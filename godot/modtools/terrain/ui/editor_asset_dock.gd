@@ -16,6 +16,10 @@ var _slot_previews: Dictionary = {}
 var _slot_filename_labels: Dictionary = {}
 var _slot_state_labels: Dictionary = {}
 var _file_dialog: FileDialogHelper
+# "Used by" (which missions sit on this terrain), mounted under the name row
+# once the workspace injects the shell's reference services. Null on headless
+# hosts (no shell, no strip).
+var _used_by_strip: ReferenceStrip
 
 
 func _ready() -> void:
@@ -54,7 +58,41 @@ func _sync_from_editor() -> void:
 	_detail_density_spin.set_value_no_signal(editor.get_detail_density())
 	_detail_density2_spin.set_value_no_signal(editor.get_detail_density2())
 	_refresh_slot_cards()
+	_refresh_used_by()
 	_syncing = false
+
+
+## "Used by" services from the workspace (the strip rides the shell's reference
+## index, so only a shell-hosted dock ever receives this). Builds the strip once
+## into the Properties tab under the terrain-name row, then retargets it from
+## the editor state on every sync (open / new / save-as move the identity).
+func set_reference_services(services: Dictionary) -> void:
+	if _used_by_strip == null or not is_instance_valid(_used_by_strip):
+		_used_by_strip = ReferenceStrip.new()
+		_used_by_strip.name = "TerrainUsedByStrip"
+		var name_row := _terrain_name_edit.get_parent()
+		var box := name_row.get_parent()
+		box.add_child(_used_by_strip)
+		box.move_child(_used_by_strip, name_row.get_index() + 1)
+	_used_by_strip.configure("terrain", services, PackedStringArray(["terrain"]))
+	_refresh_used_by()
+
+
+func _refresh_used_by() -> void:
+	if _used_by_strip == null or editor == null:
+		return
+	var keys := PackedStringArray()
+	# Only a saved/opened terrain has an identity missions can reference; the
+	# document's name fallback ("untitled") must never be queried — referrer
+	# buckets are name-keyed shared namespaces, so a collision would render
+	# wrong rows. Missions reference the header name bare; the .trn spelling is
+	# future-proofing the strip dedupes (the fonts both-spellings pattern).
+	if not String(editor.get_current_trn_path()).is_empty():
+		var terrain_name: String = editor.get_terrain_name_value()
+		if not terrain_name.is_empty():
+			keys.append(terrain_name)
+			keys.append(terrain_name + ".trn")
+	_used_by_strip.set_target(keys)
 
 
 func _build_slot_sections() -> void:

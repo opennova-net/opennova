@@ -21,6 +21,7 @@ var _lookup_result: RichTextLabel
 var _files: FileDialogHelper
 var _rename_section_button: Button
 var _remove_section_button: Button
+var _used_by_strip: ReferenceStrip
 
 
 func setup(workspace: StringsEditorWorkspace) -> void:
@@ -101,16 +102,53 @@ func _ready() -> void:
 	_add_button(csv_buttons, "StringsImportCsvButton", "Import...", _on_import_csv)
 	_add_button(csv_buttons, "StringsExportCsvButton", "Export...", _on_export_csv)
 
+	# "Used by" rides the shell's reference index; headless hosts get no strip.
+	var shell: Object = _ws.editor_shell if _ws != null else null
+	if shell != null and shell.has_method("get_reference_index") \
+			and shell.has_method("open_in_workspace"):
+		_used_by_strip = ReferenceStrip.new()
+		_used_by_strip.name = "StringsUsedByStrip"
+		# Kind filter: referrer buckets are name-keyed, so the bare-stem query
+		# would otherwise pick up same-named targets of other kinds. Source
+		# paths are VFS-logical; the menus that use tables open from disk only,
+		# so resolve before jumping.
+		_used_by_strip.configure("text table", {
+			"referrers": func(name: String) -> Array:
+				return shell.get_reference_index().referrers_of(name),
+			"is_ready": func() -> bool:
+				return shell.get_reference_index().is_built(),
+			"jump": func(kind: String, path: String) -> void:
+				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
+		}, PackedStringArray(["strings"]))
+		box.add_child(_used_by_strip)
+
 	refresh()
 
 
 func refresh() -> void:
-	if _doc == null and _ws != null:
+	# Re-fetch unconditionally: with document tabs the workspace's active
+	# document changes under us, and a cached _doc would keep filtering and
+	# validating a background tab.
+	if _ws != null:
 		_doc = _ws.get_document()
 	_rebuild_section_filter()
 	_refresh_validation()
 	_refresh_lookup()
 	_update_section_buttons()
+	_refresh_used_by()
+
+
+func _refresh_used_by() -> void:
+	if _used_by_strip == null:
+		return
+	var keys := PackedStringArray()
+	if _doc != null and not _doc.current_path.is_empty():
+		# Menus reference the table verbatim ("menutxt.BIN"); authoring may be
+		# extensionless - query both spellings.
+		var file: String = _doc.current_path.get_file()
+		keys.append(file)
+		keys.append(file.get_basename())
+	_used_by_strip.set_target(keys)
 
 
 # --- Section filter ---

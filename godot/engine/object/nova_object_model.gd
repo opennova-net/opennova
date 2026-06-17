@@ -168,6 +168,38 @@ func get_animation_time_ms() -> int:
 	return _anim_time_ms
 
 
+## Scrub the active body clip's playhead to `seconds` and pose IMMEDIATELY,
+## even while paused (paused scrubbing is the point; while playing the
+## zero-delta advance adds nothing). Mirrors eval_pose's own time handling so
+## the stored playhead and the rendered pose can never disagree: looping clips
+## wrap over the clip length, one-shots clamp to it. No-op without a skeletal
+## set / active clip. Distinct from the _anim_time_ms material/PANM clock.
+func set_animation_time(seconds: float) -> void:
+	if _skeletal == null or _anim_key.is_empty():
+		return
+	var length: float = _skeletal.get_clip_length(_anim_key)
+	if length <= 0.0:
+		_anim_time = 0.0
+	elif _skeletal.is_clip_looping(_anim_key):
+		_anim_time = fposmod(seconds, length)
+	else:
+		_anim_time = clampf(seconds, 0.0, length)
+	_advance_body_anim(0.0)
+
+
+## The active body clip's playhead in seconds, loop-wrapped (one-shots clamp),
+## so a scrub slider binds to it directly.
+func get_animation_time() -> float:
+	if _skeletal == null or _anim_key.is_empty():
+		return 0.0
+	var length: float = _skeletal.get_clip_length(_anim_key)
+	if length <= 0.0:
+		return 0.0
+	if _skeletal.is_clip_looping(_anim_key):
+		return fposmod(_anim_time, length)
+	return clampf(_anim_time, 0.0, length)
+
+
 func set_active_lod(lod_index: int) -> void:
 	var next_lod := _clamp_lod_index(lod_index)
 	if _active_lod == next_lod:

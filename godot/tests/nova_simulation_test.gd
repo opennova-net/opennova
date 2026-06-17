@@ -130,3 +130,115 @@ func test_bms_event_fires_through_binding() -> void:
 	assert_true(sim.has_event_fired(0), "the event is marked fired")
 	assert_true(sim.drain_effects().is_empty(), "drain cleared the log")
 	sim.free()
+
+
+# --- Read-only introspection (C8: the debug overlay's data feeds) ---
+
+func test_logic_tick_advances_per_step_and_rewinds_on_restart() -> void:
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	# The pre-mission pass already ran one tick at load, so pin DELTAS, never
+	# absolutes.
+	var t0: int = sim.get_logic_tick()
+	sim.step()
+	assert_eq(sim.get_logic_tick(), t0 + 1, "one step advances the logic tick by one")
+	sim.step()
+	sim.step()
+	assert_eq(sim.get_logic_tick(), t0 + 3)
+	sim.restart()
+	assert_eq(sim.get_logic_tick(), t0, "Stop rewinds the clock to the play-start baseline")
+	sim.free()
+
+
+func test_variable_snapshots_are_bank_sized_and_track_writes() -> void:
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	var mission: PackedInt32Array = sim.get_mission_variables_snapshot()
+	var globals: PackedInt32Array = sim.get_global_variables_snapshot()
+	var music: PackedInt32Array = sim.get_music_variables_snapshot()
+	assert_eq(mission.size(), 512, "V0..V511")
+	assert_eq(globals.size(), 256, "G0..G255")
+	assert_eq(music.size(), 16, "M0..M15")
+
+	sim.set_mission_variable(5, 42)
+	sim.set_global_variable(3, -7)
+	assert_eq(sim.get_mission_variables_snapshot()[5], 42, "snapshot reflects V writes")
+	assert_eq(sim.get_global_variables_snapshot()[3], -7, "snapshot reflects G writes")
+	assert_eq(sim.get_global_variable(3), -7, "the scalar G getter agrees")
+	sim.free()
+
+
+func test_fired_events_snapshot_matches_scalar() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {"action_type": 6, "param1": 77}).is_empty())
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+
+	var before: PackedByteArray = sim.get_fired_events_snapshot()
+	assert_eq(before.size(), sim.get_event_count(), "one flag per event")
+	assert_eq(int(before[0]), 0, "nothing fired before the first quarter pass")
+
+	for _i in range(16):
+		sim.step()
+	var after: PackedByteArray = sim.get_fired_events_snapshot()
+	assert_eq(int(after[0]), 1, "the fired flag sets")
+	assert_eq(int(after[0]) == 1, sim.has_event_fired(0), "bulk and scalar reads agree")
+	sim.free()
+
+
+func test_entity_debug_card_carries_named_scalars() -> void:
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_false(card.is_empty(), "a live entity has a card")
+	assert_eq(int(card["state"]), 16, "routed organic starts in GROUND_FOLLOWWP")
+	assert_eq(String(card["state_name"]), "GROUND_FOLLOWWP", "...with its readable name")
+	assert_eq(card["position"], sim.get_entity_position(0), "position matches the scalar getter")
+	assert_almost_eq(float(card["yaw_deg"]), sim.get_entity_yaw_deg(0), 0.01)
+	assert_eq(int(card["net_id"]), sim.get_entity_net_id(0))
+	assert_eq(int(card["kind"]), sim.get_entity_kind(0))
+	assert_true(bool(card["alive"]))
+	assert_true(card.has("health") and card.has("ai_health"),
+		"both health mirrors ride the card (they diverge under damage)")
+	assert_true(bool(card["infantry"]), "demo organics route through the infantry motor")
+
+	assert_true(sim.get_entity_debug(-1).is_empty(), "invalid index reads an empty card")
+	assert_true(sim.get_entity_debug(999).is_empty())
+	sim.free()
+
+
+func test_entity_debug_card_keeps_its_shape_after_a_scripted_remove() -> void:
+	# VaporizeSingle (action 22) despawns the registry slot while the AI entity
+	# stays in the pool - the card must keep a STABLE key set with typed
+	# defaults for the registry half, never a partial dictionary.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)
+	var probe := NovaSimulation.new()
+	assert_true(probe.load_from_mission_data(md))
+	var ssn := probe.get_entity_net_id(0)
+	probe.free()
+
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, {"action_type": 22, "param1": ssn}).is_empty())
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	for _i in range(16):
+		sim.step()
+
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_false(card.is_empty(), "the AI entity outlives its registry slot")
+	assert_true(card.has("kind") and card.has("alive") and card.has("name"),
+		"the registry half keeps its keys")
+	assert_eq(int(card["kind"]), -1, "...with typed defaults (kind -1)")
+	assert_false(bool(card["alive"]), "...alive false")
+	assert_eq(int(card["net_id"]), ssn, "the AI half still reports its scalars")
+	sim.free()
+
+
+func test_ai_state_name_static_lookup() -> void:
+	assert_eq(NovaSimulation.ai_state_name(16), "GROUND_FOLLOWWP")
+	assert_eq(NovaSimulation.ai_state_name(13), "?", "id gaps read as unknowns")
+	assert_eq(NovaSimulation.ai_state_name(23), "GROUND_DEAD")

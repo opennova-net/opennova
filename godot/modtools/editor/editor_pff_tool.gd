@@ -10,6 +10,7 @@ extends RefCounted
 ##   - open_files(title, filters, on_pick, dir)   multi-file picker (choose .pff archives)
 ##   - open_dir(title, on_pick, dir)              output-folder picker (extract destination)
 ##   - show_status(text)                          mirror a message into the status bar
+##   - on_extracted(dir)                          files landed in `dir` (shell may reindex)
 ##
 ## Each opened archive is a NovaPffArchive (the C++ shim). Loaded archives live in this object,
 ## which the shell keeps for the whole session, so closing the dialog just hides it. The .pff
@@ -19,6 +20,7 @@ var _host: Control
 var _open_files: Callable
 var _open_dir: Callable
 var _show_status: Callable
+var _on_extracted: Callable = Callable()
 var _preferred_dir: String = ""
 
 var _dialog: AcceptDialog
@@ -48,11 +50,13 @@ var _archives: Array = []
 var _active: int = -1
 
 
-func setup(host: Control, open_files: Callable, open_dir: Callable, show_status: Callable) -> void:
+func setup(host: Control, open_files: Callable, open_dir: Callable, show_status: Callable,
+		on_extracted: Callable = Callable()) -> void:
 	_host = host
 	_open_files = open_files
 	_open_dir = open_dir
 	_show_status = show_status
+	_on_extracted = on_extracted
 
 
 func open(preferred_dir: String = "") -> void:
@@ -480,6 +484,10 @@ func _perform_extraction(plan: Array, dir: String, archive_count: int) -> void:
 	_set_busy(false)
 	_refresh_all()
 	_report_extraction(ok + raw + failed, total, ok, raw, failed, dir, archive_count)
+	# Files landed on disk (even on a partial/stopped run): let the shell reindex if it
+	# cares about this directory, so new files show up in quick open without a restart.
+	if ok + raw > 0 and _on_extracted.is_valid():
+		_on_extracted.call(dir)
 
 
 func _report_extraction(done: int, total: int, ok: int, raw: int, failed: int, dir: String, archive_count: int) -> void:

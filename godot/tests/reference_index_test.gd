@@ -24,6 +24,19 @@ func before_each() -> void:
 		"begin \"Crate\"\n  id 10\n  type object\n  graphic Wcrate5\nend\n" +
 		"begin \"Ghost\"\n  id 11\n  type object\n  graphic NoSuchModel\nend\n")
 	_write_text("wcrate5.3di", "existence-only stand-in for the crate model")
+	# A menu naming: a texture that exists, an action target that exists, a
+	# sound bank that does not, a string table, and a string key (unprobed).
+	_write_text("main.mnu",
+		"<SCREEN><NAME>MAIN</NAME><WINDOW type=\"window\" name=\"ROOT\">" +
+		"<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>" +
+		"<WINDOW type=\"window\" name=\"BG\">" +
+		"<APPEARANCE type=\"image\" state=\"default\">clouds.tga</APPEARANCE></WINDOW>" +
+		"<WINDOW type=\"button\" name=\"GO\">" +
+		"<ACTION type=\"screen\" file=\"sub.mnu\">SUB</ACTION>" +
+		"<SOUND state=\"selected\" trigger=\"CLICK_SELECT\">ui.lwf</SOUND>" +
+		"<STRING type=\"id\" justify=\"LEFT\">BTN_GO</STRING>" +
+		"</WINDOW></WINDOW></SCREEN>")
+	_write_text("sub.mnu", "<SCREEN><NAME>SUB</NAME><WINDOW type=\"window\" name=\"R\"></WINDOW></SCREEN>")
 
 
 func after_each() -> void:
@@ -85,6 +98,40 @@ func test_referrers_lazily_build_and_cover_items_def() -> void:
 	var ghost := index.referrers_of("NoSuchModel")
 	assert_eq(ghost.size(), 1)
 	assert_eq(String((ghost[0] as Dictionary)["status"]), "missing")
+
+
+func test_mnu_edges_resolve_per_kind() -> void:
+	var index := _make_index()
+	var edges := index.references_of("main.mnu")
+	assert_false(edges.is_empty(), "the menu extracts edges")
+
+	var by_kind := {}
+	for edge in edges:
+		by_kind[String((edge as Dictionary)["target_kind"]) + "|" + String((edge as Dictionary)["target_name"])] = edge
+
+	var texture: Dictionary = by_kind.get("texture|clouds.tga", {})
+	assert_eq(String(texture.get("status", "")), "found", "the appearance image resolves")
+
+	var action: Dictionary = by_kind.get("menu|sub.mnu", {})
+	assert_eq(String(action.get("status", "")), "found", "the action's target menu exists")
+
+	var sound: Dictionary = by_kind.get("sound|ui.lwf", {})
+	assert_eq(String(sound.get("status", "")), "missing", "a sound bank probes name+.lwf and misses")
+
+	var strings: Dictionary = by_kind.get("strings|menutxt.BIN", {})
+	assert_eq(String(strings.get("status", "")), "missing", "the string table probes verbatim")
+
+	var key: Dictionary = by_kind.get("string_id|BTN_GO", {})
+	assert_eq(String(key.get("status", "")), "unprobed",
+		"string keys resolve against a TABLE, not the root - never a fake miss (A9 builds on this)")
+
+
+func test_mnu_referrers_through_the_whole_root_build() -> void:
+	var index := _make_index()
+	var referrers := index.referrers_of("sub.mnu")
+	assert_true(index.is_built(), "menus are swept by the whole-root build (resource-index kind 'menu')")
+	assert_eq(referrers.size(), 1, "the action edge lands in the inverse index")
+	assert_eq(String((referrers[0] as Dictionary)["source_path"]), "main.mnu")
 
 
 func test_resolve_kinds_and_unprobed() -> void:

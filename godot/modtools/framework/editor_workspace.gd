@@ -180,6 +180,12 @@ func shows_tile_gizmo() -> bool: return false
 func focus_reference(_focus: Dictionary) -> Error: return OK
 func get_current_resource_path() -> String: return ""
 
+func supports_document_tabs() -> bool: return false
+func get_document_tabs() -> Array: return []
+func get_active_document_index() -> int: return -1
+func activate_document(_index: int) -> void: pass
+func close_document(_index: int) -> void: pass
+
 func get_export_progress_title() -> String: return "Exporting..."
 func get_export_progress_phase() -> String: return ""
 func get_export_progress_message() -> String: return ""

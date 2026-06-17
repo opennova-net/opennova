@@ -22,10 +22,21 @@ const TEMP_DIR := "user://test_mnu_workspace"
 
 func before_each() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(TEMP_DIR))
+	_remove_session_file()
 
 
 func after_each() -> void:
 	_cleanup_dir(TEMP_DIR)
+	_remove_session_file()
+
+
+# Workspace open/save/close now persist the tab session; keep it out of the
+# shared user:// state (B4 convention) so tests neither leak into the dev
+# editor nor into each other.
+func _remove_session_file() -> void:
+	var state := MnuWorkspaceScript.STATE_PATH
+	if FileAccess.file_exists(state):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(state))
 
 
 func _cleanup_dir(dir_path: String) -> void:
@@ -447,15 +458,18 @@ func test_adapter_remount_reuses_single_editor() -> void:
 	ws.mount_viewport(host)
 	await get_tree().process_frame
 	var ed = ws._editor
-	assert_eq(host.get_child_count(), 1, "Editor mounts once.")
+	# The merged workspace mounts two editors into the viewport host: the menu
+	# editor (visible) and the Mns editor (parked invisible until build_inspector
+	# reparents it into the Styles tab).
+	assert_eq(host.get_child_count(), 2, "Menu editor and parked Mns editor mount once each.")
 
 	ws.unmount_viewport(host)
-	assert_eq(host.get_child_count(), 0, "Unmount removes the editor without freeing it.")
+	assert_eq(host.get_child_count(), 0, "Unmount removes both editors without freeing them.")
 
 	ws.mount_viewport(host)
 	await get_tree().process_frame
 	assert_same(ws._editor, ed, "Remount reuses the same editor instance.")
-	assert_eq(host.get_child_count(), 1, "Editor is re-parented exactly once.")
+	assert_eq(host.get_child_count(), 2, "Both editors re-parent exactly once.")
 	assert_eq(ed.widget_selected.get_connections().size(), 1,
 		"widget_selected stays connected once, not re-connected on remount.")
 

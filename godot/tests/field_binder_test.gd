@@ -39,6 +39,43 @@ func test_checkbox_sync_and_user_toggle() -> void:
 	assert_eq(writes, [false], "Toggling the checkbox should call the setter.")
 
 
+# Proves bind_link's duck-typed contract is widget-agnostic: any Object with
+# set_value/get_value and a value_changed signal binds, not just ResourceRefWidget.
+class FakeLinkWidget:
+	extends RefCounted
+	signal value_changed(value: String)
+	var _value := ""
+
+	func set_value(text: String) -> void:
+		_value = text  # silent, per contract
+
+	func get_value() -> String:
+		return _value
+
+	func user_edit(text: String) -> void:
+		_value = text
+		value_changed.emit(text)
+
+
+func test_bind_link_sync_pushes_value_without_echo() -> void:
+	var binder = FieldBinderScript.new()
+	var writes := []
+	var widget := FakeLinkWidget.new()
+	binder.bind_link(widget, func(info): return String(info.get("terrain", "")), func(v): writes.append(v))
+	binder.sync_from({"terrain": "dvxi5"})
+	assert_eq(widget.get_value(), "dvxi5", "sync_from should push the model value into the widget.")
+	assert_eq(writes.size(), 0, "sync_from must not echo back through the setter.")
+
+
+func test_bind_link_user_change_calls_setter_once() -> void:
+	var binder = FieldBinderScript.new()
+	var writes := []
+	var widget := FakeLinkWidget.new()
+	binder.bind_link(widget, func(info): return String(info.get("terrain", "")), func(v): writes.append(v))
+	widget.user_edit("full_00")
+	assert_eq(writes, ["full_00"], "a user change (outside sync) should call the setter once.")
+
+
 func test_color_and_line_bind_push_and_emit() -> void:
 	var binder = FieldBinderScript.new()
 	var color_writes := []

@@ -26,7 +26,8 @@ from `EditorWorkstation._workspace_defs()` in
 | Interface | Fonts | bitmap fonts (`.fnt`) | [fonts/](fonts/README.md) |
 | Interface | Credits | rolling credits (`.kda`) | [credits/](credits/README.md) |
 | Interface | Strings | localized string tables (RTXT) | [strings/](strings/README.md) |
-| Interface | Menu | menu screens (`.mnu` / `.mns`) | [mnu/](mnu/README.md) |
+| Interface | Menu | menu screens (`.mnu`) | [mnu/](mnu/README.md) |
+| Interface | Menu Styles | the shared menu stylesheet (`.mns`): named colors, fonts, pictures | [mnu/](mnu/README.md) |
 | Audio | Music | interactive music (`.sbf` + `.bin` script) | [music/](music/README.md) |
 | Atmosphere | Sound | sound profiles (`.lwf`) | [sound/](sound/README.md) |
 | Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [environment/](environment/README.md) |
@@ -76,8 +77,8 @@ inspectors are declared as typed registry rows:
 2. Append one `InspectorDef.make(id, "Label", "Tooltip", Script)` row to the
    workspace's `_build_inspector_defs()`.
 
-Single-pane workspaces (Fonts, Credits, Strings, Sound, Menus, Environment) skip
-the workflow rail and override `build_inspector(host)` instead.
+Single-pane workspaces (Fonts, Credits, Strings, Sound, Menus, Menu Styles,
+Environment) skip the workflow rail and override `build_inspector(host)` instead.
 
 ## Folder map
 

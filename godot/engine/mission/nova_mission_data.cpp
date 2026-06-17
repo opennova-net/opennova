@@ -94,6 +94,7 @@ void NovaMissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("place_entity_grounded", "item_id", "def_item_type", "ground_hit_bms", "ground_anchor_bms"), &NovaMissionData::place_entity_grounded);
 	ClassDB::bind_method(D_METHOD("move_entity_grounded", "kind", "index", "ground_hit_bms", "ground_anchor_bms"), &NovaMissionData::move_entity_grounded);
 	ClassDB::bind_method(D_METHOD("reground_entities", "requests", "epsilon", "apply"), &NovaMissionData::reground_entities, DEFVAL(0.01f), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("reground_entities_apply", "requests", "epsilon"), &NovaMissionData::reground_entities_apply, DEFVAL(0.01f));
 	ClassDB::bind_method(D_METHOD("marker_item_id_for_path", "path_index"), &NovaMissionData::marker_item_id_for_path);
 	ClassDB::bind_method(D_METHOD("add_path_marker_grounded", "path_index", "ground_hit_bms", "insert_index"), &NovaMissionData::add_path_marker_grounded, DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("remove_entity", "kind", "index"), &NovaMissionData::remove_entity);
@@ -525,9 +526,15 @@ bool NovaMissionData::move_entity_grounded(int kind, int index, const Vector3 &g
 	return true;
 }
 
-int NovaMissionData::reground_entities(const Array &requests, float epsilon, bool apply) {
-	std::vector<opennova::mission::authoring::RegroundRequest> rows;
+// Shared request-Array parser for the two reground bindings. `row_to_request`
+// maps each engine row back to its index in the caller's Array: the parser
+// skips index < 0 rows, so engine row i is NOT requests[i] in general, and the
+// apply variant's moved-row report must stay aligned with what the caller sent.
+static void parse_reground_requests(const Array &requests,
+		std::vector<opennova::mission::authoring::RegroundRequest> &rows,
+		std::vector<int> &row_to_request) {
 	rows.reserve(static_cast<size_t>(requests.size()));
+	row_to_request.reserve(static_cast<size_t>(requests.size()));
 	for (int i = 0; i < requests.size(); i++) {
 		const Dictionary request = requests[i];
 		const int index = int(request.get("index", -1));
@@ -546,13 +553,53 @@ int NovaMissionData::reground_entities(const Array &requests, float epsilon, boo
 		row.ground_anchor_bms[1] = anchor.y;
 		row.ground_anchor_bms[2] = anchor.z;
 		rows.push_back(row);
+		row_to_request.push_back(i);
 	}
+}
+
+int NovaMissionData::reground_entities(const Array &requests, float epsilon, bool apply) {
+	std::vector<opennova::mission::authoring::RegroundRequest> rows;
+	std::vector<int> row_to_request;
+	parse_reground_requests(requests, rows, row_to_request);
 	const size_t moved = opennova::mission::authoring::reground_entities(
 			document, rows.data(), rows.size(), epsilon, apply);
 	if (apply && moved > 0) {
 		modified = true;
 	}
 	return static_cast<int>(moved);
+}
+
+Dictionary NovaMissionData::reground_entities_apply(const Array &requests, float epsilon) {
+	std::vector<opennova::mission::authoring::RegroundRequest> rows;
+	std::vector<int> row_to_request;
+	parse_reground_requests(requests, rows, row_to_request);
+	std::vector<size_t> moved_rows;
+	const size_t moved = opennova::mission::authoring::reground_entities(
+			document, rows.data(), rows.size(), epsilon, true, &moved_rows);
+	if (moved > 0) {
+		modified = true;
+	}
+	PackedInt32Array out_rows;
+	PackedVector3Array out_positions;
+	out_rows.resize(static_cast<int>(moved_rows.size()));
+	out_positions.resize(static_cast<int>(moved_rows.size()));
+	for (size_t n = 0; n < moved_rows.size(); ++n) {
+		const size_t row = moved_rows[n];
+		out_rows.set(static_cast<int>(n), row_to_request[row]);
+		opennova::mission::EntityRecord record;
+		// The row just moved, so the read-back cannot miss; the stored transform
+		// is the engine's own bake, the one truth the world update mirrors.
+		Vector3 position;
+		if (document.get_entity(rows[row].kind, rows[row].index, record)) {
+			position = Vector3(record.transform.x, record.transform.y, record.transform.z);
+		}
+		out_positions.set(static_cast<int>(n), position);
+	}
+	Dictionary out;
+	out["moved"] = static_cast<int>(moved);
+	out["rows"] = out_rows;
+	out["positions"] = out_positions;
+	return out;
 }
 
 int NovaMissionData::marker_item_id_for_path(int path_index) const {

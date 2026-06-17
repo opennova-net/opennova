@@ -55,6 +55,11 @@ func get_capabilities() -> Array[EditorCapability]:
 				_editor.set_resource_root(EditorFileSystem.get_instance().get_resource_root())
 			if _editor.has_signal("request_edit_font") and not _editor.is_connected("request_edit_font", Callable(self, "_on_editor_request_edit_font")):
 				_editor.connect("request_edit_font", Callable(self, "_on_editor_request_edit_font"))
+			if _editor.has_method("set_reference_services") and editor_shell != null \
+					and editor_shell.has_method("get_reference_index") \
+					and editor_shell.has_method("open_kind_picker") \
+					and editor_shell.has_method("open_in_workspace"):
+				_editor.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 			_editor.set_document(_document)
 	caps.append(MainViewProvider.new(_editor))
 	

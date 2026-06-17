@@ -74,4 +74,4 @@ func test_inspector_builds_and_shows_model_fields() -> void:
 	var inspector = host.get_child(0)
 	assert_true(inspector.has_method("sync_from_editor"), "Mounted node should be the EnvironmentInspector.")
 	inspector.sync_from_editor()
-	assert_eq(inspector._sun_model.text, "msun.3di", "Inspector should show the env's sun model name.")
+	assert_eq(inspector._sun_model.get_value(), "msun.3di", "Inspector should show the env's sun model name.")

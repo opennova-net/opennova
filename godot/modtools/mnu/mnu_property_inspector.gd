@@ -23,6 +23,8 @@ signal edit_requested(edit: Dictionary)
 signal string_jump_requested(key: String)
 signal font_jump_requested(font: String)
 signal menu_jump_requested(file: String, screen: String)
+# Edit a %VAR% the selected widget references, in the Menu Styles workspace.
+signal style_jump_requested(variable: String)
 # Audition a widget's sound: the workspace resolves (trigger -> set in the menu .lwf
 # -> member -> .wav) and plays it, reusing the Sound workspace's preview player.
 signal sound_preview_requested(trigger: String, file: String)
@@ -30,6 +32,7 @@ signal sound_preview_requested(trigger: String, file: String)
 const MnuUiHelpersScript = preload("res://modtools/mnu/mnu_ui_helpers.gd")
 const MnuListEditorScript = preload("res://modtools/mnu/mnu_list_editor.gd")
 const MnuStringPickerScript = preload("res://modtools/mnu/mnu_string_picker.gd")
+const MnsVariableTableScript = preload("res://modtools/mnu/mns_variable_table.gd")
 
 # Position spins span negative coords (a widget can sit off the authoring board);
 # sizes never do.
@@ -44,13 +47,24 @@ var _selected_id := -1
 var _multi_ids: PackedInt32Array = PackedInt32Array()
 var _box: VBoxContainer
 # The resolved string table for the open menu (passed by the workspace from the
-# editor). Null when none is loaded; the string-id helpers then stay hidden.
+# editor) and its path (for the string widgets' jump/badge). Null/empty when
+# none is loaded; the string-key helpers then stay hidden.
 var _text_resource: RtxtStringFile
+var _text_resource_path := ""
+# Shell link-widget services (resolve/pick/jump) for FILE references like the
+# screen's text_rsrc; string KEYS resolve through the table above instead.
+var _ref_services: Dictionary = {}
 var _picker: PopupPanel
-var _picker_target_id := -1
+# The pending pick consumer (a StringRefWidget's on_pick); picker results
+# route through it so the widget commits exactly one edit.
+var _picker_on_pick: Callable = Callable()
 # Sound-set names from the open menu's .lwf profile (set by the workspace). When
 # present, the per-sound trigger field becomes a dropdown over the real sets.
 var _sound_sets: PackedStringArray = PackedStringArray()
+# The menu stylesheet the editor resolved (set by the workspace; null when the
+# root carries none). Color/texture/font rows resolve %VAR% swatches through it
+# and offer a dropdown over its type-matching variables.
+var _stylesheet: MnsStyleSheet
 
 
 func _ready() -> void:
@@ -59,11 +73,20 @@ func _ready() -> void:
 	_rebuild()
 
 
-func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null) -> void:
+func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
 	_document = doc
 	_selected_id = id
 	_multi_ids = PackedInt32Array()
 	_text_resource = text_res
+	_text_resource_path = text_res_path
+	if is_node_ready():
+		_rebuild()
+
+
+## Wires the shell link-widget services (see ResourceRefWidget.services_from_shell).
+## Idempotent; safe before or after the form is built.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
 	if is_node_ready():
 		_rebuild()
 
@@ -77,16 +100,23 @@ func set_sound_sets(sets: PackedStringArray) -> void:
 		_rebuild()
 
 
+# The resolved menu stylesheet (or null). No rebuild here: the workspace always
+# follows with show_widget/show_selection, which rebuilds with it in hand.
+func set_stylesheet(sheet: MnsStyleSheet) -> void:
+	_stylesheet = sheet
+
+
 # Show a summary for a multi-selection (>1 widget). Zero or one id delegates to the
 # normal single-node view. The workspace routes the editor's selection_changed here.
-func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null) -> void:
+func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
 	if ids.size() <= 1:
-		show_widget(doc, ids[0] if ids.size() == 1 else -1, text_res)
+		show_widget(doc, ids[0] if ids.size() == 1 else -1, text_res, text_res_path)
 		return
 	_document = doc
 	_selected_id = -1
 	_multi_ids = ids
 	_text_resource = text_res
+	_text_resource_path = text_res_path
 	if is_node_ready():
 		_rebuild()
 
@@ -94,6 +124,9 @@ func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtS
 func _rebuild() -> void:
 	for child in get_children():
 		child.queue_free()
+	# The picker (a direct child) dies with the rows above; drop any pending
+	# pick consumer with it so a stale callable never outlives its widget.
+	_picker_on_pick = Callable()
 	_box = MnuUiHelpersScript.make_inspector_box(self)
 
 	if _multi_ids.size() > 1:
@@ -141,9 +174,21 @@ func _build_screen_rows(id: int) -> void:
 	music_spin.value_changed.connect(func(v: float) -> void:
 		_emit({"target": "screen", "id": id, "prop": "music_var", "value": int(v)}))
 
-	var rsrc_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text resource", _document.get_screen_text_rsrc(id))
-	_wire_text(rsrc_edit, {"target": "screen", "id": id, "prop": "text_rsrc"})
-	# Make the string-table linkage explicit: does the named resource actually resolve?
+	# The screen's string table is a FILE reference: badge + browse resolve the
+	# named .bin against the resource folder, jump opens it in Strings.
+	var rsrc_row := MnuUiHelpersScript._row(_box)
+	rsrc_row.add_child(MnuUiHelpersScript._key_label("Text resource"))
+	var rsrc_widget := ResourceRefWidget.new()
+	rsrc_widget.name = "MnuScreenTextRsrc"
+	rsrc_widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# text_rsrc names carry their extension (menutxt.BIN); keep it on pick.
+	rsrc_widget.set_value_from_path(func(path: String) -> String: return path.get_file())
+	rsrc_widget.configure("strings", "string table", _ref_services)
+	rsrc_widget.set_value(_document.get_screen_text_rsrc(id))
+	rsrc_widget.value_changed.connect(func(value: String) -> void:
+		_emit({"target": "screen", "id": id, "prop": "text_rsrc", "value": value}))
+	rsrc_row.add_child(rsrc_widget)
+	# Make the live linkage explicit: is the named table the one actually loaded?
 	if not _document.get_screen_text_rsrc(id).is_empty():
 		if _text_resource != null:
 			MnuUiHelpersScript.add_muted(_box, "loaded: %d strings" % _text_resource.get_entry_count())
@@ -172,24 +217,33 @@ func _build_widget_rows(id: int) -> void:
 	var sz = MnuUiHelpersScript.add_spin_pair_row(_box, "Size", int(rect.size.x), int(rect.size.y), 0, SIZE_MAX)
 	_wire_rect(id, pos[0], pos[1], sz[0], sz[1])
 
-	var text_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text", _document.get_widget_text(id))
-	_wire_text(text_edit, {"target": "widget", "id": id, "prop": "text"})
 	var is_id := _document.get_widget_string_type(id) == "id"
+	if is_id:
+		# The text IS a string-table key: one link widget carries the key field,
+		# the found/missing badge, the table picker, the Strings jump, and the
+		# resolved-text preview - all gated on a table actually being loaded.
+		_build_string_ref_row(id)
+	else:
+		var text_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Text", _document.get_widget_text(id))
+		_wire_text(text_edit, {"target": "widget", "id": id, "prop": "text"})
 	var id_check := MnuUiHelpersScript.add_check_row(_box, "Text is a string id", is_id)
 	id_check.toggled.connect(func(pressed: bool) -> void:
 		_emit({"target": "widget", "id": id, "prop": "string_type", "value": "id" if pressed else ""}))
-	# When the text is a string-table key, show what it resolves to and offer a picker
-	# plus a jump into the Strings workspace (only when a table is actually loaded).
-	if is_id:
-		_build_string_id_rows(id)
 
-	var font_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Font", _document.get_widget_font(id))
+	var font_raw := _document.get_widget_font(id)
+	var font_edit := MnuUiHelpersScript.add_text_edit_row(_box, "Font", font_raw)
 	_wire_text(font_edit, {"target": "widget", "id": id, "prop": "font"})
-	if not _document.get_widget_font(id).is_empty():
+	_append_style_var_menu(font_edit, "font", {"target": "widget", "id": id, "prop": "font"})
+	_append_style_jump(font_edit, font_raw)
+	if not font_raw.is_empty():
 		var font_jump := Button.new()
 		font_jump.text = "Open in Fonts"
 		font_jump.tooltip_text = "Open this font in the Fonts workspace"
-		font_jump.pressed.connect(func() -> void: font_jump_requested.emit(font_edit.text))
+		# A %VAR% font resolves through the stylesheet before the jump (the
+		# token itself names no file); the basename strips a .fnt the menus
+		# author with, so the Fonts workspace's name resolution lands.
+		font_jump.pressed.connect(func() -> void:
+			font_jump_requested.emit(_resolve_style_token(font_edit.text).get_basename()))
 		_box.add_child(font_jump)
 
 	# Type-specific scalar template fields (M9). Authoring of the richer nested
@@ -227,52 +281,72 @@ func _build_widget_rows(id: int) -> void:
 		_build_table_section(id)
 
 
-# Shown under the Text field when the widget's text is a string-table key: the
-# resolved display text (or a not-found cue), a picker to choose a key from the
-# table, and a one-click jump to edit it in the Strings workspace. All gated on a
-# table actually being loaded (no resource root -> no table -> nothing extra, so the
-# behavior matches today's raw-key view).
-func _build_string_id_rows(id: int) -> void:
+# The Text row for a string-table key: a StringRefWidget resolving against the
+# loaded table. With no table the widget degrades to a plain key field (no
+# badge/picker/jump/preview), matching the old raw-key behavior.
+func _build_string_ref_row(id: int) -> void:
+	var row := MnuUiHelpersScript._row(_box)
+	row.add_child(MnuUiHelpersScript._key_label("Text"))
+	var widget := StringRefWidget.new()
+	widget.name = "MnuWidgetTextRef"
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("string", _string_key_services())
+	widget.set_value(_document.get_widget_text(id))
+	widget.value_changed.connect(func(value: String) -> void:
+		_emit({"target": "widget", "id": id, "prop": "text", "value": value}))
+	row.add_child(widget)
+
+
+# String-KEY services over the loaded table (context-local - never the shell's
+# file services). Empty when no table is loaded, which hides every affordance.
+func _string_key_services() -> Dictionary:
 	if _text_resource == null:
-		return
-	var key := _document.get_widget_text(id)
+		return {}
+	return {
+		"resolve": _resolve_string_key,
+		"pick": _pick_string_key,
+		"jump": _jump_string_key,
+	}
+
+
+func _resolve_string_key(key: String) -> Dictionary:
+	if _text_resource == null or key.is_empty():
+		return {}
 	if _text_resource.has_string(key):
-		MnuUiHelpersScript.add_muted(_box, "= \"%s\"" % _text_resource.get_string(key))
-	else:
-		MnuUiHelpersScript.add_muted(_box, "No string id set" if key.is_empty() else "Not in string table")
-	var row := HBoxContainer.new()
-	_box.add_child(row)
-	var pick_btn := Button.new()
-	pick_btn.text = "Pick string..."
-	pick_btn.tooltip_text = "Choose a string id from the loaded table"
-	pick_btn.pressed.connect(func() -> void: _open_string_picker(id))
-	row.add_child(pick_btn)
-	var jump_btn := Button.new()
-	jump_btn.text = "Edit in Strings"
-	jump_btn.tooltip_text = "Open this string in the Strings workspace"
-	jump_btn.pressed.connect(func() -> void: string_jump_requested.emit(_document.get_widget_text(id)))
-	row.add_child(jump_btn)
+		return {
+			"status": "found",
+			"path": _text_resource_path,
+			"text": RtxtStringFile.strip_hotkey(_text_resource.get_string(key)),
+		}
+	return {"status": "missing", "path": _text_resource_path, "text": ""}
 
 
-func _open_string_picker(id: int) -> void:
-	if _text_resource == null or _document == null or not _document.widget_exists(id):
+func _pick_string_key(current_key: String, on_pick: Callable) -> void:
+	_open_string_picker(on_pick, current_key)
+
+
+func _jump_string_key(key: String, _table_path: String) -> void:
+	string_jump_requested.emit(key)
+
+
+func _open_string_picker(on_pick: Callable, current_key: String) -> void:
+	if _text_resource == null:
 		return
 	if _picker == null or not is_instance_valid(_picker):
 		_picker = MnuStringPickerScript.new()
 		add_child(_picker)
 		_picker.picked.connect(_on_string_picked)
-	_picker_target_id = id
-	_picker.open_for(_text_resource, _document.get_widget_text(id))
+	_picker_on_pick = on_pick
+	_picker.open_for(_text_resource, current_key)
 
 
 func _on_string_picked(key: String) -> void:
-	if _picker_target_id < 0 or _document == null or not _document.widget_exists(_picker_target_id):
-		return
-	# Commit through the normal edit path so it folds into the MNU undo stack. That
-	# edit applies silently (no re-selection), so rebuild here to refresh the resolved
-	# line + key field.
-	_emit({"target": "widget", "id": _picker_target_id, "prop": "text", "value": key})
-	_rebuild()
+	# Route the result back to the widget that asked; its commit emits exactly
+	# one edit through the normal path and refreshes its own preview (no rebuild
+	# needed - the edit applies silently, so the widget keeps focus/state).
+	if _picker_on_pick.is_valid():
+		_picker_on_pick.call(key)
+	_picker_on_pick = Callable()
 
 
 # Color/texture sections show every populated slot as an editable row, then offer
@@ -302,10 +376,15 @@ func _build_color_section(id: int) -> void:
 		var pair = MnuUiHelpersScript.add_color_edit_row(_box, String(slot[0]), raw)
 		var swatch: ColorRect = pair[0]
 		var edit: LineEdit = pair[1]
+		# The stylesheet resolves %VAR% values, so a themed color previews as
+		# its real color instead of a transparent "unresolved" swatch.
+		MnuUiHelpersScript.refresh_swatch(swatch, raw, _stylesheet)
 		edit.text_changed.connect(func(text: String) -> void:
 			if is_instance_valid(swatch):
-				MnuUiHelpersScript.refresh_swatch(swatch, text))
+				MnuUiHelpersScript.refresh_swatch(swatch, text, _stylesheet))
 		_wire_text(edit, {"target": "widget", "id": id, "prop": "color", "slot": slot_index})
+		_append_style_var_menu(edit, "color", {"target": "widget", "id": id, "prop": "color", "slot": slot_index}, swatch)
+		_append_style_jump(edit, raw)
 	_build_add_slot(id, "Add color", empty, "color", "FFFFFF")
 
 
@@ -326,6 +405,8 @@ func _build_texture_section(id: int) -> void:
 			continue
 		var edit := MnuUiHelpersScript.add_text_edit_row(_box, String(slot[0]), raw)
 		_wire_text(edit, {"target": "widget", "id": id, "prop": "texture", "slot": slot_index})
+		_append_style_var_menu(edit, "image", {"target": "widget", "id": id, "prop": "texture", "slot": slot_index})
+		_append_style_jump(edit, raw)
 	# A new texture seeds a visible placeholder filename the author then repoints at
 	# a real .tga (textures have no neutral default the way a color has white).
 	_build_add_slot(id, "Add texture", empty, "texture", "texture.tga")
@@ -761,6 +842,76 @@ func _build_table_section(id: int) -> void:
 # fires while the field is being rebuilt or torn down (no longer in the tree, or
 # already freed) is skipped: the captured control is mid-teardown and the row
 # already reflects the document.
+# --- Stylesheet awareness ---------------------------------------------------
+
+# Stylesheet variables whose value parses as `value_type` ("color"/"font"/
+# "image"/"text"), as {name, value} rows for the "%" dropdown.
+func _style_vars_of_type(value_type: String) -> Array:
+	if _stylesheet == null:
+		return []
+	var out: Array = []
+	for entry_value in _stylesheet.get_entries():
+		var entry := entry_value as Dictionary
+		var value := String(entry.get("value", ""))
+		if MnsVariableTableScript.infer_type(value) == value_type:
+			out.append({"name": String(entry.get("name", "")), "value": value})
+	return out
+
+
+# The variable name when `raw` is a whole-field %NAME% token, else "".
+func _style_token_name(raw: String) -> String:
+	var token := raw.strip_edges()
+	if token.length() < 3 or not token.begins_with("%") or not token.ends_with("%"):
+		return ""
+	return token.substr(1, token.length() - 2)
+
+
+# A %VAR% resolves through the stylesheet (when loaded); literals pass through.
+func _resolve_style_token(raw: String) -> String:
+	if _stylesheet != null and not _style_token_name(raw).is_empty():
+		return String(_stylesheet.substitute(raw.strip_edges()))
+	return raw
+
+
+# Append the "%" variable dropdown to `edit`'s row: picking a variable writes
+# the %NAME% token (preserved on save - the document keeps raw tokens, ADR
+# 0005) and commits through the normal edit path. No stylesheet or no
+# type-matching variables -> no affordance.
+func _append_style_var_menu(edit: LineEdit, value_type: String, base: Dictionary, swatch: ColorRect = null) -> void:
+	var row := edit.get_parent() as HBoxContainer
+	if row == null:
+		return
+	MnuUiHelpersScript.add_var_menu_button(row, _style_vars_of_type(value_type), func(name: String) -> void:
+		if not is_instance_valid(edit) or not edit.is_inside_tree():
+			return
+		var token := "%" + name + "%"
+		edit.text = token
+		edit.tooltip_text = token
+		# Programmatic .text writes do not emit text_changed; refresh the
+		# swatch by hand so the picked color previews immediately.
+		if swatch != null and is_instance_valid(swatch):
+			MnuUiHelpersScript.refresh_swatch(swatch, token, _stylesheet)
+		var e := base.duplicate()
+		e["value"] = token
+		_emit(e))
+
+
+# When the current value IS a %VAR% token, offer the jump into Menu Styles.
+func _append_style_jump(edit: LineEdit, raw: String) -> void:
+	var name := _style_token_name(raw)
+	if name.is_empty():
+		return
+	var row := edit.get_parent() as HBoxContainer
+	if row == null:
+		return
+	var jump := Button.new()
+	jump.text = "Edit style"
+	jump.tooltip_text = "Edit %s in the Menu Styles workspace" % name
+	jump.pressed.connect(func() -> void:
+		style_jump_requested.emit(name))
+	row.add_child(jump)
+
+
 func _wire_text(edit: LineEdit, base: Dictionary) -> void:
 	var commit := func() -> void:
 		if not is_instance_valid(edit) or not edit.is_inside_tree():

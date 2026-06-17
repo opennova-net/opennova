@@ -688,6 +688,15 @@ target_link_libraries(mns_parse_test PRIVATE opennova_mns)
 target_include_directories(mns_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mns_parse COMMAND mns_parse_test)
 
+# Lossless MNS document model (ADR 0009): byte round-trip on the real shipped
+# menu_style.mns, minimal-delta edit stability, diagnostics. Reads
+# fixtures/mns/ so it runs from the repo root, like mnu_compat.
+add_executable(mns_document_test mns/mns_document_test.cpp)
+target_link_libraries(mns_document_test PRIVATE opennova_mns)
+target_include_directories(mns_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mns_document COMMAND mns_document_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Shared editor undo/redo core (header-only opennova::edit::EditHistory)
 add_executable(oned_edit_edit_history_test oned_edit/edit_history_test.cpp)
 target_link_libraries(oned_edit_edit_history_test PRIVATE opennova_oned_edit)
@@ -785,11 +794,12 @@ target_include_directories(refs_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(refs_extract_test PRIVATE cxx_std_17)
 add_test(NAME refs_extract COMMAND refs_extract_test)
 
-# refs: .3di material-texture and .bms header/item extractors against the
-# committed retail fixtures (self-consistent vs each format's own parser).
-foreach(test threedi mission)
+# refs: .3di material-texture, .bms header/item, and .mnu menu-asset extractors
+# against the committed retail fixtures (self-consistent vs each format's own
+# parser).
+foreach(test threedi mission mnu)
     add_executable(refs_${test}_test refs/refs_${test}_test.cpp)
-    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission)
+    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission opennova_mnu)
     target_include_directories(refs_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(refs_${test}_test PRIVATE cxx_std_17)
     add_test(NAME refs_${test} COMMAND refs_${test}_test)

@@ -197,6 +197,27 @@ func has_skeleton() -> bool:
 	return _model != null and _model.has_skeleton()
 
 
+func get_current_clip() -> String:
+	return _current_clip
+
+
+func get_skeletal_anim():
+	return _skeletal
+
+
+## Scrub the body playhead (seconds), fanned out to the arms overlay so both
+## pose in lockstep — poses apply immediately even while paused.
+func set_animation_playhead(seconds: float) -> void:
+	if _model != null:
+		_model.set_animation_time(seconds)
+	if _arms_model != null:
+		_arms_model.set_animation_time(seconds)
+
+
+func get_animation_playhead() -> float:
+	return _model.get_animation_time() if _model != null else 0.0
+
+
 # --- Arms overlay (first-person view model: skinned arms riding the same .adm skeleton) ---------
 # Load a SECOND .3di (e.g. ArmsG.3di) into a sibling model that shares the main model's
 # NovaSkeletalAnim, so the arms animate together with the weapon/body. Returns false on failure

@@ -5,9 +5,16 @@ extends ScrollContainer
 # and consumed by Environment_ComputeTimeOfDayColors @ 0x57de40; EnvFile/libs/env
 # owns the actual ported behavior.
 
+# Engine-side field -> consumption status (honored/partial/unconsumed) used to
+# badge rows whose edits don't reach the picture yet; statuses mirror
+# docs/env/env-honored-matrix.md and flip only with grill citations.
+const BADGE_PARTIAL := "◐"
+const BADGE_UNCONSUMED := "○"
+
 var _editor
 var _syncing := false
 var _selected_keyframe := 0
+var _consumption: Dictionary = {}
 
 var _name_edit: LineEdit
 var _time_slider: HSlider
@@ -20,10 +27,22 @@ var _cloud_tint: ColorPickerButton
 var _envscale: SpinBox
 var _sky_speed: SpinBox
 var _sky_height: SpinBox
-var _sun_model: LineEdit
-var _moon_model: LineEdit
-var _glare_model: LineEdit
-var _star_model: LineEdit
+var _sun_model: ResourceRefWidget
+var _moon_model: ResourceRefWidget
+var _glare_model: ResourceRefWidget
+var _star_model: ResourceRefWidget
+var _sky_map1: TextureRefWidget
+var _sky_map2: TextureRefWidget
+var _water_murk: SpinBox
+var _vertex_tint: ColorPickerButton
+var _lightning_color: ColorPickerButton
+var _ceiling_color: ColorPickerButton
+var _floor_color: ColorPickerButton
+var _iris_percent: SpinBox
+var _iris_center: SpinBox
+# Link-widget services (resolve/pick/jump from the shell); they arrive after
+# the workspace builds this inspector, so the setter re-configures live widgets.
+var _ref_services: Dictionary = {}
 var _keyframe_list: ItemList
 var _selected_time: SpinBox
 var _color_buttons: Dictionary = {}
@@ -53,6 +72,7 @@ func _connect_editor() -> void:
 
 
 func _build_ui() -> void:
+	_consumption = EnvFile.get_field_consumption()
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -104,9 +124,19 @@ func _build_ui() -> void:
 	_fog_type = _add_spin(atmosphere, "Fog type", 0, 3, 1, _on_fog_type_changed)
 	_sky_speed = _add_spin(atmosphere, "Sky speed", 0, 100, 1, _on_sky_speed_changed)
 	_sky_height = _add_spin(atmosphere, "Sky height", 10, 500, 1, _on_sky_height_changed)
-	_terrain_tint = _add_color(atmosphere, "Terrain", _on_terrain_tint_changed)
-	_water_color = _add_color(atmosphere, "Water", _on_water_color_changed)
-	_cloud_tint = _add_color(atmosphere, "Clouds", _on_cloud_tint_changed)
+	_terrain_tint = _add_color(atmosphere, "Terrain", _on_terrain_tint_changed, "terrain_tint")
+	_water_color = _add_color(atmosphere, "Water", _on_water_color_changed, "water_color")
+	_cloud_tint = _add_color(atmosphere, "Clouds", _on_cloud_tint_changed, "cloud_tint")
+
+	box.add_child(_make_separator())
+	box.add_child(_make_heading("Sky"))
+	var sky := GridContainer.new()
+	sky.columns = 2
+	sky.add_theme_constant_override("h_separation", 8)
+	sky.add_theme_constant_override("v_separation", 8)
+	box.add_child(sky)
+	_sky_map1 = _add_sky_map(sky, "Cloud map 1", func(v: String) -> void: _editor.env_file.set_sky_map1(v))
+	_sky_map2 = _add_sky_map(sky, "Cloud map 2", func(v: String) -> void: _editor.env_file.set_sky_map2(v))
 
 	box.add_child(_make_separator())
 	box.add_child(_make_heading("Sky Models"))
@@ -115,10 +145,26 @@ func _build_ui() -> void:
 	models.add_theme_constant_override("h_separation", 8)
 	models.add_theme_constant_override("v_separation", 8)
 	box.add_child(models)
-	_sun_model = _add_line_edit(models, "Sun", _on_sun_model_changed)
-	_moon_model = _add_line_edit(models, "Moon", _on_moon_model_changed)
-	_glare_model = _add_line_edit(models, "Glare", _on_glare_model_changed)
-	_star_model = _add_line_edit(models, "Star", _on_star_model_changed)
+	_sun_model = _add_model_ref(models, "Sun", func(v: String) -> void: _editor.env_file.set_sun_3di(v))
+	_moon_model = _add_model_ref(models, "Moon", func(v: String) -> void: _editor.env_file.set_moon_3di(v))
+	_glare_model = _add_model_ref(models, "Glare", func(v: String) -> void: _editor.env_file.set_glare_3di(v), "glare_3di")
+	_star_model = _add_model_ref(models, "Star", func(v: String) -> void: _editor.env_file.set_star_3di(v))
+
+	box.add_child(_make_separator())
+	box.add_child(_make_heading("Advanced"))
+	var advanced := GridContainer.new()
+	advanced.columns = 2
+	advanced.add_theme_constant_override("h_separation", 8)
+	advanced.add_theme_constant_override("v_separation", 8)
+	box.add_child(advanced)
+	# Murk caps at 0.99 like the engine clamp (original has only the <= 0.99 top).
+	_water_murk = _add_spin(advanced, "Water murk", 0.0, 0.99, 0.01, _on_water_murk_changed, "water_murk")
+	_lightning_color = _add_color(advanced, "Lightning", _on_lightning_color_changed, "lightning_color")
+	_ceiling_color = _add_color(advanced, "Ceiling", _on_ceiling_color_changed, "ceiling_color")
+	_floor_color = _add_color(advanced, "Floor", _on_floor_color_changed, "floor_color")
+	_vertex_tint = _add_color(advanced, "Vertex tint", _on_vertex_tint_changed, "vertex_tint")
+	_iris_percent = _add_spin(advanced, "Iris percent", 0.0, 100.0, 0.1, _on_iris_percent_changed, "iris_percent")
+	_iris_center = _add_spin(advanced, "Iris center", 0.0, 5.0, 0.01, _on_iris_center_changed, "iris_center")
 
 	box.add_child(_make_separator())
 	box.add_child(_make_heading("TOD Keyframes"))
@@ -171,10 +217,23 @@ func sync_from_editor() -> void:
 	_terrain_tint.color = env.get_terrain_tint()
 	_water_color.color = env.get_water_color()
 	_cloud_tint.color = env.get_cloud_tint()
-	_sun_model.text = env.get_sun_3di()
-	_moon_model.text = env.get_moon_3di()
-	_glare_model.text = env.get_glare_3di()
-	_star_model.text = env.get_star_3di()
+	_water_murk.value = env.get_water_murk()
+	_lightning_color.color = env.get_lightning_color()
+	_ceiling_color.color = env.get_ceiling_color()
+	_floor_color.color = env.get_floor_color()
+	_vertex_tint.color = env.get_vertex_tint()
+	_iris_percent.value = env.get_iris_percent()
+	_iris_center.value = env.get_iris_center()
+	_sun_model.set_value(env.get_sun_3di())
+	_moon_model.set_value(env.get_moon_3di())
+	_glare_model.set_value(env.get_glare_3di())
+	_star_model.set_value(env.get_star_3di())
+	# Push feed: preview exactly the textures the sky renders (resolved by the
+	# same C++ path — resource root or the .env's own folder).
+	_sky_map1.set_value(env.get_sky_map1())
+	_sky_map1.set_preview_texture(env.get_sky_map1_tex())
+	_sky_map2.set_value(env.get_sky_map2())
+	_sky_map2.set_preview_texture(env.get_sky_map2_tex())
 	_sync_keyframe_list()
 	_sync_selected_keyframe()
 	_syncing = false
@@ -206,11 +265,8 @@ func _sync_selected_keyframe() -> void:
 		_color_buttons[prop].color = keyframe.get(prop)
 
 
-func _add_spin(parent: Control, label_text: String, min_value: float, max_value: float, step: float, callback: Callable) -> SpinBox:
-	var label := Label.new()
-	label.text = label_text
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	parent.add_child(label)
+func _add_spin(parent: Control, label_text: String, min_value: float, max_value: float, step: float, callback: Callable, field: String = "") -> SpinBox:
+	_add_grid_label(parent, label_text, field)
 	var spin := SpinBox.new()
 	spin.min_value = min_value
 	spin.max_value = max_value
@@ -223,11 +279,8 @@ func _add_spin(parent: Control, label_text: String, min_value: float, max_value:
 	return spin
 
 
-func _add_color(parent: Control, label_text: String, callback: Callable) -> ColorPickerButton:
-	var label := Label.new()
-	label.text = label_text
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	parent.add_child(label)
+func _add_color(parent: Control, label_text: String, callback: Callable, field: String = "") -> ColorPickerButton:
+	_add_grid_label(parent, label_text, field)
 	var button := ColorPickerButton.new()
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.color_changed.connect(callback)
@@ -237,18 +290,75 @@ func _add_color(parent: Control, label_text: String, callback: Callable) -> Colo
 	return button
 
 
-func _add_line_edit(parent: Control, label_text: String, callback: Callable) -> LineEdit:
+# Row labels carry the consumption badge: fields whose edits don't reach the
+# picture yet get a glyph (partial ◐ / unconsumed ○) and a plain-language
+# tooltip, instead of silently accepting the edit.
+func _add_grid_label(parent: Control, label_text: String, field: String = "") -> void:
 	var label := Label.new()
 	label.text = label_text
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var info: Dictionary = _consumption.get(field, {})
+	if not info.is_empty():
+		var status := String(info.get("status", "honored"))
+		if status == "partial":
+			label.text += " " + BADGE_PARTIAL
+		elif status == "unconsumed":
+			label.text += " " + BADGE_UNCONSUMED
+		var tip := String(info.get("note", ""))
+		if not tip.is_empty():
+			var anchor := String(info.get("anchor", ""))
+			if not anchor.is_empty():
+				tip += "\n[orig: %s]" % anchor
+			label.tooltip_text = tip
+			label.mouse_filter = Control.MOUSE_FILTER_PASS
 	parent.add_child(label)
-	var edit := LineEdit.new()
-	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	edit.text_changed.connect(callback)
-	edit.focus_exited.connect(_commit_edit)
-	edit.text_submitted.connect(func(_t): _commit_edit())
-	parent.add_child(edit)
-	return edit
+
+
+## A 3DI model reference row (badge + browse + jump into the Object workspace).
+## Link-widget commits are discrete (Enter / focus-out / pick / clear), so each
+## one is its own undo step — no begin/commit burst bookkeeping.
+func _add_model_ref(parent: Control, label_text: String, commit: Callable, field: String = "") -> ResourceRefWidget:
+	_add_grid_label(parent, label_text, field)
+	var widget := ResourceRefWidget.new()
+	widget.name = "EnvModel" + label_text
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("object_model", label_text, _ref_services)
+	widget.value_changed.connect(func(value: String) -> void:
+		if _syncing or _editor == null or _editor.env_file == null:
+			return
+		_editor.push_undo_step(func() -> void: commit.call(value)))
+	parent.add_child(widget)
+	return widget
+
+
+## A cloud-map texture row with an always-on preview. The preview uses the push
+## feed (sync_from_editor hands over the texture the sky actually renders).
+func _add_sky_map(parent: Control, label_text: String, commit: Callable) -> TextureRefWidget:
+	_add_grid_label(parent, label_text)
+	var widget := TextureRefWidget.new()
+	widget.name = "EnvSkyMap" + label_text.replace(" ", "")
+	widget.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	widget.configure("texture", label_text, _ref_services)
+	widget.value_changed.connect(func(value: String) -> void:
+		if _syncing or _editor == null or _editor.env_file == null:
+			return
+		_editor.push_undo_step(func() -> void: commit.call(value)))
+	parent.add_child(widget)
+	return widget
+
+
+## Wires the link widgets' resolve/pick/jump Callables (see
+## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## the form is built.
+func set_reference_services(services: Dictionary) -> void:
+	_ref_services = services
+	if _sun_model != null and is_instance_valid(_sun_model):
+		_sun_model.configure("object_model", "Sun", services)
+		_moon_model.configure("object_model", "Moon", services)
+		_glare_model.configure("object_model", "Glare", services)
+		_star_model.configure("object_model", "Star", services)
+		_sky_map1.configure("texture", "Cloud map 1", services)
+		_sky_map2.configure("texture", "Cloud map 2", services)
 
 
 func _add_keyframe_color(parent: Control, property_name: String, label_text: String) -> void:
@@ -368,28 +478,46 @@ func _on_cloud_tint_changed(color: Color) -> void:
 		_editor.env_file.set_cloud_tint(color)
 
 
-func _on_sun_model_changed(text: String) -> void:
+func _on_water_murk_changed(value: float) -> void:
 	if not _syncing:
 		_begin_edit()
-		_editor.env_file.set_sun_3di(text)
+		_editor.env_file.set_water_murk(value)
 
 
-func _on_moon_model_changed(text: String) -> void:
+func _on_lightning_color_changed(color: Color) -> void:
 	if not _syncing:
 		_begin_edit()
-		_editor.env_file.set_moon_3di(text)
+		_editor.env_file.set_lightning_color(color)
 
 
-func _on_glare_model_changed(text: String) -> void:
+func _on_ceiling_color_changed(color: Color) -> void:
 	if not _syncing:
 		_begin_edit()
-		_editor.env_file.set_glare_3di(text)
+		_editor.env_file.set_ceiling_color(color)
 
 
-func _on_star_model_changed(text: String) -> void:
+func _on_floor_color_changed(color: Color) -> void:
 	if not _syncing:
 		_begin_edit()
-		_editor.env_file.set_star_3di(text)
+		_editor.env_file.set_floor_color(color)
+
+
+func _on_vertex_tint_changed(color: Color) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_vertex_tint(color)
+
+
+func _on_iris_percent_changed(value: float) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_iris_percent(value)
+
+
+func _on_iris_center_changed(value: float) -> void:
+	if not _syncing:
+		_begin_edit()
+		_editor.env_file.set_iris_center(value)
 
 
 func _on_keyframe_selected(index: int) -> void:

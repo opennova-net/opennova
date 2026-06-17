@@ -7,7 +7,6 @@
 - [ ] AI class and AI script: should be a selection, not a free input, if we can pull the options from a loadable resource (def, etc)
 - [ ] "Weapon loadout" field semantics need an IDA grill (the editor panel itself is in)
 - [ ] "Raw" group fields need an IDA grill and better editor integration
-- [ ] Terrain needs to be pickable in mission properties
 - [ ] Too much useless text noise in Mission tab
 - [ ] Briefing needs to be a larger textbox. Also confirm whether it can be a string (rtxt) and integrate nicely if so
 - [ ] "Music track" being a number is no good. Better integration

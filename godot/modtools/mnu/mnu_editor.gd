@@ -38,6 +38,16 @@ var _resource_root: NovaResourceRoot
 var _text_resource: RtxtStringFile
 var _text_resource_path: String = ""
 var _stylesheet: MnsStyleSheet
+# When the workspace owns the .mns document directly (the merged Menus
+# workspace does), it pushes its in-memory MnsStyleSheet here so canvas refreshes
+# read live edits without a disk round-trip. Null means fall back to the disk
+# resolution from the resource root.
+var _stylesheet_override: MnsStyleSheet
+# Distinct %VAR% tokens in the open menu that the loaded stylesheet does not
+# define (all of them, when none loads). Recomputed per preview refresh and
+# cached: the shell polls status per frame. The original engine FAILS on an
+# unknown variable at expansion, so these surface in the status bar.
+var _unresolved_var_count := 0
 var _tree        # MnuWidgetTree
 var _canvas      # MnuCanvas
 var _selected_id := -1
@@ -270,6 +280,7 @@ func _refresh_preview() -> void:
 	var doc := _document_resource()
 	_resolve_text_resource(doc)  # refresh the cached table + path
 	_resolve_stylesheet_resource()
+	_recount_unresolved_vars(doc)
 	_canvas.set_menu(doc, _resource_root, _text_resource, _stylesheet)
 
 
@@ -300,7 +311,17 @@ func _resolve_text_resource(doc: NovaMnuDocument) -> void:
 		continue
 
 
+# With an override pushed by the workspace (the merged Menus workspace owns the
+# .mns document directly), uses that live document so unsaved Styles edits hit
+# the canvas immediately. Without one, re-reads the canonical stylesheet from
+# the resource root on every preview refresh (also runs on every viewport mount
+# via set_resource_root), so external edits appear on the next refresh with no
+# extra wiring. Tests that drive MnuEditor without a workspace still work
+# through the disk path.
 func _resolve_stylesheet_resource() -> void:
+	if _stylesheet_override != null:
+		_stylesheet = _stylesheet_override
+		return
 	_stylesheet = null
 	if _resource_root == null or _resource_root.get_root_dir().is_empty():
 		return
@@ -310,6 +331,56 @@ func _resolve_stylesheet_resource() -> void:
 	var sheet := MnsStyleSheet.new()
 	if sheet.load_from_bytes(bytes) == OK:
 		_stylesheet = sheet
+
+
+# The workspace pushes its in-memory stylesheet here so canvas refreshes pick
+# up unsaved Styles edits live. Pass null to fall back to disk resolution.
+func set_stylesheet_resource(sheet: MnsStyleSheet) -> void:
+	_stylesheet_override = sheet
+	_refresh_preview()
+
+
+# The loaded stylesheet (null when the root carries none); the inspector uses
+# it to resolve %VAR% swatches and offer variable dropdowns.
+func get_stylesheet() -> MnsStyleSheet:
+	return _stylesheet
+
+
+func get_unresolved_var_count() -> int:
+	return _unresolved_var_count
+
+
+# Walk every widget's color/texture/font fields for whole-field %VAR% tokens
+# and count the DISTINCT names the stylesheet cannot resolve.
+func _recount_unresolved_vars(doc: NovaMnuDocument) -> void:
+	_unresolved_var_count = 0
+	if doc == null:
+		return
+	var missing: Dictionary = {}
+	var pending: Array[int] = []
+	for screen_id in doc.get_screen_ids():
+		pending.append(screen_id)
+	while not pending.is_empty():
+		var id: int = pending.pop_back()
+		for child_id in doc.get_child_ids(id):
+			pending.append(child_id)
+		if doc.is_screen(id):
+			continue # screens are containers; the styled fields live on widgets
+		for slot in range(8):
+			_note_unresolved_token(doc.get_widget_color(id, slot), missing)
+		for slot in range(4):
+			_note_unresolved_token(doc.get_widget_texture(id, slot), missing)
+		_note_unresolved_token(doc.get_widget_font(id), missing)
+	_unresolved_var_count = missing.size()
+
+
+func _note_unresolved_token(raw: String, missing: Dictionary) -> void:
+	var token := raw.strip_edges()
+	if token.length() < 3 or not token.begins_with("%") or not token.ends_with("%"):
+		return
+	var name := token.substr(1, token.length() - 2)
+	if _stylesheet == null or not _stylesheet.has_variable(name):
+		missing[name.to_upper()] = true
 
 
 func get_text_resource() -> RtxtStringFile:
@@ -723,6 +794,27 @@ func _resolve_existing_selection(id: int) -> int:
 
 
 # --- Undo / redo ----------------------------------------------------------------
+
+## Detach the current undo/redo history so the workspace can stash it per tab
+## across document rebinds (set_document clears the live stacks). The op dicts
+## are pure data, so they survive being parked.
+func take_history() -> Dictionary:
+	var history := {"undo": _undo_stack.duplicate(), "redo": _redo_stack.duplicate()}
+	_undo_stack.clear()
+	_redo_stack.clear()
+	return history
+
+
+## Restore a take_history() stash for the (just-bound) document; an empty
+## dictionary leaves the cleared stacks as-is.
+func restore_history(history: Dictionary) -> void:
+	_undo_stack.clear()
+	_redo_stack.clear()
+	if history.has("undo"):
+		_undo_stack.assign(history["undo"])
+	if history.has("redo"):
+		_redo_stack.assign(history["redo"])
+
 
 func can_undo() -> bool:
 	return not _undo_stack.is_empty()

@@ -223,6 +223,22 @@ func sample_world_height(world_x: float, world_z: float) -> float:
 	return _sample_source_height(source.x, source.y)
 
 
+# Batch variant of sample_world_height: one C++ call for the whole point set
+# (the per-point path pays ~6 GDScript->C++ crossings each). Samples the SAME
+# live editable image — the document hands one Image to both this mesh and the
+# NovaTerrainData, and the C++ math mirrors world_to_source_coords +
+# _sample_source_height exactly (pinned by terrain_height_revision_test's
+# batch/scalar parity rows). Off-mesh / no-data points are NAN, not the scalar
+# path's -1e6 sentinel.
+func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
+	if _data == null:
+		var out := PackedFloat32Array()
+		out.resize(points.size())
+		out.fill(NAN)
+		return out
+	return _data.sample_heights_world_live(points)
+
+
 func world_to_cell_source_coords(world_x: float, world_z: float, row: int, col: int) -> Vector2:
 	# Explicit-cell, unclamped-local variant. Forwards to the C++ kernel.
 	if _data == null:

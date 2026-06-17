@@ -175,6 +175,12 @@ public:
 	// {"glare": 0..255, "fog_whiten": 0..40}.
 	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
+	// Field name -> renderer-consumption status for editor badging:
+	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,
+	//  "anchor": String, "note": String}. Statuses mirror
+	// docs/env/env-honored-matrix.md and flip only with grill citations.
+	static Dictionary get_field_consumption();
+
 	// BMS mission override layer. Recognized keys: water_height (float),
 	// fog_level (float), fog_color (Color), water_color (Color),
 	// water_murk (float), start_time (int HHMM).

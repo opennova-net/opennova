@@ -200,28 +200,44 @@ String NovaResourceRoot::resolve_file(const String &name) {
 	}
 	const String wanted = file.to_lower();
 
-	Ref<DirAccess> dir = DirAccess::open(root_dir_);
-	if (dir.is_null()) {
-		last_error_ = "Resource directory cannot be opened: " + root_dir_;
-		return String();
+	const uint64_t epoch = opennova::cache_epoch();
+	if (!resolve_memo_built_ || resolve_memo_epoch_ != epoch) {
+		Ref<DirAccess> dir = DirAccess::open(root_dir_);
+		if (dir.is_null()) {
+			last_error_ = "Resource directory cannot be opened: " + root_dir_;
+			return String();
+		}
+		resolve_memo_.clear();
+		dir->list_dir_begin();
+		String entry = dir->get_next();
+		while (!entry.is_empty()) {
+			if (!dir->current_is_dir()) {
+				const String key_string = entry.to_lower();
+				const std::string key(key_string.utf8().get_data());
+				auto it = resolve_memo_.find(key);
+				if (it != resolve_memo_.end()) {
+					// Case-variant duplicates poison the name: resolving it is an error.
+					it->second = String();
+				} else {
+					resolve_memo_.emplace(key, root_dir_.path_join(entry));
+				}
+			}
+			entry = dir->get_next();
+		}
+		dir->list_dir_end();
+		resolve_memo_built_ = true;
+		resolve_memo_epoch_ = epoch;
 	}
 
-	String found;
-	dir->list_dir_begin();
-	String entry = dir->get_next();
-	while (!entry.is_empty()) {
-		if (!dir->current_is_dir() && entry.to_lower() == wanted) {
-			if (!found.is_empty()) {
-				dir->list_dir_end();
-				last_error_ = "Duplicate resource filename: " + file;
-				return String();
-			}
-			found = entry;
-		}
-		entry = dir->get_next();
+	const auto found = resolve_memo_.find(std::string(wanted.utf8().get_data()));
+	if (found == resolve_memo_.end()) {
+		return String();
 	}
-	dir->list_dir_end();
-	return found.is_empty() ? String() : root_dir_.path_join(found);
+	if (found->second.is_empty()) {
+		last_error_ = "Duplicate resource filename: " + file;
+		return String();
+	}
+	return found->second;
 }
 
 PackedStringArray NovaResourceRoot::list_files(const String &suffix) const {
@@ -301,6 +317,18 @@ Ref<Texture2D> NovaResourceRoot::load_texture(const String &name) const {
 		return loose;
 	}
 
+	const uint64_t epoch = opennova::cache_epoch();
+	if (packed_texture_cache_epoch_ != epoch) {
+		packed_texture_cache_.clear();
+		packed_texture_cache_epoch_ = epoch;
+	}
+	const std::string cache_key(file.to_lower().utf8().get_data());
+	const auto cached = packed_texture_cache_.find(cache_key);
+	if (cached != packed_texture_cache_.end()) {
+		return cached->second;
+	}
+
+	Ref<Texture2D> result;
 	for (const String &candidate : opennova::texture_candidate_filenames(file)) {
 		const PackedByteArray bytes = read_file(candidate);
 		if (bytes.is_empty()) {
@@ -308,10 +336,12 @@ Ref<Texture2D> NovaResourceRoot::load_texture(const String &name) const {
 		}
 		Ref<Texture2D> tex = opennova::load_texture_from_bytes(candidate, bytes);
 		if (tex.is_valid()) {
-			return tex;
+			result = tex;
+			break;
 		}
 	}
-	return Ref<Texture2D>();
+	packed_texture_cache_.emplace(cache_key, result);
+	return result;
 }
 
 Ref<Resource> NovaResourceRoot::load_font(const String &name) const {

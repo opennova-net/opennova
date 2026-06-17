@@ -148,6 +148,51 @@ func test_resource_root_loads_dds_from_pff() -> void:
 		assert_eq(tex.get_height(), 4)
 
 
+func test_resolve_file_snapshots_per_cache_epoch() -> void:
+	# resolve_file reads a one-walk-per-epoch snapshot of the root directory, matching
+	# the index-backed listings: on-disk edits surface via scan/mount or an explicit
+	# bump_cache_epoch(), never mid-epoch.
+	var root := _make_flat_root("resolve_epoch")
+	_write_file(root.path_join("Alpha.TRN"), "trn")
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.set_root_dir(root), OK)
+	assert_eq(_norm(resources.resolve_file("alpha.trn")), _norm(root.path_join("Alpha.TRN")))
+
+	_write_file(root.path_join("Bravo.TRN"), "trn")
+	assert_eq(resources.resolve_file("bravo.trn"), "", "A file added after the mount stays invisible until the epoch moves.")
+
+	NovaResourceRoot.bump_cache_epoch()
+	assert_eq(_norm(resources.resolve_file("bravo.trn")), _norm(root.path_join("Bravo.TRN")), "bump_cache_epoch() re-reads the directory.")
+
+	_write_file(root.path_join("Charlie.TRN"), "trn")
+	assert_eq(resources.set_root_dir(root), OK)
+	assert_eq(_norm(resources.resolve_file("charlie.trn")), _norm(root.path_join("Charlie.TRN")), "A remount/rescan re-reads the directory.")
+
+
+func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
+	# PFF-resident textures decode once per epoch; repeat load_texture calls hand out
+	# the same Texture2D instance (consumers never mutate textures — the loose path
+	# has shared its decode cache the same way since the resolver caches landed).
+	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.6, 0.3, 0.1, 1.0))
+	var root := _make_flat_root("dds_pff_cache")
+	_write_pff(root.path_join("textures.pff"), [{"name": "swatch.dds", "bytes": image.save_dds_to_buffer()}])
+
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	var first: Texture2D = resources.load_texture("swatch.dds")
+	var second: Texture2D = resources.load_texture("swatch.dds")
+	assert_not_null(first)
+	assert_true(first == second, "Repeat packed loads should return the cached texture, not a fresh decode.")
+	assert_null(resources.load_texture("missing.dds"), "Misses stay misses when cached.")
+	assert_null(resources.load_texture("missing.dds"))
+
+	NovaResourceRoot.bump_cache_epoch()
+	var after_bump: Texture2D = resources.load_texture("swatch.dds")
+	assert_not_null(after_bump, "An epoch bump must not lose the texture, only the cache.")
+
+
 func after_each() -> void:
 	_remove_dir_recursive(OS.get_cache_dir().path_join("opennova_resource_root_contract"))
 

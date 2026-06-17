@@ -3,20 +3,28 @@ extends Control
 
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU }
+
+# Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
+# shows the non-popup ones in order. The enum below stays only as stable id
+# constants and for the two genuine per-workspace branches (env popup, tile gizmo).
+
+
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
 
 # Item metadata sentinel for the "Clear list" entry in the recent-directories
 # dropdown; real entries carry their path, the disabled placeholder carries "".
 const _RECENT_CLEAR_META := "::clear::"
 
-@onready var _project_label: Label = %ProjectLabel
+@onready var _nav_back_button: Button = %NavBackButton
+@onready var _nav_forward_button: Button = %NavForwardButton
+@onready var _context_workspace_label: Label = %ContextWorkspaceLabel
+@onready var _context_doc_label: Label = %ContextDocLabel
 @onready var _top_bar: PanelContainer = %TopBar
 @onready var _body_row: SplitContainer = %BodyRow
 @onready var _center_right_split: SplitContainer = %CenterRightSplit
 @onready var _left_lane: PanelContainer = %LeftLane
-@onready var _workspace_scroll: ScrollContainer = %WorkspaceScroll
-@onready var _workspace_scroll_left_button: Button = %WorkspaceScrollLeftButton
-@onready var _workspace_scroll_right_button: Button = %WorkspaceScrollRightButton
+@onready var _workspace_bar: PanelContainer = %WorkspaceBar
 @onready var _workspace_rail: BoxContainer = %WorkspaceRail
 @onready var _workspace_actions_host: BoxContainer = %WorkspaceActionsHost
 @onready var _modes_label: Label = %ModesLabel
@@ -24,14 +32,20 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _inspector_host: Control = %InspectorHost
 @onready var _viewport_lane: Control = %ViewportLane
 @onready var _viewport_host: Control = %ViewportHost
+@onready var _document_tab_strip: PanelContainer = %DocumentTabStrip
+@onready var _document_tab_row: HBoxContainer = %DocumentTabRow
 @onready var _camera_toggle_button: Button = %CameraToggleButton
 @onready var _camera_popup: PopoverPanel = %CameraPopup
 @onready var _camera_popup_close: Button = %CameraPopupClose
+@onready var _camera_popup_detach: Button = %CameraPopupDetach
+@onready var _camera_popup_content: Control = %CameraPopupContent
 @onready var _camera_settings_host: Control = %CameraSettingsHost
 @onready var _environment_toggle_button: Button = %EnvironmentToggleButton
 @onready var _environment_popup: PopoverPanel = %EnvironmentPopup
 @onready var _environment_popup_title: Label = %EnvironmentPopupTitle
 @onready var _environment_popup_close: Button = %EnvironmentPopupClose
+@onready var _environment_popup_detach: Button = %EnvironmentPopupDetach
+@onready var _environment_popup_content: Control = %EnvironmentPopupContent
 @onready var _environment_actions_host: VBoxContainer = %EnvironmentActionsHost
 @onready var _environment_inspector_host: Control = %EnvironmentInspectorHost
 @onready var _settings_toggle_button: Button = %SettingsToggleButton
@@ -49,6 +63,9 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _settings_axes_toggle: CheckBox = %SettingsAxesToggle
 @onready var _settings_pff_tool_button: Button = %SettingsPffToolButton
 @onready var _asset_dock: Control = %AssetDock
+@onready var _right_split: SplitContainer = %RightSplit
+@onready var _browser_toggle_button: Button = %BrowserToggleButton
+@onready var _browser_pane_host: PanelContainer = %ResourceBrowserPaneHost
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
 @onready var _status_context_label: Label = %StatusContextLabel
@@ -69,16 +86,22 @@ const _RECENT_CLEAR_META := "::clear::"
 @onready var _progress_counts_label: Label = %ProgressCountsLabel
 
 var editor: Node
-var _active_workspace_id: StringName = &"terrain"
+var _active_workspace_id: int = Workspace.MISSION
 var _workspaces: Dictionary = {}
 var _environment_workspace: EnvironmentEditorWorkspace
 var _workspace_buttons: Dictionary = {}
-# Popup workspaces (Environment) keep their nav buttons here, separate from
-# _workspace_buttons, because they never become _active_workspace_id; their
-# pressed state mirrors popup visibility instead of the active-id refresh loop.
-var _popup_workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
+# Top-bar overflow ("More") menu holding the secondary document actions
+# (Save As / Export). Only the horizontal top-bar host builds one; the
+# environment popup's vertical list keeps full buttons.
+var _workspace_overflow_button: MenuButton
 var _environment_action_buttons: Dictionary = {}
+# Last applied context-header doc title + OS window title; each is recomputed
+# only when its text actually changes (this runs from the per-frame status
+# refresh, so the work is skipped on the vast majority of frames).
+var _context_ws_label_cache := ""
+var _context_doc_title_cache := ""
+var _window_title_cache := ""
 var _asset_dock_workspace_id: StringName = &""
 var _camera_settings_panel: Control
 var _resource_library := EditorResourceLibrary.new()
@@ -96,12 +119,36 @@ var _export_ui_active: bool = false
 var _pending_export_dir: String = ""
 var _overlay_tween: Tween
 var _unsaved_dialog: ConfirmationDialog
+# App-close guard: one prompt covering every workspace with unsaved work,
+# separate from _unsaved_dialog (the terrain editor's per-action save prompt).
+var _close_guard_dialog: ConfirmationDialog
+# When set, the unsaved-changes dialog routes Save/Discard/Cancel here instead
+# of the terrain editor's pending-action flow (prompt_unsaved_for vs the legacy
+# prompt_unsaved_changes). Cleared before each invocation, so a stale callable
+# can never hijack a later prompt.
+var _unsaved_on_save := Callable()
+var _unsaved_on_discard := Callable()
+var _unsaved_on_cancel := Callable()
 var _cdep_dialog: ConfirmationDialog
 var _export_dialog: ExportFlavorDialog
 var _cdep_fix_callback: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
+# The persistent Resource Browser pane (lazy: built on first show).
+var _browser_pane: ResourceBrowserPane
 var _pff_tool := EditorPffTool.new()
 var _file_dialogs: FileDialogHelper
+# Detachable panels (B6): the camera/environment popovers can pop their
+# content into floating windows. State machines live in the hosts; the cached
+# restore dicts make persisted "open floating" decisions without re-reading
+# the config per toggle (the save handlers keep them current).
+var _camera_panel_host: DetachablePanelHost
+var _environment_panel_host: DetachablePanelHost
+var _panel_restore: Dictionary = {}
+# Browser-style Back/Forward over departure snapshots (see EditorNavHistory).
+# History records only at the user navigation entry points
+# (_on_workspace_pressed, open_in_workspace); direct set_active_workspace /
+# open_file calls (tools, tests, the restore path itself) bypass it.
+var _nav_history := EditorNavHistory.new()
 
 
 func _ready() -> void:
@@ -120,17 +167,20 @@ func _ready() -> void:
 		self,
 		_open_files_dialog,
 		_open_dir_dialog,
-		show_status_message
+		show_status_message,
+		_on_pff_extracted
 	)
 	_build_workspace_rail()
-	_wire_workspace_scroll_affordance()
+	_wire_nav_buttons()
 	_wire_camera_popup()
 	_wire_environment_popup()
 	_wire_settings_popup()
 	_wire_tile_gizmo()
 	_wire_splits()
+	_wire_browser_pane()
 	_apply_window_min_size()
-	_project_label.clip_text = true
+	get_tree().set_auto_accept_quit(false)
+	_context_doc_label.clip_text = true
 	_status_context_label.clip_text = true
 	_status_camera_label.clip_text = true
 	_status_fps_label.clip_text = true
@@ -146,10 +196,57 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	# Quit-while-floating remembers the preference + rect for the next session.
+	if _camera_panel_host != null:
+		_camera_panel_host.save_now()
+	if _environment_panel_host != null:
+		_environment_panel_host.save_now()
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).release_viewport()
 	_clear_viewport_host()
-	_mounted_workspace_id = -1
+	_mounted_workspace_id = &""
+
+
+# The shell owns the app-close guard: a single prompt covering every workspace
+# with unsaved work. _ready calls set_auto_accept_quit(false) so WM_CLOSE lands
+# here; the embedded terrain editor's own handler defers to this (it no-ops when
+# it has a workstation), so the user never sees two stacked dialogs. GUT and the
+# screenshot tool quit through get_tree().quit(), which bypasses this entirely.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_handle_close_request()
+
+
+func _handle_close_request() -> void:
+	var dirty := PackedStringArray()
+	for workspace in _workspaces.values():
+		var ws := workspace as EditorWorkspace
+		if ws != null and ws.has_unsaved_changes():
+			dirty.append(ws.get_workspace_label())
+	if _environment_workspace != null and _environment_workspace.has_unsaved_changes():
+		dirty.append("Environment")
+	if dirty.is_empty():
+		get_tree().quit()
+		return
+	_ensure_close_guard_dialog()
+	_close_guard_dialog.dialog_text = "Unsaved changes in: %s.\n\nQuit without saving?" % ", ".join(dirty)
+	_close_guard_dialog.popup_centered()
+
+
+func _ensure_close_guard_dialog() -> void:
+	if _close_guard_dialog != null and is_instance_valid(_close_guard_dialog):
+		return
+	_close_guard_dialog = ConfirmationDialog.new()
+	_close_guard_dialog.name = "CloseGuardDialog"
+	_close_guard_dialog.title = "Quit OpenNova Editor"
+	_close_guard_dialog.exclusive = true
+	if theme != null:
+		_close_guard_dialog.theme = theme
+	add_child(_close_guard_dialog)
+	_close_guard_dialog.get_ok_button().text = "Quit without saving"
+	_close_guard_dialog.get_cancel_button().text = "Keep editing"
+	# OK quits; Cancel/Escape dismisses and leaves the editor open.
+	_close_guard_dialog.confirmed.connect(func() -> void: get_tree().quit())
 
 
 func set_editor(value: Node) -> void:
@@ -160,6 +257,9 @@ func set_editor(value: Node) -> void:
 	if _environment_workspace != null:
 		_environment_workspace.bind_to_editor(value)
 	_reset_environment_popup_content()
+	# A floating environment window must not sit empty until its next toggle.
+	if _environment_panel_host != null and _environment_panel_host.is_floating():
+		_ensure_environment_popup_content()
 	_sync_camera_popup_editor()
 	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
@@ -173,7 +273,7 @@ func sync_from_editor_state() -> void:
 	_ensure_workspaces()
 	_refresh_workspace_buttons()
 	_refresh_workflow_from_workspace()
-	_refresh_project_label()
+	_refresh_context_header()
 	_refresh_shell_state()
 	_refresh_status()
 	_refresh_tile_gizmo()
@@ -195,9 +295,24 @@ func _process(_delta: float) -> void:
 	_refresh_tile_gizmo()
 
 
+func _workspace_defs() -> Array:
+	# Categories group the nav list; array order is the within-category order and
+	# the order categories first appear (World, Interface, Atmosphere).
+	return [
+		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
+		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World", &"terrain"),
+		WorkspaceDef.make(Workspace.OBJECT, ObjectWorkspaceAdapter, false, &"World", &"object"),
+		WorkspaceDef.make(Workspace.FONTS, FontsWorkspaceAdapter, false, &"Interface", &"fonts"),
+		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
+		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),
+		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
+		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
+		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
+		WorkspaceDef.make(&"environment", EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),
+	]
+
+
 func _ensure_workspaces() -> void:
-	# Workspaces are registered to WorkspaceRegistry
-	# For now, to keep the shell working, we will manually register them here until they self-register.
 	if WorkspaceRegistry.get_all_workspaces().is_empty():
 		WorkspaceRegistry.register_workspace(&"terrain", WorkspaceDef.make(&"terrain", preload("res://modtools/editor/terrain_workspace.gd"), false, &"World", &"terrain"))
 		WorkspaceRegistry.register_workspace(&"object", WorkspaceDef.make(&"object", preload("res://modtools/object/object_workspace.gd"), false, &"World", &"object"))
@@ -218,12 +333,17 @@ func _ensure_workspaces() -> void:
 		elif not _workspaces.has(def.id):
 			var workspace: EditorWorkspace = def.adapter_script.new()
 			workspace.set_editor_shell(self)
+			# The tab strip is signal-driven: rebuilt only from documents_changed
+			# (and workspace switches), never from the per-frame shell poll.
+			if workspace.has_signal("documents_changed"):
+				workspace.connect("documents_changed", _on_workspace_documents_changed.bind(def.id))
 			_workspaces[def.id] = workspace
 
-
-# Build the top-bar, category-grouped workspace nav. The horizontal rail lives in
-# a bounded ScrollContainer so workspace growth scrolls instead of competing with
-# document actions or the viewport.
+# Build the vertical workspace dock bar at the far left of the body: one toggle
+# button per non-popup workspace, grouped by category with separators between
+# groups. Nine entries fit the shell height with room to spare, so the bar never
+# scrolls or overflows. Popup workspaces (Environment) stay on their top-bar
+# toggle button, not the bar.
 func _build_workspace_rail() -> void:
 	var active_style := _make_workspace_active_stylebox()
 	# Bucket defs by category, preserving array order within each bucket and the
@@ -231,107 +351,116 @@ func _build_workspace_rail() -> void:
 	var buckets: Dictionary = {}
 	var category_order: Array = []
 	for def in WorkspaceRegistry.get_all_workspaces():
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			continue
 		if not buckets.has(def.category):
 			buckets[def.category] = []
 			category_order.append(def.category)
 		(buckets[def.category] as Array).append(def)
 	for category in category_order:
 		if _workspace_rail.get_child_count() > 0:
-			var separator := VSeparator.new()
-			separator.custom_minimum_size = Vector2(8, 34)
+			var separator := HSeparator.new()
+			separator.custom_minimum_size = Vector2(40, 8)
 			_workspace_rail.add_child(separator)
-		for def in buckets[category]:
-			# Popup workspaces (Environment) are not in _workspaces; their single
-			# instance lives in _environment_workspace.
-			var workspace: EditorWorkspace = _environment_workspace if def.popup else _get_workspace(def.id)
-			var btn := Button.new()
-			btn.text = workspace.get_workspace_label() if workspace != null else "Workspace"
-			btn.tooltip_text = workspace.get_workspace_tooltip() if workspace != null else ""
-			btn.toggle_mode = true
-			btn.focus_mode = Control.FOCUS_NONE
-			btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
-			btn.clip_text = true
-			btn.custom_minimum_size = Vector2(96, 34)
-			btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-			# Faint accent fill so the active row reads as filled, not just outlined.
-			btn.add_theme_stylebox_override("pressed", active_style)
-			btn.add_theme_stylebox_override("hover_pressed", active_style)
-			btn.icon = EditorIconLibrary.resolve(def.icon_id)
-			if def.popup:
-				# A popup row toggles its panel rather than swapping the viewport.
-				btn.toggled.connect(_on_popup_workspace_toggled.bind(def.id))
-				_popup_workspace_buttons[def.id] = btn
-			else:
-				btn.pressed.connect(_on_workspace_pressed.bind(def.id))
-				_workspace_buttons[def.id] = btn
-			_workspace_rail.add_child(btn)
+		for def_v in buckets[category]:
+			_workspace_rail.add_child(_make_workspace_bar_button(def_v as WorkspaceDef, active_style))
 	_refresh_workspace_buttons()
-	_refresh_workspace_scroll_affordance.call_deferred()
 
 
-func _wire_workspace_scroll_affordance() -> void:
-	if _workspace_scroll_left_button != null:
-		_workspace_scroll_left_button.icon = EditorIconLibrary.resolve(&"scroll_left")
-		if not _workspace_scroll_left_button.pressed.is_connected(_on_workspace_scroll_left_pressed):
-			_workspace_scroll_left_button.pressed.connect(_on_workspace_scroll_left_pressed)
-	if _workspace_scroll_right_button != null:
-		_workspace_scroll_right_button.icon = EditorIconLibrary.resolve(&"scroll_right")
-		if not _workspace_scroll_right_button.pressed.is_connected(_on_workspace_scroll_right_pressed):
-			_workspace_scroll_right_button.pressed.connect(_on_workspace_scroll_right_pressed)
-	if _workspace_scroll != null:
-		if not _workspace_scroll.resized.is_connected(_on_workspace_scroll_resized):
-			_workspace_scroll.resized.connect(_on_workspace_scroll_resized)
-		var h_scroll := _workspace_scroll.get_h_scroll_bar()
-		if h_scroll != null and not h_scroll.value_changed.is_connected(_on_workspace_scroll_value_changed):
-			h_scroll.value_changed.connect(_on_workspace_scroll_value_changed)
-	if _workspace_rail != null and not _workspace_rail.resized.is_connected(_on_workspace_scroll_resized):
-		_workspace_rail.resized.connect(_on_workspace_scroll_resized)
-	_refresh_workspace_scroll_affordance.call_deferred()
+# A workspace dock button: an empty-text toggle Button carrying the active
+# stylebox, with a mouse-ignoring VBox{icon, label} child anchored over it so the
+# icon sits above the label. Button stays text-less; the child Label is what the
+# user (and the tests) read.
+func _make_workspace_bar_button(def: WorkspaceDef, active_style: StyleBoxFlat) -> Button:
+	var workspace: EditorWorkspace = _get_workspace(def.id)
+	var label_text := workspace.get_workspace_label() if workspace != null else "Workspace"
+	var tooltip := workspace.get_workspace_tooltip() if workspace != null else ""
+	var hotkey := _workspace_hotkey_number(def.id)
+	var btn := Button.new()
+	btn.toggle_mode = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.custom_minimum_size = Vector2(0, 52)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.tooltip_text = ("Ctrl+%d  %s" % [hotkey, tooltip]) if hotkey > 0 else tooltip
+	# Faint accent fill so the active row reads as filled, not just outlined.
+	btn.add_theme_stylebox_override("pressed", active_style)
+	btn.add_theme_stylebox_override("hover_pressed", active_style)
+	btn.pressed.connect(_on_workspace_pressed.bind(def.id))
+	_workspace_buttons[def.id] = btn
+
+	# Button is not a Container, so the child lays out by anchors: fill the button.
+	var box := VBoxContainer.new()
+	box.name = "BarButtonBox"
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 3)
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	btn.add_child(box)
+
+	var icon := TextureRect.new()
+	icon.name = "BarButtonIcon"
+	icon.texture = EditorIconLibrary.resolve(def.icon_id)
+	icon.custom_minimum_size = Vector2(16, 16)
+	icon.expand_mode = TextureRect.EXPAND_KEEP_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(icon)
+
+	var label := Label.new()
+	label.name = "BarButtonLabel"
+	label.text = label_text
+	label.theme_type_variation = &"Muted"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.clip_text = true
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_child(label)
+	return btn
 
 
-func _on_workspace_scroll_left_pressed() -> void:
-	_scroll_workspace_ribbon(-1)
+# 1-based position of a workspace among the non-popup bar entries (its Ctrl+N
+# digit), or -1 if it has none. Only Ctrl+1..9 are wired, so a 10th-or-later
+# entry gets no digit. _workspace_id_at_bar_index is the inverse.
+func _workspace_hotkey_number(workspace_id: StringName) -> int:
+	var index := 0
+	for def in WorkspaceRegistry.get_all_workspaces():
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			continue
+		index += 1
+		if def.id == workspace_id:
+			return index if index <= 9 else -1
+	return -1
 
 
-func _on_workspace_scroll_right_pressed() -> void:
-	_scroll_workspace_ribbon(1)
+func _workspace_id_at_bar_index(index: int) -> StringName:
+	var i := 0
+	for def in WorkspaceRegistry.get_all_workspaces():
+		var def := def_v as WorkspaceDef
+		if def.popup:
+			continue
+		if i == index:
+			return def.id
+		i += 1
+	return -1
 
 
-func _on_workspace_scroll_value_changed(_value: float) -> void:
-	_refresh_workspace_scroll_affordance()
-
-
-func _on_workspace_scroll_resized() -> void:
-	_refresh_workspace_scroll_affordance()
-
-
-func _scroll_workspace_ribbon(direction: int) -> void:
-	var max_scroll := _workspace_scroll_max()
-	var next_scroll := clampi(_workspace_scroll.scroll_horizontal + (direction * 112), 0, max_scroll)
-	_workspace_scroll.scroll_horizontal = next_scroll
-	_refresh_workspace_scroll_affordance()
-
-
-func _refresh_workspace_scroll_affordance() -> void:
-	if _workspace_scroll == null or _workspace_rail == null or _workspace_scroll_left_button == null or _workspace_scroll_right_button == null:
-		return
-	var max_scroll := _workspace_scroll_max()
-	var overflow := max_scroll > 1
-	if not overflow and _workspace_scroll.scroll_horizontal != 0:
-		_workspace_scroll.scroll_horizontal = 0
-	if overflow and _workspace_scroll.scroll_horizontal > max_scroll:
-		_workspace_scroll.scroll_horizontal = max_scroll
-	_workspace_scroll_left_button.visible = overflow
-	_workspace_scroll_right_button.visible = overflow
-	_workspace_scroll_left_button.disabled = not overflow or _workspace_scroll.scroll_horizontal <= 0
-	_workspace_scroll_right_button.disabled = not overflow or _workspace_scroll.scroll_horizontal >= max_scroll - 1
-
-
-func _workspace_scroll_max() -> int:
-	if _workspace_scroll == null or _workspace_rail == null:
-		return 0
-	var rail_width := _workspace_rail.get_combined_minimum_size().x
-	return maxi(0, int(ceilf(rail_width - _workspace_scroll.size.x)))
+func _wire_nav_buttons() -> void:
+	if _nav_back_button != null:
+		_nav_back_button.icon = EditorIconLibrary.resolve(&"nav_back")
+		if _nav_back_button.icon == null:
+			_nav_back_button.text = "<"
+		if not _nav_back_button.pressed.is_connected(go_back):
+			_nav_back_button.pressed.connect(go_back)
+	if _nav_forward_button != null:
+		_nav_forward_button.icon = EditorIconLibrary.resolve(&"nav_forward")
+		if _nav_forward_button.icon == null:
+			_nav_forward_button.text = ">"
+		if not _nav_forward_button.pressed.is_connected(go_forward):
+			_nav_forward_button.pressed.connect(go_forward)
+	_refresh_nav_buttons()
 
 
 # Local-only active-row emphasis (no editor_theme.tres change). The themed pressed
@@ -350,18 +479,16 @@ func _make_workspace_active_stylebox() -> StyleBoxFlat:
 	return sb
 
 
-func _on_popup_workspace_toggled(workspace_id: StringName, pressed: bool) -> void:
-	if workspace_id == &"environment":
-		_set_environment_popup_visible(pressed)
-
 
 func _action_defs_for_workspace(workspace: EditorWorkspace) -> Array:
+	# "overflow" marks the secondary actions the horizontal top bar folds into
+	# the More menu; vertical hosts (environment popup) ignore it.
 	var action_defs := [
-		{"id": WorkspaceAction.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label()},
-		{"id": WorkspaceAction.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label()},
-		{"id": WorkspaceAction.SAVE, "visible": workspace.has_save_action(), "label": workspace.get_save_action_label()},
-		{"id": WorkspaceAction.SAVE_AS, "visible": workspace.has_save_as_action(), "label": workspace.get_save_as_action_label()},
-		{"id": WorkspaceAction.EXPORT, "visible": workspace.has_export_action(), "label": workspace.get_export_action_label()},
+		{"id": WorkspaceAction.NEW, "visible": workspace.has_new_action(), "label": workspace.get_new_action_label(), "overflow": false},
+		{"id": WorkspaceAction.OPEN, "visible": workspace.has_open_action(), "label": workspace.get_open_action_label(), "overflow": false},
+		{"id": WorkspaceAction.SAVE, "visible": workspace.has_save_action(), "label": workspace.get_save_action_label(), "overflow": false},
+		{"id": WorkspaceAction.SAVE_AS, "visible": workspace.has_save_as_action(), "label": workspace.get_save_as_action_label(), "overflow": true},
+		{"id": WorkspaceAction.EXPORT, "visible": workspace.has_export_action(), "label": workspace.get_export_action_label(), "overflow": true},
 	]
 	return action_defs
 
@@ -378,14 +505,21 @@ func _rebuild_action_buttons(
 		host.remove_child(child)
 		child.free()
 	buttons.clear()
+	# The freed children included the previous More menu (top-bar host only).
+	if host is HBoxContainer:
+		_workspace_overflow_button = null
 
 	if workspace == null:
 		host.visible = false
 		return
 
 	var action_defs := _action_defs_for_workspace(workspace)
+	var overflow_defs: Array = []
 	for action_def in action_defs:
 		if not bool(action_def["visible"]):
+			continue
+		if host is HBoxContainer and bool(action_def.get("overflow", false)):
+			overflow_defs.append(action_def)
 			continue
 		var btn := Button.new()
 		var action_id := int(action_def["id"])
@@ -403,7 +537,11 @@ func _rebuild_action_buttons(
 		host.add_child(btn)
 		buttons[action_id] = btn
 
-	host.visible = not buttons.is_empty()
+	if not overflow_defs.is_empty():
+		_workspace_overflow_button = _make_overflow_button(overflow_defs, on_pressed, name_prefix, min_height)
+		host.add_child(_workspace_overflow_button)
+
+	host.visible = not buttons.is_empty() or (host is HBoxContainer and _workspace_overflow_button != null)
 	_refresh_action_buttons_state(workspace, buttons)
 
 
@@ -470,10 +608,64 @@ func _refresh_action_buttons_state(workspace: EditorWorkspace, buttons: Dictiona
 				btn.disabled = busy or workspace == null or not workspace.can_export()
 
 
+func _make_overflow_button(overflow_defs: Array, on_pressed: Callable, name_prefix: String, min_height: float) -> MenuButton:
+	var more := MenuButton.new()
+	more.name = name_prefix + "MoreActionsButton"
+	more.text = "More"
+	more.tooltip_text = "More document actions"
+	more.icon = EditorIconLibrary.resolve(&"action_more")
+	more.focus_mode = Control.FOCUS_NONE
+	more.flat = false
+	more.custom_minimum_size = Vector2(0, min_height)
+	more.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var popup := more.get_popup()
+	# The popup is a native Window; it does not inherit the shell theme.
+	if theme != null:
+		popup.theme = theme
+	for action_def in overflow_defs:
+		var action_id := int(action_def["id"])
+		popup.add_icon_item(EditorIconLibrary.resolve(_workspace_action_icon_id(action_id)), String(action_def["label"]), action_id)
+	# PopupMenu.id_pressed hands over the item id, which is the WorkspaceAction
+	# value, so the menu routes through the same handler as the buttons.
+	popup.id_pressed.connect(on_pressed)
+	# Items are only actionable while the popup is open; refreshing their
+	# disabled state on about_to_popup keeps gating out of the per-frame poll.
+	popup.about_to_popup.connect(_refresh_workspace_overflow_state)
+	return more
+
+
+func _refresh_workspace_overflow_state() -> void:
+	if _workspace_overflow_button == null or not is_instance_valid(_workspace_overflow_button):
+		return
+	var workspace := _get_active_workspace()
+	var busy := _any_workspace_busy()
+	var popup := _workspace_overflow_button.get_popup()
+	for i in popup.item_count:
+		var disabled := busy or workspace == null
+		if not disabled:
+			match popup.get_item_id(i):
+				WorkspaceAction.NEW:
+					disabled = not workspace.can_new()
+				WorkspaceAction.OPEN:
+					disabled = not workspace.can_open()
+				WorkspaceAction.SAVE:
+					disabled = not workspace.can_save()
+				WorkspaceAction.SAVE_AS:
+					disabled = not workspace.can_save_as()
+				WorkspaceAction.EXPORT:
+					disabled = not workspace.can_export()
+		popup.set_item_disabled(i, disabled)
+
+
 func _on_workspace_pressed(workspace_id: StringName) -> void:
+	var from := _location_snapshot()
 	set_active_workspace(workspace_id)
+	_record_nav_departure(from)
 
 
+# Direct calls bypass the Back/Forward history (tools, tests, the restore path
+# itself); user navigation records through _on_workspace_pressed and
+# open_in_workspace.
 func set_active_workspace(workspace_id: StringName) -> void:
 	if workspace_id == &"environment":
 		_set_environment_popup_visible(true)
@@ -510,12 +702,13 @@ func get_active_workspace_id() -> StringName:
 func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Error:
 	_ensure_workspaces()
 	var workspace_id := _workspace_id_for_resource_kind(kind)
-	if workspace_id == &"":
+	if workspace_id == -1:
 		return ERR_UNAVAILABLE
 	var workspace := _workspace_for_id(workspace_id)
 	var clean_path := path.strip_edges()
 	if clean_path.is_empty():
 		return ERR_INVALID_PARAMETER
+	var from := _location_snapshot()
 	if clean_path != String(workspace.get_current_resource_path()):
 		var err: Error = workspace.open_file(clean_path)
 		if err != OK:
@@ -526,6 +719,8 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 	else:
 		_refresh_workspace_surface()
 		sync_from_editor_state()
+	# A focus miss below still navigated, so the departure records either way.
+	_record_nav_departure(from)
 	if not focus.is_empty():
 		var focus_err: Error = workspace.focus_reference(focus)
 		if focus_err != OK:
@@ -537,17 +732,23 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 	return OK
 
 
-# The registry id of the workspace declaring `kind` as its open-resource kind
-# (&"" when no workspace does). Covers the popup workspace too, so jumps can
-# target Environment.
+# The registry id of the workspace declaring `kind` as one of its open-resource
+# kinds (-1 when no workspace does). Covers the popup workspace too, so jumps
+# can target Environment. A workspace can claim multiple kinds via
+# get_open_resource_kinds() (Menus claims both "menu" and "menu_style" since the
+# stylesheet merged in).
 func _workspace_id_for_resource_kind(kind: String) -> StringName:
 	if kind.is_empty():
-		return &""
+		return -1
 	for def in WorkspaceRegistry.get_all_workspaces():
+		var def := def_v as WorkspaceDef
 		var workspace := _workspace_for_id(def.id)
-		if workspace != null and String(workspace.get_open_resource_kind()) == kind:
-			return def.id
-	return &""
+		if workspace == null:
+			continue
+		for claimed in workspace.get_open_resource_kinds():
+			if String(claimed) == kind:
+				return def.id
+	return -1
 
 
 # _get_workspace covers the main-rail workspaces; popup workspaces live outside
@@ -557,15 +758,229 @@ func _workspace_for_id(workspace_id: StringName) -> EditorWorkspace:
 	if workspace != null:
 		return workspace
 	for def in WorkspaceRegistry.get_all_workspaces():
+		var def := def_v as WorkspaceDef
 		if def.id == workspace_id and def.popup:
 			return _environment_workspace
 	return null
 
+
+# Cross-jump used by the Credits and Menus workspaces' font references. Fonts open
+# by NAME, so resolution stays on the Fonts workspace (resolve_font_file); the open
+# itself rides open_in_workspace.
+func open_font_workspace(font_name: String) -> Error:
+	_ensure_workspaces()
+	var workspace := _get_workspace(Workspace.FONTS)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var clean_name := font_name.strip_edges()
+	if clean_name.is_empty():
+		return ERR_INVALID_PARAMETER
+	var path := String(workspace.call("resolve_font_file", clean_name))
+	if path.is_empty():
+		show_status_message("Font not found: %s" % clean_name, 5.0)
+		return ERR_DOES_NOT_EXIST
+	var err := open_in_workspace("font", path)
+	if err != OK:
+		return err
+	show_status_message("Opened font %s." % clean_name, 3.0)
+	return OK
+
+
+# Cross-jump used by the Menus workspace's "Edit in Strings": open the menu's resolved
+# text table in the Strings workspace and focus the given key. table_path is an
+# absolute path (already resolved by the caller).
+func open_strings_workspace(table_path: String, key: String) -> Error:
+	var err := open_in_workspace("strings", table_path, {"key": key})
+	if err != OK:
+		return err
+	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
+	return OK
+
+
+# Cross-jump used by the Menus workspace's cross-file ACTION rows. Resolve a
+# .mnu name/path against the configured resource root, open it in Menus, then
+# focus the target screen when supplied.
+func open_menu_workspace(file: String, screen: String = "") -> Error:
+	var path := _resolve_menu_action_path(file)
+	if path.is_empty():
+		show_status_message("Menu not found: %s" % file.strip_edges(), 5.0)
+		return ERR_FILE_NOT_FOUND
+	var target := screen.strip_edges()
+	var err := open_in_workspace("menu", path, {"screen": target} if not target.is_empty() else {})
+	if err != OK:
+		return err
+	show_status_message("Opened menu %s%s." % [
+		path.get_file(),
+		" -> %s" % target if not target.is_empty() else "",
+	], 3.0)
+	return OK
+
+
+# --- Global navigation history (Back/Forward) --------------------------------
+
+# Where the user is right now, as a history entry: the active workspace and its
+# open document ("" when none). Captured lazily at departure, so everything
+# beyond the path (selection, tabs, camera) keeps living in the persistent
+# workspace instance itself.
+func _location_snapshot() -> Dictionary:
+	var workspace := _get_active_workspace()
+	var path := String(workspace.get_current_resource_path()) if workspace != null else ""
+	return {"workspace_id": _active_workspace_id, "path": path}
+
+
+# Record `from` if the navigation that just ran actually moved the user.
+# Same-location jumps (focus-only, failed opens, the Environment popup) leave
+# the location unchanged and record nothing.
+func _record_nav_departure(from: Dictionary) -> void:
+	if EditorNavHistory.same(from, _location_snapshot()):
+		return
+	_nav_history.record(from)
+	_refresh_nav_buttons()
+
+
+func go_back() -> void:
+	if _any_workspace_busy() or not _nav_history.can_go_back():
+		return
+	var current := _location_snapshot()
+	var entry := _nav_history.peek_back()
+	if _navigate_to(entry) == OK:
+		_nav_history.commit_back(current)
+	else:
+		_nav_history.drop_back()
+		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 5.0)
+	_refresh_nav_buttons()
+
+
+func go_forward() -> void:
+	if _any_workspace_busy() or not _nav_history.can_go_forward():
+		return
+	var current := _location_snapshot()
+	var entry := _nav_history.peek_forward()
+	if _navigate_to(entry) == OK:
+		_nav_history.commit_forward(current)
+	else:
+		_nav_history.drop_forward()
+		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 5.0)
+	_refresh_nav_buttons()
+
+
+# Restore a history entry: reopen its document if it changed, then switch
+# workspaces. Resolves through _get_workspace (never _workspace_for_id) so a
+# corrupt entry cannot route to the Environment popup. Mirrors
+# open_in_workspace's same-path skip, so returning to a still-open document
+# keeps selection, tabs, and undo intact — and a failed reopen returns before
+# any workspace switch, leaving the user where they were.
+func _navigate_to(entry: Dictionary) -> Error:
+	var workspace_id := int(entry.get("workspace_id", -1))
+	var workspace := _get_workspace(workspace_id)
+	if workspace == null:
+		return ERR_UNAVAILABLE
+	var entry_path := String(entry.get("path", ""))
+	if not entry_path.is_empty() and entry_path != String(workspace.get_current_resource_path()):
+		var err: Error = workspace.open_file(entry_path)
+		if err != OK:
+			return err
+	if _active_workspace_id != workspace_id:
+		set_active_workspace(workspace_id)
+	else:
+		_refresh_workspace_surface()
+		sync_from_editor_state()
+	return OK
+
+
+func _refresh_nav_buttons() -> void:
+	var busy := _any_workspace_busy()
+	if _nav_back_button != null:
+		_nav_back_button.disabled = busy or not _nav_history.can_go_back()
+		_nav_back_button.tooltip_text = _nav_tooltip("Back", _nav_history.peek_back())
+	if _nav_forward_button != null:
+		_nav_forward_button.disabled = busy or not _nav_history.can_go_forward()
+		_nav_forward_button.tooltip_text = _nav_tooltip("Forward", _nav_history.peek_forward())
+
+
+func _nav_tooltip(verb: String, entry: Dictionary) -> String:
+	if entry.is_empty():
+		return verb
+	var workspace := _get_workspace(int(entry.get("workspace_id", -1)))
+	var label := String(workspace.get_workspace_label()) if workspace != null else ""
+	if label.is_empty():
+		return verb
+	var file := String(entry.get("path", "")).get_file()
+	if file.is_empty():
+		return "%s to %s" % [verb, label]
+	return "%s to %s (%s)" % [verb, label, file]
+
+
+# Re-index the resource folder (the browser pane consumes this as an injected
+# callable; workspaces that CREATE files under the root call it so the lazy
+# VFS name index picks them up without a remount).
+func rescan_resource_root() -> Error:
+	return _scan_resource_root(false)
+
+
+func _resolve_menu_action_path(file: String) -> String:
+	var clean := file.strip_edges().replace("\\", "/")
+	if clean.is_empty():
+		return ""
+	var candidates := _menu_action_path_candidates(clean)
+	for candidate_value in candidates:
+		var candidate := String(candidate_value)
+		if FileAccess.file_exists(candidate):
+			return candidate
+	var root := _resource_library.get_root_dir()
+	if not root.is_empty():
+		for candidate_value in candidates:
+			var candidate := String(candidate_value)
+			var direct := root.path_join(candidate)
+			if FileAccess.file_exists(direct):
+				return direct
+			var basename := root.path_join(candidate.get_file())
+			if FileAccess.file_exists(basename):
+				return basename
+	var index := _resource_library.get_index()
+	if _resource_library.get_root_dir().is_empty():
+		return ""
+	if index.get_root_dir().is_empty():
+		_scan_resource_root(false)
+	for entry_value in index.get_resource_files("menu"):
+		var entry := entry_value as Dictionary
+		var rel := String(entry.get("relative_path", "")).replace("\\", "/")
+		var logical := String(entry.get("logical_name", "")).replace("\\", "/")
+		for candidate_value in candidates:
+			var candidate := String(candidate_value)
+			var want := candidate.to_lower()
+			var want_file := candidate.get_file().to_lower()
+			if rel.to_lower() == want or rel.get_file().to_lower() == want_file \
+					or logical.to_lower() == want or logical.get_file().to_lower() == want_file:
+				var path := String(entry.get("path", ""))
+				if not path.is_empty():
+					return path
+	return ""
+
+
+func _menu_action_path_candidates(clean: String) -> Array:
+	var candidates := [clean]
+	var file_name := clean.get_file()
+	if file_name.is_empty() or file_name.begins_with("jo_"):
+		return candidates
+	var jo_name := "jo_%s" % file_name
+	var dir := clean.get_base_dir()
+	if not dir.is_empty():
+		var jo_relative := dir.path_join(jo_name)
+		if not candidates.has(jo_relative):
+			candidates.append(jo_relative)
+	if not candidates.has(jo_name):
+		candidates.append(jo_name)
+	return candidates
+
+
 func _get_workspace(workspace_id: StringName) -> EditorWorkspace:
 	return _workspaces.get(workspace_id) as EditorWorkspace
 
+
 func _get_active_workspace() -> EditorWorkspace:
 	return _get_workspace(_active_workspace_id)
+
 
 func _mount_active_workspace_viewport() -> void:
 	if _viewport_host == null:
@@ -573,7 +988,7 @@ func _mount_active_workspace_viewport() -> void:
 	_clear_viewport_host()
 	var workspace := _get_active_workspace()
 	if workspace == null:
-		_mounted_workspace_id = -1
+		_mounted_workspace_id = &""
 		return
 	workspace.mount_viewport(_viewport_host)
 	_mounted_workspace_id = _active_workspace_id
@@ -617,10 +1032,7 @@ func _refresh_workspace_buttons() -> void:
 		var btn: Button = _workspace_buttons[workspace_id]
 		btn.set_pressed_no_signal(workspace_id == _active_workspace_id)
 		btn.disabled = busy
-	# Popup rows never become _active_workspace_id; their pressed state is driven
-	# by popup visibility in _set_environment_popup_visible, so only sync busy here.
-	for workspace_id in _popup_workspace_buttons:
-		(_popup_workspace_buttons[workspace_id] as Button).disabled = busy
+	_refresh_nav_buttons()
 
 
 func _refresh_workspace_surface() -> void:
@@ -642,12 +1054,122 @@ func _refresh_workspace_surface() -> void:
 		_refresh_workflow_from_workspace()
 	else:
 		_show_workspace_inspector(workspace)
+	_rebuild_document_tabs()
 	_refresh_workspace_buttons()
-	_refresh_workspace_scroll_affordance.call_deferred()
+
+
+# --- Document tabs (multi-document workspaces) -----------------------------
+# One strip above the viewport, hidden unless the active workspace opts into
+# the document-tab tier. Rebuilds are signal-driven: documents_changed for the
+# active workspace, plus the workspace-switch surface refresh.
+
+func _on_workspace_documents_changed(workspace_id: StringName) -> void:
+	if workspace_id == _active_workspace_id:
+		_rebuild_document_tabs()
+
+
+func _rebuild_document_tabs() -> void:
+	if _document_tab_row == null:
+		return
+	# queue_free, not free: a rebuild is usually triggered FROM a tab/close
+	# button's own pressed emission, and freeing the emitting button is an error
+	# (locked object). Detach immediately so the new row builds clean.
+	for child in _document_tab_row.get_children():
+		_document_tab_row.remove_child(child)
+		child.queue_free()
+	var workspace := _get_active_workspace()
+	if workspace == null or not workspace.supports_document_tabs():
+		_document_tab_strip.visible = false
+		return
+	var tabs: Array = workspace.get_document_tabs()
+	var active := workspace.get_active_document_index()
+	var active_style := _make_workspace_active_stylebox()
+	for i in tabs.size():
+		var tab: Dictionary = tabs[i]
+		var label := String(tab.get("label", "Untitled"))
+		var btn := Button.new()
+		btn.name = "DocumentTab%d" % i
+		btn.toggle_mode = true
+		btn.text = label + ("*" if bool(tab.get("dirty", false)) else "")
+		btn.tooltip_text = String(tab.get("tooltip", label))
+		btn.clip_text = true
+		btn.custom_minimum_size = Vector2(96, 28)
+		btn.focus_mode = Control.FOCUS_NONE
+		if i == active:
+			btn.add_theme_stylebox_override("normal", active_style)
+			btn.set_pressed_no_signal(true)
+		btn.pressed.connect(_on_document_tab_pressed.bind(i))
+		_document_tab_row.add_child(btn)
+		var close := Button.new()
+		close.name = "DocumentTabClose%d" % i
+		close.text = PopoverPanel.CLOSE_GLYPH
+		close.tooltip_text = "Close %s" % label
+		close.custom_minimum_size = Vector2(24, 28)
+		close.focus_mode = Control.FOCUS_NONE
+		close.pressed.connect(_on_document_tab_close_pressed.bind(i))
+		_document_tab_row.add_child(close)
+	_document_tab_strip.visible = not tabs.is_empty()
+
+
+func _on_document_tab_pressed(index: int) -> void:
+	var workspace := _get_active_workspace()
+	if workspace == null:
+		return
+	if index == workspace.get_active_document_index():
+		# Re-pressing the active tab must not untoggle it visually.
+		_rebuild_document_tabs()
+		return
+	workspace.activate_document(index)
+	sync_from_editor_state()
+
+
+func _on_document_tab_close_pressed(index: int) -> void:
+	var workspace := _get_active_workspace()
+	if workspace == null:
+		return
+	var tabs: Array = workspace.get_document_tabs()
+	if index < 0 or index >= tabs.size():
+		return
+	if not bool((tabs[index] as Dictionary).get("dirty", false)):
+		workspace.close_document(index)
+		sync_from_editor_state()
+		return
+	# Activate first so the user sees what is at stake — and so the close target
+	# stays well-defined across the async prompt/save-as: every follow-up acts on
+	# the ACTIVE document, immune to index shifts.
+	workspace.activate_document(index)
+	_rebuild_document_tabs()
+	prompt_unsaved_for(
+		func() -> void: _save_then_close_active_document(workspace),
+		func() -> void: _close_active_document(workspace))
+
+
+func _close_active_document(workspace: EditorWorkspace) -> void:
+	var idx := workspace.get_active_document_index()
+	if idx >= 0:
+		workspace.close_document(idx)
+	sync_from_editor_state()
+
+
+func _save_then_close_active_document(workspace: EditorWorkspace) -> void:
+	var err := workspace.save_current()
+	if err == OK:
+		_close_active_document(workspace)
+		return
+	if err == ERR_INVALID_PARAMETER:
+		# No path yet: route through Save As; close only on success.
+		_open_dir_dialog(workspace.get_save_dialog_title(), func(dir_path: String) -> void:
+			if workspace.save_as(dir_path) == OK:
+				_close_active_document(workspace)
+			else:
+				show_status_message("Save failed — keeping the tab open.", 6.0),
+			_preferred_save_dir(workspace))
+		return
+	show_status_message("Save failed (error %d) — keeping the tab open." % err, 6.0)
 
 
 func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
-	if _asset_dock_workspace_id != &"" and _asset_dock_workspace_id != _active_workspace_id:
+	if _asset_dock_workspace_id != -1 and _asset_dock_workspace_id != _active_workspace_id:
 		var old_workspace := _get_workspace(_asset_dock_workspace_id)
 		if old_workspace != null:
 			old_workspace.set_asset_dock(null)
@@ -660,10 +1182,12 @@ func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
 		_clear_asset_dock_children()
 		_asset_dock.visible = false
 		_asset_dock_workspace_id = &""
+		_sync_right_split_visibility()
 		return
 	_asset_dock.visible = true
 	workspace.set_asset_dock(_asset_dock)
 	_asset_dock_workspace_id = _active_workspace_id
+	_sync_right_split_visibility()
 
 
 func _clear_asset_dock_children() -> void:
@@ -682,20 +1206,88 @@ func _show_workspace_inspector(workspace: EditorWorkspace) -> void:
 		workspace.build_inspector(_inspector_host)
 		if _inspector_host.get_child_count() > 0:
 			return
-	var label := Label.new()
-	var workspace_label := "Workspace"
-	var context := "This workspace is not implemented yet."
+	# Fallback for a workspace with no inspector content: a clean call-to-action
+	# (icon + guidance + its own New/Open + quick-open) instead of a bare line.
+	var message := "This workspace is not available yet."
+	var icon_id := &""
 	if workspace != null:
-		workspace_label = workspace.get_workspace_label()
-		context = workspace.get_status_context()
-	label.text = "%s workspace\n%s" % [workspace_label, context]
+		var context := workspace.get_status_context()
+		message = context if not context.is_empty() else "Nothing is open here yet."
+		var def := _def_for_id(_active_workspace_id)
+		if def != null:
+			icon_id = def.icon_id
+	_build_empty_state_panel(_inspector_host, message, icon_id)
+
+
+# A centered call-to-action for an empty inspector: the workspace icon, a one-line
+# message, and the workspace's own New/Open actions plus quick-open. The buttons
+# route through the same handlers as the top-bar toolbar, so behavior is identical.
+func _build_empty_state_panel(host: Control, message: String, icon_id: StringName) -> void:
+	var panel := VBoxContainer.new()
+	panel.name = "EmptyStatePanel"
+	panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	panel.add_theme_constant_override("separation", 14)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host.add_child(panel)
+
+	var icon_tex := EditorIconLibrary.resolve(icon_id)
+	if icon_tex != null:
+		var icon := TextureRect.new()
+		icon.name = "EmptyStateIcon"
+		icon.texture = icon_tex
+		icon.custom_minimum_size = Vector2(32, 32)
+		icon.expand_mode = TextureRect.EXPAND_KEEP_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		panel.add_child(icon)
+
+	var label := Label.new()
+	label.name = "EmptyStateMessage"
+	label.text = message
 	label.theme_type_variation = &"Muted"
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_inspector_host.add_child(label)
+	panel.add_child(label)
+
+	var actions := HBoxContainer.new()
+	actions.name = "EmptyStateActions"
+	actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	actions.add_theme_constant_override("separation", 8)
+	panel.add_child(actions)
+	var workspace := _get_active_workspace()
+	if workspace != null:
+		for action_def in _action_defs_for_workspace(workspace):
+			var action_id := int(action_def["id"])
+			if action_id != WorkspaceAction.NEW and action_id != WorkspaceAction.OPEN:
+				continue
+			if not bool(action_def["visible"]):
+				continue
+			var btn := Button.new()
+			btn.name = "EmptyState" + _workspace_action_button_name(action_id)
+			btn.text = String(action_def["label"])
+			btn.icon = EditorIconLibrary.resolve(_workspace_action_icon_id(action_id))
+			btn.focus_mode = Control.FOCUS_NONE
+			btn.custom_minimum_size = Vector2(0, 34)
+			btn.pressed.connect(_on_workspace_action_pressed.bind(action_id))
+			actions.add_child(btn)
+	var browse := Button.new()
+	browse.name = "EmptyStateBrowseButton"
+	browse.text = "Browse Resources"
+	browse.icon = EditorIconLibrary.resolve(&"browser")
+	browse.focus_mode = Control.FOCUS_NONE
+	browse.custom_minimum_size = Vector2(0, 34)
+	browse.pressed.connect(focus_browser_pane)
+	actions.add_child(browse)
+
+
+func _def_for_id(workspace_id: int) -> WorkspaceDef:
+	for def in WorkspaceRegistry.get_all_workspaces():
+		var def := def_v as WorkspaceDef
+		if def.id == workspace_id:
+			return def
+	return null
 
 
 func _wire_tile_gizmo() -> void:
@@ -744,13 +1336,113 @@ func _save_split_layout() -> void:
 	_resource_library.save_layout_state(_body_row.split_offset, _center_right_split.split_offset)
 
 
+# The Resource Browser pane is a DOCK, not a popover: it never joins the
+# camera/environment/settings mutual exclusion or the Escape handler, and its
+# visibility + split width persist across sessions.
+func _wire_browser_pane() -> void:
+	if _browser_toggle_button != null:
+		_browser_toggle_button.icon = EditorIconLibrary.resolve(&"browser")
+		_browser_toggle_button.toggled.connect(_set_browser_pane_visible)
+	if _right_split != null and not _right_split.drag_ended.is_connected(_save_browser_state):
+		_right_split.drag_ended.connect(_save_browser_state)
+	# Startup restore is a read-only apply (mirrors _apply_split_layout): test
+	# instantiations must never persist a layout they did not change.
+	var state := _resource_library.load_browser_state()
+	if _right_split != null and bool(state["has_split"]):
+		_right_split.split_offset = int(state["split"])
+	if bool(state["visible"]) and _browser_pane_host != null:
+		_ensure_browser_pane()
+		_browser_pane_host.visible = true
+		if _browser_toggle_button != null:
+			_browser_toggle_button.set_pressed_no_signal(true)
+		# Refresh now only when no root is configured (nothing will scan later);
+		# with a root, _ready's scan fills the pane through _refresh_browser_pane
+		# - an eager refresh here would lazy-scan and double the startup index walk.
+		if _resource_library.get_root_dir().is_empty():
+			_browser_pane.refresh()
+	_sync_right_split_visibility()
+
+
+func _ensure_browser_pane() -> void:
+	if _browser_pane != null and is_instance_valid(_browser_pane):
+		return
+	_browser_pane = ResourceBrowserPane.new()
+	_browser_pane.name = "ResourceBrowserPane"
+	# Capabilities only - the pane's double-click rides the same cross-jump
+	# spine as the link widgets (open_in_workspace), never a private open path.
+	_browser_pane.setup(
+		func() -> RefCounted: return _resource_library.get_index(),
+		func() -> String: return _resource_library.get_root_dir(),
+		func() -> void: _scan_resource_root(false),
+		_current_resource_path_for_browser,
+		func(kind: String, path: String) -> void: open_in_workspace(kind, path)
+	)
+	_browser_pane_host.add_child(_browser_pane)
+
+
+func _set_browser_pane_visible(active: bool) -> void:
+	if _browser_pane_host == null:
+		return
+	if active:
+		_ensure_browser_pane()
+	_browser_pane_host.visible = active
+	if _browser_toggle_button != null:
+		_browser_toggle_button.set_pressed_no_signal(active)
+	_sync_right_split_visibility()
+	if active and _browser_pane != null:
+		_browser_pane.refresh()
+	_save_browser_state()
+
+
+# Quick-open: reveal the resource browser pane and focus its search box (Ctrl+P,
+# and the empty-state "Browse resources" button). The table's focus_search()
+# defers the grab, so calling it right after the pane is shown is safe.
+func focus_browser_pane() -> void:
+	_set_browser_pane_visible(true)
+	if _browser_pane != null and is_instance_valid(_browser_pane):
+		_browser_pane.table.focus_search()
+
+
+# With both children hidden, RightSplit itself hides so dockless workspaces
+# keep the pre-pane behavior: no live divider, and the persisted right offset
+# stays inert (CenterRightSplit sees one visible child).
+func _sync_right_split_visibility() -> void:
+	if _right_split == null:
+		return
+	_right_split.visible = (_asset_dock != null and _asset_dock.visible) \
+			or (_browser_pane_host != null and _browser_pane_host.visible)
+
+
+func _save_browser_state() -> void:
+	if _browser_pane_host == null or _right_split == null:
+		return
+	_resource_library.save_browser_state(_browser_pane_host.visible, _right_split.split_offset)
+
+
+# Keep a visible pane truthful after the root changes or a rescan.
+func _refresh_browser_pane() -> void:
+	if _browser_pane != null and is_instance_valid(_browser_pane) \
+			and _browser_pane_host != null and _browser_pane_host.visible:
+		_browser_pane.refresh()
+
+
 func _wire_camera_popup() -> void:
 	if _camera_popup != null:
 		_camera_popup.visible = false
 		_camera_popup.apply_anchor(320.0)
 		_camera_popup.bind_close(_camera_popup_close)
+		_camera_popup.bind_detach(_camera_popup_detach)
 		if not _camera_popup.close_requested.is_connected(_on_camera_popup_close_pressed):
 			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
+		if not _camera_popup.detach_requested.is_connected(_detach_camera_panel):
+			_camera_popup.detach_requested.connect(_detach_camera_panel)
+	if _camera_panel_host == null and _camera_popup_content != null:
+		_camera_panel_host = DetachablePanelHost.new(&"camera", "Camera", Vector2i(344, 320))
+		_camera_panel_host.setup(_camera_popup_content, self, _save_camera_panel_state)
+		_camera_panel_host.floating_changed.connect(_on_camera_floating_changed)
+		# Read-only startup apply: remember the preference, never spawn windows
+		# at launch (the floating preference applies on the next open).
+		_panel_restore["camera"] = _resource_library.load_panel_state("camera")
 	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
 		_camera_toggle_button.icon = EditorIconLibrary.resolve(&"camera")
 		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
@@ -762,12 +1454,76 @@ func _wire_environment_popup() -> void:
 		_environment_popup.visible = false
 		_environment_popup.apply_anchor(400.0)
 		_environment_popup.bind_close(_environment_popup_close)
+		_environment_popup.bind_detach(_environment_popup_detach)
 		if not _environment_popup.close_requested.is_connected(_on_environment_popup_close_pressed):
 			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
+		if not _environment_popup.detach_requested.is_connected(_detach_environment_panel):
+			_environment_popup.detach_requested.connect(_detach_environment_panel)
+	if _environment_panel_host == null and _environment_popup_content != null:
+		_environment_panel_host = DetachablePanelHost.new(&"environment", "Environment", Vector2i(424, 480))
+		_environment_panel_host.setup(_environment_popup_content, self, _save_environment_panel_state)
+		_environment_panel_host.floating_changed.connect(_on_environment_floating_changed)
+		_panel_restore["environment"] = _resource_library.load_panel_state("environment")
 	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
 		_environment_toggle_button.icon = EditorIconLibrary.resolve(&"environment")
 		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
 	_refresh_environment_popup_state()
+
+
+# --- Detachable panels (B6) ---
+
+func _save_camera_panel_state(docked: bool, rect: Rect2i) -> void:
+	_panel_restore["camera"] = {"docked": docked, "has_rect": true, "rect": rect}
+	_resource_library.save_panel_state("camera", docked, rect)
+
+
+func _save_environment_panel_state(docked: bool, rect: Rect2i) -> void:
+	_panel_restore["environment"] = {"docked": docked, "has_rect": true, "rect": rect}
+	_resource_library.save_panel_state("environment", docked, rect)
+
+
+func _panel_restore_for(panel_id: String) -> Dictionary:
+	return _panel_restore.get(panel_id, {"docked": true, "has_rect": false, "rect": Rect2i()})
+
+
+# The window opens where it was last seen (clamped to a visible screen at
+# apply time); first detach derives a rect from where the popover sits.
+func _panel_detach_rect(panel_id: String, popover: PopoverPanel) -> Rect2i:
+	var restore := _panel_restore_for(panel_id)
+	if bool(restore.get("has_rect", false)):
+		return restore.get("rect", Rect2i()) as Rect2i
+	return DetachablePanelHost.screen_rect_for(popover)
+
+
+func _detach_camera_panel() -> void:
+	if _camera_panel_host == null or _camera_panel_host.is_floating():
+		return
+	# Content must exist before it floats (the popover may never have opened).
+	_ensure_camera_popup_content()
+	_camera_panel_host.detach(_panel_detach_rect("camera", _camera_popup))
+	if _camera_popup != null:
+		_camera_popup.close()
+	_refresh_camera_popup_state()
+
+
+func _detach_environment_panel() -> void:
+	if _environment_panel_host == null or _environment_panel_host.is_floating():
+		return
+	_ensure_environment_popup_content()
+	_environment_panel_host.detach(_panel_detach_rect("environment", _environment_popup))
+	if _environment_popup != null:
+		_environment_popup.close()
+	_refresh_environment_popup_state()
+
+
+func _on_camera_floating_changed(floating: bool) -> void:
+	if _camera_toggle_button != null:
+		_camera_toggle_button.set_pressed_no_signal(floating)
+
+
+func _on_environment_floating_changed(floating: bool) -> void:
+	if _environment_toggle_button != null:
+		_environment_toggle_button.set_pressed_no_signal(floating)
 
 
 func _wire_settings_popup() -> void:
@@ -804,6 +1560,19 @@ func _on_settings_pff_tool_pressed() -> void:
 	_pff_tool.open(_preferred_resource_root_dir())
 
 
+func _on_pff_extracted(dir: String) -> void:
+	# The quick-open index is only built at startup/root-change, so files extracted
+	# into the configured resource root would stay invisible until a restart. Rescan
+	# for the user. Exact-root match only: the loose scan is top-level-only by design,
+	# so a subfolder extraction would not be picked up by a rescan anyway.
+	var root := _resource_library.get_root_dir()
+	if root.is_empty():
+		return
+	if _resource_library.canonical_key(dir) != _resource_library.canonical_key(root):
+		return
+	_scan_resource_root(false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey
@@ -822,6 +1591,39 @@ func _unhandled_input(event: InputEvent) -> void:
 			if _settings_popup != null and _settings_popup.visible:
 				_set_settings_popup_visible(false)
 				get_viewport().set_input_as_handled()
+		# Ctrl+1..9 jump to the Nth workspace dock button; Ctrl+P opens quick-open.
+		# Routed through _on_workspace_pressed so the jump records Back/Forward
+		# history exactly like a click. An editor that consumes Ctrl+digit itself
+		# (none today) would shadow this, since descendants see input first.
+		elif key.pressed and not key.is_echo() and key.ctrl_pressed \
+				and not key.alt_pressed and not key.shift_pressed:
+			if key.keycode >= KEY_1 and key.keycode <= KEY_9:
+				var workspace_id := _workspace_id_at_bar_index(key.keycode - KEY_1)
+				if workspace_id >= 0:
+					_on_workspace_pressed(workspace_id)
+					get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_P:
+				focus_browser_pane()
+				get_viewport().set_input_as_handled()
+		# Global Back/Forward. A workspace-local navigation that uses the same
+		# gestures wins while its view is on screen (Music's canvas nav,
+		# live_mode.gd) — descendants see unhandled input first.
+		elif key.pressed and not key.is_echo() and key.alt_pressed:
+			if key.keycode == KEY_LEFT:
+				go_back()
+				get_viewport().set_input_as_handled()
+			elif key.keycode == KEY_RIGHT:
+				go_forward()
+				get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton:
+		var mouse := event as InputEventMouseButton
+		if mouse.pressed:
+			if mouse.button_index == MOUSE_BUTTON_XBUTTON1:
+				go_back()
+				get_viewport().set_input_as_handled()
+			elif mouse.button_index == MOUSE_BUTTON_XBUTTON2:
+				go_forward()
+				get_viewport().set_input_as_handled()
 
 
 func _on_camera_toggle_toggled(pressed: bool) -> void:
@@ -835,8 +1637,22 @@ func _on_camera_popup_close_pressed() -> void:
 func _set_camera_popup_visible(active: bool) -> void:
 	if _camera_popup == null:
 		return
+	# A floating panel is not a popover: the toggle raises its window, and the
+	# siblings' mutual-exclusion calls (active=false) must leave it alone.
+	if _camera_panel_host != null and _camera_panel_host.is_floating():
+		if active:
+			_ensure_camera_popup_content()
+			_camera_panel_host.focus_window()
+		if _camera_toggle_button != null:
+			_camera_toggle_button.set_pressed_no_signal(true)
+		return
 	if active and _get_editor_camera() == null:
 		active = false
+	# The remembered floating preference applies on open, never at launch.
+	if active and _camera_panel_host != null \
+			and not bool(_panel_restore_for("camera").get("docked", true)):
+		_detach_camera_panel()
+		return
 	if active:
 		_set_environment_popup_visible(false)
 		_set_settings_popup_visible(false)
@@ -865,13 +1681,23 @@ func _sync_camera_popup_editor() -> void:
 
 func _refresh_camera_popup_state() -> void:
 	var has_camera := _get_editor_camera() != null
+	var floating := _camera_panel_host != null and _camera_panel_host.is_floating()
+	# A floating camera panel whose camera disappeared re-docks (mirrors the
+	# docked popover's force-close below). persist=false: a transient
+	# camera-null (editor rebind) must not overwrite the user's floating
+	# preference - the next open with a camera floats again.
+	if floating and not has_camera:
+		_camera_panel_host.redock(false)
+		floating = false
 	if _camera_toggle_button != null:
 		_camera_toggle_button.disabled = not has_camera
 		if not has_camera:
 			_camera_toggle_button.set_pressed_no_signal(false)
+		elif floating:
+			_camera_toggle_button.set_pressed_no_signal(true)
 	if _camera_popup != null and _camera_popup.visible and not has_camera:
 		_camera_popup.visible = false
-	if _camera_popup != null and _camera_popup.visible:
+	if (_camera_popup != null and _camera_popup.visible) or floating:
 		_ensure_camera_popup_content()
 		if _camera_settings_panel != null and _camera_settings_panel.has_method("sync_from_editor_state"):
 			_camera_settings_panel.sync_from_editor_state()
@@ -909,15 +1735,26 @@ func show_environment_dialog() -> void:
 func _set_environment_popup_visible(active: bool) -> void:
 	if _environment_popup == null:
 		return
+	# A floating panel is not a popover: the toggle raises its window, and the
+	# siblings' mutual-exclusion calls (active=false) must leave it alone.
+	if _environment_panel_host != null and _environment_panel_host.is_floating():
+		if active:
+			_ensure_environment_popup_content()
+			_environment_panel_host.focus_window()
+		if _environment_toggle_button != null:
+			_environment_toggle_button.set_pressed_no_signal(true)
+		return
+	# The remembered floating preference applies on open, never at launch.
+	if active and _environment_panel_host != null \
+			and not bool(_panel_restore_for("environment").get("docked", true)):
+		_detach_environment_panel()
+		return
 	if active:
 		_set_camera_popup_visible(false)
 		_set_settings_popup_visible(false)
 	_environment_popup.visible = active
 	if _environment_toggle_button != null:
 		_environment_toggle_button.set_pressed_no_signal(active)
-	# Keep the Environment nav row in sync with the in-viewport sun toggle.
-	if _popup_workspace_buttons.has(&"environment"):
-		(_popup_workspace_buttons[&"environment"] as Button).set_pressed_no_signal(active)
 	if active:
 		_ensure_environment_popup_content()
 	_refresh_environment_popup_state()
@@ -952,8 +1789,12 @@ func _ensure_environment_popup_content() -> void:
 
 
 func _refresh_environment_popup_state() -> void:
+	var title := _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
 	if _environment_popup_title != null:
-		_environment_popup_title.text = _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
+		_environment_popup_title.text = title
+	if _environment_panel_host != null and _environment_panel_host.is_floating():
+		# The dirty "*" reaches the floating window through its OS title.
+		_environment_panel_host.set_window_title("Environment — %s" % title)
 	_refresh_action_buttons_state(_environment_workspace, _environment_action_buttons)
 
 
@@ -1131,6 +1972,7 @@ func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
 	var result := _resource_library.set_root_dir(path, persist, scan)
 	_show_resource_status(result)
 	_sync_settings_popup_state()
+	_refresh_browser_pane()
 	return int(result["err"])
 
 
@@ -1142,6 +1984,7 @@ func _scan_resource_root(show_message: bool) -> Error:
 	if show_message:
 		_show_resource_status(result)
 	_sync_settings_popup_state()
+	_refresh_browser_pane()
 	return int(result["err"])
 
 
@@ -1239,13 +2082,31 @@ func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable
 	_resource_browser.open_files(title, files, on_pick)
 
 
+## Open the indexed resource picker over every resource of `kind`. The browse
+## affordance behind link widgets (ResourceRefWidget.services_from_shell);
+## `on_pick` receives the chosen resource's path.
+func open_kind_picker(kind: String, title: String, on_pick: Callable) -> void:
+	_resource_browser.open_kind(kind, title, on_pick)
+
+
+## The shared reference index over the resource root — link widgets resolve
+## their validity badges through this.
+func get_reference_index() -> NovaReferenceIndex:
+	return _resource_library.get_reference_index()
+
+
 # Resolves the active workspace's current resource path for the browser's
 # "(open)" marker; the environment popup retargets it to the environment
 # workspace. Stays on the shell (reads popup/workspace state) and is injected
 # into EditorResourceBrowser as a capability callable.
 func _current_resource_path_for_browser(kind: String) -> String:
 	var workspace := _get_active_workspace()
-	if _environment_popup != null and _environment_popup.visible and kind == "environment":
+	# The environment panel counts as open whether docked OR floating - the
+	# popover hides while the content floats, but its document is still the
+	# one the "(open)" marker should follow.
+	var environment_open := (_environment_popup != null and _environment_popup.visible) \
+			or (_environment_panel_host != null and _environment_panel_host.is_floating())
+	if environment_open and kind == "environment":
 		workspace = _environment_workspace
 	if workspace != null:
 		return workspace.get_current_resource_path()
@@ -1359,6 +2220,7 @@ func _apply_busy_modulation(active: bool) -> void:
 	var alpha := 0.55 if active else 1.0
 	var color := Color(1.0, 1.0, 1.0, alpha)
 	_top_bar.modulate = color
+	_workspace_bar.modulate = color
 	_left_lane.modulate = color
 	_asset_dock.modulate = color
 	_status_bar.modulate = color
@@ -1429,12 +2291,48 @@ func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> v
 	_inspector_host.add_child(placeholder)
 
 
-func _refresh_project_label() -> void:
+# Top-bar context: the active workspace name (Heading) plus its document title
+# (Muted), and the OS window title. The doc label is suppressed when the title is
+# just the workspace name (nothing open) so the header never reads "Mission /
+# Mission"; get_project_title() already folds in the dirty "*" marker. Runs from
+# the per-frame status refresh, so the combined cache skips the work whenever
+# neither the workspace nor its title changed.
+func _refresh_context_header() -> void:
 	var workspace := _get_active_workspace()
-	if workspace == null:
-		_project_label.text = "OpenNova Terrain Editor"
+	var ws_label := "" if workspace == null else workspace.get_workspace_label()
+	var title := "OpenNova Editor" if workspace == null else workspace.get_project_title()
+	if ws_label == _context_ws_label_cache and title == _context_doc_title_cache:
 		return
-	_project_label.text = workspace.get_project_title()
+	_context_ws_label_cache = ws_label
+	_context_doc_title_cache = title
+	_context_workspace_label.text = ws_label
+	var doc_text := "" if title == ws_label else title
+	_context_doc_label.text = doc_text
+	# Size the doc label to its text instead of a fixed column: short titles stop
+	# wasting top-bar width, long ones clip at a cap so the 1024px shell still
+	# fits every group.
+	if doc_text.is_empty():
+		_context_doc_label.custom_minimum_size.x = 0.0
+	else:
+		var font := _context_doc_label.get_theme_font(&"font")
+		var font_size := _context_doc_label.get_theme_font_size(&"font_size")
+		if font != null:
+			var text_width := font.get_string_size(doc_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			_context_doc_label.custom_minimum_size.x = clampf(text_width + 8.0, 0.0, 280.0)
+	_refresh_window_title(ws_label, title)
+
+
+# Mirror the context into the OS window title, cached so it only re-sets on
+# change. Headless display servers no-op window_set_title, which is harmless.
+func _refresh_window_title(ws_label: String, title: String) -> void:
+	var window_title := "OpenNova Editor"
+	if not ws_label.is_empty():
+		var head := ws_label if title == ws_label else "%s - %s" % [ws_label, title]
+		window_title = "%s - OpenNova Editor" % head
+	if window_title == _window_title_cache:
+		return
+	_window_title_cache = window_title
+	DisplayServer.window_set_title(window_title)
 
 
 func show_status_message(text: String, duration: float = 4.0) -> void:
@@ -1460,13 +2358,16 @@ func _refresh_status() -> void:
 		_status_tool_label.theme_type_variation = &""
 
 	_status_context_label.text = workspace.get_status_context()
-	if workspace != null and workspace.shows_camera_status() and editor and editor.camera:
-		var pos: Vector3 = editor.camera.global_position
+	# The capability hook, not the legacy terrain-global editor.camera: each
+	# workspace reports its own active camera (mission's follows play mode).
+	var status_camera: Camera3D = workspace.get_viewport_camera() if workspace.shows_camera_status() else null
+	if status_camera != null:
+		var pos: Vector3 = status_camera.global_position
 		_status_camera_label.text = "%.0f, %.0f, %.0f" % [pos.x, pos.y, pos.z]
 	else:
 		_status_camera_label.text = ""
 	_status_fps_label.text = "%d fps" % Engine.get_frames_per_second()
-	_refresh_project_label()
+	_refresh_context_header()
 
 
 func _refresh_tile_gizmo() -> void:
@@ -1474,7 +2375,7 @@ func _refresh_tile_gizmo() -> void:
 		return
 	_tile_gizmo.visible = false
 	var active_workspace := _get_active_workspace()
-	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != preload("res://modtools/editor/terrain_workspace.gd").Workflow.STAMP or not editor.has_selected_tileinfo_entry():
+	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
 		return
 
 	var camera: Camera3D = editor.get_editor_camera()
@@ -1538,9 +2439,45 @@ func _on_tile_gizmo_delete_pressed() -> void:
 
 
 func prompt_unsaved_changes(_action_name: String) -> void:
+	# Legacy entry: clears the callables so the dialog routes Save/Discard/Cancel
+	# to the terrain editor's pending-action flow (the dispatchers' fallback).
+	_unsaved_on_save = Callable()
+	_unsaved_on_discard = Callable()
+	_unsaved_on_cancel = Callable()
 	_ensure_unsaved_dialog()
 	_unsaved_dialog.popup_centered()
 	show_status_message("Save or discard your changes to continue.", 6.0)
+
+
+## Pops the shared unsaved-changes dialog with caller-supplied outcomes (e.g. a
+## document tab close: save-then-close / close / keep). Same dialog, same
+## buttons — only the routing differs from prompt_unsaved_changes.
+func prompt_unsaved_for(on_save: Callable, on_discard: Callable, on_cancel := Callable()) -> void:
+	_unsaved_on_save = on_save
+	_unsaved_on_discard = on_discard
+	_unsaved_on_cancel = on_cancel
+	_ensure_unsaved_dialog()
+	_unsaved_dialog.popup_centered()
+	show_status_message("Save or discard your changes to continue.", 6.0)
+
+
+func _take_unsaved_callable(which: StringName) -> Callable:
+	var cb := Callable()
+	match which:
+		&"save":
+			cb = _unsaved_on_save
+		&"discard":
+			cb = _unsaved_on_discard
+		&"cancel":
+			cb = _unsaved_on_cancel
+	_unsaved_on_save = Callable()
+	_unsaved_on_discard = Callable()
+	_unsaved_on_cancel = Callable()
+	return cb
+
+
+func _has_unsaved_callables() -> bool:
+	return _unsaved_on_save.is_valid() or _unsaved_on_discard.is_valid() or _unsaved_on_cancel.is_valid()
 
 
 func prompt_save_directory_for_pending_action(_action_name: String) -> void:
@@ -1564,16 +2501,31 @@ func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 
 
 func _on_prompt_save_changes() -> void:
+	if _has_unsaved_callables():
+		var cb := _take_unsaved_callable(&"save")
+		if cb.is_valid():
+			cb.call()
+		return
 	if editor:
 		editor.confirm_pending_action_save()
 
 
 func _on_prompt_discard_changes() -> void:
+	if _has_unsaved_callables():
+		var cb := _take_unsaved_callable(&"discard")
+		if cb.is_valid():
+			cb.call()
+		return
 	if editor:
 		editor.confirm_pending_action_discard()
 
 
 func _on_prompt_keep_editing() -> void:
+	if _has_unsaved_callables():
+		var cb := _take_unsaved_callable(&"cancel")
+		if cb.is_valid():
+			cb.call()
+		return
 	if editor:
 		editor.cancel_pending_action()
 
@@ -1669,7 +2621,11 @@ func _ensure_export_dialog() -> void:
 
 
 func on_export_started(_dir_path: String) -> void:
-	show_status_message("Exporting terrain...", 30.0)
+	# The workspace hook, not a hard-coded "Exporting terrain..." — any
+	# exporting workspace announces itself (the same title the progress
+	# overlay shows).
+	var workspace := _get_active_workspace()
+	show_status_message(workspace.get_export_progress_title() if workspace != null else "Exporting...", 30.0)
 	_set_export_ui_active(true)
 	_sync_export_progress()
 

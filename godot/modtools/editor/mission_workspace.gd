@@ -31,6 +31,14 @@ var _detail_host: Control
 var _play_mount: ViewportMount
 # The shell's viewport host, cached at mount so Play/Stop can swap mounts.
 var _viewport_host: Control
+# The live "Terrain changed under N objects" confirm (see _prompt_reground), so a
+# re-activate while it is open cannot stack a second one.
+var _reground_dialog: ConfirmationDialog
+# The mission debug overlay summoned over the editor (lazily built on the first
+# toggle, parented under the shell like _prompt_reground's dialog). Variable
+# edits are write-locked for its whole life; the runtime source follows the
+# active mode per refresh (see _debug_runtime_source).
+var _debug_overlay: NovaDebugOverlay
 
 
 func _init(value: Node = null) -> void:
@@ -110,7 +118,7 @@ func get_status_context() -> String:
 	if _controller != null and _controller.is_loaded():
 		var stats: Dictionary = _controller.get_stats()
 		return "%s, %d objects" % [_controller.get_mission_title(), int(stats.get("placed", 0))]
-	return "Open a .bms mission to load its world."
+	return "Open a mission to load its world."
 
 
 func shows_camera_status() -> bool:
@@ -121,15 +129,69 @@ func shows_camera_status() -> bool:
 
 func activate() -> void:
 	if _controller != null:
-		# Drop a loaded mission whose terrain was changed under it from the Terrain
-		# workspace before re-showing its objects (else they float over a new world).
-		_controller.reconcile_with_terrain()
+		# Drop a loaded mission whose terrain was swapped out underneath from the
+		# Terrain workspace before re-showing its objects (else they float over a new
+		# world). On the SAME terrain, a non-zero return means height edits left that
+		# many objects off the ground — offer the one-step re-ground.
+		var drift: int = _controller.reconcile_with_terrain()
 		_controller.set_objects_visible(true)
+		if drift > 0:
+			_prompt_reground(drift)
 	if terrain_editor != null and _mount != null and _mount.is_mounted():
 		terrain_editor.set_viewport_active(true, false)
 
 
+# Terrain heights changed under the loaded mission (same .trn): offer the bulk
+# re-ground. A transient ConfirmationDialog parented to the shell (the music
+# workspace's deactivate prompt pattern), with the shell theme set EXPLICITLY —
+# an embedded Window does not resolve the in-tree theme through the Control
+# parent chain (see the shell's _ensure_unsaved_dialog comment) — and exclusive
+# like the shell's own confirms. Escape/X emit `canceled`, so every dismissal
+# lands on the decline path (acknowledge: quiet until the next height edit).
+func _prompt_reground(count: int) -> void:
+	if editor_shell == null:
+		return  # headless host: the inspector's manual Re-ground button still covers it
+	if _reground_dialog != null and is_instance_valid(_reground_dialog):
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.name = "MissionRegroundDialog"
+	dialog.title = "Terrain changed"
+	dialog.dialog_text = "Terrain changed under %d object%s.\nRe-ground them to the new surface?" % [count, "" if count == 1 else "s"]
+	dialog.exclusive = true
+	if editor_shell is Control and (editor_shell as Control).theme != null:
+		dialog.theme = (editor_shell as Control).theme
+	dialog.get_ok_button().text = "Re-ground"
+	dialog.get_cancel_button().text = "Leave as-is"
+	dialog.confirmed.connect(func() -> void:
+		# The is_loaded guard covers a stale confirm: a dialog that lost modality
+		# (another exclusive sibling was up) can be answered after the mission was
+		# cleared or swapped underneath it.
+		if _controller.is_loaded():
+			_controller.reground_drifted()  # reports "Re-grounded N..." via status_reported
+		_reground_dialog = null
+		dialog.queue_free())
+	dialog.canceled.connect(func() -> void:
+		_controller.acknowledge_terrain_drift()
+		_reground_dialog = null
+		dialog.queue_free())
+	_reground_dialog = dialog
+	editor_shell.add_child(dialog)
+	dialog.popup_centered()
+
+
 func deactivate() -> void:
+	# Leaving the workspace dismisses the re-ground question without answering it:
+	# the revision is NOT adopted, so the prompt re-poses on the next activate
+	# (unlike the explicit "Leave as-is"). Also keeps the dialog from floating over
+	# other workspaces or colliding with their own exclusive prompts.
+	if _reground_dialog != null and is_instance_valid(_reground_dialog):
+		_reground_dialog.queue_free()
+	_reground_dialog = null
+	# The debug overlay is mission-scoped UI; hide it (toggle pauses its refresh
+	# timer too) so it never floats over another workspace. It re-summons in one
+	# click and keeps its tab/filter state.
+	if is_debug_overlay_open():
+		_debug_overlay.toggle()
 	if is_playing_mission():
 		stop_play_mission()
 	if _controller != null:
@@ -177,6 +239,9 @@ func release_viewport() -> void:
 		stop_play_mission()
 	if _play_mount != null:
 		_play_mount.release()
+	if _debug_overlay != null and is_instance_valid(_debug_overlay):
+		_debug_overlay.queue_free()
+	_debug_overlay = null
 	_viewport_host = null
 	_detach_input_target()
 	if terrain_editor != null:
@@ -266,6 +331,61 @@ func stop_play_mission() -> void:
 			viewport.set_input_target(_controller)
 		terrain_editor.set_viewport_active(true, false)
 	_sync_shell_title()
+
+
+# --- Mission debug overlay (C12) -------------------------------------------
+# The same NovaDebugOverlay the game summons with F3, mounted over the editor
+# shell with variable edits locked. The runtime source is re-resolved on every
+# overlay refresh, so Play/Stop/sim restarts need no rewiring here.
+
+func toggle_debug_overlay() -> void:
+	if editor_shell == null:
+		return  # headless host: nothing to float the overlay over
+	if _debug_overlay == null or not is_instance_valid(_debug_overlay):
+		_debug_overlay = NovaDebugOverlay.new()
+		_debug_overlay.name = "MissionDebugOverlay"
+		# One-way lock BEFORE the first refresh can build rows: mission VARIABLES
+		# stay read-only from the editor's overlay. The Sim-tab transport stays
+		# live by design (the button tooltip advertises it) — its presses relay
+		# through _on_overlay_transport so the controller stays in step.
+		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
+		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
+		_debug_overlay.transport_used.connect(_on_overlay_transport)
+		editor_shell.add_child(_debug_overlay)
+	_debug_overlay.toggle()
+
+
+func is_debug_overlay_open() -> bool:
+	return _debug_overlay != null and is_instance_valid(_debug_overlay) and _debug_overlay.visible
+
+
+# The overlay's runtime supplier. PIE first: Play Mission boots the real game
+# world (play_mission() sim_stops the in-place driver before swapping, so the
+# two can never BOTH be live); otherwise the in-place Simulate driver, which is
+# null while idle (the overlay shows its no-mission state).
+func _debug_runtime_source():
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		return world.get_runtime() if world != null else null
+	return _controller.get_sim_runtime() if _controller != null else null
+
+
+# The overlay drives the live runtime DIRECTLY (it is host-neutral and only
+# knows a runtime), so its transport presses bypass MissionController's
+# sim_play/sim_pause/sim_stop — whose `changed` signal is the only thing the
+# editor sim bar refreshes on. Relay: Stop completes the editor-side stop
+# (sim_stop frees the driver, unlocking edits and restoring the gizmo — the
+# overlay's runtime.stop() alone left is_simulating() true over a visually
+# stopped world); everything else just re-emits changed via the controller.
+func _on_overlay_transport(action: String) -> void:
+	if is_playing_mission():
+		return  # PIE: the play world owns its transport; no editor sim bar involved
+	if _controller == null:
+		return
+	if action == "stop":
+		_controller.sim_stop()
+	elif _controller.has_method("notify_sim_transport_changed"):
+		_controller.notify_sim_transport_changed()
 
 
 # --- New (create a mission from scratch) --------------------------------------
@@ -443,6 +563,11 @@ func build_inspector(host: Control) -> void:
 	if _inspector.has_method("set_play_hooks"):
 		_inspector.set_play_hooks(Callable(self, "play_mission"), Callable(self, "is_playing_mission"),
 			Callable(self, "stop_play_mission"))
+	if _inspector.has_method("set_debug_hooks"):
+		_inspector.set_debug_hooks(Callable(self, "toggle_debug_overlay"),
+			Callable(self, "is_debug_overlay_open"))
+	if editor_shell != null and _inspector.has_method("set_reference_services"):
+		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 
 
 # --- Asset dock (the right pane) ----------------------------------------------

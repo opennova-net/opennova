@@ -104,7 +104,7 @@ func get_project_title() -> String:
 
 func get_status_context() -> String:
 	if string_table == null:
-		return "No string table loaded"
+		return "No string table open."
 	return "%d strings  %d sections" % [string_table.get_entry_count(), string_table.get_section_count()]
 
 

@@ -8,8 +8,11 @@ const LodsInspectorScript = preload("res://modtools/object/ui/inspectors/lods_in
 const LightsInspectorScript = preload("res://modtools/object/ui/inspectors/lights_inspector.gd")
 const MaterialsInspectorScript = preload("res://modtools/object/ui/inspectors/materials_inspector.gd")
 const PartAnimsInspectorScript = preload("res://modtools/object/ui/inspectors/part_anims_inspector.gd")
+const AnimsInspectorScript = preload("res://modtools/object/ui/inspectors/anims_inspector.gd")
 
-enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS }
+# ANIMS is APPENDED (object_editor_test pins LODS == raw id 4 — never renumber);
+# tab order comes from the defs array below, independent of these ids.
+enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS, ANIMS }
 
 # Workflow inspectors are declared as typed InspectorDef rows in _build_inspector_defs().
 
@@ -146,6 +149,8 @@ func get_status_tool() -> String:
 			return "Lights"
 		Workflow.LODS:
 			return "LODs"
+		Workflow.ANIMS:
+			return "Anims"
 		_:
 			return "Object"
 
@@ -344,6 +349,7 @@ func build_inspector(host: Control) -> void:
 func _build_inspector_defs() -> Array:
 	return [
 		InspectorDef.make(Workflow.PREVIEW, "Preview", "View the object with fixed editor lighting.", PreviewInspectorScript),
+		InspectorDef.make(Workflow.ANIMS, "Anims", "Load a body-animation set and play or scrub its clips.", AnimsInspectorScript),
 		InspectorDef.make(Workflow.MATERIALS, "Materials", "Edit material shader tags, textures, and alpha.", MaterialsInspectorScript),
 		InspectorDef.make(Workflow.PARTS, "Part Anims", "Inspect and edit PANM part animation entries.", PartAnimsInspectorScript),
 		InspectorDef.make(Workflow.LIGHTS, "Lights", "Inspect and edit object light colors.", LightsInspectorScript),

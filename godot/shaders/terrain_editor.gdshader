@@ -12,6 +12,11 @@ uniform float u_heightmap_size = 1024.0;
 uniform sampler2D u_charmap : source_color, filter_nearest, repeat_disable;
 uniform bool u_show_surface_overlay = false;
 uniform bool u_show_sector_overlay = false;
+// The shell's View > Show grid guide: thin NEUTRAL sector-boundary lines that
+// follow the surface. Distinct from u_show_sector_overlay (the Layout
+// workflow's colored per-sector diagnostic with its tint fill) — a reference
+// grid must not wash the map in color.
+uniform bool u_show_grid = false;
 
 uniform vec2 u_brush_pos = vec2(-10000.0, -10000.0);
 uniform float u_brush_radius = 10.0;
@@ -112,6 +117,11 @@ void fragment() {
 			float border = 1.0 - smoothstep(0.0, 0.015, edge);
 			float overlay_alpha = max(0.14, border * 0.72);
 			result = mix(result, sector_overlay_color(v_sector_id), overlay_alpha);
+		}
+		if (u_show_grid) {
+			float edge = min(min(v_sector_uv.x, 1.0 - v_sector_uv.x), min(v_sector_uv.y, 1.0 - v_sector_uv.y));
+			float line = 1.0 - smoothstep(0.0, 0.006, edge);
+			result = mix(result, vec3(0.85), line * 0.45);
 		}
 	} else {
 		result = u_empty_sector_fill;

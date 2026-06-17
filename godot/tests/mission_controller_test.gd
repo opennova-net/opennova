@@ -37,9 +37,36 @@ class StubTerrainEditor:
 	# Placement raycast seam (Phase 3): the controller grounds a placed object via these.
 	var terrain_hit: Vector3 = Vector3(64.0, 10.0, -64.0)
 	var terrain_hit_valid: bool = true
+	# B8 re-ground seams: the height revision the controller captures at load, and a
+	# fake surface plane (height + optional x slope, so a test can move the ground
+	# under one entity while keeping it still under another, and can pin WHERE the
+	# controller samples — a flat surface cannot tell the rotated-anchor ground
+	# point from the entity origin).
+	var height_revision := 0
+	var sample_height := 10.0
+	var sample_slope_x := 0.0
+	# Request-cache observability: how many times the controller sampled the
+	# surface (one drift cycle must sample each entity once, not three times).
+	var sample_calls := 0
 
 	func get_resource_root() -> NovaResourceRoot:
 		return resource_root
+
+	func get_height_revision() -> int:
+		return height_revision
+
+	func sample_height_world(world_x: float, _world_z: float) -> float:
+		sample_calls += 1
+		return sample_height + sample_slope_x * world_x
+
+	# The batch seam the request builder prefers; loops the scalar fake so the
+	# per-point sample_calls accounting stays meaningful.
+	func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
+		var out := PackedFloat32Array()
+		out.resize(points.size())
+		for i in points.size():
+			out[i] = sample_height_world(points[i].x, points[i].y)
+		return out
 
 	func get_terrain_world_root() -> Node3D:
 		return world_root
@@ -1109,6 +1136,300 @@ func test_failed_terrain_load_clears_prior_mission() -> void:
 	assert_eq(err, ERR_CANT_OPEN, "a terrain load failure surfaces as the open error")
 	assert_false(controller.is_loaded(), "a failed open clears the prior mission state")
 	assert_string_contains(controller.get_last_status(), "Could not load")
+
+
+# --- B8: terrain height drift + bulk re-ground ---------------------------------
+# Height edits under a loaded mission leave its objects floating/sunken. The
+# controller captures the terrain height revision plus a per-ground-point surface
+# memo at load; reconcile_with_terrain returns the engine's dry-run deviation count
+# over the entities whose ground MOVED when the SAME terrain's revision changed
+# (the TRN-swap clear() branch above is untouched); reground_drifted applies the
+# identical request set as one undo step. Entities authored off the surface on
+# purpose (raised objects, flight-altitude markers) are excluded by the memo.
+
+func test_open_captures_height_revision_and_reconcile_reports_no_drift() -> void:
+	var stub := StubTerrainEditor.new()
+	stub.resource_root = _dvxi5_root()
+	stub.world_root = Node3D.new()
+	stub.height_revision = 7
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+
+	var controller := MissionController.new(stub)
+	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
+	assert_eq(controller._loaded_height_revision, 7, "the load captures the editor's height revision")
+	assert_eq(controller.reconcile_with_terrain(), 0, "same terrain, same revision -> no drift")
+
+	# The revision gates the scan entirely: with no height edit, an absurd surface
+	# is never even sampled.
+	stub.sample_height = 9999.0
+	assert_eq(controller.reconcile_with_terrain(), 0, "unchanged revision short-circuits the drift scan")
+	assert_true(controller.is_loaded(), "the no-drift paths never clear the mission")
+
+
+func test_height_drift_counts_and_reground_grounds_markers() -> void:
+	var controller := _loaded_with_item_db()
+	var mission := controller.get_mission()
+	assert_gt(mission.get_entity_count(NovaMissionData.KIND_MARKER), 0,
+		"precondition: the fixture mission carries markers")
+
+	_stub_drift(controller, 500.0)
+	var count := controller.reconcile_with_terrain()
+	assert_gt(count, 0, "a height edit under the mission reports drifting entities")
+	assert_true(controller.is_loaded(), "drift reporting never clears the mission")
+
+	assert_eq(controller.reground_drifted(), count,
+		"the apply moves exactly what the dry-run counted (one shared policy)")
+	var marker: Vector3 = mission.get_entities(NovaMissionData.KIND_MARKER)[0]["position"]
+	assert_almost_eq(marker.z, 500.0, 0.01, "markers store the sampled hit directly (BMS z = height)")
+	assert_true(controller.is_dirty(), "a re-ground that moved entities dirties the document")
+	assert_string_contains(controller.get_last_status(), "Re-grounded")
+	assert_eq(controller.reconcile_with_terrain(), 0, "the applied re-ground settles the drift")
+
+
+func test_reground_is_one_undo_step_and_undo_restores() -> void:
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	assert_eq(controller.undo_depth(), 1, "precondition: the placement is one step")
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1, "the single placed entity drifts")
+	assert_eq(controller.reground_drifted(), 1)
+	assert_almost_eq((mission.get_entity(kind, index)["position"] as Vector3).z, 42.0, 0.01,
+		"the entity re-grounds onto the new surface")
+	assert_eq(controller.undo_depth(), 2, "the whole re-ground is exactly one more undo step")
+
+	controller.undo()
+	assert_almost_eq((mission.get_entity(kind, index)["position"] as Vector3).z, 10.0, 0.01,
+		"one undo restores the pre-re-ground position")
+
+
+func test_reground_count_matches_engine_bake_for_rotated_anchor() -> void:
+	# The honesty test for the request math: the engine bakes position =
+	# hit - R*anchor with R including the Rz(90) model-forward correction, so the
+	# builder must sample under the ROTATED anchor. If it sampled the entity origin
+	# instead, this on-surface entity would count as drifted forever (and the apply
+	# would shift it sideways).
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+	controller._select(kind, index)
+	controller.set_selected_rotation(Vector3(0, 37, 0))
+	controller._flush_edit()
+
+	# Give the (headless-unresolvable) graphic a non-trivial model-local anchor via
+	# the placer's cache (a white-box seam, like _select above).
+	var graphic: String = controller._placer.graphic_for(102001)
+	assert_false(graphic.is_empty(), "items.def resolves 102001 to a graphic name")
+	var anchor_godot := Vector3(1.0, 0.5, 2.0)
+	controller._placer._anchor_cache[graphic] = anchor_godot
+
+	# A SLOPED surface that passes exactly through the rotated ground anchor: zero
+	# drift. The slope pins the sample LOCATION too — sampling under the entity
+	# origin instead of the rotated anchor reads a different height off the slope
+	# (~0.04 here, over the 0.01 epsilon) and would be counted.
+	var pos: Vector3 = mission.get_entity(kind, index)["position"]
+	var rot: Vector3 = mission.get_entity(kind, index)["rotation_deg"]
+	var ground: Vector3 = Placer.bms_to_godot_position(pos) + Placer.bms_to_godot_basis(rot) * anchor_godot
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.sample_slope_x = 0.1
+	_stub_drift(controller, ground.y - 0.1 * ground.x)
+	assert_eq(controller.reconcile_with_terrain(), 0,
+		"an entity already on the surface never counts as drifted (editor hit == engine bake)")
+
+	# Raise the surface 5 (slope kept): a pure z re-ground, x/y preserved by the
+	# conjugacy — and because x is preserved, the slope contributes no extra delta.
+	stub.height_revision += 1
+	stub.sample_height += 5.0
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	assert_eq(controller.reground_drifted(), 1)
+	var after: Vector3 = mission.get_entity(kind, index)["position"]
+	assert_almost_eq(after.x, pos.x, 0.01, "the re-ground preserves x exactly")
+	assert_almost_eq(after.y, pos.y, 0.01, "and y")
+	assert_almost_eq(after.z, pos.z + 5.0, 0.01, "and lifts z by exactly the surface delta")
+
+
+func test_acknowledge_terrain_drift_suppresses_until_the_next_height_edit() -> void:
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+
+	_stub_drift(controller, 500.0)
+	assert_gt(controller.reconcile_with_terrain(), 0, "precondition: drift is reported")
+
+	controller.acknowledge_terrain_drift()
+	assert_eq(controller.reconcile_with_terrain(), 0, "declining adopts the revision (no re-nag)")
+
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.height_revision += 1
+	assert_gt(controller.reconcile_with_terrain(), 0, "the NEXT height edit re-arms the prompt")
+
+	# Declining silenced the prompt, not the drift: the manual re-ground still
+	# sees and fixes it (the surface memo is kept on acknowledge).
+	assert_eq(controller.reground_drifted(), 1, "the manual path still applies after a decline")
+
+
+func test_reground_only_touches_entities_whose_ground_moved() -> void:
+	# The locality policy: a bulk re-ground may only move entities whose ground
+	# SURFACE changed since the baseline. An entity deliberately raised over
+	# unchanged terrain (a flight-altitude marker, a lifted object) deviates from
+	# the surface but must be neither counted nor flattened.
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(0.0, 10, -50)))
+	assert_true(controller.place_entity_at_world(102001, Vector3(100.0, 10, -50)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var index_a := int(mission.get_entities(kind)[0]["index"])  # ground x = 0
+	var index_b := int(mission.get_entities(kind)[1]["index"])  # ground x = 100
+
+	# Raise B 20 over its (unchanged) ground on purpose, then adopt the layout as
+	# the known-grounded reference (the load-time baseline predates both entities).
+	controller._select(kind, index_b)
+	controller.set_selected_position(Vector3(100.0, 50.0, 30.0))
+	controller._flush_edit()
+	controller._record_ground_state()
+
+	# Tilt the surface: height(x) = 5 + 0.05x — the ground drops 5 under A (x=0)
+	# and stays exactly 10 under B (x=100).
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.height_revision += 1
+	stub.sample_slope_x = 0.05
+	stub.sample_height = 5.0
+
+	assert_eq(controller.reconcile_with_terrain(), 1,
+		"only the entity whose ground moved counts — B's raise is intentional, not drift")
+	assert_eq(controller.reground_drifted(), 1)
+	assert_almost_eq((mission.get_entity(kind, index_a)["position"] as Vector3).z, 5.0, 0.01,
+		"A re-grounds onto the moved surface")
+	assert_almost_eq((mission.get_entity(kind, index_b)["position"] as Vector3).z, 30.0, 0.01,
+		"B keeps its authored altitude — its ground never moved")
+
+
+func test_reground_cycle_samples_each_entity_once() -> void:
+	# The request-cache perf contract: one drift cycle (activate-time count ->
+	# apply -> baseline re-record) builds the request set ONCE — count, apply, and
+	# baseline share the cached rows, so the surface is sampled exactly once per
+	# entity instead of three times.
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	_stub_drift(controller, 42.0)
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.sample_calls = 0
+	assert_eq(controller.reconcile_with_terrain(), 1, "precondition: the entity drifts")
+	assert_eq(controller.reground_drifted(), 1)
+	assert_eq(stub.sample_calls, 1,
+		"one entity, one sample: the cycle shares one cached request build")
+	assert_eq(controller.reconcile_with_terrain(), 0, "the applied re-ground settles the drift")
+
+
+func test_targeted_reground_updates_placed_nodes_in_place() -> void:
+	# The targeted-apply contract: a bulk re-ground rewrites the moved entities'
+	# placed-world records in place — no full re-bake, so the pickable index
+	# keeps its identity and the membership revision stays put — and the node
+	# rises by exactly the surface delta (x/z preserved: pure-z). Asserted on the
+	# animated-node record: the static branch is the same one-line absolute
+	# write, but the headless RenderingServer does not round-trip MultiMesh
+	# buffers, so a static record rides along for execution coverage only.
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+
+	# Fabricate the placed-world records the placer would have built (headless
+	# cannot resolve the model) — the white-box seam, like _anchor_cache above.
+	var entity: Dictionary = mission.get_entity(kind, index)
+	var xform0: Transform3D = Placer.entity_transform(entity["position"], entity["rotation_deg"])
+	var node := Node3D.new()
+	add_child_autofree(node)
+	node.transform = xform0
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.instance_count = 1
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	add_child_autofree(mmi)
+	controller._pickable = [
+		{ "kind": kind, "index": index, "animated": true,
+			"node": node, "offset": Transform3D.IDENTITY, "graphic": "stub" },
+		{ "kind": kind, "index": index, "animated": false,
+			"mm": mm, "mmi": mmi, "slot": 0, "offset": Transform3D.IDENTITY,
+			"graphic": "stub" },
+	]
+	var pickable_before: Array = controller._pickable
+	var rev_before := controller.get_membership_revision()
+
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	assert_eq(controller.reground_drifted(), 1)
+
+	assert_almost_eq(node.transform.origin.y, 42.0, 0.01, "the node rises onto the new surface")
+	assert_almost_eq(node.transform.origin.x, xform0.origin.x, 0.01, "x preserved (pure-z)")
+	assert_almost_eq(node.transform.origin.z, xform0.origin.z, 0.01, "z preserved (pure-z)")
+	assert_true(is_same(controller._pickable, pickable_before),
+		"no re-bake: the pickable index keeps its identity")
+	assert_eq(controller.get_membership_revision(), rev_before,
+		"a re-ground is not a membership change")
+
+
+func test_targeted_reground_falls_back_when_a_record_is_freed() -> void:
+	# A pickable record whose backing node was freed mid-flight must not crash or
+	# half-update: the targeted path reports failure and the full re-bake
+	# rebuilds the world from the (already re-grounded) document.
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var index := int(mission.get_entities(kind)[0]["index"])
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.instance_count = 1
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.free()
+	controller._pickable = [{
+		"kind": kind, "index": index, "animated": false,
+		"mm": mm, "mmi": mmi, "slot": 0, "offset": Transform3D.IDENTITY,
+		"graphic": "stub",
+	}]
+	var pickable_before: Array = controller._pickable
+
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reground_drifted(), 1)
+	assert_false(is_same(controller._pickable, pickable_before),
+		"the fallback re-bake rebuilt the pickable index")
+	assert_almost_eq((mission.get_entity(kind, index)["position"] as Vector3).z, 42.0, 0.01,
+		"the document is re-grounded either way")
+
+
+func test_reground_cache_invalidated_by_an_entity_edit() -> void:
+	# The cache token includes object_records_revision, so an entity placed
+	# between the prompt count and the apply forces a rebuild and the apply sees
+	# it (a stale cache would silently skip the newcomer).
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	# The newcomer grounds at its own placement height (BMS z = 10), off the moved
+	# surface (42) with no baseline memo, so the engine's deviation check moves it.
+	assert_true(controller.place_entity_at_world(102001, Vector3(80, 10, -80)))
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.sample_calls = 0
+	assert_eq(controller.reground_drifted(), 2,
+		"the post-count placement re-grounds too — the edit re-keyed the cache")
+	assert_eq(stub.sample_calls, 2, "the rebuild samples both entities")
+
+
+# Bump the stub's height revision and set its surface base height (slope kept):
+# the minimal "the user edited terrain heights under the mission" gesture.
+func _stub_drift(controller: MissionController, surface_height: float) -> void:
+	var stub: StubTerrainEditor = controller.terrain_editor
+	stub.height_revision += 1
+	stub.sample_height = surface_height
 
 
 # --- Authoring (Phase 5): undo / redo -----------------------------------------

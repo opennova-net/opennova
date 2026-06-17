@@ -145,9 +145,13 @@ func get_terrain_tint() -> Vector3:
 
 
 func get_terrain_lighting_attenuation() -> Vector3:
-	# terrain_rgb is a recovered reciprocal attenuation LUT, not a direct tint.
-	# Jointops.exe Terrain_SetEnvironmentData@0x53F840 is only a buffer copy;
-	# keep this neutral until the exact runtime consumer is located.
+	# terrain_rgb IS a direct live tint with three witnessed consumers (C6/G3):
+	# the terrain texture bake (channel*v >> 12 [orig: PolyTrn_InitTextures
+	# @ 0x60b8cb]), the water-quad half tint [orig: PolyTrn_RenderTile @ 0x60df0d],
+	# and the foliage lightmap */128 [orig: sample_terrain_lightmap @ 0x606030].
+	# Those per-consumer ports ride the terrain/foliage work, not the env slice -
+	# returning identity here is tracked divergence #19 (docs/env/env-tod-re.md),
+	# kept neutral rather than faked through the wrong (uniform-tint) path.
 	return Vector3.ONE
 
 
@@ -235,21 +239,25 @@ func get_sky_highlight() -> Vector3:
 	return _tod.get("skyhighlight", Vector3.ZERO)
 
 
-func get_horizon_color() -> Vector3:
+## Cloud-pass color blocks (sky dome VS constants c24/c27/c26)
+## [orig: render_skybox uploads @ 0x57934a..0x57936f].
+func get_cloud_base() -> Vector3:
 	return _tod.get("cloudbase", Vector3.ZERO)
 
 
-func get_ground_fog_color() -> Vector3:
+func get_cloud_highlight() -> Vector3:
 	return _tod.get("cloudhighlight", Vector3.ZERO)
 
 
-func get_secondary_ambient() -> Vector3:
+func get_cloud_edge() -> Vector3:
 	return _tod.get("cloudedge", Vector3.ZERO)
 
 
 func get_skyfog_color() -> Vector3:
-	# The clear/horizon color renders doubled like fog
-	# [orig: Environment_UpdateWeatherTick @ 0x57f190].
+	# The clear/horizon color, doubled like fog [orig: Environment_UpdateWeatherTick
+	# @ 0x57f190]. Its witnessed consumer is the FRAME CLEAR color (cross-faded
+	# skyfog<->fog at low fog distance), which no host wires yet - tracked as
+	# divergence #21 in docs/env/env-tod-re.md; this getter is the API for it.
 	return _double_vec3(_tod.get("skyfog", Vector3.ZERO))
 
 

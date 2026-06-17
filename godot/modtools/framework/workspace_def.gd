@@ -5,7 +5,7 @@ extends Resource
 ## adapter script to instantiate, whether it lives in a popup (Environment)
 ## rather than swapping the main viewport, plus optional placement metadata the
 ## navigation needs before the adapter is instantiated (its category grouping and
-## a reserved icon key). Label, tooltip, and behavior stay self-described by the
+## an icon key). Label, tooltip, and behavior stay self-described by the
 ## adapter, so this only captures what the shell needs to build and place the
 ## workspace.
 ##
@@ -22,8 +22,8 @@ extends Resource
 ## Navigation grouping. The nav lists workspaces under a header per category, in
 ## the order categories first appear in the registry. &"" means no header (flat).
 @export var category: StringName = &""
-## Reserved for the future icon pass: a glyph key the nav can resolve to a row
-## icon. &"" means text-only (today). Unread until icons land.
+## Glyph key the nav rail resolves to a row icon via EditorIconLibrary.
+## &"" means text-only.
 @export var icon_id: StringName = &""
 
 
