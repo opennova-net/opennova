@@ -211,6 +211,10 @@ var _viewport_active: bool = false
 var _viewport_edit_input_active: bool = false
 var _viewport_mouse_position: Vector2 = Vector2.ZERO
 
+## The embedded MCP agent service (modtools/mcp/editor_mcp_service.gd), or
+## null in runtime_game builds. The Settings popup reaches it through here.
+var mcp_service: Node = null
+
 
 func _ready() -> void:
 	get_tree().auto_accept_quit = false
@@ -228,6 +232,7 @@ func _ready() -> void:
 	_load_editor_state()
 	if workstation and workstation.has_method("set_editor"):
 		workstation.set_editor(self)
+	_init_mcp_service()
 	new_terrain()
 
 
@@ -235,6 +240,20 @@ func _exit_tree() -> void:
 	var window := get_window()
 	if window:
 		window.min_size = _previous_window_min_size
+
+
+# Boot the embedded MCP (agent) server. ONED-only by construction: the runtime
+# export excludes modtools/*, so this is the single start path; the feature
+# guard is belt-and-braces. Whether it actually listens is McpSettings'
+# decision (on by default, never headless, --mcp-off/--mcp-port override).
+func _init_mcp_service() -> void:
+	if OS.has_feature("runtime_game"):
+		return
+	var service := EditorMcpService.new()
+	service.name = "McpService"
+	add_child(service)
+	service.setup(self, workstation)
+	mcp_service = service
 
 
 func _configure_editor_window() -> void:

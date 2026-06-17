@@ -38,6 +38,11 @@ var _resource_root: NovaResourceRoot
 var _text_resource: RtxtStringFile
 var _text_resource_path: String = ""
 var _stylesheet: MnsStyleSheet
+# When the workspace owns the .mns document directly (the merged Menus
+# workspace does), it pushes its in-memory MnsStyleSheet here so canvas refreshes
+# read live edits without a disk round-trip. Null means fall back to the disk
+# resolution from the resource root.
+var _stylesheet_override: MnsStyleSheet
 # Distinct %VAR% tokens in the open menu that the loaded stylesheet does not
 # define (all of them, when none loads). Recomputed per preview refresh and
 # cached: the shell polls status per frame. The original engine FAILS on an
@@ -276,7 +281,10 @@ func _refresh_preview() -> void:
 	_resolve_text_resource(doc)  # refresh the cached table + path
 	_resolve_stylesheet_resource()
 	_recount_unresolved_vars(doc)
-	_canvas.set_menu(doc, _resource_root, _text_resource, _stylesheet)
+	var menu_file := ""
+	if _document != null:
+		menu_file = String(_document.get("current_path")).get_file()
+	_canvas.set_menu(doc, _resource_root, _text_resource, _stylesheet, menu_file)
 
 
 # Best-effort: resolve the document's first non-empty screen text resource through
@@ -306,11 +314,17 @@ func _resolve_text_resource(doc: NovaMnuDocument) -> void:
 		continue
 
 
-# Re-reads the canonical stylesheet from the root on every preview refresh,
-# which also runs on every viewport mount (set_resource_root) - so edits saved
-# in the Menu Styles workspace appear here on the next workspace switch with no
-# extra wiring.
+# With an override pushed by the workspace (the merged Menus workspace owns the
+# .mns document directly), uses that live document so unsaved Styles edits hit
+# the canvas immediately. Without one, re-reads the canonical stylesheet from
+# the resource root on every preview refresh (also runs on every viewport mount
+# via set_resource_root), so external edits appear on the next refresh with no
+# extra wiring. Tests that drive MnuEditor without a workspace still work
+# through the disk path.
 func _resolve_stylesheet_resource() -> void:
+	if _stylesheet_override != null:
+		_stylesheet = _stylesheet_override
+		return
 	_stylesheet = null
 	if _resource_root == null or _resource_root.get_root_dir().is_empty():
 		return
@@ -320,6 +334,13 @@ func _resolve_stylesheet_resource() -> void:
 	var sheet := MnsStyleSheet.new()
 	if sheet.load_from_bytes(bytes) == OK:
 		_stylesheet = sheet
+
+
+# The workspace pushes its in-memory stylesheet here so canvas refreshes pick
+# up unsaved Styles edits live. Pass null to fall back to disk resolution.
+func set_stylesheet_resource(sheet: MnsStyleSheet) -> void:
+	_stylesheet_override = sheet
+	_refresh_preview()
 
 
 # The loaded stylesheet (null when the root carries none); the inspector uses
@@ -587,6 +608,42 @@ func add_widget_action(type: int) -> int:
 	return new_id
 
 
+# Add N widgets (each with optional initial properties) as ONE undo step — the
+# programmatic batch counterpart of add_widget_action, for callers that know
+# parent/rect up front (the MCP add_menu_widgets tool, future duplicate/paste).
+# rows = [{parent: int, type: int, rect: Rect2, props: {prop -> value}}]; props
+# use the slot-less _write_prop vocabulary (name/text/string_type/font/flags/
+# group/...). Returns one {ok, id?} per row, in order. Mirrors apply_rect_batch's
+# snapshot-undo shape; a row whose add is rejected reports ok=false and the
+# batch continues (validation belongs to the caller).
+func add_widgets_batch(rows: Array) -> Array:
+	var results: Array = []
+	var doc := _document_resource()
+	if doc == null or rows.is_empty():
+		return results
+	var before := doc.capture_state()
+	var sel_before := _selected_id
+	var last_id := -1
+	_suppress_select_emit = true
+	for row_v in rows:
+		var row: Dictionary = row_v
+		var new_id := doc.add_widget(int(row.get("parent", -1)), int(row.get("type", -1)),
+				row.get("rect", NEW_WIDGET_RECT))
+		if new_id < 0:
+			results.append({ "ok": false })
+			continue
+		var props: Dictionary = row.get("props", {})
+		for prop in props:
+			_write_prop(doc, "widget", new_id, String(prop), -1, props[prop])
+		results.append({ "ok": true, "id": new_id })
+		last_id = new_id
+	_suppress_select_emit = false
+	if _push_struct("add_widgets_batch", before, sel_before,
+			last_id if last_id >= 0 else sel_before) and last_id >= 0:
+		select_widget(last_id)
+	return results
+
+
 func delete_selection_action() -> void:
 	var doc := _document_resource()
 	if doc == null or _selected_id < 0 or not doc.widget_exists(_selected_id):
@@ -636,14 +693,17 @@ func _unique_screen_name() -> String:
 	return "SCREEN_%d" % n
 
 
-func add_screen_action() -> int:
+# custom_name lets programmatic callers (the MCP edit_menu_screen tool) name the
+# screen up front; they own uniqueness (duplicates alias show/delete-by-name).
+# The toolbar passes nothing and keeps the unique default.
+func add_screen_action(custom_name := "") -> int:
 	var doc := _document_resource()
 	if doc == null:
 		return -1
 	var before := doc.capture_state()
 	var sel_before := _selected_id
 	_suppress_select_emit = true
-	var sid := doc.add_screen(_unique_screen_name())
+	var sid := doc.add_screen(custom_name if not custom_name.is_empty() else _unique_screen_name())
 	_suppress_select_emit = false
 	if sid < 0:
 		return -1
@@ -883,6 +943,8 @@ func _read_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slo
 		"flags": return doc.get_widget_flags(id)
 		"sounds": return doc.get_widget_sounds(id)
 		"actions": return doc.get_widget_actions(id)
+		"appearances": return doc.get_widget_appearances(id)
+		"frame": return doc.get_window_frame(id)
 		"table_count": return doc.get_table_column_count(id)
 		"table_spacing": return doc.get_table_column_spacing(id)
 	return null
@@ -910,6 +972,8 @@ func _write_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, sl
 		"flags": doc.set_widget_flags(id, int(value))
 		"sounds": doc.set_widget_sounds(id, value)
 		"actions": doc.set_widget_actions(id, value)
+		"appearances": doc.set_widget_appearances(id, value)
+		"frame": doc.set_window_frame(id, value)
 		"table_count": doc.set_table_column_count(id, int(value))
 		"table_spacing": doc.set_table_column_spacing(id, int(value))
 

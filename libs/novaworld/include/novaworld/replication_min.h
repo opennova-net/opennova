@@ -287,8 +287,8 @@ std::vector<uint8_t> build_tag_0d_spawn_points(const std::vector<SpawnPointEntit
 // this belongs to pool-2 capture-zone objects, not pool-1 spawn points. The
 // runtime keeps it disabled until we classify those objects from mission data.
 // Witnessed at
-// `NapiNPClientMsg_0x040 @ 0x425A50` → `sub_425A54` → `sub_5BEBB0` →
-// `sub_5BEA60` → `sub_5BE970`. The chain ALLOCATES entries in the
+// `NapiNPClientMsg_0x040 @ 0x425A50` → `sub_425A54` → `MapOverlay_DecodeOverlayEntries` →
+// `MapOverlay_UpdateOrCreateSlot` → `sub_5BE970`. The chain ALLOCATES entries in the
 // `unk_28E5620` minimap-overlay array (1160 slots × 32 bytes) — which is the
 // ACTUAL source of clickable spawn markers in both the CMAP menu
 // (`sub_5492A0`) AND the DEATH spawn-select menu (`sub_5536A0`). Filters
@@ -296,12 +296,17 @@ std::vector<uint8_t> build_tag_0d_spawn_points(const std::vector<SpawnPointEntit
 // and `item_def[84] & 0x40000` (the SpawnPoint bit set by the `SpawnPoint`
 // attrib in items.def, witnessed at `ItemDef_ParseProperty @ 0x4A0BBA`).
 //
-// Wire format (sub_5BEBB0 parses):
+// Wire format (MapOverlay_DecodeOverlayEntries parses; full field map +
+// controlled-capture witness in docs/net/novaworld-net-re.md §5.19):
 //   [u8 count]
 //   count × 6-byte record:
 //     [u16 packed_handle]   ; (pool << 12) | slot — 0xFFFF = skip
-//     [u8  size]            ; passed to sub_5BEA60 as `size` param; retail uses 0x00
-//     [u8  b3][u8 b4][u8 b5]; NOT read by sub_5BEBB0 / sub_5BEA60 — stride-only bytes
+//     [u8  param]           ; entry+2 → slot+2; retail uses 0x00
+//     [u8  iconColor]       ; entry+3 → g_minimap_overlay_color_table idx (0x0c neutral / 0x09 Red / 0x0a Blue) — capture state
+//     [u8  flags]           ; entry+4 → 0x10 persistent capture-zone, 0x20 clear slot
+//     [u8  source]          ; entry+5 → slot+4
+//   (corrected 2026-06-17: entry+3/+4/+5 ARE read by MapOverlay_UpdateOrCreateSlot,
+//    not stride-only as an earlier note here claimed.)
 //
 // Retail capture3 (dvxi5 AS, same map as ours) sends this tag 399× over 235s
 // ≈ 1.7 Hz cadence. Example body for 4 spawn points (pool 1 slots 49-52 of

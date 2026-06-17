@@ -2602,3 +2602,191 @@ func test_gizmo_hides_while_simulating_and_returns_on_stop() -> void:
 
 	controller.sim_stop()
 	assert_true(controller._gizmo.visible, "the gizmo returns for the surviving selection on Stop")
+
+
+# --- MCP seams: save_as_path / reground_all / grounded move / env reload -------
+# The curated MCP tool surface drives the controller through these four public
+# seams; they reuse the interactive paths' privates so agent edits and hand
+# edits produce identical records.
+
+func test_save_as_path_round_trips_and_validates() -> void:
+	var controller := _new_with_item_db()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
+	assert_eq(controller.save_as_path("nope.txt"), ERR_INVALID_PARAMETER, "non-.bms paths are rejected")
+	var dir := OS.get_cache_dir().path_join("opennova_mcp_seam_test")
+	var path := dir.path_join("custom_name.bms")
+	assert_eq(controller.save_as_path(path), OK)
+	assert_true(FileAccess.file_exists(path), "the file lands exactly where named")
+	assert_eq(controller.get_current_path(), path, "the saved path becomes the current path")
+	assert_false(controller.is_dirty(), "save marks the document clean")
+	assert_string_contains(controller.get_last_status(), "custom_name.bms")
+	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(dir)
+
+
+func test_reground_all_repairs_what_the_drift_filter_protects() -> void:
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
+	var kind := NovaMissionData.KIND_BUILDING
+	var grounded: Vector3 = mission.get_entities(kind)[0]["position"]
+	# Adopt the fresh placement into the ground baseline: load-time memos do not
+	# cover entities placed afterwards, and the drift filter only protects
+	# memoized keys. This pass moves nothing but re-records the baseline.
+	assert_eq(controller.reground_drifted(), 0, "a freshly grounded placement has nothing to move")
+
+	# Float the entity by writing a raw position (the mis-grounding an agent's
+	# guessed height produces): terrain unchanged, so the baseline drift filter
+	# protects it and reground_drifted refuses to touch it.
+	controller.select_object(kind, 0)
+	controller.set_selected_position(grounded + Vector3(0, 0, 5.0))
+	assert_almost_eq((mission.get_entities(kind)[0]["position"] as Vector3).z, grounded.z + 5.0, 0.001,
+		"precondition: the entity floats 5 units above its bake")
+	assert_eq(controller.reconcile_with_terrain(), 0, "unchanged terrain reports no drift")
+	assert_eq(controller.reground_drifted(), 0, "the drift path protects it (baseline filter)")
+
+	var depth_before := controller.undo_depth()
+	var out: Dictionary = controller.reground_all()
+	assert_gt(int(out["checked"]), 0)
+	assert_eq(int(out["moved"]), 1, "reground_all plants the floated entity")
+	assert_almost_eq((mission.get_entities(kind)[0]["position"] as Vector3).z, grounded.z, 0.01,
+		"the stored position returns to the grounded bake")
+	assert_true(controller.is_dirty())
+	assert_eq(controller.undo_depth(), depth_before + 1, "the bulk repair is one undo step")
+	controller.undo()
+	assert_almost_eq((mission.get_entities(kind)[0]["position"] as Vector3).z, grounded.z + 5.0, 0.001,
+		"undo restores the pre-repair (floated) state")
+
+
+func test_reground_all_without_mission_is_inert() -> void:
+	var stub := StubTerrainEditor.new()
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.reground_all(), { "checked": 0, "moved": 0 })
+
+
+func test_move_selected_to_world_grounded_matches_direct_placement() -> void:
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	var kind := NovaMissionData.KIND_BUILDING
+	# Reference: the same item placed directly at the destination hit.
+	assert_true(controller.place_entity_at_world(102001, Vector3(80.0, 10.0, -20.0)))
+	var reference: Vector3 = mission.get_entities(kind)[0]["position"]
+	# Subject: placed elsewhere, then moved via the seam.
+	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
+	controller.select_object(kind, 1)
+	var depth_before := controller.undo_depth()
+	assert_true(controller.move_selected_to_world_grounded(Vector3(80.0, 10.0, -20.0)))
+	var moved: Vector3 = mission.get_entities(kind)[1]["position"]
+	assert_almost_eq(moved.x, reference.x, 0.001, "anchor parity: a grounded move equals a direct placement (x)")
+	assert_almost_eq(moved.y, reference.y, 0.001, "anchor parity (y)")
+	assert_almost_eq(moved.z, reference.z, 0.001, "anchor parity (z/height)")
+	assert_eq(controller.undo_depth(), depth_before + 1, "the move is one undo step")
+	controller.undo()
+	assert_almost_eq((mission.get_entities(kind)[1]["position"] as Vector3).x, 50.0, 1.0,
+		"undo restores the pre-move position")
+
+
+func test_move_selected_to_world_grounded_marker_stores_hit() -> void:
+	var controller := _new_with_item_db()
+	var mission := controller.get_mission()
+	var marker_id := -1
+	for item in controller.get_placeable_items():
+		if NovaMissionData.kind_for_item_type(int(item["type"])) == NovaMissionData.KIND_MARKER:
+			marker_id = int(item["id"])
+			break
+	assert_gt(marker_id, 0, "precondition: the items fixture carries a marker item")
+	assert_true(controller.place_entity_at_world(marker_id, Vector3(50.0, 10.0, -50.0)))
+	controller.select_object(NovaMissionData.KIND_MARKER, 0)
+	assert_true(controller.move_selected_to_world_grounded(Vector3(80.0, 10.0, -20.0)))
+	var pos: Vector3 = mission.get_entities(NovaMissionData.KIND_MARKER)[0]["position"]
+	assert_almost_eq(pos.x, 80.0, 0.001, "markers store the hit directly (BMS x)")
+	assert_almost_eq(pos.y, 20.0, 0.001, "BMS y = -world z")
+	assert_almost_eq(pos.z, 10.0, 0.001, "BMS z = world height")
+
+
+func test_move_selected_grounded_rejected_without_selection_or_while_simulating() -> void:
+	var controller := _new_with_item_db()
+	assert_false(controller.move_selected_to_world_grounded(Vector3(1, 10, 1)), "no selection -> false")
+	controller.get_mission().add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)
+	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
+	controller.sim_play()
+	assert_true(controller.is_simulating())
+	assert_false(controller.move_selected_to_world_grounded(Vector3(1, 10, 1)), "sim locks the seam")
+	controller.sim_stop()
+
+
+# Env reload: the stub gains an environment editor so _load_environment runs; the
+# seam must re-open the mission's env ref and layer the attrib-gated mission
+# overrides onto the preview (open_env emits before overrides exist, so the
+# controller re-fans-out afterwards).
+class StubEnvEditor:
+	extends Node
+
+	var env_file: EnvFile
+	var opened := ""
+	var defaults := 0
+	var emits := 0
+
+	func open_env(path: String) -> Error:
+		var next := EnvFile.new()
+		next.set_source_path(path)
+		var err := next.load()
+		if err != OK:
+			return err
+		env_file = next
+		opened = path
+		return OK
+
+	func create_default_environment(_mark_dirty: bool = true) -> void:
+		env_file = EnvFile.new()
+		env_file.reset_to_default()
+		defaults += 1
+
+	func _emit_all_changed() -> void:
+		emits += 1
+
+
+class StubEnvTerrainEditor:
+	extends StubTerrainEditor
+
+	var env_editor := StubEnvEditor.new()
+
+	func get_environment_editor() -> StubEnvEditor:
+		return env_editor
+
+
+func test_reload_environment_applies_ref_and_mission_overrides() -> void:
+	var stub := StubEnvTerrainEditor.new()
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/env"))
+	stub.resource_root = root
+	stub.world_root = Node3D.new()
+	stub.current_trn_path = "dvxi5.trn"
+	add_child_autofree(stub.world_root)
+	add_child_autofree(stub)
+	add_child_autofree(stub.env_editor)
+	var controller := MissionController.new(stub)
+	assert_eq(controller.new_mission(), OK)
+	assert_eq(stub.env_editor.defaults, 1, "a fresh mission resets the preview to the neutral default")
+
+	var mission := controller.get_mission()
+	mission.set_header_string("environment", "full_00")
+	assert_eq(controller.reload_environment(), "", "the env ref resolves and loads")
+	assert_string_contains(stub.env_editor.opened, "full_00.env")
+	assert_eq(stub.env_editor.emits, 0, "no overrides -> no extra fan-out needed")
+
+	# Gate a fog override on (attrib bit 0x2 gates fog_level) and reload: the
+	# preview must now layer the mission override and re-fan-out.
+	mission.set_header_flag(2, true)
+	assert_false((mission.get_environment_overrides() as Dictionary).is_empty(),
+		"precondition: the gate exposes an override payload")
+	assert_eq(controller.reload_environment(), "")
+	assert_eq(stub.env_editor.emits, 1, "overrides applied -> the preview re-emits past the bare .env values")
+
+
+func test_reload_environment_without_mission_reports() -> void:
+	var stub := StubTerrainEditor.new()
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	assert_string_contains(controller.reload_environment(), "no mission")

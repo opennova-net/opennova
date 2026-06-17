@@ -160,7 +160,9 @@ NW-C4 in [§8](net/novaworld-net-re.md). Re-anchored to retail (was jodemo-only)
 ## 5.5 Full client parity sweep (grill wave 7, 2026-06-14)
 
 All 24 client systems re-grilled (3 passes, adversarially verified). Verdict table + the full
-`D-NET-1..49` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here.
+`D-NET-1..60` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
+(`D-NET-58..60` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
+0x20 movementVal label corrections, 0x0B icon offset; see §5.11/§5.12/§5.19-§5.21).
 Newly-grilled originals (join key = addr):
 
 | original | addr | role | D-NET | status |

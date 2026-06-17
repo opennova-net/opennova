@@ -370,6 +370,13 @@ func _debug_runtime_source():
 	return _controller.get_sim_runtime() if _controller != null else null
 
 
+## The live runtime an external surface (the MCP agent service) should read:
+## the PIE world's when playing, else the in-place sim driver, else null.
+## Public mirror of _debug_runtime_source, same resolution order.
+func get_active_runtime():
+	return _debug_runtime_source()
+
+
 # The overlay drives the live runtime DIRECTLY (it is host-neutral and only
 # knows a runtime), so its transport presses bypass MissionController's
 # sim_play/sim_pause/sim_stop — whose `changed` signal is the only thing the

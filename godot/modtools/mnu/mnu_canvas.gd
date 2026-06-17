@@ -64,6 +64,9 @@ var _document: NovaMnuDocument
 var _resource_root: NovaResourceRoot
 var _text_resource: RtxtStringFile
 var _stylesheet: MnsStyleSheet
+# The document's own .mnu basename (shipped self-file screen actions compare
+# against it; see NovaMnuMenu.set_menu_file).
+var _menu_file := ""
 
 var _menu_size := Vector2(640, 480)
 # _fit_scale / _fit_offset are the base letterbox fit (board -> canvas). _zoom and
@@ -152,12 +155,15 @@ func _ready() -> void:
 
 
 # Point the preview at a document. resource_root/text_resource are optional; when
-# absent the builder degrades to placeholder visuals (M3 behavior).
-func set_menu(doc: NovaMnuDocument, resource_root: NovaResourceRoot, text_resource: RtxtStringFile, stylesheet: MnsStyleSheet = null) -> void:
+# absent the builder degrades to placeholder visuals (M3 behavior). menu_file is
+# the document's own .mnu basename (refreshed on every rebind; a Save As while
+# the preview plays keeps the old name until the next rebind).
+func set_menu(doc: NovaMnuDocument, resource_root: NovaResourceRoot, text_resource: RtxtStringFile, stylesheet: MnsStyleSheet = null, menu_file := "") -> void:
 	_document = doc
 	_resource_root = resource_root
 	_text_resource = text_resource
 	_stylesheet = stylesheet
+	_menu_file = menu_file
 	if doc != null:
 		_menu_size = Vector2(doc.get_menu_size())
 		# Re-seed the visible screen when it is empty OR a stale name the new
@@ -278,6 +284,7 @@ func _rebuild_preview() -> void:
 	_preview.set_resource_root(_resource_root)
 	_preview.set_text_resource(_text_resource)
 	_preview.set_stylesheet(_stylesheet)
+	_preview.set_menu_file(_menu_file)
 	# Assigning the menu rebuilds the widget tree when the preview is in the tree;
 	# in edit_mode build() shows every screen, so re-apply single-screen visibility.
 	_preview.menu = _document

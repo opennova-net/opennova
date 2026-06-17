@@ -39,7 +39,7 @@ namespace opennova {
 // the corresponding source field is non-zero (`if (value) flags |= bit; write`)
 // — so `Pool3SyncRecord::flags_byte` on the input is ignored and recomputed
 // here. Field→bit mapping (matching `decode_pool3_sync_batch`):
-//   0x01 parent_handle (u32) · 0x02 orientation_val (u32) · 0x04 ammo_count (u16)
+//   0x01 movement_val (u32, raw BAM heading — NOT a parent; D-NET-59) · 0x02 orientation_val (u32) · 0x04 ammo_count (u16)
 //   0x08 team_byte (u8) · 0x10 weapon_type (u16) · 0x20 score_byte (u8).
 // `net_handle` (u16) is always written, after the 0x04 field and before 0x08.
 //
@@ -56,14 +56,14 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // (NO start_index — unlike 0x20), then per record `[u16 spawn_flags][u16 slot_id]
 // [u16 item_type_id][cstr entity_name]` and the flag-gated body (entity_flags,
 // always-pos, vel/section/orient/parent/target, the 0x400 weapon block, the
-// always team_byte, the 0x800 AI trailer, alert/action/weapon_type, the health
+// always bone_byte (+290; team is the 0x0010-gated byte, D-NET-58), the 0x800 AI trailer, alert/action/weapon_type, the health
 // block, difficulty) — see decode_pool_spawn_batch for the exact field order.
 //
 // As with the pool-3 encoder, the spawn_flags word is DERIVED from which record
 // fields are populated (the original sets each bit inside `if (value) { … }`),
 // so `PoolSpawnRecord::spawn_flags` on the input is ignored and recomputed:
 //   0x0020 entity_flags!=0 · 0x0001/2/4 vel_{x,y,z}!=0 · 0x0008 section_mask!=0
-//   0x0010 orient_byte!=0 · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
+//   0x0010 team_byte!=0 (entity+354; D-NET-58) · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
 //   0x0400 weapon_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
 //   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 weapon_type_byte!=0
 //   0x2000 health_byte!=0 (writes health_byte+health_short) ELSE 0x8000 health_short!=0

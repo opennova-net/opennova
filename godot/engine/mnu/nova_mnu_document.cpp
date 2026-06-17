@@ -559,13 +559,30 @@ void NovaMnuDocument::set_window_rect(int p_id, const Rect2 &p_rect) {
 	if (!w) {
 		return;
 	}
+	// A negative extent means "auto-size": the writer then omits RIGHT/BOTTOM,
+	// which is how shipped menus spell art-sized toggles and auto-height labels
+	// (the original engine stretches appearance art across an explicit width).
+	const bool auto_width = p_rect.size.x < 0.0f;
+	const bool auto_height = p_rect.size.y < 0.0f;
 	mnu::Position &p = w->position;
 	p.left = static_cast<int>(p_rect.position.x);
 	p.top = static_cast<int>(p_rect.position.y);
-	p.right = static_cast<int>(p_rect.position.x + p_rect.size.x);
-	p.bottom = static_cast<int>(p_rect.position.y + p_rect.size.y);
-	p.has_left = p.has_top = p.has_right = p.has_bottom = true;
+	p.right = auto_width ? 0 : static_cast<int>(p_rect.position.x + p_rect.size.x);
+	p.bottom = auto_height ? 0 : static_cast<int>(p_rect.position.y + p_rect.size.y);
+	p.has_left = p.has_top = true;
+	p.has_right = !auto_width;
+	p.has_bottom = !auto_height;
 	touch();
+}
+
+int NovaMnuDocument::get_window_rect_flags(int p_id) const {
+	const mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return 0;
+	}
+	const mnu::Position &p = w->position;
+	return (p.has_left ? RECT_HAS_LEFT : 0) | (p.has_top ? RECT_HAS_TOP : 0) |
+			(p.has_right ? RECT_HAS_RIGHT : 0) | (p.has_bottom ? RECT_HAS_BOTTOM : 0);
 }
 
 String NovaMnuDocument::get_widget_text(int p_id) const {
@@ -671,6 +688,81 @@ void NovaMnuDocument::set_widget_sounds(int p_id, const TypedArray<Dictionary> &
 	}
 	w->sounds = next;
 	touch();
+}
+
+TypedArray<Dictionary> NovaMnuDocument::get_widget_appearances(int p_id) const {
+	TypedArray<Dictionary> out;
+	const mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return out;
+	}
+	for (const mnu::Appearance &a : w->appearances) {
+		Dictionary d;
+		d["state"] = to_gd(a.state);
+		d["type"] = to_gd(a.type);
+		d["value"] = to_gd(a.value);
+		d["map_state"] = a.map_state;
+		d["height"] = a.height;
+		out.push_back(d);
+	}
+	return out;
+}
+
+void NovaMnuDocument::set_widget_appearances(int p_id, const TypedArray<Dictionary> &p_rows) {
+	mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return;
+	}
+	std::vector<mnu::Appearance> next;
+	next.reserve(static_cast<size_t>(p_rows.size()));
+	for (int i = 0; i < p_rows.size(); ++i) {
+		const Dictionary d = p_rows[i];
+		mnu::Appearance a;
+		a.state = to_std(String(d.get("state", "")));
+		a.type = to_std(String(d.get("type", "")));
+		a.value = to_std(String(d.get("value", "")));
+		a.map_state = int(d.get("map_state", -1));
+		a.height = int(d.get("height", 0));
+		next.push_back(a);
+	}
+	w->appearances = next;
+	touch();
+}
+
+Dictionary NovaMnuDocument::get_window_frame(int p_id) const {
+	Dictionary out;
+	const mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return out;
+	}
+	out["stencil"] = to_gd(w->frame.stencil);
+	out["stencil_size"] = w->frame.stencil_size;
+	out["brush"] = to_gd(w->frame.brush);
+	out["monogram"] = to_gd(w->frame.monogram);
+	return out;
+}
+
+void NovaMnuDocument::set_window_frame(int p_id, const Dictionary &p_frame) {
+	mnu::Window *w = window_at(locate(p_id));
+	if (!w) {
+		return;
+	}
+	// insetx/insety stay untouched: they are round-trip data the bake ignores.
+	w->frame.stencil = to_std(String(p_frame.get("stencil", "")));
+	w->frame.stencil_size = int(p_frame.get("stencil_size", 0));
+	w->frame.brush = to_std(String(p_frame.get("brush", "")));
+	w->frame.monogram = to_std(String(p_frame.get("monogram", "")));
+	touch();
+}
+
+bool NovaMnuDocument::widget_has_scrollbar(int p_id) const {
+	const mnu::Window *w = window_at(locate(p_id));
+	return w != nullptr && w->table_data.scrollbar.present;
+}
+
+bool NovaMnuDocument::widget_has_spin_arrows(int p_id) const {
+	const mnu::Window *w = window_at(locate(p_id));
+	return w != nullptr && w->spinup.present && w->spindown.present;
 }
 
 TypedArray<Dictionary> NovaMnuDocument::get_widget_actions(int p_id) const {
@@ -1127,11 +1219,17 @@ int NovaMnuDocument::add_widget(int p_parent_id, int p_type, const Rect2 &p_rect
 	mnu::Window w;
 	w.type = static_cast<mnu::WindowType>(p_type);
 	w.name = mnu::window_type_name(w.type);
+	// Same auto-size convention as set_window_rect: a negative extent leaves
+	// has_right/has_bottom unset so the writer omits RIGHT/BOTTOM.
+	const bool auto_width = p_rect.size.x < 0.0f;
+	const bool auto_height = p_rect.size.y < 0.0f;
 	w.position.left = static_cast<int>(p_rect.position.x);
 	w.position.top = static_cast<int>(p_rect.position.y);
-	w.position.right = static_cast<int>(p_rect.position.x + p_rect.size.x);
-	w.position.bottom = static_cast<int>(p_rect.position.y + p_rect.size.y);
-	w.position.has_left = w.position.has_top = w.position.has_right = w.position.has_bottom = true;
+	w.position.right = auto_width ? 0 : static_cast<int>(p_rect.position.x + p_rect.size.x);
+	w.position.bottom = auto_height ? 0 : static_cast<int>(p_rect.position.y + p_rect.size.y);
+	w.position.has_left = w.position.has_top = true;
+	w.position.has_right = !auto_width;
+	w.position.has_bottom = !auto_height;
 	parent->children.push_back(std::move(w));
 
 	IdWindow id_node;
@@ -1165,8 +1263,21 @@ void NovaMnuDocument::delete_widget(int p_id) {
 int NovaMnuDocument::add_screen(const String &p_name) {
 	mnu::Screen screen;
 	screen.name = to_std(p_name);
-	screen.root_window.name = "ROOT";
+	// Stock-shaped root: every shipped screen root is a MAIN window with a full
+	// 4-corner POSITION and at least one APPEARANCE row — the original engine's
+	// layout/render paths assume them (a bare root crashed it).
+	screen.root_window.name = "MAIN";
 	screen.root_window.type = mnu::WindowType::Window;
+	mnu::Position &root_pos = screen.root_window.position;
+	root_pos.left = 0;
+	root_pos.top = 0;
+	root_pos.right = 800;
+	root_pos.bottom = 600;
+	root_pos.has_left = root_pos.has_top = root_pos.has_right = root_pos.has_bottom = true;
+	mnu::Appearance root_app;
+	root_app.type = "custom";
+	root_app.state = "default";
+	screen.root_window.appearances.push_back(root_app);
 	doc_.screens.push_back(std::move(screen));
 
 	IdScreen s;
@@ -1465,6 +1576,17 @@ void NovaMnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_widget_color", "id", "slot", "value"), &NovaMnuDocument::set_widget_color);
 	ClassDB::bind_method(D_METHOD("get_widget_texture", "id", "slot"), &NovaMnuDocument::get_widget_texture);
 	ClassDB::bind_method(D_METHOD("set_widget_texture", "id", "slot", "value"), &NovaMnuDocument::set_widget_texture);
+	ClassDB::bind_method(D_METHOD("get_widget_appearances", "id"), &NovaMnuDocument::get_widget_appearances);
+	ClassDB::bind_method(D_METHOD("set_widget_appearances", "id", "rows"), &NovaMnuDocument::set_widget_appearances);
+	ClassDB::bind_method(D_METHOD("get_window_frame", "id"), &NovaMnuDocument::get_window_frame);
+	ClassDB::bind_method(D_METHOD("set_window_frame", "id", "frame"), &NovaMnuDocument::set_window_frame);
+	ClassDB::bind_method(D_METHOD("widget_has_scrollbar", "id"), &NovaMnuDocument::widget_has_scrollbar);
+	ClassDB::bind_method(D_METHOD("widget_has_spin_arrows", "id"), &NovaMnuDocument::widget_has_spin_arrows);
+	ClassDB::bind_method(D_METHOD("get_window_rect_flags", "id"), &NovaMnuDocument::get_window_rect_flags);
+	BIND_CONSTANT(RECT_HAS_LEFT);
+	BIND_CONSTANT(RECT_HAS_TOP);
+	BIND_CONSTANT(RECT_HAS_RIGHT);
+	BIND_CONSTANT(RECT_HAS_BOTTOM);
 	ClassDB::bind_method(D_METHOD("get_widget_flags", "id"), &NovaMnuDocument::get_widget_flags);
 	ClassDB::bind_method(D_METHOD("set_widget_flags", "id", "flags"), &NovaMnuDocument::set_widget_flags);
 	ClassDB::bind_method(D_METHOD("get_widget_group", "id"), &NovaMnuDocument::get_widget_group);

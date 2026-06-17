@@ -766,6 +766,35 @@ func reground_drifted() -> int:
 	return moved
 
 
+## Snap EVERY entity onto the current surface as one undo step — the bulk-repair
+## seam (MCP reground_mission). Unlike reground_drifted there is NO baseline
+## filter: rows whose terrain never moved are re-grounded too, which is exactly
+## the mis-grounded-mission repair the drift path is designed to skip (its
+## filter protects deliberate off-surface authoring; this seam plants those
+## too, so callers must warn). Returns { checked, moved }.
+func reground_all() -> Dictionary:
+	if _mission == null or _reject_edit_while_simulating():
+		return { "checked": 0, "moved": 0 }
+	var requests := _reground_requests_cached()
+	_flush_edit()
+	_mission.begin_edit()
+	var result: Dictionary = _mission.reground_entities_apply(requests, REGROUND_EPSILON)
+	var moved := int(result.get("moved", 0))
+	_mission.commit_edit() # pushes one step only if something actually moved
+	# Same pure-z reasoning as reground_drifted: the cached rows stay byte-valid
+	# for the post-apply document, so re-key the token before re-recording.
+	_reground_cache_token = _reground_token()
+	_record_ground_state()
+	if moved > 0:
+		if not _apply_reground_world_update(requests,
+				result.get("rows", PackedInt32Array()),
+				result.get("positions", PackedVector3Array())):
+			_rebake_objects()
+		mark_dirty()
+	_report("Re-grounded %d of %d entities." % [moved, requests.size()])
+	return { "checked": requests.size(), "moved": moved }
+
+
 # Post-apply world sync for a bulk re-ground: rewrite only the moved entities'
 # MultiMesh slots / animated nodes / pick bodies in place — the same absolute
 # writes _apply_selected_xform does for the selection — instead of re-baking
@@ -991,6 +1020,29 @@ func save_as(dir_path: String) -> Error:
 		_notify_changed()
 	else:
 		_last_status = "Could not save %s: %s" % [filename, _mission.get_last_error()]
+	return err as Error
+
+
+## Save to an explicit .bms file path (the MCP save seam). Mirrors save_as(),
+## which takes a directory and composes the filename from the current path;
+## this takes the full destination and adopts it as the current path.
+func save_as_path(path: String) -> Error:
+	if _mission == null:
+		return ERR_UNAVAILABLE
+	if path.is_empty() or path.get_extension().to_lower() != "bms":
+		return ERR_INVALID_PARAMETER
+	var mkdir := DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	if mkdir != OK:
+		return mkdir
+	var err := int(_mission.save_as(path))
+	if err == OK:
+		_current_path = path
+		_last_open_dir = path.get_base_dir()
+		_mission.mark_clean()
+		_last_status = "Saved %s." % path.get_file()
+		_notify_changed()
+	else:
+		_last_status = "Could not save %s: %s" % [path.get_file(), _mission.get_last_error()]
 	return err as Error
 
 
@@ -1857,6 +1909,24 @@ func _commit_selected_transform() -> void:
 		if int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
 			_refresh_marker_overlay()
 		mark_dirty()
+
+
+## Programmatic grounded move (the MCP edit seam): drop the SELECTED entity so
+## its ground point sits at a world-space terrain hit — the viewport drag's
+## anchor bake (origin = hit − rotated ground anchor; hit stored directly for
+## markers) — as one closed undo step. Returns false with no selection, no
+## mission, or while simulating.
+func move_selected_to_world_grounded(global_hit: Vector3) -> bool:
+	if _selected_ref.is_empty() or _mission == null:
+		return false
+	if _reject_edit_while_simulating():
+		return false
+	_flush_edit()
+	begin_edit()
+	_move_selected_to_world(global_hit)
+	_commit_selected_transform()
+	commit_edit()
+	return true
 
 
 # --- Authoring (Phase 2): numeric / property edits from the inspector ---------
@@ -3644,6 +3714,16 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 		if env_path.is_empty():
 			note = "environment %s was not found" % env_ref
 		elif env_editor.has_method("open_env") and int(env_editor.open_env(env_path)) == OK:
+			# Game parity: the runtime layers the mission's attrib-gated fog/water
+			# overrides on top of the .env (get_environment_overrides builds exactly
+			# the apply_mission_overrides payload). Apply them to the preview too,
+			# then re-fan-out — open_env already emitted with the bare .env values.
+			var env_file: Variant = env_editor.get("env_file")
+			var overrides: Dictionary = mission.get_environment_overrides()
+			if env_file != null and not overrides.is_empty() and env_file.has_method("apply_mission_overrides"):
+				env_file.apply_mission_overrides(overrides)
+				if env_editor.has_method("_emit_all_changed"):
+					env_editor._emit_all_changed()
 			return ""  # loaded the mission's own environment; nothing to reset or note
 		else:
 			note = "environment %s could not be loaded" % env_ref
@@ -3653,6 +3733,20 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 	if env_editor.has_method("create_default_environment"):
 		env_editor.create_default_environment(false)
 	return note
+
+
+## Re-apply the open mission's environment (ref + fog/water overrides) to the
+## editor preview — the seam the MCP set_mission_header tool calls after the
+## `environment` header changes, since open/new are otherwise the only times
+## the preview tracks the mission. Returns the load note ("" on success).
+func reload_environment() -> String:
+	if _mission == null:
+		return "no mission open"
+	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root() \
+			if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
+	if resource_root == null:
+		return "no resource root mounted"
+	return _load_environment(_mission, resource_root)
 
 
 func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, timeline: PerfTimeline = null) -> void:

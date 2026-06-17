@@ -93,7 +93,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		if (rec.spawn_flags & 0x0002) rec.vel_y = int32_t(c.u32());
 		if (rec.spawn_flags & 0x0004) rec.vel_z = int32_t(c.u32());
 		if (rec.spawn_flags & 0x0008) rec.section_mask = int32_t(c.u32());
-		if (rec.spawn_flags & 0x0010) rec.orient_byte = c.u8();
+		if (rec.spawn_flags & 0x0010) rec.team_byte = c.u8();  // entity+354, BMS team (D-NET-58)
 		if (rec.spawn_flags & 0x0100) rec.parent_handle = c.u16();
 		if (rec.spawn_flags & 0x0200) rec.target_handle = c.u16();
 
@@ -120,7 +120,7 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 			rec.extra_handle_1 = c.u16();
 		}
 
-		rec.team_byte = c.u8();
+		rec.bone_byte = c.u8();  // entity+290, unconditional bone/other byte — NOT team (D-NET-58)
 
 		if (rec.spawn_flags & 0x0800) {
 			rec.ai_profile_1 = c.u32();
@@ -178,7 +178,7 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.flags_byte & 0x01) rec.parent_handle = c.u32();
+		if (rec.flags_byte & 0x01) rec.movement_val = c.u32();  // entitySlot+16, raw BAM heading — NOT parent (D-NET-59)
 		if (rec.flags_byte & 0x02) rec.orientation_val = c.u32();
 		if (rec.flags_byte & 0x04) rec.ammo_count = c.u16();
 		rec.net_handle = c.u16();
@@ -191,6 +191,27 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 		if (!record_ok) return false;
 	}
 
+	return (c.p == c.end);
+}
+
+// S2C 0x40 minimap-overlay update / capture-zone state (§5.19).
+// [orig: NapiNPClientMsg_0x040 @ 0x425A50 → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte walker)]
+bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
+                                 CaptureZoneOverlayBatch &out) {
+	out = CaptureZoneOverlayBatch{};
+	Cursor c{body, body + len, true};
+	out.count = c.u8();
+	for (uint8_t i = 0; i < out.count && c.ok; ++i) {
+		CaptureZoneOverlay e;
+		e.handle     = c.u16();
+		e.param      = c.u8();
+		e.icon_color = c.u8();
+		e.flags      = c.u8();
+		e.source     = c.u8();
+		const bool record_ok = c.ok;
+		out.entries.push_back(e);
+		if (!record_ok) return false;
+	}
 	return (c.p == c.end);
 }
 

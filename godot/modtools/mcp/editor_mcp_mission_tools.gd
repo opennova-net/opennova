@@ -1,0 +1,756 @@
+class_name EditorMcpMissionTools
+extends RefCounted
+
+## The mission-authoring MCP tools: every mutation routes through the
+## MissionController seams the editor UI itself uses — placement and moves bake
+## the model's ground anchor against terrain heights the TOOL samples (callers
+## never supply heights), waypoint markers ground the same way, properties go
+## through the validated setters, and the sim transport mirrors the sim bar.
+## Holding the API wrong (the raw-script era's floating objects) is impossible
+## by construction.
+
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
+const ROW_CAP := 100
+const INT_PROPS: Array[String] = [
+	"group", "waypoint_id", "wp_number", "team", "ai_flags", "perception",
+	"accuracy", "alert_state", "min_engagement_distance", "max_engagement_distance",
+	"max_attack_distance", "spawn_count", "max_simultaneous", "no_less_than", "map_symbol",
+]
+const STRING_PROPS: Array[String] = ["name1", "name2"]
+const HEADER_STRINGS: Array[String] = ["mission_name", "designer", "briefing", "terrain", "environment"]
+const HEADER_INTS: Array[String] = [
+	"climate", "weather", "mission_type", "attrib_flags", "start_time", "minutes_per_day",
+	"player_health", "max_saves", "music", "reverb", "wind_speed", "wind_direction",
+	"water_override", "fog_override",
+]
+
+var service: Node
+
+
+func _init(mcp_service: Node) -> void:
+	service = mcp_service
+
+
+func register_all(registry: McpToolRegistry) -> void:
+	registry.register(_def("list_items",
+			"The placeable item palette (items.def) of the open mission: rows {id, name, type, kind, kind_label}. Pass id to place_entities. kind: 0=marker (player starts, gizmo markers), 1=item, 2=building, 3=person (AI organic). filter is a case-insensitive name substring. Requires an open mission (open_in_workspace workspace=\"mission\").",
+			{
+				"filter": { "type": "string", "default": "" },
+				"kind": { "type": "integer", "enum": [0, 1, 2, 3] },
+				"limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 2000 },
+				"offset": { "type": "integer", "default": 0 },
+			}), Callable(self, "_tool_list_items"))
+	registry.register(_def("sample_terrain",
+			"Terrain surface heights under world-space points: points=[[x,z],...] -> heights[i] = ground y, null when off the terrain. This is the live surface the editor grounds placements on — mostly diagnostic, since place_entities and edit_waypoint_path sample for you.",
+			{
+				"points": { "type": "array", "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }, "minItems": 1, "maxItems": 1024 },
+			}, ["points"]), Callable(self, "_tool_sample_terrain"))
+	registry.register(_def("place_entities",
+			"Place new entities standing ON the terrain, exactly as the editor's click-placement grounds them: the tool samples the surface at each (x, z) and bakes the model's ground anchor — never supply or guess heights. rows: [{item_id (from list_items), x, z (world-space), yaw_deg?, name1? (AI class), name2? (AI script), team?, group?, waypoint_id? (path the unit follows), properties? (int field -> value)}]. Off-terrain rows fail individually without aborting the batch; each placement is its own undo step, like hand-placing. Max 100 rows per call. Rejected while the simulation runs — sim_control(action=\"stop\") first. Marks the mission dirty; never save unless asked.",
+			{
+				"rows": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "type": "object",
+					"properties": {
+						"item_id": { "type": "integer" }, "x": { "type": "number" }, "z": { "type": "number" },
+						"yaw_deg": { "type": "number" }, "name1": { "type": "string" }, "name2": { "type": "string" },
+						"team": { "type": "integer" }, "group": { "type": "integer" }, "waypoint_id": { "type": "integer" },
+						"properties": { "type": "object" },
+					}, "required": ["item_id", "x", "z"] } },
+			}, ["rows"], { "timeout_ms": 120000 }), Callable(self, "_tool_place_entities"))
+	registry.register(_def("get_mission_entities",
+			"List or inspect the open mission's entities. Record positions are BMS mission-space ({x,y,z}, z up) plus a world [x,y,z] echo (y up). Filters: kind (0=marker 1=item 2=building 3=person), name (model-name substring), team, group, item_id. detail={kind,index} returns ONE entity's complete authored record instead. While simulating, person entities carry a live overlay (position, health, state).",
+			{
+				"kind": { "type": "integer", "enum": [0, 1, 2, 3] },
+				"name": { "type": "string" },
+				"team": { "type": "integer" },
+				"group": { "type": "integer" },
+				"item_id": { "type": "integer" },
+				"limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 },
+				"offset": { "type": "integer", "default": 0 },
+				"detail": { "type": "object", "properties": { "kind": { "type": "integer" }, "index": { "type": "integer" } } },
+			}), Callable(self, "_tool_get_entities"))
+	registry.register(_def("edit_mission_entity",
+			"Edit one existing entity by (kind, index) — exactly one op per call. move={x,z}: re-grounds it on the terrain at the new spot (the editor's drag bake; never pass y). rotate={yaw_deg?,pitch_deg?,roll_deg?}: omitted axes keep their value (stored as integer degrees). set={int property -> value} (group, waypoint_id, wp_number, team, ai_flags, perception, accuracy, alert_state, min/max_engagement_distance, max_attack_distance, spawn_count, max_simultaneous, no_less_than, map_symbol). set_strings={name1? (AI class), name2? (AI script)}. delete=true removes it (later indices of that kind shift — re-list before further edits). One undo step per call (set: one per field). Rejected while simulating.",
+			{
+				"kind": { "type": "integer" }, "index": { "type": "integer" },
+				"move": { "type": "object", "properties": { "x": { "type": "number" }, "z": { "type": "number" } } },
+				"rotate": { "type": "object", "properties": { "yaw_deg": { "type": "number" }, "pitch_deg": { "type": "number" }, "roll_deg": { "type": "number" } } },
+				"set": { "type": "object" },
+				"set_strings": { "type": "object", "properties": { "name1": { "type": "string" }, "name2": { "type": "string" } } },
+				"delete": { "type": "boolean" },
+			}, ["kind", "index"]), Callable(self, "_tool_edit_entity"))
+	registry.register(_def("edit_waypoint_path",
+			"Author waypoint paths — the routes AI units follow (a unit follows the path named by its waypoint_id property). One op per call: new_path (selects the first empty path, returns its index); select_path={path}; add_markers={points:[[x,z],...]} appends grounded markers to the ACTIVE path in order (world x/z, terrain-sampled, off-terrain points fail per-point); set_flags={loop?,blue?,red?} — paths loop by default (loop=true clears the on-disk DOES_NOT_LOOP bit; handled for you); assign_entity={kind,index,path}; delete_marker={marker_index}; list (all summaries + active detail). Marker ops switch the editor into Waypoints mode so the overlay is visible. Rejected while simulating.",
+			{
+				"op": { "type": "string", "enum": ["new_path", "select_path", "add_markers", "set_flags", "assign_entity", "delete_marker", "list"] },
+				"path": { "type": "integer" },
+				"points": { "type": "array", "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }, "maxItems": 100 },
+				"loop": { "type": "boolean", "default": true },
+				"blue": { "type": "boolean", "default": false },
+				"red": { "type": "boolean", "default": false },
+				"kind": { "type": "integer" }, "index": { "type": "integer" },
+				"marker_index": { "type": "integer" },
+			}, ["op"]), Callable(self, "_tool_waypoints"))
+	registry.register(_def("set_mission_header",
+			"Set mission header fields; fields is a {name -> value} map, one undo step per field. Strings: mission_name, designer, briefing, environment (.env basename — the editor preview reloads to match the game, including the mission's fog/water overrides), terrain (terrain basename — does NOT reload the loaded terrain; avoid unless asked). Ints: climate, weather, mission_type, attrib_flags, start_time, minutes_per_day, player_health, max_saves, music, reverb, wind_speed, wind_direction, water_override (s16 half-units), fog_override (fog distance). The two *_override values only take effect when their attrib_flags bit is set (water 0x1, fog-distance 0x2) — set both, or the value is dormant (and an enabled bit with a 0 value fogs the map out). Unknown fields are rejected up front with this list.",
+			{ "fields": { "type": "object" } }, ["fields"]), Callable(self, "_tool_set_header"))
+	registry.register(_def("reground_mission",
+			"Repair: snap EVERY entity back onto the terrain surface in one undo step. Use when objects float or sink (placed at guessed heights, or terrain edits moved the ground). Unlike the editor's drift prompt this does not skip rows whose terrain never changed, so it fixes mis-grounded missions — but entities deliberately authored off the ground get planted too; warn the user if that may apply. Rejected while simulating.",
+			{}, [], { "timeout_ms": 120000 }), Callable(self, "_tool_reground"))
+	registry.register(_def("analyze_mission",
+			"Composition report for a mission — the open one (no args) or ANY .bms by name/path (read-only; nothing opens in the editor). Header info, entity counts by kind, the most-used items with names, the densest 64m world-space cells (centers you can set_camera at), waypoint path summaries with loop bits, and team / AI-class (name1) / alert distributions for AI persons. Use it to study a stock mission's patterns before authoring in its style.",
+			{
+				"path": { "type": "string" },
+				"top": { "type": "integer", "default": 15, "minimum": 1, "maximum": 50 },
+			}, [], { "timeout_ms": 60000 }), Callable(self, "_tool_analyze"))
+	registry.register(_def("save_mission",
+			"Write the open mission to disk. ONLY call this when the user explicitly asked to save. No args: saves to its current path (errors if never saved — pass path). path: a filename (\"patrol.bms\", written into the mounted resource root) or an absolute path; must end in .bms and becomes the mission's current path. Clears the dirty flag; undo history survives.",
+			{ "path": { "type": "string" } }), Callable(self, "_tool_save"))
+	registry.register(_def("sim_control",
+			"Drive the in-editor mission simulation — the same AI and pacing the game runs, over the authored data. action=play|pause|step|stop; step advances `steps` ticks (max 600). While the sim runs ALL editing tools are rejected; stop also rewinds the world to the authored state. Unavailable while a human's Play-in-Editor session owns the runtime.",
+			{
+				"action": { "type": "string", "enum": ["play", "pause", "step", "stop"] },
+				"steps": { "type": "integer", "default": 1, "minimum": 1, "maximum": 600 },
+			}, ["action"], { "timeout_ms": 60000 }), Callable(self, "_tool_sim_control"))
+	registry.register(_def("get_sim_state",
+			"Live runtime state while simulating or playing-in-editor: logic tick, AI entity counts, WAC scripting state, non-zero mission/global variables, fired event flags — and entity=<index> returns one AI entity's full debug card (position, health, AI state, waypoint progress). Read-only and safe to poll; returns {active:false} with a hint when nothing runs.",
+			{
+				"entity": { "type": "integer" },
+				"include_variables": { "type": "boolean", "default": true },
+				"include_wac": { "type": "boolean", "default": true },
+			}, [], { "serial": false }), Callable(self, "_tool_sim_state"))
+
+
+static func _def(name: String, description: String, properties := {}, required: Array = [], extra := {}) -> Dictionary:
+	var schema := { "type": "object", "properties": properties }
+	if not required.is_empty():
+		schema["required"] = required
+	var def := { "name": name, "description": description, "input_schema": schema }
+	def.merge(extra)
+	return def
+
+
+# --- shared guards / helpers ---------------------------------------------------
+
+# The open mission's controller, or an error result. Every mission tool funnels
+# through here so the "open a mission first" guidance is uniform.
+func _require_mission(ctx: McpToolContext) -> Dictionary:
+	var controller: Variant = ctx.mission()
+	if controller == null or not controller.has_method("is_loaded") or not controller.is_loaded():
+		return { "error": "No mission open — open_in_workspace(workspace=\"mission\", path=...) first; list candidates with list_assets(kind=\"mission\")." }
+	return { "controller": controller }
+
+
+# Mission present AND editable (the simulation locks every mutation, mirroring
+# the editor's own edit guard).
+func _require_editable(ctx: McpToolContext) -> Dictionary:
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return gate
+	var controller: Variant = gate["controller"]
+	if controller.has_method("is_simulating") and controller.is_simulating():
+		return { "error": "The simulation owns the world — sim_control(action=\"stop\") first (stop rewinds to the authored state)." }
+	var ws: Variant = ctx.workspace("mission")
+	if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission():
+		return { "error": "A Play-in-Editor session owns the world — stop it in the editor before editing." }
+	return gate
+
+
+# Batch-sample terrain heights at world (x, z) pairs; null per off-terrain point.
+func _sample(ctx: McpToolContext, points: PackedVector2Array) -> Array:
+	var out: Array = []
+	if ctx.editor == null or not ctx.editor.has_method("sample_heights_world"):
+		return out
+	var heights: PackedFloat32Array = ctx.editor.sample_heights_world(points)
+	for h in heights:
+		out.append(null if is_nan(h) else h)
+	return out
+
+
+static func _kind_label(kind: int) -> String:
+	match kind:
+		NovaMissionData.KIND_MARKER:
+			return "marker"
+		NovaMissionData.KIND_ITEM:
+			return "item"
+		NovaMissionData.KIND_BUILDING:
+			return "building"
+		NovaMissionData.KIND_ORGANIC:
+			return "person"
+	return str(kind)
+
+
+static func _world_echo(bms_pos: Vector3) -> Array:
+	var world := MissionObjectPlacer.bms_to_godot_position(bms_pos)
+	return [world.x, world.y, world.z]
+
+
+# --- discovery ------------------------------------------------------------------
+
+func _tool_list_items(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var filter := String(args.get("filter", "")).to_lower()
+	var want_kind := int(args.get("kind", -1)) if args.has("kind") else -1
+	var matched: Array = []
+	for item: Dictionary in controller.get_placeable_items():
+		var kind := int(NovaMissionData.kind_for_item_type(int(item["type"])))
+		if want_kind >= 0 and kind != want_kind:
+			continue
+		if not filter.is_empty() and not String(item["display_name"]).to_lower().contains(filter):
+			continue
+		matched.append({
+			"id": item["id"], "name": item["display_name"], "type": item["type"],
+			"kind": kind, "kind_label": _kind_label(kind),
+		})
+	var offset := maxi(int(args.get("offset", 0)), 0)
+	var limit := clampi(int(args.get("limit", 200)), 1, 2000)
+	var page := matched.slice(offset, offset + limit)
+	return { "items": page, "total": matched.size(), "truncated": offset + page.size() < matched.size() }
+
+
+func _tool_sample_terrain(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	if ctx.editor == null or not ctx.editor.has_method("sample_heights_world"):
+		return McpToolResult.error("No terrain loaded — open a terrain or mission first.")
+	var points := PackedVector2Array()
+	for pair in args.get("points", []):
+		if pair is Array and pair.size() >= 2:
+			points.append(Vector2(float(pair[0]), float(pair[1])))
+	if points.is_empty():
+		return McpToolResult.error("points must be [[x, z], ...] in world space.")
+	var heights := _sample(ctx, points)
+	var off := 0
+	for h in heights:
+		if h == null:
+			off += 1
+	return { "heights": heights, "off_terrain": off }
+
+
+# --- placement / editing ---------------------------------------------------------
+
+func _tool_place_entities(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_editable(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var rows: Array = args.get("rows", []) if args.get("rows") is Array else []
+	if rows.is_empty():
+		return McpToolResult.error("rows is required: [{item_id, x, z, ...}].")
+	if rows.size() > ROW_CAP:
+		return McpToolResult.error("Too many rows (%d) — max %d per call; batch across calls." % [rows.size(), ROW_CAP])
+	var points := PackedVector2Array()
+	for row: Dictionary in rows:
+		points.append(Vector2(float(row.get("x", 0.0)), float(row.get("z", 0.0))))
+	var heights := _sample(ctx, points)
+	if heights.is_empty():
+		return McpToolResult.error("No terrain loaded to ground placements on.")
+	var results: Array = []
+	var placed := 0
+	for i in range(rows.size()):
+		var row: Dictionary = rows[i]
+		if heights[i] == null:
+			results.append({ "ok": false, "error": "off the terrain at (%.0f, %.0f)" % [points[i].x, points[i].y] })
+			continue
+		var hit := Vector3(points[i].x, float(heights[i]), points[i].y)
+		if not controller.place_entity_at_world(int(row.get("item_id", 0)), hit):
+			results.append({ "ok": false, "error": String(controller.get_last_status()) })
+			continue
+		var sel: Dictionary = controller.get_selection_summary()
+		var row_out := {
+			"ok": true,
+			"kind": sel.get("kind", -1), "kind_label": _kind_label(int(sel.get("kind", -1))),
+			"index": sel.get("index", -1), "grounded_y": heights[i],
+		}
+		var issue := _apply_row_extras(controller, row)
+		if not issue.is_empty():
+			row_out["warning"] = issue
+		results.append(row_out)
+		placed += 1
+		if placed % 10 == 0:
+			await ctx.frames(1)
+	return { "placed": placed, "failed": rows.size() - placed, "rows": results, "dirty": controller.is_dirty() }
+
+
+# Post-place extras for one row (rotation, AI fields, properties) on the
+# still-selected new entity. Returns a warning string for rejected keys.
+func _apply_row_extras(controller: Variant, row: Dictionary) -> String:
+	var rejected := PackedStringArray()
+	var yaw := float(row.get("yaw_deg", 0.0))
+	if absf(yaw) > 0.01:
+		controller.set_selected_rotation(Vector3(0, yaw, 0))
+		controller.commit_edit()
+	if row.has("team"):
+		controller.set_selected_team(int(row["team"]))
+	if row.has("group"):
+		controller.set_selected_group(int(row["group"]))
+	if row.has("waypoint_id"):
+		controller.set_selected_property("waypoint_id", int(row["waypoint_id"]))
+	for key in ["name1", "name2"]:
+		if row.has(key):
+			controller.set_selected_string_property(key, String(row[key]))
+	var properties: Dictionary = row.get("properties", {}) if row.get("properties") is Dictionary else {}
+	for key in properties:
+		if INT_PROPS.has(String(key)):
+			controller.set_selected_property(String(key), int(properties[key]))
+		else:
+			rejected.append(String(key))
+	if rejected.is_empty():
+		return ""
+	return "unknown properties ignored: %s (valid: %s)" % [", ".join(rejected), ", ".join(INT_PROPS)]
+
+
+func _tool_get_entities(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var mission: Variant = controller.get_mission()
+	if args.get("detail") is Dictionary:
+		var detail: Dictionary = args["detail"]
+		var record: Dictionary = mission.get_entity(int(detail.get("kind", -1)), int(detail.get("index", -1)))
+		if record.is_empty():
+			return McpToolResult.error("No entity at (kind=%s, index=%s) — list with get_mission_entities." % [detail.get("kind"), detail.get("index")])
+		record["kind_label"] = _kind_label(int(detail.get("kind", -1)))
+		if record.get("position") is Vector3:
+			record["world_position"] = _world_echo(record["position"])
+		record["live"] = _live_card(ctx, int(detail.get("kind", -1)), int(detail.get("index", -1)))
+		return record
+	var simulating: bool = controller.has_method("is_simulating") and controller.is_simulating()
+	var live := _live_cards_by_ref(ctx) if simulating else {}
+	var matched: Array = []
+	for row: Dictionary in controller.get_object_list():
+		if args.has("kind") and int(row.get("kind", -1)) != int(args["kind"]):
+			continue
+		if args.has("item_id") and int(row.get("item_id", -1)) != int(args["item_id"]):
+			continue
+		if args.has("name") and not String(row.get("name", "")).to_lower().contains(String(args["name"]).to_lower()):
+			continue
+		matched.append(row)
+	var offset := maxi(int(args.get("offset", 0)), 0)
+	var limit := clampi(int(args.get("limit", 200)), 1, 1000)
+	var out: Array = []
+	var skipped := 0
+	for row: Dictionary in matched:
+		var record: Dictionary = mission.get_entity(int(row["kind"]), int(row["index"]))
+		if args.has("team") and int(record.get("team", -1)) != int(args["team"]):
+			skipped += 1
+			continue
+		if args.has("group") and int(record.get("group", record.get("group_id", -1))) != int(args["group"]):
+			skipped += 1
+			continue
+		var entry := {
+			"kind": row["kind"], "kind_label": _kind_label(int(row["kind"])),
+			"index": row["index"], "item_id": row["item_id"], "name": row["name"],
+			"position": record.get("position"),
+			"rotation_deg": record.get("rotation_deg"),
+			"team": record.get("team"), "waypoint_id": record.get("waypoint_id"),
+		}
+		if record.get("position") is Vector3:
+			entry["world_position"] = _world_echo(record["position"])
+		var live_key := "%d:%d" % [int(row["kind"]), int(row["index"])]
+		if live.has(live_key):
+			entry["live"] = live[live_key]
+		out.append(entry)
+	var page := out.slice(offset, offset + limit)
+	return { "entities": page, "total": out.size(), "truncated": offset + page.size() < out.size(), "simulating": simulating }
+
+
+func _live_cards_by_ref(ctx: McpToolContext) -> Dictionary:
+	var sim: Variant = ctx.sim()
+	if sim == null:
+		return {}
+	var cards := {}
+	for i in range(int(sim.get_entity_count())):
+		var card: Dictionary = sim.get_entity_debug(i)
+		cards["%d:%d" % [int(card.get("kind", -1)), int(card.get("index", -1))]] = {
+			"position": card.get("position"), "health": card.get("health"),
+			"alive": card.get("alive"), "state": card.get("state_name", card.get("state")),
+		}
+	return cards
+
+
+func _live_card(ctx: McpToolContext, kind: int, index: int) -> Variant:
+	var cards := _live_cards_by_ref(ctx)
+	return cards.get("%d:%d" % [kind, index])
+
+
+func _tool_edit_entity(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_editable(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var ops := PackedStringArray()
+	for op in ["move", "rotate", "set", "set_strings", "delete"]:
+		if args.has(op):
+			ops.append(op)
+	if ops.size() != 1:
+		return McpToolResult.error("Exactly one op per call (move | rotate | set | set_strings | delete); got: %s" % [ops])
+	var kind := int(args.get("kind", -1))
+	var index := int(args.get("index", -1))
+	controller.select_object(kind, index)
+	if (controller.get_selection_summary() as Dictionary).is_empty():
+		return McpToolResult.error("No entity at (kind=%d, index=%d) — get_mission_entities lists them." % [kind, index])
+	var op := String(ops[0])
+	match op:
+		"move":
+			var move: Dictionary = args["move"]
+			var heights := _sample(ctx, PackedVector2Array([Vector2(float(move.get("x", 0)), float(move.get("z", 0)))]))
+			if heights.is_empty() or heights[0] == null:
+				return McpToolResult.error("(%.0f, %.0f) is off the terrain." % [float(move.get("x", 0)), float(move.get("z", 0))])
+			if not controller.move_selected_to_world_grounded(Vector3(float(move["x"]), float(heights[0]), float(move["z"]))):
+				return McpToolResult.error("Move rejected: %s" % controller.get_last_status())
+		"rotate":
+			var rotate: Dictionary = args["rotate"]
+			var current: Vector3 = controller.get_selected_rotation()
+			var merged := Vector3(
+				float(rotate.get("pitch_deg", current.x)),
+				float(rotate.get("yaw_deg", current.y)),
+				float(rotate.get("roll_deg", current.z)))
+			controller.set_selected_rotation(merged)
+			controller.commit_edit()
+		"set":
+			var fields: Dictionary = args["set"]
+			for key in fields:
+				if not INT_PROPS.has(String(key)):
+					return McpToolResult.error("Unknown property '%s'. Valid: %s" % [key, ", ".join(INT_PROPS)])
+			for key in fields:
+				match String(key):
+					"team":
+						controller.set_selected_team(int(fields[key]))
+					"group":
+						controller.set_selected_group(int(fields[key]))
+					_:
+						controller.set_selected_property(String(key), int(fields[key]))
+		"set_strings":
+			var strings: Dictionary = args["set_strings"]
+			for key in strings:
+				if not STRING_PROPS.has(String(key)):
+					return McpToolResult.error("Unknown string property '%s'. Valid: %s" % [key, ", ".join(STRING_PROPS)])
+			for key in strings:
+				controller.set_selected_string_property(String(key), String(strings[key]))
+		"delete":
+			if not bool(args["delete"]):
+				return McpToolResult.error("delete must be true to remove the entity.")
+			if not controller.delete_selected():
+				return McpToolResult.error("Delete rejected: %s" % controller.get_last_status())
+			return { "ok": true, "op": "delete", "dirty": controller.is_dirty() }
+	var record: Dictionary = controller.get_mission().get_entity(kind, index)
+	if record.get("position") is Vector3:
+		record["world_position"] = _world_echo(record["position"])
+	return { "ok": true, "op": op, "entity": record, "dirty": controller.is_dirty() }
+
+
+# --- waypoints -------------------------------------------------------------------
+
+func _tool_waypoints(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var op := String(args.get("op", ""))
+	var gate := _require_mission(ctx) if op == "list" else _require_editable(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	match op:
+		"new_path":
+			controller.set_waypoint_mode(true)
+			var index := int(controller.select_new_waypoint_path())
+			if index < 0:
+				return McpToolResult.error("All 128 waypoint paths are in use.")
+			return { "ok": true, "path": index, "active": controller.get_active_waypoint_path() }
+		"select_path":
+			controller.set_waypoint_mode(true)
+			controller.select_waypoint_path(int(args.get("path", -1)))
+			var active: Dictionary = controller.get_active_waypoint_path()
+			if active.is_empty():
+				return McpToolResult.error("No path %s — op=\"list\" shows them; op=\"new_path\" creates one." % args.get("path"))
+			return { "ok": true, "active": active }
+		"add_markers":
+			if int(controller.get_selected_waypoint_path_index()) < 0:
+				return McpToolResult.error("No active path — op=\"new_path\" or op=\"select_path\" first.")
+			var raw: Array = args.get("points", []) if args.get("points") is Array else []
+			if raw.is_empty():
+				return McpToolResult.error("points is required: [[x, z], ...] in world space.")
+			var points := PackedVector2Array()
+			for pair in raw:
+				points.append(Vector2(float(pair[0]), float(pair[1])))
+			var heights := _sample(ctx, points)
+			var added := 0
+			var results: Array = []
+			for i in range(points.size()):
+				if heights[i] == null:
+					results.append({ "ok": false, "error": "off the terrain" })
+					continue
+				if controller.add_marker_to_active_path_at_world(Vector3(points[i].x, float(heights[i]), points[i].y)):
+					added += 1
+					results.append({ "ok": true, "marker": controller.get_selected_marker() })
+				else:
+					results.append({ "ok": false, "error": String(controller.get_last_status()) })
+				if added % 25 == 0:
+					await ctx.frames(1)
+			return { "added": added, "rows": results, "active": controller.get_active_waypoint_path(), "dirty": controller.is_dirty() }
+		"set_flags":
+			if int(controller.get_selected_waypoint_path_index()) < 0:
+				return McpToolResult.error("No active path — select one first.")
+			controller.set_waypoint_flags(bool(args.get("loop", true)), bool(args.get("blue", false)), bool(args.get("red", false)))
+			return { "ok": true, "active": controller.get_active_waypoint_path(), "dirty": controller.is_dirty() }
+		"assign_entity":
+			controller.select_object(int(args.get("kind", -1)), int(args.get("index", -1)))
+			if (controller.get_selection_summary() as Dictionary).is_empty():
+				return McpToolResult.error("No entity at (kind=%s, index=%s)." % [args.get("kind"), args.get("index")])
+			controller.set_selected_property("waypoint_id", int(args.get("path", 0)))
+			return { "ok": true, "dirty": controller.is_dirty() }
+		"delete_marker":
+			if int(controller.get_selected_waypoint_path_index()) < 0:
+				return McpToolResult.error("No active path — select one first.")
+			controller.select_waypoint_marker(int(args.get("marker_index", -1)))
+			if (controller.get_selected_marker() as Dictionary).is_empty():
+				return McpToolResult.error("No marker %s on the active path." % args.get("marker_index"))
+			if not controller.delete_selected_marker():
+				return McpToolResult.error("Delete rejected: %s" % controller.get_last_status())
+			return { "ok": true, "active": controller.get_active_waypoint_path(), "dirty": controller.is_dirty() }
+		"list":
+			return {
+				"paths": controller.get_waypoint_summaries(),
+				"active": controller.get_active_waypoint_path(),
+			}
+	return McpToolResult.error("Unknown op '%s'." % op)
+
+
+# --- header / repair / analysis ----------------------------------------------------
+
+func _tool_set_header(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_editable(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var fields: Dictionary = args.get("fields", {}) if args.get("fields") is Dictionary else {}
+	if fields.is_empty():
+		return McpToolResult.error("fields is required: {name -> value}.")
+	for key in fields:
+		var name := String(key)
+		if not HEADER_STRINGS.has(name) and not HEADER_INTS.has(name):
+			return McpToolResult.error("Unknown header field '%s'. Strings: %s. Ints: %s." % [name, ", ".join(HEADER_STRINGS), ", ".join(HEADER_INTS)])
+	var applied := PackedStringArray()
+	var env_changed := false
+	for key in fields:
+		var name := String(key)
+		if HEADER_STRINGS.has(name):
+			controller.set_header_string(name, String(fields[key]))
+			env_changed = env_changed or name == "environment"
+		else:
+			controller.set_header_int(name, int(fields[key]))
+		applied.append(name)
+	var note := ""
+	if env_changed and controller.has_method("reload_environment"):
+		note = String(controller.reload_environment())
+	var out := { "applied": applied, "dirty": controller.is_dirty() }
+	if not note.is_empty():
+		out["environment_note"] = note
+	return out
+
+
+func _tool_reground(_args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_editable(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var out: Dictionary = controller.reground_all()
+	out["dirty"] = controller.is_dirty()
+	out["status"] = controller.get_last_status()
+	return out
+
+
+func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var mission: Variant = null
+	var names := {}
+	var source := ""
+	if args.has("path") and not String(args["path"]).is_empty():
+		mission = NovaMissionData.new()
+		var opened := McpAssetDescribe.open_data(mission, ctx, String(args["path"]))
+		if not opened["ok"]:
+			return McpToolResult.error(String(opened["error"]))
+		source = String(opened["path"])
+		var db := NovaItemDatabase.new()
+		if ctx.root() != null and db.load_from_resource_root(ctx.root(), "items.def") == OK:
+			for item: Dictionary in db.get_items():
+				names[int(item["id"])] = item["display_name"]
+	else:
+		var gate := _require_mission(ctx)
+		if gate.has("error"):
+			return McpToolResult.error(gate["error"])
+		var controller: Variant = gate["controller"]
+		mission = controller.get_mission()
+		source = String(controller.get_current_path())
+		for item: Dictionary in controller.get_placeable_items():
+			names[int(item["id"])] = item["display_name"]
+	var top := clampi(int(args.get("top", 15)), 1, 50)
+	var entities: Array = mission.get_all_entities()
+	var by_kind := {}
+	var item_freq := {}
+	var cells := {}
+	var teams := {}
+	var classes := {}
+	for entity: Dictionary in entities:
+		var kind := int(entity.get("kind", -1))
+		var label := _kind_label(kind)
+		by_kind[label] = int(by_kind.get(label, 0)) + 1
+		var item_id := int(entity.get("item_id", 0))
+		item_freq[item_id] = int(item_freq.get(item_id, 0)) + 1
+		if entity.get("position") is Vector3:
+			var world := MissionObjectPlacer.bms_to_godot_position(entity["position"])
+			var cell := Vector2i(floori(world.x / 64.0), floori(world.z / 64.0))
+			cells[cell] = int(cells.get(cell, 0)) + 1
+		if kind == NovaMissionData.KIND_ORGANIC:
+			var team := str(entity.get("team", "?"))
+			teams[team] = int(teams.get(team, 0)) + 1
+			var name1 := String(entity.get("name1", ""))
+			if not name1.is_empty():
+				classes[name1] = int(classes.get(name1, 0)) + 1
+	var top_items: Array = []
+	for id in item_freq:
+		top_items.append([item_freq[id], id, names.get(id, "?")])
+	top_items.sort_custom(func(a, b): return a[0] > b[0])
+	var top_cells: Array = []
+	for cell in cells:
+		top_cells.append([cells[cell], cell])
+	top_cells.sort_custom(func(a, b): return a[0] > b[0])
+	var dense: Array = []
+	for row in top_cells.slice(0, top):
+		var cell: Vector2i = row[1]
+		dense.append({ "count": row[0], "world_center": [cell.x * 64 + 32, cell.y * 64 + 32] })
+	var paths: Array = []
+	for summary: Dictionary in mission.get_waypoint_summaries():
+		if int(summary.get("marker_count", 0)) > 0:
+			paths.append(summary)
+	return {
+		"source": source,
+		"info": mission.get_info(),
+		"total_entities": entities.size(),
+		"by_kind": by_kind,
+		"top_items": top_items.slice(0, top).map(func(row): return { "count": row[0], "id": row[1], "name": row[2] }),
+		"densest_cells_64m": dense,
+		"waypoint_paths": paths,
+		"persons": { "teams": teams, "ai_classes": classes },
+	}
+
+
+# --- save / sim -------------------------------------------------------------------
+
+func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var path := String(args.get("path", "")).strip_edges()
+	var err: Error
+	if path.is_empty():
+		err = controller.save_current()
+		if err == ERR_INVALID_PARAMETER:
+			return McpToolResult.error("This mission has never been saved — pass path (a .bms filename or absolute path).")
+	else:
+		if path.get_extension().to_lower() != "bms":
+			return McpToolResult.error("path must end in .bms.")
+		if path.is_relative_path():
+			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null and ctx.shell.has_method("get_resource_root_dir") else ""
+			if root_dir.is_empty():
+				return McpToolResult.error("No resource root mounted to resolve a relative filename — pass an absolute path.")
+			path = root_dir.path_join(path)
+		err = controller.save_as_path(path)
+	if err != OK:
+		return McpToolResult.error("Save failed (%s): %s" % [error_string(err), controller.get_last_status()])
+	return { "ok": true, "path": controller.get_current_path(), "status": controller.get_last_status(), "dirty": controller.is_dirty() }
+
+
+func _tool_sim_control(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return McpToolResult.error(gate["error"])
+	var controller: Variant = gate["controller"]
+	var ws: Variant = ctx.workspace("mission")
+	if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission():
+		return McpToolResult.error("A Play-in-Editor session owns the runtime — stop it in the editor first.")
+	match String(args.get("action", "")):
+		"play":
+			controller.sim_play()
+			if not controller.is_simulating():
+				return McpToolResult.error("Simulation did not start: %s" % controller.get_last_status())
+		"pause":
+			controller.sim_pause()
+		"step":
+			var steps := clampi(int(args.get("steps", 1)), 1, 600)
+			if not controller.is_simulating():
+				controller.sim_step()
+				steps -= 1
+			var runtime: Variant = controller.get_sim_runtime()
+			for i in range(steps):
+				if runtime != null and runtime.has_method("tick"):
+					runtime.tick()
+				else:
+					controller.sim_step()
+				if (i + 1) % 30 == 0:
+					await ctx.frames(1)
+		"stop":
+			controller.sim_stop()
+		_:
+			return McpToolResult.error("action must be play | pause | step | stop.")
+	var sim: Variant = ctx.sim()
+	return {
+		"simulating": controller.is_simulating(),
+		"playing": controller.is_sim_playing() if controller.has_method("is_sim_playing") else false,
+		"tick": sim.get_logic_tick() if sim != null and sim.has_method("get_logic_tick") else null,
+	}
+
+
+func _tool_sim_state(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var runtime: Variant = ctx.runtime()
+	if runtime == null:
+		return { "active": false, "hint": "Nothing is running — sim_control(action=\"play\") starts the editor simulation." }
+	var sim: Variant = runtime.get_sim() if runtime.has_method("get_sim") else null
+	if sim == null:
+		return { "active": false, "hint": "Runtime present but no simulation attached." }
+	var ws: Variant = ctx.workspace("mission")
+	var out := {
+		"active": true,
+		"source": "pie" if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission() else "sim",
+		"playing": runtime.is_playing() if runtime.has_method("is_playing") else null,
+		"tick": sim.get_logic_tick(),
+		"entities": sim.get_entity_count(),
+	}
+	if sim.has_method("get_spawned_count"):
+		out["spawned"] = sim.get_spawned_count()
+	if sim.has_method("get_brain_count"):
+		out["brains"] = sim.get_brain_count()
+	if bool(args.get("include_wac", true)) and sim.has_method("get_wac_state"):
+		out["wac"] = sim.get_wac_state()
+	if bool(args.get("include_variables", true)):
+		out["variables"] = {
+			"mission": _nonzero(sim.get_mission_variables_snapshot() if sim.has_method("get_mission_variables_snapshot") else []),
+			"global": _nonzero(sim.get_global_variables_snapshot() if sim.has_method("get_global_variables_snapshot") else []),
+		}
+	if sim.has_method("get_fired_events_snapshot"):
+		var fired: Array = []
+		var flags: Variant = sim.get_fired_events_snapshot()
+		for i in range(flags.size()):
+			if int(flags[i]) != 0:
+				fired.append(i)
+				if fired.size() >= 50:
+					break
+		out["fired_events"] = fired
+	if args.has("entity"):
+		var index := int(args["entity"])
+		if index >= 0 and index < int(sim.get_entity_count()):
+			out["entity"] = sim.get_entity_debug(index)
+		else:
+			out["entity_error"] = "index out of range (0..%d)" % (int(sim.get_entity_count()) - 1)
+	return out
+
+
+static func _nonzero(values: Variant) -> Dictionary:
+	var out := {}
+	for i in range(values.size()):
+		if int(values[i]) != 0:
+			out[str(i)] = values[i]
+	return out

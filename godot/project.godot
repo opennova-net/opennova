@@ -18,10 +18,20 @@ boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
 run/main_scene.runtime_game="res://game/main_game.tscn"
+run/flush_stdout_on_print=true
 
 [audio]
 
 buses/default_bus_layout="res://default_bus_layout.tres"
+
+[debug]
+
+; The MCP agent server's get_logs tool tails the rotated engine log for errors
+; and prints (GDScript cannot hook push_error in-process). This matches the
+; desktop default and documents the dependency; run/flush_stdout_on_print above
+; additionally makes release exports flush prints per line instead of only on
+; the next error.
+file_logging/enable_file_logging.pc=true
 
 [autoload]
 

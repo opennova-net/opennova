@@ -176,9 +176,22 @@ public:
 	String get_screen_cursor_file(int p_screen_id) const;
 	void set_screen_property(int p_screen_id, const String &p_key, const Variant &p_value);
 
+	// Which POSITION extents are explicitly authored (get_window_rect_flags
+	// bitmask). Shipped menus omit RIGHT/BOTTOM for auto-size widgets (the
+	// original engine stretches appearance art across an explicit width).
+	enum RectFlags {
+		RECT_HAS_LEFT = 1,
+		RECT_HAS_TOP = 2,
+		RECT_HAS_RIGHT = 4,
+		RECT_HAS_BOTTOM = 8,
+	};
+
 	// --- Widget property read/write (setters emit changed) ---
 	void set_widget_name(int p_id, const String &p_name);
+	// A negative rect width/height means auto-size: clears has_right/has_bottom
+	// so the writer omits RIGHT/BOTTOM, the shipped auto-size spelling.
 	void set_window_rect(int p_id, const Rect2 &p_rect);
+	int get_window_rect_flags(int p_id) const;
 
 	String get_widget_text(int p_id) const;       // string_data.value
 	void set_widget_text(int p_id, const String &p_text);
@@ -258,6 +271,24 @@ public:
 	int get_widget_group(int p_id) const;
 	void set_widget_group(int p_id, int p_group);
 	PackedStringArray get_flag_labels() const;
+
+	// Full per-state appearance rows {state, type, value, map_state, height};
+	// set replaces the whole list. This is the only writer that can author the
+	// stock empty-state rows (no type) and "custom" rows — the color/texture
+	// slot setters always create type="image" rows.
+	TypedArray<Dictionary> get_widget_appearances(int p_id) const;
+	void set_widget_appearances(int p_id, const TypedArray<Dictionary> &p_rows);
+
+	// FRAME assets {stencil, stencil_size, brush, monogram}: DRAW_FRAME children
+	// render with the nearest ancestor's frame; shipped screens carry it on the
+	// root window. insetx/insety round-trip data is preserved untouched.
+	Dictionary get_window_frame(int p_id) const;
+	void set_window_frame(int p_id, const Dictionary &p_frame);
+
+	// Corpus-structure probes for the game-safety analyzer: every shipped LIST
+	// has a SCROLLBAR subtree, every shipped SPINLIST has SPINUP+SPINDOWN.
+	bool widget_has_scrollbar(int p_id) const;
+	bool widget_has_spin_arrows(int p_id) const;
 
 	// --- Structural mutation (emit changed; return the affected id) ---
 	int add_widget(int p_parent_id, int p_type, const Rect2 &p_rect);

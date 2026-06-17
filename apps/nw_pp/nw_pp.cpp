@@ -567,7 +567,7 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 	if (r.spawn_flags & 0x0002) std::printf(" velY");
 	if (r.spawn_flags & 0x0004) std::printf(" velZ");
 	if (r.spawn_flags & 0x0008) std::printf(" sectionMask");
-	if (r.spawn_flags & 0x0010) std::printf(" orient=0x%02x", r.orient_byte);
+	if (r.spawn_flags & 0x0010) std::printf(" team=0x%02x", r.team_byte);
 	if (r.spawn_flags & 0x0100)
 		std::printf(" parent=%s", handle_str(r.parent_handle).c_str());
 	if (r.spawn_flags & 0x0200)
@@ -580,7 +580,7 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 			std::printf(" weapons=%d+2extra", wcount);
 		}
 	}
-	std::printf(" team=0x%02x", r.team_byte);
+	std::printf(" bone=0x%02x", r.bone_byte);
 	if (r.spawn_flags & 0x0800)
 		std::printf(" AItrailer{p1=0x%08x p2=0x%08x name=\"%s\"}",
 		            r.ai_profile_1, r.ai_profile_2, r.ai_name.c_str());
@@ -606,7 +606,7 @@ void print_pool3_sync_record(uint16_t slot_idx, const Pool3SyncRecord &r) {
 	            "pos=(%.1f, %.1f, %.1f)",
 	            unsigned(slot_idx), type_str(r.item_type_id).c_str(),
 	            r.flags_byte, fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
-	if (r.flags_byte & 0x01) std::printf(" parent=0x%08x", r.parent_handle);
+	if (r.flags_byte & 0x01) std::printf(" movement=0x%08x", r.movement_val);
 	if (r.flags_byte & 0x02) std::printf(" orient=0x%08x", r.orientation_val);
 	if (r.flags_byte & 0x04) std::printf(" ammo=%u", unsigned(r.ammo_count));
 	std::printf(" net=%s", handle_str(r.net_handle).c_str());
@@ -636,6 +636,23 @@ void print_tag_20(const std::vector<uint8_t> &body) {
 	for (size_t i = 0; i < batch.records.size(); ++i)
 		print_pool3_sync_record(uint16_t(batch.start_index + i),
 		                        batch.records[i]);
+}
+
+void print_tag_40(const std::vector<uint8_t> &body) {
+	CaptureZoneOverlayBatch batch;
+	const bool clean = decode_capture_zone_overlay(body.data(), body.size(), batch);
+	std::printf("        [0x40] count=%u (body %zu B%s)\n",
+	            unsigned(batch.count), body.size(),
+	            clean ? "" : ", DECODE INCOMPLETE");
+	for (const auto &e : batch.entries) {
+		const char *col = e.icon_color == 0x0c ? "neutral" :
+		                  e.icon_color == 0x09 ? "Red" :
+		                  e.icon_color == 0x0a ? "Blue" : "?";
+		std::printf("        overlay handle=%s param=0x%02x icon=0x%02x(%s) "
+		            "flags=0x%02x%s source=0x%02x\n",
+		            handle_str(e.handle).c_str(), e.param, e.icon_color, col,
+		            e.flags, (e.flags & 0x10) ? " [capture-zone]" : "", e.source);
+	}
 }
 
 // Tiny bounds-checked cursor for the 0x0A header walk. Mirrors the Cursor in
@@ -1059,6 +1076,7 @@ void print_payload(char dir, int frame, int tag,
 	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
 	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
 	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
+	else if (dir == 'S' && tag == 0x40) print_tag_40(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
 	else if (dir == 'C' && tag == 0x21) print_tag_21_c2s(payload);
