@@ -36,7 +36,7 @@ ProtocolMessageFlags decode_flags(uint8_t raw) {
 	f.skip1 = (raw & 0x08u) != 0;
 	f.frag_cont = (raw & 0x04u) != 0;
 	f.frag_end = (raw & 0x02u) != 0;
-	f.msg_type_high_bit = (raw & 0x01u) != 0;
+	f.msg_type_high_bit = (raw & 0x80u) != 0;
 	return f;
 }
 
@@ -93,18 +93,18 @@ bool parse_protocol_messages(const uint8_t *data, size_t len,
 		msg.flags = decode_flags(flags_raw);
 		msg.tag = data[pos + 1];
 		msg.full_tag = static_cast<uint16_t>(
-				(static_cast<uint16_t>(flags_raw & 0x01u) << 8) | msg.tag);
+				(msg.flags.msg_type_high_bit ? 0x100u : 0u) | msg.tag);
 		pos += 2;
 
-		if (msg.flags.len16) {
+		if (msg.flags.len8) {
+			if (pos + 1 > len) return true;
+			msg.length = data[pos];
+			pos += 1;
+		} else if (msg.flags.len16) {
 			if (pos + 2 > len) return true; // tolerant: stop cleanly
 			msg.length = static_cast<uint32_t>(data[pos]) |
 					(static_cast<uint32_t>(data[pos + 1]) << 8);
 			pos += 2;
-		} else if (msg.flags.len8) {
-			if (pos + 1 > len) return true;
-			msg.length = data[pos];
-			pos += 1;
 		} else {
 			msg.length = 0;
 		}
@@ -154,14 +154,14 @@ bool append_protocol_message(std::vector<uint8_t> &out,
 	ProtocolMessageFlags flags = decode_flags(flags_raw);
 	out.push_back(flags_raw);
 	out.push_back(msg.tag);
-	if (flags.len16) {
-		out.push_back(static_cast<uint8_t>(msg.payload.size() & 0xFFu));
-		out.push_back(static_cast<uint8_t>((msg.payload.size() >> 8) & 0xFFu));
-	} else if (flags.len8) {
+	if (flags.len8) {
 		if (msg.payload.size() > 0xFFu) {
 			return false;
 		}
 		out.push_back(static_cast<uint8_t>(msg.payload.size() & 0xFFu));
+	} else if (flags.len16) {
+		out.push_back(static_cast<uint8_t>(msg.payload.size() & 0xFFu));
+		out.push_back(static_cast<uint8_t>((msg.payload.size() >> 8) & 0xFFu));
 	} else if (!msg.payload.empty()) {
 		return false;
 	}
@@ -258,12 +258,6 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 //   flags & 0x06 == 0x02 (FINAL)   → append + dispatch reassembled
 //   flags & 0x06 == 0x00 (NONE)    → dispatch directly (single message)
 //
-// Implementation note: we always append-then-decide (covers FIRST/MID/FINAL/
-// NONE uniformly because an empty buffer just means "first or only chunk").
-// We don't reset on FIRST because we don't interleave fragmented streams
-// per session. If interleaving ever happens, switch to the explicit
-// three-state model.
-//
 // Regression history: an earlier rewrite used `frag_first && !frag_end`
 // (= dispatch on FRAG_CONT+FRAG_END) which broke retail's mid-fragment
 // flag=0x46 by dispatching it prematurely. See notes/ida_witness_matrix.md
@@ -277,6 +271,9 @@ bool reassemble_protocol_payload(ProtocolReassemblyState &state,
 				!state.buffer.empty();
 	}
 	payload_out.clear();
+	if ((msg.flags.raw & 0x06u) == 0x04u) {
+		state.buffer.clear();
+	}
 	state.buffer.insert(state.buffer.end(), msg.payload.begin(), msg.payload.end());
 	if (msg.flags.frag_cont) {
 		return false;

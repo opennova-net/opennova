@@ -91,6 +91,42 @@ bool check_custom_flags_encode() {
 	return true;
 }
 
+bool check_settings_update_selects_high_table() {
+	const uint8_t bytes[] = {
+		0xA0, 0x2A, 0x01, 0x7F, // 0x80 high table + LEN8
+	};
+	std::vector<opennova::ProtocolMessage> decoded;
+	if (!expect(opennova::parse_protocol_messages(bytes, sizeof(bytes), decoded),
+			"parse high-table message")) return false;
+	if (!expect(decoded.size() == 1, "one high-table message decoded")) return false;
+	if (!expect(decoded[0].flags.settings_update, "flag 0x80 recognized")) return false;
+	if (!expect(decoded[0].full_tag == 0x12A,
+			"flag 0x80 selects full_tag high table")) return false;
+
+	auto made = opennova::make_protocol_message(0x2A, {0x7F}, 0xA0);
+	if (!expect(made.full_tag == 0x12A,
+			"make_protocol_message uses 0x80 for high table")) return false;
+	return true;
+}
+
+bool check_len8_precedes_len16_when_both_bits_set() {
+	const uint8_t bytes[] = {
+		0x60, 0x33, 0x02, 0xAA, 0xBB, // LEN8 wins even though LEN16 is also set
+		0x20, 0x44, 0x01, 0xCC,
+	};
+	std::vector<opennova::ProtocolMessage> decoded;
+	if (!expect(opennova::parse_protocol_messages(bytes, sizeof(bytes), decoded),
+			"parse mixed LEN8/LEN16 flags")) return false;
+	if (!expect(decoded.size() == 2, "LEN8 precedence preserves following message")) return false;
+	if (!expect(decoded[0].tag == 0x33 && decoded[0].length == 2,
+			"first message uses one-byte length")) return false;
+	if (!expect(decoded[0].payload == std::vector<uint8_t>({0xAA, 0xBB}),
+			"first payload decoded via LEN8")) return false;
+	if (!expect(decoded[1].tag == 0x44 && decoded[1].payload == std::vector<uint8_t>({0xCC}),
+			"second message remains aligned")) return false;
+	return true;
+}
+
 bool check_fragment_reassembly_flushes_on_no_cont() {
 	opennova::ProtocolReassemblyState state;
 	auto first = opennova::make_protocol_message(0x00, {0x01, 0x02}, 0x24);
@@ -104,6 +140,24 @@ bool check_fragment_reassembly_flushes_on_no_cont() {
 			"final fragment flushes")) return false;
 	if (!expect(payload.size() == 3, "payload reassembled")) return false;
 	if (!expect(payload[0] == 0x01 && payload[2] == 0x03, "payload order preserved")) return false;
+	return true;
+}
+
+bool check_first_fragment_resets_stale_buffer() {
+	opennova::ProtocolReassemblyState state;
+	state.buffer = {0x99, 0x88};
+	auto first = opennova::make_protocol_message(0x00, {0x01, 0x02}, 0x24);
+	auto last = opennova::make_protocol_message(0x00, {0x03}, 0x22);
+	std::vector<uint8_t> payload;
+	bool was_fragmented = false;
+	if (!expect(!opennova::reassemble_protocol_payload(state, first, payload, &was_fragmented),
+			"first fragment buffers")) return false;
+	if (!expect(state.buffer == std::vector<uint8_t>({0x01, 0x02}),
+			"first fragment resets stale reassembly buffer")) return false;
+	if (!expect(opennova::reassemble_protocol_payload(state, last, payload, &was_fragmented),
+			"final fragment flushes after reset")) return false;
+	if (!expect(payload == std::vector<uint8_t>({0x01, 0x02, 0x03}),
+			"reassembled payload excludes stale bytes")) return false;
 	return true;
 }
 
@@ -139,7 +193,10 @@ int main() {
 	bool ok = true;
 	ok = check_plaintext_encode_decode_roundtrip() && ok;
 	ok = check_custom_flags_encode() && ok;
+	ok = check_settings_update_selects_high_table() && ok;
+	ok = check_len8_precedes_len16_when_both_bits_set() && ok;
 	ok = check_fragment_reassembly_flushes_on_no_cont() && ok;
+	ok = check_first_fragment_resets_stale_buffer() && ok;
 	ok = check_fragment_reassembly_three_fragments() && ok;
 	ok = check_skip_bytes_round_trip() && ok;
 	return ok ? 0 : 1;

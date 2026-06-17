@@ -194,7 +194,8 @@ bool load_manifest(const std::string &path,
 ProtocolMessage message_from_fixture(const FixtureMessage &m) {
 	ProtocolMessage msg;
 	msg.tag = static_cast<uint8_t>(m.full_type & 0xFFu);
-	msg.full_tag = m.full_type;
+	msg.full_tag = static_cast<uint16_t>(
+			((m.flags_raw & 0x80u) ? 0x100u : 0u) | msg.tag);
 	msg.payload = m.body;
 	msg.length = static_cast<uint32_t>(m.body.size());
 	const uint8_t raw = m.flags_raw;
@@ -205,9 +206,15 @@ ProtocolMessage message_from_fixture(const FixtureMessage &m) {
 	msg.flags.skip1 = (raw & 0x08u) != 0;
 	msg.flags.frag_cont = (raw & 0x04u) != 0;
 	msg.flags.frag_end = (raw & 0x02u) != 0;
-	msg.flags.msg_type_high_bit = (raw & 0x01u) != 0;
+	msg.flags.msg_type_high_bit = (raw & 0x80u) != 0;
 	msg.flags.raw = raw;
 	return msg;
+}
+
+uint16_t runtime_full_type(const FixtureMessage &m) {
+	return static_cast<uint16_t>(
+			((m.flags_raw & 0x80u) ? 0x100u : 0u) |
+			static_cast<uint8_t>(m.full_type & 0xFFu));
 }
 
 const char *const kRuns[] = {
@@ -265,7 +272,7 @@ int main() {
 					// a non-empty payload would be unrepresentable.
 					if ((m.flags_raw & 0x60u) == 0) TEST_EXPECT(m.body.empty());
 					rebuilt.push_back(message_from_fixture(m));
-					TEST_EXPECT(rebuilt.back().full_tag == m.full_type);
+					TEST_EXPECT(rebuilt.back().full_tag == runtime_full_type(m));
 				}
 
 				std::vector<uint8_t> stream;
@@ -277,13 +284,13 @@ int main() {
 				TEST_EXPECT(reparsed.size() == b.messages.size());
 				for (size_t i = 0; i < reparsed.size(); ++i) {
 					TEST_EXPECT(reparsed[i].flags.raw == b.messages[i].flags_raw);
-					TEST_EXPECT(reparsed[i].full_tag == b.messages[i].full_type);
+					TEST_EXPECT(reparsed[i].full_tag == runtime_full_type(b.messages[i]));
 					TEST_EXPECT(reparsed[i].payload == b.messages[i].body);
 				}
 
 				total_messages += b.messages.size();
 				++total_bundles;
-				for (const auto &m : b.messages) seen_types.insert(m.full_type);
+				for (const auto &m : b.messages) seen_types.insert(runtime_full_type(m));
 			}
 		}
 

@@ -48,7 +48,7 @@ namespace opennova {
 //     +14   N     inner-message region: each message is
 //                   [flags:u8][tag:u8]
 //                   (if flags & 0x20) [len_u8]
-//                   (if flags & 0x40) [len_u16_LE]   else len = 0
+//                   (else if flags & 0x40) [len_u16_LE]   else len = 0
 //                   (if flags & 0x08) [skip 1 byte]
 //                   (if flags & 0x10) [skip 2 bytes]
 //                   [payload of `len` bytes]
@@ -75,7 +75,7 @@ namespace opennova {
 //                            only), 0x02 alone = final chunk (append +
 //                            dispatch reassembled).
 //   0x02 FRAG_END         — set on mid AND final fragments
-//   0x01 msg_type high-bit — full_tag = (hb << 8) | tag (9-bit tag space)
+//   0x01 unused/reserved   — not part of the tag number in retail
 //
 // History: prior comment block cited `sub_5E91F0` / `sub_5E72E0` as
 // jodemo.exe witnesses; those addresses resolve to particle-system code
@@ -105,7 +105,7 @@ struct ProtocolMessageFlags {
 	bool frag_cont = false;        // 0x04 — "more fragments coming" (set
 	                               //         on first AND mid fragments)
 	bool frag_end = false;         // 0x02 — "is final or mid fragment"
-	bool msg_type_high_bit = false; // 0x01 — full_tag = (hb << 8) | tag
+	bool msg_type_high_bit = false; // 0x80 — full_tag = 0x100 | tag
 	uint8_t raw = 0;
 };
 
@@ -113,7 +113,7 @@ struct ProtocolMessageFlags {
 struct ProtocolMessage {
 	ProtocolMessageFlags flags;
 	uint8_t tag = 0;
-	uint16_t full_tag = 0; // 9-bit (msg_type_high_bit << 8) | tag
+	uint16_t full_tag = 0; // 9-bit ((flags&0x80 ? 0x100 : 0) | tag)
 	uint32_t length = 0;   // payload length in bytes
 	std::vector<uint8_t> payload;
 	// SKIP1/SKIP2 payload bytes — retail discards these on receive but
