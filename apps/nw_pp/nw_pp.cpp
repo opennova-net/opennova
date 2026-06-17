@@ -422,28 +422,6 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 	}
 }
 
-// Tiny bounds-checked cursor for the 0x0A header walk. Mirrors the Cursor in
-// libs/novaworld/src/ingame_decode.cpp; kept local here so nw_pp doesn't drag
-// the libs' internal cursor type into a public header.
-struct PpCursor {
-	const uint8_t *p;
-	const uint8_t *end;
-	bool ok = true;
-	uint8_t  u8()  { if (!ok || p + 1 > end) { ok = false; return 0; }
-	                 return *p++; }
-	uint16_t u16() { if (!ok || p + 2 > end) { ok = false; return 0; }
-	                 uint16_t v = uint16_t(p[0]) | uint16_t(p[1]) << 8;
-	                 p += 2; return v; }
-	int16_t  i16() { return int16_t(u16()); }
-	uint32_t u32() { if (!ok || p + 4 > end) { ok = false; return 0; }
-	                 uint32_t v = uint32_t(p[0]) | uint32_t(p[1]) << 8 |
-	                              uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
-	                 p += 4; return v; }
-	int32_t  i32() { return int32_t(u32()); }
-	void     skip(size_t n) { if (!ok || p + n > end) { ok = false; return; }
-	                          p += n; }
-};
-
 void print_player_compact_record(const PlayerCompactRecord &r) {
 	std::printf("            player: vehBone=%u seat=%u vehHdl=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
@@ -619,212 +597,110 @@ void print_weapon_hit_record(const WeaponHitRecord &r) {
 	std::printf("\n");
 }
 
-// Walk a S2C 0x0A body: fixed header per §5.9 plus trailing event loop.
-// Event tags: 0=EOB, 1=per-entity compact record, 2=weapon-hit. Fails closed
-// on any unknown tag — prints the offset and stops.
+// Print a S2C 0x0A frame update. Thin renderer over the single libs walker
+// (decode_frame_update) — the byte layout lives there, this just formats the
+// resulting FrameUpdate (header anchor + flags, env snapshot, local-player tail,
+// passenger record, per-entity compact records, weapon-hit records). On a short
+// read decode_frame_update fills what it walked and flags it; we print that plus
+// the halt point.
 void print_tag_0a(const std::vector<uint8_t> &body) {
-	PpCursor c{body.data(), body.data() + body.size(), true};
-
-	// Fixed header per §5.9: 3× i32 refs (tick anchors), flags1, flags2 (low
-	// 2 bits = sub-block selector, bit 3 = vehicle-passenger record gate),
-	// variable sub-block (cases 0-3, all IDA-witnessed), then the 7 B fixed
-	// tail (state_flag_byte u8 / mount u16 / health i16 / state_word i16)
-	// and optional 6 B vehicle-passenger record.
-	const int32_t ref0 = c.i32();
-	const int32_t ref1 = c.i32();
-	const int32_t ref2 = c.i32();
-	const uint8_t flags1 = c.u8();
-	const uint8_t flags2 = c.u8();
-	const unsigned sub_idx = unsigned(flags2 & 0x03);
+	auto class_of = [](uint16_t t) -> EntityClass {
+		auto it = g_item_class.find(t);
+		return it == g_item_class.end() ? EntityClass::Unknown : it->second;
+	};
+	FrameUpdate fu;
+	const bool ok = decode_frame_update(body.data(), body.size(), class_of, fu);
 
 	std::printf("        [0x0A] refs=(0x%08x,0x%08x,0x%08x) flags1=0x%02x "
-	            "flags2=0x%02x sub=%u\n",
-	            uint32_t(ref0), uint32_t(ref1), uint32_t(ref2),
-	            unsigned(flags1), unsigned(flags2), sub_idx);
+	            "flags2=0x%02x sub=%u%s\n",
+	            uint32_t(fu.anchor_x), uint32_t(fu.anchor_y), uint32_t(fu.anchor_z),
+	            unsigned(fu.flags1), unsigned(fu.flags2), unsigned(fu.sub_block),
+	            ok ? "" : " (DECODE INCOMPLETE)");
 
-	// All four sub-block widths IDA-witnessed in NapiNPClientMsg_0x00A
-	// (2026-06-16 grill): case 0 = 11 B (6× u8 + u8 sentinel + i32),
-	// case 1 = 6 B (4× u8 + i16), case 2 = 11 B (3× u16 + 5× u8 ENV),
-	// case 3 = 16 B or 0 B gated by `g_GameType & 0x20000`. Sub=3's gate is
-	// wire-invisible — skipping 0 B matches non-objective gametypes; on an
-	// objective-bit-set capture, sub=3 frames will misalign and the walker
-	// will fail closed on an unknown event tag.
-	switch (sub_idx) {
-		case 0:
-			c.skip(11);  // 6× u8 + u8 sentinel + i32 [orig: 0x430054..0x43012E]
-			break;
-		case 1:
-			c.skip(6);   // 4× u8 + i16 [orig: 0x430191..0x430210]
-			break;
-		case 2: {
-			const uint16_t fog_dist     = c.u16();
-			const uint16_t fog_accel    = c.u16();
-			const uint16_t tod_fixed    = c.u16();
-			const uint8_t  quake_ticks  = c.u8();
-			const uint8_t  cloud_scroll = c.u8();
-			const uint8_t  cloud_byte2  = c.u8();
-			const uint8_t  overcast     = c.u8();
-			const uint8_t  env_trail    = c.u8();
-			std::printf("            env: fogDist=0x%04x fogAccel=0x%04x "
-			            "todFixed=0x%04x quake=%u clouds=(0x%02x,0x%02x) "
-			            "overcast=0x%02x trail=0x%02x\n",
-			            unsigned(fog_dist), unsigned(fog_accel),
-			            unsigned(tod_fixed), unsigned(quake_ticks),
-			            unsigned(cloud_scroll), unsigned(cloud_byte2),
-			            unsigned(overcast), unsigned(env_trail));
-			break;
-		}
-		case 3:
-			// Gated on `g_GameType & 0x20000`; default to skip 0 B (the
-			// common case) and rely on the post-header event-loop scan
-			// catching a stale alignment.
-			break;
-	}
+	if (fu.env.present)
+		std::printf("            env: fogDist=0x%04x fogAccel=0x%04x todFixed=0x%04x "
+		            "quake=%u clouds=(0x%02x,0x%02x) overcast=0x%02x trail=0x%02x\n",
+		            unsigned(fu.env.fog_dist), unsigned(fu.env.fog_accel),
+		            unsigned(fu.env.tod_fixed), unsigned(fu.env.quake_ticks),
+		            unsigned(fu.env.cloud_scroll), unsigned(fu.env.cloud_byte2),
+		            unsigned(fu.env.overcast), unsigned(fu.env.env_trail));
 
-	// §5.9 post-dispatch fixed tail — 7 B always, IDA-witnessed:
-	//   state_flag_byte u8  [0x4303E5] bit 0→dword_B76484, bit 1→dword_B76480,
-	//                                  bits 0/1→g_local_player_entity.pad7[12] bits 8/9
-	//   mountHandle     u16 [0x430408] vehicle-mount handle (pool<<12|slot, 0xFFFF=none)
-	//   health          i16 [0x430428] → g_local_player_entity->Health
-	//   state_word      i16 [0x430442] → *(WORD*)g_local_player_entity->pad7
-	// (The trailing i16 was previously read as two separate bytes — refuted
-	// by the 0x430442 grill; bytes 6-7 are the high half of a single i16.)
-	const uint8_t  state_flag_byte = c.u8();
-	const uint16_t mount           = c.u16();
-	const int16_t  health          = c.i16();
-	const int16_t  state_word      = c.i16();
-	if (!c.ok) {
-		std::printf("            header: underrun in tail (state/mount/health/state_word)\n");
-		return;
-	}
-	std::printf("            header: state=0x%02x mount=%s health=%d "
-	            "state_word=0x%04x\n",
-	            unsigned(state_flag_byte), handle_str(mount).c_str(),
-	            int(health), unsigned(uint16_t(state_word)));
+	std::printf("            header: state=0x%02x mount=%s health=%d state_word=0x%04x\n",
+	            unsigned(fu.state_flag_byte), handle_str(fu.mount_handle).c_str(),
+	            int(fu.health), unsigned(uint16_t(fu.state_word)));
 
-	// Conditional vehicle-passenger record [orig: 0x430459 —
-	// `if ((flags2 & 0xF) != 8) goto skip`]. Only fires when sub-block was
-	// case 0 AND bit 3 of flags2 is set (joiner is mounted as a passenger,
-	// not driver). Wire layout: u16 passenger_handle [0x430474] (0xFFFF
-	// early-skips seat_yaw/pitch), u16 seat_yaw [0x4304C3], u16 seat_pitch
-	// [0x4304DC].
-	if ((flags2 & 0xF) == 8) {
-		const uint16_t passenger_handle = c.u16();
-		if (!c.ok) {
-			std::printf("            passenger: underrun before handle\n");
-			return;
-		}
-		if (passenger_handle == 0xFFFF) {
+	if (fu.passenger.present) {
+		if (fu.passenger.has_seat)
+			std::printf("            passenger: hdl=%s seat_yaw=0x%04x seat_pitch=0x%04x\n",
+			            handle_str(fu.passenger.handle).c_str(),
+			            unsigned(fu.passenger.seat_yaw), unsigned(fu.passenger.seat_pitch));
+		else
 			std::printf("            passenger: hdl=ffff (no seat yaw/pitch)\n");
-		} else {
-			const uint16_t seat_yaw   = c.u16();
-			const uint16_t seat_pitch = c.u16();
-			if (!c.ok) {
-				std::printf("            passenger: underrun in seat yaw/pitch\n");
-				return;
-			}
-			std::printf("            passenger: hdl=%s seat_yaw=0x%04x "
-			            "seat_pitch=0x%04x\n",
-			            handle_str(passenger_handle).c_str(),
-			            unsigned(seat_yaw), unsigned(seat_pitch));
-		}
 	}
 
-	// Event loop [orig: 0x4306A1..0x4307A2]. Tags hard-capped at {0,1,2} —
-	// `cmp eax,2 / jg` at 0x4306DA treats tag ≥3 as silent terminator (same
-	// exit as tag==0). For tag==1 the wire order is `[u8 tag][u16 handle]
-	// [u16 typeId]<compact-record>` confirmed at 0x43070C / 0x43076B.
-	int rec_idx = 0;
-	while (c.ok && c.p < c.end) {
-		const size_t tag_off = size_t(c.p - body.data());
-		const uint8_t tag = c.u8();
-		if (tag == 0) {
-			std::printf("            [eob] %zu B leftover\n",
-			            size_t(c.end - c.p));
-			return;
+	for (size_t i = 0; i < fu.records.size(); ++i) {
+		const FrameUpdateRecord &r = fu.records[i];
+		std::printf("            rec %zu hdl=%s type=%s class=%s\n", i,
+		            handle_str(r.handle).c_str(), type_str(r.type_id).c_str(),
+		            class_name(r.cls));
+		switch (r.cls) {
+			case EntityClass::Player:   print_player_compact_record(r.player); break;
+			case EntityClass::Vehicle:  print_vehicle_compact_record(r.vehicle); break;
+			case EntityClass::Infantry: print_infantry_compact_record(r.infantry); break;
+			default: break;
 		}
-		if (tag == 2) {
-			// §5.9.1 weapon-hit. Variable length 17-20 B by flags gate.
-			// Event loop continues past hits (not a terminator).
-			const size_t avail = size_t(c.end - c.p);
-			WeaponHitRecord r;
-			size_t consumed = 0;
-			if (decode_weapon_hit_record(c.p, avail, r, consumed)) {
-				std::printf("            tag=0x02 weapon-hit @+%zu (%zu B)\n",
-				            tag_off, consumed);
-				print_weapon_hit_record(r);
-				c.p += consumed;
-				continue;
-			}
-			std::printf("            tag=0x02 weapon-hit @+%zu DECODE FAILED "
-			            "(consumed=%zu, avail=%zu) — halting, %s\n",
-			            tag_off, consumed, avail,
-			            to_hex_sample(c.p, avail).c_str());
-			return;
-		}
-		if (tag == 1) {
-			const uint16_t handle  = c.u16();
-			const uint16_t type_id = c.u16();
-			if (!c.ok) {
-				std::printf("            tag=0x01 @+%zu underrun in record "
-				            "header\n", tag_off);
-				return;
-			}
-			auto it = g_item_class.find(type_id);
-			const EntityClass cls = (it == g_item_class.end())
-			                         ? EntityClass::Unknown : it->second;
-			const size_t avail = size_t(c.end - c.p);
-			std::printf("            rec %d @+%zu hdl=%s type=%s class=%s\n",
-			            rec_idx, tag_off, handle_str(handle).c_str(),
-			            type_str(type_id).c_str(), class_name(cls));
-			rec_idx++;
-			size_t consumed = 0;
-			bool ok = false;
-			switch (cls) {
-				case EntityClass::Player: {
-					PlayerCompactRecord r;
-					ok = decode_player_compact_record(c.p, avail, r, consumed);
-					if (ok) print_player_compact_record(r);
-					break;
-				}
-				case EntityClass::Vehicle: {
-					VehicleCompactRecord r;
-					ok = decode_vehicle_compact_record(c.p, avail, r, consumed);
-					if (ok) print_vehicle_compact_record(r);
-					break;
-				}
-				case EntityClass::Infantry: {
-					InfantryCompactRecord r;
-					ok = decode_infantry_compact_record(c.p, avail, r, consumed);
-					if (ok) print_infantry_compact_record(r);
-					break;
-				}
-				case EntityClass::Guided:
-				case EntityClass::Unknown:
-				default:
-					// Either guided (§5.15 deferred — variable-length delta
-					// codec) or unknown class — both fail closed since we
-					// don't know how many bytes to skip.
-					std::printf("            (no fixed decoder, %zu B remain) "
-					            "halting walker — %s\n", avail,
-					            to_hex_sample(c.p, avail).c_str());
-					return;
-			}
-			if (!ok) {
-				std::printf("            DECODE FAILED (consumed=%zu, avail=%zu) — "
-				            "halting walker\n", consumed, avail);
-				return;
-			}
-			c.p += consumed;
-			continue;
-		}
-		// Unknown event tag — fail closed.
-		std::printf("            tag=0x%02x @+%zu UNKNOWN — halting walker, "
-		            "%zu B remaining: %s\n", unsigned(tag), tag_off,
-		            size_t(c.end - c.p),
-		            to_hex_sample(c.p, size_t(c.end - c.p)).c_str());
+	}
+	for (const WeaponHitRecord &h : fu.hits) {
+		std::printf("            tag=0x02 weapon-hit\n");
+		print_weapon_hit_record(h);
+	}
+	if (!ok)
+		std::printf("            (decode halted after %zu B of %zu)\n",
+		            fu.consumed, body.size());
+}
+
+// S2C 0x1E game event — kill feed + objectives + zone control.
+void print_tag_1e(const std::vector<uint8_t> &body) {
+	GameEventRecord r;
+	size_t consumed = 0;
+	if (!decode_game_event(body.data(), body.size(), r, consumed)) {
+		std::printf("        [0x1E] game-event decode failed (len=%zu): %s\n",
+		            body.size(), to_hex_sample(body.data(), body.size()).c_str());
 		return;
 	}
+	const GameEventKind k = game_event_kind(r.event_type);
+	const char *kind = k == GameEventKind::Kill ? "KILL"
+	                 : k == GameEventKind::Objective ? "OBJECTIVE" : "event";
+	const char *key = game_event_strcnd_key(r.event_type);
+	auto idx = [](uint8_t i) {
+		return i == 0xFF ? std::string("none") : ("p0/s" + std::to_string(unsigned(i)));
+	};
+	std::printf("        [0x1E] %s type=%u attacker=%s victim=%s aux=%s pos=(%d, %d)%s%s\n",
+	            kind, unsigned(r.event_type), idx(r.attacker_index).c_str(),
+	            idx(r.victim_index).c_str(), idx(r.aux_index).c_str(),
+	            int(r.pos_x), int(r.pos_y), key ? " key=" : "", key ? key : "");
+}
+
+// S2C 0x26 entity kill replication.
+void print_tag_26(const std::vector<uint8_t> &body) {
+	KillRecord r;
+	size_t consumed = 0;
+	if (!decode_kill_record(body.data(), body.size(), r, consumed)) {
+		std::printf("        [0x26] kill decode failed (len=%zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x26] KILL victim=%s attacker=%s\n",
+	            handle_str(r.victim_slot).c_str(), handle_str(r.attacker).c_str());
+}
+
+// S2C 0x4E batch despawn/kill.
+void print_tag_4e(const std::vector<uint8_t> &body) {
+	BatchKillBatch b;
+	const bool clean = decode_batch_kill(body.data(), body.size(), b);
+	std::printf("        [0x4E] batch-despawn count=%u slots=%zu%s\n",
+	            unsigned(b.count), b.slots.size(), clean ? "" : " (DECODE INCOMPLETE)");
+	for (uint16_t s : b.slots)
+		std::printf("            slot %s\n", handle_str(s).c_str());
 }
 
 void print_payload(char dir, int frame, int tag,
@@ -838,6 +714,9 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
 	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
 	else if (dir == 'S' && tag == 0x40) print_tag_40(payload);
+	else if (dir == 'S' && tag == 0x1E) print_tag_1e(payload);
+	else if (dir == 'S' && tag == 0x26) print_tag_26(payload);
+	else if (dir == 'S' && tag == 0x4E) print_tag_4e(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
 	else if (dir == 'C' && tag == 0x21) print_tag_21_c2s(payload);
@@ -1031,9 +910,63 @@ int run_replay_json(const std::vector<CaptureDatagram> &caps,
 		if (i + 1 < tl.entities.size()) o << ",";
 		o << "\n";
 	}
-	o << "  ]\n}\n";
-	std::fprintf(stderr, "wrote %zu entities (frames %d..%d) to %s\n",
-	             tl.entities.size(), tl.first_frame, tl.last_frame, out_path);
+	o << "  ],\n";
+
+	// Event stream: fire / hit / kill / game-event / capture-zone, in capture
+	// order. Spatial fields are world meters; src/tgt/aux are entity handles.
+	auto kind_name = [](ReplayEventKind k) -> const char * {
+		switch (k) {
+		case ReplayEventKind::Fire:        return "fire";
+		case ReplayEventKind::Hit:         return "hit";
+		case ReplayEventKind::Kill:        return "kill";
+		case ReplayEventKind::GameEvent:   return "gameevent";
+		case ReplayEventKind::CaptureZone: return "zone";
+		}
+		return "?";
+	};
+	o << "  \"events\": [\n";
+	for (size_t i = 0; i < tl.events.size(); ++i) {
+		const ReplayEvent &e = tl.events[i];
+		o << "    {\"f\":" << e.frame_index << ",\"kind\":\"" << kind_name(e.kind) << "\"";
+		if (e.has_pos) o << ",\"x\":" << fp16(e.x) << ",\"y\":" << fp16(e.y)
+		                 << ",\"z\":" << fp16(e.z);
+		if (e.has_dir) o << ",\"dx\":" << fp16(e.dir_x) << ",\"dy\":" << fp16(e.dir_y);
+		if (e.source != 0xFFFF) o << ",\"src\":" << e.source;
+		if (e.target != 0xFFFF) o << ",\"tgt\":" << e.target;
+		if (e.aux != 0xFFFF)    o << ",\"aux\":" << e.aux;
+		if (e.adm_index)        o << ",\"adm\":" << unsigned(e.adm_index);
+		if (e.event_type)       o << ",\"etype\":" << unsigned(e.event_type);
+		if (e.sound)            o << ",\"snd\":1";
+		if (!e.label.empty())   o << ",\"label\":\"" << json_escape(e.label) << "\"";
+		o << "}";
+		if (i + 1 < tl.events.size()) o << ",";
+		o << "\n";
+	}
+	o << "  ],\n";
+
+	// Environment timeline (0x0A env snapshots).
+	o << "  \"env\": [";
+	for (size_t i = 0; i < tl.environment.size(); ++i) {
+		const ReplayEnvSample &e = tl.environment[i];
+		if (i) o << ",";
+		o << "{\"f\":" << e.frame_index << ",\"fog\":" << e.fog_dist
+		  << ",\"tod\":" << e.tod_fixed << ",\"quake\":" << unsigned(e.quake_ticks)
+		  << ",\"cloud\":" << unsigned(e.cloud_scroll)
+		  << ",\"overcast\":" << unsigned(e.overcast) << "}";
+	}
+	o << "]\n}\n";
+
+	size_t n_hit = 0, n_fire = 0, n_kill = 0;
+	for (const auto &e : tl.events) {
+		if (e.kind == ReplayEventKind::Hit) n_hit++;
+		else if (e.kind == ReplayEventKind::Fire) n_fire++;
+		else if (e.kind == ReplayEventKind::Kill) n_kill++;
+	}
+	std::fprintf(stderr,
+	             "wrote %zu entities, %zu events (%zu fire / %zu hit / %zu kill), "
+	             "%zu env (frames %d..%d) to %s\n",
+	             tl.entities.size(), tl.events.size(), n_fire, n_hit, n_kill,
+	             tl.environment.size(), tl.first_frame, tl.last_frame, out_path);
 	return 0;
 }
 

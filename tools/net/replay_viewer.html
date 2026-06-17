@@ -13,12 +13,16 @@
   window (or use "Load JSON"). No build, no server, no dependencies — open this
   file in any browser.
 
-  Coordinates: positions are world meters (x = east, y = north); heading is
-  degrees. Spawn samples are the authoritative world layout (validated against
-  the authored mission by tests/novaworld/nw_pool_groundtruth_test); C2S 0x0C
-  uplink samples are the joiner's per-frame motion. "Anchor tracks to spawn"
-  reconciles the uplink world+origin frame with the spawn world frame (a no-op
-  when the map origin is zero, as in the dvxi5 probe capture).
+  Everything shown is decoded from the wire (pcap) — never from a .sph:
+    - entities[]  : per-entity tracks (spawn pose + C2S 0x0C uplink + S2C 0x0A
+                    decompressed motion). x = east, y = north, in world meters.
+    - events[]    : fire (C2S 0x06), hit (S2C 0x0A tag==2), kill / game-event
+                    (S2C 0x1E / 0x26), capture-zone (S2C 0x40).
+    - env[]       : S2C 0x0A environment snapshots (fog / time-of-day / clouds).
+
+  The event log on the right is the kill feed + projectile/sound log; it scrubs
+  with the timeline (click any line to seek). Projectiles (fire rays + hit
+  bursts) draw on the map. Click an entity to inspect every field we decoded.
 -->
 <style>
   :root {
@@ -32,6 +36,8 @@
     --orange-dim: #c75f12;
     --blue: #4a90ff;
     --red: #ff5a5a;
+    --yellow: #ffd24a;
+    --green: #5ad27a;
     --neutral: #b6bcc2;
   }
   * { box-sizing: border-box; }
@@ -40,8 +46,10 @@
   #app { display: flex; height: 100%; }
   #side { width: 290px; flex: 0 0 290px; background: var(--panel); border-right: 1px solid var(--line);
     display: flex; flex-direction: column; overflow-y: auto; }
-  #stage { position: relative; flex: 1 1 auto; }
-  canvas { display: block; width: 100%; height: 100%; background: #151618; cursor: grab; }
+  #right { width: 330px; flex: 0 0 330px; background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden; }
+  #stage { position: relative; flex: 1 1 auto; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; background: #151618; cursor: crosshair; }
   canvas.drag { cursor: grabbing; }
   h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--orange);
     margin: 0; padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
@@ -49,7 +57,8 @@
     font-size: 11px; margin-top: 3px; }
   .sec { padding: 12px 14px; border-bottom: 1px solid var(--line); }
   .sec h2 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
-    margin: 0 0 8px; }
+    margin: 0 0 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  .sec h2 span.count { color: var(--orange); font-variant-numeric: tabular-nums; }
   button, label.btn { background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
     border-radius: 5px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
   button:hover, label.btn:hover { border-color: var(--orange-dim); }
@@ -60,10 +69,13 @@
   input[type=range] { width: 100%; accent-color: var(--orange); }
   select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
     border-radius: 5px; padding: 4px 6px; }
-  label.chk { display: flex; gap: 7px; align-items: center; cursor: pointer; user-select: none; }
+  label.chk { display: flex; gap: 7px; align-items: center; cursor: pointer; user-select: none;
+    font-size: 12px; }
   label.chk input { accent-color: var(--orange); }
+  label.chk + label.chk { margin-top: 6px; }
   .kv { display: flex; justify-content: space-between; color: var(--muted); }
-  .kv b { color: var(--ink); font-weight: 600; }
+  .kv b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kv + .kv { margin-top: 3px; }
   .legend div { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--muted); }
   .sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 12px; }
   #framelabel { font-variant-numeric: tabular-nums; color: var(--orange); font-weight: 600; }
@@ -74,6 +86,35 @@
   #hint { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 11px;
     background: rgba(21,22,24,.7); padding: 4px 8px; border-radius: 5px; }
   .tag { font-variant-numeric: tabular-nums; }
+
+  /* event log */
+  #logwrap { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+  #logfilters { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #logfilters .row { gap: 6px 10px; }
+  .efilt { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; user-select: none;
+    font-size: 11px; color: var(--muted); }
+  .efilt input { accent-color: var(--orange); }
+  #log { flex: 1 1 auto; overflow-y: auto; padding: 4px 0; font-size: 12px; }
+  .ev { display: grid; grid-template-columns: 46px 16px 1fr; gap: 6px; align-items: baseline;
+    padding: 3px 12px; cursor: pointer; border-left: 2px solid transparent; }
+  .ev:hover { background: var(--panel2); }
+  .ev.now { background: rgba(255,122,24,.13); border-left-color: var(--orange); }
+  .ev.future { opacity: .38; }
+  .ev .f { color: #6b7077; font-variant-numeric: tabular-nums; font-size: 11px; }
+  .ev .ic { text-align: center; }
+  .ev .tx { color: var(--ink); }
+  .ev .tx .sub { color: var(--muted); }
+  .ev.kill .tx { color: var(--orange); font-weight: 600; }
+  .ev.fire .ic { color: var(--yellow); }
+  .ev.hit .ic { color: var(--red); }
+  .ev.kill .ic { color: var(--orange); }
+  .ev.gameevent .ic { color: var(--blue); }
+  .ev.zone .ic { color: var(--green); }
+  #inspector { border-bottom: 1px solid var(--line); padding: 12px 14px; max-height: 42%; overflow-y: auto; }
+  #inspector .ihead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  #inspector .ihead b { color: var(--orange); }
+  #inspector .close { cursor: pointer; color: var(--muted); border: none; background: none; font-size: 14px; }
+  #inspector.empty { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -110,10 +151,17 @@
     <div class="sec">
       <h2>Display</h2>
       <label class="chk"><input id="opt-labels" type="checkbox" checked> Entity labels</label>
-      <label class="chk" style="margin-top:6px"><input id="opt-trails" type="checkbox" checked> Motion trails</label>
-      <label class="chk" style="margin-top:6px"><input id="opt-anchors" type="checkbox" checked> Spawn anchors (authored layout)</label>
-      <label class="chk" style="margin-top:6px"><input id="opt-anchorfix" type="checkbox" checked> Anchor tracks to spawn</label>
-      <label class="chk" style="margin-top:6px"><input id="opt-grid" type="checkbox" checked> World grid</label>
+      <label class="chk"><input id="opt-trails" type="checkbox" checked> Motion trails</label>
+      <label class="chk"><input id="opt-projectiles" type="checkbox" checked> Projectiles &amp; hits</label>
+      <label class="chk"><input id="opt-eventmarks" type="checkbox" checked> Event markers (kills / zones)</label>
+      <label class="chk"><input id="opt-anchors" type="checkbox" checked> Spawn anchors (authored layout)</label>
+      <label class="chk"><input id="opt-anchorfix" type="checkbox" checked> Anchor tracks to spawn</label>
+      <label class="chk"><input id="opt-grid" type="checkbox" checked> World grid</label>
+    </div>
+
+    <div class="sec">
+      <h2>Environment <span id="env-frame" class="count"></span></h2>
+      <div id="env-readout" style="color:var(--muted)">—</div>
     </div>
 
     <div class="sec">
@@ -135,14 +183,37 @@
       <div class="kv"><span>Entities</span><b id="st-ent">0</b></div>
       <div class="kv"><span>Frames</span><b id="st-frames">—</b></div>
       <div class="kv"><span>Moving (tracked)</span><b id="st-moving">0</b></div>
+      <div class="kv"><span>Events</span><b id="st-events">0</b></div>
     </div>
   </aside>
 
   <div id="stage">
     <canvas id="cv"></canvas>
     <div id="drop">drop replay JSON</div>
-    <div id="hint">drag to pan · wheel to zoom · space to play/pause</div>
+    <div id="hint">drag to pan · wheel to zoom · click entity to inspect · space = play/pause</div>
   </div>
+
+  <aside id="right">
+    <div id="inspector" class="empty">click an entity to inspect</div>
+    <div id="logwrap">
+      <div id="logfilters">
+        <h2 style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0 0 8px">
+          Event log <span id="log-count" class="tag" style="color:var(--orange)"></span></h2>
+        <div class="row">
+          <label class="efilt"><input type="checkbox" data-k="kill" checked> kills</label>
+          <label class="efilt"><input type="checkbox" data-k="fire" checked> fire</label>
+          <label class="efilt"><input type="checkbox" data-k="hit" checked> hits</label>
+          <label class="efilt"><input type="checkbox" data-k="gameevent" checked> events</label>
+          <label class="efilt"><input type="checkbox" data-k="zone" checked> zones</label>
+        </div>
+        <div class="row" style="margin-top:7px">
+          <label class="efilt"><input type="checkbox" id="filt-snd"> hide <span class="tag">snd:</span> lines</label>
+          <label class="efilt"><input type="checkbox" id="filt-follow" checked> follow playhead</label>
+        </div>
+      </div>
+      <div id="log"></div>
+    </div>
+  </aside>
 </div>
 
 <script>
@@ -150,6 +221,8 @@
 (() => {
   const TEAM = { 1: "#4a90ff", 2: "#ff5a5a" };
   const NEUTRAL = "#b6bcc2";
+  const FADE = 18;            // frames a projectile/hit stays drawn
+  const KILL_FADE = 120;      // frames a kill X stays drawn on the map
   // shape drawn per coarse category from the exporter (category_for in nw_pp).
   const CATS = {
     player:   { shape: "ring",     label: "Player" },
@@ -157,11 +230,14 @@
     organic:  { shape: "circle",   label: "Organic" },
     vehicle:  { shape: "triangle", label: "Vehicle" },
     item:     { shape: "square",   label: "Item" },
-    building:  { shape: "square",  label: "Building" },
+    building: { shape: "square",   label: "Building" },
     marker:   { shape: "diamond",  label: "Marker" },
     guided:   { shape: "triangle", label: "Guided" },
     unknown:  { shape: "circle",   label: "Unknown" },
   };
+  const EV_ICON = { fire: "▸", hit: "✦", kill: "✖", gameevent: "◆", zone: "▣" };
+  // capture-zone icon_color → team color (matches g_minimap_overlay_color_table)
+  const ZONE_COL = { 0x0c: NEUTRAL, 0x09: "#ff5a5a", 0x0a: "#4a90ff" };
 
   const cv = document.getElementById("cv");
   const ctx = cv.getContext("2d");
@@ -170,23 +246,38 @@
 
   let DATA = null;       // parsed JSON
   let ENTS = [];         // prepared entities
-  let bounds = null;     // world bounds {minx,maxx,miny,maxy}
-  let view = { scale: 1, ox: 0, oy: 0 };   // world->screen
+  let BYH = new Map();    // handle -> entity
+  let EVENTS = [];        // prepared events (time-sorted)
+  let ENV = [];           // env samples (time-sorted)
+  let bounds = null;
+  let view = { scale: 1, ox: 0, oy: 0 };
   let frame = 0, fmin = 0, fmax = 0;
   let playing = false, lastT = 0;
+  let selected = null;    // selected entity (inspector)
 
   const opt = {
-    labels:   el("opt-labels"),
-    trails:   el("opt-trails"),
-    anchors:  el("opt-anchors"),
-    anchorfix:el("opt-anchorfix"),
-    grid:     el("opt-grid"),
+    labels:      el("opt-labels"),
+    trails:      el("opt-trails"),
+    projectiles: el("opt-projectiles"),
+    eventmarks:  el("opt-eventmarks"),
+    anchors:     el("opt-anchors"),
+    anchorfix:   el("opt-anchorfix"),
+    grid:        el("opt-grid"),
   };
+  const evFilt = { kill: true, fire: true, hit: true, gameevent: true, zone: true };
 
   function teamColor(t) { return TEAM[t] || NEUTRAL; }
 
-  // Reconcile a track's uplink frame with the spawn frame: shift uplink samples
-  // so the first uplink lands on the spawn position (a no-op when origin == 0).
+  // ---- name resolution for event text -----
+  function nameOf(handle) {
+    if (handle === undefined || handle === 65535) return "—";
+    const e = BYH.get(handle);
+    if (e && e.name) return e.name;
+    const pool = handle >> 12, slot = handle & 0xfff;
+    return "s" + slot + (pool ? "·p" + pool : "");
+  }
+
+  // ---- prepare -----
   function prepare(d) {
     const ents = [];
     for (const e of d.entities) {
@@ -204,18 +295,53 @@
       }));
       track.sort((a, b) => a.f - b.f);
       ents.push({
-        handle: e.handle, pool: e.pool, type_id: e.type_id,
+        handle: e.handle, pool: e.pool, type_id: e.type_id, net_id: e.net_id,
+        spawn_tag: e.spawn_tag,
         name: e.name || (d.items && d.items[e.type_id]) || ("type " + e.type_id),
         cat: (CATS[e.category] ? e.category : "unknown"),
         team: e.team, spawn, track,
-        // moves if it has >1 per-frame sample (C2S 0x0C uplink or S2C 0x0A motion)
         moving: track.filter(s => s.src === "uplink" || s.src === "frameupdate").length > 1,
       });
     }
     return ents;
   }
 
-  function computeBounds(ents) {
+  function prepareEvents(d) {
+    const evs = (d.events || []).map(e => {
+      const ev = Object.assign({}, e);
+      ev.text = eventText(ev);
+      return ev;
+    });
+    evs.sort((a, b) => a.f - b.f);
+    return evs;
+  }
+
+  function eventText(e) {
+    const adm = e.adm !== undefined ? ` · adm ${e.adm}` : "";
+    switch (e.kind) {
+      case "kill": {
+        const lab = e.label ? ` <span class="sub">(${e.label})</span>` : "";
+        return `${nameOf(e.src)} ✖ ${nameOf(e.tgt)}${lab}`;
+      }
+      case "fire":
+        return `<span class="sub">snd:</span> ${nameOf(e.src)} fires${adm}`;
+      case "hit":
+        return `<span class="sub">snd:</span> hit ${nameOf(e.tgt)}${e.aux!==undefined?` · wpn ${nameOf(e.aux)}`:""}${adm}`;
+      case "gameevent":
+        return `${e.label || ("event " + (e.etype||0))}${e.src!==undefined?` <span class="sub">(${nameOf(e.src)})</span>`:""}`;
+      case "zone": {
+        const col = ZONE_COL[e.etype] === "#ff5a5a" ? "Red" : ZONE_COL[e.etype] === "#4a90ff" ? "Blue" : "neutral";
+        const cleared = (e.aux & 0x20) ? "cleared" : (e.aux & 0x10) ? "capture-zone" : "marker";
+        return `zone ${nameOf(e.src)} → ${col} <span class="sub">(${cleared})</span>`;
+      }
+    }
+    return e.kind;
+  }
+  // an event is a "snd:" line when the engine plays a sound for it (fire / hit /
+  // announcement). The filter hides only these from the log text.
+  function isSnd(e) { return !!e.snd && (e.kind === "fire" || e.kind === "hit"); }
+
+  function computeBounds(ents, evs) {
     let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
     const acc = (x, y) => { if (x < minx) minx = x; if (x > maxx) maxx = x;
                             if (y < miny) miny = y; if (y > maxy) maxy = y; };
@@ -223,6 +349,7 @@
       if (e.spawn) acc(e.spawn.x, e.spawn.y);
       for (const s of e.track) acc(s.x, s.y);
     }
+    for (const e of evs) if (e.x !== undefined) acc(e.x, e.y);
     if (!isFinite(minx)) { minx = -100; maxx = 100; miny = -100; maxy = 100; }
     return { minx, maxx, miny, maxy };
   }
@@ -236,11 +363,10 @@
     view.scale = s;
     const cx = (bounds.minx + bounds.maxx) / 2, cy = (bounds.miny + bounds.maxy) / 2;
     view.ox = w / 2 - cx * s;
-    view.oy = h / 2 + cy * s;   // flip y (north up)
+    view.oy = h / 2 + cy * s;
     draw();
   }
 
-  // world -> screen (y flips so north is up)
   function sx(x) { return x * view.scale + view.ox; }
   function sy(y) { return -y * view.scale + view.oy; }
 
@@ -258,7 +384,6 @@
 
   function drawGrid() {
     if (!opt.grid.checked || !bounds) return;
-    // pick a round spacing giving ~8-14 lines across the wider span
     const span = Math.max(bounds.maxx - bounds.minx, bounds.maxy - bounds.miny);
     const raw = span / 10;
     const pow = Math.pow(10, Math.floor(Math.log10(Math.max(1, raw))));
@@ -275,7 +400,6 @@
       ctx.beginPath(); ctx.moveTo(0, sy(y)); ctx.lineTo(cv.width, sy(y)); ctx.stroke();
       ctx.fillText(y.toFixed(0), 4, sy(y) - 2);
     }
-    // axes
     ctx.strokeStyle = "#33363b";
     ctx.beginPath(); ctx.moveTo(0, sy(0)); ctx.lineTo(cv.width, sy(0)); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(sx(0), 0); ctx.lineTo(sx(0), cv.height); ctx.stroke();
@@ -291,6 +415,71 @@
     else { ctx.arc(x, y, r, 0, Math.PI * 2); }
   }
 
+  // live capture-zone color per handle at the current frame
+  function zoneStates(cf) {
+    const m = new Map();
+    for (const e of EVENTS) {
+      if (e.kind !== "zone" || e.f > cf) continue;
+      m.set(e.src, e);
+    }
+    return m;
+  }
+
+  function drawProjectiles() {
+    if (!opt.projectiles.checked) return;
+    for (const e of EVENTS) {
+      const age = frame - e.f;
+      if (age < 0 || age > FADE) continue;
+      const a = 1 - age / FADE;
+      if (e.kind === "fire" && e.x !== undefined && e.dx !== undefined) {
+        const mag = Math.hypot(e.dx, e.dy) || 1;
+        const len = 70; // world metres of tracer
+        const X = sx(e.x), Y = sy(e.y);
+        const X2 = sx(e.x + e.dx / mag * len), Y2 = sy(e.y + e.dy / mag * len);
+        ctx.strokeStyle = `rgba(255,210,74,${a})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X2, Y2); ctx.stroke();
+        ctx.fillStyle = `rgba(255,235,150,${a})`;
+        ctx.beginPath(); ctx.arc(X, Y, 2.5, 0, Math.PI * 2); ctx.fill();
+      } else if (e.kind === "hit" && e.x !== undefined) {
+        const X = sx(e.x), Y = sy(e.y), r = 4 + age * 0.9;
+        ctx.strokeStyle = `rgba(255,90,90,${a})`; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
+
+  function drawEventMarks() {
+    if (!opt.eventmarks.checked) return;
+    // live capture zones (persistent)
+    const zs = zoneStates(frame);
+    for (const [, e] of zs) {
+      if (e.aux & 0x20) continue; // cleared slot
+      const ent = BYH.get(e.src);
+      const p = ent ? posAt(ent, frame) : (e.x !== undefined ? e : null);
+      if (!p) continue;
+      const X = sx(p.x), Y = sy(p.y);
+      const col = ZONE_COL[e.etype] || NEUTRAL;
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.globalAlpha = 0.8;
+      ctx.beginPath(); ctx.arc(X, Y, 13, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // recent kills (fading X at the kill location, when positioned)
+    for (const e of EVENTS) {
+      if (e.kind !== "kill") continue;
+      const age = frame - e.f;
+      if (age < 0 || age > KILL_FADE) continue;
+      let px, py;
+      if (e.x !== undefined) { px = e.x; py = e.y; }
+      else { const v = BYH.get(e.tgt); const p = v && posAt(v, e.f); if (!p) continue; px = p.x; py = p.y; }
+      const a = 1 - age / KILL_FADE;
+      const X = sx(px), Y = sy(py), r = 7;
+      ctx.strokeStyle = `rgba(255,122,24,${0.35 + a * 0.65})`; ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(X - r, Y - r); ctx.lineTo(X + r, Y + r);
+      ctx.moveTo(X + r, Y - r); ctx.lineTo(X - r, Y + r); ctx.stroke();
+    }
+  }
+
   function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -298,7 +487,6 @@
     drawGrid();
     if (!ENTS.length) return;
 
-    // trails (under markers)
     if (opt.trails.checked) {
       for (const e of ENTS) {
         if (!e.moving) continue;
@@ -314,7 +502,6 @@
       }
     }
 
-    // spawn anchors (authored layout)
     if (opt.anchors.checked) {
       for (const e of ENTS) {
         if (!e.spawn) continue;
@@ -323,6 +510,8 @@
         ctx.beginPath(); ctx.arc(X, Y, 9, 0, Math.PI * 2); ctx.stroke();
       }
     }
+
+    drawEventMarks();
 
     // live markers
     for (const e of ENTS) {
@@ -338,11 +527,15 @@
         ctx.beginPath(); ctx.arc(X, Y, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
       }
-      // heading tick (world degrees: +x east, +y north)
+      if (selected === e) {
+        ctx.beginPath(); ctx.arc(X, Y, r + 6, 0, Math.PI * 2);
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]);
+        ctx.stroke(); ctx.setLineDash([]);
+      }
       if (p.h !== null && p.h !== undefined) {
-        const a = p.h * Math.PI / 180;
+        const ang = p.h * Math.PI / 180;
         ctx.beginPath(); ctx.moveTo(X, Y);
-        ctx.lineTo(X + Math.cos(a) * (r + 7), Y - Math.sin(a) * (r + 7));
+        ctx.lineTo(X + Math.cos(ang) * (r + 7), Y - Math.sin(ang) * (r + 7));
         ctx.strokeStyle = "#f5f6f7"; ctx.lineWidth = 1.5; ctx.stroke();
       }
       if (opt.labels.checked) {
@@ -350,6 +543,105 @@
         ctx.fillText(e.name, X + 9, Y - 7);
       }
     }
+
+    drawProjectiles();
+  }
+
+  // ---- entity pick (inspector) -----
+  function pickEntity(mx, my) {
+    let best = null, bestD = 16 * 16;
+    for (const e of ENTS) {
+      const p = posAt(e, frame);
+      if (!p) continue;
+      const dx = sx(p.x) - mx, dy = sy(p.y) - my, d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  function renderInspector() {
+    const box = el("inspector");
+    if (!selected) { box.className = "empty"; box.textContent = "click an entity to inspect"; return; }
+    box.className = "";
+    const e = selected, p = posAt(e, frame);
+    const hx = "0x" + e.handle.toString(16).padStart(4, "0");
+    const rows = [
+      ["handle", `${hx} · p${e.pool}/s${e.handle & 0xfff}`],
+      ["type", `${e.type_id}${DATA.items && DATA.items[e.type_id] ? " · " + DATA.items[e.type_id] : ""}`],
+      ["category", e.cat],
+      ["team", e.team === 1 ? "Blue (1)" : e.team === 2 ? "Red (2)" : (e.team == null ? "—" : e.team)],
+      ["net_id", e.net_id],
+      ["spawn tag", e.spawn_tag],
+      ["pos (m)", p ? `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${(p.z!==undefined?p.z.toFixed(1):"?")}` : "—"],
+      ["heading", p && p.h != null ? p.h.toFixed(1) + "°" : "—"],
+      ["samples", `${e.track.length} (${e.moving ? "moving" : "static"})`],
+    ];
+    box.innerHTML =
+      `<div class="ihead"><b>${e.name}</b><button class="close" title="close">✕</button></div>` +
+      rows.map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join("");
+    box.querySelector(".close").onclick = () => { selected = null; renderInspector(); draw(); };
+  }
+
+  // ---- event log -----
+  function renderLog() {
+    const log = el("log");
+    const hideSnd = el("filt-snd").checked;
+    const list = EVENTS.filter(e => evFilt[e.kind] && !(hideSnd && isSnd(e)));
+    el("log-count").textContent = list.length + " / " + EVENTS.length;
+    const html = list.map((e, i) => {
+      const cls = e.f <= frame ? (frame - e.f <= FADE ? "now" : "") : "future";
+      return `<div class="ev ${e.kind} ${cls}" data-f="${e.f}">` +
+             `<span class="f">${e.f}</span>` +
+             `<span class="ic">${EV_ICON[e.kind] || "·"}</span>` +
+             `<span class="tx">${e.text}</span></div>`;
+    }).join("");
+    log.innerHTML = html;
+    log.querySelectorAll(".ev").forEach(d => {
+      d.onclick = () => { setPlaying(false); setFrame(parseInt(d.dataset.f, 10)); };
+    });
+    followLog();
+  }
+  function followLog() {
+    if (!el("filt-follow").checked) return;
+    const log = el("log");
+    const nodes = log.querySelectorAll(".ev");
+    let target = null;
+    for (const n of nodes) { if (parseInt(n.dataset.f, 10) <= frame) target = n; else break; }
+    if (target) {
+      const lt = target.offsetTop - log.clientHeight * 0.66;
+      log.scrollTop = Math.max(0, lt);
+    }
+  }
+  // lighter update: just retag now/future without rebuilding, then follow
+  function refreshLogClasses() {
+    el("log").querySelectorAll(".ev").forEach(d => {
+      const f = parseInt(d.dataset.f, 10);
+      d.classList.toggle("future", f > frame);
+      d.classList.toggle("now", f <= frame && frame - f <= FADE);
+    });
+    followLog();
+  }
+
+  // ---- environment readout -----
+  function envAt(cf) {
+    if (!ENV.length) return null;
+    let r = ENV[0];
+    for (const s of ENV) { if (s.f <= cf) r = s; else break; }
+    return r;
+  }
+  function renderEnv() {
+    const s = envAt(frame);
+    const box = el("env-readout");
+    if (!s) { box.textContent = "—"; el("env-frame").textContent = ""; return; }
+    el("env-frame").textContent = "f " + s.f;
+    const hrs = (s.tod / 65536 * 24);
+    const hh = Math.floor(hrs), mm = Math.floor((hrs - hh) * 60);
+    box.innerHTML =
+      `<div class="kv"><span>time of day</span><b>${hh}:${String(mm).padStart(2,"0")} (0x${s.tod.toString(16)})</b></div>` +
+      `<div class="kv"><span>fog</span><b>${s.fog}</b></div>` +
+      `<div class="kv"><span>clouds</span><b>${s.cloud}</b></div>` +
+      `<div class="kv"><span>overcast</span><b>${s.overcast}</b></div>` +
+      `<div class="kv"><span>quake</span><b>${s.quake}</b></div>`;
   }
 
   // ---- timeline / animation -----
@@ -358,19 +650,21 @@
     el("scrub").value = String(frame);
     el("framelabel").textContent = `f ${frame} / ${fmax}`;
     draw();
+    refreshLogClasses();
+    renderEnv();
+    if (selected) renderInspector();
   }
   function tick(t) {
     if (playing) {
       if (!lastT) lastT = t;
       const dt = (t - lastT) / 1000; lastT = t;
-      const fps = 120 * parseFloat(el("speed").value); // capture-frames advanced / sec
+      const fps = 120 * parseFloat(el("speed").value);
       let nf = frame + fps * dt;
-      if (nf >= fmax) { nf = fmin; }            // loop
+      if (nf >= fmax) { nf = fmin; }
       setFrame(Math.round(nf));
     } else lastT = 0;
     requestAnimationFrame(tick);
   }
-
   function setPlaying(p) {
     playing = p; lastT = 0;
     el("play").textContent = p ? "⏸ Pause" : "▶ Play";
@@ -380,21 +674,26 @@
   function load(json) {
     DATA = json;
     ENTS = prepare(json);
-    bounds = computeBounds(ENTS);
+    BYH = new Map(ENTS.map(e => [e.handle, e]));
+    EVENTS = prepareEvents(json);
+    ENV = (json.env || []).slice().sort((a, b) => a.f - b.f);
+    bounds = computeBounds(ENTS, EVENTS);
     fmin = json.meta ? json.meta.first_frame : 0;
     fmax = json.meta ? json.meta.last_frame : 100;
     if (!(fmax > fmin)) fmax = fmin + 1;
+    selected = null;
     el("scrub").min = String(fmin); el("scrub").max = String(fmax);
     el("capname").textContent = (json.meta && json.meta.capture) || "loaded";
     el("st-ent").textContent = String(ENTS.length);
     el("st-frames").textContent = `${fmin} – ${fmax}`;
     el("st-moving").textContent = String(ENTS.filter(e => e.moving).length);
-    // category legend (only the categories present)
+    el("st-events").textContent = String(EVENTS.length);
     const present = [...new Set(ENTS.map(e => e.cat))];
     el("catlegend").innerHTML = present.map(c =>
       `<div><span class="sw" style="background:#7d828a;border-radius:${(CATS[c]||{}).shape==='circle'||(CATS[c]||{}).shape==='ring'?'50%':'3px'}"></span> ${(CATS[c]||CATS.unknown).label}</div>`
     ).join("");
-    resize(); fitView(); setFrame(fmin);
+    resize(); fitView();
+    renderInspector(); renderLog(); setFrame(fmin);
   }
 
   function loadFile(file) {
@@ -413,11 +712,22 @@
   }
   window.addEventListener("resize", () => { resize(); });
 
-  let dragging = false, lastX = 0, lastY = 0;
-  cv.addEventListener("mousedown", e => { dragging = true; lastX = e.clientX; lastY = e.clientY; cv.classList.add("drag"); });
-  window.addEventListener("mouseup", () => { dragging = false; cv.classList.remove("drag"); });
+  let dragging = false, moved = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
+  cv.addEventListener("mousedown", e => { dragging = true; moved = false; lastX = e.clientX; lastY = e.clientY; downX = e.clientX; downY = e.clientY; });
+  window.addEventListener("mouseup", e => {
+    if (dragging && !moved) {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = cv.getBoundingClientRect();
+      const pick = pickEntity((e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr);
+      if (pick) { selected = pick; renderInspector(); } else if (selected) { selected = null; renderInspector(); }
+      draw();
+    }
+    dragging = false; cv.classList.remove("drag");
+  });
   window.addEventListener("mousemove", e => {
     if (!dragging) return;
+    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 3) { moved = true; cv.classList.add("drag"); }
+    if (!moved) return;
     const dpr = window.devicePixelRatio || 1;
     view.ox += (e.clientX - lastX) * dpr; view.oy += (e.clientY - lastY) * dpr;
     lastX = e.clientX; lastY = e.clientY; draw();
@@ -427,7 +737,6 @@
     const dpr = window.devicePixelRatio || 1;
     const mx = e.offsetX * dpr, my = e.offsetY * dpr;
     const k = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    // zoom about cursor
     view.ox = mx - (mx - view.ox) * k;
     view.oy = my - (my - view.oy) * k;
     view.scale *= k; draw();
@@ -443,7 +752,11 @@
   el("fit").addEventListener("click", fitView);
   el("play").addEventListener("click", () => setPlaying(!playing));
   el("scrub").addEventListener("input", e => { setPlaying(false); setFrame(parseInt(e.target.value, 10)); });
-  Object.values(opt).forEach(c => c.addEventListener("change", () => { if (DATA) { ENTS = prepare(DATA); draw(); } }));
+  Object.values(opt).forEach(c => c.addEventListener("change", () => { if (DATA) { ENTS = prepare(DATA); BYH = new Map(ENTS.map(e => [e.handle, e])); draw(); } }));
+  document.querySelectorAll('.efilt input[data-k]').forEach(c =>
+    c.addEventListener("change", () => { evFilt[c.dataset.k] = c.checked; renderLog(); }));
+  el("filt-snd").addEventListener("change", renderLog);
+  el("filt-follow").addEventListener("change", followLog);
   window.addEventListener("keydown", e => {
     if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
   });

@@ -385,22 +385,122 @@ struct FrameUpdateRecord {
 	InfantryCompactRecord infantry{}; // valid iff cls == Infantry
 };
 
+// The 0x0A header's sub-block case 2 (`flags2 & 3 == 2`) — a global environment
+// snapshot the host streams alongside motion: fog / time-of-day / clouds / quake.
+// [orig: NapiNPClientMsg_0x00A @ 0x430054..0x4302xx case 2]
+struct FrameEnv {
+	bool     present = false;
+	uint16_t fog_dist = 0;      // fog far distance
+	uint16_t fog_accel = 0;     // fog falloff / accel
+	uint16_t tod_fixed = 0;     // time-of-day (16-bit phase of a 24 h day)
+	uint8_t  quake_ticks = 0;   // screen-shake duration
+	uint8_t  cloud_scroll = 0;
+	uint8_t  cloud_byte2 = 0;
+	uint8_t  overcast = 0;
+	uint8_t  env_trail = 0;
+};
+
+// The 0x0A conditional vehicle-passenger record (`flags2 & 0xF == 8`) — the
+// local player's seat orientation when riding as a passenger (not driver).
+// [orig: NapiNPClientMsg_0x00A @ 0x430459..0x4304DC]
+struct FramePassenger {
+	bool     present = false;
+	uint16_t handle = 0xFFFF;   // seat's vehicle handle; 0xFFFF ⇒ no seat yaw/pitch
+	bool     has_seat = false;  // true when handle != 0xFFFF (yaw/pitch follow)
+	uint16_t seat_yaw = 0;
+	uint16_t seat_pitch = 0;
+};
+
 struct FrameUpdate {
 	// Header refs (dword_A822E4/E8/EC) — the i32 16.16 world anchor each compact
 	// record's decompressed position is added to (when unmounted).
 	int32_t anchor_x = 0, anchor_y = 0, anchor_z = 0;
+	uint8_t  flags1 = 0;            // loadprog / death-spectator signals
+	uint8_t  flags2 = 0;            // low 2 bits = sub-block selector, bit 3 = passenger gate
+	uint8_t  sub_block = 0;         // flags2 & 3 (0/1/2/3)
+	// 7-byte fixed tail (local-player state) [orig: 0x4303E5..0x430442].
+	uint8_t  state_flag_byte = 0;
 	uint16_t mount_handle = 0xFFFF; // local-player vehicle-mount (header tail)
-	std::vector<FrameUpdateRecord> records;
+	int16_t  health = 0;            // local-player health
+	int16_t  state_word = 0;
+	FrameEnv       env;             // valid iff sub_block == 2
+	FramePassenger passenger;       // valid iff (flags2 & 0xF) == 8
+	std::vector<FrameUpdateRecord> records;  // tag==1 per-entity motion
+	std::vector<WeaponHitRecord>   hits;     // tag==2 weapon-hit events (§5.9.1)
+	// Walk status: `complete` is true iff the event loop hit its terminator (tag
+	// 0 / end) cleanly. `consumed` is the byte count walked (for diagnostics).
+	bool   complete = false;
+	size_t consumed = 0;
 };
 
-// Walk a S2C 0x0A body into a FrameUpdate. `class_of` maps a wire type_id to its
-// compact dispatch class (built from items.def). Returns true iff the walk
-// reached the event-loop terminator (tag 0) or end cleanly; on any short read /
-// unknown class it stops, leaving the records decoded so far in `out`. Weapon-hit
-// (tag==2) records are consumed but not stored (motion-irrelevant here).
+// Walk a S2C 0x0A body into a FrameUpdate — the single, complete decode of the
+// message (the same walk nw_pp's printer renders). Captures the anchor + header
+// flags, the env sub-block (case 2), the local-player tail, the conditional
+// passenger record, every tag==1 per-entity compact record, AND every tag==2
+// weapon-hit record (§5.9.1). `class_of` maps a wire type_id to its compact
+// dispatch class (built from items.def). Returns true (and sets out.complete)
+// iff the event loop reached its terminator cleanly; on any short read / unknown
+// class it stops, leaving everything decoded so far in `out` (out.complete=false,
+// out.consumed = bytes walked) so callers can render partial state + the failure
+// point. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
                          FrameUpdate &out);
+
+// ===========================================================================
+// S2C game-event + kill messages — the kill feed and entity-death replication.
+// ===========================================================================
+
+// S2C 0x1E — game event (kill feed + objectives + zone control). Fixed 8 B.
+// [orig: NetPacket_HandleGameEvent @ 0x426270]. The client resolves the three
+// pool-0 indices to entities, then a ~60-case switch on event_type selects a
+// "Canned Msg"/STRCNDnn string, formats it via HUD_FormatKillEventMessage
+// (@ 0x422DA0) and posts it to the kill feed (Chat_AddDebugMessage); some types
+// also trigger a sound / progress-bar / effect. Only processed in-session (except
+// type 48). pos is the event's world map location (handler shifts i16 << 16 → 16.16).
+struct GameEventRecord {
+	uint8_t  event_type = 0;        // 1-60; selects the canned message + behavior
+	uint8_t  attacker_index = 0xFF; // pool-0 index (0xFF = none) → Pool_GetEntryUnchecked(0,*)
+	uint8_t  victim_index = 0xFF;   // pool-0 index (0xFF = none)
+	uint8_t  aux_index = 0xFF;      // pool-0 index (0xFF = none) — 3rd actor / means
+	int16_t  pos_x = 0;             // world X in meters (handler shifts << 16 to 16.16)
+	int16_t  pos_y = 0;             // world Y in meters
+};
+
+bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
+                       size_t &consumed);
+
+// Coarse classification of a 0x1E event_type, derived structurally from the
+// handler's switch [orig: 0x426270]. Drives the viewer's kill-feed styling.
+enum class GameEventKind : uint8_t {
+	Other = 0,     // single-actor canned / misc HUD message
+	Kill,          // attacker killed victim (the kill feed proper)
+	Objective,     // flag / capture / zone control / camp events
+};
+GameEventKind game_event_kind(uint8_t event_type);
+
+// The witnessed "Canned Msg" string key (e.g. "STRCND04") an event_type maps to,
+// or nullptr when the type has none. Faithful to the 0x426270 switch.
+const char *game_event_strcnd_key(uint8_t event_type);
+
+// S2C 0x26 — entity kill replication. Fixed 4 B `[u16 victim_slot][u16 attacker]`.
+// [orig: NapiNPClientMsg_0x026 @ 0x42EC30 → Entity_KillBySlotId(victim, attacker, 0)
+//  @ 0x42BCE0 — arg0 is the DYING entity, arg1 the killer]. Client-only.
+struct KillRecord {
+	uint16_t victim_slot = 0xFFFF;  // (pool<<12)|slot of the entity that dies
+	uint16_t attacker = 0xFFFF;     // killer handle / id recorded on the hit
+};
+bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
+                        size_t &consumed);
+
+// S2C 0x4E — batch despawn/kill. `[u16 count][count × u16 slot]`; each slot is
+// killed via Entity_KillBySlotId(slot, 0, 1), then the handler replies C2S 0x28.
+// [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870 (misnamed — it kills)].
+struct BatchKillBatch {
+	uint16_t count = 0;
+	std::vector<uint16_t> slots;    // (pool<<12)|slot of each despawned entity
+};
+bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out);
 
 // ===========================================================================
 // C2S 0x0C — per-entity client-to-host packet. Outer body starts with a 5-byte

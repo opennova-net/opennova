@@ -203,11 +203,143 @@ void test_frame_update_fold() {
 	EXPECT(s->has_heading && std::fabs(s->heading_deg - 90.0) < 0.5);
 }
 
+// --- event-stream crafters ---------------------------------------------------
+void put_i16(std::vector<uint8_t> &b, int16_t v) { put_u16(b, uint16_t(v)); }
+
+// S2C 0x1E game event — 8 B (§ NetPacket_HandleGameEvent @ 0x426270).
+std::vector<uint8_t> make_game_event_1e(uint8_t type, uint8_t att, uint8_t vic,
+                                        uint8_t aux, int16_t x, int16_t y) {
+	std::vector<uint8_t> b{type, att, vic, aux};
+	put_i16(b, x);
+	put_i16(b, y);
+	return b;
+}
+
+// C2S 0x06 client-fired-round — 45 B (§5.16).
+std::vector<uint8_t> make_fired_round_06(uint16_t shooter, uint8_t adm, int32_t x,
+                                         int32_t y, int32_t z, int32_t dx, int32_t dy) {
+	std::vector<uint8_t> b;
+	put_u32(b, 0x12345678);   // current_tick
+	put_u16(b, shooter);
+	b.push_back(0);           // fire_flags
+	b.push_back(adm);
+	put_u32(b, uint32_t(x)); put_u32(b, uint32_t(y)); put_u32(b, uint32_t(z));
+	put_u32(b, uint32_t(dx)); put_u32(b, uint32_t(dy));
+	put_u16(b, 0xFFFF);       // target_handle
+	put_u16(b, 0);            // hit_part
+	b.push_back(0); b.push_back(0); b.push_back(0); // extras
+	for (int i = 0; i < 5; ++i) put_u16(b, 0);      // muzzle block
+	return b;                 // 45 B
+}
+
+// S2C 0x0A with an ENV sub-block (case 2) + a single weapon-hit (tag==2, flags=0
+// → 17 B) + EOB. Exercises decode_frame_update's env + hits capture.
+std::vector<uint8_t> make_frame_update_env_hit(int32_t ax, int32_t ay, int32_t az,
+                                               uint16_t hit_target, uint8_t adm,
+                                               uint16_t cpx, uint16_t cpy, uint16_t cpz) {
+	std::vector<uint8_t> b;
+	put_u32(b, uint32_t(ax)); put_u32(b, uint32_t(ay)); put_u32(b, uint32_t(az));
+	b.push_back(0);           // flags1
+	b.push_back(2);           // flags2 -> sub-block 2 (ENV)
+	put_u16(b, 1000);         // fog_dist
+	put_u16(b, 0xFF00);       // fog_accel
+	put_u16(b, 0x7957);       // tod_fixed
+	b.push_back(0);           // quake
+	b.push_back(15);          // cloud_scroll
+	b.push_back(0);           // cloud_byte2
+	b.push_back(0);           // overcast
+	b.push_back(0);           // env_trail
+	b.push_back(0); put_u16(b, 0xFFFF); put_u16(b, 200); put_u16(b, 0); // 7-B tail
+	b.push_back(2);           // event tag 2 = weapon-hit
+	b.push_back(0);           // flags (no parent / no weapon -> 17 B)
+	b.push_back(adm);         // adm_index
+	b.push_back(0);           // hit_subtype
+	put_u16(b, hit_target);   // target_handle
+	put_u16(b, 0xF7FF);       // damage_extra
+	put_u16(b, cpx); put_u16(b, cpy); put_u16(b, cpz); // compressed pos
+	put_u16(b, 0); put_u16(b, 0);                      // yaw / pitch
+	b.push_back(0);           // event tag 0 = EOB
+	return b;
+}
+
+// End-to-end event stream: a kill (S2C 0x1E), a fire (C2S 0x06) and a 0x0A
+// carrying an env snapshot + a weapon-hit, asserted out of build_replay_timeline.
+void test_event_stream() {
+	const int32_t ax = 1000000, ay = 2000000, az = 500000;
+	const uint16_t kHitTgt = 0x0003;
+
+	ClientAuth ca;
+	ca.na = "tester";
+	ca.ci = 1;
+	ca.ck = 2;
+	ca.scrk = std::string(kScrk);
+	ServerAuth sa = build_server_auth(ca, 0x7F000001u, 32768, 0x55, kScrk);
+
+	std::vector<net::PcapDatagram> dgrams;
+	int f = 1;
+	dgrams.push_back({32769, 32768, f++,
+	                  nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH,
+	                                   server_auth_to_bytes(sa))});
+	dgrams.push_back({32768, 32769, f++,
+	                  nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH,
+	                                   client_auth_to_bytes(ca))});
+	dgrams.push_back({32769, 32768, f++,
+	                  make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+	                                     0x1E, make_game_event_1e(4, 5, 4, 0xFF, 0, 0))});
+	dgrams.push_back({32768, 32769, f++,
+	                  make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x06,
+	                                     make_fired_round_06(0x0005, 24, 3000000,
+	                                                         1000000, 3700000,
+	                                                         -30000, -1200))});
+	dgrams.push_back({32769, 32768, f++,
+	                  make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A,
+	                                     make_frame_update_env_hit(ax, ay, az, kHitTgt,
+	                                                               18, 0x5007, 0x4608, 0))});
+	const std::vector<uint8_t> pcap = net::build_pcap_udp(dgrams);
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	std::vector<CaptureDatagram> caps;
+	for (auto &pk : got) caps.push_back({pk.frame_index, std::move(pk.payload)});
+	const ReplayTimeline tl =
+	    build_replay_timeline(decode_capture_to_messages(caps));
+
+	int nfire = 0, nhit = 0, nkill = 0;
+	const ReplayEvent *kill = nullptr, *fire = nullptr, *hit = nullptr;
+	for (const auto &e : tl.events) {
+		if (e.kind == ReplayEventKind::Fire) { nfire++; fire = &e; }
+		else if (e.kind == ReplayEventKind::Hit) { nhit++; hit = &e; }
+		else if (e.kind == ReplayEventKind::Kill) { nkill++; kill = &e; }
+	}
+	EXPECT(nkill == 1 && nfire == 1 && nhit == 1);
+	if (kill) {
+		EXPECT(kill->source == 5 && kill->target == 4);
+		EXPECT(kill->event_type == 4 && kill->label == "STRCND04");
+	}
+	if (fire) {
+		EXPECT(fire->source == 0x0005 && fire->adm_index == 24);
+		EXPECT(fire->has_pos && fire->x == 3000000);
+		EXPECT(fire->has_dir && fire->dir_x == -30000);
+	}
+	if (hit) {
+		EXPECT(hit->target == kHitTgt && hit->adm_index == 18);
+		EXPECT(hit->has_pos);
+		EXPECT(hit->x == ax + network_decompress_fixedpoint(0x5007));
+		EXPECT(hit->y == ay + network_decompress_fixedpoint(0x4608));
+	}
+	EXPECT(tl.environment.size() == 1);
+	if (!tl.environment.empty()) {
+		EXPECT(tl.environment[0].fog_dist == 1000);
+		EXPECT(tl.environment[0].tod_fixed == 0x7957);
+		EXPECT(tl.environment[0].cloud_scroll == 15);
+	}
+}
+
 } // namespace
 
 int main() {
 	test_decompress_vectors();
 	test_frame_update_fold();
+	test_event_stream();
 
 	// --- craft the inputs -----------------------------------------------------
 	// Two pool-1 spawns: a "blue" entity at (-85,45) and a "red" one at (85,45).

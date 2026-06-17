@@ -520,54 +520,75 @@ bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
                          FrameUpdate &out) {
 	Cursor c{body, body + len, true};
+	auto finish = [&](bool complete) {
+		out.complete = complete;
+		out.consumed = size_t(c.p - body);
+		return complete;
+	};
 
 	// 12-byte reference header -> the position anchor (dword_A822E4/E8/EC).
 	out.anchor_x = c.i32();
 	out.anchor_y = c.i32();
 	out.anchor_z = c.i32();
-	c.u8(); // flags1 (loadprog / death-spectator signals — not needed here)
-	const uint8_t flags2 = c.u8();
-	switch (flags2 & 0x03) {
+	out.flags1 = c.u8();    // loadprog / death-spectator signals
+	out.flags2 = c.u8();
+	out.sub_block = uint8_t(out.flags2 & 0x03);
+	switch (out.sub_block) {
 	case 0: c.skip(11); break;
 	case 1: c.skip(6); break;
-	case 2: c.skip(11); break;
-	default: break; // case 3: 0 B
+	case 2:
+		// ENV snapshot [orig: 0x430054 case 2]: 3× u16 + 5× u8 (= 11 B, same
+		// cursor advance the previous `skip(11)` made — now retained).
+		out.env.present      = true;
+		out.env.fog_dist     = c.u16();
+		out.env.fog_accel    = c.u16();
+		out.env.tod_fixed    = c.u16();
+		out.env.quake_ticks  = c.u8();
+		out.env.cloud_scroll = c.u8();
+		out.env.cloud_byte2  = c.u8();
+		out.env.overcast     = c.u8();
+		out.env.env_trail    = c.u8();
+		break;
+	default: break; // case 3: 0 B (objective-gametype gated)
 	}
 
 	// 7-byte fixed tail: state_flag u8, mount u16, health i16, state_word i16.
-	c.u8();
-	out.mount_handle = c.u16();
-	c.i16();
-	c.i16();
-	if (!c.ok) return false;
+	out.state_flag_byte = c.u8();
+	out.mount_handle    = c.u16();
+	out.health          = c.i16();
+	out.state_word      = c.i16();
+	if (!c.ok) return finish(false);
 
 	// Conditional vehicle-passenger record (sub-block 0 + flags2 bit 3 set).
-	if ((flags2 & 0x0F) == 8) {
-		const uint16_t passenger_handle = c.u16();
-		if (!c.ok) return false;
-		if (passenger_handle != 0xFFFF) {
-			c.u16(); // seat_yaw
-			c.u16(); // seat_pitch
+	if ((out.flags2 & 0x0F) == 8) {
+		out.passenger.present = true;
+		out.passenger.handle = c.u16();
+		if (!c.ok) return finish(false);
+		if (out.passenger.handle != 0xFFFF) {
+			out.passenger.has_seat = true;
+			out.passenger.seat_yaw = c.u16();
+			out.passenger.seat_pitch = c.u16();
 		}
 	}
 
-	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = weapon-hit (skipped).
+	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = weapon-hit.
 	while (c.ok && c.p < c.end) {
 		const uint8_t tag = c.u8();
-		if (tag == 0) return true;
+		if (tag == 0) return finish(true);
 		if (tag == 2) {
 			WeaponHitRecord wh;
 			size_t consumed = 0;
 			if (!decode_weapon_hit_record(c.p, size_t(c.end - c.p), wh, consumed))
-				return false;
+				return finish(false);
 			c.p += consumed;
+			out.hits.push_back(wh);
 			continue;
 		}
 		if (tag == 1) {
 			FrameUpdateRecord rec;
 			rec.handle = c.u16();
 			rec.type_id = c.u16();
-			if (!c.ok) return false;
+			if (!c.ok) return finish(false);
 			rec.cls = class_of ? class_of(rec.type_id) : EntityClass::Unknown;
 			const size_t avail = size_t(c.end - c.p);
 			size_t consumed = 0;
@@ -585,16 +606,108 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 			default:
 				// Guided (§5.15 deferred) or Unknown: record width unknown —
 				// fail closed (we can't safely advance the cursor).
-				return false;
+				return finish(false);
 			}
-			if (!ok) return false;
+			if (!ok) return finish(false);
 			c.p += consumed;
 			out.records.push_back(std::move(rec));
 			continue;
 		}
-		return false; // unknown event tag — fail closed
+		return finish(false); // unknown event tag — fail closed
 	}
-	return c.ok;
+	return finish(c.ok);
+}
+
+// S2C 0x1E game event — 8 B fixed. [orig: NetPacket_HandleGameEvent @ 0x426270]
+bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
+                       size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.event_type     = c.u8();
+	out.attacker_index = c.u8();
+	out.victim_index   = c.u8();
+	out.aux_index      = c.u8();
+	out.pos_x          = c.i16();
+	out.pos_y          = c.i16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 8;
+}
+
+// Coarse event_type classification — a structural read of the 0x426270 switch:
+// the cases that resolve attacker+victim (HUD_FormatKillEventMessage with both)
+// are kills; the flag/zone/camp/base cases are objectives; the rest are misc.
+GameEventKind game_event_kind(uint8_t t) {
+	switch (t) {
+	case 4: case 5: case 6: case 7: case 8: case 9:
+	case 10: case 11: case 12: case 13: case 14: case 15:
+	case 24: case 32: case 33: case 34: case 38: case 39:
+	case 45: case 49:
+		return GameEventKind::Kill;
+	case 19: case 20: case 21:
+	case 41: case 42: case 43: case 44:
+	case 50: case 51: case 52: case 53:
+	case 54: case 55: case 56: case 57: case 58: case 59: case 60:
+		return GameEventKind::Objective;
+	default:
+		return GameEventKind::Other;
+	}
+}
+
+// The witnessed "Canned Msg" string key for an event_type, where the handler
+// uses a single deterministic key. Types that pick the string by team/gametype
+// at runtime (19/20/21/50-53/58) return nullptr. [orig: 0x426270 switch]
+const char *game_event_strcnd_key(uint8_t t) {
+	switch (t) {
+	case 1: return "STRCND01"; case 2: return "STRCND02"; case 3: return "STRCND03";
+	case 4: return "STRCND04"; case 5: return "STRCND05"; case 6: return "STRCND06";
+	case 7: case 8: case 9: return "STRCND07";
+	case 10: case 11: case 12: return "STRCND08";
+	case 13: return "STRCND09"; case 14: return "STRCND10"; case 15: return "STRCND11";
+	case 16: case 17: case 18: return "STRCND12";
+	case 22: case 23: return "STRCND19";
+	case 24: return "STRCND22"; case 25: return "STRCND28"; case 26: return "STRCND29";
+	case 27: return "STRCND33"; case 28: return "STRCND34"; case 29: return "STRCND31";
+	case 30: return "STRCND32"; case 31: return "STRCND35";
+	case 32: return "STRCND36"; case 33: return "STRCND37"; case 34: return "STRCND38";
+	case 35: return "STRCND39"; case 36: return "STRCND40"; case 37: return "STRCND41";
+	case 38: return "STRCND42"; case 39: return "STRCND43"; case 40: return "STRCND44";
+	case 41: return "STRCND_PSP_BLUEWARNING"; case 42: return "STRCND_PSP_REDWARNING";
+	case 43: return "STRCND_PSP_BLUETAKEN";   case 44: return "STRCND_PSP_REDTAKEN";
+	case 45: return "STRCND45"; case 48: return "STRCND46"; case 49: return "STRCND47";
+	case 54: return "STRCND_LFP_BLUEWARNING"; case 55: return "STRCND_LFP_REDWARNING";
+	case 56: return "STRCND_LFP_BLUETAKEN";   case 57: return "STRCND_LFP_REDTAKEN";
+	case 59: return "STRCND_FULLYCAMPED";     case 60: return "STRCND_LOSTCAMP";
+	default: return nullptr;
+	}
+}
+
+// S2C 0x26 entity kill replication. [orig: NapiNPClientMsg_0x026 @ 0x42EC30]
+// The handler is defensive: it reads the victim slot if 2 B are present and the
+// attacker if a further 2 B are present, then always kills. We mirror that —
+// victim is required, attacker is read when present.
+bool decode_kill_record(const uint8_t *body, size_t len, KillRecord &out,
+                        size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.victim_slot = c.u16();
+	if (!c.ok) return false;
+	if (c.p + 2 <= c.end) out.attacker = c.u16();
+	consumed = size_t(c.p - body);
+	return true;
+}
+
+// S2C 0x4E batch despawn/kill. [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870]
+// The handler kills every u16 slot after the count word up to the buffer end
+// (the leading `count` is echoed in the C2S 0x28 reply, not a read limit).
+bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out) {
+	out = BatchKillBatch{};
+	Cursor c{body, body + len, true};
+	out.count = c.u16();
+	if (!c.ok) return false;
+	while (c.p + 2 <= c.end)
+		out.slots.push_back(c.u16());
+	return (c.p == c.end);
 }
 
 } // namespace opennova

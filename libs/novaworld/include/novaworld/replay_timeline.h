@@ -14,13 +14,16 @@
 //   - C2S 0x0C extended uplinks (§5.10) append per-frame motion for the joiner's
 //     OWN player — full i32 16.16 positions, the cleanest moving track in a
 //     loopback capture.
+//   - S2C 0x0A per-frame compact records (§5.9) append the host's view of every
+//     nearby entity's motion (positions decompressed via
+//     network_decompress_fixedpoint + the message anchor). On-foot records land
+//     in world here; mounted (vehicle-local) records are deferred.
 //
-// What is NOT folded in yet: S2C 0x0A per-frame compact records (§5.9). They
-// carry the host's view of every nearby entity, but their positions are
-// wire-COMPRESSED against an anchor whose reconstruction is not yet
-// IDA-witnessed (faithful-port: we don't invent the decompression). When that
-// lands, those samples extend every entity's track here — the struct already
-// accommodates it via ReplaySampleSource.
+// Beyond per-entity tracks, the timeline also carries an EVENT stream and an
+// ENVIRONMENT stream decoded from the same wire: weapon-fire (C2S 0x06),
+// weapon-hit (S2C 0x0A tag==2), kills + game events (S2C 0x1E / 0x26),
+// capture-zone state (S2C 0x40), and the 0x0A env snapshot. These let a viewer
+// render a kill feed, projectiles, and an environment readout.
 
 #include <cstdint>
 #include <functional>
@@ -62,10 +65,44 @@ struct ReplayEntity {
 	std::vector<ReplaySample> track; // time-ordered samples (seeded with spawn)
 };
 
+// A discrete in-game event, decoded from the wire, placed on the timeline.
+enum class ReplayEventKind : uint8_t {
+	Fire = 0,     // C2S 0x06 weapon-fire (world origin + direction) §5.16
+	Hit,          // S2C 0x0A tag==2 validated weapon-hit (impact world pos) §5.9.1
+	Kill,         // S2C 0x1E kill-type event / S2C 0x26 — an entity death
+	GameEvent,    // S2C 0x1E non-kill (objective / zone / misc canned message)
+	CaptureZone,  // S2C 0x40 minimap capture-zone state change §5.19
+};
+
+struct ReplayEvent {
+	int frame_index = 0;
+	ReplayEventKind kind = ReplayEventKind::Fire;
+	bool has_pos = false;
+	int32_t x = 0, y = 0, z = 0;   // world 16.16, valid iff has_pos
+	bool has_dir = false;
+	int32_t dir_x = 0, dir_y = 0;  // fire direction (raw i32 wire), valid iff has_dir
+	uint16_t source = 0xFFFF;      // shooter / attacker / killer handle (0xFFFF=none)
+	uint16_t target = 0xFFFF;      // target / victim handle (0xFFFF=none)
+	uint16_t aux = 0xFFFF;         // weapon handle (hit) / aux actor (game event) / flags (zone)
+	uint8_t  adm_index = 0;        // weapon/action descriptor (Fire/Hit)
+	uint8_t  event_type = 0;       // 0x1E event_type (Kill/GameEvent) / 0x40 icon color (Zone)
+	bool     sound = false;        // the engine plays a sound for this event (fire/hit/announce)
+	std::string label;             // best-effort tag: STRCND key / category
+};
+
+// One environment snapshot from the S2C 0x0A header sub-block (case 2).
+struct ReplayEnvSample {
+	int frame_index = 0;
+	uint16_t fog_dist = 0, fog_accel = 0, tod_fixed = 0;
+	uint8_t  quake_ticks = 0, cloud_scroll = 0, overcast = 0;
+};
+
 struct ReplayTimeline {
 	int first_frame = 0;     // capture frame span (the natural scrubber range)
 	int last_frame = 0;
-	std::vector<ReplayEntity> entities; // in spawn/first-seen order
+	std::vector<ReplayEntity> entities;     // in spawn/first-seen order
+	std::vector<ReplayEvent>  events;        // fire / hit / kill / game-event / zone
+	std::vector<ReplayEnvSample> environment; // 0x0A env snapshots over time
 };
 
 // Assemble the timeline from the decoded in-game message stream

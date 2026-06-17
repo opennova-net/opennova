@@ -206,6 +206,17 @@ via `apps/common/pcap_reader`, `nw_pool_decode_unit_test` inline-pcap round-trip
 | `NapiNPClientMsg_0x020` | `0x425C00` | S2C 0x20 pool-3 sync — type/pos/team/heading (90−facing) vs authored knowns | D-NET-59/62 | matching |
 | `serialize_entity_pool_to_packet_0` | `0x503940` | team source = entity+354 (onhook +146/+196 ruled out) | D-NET-62 | matching |
 
+Kill feed + replay event/environment streams (§5.26/§5.27; one-host/one-client capture 2026-06-17;
+`nw_pp` printers + `libs/novaworld` decoders, `nw_replay_timeline` `test_event_stream`):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `NetPacket_HandleGameEvent` | `0x426270` | S2C 0x1E game event / kill feed — 8-B body (type/attacker/victim/aux/pos); `event_type`→`STRCNDnn` switch ported (`game_event_kind`/`_strcnd_key`); byte-witnessed `04 05 04 ff`=type-4 kill | — | matching |
+| `NapiNPClientMsg_0x026` | `0x42EC30` | S2C 0x26 entity kill — `[u16 victim_slot][u16 attacker]` → `Entity_KillBySlotId` | — | matching |
+| `NapiNPClientMsg_HandleBatchSpawn` | `0x431870` | S2C 0x4E batch despawn — count + per-slot kill (Kong-misnamed "spawn") | — | matching |
+| `Entity_KillBySlotId` | `0x42BCE0` | arg0 = dying entity, arg1 = attacker — disambiguates the 0x26 field order | — | host code / read-only grill |
+| `HUD_FormatKillEventMessage` | `0x422DA0` | kill-feed name/clan formatting (`$A`/`$B` tokens) — confirms 0x1E actor roles (killer/victim/aux) | — | host code / read-only grill |
+
 ## 5.6 Single-player listen-server bring-up (engine-research, 2026-06-16)
 
 Witness that JO single player is an in-process listen server (host + client, socketless transport

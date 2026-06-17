@@ -104,6 +104,9 @@ ReplayTimeline build_replay_timeline(
     const std::vector<InGameMessage> &messages,
     const std::function<EntityClass(uint16_t)> &class_of) {
 	Builder b;
+	// Last (icon_color<<8 | flags) seen per capture-zone handle — emit a
+	// CaptureZone event only when a zone's state changes (the 0x40 sync repeats).
+	std::unordered_map<uint16_t, uint16_t> last_zone_state;
 	for (const auto &m : messages) {
 		b.note_frame(m.frame_index);
 
@@ -205,7 +208,7 @@ ReplayTimeline build_replay_timeline(
 			s.has_heading = true;
 			s.source = ReplaySampleSource::ClientUplink;
 			e.track.push_back(s);
-		} else if (m.dir == 'S' && m.tag == 0x0A && class_of) {
+		} else if (m.dir == 'S' && m.tag == 0x0A) {
 			// Per-frame motion for every nearby entity (the host's view). Each
 			// compact record's position is compressed against the message's
 			// header anchor; unmounted records decode to world here, mounted
@@ -221,6 +224,104 @@ ReplayTimeline build_replay_timeline(
 				ReplayEntity &e = b.get(r.handle, r.type_id);
 				if (e.type_id == 0) e.type_id = r.type_id;
 				e.track.push_back(s);
+			}
+			// Environment snapshot (0x0A header sub-block case 2).
+			if (fu.env.present) {
+				ReplayEnvSample es;
+				es.frame_index = m.frame_index;
+				es.fog_dist = fu.env.fog_dist;
+				es.fog_accel = fu.env.fog_accel;
+				es.tod_fixed = fu.env.tod_fixed;
+				es.quake_ticks = fu.env.quake_ticks;
+				es.cloud_scroll = fu.env.cloud_scroll;
+				es.overcast = fu.env.overcast;
+				b.tl.environment.push_back(es);
+			}
+			// Weapon-hit events (0x0A tag==2): impact world pos = decompress + anchor.
+			for (const auto &h : fu.hits) {
+				ReplayEvent ev;
+				ev.frame_index = m.frame_index;
+				ev.kind = ReplayEventKind::Hit;
+				ev.has_pos = true;
+				ev.x = network_decompress_fixedpoint(h.pos_x_compressed) + fu.anchor_x;
+				ev.y = network_decompress_fixedpoint(h.pos_y_compressed) + fu.anchor_y;
+				ev.z = network_decompress_fixedpoint(h.pos_z_compressed) + fu.anchor_z;
+				ev.target = h.target_handle;
+				ev.aux = h.weapon_handle;
+				ev.adm_index = h.adm_index;
+				ev.sound = true;
+				b.tl.events.push_back(std::move(ev));
+			}
+		} else if (m.dir == 'C' && m.tag == 0x06) {
+			// Weapon-fire uplink — world origin + direction + shooter (§5.16).
+			ClientFiredRound fr;
+			size_t consumed = 0;
+			if (decode_client_fired_round(m.payload.data(), m.payload.size(),
+			                              fr, consumed)) {
+				ReplayEvent ev;
+				ev.frame_index = m.frame_index;
+				ev.kind = ReplayEventKind::Fire;
+				ev.has_pos = true; ev.x = fr.pos_x; ev.y = fr.pos_y; ev.z = fr.pos_z;
+				ev.has_dir = true; ev.dir_x = fr.dir_x; ev.dir_y = fr.dir_y;
+				ev.source = fr.shooter_handle;
+				ev.target = fr.target_handle;
+				ev.adm_index = fr.adm_index;
+				ev.sound = true;
+				b.tl.events.push_back(std::move(ev));
+			}
+		} else if (m.dir == 'S' && m.tag == 0x1E) {
+			// Game event — kill feed + objectives. Pool-0 indices ARE pool-0
+			// handles ((0<<12)|slot), matching organic spawn slot_ids.
+			GameEventRecord ge;
+			size_t consumed = 0;
+			if (decode_game_event(m.payload.data(), m.payload.size(), ge, consumed)) {
+				ReplayEvent ev;
+				ev.frame_index = m.frame_index;
+				ev.kind = game_event_kind(ge.event_type) == GameEventKind::Kill
+				              ? ReplayEventKind::Kill : ReplayEventKind::GameEvent;
+				ev.event_type = ge.event_type;
+				if (ge.attacker_index != 0xFF) ev.source = ge.attacker_index;
+				if (ge.victim_index != 0xFF) ev.target = ge.victim_index;
+				if (ge.aux_index != 0xFF) ev.aux = ge.aux_index;
+				if (ge.pos_x != 0 || ge.pos_y != 0) {
+					ev.has_pos = true;
+					ev.x = int32_t(ge.pos_x) << 16;
+					ev.y = int32_t(ge.pos_y) << 16;
+				}
+				if (const char *key = game_event_strcnd_key(ge.event_type))
+					ev.label = key;
+				ev.sound = true;
+				b.tl.events.push_back(std::move(ev));
+			}
+		} else if (m.dir == 'S' && m.tag == 0x26) {
+			// Direct entity-death replication.
+			KillRecord kr;
+			size_t consumed = 0;
+			if (decode_kill_record(m.payload.data(), m.payload.size(), kr, consumed)) {
+				ReplayEvent ev;
+				ev.frame_index = m.frame_index;
+				ev.kind = ReplayEventKind::Kill;
+				ev.source = kr.attacker;
+				ev.target = kr.victim_slot;
+				b.tl.events.push_back(std::move(ev));
+			}
+		} else if (m.dir == 'S' && m.tag == 0x40) {
+			// Capture-zone state — emit only on change (the 0x40 sync repeats).
+			CaptureZoneOverlayBatch cz;
+			if (decode_capture_zone_overlay(m.payload.data(), m.payload.size(), cz)) {
+				for (const auto &z : cz.entries) {
+					const uint16_t state = uint16_t((z.icon_color << 8) | z.flags);
+					auto it = last_zone_state.find(z.handle);
+					if (it != last_zone_state.end() && it->second == state) continue;
+					last_zone_state[z.handle] = state;
+					ReplayEvent ev;
+					ev.frame_index = m.frame_index;
+					ev.kind = ReplayEventKind::CaptureZone;
+					ev.source = z.handle;
+					ev.event_type = z.icon_color;
+					ev.aux = z.flags;
+					b.tl.events.push_back(std::move(ev));
+				}
 			}
 		}
 	}

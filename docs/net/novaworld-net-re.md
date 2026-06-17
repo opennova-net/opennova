@@ -1743,6 +1743,82 @@ tracks — including `network_decompress_fixedpoint` vectors and that an `0x0A` 
 `decompress(compressed) + anchor`. No capture fixture; runs in CI. The real-capture cross-checks
 (`nw_pool_groundtruth`, path-gated) were repointed onto the same shared helper.
 
+### 5.26 Tags 0x1E / 0x26 / 0x4E — game events, kills, batch despawn (the kill feed; one-host/one-client capture 2026-06-17)
+
+The client's death + announcement path, decoded field-for-field and validated against a fresh
+one-host/one-client loopback capture (`apps/nw_pp` printers + `libs/novaworld/ingame_decode`
+decoders for all three).
+
+**S2C 0x1E — game event (the kill feed proper).** Fixed 8-byte body.
+[orig: `NetPacket_HandleGameEvent @ 0x426270`].
+
+| Off | Field | Type | Meaning |
+|---|---|---|---|
+| 0 | `event_type` | u8 | 1–60; selects the canned message + side effects (see below) |
+| 1 | `attacker_index` | u8 | pool-0 index → `[orig: Pool_GetEntryUnchecked @ 0x441FC0]`(0, idx); `0xFF`=none |
+| 2 | `victim_index` | u8 | pool-0 index; `0xFF`=none |
+| 3 | `aux_index` | u8 | pool-0 index — third actor / means; `0xFF`=none |
+| 4 | `pos_x` | i16 | event world X in metres (handler does `<< 16` → 16.16) |
+| 6 | `pos_y` | i16 | event world Y in metres |
+
+The handler, in-session only (except `event_type==48`), switches `event_type` over ~60 cases:
+each resolves a `"Canned Msg"`/`STRCNDnn` string via `[orig: GameText_GetString @ 0x51EBD0]`,
+formats it with the resolved killer/victim/aux names via `[orig: HUD_FormatKillEventMessage @
+0x422DA0]` (→ `[orig: Chat_FormatMessage @ 0x422C60]`, `$A`/`$B` token substitution; player names
+from the slot table with `<ch>…<co>` clan-tag colouring), and posts it to the kill feed with a
+colour via `[orig: Chat_AddDebugMessage @ 0x4987F0]`. Objective/zone cases additionally drive
+`[orig: PlaySoundOnDedicatedServer @ 0x527BE0]`, `HUD_DrawDefaultProgressBar @ 0x527E60`, and
+effect spawns. Cases that resolve both attacker AND victim (4–15, 24, 32–34, 38–39, 45, 49) are
+**kills**; the flag/zone/camp/base cases (19–21, 41–44, 50–60) are **objectives**; the rest are
+misc HUD lines. The full `event_type → STRCNDnn` table and the kind classification are ported in
+`game_event_strcnd_key` / `game_event_kind` (libs/novaworld/ingame_decode.cpp). **Wire-confirmed:**
+the capture's three `0x1E` bodies were `04 05 04 ff 00 00 00 00` (type 4 = `STRCND04` kill,
+attacker pool0/s5 killed victim pool0/s4), `2a 05 ff ff …` (type 42 = `STRCND_PSP_REDWARNING`),
+and `02 05 00 00 …` (type 2). Pool-0 indices ARE pool-0 handles (`(0<<12)|slot`), so they key
+straight into the organic-spawn (§5.23) entity table.
+
+**S2C 0x26 — entity kill replication.** Fixed 4-byte body `[u16 victim_slot][u16 attacker]`.
+[orig: `NapiNPClientMsg_0x026 @ 0x42EC30`] → `[orig: Entity_KillBySlotId @ 0x42BCE0]`(victim_slot,
+attacker, 0). Client-only (skipped when `g_napi_np_ctx.is_authority`). The decompiler labels the
+first word `killer_slot_id`, but `Entity_KillBySlotId`'s arg0 is the entity that **dies** (it
+resolves the slot, validates it is alive, records arg1 as the attacker on the hit record, and
+invokes the entity's death callback) — so the first word is the **victim** slot, the second the
+attacker. The handler is defensive: it reads the victim if ≥2 B are present and the attacker if a
+further 2 B follow, then always kills.
+
+**S2C 0x4E — batch despawn/kill.** `[u16 count][count × u16 slot]`. [orig:
+`NapiNPClientMsg_HandleBatchSpawn @ 0x431870`] — Kong-misnamed "spawn": it kills every u16 slot
+after the count word via `Entity_KillBySlotId(slot, 0, 1)` up to the buffer end (the leading
+`count` is echoed in the reply, not a read limit), then queues the C2S `0x28` ack.
+
+### 5.27 Replay event + environment streams (tooling, 2026-06-17)
+
+Two refinements turn the replay timeline (§5.25) from "where is everything" into "what is
+happening", and consolidate the `0x0A` decode to a single source.
+
+- **`decode_frame_update` is now the whole `0x0A` decode.** The env sub-block (header case 2:
+  fog / time-of-day / clouds / quake), the conditional vehicle-passenger record, and every
+  trailing **weapon-hit** (event-loop `tag==2`, §5.9.1) — previously walked only by `nw_pp`'s
+  printer — are captured into the `FrameUpdate` struct. `nw_pp::print_tag_0a` is now a thin
+  renderer over that struct, so advancing `0x0A` knowledge means editing one walker.
+- **An event stream + an environment stream** ride alongside the per-entity tracks in
+  `ReplayTimeline`: **fire** (C2S `0x06`, §5.16 — world origin + direction + shooter + `adm_index`),
+  **hit** (`0x0A` `tag==2` — impact world pos = `network_decompress_fixedpoint(compressed)` + the
+  message anchor, + target / weapon / `adm_index`), **kill** + **game-event** (§5.26 `0x1E`/`0x26`),
+  and **capture-zone** state (§5.19 `0x40`, emitted only on change — the sync repeats every frame).
+  The env stream is the `0x0A` case-2 snapshots over time. `nw_pp --replay-json` emits `events[]`
+  + `env[]`; `tools/net/replay_viewer.html` renders a time-synced kill feed / event log (with a
+  `snd:` filter), projectile tracers (fire rays) + hit bursts, live capture-zone rings, an
+  environment readout, and a click-to-inspect entity panel.
+
+**Wire-confirmed** on the one-host/one-client capture (957 datagrams): 151 events — 19 fire
+(pool0/s5, `adm 24`), 125 hit (→pool0/s3, weapon pool0/s4, `adm 18`, positions decompressed), 1
+kill (s5 ✖ s4, `STRCND04` — matching the `0x1E` byte-witness above), 2 game-events, 4 capture-zone
+state changes (deduped from 336 `0x40` syncs) — plus 98 env snapshots. CI: `nw_replay_timeline`
+gains `test_event_stream`, which crafts an inline `0x1E` kill + C2S `0x06` fire + `0x0A` env+hit
+through the shared pipeline and asserts the assembled events (kill source/target/`STRCND04`, fire
+origin/dir/adm, hit world pos = decompress + anchor) and the env snapshot.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
