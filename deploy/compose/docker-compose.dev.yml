@@ -31,6 +31,11 @@ services:
     #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
     environment:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-192.168.10.120}
+      # Re-set here for the same reason as ONNET_PUBLIC_HOST: the base compose's
+      # `environment:` block overrides app.dev.env, so the dev token set there
+      # never reaches the container. Without this the admin API stays CLOSED and
+      # the web /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-dev-admin-token}
       ONNET_CLIENT_REFLECT_IP: ${ONNET_CLIENT_REFLECT_IP:-192.168.10.120}
       # Two reflect ports, mirroring onnet's separate gate/nw_udp processes and
       # JO game.cfg. Each is the retail client's LOCAL UDP port for that socket

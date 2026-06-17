@@ -160,10 +160,11 @@ NW-C4 in [§8](net/novaworld-net-re.md). Re-anchored to retail (was jodemo-only)
 ## 5.5 Full client parity sweep (grill wave 7, 2026-06-14)
 
 All 24 client systems re-grilled (3 passes, adversarially verified). Verdict table + the full
-`D-NET-1..61` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
-(`D-NET-58..61` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
-0x20 movementVal label corrections, 0x0B icon offset, and the `/PROFILE` `.sph` server-log
-cross-validation; see §5.11/§5.12/§5.19-§5.22).
+`D-NET-1..62` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
+(`D-NET-58..62` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
+0x20 movementVal label corrections, 0x0B icon offset, the `/PROFILE` `.sph` server-log
+cross-validation, and the authored-mission cross-validation of pools 1/2/3 incl. the S2C 0x0C
+organic-spawn field map; see §5.11/§5.12/§5.19-§5.24).
 Newly-grilled originals (join key = addr):
 
 | original | addr | role | D-NET | status |
@@ -193,6 +194,42 @@ Newly-grilled originals (join key = addr):
 | `CServerLog_CloseAndFree` | `0x4e1a10` | `.END` close | D-NET-61 | matching |
 
 Crypto/TLV/envelope (NW-C1..C4, CRC32, NAPI TLV/envelope) re-confirmed byte-exact — no change.
+
+Authored-mission cross-validation of pools 1/2/3 (§5.23/§5.24; D-NET-62; the dvxi5 probe's known
+`mission.bms` decoded field-for-field on the wire — `nw_pool_groundtruth_test` reads the real pcap
+via `apps/common/pcap_reader`, `nw_pool_decode_unit_test` inline-pcap round-trip):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `NapiNPClientMsg_0x00C` | `0x42E730` | S2C 0x0C pool-0 organic spawn batch — flat slotId-first field map; team@entity+354 | D-NET-62 | matching |
+| `NapiNPClientMsg_0x00D` | `0x432C40` | S2C 0x0D pool-1 spawn — type/pos/team reproduce vs authored knowns | D-NET-58/62 | matching |
+| `NapiNPClientMsg_0x020` | `0x425C00` | S2C 0x20 pool-3 sync — type/pos/team/heading (90−facing) vs authored knowns | D-NET-59/62 | matching |
+| `serialize_entity_pool_to_packet_0` | `0x503940` | team source = entity+354 (onhook +146/+196 ruled out) | D-NET-62 | matching |
+
+## 5.6 Single-player listen-server bring-up (engine-research, 2026-06-16)
+
+Witness that JO single player is an in-process listen server (host + client, socketless transport
+mode 1). Originals only — none reimplemented yet; these gate a future in-process listen-server
+(single-player) host. Findings landed in
+[net/novaworld-net-re.md §5.0](net/novaworld-net-re.md).
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `SinglePlayer_StartMission` | `0x561af0` | SP launch: `SetConnectionMode(3)` + `SetTransportMode(1)` + `CreateSession` → "Game Loop" | server_name `"SINGLEPLAYERGAME"`; decompile | confirm-only (not reimplemented) |
+| `CGameSession_SetConnectionMode` | `0x4c49f0` | conn mode → `is_authority`/`is_mp_session_peer` (1=host, 2=client, 3=host+client) | switch writes +0x5C/+0x60/+0x64 | confirm-only |
+| `CNapiNetwork_SetTransportMode` | `0x4c8750` | socket-state field; opens a UDP socket only for modes 2/3/4 (SP=1 → no socket) | `OpenTransportSocket` gate | confirm-only |
+| `CNapiGameSession_CreateSession` | `0x4c97c0` | shared SP/MP creator: installs host callbacks, StartServer, local client conn (type 2) | decompile; host-callback installs | confirm-only |
+| `NapiNPProtocol_StartServer` (Kong `sub_62B5E0`) | `0x62b5e0` | host bring-up: session key + `host_start_tick` + "HOST STARTED" log (§6.5) | callees `NapiNP_GenerateSessionKey`/`GetTickCount`/`LogHostStarted`; **renamed in IDB 2026-06-16** | confirm-only |
+
+Host-side spawn flow (R1, 2026-06-16; net-re §5.2a):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Server_InitNewRoundState` | `0x51c8e0` | host new-round init: player-slot table + local-player ctx (name from `CHAR` var iff `transport_mode==1`) + clears timeout gate | decompile; §5.2a | confirm-only |
+| `CNapiServer_ProcessPendingPlayerSpawns` | `0x4c8dc0` | server spawn acceptor (gated `is_authority && !gate`): builds player entity, sends spawn msgs 3/5/4/0x7B, game-state 8 | decompile; §5.2a | confirm-only |
+| `Server_BuildPlayerInfoAndAdd` | `0x51d560` | builds the `GamePlayerEntity` (host's local player) | called by `0x4c8dc0`; §5.2a | confirm-only |
+| `Server_SendInitialGameStateToPlayer` | `0x51bba0` | **server-side source of the S2C loading sequence** (0x2C/08/2A/1C/0B/66/76/11 + 0x10/0D/0C/20/45/7E/1A) → game-state 9 | decompile; §5.2a (P6 emitter spec) | confirm-only |
+| `NapiClient_WaitForGameStart` | `0x42cc10` | shared host+client loading-wait loop; pumps in-process until spawn gate `dword_24C1928` set | decompile; §5.2/§5.2a | confirm-only |
 
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
