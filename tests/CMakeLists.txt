@@ -1030,6 +1030,14 @@ target_link_libraries(nw_ingame_c2s_uplink_test PRIVATE opennova_novaworld)
 target_include_directories(nw_ingame_c2s_uplink_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_c2s_uplink COMMAND nw_ingame_c2s_uplink_test)
 
+# In-match S2C encoders — loopback identity (encode -> decode field-identical),
+# ADR 0011 §4. encode side ports serialize_entity_pool_to_packet @0x503460; the
+# decode side is verified vs NapiNPClientMsg_0x020 @0x425C00. No capture dep.
+add_executable(nw_ingame_encode_test novaworld/nw_ingame_encode_test.cpp)
+target_link_libraries(nw_ingame_encode_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_encode COMMAND nw_ingame_encode_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

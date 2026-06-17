@@ -402,7 +402,10 @@ This is what a reimplemented server must **handle**.
 
 ### Open questions
 
-- Magic `0x7C08C6` in every dispatch entry — likely a build/version stamp.
+- Magic `0x7C08C6` in every dispatch entry — guessed a build/version stamp, but `0x7C08C6` is
+  also the **address** of the global `font_name` (an empty/default C-string used widely as a
+  default arg; see §5.0). Re-examine whether the field is a pointer to that string rather than a
+  stamp.
 - `handler2` of `NapiNPMsgInfo` — always zero in observed entries; possibly the
   `cb_server_3`/`cb_client_0` callback slots per the dispatcher decompile.
 - `msginfo_high_*` tables (selected when `flags >> 7`) — index pointers live in
@@ -418,6 +421,87 @@ This is what a reimplemented server must **handle**.
   capture), 0x33 / 0x37 (file-chunk re-request replies; need a C2S 0x60 / 0x64 flow).
 
 ## 5. Tag-level findings (audited against retail captures)
+
+### 5.0 Session bring-up — single player is an in-process listen server
+
+A single-player mission is **not** an offline codepath. It stands up a NovaWorld **host** in the
+same process and connects a **local client** to it, then runs the full in-game replication loop
+(§5.1–§5.17) over an in-memory (socketless) transport. Witnessed 2026-06-16 in `Jointops.exe`.
+
+`[orig: SinglePlayer_StartMission @ 0x561af0]` (the menu "start mission" action) does, in order:
+
+1. `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` with mode **3**. The function maps the
+   connection mode to two booleans and stores all three on `g_napi_np_ctx` (§6.3): mode →
+   `connection_mode (+0x5C)`, is_host → `is_authority (+0x60)`, is_client →
+   `is_mp_session_peer (+0x64)`.
+
+   | mode | is_host = `is_authority` | is_client = `is_mp_session_peer` | role |
+   |---|---|---|---|
+   | 0 | 0 | 0 | none |
+   | 1 | 1 | 0 | host only |
+   | 2 | 0 | 1 | client only (join a remote host) |
+   | **3** | **1** | **1** | **host + client = single-player / co-op listen server** |
+
+2. `[orig: CNapiNetwork_SetTransportMode @ 0x4c8750]` with mode **1**. Despite its name it writes
+   the socket-state field (`CNapiNetwork+0x54`, §6.2) and calls
+   `[orig: CNapiNetwork_OpenTransportSocket @ 0x4c6a40]` **only for values 2/3/4**. SP passes
+   **1**, so **no UDP socket is opened** — host↔local-client delivery is in-process.
+
+3. Fills the same `NapiGameSettings` (§6.4) multiplayer uses — `server_name = "SINGLEPLAYERGAME"`,
+   max_players = 1 — then `[orig: CNapiGameSession_CreateSession @ 0x4c97c0]`.
+
+`CreateSession` is the **shared SP/MP session creator**. It installs the host-side callbacks —
+`[orig: CNapiNetwork_ValidateJoinRequest @ 0x4c61b0]`, `[orig: NapiNPServer_HandleNewConnection @
+0x4c8040]`, `[orig: NapiNPServer_DestroyPlayerCtx @ 0x4c8400]`, `[orig:
+CNapiServer_OnPlayerDisconnected @ 0x4c94d0]` — builds the server config flags
+(`[orig: CNapiServerConfig_BuildFlags @ 0x4c4dc0]`), then calls **StartServer**
+`[orig: NapiNPProtocol_StartServer @ 0x62b5e0]` (renamed from Kong `sub_62B5E0`, applied
+2026-06-16). StartServer is identified by its callee set: `NapiNPProtocol_StopServer`,
+`[orig: NapiNP_GenerateSessionKey @ 0x61ea70]` (→ `host_key`, §6.5 +0x534), `GetTickCount` (→
+`host_start_tick`, +0x53C), and `[orig: CNapiNPConnection_LogHostStarted @ 0x61e6a0]` (the
+`"HOST STARTED \"%s\""` log) — matching the §6.5 host-state init exactly.
+
+Finally, because `is_host && is_client` (mode 3), `CreateSession` creates a **local client
+connection** with `[orig: NapiNPConnection_Create @ 0x62acb0]` (connection type **2**) and blocks
+on `[orig: CNapiGameSession_WaitForHostResponse @ 0x62b2d0]` — the loopback client↔host handshake
+inside one process. Control then enters the `"Game Loop"` UI state.
+
+**Consequence.** SP, co-op, and MP are one architecture; only the client count and transport
+differ. Single player = `SetConnectionMode(3)` + `SetTransportMode(1)` (socketless); a co-op/MP
+host raises the transport to a socket-opening mode (2/3/4) and accepts remote clients — no new
+gameplay or replication path. `is_in_session @ g_napi_np_ctx+0x58` (§6.3) gates the entire
+replication loop in every case, which is why §5.1–§5.17 run identically under single player.
+
+**Open follow-ups (gated on this):**
+- **Host's own-player spawn.** Substantially resolved in **§5.2a** (R1): the host runs its own
+  server-side spawn machinery in-process (`Server_InitNewRoundState` → `ProcessPendingPlayerSpawns`
+  + `Server_BuildPlayerInfoAndAdd` → `Server_SendInitialGameStateToPlayer`) while sitting in the
+  in-process pump of `NapiClient_WaitForGameStart`. The narrow open sub-thread is the exact
+  `dword_24C1928` write — probably the per-frame `0x0A` `flags1 & 0x01` spawn signal (the host
+  cannot use the joiner-only `0x1D`); byte-confirmation pending.
+- **In-process delivery faithfulness.** *Substantially resolved 2026-06-16 (R2).* Transport mode 1
+  runs the **same byte serialize/parse path** as a socket session — only the UDP I/O is skipped, not
+  the wire encoding. Witness chain: the host emits via `[orig: NapiNPServer_SendFiltered @ 0x4C87E0]`
+  → `[orig: NapiNPServer_SendToConn @ 0x4c4f20]` → `[orig: NapiNPConnection_QueueMessage @ 0x628640]`
+  — i.e. each S2C is **built as a wire message on the connection's `msg_queue`**, never handed to the
+  client handler by pointer. The receive side `[orig: NapiNPProtocol_PumpRecvQueues @ 0x6266a0]` (under
+  `[orig: NapiNPProtocol_Pump @ 0x62a650]`) drains a **byte circular-buffer FIFO** (`recv_buf[55]` via
+  `CCircularBuffer_Read2`), dispatches by the first opcode byte through `g_np_opcode_handlers`, then
+  `[orig: NapiNPConnection_ParseMessages @ 0x625bc0]` runs the msg_id dispatch — the identical path for
+  socket and in-process datagrams. `[orig: CNapiNetwork_SetTransportMode @ 0x4c8750]` opens **no
+  socket** for mode 1 (`[orig: CNapiNetwork_OpenTransportSocket @ 0x4c6a40]` is reached only for modes
+  2/3/4), so mode-1 delivery must loop the serialized datagram back into that same recv FIFO in-process.
+  **Consequence for the reimpl:** the faithful SP path is a literal in-process byte loopback (serialize
+  real entity state → datagram → recv FIFO → decode), *not* a direct snapshot hand-off — this is what
+  ADR 0011 records. **Remaining open (narrow):** (a) the exact mode-1 transmit substitution that writes
+  the datagram into the local recv FIFO in place of `sendto`; (b) whether the SCRK stream cipher runs on
+  that in-memory datagram — the `0x43`/`0x83` recv dispatch decrypts with SCRK, so crypto **likely** runs
+  end-to-end in-process, but the transmit-side encrypt on the loopback is not yet byte-witnessed.
+- `font_name @ 0x7C08C6` is the empty/default-string global that `SinglePlayer_StartMission` and
+  `CreateSession` copy (via `[orig: Napi_CopyString @ 0x617e10]`) into the unused password/config
+  fields. Its **address** coincides with the dispatch-table `magic` constant `0x7C08C6` (§4 open
+  items, §6.1) — the "magic = build/version stamp" guess should be re-examined as a possible
+  pointer to this default-string global.
 
 ### 5.1 Loading-progress counter — `dword_A82370`
 
@@ -475,6 +559,124 @@ Live-test record (2026-04-26, reverted stack vs retail client):
    spawning. The menu-bypass tag retail sends to skip that fallback was still unidentified at
    the time of the revert; candidates were the 0x05 flag byte (must be non-zero) and tags
    retail emits that we did not (e.g. 0x40).
+
+### 5.2a Host-side spawn flow — how the listen-server host spawns its own player (R1, 2026-06-16)
+
+Resolves §5.0's "host's own-player spawn" follow-up. On a listen server the host is
+`is_authority == 1` and never processes the S2C 0x1D gate (§5.2, joiner-only), yet it must spawn
+its own player and clear `dword_24C1928`. The host runs its own server-side spawn machinery
+in-process. The flow:
+
+1. **Local-player context** — `[orig: Server_InitNewRoundState @ 0x51c8e0]` (called directly by
+   `SinglePlayer_StartMission`, §5.0). When `is_authority`, allocates the player-slot table
+   (`[orig: Server_AllocatePlayerSlotTable @ 0x51c180]`, capped 1..251) and sets up the local
+   player object `playerCtx @ 0x24C0CC4` (guard `dword_24C0CA0`): name from `STRSRV19`
+   ("Server") or, for the SP host specifically (`is_in_session && is_authority &&
+   is_mp_session_peer && transport_mode == 1`), from the profile `CHAR` var; assigns team
+   (`[orig: Server_AssignPlayerTeam @ 0x4fe310]`). Clears the *timeout* gate `dword_24C1878 = 0`,
+   not the spawn gate. A second witness that `transport_mode == 1` is the SP-host signature (§5.0).
+
+2. **Server accepts the (local) player + builds the entity** —
+   `[orig: CNapiServer_ProcessPendingPlayerSpawns @ 0x4c8dc0]`, gated
+   `is_authority && !dword_24D1DE0 && !dword_24C1928` (runs while the gate is clear). Walks the
+   pending-connection list, applies team-balance, then per accepted player calls
+   `[orig: Server_BuildPlayerInfoAndAdd @ 0x51d560]` (builds the `GamePlayerEntity`, stored at
+   `CGameSession+4512`), sends spawn msgs `3` (weapon-restriction flag) / `5` (bool true) / `4` /
+   `0x7B`, then `[orig: CNetPlayer_SetGameState @ 0x4c4060]` → state 8 and
+   `CServerTick_SetPhase(slot, 1)`. The host's local client is just another entry in this list.
+   Reads the gate as a guard; does not write it.
+
+3. **Server streams the loading sequence** —
+   `[orig: Server_SendInitialGameStateToPlayer @ 0x51bba0]`, gated `!dword_24C1928`, is a
+   per-frame phase machine and the **server-side source of the S2C loading messages** (the
+   sequence consumed by §5.1/§5.4–§5.12). Two phase tracks, each ending with
+   `CNetPlayer_SetGameState(.., 9)` (in-game). All sends go through
+   `[orig: NapiNPServer_SendFiltered @ 0x4C87E0]` with the send descriptor at
+   `g_napi_np_ctx+0x1198..0x11A0` (§6.3) stamped per message:
+   - player-sync track (`slot+0x20 == 2`, subPhase 8→16): `0x2C` type/base name
+     (`NetPacket_WriteTypeNameAndBaseName`) → `0x08` server config → `0x2A`×6 table rows → `0x1C`
+     → `0x0B` 616-B BMS header (`[orig: NetPacket_WriteBMSHeader @ 0x502ca0]`, §5.4) → `0x66`
+     weapon restrictions → `0x76` server tick16 → `0x11`.
+   - world-stream track (`slot+0x20 == 4`, phases 0→7): `0x10` static batch → `0x0D` pool spawn
+     → `0x0C` entity states → `0x20` bulk pool-3 → `0x45` → `0x7E` → `0x1A` timestamp.
+
+   This is the emitter ordering the planned P6 host world-stream must reproduce.
+
+   **Server-side S2C serializer map (witnessed 2026-06-16, `[orig: Server_SendInitialGameStateToPlayer
+   @ 0x51bba0]`).** Each load-track tag is produced by a dedicated serializer; these are the ENCODE
+   functions the host reimpl ports (the client-side decoders are §5.4/§5.9/§5.11/§5.12). The emitter
+   gates on `dword_C8FC58` and caps at 20 messages/frame (`conn[+1896] < 20`). Two tracks keyed on
+   `playerSlot+0x20` (sync state), driven by phase counters `playerSlot+89878` (player-sync subPhase) /
+   `playerSlot+89882` (world-stream phase) / `playerSlot+89884` (per-phase loop counter). Every send is
+   `NapiNPServer_SendFiltered(.., msgId, 1, 0, buf, len)` with `g_napi_np_ctx[+1126]=32` (filter = the
+   just-spawned player) and `[+1128]=playerSlot`.
+
+   Player-sync track (`+0x20 == 2`, subPhase 8→16+, then sync state → 3):
+
+   | order | tag | serializer |
+   |---|---|---|
+   | subPhase 8 | 0x2C | `[orig: NetPacket_WriteTypeNameAndBaseName @ 0x505780]` |
+   | subPhase 9 | 0x08 | `[orig: ServerConfig_SerializeToPacket @ 0x505bd0]` |
+   | subPhase 10-15 | 0x2A ×6 | `[orig: NetPacket_CopyTenBytes @ 0x503900]` (rows `byte_82F1DC`, gate `dword_82F1D8` vs `playerSlot+7`) |
+   | ≥16 | 0x1C | (empty payload) |
+   | ≥16 | 0x0B | `[orig: NetPacket_WriteBMSHeader @ 0x502ca0]` (from `byte_A761D0`; §5.4) |
+   | ≥16 | 0x66 | `[orig: NetPacket_SerializeWeaponRestrictionTable @ 0x5102c0]` |
+   | ≥16 | 0x76 | `[orig: NetPacket_WriteServerTick16 @ 0x510350]` |
+   | ≥16 | 0x11 | (empty payload, **last** — the §5.5 bundle) |
+
+   World-stream track (`+0x20 == 4`, phases 0→7, then sync state → 5). Each phase serializes a
+   whole entity pool and advances when its cursor reaches that pool's used-entry count
+   `[orig: Pool_GetUsedCount @ 0x441f80]` — a one-line getter `return g_pool_list[poolIndex].used`,
+   the sibling of `Pool_GetEntryUnchecked @ 0x441fc0`. **Kong misnames it `PowerUpDef_LoadAll` with a
+   bogus "loads powerup definitions" comment** (its arg is a pool index 0..3, not a filename;
+   `Server_SendInitialGameStateToPlayer` passes 0/1/2/3). IDB rename `0x441f80 → Pool_GetUsedCount`
+   + corrective comment applied 2026-06-16:
+
+   | phase | tag | serializer |
+   |---|---|---|
+   | 1 | 0x10 | `[orig: sub_5042F0]` (static batch; §5.9) |
+   | 2 | 0x0D | `[orig: serialize_entity_pool_to_packet_0 @ 0x503940]` (pool spawn; §5.11) |
+   | 3 | 0x0C | `[orig: serialize_entity_states_to_buffer @ 0x5030a0]` (entity states) |
+   | 4 | 0x20 | `[orig: serialize_entity_pool_to_packet @ 0x503460]` (bulk pool-3; §5.12) |
+   | 5 | 0x45 | `[orig: sub_506570]` (terrain; repeats until it returns 0) |
+   | 6 | 0x7E | `[orig: sub_506620]` |
+   | 7 | 0x1A | `[orig: NetPacket_WriteTimestamp @ 0x5046c0]`; then `CNetPlayer_SetGameState(9)` |
+
+   The per-entity payload bodies these serializers emit are the inverse of the witnessed decoders: the
+   player class via `[orig: NetPacket_SerializePlayerState @ 0x4C09C0]` (mode 1 = write compact / mode 3
+   = write extended; §5.10 gives both directions, write side = `Network_CompressFixedPoint` instead of
+   decompress, `Entity_TransformWorldToLocal` for the vehicle-mounted branch), AI infantry via
+   `NetPacket_SerializeInfantryEntityState @ 0x4C0320` (§5.14), vehicles via
+   `Entity_SerializeMountedVehicleState @ 0x460560` (§5.13).
+
+4. **The host waits in-process** — `[orig: NapiClient_WaitForGameStart @ 0x42cc10]` (the shared
+   host+client loading-screen loop, §5.2) sends the client-ready `0x0A`, then pumps the network
+   in-process — `[orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]` →
+   `[orig: NapiNPProtocol_Pump @ 0x62a650]` / `[orig: CNapiGameSession_ProcessNetwork @ 0x4d09f0]`
+   — until `dword_24C1928` is set (return 1). On the host these pumps drive steps 2–3 and deliver
+   the messages to the host's own local client *in the same process* (transport mode 1, §5.0); no
+   socket round-trip.
+
+**The gate write (probable, byte-confirmation pending).** Ruled out for the host: the C2S uplink
+path (`[orig: Client_ProcessNetworkFrame @ 0x42c180]` — its `dword_24C1928` reads and the
+`0x2C`/`0x0C`-input sends are all gated `!is_authority`, joiner-only) and the two server spawn
+functions above (read-as-guard only). The S2C `0x1D` handler is `is_authority == 0` only (§5.2)
+and is never emitted by `Server_SendInitialGameStateToPlayer`, so the host cannot use it. The
+remaining client-side writer the host's local client *can* hit under the pump is the per-frame
+`0x0A` handler: `[orig: NapiNPClientMsg_0x00A @ 0x42fec0]` sets `dword_24C1928` on `flags1 & 0x01`
+(§5.9, the spawn/respawn signal). **Probable:** once the host's player reaches game-state 9, the
+host's per-frame `0x0A` to its local client carries `flags1 & 0x01` and the local `0x0A` handler
+clears the gate. Open: byte-confirm that the first post-spawn `0x0A` sets `flags1 & 0x01` (the
+server-side `0x0A` builder's spawn-flag logic is unwitnessed; the `0x430000`-page `0x1D`/`0x0A`
+handlers currently fail to decompile — an analysis gap on that page).
+
+**IDB names applied (2026-06-16, this grill; addresses are the join key, so older prose keeps the
+`dword_*` spellings):** `sub_62B5E0 → NapiNPProtocol_StartServer @ 0x62b5e0`;
+`dword_24C1928 → g_spawn_success_gate`; `dword_24C1878 → g_loading_timeout_flag`;
+`dword_24C187C → g_loading_cancel_flag`; `dword_A82370 → g_loading_progress`. Each carries a
+one-line entry comment in the IDB. Probable-only and left as-is: `dword_24C0CA0` (local-player-ctx
+guard), `dword_24D1DE0` (spawn-processing gate), `dword_A82364` (reconnect/ready flag, set by S2C
+0x1A).
 
 ### 5.3 Tag direction asymmetry (durable warning)
 
@@ -933,11 +1135,18 @@ consumed exactly on every payload).
 | — | 2 | healthShort (alt) | `(spawnFlags & 0x8000) && !(0x2000)` | entity+350 |
 | — | 1 | difficultyByte | `spawnFlags & 0x4000` | entity+624 |
 
-**Weapon block precise shape:** the `0x400` branch first reads the u8 mask. If `mask == 0`
-the block ends — `extraHandle0/1` are NOT consumed. Otherwise it walks bits 0..7 and reads
-one u16 per set bit, then unconditionally consumes `extraHandle0/1`. So minimal-mask block =
-3 B (`u8 mask + 2× u16 extras`); maximal = 19 B. When `0x400` is NOT set, `entity+416/+418`
-are written `0xFFFF/0xFFFF` in-memory and nothing is read from the wire.
+**Weapon block precise shape (corrected — D-NET-56):** the `0x400` branch reads the u8 mask;
+when the mask is non-zero it walks bits 0..7 reading one u16 per set bit (`0xFFFF` on a set bit
+skips storage but still consumes the wire u16); then it **always** consumes `extraHandle0` +
+`extraHandle1` (2× u16). The mask==0 path (`goto LABEL_110 @ 0x4330b1`) skips the per-bit loop
+but **still reads both extras** — an earlier note here claimed mask==0 ends the block with no
+extras, which is wrong (it also misstated the "minimal block" size). So under `0x400`: minimal =
+**5 B** (`u8 mask==0 + 2× u16 extras`), maximal = `1 + 2×8 + 4` = 21 B. When `0x400` is NOT set,
+`entity+416/+418` are written `0xFFFF/0xFFFF` in-memory and nothing is read from the wire.
+Note the **encode** side `serialize_entity_pool_to_packet_0 @ 0x503940` only sets `0x400` when its
+mask (`itemDef+604`) is non-zero, so retail never emits the (0x400, mask==0) record — which is why
+the byte-witness capture never exercised it; the client handler reads it regardless, so the decoder
+must match.
 
 **AI trailer correction (D-NET-52):** every conditional field of the trailer is a 4-byte
 read (`cursor += 2` on a `uint16_t*` advances 4 bytes; hex-rays renders the value type as
@@ -1213,7 +1422,7 @@ message-queue code) — it is not a real class.
 | Struct | Layout | Notes |
 |---|---|---|
 | `NapiNPMsgInfo` | `{u32 msg_id, u32 magic, handler, handler2}` | sentinel = `magic==0`; `handler2` always 0 in observed entries |
-| `NapiNPOpcodeInfo` | `{u32 index, u32 opcode, u32 magic, handler}` | magic always `0x7C08C6`; sentinel `index=0xFFFFFFFF` |
+| `NapiNPOpcodeInfo` | `{u32 index, u32 opcode, u32 magic, handler}` | magic always `0x7C08C6` (= addr of `font_name`; possible string pointer, see §5.0); sentinel `index=0xFFFFFFFF` |
 
 ### 6.2 `CNapiNetwork` (~4524 B; methods 0x4a8040-0x4ca4a0; 32/33 typed)
 
@@ -1223,7 +1432,7 @@ message-queue code) — it is not a real class.
 | 80 | `transport_mode` | 4 | 0=down, 1=host, 2=client_relay, 3=client_direct (per method dispatch) |
 | 84 | `socket_state` | 4 | state machine 0..4 |
 | 88 | `field_58` | 4 | gates OpenTransportSocket |
-| 92-100 | `field_5C/60/64` | 12 | likely a small host/client config-flag sub-struct |
+| 92-100 | `connection_mode` / `is_authority` / `is_mp_session_peer` | 12 | the host/client config sub-struct, resolved: written by `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` from the connection mode (§5.0, §6.3) |
 | 104 | pad | 3372 | unaccounted NAPI internals (queues / logging / per-session state) |
 | 3476 | `disconnect_event_buf` | 184 | `NapiNPDisconnectEvent` buffer; cleared by Shutdown |
 | 3660-3668 | `field_E4C/E50/E54` | 12 | |
@@ -1258,9 +1467,9 @@ difference is one trailing pointer), and every call site passes `&g_napi_np_ctx`
 | 0x050 | `transport_mode` | 4 | 1=NovaWorld, 2=LAN (UI enumeration branches ==1 → SetTransportMode(4), ==2 → (2)); NovaWorld-only AppId/JoinTicket gates check ==1 |
 | 0x054 | `socket_state` | 4 | |
 | 0x058 | `is_in_session` | 4 | non-zero whenever an MP session is in progress; gates `[orig: Server_PumpNetworkTransport @ 0x4FD960]`, 14 branches of `[orig: Server_TickUpdate @ 0x51D7E0]`, 11 of `[orig: Game_StartMission @ 0x524360]`, the whole body of `[orig: NetClient_FlushAndSync @ 0x424710]` |
-| 0x05C | `field_5C` | 4 | |
-| 0x060 | `is_authority` | 4 | non-zero on host/server (preserved Kong name) |
-| 0x064 | `is_mp_session_peer` | 4 | renamed 2026-04-26 from `is_dedicated_server` (see below) |
+| 0x05C | `connection_mode` | 4 | host/client mode written by `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` (0=none, 1=host, 2=client, 3=host+client); single player uses 3 (§5.0). Was `field_5C` |
+| 0x060 | `is_authority` | 4 | non-zero on host/server (preserved Kong name); set by `SetConnectionMode` = is_host bit of `connection_mode` (§5.0) |
+| 0x064 | `is_mp_session_peer` | 4 | renamed 2026-04-26 from `is_dedicated_server` (see below); set by `SetConnectionMode` = is_client bit of `connection_mode` (mode 3 → 1, §5.0) |
 | 0x068 | pad | 3372 | NAPI internals |
 | 0xD94 | `disconnect_event_buf` | 184 | |
 | 0xE4C-0xE54 | `field_E4C/E50/E54` | 12 | |
@@ -2129,6 +2338,7 @@ FLDS columns, decoded through the XXXX terminator):
 - **D-NET-53** [HIGH, TRACKED] `build_tag_0d_spawn_points @ replication_min.cpp:484` emits two unconditional `u16 weapon_slot` zeros (lines 524-525) before the trailing `u8 bone_attach`. Retail's handler only reads the weapon block when `flags & 0x400` is set, and the builder uses `flags = 0x30` — so those 4 bytes corrupt alignment exactly as the §5.6 warning describes for the (quarantined) `build_tag_0d_local_player_spawn` sibling. With >1 spawn point in a batch, the second and subsequent records would be misaligned and the receiver would either drop them or crash. Drop the two `push_u16(buf, 0)` writes; the `u8` after them is the always-byte that lands at entity+290, not a "bone_attach". [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 — weapon block gated by `spawnFlags & 0x400`)]
 - **D-NET-54** [LOW, DOC] In-source field-table comments at `replication_min.cpp:417-422` (and the mirror at line 524-526) label the always-byte at +290 "bone_attach byte" and `flags&0x10` as "team". Per §5.11 the always-byte is unnamed in retail (Hex-Rays calls it `teamByte`; field is at +290), and `flags&0x10` writes `orientByte` to +354. Update the in-source comments to match §5.11. Wire-emitted bytes are unchanged by this fix — comment-only. [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x432e29 = flags&0x10 → +354; @ 0x43310a = unconditional u8 → +290)]
 - **D-NET-55** [HIGH, TRACKED] No `build_tag_20_pool3_sync` builder exists; `game_session.cpp` dispatch (around lines 1023-1075) has no inbound `handle_tag_20_*` either — every S2C 0x20 falls through to `handle_unknown_or_passive_tag`. Pool-3 markers / waypoints / nav-nodes are therefore not registered into the client's pool 3, which blocks AI navigation, target markers, and any spawn-select markers that resolve via pool 3. §5.12 has the full record map; the builder needs a `[u16 start_idx][u16 count]` header + per-entity flag-driven serializer matching the witnessed 29-payload / 792-entity loopback shape. [orig: NapiNPClientMsg_0x020 @ 0x425C00]
+- **D-NET-56** [MED, FIXED] `decode_pool_spawn_batch` (ingame_decode.cpp) read `extra_handle_0/1` only inside `if (weapon_mask)`, under-reading by 4 B on the (`0x400` set, mask==0) path. The handler's mask==0 branch (`goto LABEL_110`) skips the per-bit loop but still consumes both extras unconditionally once `0x400` is set; moved the extras read outside the mask!=0 guard. **Latent:** retail's encoder `serialize_entity_pool_to_packet_0 @ 0x503940` only sets `0x400` when its mask (`itemDef+604`) is non-zero, so the byte-witness capture never produced mask==0 and `nw_ingame_pool_records_test` stayed green — but the client handler reads it regardless, so the port must match. Found by grilling the encode side for the Phase-1 host world-stream (trust-but-verify of already-written code). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

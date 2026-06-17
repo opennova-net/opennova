@@ -59,3 +59,26 @@ AI, 62-frame cadence, `TickContext.is_authority` as the authority seam).
   spawn flow to a retail client) slots in without touching WAC/BMS/AI code.
 - Anything currently reading `TickContext.is_authority` is already on the correct side
   of the authority split and needs no change when a real server arrives.
+
+## Amendment (2026-06-16) — superseded by ADR 0011/0012 where noted
+
+The single-player implementation grill (docs/net/novaworld-net-re.md §5.0/§5.2a, `[orig:
+SinglePlayer_StartMission @ 0x561af0]` and `[orig: Server_SendInitialGameStateToPlayer @ 0x51bba0]`)
+witnessed that the original runs single-player **through** the in-match seam — SP is an in-process
+listen server (`SetConnectionMode(3)` + socketless `SetTransportMode(1)`), serializing real entity
+state to its own local client. This refines three points of this ADR:
+
+1. **Consequence "single-player keeps `LocalSink` and pays nothing" is superseded by
+   [ADR 0011](0011-single-player-in-process-listen-server.md).** SP runs through `NetSystem` and a
+   serializing sink over an in-process byte loopback; it pays the serialize/parse round-trip the
+   original pays. `is_authority` / `INetCommandSink` remain the seam exactly as decided here.
+
+2. **Decision 1 (`NetSystem : ISystem` ahead of WAC) is now the active implementation target,** not a
+   design placeholder. The host frame order is `input → net(drain C2S) → World::run_logic_tick →
+   net(emit S2C) → present` (`Game_ProcessMainFrame @ 0x5263f0`), per ADR 0011.
+
+3. **Decision 4 (the wire libs are "experimental") is lifted tag-by-tag as ENCODE witnesses land.** The
+   decode side is already witnessed (`ingame_decode.h`); the host serializer map is now witnessed (§5.2a
+   "Server-side S2C serializer map"). `game_session`/`game_server_runtime`/`replication_min` are rebuilt
+   against the seam with the map-locked fixture blobs replaced by real-state encoders (ADR 0003). The
+   player model is fixed by [ADR 0012](0012-player-is-host-side-server-entity.md).

@@ -11,6 +11,7 @@ add_library(opennova_novaworld STATIC
     src/gsb.cpp
     src/replication_min.cpp
     src/ingame_decode.cpp
+    src/ingame_encode.cpp
     src/connection/registry.cpp
     src/connection/manager.cpp
     src/db/sqlite.cpp

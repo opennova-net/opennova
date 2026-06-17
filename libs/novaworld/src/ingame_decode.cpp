@@ -97,12 +97,17 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		if (rec.spawn_flags & 0x0100) rec.parent_handle = c.u16();
 		if (rec.spawn_flags & 0x0200) rec.target_handle = c.u16();
 
-		// Weapon block. The retail handler reads the mask byte
-		// unconditionally inside the 0x400 branch; if the mask is zero the
-		// extras are NOT consumed (the branch falls through to the
-		// teamByte read). If the mask is non-zero, one u16 per set bit
-		// (0xFFFF on a set bit skips storage but still consumes the wire
-		// u16), then unconditional extra_handle_0 + extra_handle_1.
+		// Weapon block (0x0400). The retail handler reads the mask byte, then —
+		// non-zero mask — one u16 per set bit (0xFFFF on a set bit skips storage
+		// but still consumes the wire u16). It then ALWAYS consumes
+		// extra_handle_0 + extra_handle_1: the mask==0 path `goto LABEL_110`
+		// (@ 0x4330b1) reads both before falling through to the teamByte read.
+		// D-NET-56: an earlier reading put the extras inside `if (mask)`, which
+		// under-read by 4 B on the (0x400 set, mask==0) path. Retail servers
+		// never emit that case (serialize_entity_pool_to_packet_0 only sets
+		// 0x400 when the mask is non-zero), so the byte-witness capture didn't
+		// exercise it — but the client handler reads it, so the port must too.
+		// [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
 		if (rec.spawn_flags & 0x0400) {
 			rec.weapon_mask = c.u8();
 			if (rec.weapon_mask) {
@@ -110,9 +115,9 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 					if (rec.weapon_mask & (1u << b))
 						rec.weapon_handles[b] = c.u16();
 				}
-				rec.extra_handle_0 = c.u16();
-				rec.extra_handle_1 = c.u16();
 			}
+			rec.extra_handle_0 = c.u16();
+			rec.extra_handle_1 = c.u16();
 		}
 
 		rec.team_byte = c.u8();
