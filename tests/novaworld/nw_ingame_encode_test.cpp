@@ -34,7 +34,7 @@ bool records_equal(const Pool3SyncRecord &a, const Pool3SyncRecord &b) {
 	return a.item_type_id == b.item_type_id && a.is_empty_slot == b.is_empty_slot &&
 	       a.flags_byte == b.flags_byte && a.pos_x == b.pos_x && a.pos_y == b.pos_y &&
 	       a.pos_z == b.pos_z && a.net_handle == b.net_handle &&
-	       a.parent_handle == b.parent_handle && a.orientation_val == b.orientation_val &&
+	       a.movement_val == b.movement_val && a.orientation_val == b.orientation_val &&
 	       a.ammo_count == b.ammo_count && a.team_byte == b.team_byte &&
 	       a.weapon_type == b.weapon_type && a.score_byte == b.score_byte;
 }
@@ -48,7 +48,7 @@ int test_roundtrip_all_flags() {
 	r.pos_x          = int32_t(0x11223344);
 	r.pos_y          = int32_t(0x55667788);
 	r.pos_z          = int32_t(0x003A5E6A);
-	r.parent_handle  = 0xAABBCCDD; // 0x01
+	r.movement_val   = 0xAABBCCDD; // 0x01
 	r.orientation_val= 0x0F0E0D0C; // 0x02
 	r.ammo_count     = 0x0102;     // 0x04
 	r.net_handle     = 0x108B;     // always
@@ -174,7 +174,7 @@ int test_pool_spawn_roundtrip_full() {
 	r.pos_z = int32_t(0x001fbcd7);
 	r.vel_x = 10;                    // -> 0x0001
 	r.section_mask = 0x40;           // -> 0x0008
-	r.orient_byte = 1;               // -> 0x0010
+	r.team_byte = 1;                 // -> 0x0010 (D-NET-58: gate-0x10 byte @ +354 is team)
 	r.parent_handle = 0x1033;        // -> 0x0100
 	r.target_handle = 0x2044;        // -> 0x0200
 	r.weapon_mask = 0x05;            // bits 0 + 2 -> 0x0400
@@ -182,7 +182,7 @@ int test_pool_spawn_roundtrip_full() {
 	r.weapon_handles[2] = 0x3002;
 	r.extra_handle_0 = 0x4001;
 	r.extra_handle_1 = 0x4002;
-	r.team_byte = 2;
+	r.bone_byte = 2;                 // unconditional +290 (D-NET-58)
 	r.ai_profile_1 = 0x11112222;     // -> 0x0800
 	r.ai_profile_2 = 0x33334444;
 	r.ai_name = "patrol_a";
@@ -208,7 +208,7 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.pos_z == int32_t(0x001fbcd7));
 	EXPECT(d.vel_x == 10);
 	EXPECT(d.section_mask == 0x40);
-	EXPECT(d.orient_byte == 1);
+	EXPECT(d.team_byte == 1);
 	EXPECT(d.parent_handle == 0x1033);
 	EXPECT(d.target_handle == 0x2044);
 	EXPECT(d.weapon_mask == 0x05);
@@ -217,7 +217,7 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.weapon_handles[1] == 0xFFFF); // bit clear -> untouched default
 	EXPECT(d.extra_handle_0 == 0x4001);
 	EXPECT(d.extra_handle_1 == 0x4002);
-	EXPECT(d.team_byte == 2);
+	EXPECT(d.bone_byte == 2);
 	EXPECT(d.ai_profile_1 == 0x11112222);
 	EXPECT(d.ai_profile_2 == 0x33334444);
 	EXPECT(d.ai_name == "patrol_a");
@@ -233,13 +233,13 @@ int test_pool_spawn_roundtrip_full() {
 
 int test_pool_spawn_minimal() {
 	// No conditional fields -> spawn_flags 0; body = flags(2)+slot(2)+type(2)+
-	// name(1 NUL)+pos(12)+team(1) = 20; + count(2) = 22.
+	// name(1 NUL)+pos(12)+bone(1) = 20; + count(2) = 22.
 	PoolSpawnBatch in;
 	PoolSpawnRecord r;
 	r.slot_id = 0x1002;
 	r.item_type_id = 0x044A;
 	r.pos_x = 1; r.pos_y = 2; r.pos_z = 3;
-	r.team_byte = 1;
+	r.bone_byte = 1;
 	in.records.push_back(r);
 
 	std::vector<uint8_t> wire = encode_pool_spawn_batch(in);
@@ -249,7 +249,7 @@ int test_pool_spawn_minimal() {
 	EXPECT(out.records.size() == 1);
 	const PoolSpawnRecord &d = out.records[0];
 	EXPECT(d.slot_id == 0x1002 && d.item_type_id == 0x044A);
-	EXPECT(d.pos_y == 2 && d.team_byte == 1);
+	EXPECT(d.pos_y == 2 && d.bone_byte == 1);
 	EXPECT(d.parent_handle == 0xFFFF && d.target_handle == 0xFFFF); // not emitted
 	std::printf("PASS pool_spawn_minimal\n");
 	return 0;
@@ -261,7 +261,7 @@ int test_pool_spawn_health_alt_8000() {
 	PoolSpawnRecord r;
 	r.slot_id = 0x1003; r.item_type_id = 0x0100;
 	r.health_byte = 0; r.health_short = 250;
-	r.team_byte = 2;
+	r.bone_byte = 2;
 	in.records.push_back(r);
 
 	std::vector<uint8_t> wire = encode_pool_spawn_batch(in);
@@ -292,7 +292,7 @@ int test_decode_weapon_block_mask_zero_dnet56() {
 		0x00,                   // weapon_mask = 0  (the latent path)
 		0xAA, 0xAA,             // extra_handle_0  (must be consumed)
 		0xBB, 0xBB,             // extra_handle_1  (must be consumed)
-		0x05,                   // team_byte = 5
+		0x05,                   // bone_byte = 5 (+290 unconditional)
 	};
 	PoolSpawnBatch out;
 	const bool ok = decode_pool_spawn_batch(body, sizeof(body), out);
@@ -301,7 +301,7 @@ int test_decode_weapon_block_mask_zero_dnet56() {
 	EXPECT(out.records[0].weapon_mask == 0);
 	EXPECT(out.records[0].extra_handle_0 == 0xAAAA);
 	EXPECT(out.records[0].extra_handle_1 == 0xBBBB);
-	EXPECT(out.records[0].team_byte == 0x05);
+	EXPECT(out.records[0].bone_byte == 0x05);
 	EXPECT(out.records[0].pos_z == 3);
 	std::printf("PASS decode_weapon_block_mask_zero (D-NET-56)\n");
 	return 0;

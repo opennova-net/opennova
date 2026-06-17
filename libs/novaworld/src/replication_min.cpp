@@ -531,7 +531,7 @@ std::vector<uint8_t> build_tag_0d_spawn_points(const std::vector<SpawnPointEntit
 std::vector<uint8_t> build_tag_40_capture_zone_state(
 		const std::vector<GameEntitySnapshot> &entities) {
 	// Phase D.0.26.4/8 — tag=0x40 capture-point/spawn-marker broadcast. Wire
-	// format per `sub_5BEBB0 @ 0x5BEBB0`:
+	// format per `MapOverlay_DecodeOverlayEntries @ 0x5BEBB0` (docs §5.19):
 	//   [u8 count] + count × [u16 handle][u8 size][u8 b3][u8 b4][u8 b5]
 	//
 	// Retail capture3 (dvxi5 AS) observed bytes, indexed by the spawn-point's

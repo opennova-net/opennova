@@ -206,14 +206,14 @@ sweep; blank = not yet characterized.
 | 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | full entity spawn batch (~1 KB); parses name fields inline (no opt-in trailer) |
-| 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+290; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
+| 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
 | 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): 4×i32 (sessionId, X, Y, Z), 3×i16 fixed-point angles, u8 flags, team scores, player count, waypoint + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B, sometimes fragmented in retail |
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | |
 | 0x13 | 0x42EB50 | `_0x013` | |
 | 0x14 | 0x42F240 | `_0x014` | |
-| 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST: max_players, count, per-player slot/ping/scores/flags |
+| 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
 | 0x18 | 0x433780 | `_0x018` | does not fire in normal multiplayer (§5.7); an early "EntitySpawn" label is unverified |
 | 0x19 | 0x425E80 | `_0x019` | |
@@ -223,7 +223,7 @@ sweep; blank = not yet characterized.
 | 0x1D | 0x430840 | `_0x01D` | **spawn-success gate**: sets `dword_24C1928=1` before any payload parse when `is_authority==0` (§5.2) |
 | 0x1E | 0x426270 | `_0x01E` (`NetPacket_HandleGameEvent`) | 8-byte game event; does not unblock movement directly |
 | 0x1F | 0x427CB0 | `_0x01F` | |
-| 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; `[u16 start_idx][u16 count]` header + per-entity record per the §5.12 field map (u16 type_id; `type_id==0` ⇒ empty-slot sentinel, no body; else u8 flags + 3×i32 pos always, then u32 parent (f&1), u32 orient (f&2), u16 ammo (f&4), u16 netHandle ALWAYS, u8 team (f&8), u16 weaponType (f&0x10), u8 score (f&0x20)); allocates pool-3 entries |
+| 0x20 | 0x425C00 | `_0x020` | bulk pool-3 entity sync; sets `dword_A82370=5`; `[u16 start_idx][u16 count]` header + per-entity record per the §5.12 field map (u16 type_id; `type_id==0` ⇒ empty-slot sentinel, no body; else u8 flags + 3×i32 pos always, then u32 movementVal/BAM-heading (f&1; D-NET-59), u32 orient (f&2), u16 ammo (f&4), u16 netHandle ALWAYS, u8 team (f&8), u16 weaponType (f&0x10), u8 score (f&0x20)); allocates pool-3 entries |
 | 0x21 | 0x430B10 | `_HandleSpawnEffect` | |
 | 0x22 | 0x42EC90 | `_0x022` | part of the 0x0F reply ecosystem |
 | 0x23 | 0x4F81E0 | `_0x023` | part of the 0x0F reply ecosystem |
@@ -254,13 +254,13 @@ sweep; blank = not yet characterized.
 | 0x3D | 0x422870 | `_0x03D` | |
 | 0x3E | 0x4226D0 | `_0x03E` | ack-style |
 | 0x3F | 0x42BB20 | `_0x03F` | |
-| 0x40 | 0x425A50 | `_0x040` | capture-zone state (1 B) → minimap-overlay array `unk_28E5620` via the `sub_5BEBB0` chain; needed for AS capture-zone markers |
+| 0x40 | 0x425A50 | `_0x040` | minimap-overlay update / capture-zone state — `[u8 count][N×6B entry]`, full map §5.19 (controlled capture 2026-06-17) |
 | 0x41 | 0x4254C0 | `_0x041` | |
 | 0x42 | 0x4281A0 | `_0x042` | spawn-gate-adjacent; retail emits during load |
 | 0x43 | 0x42FA90 | `_0x043` | |
 | 0x44 | 0x422710 | `_0x044` | |
 | 0x45 | 0x422890 | `_0x045` | empty payload; sets `dword_A82370=6`; calls `PolyTrn_LoadTileData()` (terrain texture rebuild) |
-| 0x46 | 0x431370 | `_0x046` | PLAYER-SYNC: slot + u16 fields-present bitfield (bit 15 = remove); read order must match IDA |
+| 0x46 | 0x431370 | `_0x046` | PLAYER-SYNC — full layout + field read order verified §5.21 (controlled capture 2026-06-17) |
 | 0x48 | 0x4284B0 | `_0x048` | |
 | 0x49 | 0x42C0A0 | `_0x049` | weapon-reload notification |
 | 0x4C | 0x428570 | `_0x04C` | target-assignment list (squad/AI orders) |
@@ -762,11 +762,12 @@ inert); the reverted stack emitted it speculatively and it was marked for remova
 
 ### 5.8 Wire-format verification gaps
 
-Tags emitted by the reverted stack but never byte-compared against retail: 0x16 (per-player
-record layout), 0x46 (bitfield read order), 0x60 and 0x64 (file-transfer chunks; a format error
-makes the client request retransmits forever). **0x0A and 0x10 are now witnessed end to end —
-see §5.9.** Cross-capture diffs still pending for 0x0F, 0x60, 0x64, 0x7B (+13-byte size delta vs
-the reverted builder).
+Tags emitted by the reverted stack but never byte-compared against retail: 0x60 and 0x64
+(file-transfer chunks; a format error makes the client request retransmits forever). **0x0A and
+0x10 are now witnessed end to end — see §5.9. 0x16 (per-player record layout) and 0x46 (bitfield
+read order) are now byte-compared against the controlled "ON RE Probe AS dvxi5" loopback (all 33
+0x16 + all 51 0x46 records decode to the byte) — see §5.20 / §5.21.** Cross-capture diffs still
+pending for 0x0F, 0x60, 0x64, 0x7B (+13-byte size delta vs the reverted builder).
 
 ### 5.9 Core in-game replication loop — field maps (loopback capture 2026-06-16)
 
@@ -1116,14 +1117,14 @@ consumed exactly on every payload).
 | — | 4 | velY | `spawnFlags & 0x0002` | entity+20 |
 | — | 4 | velZ | `spawnFlags & 0x0004` | entity+24 |
 | — | 4 | sectionMask | `spawnFlags & 0x0008` | entity+308 |
-| — | 1 | orientByte | `spawnFlags & 0x0010` | entity+354 |
+| — | 1 | **teamByte** | `spawnFlags & 0x0010` | entity+354 — BMS team (1=Blue/2=Red); D-NET-58 |
 | — | 2 | parentHandle | `spawnFlags & 0x0100` | resolved → entity+368 (pool ptr) |
 | — | 2 | targetHandle | `spawnFlags & 0x0200` | resolved → entity+40 (pool ptr) |
 | — | 1 | weaponSlotMask | `spawnFlags & 0x0400` | (the weapon block; reads u16 per set bit, 0xFFFF on a set bit skips storage but still consumes the wire u16) |
 | — | 2 ea | weaponHandle\[bit\] | `mask & (1<<bit)` (bits 0..7) | entity+400+2·bit (capped at +414); 0xFFFF skips storage |
 | — | 2 | extraHandle0 | inside `0x0400` block | entity+416 |
 | — | 2 | extraHandle1 | inside `0x0400` block | entity+418 |
-| — | 1 | teamByte | always | entity+290 (u16 zero-ext) |
+| — | 1 | **boneByte** | always | entity+290 (u16 zero-ext) — bone/other, NOT team; D-NET-58 |
 | — | 4 | aiProfile1 | `spawnFlags & 0x0800` | trailer → aiSlot+16 |
 | — | 4 | aiProfile2 | `spawnFlags & 0x0800` | trailer → aiSlot+20 |
 | — | cstr | aiName | `spawnFlags & 0x0800` | trailer → aiSlot+156 |
@@ -1153,6 +1154,18 @@ read (`cursor += 2` on a `uint16_t*` advances 4 bytes; hex-rays renders the valu
 `uint16_t*`, but the wire is u32). 195 of 437 records in the loopback carry the trailer;
 all match this 4+4+cstring shape exactly.
 
+**Team/bone label correction (D-NET-58, controlled capture 2026-06-17):** the
+`spawnFlags & 0x0010`-gated byte at entity+354 is the **team** byte (1=Blue/2=Red), and the
+unconditional post-weapon byte at entity+290 is a **bone/other** byte, NOT team. The earlier
+labels (`orientByte`@+354 / `teamByte`@+290, from D-NET-54 trusting the handler-side Hex-Rays
+variable name) are inverted. Witnessed on the encode side: `serialize_entity_pool_to_packet_0`
+sources the gated byte from `entity+354` (Hex-Rays var `team_byte`; `if(team_byte) flags|=0x10`)
+and the unconditional byte from `entity+290` (var `bone_byte`). entity+354 is the **unified team
+landing** across both spawn paths (§5.12 already lands 0x20 team there under flag 0x08). The
+controlled "ON RE Probe AS dvxi5" loopback confirms it empirically: the two trucks authored
+team 1/2 carry +354 = 0x01/0x02 while +290 = 0x00 on both.
+`[orig: serialize_entity_pool_to_packet_0 @ 0x503940 (team_byte @ 0x5039f1; bone_byte @ 0x503cda)]`
+
 **Cross-witness numbers (`nw_ingame_pool_records_test` vs the 2026-06-16b loopback):**
 
 - 37 payloads, sizes 226..550 B, modal 543 B; 437 entities total (max 20 per payload).
@@ -1181,7 +1194,7 @@ Cross-witnessed against 792 records over 29 retail payloads in the same loopback
 | 3 | 4 | posX | non-empty | entitySlot+4 (i32 16.16 world) |
 | 7 | 4 | posY | non-empty | entitySlot+8 |
 | 11 | 4 | posZ | non-empty | entitySlot+12 |
-| — | 4 | parentHandle | `flags & 0x01` | entitySlot+16 |
+| — | 4 | **movementVal** | `flags & 0x01` | entitySlot+16 — raw u32 (32-bit BAM heading for markers), NOT a `pool<<12\|slot` parent; D-NET-59 |
 | — | 4 | orientationVal | `flags & 0x02` | entitySlot+0 |
 | — | 2 | ammoCount | `flags & 0x04` | entitySlot+290 |
 | — | 2 | netHandle | non-empty (ALWAYS) | entitySlot+124 (zero-ext to u32) |
@@ -1197,6 +1210,19 @@ The `netHandle` field at +124 lines up with the AI-navigation marker references 
 in `docs/world/world-wac-ai-re.md:89-92` (target nodes resolved as
 `Pool_GetEntryUnchecked(3, ·)`), and `+290` is the same ammo/team slot tags 0x10 and 0x0D
 use (per-tag semantic — Hex-Rays auto-named).
+
+**`movementVal` label correction (D-NET-59, controlled capture 2026-06-17):** the
+`flags & 0x01` field at entitySlot+16 is the engine's `entry[4]` **`movement_val`**, written
+RAW (no pool-resolve), NOT a `pool<<12|slot` parent handle. For pool-3 start markers it carries
+a full 32-bit **BAM heading**: the controlled probe's Blue starts = `0x40000000` (90.00°), Red
+starts = `0xc0000000` (270.00°) — values that are not valid pool handles and are strictly
+team-correlated. The companion `flags & 0x02` field (`orientationVal` → entitySlot+0) is the
+other angle slot. `[orig: serialize_entity_pool_to_packet @ 0x503460 (movement_val = entry[4] @ 0x50350c, written raw) / NapiNPClientMsg_0x020 @ 0x425C00]`
+
+**Team byte == raw BMS team (controlled witness 2026-06-17):** first capture with authored-known
+teams confirms the `flags & 0x08` byte at entitySlot+354 is the **raw BMS team integer, no remap**
+— the two `0x1773` Blue start markers carry team `0x01`, the two `0x1774` Red markers carry
+`0x02` (BMS team 1=Blue, 2=Red), at the exact authored cardinal positions.
 
 **Cross-witness numbers:**
 
@@ -1408,6 +1434,101 @@ exactly: vehicle_handle = 0xFFFF, posXYZ = i32 16.16 LE world coords, heading = 
 the player having fired all four loadout slots). The vehicle-mounted branch is exercised
 from f=2053 onward when the joiner mounts handle `0x1033` (pool 1 / slot 51) and positions
 flip to vehicle-LOCAL small-magnitude i32s — same wire shape, different host interpretation.
+
+### 5.19 Tag 0x40 — minimap-overlay update / capture-zone state (controlled capture 2026-06-17)
+
+`[orig: NapiNPClientMsg_0x040 @ 0x425A50 → sub_425A54 @ 0x425A54 (reads count) → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte entry walker) → MapOverlay_UpdateOrCreateSlot @ 0x5BEA60]`. Refines the older
+"capture-zone state (1 B)" note — the 1 byte it meant is the per-zone icon/color byte; the packet
+itself is a general minimap-overlay update carrying N entries.
+
+Wire shape: `[u8 count][count × 6-byte entry]`.
+
+| off (within entry) | bytes | field | landing / meaning |
+|---|---|---|---|
+| 0 | 2 | handle (u16 LE) | `pool<<12\|slot`, resolved via `g_pool_list` |
+| 2 | 1 | param | slot+2 (`param_size`); 0 for zones |
+| 3 | 1 | iconColor | index into `g_minimap_overlay_color_table` @ 0x840A10 (LE `0xAARRGGBB`): **0x0c neutral/green** (0xFF208020), **0x09 Red** (0xFF802020), **0x0a Blue** (0xFF304080). Team↔color binding per the prior dvxi5-AS capture3 correlation (`replication_min.cpp build_tag_40_capture_zone_state`): **0x09 = Red (team 2), 0x0a = Blue (team 1)** — the per-zone capture state. (An initial RGBA-byte-order read had 0x09/0x0a swapped; the LE-dword + capture3 correlation agree on Red=0x09/Blue=0x0a.) |
+| 4 | 1 | flags | **0x10 = persistent capture-zone marker**; bit **0x20 = clear slot** (writes handle 0xFFFF, zeroes lifetime) |
+| 5 | 1 | source | slot+4 |
+
+Overlay X/Y/Z is read from the **resolved pool entity**, not the wire — the 0x40 packet carries
+no coordinates. The textual Under-Attack / Ready-for-Takeover HUD (`draw_capture_point_status_overlays
+@ 0x5A2480`) derives contest state locally from per-team proximity counts; tag 0x40 is the
+authoritative minimap **color** channel.
+
+**Witness:** the A&S probe "ON RE Probe AS dvxi5" (two human players, 699 0x40 records) has two
+capture points — Rebel HQ (handle 0x1000, bms(0,0)) and JO Tent (handle 0x1001, bms(0,-40)), both
+authored neutral. Rebel HQ's iconColor evolves `0x0c→0x09→0x0c→0x0a` (neutral → Red captures →
+neutral → Blue captures); JO Tent stays `0x0c` all game. Per-handle histogram: 0x1000 = 310
+neutral / 217 Red (0x09) / 172 Blue (0x0a), 0x1001 = 699 neutral. Six `count==3` records append a transient truck blip (handle 0x1003,
+flags `0x00` ≠ 0x10 — distinguishes a blip from a zone). Decoded by `decode_capture_zone_overlay`
+in `libs/novaworld/include/novaworld/ingame_decode.h`.
+
+### 5.20 Tag 0x16 — PLAYER-LIST (controlled capture 2026-06-17)
+
+`[orig: NapiNPClientMsg_PlayerList @ 0x42FAE0]`. All 33 records in the probe capture decode to a
+2-byte trailer remainder.
+
+```
+[u8 max_players][u8 player_count (clamp 252)]
+player_count × { [u8 slot_id][u16 ping LE][u16 score1 LE][u16 score2 LE][u8 flags] }   // 8 B/row
+[u8 team_count]
+(team_count+1) × { [u16 score1 LE][u16 score2 LE][u8 player_count][u8 alive_count] }    // 6 B/row
+[u8 extra1][u8 extra2]                                                                   // trailer
+```
+
+- Row flags: `alive = flags & 1` (scoreboard `is_alive` → score_entry+52; observed 0 in the probe —
+  not a per-row liveness), `team = flags >> 1`. Probe: host slot0 flags=0x02 (team1/Blue), joiner
+  slot1 flags=0x04 (team2/Red).
+- Team table: `team_count`=2 ⇒ **3 rows** (T0 neutral / T1 Blue / T2 Red); per-player score2 mirrors
+  into T1/T2, T0 stays 0. Probe score2 accrues with A&S play (T1 0→47, T2 0→57); ping=0 (loopback).
+- The server may **re-sort the player rows between frames** — `slot_id` is authoritative, not row
+  position.
+
+### 5.21 Tag 0x46 — PLAYER-SYNC (controlled capture 2026-06-17)
+
+`[orig: NapiNPClientMsg_PlayerSync @ 0x431370]`. All 51 records in the probe capture decode to the
+byte (every set bit consumed).
+
+```
+[u8 slot_id][u16 fieldBitmask LE]
+if (bitmask & 0x8000): removal — stop (no body)
+else [u8 entity_slot_id]   // pool-0 slot; handle = (0<<12)|slot
+then present fields IN SOURCE ORDER (NON-numeric — 0x10 before 0x04, 0x1000 before 0x40):
+  0x0001 name   cstr (≤31 + NUL)
+  0x0002 clan   cstr (≤15 + NUL)
+  0x0010 id/label cstr (NUL-term)
+  0x0004 u8 team
+  0x0008 u8 type|subtype   (type=v&0x7F→slot+16, subtype=v>>7→slot+44)
+  0x0020 u8 → slot+45
+  0x1000 u8 → slot+46
+  0x0040 u8 → slot+48
+  0x0080 u8 → slot+49
+  0x0400 u8 quality (clamp 4)
+  0x0800 u32 entityRef
+bit 0x4000 (no body byte) → client queues a C2S 0x22 ack
+```
+
+- `entity_slot_id` is a **pool-0** slot → handle `(0<<12)|slot`. Probe: host slot0 → entity_slot 4
+  → handle **0x0004**; joiner "TestPlayer" slot1 → entity_slot 5 → handle **0x0005** — both
+  cross-witnessed in the 0x0A stream as the only two type-`0x14b9` "Player #1, Multiplayer"
+  entities. Ties the player table (slot) to the entity pool (handle).
+- Team byte (bit 0x04): host=1 (Blue), joiner=2 (Red) — matches §5.20 `flags>>1` and the 0x04 path
+  is gated by `g_GameType & 0x10000`; for the A&S probe (attrib 0x10000) the `|=0x200` branch is
+  skipped, confirming `g_GameType` holds the gametype-attribute word `[orig: g_GameType @ 0x24D2128]`.
+- **Residual follow-up:** the bit-0x08 byte is stored in the type/subtype slot per IDA, but in the
+  probe its runtime content streams a respawn countdown (0x77→0x00 on the joiner). Layout solid;
+  the runtime semantic of that byte needs a producer-side grill.
+
+### Cross-note — pool-0 organic spawn path (controlled capture 2026-06-17)
+
+Pool-0 AI organics (infantry) spawn via **S2C 0x0C** `[orig: _0x00C @ 0x42E730]` (full-entity spawn
+batch; u32 count + inline name fields), NOT via 0x0D (pool-1 items/vehicles) — the probe's single
+0x0D batch carried only the 4 pool-1 items and the 0x10 static batch was empty, while the 4 AI
+soldiers (type 0x0816) first appear in the 0x0C batch at the authored (-70,-15) and thereafter in
+the per-frame 0x0A stream. 0x0A is live replication of already-spawned entities, never the spawn
+mechanism. The compact 0x0A vehicle/infantry records carry no team byte — team lives only in the
+spawn/sync packets (0x0D entity+354, 0x20 flag-0x08).
 
 ## 6. Struct reference
 
@@ -2340,6 +2461,11 @@ FLDS columns, decoded through the XXXX terminator):
 - **D-NET-55** [HIGH, TRACKED] No `build_tag_20_pool3_sync` builder exists; `game_session.cpp` dispatch (around lines 1023-1075) has no inbound `handle_tag_20_*` either — every S2C 0x20 falls through to `handle_unknown_or_passive_tag`. Pool-3 markers / waypoints / nav-nodes are therefore not registered into the client's pool 3, which blocks AI navigation, target markers, and any spawn-select markers that resolve via pool 3. §5.12 has the full record map; the builder needs a `[u16 start_idx][u16 count]` header + per-entity flag-driven serializer matching the witnessed 29-payload / 792-entity loopback shape. [orig: NapiNPClientMsg_0x020 @ 0x425C00]
 - **D-NET-56** [MED, FIXED] `decode_pool_spawn_batch` (ingame_decode.cpp) read `extra_handle_0/1` only inside `if (weapon_mask)`, under-reading by 4 B on the (`0x400` set, mask==0) path. The handler's mask==0 branch (`goto LABEL_110`) skips the per-bit loop but still consumes both extras unconditionally once `0x400` is set; moved the extras read outside the mask!=0 guard. **Latent:** retail's encoder `serialize_entity_pool_to_packet_0 @ 0x503940` only sets `0x400` when its mask (`itemDef+604`) is non-zero, so the byte-witness capture never produced mask==0 and `nw_ingame_pool_records_test` stayed green — but the client handler reads it regardless, so the port must match. Found by grilling the encode side for the Phase-1 host world-stream (trust-but-verify of already-written code). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
 - **D-NET-57** [DOC, FIXED] §5.10 player compact record: the yaw_byte landing was cited as `entity+0x14`. Validated against the actual `NetPacket_SerializePlayerState` case 1 (write) + case 2 (read) — the read lands **yaw (byte 10) at `entity+0x10`** and **pitch (byte 11) at `entity+0x14`** (case-2 spawn branch writes `entity+0x10/0x14/0x18` = the heading/pitch/roll Euler triple). The decompiler's `pitchPacked`/`rollPacked` slot names are reused-stack artifacts, not the field semantics. **Wire layout, field widths, and yaw@10/pitch@11 ORDER are unchanged and confirmed correct** — `encode_player_compact_record` and `decode_player_compact_record` need no change; only the doc/struct landing-offset comment is corrected. This was the validation pass the player-compact encoder needed (the case-switch function exceeds a single decompile, so the case-1 write + case-2 read were extracted via Hex-Rays `py_eval`). [orig: NetPacket_SerializePlayerState @ 0x4C09C0 (case 1 write; case 2 read @ ~0x4c0730 entity+0x10/0x14/0x18 stores)]
+
+Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S 0x10000, host + "TestPlayer", 2026-06-17):
+- **D-NET-58** [HIGH, DOC+CODE] §5.11 0x0D team/orient labels were CROSSED (inherited from D-NET-54 trusting the handler-side Hex-Rays name). The `spawnFlags&0x0010`-gated byte at **entity+354 is TEAM** (1=Blue/2=Red); the unconditional post-weapon byte at **entity+290 is a bone/other byte, NOT team**. entity+354 is the unified team landing shared with the 0x20 path (§5.12 flag 0x08). Renamed `ingame_decode.h PoolSpawnRecord.orient_byte→team_byte` (+354, gate 0x10) and `team_byte→bone_byte` (+290), with matching `ingame_encode.cpp`/`nw_pp` updates. Controlled witness: trucks authored team 1/2 → +354 = 0x01/0x02, +290 = 0x00. [orig: serialize_entity_pool_to_packet_0 @ 0x503940 (team_byte=*(entity+354); bone_byte=*(entity+290))]
+- **D-NET-59** [HIGH, DOC+CODE] §5.12 0x20 `flags&0x01` field is the engine's `entry[4]` **`movement_val` @ entitySlot+16**, written RAW (no pool-resolve) — a 32-bit BAM heading for pool-3 start markers, NOT a `pool<<12\|slot` parent handle. Renamed `ingame_decode.h Pool3SyncRecord.parent_handle→movement_val`. Controlled witness: Blue starts 0x40000000 (90°), Red starts 0xc0000000 (270°), team-correlated. [orig: serialize_entity_pool_to_packet @ 0x503460 (movement_val=entry[4], written raw) / NapiNPClientMsg_0x020 @ 0x425C00]
+- **D-NET-60** [LOW, DOC] §5.4 0x0B icon-key offset: "full_00" observed at off **220-226**, not the documented 246-253. Signature(0-3)/name(4-35)/designer(36-67)/basename(68) all matched their documented offsets, so only the icon row is suspect — re-diff against more retail maps or annotate as header-variant-dependent. Note: the synthesized header title-cases the basename to "Dvxi5" at +68 (client terrain lookup is case-insensitive). [orig: byte_A761D0 @ §5.5]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

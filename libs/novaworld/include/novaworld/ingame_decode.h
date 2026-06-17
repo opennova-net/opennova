@@ -46,8 +46,9 @@ struct PoolSpawnRecord {
 	int32_t pos_z = 0;
 
 	// Always-present unconditional byte after the weapon block. Landing
-	// entity+290 (u16 zero-ext).
-	uint8_t team_byte = 0;
+	// entity+290 (u16 zero-ext). Bone/other byte — NOT team (D-NET-58); the
+	// team byte is the 0x0010-gated field at entity+354 below.
+	uint8_t bone_byte = 0;
 
 	// Conditional fields. Gate column = exact spawn_flags bit to test.
 	// gate            field                landing
@@ -56,7 +57,7 @@ struct PoolSpawnRecord {
 	int32_t  vel_y = 0;             // 0x0002   entity+20
 	int32_t  vel_z = 0;             // 0x0004   entity+24
 	int32_t  section_mask = 0;      // 0x0008   entity+308
-	uint8_t  orient_byte = 0;       // 0x0010   entity+354
+	uint8_t  team_byte = 0;         // 0x0010   entity+354 — BMS team 1=Blue/2=Red (D-NET-58)
 	uint16_t parent_handle = 0xFFFF;// 0x0100   resolved → entity+368
 	uint16_t target_handle = 0xFFFF;// 0x0200   resolved → entity+40
 
@@ -120,7 +121,7 @@ struct Pool3SyncRecord {
 	uint16_t net_handle = 0xFFFF;     // always   entitySlot+124
 
 	// Conditional fields.
-	uint32_t parent_handle = 0;       // 0x01     entitySlot+16
+	uint32_t movement_val = 0;        // 0x01     entitySlot+16 — raw u32, BAM heading for markers; NOT a parent handle (D-NET-59)
 	uint32_t orientation_val = 0;     // 0x02     entitySlot+0
 	uint16_t ammo_count = 0;          // 0x04     entitySlot+290
 	uint8_t  team_byte = 0;           // 0x08     entitySlot+354
@@ -147,6 +148,29 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 // Decode a S2C 0x20 body per the §5.12 field map. Same return contract.
 bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
                               Pool3SyncBatch &out);
+
+// One entry from a S2C 0x40 minimap-overlay update / capture-zone state batch
+// (§5.19). 6 bytes per entry, prefixed by a u8 count. Overlay position is read
+// from the resolved pool entity, not the wire — this packet carries no coords.
+// [orig: NapiNPClientMsg_0x040 @ 0x425A50 → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte walker)
+//  → MapOverlay_UpdateOrCreateSlot @ 0x5BEA60; color table g_minimap_overlay_color_table @ 0x840A10]
+struct CaptureZoneOverlay {
+	uint16_t handle = 0;       // +0  (pool<<12)|slot, resolved via g_pool_list
+	uint8_t  param = 0;        // +2  → slot+2
+	uint8_t  icon_color = 0;   // +3  index into g_minimap_overlay_color_table: 0x0c neutral / 0x09 Red / 0x0a Blue (BMS team 0/2/1)
+	uint8_t  flags = 0;        // +4  0x10 = persistent capture-zone marker; 0x20 = clear slot
+	uint8_t  source = 0;       // +5  → slot+4
+};
+
+struct CaptureZoneOverlayBatch {
+	uint8_t count = 0;
+	std::vector<CaptureZoneOverlay> entries;
+};
+
+// Decode a S2C 0x40 body: [u8 count][count × 6-byte entry]. Returns true iff the
+// body was consumed exactly.
+bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
+                                 CaptureZoneOverlayBatch &out);
 
 // ===========================================================================
 // Per-entity compact records — appear inside S2C 0x0A's trailing event loop,

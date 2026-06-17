@@ -65,7 +65,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 		// a clear bit means "field was zero", not "field absent from state".
 		// Field->bit map matches NapiNPClientMsg_0x020 / §5.12 exactly.
 		uint8_t flags = 0;
-		if (rec.parent_handle)   flags |= 0x01; // entry+16  [orig: 0x50357e]
+		if (rec.movement_val)    flags |= 0x01; // entry+16 raw BAM heading [orig: 0x50357e] (D-NET-59)
 		if (rec.orientation_val) flags |= 0x02; // entry+0   [orig: 0x503593]
 		if (rec.ammo_count)      flags |= 0x04; // entry+290 [orig: 0x5035b7]
 		if (rec.team_byte)       flags |= 0x08; // entry+354 [orig: 0x5035f1]
@@ -77,7 +77,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 		w.u32(uint32_t(rec.pos_y));     // entry+8  [orig: 0x503565]
 		w.u32(uint32_t(rec.pos_z));     // entry+12 [orig: 0x503577]
 
-		if (flags & 0x01) w.u32(rec.parent_handle);   // [orig: 0x50358f]
+		if (flags & 0x01) w.u32(rec.movement_val);    // [orig: 0x50358f] (D-NET-59)
 		if (flags & 0x02) w.u32(rec.orientation_val); // [orig: 0x5035a9]
 		if (flags & 0x04) w.u16(rec.ammo_count);      // [orig: 0x5035cc]
 		w.u16(rec.net_handle);                         // ALWAYS [orig: 0x5035e2, entry+124]
@@ -107,7 +107,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.vel_y)                     f |= 0x0002; // entity+20   [orig: 0x503b58]
 		if (rec.vel_z)                     f |= 0x0004; // entity+24   [orig: 0x503b74]
 		if (rec.section_mask)              f |= 0x0008; // entity+308  [orig: 0x503b93]
-		if (rec.orient_byte)               f |= 0x0010; // entity+354  [orig: 0x503bb2]
+		if (rec.team_byte)                 f |= 0x0010; // entity+354 team [orig: 0x503bb2] (D-NET-58)
 		if (rec.parent_handle != 0xFFFF)   f |= 0x0100; // entity+368  [orig: 0x503bd1]
 		if (rec.target_handle != 0xFFFF)   f |= 0x0200; // entity+40   [orig: 0x503c27]
 		if (rec.weapon_mask)               f |= 0x0400; // itemDef+604 [orig: 0x503c83]
@@ -134,7 +134,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (f & 0x0002) w.u32(uint32_t(rec.vel_y));
 		if (f & 0x0004) w.u32(uint32_t(rec.vel_z));
 		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
-		if (f & 0x0010) w.u8(rec.orient_byte);
+		if (f & 0x0010) w.u8(rec.team_byte);   // entity+354 team (D-NET-58)
 		if (f & 0x0100) w.u16(rec.parent_handle);
 		if (f & 0x0200) w.u16(rec.target_handle);
 
@@ -150,7 +150,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 			w.u16(rec.extra_handle_1);  // entity+418 [orig: 0x503d24]
 		}
 
-		w.u8(rec.team_byte);            // ALWAYS, entity+290 [orig: 0x503d38]
+		w.u8(rec.bone_byte);            // ALWAYS, entity+290 bone/other byte [orig: 0x503d38] (D-NET-58)
 
 		if (f & 0x0800) {               // AI trailer (D-NET-52: 4+4+cstr)
 			w.u32(rec.ai_profile_1);    // aiSlot+16  [orig: 0x503d6f]
