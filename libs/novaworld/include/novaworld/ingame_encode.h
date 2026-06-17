@@ -80,4 +80,45 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // round-trip with decode_pool_spawn_batch is field-identical.
 std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 
+// Encode a §5.14 infantry / AI compact record (14 B fixed) — the bytes
+// `decode_infantry_compact_record` consumes, and the byte order produced by
+// [orig: NetPacket_SerializeInfantryEntityState case 1 (write, type 11) @ 0x4C0320].
+// One of the per-class callbacks that fill the S2C 0x0A trailing event-loop
+// `tag==1` records (org0/org1-class entities — AI infantry).
+//
+// The record carries the ALREADY-COMPRESSED positions (u16): the original's
+// write path runs `Network_CompressFixedPoint` (and `Entity_TransformWorldToLocal`
+// when mounted) on the live entity to produce them — work the host driver does
+// when building the record from a World entity. This wire encoder writes the u16s
+// raw, the exact inverse of `decode_infantry_compact_record`.
+std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord &rec);
+
+// Encode a §5.13 vehicle compact record (15 B mounted / 21 B unmounted) — the
+// bytes `decode_vehicle_compact_record` consumes, and the byte order produced by
+// [orig: Entity_SerializeMountedVehicleState case 1 (write, type 11) @ 0x460560].
+// Used by CHel/cveh/cbot/cpln/ctrn-class entities (controllable vehicles + AI
+// ground/air units) in the S2C 0x0A trailing event-loop.
+//
+// The mounted/unmounted split is gated on `flags_byte & 0x04` — the original
+// branches on `entity+36 & 4`, so this encoder branches on the flag bit (not the
+// cached `is_mounted`). Positions/headings are the already-compressed u16s
+// (`weapon_y_raw` is a raw i16); `Network_CompressFixedPoint` /
+// `Entity_TransformWorldToLocal` run at the World->record layer upstream.
+std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &rec);
+
+// Encode a §5.10 player compact record (18 B fixed) — the bytes
+// `decode_player_compact_record` consumes, and the byte order produced by
+// [orig: NetPacket_SerializePlayerState case 1 (write compact, type 11) @ 0x4C09C0].
+// This is the player's own state as replicated to OTHER clients in the S2C 0x0A
+// trailing event-loop (the player class also sends the extended C2S 0x0C uplink,
+// case 3 — encoded separately).
+//
+// Positions are the already-compressed u16s (case 1 runs `Network_CompressFixedPoint`
+// / `Entity_TransformWorldToLocal` on the live entity at the World->record layer).
+// The 18-byte field order is the §5.10 witnessed map, verified here as the exact
+// inverse of `decode_player_compact_record`; the case-switch function exceeds a
+// single clean decompile, so the layout is cited from the landed §5.10 grill + that
+// verified decoder rather than a fresh re-decompile of the write block.
+std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec);
+
 } // namespace opennova

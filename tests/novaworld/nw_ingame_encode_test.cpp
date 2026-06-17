@@ -307,6 +307,141 @@ int test_decode_weapon_block_mask_zero_dnet56() {
 	return 0;
 }
 
+// ---- S2C 0x0A trailing compact records -------------------------------------
+
+int test_infantry_compact_roundtrip() {
+	// §5.14 — 14 B fixed. Positions are raw already-compressed u16s on the wire.
+	InfantryCompactRecord r;
+	r.seat_bone_idx       = 3;
+	r.vehicle_slot_handle = 0x108B;   // pool 1 / slot 139 (mounted)
+	r.pos_x_compressed    = 0xBE8F;
+	r.pos_y_compressed    = 0xB504;
+	r.pos_z_compressed    = 0xBCD7;
+	r.yaw_byte            = 0x40;
+	r.flags_byte          = 0x06;
+	r.pitch_byte          = 0x12;
+	r.aim_yaw_byte        = 0x80;
+	r.anim_byte           = 0x05;
+
+	std::vector<uint8_t> wire = encode_infantry_compact_record(r);
+	EXPECT(wire.size() == 14);
+
+	InfantryCompactRecord d;
+	size_t consumed = 0;
+	EXPECT(decode_infantry_compact_record(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 14);
+	EXPECT(d.seat_bone_idx == 3);
+	EXPECT(d.vehicle_slot_handle == 0x108B);
+	EXPECT(d.pos_x_compressed == 0xBE8F);
+	EXPECT(d.pos_y_compressed == 0xB504);
+	EXPECT(d.pos_z_compressed == 0xBCD7);
+	EXPECT(d.yaw_byte == 0x40);
+	EXPECT(d.flags_byte == 0x06);
+	EXPECT(d.pitch_byte == 0x12);
+	EXPECT(d.aim_yaw_byte == 0x80);
+	EXPECT(d.anim_byte == 0x05);
+	std::printf("PASS infantry_compact_roundtrip\n");
+	return 0;
+}
+
+int test_vehicle_compact_roundtrip_mounted() {
+	// §5.13 mounted (flags_byte & 4) -> 15 B: header + secondary_heading + final.
+	VehicleCompactRecord r;
+	r.parent_slot_handle = 0x1033;
+	r.pos_x_compressed = 0x1111;
+	r.pos_y_compressed = 0x2222;
+	r.pos_z_compressed = 0x3333;
+	r.yaw_high = int16_t(0x4444);
+	r.flags_byte = 0x04;            // mounted
+	r.secondary_heading = 0x5555;
+	r.final_heading = 0x6666;
+
+	std::vector<uint8_t> wire = encode_vehicle_compact_record(r);
+	EXPECT(wire.size() == 15);
+	VehicleCompactRecord d;
+	size_t consumed = 0;
+	EXPECT(decode_vehicle_compact_record(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 15);
+	EXPECT(d.is_mounted);
+	EXPECT(d.parent_slot_handle == 0x1033);
+	EXPECT(d.pos_y_compressed == 0x2222);
+	EXPECT(d.yaw_high == int16_t(0x4444));
+	EXPECT(d.flags_byte == 0x04);
+	EXPECT(d.secondary_heading == 0x5555);
+	EXPECT(d.final_heading == 0x6666);
+	std::printf("PASS vehicle_compact_roundtrip_mounted\n");
+	return 0;
+}
+
+int test_vehicle_compact_roundtrip_unmounted() {
+	// §5.13 unmounted (flags_byte & 4 clear) -> 21 B: header + weapon block + final.
+	VehicleCompactRecord r;
+	r.parent_slot_handle = 0xFFFF;
+	r.pos_x_compressed = 0xAAAA;
+	r.pos_y_compressed = 0xBBBB;
+	r.pos_z_compressed = 0xCCCC;
+	r.yaw_high = int16_t(0x0DDD);
+	r.flags_byte = 0x00;            // unmounted
+	r.weapon_x_compressed = 0x0101;
+	r.weapon_y_raw = 0x0202;
+	r.weapon_z_compressed = 0x0303;
+	r.weapon_heading_compressed = 0x0404;
+	r.final_heading = 0x0505;
+
+	std::vector<uint8_t> wire = encode_vehicle_compact_record(r);
+	EXPECT(wire.size() == 21);
+	VehicleCompactRecord d;
+	size_t consumed = 0;
+	EXPECT(decode_vehicle_compact_record(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 21);
+	EXPECT(!d.is_mounted);
+	EXPECT(d.parent_slot_handle == 0xFFFF);
+	EXPECT(d.pos_x_compressed == 0xAAAA);
+	EXPECT(d.weapon_x_compressed == 0x0101);
+	EXPECT(d.weapon_y_raw == 0x0202);
+	EXPECT(d.weapon_z_compressed == 0x0303);
+	EXPECT(d.weapon_heading_compressed == 0x0404);
+	EXPECT(d.final_heading == 0x0505);
+	std::printf("PASS vehicle_compact_roundtrip_unmounted\n");
+	return 0;
+}
+
+int test_player_compact_roundtrip() {
+	// §5.10 player compact -> 18 B fixed.
+	PlayerCompactRecord r;
+	r.vehicle_bone      = 1;
+	r.seat_type         = 2;
+	r.vehicle_handle    = 0xFFFF;     // on foot
+	r.pos_x_compressed  = 0xBE8F;
+	r.pos_y_compressed  = 0xB504;
+	r.pos_z_compressed  = 0xBCD7;
+	r.yaw_byte          = 0x40;
+	r.pitch_byte        = 0x10;
+	r.anim_slot_low     = 0x12;
+	r.state_flags       = 0x06;       // bit1 spawning + bit2 mounted bits set
+	r.weapon_anim_state = 0x05;
+	r.priority          = 0x10;
+	r.anim_def_index    = 0x07;
+	r.health_class_byte = 0x80;
+
+	std::vector<uint8_t> wire = encode_player_compact_record(r);
+	EXPECT(wire.size() == 18);
+	PlayerCompactRecord d;
+	size_t consumed = 0;
+	EXPECT(decode_player_compact_record(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 18);
+	EXPECT(d.vehicle_bone == 1 && d.seat_type == 2);
+	EXPECT(d.vehicle_handle == 0xFFFF);
+	EXPECT(d.pos_x_compressed == 0xBE8F);
+	EXPECT(d.pos_z_compressed == 0xBCD7);
+	EXPECT(d.yaw_byte == 0x40 && d.pitch_byte == 0x10);
+	EXPECT(d.anim_slot_low == 0x12 && d.state_flags == 0x06);
+	EXPECT(d.weapon_anim_state == 0x05 && d.priority == 0x10);
+	EXPECT(d.anim_def_index == 0x07 && d.health_class_byte == 0x80);
+	std::printf("PASS player_compact_roundtrip\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -320,6 +455,10 @@ int main() {
 	rc |= test_pool_spawn_minimal();
 	rc |= test_pool_spawn_health_alt_8000();
 	rc |= test_decode_weapon_block_mask_zero_dnet56();
+	rc |= test_infantry_compact_roundtrip();
+	rc |= test_vehicle_compact_roundtrip_mounted();
+	rc |= test_vehicle_compact_roundtrip_unmounted();
+	rc |= test_player_compact_roundtrip();
 	if (rc == 0) std::printf("ALL nw_ingame_encode tests passed\n");
 	return rc;
 }

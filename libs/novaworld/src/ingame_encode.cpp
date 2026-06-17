@@ -173,4 +173,71 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 	return out;
 }
 
+// [orig: NetPacket_SerializeInfantryEntityState case 1 (write, type 11) @ 0x4C0320]
+// Fixed 14 B; positions are the already-compressed u16s (see ingame_encode.h).
+std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord &rec) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(rec.seat_bone_idx);         // entity+343 if mounted else 0 [orig: 0x4c0700 / 0x4c072e]
+	w.u16(rec.vehicle_slot_handle);  // (pool<<12)|slot or 0xFFFF    [orig: 0x4c0780 / 0x4c07b1]
+	w.u16(rec.pos_x_compressed);     // CompressFixedPoint(world/local) [orig: 0x4c07f2 / 0x4c0884]
+	w.u16(rec.pos_y_compressed);     // [orig: 0x4c0817 / 0x4c089e]
+	w.u16(rec.pos_z_compressed);     // [orig: 0x4c083c / 0x4c08c5]
+	w.u8(rec.yaw_byte);              // (entity+16 + 0x800000) >> 24  [orig: 0x4c08f8]
+	w.u8(rec.flags_byte);            // entity+36                     [orig: 0x4c0917]
+	w.u8(rec.pitch_byte);            // entity+748 (clamped)          [orig: 0x4c0960]
+	w.u8(rec.aim_yaw_byte);          // entity+720                    [orig: 0x4c0983]
+	w.u8(rec.anim_byte);             // entity+696 ?: entity+700      [orig: 0x4c09ae]
+	return out; // 14 B
+}
+
+// [orig: Entity_SerializeMountedVehicleState case 1 (write, type 11) @ 0x460560]
+// 15 B mounted / 21 B unmounted; positions are already-compressed u16s.
+std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &rec) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(rec.parent_slot_handle);    // (pool<<12)|slot or 0xFFFF  [orig: 0x460ba1 / 0x460c61]
+	w.u16(rec.pos_x_compressed);      // CompressFixedPoint(local/world) [orig: 0x460bda / 0x460c92]
+	w.u16(rec.pos_y_compressed);      // [orig: 0x460bff / 0x460cbc]
+	w.u16(rec.pos_z_compressed);      // [orig: 0x460c24 / 0x460ce6]
+	w.u16(uint16_t(rec.yaw_high));    // (v+0x8000)>>16 BAM high     [orig: 0x460d0a]
+	w.u8(rec.flags_byte);             // entity+36                   [orig: 0x460d22]
+
+	// Mounted (entity+36 & 4) emits only secondary_heading; unmounted emits the
+	// full weapon/turret block. [orig: branch @ 0x460d2f]
+	if (rec.flags_byte & 0x04) {
+		w.u16(rec.secondary_heading);          // entity+24 (v+0x8000)>>16 [orig: 0x460d4c]
+	} else {
+		w.u16(rec.weapon_x_compressed);        // entity+160          [orig: 0x460d7b]
+		w.u16(rec.weapon_y_raw);               // entity+286 raw i16  [orig: 0x460d9b]
+		w.u16(rec.weapon_z_compressed);        // vehicleData[136]    [orig: 0x460dc2]
+		w.u16(rec.weapon_heading_compressed);  // vehicleData[135]    [orig: 0x460de9]
+	}
+	w.u16(rec.final_heading);         // entity+20 (mounted) / vehicleData[132] [orig: 0x460e10]
+	return out; // 15 or 21 B
+}
+
+// [orig: NetPacket_SerializePlayerState case 1 (write compact, type 11) @ 0x4C09C0; §5.10]
+// 18 B fixed; the inverse of decode_player_compact_record (see ingame_encode.h on
+// why the layout is cited from the landed §5.10 grill).
+std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(rec.vehicle_bone);       // entity+0x157
+	w.u8(rec.seat_type);          // local seat-type byte
+	w.u16(rec.vehicle_handle);    // (pool<<12)|slot or 0xFFFF
+	w.u16(rec.pos_x_compressed);  // CompressFixedPoint(entity+4; vehicle-local if mounted)
+	w.u16(rec.pos_y_compressed);  // entity+8
+	w.u16(rec.pos_z_compressed);  // entity+0xC
+	w.u8(rec.yaw_byte);           // entity+0x14 high byte
+	w.u8(rec.pitch_byte);
+	w.u8(rec.anim_slot_low);      // entity+0x12C
+	w.u8(rec.state_flags);        // entity+0x24 (bit2 spawning, bit4 mounted)
+	w.u8(rec.weapon_anim_state);  // entity+0x2B8 / 0x2BC
+	w.u8(rec.priority);           // entity+0x377
+	w.u8(rec.anim_def_index);     // entity+0x2B0
+	w.u8(rec.health_class_byte);  // -> Entity_SetHealthFromDifficultyByte on read
+	return out; // 18 B
+}
+
 } // namespace opennova
