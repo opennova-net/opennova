@@ -1015,6 +1015,15 @@ target_link_libraries(nw_ingame_pool_records_test PRIVATE opennova_novaworld ope
 target_include_directories(nw_ingame_pool_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_pool_records COMMAND nw_ingame_pool_records_test)
 
+# /PROFILE .sph server-log decoder — §5.22. Witnessed against the controlled
+# dvxi5 probe recordings (host.sph / client.sph), the engine's own decoded view
+# of the same session as the pool-records capture. Skips unless
+# NW_PROFILE_SPH_DIR points at the folder holding the two .sph files.
+add_executable(nw_serverlog_decode_test novaworld/nw_serverlog_decode_test.cpp)
+target_link_libraries(nw_serverlog_decode_test PRIVATE opennova_novaworld)
+target_include_directories(nw_serverlog_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_serverlog_decode COMMAND nw_serverlog_decode_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.

@@ -160,9 +160,10 @@ NW-C4 in [§8](net/novaworld-net-re.md). Re-anchored to retail (was jodemo-only)
 ## 5.5 Full client parity sweep (grill wave 7, 2026-06-14)
 
 All 24 client systems re-grilled (3 passes, adversarially verified). Verdict table + the full
-`D-NET-1..60` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
-(`D-NET-58..60` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
-0x20 movementVal label corrections, 0x0B icon offset; see §5.11/§5.12/§5.19-§5.21).
+`D-NET-1..61` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
+(`D-NET-58..61` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
+0x20 movementVal label corrections, 0x0B icon offset, and the `/PROFILE` `.sph` server-log
+cross-validation; see §5.11/§5.12/§5.19-§5.22).
 Newly-grilled originals (join key = addr):
 
 | original | addr | role | D-NET | status |
@@ -179,6 +180,17 @@ Newly-grilled originals (join key = addr):
 | `NapiStatement_SerializeVarList` | `0x4d0660` | ClientVarList(VarList)+ClientVar(VarFNum/VarName/VarValue) | D-NET-38 | fixed |
 | `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | divergent |
 | `String_SanitizeForLobby` | `0x4fe750` | lobby field sanitize | D-NET-41 | tracked |
+
+`/PROFILE` `.sph` server-log recorder cluster (§5.22; decoder `libs/novaworld/serverlog_decode.cpp`):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `Game_ProcessMainFrame` | `0x5263f0` | per-frame recorder branch (8-tick, iterates pool 0) | D-NET-61 | matching |
+| `CServerLog_WritePositionRecord` | `0x4e1b00` | PDAT entity sample (pos 16.16 / BAM32 yaw) | D-NET-61 | matching |
+| `CServerLog_WritePlayerNameRecord` | `0x4e1cc0` | PDEF roster (team@entity+354) | D-NET-61 | matching |
+| `CServerLog_WriteTimestampRecord` | `0x4e1aa0` | FBEG frame marker (tick>>3) | D-NET-61 | matching |
+| `CServerLog_WriteDeathMarker` / `CServerLog_WriteDisconnectMarker` | `0x4e1e00` / `0x4e1c50` | PBRK / PREM event markers | D-NET-61 | matching |
+| `CServerLog_CloseAndFree` | `0x4e1a10` | `.END` close | D-NET-61 | matching |
 
 Crypto/TLV/envelope (NW-C1..C4, CRC32, NAPI TLV/envelope) re-confirmed byte-exact — no change.
 

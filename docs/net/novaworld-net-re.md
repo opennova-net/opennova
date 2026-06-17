@@ -1530,6 +1530,81 @@ the per-frame 0x0A stream. 0x0A is live replication of already-spawned entities,
 mechanism. The compact 0x0A vehicle/infantry records carry no team byte — team lives only in the
 spawn/sync packets (0x0D entity+354, 0x20 flag-0x08).
 
+### 5.22 `/PROFILE` `.sph` server-log recording — independent value oracle (controlled capture 2026-06-17)
+
+Launching with `/profile <file>` `[orig: Game_ParseCommandLineAndInit @ 0x4a7310 (sets
+g_RunningWithProfile @ 0xb4c500 + filename g_ProfileLogPath @ 0xb4c504)]` makes the engine dump a
+FOURCC-chunked "server-log" recording (`host.sph` / `client.sph`). It is the engine's own *decoded*
+per-frame view of the session, so it cross-validates the in-game replication RE **without any
+decryption** — and `host.sph` (authority) vs `client.sph` (replicated) is the round-trip itself.
+The probe produced both for the SAME session as the §5.9–5.21 capture (dvxi5 / `mission.bms` /
+`TestPlayer`+`FooPlayer`).
+
+The recorder opens in `[orig: Game_StartMission @ 0x524360 (open path @ 0x524482; ctx recordCtx @
+0xb79448)]` and closes via `[orig: CServerLog_CloseAndFree @ 0x4e1a10]` from mission teardown
+`[orig: Game_TeardownMission @ 0x522350]`. The per-frame write is `[orig: Game_ProcessMainFrame @
+0x5263f0 @ 0x526879]`: **every 8th engine tick** (`tick & 7 == 7`; 62 Hz → ~7.75 Hz) it iterates
+**`g_pool_list[0]` — POOL 0 = players** — an independent witness that pool 0 is the player pool.
+
+On-disk chunk = `[char[4] tag][u16 length][u16 pad][payload]`; `length` is the TOTAL size incl. the
+8-byte header. Tags are the reversed mnemonic (the engine writes a u32 multichar constant LE, or
+`strcpy`s the reversed literal with the low length byte folded into the comma/`\b`):
+
+| on-disk | mnemonic | writer `[orig]` | len | payload |
+|---|---|---|---|---|
+| `NGEB` | BEGN | open path @ 0x524482 | 28 | `u32 ver=2`, `char[16]` mission basename |
+| `FEDP` | PDEF | `CServerLog_WritePlayerNameRecord @ 0x4e1cc0` | 20+nameLen | `u32 netid`, `u32 team` (read from **entity+354**), `u32 nameLen`, `name` |
+| `GEBF` | FBEG | `CServerLog_WriteTimestampRecord @ 0x4e1aa0` | 12 | `u32 frameIndex` (= tick>>3) |
+| `TADP` | PDAT | `CServerLog_WritePositionRecord @ 0x4e1b00` | 44 | see field map below |
+| `CPSP` | CDAT | `CServerLog_WriteEntityDataRecord @ 0x4e1bd0` | 168 | `u32 netid` + 154 B blob (not emitted in this capture) |
+| `KRBP` | PBRK | `CServerLog_WriteDeathMarker @ 0x4e1e00` | 12 | `u32` player id — death event |
+| `MERP` | PREM | `CServerLog_WriteDisconnectMarker @ 0x4e1c50` | 12 | `u32` player id — disconnect event |
+| `DNE.` | .END | `CServerLog_CloseAndFree @ 0x4e1a10` | 8 | (none) |
+
+`PDAT` field map (the 36-byte payload; entity-struct sources in parens):
+
+```
++8  u32 net_id              entity[30] (bot) / entity[31]
++12 i32 -entity[2]          (negated on disk)   } reconstructed entity world
++16 i32  entity[3]                               } position = entity+4/+8/+12,
++20 i32  entity[1]                               } i.e. (entity[1], entity[2], entity[3])
++24 u32  entity[4]          32-bit BAM heading
++28 u32  entity[6]          2nd Euler angle
++32 u32  (unwritten / dead — stays 0 from the zero-init buffer)
++36 u32  entity[9]          entity flags
++40 u16  1 iff entity[91]   vehicle flag
++42 u16  playerSlot+0x15F78 a per-player STAT byte — NOT team. The decompiler
+                            auto-labels it "team", but the source is parent[0x15F78]
+                            (=0 in early frames); the authoritative team is in FEDP
+                            (entity+354). Cross-checked: PDAT +42 = 0 while FEDP team = 1/2.
+```
+
+**Cross-validation against the wire capture** (`nw_pp host.sph` / `client.sph` vs `nw_pp <probe>.pcapng`):
+FooPlayer (Red, roster id 3 = pool-0 handle `0x0005`) at spawn correlates **byte-for-byte across three
+independent decodings**:
+
+| source | position (16.16) | heading |
+|---|---|---|
+| `.sph` `PDAT` | `(70.0, 25.0, 56.306)` | `0xc0000000` = 270° |
+| C2S **0x0C** extended uplink (§5.10) | `(70.0, 25.0, 56.3)` | `hdg=0xC000` → sign-ext ×0x10000 = `0xC0000000` |
+| S2C **0x0A** header `refs` | `0x00460000,0x00190000,0x00384e68` = `(70.0, 25.0, 56.306)` | — |
+
+This independently confirms (a) the `PlayerExtendedUplink` (0x0C) decoder and the `.sph` `PDAT`
+decoder both yield the engine's true entity position+heading; (b) the **S2C 0x0A header carries the
+subject player's raw world position** as 3×i32 16.16 `refs` — the decode-base for the compressed
+per-entity records that follow (consistent with D-NET-50's "positions are compressed deltas"); and
+(c) the coordinate reconstruction (un-negate +12, permute) is correct, since it produces the
+identical `(X,Y,Z)` the wire uses. Team↔X-sign (Blue −X / Red +X), the id↔name↔team roster, and the
+~7.75 Hz cadence (816 × 0x0A ≈ 789 client frames) all line up; the host's `PBRK`/`PREM` markers give
+a labeled death/join/disconnect timeline.
+
+**Limits.** `PDAT` is *decoded* state, so it validates VALUES, not wire byte-framing/encryption.
+Only pool-0 (the two human players) is recorded — the AI/mission entities (pool-1/3, the §5.11/5.12
+spawn batches) are not; the authored `mission_knowns.md` sheet covers those. Sampling is 8-tick
+(~7.75 Hz). Tooling: `apps/nw_pp` reads `.sph` natively (suffix-dispatched); the decoder is
+`libs/novaworld/serverlog_decode.{h,cpp}`; `tests/novaworld/nw_serverlog_decode_test` witnesses the
+controlled knowns (gated on `NW_PROFILE_SPH_DIR`).
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
@@ -2466,6 +2541,7 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-58** [HIGH, DOC+CODE] §5.11 0x0D team/orient labels were CROSSED (inherited from D-NET-54 trusting the handler-side Hex-Rays name). The `spawnFlags&0x0010`-gated byte at **entity+354 is TEAM** (1=Blue/2=Red); the unconditional post-weapon byte at **entity+290 is a bone/other byte, NOT team**. entity+354 is the unified team landing shared with the 0x20 path (§5.12 flag 0x08). Renamed `ingame_decode.h PoolSpawnRecord.orient_byte→team_byte` (+354, gate 0x10) and `team_byte→bone_byte` (+290), with matching `ingame_encode.cpp`/`nw_pp` updates. Controlled witness: trucks authored team 1/2 → +354 = 0x01/0x02, +290 = 0x00. [orig: serialize_entity_pool_to_packet_0 @ 0x503940 (team_byte=*(entity+354); bone_byte=*(entity+290))]
 - **D-NET-59** [HIGH, DOC+CODE] §5.12 0x20 `flags&0x01` field is the engine's `entry[4]` **`movement_val` @ entitySlot+16**, written RAW (no pool-resolve) — a 32-bit BAM heading for pool-3 start markers, NOT a `pool<<12\|slot` parent handle. Renamed `ingame_decode.h Pool3SyncRecord.parent_handle→movement_val`. Controlled witness: Blue starts 0x40000000 (90°), Red starts 0xc0000000 (270°), team-correlated. [orig: serialize_entity_pool_to_packet @ 0x503460 (movement_val=entry[4], written raw) / NapiNPClientMsg_0x020 @ 0x425C00]
 - **D-NET-60** [LOW, DOC] §5.4 0x0B icon-key offset: "full_00" observed at off **220-226**, not the documented 246-253. Signature(0-3)/name(4-35)/designer(36-67)/basename(68) all matched their documented offsets, so only the icon row is suspect — re-diff against more retail maps or annotate as header-variant-dependent. Note: the synthesized header title-cases the basename to "Dvxi5" at +68 (client terrain lookup is case-insensitive). [orig: byte_A761D0 @ §5.5]
+- **D-NET-61** [INFO, VALIDATED] The `/PROFILE` `.sph` server-log (§5.22) — the engine's own decoded per-frame view of the SAME probe session — was decoded (`libs/novaworld/serverlog_decode.{h,cpp}`, `nw_pp` `.sph` mode, `nw_serverlog_decode_test`) and cross-validated against the `.pcapng`: FooPlayer (Red, pool-0 handle 0x0005) spawn state `(70.0, 25.0, 56.306)/0xc0000000` matches **byte-for-byte** across `.sph` `PDAT`, C2S 0x0C extended uplink (§5.10), and the S2C 0x0A header `refs` triple — independently confirming the 0x0C decoder, the 16.16/-Z + 32-bit-BAM conventions, pool-0=players (the recorder iterates `g_pool_list[0]`), and team@entity+354 (re-confirms D-NET-58 via the `FEDP` roster: TestPlayer=Blue/1, FooPlayer=Red/2). No code divergence — a validation pass + new oracle tooling. Two IDB-fidelity fixes were required to read the recorder: `sub_522350`→`Game_TeardownMission` decompilation was blocked by phantom-arg prototypes on 0-arg callees (`Database_GetFieldValue` is actually `void __thiscall Database_FreeFieldEntries`; `File_Seek`/`Terrain_RenderSectorsWithWhiteFog`/`CEffectWorld_IsNameAvailable` retyped to 0 args — each 1 xref, 0 stack-arg reads). [orig: Game_ProcessMainFrame @ 0x5263f0 / CServerLog_WritePositionRecord @ 0x4e1b00 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

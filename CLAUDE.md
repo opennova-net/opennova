@@ -49,7 +49,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   paths — set them in `.claude/settings.local.json` `env`, never in tracked files):
   `OPENNOVA_JO_DIR` (ctest install sweeps), `OPENNOVA_MISSION_CORPUS` (.bms corpus),
   `OPENNOVA_JO_ASSETS` (pytest DCC parity), `NOVA_RESOURCE_DIR` (screenshot capture),
-  `JO_ASSETS_DIR` (perf probes).
+  `JO_ASSETS_DIR` (perf probes), `NW_PROFILE_SPH_DIR` (folder with `host.sph`/`client.sph`
+  `/profile` recordings for the `nw_serverlog_decode` net witness).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/python, not PowerShell.
 

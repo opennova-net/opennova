@@ -30,6 +30,7 @@
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
 #include <novaworld/ingame_decode.h>
+#include <novaworld/serverlog_decode.h>
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
@@ -88,6 +89,8 @@ bool ends_with_icase(const std::string &s, const char *suffix) {
 bool is_pcap_path(const std::string &p) {
 	return ends_with_icase(p, ".pcap") || ends_with_icase(p, ".pcapng");
 }
+
+bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
 
 // Native pcap / pcapng reader for the loopback-UDP slice we care about.
 //
@@ -1112,6 +1115,62 @@ void process_protocol(const std::vector<uint8_t> &body, const std::string &scrk,
 	}
 }
 
+// ---- /PROFILE .sph server-log mode -----------------------------------------
+
+const char *serverlog_team_name(uint8_t team) {
+	switch (team) {
+	case 0: return "Neutral";
+	case 1: return "Blue";
+	case 2: return "Red";
+	default: return "?";
+	}
+}
+
+int run_server_log(const char *path) {
+	std::ifstream f(path, std::ios::binary);
+	if (!f) {
+		std::fprintf(stderr, "FAILED to open %s\n", path);
+		return 1;
+	}
+	std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)),
+	                          std::istreambuf_iterator<char>());
+	std::fprintf(stderr, "loaded %zu bytes from %s\n", data.size(), path);
+
+	ServerLogDocument doc;
+	const bool clean = decode_server_log(data.data(), data.size(), doc);
+
+	std::printf("== /PROFILE .sph server-log ==\n");
+	std::printf("mission=%s  version=%u  ended=%s  leftover=%zu (%s)\n",
+	            doc.mission.c_str(), doc.version, doc.ended_clean ? "yes" : "NO",
+	            doc.leftover_bytes, clean ? "clean" : "DECODE INCOMPLETE");
+
+	std::printf("roster (%zu):\n", doc.roster.size());
+	for (const auto &p : doc.roster)
+		std::printf("  id=%u team=%u(%s) name=\"%s\"\n", p.net_id, p.team,
+		            serverlog_team_name(p.team), p.name.c_str());
+
+	std::printf("events (%zu):\n", doc.events.size());
+	for (const auto &e : doc.events)
+		std::printf("  @frame=%u %s id=%u\n", e.at_frame,
+		            e.kind == ServerLogEventKind::Death ? "DEATH" : "DISCONNECT",
+		            e.net_id);
+
+	std::printf("frames (%zu):\n", doc.frames.size());
+	if (doc.cdat_count)
+		std::printf("  (CPSP entity-data blobs seen: %u)\n", doc.cdat_count);
+	for (const auto &fr : doc.frames) {
+		std::printf("  frame %u (%zu entities):\n", fr.frame_index,
+		            fr.entities.size());
+		for (const auto &e : fr.entities)
+			std::printf("    id=%u pos=(%.3f, %.3f, %.3f) yaw=%.1f deg "
+			            "(0x%08x) flags=0x%x veh=%u stat=%u\n",
+			            e.net_id, serverlog_fp16(e.pos_x), serverlog_fp16(e.pos_y),
+			            serverlog_fp16(e.pos_z), serverlog_bam32_deg(e.yaw_bam),
+			            e.yaw_bam, e.flags, e.vehicle_flag, e.stat_byte);
+	}
+	return clean ? 0 : 2;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -1142,6 +1201,8 @@ int main(int argc, char *argv[]) {
 		             "       so type_ids in 0x0D/0x20 records show as names\n");
 		return 1;
 	}
+	if (is_sph_path(path)) return run_server_log(path);
+
 	if (items_path && *items_path) {
 		const size_t n = load_items_def(items_path);
 		std::fprintf(stderr, "loaded %zu item names from %s\n", n, items_path);
