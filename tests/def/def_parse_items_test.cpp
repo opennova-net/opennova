@@ -78,6 +78,34 @@ int main(void) {
         return 1;
     }
 
+    /* §5.10b class-tag directives. The buggy uses ai_function chel (the engine's
+       AI-helicopter family — buggies inherit aircraft-like driving in retail).
+       render_function/move_function = cveh. No disk_function on the buggy. */
+    if (strcmp(buggy->ai_function, "chel") != 0) {
+        fprintf(stderr, "FAIL: buggy ai_function mismatch: expected 'chel', got '%s'\n",
+                buggy->ai_function);
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(buggy->move_function, "cveh") != 0) {
+        fprintf(stderr, "FAIL: buggy move_function mismatch: expected 'cveh', got '%s'\n",
+                buggy->move_function);
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(buggy->render_function, "cveh") != 0) {
+        fprintf(stderr, "FAIL: buggy render_function mismatch: expected 'cveh', got '%s'\n",
+                buggy->render_function);
+        def_free_items(&items);
+        return 1;
+    }
+    if (buggy->disk_function[0] != '\0') {
+        fprintf(stderr, "FAIL: buggy disk_function should be empty, got '%s'\n",
+                buggy->disk_function);
+        def_free_items(&items);
+        return 1;
+    }
+
     /* Find "Player #1, Single player" by id */
     const DefItemDef *player1 = NULL;
     for (size_t i = 0; i < items.count; ++i) {
@@ -131,6 +159,55 @@ int main(void) {
 
     if (player1->hp != 150) {
         fprintf(stderr, "FAIL: player1 hp mismatch: expected 150, got %d\n", player1->hp);
+        def_free_items(&items);
+        return 1;
+    }
+
+    /* The player's ai_function is `plyr` — the §5.10b dispatch tag that selects
+       NetPacket_SerializePlayerState. move_function is `org2` (a movement-family
+       variant); disk_function is the load-class string `PLAYER`. */
+    if (strcmp(player1->ai_function, "plyr") != 0) {
+        fprintf(stderr, "FAIL: player1 ai_function mismatch: expected 'plyr', got '%s'\n",
+                player1->ai_function);
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(player1->move_function, "org2") != 0) {
+        fprintf(stderr, "FAIL: player1 move_function mismatch: expected 'org2', got '%s'\n",
+                player1->move_function);
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(player1->disk_function, "PLAYER") != 0) {
+        fprintf(stderr, "FAIL: player1 disk_function mismatch: expected 'PLAYER', got '%s'\n",
+                player1->disk_function);
+        def_free_items(&items);
+        return 1;
+    }
+
+    /* AI infantry: Generic Soldier (id 105311) uses ai_function org1 = the
+       §5.10b dispatch tag that selects NetPacket_SerializeInfantryEntityState. */
+    const DefItemDef *soldier = NULL;
+    for (size_t i = 0; i < items.count; ++i) {
+        if (items.entries[i].id == 105311) {
+            soldier = &items.entries[i];
+            break;
+        }
+    }
+    if (!soldier) {
+        fprintf(stderr, "FAIL: could not find Generic Soldier (id 105311)\n");
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(soldier->ai_function, "org1") != 0) {
+        fprintf(stderr, "FAIL: soldier ai_function mismatch: expected 'org1', got '%s'\n",
+                soldier->ai_function);
+        def_free_items(&items);
+        return 1;
+    }
+    if (strcmp(soldier->move_function, "org1") != 0) {
+        fprintf(stderr, "FAIL: soldier move_function mismatch: expected 'org1', got '%s'\n",
+                soldier->move_function);
         def_free_items(&items);
         return 1;
     }

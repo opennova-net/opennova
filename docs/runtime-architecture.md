@@ -24,7 +24,7 @@ the entity pool, then audio mixes. OpenNova mirrors this shape.
 
 ```
 main_game.gd / editor _process
-  -> NovaWorld.tick(camera)                         host frame (game)
+  -> GameWorld.tick(camera)                         host frame (game)
        foliage dispatch                             client render pass
        MissionRuntime.tick()                        == the server tick + entity render:
          NovaSimulation.advance_frame()               engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
@@ -37,7 +37,7 @@ main_game.gd / editor _process
 The editor "Play the mission" goes through the **same** `MissionRuntime` + `MissionPresentPass`,
 just in `EVERY_PROCESS` cadence (one tick per frame) and self-ticking via `_process`. There is
 one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unified-mission-runtime-present-pass.md).
-`NovaWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one
+`GameWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one
 `NovaSimulation` per host context is intentional, not duplication.
 
 ## Layers
@@ -53,7 +53,7 @@ one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unif
   (`get_present_snapshot()` → a flat `PackedFloat32Array`, `PF_*` field layout) so the per-tick
   present loop makes one call, not ~10 Variant-boxed scalar getters per entity.
 - **Runtime driver (GDScript)** — `mission_runtime.gd` owns `{sim, present pass, index}` and
-  single-sources the per-tick order (advance → present → drain). Both `nova_world.gd` (game) and
+  single-sources the per-tick order (advance → present → drain). Both `game_world.gd` (game) and
   `mission_controller.gd` (editor) drive it.
 - **Present pass (GDScript)** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the

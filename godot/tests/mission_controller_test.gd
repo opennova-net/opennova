@@ -6,7 +6,7 @@ extends GutTest
 # editor). The resolve-miss path is the important one: a mission whose referenced
 # terrain is absent must fail cleanly with a clear reason and must not attempt to
 # load terrain. Full end-to-end placement is validated against real assets
-# out-of-band (see the placer + nova_world paths).
+# out-of-band (see the placer + game_world paths).
 
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
 const Placer := preload("res://engine/mission/mission_object_placer.gd")

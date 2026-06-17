@@ -1,0 +1,33 @@
+{
+ACTION: REPLACE
+TYPE:	WINDOW
+SCREEN: NW_MULTI_PLAYER
+PARENT: MAIN
+NAME:	NOVAWORLD
+
+<WINDOW type="static" name="NOVAWORLD">
+	<POSITION>
+		<LEFT>00</LEFT>
+		<TOP>15</TOP>
+	</POSITION>
+	<WINDOW type="multiline_edit" name="GENERIC_MESSAGE" READONLY>
+		<POSITION>
+			<LEFT>10</LEFT>
+			<RIGHT>790</RIGHT>
+			<TOP>0</TOP>
+			<BOTTOM>320</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>%DEF_FONTNAME_BODY%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<STRING justify="CENTER" vjustify="CENTER">The database you are attempting to use is currently not available.
+Please try the operation again.
+If this problem persists, please contact technical support at support@novalogic.com.
+(Code NWNODB01)</STRING>
+	</WINDOW>
+</WINDOW>
+}

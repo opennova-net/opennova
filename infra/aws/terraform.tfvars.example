@@ -1,0 +1,31 @@
+# Terraform variables for the OpenNova NovaWorld infrastructure.
+# Copy to terraform.tfvars (gitignored) and adjust for your account — or
+# supply everything as TF_VAR_* environment variables from your vault
+# (that is what the deploy toolbox does; see DEPLOY.md).
+#
+# Secrets (cloudflare_api_token, ssh_public_key) should come from the vault
+# as TF_VAR_ env vars, never from this file.
+
+region           = "us-east-1"
+ssh_allowed_cidr = "0.0.0.0/0"   # restrict to your IP(s)
+allowed_cidrs    = ["0.0.0.0/0"] # game-service ingress CIDRs
+instance_type    = "c7i.large"
+instance_name    = "opennova-server"
+
+downloads_bucket_name = "downloads.example.com"
+backup_bucket_name    = "example-opennova-backups"
+create_ci_user        = true
+
+allocate_eip = true
+
+# Cloudflare DNS (optional but recommended)
+# cloudflare_zone_id = "your-zone-id"   # Domain Overview > Zone ID
+# cloudflare_domain  = "example.com"    # creates @, www, nw records
+# cloudflare_web_proxied = true         # web records behind Cloudflare TLS;
+#                                       # the nw record is always unproxied
+
+# Optional overrides
+# game_http_port = 8080
+# web_http_port  = 80
+# web_https_port = 443
+# ami_id         = ""  # pin after the first prod apply (see variable docs)

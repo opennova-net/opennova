@@ -5,7 +5,7 @@ extends RefCounted
 # Given a parsed mission (NovaMissionData), a resource root, and an item database
 # (items.def), this resolves each placed entity to its visual model and instances
 # it under a "MissionObjects" container parented to the caller's world root. It is
-# the one genuinely shared piece between the runtime (NovaWorld) and the editor
+# the one genuinely shared piece between the runtime (GameWorld) and the editor
 # Mission workspace: the terrain editor / runtime each own the terrain + camera;
 # this only knows how to turn entities into renderables.
 #

@@ -49,3 +49,24 @@ _Avoid_: play mode, runtime (it is still a preview)
 **Tab**:
 A Window shown or hidden by a sibling button's `window` Action (e.g. the Options panels). Not a widget type, just an authored convention: one button per panel, each `<ACTION type="window">` hiding the siblings and showing its own.
 _Avoid_: page, panel (when you mean the toggling mechanism)
+
+## World & NovaWorld
+
+The vocabulary separating the in-game world from the online service. The names collided
+historically; they are now distinct.
+
+**GameWorld**:
+The runtime world-sim host scene (`godot/engine/world/game_world.tscn`): terrain, environment, mission runtime, and audio under one embeddable root. The game shell and play-in-editor both instance it. Formerly named `NovaWorld`.
+_Avoid_: NovaWorld (that name now belongs to the service), world scene
+
+**NovaWorld**:
+NovaLogic's online matchmaking and account service, and our reimplementation of it (`apps/novaworld_server`, `libs/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
+_Avoid_: emulator, lobby server
+
+**Gate**:
+The first-contact UDP service (`novaworld_gate`, port 7597) that bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint.
+_Avoid_: lobby
+
+**Browser**:
+The in-game server list (`novaworld_browser`) populated from the service's GSB/GLB data.
+_Avoid_: lobby, server list (in code)

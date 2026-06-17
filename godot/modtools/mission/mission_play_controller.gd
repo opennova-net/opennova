@@ -1,6 +1,6 @@
 extends Control
 
-# Play-in-editor: boots the REAL game world — the same nova_world.tscn the game
+# Play-in-editor: boots the REAL game world — the same game_world.tscn the game
 # shell instances, the same load path, the same MissionRuntime tick — inside an
 # editor-owned SubViewport, fed the editor's resource root and the OPEN
 # in-memory mission (unsaved edits play). This node IS the play viewport the
@@ -19,12 +19,12 @@ extends Control
 signal stop_requested
 signal status_reported(message: String, is_error: bool)
 
-const NovaWorldScene := preload("res://engine/world/nova_world.tscn")
+const GameWorldScene := preload("res://engine/world/game_world.tscn")
 const FlyCameraScript := preload("res://engine/fly_camera.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 var _viewport: SubViewport
-var _world  # NovaWorld
+var _world  # GameWorld
 var _camera: Camera3D
 var _status: Label
 var _playing := false
@@ -45,7 +45,7 @@ func _ready() -> void:
 	_viewport.handle_input_locally = true
 	container.add_child(_viewport)
 
-	_world = NovaWorldScene.instantiate()
+	_world = GameWorldScene.instantiate()
 	_world.name = "World"
 	_viewport.add_child(_world)
 

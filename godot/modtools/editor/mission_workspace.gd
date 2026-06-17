@@ -270,7 +270,7 @@ func get_viewport_camera() -> Camera3D:
 
 
 # --- Play-in-editor (PIE M4) ----------------------------------------------
-# Play boots the REAL game loop (nova_world.tscn + MissionRuntime at the game
+# Play boots the REAL game loop (game_world.tscn + MissionRuntime at the game
 # cadence) over the OPEN in-memory mission in a play viewport that replaces the
 # edit viewport; the edit world survives unmounted. Structural input safety:
 # while playing, the edit input router is out of the tree.

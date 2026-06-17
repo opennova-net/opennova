@@ -529,7 +529,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   `NovaColorSmoother`; engine-faithful `nova_environment`/`nova_sky`/
   `nova_water`/`nova_weather`; new `nova_celestial` + two celestial shaders;
   BMS override fields through `NovaMissionData`; runtime apply/clear in
-  `nova_world`.
+  `game_world`.
 - `godot/modtools`: terrain preview unified onto `NovaWater` + `EditorWeather`
   (PR #24 parity); Environment workspace undo/redo, save-path gate, and sky-model
   fields.

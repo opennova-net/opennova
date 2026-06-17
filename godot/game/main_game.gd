@@ -1,7 +1,7 @@
 extends Node3D
 
 # Runtime shell: boots into the game's menu front-end (NovaMenuHost, driving the
-# .mnu menu set + audio from the chosen resource dir) and hands off to a NovaWorld
+# .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand. The
 # engine ships no game data; everything (menus, audio, terrain, missions) loads
 # from the chosen resource dir. The first-launch directory picker lives here
@@ -19,7 +19,7 @@ const DEBUG_OVERLAY_KEY := KEY_F3
 
 enum State { MENU, WORLD, PAUSED }
 
-@onready var _world: NovaWorld = $World
+@onready var _world: GameWorld = $World
 @onready var _camera: Camera3D = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
 @onready var _menu_host = $MenuLayer/MenuHost
@@ -111,6 +111,8 @@ func _wire_host() -> void:
 	_menu_host.exit_to_desktop_requested.connect(_on_exit_to_desktop)
 	_menu_host.return_to_menu_requested.connect(_on_return_to_menu)
 	_menu_host.resume_requested.connect(_on_resume)
+	if _menu_host.has_signal("novaworld_requested"):
+		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
 
 
 # --- Resource dir picker (first launch) ---------------------------------------
@@ -160,6 +162,28 @@ func _cleanup_picker() -> void:
 	if _picker != null:
 		_picker.queue_free()
 		_picker = null
+
+
+# --- NovaWorld (online multiplayer) ------------------------------------------
+
+var _novaworld_panel: NovaWorldPanel
+
+func _on_novaworld_requested() -> void:
+	if _novaworld_panel != null:
+		return
+	_novaworld_panel = NovaWorldPanel.new()
+	# Dev default: localhost. A prod build sets the server host from the
+	# resolved server IP before showing the panel.
+	_menu_host.hide_menu()
+	$MenuLayer.add_child(_novaworld_panel)
+	_novaworld_panel.closed.connect(_on_novaworld_closed)
+
+
+func _on_novaworld_closed() -> void:
+	if _novaworld_panel != null:
+		_novaworld_panel.queue_free()
+		_novaworld_panel = null
+	_menu_host.show_menu()
 
 
 # --- Menu <-> world transitions ----------------------------------------------

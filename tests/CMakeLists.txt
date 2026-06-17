@@ -812,3 +812,268 @@ target_link_libraries(ref_graph_test PRIVATE opennova_refs opennova_env opennova
 target_include_directories(ref_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ref_graph_test PRIVATE cxx_std_17)
 add_test(NAME ref_graph COMMAND ref_graph_test)
+
+# ----------------------------------------------------------------------------
+# Net stack tests (relanded from PR #37)
+# ----------------------------------------------------------------------------
+
+# novacrypto tests
+add_executable(url_cipher_test novacrypto/url_cipher_test.cpp)
+target_link_libraries(url_cipher_test PRIVATE opennova_novacrypto)
+target_include_directories(url_cipher_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME url_cipher COMMAND url_cipher_test)
+
+add_executable(crc32_test novacrypto/crc32_test.cpp)
+target_link_libraries(crc32_test PRIVATE opennova_novacrypto)
+target_include_directories(crc32_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME crc32 COMMAND crc32_test)
+
+add_executable(nwu_test novacrypto/nwu_test.cpp)
+target_link_libraries(nwu_test PRIVATE opennova_novacrypto)
+target_include_directories(nwu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nwu COMMAND nwu_test)
+
+add_executable(pubcrypto_test novacrypto/pubcrypto_test.cpp)
+target_link_libraries(pubcrypto_test PRIVATE opennova_novacrypto)
+target_include_directories(pubcrypto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pubcrypto COMMAND pubcrypto_test)
+
+add_executable(epask_test novacrypto/epask_test.cpp)
+target_link_libraries(epask_test PRIVATE opennova_novacrypto)
+target_include_directories(epask_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME epask COMMAND epask_test)
+
+# napi tests
+add_executable(envelope_test napi/envelope_test.cpp)
+target_link_libraries(envelope_test PRIVATE opennova_napi opennova_novacrypto)
+target_include_directories(envelope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME envelope COMMAND envelope_test)
+
+add_executable(tlv_test napi/tlv_test.cpp)
+target_link_libraries(tlv_test PRIVATE opennova_napi)
+target_include_directories(tlv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tlv COMMAND tlv_test)
+
+add_executable(session_test napi/session_test.cpp)
+target_link_libraries(session_test PRIVATE opennova_napi)
+target_include_directories(session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session COMMAND session_test)
+
+# novaworld tests
+add_executable(registration_url_test novaworld/registration_url_test.cpp)
+target_link_libraries(registration_url_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(registration_url_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME registration_url COMMAND registration_url_test)
+
+add_executable(gate_response_test novaworld/gate_response_test.cpp)
+target_link_libraries(gate_response_test PRIVATE opennova_novaworld)
+target_include_directories(gate_response_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_response COMMAND gate_response_test)
+
+add_executable(gate_probe_test novaworld/gate_probe_test.cpp)
+target_link_libraries(gate_probe_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gate_probe_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_probe COMMAND gate_probe_test)
+
+add_executable(lobby_update_test novaworld/lobby_update_test.cpp)
+target_link_libraries(lobby_update_test PRIVATE opennova_novaworld)
+target_include_directories(lobby_update_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lobby_update COMMAND lobby_update_test)
+
+add_executable(gate_server_loopback_test novaworld/gate_server_loopback_test.cpp)
+target_link_libraries(gate_server_loopback_test PRIVATE opennova_novaworld opennova_novacrypto opennova_napi opennova_app_common)
+target_include_directories(gate_server_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
+
+add_executable(gsb_roundtrip_test novaworld/gsb_roundtrip_test.cpp)
+target_link_libraries(gsb_roundtrip_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gsb_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gsb_roundtrip COMMAND gsb_roundtrip_test)
+
+# ADR 0010 Phase 2 — gsb_parse_response is the exact client inverse of the builder.
+add_executable(gsb_parse_roundtrip_test novaworld/gsb_parse_roundtrip_test.cpp)
+target_link_libraries(gsb_parse_roundtrip_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gsb_parse_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME gsb_parse_roundtrip COMMAND gsb_parse_roundtrip_test)
+
+# Byte-level oracle: decode the genuine .204 server-browser blob
+# (fixtures/novaworld/nw204_jop_2.gsb) through our retail-faithful parser.
+add_executable(gsb_real204_decode_test novaworld/gsb_real204_decode_test.cpp)
+target_link_libraries(gsb_real204_decode_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(gsb_real204_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(gsb_real204_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME gsb_real204_decode COMMAND gsb_real204_decode_test)
+
+add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
+target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME protocol_message COMMAND protocol_message_test)
+
+add_executable(game_session_test novaworld/game_session_test.cpp)
+target_link_libraries(game_session_test PRIVATE opennova_novaworld)
+target_include_directories(game_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game_session COMMAND game_session_test)
+
+add_executable(game_server_runtime_test novaworld/game_server_runtime_test.cpp)
+target_link_libraries(game_server_runtime_test PRIVATE opennova_novaworld)
+target_include_directories(game_server_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game_server_runtime COMMAND game_server_runtime_test)
+
+add_executable(replication_min_test novaworld/replication_min_test.cpp)
+target_link_libraries(replication_min_test PRIVATE opennova_novaworld)
+target_include_directories(replication_min_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME replication_min COMMAND replication_min_test)
+
+# bms (mission-file) parser tests
+add_executable(bms_spawn_points_test bms/spawn_points_test.cpp)
+target_link_libraries(bms_spawn_points_test PRIVATE opennova_bms)
+target_include_directories(bms_spawn_points_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME bms_spawn_points COMMAND bms_spawn_points_test)
+
+# Connection registry / manager tests
+add_executable(connection_registry_test novaworld/connection_registry_test.cpp)
+target_link_libraries(connection_registry_test PRIVATE opennova_novaworld)
+target_include_directories(connection_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME connection_registry COMMAND connection_registry_test)
+
+add_executable(connection_manager_test novaworld/connection_manager_test.cpp)
+target_link_libraries(connection_manager_test PRIVATE opennova_novaworld)
+target_include_directories(connection_manager_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME connection_manager COMMAND connection_manager_test)
+
+# SQLite wrapper + migration runner tests
+add_executable(db_sqlite_test novaworld/db_sqlite_test.cpp)
+target_link_libraries(db_sqlite_test PRIVATE opennova_novaworld)
+target_include_directories(db_sqlite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME db_sqlite COMMAND db_sqlite_test)
+
+# Phase A — ClientHello/ClientAuth serializer roundtrip
+add_executable(session_hello_roundtrip_test novaworld/session_hello_roundtrip_test.cpp)
+target_link_libraries(session_hello_roundtrip_test PRIVATE opennova_novaworld)
+target_include_directories(session_hello_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session_hello_roundtrip COMMAND session_hello_roundtrip_test)
+
+# Phase D — LobbySession dispatch tests
+add_executable(lobby_session_test novaworld/lobby_session_test.cpp)
+target_link_libraries(lobby_session_test PRIVATE opennova_novaworld opennova_napi)
+target_include_directories(lobby_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lobby_session COMMAND lobby_session_test)
+
+# ADR 0010 Phase 1 — ClientSession handshake (hk echo + 0x83 verify) driven
+# in-process against the real server-side parsers/builders + LobbySession.
+add_executable(client_session_loopback_test novaworld/client_session_loopback_test.cpp)
+target_link_libraries(client_session_loopback_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(client_session_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_session_loopback COMMAND client_session_loopback_test)
+
+# ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
+# credential POST body with the login helpers and decodes it through a copy of
+# the server's parse_form_body + EPASK path, then checks the cookie jar carries
+# NWHANDLE/PCID onto the later GSB fetch (grill NW-S5/B3).
+add_executable(http_login_test novaworld/http_login_test.cpp)
+target_link_libraries(http_login_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(http_login_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME http_login COMMAND http_login_test)
+
+# ADR 0010 Phase 5 — the NWJoin .joi connection-string parser (host address +
+# tokens) and url_cipher NK round-trip.
+add_executable(joi_parse_test novaworld/joi_parse_test.cpp)
+target_link_libraries(joi_parse_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(joi_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME joi_parse COMMAND joi_parse_test)
+
+# ADR 0010 Phase 5 — the JointOperations ClientHello (proto switch): PN flips to
+# JointOperations with a distinct PG; the NOVAWORLDUDP path is unchanged.
+add_executable(jointops_hello_test novaworld/jointops_hello_test.cpp)
+target_link_libraries(jointops_hello_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(jointops_hello_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME jointops_hello COMMAND jointops_hello_test)
+
+# ADR 0010 real-NW parity — decodes the genuine .204 lobby capture (the oracle):
+# envelope + outer NWU + per-session SCRK, dumps every container so our builders
+# can be matched field for field. fixtures/novaworld/nw204_lobby.hexcap.
+add_executable(nw204_lobby_decode_test novaworld/nw204_lobby_decode_test.cpp)
+target_link_libraries(nw204_lobby_decode_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(nw204_lobby_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw204_lobby_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME nw204_lobby_decode COMMAND nw204_lobby_decode_test)
+
+# In-game JOINTOPERATIONS surveyor — decodes a loopback host+join+play capture
+# and histograms the in-match NAPI messages per (direction, msg_id) so the
+# high-volume tags can be RE'd against §4. Asset-gated on env NW_INGAME_HEXCAP
+# (skips cleanly when unset); same decode pipeline as nw204_lobby_decode.
+add_executable(nw_ingame_histogram_test novaworld/nw_ingame_histogram_test.cpp)
+target_link_libraries(nw_ingame_histogram_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(nw_ingame_histogram_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_histogram COMMAND nw_ingame_histogram_test)
+
+# Pool-records byte-witness — walks every S2C 0x0D and 0x20 payload in the
+# same hexcap and asserts the §5.11/§5.12 field maps consume the wire exactly.
+# Asset-gated on NW_INGAME_HEXCAP, identical pipeline to the histogram test.
+add_executable(nw_ingame_pool_records_test novaworld/nw_ingame_pool_records_test.cpp)
+target_link_libraries(nw_ingame_pool_records_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(nw_ingame_pool_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_pool_records COMMAND nw_ingame_pool_records_test)
+
+# Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
+# infantry. Hand-built input vectors mirror the wire layout; no capture
+# dependency, so the test runs unconditionally in CI.
+add_executable(nw_ingame_compact_records_test novaworld/nw_ingame_compact_records_test.cpp)
+target_link_libraries(nw_ingame_compact_records_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_compact_records_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_compact_records COMMAND nw_ingame_compact_records_test)
+
+# C2S 0x0C extended (type-10) uplink decoder — §5.10. Byte vectors embedded
+# verbatim from the 3-player loopback pcap (host_and_join…_threeplayers…).
+add_executable(nw_ingame_c2s_uplink_test novaworld/nw_ingame_c2s_uplink_test.cpp)
+target_link_libraries(nw_ingame_c2s_uplink_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_c2s_uplink_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_c2s_uplink COMMAND nw_ingame_c2s_uplink_test)
+
+# In-match S2C encoders — loopback identity (encode -> decode field-identical),
+# ADR 0011 §4. encode side ports serialize_entity_pool_to_packet @0x503460; the
+# decode side is verified vs NapiNPClientMsg_0x020 @0x425C00. No capture dep.
+add_executable(nw_ingame_encode_test novaworld/nw_ingame_encode_test.cpp)
+target_link_libraries(nw_ingame_encode_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_encode COMMAND nw_ingame_encode_test)
+
+# Backend schema regression — applies the actual backend/migrations/* and
+# backend/seed/* the standalone server uses, so SQL syntax errors and seed
+# regressions break CI before they break the running server.
+# Retail-capture replay — pins the ProtocolMessage codec and the RE-doc
+# §5.4/§5.5 BMS-bundle facts against the 2026-04-26 live JO captures.
+add_executable(nwmsg_replay_test novaworld/nwmsg_replay_test.cpp)
+target_link_libraries(nwmsg_replay_test PRIVATE opennova_novaworld)
+target_include_directories(nwmsg_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
+
+# Host-row staleness backstop sweep (prune_stale_hosts).
+add_executable(host_prune_test novaworld/host_prune_test.cpp)
+target_link_libraries(host_prune_test PRIVATE opennova_novaworld)
+target_include_directories(host_prune_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(host_prune_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME host_prune COMMAND host_prune_test)
+
+# End-to-end host register -> read-back (the path /api/lobbies + /jop_2.gsb use).
+add_executable(host_register_list_test novaworld/host_register_list_test.cpp)
+target_link_libraries(host_register_list_test PRIVATE opennova_novaworld opennova_napi)
+target_include_directories(host_register_list_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(host_register_list_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME host_register_list COMMAND host_register_list_test)
+
+add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
+target_link_libraries(backend_schema_test PRIVATE opennova_novaworld)
+target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME backend_schema COMMAND backend_schema_test)
+
+# Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
+# real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
+add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)
+target_link_libraries(unknown_tracker_test PRIVATE opennova_novaworld)
+target_include_directories(unknown_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(unknown_tracker_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
+

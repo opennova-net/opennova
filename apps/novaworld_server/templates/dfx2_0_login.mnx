@@ -1,0 +1,456 @@
+{
+ACTION: REPLACE
+TYPE:	WINDOW
+SCREEN: NW_MULTI_PLAYER
+PARENT: MAIN
+NAME:	NOVAWORLD
+ACTIVATE: ENABLE_BACK_BUTTON
+
+<WINDOW type="static" name="NOVAWORLD">
+	<WINDOW type="window" name="ENABLE_BACK_BUTTON">
+		<ACTION type="window" state="show">BACK</ACTION>
+	</WINDOW>
+	<POSITION>
+		<LEFT>0</LEFT>
+		<TOP>0</TOP>
+	</POSITION>
+
+	<WINDOW type="table" name="AD_TABLE">
+		<APPEARANCE state="default"></APPEARANCE>
+		<ACTION type="URL" EXTERNAL_BROWSER>							http://www.novaworld2.com/index.php?do=/public/store/catalog/&parent_close=1&pfid=38&source=dfx2
+		</ACTION>
+		<POSITION>
+			<LEFT>205</LEFT>
+			<RIGHT>595</RIGHT>
+			<TOP>30</TOP>
+			<BOTTOM>77</BOTTOM>
+		</POSITION>
+		<COLUMN count="1" spacing="0">
+			<HEADER justify="CENTER" vjustify="TOP" column="0" sort="0" width="390" type="id"></HEADER>
+			<BODY justify="CENTER" vjustify="TOP" column="0" BITMAP_DRAW></BODY>
+			<SUBST column="0" value="0"  URL>http://207.178.209.204/nonbhdx2.tga</SUBST>
+			<SUBST column="0"  URL>http://207.178.209.204/nonbhdx2.tga</SUBST>
+		</COLUMN>
+		<MIN_ITEM_HEIGHT>48</MIN_ITEM_HEIGHT>
+		<FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT>
+		<ITEMS>
+			<ROW>
+				<ITEM VALUE="0">0</ITEM>
+			</ROW>
+		</ITEMS>
+	</WINDOW>
+
+	<WINDOW type="window" name="LOGIN_PAGE">
+		<WINDOW type="static" name="STATIC_MOTD1">
+		<FONT>
+			<NAME>%DEF_FONTNAME_XL%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<POSITION>
+			<LEFT>100</LEFT>
+			<RIGHT>700</RIGHT>
+			<TOP>-6</TOP>
+			<BOTTOM>14</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">WELCOME TO NOVAWORLD</STRING>
+	</WINDOW>
+	<WINDOW type="static" name="STATIC_MOTD2">
+		<FONT>
+			<NAME>%DEF_FONTNAME_LG%</NAME>
+			<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+			<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+			<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+			<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+		</FONT>
+		<POSITION>
+			<LEFT>200</LEFT>
+			<RIGHT>600</RIGHT>
+			<TOP>94</TOP>
+			<BOTTOM>114</BOTTOM>
+		</POSITION>
+		<STRING justify="CENTER" vjustify="CENTER">Please login or create an account.</STRING>
+	</WINDOW>
+		<WINDOW type="static" name="STATIC_NW_USERNAME">
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>121</TOP>
+				<BOTTOM>145</BOTTOM>
+			</POSITION>
+			<STRING justify="RIGHT" vjustify="CENTER">Name:</STRING>
+		</WINDOW>
+		<WINDOW type="edit" name="NAME" form="1" MAXCHAR="16">
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<ACTION type="TAB">PASSWORD</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn3.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn3.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn3.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn3.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>230</LEFT>
+				<RIGHT>486</RIGHT>
+				<TOP>121</TOP>
+				<BOTTOM>145</BOTTOM>
+			</POSITION>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER">@NAME@</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="STATIC_NW_PASSWORD">
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>220</RIGHT>
+				<TOP>151</TOP>
+				<BOTTOM>175</BOTTOM>
+			</POSITION>
+			<STRING justify="RIGHT" vjustify="CENTER">Password:</STRING>
+		</WINDOW>
+		<WINDOW type="edit" name="PASSWORD" PASSWORD form="1" MAXCHAR="16">
+			<ACTION type="TAB">NAME</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn3.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn3.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn3.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn3.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>230</LEFT>
+				<RIGHT>486</RIGHT>
+				<TOP>151</TOP>
+				<BOTTOM>175</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER"></STRING>
+		</WINDOW>
+		<WINDOW type="static" name="STATIC_NW_PASSWORD_HIDDEN" HIDDEN>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>235</LEFT>
+				<RIGHT>491</RIGHT>
+				<TOP>151</TOP>
+				<BOTTOM>175</BOTTOM>
+			</POSITION>
+			<STRING justify="LEFT" vjustify="CENTER">********</STRING>
+		</WINDOW>
+		<WINDOW type="edit" name="rememberlogindata" form="1" READONLY HIDDEN>
+			<STRING edge="5" justify="LEFT" vjustify="CENTER"></STRING>
+		</WINDOW>
+		<WINDOW type="button" name="LOGIN">
+			<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+			<ACTION type="WINDOW" state="DISABLE" TOGGLE>LOGIN</ACTION>
+			<ACTION type="FORM_POST" target_form="1">NWLogin.dll</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn20.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn20.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>510</LEFT>
+				<RIGHT>615</RIGHT>
+				<TOP>151</TOP>
+				<BOTTOM>175</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING justify="CENTER" vjustify="CENTER">Login</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="button" name="CREATE_ACCOUNT">
+			<ACTION type="window" state="show">QUERY_WINDOW</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1c.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>162</LEFT>
+				<TOP>241</TOP>
+				<BOTTOM>265</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING justify="CENTER" vjustify="CENTER">Create Account</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="button" name="FORGOT_LOGIN">
+			<ACTION type="URL">dfx2_0_getl.htm</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1c.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>322</LEFT>
+				<TOP>241</TOP>
+				<BOTTOM>265</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING justify="CENTER" vjustify="CENTER">Forgot Login</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+<!--		
+		<WINDOW type="button" name="FORGOT_PASSWORD">
+			<ACTION type="URL">dfx2_0_getp.htm</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1c.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>402</LEFT>
+				<TOP>241</TOP>
+				<BOTTOM>265</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING justify="CENTER" vjustify="CENTER">Forgot Password</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+-->
+		<WINDOW type="button" name="HELP">
+			<ACTION type="window" state="hide">BACK</ACTION>
+			<ACTION type="window" state="show">HELP_PAGE_BACK</ACTION>
+			<ACTION type="window" state="HIDE">LOGIN_PAGE</ACTION>
+			<ACTION type="window" state="SHOW">HELP_PAGE</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn1c.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn1c.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>482</LEFT>
+				<TOP>241</TOP>
+				<BOTTOM>265</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING justify="CENTER" vjustify="CENTER">Help</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="checkbox" name="REMEMBER_LOGIN" GLOBAL_VAR CHECKED>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn5.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn5.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn5.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn5.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>250</LEFT>
+				<TOP>186</TOP>
+				<BOTTOM>210</BOTTOM>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_BODY%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING justify="CENTER" vjustify="CENTER">Remember my login information.</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="static" name="STATIC_ESRB_WARNING">
+			<POSITION>
+				<LEFT>160</LEFT>
+				<RIGHT>640</RIGHT>
+				<TOP>340</TOP>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">ESRB Notice: Game experience may change during online play.</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="STATIC_ACCOUNT_WARNING">
+			<POSITION>
+				<LEFT>140</LEFT>
+				<RIGHT>660</RIGHT>
+				<TOP>370</TOP>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">Users violating NovaLogic's License Provisions and/or Terms of Service are subject</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="STATIC_ACCOUNT_WARNING2">
+			<POSITION>
+				<LEFT>140</LEFT>
+				<RIGHT>660</RIGHT>
+				<TOP>385</TOP>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">to having their License to all NovaLogic and NovaWorld accounts terminated</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="STATIC_NWINFO">
+			<POSITION>
+				<LEFT>140</LEFT>
+				<RIGHT>660</RIGHT>
+				<TOP>415</TOP>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">Visit www.Novaworld.com for account management and forums.</STRING>
+		</WINDOW>
+		@IB3_FORM_1@
+	</WINDOW>
+	<WINDOW type="window" name="QUERY_WINDOW" DRAW_FRAME HIDDEN MODAL>
+		<APPEARANCE type="color" state="default">%COLOR_BLACK%</APPEARANCE>
+		<POSITION>
+			<LEFT>200</LEFT>
+			<RIGHT>600</RIGHT>
+			<TOP>150</TOP>
+			<BOTTOM>250</BOTTOM>
+		</POSITION>
+		<WINDOW type="multiline_edit" name="STATIC_QUESTION" READONLY>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>380</RIGHT>
+				<TOP>5</TOP>
+				<BOTTOM>60</BOTTOM>
+			</POSITION>
+			<STRING type="id" justify="LEFT">This action will close the game and open Novaworld Community in a browser window.  Would you like to continue?</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="QUERY_YES">
+			<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+			<ACTION type="URL" EXTERNAL_BROWSER>
+				https://www.novaworld2.com/index.php?do=/public/signup/&parent_close=1&pfid=38&source=dfx2
+			</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn7.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>220</LEFT>
+				<RIGHT>380</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>94</BOTTOM>
+			</POSITION>
+			<STRING type="ID" justify="CENTER" vjustify="CENTER">TT_YES</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+		<WINDOW type="button" name="QUERY_NO">
+			<ACTION type="window" state="HIDE">QUERY_WINDOW</ACTION>
+			<APPEARANCE type="image" state="default" map_state="0" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="mouseover" map_state="1" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="selected" map_state="2" height="24">btn7.tga</APPEARANCE>
+			<APPEARANCE type="image" state="disabled" map_state="3" height="24">btn7.tga</APPEARANCE>
+			<POSITION>
+				<LEFT>20</LEFT>
+				<RIGHT>180</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>94</BOTTOM>
+			</POSITION>
+			<STRING type="ID" justify="CENTER" vjustify="CENTER">TT_NO</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+	</WINDOW>
+	<WINDOW type="window" name="HELP_PAGE" HIDDEN>
+		<WINDOW type="multiline_edit" name="HELP_TEXT" READONLY>
+			<APPEARANCE type="outline" state="default">%TRIM_COLOR%</APPEARANCE>
+			<POSITION>
+				<LEFT>100</LEFT>
+				<RIGHT>700</RIGHT>
+				<TOP>70</TOP>
+				<BOTTOM>320</BOTTOM>
+			</POSITION>
+			<STRING edge="5" justify="LEFT" vjustify="TOP">@HELP_STRING@</STRING>
+			<SCROLLBAR>
+				<APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
+				<APPEARANCE type="image" state="mouseover">m_scrolV.tga</APPEARANCE>
+				<APPEARANCE type="image" state="selected">m_scrolV.tga</APPEARANCE>
+				<SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
+				<SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
+				<SHUTTLE type="image" state="selected">shuttlev.tga</SHUTTLE>
+				<SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
+				<SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
+				<SCROLLUP type="image" state="selected" map_state="2" height="24">up2arrw.tga</SCROLLUP>
+				<SCROLLUP type="image" state="disabled" map_state="3" height="24">up2arrw.tga</SCROLLUP>
+				<SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">dn2arrw.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="selected" map_state="2" height="24">dn2arrw.tga</SCROLLDOWN>
+				<SCROLLDOWN type="image" state="disabled" map_state="3" height="24">dn2arrw.tga</SCROLLDOWN>
+				<POSITION>
+					<LEFT>600</LEFT>
+					<TOP>0</TOP>
+					<RIGHT>620</RIGHT>
+					<BOTTOM>250</BOTTOM>
+				</POSITION>
+				<SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
+			</SCROLLBAR>
+		</WINDOW>
+		<WINDOW type="button" name="HELP_PAGE_BACK">
+			<ACTION type="window" state="hide">HELP_PAGE_BACK</ACTION>
+			<ACTION type="window" state="show">BACK</ACTION>
+			<ACTION type="window" state="SHOW">LOGIN_PAGE</ACTION>
+			<ACTION type="window" state="HIDE">HELP_PAGE</ACTION>
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<APPEARANCE state="default"></APPEARANCE>
+			<APPEARANCE state="mouseover"></APPEARANCE>
+			<APPEARANCE state="selected"></APPEARANCE>
+			<APPEARANCE state="disabled"></APPEARANCE>
+			<POSITION>
+				<LEFT>76</LEFT>
+				<TOP>493</TOP>
+			</POSITION>
+			<FONT>
+				<NAME>%DEF_FONTNAME_LG%</NAME>
+				<DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+				<MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+				<SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+				<DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+			</FONT>
+			<STRING type="id" justify="RIGHT" vjustify="CENTER">NAV_Back</STRING>
+			<SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
+			<SOUND state="selected" trigger="CLICK_SELECT">menu.lwf</SOUND>
+		</WINDOW>
+	</WINDOW>
+</WINDOW>
+}
