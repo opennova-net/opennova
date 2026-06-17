@@ -52,7 +52,7 @@ func get_status_tool() -> String:
 
 
 func get_status_context() -> String:
-	return controller.get_status_context() if controller else "No sound profile loaded"
+	return controller.get_status_context() if controller else "No sound profile open."
 
 
 # --- Lifecycle ---

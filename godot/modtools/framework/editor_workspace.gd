@@ -358,6 +358,15 @@ func get_open_resource_kind() -> String:
 	return ""
 
 
+# Every resource kind this workspace accepts via open_in_workspace. Defaults to
+# [get_open_resource_kind()] so single-kind workspaces (the common case) need no
+# override. The Menus workspace overrides this to claim both "menu" and
+# "menu_style" since the stylesheet authoring tab now lives there.
+func get_open_resource_kinds() -> PackedStringArray:
+	var single := get_open_resource_kind()
+	return PackedStringArray([single]) if not single.is_empty() else PackedStringArray()
+
+
 func get_current_resource_path() -> String:
 	return ""
 

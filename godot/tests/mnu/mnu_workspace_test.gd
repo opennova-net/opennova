@@ -458,15 +458,18 @@ func test_adapter_remount_reuses_single_editor() -> void:
 	ws.mount_viewport(host)
 	await get_tree().process_frame
 	var ed = ws._editor
-	assert_eq(host.get_child_count(), 1, "Editor mounts once.")
+	# The merged workspace mounts two editors into the viewport host: the menu
+	# editor (visible) and the Mns editor (parked invisible until build_inspector
+	# reparents it into the Styles tab).
+	assert_eq(host.get_child_count(), 2, "Menu editor and parked Mns editor mount once each.")
 
 	ws.unmount_viewport(host)
-	assert_eq(host.get_child_count(), 0, "Unmount removes the editor without freeing it.")
+	assert_eq(host.get_child_count(), 0, "Unmount removes both editors without freeing them.")
 
 	ws.mount_viewport(host)
 	await get_tree().process_frame
 	assert_same(ws._editor, ed, "Remount reuses the same editor instance.")
-	assert_eq(host.get_child_count(), 1, "Editor is re-parented exactly once.")
+	assert_eq(host.get_child_count(), 2, "Both editors re-parent exactly once.")
 	assert_eq(ed.widget_selected.get_connections().size(), 1,
 		"widget_selected stays connected once, not re-connected on remount.")
 

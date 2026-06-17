@@ -1,9 +1,11 @@
 class_name MnsEditor
 extends Control
 
-# The Menu Styles workspace editor surface: a toolbar over a Variables/Source
-# view toggle plus a collapsible live menu preview. Binds to an
-# MnsEditorDocument and owns the undo stack.
+# The Styles tab body inside the Menus workspace: a toolbar over a
+# Variables/Source view toggle. Binds to an MnsEditorDocument and owns the undo
+# stack. The Menus canvas IS the live preview for stylesheet edits (the
+# workspace pushes the in-memory MnsStyleSheet into the MnuEditor on every
+# document_changed), so this editor no longer carries its own preview pane.
 #
 # Undo strategy: every mutation funnels through apply_edit(edit), which records
 # a whole-file source-text snapshot pair (the document is a few KB and
@@ -13,21 +15,16 @@ extends Control
 
 const MnsVariableTableScript = preload("res://modtools/mnu/mns_variable_table.gd")
 const MnsSourceViewScript = preload("res://modtools/mnu/mns_source_view.gd")
-const MnsPreviewScript = preload("res://modtools/mnu/mns_preview.gd")
 
 signal variable_selected(name: String)
 
 var _document   # MnsEditorDocument
-var _resource_root: NovaResourceRoot
-var _list_menus: Callable = Callable()
 
 var _table: MnsVariableTable
 var _table_scroll: ScrollContainer
 var _source_view: MnsSourceView
-var _preview: MnsPreview
 var _btn_variables: Button
 var _btn_source: Button
-var _btn_preview: Button
 var _btn_add: Button
 var _btn_remove: Button
 
@@ -60,19 +57,13 @@ func _build_ui() -> void:
 
 	_build_toolbar(root_box)
 
-	var split := HSplitContainer.new()
-	split.name = "RootSplit"
-	split.split_offset = 460
-	split.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root_box.add_child(split)
-
-	# Variables and Source share the left pane; exactly one is visible.
+	# Variables and Source share the body; exactly one is visible. There is no
+	# separate preview pane: the Menus canvas IS the live stylesheet preview.
 	var view_stack := MarginContainer.new()
 	view_stack.name = "ViewStack"
 	view_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	view_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	split.add_child(view_stack)
+	root_box.add_child(view_stack)
 
 	_table_scroll = ScrollContainer.new()
 	_table_scroll.name = "TableScroll"
@@ -90,10 +81,6 @@ func _build_ui() -> void:
 	_source_view.apply_callback = func(text: String) -> void:
 		apply_edit({"op": "source", "text": text})
 	view_stack.add_child(_source_view)
-
-	_preview = MnsPreviewScript.new()
-	_preview.name = "Preview"
-	split.add_child(_preview)
 
 
 func _build_toolbar(parent: Control) -> void:
@@ -135,15 +122,6 @@ func _build_toolbar(parent: Control) -> void:
 			_show_source_view(true))
 	bar.add_child(_btn_source)
 
-	_btn_preview = Button.new()
-	_btn_preview.text = "Preview"
-	_btn_preview.toggle_mode = true
-	_btn_preview.button_pressed = true
-	_btn_preview.toggled.connect(func(on: bool) -> void:
-		if _preview != null:
-			_preview.visible = on)
-	bar.add_child(_btn_preview)
-
 
 func _show_source_view(on: bool) -> void:
 	if _source_view == null or _table_scroll == null:
@@ -176,23 +154,6 @@ func set_document(document) -> void:
 	_refresh_all()
 
 
-func set_resource_root(root: NovaResourceRoot) -> void:
-	_resource_root = root
-	_reconfigure_preview()
-
-
-# The workspace injects the shell's menu lister so the preview can offer every
-# menu in the resource folder (empty/invalid in headless tests).
-func set_menu_list_provider(list_menus: Callable) -> void:
-	_list_menus = list_menus
-	_reconfigure_preview()
-
-
-func _reconfigure_preview() -> void:
-	if _preview != null:
-		_preview.configure(_resource_root, _list_menus)
-
-
 func _sheet() -> MnsStyleSheet:
 	return _document.resource if _document != null else null
 
@@ -212,15 +173,15 @@ func _on_resource_changed() -> void:
 
 
 func _refresh_all() -> void:
-	if not is_node_ready():
-		return
+	# Build eagerly so headless callers (tests, the workspace mount path that
+	# parks this editor invisible before the right dock is built) get a working
+	# table / source view immediately without waiting for the next frame.
+	_build_ui()
 	var sheet := _sheet()
 	if _table != null:
 		_table.set_stylesheet(sheet)
 	if _source_view != null:
 		_source_view.set_stylesheet(sheet)
-	if _preview != null:
-		_preview.set_stylesheet(sheet)
 	_recount(sheet)
 	# Default-select the first variable so the inspector is populated.
 	var entries: Array = sheet.get_entries() if sheet != null else []

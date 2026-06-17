@@ -2637,4 +2637,9 @@ func _get_material() -> ShaderMaterial:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# Embedded in the editor shell? The shell owns the unified close guard,
+		# which already lists this workspace among the dirty ones. Only a
+		# standalone terrain scene (no workstation) handles its own close.
+		if workstation != null:
+			return
 		request_quit_editor()

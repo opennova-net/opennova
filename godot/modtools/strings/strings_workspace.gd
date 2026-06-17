@@ -71,7 +71,7 @@ func get_status_tool() -> String:
 
 
 func get_status_context() -> String:
-	return strings_editor.get_status_context() if strings_editor else "No string table loaded"
+	return strings_editor.get_status_context() if strings_editor else "No string table open."
 
 
 # --- Lifecycle ---

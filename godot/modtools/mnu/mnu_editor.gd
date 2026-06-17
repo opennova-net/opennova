@@ -38,6 +38,11 @@ var _resource_root: NovaResourceRoot
 var _text_resource: RtxtStringFile
 var _text_resource_path: String = ""
 var _stylesheet: MnsStyleSheet
+# When the workspace owns the .mns document directly (the merged Menus
+# workspace does), it pushes its in-memory MnsStyleSheet here so canvas refreshes
+# read live edits without a disk round-trip. Null means fall back to the disk
+# resolution from the resource root.
+var _stylesheet_override: MnsStyleSheet
 # Distinct %VAR% tokens in the open menu that the loaded stylesheet does not
 # define (all of them, when none loads). Recomputed per preview refresh and
 # cached: the shell polls status per frame. The original engine FAILS on an
@@ -309,11 +314,17 @@ func _resolve_text_resource(doc: NovaMnuDocument) -> void:
 		continue
 
 
-# Re-reads the canonical stylesheet from the root on every preview refresh,
-# which also runs on every viewport mount (set_resource_root) - so edits saved
-# in the Menu Styles workspace appear here on the next workspace switch with no
-# extra wiring.
+# With an override pushed by the workspace (the merged Menus workspace owns the
+# .mns document directly), uses that live document so unsaved Styles edits hit
+# the canvas immediately. Without one, re-reads the canonical stylesheet from
+# the resource root on every preview refresh (also runs on every viewport mount
+# via set_resource_root), so external edits appear on the next refresh with no
+# extra wiring. Tests that drive MnuEditor without a workspace still work
+# through the disk path.
 func _resolve_stylesheet_resource() -> void:
+	if _stylesheet_override != null:
+		_stylesheet = _stylesheet_override
+		return
 	_stylesheet = null
 	if _resource_root == null or _resource_root.get_root_dir().is_empty():
 		return
@@ -323,6 +334,13 @@ func _resolve_stylesheet_resource() -> void:
 	var sheet := MnsStyleSheet.new()
 	if sheet.load_from_bytes(bytes) == OK:
 		_stylesheet = sheet
+
+
+# The workspace pushes its in-memory stylesheet here so canvas refreshes pick
+# up unsaved Styles edits live. Pass null to fall back to disk resolution.
+func set_stylesheet_resource(sheet: MnsStyleSheet) -> void:
+	_stylesheet_override = sheet
+	_refresh_preview()
 
 
 # The loaded stylesheet (null when the root carries none); the inspector uses
