@@ -423,6 +423,22 @@ func save_as(_dir_path: String) -> Error:
 	return ERR_UNAVAILABLE
 
 
+func uses_save_file_dialog() -> bool:
+	return false
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray()
+
+
+func get_save_file_dialog_default_name() -> String:
+	return ""
+
+
+func save_as_file(_path: String) -> Error:
+	return ERR_UNAVAILABLE
+
+
 func can_export() -> bool:
 	return false
 

@@ -148,6 +148,23 @@ func test_save_without_mission_is_unavailable() -> void:
 	assert_eq(controller.save_as("user://nope"), ERR_UNAVAILABLE, "save_as with no mission is unavailable")
 
 
+func test_save_as_file_mis_adopts_path_and_save_current_preserves_extension() -> void:
+	var controller := _new_with_item_db()
+	controller.get_mission().set_header_string("mission_name", "Controller MIS")
+	var path := ProjectSettings.globalize_path("user://mission_controller_%d.mis" % Time.get_ticks_usec())
+	assert_eq(controller.save_as_file(path), OK, "Save As accepts an explicit .mis path")
+	assert_eq(controller.get_current_path(), path, "Save As adopts the .mis path")
+	var text := FileAccess.get_file_as_string(path)
+	assert_true(text.begins_with("// mission metafile\r\n"), "the adopted path is written as MIS text")
+
+	controller.get_mission().set_header_string("designer", "second save")
+	controller.mark_dirty()
+	assert_eq(controller.save_current(), OK, "Save Current writes back to the adopted .mis path")
+	text = FileAccess.get_file_as_string(path)
+	assert_string_contains(text, "designer \"second save\"")
+	DirAccess.remove_absolute(path)
+
+
 func test_handle_viewport_input_is_safe_without_a_mission() -> void:
 	# The controller is wired as the viewport input target; with no mission (or no
 	# terrain editor) every event must be an inert no-op, never a crash or a dirty.

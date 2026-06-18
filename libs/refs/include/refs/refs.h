@@ -38,7 +38,7 @@ struct Reference {
 };
 
 // True when `name` (by extension or well-known filename, case-insensitive on
-// the basename) has an extractor: *.env, *.kda, *.3di, *.bms, *.mnu, items.def.
+// the basename) has an extractor: *.env, *.kda, *.3di, *.bms, *.mis, *.mnu, items.def.
 bool can_extract(const std::string& name);
 
 // Extract `source_path`'s outgoing references from its bytes into `out`

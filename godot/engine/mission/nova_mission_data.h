@@ -22,7 +22,7 @@ namespace godot {
 class NovaResourceRoot;
 
 // Thin GDExtension wrapper over opennova::mission::MissionDocument (libs/mission).
-// Parses a NovaLogic .bms mission file and exposes its header (terrain/env refs,
+// Parses a NovaLogic .bms/.mis mission file and exposes its header (terrain/env refs,
 // metadata) and its placed entities as Godot dictionaries. The read surface is
 // loading + getters; the mutate surface (Phase 1 authoring) is set_entity_transform
 // + save, calling the already byte-faithful writer in libs/mission.
@@ -113,7 +113,7 @@ public:
 	// post-state: loaded document, source_path cleared, modified flag cleared, history reset.
 	// Always returns OK.
 	Error create_default();
-	// Load a .bms by flat name through the mounted resource root (VFS), so missions packed in
+	// Load a .bms/.mis by flat name through the mounted resource root (VFS), so missions packed in
 	// PFF archives load at runtime. Mirrors NovaObjectData::open_from_resource_root.
 	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
 	bool is_loaded() const;

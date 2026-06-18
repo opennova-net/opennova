@@ -116,6 +116,7 @@ int main() {
 	write_file(root / "credits" / "finale.kda", "kda");
 	write_file(root / "fonts" / "Serpen24.fnt", "fnt");
 	write_file(root / "strings" / "menu.bin", "bin");
+	write_file(root / "briefing.MIS", "// mission metafile\r\n");
 
 	opennova::ResourceIndex index;
 	TEST_EXPECT(!index.scan((root / "missing").string()));
@@ -123,7 +124,7 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 13);
+	TEST_EXPECT(all_files.size() == 14);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Menus.BIN"));
 	TEST_EXPECT(has_relative_path(all_files, "main.mnu"));
@@ -131,6 +132,7 @@ int main() {
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.sbf"));
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.bin"));
 	TEST_EXPECT(has_relative_path(all_files, "first.bms"));
+	TEST_EXPECT(has_relative_path(all_files, "briefing.MIS"));
 	TEST_EXPECT(has_relative_path(all_files, "finale.kda"));
 	TEST_EXPECT(has_relative_path(all_files, "Serpen24.fnt"));
 	TEST_EXPECT(!has_relative_path(all_files, "missions/first.bms"));
@@ -155,7 +157,7 @@ int main() {
 
 	TEST_EXPECT(index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.resource_files("environment").size() == 1);
-	TEST_EXPECT(index.resource_files("mission").size() == 1);
+	TEST_EXPECT(index.resource_files("mission").size() == 2);
 	TEST_EXPECT(index.resource_files("object_project").size() == 1);
 	TEST_EXPECT(index.resource_files("object_model").size() == 1);
 	TEST_EXPECT(index.resource_files("object_scene").size() == 1);
@@ -166,7 +168,8 @@ int main() {
 	TEST_EXPECT(index.resource_files("mns").size() == 1);  // alias normalizes to "menu_style"
 	TEST_EXPECT(index.resource_files("menu_style")[0].display_name == "menu_style");
 	TEST_EXPECT(index.resource_files("glb").empty());
-	TEST_EXPECT(index.resource_files("bms").size() == 1);
+	TEST_EXPECT(index.resource_files("bms").size() == 2);
+	TEST_EXPECT(index.resource_files("mis").size() == 2);
 	TEST_EXPECT(index.resource_files("trn").size() == 1);
 	TEST_EXPECT(index.resource_files("env").size() == 1);
 	TEST_EXPECT(index.resource_files("3dp").size() == 1);
@@ -212,7 +215,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 16);
+	TEST_EXPECT(mounted_files.size() == 17);
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));
