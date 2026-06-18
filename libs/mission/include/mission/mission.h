@@ -266,6 +266,8 @@ public:
 
 	bool load_bms_file(const std::string &path);
 	bool load_bms_bytes(const uint8_t *data, size_t size);
+	bool load_mis_file(const std::string &path);
+	bool load_mis_text(const std::string &text);
 	bool save_bms_file(const std::string &path);
 	bool write_bms_bytes(std::vector<uint8_t> &out);
 	bool save_mis_file(const std::string &path);

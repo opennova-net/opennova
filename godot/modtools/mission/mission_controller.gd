@@ -3,7 +3,7 @@ extends RefCounted
 # Editor-side controller for the Mission workspace (the Phase 2 adapter).
 #
 # Holds the open mission (NovaMissionData) plus its document state (path /
-# loaded / dirty) and drives the load: parse the .bms, resolve its referenced
+# loaded / dirty) and drives the load: parse the mission file, resolve its referenced
 # terrain + environment from the shared resource root, load them through the
 # terrain editor (read-only viewport), then run the host-agnostic
 # MissionObjectPlacer under the terrain editor's world root. The resolve + place
@@ -428,7 +428,7 @@ func _is_same_clean_terrain(trn_path: String) -> bool:
 		return false
 	return current.replace("\\", "/").to_lower() == trn_path.replace("\\", "/").to_lower()
 
-## Open a .bms: parse it, resolve + load its referenced terrain and environment
+## Open a .bms/.mis: parse it, resolve + load its referenced terrain and environment
 ## through the terrain editor, then place its objects under the shared world root.
 ## Returns OK, or an error code; get_last_status() carries a human-facing reason.
 func open_mission(bms_path: String) -> Error:
@@ -956,7 +956,8 @@ func _notify_changed() -> void:
 func save_current() -> Error:
 	if _mission == null:
 		return ERR_UNAVAILABLE
-	if _current_path.is_empty() or _current_path.get_extension().to_lower() != "bms":
+	var ext := _current_path.get_extension().to_lower()
+	if _current_path.is_empty() or (ext != "bms" and ext != "mis"):
 		return ERR_INVALID_PARAMETER
 	var err := int(_mission.save_file())
 	if err == OK:
@@ -975,13 +976,27 @@ func save_as(dir_path: String) -> Error:
 		return ERR_UNAVAILABLE
 	if dir_path.is_empty():
 		return ERR_INVALID_PARAMETER
-	var mkdir := DirAccess.make_dir_recursive_absolute(dir_path)
-	if mkdir != OK:
-		return mkdir
 	var filename := _current_path.get_file()
 	if filename.is_empty():
 		filename = "mission.bms"
-	var path := dir_path.path_join(filename)
+	return save_as_file(dir_path.path_join(filename))
+
+
+func save_as_file(path: String) -> Error:
+	if _mission == null:
+		return ERR_UNAVAILABLE
+	if path.is_empty():
+		return ERR_INVALID_PARAMETER
+	var ext := path.get_extension().to_lower()
+	if ext != "bms" and ext != "mis":
+		_last_status = "Mission files must be saved as .bms or .mis."
+		return ERR_INVALID_PARAMETER
+	var dir_path := path.get_base_dir()
+	if not dir_path.is_empty():
+		var mkdir := DirAccess.make_dir_recursive_absolute(dir_path)
+		if mkdir != OK:
+			return mkdir
+	var filename := path.get_file()
 	var err := int(_mission.save_as(path))
 	if err == OK:
 		_current_path = path
