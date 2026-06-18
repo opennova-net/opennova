@@ -33,6 +33,12 @@ func _init(mcp_service: Node) -> void:
 
 
 func register_all(registry: McpToolRegistry) -> void:
+	registry.register(_def("new_mission",
+			"Create a brand-new empty mission from scratch — no file until save_mission. A mission needs a terrain to place onto and reference: pass terrain (a .trn basename, e.g. \"Dvxi3\") to load it first, or omit to build on the already-loaded terrain. Replaces the open mission only when it has no unsaved changes (or discard=true). Switches focus to the Mission workspace. Rejected while simulating. This is the fresh-authoring entry point — call it before list_items / place_entities when starting a new mission.",
+			{
+				"terrain": { "type": "string" },
+				"discard": { "type": "boolean", "default": false },
+			}, [], { "timeout_ms": 120000 }), Callable(self, "_tool_new_mission"))
 	registry.register(_def("list_items",
 			"The placeable item palette (items.def) of the open mission: rows {id, name, type, kind, kind_label}. Pass id to place_entities. kind: 0=marker (player starts, gizmo markers), 1=item, 2=building, 3=person (AI organic). filter is a case-insensitive name substring. Requires an open mission (open_in_workspace workspace=\"mission\").",
 			{
@@ -186,6 +192,46 @@ static func _world_echo(bms_pos: Vector3) -> Array:
 
 
 # --- discovery ------------------------------------------------------------------
+
+# Create a fresh empty mission, optionally loading a terrain first. Mirrors the
+# editor's New action (MissionController.new_mission) so authoring needs no manual
+# click — the gap that made the MCP server require human interaction.
+func _tool_new_mission(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var controller: Variant = ctx.mission()
+	if controller == null or not controller.has_method("new_mission"):
+		return McpToolResult.error("Mission workspace unavailable.")
+	if controller.has_method("is_simulating") and controller.is_simulating():
+		return McpToolResult.error("The simulation owns the world — sim_control(action=\"stop\") first.")
+	var ws: Variant = ctx.workspace("mission")
+	if ws != null and ws.has_method("is_playing_mission") and ws.is_playing_mission():
+		return McpToolResult.error("A Play-in-Editor session owns the world — stop it in the editor first.")
+	if controller.has_method("is_loaded") and controller.is_loaded() \
+			and controller.has_method("is_dirty") and controller.is_dirty() \
+			and not bool(args.get("discard", false)):
+		return McpToolResult.error("The open mission has unsaved changes — save_mission first, or pass discard: true to replace it.")
+	if ctx.shell == null:
+		return McpToolResult.error("The editor shell is not bound yet.")
+	var terrain := String(args.get("terrain", "")).strip_edges()
+	if not terrain.is_empty():
+		var resolved := McpAssetDescribe.resolve(ctx, terrain)
+		if not resolved["ok"]:
+			return McpToolResult.error("Terrain '%s' not found: %s. List with list_assets(kind=\"terrain\")." % [terrain, String(resolved.get("error", ""))])
+		var target := String(resolved["path"]) if resolved.get("loose", false) else String(resolved["name"])
+		var terr_err: Error = ctx.shell.open_in_workspace("terrain", target, {})
+		if terr_err != OK:
+			return McpToolResult.error("Could not load terrain '%s' (%s)." % [terrain, error_string(terr_err)])
+		await ctx.frames(1)
+	var err: Error = controller.new_mission()
+	if err != OK:
+		return McpToolResult.error("New mission failed: %s" % controller.get_last_status())
+	# Bring the Mission workspace forward so the human sees the empty world.
+	var mission_ws_id := int(ctx.shell._workspace_id_for_resource_kind("mission"))
+	if mission_ws_id != -1 and ctx.shell.has_method("set_active_workspace"):
+		ctx.shell.set_active_workspace(mission_ws_id)
+		await ctx.frames(1)
+	var info: Dictionary = controller.get_mission().get_info() if controller.has_method("get_mission") else {}
+	return { "ok": true, "terrain": info.get("terrain", ""), "status": controller.get_last_status(), "dirty": controller.is_dirty() }
+
 
 func _tool_list_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var gate := _require_mission(ctx)
