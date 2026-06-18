@@ -327,6 +327,170 @@ int check_C_21_checksum_reply() {
 	return 0;
 }
 
+// S2C 0x5A — weapon-loadout: avatarClass + one slot + 0xFF terminator.
+int check_S_5A_weapon_loadout() {
+	LE w;
+	w.u8(3);                       // avatar_class
+	w.u8(5);                       // slot 0 type id (AdmDef index)
+	w.u8(10); w.u8(11); w.u8(12);  // ammo primary/secondary/alt
+	w.u8(0xFF);                    // terminator (replaces next typeId)
+	EXPECT(w.b.size() == 6);
+	WeaponLoadout out;
+	EXPECT(decode_weapon_loadout(w.b.data(), w.b.size(), out));
+	EXPECT(out.avatar_class == 3);
+	EXPECT(out.slots.size() == 1);
+	EXPECT(out.slots[0].type_id == 5 && out.slots[0].ammo_alt == 12);
+	cover('S', 0x5A);
+	return 0;
+}
+
+// S2C 0x6E — roster: one team with one member.
+int check_S_6E_roster() {
+	LE w;
+	w.u8(1);          // team_count
+	w.u16(0x1000);    // team_entity_handle
+	w.u16(0);         // team_slot_index
+	w.u8(1);          // member_count
+	w.u16(0x2000);    // team_slot_handle
+	w.u16(0x0004);    // member handle
+	EXPECT(w.b.size() == 10);
+	RosterSync out;
+	EXPECT(decode_roster_sync(w.b.data(), w.b.size(), out));
+	EXPECT(out.teams.size() == 1);
+	EXPECT(out.teams[0].members.size() == 1);
+	EXPECT(out.teams[0].members[0] == 0x0004);
+	cover('S', 0x6E);
+	return 0;
+}
+
+// S2C 0x7B — full player info: 5 cstrings + u32 + 2 cstrings.
+int check_S_7B_full_player_info() {
+	LE w;
+	auto str = [&](const char *s) {
+		for (const char *p = s; *p; ++p) w.u8(uint8_t(*p));
+		w.u8(0);
+	};
+	str("Name"); str("00000003"); str("biggy"); str("MyMission"); str("m.bms");
+	w.u32(0xCAFEBABE);
+	str("motd here"); str("game here");
+	FullPlayerInfo out;
+	EXPECT(decode_full_player_info(w.b.data(), w.b.size(), out));
+	EXPECT(out.player_name == "Name");
+	EXPECT(out.player_id == "00000003");   // NovaWorld player/account ID, not a clan tag
+	EXPECT(out.server_name == "biggy");
+	EXPECT(out.map_file == "m.bms");
+	EXPECT(out.extra == 0xCAFEBABE);
+	EXPECT(out.game_name == "game here");
+	cover('S', 0x7B);
+	return 0;
+}
+
+// S2C 0x0F — world-state-load: header + fixed 128-i32 score block + 0 waypoints
+// (gametype hint off) + 0 team names.
+int check_S_0F_world_state() {
+	LE w;
+	w.u32(0x11223344);                       // session_tick
+	w.u32(100); w.u32(200); w.u32(300);      // pos x/y/z (16.16)
+	w.u16(0x4000); w.u16(0); w.u16(0);       // yaw/pitch/roll (i16)
+	w.u8(0x00);                              // game_flags
+	for (int i = 0; i < kWorldStateScoreCount; ++i) w.u32(0); // 128 scores
+	w.u16(0);                                // waypoint_count
+	w.u16(0);                                // team_name_count
+	EXPECT(w.b.size() == size_t(4 + 12 + 6 + 1 + 4 * kWorldStateScoreCount + 2 + 2));
+	WorldStateLoad out;
+	EXPECT(decode_world_state_load(w.b.data(), w.b.size(), out));
+	EXPECT(out.session_tick == 0x11223344);
+	EXPECT(out.yaw == 0x4000);
+	EXPECT(out.waypoint_count == 0);
+	EXPECT(out.team_scores.size() == size_t(kWorldStateScoreCount));
+	cover('S', 0x0F);
+	return 0;
+}
+
+// S2C 0x60 / 0x64 — file-transfer chunk: 12-B header + raw payload. One decoder
+// serves both tags; cover() each so the drift guard balances.
+int check_S_60_64_file_transfer() {
+	LE w;
+	w.u32(1);            // transfer_id
+	w.u32(8);            // total_size
+	w.u32(0);            // chunk_offset
+	w.u32(0xDEADBEEF);   // 8 raw payload bytes (offset 0 + 8 == total -> final chunk)
+	w.u32(0x0BADF00D);
+	EXPECT(w.b.size() == 12 + 8);
+	FileTransferChunk out;
+	EXPECT(decode_file_transfer_chunk(w.b.data(), w.b.size(), out));
+	EXPECT(out.transfer_id == 1);
+	EXPECT(out.chunk_size == 8);
+	EXPECT(out.is_final());
+	cover('S', 0x60);
+	cover('S', 0x64);
+	return 0;
+}
+
+// C2S 0x22 — player-sync request: [u8 slot][u16 fieldFlags].
+int check_C_22_player_sync_request() {
+	LE w;
+	w.u8(0x02);
+	w.u16(0x5CF7);
+	BurstPlayerSyncRequest r;
+	size_t consumed = 0;
+	EXPECT(decode_burst_player_sync_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(r.field_flags == 0x5CF7);
+	cover('C', 0x22);
+	return 0;
+}
+
+// C2S 0x23 — visible-players request: empty body.
+int check_C_23_visible_request() {
+	size_t consumed = 1;
+	EXPECT(decode_burst_visible_request(nullptr, 0, consumed));
+	EXPECT(consumed == 0);
+	cover('C', 0x23);
+	return 0;
+}
+
+// C2S 0x28 — loadout request: [u32][u32][u16].
+int check_C_28_loadout_request() {
+	LE w;
+	w.u32(0x11111111);
+	w.u32(0x22222222);
+	w.u16(0x3333);
+	BurstLoadoutRequest r;
+	size_t consumed = 0;
+	EXPECT(decode_burst_loadout_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 10);
+	EXPECT(r.flags == 0x22222222);
+	cover('C', 0x28);
+	return 0;
+}
+
+// C2S 0x29 — entity request: [u16 bufferIndex].
+int check_C_29_entity_request() {
+	LE w;
+	w.u16(0x0042);
+	BurstEntityRequest r;
+	size_t consumed = 0;
+	EXPECT(decode_burst_entity_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 2);
+	EXPECT(r.buffer_index == 0x0042);
+	cover('C', 0x29);
+	return 0;
+}
+
+// C2S 0x4C — client quality byte: [u8] (server clamps to 4).
+int check_C_4C_client_quality() {
+	LE w;
+	w.u8(9);             // > 4 -> clamps to 4
+	BurstClientQuality r;
+	size_t consumed = 0;
+	EXPECT(decode_burst_client_quality(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 1);
+	EXPECT(r.value == 4);
+	cover('C', 0x4C);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -363,6 +527,16 @@ int main() {
 	if (check_C_0C_extended_uplink()) return 1;
 	if (check_C_06_fired_round()) return 1;
 	if (check_C_21_checksum_reply()) return 1;
+	if (check_S_5A_weapon_loadout()) return 1;
+	if (check_S_6E_roster()) return 1;
+	if (check_S_7B_full_player_info()) return 1;
+	if (check_S_0F_world_state()) return 1;
+	if (check_S_60_64_file_transfer()) return 1;
+	if (check_C_22_player_sync_request()) return 1;
+	if (check_C_23_visible_request()) return 1;
+	if (check_C_28_loadout_request()) return 1;
+	if (check_C_29_entity_request()) return 1;
+	if (check_C_4C_client_quality()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

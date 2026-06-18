@@ -959,4 +959,185 @@ bool decode_batch_kill(const uint8_t *body, size_t len, BatchKillBatch &out) {
 	return (c.p == c.end);
 }
 
+// ===========================================================================
+// Uncharacterized-tag bodies (D-NET-73 / D-NET-74). Field maps: docs
+// §5.28-§5.33. Witnessed in Jointops.exe.kong.i64 this pass; see ingame_decode.h
+// for the per-tag layout + [orig] cites.
+// ===========================================================================
+
+// S2C 0x5A weapon-loadout. [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0]
+bool decode_weapon_loadout(const uint8_t *body, size_t len, WeaponLoadout &out) {
+	out = WeaponLoadout{};
+	Cursor c{body, body + len, true};
+	out.avatar_class = c.u8();
+	uint8_t type_id = c.u8();
+	if (!c.ok) return false;
+	// Chain of {typeId, ammoP, ammoS, ammoAlt} terminated by typeId == 0xFF.
+	// Retail caps at 40 raw slots (@ 0x429155) before reading the ammo bytes.
+	int raw = 0;
+	while (type_id != 0xFF && raw < 40) {
+		WeaponLoadoutSlot s;
+		s.type_id        = type_id;
+		s.ammo_primary   = c.u8();
+		s.ammo_secondary = c.u8();
+		s.ammo_alt       = c.u8();
+		out.slots.push_back(s);
+		type_id = c.u8();   // next type id (or the 0xFF terminator)
+		++raw;
+		if (!c.ok) return false;
+	}
+	return (c.p == c.end);
+}
+
+// S2C 0x6E team/squad roster sync. [orig: NapiNPClientMsg_HandleSquadRosterSync @ 0x429880]
+bool decode_roster_sync(const uint8_t *body, size_t len, RosterSync &out) {
+	out = RosterSync{};
+	Cursor c{body, body + len, true};
+	out.team_count = c.u8();
+	if (!c.ok) return false;
+	out.teams.reserve(out.team_count);
+	for (unsigned i = 0; i < out.team_count; ++i) {
+		RosterTeam t;
+		t.team_entity_handle = c.u16();
+		t.team_slot_index    = c.u16();
+		t.member_count       = c.u8();
+		t.team_slot_handle   = c.u16();
+		if (!c.ok) { out.teams.push_back(std::move(t)); return false; }
+		t.members.reserve(t.member_count);
+		for (unsigned m = 0; m < t.member_count; ++m)
+			t.members.push_back(c.u16());
+		const bool record_ok = c.ok;
+		out.teams.push_back(std::move(t));
+		if (!record_ok) return false;
+	}
+	return (c.p == c.end);
+}
+
+// S2C 0x7B full player info. [orig: NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0]
+bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &out) {
+	out = FullPlayerInfo{};
+	Cursor c{body, body + len, true};
+	out.player_name  = c.cstr();
+	out.player_id    = c.cstr();
+	out.server_name  = c.cstr();
+	out.mission_name = c.cstr();
+	out.map_file     = c.cstr();
+	out.extra        = c.u32();
+	out.motd         = c.cstr();
+	out.game_name    = c.cstr();
+	if (!c.ok) return false;
+	return (c.p == c.end);
+}
+
+// S2C 0x0F world-state-load. [orig: NapiNPClientMsg_0x00F @ 0x42E200]
+bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &out,
+                             bool is_waypoint_gametype) {
+	out = WorldStateLoad{};
+	Cursor c{body, body + len, true};
+	out.session_tick = c.u32();
+	out.pos_x = int32_t(c.u32());
+	out.pos_y = int32_t(c.u32());
+	out.pos_z = int32_t(c.u32());
+	out.yaw   = c.i16();
+	out.pitch = c.i16();
+	out.roll  = c.i16();
+	out.game_flags = c.u8();
+	// Fixed 128-entry team-score table (loop fills [outTable, data) @ 0x42e324).
+	for (int i = 0; i < kWorldStateScoreCount; ++i)
+		out.team_scores[i] = int32_t(c.u32());
+	out.waypoint_count = c.u16();
+	if (!c.ok) return false;
+	// Waypoint records ride the wire ONLY for a waypoint gametype — an off-wire
+	// host gate, so the caller supplies the hint (default false).
+	if (is_waypoint_gametype) {
+		out.waypoints.reserve(out.waypoint_count);
+		for (unsigned i = 0; i < out.waypoint_count; ++i) {
+			WorldStateWaypoint w;
+			w.slot_id = c.u16();
+			w.name_id = c.u16();
+			w.pad     = c.u8();
+			out.waypoints.push_back(w);
+			if (!c.ok) return false;
+		}
+	}
+	out.team_name_count = c.u16();
+	if (!c.ok) return false;
+	out.team_names.reserve(out.team_name_count);
+	for (unsigned i = 0; i < out.team_name_count; ++i) {
+		out.team_names.push_back(c.cstr());
+		if (!c.ok) return false;
+	}
+	return (c.p == c.end);
+}
+
+// S2C 0x60 / 0x64 chunked file transfer (shared decoder).
+// [orig: NapiNPClientMsg_HandleFileTransferChunk @ 0x432350 (0x60) /
+//        NapiNPClientMsg_HandleMissionDataChunk @ 0x432410 (0x64)]
+bool decode_file_transfer_chunk(const uint8_t *body, size_t len, FileTransferChunk &out) {
+	out = FileTransferChunk{};
+	Cursor c{body, body + len, true};
+	out.transfer_id  = c.u32();
+	out.total_size   = c.u32();
+	out.chunk_offset = c.u32();
+	if (!c.ok) return false;          // need the full 12-byte header
+	out.chunk_size = size_t(c.end - c.p);
+	out.chunk_data = c.p;             // remaining bytes are the raw payload slice
+	return true;                      // 12 + chunk_size == len by construction
+}
+
+// C2S 0x22 player-sync request. [orig: NapiNPServerMsg_0x022 @ 0x514C90]
+bool decode_burst_player_sync_request(const uint8_t *body, size_t len,
+                                      BurstPlayerSyncRequest &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.slot        = c.u8();
+	out.field_flags = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 3;
+}
+
+// C2S 0x23 visible-players request (empty body). [orig: NapiNPServerMsg_0x023 @ 0x514D50]
+bool decode_burst_visible_request(const uint8_t * /*body*/, size_t len, size_t &consumed) {
+	consumed = 0;
+	return len == 0;
+}
+
+// C2S 0x28 weapon-loadout request. [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550]
+bool decode_burst_loadout_request(const uint8_t *body, size_t len,
+                                  BurstLoadoutRequest &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.loadout_filter = c.u32();
+	out.flags          = c.u32();
+	out.extra          = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 10;
+}
+
+// C2S 0x29 entity-packet request. [orig: NapiNPServerMsg_0x029 @ 0x514F10]
+bool decode_burst_entity_request(const uint8_t *body, size_t len,
+                                 BurstEntityRequest &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.buffer_index = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 2;
+}
+
+// C2S 0x4C client quality/state byte (server clamps to 4 @ 0x5111fd).
+// [orig: NapiNPServerMsg_0x04C @ 0x5111B0]
+bool decode_burst_client_quality(const uint8_t *body, size_t len,
+                                 BurstClientQuality &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	uint8_t v = c.u8();
+	if (!c.ok) return false;
+	out.value = v > 4 ? uint8_t(4) : v;
+	consumed = size_t(c.p - body);
+	return consumed == 1;
+}
+
 } // namespace opennova

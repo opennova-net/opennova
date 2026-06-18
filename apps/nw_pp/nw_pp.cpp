@@ -722,6 +722,140 @@ void print_tag_46(const std::vector<uint8_t> &body) {
 	            clean ? "" : " INCOMPLETE");
 }
 
+// S2C 0x5A weapon-loadout. typeId is an AdmDef (weapon/action) index, not an
+// items.def type — printed raw, not via type_str.
+void print_tag_5a(const std::vector<uint8_t> &body) {
+	WeaponLoadout wl;
+	const bool clean = decode_weapon_loadout(body.data(), body.size(), wl);
+	std::printf("        [0x5A] weapon-loadout avatarClass=%u slots=%zu%s\n",
+	            unsigned(wl.avatar_class), wl.slots.size(),
+	            clean ? "" : " (DECODE INCOMPLETE)");
+	for (const auto &s : wl.slots)
+		std::printf("            slot admIdx=%u ammo=(%u,%u,%u)\n",
+		            unsigned(s.type_id), unsigned(s.ammo_primary),
+		            unsigned(s.ammo_secondary), unsigned(s.ammo_alt));
+}
+
+// S2C 0x6E team/squad roster sync.
+void print_tag_6e(const std::vector<uint8_t> &body) {
+	RosterSync rs;
+	const bool clean = decode_roster_sync(body.data(), body.size(), rs);
+	std::printf("        [0x6E] roster teams=%u%s\n",
+	            unsigned(rs.team_count), clean ? "" : " (DECODE INCOMPLETE)");
+	for (const auto &t : rs.teams) {
+		std::printf("            team ent=%s slotIdx=%u members=%u slotHdl=%s:",
+		            handle_str(t.team_entity_handle).c_str(),
+		            unsigned(t.team_slot_index), unsigned(t.member_count),
+		            handle_str(t.team_slot_handle).c_str());
+		for (uint16_t m : t.members) std::printf(" %s", handle_str(m).c_str());
+		std::printf("\n");
+	}
+}
+
+// S2C 0x7B full player/session info. Field roles witnessed from the landing
+// globals + PunkBuster cvar map (NOT the Hex-Rays auto-comment) — `id` is the
+// NovaWorld player/account ID, not a clan tag.
+void print_tag_7b(const std::vector<uint8_t> &body) {
+	FullPlayerInfo fi;
+	const bool clean = decode_full_player_info(body.data(), body.size(), fi);
+	std::printf("        [0x7B] full-player-info name=\"%s\" id=\"%s\" server=\"%s\" "
+	            "mission=\"%s\" map=\"%s\" extra=0x%08x%s\n",
+	            fi.player_name.c_str(), fi.player_id.c_str(), fi.server_name.c_str(),
+	            fi.mission_name.c_str(), fi.map_file.c_str(), fi.extra,
+	            clean ? "" : " (DECODE INCOMPLETE)");
+	if (!fi.motd.empty())      std::printf("            motd=\"%s\"\n", fi.motd.c_str());
+	if (!fi.game_name.empty()) std::printf("            game=\"%s\"\n", fi.game_name.c_str());
+}
+
+// S2C 0x0F world-state-load. The 128-entry score table is summarized (non-zero
+// count); the spawn pose + waypoint/team-name counts + team names are shown.
+void print_tag_0f(const std::vector<uint8_t> &body) {
+	WorldStateLoad ws;
+	const bool clean = decode_world_state_load(body.data(), body.size(), ws);
+	int nonzero = 0;
+	for (int32_t s : ws.team_scores) if (s) ++nonzero;
+	std::printf("        [0x0F] world-state tick=%u spawn=(%.1f, %.1f, %.1f) "
+	            "yaw=%d pitch=%d roll=%d flags=0x%02x scores[%d nz] waypoints=%u "
+	            "teamNames=%u%s\n",
+	            ws.session_tick, fp16(ws.pos_x), fp16(ws.pos_y), fp16(ws.pos_z),
+	            int(ws.yaw), int(ws.pitch), int(ws.roll), unsigned(ws.game_flags),
+	            nonzero, unsigned(ws.waypoint_count), unsigned(ws.team_name_count),
+	            clean ? "" : " (DECODE INCOMPLETE)");
+	for (const auto &n : ws.team_names)
+		std::printf("            team-name \"%s\"\n", n.c_str());
+}
+
+// S2C 0x60 / 0x64 chunked file transfer (shared printer).
+void print_tag_file_xfer(int tag, const std::vector<uint8_t> &body) {
+	FileTransferChunk ft;
+	if (!decode_file_transfer_chunk(body.data(), body.size(), ft)) {
+		std::printf("        [0x%02X] file-transfer header decode failed (len=%zu)\n",
+		            tag, body.size());
+		return;
+	}
+	std::printf("        [0x%02X] file-transfer id=%u total=%u offset=%u chunk=%zu B %s "
+	            "(re-request C2S 0x%02X if incomplete): %s\n",
+	            tag, ft.transfer_id, ft.total_size, ft.chunk_offset, ft.chunk_size,
+	            ft.is_final() ? "[FINAL]" : "[more]",
+	            tag == 0x60 ? 0x33 : 0x37,
+	            to_hex_sample(ft.chunk_data, ft.chunk_size).c_str());
+}
+
+// C2S 0x22 player-sync request.
+void print_tag_22_c2s(const std::vector<uint8_t> &body) {
+	BurstPlayerSyncRequest r;
+	size_t used = 0;
+	if (!decode_burst_player_sync_request(body.data(), body.size(), r, used)) {
+		std::printf("        [0x22 C2S] decode failed (need 3 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x22 C2S] player-sync-request slot=0x%02x fieldFlags=0x%04x\n",
+	            unsigned(r.slot), unsigned(r.field_flags));
+}
+
+// C2S 0x23 visible-players request (empty).
+void print_tag_23_c2s(const std::vector<uint8_t> &body) {
+	size_t used = 0;
+	const bool ok = decode_burst_visible_request(body.data(), body.size(), used);
+	std::printf("        [0x23 C2S] visible-players-request (empty)%s\n",
+	            ok ? "" : " UNEXPECTED PAYLOAD");
+}
+
+// C2S 0x28 weapon-loadout request.
+void print_tag_28_c2s(const std::vector<uint8_t> &body) {
+	BurstLoadoutRequest r;
+	size_t used = 0;
+	if (!decode_burst_loadout_request(body.data(), body.size(), r, used)) {
+		std::printf("        [0x28 C2S] decode failed (need 10 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x28 C2S] loadout-request filter=0x%08x flags=0x%08x extra=0x%04x\n",
+	            r.loadout_filter, r.flags, unsigned(r.extra));
+}
+
+// C2S 0x29 entity-packet request.
+void print_tag_29_c2s(const std::vector<uint8_t> &body) {
+	BurstEntityRequest r;
+	size_t used = 0;
+	if (!decode_burst_entity_request(body.data(), body.size(), r, used)) {
+		std::printf("        [0x29 C2S] decode failed (need 2 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x29 C2S] entity-request bufferIndex=%u\n",
+	            unsigned(r.buffer_index));
+}
+
+// C2S 0x4C client quality/state byte.
+void print_tag_4c_c2s(const std::vector<uint8_t> &body) {
+	BurstClientQuality r;
+	size_t used = 0;
+	if (!decode_burst_client_quality(body.data(), body.size(), r, used)) {
+		std::printf("        [0x4C C2S] decode failed (need 1 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x4C C2S] client-quality=%u\n", unsigned(r.value));
+}
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
 	const char *label = tag_label(dir, tag);
@@ -739,9 +873,19 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x1E) print_tag_1e(payload);
 	else if (dir == 'S' && tag == 0x26) print_tag_26(payload);
 	else if (dir == 'S' && tag == 0x4E) print_tag_4e(payload);
+	else if (dir == 'S' && tag == 0x0F) print_tag_0f(payload);
+	else if (dir == 'S' && tag == 0x5A) print_tag_5a(payload);
+	else if (dir == 'S' && tag == 0x6E) print_tag_6e(payload);
+	else if (dir == 'S' && tag == 0x7B) print_tag_7b(payload);
+	else if (dir == 'S' && (tag == 0x60 || tag == 0x64)) print_tag_file_xfer(tag, payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
 	else if (dir == 'C' && tag == 0x21) print_tag_21_c2s(payload);
+	else if (dir == 'C' && tag == 0x22) print_tag_22_c2s(payload);
+	else if (dir == 'C' && tag == 0x23) print_tag_23_c2s(payload);
+	else if (dir == 'C' && tag == 0x28) print_tag_28_c2s(payload);
+	else if (dir == 'C' && tag == 0x29) print_tag_29_c2s(payload);
+	else if (dir == 'C' && tag == 0x4C) print_tag_4c_c2s(payload);
 	else if (!payload.empty()) std::printf("        %s\n",
 	                                       to_hex_sample(payload.data(),
 	                                                     payload.size()).c_str());

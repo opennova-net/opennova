@@ -851,4 +851,179 @@ struct ClientChecksumReply {
 bool decode_client_checksum_reply(const uint8_t *body, size_t len,
                                   ClientChecksumReply &out, size_t &consumed);
 
+// ===========================================================================
+// Uncharacterized-tag bodies field-mapped from IDA (D-NET-73 / D-NET-74). These
+// dispatch + frame cleanly; their bodies were the §8 D-NET-72 deferral. Field
+// maps: docs/net/novaworld-net-re.md §5.28-§5.33.
+// ===========================================================================
+
+// S2C 0x5A — weapon-loadout sync (§5.30). `[u8 avatarClass]` then a slot chain
+// `{ u8 typeId, u8 ammoPrimary, u8 ammoSecondary, u8 ammoAlt }` terminated by
+// `typeId == 0xFF` (the terminator replaces the next typeId). The retail handler
+// drops slots whose typeId fails AdmDef_GetEntryByIndex and caps at 40 raw
+// slots; the wire decoder keeps every slot (AdmDef validation is a runtime
+// concern, not a wire field — a deliberate non-divergence).
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0]
+struct WeaponLoadoutSlot {
+	uint8_t type_id = 0;
+	uint8_t ammo_primary = 0;
+	uint8_t ammo_secondary = 0;
+	uint8_t ammo_alt = 0;
+};
+struct WeaponLoadout {
+	uint8_t avatar_class = 0;
+	std::vector<WeaponLoadoutSlot> slots;   // chain until typeId 0xFF (<= 40)
+};
+bool decode_weapon_loadout(const uint8_t *body, size_t len, WeaponLoadout &out);
+
+// S2C 0x6E — team/squad roster sync (§5.31). `[u8 teamCount]` then per team
+// `{ u16 teamEntityHandle, u16 teamSlotIndex, u8 memberCount, u16 teamSlotHandle,
+//   u16 member × memberCount }`. teamEntityHandle == 0xFFFF marks "no team
+// entity" (the handler skips the entity-slot write but still reads every field).
+// [orig: NapiNPClientMsg_HandleSquadRosterSync @ 0x429880]
+struct RosterTeam {
+	uint16_t team_entity_handle = 0xFFFF; // (pool<<12)|slot; 0xFFFF = none
+	uint16_t team_slot_index = 0;         // index into the roster arrays
+	uint8_t  member_count = 0;            // -> entity+550
+	uint16_t team_slot_handle = 0;        // -> entity+548
+	std::vector<uint16_t> members;        // member_count member handles
+};
+struct RosterSync {
+	uint8_t team_count = 0;
+	std::vector<RosterTeam> teams;
+};
+bool decode_roster_sync(const uint8_t *body, size_t len, RosterSync &out);
+
+// S2C 0x7B — full player/session info (§5.32). Five NUL-terminated strings, then
+// `[u32 extra]`, then two more NUL-terminated strings. The retail handler caps the
+// dest buffers (32 / 512) but advances the wire by strlen+1 — the caps are dest
+// sizes, not wire widths.
+//
+// Field roles are witnessed from the landing globals, NOT the Hex-Rays
+// "clan/squad/label/rank" auto-comment (which is wrong on every field). The
+// PunkBuster cvar map [orig: PunkBuster_GetCvarValue @ 0x4D96A0] ties three of the
+// strings to named cvars (`name` → string 1, `sv_hostname` → string 3, `mapname` →
+// string 5, `gamename` → string 7), and string 2 lands in the slot the S2C 0x7A
+// player-name handler also writes (stru_A86920.pad9[196] @ 0x429B40). Cross-capture:
+// string 2 is a persistent per-player zero-padded number (FooPlayer = "00000003"
+// across every loopback; a second player = "00000005"), populated INSTEAD of the
+// display name on a NovaWorld account join and empty for a LAN/local join — i.e. the
+// server's player/account ID, NOT a clan tag.
+// [orig: NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0]
+struct FullPlayerInfo {
+	std::string player_name;   // 1 — local/LAN display name (PunkBuster `name`); empty on account joins
+	std::string player_id;     // 2 — NovaWorld player/account ID (0-padded numeric, persistent per player); empty on LAN joins — NOT a clan tag
+	std::string server_name;   // 3 — host/server name (PunkBuster `sv_hostname`)
+	std::string mission_name;  // 4 — mission display title
+	std::string map_file;      // 5 — .bms filename (PunkBuster `mapname`)
+	uint32_t    extra = 0;     // u32
+	std::string motd;          // 6 — unwitnessed (empty in every capture); the "MOTD" guess is unconfirmed
+	std::string game_name;     // 7 — game name (PunkBuster `gamename`)
+};
+bool decode_full_player_info(const uint8_t *body, size_t len, FullPlayerInfo &out);
+
+// S2C 0x0F — world-state-load (§5.29). The joiner's spawn pose + game flags + a
+// fixed team-score table + waypoint/team-name lists (~624 B). Layout:
+//   [i32 sessionTick][i32 posX][i32 posY][i32 posZ]   (pos 16.16)
+//   [i16 yaw][i16 pitch][i16 roll]                     (each <<16 to 16.16)
+//   [u8 gameFlags]
+//   i32 teamScores[kWorldStateScoreCount]              (fixed 128-entry block)
+//   [u16 waypointCount]
+//     { u16 slotId, u16 nameId, u8 pad } × waypointCount  // host-gametype-gated
+//   [u16 teamNameCount]
+//     cstring × teamNameCount
+// The waypoint records are gated on the HOST by (g_GameType & 0xFFFDFFFF) ==
+// 0x10020 (a waypoint gametype). That gate is NOT on the wire, so an off-wire
+// decoder takes the is_waypoint_gametype hint (default false; TDM/DM send
+// waypointCount 0 / no records). [orig: NapiNPClientMsg_0x00F @ 0x42E200]
+inline constexpr int kWorldStateScoreCount = 128; // (data - outTable)/4 @ 0x42e324
+struct WorldStateWaypoint {
+	uint16_t slot_id = 0;
+	uint16_t name_id = 0;
+	uint8_t  pad = 0;          // read-and-discard by the handler (cursor advance)
+};
+struct WorldStateLoad {
+	uint32_t session_tick = 0;
+	int32_t  pos_x = 0, pos_y = 0, pos_z = 0;
+	int16_t  yaw = 0, pitch = 0, roll = 0;
+	uint8_t  game_flags = 0;
+	std::array<int32_t, kWorldStateScoreCount> team_scores{};
+	uint16_t waypoint_count = 0;
+	std::vector<WorldStateWaypoint> waypoints;  // populated only when the hint is set
+	uint16_t team_name_count = 0;
+	std::vector<std::string> team_names;
+};
+bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &out,
+                             bool is_waypoint_gametype = false);
+
+// S2C 0x60 / 0x64 — chunked file transfer (§5.28). BOTH tags share a 12-byte
+// header `[u32 transferId/checksum][u32 totalSize][u32 chunkOffset]` then
+// `len - 12` RAW file bytes, written at chunkOffset into a reassembly buffer.
+// On `chunkOffset + chunkSize >= totalSize` the transfer completes; otherwise the
+// client re-requests the next chunk (0x60 -> C2S 0x33, 0x64 -> C2S 0x37; payload
+// `[transferId][nextOffset]`, 8 B). There is NO compression codec — the payload
+// is literal file content (0x60 reassembles into a CDataStream; 0x64 into a
+// buffer whose completion yields 3 mission-name strings). probe2 completed each
+// transfer in one chunk, so the re-requests never fired (D-NET-74; refines the
+// D-NET-69 "streamed, not chunked" wording).
+// [orig: NapiNPClientMsg_HandleFileTransferChunk @ 0x432350 (0x60) /
+//        NapiNPClientMsg_HandleMissionDataChunk @ 0x432410 (0x64)]
+struct FileTransferChunk {
+	uint32_t transfer_id = 0;            // dword_A822C0 (0x60) / dword_A822C4 (0x64)
+	uint32_t total_size = 0;             // full transfer size (all chunks)
+	uint32_t chunk_offset = 0;           // where this chunk's bytes land
+	size_t   chunk_size = 0;             // len - 12 (this chunk's payload bytes)
+	const uint8_t *chunk_data = nullptr; // points into `body` at +12
+	bool is_final() const {
+		return uint64_t(chunk_offset) + chunk_size >= total_size;
+	}
+};
+bool decode_file_transfer_chunk(const uint8_t *body, size_t len, FileTransferChunk &out);
+
+// ---------------------------------------------------------------------------
+// C2S burst replies (§5.33) — small client->server requests the client queues in
+// response to S2C load/sync messages. Field-mapped from the authority SERVER
+// read-handlers (the canonical body); each serializes a reply back to the client.
+// ---------------------------------------------------------------------------
+
+// C2S 0x22 — player-sync request `[u8 slot][u16 fieldFlags]` (3 B). Server replies
+// S2C 0x46 for `slot` with `fieldFlags`. [orig: NapiNPServerMsg_0x022 @ 0x514C90]
+struct BurstPlayerSyncRequest {
+	uint8_t  slot = 0;
+	uint16_t field_flags = 0;
+};
+bool decode_burst_player_sync_request(const uint8_t *body, size_t len,
+                                      BurstPlayerSyncRequest &out, size_t &consumed);
+
+// C2S 0x23 — visible-players request, EMPTY body (0 B). Server replies S2C 0x4C
+// with a visible-players snapshot. [orig: NapiNPServerMsg_0x023 @ 0x514D50]
+bool decode_burst_visible_request(const uint8_t *body, size_t len, size_t &consumed);
+
+// C2S 0x28 — weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]`
+// (10 B). Server replies S2C 0x4E.
+// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550]
+struct BurstLoadoutRequest {
+	uint32_t loadout_filter = 0;
+	uint32_t flags = 0;
+	uint16_t extra = 0;
+};
+bool decode_burst_loadout_request(const uint8_t *body, size_t len,
+                                  BurstLoadoutRequest &out, size_t &consumed);
+
+// C2S 0x29 — entity-packet request `[u16 bufferIndex]` (2 B). Server writes that
+// entity's packet and replies S2C 0x51. [orig: NapiNPServerMsg_0x029 @ 0x514F10]
+struct BurstEntityRequest {
+	uint16_t buffer_index = 0;
+};
+bool decode_burst_entity_request(const uint8_t *body, size_t len,
+                                 BurstEntityRequest &out, size_t &consumed);
+
+// C2S 0x4C — client quality/state byte `[u8 value]` (server clamps to 0..4 and
+// sets the player's connection-quality state). [orig: NapiNPServerMsg_0x04C @ 0x5111B0]
+struct BurstClientQuality {
+	uint8_t value = 0;  // 0..4 after clamp
+};
+bool decode_burst_client_quality(const uint8_t *body, size_t len,
+                                 BurstClientQuality &out, size_t &consumed);
+
 } // namespace opennova

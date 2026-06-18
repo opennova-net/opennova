@@ -260,7 +260,7 @@ sweep; blank = not yet characterized.
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
-| 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): 4×i32 (sessionId, X, Y, Z), 3×i16 fixed-point angles, u8 flags, team scores, player count, waypoint + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B, sometimes fragmented in retail |
+| 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): i32 sessionTick + 3×i32 spawn pos, 3×i16 angles, u8 flags, **fixed 128-i32 score block**, then waypoint records (off-wire gametype gate) + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B. Full field map **§5.29** (decoded) |
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | |
@@ -329,17 +329,17 @@ sweep; blank = not yet characterized.
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT echo |
 | 0x58 | 0x4228C0 | `_0x058` | texture loader (terrain assets) |
 | 0x59 | 0x4228E0 | `_0x059` | |
-| 0x5A | 0x4290E0 | `_0x05A` | weapon-loadout sync; resets `dword_81474C=0` |
+| 0x5A | 0x4290E0 | `_0x05A` | weapon-loadout sync: `[u8 avatarClass]` + a `{typeId, ammoP, ammoS, ammoAlt}` slot chain to a `0xFF` terminator (typeId = AdmDef index); resets `dword_81474C=0`. Field map **§5.30** (decoded) |
 | 0x5B | 0x4322B0 | `_0x05B` | |
 | 0x5C | 0x425200 | `_0x05C` | |
 | 0x5D | 0x429730 | `_0x05D` | entity-destroy list (cleanup) |
 | 0x5E | 0x4297B0 | `_0x05E` | |
 | 0x5F | 0x4228F0 | `_0x05F` | |
-| 0x60 | 0x432350 | `_HandleFileTransferChunk` | mission ANNOUNCE (witnessed probe2, §5.28): u32 type=1, u32 bodyLen, u32 reserved, then a SERVERNAME/MISSIONNAME string table. NOT a chunked file copy — the joiner gets the mission as 0x60 announce + one 0x64 chunk + the 0x0B 616-B header + spawn batches; the C2S 0x33 re-request never fires (D-NET-69) |
+| 0x60 | 0x432350 | `_HandleFileTransferChunk` | **chunked file transfer** (decoded §5.28): `[u32 transferId][u32 totalSize][u32 chunkOffset]` + raw file bytes → `CDataStream`; re-request **C2S 0x33** when incomplete. probe2 completed in one 163-B chunk (transfer content = the `SERVERNAME`/`MISSIONNAME` VarList), so 0x33 never fired — **D-NET-74 corrects the D-NET-69 "announce VarList / type=1,bodyLen,reserved" reading** (a single-chunk artifact) |
 | 0x61 | 0x4297C0 | `_HandleSessionKey` | u32 session key → `g_sessionKey`; **disables `_connectlog.txt`** (source of the "DISABLING CONNECTLOG" log line) |
 | 0x62 | 0x42D200 | `_0x062` | |
 | 0x63 | 0x42D450 | `_0x063` | |
-| 0x64 | 0x432410 | `_0x064` | mission CHUNK (witnessed probe2, §5.29): same 12-B header (u32 type=1, u32 bodyLen, u32 reserved) + one compact payload. Streamed beside the 0x0B header + spawn batches, not a re-requested chunk train; the C2S 0x37 re-request never fires (D-NET-69) |
+| 0x64 | 0x432410 | `_HandleMissionDataChunk` | **chunked file transfer** (decoded §5.28): same 12-B `[transferId][totalSize][chunkOffset]` header + raw file bytes → buffer (completion extracts 3×32-B mission-name strings); re-request **C2S 0x37** when incomplete. probe2 completed in one 180-B chunk (D-NET-74). **No compression codec** — raw file content (resolves the deferred "0x64 inner codec") |
 | 0x65 | 0x429870 | `_0x065` | |
 | 0x66 | 0x42D4C0 | `_HandleWeaponRestrictions` | count + (slot, restriction) pairs |
 | 0x67 | 0x42D570 | `_0x067` | |
@@ -348,7 +348,7 @@ sweep; blank = not yet characterized.
 | 0x6B | 0x425520 | `_0x06B` | |
 | 0x6C | 0x428FC0 | `_0x06C` | |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
-| 0x6E | 0x429880 | `_0x06E` | team/squad roster sync |
+| 0x6E | 0x429880 | `_0x06E` | team/squad roster sync: `[u8 teamCount]` + per team `{u16 entityHandle, u16 slotIdx, u8 memberCount, u16 slotHandle, u16 members[]}`. Field map **§5.31** (decoded) |
 | 0x6F | 0x428D60 | `_0x06F` | cinematic camera assignment |
 | 0x70 | 0x429A30 | `_0x070` | |
 | 0x71 | 0x425600 | `_0x071` | |
@@ -360,7 +360,7 @@ sweep; blank = not yet characterized.
 | 0x78 | 0x4259070 | `_0x078` | (address as recorded in the source note has 7 hex digits — likely a typo; re-verify in the IDB) |
 | 0x79 | 0x429B00 | `_0x079` | spectator-mode (1 B → `dword_82BEE4`) |
 | 0x7A | 0x429B40 | `_0x07A` | player name (max 64 chars) → server-info struct |
-| 0x7B | 0x429BB0 | `_0x07B` | full player info: 5×cstring(32), u32, 2×cstring(512) (MOTD) |
+| 0x7B | 0x429BB0 | `_0x07B` | full player/session info: 5×cstring + u32 + 2×cstring. Field map **§5.32** (decoded) — roles witnessed from the landing globals + PunkBuster cvars (the Hex-Rays "clan/squad/rank" comment is wrong): name / **playerId** (NovaWorld account id, **not** a clan tag) / serverName / missionName / mapFile / … / gameName |
 | 0x7C | 0x426020 | `_0x07C` | |
 | 0x7D | 0x432690 | `_0x07D` | |
 | 0x7E | 0x425E20 | `_0x07E` | two cstrings → `byte_A86520` / `byte_A86120` (server config strings) |
@@ -408,14 +408,14 @@ This is what a reimplemented server must **handle**.
 | 0x1D | 0x501C60 | |
 | 0x20 | 0x501F70 | |
 | 0x21 | 0x502050 | anti-cheat CRC reply (§5.17) — reads u8 player_index + u32 expected_crc; host XORs computed CRC against per-connection salt at `playerCtx+89924`, mismatch logs "ACRC" + sends "PUNT ACRC" |
-| 0x22 | 0x514C90 | member of the client reply burst to S2C 0x0F / 0x4D |
-| 0x23 | 0x514D50 | burst member |
+| 0x22 | 0x514C90 | player-sync request `[u8 slot][u16 fieldFlags]` → host serializes & replies S2C 0x46 (§5.33); the client queues it on a 0x46 `0x4000`-ack and as a 0x0F/0x4D reply-burst member |
+| 0x23 | 0x514D50 | visible-players request (empty body) → host replies S2C 0x4C snapshot (§5.33); 0x0F/0x4D reply-burst member |
 | 0x24 | 0x514DC0 | |
 | 0x25 | 0x514DF0 | weapon-reload request (mid-game) — note the direction asymmetry vs S2C 0x25 (§5.3) |
 | 0x26 | 0x502390 | |
 | 0x27 | 0x4FC980 | |
-| 0x28 | 0x51A550 | burst member; also the ack reply to S2C 0x4E |
-| 0x29 | 0x514F10 | burst member |
+| 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
+| 0x29 | 0x514F10 | entity-packet request `[u16 bufferIndex]` → host writes that entity's packet & replies S2C 0x51 (§5.33); reply-burst member |
 | 0x2B | 0x514FE0 | |
 | 0x2C | 0x515070 | burst-member receiver |
 | 0x2D | 0x502430 | burst-member receiver |
@@ -424,11 +424,11 @@ This is what a reimplemented server must **handle**.
 | 0x30 | 0x5029B0 | |
 | 0x31 | 0x5024A0 | |
 | 0x32 | 0x51A600 | burst-member receiver |
-| 0x33 | 0x515230 | next-chunk request — labelled reply to S2C 0x60, but NEVER witnessed: the probe2 download streamed without it (D-NET-69); the "re-request" semantic is unverified |
+| 0x33 | 0x515230 | next-chunk request for the S2C 0x60 file transfer — payload `[u32 transferId][u32 nextOffset]` (8 B). Fires only when a transfer spans >1 chunk; probe2's 0x60 fit in one chunk so it didn't fire — NOT because the semantic is unverified (D-NET-74 corrects D-NET-69) |
 | 0x34 | 0x5024B0 | |
 | 0x35 | 0x500DF0 | |
 | 0x36 | 0x500E00 | |
-| 0x37 | 0x5152E0 | mission-chunk re-request — labelled reply to S2C 0x64, but NEVER witnessed (probe2 streamed without it, D-NET-69); semantic unverified |
+| 0x37 | 0x5152E0 | next-chunk request for the S2C 0x64 file transfer — same `[transferId][nextOffset]` 8-B payload as 0x33. Didn't fire in probe2 because that transfer fit in one chunk, NOT because the protocol is re-request-free (D-NET-74) |
 | 0x38 | 0x502510 | |
 | 0x39 | 0x500E20 | |
 | 0x3C | 0x519110 | |
@@ -446,7 +446,7 @@ This is what a reimplemented server must **handle**.
 | 0x48 | 0x510F30 | server-side no-op stub (handler body is empty). 4-byte payload observed in capture (`03 00 00 00`) is read off the wire and discarded. The `NapiNPClientMsg_0x048 @ 0x4284b0` exists on the client side for the inverse S2C 0x48 path, but no S2C 0x48 was observed in the 3-player capture. |
 | 0x49 | 0x510F40 | |
 | 0x4B | 0x510DC0 | |
-| 0x4C | 0x5111B0 | |
+| 0x4C | 0x5111B0 | client quality/state byte `[u8 value]` (host clamps 0..4, sets the player's connection-quality); field map §5.33 (decoded) |
 | 0x4D | 0x518F70 | |
 | 0x4E | 0x511210 | client reply when the S2C 0x05 flag byte is non-zero |
 | 0x4F | 0x514A40 | |
@@ -1933,44 +1933,153 @@ gains `test_event_stream`, which crafts an inline `0x1E` kill + C2S `0x06` fire 
 through the shared pipeline and asserts the assembled events (kill source/target/`STRCND04`, fire
 origin/dir/adm, hit world pos = decompress + anchor) and the env snapshot.
 
-### 5.28 Mission delivery to a joiner — streamed, not a bulk file copy (probe2, 2026-06-18)
+### 5.28 Mission delivery to a joiner — a chunked file transfer (probe2, 2026-06-18; header corrected 2026-06-18b)
 
-When a client joins a hosted mission it does NOT have locally, the host does **not** send the raw
-`.bms` as a chunked file with re-requests. The probe2 capture (Team Deathmatch; the joiner ran from
-a separate install lacking `probe2.bms`, so a real download was forced) shows the mission arriving
-as a **streamed sequence**, and the labelled re-request path (C2S `0x33`/`0x37`) never fires
-(D-NET-69):
+When a client joins a hosted mission it does NOT have locally, the host streams it as part of the
+initial game state. The probe2 capture (Team Deathmatch; the joiner ran from a separate install
+lacking `probe2.bms`, so a real download was forced) shows the joiner receiving, in order:
 
 - **S2C `0x0B`** — the literal 616-byte BMS header (`42 4D 53 13` … mission name … designer), §5.4.
-- **S2C `0x60` — mission ANNOUNCE** `[orig: @ 0x432350]`. 12-byte header then a key/value string
-  table (the VarList encoding the lobby `ClientHostUpdate` also uses): each entry is
-  `{ cstr key, u32 valueLen, value (valueLen bytes incl NUL) }`.
+- **S2C `0x60` / `0x64`** — two **chunked file transfers** (corrected below).
+- **S2C `0x0F`** world-state-load (§5.29), then the entity **spawn batches** (`0x10` statics, `0x0D`
+  pool-1, `0x0C` organics, `0x20` markers) — the actual world contents.
 
-  | off | type | field |
-  |---|---|---|
-  | 0 | u32 | type (=1) |
-  | 4 | u32 | bodyLen (= packet len − 12) |
-  | 8 | u32 | reserved (=0) |
-  | 12 | … | string table — witnessed keys `SERVERNAME` → `"biggy"`, `MISSIONNAME` → `"ON RE Probe TDM Dvxi3"` |
+**`0x60` and `0x64` are identical chunked-file-transfer handlers**, not a structured "announce +
+opaque chunk". Both read a 12-byte header then RAW file bytes, reassembled by offset:
 
-- **S2C `0x64` — mission CHUNK** `[orig: @ 0x432410]`. Same 12-byte header (`type=1`, `bodyLen`,
-  `reserved=0`) then `bodyLen` bytes of an **opaque compact payload** (binary, not plaintext — a
-  compressed/encoded mission sub-resource; the joiner needs the non-entity mission data because the
-  ENTITIES arrive separately as spawn batches). One 180-byte chunk in the probe — the internal codec
-  is deferred to an IDA grill of `0x432410`.
-- **S2C `0x0F`** world-state-load, then the entity **spawn batches** (`0x10` statics, `0x0D` pool-1,
-  `0x0C` organics, `0x20` markers) — the actual world contents.
+| off | type | field |
+|---|---|---|
+| 0 | u32 | `transferId` / checksum — echoed in the re-request; probe2 = `1` |
+| 4 | u32 | `totalSize` — full transfer size across all chunks |
+| 8 | u32 | `chunkOffset` — where this chunk's bytes land in the reassembly buffer |
+| 12 | … | `len − 12` raw file bytes |
 
-So the joiner reconstructs the mission from header + announce + one chunk + streamed entity state,
-not from a re-requested raw-file copy. The `0x60`/`0x64` "chunked transfer with C2S `0x33`/`0x37`
-re-requests" descriptions inherited from the reverted stack (§5.8 already flagged them as never
-byte-compared) are corrected here and in §4; this matches the host emit order in §5.2a
-(`Server_SendInitialGameStateToPlayer @ 0x51bba0`), which likewise carries no `0x60`/`0x64`/`0x33`/
-`0x37` chunk train.
+When `chunkOffset + chunkSize >= totalSize` the transfer completes; otherwise the client re-requests
+the next chunk — `0x60` → **C2S `0x33`**, `0x64` → **C2S `0x37`**, payload `[transferId][nextOffset]`
+(8 B). There is **no compression codec** — the payload is literal file content. `0x60` reassembles
+into a `CDataStream` (`stru_A86920.pad9[24]`); `0x64` into a raw buffer (`unk_24D1E08`) whose
+completion extracts three 32-byte mission-name strings (buffer +0x34/+0x54/+0x74).
+[orig: `NapiNPClientMsg_HandleFileTransferChunk @ 0x432350` (0x60) /
+`NapiNPClientMsg_HandleMissionDataChunk @ 0x432410` (0x64)]
 
-**Witness:** `.scratch/probe2.pcapng` — one `0x60` @ f896, one `0x64` @ f899, the `0x0B` header @
-f957, then the `0x10`/`0x0D`/`0x0C`/`0x20` batches. Printed raw by `nw_pp`; the `0x64` payload codec
-is the only deferred piece.
+**Correction (D-NET-74, supersedes the original D-NET-69 framing).** The first pass read the header
+as `[u32 type=1][u32 bodyLen][u32 reserved=0]` and called `0x60` a parsed `SERVERNAME`/`MISSIONNAME`
+VarList. That was a **single-chunk artifact**: probe2's transfers each fit in ONE chunk, so
+`transferId` read as `1` (looked like `type=1`), `totalSize` equalled the remaining bytes (looked
+like `bodyLen`), and `chunkOffset` was `0` (looked like `reserved=0`). The C2S `0x33`/`0x37`
+re-requests never fired because each transfer **completed in one chunk** — NOT because the protocol
+is re-request-free. The `SERVERNAME`/`MISSIONNAME` text is the *content* of the file `0x60` carries
+(itself a `{ cstr key, u32 len, value }` VarList parsed downstream of reassembly), not a field layout
+the `0x60` handler imposes — the handler only `memcpy`s raw bytes into a stream.
+
+**Witness:** `.scratch/probe2.pcapng` — `decode_file_transfer_chunk` (shared by both tags) decodes:
+- `0x60` @ f896: `id=1 total=163 offset=0 chunk=163 [FINAL]` — content
+  `SERVERNAME\0 [u32 6] "biggy"\0 MISSIONNAME\0 [u32 22] "ON RE Probe TDM Dvxi3"\0 …`.
+- `0x64` @ f899: `id=1 total=180 offset=0 chunk=180 [FINAL]` — a binary mission-metadata blob.
+Both consume to the byte; this matches the host emit order in §5.2a
+(`Server_SendInitialGameStateToPlayer @ 0x51bba0`).
+
+### 5.29 Tag 0x0F — world-state-load (joiner spawn + scores + waypoints; probe2, 2026-06-18)
+
+After the mission transfer (§5.28) the host sends the joiner its spawn pose, the game flags, the
+team-score table, and the waypoint / team-name lists. ~624 B.
+[orig: `NapiNPClientMsg_0x00F @ 0x42E200`]:
+
+| off | type | field | notes |
+|---|---|---|---|
+| 0 | i32 | sessionTick | → `dword_A82368` |
+| 4 | i32 ×3 | posX/Y/Z | local-player spawn (16.16); → entity+4/8/12 when `!is_authority` |
+| 16 | i16 ×3 | yaw/pitch/roll | each `<< 16` to 16.16 → entity Yaw/Pitch/Roll |
+| 22 | u8 | gameFlags | bit0 → `byte_A860DC` (gated on `byte_A860EC==0`); bit1 → `A860DD`; bit2 → `A860DE`; bit3 → ceasefire |
+| 23 | i32 ×128 | teamScores | **FIXED 128-entry block** — the loop fills `[outTable, data)` @ 0x42e324 (512 B; the bulk of the body) |
+| 535 | u16 | waypointCount | |
+| 537 | … | waypointRecords | `{ u16 slotId, u16 nameId, u8 pad }` × waypointCount — **present ONLY for a waypoint gametype** `(g_GameType & 0xFFFDFFFF) == 0x10020`; that gate is **not on the wire** (off-wire, like the §5.10 0x0A objective block) |
+| … | u16 | teamNameCount | |
+| … | cstring × teamNameCount | teamNames | each copied 3-bytes-at-a-time into a 64-byte slot; wire advance = `strlen+1` |
+
+Because the waypoint gate is off-wire, an off-wire decoder takes an `is_waypoint_gametype` hint
+(default false); for TDM/DM the host sends `waypointCount = 0` / no records, so the default is
+byte-exact. A non-authority client then queues the C2S burst replies
+`0x28`/`0x29`/`0x2D`/`0x32`/`0x22`/`0x23` (§5.33). **Witness:** probe2 `0x0F` — `decode_world_state_load`
+consumes the 539-byte body to the byte: `tick=501013671 spawn=(85.0, 0.0, 27.6) yaw=0xC000 flags=0x01
+scores[7 nz] waypoints=0 teamNames=0` (spawn x=85 matches an authored Red start; `waypoints=0`
+confirms the TDM gate-off default and the 128-entry score-block count).
+
+### 5.30 Tag 0x5A — weapon-loadout sync (probe2, 2026-06-18)
+
+[orig: `NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0`]. `[u8 avatarClass]` then a slot chain
+`{ u8 typeId, u8 ammoPrimary, u8 ammoSecondary, u8 ammoAlt }` repeated, terminated by `typeId == 0xFF`
+(the terminator replaces the next typeId; ≤ 40 raw slots @ 0x429155). Each `typeId` is an
+`AdmDef_GetEntryByIndex` (weapon / action-descriptor) index, **not** an items.def type. The retail
+handler drops slots that fail the AdmDef lookup, but that is runtime validation, not a wire field — the
+decoder keeps every slot (a deliberate non-divergence). Resets `dword_81474C = 0` (the
+heartbeat/input gate) on completion. **Witness:** probe2 — 8× `0x5A`, e.g. `avatarClass=8 slots=8`;
+full-consume via `decode_weapon_loadout`.
+
+### 5.31 Tag 0x6E — team/squad roster sync (probe2, 2026-06-18)
+
+[orig: `NapiNPClientMsg_HandleSquadRosterSync @ 0x429880`]. `[u8 teamCount]` then per team:
+
+| type | field | notes |
+|---|---|---|
+| u16 | teamEntityHandle | (pool<<12)\|slot; `0xFFFF` ⇒ skip the entity-slot write (fields still read) |
+| u16 | teamSlotIndex | index into the roster arrays (`unk_A85CC4 + 16*idx`, `dword_A85BC4[idx]`) |
+| u8 | memberCount | → entity+550 |
+| u16 | teamSlotHandle | → entity+548 |
+| u16 × memberCount | members | each a (pool<<12)\|slot; a member matching the local player sets `word_A85BC0 = teamEntityHandle` |
+
+**Witness:** probe2 — 43× `0x6E` (mostly `teams=0` early in the join); full-consume via
+`decode_roster_sync`.
+
+### 5.32 Tag 0x7B — full player/session info (probe2 + loopbacks, 2026-06-18)
+
+[orig: `NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0`]. Five NUL-terminated strings, then
+`[u32 extra]`, then two more NUL-terminated strings. The handler caps the dest buffers (32 / 512) but
+advances the wire by `strlen+1` — the caps are dest sizes, not wire widths.
+
+**Field roles are witnessed from the landing globals, NOT the Hex-Rays "clan/squad/label/rank"
+auto-comment** (which is wrong on every field). Two independent witnesses pin the meanings:
+`PunkBuster_GetCvarValue @ 0x4D96A0` maps three strings to named cvars (`name` → string 1,
+`sv_hostname` → string 3, `mapname` → string 5, `gamename` → string 7), and string 2 lands in the
+exact slot the **S2C 0x7A** player-name handler also writes (`stru_A86920.pad9[196]`, `@ 0x429B40`).
+
+| # | wire field | dest | cvar | observed |
+|---|---|---|---|---|
+| 1 | playerName | `pad9[164]` (0xA86C60) | `name` | `"FooPlayer"` / `"cdouglass"` — local/LAN display name |
+| 2 | **playerId** | `pad9[196]` (0xA86C80) | — | `"00000003"` / `"00000005"` — NovaWorld player/account ID (**not a clan tag**) |
+| 3 | serverName | `pad9[228]` (0xA86CA0) | `sv_hostname` | `"biggy"` |
+| 4 | missionName | `dst` (0xA86CC0) | — | `"ON RE Probe TDM Dvxi3"` |
+| 5 | mapFile | `byte_A86CE0` | `mapname` | `"probe2.bms"` / `"mission.bms"` |
+| — | extra (u32) | `dword_A86D00` | — | `0x00010000` |
+| 6 | motd | `byte_A86D04` | — | (empty in every capture — "MOTD" guess unconfirmed) |
+| 7 | gameName | `byte_A86D24` | `gamename` | (empty in probe2) |
+
+**String 2 is a player ID, not a clan tag** — cross-capture: it is a persistent per-player
+zero-padded number (`FooPlayer = "00000003"` across probe2 / medium / reconnects loopbacks; a second
+player = `"00000005"`), populated **instead of** the display name on a NovaWorld account join, and
+**empty on a LAN/local join** (the LAN `cdouglass` capture has `name="cdouglass"`, id `""`). So strings
+1 and 2 are the two faces of player identity — local display name vs online account ID — exactly the
+mutual exclusion the join auth path produces. **Witness:** `decode_full_player_info` full-consumes
+every `0x7B` across all five `.scratch` captures (`0x7B` ×2 in probe2).
+
+### 5.33 C2S burst replies 0x22 / 0x23 / 0x28 / 0x29 / 0x4C (probe2, 2026-06-18)
+
+The small client→server requests a joiner queues in response to S2C load/sync messages (the 0x0F
+world-state reply burst, the 0x46 `0x4000`-ack, the 0x4D spawn-slot). Field-mapped from the authority
+**SERVER** read-handlers (the canonical body); each serializes a reply back to the requester.
+
+| tag | body | server reply | handler |
+|---|---|---|---|
+| `0x22` | `[u8 slot][u16 fieldFlags]` (3 B) | S2C `0x46` player-sync for `slot` with `fieldFlags` | `NapiNPServerMsg_0x022 @ 0x514C90` |
+| `0x23` | empty (0 B) | S2C `0x4C` visible-players snapshot | `@ 0x514D50` |
+| `0x28` | `[u32 loadoutFilter][u32 flags][u16 extra]` (10 B) | S2C `0x4E` | `NapiNPServerMsg_HandleWeaponLoadoutRequest @ 0x51A550` |
+| `0x29` | `[u16 bufferIndex]` (2 B) | S2C `0x51` entity packet | `NapiNPServerMsg_0x029 @ 0x514F10` |
+| `0x4C` | `[u8 value]` (1 B; server clamps 0..4) | — (sets player connection-quality) | `NapiNPServerMsg_0x04C @ 0x5111B0` |
+
+These confirm §5.8's hypothesis that `0x22`/`0x23`/`0x28`/`0x29` are the 0x0F/0x4D reply burst, with
+exact bodies. **Witness:** probe2 — `0x22` ×11 (`slot=0x00/0x01 fieldFlags=0x5cf7/0x1cf7`), `0x23` ×1,
+`0x28` ×1 (`filter=0x1ddcc5d4 flags=0x1ddcdca7`), `0x29` ×1, `0x4C` ×60; all full-consume via the
+`decode_burst_*` family.
 
 ## 6. Struct reference
 
@@ -2958,10 +3067,12 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-68** [DOC, FIXED] **JO has no raw-input (keys/axes/buttons) channel — player movement is state-replicated, and the §5.4 C2S table mislabeled two unrelated tags as one.** A player's client simulates its own movement locally and uploads the *computed pose* (world position 16.16 + heading/pitch/anim) once per frame via C2S `0x0C` extended (§5.10, `PlayerExtendedUplink` — byte-validated client-origin by D-NET-61: the position matched across `.sph` / C2S 0x0C / S2C 0x0A). The host **read-applies** that reported pose — `dispatch_entity_packet_callback @ 0x4D6A80` hardwires `packetCtx[6]=4` (read-apply), stages the position at the smooth-target `entity+0x234` and interpolates the live entity toward it — and validates plausibility (speed/time-sync + weapon tallies); it does **not** re-simulate movement from inputs. So the host is authoritative as the relay/validator/coordinator (canonical world broadcast, vehicles, AI, hit resolution, anti-cheat), **not** as a movement simulator — there are no inputs on the wire to simulate from. Two §5.4 C2S rows that implied a phantom input stream are corrected from decompiling their handlers: (1) `0x08` "entity movement/state delta" → `validate_time_sync @ 0x502210`, an anti-speedhack that checks `[u32 sessionId][u32 gameTimestamp]` deltas stay within 3% of `GetTickCount` wall-clock; (2) `0x0F` "client input frame (movement + buttons; ~33 ms cadence)" → `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`, a `[u16 pool-0/1 handle]` info request whose host serializes that entity's info and broadcasts S2C `0x18` (the fallback spawn-menu "query loop" of pool-1 slots `0x10NN` is this request, not an input frame). **Naming note (no rename):** the C2S 0x0C "player input" terminology — `Player_BuildTag0CInputBody @ 0x42A550`, the reimpl `handle_tag_0c_player_input` — denotes the client's per-frame POSITION/STATE upload, not raw input; left as-is (IDB renames are shared state; "input" is defensible for the per-frame submission), clarified here for the record. **Implication for the runtime client/host split:** a faithful client simulates its own player and emits a `0x0C`-style pose; it does not ship inputs for the host to run. Doc-only — no source change. [orig: validate_time_sync @ 0x502210 / NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180 / dispatch_entity_packet_callback @ 0x4D6A80 / Player_BuildTag0CInputBody @ 0x42A550]
 
 Controlled-capture validation (probe mission "ON RE Probe TDM Dvxi3", probe 2 / Team Deathmatch 0x20000000, host + joiner on a separate install, 2026-06-18):
-- **D-NET-69** [HIGH, DOC] §4 / §5.28 mission delivery corrected. The §4 table described S2C `0x60`/`0x64` as a chunked `.bms` file transfer with C2S `0x33`/`0x37` re-requests (inherited from the reverted stack; §5.8 had already flagged `0x60`/`0x64` as never byte-compared). The probe2 capture — a real download forced by a joiner whose install lacked `probe2.bms` — shows mission delivery is **streamed, not a bulk file copy**: S2C `0x60` = a mission ANNOUNCE (`[u32 type=1][u32 bodyLen][u32 reserved]` + a `SERVERNAME`/`MISSIONNAME` VarList string table), S2C `0x64` = one compact mission CHUNK (same 12-B header + an opaque ~180-B payload), then the S2C `0x0B` literal 616-B BMS header, S2C `0x0F`, and the entity spawn batches (`0x10`/`0x0D`/`0x0C`/`0x20`). The C2S `0x33`/`0x37` re-requests **never fired** — matching the host emit order in §5.2a (no chunk train). Corrected the §4 `0x60`/`0x64`/`0x33`/`0x37` rows + the catalog notes (`0x60` renamed `mission-announce`); landed the §5.28 field map. The `0x64` inner payload codec is deferred to an IDA grill of `0x432410`. [orig: NapiNPClientMsg @ 0x432350 (0x60) / @ 0x432410 (0x64) / Server_SendInitialGameStateToPlayer @ 0x51bba0 (§5.2a emit order)]
+- **D-NET-69** [HIGH, DOC] §4 / §5.28 mission delivery corrected. The §4 table described S2C `0x60`/`0x64` as a chunked `.bms` file transfer with C2S `0x33`/`0x37` re-requests (inherited from the reverted stack; §5.8 had already flagged `0x60`/`0x64` as never byte-compared). The probe2 capture — a real download forced by a joiner whose install lacked `probe2.bms` — shows mission delivery is **streamed, not a bulk file copy**: S2C `0x60` = a mission ANNOUNCE (`[u32 type=1][u32 bodyLen][u32 reserved]` + a `SERVERNAME`/`MISSIONNAME` VarList string table), S2C `0x64` = one compact mission CHUNK (same 12-B header + an opaque ~180-B payload), then the S2C `0x0B` literal 616-B BMS header, S2C `0x0F`, and the entity spawn batches (`0x10`/`0x0D`/`0x0C`/`0x20`). The C2S `0x33`/`0x37` re-requests **never fired** — matching the host emit order in §5.2a (no chunk train). Corrected the §4 `0x60`/`0x64`/`0x33`/`0x37` rows + the catalog notes; landed the §5.28 field map. **[Partly superseded by D-NET-74, 2026-06-18b:** the IDA grill of `0x432350`/`0x432410` shows `0x60`/`0x64` ARE genuine chunked file transfers — header `[u32 transferId][u32 totalSize][u32 chunkOffset]` + raw file bytes, C2S `0x33`/`0x37` re-request on an incomplete transfer. The re-requests didn't fire because probe2 completed each transfer in ONE chunk, not because delivery is stream-only; the `type=1/bodyLen/reserved` header reading and the "announce VarList" attribution were single-chunk artifacts (the VarList is the transferred file's *content*, not a 0x60 field layout). See the corrected §5.28.] [orig: NapiNPClientMsg @ 0x432350 (0x60) / @ 0x432410 (0x64) / Server_SendInitialGameStateToPlayer @ 0x51bba0 (§5.2a emit order)]
 - **D-NET-70** [INFO, VALIDATED] Pool assignment is by entity **capability, not editor "kind"**: purely-static structures (armory, oil pump, oil towers/pipes/docks/tanks) replicate via S2C `0x10` (pool-2 static-entity batch), while destructible / AI-bearing objects (oil-field LFP `0x0135`/`0x0136`, the drivable fuel truck) ride S2C `0x0D` (pool-1) alongside vehicles. Wire-validated against the probe2 `dvxi3_manifest.txt`: every authored type observed on exactly one pool with byte-exact position/team, so the manifest's `wire_tag` column is now wire-confirmed (no re-hypothesis). [orig: NapiNPClientMsg_0x010 @ 0x433400 (pool-2) / NapiNPClientMsg_0x00D @ 0x432C40 (pool-1)]
 - **D-NET-71** [HIGH, FIXED] S2C `0x10` (pool-2 static-entity batch) had the §5.9 field map but **no decoder** — printed raw hex only, so the replay timeline/viewer silently **dropped every static** (the oil pump `Pmpjk01`, both armories, ~70 oil-field decorations were invisible — the reported "why isn't Pmpjk01 showing up"). Ported §5.9 to `decode_static_entity_batch` (`ingame_decode`): header `[u16 startIndex][u16 count]`; per record `[u16 itemTypeId (0 = empty-slot sentinel)][u16 fieldFlags][i32 posX/Y/Z]` + flag-gated vel / sectionMask / team@+354 / parentSlot, **unconditional** `ammoCount` + `weaponByte`, and `attachRef` when `weaponByte != 0 || flags & 0x200`. Wired a `0x10` branch into `build_replay_timeline` (pool-2 handle `(2<<12)|slot`), a `nw_pp` `print_tag_10`, the catalog (`0x10` → Decoded), the coverage gate, and a new `nw_dvxi3_groundtruth_test` asserting every authored static. Byte-exact full-consume on all 4 capture batches; the replay JSON went **31 → 106 entities** (75 statics surfaced). Also landed the already-documented player decoders `decode_player_list` (§5.20) / `decode_player_sync` (§5.21) — catalog → Decoded, byte-exact on the capture (TestPlayer → handle `0x0004`, FooPlayer → `0x0005`). [orig: NapiNPClientMsg_0x010 @ 0x433400 / NapiNPClientMsg_PlayerList @ 0x42FAE0 / NapiNPClientMsg_PlayerSync @ 0x431370]
-- **D-NET-72** [OPEN] Tags present in the probe2 capture but still uncharacterized (dispatch-table one-liners, no field map) — deferred to an IDA-witnessing pass: S2C `0x5A` weapon-loadout (`0x4290E0`), `0x6E` team/squad roster (`0x429880`), `0x7B` full-player-info (`0x429BB0`); C2S burst replies `0x22`/`0x23`/`0x28`/`0x29` (`0x514C90`/`0x514D50`/`0x51A550`/`0x514F10`) and `0x4C` (`0x5111B0`); plus the S2C `0x0F` world-state-load body (`0x42E200`, ~624 B, now witnessed but not field-mapped) and the S2C `0x64` mission-chunk inner codec (`0x432410`). All decode/print cleanly at the framing layer; only their bodies are unmapped. [orig: addresses inline]
+- **D-NET-72** [FIXED] Tags present in the probe2 capture but uncharacterized (dispatch-table one-liners, no field map) — now IDA-witnessed and landed (D-NET-73 + D-NET-74): S2C `0x5A` weapon-loadout (`0x4290E0`), `0x6E` roster (`0x429880`), `0x7B` full-player-info (`0x429BB0`), the `0x0F` world-state-load body (`0x42E200`); C2S bursts `0x22`/`0x23`/`0x28`/`0x29` (`0x514C90`/`0x514D50`/`0x51A550`/`0x514F10`) + `0x4C` (`0x5111B0`); and the `0x64`/`0x60` mission-transfer "inner codec" (`0x432410`/`0x432350`). Field maps §5.28-§5.33; decoders + `nw_pp` printers + catalog flips + coverage all landed below. [orig: addresses inline]
+- **D-NET-73** [HIGH, FIXED] Field-mapped + decoded the uncharacterized in-game tag bodies (closing the structured half of D-NET-72) from the retail handlers, each byte-exact-validated against the probe2 capture. **S2C `0x5A`** weapon-loadout (§5.30): `[u8 avatarClass]` + a `{u8 typeId, u8 ammoP, u8 ammoS, u8 ammoAlt}` slot chain to a `0xFF` terminator (`typeId` = AdmDef index; the handler's AdmDef-validity drop is runtime, not wire — the decoder keeps all slots). **S2C `0x6E`** roster (§5.31): `[u8 teamCount]` + per-team `{u16 entityHandle (0xFFFF=none), u16 slotIdx, u8 memberCount, u16 slotHandle, u16 members[]}`. **S2C `0x7B`** full-player/session-info (§5.32): 5 cstrings + `[u32 extra]` + 2 cstrings = name / **playerId** / serverName / missionName / mapFile / motd / gameName (probe2: `FooPlayer` / `00000003` / `biggy` / `ON RE Probe TDM Dvxi3` / `probe2.bms`). **String 2 is the NovaWorld player/account ID, not a clan tag** — witnessed from the landing globals + `PunkBuster_GetCvarValue @ 0x4D96A0` cvar map (`name`/`sv_hostname`/`mapname`/`gamename`) and the slot string 2 shares with the S2C 0x7A name handler (`@ 0x429B40`); cross-capture it is persistent per player and empty on LAN joins (where the display name is used instead). The Hex-Rays `clan/squad/rank` auto-comment is wrong on every string. **S2C `0x0F`** world-state-load (§5.29): `i32 sessionTick` + 3×i32 spawn + 3×i16 angles + `u8 gameFlags` + a **fixed 128-i32 score block** (`(data−outTable)/4` @ 0x42e324) + `u16 waypointCount` + waypoint records (gated by the off-wire `g_GameType` waypoint test → decoder hint, default false; TDM sends 0) + `u16 teamNameCount` + cstring names. **C2S bursts** (§5.33), field-mapped from the authority server read-handlers: `0x22` `[u8 slot][u16 fieldFlags]`→S2C 0x46, `0x23` empty→S2C 0x4C, `0x28` `[u32][u32][u16]`→S2C 0x4E, `0x29` `[u16 bufferIndex]`→S2C 0x51, `0x4C` `[u8 value]` (clamp 0..4). Landed `decode_weapon_loadout`/`decode_roster_sync`/`decode_full_player_info`/`decode_world_state_load`/`decode_burst_*` (`ingame_decode`), `nw_pp` printers, catalog → Decoded (25 Decoded tags), and `nw_message_coverage` checks. Wire-validated: `nw_pp` full-consumes every occurrence in probe2 (`0x0F`×1, `0x5A`×8, `0x6E`×43, `0x7B`×2, `0x22`×11, `0x23`×1, `0x28`×1, `0x29`×1, `0x4C`×60) with zero leftover bytes; the `0x0F` `waypoints=0` confirms both the TDM gate-off default and the 128-entry score-block count. [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0 / NapiNPClientMsg_HandleSquadRosterSync @ 0x429880 / NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0 / NapiNPClientMsg_0x00F @ 0x42E200 / NapiNPServerMsg_0x022 @ 0x514C90 / _0x023 @ 0x514D50 / HandleWeaponLoadoutRequest @ 0x51A550 / _0x029 @ 0x514F10 / _0x04C @ 0x5111B0]
+- **D-NET-74** [HIGH, DOC+CODE] **S2C `0x60`/`0x64` are a genuine chunked file transfer — refines D-NET-69.** The IDA grill of `NapiNPClientMsg_HandleFileTransferChunk @ 0x432350` (0x60) and `NapiNPClientMsg_HandleMissionDataChunk @ 0x432410` (0x64) shows both read an identical 12-byte header `[u32 transferId/checksum][u32 totalSize][u32 chunkOffset]` then `len−12` **raw file bytes**, reassembled by offset; on `chunkOffset + chunkSize >= totalSize` the transfer completes, else the client re-requests the next chunk (`0x60`→C2S `0x33`, `0x64`→C2S `0x37`, payload `[transferId][nextOffset]`, 8 B). 0x60 reassembles into a `CDataStream`; 0x64 into a buffer whose completion extracts 3×32-B mission-name strings. **There is no compression codec** — the payload is literal file content (resolves the deferred "0x64 inner codec"). D-NET-69 read the header as `[type=1][bodyLen][reserved=0]` and called 0x60 a parsed `SERVERNAME`/`MISSIONNAME` VarList; that was a **single-chunk artifact** — probe2's transfers each fit in one chunk, so `transferId=1` looked like `type=1`, `totalSize` equalled the remaining bytes, and `chunkOffset=0` looked like `reserved`, and the C2S 0x33/0x37 re-requests didn't fire because the transfers *completed*, not because delivery is stream-only. The `SERVERNAME`/`MISSIONNAME` text is the transferred file's content (a downstream-parsed VarList), not a 0x60 field layout. Landed the shared `decode_file_transfer_chunk` (`ingame_decode`) + `nw_pp` printer + catalog (`0x60`/`0x64` → `file-transfer-chunk`, Decoded) + coverage; corrected §4 (`0x60`/`0x64`/`0x33`/`0x37` rows) and rewrote §5.28. Wire-validated against probe2 (`0x60`: id=1 total=163 offset=0 [FINAL]; `0x64`: id=1 total=180 offset=0 [FINAL]; both consume to the byte). [orig: NapiNPClientMsg_HandleFileTransferChunk @ 0x432350 / NapiNPClientMsg_HandleMissionDataChunk @ 0x432410 / CDataStream_Write @ 0x455480]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;
