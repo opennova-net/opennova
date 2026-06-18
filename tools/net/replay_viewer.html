@@ -51,6 +51,15 @@
   #stage { position: relative; flex: 1 1 auto; min-width: 0; }
   canvas { display: block; width: 100%; height: 100%; background: #151618; cursor: crosshair; }
   canvas.drag { cursor: grabbing; }
+  #grid { display: grid; gap: 2px; width: 100%; height: 100%; background: var(--line); }
+  .vp { position: relative; background: #151618; min-width: 0; min-height: 0; overflow: hidden; }
+  .vp canvas { width: 100%; height: 100%; }
+  .vp .vplabel { position: absolute; left: 8px; top: 6px; font-size: 11px; letter-spacing: .06em;
+    background: rgba(21,22,24,.72); padding: 2px 8px; border-radius: 4px; pointer-events: none;
+    color: var(--orange); font-weight: 600; }
+  .vp .vplabel.client { color: var(--blue); }
+  .vp .vpdiv { position: absolute; right: 8px; top: 6px; font-size: 10px; color: #ff7ad8;
+    background: rgba(21,22,24,.72); padding: 2px 7px; border-radius: 4px; pointer-events: none; }
   h1 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--orange);
     margin: 0; padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
   h1 small { display: block; color: var(--muted); letter-spacing: .04em; text-transform: none;
@@ -188,9 +197,9 @@
   </aside>
 
   <div id="stage">
-    <canvas id="cv"></canvas>
+    <div id="grid"></div>
     <div id="drop">drop replay JSON</div>
-    <div id="hint">drag to pan · wheel to zoom · click entity to inspect · space = play/pause</div>
+    <div id="hint">one viewport per participant (host vs each client) · drag to pan · wheel to zoom · click entity to inspect · space = play/pause</div>
   </div>
 
   <aside id="right">
@@ -239,48 +248,50 @@
   // capture-zone icon_color → team color (matches g_minimap_overlay_color_table)
   const ZONE_COL = { 0x0c: NEUTRAL, 0x09: "#ff5a5a", 0x0a: "#4a90ff" };
 
-  const cv = document.getElementById("cv");
-  const ctx = cv.getContext("2d");
   const stage = document.getElementById("stage");
+  const grid = document.getElementById("grid");
   const el = (id) => document.getElementById(id);
 
-  let DATA = null;       // parsed JSON
-  let ENTS = [];         // prepared entities
-  let BYH = new Map();    // handle -> entity
-  let EVENTS = [];        // prepared events (time-sorted)
-  let ENV = [];           // env samples (time-sorted)
+  // Current-viewport bindings, reassigned per viewport in drawAll() so the draw
+  // primitives below stay simple (one canvas at a time). VIEWPORTS holds one
+  // participant each; the camera + scrubber + selection are SHARED across them.
+  let cv = null, ctx = null, ENTS = [], BYH = new Map();
+  let VIEWPORTS = [];        // [{name,is_host,session,ents,byh,cv,ctx,divEl}]
+  let NAMES = new Map();     // handle -> display name (shared, for the event log)
+  let DIVERGENT = new Map(); // handle -> max cross-viewport distance at `frame`
+
+  let DATA = null;
+  let EVENTS = [];           // prepared events (time-sorted, shared)
+  let ENV = [];              // env samples (shared)
   let bounds = null;
-  let view = { scale: 1, ox: 0, oy: 0 };
+  let view = { scale: 1, ox: 0, oy: 0 }; // ONE shared camera so the views align
   let frame = 0, fmin = 0, fmax = 0;
   let playing = false, lastT = 0;
-  let selected = null;    // selected entity (inspector)
+  let selected = null;       // selected entity HANDLE (resolved per viewport)
 
   const opt = {
-    labels:      el("opt-labels"),
-    trails:      el("opt-trails"),
-    projectiles: el("opt-projectiles"),
-    eventmarks:  el("opt-eventmarks"),
-    anchors:     el("opt-anchors"),
-    anchorfix:   el("opt-anchorfix"),
-    grid:        el("opt-grid"),
+    labels: el("opt-labels"), trails: el("opt-trails"),
+    projectiles: el("opt-projectiles"), eventmarks: el("opt-eventmarks"),
+    anchors: el("opt-anchors"), anchorfix: el("opt-anchorfix"), grid: el("opt-grid"),
   };
   const evFilt = { kill: true, fire: true, hit: true, gameevent: true, zone: true };
 
   function teamColor(t) { return TEAM[t] || NEUTRAL; }
 
-  // ---- name resolution for event text -----
   function nameOf(handle) {
     if (handle === undefined || handle === 65535) return "—";
-    const e = BYH.get(handle);
-    if (e && e.name) return e.name;
+    const n = NAMES.get(handle);
+    if (n) return n;
     const pool = handle >> 12, slot = handle & 0xfff;
     return "s" + slot + (pool ? "·p" + pool : "");
   }
 
-  // ---- prepare -----
-  function prepare(d) {
+  // Prepare one participant's entities into the renderable per-viewport form.
+  // (The own-player uplink is already world-reconciled in libs, so anchorfix is
+  // a near no-op now; kept for older JSON.)
+  function prepareEnts(entities) {
     const ents = [];
-    for (const e of d.entities) {
+    for (const e of (entities || [])) {
       const spawn = e.spawn;
       let off = { x: 0, y: 0 };
       if (opt.anchorfix.checked && spawn) {
@@ -288,16 +299,14 @@
         if (firstUp) off = { x: spawn.x - firstUp.x, y: spawn.y - firstUp.y };
       }
       const track = (e.track || []).map(s => ({
-        f: s.f,
-        x: s.src === "uplink" ? s.x + off.x : s.x,
-        y: s.src === "uplink" ? s.y + off.y : s.y,
-        h: s.h, src: s.src,
+        f: s.f, x: s.src === "uplink" ? s.x + off.x : s.x,
+        y: s.src === "uplink" ? s.y + off.y : s.y, h: s.h, src: s.src,
       }));
       track.sort((a, b) => a.f - b.f);
       ents.push({
         handle: e.handle, pool: e.pool, type_id: e.type_id, net_id: e.net_id,
         spawn_tag: e.spawn_tag,
-        name: e.name || (d.items && d.items[e.type_id]) || ("type " + e.type_id),
+        name: e.name || (DATA && DATA.items && DATA.items[e.type_id]) || ("type " + e.type_id),
         cat: (CATS[e.category] ? e.category : "unknown"),
         team: e.team, spawn, track,
         moving: track.filter(s => s.src === "uplink" || s.src === "frameupdate").length > 1,
@@ -307,11 +316,7 @@
   }
 
   function prepareEvents(d) {
-    const evs = (d.events || []).map(e => {
-      const ev = Object.assign({}, e);
-      ev.text = eventText(ev);
-      return ev;
-    });
+    const evs = (d.events || []).map(e => { const ev = Object.assign({}, e); ev.text = eventText(ev); return ev; });
     evs.sort((a, b) => a.f - b.f);
     return evs;
   }
@@ -337,34 +342,29 @@
     }
     return e.kind;
   }
-  // an event is a "snd:" line when the engine plays a sound for it (fire / hit /
-  // announcement). The filter hides only these from the log text.
   function isSnd(e) { return !!e.snd && (e.kind === "fire" || e.kind === "hit"); }
 
-  function computeBounds(ents, evs) {
+  function computeBounds() {
     let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
-    const acc = (x, y) => { if (x < minx) minx = x; if (x > maxx) maxx = x;
-                            if (y < miny) miny = y; if (y > maxy) maxy = y; };
-    for (const e of ents) {
+    const acc = (x, y) => { if (x<minx) minx=x; if (x>maxx) maxx=x; if (y<miny) miny=y; if (y>maxy) maxy=y; };
+    for (const vp of VIEWPORTS) for (const e of vp.ents) {
       if (e.spawn) acc(e.spawn.x, e.spawn.y);
       for (const s of e.track) acc(s.x, s.y);
     }
-    for (const e of evs) if (e.x !== undefined) acc(e.x, e.y);
-    if (!isFinite(minx)) { minx = -100; maxx = 100; miny = -100; maxy = 100; }
+    for (const e of EVENTS) if (e.x !== undefined) acc(e.x, e.y);
+    if (!isFinite(minx)) { minx=-100; maxx=100; miny=-100; maxy=100; }
     return { minx, maxx, miny, maxy };
   }
 
   function fitView() {
-    if (!bounds) return;
-    const w = cv.width, h = cv.height, pad = 60;
-    const bw = Math.max(1, bounds.maxx - bounds.minx);
-    const bh = Math.max(1, bounds.maxy - bounds.miny);
-    const s = Math.min((w - 2 * pad) / bw, (h - 2 * pad) / bh);
-    view.scale = s;
-    const cx = (bounds.minx + bounds.maxx) / 2, cy = (bounds.miny + bounds.maxy) / 2;
-    view.ox = w / 2 - cx * s;
-    view.oy = h / 2 + cy * s;
-    draw();
+    if (!bounds || !VIEWPORTS.length) return;
+    const w = VIEWPORTS[0].cv.width, h = VIEWPORTS[0].cv.height, pad = 50;
+    const bw = Math.max(1, bounds.maxx - bounds.minx), bh = Math.max(1, bounds.maxy - bounds.miny);
+    const sc = Math.min((w - 2*pad)/bw, (h - 2*pad)/bh);
+    view.scale = sc;
+    const cx = (bounds.minx+bounds.maxx)/2, cy = (bounds.miny+bounds.maxy)/2;
+    view.ox = w/2 - cx*sc; view.oy = h/2 + cy*sc;
+    drawAll();
   }
 
   function sx(x) { return x * view.scale + view.ox; }
@@ -415,13 +415,9 @@
     else { ctx.arc(x, y, r, 0, Math.PI * 2); }
   }
 
-  // live capture-zone color per handle at the current frame
   function zoneStates(cf) {
     const m = new Map();
-    for (const e of EVENTS) {
-      if (e.kind !== "zone" || e.f > cf) continue;
-      m.set(e.src, e);
-    }
+    for (const e of EVENTS) { if (e.kind !== "zone" || e.f > cf) continue; m.set(e.src, e); }
     return m;
   }
 
@@ -433,7 +429,7 @@
       const a = 1 - age / FADE;
       if (e.kind === "fire" && e.x !== undefined && e.dx !== undefined) {
         const mag = Math.hypot(e.dx, e.dy) || 1;
-        const len = 70; // world metres of tracer
+        const len = 70;
         const X = sx(e.x), Y = sy(e.y);
         const X2 = sx(e.x + e.dx / mag * len), Y2 = sy(e.y + e.dy / mag * len);
         ctx.strokeStyle = `rgba(255,210,74,${a})`; ctx.lineWidth = 2;
@@ -450,10 +446,9 @@
 
   function drawEventMarks() {
     if (!opt.eventmarks.checked) return;
-    // live capture zones (persistent)
     const zs = zoneStates(frame);
     for (const [, e] of zs) {
-      if (e.aux & 0x20) continue; // cleared slot
+      if (e.aux & 0x20) continue;
       const ent = BYH.get(e.src);
       const p = ent ? posAt(ent, frame) : (e.x !== undefined ? e : null);
       if (!p) continue;
@@ -463,7 +458,6 @@
       ctx.beginPath(); ctx.arc(X, Y, 13, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    // recent kills (fading X at the kill location, when positioned)
     for (const e of EVENTS) {
       if (e.kind !== "kill") continue;
       const age = frame - e.f;
@@ -513,7 +507,6 @@
 
     drawEventMarks();
 
-    // live markers
     for (const e of ENTS) {
       const p = posAt(e, frame);
       if (!p) continue;
@@ -527,7 +520,11 @@
         ctx.beginPath(); ctx.arc(X, Y, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
       }
-      if (selected === e) {
+      if (DIVERGENT.has(e.handle)) {
+        ctx.beginPath(); ctx.arc(X, Y, r + 9, 0, Math.PI * 2);
+        ctx.strokeStyle = "#ff7ad8"; ctx.lineWidth = 2; ctx.stroke();
+      }
+      if (selected === e.handle) {
         ctx.beginPath(); ctx.arc(X, Y, r + 6, 0, Math.PI * 2);
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]);
         ctx.stroke(); ctx.setLineDash([]);
@@ -547,12 +544,40 @@
     drawProjectiles();
   }
 
-  // ---- entity pick (inspector) -----
-  function pickEntity(mx, my) {
+  // Per-handle max position spread across viewports at the current frame: where
+  // the host's broadcast and a client's reconstruction disagree (the RE signal).
+  function computeDivergent() {
+    const pos = new Map();
+    for (const vp of VIEWPORTS) for (const e of vp.ents) {
+      const p = posAt(e, frame); if (!p) continue;
+      if (!pos.has(e.handle)) pos.set(e.handle, []);
+      pos.get(e.handle).push(p);
+    }
+    const out = new Map();
+    for (const [h, ps] of pos) {
+      let mx = 0;
+      for (let i = 0; i < ps.length; i++)
+        for (let j = i + 1; j < ps.length; j++)
+          mx = Math.max(mx, Math.hypot(ps[i].x - ps[j].x, ps[i].y - ps[j].y));
+      if (mx > 2.0) out.set(h, mx);
+    }
+    return out;
+  }
+
+  function drawAll() {
+    for (const vp of VIEWPORTS) {
+      cv = vp.cv; ctx = vp.ctx; ENTS = vp.ents; BYH = vp.byh;
+      draw();
+    }
+    let worst = 0;
+    for (const [, d] of DIVERGENT) worst = Math.max(worst, d);
+    for (const vp of VIEWPORTS) vp.divEl.textContent = worst > 0 ? ("Δ " + worst.toFixed(1) + " m") : "";
+  }
+
+  function pickEntity(vp, mx, my) {
     let best = null, bestD = 16 * 16;
-    for (const e of ENTS) {
-      const p = posAt(e, frame);
-      if (!p) continue;
+    for (const e of vp.ents) {
+      const p = posAt(e, frame); if (!p) continue;
       const dx = sx(p.x) - mx, dy = sy(p.y) - my, d = dx * dx + dy * dy;
       if (d < bestD) { bestD = d; best = e; }
     }
@@ -561,58 +586,51 @@
 
   function renderInspector() {
     const box = el("inspector");
-    if (!selected) { box.className = "empty"; box.textContent = "click an entity to inspect"; return; }
+    const base = (selected != null && VIEWPORTS.length) ? VIEWPORTS[0].byh.get(selected) : null;
+    if (!base) { box.className = "empty"; box.textContent = "click an entity to inspect"; return; }
     box.className = "";
-    const e = selected, p = posAt(e, frame);
-    const hx = "0x" + e.handle.toString(16).padStart(4, "0");
+    const hx = "0x" + selected.toString(16).padStart(4, "0");
     const rows = [
-      ["handle", `${hx} · p${e.pool}/s${e.handle & 0xfff}`],
-      ["type", `${e.type_id}${DATA.items && DATA.items[e.type_id] ? " · " + DATA.items[e.type_id] : ""}`],
-      ["category", e.cat],
-      ["team", e.team === 1 ? "Blue (1)" : e.team === 2 ? "Red (2)" : (e.team == null ? "—" : e.team)],
-      ["net_id", e.net_id],
-      ["spawn tag", e.spawn_tag],
-      ["pos (m)", p ? `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${(p.z!==undefined?p.z.toFixed(1):"?")}` : "—"],
-      ["heading", p && p.h != null ? p.h.toFixed(1) + "°" : "—"],
-      ["samples", `${e.track.length} (${e.moving ? "moving" : "static"})`],
+      ["handle", `${hx} · p${base.pool}/s${selected & 0xfff}`],
+      ["type", `${base.type_id}${DATA.items && DATA.items[base.type_id] ? " · " + DATA.items[base.type_id] : ""}`],
+      ["category", base.cat],
+      ["team", base.team === 1 ? "Blue (1)" : base.team === 2 ? "Red (2)" : (base.team == null ? "—" : base.team)],
+      ["net_id", base.net_id],
+      ["spawn tag", base.spawn_tag],
     ];
+    for (const vp of VIEWPORTS) {
+      const e = vp.byh.get(selected), p = e && posAt(e, frame);
+      rows.push([(vp.is_host ? "host" : vp.name) + " pos", p ? `${p.x.toFixed(1)}, ${p.y.toFixed(1)}` : "—"]);
+    }
+    if (DIVERGENT.has(selected)) rows.push(["divergence", DIVERGENT.get(selected).toFixed(2) + " m"]);
     box.innerHTML =
-      `<div class="ihead"><b>${e.name}</b><button class="close" title="close">✕</button></div>` +
+      `<div class="ihead"><b>${base.name}</b><button class="close" title="close">✕</button></div>` +
       rows.map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join("");
-    box.querySelector(".close").onclick = () => { selected = null; renderInspector(); draw(); };
+    box.querySelector(".close").onclick = () => { selected = null; renderInspector(); drawAll(); };
   }
 
-  // ---- event log -----
   function renderLog() {
     const log = el("log");
     const hideSnd = el("filt-snd").checked;
     const list = EVENTS.filter(e => evFilt[e.kind] && !(hideSnd && isSnd(e)));
     el("log-count").textContent = list.length + " / " + EVENTS.length;
-    const html = list.map((e, i) => {
+    log.innerHTML = list.map((e) => {
       const cls = e.f <= frame ? (frame - e.f <= FADE ? "now" : "") : "future";
       return `<div class="ev ${e.kind} ${cls}" data-f="${e.f}">` +
              `<span class="f">${e.f}</span>` +
              `<span class="ic">${EV_ICON[e.kind] || "·"}</span>` +
              `<span class="tx">${e.text}</span></div>`;
     }).join("");
-    log.innerHTML = html;
-    log.querySelectorAll(".ev").forEach(d => {
-      d.onclick = () => { setPlaying(false); setFrame(parseInt(d.dataset.f, 10)); };
-    });
+    log.querySelectorAll(".ev").forEach(d => { d.onclick = () => { setPlaying(false); setFrame(parseInt(d.dataset.f, 10)); }; });
     followLog();
   }
   function followLog() {
     if (!el("filt-follow").checked) return;
     const log = el("log");
-    const nodes = log.querySelectorAll(".ev");
     let target = null;
-    for (const n of nodes) { if (parseInt(n.dataset.f, 10) <= frame) target = n; else break; }
-    if (target) {
-      const lt = target.offsetTop - log.clientHeight * 0.66;
-      log.scrollTop = Math.max(0, lt);
-    }
+    for (const n of log.querySelectorAll(".ev")) { if (parseInt(n.dataset.f, 10) <= frame) target = n; else break; }
+    if (target) log.scrollTop = Math.max(0, target.offsetTop - log.clientHeight * 0.66);
   }
-  // lighter update: just retag now/future without rebuilding, then follow
   function refreshLogClasses() {
     el("log").querySelectorAll(".ev").forEach(d => {
       const f = parseInt(d.dataset.f, 10);
@@ -622,7 +640,6 @@
     followLog();
   }
 
-  // ---- environment readout -----
   function envAt(cf) {
     if (!ENV.length) return null;
     let r = ENV[0];
@@ -644,15 +661,15 @@
       `<div class="kv"><span>quake</span><b>${s.quake}</b></div>`;
   }
 
-  // ---- timeline / animation -----
   function setFrame(f) {
     frame = Math.max(fmin, Math.min(fmax, f));
     el("scrub").value = String(frame);
     el("framelabel").textContent = `f ${frame} / ${fmax}`;
-    draw();
+    DIVERGENT = computeDivergent();
+    drawAll();
     refreshLogClasses();
     renderEnv();
-    if (selected) renderInspector();
+    if (selected != null) renderInspector();
   }
   function tick(t) {
     if (playing) {
@@ -670,25 +687,52 @@
     el("play").textContent = p ? "⏸ Pause" : "▶ Play";
   }
 
-  // ---- load -----
+  // Build one viewport per participant (host first, then each client).
+  function buildViewports() {
+    grid.innerHTML = "";
+    VIEWPORTS = [];
+    NAMES = new Map();
+    const parts = (DATA.participants || []);
+    const n = Math.max(1, parts.length);
+    const cols = n <= 3 ? n : Math.ceil(Math.sqrt(n));
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    for (const p of parts) {
+      const wrap = document.createElement("div"); wrap.className = "vp";
+      const c = document.createElement("canvas");
+      const label = document.createElement("div");
+      label.className = "vplabel" + (p.is_host ? "" : " client");
+      label.textContent = p.is_host ? "HOST (authoritative broadcast)" : ((p.name || ("client " + p.session)) + " (received)");
+      const divb = document.createElement("div"); divb.className = "vpdiv";
+      wrap.appendChild(c); wrap.appendChild(label); wrap.appendChild(divb);
+      grid.appendChild(wrap);
+      const ents = prepareEnts(p.entities);
+      for (const e of ents) if (!NAMES.has(e.handle)) NAMES.set(e.handle, e.name);
+      const vp = { name: p.name || ("client " + p.session), is_host: !!p.is_host,
+        session: p.session, ents, byh: new Map(ents.map(e => [e.handle, e])),
+        cv: c, ctx: c.getContext("2d"), divEl: divb };
+      attachCanvas(vp);
+      VIEWPORTS.push(vp);
+    }
+  }
+
   function load(json) {
     DATA = json;
-    ENTS = prepare(json);
-    BYH = new Map(ENTS.map(e => [e.handle, e]));
+    buildViewports();
     EVENTS = prepareEvents(json);
     ENV = (json.env || []).slice().sort((a, b) => a.f - b.f);
-    bounds = computeBounds(ENTS, EVENTS);
+    bounds = computeBounds();
     fmin = json.meta ? json.meta.first_frame : 0;
     fmax = json.meta ? json.meta.last_frame : 100;
     if (!(fmax > fmin)) fmax = fmin + 1;
     selected = null;
     el("scrub").min = String(fmin); el("scrub").max = String(fmax);
     el("capname").textContent = (json.meta && json.meta.capture) || "loaded";
-    el("st-ent").textContent = String(ENTS.length);
+    const base = VIEWPORTS.length ? VIEWPORTS[0].ents : [];
+    el("st-ent").textContent = String(base.length);
     el("st-frames").textContent = `${fmin} – ${fmax}`;
-    el("st-moving").textContent = String(ENTS.filter(e => e.moving).length);
+    el("st-moving").textContent = String(base.filter(e => e.moving).length);
     el("st-events").textContent = String(EVENTS.length);
-    const present = [...new Set(ENTS.map(e => e.cat))];
+    const present = [...new Set(VIEWPORTS.flatMap(vp => vp.ents.map(e => e.cat)))];
     el("catlegend").innerHTML = present.map(c =>
       `<div><span class="sw" style="background:#7d828a;border-radius:${(CATS[c]||{}).shape==='circle'||(CATS[c]||{}).shape==='ring'?'50%':'3px'}"></span> ${(CATS[c]||CATS.unknown).label}</div>`
     ).join("");
@@ -702,66 +746,63 @@
     r.readAsText(file);
   }
 
-  // ---- canvas sizing / interaction -----
   function resize() {
     const dpr = window.devicePixelRatio || 1;
-    cv.width = Math.floor(stage.clientWidth * dpr);
-    cv.height = Math.floor(stage.clientHeight * dpr);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    draw();
-  }
-  window.addEventListener("resize", () => { resize(); });
-
-  let dragging = false, moved = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
-  cv.addEventListener("mousedown", e => { dragging = true; moved = false; lastX = e.clientX; lastY = e.clientY; downX = e.clientX; downY = e.clientY; });
-  window.addEventListener("mouseup", e => {
-    if (dragging && !moved) {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = cv.getBoundingClientRect();
-      const pick = pickEntity((e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr);
-      if (pick) { selected = pick; renderInspector(); } else if (selected) { selected = null; renderInspector(); }
-      draw();
+    for (const vp of VIEWPORTS) {
+      vp.cv.width = Math.max(1, Math.floor(vp.cv.clientWidth * dpr));
+      vp.cv.height = Math.max(1, Math.floor(vp.cv.clientHeight * dpr));
     }
-    dragging = false; cv.classList.remove("drag");
-  });
+    drawAll();
+  }
+  window.addEventListener("resize", () => resize());
+
+  // Shared camera: pan/zoom on any viewport moves the one `view`; all redraw.
+  let dragVp = null, moved = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
+  function attachCanvas(vp) {
+    vp.cv.addEventListener("mousedown", e => { dragVp = vp; moved = false; lastX = e.clientX; lastY = e.clientY; downX = e.clientX; downY = e.clientY; });
+    vp.cv.addEventListener("wheel", e => {
+      e.preventDefault();
+      const dpr = window.devicePixelRatio || 1;
+      const mx = e.offsetX * dpr, my = e.offsetY * dpr;
+      const k = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      view.ox = mx - (mx - view.ox) * k; view.oy = my - (my - view.oy) * k; view.scale *= k;
+      drawAll();
+    }, { passive: false });
+  }
   window.addEventListener("mousemove", e => {
-    if (!dragging) return;
-    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 3) { moved = true; cv.classList.add("drag"); }
+    if (!dragVp) return;
+    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 3) { moved = true; dragVp.cv.classList.add("drag"); }
     if (!moved) return;
     const dpr = window.devicePixelRatio || 1;
     view.ox += (e.clientX - lastX) * dpr; view.oy += (e.clientY - lastY) * dpr;
-    lastX = e.clientX; lastY = e.clientY; draw();
+    lastX = e.clientX; lastY = e.clientY; drawAll();
   });
-  cv.addEventListener("wheel", e => {
-    e.preventDefault();
-    const dpr = window.devicePixelRatio || 1;
-    const mx = e.offsetX * dpr, my = e.offsetY * dpr;
-    const k = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    view.ox = mx - (mx - view.ox) * k;
-    view.oy = my - (my - view.oy) * k;
-    view.scale *= k; draw();
-  }, { passive: false });
+  window.addEventListener("mouseup", e => {
+    if (dragVp && !moved) {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = dragVp.cv.getBoundingClientRect();
+      const pick = pickEntity(dragVp, (e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr);
+      selected = pick ? pick.handle : null;
+      renderInspector(); drawAll();
+    }
+    if (dragVp) dragVp.cv.classList.remove("drag");
+    dragVp = null;
+  });
 
-  // ---- drag & drop -----
   ["dragenter", "dragover"].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); stage.classList.add("over"); }));
   ["dragleave", "drop"].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); if (ev !== "dragover") stage.classList.remove("over"); }));
   stage.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) loadFile(f); });
 
-  // ---- controls -----
   el("file").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
   el("fit").addEventListener("click", fitView);
   el("play").addEventListener("click", () => setPlaying(!playing));
   el("scrub").addEventListener("input", e => { setPlaying(false); setFrame(parseInt(e.target.value, 10)); });
-  Object.values(opt).forEach(c => c.addEventListener("change", () => { if (DATA) { ENTS = prepare(DATA); BYH = new Map(ENTS.map(e => [e.handle, e])); draw(); } }));
-  document.querySelectorAll('.efilt input[data-k]').forEach(c =>
-    c.addEventListener("change", () => { evFilt[c.dataset.k] = c.checked; renderLog(); }));
+  Object.values(opt).forEach(c => c.addEventListener("change", () => { if (DATA) drawAll(); }));
+  document.querySelectorAll('.efilt input[data-k]').forEach(c => c.addEventListener("change", () => { evFilt[c.dataset.k] = c.checked; renderLog(); }));
   el("filt-snd").addEventListener("change", renderLog);
   el("filt-follow").addEventListener("change", followLog);
-  window.addEventListener("keydown", e => {
-    if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
-  });
+  window.addEventListener("keydown", e => { if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); } });
 
-  resize();
   requestAnimationFrame(tick);
 })();
 </script>

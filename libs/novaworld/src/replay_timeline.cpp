@@ -408,14 +408,16 @@ std::vector<ParticipantView> build_per_participant_world(
 	const std::vector<InGameMessage> msgs = decode_capture_to_messages(datagrams);
 	const ReplayTimeline full = build_replay_timeline(msgs, class_of);
 
-	// Roster: the host (authority) + one client per distinct session (client UDP
-	// port), in first-seen order.
+	// Roster: the host (authority) + one client per session that OWNS an entity —
+	// i.e. sent a C2S 0x0C uplink, an in-game player reporting its own position.
+	// Sessions without one (the host's own local client on a listen server, the
+	// lobby/gate sessions) are not distinct in-game viewpoints, so they get no view.
 	std::vector<int> client_sessions;
-	for (const auto &m : msgs) {
-		if (m.session == 0) continue;
-		if (std::find(client_sessions.begin(), client_sessions.end(), m.session) ==
-		    client_sessions.end())
-			client_sessions.push_back(m.session);
+	for (const ReplayEntity &e : full.entities) {
+		if (e.owner_session == 0) continue;
+		if (std::find(client_sessions.begin(), client_sessions.end(),
+		              e.owner_session) == client_sessions.end())
+			client_sessions.push_back(e.owner_session);
 	}
 
 	std::vector<ParticipantView> views;

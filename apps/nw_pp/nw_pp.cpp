@@ -827,8 +827,12 @@ int run_replay_json(const std::vector<CaptureDatagram> &caps,
 		auto it = g_item_class.find(t);
 		return it == g_item_class.end() ? EntityClass::Unknown : it->second;
 	};
-	const ReplayTimeline tl =
-	    build_replay_timeline(decode_capture_to_messages(caps), class_of);
+	const std::vector<ParticipantView> views = build_per_participant_world(caps, class_of);
+	const ReplayTimeline empty;
+	// meta / items / env / events are shared (the entity SET + wire event stream
+	// are identical across views; only per-entity tracks differ per participant).
+	const ReplayTimeline &shared = views.empty() ? empty : views[0].timeline;
+
 	std::ofstream o(out_path);
 	if (!o) {
 		std::fprintf(stderr, "FAILED to open %s for write\n", out_path);
@@ -837,14 +841,16 @@ int run_replay_json(const std::vector<CaptureDatagram> &caps,
 	o.setf(std::ios::fixed);
 	o.precision(3);
 	o << "{\n  \"meta\": {\"capture\":\"" << json_escape(basename_of(capture_path))
-	  << "\",\"first_frame\":" << tl.first_frame << ",\"last_frame\":"
-	  << tl.last_frame << ",\"entity_count\":" << tl.entities.size()
-	  << ",\"note\":\"positions=world meters; heading=degrees; uplink samples are "
-	     "world+origin (viewer anchors them to spawn for display)\"},\n";
-	// type_id -> display name (populated only when --items gave an items.def).
+	  << "\",\"first_frame\":" << shared.first_frame << ",\"last_frame\":"
+	  << shared.last_frame << ",\"entity_count\":" << shared.entities.size()
+	  << ",\"participants\":" << views.size()
+	  << ",\"note\":\"positions=world meters; heading=degrees; each participant's "
+	     "own-player uplink track is reconciled to its spawn world frame in libs\"},\n";
+
+	// type_id -> display name (shared; populated only when --items gave an items.def).
 	{
 		std::set<uint16_t> types;
-		for (const auto &e : tl.entities) types.insert(e.type_id);
+		for (const auto &en : shared.entities) types.insert(en.type_id);
 		o << "  \"items\": {";
 		bool first = true;
 		for (uint16_t t : types) {
@@ -856,33 +862,20 @@ int run_replay_json(const std::vector<CaptureDatagram> &caps,
 		}
 		o << "},\n";
 	}
-	o << "  \"entities\": [\n";
-	for (size_t i = 0; i < tl.entities.size(); ++i) {
-		const ReplayEntity &e = tl.entities[i];
-		char tagbuf[8];
-		std::snprintf(tagbuf, sizeof(tagbuf), "0x%02x",
-		              static_cast<unsigned char>(e.spawn_tag));
-		o << "    {\"handle\":" << e.handle << ",\"pool\":" << unsigned(e.pool)
-		  << ",\"type_id\":" << e.type_id << ",\"name\":\"" << json_escape(e.name)
-		  << "\",\"category\":\"" << category_for(e.type_id, e.pool)
-		  << "\",\"team\":";
-		if (e.team_known) o << e.team; else o << "null";
-		o << ",\"net_id\":" << e.net_id << ",\"spawn_tag\":\"" << tagbuf
-		  << "\",\"spawn\":";
-		if (e.has_spawn) write_sample_json(o, e.spawn, false); else o << "null";
-		o << ",\"track\":[";
-		for (size_t j = 0; j < e.track.size(); ++j) {
-			if (j) o << ",";
-			write_sample_json(o, e.track[j], true);
-		}
-		o << "]}";
-		if (i + 1 < tl.entities.size()) o << ",";
-		o << "\n";
-	}
-	o << "  ],\n";
 
-	// Event stream: fire / hit / kill / game-event / capture-zone, in capture
-	// order. Spatial fields are world meters; src/tgt/aux are entity handles.
+	// Environment timeline (0x0A env snapshots) — shared across participants.
+	o << "  \"env\": [";
+	for (size_t i = 0; i < shared.environment.size(); ++i) {
+		const ReplayEnvSample &en = shared.environment[i];
+		if (i) o << ",";
+		o << "{\"f\":" << en.frame_index << ",\"fog\":" << en.fog_dist
+		  << ",\"tod\":" << en.tod_fixed << ",\"quake\":" << unsigned(en.quake_ticks)
+		  << ",\"cloud\":" << unsigned(en.cloud_scroll)
+		  << ",\"overcast\":" << unsigned(en.overcast) << "}";
+	}
+	o << "],\n";
+
+	// Event stream (shared) — fire / hit / kill / game-event / capture-zone.
 	auto kind_name = [](ReplayEventKind k) -> const char * {
 		switch (k) {
 		case ReplayEventKind::Fire:        return "fire";
@@ -894,48 +887,70 @@ int run_replay_json(const std::vector<CaptureDatagram> &caps,
 		return "?";
 	};
 	o << "  \"events\": [\n";
-	for (size_t i = 0; i < tl.events.size(); ++i) {
-		const ReplayEvent &e = tl.events[i];
-		o << "    {\"f\":" << e.frame_index << ",\"kind\":\"" << kind_name(e.kind) << "\"";
-		if (e.has_pos) o << ",\"x\":" << fp16(e.x) << ",\"y\":" << fp16(e.y)
-		                 << ",\"z\":" << fp16(e.z);
-		if (e.has_dir) o << ",\"dx\":" << fp16(e.dir_x) << ",\"dy\":" << fp16(e.dir_y);
-		if (e.source != 0xFFFF) o << ",\"src\":" << e.source;
-		if (e.target != 0xFFFF) o << ",\"tgt\":" << e.target;
-		if (e.aux != 0xFFFF)    o << ",\"aux\":" << e.aux;
-		if (e.adm_index)        o << ",\"adm\":" << unsigned(e.adm_index);
-		if (e.event_type)       o << ",\"etype\":" << unsigned(e.event_type);
-		if (e.sound)            o << ",\"snd\":1";
-		if (!e.label.empty())   o << ",\"label\":\"" << json_escape(e.label) << "\"";
+	for (size_t i = 0; i < shared.events.size(); ++i) {
+		const ReplayEvent &en = shared.events[i];
+		o << "    {\"f\":" << en.frame_index << ",\"kind\":\"" << kind_name(en.kind) << "\"";
+		if (en.has_pos) o << ",\"x\":" << fp16(en.x) << ",\"y\":" << fp16(en.y) << ",\"z\":" << fp16(en.z);
+		if (en.has_dir) o << ",\"dx\":" << fp16(en.dir_x) << ",\"dy\":" << fp16(en.dir_y);
+		if (en.source != 0xFFFF) o << ",\"src\":" << en.source;
+		if (en.target != 0xFFFF) o << ",\"tgt\":" << en.target;
+		if (en.aux != 0xFFFF)    o << ",\"aux\":" << en.aux;
+		if (en.adm_index)        o << ",\"adm\":" << unsigned(en.adm_index);
+		if (en.event_type)       o << ",\"etype\":" << unsigned(en.event_type);
+		if (en.sound)            o << ",\"snd\":1";
+		if (!en.label.empty())   o << ",\"label\":\"" << json_escape(en.label) << "\"";
 		o << "}";
-		if (i + 1 < tl.events.size()) o << ",";
+		if (i + 1 < shared.events.size()) o << ",";
 		o << "\n";
 	}
 	o << "  ],\n";
 
-	// Environment timeline (0x0A env snapshots).
-	o << "  \"env\": [";
-	for (size_t i = 0; i < tl.environment.size(); ++i) {
-		const ReplayEnvSample &e = tl.environment[i];
-		if (i) o << ",";
-		o << "{\"f\":" << e.frame_index << ",\"fog\":" << e.fog_dist
-		  << ",\"tod\":" << e.tod_fixed << ",\"quake\":" << unsigned(e.quake_ticks)
-		  << ",\"cloud\":" << unsigned(e.cloud_scroll)
-		  << ",\"overcast\":" << unsigned(e.overcast) << "}";
+	// Per-participant entities — each participant's reconstructed world.
+	auto write_entity = [&](const ReplayEntity &en) {
+		char tagbuf[8];
+		std::snprintf(tagbuf, sizeof(tagbuf), "0x%02x", static_cast<unsigned char>(en.spawn_tag));
+		o << "      {\"handle\":" << en.handle << ",\"pool\":" << unsigned(en.pool)
+		  << ",\"type_id\":" << en.type_id << ",\"name\":\"" << json_escape(en.name)
+		  << "\",\"category\":\"" << category_for(en.type_id, en.pool) << "\",\"team\":";
+		if (en.team_known) o << en.team; else o << "null";
+		o << ",\"net_id\":" << en.net_id << ",\"spawn_tag\":\"" << tagbuf << "\",\"spawn\":";
+		if (en.has_spawn) write_sample_json(o, en.spawn, false); else o << "null";
+		o << ",\"track\":[";
+		for (size_t j = 0; j < en.track.size(); ++j) {
+			if (j) o << ",";
+			write_sample_json(o, en.track[j], true);
+		}
+		o << "]}";
+	};
+	o << "  \"participants\": [\n";
+	for (size_t vi = 0; vi < views.size(); ++vi) {
+		const ParticipantView &pv = views[vi];
+		o << "    {\"id\":" << pv.who.id << ",\"is_host\":" << (pv.who.is_host ? "true" : "false")
+		  << ",\"session\":" << pv.who.session << ",\"name\":\"" << json_escape(pv.who.name)
+		  << "\",\"entities\":[\n";
+		for (size_t i = 0; i < pv.timeline.entities.size(); ++i) {
+			write_entity(pv.timeline.entities[i]);
+			if (i + 1 < pv.timeline.entities.size()) o << ",";
+			o << "\n";
+		}
+		o << "    ]}";
+		if (vi + 1 < views.size()) o << ",";
+		o << "\n";
 	}
-	o << "]\n}\n";
+	o << "  ]\n}\n";
 
 	size_t n_hit = 0, n_fire = 0, n_kill = 0;
-	for (const auto &e : tl.events) {
-		if (e.kind == ReplayEventKind::Hit) n_hit++;
-		else if (e.kind == ReplayEventKind::Fire) n_fire++;
-		else if (e.kind == ReplayEventKind::Kill) n_kill++;
+	for (const auto &en : shared.events) {
+		if (en.kind == ReplayEventKind::Hit) n_hit++;
+		else if (en.kind == ReplayEventKind::Fire) n_fire++;
+		else if (en.kind == ReplayEventKind::Kill) n_kill++;
 	}
 	std::fprintf(stderr,
-	             "wrote %zu entities, %zu events (%zu fire / %zu hit / %zu kill), "
-	             "%zu env (frames %d..%d) to %s\n",
-	             tl.entities.size(), tl.events.size(), n_fire, n_hit, n_kill,
-	             tl.environment.size(), tl.first_frame, tl.last_frame, out_path);
+	             "wrote %zu participants x %zu entities, %zu events "
+	             "(%zu fire / %zu hit / %zu kill), %zu env (frames %d..%d) to %s\n",
+	             views.size(), shared.entities.size(), shared.events.size(),
+	             n_fire, n_hit, n_kill, shared.environment.size(),
+	             shared.first_frame, shared.last_frame, out_path);
 	return 0;
 }
 
