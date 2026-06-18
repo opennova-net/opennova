@@ -4,6 +4,7 @@ add_library(opennova_novaworld STATIC
     src/gate_probe.cpp
     src/lobby_update.cpp
     src/session_hello.cpp
+    src/session_protocol.cpp
     src/protocol_message.cpp
     src/client_session.cpp
     src/game_session.cpp

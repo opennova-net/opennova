@@ -10,7 +10,7 @@ session handshake, the browser/host/play container services, and the legacy
 | Listener | Port | Protocol |
 | --- | --- | --- |
 | `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) |
-| `NwUdpListener` | UDP 64206 | NWU framing → session handshake (0x41/0x42/0x43/0x46) → NOVAWORLDUDP containers |
+| `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 
 ## Thread model

@@ -919,6 +919,11 @@ target_link_libraries(game_server_runtime_test PRIVATE opennova_novaworld)
 target_include_directories(game_server_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME game_server_runtime COMMAND game_server_runtime_test)
 
+add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
+target_link_libraries(session_protocol_test PRIVATE opennova_novaworld)
+target_include_directories(session_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session_protocol COMMAND session_protocol_test)
+
 add_executable(replication_min_test novaworld/replication_min_test.cpp)
 target_link_libraries(replication_min_test PRIVATE opennova_novaworld)
 target_include_directories(replication_min_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

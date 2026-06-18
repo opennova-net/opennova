@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include <novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
+#include <novaworld/game_server_runtime.h>
 #include <novaworld/lobby_session.h>
 #include <novaworld/protocol_message.h>
 
@@ -53,9 +54,9 @@ struct ServerConfig;
 //   0x43 SESSION       -> 0x83 SESSION (heartbeat ack only for now)
 //   0x46 ClientGoodBye -> 0x86 ServerGoodBye + drop the connection
 //
-// PN dispatch happens at HELLO time — only "NOVAWORLDUDP" peers are
-// accepted. Game-protocol (PN="JointOperations") clients should be hitting
-// a future per-match game server, not us.
+// PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby
+// container path; "JointOperations"/"JOINTOPERATIONS" peers use the in-match
+// GameServerRuntime on the same retail UDP session port.
 class NwUdpListener {
 public:
 	explicit NwUdpListener(ConnectionManager &manager);
@@ -73,9 +74,9 @@ public:
 	}
 
 	// Optional unknown-message tracker. When set, unhandled opcodes,
-	// non-NOVAWORLDUDP PN strings, unhandled protocol-message types, and
-	// "unknown:" lobby containers are recorded (deduped) for /api/unknowns
-	// + the unknown_messages table. Null is safe (every hook is guarded).
+	// unsupported PN strings, unhandled protocol-message types, and "unknown:"
+	// lobby containers are recorded (deduped) for /api/unknowns + the
+	// unknown_messages table. Null is safe (every hook is guarded).
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
 	NwUdpListener(const NwUdpListener &) = delete;
@@ -120,6 +121,7 @@ private:
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
+	GameServerRuntime game_runtime_;
 	mutable std::mutex lobby_states_mu_;
 	std::unordered_map<PeerAddr, LobbyConnState, PeerAddrHash> lobby_states_;
 	opennova::db::Database *db_ = nullptr;

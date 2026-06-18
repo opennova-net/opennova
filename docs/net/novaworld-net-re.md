@@ -89,7 +89,7 @@ known NWEC mappings, additional host-var aliases retail emits for specific expan
 
 | Opcode | Name | Direction | Behavior | Key data |
 | --- | --- | --- | --- | --- |
-| `0x41` | ClientHello | C→S | Accepts only `PN=NOVAWORLDUDP`, replies ServerHello. | `CI`, `PN`, client address. |
+| `0x41` | ClientHello | C→S | Accepts supported PN values (`NOVAWORLDUDP` lobby, `JointOperations`/`JOINTOPERATIONS` game), replies ServerHello. | `CI`, `PN`, client address. |
 | `0x42` | ClientAuth | C→S | Promotes addr-keyed session; stores client SCRK and server SCRK/SK; replies ServerAuth. | `CI`, `CK`, `SCRK`, `NA`, generated `SK`, `NWUID`. |
 | `0x43` | ProtocolMessage | both | Decodes encrypted session packet, ACKs every valid packet, dispatches browser/session containers, fragments/reassembles Layer-4 payloads. | Header `session_id`, `seq_num`, `ack_count`; one or more protocol messages. |
 | `0x46` | ClientGoodBye | C→S | Drops connection/session state and active host/player rows. | Client connection id if present. |
@@ -2305,8 +2305,9 @@ there (not yet on master).
 - **Protocol code lives once** in Godot-free libs: `libs/novacrypto` (Layer 2 cipher),
   `libs/napi` (Layer 2-3 framing/session/TLV), `libs/novaworld` (all Layer-4 PN message sets —
   browser/session services and the in-match GameSession runtime — plus connection registry and
-  db wrapper). PN dispatch happens inside `libs/novaworld`; the NovaWorld server rejects
-  non-`NOVAWORLDUDP` PN, leaving in-match traffic to a (deferred) per-match game server.
+  db wrapper). PN dispatch happens inside `libs/novaworld`; the NovaWorld server routes
+  `NOVAWORLDUDP` to lobby containers and `JointOperations`/`JOINTOPERATIONS` to the experimental
+  in-match `GameServerRuntime`.
 - **Godot is the client only**: GDExtension binding under `godot/engine/network/`; servers are
   pure C++ with no Godot dependency. A future Godot admin/stats viewer would talk to the
   standalone server over HTTP, never be the server.

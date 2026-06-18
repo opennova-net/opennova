@@ -35,13 +35,13 @@ AI, 62-frame cadence, `TickContext.is_authority` as the authority seam).
 3. **The wire enumeration is the RE record, not the code.** The §4 dispatch tables
    (S2C `0x82AE28`, C2S `0x82B5D8`) are the authoritative tag inventory. Implementation
    proceeds tag-by-tag with IDA witnesses, the same way the matchmaking stack was built.
-   Until then, `PN="JointOperations"` sessions are accepted at the hello layer and
-   recorded by the unknown-message tracker (`pn:` channel), so real-world traffic
-   shapes the priority order. As of the ADR 0010 join leg the OpenNova *client* now
+   Until then, `PN="JointOperations"` sessions are accepted at the session layer and
+   routed to the experimental `GameServerRuntime`, so real-world traffic shapes the
+   priority order. As of the ADR 0010 join leg the OpenNova *client* now
    *emits* this seam hello: after NWJoin it opens a session to the host and sends a
    `ClientHello` with `PN="JointOperations"` (`NovaWorldClient::send_jointops_hello`),
-   then stops — the server still only records it on the `pn:` channel. Nothing past
-   the hello is implemented on either side yet.
+   then stops. The server now has the PN route, but the game-runtime implementation
+   remains experimental and tag coverage is still being built out.
 4. **Existing in-match groundwork is experimental.** `libs/novaworld`'s `game_session`,
    `game_server_runtime`, `replication_min`, and `libs/bms` (the net-side spawn-point
    parser) relanded with the PR #37 stack and keep their tests, but they are

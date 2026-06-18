@@ -109,10 +109,9 @@ std::array<uint8_t, 16> novaworldudp_pg() {
 // real bytes live in the game-session connect path (CNapiGameSession_StartPlaying
 // @ 0x4d45e0 / the InitNPConnection sibling that builds the host connection),
 // not yet grilled (IDA MCP was down). This placeholder is distinct from the
-// NOVAWORLDUDP GUID and deterministic, which is all the local milestone needs:
-// our server rejects the join hello on PN ("JointOperations" != "NOVAWORLDUDP")
-// before it ever inspects PG. Replace with the witnessed bytes for real-host
-// parity; see docs/net/novaworld-net-re.md.
+// NOVAWORLDUDP GUID and deterministic, which is enough for local proto-switch
+// routing. Replace with the witnessed bytes for real-host parity; see
+// docs/net/novaworld-net-re.md.
 std::array<uint8_t, 16> jointoperations_pg() {
 	// ASCII "JO-PROVIS-PG\0\0\0\0" — visibly a placeholder in a hex dump.
 	return {'J', 'O', '-', 'P', 'R', 'O', 'V', 'I', 'S', '-', 'P', 'G', 0, 0, 0, 0};

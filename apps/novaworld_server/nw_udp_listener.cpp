@@ -13,6 +13,7 @@
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
+#include <novaworld/session_protocol.h>
 #include <novaworld/unknown_tracker.h>
 
 #include <chrono>
@@ -223,6 +224,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	bound_port_ = config.nw_udp_port;
 
 	stop_requested_.store(false);
+	game_runtime_.start();
 	running_.store(true);
 	worker_ = std::thread([this] { run_loop(); });
 	std::printf("[nwudp] listening on UDP :%u\n",
@@ -233,6 +235,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 void NwUdpListener::stop() {
 	stop_requested_.store(true);
 	if (worker_.joinable()) worker_.join();
+	game_runtime_.stop();
 	running_.store(false);
 }
 
@@ -298,6 +301,7 @@ void NwUdpListener::run_loop() {
 	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
 	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[nwudp] re-bind failed; aborting loop\n");
+		game_runtime_.stop();
 		running_.store(false);
 		return;
 	}
@@ -335,9 +339,8 @@ void NwUdpListener::run_loop() {
 				             client_label.c_str());
 				break;
 			}
-			// PN dispatch — only NOVAWORLDUDP traffic belongs here.
-			// Game-protocol clients hit a future game server, not us.
-			if (hello.pn != "NOVAWORLDUDP") {
+			const SessionProtocolKind protocol = classify_session_protocol(hello.pn);
+			if (protocol == SessionProtocolKind::Unsupported) {
 				std::fprintf(stderr, "[nwudp] %s — refusing PN='%s'\n",
 				             client_label.c_str(), hello.pn.c_str());
 				if (tracker_) {
@@ -467,108 +470,136 @@ void NwUdpListener::run_loop() {
 			lobby_state.last_inbound_seq = hdr.seq_num;
 
 			std::vector<ProtocolMessage> replies;
-			for (const auto &pm : messages) {
-				std::printf("[nwudp]     pm flags=0x%02x tag=0x%03x len=%u settings=%d frag_cont=%d frag_end=%d\n",
-				            pm.flags.raw, pm.full_tag, pm.length,
-				            pm.flags.settings_update ? 1 : 0,
-				            pm.flags.frag_cont ? 1 : 0,
-				            pm.flags.frag_end ? 1 : 0);
-				if (pm.flags.settings_update) continue; // socket tuning, ignore
-				if (pm.full_tag != 0) {
-					// Non-zero full message type = a container/protocol
-					// selector we have no Layer-4 handler for. Record the
-					// hex tag so /api/unknowns surfaces what retail sent.
-					if (tracker_) {
-						tracker_->record("ptype", hex_sig(pm.full_tag, 3),
-						                 pm.payload.data(), pm.payload.size(),
-						                 client_label, now_ms());
-					}
-					continue;                            // only Layer-4 lobby
+			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->pn);
+			if (protocol == SessionProtocolKind::JointOperations) {
+				for (const auto &pm : messages) {
+					std::printf("[nwudp]     pm flags=0x%02x tag=0x%03x len=%u settings=%d frag_cont=%d frag_end=%d\n",
+					            pm.flags.raw, pm.full_tag, pm.length,
+					            pm.flags.settings_update ? 1 : 0,
+					            pm.flags.frag_cont ? 1 : 0,
+					            pm.flags.frag_end ? 1 : 0);
 				}
-
-				// Fragment reassembly: multi-packet payloads (e.g.
-				// ClientRequestVerifyResult @ ~3.4 KB) span 2-3 SESSION
-				// packets with FRAG_CONT set on every chunk except the
-				// final. reassemble_protocol_payload accumulates and
-				// returns true only when the assembled buffer is ready.
-				std::vector<uint8_t> assembled;
-				bool was_fragmented = false;
-				if (!reassemble_protocol_payload(lobby_state.reassembly, pm,
-				                                 assembled, &was_fragmented)) {
-					std::printf("[nwudp]     fragment buffered (assembly=%zuB so far)\n",
-					            lobby_state.reassembly.buffer.size());
-					continue;
+				SessionProtocolDispatchResult result =
+					dispatch_in_match_session_messages(protocol, game_runtime_,
+					                                   client_label, messages,
+					                                   static_cast<uint32_t>(now_ms() & 0xFFFFFFFFu));
+				replies = std::move(result.replies);
+				if (!result.label.empty()) {
+					std::printf("[nwudp] %s SESSION game=%s -> %zu replies\n",
+					            client_label.c_str(), result.label.c_str(),
+					            replies.size());
 				}
-				if (assembled.empty()) continue; // ack-only
-
-				if (was_fragmented) {
-					std::printf("[nwudp]     reassembled %zu-byte payload from fragments\n",
-					            assembled.size());
-				}
-
-				// Parse the inner stream as a Container (NapiMessage tree).
-				std::vector<NapiMessage> outer_messages;
-				size_t consumed = 0;
-				if (napi_stream_decode(assembled.data(), assembled.size(),
-				                       outer_messages, &consumed) != 0) {
-					std::fprintf(stderr, "[nwudp]     napi_stream_decode FAILED on %zu-byte payload\n",
-					             assembled.size());
-					continue;
-				}
-				std::printf("[nwudp]     parsed %zu container(s)\n", outer_messages.size());
-				for (const auto &outer : outer_messages) {
-					// onnet wraps the actual message inside a root container,
-					// so each top-level message we get IS the lobby message
-					// (its name is the message kind).
-					LobbyDispatchResult result;
-					if (outer.name == "ClientRequestVerifyResult") {
-						const auto maintenance = load_maintenance_status(db_);
-						if (maintenance.enabled) {
-							result.label = "ClientRequestVerifyResult:maintenance";
-							result.reply_containers.push_back(
-								make_server_verify_failure(maintenance.message));
-						}
-					}
-					if (result.label.empty()) {
-						result = lobby_session_.dispatch(outer, lobby_state.lobby,
-						                                client_ip_str, from.port);
-					}
-					if (!result.label.empty()) {
-						std::printf("[nwudp] %s SESSION recv name=%s -> %zu replies\n",
-						            client_label.c_str(), result.label.c_str(),
-						            result.reply_containers.size());
-						// lobby_session.cpp returns "unknown:<name>" for any
-						// container it has no handler for (lobby_session.cpp:258).
-						static constexpr char kUnknownPrefix[] = "unknown:";
-						if (tracker_ &&
-						    result.label.rfind(kUnknownPrefix, 0) == 0) {
-							const std::string name =
-								result.label.substr(sizeof(kUnknownPrefix) - 1);
-							tracker_->record("container", name,
-							                 assembled.data(), assembled.size(),
+			} else if (protocol == SessionProtocolKind::Lobby) {
+				for (const auto &pm : messages) {
+					std::printf("[nwudp]     pm flags=0x%02x tag=0x%03x len=%u settings=%d frag_cont=%d frag_end=%d\n",
+					            pm.flags.raw, pm.full_tag, pm.length,
+					            pm.flags.settings_update ? 1 : 0,
+					            pm.flags.frag_cont ? 1 : 0,
+					            pm.flags.frag_end ? 1 : 0);
+					if (pm.flags.settings_update) continue; // socket tuning, ignore
+					if (pm.full_tag != 0) {
+						// Non-zero full message type = a container/protocol
+						// selector we have no Layer-4 handler for. Record the
+						// hex tag so /api/unknowns surfaces what retail sent.
+						if (tracker_) {
+							tracker_->record("ptype", hex_sig(pm.full_tag, 3),
+							                 pm.payload.data(), pm.payload.size(),
 							                 client_label, now_ms());
 						}
+						continue;                            // only Layer-4 lobby
 					}
-					for (auto &reply_container : result.reply_containers) {
-						std::vector<NapiMessage> root_stream{std::move(reply_container)};
-						std::vector<uint8_t> stream_bytes(napi_stream_size(root_stream));
-						size_t stream_size = 0;
-						if (napi_stream_encode(root_stream, stream_bytes.data(),
-						                       stream_bytes.size(), &stream_size) != 0) {
-							continue;
-						}
-						stream_bytes.resize(stream_size);
 
-						ProtocolMessage rpm;
-						rpm.flags.raw = (stream_size > 0xFF) ? 0x40u : 0x20u;
-						rpm.flags.len16 = stream_size > 0xFF;
-						rpm.flags.len8  = stream_size <= 0xFF;
-						rpm.tag = 0;
-						rpm.full_tag = 0;
-						rpm.length = static_cast<uint32_t>(stream_size);
-						rpm.payload = std::move(stream_bytes);
-						replies.push_back(std::move(rpm));
+					// Fragment reassembly: multi-packet payloads (e.g.
+					// ClientRequestVerifyResult @ ~3.4 KB) span 2-3 SESSION
+					// packets with FRAG_CONT set on every chunk except the
+					// final. reassemble_protocol_payload accumulates and
+					// returns true only when the assembled buffer is ready.
+					std::vector<uint8_t> assembled;
+					bool was_fragmented = false;
+					if (!reassemble_protocol_payload(lobby_state.reassembly, pm,
+					                                 assembled, &was_fragmented)) {
+						std::printf("[nwudp]     fragment buffered (assembly=%zuB so far)\n",
+						            lobby_state.reassembly.buffer.size());
+						continue;
 					}
+					if (assembled.empty()) continue; // ack-only
+
+					if (was_fragmented) {
+						std::printf("[nwudp]     reassembled %zu-byte payload from fragments\n",
+						            assembled.size());
+					}
+
+					// Parse the inner stream as a Container (NapiMessage tree).
+					std::vector<NapiMessage> outer_messages;
+					size_t consumed = 0;
+					if (napi_stream_decode(assembled.data(), assembled.size(),
+					                       outer_messages, &consumed) != 0) {
+						std::fprintf(stderr, "[nwudp]     napi_stream_decode FAILED on %zu-byte payload\n",
+						             assembled.size());
+						continue;
+					}
+					std::printf("[nwudp]     parsed %zu container(s)\n", outer_messages.size());
+					for (const auto &outer : outer_messages) {
+						// onnet wraps the actual message inside a root container,
+						// so each top-level message we get IS the lobby message
+						// (its name is the message kind).
+						LobbyDispatchResult result;
+						if (outer.name == "ClientRequestVerifyResult") {
+							const auto maintenance = load_maintenance_status(db_);
+							if (maintenance.enabled) {
+								result.label = "ClientRequestVerifyResult:maintenance";
+								result.reply_containers.push_back(
+									make_server_verify_failure(maintenance.message));
+							}
+						}
+						if (result.label.empty()) {
+							result = lobby_session_.dispatch(outer, lobby_state.lobby,
+							                                client_ip_str, from.port);
+						}
+						if (!result.label.empty()) {
+							std::printf("[nwudp] %s SESSION recv name=%s -> %zu replies\n",
+							            client_label.c_str(), result.label.c_str(),
+							            result.reply_containers.size());
+							// lobby_session.cpp returns "unknown:<name>" for any
+							// container it has no handler for (lobby_session.cpp:258).
+							static constexpr char kUnknownPrefix[] = "unknown:";
+							if (tracker_ &&
+							    result.label.rfind(kUnknownPrefix, 0) == 0) {
+								const std::string name =
+									result.label.substr(sizeof(kUnknownPrefix) - 1);
+								tracker_->record("container", name,
+								                 assembled.data(), assembled.size(),
+								                 client_label, now_ms());
+							}
+						}
+						for (auto &reply_container : result.reply_containers) {
+							std::vector<NapiMessage> root_stream{std::move(reply_container)};
+							std::vector<uint8_t> stream_bytes(napi_stream_size(root_stream));
+							size_t stream_size = 0;
+							if (napi_stream_encode(root_stream, stream_bytes.data(),
+							                       stream_bytes.size(), &stream_size) != 0) {
+								continue;
+							}
+							stream_bytes.resize(stream_size);
+
+							ProtocolMessage rpm;
+							rpm.flags.raw = (stream_size > 0xFF) ? 0x40u : 0x20u;
+							rpm.flags.len16 = stream_size > 0xFF;
+							rpm.flags.len8  = stream_size <= 0xFF;
+							rpm.tag = 0;
+							rpm.full_tag = 0;
+							rpm.length = static_cast<uint32_t>(stream_size);
+							rpm.payload = std::move(stream_bytes);
+							replies.push_back(std::move(rpm));
+						}
+					}
+				}
+			} else {
+				std::fprintf(stderr, "[nwudp] %s — unsupported SESSION PN='%s'\n",
+				             client_label.c_str(), conn_opt->pn.c_str());
+				if (tracker_) {
+					tracker_->record("pn", conn_opt->pn, body.data(), body.size(),
+					                 client_label, now_ms());
 				}
 			}
 

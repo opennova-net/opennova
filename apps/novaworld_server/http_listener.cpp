@@ -419,10 +419,9 @@ bool HttpListener::start(const ServerConfig &config) {
 	// joinable game without a live host process. Bearer-gated (CLOSED unless
 	// ADMIN_API_TOKEN is set), so prod is unaffected. Defaults point the host at
 	// this server's own NW UDP port (127.0.0.1:64206) so a joining OpenNova
-	// client's JointOperations hello lands on our nw_udp_listener and is recorded
-	// on the unknown-tracker pn: channel — the proto-switch proof. The row is
-	// wiped on the next boot (clear_all) and by the stale-host sweep; re-inject
-	// per run. See plan/phase3-host-wiring + we-need-to-get-gentle-owl.
+	// client's JointOperations hello lands on our nw_udp_listener and routes to
+	// the game-runtime PN path. The row is wiped on the next boot (clear_all)
+	// and by the stale-host sweep; re-inject per run.
 	CROW_ROUTE(app, "/api/admin/hosts").methods("POST"_method)(
 	    [this, admin_authorized, public_host](const crow::request &req) {
 		if (!admin_authorized(req)) {
