@@ -345,16 +345,16 @@ int test_infantry_compact_roundtrip() {
 }
 
 int test_vehicle_compact_roundtrip_mounted() {
-	// §5.13 mounted (flags_byte & 4) -> 15 B: header + secondary_heading + final.
+	// §5.13 mounted (flags_byte & 4) -> 15 B: header + euler_y + euler_x.
 	VehicleCompactRecord r;
 	r.parent_slot_handle = 0x1033;
 	r.pos_x_compressed = 0x1111;
 	r.pos_y_compressed = 0x2222;
 	r.pos_z_compressed = 0x3333;
-	r.yaw_high = int16_t(0x4444);
+	r.euler_z = int16_t(0x4444);
 	r.flags_byte = 0x04;            // mounted
-	r.secondary_heading = 0x5555;
-	r.final_heading = 0x6666;
+	r.euler_y = int16_t(0x5555);
+	r.euler_x = int16_t(0x6666);
 
 	std::vector<uint8_t> wire = encode_vehicle_compact_record(r);
 	EXPECT(wire.size() == 15);
@@ -365,28 +365,28 @@ int test_vehicle_compact_roundtrip_mounted() {
 	EXPECT(d.is_mounted);
 	EXPECT(d.parent_slot_handle == 0x1033);
 	EXPECT(d.pos_y_compressed == 0x2222);
-	EXPECT(d.yaw_high == int16_t(0x4444));
+	EXPECT(d.euler_z == int16_t(0x4444));
 	EXPECT(d.flags_byte == 0x04);
-	EXPECT(d.secondary_heading == 0x5555);
-	EXPECT(d.final_heading == 0x6666);
+	EXPECT(d.euler_y == int16_t(0x5555));
+	EXPECT(d.euler_x == int16_t(0x6666));
 	std::printf("PASS vehicle_compact_roundtrip_mounted\n");
 	return 0;
 }
 
 int test_vehicle_compact_roundtrip_unmounted() {
-	// §5.13 unmounted (flags_byte & 4 clear) -> 21 B: header + weapon block + final.
+	// §5.13 unmounted (flags_byte & 4 clear) -> 21 B: header + turret/weapon-aim block.
 	VehicleCompactRecord r;
 	r.parent_slot_handle = 0xFFFF;
 	r.pos_x_compressed = 0xAAAA;
 	r.pos_y_compressed = 0xBBBB;
 	r.pos_z_compressed = 0xCCCC;
-	r.yaw_high = int16_t(0x0DDD);
+	r.euler_z = int16_t(0x0DDD);
 	r.flags_byte = 0x00;            // unmounted
-	r.weapon_x_compressed = 0x0101;
-	r.weapon_y_raw = 0x0202;
-	r.weapon_z_compressed = 0x0303;
-	r.weapon_heading_compressed = 0x0404;
-	r.final_heading = 0x0505;
+	r.weapon_x = 0x0101;
+	r.turret_pitch_raw = int16_t(0x0202);
+	r.weapon_aim_y = 0x0303;
+	r.weapon_aim_z = 0x0404;
+	r.weapon_heading_bam = int16_t(0x0505);
 
 	std::vector<uint8_t> wire = encode_vehicle_compact_record(r);
 	EXPECT(wire.size() == 21);
@@ -397,11 +397,11 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	EXPECT(!d.is_mounted);
 	EXPECT(d.parent_slot_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xAAAA);
-	EXPECT(d.weapon_x_compressed == 0x0101);
-	EXPECT(d.weapon_y_raw == 0x0202);
-	EXPECT(d.weapon_z_compressed == 0x0303);
-	EXPECT(d.weapon_heading_compressed == 0x0404);
-	EXPECT(d.final_heading == 0x0505);
+	EXPECT(d.weapon_x == 0x0101);
+	EXPECT(d.turret_pitch_raw == int16_t(0x0202));
+	EXPECT(d.weapon_aim_y == 0x0303);
+	EXPECT(d.weapon_aim_z == 0x0404);
+	EXPECT(d.weapon_heading_bam == int16_t(0x0505));
 	std::printf("PASS vehicle_compact_roundtrip_unmounted\n");
 	return 0;
 }

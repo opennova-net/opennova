@@ -1265,39 +1265,40 @@ The write side branches first on whether the entity has an attached parent
 `dword_C867A4..AC`. Then on `flagsByte & 4` (mounted bit): if set, only a
 small heading block follows; if clear, the full weapon/turret block follows.
 
-| off | bytes | field | gate | landing |
-|---|---|---|---|---|
-| 0 | 2 | parentSlotHandle | always | `(pool<<12)|slot` or `0xFFFF`=none |
-| 2 | 2 | posX compressed | always | entity+4 (vehicle-local if parent ≠ none) |
-| 4 | 2 | posY compressed | always | entity+8 |
-| 6 | 2 | posZ compressed | always | entity+12 |
-| 8 | 2 | yawHigh (i16 BAM `(v+0x8000)>>16`) | always | entity+16 |
-| 10 | 1 | flagsByte | always | entity+36 (low byte) |
-| 11 | 2 | secondaryHeading | `flagsByte & 4` | entity+24 (mounted case ends here) |
-| 11 | 2 | weaponX compressed | NOT `flagsByte & 4` | entity+160 |
-| 13 | 2 | weaponY raw u16 | NOT `flagsByte & 4` | entity+286 |
-| 15 | 2 | weaponZ compressed | NOT `flagsByte & 4` | vehicleData[136] = entity+544 |
-| 17 | 2 | weaponHeading compressed | NOT `flagsByte & 4` | vehicleData[135] = entity+540 |
-| 13 or 19 | 2 | finalHeading (i16 BAM high) | always | entity+20 (mounted) or vehicleData[132]=entity+528 |
+| off | bytes | field (new name) | gate | write-source | read-dest |
+|---|---|---|---|---|---|
+| 0 | 2 | parentSlotHandle | always | `(pool<<12)\|slot` from entity+40 (`0xFFFF`=none) | resolves parent entity |
+| 2 | 2 | posX compressed | always | entity+4 (vehicle-local if parent ≠ none) | entity+4 (local→world) |
+| 4 | 2 | posY compressed | always | entity+8 | entity+8 |
+| 6 | 2 | posZ compressed | always | entity+12 | entity+12 |
+| 8 | 2 | eulerZ (i16 BAM `(v+0x8000)>>16`) | always | entity+16 | entity+576 |
+| 10 | 1 | flagsByte | always | entity+36 (low byte) | entity+36 |
+| 11 | 2 | eulerY (i16 BAM) | `flagsByte & 4` | entity+24 | entity+584 |
+| 13 | 2 | eulerX (i16 BAM) | `flagsByte & 4` | entity+20 | entity+580 (mounted case ends here) |
+| 11 | 2 | weaponX compressed | NOT `flagsByte & 4` | entity+160 | entity+160 |
+| 13 | 2 | turretPitch raw i16 | NOT `flagsByte & 4` | entity+286 | entity+286 |
+| 15 | 2 | weaponAimY compressed | NOT `flagsByte & 4` | vehicleData[136] | vehicleData[177] |
+| 17 | 2 | weaponAimZ compressed | NOT `flagsByte & 4` | vehicleData[135] | vehicleData[178] |
+| 19 | 2 | weaponHeading (i16 BAM high) | NOT `flagsByte & 4` | vehicleData[132] | vehicleData[179] |
 
 Total: **15 B** when mounted (`flagsByte & 4`), **21 B** when not.
 
 `vehicleData` is `*(_DWORD **)(entity + 100)` — an auxiliary state buffer
-attached to mounted vehicles for weapon-aim tracking.
+attached to mounted vehicles for weapon-aim tracking. Note the write side reads
+weapon-aim from `vehicleData[136/135/132]` while the read side lands the
+decompressed values into a *different* slot triple `vehicleData[177/178/179]`
+(write-source ≠ read-dest — the earlier single "landing" column conflated them).
 
-**Euler-triple footnote (2026-06-16d IDA grill).** `yawHigh` at wire offset 8
-isn't a standalone yaw — it's the Z component of a position-block Euler triple
-landing at `entity+576`, fed to `Math_BuildFixedPointMatrixFromEulerAngles`
-together with the mounted-branch reads. In the mounted case, the two i16s
-labelled here `secondaryHeading` (off=11) and `finalHeading` (off=13) actually
-land at `entity+584` and `entity+580` respectively as the Y and X components
-of a rider-body Euler triple. In the unmounted case, the field labelled
-`weaponY raw u16` is more precisely the turret-pitch raw i16 (lands at
-`entity+286` as a raw word, not via decompress); the remaining three
-compressed u16s feed `vehicleData[177/178/179]` (weapon Y/Z + final heading
-BAM). The byte counts and read order in this table are byte-exact — a fuller
-field rename pass is tracked separately to avoid churning §5.13 callers in the
-same commit as §5.9.1.
+**Field labels corrected 2026-06-17 (D-NET-63).** The table above now reflects the
+witnessed semantics: `eulerZ/eulerY/eulerX` are the orientation / rider Euler
+triple (Z read pre-branch always; X/Y only when mounted) fed to
+`Math_BuildFixedPointMatrixFromEulerAngles`, and the unmounted block is a
+turret-pitch raw i16 + weapon-aim Y/Z + a weapon-heading BAM. The reimpl
+`VehicleCompactRecord` (`ingame_decode.h`) uses these names. Because the original
+write side has no shared trailing field, the formerly-shared `finalHeading` is
+split per branch into `euler_x` (mounted) / `weapon_heading_bam` (unmounted). Wire
+byte counts, read order, and sizes (15 B / 21 B) are unchanged — the rename is
+label-only and the round-trip + byte-witness tests stay green.
 
 ### 5.14 Infantry / AI compact record (S2C 0x0A trailing event)
 
@@ -2757,6 +2758,7 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-60** [LOW, DOC] §5.4 0x0B icon-key offset: "full_00" observed at off **220-226**, not the documented 246-253. Signature(0-3)/name(4-35)/designer(36-67)/basename(68) all matched their documented offsets, so only the icon row is suspect — re-diff against more retail maps or annotate as header-variant-dependent. Note: the synthesized header title-cases the basename to "Dvxi5" at +68 (client terrain lookup is case-insensitive). [orig: byte_A761D0 @ §5.5]
 - **D-NET-61** [INFO, VALIDATED] The `/PROFILE` `.sph` server-log (§5.22) — the engine's own decoded per-frame view of the SAME probe session — was decoded (`libs/novaworld/serverlog_decode.{h,cpp}`, `nw_pp` `.sph` mode, `nw_serverlog_decode_test`) and cross-validated against the `.pcapng`: FooPlayer (Red, pool-0 handle 0x0005) spawn state `(70.0, 25.0, 56.306)/0xc0000000` matches **byte-for-byte** across `.sph` `PDAT`, C2S 0x0C extended uplink (§5.10), and the S2C 0x0A header `refs` triple — independently confirming the 0x0C decoder, the 16.16/-Z + 32-bit-BAM conventions, pool-0=players (the recorder iterates `g_pool_list[0]`), and team@entity+354 (re-confirms D-NET-58 via the `FEDP` roster: TestPlayer=Blue/1, FooPlayer=Red/2). No code divergence — a validation pass + new oracle tooling. Two IDB-fidelity fixes were required to read the recorder: `sub_522350`→`Game_TeardownMission` decompilation was blocked by phantom-arg prototypes on 0-arg callees (`Database_GetFieldValue` is actually `void __thiscall Database_FreeFieldEntries`; `File_Seek`/`Terrain_RenderSectorsWithWhiteFog`/`CEffectWorld_IsNameAvailable` retyped to 0 args — each 1 xref, 0 stack-arg reads). [orig: Game_ProcessMainFrame @ 0x5263f0 / CServerLog_WritePositionRecord @ 0x4e1b00 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 - **D-NET-62** [INFO, VALIDATED] Authored-mission cross-validation of pools 1/2/3 (§5.24) — the dvxi5 probe's *known* `mission.bms`, serialized by the retail host, decoded field-for-field on the wire (the sibling of D-NET-61 for the pools the `.sph` can't see). Lands the **S2C 0x0C organic-spawn field map + decoder** (`decode_organic_spawn_batch` / `OrganicSpawnRecord`, §5.23) — byte-exact consume on the probe's 6-organic batch (4 AI `0x0816` + 2 players `0x14B9`); the shared pcap reader (`apps/common/pcap_reader`, nw_pp factored onto it); and two tests (`nw_pool_groundtruth_test` reads the real `.scratch` pcap directly; `nw_pool_decode_unit_test` inline-pcap round-trips 0x0D/0x20 through the full S2C stack). Confirms: type_id/position/team reproduce (posX/posY lossless i32 16.16; posZ re-grounds ≤1u for vehicles/AI, markers keep authored z); the heading convention **`wire_BAM = 90 - facing`** (pinned by AI authored at facing {0,90,180,270} → wire {90°,0°,270°,180°}; the 0x20 markers at facing {0,180} alone could not distinguish it from `facing+90`); and team @ **entity+354** — the onhook PoC's `+146`/`+196` reads are inside `GamePlayerEntity.pad5`, a runtime/display mirror, NOT the BMS team (same mislabel class as the PDAT `+42` STAT byte, §5.22). No divergence in the pool decoders — a new field map + validation oracle. [orig: NapiNPClientMsg_0x00C @ 0x42E730 / serialize_entity_pool_to_packet_0 @ 0x503940 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
+- **D-NET-63** [MED, DOC+CODE] §5.13 vehicle compact record field labels corrected (the rename the 2026-06-16d footnote deferred). Re-grilled the mode-2 (read) path of `Entity_SerializeMountedVehicleState @ 0x460560`: the pre-branch i16 (`yaw_high`) and the two mounted-branch i16s are the **orientation / rider Euler triple Z/Y/X** landing at **entity+576/584/580** (fed to `Math_BuildFixedPointMatrixFromEulerAngles`), and the unmounted block is **turret-pitch raw i16 (entity+286) + weapon-aim Y/Z (read-dest `vehicleData[177/178]`) + weapon-heading BAM (`vehicleData[179]`)** — distinct from the genuine weapon-X compressed u16 (entity+160). The write side has NO shared trailing field, so the reimpl's formerly-shared `final_heading` is split per branch into `euler_x` (mounted) / `weapon_heading_bam` (unmounted). Renamed `ingame_decode.h VehicleCompactRecord` (`yaw_high→euler_z`, `secondary_heading→euler_y`, `final_heading→euler_x|weapon_heading_bam`, `weapon_x_compressed→weapon_x`, `weapon_y_raw→turret_pitch_raw`, `weapon_z_compressed→weapon_aim_y`, `weapon_heading_compressed→weapon_aim_z`) with matching `ingame_encode.cpp` / `nw_pp.cpp` / `replay_timeline.cpp` / `nw_ingame_compact_records_test` / `nw_ingame_encode_test`. Also split the §5.13 table's "landing" column into write-source vs read-dest (it had conflated write `vehicleData[136]` with read-dest `vehicleData[177]`). **Wire bytes, read order, and sizes (15 B mounted / 21 B not) are unchanged** — label-only; round-trip + byte-witness tests stay green. [orig: Entity_SerializeMountedVehicleState @ 0x460560 (read path @ 0x4605a3..0x460aff; Euler matrix build @ 0x460a0f → Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40)]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

@@ -77,10 +77,10 @@ int test_vehicle_mounted_15_bytes() {
 		0x10, 0x20,             // posX compressed
 		0x30, 0x40,             // posY
 		0x50, 0x60,             // posZ
-		0x00, 0x80,             // yaw_high (i16 = -0x8000)
+		0x00, 0x80,             // euler_z (i16 = -0x8000)
 		0x04,                   // flags_byte — bit 2 SET (mounted)
-		0x11, 0x22,             // secondary_heading
-		0x33, 0x44,             // final_heading
+		0x11, 0x22,             // euler_y
+		0x33, 0x44,             // euler_x
 		0xAA, 0xBB,             // trailing
 	};
 	VehicleCompactRecord rec;
@@ -91,8 +91,8 @@ int test_vehicle_mounted_15_bytes() {
 	EXPECT(rec.is_mounted == true);
 	EXPECT(rec.parent_slot_handle == 0x108B);
 	EXPECT(rec.flags_byte == 0x04);
-	EXPECT(rec.secondary_heading == 0x2211);
-	EXPECT(rec.final_heading == 0x4433);
+	EXPECT(rec.euler_y == int16_t(0x2211));
+	EXPECT(rec.euler_x == int16_t(0x4433));
 	std::printf("PASS vehicle_mounted 15B\n");
 	return 0;
 }
@@ -104,13 +104,13 @@ int test_vehicle_unmounted_21_bytes() {
 		0x01, 0x02,             // posX
 		0x03, 0x04,             // posY
 		0x05, 0x06,             // posZ
-		0x00, 0x40,             // yaw_high
+		0x00, 0x40,             // euler_z
 		0x01,                   // flags_byte (mounted bit CLEAR)
-		0x11, 0x22,             // weapon_x_compressed
-		0x33, 0x44,             // weapon_y_raw
-		0x55, 0x66,             // weapon_z_compressed
-		0x77, 0x88,             // weapon_heading_compressed
-		0x99, 0xAA,             // final_heading
+		0x11, 0x22,             // weapon_x
+		0x33, 0x44,             // turret_pitch_raw
+		0x55, 0x66,             // weapon_aim_y
+		0x77, 0x88,             // weapon_aim_z
+		0x99, 0xAA,             // weapon_heading_bam
 		0xCC,                   // trailing
 	};
 	VehicleCompactRecord rec;
@@ -120,11 +120,11 @@ int test_vehicle_unmounted_21_bytes() {
 	EXPECT(consumed == 21);
 	EXPECT(rec.is_mounted == false);
 	EXPECT(rec.parent_slot_handle == 0xFFFF);
-	EXPECT(rec.weapon_x_compressed == 0x2211);
-	EXPECT(rec.weapon_y_raw == 0x4433);
-	EXPECT(rec.weapon_z_compressed == 0x6655);
-	EXPECT(rec.weapon_heading_compressed == 0x8877);
-	EXPECT(rec.final_heading == 0xAA99);
+	EXPECT(rec.weapon_x == 0x2211);
+	EXPECT(rec.turret_pitch_raw == int16_t(0x4433));
+	EXPECT(rec.weapon_aim_y == 0x6655);
+	EXPECT(rec.weapon_aim_z == 0x8877);
+	EXPECT(rec.weapon_heading_bam == int16_t(0xAA99));
 	std::printf("PASS vehicle_unmounted 21B\n");
 	return 0;
 }

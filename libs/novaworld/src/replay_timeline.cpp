@@ -41,7 +41,7 @@ bool frame_record_world_sample(const FrameUpdateRecord &r, int32_t ax, int32_t a
 	case EntityClass::Vehicle:
 		cx = r.vehicle.pos_x_compressed; cy = r.vehicle.pos_y_compressed;
 		cz = r.vehicle.pos_z_compressed; parent = r.vehicle.parent_slot_handle;
-		yaw_deg = bam32_to_deg(uint32_t(int32_t(r.vehicle.yaw_high) << 16));
+		yaw_deg = bam32_to_deg(uint32_t(int32_t(r.vehicle.euler_z) << 16));
 		break;
 	default:
 		return false;

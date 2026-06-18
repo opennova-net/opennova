@@ -328,18 +328,21 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 	out.pos_x_compressed   = c.u16();
 	out.pos_y_compressed   = c.u16();
 	out.pos_z_compressed   = c.u16();
-	out.yaw_high           = int16_t(c.u16());
+	out.euler_z            = int16_t(c.u16());
 	out.flags_byte         = c.u8();
 	out.is_mounted         = (out.flags_byte & 0x04) != 0;
 	if (out.is_mounted) {
-		out.secondary_heading = c.u16();
+		// Mounted: the remaining two Euler components (entity+584/+580).
+		out.euler_y = int16_t(c.u16());
+		out.euler_x = int16_t(c.u16());
 	} else {
-		out.weapon_x_compressed       = c.u16();
-		out.weapon_y_raw              = c.u16();
-		out.weapon_z_compressed       = c.u16();
-		out.weapon_heading_compressed = c.u16();
+		// Unmounted: turret pitch (raw) + weapon-aim Y/Z + heading BAM.
+		out.weapon_x           = c.u16();
+		out.turret_pitch_raw   = int16_t(c.u16());
+		out.weapon_aim_y       = c.u16();
+		out.weapon_aim_z       = c.u16();
+		out.weapon_heading_bam = int16_t(c.u16());
 	}
-	out.final_heading = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == (out.is_mounted ? size_t(15) : size_t(21));

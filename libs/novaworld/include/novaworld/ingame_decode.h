@@ -293,21 +293,23 @@ struct VehicleCompactRecord {
 	uint16_t pos_x_compressed = 0;        // entity+4   (vehicle-local if parent != none)
 	uint16_t pos_y_compressed = 0;        // entity+8
 	uint16_t pos_z_compressed = 0;        // entity+12
-	int16_t  yaw_high = 0;                // entity+16 (BAM high i16 (v+0x8000)>>16)
+	// Orientation / rider Euler triple (BAM-high i16 (v+0x8000)>>16). euler_z is
+	// read pre-branch (always present); euler_x/euler_y follow only in the mounted
+	// branch. Together they feed Math_BuildFixedPointMatrixFromEulerAngles.
+	int16_t  euler_z = 0;                 // src entity+16 -> read-dest entity+576
 	uint8_t  flags_byte = 0;              // entity+36 low byte
 	bool     is_mounted = false;          // (flags_byte & 4) != 0
 
-	// Mounted branch (is_mounted = true):
-	uint16_t secondary_heading = 0;       // entity+24, valid iff is_mounted
+	// Mounted branch (is_mounted = true) — the other two Euler components:
+	int16_t  euler_y = 0;                 // src entity+24 -> read-dest entity+584
+	int16_t  euler_x = 0;                 // src entity+20 -> read-dest entity+580
 
-	// Unmounted branch (is_mounted = false):
-	uint16_t weapon_x_compressed = 0;     // entity+160
-	uint16_t weapon_y_raw = 0;            // entity+286 (raw u16, not compressed)
-	uint16_t weapon_z_compressed = 0;     // vehicleData[136] = entity+544
-	uint16_t weapon_heading_compressed = 0;// vehicleData[135] = entity+540
-
-	// Always present, both branches:
-	uint16_t final_heading = 0;           // entity+20 (mounted) or vehicleData[132]=entity+528
+	// Unmounted branch (is_mounted = false) — turret pitch + weapon-aim block:
+	uint16_t weapon_x = 0;                // entity+160 (compressed)
+	int16_t  turret_pitch_raw = 0;        // entity+286 (raw i16, not compressed)
+	uint16_t weapon_aim_y = 0;            // src vehicleData[136] -> read-dest vehicleData[177] (compressed)
+	uint16_t weapon_aim_z = 0;            // src vehicleData[135] -> read-dest vehicleData[178] (compressed)
+	int16_t  weapon_heading_bam = 0;      // src vehicleData[132] -> read-dest vehicleData[179] (BAM high i16)
 };
 
 // One §5.14 compact record (14 B fixed). Decoded by

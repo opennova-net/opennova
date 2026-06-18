@@ -438,21 +438,19 @@ void print_player_compact_record(const PlayerCompactRecord &r) {
 
 void print_vehicle_compact_record(const VehicleCompactRecord &r) {
 	std::printf("            vehicle: parent=%s pos=(0x%04x,0x%04x,0x%04x) "
-	            "yawHigh=%d flags=0x%02x %s",
+	            "eulerZ=%d flags=0x%02x %s",
 	            handle_str(r.parent_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
-	            unsigned(r.pos_z_compressed), int(r.yaw_high),
+	            unsigned(r.pos_z_compressed), int(r.euler_z),
 	            unsigned(r.flags_byte), r.is_mounted ? "MOUNTED" : "unmounted");
 	if (r.is_mounted) {
-		std::printf(" secHdg=0x%04x", unsigned(r.secondary_heading));
+		std::printf(" euler=(x=%d y=%d)\n", int(r.euler_x), int(r.euler_y));
 	} else {
-		std::printf(" weap=(x=0x%04x y=0x%04x z=0x%04x hdg=0x%04x)",
-		            unsigned(r.weapon_x_compressed),
-		            unsigned(r.weapon_y_raw),
-		            unsigned(r.weapon_z_compressed),
-		            unsigned(r.weapon_heading_compressed));
+		std::printf(" weap=(x=0x%04x pitch=%d aimY=0x%04x aimZ=0x%04x hdgBAM=%d)\n",
+		            unsigned(r.weapon_x), int(r.turret_pitch_raw),
+		            unsigned(r.weapon_aim_y), unsigned(r.weapon_aim_z),
+		            int(r.weapon_heading_bam));
 	}
-	std::printf(" finalHdg=0x%04x\n", unsigned(r.final_heading));
 }
 
 void print_infantry_compact_record(const InfantryCompactRecord &r) {

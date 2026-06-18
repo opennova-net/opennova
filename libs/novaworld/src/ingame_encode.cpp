@@ -200,20 +200,23 @@ std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &r
 	w.u16(rec.pos_x_compressed);      // CompressFixedPoint(local/world) [orig: 0x460bda / 0x460c92]
 	w.u16(rec.pos_y_compressed);      // [orig: 0x460bff / 0x460cbc]
 	w.u16(rec.pos_z_compressed);      // [orig: 0x460c24 / 0x460ce6]
-	w.u16(uint16_t(rec.yaw_high));    // (v+0x8000)>>16 BAM high     [orig: 0x460d0a]
+	w.u16(uint16_t(rec.euler_z));     // Euler Z, (v+0x8000)>>16 BAM high  [orig: 0x460d0a]
 	w.u8(rec.flags_byte);             // entity+36                   [orig: 0x460d22]
 
-	// Mounted (entity+36 & 4) emits only secondary_heading; unmounted emits the
-	// full weapon/turret block. [orig: branch @ 0x460d2f]
+	// Mounted (entity+36 & 4) emits the other two Euler components; unmounted emits
+	// the full turret/weapon-aim block. The shared trailing write @ 0x460e10 carries
+	// Euler X when mounted (src 0x460d52) and the weapon heading BAM when not
+	// (src 0x460def). [orig: branch @ 0x460d2f]
 	if (rec.flags_byte & 0x04) {
-		w.u16(rec.secondary_heading);          // entity+24 (v+0x8000)>>16 [orig: 0x460d4c]
+		w.u16(uint16_t(rec.euler_y));           // entity+24 Euler Y  [orig: 0x460d4c]
+		w.u16(uint16_t(rec.euler_x));           // entity+20 Euler X  [orig: 0x460d52 -> 0x460e10]
 	} else {
-		w.u16(rec.weapon_x_compressed);        // entity+160          [orig: 0x460d7b]
-		w.u16(rec.weapon_y_raw);               // entity+286 raw i16  [orig: 0x460d9b]
-		w.u16(rec.weapon_z_compressed);        // vehicleData[136]    [orig: 0x460dc2]
-		w.u16(rec.weapon_heading_compressed);  // vehicleData[135]    [orig: 0x460de9]
+		w.u16(rec.weapon_x);                    // entity+160         [orig: 0x460d7b]
+		w.u16(uint16_t(rec.turret_pitch_raw));  // entity+286 raw i16 [orig: 0x460d9b]
+		w.u16(rec.weapon_aim_y);                // vehicleData[136]   [orig: 0x460dc2]
+		w.u16(rec.weapon_aim_z);                // vehicleData[135]   [orig: 0x460de9]
+		w.u16(uint16_t(rec.weapon_heading_bam));// vehicleData[132]   [orig: 0x460def -> 0x460e10]
 	}
-	w.u16(rec.final_heading);         // entity+20 (mounted) / vehicleData[132] [orig: 0x460e10]
 	return out; // 15 or 21 B
 }
 
