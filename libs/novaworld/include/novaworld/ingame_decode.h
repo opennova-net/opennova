@@ -59,6 +59,24 @@ inline int32_t network_decompress_fixedpoint(uint16_t c) {
 	return sign ^ mag;
 }
 
+// Lift a vehicle-LOCAL offset into world space. [orig: Entity_TransformLocalToWorld
+// @ 0x43BD00 — called by the read path at NetPacket_SerializeInfantryEntityState @
+// 0x4C0320 / NetPacket_SerializePlayerState @ 0x4C09C0 for a mounted record]: rotate
+// (lx,ly,lz) by the parent's Euler — roll about X, then pitch about Y, then yaw about
+// Z — in 22-bit fixed-point sin/cos, then add the parent's world position. Angles are
+// 32-bit BAM (full circle = 2^32; the engine `fild`s them as signed). Mounts nest
+// (a rider on a weapon mount on a vehicle), so callers resolve the parent's WORLD
+// pose first and feed it here. The unmounted S2C 0x0A vehicle record transmits only
+// the parent's yaw (euler_z); pitch/roll are integrated locally by the engine and
+// are NOT on the wire, so callers pass 0 for them (a wire limitation, not a
+// divergence). i32 16.16 in and out. (std::sin/cos vs the x87 path is a CRT/platform
+// primitive — the structural Euler rotation + 2^22 fixed-point is the faithful port.)
+struct WorldPose { int32_t x = 0, y = 0, z = 0; };
+WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           uint32_t yaw_bam, uint32_t pitch_bam,
+                                           uint32_t roll_bam);
+
 // One record from a S2C 0x0D pool-entity spawn batch (§5.11).
 struct PoolSpawnRecord {
 	uint16_t spawn_flags = 0;

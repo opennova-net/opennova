@@ -490,12 +490,90 @@ void test_death_respawn() {
 	}
 }
 
+// Mounted vehicle transform: a rider's vehicle-LOCAL 0x0A offset must be lifted into
+// world via the parent's pose (the rider follows the vehicle), not skipped. [orig:
+// Entity_TransformLocalToWorld @ 0x43BD00]. (a) yaw=pitch=roll=0 is exact identity
+// (local + parent). (b) end-to-end: a rider mounted to a parent at yaw 90 deg lands
+// exactly at network_transform_local_to_world(local, parent_pose).
+void test_mount_transform() {
+	const int32_t M = 65536;
+	{ // (a) zero-rotation identity (cos0/sin0 are exact -> no fixed-point rounding)
+		const WorldPose w = network_transform_local_to_world(
+		    10 * M, 20 * M, 5 * M, 100 * M, 200 * M, 50 * M, 0, 0, 0);
+		EXPECT(w.x == 110 * M && w.y == 220 * M && w.z == 55 * M);
+	}
+	// (b) rider mounted to a parent, through the full timeline + resolver.
+	constexpr uint16_t kType = 0x0816; // -> Infantry
+	constexpr uint16_t P = 0x0002;     // the parent (carrier)
+	constexpr uint16_t R = 0x0006;     // the rider (mounted to P)
+	const int32_t Pwx = 40 * M, Pwy = 25 * M, Pwz = 16 * M; // parent world pose
+	const int32_t lx = 3 * M, ly = 1 * M, lz = 2 * M;       // rider seat-local offset
+
+	PoolSpawnRecord rp; rp.slot_id = P; rp.item_type_id = kType;
+	rp.pos_x = Pwx; rp.pos_y = Pwy; rp.pos_z = Pwz;
+	PoolSpawnRecord rr; rr.slot_id = R; rr.item_type_id = kType;
+	PoolSpawnBatch sb; sb.records = {rp, rr};
+	const std::vector<uint8_t> spawn_inner = encode_pool_spawn_batch(sb);
+
+	InfantryCompactRecord ip; ip.vehicle_slot_handle = 0xFFFF; ip.yaw_byte = 0x40; // 90 deg
+	const std::vector<uint8_t> fu_p = make_frame_update_0a(Pwx, Pwy, Pwz, P, kType, ip);
+	const uint16_t clx = network_compress_fixedpoint(lx),
+	               cly = network_compress_fixedpoint(ly),
+	               clz = network_compress_fixedpoint(lz);
+	InfantryCompactRecord ir; ir.vehicle_slot_handle = P; // mounted -> vehicle-local
+	ir.pos_x_compressed = clx; ir.pos_y_compressed = cly; ir.pos_z_compressed = clz;
+	const std::vector<uint8_t> fu_r = make_frame_update_0a(0, 0, 0, R, kType, ir);
+
+	ClientAuth ca; ca.na = "t"; ca.scrk = std::string(kScrk);
+	ServerAuth sa = build_server_auth(ca, 0x7F000001u, 32768, 0x55, kScrk);
+	std::vector<net::PcapDatagram> dgrams; int f = 1;
+	auto S = [&](uint8_t tag, const std::vector<uint8_t> &inner) {
+		dgrams.push_back({32769, 32768, f++,
+		    make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, tag, inner)});
+	};
+	dgrams.push_back({32769, 32768, f++,
+	    nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa))});
+	S(0x0D, spawn_inner);
+	S(0x0A, fu_p); // parent world pose (yaw 90)
+	S(0x0A, fu_r); // rider mounted to the parent
+
+	const std::vector<uint8_t> pcap = net::build_pcap_udp(dgrams);
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	std::vector<CaptureDatagram> caps;
+	for (auto &pk : got) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
+	auto class_of = [kType](uint16_t t) -> EntityClass {
+		return t == kType ? EntityClass::Infantry : EntityClass::Unknown;
+	};
+	const ReplayTimeline tl =
+	    build_replay_timeline(decode_capture_to_messages(caps), class_of);
+
+	const ReplayEntity *er = nullptr;
+	for (const auto &e : tl.entities) if (e.handle == R) er = &e;
+	EXPECT(er != nullptr);
+	if (er) {
+		const ReplaySample *ms = nullptr;
+		for (const auto &s : er->track) if (s.mounted) ms = &s;
+		EXPECT(ms != nullptr); // the vehicle-local record was lifted, not skipped
+		if (ms) {
+			const int32_t dlx = network_decompress_fixedpoint(clx),
+			              dly = network_decompress_fixedpoint(cly),
+			              dlz = network_decompress_fixedpoint(clz);
+			const WorldPose w = network_transform_local_to_world(
+			    dlx, dly, dlz, Pwx, Pwy, Pwz, 0x40000000u, 0, 0);
+			EXPECT(ms->x == w.x && ms->y == w.y && ms->z == w.z);
+			EXPECT(ms->source == ReplaySampleSource::FrameUpdate);
+		}
+	}
+}
+
 int main() {
 	test_decompress_vectors();
 	test_frame_update_fold();
 	test_event_stream();
 	test_per_participant_split();
 	test_death_respawn();
+	test_mount_transform();
 
 	// --- craft the inputs -----------------------------------------------------
 	// Two pool-1 spawns: a "blue" entity at (-85,45) and a "red" one at (85,45).

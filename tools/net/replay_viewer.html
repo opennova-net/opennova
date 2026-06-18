@@ -301,7 +301,7 @@
       const track = (e.track || []).map(s => ({
         f: s.f, x: s.src === "uplink" ? s.x + off.x : s.x,
         y: s.src === "uplink" ? s.y + off.y : s.y, h: s.h, src: s.src,
-        dead: !!s.dead, respawn: !!s.respawn,
+        dead: !!s.dead, respawn: !!s.respawn, mounted: !!s.mounted,
       }));
       track.sort((a, b) => a.f - b.f);
       ents.push({
@@ -374,17 +374,17 @@
   function posAt(e, cf) {
     const t = e.track;
     if (!t.length) return e.spawn ? { x: e.spawn.x, y: e.spawn.y, h: e.spawn.h } : null;
-    if (cf <= t[0].f) return { x: t[0].x, y: t[0].y, h: t[0].h, dead: !!t[0].dead };
+    if (cf <= t[0].f) return { x: t[0].x, y: t[0].y, h: t[0].h, dead: !!t[0].dead, mounted: !!t[0].mounted };
     let i = 0;
     while (i < t.length - 1 && t[i + 1].f <= cf) i++;
-    if (i >= t.length - 1) return { x: t[i].x, y: t[i].y, h: t[i].h, dead: !!t[i].dead };
+    if (i >= t.length - 1) return { x: t[i].x, y: t[i].y, h: t[i].h, dead: !!t[i].dead, mounted: !!t[i].mounted };
     const a = t[i], b = t[i + 1];
     // A respawn sample is a teleport (death -> spawn): never interpolate across it.
     // Hold the pre-death pose until the snap frame; the gap reads as "dead".
-    if (b.respawn) return { x: a.x, y: a.y, h: a.h, dead: true };
+    if (b.respawn) return { x: a.x, y: a.y, h: a.h, dead: true, mounted: !!a.mounted };
     const u = (cf - a.f) / Math.max(1, b.f - a.f);
     return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u,
-             h: (u < 0.5 ? a.h : b.h), dead: !!a.dead };
+             h: (u < 0.5 ? a.h : b.h), dead: !!a.dead, mounted: !!a.mounted };
   }
 
   function drawGrid() {
@@ -527,6 +527,10 @@
       if (!dead && (CATS[e.cat] || {}).shape === "ring") {
         ctx.beginPath(); ctx.arc(X, Y, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+      if (p.mounted && !dead) { // riding a vehicle / weapon mount (parent transform)
+        ctx.beginPath(); ctx.arc(X, Y, r + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "#4ad2c2"; ctx.lineWidth = 1.4; ctx.stroke();
       }
       if (DIVERGENT.has(e.handle)) {
         ctx.beginPath(); ctx.arc(X, Y, r + 9, 0, Math.PI * 2);

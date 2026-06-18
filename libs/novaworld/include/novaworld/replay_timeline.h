@@ -16,8 +16,10 @@
 //     loopback capture.
 //   - S2C 0x0A per-frame compact records (§5.9) append the host's view of every
 //     nearby entity's motion (positions decompressed via
-//     network_decompress_fixedpoint + the message anchor). On-foot records land
-//     in world here; mounted (vehicle-local) records are deferred.
+//     network_decompress_fixedpoint + the message anchor). On-foot records land in
+//     world directly; mounted (vehicle-local) records are lifted into world by the
+//     parent-vehicle transform (network_transform_local_to_world), so a rider
+//     follows its vehicle / weapon mount instead of freezing.
 //
 // Beyond per-entity tracks, the timeline also carries an EVENT stream and an
 // ENVIRONMENT stream decoded from the same wire: weapon-fire (C2S 0x06),
@@ -53,6 +55,8 @@ struct ReplaySample {
 	                                 // spectator bit the read path gates on)
 	bool respawn = false;            // this sample is a respawn snap: a dead->alive
 	                                 // teleport — interp/trails must NOT bridge to it
+	bool mounted = false;            // position came from the parent-vehicle transform
+	                                 // (rider on a vehicle / weapon mount), not the wire
 };
 
 // One entity reconstructed from the capture, keyed by its network handle.
@@ -119,7 +123,9 @@ struct ReplayTimeline {
 // items.def by the caller); it is required to walk the S2C 0x0A per-frame records
 // (their width is class-dependent). When empty, 0x0A motion is skipped and the
 // timeline carries only spawns + C2S 0x0C uplinks. Mounted 0x0A records (whose
-// positions are vehicle-local) are skipped until the parent transform lands.
+// positions are vehicle-local) are lifted into world via the parent's pose
+// (network_transform_local_to_world), resolved bottom-up so nested mounts — a rider
+// on a weapon mount on a vehicle — place correctly.
 ReplayTimeline build_replay_timeline(
     const std::vector<InGameMessage> &messages,
     const std::function<EntityClass(uint16_t)> &class_of = {});

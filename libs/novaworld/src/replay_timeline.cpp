@@ -23,12 +23,14 @@ bool is_mounted_parent(uint16_t parent) {
 	return parent != 0xFFFF && (parent & 0xF000) < 0x5000;
 }
 
-// Extract a world-frame sample from one S2C 0x0A compact record: decompress the
-// three packed positions and add the message anchor (the 0x0A header refs).
-// Returns false for mounted records (vehicle-local, deferred) or unknown class.
-bool frame_record_world_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
-                               int32_t az, int frame, ReplaySample &s,
-                               uint8_t &flags_out) {
+// One S2C 0x0A compact record -> a ReplaySample. Unmounted records decode to WORLD
+// (decompress + the 0x0A header anchor). Mounted records carry a vehicle-LOCAL
+// offset (decompress, NO anchor) -> RecKind::Mounted, placed in world later by the
+// parent transform (resolve_mounted). RecKind::Skip = class without a compact form.
+enum class RecKind { Skip, World, Mounted };
+RecKind frame_record_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
+                            int32_t az, int frame, ReplaySample &s,
+                            uint8_t &flags_out, uint16_t &parent_out) {
 	uint16_t cx, cy, cz, parent;
 	double yaw_deg;
 	switch (r.cls) {
@@ -51,18 +53,36 @@ bool frame_record_world_sample(const FrameUpdateRecord &r, int32_t ax, int32_t a
 		flags_out = r.vehicle.flags_byte;
 		break;
 	default:
-		return false;
+		return RecKind::Skip;
 	}
-	if (is_mounted_parent(parent)) return false;
+	parent_out = parent;
 	s.frame_index = frame;
-	s.x = network_decompress_fixedpoint(cx) + ax;
-	s.y = network_decompress_fixedpoint(cy) + ay;
-	s.z = network_decompress_fixedpoint(cz) + az;
 	s.heading_deg = yaw_deg;
 	s.has_heading = true;
 	s.source = ReplaySampleSource::FrameUpdate;
-	return true;
+	const int32_t dx = network_decompress_fixedpoint(cx);
+	const int32_t dy = network_decompress_fixedpoint(cy);
+	const int32_t dz = network_decompress_fixedpoint(cz);
+	if (is_mounted_parent(parent)) {
+		s.x = dx; s.y = dy; s.z = dz; // vehicle-local; world via the parent transform
+		return RecKind::Mounted;
+	}
+	s.x = dx + ax; s.y = dy + ay; s.z = dz + az;
+	return RecKind::World;
 }
+
+// A deferred mounted record: a rider's vehicle-LOCAL offset + the parent handle, to
+// be lifted to world by resolve_mounted once the parent's world track is known.
+struct MountedRec {
+	uint16_t handle = 0, type = 0;
+	int frame = 0;
+	int32_t lx = 0, ly = 0, lz = 0; // vehicle-local offset (decompressed)
+	uint16_t parent = 0xFFFF;       // pool<<12|slot of the parent (vehicle / weapon mount)
+	double yaw_deg = 0.0;           // rider's own (local) heading
+	bool has_yaw = false;
+	bool dead = false;
+	ReplaySampleSource source = ReplaySampleSource::FrameUpdate; // 0x0A or own uplink
+};
 
 // The slot-id sentinel that ends a spawn batch (also guards stale/free slots).
 bool is_sentinel_slot(uint16_t slot) {
@@ -72,6 +92,7 @@ bool is_sentinel_slot(uint16_t slot) {
 struct Builder {
 	ReplayTimeline tl;
 	std::unordered_map<uint16_t, size_t> index; // handle -> entities[] position
+	std::vector<MountedRec> mounted;            // deferred riders (vehicle-local)
 	bool any_frame = false;
 
 	ReplayEntity &get(uint16_t handle, uint16_t type_id) {
@@ -140,6 +161,113 @@ void mark_lifecycle(ReplayTimeline &tl) {
 				if (dead && i > 0) s.respawn = true; // dead -> alive = teleport snap
 				dead = false;
 			}
+		}
+	}
+}
+
+// World pose (i32 16.16 position + heading) of an entity at a capture frame, by
+// interpolating its frame-sorted track. Used to resolve a parent's pose for the
+// mount transform; the parent must already be world-resolved + sorted.
+bool entity_pose_at(const ReplayEntity &e, int frame, int32_t &x, int32_t &y,
+                    int32_t &z, double &yaw, bool &has_yaw) {
+	const auto &t = e.track;
+	if (t.empty()) return false;
+	const ReplaySample *r = nullptr;
+	if (frame <= t.front().frame_index) {
+		r = &t.front();
+	} else if (frame >= t.back().frame_index) {
+		r = &t.back();
+	} else {
+		for (size_t i = 1; i < t.size(); ++i) {
+			if (t[i].frame_index >= frame) {
+				const ReplaySample &a = t[i - 1], &c = t[i];
+				const int span = c.frame_index - a.frame_index;
+				const double u = span > 0 ? double(frame - a.frame_index) / double(span) : 0.0;
+				x = a.x + int32_t((c.x - a.x) * u);
+				y = a.y + int32_t((c.y - a.y) * u);
+				z = a.z + int32_t((c.z - a.z) * u);
+				yaw = (u < 0.5) ? a.heading_deg : c.heading_deg;
+				has_yaw = a.has_heading;
+				return true;
+			}
+		}
+		return false;
+	}
+	x = r->x; y = r->y; z = r->z; yaw = r->heading_deg; has_yaw = r->has_heading;
+	return true;
+}
+
+// degrees -> 32-bit BAM (full circle = 2^32), the angle unit the transform expects.
+uint32_t deg_to_bam(double deg) {
+	double t = std::fmod(deg, 360.0);
+	if (t < 0.0) t += 360.0;
+	return uint32_t(int64_t(t / 360.0 * 4294967296.0) & 0xFFFFFFFFll);
+}
+
+// Lift every deferred mounted record (b.mounted) into world space. A rider's world
+// pose = network_transform_local_to_world(local_offset, parent_world_pose) [orig:
+// Entity_TransformLocalToWorld @ 0x43BD00, applied per mounted record by the read
+// path]. Mounts NEST (a rider on a weapon mount on a vehicle, a passenger/driver on
+// a vehicle), so resolve bottom-up: an entity is world-resolved only once every
+// parent it rides is resolved. The parent's unmounted 0x0A record carries only yaw
+// on the wire, so pitch/roll feed in as 0 (a wire limitation, not a divergence).
+void resolve_mounted(Builder &b) {
+	if (b.mounted.empty()) return;
+	std::unordered_map<uint16_t, std::vector<size_t>> by_handle;
+	for (size_t i = 0; i < b.mounted.size(); ++i)
+		by_handle[b.mounted[i].handle].push_back(i);
+	// Unmounted entities (no deferred records) start resolved; their tracks are
+	// already frame-sorted by the fold.
+	std::unordered_map<uint16_t, bool> resolved;
+	for (const ReplayEntity &e : b.tl.entities)
+		resolved[e.handle] = (by_handle.find(e.handle) == by_handle.end());
+	bool progress = true;
+	size_t guard = 0;
+	while (progress && guard++ <= b.tl.entities.size() + 4) {
+		progress = false;
+		for (auto &kv : by_handle) {
+			const uint16_t h = kv.first;
+			if (resolved[h]) continue;
+			bool ready = true; // every parent this rider mounts must be resolved first
+			for (size_t idx : kv.second) {
+				auto pit = b.index.find(b.mounted[idx].parent);
+				if (pit == b.index.end() || !resolved[b.mounted[idx].parent]) {
+					ready = false;
+					break;
+				}
+			}
+			if (!ready) continue;
+			ReplayEntity &re = b.tl.entities[b.index[h]];
+			for (size_t idx : kv.second) {
+				const MountedRec &mr = b.mounted[idx];
+				const ReplayEntity &pe = b.tl.entities[b.index[mr.parent]];
+				int32_t px, py, pz;
+				double pyaw;
+				bool phy;
+				if (!entity_pose_at(pe, mr.frame, px, py, pz, pyaw, phy)) continue;
+				const uint32_t yaw_bam = phy ? deg_to_bam(pyaw) : 0;
+				const WorldPose w = network_transform_local_to_world(
+				    mr.lx, mr.ly, mr.lz, px, py, pz, yaw_bam, 0, 0);
+				ReplaySample s;
+				s.frame_index = mr.frame;
+				s.x = w.x; s.y = w.y; s.z = w.z;
+				if (mr.has_yaw || phy) { // world heading = parent yaw + local yaw
+					double hd = std::fmod((phy ? pyaw : 0.0) + mr.yaw_deg, 360.0);
+					if (hd < 0.0) hd += 360.0;
+					s.heading_deg = hd;
+					s.has_heading = true;
+				}
+				s.source = mr.source;
+				s.dead = mr.dead;
+				s.mounted = true;
+				re.track.push_back(s);
+			}
+			std::stable_sort(re.track.begin(), re.track.end(),
+			                 [](const ReplaySample &a, const ReplaySample &c) {
+				                 return a.frame_index < c.frame_index;
+			                 });
+			resolved[h] = true;
+			progress = true;
 		}
 	}
 }
@@ -245,16 +373,31 @@ ReplayTimeline build_replay_timeline(
 			ReplayEntity &e = b.get(hdr.handle, hdr.item_type_id);
 			if (e.type_id == 0) e.type_id = hdr.item_type_id;
 			e.owner_session = m.session; // this entity is the uplink-sender's own player
-			ReplaySample s;
-			s.frame_index = m.frame_index;
-			s.x = up.pos_x;
-			s.y = up.pos_y;
-			s.z = up.pos_z;
 			// i16 heading sign-extends << 16 into a 32-bit BAM (§5.10).
-			s.heading_deg = bam32_to_deg(uint32_t(int32_t(up.heading) << 16));
-			s.has_heading = true;
-			s.source = ReplaySampleSource::ClientUplink;
-			e.track.push_back(s);
+			const double up_yaw = bam32_to_deg(uint32_t(int32_t(up.heading) << 16));
+			if (is_mounted_parent(up.vehicle_handle)) {
+				// The own-player uplink is vehicle-LOCAL when mounted too (§5.10) —
+				// defer to the same parent transform, tagged ClientUplink so the
+				// owner's projected view keeps it.
+				MountedRec mr;
+				mr.handle = hdr.handle; mr.type = hdr.item_type_id;
+				mr.frame = m.frame_index;
+				mr.lx = up.pos_x; mr.ly = up.pos_y; mr.lz = up.pos_z;
+				mr.parent = up.vehicle_handle;
+				mr.yaw_deg = up_yaw; mr.has_yaw = true;
+				mr.source = ReplaySampleSource::ClientUplink;
+				b.mounted.push_back(mr);
+			} else {
+				ReplaySample s;
+				s.frame_index = m.frame_index;
+				s.x = up.pos_x;
+				s.y = up.pos_y;
+				s.z = up.pos_z;
+				s.heading_deg = up_yaw;
+				s.has_heading = true;
+				s.source = ReplaySampleSource::ClientUplink;
+				e.track.push_back(s);
+			}
 		} else if (m.dir == 'S' && m.tag == 0x0A) {
 			// Per-frame motion for every nearby entity (the host's view). Each
 			// compact record's position is compressed against the message's
@@ -266,10 +409,11 @@ ReplayTimeline build_replay_timeline(
 				if (is_sentinel_slot(r.handle)) continue;
 				ReplaySample s;
 				uint8_t rec_flags = 0;
-				if (!frame_record_world_sample(r, fu.anchor_x, fu.anchor_y,
-				                               fu.anchor_z, m.frame_index, s,
-				                               rec_flags))
-					continue;
+				uint16_t parent = 0xFFFF;
+				const RecKind k = frame_record_sample(r, fu.anchor_x, fu.anchor_y,
+				                                      fu.anchor_z, m.frame_index, s,
+				                                      rec_flags, parent);
+				if (k == RecKind::Skip) continue;
 				// flags & 0x02 = the dead/spectator bit the read path gates on
 				// [orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320 (flagsByte
 				// & 2 branch) / NetPacket_SerializePlayerState @ 0x4C09C0]. mark_lifecycle
@@ -277,7 +421,13 @@ ReplayTimeline build_replay_timeline(
 				s.dead = (rec_flags & 0x02) != 0;
 				ReplayEntity &e = b.get(r.handle, r.type_id);
 				if (e.type_id == 0) e.type_id = r.type_id;
-				e.track.push_back(s);
+				if (k == RecKind::World) {
+					e.track.push_back(s);
+				} else { // Mounted — vehicle-local; lifted to world by resolve_mounted
+					b.mounted.push_back({r.handle, r.type_id, m.frame_index,
+					                     s.x, s.y, s.z, parent, s.heading_deg,
+					                     s.has_heading, s.dead});
+				}
 			}
 			// Environment snapshot (0x0A header sub-block case 2).
 			if (fu.env.present) {
@@ -394,6 +544,7 @@ ReplayTimeline build_replay_timeline(
 			}
 		}
 	}
+	resolve_mounted(b);   // lift vehicle-local riders into world (parent transform)
 	mark_lifecycle(b.tl); // flag death->respawn teleport boundaries (no-interp)
 	return b.tl;
 }

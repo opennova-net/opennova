@@ -1,5 +1,6 @@
 #include "novaworld/ingame_decode.h"
 
+#include <cmath>
 #include <cstring>
 
 // Decoders for S2C 0x0D / 0x20 — see docs/net/novaworld-net-re.md §5.11/§5.12.
@@ -8,6 +9,37 @@
 // leftover bytes).
 
 namespace opennova {
+
+// [orig: Entity_TransformLocalToWorld @ 0x43BD00] — see ingame_decode.h. Euler
+// roll(X)->pitch(Y)->yaw(Z) rotation of the local offset in 22-bit fixed-point,
+// then add the parent's world position. The intermediate assignments mirror the
+// disassembly's imul/shrd-22 chain; the angle->radian + sin/cos*2^22 reproduces
+// the x87 trig (last-bit FPU rounding is a platform primitive).
+WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           uint32_t yaw_bam, uint32_t pitch_bam,
+                                           uint32_t roll_bam) {
+	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
+	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
+		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
+		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
+		c = int32_t(std::cos(a) * 4194304.0);
+	};
+	int32_t sr, cr, sp, cp, sy, cy;
+	q(roll_bam, sr, cr); q(pitch_bam, sp, cp); q(yaw_bam, sy, cy);
+	auto m = [](int32_t a, int32_t b) -> int32_t { // (a*b) >> 22 (imul + shrd ,22)
+		return int32_t((int64_t(a) * int64_t(b)) >> 22);
+	};
+	const int32_t ry = m(ly, cr) - m(lz, sr);  // after roll about X: y'
+	const int32_t rz = m(ly, sr) + m(lz, cr);  //                     z'
+	const int32_t pxr = m(lx, cp) - m(rz, sp); // after pitch about Y: x''
+	const int32_t zr = m(lx, sp) + m(rz, cp);  //                      z''
+	WorldPose w;                               // after yaw about Z + parent world
+	w.x = m(pxr, cy) - m(ry, sy) + px;
+	w.y = m(pxr, sy) + m(ry, cy) + py;
+	w.z = zr + pz;
+	return w;
+}
 
 namespace {
 

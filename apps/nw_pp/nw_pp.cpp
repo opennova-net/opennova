@@ -817,6 +817,7 @@ void write_sample_json(std::ostream &o, const ReplaySample &s, bool with_src) {
 		o << ",\"src\":\"" << src << "\"";
 		if (s.dead) o << ",\"dead\":1";
 		if (s.respawn) o << ",\"respawn\":1";
+		if (s.mounted) o << ",\"mounted\":1";
 	}
 	o << "}";
 }
