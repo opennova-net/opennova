@@ -164,7 +164,7 @@ int main() {
 	// --- decode via the shared pipeline, then collect S2C 0x0D / 0x20 / 0x0C ---
 	std::vector<CaptureDatagram> caps;
 	caps.reserve(pkts.size());
-	for (auto &pk : pkts) caps.push_back({pk.frame_index, std::move(pk.payload)});
+	for (auto &pk : pkts) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
 	for (const auto &m : decode_capture_to_messages(caps))
 		if (m.dir == 'S' && !m.settings_update) collect(int(m.tag), m.payload);
 	std::printf("collected %zu x 0x0D, %zu x 0x20, %zu x 0x0C records "

@@ -60,6 +60,8 @@ struct ReplayEntity {
 	bool team_known = false;
 	uint16_t net_id = 0xFFFF;// organic net_id / marker authored bms id, when known
 	char spawn_tag = 0;      // 0x0D / 0x20 / 0x0C the entity entered on (0 = uplink-only)
+	int  owner_session = 0;  // client session whose C2S 0x0C uplink owns this entity's
+	                         // clean track (0 = host-owned / no uplink owner)
 	bool has_spawn = false;
 	ReplaySample spawn;      // authoritative initial WORLD pose
 	std::vector<ReplaySample> track; // time-ordered samples (seeded with spawn)
@@ -116,5 +118,51 @@ struct ReplayTimeline {
 ReplayTimeline build_replay_timeline(
     const std::vector<InGameMessage> &messages,
     const std::function<EntityClass(uint16_t)> &class_of = {});
+
+// ===========================================================================
+// Per-participant world model (the client/host split). Each network participant
+// — the host (authority, sends S2C) + one client per session (keyed by its UDP
+// port) — reconstructs its OWN view: its own player from its clean C2S 0x0C
+// uplink, every other entity from the S2C 0x0A it received. Diffing the host's
+// broadcast view against a client's reconstruction validates the decompress +
+// anchor decode under motion. The SAME structs feed the live Godot runtime from
+// the socket — this is the runtime world model, not replay-only.
+// ===========================================================================
+
+struct Participant {
+	int id = 0;          // 0 = host; 1..N = clients in roster order
+	bool is_host = false;
+	int session = 0;     // client-side UDP port (0 for the host)
+	std::string name;    // "host" / "client <port>" (later: NWHANDLE from the roster)
+};
+
+struct ParticipantView {
+	Participant who;
+	ReplayTimeline timeline; // projected to this participant's vantage
+};
+
+// Reconstruct every participant's world from a capture: decode once, build the
+// single timeline once, then project per participant by ReplaySample.source +
+// entity ownership. Index 0 is the host view; then one view per client session.
+std::vector<ParticipantView> build_per_participant_world(
+    const std::vector<CaptureDatagram> &datagrams,
+    const std::function<EntityClass(uint16_t)> &class_of = {});
+
+// Per-entity position divergence between two participant views (Step 3 harness).
+struct EntityDivergence {
+	uint16_t handle = 0;
+	int compared = 0;      // overlapping frames compared
+	double max_dist = 0.0; // worst per-frame position error (meters)
+	double mean_dist = 0.0;
+};
+
+struct ViewDiff {
+	std::vector<EntityDivergence> entities; // only entities that actually diverge
+};
+
+// Compare two views entity-by-entity (by handle), interpolating positions at each
+// other's sample frames. Surfaces where the host broadcast and a client's
+// reconstruction disagree — the RE-validation signal.
+ViewDiff diff_participant_views(const ParticipantView &a, const ParticipantView &b);
 
 } // namespace opennova

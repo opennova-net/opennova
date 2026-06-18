@@ -179,7 +179,7 @@ void test_frame_update_fold() {
 	std::vector<net::PcapDatagram> got;
 	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
 	std::vector<CaptureDatagram> caps;
-	for (auto &pk : got) caps.push_back({pk.frame_index, std::move(pk.payload)});
+	for (auto &pk : got) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
 
 	auto class_of = [kType](uint16_t t) -> EntityClass {
 		return t == kType ? EntityClass::Infantry : EntityClass::Unknown;
@@ -299,7 +299,7 @@ void test_event_stream() {
 	std::vector<net::PcapDatagram> got;
 	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
 	std::vector<CaptureDatagram> caps;
-	for (auto &pk : got) caps.push_back({pk.frame_index, std::move(pk.payload)});
+	for (auto &pk : got) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
 	const ReplayTimeline tl =
 	    build_replay_timeline(decode_capture_to_messages(caps));
 
@@ -336,10 +336,85 @@ void test_event_stream() {
 
 } // namespace
 
+// Per-participant world model + host<->client diff — the RE-validation harness.
+// A 2-party capture (host 32769 / client 32768): an 0x0D spawn lays down the
+// joiner's player H + an AI A; C2S 0x0C uplinks move H (clean, world+origin);
+// S2C 0x0A frame updates move H (compressed, a DIFFERENT path) + A.
+// build_per_participant_world must yield host + 1 client; the diff must flag H
+// (host sees the compressed broadcast, the client sees its own clean uplink) and
+// NOT A (both see it via the same frameupdate).
+void test_per_participant_split() {
+	constexpr uint16_t kType = 0x0816; // -> Infantry (class_of below)
+	constexpr uint16_t H = 0x0005;     // the joiner's own player
+	constexpr uint16_t A = 0x0002;     // an AI entity (host-owned, no uplink)
+	const int32_t Sx = 70 << 16, Sy = 25 << 16, Sz = 16 << 16; // H spawn (world 16.16)
+	const int32_t Qx = 90 << 16, Qy = 40 << 16, Qz = 16 << 16; // A spawn
+	const int32_t O = 1000 << 16;      // world+origin offset carried on the uplink
+
+	// 0x0D spawn batch: H + A (the encoder gives both a world spawn pose).
+	PoolSpawnRecord rh; rh.slot_id = H; rh.item_type_id = kType;
+	rh.pos_x = Sx; rh.pos_y = Sy; rh.pos_z = Sz;
+	PoolSpawnRecord ra; ra.slot_id = A; ra.item_type_id = kType;
+	ra.pos_x = Qx; ra.pos_y = Qy; ra.pos_z = Qz;
+	PoolSpawnBatch sb; sb.records = {rh, ra};
+	const std::vector<uint8_t> spawn_inner = encode_pool_spawn_batch(sb);
+
+	// H frameupdate: anchor = spawn, compressed = +200m x -> host sees H at Sx+~200m.
+	InfantryCompactRecord ih; ih.vehicle_slot_handle = 0xFFFF;
+	ih.pos_x_compressed = network_compress_fixedpoint(200 << 16);
+	const std::vector<uint8_t> fu_h = make_frame_update_0a(Sx, Sy, Sz, H, kType, ih);
+	// A frameupdate: anchor = A spawn, compressed = +1m x (a small move, same in both views).
+	InfantryCompactRecord iaa; iaa.vehicle_slot_handle = 0xFFFF;
+	iaa.pos_x_compressed = network_compress_fixedpoint(1 << 16);
+	const std::vector<uint8_t> fu_a = make_frame_update_0a(Qx, Qy, Qz, A, kType, iaa);
+
+	ClientAuth ca; ca.na = "t"; ca.ci = 1; ca.ck = 2; ca.scrk = std::string(kScrk);
+	ServerAuth sa = build_server_auth(ca, 0x7F000001u, 32768, 0x55, kScrk);
+
+	std::vector<net::PcapDatagram> dgrams;
+	int f = 1;
+	dgrams.push_back({32769, 32768, f++, nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa))});
+	dgrams.push_back({32768, 32769, f++, nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca))});
+	dgrams.push_back({32769, 32768, f++, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D, spawn_inner)});               // f=3 spawn H+A
+	dgrams.push_back({32768, 32769, f++, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, make_uplink(H, kType, Sx + O, Sy, Sz, 0))}); // f=4 uplink1 -> reconciles to spawn
+	dgrams.push_back({32769, 32768, f++, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, fu_h)});                      // f=5 H frameupdate (+200m)
+	dgrams.push_back({32768, 32769, f++, make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C, make_uplink(H, kType, Sx + O + (100 << 16), Sy, Sz, 0))}); // f=6 uplink2 (+100m)
+	dgrams.push_back({32769, 32768, f++, make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0A, fu_a)});                      // f=7 A frameupdate
+
+	const std::vector<uint8_t> pcap = net::build_pcap_udp(dgrams);
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	std::vector<CaptureDatagram> caps;
+	for (auto &pk : got) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
+
+	auto class_of = [kType](uint16_t t) -> EntityClass {
+		return t == kType ? EntityClass::Infantry : EntityClass::Unknown;
+	};
+	const std::vector<ParticipantView> views = build_per_participant_world(caps, class_of);
+
+	EXPECT(views.size() == 2);
+	if (views.size() == 2) {
+		EXPECT(views[0].who.is_host && views[0].who.session == 0);
+		EXPECT(!views[1].who.is_host && views[1].who.session == 32768);
+
+		const ViewDiff d = diff_participant_views(views[0], views[1]);
+		bool h_div = false, a_div = false;
+		double h_dist = 0.0;
+		for (const auto &ed : d.entities) {
+			if (ed.handle == H) { h_div = true; h_dist = ed.max_dist; }
+			if (ed.handle == A) a_div = true;
+		}
+		EXPECT(h_div);          // H: host (compressed broadcast) vs client (clean uplink) differ
+		EXPECT(h_dist > 1.0);   // the crafted paths differ by ~150 m
+		EXPECT(!a_div);         // A: both views see the same frameupdate -> no divergence
+	}
+}
+
 int main() {
 	test_decompress_vectors();
 	test_frame_update_fold();
 	test_event_stream();
+	test_per_participant_split();
 
 	// --- craft the inputs -----------------------------------------------------
 	// Two pool-1 spawns: a "blue" entity at (-85,45) and a "red" one at (85,45).
@@ -409,7 +484,7 @@ int main() {
 	EXPECT(got.size() == dgrams.size());
 
 	std::vector<CaptureDatagram> caps;
-	for (auto &pk : got) caps.push_back({pk.frame_index, std::move(pk.payload)});
+	for (auto &pk : got) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
 	const std::vector<InGameMessage> msgs = decode_capture_to_messages(caps);
 
 	// Sanity: the shared pipeline yielded exactly the three protocol messages

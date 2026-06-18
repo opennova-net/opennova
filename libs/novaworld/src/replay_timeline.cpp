@@ -2,6 +2,9 @@
 
 #include "novaworld/ingame_decode.h"
 
+#include <algorithm>
+#include <cmath>
+#include <string>
 #include <unordered_map>
 
 namespace opennova {
@@ -198,6 +201,7 @@ ReplayTimeline build_replay_timeline(
 			if (!decode_player_extended_uplink(rest, rest_len, up, used)) continue;
 			ReplayEntity &e = b.get(hdr.handle, hdr.item_type_id);
 			if (e.type_id == 0) e.type_id = hdr.item_type_id;
+			e.owner_session = m.session; // this entity is the uplink-sender's own player
 			ReplaySample s;
 			s.frame_index = m.frame_index;
 			s.x = up.pos_x;
@@ -326,6 +330,134 @@ ReplayTimeline build_replay_timeline(
 		}
 	}
 	return b.tl;
+}
+
+namespace {
+
+// Project the full timeline to one participant's vantage. Spawn samples are always
+// kept; an entity the participant OWNS (its own player) keeps its clean
+// ClientUplink track, every other entity keeps the FrameUpdate (received-on-wire)
+// track. The host keeps FrameUpdate for everything (the broadcast view). The owned
+// uplink track is reconciled to the spawn's WORLD frame (the §5.10 world+origin
+// offset the viewer's anchorfix removes) so it is comparable to the others.
+ParticipantView project_view(const ReplayTimeline &full, const Participant &who) {
+	ParticipantView v;
+	v.who = who;
+	v.timeline.first_frame = full.first_frame;
+	v.timeline.last_frame = full.last_frame;
+	v.timeline.events = full.events;            // one wire event/env stream, shared
+	v.timeline.environment = full.environment;
+	for (const ReplayEntity &src : full.entities) {
+		const bool own = !who.is_host && src.owner_session != 0 &&
+		                 src.owner_session == who.session;
+		int32_t ox = 0, oy = 0, oz = 0;
+		if (own && src.has_spawn) {
+			for (const ReplaySample &s : src.track)
+				if (s.source == ReplaySampleSource::ClientUplink) {
+					ox = src.spawn.x - s.x;
+					oy = src.spawn.y - s.y;
+					oz = src.spawn.z - s.z;
+					break;
+				}
+		}
+		ReplayEntity e = src;
+		e.track.clear();
+		for (const ReplaySample &s : src.track) {
+			bool keep;
+			if (s.source == ReplaySampleSource::Spawn) keep = true;
+			else if (own) keep = (s.source == ReplaySampleSource::ClientUplink);
+			else keep = (s.source == ReplaySampleSource::FrameUpdate);
+			if (!keep) continue;
+			ReplaySample o = s;
+			if (own && s.source == ReplaySampleSource::ClientUplink) {
+				o.x += ox; o.y += oy; o.z += oz;
+			}
+			e.track.push_back(o);
+		}
+		v.timeline.entities.push_back(std::move(e));
+	}
+	return v;
+}
+
+// Linear-interpolate (x,y) in meters at capture frame `f` over `track`; false if
+// the track is empty or `f` is outside its span (no extrapolation).
+bool interp_pos(const std::vector<ReplaySample> &track, int f, double &x, double &y) {
+	if (track.empty()) return false;
+	if (f < track.front().frame_index || f > track.back().frame_index) return false;
+	for (size_t i = 1; i < track.size(); ++i) {
+		if (track[i].frame_index >= f) {
+			const ReplaySample &a = track[i - 1];
+			const ReplaySample &c = track[i];
+			const int span = c.frame_index - a.frame_index;
+			const double u = span > 0 ? double(f - a.frame_index) / double(span) : 0.0;
+			x = (a.x + (c.x - a.x) * u) / 65536.0;
+			y = (a.y + (c.y - a.y) * u) / 65536.0;
+			return true;
+		}
+	}
+	x = track.front().x / 65536.0;
+	y = track.front().y / 65536.0;
+	return true;
+}
+
+} // namespace
+
+std::vector<ParticipantView> build_per_participant_world(
+    const std::vector<CaptureDatagram> &datagrams,
+    const std::function<EntityClass(uint16_t)> &class_of) {
+	const std::vector<InGameMessage> msgs = decode_capture_to_messages(datagrams);
+	const ReplayTimeline full = build_replay_timeline(msgs, class_of);
+
+	// Roster: the host (authority) + one client per distinct session (client UDP
+	// port), in first-seen order.
+	std::vector<int> client_sessions;
+	for (const auto &m : msgs) {
+		if (m.session == 0) continue;
+		if (std::find(client_sessions.begin(), client_sessions.end(), m.session) ==
+		    client_sessions.end())
+			client_sessions.push_back(m.session);
+	}
+
+	std::vector<ParticipantView> views;
+	Participant host;
+	host.is_host = true;
+	host.name = "host";
+	views.push_back(project_view(full, host));
+	for (size_t i = 0; i < client_sessions.size(); ++i) {
+		Participant c;
+		c.id = int(i + 1);
+		c.session = client_sessions[i];
+		c.name = "client " + std::to_string(client_sessions[i]);
+		views.push_back(project_view(full, c));
+	}
+	return views;
+}
+
+ViewDiff diff_participant_views(const ParticipantView &a, const ParticipantView &b) {
+	ViewDiff out;
+	std::unordered_map<uint16_t, const ReplayEntity *> bmap;
+	for (const auto &e : b.timeline.entities) bmap[e.handle] = &e;
+	for (const ReplayEntity &ea : a.timeline.entities) {
+		auto it = bmap.find(ea.handle);
+		if (it == bmap.end()) continue;
+		const ReplayEntity &eb = *it->second;
+		EntityDivergence d;
+		d.handle = ea.handle;
+		double sum = 0.0;
+		for (const ReplaySample &s : ea.track) {
+			double bx, by;
+			if (!interp_pos(eb.track, s.frame_index, bx, by)) continue;
+			const double dist = std::hypot(s.x / 65536.0 - bx, s.y / 65536.0 - by);
+			++d.compared;
+			sum += dist;
+			if (dist > d.max_dist) d.max_dist = dist;
+		}
+		if (d.compared > 0) {
+			d.mean_dist = sum / d.compared;
+			if (d.max_dist > 1e-6) out.entities.push_back(d); // skip identical-source matches
+		}
+	}
+	return out;
 }
 
 } // namespace opennova

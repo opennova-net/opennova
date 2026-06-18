@@ -1,5 +1,7 @@
 #include "novaworld/wire_capture.h"
 
+#include <unordered_map>
+
 #include <napi/envelope.h>
 #include <novacrypto/nwu.h>
 #include <novaworld/protocol_message.h>
@@ -41,7 +43,7 @@ struct DirState {
 };
 
 void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
-             DirState &st, int frame, std::vector<InGameMessage> &out) {
+             DirState &st, int frame, int session, std::vector<InGameMessage> &out) {
 	if (scrk.empty()) return;
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> msgs;
@@ -61,6 +63,7 @@ void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir
 		m.dir = dir;
 		m.tag = st.pending_tag;
 		m.settings_update = st.pending_settings;
+		m.session = session;
 		m.payload = std::move(assembled);
 		out.push_back(std::move(m));
 		st.have_pending = false;
@@ -72,28 +75,41 @@ void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir
 std::vector<InGameMessage>
 decode_capture_to_messages(const std::vector<CaptureDatagram> &datagrams) {
 	std::vector<InGameMessage> out;
-	std::string client_scrk, server_scrk;
-	DirState cstate, sstate;
+	// Per-session state keyed by the client-side UDP port (C2S src / S2C dst). Each
+	// session carries its OWN SCRK pair + per-direction reassembly, so a capture with
+	// N clients decodes correctly (a single global pair would clobber the prior
+	// client's keys). When ports are unavailable (hexcap / crafted port-less caps)
+	// every datagram keys to session 0 — the original single-session behavior.
+	struct Session {
+		std::string client_scrk, server_scrk;
+		DirState cstate, sstate;
+	};
+	std::unordered_map<int, Session> sessions;
 	for (const auto &d : datagrams) {
 		uint8_t op = 0;
 		std::vector<uint8_t> body;
 		if (!decode_outer(d.payload, op, body)) continue;
+		const bool is_server = (op == SESSION_OPCODE_SERVER_AUTH ||
+		                        op == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
+		const bool have_ports = (d.src_port != 0 && d.dst_port != 0);
+		const int session_key = !have_ports ? 0 : (is_server ? d.dst_port : d.src_port);
+		Session &s = sessions[session_key];
 		switch (op) {
 		case SESSION_OPCODE_CLIENT_AUTH: {
 			ClientAuth a;
-			if (parse_client_auth(body.data(), body.size(), a)) client_scrk = a.scrk;
+			if (parse_client_auth(body.data(), body.size(), a)) s.client_scrk = a.scrk;
 			break;
 		}
 		case SESSION_OPCODE_SERVER_AUTH: {
 			ServerAuth a;
-			if (parse_server_auth(body.data(), body.size(), a)) server_scrk = a.scrk;
+			if (parse_server_auth(body.data(), body.size(), a)) s.server_scrk = a.scrk;
 			break;
 		}
 		case SESSION_OPCODE_PROTOCOL_MESSAGE:
-			process(body, client_scrk, 'C', cstate, d.frame_index, out);
+			process(body, s.client_scrk, 'C', s.cstate, d.frame_index, session_key, out);
 			break;
 		case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-			process(body, server_scrk, 'S', sstate, d.frame_index, out);
+			process(body, s.server_scrk, 'S', s.sstate, d.frame_index, session_key, out);
 			break;
 		default:
 			break;

@@ -59,6 +59,7 @@ namespace {
 
 struct Datagram {
 	int srcport = 0;
+	int dstport = 0;
 	int frame = 0;
 	std::vector<uint8_t> bytes;
 };
@@ -990,6 +991,7 @@ int main(int argc, char *argv[]) {
 		for (auto &pk : pkts) {
 			Datagram d;
 			d.srcport = pk.srcport;
+			d.dstport = pk.dstport;
 			d.frame = pk.frame_index;
 			d.bytes = std::move(pk.payload);
 			dgrams.push_back(std::move(d));
@@ -1024,7 +1026,7 @@ int main(int argc, char *argv[]) {
 	// the historical 0x1000 settings-update bit; the filter matches the low byte.
 	std::vector<CaptureDatagram> caps;
 	caps.reserve(dgrams.size());
-	for (auto &d : dgrams) caps.push_back({d.frame, std::move(d.bytes)});
+	for (auto &d : dgrams) caps.push_back({d.frame, d.srcport, d.dstport, std::move(d.bytes)});
 
 	// --replay-json: build the timeline and emit the viewer document, then exit.
 	if (replay_json_out && *replay_json_out)

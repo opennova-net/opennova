@@ -24,6 +24,8 @@ namespace opennova {
 // dependencies — callers map their own datagram type onto this.
 struct CaptureDatagram {
 	int frame_index = 0;
+	int src_port = 0;  // UDP source port; 0 = unknown (hexcap / crafted port-less)
+	int dst_port = 0;  // UDP dest port; 0 = unknown
 	std::vector<uint8_t> payload;
 };
 
@@ -35,6 +37,8 @@ struct InGameMessage {
 	char dir = '?';               // 'C' = client->server, 'S' = server->client
 	uint16_t tag = 0;             // protocol full_tag; the low byte is the dispatch tag
 	bool settings_update = false; // ProtocolMessage.flags.settings_update
+	int session = 0;              // per-session id = the client-side UDP port (the
+	                              // distinct-participant key); 0 = single/unknown session
 	std::vector<uint8_t> payload; // reassembled inner body
 };
 
