@@ -496,6 +496,65 @@ bool decode_weapon_hit_record(const uint8_t *body, size_t len,
 	return consumed == expected;
 }
 
+// §5.15 guided weapon record — read ONE field group. The write side lives in
+// encode_guided_field_group. [orig: Entity_SerializeGuidedMissileState @ 0x447C50]
+// (mode 2 read-full = the case-2 switch; mode 4 read-apply = the case-4 switch).
+// See ingame_decode.h for the (mode × group) size matrix + the deferral note.
+bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
+                               const uint8_t *body, size_t len,
+                               GuidedRecord &out, size_t &consumed) {
+	consumed = 0;
+	// Decode handles the two READ modes only (full vs delta-apply); the write
+	// modes 1/3 are encode_guided_field_group's job.
+	if (mode != GuidedMode::ReadFull && mode != GuidedMode::ReadApply)
+		return false;
+	const bool full = (mode == GuidedMode::ReadFull);
+	Cursor c{body, body + len, true};
+	switch (group) {
+	case GuidedFieldGroup::Status:        // [orig: 0x448039] entity+696|=1, +276|=0x1000
+		out.launched = true;
+		break;                            // 0 payload bytes
+	case GuidedFieldGroup::ClearTarget:   // [orig: 0x447e73] clear target
+		out.target_cleared = true;
+		out.target_slot = 0xFFFF;
+		break;                            // 0 payload bytes
+	case GuidedFieldGroup::TargetPos:     // [orig: 0x447e93 (full) / 0x448052 (apply)]
+		out.target_slot = c.u16();        // entity+724
+		out.target_bound = true;
+		if (full) {                       // full reads pos; apply reads target only
+			out.pos_x = int32_t(c.u32()); // entity+700
+			out.pos_y = int32_t(c.u32()); // entity+704
+			out.pos_z = int32_t(c.u32()); // entity+708
+		}
+		break;
+	case GuidedFieldGroup::TargetTypePos: // [orig: 0x447f39 (full) / 0x4480ab (apply)]
+		if (full) out.target_slot = c.u16();    // entity+724 (full only)
+		out.weapon_type = uint16_t(c.u32());     // entity+698 (low u16 of a 4-B field)
+		out.pos_x = int32_t(c.u32());
+		out.pos_y = int32_t(c.u32());
+		out.pos_z = int32_t(c.u32());
+		out.target_bound = true;
+		break;
+	case GuidedFieldGroup::Pos:           // [orig: 0x448135] read pos, clear target
+		out.pos_x = int32_t(c.u32());
+		out.pos_y = int32_t(c.u32());
+		out.pos_z = int32_t(c.u32());
+		out.target_cleared = true;
+		out.target_slot = 0xFFFF;
+		break;
+	case GuidedFieldGroup::AttachOffsets: // [orig: 0x4481b1] entity+740/744/748
+		out.attach_x = int32_t(c.u32());
+		out.attach_y = int32_t(c.u32());
+		out.attach_z = int32_t(c.u32());
+		break;
+	default:
+		return false;
+	}
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return true;
+}
+
 // §5.10b class dispatch — exact 4-char match (the table is case-sensitive).
 // Direct witnesses: plyr→Player; org0/org1→Infantry; cveh/CHel/cbot/cpln/ctrn→
 // Vehicle; rokt/stng/hlfr/jvln/arty→Guided. Unwitnessed tags default Unknown.
@@ -631,8 +690,12 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 				ok = decode_infantry_compact_record(c.p, avail, rec.infantry, consumed);
 				break;
 			default:
-				// Guided (§5.15 deferred) or Unknown: record width unknown —
-				// fail closed (we can't safely advance the cursor).
+				// Guided (§5.15) or Unknown: not a §5.10b compact (the guided
+				// serializer rejects format 11), so it never legitimately appears
+				// here — guided state replicates via the 0x0C entity-packet path
+				// (sub_op-dispatched, see decode_guided_field_group), not the 0x0A
+				// trailing event loop. Width is unknown, so fail closed (we can't
+				// safely advance the cursor).
 				return finish(false);
 			}
 			if (!ok) return finish(false);

@@ -1056,8 +1056,9 @@ state.
 **Open follow-ups (§5.9 + §5.10):** Pool-entity messages 0x0D and 0x20 closed in §5.11 / §5.12
 (Stage C). The vehicle / AI-infantry / weapon-class callbacks at `ItemDef+356` — flagged here
 as "TBD" — are decoded in §5.10b (dispatch table) plus §5.13 (vehicle compact),
-§5.14 (AI infantry compact) and §5.15 (guided weapons; structural sketch only, full
-field map deferred until a capture carries live projectile traffic). Compact-record velocity
+§5.14 (AI infantry compact) and §5.15 (guided weapons; full (mode×field-group) matrix
++ structural port landed, wire integration + validation deferred until a capture
+carries live projectile traffic — D-NET-64). Compact-record velocity
 fields witnessed for tag 0x10 (§5.9, entity+16/20/24 with flag gating) but not exercised in
 the 0x0A trailing record — confirmed class-specific (no vehicle / infantry callback writes
 them; player callback's compact path doesn't either).
@@ -1096,7 +1097,7 @@ Network-serialize callbacks observed in the table (14 networked entries with
 | `plyr` | `NetPacket_SerializePlayerState @ 0x4C09C0` | player infantry | both compact (type 11) and extended (type 10) — §5.10 |
 | `org0` / `org1` | `NetPacket_SerializeInfantryEntityState @ 0x4C0320` | AI infantry / organic | compact only — §5.14 |
 | `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` | `Entity_SerializeMountedVehicleState @ 0x460560` | vehicles + AI ground/air units | compact only — §5.13 |
-| `rokt` / `stng` / `hlfr` / `jvln` / `arty` | `Entity_SerializeGuidedMissileState @ 0x447C50` | guided weapons (rockets, missiles, artillery) | 4 modes × 6 sub-fields delta codec — §5.15 (TBD) |
+| `rokt` / `stng` / `hlfr` / `jvln` / `arty` | `Entity_SerializeGuidedMissileState @ 0x447C50` | guided weapons (rockets, missiles, artillery) | 4 modes × 6 field-groups; selector = sub_op byte; ported, wire-deferred — §5.15 |
 
 **Non-networked entries (27 with `fn[3] == 0`)**, kept in the table for the
 other `fn[]` slots (damage / init / spawn-companion): `null`, `brrl`, `envs`,
@@ -1332,19 +1333,56 @@ entry select whether to write +696 vs +700 — and handles a special path
 through `Entity_TryAttachOrDetach` when `flagsByte & 2` flips. None of that
 affects the wire layout.
 
-### 5.15 Guided weapon record — TBD (delta codec)
+### 5.15 Guided weapon record — per-(mode, field-group) codec
 
 `[orig: Entity_SerializeGuidedMissileState @ 0x447C50]`. Used by item classes
-`rokt` / `stng` / `hlfr` / `jvln` / `arty` (rockets, Stinger / Hellfire /
-Javelin / artillery). Structurally different from §5.10 / §5.13 / §5.14: a 4×6
-matrix of modes × sub-fields (`packetCtx[6]` ∈ {1,2,3,4} crossed with
-`packetCtx[7]` ∈ {1..6}) — full-write / full-read / delta-write / delta-apply
-across six field-groups (status, target handle, position, type+pos,
-attach-offsets). Used for projectile-in-flight state replication, not a single
-fixed compact record like §5.13/§5.14. Decoded skeleton lives in the IDA
-record; full field map deferred until a capture carrying live guided-weapon
-traffic exists (the 2026-06-16b loopback has none — no rockets fired during
-the on-foot/in-buggy session).
+`rokt` / `stng` / `hlfr` / `jvln` / `arty` / `arti` (rockets, Stinger / Hellfire /
+Javelin / artillery). Structurally unlike §5.10 / §5.13 / §5.14: NOT one fixed
+body keyed on format 11, but a **matrix of `mode` (`packetCtx[6]` ∈ {1..4}) ×
+`field-group` (`packetCtx[7]` ∈ {1..6})** — each call serializes exactly one field
+group of a projectile-in-flight's state.
+
+**Modes** (`packetCtx[6]`): 1 = write-full, 2 = read-full (no-op when the receiver
+is the authority), 3 = write-delta, 4 = read-apply (delta).
+
+**Field groups** (`packetCtx[7]`) and per-mode payload sizes (bytes AFTER the
+5-byte entity sub-header):
+
+| group | landing | write-full(1) | read-full(2) | write-delta(3) | read-apply(4) |
+|---|---|---|---|---|---|
+| 1 status (launch) | entity+696\|=1, +276\|=0x1000 | 1 B (`0x00`) | 0 B | 1 B (`0x00`) | 0 B |
+| 2 clear-target | entity+696&=~2, +724=0, +728=-1 | 1 B (`0x00`) | 0 B | 1 B (`0x00`) | 0 B |
+| 3 target+pos | target entity+724, pos entity+700/704/708 | 14 | 14 | 2 (target only) | 2 (target only) |
+| 4 target+type+pos | + weapon-type entity+698 | 18 (+target) | 18 (+target) | 16 (no target) | 16 (no target) |
+| 5 pos | entity+700/704/708 (read clears target) | 12 | 12 | 12 | 12 |
+| 6 attach-offsets | entity+740/744/748 | 12 | 12 | 12 | 12 |
+
+The target handle is the 2-byte `(pool<<12)|slot`; the weapon-type is a 4-byte
+field whose low u16 is the type id; position/attach are raw i32. The **delta modes
+(3/4) drop the target handle** the full modes (1/2) carry — group 3 delta is just
+the handle, group 4 delta omits it entirely.
+
+**Group-selector framing (the previously-missing piece, now witnessed).** The
+`(mode, group)` pair is set by the *caller*, not encoded in this function. On the
+host C2S-receive path `[orig: dispatch_entity_packet_callback @ 0x4D6A80]` reads the
+5-byte entity sub-header (`[u16 handle][u16 type_id][u8 sub_op]`, §5.10b), copies the
+**`sub_op` byte into `packetCtx[7]` (the field group)** and hardwires
+`packetCtx[6]=4` (read-apply). So for a guided entity the wire-carried `sub_op` IS
+the field-group selector (1..6) — the same byte that is 10/11 (extended/compact
+format) for the player/infantry/vehicle classes. Because the serializer rejects
+format 11, guided entities never appear as a §5.10b 0x0A compact record, and
+`decode_frame_update` correctly fails closed on `EntityClass::Guided`. The
+write-side 1-byte `0x00` marker for groups 1/2 (read side reads 0 B) is a framing
+byte the dispatcher owns — reproduced by the port but not round-trippable at the
+serializer layer.
+
+**Port + status.** `GuidedRecord` + `encode_guided_field_group` /
+`decode_guided_field_group` (`ingame_encode.cpp` / `ingame_decode.cpp`) port the
+write/read switches; `nw_ingame_guided_test` round-trips every (mode, group).
+**Deferred** (D-NET-64): wiring the codec into the 0x0C entity-packet dispatch and
+validating the per-group field semantics against the wire — no capture in hand
+carries guided traffic (the 2026-06-16b loopback fired no rockets). Verdict:
+**partial** (IDA-structural; round-trip-pinned; wire-unvalidated).
 
 ### 5.16 C2S 0x06 — client-fired-round (3-player loopback 2026-06-16d)
 
@@ -2759,6 +2797,7 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-61** [INFO, VALIDATED] The `/PROFILE` `.sph` server-log (§5.22) — the engine's own decoded per-frame view of the SAME probe session — was decoded (`libs/novaworld/serverlog_decode.{h,cpp}`, `nw_pp` `.sph` mode, `nw_serverlog_decode_test`) and cross-validated against the `.pcapng`: FooPlayer (Red, pool-0 handle 0x0005) spawn state `(70.0, 25.0, 56.306)/0xc0000000` matches **byte-for-byte** across `.sph` `PDAT`, C2S 0x0C extended uplink (§5.10), and the S2C 0x0A header `refs` triple — independently confirming the 0x0C decoder, the 16.16/-Z + 32-bit-BAM conventions, pool-0=players (the recorder iterates `g_pool_list[0]`), and team@entity+354 (re-confirms D-NET-58 via the `FEDP` roster: TestPlayer=Blue/1, FooPlayer=Red/2). No code divergence — a validation pass + new oracle tooling. Two IDB-fidelity fixes were required to read the recorder: `sub_522350`→`Game_TeardownMission` decompilation was blocked by phantom-arg prototypes on 0-arg callees (`Database_GetFieldValue` is actually `void __thiscall Database_FreeFieldEntries`; `File_Seek`/`Terrain_RenderSectorsWithWhiteFog`/`CEffectWorld_IsNameAvailable` retyped to 0 args — each 1 xref, 0 stack-arg reads). [orig: Game_ProcessMainFrame @ 0x5263f0 / CServerLog_WritePositionRecord @ 0x4e1b00 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 - **D-NET-62** [INFO, VALIDATED] Authored-mission cross-validation of pools 1/2/3 (§5.24) — the dvxi5 probe's *known* `mission.bms`, serialized by the retail host, decoded field-for-field on the wire (the sibling of D-NET-61 for the pools the `.sph` can't see). Lands the **S2C 0x0C organic-spawn field map + decoder** (`decode_organic_spawn_batch` / `OrganicSpawnRecord`, §5.23) — byte-exact consume on the probe's 6-organic batch (4 AI `0x0816` + 2 players `0x14B9`); the shared pcap reader (`apps/common/pcap_reader`, nw_pp factored onto it); and two tests (`nw_pool_groundtruth_test` reads the real `.scratch` pcap directly; `nw_pool_decode_unit_test` inline-pcap round-trips 0x0D/0x20 through the full S2C stack). Confirms: type_id/position/team reproduce (posX/posY lossless i32 16.16; posZ re-grounds ≤1u for vehicles/AI, markers keep authored z); the heading convention **`wire_BAM = 90 - facing`** (pinned by AI authored at facing {0,90,180,270} → wire {90°,0°,270°,180°}; the 0x20 markers at facing {0,180} alone could not distinguish it from `facing+90`); and team @ **entity+354** — the onhook PoC's `+146`/`+196` reads are inside `GamePlayerEntity.pad5`, a runtime/display mirror, NOT the BMS team (same mislabel class as the PDAT `+42` STAT byte, §5.22). No divergence in the pool decoders — a new field map + validation oracle. [orig: NapiNPClientMsg_0x00C @ 0x42E730 / serialize_entity_pool_to_packet_0 @ 0x503940 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 - **D-NET-63** [MED, DOC+CODE] §5.13 vehicle compact record field labels corrected (the rename the 2026-06-16d footnote deferred). Re-grilled the mode-2 (read) path of `Entity_SerializeMountedVehicleState @ 0x460560`: the pre-branch i16 (`yaw_high`) and the two mounted-branch i16s are the **orientation / rider Euler triple Z/Y/X** landing at **entity+576/584/580** (fed to `Math_BuildFixedPointMatrixFromEulerAngles`), and the unmounted block is **turret-pitch raw i16 (entity+286) + weapon-aim Y/Z (read-dest `vehicleData[177/178]`) + weapon-heading BAM (`vehicleData[179]`)** — distinct from the genuine weapon-X compressed u16 (entity+160). The write side has NO shared trailing field, so the reimpl's formerly-shared `final_heading` is split per branch into `euler_x` (mounted) / `weapon_heading_bam` (unmounted). Renamed `ingame_decode.h VehicleCompactRecord` (`yaw_high→euler_z`, `secondary_heading→euler_y`, `final_heading→euler_x|weapon_heading_bam`, `weapon_x_compressed→weapon_x`, `weapon_y_raw→turret_pitch_raw`, `weapon_z_compressed→weapon_aim_y`, `weapon_heading_compressed→weapon_aim_z`) with matching `ingame_encode.cpp` / `nw_pp.cpp` / `replay_timeline.cpp` / `nw_ingame_compact_records_test` / `nw_ingame_encode_test`. Also split the §5.13 table's "landing" column into write-source vs read-dest (it had conflated write `vehicleData[136]` with read-dest `vehicleData[177]`). **Wire bytes, read order, and sizes (15 B mounted / 21 B not) are unchanged** — label-only; round-trip + byte-witness tests stay green. [orig: Entity_SerializeMountedVehicleState @ 0x460560 (read path @ 0x4605a3..0x460aff; Euler matrix build @ 0x460a0f → Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40)]
+- **D-NET-64** [PARTIAL, DOC+CODE] §5.15 guided weapon record upgraded from "TBD" to a documented per-(mode, field-group) matrix + structural port. `Entity_SerializeGuidedMissileState @ 0x447C50` is a `mode (packetCtx[6] ∈ {1..4}) × field-group (packetCtx[7] ∈ {1..6})` codec (write-full/read-full/write-delta/read-apply across status / clear-target / target+pos / type+pos / pos / attach-offsets), NOT a fixed compact. **Framing resolved:** `dispatch_entity_packet_callback @ 0x4D6A80` copies the 5-byte entity sub-header's `sub_op` byte into `packetCtx[7]`, so the field-group selector rides the wire as `sub_op` (1..6 for guided; 10/11 = extended/compact for the §5.10b classes), and hardwires `packetCtx[6]=4` (read-apply) on the host C2S-receive path. The serializer rejects format 11, confirming guided never legitimately appears as a 0x0A compact — `decode_frame_update`'s fail-closed on `EntityClass::Guided` is correct. Landed `GuidedRecord` + `encode_guided_field_group`/`decode_guided_field_group` (`ingame_encode.cpp`/`ingame_decode.cpp`) + `nw_ingame_guided_test` (per-(mode,group) round-trip; the write-side 1-B `0x00` status/clear marker is the dispatcher's framing, read side reads 0 B). **DEFERRED:** wiring into the 0x0C entity-packet dispatch + per-group field validation — no capture carries guided traffic (the 2026-06-16b loopback fired no rockets). Verdict partial (IDA-structural, round-trip-pinned, wire-unvalidated). [orig: Entity_SerializeGuidedMissileState @ 0x447C50 / dispatch_entity_packet_callback @ 0x4D6A80]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

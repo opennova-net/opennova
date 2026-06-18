@@ -368,6 +368,80 @@ bool decode_weapon_hit_record(const uint8_t *body, size_t len,
                               WeaponHitRecord &out, size_t &consumed);
 
 // ===========================================================================
+// §5.15 Guided weapon record — per-(mode, field-group) projectile-state codec.
+// [orig: Entity_SerializeGuidedMissileState @ 0x447C50]. Used by item classes
+// rokt / stng / hlfr / jvln / arty / arti. UNLIKE the §5.10 / §5.13 / §5.14
+// compact records, this is NOT one fixed body keyed on format 11 — it is a
+// matrix of `mode` (packetCtx[6] ∈ {1..4}) × `field-group` (packetCtx[7] ∈
+// {1..6}); each call serializes exactly ONE group. The group selector rides the
+// wire as the `sub_op` byte of the 5-byte entity sub-header (EntityPacketSubHeader
+// .sub_op): [orig: dispatch_entity_packet_callback @ 0x4D6A80] copies it to
+// packetCtx[7] and hardwires packetCtx[6]=4 (read-apply) on the host C2S-receive
+// path. The serializer rejects format 11, so guided entities NEVER appear as a
+// §5.10b 0x0A compact record — decode_frame_update correctly fails closed on
+// EntityClass::Guided.
+//
+// Per-group payload sizes (the bytes AFTER the sub-header):
+//   group              write-full(1)  read-full(2)  write-delta(3)  read-apply(4)
+//   1 Status            1 B (0x00)      0 B           1 B (0x00)      0 B
+//   2 ClearTarget       1 B (0x00)      0 B           1 B (0x00)      0 B
+//   3 TargetPos        14 B           14 B            2 B (target)    2 B (target)
+//   4 TargetTypePos    18 B (+target) 18 B (+target) 16 B (no target)16 B (no target)
+//   5 Pos              12 B           12 B           12 B            12 B
+//   6 AttachOffsets    12 B           12 B           12 B            12 B
+//
+// Wire integration into the 0x0C entity-packet path + a full field-validation are
+// DEFERRED: no capture in hand carries guided traffic (the 2026-06-16b loopback
+// fired no rockets), so the per-group layouts are an IDA-structural port pinned
+// only by the encode↔decode round-trip in nw_ingame_guided_test. The write-side
+// 1-byte 0x00 marker for the status/clear groups (read side reads 0 B) is a
+// framing detail the dispatcher owns; it is reproduced but not round-trippable
+// at the serializer layer (see the test).
+// ===========================================================================
+
+enum class GuidedMode : uint8_t {
+	WriteFull  = 1,  // host serialize, full state
+	ReadFull   = 2,  // client deserialize, full state (no-op when authority)
+	WriteDelta = 3,  // host serialize, delta
+	ReadApply  = 4,  // deserialize-apply, delta (the 0x4D6A80 host-receive path)
+};
+
+enum class GuidedFieldGroup : uint8_t {
+	Status        = 1,  // launch bits (entity+696|=1, entity+276|=0x1000)
+	ClearTarget   = 2,  // clear target (entity+696&=~2, +724=0, +728=-1)
+	TargetPos     = 3,  // full: u16 target + 3× i32 pos; delta: u16 target only
+	TargetTypePos = 4,  // full: u16 target + i32 type + 3× i32 pos; delta: drops target
+	Pos           = 5,  // 3× i32 pos (clears target on read)
+	AttachOffsets = 6,  // 3× i32 attach offsets
+};
+
+// One guided projectile's replicated state. A given (mode, group) call touches
+// only the subset of these fields its group covers; the rest stay default.
+struct GuidedRecord {
+	uint16_t target_slot = 0xFFFF;  // entity+724 — (pool<<12)|slot of the lock target
+	uint16_t weapon_type = 0;       // entity+698 — wire-carried as a 4-byte field, low u16 kept
+	int32_t  pos_x = 0;             // entity+700
+	int32_t  pos_y = 0;             // entity+704
+	int32_t  pos_z = 0;             // entity+708
+	int32_t  attach_x = 0;          // entity+740
+	int32_t  attach_y = 0;          // entity+744
+	int32_t  attach_z = 0;          // entity+748
+	// Status-bit effects of the read side (entity+696 flags), for callers.
+	bool launched = false;          // group 1 read sets entity+696 |= 1
+	bool target_bound = false;      // group 3/4 read sets entity+696 |= 2
+	bool target_cleared = false;    // group 2/5 read clears the target
+};
+
+// Decode ONE guided field group from `body` (the bytes after the 5-byte entity
+// sub-header). `mode` must be a read mode (ReadFull or ReadApply); `group` is the
+// sub-header sub_op. Returns true iff the group's bytes were consumed cleanly;
+// `consumed` is the byte count (0 for the read-side status/clear groups).
+// [orig: Entity_SerializeGuidedMissileState @ 0x447C50]
+bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
+                               const uint8_t *body, size_t len,
+                               GuidedRecord &out, size_t &consumed);
+
+// ===========================================================================
 // S2C 0x0A per-frame update — the whole message, walked into structured form.
 // [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]. The 12-byte header's three i32 refs
 // are stored into dword_A822E4/E8/EC (verbatim; the per-message position anchor)

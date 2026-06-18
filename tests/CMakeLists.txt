@@ -1091,6 +1091,13 @@ target_link_libraries(nw_message_coverage_test PRIVATE opennova_novaworld)
 target_include_directories(nw_message_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_message_coverage COMMAND nw_message_coverage_test)
 
+# §5.15 guided weapon record — per-(mode, field-group) encode<->decode round-trip
+# pinning the structural port of Entity_SerializeGuidedMissileState. Self-contained.
+add_executable(nw_ingame_guided_test novaworld/nw_ingame_guided_test.cpp)
+target_link_libraries(nw_ingame_guided_test PRIVATE opennova_novaworld)
+target_include_directories(nw_ingame_guided_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_ingame_guided COMMAND nw_ingame_guided_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

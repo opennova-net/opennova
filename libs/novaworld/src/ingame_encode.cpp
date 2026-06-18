@@ -243,4 +243,48 @@ std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec
 	return out; // 18 B
 }
 
+// [orig: Entity_SerializeGuidedMissileState write modes (case 1 / case 3) @ 0x447C50]
+// Write ONE field group — the inverse of decode_guided_field_group. `full` =
+// WriteFull (mode 1); the delta path (WriteDelta, mode 3) drops the target handle
+// from group 4 and writes only the target handle for group 3.
+std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
+                                               GuidedFieldGroup group,
+                                               const GuidedRecord &rec) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	const bool full = (mode == GuidedMode::WriteFull);
+	switch (group) {
+	case GuidedFieldGroup::Status:
+	case GuidedFieldGroup::ClearTarget:
+		w.u8(0);                          // [orig: LABEL_3 @ 0x447c98] 1-byte marker
+		break;
+	case GuidedFieldGroup::TargetPos:     // [orig: 0x447cd6 (full) / 0x447fdb (delta)]
+		w.u16(rec.target_slot);           // entity+724
+		if (full) {                       // full writes pos; delta writes target only
+			w.u32(uint32_t(rec.pos_x));   // entity+700
+			w.u32(uint32_t(rec.pos_y));   // entity+704
+			w.u32(uint32_t(rec.pos_z));   // entity+708
+		}
+		break;
+	case GuidedFieldGroup::TargetTypePos: // [orig: 0x447d85 (full) / 0x447d9c (delta)]
+		if (full) w.u16(rec.target_slot); // entity+724 (full only)
+		w.u32(rec.weapon_type);           // entity+698 (4-B field, low u16 significant)
+		w.u32(uint32_t(rec.pos_x));
+		w.u32(uint32_t(rec.pos_y));
+		w.u32(uint32_t(rec.pos_z));
+		break;
+	case GuidedFieldGroup::Pos:           // [orig: 0x447ced]
+		w.u32(uint32_t(rec.pos_x));
+		w.u32(uint32_t(rec.pos_y));
+		w.u32(uint32_t(rec.pos_z));
+		break;
+	case GuidedFieldGroup::AttachOffsets: // [orig: 0x447df3] entity+740/744/748
+		w.u32(uint32_t(rec.attach_x));
+		w.u32(uint32_t(rec.attach_y));
+		w.u32(uint32_t(rec.attach_z));
+		break;
+	}
+	return out;
+}
+
 } // namespace opennova

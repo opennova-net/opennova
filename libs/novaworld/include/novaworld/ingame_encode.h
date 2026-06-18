@@ -121,4 +121,13 @@ std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &r
 // verified decoder rather than a fresh re-decompile of the write block.
 std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec);
 
+// Encode ONE §5.15 guided field group — the write side (modes 1/3) of
+// [orig: Entity_SerializeGuidedMissileState @ 0x447C50], the inverse of
+// decode_guided_field_group. Produces the bytes that follow the 5-byte entity
+// sub-header for `group`. `mode` must be a write mode (WriteFull or WriteDelta).
+// See ingame_decode.h §5.15 for the (mode × group) size matrix + deferral note.
+std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
+                                               GuidedFieldGroup group,
+                                               const GuidedRecord &rec);
+
 } // namespace opennova
