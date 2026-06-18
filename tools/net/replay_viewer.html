@@ -301,6 +301,7 @@
       const track = (e.track || []).map(s => ({
         f: s.f, x: s.src === "uplink" ? s.x + off.x : s.x,
         y: s.src === "uplink" ? s.y + off.y : s.y, h: s.h, src: s.src,
+        dead: !!s.dead, respawn: !!s.respawn,
       }));
       track.sort((a, b) => a.f - b.f);
       ents.push({
@@ -373,13 +374,17 @@
   function posAt(e, cf) {
     const t = e.track;
     if (!t.length) return e.spawn ? { x: e.spawn.x, y: e.spawn.y, h: e.spawn.h } : null;
-    if (cf <= t[0].f) return { x: t[0].x, y: t[0].y, h: t[0].h };
+    if (cf <= t[0].f) return { x: t[0].x, y: t[0].y, h: t[0].h, dead: !!t[0].dead };
     let i = 0;
     while (i < t.length - 1 && t[i + 1].f <= cf) i++;
-    if (i >= t.length - 1) return { x: t[i].x, y: t[i].y, h: t[i].h };
+    if (i >= t.length - 1) return { x: t[i].x, y: t[i].y, h: t[i].h, dead: !!t[i].dead };
     const a = t[i], b = t[i + 1];
+    // A respawn sample is a teleport (death -> spawn): never interpolate across it.
+    // Hold the pre-death pose until the snap frame; the gap reads as "dead".
+    if (b.respawn) return { x: a.x, y: a.y, h: a.h, dead: true };
     const u = (cf - a.f) / Math.max(1, b.f - a.f);
-    return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, h: (u < 0.5 ? a.h : b.h) };
+    return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u,
+             h: (u < 0.5 ? a.h : b.h), dead: !!a.dead };
   }
 
   function drawGrid() {
@@ -490,6 +495,8 @@
         for (const s of e.track) {
           if (s.f > frame) break;
           const X = sx(s.x), Y = sy(s.y);
+          // a respawn sample teleports — break the trail so death->respawn doesn't streak
+          if (s.respawn) started = false;
           if (!started) { ctx.moveTo(X, Y); started = true; } else ctx.lineTo(X, Y);
         }
         ctx.stroke();
@@ -511,12 +518,13 @@
       const p = posAt(e, frame);
       if (!p) continue;
       const X = sx(p.x), Y = sy(p.y);
-      const col = teamColor(e.team);
+      const dead = !!p.dead;            // killed, awaiting respawn — held at death spot
+      const col = dead ? "#6b7077" : teamColor(e.team);
       const r = e.cat === "player" ? 7 : 5;
       markerPath(e.cat, X, Y, r);
-      ctx.fillStyle = col; ctx.globalAlpha = 0.92; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = col; ctx.globalAlpha = dead ? 0.45 : 0.92; ctx.fill(); ctx.globalAlpha = 1;
       ctx.lineWidth = 1.5; ctx.strokeStyle = "#101113"; ctx.stroke();
-      if ((CATS[e.cat] || {}).shape === "ring") {
+      if (!dead && (CATS[e.cat] || {}).shape === "ring") {
         ctx.beginPath(); ctx.arc(X, Y, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
       }
@@ -529,14 +537,20 @@
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]);
         ctx.stroke(); ctx.setLineDash([]);
       }
-      if (p.h !== null && p.h !== undefined) {
+      if (dead) {
+        // small death cross — the entity is a ragdoll here until it respawns
+        ctx.strokeStyle = "#ff5a5a"; ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(X - 3, Y - 3); ctx.lineTo(X + 3, Y + 3);
+        ctx.moveTo(X + 3, Y - 3); ctx.lineTo(X - 3, Y + 3); ctx.stroke();
+      } else if (p.h !== null && p.h !== undefined) {
         const ang = p.h * Math.PI / 180;
         ctx.beginPath(); ctx.moveTo(X, Y);
         ctx.lineTo(X + Math.cos(ang) * (r + 7), Y - Math.sin(ang) * (r + 7));
         ctx.strokeStyle = "#f5f6f7"; ctx.lineWidth = 1.5; ctx.stroke();
       }
       if (opt.labels.checked) {
-        ctx.fillStyle = "#cfd2d6"; ctx.font = "11px Segoe UI";
+        ctx.fillStyle = dead ? "#80868c" : "#cfd2d6"; ctx.font = "11px Segoe UI";
         ctx.fillText(e.name, X + 9, Y - 7);
       }
     }

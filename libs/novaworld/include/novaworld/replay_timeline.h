@@ -48,6 +48,11 @@ struct ReplaySample {
 	double heading_deg = 0.0;        // [0,360); valid iff has_heading
 	bool has_heading = false;
 	ReplaySampleSource source = ReplaySampleSource::Spawn;
+	bool dead = false;               // entity in dead/spectator state this sample
+	                                 // (S2C 0x0A compact flags & 0x02 — the dead/
+	                                 // spectator bit the read path gates on)
+	bool respawn = false;            // this sample is a respawn snap: a dead->alive
+	                                 // teleport — interp/trails must NOT bridge to it
 };
 
 // One entity reconstructed from the capture, keyed by its network handle.

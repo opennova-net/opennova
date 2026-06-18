@@ -815,6 +815,8 @@ void write_sample_json(std::ostream &o, const ReplaySample &s, bool with_src) {
 		    : s.source == ReplaySampleSource::FrameUpdate ? "frameupdate"
 		                                                  : "spawn";
 		o << ",\"src\":\"" << src << "\"";
+		if (s.dead) o << ",\"dead\":1";
+		if (s.respawn) o << ",\"respawn\":1";
 	}
 	o << "}";
 }

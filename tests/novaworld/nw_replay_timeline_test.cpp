@@ -410,11 +410,92 @@ void test_per_participant_split() {
 	}
 }
 
+// Death/respawn lifecycle: a killed entity must NOT drift from its death spot to
+// its respawn — the dead->alive transition is a teleport boundary (the engine
+// snaps via Entity_ResetToSpawnState @ 0x4B9610, never interpolates). Two wire
+// paths must both flag the respawn sample (no-interp): (a) the on-screen ragdoll
+// — the entity keeps getting 0x0A records with flags & 0x02 set, then a record
+// with it clear at the new position; (b) the victim drops out of the 0x0A set —
+// only the S2C 0x26 kill marks it, the first record after is the respawn.
+void test_death_respawn() {
+	constexpr uint16_t kType = 0x0816;          // -> Infantry (class_of below)
+	constexpr uint16_t H = 0x0007;              // ragdoll-path victim
+	constexpr uint16_t G = 0x0009;              // records-stop victim
+	const int32_t P0x = 10 << 16, P0y = -5 << 16, P0z = 16 << 16;
+	const int32_t P1x = 80 << 16, P1y = 30 << 16, P1z = 16 << 16; // H respawn (far)
+	const int32_t Q0x = -20 << 16, Q0y = -20 << 16, Q0z = 16 << 16;
+	const int32_t Q1x = -85 << 16, Q1y = 45 << 16, Q1z = 16 << 16; // G respawn (far)
+
+	PoolSpawnRecord rh; rh.slot_id = H; rh.item_type_id = kType;
+	rh.pos_x = P0x; rh.pos_y = P0y; rh.pos_z = P0z;
+	PoolSpawnRecord rg; rg.slot_id = G; rg.item_type_id = kType;
+	rg.pos_x = Q0x; rg.pos_y = Q0y; rg.pos_z = Q0z;
+	PoolSpawnBatch sb; sb.records = {rh, rg};
+	const std::vector<uint8_t> spawn_inner = encode_pool_spawn_batch(sb);
+
+	// One unmounted 0x0A compact record (compressed=0 -> world = anchor) with the
+	// given dead bit (flags & 0x02). The position is carried by the anchor.
+	auto fu = [&](int32_t ax, int32_t ay, int32_t az, uint16_t h, uint8_t flags) {
+		InfantryCompactRecord inf; inf.vehicle_slot_handle = 0xFFFF;
+		inf.pos_x_compressed = 0; inf.pos_y_compressed = 0; inf.pos_z_compressed = 0;
+		inf.flags_byte = flags;
+		return make_frame_update_0a(ax, ay, az, h, kType, inf);
+	};
+	std::vector<uint8_t> kill_g; put_u16(kill_g, G); put_u16(kill_g, 0x0001);
+
+	ClientAuth ca; ca.na = "t"; ca.scrk = std::string(kScrk);
+	ServerAuth sa = build_server_auth(ca, 0x7F000001u, 32768, 0x55, kScrk);
+	std::vector<net::PcapDatagram> dgrams; int f = 1;
+	auto S = [&](uint8_t tag, const std::vector<uint8_t> &inner) {
+		dgrams.push_back({32769, 32768, f++,
+		    make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, tag, inner)});
+	};
+	dgrams.push_back({32769, 32768, f++,
+	    nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa))});
+	S(0x0D, spawn_inner);
+	S(0x0A, fu(P0x, P0y, P0z, H, 0x00)); // H alive
+	S(0x0A, fu(P0x, P0y, P0z, H, 0x02)); // H dead (ragdoll, held at death spot)
+	S(0x0A, fu(P0x, P0y, P0z, H, 0x02)); // H dead
+	S(0x0A, fu(P1x, P1y, P1z, H, 0x00)); // H respawn (alive, teleported)
+	S(0x0A, fu(Q0x, Q0y, Q0z, G, 0x00)); // G alive
+	S(0x26, kill_g);                     // G killed (records then stop)
+	S(0x0A, fu(Q1x, Q1y, Q1z, G, 0x00)); // G reappears at spawn -> respawn
+
+	const std::vector<uint8_t> pcap = net::build_pcap_udp(dgrams);
+	std::vector<net::PcapDatagram> got;
+	EXPECT(net::read_pcap_udp(pcap.data(), pcap.size(), got));
+	std::vector<CaptureDatagram> caps;
+	for (auto &pk : got) caps.push_back({pk.frame_index, pk.srcport, pk.dstport, std::move(pk.payload)});
+	auto class_of = [kType](uint16_t t) -> EntityClass {
+		return t == kType ? EntityClass::Infantry : EntityClass::Unknown;
+	};
+	const ReplayTimeline tl =
+	    build_replay_timeline(decode_capture_to_messages(caps), class_of);
+
+	const ReplayEntity *eh = nullptr, *eg = nullptr;
+	for (const auto &e : tl.entities) { if (e.handle == H) eh = &e; if (e.handle == G) eg = &e; }
+	EXPECT(eh != nullptr && eg != nullptr);
+	if (eh) {
+		int ndead = 0, nrespawn = 0; const ReplaySample *resp = nullptr;
+		for (const auto &s : eh->track) { if (s.dead) ndead++; if (s.respawn) { nrespawn++; resp = &s; } }
+		EXPECT(ndead == 2);     // the two flags & 0x02 ragdoll samples
+		EXPECT(nrespawn == 1);  // exactly one teleport boundary
+		if (resp) { EXPECT(resp->x == P1x); EXPECT(!resp->dead); } // the respawn IS the alive snap
+	}
+	if (eg) {
+		int nrespawn = 0; const ReplaySample *resp = nullptr;
+		for (const auto &s : eg->track) if (s.respawn) { nrespawn++; resp = &s; }
+		EXPECT(nrespawn == 1);  // the 0x26 kill turns the reappearance into a respawn
+		if (resp) EXPECT(resp->x == Q1x);
+	}
+}
+
 int main() {
 	test_decompress_vectors();
 	test_frame_update_fold();
 	test_event_stream();
 	test_per_participant_split();
+	test_death_respawn();
 
 	// --- craft the inputs -----------------------------------------------------
 	// Two pool-1 spawns: a "blue" entity at (-85,45) and a "red" one at (85,45).

@@ -27,7 +27,8 @@ bool is_mounted_parent(uint16_t parent) {
 // three packed positions and add the message anchor (the 0x0A header refs).
 // Returns false for mounted records (vehicle-local, deferred) or unknown class.
 bool frame_record_world_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
-                               int32_t az, int frame, ReplaySample &s) {
+                               int32_t az, int frame, ReplaySample &s,
+                               uint8_t &flags_out) {
 	uint16_t cx, cy, cz, parent;
 	double yaw_deg;
 	switch (r.cls) {
@@ -35,16 +36,19 @@ bool frame_record_world_sample(const FrameUpdateRecord &r, int32_t ax, int32_t a
 		cx = r.player.pos_x_compressed; cy = r.player.pos_y_compressed;
 		cz = r.player.pos_z_compressed; parent = r.player.vehicle_handle;
 		yaw_deg = bam_byte_to_deg(r.player.yaw_byte);
+		flags_out = r.player.state_flags;
 		break;
 	case EntityClass::Infantry:
 		cx = r.infantry.pos_x_compressed; cy = r.infantry.pos_y_compressed;
 		cz = r.infantry.pos_z_compressed; parent = r.infantry.vehicle_slot_handle;
 		yaw_deg = bam_byte_to_deg(r.infantry.yaw_byte);
+		flags_out = r.infantry.flags_byte;
 		break;
 	case EntityClass::Vehicle:
 		cx = r.vehicle.pos_x_compressed; cy = r.vehicle.pos_y_compressed;
 		cz = r.vehicle.pos_z_compressed; parent = r.vehicle.parent_slot_handle;
 		yaw_deg = bam32_to_deg(uint32_t(int32_t(r.vehicle.euler_z) << 16));
+		flags_out = r.vehicle.flags_byte;
 		break;
 	default:
 		return false;
@@ -100,6 +104,45 @@ struct Builder {
 		if (e.track.empty()) e.track.push_back(s);
 	}
 };
+
+// Flag respawn (teleport) boundaries on every entity's track. A dead->alive
+// transition is a SNAP, not motion: the engine relocates the entity and calls
+// Entity_ResetToSpawnState @ 0x4B9610 (it never interpolates from the death
+// location). The dead state is taken from BOTH wire signals: the per-sample dead
+// bit (S2C 0x0A compact flags & 0x02 — brackets the on-screen ragdoll) AND the
+// kill stream (S2C 0x26/0x4E -> Entity_KillBySlotId @ 0x42BCE0 — the only signal
+// when a dying entity drops out of the 0x0A set entirely). interp/trail rendering
+// must not bridge a sample flagged respawn. Idempotent; safe to re-run on a view.
+void mark_lifecycle(ReplayTimeline &tl) {
+	std::unordered_map<uint16_t, std::vector<int>> kill_frames;
+	for (const ReplayEvent &ev : tl.events)
+		if (ev.kind == ReplayEventKind::Kill && ev.target != 0xFFFF)
+			kill_frames[ev.target].push_back(ev.frame_index);
+	for (auto &kv : kill_frames) std::sort(kv.second.begin(), kv.second.end());
+	for (ReplayEntity &e : tl.entities) {
+		auto it = kill_frames.find(e.handle);
+		const std::vector<int> *kf = (it != kill_frames.end()) ? &it->second : nullptr;
+		bool dead = false;
+		for (size_t i = 0; i < e.track.size(); ++i) {
+			ReplaySample &s = e.track[i];
+			s.respawn = false;
+			// A kill landing after the previous sample but at/before this one took
+			// the entity dead in the interim (covers victims whose 0x0A records stop).
+			if (kf) {
+				const int prev = (i > 0) ? e.track[i - 1].frame_index
+				                         : s.frame_index - 1;
+				for (int f : *kf)
+					if (f > prev && f <= s.frame_index) { dead = true; break; }
+			}
+			if (s.dead) {
+				dead = true;
+			} else {
+				if (dead && i > 0) s.respawn = true; // dead -> alive = teleport snap
+				dead = false;
+			}
+		}
+	}
+}
 
 } // namespace
 
@@ -222,9 +265,16 @@ ReplayTimeline build_replay_timeline(
 			for (const auto &r : fu.records) {
 				if (is_sentinel_slot(r.handle)) continue;
 				ReplaySample s;
+				uint8_t rec_flags = 0;
 				if (!frame_record_world_sample(r, fu.anchor_x, fu.anchor_y,
-				                               fu.anchor_z, m.frame_index, s))
+				                               fu.anchor_z, m.frame_index, s,
+				                               rec_flags))
 					continue;
+				// flags & 0x02 = the dead/spectator bit the read path gates on
+				// [orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320 (flagsByte
+				// & 2 branch) / NetPacket_SerializePlayerState @ 0x4C09C0]. mark_lifecycle
+				// turns the dead->alive transition into a respawn (no-interp) boundary.
+				s.dead = (rec_flags & 0x02) != 0;
 				ReplayEntity &e = b.get(r.handle, r.type_id);
 				if (e.type_id == 0) e.type_id = r.type_id;
 				e.track.push_back(s);
@@ -309,6 +359,21 @@ ReplayTimeline build_replay_timeline(
 				ev.target = kr.victim_slot;
 				b.tl.events.push_back(std::move(ev));
 			}
+		} else if (m.dir == 'S' && m.tag == 0x4E) {
+			// Batch despawn/kill — every listed slot is killed via Entity_KillBySlotId
+			// [orig: NapiNPClientMsg_HandleBatchSpawn @ 0x431870]. Emit one Kill per
+			// slot so mark_lifecycle ends each victim's life segment.
+			BatchKillBatch bk;
+			if (decode_batch_kill(m.payload.data(), m.payload.size(), bk)) {
+				for (uint16_t slot : bk.slots) {
+					if (is_sentinel_slot(slot)) continue;
+					ReplayEvent ev;
+					ev.frame_index = m.frame_index;
+					ev.kind = ReplayEventKind::Kill;
+					ev.target = slot;
+					b.tl.events.push_back(std::move(ev));
+				}
+			}
 		} else if (m.dir == 'S' && m.tag == 0x40) {
 			// Capture-zone state — emit only on change (the 0x40 sync repeats).
 			CaptureZoneOverlayBatch cz;
@@ -329,6 +394,7 @@ ReplayTimeline build_replay_timeline(
 			}
 		}
 	}
+	mark_lifecycle(b.tl); // flag death->respawn teleport boundaries (no-interp)
 	return b.tl;
 }
 
@@ -376,6 +442,7 @@ ParticipantView project_view(const ReplayTimeline &full, const Participant &who)
 		}
 		v.timeline.entities.push_back(std::move(e));
 	}
+	mark_lifecycle(v.timeline); // recompute teleport boundaries on the filtered tracks
 	return v;
 }
 
@@ -388,6 +455,14 @@ bool interp_pos(const std::vector<ReplaySample> &track, int f, double &x, double
 		if (track[i].frame_index >= f) {
 			const ReplaySample &a = track[i - 1];
 			const ReplaySample &c = track[i];
+			if (c.respawn) {
+				// Teleport boundary (death -> respawn): never interpolate across it.
+				// Hold the pre-death pose until the snap frame, then jump to `c`.
+				const ReplaySample &h = (f < c.frame_index) ? a : c;
+				x = h.x / 65536.0;
+				y = h.y / 65536.0;
+				return true;
+			}
 			const int span = c.frame_index - a.frame_index;
 			const double u = span > 0 ? double(f - a.frame_index) / double(span) : 0.0;
 			x = (a.x + (c.x - a.x) * u) / 65536.0;
