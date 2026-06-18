@@ -1083,6 +1083,14 @@ target_link_libraries(nw_ingame_encode_test PRIVATE opennova_novaworld)
 target_include_directories(nw_ingame_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_encode COMMAND nw_ingame_encode_test)
 
+# In-game message catalog coverage gate — asserts every Decoded tag's decoder
+# consumes a representative body to the byte and the catalog stays consistent
+# (the net analog of ADR 0002's MNU key-coverage). Self-contained, always-run.
+add_executable(nw_message_coverage_test novaworld/nw_message_coverage_test.cpp)
+target_link_libraries(nw_message_coverage_test PRIVATE opennova_novaworld)
+target_include_directories(nw_message_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_message_coverage COMMAND nw_message_coverage_test)
+
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed
 # regressions break CI before they break the running server.

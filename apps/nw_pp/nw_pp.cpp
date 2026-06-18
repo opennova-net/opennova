@@ -30,6 +30,7 @@
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
 #include <novaworld/ingame_decode.h>
+#include <novaworld/ingame_message_catalog.h>
 #include <novaworld/serverlog_decode.h>
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
@@ -136,59 +137,12 @@ std::string handle_str(uint16_t h) {
 	return buf;
 }
 
-// Tag labels from docs/net/novaworld-net-re.md §4 dispatch tables. Short
-// human names just to orient the reader of nw_pp output; not exhaustive,
-// just the tags we've seen flow in real captures.
+// Tag labels come from the shared in-game message catalog
+// (libs/novaworld/.../ingame_message_catalog.h) — the single source of truth
+// shared with the nw_message_coverage CI gate, so names can't drift between the
+// printer and the coverage test. nullptr (uncatalogued) renders as a bare hex tag.
 const char *tag_label(char dir, int tag) {
-	if (dir == 'S') {
-		switch (tag) {
-			case 0x00: return "init";
-			case 0x02: return "post-handshake";
-			case 0x0A: return "per-frame-update";       // §5.9
-			case 0x0B: return "BMS-header";              // §5.4
-			case 0x0C: return "entity-spawn-batch";
-			case 0x0D: return "pool-spawn";              // §5.11
-			case 0x0F: return "world-state-load";
-			case 0x10: return "static-entity-batch";    // §5.9
-			case 0x16: return "player-list";
-			case 0x1A: return "wait-for-game-start-ack";
-			case 0x1D: return "spawn-success-gate";      // §5.2
-			case 0x1E: return "game-event";
-			case 0x20: return "pool3-sync";              // §5.12
-			case 0x26: return "kill-sync";
-			case 0x40: return "capture-zone-state";
-			case 0x45: return "terrain-load";
-			case 0x46: return "player-sync";
-			case 0x4E: return "kill-by-slot";
-			case 0x57: return "rtt-echo";
-			case 0x5A: return "weapon-loadout";
-			case 0x60: return "file-chunk";
-			case 0x61: return "session-key";
-			case 0x64: return "mission-chunk";
-			case 0x6F: return "cinematic-camera";
-			case 0x7B: return "full-player-info";
-			default: return nullptr;
-		}
-	} else {
-		switch (tag) {
-			case 0x00: return "JOIN";
-			case 0x06: return "fired-round";
-			case 0x0C: return "entity-uplink";            // §5.10 (extended type-10)
-			case 0x0D: return "replication-ack";
-			case 0x0F: return "spawn-query";              // §5.9 (len-2 = spawn-point query)
-			case 0x16: return "chat";
-			case 0x21: return "checksum-reply";
-			case 0x22: return "burst";
-			case 0x23: return "burst";
-			case 0x28: return "burst";
-			case 0x29: return "burst";
-			case 0x2C: return "rtt-consumed";
-			case 0x47: return "ping";                     // observed len=0 header-only
-			case 0x48: return "client-ack";               // observed 4 B
-			case 0x4C: return "client-state-byte";        // observed 1 B (=0x01)
-			default: return nullptr;
-		}
-	}
+	return ingame_message_name(dir, uint8_t(tag));
 }
 
 // ItemDef.id → display_name resolution. Populated when --items <path> is
