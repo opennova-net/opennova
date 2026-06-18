@@ -387,17 +387,55 @@ struct FrameUpdateRecord {
 
 // The 0x0A header's sub-block case 2 (`flags2 & 3 == 2`) — a global environment
 // snapshot the host streams alongside motion: fog / time-of-day / clouds / quake.
-// [orig: NapiNPClientMsg_0x00A @ 0x430054..0x4302xx case 2]
+// Every field's runtime landing + scale is witnessed.
+// [orig: NapiNPClientMsg_0x00A @ 0x430244..0x43034C case 2]
 struct FrameEnv {
 	bool     present = false;
-	uint16_t fog_dist = 0;      // fog far distance
-	uint16_t fog_accel = 0;     // fog falloff / accel
-	uint16_t tod_fixed = 0;     // time-of-day (16-bit phase of a 24 h day)
-	uint8_t  quake_ticks = 0;   // screen-shake duration
-	uint8_t  cloud_scroll = 0;
-	uint8_t  cloud_byte2 = 0;
-	uint8_t  overcast = 0;
-	uint8_t  env_trail = 0;
+	uint16_t fog_dist = 0;      // → Env_FogDistTarget (raw << 16)        [0x430267]
+	uint16_t fog_accel = 0;     // → Env_FogDistAccelClamp (raw << 8)     [0x430286]
+	uint16_t tod_fixed = 0;     // → Env_CurTimeFixed24 (time-of-day, raw << 13) [0x4302AE]
+	uint8_t  quake_ticks = 0;   // → Env_QuakeTicks (screen-shake)        [0x4302CE]
+	uint8_t  cloud_scroll = 0;  // → Env_CloudScrollRateTarget (raw << 10) [0x4302EC]
+	uint8_t  cloud_param2 = 0;  // → dword_26C6884 (raw << 8; 2nd cloud param) [0x430311]
+	uint8_t  overcast = 0;      // → Env_OvercastBlendTarget (raw << 8)   [0x43032D]
+	uint8_t  env_param = 0;     // → dword_2C059D0                        [0x43034C]
+};
+
+// The 0x0A header's sub-block case 0 (`flags2 & 3 == 0`, the common gameplay
+// frame) — local-player per-frame view/aim + current-target state. Read on both
+// host and client. Field roles beyond their landing globals are unwitnessed; the
+// landings are exact. [orig: NapiNPClientMsg_0x00A @ 0x430054..0x430136]
+struct FrameAimBlock {
+	bool     present = false;
+	uint8_t  view0 = 0;         // → dword_A85B64  [0x430064]
+	uint8_t  view1 = 0;         // → dword_A85B5C  [0x430084]
+	uint8_t  view2 = 0;         // → dword_A85B60  [0x43009F]
+	uint8_t  view3 = 0;         // → dword_A85B68  [0x4300C3]
+	uint8_t  view4 = 0;         // → dword_A85B6C  [0x4300E3]
+	uint8_t  view5 = 0;         // → word_A85B7C   [0x430104]
+	uint8_t  target_slot = 0;   // 0xFF=none → dword_A85B70/B74 (current target idx) [0x43014D]
+	int32_t  aim_extra = 0;     // → dword_A85BBC  [0x430136]
+};
+
+// The 0x0A header's sub-block case 1 (`flags2 & 3 == 1`) — the round/game timer
+// snapshot (client only). [orig: NapiNPClientMsg_0x00A @ 0x430191..0x430235]
+struct FrameTimerBlock {
+	bool     present = false;
+	uint8_t  state0 = 0;        // → dword_C6EAE0  [0x4301A1]
+	uint8_t  state1 = 0;        // → dword_C6EAE4  [0x4301BC]
+	uint8_t  state2 = 0;        // → dword_C8FC64  [0x4301E0]
+	uint8_t  state3 = 0;        // → dword_C8FC68  [0x430200]
+	int16_t  timer_seconds = 0; // → dword_24C1958 = 62 × this (62 Hz ticks); <0 ⇒ -1 [0x430235]
+};
+
+// The 0x0A header's sub-block case 3 (`flags2 & 3 == 3`) — objective-gametype
+// state, present ONLY when the host's `g_GameType & 0x20000` bit is set. That gate
+// is NOT on the wire, so an off-wire decoder cannot know whether 16 B follow; we
+// default to 0 B (correct for every non-objective capture) and flag if a body is
+// present. [orig: NapiNPClientMsg_0x00A @ 0x430363..0x4303D0]
+struct FrameObjectiveBlock {
+	bool     present = false;   // true only if we chose to read it (objective gate)
+	int32_t  state[4] = {0, 0, 0, 0}; // → dword_AC86F4/F0/EC/E8
 };
 
 // The 0x0A conditional vehicle-passenger record (`flags2 & 0xF == 8`) — the
@@ -423,8 +461,11 @@ struct FrameUpdate {
 	uint16_t mount_handle = 0xFFFF; // local-player vehicle-mount (header tail)
 	int16_t  health = 0;            // local-player health
 	int16_t  state_word = 0;
-	FrameEnv       env;             // valid iff sub_block == 2
-	FramePassenger passenger;       // valid iff (flags2 & 0xF) == 8
+	FrameAimBlock       aim;        // valid iff sub_block == 0
+	FrameTimerBlock     timer;      // valid iff sub_block == 1
+	FrameEnv            env;        // valid iff sub_block == 2
+	FrameObjectiveBlock objective;  // valid iff sub_block == 3 (+ objective gate)
+	FramePassenger      passenger;  // valid iff (flags2 & 0xF) == 8
 	std::vector<FrameUpdateRecord> records;  // tag==1 per-entity motion
 	std::vector<WeaponHitRecord>   hits;     // tag==2 weapon-hit events (§5.9.1)
 	// Walk status: `complete` is true iff the event loop hit its terminator (tag

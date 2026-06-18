@@ -617,13 +617,29 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 	            unsigned(fu.flags1), unsigned(fu.flags2), unsigned(fu.sub_block),
 	            ok ? "" : " (DECODE INCOMPLETE)");
 
+	if (fu.aim.present)
+		std::printf("            aim: view=(%u,%u,%u,%u,%u,%u) target=%s extra=0x%08x\n",
+		            unsigned(fu.aim.view0), unsigned(fu.aim.view1), unsigned(fu.aim.view2),
+		            unsigned(fu.aim.view3), unsigned(fu.aim.view4), unsigned(fu.aim.view5),
+		            fu.aim.target_slot == 0xFF ? "none"
+		                : (std::string("s") + std::to_string(fu.aim.target_slot)).c_str(),
+		            uint32_t(fu.aim.aim_extra));
+	if (fu.timer.present)
+		std::printf("            timer: state=(%u,%u,%u,%u) seconds=%d\n",
+		            unsigned(fu.timer.state0), unsigned(fu.timer.state1),
+		            unsigned(fu.timer.state2), unsigned(fu.timer.state3),
+		            int(fu.timer.timer_seconds));
 	if (fu.env.present)
 		std::printf("            env: fogDist=0x%04x fogAccel=0x%04x todFixed=0x%04x "
-		            "quake=%u clouds=(0x%02x,0x%02x) overcast=0x%02x trail=0x%02x\n",
+		            "quake=%u clouds=(0x%02x,0x%02x) overcast=0x%02x param=0x%02x\n",
 		            unsigned(fu.env.fog_dist), unsigned(fu.env.fog_accel),
 		            unsigned(fu.env.tod_fixed), unsigned(fu.env.quake_ticks),
-		            unsigned(fu.env.cloud_scroll), unsigned(fu.env.cloud_byte2),
-		            unsigned(fu.env.overcast), unsigned(fu.env.env_trail));
+		            unsigned(fu.env.cloud_scroll), unsigned(fu.env.cloud_param2),
+		            unsigned(fu.env.overcast), unsigned(fu.env.env_param));
+	if (fu.objective.present)
+		std::printf("            objective: %d %d %d %d\n",
+		            fu.objective.state[0], fu.objective.state[1],
+		            fu.objective.state[2], fu.objective.state[3]);
 
 	std::printf("            header: state=0x%02x mount=%s health=%d state_word=0x%04x\n",
 	            unsigned(fu.state_flag_byte), handle_str(fu.mount_handle).c_str(),

@@ -534,22 +534,46 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	out.flags2 = c.u8();
 	out.sub_block = uint8_t(out.flags2 & 0x03);
 	switch (out.sub_block) {
-	case 0: c.skip(11); break;
-	case 1: c.skip(6); break;
+	case 0:
+		// Local-player view/aim + current-target state (11 B) [orig: 0x430054..0x430136].
+		out.aim.present     = true;
+		out.aim.view0       = c.u8();
+		out.aim.view1       = c.u8();
+		out.aim.view2       = c.u8();
+		out.aim.view3       = c.u8();
+		out.aim.view4       = c.u8();
+		out.aim.view5       = c.u8();
+		out.aim.target_slot = c.u8();
+		out.aim.aim_extra   = c.i32();
+		break;
+	case 1:
+		// Round/game timer (6 B) [orig: 0x430191..0x430235].
+		out.timer.present       = true;
+		out.timer.state0        = c.u8();
+		out.timer.state1        = c.u8();
+		out.timer.state2        = c.u8();
+		out.timer.state3        = c.u8();
+		out.timer.timer_seconds = c.i16();
+		break;
 	case 2:
-		// ENV snapshot [orig: 0x430054 case 2]: 3× u16 + 5× u8 (= 11 B, same
-		// cursor advance the previous `skip(11)` made — now retained).
+		// ENV snapshot (11 B): 3× u16 + 5× u8 [orig: 0x430244..0x43034C].
 		out.env.present      = true;
 		out.env.fog_dist     = c.u16();
 		out.env.fog_accel    = c.u16();
 		out.env.tod_fixed    = c.u16();
 		out.env.quake_ticks  = c.u8();
 		out.env.cloud_scroll = c.u8();
-		out.env.cloud_byte2  = c.u8();
+		out.env.cloud_param2 = c.u8();
 		out.env.overcast     = c.u8();
-		out.env.env_trail    = c.u8();
+		out.env.env_param    = c.u8();
 		break;
-	default: break; // case 3: 0 B (objective-gametype gated)
+	default:
+		// case 3: objective-gametype block (4× i32) present ONLY when the host's
+		// `g_GameType & 0x20000` bit is set — a gate that is NOT on the wire. Off
+		// the wire we cannot know, so we read 0 B (correct for every non-objective
+		// capture; a coverage-audit misalignment would flag an objective capture).
+		// [orig: 0x430363..0x4303D0]
+		break;
 	}
 
 	// 7-byte fixed tail: state_flag u8, mount u16, health i16, state_word i16.
