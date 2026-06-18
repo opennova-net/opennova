@@ -35,7 +35,8 @@ bool fixtures_match_python() {
 	               "DMDIKKLGLMLNONCCOICCNPAPDC",
 	               "PCID encoding")) return false;
 
-	// PUBNAMEINFO/PUBSQUADINFO equivalent: encode_pub_value(b'\x00' * 7, key)
+	// Legacy empty NAMEINFO/SQUADINFO fixture: encode_pub_value(b'\x00' * 7, key).
+	// Real /NWJoin identity payload shape is covered by join_identity_test.
 	const std::vector<uint8_t> seven_zeros(7, 0x00);
 	if (!expect_eq(opennova::encode_pub_value(seven_zeros, key),
 	               "EMEGMGHGGMKKGLKOFGIPLM",

@@ -54,7 +54,7 @@ The `NW*.dll` routes as implemented in the reverted stack, matching retail wire 
 | `/NWLogin.dll` GET | client relay GET | Completes login and sets identity cookies. | `NWH`, `NWHANDLE`, `CHAR`, `PCID`, `EXPBITS`, `LOGINSESSIONTAG`. | Relay tag may come from query string: retail HTTP/1.0 drops cookies. |
 | `/NWLogout.dll` | client GET | Clears pending login session, active-user row, persistent-cookie pin. | `LOGINSESSIONTAG`, `PERSISTENTEXPRESSLOGINDATA`. | UDP state still tears down via GOODBYE or timeout. |
 | `/NWHost.dll` | client GET relay | Issues `HOSTKEY` used by later UDP host registration. | `HOSTKEY`, `NWPF`, `NWPF2`, `PUB*` placeholders. | Host identity is finalized by UDP `ClientHostRequest`. |
-| `/NWJoin.dll` | client GET relay | Resolves RID, expansion-gates the joiner, emits `.joi` tokens and PUB cookies. | `RID`, `NK`, `CK`, `BK`, `PUBPCID`, `PUBNAMEINFO`, `PUBSQUADINFO`, `PUBJOINTICKET`. | `NK` is encoded host `ip:port`; `CK` is encoded host app id. |
+| `/NWJoin.dll` | client GET relay | Resolves RID, expansion-gates the joiner, emits `.joi` tokens and PUB cookies. | `RID`, `NK`, `CK`, `BK`, `PUBPCID`, `PUBNAMEINFO`, `PUBSQUADINFO`, `PUBJOINTICKET`. | `NK` is encoded host `ip:port`; `CK` is encoded host app id; `PUBNAMEINFO` is `NWHANDLE\0`, and `PUBSQUADINFO` is `[u32 zero][display\0][short\0]` for the retail host join handler. |
 | `/NWCharacter.dll`, `/NWAccount.dll` | client GET | Renders account/character templates from login cookies. | `NWHANDLE`, `PCID`, `NWH`. | Best-effort identity refresh. |
 | `/*.gsb` | client GET | Builds encrypted GSB response from active hosts. | RID, host IP, 26 server-browser fields. | `jop_2.gsb` and `dfx2_0.gsb` routed. |
 

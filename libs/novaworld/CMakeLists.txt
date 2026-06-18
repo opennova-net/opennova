@@ -9,6 +9,7 @@ add_library(opennova_novaworld STATIC
     src/game_session.cpp
     src/game_server_runtime.cpp
     src/gsb.cpp
+    src/join_identity.cpp
     src/replication_min.cpp
     src/ingame_decode.cpp
     src/ingame_encode.cpp

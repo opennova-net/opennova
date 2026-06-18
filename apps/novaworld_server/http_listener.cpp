@@ -12,6 +12,7 @@
 #include <novaworld/db/sqlite.h>
 #include <novaworld/gsb.h>
 #include <novaworld/host_repository.h>
+#include <novaworld/join_identity.h>
 #include <novaworld/unknown_tracker.h>
 
 #include <crow.h>
@@ -1721,12 +1722,9 @@ bool HttpListener::start(const ServerConfig &config) {
 		add_cookie(res, "YOURIP",           req.remote_ip_address);
 		add_cookie(res, "NWJOINSESSIONTAG", tag_from_request);
 
-		// PUBcrypto-encoded join cookies (Phase E.4). Mirrors
-		// onnw/controllers/nova_world/join.py:106-114:
-		//   pub_pcid     = encode_pub_value(joiner_pcid + '\x00', host.pcid_key)
-		//   pub_nameinfo = encode_pub_value(b'\x00' * 7,         host.pcid_key)
-		//   pub_squad    = encode_pub_value(b'\x00' * 7,         host.pcid_key)
-		//   pub_jointicket = "JT:0a000013143f1efe6c8000767fd748e1127304c5b6d728"
+		// PUBcrypto-encoded join cookies (Phase E.4). Retail host-side join
+		// reads CD/<localaddr>{PCID,NAMEINFO,SQUADINFO}; SQUADINFO supplies
+		// the remote player's display/short names before validation.
 		// Joiner identity comes from the inbound NWHANDLE cookie which
 		// retail set during their /NWLogin.dll completion. Look the user
 		// up in `players` to get their PCID.
@@ -1801,21 +1799,31 @@ bool HttpListener::start(const ServerConfig &config) {
 				}
 			}
 			if (host_pcid_key.empty()) {
-				std::fprintf(stderr, "[http] /NWJoin.dll WARN host pcid_key missing — PUB* cookies will be empty (joiner cookies=[%s])\n",
+				std::fprintf(stderr, "[http] /NWJoin.dll WARN host pcid_key missing - PUB* cookies will be empty (joiner cookies=[%s])\n",
 				             cookie_summary(request_cookie_header(req)).c_str());
 			} else if (joiner_pcid.empty()) {
-				std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner identity — PUB* cookies will be empty (joiner cookies=[%s])\n",
+				std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner identity - PUB* cookies will be empty (joiner cookies=[%s])\n",
 				             cookie_summary(request_cookie_header(req)).c_str());
 			} else {
 				try {
-					std::vector<uint8_t> pcid_plain(joiner_pcid.begin(), joiner_pcid.end());
-					pcid_plain.push_back(0x00);
-					pub_pcid = opennova::encode_pub_value(pcid_plain, host_pcid_key);
-					const std::vector<uint8_t> seven_zeros(7, 0x00);
-					pub_nameinfo  = opennova::encode_pub_value(seven_zeros, host_pcid_key);
-					pub_squadinfo = opennova::encode_pub_value(seven_zeros, host_pcid_key);
-					std::printf("[http] /NWJoin.dll PUB* encoded for joiner=%s pcid=%s host_key=%zuB\n",
-					            joiner_label.c_str(), joiner_pcid.c_str(), host_pcid_key.size());
+					const auto payloads =
+						opennova::build_pub_join_identity_plaintexts(joiner_pcid, joiner_nwhandle);
+					pub_pcid = opennova::encode_pub_value(payloads.pcid, host_pcid_key);
+					if (!payloads.name_info.empty()) {
+						pub_nameinfo = opennova::encode_pub_value(payloads.name_info, host_pcid_key);
+					}
+					if (!payloads.squad_info.empty()) {
+						pub_squadinfo = opennova::encode_pub_value(payloads.squad_info, host_pcid_key);
+					}
+					if (payloads.name_info.empty() || payloads.squad_info.empty()) {
+						std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner display handle - PUBNAMEINFO/PUBSQUADINFO will be empty (joiner=%s cookies=[%s])\n",
+						             joiner_label.c_str(),
+						             cookie_summary(request_cookie_header(req)).c_str());
+					}
+					std::printf("[http] /NWJoin.dll PUB* encoded for joiner=%s pcid=%s nwhandle=%s host_key=%zuB name=%zuB squad=%zuB\n",
+					            joiner_label.c_str(), joiner_pcid.c_str(),
+					            joiner_nwhandle.c_str(), host_pcid_key.size(),
+					            payloads.name_info.size(), payloads.squad_info.size());
 				} catch (const std::exception &e) {
 					std::fprintf(stderr, "[http] /NWJoin.dll PUB* encode failed: %s\n", e.what());
 				}

@@ -982,6 +982,11 @@ target_link_libraries(joi_parse_test PRIVATE opennova_novaworld opennova_novacry
 target_include_directories(joi_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME joi_parse COMMAND joi_parse_test)
 
+add_executable(join_identity_test novaworld/join_identity_test.cpp)
+target_link_libraries(join_identity_test PRIVATE opennova_novaworld opennova_novacrypto)
+target_include_directories(join_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME join_identity COMMAND join_identity_test)
+
 # ADR 0010 Phase 5 — the JointOperations ClientHello (proto switch): PN flips to
 # JointOperations with a distinct PG; the NOVAWORLDUDP path is unchanged.
 add_executable(jointops_hello_test novaworld/jointops_hello_test.cpp)
@@ -1116,4 +1121,3 @@ target_link_libraries(unknown_tracker_test PRIVATE opennova_novaworld)
 target_include_directories(unknown_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(unknown_tracker_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
-
