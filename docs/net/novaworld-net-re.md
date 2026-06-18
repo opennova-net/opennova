@@ -170,7 +170,7 @@ Handles fragment flags (bit `0x06` mid-fragment, `0x04` continuation, `0x02` end
 into a per-connection `NapiBuffer` at connection offset `+860`, then resolves the handler via
 `FindMsgInfo(proto, dir_flag, msg_type)`. `dir_flag`: `0x01` = client-receive
 (`msginfo_client_table`), `0x02` = server-receive (`msginfo_server_table`), `+0x04` when
-`flags >> 7` (high-byte / settings-update mode; selects the `msginfo_high_*` tables).
+`flags >> 7` (high-table control mode; selects the `msginfo_high_*` tables).
 
 ### Dispatcher table globals
 
@@ -178,7 +178,7 @@ into a per-connection `NapiBuffer` at connection offset `+860`, then resolves th
 |---|---|---|---|
 | `g_np_msginfo_client` | `0x82AE28` | `NapiNPMsgInfo[123]` | S2C dispatch, 122 entries + sentinel (counted from delta to next named global). |
 | `g_np_msginfo_server` | `0x82B5D8` | `NapiNPMsgInfo[72]` | C2S dispatch, msg_ids 0x00..0x51 + sentinel (conservative count). |
-| `g_np_msginfo_highbit` | `0x849E80` | `NapiNPMsgInfo[64]` | High-bit msg_type dispatch; count not fully witnessed. |
+| `g_np_msginfo_highbit` | `0x849E80` | `NapiNPMsgInfo[64]` | High-table control dispatch; four registered entries (`H:0x00..H:0x03`) plus sentinel witnessed. |
 
 Tables terminate on a sentinel entry with `magic == 0`
 (`[orig: NapiNPMsgInfo_BuildIndex @ 0x61e2b0]`); they are assigned to `NapiNPProtocol`'s
@@ -186,6 +186,59 @@ Tables terminate on a sentinel entry with `magic == 0`
 dispatcher byte-decode session placed the server table at `0x82B6D8`, the later typing pass at
 `0x82B5D8` (= `0x82AE28` + 123×16, self-consistent and applied to the IDB). Treat the IDB
 typing as authoritative; re-verify if exact counts ever matter.
+
+### High-table control messages (NAPI control, not gameplay)
+
+The protocol-message flag bit `0x80` is a **high-table selector**, not a low-table msg_id
+modifier and not an in-game message namespace. Retail dispatches these packets through the
+`msginfo_high_*` indexes populated by `[orig: NapiNPProtocol_InitMsgInfoIndex @ 0x61E400]`;
+`[orig: NapiNPProtocol_FindMsgInfo @ 0x61E380]` picks the low or high index by direction plus
+the `+0x04` high-table bit. `[orig: NapiNPConnection_DispatchMessage @ 0x622570]` gets the
+selector from the protocol-message flags/raw type high bit (`0x80`). If a high-table index has no
+entry, retail does **not** fall through to the normal low msg_id callback.
+
+Only four high-table entries are registered in the retail JO binary:
+
+| High tag | Handler | Working name | Purpose |
+|---|---|---|---|
+| `H:0x00` | `0x621940` | `NapiNPConnection_HandleCSConfigUpdate` | Runtime connection-settings sync; sparse update form of the `CS` entries sent in opcode `0x82`. |
+| `H:0x01` | `0x6219F0` | `NapiNPConnection_HandleNameTagUpdate` | Connection name/tag update, not a player display name. |
+| `H:0x02` | `0x62A040` | `NapiNPConnection_ProcessDataTransferControl` | Data-transfer side channel control. |
+| `H:0x03` | `0x621AE0` | `NapiNPConnection_HandleDescriptionPacket` | Connection description packet. |
+
+`H:0x00` payload format:
+
+```
+u8  direction
+u32 field_mask_le
+for each set bit i in field_mask, low to high:
+    u32 value_le_for_cs_field_i
+```
+
+The same 15 CS field indexes appear in opcode `0x82` SessionInit as repeated `CS` TLVs with
+payload `[direction:u8][field_index:u8][value:u32le]` (`[orig:
+NapiNPConnection_SendSessionInit @ 0x620EF0]`; receiver `[orig:
+NapiNP_HandleServerJoinResponse @ 0x629840]`). `H:0x00` is therefore the runtime sparse-update
+form of the SessionInit CS block, not an unknown gameplay message. Observed captures line up with
+the IDA callers:
+
+| Caller | Mask | Field | Meaning |
+|---|---|---|---|
+| `[orig: NapiNPServer_HandleNewConnection @ 0x4C8040]` | `0x00002000` | 13 | `max_packet_bytes`; observed value `1300` (`0x514`). |
+| `[orig: NapiNPServer_UpdateHoldoffTicks @ 0x4C5F40]` | `0x00000008` | 3 | `send_holdoff_ticks`; observed value `12`. |
+
+Direction is peer-relative and mirrored. On receive, `[orig:
+NapiNPConnection_HandleCSConfigUpdate @ 0x621940]` applies `direction != 0` to local
+`conn+0x17C` and `direction == 0` to local `conn+0x1B8`; the SessionInit receiver uses the same
+pair after applying the `CS` TLVs. The send side (`[orig:
+NapiNPConnection_SendConfigUpdate @ 0x6286E0]`, gated by `[orig:
+NapiNPConnection_SendConfigUpdateIfEnabled @ 0x629730]`) flips the outbound direction byte so the
+peer lands the update in its corresponding local array.
+
+Terminology guard: in the NOVAWORLDUDP lobby/gate flow, `NA` values such as `jop:cus2` are
+connection/game/gate tags. They are not `NWHANDLE`/`CHAR` player display names, and high-table
+`H:0x01` should likewise be treated as connection tag/name state unless a future witness proves
+otherwise.
 
 ### S2C message table (server emits, client handles) — `0x82AE28`
 
@@ -408,9 +461,8 @@ This is what a reimplemented server must **handle**.
   stamp.
 - `handler2` of `NapiNPMsgInfo` — always zero in observed entries; possibly the
   `cb_server_3`/`cb_client_0` callback slots per the dispatcher decompile.
-- `msginfo_high_*` tables (selected when `flags >> 7`) — index pointers live in
-  `NapiNPProtocol` (§6.5) but the populating init path is unwitnessed; deferred until a
-  `flags=0x80` packet shows up in capture analysis.
+- High-table payload depth beyond `H:0x00` — registered entries and routing are witnessed
+  (§4 high-table control messages), but `H:0x01..H:0x03` still have only purpose-level names.
 - Opcode handlers `0x6213B0`..`0x624340` mostly lack descriptive names.
 - msg_id values `0x86`/`0x87`/`0x88+` observed in the client-table tail; dispatch assignment
   unclear (possibly dead entries).
@@ -2055,6 +2107,43 @@ explicit 512-byte copies into the SUS buffers. Host-state DWORDs confirmed by St
 (`sub_62B5E0`), `StopServer @ 0x62a820`, `NapiNPProtocol_Create @ 0x625a10`,
 `NapiNPTimer_GenerateRandomId @ 0x61e533`, and HandleClientJoin's HK validation.
 
+#### `NapiCSConfig` defaults and direction mirroring
+
+`[orig: CNapiGameSession_InitNPConnection @ 0x4D3BE0]` initializes both protocol CS templates
+(`proto+0xE44` and `proto+0xE80`) to the same 15-dword default block. `[orig:
+NapiNPConnection_Create @ 0x62ACB0]` copies those protocol templates into each connection with
+direction-dependent mirroring:
+
+| Connection type | `conn+0x17C` | `conn+0x1B8` |
+|---|---|---|
+| server-side connection (`type == 1`) | `proto+0xE44` | `proto+0xE80` |
+| client-side connection (`type == 2`) | `proto+0xE80` | `proto+0xE44` |
+
+Field defaults:
+
+| Index | Working field name | Default |
+|---|---|---:|
+| 0 | `timeout_ms` | 240000 |
+| 1 | `recv_max_per_tick` | 4 |
+| 2 | `send_interval_ms` | 0 |
+| 3 | `send_holdoff_ticks` | 0 |
+| 4 | `idle_send_interval_ms` | 60000 |
+| 5 | `active_send_interval_ms` | 1000 |
+| 6 | `packet_queue_interval_ms` | `0xffffffff` |
+| 7 | `allow_dir0_update` | 0 |
+| 8 | `static_msg_payload_max` | 2048 |
+| 9 | `static_msg_count` | 128 |
+| 10 | `packet_queue_max` | 100 |
+| 11 | `msg_out_max` | 500 |
+| 12 | `msg_out_overflow_log` | 1 |
+| 13 | `max_packet_bytes` | 1300 |
+| 14 | `max_packets_per_tick` | `0xffffffff` |
+
+The `max_packet_bytes` default is the clamped MTU value `0x514` (min 100, max `0x10000`).
+`[orig: NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0]` computes field 3 as one of
+`1/3/4/6/12` depending on transport/LAN mode; the observed retail/OpenNova loopback update used
+`12`.
+
 ### 6.6 `NapiPingManager` (declared 288 B; **real allocation 116 B**)
 
 `[orig: NapiPingManager_Create @ 0x6303D0]` allocates 116 (0x74) bytes; every witnessed access
@@ -2549,7 +2638,7 @@ The lobby exchange (raw UDP payload bytes; `cooked` = after the 4-byte CRC envel
 | 8933 | S→C | 313 | 0x81 | ServerHello (`SN`="NWServer") |
 | 8977 | C→S | 641 | 0x42 | ClientAuth/Join — 11 CU chunks, **all type=2** |
 | 9729 | S→C | 650 | 0x82 | **ServerSessionInit** (`CR`=1, `SK`, 61-char SCRK, NWUID CU) |
-| 9730 | S→C | 42  | 0x83 | two `settings_update` (CS config) messages, **not** ServerStartVerify |
+| 9730 | S→C | 42  | 0x83 | two high-table `H:0x00` CS config updates, **not** ServerStartVerify |
 | 9739 | C→S | 18  | 0x43 | header-only **ack** (seq=1, ack=1) |
 | 9778 | C→S | 40  | 0x43 | ClientConnected (seq=2) — bare "ClientConnected" statement |
 | 10163 | S→C | 42 | 0x83 | **ServerStartVerify** (seq=2) |
@@ -2568,7 +2657,9 @@ Established facts (all witnessed in the capture, IDA where noted):
    0x620ef0` emits opcode 0x82 (`-126`) carrying CI/SK/CS×30/CU/SCRK/NA/RIP/RPN; the client
    receiver is `NapiNP_HandleServerJoinResponse @ 0x629840` (`CR`=`byte_7DFDE8`≠0 ⇒ success ⇒
    `conn_state=5` → `OnStateChange @ 0x626060` → `OnNovaWorldConnected @ 0x4d1570`). Our code
-   keeps the legacy "ServerAuth" name for opcode 0x82; it is the SessionInit.
+   keeps the legacy "ServerAuth" name for opcode 0x82; it is the SessionInit. The `CS` TLVs in
+   this packet are the full connection-settings snapshot; later high-table `H:0x00` packets are
+   sparse updates of the same fields (§4 high-table control messages).
 3. **The verify `Cookie` var-list is CD-key/hardware identity, and the lobby verify is NOT
    credential-gated.** The 892B `ClientRequestVerifyResult` (frame 10166) decodes to
    `SessIdString=""` + a `ClientVarList(VarList="Cookie")` of `ClientVar{VarFNum="0",VarName,
@@ -2598,7 +2689,7 @@ verify, which the permissive server accepts. Oracle: `nw204_lobby_decode_test`. 
 CD-key boundary** for the lobby VALIDATE — the milestone is reachable without credentials.
 
 **Live result (2026-06-12):** our client reached **CONNECTED/VALIDATED against the real `.204`**
-(`~/Desktop/capture_opennova.pcapng`): `0x41(259)→0x81(293)→0x42(617)→0x82(650)→settings 0x83(42)
+(`~/Desktop/capture_opennova.pcapng`): `0x41(259)→0x81(293)→0x42(617)→0x82(650)→H:0x00 CS 0x83(42)
 →ClientConnected(40)+ack(18)→ServerStartVerify(42)→verify(882)→ServerVerifyResult(151)→` 2 s
 keepalives. The seq/ack fix was the whole story.
 
@@ -2798,6 +2889,7 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-62** [INFO, VALIDATED] Authored-mission cross-validation of pools 1/2/3 (§5.24) — the dvxi5 probe's *known* `mission.bms`, serialized by the retail host, decoded field-for-field on the wire (the sibling of D-NET-61 for the pools the `.sph` can't see). Lands the **S2C 0x0C organic-spawn field map + decoder** (`decode_organic_spawn_batch` / `OrganicSpawnRecord`, §5.23) — byte-exact consume on the probe's 6-organic batch (4 AI `0x0816` + 2 players `0x14B9`); the shared pcap reader (`apps/common/pcap_reader`, nw_pp factored onto it); and two tests (`nw_pool_groundtruth_test` reads the real `.scratch` pcap directly; `nw_pool_decode_unit_test` inline-pcap round-trips 0x0D/0x20 through the full S2C stack). Confirms: type_id/position/team reproduce (posX/posY lossless i32 16.16; posZ re-grounds ≤1u for vehicles/AI, markers keep authored z); the heading convention **`wire_BAM = 90 - facing`** (pinned by AI authored at facing {0,90,180,270} → wire {90°,0°,270°,180°}; the 0x20 markers at facing {0,180} alone could not distinguish it from `facing+90`); and team @ **entity+354** — the onhook PoC's `+146`/`+196` reads are inside `GamePlayerEntity.pad5`, a runtime/display mirror, NOT the BMS team (same mislabel class as the PDAT `+42` STAT byte, §5.22). No divergence in the pool decoders — a new field map + validation oracle. [orig: NapiNPClientMsg_0x00C @ 0x42E730 / serialize_entity_pool_to_packet_0 @ 0x503940 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 - **D-NET-63** [MED, DOC+CODE] §5.13 vehicle compact record field labels corrected (the rename the 2026-06-16d footnote deferred). Re-grilled the mode-2 (read) path of `Entity_SerializeMountedVehicleState @ 0x460560`: the pre-branch i16 (`yaw_high`) and the two mounted-branch i16s are the **orientation / rider Euler triple Z/Y/X** landing at **entity+576/584/580** (fed to `Math_BuildFixedPointMatrixFromEulerAngles`), and the unmounted block is **turret-pitch raw i16 (entity+286) + weapon-aim Y/Z (read-dest `vehicleData[177/178]`) + weapon-heading BAM (`vehicleData[179]`)** — distinct from the genuine weapon-X compressed u16 (entity+160). The write side has NO shared trailing field, so the reimpl's formerly-shared `final_heading` is split per branch into `euler_x` (mounted) / `weapon_heading_bam` (unmounted). Renamed `ingame_decode.h VehicleCompactRecord` (`yaw_high→euler_z`, `secondary_heading→euler_y`, `final_heading→euler_x|weapon_heading_bam`, `weapon_x_compressed→weapon_x`, `weapon_y_raw→turret_pitch_raw`, `weapon_z_compressed→weapon_aim_y`, `weapon_heading_compressed→weapon_aim_z`) with matching `ingame_encode.cpp` / `nw_pp.cpp` / `replay_timeline.cpp` / `nw_ingame_compact_records_test` / `nw_ingame_encode_test`. Also split the §5.13 table's "landing" column into write-source vs read-dest (it had conflated write `vehicleData[136]` with read-dest `vehicleData[177]`). **Wire bytes, read order, and sizes (15 B mounted / 21 B not) are unchanged** — label-only; round-trip + byte-witness tests stay green. [orig: Entity_SerializeMountedVehicleState @ 0x460560 (read path @ 0x4605a3..0x460aff; Euler matrix build @ 0x460a0f → Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40)]
 - **D-NET-64** [PARTIAL, DOC+CODE] §5.15 guided weapon record upgraded from "TBD" to a documented per-(mode, field-group) matrix + structural port. `Entity_SerializeGuidedMissileState @ 0x447C50` is a `mode (packetCtx[6] ∈ {1..4}) × field-group (packetCtx[7] ∈ {1..6})` codec (write-full/read-full/write-delta/read-apply across status / clear-target / target+pos / type+pos / pos / attach-offsets), NOT a fixed compact. **Framing resolved:** `dispatch_entity_packet_callback @ 0x4D6A80` copies the 5-byte entity sub-header's `sub_op` byte into `packetCtx[7]`, so the field-group selector rides the wire as `sub_op` (1..6 for guided; 10/11 = extended/compact for the §5.10b classes), and hardwires `packetCtx[6]=4` (read-apply) on the host C2S-receive path. The serializer rejects format 11, confirming guided never legitimately appears as a 0x0A compact — `decode_frame_update`'s fail-closed on `EntityClass::Guided` is correct. Landed `GuidedRecord` + `encode_guided_field_group`/`decode_guided_field_group` (`ingame_encode.cpp`/`ingame_decode.cpp`) + `nw_ingame_guided_test` (per-(mode,group) round-trip; the write-side 1-B `0x00` status/clear marker is the dispatcher's framing, read side reads 0 B). **DEFERRED:** wiring into the 0x0C entity-packet dispatch + per-group field validation — no capture carries guided traffic (the 2026-06-16b loopback fired no rockets). Verdict partial (IDA-structural, round-trip-pinned, wire-unvalidated). [orig: Entity_SerializeGuidedMissileState @ 0x447C50 / dispatch_entity_packet_callback @ 0x4D6A80]
+- **D-NET-65** [HIGH, DOC] High-bit protocol-message packets are a separate NAPI high-table control namespace, not low-table gameplay tags and not generic "unknown settings." Retail registers only `H:0x00..H:0x03` in `g_np_msginfo_highbit @ 0x849E80`: `H:0x00` is CS config update, `H:0x01` is connection name/tag update, `H:0x02` is data-transfer control, and `H:0x03` is description packet. `H:0x00` is the sparse runtime update form of the opcode-`0x82` `CS` TLVs: payload `[direction:u8][mask:u32le][u32 per set field]`, with the same 15 `NapiCSConfig` field indexes documented under §6.5. Observed masks match IDA callers: `0x2000` -> field 13 `max_packet_bytes=1300` from `NapiNPServer_HandleNewConnection`, and `0x0008` -> field 3 `send_holdoff_ticks=12` from `NapiNPServer_UpdateHoldoffTicks`. Also corrected the terminology trap: `NA=jop:cus2` is connection/game/gate tag state in the NOVAWORLDUDP path, not the player display name (`NWHANDLE`/`CHAR`). No source change in this commit; this records the finding and implementation implication. [orig: NapiNPProtocol_InitMsgInfoIndex @ 0x61E400 / NapiNPProtocol_FindMsgInfo @ 0x61E380 / NapiNPConnection_DispatchMessage @ 0x622570 / NapiNPConnection_HandleCSConfigUpdate @ 0x621940 / NapiNPConnection_SendSessionInit @ 0x620EF0 / NapiNP_HandleServerJoinResponse @ 0x629840 / NapiNPConnection_SendConfigUpdate @ 0x6286E0 / NapiNPServer_HandleNewConnection @ 0x4C8040 / NapiNPServer_UpdateHoldoffTicks @ 0x4C5F40 / NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;
