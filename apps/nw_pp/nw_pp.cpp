@@ -360,6 +360,29 @@ void print_tag_20(const std::vector<uint8_t> &body) {
 		                        batch.records[i]);
 }
 
+void print_static_entity_record(uint16_t slot, const StaticEntityRecord &r) {
+	const uint16_t handle = uint16_t((2u << 12) | (slot & 0x0FFF));
+	if (r.is_empty_slot) {
+		std::printf("        slot %s (empty)\n", handle_str(handle).c_str());
+		return;
+	}
+	std::printf("        slot %s type=%s flags=0x%03x pos=(%.1f, %.1f, %.1f)",
+	            handle_str(handle).c_str(), type_str(r.item_type_id).c_str(),
+	            unsigned(r.field_flags), fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
+	if (r.field_flags & 0x0010) std::printf(" team=0x%02x", r.team_byte);
+	std::printf(" ammo=0x%02x weap=0x%02x\n", r.ammo_count, r.weapon_byte);
+}
+
+void print_tag_10(const std::vector<uint8_t> &body) {
+	StaticEntityBatch batch;
+	const bool clean = decode_static_entity_batch(body.data(), body.size(), batch);
+	std::printf("        [0x10] startIdx=%u entityCount=%d (body %zu B%s)\n",
+	            unsigned(batch.start_index), int(batch.entity_count),
+	            body.size(), clean ? "" : ", DECODE INCOMPLETE");
+	for (size_t i = 0; i < batch.records.size(); ++i)
+		print_static_entity_record(uint16_t(batch.start_index + i), batch.records[i]);
+}
+
 void print_tag_40(const std::vector<uint8_t> &body) {
 	CaptureZoneOverlayBatch batch;
 	const bool clean = decode_capture_zone_overlay(body.data(), body.size(), batch);
@@ -672,6 +695,33 @@ void print_tag_4e(const std::vector<uint8_t> &body) {
 		std::printf("            slot %s\n", handle_str(s).c_str());
 }
 
+void print_tag_16(const std::vector<uint8_t> &body) {
+	PlayerList pl;
+	const bool clean = decode_player_list(body.data(), body.size(), pl);
+	std::printf("        [0x16] max=%u players=%u teams=%u%s\n",
+	            pl.max_players, pl.player_count, pl.team_count,
+	            clean ? "" : " DECODE INCOMPLETE");
+	for (const auto &r : pl.players)
+		std::printf("        player slot=0x%02x ping=%u score=%u/%u flags=0x%02x (team=%u alive=%u)\n",
+		            r.slot_id, r.ping, r.score1, r.score2, r.flags,
+		            r.flags >> 1, r.flags & 1);
+}
+
+void print_tag_46(const std::vector<uint8_t> &body) {
+	PlayerSync ps;
+	const bool clean = decode_player_sync(body.data(), body.size(), ps);
+	if (ps.removal) {
+		std::printf("        [0x46] slot=0x%02x REMOVAL (bitmask=0x%04x)%s\n",
+		            ps.slot_id, ps.field_bitmask, clean ? "" : " INCOMPLETE");
+		return;
+	}
+	std::printf("        [0x46] slot=0x%02x bitmask=0x%04x entity=0x%04x team=%u "
+	            "name=\"%s\"%s%s\n",
+	            ps.slot_id, ps.field_bitmask, unsigned(ps.entity_slot_id), ps.team,
+	            ps.name.c_str(), ps.queue_ack ? " +ack" : "",
+	            clean ? "" : " INCOMPLETE");
+}
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
 	const char *label = tag_label(dir, tag);
@@ -682,7 +732,10 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x0C) print_tag_0c(payload);
 	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
 	else if (dir == 'S' && tag == 0x20) print_tag_20(payload);
+	else if (dir == 'S' && tag == 0x10) print_tag_10(payload);
 	else if (dir == 'S' && tag == 0x40) print_tag_40(payload);
+	else if (dir == 'S' && tag == 0x16) print_tag_16(payload);
+	else if (dir == 'S' && tag == 0x46) print_tag_46(payload);
 	else if (dir == 'S' && tag == 0x1E) print_tag_1e(payload);
 	else if (dir == 'S' && tag == 0x26) print_tag_26(payload);
 	else if (dir == 'S' && tag == 0x4E) print_tag_4e(payload);

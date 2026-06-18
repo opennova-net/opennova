@@ -234,6 +234,133 @@ bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
 	return (c.p == c.end);
 }
 
+// S2C 0x10 pool-2 static-entity batch (§5.9). Header [u16 startIndex][u16 count]
+// like 0x20; each record is flags-first variable-length like 0x0D, with the
+// itemTypeId == 0 empty-slot sentinel. ammoCount and weaponByte are UNCONDITIONAL;
+// attachRef is read when weaponByte != 0 OR flags & 0x200.
+// [orig: NapiNPClientMsg_0x010 @ 0x433400]
+bool decode_static_entity_batch(const uint8_t *body, size_t len,
+                                StaticEntityBatch &out) {
+	out.records.clear();
+	out.start_index = 0;
+	out.entity_count = 0;
+
+	Cursor c{body, body + len, true};
+	out.start_index = c.u16();
+	out.entity_count = int16_t(c.u16());
+	if (!c.ok) return false;
+	if (out.entity_count <= 0) return (c.p == c.end);
+
+	out.records.reserve(size_t(out.entity_count));
+	for (int i = 0; i < out.entity_count; ++i) {
+		StaticEntityRecord rec;
+		rec.item_type_id = c.u16();
+		if (!c.ok) {
+			out.records.push_back(std::move(rec));
+			return false;
+		}
+		if (rec.item_type_id == 0) {
+			rec.is_empty_slot = true;
+			out.records.push_back(std::move(rec));
+			continue;
+		}
+
+		rec.field_flags = c.u16();
+		rec.pos_x = int32_t(c.u32());
+		rec.pos_y = int32_t(c.u32());
+		rec.pos_z = int32_t(c.u32());
+
+		if (rec.field_flags & 0x0001) rec.vel_x = int32_t(c.u32());
+		if (rec.field_flags & 0x0002) rec.vel_y = int32_t(c.u32());
+		if (rec.field_flags & 0x0004) rec.vel_z = int32_t(c.u32());
+		if (rec.field_flags & 0x0008) rec.section_mask = int32_t(c.u32());
+		if (rec.field_flags & 0x0010) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
+		if (rec.field_flags & 0x0020) rec.parent_slot = int32_t(c.u32());
+		rec.ammo_count = c.u8();                                  // entity+290, unconditional
+		if (rec.field_flags & 0x0040) rec.bone_a = c.u8();
+		if (rec.field_flags & 0x0080) rec.bone_b = c.u8();
+		if (rec.field_flags & 0x0100) rec.score_flag = c.u8();
+		rec.weapon_byte = c.u8();                                 // entity+538, unconditional
+		if (rec.weapon_byte != 0 || (rec.field_flags & 0x0200)) rec.attach_ref = c.u16();
+
+		const bool record_ok = c.ok;
+		out.records.push_back(std::move(rec));
+		if (!record_ok) return false;
+	}
+
+	return (c.p == c.end);
+}
+
+// S2C 0x16 player-list scoreboard (§5.20). One message = the full list:
+// header + player_count 8-B rows + team_count + (team_count+1) 6-B rows + a
+// 2-byte trailer. [orig: NapiNPClientMsg_PlayerList @ 0x42FAE0]
+bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
+	out = PlayerList{};
+	Cursor c{body, body + len, true};
+	out.max_players = c.u8();
+	out.player_count = c.u8();
+	if (!c.ok) return false;
+	out.players.reserve(out.player_count);
+	for (unsigned i = 0; i < out.player_count; ++i) {
+		PlayerListRow r;
+		r.slot_id = c.u8();
+		r.ping = c.u16();
+		r.score1 = c.u16();
+		r.score2 = c.u16();
+		r.flags = c.u8();
+		out.players.push_back(r);
+		if (!c.ok) return false;
+	}
+	out.team_count = c.u8();
+	if (!c.ok) return false;
+	const unsigned team_rows = unsigned(out.team_count) + 1;  // T0 neutral + per team
+	out.teams.reserve(team_rows);
+	for (unsigned i = 0; i < team_rows; ++i) {
+		PlayerListTeamRow t;
+		t.score1 = c.u16();
+		t.score2 = c.u16();
+		t.player_count = c.u8();
+		t.alive_count = c.u8();
+		out.teams.push_back(t);
+		if (!c.ok) return false;
+	}
+	out.extra1 = c.u8();
+	out.extra2 = c.u8();
+	return (c.p == c.end);
+}
+
+// S2C 0x46 player-sync (§5.21). Header [u8 slot][u16 bitmask]; bit 0x8000 = a
+// removal (no body). Otherwise [u8 entity_slot] then the present fields IN
+// SOURCE ORDER (non-numeric). Bit 0x4000 carries no body (queue-ack signal).
+// [orig: NapiNPClientMsg_PlayerSync @ 0x431370]
+bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
+	out = PlayerSync{};
+	Cursor c{body, body + len, true};
+	out.slot_id = c.u8();
+	out.field_bitmask = c.u16();
+	if (!c.ok) return false;
+	const uint16_t m = out.field_bitmask;
+	if (m & 0x8000) {
+		out.removal = true;
+		return (c.p == c.end);
+	}
+	out.entity_slot_id = c.u8();
+	// Source order: name, clan, id, team, type|subtype, 0x20, 0x1000, 0x40, 0x80, quality, entityRef.
+	if (m & 0x0001) out.name = c.cstr();
+	if (m & 0x0002) out.clan = c.cstr();
+	if (m & 0x0010) out.id_label = c.cstr();
+	if (m & 0x0004) out.team = c.u8();
+	if (m & 0x0008) out.type_subtype = c.u8();
+	if (m & 0x0020) out.field_0020 = c.u8();
+	if (m & 0x1000) out.field_1000 = c.u8();
+	if (m & 0x0040) out.field_0040 = c.u8();
+	if (m & 0x0080) out.field_0080 = c.u8();
+	if (m & 0x0400) out.quality = c.u8();
+	if (m & 0x0800) out.entity_ref = c.u32();
+	out.queue_ack = (m & 0x4000) != 0;   // no body byte
+	return (c.p == c.end);
+}
+
 // S2C 0x0C pool-0 organic spawn batch (§5.23). Fully flat per record — no
 // flag-gated optionals; slot-id-first; name parsed inline for every record.
 // [orig: NapiNPClientMsg_0x00C @ 0x42E730]

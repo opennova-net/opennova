@@ -1042,6 +1042,18 @@ target_compile_definitions(nw_pool_groundtruth_test PRIVATE
     DEFAULT_DVXI5_PCAP="${CMAKE_SOURCE_DIR}/.scratch/host_and_join_game_on_opennovaworld_loopback_mission_probe.pcapng")
 add_test(NAME nw_pool_groundtruth COMMAND nw_pool_groundtruth_test)
 
+# dvxi3 probe (probe 2, Team Deathmatch) groundtruth — successor to the dvxi5
+# test, additionally cross-validating the S2C 0x10 pool-2 static-entity decoder
+# (armory, oil pump, oil-field) against the authored statics. Skips unless the
+# capture is present (NW_DVXI3_PCAP, else the in-tree .scratch path).
+add_executable(nw_dvxi3_groundtruth_test novaworld/nw_dvxi3_groundtruth_test.cpp)
+target_link_libraries(nw_dvxi3_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_dvxi3_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_dvxi3_groundtruth_test PRIVATE
+    FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
+    DEFAULT_DVXI3_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe2.pcapng")
+add_test(NAME nw_dvxi3_groundtruth COMMAND nw_dvxi3_groundtruth_test)
+
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
 # NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture

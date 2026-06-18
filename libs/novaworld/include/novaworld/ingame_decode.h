@@ -195,6 +195,47 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 bool decode_pool3_sync_batch(const uint8_t *body, size_t len,
                               Pool3SyncBatch &out);
 
+// One record from a S2C 0x10 static-entity batch (§5.9). Pool-2 statics —
+// purely static structures (armory, oil pump, oil-field decorations) that carry
+// no AI/destructible state, so they replicate here rather than via the pool-1
+// 0x0D path. Header is [u16 startIndex][u16 entityCount] (like 0x20); each record
+// is flags-first variable-length (like 0x0D), itemTypeId == 0 is the empty-slot
+// sentinel. [orig: NapiNPClientMsg_0x010 @ 0x433400]
+struct StaticEntityRecord {
+	uint16_t item_type_id = 0;   // always; 0 ⇒ empty slot (record ends, slot left zero)
+	bool     is_empty_slot = false;
+
+	uint16_t field_flags = 0;    // always
+	int32_t  pos_x = 0;          // always  entity+4  (i32 16.16 world)
+	int32_t  pos_y = 0;          // always  entity+8
+	int32_t  pos_z = 0;          // always  entity+12
+
+	int32_t  vel_x = 0;          // 0x01    entity+16
+	int32_t  vel_y = 0;          // 0x02    entity+20
+	int32_t  vel_z = 0;          // 0x04    entity+24
+	int32_t  section_mask = 0;   // 0x08    entity+308
+	uint8_t  team_byte = 0;      // 0x10    entity+354 (BMS team 1=Blue/2=Red)
+	int32_t  parent_slot = 0;    // 0x20    entity+36
+	uint8_t  ammo_count = 0;     // always  entity+290
+	uint8_t  bone_a = 0;         // 0x40    entity+533
+	uint8_t  bone_b = 0;         // 0x80    entity+532
+	uint8_t  score_flag = 0;     // 0x100   entity+624
+	uint8_t  weapon_byte = 0;    // always  entity+538
+	uint16_t attach_ref = 0;     // weapon_byte != 0 || flags & 0x200; entity+350
+};
+
+struct StaticEntityBatch {
+	uint16_t start_index = 0;
+	int16_t  entity_count = 0;
+	std::vector<StaticEntityRecord> records;
+};
+
+// Decode a S2C 0x10 body per the §5.9 field map. Same return contract as
+// decode_pool3_sync_batch: true iff the body was consumed exactly.
+// [orig: NapiNPClientMsg_0x010 @ 0x433400]
+bool decode_static_entity_batch(const uint8_t *body, size_t len,
+                                StaticEntityBatch &out);
+
 // One record from a S2C 0x0C organic-entity spawn batch (§5.23).
 // [orig: NapiNPClientMsg_0x00C @ 0x42E730]. Pool-0 "organics" — AI infantry and
 // human-player infantry — enter the world via 0x0C, NOT 0x0D (which handles
@@ -244,6 +285,56 @@ struct OrganicSpawnBatch {
 // leftover. [orig: NapiNPClientMsg_0x00C @ 0x42E730]
 bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
                                 OrganicSpawnBatch &out);
+
+// S2C 0x16 player-list (§5.20) — the scoreboard. One message = the full list;
+// the server may re-sort rows between frames, so slot_id is authoritative.
+// [orig: NapiNPClientMsg_PlayerList @ 0x42FAE0]
+struct PlayerListRow {
+	uint8_t  slot_id = 0;
+	uint16_t ping = 0;
+	uint16_t score1 = 0;
+	uint16_t score2 = 0;
+	uint8_t  flags = 0;       // alive = flags & 1; team = flags >> 1
+};
+struct PlayerListTeamRow {
+	uint16_t score1 = 0;
+	uint16_t score2 = 0;
+	uint8_t  player_count = 0;
+	uint8_t  alive_count = 0;
+};
+struct PlayerList {
+	uint8_t  max_players = 0;
+	uint8_t  player_count = 0;
+	std::vector<PlayerListRow> players;
+	uint8_t  team_count = 0;
+	std::vector<PlayerListTeamRow> teams;  // team_count + 1 rows (T0 neutral + per team)
+	uint8_t  extra1 = 0;                    // trailer
+	uint8_t  extra2 = 0;
+};
+bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
+
+// S2C 0x46 player-sync (§5.21) — one player record, fields gated by a bitmask
+// read in SOURCE order (NON-numeric: 0x10 before 0x04, 0x1000 before 0x40).
+// [orig: NapiNPClientMsg_PlayerSync @ 0x431370]
+struct PlayerSync {
+	uint8_t  slot_id = 0;
+	uint16_t field_bitmask = 0;
+	bool     removal = false;        // bitmask & 0x8000 — no body follows
+	uint8_t  entity_slot_id = 0;     // present when !removal; pool-0 → handle (0<<12)|slot
+	std::string name;                // 0x0001
+	std::string clan;                // 0x0002
+	std::string id_label;            // 0x0010
+	uint8_t  team = 0;               // 0x0004
+	uint8_t  type_subtype = 0;       // 0x0008 (type = v & 0x7F, subtype = v >> 7)
+	uint8_t  field_0020 = 0;         // 0x0020
+	uint8_t  field_1000 = 0;         // 0x1000
+	uint8_t  field_0040 = 0;         // 0x0040
+	uint8_t  field_0080 = 0;         // 0x0080
+	uint8_t  quality = 0;            // 0x0400 (clamp 4)
+	uint32_t entity_ref = 0;         // 0x0800
+	bool     queue_ack = false;      // 0x4000 — no body byte; client queues a C2S 0x22 ack
+};
+bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out);
 
 // One entry from a S2C 0x40 minimap-overlay update / capture-zone state batch
 // (§5.19). 6 bytes per entry, prefixed by a u8 count. Overlay position is read

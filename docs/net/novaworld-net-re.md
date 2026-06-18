@@ -335,11 +335,11 @@ sweep; blank = not yet characterized.
 | 0x5D | 0x429730 | `_0x05D` | entity-destroy list (cleanup) |
 | 0x5E | 0x4297B0 | `_0x05E` | |
 | 0x5F | 0x4228F0 | `_0x05F` | |
-| 0x60 | 0x432350 | `_HandleFileTransferChunk` | u32 sessionId, u32 totalSize, u32 offset, payload; incomplete → client requests the next chunk via C2S 0x33 |
+| 0x60 | 0x432350 | `_HandleFileTransferChunk` | mission ANNOUNCE (witnessed probe2, §5.28): u32 type=1, u32 bodyLen, u32 reserved, then a SERVERNAME/MISSIONNAME string table. NOT a chunked file copy — the joiner gets the mission as 0x60 announce + one 0x64 chunk + the 0x0B 616-B header + spawn batches; the C2S 0x33 re-request never fires (D-NET-69) |
 | 0x61 | 0x4297C0 | `_HandleSessionKey` | u32 session key → `g_sessionKey`; **disables `_connectlog.txt`** (source of the "DISABLING CONNECTLOG" log line) |
 | 0x62 | 0x42D200 | `_0x062` | |
 | 0x63 | 0x42D450 | `_0x063` | |
-| 0x64 | 0x432410 | `_0x064` | mission-file chunk transfer (like 0x60); incomplete → C2S 0x37 |
+| 0x64 | 0x432410 | `_0x064` | mission CHUNK (witnessed probe2, §5.29): same 12-B header (u32 type=1, u32 bodyLen, u32 reserved) + one compact payload. Streamed beside the 0x0B header + spawn batches, not a re-requested chunk train; the C2S 0x37 re-request never fires (D-NET-69) |
 | 0x65 | 0x429870 | `_0x065` | |
 | 0x66 | 0x42D4C0 | `_HandleWeaponRestrictions` | count + (slot, restriction) pairs |
 | 0x67 | 0x42D570 | `_0x067` | |
@@ -424,11 +424,11 @@ This is what a reimplemented server must **handle**.
 | 0x30 | 0x5029B0 | |
 | 0x31 | 0x5024A0 | |
 | 0x32 | 0x51A600 | burst-member receiver |
-| 0x33 | 0x515230 | next-chunk request (reply to S2C 0x60) |
+| 0x33 | 0x515230 | next-chunk request — labelled reply to S2C 0x60, but NEVER witnessed: the probe2 download streamed without it (D-NET-69); the "re-request" semantic is unverified |
 | 0x34 | 0x5024B0 | |
 | 0x35 | 0x500DF0 | |
 | 0x36 | 0x500E00 | |
-| 0x37 | 0x5152E0 | mission-chunk re-request (reply to S2C 0x64) |
+| 0x37 | 0x5152E0 | mission-chunk re-request — labelled reply to S2C 0x64, but NEVER witnessed (probe2 streamed without it, D-NET-69); semantic unverified |
 | 0x38 | 0x502510 | |
 | 0x39 | 0x500E20 | |
 | 0x3C | 0x519110 | |
@@ -1933,6 +1933,45 @@ gains `test_event_stream`, which crafts an inline `0x1E` kill + C2S `0x06` fire 
 through the shared pipeline and asserts the assembled events (kill source/target/`STRCND04`, fire
 origin/dir/adm, hit world pos = decompress + anchor) and the env snapshot.
 
+### 5.28 Mission delivery to a joiner — streamed, not a bulk file copy (probe2, 2026-06-18)
+
+When a client joins a hosted mission it does NOT have locally, the host does **not** send the raw
+`.bms` as a chunked file with re-requests. The probe2 capture (Team Deathmatch; the joiner ran from
+a separate install lacking `probe2.bms`, so a real download was forced) shows the mission arriving
+as a **streamed sequence**, and the labelled re-request path (C2S `0x33`/`0x37`) never fires
+(D-NET-69):
+
+- **S2C `0x0B`** — the literal 616-byte BMS header (`42 4D 53 13` … mission name … designer), §5.4.
+- **S2C `0x60` — mission ANNOUNCE** `[orig: @ 0x432350]`. 12-byte header then a key/value string
+  table (the VarList encoding the lobby `ClientHostUpdate` also uses): each entry is
+  `{ cstr key, u32 valueLen, value (valueLen bytes incl NUL) }`.
+
+  | off | type | field |
+  |---|---|---|
+  | 0 | u32 | type (=1) |
+  | 4 | u32 | bodyLen (= packet len − 12) |
+  | 8 | u32 | reserved (=0) |
+  | 12 | … | string table — witnessed keys `SERVERNAME` → `"biggy"`, `MISSIONNAME` → `"ON RE Probe TDM Dvxi3"` |
+
+- **S2C `0x64` — mission CHUNK** `[orig: @ 0x432410]`. Same 12-byte header (`type=1`, `bodyLen`,
+  `reserved=0`) then `bodyLen` bytes of an **opaque compact payload** (binary, not plaintext — a
+  compressed/encoded mission sub-resource; the joiner needs the non-entity mission data because the
+  ENTITIES arrive separately as spawn batches). One 180-byte chunk in the probe — the internal codec
+  is deferred to an IDA grill of `0x432410`.
+- **S2C `0x0F`** world-state-load, then the entity **spawn batches** (`0x10` statics, `0x0D` pool-1,
+  `0x0C` organics, `0x20` markers) — the actual world contents.
+
+So the joiner reconstructs the mission from header + announce + one chunk + streamed entity state,
+not from a re-requested raw-file copy. The `0x60`/`0x64` "chunked transfer with C2S `0x33`/`0x37`
+re-requests" descriptions inherited from the reverted stack (§5.8 already flagged them as never
+byte-compared) are corrected here and in §4; this matches the host emit order in §5.2a
+(`Server_SendInitialGameStateToPlayer @ 0x51bba0`), which likewise carries no `0x60`/`0x64`/`0x33`/
+`0x37` chunk train.
+
+**Witness:** `.scratch/probe2.pcapng` — one `0x60` @ f896, one `0x64` @ f899, the `0x0B` header @
+f957, then the `0x10`/`0x0D`/`0x0C`/`0x20` batches. Printed raw by `nw_pp`; the `0x64` payload codec
+is the only deferred piece.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
@@ -2916,6 +2955,12 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-66** [HIGH, FIXED] The replay timeline (§5.25) had **no death/respawn lifecycle** — an entity was one monotonically-accumulating track, so a kill followed by a respawn-elsewhere read as two consecutive samples and `interp_pos` / the viewer's `posAt` **linearly interpolated a glide** from the death spot to the spawn point (the reported "players drift when they die"). This is unfaithful: the engine never interpolates across a death — `Entity_KillBySlotId @ 0x42BCE0` sets the dead flag `Flags & 2`, and the dead→alive transition relocates the entity and calls `Entity_ResetToSpawnState @ 0x4B9610` (a SNAP). The read path gates on this exact bit: `NetPacket_SerializeInfantryEntityState @ 0x4C0320` branches on `flagsByte & 2` (the wire dead/spectator bit), and `NetPacket_SerializePlayerState @ 0x4C09C0` does `test [entity+0x24], 2` → set position directly + `Entity_ResetToSpawnState`. Modeled from BOTH wire signals: the per-record dead bit (S2C `0x0A` compact `flags & 0x02`, set while the ragdoll is broadcast and cleared at the respawn record — empirically brackets victim `0x4`: dead f=1998→2142, respawn snap f=2216) AND the kill stream (S2C `0x26`/`0x4E` — the only signal when a victim drops out of the `0x0A` set, e.g. victim `0x5`: records stop f=1934, killed f=2344, reappears at spawn f=3651). Added `ReplaySample.dead/respawn` + `mark_lifecycle` (flags the dead→alive transition `respawn`, run on the full timeline AND each projected per-participant view); `interp_pos`, the viewer `posAt`, and the trail polyline never bridge a `respawn` sample (hold at the death spot, styled dead, then teleport); `nw_pp` emits `dead`/`respawn`; the previously-missing S2C `0x4E` batch-despawn fold (`decode_batch_kill`) now emits a Kill per slot. CI: `nw_replay_timeline_test::test_death_respawn` (ragdoll path + records-stop path). Non-death disconnect/cull gaps (no kill, no flag — e.g. the `0x46` `0x8000` player-leave / `0x5D` destroy list) remain a separate despawn-channel grill. [orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320 / NetPacket_SerializePlayerState @ 0x4C09C0 / Entity_KillBySlotId @ 0x42BCE0 / Entity_ResetToSpawnState @ 0x4B9610 / NapiNPClientMsg_HandleBatchSpawn @ 0x431870]
 - **D-NET-67** [HIGH, FIXED] Mounted (vehicle-local) `0x0A` compact records were **skipped** in the replay timeline (`frame_record_world_sample` returned false on `is_mounted_parent`), so a passenger/driver/gunner froze at its last on-foot position while the vehicle drove off (the reported "not handling being attached to a vehicle"). The read path instead lifts the record's vehicle-LOCAL position to world: unmounted (`parent == 0xFFFF` / `≥0x5000`) → `pos += anchor`; mounted → `Entity_TransformLocalToWorld(&local, &local, parentEntity+1)` where `parentEntity+1` is the parent's `{x,y,z, yawBAM, pitchBAM, rollBAM}` at entity+4..+24. Ported `Entity_TransformLocalToWorld @ 0x43BD00` as `network_transform_local_to_world` (ingame_decode) — a faithful Euler roll(X)→pitch(Y)→yaw(Z) rotation of the local offset in 22-bit fixed-point (`sin/cos ×2²²`, `imul` + `shrd …,22`, traced from the disassembly's output assignments), then add the parent's world position; the disasm reads angles via `fild` (signed 32-bit BAM). Wired into `build_replay_timeline`: mounted records are deferred (`MountedRec`: vehicle-local offset + parent handle), then `resolve_mounted` lifts each rider once its parent's world track is known — **bottom-up so nested mounts resolve** (a rider on a weapon mount on a vehicle; the seat-local offset on the wire already encodes driver vs passenger vs gunner, so the per-level transform is uniform). The C2S `0x0C` own-player uplink is also vehicle-local when mounted (§5.10), so it's deferred the same way (tagged `ClientUplink` so the owner's projected view keeps it). The rider's world heading = parent yaw + local yaw (`outWorld[3] = ref[3] + local[3]`). **Wire limitation (not a divergence):** the unmounted vehicle record transmits only the parent's yaw (`euler_z`, §5.13); the engine integrates pitch/roll locally and they are not on the wire, so the lift feeds pitch=roll=0. Validated on the medium loopback (players `0x3`/`0x4`/`0x5` ride vehicles `0x1000`–`0x1002` through motion) + CI `nw_replay_timeline_test::test_mount_transform` (exact yaw=0 identity + a crafted rider-on-parent lands exactly at the ported transform). `std::sin/cos` vs the x87 path is a CRT/platform primitive. [orig: Entity_TransformLocalToWorld @ 0x43BD00 (read path @ NetPacket_SerializeInfantryEntityState @ 0x4C0320 / NetPacket_SerializePlayerState @ 0x4C09C0)]
 - **D-NET-68** [DOC, FIXED] **JO has no raw-input (keys/axes/buttons) channel — player movement is state-replicated, and the §5.4 C2S table mislabeled two unrelated tags as one.** A player's client simulates its own movement locally and uploads the *computed pose* (world position 16.16 + heading/pitch/anim) once per frame via C2S `0x0C` extended (§5.10, `PlayerExtendedUplink` — byte-validated client-origin by D-NET-61: the position matched across `.sph` / C2S 0x0C / S2C 0x0A). The host **read-applies** that reported pose — `dispatch_entity_packet_callback @ 0x4D6A80` hardwires `packetCtx[6]=4` (read-apply), stages the position at the smooth-target `entity+0x234` and interpolates the live entity toward it — and validates plausibility (speed/time-sync + weapon tallies); it does **not** re-simulate movement from inputs. So the host is authoritative as the relay/validator/coordinator (canonical world broadcast, vehicles, AI, hit resolution, anti-cheat), **not** as a movement simulator — there are no inputs on the wire to simulate from. Two §5.4 C2S rows that implied a phantom input stream are corrected from decompiling their handlers: (1) `0x08` "entity movement/state delta" → `validate_time_sync @ 0x502210`, an anti-speedhack that checks `[u32 sessionId][u32 gameTimestamp]` deltas stay within 3% of `GetTickCount` wall-clock; (2) `0x0F` "client input frame (movement + buttons; ~33 ms cadence)" → `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`, a `[u16 pool-0/1 handle]` info request whose host serializes that entity's info and broadcasts S2C `0x18` (the fallback spawn-menu "query loop" of pool-1 slots `0x10NN` is this request, not an input frame). **Naming note (no rename):** the C2S 0x0C "player input" terminology — `Player_BuildTag0CInputBody @ 0x42A550`, the reimpl `handle_tag_0c_player_input` — denotes the client's per-frame POSITION/STATE upload, not raw input; left as-is (IDB renames are shared state; "input" is defensible for the per-frame submission), clarified here for the record. **Implication for the runtime client/host split:** a faithful client simulates its own player and emits a `0x0C`-style pose; it does not ship inputs for the host to run. Doc-only — no source change. [orig: validate_time_sync @ 0x502210 / NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180 / dispatch_entity_packet_callback @ 0x4D6A80 / Player_BuildTag0CInputBody @ 0x42A550]
+
+Controlled-capture validation (probe mission "ON RE Probe TDM Dvxi3", probe 2 / Team Deathmatch 0x20000000, host + joiner on a separate install, 2026-06-18):
+- **D-NET-69** [HIGH, DOC] §4 / §5.28 mission delivery corrected. The §4 table described S2C `0x60`/`0x64` as a chunked `.bms` file transfer with C2S `0x33`/`0x37` re-requests (inherited from the reverted stack; §5.8 had already flagged `0x60`/`0x64` as never byte-compared). The probe2 capture — a real download forced by a joiner whose install lacked `probe2.bms` — shows mission delivery is **streamed, not a bulk file copy**: S2C `0x60` = a mission ANNOUNCE (`[u32 type=1][u32 bodyLen][u32 reserved]` + a `SERVERNAME`/`MISSIONNAME` VarList string table), S2C `0x64` = one compact mission CHUNK (same 12-B header + an opaque ~180-B payload), then the S2C `0x0B` literal 616-B BMS header, S2C `0x0F`, and the entity spawn batches (`0x10`/`0x0D`/`0x0C`/`0x20`). The C2S `0x33`/`0x37` re-requests **never fired** — matching the host emit order in §5.2a (no chunk train). Corrected the §4 `0x60`/`0x64`/`0x33`/`0x37` rows + the catalog notes (`0x60` renamed `mission-announce`); landed the §5.28 field map. The `0x64` inner payload codec is deferred to an IDA grill of `0x432410`. [orig: NapiNPClientMsg @ 0x432350 (0x60) / @ 0x432410 (0x64) / Server_SendInitialGameStateToPlayer @ 0x51bba0 (§5.2a emit order)]
+- **D-NET-70** [INFO, VALIDATED] Pool assignment is by entity **capability, not editor "kind"**: purely-static structures (armory, oil pump, oil towers/pipes/docks/tanks) replicate via S2C `0x10` (pool-2 static-entity batch), while destructible / AI-bearing objects (oil-field LFP `0x0135`/`0x0136`, the drivable fuel truck) ride S2C `0x0D` (pool-1) alongside vehicles. Wire-validated against the probe2 `dvxi3_manifest.txt`: every authored type observed on exactly one pool with byte-exact position/team, so the manifest's `wire_tag` column is now wire-confirmed (no re-hypothesis). [orig: NapiNPClientMsg_0x010 @ 0x433400 (pool-2) / NapiNPClientMsg_0x00D @ 0x432C40 (pool-1)]
+- **D-NET-71** [HIGH, FIXED] S2C `0x10` (pool-2 static-entity batch) had the §5.9 field map but **no decoder** — printed raw hex only, so the replay timeline/viewer silently **dropped every static** (the oil pump `Pmpjk01`, both armories, ~70 oil-field decorations were invisible — the reported "why isn't Pmpjk01 showing up"). Ported §5.9 to `decode_static_entity_batch` (`ingame_decode`): header `[u16 startIndex][u16 count]`; per record `[u16 itemTypeId (0 = empty-slot sentinel)][u16 fieldFlags][i32 posX/Y/Z]` + flag-gated vel / sectionMask / team@+354 / parentSlot, **unconditional** `ammoCount` + `weaponByte`, and `attachRef` when `weaponByte != 0 || flags & 0x200`. Wired a `0x10` branch into `build_replay_timeline` (pool-2 handle `(2<<12)|slot`), a `nw_pp` `print_tag_10`, the catalog (`0x10` → Decoded), the coverage gate, and a new `nw_dvxi3_groundtruth_test` asserting every authored static. Byte-exact full-consume on all 4 capture batches; the replay JSON went **31 → 106 entities** (75 statics surfaced). Also landed the already-documented player decoders `decode_player_list` (§5.20) / `decode_player_sync` (§5.21) — catalog → Decoded, byte-exact on the capture (TestPlayer → handle `0x0004`, FooPlayer → `0x0005`). [orig: NapiNPClientMsg_0x010 @ 0x433400 / NapiNPClientMsg_PlayerList @ 0x42FAE0 / NapiNPClientMsg_PlayerSync @ 0x431370]
+- **D-NET-72** [OPEN] Tags present in the probe2 capture but still uncharacterized (dispatch-table one-liners, no field map) — deferred to an IDA-witnessing pass: S2C `0x5A` weapon-loadout (`0x4290E0`), `0x6E` team/squad roster (`0x429880`), `0x7B` full-player-info (`0x429BB0`); C2S burst replies `0x22`/`0x23`/`0x28`/`0x29` (`0x514C90`/`0x514D50`/`0x51A550`/`0x514F10`) and `0x4C` (`0x5111B0`); plus the S2C `0x0F` world-state-load body (`0x42E200`, ~624 B, now witnessed but not field-mapped) and the S2C `0x64` mission-chunk inner codec (`0x432410`). All decode/print cleanly at the framing layer; only their bodies are unmapped. [orig: addresses inline]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

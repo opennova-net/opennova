@@ -223,6 +223,72 @@ int check_S_4E_batch_kill() {
 	return 0;
 }
 
+// S2C 0x10 — static-entity batch: [u16 startIdx][u16 count] + one record with
+// flags=team-only, exercising the unconditional ammo/weapon bytes and the
+// no-attachRef path (weaponByte==0 && !(flags & 0x200)).
+int check_S_10_static_entity() {
+	LE w;
+	w.u16(0);          // start_index
+	w.u16(1);          // entity_count
+	w.u16(0x0465);     // item_type_id (armory; non-zero, not the empty-slot sentinel)
+	w.u16(0x0010);     // field_flags -> team present only
+	w.u32(0xFFAC0000); w.u32(0x00010000); w.u32(0x00180000); // pos x/y/z
+	w.u8(0x01);        // team (flags & 0x10)
+	w.u8(0x00);        // ammo_count (unconditional)
+	w.u8(0x00);        // weapon_byte (unconditional); 0 && no 0x200 -> no attach_ref
+	EXPECT(w.b.size() == 23);
+	StaticEntityBatch out;
+	EXPECT(decode_static_entity_batch(w.b.data(), w.b.size(), out));
+	EXPECT(out.records.size() == 1);
+	EXPECT(out.records[0].item_type_id == 0x0465);
+	EXPECT(out.records[0].team_byte == 0x01);
+	cover('S', 0x10);
+	return 0;
+}
+
+// S2C 0x16 — player-list: header + 1 player row + team_count=1 (2 team rows) + trailer.
+int check_S_16_player_list() {
+	LE w;
+	w.u8(8);            // max_players
+	w.u8(1);            // player_count
+	w.u8(0x00);         // row: slot_id
+	w.u16(0);           //      ping
+	w.u16(10);          //      score1
+	w.u16(20);          //      score2
+	w.u8(0x02);         //      flags -> team1
+	w.u8(1);            // team_count -> 2 team rows (T0 + T1)
+	for (int i = 0; i < 2; ++i) { w.u16(0); w.u16(0); w.u8(0); w.u8(0); }
+	w.u8(0); w.u8(0);   // trailer extra1/extra2
+	EXPECT(w.b.size() == 25);
+	PlayerList out;
+	EXPECT(decode_player_list(w.b.data(), w.b.size(), out));
+	EXPECT(out.players.size() == 1);
+	EXPECT(out.teams.size() == 2);
+	EXPECT(out.players[0].flags == 0x02);
+	cover('S', 0x16);
+	return 0;
+}
+
+// S2C 0x46 — player-sync: name(0x0001) + team(0x0004) + ack(0x4000), source order.
+int check_S_46_player_sync() {
+	LE w;
+	w.u8(0x01);         // slot_id
+	w.u16(0x4005);      // bitmask: name | team | ack
+	w.u8(0x05);         // entity_slot_id
+	w.u8('P'); w.u8(0); // name cstr "P"
+	w.u8(0x02);         // team
+	EXPECT(w.b.size() == 7);
+	PlayerSync out;
+	EXPECT(decode_player_sync(w.b.data(), w.b.size(), out));
+	EXPECT(!out.removal);
+	EXPECT(out.entity_slot_id == 0x05);
+	EXPECT(out.name == "P");
+	EXPECT(out.team == 0x02);
+	EXPECT(out.queue_ack);
+	cover('S', 0x46);
+	return 0;
+}
+
 // C2S 0x0C — extended player uplink body: fixed 43 B.
 int check_C_0C_extended_uplink() {
 	LE w;
@@ -291,6 +357,9 @@ int main() {
 	if (check_S_1E_game_event()) return 1;
 	if (check_S_26_kill()) return 1;
 	if (check_S_4E_batch_kill()) return 1;
+	if (check_S_10_static_entity()) return 1;
+	if (check_S_16_player_list()) return 1;
+	if (check_S_46_player_sync()) return 1;
 	if (check_C_0C_extended_uplink()) return 1;
 	if (check_C_06_fired_round()) return 1;
 	if (check_C_21_checksum_reply()) return 1;

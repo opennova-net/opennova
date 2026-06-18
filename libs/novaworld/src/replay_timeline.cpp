@@ -356,6 +356,30 @@ ReplayTimeline build_replay_timeline(
 				s.has_heading = true;
 				b.set_spawn(e, s, 0x0C);
 			}
+		} else if (m.dir == 'S' && m.tag == 0x10) {
+			// Pool-2 static-entity batch (armory, oil pump, static decorations).
+			// Like 0x20 the handle is synthesized from the slot index; pure
+			// statics carry no motion, only the spawn pose.
+			StaticEntityBatch batch;
+			decode_static_entity_batch(m.payload.data(), m.payload.size(), batch);
+			for (size_t i = 0; i < batch.records.size(); ++i) {
+				const auto &r = batch.records[i];
+				if (r.is_empty_slot) continue;
+				const uint16_t slot = uint16_t(batch.start_index + i);
+				const uint16_t handle = uint16_t((2u << 12) | (slot & 0x0FFF));
+				ReplayEntity &e = b.get(handle, r.item_type_id);
+				e.type_id = r.item_type_id;
+				if (r.field_flags & 0x0010) {
+					e.team = r.team_byte;
+					e.team_known = true;
+				}
+				ReplaySample s;
+				s.frame_index = m.frame_index;
+				s.x = r.pos_x;
+				s.y = r.pos_y;
+				s.z = r.pos_z;
+				b.set_spawn(e, s, 0x10);
+			}
 		} else if (m.dir == 'C' && m.tag == 0x0C) {
 			// Joiner's own-player uplink — the clean per-frame motion source.
 			// Only the extended (type-10) sub_op carries world positions.
