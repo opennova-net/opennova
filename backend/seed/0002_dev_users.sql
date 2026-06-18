@@ -31,8 +31,61 @@ VALUES
      '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
      '00000006', '1', 'TestPlayer3');
 
+-- Repair existing development DBs too. Earlier seed versions used
+-- INSERT OR IGNORE only, so a stale row (for example foo with an empty
+-- nwhandle) would survive every server boot and yield blank in-game names.
+UPDATE players SET
+    password_hash = '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+    pcid = '00000002',
+    nwh = '1',
+    nwhandle = 'TestPlayer',
+    account_status = 'active'
+WHERE username = 'test';
+
+UPDATE players SET
+    password_hash = '$2b$10$M0sIsGDx7nXPWw9toIMIa.2RxXZm39nROt2kjsoyi9QUN9Q7x2SIC',
+    pcid = '00000003',
+    nwh = '1',
+    nwhandle = 'FooPlayer',
+    account_status = 'active'
+WHERE username = 'foo';
+
+UPDATE players SET
+    password_hash = '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+    pcid = '00000004',
+    nwh = '1',
+    nwhandle = 'TestPlayer1',
+    account_status = 'active'
+WHERE username = 'test1';
+
+UPDATE players SET
+    password_hash = '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+    pcid = '00000005',
+    nwh = '1',
+    nwhandle = 'TestPlayer2',
+    account_status = 'active'
+WHERE username = 'test2';
+
+UPDATE players SET
+    password_hash = '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
+    pcid = '00000006',
+    nwh = '1',
+    nwhandle = 'TestPlayer3',
+    account_status = 'active'
+WHERE username = 'test3';
+
 INSERT OR IGNORE INTO player_game_access (user_id, game_slug, status, exp_bits)
 SELECT p.id, g.slug, 'active', g.exp_bits
 FROM players p
 JOIN games g ON g.slug = 'jop_2_consumer'
 WHERE p.username IN ('test', 'foo', 'test1', 'test2', 'test3');
+
+UPDATE player_game_access
+SET status = 'active',
+    exp_bits = (SELECT exp_bits FROM games WHERE slug = 'jop_2_consumer'),
+    updated_at = CURRENT_TIMESTAMP
+WHERE game_slug = 'jop_2_consumer'
+  AND user_id IN (
+      SELECT id FROM players
+      WHERE username IN ('test', 'foo', 'test1', 'test2', 'test3')
+  );

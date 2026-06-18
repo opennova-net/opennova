@@ -72,6 +72,40 @@ bool serialize_round_trip() {
 	return true;
 }
 
+bool malformed_epask_string_is_atoi_tolerant() {
+	const auto missing = opennova::epask_from_string("not-a-number");
+	if (missing.exponent != 0 || missing.modulus != 0 || !missing.key.empty()) {
+		std::fprintf(stderr, "FAIL: malformed EPASK without colons should parse as zeros\n");
+		return false;
+	}
+	const auto partial = opennova::epask_from_string("123abc: 456xyz:key-tail");
+	if (partial.exponent != 123 || partial.modulus != 456 || partial.key != "key-tail") {
+		std::fprintf(stderr, "FAIL: EPASK fields should use atoi-style prefixes\n");
+		return false;
+	}
+	const auto empty_numeric = opennova::epask_from_string(":bad:key");
+	if (empty_numeric.exponent != 0 || empty_numeric.modulus != 0 || empty_numeric.key != "key") {
+		std::fprintf(stderr, "FAIL: empty/non-numeric EPASK fields should parse as zero\n");
+		return false;
+	}
+	return true;
+}
+
+bool encrypt_truncates_at_first_nul() {
+	opennova::EpaskParams params;
+	params.exponent = 10001;
+	params.modulus  = 207887;
+	params.key      = "1700000000000000001";
+
+	const std::string with_tail("abc\0def", 7);
+	const std::string ct = opennova::epask_encrypt(with_tail, params);
+	if (!expect_eq(ct, opennova::epask_encrypt("abc", params),
+	               "encrypt truncates at first NUL")) return false;
+	if (!expect_eq(opennova::epask_decrypt(ct, params), "abc",
+	               "NUL-truncated ciphertext decrypts to prefix")) return false;
+	return true;
+}
+
 bool generate_yields_valid_params() {
 	auto params = opennova::generate_epask();
 	if (params.modulus <= 200000u || params.modulus >= 300000u) {
@@ -121,6 +155,8 @@ int main() {
 	bool ok = true;
 	ok = fixtures_match_python()      && ok;
 	ok = serialize_round_trip()       && ok;
+	ok = malformed_epask_string_is_atoi_tolerant() && ok;
+	ok = encrypt_truncates_at_first_nul() && ok;
 	ok = generate_yields_valid_params() && ok;
 	ok = malformed_inputs_throw()     && ok;
 	if (!ok) {

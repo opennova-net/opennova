@@ -4,8 +4,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <random>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace opennova {
@@ -126,6 +128,11 @@ std::vector<uint8_t> modexp_encrypt(const std::vector<uint8_t> &data,
 	return out;
 }
 
+uint32_t atoi64_u32(std::string_view s) {
+	const std::string owned(s);
+	return static_cast<uint32_t>(std::strtoll(owned.c_str(), nullptr, 10));
+}
+
 } // namespace
 
 EpaskParams generate_epask() {
@@ -181,20 +188,18 @@ std::string epask_to_string(const EpaskParams &p) {
 // [orig: parse_colon_delimited_string @ 0x666710 (retail) — splits 'exp:mod:key']
 EpaskParams epask_from_string(const std::string &s) {
 	const auto first = s.find(':');
+	EpaskParams p;
 	if (first == std::string::npos) {
-		throw std::runtime_error("EPASK string missing first ':'");
+		p.exponent = atoi64_u32(s);
+		return p;
 	}
 	const auto second = s.find(':', first + 1);
+	p.exponent = atoi64_u32(std::string_view{s}.substr(0, first));
 	if (second == std::string::npos) {
-		throw std::runtime_error("EPASK string missing second ':'");
+		p.modulus = atoi64_u32(std::string_view{s}.substr(first + 1));
+		return p;
 	}
-	EpaskParams p;
-	try {
-		p.exponent = static_cast<uint32_t>(std::stoul(s.substr(0, first)));
-		p.modulus  = static_cast<uint32_t>(std::stoul(s.substr(first + 1, second - first - 1)));
-	} catch (const std::exception &) {
-		throw std::runtime_error("EPASK string has non-numeric exponent/modulus");
-	}
+	p.modulus = atoi64_u32(std::string_view{s}.substr(first + 1, second - first - 1));
 	p.key = s.substr(second + 1);
 	return p;
 }
@@ -228,7 +233,9 @@ std::string epask_encrypt(const std::string &plaintext, const EpaskParams &param
 	//   step3 = nwu_encrypt(step2, key)
 	//   return epask_encode_nibbles(step3)
 	// Swap: onnet's nwu_encrypt == our nwu_decrypt.
-	std::vector<uint8_t> step1(plaintext.begin(), plaintext.end());
+	const size_t nul = plaintext.find('\0');
+	const size_t plaintext_len = (nul == std::string::npos) ? plaintext.size() : nul;
+	std::vector<uint8_t> step1(plaintext.begin(), plaintext.begin() + plaintext_len);
 	if (!step1.empty()) nwu_decrypt(step1.data(), step1.size(), params.key);
 	auto step2 = modexp_encrypt(step1, params.exponent, params.modulus);
 	if (!step2.empty()) nwu_decrypt(step2.data(), step2.size(), params.key);

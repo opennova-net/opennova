@@ -1050,15 +1050,15 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 			enter_state(STATE_CONNECTED);
 			return;
 		}
-		int port = std::atoi(conn.np.c_str());
+		int port = std::atoi(conn.host_port.c_str());
 		if (port <= 0 || port > 65535) {
 			emit_signal("error_occurred", String("join: bad host port"));
 			enter_state(STATE_CONNECTED);
 			return;
 		}
 		UtilityFunctions::print(String("[NovaWorldClient] join resolved host ")
-			+ String(conn.ni.c_str()) + ":" + String(conn.np.c_str()));
-		send_jointops_hello(String(conn.ni.c_str()), static_cast<uint16_t>(port));
+			+ String(conn.host_ip.c_str()) + ":" + String(conn.host_port.c_str()));
+		send_jointops_hello(String(conn.host_ip.c_str()), static_cast<uint16_t>(port));
 		break;
 	}
 	default:

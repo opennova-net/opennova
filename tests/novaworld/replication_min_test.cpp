@@ -1,4 +1,5 @@
 #include <novaworld/replication_min.h>
+#include <novaworld/ingame_decode.h>
 
 #include <cstdio>
 #include <cstring>
@@ -285,6 +286,25 @@ bool check_tag_40_capture_zone_state_layout() {
 	return true;
 }
 
+bool check_tag_0d_spawn_points_decode_alignment() {
+	std::vector<opennova::SpawnPointEntity> points = {
+		{1, 49, 1359, 1, 10699725, 312269, 3011838},
+		{1, 50, 1359, 2, -20319450, -4849379, 4066280},
+	};
+	const auto buf = opennova::build_tag_0d_spawn_points(points);
+	opennova::PoolSpawnBatch decoded;
+	if (!expect(opennova::decode_pool_spawn_batch(buf.data(), buf.size(), decoded),
+			"tag=0x0D spawn-point batch decodes without leftover/misalignment")) return false;
+	if (!expect(decoded.records.size() == 2, "two spawn-point records decoded")) return false;
+	if (!expect(decoded.records[0].spawn_flags == 0x0030, "record 0 flags = team|entity36")) return false;
+	if (!expect(decoded.records[0].slot_id == 0x1031, "record 0 pool/slot")) return false;
+	if (!expect(decoded.records[0].team_byte == 1, "record 0 team")) return false;
+	if (!expect(decoded.records[0].bone_byte == 0, "record 0 bone byte")) return false;
+	if (!expect(decoded.records[1].slot_id == 0x1032, "record 1 stays aligned")) return false;
+	if (!expect(decoded.records[1].team_byte == 2, "record 1 team")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -302,6 +322,7 @@ int main() {
 	ok = check_tag_1e_game_event_post_spawn_layout() && ok;
 	ok = check_long_name_truncation() && ok;
 	ok = check_tag_40_capture_zone_state_layout() && ok;
+	ok = check_tag_0d_spawn_points_decode_alignment() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

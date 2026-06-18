@@ -133,6 +133,7 @@ int main() {
 		    "YOURIP=203.0.113.7",
 		    "LOGINSESSIONTAG=NWServer:NWLogin.dll:SESSIONTAG:42:deadbeef; Path=/; HttpOnly",
 		    "NWHANDLE=TestPlayer; Path=/",
+		    "CHAR=TestPlayer; Path=/",
 		    "PCID=00000002; Expires=Wed, 09 Jun 2027 10:18:14 GMT",
 		    "EXPBITS=3",
 		};
@@ -141,6 +142,7 @@ int main() {
 		for (const auto &kv : parsed) by_name[kv.first] = kv.second;
 
 		check(by_name["NWHANDLE"] == "TestPlayer", "NWHANDLE parsed without attributes");
+		check(by_name["CHAR"] == "TestPlayer", "CHAR parsed without attributes");
 		check(by_name["PCID"] == "00000002", "PCID parsed, Expires attribute dropped");
 		check(by_name["LOGINSESSIONTAG"] == "NWServer:NWLogin.dll:SESSIONTAG:42:deadbeef",
 		      "LOGINSESSIONTAG keeps its colons, drops Path/HttpOnly");
@@ -151,6 +153,8 @@ int main() {
 		jar.merge_set_cookie_values(set_cookies);
 		check(jar.find("NWHANDLE") != nullptr && *jar.find("NWHANDLE") == "TestPlayer",
 		      "jar stores NWHANDLE");
+		check(jar.find("CHAR") != nullptr && *jar.find("CHAR") == "TestPlayer",
+		      "jar stores CHAR");
 		check(jar.find("PCID") != nullptr && *jar.find("PCID") == "00000002",
 		      "jar stores PCID");
 

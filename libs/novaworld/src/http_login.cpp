@@ -1,6 +1,7 @@
 #include <novaworld/http_login.h>
 
 #include <novacrypto/epask.h>
+#include <novacrypto/url_cipher.h>
 
 namespace opennova {
 
@@ -101,7 +102,19 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 		if (amp == std::string::npos) break;
 		pos = amp + 1;
 	}
-	out.ok = !out.ni.empty() && !out.np.empty();
+	if (!out.nk.empty()) {
+		const std::string decoded = url_cipher_decode(out.nk, URL_CIPHER_KEY_NK);
+		const size_t colon = decoded.find(':');
+		if (colon != std::string::npos) {
+			out.host_ip = decoded.substr(0, colon);
+			out.host_port = decoded.substr(colon + 1);
+		} else {
+			out.host_ip = decoded;
+		}
+	}
+	if (out.host_ip.empty()) out.host_ip = out.ni;
+	if (out.host_port.empty()) out.host_port = out.np;
+	out.ok = !out.host_ip.empty() && !out.host_port.empty();
 	return out;
 }
 

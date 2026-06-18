@@ -16,10 +16,10 @@ namespace opennova {
 // path (see gate_response.cpp):
 //
 //   POSTIPADDRESS        -> post_ip (dotted-quad -> 4 bytes)        REQUIRED
-//   POSTIPPORT           -> post_port (decimal uint16)             REQUIRED
+//   POSTIPPORT           -> post_port (decimal uint32)             REQUIRED
 //   LOBBYNAME            -> lobby_name (string)
 //   METIPADDRESS         -> met_ip (stored as string; used as-is by client)
-//   METIPPORT            -> met_port (decimal uint16)
+//   METIPPORT            -> met_port (decimal uint32)
 //   METLABEL             -> met_label (string)
 //   METPING              -> met_ping (decimal int)
 //   METEXT               -> met_ext (decimal int)
@@ -28,7 +28,7 @@ namespace opennova {
 //   UDPCODE1             -> udp_code1 (string, int as text)
 //   UDPCODE2             -> udp_code2 (string, int as text)
 //   REFLECTEDIPADDRESS   -> reflected_ip (dotted-quad -> 4 bytes)
-//   REFLECTEDPORTNUMBER  -> reflected_port (decimal uint16)
+//   REFLECTEDPORTNUMBER  -> reflected_port (decimal uint32)
 //   USEJUNCTION          -> use_junction (decimal int; relay/junction flag)
 //   CLEARJUNCTION        -> clear_junction (decimal int)
 //   GLSVSSREQUEST        -> glsvss_request (string; briefing-server request)
@@ -54,12 +54,12 @@ namespace opennova {
 struct GateResponse {
 	// IPv4 addresses in NETWORK byte order (0xXXYYZZWW where X.Y.Z.W).
 	std::array<uint8_t, 4> post_ip{0, 0, 0, 0};
-	uint16_t post_port = 0;
+	uint32_t post_port = 0;
 
 	std::string lobby_name;
 
 	std::string met_ip;
-	uint16_t met_port = 0;
+	uint32_t met_port = 0;
 	std::string met_label;
 	int met_ping = 0;
 	int met_ext = 0;
@@ -70,7 +70,7 @@ struct GateResponse {
 	std::string udp_code2;
 
 	std::array<uint8_t, 4> reflected_ip{0, 0, 0, 0};
-	uint16_t reflected_port = 0;
+	uint32_t reflected_port = 0;
 
 	int use_junction = 0;
 	int clear_junction = 0;
@@ -78,7 +78,8 @@ struct GateResponse {
 	int glsvss_rims = 0;
 	int glsvss_agrms = 0;
 
-	// Not in retail JO:CA's ProcessResponse; tolerant extras (see header note).
+	// Not in retail JO:CA's ProcessResponse. Retained only so old callers still
+	// compile; the parser leaves them empty while counting the VAR lines.
 	std::string cus;
 	std::string pvt;
 

@@ -1,5 +1,6 @@
 #include <novaworld/game_session.h>
 
+#include <novaworld/ingame_decode.h>
 #include <novaworld/retail_blobs.h>
 #include <novaworld/retail_loading_blobs.h>
 
@@ -187,6 +188,12 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameSessionConfig &cfg) {
 	append_u32_le(payload, cfg.gametype);
 	payload.push_back(0);
 	append_cstr(payload, cfg.expansion);
+	return payload;
+}
+
+std::vector<uint8_t> build_tag7a_player_name(const GameSessionConfig &cfg) {
+	std::vector<uint8_t> payload;
+	append_cstr(payload, cfg.player_name);
 	return payload;
 }
 
@@ -711,8 +718,7 @@ void handle_tag_02_post_handshake(InboundTagContext &ctx) {
 	add_tag00_handshake(ctx.result, 0);
 	add_tag00_handshake(ctx.result, 1);
 	add_reply(ctx.result, 0x01, {0x01, 0x00, 0x00, 0x00});
-	add_reply(ctx.result, 0x7A, std::vector<uint8_t>{
-			'D', 'E', 'V', '-', 'A', '0', '2', '-', '0', '0', '0', '1', 0});
+	add_reply(ctx.result, 0x7A, build_tag7a_player_name(ctx.config));
 	add_reply(ctx.result, 0x7B, build_tag7b_session_summary(ctx.config));
 	add_reply(ctx.result, 0x03, {0x01, 0x01, 0x00, 0x01, 0x00});
 	add_reply(ctx.result, 0x05, {0x01});
@@ -856,16 +862,31 @@ void handle_tag_2f_loadout_request(InboundTagContext &ctx) {
 }
 
 // Retail server tag 0x0C = `NapiNPServerMsg_0x00C @ 0x501C30`. Player-input
-// frame; client sends position+orientation+button state at ~30Hz. We snapshot
-// the position fields (offsets 7/11/15 = X/Y/Z u32 LE per observation) so
-// the snapshot exposes client_pos for diagnostics.
+// frame; client sends the 5-byte entity packet sub-header followed by a
+// type-10 extended player uplink body. Use the shared decoder so this path
+// stays aligned with the byte-witnessed C2S parser.
 void handle_tag_0c_player_input(InboundTagContext &ctx,
                                 const std::vector<uint8_t> &payload) {
-	if (payload.size() >= 19) {
-		ctx.state.client_pos_x = read_u32_le(payload.data() + 7);
-		ctx.state.client_pos_y = read_u32_le(payload.data() + 11);
-		ctx.state.client_pos_z = read_u32_le(payload.data() + 15);
-		ctx.state.client_pos_valid = true;
+	EntityPacketSubHeader hdr;
+	size_t header_consumed = 0;
+	if (decode_entity_packet_sub_header(payload.data(), payload.size(), hdr, header_consumed) &&
+	    hdr.sub_op == 0x0A) {
+		PlayerExtendedUplink uplink;
+		size_t body_consumed = 0;
+		if (decode_player_extended_uplink(payload.data() + header_consumed,
+		                                  payload.size() - header_consumed,
+		                                  uplink, body_consumed) &&
+		    header_consumed + body_consumed == payload.size()) {
+			ctx.state.client_entity_handle = hdr.handle;
+			ctx.state.client_item_type_id = hdr.item_type_id;
+			ctx.state.client_vehicle_handle = uplink.vehicle_handle;
+			ctx.state.client_pos_x = static_cast<uint32_t>(uplink.pos_x);
+			ctx.state.client_pos_y = static_cast<uint32_t>(uplink.pos_y);
+			ctx.state.client_pos_z = static_cast<uint32_t>(uplink.pos_z);
+			ctx.state.client_heading = uplink.heading;
+			ctx.state.client_pitch = uplink.pitch;
+			ctx.state.client_pos_valid = true;
+		}
 	}
 	ctx.result.label = "in-game 0x0C player input consumed";
 }

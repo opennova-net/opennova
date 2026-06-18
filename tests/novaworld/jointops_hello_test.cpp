@@ -7,9 +7,9 @@
 // from the lobby GUID. The default (NOVAWORLDUDP) hello is unchanged — the
 // per-PN PG selector must not regress the lobby path.
 //
-// PG/PV1 for JointOperations are PROVISIONAL pending the StartPlaying @ 0x4d45e0
-// grill; this test pins the provisional placeholder so a later real-GUID change
-// is a deliberate, visible edit here.
+// PG for JointOperations is PROVISIONAL pending the StartPlaying @ 0x4d45e0
+// grill. PV1 is witnessed separately and must differ from the NOVAWORLDUDP
+// lobby PV1.
 
 #include <novaworld/client_session.h>
 #include <novaworld/session_hello.h>
@@ -65,6 +65,7 @@ int main() {
 	ClientHello jo_hello;
 	check(decode_hello(jo.start(), jo_hello), "JO hello decodes");
 	check(jo_hello.pn == "JointOperations", "JO hello PN == JointOperations");
+	check(jo_hello.pv1 == "0.0.0 1/12/2004 EM", "JO hello PV1 == game protocol date");
 	check(jo_hello.pg_present, "JO hello carries PG");
 	check(jo_hello.pg == kProvisionalJoPg, "JO hello PG == provisional JO GUID");
 
@@ -73,6 +74,7 @@ int main() {
 	ClientHello nw_hello;
 	check(decode_hello(nw.start(), nw_hello), "NOVAWORLDUDP hello decodes");
 	check(nw_hello.pn == "NOVAWORLDUDP", "default hello PN == NOVAWORLDUDP");
+	check(nw_hello.pv1 == "0.0.0 2/10/2004 EM", "default hello PV1 unchanged");
 	check(nw_hello.pg == (std::array<uint8_t, 16>{
 	          0xF2, 0x0C, 0xEE, 0xD8, 0xCE, 0xE4, 0x8D, 0x44,
 	          0x90, 0xB4, 0x1D, 0x42, 0xB3, 0x64, 0xAB, 0x71}),

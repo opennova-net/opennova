@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <iterator>
+#include <string>
 #include <vector>
 
 namespace {
@@ -34,6 +35,30 @@ int count_tag(const std::vector<opennova::ProtocolMessage> &messages, uint8_t ta
 	return count;
 }
 
+std::string read_cstr(const std::vector<uint8_t> &payload, size_t offset = 0) {
+	std::string out;
+	for (size_t i = offset; i < payload.size() && payload[i] != 0; ++i) {
+		out.push_back(static_cast<char>(payload[i]));
+	}
+	return out;
+}
+
+void push_u8(std::vector<uint8_t> &buf, uint8_t v) {
+	buf.push_back(v);
+}
+
+void push_u16(std::vector<uint8_t> &buf, uint16_t v) {
+	buf.push_back(static_cast<uint8_t>(v & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+}
+
+void push_u32(std::vector<uint8_t> &buf, uint32_t v) {
+	buf.push_back(static_cast<uint8_t>(v & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
+	buf.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
+}
+
 std::vector<opennova::ProtocolMessage> drain_queued(opennova::GameSession &session,
                                                     opennova::GameSessionState &state) {
 	std::vector<opennova::ProtocolMessage> out;
@@ -47,7 +72,9 @@ std::vector<opennova::ProtocolMessage> drain_queued(opennova::GameSession &sessi
 }
 
 bool check_post_handshake_burst() {
-	opennova::GameSession session;
+	opennova::GameSessionConfig config;
+	config.player_name = "FooPlayer";
+	opennova::GameSession session(config);
 	opennova::GameSessionState state;
 	std::vector<opennova::ProtocolMessage> incoming = {
 			opennova::make_protocol_message(0x02, std::vector<uint8_t>(256, 0)),
@@ -58,8 +85,14 @@ bool check_post_handshake_burst() {
 			"first reply is custom tag=0x00 ack")) return false;
 	if (!expect(result.replies[1].tag == 0x00 && result.replies[1].payload[0] == 1,
 			"second custom ack has idx=1")) return false;
-	if (!expect(find_tag(result.replies, 0x7A) >= 0, "player handle tag=0x7A present")) return false;
-	if (!expect(find_tag(result.replies, 0x7B) >= 0, "session summary tag=0x7B present")) return false;
+	const int tag7a = find_tag(result.replies, 0x7A);
+	if (!expect(tag7a >= 0, "player handle tag=0x7A present")) return false;
+	if (!expect(read_cstr(result.replies[static_cast<size_t>(tag7a)].payload) == "FooPlayer",
+			"player handle tag=0x7A carries configured player name")) return false;
+	const int tag7b = find_tag(result.replies, 0x7B);
+	if (!expect(tag7b >= 0, "session summary tag=0x7B present")) return false;
+	if (!expect(read_cstr(result.replies[static_cast<size_t>(tag7b)].payload) == "FooPlayer",
+			"session summary tag=0x7B starts with configured player name")) return false;
 	return true;
 }
 
@@ -481,11 +514,17 @@ bool check_tick_emits_entity_batch_and_world_reference() {
 bool check_client_position_is_state_only() {
 	opennova::GameSession session;
 	opennova::GameSessionState state;
-	std::vector<uint8_t> payload(19, 0);
-	payload[7] = 0x44;
-	payload[8] = 0x33;
-	payload[9] = 0x22;
-	payload[10] = 0x11;
+	std::vector<uint8_t> payload;
+	push_u16(payload, 0x0003);     // entity handle
+	push_u16(payload, 0x14B9);     // player item type
+	push_u8(payload, 0x0A);        // extended uplink
+	push_u16(payload, 0x2222);     // vehicle handle
+	push_u32(payload, 0x11223344); // x
+	push_u32(payload, 0x55667788); // y
+	push_u32(payload, 0x99AABBCC); // z
+	push_u16(payload, 0x1234);     // heading
+	push_u16(payload, 0x5678);     // pitch
+	for (int i = 0; i < 25; ++i) push_u8(payload, 0);
 	std::vector<opennova::ProtocolMessage> incoming = {
 			opennova::make_protocol_message(0x0C, payload),
 	};
@@ -493,6 +532,19 @@ bool check_client_position_is_state_only() {
 	if (!expect(result.replies.empty(), "client input has no immediate reply")) return false;
 	if (!expect(state.client_pos_valid, "client position marked valid")) return false;
 	if (!expect(state.client_pos_x == 0x11223344u, "client X cached")) return false;
+	if (!expect(state.client_pos_y == 0x55667788u, "client Y cached")) return false;
+	if (!expect(state.client_pos_z == 0x99AABBCCu, "client Z cached")) return false;
+	if (!expect(state.client_entity_handle == 0x0003u, "client entity handle cached")) return false;
+	if (!expect(state.client_item_type_id == 0x14B9u, "client item type cached")) return false;
+	if (!expect(state.client_vehicle_handle == 0x2222u, "client vehicle handle cached")) return false;
+	if (!expect(state.client_heading == 0x1234, "client heading cached")) return false;
+	if (!expect(state.client_pitch == 0x5678, "client pitch cached")) return false;
+
+	opennova::GameSessionState compact_state;
+	payload[4] = 0x0B; // compact sub-op; do not treat as extended position.
+	session.handle_messages(compact_state, {opennova::make_protocol_message(0x0C, payload)}, 0);
+	if (!expect(!compact_state.client_pos_valid,
+			"compact 0x0C body is not misparsed as extended uplink")) return false;
 	return true;
 }
 

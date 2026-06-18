@@ -51,7 +51,7 @@ public:
 	struct Config {
 		uint32_t client_index = 1;   // ci — caller-chosen (binding: random)
 		uint32_t client_key = 1;     // ck — caller-chosen (binding: random)
-		std::string na = "jop:cus2"; // gate tag echo (memory reference_gate_tags)
+		std::string na = "jop:cus2"; // gate/game tag echoed in ClientAuth NA
 
 		// ClientHello identity. The real NovaWorld server VALIDATES four fields
 		// in HandleClientHello @ 0x6213B0 and silently drops the ClientHello
@@ -113,7 +113,7 @@ public:
 		// Preset for the in-match game session: the ClientHello the client sends
 		// to a host after NWJoin, which flips the connection protocol from the
 		// lobby (NOVAWORLDUDP) to the game (JointOperations). PN/PV1/PG are the
-		// JointOperations identity. NOTE: PG/PV1 are PROVISIONAL pending the
+		// JointOperations identity. NOTE: PG is PROVISIONAL pending the
 		// StartPlaying @ 0x4d45e0 grill — sufficient to cross the proto boundary
 		// (our server rejects on PN alone) but not yet retail-valid for a real
 		// host. See docs/adr/0010 + docs/net/novaworld-net-re.md.

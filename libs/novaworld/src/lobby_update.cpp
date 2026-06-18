@@ -1,16 +1,50 @@
 #include <novaworld/lobby_update.h>
 
 #include <cstdio>
-#include <cstring>
+#include <string_view>
 
 namespace opennova {
 
 namespace {
 
-// Append "<lead>key = value" to `out`. Matches the binary's
-// sprintf(&v81[strlen(v81)], " %s = %s", key, value) pattern inside the
-// delete-path blob builder, which is reused for update-path packets too.
-void append_kv(std::string &out, const char *key, const std::string &value) {
+std::string sanitize_lobby_value(std::string_view value) {
+	if (value.empty()) {
+		return "---";
+	}
+	std::string out(value);
+	for (char &ch : out) {
+		if (ch == ' ' || ch == '?' || ch == '@' || ch == '=') {
+			ch = '+';
+		}
+	}
+	return out;
+}
+
+std::string itoa(int v) {
+	char buf[32];
+	std::snprintf(buf, sizeof(buf), "%d", v);
+	return std::string(buf);
+}
+
+std::string yn(bool v) {
+	return v ? "Y" : "N";
+}
+
+void append_kv(std::string &out, std::string_view key, std::string_view value) {
+	out += ' ';
+	out += sanitize_lobby_value(key);
+	out += " = ";
+	out += sanitize_lobby_value(value);
+}
+
+void append_kv_raw_key(std::string &out, std::string_view key, std::string_view value) {
+	out += ' ';
+	out += key;
+	out += " = ";
+	out += sanitize_lobby_value(value);
+}
+
+void append_kv_literal(std::string &out, std::string_view key, std::string_view value) {
 	out += ' ';
 	out += key;
 	out += " = ";
@@ -19,73 +53,62 @@ void append_kv(std::string &out, const char *key, const std::string &value) {
 
 } // namespace
 
-std::string lobby_update_build(const LobbyServerInfo &info, bool is_delete) {
-	// Blob starts with "<lobbyName> " and immediately "HostKey = <key>"
-	// (the only key NOT prefixed with a space in the original, since it's
-	// the first pair after the LobbyName prefix).
+std::string lobby_update_build(const LobbyServerInfo &info) {
 	std::string out;
-	out.reserve(512);
+	out.reserve(768);
+
 	out += info.lobby_name;
-	out += ' ';
+	out += "  HostKey = ";
+	out += sanitize_lobby_value(info.host_key);
 
-	// HostKey is always in position 2 (witnessed in the decomp pre-loop).
-	out += "HostKey = ";
-	out += info.host_key;
+	append_kv_raw_key(out, "ServerName", info.server_name);
+	append_kv_raw_key(out, "GameType", info.game_type);
+	append_kv_raw_key(out, "MissionName", info.mission_name);
+	append_kv_raw_key(out, "Region", info.region);
+	append_kv_raw_key(out, "Players", itoa(info.players));
+	append_kv_raw_key(out, "MaxPlayers", itoa(info.max_players));
+	append_kv_raw_key(out, "Dedicated", yn(info.dedicated));
+	append_kv_raw_key(out, "TimeLeft", info.time_left);
+	append_kv_raw_key(out, "Password", yn(info.password_protected));
+	append_kv_raw_key(out, "Country", info.country);
+	append_kv_raw_key(out, "Msg", info.msg);
+	append_kv_raw_key(out, "Age", info.uptime);
+	append_kv_raw_key(out, "TimeOfDay", info.tod);
+	append_kv_raw_key(out, "Stat", "N");
+	append_kv_literal(out, "LevelRange", " ");
+	append_kv_raw_key(out, "Locked", yn(info.locked));
+	append_kv_raw_key(out, "Tracers", yn(!info.tracers_disabled));
+	append_kv_raw_key(out, "Skins", yn(info.skins_allowed));
+	append_kv_raw_key(out, "BBMode", itoa(info.bb_mode));
+	append_kv_raw_key(out, "Mod", info.mod);
+	append_kv_raw_key(out, "PIX", info.pix);
+	append_kv_raw_key(out, "PBServer", info.pb_server ? "1" : "0");
+	append_kv_raw_key(out, "Ver1", info.ver1);
+	append_kv_raw_key(out, "Ver2", info.ver2);
+	append_kv_raw_key(out, "Exp", info.exp);
+	append_kv_raw_key(out, "Expbits", info.expbits);
+	append_kv_raw_key(out, "Joicon2", info.joicon2);
+	append_kv_raw_key(out, "GCC", info.gcc);
+	append_kv_raw_key(out, "Port", info.port);
+	append_kv_raw_key(out, "AllowPing", itoa(info.allow_ping));
 
-	if (is_delete) {
-		// Delete path: short form. Witnessed:
-		//   sprintf(&v81[strlen(v81)], " Port = -1 DELETE");
-		out += " Port = -1 DELETE";
-		return out;
+	if (!info.country_name.empty() || !info.lang.empty() || info.timezone_bias != 0) {
+		append_kv_raw_key(out, "CountryName", info.country_name);
+		append_kv_raw_key(out, "Lang", info.lang);
+		append_kv_raw_key(out, "TZB", itoa(info.timezone_bias));
 	}
-
-	// Update path: the full set of keys.
-	append_kv(out, "ServerName", info.server_name);
-	append_kv(out, "GameType", info.game_type);
-	append_kv(out, "MissionName", info.mission_name);
-	append_kv(out, "Region", info.region);
-	append_kv(out, "HostDID", info.host_did);
-
-	auto itoa = [](int v) { char buf[32]; std::snprintf(buf, sizeof(buf), "%d", v); return std::string(buf); };
-	auto yes_no = [](bool b) -> std::string { return b ? "Yes" : "No"; };
-
-	append_kv(out, "Players", itoa(info.players));
-	append_kv(out, "MaxPlayers", itoa(info.max_players));
-	append_kv(out, "MI1", itoa(info.mi1));
-	append_kv(out, "MI2", itoa(info.mi2));
-	append_kv(out, "MI3", itoa(info.mi3));
-	append_kv(out, "Dedicated", yes_no(info.dedicated));
-	append_kv(out, "Locked", yes_no(info.locked));
-	append_kv(out, "Skins", yes_no(info.skins_allowed));
-	append_kv(out, "TimeLeft", info.time_left);
-	append_kv(out, "Password", yes_no(info.password_protected));
-	append_kv(out, "Tracers", yes_no(!info.tracers_disabled));
-	append_kv(out, "Country", info.country);
-	append_kv(out, "Port", info.port);
-	append_kv(out, "AllowPing", itoa(info.allow_ping));
-	append_kv(out, "Uptime", info.uptime); // binary uses a string key here; name witnessed as off_748680
-
-	append_kv(out, "TimeOfDay", info.tod);
-	append_kv(out, "AccessCodeList", info.access_code_list);
-	append_kv(out, "AppID", itoa(info.app_id));
-	append_kv(out, "PCIDKey", itoa(info.pcid_key));
-	append_kv(out, "GameServerBaffleKey", itoa(info.game_server_baffle_key));
-	append_kv(out, "Stat", info.stat);
-	if (!info.level_range.empty()) {
-		append_kv(out, "LevelRange", info.level_range);
-	}
-	append_kv(out, "BBMode", itoa(info.bb_mode));
-	append_kv(out, "GV", info.gv);
-	append_kv(out, "Version", info.version);
-	append_kv(out, "CountryName", info.country_name);
-	append_kv(out, "Lang", info.lang);
-	append_kv(out, "TimezoneBias", itoa(info.timezone_bias));
-	append_kv(out, "Ver1", info.ver1);
-	append_kv(out, "Ver2", info.ver2);
-	append_kv(out, "PBServer", info.pb_server ? "1" : "0");
 
 	for (const auto &p : info.extra_pairs) {
-		append_kv(out, p.first.c_str(), p.second);
+		append_kv(out, p.first, p.second);
+	}
+
+	if (info.player_names.empty()) {
+		out += " p=";
+	} else {
+		for (const std::string &player : info.player_names) {
+			out += " p=";
+			out += sanitize_lobby_value(player);
+		}
 	}
 
 	return out;

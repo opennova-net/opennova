@@ -75,7 +75,7 @@ parse_set_cookie_values(const std::vector<std::string> &set_cookie_values);
 
 // The connection tokens NWJoin.dll hands back in the `.joi` response, used to
 // reach the hosted game. NK/CK are url_cipher-encoded (NK = host "ip:port",
-// CK = the host app id); NI/NP are the same host ip/port in the clear; BK is the
+// CK = the host app id); NI/NP are plaintext proxy/display slots; BK is the
 // literal "986119".
 struct JoiConnection {
 	std::string nk;
@@ -83,7 +83,9 @@ struct JoiConnection {
 	std::string ni;  // host ip (plaintext)
 	std::string np;  // host port (plaintext)
 	std::string bk;
-	bool ok = false; // true when at least NI and NP were present
+	std::string host_ip;   // decoded NK head, fallback NI
+	std::string host_port; // decoded NK tail, fallback NP
+	bool ok = false; // true when a dial endpoint was recovered
 };
 
 // Extract the bracketed connection string the join page carries in its <TITLE>:
@@ -92,8 +94,7 @@ struct JoiConnection {
 // @ 0x54dfb0). Splits the first `[...]` run on '&' into KEY=VALUE pairs. The
 // url_cipher-encoded NK/CK never contain '&', so the split is unambiguous (and
 // matches retail, whose NK/CK decode also terminates at '&'). The host address
-// is taken from the plaintext NI/NP; decode NK with url_cipher_decode for a
-// cross-check or for a server that omits NI/NP.
+// is taken from decoded NK; NI/NP are preserved but are not the dial authority.
 JoiConnection parse_joi_connection_string(const std::string &body);
 
 // The cookie store the engine carries across the NovaWorld endpoint family.

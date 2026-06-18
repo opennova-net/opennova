@@ -71,8 +71,8 @@ bool check_all_known_keys() {
 	if (!expect((r.reflected_ip == std::array<uint8_t, 4>{203, 0, 113, 7}),
 			"REFLECTEDIPADDRESS")) return false;
 	if (!expect(r.reflected_port == 55555, "REFLECTEDPORTNUMBER")) return false;
-	if (!expect(r.cus == "custom-tier-4", "CUS preserved")) return false;
-	if (!expect(r.pvt == "private-flag", "PVT preserved")) return false;
+	if (!expect(r.cus.empty(), "CUS counted but ignored")) return false;
+	if (!expect(r.pvt.empty(), "PVT counted but ignored")) return false;
 	return true;
 }
 
@@ -122,7 +122,28 @@ bool check_quoted_response() {
 	if (!expect(r.udp_novaworld == "127.0.0.1:64206", "quoted UDPNOVAWORLD stripped")) return false;
 	if (!expect(r.startup_url == "http://127.0.0.1:8080", "quoted STARTUPURL stripped")) return false;
 	if (!expect(r.lobby_name == "jop 2 consumer", "quoted value keeps its internal space")) return false;
-	if (!expect(r.cus.empty(), "empty quoted value -> empty string")) return false;
+	if (!expect(r.cus.empty(), "CUS ignored even when present")) return false;
+	return true;
+}
+
+bool check_retail_loose_numeric_and_ipv4_edges() {
+	const std::string body =
+			"VAR POSTIPADDRESS 300.513.999.256trailing\n"
+			"VAR POSTIPPORT 70000\n"
+			"VAR REFLECTEDIPADDRESS 1.2.3.4garbage\n"
+			"VAR REFLECTEDPORTNUMBER 4294967295\n"
+			"VAR METPING \"\v-42ms\"\n"
+			"VAR METEXT \"\f7tail\"\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(body, r), "loose retail edge response parses")) return false;
+	if (!expect((r.post_ip == std::array<uint8_t, 4>{44, 1, 231, 0}),
+			"POSTIPADDRESS octets mask to uint8 and ignore tail")) return false;
+	if (!expect(r.post_port == 70000u, "POSTIPPORT stores full 32-bit value")) return false;
+	if (!expect((r.reflected_ip == std::array<uint8_t, 4>{1, 2, 3, 4}),
+			"REFLECTEDIPADDRESS ignores chars after fourth octet")) return false;
+	if (!expect(r.reflected_port == 4294967295u, "REFLECTEDPORTNUMBER stores u32 max")) return false;
+	if (!expect(r.met_ping == -42, "atoi_loose skips vertical-tab whitespace")) return false;
+	if (!expect(r.met_ext == 7, "atoi_loose skips form-feed whitespace")) return false;
 	return true;
 }
 
@@ -141,6 +162,7 @@ int main() {
 	if (!check_all_known_keys()) return 1;
 	if (!check_case_insensitive_keys()) return 1;
 	if (!check_quoted_response()) return 1;
+	if (!check_retail_loose_numeric_and_ipv4_edges()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
 	if (!check_empty_returns_false()) return 1;
 	std::printf("OK: gate response KV parser (quoted + unquoted; 19 retail VARs + CUS/PVT)\n");

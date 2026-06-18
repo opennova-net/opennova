@@ -2631,16 +2631,16 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | System | Verdict | Note |
 |---|---|---|
 | A1 gate-probe | **matching** | crypto chain byte-verified end to end |
-| A2 gate-response | partial | 7 parser-leniency divergences (D-NET-9..15) |
+| A2 gate-response | partial | literal parser still tracked (D-NET-9); leniency fixes landed (D-NET-10..15) |
 | A3 clienthello | partial | ServerHello two-branch model + PL fiction (D-NET-16..18) |
-| A4 clientauth | partial | CS-table (HIGH) + gating + JFC/JFP/JFS (D-NET-1..4) |
+| A4 clientauth | partial | CS-table/gating/JFC rejection fields fixed; remaining issues are outside A4 |
 | A5 client-session-fsm | partial | Success atol, Cookie parent, ClientConnected timing (D-NET-19..22) |
-| A6 protocol-message | partial | **0x80 selector + LEN8/16 (HIGH)**, frag reset (D-NET-5..8) |
+| A6 protocol-message | partial | 0x80 selector + LEN8/16 fixed; frag reset/truncated stream remain (D-NET-7/8) |
 | A7 verify-containers | partial | Success atol (= D-NET-19); verify-cookie claim refuted |
 | A8 web-domain | **matching** | SessionInit CU web-domain install confirmed |
 | A9 session-timing | partial | timeout value/citation, NWEC13 default (D-NET-23..25) |
 | B1 nwu | **matching** | byte-exact (NW-C1) |
-| B2 epask | **matching** | byte-exact (NW-C2); 2 edge-case-only notes (D-NET-26/27) |
+| B2 epask | **matching** | byte-exact (NW-C2); edge cases fixed (D-NET-26/27) |
 | B3 pubcrypto | **matching** | byte-exact (NW-C3) |
 | B4 url-cipher | **matching** | byte-exact (NW-C4) |
 | B5 crc32-table | **matching** | table identical @0x849938, check 0x0376E6E7 |
@@ -2651,13 +2651,13 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | C3 login-orchestration | partial | markup-derived URLs (D-NET-31) + shared cookie fix |
 | C4 gsb-parse | **matching** | format fixed + byte-verified vs genuine `.204` (D-NET-32..36) |
 | C5 joi-regurl | partial | documentation only; ':' separator + HOSTKEY trim confirmed |
-| D1 join-handoff | **divergent** | JO hello PV1 + dial-from-NK (D-NET-47..49) |
+| D1 join-handoff | partial | JO PV1 + dial-from-NK fixed; JO PG remains open (D-NET-49) |
 | D2 client-play-request | **matching** | CurrentlyPlaying + ClientVarList wrap fixed; parseable by our server (D-NET-37..39) |
-| D3 host-registration | **divergent** | fabricated DELETE path + sanitize + key set + tokens (D-NET-40..46) |
+| D3 host-registration | partial | text blob corrected (D-NET-40..46); host request VarList wrapping remains tracked |
 
 The cryptographic + framing foundation re-confirmed byte-exact (NW-C1..C4, CRC32, NAPI
 TLV/envelope) — no code change. Defects concentrate in GSB (C4), the join/host client-direction
-builders (D1/D2/D3), and the protocol-message dispatch flags (A6).
+builders (D1/D2/D3), 0x0A runtime replacement, and remaining ServerHello/cookie edge cases.
 
 **Divergence catalog (D-NET-n; stable IDs, never renumbered).** Status: FIXED = applied this
 session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
@@ -2665,23 +2665,23 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 `session_hello.cpp` (A4 ClientAuth/ServerSessionInit 0x42/0x82):
 - **D-NET-1** [HIGH, FIXED] CS field default tables were onnet guesses, wrong at idx 4/8/9/10/12/13. Engine template (IDENTICAL both directions): `{0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,8:2048,9:128,10:100,11:500,12:1,13:MTU(1300),14:0xFFFFFFFF}`. [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / NapiNPConnection_Create @ 0x62acb0 / NapiNPConnection_SendSessionInit @ 0x620ef0]
 - **D-NET-2** [LOW, FIXED] CI/HK/CK were emitted unconditionally; retail gates each on non-zero (like SIP/SPN). [orig: NapiNPConnection_SendClientHello @ 0x61fe20]
-- **D-NET-3** [LOW, TRACKED] `parse_server_auth` ignores JFC/JFP/JFS rejected-join fields (failure code/param/string); the `!scrk.empty()` success gate misclassifies a legit SCRK-less rejection as malformed. [orig: NapiNP_HandleServerJoinResponse @ 0x629840]
+- **D-NET-3** [LOW, FIXED] `parse_server_auth` now parses JFC/JFP/JFS rejected-join fields (failure code/param/string); SCRK-less rejections are valid auth packets and surface as rejections, not malformed. [orig: NapiNP_HandleServerJoinResponse @ 0x629840]
 - **D-NET-4** [LOW, FIXED] RIP/RPN were emitted unconditionally; retail gates on peer_addr/peer_port != 0. [orig: NapiNPConnection_SendSessionInit @ 0x620ef0]
 
 `protocol_message.cpp` (A6):
-- **D-NET-5** [HIGH, TRACKED] high-table/include-seq selector is flag bit **0x80**, not 0x01; `full_tag = (flags&0x80?0x100:0)|tag`; wire bit 0x01 is unused/reserved. [orig: NapiNPConnection_DispatchMessage @ 0x622570 / NapiNPProtocol_FindMsgInfo @ 0x61e380 / NapiNP_WriteMessageRecord @ 0x61da90]
-- **D-NET-6** [HIGH, TRACKED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: NapiNPConnection_ParseMessages @ 0x625bc0]
+- **D-NET-5** [HIGH, FIXED] high-table/include-seq selector is flag bit **0x80**, not 0x01; `full_tag = (flags&0x80?0x100:0)|tag`; wire bit 0x01 is unused/reserved. [orig: NapiNPConnection_DispatchMessage @ 0x622570 / NapiNPProtocol_FindMsgInfo @ 0x61e380 / NapiNP_WriteMessageRecord @ 0x61da90]
+- **D-NET-6** [HIGH, FIXED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: NapiNPConnection_ParseMessages @ 0x625bc0]
 - **D-NET-7** [MED, TRACKED] reassembly must clear the buffer on the FIRST fragment (`(flags&6)==4`) before appending. [orig: NapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
 - **D-NET-8** [LOW, TRACKED] truncated inner stream: retail substitutes 0 for missing fields and still dispatches; we bail. [orig: NapiNPConnection_ParseMessages @ 0x625bc0]
 
 `gate_response.cpp` (A2):
 - **D-NET-9** [MED, TRACKED] port fields need full literal parse (char/hex/octal/binary/decimal, in order). [orig: NapiScript_ParseLiteralValue @ 0x62db00]
-- **D-NET-10** [MED, TRACKED] store full 32-bit port; drop the [0,65535] reject (retail stores verbatim, presence = non-zero). [orig: CNapiGateManager_ProcessResponse @ 0x4ced20 (@ 0x4cf1ae)]
-- **D-NET-11** [MED, TRACKED] IPv4 octets >255 accepted (mask to uint8), not rejected. [orig: Network_ParseIPv4AddressOctets @ 0x62dc10]
-- **D-NET-12** [LOW, TRACKED] IPv4 parse stops after the 4th octet, ignores trailing chars. [orig: 0x62dc10]
-- **D-NET-13** [LOW, TRACKED] remove CUS/PVT phantom keys (exactly 19 real keys; CUS/PVT counted-but-ignored). [orig: 0x4ced20]
-- **D-NET-14** [LOW, TRACKED] `is_ws` should match `isspace` (add \v 0x0B, \f 0x0C). [orig: String_TokenizeQuotedToArray @ 0x616d60]
-- **D-NET-15** [LOW, TRACKED] `atoi_loose` must skip leading whitespace (atol semantics). [orig: 0x4ced20 (atol @ 0x76ab0a)]
+- **D-NET-10** [MED, FIXED] store full 32-bit port; drop the [0,65535] reject (retail stores verbatim, presence = non-zero). [orig: CNapiGateManager_ProcessResponse @ 0x4ced20 (@ 0x4cf1ae)]
+- **D-NET-11** [MED, FIXED] IPv4 octets >255 accepted (mask to uint8), not rejected. [orig: Network_ParseIPv4AddressOctets @ 0x62dc10]
+- **D-NET-12** [LOW, FIXED] IPv4 parse stops after the 4th octet, ignores trailing chars. [orig: 0x62dc10]
+- **D-NET-13** [LOW, FIXED] remove CUS/PVT phantom keys (exactly 19 real keys; CUS/PVT counted-but-ignored). [orig: 0x4ced20]
+- **D-NET-14** [LOW, FIXED] `is_ws` should match `isspace` (add \v 0x0B, \f 0x0C). [orig: String_TokenizeQuotedToArray @ 0x616d60]
+- **D-NET-15** [LOW, FIXED] `atoi_loose` must skip leading whitespace (atol semantics). [orig: 0x4ced20 (atol @ 0x76ab0a)]
 
 `session_hello.cpp` (A3 ClientHello/ServerHello):
 - **D-NET-16** [MED, TRACKED] drop the is_game_server two-branch ServerHello model; emit SF UNCONDITIONALLY (0/1 flag); remove the fabricated PL tag; gate P1/P2/NP/MP on nonzero. [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
@@ -2700,8 +2700,8 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-25** [LOW, TRACKED] add Reject1009→NWEC14; unknown-reject default → NWEC13 (currently NWEC02). [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10]
 
 `novacrypto/epask.cpp` (B2, edge-case only):
-- **D-NET-26** [LOW, TRACKED] `epask_from_string` should use `_atoi64` semantics (return 0, no throw). [orig: parse_colon_delimited_string @ 0x666710]
-- **D-NET-27** [LOW, TRACKED] `epask_encrypt` should truncate plaintext at first NUL (strlen). [orig: sub_6669A0 @ 0x6669a0]
+- **D-NET-26** [LOW, FIXED] `epask_from_string` uses `_atoi64` semantics (return 0, no throw). [orig: parse_colon_delimited_string @ 0x666710]
+- **D-NET-27** [LOW, FIXED] `epask_encrypt` truncates plaintext at first NUL (strlen). [orig: sub_6669A0 @ 0x6669a0]
 
 `napi` tlv/envelope (B6/B7):
 - **D-NET-28** [LOW, TRACKED] enforce name length [1,63] and data length [0,4095] at the novaworld builder layer (not the TLV codec). [orig: NapiStatementParam_Create @ 0x632b30]
@@ -2725,27 +2725,27 @@ FLDS columns, decoded through the XXXX terminator):
 - **D-NET-38** [HIGH, FIXED] var-lists are wrapped as `ClientVarList` containers (a `VarList` field carrying the list name + `ClientVar` children with VarFNum/VarName/VarValue) via the new `make_client_var_list` helper — the shape `extract_var_lists` parses. (`make_client_host_request` still needs the same treatment — tracked under D3/host.) [orig: NapiStatement_SerializeVarList @ 0x4d0660]
 - **D-NET-39** [MED, FIXED] var-list child order is Cookie then PlaySetup; the stale `session.h` `SendPlayRequest @ 0x4af990` citation corrected to `0x4d3920`. Locked by `session_test`. [orig: 0x4d3920]
 
-`lobby_update.cpp` (D3 host registration) — DIVERGENT:
-- **D-NET-40** [HIGH, TRACKED] remove the fabricated `is_delete` / "Port = -1 DELETE" / 4×-send path (no such string in the binary; single SendUDPPacket). Teardown is a separate mechanism (likely ClientStopHosting TLV @ 0x4d04e0). Also fix header anchor 0x4d2e10 → 0x4fe8c0. [orig: Lobby_UpdateServerInfo @ 0x4fe8c0]
-- **D-NET-41** [HIGH, TRACKED] sanitize HostKey + every key/value/player name: ' '/'?'/'@'/'=' → '+', empty → "---" (NOT lobby_name). [orig: String_SanitizeForLobby @ 0x4fe750]
-- **D-NET-42** [HIGH, TRACKED] key set: drop HostDID/AccessCodeList; add Mod/Msg/GCC; rename Uptime→Age, TimezoneBias→TZB; gate CountryName/Lang/TZB on dword_B5F4E4; match the exact VarList order. [orig: 0x4fe8c0]
-- **D-NET-43** [HIGH, TRACKED] booleans via STRNOVA11/12 tokens (not "Yes"/"No"); Ver1="3"/Ver2="2345" (not "1"/"2780"). [orig: 0x4fe8c0 (@ 0x4ff3e0)]
-- **D-NET-44** [MED, TRACKED] two spaces before HostKey; drive keys from an ordered VarList (LobbyName first, re-emitted). [orig: 0x4fe8c0 (@ 0x4ff4e1)]
-- **D-NET-45** [MED, TRACKED] Stat="N" always; LevelRange always emitted as a single space. [orig: 0x4fe8c0 (~0x4ff215)]
-- **D-NET-46** [MED, TRACKED] model the gated ` p=<player>` suffix (bare ` p=` fallback), after all ` k = v` pairs. [orig: 0x4fe8c0 (@ 0x4ff560)]
+`lobby_update.cpp` (D3 host registration):
+- **D-NET-40** [HIGH, FIXED] remove the fabricated `is_delete` / "Port = -1 DELETE" / 4×-send path (no such string in the binary; single SendUDPPacket). Teardown is a separate mechanism (likely ClientStopHosting TLV @ 0x4d04e0). Also fix header anchor 0x4d2e10 → 0x4fe8c0. [orig: Lobby_UpdateServerInfo @ 0x4fe8c0]
+- **D-NET-41** [HIGH, FIXED] sanitize HostKey + every key/value/player name: ' '/'?'/'@'/'=' → '+', empty → "---" (NOT lobby_name). [orig: String_SanitizeForLobby @ 0x4fe750]
+- **D-NET-42** [HIGH, FIXED] key set: drop HostDID/AccessCodeList; add Mod/Msg/GCC; rename Uptime→Age, TimezoneBias→TZB; gate CountryName/Lang/TZB on dword_B5F4E4; match the exact VarList order. [orig: 0x4fe8c0]
+- **D-NET-43** [HIGH, FIXED] booleans via STRNOVA11/12 tokens (not "Yes"/"No"); Ver1="3"/Ver2="2345" (not "1"/"2780"). [orig: 0x4fe8c0 (@ 0x4ff3e0)]
+- **D-NET-44** [MED, FIXED] two spaces before HostKey; drive keys from an ordered VarList (LobbyName first, re-emitted). [orig: 0x4fe8c0 (@ 0x4ff4e1)]
+- **D-NET-45** [MED, FIXED] Stat="N" always; LevelRange always emitted as a single space. [orig: 0x4fe8c0 (~0x4ff215)]
+- **D-NET-46** [MED, FIXED] model the gated ` p=<player>` suffix (bare ` p=` fallback), after all ` k = v` pairs. [orig: 0x4fe8c0 (@ 0x4ff560)]
 
 `client_session.cpp` + binding (D1 join handoff) — DIVERGENT (ADR 0009 in-match seam):
-- **D-NET-47** [MED, TRACKED] JointOperations game-host hello PV1 must be "0.0.0 1/12/2004 EM" (NOT the lobby PV1 "0.0.0 2/10/2004 EM"); wrong PV1 = hard reject. PN "JOINTOPERATIONS". [orig: CNapiNetwork_Init @ 0x4ca4a0 / NapiNPProtocol_HandleClientJoin @ 0x62B750]
-- **D-NET-48** [LOW, TRACKED] dial the host from DECODED NK (url-cipher, split ':'), not plaintext NI/NP (NI/NP feed only the proxy slots). [orig: parse_connection_query_string @ 0x54dfb0 / CNapiGameSession_ConnectOrHost @ 0x4d4f10]
+- **D-NET-47** [MED, FIXED] JointOperations game-host hello PV1 must be "0.0.0 1/12/2004 EM" (NOT the lobby PV1 "0.0.0 2/10/2004 EM"); wrong PV1 = hard reject. PN casing still needs a direct host witness; code keeps the existing `JointOperations` casing. [orig: CNapiNetwork_Init @ 0x4ca4a0 / NapiNPProtocol_HandleClientJoin @ 0x62B750]
+- **D-NET-48** [LOW, FIXED] dial the host from DECODED NK (url-cipher, split ':'), not plaintext NI/NP (NI/NP feed only the proxy slots). [orig: parse_connection_query_string @ 0x54dfb0 / CNapiGameSession_ConnectOrHost @ 0x4d4f10]
 - **D-NET-49** [OPEN] `jointoperations_pg()` is a placeholder; the in-match PG (16B @ proto+284) is unwitnessed (source `NapiNPVarBlock_Copy @ 0x4ca7af`, not sub_62E750). Re-discover.
 
 `replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
 - **D-NET-50** [HIGH, TRACKED] `build_tag_0a_world_reference` ships a 623-byte verbatim retail blob (`kRetailTag0aPayload`) with only bytes 0-11 patched. The real S2C 0x0A trailer is per-entity 18-byte **compact (type-11) records** — positions 16-bit compressed via `Network_CompressFixedPoint`, NOT raw i32, and vehicle-local when mounted. Replace with a field-driven builder per §5.10 case 1 (full table there). [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop]
-- **D-NET-51** [HIGH, TRACKED] `handle_tag_0c_player_input` reads position as raw i32 at offsets 7/11/15, treating the whole body as raw position. The real C2S 0x0C body is the fixed **43-byte extended (type-10)** format from §5.10: 5-B header, then vehicleHandle/posX/posY/posZ (i32 16.16, vehicle-local if mounted), heading/pitch (i16 BAM), state bytes, anim defs, and 4×(weapon_id,counter) anti-cheat pairs. Replace with a field-driven parser per §5.10 case 4. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
+- **D-NET-51** [HIGH, FIXED] `handle_tag_0c_player_input` now uses the shared 5-byte entity sub-header + 43-byte extended (type-10) decoder from §5.10 instead of raw offsets. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
 
 `replication_min.cpp` + `game_session.cpp` (pool-entity spawn/sync — §5.11/§5.12):
 - **D-NET-52** [DOC, FIXED] §5.6 trailer layout previously read `[u16][u32][cstring]`. The retail handler reads `aiProfile1` and `aiProfile2` with `cursor += 2` on a `uint16_t*` — both fields are **4 wire bytes** (the Hex-Rays render shows `uint16_t*` as the value type, but the cursor advance and the destination slot writes are `_DWORD`). Cross-witnessed against 195/437 trailer-carrying 0x0D records in the 2026-06-16b loopback. Update §5.6 + §5.11 (this commit). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x43311e / 0x433131)]
-- **D-NET-53** [HIGH, TRACKED] `build_tag_0d_spawn_points @ replication_min.cpp:484` emits two unconditional `u16 weapon_slot` zeros (lines 524-525) before the trailing `u8 bone_attach`. Retail's handler only reads the weapon block when `flags & 0x400` is set, and the builder uses `flags = 0x30` — so those 4 bytes corrupt alignment exactly as the §5.6 warning describes for the (quarantined) `build_tag_0d_local_player_spawn` sibling. With >1 spawn point in a batch, the second and subsequent records would be misaligned and the receiver would either drop them or crash. Drop the two `push_u16(buf, 0)` writes; the `u8` after them is the always-byte that lands at entity+290, not a "bone_attach". [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 — weapon block gated by `spawnFlags & 0x400`)]
+- **D-NET-53** [HIGH, FIXED] `build_tag_0d_spawn_points` no longer emits ungated weapon-slot zeros before the always-read bone/other byte; multi-record batches decode without leftover/misalignment. [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 — weapon block gated by `spawnFlags & 0x400`)]
 - **D-NET-54** [LOW, DOC] In-source field-table comments at `replication_min.cpp:417-422` (and the mirror at line 524-526) label the always-byte at +290 "bone_attach byte" and `flags&0x10` as "team". Per §5.11 the always-byte is unnamed in retail (Hex-Rays calls it `teamByte`; field is at +290), and `flags&0x10` writes `orientByte` to +354. Update the in-source comments to match §5.11. Wire-emitted bytes are unchanged by this fix — comment-only. [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x432e29 = flags&0x10 → +354; @ 0x43310a = unconditional u8 → +290)]
 - **D-NET-55** [HIGH, TRACKED] No `build_tag_20_pool3_sync` builder exists; `game_session.cpp` dispatch (around lines 1023-1075) has no inbound `handle_tag_20_*` either — every S2C 0x20 falls through to `handle_unknown_or_passive_tag`. Pool-3 markers / waypoints / nav-nodes are therefore not registered into the client's pool 3, which blocks AI navigation, target markers, and any spawn-select markers that resolve via pool 3. §5.12 has the full record map; the builder needs a `[u16 start_idx][u16 count]` header + per-entity flag-driven serializer matching the witnessed 29-payload / 792-entity loopback shape. [orig: NapiNPClientMsg_0x020 @ 0x425C00]
 - **D-NET-56** [MED, FIXED] `decode_pool_spawn_batch` (ingame_decode.cpp) read `extra_handle_0/1` only inside `if (weapon_mask)`, under-reading by 4 B on the (`0x400` set, mask==0) path. The handler's mask==0 branch (`goto LABEL_110`) skips the per-bit loop but still consumes both extras unconditionally once `0x400` is set; moved the extras read outside the mask!=0 guard. **Latent:** retail's encoder `serialize_entity_pool_to_packet_0 @ 0x503940` only sets `0x400` when its mask (`itemDef+604`) is non-zero, so the byte-witness capture never produced mask==0 and `nw_ingame_pool_records_test` stayed green — but the client handler reads it regardless, so the port must match. Found by grilling the encode side for the Phase-1 host world-stream (trust-but-verify of already-written code). [orig: NapiNPClientMsg_0x00D @ 0x432C40 (@ 0x4330b1 LABEL_110)]
@@ -2783,7 +2783,8 @@ down; unreachable for realistic payloads).
   `gsb_real204_decode_test` oracle (fixtures/novaworld/nw204_jop_2.gsb). Server browse against
   real NovaWorld now produces a retail-parseable list.
 
-**High-value follow-up backlog (tracked rewrites):** A6 dispatch flags (D-NET-5/6 — `0x80`
-selector + LEN8/16 precedence); D3 host registration overhaul (D-NET-40..46), which also includes
-giving `make_client_host_request` the same `ClientVarList` wrapping `make_client_play_request` now
-has (D-NET-38). Each carries its `[orig]` anchor and corrected behavior above.
+**High-value follow-up backlog (tracked rewrites):** JO game PG discovery (D-NET-49);
+field-driven S2C 0x0A world-reference replacement (D-NET-50); pool-3 0x20 runtime wiring
+(D-NET-55); and giving `make_client_host_request` the same `ClientVarList` wrapping
+`make_client_play_request` now has (D-NET-38). Each carries its `[orig]` anchor and
+corrected behavior above.

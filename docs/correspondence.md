@@ -171,15 +171,15 @@ Newly-grilled originals (join key = addr):
 |---|---|---|---|---|
 | `CNapiGameSession_InitNPConnection` | `0x4d3e1f` | CS field template (identical both dirs) | D-NET-1 | fixed |
 | `NapiNPConnection_SendClientHello` | `0x61fe20` | 0x42 builder; CI/HK/CK gate | D-NET-2 | fixed |
-| `NapiNP_HandleServerJoinResponse` | `0x629840` | JFC/JFP/JFS rejected-join read | D-NET-3 | tracked |
+| `NapiNP_HandleServerJoinResponse` | `0x629840` | JFC/JFP/JFS rejected-join read | D-NET-3 | fixed |
 | `NapiNPConnection_SendSessionInit` | `0x620ef0` | 0x82 builder; RIP/RPN gate | D-NET-4 | fixed |
-| `NapiNPConnection_DispatchMessage` | `0x622570` | high-table 0x80 selector | D-NET-5 | tracked |
-| `NapiNPConnection_ParseMessages` | `0x625bc0` | LEN8/LEN16 precedence | D-NET-6 | tracked |
+| `NapiNPConnection_DispatchMessage` | `0x622570` | high-table 0x80 selector | D-NET-5 | fixed |
+| `NapiNPConnection_ParseMessages` | `0x625bc0` | LEN8/LEN16 precedence | D-NET-6 | fixed |
 | `CNapiGameSession_HandleConnectVerifyResponse` | `0x4d5800` | Success = atol != 0 | D-NET-19 | fixed |
 | `NapiGameList_ProcessEncryptedResponse` | `0x63d740` | GSB chunk format (prefix magic) | D-NET-32..35 | divergent |
 | `CNapiGameSession_SendPlayRequest` | `0x4d3920` | ClientPlayRequest shape (CurrentlyPlaying + ClientVarList) | D-NET-37..39 | fixed |
 | `NapiStatement_SerializeVarList` | `0x4d0660` | ClientVarList(VarList)+ClientVar(VarFNum/VarName/VarValue) | D-NET-38 | fixed |
-| `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | divergent |
+| `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | fixed |
 | `String_SanitizeForLobby` | `0x4fe750` | lobby field sanitize | D-NET-41 | tracked |
 
 `/PROFILE` `.sph` server-log recorder cluster (§5.22; decoder `libs/novaworld/serverlog_decode.cpp`):

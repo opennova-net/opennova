@@ -2,11 +2,9 @@
 //
 // The join page carries the host address + tokens in its <TITLE>, e.g.
 //   [NK=<enc>&CK=<enc>&NI=127.0.0.1&NP=64206&BK=986119&]
-// This pins that parse_joi_connection_string extracts the plaintext host
-// address (NI/NP) and that the url_cipher-encoded NK round-trips to the same
-// host:port through url_cipher_decode (the keys the server's NWJoin handler
-// encodes with). Server side: apps/novaworld_server/http_listener.cpp:1537-1576
-// + templates/jop_2_join.joi.
+// This pins that parse_joi_connection_string captures NI/NP but selects the
+// actual dial endpoint from decoded NK. NI/NP are proxy/display slots and can
+// disagree with NK on live NovaWorld joins.
 
 #include <novacrypto/url_cipher.h>
 #include <novaworld/http_login.h>
@@ -32,6 +30,8 @@ int main() {
 
 	const std::string host_ip = "127.0.0.1";
 	const std::string host_port = "64206";
+	const std::string proxy_ip = "10.99.88.77";
+	const std::string proxy_port = "12345";
 	const std::string nk_plain = host_ip + ":" + host_port;  // "127.0.0.1:64206"
 	const std::string app_id = "20";
 
@@ -45,14 +45,16 @@ int main() {
 	// and all (the template wraps the bracket in newlines).
 	const std::string body =
 	    "<HTML><HEAD><TITLE>\n"
-	    "[NK=" + nk + "&CK=" + ck + "&NI=" + host_ip + "&NP=" + host_port + "&BK=986119&]\n"
+	    "[NK=" + nk + "&CK=" + ck + "&NI=" + proxy_ip + "&NP=" + proxy_port + "&BK=986119&]\n"
 	    "</TITLE></HEAD><BODY>Joining DEV Joinable...</BODY></HTML>";
 
 	const JoiConnection conn = parse_joi_connection_string(body);
 
-	check(conn.ok, "parse reports ok (NI + NP present)");
-	check(conn.ni == host_ip, "NI is the plaintext host ip");
-	check(conn.np == host_port, "NP is the plaintext host port");
+	check(conn.ok, "parse reports ok (decoded NK endpoint present)");
+	check(conn.host_ip == host_ip, "decoded NK host ip selected for dialing");
+	check(conn.host_port == host_port, "decoded NK host port selected for dialing");
+	check(conn.ni == proxy_ip, "NI plaintext proxy/display slot preserved");
+	check(conn.np == proxy_port, "NP plaintext proxy/display slot preserved");
 	check(conn.bk == "986119", "BK is the literal 986119");
 	check(conn.nk == nk, "NK token captured verbatim");
 	check(conn.ck == ck, "CK token captured verbatim");

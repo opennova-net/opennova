@@ -79,9 +79,14 @@ struct GameSessionState {
 	// receiving tag=0x51, and re-replying would loop forever.
 	bool player_spawn_confirmed = false;
 	bool client_pos_valid = false;
+	uint16_t client_entity_handle = 0;
+	uint16_t client_item_type_id = 0;
+	uint16_t client_vehicle_handle = 0xFFFF;
 	uint32_t client_pos_x = 0;
 	uint32_t client_pos_y = 0;
 	uint32_t client_pos_z = 0;
+	int16_t client_heading = 0;
+	int16_t client_pitch = 0;
 };
 
 struct GameSessionDispatchResult {

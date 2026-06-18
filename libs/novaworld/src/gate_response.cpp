@@ -22,7 +22,7 @@ bool ieq(std::string_view a, std::string_view b) {
 }
 
 bool is_line_break(char c) { return c == '\n' || c == '\r'; }
-bool is_ws(char c) { return c == ' ' || c == '\t'; }
+bool is_ws(char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; }
 
 // Quote-aware tokenizer, mirroring [orig: String_TokenizeQuotedToArray @
 // 0x616d60]: whitespace separates tokens OUTSIDE quotes; a `"` toggles
@@ -67,26 +67,30 @@ std::vector<std::string> tokenize_line(std::string_view line) {
 
 bool parse_ipv4(std::string_view s, std::array<uint8_t, 4> &out) {
 	std::array<uint8_t, 4> parts{0, 0, 0, 0};
-	size_t part = 0;
-	int v = -1;
-	for (size_t i = 0; i <= s.size(); ++i) {
-		const bool at_end = (i == s.size());
-		const char c = at_end ? '.' : s[i];
-		if (c == '.') {
-			if (v < 0 || v > 255 || part >= 4) {
-				return false;
-			}
-			parts[part++] = static_cast<uint8_t>(v);
-			v = -1;
-		} else if (c >= '0' && c <= '9') {
-			if (v < 0) v = 0;
-			v = v * 10 + (c - '0');
-			if (v > 255) return false;
-		} else {
-			return false;
+	size_t pos = 0;
+	for (size_t part = 0; part < 4; ++part) {
+		while (pos < s.size() && is_ws(s[pos])) ++pos;
+		int sign = 1;
+		if (pos < s.size() && (s[pos] == '+' || s[pos] == '-')) {
+			if (s[pos] == '-') sign = -1;
+			++pos;
+		}
+		uint64_t v = 0;
+		bool any = false;
+		while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9') {
+			any = true;
+			v = v * 10u + static_cast<uint64_t>(s[pos] - '0');
+			++pos;
+		}
+		if (!any) return false;
+		const int64_t signed_v = sign < 0 ? -static_cast<int64_t>(v) : static_cast<int64_t>(v);
+		parts[part] = static_cast<uint8_t>(signed_v);
+		if (part < 3) {
+			while (pos < s.size() && s[pos] != '.') ++pos;
+			if (pos >= s.size()) return false;
+			++pos;
 		}
 	}
-	if (part != 4) return false;
 	out = parts;
 	return true;
 }
@@ -115,8 +119,9 @@ bool parse_int(std::string_view s, int &out) {
 int atoi_loose(std::string_view s) {
 	int sign = 1;
 	size_t i = 0;
-	if (!s.empty() && (s[0] == '+' || s[0] == '-')) {
-		if (s[0] == '-') sign = -1;
+	while (i < s.size() && is_ws(s[i])) ++i;
+	if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
+		if (s[i] == '-') sign = -1;
 		++i;
 	}
 	long long acc = 0;
@@ -125,6 +130,25 @@ int atoi_loose(std::string_view s) {
 		acc = acc * 10 + (s[i] - '0');
 	}
 	return static_cast<int>(sign * acc);
+}
+
+uint32_t atou32_loose(std::string_view s) {
+	int sign = 1;
+	size_t i = 0;
+	while (i < s.size() && is_ws(s[i])) ++i;
+	if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
+		if (s[i] == '-') sign = -1;
+		++i;
+	}
+	uint64_t acc = 0;
+	for (; i < s.size(); ++i) {
+		if (s[i] < '0' || s[i] > '9') break;
+		acc = acc * 10u + static_cast<uint64_t>(s[i] - '0');
+	}
+	if (sign < 0) {
+		return static_cast<uint32_t>(-static_cast<int64_t>(acc));
+	}
+	return static_cast<uint32_t>(acc);
 }
 
 } // namespace
@@ -165,19 +189,13 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		if (ieq(key, "POSTIPADDRESS")) {
 			parse_ipv4(value, out.post_ip);
 		} else if (ieq(key, "POSTIPPORT")) {
-			int v = 0;
-			if (parse_int(value, v) && v >= 0 && v <= 65535) {
-				out.post_port = static_cast<uint16_t>(v);
-			}
+			out.post_port = atou32_loose(value);
 		} else if (ieq(key, "LOBBYNAME")) {
 			out.lobby_name = std::string(value);
 		} else if (ieq(key, "METIPADDRESS")) {
 			out.met_ip = std::string(value);
 		} else if (ieq(key, "METIPPORT")) {
-			int v = 0;
-			if (parse_int(value, v) && v >= 0 && v <= 65535) {
-				out.met_port = static_cast<uint16_t>(v);
-			}
+			out.met_port = atou32_loose(value);
 		} else if (ieq(key, "METLABEL")) {
 			out.met_label = std::string(value);
 		} else if (ieq(key, "METPING")) {
@@ -195,10 +213,7 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "REFLECTEDIPADDRESS")) {
 			parse_ipv4(value, out.reflected_ip);
 		} else if (ieq(key, "REFLECTEDPORTNUMBER")) {
-			int v = 0;
-			if (parse_int(value, v) && v >= 0 && v <= 65535) {
-				out.reflected_port = static_cast<uint16_t>(v);
-			}
+			out.reflected_port = atou32_loose(value);
 		} else if (ieq(key, "USEJUNCTION")) {
 			out.use_junction = atoi_loose(value);
 		} else if (ieq(key, "CLEARJUNCTION")) {
@@ -210,9 +225,9 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "GLSVSSAGRMS")) {
 			out.glsvss_agrms = atoi_loose(value);
 		} else if (ieq(key, "CUS")) {
-			out.cus = std::string(value);
+			// Phantom key: counted for read-result parity but not retained.
 		} else if (ieq(key, "PVT")) {
-			out.pvt = std::string(value);
+			// Phantom key: counted for read-result parity but not retained.
 		} else {
 			matched = false;
 		}

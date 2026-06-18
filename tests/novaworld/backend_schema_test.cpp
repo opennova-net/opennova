@@ -99,6 +99,25 @@ int test_seed_populates_games_and_expansions() {
 	TEST_EXPECT(expansions[2].as_text(0).value() == "revx02");
 	TEST_EXPECT(expansions[2].as_int(2).value() == 1); // featured
 
+	auto players = db.query(
+		"SELECT username, pcid, nwh, nwhandle FROM players ORDER BY username;"
+	);
+	TEST_EXPECT(players.size() == 5);
+	TEST_EXPECT(players[0].as_text(0).value() == "foo");
+	TEST_EXPECT(players[0].as_text(1).value() == "00000003");
+	TEST_EXPECT(players[0].as_text(2).value() == "1");
+	TEST_EXPECT(players[0].as_text(3).value() == "FooPlayer");
+	TEST_EXPECT(players[1].as_text(0).value() == "test");
+	TEST_EXPECT(players[1].as_text(1).value() == "00000002");
+	TEST_EXPECT(players[1].as_text(2).value() == "1");
+	TEST_EXPECT(players[1].as_text(3).value() == "TestPlayer");
+	TEST_EXPECT(players[2].as_text(0).value() == "test1");
+	TEST_EXPECT(players[2].as_text(3).value() == "TestPlayer1");
+	TEST_EXPECT(players[3].as_text(0).value() == "test2");
+	TEST_EXPECT(players[3].as_text(3).value() == "TestPlayer2");
+	TEST_EXPECT(players[4].as_text(0).value() == "test3");
+	TEST_EXPECT(players[4].as_text(3).value() == "TestPlayer3");
+
 	auto files = db.query(
 		"SELECT e.slug, COUNT(f.id) "
 		"FROM expansions e LEFT JOIN expansion_files f ON f.expansion_id = e.id "
@@ -155,6 +174,17 @@ int test_seed_is_idempotent() {
 		for (const auto &p : seeds) {
 			db.exec_script(read_file(p));
 		}
+		if (pass == 0) {
+			db.exec(
+				"UPDATE players SET pcid='BADFOO', nwh='', nwhandle='', "
+				"account_status='banned' WHERE username='foo';"
+			);
+			db.exec(
+				"UPDATE player_game_access SET status='banned', exp_bits='0' "
+				"WHERE user_id=(SELECT id FROM players WHERE username='foo') "
+				"AND game_slug='jop_2_consumer';"
+			);
+		}
 	}
 
 	auto games = db.query("SELECT COUNT(*) FROM games;");
@@ -163,6 +193,23 @@ int test_seed_is_idempotent() {
 	TEST_EXPECT(expansions[0].as_int(0).value() == 3);
 	auto files = db.query("SELECT COUNT(*) FROM expansion_files;");
 	TEST_EXPECT(files[0].as_int(0).value() == 1);
+	auto foo = db.query(
+		"SELECT pcid, nwh, nwhandle, account_status FROM players "
+		"WHERE username='foo';"
+	);
+	TEST_EXPECT(foo.size() == 1);
+	TEST_EXPECT(foo[0].as_text(0).value() == "00000003");
+	TEST_EXPECT(foo[0].as_text(1).value() == "1");
+	TEST_EXPECT(foo[0].as_text(2).value() == "FooPlayer");
+	TEST_EXPECT(foo[0].as_text(3).value() == "active");
+	auto access = db.query(
+		"SELECT status, exp_bits FROM player_game_access "
+		"WHERE user_id=(SELECT id FROM players WHERE username='foo') "
+		"AND game_slug='jop_2_consumer';"
+	);
+	TEST_EXPECT(access.size() == 1);
+	TEST_EXPECT(access[0].as_text(0).value() == "active");
+	TEST_EXPECT(access[0].as_text(1).value() == "3");
 	return 0;
 }
 

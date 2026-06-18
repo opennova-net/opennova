@@ -129,7 +129,7 @@ std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
 ClientSession::Config ClientSession::Config::jointoperations() {
 	Config c;
 	c.pn  = "JointOperations";       // flips the session to the in-match game protocol
-	c.pv1 = "0.0.0 2/10/2004 EM";    // PROVISIONAL — real JO PV1 pending the 0x4d45e0 grill
+	c.pv1 = "0.0.0 1/12/2004 EM";    // JointOperations game protocol PV1
 	c.pg  = jointoperations_pg();    // PROVISIONAL placeholder GUID
 	c.use_default_pg = false;        // use the explicit JO pg above
 	return c;

@@ -17,10 +17,13 @@
 
 using opennova::ClientAuth;
 using opennova::ClientHello;
+using opennova::ServerAuth;
 using opennova::client_auth_to_bytes;
 using opennova::client_hello_to_bytes;
 using opennova::parse_client_auth;
 using opennova::parse_client_hello;
+using opennova::parse_server_auth;
+using opennova::server_auth_to_bytes;
 
 namespace {
 
@@ -118,6 +121,28 @@ int test_client_auth_minimum_for_acceptance() {
 	return 0;
 }
 
+int test_server_auth_rejection_roundtrip() {
+	ServerAuth src;
+	src.ci = 7;
+	src.ck = 0x12345678u;
+	src.cr = 0;
+	src.jfc = 19;
+	src.jfp = 2;
+	src.jfs = "side password rejected";
+
+	auto bytes = server_auth_to_bytes(src);
+	TEST_EXPECT(!bytes.empty());
+
+	ServerAuth round;
+	TEST_EXPECT(parse_server_auth(bytes.data(), bytes.size(), round));
+	TEST_EXPECT(round.cr == 0);
+	TEST_EXPECT(round.jfc == 19);
+	TEST_EXPECT(round.jfp == 2);
+	TEST_EXPECT(round.jfs == "side password rejected");
+	TEST_EXPECT(round.scrk.empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -125,6 +150,7 @@ int main() {
 	if (test_client_hello_minimal() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
+	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	std::printf("OK: ClientHello/ClientAuth serializer roundtrip\n");
 	return 0;
 }

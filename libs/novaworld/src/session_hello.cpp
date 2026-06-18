@@ -355,6 +355,9 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg) {
 	append_u32_field(buf, "MI", msg.mi);
 	append_u32_field(buf, "CK", msg.ck);
 	append_u32_field(buf, "CR", msg.cr);
+	if (msg.jfc) append_u32_field(buf, "JFC", msg.jfc);
+	if (msg.jfp) append_u32_field(buf, "JFP", msg.jfp);
+	if (!msg.jfs.empty()) append_string_field(buf, "JFS", msg.jfs);
 	append_u32_field(buf, "SK", msg.sk);
 	for (const auto &f : msg.client_cs) {
 		append_cs_field(buf, /*direction=*/1, f);
@@ -406,6 +409,8 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 	out.client_cs.clear();
 	out.server_cs.clear();
 	out.cu.clear();
+	bool saw_cr = false;
+	bool saw_rejection_detail = false;
 	size_t pos = 0;
 	while (pos < len) {
 		std::string name;
@@ -416,7 +421,10 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		if      (name == "CI")  out.ci  = read_u32_le(value, size);
 		else if (name == "MI")  out.mi  = read_u32_le(value, size);
 		else if (name == "CK")  out.ck  = read_u32_le(value, size);
-		else if (name == "CR")  out.cr  = read_u32_le(value, size);
+		else if (name == "CR")  { out.cr  = read_u32_le(value, size); saw_cr = true; }
+		else if (name == "JFC") { out.jfc = read_u32_le(value, size); saw_rejection_detail = true; }
+		else if (name == "JFP") { out.jfp = read_u32_le(value, size); saw_rejection_detail = true; }
+		else if (name == "JFS") { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
 		else if (name == "SK")  out.sk  = read_u32_le(value, size);
 		else if (name == "CS" && size == 6) {
 			// [direction][field_index][LE uint32]. direction 1 = client, 0 = server.
@@ -438,9 +446,9 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	// Minimum sanity: a real ServerAuth carries a server SCRK the client
-	// needs to decrypt subsequent session traffic.
-	return !out.scrk.empty();
+	// Accepted ServerAuth carries SCRK for subsequent traffic. Rejected joins
+	// legitimately omit SCRK and instead carry JFC/JFP/JFS details.
+	return !out.scrk.empty() || (saw_cr && out.cr != 1 && saw_rejection_detail);
 }
 
 // ---- ServerHello serializer (restored below) ---------------------------

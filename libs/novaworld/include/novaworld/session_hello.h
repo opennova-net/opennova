@@ -145,7 +145,7 @@ struct ClientAuth {
 	uint32_t ci = 0;   // Client Index (echo from Hello)
 	uint32_t hk = 0;   // Host Key (echo from ServerHello; checked == proto+1332)
 	uint32_t ck = 0;   // Client Key (client-generated)
-	std::string na;    // Name / alias (e.g. "jop:cus2") — must be NON-EMPTY (else reject 5)
+	std::string na;    // gate/game identifier (e.g. "jop:cus2"); must be non-empty
 	uint32_t sip = 0;  // Source IP (retail omits the tag when 0)
 	uint32_t spn = 0;  // Source Port Number (retail omits the tag when 0)
 	std::string scrk;  // Client-side Session CRypto Key
@@ -220,6 +220,12 @@ struct ServerAuth {
 	std::string na;       // echo client.na
 	uint32_t rip = 0;     // Reflected IP (client's remote IP)
 	uint32_t rpn = 0;     // Reflected Port Number
+
+	// Rejected-join fields. Retail can send these without SCRK when CR != 1;
+	// the packet is valid and should surface as a rejection, not malformed.
+	uint32_t jfc = 0;     // Join failure code
+	uint32_t jfp = 0;     // Join failure parameter
+	std::string jfs;      // Join failure string
 };
 
 // Build a minimal-valid ServerAuth echoing client fields + server

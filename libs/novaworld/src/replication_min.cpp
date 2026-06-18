@@ -520,10 +520,9 @@ std::vector<uint8_t> build_tag_0d_spawn_points(const std::vector<SpawnPointEntit
 		push_u32(buf, static_cast<uint32_t>(p.z));
 		// Team (flags&0x10).
 		push_u8(buf, p.team);
-		// Mandatory tail per the handler's always-read fields.
-		push_u16(buf, 0); // weapon_slot_0 → entity+416
-		push_u16(buf, 0); // weapon_slot_1 → entity+418
-		push_u8(buf, 0);  // bone_attach byte → entity+290
+		// Mandatory always-read bone/other byte. Weapon handles are gated by
+		// flags&0x0400 and are absent for these 0x0030 records.
+		push_u8(buf, 0);
 	}
 	return buf;
 }
