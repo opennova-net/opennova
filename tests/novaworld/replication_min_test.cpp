@@ -156,15 +156,40 @@ bool check_tag_2a_chat_layout() {
 }
 
 bool check_tag_0a_world_reference_layout() {
+	// D-NET-50: the field-driven §5.9 0x0A frame replaces the verbatim retail blob.
+	// The anchor (first 12 bytes) is the subject world position; one replicated
+	// entity becomes a tag=1 compact record; the whole frame must decode cleanly.
 	opennova::PlayerReplicationState ctx;
 	ctx.spawn_x = 0x01020304u;
 	ctx.spawn_y = 0x11121314u;
 	ctx.spawn_z = 0x21222324u;
-	const auto buf = opennova::build_tag_0a_world_reference(ctx);
-	if (!expect(buf.size() == 623, "tag=0x0A world reference is 623 bytes")) return false;
-	if (!expect(le32(buf.data() + 0) == ctx.spawn_x, "world reference X patched")) return false;
-	if (!expect(le32(buf.data() + 4) == ctx.spawn_y, "world reference Y patched")) return false;
-	if (!expect(le32(buf.data() + 8) == ctx.spawn_z, "world reference Z patched")) return false;
+	std::vector<opennova::GameEntitySnapshot> ents;
+	opennova::GameEntitySnapshot e;
+	e.pool = 0;
+	e.slot = 5;
+	e.type_id = 0x14B9;
+	e.entity_class = opennova::EntityClass::Infantry;
+	e.x = 0x01020404; // small +0x100 delta from the anchor X
+	e.y = 0x11121314;
+	e.z = 0x21222324;
+	ents.push_back(e);
+
+	const auto buf = opennova::build_tag_0a_world_reference(ctx, ents);
+	if (!expect(le32(buf.data() + 0) == ctx.spawn_x, "world reference X = anchor")) return false;
+	if (!expect(le32(buf.data() + 4) == ctx.spawn_y, "world reference Y = anchor")) return false;
+	if (!expect(le32(buf.data() + 8) == ctx.spawn_z, "world reference Z = anchor")) return false;
+
+	auto class_of = [](uint16_t t) {
+		return t == 0x14B9 ? opennova::EntityClass::Infantry : opennova::EntityClass::Unknown;
+	};
+	opennova::FrameUpdate fu;
+	if (!expect(opennova::decode_frame_update(buf.data(), buf.size(), class_of, fu),
+	            "field-driven 0x0A decodes")) return false;
+	if (!expect(fu.complete && fu.consumed == buf.size(), "0x0A consumed exactly")) return false;
+	if (!expect(fu.records.size() == 1 &&
+	            fu.records[0].cls == opennova::EntityClass::Infantry &&
+	            fu.records[0].handle == 5,
+	            "replicated entity present as infantry compact")) return false;
 	return true;
 }
 

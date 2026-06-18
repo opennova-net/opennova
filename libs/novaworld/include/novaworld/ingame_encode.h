@@ -27,6 +27,30 @@
 
 namespace opennova {
 
+// Compress an i32 16.16 fixed-point value to its 16-bit network form — the exact
+// inverse of `network_decompress_fixedpoint` (ingame_decode.h). Faithful port of
+// [orig: Network_CompressFixedPoint @ 0x4C2780]: sign in bit 0, exponent (shift)
+// in bits 1-3, 12-bit mantissa in bits 4-15. The host runs this on
+// `world_pos - anchor` (or the vehicle-local delta) before emitting a §5.10/§5.13/
+// §5.14 compact record; the result round-trips through the decompressor within one
+// quantization step (the codec is lossy/float-like).
+//
+// Divergence (documented): the original calls `bsr` on the folded magnitude with
+// no zero guard, so `value` in {0, -1} (which fold to 0) is undefined in retail.
+// We return the sign bit there — the only value that round-trips (0->0, -1->1->-1).
+inline uint16_t network_compress_fixedpoint(int32_t value) {
+	const uint32_t sign = uint32_t(value) >> 31;        // 0 or 1  [4c279a]
+	const int32_t  smask = value >> 31;                  // 0 or -1 (arith)  [4c2795]
+	const uint32_t fold = uint32_t(value ^ smask);       // |value| folded  [4c2798]
+	if (fold == 0) return uint16_t(sign);                // bsr-undefined guard
+	uint32_t bsr = 31;                                   // highest set-bit index  [4c279d]
+	for (uint32_t m = fold; !(m & 0x80000000u); m <<= 1) --bsr;
+	const uint32_t shift = ((bsr >= 15) ? (bsr - 15) : 0u) | 1u; // [4c27a0..4c27ac]
+	uint32_t mantissa = (fold + (8u << shift)) >> shift;          // round + scale  [4c27af..4c27b3]
+	if (mantissa > 0xFFFFu) mantissa = 0xFFFFu;                   // clamp  [4c27b8..4c27bf]
+	return uint16_t((mantissa & 0xFFF0u) | (shift & 0x0Eu) | sign); // [4c27b5..4c27cb]
+}
+
 // Encode a S2C 0x20 bulk pool-3 sync body (§5.12) — the exact bytes
 // `decode_pool3_sync_batch` consumes. Faithful port of
 // [orig: serialize_entity_pool_to_packet @ 0x503460]:
@@ -129,5 +153,16 @@ std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec
 std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
                                                GuidedFieldGroup group,
                                                const GuidedRecord &rec);
+
+// Encode a §5.9.1 weapon-hit record — the inverse of decode_weapon_hit_record.
+// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. 17-20 B by the flags gate.
+std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec);
+
+// Build a complete S2C 0x0A frame from a FrameUpdate — the inverse of the §5.9
+// decode_frame_update walk. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]. The host
+// constructs the FrameUpdate from live entity state (anchor = subject world pos;
+// each compact record's positions compressed via network_compress_fixedpoint
+// relative to the anchor) and this emits the wire bytes the client decodes.
+std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu);
 
 } // namespace opennova

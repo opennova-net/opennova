@@ -442,10 +442,133 @@ int test_player_compact_roundtrip() {
 	return 0;
 }
 
+// network_compress_fixedpoint <-> network_decompress_fixedpoint, the position
+// codec the field-driven 0x0A builder uses. The codec is lossy (12-bit float-like)
+// and its XOR-fold is asymmetric for negatives, so only representable positives are
+// exact; everything else must land within its quantization step.
+// [orig: Network_CompressFixedPoint @ 0x4C2780 / Network_DecompressFixedPoint @ 0x4C27E0]
+int test_compress_fixedpoint_roundtrip() {
+	// bsr-undefined inputs (fold==0) round-trip exactly via the sign guard.
+	EXPECT(network_compress_fixedpoint(0) == 0);
+	EXPECT(network_decompress_fixedpoint(network_compress_fixedpoint(0)) == 0);
+	EXPECT(network_decompress_fixedpoint(network_compress_fixedpoint(-1)) == -1);
+
+	// Exactly-representable positives (mantissa<<shift, mantissa a multiple of 0x10).
+	const int32_t exact[] = {0x20, 0x200, 0x1000, 0x2000, 0x4000};
+	for (int32_t v : exact)
+		EXPECT(network_decompress_fixedpoint(network_compress_fixedpoint(v)) == v);
+
+	// General values round-trip within one quantization step (~|v| >> 11); allow
+	// |v|/1024 + 32 as a safe upper bound. Covers negatives + the full i32 range.
+	const int32_t vals[] = {
+		1, -1, 5, -5, 0x1234, -0x1234, 0x12345, -0x12345, -0x2000,
+		0x100000, -0x100000, 0x3FFFFFF, -0x3FFFFFF, 0x7FFFFFFF, int32_t(0x80000001u),
+	};
+	for (int32_t v : vals) {
+		const int32_t rt = network_decompress_fixedpoint(network_compress_fixedpoint(v));
+		int64_t err = int64_t(rt) - int64_t(v);
+		if (err < 0) err = -err;
+		int64_t mag = int64_t(v) < 0 ? -int64_t(v) : int64_t(v);
+		EXPECT(err <= (mag >> 10) + 32);
+	}
+	std::printf("PASS compress_fixedpoint_roundtrip\n");
+	return 0;
+}
+
+// encode_frame_update <-> decode_frame_update: the §5.9 0x0A whole-message pair the
+// field-driven builder relies on. Covers the aim sub-block + all three compact
+// classes + a weapon-hit, the env sub-block, and the conditional passenger record.
+int test_frame_update_roundtrip() {
+	auto class_of = [](uint16_t t) -> EntityClass {
+		if (t == 100) return EntityClass::Player;
+		if (t == 200) return EntityClass::Vehicle;
+		if (t == 300) return EntityClass::Infantry;
+		return EntityClass::Unknown;
+	};
+
+	// (a) aim sub-block (flags2=0x00) + player/vehicle/infantry records + 1 hit.
+	{
+		FrameUpdate in;
+		in.anchor_x = 0x00112233; in.anchor_y = int32_t(0xFFAABBCC); in.anchor_z = 0x0044EE55;
+		in.flags1 = 0x02; in.flags2 = 0x00;
+		in.aim.view0 = 1; in.aim.view1 = 2; in.aim.view2 = 3;
+		in.aim.view3 = 4; in.aim.view4 = 5; in.aim.view5 = 6;
+		in.aim.target_slot = 0xFF; in.aim.aim_extra = 0x12345678;
+		in.state_flag_byte = 0x07; in.mount_handle = 0xFFFF; in.health = 96; in.state_word = -3;
+
+		FrameUpdateRecord p; p.handle = 0x0001; p.type_id = 100; p.cls = EntityClass::Player;
+		p.player.vehicle_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
+		in.records.push_back(p);
+		FrameUpdateRecord v; v.handle = 0x1002; v.type_id = 200; v.cls = EntityClass::Vehicle;
+		v.vehicle.parent_slot_handle = 0xFFFF; v.vehicle.flags_byte = 0x00;
+		v.vehicle.weapon_x = 0x0101; v.vehicle.weapon_aim_y = 0x0303;
+		in.records.push_back(v);
+		FrameUpdateRecord inf; inf.handle = 0x2003; inf.type_id = 300; inf.cls = EntityClass::Infantry;
+		inf.infantry.vehicle_slot_handle = 0xFFFF; inf.infantry.pos_x_compressed = 0xABCD;
+		in.records.push_back(inf);
+
+		WeaponHitRecord hit; hit.flags = 0x00; hit.adm_index = 9; hit.target_handle = 0x100A;
+		hit.pos_x_compressed = 0x0011; in.hits.push_back(hit);
+
+		std::vector<uint8_t> wire = encode_frame_update(in);
+		FrameUpdate out;
+		EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out));
+		EXPECT(out.complete);
+		EXPECT(out.consumed == wire.size());
+		EXPECT(out.anchor_x == in.anchor_x && out.anchor_y == in.anchor_y && out.anchor_z == in.anchor_z);
+		EXPECT(out.flags1 == 0x02 && out.flags2 == 0x00);
+		EXPECT(out.aim.present && out.aim.aim_extra == 0x12345678 && out.aim.view5 == 6);
+		EXPECT(out.health == 96 && out.state_word == -3 && out.mount_handle == 0xFFFF);
+		EXPECT(out.records.size() == 3);
+		EXPECT(out.records[0].cls == EntityClass::Player && out.records[0].handle == 0x0001);
+		EXPECT(out.records[0].player.pos_x_compressed == 0x1234);
+		EXPECT(out.records[1].cls == EntityClass::Vehicle && out.records[1].vehicle.weapon_x == 0x0101);
+		EXPECT(out.records[1].vehicle.weapon_aim_y == 0x0303);
+		EXPECT(out.records[2].cls == EntityClass::Infantry && out.records[2].infantry.pos_x_compressed == 0xABCD);
+		EXPECT(out.hits.size() == 1 && out.hits[0].adm_index == 9 && out.hits[0].target_handle == 0x100A);
+	}
+
+	// (b) env sub-block (flags2=0x02), no records.
+	{
+		FrameUpdate in;
+		in.flags2 = 0x02;
+		in.env.fog_dist = 0x1111; in.env.fog_accel = 0x2222; in.env.tod_fixed = 0x3333;
+		in.env.quake_ticks = 0x44; in.env.env_param = 0x55;
+		in.mount_handle = 0xFFFF; in.health = 50;
+		std::vector<uint8_t> wire = encode_frame_update(in);
+		FrameUpdate out;
+		EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out));
+		EXPECT(out.complete && out.consumed == wire.size());
+		EXPECT(out.sub_block == 2 && out.env.present);
+		EXPECT(out.env.fog_dist == 0x1111 && out.env.tod_fixed == 0x3333 && out.env.env_param == 0x55);
+		EXPECT(out.records.empty());
+	}
+
+	// (c) passenger record (flags2=0x08 -> aim sub-block + passenger gate) with seat.
+	{
+		FrameUpdate in;
+		in.flags2 = 0x08;
+		in.mount_handle = 0x1005; in.health = 75;
+		in.passenger.handle = 0x1006;
+		in.passenger.seat_yaw = 0xAA11; in.passenger.seat_pitch = 0xBB22;
+		std::vector<uint8_t> wire = encode_frame_update(in);
+		FrameUpdate out;
+		EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out));
+		EXPECT(out.complete && out.consumed == wire.size());
+		EXPECT(out.passenger.present && out.passenger.handle == 0x1006);
+		EXPECT(out.passenger.has_seat && out.passenger.seat_yaw == 0xAA11 && out.passenger.seat_pitch == 0xBB22);
+	}
+
+	std::printf("PASS frame_update_roundtrip\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int rc = 0;
+	rc |= test_compress_fixedpoint_roundtrip();
+	rc |= test_frame_update_roundtrip();
 	rc |= test_roundtrip_all_flags();
 	rc |= test_roundtrip_no_flags_and_length();
 	rc |= test_flag_derivation_is_from_nonzero();

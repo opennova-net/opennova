@@ -287,4 +287,101 @@ std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
 	return out;
 }
 
+// §5.9.1 weapon-hit record — the inverse of decode_weapon_hit_record.
+// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. 17-20 B by the flags gate
+// (0x80 adds parent_byte, 0x40 adds weapon_handle).
+std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(rec.flags);
+	w.u8(rec.adm_index);
+	w.u8(rec.hit_subtype);
+	if (rec.flags & 0x80) w.u8(rec.parent_byte);
+	w.u16(rec.target_handle);
+	if (rec.flags & 0x40) w.u16(rec.weapon_handle);
+	w.u16(rec.damage_extra_raw);
+	w.u16(rec.pos_x_compressed);
+	w.u16(rec.pos_y_compressed);
+	w.u16(rec.pos_z_compressed);
+	w.u16(rec.yaw_bam_high);
+	w.u16(rec.pitch_bam_high);
+	return out;
+}
+
+// Build a complete S2C 0x0A frame from a FrameUpdate — the inverse of the
+// decode_frame_update walk (§5.9). [orig: NapiNPClientMsg_0x00A @ 0x42FEC0].
+// 12-B anchor, flags1/flags2, the flags2&3 sub-block (aim/timer/env/objective),
+// the 7-B tail, the conditional passenger record, then the event loop (tag=1
+// per-entity compact via the §5.10b class dispatch, tag=2 weapon-hit) and the
+// tag=0 terminator. Guided/Unknown records are NOT emitted: the guided serializer
+// rejects format 11, so they never appear in 0x0A (decode fails closed on them).
+std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	auto append = [&](const std::vector<uint8_t> &v) {
+		out.insert(out.end(), v.begin(), v.end());
+	};
+
+	w.u32(uint32_t(fu.anchor_x));
+	w.u32(uint32_t(fu.anchor_y));
+	w.u32(uint32_t(fu.anchor_z));
+	w.u8(fu.flags1);
+	w.u8(fu.flags2);
+
+	switch (fu.flags2 & 0x03) {
+	case 0: // aim (11 B)
+		w.u8(fu.aim.view0); w.u8(fu.aim.view1); w.u8(fu.aim.view2);
+		w.u8(fu.aim.view3); w.u8(fu.aim.view4); w.u8(fu.aim.view5);
+		w.u8(fu.aim.target_slot);
+		w.u32(uint32_t(fu.aim.aim_extra));
+		break;
+	case 1: // timer (6 B)
+		w.u8(fu.timer.state0); w.u8(fu.timer.state1);
+		w.u8(fu.timer.state2); w.u8(fu.timer.state3);
+		w.u16(uint16_t(fu.timer.timer_seconds));
+		break;
+	case 2: // env (11 B)
+		w.u16(fu.env.fog_dist); w.u16(fu.env.fog_accel); w.u16(fu.env.tod_fixed);
+		w.u8(fu.env.quake_ticks); w.u8(fu.env.cloud_scroll); w.u8(fu.env.cloud_param2);
+		w.u8(fu.env.overcast); w.u8(fu.env.env_param);
+		break;
+	default: // sub-block 3: the objective gate is wire-invisible → 0 B (matches decode)
+		break;
+	}
+
+	// 7-byte tail (local-player state).
+	w.u8(fu.state_flag_byte);
+	w.u16(fu.mount_handle);
+	w.u16(uint16_t(fu.health));
+	w.u16(uint16_t(fu.state_word));
+
+	// Conditional passenger record.
+	if ((fu.flags2 & 0x0F) == 8) {
+		w.u16(fu.passenger.handle);
+		if (fu.passenger.handle != 0xFFFF) {
+			w.u16(fu.passenger.seat_yaw);
+			w.u16(fu.passenger.seat_pitch);
+		}
+	}
+
+	// Event loop: tag=1 per-entity compacts, then tag=2 weapon-hits, then tag=0.
+	for (const FrameUpdateRecord &rec : fu.records) {
+		w.u8(1);
+		w.u16(rec.handle);
+		w.u16(rec.type_id);
+		switch (rec.cls) {
+		case EntityClass::Player:   append(encode_player_compact_record(rec.player)); break;
+		case EntityClass::Vehicle:  append(encode_vehicle_compact_record(rec.vehicle)); break;
+		case EntityClass::Infantry: append(encode_infantry_compact_record(rec.infantry)); break;
+		default: break; // Guided/Unknown not emitted (see header)
+		}
+	}
+	for (const WeaponHitRecord &hit : fu.hits) {
+		w.u8(2);
+		append(encode_weapon_hit_record(hit));
+	}
+	w.u8(0); // event-loop terminator
+	return out;
+}
+
 } // namespace opennova

@@ -1207,7 +1207,9 @@ GameSessionDispatchResult GameSession::tick(GameSessionState &state,
 		state.ms_since_tag10 = 0;
 	}
 	if (state.spawned && state.ms_since_tag0a >= kTag0aIntervalMs) {
-		add_reply(result, 0x0A, build_tag_0a_world_reference(player_replication_state()));
+		add_reply(result, 0x0A,
+		          build_tag_0a_world_reference(player_replication_state(),
+		                                       config_.replicated_entities));
 		state.ms_since_tag0a = 0;
 	}
 	if (state.spawned && state.ms_since_tag57 >= kTag57IntervalMs) {

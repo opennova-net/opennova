@@ -1,4 +1,5 @@
 #include <novaworld/game_session.h>
+#include <novaworld/ingame_decode.h> // decode_frame_update (validate the field-driven 0x0A)
 #include <novaworld/retail_loading_blobs.h>
 
 #include <cstdio>
@@ -507,6 +508,17 @@ bool check_tick_emits_entity_batch_and_world_reference() {
 	const auto spawned_tick = session.tick(state, 1000, 0xCAFEBABFu);
 	if (!expect(find_tag(spawned_tick.replies, 0x10) >= 0, "spawned tick emits tag=0x10")) return false;
 	if (!expect(find_tag(spawned_tick.replies, 0x0A) >= 0, "spawned tick emits tag=0x0A world reference")) return false;
+	{
+		// D-NET-50: the field-driven 0x0A the tick now emits must decode cleanly via
+		// the §5.9 walk (no leftover) — the end-to-end wiring check.
+		const int s0a = find_tag(spawned_tick.replies, 0x0A);
+		const auto &frame = spawned_tick.replies[static_cast<size_t>(s0a)].payload;
+		auto class_of = [](uint16_t) { return opennova::EntityClass::Unknown; };
+		opennova::FrameUpdate fu;
+		if (!expect(opennova::decode_frame_update(frame.data(), frame.size(), class_of, fu) &&
+		            fu.complete && fu.consumed == frame.size(),
+		            "field-driven 0x0A decodes cleanly")) return false;
+	}
 	if (!expect(find_tag(spawned_tick.replies, 0x57) >= 0, "spawned tick emits tag=0x57")) return false;
 	return true;
 }

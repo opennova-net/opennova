@@ -2870,7 +2870,7 @@ FLDS columns, decoded through the XXXX terminator):
 - **D-NET-49** [OPEN] `jointoperations_pg()` is a placeholder; the in-match PG (16B @ proto+284) is unwitnessed (source `NapiNPVarBlock_Copy @ 0x4ca7af`, not sub_62E750). Re-discover.
 
 `replication_min.cpp` + `game_session.cpp` (in-match player state — §5.10):
-- **D-NET-50** [HIGH, TRACKED] `build_tag_0a_world_reference` ships a 623-byte verbatim retail blob (`kRetailTag0aPayload`) with only bytes 0-11 patched. The real S2C 0x0A trailer is per-entity 18-byte **compact (type-11) records** — positions 16-bit compressed via `Network_CompressFixedPoint`, NOT raw i32, and vehicle-local when mounted. Replace with a field-driven builder per §5.10 case 1 (full table there). [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop]
+- **D-NET-50** [HIGH, FIXED] `build_tag_0a_world_reference` shipped a 623-byte verbatim retail blob (`kRetailTag0aPayload`, only bytes 0-11 patched) on a 300 ms gameplay cadence — an ADR-0003 raw-passthrough violation. Replaced with a **field-driven builder**: it constructs a `FrameUpdate` from the host's `PlayerReplicationState` + `config_.replicated_entities` (anchor = subject world position; one tag=1 compact record per replicated entity, positions 16-bit compressed relative to the anchor via the new `network_compress_fixedpoint`, classed by `GameEntitySnapshot.entity_class`) and emits it via the new `encode_frame_update` — the exact inverse of `decode_frame_update`. Ported `network_compress_fixedpoint` (with a documented zero-guard divergence) + added `encode_frame_update` / `encode_weapon_hit_record` (ingame_encode). Validated by encode↔decode round-trips (compressor + whole-frame) and a `game_session` end-to-end assertion that the tick's 0x0A `decode_frame_update`-cleans. Guided/Unknown classes are skipped (no 0x0A compact form). Vehicle-local (mounted) compression + env/timer sub-block rotation are tracked follow-ups. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 1 / NapiNPClientMsg_0x00A @ 0x42FEC0 event loop / Network_CompressFixedPoint @ 0x4C2780]
 - **D-NET-51** [HIGH, FIXED] `handle_tag_0c_player_input` now uses the shared 5-byte entity sub-header + 43-byte extended (type-10) decoder from §5.10 instead of raw offsets. [orig: NetPacket_SerializePlayerState @ 0x4C09C0 case 4 / dispatch_entity_packet_callback @ 0x4D6A80]
 
 `replication_min.cpp` + `game_session.cpp` (pool-entity spawn/sync — §5.11/§5.12):
@@ -2917,7 +2917,7 @@ down; unreachable for realistic payloads).
   real NovaWorld now produces a retail-parseable list.
 
 **High-value follow-up backlog (tracked rewrites):** JO game PG discovery (D-NET-49);
-field-driven S2C 0x0A world-reference replacement (D-NET-50); pool-3 0x20 runtime wiring
-(D-NET-55); and giving `make_client_host_request` the same `ClientVarList` wrapping
-`make_client_play_request` now has (D-NET-38). Each carries its `[orig]` anchor and
-corrected behavior above.
+pool-3 0x20 runtime wiring (D-NET-55, the sibling of the now-FIXED D-NET-50 — its
+`encode_pool3_sync_batch` is written but unwired into the tick loop); and giving
+`make_client_host_request` the same `ClientVarList` wrapping `make_client_play_request`
+now has (D-NET-38). Each carries its `[orig]` anchor and corrected behavior above.

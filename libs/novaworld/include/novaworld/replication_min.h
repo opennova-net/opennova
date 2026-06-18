@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <novaworld/ingame_decode.h> // EntityClass (the §5.10b replication class)
+
 namespace opennova {
 
 // In-game replication payload builders. Each builder produces raw payload bytes
@@ -52,6 +54,10 @@ struct GameEntitySnapshot {
 	int32_t x = 0;
 	int32_t y = 0;
 	int32_t z = 0;
+	// §5.10b replication class for the S2C 0x0A event loop (D-NET-50): selects the
+	// compact encoder. Unknown ⇒ the entity is NOT emitted as a 0x0A compact record
+	// (the authoring / .bms layer sets it from the item's *_function class tag).
+	EntityClass entity_class = EntityClass::Unknown;
 };
 
 struct EntityBatchBuildResult {
@@ -150,8 +156,10 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout();
 // First-pass implementation: verbatim copy of retail capture3 frame 211497
 // (623 bytes), with bytes 0-11 patched to ctx.spawn_x/y/z so the client
 // locks to OUR spawn coord, not retail's.
-std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &player);
-std::vector<uint8_t> build_tag_0a_player_state(const PlayerReplicationState &player);
+std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &player,
+                                                  const std::vector<GameEntitySnapshot> &entities = {});
+std::vector<uint8_t> build_tag_0a_player_state(const PlayerReplicationState &player,
+                                               const std::vector<GameEntitySnapshot> &entities = {});
 
 // tag=0x1E GAME-EVENT. Witnessed at `GameEvent_BuildPayload@0x5054E0` (server-
 // side payload builder) + `NetPacket_HandleGameEvent@0x426270` (client-side
