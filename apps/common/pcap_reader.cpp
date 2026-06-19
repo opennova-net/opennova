@@ -1,6 +1,7 @@
 #include "pcap_reader.h"
 
 #include <fstream>
+#include <functional>
 
 namespace opennova::net {
 
@@ -65,7 +66,8 @@ int strip_link_header(uint32_t linktype, const uint8_t *frame, size_t len) {
 
 void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
                       int frame_index, uint64_t ts_nanos,
-                      std::vector<PcapDatagram> &out, int &fragments_dropped) {
+                      const std::function<void(PcapDatagram &)> &emit,
+                      int &fragments_dropped) {
 	const int ip_off = strip_link_header(linktype, pkt, len);
 	if (ip_off < 0 || size_t(ip_off) + 20 > len) return;
 	const uint8_t *ip = pkt + ip_off;
@@ -102,7 +104,7 @@ void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
 	d.frame_index = frame_index;
 	d.ts_nanos = ts_nanos;
 	d.payload.assign(pkt + payload_off, pkt + payload_off + payload_len);
-	out.push_back(std::move(d));
+	emit(d);
 }
 
 uint16_t ipv4_checksum(const uint8_t *hdr, size_t len) {
@@ -154,6 +156,7 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 	if (!data || len < 24) return false;
 	int fragments_dropped = 0;
 	int frame_index = 0;
+	auto emit = [&out](PcapDatagram &d) { out.push_back(std::move(d)); };
 
 	const uint32_t magic = read_u32_le(data);
 	if (magic == PCAP_MAGIC_LE || magic == PCAP_MAGIC_BE ||
@@ -175,7 +178,7 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 			if (off + 16 + incl_len > len) break;
 			frame_index++;
 			extract_ipv4_udp(data + off + 16, incl_len, linktype, frame_index, ts_nanos,
-			                 out, fragments_dropped);
+			                 emit, fragments_dropped);
 			off += 16 + incl_len;
 		}
 	} else if (magic == PCAPNG_BLOCK_SHB) {
@@ -206,14 +209,14 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 				if (20 + cap_len <= body_len) {
 					frame_index++;
 					extract_ipv4_udp(body + 20, cap_len, cur_linktype, frame_index,
-					                 ts_nanos, out, fragments_dropped);
+					                 ts_nanos, emit, fragments_dropped);
 				}
 			} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
 				const uint32_t pkt_len = read_u32_le(body);
 				if (4 + pkt_len <= body_len) {
 					frame_index++;
 					extract_ipv4_udp(body + 4, pkt_len, cur_linktype, frame_index, 0,
-					                 out, fragments_dropped);
+					                 emit, fragments_dropped);
 				}
 			}
 			off += blen;
@@ -237,6 +240,101 @@ bool read_pcap_udp_file(const std::string &path, std::vector<PcapDatagram> &out,
 	f.read(reinterpret_cast<char *>(buf.data()), n);
 	if (!f.good() && !f.eof()) return false;
 	return read_pcap_udp(buf.data(), buf.size(), out, frags_dropped);
+}
+
+bool stream_pcap_udp_file(const std::string &path,
+                          const std::function<bool(const PcapDatagram &)> &on_datagram,
+                          int *frags_dropped) {
+	// One record/block at a time over a large IO buffer — flat memory regardless of
+	// file size (for multi-GB captures the whole-file read above would OOM).
+	constexpr uint32_t kMaxRecord = 64u << 20; // 64 MB sanity cap per record/block
+	std::vector<char> iobuf(1u << 20);
+	std::ifstream f;
+	f.rdbuf()->pubsetbuf(iobuf.data(), std::streamsize(iobuf.size()));
+	f.open(path, std::ios::binary);
+	if (!f) return false;
+
+	int fragments_dropped = 0;
+	int frame_index = 0;
+	bool stop = false;
+	auto emit = [&](PcapDatagram &d) { if (!stop && !on_datagram(d)) stop = true; };
+
+	uint8_t hdr[24];
+	if (!f.read(reinterpret_cast<char *>(hdr), 24)) return false;
+	const uint32_t magic = read_u32_le(hdr);
+
+	if (magic == PCAP_MAGIC_LE || magic == PCAP_MAGIC_BE ||
+	    magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE) {
+		const bool be = (magic == PCAP_MAGIC_BE || magic == PCAP_MAGIC_NSEC_BE);
+		const bool nsec = (magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE);
+		auto r32 = [&](const uint8_t *p) { return be ? read_u32_be(p) : read_u32_le(p); };
+		const uint32_t linktype = r32(hdr + 20);
+		std::vector<uint8_t> frame;
+		uint8_t rec[16];
+		while (f.read(reinterpret_cast<char *>(rec), 16)) {
+			const uint32_t ts_sec = r32(rec);
+			const uint32_t ts_frac = r32(rec + 4);
+			const uint64_t ts_nanos = uint64_t(ts_sec) * 1000000000ull +
+			    (nsec ? uint64_t(ts_frac) : uint64_t(ts_frac) * 1000ull);
+			const uint32_t incl_len = r32(rec + 8);
+			if (incl_len > kMaxRecord) break;
+			frame.resize(incl_len);
+			if (incl_len && !f.read(reinterpret_cast<char *>(frame.data()), incl_len)) break;
+			++frame_index;
+			extract_ipv4_udp(frame.data(), incl_len, linktype, frame_index, ts_nanos,
+			                 emit, fragments_dropped);
+			if (stop) break;
+		}
+	} else if (magic == PCAPNG_BLOCK_SHB) {
+		const uint32_t bom = read_u32_le(hdr + 8);
+		if (bom != 0x1A2B3C4Du) return false; // big-endian pcapng unsupported
+		const uint32_t shb_len = read_u32_le(hdr + 4);
+		if (shb_len < 24 || shb_len > kMaxRecord) return false;
+		if (shb_len > 24) f.seekg(shb_len - 24, std::ios::cur); // skip SHB options
+		uint32_t cur_linktype = LINKTYPE_ETHERNET;
+		std::vector<uint64_t> if_mult;
+		std::vector<uint8_t> block;
+		uint8_t bh[8];
+		while (f.read(reinterpret_cast<char *>(bh), 8)) {
+			const uint32_t btype = read_u32_le(bh);
+			const uint32_t blen = read_u32_le(bh + 4);
+			if (blen < 12 || blen > kMaxRecord) break;
+			const size_t body_total = blen - 8; // body + trailing length copy
+			block.resize(body_total);
+			if (!f.read(reinterpret_cast<char *>(block.data()), std::streamsize(body_total))) break;
+			const uint8_t *body = block.data();
+			const size_t body_len = blen - 12;
+			if (btype == PCAPNG_BLOCK_IDB && body_len >= 8) {
+				cur_linktype = read_u32_le(body) & 0xFFFF;
+				if_mult.push_back(idb_ns_multiplier(body, body_len));
+			} else if (btype == PCAPNG_BLOCK_EPB && body_len >= 20) {
+				const uint32_t iface = read_u32_le(body);
+				const uint64_t mult = iface < if_mult.size() ? if_mult[iface] : 1000ull;
+				const uint64_t ts = (uint64_t(read_u32_le(body + 4)) << 32) |
+				                    uint64_t(read_u32_le(body + 8));
+				const uint64_t ts_nanos = ts * mult;
+				const uint32_t cap_len = read_u32_le(body + 12);
+				if (20 + cap_len <= body_len) {
+					++frame_index;
+					extract_ipv4_udp(body + 20, cap_len, cur_linktype, frame_index,
+					                 ts_nanos, emit, fragments_dropped);
+				}
+			} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
+				const uint32_t pkt_len = read_u32_le(body);
+				if (4 + pkt_len <= body_len) {
+					++frame_index;
+					extract_ipv4_udp(body + 4, pkt_len, cur_linktype, frame_index, 0,
+					                 emit, fragments_dropped);
+				}
+			}
+			if (stop) break;
+		}
+	} else {
+		return false;
+	}
+
+	if (frags_dropped) *frags_dropped = fragments_dropped;
+	return true;
 }
 
 std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams) {

@@ -1140,6 +1140,14 @@ target_include_directories(nw_replay_partition_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
 add_test(NAME nw_replay_partition COMMAND nw_replay_partition_test)
 
+# Streaming pcap reader — stream_pcap_udp_file must match the whole-file
+# read_pcap_udp byte-for-byte and honor early-exit (the basis for nw_replay
+# handling multi-GB captures without loading them into RAM). No fixtures, CI.
+add_executable(nw_pcap_stream_test novaworld/nw_pcap_stream_test.cpp)
+target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common)
+target_include_directories(nw_pcap_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_pcap_stream COMMAND nw_pcap_stream_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.

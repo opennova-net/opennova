@@ -6,6 +6,7 @@
 // it only needs to know which port is the host and which are clients.
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
 #include "pcap_reader.h"
@@ -48,9 +49,21 @@ struct Roles {
 	int role_count() const { return host_port ? int(client_ports.size()) + 1 : 0; }
 };
 
-// Derive the role partition from the session traffic in `pkts`: the host is the
-// port on the host side of every session flow; each client is a distinct port on
-// the other side. Noise is ignored.
+// Incremental partition tally: feed datagrams one at a time (so a multi-GB capture
+// can be partitioned by streaming, not loading it all), then finish() to derive
+// the host + client ports. The host is the port on the host side of every session
+// flow; each client is a distinct port on the other side. Noise is ignored.
+class RoleTally {
+public:
+	void add(const net::PcapDatagram &d);
+	Roles finish() const;
+
+private:
+	std::map<int, int> host_votes_;
+	std::map<int, int> client_seen_;
+};
+
+// Derive the role partition from all of `pkts` (a convenience over RoleTally).
 Roles partition_roles(const std::vector<net::PcapDatagram> &pkts);
 
 } // namespace opennova::replay

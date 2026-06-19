@@ -215,47 +215,58 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 
-	std::vector<net::PcapDatagram> pkts;
-	if (!net::read_pcap_udp_file(args.pcap, pkts)) {
+	// --validate needs every datagram in memory to decode per-role; small captures
+	// only (it loads the whole file).
+	if (args.validate) {
+		std::vector<net::PcapDatagram> pkts;
+		if (!net::read_pcap_udp_file(args.pcap, pkts)) {
+			std::fprintf(stderr, "nw_replay: failed to read pcap %s\n", args.pcap.c_str());
+			return 1;
+		}
+		std::printf("loaded %zu datagrams from %s\n", pkts.size(), args.pcap.c_str());
+		const replay::Roles roles = replay::partition_roles(pkts);
+		if (!roles.ok()) {
+			std::fprintf(stderr, "nw_replay: no NovaWorld session flows found\n");
+			return 1;
+		}
+		print_roles(roles);
+		return run_validate(pkts, roles, args.items);
+	}
+
+	// Pass 1 (streaming): partition + capture span with flat memory. Early-exit once
+	// a stable host+client partition is found, so a multi-GB capture isn't fully
+	// scanned twice (the join handshake — incl. the representative client — is early).
+	replay::RoleTally tally;
+	uint64_t tmin = UINT64_MAX, tmax = 0;
+	size_t scanned = 0;
+	if (!net::stream_pcap_udp_file(args.pcap, [&](const net::PcapDatagram &d) -> bool {
+		    tally.add(d);
+		    ++scanned;
+		    if (d.ts_nanos) {
+			    if (d.ts_nanos < tmin) tmin = d.ts_nanos;
+			    if (d.ts_nanos > tmax) tmax = d.ts_nanos;
+		    }
+		    if (scanned >= 100000 && (scanned % 10000) == 0 && tally.finish().ok())
+			    return false; // partition stable — stop scanning
+		    return true;
+	    })) {
 		std::fprintf(stderr, "nw_replay: failed to read pcap %s\n", args.pcap.c_str());
 		return 1;
 	}
-	std::printf("loaded %zu datagrams from %s\n", pkts.size(), args.pcap.c_str());
-	{
-		uint64_t tmin = UINT64_MAX, tmax = 0;
-		for (const auto &d : pkts)
-			if (d.ts_nanos) {
-				if (d.ts_nanos < tmin) tmin = d.ts_nanos;
-				if (d.ts_nanos > tmax) tmax = d.ts_nanos;
-			}
-		if (tmax >= tmin && tmin != UINT64_MAX)
-			std::printf("capture span: %.3f s\n", double(tmax - tmin) / 1.0e9);
-	}
+	std::printf("scanned %zu datagrams from %s\n", scanned, args.pcap.c_str());
+	if (tmax >= tmin && tmin != UINT64_MAX)
+		std::printf("capture span (scanned): %.3f s\n", double(tmax - tmin) / 1.0e9);
 
-	const replay::Roles roles = replay::partition_roles(pkts);
+	const replay::Roles roles = tally.finish();
 	if (!roles.ok()) {
 		std::fprintf(stderr, "nw_replay: no NovaWorld session flows found in the "
 		                     "capture (host + at least one client expected)\n");
 		return 1;
 	}
 	print_roles(roles);
-
 	if (args.print_roles) return 0;
-	if (args.validate) return run_validate(pkts, roles, args.items);
-
-	// Spectator stream: the representative session's S2C broadcast, in capture
-	// order, with timestamps for pacing.
-	struct PlanItem {
-		size_t pkt_index;
-		uint64_t ts_nanos;
-	};
-	std::vector<PlanItem> playlist;
-	playlist.reserve(pkts.size());
-	for (size_t i = 0; i < pkts.size(); ++i)
-		if (is_spectator_datagram(pkts[i], roles))
-			playlist.push_back({i, pkts[i].ts_nanos});
-	std::printf("spectator stream: %zu datagrams (representative session :%d S2C)\n",
-	            playlist.size(), representative_port(roles));
+	std::printf("spectator stream: representative session :%d S2C\n",
+	            representative_port(roles));
 
 	if (net::startup() != 0) {
 		std::fprintf(stderr, "nw_replay: socket startup failed\n");
@@ -291,24 +302,27 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// Paced playback to the spectator.
+	// Pass 2 (streaming): paced playback of the representative session's S2C to the
+	// spectator, read straight off disk — flat memory even for a multi-GB capture.
 	do {
 		const auto wall0 = steady_clock::now();
-		uint64_t prev_ts = playlist.empty() ? 0 : playlist.front().ts_nanos;
+		uint64_t prev_ts = 0;
+		bool first = true;
 		double sched_ns = 0.0;
 		size_t sent = 0;
-		for (const auto &item : playlist) {
-			const uint64_t gap = item.ts_nanos >= prev_ts ? item.ts_nanos - prev_ts : 0;
+		net::stream_pcap_udp_file(args.pcap, [&](const net::PcapDatagram &d) -> bool {
+			if (!is_spectator_datagram(d, roles)) return true;
+			if (first) { first = false; prev_ts = d.ts_nanos; }
+			const uint64_t gap = d.ts_nanos >= prev_ts ? d.ts_nanos - prev_ts : 0;
 			double gap_ms = double(gap) / 1.0e6 / args.speed;
 			if (gap_ms > double(args.max_gap_ms)) gap_ms = double(args.max_gap_ms);
 			sched_ns += gap_ms * 1.0e6;
-			prev_ts = item.ts_nanos;
+			prev_ts = d.ts_nanos;
 			std::this_thread::sleep_until(wall0 + nanoseconds(int64_t(sched_ns)));
-
-			const std::vector<uint8_t> &payload = pkts[item.pkt_index].payload;
-			net::udp_send_to(sock.get(), spectator, payload.data(), payload.size());
-			sent++;
-		}
+			net::udp_send_to(sock.get(), spectator, d.payload.data(), d.payload.size());
+			++sent;
+			return true;
+		});
 		std::printf("playback complete (%zu datagrams)\n", sent);
 		std::fflush(stdout);
 	} while (args.loop);

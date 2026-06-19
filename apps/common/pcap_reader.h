@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -35,9 +36,19 @@ bool read_pcap_udp(const uint8_t *data, size_t len,
                    std::vector<PcapDatagram> &out, int *frags_dropped = nullptr);
 
 // Convenience wrapper: slurp `path` then read_pcap_udp(). Returns false if the
-// file can't be read or isn't a pcap/pcapng.
+// file can't be read or isn't a pcap/pcapng. Loads the WHOLE file into memory —
+// use stream_pcap_udp_file for multi-GB captures.
 bool read_pcap_udp_file(const std::string &path, std::vector<PcapDatagram> &out,
                         int *frags_dropped = nullptr);
+
+// Stream a pcap/pcapng file one record/block at a time, invoking `on_datagram`
+// for each IPv4/UDP datagram in order, WITHOUT loading the whole file — flat
+// memory regardless of file size (for multi-GB captures). The datagram reference
+// is only valid for the duration of the callback; return false from it to stop
+// early (e.g. once a partition is established). Returns false on bad magic / IO.
+bool stream_pcap_udp_file(const std::string &path,
+                          const std::function<bool(const PcapDatagram &)> &on_datagram,
+                          int *frags_dropped = nullptr);
 
 // Build a minimal legacy pcap (DLT_RAW: one synthetic IPv4+UDP frame per
 // datagram) in memory — for crafting tiny inline captures in tests. Only

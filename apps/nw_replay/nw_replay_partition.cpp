@@ -38,29 +38,33 @@ int session_port_of(const net::PcapDatagram &d) {
 	return is_server_kind(k) ? d.dstport : d.srcport;
 }
 
-Roles partition_roles(const std::vector<net::PcapDatagram> &pkts) {
-	// Tally the host-side port of every session flow and the set of client ports.
-	std::map<int, int> host_votes;
-	std::map<int, int> client_seen;
-	for (const auto &d : pkts) {
-		const SessionKind k = classify_session(d.payload);
-		if (k == SessionKind::NotSession) continue;
-		const int client = is_server_kind(k) ? d.dstport : d.srcport;
-		const int host = is_server_kind(k) ? d.srcport : d.dstport;
-		host_votes[host]++;
-		client_seen[client]++;
-	}
+void RoleTally::add(const net::PcapDatagram &d) {
+	const SessionKind k = classify_session(d.payload);
+	if (k == SessionKind::NotSession) return;
+	const int client = is_server_kind(k) ? d.dstport : d.srcport;
+	const int host = is_server_kind(k) ? d.srcport : d.dstport;
+	host_votes_[host]++;
+	client_seen_[client]++;
+}
+
+Roles RoleTally::finish() const {
 	Roles r;
 	int best = 0;
-	for (const auto &[port, n] : host_votes)
+	for (const auto &[port, n] : host_votes_)
 		if (n > best) {
 			best = n;
 			r.host_port = port;
 		}
-	for (const auto &[port, n] : client_seen)
+	for (const auto &[port, n] : client_seen_)
 		if (port != r.host_port) r.client_ports.push_back(port);
 	std::sort(r.client_ports.begin(), r.client_ports.end());
 	return r;
+}
+
+Roles partition_roles(const std::vector<net::PcapDatagram> &pkts) {
+	RoleTally t;
+	for (const auto &d : pkts) t.add(d);
+	return t.finish();
 }
 
 } // namespace opennova::replay
