@@ -68,6 +68,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', 0x57, "rtt-echo",                MsgCoverage::Decoded,     "§5.34 decode_rtt_sample"},
 		{'S', 0x59, "deployed-item",           MsgCoverage::Decoded,     "§5.36 decode_deployed_item_spawn"},
 		{'S', 0x5A, "weapon-loadout",          MsgCoverage::Decoded,     "§5.30 decode_weapon_loadout"},
+		{'S', 0x5D, "destroy-list",            MsgCoverage::PrinterOnly, "clean despawn [i16 slot]xN (D-NET-80)"},
 		{'S', 0x60, "file-transfer-chunk",     MsgCoverage::Decoded,     "§5.28 decode_file_transfer_chunk"},
 		{'S', 0x61, "session-key",             MsgCoverage::PrinterOnly, "SCRK exchange"},
 		{'S', 0x64, "file-transfer-chunk",     MsgCoverage::Decoded,     "§5.28 decode_file_transfer_chunk"},

@@ -1071,6 +1071,20 @@ target_compile_definitions(nw_dvxc1_groundtruth_test PRIVATE
     DEFAULT_DVXC1_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3.pcapng")
 add_test(NAME nw_dvxc1_groundtruth COMMAND nw_dvxc1_groundtruth_test)
 
+# probe3_again: the richer dvxc1 re-run (3 players, 15 weapons, more movement).
+# Asserts the NEW dimensions — RTT/trio transport volume, multi-client identity +
+# death/leave lifecycle (0x26+0x13 deaths, 0x5D despawn cross-checked vs the host
+# .sph oracle), weapon variety, 0x59 deployed-item, and the confirmed negatives
+# (no guided 0x0C sub_ops, AI-static 0x20, Co-op roster teams==0). Gated on
+# NW_PROBE3AGAIN_PCAP / the .scratch capture; skips clean when absent.
+add_executable(nw_probe3again_lifecycle_test novaworld/nw_probe3again_lifecycle_test.cpp)
+target_link_libraries(nw_probe3again_lifecycle_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_probe3again_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_probe3again_lifecycle_test PRIVATE
+    DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng"
+    DEFAULT_PROBE3AGAIN_HOST_SPH="${CMAKE_SOURCE_DIR}/.scratch/hostprof_probe3again.sph")
+add_test(NAME nw_probe3again_lifecycle COMMAND nw_probe3again_lifecycle_test)
+
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
 # NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture
