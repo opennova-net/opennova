@@ -632,6 +632,31 @@ int check_S_2A_chat_history() {
 	return 0;
 }
 
+// S2C 0x59 — deployed-item / weapon-overlay spawn: fixed 32 B.
+int check_S_59_deployed_item() {
+	LE w;
+	w.u16(0x0362);  // item_id
+	w.u16(0x0005);  // owner_handle
+	w.u16(0x0362);  // friendly_item_id
+	w.u16(0x0000);  // enemy_item_id
+	w.u16(0x100B);  // slot_handle
+	w.u16(0xFFFF);  // parent_handle (none)
+	w.u32(0x00357A0F); w.u32(0xFFE41A76); w.u32(0x000B9705); // pos x/y/z
+	w.u16(0xAF58); w.u16(0xCBBA); w.u16(0x0000); // angles
+	w.u16(0x0000);  // reserved
+	EXPECT(w.b.size() == 32);
+	DeployedItemSpawn d;
+	size_t consumed = 0;
+	EXPECT(decode_deployed_item_spawn(w.b.data(), w.b.size(), d, consumed));
+	EXPECT(consumed == 32);
+	EXPECT(d.slot_handle == 0x100B);
+	EXPECT(d.owner_handle == 0x0005);
+	EXPECT(uint32_t(d.pos_x) == 0x00357A0F);
+	EXPECT(d.parent_handle == 0xFFFF);
+	cover('S', 0x59);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -687,6 +712,7 @@ int main() {
 	if (check_S_42_input_flags()) return 1;
 	if (check_S_79_spectator_flag()) return 1;
 	if (check_S_2A_chat_history()) return 1;
+	if (check_S_59_deployed_item()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

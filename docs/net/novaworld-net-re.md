@@ -311,7 +311,7 @@ sweep; blank = not yet characterized.
 | 0x41 | 0x4254C0 | `_0x041` | |
 | 0x42 | 0x4281A0 | `_0x042` | input/state-flags `[u16]` → Input_UnpackStateFlags (§5.35) |
 | 0x43 | 0x42FA90 | `_0x043` | time-sync ping `[u32 serverTs]` → C2S 0x08 (§5.34) |
-| 0x44 | 0x422710 | `_0x044` | |
+| 0x44 | 0x422710 | `_0x044` | entity-routed sub-packet: `[u16][i16 netId][u8 subtype]` + class body → entity def+356 callback (§5.36; body partial) |
 | 0x45 | 0x422890 | `_0x045` | empty payload; sets `dword_A82370=6`; calls `PolyTrn_LoadTileData()` (terrain texture rebuild) |
 | 0x46 | 0x431370 | `_0x046` | PLAYER-SYNC — full layout + field read order verified §5.21 (controlled capture 2026-06-17) |
 | 0x48 | 0x4284B0 | `_0x048` | |
@@ -328,7 +328,7 @@ sweep; blank = not yet characterized.
 | 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_0x058` | texture loader (terrain assets) |
-| 0x59 | 0x4228E0 | `_0x059` | |
+| 0x59 | 0x4228E0 | `_0x059` | deployed-item / weapon-overlay spawn (32 B): item ids + owner + slot + parent + 3×i32 pos + 3×u16 ang (§5.36) |
 | 0x5A | 0x4290E0 | `_0x05A` | weapon-loadout sync: `[u8 avatarClass]` + a `{typeId, ammoP, ammoS, ammoAlt}` slot chain to a `0xFF` terminator (typeId = AdmDef index); resets `dword_81474C=0`. Field map **§5.30** (decoded) |
 | 0x5B | 0x4322B0 | `_0x05B` | |
 | 0x5C | 0x425200 | `_0x05C` | |
@@ -2158,6 +2158,41 @@ distinct from the S2C `0x20` pool-3 sync). [orig: `NapiNPClientMsg_HandleChecksu
 ×12; all full-consume via the `decode_*` family. `nw_pp` decodes the whole capture with **zero decode
 failures**.
 
+### 5.36 Deployed-item spawn 0x59 + entity-routed sub-packet 0x44 (probe3_again, 2026-06-19)
+
+**S2C `0x59` — deployed-item / weapon-overlay spawn-or-update.** Fixed 32-B record. The host streams the
+placeable / weapon-overlay entities a player drops (ammo / supply crates, mines, beacons, satchels,
+deployed guns…). The handler searches 512 weapon-overlay slots for a matching entity and either updates
+its transform or allocates a new pool entry from the item def. It reads 15 u16s (30 B); the trailing 2
+bytes are unread.
+
+| off | field | type | notes |
+|---|---|---|---|
+| 0 | itemId | u16 | base / fallback item id (used if owner/items invalid) |
+| 2 | ownerHandle | u16 | the placing entity `(pool<<12)|slot` |
+| 4 | friendlyItemId | u16 | model shown to the owner's team |
+| 6 | enemyItemId | u16 | model shown to the other team |
+| 8 | slotHandle | u16 | the spawned entity `(pool<<12)|slot` |
+| 10 | parentHandle | u16 | attach parent (`0xFFFF` = none) |
+| 12 | posX/Y/Z | 3×i32 | world position (16.16) |
+| 24 | angX/Y/Z | 3×u16 | Euler; engine shifts `<< 16` |
+| 30 | reserved | u16 | not read by the handler |
+
+The friend/foe item pair lets one deployable look different to each side, selected by the owner's team @
+`+354` vs the local player (`enemyItemId` also chosen under the `dword_24D1E34 & 0x8000` no-friendly-fire
+flag). [orig: `NapiNPClientMsg_0x059 @ 0x4228E0` → `Entity_SpawnOrUpdateFromSlotPacket @ 0x546770`].
+**Witness:** probe3_again ×12 — a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5 at world
+`(53.5, -27.9, 11.6)`, `parent=none`; byte-exact full-consume via `decode_deployed_item_spawn`.
+
+**S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
+class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
+def+356`, `source_type=2`) — the **same per-class path** the C2S `0x0C` entity-uplink uses (§5.10b). We
+decode the sub-header + expose the body slice; the body's field layout is class-specific and is **not yet
+fully mapped** (PARTIAL — same deferral as the §5.15 guided record; the `subtype` here plays the field-group
+role the C2S 0x0C `sub_op` does). [orig: `NapiNPClientMsg_0x044 @ 0x422710` →
+`NetPacket_DispatchToEntityByNetId @ 0x4D6960`]. **Witness:** probe3_again ×12 — `subtype` 1/2/3 with body
+sizes 1/1/14 B; sub-header consumes, body left raw.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
@@ -3165,6 +3200,7 @@ Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1" re-run —
 - **D-NET-76** [MED, DOC+CODE] **The high-volume transport / anti-cheat control pings are now decoded — the largest hex-only hole in the §4 catalog (§5.34).** The richer 2-client session carried enough of each to field-map them. **RTT ping/pong S2C `0x57` ⇄ C2S `0x2C`** (×10,679 each — the single biggest channel by datagram count): identical 5-B `[u32 timestamp][u8 echoFlag]`; bidirectional — both peers ping, `echoFlag != 0` bounces the stamp back with the flag cleared, `echoFlag == 0` measures `rtt = GetTickCount() - timestamp` into a 10-sample ring (the server side also enforces `g_MinPing`/`g_MaxPing`, kicking >20× violators). **Periodic request trio S2C `0x68`/`0x43`/`0x39`** (×141 each, ~every 335 frames): each a single `[u32]` → fixed reply — `0x68` start_index → C2S `0x3D` entity-index list; `0x43` server_timestamp → C2S `0x08` time-sync; `0x39` challenge_seed → C2S `0x1C` anim-map CRC (seed constant `0x3D5D`). Landed `decode_rtt_sample` + `decode_u32_scalar` (`ingame_decode`), `nw_pp` printers, catalog flips (`0x57`/`0x2C`/`0x68`/`0x43`/`0x39` → Decoded; `0x08`/`0x1C`/`0x3D` reply labels), and `nw_message_coverage` checks (**30 Decoded tags**). **`0x2C` is direction-overloaded** — S2C `0x2C` (`@ 0x427E10`) is a chat-history entry, only the C2S direction is RTT. Wire-validated: RTT timestamps pair across the two directions; the trio full-consumes. [orig: NapiNPClientMsg_0x057_RTT @ 0x432210 / NapiNPServerMsg_HandlePingResponse @ 0x515070 / NapiNPClientMsg_0x068 @ 0x42DAA0 / NapiNPClientMsg_0x043 @ 0x42FA90 / NapiNPClientMsg_HandleChecksumChallenge @ 0x42E6D0]
 - **D-NET-77** [MED, DOC+CODE] **S2C `0x6B` is a minimap-overlay batch, not the objective/HUD timer the census guessed (§5.35).** `[u8 count]` + `count × 12-B records`; the handler reads only the `[u16 handle]` at each record+0 (pool-resolved) and **rebuilds that entity's minimap blip from its own engine-side state** (position, type, team @ `entity+354` → icon + team color via `update_minimap_overlay_entity @ 0x5BEC10`). The 10 trailing bytes per record are not consumed by the handler — so the `1e→1d` "countdown" the census flagged is just a byte inside a per-record blob the engine ignores, not a global timer. Landed `decode_minimap_overlay_batch` + printer + catalog + coverage. probe3_again ×266 (`count=1`, blip = the active player), full-consume. [orig: NapiNPClientMsg_0x06B @ 0x425520 → update_minimap_overlay_entity @ 0x5BEC10]
 - **D-NET-78** [MED, DOC+CODE] **Weapon-reload / second death path / entity-checksum + misc client scalars decoded (§5.35).** **S2C `0x49`** weapon-reload `[u16 handle][u16 reloadParam]` → `WeaponSlot_ReloadAmmo` — and the **IDB name `handle_camera_sync_packet_0x049` is WRONG** (no camera code; reloads ammo). **S2C `0x13`** is a SECOND entity-death path beside `0x26`: `[u16 handle][i16 killerSource]` acts directly on the entity (`Health=0` + death cb), where `0x26` routes through `Entity_KillBySlotId`. **S2C `0x30`** entity-checksum request `[u8 entityId][u16 checksum]` replies **C2S `0x20`** — correcting the §4 catalog row that read "→ C2S 0x21" (0x21 is the *0x31* weapon-loadout CRC reply; the census confirms the 0x30↔0x20 pairing, ×174 each). Plus the misc scalars **`0x42`** input/state-flags `[u16]`→`Input_UnpackStateFlags`, **`0x79`** spectator flag `[u8]`, **`0x2A`** chat-history `[i32][i32][i16]`. Landed `decode_weapon_reload`/`decode_entity_death`/`decode_entity_checksum_request`/`decode_input_state_flags`/`decode_spectator_flag`/`decode_chat_history_entry` + printers + catalog (→ Decoded; `C2S 0x20` reply label) + coverage (**37 Decoded tags**). probe3_again: `0x49` ×84 (`reloadParam=195` on both players), `0x13` ×18, `0x30` ×174, `0x42` ×143, `0x79` ×355, `0x2A` ×12; `nw_pp` decodes the whole capture with **zero decode failures**. [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (misnamed) / NapiNPClientMsg_EntityDeath @ 0x42EB50 / NapiNPClientMsg_HandleChecksumRequest @ 0x431170 / NapiNPClientMsg_0x042 @ 0x4281A0 / _0x079 @ 0x429B00 / _0x02A @ 0x425BA0]
+- **D-NET-79** [MED, DOC+CODE] **Deployed-item spawn 0x59 + entity-routed sub-packet 0x44 (§5.36).** **S2C `0x59`** is the deployed-item / weapon-overlay channel — a fixed 32-B record (item ids + owner + slot + parent + 3×i32 16.16 pos + 3×u16 Euler) the host streams for placeables a player drops; one record carries a friend/foe item-id pair so the same deployable shows a different model per team (owner team @ `+354` vs local player). Witnessed in probe3_again as a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5; landed `decode_deployed_item_spawn` (→ Decoded, **38 Decoded tags**). **S2C `0x44`** is an entity-routed sub-packet: a 5-B sub-header `[u16][i16 netId][u8 subtype]` whose class-dependent body the dispatcher routes to the entity's per-class `def+356` callback — the same per-class path as the C2S `0x0C` uplink (§5.10b), with `subtype` playing the field-group role. Decoded the sub-header (PrinterOnly; body left raw — class-specific, same deferral as the §5.15 guided record). `nw_pp` decodes the whole capture with zero failures. [orig: Entity_SpawnOrUpdateFromSlotPacket @ 0x546770 / NetPacket_DispatchToEntityByNetId @ 0x4D6960]
 - **D-NET-55 / D-NET-64 — probe3_again ALSO did NOT surface them (still OPEN).** Despite 3 players, 15 distinct weapon `adm` indices, and 260 fire events, all 9,049 C2S `0x0c` uploads are sub_op `0x0a` (zero guided field-groups), nobody used a vehicle / rocket Little Bird (every uplink `vehHdl=0xFFFF`), and the AI stayed static (mid-game S2C `0x20` = the 2-record load batch only). The 15 weapons fired were all ballistic; roster `0x6e` stayed `teams=0` (Co-op single-team). A dedicated guided + patrolling-AI capture is still required for D-NET-64 / D-NET-55.
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')

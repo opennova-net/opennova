@@ -1281,4 +1281,48 @@ bool decode_chat_history_entry(const uint8_t *body, size_t len,
 	return consumed == 10;
 }
 
+// ---------------------------------------------------------------------------
+// Deployed-item spawn (0x59) + entity-routed sub-packet (0x44) (§5.36).
+// ---------------------------------------------------------------------------
+
+// S2C 0x59 deployed-item / weapon-overlay spawn — fixed 32-B record (the handler
+// reads 15 u16s = 30 B; 2 trailing reserved). pos = 3×i32 16.16; angles 3×u16.
+// [orig: Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
+bool decode_deployed_item_spawn(const uint8_t *body, size_t len,
+                                DeployedItemSpawn &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.item_id          = c.u16();
+	out.owner_handle     = c.u16();
+	out.friendly_item_id = c.u16();
+	out.enemy_item_id    = c.u16();
+	out.slot_handle      = c.u16();
+	out.parent_handle    = c.u16();
+	out.pos_x            = c.i32();
+	out.pos_y            = c.i32();
+	out.pos_z            = c.i32();
+	out.angle_x          = c.u16();
+	out.angle_y          = c.u16();
+	out.angle_z          = c.u16();
+	out.reserved         = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 32;
+}
+
+// S2C 0x44 entity-routed sub-packet — 5-B sub-header + class-dependent body.
+// [orig: NetPacket_DispatchToEntityByNetId @ 0x4D6960]
+bool decode_entity_routed_packet(const uint8_t *body, size_t len,
+                                 EntityRoutedPacket &out) {
+	out = EntityRoutedPacket{};
+	Cursor c{body, body + len, true};
+	out.field0  = c.u16();
+	out.net_id  = c.i16();
+	out.subtype = c.u8();
+	if (!c.ok) return false;       // need the 5-byte sub-header
+	out.body = c.p;
+	out.body_size = size_t(c.end - c.p);
+	return true;
+}
+
 } // namespace opennova

@@ -1148,4 +1148,49 @@ struct ChatHistoryEntry {
 bool decode_chat_history_entry(const uint8_t *body, size_t len,
                                ChatHistoryEntry &out, size_t &consumed);
 
+// ===========================================================================
+// Deployed-item / weapon-overlay spawn (0x59) + entity-routed sub-packet
+// (0x44) (§5.36).
+// ===========================================================================
+
+// S2C 0x59 — deployed-item / weapon-overlay spawn-or-update. Fixed 32-B record.
+// The host streams the placeable / weapon-overlay entities a player drops (mines,
+// beacons, satchels, deployed guns…). The handler searches 512 weapon-overlay
+// slots for a matching entity and either updates its transform or allocates a
+// new pool entry initialised from the item def. `itemId` / `friendlyItemId` /
+// `enemyItemId` let one deployable show a different model to friend vs foe
+// (selected by the owner's team @ +354 vs the local player); `itemId` is the
+// fallback. The handler reads 15 u16s (30 B); the 2 trailing bytes are unread.
+// [orig: NapiNPClientMsg_0x059 @ 0x4228E0 → Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
+struct DeployedItemSpawn {
+	uint16_t item_id = 0;          // packet[0] — fallback / base item id
+	uint16_t owner_handle = 0;     // packet[1] — the placing entity
+	uint16_t friendly_item_id = 0; // packet[2] — model shown to the owner's team
+	uint16_t enemy_item_id = 0;    // packet[3] — model shown to the other team
+	uint16_t slot_handle = 0;      // packet[4] — the spawned entity (pool<<12)|slot
+	uint16_t parent_handle = 0xFFFF; // packet[5] — attach parent (0xFFFF = none)
+	int32_t  pos_x = 0, pos_y = 0, pos_z = 0;       // i32 16.16 world position
+	uint16_t angle_x = 0, angle_y = 0, angle_z = 0; // Euler; the engine shifts << 16
+	uint16_t reserved = 0;         // 2 trailing bytes (not read by the handler)
+};
+bool decode_deployed_item_spawn(const uint8_t *body, size_t len,
+                                DeployedItemSpawn &out, size_t &consumed);
+
+// S2C 0x44 — entity-routed sub-packet. A 5-B sub-header `[u16 field0][i16 netId]
+// [u8 subtype]` followed by a class-dependent body the dispatcher routes to the
+// target entity's per-class serialize callback (entity def+356, source_type=2) —
+// the SAME per-class path the C2S 0x0C entity-uplink uses (§5.10b). We decode the
+// sub-header + expose the body slice; the body's field layout is class-specific
+// (PARTIAL — same deferral as the §5.15 guided record). [orig: NapiNPClientMsg_0x044
+//  @ 0x422710 → NetPacket_DispatchToEntityByNetId @ 0x4D6960]
+struct EntityRoutedPacket {
+	uint16_t field0 = 0;            // [0..1] not read by the dispatcher
+	int16_t  net_id = 0;            // [2..3] EntitySlot_FindByNetId key
+	uint8_t  subtype = 0;           // [4] selects the def+356 callback path
+	const uint8_t *body = nullptr;  // class-dependent body (size = len - 5)
+	size_t   body_size = 0;
+};
+bool decode_entity_routed_packet(const uint8_t *body, size_t len,
+                                 EntityRoutedPacket &out);
+
 } // namespace opennova

@@ -1013,6 +1013,34 @@ void print_tag_2a(const std::vector<uint8_t> &body) {
 	            unsigned(e.field_a), unsigned(e.field_b), int(e.field_c));
 }
 
+// S2C 0x59 deployed-item / weapon-overlay spawn.
+void print_tag_59(const std::vector<uint8_t> &body) {
+	DeployedItemSpawn d;
+	size_t used = 0;
+	if (!decode_deployed_item_spawn(body.data(), body.size(), d, used)) {
+		std::printf("        [0x59] deployed-item decode failed (need 32 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x59] deployed-item slot=%s owner=%s type=%s (fr=%s/en=%s) parent=%s\n",
+	            handle_str(d.slot_handle).c_str(), handle_str(d.owner_handle).c_str(),
+	            type_str(d.item_id).c_str(), type_str(d.friendly_item_id).c_str(),
+	            type_str(d.enemy_item_id).c_str(), handle_str(d.parent_handle).c_str());
+	std::printf("            pos=(%.1f, %.1f, %.1f) ang=(0x%04x,0x%04x,0x%04x)\n",
+	            fp16(d.pos_x), fp16(d.pos_y), fp16(d.pos_z),
+	            unsigned(d.angle_x), unsigned(d.angle_y), unsigned(d.angle_z));
+}
+
+// S2C 0x44 entity-routed sub-packet (sub-header decoded; body class-dependent).
+void print_tag_44(const std::vector<uint8_t> &body) {
+	EntityRoutedPacket p;
+	if (!decode_entity_routed_packet(body.data(), body.size(), p)) {
+		std::printf("        [0x44] entity-routed decode failed (need 5 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x44] entity-routed field0=0x%04x netId=%d subtype=%u (class body %zu B)\n",
+	            unsigned(p.field0), int(p.net_id), unsigned(p.subtype), p.body_size);
+}
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
 	const char *label = tag_label(dir, tag);
@@ -1046,6 +1074,8 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x42) print_tag_42(payload);
 	else if (dir == 'S' && tag == 0x79) print_tag_79(payload);
 	else if (dir == 'S' && tag == 0x2A) print_tag_2a(payload);
+	else if (dir == 'S' && tag == 0x59) print_tag_59(payload);
+	else if (dir == 'S' && tag == 0x44) print_tag_44(payload);
 	else if (dir == 'C' && tag == 0x2C) print_tag_2c_c2s(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
