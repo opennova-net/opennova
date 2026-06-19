@@ -1059,6 +1059,18 @@ target_compile_definitions(nw_dvxi3_groundtruth_test PRIVATE
     DEFAULT_DVXI3_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe2.pcapng")
 add_test(NAME nw_dvxi3_groundtruth COMMAND nw_dvxi3_groundtruth_test)
 
+# Co-op probe 3 (dvxc1): re-validates the spawn batches AND witnesses the deferred
+# Co-op bodies (0x0F waypoint records, 0x0A objective sub-block 3, 0x60 multi-chunk
+# + C2S 0x33, 0x7B gameName + g_GameType). Gated on NW_DVXC1_PCAP / the .scratch
+# capture; skips clean when absent.
+add_executable(nw_dvxc1_groundtruth_test novaworld/nw_dvxc1_groundtruth_test.cpp)
+target_link_libraries(nw_dvxc1_groundtruth_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_dvxc1_groundtruth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_dvxc1_groundtruth_test PRIVATE
+    FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld"
+    DEFAULT_DVXC1_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3.pcapng")
+add_test(NAME nw_dvxc1_groundtruth COMMAND nw_dvxc1_groundtruth_test)
+
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
 # NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture

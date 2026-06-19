@@ -614,12 +614,13 @@ struct FrameTimerBlock {
 };
 
 // The 0x0A header's sub-block case 3 (`flags2 & 3 == 3`) — objective-gametype
-// state, present ONLY when the host's `g_GameType & 0x20000` bit is set. That gate
-// is NOT on the wire, so an off-wire decoder cannot know whether 16 B follow; we
-// default to 0 B (correct for every non-objective capture) and flag if a body is
-// present. [orig: NapiNPClientMsg_0x00A @ 0x430363..0x4303D0]
+// state (4× i32, 16 B), present ONLY when the host's `g_GameType & 0x20000` bit is
+// set. That gate is NOT on the wire, so decode_frame_update reads the body only
+// when its `is_objective_gametype` hint is set. First witnessed in probe3 (Co-op,
+// g_GameType 0x30020). [orig: NapiNPClientMsg_0x00A gate @ 0x430361, body
+// @ 0x430363..0x4303D0]
 struct FrameObjectiveBlock {
-	bool     present = false;   // true only if we chose to read it (objective gate)
+	bool     present = false;   // true iff the objective body was read (hint on + sub_block 3)
 	int32_t  state[4] = {0, 0, 0, 0}; // → dword_AC86F4/F0/EC/E8
 };
 
@@ -669,9 +670,13 @@ struct FrameUpdate {
 // class it stops, leaving everything decoded so far in `out` (out.complete=false,
 // out.consumed = bytes walked) so callers can render partial state + the failure
 // point. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]
+// `is_objective_gametype` gates the sub-block-3 objective body (16 B): the host
+// only emits it when `g_GameType & 0x20000` is set — a gate not on the wire, so
+// the caller supplies it (e.g. from the 0x7B `extra` field = g_GameType). Default
+// false (correct for every non-objective capture).
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
-                         FrameUpdate &out);
+                         FrameUpdate &out, bool is_objective_gametype = false);
 
 // ===========================================================================
 // S2C game-event + kill messages — the kill feed and entity-death replication.

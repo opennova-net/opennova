@@ -739,7 +739,7 @@ EntityClass class_from_tag(const char *tag) {
 // case 0 = 11 B, 1 = 6 B, 2 = 11 B (ENV), 3 = 0 B (objective-gametype gated).
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
-                         FrameUpdate &out) {
+                         FrameUpdate &out, bool is_objective_gametype) {
 	Cursor c{body, body + len, true};
 	auto finish = [&](bool complete) {
 		out.complete = complete;
@@ -788,12 +788,21 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		out.env.overcast     = c.u8();
 		out.env.env_param    = c.u8();
 		break;
-	default:
-		// case 3: objective-gametype block (4× i32) present ONLY when the host's
-		// `g_GameType & 0x20000` bit is set — a gate that is NOT on the wire. Off
-		// the wire we cannot know, so we read 0 B (correct for every non-objective
-		// capture; a coverage-audit misalignment would flag an objective capture).
-		// [orig: 0x430363..0x4303D0]
+	case 3:
+		// Objective-gametype block (4× i32, 16 B) present ONLY when the host's
+		// `g_GameType & 0x20000` bit is set [orig: gate @ 0x430361, body
+		// @ 0x430363..0x4303D0]. That gate is NOT on the wire, so the caller supplies
+		// the hint (default false). probe3 (Co-op, g_GameType 0x30020) is the first
+		// capture to carry it (docs/net/novaworld-net-re.md D-NET-75); the 4 i32 land
+		// in dword_AC86F4/F0/EC/E8.
+		if (is_objective_gametype) {
+			out.objective.present  = true;
+			out.objective.state[0] = c.i32();
+			out.objective.state[1] = c.i32();
+			out.objective.state[2] = c.i32();
+			out.objective.state[3] = c.i32();
+			if (!c.ok) return finish(false);
+		}
 		break;
 	}
 

@@ -159,6 +159,15 @@ std::unordered_map<int, std::string> g_item_names;
 // size a record (fail closed). Keyed by wire_id (items.def id − 100000).
 std::unordered_map<uint16_t, EntityClass> g_item_class;
 
+// The session game type (g_GameType @ 0x24D2128), learned from the S2C 0x7B
+// `extra` field (the host puts g_GameType there). Two in-match sub-bodies are
+// gated on it but the gate is NOT on their own wire, so the printer threads it
+// into the gated decoders: 0x0F waypoint records ((g & 0xFFFDFFFF)==0x10020) and
+// 0x0A objective sub-block 3 (g & 0x20000). 0 until the first 0x7B is seen.
+uint32_t g_game_type = 0;
+inline bool gt_is_waypoint() { return (g_game_type & 0xFFFDFFFFu) == 0x10020u; }
+inline bool gt_is_objective() { return (g_game_type & 0x20000u) != 0; }
+
 const char *class_name(EntityClass c) {
 	switch (c) {
 		case EntityClass::Player:   return "Player";
@@ -585,7 +594,8 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		return it == g_item_class.end() ? EntityClass::Unknown : it->second;
 	};
 	FrameUpdate fu;
-	const bool ok = decode_frame_update(body.data(), body.size(), class_of, fu);
+	const bool ok = decode_frame_update(body.data(), body.size(), class_of, fu,
+	                                    gt_is_objective());
 
 	std::printf("        [0x0A] refs=(0x%08x,0x%08x,0x%08x) flags1=0x%02x "
 	            "flags2=0x%02x sub=%u%s\n",
@@ -758,6 +768,9 @@ void print_tag_6e(const std::vector<uint8_t> &body) {
 void print_tag_7b(const std::vector<uint8_t> &body) {
 	FullPlayerInfo fi;
 	const bool clean = decode_full_player_info(body.data(), body.size(), fi);
+	// The 0x7B `extra` dword is the host's g_GameType (witnessed: probe3 Co-op =
+	// 0x30020). Track it so the gametype-gated 0x0F / 0x0A sub-bodies decode.
+	g_game_type = fi.extra;
 	std::printf("        [0x7B] full-player-info name=\"%s\" id=\"%s\" server=\"%s\" "
 	            "mission=\"%s\" map=\"%s\" extra=0x%08x%s\n",
 	            fi.player_name.c_str(), fi.player_id.c_str(), fi.server_name.c_str(),
@@ -771,7 +784,11 @@ void print_tag_7b(const std::vector<uint8_t> &body) {
 // count); the spawn pose + waypoint/team-name counts + team names are shown.
 void print_tag_0f(const std::vector<uint8_t> &body) {
 	WorldStateLoad ws;
-	const bool clean = decode_world_state_load(body.data(), body.size(), ws);
+	// Waypoint records ride the 0x0F wire only for a waypoint gametype (the host
+	// gate (g_GameType & 0xFFFDFFFF)==0x10020, off-wire) — pass the hint learned
+	// from the 0x7B `extra` field, else the records misparse as team-name data.
+	const bool clean = decode_world_state_load(body.data(), body.size(), ws,
+	                                           gt_is_waypoint());
 	int nonzero = 0;
 	for (int32_t s : ws.team_scores) if (s) ++nonzero;
 	std::printf("        [0x0F] world-state tick=%u spawn=(%.1f, %.1f, %.1f) "
@@ -781,6 +798,10 @@ void print_tag_0f(const std::vector<uint8_t> &body) {
 	            int(ws.yaw), int(ws.pitch), int(ws.roll), unsigned(ws.game_flags),
 	            nonzero, unsigned(ws.waypoint_count), unsigned(ws.team_name_count),
 	            clean ? "" : " (DECODE INCOMPLETE)");
+	for (const auto &w : ws.waypoints)
+		std::printf("            waypoint slot=%s nameId=%u (STRWPNAME%03u) pad=%u\n",
+		            handle_str(uint16_t((3u << 12) | (w.slot_id & 0x0FFF))).c_str(),
+		            unsigned(w.name_id), unsigned(w.name_id), unsigned(w.pad));
 	for (const auto &n : ws.team_names)
 		std::printf("            team-name \"%s\"\n", n.c_str());
 }
