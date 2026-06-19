@@ -1030,6 +1030,23 @@ void print_tag_59(const std::vector<uint8_t> &body) {
 	            unsigned(d.angle_x), unsigned(d.angle_y), unsigned(d.angle_z));
 }
 
+// S2C 0x45 terrain-tile load batch (paged; §5.37).
+void print_tag_45(const std::vector<uint8_t> &body) {
+	TerrainLoadBatch b;
+	if (!decode_terrain_load_batch(body.data(), body.size(), b)) {
+		std::printf("        [0x45] terrain-load decode failed (len %zu)\n", body.size());
+		return;
+	}
+	if (b.has_header)
+		std::printf("        [0x45] terrain-load HEADER magic=0x%08x tile_count=%u "
+		            "tiles[0,%u) (%zu entries)\n",
+		            unsigned(b.magic), unsigned(b.tile_count), unsigned(b.end_index),
+		            b.tiles.size());
+	else
+		std::printf("        [0x45] terrain-load page tiles[%u,%u) (%zu entries)\n",
+		            unsigned(b.start_index), unsigned(b.end_index), b.tiles.size());
+}
+
 // S2C 0x44 entity-routed sub-packet (sub-header decoded; body class-dependent).
 void print_tag_44(const std::vector<uint8_t> &body) {
 	EntityRoutedPacket p;
@@ -1075,6 +1092,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x79) print_tag_79(payload);
 	else if (dir == 'S' && tag == 0x2A) print_tag_2a(payload);
 	else if (dir == 'S' && tag == 0x59) print_tag_59(payload);
+	else if (dir == 'S' && tag == 0x45) print_tag_45(payload);
 	else if (dir == 'S' && tag == 0x44) print_tag_44(payload);
 	else if (dir == 'C' && tag == 0x2C) print_tag_2c_c2s(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);

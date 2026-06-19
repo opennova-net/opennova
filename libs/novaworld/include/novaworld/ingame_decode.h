@@ -1193,4 +1193,42 @@ struct EntityRoutedPacket {
 bool decode_entity_routed_packet(const uint8_t *body, size_t len,
                                  EntityRoutedPacket &out);
 
+// ===========================================================================
+// S2C 0x45 — terrain-tile load batch (§5.37). The host streams the multiplayer
+// terrain-tile array to a JOINING client as phase 5 of the initial-state load
+// sequence (Server_SendInitialGameStateToPlayer @ 0x51BBA0 → repeats until the
+// serializer returns 0). It is LOAD-ONLY (no gameplay-tick path), PAGED, and one
+// of the few messages that carries an actual payload despite the §4 dispatch
+// row historically reading "empty payload" (corrected by D-NET-83).
+//
+// Wire shape, witnessed byte-exact from BOTH the writer and the reader:
+//   - First chunk: wire start word == 0xFFFF → a 16-B header follows the 4-B
+//     [u16 0xFFFF][u16 end] frame: [u32 'til0' magic][u32 tile_count]
+//     [u32 hdr2][u32 hdr3]; tiles [0, end) start at byte 20.
+//   - Subsequent chunk: [u16 start][u16 end]; tiles [start, end) start at byte 4.
+// Each tile entry is 12 OPAQUE bytes the loader copies verbatim into
+// g_TerrainTileData+16+12*idx (the network layer never interprets the 3 dwords —
+// the terrain renderer does, later), so we expose them at the engine's own copy
+// granularity rather than inventing field names.
+// [orig: serialize_terrain_tiles @ 0x6080F0 (writer) / PolyTrn_LoadTileData
+//  @ 0x6081D0 (reader) / NapiNPClientMsg_0x045 @ 0x422890 (handler)]
+struct TerrainTileEntry {
+	uint32_t word0 = 0;  // 12-B opaque tile record (copied raw into g_TerrainTileData)
+	uint32_t word1 = 0;
+	uint32_t word2 = 0;
+};
+struct TerrainLoadBatch {
+	bool     has_header = false;  // first chunk (wire start word == 0xFFFF)
+	uint16_t start_index = 0;     // first tile index this chunk carries (0 for the header chunk)
+	uint16_t end_index = 0;       // one past the last tile index this chunk carries
+	// Header-chunk only (has_header):
+	uint32_t magic = 0;           // 'til0' == 0x74696C30 (reader bails on mismatch)
+	uint32_t tile_count = 0;      // total tiles in the full terrain set (drives the alloc)
+	uint32_t header_field2 = 0;
+	uint32_t header_field3 = 0;
+	std::vector<TerrainTileEntry> tiles;  // end_index - start_index entries
+};
+// Returns true iff the body was consumed exactly (header + N×12-B entries).
+bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch &out);
+
 } // namespace opennova

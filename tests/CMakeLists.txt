@@ -1085,6 +1085,19 @@ target_compile_definitions(nw_probe3again_lifecycle_test PRIVATE
     DEFAULT_PROBE3AGAIN_HOST_SPH="${CMAKE_SOURCE_DIR}/.scratch/hostprof_probe3again.sph")
 add_test(NAME nw_probe3again_lifecycle COMMAND nw_probe3again_lifecycle_test)
 
+# operation_whitenoise: the FIRST stock retail Co-op capture (not an authored
+# probe). Wire-only coverage witness — asserts every catalogued Decoded tag the
+# capture carries is consumed to the byte across all occurrences, plus the S2C
+# 0x20 stock load-batch spot-asserts (paged, every optional flag exercised, load-
+# only) and the confirmed negatives (C2S 0x0C all sub_op 0x0A, no 0x44 / 0x59).
+# Gated on NW_WHITENOISE_PCAP / the .scratch capture; skips clean when absent.
+add_executable(nw_whitenoise_coverage_test novaworld/nw_whitenoise_coverage_test.cpp)
+target_link_libraries(nw_whitenoise_coverage_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_whitenoise_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_whitenoise_coverage_test PRIVATE
+    DEFAULT_WHITENOISE_PCAP="${CMAKE_SOURCE_DIR}/.scratch/operation_whitenoise.pcapng")
+add_test(NAME nw_whitenoise_coverage COMMAND nw_whitenoise_coverage_test)
+
 # Inline-pcap decoder regression — crafts tiny in-memory pcaps and round-trips
 # the 0x0D / 0x20 pool decoders through the full S2C stack (encode -> frame ->
 # NWU -> envelope -> build_pcap_udp -> read_pcap_udp -> decode). No capture

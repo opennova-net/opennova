@@ -61,7 +61,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', 0x42, "input-state-flags",       MsgCoverage::Decoded,     "§5.35 decode_input_state_flags"},
 		{'S', 0x43, "time-sync-ping",          MsgCoverage::Decoded,     "§5.34 decode_u32_scalar (serverTs -> C2S 0x08)"},
 		{'S', 0x44, "entity-routed",           MsgCoverage::PrinterOnly, "§5.36 decode_entity_routed_packet (sub-header; class body partial)"},
-		{'S', 0x45, "terrain-load",            MsgCoverage::PrinterOnly, "terrain stream"},
+		{'S', 0x45, "terrain-load",            MsgCoverage::Decoded,     "§5.37 decode_terrain_load_batch"},
 		{'S', 0x46, "player-sync",             MsgCoverage::Decoded,     "§5.21 decode_player_sync"},
 		{'S', 0x49, "weapon-reload",           MsgCoverage::Decoded,     "§5.35 decode_weapon_reload"},
 		{'S', 0x4E, "kill-by-slot",            MsgCoverage::Decoded,     "§5.26 decode_batch_kill"},

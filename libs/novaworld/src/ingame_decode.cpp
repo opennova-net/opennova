@@ -1325,4 +1325,43 @@ bool decode_entity_routed_packet(const uint8_t *body, size_t len,
 	return true;
 }
 
+// S2C 0x45 terrain-tile load batch — §5.37. Paged stream the host sends during a
+// client's initial-state load (phase 5 of Server_SendInitialGameStateToPlayer).
+// Witnessed byte-exact against the writer + reader (52-tile header chunk = 644 B,
+// 53-tile chunk = 640 B in operation_whitenoise). The 12-B tile entries are
+// opaque copies the network layer never interprets (D-NET-83).
+// [orig: serialize_terrain_tiles @ 0x6080F0 / PolyTrn_LoadTileData @ 0x6081D0 /
+//  NapiNPClientMsg_0x045 @ 0x422890]
+bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch &out) {
+	out = TerrainLoadBatch{};
+	Cursor c{body, body + len, true};
+	const uint16_t first = c.u16();   // wire start word
+	out.end_index = c.u16();
+	if (!c.ok) return false;          // need the 4-byte [start][end] frame
+	out.has_header = (first == 0xFFFF);
+	if (out.has_header) {
+		out.start_index = 0;
+		out.magic = c.u32();          // 'til0'
+		out.tile_count = c.u32();
+		out.header_field2 = c.u32();
+		out.header_field3 = c.u32();
+		if (!c.ok) return false;
+		if (out.magic != 0x74696C30u) return false;  // reader returns 1 (no load) otherwise
+	} else {
+		out.start_index = first;
+	}
+	if (out.end_index < out.start_index) return false;
+	const uint32_t n = uint32_t(out.end_index) - out.start_index;
+	out.tiles.reserve(n);
+	for (uint32_t i = 0; i < n; ++i) {
+		TerrainTileEntry e;
+		e.word0 = c.u32();
+		e.word1 = c.u32();
+		e.word2 = c.u32();
+		if (!c.ok) return false;
+		out.tiles.push_back(e);
+	}
+	return c.p == c.end;  // consumed exactly
+}
+
 } // namespace opennova

@@ -657,6 +657,29 @@ int check_S_59_deployed_item() {
 	return 0;
 }
 
+// S2C 0x45 — terrain-tile load: a header chunk ('til0' magic + tile_count) plus
+// one 12-B opaque tile entry. Asserts the framing + raw tile copy consume cleanly.
+int check_S_45_terrain_load() {
+	LE w;
+	w.u16(0xFFFF);      // header-chunk marker (wire start word)
+	w.u16(1);           // end_index -> 1 tile
+	w.u32(0x74696C30);  // 'til0' magic
+	w.u32(1);           // tile_count
+	w.u32(0);           // hdr2
+	w.u32(0);           // hdr3
+	w.u32(0x11111111); w.u32(0x22222222); w.u32(0x33333333); // one 12-B tile entry
+	EXPECT(w.b.size() == 32);
+	TerrainLoadBatch out;
+	EXPECT(decode_terrain_load_batch(w.b.data(), w.b.size(), out));
+	EXPECT(out.has_header);
+	EXPECT(out.start_index == 0 && out.end_index == 1);
+	EXPECT(out.tile_count == 1);
+	EXPECT(out.tiles.size() == 1);
+	EXPECT(out.tiles[0].word1 == 0x22222222);
+	cover('S', 0x45);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -713,6 +736,7 @@ int main() {
 	if (check_S_79_spectator_flag()) return 1;
 	if (check_S_2A_chat_history()) return 1;
 	if (check_S_59_deployed_item()) return 1;
+	if (check_S_45_terrain_load()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

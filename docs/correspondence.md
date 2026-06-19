@@ -160,8 +160,12 @@ NW-C4 in [§8](net/novaworld-net-re.md). Re-anchored to retail (was jodemo-only)
 ## 5.5 Full client parity sweep (grill wave 7, 2026-06-14)
 
 All 24 client systems re-grilled (3 passes, adversarially verified). Verdict table + the full
-`D-NET-1..64` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
-(`D-NET-58..62` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
+`D-NET-1..85` catalog live in [§8 "Wave 7"](net/novaworld-net-re.md) — not repeated here
+(`D-NET-76..81` from the probe3_again controlled capture: RTT/trio transport, minimap `0x6B`,
+reload `0x49`/death `0x13`/checksum `0x30`, deployed-item `0x59`/routed `0x44`; `D-NET-82..85`
+from the first stock retail Co-op capture: every decoder byte-validated on organic content, S2C
+`0x45` terrain-load promoted (§5.37), the `0x20`/`0x45` load-only cadence reframe of D-NET-55;
+`D-NET-58..62` from the 2026-06-17 controlled-capture validation: in-game 0x0D team/bone +
 0x20 movementVal label corrections, 0x0B icon offset, the `/PROFILE` `.sph` server-log
 cross-validation, and the authored-mission cross-validation of pools 1/2/3 incl. the S2C 0x0C
 organic-spawn field map; `D-NET-63` the §5.13 vehicle compact Euler-triple / weapon-aim label
