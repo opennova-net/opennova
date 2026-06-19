@@ -526,6 +526,112 @@ int check_u32_scalar_trio() {
 	return 0;
 }
 
+// S2C 0x6B — minimap overlay: [u8 count=1] + one 12-B record (handle + 10 raw).
+int check_S_6B_minimap() {
+	LE w;
+	w.u8(1);            // count
+	w.u16(0x0005);      // record handle
+	w.zeros(10);        // 10 raw trailing bytes (unused by the handler)
+	EXPECT(w.b.size() == 13);
+	MinimapOverlayBatch out;
+	EXPECT(decode_minimap_overlay_batch(w.b.data(), w.b.size(), out));
+	EXPECT(out.entries.size() == 1);
+	EXPECT(out.entries[0].handle == 0x0005);
+	cover('S', 0x6B);
+	return 0;
+}
+
+// S2C 0x49 — weapon reload: [u16 handle][u16 reloadParam] (4 B).
+int check_S_49_weapon_reload() {
+	LE w;
+	w.u16(0x0006);
+	w.u16(0x00C3);
+	EXPECT(w.b.size() == 4);
+	WeaponReload r;
+	size_t consumed = 0;
+	EXPECT(decode_weapon_reload(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(r.entity_handle == 0x0006);
+	EXPECT(r.reload_param == 0x00C3);
+	cover('S', 0x49);
+	return 0;
+}
+
+// S2C 0x13 — entity death (second path): [u16 handle][i16 killerSource] (4 B).
+int check_S_13_entity_death() {
+	LE w;
+	w.u16(0x0006);
+	w.u16(0xFFFF);     // killer_source = -1
+	EXPECT(w.b.size() == 4);
+	EntityDeathRecord d;
+	size_t consumed = 0;
+	EXPECT(decode_entity_death(w.b.data(), w.b.size(), d, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(d.entity_handle == 0x0006);
+	EXPECT(d.killer_source == -1);
+	cover('S', 0x13);
+	return 0;
+}
+
+// S2C 0x30 — entity-checksum request: [u8 entityId][u16 checksum] (3 B).
+int check_S_30_checksum_request() {
+	LE w;
+	w.u8(0x02);
+	w.u16(0xBEEF);
+	EXPECT(w.b.size() == 3);
+	EntityChecksumRequest r;
+	size_t consumed = 0;
+	EXPECT(decode_entity_checksum_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 3);
+	EXPECT(r.entity_id == 0x02);
+	EXPECT(r.checksum == 0xBEEF);
+	cover('S', 0x30);
+	return 0;
+}
+
+// S2C 0x42 — input/state-flags: [u16] (2 B).
+int check_S_42_input_flags() {
+	LE w;
+	w.u16(0x1234);
+	uint16_t flags = 0;
+	size_t consumed = 0;
+	EXPECT(decode_input_state_flags(w.b.data(), w.b.size(), flags, consumed));
+	EXPECT(consumed == 2);
+	EXPECT(flags == 0x1234);
+	cover('S', 0x42);
+	return 0;
+}
+
+// S2C 0x79 — spectator-mode flag: [u8] (1 B).
+int check_S_79_spectator_flag() {
+	LE w;
+	w.u8(1);
+	uint8_t flag = 0;
+	size_t consumed = 0;
+	EXPECT(decode_spectator_flag(w.b.data(), w.b.size(), flag, consumed));
+	EXPECT(consumed == 1);
+	EXPECT(flag == 1);
+	cover('S', 0x79);
+	return 0;
+}
+
+// S2C 0x2A — chat-history entry: [i32 a][i32 b][i16 c] (10 B).
+int check_S_2A_chat_history() {
+	LE w;
+	w.u32(0x11223344);
+	w.u32(0x55667788);
+	w.u16(0x99AA);
+	EXPECT(w.b.size() == 10);
+	ChatHistoryEntry e;
+	size_t consumed = 0;
+	EXPECT(decode_chat_history_entry(w.b.data(), w.b.size(), e, consumed));
+	EXPECT(consumed == 10);
+	EXPECT(uint32_t(e.field_a) == 0x11223344);
+	EXPECT(uint32_t(e.field_b) == 0x55667788);
+	cover('S', 0x2A);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -574,6 +680,13 @@ int main() {
 	if (check_C_4C_client_quality()) return 1;
 	if (check_rtt_sample()) return 1;
 	if (check_u32_scalar_trio()) return 1;
+	if (check_S_6B_minimap()) return 1;
+	if (check_S_49_weapon_reload()) return 1;
+	if (check_S_13_entity_death()) return 1;
+	if (check_S_30_checksum_request()) return 1;
+	if (check_S_42_input_flags()) return 1;
+	if (check_S_79_spectator_flag()) return 1;
+	if (check_S_2A_chat_history()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

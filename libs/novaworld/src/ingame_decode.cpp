@@ -1181,4 +1181,104 @@ bool decode_u32_scalar(const uint8_t *body, size_t len,
 	return consumed == 4;
 }
 
+// ---------------------------------------------------------------------------
+// Minimap / reload / lifecycle scalars (§5.35).
+// ---------------------------------------------------------------------------
+
+// S2C 0x6B minimap overlay batch — [u8 count] + count × 12-B records. Only the
+// [u16 handle] at each record+0 drives the engine (the blip is rebuilt from the
+// entity's own state); the 10 trailing bytes are kept raw, unused by the handler.
+// [orig: NapiNPClientMsg_0x06B @ 0x425520]
+bool decode_minimap_overlay_batch(const uint8_t *body, size_t len,
+                                  MinimapOverlayBatch &out) {
+	out = MinimapOverlayBatch{};
+	Cursor c{body, body + len, true};
+	uint8_t count = c.u8();
+	if (!c.ok) return false;
+	out.entries.reserve(count);
+	for (uint8_t i = 0; i < count; ++i) {
+		MinimapOverlayBatch::Entry e;
+		e.handle = c.u16();
+		for (int j = 0; j < 10; ++j) e.extra[j] = c.u8();
+		if (!c.ok) return false;
+		out.entries.push_back(e);
+	}
+	return size_t(c.p - body) == size_t(1) + size_t(12) * count;
+}
+
+// S2C 0x49 weapon-reload notification — [u16 handle][u16 reloadParam] (4 B).
+// [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (IDA-misnamed; reloads ammo)]
+bool decode_weapon_reload(const uint8_t *body, size_t len,
+                          WeaponReload &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	out.reload_param  = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 4;
+}
+
+// S2C 0x13 entity death (second path) — [u16 handle][i16 killerSource] (4 B).
+// [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
+bool decode_entity_death(const uint8_t *body, size_t len,
+                         EntityDeathRecord &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	out.killer_source = c.i16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 4;
+}
+
+// S2C 0x30 entity-checksum request — [u8 entityId][u16 checksum] (3 B) → C2S 0x20.
+// [orig: NapiNPClientMsg_HandleChecksumRequest @ 0x431170]
+bool decode_entity_checksum_request(const uint8_t *body, size_t len,
+                                    EntityChecksumRequest &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_id = c.u8();
+	out.checksum  = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 3;
+}
+
+// S2C 0x42 input/state-flags — [u16] (2 B). [orig: NapiNPClientMsg_0x042 @ 0x4281A0]
+bool decode_input_state_flags(const uint8_t *body, size_t len,
+                              uint16_t &out_flags, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out_flags = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 2;
+}
+
+// S2C 0x79 spectator-mode flag — [u8] (1 B). [orig: NapiNPClientMsg_0x079 @ 0x429B00]
+bool decode_spectator_flag(const uint8_t *body, size_t len,
+                           uint8_t &out_flag, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out_flag = c.u8();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 1;
+}
+
+// S2C 0x2A chat-history entry — [i32 a][i32 b][i16 c] (10 B).
+// [orig: NapiNPClientMsg_0x02A @ 0x425BA0]
+bool decode_chat_history_entry(const uint8_t *body, size_t len,
+                               ChatHistoryEntry &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.field_a = c.i32();
+	out.field_b = c.i32();
+	out.field_c = c.i16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 10;
+}
+
 } // namespace opennova

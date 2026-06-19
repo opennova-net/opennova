@@ -264,7 +264,7 @@ sweep; blank = not yet characterized.
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | |
-| 0x13 | 0x42EB50 | `_0x013` | |
+| 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]` → Health=0 + death cb (§5.35) |
 | 0x14 | 0x42F240 | `_0x014` | |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
@@ -286,13 +286,13 @@ sweep; blank = not yet characterized.
 | 0x27 | 0x425AA0 | `_0x027` | |
 | 0x28 | 0x425B40 | `_0x028` | |
 | 0x29 | 0x427D00 | `_0x029` | |
-| 0x2A | 0x425BA0 | `_0x02A` | chat-history entries |
+| 0x2A | 0x425BA0 | `_0x02A` | chat-history entry `[i32][i32][i16]` (10 B) → Chat_AddToHistory (§5.35) |
 | 0x2B | 0x427DF0 | `_0x02B` | |
 | 0x2C | 0x427E10 | `_0x02C` | chat entry |
 | 0x2D | 0x427E90 | `_0x02D` | |
 | 0x2E | 0x427F80 | `_0x02E` | |
 | 0x2F | 0x430E10 | `_0x02F` | |
-| 0x30 | 0x431170 | `_HandleChecksumRequest` | anti-cheat CRC challenge → client replies C2S 0x21 |
+| 0x30 | 0x431170 | `_HandleChecksumRequest` | entity-checksum request `[u8 entityId][u16 checksum]` → reply **C2S 0x20** (NOT 0x21; §5.35) |
 | 0x31 | 0x4311E0 | `_0x031` | CRC request for weapon loadout → C2S 0x21 |
 | 0x32 | 0x428060 | `_0x032` | |
 | 0x33 | 0x425FA0 | `_0x033` | |
@@ -309,13 +309,13 @@ sweep; blank = not yet characterized.
 | 0x3F | 0x42BB20 | `_0x03F` | |
 | 0x40 | 0x425A50 | `_0x040` | minimap-overlay update / capture-zone state — `[u8 count][N×6B entry]`, full map §5.19 (controlled capture 2026-06-17) |
 | 0x41 | 0x4254C0 | `_0x041` | |
-| 0x42 | 0x4281A0 | `_0x042` | spawn-gate-adjacent; retail emits during load |
+| 0x42 | 0x4281A0 | `_0x042` | input/state-flags `[u16]` → Input_UnpackStateFlags (§5.35) |
 | 0x43 | 0x42FA90 | `_0x043` | time-sync ping `[u32 serverTs]` → C2S 0x08 (§5.34) |
 | 0x44 | 0x422710 | `_0x044` | |
 | 0x45 | 0x422890 | `_0x045` | empty payload; sets `dword_A82370=6`; calls `PolyTrn_LoadTileData()` (terrain texture rebuild) |
 | 0x46 | 0x431370 | `_0x046` | PLAYER-SYNC — full layout + field read order verified §5.21 (controlled capture 2026-06-17) |
 | 0x48 | 0x4284B0 | `_0x048` | |
-| 0x49 | 0x42C0A0 | `_0x049` | weapon-reload notification |
+| 0x49 | 0x42C0A0 | `_0x049` | weapon-reload `[u16 handle][u16 reloadParam]` → WeaponSlot_ReloadAmmo (IDB name `handle_camera_sync_packet_0x049` is wrong; §5.35) |
 | 0x4C | 0x428570 | `_0x04C` | target-assignment list (squad/AI orders) |
 | 0x4D | 0x4317B0 | `_HandleSpawnSlot` | reads u8 slot; local slot → tip event; otherwise client replies C2S 0x22+0x23; reads `dword_24C1928` as a skip-tip-if-already-spawned guard (never writes it) |
 | 0x4E | 0x431870 | `_HandleBatchSpawn` (misleading) | u16 count + per-slot u16; calls `Entity_KillBySlotId` (kill, not spawn), then replies C2S 0x28 |
@@ -345,7 +345,7 @@ sweep; blank = not yet characterized.
 | 0x67 | 0x42D570 | `_0x067` | |
 | 0x68 | 0x42DAA0 | `_0x068` | entity-index list request `[u32 startIdx]` → C2S 0x3D (§5.34) |
 | 0x6A | 0x432510 | `_0x06A` | |
-| 0x6B | 0x425520 | `_0x06B` | |
+| 0x6B | 0x425520 | `_0x06B` | minimap overlay batch `[u8 count]`+count×12B (handle@+0; blip rebuilt from entity state, 10 trailing B unused) (§5.35) |
 | 0x6C | 0x428FC0 | `_0x06C` | |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
 | 0x6E | 0x429880 | `_0x06E` | team/squad roster sync: `[u8 teamCount]` + per team `{u16 entityHandle, u16 slotIdx, u8 memberCount, u16 slotHandle, u16 members[]}`. Field map **§5.31** (decoded) |
@@ -358,7 +358,7 @@ sweep; blank = not yet characterized.
 | 0x75 | 0x4259E0 | `_0x075` | spectator-mode flags (2 B); sets `byte_A860EC`, `dword_24D1DF4` |
 | 0x76 | 0x42D540 | `_0x076` | u16 → `dword_24D59FC` |
 | 0x78 | 0x4259070 | `_0x078` | (address as recorded in the source note has 7 hex digits — likely a typo; re-verify in the IDB) |
-| 0x79 | 0x429B00 | `_0x079` | spectator-mode (1 B → `dword_82BEE4`) |
+| 0x79 | 0x429B00 | `_0x079` | spectator-mode flag (1 B → `dword_82BEE4`) (§5.35) |
 | 0x7A | 0x429B40 | `_0x07A` | player name (max 64 chars) → server-info struct |
 | 0x7B | 0x429BB0 | `_0x07B` | full player/session info: 5×cstring + u32 + 2×cstring. Field map **§5.32** (decoded) — roles witnessed from the landing globals + PunkBuster cvars (the Hex-Rays "clan/squad/rank" comment is wrong): name / **playerId** (NovaWorld account id, **not** a clan tag) / serverName / missionName / mapFile / … / gameName |
 | 0x7C | 0x426020 | `_0x07C` | |
@@ -406,7 +406,7 @@ This is what a reimplemented server must **handle**.
 | 0x1B | 0x501D90 | |
 | 0x1C | 0x501D40 | anim-map CRC reply (to S2C 0x39, §5.34) |
 | 0x1D | 0x501C60 | |
-| 0x20 | 0x501F70 | |
+| 0x20 | 0x501F70 | entity-checksum reply (to S2C 0x30, §5.35) |
 | 0x21 | 0x502050 | anti-cheat CRC reply (§5.17) — reads u8 player_index + u32 expected_crc; host XORs computed CRC against per-connection salt at `playerCtx+89924`, mismatch logs "ACRC" + sends "PUNT ACRC" |
 | 0x22 | 0x514C90 | player-sync request `[u8 slot][u16 fieldFlags]` → host serializes & replies S2C 0x46 (§5.33); the client queues it on a 0x46 `0x4000`-ack and as a 0x0F/0x4D reply-burst member |
 | 0x23 | 0x514D50 | visible-players request (empty body) → host replies S2C 0x4C snapshot (§5.33); 0x0F/0x4D reply-burst member |
@@ -2119,6 +2119,45 @@ different fixed reply built from local state; the inbound parse is structurally 
 directions); `0x68`/`0x43`/`0x39` ×141 each (`0x39` seed constant `0x3D5D`, `0x43` serverTs a slow coarse
 tick, `0x68` startIdx paging 50/100/150…); all full-consume via `decode_rtt_sample` / `decode_u32_scalar`.
 
+### 5.35 Minimap overlays, weapon reload, second death path, checksum + misc scalars (probe3_again, 2026-06-19)
+
+The per-entity HUD / lifecycle notifications the host streams alongside the 0x0A frame. All were
+dispatch-table one-liners (no field map) until probe3_again carried enough of each to witness.
+
+**S2C `0x6B` — minimap overlay batch.** `[u8 count]` + `count × 12-B records`. The handler reads only the
+`[u16 handle]` at each record's offset 0 (resolved via the pool table) and **rebuilds that entity's
+minimap blip from its own engine-side state** — position, type, and team @ `entity+354` (the same team
+byte as D-NET-58) → icon + team color. The 10 trailing bytes per record are *not* consumed by the handler,
+so the decoder keeps them raw. [orig: `NapiNPClientMsg_0x06B @ 0x425520` → `update_minimap_overlay_entity @ 0x5BEC10`].
+(The census guess "objective/HUD countdown" was wrong — the `1e→1d` byte is inside a per-record blob the
+handler ignores, not a global timer.)
+
+**S2C `0x49` — weapon-reload notification.** `[u16 entityHandle][u16 reloadParam]` (4 B). Resolves the
+entity → `WeaponSlot_ReloadAmmo(entity, reloadParam)`; a vehicle entity instead arms an 80-tick timer.
+**The IDB name `handle_camera_sync_packet_0x049` is wrong** — there is no camera code; it reloads ammo.
+[orig: `handle_camera_sync_packet_0x049 @ 0x42C0A0` (misnamed) → `WeaponSlot_ReloadAmmo @ 0x541720`].
+
+**S2C `0x13` — entity death (the SECOND death path, beside `0x26`).** `[u16 entityHandle][i16 killerSource]`
+(4 B). Sets the entity `Health=0`, stores `killerSource` at `entity+pad9[36]`, clears `entity+pad8[86]`,
+fires the death callback `(entity, 4, 0)`; if the local player died it stamps the respawn tick + toggles
+the weapon scope. Unlike `0x26` (which routes through `Entity_KillBySlotId`), this acts directly on the
+entity. [orig: `NapiNPClientMsg_EntityDeath @ 0x42EB50`].
+
+**S2C `0x30` — entity-checksum request.** `[u8 entityId][u16 checksum]` (3 B) → builds
+`NetPacket_WriteEntityChecksum(entityId, checksum)` and replies **C2S `0x20`** (an entity-checksum reply,
+distinct from the S2C `0x20` pool-3 sync). [orig: `NapiNPClientMsg_HandleChecksumRequest @ 0x431170`].
+
+**Misc client scalars.** `0x42` input/state-flags `[u16]` → `Input_UnpackStateFlags`
+([orig: `NapiNPClientMsg_0x042 @ 0x4281A0`]); `0x79` spectator-mode flag `[u8]` → `dword_82BEE4`
+([orig: `NapiNPClientMsg_0x079 @ 0x429B00`]); `0x2A` chat-history entry `[i32 a][i32 b][i16 c]` (10 B) →
+`Chat_AddToHistory` ([orig: `NapiNPClientMsg_0x02A @ 0x425BA0`]).
+
+**Witness:** probe3_again — `0x6B` ×266 (`count=1`, blip handle = the active player), `0x49` ×84
+(`reloadParam=195` on both player handles `0x0006`/`0x0007`), `0x13` ×18 (`killerSource=0`), `0x30` ×174
+(`entityId=0xff checksum=0`, ⇄ C2S `0x20` ×174), `0x42` ×143 (`flags=0`), `0x79` ×355 (`flag=1`), `0x2A`
+×12; all full-consume via the `decode_*` family. `nw_pp` decodes the whole capture with **zero decode
+failures**.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
@@ -3124,6 +3163,8 @@ Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1", probe 3 /
 
 Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1" re-run — `probe3_again`, **3 human players** + 15 ballistic weapons + more movement + a second client; host + 2 client `/PROFILE` recordings, 2026-06-19):
 - **D-NET-76** [MED, DOC+CODE] **The high-volume transport / anti-cheat control pings are now decoded — the largest hex-only hole in the §4 catalog (§5.34).** The richer 2-client session carried enough of each to field-map them. **RTT ping/pong S2C `0x57` ⇄ C2S `0x2C`** (×10,679 each — the single biggest channel by datagram count): identical 5-B `[u32 timestamp][u8 echoFlag]`; bidirectional — both peers ping, `echoFlag != 0` bounces the stamp back with the flag cleared, `echoFlag == 0` measures `rtt = GetTickCount() - timestamp` into a 10-sample ring (the server side also enforces `g_MinPing`/`g_MaxPing`, kicking >20× violators). **Periodic request trio S2C `0x68`/`0x43`/`0x39`** (×141 each, ~every 335 frames): each a single `[u32]` → fixed reply — `0x68` start_index → C2S `0x3D` entity-index list; `0x43` server_timestamp → C2S `0x08` time-sync; `0x39` challenge_seed → C2S `0x1C` anim-map CRC (seed constant `0x3D5D`). Landed `decode_rtt_sample` + `decode_u32_scalar` (`ingame_decode`), `nw_pp` printers, catalog flips (`0x57`/`0x2C`/`0x68`/`0x43`/`0x39` → Decoded; `0x08`/`0x1C`/`0x3D` reply labels), and `nw_message_coverage` checks (**30 Decoded tags**). **`0x2C` is direction-overloaded** — S2C `0x2C` (`@ 0x427E10`) is a chat-history entry, only the C2S direction is RTT. Wire-validated: RTT timestamps pair across the two directions; the trio full-consumes. [orig: NapiNPClientMsg_0x057_RTT @ 0x432210 / NapiNPServerMsg_HandlePingResponse @ 0x515070 / NapiNPClientMsg_0x068 @ 0x42DAA0 / NapiNPClientMsg_0x043 @ 0x42FA90 / NapiNPClientMsg_HandleChecksumChallenge @ 0x42E6D0]
+- **D-NET-77** [MED, DOC+CODE] **S2C `0x6B` is a minimap-overlay batch, not the objective/HUD timer the census guessed (§5.35).** `[u8 count]` + `count × 12-B records`; the handler reads only the `[u16 handle]` at each record+0 (pool-resolved) and **rebuilds that entity's minimap blip from its own engine-side state** (position, type, team @ `entity+354` → icon + team color via `update_minimap_overlay_entity @ 0x5BEC10`). The 10 trailing bytes per record are not consumed by the handler — so the `1e→1d` "countdown" the census flagged is just a byte inside a per-record blob the engine ignores, not a global timer. Landed `decode_minimap_overlay_batch` + printer + catalog + coverage. probe3_again ×266 (`count=1`, blip = the active player), full-consume. [orig: NapiNPClientMsg_0x06B @ 0x425520 → update_minimap_overlay_entity @ 0x5BEC10]
+- **D-NET-78** [MED, DOC+CODE] **Weapon-reload / second death path / entity-checksum + misc client scalars decoded (§5.35).** **S2C `0x49`** weapon-reload `[u16 handle][u16 reloadParam]` → `WeaponSlot_ReloadAmmo` — and the **IDB name `handle_camera_sync_packet_0x049` is WRONG** (no camera code; reloads ammo). **S2C `0x13`** is a SECOND entity-death path beside `0x26`: `[u16 handle][i16 killerSource]` acts directly on the entity (`Health=0` + death cb), where `0x26` routes through `Entity_KillBySlotId`. **S2C `0x30`** entity-checksum request `[u8 entityId][u16 checksum]` replies **C2S `0x20`** — correcting the §4 catalog row that read "→ C2S 0x21" (0x21 is the *0x31* weapon-loadout CRC reply; the census confirms the 0x30↔0x20 pairing, ×174 each). Plus the misc scalars **`0x42`** input/state-flags `[u16]`→`Input_UnpackStateFlags`, **`0x79`** spectator flag `[u8]`, **`0x2A`** chat-history `[i32][i32][i16]`. Landed `decode_weapon_reload`/`decode_entity_death`/`decode_entity_checksum_request`/`decode_input_state_flags`/`decode_spectator_flag`/`decode_chat_history_entry` + printers + catalog (→ Decoded; `C2S 0x20` reply label) + coverage (**37 Decoded tags**). probe3_again: `0x49` ×84 (`reloadParam=195` on both players), `0x13` ×18, `0x30` ×174, `0x42` ×143, `0x79` ×355, `0x2A` ×12; `nw_pp` decodes the whole capture with **zero decode failures**. [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (misnamed) / NapiNPClientMsg_EntityDeath @ 0x42EB50 / NapiNPClientMsg_HandleChecksumRequest @ 0x431170 / NapiNPClientMsg_0x042 @ 0x4281A0 / _0x079 @ 0x429B00 / _0x02A @ 0x425BA0]
 - **D-NET-55 / D-NET-64 — probe3_again ALSO did NOT surface them (still OPEN).** Despite 3 players, 15 distinct weapon `adm` indices, and 260 fire events, all 9,049 C2S `0x0c` uploads are sub_op `0x0a` (zero guided field-groups), nobody used a vehicle / rocket Little Bird (every uplink `vehHdl=0xFFFF`), and the AI stayed static (mid-game S2C `0x20` = the 2-record load batch only). The 15 weapons fired were all ballistic; roster `0x6e` stayed `teams=0` (Co-op single-team). A dedicated guided + patrolling-AI capture is still required for D-NET-64 / D-NET-55.
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')

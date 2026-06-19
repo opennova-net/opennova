@@ -933,6 +933,86 @@ void print_tag_39(const std::vector<uint8_t> &body) {
 	std::printf("        [0x39] anim-crc-challenge seed=0x%08x -> reply C2S 0x1C\n", v);
 }
 
+// S2C 0x6B minimap overlay batch.
+void print_tag_6b(const std::vector<uint8_t> &body) {
+	MinimapOverlayBatch b;
+	if (!decode_minimap_overlay_batch(body.data(), body.size(), b)) {
+		std::printf("        [0x6B] minimap-overlay decode failed (len %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x6B] minimap-overlay count=%zu\n", b.entries.size());
+	for (const auto &e : b.entries)
+		std::printf("            blip handle=%s\n", handle_str(e.handle).c_str());
+}
+
+// S2C 0x49 weapon-reload notification.
+void print_tag_49(const std::vector<uint8_t> &body) {
+	WeaponReload r;
+	size_t used = 0;
+	if (!decode_weapon_reload(body.data(), body.size(), r, used)) {
+		std::printf("        [0x49] weapon-reload decode failed (need 4 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x49] weapon-reload handle=%s reloadParam=%u\n",
+	            handle_str(r.entity_handle).c_str(), unsigned(r.reload_param));
+}
+
+// S2C 0x13 entity death (second death path).
+void print_tag_13(const std::vector<uint8_t> &body) {
+	EntityDeathRecord d;
+	size_t used = 0;
+	if (!decode_entity_death(body.data(), body.size(), d, used)) {
+		std::printf("        [0x13] entity-death decode failed (need 4 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x13] entity-death handle=%s killerSource=%d\n",
+	            handle_str(d.entity_handle).c_str(), int(d.killer_source));
+}
+
+// S2C 0x30 entity-checksum request -> reply C2S 0x20.
+void print_tag_30(const std::vector<uint8_t> &body) {
+	EntityChecksumRequest r;
+	size_t used = 0;
+	if (!decode_entity_checksum_request(body.data(), body.size(), r, used)) {
+		std::printf("        [0x30] entity-checksum-req decode failed (need 3 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x30] entity-checksum-req entityId=0x%02x checksum=0x%04x -> reply C2S 0x20\n",
+	            unsigned(r.entity_id), unsigned(r.checksum));
+}
+
+// S2C 0x42 input/state-flags push.
+void print_tag_42(const std::vector<uint8_t> &body) {
+	uint16_t flags = 0; size_t used = 0;
+	if (!decode_input_state_flags(body.data(), body.size(), flags, used)) {
+		std::printf("        [0x42] input-state-flags decode failed (need 2 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x42] input-state-flags=0x%04x\n", unsigned(flags));
+}
+
+// S2C 0x79 spectator-mode flag.
+void print_tag_79(const std::vector<uint8_t> &body) {
+	uint8_t flag = 0; size_t used = 0;
+	if (!decode_spectator_flag(body.data(), body.size(), flag, used)) {
+		std::printf("        [0x79] spectator-flag decode failed (need 1 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x79] spectator-flag=%u\n", unsigned(flag));
+}
+
+// S2C 0x2A chat-history entry.
+void print_tag_2a(const std::vector<uint8_t> &body) {
+	ChatHistoryEntry e;
+	size_t used = 0;
+	if (!decode_chat_history_entry(body.data(), body.size(), e, used)) {
+		std::printf("        [0x2A] chat-history decode failed (need 10 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x2A] chat-history a=0x%08x b=0x%08x c=%d\n",
+	            unsigned(e.field_a), unsigned(e.field_b), int(e.field_c));
+}
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
 	const char *label = tag_label(dir, tag);
@@ -959,6 +1039,13 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x68) print_tag_68(payload);
 	else if (dir == 'S' && tag == 0x43) print_tag_43(payload);
 	else if (dir == 'S' && tag == 0x39) print_tag_39(payload);
+	else if (dir == 'S' && tag == 0x6B) print_tag_6b(payload);
+	else if (dir == 'S' && tag == 0x49) print_tag_49(payload);
+	else if (dir == 'S' && tag == 0x13) print_tag_13(payload);
+	else if (dir == 'S' && tag == 0x30) print_tag_30(payload);
+	else if (dir == 'S' && tag == 0x42) print_tag_42(payload);
+	else if (dir == 'S' && tag == 0x79) print_tag_79(payload);
+	else if (dir == 'S' && tag == 0x2A) print_tag_2a(payload);
 	else if (dir == 'C' && tag == 0x2C) print_tag_2c_c2s(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);

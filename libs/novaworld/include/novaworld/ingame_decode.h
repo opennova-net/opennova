@@ -1068,4 +1068,84 @@ bool decode_rtt_sample(const uint8_t *body, size_t len,
 bool decode_u32_scalar(const uint8_t *body, size_t len,
                        uint32_t &out_value, size_t &consumed);
 
+// ===========================================================================
+// Minimap overlays, weapon reload, second death path, entity-checksum, and
+// misc client scalars (§5.35) — the per-entity HUD / lifecycle notifications
+// the host streams alongside the 0x0A frame.
+// ===========================================================================
+
+// S2C 0x6B — minimap overlay batch. `[u8 count]` + `count × 12-B records`; the
+// handler reads only the `[u16 handle]` at each record's offset 0 (resolved via
+// the pool table) and rebuilds that entity's minimap blip from its OWN state
+// (position, type, team @ entity+354 → icon / team color). The 10 trailing bytes
+// per record are NOT consumed by the handler — the blip is recomputed
+// engine-side, not taken from the wire — so the decoder keeps them raw.
+// [orig: NapiNPClientMsg_0x06B @ 0x425520 → update_minimap_overlay_entity @ 0x5BEC10]
+struct MinimapOverlayBatch {
+	struct Entry {
+		uint16_t handle = 0;        // (pool<<12)|slot of the overlaid entity
+		uint8_t  extra[10] = {};    // server-side blip state; NOT read by the handler
+	};
+	std::vector<Entry> entries;
+};
+bool decode_minimap_overlay_batch(const uint8_t *body, size_t len,
+                                  MinimapOverlayBatch &out);
+
+// S2C 0x49 — weapon-reload notification. `[u16 entityHandle][u16 reloadParam]`
+// (4 B). The handler resolves the entity and calls WeaponSlot_ReloadAmmo(entity,
+// reloadParam); a vehicle entity instead arms an 80-tick timer. NOTE the IDB
+// name `handle_camera_sync_packet_0x049` is WRONG — there is no camera code, it
+// reloads ammo. [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (IDA-misnamed)
+//  → WeaponSlot_ReloadAmmo @ 0x541720]
+struct WeaponReload {
+	uint16_t entity_handle = 0;
+	uint16_t reload_param = 0;   // WeaponSlot_ReloadAmmo arg (reload slot / amount)
+};
+bool decode_weapon_reload(const uint8_t *body, size_t len,
+                          WeaponReload &out, size_t &consumed);
+
+// S2C 0x13 — entity death (the SECOND death path, beside 0x26 kill-sync).
+// `[u16 entityHandle][i16 killerSource]` (4 B). The handler sets the entity's
+// Health=0, stores killerSource at entity+pad9[36], clears entity+pad8[86], and
+// fires its death callback(entity, 4, 0); if the local player died it stamps the
+// respawn tick + toggles the weapon scope. Unlike 0x26 (which routes through
+// Entity_KillBySlotId), this path acts directly on the entity.
+// [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50]
+struct EntityDeathRecord {
+	uint16_t entity_handle = 0;  // the dying entity
+	int16_t  killer_source = 0;  // killer / damage source (i16)
+};
+bool decode_entity_death(const uint8_t *body, size_t len,
+                         EntityDeathRecord &out, size_t &consumed);
+
+// S2C 0x30 — entity-checksum request. `[u8 entityId][u16 checksum]` (3 B). The
+// client builds NetPacket_WriteEntityChecksum(entityId, checksum) and replies
+// C2S 0x20 (entity checksum). [orig: NapiNPClientMsg_HandleChecksumRequest @ 0x431170]
+struct EntityChecksumRequest {
+	uint8_t  entity_id = 0;
+	uint16_t checksum = 0;
+};
+bool decode_entity_checksum_request(const uint8_t *body, size_t len,
+                                    EntityChecksumRequest &out, size_t &consumed);
+
+// S2C 0x42 — input/state-flags push `[u16 stateFlags]` (2 B) → Input_UnpackStateFlags.
+// [orig: NapiNPClientMsg_0x042 @ 0x4281A0]
+bool decode_input_state_flags(const uint8_t *body, size_t len,
+                              uint16_t &out_flags, size_t &consumed);
+
+// S2C 0x79 — spectator-mode flag `[u8]` (1 B) → dword_82BEE4.
+// [orig: NapiNPClientMsg_0x079 @ 0x429B00]
+bool decode_spectator_flag(const uint8_t *body, size_t len,
+                           uint8_t &out_flag, size_t &consumed);
+
+// S2C 0x2A — chat-history entry `[i32 a][i32 b][i16 c]` (10 B) → Chat_AddToHistory.
+// [orig: NapiNPClientMsg_0x02A @ 0x425BA0]
+struct ChatHistoryEntry {
+	int32_t field_a = 0;
+	int32_t field_b = 0;
+	int16_t field_c = 0;
+};
+bool decode_chat_history_entry(const uint8_t *body, size_t len,
+                               ChatHistoryEntry &out, size_t &consumed);
+
 } // namespace opennova
