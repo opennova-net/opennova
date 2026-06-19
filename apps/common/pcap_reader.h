@@ -16,6 +16,9 @@ struct PcapDatagram {
 	int dstport = 0;
 	int frame_index = 0; // 1-based order within the capture
 	std::vector<uint8_t> payload;
+	// Appended last so existing positional aggregate-init `{src, dst, frame,
+	// payload}` callers keep compiling (ts defaults to 0).
+	uint64_t ts_nanos = 0; // capture timestamp, nanoseconds since the epoch (0 if absent)
 };
 
 // Parse a legacy pcap or pcapng buffer already in memory; append every IPv4/UDP
@@ -38,8 +41,9 @@ bool read_pcap_udp_file(const std::string &path, std::vector<PcapDatagram> &out,
 
 // Build a minimal legacy pcap (DLT_RAW: one synthetic IPv4+UDP frame per
 // datagram) in memory — for crafting tiny inline captures in tests. Only
-// srcport/dstport/payload are used; src/dst IPs are 127.0.0.1 and timestamps
-// are zero (deterministic). The result round-trips through read_pcap_udp().
+// srcport/dstport/ts_nanos/payload are used; src/dst IPs are 127.0.0.1. The
+// timestamp is written at microsecond resolution (ts_nanos truncated), so the
+// result round-trips through read_pcap_udp() at that resolution.
 std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams);
 
 } // namespace opennova::net

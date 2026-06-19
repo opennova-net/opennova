@@ -25,6 +25,9 @@ const VegAssets := preload("res://engine/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
+const NetWorldView := preload("res://engine/world/net_world_view.gd")
+const NET_CONTAINER_NAME := "NetObjects"
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -57,6 +60,8 @@ var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pa
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _mission_audio: NovaMissionAudio
+var _net_client     # NovaNetClient: the in-match wire client (replay or live)
+var _net_view       # NetWorldView: spawns + drives models from the decoded world
 # A host-injected resource root (the editor's mounted VFS). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
@@ -154,7 +159,89 @@ func load_mission_data(mission: NovaMissionData, bms_name: String, dir: String =
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
-# The ONE mission load path — the file entry (load_mission) and the in-memory
+## Load a NET-driven session: terrain + environment come from `mission`'s header
+## refs (resolved from the mounted root), but entities come from the LIVE WIRE
+## stream — a NovaNetClient dialing the replay tool (or, later, a real server) —
+## not the .bms placements and not the AI sim. Renders real .3di models at the
+## decoded positions each frame via NetWorldView.
+## opts: { mission (bms name), dir, replay_host, replay_port, items (optional
+## items.def path override), follow_camera (bool), camera (Camera3D) }.
+func load_net_session(opts: Dictionary) -> int:
+	# Resource root: a `loose` dir (a flat extract — e.g. an authored probe folder)
+	# mounts via set_root_dir; otherwise the normal PFF-install resolution.
+	var resource_root: NovaResourceRoot
+	var dir := String(opts.get("dir", ""))
+	if bool(opts.get("loose", false)) and not dir.is_empty():
+		resource_root = NovaResourceRoot.new()
+		resource_root.set_root_dir(dir)
+		set_resource_root(resource_root)
+	else:
+		resource_root = _resolve_root(dir)
+	if resource_root == null:
+		return ERR_CANT_OPEN
+	_resource_root = resource_root
+	var bms_name := String(opts.get("mission", ""))
+	if bms_name.is_empty() or not resource_root.has_file(bms_name):
+		load_failed.emit("net session: mission '%s' not found in %s" % [bms_name, resource_root.get_root_dir()])
+		return ERR_FILE_NOT_FOUND
+	var mission := NovaMissionData.new()
+	if mission.open_from_resource_root(resource_root, bms_name) != OK:
+		load_failed.emit("net session: failed to parse %s: %s" % [bms_name, mission.get_last_error()])
+		return ERR_CANT_OPEN
+
+	# Terrain + environment (the map the host played) — same loaders as a mission.
+	var env_name := mission.get_environment_ref() + ".env"
+	if resource_root.has_file(env_name) and _load_environment(env_name):
+		_apply_mission_environment_overrides(mission)
+	var trn := mission.get_terrain_ref() + ".trn"
+	if not resource_root.has_file(trn):
+		load_failed.emit("net session: %s.trn not found in %s" % [mission.get_terrain_ref(), resource_root.get_root_dir()])
+		return ERR_FILE_NOT_FOUND
+	if not _load_terrain(trn):
+		load_failed.emit("net session: failed to load %s" % trn)
+		return ERR_CANT_OPEN
+	_loaded_mission = mission
+
+	# Item database for BOTH the §5.10b wire dispatch-class table and model
+	# resolution. An explicit `items` path wins (e.g. the JOX items.def a probe was
+	# authored against); otherwise resolve items.def from the mounted root.
+	var item_db := NovaItemDatabase.new()
+	var items_path := String(opts.get("items", ""))
+	var item_err := item_db.load(items_path) if not items_path.is_empty() \
+		else item_db.load_from_resource_root(resource_root, "items.def")
+	if item_err != OK:
+		push_warning("net session: items.def not loaded (%s) — entities won't resolve" % item_db.get_last_error())
+
+	var resolver = NovaModelResolver.new()
+	resolver.setup(resource_root, item_db)
+
+	# The in-match client (replay vs real differ only by the endpoint it dials).
+	_net_client = NovaNetClient.new()
+	_net_client.name = "NovaNetClient"
+	_net_client.set_item_database(item_db)
+	_net_client.replay_host = String(opts.get("replay_host", "127.0.0.1"))
+	_net_client.replay_port = int(opts.get("replay_port", 42000))
+	_net_client.assigned.connect(func(role, is_host, session, m):
+		print("GameWorld(net): role=%d is_host=%s session=%d mission='%s'" % [role, is_host, session, m]))
+	add_child(_net_client)
+
+	var container := Node3D.new()
+	container.name = NET_CONTAINER_NAME
+	add_child(container)
+
+	var camera: Camera3D = opts.get("camera", null) if bool(opts.get("follow_camera", false)) else null
+	_net_view = NetWorldView.new()
+	_net_view.name = "NetWorldView"
+	_net_view.setup(_net_client, resolver, container, _env, camera)
+	add_child(_net_view)
+
+	_net_client.connect_to_replay()
+	_loaded = true
+	world_loaded.emit()
+	return OK
+
+
+# The ONE mission path — the file entry (load_mission) and the in-memory
 # entry (load_mission_data) converge here: resolve the header's terrain +
 # environment from `resource_root`, apply the mission's env overrides, build the
 # world, place objects, start the runtime + audio.
@@ -259,6 +346,17 @@ func unload() -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		container.queue_free()
+	# Net session teardown (no-ops for a normal mission).
+	if _net_view != null:
+		_net_view.queue_free()
+	if _net_client != null:
+		_net_client.stop()
+		_net_client.queue_free()
+	var net_container := get_node_or_null(NodePath(NET_CONTAINER_NAME))
+	if net_container != null:
+		net_container.queue_free()
+	_net_view = null
+	_net_client = null
 	if _mission_audio != null:
 		_mission_audio.teardown()
 	if _env != null and _env.environment_data != null:

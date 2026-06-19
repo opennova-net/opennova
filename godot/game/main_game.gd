@@ -38,6 +38,12 @@ func _ready() -> void:
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
 		_camera.connect("escape_pressed", _on_camera_escape)
+	# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
+	# inherit from the editor), skip the menu and dial the replay tool / server
+	# directly — each instance gets slotted into a role on connect.
+	if not OS.get_environment("NW_REPLAY").is_empty():
+		_enter_net_session()
+		return
 	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		_request_resource_dir()
@@ -198,6 +204,37 @@ func _on_start_requested(bms_name: String) -> void:
 	if not _world.load_failed.is_connected(_on_world_load_failed):
 		_world.load_failed.connect(_on_world_load_failed)
 	_world.load_mission(bms_name)
+
+
+# Enter a net-replay session (no menu). The replay tool (or a real server) is at
+# NW_REPLAY="host:port"; NW_REPLAY_MISSION names the map .bms, NW_REPLAY_ITEMS is
+# an optional items.def override, NW_REPLAY_DIR an optional resource dir (else the
+# persisted one). Each launched instance dials in and is assigned a role.
+func _enter_net_session() -> void:
+	var ep := OS.get_environment("NW_REPLAY")
+	var parts := ep.split(":")
+	_menu_host.hide_menu()
+	_world.visible = true
+	_set_hud_visible(true)
+	_state = State.WORLD
+	if not _world.world_loaded.is_connected(_on_world_loaded):
+		_world.world_loaded.connect(_on_world_loaded)
+	if not _world.load_failed.is_connected(_on_world_load_failed):
+		_world.load_failed.connect(_on_world_load_failed)
+	var err := _world.load_net_session({
+		"mission": OS.get_environment("NW_REPLAY_MISSION"),
+		"replay_host": parts[0] if parts.size() > 0 else "127.0.0.1",
+		"replay_port": int(parts[1]) if parts.size() > 1 else 42000,
+		"items": OS.get_environment("NW_REPLAY_ITEMS"),
+		"dir": OS.get_environment("NW_REPLAY_DIR"),
+		"loose": not OS.get_environment("NW_REPLAY_LOOSE").is_empty(),
+		# Client roles chase their assigned player; the host role (no own player)
+		# is left on the free-fly camera as a spectator.
+		"follow_camera": true,
+		"camera": _camera,
+	})
+	if err != OK:
+		push_warning("MainGame: net session failed to start (%d)" % err)
 
 
 func _on_world_loaded() -> void:

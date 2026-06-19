@@ -1116,6 +1116,30 @@ target_link_libraries(nw_replay_timeline_test PRIVATE opennova_novaworld opennov
 target_include_directories(nw_replay_timeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_replay_timeline COMMAND nw_replay_timeline_test)
 
+# CaptureDecoder streaming-equivalence — pins that a sequence of push() calls
+# yields byte-identical InGameMessages to one batch decode_capture_to_messages()
+# (the contract the in-engine live net client relies on). Runs on an inline
+# two-session capture unconditionally; also checks the real 3-player probe3_again
+# capture when present (NW_PROBE3AGAIN_PCAP / .scratch), skipping clean otherwise.
+add_executable(nw_capture_decoder_test novaworld/nw_capture_decoder_test.cpp)
+target_link_libraries(nw_capture_decoder_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_capture_decoder_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_capture_decoder_test PRIVATE
+    DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng")
+add_test(NAME nw_capture_decoder COMMAND nw_capture_decoder_test)
+
+# nw_replay role partition — pins that the replay tool splits a session into host
+# + client roles from the NAPI session opcode + UDP ports, ignores gate/SSDP
+# noise, and preserves each role's handshake. Compiles the partition unit
+# (apps/nw_replay/nw_replay_partition.cpp) directly. No fixtures, runs in CI.
+add_executable(nw_replay_partition_test
+    novaworld/nw_replay_partition_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/nw_replay/nw_replay_partition.cpp)
+target_link_libraries(nw_replay_partition_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_replay_partition_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/nw_replay)
+add_test(NAME nw_replay_partition COMMAND nw_replay_partition_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.

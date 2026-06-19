@@ -55,6 +55,7 @@ set(TARGET_NAME "opennova")
 add_library(${TARGET_NAME} SHARED
     register_types.cpp
     network/nova_world_client.cpp
+    network/nova_net_client.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_build_job.cpp
     terrain/nova_terrain_data.cpp

@@ -1,6 +1,8 @@
 #include "novaworld/wire_capture.h"
 
+#include <memory>
 #include <unordered_map>
+#include <utility>
 
 #include <napi/envelope.h>
 #include <novacrypto/nwu.h>
@@ -42,6 +44,24 @@ struct DirState {
 	int pending_first_frame = 0;
 };
 
+// Per-session state keyed by the client-side UDP port (C2S src / S2C dst). Each
+// session carries its OWN SCRK pair + per-direction reassembly, so a capture with
+// N clients decodes correctly (a single global pair would clobber the prior
+// client's keys). When ports are unavailable (hexcap / crafted port-less caps)
+// every datagram keys to session 0 — the original single-session behavior.
+struct Session {
+	std::string client_scrk, server_scrk;
+	DirState cstate, sstate;
+};
+
+// Drive one datagram through the outer-decode pipeline, appending any completed
+// in-game messages to `out`. Shared by the live CaptureDecoder and the batch
+// function so both produce identical output. State lives in `sessions`, keyed as
+// above.
+void process_datagram(const CaptureDatagram &d,
+                      std::unordered_map<int, Session> &sessions,
+                      std::vector<InGameMessage> &out);
+
 void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
              DirState &st, int frame, int session, std::vector<InGameMessage> &out) {
 	if (scrk.empty()) return;
@@ -70,51 +90,61 @@ void process(const std::vector<uint8_t> &body, const std::string &scrk, char dir
 	}
 }
 
+void process_datagram(const CaptureDatagram &d,
+                      std::unordered_map<int, Session> &sessions,
+                      std::vector<InGameMessage> &out) {
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	if (!decode_outer(d.payload, op, body)) return;
+	const bool is_server = (op == SESSION_OPCODE_SERVER_AUTH ||
+	                        op == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
+	const bool have_ports = (d.src_port != 0 && d.dst_port != 0);
+	const int session_key = !have_ports ? 0 : (is_server ? d.dst_port : d.src_port);
+	Session &s = sessions[session_key];
+	switch (op) {
+	case SESSION_OPCODE_CLIENT_AUTH: {
+		ClientAuth a;
+		if (parse_client_auth(body.data(), body.size(), a)) s.client_scrk = a.scrk;
+		break;
+	}
+	case SESSION_OPCODE_SERVER_AUTH: {
+		ServerAuth a;
+		if (parse_server_auth(body.data(), body.size(), a)) s.server_scrk = a.scrk;
+		break;
+	}
+	case SESSION_OPCODE_PROTOCOL_MESSAGE:
+		process(body, s.client_scrk, 'C', s.cstate, d.frame_index, session_key, out);
+		break;
+	case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
+		process(body, s.server_scrk, 'S', s.sstate, d.frame_index, session_key, out);
+		break;
+	default:
+		break;
+	}
+}
+
 } // namespace
+
+struct CaptureDecoder::Impl {
+	std::unordered_map<int, Session> sessions;
+};
+
+CaptureDecoder::CaptureDecoder() : impl_(std::make_unique<Impl>()) {}
+CaptureDecoder::~CaptureDecoder() = default;
+CaptureDecoder::CaptureDecoder(CaptureDecoder &&) noexcept = default;
+CaptureDecoder &CaptureDecoder::operator=(CaptureDecoder &&) noexcept = default;
+
+std::vector<InGameMessage> CaptureDecoder::push(const CaptureDatagram &datagram) {
+	std::vector<InGameMessage> out;
+	process_datagram(datagram, impl_->sessions, out);
+	return out;
+}
 
 std::vector<InGameMessage>
 decode_capture_to_messages(const std::vector<CaptureDatagram> &datagrams) {
 	std::vector<InGameMessage> out;
-	// Per-session state keyed by the client-side UDP port (C2S src / S2C dst). Each
-	// session carries its OWN SCRK pair + per-direction reassembly, so a capture with
-	// N clients decodes correctly (a single global pair would clobber the prior
-	// client's keys). When ports are unavailable (hexcap / crafted port-less caps)
-	// every datagram keys to session 0 — the original single-session behavior.
-	struct Session {
-		std::string client_scrk, server_scrk;
-		DirState cstate, sstate;
-	};
 	std::unordered_map<int, Session> sessions;
-	for (const auto &d : datagrams) {
-		uint8_t op = 0;
-		std::vector<uint8_t> body;
-		if (!decode_outer(d.payload, op, body)) continue;
-		const bool is_server = (op == SESSION_OPCODE_SERVER_AUTH ||
-		                        op == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE);
-		const bool have_ports = (d.src_port != 0 && d.dst_port != 0);
-		const int session_key = !have_ports ? 0 : (is_server ? d.dst_port : d.src_port);
-		Session &s = sessions[session_key];
-		switch (op) {
-		case SESSION_OPCODE_CLIENT_AUTH: {
-			ClientAuth a;
-			if (parse_client_auth(body.data(), body.size(), a)) s.client_scrk = a.scrk;
-			break;
-		}
-		case SESSION_OPCODE_SERVER_AUTH: {
-			ServerAuth a;
-			if (parse_server_auth(body.data(), body.size(), a)) s.server_scrk = a.scrk;
-			break;
-		}
-		case SESSION_OPCODE_PROTOCOL_MESSAGE:
-			process(body, s.client_scrk, 'C', s.cstate, d.frame_index, session_key, out);
-			break;
-		case SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE:
-			process(body, s.server_scrk, 'S', s.sstate, d.frame_index, session_key, out);
-			break;
-		default:
-			break;
-		}
-	}
+	for (const auto &d : datagrams) process_datagram(d, sessions, out);
 	return out;
 }
 

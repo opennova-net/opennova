@@ -30,6 +30,11 @@ private:
 		String graphic;
 		String anim_def;
 		String sound_profile;
+		// items.def *_function class-tag directives. The net layer maps these to a
+		// §5.10b wire dispatch class (NovaNetClient::class_from_tag); the placer/
+		// renderer doesn't use them. Stored raw so the object DB stays net-agnostic.
+		String ai_function;
+		String move_function;
 		// items.def soundloop_1..7 — the looping ambient sound-set names for a
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
 		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
@@ -73,6 +78,10 @@ public:
 	// Model basename without extension (e.g. "tank"); empty if unknown/none.
 	String get_graphic(int id) const;
 	String get_anim_def(int id) const;
+	// items.def *_function class tags (raw); empty if the item declares none. The
+	// net layer turns these into a wire dispatch class.
+	String get_ai_function(int id) const;
+	String get_move_function(int id) const;
 	int get_item_type(int id) const;
 	String get_display_name(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf

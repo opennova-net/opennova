@@ -64,8 +64,8 @@ int strip_link_header(uint32_t linktype, const uint8_t *frame, size_t len) {
 }
 
 void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
-                      int frame_index, std::vector<PcapDatagram> &out,
-                      int &fragments_dropped) {
+                      int frame_index, uint64_t ts_nanos,
+                      std::vector<PcapDatagram> &out, int &fragments_dropped) {
 	const int ip_off = strip_link_header(linktype, pkt, len);
 	if (ip_off < 0 || size_t(ip_off) + 20 > len) return;
 	const uint8_t *ip = pkt + ip_off;
@@ -100,6 +100,7 @@ void extract_ipv4_udp(const uint8_t *pkt, size_t len, uint32_t linktype,
 	d.srcport = int(srcport);
 	d.dstport = int(dstport);
 	d.frame_index = frame_index;
+	d.ts_nanos = ts_nanos;
 	d.payload.assign(pkt + payload_off, pkt + payload_off + payload_len);
 	out.push_back(std::move(d));
 }
@@ -111,6 +112,39 @@ uint16_t ipv4_checksum(const uint8_t *hdr, size_t len) {
 	if (len & 1) sum += uint32_t(hdr[len - 1]) << 8;
 	while (sum >> 16) sum = (sum & 0xFFFFu) + (sum >> 16);
 	return uint16_t(~sum & 0xFFFFu);
+}
+
+// pcapng if_tsresol byte -> nanoseconds-per-tick multiplier. MSB clear: 10^-byte
+// seconds (byte=6 default microsecond -> 1000 ns/tick; byte=9 nanosecond -> 1).
+// MSB set: 2^-(byte&0x7f) seconds. Sub-nanosecond resolutions clamp to 1.
+uint64_t ns_mult_from_tsresol(uint8_t b) {
+	if (b & 0x80) {
+		const uint32_t e = b & 0x7F;
+		const long double sec = 1.0L / (long double)(1ull << (e <= 62 ? e : 62));
+		const long double m = sec * 1.0e9L;
+		return m < 1.0L ? 1ull : (uint64_t)(m + 0.5L);
+	}
+	static const uint64_t pow10[] = {1000000000ull, 100000000ull, 10000000ull,
+	                                 1000000ull,    100000ull,    10000ull,
+	                                 1000ull,       100ull,       10ull, 1ull};
+	return b <= 9 ? pow10[b] : 1ull; // >9 = sub-ns, clamp
+}
+
+// Walk an IDB body's options for if_tsresol (code 9); default microseconds.
+uint64_t idb_ns_multiplier(const uint8_t *body, size_t body_len) {
+	uint64_t mult = 1000; // if_tsresol absent => 1e-6 (microseconds)
+	size_t o = 8;         // after linktype(2) + reserved(2) + snaplen(4)
+	while (o + 4 <= body_len) {
+		const uint16_t code = read_u16_le(body + o);
+		const uint16_t olen = read_u16_le(body + o + 2);
+		o += 4;
+		if (code == 0) break; // opt_endofopt
+		if (code == 9 && olen >= 1 && o < body_len)
+			mult = ns_mult_from_tsresol(body[o]);
+		o += olen;
+		o = (o + 3) & ~size_t(3); // 4-byte align
+	}
+	return mult;
 }
 
 } // namespace
@@ -125,15 +159,23 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 	if (magic == PCAP_MAGIC_LE || magic == PCAP_MAGIC_BE ||
 	    magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE) {
 		const bool be = (magic == PCAP_MAGIC_BE || magic == PCAP_MAGIC_NSEC_BE);
+		const bool nsec = (magic == PCAP_MAGIC_NSEC_LE || magic == PCAP_MAGIC_NSEC_BE);
 		auto r32 = [&](const uint8_t *p) { return be ? read_u32_be(p) : read_u32_le(p); };
 		const uint32_t linktype = r32(data + 20);
 		size_t off = 24;
+		// Record header: ts_sec(4) ts_frac(4) incl_len(4) orig_len(4) then data.
+		// ts_frac is microseconds unless the nsec magic is set.
 		while (off + 16 <= len) {
+			const uint32_t ts_sec = r32(data + off);
+			const uint32_t ts_frac = r32(data + off + 4);
+			const uint64_t ts_nanos =
+			    uint64_t(ts_sec) * 1000000000ull +
+			    (nsec ? uint64_t(ts_frac) : uint64_t(ts_frac) * 1000ull);
 			const uint32_t incl_len = r32(data + off + 8);
 			if (off + 16 + incl_len > len) break;
 			frame_index++;
-			extract_ipv4_udp(data + off + 16, incl_len, linktype, frame_index, out,
-			                 fragments_dropped);
+			extract_ipv4_udp(data + off + 16, incl_len, linktype, frame_index, ts_nanos,
+			                 out, fragments_dropped);
 			off += 16 + incl_len;
 		}
 	} else if (magic == PCAPNG_BLOCK_SHB) {
@@ -141,6 +183,7 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 		const uint32_t bom = read_u32_le(data + 8);
 		if (bom != 0x1A2B3C4Du) return false; // big-endian pcapng unsupported
 		uint32_t cur_linktype = LINKTYPE_ETHERNET;
+		std::vector<uint64_t> if_mult; // per-interface ns-per-tick (IDB order)
 		size_t off = 0;
 		while (off + 8 <= len) {
 			const uint32_t btype = read_u32_le(data + off);
@@ -150,20 +193,27 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 			const size_t body_len = blen - 12; // minus type + len*2
 			if (btype == PCAPNG_BLOCK_IDB && body_len >= 8) {
 				cur_linktype = read_u32_le(body) & 0xFFFF;
+				if_mult.push_back(idb_ns_multiplier(body, body_len));
 			} else if (btype == PCAPNG_BLOCK_EPB && body_len >= 20) {
 				// EPB: interface_id(4) ts_high(4) ts_low(4) cap_len(4) pkt_len(4) data...
+				// Timestamp units come from that interface's IDB if_tsresol option.
+				const uint32_t iface = read_u32_le(body);
+				const uint64_t mult = iface < if_mult.size() ? if_mult[iface] : 1000ull;
+				const uint64_t ts = (uint64_t(read_u32_le(body + 4)) << 32) |
+				                    uint64_t(read_u32_le(body + 8));
+				const uint64_t ts_nanos = ts * mult;
 				const uint32_t cap_len = read_u32_le(body + 12);
 				if (20 + cap_len <= body_len) {
 					frame_index++;
-					extract_ipv4_udp(body + 20, cap_len, cur_linktype, frame_index, out,
-					                 fragments_dropped);
+					extract_ipv4_udp(body + 20, cap_len, cur_linktype, frame_index,
+					                 ts_nanos, out, fragments_dropped);
 				}
 			} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
 				const uint32_t pkt_len = read_u32_le(body);
 				if (4 + pkt_len <= body_len) {
 					frame_index++;
-					extract_ipv4_udp(body + 4, pkt_len, cur_linktype, frame_index, out,
-					                 fragments_dropped);
+					extract_ipv4_udp(body + 4, pkt_len, cur_linktype, frame_index, 0,
+					                 out, fragments_dropped);
 				}
 			}
 			off += blen;
@@ -237,8 +287,8 @@ std::vector<uint8_t> build_pcap_udp(const std::vector<PcapDatagram> &dgrams) {
 		ip[11] = uint8_t(cksum);
 
 		const uint32_t incl = uint32_t(total_len);
-		put32(0);    // ts_sec (deterministic)
-		put32(0);    // ts_usec
+		put32(uint32_t(d.ts_nanos / 1000000000ull));        // ts_sec
+		put32(uint32_t((d.ts_nanos % 1000000000ull) / 1000)); // ts_usec
 		put32(incl); // incl_len
 		put32(incl); // orig_len
 		buf.insert(buf.end(), ip, ip + 20);

@@ -95,6 +95,12 @@ add_subdirectory(apps/novaworld_server)
 # `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
 add_subdirectory(apps/nw_pp)
 
+# nw_replay — plays a captured NovaWorld session at each Godot game-client
+# instance: partitions the pcap by UDP port into roles (host + clients), assigns
+# a role per instance as it dials in, and paces each role's raw datagrams to it.
+# The stand-in for "the network"; cut-over to real MP = point clients elsewhere.
+add_subdirectory(apps/nw_replay)
+
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx
     opennova_fnt

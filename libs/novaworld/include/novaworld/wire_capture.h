@@ -13,6 +13,7 @@
 // See docs/net/novaworld-net-re.md §3 (outer stack) and §4 (tag dispatch).
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,35 @@ struct InGameMessage {
 	int session = 0;              // per-session id = the client-side UDP port (the
 	                              // distinct-participant key); 0 = single/unknown session
 	std::vector<uint8_t> payload; // reassembled inner body
+};
+
+// Resumable form of the outer-decode pipeline for a LIVE feed: push datagrams as
+// they arrive (in wire/capture order) and receive the in-game messages that
+// completed on each push. It holds the per-session SCRK pair + per-direction
+// reassembly state across calls, so SCRK recovered from an early ClientAuth /
+// ServerAuth decrypts later protocol packets — exactly as the batch function
+// does. This is the form the in-engine net client uses; re-running the
+// whole-capture function over a growing buffer each frame would be O(n^2).
+//
+// decode_capture_to_messages() is now a thin loop over push(), so a sequence of
+// push() calls produces byte-identical output to one batch call over the same
+// datagrams (guarded by nw_capture_decoder_test).
+class CaptureDecoder {
+public:
+	CaptureDecoder();
+	~CaptureDecoder();
+	CaptureDecoder(CaptureDecoder &&) noexcept;
+	CaptureDecoder &operator=(CaptureDecoder &&) noexcept;
+	CaptureDecoder(const CaptureDecoder &) = delete;
+	CaptureDecoder &operator=(const CaptureDecoder &) = delete;
+
+	// Feed one datagram (the NAPI envelope onward). Returns the in-game messages
+	// that completed on this datagram (0 or more, in order).
+	std::vector<InGameMessage> push(const CaptureDatagram &datagram);
+
+private:
+	struct Impl;
+	std::unique_ptr<Impl> impl_;
 };
 
 // Drive the outer-decode pipeline over `datagrams` (in capture order) and return

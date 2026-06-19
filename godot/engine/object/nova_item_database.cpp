@@ -20,6 +20,8 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_item", "id"), &NovaItemDatabase::has_item);
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &NovaItemDatabase::get_graphic);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &NovaItemDatabase::get_anim_def);
+	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &NovaItemDatabase::get_ai_function);
+	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &NovaItemDatabase::get_move_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &NovaItemDatabase::get_item_type);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
@@ -65,6 +67,8 @@ Error NovaItemDatabase::load(const String &path) {
 		item.graphic = String(entry.graphic);
 		item.anim_def = String(entry.anim_def);
 		item.sound_profile = String(entry.sound_profile);
+		item.ai_function = String(entry.ai_function);
+		item.move_function = String(entry.move_function);
 		for (int s = 0; s < 7; ++s) {
 			item.soundloops[s] = String(entry.soundloops[s]);
 		}
@@ -108,6 +112,8 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 		item.graphic = String(entry.graphic);
 		item.anim_def = String(entry.anim_def);
 		item.sound_profile = String(entry.sound_profile);
+		item.ai_function = String(entry.ai_function);
+		item.move_function = String(entry.move_function);
 		for (int s = 0; s < 7; ++s) {
 			item.soundloops[s] = String(entry.soundloops[s]);
 		}
@@ -147,6 +153,16 @@ String NovaItemDatabase::get_graphic(int id) const {
 String NovaItemDatabase::get_anim_def(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.anim_def;
+}
+
+String NovaItemDatabase::get_ai_function(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.ai_function;
+}
+
+String NovaItemDatabase::get_move_function(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.move_function;
 }
 
 int NovaItemDatabase::get_item_type(int id) const {
