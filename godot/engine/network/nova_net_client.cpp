@@ -16,15 +16,14 @@
 using namespace godot;
 using opennova::CaptureDatagram;
 using opennova::EntityClass;
-using opennova::InGameMessage;
 using opennova::ReplayEntity;
 using opennova::ReplaySample;
-using opennova::ReplaySampleSource;
 
 namespace {
 
-constexpr uint8_t HELLO_MAGIC[4] = {'N', 'W', 'R', 'H'};
-constexpr uint8_t ASSIGN_MAGIC[4] = {'N', 'W', 'R', 'A'};
+// A tiny ping so the source learns this spectator's address; the data plane is
+// pure captured/wire bytes.
+constexpr uint8_t REGISTER_MAGIC[4] = {'N', 'W', 'R', 'H'};
 
 PackedByteArray to_pba(const uint8_t *p, size_t n) {
 	PackedByteArray out;
@@ -55,24 +54,18 @@ void NovaNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("connect_to_replay"), &NovaNetClient::connect_to_replay);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaNetClient::stop);
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaNetClient::get_state);
-	ClassDB::bind_method(D_METHOD("get_role_index"), &NovaNetClient::get_role_index);
-	ClassDB::bind_method(D_METHOD("is_host_role"), &NovaNetClient::is_host_role);
-	ClassDB::bind_method(D_METHOD("get_session_port"), &NovaNetClient::get_session_port);
 	ClassDB::bind_method(D_METHOD("get_mission"), &NovaNetClient::get_mission);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaNetClient::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entities"), &NovaNetClient::get_entities);
 	ClassDB::bind_method(D_METHOD("get_latest_frame"), &NovaNetClient::get_latest_frame);
 	ClassDB::bind_method(D_METHOD("get_frame_range"), &NovaNetClient::get_frame_range);
 	ClassDB::bind_method(D_METHOD("sample_at", "handle", "frame_f"), &NovaNetClient::sample_at);
-	ClassDB::bind_method(D_METHOD("get_own_player_handle"), &NovaNetClient::get_own_player_handle);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "replay_host"), "set_replay_host", "get_replay_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "replay_port"), "set_replay_port", "get_replay_port");
 
-	ADD_SIGNAL(MethodInfo("assigned", PropertyInfo(Variant::INT, "role_index"),
-	                      PropertyInfo(Variant::BOOL, "is_host"),
-	                      PropertyInfo(Variant::INT, "session_port"),
-	                      PropertyInfo(Variant::STRING, "mission")));
+	// Emitted once the mission/map .bms name is read off the wire (S2C 0x7B).
+	ADD_SIGNAL(MethodInfo("mission_known", PropertyInfo(Variant::STRING, "mission")));
 	ADD_SIGNAL(MethodInfo("world_updated"));
 	ADD_SIGNAL(MethodInfo("disconnected"));
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
@@ -124,17 +117,14 @@ void NovaNetClient::connect_to_replay() {
 	local_port_ = int(socket_->get_local_port());
 	socket_->set_dest_address(replay_host_, replay_port_);
 	connect_elapsed_ = 0.0;
-	since_hello_ = hello_resend_s_; // send immediately on first _process
+	since_register_ = register_resend_s_; // send immediately on first _process
 	enter_state(STATE_CONNECTING);
-	send_hello();
+	send_register();
 }
 
 void NovaNetClient::stop() {
 	if (socket_.is_valid()) socket_->close();
 	socket_.unref();
-	role_index_ = -1;
-	is_host_ = false;
-	session_port_ = 0;
 	mission_ = String();
 	decoder_ = opennova::CaptureDecoder();
 	messages_.clear();
@@ -144,31 +134,14 @@ void NovaNetClient::stop() {
 	// before connect_to_replay() (which calls stop()) would be wiped, leaving
 	// S2C 0x0A motion unwalkable.
 	recv_counter_ = 0;
-	own_player_handle_ = 0xFFFF;
 	dirty_ = false;
 	if (state_ != STATE_IDLE) enter_state(STATE_IDLE);
 }
 
-void NovaNetClient::send_hello() {
+void NovaNetClient::send_register() {
 	if (!socket_.is_valid()) return;
 	socket_->set_dest_address(replay_host_, replay_port_);
-	socket_->put_packet(to_pba(HELLO_MAGIC, 4));
-}
-
-bool NovaNetClient::parse_assign(const uint8_t *p, int n) {
-	if (n < 9 || std::memcmp(p, ASSIGN_MAGIC, 4) != 0) return false;
-	role_index_ = int(p[4]);
-	is_host_ = p[5] != 0;
-	session_port_ = int(p[6]) | (int(p[7]) << 8);
-	const int mlen = int(p[8]);
-	mission_ = String();
-	if (n >= 9 + mlen && mlen > 0) {
-		PackedByteArray mb;
-		mb.resize(mlen);
-		std::memcpy(mb.ptrw(), p + 9, mlen);
-		mission_ = mb.get_string_from_utf8();
-	}
-	return true;
+	socket_->put_packet(to_pba(REGISTER_MAGIC, 4));
 }
 
 void NovaNetClient::drain_socket() {
@@ -178,24 +151,27 @@ void NovaNetClient::drain_socket() {
 		if (pkt.size() <= 0) continue;
 		const std::vector<uint8_t> bytes = from_pba(pkt);
 
-		if (state_ == STATE_CONNECTING) {
-			if (parse_assign(bytes.data(), int(bytes.size()))) {
-				enter_state(STATE_RECEIVING);
-				emit_signal("assigned", role_index_, is_host_, session_port_, mission_);
-			}
-			continue; // ignore non-ASSIGN before assignment
-		}
+		// The first datagram means the stream started — switch to RECEIVING.
+		if (state_ == STATE_CONNECTING) enter_state(STATE_RECEIVING);
 		if (state_ != STATE_RECEIVING) continue;
-		if (parse_assign(bytes.data(), int(bytes.size()))) continue; // stray re-assign
 
-		// A raw captured datagram — decode it exactly as a real client would.
+		// A raw wire datagram — decode it exactly as a real client would.
 		CaptureDatagram d;
 		d.frame_index = ++recv_counter_;
-		d.src_port = int(socket_->get_packet_port()); // nw_replay's port (constant)
+		d.src_port = int(socket_->get_packet_port()); // source port (constant over the hop)
 		d.dst_port = local_port_;
 		d.payload = bytes;
 		for (auto &m : decoder_.push(d)) {
 			if (m.settings_update) continue;
+			// The mission/map name rides the wire (S2C 0x7B full-player-info).
+			if (mission_.is_empty() && m.dir == 'S' && m.tag == 0x7B) {
+				opennova::FullPlayerInfo fi;
+				if (opennova::decode_full_player_info(m.payload.data(), m.payload.size(), fi) &&
+				    !fi.map_file.empty()) {
+					mission_ = String(fi.map_file.c_str());
+					emit_signal("mission_known", mission_);
+				}
+			}
 			messages_.push_back(std::move(m));
 			dirty_ = true;
 		}
@@ -205,32 +181,20 @@ void NovaNetClient::drain_socket() {
 void NovaNetClient::rebuild_world() {
 	world_ = opennova::build_replay_timeline(
 	    messages_, [this](uint16_t t) { return class_of(t); });
-	// Own player = the entity with a clean C2S 0x0C uplink sample (a client's own
-	// player). The host has none (spectator), so this stays 0xFFFF for it.
-	own_player_handle_ = 0xFFFF;
-	for (const auto &e : world_.entities) {
-		for (const auto &s : e.track) {
-			if (s.source == ReplaySampleSource::ClientUplink) {
-				own_player_handle_ = e.handle;
-				break;
-			}
-		}
-		if (own_player_handle_ != 0xFFFF) break;
-	}
 }
 
 void NovaNetClient::_process(double delta) {
 	if (state_ == STATE_CONNECTING) {
 		drain_socket();
-		if (state_ != STATE_CONNECTING) return; // assigned this frame
+		if (state_ != STATE_CONNECTING) return; // first datagram arrived this frame
 		connect_elapsed_ += delta;
-		since_hello_ += delta;
-		if (since_hello_ >= hello_resend_s_) {
-			since_hello_ = 0.0;
-			send_hello();
+		since_register_ += delta;
+		if (since_register_ >= register_resend_s_) {
+			since_register_ = 0.0;
+			send_register();
 		}
 		if (connect_elapsed_ >= connect_timeout_s_)
-			enter_state(STATE_ERROR, "no ASSIGN from nw_replay (is it running?)");
+			enter_state(STATE_ERROR, "no data from the replay/server (is it running?)");
 		return;
 	}
 	if (state_ != STATE_RECEIVING) return;
@@ -267,7 +231,6 @@ Array NovaNetClient::get_entities() const {
 		d["team_known"] = e.team_known;
 		d["owner_session"] = e.owner_session;
 		d["spawn_tag"] = int((unsigned char)e.spawn_tag);
-		d["is_own_player"] = (e.handle == own_player_handle_);
 		out.push_back(d);
 	}
 	return out;
@@ -278,8 +241,6 @@ int NovaNetClient::get_latest_frame() const { return world_.last_frame; }
 Vector2i NovaNetClient::get_frame_range() const {
 	return Vector2i(world_.first_frame, world_.last_frame);
 }
-
-int NovaNetClient::get_own_player_handle() const { return int(own_player_handle_); }
 
 Dictionary NovaNetClient::sample_at(int handle, double frame_f) const {
 	Dictionary out;

@@ -206,10 +206,10 @@ func _on_start_requested(bms_name: String) -> void:
 	_world.load_mission(bms_name)
 
 
-# Enter a net-replay session (no menu). The replay tool (or a real server) is at
-# NW_REPLAY="host:port"; NW_REPLAY_MISSION names the map .bms, NW_REPLAY_ITEMS is
-# an optional items.def override, NW_REPLAY_DIR an optional resource dir (else the
-# persisted one). Each launched instance dials in and is assigned a role.
+# Spectate a net session (no menu). The source (replay tool or a real server) is
+# at NW_REPLAY="host:port"; the map name comes off the wire, so only the resource
+# dir is needed: NW_REPLAY_DIR (else the persisted one), NW_REPLAY_LOOSE for a flat
+# extract, and NW_REPLAY_ITEMS as an optional items.def override.
 func _enter_net_session() -> void:
 	var ep := OS.get_environment("NW_REPLAY")
 	var parts := ep.split(":")
@@ -222,15 +222,11 @@ func _enter_net_session() -> void:
 	if not _world.load_failed.is_connected(_on_world_load_failed):
 		_world.load_failed.connect(_on_world_load_failed)
 	var err := _world.load_net_session({
-		"mission": OS.get_environment("NW_REPLAY_MISSION"),
 		"replay_host": parts[0] if parts.size() > 0 else "127.0.0.1",
 		"replay_port": int(parts[1]) if parts.size() > 1 else 42000,
-		"items": OS.get_environment("NW_REPLAY_ITEMS"),
 		"dir": OS.get_environment("NW_REPLAY_DIR"),
 		"loose": not OS.get_environment("NW_REPLAY_LOOSE").is_empty(),
-		# Client roles chase their assigned player; the host role (no own player)
-		# is left on the free-fly camera as a spectator.
-		"follow_camera": true,
+		"items": OS.get_environment("NW_REPLAY_ITEMS"),
 		"camera": _camera,
 	})
 	if err != OK:

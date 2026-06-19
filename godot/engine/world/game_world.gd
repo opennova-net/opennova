@@ -159,13 +159,14 @@ func load_mission_data(mission: NovaMissionData, bms_name: String, dir: String =
 	return _load_mission_internal(mission, bms_name, resource_root)
 
 
-## Load a NET-driven session: terrain + environment come from `mission`'s header
-## refs (resolved from the mounted root), but entities come from the LIVE WIRE
-## stream — a NovaNetClient dialing the replay tool (or, later, a real server) —
-## not the .bms placements and not the AI sim. Renders real .3di models at the
-## decoded positions each frame via NetWorldView.
-## opts: { mission (bms name), dir, replay_host, replay_port, items (optional
-## items.def path override), follow_camera (bool), camera (Camera3D) }.
+## Spectate a NET-driven session: a NovaNetClient connects to the source (the
+## replay tool today, a real server later), and entities come from the LIVE WIRE
+## stream — not the .bms placements, not the AI sim. The map name rides the wire
+## (S2C 0x7B), so when the client learns it we load that mission's terrain +
+## environment; meanwhile NetWorldView renders the decoded .3di models each frame.
+## Only the resource dir + the endpoint are needed.
+## opts: { dir, loose (bool), replay_host, replay_port, items (optional items.def
+## path override), camera (Camera3D for the spectator overview) }.
 func load_net_session(opts: Dictionary) -> int:
 	# Resource root: a `loose` dir (a flat extract — e.g. an authored probe folder)
 	# mounts via set_root_dir; otherwise the normal PFF-install resolution.
@@ -180,31 +181,10 @@ func load_net_session(opts: Dictionary) -> int:
 	if resource_root == null:
 		return ERR_CANT_OPEN
 	_resource_root = resource_root
-	var bms_name := String(opts.get("mission", ""))
-	if bms_name.is_empty() or not resource_root.has_file(bms_name):
-		load_failed.emit("net session: mission '%s' not found in %s" % [bms_name, resource_root.get_root_dir()])
-		return ERR_FILE_NOT_FOUND
-	var mission := NovaMissionData.new()
-	if mission.open_from_resource_root(resource_root, bms_name) != OK:
-		load_failed.emit("net session: failed to parse %s: %s" % [bms_name, mission.get_last_error()])
-		return ERR_CANT_OPEN
-
-	# Terrain + environment (the map the host played) — same loaders as a mission.
-	var env_name := mission.get_environment_ref() + ".env"
-	if resource_root.has_file(env_name) and _load_environment(env_name):
-		_apply_mission_environment_overrides(mission)
-	var trn := mission.get_terrain_ref() + ".trn"
-	if not resource_root.has_file(trn):
-		load_failed.emit("net session: %s.trn not found in %s" % [mission.get_terrain_ref(), resource_root.get_root_dir()])
-		return ERR_FILE_NOT_FOUND
-	if not _load_terrain(trn):
-		load_failed.emit("net session: failed to load %s" % trn)
-		return ERR_CANT_OPEN
-	_loaded_mission = mission
 
 	# Item database for BOTH the §5.10b wire dispatch-class table and model
-	# resolution. An explicit `items` path wins (e.g. the JOX items.def a probe was
-	# authored against); otherwise resolve items.def from the mounted root.
+	# resolution. Normally resolved from the mounted root; an explicit `items` path
+	# overrides it (e.g. when a probe's items.def lives outside the install).
 	var item_db := NovaItemDatabase.new()
 	var items_path := String(opts.get("items", ""))
 	var item_err := item_db.load(items_path) if not items_path.is_empty() \
@@ -215,30 +195,52 @@ func load_net_session(opts: Dictionary) -> int:
 	var resolver = NovaModelResolver.new()
 	resolver.setup(resource_root, item_db)
 
-	# The in-match client (replay vs real differ only by the endpoint it dials).
+	# The in-match spectator client (replay vs real differ only by the endpoint).
 	_net_client = NovaNetClient.new()
 	_net_client.name = "NovaNetClient"
 	_net_client.set_item_database(item_db)
 	_net_client.replay_host = String(opts.get("replay_host", "127.0.0.1"))
 	_net_client.replay_port = int(opts.get("replay_port", 42000))
-	_net_client.assigned.connect(func(role, is_host, session, m):
-		print("GameWorld(net): role=%d is_host=%s session=%d mission='%s'" % [role, is_host, session, m]))
+	_net_client.mission_known.connect(_on_net_mission)
 	add_child(_net_client)
 
 	var container := Node3D.new()
 	container.name = NET_CONTAINER_NAME
 	add_child(container)
 
-	var camera: Camera3D = opts.get("camera", null) if bool(opts.get("follow_camera", false)) else null
 	_net_view = NetWorldView.new()
 	_net_view.name = "NetWorldView"
-	_net_view.setup(_net_client, resolver, container, _env, camera)
+	_net_view.setup(_net_client, resolver, container, _env, opts.get("camera", null))
 	add_child(_net_view)
 
 	_net_client.connect_to_replay()
 	_loaded = true
 	world_loaded.emit()
 	return OK
+
+
+# The map name arrived on the wire (S2C 0x7B). Load that mission's terrain +
+# environment so the streamed entities have ground to stand on. Entities are NOT
+# placed from the .bms and the AI sim never runs — they come from the wire.
+func _on_net_mission(mission_name: String) -> void:
+	if _loaded_mission != null or _resource_root == null:
+		return
+	if not _resource_root.has_file(mission_name):
+		push_warning("net session: map '%s' (from the wire) not in %s" % [mission_name, _resource_root.get_root_dir()])
+		return
+	var mission := NovaMissionData.new()
+	if mission.open_from_resource_root(_resource_root, mission_name) != OK:
+		push_warning("net session: failed to parse %s: %s" % [mission_name, mission.get_last_error()])
+		return
+	_loaded_mission = mission
+	var env_name := mission.get_environment_ref() + ".env"
+	if _resource_root.has_file(env_name) and _load_environment(env_name):
+		_apply_mission_environment_overrides(mission)
+	var trn := mission.get_terrain_ref() + ".trn"
+	if _resource_root.has_file(trn) and _load_terrain(trn):
+		print("GameWorld(net): map %s -> terrain %s loaded" % [mission_name, mission.get_terrain_ref()])
+	else:
+		push_warning("net session: terrain %s.trn not loaded" % mission.get_terrain_ref())
 
 
 # The ONE mission path — the file entry (load_mission) and the in-memory

@@ -74,40 +74,13 @@ func _apply_transforms() -> void:
 		node.visible = bool(s.get("alive", true))
 
 
-# Chase the assigned player (client roles) from its DECODED pose — players carry no
-# items.def model (the avatar system is separate), so we follow the wire position +
-# heading directly rather than a spawned node. The host role spectates (no own
-# player) and is left on the free-fly camera. On the first valid follow we silence
-# the fly-camera's own movement so the two don't fight for the transform.
-var _fly_silenced := false
-var _host_framed := false
+var _framed := false
 
+# Spectator framing: once models exist, lift the camera to an overview of their
+# centroid so the populated world is in view immediately, then hand back to the
+# free-fly controller (no silencing — the user can fly from there).
 func _update_camera() -> void:
-	if _camera == null:
-		return
-	var own = _client.get_own_player_handle()
-	if own == 0xFFFF:
-		_frame_host_once() # spectator: point the camera at the action once
-		return
-	var s: Dictionary = _client.sample_at(own, float(_client.get_latest_frame()))
-	if not bool(s.get("found", false)):
-		return
-	if not _fly_silenced:
-		_fly_silenced = true
-		_camera.set_process(false)
-		_camera.set_physics_process(false)
-	var p := MissionObjectPlacer.bms_to_godot_position(s["pos"])
-	var basis := MissionObjectPlacer.bms_to_godot_basis(Vector3(0.0, float(s.get("heading_deg", 0.0)), 0.0))
-	var forward := -basis.z.normalized()           # the direction the player faces
-	_camera.global_position = p + Vector3(0.0, 2.2, 0.0) - forward * 5.0  # behind + above
-	_camera.look_at(p + Vector3(0.0, 1.3, 0.0) + forward * 2.0, Vector3.UP)
-
-
-# Spectator framing (host role): once models exist, lift the camera to an overview
-# of their centroid so the populated world is in view immediately, then hand back
-# to the free-fly controller (no silencing — the user can fly from there).
-func _frame_host_once() -> void:
-	if _host_framed or _nodes.is_empty():
+	if _camera == null or _framed or _nodes.is_empty():
 		return
 	var centroid := Vector3.ZERO
 	var n := 0
@@ -116,7 +89,7 @@ func _frame_host_once() -> void:
 		n += 1
 	if n == 0:
 		return
-	_host_framed = true
+	_framed = true
 	centroid /= n
 	_camera.global_position = centroid + Vector3(0.0, 90.0, 110.0)
 	_camera.look_at(centroid, Vector3.UP)
