@@ -1149,4 +1149,36 @@ bool decode_burst_client_quality(const uint8_t *body, size_t len,
 	return consumed == 1;
 }
 
+// ---------------------------------------------------------------------------
+// Session/transport control pings (§5.34).
+// ---------------------------------------------------------------------------
+
+// S2C 0x57 / C2S 0x2C RTT ping/pong — 5-B `[u32 timestamp][u8 echo_flag]`.
+// [orig: NapiNPClientMsg_0x057_RTT @ 0x432210 (S2C);
+//        NapiNPServerMsg_HandlePingResponse @ 0x515070 (C2S 0x2C)]
+bool decode_rtt_sample(const uint8_t *body, size_t len,
+                       RttSample &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.timestamp = c.u32();
+	out.echo_flag = c.u8();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 5;
+}
+
+// S2C 0x68/0x43/0x39 periodic request trio — a single `[u32]` inbound scalar.
+// Each handler reads the same 4-byte body and queues a different fixed reply
+// (0x68→C2S 0x3D, 0x43→C2S 0x08, 0x39→C2S 0x1C); only the inbound parse lives
+// here. [orig: 0x42DAA0 (0x68), 0x42FA90 (0x43), 0x42E6D0 (0x39)]
+bool decode_u32_scalar(const uint8_t *body, size_t len,
+                       uint32_t &out_value, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out_value = c.u32();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 4;
+}
+
 } // namespace opennova

@@ -491,6 +491,41 @@ int check_C_4C_client_quality() {
 	return 0;
 }
 
+// S2C 0x57 / C2S 0x2C — RTT ping/pong: [u32 timestamp][u8 echo_flag] (5 B). One
+// decoder serves both directions; cover() each so the drift guard balances.
+int check_rtt_sample() {
+	LE w;
+	w.u32(0x22330011);   // timestamp
+	w.u8(1);             // echo_flag
+	EXPECT(w.b.size() == 5);
+	RttSample r;
+	size_t consumed = 0;
+	EXPECT(decode_rtt_sample(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 5);
+	EXPECT(r.timestamp == 0x22330011);
+	EXPECT(r.echo_flag == 1);
+	cover('S', 0x57);
+	cover('C', 0x2C);
+	return 0;
+}
+
+// S2C 0x68 / 0x43 / 0x39 — periodic request trio: a single [u32] (4 B). One
+// reader serves all three; cover() each.
+int check_u32_scalar_trio() {
+	LE w;
+	w.u32(0x00003D5D);
+	EXPECT(w.b.size() == 4);
+	uint32_t v = 0;
+	size_t consumed = 0;
+	EXPECT(decode_u32_scalar(w.b.data(), w.b.size(), v, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(v == 0x00003D5D);
+	cover('S', 0x68);
+	cover('S', 0x43);
+	cover('S', 0x39);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -537,6 +572,8 @@ int main() {
 	if (check_C_28_loadout_request()) return 1;
 	if (check_C_29_entity_request()) return 1;
 	if (check_C_4C_client_quality()) return 1;
+	if (check_rtt_sample()) return 1;
+	if (check_u32_scalar_trio()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

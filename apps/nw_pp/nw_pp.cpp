@@ -877,6 +877,62 @@ void print_tag_4c_c2s(const std::vector<uint8_t> &body) {
 	std::printf("        [0x4C C2S] client-quality=%u\n", unsigned(r.value));
 }
 
+// S2C 0x57 RTT ping/pong echo (mirror of C2S 0x2C).
+void print_tag_57(const std::vector<uint8_t> &body) {
+	RttSample r;
+	size_t used = 0;
+	if (!decode_rtt_sample(body.data(), body.size(), r, used)) {
+		std::printf("        [0x57] rtt-echo decode failed (need 5 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x57] rtt-echo ts=0x%08x flag=%u (%s)\n",
+	            r.timestamp, unsigned(r.echo_flag),
+	            r.echo_flag ? "ping->C2S 0x2C" : "measure rtt");
+}
+
+// C2S 0x2C RTT ping/pong consumed (mirror of S2C 0x57).
+void print_tag_2c_c2s(const std::vector<uint8_t> &body) {
+	RttSample r;
+	size_t used = 0;
+	if (!decode_rtt_sample(body.data(), body.size(), r, used)) {
+		std::printf("        [0x2C C2S] rtt-consumed decode failed (need 5 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x2C C2S] rtt-consumed ts=0x%08x flag=%u (%s)\n",
+	            r.timestamp, unsigned(r.echo_flag),
+	            r.echo_flag ? "ping->S2C 0x57" : "measure rtt");
+}
+
+// S2C 0x68 entity-index-list request -> reply C2S 0x3D.
+void print_tag_68(const std::vector<uint8_t> &body) {
+	uint32_t v = 0; size_t used = 0;
+	if (!decode_u32_scalar(body.data(), body.size(), v, used)) {
+		std::printf("        [0x68] entity-index-request decode failed (need 4 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x68] entity-index-request startIdx=%u -> reply C2S 0x3D\n", v);
+}
+
+// S2C 0x43 time-sync ping -> reply C2S 0x08.
+void print_tag_43(const std::vector<uint8_t> &body) {
+	uint32_t v = 0; size_t used = 0;
+	if (!decode_u32_scalar(body.data(), body.size(), v, used)) {
+		std::printf("        [0x43] time-sync-ping decode failed (need 4 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x43] time-sync-ping serverTs=0x%08x -> reply C2S 0x08\n", v);
+}
+
+// S2C 0x39 anim-map CRC challenge -> reply C2S 0x1C.
+void print_tag_39(const std::vector<uint8_t> &body) {
+	uint32_t v = 0; size_t used = 0;
+	if (!decode_u32_scalar(body.data(), body.size(), v, used)) {
+		std::printf("        [0x39] anim-crc-challenge decode failed (need 4 B got %zu)\n", body.size());
+		return;
+	}
+	std::printf("        [0x39] anim-crc-challenge seed=0x%08x -> reply C2S 0x1C\n", v);
+}
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload) {
 	const char *label = tag_label(dir, tag);
@@ -899,6 +955,11 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x6E) print_tag_6e(payload);
 	else if (dir == 'S' && tag == 0x7B) print_tag_7b(payload);
 	else if (dir == 'S' && (tag == 0x60 || tag == 0x64)) print_tag_file_xfer(tag, payload);
+	else if (dir == 'S' && tag == 0x57) print_tag_57(payload);
+	else if (dir == 'S' && tag == 0x68) print_tag_68(payload);
+	else if (dir == 'S' && tag == 0x43) print_tag_43(payload);
+	else if (dir == 'S' && tag == 0x39) print_tag_39(payload);
+	else if (dir == 'C' && tag == 0x2C) print_tag_2c_c2s(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);
 	else if (dir == 'C' && tag == 0x21) print_tag_21_c2s(payload);

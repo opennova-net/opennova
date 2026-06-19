@@ -301,7 +301,7 @@ sweep; blank = not yet characterized.
 | 0x36 | 0x426120 | `_0x036` | |
 | 0x37 | 0x431250 | `_0x037` | |
 | 0x38 | 0x4260B0 | `_0x038` | |
-| 0x39 | 0x42E6D0 | `_0x039` | |
+| 0x39 | 0x42E6D0 | `_0x039` | anti-cheat anim-map CRC challenge `[u32 seed]` → C2S 0x1C (§5.34) |
 | 0x3A | 0x422680 | `_0x03A` | |
 | 0x3B | 0x431340 | `_0x03B` | |
 | 0x3D | 0x422870 | `_0x03D` | |
@@ -310,7 +310,7 @@ sweep; blank = not yet characterized.
 | 0x40 | 0x425A50 | `_0x040` | minimap-overlay update / capture-zone state — `[u8 count][N×6B entry]`, full map §5.19 (controlled capture 2026-06-17) |
 | 0x41 | 0x4254C0 | `_0x041` | |
 | 0x42 | 0x4281A0 | `_0x042` | spawn-gate-adjacent; retail emits during load |
-| 0x43 | 0x42FA90 | `_0x043` | |
+| 0x43 | 0x42FA90 | `_0x043` | time-sync ping `[u32 serverTs]` → C2S 0x08 (§5.34) |
 | 0x44 | 0x422710 | `_0x044` | |
 | 0x45 | 0x422890 | `_0x045` | empty payload; sets `dword_A82370=6`; calls `PolyTrn_LoadTileData()` (terrain texture rebuild) |
 | 0x46 | 0x431370 | `_0x046` | PLAYER-SYNC — full layout + field read order verified §5.21 (controlled capture 2026-06-17) |
@@ -326,7 +326,7 @@ sweep; blank = not yet characterized.
 | 0x53 | 0x428AE0 | `_0x053` | |
 | 0x54 | 0x429040 | `_0x054` | |
 | 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
-| 0x57 | 0x432210 | `_0x057_RTT` | RTT echo |
+| 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_0x058` | texture loader (terrain assets) |
 | 0x59 | 0x4228E0 | `_0x059` | |
 | 0x5A | 0x4290E0 | `_0x05A` | weapon-loadout sync: `[u8 avatarClass]` + a `{typeId, ammoP, ammoS, ammoAlt}` slot chain to a `0xFF` terminator (typeId = AdmDef index); resets `dword_81474C=0`. Field map **§5.30** (decoded) |
@@ -343,7 +343,7 @@ sweep; blank = not yet characterized.
 | 0x65 | 0x429870 | `_0x065` | |
 | 0x66 | 0x42D4C0 | `_HandleWeaponRestrictions` | count + (slot, restriction) pairs |
 | 0x67 | 0x42D570 | `_0x067` | |
-| 0x68 | 0x42DAA0 | `_0x068` | |
+| 0x68 | 0x42DAA0 | `_0x068` | entity-index list request `[u32 startIdx]` → C2S 0x3D (§5.34) |
 | 0x6A | 0x432510 | `_0x06A` | |
 | 0x6B | 0x425520 | `_0x06B` | |
 | 0x6C | 0x428FC0 | `_0x06C` | |
@@ -404,7 +404,7 @@ This is what a reimplemented server must **handle**.
 | 0x19 | 0x514250 | |
 | 0x1A | 0x514B20 | |
 | 0x1B | 0x501D90 | |
-| 0x1C | 0x501D40 | |
+| 0x1C | 0x501D40 | anim-map CRC reply (to S2C 0x39, §5.34) |
 | 0x1D | 0x501C60 | |
 | 0x20 | 0x501F70 | |
 | 0x21 | 0x502050 | anti-cheat CRC reply (§5.17) — reads u8 player_index + u32 expected_crc; host XORs computed CRC against per-connection salt at `playerCtx+89924`, mismatch logs "ACRC" + sends "PUNT ACRC" |
@@ -417,7 +417,7 @@ This is what a reimplemented server must **handle**.
 | 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
 | 0x29 | 0x514F10 | entity-packet request `[u16 bufferIndex]` → host writes that entity's packet & replies S2C 0x51 (§5.33); reply-burst member |
 | 0x2B | 0x514FE0 | |
-| 0x2C | 0x515070 | burst-member receiver |
+| 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
 | 0x2D | 0x502430 | burst-member receiver |
 | 0x2E | 0x515390 | |
 | 0x2F | 0x515790 | |
@@ -432,7 +432,7 @@ This is what a reimplemented server must **handle**.
 | 0x38 | 0x502510 | |
 | 0x39 | 0x500E20 | |
 | 0x3C | 0x519110 | |
-| 0x3D | 0x500EC0 | |
+| 0x3D | 0x500EC0 | entity-index list reply (to S2C 0x68, §5.34) |
 | 0x3E | 0x500E10 | |
 | 0x3F | 0x518F10 | |
 | 0x40 | 0x51C4C0 | |
@@ -2087,6 +2087,38 @@ exact bodies. **Witness:** probe2 — `0x22` ×11 (`slot=0x00/0x01 fieldFlags=0x
 `0x28` ×1 (`filter=0x1ddcc5d4 flags=0x1ddcdca7`), `0x29` ×1, `0x4C` ×60; all full-consume via the
 `decode_burst_*` family.
 
+### 5.34 Session/transport control pings — RTT 0x57/0x2C + request trio 0x68/0x43/0x39 (probe3_again, 2026-06-19)
+
+The NAPI transport / anti-cheat keepalives — distinct from gameplay replication: each carries a single
+scalar and triggers a fixed reply. They dominate the wire by volume (the RTT pair alone is **~10.7 K each**
+in a multi-minute session), so they're the bulk of an in-game capture's datagram count and were the largest
+remaining hex-only hole in the §4 catalog.
+
+**RTT ping/pong — S2C `0x57` ⇄ C2S `0x2C`.** Identical 5-B body `[u32 timestamp][u8 echoFlag]`. The two
+handlers mirror each other: when `echoFlag != 0` the receiver bounces the timestamp straight back
+(`0x57`→C2S `0x2C`, `0x2C`→S2C `0x57`) with `echoFlag` cleared; when `echoFlag == 0` the receiver computes
+`rtt = GetTickCount() - timestamp` into a 10-sample ring. The server side (`0x2C`) additionally enforces
+`g_MinPing` / `g_MaxPing`, incrementing a strike counter and disconnecting players who violate >20× in a
+row. The probe was **bidirectional** — both host and client ping each other; the timestamp pairs across the
+two directions (e.g. `ts=0x2233240a`: C2S `0x2C` flag=1 → S2C `0x57` flag=0).
+[orig: `NapiNPClientMsg_0x057_RTT @ 0x432210` (S2C); `NapiNPServerMsg_HandlePingResponse @ 0x515070` (C2S 0x2C)].
+**Note `0x2C` is direction-overloaded** — S2C `0x2C` (`@ 0x427E10`) is an unrelated chat-history entry, NOT
+RTT; only the C2S direction is the ping reply.
+
+**Periodic request trio — S2C `0x68` / `0x43` / `0x39`.** Each parses a single `[u32]` (4 B) and queues a
+different fixed reply built from local state; the inbound parse is structurally identical, so one reader
+(`decode_u32_scalar`) serves all three. They fire together on a coarse period (~every 335 frames in probe3).
+
+| S2C tag | body | meaning | reply | handler |
+|---|---|---|---|---|
+| `0x68` | `[u32 start_index]` | entity-index list page cursor (observed paging 50, 100, 150…) | C2S `0x3D` (entity-index list) | `NapiNPClientMsg_0x068 @ 0x42DAA0` |
+| `0x43` | `[u32 server_timestamp]` | time-sync / anti-speedhack stamp | C2S `0x08` (`[u32 server_ts][u32 GetTickCount]`) | `NapiNPClientMsg_0x043 @ 0x42FA90` |
+| `0x39` | `[u32 challenge_seed]` | anti-cheat anim-map CRC seed (constant `0x3D5D` in probe3) | C2S `0x1C` (`AnimMap_GetSlotChecksum`) | `NapiNPClientMsg_HandleChecksumChallenge @ 0x42E6D0` |
+
+**Witness:** probe3_again — `0x57`/`0x2C` ×10,679 each (every body 5 B, timestamps pair across the two
+directions); `0x68`/`0x43`/`0x39` ×141 each (`0x39` seed constant `0x3D5D`, `0x43` serverTs a slow coarse
+tick, `0x68` startIdx paging 50/100/150…); all full-consume via `decode_rtt_sample` / `decode_u32_scalar`.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
@@ -3089,6 +3121,10 @@ Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1", probe 3 /
   - **Pool routing (extends D-NET-70).** The "Change Team & Spawn Volume" objects (`0x0575` tent / `0x0576` HQ) ride **pool-1 S2C `0x0D`** (team-gated `spawn_flags & 0x10`), NOT pool-2 statics; the four pool-2 **armories** (handles `0x2000`-`0x2003`) carry the S2C `0x40` capture-zone overlays + drive the S2C `0x1E` OBJECTIVE events (`STRCND_PSP_BLUEWARNING` type 41 / `STRCND_PSP_BLUETAKEN` type 43).
   - **Landed:** `is_objective_gametype` hint + objective body in `decode_frame_update`; `nw_pp` g_GameType tracking (from 0x7B) + the `is_waypoint_gametype`/`is_objective_gametype` wiring + 0x0F waypoint-record printing; `fixtures/novaworld/dvxc1_manifest.txt` (37 authored entities) + `nw_dvxc1_groundtruth_test` (every 0x10/0x0D/0x0C/0x20 entity field-for-field + the four deferred witnesses). `nw_pp` full-consumes the entire probe3 capture with **zero leftover bytes on every tag**; all 30 net ctests green. [orig: NapiNPClientMsg_0x00F @ 0x42E200 / NapiNPClientMsg_0x00A @ 0x42FEC0 / NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0 / AI_GetTaskTypeFromFlags @ 0x40DAE0 / Game_StartMission @ 0x524360]
 - **D-NET-55 / D-NET-64 — probe3 did NOT surface them (still OPEN).** Mid-game S2C `0x20` (D-NET-55): probe3 sent only the load-batch 0x20; the Co-op AI stayed static (no waypoint patrol), so no mid-game pool-3 stream. Guided-weapon record (D-NET-64): the player fired only `adm=74` rifle + a few grenades (zero C2S `0x0c` guided sub_ops; all 3048 are sub_op `0x0a`), and the placed Stinger AI never fired a tracked missile — no guided traffic. A follow-up capture must have the player equip+fire a Stinger/Javelin/AT4 and fly the rocket Little Bird, and the AI must actually patrol (investigate the dormant-AI cause first).
+
+Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1" re-run — `probe3_again`, **3 human players** + 15 ballistic weapons + more movement + a second client; host + 2 client `/PROFILE` recordings, 2026-06-19):
+- **D-NET-76** [MED, DOC+CODE] **The high-volume transport / anti-cheat control pings are now decoded — the largest hex-only hole in the §4 catalog (§5.34).** The richer 2-client session carried enough of each to field-map them. **RTT ping/pong S2C `0x57` ⇄ C2S `0x2C`** (×10,679 each — the single biggest channel by datagram count): identical 5-B `[u32 timestamp][u8 echoFlag]`; bidirectional — both peers ping, `echoFlag != 0` bounces the stamp back with the flag cleared, `echoFlag == 0` measures `rtt = GetTickCount() - timestamp` into a 10-sample ring (the server side also enforces `g_MinPing`/`g_MaxPing`, kicking >20× violators). **Periodic request trio S2C `0x68`/`0x43`/`0x39`** (×141 each, ~every 335 frames): each a single `[u32]` → fixed reply — `0x68` start_index → C2S `0x3D` entity-index list; `0x43` server_timestamp → C2S `0x08` time-sync; `0x39` challenge_seed → C2S `0x1C` anim-map CRC (seed constant `0x3D5D`). Landed `decode_rtt_sample` + `decode_u32_scalar` (`ingame_decode`), `nw_pp` printers, catalog flips (`0x57`/`0x2C`/`0x68`/`0x43`/`0x39` → Decoded; `0x08`/`0x1C`/`0x3D` reply labels), and `nw_message_coverage` checks (**30 Decoded tags**). **`0x2C` is direction-overloaded** — S2C `0x2C` (`@ 0x427E10`) is a chat-history entry, only the C2S direction is RTT. Wire-validated: RTT timestamps pair across the two directions; the trio full-consumes. [orig: NapiNPClientMsg_0x057_RTT @ 0x432210 / NapiNPServerMsg_HandlePingResponse @ 0x515070 / NapiNPClientMsg_0x068 @ 0x42DAA0 / NapiNPClientMsg_0x043 @ 0x42FA90 / NapiNPClientMsg_HandleChecksumChallenge @ 0x42E6D0]
+- **D-NET-55 / D-NET-64 — probe3_again ALSO did NOT surface them (still OPEN).** Despite 3 players, 15 distinct weapon `adm` indices, and 260 fire events, all 9,049 C2S `0x0c` uploads are sub_op `0x0a` (zero guided field-groups), nobody used a vehicle / rocket Little Bird (every uplink `vehHdl=0xFFFF`), and the AI stayed static (mid-game S2C `0x20` = the 2-record load batch only). The 15 weapons fired were all ballistic; roster `0x6e` stayed `teams=0` (Co-op single-team). A dedicated guided + patrolling-AI capture is still required for D-NET-64 / D-NET-55.
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

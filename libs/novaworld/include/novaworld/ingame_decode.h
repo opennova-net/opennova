@@ -1031,4 +1031,41 @@ struct BurstClientQuality {
 bool decode_burst_client_quality(const uint8_t *body, size_t len,
                                  BurstClientQuality &out, size_t &consumed);
 
+// ===========================================================================
+// Session/transport control pings (§5.34) — RTT ping/pong + periodic request
+// trio. These are NAPI transport / anti-cheat keepalives, not gameplay
+// replication: each carries a single scalar and triggers a fixed reply. They
+// dominate the wire by volume (the RTT pair alone is ~10k each per session).
+// ===========================================================================
+
+// S2C 0x57 / C2S 0x2C — RTT ping/pong. Identical 5-B body `[u32 timestamp]
+// [u8 echo_flag]`. The two handlers mirror each other: when echo_flag != 0 the
+// receiver bounces the timestamp straight back (0x57→C2S 0x2C, 0x2C→S2C 0x57)
+// with echo_flag cleared; when echo_flag == 0 the receiver measures
+// rtt = GetTickCount() - timestamp into a 10-sample ring (the server side also
+// enforces g_MinPing / g_MaxPing, kicking persistent violators).
+// [orig: NapiNPClientMsg_0x057_RTT @ 0x432210 (S2C 0x57);
+//        NapiNPServerMsg_HandlePingResponse @ 0x515070 (C2S 0x2C)]
+struct RttSample {
+	uint32_t timestamp = 0;   // sender's GetTickCount() ms stamp to echo / measure
+	uint8_t  echo_flag = 0;   // !=0 ⇒ bounce back; 0 ⇒ measure rtt = now - timestamp
+};
+bool decode_rtt_sample(const uint8_t *body, size_t len,
+                       RttSample &out, size_t &consumed);
+
+// S2C 0x68 / 0x43 / 0x39 — periodic request trio. Each parses a single `[u32]`
+// (4 B) and queues a fixed reply built from local state; the inbound parse is
+// structurally identical across the three, so one reader serves all of them.
+// Per-tag semantics (field meaning + the reply each triggers):
+//   0x68  start_index      → reply C2S 0x3D (entity-index list, paged from start_index)
+//                            [orig: NapiNPClientMsg_0x068 @ 0x42DAA0]
+//   0x43  server_timestamp → reply C2S 0x08 (`[u32 server_ts][u32 GetTickCount]`,
+//                            the time-sync / anti-speedhack echo)
+//                            [orig: NapiNPClientMsg_0x043 @ 0x42FA90]
+//   0x39  challenge_seed   → reply C2S 0x1C (AnimMap_GetSlotChecksum of the local
+//                            player's anim slot — anti-cheat CRC challenge)
+//                            [orig: NapiNPClientMsg_HandleChecksumChallenge @ 0x42E6D0]
+bool decode_u32_scalar(const uint8_t *body, size_t len,
+                       uint32_t &out_value, size_t &consumed);
+
 } // namespace opennova
