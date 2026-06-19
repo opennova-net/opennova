@@ -68,7 +68,11 @@ func _apply_transforms() -> void:
 			continue
 		var node: Node3D = _nodes[h]
 		var gpos := MissionObjectPlacer.bms_to_godot_position(s["pos"])
-		var yaw := float(s.get("heading_deg", 0.0))
+		# The wire heading is the engine heading (90 - facing; nw_dvxc1_groundtruth),
+		# but bms_to_godot_basis expects the .bms-yaw field and applies 90 - yaw
+		# itself — feed it the same value the placer/present-pass do (90 - heading)
+		# so a net entity sits exactly where placement would put it (no double 90).
+		var yaw := 90.0 - float(s.get("heading_deg", 0.0))
 		node.transform = Transform3D(
 			MissionObjectPlacer.bms_to_godot_basis(Vector3(0.0, yaw, 0.0)), gpos)
 		node.visible = bool(s.get("alive", true))
