@@ -244,7 +244,10 @@ Host-side spawn flow (R1, 2026-06-16; net-re §5.2a):
 |---|---|---|---|---|
 | `Server_InitNewRoundState` | `0x51c8e0` | host new-round init: player-slot table + local-player ctx (name from `CHAR` var iff `transport_mode==1`) + clears timeout gate | decompile; §5.2a | confirm-only |
 | `CNapiServer_ProcessPendingPlayerSpawns` | `0x4c8dc0` | server spawn acceptor (gated `is_authority && !gate`): builds player entity, sends spawn msgs 3/5/4/0x7B, game-state 8 | decompile; §5.2a | confirm-only |
-| `Server_BuildPlayerInfoAndAdd` | `0x51d560` | builds the `GamePlayerEntity` (host's local player) | called by `0x4c8dc0`; §5.2a | confirm-only |
+| `Server_BuildPlayerInfoAndAdd` | `0x51d560` | builds the 226-B player-INFO buffer (name/flags/JSP/PCID/squad); delegates entity registration to `player_ServerAdd` | called by `0x4c8dc0`; §5.2b | confirm-only |
+| `player_ServerAdd` | `0x51cbc0` | player-SLOT manager: memsets the 100584-B slot, `Server_AssignPlayerTeam`, ServerLog Name/IpPort/PCID/Team/Type records, holds `g_local_player_entity` | decompile; §5.2b | confirm-only |
+| `Entity_InitFromItemDef` | `0x49e550` | item-template → entity field copy: `entity+28` idx → `gItemDefs[idx]`; +286 healthMax, +288 armorMax, +48/52/56 counters, +432 timing, +452/456 callbacks; dispatches item init cb | decompile; §5.2b / §6.9 | confirm-only |
+| `Entity_ResetToSpawnState` | `0x4B9610` | spawn/respawn reset: backs up pos as spawn point, splats Yaw across heading fields, **clears `Flags & 2` (entity+36 movement gate)**, zeroes vel/AI refs, detaches vehicle, removes pool 0/1 cross-refs | decompile; §5.2b / §5.6 | confirm-only |
 | `Server_SendInitialGameStateToPlayer` | `0x51bba0` | **server-side source of the S2C loading sequence** (0x2C/08/2A/1C/0B/66/76/11 + 0x10/0D/0C/20/45/7E/1A) → game-state 9 | decompile; §5.2a (P6 emitter spec) | confirm-only |
 | `NapiClient_WaitForGameStart` | `0x42cc10` | shared host+client loading-wait loop; pumps in-process until spawn gate `dword_24C1928` set | decompile; §5.2/§5.2a | confirm-only |
 

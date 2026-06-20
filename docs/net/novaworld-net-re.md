@@ -632,8 +632,10 @@ in-process. The flow:
    `[orig: CNapiServer_ProcessPendingPlayerSpawns @ 0x4c8dc0]`, gated
    `is_authority && !dword_24D1DE0 && !dword_24C1928` (runs while the gate is clear). Walks the
    pending-connection list, applies team-balance, then per accepted player calls
-   `[orig: Server_BuildPlayerInfoAndAdd @ 0x51d560]` (builds the `GamePlayerEntity`, stored at
-   `CGameSession+4512`), sends spawn msgs `3` (weapon-restriction flag) / `5` (bool true) / `4` /
+   `[orig: Server_BuildPlayerInfoAndAdd @ 0x51d560]` (builds the player-INFO buffer and delegates
+   entity registration to `[orig: player_ServerAdd @ 0x51cbc0]`, stored at `CGameSession+4512`;
+   the entity field-init sequence is §5.2b), sends spawn msgs `3` (weapon-restriction flag) /
+   `5` (bool true) / `4` /
    `0x7B`, then `[orig: CNetPlayer_SetGameState @ 0x4c4060]` → state 8 and
    `CServerTick_SetPhase(slot, 1)`. The host's local client is just another entry in this list.
    Reads the gate as a guard; does not write it.
@@ -730,6 +732,80 @@ one-line entry comment in the IDB. Probable-only and left as-is: `dword_24C0CA0`
 guard), `dword_24D1DE0` (spawn-processing gate), `dword_A82364` (reconnect/ready flag, set by S2C
 0x1A).
 
+### 5.2b Entity build + spawn-state init — the field-init sequence (2026-06-20)
+
+Witnessed to give the listen-server host's own-player spawn a faithful field-init sequence
+to port (the SP-as-listen-server keystone, libs/netsim Phase 2). All anchored (decompiled
+this session); no IDB writes (all four functions already carry correct curated names).
+
+**`Server_BuildPlayerInfoAndAdd` builds the player-INFO buffer, not the entity.**
+`[orig: Server_BuildPlayerInfoAndAdd @ 0x51d560]` assembles a 226-byte player-info buffer
+(`uint16_t[113]`: `NapiNPPlayer*`, name via `Napi_CopyString`, net flags, JSP country codes
+resolved through `lookup_entity_slot_and_pack_entry` / `MinimapSlot_HasEntity`, PCID from
+`player->pad_0[55]`, squad tag) and delegates registration to
+`[orig: player_ServerAdd @ 0x51cbc0]`. The bot/authority branch (`net_flags != 0`) fills
+empty texName strings; the human branch reads the `net_cfg` JSP/country/PCID. The in-world
+`GamePlayerEntity` geometry is NOT built here — §5.2a step 2's "builds the GamePlayerEntity"
+is refined: this builds the *info record* and hands off.
+
+**`player_ServerAdd` is the player-SLOT manager.** `[orig: player_ServerAdd @ 0x51cbc0]`
+(gated `is_authority`; strings `"server_PlayerAdd(): Unable to find empty slot!?"`,
+`"Robot #%ld"`) memsets the 100584-byte (`0x188E8`) player slot, assigns the team
+(`[orig: Server_AssignPlayerTeam @ 0x4fe310]`), writes the `ServerLog` PlayerName /
+PlayerIpAndPort / PlayerPCID / PlayerTeam / PlayerType records (`CNapiVarList_SetOrCreate`),
+sets up weapon-slot tracking, and on the local-player path stores the `g_local_player_entity`
+pointer into the slot. Slot/identity bookkeeping — not entity field-init.
+
+**`Entity_InitFromItemDef` — the item-template → entity field copy (the reusable init).**
+`[orig: Entity_InitFromItemDef @ 0x49e550]` reads the type index at `entity+28`; when
+`0 < idx < gItemCount` it caches `itemDef = &gItemDefs[idx]` at `entity+32` and copies:
+
+| dst | src | width |
+|---|---|---|
+| entity+32 | `&gItemDefs[idx]` (itemDef ptr) | ptr |
+| entity+286 | `itemDef->healthMax` | u16 |
+| entity+288 | `itemDef->armorMax` | u16 |
+| entity+48/52/56 | `rtCounter0/1/2` | u32 |
+| entity+432 | `destroyTiming0` | u32 |
+| entity+452 | `itemDef->pad_130[40]` | u32 |
+| entity+456 | `itemDef->pad_130[8]` | u32 |
+
+then, if the item's init callback `itemDef->pad_130[24]` is non-null and not itself,
+tail-calls `callback(entity)`. Confirms §6.9 (`entity+286 = ItemDef.healthMax`) and adds
+`entity+288 = armorMax`. The caller sets `entity+28` (the `gItemDefs` index, from
+`ItemList_FindIndexByTypeId(type_id)`; player infantry `type_id 0x14B9`) BEFORE calling.
+
+**`Entity_ResetToSpawnState` — the spawn/respawn reset that CLEARS the `entity+36` gate.**
+`[orig: Entity_ResetToSpawnState @ 0x4B9610]` resolves §5.6's "remaining unsolved spawn
+blocker": the `entity+36` bit-1 clear is this reset, not a wire message. It:
+- backs up current `Position` (X/Y/Z) → the entity spawn-point fields (`pad9[124/128/132]`);
+- splats the current `Yaw` across the heading-field family (`pad9[148/80/72/76/56/60]`,
+  `pad5[12]`, `pad8[68]`);
+- writes `Flags & 0xFFFFFFFD` to `pad9[152]`, then `entity->Flags &= ~2u` — **clears
+  `entity+36` bit 1, the movement gate `[orig: Player_BuildTag0CInputBody @ 0x42A550]`
+  checks** before serializing C2S 0x0C input (§5.6);
+- zeroes velocities / AI-target refs (`pad5[24..44]`, `pad9[88/156/92]`, `pad7[20]`), sets
+  `Roll = 0`;
+- on `is_authority`, detaches from vehicle (`Entity_DetachFromVehicleIfServer`) and walks
+  pools 0 and 1 removing every cross-reference to this entity;
+- rebuilds proximity lists (`Entity_BuildProximityListsFromPools` + `Entity_BuildProximityList`).
+
+**`GamePlayerEntity` offsets (struct size 904 = `0x388`), pinning the §5.x field map:**
+
+| Offset | Field | | Offset | Field |
+|---|---|---|---|---|
+| +4 | `Position` (i32 X/Y/Z 16.16) | | +280 | `EquippedSlot` (MountSlot*) |
+| +16 | `Yaw` (i32 — the D-NET-86 heading) | | +286 | `Health` (i16) |
+| +20 | `Pitch` | | +288 | `Armor` (i16) |
+| +24 | `Roll` | | +354 | `Team` (i16) |
+| +36 | `Flags` (u32 — movement gate bit 1) | | +664 | `Weapon` |
+
+**Faithful host-spawn sequence to port (Phase 2):** alloc a pool-0 entity → set the type
+index from `type_id 0x14B9` (`ItemList_FindIndexByTypeId` → `entity+28`) →
+`Entity_InitFromItemDef` (health/armor + counters + item init callback) → place
+`Position` / `Yaw` / `Team` → `Entity_ResetToSpawnState` (clears `Flags & 2`, the gate). The
+host then streams the loading sequence (§5.2a step 3) to its own local client in-process.
+
 ### 5.3 Tag direction asymmetry (durable warning)
 
 Most/all tags have **both** a `NapiNPClientMsg_*` (S2C receive) and a `NapiNPServerMsg_*`
@@ -805,7 +881,8 @@ Do **not** use S2C 0x0D to spawn the local player. Verified by live crash + deco
   three gates before serializing player input: entity buffer non-NULL, `entity[+286]` non-zero
   (= `ItemDef.healthMax`, §6.9), and `entity[+36]` bit 1 clear. The remaining unsolved spawn
   blocker pointed at `entity[+286]` init paths and the `dword_A82370` progression (§5.1), not
-  at +36.
+  at +36 — and `entity[+36]` bit 1 is now witnessed as cleared by the spawn-state reset
+  `[orig: Entity_ResetToSpawnState @ 0x4B9610]` (§5.2b), not by any wire message.
 
 ### 5.7 Spurious tag 0x18
 
