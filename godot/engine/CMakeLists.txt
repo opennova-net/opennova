@@ -49,6 +49,8 @@ add_subdirectory(../../libs/napi opennova_napi)
 # fine — the .a is small.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 add_subdirectory(../../libs/novaworld opennova_novaworld)
+# netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
+add_subdirectory(../../libs/netsim opennova_netsim)
 
 set(TARGET_NAME "opennova")
 
@@ -184,6 +186,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_novacrypto
     opennova_napi
     opennova_novaworld
+    opennova_netsim
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

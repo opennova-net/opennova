@@ -84,6 +84,12 @@ add_subdirectory(libs/napi)
 add_subdirectory(libs/novaworld)
 add_subdirectory(libs/bms)
 
+# netsim — the in-match net seam (ADR 0009/0011): NetSystem + the World<->wire
+# bridge + the in-process loopback. The single lib depending on BOTH the runtime
+# world (opennova_world) and the wire codec (opennova_novaworld); linked into the
+# Godot client GDExtension and the netsim tests, not the FFI shared lib.
+add_subdirectory(libs/netsim)
+
 # Shared app utilities (UDP sockets, pcap writer) used by the standalone
 # servers and the loopback tests.
 add_subdirectory(apps/common)

@@ -310,6 +310,13 @@ std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &
 		const uint16_t cx = network_compress_fixedpoint(e.x - ax);
 		const uint16_t cy = network_compress_fixedpoint(e.y - ay);
 		const uint16_t cz = network_compress_fixedpoint(e.z - az);
+		// Coarse wire heading from the engine BAM (D-NET-86). Player/Infantry carry
+		// the rounded high byte (v+0x800000)>>24 (entity+16 high); Vehicle carries the
+		// rounded high i16 (v+0x8000)>>16.
+		const uint8_t yaw_byte =
+				uint8_t((uint32_t(e.euler_z) + 0x00800000u) >> 24);
+		const int16_t yaw_bam16 =
+				int16_t((uint32_t(e.euler_z) + 0x00008000u) >> 16);
 		FrameUpdateRecord rec;
 		rec.handle = uint16_t((uint16_t(e.pool) << 12) | (e.slot & 0x0FFFu));
 		rec.type_id = e.type_id;
@@ -320,6 +327,7 @@ std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &
 			rec.player.pos_x_compressed = cx;
 			rec.player.pos_y_compressed = cy;
 			rec.player.pos_z_compressed = cz;
+			rec.player.yaw_byte = yaw_byte;
 			break;
 		case EntityClass::Vehicle:
 			rec.vehicle.parent_slot_handle = 0xFFFF;
@@ -327,12 +335,14 @@ std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &
 			rec.vehicle.pos_x_compressed = cx;
 			rec.vehicle.pos_y_compressed = cy;
 			rec.vehicle.pos_z_compressed = cz;
+			rec.vehicle.euler_z = yaw_bam16;
 			break;
 		case EntityClass::Infantry:
 			rec.infantry.vehicle_slot_handle = 0xFFFF;
 			rec.infantry.pos_x_compressed = cx;
 			rec.infantry.pos_y_compressed = cy;
 			rec.infantry.pos_z_compressed = cz;
+			rec.infantry.yaw_byte = yaw_byte;
 			break;
 		default:
 			continue; // Guided / Unknown: not representable as a 0x0A compact

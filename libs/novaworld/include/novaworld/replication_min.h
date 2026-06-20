@@ -54,6 +54,13 @@ struct GameEntitySnapshot {
 	int32_t x = 0;
 	int32_t y = 0;
 	int32_t z = 0;
+	// Engine heading (entity+16, 32-bit BAM) — the yaw the spawn pose is built from
+	// (D-NET-86: entity+16 is yaw, NOT velocity). The §5.9 0x0A compact records carry
+	// only its high byte (Player/Infantry yaw_byte (v+0x800000)>>24; Vehicle euler_z
+	// (v+0x8000)>>16), so replicated orientation is coarse on the wire. The full
+	// engine heading is (90 - bms_yaw) deg; the bridge from a World entity (Entity::yaw)
+	// fills this. Default 0 keeps existing positional inits + the 0x10 batch unchanged.
+	int32_t euler_z = 0;
 	// §5.10b replication class for the S2C 0x0A event loop (D-NET-50): selects the
 	// compact encoder. Unknown ⇒ the entity is NOT emitted as a 0x0A compact record
 	// (the authoring / .bms layer sets it from the item's *_function class tag).

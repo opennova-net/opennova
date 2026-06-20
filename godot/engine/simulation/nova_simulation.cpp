@@ -155,6 +155,17 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// brains through World::ai; wire it before registering so the pre-mission pass can dispatch.
 	bms_->load(file.events, file.triggers, file.actions);
 	world_->ai = ai_.get();
+	// SP listen server (ADR 0009/0011): NetSystem runs AHEAD of WAC (net-before-logic,
+	// [orig: Game_ProcessMainFrame @ 0x5263f0]) and World::net routes through the
+	// serializing sink. register_mission_systems appends WAC->BMS->AI after it, so the
+	// system order becomes net -> WAC -> BMS -> AI. reset_world recreated a fresh World
+	// (empty systems_, net == LocalSink), so this re-wires cleanly on every (re)load.
+	if (listen_server_ && net_ && net_sink_ && client_view_) {
+		world_->net = net_sink_.get();
+		world_->add_system(net_.get());
+		client_view_->state() = opennova::netsim::ClientState{};
+		loopback_->clear();
+	}
 	opennova::mission::register_mission_systems(*world_, *wac_, *bms_, *ai_);
 	// Re-install the held script program onto the fresh WacSystem (reset_world
 	// recreated it). The 62-tick execution divider stays inside the system
@@ -184,6 +195,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restart"), &NovaSimulation::restart);
 	ClassDB::bind_method(D_METHOD("set_tick_mode", "mode"), &NovaSimulation::set_tick_mode);
 	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
+	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
+	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -297,6 +310,7 @@ void NovaSimulation::build_demo_mission() {
 void NovaSimulation::step() {
 	if (!loaded_) return;
 	world_->run_logic_tick(); // one logic tick: cache + WAC + BMS + AI, then ++logic_tick
+	net_tick(); // serialize + loopback-decode when the listen server is on (no-op otherwise)
 }
 
 bool NovaSimulation::advance_frame() {
@@ -304,8 +318,23 @@ bool NovaSimulation::advance_frame() {
 	// One host frame = one logic tick (the original's 62 Hz engine tick). The WAC VM
 	// self-gates to every 62nd tick and the BMS evaluator quarter-passes every 16th,
 	// inside their systems — exactly where the original keeps those dividers.
+	//
+	// Listen-server frame order [orig: Game_ProcessMainFrame @ 0x5263f0]:
+	//   input -> net(drain C2S) -> run_logic_tick(WAC/BMS/AI) -> net(emit S2C) -> present.
+	// The C2S drain is NetSystem::tick (system index 0, runs at the top of the loop);
+	// the S2C emit + the local client's decode happen in net_tick(), after the logic.
 	world_->run_logic_tick();
+	net_tick();
 	return true;
+}
+
+// The post-logic half of the listen-server frame: serialize the live world into one
+// S2C 0x0A frame, loop it back in-process, and let the local client decode it into the
+// ClientState the present pass reads. No-op when the listen server is off.
+void NovaSimulation::net_tick() {
+	if (!listen_server_ || !net_ || !client_view_ || !loopback_) return;
+	net_->emit_s2c(*world_, compute_net_anchor());
+	client_view_->pump(*loopback_);
 }
 
 void NovaSimulation::restart() {
@@ -616,6 +645,13 @@ bool NovaSimulation::get_entity_hidden(int p_index) const {
 }
 
 PackedFloat32Array NovaSimulation::get_present_snapshot() const {
+	// ADR 0011 Decision 1: under the listen server the present pass reads the state the
+	// LOCAL CLIENT decoded off the wire, not the authoritative sim directly — so SP
+	// renders exactly what a networked peer would. Off (the editor/preview default), the
+	// direct AI-pool path below is unchanged.
+	if (listen_server_ && client_view_) {
+		return present_snapshot_from_client_view();
+	}
 	PackedFloat32Array out;
 	if (!ai_ || !world_) return out;
 	const int count = ai_->count();
@@ -656,6 +692,87 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		r[PF_PHASE2] = static_cast<float>(phase2);
 		r[PF_ACTIVE1] = (e->brain.f[AiBrain::kPartAnimRate0] != 0 || phase1 != 0) ? 1.0f : 0.0f;
 		r[PF_ACTIVE2] = (e->brain.f[AiBrain::kPartAnimRate0 + 1] != 0 || phase2 != 0) ? 1.0f : 0.0f;
+	}
+	return out;
+}
+
+void NovaSimulation::enable_listen_server(bool p_enable) {
+	listen_server_ = p_enable;
+	if (!p_enable) return;
+	// Construct the loopback + seam objects once; they persist across reloads (they hold
+	// only a LoopbackChannel reference, never a World pointer). finish_load re-wires
+	// World::net and re-registers NetSystem on each load.
+	if (!loopback_) loopback_ = std::make_unique<opennova::netsim::LoopbackChannel>();
+	if (!net_sink_) net_sink_ = std::make_unique<opennova::netsim::SerializingSink>(*loopback_);
+	if (!net_) net_ = std::make_unique<opennova::netsim::NetSystem>(*loopback_);
+	if (!client_view_) client_view_ = std::make_unique<opennova::netsim::NetClientView>();
+}
+
+opennova::PlayerReplicationState NovaSimulation::compute_net_anchor() const {
+	opennova::PlayerReplicationState anchor; // sensible defaults if the world is empty
+	if (!world_) return anchor;
+	const opennova::world::Entity *subj = nullptr;
+	// Prefer the local player handle (Phase 2+); else the first replicated entity so the
+	// per-record compressed deltas stay small (the codec is lossy with magnitude).
+	if (world_->cached.local_player.valid()) {
+		subj = world_->registry.get(world_->cached.local_player);
+	}
+	if (!subj) {
+		world_->registry.for_each([&](const opennova::world::Entity &e) {
+			if (subj) return;
+			if (opennova::netsim::entity_class_of(e) != opennova::EntityClass::Unknown) {
+				subj = &e;
+			}
+		});
+	}
+	if (subj) {
+		anchor.spawn_x = static_cast<uint32_t>(opennova::world::to_fixed(subj->position.x));
+		anchor.spawn_y = static_cast<uint32_t>(opennova::world::to_fixed(subj->position.y));
+		anchor.spawn_z = static_cast<uint32_t>(opennova::world::to_fixed(subj->position.z));
+	}
+	return anchor;
+}
+
+PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
+	PackedFloat32Array out;
+	if (!client_view_ || !world_) return out;
+	const opennova::netsim::ClientState &cs = client_view_->state();
+	const int count = static_cast<int>(cs.entities.size());
+	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
+	float *w = out.ptrw();
+	for (int i = 0; i < count; ++i) {
+		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
+		const opennova::netsim::ClientEntityState &es = cs.entities[i];
+		r[PF_KIND] = -1.0f; r[PF_INDEX] = -1.0f; r[PF_BMS_ID] = 0.0f; r[PF_NET_ID] = 0.0f;
+		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
+		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
+		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
+		r[PF_ANIM_SLOT] = -1.0f; r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
+
+		// kind/index/bms_id/net_id resolve from the registry entity behind the decoded
+		// handle: the host is authoritative, so the placed-node mapping still resolves
+		// through MissionEntityRegistry exactly as the AI-pool path does.
+		const opennova::world::EntityHandle h{es.handle};
+		const opennova::world::Entity *ent = world_->registry.get(h);
+		if (ent) {
+			r[PF_KIND] = static_cast<float>(ent->spawn_origin >> 24);
+			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
+			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
+			r[PF_NET_ID] = static_cast<float>(ent->net_id);
+			r[PF_ANIM_SLOT] = static_cast<float>(ent->anim_slot);
+			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
+			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+		}
+		// Decoded wire position is mission (x,y,z) 16.16 -> Godot (x, z, -y) world units,
+		// the SAME remap the AI-pool path uses. Position is post-compression (lossy) —
+		// exactly what the original client renders for its decoded peers.
+		r[PF_POS_X] = static_cast<float>(es.x / kFixed16);
+		r[PF_POS_Y] = static_cast<float>(es.z / kFixed16);
+		r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
+		// Coarse heading: rebuild the 32-bit engine BAM from the compact high byte, then
+		// engine -> mission yaw (90 - heading), matching the AI-pool present.
+		const uint32_t heading_bam = static_cast<uint32_t>(es.yaw_byte) << 24;
+		r[PF_YAW_DEG] = static_cast<float>(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
 	}
 	return out;
 }

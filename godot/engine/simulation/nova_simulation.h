@@ -25,6 +25,12 @@
 #include "mission/nova_mission_data.h"
 #include "simulation/infantry_root_motion.h"
 
+#include <novaworld/replication_min.h>
+#include "netsim/loopback_channel.h"
+#include "netsim/net_client_view.h"
+#include "netsim/net_system.h"
+#include "netsim/serializing_sink.h"
+
 namespace godot {
 
 class NovaTerrainData;
@@ -97,6 +103,24 @@ private:
 	bool have_baseline_ = false;
 	int tick_mode_ = TICK_DIVIDED;
 
+	// --- in-match net seam (ADR 0009/0011): the SP in-process listen server. OFF by
+	// default, so the editor / non-net preview path is byte-for-byte unchanged. When
+	// enabled (before load), finish_load registers NetSystem ahead of WAC, routes
+	// World::net through the serializing sink, and the present pass reads the
+	// client-decoded ClientState (ADR 0011 Decision 1) instead of the AI pool.
+	bool listen_server_ = false;
+	std::unique_ptr<opennova::netsim::LoopbackChannel> loopback_;
+	std::unique_ptr<opennova::netsim::SerializingSink> net_sink_;
+	std::unique_ptr<opennova::netsim::NetSystem> net_;
+	std::unique_ptr<opennova::netsim::NetClientView> client_view_;
+	// The per-frame 0x0A anchor: the local player's world position, or (Phase 1, no
+	// player yet) the first replicated entity, so compressed deltas stay small.
+	opennova::PlayerReplicationState compute_net_anchor() const;
+	// Build the PF_* present buffer from the client-decoded ClientState.
+	PackedFloat32Array present_snapshot_from_client_view() const;
+	// Post-logic listen-server step: emit S2C -> loopback -> client decode. No-op off.
+	void net_tick();
+
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive
 	// a reload (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no grounding.
@@ -140,6 +164,14 @@ public:
 	void restart();        // Stop: restore the play-start baseline (rewinds world + AI)
 	void set_tick_mode(int p_mode) { tick_mode_ = p_mode; }
 	int get_tick_mode() const { return tick_mode_; }
+
+	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
+	// real entity state through NetSystem onto an in-process loopback, the local client
+	// decodes it, and the present pass reads that decoded state. Call BEFORE loading a
+	// mission — the next load registers NetSystem ahead of WAC. Disabling reverts to the
+	// direct AI-pool present (the editor default).
+	void enable_listen_server(bool p_enable);
+	bool is_listen_server() const { return listen_server_; }
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

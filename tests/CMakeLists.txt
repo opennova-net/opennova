@@ -1224,3 +1224,15 @@ target_link_libraries(unknown_tracker_test PRIVATE opennova_novaworld)
 target_include_directories(unknown_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(unknown_tracker_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
+
+# netsim tests — the in-match net seam (ADR 0009/0011).
+# The in-process loopback transport.
+add_executable(netsim_loopback_channel_test netsim/loopback_channel_test.cpp)
+target_link_libraries(netsim_loopback_channel_test PRIVATE opennova_netsim)
+add_test(NAME netsim_loopback_channel COMMAND netsim_loopback_channel_test)
+
+# The ADR 0011 §4 loopback identity guard: World entity -> encode -> loopback ->
+# decode -> ClientState, field-identical to what the host's encoder + codec produced.
+add_executable(netsim_loopback_identity_test netsim/loopback_identity_test.cpp)
+target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_netsim)
+add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)

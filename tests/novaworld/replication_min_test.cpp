@@ -330,6 +330,51 @@ bool check_tag_0d_spawn_points_decode_alignment() {
 	return true;
 }
 
+// D-NET-86: the engine heading (entity+16) threads into the 0x0A compact yaw fields.
+// Player/Infantry carry the rounded high byte (v+0x800000)>>24; Vehicle the rounded
+// high i16 (v+0x8000)>>16. The 0x10 batch is deliberately NOT touched (no orientation
+// on the wire there) — covered by check_tag_10_entity_batch_layout staying green.
+bool check_tag_0a_euler_z_threading() {
+	opennova::PlayerReplicationState ctx;
+	ctx.spawn_x = 0x01020304u;
+	ctx.spawn_y = 0x11121314u;
+	ctx.spawn_z = 0x21222324u;
+
+	const int32_t euler = 0x12345678;
+	const uint8_t want_byte = static_cast<uint8_t>(
+			(static_cast<uint32_t>(euler) + 0x00800000u) >> 24); // 0x12
+	const int16_t want_i16 = static_cast<int16_t>(
+			(static_cast<uint32_t>(euler) + 0x00008000u) >> 16); // 0x1234
+
+	opennova::GameEntitySnapshot inf;
+	inf.pool = 0; inf.slot = 5; inf.type_id = 0x2000;
+	inf.entity_class = opennova::EntityClass::Infantry;
+	inf.x = ctx.spawn_x; inf.y = ctx.spawn_y; inf.z = ctx.spawn_z;
+	inf.euler_z = euler;
+
+	opennova::GameEntitySnapshot veh = inf;
+	veh.slot = 6; veh.type_id = 0x3000;
+	veh.entity_class = opennova::EntityClass::Vehicle;
+
+	const auto buf = opennova::build_tag_0a_world_reference(ctx, {inf, veh});
+	auto class_of = [](uint16_t t) {
+		if (t == 0x2000) return opennova::EntityClass::Infantry;
+		if (t == 0x3000) return opennova::EntityClass::Vehicle;
+		return opennova::EntityClass::Unknown;
+	};
+	opennova::FrameUpdate fu;
+	if (!expect(opennova::decode_frame_update(buf.data(), buf.size(), class_of, fu) &&
+	            fu.complete, "0x0A with euler_z decodes cleanly")) return false;
+	if (!expect(fu.records.size() == 2, "two compact records")) return false;
+	if (!expect(fu.records[0].cls == opennova::EntityClass::Infantry &&
+	            fu.records[0].infantry.yaw_byte == want_byte,
+	            "infantry yaw_byte = (euler+0x800000)>>24")) return false;
+	if (!expect(fu.records[1].cls == opennova::EntityClass::Vehicle &&
+	            fu.records[1].vehicle.euler_z == want_i16,
+	            "vehicle euler_z = (euler+0x8000)>>16")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -342,6 +387,7 @@ int main() {
 	ok = check_tag_57_rtt_layout() && ok;
 	ok = check_tag_2a_chat_layout() && ok;
 	ok = check_tag_0a_world_reference_layout() && ok;
+	ok = check_tag_0a_euler_z_threading() && ok;
 	ok = check_tag_5a_weapon_loadout_bytes() && ok;
 	ok = check_tag_0d_local_player_spawn_layout() && ok;
 	ok = check_tag_1e_game_event_post_spawn_layout() && ok;
