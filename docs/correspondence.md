@@ -262,6 +262,16 @@ Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
 | `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) | disasm; §5.38 | confirm-only |
 | `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
 
+First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Camera_ComputeThirdPersonView` | `0x437d10` | master view placement; mode-0 (FP) sets g_view_pos = Position + (0,0,0x10000 eye), g_view_rot = Yaw/Pitch/Roll | disasm; §5.39 | confirm-only |
+| `ThirdPersonCamera_Update` | `0x437af0` | 3P follow: target = Position + CameraOffset@+0x6C + smoothing/distance/bone-collision | disasm; §5.39 | confirm-only |
+| `Player_UpdateFirstPersonCamera` | `0x4dd380` | builds g_view_matrix @0xB764E0 from g_view_pos/rot + weapon bias/bone/lead + prone drop | disasm; §5.39 | confirm-only |
+| `Input_HandleActionBinding_0` | `0x4e1330` | applies scaled mouse to entity Yaw@+0x10 (wraps) / Pitch@+0x14 (clamp ±80° = ±954437120) | disasm; §5.39 | confirm-only |
+| `Camera_SetTrackedEntity` | `0x4391d0` | sets the camera mode dword_A890C8 (0=FP on-foot, 1=vehicle 3P) + tracked entity dword_A890CC | disasm; §5.39 | confirm-only |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

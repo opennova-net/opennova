@@ -2394,6 +2394,46 @@ player's *movement* is the motor simulation, not a self-read-apply.
 (gate 2nd half), 0x4b9a8c (remote-interpolation detail), 0x4df68f (move-order write to
 entity+0x12C), 0x499680 (mouse look→Yaw/Pitch front end); `idb_save`.
 
+### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
+
+The moving player's view, witnessed for a faithful first-person camera (the §5.38 player). All
+anchored (decompiled this session); read-only, no IDB writes.
+
+**Mode flag `dword_A890C8`** (set by `[orig: Camera_SetTrackedEntity @ 0x4391d0]`; tracked entity =
+`dword_A890CC`): **0 = first-person on-foot** (primary), 1 = vehicle/mounted (3P), 3 = spectator,
+4 = lerp transition. The original toggles 1P/3P on foot with **F4**.
+
+**First person (mode 0)** `[orig: Camera_ComputeThirdPersonView @ 0x437d10]` — despite the name this
+is the master view placement; the mode-0 branch is FP:
+- `g_view_pos {x,y,z}` ← entity `Position` (+4/+8/+12); then **`g_view_pos_z += 0x10000`** = **+1.0
+  world-unit eye height** (a fixed standing-infantry bump, NOT CameraOffset) `[orig: @ 0x437e8f]`.
+- `g_view_rot {yaw,pitch,roll}` ← entity `Yaw/Pitch/Roll` (+16/+20/+24, 32-bit BAM) `[orig: @ 0x437d92]`.
+
+The final 1P view matrix `g_view_matrix @ 0xB764E0` is built by `[orig: Player_UpdateFirstPersonCamera
+@ 0x4dd380]` = `g_view_pos`/`g_view_rot` + weapon view-bias + weapon bone offset + clamped velocity
+lead + prone Z-drop (−0x500); those refinements are deferred.
+
+**Third person** `[orig: ThirdPersonCamera_Update @ 0x437af0]`: `target = Position + CameraOffset@+0x6C`
+(SpecialVec3), plus smoothing + distance `dword_A8910C` + bone collision (deferred).
+
+**Look apply** `[orig: Input_HandleActionBinding_0 @ 0x4e1330]`, `analog` = the sensitivity-scaled
+mouse delta: `Yaw ±= analog<<16` (**wraps, no clamp**); `Pitch = clamp(Pitch ± analog<<16,
+±954437120)` = **±80°** (turret variant +40° when entity flag 0x100); center-view → `Pitch = 0`.
+
+**Sensitivity / FOV** `[orig: Input_ProcessMouseAxisBindings @ 0x499680]`: `scaled = (raw_delta ·
+(dword_24D207C<<11) + 0x8000) >> 16`; `dword_24D207C ∈ [1,511]`; Y inverted unless `dword_24D2078`.
+FOV = `dword_A7839C / 65536` degrees (16.16; base `dword_26C6844`, scope-modified)
+`[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 @ 0x5ca601]`.
+
+**OpenNova port (Phase 2.5).** The host first-person camera places the `Camera3D` at the player's
+Godot position + 1.0u eye, oriented by the player's authoritative Yaw/Pitch
+(`NovaSimulation::get_local_player_yaw_deg`/`get_local_player_pitch_deg`); **F4** swaps to a
+behind+above third person; the mouse drives Yaw + Pitch (clamped ±80°). The "AI in the ground" symptom
+was a two-store bug (the motor's grounded `AiEntity.pos` was mirrored to the registry `Entity` only
+for the local player) — now every motor entity mirrors. **Tracked deferrals:** 3P follow
+smoothing/collision (`@0x437af0`), the weapon view-bias/bone/velocity-lead/prone-drop (`@0x4dd380`),
+the exact `CameraOffset@+0x6C`, the FOV source, and the FP arms viewmodel.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
