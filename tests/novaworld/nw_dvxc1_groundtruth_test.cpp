@@ -256,6 +256,16 @@ int main() {
 			std::snprintf(buf, sizeof(buf), "%s: team gate CLEAR (team 0)", m->role.c_str());
 			check(!team_gate, buf);
 		}
+		// Orientation: euler_z (entity+16, 0x01-gated) = (90 - authored facing) BAM
+		// (D-NET-86), same engine-heading frame the statics use. Gate clear == the
+		// engine heading is 0 (authored facing 90, e.g. the blue littlebird).
+		const uint32_t exp_bam = expected_bam(m->facing_deg);
+		const bool yaw_gate = (r.spawn_flags & 0x0001) != 0;
+		const uint32_t got_bam = yaw_gate ? uint32_t(r.euler_z) : 0u;
+		std::snprintf(buf, sizeof(buf),
+		              "%s: 0x0D yaw BAM == 0x%08x for facing %d (got 0x%08x, gate %d)",
+		              m->role.c_str(), exp_bam, m->facing_deg, got_bam, int(yaw_gate));
+		check(got_bam == exp_bam, buf);
 	}
 
 	// --- 0x20 pool-3 sync (player starts + air-spawn + waypoint markers) ------
@@ -350,6 +360,18 @@ int main() {
 			std::snprintf(buf, sizeof(buf), "%s: team gate CLEAR (team 0)", m->role.c_str());
 			check(!team_gate, buf);
 		}
+		// Orientation: euler_z (entity+16, 0x01-gated) is the engine yaw heading =
+		// (90 - authored facing) BAM (D-NET-86) — the field that was mislabeled as
+		// velocity and dropped, leaving every static facing east in the spectator.
+		// The host serializes it only when non-zero, so a cleared gate == engine
+		// heading 0 == authored facing 90 (the blue armory pair).
+		const uint32_t exp_bam = expected_bam(m->facing_deg);
+		const bool yaw_gate = (r.field_flags & 0x0001) != 0;
+		const uint32_t got_bam = yaw_gate ? uint32_t(r.euler_z) : 0u;
+		std::snprintf(buf, sizeof(buf),
+		              "%s: static yaw BAM == 0x%08x for facing %d (got 0x%08x, gate %d)",
+		              m->role.c_str(), exp_bam, m->facing_deg, got_bam, int(yaw_gate));
+		check(got_bam == exp_bam, buf);
 	}
 
 	// --- every authored entity must have been witnessed -----------------------

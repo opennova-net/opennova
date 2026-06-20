@@ -103,9 +103,9 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		// inside `if (value) { flags |= bit; <write> }`). See ingame_encode.h.
 		uint16_t f = 0;
 		if (rec.entity_flags)              f |= 0x0020; // entity+36   [orig: 0x503ae6]
-		if (rec.vel_x)                     f |= 0x0001; // entity+16   [orig: 0x503b3c]
-		if (rec.vel_y)                     f |= 0x0002; // entity+20   [orig: 0x503b58]
-		if (rec.vel_z)                     f |= 0x0004; // entity+24   [orig: 0x503b74]
+		if (rec.euler_z)                   f |= 0x0001; // entity+16 yaw [orig: 0x503b3c]
+		if (rec.euler_x)                   f |= 0x0002; // entity+20   [orig: 0x503b58]
+		if (rec.euler_y)                   f |= 0x0004; // entity+24   [orig: 0x503b74]
 		if (rec.section_mask)              f |= 0x0008; // entity+308  [orig: 0x503b93]
 		if (rec.team_byte)                 f |= 0x0010; // entity+354 team [orig: 0x503bb2] (D-NET-58)
 		if (rec.parent_handle != 0xFFFF)   f |= 0x0100; // entity+368  [orig: 0x503bd1]
@@ -130,9 +130,9 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		w.u32(uint32_t(rec.pos_y));     // entity+8  [orig: 0x503b22]
 		w.u32(uint32_t(rec.pos_z));     // entity+12 [orig: 0x503b35]
 
-		if (f & 0x0001) w.u32(uint32_t(rec.vel_x));
-		if (f & 0x0002) w.u32(uint32_t(rec.vel_y));
-		if (f & 0x0004) w.u32(uint32_t(rec.vel_z));
+		if (f & 0x0001) w.u32(uint32_t(rec.euler_z));
+		if (f & 0x0002) w.u32(uint32_t(rec.euler_x));
+		if (f & 0x0004) w.u32(uint32_t(rec.euler_y));
 		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
 		if (f & 0x0010) w.u8(rec.team_byte);   // entity+354 team (D-NET-58)
 		if (f & 0x0100) w.u16(rec.parent_handle);

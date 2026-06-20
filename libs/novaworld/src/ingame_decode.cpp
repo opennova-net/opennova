@@ -129,9 +129,9 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.spawn_flags & 0x0001) rec.vel_x = int32_t(c.u32());
-		if (rec.spawn_flags & 0x0002) rec.vel_y = int32_t(c.u32());
-		if (rec.spawn_flags & 0x0004) rec.vel_z = int32_t(c.u32());
+		if (rec.spawn_flags & 0x0001) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
+		if (rec.spawn_flags & 0x0002) rec.euler_x = int32_t(c.u32()); // entity+20
+		if (rec.spawn_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
 		if (rec.spawn_flags & 0x0008) rec.section_mask = int32_t(c.u32());
 		if (rec.spawn_flags & 0x0010) rec.team_byte = c.u8();  // entity+354, BMS team (D-NET-58)
 		if (rec.spawn_flags & 0x0100) rec.parent_handle = c.u16();
@@ -270,9 +270,9 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		rec.pos_y = int32_t(c.u32());
 		rec.pos_z = int32_t(c.u32());
 
-		if (rec.field_flags & 0x0001) rec.vel_x = int32_t(c.u32());
-		if (rec.field_flags & 0x0002) rec.vel_y = int32_t(c.u32());
-		if (rec.field_flags & 0x0004) rec.vel_z = int32_t(c.u32());
+		if (rec.field_flags & 0x0001) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
+		if (rec.field_flags & 0x0002) rec.euler_x = int32_t(c.u32()); // entity+20
+		if (rec.field_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
 		if (rec.field_flags & 0x0008) rec.section_mask = int32_t(c.u32());
 		if (rec.field_flags & 0x0010) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
 		if (rec.field_flags & 0x0020) rec.parent_slot = int32_t(c.u32());

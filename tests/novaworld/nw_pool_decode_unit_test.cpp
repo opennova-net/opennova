@@ -14,10 +14,13 @@
 #include <novaworld/ingame_decode.h>
 #include <novaworld/ingame_encode.h>
 #include <novaworld/protocol_message.h>
+#include <novaworld/replay_timeline.h>
 #include <novaworld/session_keys.h>
+#include <novaworld/wire_capture.h>
 
 #include "pcap_reader.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -123,6 +126,7 @@ void test_pool_spawn_0d_via_pcap() {
 	r.pos_x = -5570560;          // -85.0
 	r.pos_y = 2949120;           //  45.0
 	r.pos_z = 2480896;           //  37.857
+	r.euler_z = int32_t(0x40000000u); // entity+16 yaw heading 90 deg BAM -> gate 0x0001 (D-NET-86)
 	r.team_byte = 2;             // -> gate 0x0010
 	r.target_handle = 0x2044;    // -> gate 0x0200
 	PoolSpawnBatch in;
@@ -150,6 +154,8 @@ void test_pool_spawn_0d_via_pcap() {
 	EXPECT(d.item_type_id == 0x050E);
 	EXPECT(d.slot_id == 0x1002);
 	EXPECT(d.pos_x == -5570560 && d.pos_y == 2949120 && d.pos_z == 2480896);
+	EXPECT((d.spawn_flags & 0x0001) != 0);          // yaw-heading gate (was mislabeled velocity)
+	EXPECT(d.euler_z == int32_t(0x40000000u));      // entity+16 yaw survives the full stack
 	EXPECT((d.spawn_flags & 0x0010) != 0);
 	EXPECT(d.team_byte == 2);
 	EXPECT((d.spawn_flags & 0x0200) != 0);
@@ -197,12 +203,58 @@ void test_pool3_sync_0x20_via_pcap() {
 	EXPECT(d.net_handle == 8);
 }
 
+// --- the spawn yaw heading flows to the timeline (D-NET-86) ----------------
+// A pool spawn's 0x01-gated euler_z (entity+16) is the engine yaw heading, NOT
+// velocity. It must surface as the spawn-pose heading the spectator renders, and
+// (90 - heading) must recover the authored BMS yaw the editor places from — so a
+// net static sits exactly where ONED's bms_to_godot_basis would put it. Before the
+// fix this field was dropped and every static stood at heading 0 (faced east).
+void test_spawn_heading_flows_to_timeline() {
+	const double bms_yaw = 30.0;                 // what an author would set in the .bms
+	const double engine_heading = 90.0 - bms_yaw; // the engine/wire frame = 60 deg
+	const uint32_t yaw_bam = uint32_t((uint64_t(int(engine_heading)) << 32) / 360);
+
+	PoolSpawnRecord r;
+	r.slot_id = 0x1003;          // pool-1 slot 3 -> handle 0x1003
+	r.item_type_id = 0x050E;
+	r.pos_x = 1000; r.pos_y = 2000; r.pos_z = 3000;
+	r.euler_z = int32_t(yaw_bam); // entity+16 yaw heading -> gate 0x0001
+	PoolSpawnBatch in;
+	in.entity_count = 1;
+	in.records.push_back(r);
+
+	// Inner encode/decode round-trip preserves the renamed field.
+	std::vector<uint8_t> inner = encode_pool_spawn_batch(in);
+	PoolSpawnBatch rt;
+	EXPECT(decode_pool_spawn_batch(inner.data(), inner.size(), rt));
+	EXPECT(rt.records.size() == 1 && rt.records[0].euler_z == int32_t(yaw_bam));
+
+	// Flow it through the timeline as a server 0x0D message.
+	InGameMessage m;
+	m.frame_index = 1;
+	m.dir = 'S';
+	m.tag = 0x0D;
+	m.payload = inner;
+	ReplayTimeline tl = build_replay_timeline({m});
+
+	const ReplayEntity *e = nullptr;
+	for (const auto &ent : tl.entities)
+		if (ent.handle == 0x1003) { e = &ent; break; }
+	EXPECT(e != nullptr);
+	if (!e) return;
+	EXPECT(e->has_spawn && e->spawn.has_heading);
+	EXPECT(std::fabs(e->spawn.heading_deg - engine_heading) < 0.5);   // ~60 deg on the wire
+	// Placement-equivalence: 90 - heading == the authored BMS yaw the editor uses.
+	EXPECT(std::fabs((90.0 - e->spawn.heading_deg) - bms_yaw) < 0.5); // ~30 deg
+}
+
 } // namespace
 
 int main() {
 	test_pcap_roundtrip();
 	test_pool_spawn_0d_via_pcap();
 	test_pool3_sync_0x20_via_pcap();
+	test_spawn_heading_flows_to_timeline();
 	if (g_failures) {
 		std::printf("\n%d assertion(s) failed\n", g_failures);
 		return 1;

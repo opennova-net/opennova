@@ -285,8 +285,9 @@ ReplayTimeline build_replay_timeline(
 		b.note_frame(m.frame_index);
 
 		if (m.dir == 'S' && m.tag == 0x0D) {
-			// Pool-1/3 entity spawn (vehicles, items, objective markers). No
-			// heading field on the wire here — left unset.
+			// Pool-1/3 entity spawn (vehicles, items, objective markers). The
+			// 0x01-gated euler_z (entity+16) is the engine yaw heading (32-bit BAM),
+			// not velocity (D-NET-86); surface it as the spawn pose facing.
 			PoolSpawnBatch batch;
 			decode_pool_spawn_batch(m.payload.data(), m.payload.size(), batch);
 			for (const auto &r : batch.records) {
@@ -303,6 +304,10 @@ ReplayTimeline build_replay_timeline(
 				s.x = r.pos_x;
 				s.y = r.pos_y;
 				s.z = r.pos_z;
+				if (r.spawn_flags & 0x0001) {
+					s.heading_deg = bam32_to_deg(uint32_t(r.euler_z));
+					s.has_heading = true;
+				}
 				b.set_spawn(e, s, 0x0D);
 			}
 		} else if (m.dir == 'S' && m.tag == 0x20) {
@@ -378,6 +383,13 @@ ReplayTimeline build_replay_timeline(
 				s.x = r.pos_x;
 				s.y = r.pos_y;
 				s.z = r.pos_z;
+				// 0x01-gated euler_z (entity+16) is the static's yaw heading (32-bit
+				// BAM), not velocity (D-NET-86) — the spawn pose facing a spectator
+				// renders. Without it every static stood at heading 0 (faced east).
+				if (r.field_flags & 0x0001) {
+					s.heading_deg = bam32_to_deg(uint32_t(r.euler_z));
+					s.has_heading = true;
+				}
 				b.set_spawn(e, s, 0x10);
 			}
 		} else if (m.dir == 'C' && m.tag == 0x0C) {

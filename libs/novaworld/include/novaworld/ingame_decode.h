@@ -99,9 +99,15 @@ struct PoolSpawnRecord {
 	// Conditional fields. Gate column = exact spawn_flags bit to test.
 	// gate            field                landing
 	uint32_t entity_flags = 0;      // 0x0020   entity+36
-	int32_t  vel_x = 0;             // 0x0001   entity+16
-	int32_t  vel_y = 0;             // 0x0002   entity+20
-	int32_t  vel_z = 0;             // 0x0004   entity+24
+	// Orientation Euler triple (each 32-bit BAM) — NOT velocity (Hex-Rays mislabels
+	// these "velX/Y/Z"). entity+16 is the yaw heading the engine builds the spawn
+	// pose from. [orig: NapiNPClientMsg_0x00D @0x432c40 writes entity+16/+20/+24 (DWORD
+	// idx 4/5/6); consumed by Entity_UpdateOrientationMatrix @0x43b440 ->
+	// Math_BuildFixedPointMatrixFromEulerAngles @0x613f40 reading euler[3..5] =
+	// entity+16/+20/+24]. euler_z is the engine heading = (90 - bms_yaw) deg (D-NET-86).
+	int32_t  euler_z = 0;           // 0x0001   entity+16  (yaw heading, 32-bit BAM)
+	int32_t  euler_x = 0;           // 0x0002   entity+20  (32-bit BAM)
+	int32_t  euler_y = 0;           // 0x0004   entity+24  (32-bit BAM)
 	int32_t  section_mask = 0;      // 0x0008   entity+308
 	uint8_t  team_byte = 0;         // 0x0010   entity+354 — BMS team 1=Blue/2=Red (D-NET-58)
 	uint16_t parent_handle = 0xFFFF;// 0x0100   resolved → entity+368
@@ -210,9 +216,14 @@ struct StaticEntityRecord {
 	int32_t  pos_y = 0;          // always  entity+8
 	int32_t  pos_z = 0;          // always  entity+12
 
-	int32_t  vel_x = 0;          // 0x01    entity+16
-	int32_t  vel_y = 0;          // 0x02    entity+20
-	int32_t  vel_z = 0;          // 0x04    entity+24
+	// Orientation Euler triple (each 32-bit BAM) — NOT velocity. entity+16 is the
+	// yaw heading the static's spawn pose builds from (Hex-Rays mislabels these
+	// "velX/Y/Z"). [orig: NapiNPClientMsg_0x010 @0x433400 writes entity+16/+20/+24;
+	// consumed by Entity_UpdateOrientationMatrix @0x43b440 (euler[3..5])]. euler_z is
+	// the engine heading = (90 - bms_yaw) deg (D-NET-86).
+	int32_t  euler_z = 0;        // 0x01    entity+16  (yaw heading, 32-bit BAM)
+	int32_t  euler_x = 0;        // 0x02    entity+20  (32-bit BAM)
+	int32_t  euler_y = 0;        // 0x04    entity+24  (32-bit BAM)
 	int32_t  section_mask = 0;   // 0x08    entity+308
 	uint8_t  team_byte = 0;      // 0x10    entity+354 (BMS team 1=Blue/2=Red)
 	int32_t  parent_slot = 0;    // 0x20    entity+36

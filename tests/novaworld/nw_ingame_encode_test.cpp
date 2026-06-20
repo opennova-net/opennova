@@ -172,7 +172,7 @@ int test_pool_spawn_roundtrip_full() {
 	r.pos_x = int32_t(0x05b0be8f);
 	r.pos_y = int32_t(0xfa47b504);
 	r.pos_z = int32_t(0x001fbcd7);
-	r.vel_x = 10;                    // -> 0x0001
+	r.euler_z = 10;                  // -> 0x0001 (entity+16 yaw heading, 32-bit BAM)
 	r.section_mask = 0x40;           // -> 0x0008
 	r.team_byte = 1;                 // -> 0x0010 (D-NET-58: gate-0x10 byte @ +354 is team)
 	r.parent_handle = 0x1033;        // -> 0x0100
@@ -206,7 +206,7 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.entity_flags == 2);
 	EXPECT(d.pos_x == int32_t(0x05b0be8f));
 	EXPECT(d.pos_z == int32_t(0x001fbcd7));
-	EXPECT(d.vel_x == 10);
+	EXPECT(d.euler_z == 10);
 	EXPECT(d.section_mask == 0x40);
 	EXPECT(d.team_byte == 1);
 	EXPECT(d.parent_handle == 0x1033);
