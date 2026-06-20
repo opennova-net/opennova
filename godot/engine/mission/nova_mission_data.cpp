@@ -187,7 +187,11 @@ void NovaMissionData::_bind_methods() {
 Error NovaMissionData::open_file(const String &path) {
 	source_path = path;
 	last_error = String();
-	if (!document.load_bms_file(path.utf8().get_data())) {
+	const String ext = path.get_extension().to_lower();
+	const bool ok = ext == "mis"
+			? document.load_mis_file(path.utf8().get_data())
+			: document.load_bms_file(path.utf8().get_data());
+	if (!ok) {
 		last_error = String(document.last_error().c_str());
 		return ERR_CANT_OPEN;
 	}
@@ -228,7 +232,15 @@ Error NovaMissionData::open_from_resource_root(const Ref<NovaResourceRoot> &p_re
 		last_error = "Mission file not found in resource root: " + file;
 		return ERR_FILE_NOT_FOUND;
 	}
-	if (!document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()))) {
+	const String ext = file.get_extension().to_lower();
+	bool ok = false;
+	if (ext == "mis") {
+		const std::string text(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+		ok = document.load_mis_text(text);
+	} else {
+		ok = document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()));
+	}
+	if (!ok) {
 		last_error = String(document.last_error().c_str());
 		return ERR_CANT_OPEN;
 	}
@@ -1341,7 +1353,11 @@ Error NovaMissionData::save_as(const String &path) {
 	if (path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
-	if (!document.save_bms_file(path.utf8().get_data())) {
+	const String ext = path.get_extension().to_lower();
+	const bool ok = ext == "mis"
+			? document.save_mis_file(path.utf8().get_data())
+			: document.save_bms_file(path.utf8().get_data());
+	if (!ok) {
 		last_error = String(document.last_error().c_str());
 		return ERR_FILE_CANT_WRITE;
 	}

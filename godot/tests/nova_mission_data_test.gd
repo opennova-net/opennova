@@ -120,6 +120,10 @@ func _temp_bms_path() -> String:
 	return ProjectSettings.globalize_path("user://mission_authoring_rt_%d.bms" % Time.get_ticks_usec())
 
 
+func _temp_mis_path() -> String:
+	return ProjectSettings.globalize_path("user://mission_authoring_rt_%d.mis" % Time.get_ticks_usec())
+
+
 func test_set_entity_transform_persists_through_save_reload() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
@@ -763,6 +767,27 @@ func test_create_default_save_and_reopen() -> void:
 	assert_eq(reopened.open_file(path), OK, "the saved from-scratch mission reopens")
 	assert_eq(reopened.get_terrain_ref(), "dvxi5", "terrain ref round-trips")
 	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), 1, "the placed item round-trips")
+	DirAccess.remove_absolute(path)
+
+
+func test_create_default_save_as_mis_and_reopen() -> void:
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK)
+	assert_true(m.set_header_string("mission_name", "MIS Binding"))
+	assert_true(m.set_header_string("terrain", "dvxi5"))
+	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 7), Vector3(1, 90, 3))
+	var path := _temp_mis_path()
+	assert_eq(m.save_as(path), OK, "save_as chooses the .mis writer by extension")
+	var text := FileAccess.get_file_as_string(path)
+	assert_true(text.begins_with("// mission metafile\r\n"), ".mis Save As writes the text metafile")
+	assert_eq(m.get_source_path(), path, "Save As adopts the .mis path")
+
+	var reopened := NovaMissionData.new()
+	assert_eq(reopened.open_file(path), OK, "the saved .mis reopens through the generic open_file")
+	assert_eq(reopened.get_source_path(), path, "open_file records the .mis path")
+	assert_eq(reopened.get_mission_name(), "MIS Binding")
+	assert_eq(reopened.get_terrain_ref(), "dvxi5")
+	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), 1)
 	DirAccess.remove_absolute(path)
 
 

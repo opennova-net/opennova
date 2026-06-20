@@ -24,7 +24,7 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 
 Three layers:
 
-- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, fonts, credits, strings, menus, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, fonts, credits, strings, menus, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
 - **Core engine (`libs/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
@@ -78,7 +78,7 @@ Exports the current scene to NovaLogic's ASCII Scene Export format. Supports mul
 
 The authoring layer for JO assets, organized into workspaces grouped by purpose:
 
-- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (`.bms` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime).
+- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime).
 - **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), Strings (RTXT string tables), and Menus (`.mnu` / `.mns` menu screens with a WYSIWYG canvas and interactive preview).
 - **Audio**: Music (interactive music: `.sbf` banks plus `.bin` music scripts).
 - **Atmosphere**: Sound (`.lwf` sound profiles) and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
@@ -147,7 +147,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
 | **world** | World substrate: entity registry and pools, variable store, AI with the infantry motor, and the logic tick. |
 | **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
-| **mission** | `.bms` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. |
+| **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. |
 | **anim** | Skeletal animation evaluator: samples `.bad` clips into per-bone transforms. |
 | **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |
 | **vfs** | Virtual file system: loose directories and PFF archives behind one lookup, with SCR/BFC1 decode. |

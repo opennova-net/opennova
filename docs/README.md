@@ -49,7 +49,8 @@ behavior is summarized and cited.
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed |
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
-| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | relanded on the `web-nw-for-real-master` integration branch (see `plan/`) |
+| Mission | [`mission/mis-format-re.md`](mission/mis-format-re.md) | partial: writer-generated subset, full `dfx2med.exe` grill pending |
+| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | unlanded: stack landed in PR #37, reverted in PR #50 |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |

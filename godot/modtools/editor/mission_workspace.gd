@@ -1,7 +1,7 @@
 class_name MissionEditorWorkspace
 extends EditorWorkspace
 
-# Mission workspace: create or open a .bms mission and author its world. The mission's header
+# Mission workspace: create or open a .bms/.mis mission and author its world. The mission's header
 # selects the terrain + environment, which load into the shared terrain viewport, and its placed
 # objects are instanced under the terrain world root by the host-agnostic MissionObjectPlacer.
 # New Mission builds an empty mission on the currently-loaded terrain; from there objects, zones,
@@ -432,11 +432,11 @@ func get_open_action_label() -> String:
 
 
 func get_open_dialog_title() -> String:
-	return "Open mission (.bms)"
+	return "Open mission (.bms, .mis)"
 
 
 func get_open_dialog_filters() -> PackedStringArray:
-	return PackedStringArray(["*.bms ; Mission"])
+	return PackedStringArray(["*.bms ; Binary Mission", "*.mis ; Mission Metafile"])
 
 
 func get_open_dialog_dir() -> String:
@@ -519,8 +519,32 @@ func save_as(dir_path: String) -> Error:
 	return err as Error
 
 
+func uses_save_file_dialog() -> bool:
+	return true
+
+
+func get_save_file_dialog_filters() -> PackedStringArray:
+	return PackedStringArray(["*.bms ; Binary Mission", "*.mis ; Mission Metafile"])
+
+
+func get_save_file_dialog_default_name() -> String:
+	if _controller != null:
+		var current: String = _controller.get_current_path().get_file()
+		if not current.is_empty():
+			return current
+	return "mission.bms"
+
+
+func save_as_file(path: String) -> Error:
+	if _controller == null:
+		return ERR_UNAVAILABLE
+	var err := int(_controller.save_as_file(path))
+	_report_save_status(err)
+	return err as Error
+
+
 func get_save_dialog_title() -> String:
-	return "Choose where to save the mission (.bms)"
+	return "Choose where to save the mission"
 
 
 func get_save_dialog_dir() -> String:

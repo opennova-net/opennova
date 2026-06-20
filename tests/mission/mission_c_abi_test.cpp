@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -29,6 +30,12 @@ std::vector<uint8_t> read_file(const std::string &path) {
 		return {};
 	}
 	return data;
+}
+
+std::string temp_path(const char *name) {
+	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/build/test-output";
+	std::filesystem::create_directories(dir);
+	return dir + "/" + name;
 }
 
 // Direct C++ exercise of the whole-event CRUD (add_event / remove_event) and the enum reflectors,
@@ -577,6 +584,19 @@ int main() {
 	TEST_EXPECT(mis_text.find("  default_secondary WPN_colt45\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("begin item 0\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("//bms") == std::string::npos);
+	const std::string mis_path = temp_path("mission_c_abi_dispatch.mis");
+	TEST_EXPECT(opennova_mission_save_path(document, mis_path.c_str()) == 1);
+	const std::vector<uint8_t> saved_mis = read_file(mis_path);
+	TEST_EXPECT(saved_mis.size() > 20);
+	const std::string saved_mis_text(reinterpret_cast<const char *>(saved_mis.data()), saved_mis.size());
+	TEST_EXPECT(saved_mis_text.find("// mission metafile\r\n") == 0);
+	OpenNovaMissionDocument *mis_reload = opennova_mission_create();
+	TEST_EXPECT(opennova_mission_load_path(mis_reload, mis_path.c_str()) == 1);
+	TEST_EXPECT(opennova_mission_entity_count(mis_reload, 1) > 0);
+	OpenNovaMissionInfo mis_info = {};
+	TEST_EXPECT(opennova_mission_get_info(mis_reload, &mis_info) == 1);
+	TEST_EXPECT(mis_info.mission_name[0] != '\0');
+	opennova_mission_destroy(mis_reload);
 	opennova_mission_free_bytes(&mis);
 	TEST_EXPECT(mis.data == nullptr);
 	TEST_EXPECT(mis.size == 0);

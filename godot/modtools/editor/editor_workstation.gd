@@ -1163,14 +1163,11 @@ func _save_then_close_active_document(workspace: EditorWorkspace) -> void:
 		return
 	if err == ERR_INVALID_PARAMETER:
 		# No path yet: route through Save As; close only on success.
-		_open_dir_dialog(workspace.get_save_dialog_title(), func(dir_path: String) -> void:
-			if workspace.save_as(dir_path) == OK:
-				_close_active_document(workspace)
-			else:
-				show_status_message("Save failed — keeping the tab open.", 6.0),
-			_preferred_save_dir(workspace))
+		var close_after_save := func() -> void:
+			_close_active_document(workspace)
+		_open_save_as_dialog(workspace, close_after_save, "Save failed - keeping the tab open.")
 		return
-	show_status_message("Save failed (error %d) — keeping the tab open." % err, 6.0)
+	show_status_message("Save failed (error %d) - keeping the tab open." % err, 6.0)
 
 
 func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
@@ -2084,10 +2081,6 @@ func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 		var err: Error = workspace.open_file(path)
 		if err != OK:
 			show_status_message("Open failed (error %d)" % err, 6.0)
-	var save_project_as := func(dir_path: String) -> void:
-		var err: Error = workspace.save_as(dir_path)
-		if err != OK:
-			show_status_message("Save failed (error %d)" % err, 6.0)
 	match action_id:
 		WorkspaceAction.NEW:
 			if workspace.can_new() and _flush_workspace_or_status(workspace):
@@ -2101,11 +2094,7 @@ func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
 			_on_save_pressed(workspace)
 		WorkspaceAction.SAVE_AS:
 			if _flush_workspace_or_status(workspace):
-				_open_dir_dialog(
-					workspace.get_save_dialog_title(),
-					save_project_as,
-					_preferred_save_dir(workspace)
-				)
+				_open_save_as_dialog(workspace)
 		WorkspaceAction.EXPORT:
 			_on_export_pressed(workspace)
 
@@ -2178,6 +2167,44 @@ func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = ""
 	_ensure_file_dialogs().open_dir(title, on_pick, current_dir)
 
 
+func _open_save_as_dialog(workspace: EditorWorkspace, on_success: Callable = Callable(), failure_message: String = "") -> void:
+	if workspace == null:
+		return
+	var report_failure := func(err: Error) -> void:
+		if not failure_message.is_empty():
+			show_status_message(failure_message, 6.0)
+		else:
+			show_status_message("Save failed (error %d)" % err, 6.0)
+	if workspace.uses_save_file_dialog():
+		var save_file_as := func(path: String) -> void:
+			var err: Error = workspace.save_as_file(path)
+			if err == OK:
+				if on_success.is_valid():
+					on_success.call()
+			else:
+				report_failure.call(err)
+		_ensure_file_dialogs().save_file(
+			workspace.get_save_dialog_title(),
+			workspace.get_save_file_dialog_filters(),
+			workspace.get_save_file_dialog_default_name(),
+			save_file_as,
+			_preferred_save_dir(workspace)
+		)
+		return
+	var save_project_as := func(dir_path: String) -> void:
+		var err: Error = workspace.save_as(dir_path)
+		if err == OK:
+			if on_success.is_valid():
+				on_success.call()
+		else:
+			report_failure.call(err)
+	_open_dir_dialog(
+		workspace.get_save_dialog_title(),
+		save_project_as,
+		_preferred_save_dir(workspace)
+	)
+
+
 func _open_files_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
 	_ensure_file_dialogs().open_files(title, filters, on_pick, current_dir)
 
@@ -2222,13 +2249,7 @@ func _on_save_pressed(workspace: EditorWorkspace = null) -> void:
 		show_status_message("Resolve source parse errors before saving.", 6.0)
 		return
 	if err == ERR_INVALID_PARAMETER:
-		var save_project_as := func(dir_path: String) -> void:
-			workspace.save_as(dir_path)
-		_open_dir_dialog(
-			workspace.get_save_dialog_title(),
-			save_project_as,
-			_preferred_save_dir(workspace)
-		)
+		_open_save_as_dialog(workspace)
 	elif err != OK:
 		show_status_message("%s save is not available." % workspace.get_workspace_label(), 4.0)
 
