@@ -79,7 +79,7 @@ func test_listen_server_spawns_and_replicates_local_player() -> void:
 		"player at the requested spawn position (Godot->mission->Godot round-trip)")
 
 	# Drive forward for several frames (exercises input -> pre-tick hook -> motor -> present).
-	sim.set_player_input(true, false, false, false, false, 0.0)
+	sim.set_player_input(true, false, false, false, false, 0.0, 0.0)
 	for _i in range(8):
 		sim.advance_frame()
 

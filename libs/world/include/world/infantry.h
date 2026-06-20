@@ -144,6 +144,10 @@ struct InfantryState {
     // forward-walk clip serves all 8 directions for now (dedicated strafe/back clips are a
     // tracked follow-up, net-re §5.38).
     int32_t move_offset = 0;
+    // The local player's look pitch (entity Pitch@+0x14, BAM32), set from the mouse. The
+    // motor applies it directly (look wins over the slope lean) and the first-person camera
+    // reads it. [orig: Input_HandleActionBinding_0 @0x4e1330; net-re §5.38]
+    int32_t look_pitch = 0;
 
     // Movement order, refreshed by the 16-tick think.
     // [orig moveMode local in 0x4b9910: 0 stop, 3 move-to-current-node,

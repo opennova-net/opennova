@@ -102,9 +102,15 @@ func has_player() -> bool:
 func local_player_position() -> Vector3:
 	return _sim.get_local_player_position() if _sim != null else Vector3.ZERO
 
-func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float) -> void:
+func local_player_yaw_deg() -> float:
+	return _sim.get_local_player_yaw_deg() if _sim != null else 0.0
+
+func local_player_pitch_deg() -> float:
+	return _sim.get_local_player_pitch_deg() if _sim != null else 0.0
+
+func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _sim != null:
-		_sim.set_player_input(forward, back, left, right, run, look_yaw_deg)
+		_sim.set_player_input(forward, back, left, right, run, look_yaw_deg, look_pitch_deg)
 
 
 func get_sim() -> NovaSimulation:

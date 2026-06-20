@@ -7,9 +7,11 @@ namespace opennova::world {
 void apply_player_move_order(AiEntity &e, const PlayerInput &in) {
     InfantryState &inf = e.inf;
 
-    // Look → body facing (the body turns toward target_heading; the motor quarter-steps).
-    // [orig: Input_ProcessMouseAxisBindings @0x499680 writes the entity Yaw, net-re §5.38]
+    // Look → entity Yaw/Pitch. For the local player the motor applies these directly (instant,
+    // no body-turn smoothing) — the original drives entity+0x10/+0x14 straight from the mouse.
+    // [orig: Input_ProcessMouseAxisBindings @0x499680 / Input_HandleActionBinding_0 @0x4e1330]
     inf.target_heading = in.look_heading;
+    inf.look_pitch = in.look_pitch;
 
     // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R combo → 8-way move index.
     int dir_bits = 0;

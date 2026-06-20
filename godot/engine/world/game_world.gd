@@ -492,9 +492,23 @@ func has_local_player() -> bool:
 func local_player_position() -> Vector3:
 	return _runtime.local_player_position() if _runtime != null else Vector3.ZERO
 
-func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float) -> void:
+func local_player_yaw_deg() -> float:
+	return _runtime.local_player_yaw_deg() if _runtime != null else 0.0
+
+func local_player_pitch_deg() -> float:
+	return _runtime.local_player_pitch_deg() if _runtime != null else 0.0
+
+func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _runtime != null:
-		_runtime.set_player_input(forward, back, left, right, run, look_yaw_deg)
+		_runtime.set_player_input(forward, back, left, right, run, look_yaw_deg, look_pitch_deg)
+
+## Build a host-managed avatar model for the local player (which has no BMS placement of its
+## own). The caller (main_game) positions it and toggles first/third-person visibility. Null
+## when the resource root / item graphic is unavailable. 0x14B9 = player infantry [net-re §5.2b].
+func build_local_player_avatar() -> Node3D:
+	if _placer == null:
+		return null
+	return _placer.build_animated_model(0x14B9, self)
 
 
 # Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects

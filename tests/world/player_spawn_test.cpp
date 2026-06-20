@@ -139,6 +139,59 @@ int main() {
         CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[2])) - e->position.z) < 0.01f);
     }
 
+    // --- grounding mirror runs for NON-player motor entities too (the AI-in-the-ground fix):
+    //     the motor mirrors every inf.active entity's pose into the registry Entity that
+    //     snapshot_of serializes, so the wire carries the current pose, not the stale spawn Z.
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+        Entity seed;
+        seed.kind = EntityKind::Organic;
+        seed.item_id = 0x14B9;
+        seed.net_id = 7;
+        seed.position = {1.0f, 2.0f, 3.0f}; // authored spawn pos
+        seed.alive = true;
+        const EntityHandle h = w.registry.spawn(0, seed);
+        AiEntity &ae = *ai.at(ai.attach(h));
+        ae.net_id = 7;
+        ae.inf.active = true; // a plain AI organic — NOT is_local_player
+        ae.pos[0] = to_fixed(11.0f);
+        ae.pos[1] = to_fixed(22.0f);
+        ae.pos[2] = to_fixed(33.0f); // motor-advanced pose, distinct from the authored spawn
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.logic_tick = 0;
+        ctx.is_authority = true;
+        ai.tick(w, ctx);
+        const Entity *e = w.registry.get(h);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[0])) - e->position.x) < 0.01f);
+        CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[2])) - e->position.z) < 0.01f);
+        CHECK(std::fabs(e->position.z - 33.0f) < 0.01f); // mirrored, not the authored 3.0
+    }
+
+    // --- player look: pitch applies and the look yaw is INSTANT (no body-turn smoothing).
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+        spawn_player(w, PlayerSpawn{}); // spawn yaw 0 -> heading ~0x40000000
+        AiEntity &ae = *ai.at(0);
+        PlayerInput in;
+        in.look_heading = 0x20000000; // a different facing
+        in.look_pitch = 0x08000000;
+        apply_player_move_order(ae, in);
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.logic_tick = 0;
+        ctx.is_authority = true;
+        ai.tick(w, ctx);
+        CHECK(ae.heading == 0x20000000); // instant look yaw, not quarter-stepped toward target
+        CHECK(ae.pitch == 0x08000000);   // look pitch applied (slope lean overridden)
+    }
+
     std::printf("player_spawn: %s\n", failures == 0 ? "OK" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

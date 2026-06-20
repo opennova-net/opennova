@@ -409,6 +409,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 6. Slope slide + lean (every 8 ticks; alive only). [orig: gate dump 915 + flag rules]
     if (e.health > 0 && (key & 7u) == 0) infantry_slope_slide(e);
 
+    // Local player: entity Yaw/Pitch come STRAIGHT from the mouse — instant, no body-turn
+    // smoothing, and the look pitch wins over the slope lean. The original drives
+    // entity+0x10/+0x14 directly from input, so the move direction (rotated by
+    // e.heading + move_offset below) and the first-person camera both follow the look
+    // immediately. [orig: Input_HandleActionBinding_0 @0x4e1330; net-re §5.38]
+    if (inf.is_local_player) {
+        inf.body_heading = inf.target_heading;
+        e.heading = inf.target_heading;
+        e.pitch = inf.look_pitch;
+    }
+
     // 7-8. Rotate the root delta into world axes and integrate. [orig: dump 4758-4779,
     // 5083-5086 — full-precision sin/cos at 2^22, pos += rotated + velocity]
     {
@@ -467,17 +478,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     e.brain.f[AiBrain::kWorkHeading] = e.heading;
 
     // Two-store reconciliation: the motor advances AiEntity.pos/heading (16.16 / BAM32), but
-    // the S2C 0x0A snapshot reads the registry Entity (snapshot_of). Mirror the local
-    // player's pose back so its motion replicates to its own client view (ADR 0011/0012).
-    if (inf.is_local_player) {
-        if (Entity *ent = world.registry.get(e.handle)) {
-            ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
-            ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
-            ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
-            // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
-            // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
-            ent->yaw = static_cast<int16_t>(90 - e.heading / kBamPerDegree);
-        }
+    // the S2C 0x0A snapshot SERIALIZES the registry Entity (snapshot_of reads Entity.position).
+    // Mirror EVERY motor entity's grounded pose back so the wire — and the listen-server
+    // present that decodes it — carry the current grounded position, not the stale authored
+    // spawn Z (which sank AI organics into the terrain on the wire path). Faithful: the
+    // original engine has ONE Entity Position store that is both mover output and serializer
+    // input; our AiEntity.pos vs registry Entity.position split is the tracked deviation, so
+    // we keep them in sync here. (The direct AI-pool present still reads AiEntity.pos.)
+    if (Entity *ent = world.registry.get(e.handle)) {
+        ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
+        ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
+        ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
+        // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
+        // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
+        ent->yaw = static_cast<int16_t>(90 - e.heading / kBamPerDegree);
     }
 
     advance_part_anim(e); // PANM channels integrate regardless of the motor path

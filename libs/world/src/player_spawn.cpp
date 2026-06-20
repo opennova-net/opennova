@@ -18,6 +18,10 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
     // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
     Entity seed;
     seed.net_id = spawn.net_id;
+    // Key the player by its net_id as the bms_id too, so the host can resolve a player avatar
+    // node for it through the present pass (the player has no BMS placement of its own). A high
+    // net_id (0xFFF0) won't collide with the small mission bms ids. [net-re §5.38; ADR 0012]
+    seed.bms_id = static_cast<int32_t>(spawn.net_id);
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
     seed.position = spawn.position;

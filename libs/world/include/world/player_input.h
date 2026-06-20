@@ -20,7 +20,9 @@ struct PlayerInput {
     bool left = false;
     bool right = false;
     bool run = false;          // alerted/run gait (vs walk)
-    int32_t look_heading = 0;  // absolute facing, BAM32
+    int32_t look_heading = 0;  // absolute facing (entity Yaw@+0x10), BAM32
+    int32_t look_pitch = 0;    // absolute look pitch (entity Pitch@+0x14), BAM32; the caller
+                               // clamps to ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]
 };
 
 // Faithful [orig: Player_PackInputStateToEntity @0x4df450]: collapse the F/B/L/R combo into

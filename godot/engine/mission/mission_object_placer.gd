@@ -309,6 +309,28 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	return stats
 
 
+## Build ONE animated NovaObjectModel for an item type, in its rest pose, parented under
+## `parent` -- for a host-managed entity with no BMS placement (the local-player avatar in
+## first/third-person). The caller positions/orients it and toggles visibility; it is NOT
+## tagged or registered for the present pass. Returns null when the item type has no
+## resolvable graphic (the same resolution path the animated entities in place() use).
+func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -> Node3D:
+	var graphic := _graphic_for(item_id)
+	if graphic.is_empty():
+		return null
+	var data := _load_object_data(graphic)
+	if data == null:
+		return null
+	var model: Node3D = NovaObjectModelScript.new()
+	model.name = "PlayerAvatar_%s" % graphic
+	parent.add_child(model)
+	if env_node != null and model.has_method("set_environment_node"):
+		model.set_environment_node(env_node)
+	_apply_skeletal_anim(model, item_id)
+	model.set_object_data(data)
+	return model
+
+
 # --- Incremental placement (editor authoring) ---------------------------------
 
 ## Render one freshly-added entity into an existing MissionObjects container without

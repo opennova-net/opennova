@@ -200,8 +200,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &NovaSimulation::spawn_local_player);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
-	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "look_yaw_deg"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
+	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
+	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -372,7 +374,7 @@ bool NovaSimulation::has_local_player() const {
 }
 
 void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
-                                      bool p_run, float p_look_yaw_deg) {
+                                      bool p_run, float p_look_yaw_deg, float p_look_pitch_deg) {
 	player_input_.forward = p_forward;
 	player_input_.back = p_back;
 	player_input_.left = p_left;
@@ -381,6 +383,8 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	// Look yaw (mission degrees) -> engine BAM heading, the (90 - yaw) convention used at spawn.
 	player_input_.look_heading =
 	    static_cast<int32_t>((90.0 - static_cast<double>(p_look_yaw_deg)) * kBamPerDegree);
+	// Look pitch (mission degrees, up positive) -> entity Pitch@+0x14 (BAM32). No 90-offset.
+	player_input_.look_pitch = static_cast<int32_t>(static_cast<double>(p_look_pitch_deg) * kBamPerDegree);
 }
 
 Vector3 NovaSimulation::get_local_player_position() const {
@@ -389,6 +393,21 @@ Vector3 NovaSimulation::get_local_player_position() const {
 	if (!e) return Vector3();
 	// mission (x,y,z) -> Godot (x, z, -y).
 	return Vector3(e->position.x, e->position.z, -e->position.y);
+}
+
+float NovaSimulation::get_local_player_yaw_deg() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0.0f;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p) return 0.0f;
+	// Engine heading (BAM32) -> mission yaw degrees, the (90 - heading) convention.
+	return static_cast<float>(90.0 - static_cast<double>(p->heading) / kBamPerDegree);
+}
+
+float NovaSimulation::get_local_player_pitch_deg() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0.0f;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p) return 0.0f;
+	return static_cast<float>(static_cast<double>(p->pitch) / kBamPerDegree);
 }
 
 void NovaSimulation::restart() {

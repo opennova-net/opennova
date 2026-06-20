@@ -10,6 +10,7 @@ extends Node3D
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -17,11 +18,15 @@ const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const CHANGE_DIR_KEY := KEY_F9
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
-# Phase 2 (the moving player, NOVA_PLAYER): the follow-camera offset (Godot space) and the
-# tank-turn rate for A/D. W/S walk the player along its facing; the FlyCamera's free-look
-# stays on right-mouse, so plain WASD is free for the player.
-const PLAYER_CAM_OFFSET := Vector3(0, 12, 18)
-const PLAYER_TURN_DEG_PER_SEC := 120.0
+# Phase 2.5 (the moving player, NOVA_PLAYER): faithful first-person camera. The eye is +1.0
+# world unit above the player [orig: Camera_ComputeThirdPersonView @0x437d10]; F4 swaps to a
+# behind+above third person [orig: ThirdPersonCamera_Update @0x437af0]. The mouse drives look
+# yaw/pitch (pitch clamped ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]).
+const PLAYER_EYE_HEIGHT := 1.0          # +0x10000 = +1.0 world unit above Position
+const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
+const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
+const PLAYER_TP_DISTANCE := 5.0         # 3P camera distance behind the player
+const PLAYER_TP_HEIGHT := 1.5           # 3P camera height bump
 
 enum State { MENU, WORLD, PAUSED }
 
@@ -36,7 +41,10 @@ var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
-var _player_look_yaw := 0.0  # the local player's facing (mission deg), turned by A/D
+var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
+var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
+var _player_third_person := false  # F4 toggles first/third person
+var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); null until built
 
 
 func _ready() -> void:
@@ -72,6 +80,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode == DEBUG_OVERLAY_KEY:
 		_toggle_debug_overlay()
+		get_viewport().set_input_as_handled()
+		return
+	# F4 toggles first/third person for the local player [orig: dword_A890C8 mode flag].
+	if key.keycode == KEY_F4 and _world.has_local_player():
+		_player_third_person = not _player_third_person
 		get_viewport().set_input_as_handled()
 
 
@@ -310,27 +323,74 @@ func _set_hud_visible(v: bool) -> void:
 # also lets a host that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
 func _process(delta: float) -> void:
-	if _state != State.PAUSED and _world.is_loaded():
-		# Phase 2 (NOVA_PLAYER): drive the local player and follow it with the camera. The
-		# input is set BEFORE tick() so the sim applies it net-before-logic this frame.
-		var has_player: bool = _world.has_local_player()
-		if has_player:
-			_drive_local_player(delta)
-		_world.tick(_camera.global_position)
-		if has_player:
-			var pp: Vector3 = _world.local_player_position()
-			_camera.global_position = pp + PLAYER_CAM_OFFSET
-			_camera.look_at(pp, Vector3.UP)
+	# Release the captured mouse while paused / unloaded so the menus stay usable.
+	if _state == State.PAUSED or not _world.is_loaded():
+		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		return
+	# Phase 2.5 (NOVA_PLAYER): drive the local player and follow it with the first-person
+	# camera. Input is set BEFORE tick() so the sim applies it net-before-logic this frame.
+	var has_player: bool = _world.has_local_player()
+	if has_player:
+		if _state == State.WORLD and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+		if _player_avatar == null:
+			_player_avatar = _world.build_local_player_avatar()
+		_drive_local_player(delta)
+	elif _player_avatar != null:
+		_player_avatar.queue_free()
+		_player_avatar = null
+	_world.tick(_camera.global_position)
+	if has_player:
+		_update_player_camera()
 
 
-# Tank-style WASD control of the local player: W/S move along the facing, A/D turn it. The
-# 8-way strafe (left/right) is left for the mouse-look follow-up (net-re §5.38).
-func _drive_local_player(delta: float) -> void:
-	if Input.is_key_pressed(KEY_A):
-		_player_look_yaw += PLAYER_TURN_DEG_PER_SEC * delta
-	if Input.is_key_pressed(KEY_D):
-		_player_look_yaw -= PLAYER_TURN_DEG_PER_SEC * delta
+# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns
+# the look (see _unhandled_input). Shift runs. [orig: Player_PackInputStateToEntity @0x4df450]
+func _drive_local_player(_delta: float) -> void:
 	var fwd: bool = Input.is_key_pressed(KEY_W)
 	var back: bool = Input.is_key_pressed(KEY_S)
+	var left: bool = Input.is_key_pressed(KEY_A)
+	var right: bool = Input.is_key_pressed(KEY_D)
 	var run: bool = Input.is_key_pressed(KEY_SHIFT)
-	_world.set_local_player_input(fwd, back, false, false, run, _player_look_yaw)
+	_world.set_local_player_input(fwd, back, left, right, run, _player_look_yaw, _player_look_pitch)
+
+
+# Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
+# Yaw@+0x10 / Pitch@+0x14, Input_HandleActionBinding_0 @0x4e1330]. Signs are tunable.
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseMotion):
+		return
+	if _state != State.WORLD or not _world.is_loaded() or not _world.has_local_player():
+		return
+	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
+		return
+	var mm := event as InputEventMouseMotion
+	_player_look_yaw += mm.relative.x * PLAYER_MOUSE_SENS_DEG
+	_player_look_pitch = clampf(_player_look_pitch - mm.relative.y * PLAYER_MOUSE_SENS_DEG,
+		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
+
+
+# Place the camera from the player's authoritative pose. First person: eye = player + 1.0u
+# looking along the facing. Third person (F4): behind + above, looking at the player. The
+# mission yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission facing
+# yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
+func _update_player_camera() -> void:
+	var pos: Vector3 = _world.local_player_position()
+	var yr := deg_to_rad(_world.local_player_yaw_deg())
+	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	if _player_third_person:
+		_camera.global_position = eye - forward * PLAYER_TP_DISTANCE + Vector3(0, PLAYER_TP_HEIGHT, 0)
+		_camera.look_at(eye, Vector3.UP)
+	else:
+		_camera.global_position = eye
+		_camera.look_at(eye + forward, Vector3.UP)
+	# Host-managed avatar: stand it at the player facing the look yaw (the body doesn't pitch);
+	# shown in third person, hidden in first (the FP arms viewmodel is a later weapon-phase step).
+	if _player_avatar != null and is_instance_valid(_player_avatar):
+		_player_avatar.global_position = pos
+		_player_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
+		_player_avatar.visible = _player_third_person

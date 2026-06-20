@@ -188,13 +188,19 @@ public:
 	bool spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team);
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
-	// Feed one frame of player input: the move keys + look yaw (mission degrees). Applied to
-	// the player's infantry move order at the top of the next frame.
+	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
+	// to the player's infantry move order at the top of the next frame. The original drives
+	// entity Yaw@+0x10 / Pitch@+0x14 straight from the mouse [orig: Input_HandleActionBinding_0
+	// @0x4e1330]; the caller clamps pitch to ±80°.
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
-	                      float p_look_yaw_deg);
+	                      float p_look_yaw_deg, float p_look_pitch_deg);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// The local player's authoritative look yaw / pitch in mission degrees (for the first-person
+	// camera). yaw = 90 - heading; pitch up positive. 0 when no player is spawned.
+	float get_local_player_yaw_deg() const;
+	float get_local_player_pitch_deg() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
