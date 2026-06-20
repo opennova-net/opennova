@@ -62,8 +62,9 @@ struct GameEntitySnapshot {
 	// fills this. Default 0 keeps existing positional inits + the 0x10 batch unchanged.
 	int32_t euler_z = 0;
 	// §5.10b replication class for the S2C 0x0A event loop (D-NET-50): selects the
-	// compact encoder. Unknown ⇒ the entity is NOT emitted as a 0x0A compact record
-	// (the authoring / .bms layer sets it from the item's *_function class tag).
+	// compact encoder. Unknown / NoNetworkCallback / Guided are not emitted by the
+	// production 0x0A world-reference builder; authoring/runtime code sets this from
+	// the item's *_function class tag.
 	EntityClass entity_class = EntityClass::Unknown;
 };
 
@@ -160,9 +161,9 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout();
 // deserializes into the local entity + calls Game_InitNewRound when
 // appropriate. Payload bytes 0-11 = Position X/Y/Z as signed int32 LE.
 //
-// First-pass implementation: verbatim copy of retail capture3 frame 211497
-// (623 bytes), with bytes 0-11 patched to ctx.spawn_x/y/z so the client
-// locks to OUR spawn coord, not retail's.
+// Field-driven §5.9 frame: the 12-byte anchor is player.spawn_x/y/z, followed
+// by the local-player tail and one tag=1 compact record per configured
+// Player/Infantry/Vehicle snapshot.
 std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &player,
                                                   const std::vector<GameEntitySnapshot> &entities = {});
 std::vector<uint8_t> build_tag_0a_player_state(const PlayerReplicationState &player,

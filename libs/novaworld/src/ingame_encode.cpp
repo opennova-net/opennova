@@ -313,8 +313,9 @@ std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec) {
 // 12-B anchor, flags1/flags2, the flags2&3 sub-block (aim/timer/env/objective),
 // the 7-B tail, the conditional passenger record, then the event loop (tag=1
 // per-entity compact via the §5.10b class dispatch, tag=2 weapon-hit) and the
-// tag=0 terminator. Guided/Unknown records are NOT emitted: the guided serializer
-// rejects format 11, so they never appear in 0x0A (decode fails closed on them).
+// tag=0 terminator. Known null-callback classes deliberately emit a header-only
+// tag=1 record; Guided/Unknown records are skipped because they have no fixed
+// 0x0A compact width.
 std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	std::vector<uint8_t> out;
 	Writer w{out};
@@ -366,14 +367,32 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 
 	// Event loop: tag=1 per-entity compacts, then tag=2 weapon-hits, then tag=0.
 	for (const FrameUpdateRecord &rec : fu.records) {
-		w.u8(1);
-		w.u16(rec.handle);
-		w.u16(rec.type_id);
 		switch (rec.cls) {
-		case EntityClass::Player:   append(encode_player_compact_record(rec.player)); break;
-		case EntityClass::Vehicle:  append(encode_vehicle_compact_record(rec.vehicle)); break;
-		case EntityClass::Infantry: append(encode_infantry_compact_record(rec.infantry)); break;
-		default: break; // Guided/Unknown not emitted (see header)
+		case EntityClass::Player:
+			w.u8(1);
+			w.u16(rec.handle);
+			w.u16(rec.type_id);
+			append(encode_player_compact_record(rec.player));
+			break;
+		case EntityClass::Vehicle:
+			w.u8(1);
+			w.u16(rec.handle);
+			w.u16(rec.type_id);
+			append(encode_vehicle_compact_record(rec.vehicle));
+			break;
+		case EntityClass::Infantry:
+			w.u8(1);
+			w.u16(rec.handle);
+			w.u16(rec.type_id);
+			append(encode_infantry_compact_record(rec.infantry));
+			break;
+		case EntityClass::NoNetworkCallback:
+			w.u8(1);
+			w.u16(rec.handle);
+			w.u16(rec.type_id);
+			break;
+		default:
+			break;
 		}
 	}
 	for (const WeaponHitRecord &hit : fu.hits) {

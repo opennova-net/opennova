@@ -130,10 +130,38 @@ bool run() {
 	return true;
 }
 
+bool run_header_only_records_are_ignored_by_client_view() {
+	nw::FrameUpdate fu;
+	fu.flags2 = 0x02;
+	fu.env.fog_dist = 0x1111;
+	fu.env.fog_accel = 0x2222;
+	fu.env.tod_fixed = 0x3333;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 100;
+
+	nw::FrameUpdateRecord r;
+	r.handle = 0x2007;
+	r.type_id = 0x0465;
+	r.cls = nw::class_from_tag("bldg");
+	fu.records.push_back(r);
+
+	ns::LoopbackChannel channel;
+	channel.host_send(ns::kTag0aFrameUpdate, nw::encode_frame_update(fu));
+	ns::NetClientView view([](uint16_t t) {
+		return t == 0x0465 ? nw::class_from_tag("bldg") : nw::EntityClass::Unknown;
+	});
+	view.pump(channel);
+
+	if (!expect(view.frames_applied() == 1, "header-only frame applied")) return false;
+	if (!expect(view.state().entities.empty(),
+	            "header-only null-callback record does not create a client entity")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
-	const bool ok = run();
+	const bool ok = run() && run_header_only_records_are_ignored_by_client_view();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

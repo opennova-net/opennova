@@ -41,6 +41,7 @@ enum class EntityClass : uint8_t {
 	Infantry, // §5.14  14 B fixed
 	Vehicle,  // §5.13  15 B mounted / 21 B unmounted
 	Guided,   // §5.15  variable-length delta codec (deferred)
+	NoNetworkCallback, // known ItemDef class with fn[3] == 0; tag==1 header only
 };
 
 // Map a 4-char items.def class-tag (case-sensitive §5.10b match) to its class.
@@ -373,10 +374,9 @@ bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
 // ===========================================================================
 // Per-entity compact records — appear inside S2C 0x0A's trailing event loop,
 // `tag==1` branch. Each record is decoded by a callback selected per item
-// type from the §5.10b entity-class dispatch table. Three of the four
-// witnessed callbacks land here; the fourth (guided weapons, §5.15) is a
-// variable-length delta codec deferred until a capture carries projectile
-// traffic.
+// type from the §5.10b entity-class dispatch table. Three of the witnessed
+// callbacks land here; guided weapons use a variable-length field-group codec,
+// and known null callbacks consume no record body.
 //
 // Convention divergence from decode_pool_*_batch: these consume a PREFIX of a
 // larger event-loop buffer, so they emit `consumed` (the exact byte count
@@ -676,9 +676,11 @@ struct FrameUpdate {
 // flags, the env sub-block (case 2), the local-player tail, the conditional
 // passenger record, every tag==1 per-entity compact record, AND every tag==2
 // weapon-hit record (§5.9.1). `class_of` maps a wire type_id to its compact
-// dispatch class (built from items.def). Returns true (and sets out.complete)
-// iff the event loop reached its terminator cleanly; on any short read / unknown
-// class it stops, leaving everything decoded so far in `out` (out.complete=false,
+// dispatch class (built from items.def). Known null callbacks consume only the
+// `[tag][handle][typeId]` header and continue [orig: null-callback branch
+// @ 0x430814..0x43081D]. Returns true (and sets out.complete) iff the event loop
+// reached its terminator cleanly; on any short read / unresolved-width class it
+// stops, leaving everything decoded so far in `out` (out.complete=false,
 // out.consumed = bytes walked) so callers can render partial state + the failure
 // point. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]
 // `is_objective_gametype` gates the sub-block-3 objective body (16 B): the host

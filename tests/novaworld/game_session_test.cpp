@@ -72,6 +72,22 @@ std::vector<opennova::ProtocolMessage> drain_queued(opennova::GameSession &sessi
 	return out;
 }
 
+opennova::GameEntitySnapshot replicated_entity(uint8_t pool, uint16_t slot,
+                                               uint16_t type_id,
+                                               opennova::EntityClass cls,
+                                               int32_t x, int32_t y, int32_t z) {
+	opennova::GameEntitySnapshot e;
+	e.pool = pool;
+	e.slot = slot;
+	e.type_id = type_id;
+	e.team = 1;
+	e.x = x;
+	e.y = y;
+	e.z = z;
+	e.entity_class = cls;
+	return e;
+}
+
 bool check_post_handshake_burst() {
 	opennova::GameSessionConfig config;
 	config.player_name = "FooPlayer";
@@ -206,8 +222,8 @@ bool check_spawn_request_acceptance_sequence() {
 bool check_observed_loading_flow_enters_world_streaming() {
 	opennova::GameSessionConfig config;
 	config.replicated_entities = {
-		{2, 3, 0x1111, 0, 1, 100, 200, 300},
-		{2, 4, 0x2222, 0, 1, 400, 500, 600},
+		replicated_entity(2, 3, 0x14B9, opennova::EntityClass::Player, 100, 200, 300),
+		replicated_entity(2, 4, 0x14BF, opennova::EntityClass::Infantry, 400, 500, 600),
 	};
 	config.spawn_points = {
 		{1, 49, 1359, 1, 1000, 2000, 3000},
@@ -303,7 +319,7 @@ bool check_observed_loading_flow_enters_world_streaming() {
 bool check_observed_spawn_readiness_accepts_once() {
 	opennova::GameSessionConfig config;
 	config.replicated_entities = {
-		{2, 3, 0x1111, 0, 1, 100, 200, 300},
+		replicated_entity(2, 3, 0x14B9, opennova::EntityClass::Player, 100, 200, 300),
 	};
 	config.spawn_points = {
 		{1, 49, 1359, 1, 1000, 2000, 3000},
@@ -485,8 +501,8 @@ bool check_tag_29_emits_tag_51_spawn_confirm() {
 bool check_tick_emits_entity_batch_and_world_reference() {
 	opennova::GameSessionConfig config;
 	config.replicated_entities = {
-		{2, 3, 0x1111, 0, 1, 100, 200, 300},
-		{2, 4, 0x2222, 0, 1, 400, 500, 600},
+		replicated_entity(2, 3, 0x14B9, opennova::EntityClass::Player, 100, 200, 300),
+		replicated_entity(2, 4, 0x14BF, opennova::EntityClass::Infantry, 400, 500, 600),
 	};
 	opennova::GameSession session(config);
 	opennova::GameSessionState state;
@@ -513,11 +529,23 @@ bool check_tick_emits_entity_batch_and_world_reference() {
 		// the §5.9 walk (no leftover) — the end-to-end wiring check.
 		const int s0a = find_tag(spawned_tick.replies, 0x0A);
 		const auto &frame = spawned_tick.replies[static_cast<size_t>(s0a)].payload;
-		auto class_of = [](uint16_t) { return opennova::EntityClass::Unknown; };
+		auto class_of = [](uint16_t t) {
+			if (t == 0x14B9) return opennova::EntityClass::Player;
+			if (t == 0x14BF) return opennova::EntityClass::Infantry;
+			return opennova::EntityClass::Unknown;
+		};
 		opennova::FrameUpdate fu;
 		if (!expect(opennova::decode_frame_update(frame.data(), frame.size(), class_of, fu) &&
 		            fu.complete && fu.consumed == frame.size(),
 		            "field-driven 0x0A decodes cleanly")) return false;
+		if (!expect(fu.records.size() == 2,
+		            "field-driven 0x0A carries configured compact records")) return false;
+		if (!expect(fu.records[0].cls == opennova::EntityClass::Player &&
+		            fu.records[0].handle == 0x2003,
+		            "first configured compact record is the player-class entity")) return false;
+		if (!expect(fu.records[1].cls == opennova::EntityClass::Infantry &&
+		            fu.records[1].handle == 0x2004,
+		            "second configured compact record is the infantry-class entity")) return false;
 	}
 	if (!expect(find_tag(spawned_tick.replies, 0x57) >= 0, "spawned tick emits tag=0x57")) return false;
 	return true;

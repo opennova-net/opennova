@@ -563,12 +563,78 @@ int test_frame_update_roundtrip() {
 	return 0;
 }
 
+int test_frame_update_known_null_callback_record_is_header_only() {
+	const EntityClass cls = class_from_tag("bldg");
+	EXPECT(cls != EntityClass::Unknown);
+
+	FrameUpdate in;
+	in.flags2 = 0x02; // env block keeps the fixture compact and body-width fixed.
+	in.env.fog_dist = 0x1111;
+	in.env.fog_accel = 0x2222;
+	in.env.tod_fixed = 0x3333;
+	in.mount_handle = 0xFFFF;
+	in.health = 100;
+
+	FrameUpdateRecord header_only;
+	header_only.handle = 0x2007;
+	header_only.type_id = 0x0465;
+	header_only.cls = cls;
+	in.records.push_back(header_only);
+
+	std::vector<uint8_t> wire = encode_frame_update(in);
+	FrameUpdate out;
+	auto class_of = [](uint16_t t) {
+		return t == 0x0465 ? class_from_tag("bldg") : EntityClass::Unknown;
+	};
+	EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out));
+	EXPECT(out.complete && out.consumed == wire.size());
+	EXPECT(out.records.size() == 1);
+	EXPECT(out.records[0].handle == 0x2007);
+	EXPECT(out.records[0].type_id == 0x0465);
+	EXPECT(out.records[0].cls == cls);
+
+	std::printf("PASS frame_update_known_null_callback_record_is_header_only\n");
+	return 0;
+}
+
+int test_frame_update_unknown_class_still_fails_closed() {
+	FrameUpdate in;
+	in.flags2 = 0x02;
+	in.env.fog_dist = 0x1111;
+	in.env.fog_accel = 0x2222;
+	in.env.tod_fixed = 0x3333;
+	in.mount_handle = 0xFFFF;
+	in.health = 100;
+
+	FrameUpdateRecord unknown;
+	unknown.handle = 0x2008;
+	unknown.type_id = 0x9999;
+	unknown.cls = class_from_tag("zzzz");
+	EXPECT(unknown.cls == EntityClass::Unknown);
+	in.records.push_back(unknown);
+
+	std::vector<uint8_t> wire = encode_frame_update(in);
+	const auto terminator = wire.back();
+	EXPECT(terminator == 0);
+	wire.insert(wire.end() - 1, {0x01, 0x08, 0x20, 0x99, 0x99});
+
+	FrameUpdate out;
+	auto class_of = [](uint16_t) { return EntityClass::Unknown; };
+	EXPECT(!decode_frame_update(wire.data(), wire.size(), class_of, out));
+	EXPECT(!out.complete);
+
+	std::printf("PASS frame_update_unknown_class_still_fails_closed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int rc = 0;
 	rc |= test_compress_fixedpoint_roundtrip();
 	rc |= test_frame_update_roundtrip();
+	rc |= test_frame_update_known_null_callback_record_is_header_only();
+	rc |= test_frame_update_unknown_class_still_fails_closed();
 	rc |= test_roundtrip_all_flags();
 	rc |= test_roundtrip_no_flags_and_length();
 	rc |= test_flag_derivation_is_from_nonzero();

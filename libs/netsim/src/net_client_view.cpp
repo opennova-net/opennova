@@ -60,6 +60,9 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 	for (ClientEntityState &e : state_.entities) e.seen_this_frame = false;
 
 	for (const FrameUpdateRecord &rec : fu.records) {
+		if (rec.cls == EntityClass::NoNetworkCallback) {
+			continue;
+		}
 		ClientEntityState &es = state_.upsert(rec.handle);
 		es.type_id = rec.type_id;
 		es.cls = rec.cls;
@@ -91,7 +94,7 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 			es.yaw_byte = rec.infantry.yaw_byte;
 			break;
 		default:
-			break; // Guided / Unknown never decode into a compact (fail-closed)
+			break; // unresolved/guided records are not compact motion samples
 		}
 		es.x = fu.anchor_x + network_decompress_fixedpoint(cx);
 		es.y = fu.anchor_y + network_decompress_fixedpoint(cy);

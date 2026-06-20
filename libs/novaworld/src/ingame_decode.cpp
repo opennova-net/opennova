@@ -716,7 +716,8 @@ bool decode_guided_field_group(GuidedMode mode, GuidedFieldGroup group,
 
 // §5.10b class dispatch — exact 4-char match (the table is case-sensitive).
 // Direct witnesses: plyr→Player; org0/org1→Infantry; cveh/CHel/cbot/cpln/ctrn→
-// Vehicle; rokt/stng/hlfr/jvln/arty→Guided. Unwitnessed tags default Unknown.
+// Vehicle; rokt/stng/hlfr/jvln/arty→Guided. Known null callbacks map to a
+// zero-body tag==1 header; unwitnessed tags default Unknown.
 EntityClass class_from_tag(const char *tag) {
 	if (!tag || tag[0] == '\0') return EntityClass::Unknown;
 	if (std::strcmp(tag, "plyr") == 0) return EntityClass::Player;
@@ -730,6 +731,21 @@ EntityClass class_from_tag(const char *tag) {
 	    std::strcmp(tag, "hlfr") == 0 || std::strcmp(tag, "jvln") == 0 ||
 	    std::strcmp(tag, "arty") == 0 || std::strcmp(tag, "arti") == 0)
 		return EntityClass::Guided;
+	if (std::strcmp(tag, "null") == 0 || std::strcmp(tag, "brrl") == 0 ||
+	    std::strcmp(tag, "envs") == 0 || std::strcmp(tag, "ewep") == 0 ||
+	    std::strcmp(tag, "ele0") == 0 || std::strcmp(tag, "gnrc") == 0 ||
+	    std::strcmp(tag, "gnrl") == 0 || std::strcmp(tag, "gnl2") == 0 ||
+	    std::strcmp(tag, "flag") == 0 || std::strcmp(tag, "squib") == 0 ||
+	    std::strcmp(tag, "nade") == 0 || std::strcmp(tag, "schl") == 0 ||
+	    std::strcmp(tag, "clym") == 0 || std::strcmp(tag, "vmne") == 0 ||
+	    std::strcmp(tag, "lndm") == 0 || std::strcmp(tag, "bldg") == 0 ||
+	    std::strcmp(tag, "bld2") == 0 || std::strcmp(tag, "cran") == 0 ||
+	    std::strcmp(tag, "door") == 0 || std::strcmp(tag, "target") == 0 ||
+	    std::strcmp(tag, "emit") == 0 || std::strcmp(tag, "towr") == 0 ||
+	    std::strcmp(tag, "tree") == 0 || std::strcmp(tag, "palm") == 0 ||
+	    std::strcmp(tag, "psec") == 0 || std::strcmp(tag, "pwrp") == 0 ||
+	    std::strcmp(tag, "aflr") == 0 || std::strcmp(tag, "gflr") == 0)
+		return EntityClass::NoNetworkCallback;
 	return EntityClass::Unknown;
 }
 
@@ -857,13 +873,17 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 			case EntityClass::Infantry:
 				ok = decode_infantry_compact_record(c.p, avail, rec.infantry, consumed);
 				break;
+			case EntityClass::NoNetworkCallback:
+				// Known item class with ItemDef+0x164 == null: retail consumes only
+				// the tag/handle/type header, then jumps back to the loop head.
+				// [orig: 0x430814..0x43081D]
+				ok = true;
+				consumed = 0;
+				break;
 			default:
-				// Guided (§5.15) or Unknown: not a §5.10b compact (the guided
-				// serializer rejects format 11), so it never legitimately appears
-				// here — guided state replicates via the 0x0C entity-packet path
-				// (sub_op-dispatched, see decode_guided_field_group), not the 0x0A
-				// trailing event loop. Width is unknown, so fail closed (we can't
-				// safely advance the cursor).
+				// Guided (§5.15) or unresolved Unknown: not a fixed §5.10b compact.
+				// Guided treats the subtype as a field-group selector and rejects
+				// the 0x0A compact subtype 11; Unknown has no safe width.
 				return finish(false);
 			}
 			if (!ok) return finish(false);

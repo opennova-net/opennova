@@ -304,8 +304,9 @@ std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &
 	fu.state_word = 0;
 
 	// One compact record per replicated entity, position compressed vs the anchor.
-	// Entities without a known §5.10b class are skipped (guided/unknown have no
-	// 0x0A compact form — decode_frame_update fails closed on them).
+	// Production streaming emits only classes with fixed §5.10b compact bodies.
+	// Guided uses the separate field-group entity-packet codec, known null callbacks
+	// are static/spawn-only, and Unknown has no safe wire width.
 	for (const GameEntitySnapshot &e : entities) {
 		const uint16_t cx = network_compress_fixedpoint(e.x - ax);
 		const uint16_t cy = network_compress_fixedpoint(e.y - ay);
@@ -344,8 +345,11 @@ std::vector<uint8_t> build_tag_0a_world_reference(const PlayerReplicationState &
 			rec.infantry.pos_z_compressed = cz;
 			rec.infantry.yaw_byte = yaw_byte;
 			break;
+		case EntityClass::Guided:
+		case EntityClass::NoNetworkCallback:
+		case EntityClass::Unknown:
 		default:
-			continue; // Guided / Unknown: not representable as a 0x0A compact
+			continue; // no production 0x0A compact body
 		}
 		fu.records.push_back(std::move(rec));
 	}
