@@ -485,6 +485,18 @@ func tick(camera_pos: Vector3) -> void:
 		_mission_audio.tick(camera_pos)
 
 
+# --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
+func has_local_player() -> bool:
+	return _runtime != null and _runtime.has_player()
+
+func local_player_position() -> Vector3:
+	return _runtime.local_player_position() if _runtime != null else Vector3.ZERO
+
+func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float) -> void:
+	if _runtime != null:
+		_runtime.set_player_input(forward, back, left, right, run, look_yaw_deg)
+
+
 # Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects
 # carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id through
 # the co-named .DBF and plays the LWF set). Other kinds are still emitted via mission_effects for
@@ -511,12 +523,19 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# A mission with no AI still ticks (BMS events / WAC); only a promote failure leaves a null sim.
 	# Hand the loaded terrain to the runtime so promoted AI grounds on it (entities hug the terrain),
 	# and the resource root so soldiers resolve their .adm/.bad root-motion clips.
-	_runtime.setup(mission, container, {
+	var opts := {
 		"tick_mode": NovaSimulation.TICK_DIVIDED,
 		"terrain": _terrain_data,
 		"resource_root": _resource_root,
 		"wac_basename": bms_name.get_basename(),
-	})
+	}
+	# NOVA_PLAYER (env launch flag, like NW_REPLAY): run the SP in-process listen server and
+	# spawn the host's own player (ADR 0011/0012, net-re §5.2b/§5.38). Default off -> normal
+	# missions run exactly as before (no listen server, no player).
+	if not OS.get_environment("NOVA_PLAYER").is_empty():
+		opts["listen_server"] = true
+		opts["player"] = true
+	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
 	_runtime.effects_drained.connect(_on_runtime_effects)

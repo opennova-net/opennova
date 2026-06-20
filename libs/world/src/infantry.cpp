@@ -33,6 +33,7 @@
 #include <cmath>
 
 #include "world/ai.h"
+#include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
 
 namespace opennova::world {
 
@@ -51,6 +52,10 @@ constexpr int32_t kTurnStopGate = 536870880;  // > 45 deg -> state 147 (stop)
 constexpr int32_t kTurnWalkGate = 357913920;  // > 30 deg -> state 1 (walk turn)
 // [orig: BAM bearing scale 683565275.5764316 = 2^31/pi (dbl_7C19D8)]
 constexpr double kBamPerRadian = 683565275.5764316;
+// [orig: degrees -> BAM32 = 2^32/360 = 11930464; same const as ai.cpp/promote.cpp.
+// Used only to mirror the local player's engine heading back to the registry Entity's
+// mission yaw — the precise (90 - deg) Q1 reconciliation lives with the present path.]
+constexpr int32_t kBamPerDegree = 11930464;
 
 int32_t abs_bam(int32_t v) { return v < 0 ? -v : v; } // BAM diffs never hit INT_MIN in practice
 
@@ -368,6 +373,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             inf.move_mode = 0;
             inf.target_dist = 0;
         }
+    } else if (inf.is_local_player) {
+        // 4'. Local player: the move order is set from input each frame
+        // (world::apply_player_move_order), NEVER the AI think — which would zero the order
+        // and waypoint-walk. Map the order to an anim every tick (responsive). The player
+        // takes the motor's simulate branch on host (is_authority) and on a client
+        // (entity==local) alike. [orig: Entity_UpdateInfantryAI loc_4B9C3E; net-re §5.38]
+        infantry_select(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 4. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
@@ -402,8 +414,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     {
         int32_t fwd = frame.dx, lat = frame.dy;
         if (inf.anim_state == anim_state::kJumpLoop) fwd = 1024; // [orig: dump 4756]
+        // The local player moves in its 8-way input direction relative to facing: the body
+        // FACES e.heading (the look), but the root delta is rotated by heading + move_offset
+        // so the forward-walk clip carries it forward/strafe/back. [net-re §5.38]
+        int32_t move_heading = e.heading;
+        if (inf.is_local_player) move_heading += inf.move_offset;
         const double rad =
-            static_cast<double>(e.heading) * (3.14159265358979323846 / 2147483648.0);
+            static_cast<double>(move_heading) * (3.14159265358979323846 / 2147483648.0);
         const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
         const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
         const int32_t wx = static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
@@ -448,6 +465,20 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     e.brain.f[AiBrain::kWorkPosY] = e.pos[1];
     e.brain.f[AiBrain::kWorkPosZ] = e.pos[2];
     e.brain.f[AiBrain::kWorkHeading] = e.heading;
+
+    // Two-store reconciliation: the motor advances AiEntity.pos/heading (16.16 / BAM32), but
+    // the S2C 0x0A snapshot reads the registry Entity (snapshot_of). Mirror the local
+    // player's pose back so its motion replicates to its own client view (ADR 0011/0012).
+    if (inf.is_local_player) {
+        if (Entity *ent = world.registry.get(e.handle)) {
+            ent->position.x = static_cast<float>(from_fixed(e.pos[0]));
+            ent->position.y = static_cast<float>(from_fixed(e.pos[1]));
+            ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
+            // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
+            // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
+            ent->yaw = static_cast<int16_t>(90 - e.heading / kBamPerDegree);
+        }
+    }
 
     advance_part_anim(e); // PANM channels integrate regardless of the motor path
 }

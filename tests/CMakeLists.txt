@@ -739,6 +739,25 @@ target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 add_test(NAME infantry COMMAND infantry_test)
 
+# Spawn-state init (Entity_ResetToSpawnState @0x4B9610, net-re §5.2b): the entity+36
+# bit-1 movement-gate clear + Position backup — the field-init half of the host
+# player-spawn machine that the Phase-2 listen-server player spawn reuses.
+add_executable(entity_spawn_test world/entity_spawn_test.cpp)
+target_link_libraries(entity_spawn_test PRIVATE opennova_world)
+target_include_directories(entity_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(entity_spawn_test PRIVATE cxx_std_17)
+add_test(NAME entity_spawn COMMAND entity_spawn_test)
+
+# The host's own-player keystone (net-re §5.2b/§5.38): spawn_player (pool-0 player-infantry
+# 0x14B9 + gate clear), apply_player_move_order (the 8-way Player_PackInputStateToEntity port),
+# and the infantry motor's local-player branch driving + mirroring the pose to the registry
+# Entity that the S2C 0x0A snapshot reads.
+add_executable(player_spawn_test world/player_spawn_test.cpp)
+target_link_libraries(player_spawn_test PRIVATE opennova_world)
+target_include_directories(player_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_spawn_test PRIVATE cxx_std_17)
+add_test(NAME player_spawn COMMAND player_spawn_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).

@@ -39,6 +39,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim.set_tick_mode(int(options.get("tick_mode", NovaSimulation.TICK_DIVIDED)))
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
+	# Phase 2 (the moving player): turn the sim into the SP in-process listen server BEFORE
+	# load (NetSystem registers ahead of WAC, ADR 0011). Gated by the NOVA_PLAYER launch flag,
+	# threaded into options by the host. Default off -> the editor/preview path is unchanged.
+	if options.get("listen_server", false):
+		_sim.enable_listen_server(true)
 	if mission == null or not _sim.load_from_mission_data(mission):
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
@@ -74,10 +79,32 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_index.build(container, mission)
 	_present = MissionPresentPass.new()
 	_present.setup(_sim, _index, options.get("present_options", {}))
+	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
+	# After load (the spawn needs the AI system wired). Spawn near the first placed entity so
+	# the player lands on the terrain; the terrain clamp grounds it. The player then runs the
+	# infantry motor from input (set_player_input) — visible translation needs walk clips.
+	if options.get("player", false):
+		var spawn_pos := Vector3.ZERO
+		if _sim.get_entity_count() > 0:
+			spawn_pos = _sim.get_entity_position(0)
+		if not _sim.spawn_local_player(spawn_pos, 0.0, 1):
+			push_warning("MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)")
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
 	return _sim.get_entity_count()
+
+
+# --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---
+func has_player() -> bool:
+	return _sim != null and _sim.has_local_player()
+
+func local_player_position() -> Vector3:
+	return _sim.get_local_player_position() if _sim != null else Vector3.ZERO
+
+func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float) -> void:
+	if _sim != null:
+		_sim.set_player_input(forward, back, left, right, run, look_yaw_deg)
 
 
 func get_sim() -> NovaSimulation:

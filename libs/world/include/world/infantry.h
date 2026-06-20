@@ -132,6 +132,19 @@ public:
 struct InfantryState {
     bool active = false;        // routed through the infantry motor (org1 class)
 
+    // The local player runs this SAME motor, but sources its move order from input
+    // (world::apply_player_move_order) instead of the 16-tick AI think, and never
+    // interpolates — [orig: Entity_UpdateInfantryAI @0x4b9910 @0x4b9a74 takes the simulate
+    // branch loc_4B9C3E when is_authority || entity==g_local_player_entity; net-re §5.38].
+    bool is_local_player = false;
+    // 8-way move direction relative to the body facing, as a BAM32 offset added to
+    // e.heading only for the player's root-motion rotation (0 = forward, ±90 = strafe,
+    // 180 = back). The body still FACES target_heading (the look). Set from the witnessed
+    // 8-way move_direction_index [orig: Player_PackInputStateToEntity @0x4df450]. The
+    // forward-walk clip serves all 8 directions for now (dedicated strafe/back clips are a
+    // tracked follow-up, net-re §5.38).
+    int32_t move_offset = 0;
+
     // Movement order, refreshed by the 16-tick think.
     // [orig moveMode local in 0x4b9910: 0 stop, 3 move-to-current-node,
     //  4 waypoint-walk (advanced past a node), 1/2/5/7/8/12 combat maneuvers

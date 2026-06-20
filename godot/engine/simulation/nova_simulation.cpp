@@ -7,6 +7,7 @@
 
 #include <mission/bms.h>
 #include <mission/mission_systems.h>
+#include <world/player_spawn.h>
 
 #include "resource_index/nova_resource_root.h"
 #include "terrain/nova_terrain_data.h"
@@ -197,6 +198,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
+	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &NovaSimulation::spawn_local_player);
+	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
+	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "look_yaw_deg"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -309,6 +314,7 @@ void NovaSimulation::build_demo_mission() {
 
 void NovaSimulation::step() {
 	if (!loaded_) return;
+	apply_player_input_pre_tick(); // net-before-logic: player input -> move order
 	world_->run_logic_tick(); // one logic tick: cache + WAC + BMS + AI, then ++logic_tick
 	net_tick(); // serialize + loopback-decode when the listen server is on (no-op otherwise)
 }
@@ -323,6 +329,7 @@ bool NovaSimulation::advance_frame() {
 	//   input -> net(drain C2S) -> run_logic_tick(WAC/BMS/AI) -> net(emit S2C) -> present.
 	// The C2S drain is NetSystem::tick (system index 0, runs at the top of the loop);
 	// the S2C emit + the local client's decode happen in net_tick(), after the logic.
+	apply_player_input_pre_tick(); // input -> the local player's move order, before logic
 	world_->run_logic_tick();
 	net_tick();
 	return true;
@@ -335,6 +342,53 @@ void NovaSimulation::net_tick() {
 	if (!listen_server_ || !net_ || !client_view_ || !loopback_) return;
 	net_->emit_s2c(*world_, compute_net_anchor());
 	client_view_->pump(*loopback_);
+}
+
+void NovaSimulation::apply_player_input_pre_tick() {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
+	AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (p) opennova::world::apply_player_move_order(*p, player_input_);
+}
+
+bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
+	if (!loaded_ || !world_ || !world_->ai) return false;
+	opennova::world::PlayerSpawn spawn;
+	// Godot (x,y,z) -> mission (x, -z, y): the inverse of the present (x,y,z) -> (x, z, -y) remap.
+	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
+	                  static_cast<float>(p_position.y)};
+	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
+	spawn.team = static_cast<uint8_t>(p_team);
+	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
+	if (!h.valid()) return false;
+	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
+	player_input_ = opennova::world::PlayerInput{};
+	player_input_.look_heading =
+	    static_cast<int32_t>((90.0 - static_cast<double>(p_yaw_deg)) * kBamPerDegree);
+	return true;
+}
+
+bool NovaSimulation::has_local_player() const {
+	return world_ && world_->cached.local_player.valid();
+}
+
+void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
+                                      bool p_run, float p_look_yaw_deg) {
+	player_input_.forward = p_forward;
+	player_input_.back = p_back;
+	player_input_.left = p_left;
+	player_input_.right = p_right;
+	player_input_.run = p_run;
+	// Look yaw (mission degrees) -> engine BAM heading, the (90 - yaw) convention used at spawn.
+	player_input_.look_heading =
+	    static_cast<int32_t>((90.0 - static_cast<double>(p_look_yaw_deg)) * kBamPerDegree);
+}
+
+Vector3 NovaSimulation::get_local_player_position() const {
+	if (!world_ || !world_->cached.local_player.valid()) return Vector3();
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (!e) return Vector3();
+	// mission (x,y,z) -> Godot (x, z, -y).
+	return Vector3(e->position.x, e->position.z, -e->position.y);
 }
 
 void NovaSimulation::restart() {

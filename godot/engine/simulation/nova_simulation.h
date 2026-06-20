@@ -20,6 +20,7 @@
 
 #include "wac/nova_wac_program.h"
 #include <world/ai.h>
+#include <world/player_input.h>
 #include <world/world.h>
 
 #include "mission/nova_mission_data.h"
@@ -121,6 +122,12 @@ private:
 	// Post-logic listen-server step: emit S2C -> loopback -> client decode. No-op off.
 	void net_tick();
 
+	// Phase 2 (the moving player): the latest input from the host controller, applied to the
+	// local player's AiEntity at the TOP of each frame (net-before-logic, ADR 0009). The
+	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
+	opennova::world::PlayerInput player_input_{};
+	void apply_player_input_pre_tick();
+
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive
 	// a reload (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no grounding.
@@ -172,6 +179,22 @@ public:
 	// direct AI-pool present (the editor default).
 	void enable_listen_server(bool p_enable);
 	bool is_listen_server() const { return listen_server_; }
+
+	// --- the local player (ADR 0012; net-re §5.2b/§5.38) -------------------
+	// Spawn the host's own player as an authoritative pool-0 entity at a Godot-space position
+	// (yaw in mission degrees). Call AFTER a mission is loaded (the spawn needs the AI system
+	// wired). Returns false if no mission is loaded or pool 0 is full. The player then runs
+	// the infantry motor from input (set_player_input), not AI think.
+	bool spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team);
+	// True once a local player has been spawned (World::cached.local_player valid).
+	bool has_local_player() const;
+	// Feed one frame of player input: the move keys + look yaw (mission degrees). Applied to
+	// the player's infantry move order at the top of the next frame.
+	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
+	                      float p_look_yaw_deg);
+	// The local player's authoritative position in Godot world space (for the follow camera);
+	// Vector3() when no player is spawned.
+	Vector3 get_local_player_position() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

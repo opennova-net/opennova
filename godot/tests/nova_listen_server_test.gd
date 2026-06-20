@@ -57,6 +57,50 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	sim.free()
 
 
+func test_listen_server_spawns_and_replicates_local_player() -> void:
+	# Phase 2 (the moving player, net-re §5.2b/§5.38): spawn_local_player makes the host's own
+	# player an authoritative pool-0 entity that replicates through the wire to its own client
+	# view like any other entity, and set_player_input feeds its infantry move order. (Headless
+	# has no anim clips, so the soldier holds — motion comes from clips, as in the original;
+	# clip-driven forward motion is covered by the C++ player_spawn_test.)
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)  # a standing organic for company
+
+	var sim := NovaSimulation.new()
+	sim.enable_listen_server(true)
+	assert_true(sim.load_from_mission_data(md), "loaded with the net seam")
+	assert_false(sim.has_local_player(), "no local player before spawn")
+
+	var spawn_pos := Vector3(5, 0, 7)
+	assert_true(sim.spawn_local_player(spawn_pos, 0.0, 1), "player spawned into pool 0")
+	assert_true(sim.has_local_player(), "local player now present")
+	assert_lt(sim.get_local_player_position().distance_to(spawn_pos), 0.01,
+		"player at the requested spawn position (Godot->mission->Godot round-trip)")
+
+	# Drive forward for several frames (exercises input -> pre-tick hook -> motor -> present).
+	sim.set_player_input(true, false, false, false, false, 0.0)
+	for _i in range(8):
+		sim.advance_frame()
+
+	# The player replicates through the wire as one more present record, keyed by its net_id.
+	var stride: int = sim.get_present_stride()
+	var snap: PackedFloat32Array = sim.get_present_snapshot()
+	var records: int = snap.size() / stride
+	var found_player := false
+	for rec in range(records):
+		var base := rec * stride
+		if int(snap[base + NovaSimulation.PF_NET_ID]) == 0xFFF0:
+			found_player = true
+			assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "player is alive")
+			# The player has no BMS placement, so it carries no (kind,index) origin (PF_KIND 0)
+			# — unlike placed mission nodes, its avatar is host-managed by net_id.
+			assert_eq(int(snap[base + NovaSimulation.PF_KIND]), 0,
+				"player carries no BMS (kind,index) origin")
+	assert_true(found_player, "the local player replicated into the client-decoded present")
+	sim.free()
+
+
 func test_listen_server_off_uses_ai_pool_present() -> void:
 	# Default (no listen server): get_present_snapshot() is the direct AI-pool path, one
 	# record per sim entity — unchanged from before the net seam.

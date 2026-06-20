@@ -17,6 +17,11 @@ const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const CHANGE_DIR_KEY := KEY_F9
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
+# Phase 2 (the moving player, NOVA_PLAYER): the follow-camera offset (Godot space) and the
+# tank-turn rate for A/D. W/S walk the player along its facing; the FlyCamera's free-look
+# stays on right-mouse, so plain WASD is free for the player.
+const PLAYER_CAM_OFFSET := Vector3(0, 12, 18)
+const PLAYER_TURN_DEG_PER_SEC := 120.0
 
 enum State { MENU, WORLD, PAUSED }
 
@@ -31,6 +36,7 @@ var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
+var _player_look_yaw := 0.0  # the local player's facing (mission deg), turned by A/D
 
 
 func _ready() -> void:
@@ -303,6 +309,28 @@ func _set_hud_visible(v: bool) -> void:
 # world finishes loading. Gating on "loaded, not paused" rather than State.WORLD
 # also lets a host that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _state != State.PAUSED and _world.is_loaded():
+		# Phase 2 (NOVA_PLAYER): drive the local player and follow it with the camera. The
+		# input is set BEFORE tick() so the sim applies it net-before-logic this frame.
+		var has_player: bool = _world.has_local_player()
+		if has_player:
+			_drive_local_player(delta)
 		_world.tick(_camera.global_position)
+		if has_player:
+			var pp: Vector3 = _world.local_player_position()
+			_camera.global_position = pp + PLAYER_CAM_OFFSET
+			_camera.look_at(pp, Vector3.UP)
+
+
+# Tank-style WASD control of the local player: W/S move along the facing, A/D turn it. The
+# 8-way strafe (left/right) is left for the mouse-look follow-up (net-re §5.38).
+func _drive_local_player(delta: float) -> void:
+	if Input.is_key_pressed(KEY_A):
+		_player_look_yaw += PLAYER_TURN_DEG_PER_SEC * delta
+	if Input.is_key_pressed(KEY_D):
+		_player_look_yaw -= PLAYER_TURN_DEG_PER_SEC * delta
+	var fwd: bool = Input.is_key_pressed(KEY_W)
+	var back: bool = Input.is_key_pressed(KEY_S)
+	var run: bool = Input.is_key_pressed(KEY_SHIFT)
+	_world.set_local_player_input(fwd, back, false, false, run, _player_look_yaw)

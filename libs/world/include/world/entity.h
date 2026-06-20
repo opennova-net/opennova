@@ -85,6 +85,15 @@ struct Entity {
     int16_t pitch = 0;
     int16_t roll = 0;
 
+    // Runtime entity flags — the GamePlayerEntity `Flags` at entity+36. Bit 1 is the
+    // movement gate cleared at spawn and checked before the C2S 0x0C input uplink
+    // [orig: Entity_ResetToSpawnState @0x4B9610 / Player_BuildTag0CInputBody @0x42A550;
+    // docs/net/novaworld-net-re.md §5.2b/§5.6]. Distinct from ai_flags (BMS attributes).
+    uint32_t flags = 0;
+    // Spawn-point backup of position, written by world::entity_reset_to_spawn_state
+    // [orig: Entity_ResetToSpawnState backs Position into pad9[124/128/132]].
+    Vec3 spawn_position;
+
     uint8_t team = 0;
     uint8_t group_id = 0;     // named-group membership
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
