@@ -251,6 +251,17 @@ Host-side spawn flow (R1, 2026-06-16; net-re §5.2a):
 | `Server_SendInitialGameStateToPlayer` | `0x51bba0` | **server-side source of the S2C loading sequence** (0x2C/08/2A/1C/0B/66/76/11 + 0x10/0D/0C/20/45/7E/1A) → game-state 9 | decompile; §5.2a (P6 emitter spec) | confirm-only |
 | `NapiClient_WaitForGameStart` | `0x42cc10` | shared host+client loading-wait loop; pumps in-process until spawn gate `dword_24C1928` set | decompile; §5.2/§5.2a | confirm-only |
 
+Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Entity_UpdateInfantryAI` | `0x4b9910` | infantry motor; branch @0x4b9a74 jumps to `loc_4B9C3E` (SIMULATE) when `is_authority` OR `entity==g_local_player_entity` — so the local player ALWAYS simulates; fall-through @0x4b9a8c = network interpolation toward smooth-target +0x234 (REMOTE entities on a client only) | disasm; §5.38 (paired to `AiSystem::tick_infantry`, world-wac-ai-re) | confirm-only |
+| `Input_ProcessMouseAxisBindings` | `0x499680` | LOOK: mouse deltas × sensitivity (`dword_24D207C<<11`, 16.16) → `Input_TryTriggerMouseAxisBinding(.., entity, dX, dY)` → Yaw(+0x10)/Pitch(+0x14) | disasm; §5.38 | confirm-only |
+| `Player_PackInputStateToEntity` | `0x4df450` | MOVE: `g_inputFlags` → 8-way move index → `entity->pad7[12]` (= entity+0x12C): index, +8 is_moving, fire/lean/scope/grenade bits; analog → pad7[16..19] | disasm; §5.38 | confirm-only |
+| `Input_ProcessPlayerFrame` | `0x49d4c0` | per-frame input binding dispatch (keyboard/mouse-axis/toggle/analog); calls `Input_ProcessMouseAxisBindings` | disasm; §5.38 | confirm-only |
+| `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) | disasm; §5.38 | confirm-only |
+| `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

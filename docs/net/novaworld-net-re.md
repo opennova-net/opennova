@@ -2323,6 +2323,77 @@ loaded-tile count) and `dword_319F7A4 → g_TerrainTileArray` (the 12-B entry ar
 + 16`); `NapiNPClientMsg_0x045` / `serialize_terrain_tiles` / `PolyTrn_LoadTileData` carry clarifying
 comments noting the §5.37 role + the "not empty payload" correction.
 
+### 5.38 Local-player input→pose locomotion — the player simulates, never interpolates (Phase 2, 2026-06-20)
+
+Witnessed to drive the SP-as-listen-server "moving player" (libs/netsim Phase 2). All anchored
+(exact disasm read this session). **Corrects a planning premise** that had the motor's
+simulate-vs-interpolate branch inverted — the premise was never landed in this doc, and the
+smooth-target was already documented as the §5.10 *receive* side, so §5.38 only adds the
+local-player side and the branch direction.
+
+**The motor's simulate-vs-interpolate gate `[orig: Entity_UpdateInfantryAI @ 0x4b9910 @ 0x4b9a74]`.**
+Per entity the motor branches (`ebp == 0` here):
+```
+cmp is_authority, 0     ; jnz loc_4B9C3E          ; jump if IS authority
+cmp entity, g_local_player_entity ; jz loc_4B9C3E ; jump if entity IS the local player
+; fall-through (0x4b9a8c) reached only when (!is_authority AND entity != local)
+```
+- **`loc_4B9C3E` = authoritative / local-player SIMULATION.** Taken when
+  `is_authority || entity == g_local_player_entity`. Runs the anim-driven ground locomotion that
+  integrates the live `Position` (entity+4/+8/+0xC): heading→velocity (speed scale `0x5800`),
+  restriction/avoidance probes (`[orig: sub_4142C0 @ 0x4142C0]`), the anim flag table
+  `dword_8139E8` gating velocity application. This is the SAME mover the AI uses (OpenNova
+  `AiSystem::tick_infantry`, `libs/world/src/infantry.cpp`, verdict MATCHING) — the only
+  difference is the move-order source.
+- **Fall-through (0x4b9a8c) = network INTERPOLATION (remote entities on a client only).** Reads
+  the smooth-target entity+0x234/+0x238/+0x23C minus the saved live pose (+0x80/+0x84/+0x88),
+  computes a 3D distance → step count 2..16 (thresholds
+  `0x2000/0x2AAA/0x4000/0x5555/0x8000/0x20000`) at +0x27E, applies one per-step delta to the live
+  pose, progress counter at +0x27C. The smooth-target is staged by the C2S 0x0C read-apply
+  `[orig: dispatch_entity_packet_callback @ 0x4D6A80]` (ctx_flags=4, §5.10) — the RECEIVE side of a
+  remote player's reported pose.
+
+**Verdict — the local player NEVER interpolates.** On the host it takes the branch via
+`is_authority`; on a client via `entity == g_local_player_entity`. Either way it locomotes
+directly through the motor from its own input. The host does NOT stage the smooth-target for its
+own local player; interpolation toward +0x234 is exclusively the receive path for *remote* peers
+(a Phase-4 MP concern, not Phase-2 SP). This reconciles D-NET-68 (the host read-applies a *remote*
+player's reported pose and never re-simulates it) with the fact that every machine simulates *its
+own* player locally.
+
+**Input → pose front end** (client-frame order from `[orig: Game_ProcessMainFrame @ 0x5263f0]`:
+`Input_ProcessFrame` → `Client_ProcessNetworkFrame` [pack input + build C2S 0x0C] →
+`Server_TickUpdate` → `Entity_UpdateAllEntities` [the motor]):
+
+| Stage | Function | What it does |
+|---|---|---|
+| Look | `[orig: Input_ProcessMouseAxisBindings @ 0x499680]` (via `Input_ProcessPlayerFrame @ 0x49d4c0`) | mouse deltas `dword_3342E54`(X)/`dword_3342E58`(Y) (Y negated unless invert-Y `dword_24D2078`) × sensitivity `dword_24D207C << 11` (reduced by weapon zoom), fixed-point `(delta*sens + 0x8000) >> 16`, dispatched via `Input_TryTriggerMouseAxisBinding(bindIdx, entity, dX, dY)` to the entity's look-axis bindings → `Yaw` (entity+0x10) / `Pitch` (entity+0x14) |
+| Move | `[orig: Player_PackInputStateToEntity @ 0x4df450]` (via `Client_ProcessNetworkFrame @ 0x42c180`, call @ 0x42c3e9, every frame) | `g_inputFlags` (`dword_B3B728`) → 4 direction bits (F/B/L/R) → 8-way `move_direction_index` (0..7) via switch → DWORD at `entity->pad7[12]` (= **entity+0x12C**): low = move index, `\|0x8` = is_moving, plus fire `0x10` / scope `0x100,0x200` / lean `0x1000,0x2000` / grenade `0x4000,0x8000`; analog axes → pad7[16..19] (entity+0x130..0x133) |
+| Simulate | `Entity_UpdateInfantryAI` `loc_4B9C3E` (above) | consumes the move order at entity+0x12C — the player's analog of the AI think order — plus the look-set `Yaw`, producing the new live pose |
+| Serialize | `[orig: Player_BuildTag0CInputBody @ 0x42A550]` | gate `entity+286 (healthMax) != 0 && (entity+36 & 2) == 0`; → `Pool_SerializeEntityViaVTable` → `NetPacket_SerializePlayerState @ 0x4C09C0` writes the live pose into C2S 0x0C |
+
+The 8-way move map (`direction_bits` F/B/L/R combo → index): F→0, F+L→1, L→2, B+L→3, B→4, B+R→5,
+R→6, F+R→7; opposing pairs (F+B, L+R, all-four) → not moving.
+
+**Phase-2 implication.** The SP listen-server player is a pool-0 infantry entity run through the
+already-ported motor (`AiSystem::tick_infantry`) with its move order sourced from input
+(entity+0x12C) instead of `infantry_think`. **No smooth-target staging and no interpolation branch
+are needed for SP** — those belong to the Phase-4 remote-peer receive path. The C2S 0x0C is still
+built and looped back for the replicate-to-own-client-view keystone (ADR 0011), but the local
+player's *movement* is the motor simulation, not a self-read-apply.
+
+**Follow-ups (unwitnessed):**
+- The exact `Yaw`/`Pitch` write inside `Input_TryTriggerMouseAxisBinding` (the per-binding apply)
+  — only the sensitivity scaling (`dword_24D207C << 11`, 16.16) and the dispatch are witnessed.
+- The precise `move_direction_index` (0..7) → move-mode → anim-state mapping inside the motor
+  (largely covered by the existing `infantry.cpp` port; grill if the player's strafe/back speed
+  scales need pinning).
+
+**IDB changes this session (comments only; no renames — all functions already curated):**
+`set_comments` at 0x4b9a74 (simulate-vs-interpolate gate; corrects the inverted note), 0x4b9a80
+(gate 2nd half), 0x4b9a8c (remote-interpolation detail), 0x4df68f (move-order write to
+entity+0x12C), 0x499680 (mouse look→Yaw/Pitch front end); `idb_save`.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the

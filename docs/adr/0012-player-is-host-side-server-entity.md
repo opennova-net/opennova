@@ -51,3 +51,35 @@ bit 1 clear. The host receives that uplink and applies it to the owned entity au
   model, never a model rewrite — the guard ADR 0011 §4 mandates (the loopback identity test) covers it.
 - `World::cached.local_player` is the existing hook for the player handle; the present pass resolves
   the player avatar through the same snapshot path as every other entity.
+
+## Amendment (2026-06-20, R1 — net-re §5.38)
+
+R0 for the Phase-2 moving player decompiled the motor branch that handles the local player
+(`[orig: Entity_UpdateInfantryAI @ 0x4b9910 @ 0x4b9a74]`) and **corrects the input model in Decision 2
+and the receive-side half of Decision 4.** The branch jumps to the simulation path
+(`loc_4B9C3E`) when **`is_authority || entity == g_local_player_entity`**; the smooth-target
+(`entity+0x234`) interpolation is the *fall-through*, reached only for a **remote entity on a client**
+(`!is_authority && entity != local`). So:
+
+- **Decision 1 stands** — the player is an authoritative pool-0 `GamePlayerEntity` (§5.2b spawn).
+- **Decision 3 stands** — the FlyCamera is demoted; the render camera follows the player entity.
+- **Decision 2 is corrected.** Input is **not** a wire-shaped pose-intent. Every machine runs the
+  infantry motor (`AiSystem::tick_infantry`) for *its own* player from **raw input** — the 8-way
+  move order + flags that `[orig: Player_PackInputStateToEntity @ 0x4df450]` writes to
+  `entity->pad7[12]` (= `entity+0x12C`), plus look (`[orig: Input_ProcessMouseAxisBindings @ 0x499680]`
+  → Yaw/Pitch) — exactly as an NPC walks from its think order. The C2S `0x0C` pose (built by
+  `Player_BuildTag0CInputBody @ 0x42A550`) is an **output uplink** a *non-authority* client layers on
+  top to report its computed pose; it is not the input and the authority host never read-applies its
+  own. The shared "one path" is **motor-from-raw-input**, with the `0x0C` uplink + host read-apply +
+  smooth-target interpolation as the client↔host layer on top.
+- **Decision 4 is corrected (receive side).** The `state flags & 2` → `Game_InitNewRound` /
+  `Entity_ResetToSpawnState` spawn signal and the smooth-target staging are the **remote-player
+  receive path** (`dispatch_entity_packet_callback @ 0x4D6A80` read-apply → interpolation). The host's
+  own player spawn-state is the **in-process** `Entity_ResetToSpawnState` (§5.2b step 5), and the host
+  clears its own spawn-success gate in-process.
+
+**Phasing consequence.** Phase 2 (SP) = spawn the pool-0 player + drive the existing motor from input +
+follow camera; the player's pose reaches the client-view through the **existing Phase-1 S2C `0x0A`
+loopback** (the ADR-0011 keystone), with no smooth-target, interpolation, or C2S `0x0C` in SP. The
+`PlayerIntent` struct, the C2S `0x0C` encoder + drain, `apply_player_intent`, and the interpolation
+branch are **Phase 4 (MP)**, where remote peers make them real.
