@@ -36,7 +36,6 @@
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
 #include <novaworld/wire_capture.h>
-#include <novaworld/replay_timeline.h>
 #include <scr/scr.h>
 
 #include "pcap_reader.h"
@@ -1164,226 +1163,16 @@ int run_server_log(const char *path) {
 	return clean ? 0 : 2;
 }
 
-// ---- --replay-json export mode ---------------------------------------------
-// Build the replay timeline (libs/novaworld) from the capture and emit a single
-// self-contained JSON document the standalone 2D viewer (tools/net/
-// replay_viewer.html) loads directly. Positions are world meters; heading is
-// degrees. The viewer anchors uplink tracks to each entity's spawn for display.
-
-std::string json_escape(const std::string &s) {
-	std::string o;
-	for (char c : s) {
-		switch (c) {
-		case '"': o += "\\\""; break;
-		case '\\': o += "\\\\"; break;
-		case '\n': o += "\\n"; break;
-		case '\r': o += "\\r"; break;
-		case '\t': o += "\\t"; break;
-		default:
-			if (static_cast<unsigned char>(c) < 0x20) {
-				char b[8];
-				std::snprintf(b, sizeof(b), "\\u%04x", static_cast<unsigned char>(c));
-				o += b;
-			} else {
-				o += c;
-			}
-		}
-	}
-	return o;
-}
-
-// Coarse display category: prefer the §5.10b entity class (when items.def was
-// loaded), else fall back to the pool taxonomy. Drives the viewer's shape/legend.
-const char *category_for(uint16_t type_id, uint8_t pool) {
-	auto it = g_item_class.find(type_id);
-	if (it != g_item_class.end()) {
-		switch (it->second) {
-		case EntityClass::Player:   return "player";
-		case EntityClass::Infantry: return "infantry";
-		case EntityClass::Vehicle:  return "vehicle";
-		case EntityClass::Guided:   return "guided";
-		default: break;
-		}
-	}
-	switch (pool) {
-	case 0: return "organic";
-	case 1: return "item";
-	case 2: return "building";
-	case 3: return "marker";
-	default: return "unknown";
-	}
-}
-
-std::string basename_of(const std::string &p) {
-	const size_t s = p.find_last_of("/\\");
-	return s == std::string::npos ? p : p.substr(s + 1);
-}
-
-void write_sample_json(std::ostream &o, const ReplaySample &s, bool with_src) {
-	o << "{\"f\":" << s.frame_index << ",\"x\":" << fp16(s.x) << ",\"y\":"
-	  << fp16(s.y) << ",\"z\":" << fp16(s.z) << ",\"h\":";
-	if (s.has_heading) o << s.heading_deg; else o << "null";
-	if (with_src) {
-		const char *src =
-		    s.source == ReplaySampleSource::ClientUplink ? "uplink"
-		    : s.source == ReplaySampleSource::FrameUpdate ? "frameupdate"
-		                                                  : "spawn";
-		o << ",\"src\":\"" << src << "\"";
-		if (s.dead) o << ",\"dead\":1";
-		if (s.respawn) o << ",\"respawn\":1";
-		if (s.mounted) o << ",\"mounted\":1";
-	}
-	o << "}";
-}
-
-int run_replay_json(const std::vector<CaptureDatagram> &caps,
-                    const std::string &capture_path, const char *out_path) {
-	// Resolve a wire type_id to its §5.10b compact class so the S2C 0x0A
-	// per-frame motion can be walked (needs items.def — pass --items).
-	auto class_of = [](uint16_t t) -> EntityClass {
-		auto it = g_item_class.find(t);
-		return it == g_item_class.end() ? EntityClass::Unknown : it->second;
-	};
-	const std::vector<ParticipantView> views = build_per_participant_world(caps, class_of);
-	const ReplayTimeline empty;
-	// meta / items / env / events are shared (the entity SET + wire event stream
-	// are identical across views; only per-entity tracks differ per participant).
-	const ReplayTimeline &shared = views.empty() ? empty : views[0].timeline;
-
-	std::ofstream o(out_path);
-	if (!o) {
-		std::fprintf(stderr, "FAILED to open %s for write\n", out_path);
-		return 1;
-	}
-	o.setf(std::ios::fixed);
-	o.precision(3);
-	o << "{\n  \"meta\": {\"capture\":\"" << json_escape(basename_of(capture_path))
-	  << "\",\"first_frame\":" << shared.first_frame << ",\"last_frame\":"
-	  << shared.last_frame << ",\"entity_count\":" << shared.entities.size()
-	  << ",\"participants\":" << views.size()
-	  << ",\"note\":\"positions=world meters; heading=degrees; each participant's "
-	     "own-player uplink track is reconciled to its spawn world frame in libs\"},\n";
-
-	// type_id -> display name (shared; populated only when --items gave an items.def).
-	{
-		std::set<uint16_t> types;
-		for (const auto &en : shared.entities) types.insert(en.type_id);
-		o << "  \"items\": {";
-		bool first = true;
-		for (uint16_t t : types) {
-			if (!first) o << ",";
-			first = false;
-			auto it = g_item_names.find(int(t));
-			o << "\"" << t << "\":\""
-			  << (it != g_item_names.end() ? json_escape(it->second) : "") << "\"";
-		}
-		o << "},\n";
-	}
-
-	// Environment timeline (0x0A env snapshots) — shared across participants.
-	o << "  \"env\": [";
-	for (size_t i = 0; i < shared.environment.size(); ++i) {
-		const ReplayEnvSample &en = shared.environment[i];
-		if (i) o << ",";
-		o << "{\"f\":" << en.frame_index << ",\"fog\":" << en.fog_dist
-		  << ",\"tod\":" << en.tod_fixed << ",\"quake\":" << unsigned(en.quake_ticks)
-		  << ",\"cloud\":" << unsigned(en.cloud_scroll)
-		  << ",\"overcast\":" << unsigned(en.overcast) << "}";
-	}
-	o << "],\n";
-
-	// Event stream (shared) — fire / hit / kill / game-event / capture-zone.
-	auto kind_name = [](ReplayEventKind k) -> const char * {
-		switch (k) {
-		case ReplayEventKind::Fire:        return "fire";
-		case ReplayEventKind::Hit:         return "hit";
-		case ReplayEventKind::Kill:        return "kill";
-		case ReplayEventKind::GameEvent:   return "gameevent";
-		case ReplayEventKind::CaptureZone: return "zone";
-		}
-		return "?";
-	};
-	o << "  \"events\": [\n";
-	for (size_t i = 0; i < shared.events.size(); ++i) {
-		const ReplayEvent &en = shared.events[i];
-		o << "    {\"f\":" << en.frame_index << ",\"kind\":\"" << kind_name(en.kind) << "\"";
-		if (en.has_pos) o << ",\"x\":" << fp16(en.x) << ",\"y\":" << fp16(en.y) << ",\"z\":" << fp16(en.z);
-		if (en.has_dir) o << ",\"dx\":" << fp16(en.dir_x) << ",\"dy\":" << fp16(en.dir_y);
-		if (en.source != 0xFFFF) o << ",\"src\":" << en.source;
-		if (en.target != 0xFFFF) o << ",\"tgt\":" << en.target;
-		if (en.aux != 0xFFFF)    o << ",\"aux\":" << en.aux;
-		if (en.adm_index)        o << ",\"adm\":" << unsigned(en.adm_index);
-		if (en.event_type)       o << ",\"etype\":" << unsigned(en.event_type);
-		if (en.sound)            o << ",\"snd\":1";
-		if (!en.label.empty())   o << ",\"label\":\"" << json_escape(en.label) << "\"";
-		o << "}";
-		if (i + 1 < shared.events.size()) o << ",";
-		o << "\n";
-	}
-	o << "  ],\n";
-
-	// Per-participant entities — each participant's reconstructed world.
-	auto write_entity = [&](const ReplayEntity &en) {
-		char tagbuf[8];
-		std::snprintf(tagbuf, sizeof(tagbuf), "0x%02x", static_cast<unsigned char>(en.spawn_tag));
-		o << "      {\"handle\":" << en.handle << ",\"pool\":" << unsigned(en.pool)
-		  << ",\"type_id\":" << en.type_id << ",\"name\":\"" << json_escape(en.name)
-		  << "\",\"category\":\"" << category_for(en.type_id, en.pool) << "\",\"team\":";
-		if (en.team_known) o << en.team; else o << "null";
-		o << ",\"net_id\":" << en.net_id << ",\"spawn_tag\":\"" << tagbuf << "\",\"spawn\":";
-		if (en.has_spawn) write_sample_json(o, en.spawn, false); else o << "null";
-		o << ",\"track\":[";
-		for (size_t j = 0; j < en.track.size(); ++j) {
-			if (j) o << ",";
-			write_sample_json(o, en.track[j], true);
-		}
-		o << "]}";
-	};
-	o << "  \"participants\": [\n";
-	for (size_t vi = 0; vi < views.size(); ++vi) {
-		const ParticipantView &pv = views[vi];
-		o << "    {\"id\":" << pv.who.id << ",\"is_host\":" << (pv.who.is_host ? "true" : "false")
-		  << ",\"session\":" << pv.who.session << ",\"name\":\"" << json_escape(pv.who.name)
-		  << "\",\"entities\":[\n";
-		for (size_t i = 0; i < pv.timeline.entities.size(); ++i) {
-			write_entity(pv.timeline.entities[i]);
-			if (i + 1 < pv.timeline.entities.size()) o << ",";
-			o << "\n";
-		}
-		o << "    ]}";
-		if (vi + 1 < views.size()) o << ",";
-		o << "\n";
-	}
-	o << "  ]\n}\n";
-
-	size_t n_hit = 0, n_fire = 0, n_kill = 0;
-	for (const auto &en : shared.events) {
-		if (en.kind == ReplayEventKind::Hit) n_hit++;
-		else if (en.kind == ReplayEventKind::Fire) n_fire++;
-		else if (en.kind == ReplayEventKind::Kill) n_kill++;
-	}
-	std::fprintf(stderr,
-	             "wrote %zu participants x %zu entities, %zu events "
-	             "(%zu fire / %zu hit / %zu kill), %zu env (frames %d..%d) to %s\n",
-	             views.size(), shared.entities.size(), shared.events.size(),
-	             n_fire, n_hit, n_kill, shared.environment.size(),
-	             shared.first_frame, shared.last_frame, out_path);
-	return 0;
-}
-
 } // namespace
 
 int main(int argc, char *argv[]) {
 	const char *path = nullptr;
 	const char *items_path = nullptr;
-	const char *replay_json_out = nullptr;
 	std::set<int> tag_filter;
 	for (int i = 1; i < argc; ++i) {
 		const char *a = argv[i];
 		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
 			items_path = argv[++i];
-		} else if (std::strcmp(a, "--replay-json") == 0 && i + 1 < argc) {
-			replay_json_out = argv[++i];
 		} else if (a[0] == '0' && (a[1] == 'x' || a[1] == 'X')) {
 			tag_filter.insert(int(std::strtol(a, nullptr, 16)));
 		} else if (!path) {
@@ -1401,9 +1190,7 @@ int main(int argc, char *argv[]) {
 		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n"
 		             "       --items / NW_PP_ITEMS gives a JO items.def "
 		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
-		             "       so type_ids in 0x0D/0x20 records show as names\n"
-		             "       --replay-json <out> writes a replay-timeline JSON "
-		             "for tools/net/replay_viewer.html instead of printing\n");
+		             "       so type_ids in 0x0D/0x20 records show as names\n");
 		return 1;
 	}
 	if (is_sph_path(path)) return run_server_log(path);
@@ -1459,10 +1246,6 @@ int main(int argc, char *argv[]) {
 	std::vector<CaptureDatagram> caps;
 	caps.reserve(dgrams.size());
 	for (auto &d : dgrams) caps.push_back({d.frame, d.srcport, d.dstport, std::move(d.bytes)});
-
-	// --replay-json: build the timeline and emit the viewer document, then exit.
-	if (replay_json_out && *replay_json_out)
-		return run_replay_json(caps, path, replay_json_out);
 
 	for (const auto &m : decode_capture_to_messages(caps)) {
 		if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;

@@ -27,6 +27,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
+const NetEventView := preload("res://engine/world/net_event_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 
 signal world_loaded()
@@ -62,6 +63,7 @@ var _placer  # MissionObjectPlacer (kept so mission audio reuses its item databa
 var _mission_audio: NovaMissionAudio
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
+var _net_event_view # NetEventView: draws the decoded event stream over the world
 # A host-injected resource root (the editor's mounted VFS). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
@@ -213,6 +215,13 @@ func load_net_session(opts: Dictionary) -> int:
 	_net_view.setup(_net_client, resolver, container, _env, opts.get("camera", null))
 	add_child(_net_view)
 
+	# Draw the decoded event stream (fire / hits / kills / capture zones) over the
+	# rendered world — the 3D replacement for the standalone viewer's 2D markers.
+	_net_event_view = NetEventView.new()
+	_net_event_view.name = "NetEventView"
+	_net_event_view.setup(_net_client)
+	add_child(_net_event_view)
+
 	_net_client.connect_to_replay()
 	_loaded = true
 	world_loaded.emit()
@@ -327,6 +336,12 @@ func get_loaded_mission() -> NovaMissionData:
 	return _loaded_mission
 
 
+## The active net spectator client (NovaNetClient), or null outside a net session.
+## Hosts use it to drive a kill-feed / event HUD off the same decoded stream.
+func get_net_client():
+	return _net_client
+
+
 func get_sim() -> NovaSimulation:
 	return _runtime.get_sim() if _runtime != null else null
 
@@ -349,6 +364,8 @@ func unload() -> void:
 	if container != null:
 		container.queue_free()
 	# Net session teardown (no-ops for a normal mission).
+	if _net_event_view != null:
+		_net_event_view.queue_free()
 	if _net_view != null:
 		_net_view.queue_free()
 	if _net_client != null:
@@ -357,6 +374,7 @@ func unload() -> void:
 	var net_container := get_node_or_null(NodePath(NET_CONTAINER_NAME))
 	if net_container != null:
 		net_container.queue_free()
+	_net_event_view = null
 	_net_view = null
 	_net_client = null
 	if _mission_audio != null:

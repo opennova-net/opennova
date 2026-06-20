@@ -9,6 +9,7 @@ extends Node3D
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
+const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -29,6 +30,7 @@ var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
+var _net_killfeed   # net spectator kill feed, built while in a net session
 
 
 func _ready() -> void:
@@ -231,6 +233,15 @@ func _enter_net_session() -> void:
 	})
 	if err != OK:
 		push_warning("MainGame: net session failed to start (%d)" % err)
+		return
+	# Kill feed over the spectator: reads the same decoded event stream NetEventView
+	# draws in 3D, posting kill / objective lines to a top-right HUD feed.
+	if _net_killfeed == null:
+		_net_killfeed = NetKillFeedScript.new()
+		_net_killfeed.name = "NetKillFeed"
+		var host: Node = _hud if _hud != null else self
+		host.add_child(_net_killfeed)
+	_net_killfeed.set_client(_world.get_net_client())
 
 
 func _on_world_loaded() -> void:
@@ -266,6 +277,9 @@ func _on_resume() -> void:
 
 func _on_return_to_menu() -> void:
 	_world.unload()
+	if _net_killfeed != null:
+		_net_killfeed.queue_free()
+		_net_killfeed = null
 	if _root != null:
 		_enter_menu(_root.get_root_dir())
 

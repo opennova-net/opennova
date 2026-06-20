@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <algorithm>
@@ -17,6 +18,8 @@ using namespace godot;
 using opennova::CaptureDatagram;
 using opennova::EntityClass;
 using opennova::ReplayEntity;
+using opennova::ReplayEnvSample;
+using opennova::ReplayEvent;
 using opennova::ReplaySample;
 
 namespace {
@@ -60,6 +63,8 @@ void NovaNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_latest_frame"), &NovaNetClient::get_latest_frame);
 	ClassDB::bind_method(D_METHOD("get_frame_range"), &NovaNetClient::get_frame_range);
 	ClassDB::bind_method(D_METHOD("sample_at", "handle", "frame_f"), &NovaNetClient::sample_at);
+	ClassDB::bind_method(D_METHOD("get_events"), &NovaNetClient::get_events);
+	ClassDB::bind_method(D_METHOD("env_at", "frame_f"), &NovaNetClient::env_at);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "replay_host"), "set_replay_host", "get_replay_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "replay_port"), "set_replay_port", "get_replay_port");
@@ -287,5 +292,51 @@ Dictionary NovaNetClient::sample_at(int handle, double frame_f) const {
 	out["alive"] = !a->dead;
 	out["dead"] = a->dead;
 	out["mounted"] = a->mounted;
+	return out;
+}
+
+Array NovaNetClient::get_events() const {
+	Array out;
+	for (const ReplayEvent &e : world_.events) {
+		Dictionary d;
+		d["frame"] = e.frame_index;
+		d["kind"] = int(e.kind);
+		d["has_pos"] = e.has_pos;
+		if (e.has_pos)
+			d["pos"] = Vector3(real_t(fp16(e.x)), real_t(fp16(e.y)), real_t(fp16(e.z)));
+		d["has_dir"] = e.has_dir;
+		if (e.has_dir)
+			d["dir"] = Vector2(real_t(fp16(e.dir_x)), real_t(fp16(e.dir_y)));
+		d["source"] = int(e.source);
+		d["target"] = int(e.target);
+		d["aux"] = int(e.aux);
+		d["adm_index"] = int(e.adm_index);
+		d["event_type"] = int(e.event_type);
+		d["sound"] = e.sound;
+		d["label"] = String(e.label.c_str());
+		out.push_back(d);
+	}
+	return out;
+}
+
+Dictionary NovaNetClient::env_at(double frame_f) const {
+	Dictionary out;
+	out["found"] = false;
+	const std::vector<ReplayEnvSample> &env = world_.environment;
+	if (env.empty()) return out;
+	// Latest snapshot at or before frame_f (the env stream is ascending by
+	// frame_index); hold the first when frame_f precedes it.
+	const ReplayEnvSample *s = &env.front();
+	for (const ReplayEnvSample &e : env) {
+		if (double(e.frame_index) <= frame_f) s = &e; else break;
+	}
+	out["found"] = true;
+	out["frame"] = s->frame_index;
+	out["fog_dist"] = int(s->fog_dist);
+	out["fog_accel"] = int(s->fog_accel);
+	out["tod_fixed"] = int(s->tod_fixed);
+	out["quake_ticks"] = int(s->quake_ticks);
+	out["cloud_scroll"] = int(s->cloud_scroll);
+	out["overcast"] = int(s->overcast);
 	return out;
 }

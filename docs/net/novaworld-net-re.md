@@ -1823,9 +1823,11 @@ entity table keyed by handle `(pool<<12)|slot`: spawns (`0x0D`/`0x20`/`0x0C`) la
 world layout (type, name, team, initial pose); C2S `0x0C` extended uplinks append the joiner's own
 per-frame track; and the **S2C `0x0A` event loop appends per-frame motion for every nearby entity**
 (each compact record's compressed position decompressed + the message's header anchor, §5.10).
-`nw_pp <cap> --replay-json <out>` emits a self-contained JSON the standalone
-`tools/net/replay_viewer.html` (top-down canvas, timeline scrubber) loads directly. Walking `0x0A`
-needs items.def (the per-record width is class-dependent, §5.10b) — pass `--items`.
+The same `ReplayTimeline` feeds the in-engine NovaWorld spectator straight from the wire — no JSON
+intermediary: `nw_replay` streams the captured packets to `NovaNetClient` (godot/engine/network),
+which decodes them and exposes the entity tracks (`sample_at`), the event stream (`get_events`), and
+the env stream (`env_at`) to the Godot render path (`NetWorldView` + `NetEventView` + the spectator
+kill-feed/env HUD). Walking `0x0A` needs items.def (the per-record width is class-dependent, §5.10b).
 
 Two facts worth recording, both observed on the dvxi5 probe + a 3-player capture:
 
@@ -1937,10 +1939,10 @@ happening", and consolidate the `0x0A` decode to a single source.
   **hit** (`0x0A` `tag==2` — impact world pos = `network_decompress_fixedpoint(compressed)` + the
   message anchor, + target / weapon / `adm_index`), **kill** + **game-event** (§5.26 `0x1E`/`0x26`),
   and **capture-zone** state (§5.19 `0x40`, emitted only on change — the sync repeats every frame).
-  The env stream is the `0x0A` case-2 snapshots over time. `nw_pp --replay-json` emits `events[]`
-  + `env[]`; `tools/net/replay_viewer.html` renders a time-synced kill feed / event log (with a
-  `snd:` filter), projectile tracers (fire rays) + hit bursts, live capture-zone rings, an
-  environment readout, and a click-to-inspect entity panel.
+  The env stream is the `0x0A` case-2 snapshots over time. The in-engine NovaWorld spectator renders
+  both straight from the wire (no JSON): `NovaNetClient.get_events()` / `env_at()` feed `NetEventView`
+  (fire-ray tracers + hit bursts, kill marks, live capture-zone rings drawn over the 3D world) and the
+  spectator HUD (a time-synced kill feed + an environment readout).
 
 **Wire-confirmed** on the one-host/one-client capture (957 datagrams): 151 events — 19 fire
 (pool0/s5, `adm 24`), 125 hit (→pool0/s3, weapon pool0/s4, `adm 18`, positions decompressed), 1

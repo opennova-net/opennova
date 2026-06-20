@@ -85,6 +85,18 @@ public:
 	// mounted}. Respawn/mount/dead transitions snap (never interpolate across).
 	Dictionary sample_at(int handle, double frame_f) const;
 
+	// Every decoded in-game event on the timeline, in capture order. One dict per
+	// event: {frame, kind (ReplayEventKind int), has_pos, pos (Vector3 world
+	// meters), has_dir, dir (Vector2), source, target, aux (0xFFFF = none),
+	// adm_index, event_type, sound, label}. Feeds the kill feed + projectile/zone
+	// markers. source/target/aux are entity handles (resolve via get_entities()).
+	Array get_events() const;
+	// The environment snapshot in effect at capture-frame `frame_f` (the latest
+	// snapshot at or before it; the first when `frame_f` precedes the stream):
+	// {found, frame, fog_dist, fog_accel, tod_fixed, quake_ticks, cloud_scroll,
+	// overcast}. found=false until the wire carries an env block.
+	Dictionary env_at(double frame_f) const;
+
 	// Engine hooks.
 	void _process(double delta) override;
 
