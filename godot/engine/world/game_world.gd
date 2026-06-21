@@ -516,8 +516,8 @@ func build_local_player_avatar() -> Node3D:
 ## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
 ## the character arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel @0x4ded60 draws
-## the weapon FP model + arms with shared bone matrices]. FIRST CUT: a fixed default (mp5sd) read
-## from weapon.def — gfx1 Mp5s_1st (gun) + gfx1a armsG (arms) on animadm Mp5_1st — built in rest
+## the weapon FP model + arms with shared bone matrices]. FIRST CUT: a fixed default (ak47auto) read
+## from weapon.def — gfx1 AKM_1st (gun) + gfx1a armsG (arms) on animadm AKM_1st — built in rest
 ## (holding) pose. Returned as a container the caller attaches to the FP camera. Per-weapon
 ## resolution (a weapon.def binding; libs/def already parses DefWeaponDef.gfx1/gfx1a/animadm) and the
 ## camera bias / sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380] are
@@ -528,13 +528,13 @@ func build_local_player_viewmodel() -> Node3D:
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
 	add_child(container)
-	# mp5sd weapon.def (REVX02/WEAPON.DEF "WPN_MP5SD"): animadm Mp5_1st, gfx1 Mp5s_1st (gun),
+	# ak47auto weapon.def (REVX02/WEAPON.DEF "WPN_AK47AUTO"): animadm AKM_1st, gfx1 AKM_1st (gun),
 	# gfx1a armsG (arms). Hardcoded as the chosen fixed default until a weapon.def reader resolves
 	# the player's equipped weapon. The gun shares the arms' skeleton plus gun-part bones, so both
-	# pose from the one animadm.
-	# anim_wpn_idle (mp5_1i) = the FP holding pose; without it the arms sit in their bind/T-pose.
-	var arms = _placer.build_model_from_graphic("armsG", "Mp5_1st", container, "anim_wpn_idle")  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic("Mp5s_1st", "Mp5_1st", container, "anim_wpn_idle")
+	# pose from the one animadm. (Swapped from mp5sd to confirm the pos/tpos placement generalizes.)
+	# anim_wpn_idle = the FP holding pose; without it the arms sit in their bind/T-pose.
+	var arms = _placer.build_model_from_graphic("armsG", "AKM_1st", container, "anim_wpn_idle")  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic("AKM_1st", "AKM_1st", container, "anim_wpn_idle")
 	if arms == null and gun == null:
 		container.queue_free()
 		return null

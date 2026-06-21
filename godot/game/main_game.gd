@@ -27,14 +27,28 @@ const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
 const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
 const PLAYER_TP_DISTANCE := 5.0         # 3P camera distance behind the player
 const PLAYER_TP_HEIGHT := 1.5           # 3P camera height bump
-# First-person weapon viewmodel offset, camera-local (right / down / forward). The original biases
-# the camera and draws the viewmodel at the view root [orig: Player_UpdateFirstPersonCamera
-# @0x4dd380]; we place it in camera space instead — tune by eye.
-const PLAYER_VIEWMODEL_OFFSET := Vector3(0.16, -0.22, -0.40)
-# FP viewmodel rotation, euler DEGREES, camera-local. Our NovaObjectModel mesh is model-native
-# (Y-up, only X-negated) so it must NOT get the world-object bms_to_godot_basis; this rotation lays
-# the gun barrel down-range relative to the view. Tunable by eye (the exact pos/tpos consume
-# transform needs the ida server, currently down). [orig: Player_RenderFirstPersonViewModel @0x4ded60]
+# First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
+# The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
+# the view orientation, then draws the gun (gfx1) + character arms at that view root
+# [orig: Player_UpdateFirstPersonCamera @0x4dd380 -> g_view_euler_translation_out;
+# Player_RenderFirstPersonViewModel @0x4ded60]. The weapon.def parser stores the pos/tpos POSITION as
+# `atof(str) * 256.0` (a 16.16 fixed-point world coord; scale flt_7D1D70 @0x544770) and the ROTATION
+# as degrees -> 32-bit BAM (`* 0x0B60B60` = 2^32/360) [orig: weapon.def 'tpos' handler @0x54471f].
+# The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
+# offset is simply `file_value / 256`. The view-local frame is (x = right, y = forward, z = up): the
+# dominant `pos[2]` is the grip's DOWN offset (barrel reaches forward via the model), not depth — see
+# `_viewmodel_offset` for the axis map and derivation. The Sighted/ADS path swaps `pos` -> `tpos`
+# (WeaponDef.AltCamOffset @0x10C, read when entity Flags & 2).
+# Units are WPN_AK47AUTO (REVX02\WEAPON.DEF) — hardcoded with the fixed-default model until a
+# weapon.def Godot binding resolves the equipped weapon's pos/tpos per-weapon. (Swapped from WPN_MP5SD
+# to confirm the placement generalizes; AK47AUTO pos is a near-pure vertical drop = a clean test.)
+const WEAPON_DEF_POS_SCALE := 256.0                                    # flt_7D1D70: file unit -> /256 world units
+const PLAYER_VIEWMODEL_POS_UNITS := Vector3(10.0, 0.0, -201.0)         # weapon.def `pos`  (hip)
+const PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-28.046, 21.531, -187.857)  # weapon.def `tpos` (ADS/sighted)
+# FP viewmodel model-facing rotation, euler DEGREES, camera-local. Our NovaObjectModel mesh is
+# model-native (Y-up, only X-negated) so it must NOT get the world-object bms_to_godot_basis; this
+# lays the gun barrel down-range relative to the view. The small per-weapon `pos`-rotation columns
+# (Bone.rot, yaw/pitch/roll BAM — AK47AUTO = 0.0 / 0.0 / 1.0 deg) are a separate fine-tune, deferred.
 const PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 
 enum State { MENU, WORLD, PAUSED }
@@ -417,10 +431,28 @@ func _update_player_camera() -> void:
 			_player_avatar.play_body_anim(_world.local_player_anim_slot())
 	# First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1, shown in
 	# first person only (hidden in 3P, where the body avatar shows instead). The original biases the
-	# CAMERA and draws the model at the view root [orig: Player_UpdateFirstPersonCamera @0x4dd380];
-	# camera-local placement is the faithful structural equivalent for this first cut.
+	# CAMERA by the weapon's `pos`/`tpos` view offset and draws the model at the view root
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380]; placing it in camera space is the faithful
+	# structural equivalent (camera.global_transform == the engine view transform here).
 	if _player_viewmodel != null and is_instance_valid(_player_viewmodel):
 		var vm_basis := Basis.from_euler(Vector3(
 			deg_to_rad(PLAYER_VIEWMODEL_ROT.x), deg_to_rad(PLAYER_VIEWMODEL_ROT.y), deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
-		_player_viewmodel.global_transform = _camera.global_transform * Transform3D(vm_basis, PLAYER_VIEWMODEL_OFFSET)
+		var vm_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)  # TODO: -> TPOS when ADS (entity Flags & 2)
+		_player_viewmodel.global_transform = _camera.global_transform * Transform3D(vm_basis, vm_offset)
 		_player_viewmodel.visible = not _player_third_person
+
+
+# Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.
+# Faithful to the witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380; scale
+# flt_7D1D70=256 @0x544770]: the camera adds `ftol(Bone.pos)` straight onto g_view_pos, and at a
+# level look the view matrix is identity [orig: Math_BuildFixedPointRotationMatrixYXZ @0x615400], so
+# component i lands on world axis i (world Z = up). The view-local frame is therefore
+# (x = right, y = forward, z = up) — `pos[2]` is the grip's DOWN offset (the dominant term; the barrel
+# reaches forward via the model), NOT depth. Godot camera-local is (x right, y up, -z forward), so:
+#   file x (right)   -> Godot  x
+#   file y (forward) -> Godot -z
+#   file z (up)      -> Godot  y      (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
+# The two small lateral/forward terms (x, y) are sign-confirmable by drive; the z->y (down) term is
+# the certain one. (oscarmike WeaponManager._jo_to_godot_position agrees on /256 + z->up/down.)
+func _viewmodel_offset(units: Vector3) -> Vector3:
+	return Vector3(units.x, units.z, -units.y) / WEAPON_DEF_POS_SCALE

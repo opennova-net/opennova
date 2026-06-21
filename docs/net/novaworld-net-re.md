@@ -2432,7 +2432,62 @@ behind+above third person; the mouse drives Yaw + Pitch (clamped ±80°). The "A
 was a two-store bug (the motor's grounded `AiEntity.pos` was mirrored to the registry `Entity` only
 for the local player) — now every motor entity mirrors. **Tracked deferrals:** 3P follow
 smoothing/collision (`@0x437af0`), the weapon view-bias/bone/velocity-lead/prone-drop (`@0x4dd380`),
-the exact `CameraOffset@+0x6C`, the FOV source, and the FP arms viewmodel.
+the exact `CameraOffset@+0x6C`, and the FOV source. (The FP arms viewmodel placement is now §5.40.)
+
+### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
+
+How the original places the first-person arms+weapon, from the user's lead that it "has to do with
+`pos` and `tpos` in weapon.def". All anchored (decompiled this session). The viewmodel is **drawn at
+the biased view root**, not as a separately-positioned model: `pos`/`tpos` bias the *camera*, and the
+gun+arms are rendered with that same transform.
+
+**The two weapon.def fields** (`WeaponDef`, size 296):
+- **`pos`** → `WeaponDef.Bone` (`BoneTransform` @0xF4 = `{float pos[3]; int rot[3]}`) — the **hip**
+  first-person offset.
+- **`tpos`** → `WeaponDef.AltCamOffset` (@0x10C) — the **ADS / sighted** offset (the alternate camera
+  position used when aiming down sights). Corroborated by the values: `tpos` pulls the weapon toward
+  the centreline and up vs `pos` (MP5SD `pos 9.07 20.74 -183` vs `tpos -44.98 44.05 -162`).
+
+**Units / scale** [orig: weapon.def `tpos` handler @ 0x54471f; `pos` mirror just above]:
+- POSITION: each value is `atof(str) × 256.0` (`flt_7D1D70` @0x544770) and stored as a float. The
+  camera `ftol`s it to an int and adds it **straight onto `g_view_pos`** (16.16 world fixed) — so the
+  stored float is already a 16.16 world coordinate, and the **net world offset = `file_value / 256`
+  world units**. (MP5SD `pos` → `(0.035, 0.081, −0.715)` world units.)
+- ROTATION: `Math_ParseFixedPoint16` (→16.16 degrees) `× 0x0B60B60` (= 2³²/360) → **32-bit BAM**.
+  Stored as `Bone.rot = [yaw, pitch, roll]` (file columns 4/5/6). MP5SD `pos` rot = `2.0 / −0.5 / 0.0°`.
+
+**How it is consumed** [orig: `Player_UpdateFirstPersonCamera` @ 0x4dd380]:
+1. Read the offset `cam_offset = ftol(Bone.pos)` (the `pos`, 16.16 world), `+ g_view_pos_bias`.
+2. Build the view rotation `BuildRotationYXZ(g_view_rot_bias + Bone.rot)` — the small per-weapon
+   `Bone.rot` is added to the look angles (Z·X·Y order, 10.22 fixed `@0x615400`).
+3. Add a **clamped velocity lead** (`g_view_velocity >> 7`, ±1024 xy / ±4096 z) and a **prone Z-drop**
+   (`−0x500` when `3·dword_A78394 ≤ 4·dword_A78398`).
+4. **ADS switch**: if `entity Flags & 2` ‖ `dword_24C1970`, *overwrite* `cam_offset` with
+   `AltCamOffset` (the `tpos`) — an **instant** swap in this function (any ADS-in easing is the
+   separate scopeup/scopedown weapon state, see [[project_fp_weapon_fsm]]).
+5. Rotate the offset by the view matrix (`Math_FixedPointTransformPoint22` @0x615810, 10.22) and add
+   `g_view_pos`; emit `g_view_euler_translation_out`.
+
+**Render** [orig: `Player_RenderFirstPersonViewModel` @ 0x4ded60]: builds `root_matrix` from
+`g_view_euler_translation_out` (`Math_BuildFixedPointToFloatMatrix4x4` @0x612200 — translation ÷65536,
+**Y negated**, rotations Z·X·Y/BAM) and renders the gfx1 gun (`WeaponDef[1].pad_10[52]`) plus the
+character arms (`g_local_player_entity->CharacterEntity`) with it. So **`pos`/`tpos` move the gun AND
+the arms together** (one unit at the view root); they enter via the camera, never here.
+
+**OpenNova port (2026-06-21).** `main_game._update_player_camera` places the host viewmodel at
+`camera.global_transform × Transform3D(model_facing, offset)` where `offset = (x, z, −y) / 256` from
+the weapon.def `pos` units (`_viewmodel_offset`), replacing an eyeballed constant. The view-local frame
+is **(x = right, y = forward, z = up)** — derived from the camera adding `ftol(Bone.pos)` straight onto
+`g_view_pos` (world Z up) under an identity view matrix at a level look, so component *i* lands on world
+axis *i*. Hence **`pos[2]` is the grip's DOWN offset (the dominant −183 → ~0.7u below the eye; the
+barrel reaches forward via the model), NOT depth.** Godot camera-local is (x right, y up, −z forward),
+so file `x→x`, `y→−z`, `z→y`. (A first cut mistakenly sent `pos[2]` into forward depth, producing a
+gun floating ~0.7u in front of the camera — the screensnapr.io/s/8e9d030 symptom; corrected here.
+oscarmike `WeaponManager._jo_to_godot_position` independently agrees on `/256` + `pos[2]→up/down`.)
+Hardcoded to WPN_MP5SD until a weapon.def Godot binding resolves the equipped weapon. **Deferrals:**
+per-weapon `pos`/`tpos` from a weapon.def binding; the `pos`→`tpos` ADS swap (entity `Flags & 2`); the
+small per-weapon `Bone.rot`; velocity lead + prone drop; the model-facing basis and the two small
+lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certain one).
 
 ## 6. Struct reference
 

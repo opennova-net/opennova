@@ -276,9 +276,19 @@ First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
 |---|---|---|---|---|
 | `Camera_ComputeThirdPersonView` | `0x437d10` | master view placement; mode-0 (FP) sets g_view_pos = Position + (0,0,0x10000 eye), g_view_rot = Yaw/Pitch/Roll | disasm; §5.39 | confirm-only |
 | `ThirdPersonCamera_Update` | `0x437af0` | 3P follow: target = Position + CameraOffset@+0x6C + smoothing/distance/bone-collision | disasm; §5.39 | confirm-only |
-| `Player_UpdateFirstPersonCamera` | `0x4dd380` | builds g_view_matrix @0xB764E0 from g_view_pos/rot + weapon bias/bone/lead + prone drop | disasm; §5.39 | confirm-only |
+| `Player_UpdateFirstPersonCamera` | `0x4dd380` | builds g_view_matrix @0xB764E0; offset = `ftol(WeaponDef.Bone.pos)` (`pos`, @0xF4) + g_view_pos_bias, rotated by `BuildRotationYXZ(view_rot_bias + Bone.rot)`, + clamped velocity lead + prone Z-drop −0x500; ADS path (entity Flags & 2 ‖ dword_24C1970) swaps offset → `AltCamOffset` (`tpos`, @0x10C) | disasm; §5.39/§5.40 | confirm-only |
 | `Input_HandleActionBinding_0` | `0x4e1330` | applies scaled mouse to entity Yaw@+0x10 (wraps) / Pitch@+0x14 (clamp ±80° = ±954437120) | disasm; §5.39 | confirm-only |
 | `Camera_SetTrackedEntity` | `0x4391d0` | sets the camera mode dword_A890C8 (0=FP on-foot, 1=vehicle 3P) + tracked entity dword_A890CC | disasm; §5.39 | confirm-only |
+
+First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (net-re §5.40, 2026-06-21):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Player_RenderFirstPersonViewModel` | `0x4ded60` | builds root_matrix from g_view_euler_translation_out (the `pos`/`tpos`-biased view from `Player_UpdateFirstPersonCamera`), renders gfx1 gun + character arms at it | disasm; §5.40 (paired to `main_game._update_player_camera` / `GameWorld.build_local_player_viewmodel`) | confirm-only |
+| weapon.def `pos`/`tpos` parser | `0x54471f` | `tpos` token handler (mirror of `pos`): POSITION = `atof(str) × 256.0` (flt_7D1D70 @0x544770) → 16.16 world coord (net world offset = file/256); ROTATION = `ParseFixedPoint16 × 0x0B60B60` (=2³²/360) → 32-bit BAM; → `WeaponDef.Bone` (`pos`, @0xF4) / `AltCamOffset` (`tpos`, @0x10C) | disasm; §5.40 | confirm-only |
+| `Math_BuildFixedPointToFloatMatrix4x4` | `0x612200` | view euler+translation → float 4×4 for the render; translation ×1/65536, **Y negated**, rotations Z-X-Y at BAM scale | disasm; §5.40 | confirm-only |
+| `Math_BuildFixedPointRotationMatrixYXZ` | `0x615400` | 10.22 fixed rotation matrix (0x400000=1.0) from (yaw,pitch,roll), order Z·X·Y; identity at zero angles | disasm; §5.40 | confirm-only |
+| `Math_FixedPointTransformPoint22` | `0x615810` | transforms a point by a 10.22 fixed matrix (round 1<<21, >>22); preserves the point's unit scale | disasm; §5.40 | confirm-only |
 
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
