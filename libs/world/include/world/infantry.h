@@ -16,6 +16,8 @@
 
 #include <cstdint>
 
+#include "world/body_anim.h"
+
 namespace opennova::world {
 
 // ---------------------------------------------------------------------------
@@ -85,6 +87,36 @@ enum : int {
 };
 } // namespace anim_state
 
+// Map the infantry motor's selected clip state (anim_state, set by infantry_select — the
+// witnessed per-tick anim selection) to the canonical present-pass BodyAnim slot the host
+// resolves against the model's .adm (body_anim.h). The org1 infantry motor (player AND AI)
+// bypasses the brain-state update_body_anim_slot (ai.cpp), so this is where a soldier's
+// Entity.anim_slot is derived; without it every org1 soldier renders a static T-pose (the slot
+// stays at its -1 default and the present pass no-ops). Gaits map to walk/jog/run; idles,
+// transitions, and the not-yet-modeled attack/reload/death body slots fall back to idle for now
+// (a follow-up, like update_body_anim_slot's own fidelity note). [orig: Entity_UpdateInfantryAI
+// @0x4b9910 selects the body anim each tick]
+inline int32_t body_anim_slot_from_state(int state) {
+    switch (state) {
+        case anim_state::kWalkForward:
+        case anim_state::kSwimForward:
+        case anim_state::kDraggerWalk:
+        case anim_state::kWoundedWalk:
+            return kBodyAnimWalkForward;
+        case anim_state::kJogForward:
+            return kBodyAnimJogForward;
+        case anim_state::kRun2:
+        case anim_state::kRun3:
+        case anim_state::kRunForward:
+        case anim_state::kWoundedRun:
+        case anim_state::kCoverRun:
+        case anim_state::kRunAway:
+            return kBodyAnimRunForward;
+        default:
+            return kBodyAnimIdle;
+    }
+}
+
 // Per-state flag helpers (bounds-safe: out-of-range states have no flags).
 uint32_t infantry_anim_flags(int state);
 
@@ -106,12 +138,23 @@ uint32_t infantry_anim_flags(int state);
 //   dz = delta(lerp(capsule_bottom) * 65536)  [flt_7C32BC; prev stored per entity,
 //        reset on climb 32..35 / death_grenade 176..179 — ~0 in gaits, lifts in climbs]
 //   events = trigger (lower keyframe, unlerped)
+//   capsule_bottom = lerp(bottom) * 65536  ABSOLUTE origin->feet (entityRadius); the on-foot
+//        ground settle floors the model-origin pos[2] to ground + capsule_bottom so the capsule
+//        bottom rests on the terrain (a waist-origin soldier's feet land on the ground) [orig:
+//        Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 settles entity[3]=entityRadius+
+//        ground @0x4b3da3; entityRadius = AnimMap_UpdateEntity @0x40b82f out_transform[3]=
+//        bottom*65536; on-foot caller org1 @0x4bf7fa; docs/world/world-wac-ai-re.md D-INF-6].
+//   capsule_top = lerp(top) * 65536 + 0x2000  [orig: out_transform[4]]
 // Grilled against real clips in tests/anim/root_motion_test.cpp.
 struct RootMotionFrame {
     int32_t dx = 0;
     int32_t dy = 0;
     int32_t dz = 0;
     uint32_t events = 0;
+    // Absolute collision-capsule extents for this frame, 16.16 (NOT deltas). The on-foot ground
+    // settle uses capsule_bottom (origin->feet) as the floor; see the doc above and D-INF-6.
+    int32_t capsule_bottom = 0;
+    int32_t capsule_top = 0; // [orig: out_transform[4] = top*65536 + 0x2000]
 };
 
 // Clip provider keyed by anim state id. `phase` is the per-entity playhead in

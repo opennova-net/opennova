@@ -43,7 +43,8 @@ private:
 	struct Track {
 		std::vector<float> fwd;      // velocity[2]: forward distance per clip frame
 		std::vector<float> lat;      // velocity[0]: lateral
-		std::vector<float> bottom;   // capsule_bottom: vertical root reference
+		std::vector<float> bottom;   // capsule_bottom: origin->feet (the ground-settle floor)
+		std::vector<float> top;      // capsule_top: origin->head (capsule extent)
 		std::vector<uint32_t> trigger;
 		int32_t frame_count = 0;
 		bool loop = false;

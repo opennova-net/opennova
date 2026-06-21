@@ -116,10 +116,13 @@ bool run() {
 	if (!expect(es.z == codec_recon(wz, static_cast<int32_t>(anchor.spawn_z)),
 	            "z is the codec's exact reconstruction")) return false;
 
-	// Coarse heading round-trips: the high byte of the 32-bit engine BAM.
-	const uint8_t want_yaw = static_cast<uint8_t>(
-			(static_cast<uint32_t>(static_cast<int32_t>(seed.yaw) << 16) + 0x00800000u) >> 24);
-	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips")) return false;
+	// Coarse heading round-trips: the high byte of the 32-bit engine-frame BAM that
+	// snapshot_of builds = (90 - mission_yaw) * kBamPerDegree (entity_wire_bridge.cpp), rounded.
+	constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches the bridge)
+	const uint32_t engine_bam = static_cast<uint32_t>(
+			static_cast<int32_t>(static_cast<int64_t>(90 - seed.yaw) * kBamPerDegree));
+	const uint8_t want_yaw = static_cast<uint8_t>((engine_bam + 0x00800000u) >> 24);
+	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips (engine-frame BAM)")) return false;
 
 	// A second emit/pump applies cleanly (frame counter advances, entity reused).
 	net.emit_s2c(world, anchor);

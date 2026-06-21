@@ -250,11 +250,37 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     root motion included) — rides the skeletal/blend pass.
   - **D-INF-2** command channels 123–127 decoded but not driven (move-to-entity bodies incl. the
     staged vehicle boarding are documented in §4.12) — rides the command-source phase.
-  - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water/capsule
-    pending, `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
+  - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water + the
+    horizontal capsule pending; the vertical capsule-bottom settle now landed — see **D-INF-6** —
+    `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
     zeroes on contact; the airborne anim overlay waits on the entity+36 flags.
   - **D-INF-4** computed sin/cos tables (trunc(f(idx)·2^22)) for the runtime-built originals.
   - **D-INF-5** idle look-at system + its spotting side effects (§4.13) — rides the combat pass.
+  - **D-INF-6** infantry/player grounding settles `pos[2]` (the model origin) to **`ground +
+    capsule_bottom`**, so the entity's collision-capsule bottom (the origin→feet offset) rests on
+    the terrain and a waist-origin model's feet land exactly on the ground. WITNESSED end-to-end
+    (re-confirmed against `Jointops.exe.kong.i64`, imagebase 0x400000, this session):
+    `Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0` resettles `entity[3] = entityRadius +
+    groundHeight` (`@0x4b3da3`; `groundHeight = heightDelta − entityRadius @0x4b3d90`), where
+    `entityRadius` is the current animation frame's `capsule_bottom × 65536` fed from the
+    `.bad`/`.adm` root record [orig: `AnimMap_UpdateEntity @0x40b5f0` (out-transform block `@0x40b82f`) `out_transform[3] =
+    bottom*65536 @0x40b84d`; `out_transform[4] = top*65536 + 0x2000` is the capsule top]. Both
+    on-foot callers pass it straight in [orig: org1 `@0x4bf7fa`, org2 `@0x4b7cf9`]. The model
+    renders at `pos[2]` with **no render-side lift** [orig: `Math_BuildFixedPointToFloatMatrix4x4
+    @0x612200` Z store `@0x612457` — pure 1/65536 scale, only Y negated]. Stance-aware: crouch/
+    prone clips carry a smaller `capsule_bottom`, lowering feet *and* the FP eye (`pos[2] + 0x10000`
+    [orig: `Camera_ComputeThirdPersonView @0x437e8f`]). The `+0x50000` [orig: `AI_ProcessMovementStep
+    @0x466db0` `ai_comp[131] = ground + 0x50000 @0x466e2d`] is the id-3 death-fall mover's vertical
+    TARGET slot, **NOT** the live `pos[2]` — applying it to the render Z floated soldiers ~1 body
+    (the regression this entry corrects; the earlier feet-origin/no-offset reading is REFUTED —
+    dropping the term sinks them waist-deep). Our port: `RootMotionFrame` carries absolute
+    `capsule_bottom`/`capsule_top` (godot `InfantryRootMotion` emits them from the `.bad` bottom/top
+    tracks); `tick_infantry` — player AND AI, the player via `InfantryState::is_local_player` — floors
+    `pos[2] = ground_cache + frame.capsule_bottom` (`libs/world/src/infantry.cpp`). The shared
+    `ai_->root_motion` is loaded from `E_STAND.adm` at mission load (`mission_runtime.gd`), so every
+    motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
+    is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
+    in `tests/world/infantry_test.cpp`.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):

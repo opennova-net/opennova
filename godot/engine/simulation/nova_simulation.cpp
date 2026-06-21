@@ -204,6 +204,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_slot"), &NovaSimulation::get_local_player_anim_slot);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -408,6 +409,15 @@ float NovaSimulation::get_local_player_pitch_deg() const {
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p) return 0.0f;
 	return static_cast<float>(static_cast<double>(p->pitch) / kBamPerDegree);
+}
+
+int NovaSimulation::get_local_player_anim_slot() const {
+	if (!world_ || !world_->cached.local_player.valid()) return -1;
+	// The same Entity.anim_slot the present pass reads for NPC models (written by the infantry
+	// motor mirror, infantry.cpp). The avatar is host-managed and not in the present registry,
+	// so main_game drives its body clip from this getter.
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e ? e->anim_slot : -1;
 }
 
 void NovaSimulation::restart() {

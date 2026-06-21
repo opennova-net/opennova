@@ -65,11 +65,13 @@ int InfantryRootMotion::load(const Ref<NovaResourceRoot> &p_resource_root, const
 				t.fwd.resize(n);
 				t.lat.resize(n);
 				t.bottom.resize(n);
+				t.top.resize(n);
 				t.trigger.resize(n);
 				for (size_t i = 0; i < n; ++i) {
 					t.fwd[i] = bf.events[i].velocity[2];
 					t.lat[i] = bf.events[i].velocity[0];
 					t.bottom[i] = bf.events[i].bottom;
+					t.top[i] = bf.events[i].top;
 					t.trigger[i] = static_cast<uint32_t>(bf.events[i].trigger);
 				}
 			}
@@ -144,6 +146,12 @@ bool InfantryRootMotion::advance(int state_id, int32_t &phase_ticks,
 	// reset) starts with no cross-clip delta [orig: anim_slot[19] prev, reset semantics].
 	out.dz = static_cast<int32_t>(sample(t.bottom, phase_ticks) * 65536.0f) -
 	         static_cast<int32_t>(sample(t.bottom, prev) * 65536.0f);
+	// Absolute capsule extents for THIS frame — the on-foot ground settle floors pos[2] to
+	// ground + capsule_bottom (origin->feet) [orig: AnimMap_UpdateEntity @0x40b82f
+	// out_transform[3]=bottom*65536, out_transform[4]=top*65536+0x2000; consumed by
+	// tick_infantry's ground clamp — docs/world/world-wac-ai-re.md D-INF-6].
+	out.capsule_bottom = static_cast<int32_t>(sample(t.bottom, phase_ticks) * 65536.0f);
+	out.capsule_top = static_cast<int32_t>(sample(t.top, phase_ticks) * 65536.0f) + 0x2000;
 	// Event bits from the lower keyframe of the current position [orig: trigger unlerped;
 	// consumers sample on alternating ticks, so the per-frame repeat is faithful].
 	out.events = t.trigger[static_cast<size_t>(pos_of(phase_ticks) >> 1)];

@@ -35,10 +35,18 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.x = world::to_fixed(e.position.x);
 	s.y = world::to_fixed(e.position.y);
 	s.z = world::to_fixed(e.position.z);
-	// Phase 1 mapping: treat Entity::yaw as the BAM-high i16 of the 32-bit engine
-	// heading (entity+16, D-NET-86). The faithful (90 - bms_yaw) conversion + the
-	// promote.cpp yaw convention land in Phase 2 (open question Q1).
-	s.euler_z = static_cast<int32_t>(e.yaw) << 16;
+	// Entity+16 on the wire is a 32-bit engine-frame BAM heading = (90 - mission_yaw) *
+	// kBamPerDegree (D-NET-86 / §5.23/§5.24 — the same convention promote.cpp:87 and ai.cpp
+	// build from). Entity::yaw is mission yaw in DEGREES, so reconcile our two-store split
+	// (Entity::yaw degrees vs AiEntity::heading BAM) at the wire boundary here: the prior
+	// `yaw << 16` was both the wrong scale (deg*65536, ~182x off) and missing the (90 - yaw)
+	// frame inversion, collapsing nearly every facing to ~yaw 90 -> NPCs faced the wrong way.
+	// The encoder takes the rounded high byte and the present inverts (90 - bam/deg) back to
+	// mission yaw, so listen-server NPCs now face the same way as the AI-pool present and the
+	// local-player avatar (which bypasses this bridge). [orig: Entity_SpawnFromBMSRecord
+	// @0x40e9f0; resolves open question Q1]
+	constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
+	s.euler_z = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
 	s.entity_class = entity_class_of(e);
 	return s;
 }

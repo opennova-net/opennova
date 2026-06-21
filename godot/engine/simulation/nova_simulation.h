@@ -201,6 +201,9 @@ public:
 	// camera). yaw = 90 - heading; pitch up positive. 0 when no player is spawned.
 	float get_local_player_yaw_deg() const;
 	float get_local_player_pitch_deg() const;
+	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
+	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
+	int get_local_player_anim_slot() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

@@ -451,7 +451,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
         e.pos[2] += 2 * inf.vel[2];
         if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
-            const int32_t floor_z = inf.ground_cache + ground_stand_offset;
+            // Settle the model-origin Z onto terrain by the current anim frame's collision-
+            // capsule bottom (origin->feet), NOT the +0x50000 death-fall mover target.
+            // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 resettles
+            // entity[3]=entityRadius+ground @0x4b3da3; entityRadius = the .bad capsule_bottom
+            // *65536 fed via AnimMap_UpdateEntity @0x40b82f; on-foot caller org1 @0x4bf7fa /
+            // org2 @0x4b7cf9. +0x50000 is the id-3 death mover's target slot (AI_ProcessMovement
+            // Step @0x466db0), never the live pos[2]. docs/world/world-wac-ai-re.md D-INF-6.]
+            const int32_t floor_z = inf.ground_cache + frame.capsule_bottom;
             if (e.pos[2] <= floor_z) {
                 // Landing. Fall damage [orig: dump 5152 — vel_z <= -1057*scale ->
                 // health -= (excess) >> 4]; horizontal slide stops on contact (D-INF-3).
@@ -492,6 +499,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
         ent->yaw = static_cast<int16_t>(90 - e.heading / kBamPerDegree);
+        // Body-anim slot for the present pass. The infantry motor (player AND AI) bypasses the
+        // brain-state update_body_anim_slot (the ai.cpp dispatch `continue`s before reaching it),
+        // so derive the present-pass BodyAnim slot from the motor's selected clip state here — else
+        // every org1 soldier renders a static T-pose (anim_slot stays -1 and _apply_body_anim
+        // no-ops). Leave the slot on death (the present hides / holds the death pose).
+        // [orig: Entity_UpdateInfantryAI @0x4b9910 selects the body anim each tick]
+        if (ent->alive && ent->health > 0)
+            ent->anim_slot = body_anim_slot_from_state(inf.anim_state);
     }
 
     advance_part_anim(e); // PANM channels integrate regardless of the motor path

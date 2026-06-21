@@ -498,6 +498,9 @@ func local_player_yaw_deg() -> float:
 func local_player_pitch_deg() -> float:
 	return _runtime.local_player_pitch_deg() if _runtime != null else 0.0
 
+func local_player_anim_slot() -> int:
+	return _runtime.local_player_anim_slot() if _runtime != null else -1
+
 func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _runtime != null:
 		_runtime.set_player_input(forward, back, left, right, run, look_yaw_deg, look_pitch_deg)
@@ -509,6 +512,33 @@ func build_local_player_avatar() -> Node3D:
 	if _placer == null:
 		return null
 	return _placer.build_animated_model(0x14B9, self)
+
+## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
+## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
+## the character arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel @0x4ded60 draws
+## the weapon FP model + arms with shared bone matrices]. FIRST CUT: a fixed default (mp5sd) read
+## from weapon.def — gfx1 Mp5s_1st (gun) + gfx1a armsG (arms) on animadm Mp5_1st — built in rest
+## (holding) pose. Returned as a container the caller attaches to the FP camera. Per-weapon
+## resolution (a weapon.def binding; libs/def already parses DefWeaponDef.gfx1/gfx1a/animadm) and the
+## camera bias / sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380] are
+## follow-ups. Null when the placer or both models fail to resolve.
+func build_local_player_viewmodel() -> Node3D:
+	if _placer == null:
+		return null
+	var container := Node3D.new()
+	container.name = "PlayerViewmodel"
+	add_child(container)
+	# mp5sd weapon.def (REVX02/WEAPON.DEF "WPN_MP5SD"): animadm Mp5_1st, gfx1 Mp5s_1st (gun),
+	# gfx1a armsG (arms). Hardcoded as the chosen fixed default until a weapon.def reader resolves
+	# the player's equipped weapon. The gun shares the arms' skeleton plus gun-part bones, so both
+	# pose from the one animadm.
+	# anim_wpn_idle (mp5_1i) = the FP holding pose; without it the arms sit in their bind/T-pose.
+	var arms = _placer.build_model_from_graphic("armsG", "Mp5_1st", container, "anim_wpn_idle")  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic("Mp5s_1st", "Mp5_1st", container, "anim_wpn_idle")
+	if arms == null and gun == null:
+		container.queue_free()
+		return null
+	return container
 
 
 # Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects

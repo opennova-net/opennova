@@ -27,6 +27,15 @@ const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
 const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
 const PLAYER_TP_DISTANCE := 5.0         # 3P camera distance behind the player
 const PLAYER_TP_HEIGHT := 1.5           # 3P camera height bump
+# First-person weapon viewmodel offset, camera-local (right / down / forward). The original biases
+# the camera and draws the viewmodel at the view root [orig: Player_UpdateFirstPersonCamera
+# @0x4dd380]; we place it in camera space instead — tune by eye.
+const PLAYER_VIEWMODEL_OFFSET := Vector3(0.16, -0.22, -0.40)
+# FP viewmodel rotation, euler DEGREES, camera-local. Our NovaObjectModel mesh is model-native
+# (Y-up, only X-negated) so it must NOT get the world-object bms_to_godot_basis; this rotation lays
+# the gun barrel down-range relative to the view. Tunable by eye (the exact pos/tpos consume
+# transform needs the ida server, currently down). [orig: Player_RenderFirstPersonViewModel @0x4ded60]
+const PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 
 enum State { MENU, WORLD, PAUSED }
 
@@ -45,6 +54,7 @@ var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from
 var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
 var _player_third_person := false  # F4 toggles first/third person
 var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); null until built
+var _player_viewmodel: Node3D = null  # host-managed FP arms+weapon (shown in 1P); null until built
 
 
 func _ready() -> void:
@@ -336,11 +346,17 @@ func _process(delta: float) -> void:
 			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		if _player_avatar == null:
 			_player_avatar = _world.build_local_player_avatar()
+		if _player_viewmodel == null:
+			_player_viewmodel = _world.build_local_player_viewmodel()
 		_drive_local_player(delta)
-	elif _player_avatar != null:
-		_player_avatar.queue_free()
-		_player_avatar = null
-	_world.tick(_camera.global_position)
+	elif _player_avatar != null or _player_viewmodel != null:
+		if _player_avatar != null:
+			_player_avatar.queue_free()
+			_player_avatar = null
+		if _player_viewmodel != null:
+			_player_viewmodel.queue_free()
+			_player_viewmodel = null
+	_world.tick(_camera.global_position, _camera.global_transform)
 	if has_player:
 		_update_player_camera()
 
@@ -394,3 +410,17 @@ func _update_player_camera() -> void:
 		_player_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
 			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
 		_player_avatar.visible = _player_third_person
+		# Drive the body clip from the player's authoritative anim slot (idle/walk/run) — the same
+		# slot the present pass feeds NPC models. The model self-ticks its skeleton via _process, so
+		# we only SELECT the clip here (play_body_anim is idempotent per tick; do not also advance).
+		if _player_avatar.has_method("play_body_anim"):
+			_player_avatar.play_body_anim(_world.local_player_anim_slot())
+	# First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1, shown in
+	# first person only (hidden in 3P, where the body avatar shows instead). The original biases the
+	# CAMERA and draws the model at the view root [orig: Player_UpdateFirstPersonCamera @0x4dd380];
+	# camera-local placement is the faithful structural equivalent for this first cut.
+	if _player_viewmodel != null and is_instance_valid(_player_viewmodel):
+		var vm_basis := Basis.from_euler(Vector3(
+			deg_to_rad(PLAYER_VIEWMODEL_ROT.x), deg_to_rad(PLAYER_VIEWMODEL_ROT.y), deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
+		_player_viewmodel.global_transform = _camera.global_transform * Transform3D(vm_basis, PLAYER_VIEWMODEL_OFFSET)
+		_player_viewmodel.visible = not _player_third_person

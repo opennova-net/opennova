@@ -40,7 +40,11 @@ constexpr int32_t fx(double units) { return static_cast<int32_t>(units * 65536.0
 // Constants under test (mirrors of the cited values in infantry.cpp).
 constexpr int32_t kClamp = 69273360;       // body turn clamp / tick
 constexpr int32_t kTerminal = -32768;      // terminal fall velocity
-constexpr int32_t kFloorStand = 0x50000;   // AiSystem::ground_stand_offset default
+constexpr int32_t kFloorStand = 0;         // infantry settles pos[2] to ground + the anim
+                                           // frame's capsule_bottom; the (sourceless) grounding
+                                           // tests below have capsule 0, so the floor is bare
+                                           // ground (+0x50000 is the death-mover target, not the
+                                           // on-foot floor — infantry.cpp / D-INF-6).
 
 // A 512x512 height field with a caller-supplied raw16 column function (uniform in the
 // second axis where not stated). Same wiring as tests/world/ground_height_test.cpp.
@@ -68,6 +72,7 @@ struct Field {
 struct TestSource : IRootMotionSource {
     std::set<int> clips;
     int32_t step = 0x4000;
+    int32_t capsule_bottom = 0; // absolute origin->feet the on-foot ground settle floors to
 
     static bool gait(int id) {
         return id == anim_state::kWalkForward || id == anim_state::kRunForward ||
@@ -80,6 +85,7 @@ struct TestSource : IRootMotionSource {
         ++phase;
         out = RootMotionFrame{};
         if (gait(id)) out.dx = step;
+        out.capsule_bottom = capsule_bottom;
         return true;
     }
 };
@@ -542,6 +548,50 @@ int main() {
         CHECK(e->pitch <= 656175520);           // ...never past the clamped slope
         CHECK(e->pos[2] < fx(100) + kFloorStand);        // followed the ground down
         CHECK(e->pos[2] > fx(90) + kFloorStand);
+    }
+
+    // ---- ground settle floors pos[2] to ground + the frame's capsule_bottom (origin->feet),
+    //      NOT the death-fall mover's +0x50000 [orig: Entity_ProcessCollisionAndPlatformPhysics
+    //      @0x4b2bd0 settles entity[3]=entityRadius+ground @0x4b3da3; entityRadius = the .bad
+    //      capsule_bottom*65536 via AnimMap_UpdateEntity @0x40b82f; D-INF-6]. ----
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1); // 1u origin->feet for the held idle pose
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(200); // dropped well above the floor
+
+        // is_authority=false so think/select never retargets the held idle clip; the ground
+        // clamp itself has no authority gate, so the soldier still settles.
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.is_authority = false;
+        for (uint32_t t = 0; t < 600; ++t) {
+            ctx.logic_tick = t;
+            ai.tick(w, ctx);
+        }
+
+        CHECK(e->pos[2] == fx(50) + fx(1)); // ground + capsule_bottom, not ground + 0x50000
+    }
+
+    // ---- body-anim slot mapping: the motor's clip state -> present-pass BodyAnim slot ----
+    {
+        CHECK(body_anim_slot_from_state(anim_state::kIdle) == kBodyAnimIdle);
+        CHECK(body_anim_slot_from_state(anim_state::kWalkForward) == kBodyAnimWalkForward);
+        CHECK(body_anim_slot_from_state(anim_state::kJogForward) == kBodyAnimJogForward);
+        CHECK(body_anim_slot_from_state(anim_state::kRunForward) == kBodyAnimRunForward);
+        CHECK(body_anim_slot_from_state(anim_state::kWoundedRun) == kBodyAnimRunForward);
+        CHECK(body_anim_slot_from_state(anim_state::kDeathFire) == kBodyAnimIdle); // unmapped -> idle
     }
 
     if (failures == 0) std::printf("infantry_test: OK\n");

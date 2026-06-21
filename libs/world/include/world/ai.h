@@ -463,7 +463,12 @@ public:
     GroundClearance ground_clearance{};
     // [orig: the +0x50000 the movers add after grounding — AI_ProcessMovementStep @0x466db0
     // brain[131] = ground + 0x50000; AI_UpdateMovementTarget @0x460e40 adds def heightOffset.]
-    int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16
+    // NOTE: the INFANTRY motor (tick_infantry — player AND AI) does NOT use this. It settles
+    // pos[2] to ground + the anim frame's capsule_bottom (origin->feet) per the witnessed
+    // collision capsule [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0; D-INF-6];
+    // +0x50000 is only the id-3 death-fall mover's vertical target slot. Still used by the
+    // vehicle/SM path (apply_ground_clamp).
+    int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16 (vehicle/SM ground clamp only)
 
     // ---- Infantry motor (org1 soldiers; docs/world/world-wac-ai-re.md §3) ----
     // Root-motion provider; injected like `terrain`. Null = no clips: every state is

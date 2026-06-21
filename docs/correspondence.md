@@ -262,6 +262,14 @@ Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
 | `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) | disasm; §5.38 | confirm-only |
 | `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
 
+On-foot ground settle (D-INF-6, world-wac-ai-re; re-witnessed 2026-06-20):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Entity_ProcessCollisionAndPlatformPhysics` | `0x4b2bd0` | on-foot settle: resettles `entity[3] = entityRadius + groundHeight` (@0x4b3da3) so pos[2] = ground + capsule_bottom; on-foot callers org1 @0x4bf7fa / org2 @0x4b7cf9 | disasm; D-INF-6 (paired to `AiSystem::tick_infantry` floor_z) | confirm-only |
+| `AnimMap_UpdateEntity` | `0x40b5f0` | feeds `entityRadius` = anim frame `capsule_bottom × 65536` (out-transform block @0x40b82f, out_transform[3] store @0x40b84d); out_transform[4] = top×65536 + 0x2000 | disasm; D-INF-6 (paired to godot `InfantryRootMotion`) | confirm-only |
+| `AI_ProcessMovementStep` | `0x466db0` | id-3 death-fall mover: `ai_comp[131] = ground + 0x50000` (@0x466e2d) — a TARGET slot, NOT the live pos[2] (refutes the +0x50000 render-Z reading) | disasm; D-INF-6 | confirm-only |
+
 First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
 
 | original | addr | role | evidence | status |

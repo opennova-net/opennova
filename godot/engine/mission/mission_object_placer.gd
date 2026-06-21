@@ -331,6 +331,50 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	return model
 
 
+## Build ONE animated NovaObjectModel from an EXPLICIT graphic (.3di basename) + an explicit .adm
+## name, in rest pose, parented under `parent`. For host-managed viewmodels that resolve their
+## model + animation directly from weapon.def (gfx1/gfx1a + animadm) rather than from an items.def
+## item id — the first-person weapon viewmodel. Returns null when the graphic doesn't resolve.
+func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", env_node: Node = null) -> Node3D:
+	if graphic.is_empty() or parent == null:
+		return null
+	var data := _load_object_data(graphic)
+	if data == null:
+		return null
+	var model: Node3D = NovaObjectModelScript.new()
+	model.name = "Viewmodel_%s" % graphic
+	parent.add_child(model)
+	if env_node != null and model.has_method("set_environment_node"):
+		model.set_environment_node(env_node)
+	if not adm_name.is_empty():
+		_apply_skeletal_anim_by_name(model, adm_name)
+	model.set_object_data(data)
+	# Pose into a starting clip (e.g. the FP weapon idle "anim_wpn_idle" -> mp5_1i) so the model
+	# holds that pose rather than its bind/T-pose; the model self-ticks the clip via _process.
+	if not clip_key.is_empty() and model.has_method("play_body_clip"):
+		model.play_body_clip(clip_key)
+	return model
+
+
+# Attach a skeletal anim set from an EXPLICIT .adm name (vs _apply_skeletal_anim, which resolves it
+# from an item def's anim_def). Same per-.adm cache + load path; leaves the model static if the
+# .adm fails to load.
+func _apply_skeletal_anim_by_name(model: Node3D, adm_name_in: String) -> void:
+	if model == null or resource_root == null:
+		return
+	var adm_name := adm_name_in if adm_name_in.to_lower().ends_with(".adm") else adm_name_in + ".adm"
+	var skeletal
+	if _skeletal_cache.has(adm_name):
+		skeletal = _skeletal_cache[adm_name]
+	else:
+		skeletal = NovaSkeletalAnim.new()
+		if not skeletal.load_from_resource_root(resource_root, adm_name):
+			skeletal = null
+		_skeletal_cache[adm_name] = skeletal
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
+
+
 # --- Incremental placement (editor authoring) ---------------------------------
 
 ## Render one freshly-added entity into an existing MissionObjects container without

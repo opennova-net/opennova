@@ -108,6 +108,9 @@ func local_player_yaw_deg() -> float:
 func local_player_pitch_deg() -> float:
 	return _sim.get_local_player_pitch_deg() if _sim != null else 0.0
 
+func local_player_anim_slot() -> int:
+	return _sim.get_local_player_anim_slot() if _sim != null else -1
+
 func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _sim != null:
 		_sim.set_player_input(forward, back, left, right, run, look_yaw_deg, look_pitch_deg)
