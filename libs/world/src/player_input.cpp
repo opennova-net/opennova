@@ -7,49 +7,83 @@ namespace opennova::world {
 void apply_player_move_order(AiEntity &e, const PlayerInput &in) {
     InfantryState &inf = e.inf;
 
-    // Look → entity Yaw/Pitch. For the local player the motor applies these directly (instant,
-    // no body-turn smoothing) — the original drives entity+0x10/+0x14 straight from the mouse.
-    // [orig: Input_ProcessMouseAxisBindings @0x499680 / Input_HandleActionBinding_0 @0x4e1330]
+    // The local player writes look yaw/pitch directly into the entity inputs.
+    // [orig: Input_ProcessMouseAxisBindings @0x499680 /
+    // Input_HandleActionBinding_0 @0x4e1330]
     inf.target_heading = in.look_heading;
     inf.look_pitch = in.look_pitch;
 
-    // Stance + jump. crouch wins over prone [orig: motor tests entity+0x12C crouch bit before the
-    // prone bit @0x4b59ce]; the motor consumes the jump edge once when grounded.
-    inf.stance = in.crouch ? InfantryState::Stance::kCrouch
-               : (in.prone ? InfantryState::Stance::kProne : InfantryState::Stance::kStand);
+    // Player stance bits are packed into entity+0x12C. The player-body motor tests
+    // prone (0x100) before crouch (0x200). [orig: 0x4b59ce / 0x4b5b13]
+    inf.stance = in.prone ? InfantryState::Stance::kProne
+               : (in.crouch ? InfantryState::Stance::kCrouch : InfantryState::Stance::kStand);
     if (in.jump) inf.jump_requested = true;
 
-    // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R combo → 8-way move index.
-    int dir_bits = 0;
-    if (in.forward) dir_bits |= 1;
-    if (in.back) dir_bits |= 2;
-    if (in.left) dir_bits |= 4;
-    if (in.right) dir_bits |= 8;
+    // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R bits collapse to an
+    // 8-way move_direction_index plus a moving bit. There is no heading offset here.
+    int direction_bits = 0;
+    if (in.forward) direction_bits |= 1;
+    if (in.back) direction_bits |= 2;
+    if (in.left) direction_bits |= 4;
+    if (in.right) direction_bits |= 8;
 
-    int index = -1; // -1 = not moving
-    switch (dir_bits) {
-        case 1:     index = 0; break; // forward
-        case 1 | 4: index = 1; break; // forward + left
-        case 4:     index = 2; break; // left
-        case 2 | 4: index = 3; break; // back + left
-        case 2:     index = 4; break; // back
-        case 2 | 8: index = 5; break; // back + right
-        case 8:     index = 6; break; // right
-        case 1 | 8: index = 7; break; // forward + right
-        default:    index = -1; break; // none / opposing keys cancel
+    bool moving = direction_bits != 0;
+    int index = 0;
+    switch (direction_bits) {
+        case 1:
+        case 13:
+            index = 0;
+            break;
+        case 2:
+        case 14:
+            index = 4;
+            break;
+        case 3:
+        case 12:
+        case 15:
+            moving = false;
+            index = 0;
+            break;
+        case 4:
+        case 7:
+            index = 2;
+            break;
+        case 5:
+            index = 1;
+            break;
+        case 6:
+            index = 3;
+            break;
+        case 8:
+        case 11:
+            index = 6;
+            break;
+        case 9:
+            index = 7;
+            break;
+        case 10:
+            index = 5;
+            break;
+        default:
+            moving = false;
+            index = 0;
+            break;
     }
 
-    if (index < 0) {
+    if (!moving) {
         inf.move_mode = 0;
         inf.target_dist = 0;
-        inf.move_offset = 0;
+        inf.move_dir_index = 0;
     } else {
-        inf.move_mode = 3;          // "move" → infantry_select picks the walk/run gait
-        inf.target_dist = 0x10000;  // > 0 so the selector treats the order as moving (1.0 16.16)
-        // index * 45° in BAM32 (2^32/8 = 0x20000000): the move direction relative to facing.
-        inf.move_offset = static_cast<int32_t>(static_cast<uint32_t>(index) * 0x20000000u);
-        inf.alert_timer = in.run ? 16 : 0; // nonzero → run gait
+        inf.move_mode = 3;
+        inf.target_dist = 0x10000;
+        inf.move_dir_index = index;
     }
+
+    // in.run is deliberately not mapped to InfantryState::alert_timer. That timer is
+    // the AI alert source in Entity_UpdateInfantryAI; the player run path needs the
+    // player-body state/flag path from IDA, not an AI shortcut.
+    (void)in.run;
 }
 
 } // namespace opennova::world

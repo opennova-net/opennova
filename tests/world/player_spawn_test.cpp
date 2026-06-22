@@ -18,18 +18,37 @@ static int failures = 0;
 #define CHECK(c) \
     do { if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } } while (0)
 
-// Synthetic clip: any state advances with a fixed forward (entity-local +X) root delta.
-struct ForwardClip : IRootMotionSource {
-    int32_t fwd;
-    explicit ForwardClip(int32_t f) : fwd(f) {}
+// Test root source: directional states expose distinct local root axes, so the player motor must
+// select the real 8-way state rather than rotate a forward clip by a port-only offset.
+struct DirectionalClip : IRootMotionSource {
+    int32_t step;
+    explicit DirectionalClip(int32_t s) : step(s) {}
     bool has_clip(int, int) const override { return true; }
-    bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
+    bool advance(int, int state_id, int32_t &phase, RootMotionFrame &out) override {
         phase += 1;
-        out.dx = fwd;
-        out.dy = 0;
-        out.dz = 0;
-        out.events = 0;
+        out = RootMotionFrame{};
+        const int dir = dir_for_state(state_id);
+        switch (dir) {
+            case 0: out.dx = step; break;                       // forward
+            case 1: out.dx = step; out.dy = -step; break;        // forwardright
+            case 2: out.dy = -step; break;                       // right
+            case 3: out.dx = -step; out.dy = -step; break;       // backright
+            case 4: out.dx = -step; break;                       // back
+            case 5: out.dx = -step; out.dy = step; break;        // backleft
+            case 6: out.dy = step; break;                        // left
+            case 7: out.dx = step; out.dy = step; break;         // forwardleft
+            default: break;
+        }
         return true;
+    }
+    static int dir_for_state(int state_id) {
+        if (state_id >= anim_state::kWalkForward && state_id < anim_state::kWalkForward + 8)
+            return state_id - anim_state::kWalkForward;
+        if (state_id >= anim_state::kWalkCrouchForward && state_id < anim_state::kWalkCrouchForward + 8)
+            return state_id - anim_state::kWalkCrouchForward;
+        if (state_id >= anim_state::kWalkProneForward && state_id < anim_state::kWalkProneForward + 8)
+            return state_id - anim_state::kWalkProneForward;
+        return -1;
     }
 };
 
@@ -80,19 +99,19 @@ int main() {
         apply_player_move_order(ae, in);
         CHECK(ae.inf.move_mode != 0);
         CHECK(ae.inf.target_dist > 0);
-        CHECK(ae.inf.move_offset == 0);             // index 0 = forward
+        CHECK(ae.inf.move_dir_index == 0);          // index 0 = forward
         CHECK(ae.inf.target_heading == 0x10000000); // look → facing
 
         in = PlayerInput{};
         in.left = true;
         apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_offset == 0x40000000);    // index 2 = +90°
+        CHECK(ae.inf.move_dir_index == 2);          // index 2 = left
 
         in = PlayerInput{};
         in.forward = true;
         in.right = true;
         apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_offset == static_cast<int32_t>(7u * 0x20000000u)); // index 7
+        CHECK(ae.inf.move_dir_index == 7);          // index 7 = forward + right
 
         in = PlayerInput{}; // opposing keys cancel → idle
         in.forward = true;
@@ -100,6 +119,23 @@ int main() {
         apply_player_move_order(ae, in);
         CHECK(ae.inf.move_mode == 0);
         CHECK(ae.inf.target_dist == 0);
+        CHECK(ae.inf.move_dir_index == 0);
+
+        in = PlayerInput{}; // F+L+R collapses to forward in the IDA switch
+        in.forward = true;
+        in.left = true;
+        in.right = true;
+        apply_player_move_order(ae, in);
+        CHECK(ae.inf.move_mode != 0);
+        CHECK(ae.inf.move_dir_index == 0);
+
+        in = PlayerInput{}; // F+B+L collapses to left
+        in.forward = true;
+        in.back = true;
+        in.left = true;
+        apply_player_move_order(ae, in);
+        CHECK(ae.inf.move_mode != 0);
+        CHECK(ae.inf.move_dir_index == 2);
     }
 
     // --- motor drive: forward input advances pos along facing AND mirrors to the Entity.
@@ -107,7 +143,7 @@ int main() {
         World w;
         AiSystem ai;
         w.ai = &ai;
-        ForwardClip clip(0x8000); // 0.5 u forward per tick
+        DirectionalClip clip(0x8000); // 0.5 u per tick along the selected state
         ai.root_motion = &clip;
         w.registry.configure_pool(0, 8);
 
@@ -137,6 +173,34 @@ int main() {
         CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[0])) - e->position.x) < 0.01f);
         CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[1])) - e->position.y) < 0.01f);
         CHECK(std::fabs(static_cast<float>(from_fixed(ae.pos[2])) - e->position.z) < 0.01f);
+    }
+
+    // --- player movement uses real 8-way clip states. Facing stays fixed; left input selects
+    //     walk_left (state 7) and consumes that clip's lateral root.
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        DirectionalClip clip(0x8000);
+        ai.root_motion = &clip;
+        w.registry.configure_pool(0, 8);
+        spawn_player(w, PlayerSpawn{});
+        AiEntity &ae = *ai.at(0);
+
+        PlayerInput in;
+        in.left = true;
+        in.look_heading = 0; // facing +X; walk_left's local +Y root should move +Y
+        apply_player_move_order(ae, in);
+
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.logic_tick = 0;
+        ctx.is_authority = true;
+        ai.tick(w, ctx);
+
+        CHECK(ae.inf.anim_state == anim_state::kWalkForward + 6);
+        CHECK(ae.pos[0] == 0);
+        CHECK(ae.pos[1] == 0x8000);
     }
 
     // --- grounding mirror runs for NON-player motor entities too (the AI-in-the-ground fix):

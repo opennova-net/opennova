@@ -1,7 +1,7 @@
-// Per-frame player input → the infantry move order — the portable, Godot-free port of the
-// engine's input front end (docs/net/novaworld-net-re.md §5.38). The host's input layer
-// (the Godot controller, or a remote client) fills a PlayerInput; this maps it onto the
-// player entity's infantry state exactly as the original packs g_inputFlags into the entity.
+// Per-frame player input -> the infantry move order: the portable, Godot-free port of the
+// engine's input front end (docs/net/novaworld-net-re.md section 5.38). The host's input layer
+// fills a PlayerInput; this maps it onto the player entity's infantry state as the original
+// packs g_inputFlags into entity+0x12C.
 #ifndef OPENNOVA_WORLD_PLAYER_INPUT_H
 #define OPENNOVA_WORLD_PLAYER_INPUT_H
 
@@ -11,33 +11,28 @@ namespace opennova::world {
 
 struct AiEntity;
 
-// The movement keys + look the engine reads each frame. `look_heading` is the absolute
-// body/aim heading (BAM32) the caller accumulates from the mouse — the analog of
-// Input_ProcessMouseAxisBindings @0x499680 (mouse × sensitivity → Yaw).
+// The movement keys + look the engine reads each frame. look_heading is the absolute
+// body/aim heading (BAM32) the caller accumulates from the mouse, matching
+// Input_ProcessMouseAxisBindings @0x499680.
 struct PlayerInput {
     bool forward = false;
     bool back = false;
     bool left = false;
     bool right = false;
-    bool run = false;          // alerted/run gait (vs walk)
-    // Stance is the host's already-resolved posture (the original toggles it on a key edge via a
-    // reliable net message; the host owns that edge logic). crouch wins over prone. jump is a
-    // per-frame edge the motor consumes once when grounded. [orig: entity+0x12C stance/jump bits;
-    // stance edge-toggle via NapiNPServerMsg_HandleStanceChange @0x501c60; crouch wins @0x4b59ce;
-    // jump bit 0x20 @0x4b7eaf]
+    bool run = false;       // reserved until the IDA player-run path is ported
     bool crouch = false;
     bool prone = false;
     bool jump = false;
-    int32_t look_heading = 0;  // absolute facing (entity Yaw@+0x10), BAM32
-    int32_t look_pitch = 0;    // absolute look pitch (entity Pitch@+0x14), BAM32; the caller
-                               // clamps to ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]
+    int32_t look_heading = 0; // absolute facing (entity Yaw@+0x10), BAM32
+    int32_t look_pitch = 0;   // absolute look pitch (entity Pitch@+0x14), BAM32
 };
 
 // Faithful [orig: Player_PackInputStateToEntity @0x4df450]: collapse the F/B/L/R combo into
-// the witnessed 8-way move_direction_index (0..7) and deposit it — plus the look heading —
-// as the player's infantry move order (move_mode / target_dist / move_offset / target_heading).
-// Opposing keys cancel (idle). Index → BAM move-direction offset relative to facing:
-//   0 forward, 1 fwd+left, 2 left, 3 back+left, 4 back, 5 back+right, 6 right, 7 fwd+right.
+// the witnessed 8-way move_direction_index (0..7) plus moving bit and deposit it, with the
+// look heading, as the player's infantry move order (move_mode / target_dist /
+// move_dir_index / target_heading). Opposing-key combinations follow the IDA switch.
+// Index names match the input packer: 0 forward, 1 forward+left, 2 left, 3 back+left,
+// 4 back, 5 back+right, 6 right, 7 forward+right.
 void apply_player_move_order(AiEntity &e, const PlayerInput &in);
 
 } // namespace opennova::world
