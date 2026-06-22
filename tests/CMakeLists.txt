@@ -754,7 +754,7 @@ target_compile_features(entity_spawn_test PRIVATE cxx_std_17)
 add_test(NAME entity_spawn COMMAND entity_spawn_test)
 
 # The host's own-player keystone (net-re §5.2b/§5.38): spawn_player (pool-0 player-infantry
-# 0x14B9 + gate clear), apply_player_move_order (the 8-way Player_PackInputStateToEntity port),
+# 0x14B9 + gate clear), PlayerBodyInput (the 8-way Player_PackInputStateToEntity port),
 # and the infantry motor's local-player branch driving + mirroring the pose to the registry
 # Entity that the S2C 0x0A snapshot reads.
 add_executable(player_spawn_test world/player_spawn_test.cpp)

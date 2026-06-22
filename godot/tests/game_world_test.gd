@@ -76,6 +76,14 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	assert_eq(terrain.weather_path, NodePath("../NovaWeather"), "terrain weather path survived extraction")
 
 
+func test_game_world_is_playable_by_default_without_env_flag() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	assert_true(world.is_playable(), "standalone and editor Play Mission should spawn a player by default")
+	world.set_playable(false)
+	assert_false(world.is_playable(), "diagnostic previews can explicitly opt out of local-player setup")
+
+
 func test_load_mission_data_rejects_an_empty_document() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

@@ -1,5 +1,6 @@
 #include "world/player_spawn.h"
 
+#include "world/angle.h"
 #include "world/ai.h"           // AiSystem, AiEntity
 #include "world/entity_spawn.h" // entity_reset_to_spawn_state
 #include "world/geom.h"         // to_fixed
@@ -7,11 +8,6 @@
 #include "world/world.h"        // World, registry, cached
 
 namespace opennova::world {
-
-namespace {
-// [orig: degrees -> BAM32 = 2^32/360 = 11930464; same const as ai.cpp/promote.cpp]
-constexpr int64_t kBamPerDegree = 11930464;
-} // namespace
 
 EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
@@ -48,7 +44,7 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
     ae.pos[1] = to_fixed(spawn.position.y);
     ae.pos[2] = to_fixed(spawn.position.z);
     // Mission yaw (deg) -> engine heading (BAM32), the canonical (90 - yaw) convention.
-    ae.heading = static_cast<int32_t>((90 - spawn.yaw) * kBamPerDegree);
+    ae.heading = bam_heading_from_mission_yaw_deg(spawn.yaw);
     ae.team = spawn.team;
     ae.net_id = spawn.net_id;
     ae.health = spawn.health;

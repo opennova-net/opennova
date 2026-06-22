@@ -60,7 +60,7 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 func test_listen_server_spawns_and_replicates_local_player() -> void:
 	# Phase 2 (the moving player, net-re §5.2b/§5.38): spawn_local_player makes the host's own
 	# player an authoritative pool-0 entity that replicates through the wire to its own client
-	# view like any other entity, and set_player_input feeds its infantry move order. (Headless
+	# view like any other entity, and set_player_input feeds its player-body input. (Headless
 	# has no anim clips, so the soldier holds — motion comes from clips, as in the original;
 	# clip-driven forward motion is covered by the C++ player_spawn_test.)
 	var md := NovaMissionData.new()

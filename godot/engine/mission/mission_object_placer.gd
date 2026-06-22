@@ -34,6 +34,8 @@ const CollisionHull := preload("res://engine/object/collision_hull.gd")
 
 const CONTAINER_NAME := "MissionObjects"
 const RENDER_LOD := 0
+const PLAYER_RUNTIME_TYPE_ID := 0x14B9
+const PLAYER_VISUAL_ITEM_ID := 105310
 
 var resource_root: NovaResourceRoot
 var item_db: NovaItemDatabase
@@ -329,6 +331,19 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	_apply_skeletal_anim(model, item_id)
 	model.set_object_data(data)
 	return model
+
+
+## Resolve runtime-only player type ids to the authored items.def visual item. Keep the runtime
+## entity item/type id unchanged; this only chooses graphics/ADM data for presentation.
+func resolve_player_visual_item_id(runtime_type_id: int) -> int:
+	_ensure_item_db()
+	if runtime_type_id == PLAYER_RUNTIME_TYPE_ID and item_db != null and item_db.has_item(PLAYER_VISUAL_ITEM_ID):
+		return PLAYER_VISUAL_ITEM_ID
+	return runtime_type_id
+
+
+func build_player_animated_model(runtime_type_id: int, parent: Node3D, env_node: Node = null) -> Node3D:
+	return build_animated_model(resolve_player_visual_item_id(runtime_type_id), parent, env_node)
 
 
 ## Build ONE animated NovaObjectModel from an EXPLICIT graphic (.3di basename) + an explicit .adm

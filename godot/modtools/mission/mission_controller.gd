@@ -3951,6 +3951,7 @@ func _ensure_sim_driver() -> bool:
 	if int(_sim_driver.setup(_mission, container, {
 			"tick_mode": NovaSimulation.TICK_DIVIDED,
 			"self_tick": true,
+			"playable": false,
 			"terrain": terrain_data,
 			"resource_root": sim_root,
 			"item_db": _item_db(),

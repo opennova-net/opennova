@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -116,6 +117,10 @@ private:
 	std::unique_ptr<opennova::netsim::SerializingSink> net_sink_;
 	std::unique_ptr<opennova::netsim::NetSystem> net_;
 	std::unique_ptr<opennova::netsim::NetClientView> client_view_;
+	uint64_t last_sim_tick_us_ = 0;
+	uint64_t last_net_tick_us_ = 0;
+	mutable uint64_t last_present_snapshot_us_ = 0;
+	mutable int last_present_entity_count_ = 0;
 	// The per-frame 0x0A anchor: the local player's world position, or (Phase 1, no
 	// player yet) the first replicated entity, so compressed deltas stay small.
 	opennova::PlayerReplicationState compute_net_anchor() const;
@@ -200,7 +205,7 @@ public:
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
-	// to the player's infantry move order at the top of the next frame. The original drives
+	// to the player's body input at the top of the next frame. The original drives
 	// entity Yaw@+0x10 / Pitch@+0x14 straight from the mouse [orig: Input_HandleActionBinding_0
 	// @0x4e1330]; the caller clamps pitch to ±80°.
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
@@ -233,6 +238,8 @@ public:
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
 	// { loaded, paused, runs, event_count, code_size } for transport/debug UI.
 	Dictionary get_wac_state() const;
+	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
+	Dictionary get_runtime_perf_counters() const;
 	// Script-disable gate [orig: dword_C6EB28].
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;

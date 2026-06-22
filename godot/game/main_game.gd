@@ -11,6 +11,7 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -18,7 +19,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const CHANGE_DIR_KEY := KEY_F9
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
-# Phase 2.5 (the moving player, NOVA_PLAYER): faithful first-person camera. The eye is +1.0
+# Faithful first-person camera. The eye is +1.0
 # world unit above the player [orig: Camera_ComputeThirdPersonView @0x437d10]; F4 swaps to a
 # behind+above third person [orig: ThirdPersonCamera_Update @0x437af0]. The mouse drives look
 # yaw/pitch (pitch clamped ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]).
@@ -64,6 +65,7 @@ var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
+var _player_host: LocalPlayerHost = null
 var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
 var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
 var _player_third_person := false  # F4 toggles first/third person
@@ -82,6 +84,10 @@ func _ready() -> void:
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
 		_camera.connect("escape_pressed", _on_camera_escape)
+	_player_host = LocalPlayerHostScript.new()
+	_player_host.name = "LocalPlayerHost"
+	add_child(_player_host)
+	_player_host.setup(_world, _camera)
 	# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
 	# inherit from the editor), skip the menu and dial the replay tool / server
 	# directly — each instance gets slotted into a role on connect.
@@ -108,6 +114,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode == DEBUG_OVERLAY_KEY:
 		_toggle_debug_overlay()
+		get_viewport().set_input_as_handled()
+		return
+	if _player_host != null and _player_host.handle_key_input(event, _state == State.WORLD):
 		get_viewport().set_input_as_handled()
 		return
 	# F4 toggles first/third person for the local player [orig: dword_A890C8 mode flag].
@@ -348,7 +357,11 @@ func _on_resume() -> void:
 
 
 func _on_return_to_menu() -> void:
+	if _player_host != null:
+		_player_host.teardown()
 	_world.unload()
+	if _player_host != null:
+		_player_host.setup(_world, _camera)
 	if _net_killfeed != null:
 		_net_killfeed.queue_free()
 		_net_killfeed = null
@@ -381,27 +394,11 @@ func _process(delta: float) -> void:
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 		return
-	# Phase 2.5 (NOVA_PLAYER): drive the local player and follow it with the first-person
-	# camera. Input is set BEFORE tick() so the sim applies it net-before-logic this frame.
-	var has_player: bool = _world.has_local_player()
-	if has_player:
-		if _state == State.WORLD and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
-			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-		if _player_avatar == null:
-			_player_avatar = _world.build_local_player_avatar()
-		if _player_viewmodel == null:
-			_player_viewmodel = _world.build_local_player_viewmodel()
-		_drive_local_player(delta)
-	elif _player_avatar != null or _player_viewmodel != null:
-		if _player_avatar != null:
-			_player_avatar.queue_free()
-			_player_avatar = null
-		if _player_viewmodel != null:
-			_player_viewmodel.queue_free()
-			_player_viewmodel = null
+	if _player_host != null:
+		_player_host.before_world_tick(delta, _state == State.WORLD)
 	_world.tick(_camera.global_position, _camera.global_transform)
-	if has_player:
-		_update_player_camera()
+	if _player_host != null:
+		_player_host.after_world_tick()
 
 
 # WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns
@@ -420,6 +417,11 @@ func _drive_local_player(_delta: float) -> void:
 # Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
 # Yaw@+0x10 / Pitch@+0x14, Input_HandleActionBinding_0 @0x4e1330]. Signs are tunable.
 func _unhandled_input(event: InputEvent) -> void:
+	if _player_host != null and _player_host.handle_input(
+			event,
+			_state == State.WORLD and _world.is_loaded() and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED):
+		get_viewport().set_input_as_handled()
+		return
 	if not (event is InputEventMouseMotion):
 		return
 	if _state != State.WORLD or not _world.is_loaded() or not _world.has_local_player():

@@ -3,12 +3,14 @@
 #include <wac/compiler.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <string>
 #include <utility>
 
 #include <mission/bms.h>
 #include <mission/mission_systems.h>
+#include <world/angle.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
 
@@ -23,14 +25,16 @@ using opennova::world::AiSystem;
 using opennova::world::TickContext;
 using opennova::world::World;
 
-// mission yaw degrees <-> 32-bit binary angle. [orig: AI_HandleCommand cmd 0x16 @0x4659fa.]
-static constexpr double kBamPerDegree = 11930464.0;
-
 namespace {
 
-// BAM (32-bit binary angle) -> radians.
-constexpr double kRadPerBam = 6.283185307179586 / 4294967296.0;
 constexpr double kFixed16 = 65536.0;
+constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
+
+uint64_t perf_now_us() {
+	using Clock = std::chrono::steady_clock;
+	return static_cast<uint64_t>(
+	    std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
+}
 
 opennova::world::SeatType seat_type_from_variant(int value) {
 	switch (value) {
@@ -40,6 +44,14 @@ opennova::world::SeatType seat_type_from_variant(int value) {
 		case static_cast<int>(opennova::world::SeatType::Driver): return opennova::world::SeatType::Driver;
 		default: return opennova::world::SeatType::None;
 	}
+}
+
+int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &item_db) {
+	if (item_id == opennova::world::kPlayerInfantryTypeId && item_db.is_valid() &&
+	    item_db->has_item(kPlayerVisualItemId)) {
+		return kPlayerVisualItemId;
+	}
+	return item_id;
 }
 
 // Build the same synthetic patrol mission the C++ promote_test uses: 3 markers forming a
@@ -110,6 +122,10 @@ void NovaSimulation::reset_world() {
 	loaded_ = false;
 	playing_ = false;
 	have_baseline_ = false;
+	last_sim_tick_us_ = 0;
+	last_net_tick_us_ = 0;
+	last_present_snapshot_us_ = 0;
+	last_present_entity_count_ = 0;
 	apply_terrain_to_ai(); // re-point the fresh ai_ at the persisted terrain field (if any)
 	apply_root_motion_to_ai(); // ...and at the persisted infantry clip set (if any)
 }
@@ -156,7 +172,8 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 		if (!e || !e->inf.active) continue;
 		const opennova::world::Entity *ent = world_->registry.get(e->handle);
 		if (!ent) continue;
-		String adm = p_item_db->get_anim_def(ent->item_id);
+		const int visual_item_id = visual_item_id_for_runtime_type(ent->item_id, p_item_db);
+		String adm = p_item_db->get_anim_def(visual_item_id);
 		if (adm.is_empty()) continue;
 		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
 		const int adm_id = infantry_anim_.register_adm(p_resource_root, adm);
@@ -302,6 +319,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
 	ClassDB::bind_method(D_METHOD("compile_and_set_wac", "sources"), &NovaSimulation::compile_and_set_wac);
 	ClassDB::bind_method(D_METHOD("get_wac_state"), &NovaSimulation::get_wac_state);
+	ClassDB::bind_method(D_METHOD("get_runtime_perf_counters"), &NovaSimulation::get_runtime_perf_counters);
 	ClassDB::bind_method(D_METHOD("set_wac_paused", "paused"), &NovaSimulation::set_wac_paused);
 	ClassDB::bind_method(D_METHOD("is_wac_paused"), &NovaSimulation::is_wac_paused);
 	ClassDB::bind_method(D_METHOD("set_mission_variable", "index", "value"), &NovaSimulation::set_mission_variable);
@@ -414,9 +432,13 @@ void NovaSimulation::build_demo_mission() {
 
 void NovaSimulation::step() {
 	if (!loaded_) return;
-	apply_player_input_pre_tick(); // net-before-logic: player input -> move order
+	const uint64_t sim_start = perf_now_us();
+	apply_player_input_pre_tick(); // net-before-logic: player input -> body input
 	world_->run_logic_tick(); // one logic tick: cache + WAC + BMS + AI, then ++logic_tick
+	last_sim_tick_us_ = perf_now_us() - sim_start;
+	const uint64_t net_start = perf_now_us();
 	net_tick(); // serialize + loopback-decode when the listen server is on (no-op otherwise)
+	last_net_tick_us_ = perf_now_us() - net_start;
 }
 
 bool NovaSimulation::advance_frame() {
@@ -429,9 +451,13 @@ bool NovaSimulation::advance_frame() {
 	//   input -> net(drain C2S) -> run_logic_tick(WAC/BMS/AI) -> net(emit S2C) -> present.
 	// The C2S drain is NetSystem::tick (system index 0, runs at the top of the loop);
 	// the S2C emit + the local client's decode happen in net_tick(), after the logic.
-	apply_player_input_pre_tick(); // input -> the local player's move order, before logic
+	const uint64_t sim_start = perf_now_us();
+	apply_player_input_pre_tick(); // input -> the local player's body input, before logic
 	world_->run_logic_tick();
+	last_sim_tick_us_ = perf_now_us() - sim_start;
+	const uint64_t net_start = perf_now_us();
 	net_tick();
+	last_net_tick_us_ = perf_now_us() - net_start;
 	return true;
 }
 
@@ -447,7 +473,7 @@ void NovaSimulation::net_tick() {
 void NovaSimulation::apply_player_input_pre_tick() {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
 	AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
-	if (p) opennova::world::apply_player_move_order(*p, player_input_);
+	if (p) opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
 }
 
 bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
@@ -462,8 +488,7 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	if (!h.valid()) return false;
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
-	player_input_.look_heading =
-	    static_cast<int32_t>((90.0 - static_cast<double>(p_yaw_deg)) * kBamPerDegree);
+	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
 	return true;
 }
 
@@ -491,8 +516,7 @@ int NovaSimulation::spawn_local_player_at_start() {
 	if (!h.valid()) return -1;
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
 	player_input_ = opennova::world::PlayerInput{};
-	player_input_.look_heading =
-	    static_cast<int32_t>((90.0 - static_cast<double>(spawn.yaw)) * kBamPerDegree);
+	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
 	return sel.found ? 1 : 0;
 }
 
@@ -514,10 +538,10 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	player_input_.prone = p_prone;
 	player_input_.jump = p_jump;
 	// Look yaw (mission degrees) -> engine BAM heading, the (90 - yaw) convention used at spawn.
-	player_input_.look_heading =
-	    static_cast<int32_t>((90.0 - static_cast<double>(p_look_yaw_deg)) * kBamPerDegree);
+	player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(p_look_yaw_deg);
 	// Look pitch (mission degrees, up positive) -> entity Pitch@+0x14 (BAM32). No 90-offset.
-	player_input_.look_pitch = static_cast<int32_t>(static_cast<double>(p_look_pitch_deg) * kBamPerDegree);
+	player_input_.look_pitch =
+	    static_cast<int32_t>(static_cast<double>(p_look_pitch_deg) * opennova::world::kBamPerDegree);
 }
 
 Vector3 NovaSimulation::get_local_player_position() const {
@@ -533,14 +557,14 @@ float NovaSimulation::get_local_player_yaw_deg() const {
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p) return 0.0f;
 	// Engine heading (BAM32) -> mission yaw degrees, the (90 - heading) convention.
-	return static_cast<float>(90.0 - static_cast<double>(p->heading) / kBamPerDegree);
+	return static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(p->heading));
 }
 
 float NovaSimulation::get_local_player_pitch_deg() const {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0.0f;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p) return 0.0f;
-	return static_cast<float>(static_cast<double>(p->pitch) / kBamPerDegree);
+	return static_cast<float>(static_cast<double>(p->pitch) * opennova::world::kDegreesPerBam);
 }
 
 int NovaSimulation::get_local_player_anim_slot() const {
@@ -636,6 +660,18 @@ Dictionary NovaSimulation::get_wac_state() const {
 	out["runs"] = wac_ != nullptr ? static_cast<int64_t>(wac_->runs()) : 0;
 	out["event_count"] = wac_ != nullptr ? wac_->program().event_count : 0;
 	out["code_size"] = wac_ != nullptr ? static_cast<int>(wac_->program().code.size()) : 0;
+	return out;
+}
+
+godot::Dictionary godot::NovaSimulation::get_runtime_perf_counters() const {
+	Dictionary out;
+	out["loaded"] = loaded_;
+	out["listen_server"] = listen_server_;
+	out["ai_count"] = ai_ ? ai_->count() : 0;
+	out["present_entity_count"] = last_present_entity_count_;
+	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
+	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
+	out["present_snapshot_us"] = static_cast<int64_t>(last_present_snapshot_us_);
 	return out;
 }
 
@@ -866,15 +902,15 @@ float NovaSimulation::get_entity_yaw(int p_index) const {
 	if (!ai_) return 0.0f;
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return 0.0f;
-	const double mission_yaw_deg = 90.0 - static_cast<double>(e->heading) / kBamPerDegree;
-	return static_cast<float>(mission_yaw_deg * (kRadPerBam * kBamPerDegree)); // deg -> rad
+	const double mission_yaw_deg = opennova::world::mission_yaw_deg_from_bam_heading(e->heading);
+	return static_cast<float>(mission_yaw_deg * 0.017453292519943295);
 }
 
 float NovaSimulation::get_entity_yaw_deg(int p_index) const {
 	if (!ai_) return 0.0f;
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return 0.0f;
-	return static_cast<float>(90.0 - static_cast<double>(e->heading) / kBamPerDegree);
+	return static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(e->heading));
 }
 
 int NovaSimulation::get_entity_state(int p_index) const {
@@ -931,16 +967,25 @@ bool NovaSimulation::get_entity_hidden(int p_index) const {
 }
 
 PackedFloat32Array NovaSimulation::get_present_snapshot() const {
+	const uint64_t start_us = perf_now_us();
 	// ADR 0011 Decision 1: under the listen server the present pass reads the state the
 	// LOCAL CLIENT decoded off the wire, not the authoritative sim directly — so SP
 	// renders exactly what a networked peer would. Off (the editor/preview default), the
 	// direct AI-pool path below is unchanged.
 	if (listen_server_ && client_view_) {
-		return present_snapshot_from_client_view();
+		PackedFloat32Array out = present_snapshot_from_client_view();
+		last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
+		last_present_snapshot_us_ = perf_now_us() - start_us;
+		return out;
 	}
 	PackedFloat32Array out;
-	if (!ai_ || !world_) return out;
+	if (!ai_ || !world_) {
+		last_present_entity_count_ = 0;
+		last_present_snapshot_us_ = perf_now_us() - start_us;
+		return out;
+	}
 	const int count = ai_->count();
+	last_present_entity_count_ = count;
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
@@ -972,7 +1017,7 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		// Yaw-only today: MISSION-space yaw degrees for the host basis (bms_to_godot_basis). The brain
 		// stores ENGINE-frame heading (90 - yaw); convert back so a moving unit (whose heading is the
 		// mover's atan2 bearing) faces its travel direction, not 90 deg off. Pitch/roll reserved (0).
-		r[PF_YAW_DEG] = static_cast<float>(90.0 - static_cast<double>(e->heading) / kBamPerDegree);
+		r[PF_YAW_DEG] = static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(e->heading));
 		const int phase1 = e->brain.f[AiBrain::kPartAnimPhase0];
 		const int phase2 = e->brain.f[AiBrain::kPartAnimPhase0 + 1];
 		r[PF_PHASE1] = static_cast<float>(phase1);
@@ -984,6 +1029,7 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 			r[PF_ANIM_PHASE_TICKS] = static_cast<float>(e->inf.clip_phase);
 		}
 	}
+	last_present_snapshot_us_ = perf_now_us() - start_us;
 	return out;
 }
 
@@ -1063,8 +1109,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_POS_Z] = static_cast<float>(-es.y / kFixed16);
 		// Coarse heading: rebuild the 32-bit engine BAM from the compact high byte, then
 		// engine -> mission yaw (90 - heading), matching the AI-pool present.
-		const uint32_t heading_bam = static_cast<uint32_t>(es.yaw_byte) << 24;
-		r[PF_YAW_DEG] = static_cast<float>(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
+		const int32_t heading_bam = static_cast<int32_t>(static_cast<uint32_t>(es.yaw_byte) << 24);
+		r[PF_YAW_DEG] = static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(heading_bam));
 		if (world_->ai) {
 			const AiEntity *ae = world_->ai->for_handle(h);
 			if (ae && ae->inf.active) {

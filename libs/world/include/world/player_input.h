@@ -1,4 +1,4 @@
-// Per-frame player input -> the infantry move order: the portable, Godot-free port of the
+// Per-frame player input -> the player body state: the portable, Godot-free port of the
 // engine's input front end (docs/net/novaworld-net-re.md section 5.38). The host's input layer
 // fills a PlayerInput; this maps it onto the player entity's infantry state as the original
 // packs g_inputFlags into entity+0x12C.
@@ -6,6 +6,8 @@
 #define OPENNOVA_WORLD_PLAYER_INPUT_H
 
 #include <cstdint>
+
+#include "world/infantry.h"
 
 namespace opennova::world {
 
@@ -27,13 +29,21 @@ struct PlayerInput {
     int32_t look_pitch = 0;   // absolute look pitch (entity Pitch@+0x14), BAM32
 };
 
-// Faithful [orig: Player_PackInputStateToEntity @0x4df450]: collapse the F/B/L/R combo into
-// the witnessed 8-way move_direction_index (0..7) plus moving bit and deposit it, with the
-// look heading, as the player's infantry move order (move_mode / target_dist /
-// move_dir_index / target_heading). Opposing-key combinations follow the IDA switch.
-// Index names match the input packer: 0 forward, 1 forward+left, 2 left, 3 back+left,
-// 4 back, 5 back+right, 6 right, 7 forward+right.
-void apply_player_move_order(AiEntity &e, const PlayerInput &in);
+// The player-body packet that mirrors the raw input deposit at entity+0x12C without
+// pretending it is an NPC route order. This is the seam future MP input sources should feed.
+struct PlayerBodyInput {
+    uint8_t direction_bits = 0;       // F/B/L/R = 1/2/4/8
+    bool moving = false;
+    int move_dir_index = 0;           // 0 F, 1 F+L, 2 L, 3 B+L, 4 B, 5 B+R, 6 R, 7 F+R
+    bool run = false;                 // reserved until the IDA player-run path is ported
+    InfantryState::Stance stance = InfantryState::Stance::kStand;
+    bool jump = false;
+    int32_t look_heading = 0;
+    int32_t look_pitch = 0;
+};
+
+PlayerBodyInput pack_player_body_input(const PlayerInput &in);
+void apply_player_body_input(AiEntity &e, const PlayerBodyInput &body);
 
 } // namespace opennova::world
 

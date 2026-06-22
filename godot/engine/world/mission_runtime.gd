@@ -31,6 +31,11 @@ var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
+var _perf_tick_us: int = 0
+var _perf_sim_us: int = 0
+var _perf_present_us: int = 0
+var _perf_effects_us: int = 0
+var _perf_did_tick := false
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
@@ -41,10 +46,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_sim.set_tick_mode(int(options.get("tick_mode", NovaSimulation.TICK_DIVIDED)))
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
-	# Phase 2 (the moving player): turn the sim into the SP in-process listen server BEFORE
-	# load (NetSystem registers ahead of WAC, ADR 0011). Gated by the NOVA_PLAYER launch flag,
-	# threaded into options by the host. Default off -> the editor/preview path is unchanged.
-	if options.get("listen_server", false):
+	# Playable hosts turn the sim into the SP in-process listen server BEFORE load
+	# (NetSystem registers ahead of WAC, ADR 0011), then spawn the host player after load.
+	var playable := bool(options.get("playable", false))
+	if playable or options.get("listen_server", false):
 		_sim.enable_listen_server(true)
 	if options.get("resource_root") != null and options.get("item_db") != null:
 		_sim.set_item_seat_specs(_build_item_seat_specs(mission, options["resource_root"], options["item_db"]))
@@ -88,7 +93,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
 	# enemy set — NOT from the first NPC's position (net-re §5.2c). The player then runs the infantry
 	# motor from input (set_player_input); visible translation needs walk clips.
-	if options.get("player", false):
+	if playable or options.get("player", false):
 		var spawn_status := int(_sim.spawn_local_player_at_start())
 		if spawn_status < 0:
 			push_warning("MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)")
@@ -211,20 +216,47 @@ func is_playing() -> bool:
 ## The host calls this in its own per-frame order (game), or _process self-ticks it (editor).
 func tick() -> bool:
 	if _sim == null:
+		_perf_tick_us = 0
+		_perf_sim_us = 0
+		_perf_present_us = 0
+		_perf_effects_us = 0
+		_perf_did_tick = false
 		return false
+	var tick_start := Time.get_ticks_usec()
+	var sim_start := tick_start
 	var did_tick: bool
 	if _sim.get_tick_mode() == NovaSimulation.TICK_EVERY_PROCESS:
 		_sim.step()
 		did_tick = true
 	else:
 		did_tick = _sim.advance_frame()  # one frame = one 62 Hz logic tick (WAC self-gates inside)
+	_perf_sim_us = Time.get_ticks_usec() - sim_start
+	_perf_present_us = 0
+	_perf_effects_us = 0
 	if did_tick:
 		if _present != null:
+			var present_start := Time.get_ticks_usec()
 			_present.present()
+			_perf_present_us = Time.get_ticks_usec() - present_start
+		var effects_start := Time.get_ticks_usec()
 		var effects := _sim.drain_effects()
+		_perf_effects_us = Time.get_ticks_usec() - effects_start
 		if not effects.is_empty():
 			effects_drained.emit(effects)
+	_perf_tick_us = Time.get_ticks_usec() - tick_start
+	_perf_did_tick = did_tick
 	return did_tick
+
+
+func get_perf_counters() -> Dictionary:
+	return {
+		"tick_us": _perf_tick_us,
+		"sim_us": _perf_sim_us,
+		"present_us": _perf_present_us,
+		"effects_us": _perf_effects_us,
+		"did_tick": _perf_did_tick,
+		"sim": _sim.get_runtime_perf_counters() if _sim != null and _sim.has_method("get_runtime_perf_counters") else {},
+	}
 
 
 func _process(_delta: float) -> void:

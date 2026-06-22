@@ -120,6 +120,10 @@ struct InfantryState {
     // Packed local-player movement direction. The player body converts this index to
     // the real directional state inside the 1-8 / 11-18 / 19-26 walk blocks.
     // [orig: Player_PackInputStateToEntity @0x4df450; player body @0x4b40e0]
+    bool player_moving = false;
+    int player_move_dir_index = 0;
+    // NPC route-order fields. Org1 think writes these; the local player is driven by
+    // player_moving/player_move_dir_index instead.
     int move_dir_index = 0;
     int32_t look_pitch = 0;
 

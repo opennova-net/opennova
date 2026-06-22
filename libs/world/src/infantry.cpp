@@ -34,6 +34,7 @@
 #include <cmath>
 
 #include "world/ai.h"
+#include "world/angle.h"
 #include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
 
 namespace opennova::world {
@@ -67,8 +68,6 @@ constexpr double kBamPerRadian = 683565275.5764316;
 // [orig: degrees -> BAM32 = 2^32/360 = 11930464; same const as ai.cpp/promote.cpp.
 // Used only to mirror the local player's engine heading back to the registry Entity's
 // mission yaw — the precise (90 - deg) Q1 reconciliation lives with the present path.]
-constexpr int32_t kBamPerDegree = 11930464;
-
 int32_t abs_bam(int32_t v) { return v < 0 ? -v : v; } // BAM diffs never hit INT_MIN in practice
 
 bool reset_capsule_bottom_state(int state) {
@@ -301,7 +300,8 @@ void AiSystem::infantry_select(AiEntity &e) {
         inf.alert_timer != 0 || e.slot.bytes()[AiSlot::kMoveFlagByte] != 0 || inf.combat_reaction;
 
     int target = anim_state::kIdle; // [orig: targetAnimState seeds 43]
-    const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
+    const bool npc_moving = inf.move_mode != 0 && inf.target_dist > 0;
+    const bool moving = inf.is_local_player ? inf.player_moving : npc_moving;
     if (moving) {
         target = alerted ? anim_state::kRunForward : anim_state::kWalkForward; // [dump 2898-2906]
         // Final-node approach gait. [orig: dump 2907-2924, ported literally incl. the skip]
@@ -342,7 +342,7 @@ void AiSystem::infantry_select(AiEntity &e) {
     if (inf.is_local_player && inf.airborne)
         target = anim_state::kJumpLoop;
     else if (inf.is_local_player)
-        target = player_stance_remap(target, inf.stance, inf.move_dir_index);
+        target = player_stance_remap(target, inf.stance, inf.player_move_dir_index);
 
     const int resolved = infantry_resolve_state(inf.adm_id, target);
     if (resolved < 0) return; // no clips at all: hold the current state
@@ -458,11 +458,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             queue_death_event(e);
             inf.move_mode = 0;
             inf.target_dist = 0;
+            inf.player_moving = false;
         }
     } else if (inf.is_local_player) {
-        // 2'. Local player: the move order is set from input each frame
-        // (world::apply_player_move_order), NEVER the AI think — which would zero the order
-        // and waypoint-walk. Map the order to an anim every tick (responsive). The player
+        // 2'. Local player: the player-body input is set from host input each frame
+        // (world::apply_player_body_input), never by the org1 AI think path. Map the body
+        // input to an anim every tick (responsive). The player
         // takes the motor's simulate branch on host (is_authority) and on a client
         // (entity==local) alike. [orig: Entity_UpdateInfantryAI loc_4B9C3E; net-re §5.38]
         // Player jump: a grounded jump request launches the vertical impulse and enters the
@@ -503,7 +504,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 
     // 5. Body heading: quarter-step toward the target, clamped. [orig: dump 4600-4611 —
     // step = (diff + 2) >> 2 clamped ±69273360; body and render yaw move together]
-    {
+    if (inf.is_local_player) {
+        inf.body_heading = inf.target_heading;
+        e.heading = inf.target_heading;
+    } else {
         const int32_t diff = inf.target_heading - inf.body_heading;
         int32_t step = (diff + 2) >> 2;
         if (step > kBodyTurnClamp) step = kBodyTurnClamp;
@@ -537,8 +541,6 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // entity+0x10/+0x14 directly from input. [orig: Input_HandleActionBinding_0
     // @0x4e1330; net-re section 5.38]
     if (inf.is_local_player) {
-        inf.body_heading = inf.target_heading;
-        e.heading = inf.target_heading;
         e.pitch = inf.look_pitch;
     }
 
@@ -625,7 +627,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         ent->position.z = static_cast<float>(from_fixed(e.pos[2]));
         // BAM32 engine heading -> mission yaw (int16): mission_yaw = 90 - heading/deg.
         // (The exact yaw round-trip is the Q1 reconciliation handled with the present.)
-        ent->yaw = static_cast<int16_t>(90 - e.heading / kBamPerDegree);
+        ent->yaw = static_cast<int16_t>(
+            std::lround(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(e.heading))));
         // Body-anim slot for the present pass. The infantry motor (player AND AI) bypasses the
         // brain-state update_body_anim_slot (the ai.cpp dispatch `continue`s before reaching it),
         // so derive the present-pass BodyAnim slot from the motor's selected clip state here — else

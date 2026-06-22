@@ -74,6 +74,11 @@ var _injected_root: NovaResourceRoot = null
 var _skeleton_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
+var _playable := true
+var _perf_tick_us: int = 0
+var _perf_foliage_us: int = 0
+var _perf_runtime_us: int = 0
+var _perf_audio_us: int = 0
 
 
 ## Inject the resource root the next load resolves through (play-in-editor hands
@@ -81,6 +86,14 @@ var _foliage_hidden := false
 ## returns to the game's settings-driven mount.
 func set_resource_root(root: NovaResourceRoot) -> void:
 	_injected_root = root
+
+
+func set_playable(enabled: bool) -> void:
+	_playable = enabled
+
+
+func is_playable() -> bool:
+	return _playable
 
 
 # The root a load resolves through: the injected one, else a fresh runtime mount of
@@ -483,6 +496,11 @@ func is_loaded() -> bool:
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
 func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> void:
+	var tick_start := Time.get_ticks_usec()
+	var foliage_start := tick_start
+	_perf_foliage_us = 0
+	_perf_runtime_us = 0
+	_perf_audio_us = 0
 	if _loaded and _dispatcher != null:
 		if _dispatcher.dispatch_algorithm == NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
 			_dispatcher.dispatch(camera_pos, camera_xform)
@@ -494,14 +512,32 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> voi
 				_dispatcher.dispatch(camera_pos, camera_xform)
 			else:
 				_dispatcher.dispatch_centers(centers, camera_xform)
+	_perf_foliage_us = Time.get_ticks_usec() - foliage_start
+	var runtime_start := Time.get_ticks_usec()
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
 	# run exactly as before.
 	if _loaded and _runtime != null and _runtime.is_playing():
 		_runtime.tick()
+	_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
+	_perf_audio_us = Time.get_ticks_usec() - audio_start
+	_perf_tick_us = Time.get_ticks_usec() - tick_start
+
+
+func get_runtime_perf_counters() -> Dictionary:
+	return {
+		"tick_us": _perf_tick_us,
+		"foliage_us": _perf_foliage_us,
+		"runtime_us": _perf_runtime_us,
+		"audio_us": _perf_audio_us,
+		"runtime": _runtime.get_perf_counters() if _runtime != null and _runtime.has_method("get_perf_counters") else {},
+		"foliage": _dispatcher.get_dispatch_stats() if _dispatcher != null and _dispatcher.has_method("get_dispatch_stats") else {},
+		"audio": _mission_audio.get_perf_counters() if _mission_audio != null and _mission_audio.has_method("get_perf_counters") else {},
+	}
 
 
 # --- the local player (Phase 2; ADR 0012). Host delegates to the mission runtime. ---
@@ -536,7 +572,7 @@ func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, 
 func build_local_player_avatar() -> Node3D:
 	if _placer == null:
 		return null
-	return _placer.build_animated_model(0x14B9, self)
+	return _placer.build_player_animated_model(0x14B9, self)
 
 ## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
@@ -638,12 +674,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
 		"item_db": _placer.get_item_db() if _placer != null else null,
 	}
-	# NOVA_PLAYER (env launch flag, like NW_REPLAY): run the SP in-process listen server and
-	# spawn the host's own player (ADR 0011/0012, net-re §5.2b/§5.38). Default off -> normal
-	# missions run exactly as before (no listen server, no player).
-	if not OS.get_environment("NOVA_PLAYER").is_empty():
-		opts["listen_server"] = true
-		opts["player"] = true
+	# Playable hosts run the SP in-process listen server and spawn their own player
+	# (ADR 0011/0012, net-re §5.2b/§5.38). Diagnostic previews can explicitly opt out.
+	opts["playable"] = _playable
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")

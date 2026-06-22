@@ -1,8 +1,9 @@
 // The host's own-player keystone (net-re §5.2b/§5.38): spawn_player builds a pool-0
-// player-infantry entity, apply_player_move_order ports the 8-way input mapping
+// player-infantry entity, PlayerBodyInput ports the 8-way input mapping
 // [orig: Player_PackInputStateToEntity @0x4df450], and the infantry motor's local-player
 // branch drives + mirrors the pose to the registry Entity (the S2C 0x0A source).
 #include "world/ai.h"
+#include "world/angle.h"
 #include "world/geom.h"
 #include "world/infantry.h"
 #include "world/player_input.h"
@@ -17,6 +18,10 @@ using namespace opennova::world;
 static int failures = 0;
 #define CHECK(c) \
     do { if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } } while (0)
+
+static void submit_player_input(AiEntity &ae, const PlayerInput &in) {
+    apply_player_body_input(ae, pack_player_body_input(in));
+}
 
 // Test root source: directional states expose distinct local root axes, so the player motor must
 // select the real 8-way state rather than rotate a forward clip by a port-only offset.
@@ -53,6 +58,23 @@ struct DirectionalClip : IRootMotionSource {
 };
 
 int main() {
+    // --- shared BAM helpers: yaw wraps as a 32-bit binary angle; pitch/camera clamps live above.
+    {
+        CHECK(bam_heading_from_mission_yaw_deg(90.0) == 0);
+        CHECK(bam_heading_from_mission_yaw_deg(450.0) == 0);
+        CHECK(bam_heading_from_mission_yaw_deg(-270.0) == 0);
+        CHECK(static_cast<uint32_t>(bam_heading_from_mission_yaw_deg(0.0)) == 0x40000000u);
+        CHECK(static_cast<uint32_t>(bam_heading_from_mission_yaw_deg(180.0)) == 0xC0000000u);
+        CHECK(static_cast<uint32_t>(bam_heading_from_mission_yaw_deg(270.0)) == 0x80000000u);
+        const int32_t wrapped = bam_heading_from_mission_yaw_deg(720.0);
+        CHECK(std::fabs(normalize_mission_yaw_deg(mission_yaw_deg_from_bam_heading(wrapped)) - 0.0) < 0.01);
+        CHECK(std::fabs(mission_yaw_deg_from_bam_heading(static_cast<int32_t>(0x40000000u)) - 0.0) < 0.001);
+        CHECK(std::fabs(mission_yaw_deg_from_bam_heading(static_cast<int32_t>(0xC0000000u)) - 180.0) < 0.001);
+        CHECK(std::fabs(mission_yaw_deg_from_bam_heading(static_cast<int32_t>(0x80000000u)) - 270.0) < 0.001);
+        CHECK(bam_from_degrees_wrapped(360.0) == 0);
+        CHECK(bam_from_degrees_wrapped(-360.0) == 0);
+    }
+
     // --- §5.2b spawn: a gated pool-0 player-infantry, motor mounted, local_player published.
     {
         World w;
@@ -84,7 +106,7 @@ int main() {
         CHECK(ae->inf.is_local_player);
     }
 
-    // --- input → 8-way move order (the witnessed mapping + opposing-key cancel).
+    // --- input -> 8-way player body mapping (the witnessed mapping + opposing-key cancel).
     {
         World w;
         AiSystem ai;
@@ -96,46 +118,98 @@ int main() {
         PlayerInput in;
         in.forward = true;
         in.look_heading = 0x10000000;
-        apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_mode != 0);
-        CHECK(ae.inf.target_dist > 0);
-        CHECK(ae.inf.move_dir_index == 0);          // index 0 = forward
+        submit_player_input(ae, in);
+        CHECK(ae.inf.player_moving);
+        CHECK(ae.inf.player_move_dir_index == 0);   // index 0 = forward
+        CHECK(ae.inf.move_mode == 0);
+        CHECK(ae.inf.target_dist == 0);
         CHECK(ae.inf.target_heading == 0x10000000); // look → facing
 
         in = PlayerInput{};
         in.left = true;
-        apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_dir_index == 2);          // index 2 = left
+        submit_player_input(ae, in);
+        CHECK(ae.inf.player_move_dir_index == 2);   // index 2 = left
 
         in = PlayerInput{};
         in.forward = true;
         in.right = true;
-        apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_dir_index == 7);          // index 7 = forward + right
+        submit_player_input(ae, in);
+        CHECK(ae.inf.player_move_dir_index == 7);   // index 7 = forward + right
 
         in = PlayerInput{}; // opposing keys cancel → idle
         in.forward = true;
         in.back = true;
-        apply_player_move_order(ae, in);
+        submit_player_input(ae, in);
+        CHECK(!ae.inf.player_moving);
+        CHECK(ae.inf.player_move_dir_index == 0);
         CHECK(ae.inf.move_mode == 0);
         CHECK(ae.inf.target_dist == 0);
-        CHECK(ae.inf.move_dir_index == 0);
 
         in = PlayerInput{}; // F+L+R collapses to forward in the IDA switch
         in.forward = true;
         in.left = true;
         in.right = true;
-        apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_mode != 0);
-        CHECK(ae.inf.move_dir_index == 0);
+        submit_player_input(ae, in);
+        CHECK(ae.inf.player_moving);
+        CHECK(ae.inf.player_move_dir_index == 0);
 
         in = PlayerInput{}; // F+B+L collapses to left
         in.forward = true;
         in.back = true;
         in.left = true;
-        apply_player_move_order(ae, in);
-        CHECK(ae.inf.move_mode != 0);
-        CHECK(ae.inf.move_dir_index == 2);
+        submit_player_input(ae, in);
+        CHECK(ae.inf.player_moving);
+        CHECK(ae.inf.player_move_dir_index == 2);
+    }
+
+    // --- player body input path: raw input packs separately from NPC route orders.
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+        spawn_player(w, PlayerSpawn{});
+        AiEntity &ae = *ai.at(0);
+
+        struct Case {
+            bool f, b, l, r;
+            bool moving;
+            int index;
+        } cases[] = {
+            {false, false, false, false, false, 0},
+            {true,  false, false, false, true,  0},
+            {false, true,  false, false, true,  4},
+            {true,  true,  false, false, false, 0},
+            {false, false, true,  false, true,  2},
+            {true,  false, true,  false, true,  1},
+            {false, true,  true,  false, true,  3},
+            {true,  true,  true,  false, true,  2},
+            {false, false, false, true,  true,  6},
+            {true,  false, false, true,  true,  7},
+            {false, true,  false, true,  true,  5},
+            {true,  true,  false, true,  true,  6},
+            {false, false, true,  true,  false, 0},
+            {true,  false, true,  true,  true,  0},
+            {false, true,  true,  true,  true,  4},
+            {true,  true,  true,  true,  false, 0},
+        };
+        for (const Case &c : cases) {
+            PlayerInput in;
+            in.forward = c.f;
+            in.back = c.b;
+            in.left = c.l;
+            in.right = c.r;
+            in.look_heading = 0x10000000;
+            const PlayerBodyInput body = pack_player_body_input(in);
+            CHECK(body.moving == c.moving);
+            CHECK(body.move_dir_index == c.index);
+            apply_player_body_input(ae, body);
+            CHECK(ae.inf.player_moving == c.moving);
+            CHECK(ae.inf.player_move_dir_index == c.index);
+            CHECK(ae.inf.move_mode == 0);
+            CHECK(ae.inf.target_dist == 0);
+            CHECK(ae.inf.target_heading == 0x10000000);
+        }
     }
 
     // --- motor drive: forward input advances pos along facing AND mirrors to the Entity.
@@ -159,7 +233,7 @@ int main() {
 
         const int32_t x0 = ae.pos[0], y0 = ae.pos[1];
         for (int i = 0; i < 30; ++i) {
-            apply_player_move_order(ae, in); // re-assert each frame (as the controller would)
+            submit_player_input(ae, in); // re-assert each frame (as the controller would)
             TickContext ctx;
             ctx.world = &w;
             ctx.logic_tick = static_cast<uint32_t>(i);
@@ -190,7 +264,7 @@ int main() {
         PlayerInput in;
         in.left = true;
         in.look_heading = 0; // facing +X; walk_left's local +Y root should move +Y
-        apply_player_move_order(ae, in);
+        submit_player_input(ae, in);
 
         TickContext ctx;
         ctx.world = &w;
@@ -246,7 +320,7 @@ int main() {
         PlayerInput in;
         in.look_heading = 0x20000000; // a different facing
         in.look_pitch = 0x08000000;
-        apply_player_move_order(ae, in);
+        submit_player_input(ae, in);
         TickContext ctx;
         ctx.world = &w;
         ctx.logic_tick = 0;

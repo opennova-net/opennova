@@ -10,7 +10,7 @@ extends Control
 #
 # The per-frame drive is literally the game shell's loop (main_game._process):
 # world.tick(camera_position, camera_transform) -> foliage coverage, runtime logic + present,
-# audio. Esc (FlyCamera.escape_pressed) requests Stop; the workspace performs
+# audio. Esc requests Stop; the workspace performs
 # the viewport swap-back. Known v1 limits, surfaced in the status line: play
 # loads the SAVED terrain/env from the resource root (live sculpt edits are not
 # in the play world), and the play world is a second terrain instance in memory
@@ -20,12 +20,15 @@ signal stop_requested
 signal status_reported(message: String, is_error: bool)
 
 const GameWorldScene := preload("res://engine/world/game_world.tscn")
-const FlyCameraScript := preload("res://engine/fly_camera.gd")
+const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const PlayInputRouterScript := preload("res://modtools/mission/mission_play_input_router.gd")
 
 var _viewport: SubViewport
 var _world  # GameWorld
 var _camera: Camera3D
+var _player_host: LocalPlayerHost
+var _input_router: Node
 var _status: Label
 var _playing := false
 
@@ -34,16 +37,22 @@ func _ready() -> void:
 	var container := SubViewportContainer.new()
 	container.name = "PlayViewportContainer"
 	container.stretch = true
+	container.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(container)
 
 	_viewport = SubViewport.new()
 	_viewport.name = "PlayViewport"
 	# Own 3D world so the played scene (terrain, physics, lighting) never bleeds
-	# into the editor's; local input handling so the fly camera works embedded.
+	# into the editor's; local input handling so the player host works embedded.
 	_viewport.own_world_3d = true
 	_viewport.handle_input_locally = true
 	container.add_child(_viewport)
+
+	_input_router = PlayInputRouterScript.new()
+	_input_router.name = "PlayInputRouter"
+	_input_router.input_target = self
+	_viewport.add_child(_input_router)
 
 	_world = GameWorldScene.instantiate()
 	_world.name = "World"
@@ -51,11 +60,14 @@ func _ready() -> void:
 
 	_camera = Camera3D.new()
 	_camera.name = "PlayCamera"
-	_camera.set_script(FlyCameraScript)
 	_camera.position = Vector3(0, 100, 0)
 	_camera.current = true
 	_viewport.add_child(_camera)
-	_camera.connect("escape_pressed", _on_escape)
+
+	_player_host = LocalPlayerHostScript.new()
+	_player_host.name = "LocalPlayerHost"
+	add_child(_player_host)
+	_player_host.setup(_world, _camera)
 
 	_status = Label.new()
 	_status.name = "PlayStatus"
@@ -81,6 +93,8 @@ func start(mission: NovaMissionData, bms_name: String, resource_root: NovaResour
 		status_reported.emit("No resource directory mounted to play from.", true)
 		return ERR_UNCONFIGURED
 	_world.set_resource_root(resource_root)
+	if _world.has_method("set_playable"):
+		_world.set_playable(true)
 	var err := int(_world.load_mission_data(mission, bms_name))
 	if err != OK:
 		_world.unload()
@@ -99,7 +113,11 @@ func stop() -> void:
 	if not _playing:
 		return
 	_playing = false
+	if _player_host != null:
+		_player_host.teardown()
 	_world.unload()
+	if _player_host != null:
+		_player_host.setup(_world, _camera)
 	_status.text = ""
 
 
@@ -115,19 +133,42 @@ func get_world():
 	return _world
 
 
+func get_player_host():
+	return _player_host
+
+
 # The literal game-shell per-frame order (main_game._process): drive the loaded
 # world's foliage + runtime + audio around the play camera.
 func _process(_delta: float) -> void:
 	if _playing and _world != null and _world.is_loaded():
+		if _player_host != null:
+			_player_host.before_world_tick(_delta, true)
 		_world.tick(_camera.global_position, _camera.global_transform)
+		if _player_host != null:
+			_player_host.after_world_tick()
 
 
-func _on_escape() -> void:
-	if _playing:
-		stop_requested.emit()
+func _unhandled_input(event: InputEvent) -> void:
+	if handle_viewport_input(event):
+		get_viewport().set_input_as_handled()
 
 
-# Park the fly camera near the action: above the first organic (the usual player
+func handle_viewport_input(event: InputEvent) -> bool:
+	if not _playing:
+		return false
+	if event is InputEventKey:
+		var key := event as InputEventKey
+		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
+			stop_requested.emit()
+			return true
+		if _player_host != null and _player_host.handle_key_input(event, true):
+			return true
+	if _player_host != null and _player_host.handle_input(event, true):
+		return true
+	return false
+
+
+# Park the play camera near the action until the player host takes over: above the first organic (the usual player
 # start area), else the first item, else a high overview. Mission positions are
 # BMS-space; the camera lives in the play world's Godot space.
 func _park_camera(mission: NovaMissionData) -> void:
