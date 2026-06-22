@@ -2108,6 +2108,13 @@ func test_place_and_delete_report_status_and_resolve_names() -> void:
 	assert_string_contains(controller.get_last_status(), "Deleted", "deleting reports a status")
 
 
+func test_selected_graphic_name_resolves_from_item_database() -> void:
+	var controller := _loaded_with_item_db()
+	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
+	assert_eq(controller.get_selected_graphic_name(), "StaticCrate1",
+		"the selected entity reports its items.def graphic basename")
+
+
 func test_display_name_is_empty_without_an_item_database() -> void:
 	# _loaded_with_selection opens over a dir with no items.def, so the placer carries no
 	# database and a name cannot resolve; the inspector then shows the kind + index instead.

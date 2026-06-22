@@ -20,6 +20,7 @@ class FakeController:
 
 	var entity: Dictionary = {}
 	var display_name: String = ""  # resolved model name for the identity line
+	var graphic_name: String = ""  # resolved items.def graphic basename for the identity block
 	var dirty: bool = false
 	var team_calls: int = 0
 	var group_calls: int = 0
@@ -79,6 +80,9 @@ class FakeController:
 
 	func get_selected_display_name() -> String:
 		return display_name
+
+	func get_selected_graphic_name() -> String:
+		return graphic_name
 
 	func get_selected_position() -> Vector3:
 		return entity.get("position", Vector3.ZERO)
@@ -721,6 +725,46 @@ func test_identity_shows_resolved_model_name() -> void:
 	assert_eq(ctx.inspector._identity_sub.text, "Organic #4", "the subline carries the kind and index")
 
 
+func test_identity_shows_resolved_graphic_name() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.fake.graphic_name = "SpecOps"
+	ctx.inspector._refresh()
+	assert_true(ctx.inspector._identity_graphic_row.visible, "the graphic row shows when a graphic resolves")
+	assert_eq(ctx.inspector._identity_graphic.get_value(), "SpecOps", "the graphic row names the items.def graphic")
+	assert_false(ctx.inspector._identity_graphic.name_edit.editable, "the selected graphic is read-only derived data")
+	assert_false(ctx.inspector._identity_graphic.browse_button.visible, "browse is hidden: this row does not set the graphic")
+	assert_false(ctx.inspector._identity_graphic.clear_button.visible, "clear is hidden: this row does not set the graphic")
+
+
+func test_identity_graphic_jump_opens_resolved_object_model() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.fake.graphic_name = "SpecOps"
+	var log := {}
+	ctx.inspector.set_reference_services({
+		"resolve": func(kind: String, name: String) -> Dictionary:
+			log["resolve"] = [kind, name]
+			return {"status": "found", "path": "C:/res/SpecOps.3di"},
+		"pick": func(kind: String, title: String, _on_pick: Callable) -> void:
+			log["pick"] = [kind, title],
+		"jump": func(kind: String, path: String) -> void:
+			log["jump"] = [kind, path],
+	})
+	ctx.inspector._refresh()
+	assert_eq(log["resolve"], ["object_model", "SpecOps"], "the selected graphic resolves as an object model")
+	assert_true(ctx.inspector._identity_graphic.jump_button.visible, "resolved graphics expose the jump button")
+	assert_false(ctx.inspector._identity_graphic.jump_button.disabled, "resolved graphics can jump")
+	assert_false(ctx.inspector._identity_graphic.browse_button.visible, "browse stays hidden even when picker services exist")
+	ctx.inspector._identity_graphic.jump_button.pressed.emit()
+	assert_eq(log["jump"], ["object_model", "C:/res/SpecOps.3di"],
+		"jump carries the object_model kind and resolved .3di path")
+
+
+func test_identity_hides_graphic_line_without_a_graphic() -> void:
+	var ctx := _make(_sample_entity())
+	assert_false(ctx.inspector._identity_graphic_row.visible, "no resolved graphic -> no graphic row clutter")
+	assert_eq(ctx.inspector._identity_graphic.get_value(), "", "hidden graphic row is cleared")
+
+
 func test_identity_falls_back_to_kind_and_index_without_a_name() -> void:
 	var ctx := _make(_sample_entity())  # display_name left ""
 	assert_eq(ctx.inspector._identity_label.text, "Organic #4", "no resolved name -> kind + index heading")
@@ -1348,6 +1392,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 	var controller := MissionController.new(null)
 	var required := [
 		"get_mission", "get_stats", "get_selection_summary", "get_selected_entity",
+		"get_selected_display_name", "get_selected_graphic_name",
 		"get_selected_position", "get_selected_rotation",
 		"set_selected_position", "set_selected_rotation", "set_selected_team",
 		"set_selected_group", "set_selected_property", "delete_selected", "is_dirty",

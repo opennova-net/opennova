@@ -356,6 +356,23 @@ func get_selected_display_name() -> String:
 	return entity_display_name(int(_selected_ref["kind"]), int(_selected_ref["index"]))
 
 
+# The items.def graphic basename for the current selection, or "" when nothing is
+# selected / no item database is loaded / the item has no declared graphic.
+func get_selected_graphic_name() -> String:
+	if _selected_ref.is_empty():
+		return ""
+	var entity := _find_entity(int(_selected_ref["kind"]), int(_selected_ref["index"]))
+	if entity.is_empty():
+		return ""
+	var db := _item_db()
+	if db == null:
+		return ""
+	var item_id := int(entity.get("item_id", 0))
+	if not db.has_item(item_id):
+		return ""
+	return db.get_graphic(item_id).strip_edges()
+
+
 # { kind, index, position (mission-space Vector3), animated } for the selected
 # entity, or empty when nothing is selected. Drives the inspector's selection line.
 func get_selection_summary() -> Dictionary:
