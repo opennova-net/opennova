@@ -138,11 +138,24 @@ func _toggle_debug_overlay() -> void:
 		var host: Node = _hud if _hud != null else self
 		host.add_child(_debug_overlay)
 		_debug_overlay.set_runtime_source(_current_runtime)
+		# The View tab toggles: the overlay only emits intent; we own the world.
+		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
+		_debug_overlay.foliage_hidden_toggled.connect(_on_foliage_hidden_toggled)
 	_debug_overlay.toggle()
 
 
 func _current_runtime():
 	return _world.get_runtime() if _world != null else null
+
+
+func _on_skeleton_debug_toggled(enabled: bool) -> void:
+	if _world != null:
+		_world.set_skeleton_debug(enabled)
+
+
+func _on_foliage_hidden_toggled(hidden: bool) -> void:
+	if _world != null:
+		_world.set_foliage_hidden(hidden)
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end

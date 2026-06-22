@@ -28,7 +28,9 @@ const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd")
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
+const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
+const SKELETON_DEBUG_NAME := "SkeletonDebug"
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -68,6 +70,10 @@ var _net_event_view # NetEventView: draws the decoded event stream over the worl
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
 var _injected_root: NovaResourceRoot = null
+# Debug: draw character bones over the world (F3 overlay's "Show skeletons"). Off by default.
+var _skeleton_debug := false
+# Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
+var _foliage_hidden := false
 
 
 ## Inject the resource root the next load resolves through (play-in-editor hands
@@ -363,6 +369,10 @@ func unload() -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		container.queue_free()
+	# Skeleton debug overlay, if summoned (harmless to leave, but free for a clean teardown).
+	var skel_debug := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
+	if skel_debug != null:
+		skel_debug.queue_free()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -554,6 +564,43 @@ func build_local_player_viewmodel() -> Node3D:
 		container.queue_free()
 		return null
 	return container
+
+
+# --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------
+# Build / free a child SkeletonDebugView that draws every character's bones over the world.
+# Mirrors the editor's set_pick_debug -> _refresh_pick_debug build/free toggle flow.
+
+func set_skeleton_debug(enabled: bool) -> void:
+	_skeleton_debug = enabled
+	_refresh_skeleton_debug()
+
+func is_skeleton_debug() -> bool:
+	return _skeleton_debug
+
+func _refresh_skeleton_debug() -> void:
+	var existing := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not _skeleton_debug:
+		return
+	var view := SkeletonDebugView.new()
+	view.name = SKELETON_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # walks this GameWorld's subtree for Skeleton3D nodes each frame
+
+
+# --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
+# The dispatcher renders the scattered vegetation through child MultiMeshInstance3D slots,
+# so hiding the dispatcher node hides all foliage at once -- without touching the placement
+# caches, so re-showing is instant and the next dispatch is already current.
+
+func set_foliage_hidden(hidden: bool) -> void:
+	_foliage_hidden = hidden
+	if _dispatcher != null:
+		_dispatcher.visible = not hidden
+
+func is_foliage_hidden() -> bool:
+	return _foliage_hidden
 
 
 # Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects

@@ -351,8 +351,27 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
+		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
+		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
 		editor_shell.add_child(_debug_overlay)
 	_debug_overlay.toggle()
+
+
+# The View tab toggles act on the PIE world (game_world.tscn) the same way the game host
+# does. Only Play Mission has a GameWorld; the in-place Simulate driver has none, so the
+# toggles are inert there (consistent with the editor's read-only overlay stance).
+func _on_overlay_skeleton_debug(enabled: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_skeleton_debug(enabled)
+
+
+func _on_overlay_foliage_hidden(hidden: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_foliage_hidden(hidden)
 
 
 func is_debug_overlay_open() -> bool:

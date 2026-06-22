@@ -18,6 +18,16 @@ extends CanvasLayer
 ## (the game's F3 overlay) ignore it.
 signal transport_used(action: String)
 
+## Fired when the View tab's "Show skeletons" checkbox is toggled. The overlay is
+## host-neutral (no reach into the 3D scene), so it only emits intent; the host that owns
+## the world (the game's main_game, the editor's mission workspace) builds/frees the bone
+## debug view in response.
+signal skeleton_debug_toggled(enabled: bool)
+
+## Fired when the View tab's "Hide foliage" checkbox is toggled. Same host-neutral
+## contract as skeleton_debug_toggled: the host hides/shows the world's foliage.
+signal foliage_hidden_toggled(hidden: bool)
+
 const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 
@@ -55,6 +65,10 @@ var _status_label: Label
 
 # Perf pane (C11): the PerfTimeline ring + live monitors.
 var _perf_pane: DebugPerfPane
+
+# View pane: render-debug toggles the host acts on (skeleton bone overlay, foliage, ...).
+var _skeleton_check: CheckBox
+var _foliage_check: CheckBox
 
 
 func _init() -> void:
@@ -153,12 +167,38 @@ func _build_panel() -> void:
 	_build_sim_tab()
 	_build_vars_tab()
 	_build_perf_tab()
+	_build_view_tab()
 
 
 func _build_perf_tab() -> void:
 	_perf_pane = DebugPerfPane.new()
 	_perf_pane.name = "Perf"
 	_tabs.add_child(_perf_pane)
+
+
+# Render-debug toggles. Unlike the other tabs these don't read the sim: the checkbox holds
+# its own state and the host acts on the emitted signal, so it's left out of _refresh.
+func _build_view_tab() -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "View"
+	tab.add_theme_constant_override("separation", 6)
+	_tabs.add_child(tab)
+
+	_skeleton_check = CheckBox.new()
+	_skeleton_check.name = "ViewSkeletons"
+	_skeleton_check.text = "Show skeletons"
+	_skeleton_check.tooltip_text = "Draw character bones (joint-to-parent lines + axis crosses) over the world."
+	_skeleton_check.button_pressed = false
+	_skeleton_check.toggled.connect(_on_skeleton_toggled)
+	tab.add_child(_skeleton_check)
+
+	_foliage_check = CheckBox.new()
+	_foliage_check.name = "ViewHideFoliage"
+	_foliage_check.text = "Hide foliage"
+	_foliage_check.tooltip_text = "Hide the scattered vegetation (grass / bushes / trees) to see the terrain under it."
+	_foliage_check.button_pressed = false
+	_foliage_check.toggled.connect(_on_foliage_toggled)
+	tab.add_child(_foliage_check)
 
 
 func _build_entities_tab() -> void:
@@ -550,6 +590,14 @@ func _on_wac_pause_toggled(pressed: bool) -> void:
 
 func _on_vars_filter_toggled(_pressed: bool) -> void:
 	_refresh()
+
+
+func _on_skeleton_toggled(pressed: bool) -> void:
+	skeleton_debug_toggled.emit(pressed)
+
+
+func _on_foliage_toggled(pressed: bool) -> void:
+	foliage_hidden_toggled.emit(pressed)
 
 
 func _on_var_submitted(text: String, index: int) -> void:

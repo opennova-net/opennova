@@ -269,6 +269,39 @@ func test_entity_detail_card_follows_selection() -> void:
 		"...and the organic's infantry trait")
 
 
+func test_view_tab_skeleton_toggle_emits() -> void:
+	# The View tab's "Show skeletons" checkbox is a pure view toggle: it needs no
+	# runtime and only emits intent for the host to act on (build/free the 3D view).
+	var overlay := _make_overlay()
+	overlay.toggle()
+	assert_not_null(overlay._tabs.get_node_or_null("View"), "a View tab exists")
+	assert_not_null(overlay._skeleton_check, "the skeleton checkbox is reachable as a member")
+	assert_eq(overlay._skeleton_check.name, "ViewSkeletons")
+	assert_false(overlay._skeleton_check.button_pressed, "it defaults off")
+
+	watch_signals(overlay)
+	overlay._skeleton_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [true])
+	overlay._skeleton_check.toggled.emit(false)
+	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [false])
+
+
+func test_view_tab_hide_foliage_toggle_emits() -> void:
+	# The View tab's "Hide foliage" checkbox: same host-neutral, runtime-free contract as
+	# the skeleton toggle -- it only emits intent for the host to act on.
+	var overlay := _make_overlay()
+	overlay.toggle()
+	assert_not_null(overlay._foliage_check, "the foliage checkbox is reachable as a member")
+	assert_eq(overlay._foliage_check.name, "ViewHideFoliage")
+	assert_false(overlay._foliage_check.button_pressed, "it defaults off (foliage shown)")
+
+	watch_signals(overlay)
+	overlay._foliage_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [true])
+	overlay._foliage_check.toggled.emit(false)
+	assert_signal_emitted_with_parameters(overlay, "foliage_hidden_toggled", [false])
+
+
 func test_refresh_timer_pauses_while_hidden() -> void:
 	var overlay := _make_overlay()
 	assert_true(overlay._timer.paused, "hidden overlay never refreshes")

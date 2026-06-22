@@ -110,6 +110,60 @@ func test_injected_root_bypasses_settings_mount() -> void:
 		"the error names the injected root's directory, proving no settings mount ran")
 
 
+func test_skeleton_debug_builds_and_frees_the_view() -> void:
+	# The F3 overlay's "Show skeletons" toggle routes here: enabling builds a child
+	# SkeletonDebugView under the world, disabling frees it (mirrors set_pick_debug).
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	assert_false(world.is_skeleton_debug(), "off by default")
+	assert_null(world.get_node_or_null("SkeletonDebug"), "...with no view node")
+
+	world.set_skeleton_debug(true)
+	assert_true(world.is_skeleton_debug())
+	assert_not_null(world.get_node_or_null("SkeletonDebug"), "enabling builds the 3D view")
+
+	world.set_skeleton_debug(false)
+	assert_false(world.is_skeleton_debug())
+	await get_tree().process_frame  # queue_free lands at frame end
+	assert_null(world.get_node_or_null("SkeletonDebug"), "disabling frees it")
+
+
+func test_hide_foliage_toggles_dispatcher_visibility() -> void:
+	# The F3 overlay's "Hide foliage" toggle routes here: it hides/shows the foliage
+	# dispatcher node (whose MultiMesh children render the scattered vegetation).
+	var world := GameWorld.new()
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	var disp := NovaFoliageDispatcher.new()
+	disp.name = "FoliageDispatcher"
+	terrain.add_child(disp)
+	world.add_child(terrain)
+	add_child_autofree(world)
+	await get_tree().process_frame  # _ready wires _dispatcher from the named child
+
+	assert_false(world.is_foliage_hidden(), "foliage is shown by default")
+	assert_true(disp.visible, "...with the dispatcher visible")
+
+	world.set_foliage_hidden(true)
+	assert_true(world.is_foliage_hidden())
+	assert_false(disp.visible, "hiding foliage hides the dispatcher (and its MultiMesh slots)")
+
+	world.set_foliage_hidden(false)
+	assert_false(world.is_foliage_hidden())
+	assert_true(disp.visible, "showing foliage restores the dispatcher")
+
+
+func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
+	# Before a world loads (or with no foliage), there is no dispatcher; the toggle must
+	# just record intent and never crash.
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_foliage_hidden(true)
+	assert_true(world.is_foliage_hidden(), "the flag holds even with no dispatcher to act on")
+
+
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
 	var terrain := NovaTerrain.new()
