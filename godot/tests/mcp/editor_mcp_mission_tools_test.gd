@@ -15,6 +15,7 @@ const MissionWorkspace := preload("res://modtools/editor/mission_workspace.gd")
 
 const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 const ITEMS_PATH := "res://../fixtures/def/items.def"
+const DSUV1_MODEL := "res://../fixtures/3dp/dsuv1/dsuv1.3di"
 const SAVE_DIR := "user://mcp_mission_tools_test"
 
 var editor: Node
@@ -22,6 +23,7 @@ var workspace: RefCounted
 var controller: RefCounted
 var service: EditorMcpService
 var shell: Node
+var mount_root_dir := ""
 
 
 class ShellStub:
@@ -29,13 +31,14 @@ class ShellStub:
 
 	var _workspaces := {}
 	var root_dir := ""
+	var root: NovaResourceRoot = null
 	var editor_node: Node = null
 
 	func get_resource_root_dir() -> String:
 		return root_dir
 
 	func get_resource_root() -> NovaResourceRoot:
-		return null
+		return root
 
 	func get_editor_camera() -> Camera3D:
 		return editor_node.get("camera") as Camera3D if editor_node != null else null
@@ -69,6 +72,9 @@ func before_each() -> void:
 func after_each() -> void:
 	service.stop()
 	McpLogHub.instance = null
+	if not mount_root_dir.is_empty():
+		_remove_dir_recursive(mount_root_dir)
+		mount_root_dir = ""
 	var dir := _abs(SAVE_DIR)
 	if DirAccess.dir_exists_absolute(dir):
 		var d := DirAccess.open(dir)
@@ -85,6 +91,61 @@ func _call(name: String, args := {}) -> McpToolResult:
 
 func _ground(x: float, z: float) -> float:
 	return editor.sample_height_world(x, z)
+
+
+func _write_text_file(path: String, text: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "opened %s for writing" % path)
+	file.store_string(text)
+	file.close()
+
+
+func _copy_fixture(src: String, dst: String) -> void:
+	var bytes := FileAccess.get_file_as_bytes(_abs(src))
+	assert_gt(bytes.size(), 0, "fixture %s loaded" % src)
+	var file := FileAccess.open(dst, FileAccess.WRITE)
+	assert_not_null(file, "opened %s for writing" % dst)
+	file.store_buffer(bytes)
+	file.close()
+
+
+func _remove_dir_recursive(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	for child in dir.get_files():
+		DirAccess.remove_absolute(path.path_join(child))
+	for child_dir in dir.get_directories():
+		_remove_dir_recursive(path.path_join(child_dir))
+	DirAccess.remove_absolute(path)
+
+
+func _seed_mount_resource_root() -> void:
+	mount_root_dir = OS.get_cache_dir().path_join("opennova_mcp_mount_test_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(mount_root_dir), OK)
+	_write_text_file(mount_root_dir.path_join("items.def"), """
+begin "Debug Seat SUV"
+  id 101294
+  type vehicle
+  graphic dsuv1
+  sid dsuv1
+  anim_def dsuv1
+end
+
+begin "Debug Soldier"
+  id 102072
+  type person
+  graphic Fsldr03
+  sid fsldr03
+  anim_def E_STAND
+end
+""")
+	_copy_fixture(DSUV1_MODEL, mount_root_dir.path_join("dsuv1.3di"))
+	var resources := NovaResourceRoot.new()
+	assert_eq(resources.set_root_dir(mount_root_dir), OK)
+	shell.root = resources
 
 
 func test_sample_terrain_matches_editor_surface() -> void:
@@ -307,6 +368,41 @@ func test_analyze_mission_open_and_by_path() -> void:
 	var by_path: McpToolResult = await _call("analyze_mission", { "path": _abs(SAVE_DIR).path_join("analyzed.bms") })
 	assert_false(by_path.is_error)
 	assert_eq(int(by_path.structured["total_entities"]), 2, "read-only analysis re-parses from disk")
+
+
+func test_analyze_mounts_reports_static_prediction_from_shared_runtime_rules() -> void:
+	_seed_mount_resource_root()
+	var mission: NovaMissionData = controller.get_mission()
+	var vehicle: Dictionary = mission.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	var soldier: Dictionary = mission.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	assert_true(mission.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
+	assert_true(mission.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+
+	var result: McpToolResult = await _call("analyze_mounts", { "include_live": false })
+	assert_false(result.is_error, str(result.content))
+	var out: Dictionary = result.structured
+	assert_eq(String(out["runtime_parity"]["shared_driver"]), "MissionRuntime",
+		"the diagnostic documents that editor play and game use the shared mission runtime")
+	var mounts: Array = out["mounts"]
+	assert_eq(mounts.size(), 1)
+	var row: Dictionary = mounts[0]
+	assert_eq(int(row["command"]["id"]), 125)
+	assert_eq(String(row["command"]["mode"]), "any_seat")
+	assert_eq(int(row["target"]["bms_id"]), int(vehicle["bms_id"]))
+	assert_gt(int(row["target"]["seat_count"]), 0, "target seats came from the real 3DI userpoints")
+	assert_eq(String(row["prediction"]["seat"]["type_label"]), "controller",
+		"command 125 can select ctrlx by original priority")
+	assert_true(String(row["prediction"]["seat"]["source_name"]).to_lower().contains("ctrlx"))
+	assert_eq(String(row["diagnostics"][0]), "static_only")
+
+	var saved: McpToolResult = await _call("save_mission", { "path": "mounts_path_mode.bms" })
+	assert_false(saved.is_error)
+	var by_path: McpToolResult = await _call("analyze_mounts", {
+		"path": _abs(SAVE_DIR).path_join("mounts_path_mode.bms"),
+		"include_live": false,
+	})
+	assert_false(by_path.is_error)
+	assert_eq(int(by_path.structured["total"]), 1, "path mode re-parses a BMS without opening it")
 
 
 func test_sim_control_locks_editing_and_steps() -> void:

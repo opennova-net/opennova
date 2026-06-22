@@ -6,6 +6,7 @@ extends GutTest
 # path: setup builds the index, tick presents sim state onto the nodes, Stop rewinds + restores.
 
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
+const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 
 func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
@@ -16,6 +17,19 @@ func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
 	assert_eq(rt._seat_type_for_user_point("UseGun01"), 3, "UseGun -> gunner")
 	assert_eq(rt._seat_type_for_user_point("drvrx"), 5, "drvrx -> driver")
 	assert_eq(rt._seat_type_for_user_point("ground"), 0, "non-seat userpoints are ignored")
+
+
+func test_numbered_seat_userpoints_select_sit_pose_index() -> void:
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_eq(rt._seat_pose_index_for_user_point("sitex00"), 0)
+	assert_eq(rt._seat_pose_index_for_user_point("ctrlx03"), 3)
+	assert_eq(rt._seat_pose_index_for_user_point("drvrx24"), 24)
+	assert_eq(rt._seat_pose_index_for_user_point("UseGun01"), 0,
+		"UseGun uses emplaced variants from the target, not sit_N userpoint digits")
+	assert_eq(rt._seat_pose_index_for_user_point("sitex99"), 30,
+		"sit_N is clamped to the known sit_0..sit_30 table")
+	assert_eq(rt._seat_pose_index_for_user_point("ground"), 0)
 
 
 func test_seat_userpoints_are_converted_through_vehicle_yaw_zero_basis() -> void:
@@ -29,6 +43,26 @@ func test_seat_userpoints_are_converted_through_vehicle_yaw_zero_basis() -> void
 		"model right maps to a left-facing seat offset")
 	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.LEFT), 90,
 		"model left maps to a right-facing seat offset")
+
+
+func test_shared_seat_diagnostics_predict_original_command_rules() -> void:
+	var seats := [
+		{ "type": 1, "position": Vector3(5, 0, 0), "source_name": "sitex00" },
+		{ "type": 2, "position": Vector3(1, 0, 0), "source_name": "ctrlx00" },
+		{ "type": 5, "position": Vector3(2, 0, 0), "source_name": "drvrx00" },
+	]
+	var passenger := MissionSeatDiagnostics.predict_best_seat(seats, 123)
+	assert_eq(int(passenger["seat_index"]), 0, "command 123 is passenger-only")
+	assert_eq(String(passenger["seat"]["source_name"]), "sitex00")
+
+	var non_controller := MissionSeatDiagnostics.predict_best_seat(seats, 124)
+	assert_eq(int(non_controller["seat_index"]), 2, "command 124 skips ctrlx and takes driver before passenger")
+	assert_eq(String(non_controller["seat"]["source_name"]), "drvrx00")
+
+	var any := MissionSeatDiagnostics.predict_best_seat(seats, 125)
+	assert_eq(int(any["seat_index"]), 1, "command 125 can select ctrlx by original priority")
+	assert_eq(String(any["seat"]["source_name"]), "ctrlx00")
+	assert_eq(String(any["candidates"][1]["status"]), "selected")
 
 
 # An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D

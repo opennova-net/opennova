@@ -410,11 +410,14 @@ func _refresh_entity_detail(sim: Object) -> void:
 		int(card.get("wp_distance", 0)), int(card.get("out_speed", 0))])
 	if bool(card.get("mounted", false)):
 		var seat_local: Vector3 = card.get("mount_seat_local", Vector3.ZERO)
-		lines.append("mounted: target ssn %d  seat %d  type %d  bone %d" % [
+		lines.append("mounted: target ssn %d  seat %d/%d  %s  type %d  bone %d" % [
 			int(card.get("mount_target_net_id", 0)), int(card.get("mount_seat", -1)),
+			int(card.get("mount_target_seat_count", 0)),
+			String(card.get("mount_seat_source_name", "")),
 			int(card.get("mount_type", 0)), int(card.get("mount_seat_bone", 0))])
-		lines.append("seat local: (%.2f, %.2f, %.2f)  yaw %+d  anim %s (%d)" % [
+		lines.append("seat local: (%.2f, %.2f, %.2f)  pose %d  yaw %+d  anim %s (%d)" % [
 			seat_local.x, seat_local.y, seat_local.z,
+			int(card.get("mount_seat_pose_index", 0)),
 			int(card.get("mount_seat_yaw_offset", 0)),
 			String(card.get("anim_key", "")), int(card.get("anim_state", -1))])
 	var traits := PackedStringArray()

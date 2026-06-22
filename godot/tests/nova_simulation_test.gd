@@ -80,8 +80,8 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		{
 			"type_id": 1294,
 			"seats": [
-				{"type": 1, "position": Vector3(9, 0, 0), "yaw_offset": 0},
-				{"type": 2, "position": Vector3(0, 1, 2), "yaw_offset": 45}
+				{"type": 1, "position": Vector3(9, 0, 0), "yaw_offset": 0, "source_name": "sitex00"},
+				{"type": 2, "position": Vector3(0, 1, 2), "yaw_offset": 45, "pose_index": 24, "source_name": "ctrlx24"}
 			],
 		}
 	])
@@ -93,19 +93,92 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		"non-gunner mounted seats carry their local yaw offset")
 	var snap := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
-	assert_eq(int(snap[NovaSimulation.PF_ANIM_STATE]), 76, "mounted infantry renders anim_sit")
+	assert_eq(int(snap[NovaSimulation.PF_ANIM_STATE]), 100, "mounted ctrlx24 infantry renders anim_sit_24")
 	var card: Dictionary = sim.get_entity_debug(0)
 	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
 	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
 	assert_eq(int(card["mount_seat"]), 1, "ctrlx seat was selected by original priority")
 	assert_eq(int(card["mount_type"]), 2, "seat type is ctrlx/controller")
 	assert_eq(int(card["mount_seat_bone"]), 0)
+	assert_eq(int(card["mount_seat_pose_index"]), 24)
+	assert_eq(String(card["mount_seat_source_name"]), "ctrlx24")
 	assert_eq(Vector3(card["mount_seat_local"]), Vector3(0, 1, 2))
 	assert_eq(int(card["mount_seat_yaw_offset"]), 45)
-	assert_eq(int(card["anim_state"]), 76)
-	assert_eq(String(card["anim_key"]), "anim_sit")
+	var target_seats: Array = card["mount_target_seats"]
+	assert_eq(target_seats.size(), 2, "debug card carries every target seat candidate")
+	assert_eq(String((target_seats[0] as Dictionary)["source_name"]), "sitex00")
+	assert_eq(int((target_seats[0] as Dictionary)["type"]), 1)
+	assert_eq(String((target_seats[1] as Dictionary)["source_name"]), "ctrlx24")
+	assert_eq(int((target_seats[1] as Dictionary)["pose_index"]), 24)
+	assert_eq(int(card["anim_state"]), 100)
+	assert_eq(String(card["anim_key"]), "anim_sit_24")
 	assert_eq(stride, NovaSimulation.PF_STRIDE)
 	sim.free()
+
+
+func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3(0, -90, 0))
+	var soldier := md.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	assert_false(soldier.is_empty())
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [
+				{
+					"type": 2,
+					"position": Vector3(-0.7148895, -0.1189880, 2.1048889),
+					"source_name": "ctrlx10",
+				}
+			],
+		}
+	])
+	assert_true(sim.load_from_mission_data(md), "loaded rotated command-125 mount")
+	var pos := sim.get_entity_position(0)
+	var expected := Vector3(10.1189880, 2.1048889, 0.7148895)
+	assert_lt(pos.distance_to(expected), 0.001,
+		"mounted seat local follows the same rotated side as the selected model userpoint")
+	sim.free()
+
+
+func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var gun := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	var soldier := md.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(10, 0, 0), Vector3.ZERO)
+	assert_false(gun.is_empty())
+	assert_false(soldier.is_empty())
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(gun["bms_id"])))
+
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"emplaced_pose_variant": 3,
+			"seats": [
+				{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}
+			],
+		}
+	])
+	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
+	var snap := sim.get_present_snapshot()
+	assert_eq(int(snap[NovaSimulation.PF_ANIM_STATE]), 67,
+		"UseGun falls back to base anim_emplaced when the emplaced variant clip is unavailable")
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_true(bool(card["mounted"]), "debug card marks UseGun occupant mounted")
+	assert_eq(int(card["mount_type"]), 3, "seat type is UseGun/gunner")
+	assert_eq(int(card["mount_target_emplaced_pose_variant"]), 3)
+	assert_eq(int(card["anim_state"]), 67)
+	assert_eq(String(card["anim_key"]), "anim_emplaced")
+	sim.free()
+
 
 func test_present_snapshot_shape_and_stride() -> void:
 	# ONE batched present snapshot replaces ~10 Variant-boxed scalar getter calls per entity in the

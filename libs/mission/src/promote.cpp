@@ -27,17 +27,19 @@ int pool_for_kind(EntityKind k) {
     return 0;
 }
 
-const std::vector<Seat> *seat_specs_for_type(const PromoteOptions &opts, int32_t type_id) {
+const ItemSeatSpec *seat_spec_for_type(const PromoteOptions &opts, int32_t type_id) {
     for (const ItemSeatSpec &spec : opts.item_seat_specs) {
-        if (spec.type_id == type_id) return &spec.seats;
+        if (spec.type_id == type_id) return &spec;
     }
     return nullptr;
 }
 
 void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
-    const std::vector<Seat> *seats = seat_specs_for_type(opts, entity.item_id);
-    if (seats == nullptr || seats->empty()) return;
-    entity.seats = *seats;
+    const ItemSeatSpec *spec = seat_spec_for_type(opts, entity.item_id);
+    if (spec == nullptr) return;
+    entity.emplaced_pose_variant = spec->emplaced_pose_variant;
+    if (spec->seats.empty()) return;
+    entity.seats = spec->seats;
     for (Seat &seat : entity.seats) {
         seat.occupant = EntityHandle{};
     }
@@ -53,17 +55,19 @@ bool within_mount_radius(const Entity &occupant, const Entity &target, float rad
 struct PendingCommandMount {
     uint16_t occupant_ssn = 0;
     uint16_t target_ssn = 0;
+    uint8_t command_id = 0;
     EntityHandle occupant_handle;
 };
 
-void apply_command_125_mounts(const std::vector<PendingCommandMount> &pending, World &world,
-                              AiSystem &ai, const PromoteOptions &opts) {
+void apply_command_mounts(const std::vector<PendingCommandMount> &pending, World &world,
+                          AiSystem &ai, const PromoteOptions &opts) {
     for (const PendingCommandMount &p : pending) {
         Entity *occupant = world.registry.get(p.occupant_handle);
         Entity *target = world.registry.get(world.registry.find_by_net_id(p.target_ssn));
         if (occupant == nullptr || target == nullptr) continue;
         if (!within_mount_radius(*occupant, *target, opts.command_mount_radius)) continue;
-        if (!world.commands.mount(p.occupant_ssn, p.target_ssn)) continue;
+        if (!world.commands.mount_boarding_command(p.occupant_ssn, p.target_ssn, p.command_id))
+            continue;
         if (AiEntity *ae = ai.for_handle(p.occupant_handle)) {
             ai.pose_if_mounted(*ae, world);
         }
@@ -290,11 +294,12 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
                 ae.health = 100;
                 ++r.brains;
             }
-            if (kind == EntityKind::Organic && e.waypoint_id == 125 &&
+            if (kind == EntityKind::Organic && e.waypoint_id >= 123 && e.waypoint_id <= 125 &&
                 e.wp_number > 0 && e.wp_number <= 0xFFFF) {
                 command_mounts.push_back(PendingCommandMount{
                     static_cast<uint16_t>(e.id),
                     static_cast<uint16_t>(e.wp_number),
+                    static_cast<uint8_t>(e.waypoint_id),
                     h,
                 });
             }
@@ -304,7 +309,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);
     promote_vec(m.markers, EntityKind::Marker, /*ai_capable=*/false);
     promote_vec(m.organics, EntityKind::Organic, /*ai_capable=*/true);
-    apply_command_125_mounts(command_mounts, world, ai, opts);
+    apply_command_mounts(command_mounts, world, ai, opts);
 
     return r;
 }

@@ -10,6 +10,7 @@ extends RefCounted
 ## by construction.
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 const ROW_CAP := 100
 const INT_PROPS: Array[String] = [
@@ -109,6 +110,18 @@ func register_all(registry: McpToolRegistry) -> void:
 				"path": { "type": "string" },
 				"top": { "type": "integer", "default": 15, "minimum": 1, "maximum": 50 },
 			}, [], { "timeout_ms": 60000 }), Callable(self, "_tool_analyze"))
+	registry.register(_def("analyze_mounts",
+			"Read-only NPC mount/seat diagnostic for attach commands 123/124/125. Uses the same seat extraction rules as MissionRuntime: authored organic -> target SSN -> target model userpoints -> predicted seat, with optional live MissionRuntime/NovaSimulation comparison while editor Play/PIE is running. path can name any .bms through the mounted resource root; omit it for the open mission.",
+			{
+				"path": { "type": "string" },
+				"include_live": { "type": "boolean", "default": true },
+				"command_ids": { "type": "array", "items": { "type": "integer" } },
+				"ssn": { "type": "integer" },
+				"target_ssn": { "type": "integer" },
+				"only_problems": { "type": "boolean", "default": false },
+				"limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 },
+				"offset": { "type": "integer", "default": 0, "minimum": 0 },
+			}, [], { "timeout_ms": 60000, "serial": false }), Callable(self, "_tool_analyze_mounts"))
 	registry.register(_def("save_mission",
 			"Write the open mission to disk. ONLY call this when the user explicitly asked to save. No args: saves to its current path (errors if never saved — pass path). path: a filename (\"patrol.bms\", written into the mounted resource root) or an absolute path; must end in .bms and becomes the mission's current path. Clears the dirty flag; undo history survives.",
 			{ "path": { "type": "string" } }), Callable(self, "_tool_save"))
@@ -681,6 +694,213 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"waypoint_paths": paths,
 		"persons": { "teams": teams, "ai_classes": classes },
 	}
+
+
+func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var loaded := _mission_for_readonly_analysis(args, ctx)
+	if loaded.has("error"):
+		return McpToolResult.error(loaded["error"])
+	var mission: Variant = loaded["mission"]
+	var source := String(loaded.get("source", ""))
+	var item_db: Variant = _item_db_for_mount_analysis(ctx, loaded.get("controller"))
+	var root: Variant = ctx.root()
+	var command_ids := _mount_command_filter(args.get("command_ids", []))
+	var target_by_ssn := _entities_by_bms_id(mission.get_all_entities())
+	var live_cards := _full_live_cards_by_ref(ctx) if bool(args.get("include_live", true)) and not args.has("path") else {}
+	var seat_cache := {}
+	var rows: Array = []
+	for raw in mission.get_all_entities():
+		var organic: Dictionary = raw
+		if int(organic.get("kind", -1)) != NovaMissionData.KIND_ORGANIC:
+			continue
+		var command_id := int(organic.get("waypoint_id", 0))
+		if not command_ids.has(command_id):
+			continue
+		var ssn := int(organic.get("bms_id", organic.get("id", 0)))
+		if args.has("ssn") and ssn != int(args["ssn"]):
+			continue
+		var target_ssn := int(organic.get("wp_number", 0))
+		if args.has("target_ssn") and target_ssn != int(args["target_ssn"]):
+			continue
+		var target: Dictionary = target_by_ssn.get(target_ssn, {})
+		var row := _mount_analysis_row(organic, target, command_id, root, item_db, seat_cache, live_cards)
+		if bool(args.get("only_problems", false)) and not _mount_row_has_problem(row):
+			continue
+		rows.append(row)
+	var offset := maxi(int(args.get("offset", 0)), 0)
+	var limit := clampi(int(args.get("limit", 200)), 1, 1000)
+	var page := rows.slice(offset, offset + limit)
+	return {
+		"source": source,
+		"runtime_parity": {
+			"shared_driver": "MissionRuntime",
+			"editor_host": "MissionController",
+			"game_host": "GameWorld",
+			"live_source": "MissionRuntime/NovaSimulation" if not live_cards.is_empty() else "static",
+		},
+		"mounts": page,
+		"total": rows.size(),
+		"truncated": offset + page.size() < rows.size(),
+	}
+
+
+func _mission_for_readonly_analysis(args: Dictionary, ctx: McpToolContext) -> Dictionary:
+	if args.has("path") and not String(args["path"]).is_empty():
+		var mission := NovaMissionData.new()
+		var opened := McpAssetDescribe.open_data(mission, ctx, String(args["path"]))
+		if not opened["ok"]:
+			return { "error": String(opened["error"]) }
+		return { "mission": mission, "source": String(opened["path"]) }
+	var gate := _require_mission(ctx)
+	if gate.has("error"):
+		return gate
+	var controller: Variant = gate["controller"]
+	return {
+		"mission": controller.get_mission(),
+		"source": String(controller.get_current_path()),
+		"controller": controller,
+	}
+
+
+func _item_db_for_mount_analysis(ctx: McpToolContext, controller: Variant) -> Variant:
+	if ctx.root() != null:
+		var db := NovaItemDatabase.new()
+		if db.load_from_resource_root(ctx.root(), "items.def") == OK:
+			return db
+	if controller != null and controller.has_method("_item_db"):
+		return controller._item_db()
+	return null
+
+
+func _mount_command_filter(raw: Variant) -> Dictionary:
+	var out := {}
+	if raw is Array and not (raw as Array).is_empty():
+		for value in raw:
+			out[int(value)] = true
+	else:
+		out[MissionSeatDiagnostics.COMMAND_PASSENGER_ONLY] = true
+		out[MissionSeatDiagnostics.COMMAND_SKIP_CONTROLLER] = true
+		out[MissionSeatDiagnostics.COMMAND_ANY_SEAT] = true
+	return out
+
+
+func _entities_by_bms_id(entities: Array) -> Dictionary:
+	var out := {}
+	for raw in entities:
+		var entity: Dictionary = raw
+		var ssn := int(entity.get("bms_id", entity.get("id", 0)))
+		if ssn != 0:
+			out[ssn] = entity
+	return out
+
+
+func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: int, root: Variant,
+		item_db: Variant, seat_cache: Dictionary, live_cards: Dictionary) -> Dictionary:
+	var diagnostics: Array = []
+	var target_ssn := int(organic.get("wp_number", 0))
+	var seats: Array = []
+	var target_card := { "bms_id": target_ssn, "found": false, "seat_count": 0 }
+	if target.is_empty():
+		diagnostics.append("target_missing")
+	else:
+		target_card = _mount_entity_card(target, item_db)
+		target_card["found"] = true
+		var type_id := int(target.get("type_id", 0))
+		if not seat_cache.has(type_id):
+			seat_cache[type_id] = MissionSeatDiagnostics.seat_specs_for_item(
+					root, item_db, int(target.get("item_id", 0)), type_id, true)
+		var spec: Dictionary = seat_cache[type_id]
+		seats = spec.get("seats", [])
+		target_card["display_name"] = spec.get("display_name", target_card.get("display_name", ""))
+		target_card["graphic"] = spec.get("graphic", "")
+		target_card["model"] = spec.get("model", "")
+		target_card["seat_count"] = seats.size()
+		if not String(spec.get("error", "")).is_empty():
+			target_card["seat_error"] = String(spec["error"])
+			diagnostics.append(String(spec["error"]))
+		if seats.is_empty():
+			diagnostics.append("no_target_seats")
+	var prediction := MissionSeatDiagnostics.predict_best_seat(seats, command_id)
+	if int(prediction.get("seat_index", -1)) < 0 and not seats.is_empty():
+		diagnostics.append("no_eligible_seat")
+	var row := {
+		"organic": _mount_entity_card(organic, item_db),
+		"command": MissionSeatDiagnostics.command_rule(command_id),
+		"target": target_card,
+		"seat_candidates": prediction.get("candidates", []),
+		"prediction": {
+			"seat_index": prediction.get("seat_index", -1),
+			"seat": prediction.get("seat", {}),
+		},
+		"diagnostics": diagnostics,
+	}
+	var live_key := "%d:%d" % [int(organic.get("kind", -1)), int(organic.get("index", -1))]
+	if live_cards.has(live_key):
+		var live: Dictionary = live_cards[live_key]
+		row["live"] = live
+		_append_live_mount_diagnostics(row, live, diagnostics)
+	elif live_cards.is_empty():
+		diagnostics.append("static_only")
+	else:
+		diagnostics.append("live_missing")
+	return row
+
+
+func _mount_entity_card(entity: Dictionary, item_db: Variant) -> Dictionary:
+	var item_id := int(entity.get("item_id", 0))
+	var out := {
+		"kind": int(entity.get("kind", -1)),
+		"kind_label": _kind_label(int(entity.get("kind", -1))),
+		"index": int(entity.get("index", -1)),
+		"bms_id": int(entity.get("bms_id", entity.get("id", 0))),
+		"item_id": item_id,
+		"type_id": int(entity.get("type_id", 0)),
+		"position": entity.get("position", Vector3.ZERO),
+		"rotation_deg": entity.get("rotation_deg", Vector3.ZERO),
+		"team": entity.get("team"),
+		"waypoint_id": entity.get("waypoint_id"),
+		"wp_number": entity.get("wp_number"),
+	}
+	if entity.get("position") is Vector3:
+		out["world_position"] = _world_echo(entity["position"])
+	if item_db != null and item_id != 0 and item_db.has_method("has_item") and item_db.has_item(item_id):
+		out["display_name"] = String(item_db.get_display_name(item_id))
+		out["graphic"] = String(item_db.get_graphic(item_id))
+	return out
+
+
+func _full_live_cards_by_ref(ctx: McpToolContext) -> Dictionary:
+	var sim: Variant = ctx.sim()
+	if sim == null:
+		return {}
+	var cards := {}
+	for i in range(int(sim.get_entity_count())):
+		var card: Dictionary = sim.get_entity_debug(i)
+		cards["%d:%d" % [int(card.get("kind", -1)), int(card.get("index", -1))]] = card
+	return cards
+
+
+func _append_live_mount_diagnostics(row: Dictionary, live: Dictionary, diagnostics: Array) -> void:
+	if not bool(live.get("mounted", false)):
+		diagnostics.append("live_not_mounted")
+		return
+	var expected := int((row.get("prediction", {}) as Dictionary).get("seat_index", -1))
+	var actual := int(live.get("mount_seat", -1))
+	if expected >= 0 and actual != expected:
+		diagnostics.append("predicted_live_mismatch")
+	var predicted_seat: Dictionary = (row.get("prediction", {}) as Dictionary).get("seat", {})
+	if not predicted_seat.is_empty():
+		var predicted_type := int(predicted_seat.get("type", 0))
+		var actual_type := int(live.get("mount_type", 0))
+		if predicted_type != actual_type:
+			diagnostics.append("predicted_live_type_mismatch")
+
+
+func _mount_row_has_problem(row: Dictionary) -> bool:
+	for item in row.get("diagnostics", []):
+		if String(item) != "static_only":
+			return true
+	return false
 
 
 # --- save / sim -------------------------------------------------------------------

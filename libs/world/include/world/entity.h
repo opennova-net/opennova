@@ -63,6 +63,8 @@ enum class SeatType : uint8_t {
 struct Seat {
     SeatType type = SeatType::None;
     uint8_t bone_index = 0;     // [orig: model[605+slot] seat-bone index]
+    uint8_t pose_index = 0;     // `sitexNN`/`ctrlxNN`/`drvrxNN` -> anim_sit + NN
+    std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
     int16_t yaw_offset = 0;     // gunner facing offset vs the vehicle yaw [orig: @0x43656c]
     EntityHandle occupant;      // [orig: vehicle[400+2*slot]] kInvalid = empty
@@ -121,6 +123,7 @@ struct Entity {
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
     // Empty for plain entities; an emplaced gun seeds one Gunner seat.
     std::vector<Seat> seats;
+    uint8_t emplaced_pose_variant = 0; // model config 1..8 -> anim_emplaced_2..9 when available
     // Occupant side: this entity is RIDING mount_target's seat mount_seat. [orig: occupant+364
     // vehicle ptr / +360 seat index / +36 & 0x40 mounted flag, written by
     // Entity_AttachToVehicleSlot @0x4946d0.] mounted == false => the rest are unset.

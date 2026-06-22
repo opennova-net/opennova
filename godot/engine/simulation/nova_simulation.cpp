@@ -181,6 +181,8 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		opennova::mission::ItemSeatSpec spec;
 		spec.type_id = static_cast<int32_t>(spec_d.get("type_id", 0));
 		if (spec.type_id == 0) continue;
+		spec.emplaced_pose_variant = static_cast<uint8_t>(
+		    std::clamp(static_cast<int>(spec_d.get("emplaced_pose_variant", 0)), 0, 8));
 
 		const Variant seats_v = spec_d.get("seats", Array());
 		if (seats_v.get_type() != Variant::ARRAY) continue;
@@ -195,6 +197,9 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 			if (seat.type == opennova::world::SeatType::None) continue;
 			seat.bone_index = static_cast<uint8_t>(
 			    std::clamp(static_cast<int>(seat_d.get("bone_index", 0)), 0, 255));
+			seat.pose_index = static_cast<uint8_t>(
+			    std::clamp(static_cast<int>(seat_d.get("pose_index", 0)), 0, 30));
+			seat.source_name = String(seat_d.get("source_name", String())).utf8().get_data();
 			const Vector3 pos = seat_d.get("position", Vector3());
 			seat.seat_local = {static_cast<float>(pos.x), static_cast<float>(pos.y),
 			                   static_cast<float>(pos.z)};
@@ -747,16 +752,40 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["mount_seat"] = ent ? static_cast<int>(ent->mount_seat) : -1;
 	out["mount_type"] = ent ? static_cast<int>(ent->mount_type) : 0;
 	out["mount_seat_bone"] = 0;
+	out["mount_seat_pose_index"] = 0;
+	out["mount_seat_source_name"] = String();
 	out["mount_seat_local"] = Vector3();
 	out["mount_seat_yaw_offset"] = 0;
+	out["mount_target_emplaced_pose_variant"] = 0;
+	out["mount_target_seat_count"] = 0;
+	out["mount_target_seats"] = Array();
 	if (ent && ent->mounted) {
 		const opennova::world::Entity *target = world_->registry.get(ent->mount_target);
 		if (target) {
 			out["mount_target_net_id"] = static_cast<int>(target->net_id);
+			out["mount_target_emplaced_pose_variant"] = static_cast<int>(target->emplaced_pose_variant);
+			out["mount_target_seat_count"] = static_cast<int>(target->seats.size());
+			Array target_seats;
+			for (int i = 0; i < static_cast<int>(target->seats.size()); ++i) {
+				const opennova::world::Seat &seat = target->seats[i];
+				Dictionary d;
+				d["index"] = i;
+				d["type"] = static_cast<int>(seat.type);
+				d["bone_index"] = static_cast<int>(seat.bone_index);
+				d["pose_index"] = static_cast<int>(seat.pose_index);
+				d["source_name"] = String(seat.source_name.c_str());
+				d["local"] = Vector3(seat.seat_local.x, seat.seat_local.y, seat.seat_local.z);
+				d["yaw_offset"] = static_cast<int>(seat.yaw_offset);
+				d["occupied"] = seat.occupant.valid();
+				target_seats.push_back(d);
+			}
+			out["mount_target_seats"] = target_seats;
 			if (ent->mount_seat >= 0 && ent->mount_seat < static_cast<int>(target->seats.size())) {
 				const opennova::world::Seat &seat = target->seats[ent->mount_seat];
 				out["mount_type"] = static_cast<int>(seat.type);
 				out["mount_seat_bone"] = static_cast<int>(seat.bone_index);
+				out["mount_seat_pose_index"] = static_cast<int>(seat.pose_index);
+				out["mount_seat_source_name"] = String(seat.source_name.c_str());
 				out["mount_seat_local"] = Vector3(seat.seat_local.x, seat.seat_local.y, seat.seat_local.z);
 				out["mount_seat_yaw_offset"] = static_cast<int>(seat.yaw_offset);
 			}

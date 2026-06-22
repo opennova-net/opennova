@@ -27,6 +27,7 @@ namespace opennova::mission {
 
 struct ItemSeatSpec {
     int32_t type_id = 0; // raw BMS/items.def id stored in bms::Entity::type_id
+    uint8_t emplaced_pose_variant = 0;
     std::vector<world::Seat> seats;
 };
 
@@ -51,10 +52,10 @@ struct PromoteOptions {
     // pass the extracted seat list here before promotion.
     std::vector<ItemSeatSpec> item_seat_specs;
 
-    // Command 125 authored spawn attachment: Entity_UpdateInfantryAI @0x4B9910 resolves
-    // slot+152 (BMS wp_number) as a target entity serial, then walks/attaches to a vehicle seat.
-    // Until the full walk-to-seat staging is ported, promotion only attaches actors already authored
-    // near the target; this mirrors EntityCommands::mount_best's proximity guard.
+    // Command 123/124/125 authored spawn attachment: Entity_UpdateInfantryAI @0x4B9910
+    // resolves slot+152 (BMS wp_number) as a target entity serial, then walks/attaches to a
+    // vehicle seat. Until the full walk-to-seat staging is ported, promotion only attaches actors
+    // already authored near the target; this mirrors EntityCommands::mount_best's proximity guard.
     float command_mount_radius = 20.0f;
 
     size_t actor_pool_capacity = 1024;

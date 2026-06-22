@@ -38,6 +38,7 @@ enum : int {
     kIdle3 = 49,
     kSit = 76,
     kReload = 65,
+    kEmplaced = 67,
     kIdleLook = 125,
     kIdle2Look = 126,
     kDraggerIdle = 137,

@@ -154,6 +154,25 @@ func test_transform_applied_from_snapshot() -> void:
 	assert_almost_eq(fwd.z, -1.0, 0.001, "yaw drives the heading basis (RotY(180 - yaw))")
 
 
+func test_transform_ignores_body_clip_visual_offsets() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 6: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 6,
+		"pos_x": 10.0,
+		"pos_y": 2.0,
+		"pos_z": 3.0,
+		"yaw_deg": 180.0,
+		"anim_state": 86,
+	}]
+	_make_pass(index, sim).present()
+	assert_true(model.position.is_equal_approx(Vector3(10.0, 2.0, 3.0)),
+		"sim entity position remains authoritative even for seated infantry clips")
+
+
 func test_visibility_from_hidden_and_alive() -> void:
 	var shown := FakeModel.new()
 	var hidden := FakeModel.new()

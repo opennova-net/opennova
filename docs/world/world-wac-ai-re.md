@@ -84,8 +84,9 @@ Everything below was decompiled and read this session (pseudocode dumps:
 `AiSlot = entity+104` (172 B, our struct): `slot[37] @+148` = **waypoint channel id**, with
 **123–127 reserved as commands** → usable mission path ids are 1..122 (format truth!):
 126 = hold/guard the group (10 u radius), 127 = follow local player (radius `max(slot[16], 4u)`),
-123/124/125 = **Goto-SSN-and-board** (the MED command names — 123 not-driver/gunner, 124 not-driver,
-125 any — are in §11). `slot[38] @+152` = node index for a real path (1..122), or the **target SSN**
+123/124/125 = **Goto-SSN-and-board** (runtime seat filters: 123 `sitex`/passenger-only,
+124 rejects `ctrlx`, 125 any; MED labels are in §11). `slot[38] @+152` = node index for a real path
+(1..122), or the **target SSN**
 (= `wp_number`) for the 123–125 Goto-SSN commands. `slot[35]` = active flag,
 `slot[36]` = located entity ptr (rescans pools 0/1/2 by id when stale).
 - Target node = pool-3 marker entity via `entryIndex[34*ch + node]` (`Pool_GetEntryUnchecked(3,·)`);
@@ -242,7 +243,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by mount config +2156); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
-    (entity+24 of the vehicle, ±71582784) and speed (+668).
+    (entity+24 of the vehicle, ±71582784) and speed (+668). Port status: `UseGun`/gunner seats
+    select `anim_emplaced` 67 plus a host-fed variant when that clip exists; non-gunner seats use
+    the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`). Remaining gaps: deriving the
+    emplaced variant from the real mount config, the driver-lean 107–110 overlay, and true per-tick
+    seat-bone follow (see §9.2).
 16. **Playhead rate**: channel time is normalized [0,1) advanced by a per-clip dt seeded at
     `AnimChannel_InitFromParams` (the literal 4096 param) — the exact dt derivation (sim-tick →
     clip-frame rate, blend-window advance) is unpinned; the IRootMotionSource seam owns phase
@@ -254,11 +259,13 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
   libs/world/src/infantry.cpp): **MATCHING**, with the named, cited deviations —
   - **D-INF-1** no blend windows (clip switches reset phase; the original blends 10/15 ticks,
     root motion included) — rides the skeletal/blend pass.
-  - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) decoded
-    but not driven — incl. the staged vehicle boarding (§4.12). **Consequence:** BMS organics with
-    `waypoint_id ∈ {123,124,125}` (Goto SSN → board the `wp_number` vehicle) idle free-standing
-    instead of riding their carrier — the 00TRa "floating crouched soldiers". Rides the command-source
-    phase; faithfully seating the rider also needs the carrier's seat-bones (§9.2 dev. 2/4).
+  - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
+    partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
+    target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
+    mount occupants already authored near a host-provided seat, and render `UseGun`/gunner seats with
+    `anim_emplaced` plus available variants (00TRa class). Remaining gaps: staged E/S/G/H
+    walk-to-seat, 126/127, child-seat traversal, true seat-bone transform follow, and driver-lean
+    mounted poses.
   - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water + the
     horizontal capsule pending; the vertical capsule-bottom settle now landed — see **D-INF-6** —
     `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
@@ -495,7 +502,9 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   (0 = empty); occupant u16 at `vehicle[400+2·slot]` (free if 0xFFFF or == playerHandle). Seat-bone
   NAME classification (bone record stride 48, name at +32): `sitex` → 1 passenger, `ctrlx` → 2
   controller (vehicle entity only), `drvrx` → 5 driver (vehicle entity only), `UseGun` → 3 gunner;
-  else skip. Player-class gate: model+148 == 124 ⇒ ctrl-only; == 123 ⇒ anything but passenger.
+  else skip. Command/player-class acceptance gate: `model+148 == 123` accepts only passenger
+  (`seatType == 1`); `model+148 == 124` rejects controller (`seatType != 2`); all other values
+  accept any classified seat. This corrects the older "124 not-driver" reading.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
 - True occupant pose comes from the seat bone transform (`Entity_GetBoneTransformAndOrientation @
@@ -504,20 +513,29 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 
 ### 9.2 Port (libs/world + libs/mission) and tracked deviations
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
-rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_best, dismount,
-find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0; `pose_mounted_occupant`
-(occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw − yaw_offset);
-`AiSystem::pose_if_mounted` skips SM + locomotion and auto-dismounts when the vehicle is gone;
-event-runtime case 0x25 → `mount_best(param1)`. Deviations (NOT silently absorbed):
+rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_boarding_command,
+mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0;
+`pose_mounted_occupant` (occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw −
+yaw_offset); `AiSystem::pose_if_mounted` skips SM + locomotion and auto-dismounts when the vehicle
+is gone; event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
+already-near occupants onto their target SSN with the runtime gate above; mounted infantry pose class
+is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
+`anim_sit_N` from the seat name digits). GDExtension debug cards expose the selected seat source name
+and the full target-seat candidate list (`source_name`, type, pose index, local offset, occupancy) for
+00TRa-style audits. Deviations (NOT silently absorbed):
 1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
    link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
    placed on its gun; wrong if two guns overlap.
-2. **`is_emplacement_item` table is EMPTY.** The original reads `UseGun` from the model's seat bones
-   (model[605..]); we don't load model bones in promotion, so the data-driven auto-seed of real
-   missions waits on the items.def emplacement set. Mechanism complete + tested.
-3. **Child-entity seat traversal + the player-class 123/124 gate** deferred (single-entity seats only).
-4. **Seat-local pose stand-in** — seat_local/yaw_offset default 0 (gunner at the gun origin) until the
-   true bone transform is read.
+2. **Seat specs are host-fed.** The original reads model seat bones directly (model[605..]); the
+   port consumes host-extracted model userpoints through `ItemSeatSpec`, so callers without model
+   metadata still seed no seats.
+3. **Child-entity seat traversal** deferred (single-entity seats only).
+4. **Mounted-pose variants are partial.** `UseGun` can consume a host-fed emplaced variant and
+   non-gunners consume numbered `sit_N`, but deriving the variant from the real mount config and the
+   sit_24 driver-lean variants remain open.
+5. **Seat-local pose stand-in** — seat_local/yaw_offset come from host userpoints when available, but
+   the true per-tick bone transform (`Entity_GetBoneTransformAndOrientation`) is still deferred. This
+   is the known suspect when a rider attaches to the right logical seat but appears too far forward.
 
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
@@ -593,11 +611,13 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
   driver, gunner)**, **124 = Goto SSN (not driver)**, **125 = Goto SSN (any)**, **126 = Goto Group**,
   **127 = Goto Player**. So a 123–127 value backed by an empty path slot is EXPECTED — it is a
   command, not a route. For 123–125 the command = navigate to the entity whose SSN = `wp_number` (the
-  editor "Number" field; spawn stores it in `slot[152]`, §7.1) and **BOARD it**, taking a seat per the
-  restriction (123 passenger-only, 124 not-driver, 125 any). Engine witness: the server-authority
-  infantry think tests `slot[148]==125` [orig: `Entity_UpdateInfantryAI @ 0x4ba9ad`] — `==125`
-  preserves the carrier vehicle pointer in `slot[144]`, else clears it; when set it runs
-  `Entity_FindBestSeatSlot @ 0x4351f0` (seat-type filter) → `Entity_AttachToVehicleSeat @ 0x4364a0`.
+  editor "Number" field; spawn stores it in `slot[152]`, §7.1) and **BOARD it**. Runtime seat filter
+  truth from `Entity_FindBestSeatSlot @0x4351f0`: 123 accepts only `sitex`/passenger, 124 rejects
+  `ctrlx`/controller while keeping `drvrx` eligible, 125 accepts any classified seat. Engine witness:
+  the server-authority infantry think tests `slot[148]==125` [orig: `Entity_UpdateInfantryAI
+  @0x4ba9ad`] — `==125` preserves the carrier vehicle pointer in `slot[144]`, else clears it; when set
+  it runs `Entity_FindBestSeatSlot @ 0x4351f0` (seat-type filter) → `Entity_AttachToVehicleSeat
+  @ 0x4364a0`.
   **CORRECTION (overturns the prior revision of this note):** an earlier version called 125 "valid
   leftover data … the game ignores it (the 'Value 125' inspector mystery)" — that was WRONG; 125 is an
   active Goto-SSN-and-board command. An inspector should name 123–127 by their command, not "Path N

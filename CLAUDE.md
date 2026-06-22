@@ -25,6 +25,11 @@ easier to relay than to rediscover.
 
 ## Build & test
 
+Important: in this linked worktree, run build/test/bootstrap/Godot commands outside the sandbox
+(request escalation). The submodule bootstrap and Godot test runner touch git metadata and
+processes in the main checkout outside the worktree, so sandboxed runs can fail or leave stuck
+processes.
+
 ```bash
 scripts/build.sh          # C++ build + full ctest (Release); BUILD_GODOT=0 skips the GDExtension
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after

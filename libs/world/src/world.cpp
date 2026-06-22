@@ -12,11 +12,24 @@ namespace opennova::world {
 // hierarchy. A manned-gun soldier is placed on/next to its gun, so this is generous.
 static constexpr double kMountRadius = 20.0;
 
+bool seat_allowed_for_mode(SeatType type, SeatSelectionMode mode) {
+    switch (mode) {
+        case SeatSelectionMode::PassengerOnly:
+            return type == SeatType::Passenger;
+        case SeatSelectionMode::RejectController:
+            return type != SeatType::Controller;
+        case SeatSelectionMode::Any:
+        default:
+            return true;
+    }
+}
+
 void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat) {
-    // Rotate the seat-local offset by the vehicle yaw (mission space is Z-up; yaw turns the X/Y
-    // plane), translate by the vehicle origin. A Gunner faces vehicle.yaw - seat.yaw_offset.
+    // Rotate the seat-local offset by the entity orientation frame, then translate by the vehicle
+    // origin. In our stored mission-yaw convention this is -vehicle.yaw; this matches the retail
+    // seat bone path through Entity_GetBoneTransformAndOrientation @0x4b0c50.
     constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
-    const double a = static_cast<double>(vehicle.yaw) * kDeg2Rad;
+    const double a = static_cast<double>(-vehicle.yaw) * kDeg2Rad;
     const double ca = std::cos(a), sa = std::sin(a);
     const Vec3 &L = seat.seat_local;
     occ.position.x = vehicle.position.x + static_cast<float>(L.x * ca - L.y * sa);
@@ -249,13 +262,15 @@ bool EntityCommands::group_dead(int group) const {
 
 // --- mount / emplacement (AttachToEmplaced) ---
 
-int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant) const {
+int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant,
+                                   SeatSelectionMode mode) const {
     // [orig: Entity_FindBestSeatSlot @0x4351f0] lowest weight wins; skip None/taken seats.
     int best = -1;
     int32_t best_weight = 65536000; // [orig: bestWeight init sentinel]
     for (int i = 0; i < static_cast<int>(target.seats.size()); ++i) {
         const Seat &s = target.seats[i];
         if (s.type == SeatType::None) continue;           // [orig: boneIdx != 0]
+        if (!seat_allowed_for_mode(s.type, mode)) continue;
         if (s.occupant.valid() && s.occupant != occupant) // [orig: owner==0xFFFF || owner==self]
             continue;
         int32_t w;
@@ -271,7 +286,7 @@ int EntityCommands::find_best_seat(const Entity &target, EntityHandle occupant) 
     return best;
 }
 
-bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn) {
+bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn, SeatSelectionMode mode) {
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] resolve both; reject already-mounted /
     // seatless; pick the best seat; write both sides; pose now.
     EntityHandle oh = world_.registry.find_by_net_id(occupant_ssn);
@@ -281,7 +296,7 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn) {
     if (!occ || !tgt) return false;
     if (occ->mounted) return false;       // [orig: entity->pad8[8] set -> return 0]
     if (tgt->seats.empty()) return false; // [orig: no model+144 vehicle / no seats]
-    const int seat_idx = find_best_seat(*tgt, oh);
+    const int seat_idx = find_best_seat(*tgt, oh, mode);
     if (seat_idx < 0) return false;
     Seat &s = tgt->seats[seat_idx];
     s.occupant = oh;                                       // [orig: vehicle[400+2*slot] = handle]
@@ -291,6 +306,24 @@ bool EntityCommands::mount(uint16_t occupant_ssn, uint16_t target_ssn) {
     occ->mounted = true;                                   // [orig: occupant+36 |= 0x40]
     pose_mounted_occupant(*occ, *tgt, s);
     return true;
+}
+
+bool EntityCommands::mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn,
+                                            uint8_t command_id) {
+    SeatSelectionMode mode = SeatSelectionMode::Any;
+    switch (command_id) {
+        case 123:
+            mode = SeatSelectionMode::PassengerOnly;
+            break;
+        case 124:
+            mode = SeatSelectionMode::RejectController;
+            break;
+        case 125:
+            break;
+        default:
+            return false;
+    }
+    return mount(occupant_ssn, target_ssn, mode);
 }
 
 bool EntityCommands::mount_best(uint16_t occupant_ssn) {

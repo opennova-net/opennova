@@ -23,6 +23,7 @@ signal effects_drained(effects: Array)
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
+const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 var _sim: NovaSimulation
 var _present
@@ -145,84 +146,31 @@ func entity_count() -> int:
 
 
 func _build_item_seat_specs(mission, resource_root, item_db) -> Array:
-	var specs: Array = []
-	if mission == null or resource_root == null or item_db == null:
-		return specs
-	var seen_types: Dictionary = {}
-	for raw in mission.get_all_entities():
-		var entity: Dictionary = raw
-		var item_id := int(entity.get("item_id", 0))
-		var type_id := int(entity.get("type_id", 0))
-		if item_id == 0 or type_id == 0 or seen_types.has(type_id):
-			continue
-		seen_types[type_id] = true
-		var graphic := String(item_db.get_graphic(item_id))
-		if graphic.is_empty():
-			continue
-		var model_name := _model_name_for_graphic(graphic)
-		if model_name.is_empty():
-			continue
-		var data := NovaObjectData.new()
-		if data.open_from_resource_root(resource_root, model_name) != OK:
-			continue
-		var seats := _seat_specs_from_model(data)
-		if not seats.is_empty():
-			specs.append({
-				"type_id": type_id,
-				"seats": seats,
-			})
-	return specs
+	return MissionSeatDiagnostics.build_item_seat_specs(mission, resource_root, item_db)
 
 
 func _model_name_for_graphic(graphic: String) -> String:
-	var basename := graphic.get_file().get_basename()
-	return "" if basename.is_empty() else basename + ".3di"
+	return MissionSeatDiagnostics.model_name_for_graphic(graphic)
 
 
 func _seat_specs_from_model(data: NovaObjectData) -> Array:
-	var seats: Array = []
-	if data == null:
-		return seats
-	for i in range(data.get_user_point_count()):
-		var up := data.get_user_point_info(i)
-		var seat_type := _seat_type_for_user_point(String(up.get("name", "")))
-		if seat_type == 0:
-			continue
-		seats.append({
-			"type": seat_type,
-			"position": _seat_local_from_user_point_position(up.get("position", Vector3.ZERO)),
-			"bone_index": i + 1,
-			"yaw_offset": _seat_yaw_offset_from_user_point_rotation(up.get("rotation", Vector3.ZERO)),
-		})
-	return seats
+	return MissionSeatDiagnostics.seat_specs_from_model(data)
 
 
 func _seat_local_from_user_point_position(pos: Vector3) -> Vector3:
-	return MissionObjectPlacer.godot_to_bms_position(
-			MissionObjectPlacer.bms_to_godot_basis(Vector3.ZERO) * pos)
+	return MissionSeatDiagnostics.seat_local_from_user_point_position(pos)
 
 
 func _seat_yaw_offset_from_user_point_rotation(direction: Vector3) -> int:
-	if direction.length_squared() < 0.000001:
-		return 0
-	var local := MissionObjectPlacer.godot_to_bms_position(
-			MissionObjectPlacer.bms_to_godot_basis(Vector3.ZERO) * direction.normalized())
-	if absf(local.x) < 0.000001 and absf(local.y) < 0.000001:
-		return 0
-	return int(round(rad_to_deg(atan2(local.x, local.y))))
+	return MissionSeatDiagnostics.seat_yaw_offset_from_user_point_rotation(direction)
 
 
 func _seat_type_for_user_point(name: String) -> int:
-	var lower := name.to_lower()
-	if lower.begins_with("sitex"):
-		return 1
-	if lower.begins_with("ctrlx"):
-		return 2
-	if lower.begins_with("usegun"):
-		return 3
-	if lower.begins_with("drvrx"):
-		return 5
-	return 0
+	return MissionSeatDiagnostics.seat_type_for_user_point(name)
+
+
+func _seat_pose_index_for_user_point(name: String) -> int:
+	return MissionSeatDiagnostics.seat_pose_index_for_user_point(name)
 
 
 func _log_infantry_debug_mounts() -> void:
@@ -233,9 +181,9 @@ func _log_infantry_debug_mounts() -> void:
 		if card.is_empty():
 			continue
 		var waypoint_id := int(card.get("waypoint_id", 0))
-		if not bool(card.get("mounted", false)) and waypoint_id != 125:
+		if not bool(card.get("mounted", false)) and (waypoint_id < 123 or waypoint_id > 125):
 			continue
-		print("NOVA_INF_DEBUG entity=%d ssn=%d wp=%d:%d mounted=%s target=%d seat=%d type=%d bone=%d local=%s yaw_offset=%d anim=%s(%d)" % [
+		print("NOVA_INF_DEBUG entity=%d ssn=%d wp=%d:%d mounted=%s target=%d seat=%d source=%s type=%d bone=%d pose=%d local=%s yaw_offset=%d seats=%d anim=%s(%d)" % [
 			i,
 			int(card.get("net_id", 0)),
 			waypoint_id,
@@ -243,10 +191,13 @@ func _log_infantry_debug_mounts() -> void:
 			str(bool(card.get("mounted", false))),
 			int(card.get("mount_target_net_id", 0)),
 			int(card.get("mount_seat", -1)),
+			String(card.get("mount_seat_source_name", "")),
 			int(card.get("mount_type", 0)),
 			int(card.get("mount_seat_bone", 0)),
+			int(card.get("mount_seat_pose_index", 0)),
 			str(card.get("mount_seat_local", Vector3.ZERO)),
 			int(card.get("mount_seat_yaw_offset", 0)),
+			int(card.get("mount_target_seat_count", 0)),
 			String(card.get("anim_key", "")),
 			int(card.get("anim_state", -1)),
 		])

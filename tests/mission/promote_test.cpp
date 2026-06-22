@@ -266,6 +266,100 @@ int main() {
         CHECK(veh->seats[0].occupant != veh->seats[1].occupant);
     }
 
+    // ---- command 123/124/125 seat restrictions: sitex-only / no-ctrlx / any ----
+    {
+        bms::File cm{};
+        cm.items.push_back(item(/*type_id=*/1294, 10 << 16, 0, 0));
+        cm.items[0].id = 11;
+        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/123, /*wp_num=*/11));
+        cm.organics[0].id = 1;
+
+        mission::PromoteOptions co{};
+        mission::ItemSeatSpec seats{};
+        seats.type_id = 1294;
+        Seat passenger{};
+        passenger.type = SeatType::Passenger;
+        passenger.seat_local = {4.f, 0.f, 0.f};
+        Seat driver{};
+        driver.type = SeatType::Driver;
+        driver.seat_local = {1.f, 0.f, 0.f};
+        seats.seats.push_back(passenger);
+        seats.seats.push_back(driver);
+        co.item_seat_specs.push_back(seats);
+
+        World cw;
+        AiSystem cai;
+        mission::promote_mission(cm, cw, cai, co);
+
+        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+        CHECK(occ != nullptr);
+        CHECK(occ->mounted);
+        CHECK(occ->mount_type == SeatType::Passenger);
+        CHECK(occ->position.x == 14.f);
+    }
+
+    {
+        bms::File cm{};
+        cm.items.push_back(item(/*type_id=*/1294, 10 << 16, 0, 0));
+        cm.items[0].id = 11;
+        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/124, /*wp_num=*/11));
+        cm.organics[0].id = 1;
+
+        mission::PromoteOptions co{};
+        mission::ItemSeatSpec seats{};
+        seats.type_id = 1294;
+        Seat controller{};
+        controller.type = SeatType::Controller;
+        controller.seat_local = {1.f, 0.f, 0.f};
+        Seat driver{};
+        driver.type = SeatType::Driver;
+        driver.seat_local = {5.f, 0.f, 0.f};
+        seats.seats.push_back(controller);
+        seats.seats.push_back(driver);
+        co.item_seat_specs.push_back(seats);
+
+        World cw;
+        AiSystem cai;
+        mission::promote_mission(cm, cw, cai, co);
+
+        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+        CHECK(occ != nullptr);
+        CHECK(occ->mounted);
+        CHECK(occ->mount_type == SeatType::Driver);
+        CHECK(occ->position.x == 15.f);
+    }
+
+    {
+        bms::File cm{};
+        cm.items.push_back(item(/*type_id=*/1294, 10 << 16, 0, 0));
+        cm.items[0].id = 11;
+        cm.organics.push_back(organic(10 << 16, 0, 0, 1, /*wp_id=*/125, /*wp_num=*/11));
+        cm.organics[0].id = 1;
+
+        mission::PromoteOptions co{};
+        mission::ItemSeatSpec seats{};
+        seats.type_id = 1294;
+        Seat passenger{};
+        passenger.type = SeatType::Passenger;
+        passenger.seat_local = {5.f, 0.f, 0.f};
+        Seat driver{};
+        driver.type = SeatType::Driver;
+        driver.seat_local = {1.f, 0.f, 0.f};
+        seats.seats.push_back(passenger);
+        seats.seats.push_back(driver);
+        co.item_seat_specs.push_back(seats);
+
+        World cw;
+        AiSystem cai;
+        mission::promote_mission(cm, cw, cai, co);
+
+        Entity *occ = cw.registry.get(cw.registry.find_by_net_id(1));
+        CHECK(occ != nullptr);
+        CHECK(occ->mounted);
+        CHECK(occ->mount_type == SeatType::Driver);
+        CHECK(occ->position.x == 11.f);
+    }
+
     // ---- organics are routed through the INFANTRY motor with seeded slots ----
     // [orig: g_EntityClassPhysicsTable "org1" -> Entity_UpdateInfantryAI @0x4b9910;
     //  slot map from Entity_SpawnFromBMSRecord @0x40e9f0]

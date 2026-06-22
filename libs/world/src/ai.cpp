@@ -6,6 +6,7 @@
 #include "world/body_anim.h"
 #include "world/world.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace opennova::world {
@@ -29,6 +30,25 @@ void update_body_anim_slot(AiEntity &e, World &world) {
         slot = kBodyAnimIdle;
     }
     ent->anim_slot = slot;
+}
+
+int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, const InfantryState &inf,
+                                const IRootMotionSource *root_motion) {
+    if (seat.type == SeatType::Gunner) {
+        const int variant = std::clamp<int>(target.emplaced_pose_variant, 0, 8);
+        if (variant > 0) {
+            const int candidate = anim_state::kEmplaced + variant;
+            if (root_motion != nullptr && root_motion->has_clip(inf.adm_id, candidate)) {
+                return candidate;
+            }
+        }
+        return anim_state::kEmplaced;
+    }
+
+    // The original derives this from the mounted seat bone name: sitexNN/ctrlxNN/drvrxNN
+    // becomes anim_sit + NN. The dynamic sit_24 driver lean states need vehicle control fields
+    // that are not modeled in this port yet, so this resolver intentionally stops at base sit_N.
+    return anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
 }
 
 // radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
@@ -576,7 +596,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         return false;
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
-    pose_mounted_occupant(*occ, *veh, veh->seats[occ->mount_seat]);
+    const Seat &seat = veh->seats[occ->mount_seat];
+    pose_mounted_occupant(*occ, *veh, seat);
     // Mirror the world Entity transform into the AiEntity the present snapshot reads (organics are
     // presented from pos[]/heading, not Entity.position; promote seeds them the same way).
     e.pos[0] = to_fixed(occ->position.x);
@@ -586,14 +607,15 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // converts back to mission yaw for the basis. [orig: entity heading = (90 - yaw) @0x40e9f0.]
     e.heading = static_cast<int32_t>(static_cast<int64_t>(90 - occ->yaw) * kBamPerDegree);
     if (e.inf.active) {
-        if (e.inf.anim_state != anim_state::kSit) {
+        const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
+        if (e.inf.anim_state != mounted_state) {
             e.inf.anim_prev = e.inf.anim_state;
-            e.inf.anim_state = anim_state::kSit;
+            e.inf.anim_state = mounted_state;
+            e.inf.clip_phase = 0;
         }
         e.inf.anim_pending = 0;
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
-        e.inf.clip_phase = 0;
         occ->anim_slot = body_anim_slot_from_state(e.inf.anim_state);
     }
     return true;

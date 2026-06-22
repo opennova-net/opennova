@@ -35,6 +35,11 @@ target_link_libraries(threedi_ground_anchor_test PRIVATE opennova_threedi)
 target_include_directories(threedi_ground_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_ground_anchor COMMAND threedi_ground_anchor_test)
 
+add_executable(threedi_userpoint_ir_test threedi/userpoint_ir_test.cpp)
+target_link_libraries(threedi_userpoint_ir_test PRIVATE opennova_threedi)
+target_include_directories(threedi_userpoint_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_userpoint_ir COMMAND threedi_userpoint_ir_test)
+
 # ADM tests
 foreach(test comment trim_value parse write)
     add_executable(adm_${test}_test adm/adm_${test}_test.cpp)
