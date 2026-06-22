@@ -14,24 +14,11 @@ config/name="OpenNova"
 config/version="0.0.8"
 run/main_scene="res://modtools/editor/editor_main.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
+run/flush_stdout_on_print=true
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
 run/main_scene.runtime_game="res://game/main_game.tscn"
-run/flush_stdout_on_print=true
-
-[audio]
-
-buses/default_bus_layout="res://default_bus_layout.tres"
-
-[debug]
-
-; The MCP agent server's get_logs tool tails the rotated engine log for errors
-; and prints (GDScript cannot hook push_error in-process). This matches the
-; desktop default and documents the dependency; run/flush_stdout_on_print above
-; additionally makes release exports flush prints per line instead of only on
-; the next error.
-file_logging/enable_file_logging.pc=true
 
 [autoload]
 
@@ -45,10 +32,6 @@ window/vsync/vsync_mode=0
 
 [editor]
 
-; Godot 4.6.1's parallel asset importer can intermittently segfault on a cold
-; import (race in the multithreaded reimport path), leaving a half-populated
-; .godot/imported cache. Serialize imports: the first-import cost is one-time
-; and only affects the editor, not the running game. See PR #23 CI history.
 import/use_multiple_threads=false
 
 [editor_plugins]
@@ -58,9 +41,9 @@ enabled=PackedStringArray("res://addons/gut/plugin.cfg")
 [rendering]
 
 rendering_device/driver.windows="d3d12"
-environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
 [shader_globals]
 

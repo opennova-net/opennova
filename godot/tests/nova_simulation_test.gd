@@ -97,6 +97,23 @@ func test_present_snapshot_matches_scalar_getters() -> void:
 		assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "spawned entity is alive")
 	sim.free()
 
+
+func test_present_snapshot_carries_infantry_anim_state_and_phase() -> void:
+	var sim := NovaSimulation.new()
+	sim.build_demo_mission()
+	var snap: PackedFloat32Array = sim.get_present_snapshot()
+	var stride: int = sim.get_present_stride()
+	assert_eq(stride, NovaSimulation.PF_STRIDE, "bound stride includes the anim fields")
+	assert_lt(NovaSimulation.PF_ANIM_STATE, NovaSimulation.PF_STRIDE, "anim state is inside the record")
+	assert_lt(NovaSimulation.PF_ANIM_PHASE_TICKS, NovaSimulation.PF_STRIDE, "anim phase is inside the record")
+	assert_false(snap.is_empty(), "demo mission has present records")
+	var base := 0
+	assert_eq(int(snap[base + NovaSimulation.PF_ANIM_STATE]), 43, "demo infantry starts in IDA idle state")
+	assert_gte(int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS]), 0, "clip phase is exported as ticks")
+	assert_eq(NovaSimulation.infantry_anim_key(43), "anim_idle", "state id resolves to the .adm clip key")
+	sim.free()
+
+
 func test_transport_play_flag() -> void:
 	var sim := NovaSimulation.new()
 	sim.build_demo_mission()

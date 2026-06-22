@@ -48,6 +48,11 @@ enum : int {
     kWalkForward = 1,      // base patrol gait
     kRun2 = 9,
     kRun3 = 10,
+    // Stance walk blocks [orig: off_8135F0 — walk_crouch_* 11-18, walk_prone_* 19-26, in the
+    // same 8-direction order as stand-walk 1-8]. Our port uses the forward clip for all 8
+    // directions (the root delta is rotated by move_offset), so only the *_Forward base is named.
+    kWalkCrouchForward = 11,
+    kWalkProneForward = 19,
     kJumpStart = 30,
     kJumpLoop = 31,        // forces forward delta 1024 [orig: 0x4b9910 @ dump 4756]
     kClimbIdle = 32,
@@ -55,6 +60,8 @@ enum : int {
     kSwimForward = 37,
     kIdle = 43,            // base idle
     kIdle2 = 44,           // combat idle (no target)
+    kIdleCrouch = 45,      // [orig: off_8135F0 idle_crouch]
+    kIdleProne = 48,       // [orig: off_8135F0 idle_prone]
     kIdle3 = 49,           // combat idle (has target)
     kReload = 65,
     kIdleLook = 125,
@@ -157,15 +164,21 @@ struct RootMotionFrame {
     int32_t capsule_top = 0; // [orig: out_transform[4] = top*65536 + 0x2000]
 };
 
-// Clip provider keyed by anim state id. `phase` is the per-entity playhead in
-// ticks owned by the caller (entity field), advanced by the source so looping /
-// clip-length policy lives with the clip data. Returning false = clip missing
-// (state unavailable; the selector falls back per the availability rules).
+// Clip provider keyed by (adm clip set, anim state id). `phase` is the per-entity
+// playhead in ticks owned by the caller (entity field), advanced by the source so
+// looping / clip-length policy lives with the clip data. Returning false = clip
+// missing (state unavailable; the selector falls back per the availability rules).
+//
+// adm_id selects WHICH model's clip set to evaluate. The original reads the per-frame
+// root record (capsule_bottom floor + step velocity) from the entity's OWN playing clip
+// in its OWN .adm [orig: AnimMap_UpdateEntity @0x40b5f0 per entity]. The host registers
+// one clip set per distinct .adm and stores its id on InfantryState.adm_id; id 0 is the
+// default set (a sourceless / single-model setup leaves every entity at 0).
 class IRootMotionSource {
 public:
     virtual ~IRootMotionSource() = default;
-    virtual bool has_clip(int state_id) const = 0;
-    virtual bool advance(int state_id, int32_t &phase_ticks, RootMotionFrame &out) = 0;
+    virtual bool has_clip(int adm_id, int state_id) const = 0;
+    virtual bool advance(int adm_id, int state_id, int32_t &phase_ticks, RootMotionFrame &out) = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -208,6 +221,11 @@ struct InfantryState {
     int anim_prev = anim_state::kIdle;    // entity[178]
     int32_t clip_phase = 0;               // channel playhead (ticks)
     uint32_t last_events = 0;             // last frame's .bad event bits
+    // Which .adm clip set grounds + locomotes this entity (host registry index; 0 = default).
+    // Each soldier sources its root motion AND its capsule_bottom ground floor from its OWN
+    // model's playing clip, not a single shared clip set [orig: AnimMap_UpdateEntity @0x40b5f0
+    // evaluates the entity's own anim map; docs/world/world-wac-ai-re.md D-INF-6].
+    int32_t adm_id = 0;
 
     // Heading pipeline (BAM32). body = entity[35] (+140), target = entity[106]
     // (+424), aim = entity[187]; torso/head stages feed bone overlays (deferred
@@ -217,6 +235,16 @@ struct InfantryState {
 
     // Velocity accumulator (slide/knockback/gravity), entity+152/+156/+160.
     int32_t vel[3] = {};
+
+    // Stance + airborne. The original player body (org2) drives these from input; the motor
+    // grounds + selects clips off them [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0:
+    // entity+0x12C bit crouch -> state 11/45, bit prone -> 19/48 (crouch wins @0x4b59ce);
+    // jump bit 0x20 -> vel_z 0x1600 + entity+0x24 |= 0x2000 @0x4b7ee5]. Default stand/grounded
+    // keeps AI identical (AI leaves stance kStand until the combat-reaction pass wires it).
+    enum class Stance : uint8_t { kStand = 0, kCrouch = 1, kProne = 2 };
+    Stance stance = Stance::kStand;
+    bool airborne = false;        // foot > kAirborneGap above the floor: dz + gravity drive Z
+    bool jump_requested = false;  // input jump edge, consumed by the motor when grounded
 
     // Think bookkeeping.
     int32_t wait_cooldown = 0;   // entity[74], think-ticks ((wait+8)>>4 on arrival)

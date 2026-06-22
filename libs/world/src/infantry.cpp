@@ -44,6 +44,14 @@ constexpr int32_t kBodyTurnClamp = 69273360;
 // [orig: gravity vel_z -= 416 every 2 ticks, terminal -32768; dump 5094]
 constexpr int32_t kGravityStep = 416;
 constexpr int32_t kTerminalVelZ = -32768;
+// Foot-above-floor gap (16.16) below which the soldier is grounded and the per-tick ground
+// snap re-anchors pos[2] to ground + capsule_bottom; above it the foot is airborne (falling)
+// and dz + gravity drive Z. [orig: Entity_UpdateInfantryPlayerBody @0x4b7e17 cmp eax,0F000h —
+// settle return (foot height above ground) > 0xF000 => transition to falling; D-INF-6]
+constexpr int32_t kAirborneGap = 0xF000;
+// [orig: jump launch vel_z impulse, Entity_UpdateInfantryPlayerBody @0x4b7ee5
+// mov [esi+0A0h], 1600h; the in-air flag entity+0x24 |= 0x2000 the same block sets]
+constexpr int32_t kJumpImpulseVelZ = 0x1600;
 // [orig: slope slide threshold 0x22222200, clamp 656175520; dump 943..984]
 constexpr int32_t kSlopeClamp = 656175520;
 constexpr int32_t kSlideThreshold = 572662272;
@@ -180,9 +188,9 @@ void AiSystem::infantry_think(AiEntity &e, World &world) {
 // ----------------------------------------------------------------------------
 // State selection + commit (every think). [orig: 0x4b9910 dump 2896-3110, 3693-3710]
 // ----------------------------------------------------------------------------
-int AiSystem::infantry_resolve_state(int state) const {
+int AiSystem::infantry_resolve_state(int adm_id, int state) const {
     if (root_motion == nullptr) return -1;
-    auto has = [&](int s) { return root_motion->has_clip(s); };
+    auto has = [&](int s) { return root_motion->has_clip(adm_id, s); };
     if (has(state)) return state;
     // Cited fallback chains. [orig: availability = animMap[id] != animMap[0]; jog<->run
     // mutual fallback dump 3010-3025; wounded falls back to the base gait]
@@ -209,11 +217,54 @@ int AiSystem::infantry_resolve_state(int state) const {
         case anim_state::kIdle3:
             if (has(anim_state::kIdle)) return anim_state::kIdle;
             break;
+        // Stance-clip fallbacks for a model lacking crouch/prone clips [orig: animMap[id] !=
+        // animMap[0]]: crouch-walk -> stand walk; prone-walk -> crouch -> stand; stance idle -> idle.
+        case anim_state::kWalkCrouchForward:
+            if (has(anim_state::kWalkForward)) return anim_state::kWalkForward;
+            break;
+        case anim_state::kWalkProneForward:
+            if (has(anim_state::kWalkCrouchForward)) return anim_state::kWalkCrouchForward;
+            if (has(anim_state::kWalkForward)) return anim_state::kWalkForward;
+            break;
+        case anim_state::kIdleCrouch:
+        case anim_state::kIdleProne:
+            if (has(anim_state::kIdle)) return anim_state::kIdle;
+            break;
         default:
             break;
     }
     if (has(anim_state::kIdle)) return anim_state::kIdle;
     return -1; // nothing playable: keep the current state
+}
+
+// Map a stand gait/idle state to its crouch/prone sibling, layering the stance dimension on top of
+// the gait picker. Our port uses the forward clip for all 8 move directions (the root delta is
+// rotated by move_offset), so a moving gait maps to the stance's forward-walk base and idle/stop
+// map to the stance idle. Run-while-crouched has NO crouch-run clip, so it falls back to crouch
+// WALK — faithful to the original, where the run-upgrade only fires for the stand state.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — moving base 1/11/19 + dir offset; non-moving
+// idle 43 / idle_crouch 45 / idle_prone 48; the run-upgrade block is gated on body state == 1, so
+// crouch(11)/prone(19) keep the WALK clip. off_8135F0 blocks: crouch-walk 11-18, prone-walk 19-26.]
+static int stance_remap(int state, InfantryState::Stance st) {
+    if (st == InfantryState::Stance::kStand) return state;
+    const bool crouch = (st == InfantryState::Stance::kCrouch);
+    switch (state) {
+        case anim_state::kWalkForward:
+        case anim_state::kJogForward:
+        case anim_state::kRunForward:
+        case anim_state::kRun2:
+        case anim_state::kRun3:
+        case anim_state::kWoundedWalk:
+        case anim_state::kWoundedRun:
+            return crouch ? anim_state::kWalkCrouchForward : anim_state::kWalkProneForward;
+        case anim_state::kIdle:
+        case anim_state::kIdle2:
+        case anim_state::kIdle3:
+        case anim_state::kStop:
+            return crouch ? anim_state::kIdleCrouch : anim_state::kIdleProne;
+        default:
+            return state; // jump / transition / death states are unaffected by stance
+    }
 }
 
 void AiSystem::infantry_select(AiEntity &e) {
@@ -255,7 +306,15 @@ void AiSystem::infantry_select(AiEntity &e) {
             target = anim_state::kWoundedWalk;
     }
 
-    const int resolved = infantry_resolve_state(target);
+    // Airborne (a player jump or a fall) overrides the gait with the jump-loop clip
+    // [orig: Entity_UpdateInfantryPlayerBody jump_loop 31]; otherwise layer the stance
+    // dimension (stand/crouch/prone) over the selected gait/idle. [orig: 0x4b40e0]
+    if (inf.is_local_player && inf.airborne)
+        target = anim_state::kJumpLoop;
+    else
+        target = stance_remap(target, inf.stance);
+
+    const int resolved = infantry_resolve_state(inf.adm_id, target);
     if (resolved < 0) return; // no clips at all: hold the current state
     if (resolved == inf.anim_state) { inf.anim_pending = 0; return; }
 
@@ -353,7 +412,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     RootMotionFrame frame;
     bool have_clip = false;
     if (root_motion != nullptr)
-        have_clip = root_motion->advance(inf.anim_state, inf.clip_phase, frame);
+        have_clip = root_motion->advance(inf.adm_id, inf.anim_state, inf.clip_phase, frame);
     inf.last_events = have_clip ? frame.events : 0;
 
     // 2. Death edge: pick a death pose once, then only gravity/ground applies.
@@ -365,7 +424,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             const int death = anim_state::kDeathBulletBase + 4; // death_bullet_torso_forward
             inf.anim_prev = inf.anim_state;
             inf.anim_state =
-                (root_motion != nullptr && root_motion->has_clip(death)) ? death
+                (root_motion != nullptr && root_motion->has_clip(inf.adm_id, death)) ? death
                                                                          : anim_state::kDeathFire;
             inf.anim_pending = 0;
             inf.clip_phase = 0;
@@ -379,6 +438,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // and waypoint-walk. Map the order to an anim every tick (responsive). The player
         // takes the motor's simulate branch on host (is_authority) and on a client
         // (entity==local) alike. [orig: Entity_UpdateInfantryAI loc_4B9C3E; net-re §5.38]
+        // Player jump: a grounded jump request launches the vertical impulse and enters the
+        // jump arc; gravity (step 9) brings it back down. [orig: Entity_UpdateInfantryPlayerBody
+        // @0x4b7ee5 sets entity+0xA0 (vel_z) = 0x1600 and entity+0x24 |= 0x2000 (in-air) on the
+        // jump input bit; gravity @0x4b7acf decrements vel_z each tick.]
+        if (inf.jump_requested && !inf.airborne && e.health > 0) {
+            inf.vel[2] = kJumpImpulseVelZ;
+            inf.airborne = true;
+        }
+        inf.jump_requested = false;
         infantry_select(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 4. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
@@ -424,6 +492,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 5083-5086 — full-precision sin/cos at 2^22, pos += rotated + velocity]
     {
         int32_t fwd = frame.dx, lat = frame.dy;
+        // Root TRANSLATION is integrated for EVERY state, not just movement states. The original
+        // advances the playing clip ONCE per tick (AnimMap_UpdateEntity @0x40b5f0) and integrates
+        // the root delta unconditionally: the dword_8139E8 bit0 flag gates the anim COMMIT rules
+        // (@0x4bd85c) and the idle LOOK-AT scan (@0x4be95f), NOT the position integration. Idle
+        // clips author a small mean-~0 root velocity — the bored weight-shift / "rock on the feet".
+        // Integrating it sways the entity's centre of mass under the swaying skeleton, so the FEET
+        // stay PLANTED (they pivot). Gating it (the prior D-INF-8 reading) held the body rigid while
+        // the skeletal FK slid the feet — the "idle skating" this overturns. capsule bottom/top and
+        // vel are MOVEMENT data only; the visual is the skeleton, which never reads them.
+        // [orig: Entity_UpdateInfantryAI @0x4b9910 integrates root delta for all states; overturns D-INF-8]
         if (inf.anim_state == anim_state::kJumpLoop) fwd = 1024; // [orig: dump 4756]
         // The local player moves in its 8-way input direction relative to facing: the body
         // FACES e.heading (the look), but the root delta is rotated by heading + move_offset
@@ -440,39 +518,67 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                            static_cast<int32_t>((static_cast<int64_t>(lat) * c) >> 22);
         e.pos[0] += wx + inf.vel[0];
         e.pos[1] += wy + inf.vel[1];
-        e.pos[2] += frame.dz;
+        // Vertical (dz + gravity + the ground snap) is resolved in step 9. The original adds dz to
+        // Position.z every frame, but the per-tick ground snap absorbs it when grounded, so we apply
+        // dz only while airborne [orig: org2 @0x4b7cef adds dz, then @0x4b3da3/@0x4b7d0a snaps to
+        // ground + capsule_bottom; D-INF-6].
     }
 
-    // 9. Gravity + ground resolve (every 2 ticks, even staggered key). [orig: dump 5088-5173]
-    // Skipped entirely without a height field: the original always has terrain under it;
-    // a terrain-free world (unit tests) keeps the authored Z instead of free-falling.
-    if (terrain != nullptr && (key & 1u) == 0) {
-        inf.vel[2] -= kGravityStep;
-        if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
-        e.pos[2] += 2 * inf.vel[2];
-        if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
-            // Settle the model-origin Z onto terrain by the current anim frame's collision-
-            // capsule bottom (origin->feet), NOT the +0x50000 death-fall mover target.
-            // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 resettles
-            // entity[3]=entityRadius+ground @0x4b3da3; entityRadius = the .bad capsule_bottom
-            // *65536 fed via AnimMap_UpdateEntity @0x40b82f; on-foot caller org1 @0x4bf7fa /
-            // org2 @0x4b7cf9. +0x50000 is the id-3 death mover's target slot (AI_ProcessMovement
-            // Step @0x466db0), never the live pos[2]. docs/world/world-wac-ai-re.md D-INF-6.]
-            const int32_t floor_z = inf.ground_cache + frame.capsule_bottom;
-            if (e.pos[2] <= floor_z) {
-                // Landing. Fall damage [orig: dump 5152 — vel_z <= -1057*scale ->
-                // health -= (excess) >> 4]; horizontal slide stops on contact (D-INF-3).
-                if (fall_damage_scale > 0 &&
-                    inf.vel[2] <= -1057 * fall_damage_scale) {
+    // 9. Vertical resolve: the per-tick ground snap (grounded) vs gravity (airborne). The original
+    // adds dz + vertical velocity to Position.z every frame, then snaps the foot to ground +
+    // capsule_bottom whenever the foot is within kAirborneGap of the floor (grounded or a small
+    // step-down), leaving dz + gravity to drive Z only when the foot is higher (a jump or a fall).
+    // Net grounded result: pos[2] = ground + capsule_bottom EVERY tick, so a COM-moving clip
+    // (sit/crouch/jump-land) keeps the feet planted as its capsule_bottom changes — the added dz is
+    // absorbed by the snap, and a clip whose origin->feet shrinks no longer floats. capsule_bottom
+    // is the current anim frame's value (origin->feet), NOT the +0x50000 death-fall mover target.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7cef adds dz; Entity_ProcessCollisionAndPlatform
+    // Physics @0x4b2bd0 restores entity[3]=ground+entityRadius @0x4b3da3 and the caller snaps the
+    // foot @0x4b7d0a (org2) / @0x4bf802 (org1); airborne split @0x4b7e17 cmp eax,0F000h; gravity
+    // -416/2t to terminal; entityRadius = capsule_bottom*65536 via AnimMap_UpdateEntity @0x40b82f;
+    // +0x50000 is the id-3 death mover's target (AI_ProcessMovementStep @0x466db0). D-INF-6.]
+    // Skipped without a height field: a terrain-free world (unit tests) keeps the authored Z.
+    if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
+        const int32_t floor_z = inf.ground_cache + frame.capsule_bottom;
+        // A grounded foot more than kAirborneGap above the floor has stepped off into a drop.
+        if (!inf.airborne && e.pos[2] - floor_z > kAirborneGap) inf.airborne = true;
+
+        if (inf.airborne) {
+            // Jumping / falling: dz then gravity (every 2 ticks: -416/2t = the witnessed -208/tick,
+            // clamped to terminal) drive Z. [orig: @0x4b7cef dz, @0x4b7acf gravity]
+            e.pos[2] += frame.dz;
+            if ((key & 1u) == 0) {
+                inf.vel[2] -= kGravityStep;
+                if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
+                e.pos[2] += 2 * inf.vel[2];
+            }
+            // Land only while descending (vel_z <= 0): during a jump ASCENT the foot is briefly
+            // within kAirborneGap of the floor but must not re-ground [orig: the in-air flag
+            // entity+0x24 & 0x2000 suppresses the ground snap until the foot returns to ground].
+            if (inf.vel[2] <= 0 && e.pos[2] - floor_z <= kAirborneGap) {
+                // Landing. Fall damage [orig: dump 5152 — vel_z <= -1057*scale -> health -=
+                // (excess) >> 4]; horizontal slide stops on contact (D-INF-3).
+                if (fall_damage_scale > 0 && inf.vel[2] <= -1057 * fall_damage_scale) {
                     int32_t excess = (-1057 * fall_damage_scale) - inf.vel[2];
                     int32_t dmg = excess >> 4;
                     if (dmg > e.health) dmg = e.health;
                     e.health = static_cast<int16_t>(e.health - dmg);
                 }
                 e.pos[2] = floor_z;
-                inf.vel[2] = 0;
                 inf.vel[0] = 0;
                 inf.vel[1] = 0;
+                inf.vel[2] = 0;
+                inf.airborne = false;
+            }
+        } else {
+            // Grounded: re-anchor the foot to the floor EVERY tick so a COM-moving clip's
+            // capsule_bottom tracks (the witnessed per-tick snap; absorbs the dz). The slope-slide
+            // impulse in vel[0]/[1] is stopped by the every-2-tick ground contact, as before.
+            e.pos[2] = floor_z;
+            if ((key & 1u) == 0) {
+                inf.vel[0] = 0;
+                inf.vel[1] = 0;
+                inf.vel[2] = 0;
             }
         }
     }

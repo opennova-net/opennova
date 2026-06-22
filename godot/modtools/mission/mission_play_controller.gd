@@ -9,7 +9,7 @@ extends Control
 # so gizmos and picking cannot fire.
 #
 # The per-frame drive is literally the game shell's loop (main_game._process):
-# world.tick(camera_position) -> foliage coverage, runtime logic + present,
+# world.tick(camera_position, camera_transform) -> foliage coverage, runtime logic + present,
 # audio. Esc (FlyCamera.escape_pressed) requests Stop; the workspace performs
 # the viewport swap-back. Known v1 limits, surfaced in the status line: play
 # loads the SAVED terrain/env from the resource root (live sculpt edits are not
@@ -119,7 +119,7 @@ func get_world():
 # world's foliage + runtime + audio around the play camera.
 func _process(_delta: float) -> void:
 	if _playing and _world != null and _world.is_loaded():
-		_world.tick(_camera.global_position)
+		_world.tick(_camera.global_position, _camera.global_transform)
 
 
 func _on_escape() -> void:

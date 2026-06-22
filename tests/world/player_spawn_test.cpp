@@ -22,8 +22,8 @@ static int failures = 0;
 struct ForwardClip : IRootMotionSource {
     int32_t fwd;
     explicit ForwardClip(int32_t f) : fwd(f) {}
-    bool has_clip(int) const override { return true; }
-    bool advance(int, int32_t &phase, RootMotionFrame &out) override {
+    bool has_clip(int, int) const override { return true; }
+    bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
         phase += 1;
         out.dx = fwd;
         out.dy = 0;

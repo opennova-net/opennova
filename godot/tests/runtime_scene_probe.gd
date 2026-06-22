@@ -4,7 +4,7 @@ extends SceneTree
 # points the shared GameWorld at an explicit resource dir (a synthesized one-root
 # fixture by default, or a dir passed via `-- <dir>`), waits for NovaTerrainData,
 # moves the camera onto a painted foliage point, then verifies the foliage
-# dispatcher is using broad camera-grid coverage. There is no runtime fallback;
+# dispatcher is using the coverage-safe runtime path. There is no runtime fallback;
 # the probe chooses the directory itself.
 #
 # Use: `godot --headless --path godot -s res://tests/runtime_scene_probe.gd -- <dir>`
@@ -87,6 +87,7 @@ func _run() -> void:
 		"dispatcher_cell_grid_radius": dispatcher.get_cell_grid_radius() if dispatcher != null else -1,
 		"dispatcher_total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"dispatcher_cached_cells": dispatcher.get_cached_cells() if dispatcher != null else -1,
+		"terrain_foliage_centers": terrain.get_foliage_dispatch_centers().size() if terrain != null else -1,
 		"overlay_tile_info": overlay != null and overlay.tile_info != null,
 		"overlay_tilestrip": overlay != null and overlay.tilestrip != null,
 		"overlay_entries_rendered": overlay.get_entry_count_rendered() if overlay != null else -1,
@@ -104,7 +105,7 @@ func _run() -> void:
 		failures.append("expected NovaTerrain/FoliageDispatcher to exist")
 	elif dispatcher.get_dispatch_algorithm() != NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
 		failures.append(
-			"expected runtime dispatcher algorithm CELL_GRID, got %d"
+			"expected runtime dispatcher algorithm CELL_GRID until engine-center radius/center feed is fully recovered, got %d"
 				% dispatcher.get_dispatch_algorithm()
 		)
 	elif dispatcher.get_cached_cells() <= 0:
@@ -112,6 +113,8 @@ func _run() -> void:
 			"expected dispatcher.cached_cells > 0 after camera-grid dispatch, got %d"
 				% dispatcher.get_cached_cells()
 		)
+	if terrain == null:
+		failures.append("expected NovaTerrain to exist")
 
 	if data != null and data.is_loaded():
 		if not colormap_ok:

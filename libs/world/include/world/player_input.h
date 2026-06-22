@@ -20,6 +20,14 @@ struct PlayerInput {
     bool left = false;
     bool right = false;
     bool run = false;          // alerted/run gait (vs walk)
+    // Stance is the host's already-resolved posture (the original toggles it on a key edge via a
+    // reliable net message; the host owns that edge logic). crouch wins over prone. jump is a
+    // per-frame edge the motor consumes once when grounded. [orig: entity+0x12C stance/jump bits;
+    // stance edge-toggle via NapiNPServerMsg_HandleStanceChange @0x501c60; crouch wins @0x4b59ce;
+    // jump bit 0x20 @0x4b7eaf]
+    bool crouch = false;
+    bool prone = false;
+    bool jump = false;
     int32_t look_heading = 0;  // absolute facing (entity Yaw@+0x10), BAM32
     int32_t look_pitch = 0;    // absolute look pitch (entity Pitch@+0x14), BAM32; the caller
                                // clamps to ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]

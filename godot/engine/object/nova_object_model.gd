@@ -47,6 +47,7 @@ var _skeleton_skin: Skin
 var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk")
 var _anim_time := 0.0               # playhead seconds into the active clip
 var _anim_playing := false
+var _anim_external_phase := false   # true when the sim, not _process(delta), owns _anim_time
 
 
 func _ready() -> void:
@@ -106,6 +107,7 @@ func set_playing(value: bool) -> void:
 func reset_animation_time() -> void:
 	_anim_time_ms = 0
 	_anim_time = 0.0
+	_anim_external_phase = false
 	_apply_runtime_state(0.0)
 
 
@@ -119,6 +121,7 @@ func set_skeletal_anim(skeletal) -> void:
 	_anim_key = ""
 	_anim_time = 0.0
 	_anim_playing = false
+	_anim_external_phase = false
 	rebuild()
 
 
@@ -138,13 +141,36 @@ func has_skeleton() -> bool:
 func play_body_clip(key: String) -> void:
 	if _skeletal == null or not _skeletal.has_clip(key):
 		return
+	if key == _anim_key:
+		_anim_external_phase = false
+		_anim_playing = true
+		return
 	_anim_key = key
 	_anim_time = 0.0
 	_anim_playing = true
+	_anim_external_phase = false
+
+
+## Pose a main-body clip at the authoritative infantry motor playhead. IDA's
+## AnimMap phase advances in half-frame ticks, so seconds = ticks / (2 * clip_fps).
+## The model does not free-run this clip between sim snapshots.
+func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	if _skeletal == null or not _skeletal.has_clip(key):
+		return
+	_anim_key = key
+	var fps: float = _skeletal.get_clip_fps(key)
+	var seconds := 0.0
+	if fps > 0.0:
+		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
+	_set_body_playhead(seconds)
+	_anim_playing = false
+	_anim_external_phase = true
+	_advance_body_anim(0.0)
 
 
 func stop_body_clip() -> void:
 	_anim_playing = false
+	_anim_external_phase = false
 
 
 func get_active_body_clip() -> String:
@@ -159,9 +185,21 @@ func play_body_anim(slot: int) -> void:
 	if _skeletal == null or slot < 0:
 		return
 	var key: String = _skeletal.slot_to_key(slot)
-	if key.is_empty() or key == _anim_key:
+	if key.is_empty():
+		return
+	if key == _anim_key and not _anim_external_phase:
 		return
 	play_body_clip(key)
+
+
+## Pose a main-body animation slot at the authoritative infantry motor playhead.
+func play_body_anim_at(slot: int, phase_ticks: int) -> void:
+	if _skeletal == null or slot < 0:
+		return
+	var key: String = _skeletal.slot_to_key(slot)
+	if key.is_empty():
+		return
+	play_body_clip_at(key, phase_ticks)
 
 
 func get_animation_time_ms() -> int:
@@ -177,6 +215,12 @@ func get_animation_time_ms() -> int:
 func set_animation_time(seconds: float) -> void:
 	if _skeletal == null or _anim_key.is_empty():
 		return
+	_anim_external_phase = false
+	_set_body_playhead(seconds)
+	_advance_body_anim(0.0)
+
+
+func _set_body_playhead(seconds: float) -> void:
 	var length: float = _skeletal.get_clip_length(_anim_key)
 	if length <= 0.0:
 		_anim_time = 0.0
@@ -184,7 +228,6 @@ func set_animation_time(seconds: float) -> void:
 		_anim_time = fposmod(seconds, length)
 	else:
 		_anim_time = clampf(seconds, 0.0, length)
-	_advance_body_anim(0.0)
 
 
 ## The active body clip's playhead in seconds, loop-wrapped (one-shots clamp),
@@ -343,7 +386,7 @@ func _advance_part_anims(delta: float) -> void:
 func _advance_body_anim(delta: float) -> void:
 	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
 		return
-	if _is_playing and _anim_playing:
+	if _is_playing and _anim_playing and not _anim_external_phase:
 		_anim_time += delta
 	var pose: Array = _skeletal.eval_pose(_anim_key, _anim_time)
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())

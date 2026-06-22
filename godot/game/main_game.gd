@@ -67,6 +67,10 @@ var _net_killfeed   # net spectator kill feed, built while in a net session
 var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
 var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
 var _player_third_person := false  # F4 toggles first/third person
+# Stance is toggled on a key edge (C = crouch, Z = prone), mirroring the original's edge-toggle;
+# the two are mutually exclusive. Jump is momentary (polled). [orig: stance bits on entity+0x12C]
+var _player_crouch := false
+var _player_prone := false
 var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); null until built
 var _player_viewmodel: Node3D = null  # host-managed FP arms+weapon (shown in 1P); null until built
 
@@ -109,6 +113,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# F4 toggles first/third person for the local player [orig: dword_A890C8 mode flag].
 	if key.keycode == KEY_F4 and _world.has_local_player():
 		_player_third_person = not _player_third_person
+		get_viewport().set_input_as_handled()
+	# C / Z toggle the player's stance (crouch / prone), mutually exclusive — the original toggles
+	# stance on a key edge. [orig: NapiNPServerMsg_HandleStanceChange @0x501c60; crouch wins]
+	elif key.keycode == KEY_C and _world.has_local_player():
+		_player_crouch = not _player_crouch
+		if _player_crouch:
+			_player_prone = false
+		get_viewport().set_input_as_handled()
+	elif key.keycode == KEY_Z and _world.has_local_player():
+		_player_prone = not _player_prone
+		if _player_prone:
+			_player_crouch = false
 		get_viewport().set_input_as_handled()
 
 
@@ -383,7 +399,9 @@ func _drive_local_player(_delta: float) -> void:
 	var left: bool = Input.is_key_pressed(KEY_A)
 	var right: bool = Input.is_key_pressed(KEY_D)
 	var run: bool = Input.is_key_pressed(KEY_SHIFT)
-	_world.set_local_player_input(fwd, back, left, right, run, _player_look_yaw, _player_look_pitch)
+	var jump: bool = Input.is_key_pressed(KEY_SPACE)  # momentary; the motor jumps once when grounded
+	_world.set_local_player_input(fwd, back, left, right, run, _player_crouch, _player_prone, jump,
+		_player_look_yaw, _player_look_pitch)
 
 
 # Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
@@ -424,10 +442,18 @@ func _update_player_camera() -> void:
 		_player_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
 			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
 		_player_avatar.visible = _player_third_person
-		# Drive the body clip from the player's authoritative anim slot (idle/walk/run) — the same
-		# slot the present pass feeds NPC models. The model self-ticks its skeleton via _process, so
-		# we only SELECT the clip here (play_body_anim is idempotent per tick; do not also advance).
-		if _player_avatar.has_method("play_body_anim"):
+		# Drive the body clip from the player's authoritative anim STATE + phase. The sim/root track
+		# owns phase; the model only poses the matching .bad clip so root motion and skeleton do not
+		# drift apart. Fall back to the old selector path for compatibility.
+		var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
+		var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
+		if not anim_key.is_empty() and _player_avatar.has_method("play_body_clip_at"):
+			_player_avatar.play_body_clip_at(anim_key, anim_phase)
+		elif not anim_key.is_empty() and _player_avatar.has_method("play_body_clip"):
+			_player_avatar.play_body_clip(anim_key)
+		elif _player_avatar.has_method("play_body_anim_at"):
+			_player_avatar.play_body_anim_at(_world.local_player_anim_slot(), anim_phase)
+		elif _player_avatar.has_method("play_body_anim"):
 			_player_avatar.play_body_anim(_world.local_player_anim_slot())
 	# First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1, shown in
 	# first person only (hidden in 3P, where the body avatar shows instead). The original biases the

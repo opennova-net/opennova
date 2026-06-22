@@ -13,6 +13,12 @@ void apply_player_move_order(AiEntity &e, const PlayerInput &in) {
     inf.target_heading = in.look_heading;
     inf.look_pitch = in.look_pitch;
 
+    // Stance + jump. crouch wins over prone [orig: motor tests entity+0x12C crouch bit before the
+    // prone bit @0x4b59ce]; the motor consumes the jump edge once when grounded.
+    inf.stance = in.crouch ? InfantryState::Stance::kCrouch
+               : (in.prone ? InfantryState::Stance::kProne : InfantryState::Stance::kStand);
+    if (in.jump) inf.jump_requested = true;
+
     // [orig: Player_PackInputStateToEntity @0x4df450] F/B/L/R combo → 8-way move index.
     int dir_bits = 0;
     if (in.forward) dir_bits |= 1;

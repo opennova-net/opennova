@@ -48,8 +48,8 @@ int main() {
 	if (!expect(terrain_light_color_from_ambient_diffuse_argb(0xFFFFFFFFu, 0xFF000000u) == 0xFF000000u,
 	            "zero diffuse with nonzero ambient should produce black light")) return 1;
 
-	// Jointops.exe Foliage_BuildGeometry@0x005BF5F0 averages the four packed
-	// Terrain_GetModulatedColorAtPos samples with a nibble-preserving expression.
+	// Foliage render-emitter parity: average four packed Terrain_GetModulatedColorAtPos
+	// samples with the nibble-preserving expression. The old 0x005BF5F0 anchor is stale.
 	if (!expect(terrain_average_four_argb(0x40010203u, 0x80050607u, 0xC0090A0Bu, 0xFF0D0E0Fu) == 0x9F070809u,
 	            "four-sample foliage color average should truncate each ARGB channel")) return 1;
 

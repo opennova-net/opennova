@@ -89,6 +89,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			spawn_pos = _sim.get_entity_position(0)
 		if not _sim.spawn_local_player(spawn_pos, 0.0, 1):
 			push_warning("MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)")
+	# Per-entity grounding: resolve each infantry soldier's OWN model .adm so it grounds + locomotes
+	# off its own clip's capsule_bottom (crouch/sit/jump plant correctly), not the shared default
+	# set. Runs after the NPC promote AND the player spawn so both are covered. [D-INF-6]
+	if options.get("resource_root") != null and options.get("item_db") != null:
+		_sim.resolve_infantry_adm_ids(options["resource_root"], options["item_db"])
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
@@ -111,9 +116,15 @@ func local_player_pitch_deg() -> float:
 func local_player_anim_slot() -> int:
 	return _sim.get_local_player_anim_slot() if _sim != null else -1
 
-func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+func local_player_anim_key() -> String:
+	return String(_sim.get_local_player_anim_key()) if _sim != null else ""
+
+func local_player_anim_phase_ticks() -> int:
+	return int(_sim.get_local_player_anim_phase_ticks()) if _sim != null else 0
+
+func set_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _sim != null:
-		_sim.set_player_input(forward, back, left, right, run, look_yaw_deg, look_pitch_deg)
+		_sim.set_player_input(forward, back, left, right, run, crouch, prone, jump, look_yaw_deg, look_pitch_deg)
 
 
 func get_sim() -> NovaSimulation:

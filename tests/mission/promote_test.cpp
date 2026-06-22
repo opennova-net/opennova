@@ -167,11 +167,11 @@ int main() {
             return id == anim_state::kWalkForward || id == anim_state::kRunForward ||
                    id == anim_state::kJogForward;
         }
-        bool has_clip(int id) const override {
+        bool has_clip(int /*adm_id*/, int id) const override {
             return gait(id) || id == anim_state::kIdle || id == anim_state::kStop;
         }
-        bool advance(int id, int32_t &phase, RootMotionFrame &out) override {
-            if (!has_clip(id)) return false;
+        bool advance(int /*adm_id*/, int id, int32_t &phase, RootMotionFrame &out) override {
+            if (!has_clip(0, id)) return false;
             ++phase;
             out = RootMotionFrame{};
             if (gait(id)) out.dx = step;

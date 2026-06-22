@@ -84,6 +84,8 @@ public:
 		PF_PHASE2,     // PANM channel 2 phase
 		PF_ACTIVE2,
 		PF_ANIM_SLOT,  // Entity.anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
+		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
+		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
 		PF_ALIVE,      // 1 when alive
 		PF_STRIDE      // record length; also the count of fields above
@@ -193,6 +195,7 @@ public:
 	// entity Yaw@+0x10 / Pitch@+0x14 straight from the mouse [orig: Input_HandleActionBinding_0
 	// @0x4e1330]; the caller clamps pitch to ±80°.
 	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
+	                      bool p_crouch, bool p_prone, bool p_jump,
 	                      float p_look_yaw_deg, float p_look_pitch_deg);
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
@@ -204,6 +207,11 @@ public:
 	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
 	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
 	int get_local_player_anim_slot() const;
+	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
+	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
+	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
+	String get_local_player_anim_key() const;
+	int get_local_player_anim_phase_ticks() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
@@ -259,6 +267,8 @@ public:
 	// Human-readable AI state name, "?" for the id gaps
 	// [orig: Entity_LookupAIStateName @0x455cc0].
 	static String ai_state_name(int p_state);
+	// Infantry anim state id -> ADM clip key ("anim_<off_8135F0 name>"), empty for invalid gaps.
+	static String infantry_anim_key(int p_state);
 
 	// Entity query. The (kind, index) pair lets the editor map a sim entity back to its placed
 	// mission record + its already-rendered node (MissionController._pickable).
@@ -306,7 +316,14 @@ public:
 	// of anim states with a usable clip (0 = nothing loaded; org1 soldiers then stand —
 	// motion comes from clips, as in the original). Survives reset_world like the terrain.
 	int set_infantry_anim_map(const Ref<class NovaResourceRoot> &p_resource_root, const String &p_adm_name);
-	int get_infantry_clip_count() const { return infantry_anim_.clip_count(); }
+	int get_infantry_clip_count() const { return infantry_anim_.clip_count(0); }
+
+	// Per-entity grounding: resolve every active infantry soldier's OWN model .adm (from its
+	// items.def type id via the item database) and store its registry adm_id on the entity, so
+	// each grounds + locomotes off its own clip rather than the shared default set. Idempotent;
+	// call after load and again after spawning the local player.
+	void resolve_infantry_adm_ids(const Ref<class NovaResourceRoot> &p_resource_root,
+	                              const Ref<class NovaItemDatabase> &p_item_db);
 
 	int get_spawned_count() const { return promo_.spawned; }
 	int get_brain_count() const { return promo_.brains; }

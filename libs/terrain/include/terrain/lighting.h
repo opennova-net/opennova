@@ -22,9 +22,9 @@ uint32_t terrain_light_color_from_ambient_diffuse_argb(uint32_t ambient_argb,
 float terrain_fog_start_for_type(float fog_end, int fog_type) noexcept;
 float terrain_fog_factor_for_distance(float distance, float fog_end, int fog_type) noexcept;
 
-// Engine: Jointops.exe Foliage_BuildGeometry@0x005BF5F0.
-// Averages four packed ARGB samples with the nibble-preserving expression used
-// after the four Terrain_GetModulatedColorAtPos calls.
+// Foliage render-emitter parity helper. The old Foliage_BuildGeometry@0x005BF5F0
+// address is stale; keep this as the nibble-preserving four-sample average until
+// the retail emitter is re-anchored.
 uint32_t terrain_average_four_argb(uint32_t c0, uint32_t c1, uint32_t c2, uint32_t c3) noexcept;
 
 // Engine: Jointops.exe Terrain_GetModulatedColorAtPos@0x005C5FE0.

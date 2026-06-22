@@ -9,6 +9,7 @@
 #include <mission/mission_systems.h>
 #include <world/player_spawn.h>
 
+#include "object/nova_item_database.h"
 #include "resource_index/nova_resource_root.h"
 #include "terrain/nova_terrain_data.h"
 
@@ -113,13 +114,42 @@ void NovaSimulation::apply_terrain_to_ai() {
 // clip" and soldiers stand, exactly the original's relationship between motion and clips.
 void NovaSimulation::apply_root_motion_to_ai() {
 	if (!ai_) return;
-	ai_->root_motion = infantry_anim_.clip_count() > 0 ? &infantry_anim_ : nullptr;
+	ai_->root_motion = !infantry_anim_.empty() ? &infantry_anim_ : nullptr;
 }
 
 int NovaSimulation::set_infantry_anim_map(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name) {
-	const int clips = infantry_anim_.load(p_resource_root, p_adm_name);
+	// The default clip set (adm_id 0): every infantry entity grounds off this until its own
+	// model's .adm is registered (register_infantry_adm + set_infantry_adm_id). Clearing here
+	// resets the whole registry on each (re)load.
+	infantry_anim_.clear();
+	infantry_anim_.register_adm(p_resource_root, p_adm_name);
 	apply_root_motion_to_ai();
-	return clips;
+	return infantry_anim_.clip_count(0);
+}
+
+// Per-entity .adm resolution: ground each soldier off its OWN model's clip, not the shared
+// default set (adm_id 0). For every active infantry entity, resolve its anim_def from its
+// items.def type id, register that .adm (parsed once, cached by name), and store the resulting
+// adm_id on its InfantryState. The local player (US01) is covered the same way once spawned.
+// Idempotent: re-registering a name returns the cached id, re-setting adm_id is harmless, so the
+// host can call this after load and again after spawning the player. [orig: AnimMap_UpdateEntity
+// @0x40b5f0 evaluates the entity's own anim map per frame; docs/world/world-wac-ai-re.md D-INF-6.]
+void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_resource_root,
+                                              const Ref<NovaItemDatabase> &p_item_db) {
+	if (!world_ || !world_->ai || p_resource_root.is_null() || p_item_db.is_null()) return;
+	AiSystem &ai = *world_->ai;
+	for (int i = 0; i < ai.count(); ++i) {
+		AiEntity *e = ai.at(i);
+		if (!e || !e->inf.active) continue;
+		const opennova::world::Entity *ent = world_->registry.get(e->handle);
+		if (!ent) continue;
+		String adm = p_item_db->get_anim_def(ent->item_id);
+		if (adm.is_empty()) continue;
+		if (!adm.to_lower().ends_with(".adm")) adm += ".adm";
+		const int adm_id = infantry_anim_.register_adm(p_resource_root, adm);
+		if (adm_id >= 0) e->inf.adm_id = adm_id;
+	}
+	apply_root_motion_to_ai();
 }
 
 void NovaSimulation::set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain) {
@@ -200,11 +230,13 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &NovaSimulation::spawn_local_player);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
-	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
+	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "crouch", "prone", "jump", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_slot"), &NovaSimulation::get_local_player_anim_slot);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
+	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -225,6 +257,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fired_events_snapshot"), &NovaSimulation::get_fired_events_snapshot);
 	ClassDB::bind_method(D_METHOD("get_entity_debug", "index"), &NovaSimulation::get_entity_debug);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
+	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_key", "state"), &NovaSimulation::infantry_anim_key);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &NovaSimulation::get_entity_kind);
 	ClassDB::bind_method(D_METHOD("get_entity_index", "index"), &NovaSimulation::get_entity_index);
@@ -242,6 +275,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
 	ClassDB::bind_method(D_METHOD("set_terrain_height_field", "terrain"), &NovaSimulation::set_terrain_height_field);
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
+	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);
@@ -267,6 +301,8 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_PHASE2);
 	BIND_ENUM_CONSTANT(PF_ACTIVE2);
 	BIND_ENUM_CONSTANT(PF_ANIM_SLOT);
+	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
+	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
 	BIND_ENUM_CONSTANT(PF_ALIVE);
 	BIND_ENUM_CONSTANT(PF_STRIDE);
@@ -375,12 +411,18 @@ bool NovaSimulation::has_local_player() const {
 }
 
 void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
-                                      bool p_run, float p_look_yaw_deg, float p_look_pitch_deg) {
+                                      bool p_run, bool p_crouch, bool p_prone, bool p_jump,
+                                      float p_look_yaw_deg, float p_look_pitch_deg) {
 	player_input_.forward = p_forward;
 	player_input_.back = p_back;
 	player_input_.left = p_left;
 	player_input_.right = p_right;
 	player_input_.run = p_run;
+	// Stance is the host's already-resolved posture (the host owns the key-edge toggle); jump is a
+	// per-frame edge the motor consumes once when grounded. [orig: entity+0x12C stance/jump bits]
+	player_input_.crouch = p_crouch;
+	player_input_.prone = p_prone;
+	player_input_.jump = p_jump;
 	// Look yaw (mission degrees) -> engine BAM heading, the (90 - yaw) convention used at spawn.
 	player_input_.look_heading =
 	    static_cast<int32_t>((90.0 - static_cast<double>(p_look_yaw_deg)) * kBamPerDegree);
@@ -418,6 +460,24 @@ int NovaSimulation::get_local_player_anim_slot() const {
 	// so main_game drives its body clip from this getter.
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	return e ? e->anim_slot : -1;
+}
+
+String NovaSimulation::get_local_player_anim_key() const {
+	// The local player's full anim-state clip key ("anim_<name>"), straight from the motor's
+	// selected state. Unlike the 8-slot BodyAnim enum (get_local_player_anim_slot), this carries
+	// stance + jump (anim_idle_crouch / anim_walk_prone_forward / anim_jump_loop / ...), so
+	// main_game drives the 3rd-person avatar via play_body_clip(key) for full stance fidelity.
+	// [orig: off_8135F0 names ARE the .adm keys without the "anim_" prefix]
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return String();
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p) return String();
+	return infantry_anim_key(p->inf.anim_state);
+}
+
+int NovaSimulation::get_local_player_anim_phase_ticks() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	return p ? p->inf.clip_phase : 0;
 }
 
 void NovaSimulation::restart() {
@@ -622,6 +682,13 @@ String NovaSimulation::ai_state_name(int p_state) {
 	return String(opennova::world::ai_state_name(p_state));
 }
 
+String NovaSimulation::infantry_anim_key(int p_state) {
+	if (p_state < 0 || p_state >= opennova::world::kInfantryAnimStateCount) return String();
+	const char *name = opennova::world::kInfantryAnimNames[p_state];
+	if (!name || !name[0]) return String();
+	return String("anim_") + String(name);
+}
+
 int NovaSimulation::get_entity_count() const {
 	return ai_ ? ai_->count() : 0;
 }
@@ -747,7 +814,8 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_ANIM_SLOT] = -1.0f; r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 0.0f;
+		r[PF_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
+		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 0.0f;
 
 		AiEntity *e = ai_->at(i);
 		if (!e) continue;
@@ -775,6 +843,10 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 		r[PF_PHASE2] = static_cast<float>(phase2);
 		r[PF_ACTIVE1] = (e->brain.f[AiBrain::kPartAnimRate0] != 0 || phase1 != 0) ? 1.0f : 0.0f;
 		r[PF_ACTIVE2] = (e->brain.f[AiBrain::kPartAnimRate0 + 1] != 0 || phase2 != 0) ? 1.0f : 0.0f;
+		if (e->inf.active) {
+			r[PF_ANIM_STATE] = static_cast<float>(e->inf.anim_state);
+			r[PF_ANIM_PHASE_TICKS] = static_cast<float>(e->inf.clip_phase);
+		}
 	}
 	return out;
 }
@@ -830,7 +902,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_ANIM_SLOT] = -1.0f; r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
+		r[PF_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
+		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
 
 		// kind/index/bms_id/net_id resolve from the registry entity behind the decoded
 		// handle: the host is authoritative, so the placed-node mapping still resolves
@@ -856,6 +929,13 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		// engine -> mission yaw (90 - heading), matching the AI-pool present.
 		const uint32_t heading_bam = static_cast<uint32_t>(es.yaw_byte) << 24;
 		r[PF_YAW_DEG] = static_cast<float>(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
+		if (world_->ai) {
+			const AiEntity *ae = world_->ai->for_handle(h);
+			if (ae && ae->inf.active) {
+				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
+				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
+			}
+		}
 	}
 	return out;
 }

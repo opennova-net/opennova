@@ -27,9 +27,9 @@ class NovaTerrainData;
 // Foliage adapter for the shared engine-spec placement/dispatcher core.
 //
 // Engine provenance:
-//   - Jointops.exe Foliage_RenderAtPosition@0x5C1940 (per-slot dispatcher)
-//   - Jointops.exe Foliage_BuildPatchData@0x5C0240 (per-cell placement)
-//   - docs/engine_spec_foliage.md 4.3-4.4
+//   - Jointops.exe terrain_update_foliage_tiles@0x601F50 (visible-center dispatcher)
+//   - Jointops.exe generate_foliage_instances@0x600980 (per-cell placement)
+//   - Jointops.exe sub_606620@0x606620 (foliage map sampler)
 //
 // Fidelity:
 //   - ENGINE_CENTERS uses shared `opennova::foliage::Dispatcher` instances and
@@ -112,6 +112,9 @@ public:
 	void set_surface_offset(float p_offset);
 	float get_surface_offset() const;
 
+	void set_engine_view_radius_fixed(int p_radius);
+	int get_engine_view_radius_fixed() const;
+
 	// Main API --------------------------------------------------------------
 
 	// Dispatch around `centre` using the configured coverage algorithm.
@@ -188,6 +191,7 @@ private:
 	int lru_capacity_ = 128;
 	float quad_half_width_ = 2.0f;
 	float surface_offset_ = 0.05f;
+	int32_t engine_view_radius_fixed_ = 0x40000;
 
 	bool mm_dirty_ = true;
 

@@ -435,9 +435,9 @@ func _load_terrain(trn_path: String) -> bool:
 	return true
 
 
-# Runtime foliage: feed the dispatcher NovaTerrainData directly (C++ fast path —
-# no Callable round trip). Same block the editor preview shares minus the
-# live-sculpt samplers.
+# Runtime foliage: feed the dispatcher NovaTerrainData directly (C++ fast path).
+# Gameplay uses the coverage-safe CELL_GRID path until the exact retail
+# engine-center radius/center feed is fully recovered.
 func _configure_foliage() -> void:
 	if _dispatcher == null or _terrain_data == null:
 		return
@@ -472,9 +472,18 @@ func is_loaded() -> bool:
 ## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
-func tick(camera_pos: Vector3) -> void:
+func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> void:
 	if _loaded and _dispatcher != null:
-		_dispatcher.dispatch(camera_pos)
+		if _dispatcher.dispatch_algorithm == NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
+			_dispatcher.dispatch(camera_pos, camera_xform)
+		else:
+			var centers := PackedVector3Array()
+			if _terrain != null:
+				centers = _terrain.get_foliage_dispatch_centers()
+			if centers.is_empty():
+				_dispatcher.dispatch(camera_pos, camera_xform)
+			else:
+				_dispatcher.dispatch_centers(centers, camera_xform)
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -501,9 +510,15 @@ func local_player_pitch_deg() -> float:
 func local_player_anim_slot() -> int:
 	return _runtime.local_player_anim_slot() if _runtime != null else -1
 
-func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+func local_player_anim_key() -> String:
+	return _runtime.local_player_anim_key() if _runtime != null else ""
+
+func local_player_anim_phase_ticks() -> int:
+	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
+
+func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _runtime != null:
-		_runtime.set_player_input(forward, back, left, right, run, look_yaw_deg, look_pitch_deg)
+		_runtime.set_player_input(forward, back, left, right, run, crouch, prone, jump, look_yaw_deg, look_pitch_deg)
 
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
 ## own). The caller (main_game) positions it and toggles first/third-person visibility. Null
@@ -572,6 +587,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		"terrain": _terrain_data,
 		"resource_root": _resource_root,
 		"wac_basename": bms_name.get_basename(),
+		# The placer's item database (item_id -> anim_def), so each soldier grounds off its own
+		# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
+		"item_db": _placer.get_item_db() if _placer != null else null,
 	}
 	# NOVA_PLAYER (env launch flag, like NW_REPLAY): run the SP in-process listen server and
 	# spawn the host's own player (ADR 0011/0012, net-re §5.2b/§5.38). Default off -> normal

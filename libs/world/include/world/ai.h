@@ -568,7 +568,7 @@ public:
     // fallbacks) and commit it under the lock/emote rules.
     void infantry_select(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
-    int infantry_resolve_state(int state) const;
+    int infantry_resolve_state(int adm_id, int state) const;
     // Slope sampling + slide [orig: every-8 block, 4 probes around the entity].
     void infantry_slope_slide(AiEntity &e);
 

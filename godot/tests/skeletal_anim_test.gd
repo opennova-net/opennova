@@ -185,6 +185,44 @@ func test_set_animation_time_wraps_or_clamps_per_clip() -> void:
 		assert_almost_eq(model.get_animation_time(), 0.0, 0.001, "one-shots clamp at zero")
 
 
+func test_play_body_clip_is_idempotent_for_same_key() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	model.play_body_clip("anim_walk_forward")
+	model.set_animation_time(0.2)
+
+	model.play_body_clip("anim_walk_forward")
+
+	assert_almost_eq(model.get_animation_time(), 0.2, 0.001,
+		"re-playing the active clip must not restart its playhead")
+
+
+func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	if not model.has_method("play_body_clip_at"):
+		fail_test("NovaObjectModel exposes play_body_clip_at(key, phase_ticks)")
+		return
+	var sk = model.get_skeletal_anim()
+	var fps: float = sk.get_clip_fps("anim_walk_forward")
+	assert_gt(fps, 0.0, "fixture clip has a valid fps")
+	var phase_ticks := 5
+	var expected_time := float(phase_ticks) / (2.0 * fps)
+
+	model.call("play_body_clip_at", "anim_walk_forward", phase_ticks)
+	var pinned_pose := model.get_skeleton().get_bone_pose_position(0)
+	model._process(0.5)
+
+	assert_almost_eq(model.get_animation_time(), expected_time, 0.001,
+		"IDA half-frame phase ticks map to skeleton pose seconds")
+	assert_true(model.get_skeleton().get_bone_pose_position(0).is_equal_approx(pinned_pose),
+		"externally phased playback does not free-run between sim snapshots")
+
+
 func test_scrub_no_ops_without_skeletal_or_clip() -> void:
 	var model = NovaObjectModelScript.new()
 	add_child_autofree(model)

@@ -28,11 +28,10 @@ namespace godot {
 namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
-constexpr int32_t RUNTIME_VIEW_RADIUS_FIXED = 0x40000;
 
-// Engine foliage lighting is not normal/slope lighting. Foliage_BuildGeometry
-// @0x005BF5F0 samples Terrain_GetModulatedColorAtPos@0x005C5FE0; sub_5C0240
-// only prepares height/patch-control data for the later render emitter.
+// Foliage color remains a MultiMesh tint approximation. The old
+// Foliage_BuildGeometry@0x005BF5F0 citation is stale; keep this path tied to the
+// verified placement/sampler functions until the retail render emitter is anchored.
 
 uint32_t color_to_argb(const Color &color) {
 	auto to_byte = [](float value) -> uint32_t {
@@ -79,6 +78,10 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_quad_half_width"), &NovaFoliageDispatcher::get_quad_half_width);
 	ClassDB::bind_method(D_METHOD("set_surface_offset", "offset"), &NovaFoliageDispatcher::set_surface_offset);
 	ClassDB::bind_method(D_METHOD("get_surface_offset"), &NovaFoliageDispatcher::get_surface_offset);
+	ClassDB::bind_method(D_METHOD("set_engine_view_radius_fixed", "radius"),
+	                     &NovaFoliageDispatcher::set_engine_view_radius_fixed);
+	ClassDB::bind_method(D_METHOD("get_engine_view_radius_fixed"),
+	                     &NovaFoliageDispatcher::get_engine_view_radius_fixed);
 	ClassDB::bind_method(D_METHOD("dispatch", "centre", "view_xform"),
 	                     &NovaFoliageDispatcher::dispatch, DEFVAL(Transform3D()));
 	ClassDB::bind_method(D_METHOD("dispatch_centers", "centers", "view_xform"),
@@ -104,6 +107,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "lru_capacity"), "set_lru_capacity", "get_lru_capacity");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "quad_half_width"), "set_quad_half_width", "get_quad_half_width");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "surface_offset"), "set_surface_offset", "get_surface_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "engine_view_radius_fixed"),
+	             "set_engine_view_radius_fixed", "get_engine_view_radius_fixed");
 
 	BIND_CONSTANT(DISPATCH_ALGORITHM_ENGINE_CENTERS);
 	BIND_CONSTANT(DISPATCH_ALGORITHM_CELL_GRID);
@@ -206,6 +211,13 @@ void NovaFoliageDispatcher::set_surface_offset(float p_offset) {
 }
 
 float NovaFoliageDispatcher::get_surface_offset() const { return surface_offset_; }
+
+void NovaFoliageDispatcher::set_engine_view_radius_fixed(int p_radius) {
+	engine_view_radius_fixed_ = p_radius < 0 ? 0 : p_radius;
+	reset();
+}
+
+int NovaFoliageDispatcher::get_engine_view_radius_fixed() const { return engine_view_radius_fixed_; }
 
 bool NovaFoliageDispatcher::_has_sampling_source() const {
 	return terrain_data_.is_valid() || (height_sampler_.is_valid() && foliage_sampler_.is_valid());
@@ -405,9 +417,8 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
 	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
 
-	// Jointops.exe Foliage_BuildGeometry@0x005BF5F0 averages four 0x8000
-	// fixed-point offsets around each source vertex. MultiMesh has one color per
-	// instance, so use the instance center as the proxy source vertex.
+	// Verified render-emitter parity is still pending; MultiMesh has one color
+	// per instance, so use the instance center as the proxy source vertex.
 	const uint32_t c0 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz - 0.5f));
 	const uint32_t c1 = color_to_argb(td->get_colormap_color_world(wx + 0.5f, wz - 0.5f));
 	const uint32_t c2 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz + 0.5f));
@@ -575,7 +586,7 @@ void NovaFoliageDispatcher::_dispatch_engine_centers(const PackedVector3Array &c
 			                                         centre_x_fixed,
 			                                         centre_z_fixed,
 			                                         engine_view_camera_z,
-			                                         RUNTIME_VIEW_RADIUS_FIXED,
+			                                         engine_view_radius_fixed_,
 			                                         engine_frame_counter_,
 			                                         config,
 			                                         samplers,

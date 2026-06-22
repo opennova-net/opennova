@@ -2,7 +2,7 @@ shader_type spatial;
 render_mode unshaded, cull_disabled, depth_prepass_alpha;
 
 // RE anchors:
-// - Foliage_BuildGeometry@0x005BF5F0 samples Terrain_GetModulatedColorAtPos.
+// - Retail foliage render-emitter bindings still need a verified anchor.
 // - Terrain_GetModulatedColorAtPos@0x005C5FE0: base.rgb * light.rgb >> 7.
 // - Pixel shader at dword_1549E3C / 0x005BF064 multiplies foliage texture t0
 //   by a terrain/light texture stream and constant diffuse color.
