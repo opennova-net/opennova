@@ -8,6 +8,29 @@ extends GutTest
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 
 
+func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_eq(rt._seat_type_for_user_point("sitex00"), 1, "sitex -> passenger")
+	assert_eq(rt._seat_type_for_user_point("ctrlx"), 2, "ctrlx -> controller")
+	assert_eq(rt._seat_type_for_user_point("UseGun01"), 3, "UseGun -> gunner")
+	assert_eq(rt._seat_type_for_user_point("drvrx"), 5, "drvrx -> driver")
+	assert_eq(rt._seat_type_for_user_point("ground"), 0, "non-seat userpoints are ignored")
+
+
+func test_seat_userpoints_are_converted_through_vehicle_yaw_zero_basis() -> void:
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	assert_true(rt._seat_local_from_user_point_position(Vector3(1, 2, 3)).is_equal_approx(Vector3(-1, 3, 2)),
+		"seat offsets use the same yaw-zero model-forward correction as object placement")
+	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.BACK), 0,
+		"model forward maps to vehicle yaw")
+	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.RIGHT), -90,
+		"model right maps to a left-facing seat offset")
+	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.LEFT), 90,
+		"model left maps to a right-facing seat offset")
+
+
 # An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D
 # transform/visible let the present pass drive it.
 class FakeModel:

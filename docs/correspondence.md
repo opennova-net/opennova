@@ -262,6 +262,14 @@ Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
 | `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) | disasm; §5.38 | confirm-only |
 | `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
 
+Vehicle-board AI command (`waypoint_id` 123–127 = Goto SSN/Group/Player; world-wac-ai-re §11/§4.12; witnessed 2026-06-22):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Entity_UpdateInfantryAI` (board sentinel) | `0x4ba9ad` | tests `slot[148]==125` (= BMS `waypoint_id`) → `==125` keep carrier `slot[144]`, else clear; when set, board via `FindBestSeatSlot`→`AttachToVehicleSeat`. List 123/124/125 = Goto SSN (passenger-only / not-driver / any); target SSN = `wp_number` (`slot[152]`) | disasm; world-wac-ai-re §11/§4.12 | confirm-only |
+| `Entity_FindBestSeatSlot` | `0x4351f0` | seat search by bone-name class (sitex=1/ctrlx=2/UseGun=3/drvrx=5) with priority weights | decompile; world-wac-ai-re §9.1 (paired to `EntityCommands::find_best_seat`) | confirm-only |
+| `Entity_AttachToVehicleSeat` | `0x4364a0` | seats the occupant on the chosen bone slot | decompile; world-wac-ai-re §9.1 (paired to `EntityCommands::mount`) | confirm-only |
+
 On-foot ground settle (D-INF-6, world-wac-ai-re; re-witnessed 2026-06-20):
 
 | original | addr | role | evidence | status |

@@ -65,6 +65,48 @@ func test_load_from_editor_mission_data() -> void:
 	assert_eq(sim.get_entity_kind(0), 3, "entity 0 maps back to KIND_ORGANIC")
 	sim.free()
 
+func test_item_seat_specs_mount_command_125_spawn() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	var soldier := md.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	assert_false(vehicle.is_empty())
+	assert_false(soldier.is_empty())
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
+	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+
+	var sim := NovaSimulation.new()
+	sim.set_item_seat_specs([
+		{
+			"type_id": 1294,
+			"seats": [
+				{"type": 1, "position": Vector3(9, 0, 0), "yaw_offset": 0},
+				{"type": 2, "position": Vector3(0, 1, 2), "yaw_offset": 45}
+			],
+		}
+	])
+	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
+	var pos := sim.get_entity_position(0)
+	assert_true(pos.is_equal_approx(Vector3(10, 2, -1)),
+		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
+	assert_almost_eq(sim.get_entity_yaw_deg(0), 45.0, 0.01,
+		"non-gunner mounted seats carry their local yaw offset")
+	var snap := sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	assert_eq(int(snap[NovaSimulation.PF_ANIM_STATE]), 76, "mounted infantry renders anim_sit")
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
+	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
+	assert_eq(int(card["mount_seat"]), 1, "ctrlx seat was selected by original priority")
+	assert_eq(int(card["mount_type"]), 2, "seat type is ctrlx/controller")
+	assert_eq(int(card["mount_seat_bone"]), 0)
+	assert_eq(Vector3(card["mount_seat_local"]), Vector3(0, 1, 2))
+	assert_eq(int(card["mount_seat_yaw_offset"]), 45)
+	assert_eq(int(card["anim_state"]), 76)
+	assert_eq(String(card["anim_key"]), "anim_sit")
+	assert_eq(stride, NovaSimulation.PF_STRIDE)
+	sim.free()
+
 func test_present_snapshot_shape_and_stride() -> void:
 	# ONE batched present snapshot replaces ~10 Variant-boxed scalar getter calls per entity in the
 	# per-tick present loop. Its length must be count * stride, and the bound stride must match the

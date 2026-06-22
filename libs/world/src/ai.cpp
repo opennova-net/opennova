@@ -585,6 +585,17 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // Engine-frame heading (90 - mission yaw), matching the spawn seed + the mover; the present
     // converts back to mission yaw for the basis. [orig: entity heading = (90 - yaw) @0x40e9f0.]
     e.heading = static_cast<int32_t>(static_cast<int64_t>(90 - occ->yaw) * kBamPerDegree);
+    if (e.inf.active) {
+        if (e.inf.anim_state != anim_state::kSit) {
+            e.inf.anim_prev = e.inf.anim_state;
+            e.inf.anim_state = anim_state::kSit;
+        }
+        e.inf.anim_pending = 0;
+        e.inf.move_mode = 0;
+        e.inf.target_dist = 0;
+        e.inf.clip_phase = 0;
+        occ->anim_slot = body_anim_slot_from_state(e.inf.anim_state);
+    }
     return true;
 }
 

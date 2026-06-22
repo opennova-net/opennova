@@ -143,6 +143,8 @@ private:
 	// ai_ is re-pointed at it like the terrain field. Empty = soldiers hold and stand.
 	InfantryRootMotion infantry_anim_;
 	void apply_root_motion_to_ai();
+	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
+	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
 	// Shared post-promote wiring: load the BMS arrays, register the systems, run the
@@ -306,6 +308,7 @@ public:
 	// Null/unloaded clears grounding (entities keep their authored Z). The editor preview and the
 	// game runtime both call this once in MissionRuntime.setup() so they ground identically.
 	void set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain);
+	void set_item_seat_specs(const Array &p_specs);
 
 	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
 	void set_loco_scale(int p_scale);

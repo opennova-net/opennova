@@ -112,6 +112,9 @@ int main() {
         w.ai = &ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
+        ai.at(idx)->inf.active = true;
+        ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
+        ai.at(idx)->inf.clip_phase = 42;
         CHECK(w.commands.mount(100, 200));
 
         TickContext ctx{};
@@ -121,6 +124,8 @@ int main() {
         CHECK(ae->pos[0] == to_fixed(10.0));
         CHECK(ae->pos[1] == to_fixed(20.0));
         CHECK(ae->pos[2] == to_fixed(5.0));
+        CHECK(ae->inf.anim_state == 76); // anim_sit
+        CHECK(ae->inf.clip_phase == 0);
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};
@@ -138,6 +143,30 @@ int main() {
         w.registry.despawn(gh);
         ai.tick(w, ctx);
         CHECK(!w.registry.get(sh)->mounted);
+    }
+
+    // ---- non-gunner seats carry a local facing offset, not just vehicle yaw ----
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {10.f, 20.f, 5.f};
+        vehicle.yaw = 15;
+        Seat passenger;
+        passenger.type = SeatType::Passenger;
+        passenger.yaw_offset = 90;
+        vehicle.seats.push_back(passenger);
+        const EntityHandle vh = w.registry.spawn(1, vehicle);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+        CHECK(w.commands.mount(100, 200));
+        Entity *occ = w.registry.get(sh);
+        CHECK(occ->mounted);
+        CHECK(occ->mount_target == vh);
+        CHECK(occ->yaw == 105);
     }
 
     // ---- BMS AttachToEmplaced: emits no unported_action + mounts via proximity ----

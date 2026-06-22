@@ -368,6 +368,15 @@ func _refresh_entity_detail(sim: Object) -> void:
 	lines.append("route %d  node %d  distance %d  speed %d" % [
 		int(card.get("waypoint_id", 0)), int(card.get("wp_node", 0)),
 		int(card.get("wp_distance", 0)), int(card.get("out_speed", 0))])
+	if bool(card.get("mounted", false)):
+		var seat_local: Vector3 = card.get("mount_seat_local", Vector3.ZERO)
+		lines.append("mounted: target ssn %d  seat %d  type %d  bone %d" % [
+			int(card.get("mount_target_net_id", 0)), int(card.get("mount_seat", -1)),
+			int(card.get("mount_type", 0)), int(card.get("mount_seat_bone", 0))])
+		lines.append("seat local: (%.2f, %.2f, %.2f)  yaw %+d  anim %s (%d)" % [
+			seat_local.x, seat_local.y, seat_local.z,
+			int(card.get("mount_seat_yaw_offset", 0)),
+			String(card.get("anim_key", "")), int(card.get("anim_state", -1))])
 	var traits := PackedStringArray()
 	if bool(card.get("infantry", false)):
 		traits.append("on foot")

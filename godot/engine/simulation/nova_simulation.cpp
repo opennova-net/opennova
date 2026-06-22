@@ -2,8 +2,10 @@
 
 #include <wac/compiler.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 
 #include <mission/bms.h>
 #include <mission/mission_systems.h>
@@ -28,6 +30,16 @@ namespace {
 // BAM (32-bit binary angle) -> radians.
 constexpr double kRadPerBam = 6.283185307179586 / 4294967296.0;
 constexpr double kFixed16 = 65536.0;
+
+opennova::world::SeatType seat_type_from_variant(int value) {
+	switch (value) {
+		case static_cast<int>(opennova::world::SeatType::Passenger): return opennova::world::SeatType::Passenger;
+		case static_cast<int>(opennova::world::SeatType::Controller): return opennova::world::SeatType::Controller;
+		case static_cast<int>(opennova::world::SeatType::Gunner): return opennova::world::SeatType::Gunner;
+		case static_cast<int>(opennova::world::SeatType::Driver): return opennova::world::SeatType::Driver;
+		default: return opennova::world::SeatType::None;
+	}
+}
 
 // Build the same synthetic patrol mission the C++ promote_test uses: 3 markers forming a
 // path, one looping waypoint record (channel 1), 2 organics on that route, 1 building.
@@ -152,6 +164,47 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 	apply_root_motion_to_ai();
 }
 
+opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
+	opennova::mission::PromoteOptions opts;
+	opts.item_seat_specs = item_seat_specs_;
+	return opts;
+}
+
+void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
+	item_seat_specs_.clear();
+	for (int64_t i = 0; i < p_specs.size(); ++i) {
+		const Variant spec_v = p_specs[i];
+		if (spec_v.get_type() != Variant::DICTIONARY) continue;
+		const Dictionary spec_d = spec_v;
+
+		opennova::mission::ItemSeatSpec spec;
+		spec.type_id = static_cast<int32_t>(spec_d.get("type_id", 0));
+		if (spec.type_id == 0) continue;
+
+		const Variant seats_v = spec_d.get("seats", Array());
+		if (seats_v.get_type() != Variant::ARRAY) continue;
+		const Array seats_a = seats_v;
+		for (int64_t j = 0; j < seats_a.size(); ++j) {
+			const Variant seat_v = seats_a[j];
+			if (seat_v.get_type() != Variant::DICTIONARY) continue;
+			const Dictionary seat_d = seat_v;
+
+			opennova::world::Seat seat;
+			seat.type = seat_type_from_variant(static_cast<int>(seat_d.get("type", 0)));
+			if (seat.type == opennova::world::SeatType::None) continue;
+			seat.bone_index = static_cast<uint8_t>(
+			    std::clamp(static_cast<int>(seat_d.get("bone_index", 0)), 0, 255));
+			const Vector3 pos = seat_d.get("position", Vector3());
+			seat.seat_local = {static_cast<float>(pos.x), static_cast<float>(pos.y),
+			                   static_cast<float>(pos.z)};
+			seat.yaw_offset = static_cast<int16_t>(
+			    std::clamp(static_cast<int>(seat_d.get("yaw_offset", 0)), -32768, 32767));
+			spec.seats.push_back(seat);
+		}
+		if (!spec.seats.empty()) item_seat_specs_.push_back(std::move(spec));
+	}
+}
+
 void NovaSimulation::set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain) {
 	// Clear first so a null/unloaded terrain disables grounding.
 	terrain_heightmap_.clear();
@@ -274,6 +327,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaSimulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
 	ClassDB::bind_method(D_METHOD("set_terrain_height_field", "terrain"), &NovaSimulation::set_terrain_height_field);
+	ClassDB::bind_method(D_METHOD("set_item_seat_specs", "specs"), &NovaSimulation::set_item_seat_specs);
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
@@ -327,7 +381,7 @@ bool NovaSimulation::load_from_mission_data(const Ref<NovaMissionData> &p_missio
 	reset_world();
 	// The editor's live, in-memory mission (unsaved edits included).
 	const opennova::bms::File &file = p_mission->native_document().bms_file();
-	promo_ = opennova::mission::promote_mission(file, *world_, *ai_);
+	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
 	return true;
 }
@@ -339,7 +393,7 @@ bool NovaSimulation::load_mission_file(const String &path) {
 	if (!opennova::bms::parse_file(std::string(path.utf8().get_data()), file, err)) {
 		return false;
 	}
-	promo_ = opennova::mission::promote_mission(file, *world_, *ai_);
+	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
 	return true;
 }
@@ -347,7 +401,7 @@ bool NovaSimulation::load_mission_file(const String &path) {
 void NovaSimulation::build_demo_mission() {
 	reset_world();
 	opennova::bms::File file = make_demo_mission();
-	promo_ = opennova::mission::promote_mission(file, *world_, *ai_);
+	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
 }
 
@@ -657,6 +711,26 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["held"] = ent ? ent->held : false;
 	out["disabled"] = ent ? ent->disabled : false;
 	out["anim_slot"] = ent ? ent->anim_slot : -1;
+	out["mounted"] = ent ? ent->mounted : false;
+	out["mount_target_net_id"] = 0;
+	out["mount_seat"] = ent ? static_cast<int>(ent->mount_seat) : -1;
+	out["mount_type"] = ent ? static_cast<int>(ent->mount_type) : 0;
+	out["mount_seat_bone"] = 0;
+	out["mount_seat_local"] = Vector3();
+	out["mount_seat_yaw_offset"] = 0;
+	if (ent && ent->mounted) {
+		const opennova::world::Entity *target = world_->registry.get(ent->mount_target);
+		if (target) {
+			out["mount_target_net_id"] = static_cast<int>(target->net_id);
+			if (ent->mount_seat >= 0 && ent->mount_seat < static_cast<int>(target->seats.size())) {
+				const opennova::world::Seat &seat = target->seats[ent->mount_seat];
+				out["mount_type"] = static_cast<int>(seat.type);
+				out["mount_seat_bone"] = static_cast<int>(seat.bone_index);
+				out["mount_seat_local"] = Vector3(seat.seat_local.x, seat.seat_local.y, seat.seat_local.z);
+				out["mount_seat_yaw_offset"] = static_cast<int>(seat.yaw_offset);
+			}
+		}
+	}
 	out["net_id"] = e->net_id;
 	out["team"] = static_cast<int>(e->team);
 	// The AI-side entity+286 mirror; diverges from the registry health under
@@ -675,6 +749,8 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["out_speed"] = e->brain.f[AiBrain::kOutSpeed];
 	out["infantry"] = e->inf.active;
 	out["infantry_move_mode"] = e->inf.move_mode;
+	out["anim_state"] = e->inf.active ? e->inf.anim_state : -1;
+	out["anim_key"] = e->inf.active ? infantry_anim_key(e->inf.anim_state) : String();
 	return out;
 }
 

@@ -3855,6 +3855,7 @@ func _ensure_sim_driver() -> bool:
 			"self_tick": true,
 			"terrain": terrain_data,
 			"resource_root": sim_root,
+			"item_db": _item_db(),
 		})) <= 0:
 		sim_stop()
 		_report("No AI entities to simulate in this mission.", false)

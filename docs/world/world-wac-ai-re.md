@@ -83,8 +83,10 @@ Everything below was decompiled and read this session (pseudocode dumps:
 ### 3.2 Navigation think (every 16 ticks)
 `AiSlot = entity+104` (172 B, our struct): `slot[37] @+148` = **waypoint channel id**, with
 **123–127 reserved as commands** → usable mission path ids are 1..122 (format truth!):
-126 = hold/guard (10 u radius), 127 = follow local player (radius `max(slot[16], 4u)`),
-123/124/125 = move-order family. `slot[38] @+152` = node index. `slot[35]` = active flag,
+126 = hold/guard the group (10 u radius), 127 = follow local player (radius `max(slot[16], 4u)`),
+123/124/125 = **Goto-SSN-and-board** (the MED command names — 123 not-driver/gunner, 124 not-driver,
+125 any — are in §11). `slot[38] @+152` = node index for a real path (1..122), or the **target SSN**
+(= `wp_number`) for the 123–125 Goto-SSN commands. `slot[35]` = active flag,
 `slot[36]` = located entity ptr (rescans pools 0/1/2 by id when stale).
 - Target node = pool-3 marker entity via `entryIndex[34*ch + node]` (`Pool_GetEntryUnchecked(3,·)`);
   the nav tables are the same `Buffer/dword_A71DD4/entryIndex` aliases our port rebased.
@@ -220,7 +222,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     against other soldiers' claims, then approach `E`→`S`/`G`→`H` stages via entity+865 with stop
     147 / guard 140 alignment and eighth-step position pulls) ending in `Entity_FindBestSeatSlot`
     + `Entity_AttachToVehicleSeat`; `UseGun` bone = emplacement manning (radius 1u/3u); net-ids
-    11000/12000/12001 get hardcoded escort/approach offsets (heading ±90° at 2–4u).
+    11000/12000/12001 get hardcoded escort/approach offsets (heading ±90° at 2–4u). The board path is
+    gated by the waypoint_id command sentinel — `slot[148] ∈ {123,124,125}` (Goto SSN; MED names in
+    §11) with target SSN = `wp_number` (`slot[152]`) [orig: `Entity_UpdateInfantryAI @ 0x4ba9ad` tests
+    `slot[148]==125` → keep carrier `slot[144]`, else clear]. Cross-validated on 00TRa: SSN 1/1715
+    (List 125, Number 11/1714) → board DTruck1/DTruck2.
 13. **Idle look-at system** (dump 4089–4429, rides the combat pass; D-INF-5): every-256-tick
     interest scan over predicted positions (≤ min(slot+68, 20u) per axis) scoring closeness +
     facing-me (+4, < 2u and bearing−their-heading < ~25°) + local-player (+2) − re-stare (−12,
@@ -248,8 +254,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
   libs/world/src/infantry.cpp): **MATCHING**, with five named, cited deviations —
   - **D-INF-1** no blend windows (clip switches reset phase; the original blends 10/15 ticks,
     root motion included) — rides the skeletal/blend pass.
-  - **D-INF-2** command channels 123–127 decoded but not driven (move-to-entity bodies incl. the
-    staged vehicle boarding are documented in §4.12) — rides the command-source phase.
+  - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) decoded
+    but not driven — incl. the staged vehicle boarding (§4.12). **Consequence:** BMS organics with
+    `waypoint_id ∈ {123,124,125}` (Goto SSN → board the `wp_number` vehicle) idle free-standing
+    instead of riding their carrier — the 00TRa "floating crouched soldiers". Rides the command-source
+    phase; faithfully seating the rider also needs the carrier's seat-bones (§9.2 dev. 2/4).
   - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water + the
     horizontal capsule pending; the vertical capsule-bottom settle now landed — see **D-INF-6** —
     `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
@@ -543,8 +552,9 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
 
 ## 11. Appendix: waypoint slot model (2026-06-07)
 
-- `waypoint_id` (BMS entity record **byte 79**) is a fixed path NUMBER, 0..127. dfx2med
-  `Med_ParamWaypointList @ 0x449c60` lists path numbers 1..127 (0 = None), each backed by a 127-entry
+- `waypoint_id` (BMS entity record **byte 79**) holds 0..127: 0 = None, **1..122 = path numbers**,
+  **123..127 = AI commands** (Goto SSN/Group/Player — see the last bullet, not paths). dfx2med
+  `Med_ParamWaypointList @ 0x449c60` lists 1..127 (0 = None), each backed by a 127-entry
   name array (stride 1548); the packer `Med_PackEntityRecord @ 0x44c8e0` writes byte 79. Our parser
   stores exactly **128 positional waypoint records** (`kWaypointRecordCount`), so array index == path
   number. Byte 78 = group/parent ref.
@@ -556,10 +566,24 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
   (`Entity_ToggleVehicleMount @ 0x436950`, `find_entity_mounted_on_vehicle @ 0x4359f0`). "Attached To
   SSN" / "ATTACH_TO_EMPLACED" are trigger/action name-table entries (PlayerAttachedToSsn = trigger 38,
   AttachToEmplaced = action 37), not entity-dialog fields.
-- A `waypoint_id` pointing at an EMPTY slot (0 markers) is valid leftover data — units that man a gun
-  or ride a vehicle never path-follow, and the game ignores it (the "Value 125" inspector mystery; not
-  a read/write bug, byte-exact round-trip holds). The inspector now labels such values
-  "Path N (no markers)".
+- **`waypoint_id` 123–127 are AI COMMAND channels, not path numbers** (the MED "Waypoints > List"
+  dropdown; usable mission path ids are 1..122). The dropdown names them: **123 = Goto SSN (not
+  driver, gunner)**, **124 = Goto SSN (not driver)**, **125 = Goto SSN (any)**, **126 = Goto Group**,
+  **127 = Goto Player**. So a 123–127 value backed by an empty path slot is EXPECTED — it is a
+  command, not a route. For 123–125 the command = navigate to the entity whose SSN = `wp_number` (the
+  editor "Number" field; spawn stores it in `slot[152]`, §7.1) and **BOARD it**, taking a seat per the
+  restriction (123 passenger-only, 124 not-driver, 125 any). Engine witness: the server-authority
+  infantry think tests `slot[148]==125` [orig: `Entity_UpdateInfantryAI @ 0x4ba9ad`] — `==125`
+  preserves the carrier vehicle pointer in `slot[144]`, else clears it; when set it runs
+  `Entity_FindBestSeatSlot @ 0x4351f0` (seat-type filter) → `Entity_AttachToVehicleSeat @ 0x4364a0`.
+  **CORRECTION (overturns the prior revision of this note):** an earlier version called 125 "valid
+  leftover data … the game ignores it (the 'Value 125' inspector mystery)" — that was WRONG; 125 is an
+  active Goto-SSN-and-board command. An inspector should name 123–127 by their command, not "Path N
+  (no markers)". Cross-validated on `00TRa.bms` (env JOX): organic SSN 1 = List 125 / Number 11
+  (= DTruck1, `id 101294`), SSN 1715 = List 125 / Number 1714 (= DTruck2, `id 101420`) — both
+  "Goto SSN (any) → board the adjacent 5-ton truck". This is the root cause of the OpenNova "two
+  friendly soldiers float in a crouched idle pose" bug in 00TRa: the reimpl never honors the 123–127
+  command channels (**D-INF-2**), so the soldiers idle on the terrain instead of riding their carrier.
 
 ## 12. Appendix: entity placement — Ground userpoint (dfx2med.exe)
 

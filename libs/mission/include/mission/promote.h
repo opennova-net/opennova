@@ -15,13 +15,20 @@
 #ifndef OPENNOVA_MISSION_PROMOTE_H
 #define OPENNOVA_MISSION_PROMOTE_H
 
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "mission/bms.h"
 #include "world/ai.h"
 #include "world/world.h"
 
 namespace opennova::mission {
+
+struct ItemSeatSpec {
+    int32_t type_id = 0; // raw BMS/items.def id stored in bms::Entity::type_id
+    std::vector<world::Seat> seats;
+};
 
 struct PromoteOptions {
     // NavEntry f[0] (arrival/advance threshold) for markers whose authored wp_distance is 0.
@@ -38,6 +45,17 @@ struct PromoteOptions {
     // unwitnessed) waypoint-assignment path; setting 16 here lets routed entities patrol on
     // spawn. With this false, entities stay in state 0 (faithful init, no movement).
     bool patrol_on_spawn = true;
+
+    // Modeled seat metadata, keyed by the raw BMS type_id. The original derives these from
+    // model userpoints/seat bones in Entity_FindBestSeatSlot @0x4351f0; hosts that load models
+    // pass the extracted seat list here before promotion.
+    std::vector<ItemSeatSpec> item_seat_specs;
+
+    // Command 125 authored spawn attachment: Entity_UpdateInfantryAI @0x4B9910 resolves
+    // slot+152 (BMS wp_number) as a target entity serial, then walks/attaches to a vehicle seat.
+    // Until the full walk-to-seat staging is ported, promotion only attaches actors already authored
+    // near the target; this mirrors EntityCommands::mount_best's proximity guard.
+    float command_mount_radius = 20.0f;
 
     size_t actor_pool_capacity = 1024;
     size_t marker_pool_capacity = 4096;

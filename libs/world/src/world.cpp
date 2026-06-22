@@ -24,7 +24,7 @@ void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat)
     occ.position.z = vehicle.position.z + L.z;
     occ.yaw = (seat.type == SeatType::Gunner)
                       ? static_cast<int16_t>(vehicle.yaw - seat.yaw_offset)
-                      : vehicle.yaw;
+                      : static_cast<int16_t>(vehicle.yaw + seat.yaw_offset);
     occ.pitch = vehicle.pitch;
     occ.roll = vehicle.roll;
 }

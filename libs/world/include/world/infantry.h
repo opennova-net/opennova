@@ -36,6 +36,7 @@ enum : int {
     kIdleCrouch = 45,
     kIdleProne = 48,
     kIdle3 = 49,
+    kSit = 76,
     kReload = 65,
     kIdleLook = 125,
     kIdle2Look = 126,
