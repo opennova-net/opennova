@@ -24,7 +24,7 @@ the row links to the authoritative record.
 | Environment / time-of-day (`libs/env` + `env_render`; `nova_environment`/`nova_sky`/`nova_weather`/`nova_celestial`) | 2026-06-09/11 | per subsystem: parse/TOD/sun-moon/fog/load-order **matching**; weather **divergent → ported**; sky dome combine **divergent — recovered (C6), port = C7**; celestial + glare new-from-witness; iris (auto-exposure) + terrain_rgb (terrain tint stack) **consumers recovered, unimplemented — tracked** | [env-tod-re.md](env/env-tod-re.md) |
 | RTXT string tables (`libs/rtxt`, NovaStrings) | 2026-06-09 | **matching** at byte level (98/98 retail bins roundtrip; D-RTXT-4 strictness retained) | [rtxt-strings-re.md](interface/rtxt-strings-re.md) |
 | BMS event runtime + mission→world promotion (`libs/mission` event_runtime/promote) | 2026-06-10 | **MATCHING** (D-EVT-1..4) | [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) |
-| World / WAC VM / AI + infantry motor (`libs/world`, `libs/wac`) | 2026-06-07..10 | **MATCHING** (infantry D-INF-1..5; vehicle/HELO movement physics are tracked `not_yet_ported` stubs) | [world-wac-ai-re.md](world/world-wac-ai-re.md) — carries its own correspondence map (§2 there) |
+| World / WAC VM / AI + infantry motor (`libs/world`, `libs/wac`) | 2026-06-07..10 (+ 2026-06-22 player slide/gravity) | **MATCHING** (infantry D-INF-1..10; vehicle/HELO movement physics are tracked `not_yet_ported` stubs) | [world-wac-ai-re.md](world/world-wac-ai-re.md) — carries its own correspondence map (§2 there) |
 | `.bms` mission loader (`libs/mission/src/bms.cpp`) | 2026-06-02 (+ 2026-06-08 foundation pass) | per function — §3 below | this page |
 
 ## 2. MNU function table (format grill 2026-06-01)

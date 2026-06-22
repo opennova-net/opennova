@@ -506,6 +506,27 @@ int main() {
         CHECK(e->health == 100);
     }
 
+    // ---- gravity cadence: the NPC (org1) falls EVERY tick; the player (org2) keeps the 2-tick
+    //      discretization. [orig: NPC -416/tick @0x4bf7bf; player -416 every 2 ticks; D-INF-10]
+    {
+        Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
+        World w;
+        AiSystem ai;
+        ai.terrain = &ground0.field;
+
+        soldier(ai); // index 0: NPC (is_local_player defaults false)
+        soldier(ai); // index 1: player (attach may realloc the AI vector — set fields AFTER both)
+        ai.at(0)->health = 100;
+        ai.at(0)->pos[0] = fx(100); ai.at(0)->pos[1] = fx(100); ai.at(0)->pos[2] = fx(100); // high up
+        ai.at(1)->health = 100;
+        ai.at(1)->inf.is_local_player = true;
+        ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
+
+        run_ticks(ai, w, 0, 2); // ticks 0 (even) and 1 (odd); both stay airborne (100u up)
+        CHECK(ai.at(0)->inf.vel[2] == -2 * 416); // NPC: two gravity steps -> per-tick fall
+        CHECK(ai.at(1)->inf.vel[2] == -416);     // player: one gravity step -> 2-tick discretization
+    }
+
     // ---- slope slide: steep ground drifts the soldier downhill + leans the body ----
     // [orig: dump 930-1000 — probes ±22528-dir; pitch slope <<14 vs threshold 0x22222200;
     //  slide (cos|sin)<<11>>22 = 2048 per 8-tick pass at heading 0; lean eighth-step]
@@ -600,7 +621,10 @@ int main() {
 
         run_ticks(ai, w, 1, 2);
 
-        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000); // IDA leaves small clearance alone
+        // Per-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
+        // foot clearance (<= 0xF000) is otherwise left alone — NOT snapped to the floor, NOT airborne.
+        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 2 * 416);
+        CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
         CHECK(!e->inf.airborne);
     }
     {
@@ -647,6 +671,39 @@ int main() {
 
         CHECK(e->inf.vel[0] != 0); // ground contact does not clear horizontal slide
         CHECK(e->inf.vel[1] != 0);
+    }
+
+    // ---- player slide damp: a GROUNDED player's horizontal slide decays by (63*v)>>6 each tick
+    //      (org2 block A, no deadzone), so a slope-slide impulse settles instead of drifting
+    //      forever — the player's slide was previously never damped. [orig: @0x4b7949;
+    //      D-INF-9]
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(50) + fx(1);
+
+        run_ticks(ai, w, 0, 1); // settle grounded
+        CHECK(!e->inf.airborne);
+
+        e->inf.vel[0] = 6400;
+        e->inf.vel[1] = -6400;
+        run_ticks(ai, w, 1, 2); // one grounded tick: org2 (63*v)>>6, NOT the NPC (7v+4)>>3 (=5600)
+        CHECK(e->inf.vel[0] == (63 * 6400) >> 6);  // 6300
+        CHECK(e->inf.vel[1] == (63 * -6400) >> 6); // -6300
+
+        run_ticks(ai, w, 2, 300); // ...and it keeps decaying (the drift bug is fixed)
+        CHECK(e->inf.vel[0] >= 0 && e->inf.vel[0] < 100);
+        CHECK(e->inf.vel[1] <= 0 && e->inf.vel[1] > -100);
     }
 
     // ---- stance: crouch/prone remap the gait + idle to the stance clips (player) ----

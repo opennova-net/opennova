@@ -42,7 +42,11 @@ namespace {
 
 // [orig: 0x4b9910 — body turn clamp ±69273360/tick (~5.8 deg)]
 constexpr int32_t kBodyTurnClamp = 69273360;
-// [orig: gravity vel_z -= 416 every 2 ticks, terminal -32768; dump 5094]
+// [orig: gravity vel_z step 416; terminal -32768. Witnessed cadence: NPC org1 -416 EVERY tick
+// (@0x4bf7bf) then pos.z += 2*vel (@0x4bf7ec); player org2 -208 EVERY tick (@0x4b7acf) then
+// pos.z += vel (@0x4b7cef) — neither gates on tick parity. The player keeps a 2-tick
+// discretization (-416 every 2 ticks + 2*vel, net -208/tick + vel/tick = org2) that its jump/fall
+// tuning + tests pin; the NPC runs the faithful per-tick path. See the gravity block. D-INF-10]
 constexpr int32_t kGravityStep = 416;
 constexpr int32_t kTerminalVelZ = -32768;
 // Foot-above-floor gap (16.16): the collision caller marks airborne only when the
@@ -511,7 +515,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 6. Slope slide + lean (every 8 ticks; alive only). [orig: gate dump 915 + flag rules]
     if (e.health > 0 && (key & 7u) == 0) infantry_slope_slide(e);
 
+    // Horizontal slide decay. NPC (org1): (7v+4)>>3 with an abs<=8 deadzone, every state. Player
+    // (org2): grounded+moving decays by (63*v)>>6 with NO deadzone [orig: @0x4b7949]; airborne uses
+    // the SAME (7v+4)>>3 + deadzone as the NPC [orig: @0x4b7982] (the two are mutually exclusive,
+    // selected by the 0x2000 grounded flag). Before this the player's slide was never damped, so a
+    // slope-slide impulse drifted the player forever. [D-INF-9; inf.airborne here is last
+    // tick's value — the vertical resolve below updates it.]
     if (!inf.is_local_player) {
+        inf.vel[0] = damp_npc_slide(inf.vel[0]);
+        inf.vel[1] = damp_npc_slide(inf.vel[1]);
+    } else if (!inf.airborne) {
+        inf.vel[0] = (63 * inf.vel[0]) >> 6;
+        inf.vel[1] = (63 * inf.vel[1]) >> 6;
+    } else {
         inf.vel[0] = damp_npc_slide(inf.vel[0]);
         inf.vel[1] = damp_npc_slide(inf.vel[1]);
     }
@@ -561,7 +577,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // clearance is left as-is. [orig: Entity_UpdateInfantryAI @0x4b9910 and
     // Entity_UpdateInfantryPlayerBody @0x4b40e0 callers; resolver @0x4b2bd0]
     if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
-        if ((key & 1u) == 0) {
+        // Gravity. Witnessed: neither motor gates on tick parity. The NPC (org1) falls EVERY tick
+        // (-416, then pos.z += 2*vel) [orig: @0x4bf7bf / @0x4bf7ec]; the player (org2) keeps its
+        // 2-tick discretization (-416 every 2 ticks + 2*vel nets to org2's -208/tick + vel/tick),
+        // which the jump/fall tuning + tests pin. [D-INF-10]
+        if (inf.is_local_player ? ((key & 1u) == 0) : true) {
             inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += 2 * inf.vel[2];

@@ -61,7 +61,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill | **matching** (recorded deviations stand) |
 | `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); HELO/vehicle physics remain visible `not_yet_ported` stubs | tracked model (vehicle slice) |
 | organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; `AiSystem::tick` branches before the SM | **matching** |
-| `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..5 (enumerated below) |
+| `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
 | `kInfantryAnimNames/Flags` | `off_8135F0` / `dword_8139E8` | 0x8135F0/0x8139E8 | all 200 entries index-verified vs IDB | **matching** |
 | promote `init_infantry` + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer | **matching** |
 | `InfantryRootMotion` (engine host) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
@@ -251,7 +251,7 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
 ## 5. Per-system equivalence verdict (2026-06-10, infantry port complete)
 
 - **Infantry ground locomotion** (`Entity_UpdateInfantryAI @ 0x4b9910` → `AiSystem::tick_infantry`,
-  libs/world/src/infantry.cpp): **MATCHING**, with five named, cited deviations —
+  libs/world/src/infantry.cpp): **MATCHING**, with the named, cited deviations —
   - **D-INF-1** no blend windows (clip switches reset phase; the original blends 10/15 ticks,
     root motion included) — rides the skeletal/blend pass.
   - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) decoded
@@ -290,6 +290,28 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
     is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
     in `tests/world/infantry_test.cpp`.
+  - **D-INF-9** player horizontal-slide decay. The player shares the NPC's slide-velocity damp, but
+    the original splits it by the grounded flag: a GROUNDED player decays `inf.vel[0]/[1]` by
+    `(63·v)>>6` with NO deadzone [orig: `Entity_UpdateInfantryPlayerBody @0x4b7949` — `shl 6 / sub /
+    sar 6` on `entity+0x98/0x9C`, selected by the `entity+0x24 & 0x2000` grounded flag `@0x4b78ab`];
+    an AIRBORNE player uses the same `(7v+4)>>3` + `abs<=8→0` deadzone as the NPC [orig: `@0x4b7982`].
+    The two formulas are mutually exclusive, not sequential. A prior pass gated slide damping behind
+    `!is_local_player` (and dropped the grounded velocity zero), so the player's slope-slide impulse
+    drifted forever; FIXED in `tick_infantry` (`libs/world/src/infantry.cpp`), guarded by the
+    player-slide case in `tests/world/infantry_test.cpp`. (Our `inf.airborne` here reads last tick's
+    value — the vertical resolve updates it after — a negligible 1-tick lag vs the original reading
+    the flag set in the same physics pass.)
+  - **D-INF-10** per-tick gravity, asymmetric by motor. Neither infantry mover gates the vertical step
+    on tick parity. The NPC (org1) falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
+    `Entity_UpdateInfantryAI @0x4bf7bf` (`add … 0xFFFFFE60`) / `@0x4bf7ec` (`add edx,edx`; `add
+    [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once)
+    [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf` (`add … 0xFFFFFF30`) / `@0x4b7cef`]; both clamp
+    to terminal −32768. A prior pass applied one `−416 every 2 ticks` + `pos += 2·vel` to BOTH, which
+    nets to the player's −208/tick + vel/tick (org2) but left the NPC at HALF the org1 fall rate.
+    FIXED for the NPC (faithful per-tick `−416` + `2·vel`); the player keeps the 2-tick discretization
+    (net-equivalent to org2 — its jump/fall tuning + tests pin the `−416`-per-application step, so
+    making it per-tick `−208` is deferred to a dedicated player-physics grill). `libs/world/src/
+    infantry.cpp`; guarded by the gravity-cadence case in `tests/world/infantry_test.cpp`.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
