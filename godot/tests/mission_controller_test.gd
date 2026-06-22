@@ -12,8 +12,10 @@ const MissionController := preload("res://modtools/mission/mission_controller.gd
 const Placer := preload("res://engine/mission/mission_object_placer.gd")
 const WaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const OverlayUtil := preload("res://engine/mission/mission_overlay_util.gd")
+const ObjectUserPointOverlay := preload("res://engine/object/object_user_point_overlay.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
+const HOUSE_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/House.3di"
 
 
 func _abs(res_path: String) -> String:
@@ -86,6 +88,21 @@ class StubTerrainEditor:
 
 	func is_valid_terrain_hit(_hit: Vector3) -> bool:
 		return terrain_hit_valid
+
+
+class FakeUserPointPlacer:
+	extends RefCounted
+
+	var data: NovaObjectData
+
+	func _init(p_data: NovaObjectData) -> void:
+		data = p_data
+
+	func object_data_for(_graphic: String) -> NovaObjectData:
+		return data
+
+	func ground_anchor_godot(_graphic: String) -> Vector3:
+		return Vector3.ZERO
 
 
 # A resource root over the repo's real dvxi5 terrain fixture (the terrain the test
@@ -208,6 +225,46 @@ func _stub_with_dvxi5() -> StubTerrainEditor:
 	add_child_autofree(stub.world_root)
 	add_child_autofree(stub)
 	return stub
+
+
+func test_selected_userpoint_overlay_uses_shared_script_and_tracks_transform() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(_abs(HOUSE_3DI3_FIXTURE)), OK)
+	assert_gt(data.get_user_point_count(), 0, "House fixture should carry userpoints.")
+	var stub := StubTerrainEditor.new()
+	var world_root := Node3D.new()
+	var container := Node3D.new()
+	container.name = "MissionObjects"
+	world_root.add_child(container)
+	stub.world_root = world_root
+	add_child_autofree(world_root)
+	add_child_autofree(stub)
+	var controller := MissionController.new(stub)
+	controller._placer = FakeUserPointPlacer.new(data)
+	controller._selected_ref = { "kind": NovaMissionData.KIND_BUILDING, "index": 0 }
+	controller._selected_graphic = "House"
+	controller._selected_xform = Transform3D(Basis(), Vector3(1.0, 2.0, 3.0))
+
+	assert_true(controller.selected_has_user_points(), "Controller should resolve userpoints through the placer.")
+	controller.set_selected_user_points_visible(true)
+
+	var overlay := container.find_child("MissionSelectedUserPoints", true, false)
+	assert_not_null(overlay, "Enabling userpoints should mount a selected-object overlay.")
+	if overlay == null:
+		return
+	assert_eq(overlay.get_script(), ObjectUserPointOverlay, "Mission selection should reuse the object overlay script.")
+	assert_eq((overlay as Node3D).transform.origin, Vector3(1.0, 2.0, 3.0),
+		"Static mission overlays start at the selected entity transform.")
+
+	controller._apply_selected_xform(Transform3D(Basis(), Vector3(5.0, 6.0, 7.0)))
+
+	assert_eq((overlay as Node3D).transform.origin, Vector3(5.0, 6.0, 7.0),
+		"Moving the selected entity should move the userpoint overlay.")
+
+	controller._deselect()
+	await get_tree().process_frame
+
+	assert_false(is_instance_valid(overlay), "Deselecting should clear the selected userpoint overlay.")
 
 
 func test_reopen_on_same_clean_terrain_skips_remount() -> void:

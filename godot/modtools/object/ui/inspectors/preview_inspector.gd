@@ -46,6 +46,13 @@ func build_main(host: Control) -> void:
 	collision.disabled = _preview == null or not _preview.has_collision()
 	playback.add_child(collision)
 
+	var user_points := CheckBox.new()
+	user_points.name = "PreviewUserPointsCheck"
+	user_points.text = "User points"
+	user_points.button_pressed = _preview != null and _preview.is_user_points_visible()
+	user_points.disabled = _preview == null or not _preview.has_user_points()
+	playback.add_child(user_points)
+
 	play.toggled.connect(func(pressed: bool) -> void:
 		if _preview != null:
 			_preview.set_playing(pressed)
@@ -62,6 +69,10 @@ func build_main(host: Control) -> void:
 	collision.toggled.connect(func(pressed: bool) -> void:
 		if _preview != null:
 			_preview.set_collision_visible(pressed)
+	)
+	user_points.toggled.connect(func(pressed: bool) -> void:
+		if _preview != null:
+			_preview.set_user_points_visible(pressed)
 	)
 
 	_build_collision_legend(box)

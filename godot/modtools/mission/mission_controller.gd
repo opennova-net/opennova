@@ -26,6 +26,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
+const ObjectUserPointOverlayScript := preload("res://engine/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
@@ -159,6 +160,7 @@ var _selected_ref: Dictionary = {}
 # node, plus its tracked container-local transform and authored rotation (degrees).
 var _selected_records: Array = []
 var _selected_node: Node3D
+var _selected_graphic := ""
 # For an animated selection, the model's ground-anchor offset (Transform3D applied
 # as node.transform = entity_xform * offset). Static entities bake the same offset
 # into each MultiMesh instance via the pickable record, so it only needs tracking
@@ -166,6 +168,8 @@ var _selected_node: Node3D
 var _selected_node_offset: Transform3D = Transform3D.IDENTITY
 var _selected_xform: Transform3D = Transform3D.IDENTITY
 var _selected_rotation_deg: Vector3 = Vector3.ZERO
+var _selected_user_point_overlay: ObjectUserPointOverlay
+var _selected_user_points_visible := false
 # In-editor PLAYPARTANIM preview: the model node currently being previewed (or null), plus a registry
 # (cached, rebuilt when the entity set changes via _membership_rev) to resolve a scripting action's
 # target SSN/group/zone to its live model -- the same MissionEntityRegistry the runtime host uses.
@@ -363,6 +367,33 @@ func get_selection_summary() -> Dictionary:
 		"position": MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin),
 		"animated": _selected_node != null,
 	}
+
+
+func selected_has_user_points() -> bool:
+	var data := _selected_object_data()
+	return data != null \
+		and data.has_method("get_user_point_count") \
+		and data.get_user_point_count() > 0
+
+
+func is_selected_user_points_visible() -> bool:
+	return _selected_user_points_visible and selected_has_user_points()
+
+
+func set_selected_user_points_visible(value: bool) -> void:
+	_selected_user_points_visible = value and selected_has_user_points() and not is_simulating()
+	_refresh_selected_user_points_overlay()
+	_notify_changed()
+
+
+func _selected_object_data() -> NovaObjectData:
+	if _selected_ref.is_empty() or _selected_graphic.is_empty() or _placer == null:
+		return null
+	if int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		return null
+	if not _placer.has_method("object_data_for"):
+		return null
+	return _placer.object_data_for(_selected_graphic)
 
 
 # Select an object from the inspector's "Placed objects" browser by kind + array index,
@@ -1709,9 +1740,11 @@ func _select(kind: int, index: int) -> void:
 	# does), otherwise SpinBox edits to two different objects fold into a single undo step.
 	_flush_edit()
 	stop_preview()
+	_clear_selected_user_points()
 	_selected_ref = { "kind": kind, "index": index }
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	var graphic := ""
 	for rec in _pickable:
@@ -1735,6 +1768,7 @@ func _select(kind: int, index: int) -> void:
 	_selected_collider = _selected_pick_collider()
 	_selected_ground_offset = Vector3.ZERO
 	if _placer != null and not graphic.is_empty():
+		_selected_graphic = graphic
 		_selected_ground_offset = _placer.ground_anchor_godot(graphic)
 	var entity := _find_entity(kind, index)
 	_selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
@@ -1753,11 +1787,13 @@ func _select(kind: int, index: int) -> void:
 
 func _deselect() -> void:
 	stop_preview()
+	_clear_selected_user_points()
 	if _selected_ref.is_empty():
 		return
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_collider = null
 	_selected_ground_offset = Vector3.ZERO
@@ -1767,6 +1803,44 @@ func _deselect() -> void:
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(-1)
 	_notify_changed()
+
+
+func _refresh_selected_user_points_overlay() -> void:
+	if not _selected_user_points_visible or not selected_has_user_points():
+		_free_selected_user_points_overlay()
+		return
+	var container := _objects_container()
+	if container == null:
+		_free_selected_user_points_overlay()
+		return
+	var data := _selected_object_data()
+	if data == null:
+		_free_selected_user_points_overlay()
+		return
+	if _selected_user_point_overlay == null or not is_instance_valid(_selected_user_point_overlay):
+		_selected_user_point_overlay = ObjectUserPointOverlayScript.new()
+		_selected_user_point_overlay.name = "MissionSelectedUserPoints"
+		container.add_child(_selected_user_point_overlay)
+	_selected_user_point_overlay.set_object_data(data)
+	if _selected_node != null and is_instance_valid(_selected_node):
+		_selected_user_point_overlay.set_source_model(_selected_node)
+		_selected_user_point_overlay.set_entity_transform(Transform3D.IDENTITY)
+	else:
+		_selected_user_point_overlay.set_source_model(null)
+		_selected_user_point_overlay.set_entity_transform(_selected_xform)
+	_selected_user_point_overlay.refresh_points()
+	_selected_user_point_overlay.set_points_visible(true)
+
+
+func _clear_selected_user_points() -> void:
+	_selected_user_points_visible = false
+	_free_selected_user_points_overlay()
+
+
+func _free_selected_user_points_overlay() -> void:
+	if _selected_user_point_overlay != null and is_instance_valid(_selected_user_point_overlay):
+		_selected_user_point_overlay.queue_free()
+	_selected_user_point_overlay = null
 
 
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
@@ -1868,6 +1942,7 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 func _apply_selected_xform(xform: Transform3D) -> void:
 	_selected_xform = xform
 	if not _selected_ref.is_empty() and int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		_clear_selected_user_points()
 		# A marker is mesh-less: preview its gizmo (container-local origin) via the overlay. No mesh
 		# records / node to move, and the selection box stays hidden.
 		if _marker_overlay != null and is_instance_valid(_marker_overlay):
@@ -1886,6 +1961,7 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 	# position, not applied here). No-op for a marker (no body).
 	if _selected_collider != null and is_instance_valid(_selected_collider):
 		_selected_collider.transform = _selected_xform
+	_refresh_selected_user_points_overlay()
 	_update_selection_box()
 	# Keep the transform gizmo on the selection. During a gizmo drag, only reposition (keep the
 	# captured drag plane + ring orientation frozen); otherwise re-orient the rings to the new
@@ -2369,11 +2445,13 @@ func set_mode(mode: int) -> void:
 	_mode = mode
 	# A mode switch is a fresh context: stop any running part-animation preview.
 	stop_preview()
+	_clear_selected_user_points()
 	# Exclusive selection: clear the object selection refs + its box, the marker selection,
 	# the zone selection, and any armed placement tool.
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_collider = null
 	_selected_ground_offset = Vector3.ZERO
@@ -3654,9 +3732,11 @@ func _clear_hover() -> void:
 # the dangling ref.
 func _reset_selection_state() -> void:
 	stop_preview()
+	_clear_selected_user_points()
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_xform = Transform3D.IDENTITY
 	_selected_rotation_deg = Vector3.ZERO
@@ -3838,6 +3918,7 @@ func _ensure_sim_driver() -> bool:
 	cancel_drag()
 	disarm_placement()
 	_clear_hover()
+	_clear_selected_user_points()
 	_sim_driver = MissionRuntime.new()
 	_sim_driver.name = "MissionRuntime"
 	container.add_child(_sim_driver)

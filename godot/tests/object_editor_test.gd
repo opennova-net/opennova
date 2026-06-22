@@ -724,6 +724,74 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	assert_eq(preview.get_animation_time_ms(), 0, "Preview inspector reset should rewind the preview.")
 
 
+func test_object_preview_shows_labeled_userpoints_by_default() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK)
+	assert_gt(data.get_user_point_count(), 0, "House fixture should carry userpoints.")
+	var preview = add_child_autofree(ObjectPreviewScript.new())
+	preview.set_object_data(data)
+	await get_tree().process_frame
+
+	var overlay := _find_node_by_name(preview, "ObjectUserPoints")
+	assert_not_null(overlay, "Object preview should mount the reusable userpoint overlay.")
+	if overlay == null:
+		return
+	assert_true(preview.has_user_points(), "Preview reports userpoints when the model has them.")
+	assert_true(preview.is_user_points_visible(), "Userpoints are visible by default in the object preview.")
+	var expected_name := String(data.get_user_point_info(0).get("name", ""))
+	if expected_name.strip_edges().is_empty():
+		expected_name = "userpoint_00"
+	var label := _find_node_by_type(overlay, "Label3D") as Label3D
+	assert_not_null(label, "Userpoints should render a 3D label.")
+	if label != null:
+		assert_eq(label.text, expected_name, "The label text should come from the userpoint name.")
+		assert_eq(label.font_size, 8, "Userpoint labels should use the compact preview font size.")
+
+
+func test_object_workspace_preview_userpoint_toggle_controls_overlay() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK)
+	var viewport_host = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_host)
+	var host = add_child_autofree(Control.new())
+
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+
+	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
+	var check := _find_node_by_name(host, "PreviewUserPointsCheck") as CheckBox
+	assert_not_null(preview)
+	assert_not_null(check)
+	if preview == null or check == null:
+		return
+	assert_false(check.disabled, "The userpoint checkbox should be enabled when the preview has userpoints.")
+	assert_true(check.button_pressed, "The userpoint checkbox should mirror the default-visible overlay.")
+
+	check.toggled.emit(false)
+
+	assert_false(preview.is_user_points_visible(), "The inspector toggle should hide userpoint labels.")
+
+
+func test_object_workspace_preview_userpoint_toggle_disables_without_points() -> void:
+	var workspace = ObjectWorkspaceScript.new()
+	workspace.set_editor_shell(self)
+	assert_eq(workspace.new_current(), OK)
+	var viewport_host = add_child_autofree(Control.new())
+	workspace.mount_viewport(viewport_host)
+	var host = add_child_autofree(Control.new())
+
+	workspace.build_workflow_inspector(ObjectEditorWorkspace.Workflow.PREVIEW, host)
+
+	var preview := _find_node_by_name(viewport_host, "ObjectPreview") as ObjectPreview
+	var check := _find_node_by_name(host, "PreviewUserPointsCheck") as CheckBox
+	assert_not_null(preview)
+	assert_not_null(check)
+	if preview == null or check == null:
+		return
+	assert_false(preview.has_user_points(), "An empty object document should not expose userpoints.")
+	assert_true(check.disabled, "The userpoint checkbox should disable when no labels can be shown.")
+
+
 func test_object_workspace_preview_and_lods_do_not_mount_empty_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)

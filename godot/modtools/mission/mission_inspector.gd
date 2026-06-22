@@ -55,6 +55,7 @@ var _loading: bool = false
 
 var _identity_label: Label  # heading: the selected model's name (or kind + index)
 var _identity_sub: Label    # muted subline: kind + index, shown when a name resolved
+var _user_points_check: CheckBox
 var _animated_note: Label
 var _behavior_flags_box: VBoxContainer  ## container for the AI-attribute checkboxes (built lazily)
 var _behavior_flag_checks: Array = []  ## [{ "bit": int, "check": CheckBox }]
@@ -549,6 +550,11 @@ func _build_edit_panel() -> void:
 	# sees "Humvee" rather than just "Item #42".
 	_identity_label = ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
 	_identity_sub = ObjectUiHelpers.add_muted_label(_edit_box, "")
+	_user_points_check = CheckBox.new()
+	_user_points_check.name = "MissionUserPointsCheck"
+	_user_points_check.text = "User points"
+	_user_points_check.tooltip_text = "Show this model's named userpoints in the viewport."
+	_edit_box.add_child(_user_points_check)
 
 	ObjectUiHelpers.add_section_heading(_edit_box, "Position")
 	_pos_spins = [
@@ -600,6 +606,7 @@ func _build_edit_panel() -> void:
 		_rot_spins[axis].value_changed.connect(_on_rotation_axis.bind(axis))
 	# The Team and Group dropdowns are wired through the FieldBinder, not here.
 	# Behavior fields likewise wire themselves through the FieldBinder in _build_behavior_section.
+	_user_points_check.toggled.connect(_on_user_points_toggled)
 	_delete_button.pressed.connect(_on_delete_pressed)
 
 
@@ -823,6 +830,9 @@ func _refresh_option_caches() -> void:
 func _refresh_edit_panel() -> void:
 	var entity: Dictionary = _controller.get_selected_entity() if _controller != null else {}
 	if entity.is_empty():
+		_loading = true
+		_sync_user_points_check(false)
+		_loading = false
 		_edit_box.visible = false
 		return
 	_edit_box.visible = true
@@ -840,6 +850,7 @@ func _refresh_edit_panel() -> void:
 		_identity_label.text = model_name
 		_identity_sub.text = kind_index
 		_identity_sub.visible = true
+	_sync_user_points_check(true)
 	# Use _sync_spin (focus-aware) so a refresh that lands while the user is mid-typing a position /
 	# rotation value does not clobber the keystroke -- matching the zone-bounds and scripting spins.
 	# The _loading bracket still suppresses the value_changed echo for the spins that do get written.
@@ -862,6 +873,27 @@ func _refresh_edit_panel() -> void:
 
 	var summary: Dictionary = _controller.get_selection_summary() if _controller != null else {}
 	_animated_note.visible = bool(summary.get("animated", false))
+
+
+func _sync_user_points_check(has_selection: bool) -> void:
+	if _user_points_check == null:
+		return
+	var has_points := false
+	var visible := false
+	var simulating := false
+	if has_selection and _controller != null:
+		has_points = _controller.selected_has_user_points() if _controller.has_method("selected_has_user_points") else false
+		visible = _controller.is_selected_user_points_visible() if _controller.has_method("is_selected_user_points_visible") else false
+		simulating = _controller.is_simulating() if _controller.has_method("is_simulating") else false
+	_user_points_check.disabled = not has_points or simulating
+	_user_points_check.button_pressed = has_points and visible
+
+
+func _on_user_points_toggled(pressed: bool) -> void:
+	if _loading or _controller == null:
+		return
+	if _controller.has_method("set_selected_user_points_visible"):
+		_controller.set_selected_user_points_visible(pressed)
 
 
 func _on_position_axis(value: float, axis: int) -> void:
