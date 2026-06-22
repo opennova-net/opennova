@@ -7,6 +7,7 @@ add_library(opennova_world STATIC
     src/entity_spawn.cpp
     src/player_input.cpp
     src/player_spawn.cpp
+    src/spawn_select.cpp
 )
 
 target_include_directories(opennova_world

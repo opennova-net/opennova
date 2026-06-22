@@ -83,15 +83,16 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_present = MissionPresentPass.new()
 	_present.setup(_sim, _index, options.get("present_options", {}))
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
-	# After load (the spawn needs the AI system wired). Spawn near the first placed entity so
-	# the player lands on the terrain; the terrain clamp grounds it. The player then runs the
-	# infantry motor from input (set_player_input) — visible translation needs walk clips.
+	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
+	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
+	# enemy set — NOT from the first NPC's position (net-re §5.2c). The player then runs the infantry
+	# motor from input (set_player_input); visible translation needs walk clips.
 	if options.get("player", false):
-		var spawn_pos := Vector3.ZERO
-		if _sim.get_entity_count() > 0:
-			spawn_pos = _sim.get_entity_position(0)
-		if not _sim.spawn_local_player(spawn_pos, 0.0, 1):
+		var spawn_status := int(_sim.spawn_local_player_at_start())
+		if spawn_status < 0:
 			push_warning("MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)")
+		elif spawn_status == 0:
+			push_warning("MissionRuntime: no player-start marker (60xx start family) in this mission — spawned at fallback origin.")
 	# Per-entity grounding: resolve each infantry soldier's OWN model .adm so it grounds + locomotes
 	# off its own clip's capsule_bottom (crouch/sit/jump plant correctly), not the shared default
 	# set. Runs after the NPC promote AND the player spawn so both are covered. [D-INF-6]

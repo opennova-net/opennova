@@ -758,6 +758,15 @@ target_include_directories(player_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(player_spawn_test PRIVATE cxx_std_17)
 add_test(NAME player_spawn COMMAND player_spawn_test)
 
+# Player spawn-point selection (CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint
+# @0x50ccc0, net-re §5.2c): SP/campaign picks the type-6002 start marker FARTHEST from enemy
+# soldiers and never an NPC's position — the faithful fix for "the player spawns on top of NPC 0".
+add_executable(spawn_select_test world/spawn_select_test.cpp)
+target_link_libraries(spawn_select_test PRIVATE opennova_world)
+target_include_directories(spawn_select_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(spawn_select_test PRIVATE cxx_std_17)
+add_test(NAME spawn_select COMMAND spawn_select_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).

@@ -806,6 +806,91 @@ index from `type_id 0x14B9` (`ItemList_FindIndexByTypeId` → `entity+28`) →
 `Position` / `Yaw` / `Team` → `Entity_ResetToSpawnState` (clears `Flags & 2`, the gate). The
 host then streams the loading sequence (§5.2a step 3) to its own local client in-process.
 
+### 5.2c Map spawn-marker selection — where the human player's pose comes from (2026-06-22)
+
+§5.2a/§5.2b resolve how the host *builds and field-inits* its own player entity but leave the
+"place `Position` / `Yaw`" step's SOURCE unwitnessed. It is the map/camera spawn selector
+`[orig: CMap_SetupSpawnCamera @ 0x50cf60]` (Kong's name is a misnomer — it positions the player
+ENTITY, not just a camera), called on join `[orig: Server_OnPlayerJoin @ 0x51a680 → 0x51a786]`
+and respawn `[orig: Server_ProcessPlayerDeath @ 0x517740 → 0x517863]`. It maps the game type
+(`g_GameType @ 0x24D2128`) + the player's team to a marker TYPE-ID, resolves it via
+`[orig: ItemList_FindIndexByTypeId @ 0x49e100]`, finds the matching pool-3 marker entities, and
+copies the chosen marker's pose into the player. AI/NPCs take their authored BMS position verbatim
+on a separate path `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]` — so a faithful player spawn must
+NEVER read an NPC's position.
+
+**Game-type → marker type-id** (every `push imm; call ItemList_FindIndexByTypeId` in 0x50cf60):
+
+| type-id | role | `g_GameType` branch |
+|---|---|---|
+| 6094 | co-op insertion | `(g_GameType & 0xFFFDFFFF) == 0x10020` |
+| 6095 | non-team primary | non-team, attempted first |
+| 6096–6099 | per-team starts (team 1–4) | `g_GameType & 0x10000` (team) |
+| 6001 | co-op fallback | co-op only |
+| **6002** | **non-team, non-coop = single-player / campaign / DM** | the SP fall-through |
+| 6003 / 6004 / 6090 / 6091 | TDM team starts 1–4 | TDM alt path |
+
+`g_GameType` bitfield: `& 0x10000` = team mode; `& 0x20000` = vehicle/coop insertion;
+`(g_GameType & 0xFFFDFFFF) == 0x10020` = cooperative; small/zero = SP/campaign/DM. For single
+player the selector attempts 6095 first and, with no 6095 markers, falls through to **6002**,
+handing it to the distance selector.
+
+**`Entity_FindBestSpawnPoint @ 0x50ccc0` — farthest-from-enemy.** For the resolved type it counts
+pool-3 entities whose `entity+28` (the `gItemDefs` index from `ItemList_FindIndexByTypeId`, NOT the
+raw type-id) matches; for each candidate the score is the min 2D distance to any pool-0 entity with
+`Flags & 0x100` (the "avoid" / enemy set), excluding self `[orig: @0x50ce0d]`; a `CPairList`
+shell-sort by score picks the farthest (`rand()` tiebreak when all are equidistant). The winner's
+`pos` (`+4/+8/+12`) and orientation (`+16/+20/+24`) are copied into the player; `+16` is the
+`(90 − yaw)` BAM heading authored at BMS load `[orig: Entity_SpawnFromBMSRecord @ 0x40eb42]`
+(D-NET-86), so it is copied VERBATIM (no re-conversion). In SP the player's TEAM is NOT taken from
+the marker — it only selects which type-id to resolve.
+
+**Index vs raw type-id (the reimpl divergence, D-NET-87).** The original matches the items.def
+INDEX at `entity+28` (`= ItemList_FindIndexByTypeId(type_id)`, written by
+`[orig: Entity_SpawnFromBMSRecord @ 0x40ebfc]`). Our reimpl stores the raw BMS `type_id` in
+`Entity.item_id` and has no items.def index; matching `item_id == 6002` is behaviorally identical
+(`ItemList_FindIndexByTypeId` is injective on the unique `ItemDef.id`) and strictly safer — a
+missing id resolves to index 0 in the original and can alias `gItemDefs[0]`, whereas the raw-id
+match cannot. The type-ids are BMS-style `6xxx` used verbatim (no `+100000` items.def-id offset)
+`[orig: ItemList_FindIndexByTypeId @ 0x49e120 compares gItemDefs[i].id (stride 2780, .id @+0x50) to
+the raw arg]`.
+
+**Real-mission machinery — the SP marker chain alone is incomplete (2026-06-22b).** Grilling
+against a shipped SP mission (00TRa.bms, "Training: Basics / Armory", `attrib_flags=0x3` ⇒ no
+game-mode bit ⇒ `g_GameType=0`) found the per-game-type chain above does NOT cover real authored
+starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `CMap_SetupSpawnCamera` with spawn-param
+low-word **0** (not 0xFFFF), so the engine first tries `[orig: sub_4FE110 @0x4fe110]` — which is a
+live-entity **handle** resolver (`poolType = handle>>12`, `index = handle & 0xFFF`, fetch
+`g_pool_list[poolType][index]`, gate on model flag `0x40000` + team), NOT a spawn-point lookup; at
+join (handle 0, no live entity yet) it returns null and the marker chain runs. 00TRa ships ZERO
+6002 markers and exactly ONE type-**6001** marker (+ 53× type-6005 waypoints), so the SP chain
+`6095 → 6002 → Entity_FindBestSpawnPoint(6002)` finds 0 candidates and is a **no-op**
+`[orig: Entity_FindBestSpawnPoint @0x50ccc0 zero-candidate epilogue @0x50cf53 — bare ret, no write
+to entity+4/+8/+12]`. The 6001 marker is instead consumed by the broader start-point family
+machinery: `[orig: build_entity_position_list @0x509660]` enumerates the family
+`{6001,6002,6003,6004,6090,6091,6094-6099}`, and the dedicated 6001 reader
+`[orig: CineEditor_FindSpectatorSpawn @0x41f25e]` copies the 6001 marker's X/Y/Z. The exact branch
+that places 00TRa's player is runtime-`g_GameType`/pool-3-data-dependent, but every path points at
+the single 6001 marker.
+
+**Reimpl (the SP-as-listen-server fix, 2026-06-22; revised 2026-06-22b — D-NET-88).** Because a
+byte-faithful port of the fragmented, data-dependent machinery is impractical (and the strict SP
+path no-ops on a 6001-only mission), the reimpl UNIFIES it: `select_player_spawn`
+(`libs/world/src/spawn_select.cpp`) scans the registry's promoted markers (`EntityKind::Marker`)
+over the start-marker family priority list
+`kSpawnMarkerStartTypes = {6002, 6095, 6094, 6001, 6096-6099, 6003, 6004, 6090, 6091}` — the FIRST
+present type wins, returning the one farthest (mission 2D) from any live `EntityKind::Organic` (the
+avoid set; the faithful `Flags & 0x100` set is approximated by live soldiers — at select time the
+player has not spawned, so every organic is an NPC). A mission is authored for one mode, so
+typically exactly one family type is present (00TRa → its 6001). `NovaSimulation::spawn_local_player_at_start`
+feeds the result into the §5.2b `spawn_player`; `mission_runtime.gd` calls it instead of the prior
+placeholder that read `get_entity_position(0)` (= the first promoted organic = NPC #0), which spawned
+the player on top of the first soldier. No family marker → a safe fallback origin, never an NPC
+position. **D-NET-88 divergence:** the unified family scan replaces the exact per-game-type
+resolution (`g_GameType`-driven order, the `sub_4FE110` handle pre-check, the cycling-vs-farthest
+distinction, the separate 6001/cinematic consumers, the `"psp"` bone offset + `+0x10000` Z nudge) —
+all deferred. Guarded by `tests/world/spawn_select_test.cpp` (incl. the 6001-only 00TRa shape).
+
 ### 5.3 Tag direction asymmetry (durable warning)
 
 Most/all tags have **both** a `NapiNPClientMsg_*` (S2C receive) and a `NapiNPServerMsg_*`

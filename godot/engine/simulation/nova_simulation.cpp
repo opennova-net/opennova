@@ -10,6 +10,7 @@
 #include <mission/bms.h>
 #include <mission/mission_systems.h>
 #include <world/player_spawn.h>
+#include <world/spawn_select.h>
 
 #include "object/nova_item_database.h"
 #include "resource_index/nova_resource_root.h"
@@ -282,6 +283,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &NovaSimulation::spawn_local_player);
+	ClassDB::bind_method(D_METHOD("spawn_local_player_at_start"), &NovaSimulation::spawn_local_player_at_start);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
 	ClassDB::bind_method(D_METHOD("set_player_input", "forward", "back", "left", "right", "run", "crouch", "prone", "jump", "look_yaw_deg", "look_pitch_deg"), &NovaSimulation::set_player_input);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
@@ -458,6 +460,35 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	player_input_.look_heading =
 	    static_cast<int32_t>((90.0 - static_cast<double>(p_yaw_deg)) * kBamPerDegree);
 	return true;
+}
+
+int NovaSimulation::spawn_local_player_at_start() {
+	if (!loaded_ || !world_ || !world_->ai) return -1;
+	// Pick the player-start marker the original would — scan the 60xx start-marker family (SP/DM,
+	// coop, team), FARTHEST from the enemy set — instead of the first NPC's position. Finds the
+	// authored start whatever the mission mode (e.g. a 6001-only SP training mission like 00TRa).
+	// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
+	const opennova::world::SpawnPointResult sel = opennova::world::select_player_spawn(*world_);
+	opennova::world::PlayerSpawn spawn;
+	if (sel.found) {
+		spawn.position = sel.position; // mission space, straight from the chosen marker
+		spawn.yaw = sel.yaw;
+	} else {
+		// No player-start marker authored: spawn at the mission origin (the terrain clamp grounds
+		// it). NEVER fall back to an NPC's position — that is the bug this replaces.
+		spawn.position = {0.0f, 0.0f, 0.0f};
+		spawn.yaw = 0;
+	}
+	// SP keeps the player's own team; the marker's team is not copied [orig: §5.2c]. Team 1 mirrors
+	// the prior placeholder until the MP team path lands.
+	spawn.team = 1;
+	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
+	if (!h.valid()) return -1;
+	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
+	player_input_ = opennova::world::PlayerInput{};
+	player_input_.look_heading =
+	    static_cast<int32_t>((90.0 - static_cast<double>(spawn.yaw)) * kBamPerDegree);
+	return sel.found ? 1 : 0;
 }
 
 bool NovaSimulation::has_local_player() const {
