@@ -81,6 +81,7 @@ var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); nu
 var _player_viewmodel: Node3D = null  # host-managed FP arms+weapon (shown in 1P); null until built
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
+var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
 
 
 func _ready() -> void:
@@ -289,6 +290,15 @@ func _wire_host() -> void:
 		_menu_host.set_companion(_mp_host)
 	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
 	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
+	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
+
+
+# The player pressed OK on the PLAYER_INFO screen. The on-disk player-profile format
+# and the in-world soldier appearance (D-PLAYERINFO-1) are not yet ported, so we hold
+# the chosen selection in memory as the seam for those later phases rather than invent
+# a profile format. See docs/playerinfo/avatars-re.md (ACCEPT / commit, D-PLAYERINFO-9).
+func _on_avatar_chosen(profile: Dictionary) -> void:
+	_chosen_avatar = profile
 
 
 # --- Resource dir picker (first launch) ---------------------------------------

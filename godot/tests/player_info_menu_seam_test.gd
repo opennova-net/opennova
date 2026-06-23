@@ -36,6 +36,9 @@ func _make_menu() -> Node:
 	var name_edit := NovaMnuEdit.new()
 	name_edit.name = "PLAYERNAME"
 	menu.add_child(name_edit)
+	var accept := Button.new()
+	accept.name = "ACCEPT"
+	menu.add_child(accept)
 	return menu
 
 
@@ -155,3 +158,17 @@ func test_snapshot_reports_current_selection() -> void:
 	assert_eq(String(snap.get("name", "")), "Ghost", "snapshot carries the player name")
 	assert_eq(int(snap.get("team", -1)), 0, "snapshot carries the team")
 	assert_eq(int(snap.get("nationality", -1)), 0, "snapshot carries the selected nationality index")
+
+
+func test_accept_emits_avatar_chosen() -> void:
+	var host := PlayerInfoMenuHost.new()
+	host._db = _load_db()
+	watch_signals(host)
+	var menu := _make_menu()
+	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
+	(menu.find_child("PLAYERNAME", true, false) as LineEdit).text = "Sandman"
+	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	assert_signal_emitted(host, "avatar_chosen", "OK commits the chosen avatar")
+	var profile: Dictionary = get_signal_parameters(host, "avatar_chosen")[0]
+	assert_eq(String(profile.get("name", "")), "Sandman", "the committed profile carries the name")
+	assert_eq(int(profile.get("nationality", -1)), 0, "the committed profile carries the selection")

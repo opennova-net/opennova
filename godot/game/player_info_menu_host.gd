@@ -71,6 +71,8 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	_team = 1 if _radio_checked("SIDE_RED") else 0
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
 	_wire_preview()
+	# OK saves the chosen avatar; the .mnu's own ACTION still navigates back to main.mnu.
+	_connect_pressed("ACCEPT", commit)  # [orig: save_player_info_from_dialog @ 0x55ee10]
 
 
 # --- Avatars.def + RTXT loading (best-effort; degrade to empty combos) ---------
