@@ -9,7 +9,8 @@ Reverse-engineered from `Jointops.exe` (Joint Operations: Combined Arms, imageba
 This is the menu-slice grill (2026-06-09), closing the render/sound divergences the
 2026-06-01 format pass deferred. The 2026-06-23 render grill added the coordinate system,
 per-item image/color rendering, spinlist arrows, the combo dropdown, the marquee CBIN
-credits, and the monogram (parsed-but-not-drawn) — see the sections below.
+credits, the monogram (parsed-but-not-drawn), and the `DRAW_FRAME` frame-draw gate — see
+the sections below.
 
 ---
 
@@ -70,6 +71,18 @@ border hanging OUTSIDE the window rect by `SIZE` and pulled back by the authored
 modulated by `0x7F7F7F` (neutral in the modulate-2x fixed-function path -> no tint).
 Reimpl: `add_frame` in `nova_mnu_builder.cpp` (8 `TextureRect` pieces + a tiled fill).
 The old 4x4 mirrored-corner NinePatch bake with hardcoded 16/24 insets is retired.
+
+A frame draws ONLY when the window's `DRAW_FRAME` flag is set: the render gate is
+`if (elem+0x134) DrawFrame(...)` in `CStaticWnd_Render @ 0x657b10`, evaluated BEFORE the
+ungated appearance/texture passes — so a window's own `<APPEARANCE>` image still draws when
+DRAW_FRAME is clear. A window may carry a `<FRAME>` purely to hand its stencil/brush down to
+framed descendants without drawing one itself: the shipped `jo_game.mnu` / `jo_options.mnu`
+root `MAIN` defines the camo `BOXTILE` brush + `BORDER2` stencil but has NO DRAW_FRAME, so it
+draws no frame, while its `MAIN_WRAPPER` / `OPTIONS_WRAPPER` children carry DRAW_FRAME and
+draw the inherited frame. Reimpl: `build_container` gates ALL frame drawing (own and
+inherited) on `w.draw_frame`. The old reimpl drew a window's own `<FRAME>` unconditionally,
+which tiled the camo brush across the whole 800x600 root — the full-window camo behind the
+in-game ESC menu (and under `letterbox.tga` on the options screen); fixed.
 
 When NEITHER the stencil nor the brush texture resolves, the original draws nothing:
 every draw in `CUIElement_DrawFrame` is guarded by a successful texture load
@@ -283,7 +296,9 @@ play and master volume, the XML entity policy, and the format round-trip (ADR 00
 draw-nothing frame fallback, MONOGRAM-parsed-but-not-drawn, spinlist/list/combo item
 rendering (text / native image / full-rect color swatch), `%VAR%` color appearances,
 spinlist SPINUP/SPINDOWN parent-relative geometry, the combo closed-cell + LIST_BOX
-popup, and the marquee_wnd CBIN-credits datasource.
+popup, the marquee_wnd CBIN-credits datasource, and the `DRAW_FRAME` frame-draw gate
+(`elem+0x134` in `CStaticWnd_Render`; the old own-frame-drawn-unconditionally bug that put
+full-window camo behind the in-game ESC menu and options screen is fixed).
 
 Accepted/divergent (each a documented decision, not a defect):
 
@@ -346,7 +361,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `libs/mnu/src/mnu.cpp` |
 | `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `libs/mnu/src/mnu.cpp` |
 | `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill; draws nothing when textures absent; no monogram) |
-| `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); confirms the menu monogram is never drawn |
+| `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> `build_container` gates `add_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
 | `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `menu_shell.gd` / `mnu_canvas.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
 | `CUIElement_DrawStretchedTexture @ 0x647d40` | `apply_position` texture-into-rect; the scaled-rect int truncation is D-MNU-4 |
@@ -372,6 +387,7 @@ xrefs); naming/splitting them remains a proposed edit.
 | `+0xD0..+0xDC` | POSITION rect (`left/top/right/bottom`) |
 | `+0xF8` | `GLOBAL_VAR` flag `[orig: @ 0x648323]` |
 | `+0x124` | `FORM` index (int) `[orig: @ 0x6482a6]` |
+| `+0x134` | `DRAW_FRAME` flag (gates the frame draw) `[orig: CStaticWnd_Render @ 0x657b10]` |
 | `+0x284` | stencil `SIZE` |
 | `+0x288` | stencil `INSETX` (float) `[orig: @ 0x648717]` |
 | `+0x28C` | stencil `INSETY` (float) `[orig: @ 0x648756]` |

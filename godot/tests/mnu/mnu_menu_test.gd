@@ -425,8 +425,10 @@ func test_monogram_parsed_but_not_drawn() -> void:
 		pass_test("temp resource root unavailable: %s" % root.get_last_error())
 		return
 
+	# DRAW_FRAME so the frame actually draws (this test's point is that the frame
+	# renders but the MONOGRAM does not) [orig: CStaticWnd_Render @ 0x657b10 -> +0x134].
 	var mnu_text := "<SCREEN><NAME>S</NAME>" + \
-		"<WINDOW type=\"window\" name=\"PANEL\">" + \
+		"<WINDOW type=\"window\" name=\"PANEL\" DRAW_FRAME>" + \
 		"<FRAME><STENCIL size=\"64\">border2.tga</STENCIL><MONOGRAM>mono.tga</MONOGRAM></FRAME>" + \
 		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION>" + \
 		"</WINDOW></SCREEN>"

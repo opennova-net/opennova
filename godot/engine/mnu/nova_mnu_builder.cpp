@@ -817,10 +817,19 @@ Control *build_container(MnuBuildContext &ctx, const mnu::Window &w, const mnu::
 	Control *container = memnew(Control);
 	container->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 
-	if (has_frame(w.frame)) {
-		add_frame(ctx, container, w.frame);
-	} else if (w.draw_frame && has_frame(inherited_frame)) {
-		add_frame(ctx, container, inherited_frame);
+	// A window draws a frame ONLY when DRAW_FRAME is set; the textures are its own
+	// <FRAME> if present, else the nearest inherited <FRAME>. A window can define a
+	// <FRAME> purely to hand textures down to framed descendants without drawing one
+	// itself (e.g. the root MAIN, which carries the camo BOXTILE brush but no
+	// DRAW_FRAME). The render path gates the frame draw on the DRAW_FRAME flag while
+	// leaving the appearance/texture passes ungated, so a window's own image still
+	// shows [orig: CStaticWnd_Render @ 0x657b10 -> field +0x134 guards CUIElement_DrawFrame].
+	if (w.draw_frame) {
+		if (has_frame(w.frame)) {
+			add_frame(ctx, container, w.frame);
+		} else if (has_frame(inherited_frame)) {
+			add_frame(ctx, container, inherited_frame);
+		}
 	}
 
 	if (has_color(w.appearances)) {

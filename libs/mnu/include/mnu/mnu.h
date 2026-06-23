@@ -253,7 +253,10 @@ struct Window {
   bool hidden = false;
   bool disabled = false;
   bool checked = false;     // For radio/checkbox initial state
-  bool draw_frame = false;  // Whether to draw inherited frame
+  bool draw_frame = false;  // DRAW_FRAME: gates ALL frame drawing (own <FRAME> or
+                            // inherited); a window with a <FRAME> but no DRAW_FRAME only
+                            // hands textures to framed children [orig: CStaticWnd_Render
+                            // @ 0x657b10 -> field +0x134 guards CUIElement_DrawFrame]
   bool modal = false;       // MODAL - dialog window
   bool readonly = false;    // READONLY - for multiline_edit
   bool as_button = false;   // AS_BUTTON - render a checkbox as a toggle button
