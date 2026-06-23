@@ -1407,21 +1407,39 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 		}
 		return nullptr;
 	};
-
-	// Column defs (width + justify + bitmap) for the body cell layout.
-	for (int c = 0; c < ncols; ++c) {
-		const mnu::TableHeader *h = find_header(c);
-		const int width = h && h->width > 0 ? h->width : 80;
-		HorizontalAlignment ha = HORIZONTAL_ALIGNMENT_LEFT;
-		if (h) {
-			const String j = to_gd(h->justify).to_upper();
-			if (j == "CENTER") {
-				ha = HORIZONTAL_ALIGNMENT_CENTER;
-			} else if (j == "RIGHT") {
-				ha = HORIZONTAL_ALIGNMENT_RIGHT;
+	auto find_body = [&](int col) -> const mnu::TableBody * {
+		for (const auto &b : td.column.bodies) {
+			if (b.column == col) {
+				return &b;
 			}
 		}
-		table->add_column(width, (int)ha, bitmap_cols.count(c) > 0);
+		return nullptr;
+	};
+	auto to_halign = [](const std::string &j, HorizontalAlignment fallback) -> HorizontalAlignment {
+		const String u = to_gd(j).to_upper();
+		if (u == "CENTER") {
+			return HORIZONTAL_ALIGNMENT_CENTER;
+		}
+		if (u == "RIGHT") {
+			return HORIZONTAL_ALIGNMENT_RIGHT;
+		}
+		if (u == "LEFT") {
+			return HORIZONTAL_ALIGNMENT_LEFT;
+		}
+		return fallback;
+	};
+
+	// Column defs (width + justify + bitmap) for the body cell layout. Body cells take
+	// the BODY justify; the HEADER justify aligns the header cell only (the old code
+	// reused the header justify for body cells, so a LEFT-authored body rendered CENTER).
+	for (int c = 0; c < ncols; ++c) {
+		const mnu::TableHeader *h = find_header(c);
+		const mnu::TableBody *b = find_body(c);
+		const int width = h && h->width > 0 ? h->width : 80;
+		const HorizontalAlignment header_align =
+				h ? to_halign(h->justify, HORIZONTAL_ALIGNMENT_LEFT) : HORIZONTAL_ALIGNMENT_LEFT;
+		const HorizontalAlignment body_align = b ? to_halign(b->justify, header_align) : header_align;
+		table->add_column(width, (int)body_align, bitmap_cols.count(c) > 0);
 	}
 
 	// Colours from the ITEMS outline / selection.
@@ -1457,12 +1475,20 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	for (int c = 0; c < ncols; ++c) {
 		const mnu::TableHeader *h = find_header(c);
 		const int width = h && h->width > 0 ? h->width : 80;
-		const String text = h ? to_gd(h->text) : String();
+		// Header text resolves type="id" through the RTXT table (the old code drew the
+		// raw id) [orig: type="id" branch @ 0x64344a -> CUIStringTable_LookupString
+		// @ 0x6434df]. ctx.text is already in scope.
+		const String text = h ? resolve_text(ctx, mnu::String{ h->type, h->justify, h->vjustify,
+												  0, h->text })
+							   : String();
+		const HorizontalAlignment header_align =
+				h ? to_halign(h->justify, HORIZONTAL_ALIGNMENT_CENTER) : HORIZONTAL_ALIGNMENT_CENTER;
 		const bool sortable = h && !h->sort.empty();
 		if (sortable) {
 			Button *hb = memnew(Button);
 			hb->set_name(String("Header") + String::num_int64(c));
 			hb->set_text(text);
+			hb->set_text_alignment(header_align);
 			hb->set_flat(true);
 			hb->set_position(Vector2(hx, 0));
 			hb->set_size(Vector2(width, rowh));
@@ -1484,6 +1510,7 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 			hl->set_text(text);
 			hl->set_position(Vector2(hx, 0));
 			hl->set_size(Vector2(width, rowh));
+			hl->set_horizontal_alignment(header_align);
 			hl->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
 			hl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 			if (cell_font.is_valid()) {
@@ -1492,6 +1519,16 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 			header->add_child(hl);
 		}
 		hx += width + td.column.spacing;
+	}
+	// Header underline (the ITEMS %TRIM_COLOR% outline read as a header rule).
+	if (has_outline) {
+		ColorRect *rule = memnew(ColorRect);
+		rule->set_name("HeaderRule");
+		rule->set_color(outline);
+		rule->set_anchors_preset(Control::PRESET_BOTTOM_WIDE);
+		rule->set_offset(SIDE_TOP, -1);
+		rule->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		header->add_child(rule);
 	}
 	table->add_child(header);
 
@@ -1514,12 +1551,29 @@ Control *build_table(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 		sb->set_menu(ctx.owner);
 		sb->set_edit_mode(ctx.edit_mode);
 		sb->set_orientation_vertical(true);
+		sb->set_track_texture(get_texture(ctx, td.scrollbar.track, "default"));
 		sb->set_shuttle_textures(get_texture(ctx, td.scrollbar.shuttle, "default"),
 				get_texture(ctx, td.scrollbar.shuttle, "mouseover"));
 		sb->set_arrow_textures(get_texture(ctx, td.scrollbar.scrollup, "default"),
 				get_texture(ctx, td.scrollbar.scrollup, "mouseover"),
 				get_texture(ctx, td.scrollbar.scrolldown, "default"),
 				get_texture(ctx, td.scrollbar.scrolldown, "mouseover"));
+		Ref<Texture2D> sb_up = get_texture(ctx, td.scrollbar.scrollup, "default");
+		if (sb_up.is_valid()) {
+			sb->set_arrow_extent(sb_up->get_height());
+		}
+		// Honor the authored <SCROLLBAR><POSITION> (parent-relative to the table)
+		// instead of a hardcoded 16px right strip [orig: table SCROLLBAR delegate
+		// @ 0x643b22]. Width from the art when the rect is degenerate.
+		const mnu::Position &sp = td.scrollbar.position;
+		if (sp.has_left && sp.has_top) {
+			float w_px = sp.has_right ? (float)(sp.right - sp.left) : 0.0f;
+			if (w_px <= 0.0f && sb_up.is_valid()) {
+				w_px = (float)sb_up->get_width();
+			}
+			float h_px = sp.has_bottom ? (float)(sp.bottom - sp.top) : 0.0f;
+			table->set_scrollbar_rect(Rect2((float)sp.left, (float)sp.top, w_px, h_px));
+		}
 		table->add_child(sb);
 	}
 

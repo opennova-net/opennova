@@ -8,6 +8,8 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include <map>
 #include <set>
@@ -69,6 +71,8 @@ private:
 	Control *viewport_ = nullptr;
 	Control *rows_container_ = nullptr;
 	NovaMnuScroll *scrollbar_ = nullptr;
+	Rect2 scrollbar_rect_;          // authored <SCROLLBAR><POSITION>, table-relative
+	bool has_scrollbar_rect_ = false;
 
 	float column_x(int p_col) const;
 	float total_width() const;
@@ -112,10 +116,15 @@ public:
 		subst_[std::make_pair(p_col, p_value)] = p_tex;
 	}
 	void set_parts(Control *p_header, Control *p_viewport, Control *p_rows, NovaMnuScroll *p_scrollbar);
+	void set_scrollbar_rect(const Rect2 &p_rect) {
+		scrollbar_rect_ = p_rect;
+		has_scrollbar_rect_ = true;
+	}
 
 	// --- Runtime data binding ---
 	int add_row();
 	int add_row_values(const PackedStringArray &p_cells);
+	void add_rows(const TypedArray<PackedStringArray> &p_rows); // append many, rebuild once
 	void set_row(int p_row, const PackedStringArray &p_cells);
 	void set_cell_text(int p_row, int p_col, const String &p_text);
 	void set_cell_value(int p_row, int p_col, const String &p_value);

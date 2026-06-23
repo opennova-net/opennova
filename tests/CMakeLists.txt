@@ -666,6 +666,12 @@ target_link_libraries(mnu_xml_unit_test PRIVATE opennova_mnu_xml)
 target_include_directories(mnu_xml_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_xml_unit COMMAND mnu_xml_unit_test)
 
+# controls: the JO input-binding catalog + Options->Controls (CONTROL_MAPPING) model.
+add_executable(controls_test controls/controls_test.cpp)
+target_link_libraries(controls_test PRIVATE opennova_controls)
+target_include_directories(controls_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME controls_unit COMMAND controls_test)
+
 add_executable(mnu_unit_test mnu/mnu_unit_test.cpp)
 target_link_libraries(mnu_unit_test PRIVATE opennova_mnu)
 target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

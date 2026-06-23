@@ -85,6 +85,7 @@
 #include "mnu/nova_mnu_globe.h"
 #include "mnu/nova_mnu_marquee.h"
 #include "mnu/nova_mnu_menu.h"
+#include "mnu/nova_controls_model.h"
 
 using namespace godot;
 
@@ -210,6 +211,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMnuGlobe);
 	GDREGISTER_CLASS(NovaMnuMarquee);
 	GDREGISTER_CLASS(NovaMnuMenu);
+	GDREGISTER_CLASS(NovaControlsModel);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(NovaNetClient);
 	GDREGISTER_CLASS(NovaUdpPump);

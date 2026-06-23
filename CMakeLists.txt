@@ -41,6 +41,7 @@ add_subdirectory(libs/dbf)
 add_subdirectory(libs/audio)
 add_subdirectory(libs/oned_edit)
 add_subdirectory(libs/refs)
+add_subdirectory(libs/controls)
 
 # Vendored third-party deps that the net stack pulls in.
 add_subdirectory(third_party/sqlite)

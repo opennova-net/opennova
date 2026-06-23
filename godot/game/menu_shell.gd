@@ -78,6 +78,14 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var mod_desc_names := PackedStringArray([
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
+# The Options -> Controls key-binding table, and the device radios that switch it
+# (Keyboard/Mouse/Joystick). The host fills the table from the libs/controls catalog.
+@export var control_table_names := PackedStringArray([
+	"CONTROL_MAPPING",
+])
+@export var control_device_names := PackedStringArray([
+	"KEYBOARD", "MOUSE", "JOYSTICK",
+])
 # Controls that open NovaWorld (online multiplayer). The shipped JO main menu
 # carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
 @export var novaworld_control_names := PackedStringArray([
@@ -118,6 +126,8 @@ var _ready_done := false
 # Optional delegate that owns game-specific menus the generic shell does not handle
 # (the JO multiplayer menu — mp_menu_host.gd). Null for a plain shell.
 var _companion = null
+# Lazily-built Options -> Controls key-binding catalog (libs/controls).
+var _controls_model: NovaControlsModel = null
 
 
 func _ready() -> void:
@@ -274,6 +284,10 @@ func _wire_named_controls() -> void:
 		if mod_list is NovaMnuList:
 			has_mod_list = true
 			_seed_mod_list(mod_list as NovaMnuList)
+	for table_name in control_table_names:
+		var ctl_table := _menu.find_child(table_name, true, false)
+		if ctl_table is NovaMnuTable:
+			_seed_control_mapping(ctl_table as NovaMnuTable)
 	if has_mission_list:
 		_connect_named(start_control_names, _on_start_control)
 	elif has_mod_list:
@@ -298,6 +312,32 @@ func _seed_mission_list(list: NovaMnuList) -> void:
 	list.set_items(names)
 	if not list.item_activated.is_connected(_on_mission_activated):
 		list.item_activated.connect(_on_mission_activated)
+
+
+# --- Controls remap table (Options -> Controls) -------------------------------
+
+# Fill the CONTROL_MAPPING table with the key-binding catalog and wire the
+# Keyboard/Mouse/Joystick device radios to repopulate it. Read-only for now: the
+# rows show the byte-exact default bindings; double-click rebinding is not wired
+# (see docs/mnu/menu-re.md D-CTRL-*). The radio nodes are rebuilt with the menu, so
+# the connections are re-made fresh each open without duplicating.
+func _seed_control_mapping(table: NovaMnuTable) -> void:
+	if _controls_model == null:
+		_controls_model = NovaControlsModel.new()
+	_fill_control_mapping(table, NovaControlsModel.DEVICE_KEYBOARD)
+	for i in control_device_names.size():
+		var radio := _menu.find_child(control_device_names[i], true, false)
+		if radio is BaseButton:
+			var device := i  # 0=keyboard, 1=mouse, 2=joystick (NovaControlsModel.Device)
+			(radio as BaseButton).pressed.connect(func() -> void:
+				_fill_control_mapping(table, device))
+
+
+func _fill_control_mapping(table: NovaMnuTable, device: int) -> void:
+	if _controls_model == null:
+		return
+	table.clear_rows()
+	table.add_rows(_controls_model.get_rows(device))
 
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------

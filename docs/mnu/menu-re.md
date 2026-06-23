@@ -199,6 +199,77 @@ plain-text datasource keeps the simple `NovaMnuMarquee`. The old code read the b
 `D-MNU-6`: the CBIN credits' custom fonts/textures are not yet resolved from the resource
 root (text scrolls with the default font); a follow-up.
 
+## Controls / key-binding table (CONTROL_MAPPING) `[orig: UI_PopulateControlMappingList @ 0x55c0c0]`
+
+The Options screen's **Controls** tab hosts a `type="table"` named `CONTROL_MAPPING` (3 columns
+Class / Action / Control) the host fills with the player's key bindings, switched by an input
+device (Keyboard / Mouse / Joystick). The `.mnu` declares only the table template; the rows are
+host-populated, like the mission/mod lists (see menu-wiring.md). The 2026-06-23b grill.
+
+**Data model.** A static action catalog `aAbsoluteTurnLe @ 0x8159cb` (108-byte stride, ~112
+entries) holds per action: a marker-prefixed English display NAME (offset 0; the leading `!`/`|`
+no-localize marker is stripped on display), a config TOKEN (offset 40, e.g. `move_forward`), a
+category/**Class id** (offset 85), and a default keyboard binding (primary + secondary Windows-VK
+codes in the record's lead bytes — i.e. at the catalog record's `-15`/`-13` offset relative to the
+next name, validated to the canonical JO scheme). `UI_BuildKeyBindingLoadoutTable @ 0x559e50`
+builds a per-action display row from the player profile's binding array (`dword_25510fc+1808`,
+72-byte entries), resolving the action name via `KeyHelp_GetStringWithFallback("Text", …)`
+(fallback to the catalog NAME), formatting the Control column with
+`KeyBinding_FormatBindingString @ 0x559a10`, and sorting via `UI_CompareSessionListEntries
+@ 0x559d10` into 432-byte (0x1B0) display entries in `Base @ 0x25c7720`.
+
+**Class names** come from `KeyBinding_BuildCategoryPages @ 0x4966c0`: the Class id resolves to a
+name via `KeyHelp_GetStringWithFallback("Text", "<KEY>", "!<Name>")` — `0` Null, `1` Movement,
+`2` Weapons, `3` Camera, `4` Map, `5` Communications, `6` Server, `7` NovaLogic, `9` Cheat,
+`10` System, `11` Debug, `12` teammatemenu, `13` Spectator.
+
+**Population.** `UI_PopulateControlMappingList @ 0x55c0c0` finds the widget by name
+(`sub_63ae80(…, "CONTROL_MAPPING")`), clears it (`CTableWnd_RemoveRow(-1) @ 0x641a40`), and for the
+active device `dword_25db7d8` (`0` keyboard / `1` mouse / `2` joystick) inserts a row per entry
+(`table_insert_row @ 0x641c30`) and sets the cells (`@ 0x63edf0`). Each device has its own runtime
+binding array (kb `dword_25c7724` / mouse `byte_25c784c` / joy `byte_25c7740`).
+`refresh_control_mapping_list @ 0x55b320` recomputes per-row conflict state
+(`check_weapon_slot_conflict @ 0x55ae60`, a kong-misnomer for *binding* conflict) and tints
+conflicting rows yellow (`sub_640110(row, …, -256)`). The device radios call
+`sub_55bcd0(mode) @ 0x55bcd0` (sets `dword_25db7d8`, swaps the REMAP_INSTRUCTIONS text id
+`REMAP_Keyboard`/`REMAP_Mouse`/`REMAP_Joystick`, repopulates).
+
+**Control column format** `[orig: KeyBinding_FormatBindingString @ 0x559a10]`: up to two key slots,
+each prefixed `Ctrl-` / `Shift-` when its modifier word is `17` / `16`, joined by the localized
+"OR" (` XXor ` fallback -> ` or `). Key names decode through `KeyBinding_GetKeyNameAndDisplayName
+@ 0x494c60`, a Windows-VK switch returning a display name ("Mouse 1", "Up", "Space", "F1", "[", or
+the printable char). Mouse buttons use special codes (`1` left, `2` right, `16` middle, `1024`
+wheel up, `2048` wheel down); joystick uses `JOYBUTTON%d`.
+
+Reimpl: **`libs/controls`** (Godot-agnostic) ports the catalog (`controls.cpp` `k_catalog` —
+byte-exact names/tokens/Class id + the default VK binding from the catalog's binding slot,
+validated Forward=W/Up, Reload=R, Jump=Space, …), the Class-name table (`action_class_name`), the
+VK decoder (`key_name`), and the binding format (`format_binding`); `build_rows(device)` mirrors
+`UI_PopulateControlMappingList`. The Godot wrapper **`NovaControlsModel`** hands rows to
+`godot/game/menu_shell.gd` (`_seed_control_mapping` / `_fill_control_mapping`), which fills the
+`CONTROL_MAPPING` `NovaMnuTable` via `add_rows` and wires the Keyboard/Mouse/Joystick radios to
+repopulate. The earlier reimpl left the table empty — `menu_shell` had no host path for a
+`type="table"`, so the Controls tab rendered floating headers over a blank grid.
+
+The table render itself was also corrected this pass (see Table render below). This pass is
+**read-only**: it reproduces what the Controls tab DISPLAYS. Live double-click rebinding
+(`update_control_mapping_display @ 0x55b700`), DEFAULTS (`sub_55bd90`) / CLEAR_KEY (`loc_55bfd0`),
+and profile persistence are deferred (D-CTRL-3), gated on a real game input-action layer.
+
+### Table render `[orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0]`
+
+Three reimpl table-render fixes landed with the controls work (`build_table` in
+`nova_mnu_builder.cpp`, `NovaMnuTable`):
+
+- **Header `type="id"` is resolved** through the RTXT table (`resolve_text`), closing the open
+  inner divergence — the header branch `@ 0x64344a` looks the text up via
+  `CUIStringTable_LookupString @ 0x6434df`; the old reimpl drew the raw id.
+- **Body cells align per the `<BODY>` justify**, not the `<HEADER>` justify (the old code reused
+  the header justify, so a LEFT-authored body rendered centred).
+- **The scrollbar honors the authored `<SCROLLBAR><POSITION>`** (table-relative) and art width
+  instead of a hardcoded 16px right strip; the track texture is applied like `build_scroll`. The
+  ITEMS `%TRIM_COLOR%` outline now draws as a header rule + per-row grid line.
+
 ## Sound `[orig: widget_process_mouse_event @ 0x647a00]`
 
 A `<SOUND>` element stores `{trigger, bank-id}` in a per-STATE slot, keyed by the
@@ -300,7 +371,22 @@ popup, the marquee_wnd CBIN-credits datasource, and the `DRAW_FRAME` frame-draw 
 (`elem+0x134` in `CStaticWnd_Render`; the old own-frame-drawn-unconditionally bug that put
 full-window camo behind the in-game ESC menu and options screen is fixed).
 
+**matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
+Class-id->name table + per-device row build), the byte-exact default keyboard bindings, the Control
+column format (key-name decode + `Ctrl-`/`Shift-`/`OR`), and the three table-render fixes (header
+`type="id"` lookup, body justify, authored scrollbar position) — the table now renders a populated,
+scrollable, correctly-aligned grid instead of floating headers over a blank body.
+
 Accepted/divergent (each a documented decision, not a defect):
+
+- **D-CTRL-1 (mouse/joystick defaults):** the keyboard defaults are byte-exact from the catalog;
+  the per-device mouse/joystick binding arrays are profile-built at runtime, not static, and are
+  not ported — mouse/joystick rows show the action list with a blank Control column.
+- **D-CTRL-2 (visibility filter):** the engine gates each row on a per-entry show flag
+  (`(*entry & 0x20)==0 && (*entry & 0x800)!=0` in `UI_PopulateControlMappingList`); the reimpl
+  approximates it by hiding the admin/internal classes (Null/Server/NovaLogic/Cheat/Debug).
+- **D-CTRL-3 (read-only):** live double-click rebinding, DEFAULTS/CLEAR_KEY mutation, and profile
+  persistence are deferred (no game input-action layer consumes the bindings yet).
 
 - **D-MNU-1 (`%VAR%` mechanism):** per-field build-time expansion vs whole-buffer
   pre-parse - the runtime result matches for stylesheet vars; host-var-in-text is a
@@ -371,6 +457,14 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
+| `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`libs/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
+| `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `libs/controls` `k_catalog` — `controls.cpp` |
+| `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
+| `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |
+| `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
+| `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `menu_shell.gd::_seed_control_mapping` |
+| `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) | `build_table` — `nova_mnu_builder.cpp` (id lookup + body justify + authored scrollbar) + `NovaMnuTable` |
+| `NovaControlsModel` (Godot wrapper) | `godot/engine/mnu/nova_controls_model.cpp` |
 
 IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
 CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `sub_6394E0 ->
@@ -393,11 +487,11 @@ xrefs); naming/splitting them remains a proposed edit.
 | `+0x28C` | stencil `INSETY` (float) `[orig: @ 0x648756]` |
 | `+0x30C` (edit, this+780) | `PASSWORD` flag `[orig: @ 0x661d3b]` |
 
-### Inner divergence still open
+### Inner divergence (closed 2026-06-23b)
 
-- Table HEADER `type="id"` `[orig: branch @ 0x64344a]` resolves the header text
-  through `CUIStringTable_LookupString @ 0x6434df`; the reimpl round-trips the `type`
-  attribute but performs no string-table lookup.
+- Table HEADER `type="id"` `[orig: branch @ 0x64344a -> CUIStringTable_LookupString @ 0x6434df]`
+  now resolves through the RTXT table in `build_table` (via `resolve_text`); the reimpl previously
+  round-tripped the `type` attribute but drew the raw id. See "Controls / key-binding table" above.
 
 Closed since the notes were taken (do not resurrect from `notes/`): the hardcoded
 16/24 stencil insets `[orig: @ 0x648717 / 0x648756]` and the texture/rect inversion

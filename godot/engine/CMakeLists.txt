@@ -42,6 +42,7 @@ add_subdirectory(../../libs/lwf opennova_lwf)
 add_subdirectory(../../libs/dbf opennova_dbf)
 add_subdirectory(../../libs/audio opennova_audio)
 add_subdirectory(../../libs/oned_edit opennova_oned_edit)
+add_subdirectory(../../libs/controls opennova_controls)
 add_subdirectory(../../libs/novacrypto opennova_novacrypto)
 add_subdirectory(../../libs/napi opennova_napi)
 # novaworld depends on sqlite (db/), so pull sqlite in too. The Godot
@@ -140,6 +141,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/mnu_item_cell.cpp
     mnu/nova_mnu_builder.cpp
     mnu/nova_mnu_menu.cpp
+    mnu/nova_controls_model.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -186,6 +188,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_dbf
     opennova_audio
     opennova_oned_edit
+    opennova_controls
     opennova_novacrypto
     opennova_napi
     opennova_novaworld
