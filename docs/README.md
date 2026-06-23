@@ -53,7 +53,7 @@ behavior is summarized and cited.
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | relanded on the `web-nw-for-real-master` integration branch (see `plan/`) |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
-| Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge grilled; spawned-player binding open) |
+| Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + full `PLAYER_INFO` screen orchestration grilled, D-PLAYERINFO-1..12; runtime `player.mnu` host wiring + spawned-player binding open) |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed |

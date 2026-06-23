@@ -8,10 +8,13 @@ composed into `combo` entries under a `nationality → division` tree) and the
 binary's.
 
 **Status: implemented and IDA-grilled for the parser/data model/editor bridge
-(2026-06-16).** `libs/avatars`, `NovaAvatarDatabase`, and the ONED Avatars
-workspace now implement the witnessed loader semantics below. The runtime
-combo -> spawned-player 3D model binding remains unwitnessed/open as
-**D-PLAYERINFO-1**.
+(2026-06-16); the full `PLAYER_INFO` screen runtime orchestration was grilled
+(read-only) on 2026-06-23** ahead of the runtime `player.mnu` host wiring.
+`libs/avatars`, `NovaAvatarDatabase`, and the ONED Avatars workspace implement
+the witnessed loader semantics below; the in-game menu population (a
+`PlayerInfoMenuHost` host) is the next phase and is now fully witnessed
+(D-PLAYERINFO-7..12). The runtime combo -> spawned-player 3D model binding
+remains unwitnessed/open as **D-PLAYERINFO-1**.
 
 ## Verdict table
 
@@ -22,6 +25,10 @@ combo -> spawned-player 3D model binding remains unwitnessed/open as
 | `PLAYER_INFO` menu consumption | **matching (read-only grill)** | `PlayerInfo_PopulateNationalityList @ 0x55d8c0`, `PlayerInfo_PopulateDivisionList @ 0x55da50`, `populate_avatar_combo_list @ 0x560210` decompiled; ONED editor exposes the same tree, alignment, and resolved-combo data but does not implement the in-game menu UI |
 | combo → spawned-player 3D model binding | **unwitnessed (time-boxed)** | consumer set identified but not traced — see **D-PLAYERINFO-1** follow-up |
 | second `AvatarDefs_Init` path (`@ 0x53d281`/`@ 0x53d2b4`) | **unwitnessed** | flagged follow-up; different buffer sizes, also parses `Avatars.def` |
+| `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade + team) | **matching (read-only grill, 2026-06-23)** | `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_PopulateAllControls @ 0x5606f0`, `PlayerInfo_RegisterAllControls @ 0x561470`, cascade handlers `@ 0x560600`/`@ 0x560690` decompiled; no reimpl yet — the `player.mnu` host wiring is the next phase (D-PLAYERINFO-7/8/12) |
+| Voice preview + PLAYERVOICE list | **matching (read-only grill, 2026-06-23)** | `PlayerInfo_PreviewVoice @ 0x55ff70` (`VOICE_%d` via `g_MenuSoundBank`), `PlayerInfo_HandleVoiceSelect @ 0x55fe00` decompiled (D-PLAYERINFO-10) |
+| ACCEPT commit + profile persistence | **matching (read-only grill, 2026-06-23)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; profile field offsets + selection-state globals pinned (D-PLAYERINFO-9/12) |
+| Loadout (PRIMARY/SECONDARY/ACCESSORY + `*_AMMO*` + weight) | **matching (read-only grill, 2026-06-23)** | `populate_weapon_slot_lists @ 0x560430`, weapon table `@ 0x2540D08`, class/team mask filter; ammo `@ 0x55e8b0` + weight `@ 0x55f480` anchored (D-PLAYERINFO-11; weapon.def/ammo.def port is a separate phase) |
 
 ## Load entry — witness map
 
@@ -213,6 +220,102 @@ So the menu reads the parsed object directly; the display vocabulary lives in th
 `"Avatars"` RTXT string table, keyed by the name fields, and the head/body
 display names form a "lastname - firstname" character label.
 
+## Screen orchestration — witness map (grilled 2026-06-23)
+
+The four populate functions above are driven by a per-screen init plus per-control
+change handlers, all registered under the `"PLAYER_INFO"` category. Controls are
+located by name through `[orig: sub_63AE80 @ 0x63ae80]` (find-widget:
+`sub_63AE80(scene, "PLAYER_INFO", "<CONTROL>")`, scene `= dword_2551100`); combo
+set-selected-index is `[orig: sub_645240 @ 0x645240]`, read-selected-value is
+`[orig: sub_644660 @ 0x644660]`.
+
+**Selection state** lives in a per-slot/per-team block of globals (NOT the
+profile), keyed `[67596*g_curProfileSlot + 32774*team]` (`g_curProfileSlot @
+0x25506B8` = active profile index): `g_charSelClass @ 0x2551130` (u8, class 5..9),
+`g_charSelNationality @ 0x2551131` (u8), `g_charSelDivision @ 0x2551132` (u8),
+`g_charSelCombo @ 0x2551134` (u16; also holds the per-character voice). The current
+profile object is `g_curPlayerProfile @ 0x25510FC = &profile[15488 *
+g_curProfileSlot]` (`profile @ 0x252de58`, 15488 B/entry; the array ends at
+`0x2540CDC`). See **D-PLAYERINFO-12**.
+
+- `[orig: PlayerInfo_InitProfileSelector @ 0x5611b0]` — screen show. Builds the
+  `PLAYER` profile combobox (`"<ProfileName> (<CharName>)"`; profile name via the
+  `"PROFILE_%d"`/`Profile %d` keys, `CS_NONAME` from the `"Menu"` table when
+  `profile+48 & 1`); selects the current profile; reads `SIDE_BLUE` (vtable+96 =
+  get-check) to derive the team; calls `PlayerInfo_PopulateAllControls(team)`; then
+  `update_player_info_weight_and_weapon_icons` and `j_SoundBank_OpenFile("menu.lwf",
+  &g_MenuSoundBank)` (the voice-preview bank `@ 0x25DC3E0`).
+- `[orig: PlayerInfo_PopulateAllControls @ 0x5606f0]` `(teamIndex)` — the
+  populate-everything pass, in order: `PlayerInfo_SetTeamAndClassMask(team)` →
+  OPTIONS_AUTORELOAD ← `profile+1524` → OPTIONS_AUTOMEDIC ← `profile+1660 == 0`
+  (inverted) → PLAYERCLASS sel ← `g_charSelClass` →
+  `PlayerInfo_PopulateNationalityList(team)` + NATIONALITY sel ←
+  `g_charSelNationality` → `PlayerInfo_PopulateDivisionList(nat, team)` + DIVISION
+  sel ← `g_charSelDivision` → `populate_avatar_combo_list()` + COMBO_LIST sel ←
+  `g_charSelCombo` → PLAYERNAME edit ← `profile+4` (vtable+76 = SetText) →
+  `populate_player_voice_combo(...)` → `populate_weapon_slot_lists()`.
+- `[orig: PlayerInfo_RegisterAllControls @ 0x561470]` — registers 28 PLAYER_INFO
+  controls, each `[orig: sub_63C060 @ 0x63c060](category, name, handler, …)`. Change
+  handlers route the selection-change notification (`0x5000001`, selected value in
+  `eventData+16`):
+  - `[orig: PlayerInfo_HandleNationalitySelect @ 0x560600]` — store
+    `g_charSelNationality`, reset `g_charSelDivision = 0`, repopulate division then
+    combo (the nat→div→combo **cascade**).
+  - `[orig: PlayerInfo_HandleDivisionSelect @ 0x560690]` — store `g_charSelDivision`,
+    repopulate combo.
+  - `[orig: PlayerInfo_HandleClassSelect @ 0x560910]` — store `g_charSelClass` (and
+    a mirror `@ 0x2559136`), re-`PlayerInfo_PopulateAllControls` (a class change
+    re-filters the loadout).
+  - `[orig: PlayerInfo_HandleProfileSelect @ 0x560960]` — on PLAYER combo change:
+    `save_player_info_from_dialog` (commit current), switch `g_curPlayerProfile`/
+    `g_curProfileSlot`, re-populate.
+  - `[orig: PlayerInfo_HandleVoiceSelect @ 0x55fe00]` — store voice into
+    `g_charSelCombo[…]`, rebuild PLAYERVOICE (DEFAULT_VOICE + per-character
+    `CHARVOICE_%d` from the voice-def table `@ 0x83C7AC`, stride 12, ending at
+    `ammoDef @ 0x83c830`).
+  - Team radios `SIDE_BLUE`/`SIDE_RED` re-run the populate for the new team via
+    `[orig: PlayerInfo_SaveAndRepopulate @ 0x5608f0]` (save → populate(team) →
+    weight); team `0 = blue/good`, `1 = red/evil` (consistent with D-PLAYERINFO-5).
+
+### Class → loadout filter mask (D-PLAYERINFO-8)
+`[orig: PlayerInfo_SetTeamAndClassMask @ 0x55de60]` `(team)` — sets the global
+`teamIndex` and maps the PLAYERCLASS byte (`g_charSelClass`, 5..9) to a
+power-of-two mask `g_playerInfoClassMask @ 0x25DC550` (5→1, 6→2, 7→4, 8→8, 9→16)
+plus `g_playerInfoTeamMask @ 0x25DC54C = 2 - (team != 0)`. Both gate the loadout.
+
+### Voice preview — TESTPLAYERVOICE (D-PLAYERINFO-10)
+`[orig: PlayerInfo_PreviewVoice @ 0x55ff70]` — on the click notification
+`0x3000001`, the voice index is the profile override `*(g_curPlayerProfile + team +
+1532)` when non-zero, else derived from the selected combo's avatar voice
+(`[orig: sub_57AE60 @ 0x57ae60](g_avatarDefs, g_charSelCombo[…])`); then
+`sprintf("VOICE_%d", idx)` → `[orig: SoundBank_FindTriggerAndPlay @ 0x75d010](key,
+params, &g_MenuSoundBank)` (params `[0]=0x10000, [2]=255`). The `menu.lwf` bank is
+loaded by the screen init.
+
+### ACCEPT / commit + persistence (D-PLAYERINFO-9)
+`[orig: save_player_info_from_dialog @ 0x55ee10]` reads each control back (combo
+value via `sub_644660`, checkbox via `[orig: sub_64ACB0 @ 0x64acb0]`):
+PLAYERCLASS → `g_charSelClass` for **both** teams (`side = 0, 32774`); NATIONALITY/
+DIVISION/COMBO_LIST → their `g_charSel*`; OPTIONS_AUTORELOAD → `profile+1524`;
+OPTIONS_AUTOMEDIC → `profile+1660 = (state == 0)` (inverted); PLAYERNAME →
+`profile+4` (char[16]; whitespace-only rejected via `iswspace`, clearing the name
+and setting `profile+52 |= 1`). Returns `[orig: serialize_weapon_loadout @
+0x55e4b0]` (persists the loadout). The live session reads the same selection
+globals via `[orig: apply_session_settings_to_globals @ 0x551500]`.
+
+### Loadout population (D-PLAYERINFO-11)
+`[orig: populate_weapon_slot_lists @ 0x560430]` fills PRIMARY/SECONDARY/ACCESSORY
+from the weapon table `@ 0x2540D08` (192 B/entry, ending at `0x254CC48`). A row
+shows only when `(entry+76 & g_playerInfoClassMask) != 0` **and**
+`(g_playerInfoTeamMask & entry+72) != 0`; it routes to PRIMARY/SECONDARY/ACCESSORY
+by `entry+68` (1/2/0); display name = `entry+0` (else the id at `entry-40`). A
+`"NONE"` row (`"Menu"`/`NONE`) is inserted at index 0 of each. It then calls
+`[orig: populate_weapon_accessory_ammo_ui @ 0x55e8b0]` (the `*_AMMO*` combos) and
+`[orig: update_player_info_weight_and_weapon_icons @ 0x55f480]` (the
+`STATIC_TOTAL_WEIGHT` budget + weapon icons; light/normal/heavy, sibling of
+`UI_UpdateWeaponWeightDisplay @ 0x565640`). The weapon/ammo source tables are the
+`weapon.def`/`ammo.def` data — porting that data path is a separate phase.
+
 ## Divergence / quirk catalog (D-PLAYERINFO)
 
 These are witnessed original behaviors a faithful port must reproduce; IDs are
@@ -226,6 +329,12 @@ stable.
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |
 | D-PLAYERINFO-5 | nationality list filtered by `alignment` vs `teamIndex` (good→0, evil→1) | the menu population is team-aware; the host port must reproduce the filter and order. |
 | D-PLAYERINFO-6 | `nationality`/`division` id token: `if (*idStr > '9') ++idStr;` then `atol` | a single leading non-digit character is skipped before parsing the numeric id. The reimpl parser must mirror this lenient id read. |
+| D-PLAYERINFO-7 | screen = init (`PlayerInfo_InitProfileSelector @ 0x5611b0`) → `PlayerInfo_PopulateAllControls(team)` + 28 per-control handlers registered via `sub_63C060`; the nat→div→combo cascade (`@ 0x560600`/`@ 0x560690`, notify `0x5000001`) repopulates dependents and **resets the division on a nationality change** | the host port reproduces the populate order and the cascade: selecting a nationality resets the division selection and refills division+combo; selecting a division refills combo. |
+| D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | the loadout list is filtered by `(weapon.classMask & playerClassMask)` and `(teamMask & weapon.teamMask)`; the port gates the loadout by selected class + team. |
+| D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55ee10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | the host commit mirrors this field map, the automedic inversion, and the name validation; selections live in per-slot/per-team globals, not the profile. |
+| D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's voice; PLAYERVOICE list = DEFAULT_VOICE + per-character `CHARVOICE_%d` | voice preview needs the `menu.lwf` bank + the `VOICE_%d` trigger; the voice list is avatar-derived (`PlayerInfo_HandleVoiceSelect @ 0x55fe00`). |
+| D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `entry+68` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480` | the loadout port reads `weapon.def`/`ammo.def` into this slot/mask/weight model — a separate subsystem (Phase 4), not required for avatar-list population. |
+| D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_charSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | the host keys avatar/loadout selection by (profile slot, team) and keeps it separate from the profile-level fields; the simplified single-profile host may collapse the slot dimension but must keep the team dimension (D-PLAYERINFO-5/7). |
 
 ## Implementation grill notes (2026-06-16)
 
@@ -248,6 +357,36 @@ The following axes are now pinned by native tests and surfaced through
 
 IDB changes made during this fix pass: none. The IDB remained read-only; proposed
 renames/types below still await maintainer approval.
+
+## IDB changes made (2026-06-23 orchestration grill)
+
+Applied to `Jointops.exe.kong.i64` (all auto-named, anchored; saved):
+
+- **Functions:** `sub_560690 → PlayerInfo_HandleDivisionSelect`,
+  `sub_560910 → PlayerInfo_HandleClassSelect`,
+  `sub_560960 → PlayerInfo_HandleProfileSelect`,
+  `sub_5608F0 → PlayerInfo_SaveAndRepopulate`,
+  `sub_55FF70 → PlayerInfo_PreviewVoice`,
+  `sub_55DE60 → PlayerInfo_SetTeamAndClassMask`.
+- **Globals:** `dword_25DC550 → g_playerInfoClassMask`,
+  `dword_25DC54C → g_playerInfoTeamMask`, `dword_25510FC → g_curPlayerProfile`,
+  `dword_25506B8 → g_curProfileSlot`, `byte_2551130 → g_charSelClass`,
+  `byte_2551131 → g_charSelNationality`, `byte_2551132 → g_charSelDivision`,
+  `word_2551134 → g_charSelCombo`.
+- Entry comments linking the eight orchestration functions to this record.
+
+Names already curated (used as-is): `PlayerInfo_PopulateAllControls @ 0x5606f0`,
+`PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_RegisterAllControls @
+0x561470`, `PlayerInfo_HandleNationalitySelect @ 0x560600`,
+`PlayerInfo_HandleVoiceSelect @ 0x55fe00`, `save_player_info_from_dialog @
+0x55ee10`, `populate_weapon_slot_lists @ 0x560430`,
+`update_player_info_weight_and_weapon_icons @ 0x55f480`.
+
+Still proposed (NOT applied — generic UI framework / struct declarations, propose
+first): rename `sub_63AE80 → UIScene_FindWidgetByName`, `sub_645240 →
+CListWnd_SetSelectedIndex`, `sub_644660 → CListWnd_GetSelectedValue`, `sub_63C060 →
+UI_RegisterScreenControlCallback`; declare the weapon-table struct `@ 0x2540D08`
+(192 B) and the player-profile struct (15488 B, fields `+4/+1524/+1532/+1660`).
 
 ## Follow-ups / open questions
 
