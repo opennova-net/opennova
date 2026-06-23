@@ -95,6 +95,22 @@ public:
 
 	std::vector<GameServerDispatch> tick(int elapsed_ms, uint32_t now_tick = 0);
 
+	// Per-session variant of tick(): drive ONE session's periodic emitter
+	// (the 0x10/0x0A/0x57 cadence). A listen-server host drives this only
+	// while the session is pre-Spawned, then stops the instant it reaches
+	// Spawned so NetSystem::emit_s2c can own that connection's per-frame 0x0A
+	// (otherwise the static-config tick 0x0A double-emits alongside the live
+	// one). Empty dispatch when the session is unknown or the runtime stopped.
+	GameServerDispatch tick_session(const std::string &session_id,
+	                                int elapsed_ms, uint32_t now_tick = 0);
+
+	// Read a session's live decode state — its phase and the joiner pose
+	// cached from the C2S 0x0C uplink (client_pos_*/heading/pitch). Returns
+	// nullptr when the session_id is unknown. Lets a host observe the
+	// handshake reach Spawned and recover the joiner's pose without a
+	// snapshot copy.
+	const GameSessionState *session_state(const std::string &session_id) const;
+
 	GameServerRuntimeSnapshot snapshot(const std::string &primary_session_id = "debug") const;
 
 private:

@@ -5,8 +5,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <utility>
+
+#include "netsim/connection.h"
 
 #include <mission/bms.h>
 #include <mission/mission_systems.h>
@@ -269,6 +272,14 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// (empty systems_, net == LocalSink), so this re-wires cleanly on every (re)load.
 	if (listen_server_ && net_ && net_sink_ && client_view_) {
 		world_->net = net_sink_.get();
+		// Reset the connection table to just the host's own loopback (connection 0);
+		// co-op peers re-handshake into fresh connections after each (re)load. This
+		// keeps the SP listen server byte-identical (one loopback connection) and
+		// drops any stale per-peer transports from a prior mission.
+		net_->clear_connections();
+		net_->add_connection(opennova::netsim::Connection{
+				loopback_.get(), opennova::netsim::TransportMode::Loopback, {}, 0});
+		remote_peers_.clear();
 		world_->add_system(net_.get());
 		client_view_->state() = opennova::netsim::ClientState{};
 		loopback_->clear();
@@ -304,6 +315,11 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
+	ClassDB::bind_method(D_METHOD("enable_host_listen", "port"), &NovaSimulation::enable_host_listen);
+	ClassDB::bind_method(D_METHOD("is_host_listening"), &NovaSimulation::is_host_listening);
+	ClassDB::bind_method(D_METHOD("get_host_listen_port"), &NovaSimulation::get_host_listen_port);
+	ClassDB::bind_method(D_METHOD("get_host_peer_count"), &NovaSimulation::get_host_peer_count);
+	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &NovaSimulation::admit_test_remote_peer);
 	ClassDB::bind_method(D_METHOD("spawn_local_player", "position", "yaw_deg", "team"), &NovaSimulation::spawn_local_player);
 	ClassDB::bind_method(D_METHOD("spawn_local_player_at_start"), &NovaSimulation::spawn_local_player_at_start);
 	ClassDB::bind_method(D_METHOD("has_local_player"), &NovaSimulation::has_local_player);
@@ -437,10 +453,12 @@ void NovaSimulation::step() {
 	if (!loaded_) return;
 	const uint64_t sim_start = perf_now_us();
 	apply_player_input_pre_tick(); // net-before-logic: player input -> body input
+	host_net_poll();          // co-op host: drain the socket + handshake/admit/route, before logic
 	world_->run_logic_tick(); // one logic tick: cache + WAC + BMS + AI, then ++logic_tick
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	const uint64_t net_start = perf_now_us();
 	net_tick(); // serialize + loopback-decode when the listen server is on (no-op otherwise)
+	host_net_flush();         // co-op host: advance handshakes + ship per-peer S2C (no-op otherwise)
 	last_net_tick_us_ = perf_now_us() - net_start;
 }
 
@@ -456,10 +474,12 @@ bool NovaSimulation::advance_frame() {
 	// the S2C emit + the local client's decode happen in net_tick(), after the logic.
 	const uint64_t sim_start = perf_now_us();
 	apply_player_input_pre_tick(); // input -> the local player's body input, before logic
+	host_net_poll();          // co-op host: poll socket -> handshake/admit/route, before logic
 	world_->run_logic_tick();
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	const uint64_t net_start = perf_now_us();
 	net_tick();
+	host_net_flush();         // co-op host: advance handshakes + ship per-peer S2C 0x0A
 	last_net_tick_us_ = perf_now_us() - net_start;
 	return true;
 }
@@ -1068,6 +1088,194 @@ void NovaSimulation::enable_listen_server(bool p_enable) {
 	if (!net_sink_) net_sink_ = std::make_unique<opennova::netsim::SerializingSink>(*loopback_);
 	if (!net_) net_ = std::make_unique<opennova::netsim::NetSystem>(*loopback_);
 	if (!client_view_) client_view_ = std::make_unique<opennova::netsim::NetClientView>();
+}
+
+bool NovaSimulation::enable_host_listen(int p_port) {
+	enable_listen_server(true); // the host's own client rides the loopback stack
+	if (pump_.is_null()) pump_.instantiate();
+	if (pump_->bind_listen(p_port) != 0) {
+		host_listen_ = false;
+		return false;
+	}
+	if (!accept_) accept_ = std::make_unique<opennova::HostSessionAccept>();
+	accept_->start();
+	host_listen_ = true;
+	return true;
+}
+
+int NovaSimulation::get_host_listen_port() const {
+	return (host_listen_ && pump_.is_valid()) ? pump_->local_port() : 0;
+}
+
+int NovaSimulation::get_host_peer_count() const {
+	return accept_ ? static_cast<int>(accept_->peer_count()) : 0;
+}
+
+opennova::PeerAddr NovaSimulation::peer_from_addr(const String &ip, int port) {
+	// "a.b.c.d" -> LE octet packing (a | b<<8 | c<<16 | d<<24), the ip_to_le
+	// convention PeerAddr uses (octet 0 in the low byte).
+	uint32_t packed = 0;
+	PackedStringArray parts = ip.split(".");
+	if (parts.size() == 4) {
+		packed = (static_cast<uint32_t>(parts[0].to_int() & 0xFF)) |
+		         (static_cast<uint32_t>(parts[1].to_int() & 0xFF) << 8) |
+		         (static_cast<uint32_t>(parts[2].to_int() & 0xFF) << 16) |
+		         (static_cast<uint32_t>(parts[3].to_int() & 0xFF) << 24);
+	}
+	return opennova::PeerAddr{packed, static_cast<uint16_t>(port)};
+}
+
+void NovaSimulation::send_datagram(const opennova::PeerAddr &peer,
+                                   const std::vector<uint8_t> &dg) {
+	if (pump_.is_null() || dg.empty()) return;
+	char ipbuf[32];
+	std::snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u",
+	              peer.ip & 0xFFu, (peer.ip >> 8) & 0xFFu,
+	              (peer.ip >> 16) & 0xFFu, (peer.ip >> 24) & 0xFFu);
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(dg.size()));
+	std::memcpy(bytes.ptrw(), dg.data(), dg.size());
+	pump_->send_to(String(ipbuf), static_cast<int>(peer.port), bytes);
+}
+
+opennova::world::PlayerSpawn NovaSimulation::spawn_from_pose(
+		const opennova::HostJoinerPose &pose) const {
+	opennova::world::PlayerSpawn spawn;
+	// Pose position is mission i32 16.16; PlayerSpawn.position is float mission units.
+	spawn.position = {static_cast<float>(pose.pos_x / kFixed16),
+	                  static_cast<float>(pose.pos_y / kFixed16),
+	                  static_cast<float>(pose.pos_z / kFixed16)};
+	// Heading is the joiner's wire heading (i16, sign-ext << 16 = 32-bit BAM); the
+	// spawn yaw is mission degrees (90 - heading), the same convention as the host
+	// player's spawn and apply_player_intent.
+	const int32_t heading_bam = static_cast<int32_t>(pose.heading) << 16;
+	spawn.yaw = static_cast<int16_t>(
+			std::lround(opennova::world::mission_yaw_deg_from_bam_heading(heading_bam)));
+	spawn.team = pose.team;
+	return spawn;
+}
+
+opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
+		const opennova::PeerAddr &peer, const opennova::HostJoinerPose &pose) {
+	if (!net_ || !world_) return {};
+	auto it = remote_peers_.find(peer);
+	if (it == remote_peers_.end()) {
+		RemotePeer fresh;
+		fresh.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
+				opennova::netsim::UdpSessionTransport::Role::Host);
+		const opennova::netsim::Connection conn{fresh.transport.get(),
+				opennova::netsim::TransportMode::Client, {}, 0};
+		fresh.conn_index = net_->add_connection(conn);
+		it = remote_peers_.emplace(peer, std::move(fresh)).first;
+	}
+	RemotePeer &rp = it->second;
+	if (rp.admitted) return net_->connection(rp.conn_index).owned_entity;
+	opennova::world::PlayerSpawn spawn = spawn_from_pose(pose);
+	spawn.net_id = next_joiner_net_id_++; // distinct SSN per joiner (host is 0xFFF0)
+	const opennova::world::EntityHandle h = net_->admit_peer(*world_, rp.conn_index, spawn);
+	rp.admitted = h.valid();
+	return h;
+}
+
+void NovaSimulation::host_net_poll() {
+	if (!host_listen_ || pump_.is_null() || !accept_ || !net_ || !world_) return;
+	pump_->poll();
+	while (pump_->has_inbound()) {
+		const Dictionary d = pump_->take_inbound();
+		const String ip = d.get("ip", String());
+		const int port = d.get("port", 0);
+		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+		const opennova::PeerAddr peer = peer_from_addr(ip, port);
+
+		opennova::HostSessionAccept::HandleResult r = accept_->handle_datagram(
+				peer, bytes.ptr(), static_cast<size_t>(bytes.size()), net_frame_counter_);
+		for (const std::vector<uint8_t> &dg : r.outbound) {
+			send_datagram(peer, dg);
+		}
+		for (const opennova::HostAcceptEvent &ev : r.events) {
+			switch (ev.kind) {
+				case opennova::HostAcceptEvent::Kind::PeerSpawned:
+					admit_remote_peer(peer, ev.pose);
+					break;
+				case opennova::HostAcceptEvent::Kind::PeerC2SInMatch: {
+					auto rp = remote_peers_.find(peer);
+					if (rp != remote_peers_.end() && rp->second.transport) {
+						for (const opennova::ProtocolMessage &m : ev.in_match_c2s) {
+							// Identity-reframe [tag][payload] into the transport inbound
+							// FIFO so NetSystem::tick's host_recv drains it next tick.
+							std::vector<uint8_t> framed;
+							framed.reserve(1 + m.payload.size());
+							framed.push_back(m.tag);
+							framed.insert(framed.end(), m.payload.begin(), m.payload.end());
+							rp->second.transport->push_inbound(framed);
+						}
+					}
+					break;
+				}
+				case opennova::HostAcceptEvent::Kind::PeerGoodbye: {
+					auto rp = remote_peers_.find(peer);
+					if (rp != remote_peers_.end()) {
+						// Retire the connection in place (nulled transport is skipped by
+						// emit_s2c/tick) before destroying the transport it points at.
+						if (rp->second.conn_index < net_->connection_count()) {
+							net_->connection(rp->second.conn_index).transport = nullptr;
+							net_->connection(rp->second.conn_index).owned_entity = {};
+						}
+						remote_peers_.erase(rp);
+					}
+					break;
+				}
+				case opennova::HostAcceptEvent::Kind::PeerHandshakeAdvanced:
+				default:
+					break;
+			}
+		}
+	}
+	++net_frame_counter_;
+}
+
+void NovaSimulation::host_net_flush() {
+	if (!host_listen_ || pump_.is_null() || !accept_ || !net_) return;
+	// Advance the handshake for pre-Spawned peers (drives GameSession::tick so the
+	// spawn gate opens) and ship their replies. ~16ms per host frame.
+	for (opennova::HostSessionAccept::TickOut &t : accept_->tick_handshakes(16, net_frame_counter_)) {
+		for (const std::vector<uint8_t> &dg : t.outbound) {
+			send_datagram(t.peer, dg);
+		}
+	}
+	// Ship each admitted peer's per-frame S2C 0x0A (staged by emit_s2c into its
+	// transport's outbound FIFO) as a framed SESSION datagram.
+	for (auto &kv : remote_peers_) {
+		RemotePeer &rp = kv.second;
+		if (!rp.admitted || !rp.transport) continue;
+		std::vector<uint8_t> raw;
+		while (rp.transport->pop_outbound(raw)) {
+			if (raw.empty()) continue;
+			const uint8_t tag = raw[0];
+			const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
+			std::vector<uint8_t> dg;
+			if (accept_->frame_in_match_s2c(kv.first, tag, body, dg)) {
+				send_datagram(kv.first, dg);
+			}
+		}
+	}
+}
+
+bool NovaSimulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
+	if (!host_listen_ || !net_ || !world_) return false;
+	opennova::HostJoinerPose pose;
+	pose.pos_valid = true;
+	// Godot (x,y,z) -> mission (x,-z,y) -> i32 16.16, the inverse of the present remap.
+	pose.pos_x = static_cast<int32_t>(std::lround(static_cast<double>(p_position.x) * kFixed16));
+	pose.pos_y = static_cast<int32_t>(std::lround(static_cast<double>(-p_position.z) * kFixed16));
+	pose.pos_z = static_cast<int32_t>(std::lround(static_cast<double>(p_position.y) * kFixed16));
+	const int32_t bam = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
+	pose.heading = static_cast<int16_t>(bam >> 16);
+	pose.team = static_cast<uint8_t>(p_team);
+	// A synthetic loopback peer; distinct port per call so repeated admits don't alias.
+	const opennova::PeerAddr peer{0x0100007Fu,
+			static_cast<uint16_t>(40000 + remote_peers_.size())};
+	return admit_remote_peer(peer, pose).valid();
 }
 
 opennova::PlayerReplicationState NovaSimulation::compute_net_anchor() const {

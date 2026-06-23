@@ -32,6 +32,13 @@
 #include "netsim/net_client_view.h"
 #include "netsim/net_system.h"
 #include "netsim/serializing_sink.h"
+#include "netsim/udp_session_transport.h"
+
+#include <novaworld/connection/registry.h>   // PeerAddr / PeerAddrHash
+#include <novaworld/host_session_accept.h>
+#include "network/nova_udp_pump.h"
+
+#include <unordered_map>
 
 namespace godot {
 
@@ -121,6 +128,39 @@ private:
 	uint64_t last_net_tick_us_ = 0;
 	mutable uint64_t last_present_snapshot_us_ = 0;
 	mutable int last_present_entity_count_ = 0;
+
+	// --- co-op LAN host (Increment C). The listen server above replicates the
+	// live World over an in-process loopback; this layer adds a real UDP socket
+	// (NovaUdpPump) + the witnessed session handshake (HostSessionAccept) so a
+	// remote joiner connects, completes the handshake against the live World,
+	// and on reaching Spawned is admitted as a pool-0 player + bound to a netsim
+	// connection. OFF by default — enable_host_listen turns it on (it implies the
+	// listen server) and the SP/editor path is untouched. Sockets live here, the
+	// protocol/crypto in libs (ADR 0010).
+	bool host_listen_ = false;
+	Ref<NovaUdpPump> pump_;
+	std::unique_ptr<opennova::HostSessionAccept> accept_;
+	struct RemotePeer {
+		std::unique_ptr<opennova::netsim::UdpSessionTransport> transport;
+		std::size_t conn_index = 0;
+		bool admitted = false;
+	};
+	std::unordered_map<opennova::PeerAddr, RemotePeer, opennova::PeerAddrHash> remote_peers_;
+	uint32_t net_frame_counter_ = 0;   // monotonic now_tick fed to the handshake driver
+	uint16_t next_joiner_net_id_ = 0xFFF1; // joiner SSNs, distinct from the host's 0xFFF0
+	// Top-of-frame: drain the socket, run each datagram through the accept
+	// component, admit spawned peers + route their in-match C2S. Before logic.
+	void host_net_poll();
+	// Post-emit: advance pre-Spawned peers' handshakes + ship each admitted
+	// peer's per-frame S2C 0x0A (from emit_s2c) as a framed SESSION datagram.
+	void host_net_flush();
+	// Spawn + bind a joiner to a fresh connection (the PeerSpawned reaction,
+	// shared with the test hook). Idempotent per peer.
+	opennova::world::EntityHandle admit_remote_peer(const opennova::PeerAddr &peer,
+	                                                const opennova::HostJoinerPose &pose);
+	opennova::world::PlayerSpawn spawn_from_pose(const opennova::HostJoinerPose &pose) const;
+	void send_datagram(const opennova::PeerAddr &peer, const std::vector<uint8_t> &dg);
+	static opennova::PeerAddr peer_from_addr(const String &ip, int port);
 	// The per-frame 0x0A anchor: the local player's world position, or (Phase 1, no
 	// player yet) the first replicated entity, so compressed deltas stay small.
 	opennova::PlayerReplicationState compute_net_anchor() const;
@@ -188,6 +228,23 @@ public:
 	// direct AI-pool present (the editor default).
 	void enable_listen_server(bool p_enable);
 	bool is_listen_server() const { return listen_server_; }
+
+	// --- co-op LAN host (Increment C) ------------------------------------
+	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port`
+	// (0 = an OS-assigned ephemeral port) and accept joiners through the
+	// witnessed session handshake, spawning each into the live World on join.
+	// Implies enable_listen_server(true) — call BEFORE loading a mission.
+	// Returns false if the socket can't bind.
+	bool enable_host_listen(int p_port);
+	bool is_host_listening() const { return host_listen_; }
+	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
+	int get_host_peer_count() const;   // joiners in handshake or admitted
+	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space
+	// position, exercising the admit_peer + connection wiring without a live
+	// socket handshake (the handshake itself is unit-tested in libs —
+	// tests/novaworld/host_session_accept_test). Returns true if an entity was
+	// spawned + bound. No-op unless host listening is on.
+	bool admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team);
 
 	// --- the local player (ADR 0012; net-re §5.2b/§5.38) -------------------
 	// Spawn the host's own player as an authoritative pool-0 entity at a Godot-space position

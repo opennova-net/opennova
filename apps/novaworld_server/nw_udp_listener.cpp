@@ -10,6 +10,7 @@
 #include <novaworld/db/sqlite.h>
 #include <novaworld/host_repository.h>
 #include <novaworld/lobby_session.h>
+#include <novaworld/nw_session_framing.h>
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
@@ -62,38 +63,10 @@ uint32_t ip_to_le(const std::array<uint8_t, 4> &ip) {
 	     | (uint32_t(ip[3]) << 24);
 }
 
-// 61-char SCRK matching retail captures (notes/retail_capture_findings.md:36-37,62:
-// ClientAuth and ServerAuth SCRK are both 61 chars; "SCRK = 61-byte ASCII key"):
-//   chars = string.ascii_uppercase + string.digits  (36 char alphabet)
-//   length = 61
-// Retail's example value:
-//   "FZJK23NP67STBCXYGH01LM45QR89VWDFZJK23NP67STBCXYGH01LM45QR89VW"  (61 chars)
-// — two 30-char halves joined by one char; we don't replicate that structure
-// explicitly (random is fine), only the length + alphabet. We previously emitted
-// 62, diverging from every capture.
-static constexpr int kDevScrkLength = 61;
-std::string make_dev_scrk() {
-	static constexpr char alphabet[] =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	std::uniform_int_distribution<int> pick(0, 35);
-	std::string out;
-	out.reserve(kDevScrkLength);
-	for (int i = 0; i < kDevScrkLength; ++i) {
-		out.push_back(alphabet[pick(gen)]);
-	}
-	return out;
-}
-
-// Per-connection server SK. Retail's ServerAuth.SK is unique per session
-// (notes/retail_capture_decoded.txt:100-105 shows 0xe99a7b8c then 0x9586a7f8
-// for two consecutive captures). We were using a hardcoded 0xC0FFEE00 for
-// every connection — fine until two clients connect at once and outside
-// observers can't tell sessions apart.
-uint32_t make_random_u32() {
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	return std::uniform_int_distribution<uint32_t>{}(gen);
-}
+// make_dev_scrk / make_dev_nwuid / make_random_session_u32 and the NW-UDP
+// envelope transform (nw_decode_inbound / nw_encode_outbound) moved to
+// libs/novaworld nw_session_framing.h so the standalone server's lobby path and
+// the consolidated HostSessionAccept share exactly one definition.
 
 struct MaintenanceStatus {
 	bool enabled = false;
@@ -139,66 +112,6 @@ NapiMessage make_server_verify_failure(const std::string &message) {
 	return reply;
 }
 
-// 60-char lowercase hex NWUID (retail format). Retail's exact pattern is
-// undocumented; what we know from notes/retail_capture_findings.md is the
-// length (~60) and that it's hex-looking. Random per-session is sufficient.
-std::string make_dev_nwuid() {
-	static constexpr char hex[] = "0123456789abcdef";
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	std::uniform_int_distribution<int> pick(0, 15);
-	std::string out;
-	out.reserve(60);
-	for (int i = 0; i < 60; ++i) {
-		out.push_back(hex[pick(gen)]);
-	}
-	return out;
-}
-
-// Decode an inbound NW-UDP datagram in place. On success, populates
-// `opcode` (byte 0 of the CRC-stripped packet, plaintext) and `body`
-// (the NWU-decrypted payload after byte 0).
-bool decode_inbound(const uint8_t *raw, size_t raw_len,
-                    uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
-	std::vector<uint8_t> stripped(raw_len);
-	size_t out_size = 0;
-	if (napi_envelope_decode(raw, raw_len, stripped.data(), stripped.size(),
-	                         &out_size) != 0) {
-		return false;
-	}
-	stripped.resize(out_size);
-	if (stripped.empty()) return false;
-
-	opcode_out = stripped[0];
-	body_out.assign(stripped.begin() + 1, stripped.end());
-	// Names swapped vs onnet — server-side decrypt is our nwu_encrypt.
-	if (!body_out.empty()) {
-		nwu_encrypt(body_out.data(), body_out.size(), SESSION_NWU_KEY);
-	}
-	return true;
-}
-
-// Encode an outbound reply: prepend `opcode`, NWU-encrypt the body part
-// (server-side encrypt is our nwu_decrypt), then NAPI envelope-wrap.
-std::vector<uint8_t> encode_outbound(uint8_t opcode,
-                                     std::vector<uint8_t> body) {
-	if (!body.empty()) {
-		nwu_decrypt(body.data(), body.size(), SESSION_NWU_KEY);
-	}
-	std::vector<uint8_t> with_opcode;
-	with_opcode.reserve(1 + body.size());
-	with_opcode.push_back(opcode);
-	with_opcode.insert(with_opcode.end(), body.begin(), body.end());
-
-	std::vector<uint8_t> packet(with_opcode.size() + 4);
-	size_t out_size = 0;
-	if (napi_envelope_encode(with_opcode.data(), with_opcode.size(),
-	                         packet.data(), packet.size(), &out_size) != 0) {
-		return {};
-	}
-	packet.resize(out_size);
-	return packet;
-}
-
 } // namespace
 
 NwUdpListener::NwUdpListener(ConnectionManager &manager) : manager_(manager) {}
@@ -224,7 +137,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	bound_port_ = config.nw_udp_port;
 
 	stop_requested_.store(false);
-	game_runtime_.start();
+	accept_.start();
 	running_.store(true);
 	worker_ = std::thread([this] { run_loop(); });
 	std::printf("[nwudp] listening on UDP :%u\n",
@@ -235,7 +148,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 void NwUdpListener::stop() {
 	stop_requested_.store(true);
 	if (worker_.joinable()) worker_.join();
-	game_runtime_.stop();
+	accept_.stop();
 	running_.store(false);
 }
 
@@ -301,7 +214,7 @@ void NwUdpListener::run_loop() {
 	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
 	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[nwudp] re-bind failed; aborting loop\n");
-		game_runtime_.stop();
+		accept_.stop();
 		running_.store(false);
 		return;
 	}
@@ -315,7 +228,7 @@ void NwUdpListener::run_loop() {
 
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
-		if (!decode_inbound(rx, static_cast<size_t>(n), opcode, body)) {
+		if (!nw_decode_inbound(rx, static_cast<size_t>(n), opcode, body)) {
 			std::fprintf(stderr, "[nwudp] %s:%u — bad envelope (%d bytes)\n",
 			             opennova::net::endpoint_to_string(from).c_str(),
 			             from.port, n);
@@ -330,6 +243,35 @@ void NwUdpListener::run_loop() {
 		std::snprintf(ip_only_buf, sizeof(ip_only_buf), "%u.%u.%u.%u",
 		              from.ip[0], from.ip[1], from.ip[2], from.ip[3]);
 		const std::string client_ip_str = ip_only_buf;
+
+		// JointOperations in-match join → the consolidated HostSessionAccept
+		// (the same accept the in-engine listen server drives). PN is learned at
+		// HELLO; thereafter route 0x42/0x43/0x46 by membership so the lobby
+		// (NOVAWORLDUDP) container path below only ever sees lobby peers. The
+		// component owns these peers' handshake/SCRK state + GameServerRuntime;
+		// it has no World here, so its spawn/in-match events are ignored — the
+		// standalone server is a session responder, not a live-sim host.
+		bool route_jo = jo_peers_.count(peer) != 0;
+		if (opcode == SESSION_OPCODE_CLIENT_HELLO) {
+			ClientHello probe;
+			if (parse_client_hello(body.data(), body.size(), probe) &&
+			    classify_session_protocol(probe.pn) ==
+			            SessionProtocolKind::JointOperations) {
+				route_jo = true;
+				jo_peers_.insert(peer);
+			}
+		}
+		if (route_jo) {
+			manager_.notify_seen_addr(peer, now_ms());
+			auto result = accept_.handle_datagram(
+			        peer, rx, static_cast<size_t>(n),
+			        static_cast<uint32_t>(now_ms() & 0xFFFFFFFFu));
+			for (const auto &dg : result.outbound) {
+				opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
+			}
+			if (opcode == SESSION_OPCODE_CLIENT_GOODBYE) jo_peers_.erase(peer);
+			continue;
+		}
 
 		switch (opcode) {
 		case SESSION_OPCODE_CLIENT_HELLO: {
@@ -360,8 +302,8 @@ void NwUdpListener::run_loop() {
 
 			ServerHello reply = build_server_hello(hello, client_ip_net,
 			                                       client_port);
-			auto packet = encode_outbound(SESSION_OPCODE_SERVER_HELLO,
-			                              server_hello_to_bytes(reply));
+			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO,
+			                                 server_hello_to_bytes(reply));
 			opennova::net::udp_send_to(socket.get(), from, packet.data(),
 			                           packet.size());
 			std::printf("[nwudp] HELLO from %s ci=0x%08x pn=%s -> ServerHello (%zu B)\n",
@@ -408,7 +350,7 @@ void NwUdpListener::run_loop() {
 			// Keyed by PeerAddr (G.7): two retail processes both send
 			// ci=0x00000001, so keying by ci would have the second AUTH
 			// overwrite the first's per-connection state.
-			const uint32_t server_sk = make_random_u32();
+			const uint32_t server_sk = make_random_session_u32();
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				auto &state = lobby_states_[peer];
@@ -422,8 +364,8 @@ void NwUdpListener::run_loop() {
 			                                     /*novaworld_name=*/"NWServer",
 			                                     /*novaworld_web_url=*/"http://127.0.0.1:8080",
 			                                     /*nwuid=*/nwuid);
-			auto packet = encode_outbound(SESSION_OPCODE_SERVER_AUTH,
-			                              server_auth_to_bytes(reply));
+			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
+			                                 server_auth_to_bytes(reply));
 			opennova::net::udp_send_to(socket.get(), from, packet.data(),
 			                           packet.size());
 			std::printf("[nwudp] AUTH from %s ci=0x%08x na='%s' -> ServerAuth (%zu B)\n",
@@ -471,25 +413,10 @@ void NwUdpListener::run_loop() {
 
 			std::vector<ProtocolMessage> replies;
 			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->pn);
-			if (protocol == SessionProtocolKind::JointOperations) {
-				for (const auto &pm : messages) {
-					std::printf("[nwudp]     pm flags=0x%02x tag=0x%03x len=%u settings=%d frag_cont=%d frag_end=%d\n",
-					            pm.flags.raw, pm.full_tag, pm.length,
-					            pm.flags.settings_update ? 1 : 0,
-					            pm.flags.frag_cont ? 1 : 0,
-					            pm.flags.frag_end ? 1 : 0);
-				}
-				SessionProtocolDispatchResult result =
-					dispatch_in_match_session_messages(protocol, game_runtime_,
-					                                   client_label, messages,
-					                                   static_cast<uint32_t>(now_ms() & 0xFFFFFFFFu));
-				replies = std::move(result.replies);
-				if (!result.label.empty()) {
-					std::printf("[nwudp] %s SESSION game=%s -> %zu replies\n",
-					            client_label.c_str(), result.label.c_str(),
-					            replies.size());
-				}
-			} else if (protocol == SessionProtocolKind::Lobby) {
+			// JointOperations peers are routed to HostSessionAccept above and
+			// never reach this switch — only the lobby (NOVAWORLDUDP) container
+			// path and unsupported PNs land here.
+			if (protocol == SessionProtocolKind::Lobby) {
 				for (const auto &pm : messages) {
 					std::printf("[nwudp]     pm flags=0x%02x tag=0x%03x len=%u settings=%d frag_cont=%d frag_end=%d\n",
 					            pm.flags.raw, pm.full_tag, pm.length,
@@ -622,8 +549,8 @@ void NwUdpListener::run_loop() {
 			}
 			std::printf("[nwudp]   sending %zu reply byte(s) (server_scrk=%zuB)\n",
 			            body_out.size(), conn_opt->server_scrk.size());
-			auto packet = encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
-			                              std::move(body_out));
+			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+			                                 std::move(body_out));
 			opennova::net::udp_send_to(socket.get(), from, packet.data(), packet.size());
 			break;
 		}

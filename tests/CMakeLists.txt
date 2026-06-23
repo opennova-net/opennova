@@ -963,6 +963,11 @@ target_link_libraries(session_protocol_test PRIVATE opennova_novaworld)
 target_include_directories(session_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME session_protocol COMMAND session_protocol_test)
 
+add_executable(host_session_accept_test novaworld/host_session_accept_test.cpp)
+target_link_libraries(host_session_accept_test PRIVATE opennova_novaworld)
+target_include_directories(host_session_accept_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME host_session_accept COMMAND host_session_accept_test)
+
 add_executable(replication_min_test novaworld/replication_min_test.cpp)
 target_link_libraries(replication_min_test PRIVATE opennova_novaworld)
 target_include_directories(replication_min_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -115,6 +115,34 @@ std::vector<GameServerDispatch> GameServerRuntime::tick(int elapsed_ms, uint32_t
 	return dispatches;
 }
 
+GameServerDispatch GameServerRuntime::tick_session(const std::string &session_id,
+                                                   int elapsed_ms, uint32_t now_tick) {
+	GameServerDispatch dispatch;
+	dispatch.session_id = session_id;
+	if (!running_) {
+		dispatch.label = "game server stopped";
+		return dispatch;
+	}
+	auto it = sessions_.find(session_id);
+	if (it == sessions_.end()) {
+		dispatch.label = "no such session";
+		return dispatch;
+	}
+	GameSessionDispatchResult result =
+			session_.tick(it->second, std::max(0, elapsed_ms), resolve_tick(now_tick));
+	dispatch.replies = std::move(result.replies);
+	dispatch.label = std::move(result.label);
+	messages_tx_ += dispatch.replies.size();
+	last_event_ = dispatch.label;
+	last_reply_count_ = static_cast<int>(dispatch.replies.size());
+	return dispatch;
+}
+
+const GameSessionState *GameServerRuntime::session_state(const std::string &session_id) const {
+	auto it = sessions_.find(session_id);
+	return it == sessions_.end() ? nullptr : &it->second;
+}
+
 GameServerRuntimeSnapshot GameServerRuntime::snapshot(const std::string &primary_session_id) const {
 	GameServerRuntimeSnapshot out;
 	out.running = running_;

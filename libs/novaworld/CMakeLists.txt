@@ -5,6 +5,8 @@ add_library(opennova_novaworld STATIC
     src/lobby_update.cpp
     src/session_hello.cpp
     src/session_protocol.cpp
+    src/nw_session_framing.cpp
+    src/host_session_accept.cpp
     src/protocol_message.cpp
     src/client_session.cpp
     src/game_session.cpp

@@ -5,9 +5,10 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
-#include <novaworld/game_server_runtime.h>
+#include <novaworld/host_session_accept.h>
 #include <novaworld/lobby_session.h>
 #include <novaworld/protocol_message.h>
 
@@ -121,7 +122,14 @@ private:
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
-	GameServerRuntime game_runtime_;
+	// JointOperations in-match join: the consolidated host-accept component
+	// (the same one NovaSimulation's listen server drives). It owns the JO
+	// peers' handshake/SCRK state + the GameServerRuntime; the lobby
+	// (NOVAWORLDUDP) container path below is independent. `jo_peers_` tracks
+	// which peers classified as JointOperations at HELLO so 0x42/0x43/0x46
+	// route to the component without re-parsing PN each datagram.
+	HostSessionAccept accept_;
+	std::unordered_set<PeerAddr, PeerAddrHash> jo_peers_;
 	mutable std::mutex lobby_states_mu_;
 	std::unordered_map<PeerAddr, LobbyConnState, PeerAddrHash> lobby_states_;
 	opennova::db::Database *db_ = nullptr;

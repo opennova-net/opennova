@@ -57,8 +57,15 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# Playable hosts turn the sim into the SP in-process listen server BEFORE load
 	# (NetSystem registers ahead of WAC, ADR 0011), then spawn the host player after load.
+	# A co-op LAN host additionally binds a real UDP socket and accepts joiners through
+	# the witnessed handshake (enable_host_listen implies the listen server).
 	var playable := bool(options.get("playable", false))
-	if playable or options.get("listen_server", false):
+	if String(options.get("net_transport", "")) == "lan":
+		var bind_port := int(options.get("bind_port", 17479))
+		if not _sim.enable_host_listen(bind_port):
+			push_warning("MissionRuntime: could not bind co-op LAN host port %d — falling back to local listen server." % bind_port)
+			_sim.enable_listen_server(true)
+	elif playable or options.get("listen_server", false):
 		_sim.enable_listen_server(true)
 	if options.get("resource_root") != null and options.get("item_db") != null:
 		_sim.set_item_seat_specs(_build_item_seat_specs(mission, options["resource_root"], options["item_db"]))

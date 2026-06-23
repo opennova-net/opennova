@@ -191,6 +191,7 @@ func _read_host_config() -> Dictionary:
 		"game_type_raw": _spin_value("GAME_TYPE", ""),  # the spinlist choice, for later
 		"channel": "LAN",
 		"net_transport": "lan",
+		"bind_port": 17479,                        # default co-op LAN host UDP port
 	}
 
 
