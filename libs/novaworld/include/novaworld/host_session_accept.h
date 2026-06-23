@@ -49,6 +49,10 @@ struct HostAcceptEvent {
 	Kind kind = Kind::PeerHandshakeAdvanced;
 	PeerAddr peer;
 	HostJoinerPose pose;                       // valid when kind == PeerSpawned
+	std::string peer_name;                     // valid when kind == PeerSpawned: the
+	                                           // joiner's ClientHello.co (player name),
+	                                           // streamed back as the S2C 0x0C organic
+	                                           // entity_name so the joiner name-matches.
 	std::vector<ProtocolMessage> in_match_c2s; // valid when kind == PeerC2SInMatch
 };
 
@@ -96,6 +100,8 @@ public:
 private:
 	struct PeerState {
 		std::string pn;             // ClientHello.pn — drives classify_session_protocol
+		std::string player_name;    // ClientHello.co — the joiner's player name, echoed
+		                            // into the organic-spawn 0x0C for the name-match (D.0)
 		std::string client_scrk;    // ClientAuth.scrk — decrypts inbound 0x43
 		std::string server_scrk;    // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 		uint32_t client_ck = 0;     // ClientAuth.ck → session_id on our S2C

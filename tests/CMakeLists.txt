@@ -968,6 +968,16 @@ target_link_libraries(host_session_accept_test PRIVATE opennova_novaworld)
 target_include_directories(host_session_accept_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME host_session_accept COMMAND host_session_accept_test)
 
+# JOINER co-op join (D.1): the client mirror of HostSessionAccept driven in-process
+# against a REAL HostSessionAccept; name-match self-id (organic 0x0C) -> wire handle H
+# -> C2S 0x0C uplink -> PeerC2SInMatch -> NetSystem apply_player_intent SNAP. Links
+# opennova_netsim (transitively pulls opennova_world + opennova_novaworld) for the
+# phase-6 receive-apply.
+add_executable(joiner_session_test novaworld/joiner_session_test.cpp)
+target_link_libraries(joiner_session_test PRIVATE opennova_netsim)
+target_include_directories(joiner_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME joiner_session COMMAND joiner_session_test)
+
 add_executable(replication_min_test novaworld/replication_min_test.cpp)
 target_link_libraries(replication_min_test PRIVATE opennova_novaworld)
 target_include_directories(replication_min_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1287,3 +1297,7 @@ add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
 add_executable(netsim_two_peer_fanout_test netsim/two_peer_fanout_test.cpp)
 target_link_libraries(netsim_two_peer_fanout_test PRIVATE opennova_netsim)
 add_test(NAME netsim_two_peer_fanout COMMAND netsim_two_peer_fanout_test)
+
+add_executable(netsim_build_player_uplink_test netsim/build_player_uplink_test.cpp)
+target_link_libraries(netsim_build_player_uplink_test PRIVATE opennova_netsim)
+add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test)

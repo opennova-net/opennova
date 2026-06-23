@@ -92,6 +92,8 @@ HostSessionAccept::HandleResult HostSessionAccept::handle_datagram(
 		}
 		PeerState &st = peers_[peer];
 		st.pn = hello.pn;
+		st.player_name = hello.co; // the joiner's player name (CO is free/unvalidated);
+		                           // streamed back in the organic-spawn 0x0C name-match
 		st.session_id = peer_session_id(peer);
 		// client_ip_net: the builders take the IP as the four payload octets in
 		// LE packing (so retail's positional TLV reader prints a.b.c.d) — pass
@@ -164,6 +166,7 @@ HostSessionAccept::HandleResult HostSessionAccept::handle_datagram(
 			ev.kind = HostAcceptEvent::Kind::PeerSpawned;
 			ev.peer = peer;
 			ev.pose = pose_from_session(*gss);
+			ev.peer_name = st.player_name; // for the joiner-side name-match (D.0)
 			out.events.push_back(std::move(ev));
 		}
 

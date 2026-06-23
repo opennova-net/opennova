@@ -133,4 +133,22 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	return true;
 }
 
+PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::AiEntity &ae) {
+	PlayerExtendedUplink up; // wire defaults: vehicle_handle 0xFFFF, all counters 0
+	up.vehicle_handle = 0xFFFFu; // on foot (mounted vehicle-local transform deferred)
+	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
+	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
+	// (the exact inverse of apply_player_intent's `intent.heading << 16`). [orig: case 4
+	// @0x4c1da6/@0x4c1dca + the live +4/+8/+0xC pos store.]
+	up.pos_x = ae.pos[0];
+	up.pos_y = ae.pos[1];
+	up.pos_z = ae.pos[2];
+	up.heading = static_cast<int16_t>(ae.heading >> 16);
+	up.pitch = static_cast<int16_t>(ae.pitch >> 16);
+	// Cosmetic anim byte (entity+0x12C low) — the host read-apply does not consume it; carried
+	// for fidelity. -1 (no slot) maps to 0.
+	up.anim_slot_low = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
+	return up;
+}
+
 } // namespace opennova::netsim

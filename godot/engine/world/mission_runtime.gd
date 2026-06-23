@@ -61,7 +61,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# the witnessed handshake (enable_host_listen implies the listen server).
 	var playable := bool(options.get("playable", false))
 	if String(options.get("net_transport", "")) == "lan":
-		var bind_port := int(options.get("bind_port", 17479))
+		# Default to the witnessed retail LAN host port — the first of the [32768, 32787]
+		# range [orig: game.cfg mplanserverportmin/max, JO_SERVER]; matches host_and_join_lan.pcapng.
+		var bind_port := int(options.get("bind_port", 32768))
 		if not _sim.enable_host_listen(bind_port):
 			push_warning("MissionRuntime: could not bind co-op LAN host port %d — falling back to local listen server." % bind_port)
 			_sim.enable_listen_server(true)

@@ -806,6 +806,20 @@ index from `type_id 0x14B9` (`ItemList_FindIndexByTypeId` → `entity+28`) →
 `Position` / `Yaw` / `Team` → `Entity_ResetToSpawnState` (clears `Flags & 2`, the gate). The
 host then streams the loading sequence (§5.2a step 3) to its own local client in-process.
 
+**IDB struct expansion (2026-06-23 `Entity_*` grill).** `GamePlayerEntity` (ordinal 357) now carries
+the full named field set in `Jointops.exe.kong.i64` (49 members, size unchanged 904), and the
+`GamePlayerEntity *` type is applied to ~197 `Entity_*` prototypes so field access renders across the
+family. Fields named (each corroborated by a witnessed write or the §5.9 tag-0x10 map): `ItemTypeIndex`
++28, `itemDef` +32 (`ItemDef*`), `rtCounter0/1/2` +48/+52/+56 (init from `ItemDef`; +0x30 is reused at
+runtime as a weapon/AI data pointer), `aiRuntime` +104, `Armor` +0x120 (`= ItemDef.armorMax`),
+`ammoCount` +0x122, `MoveOrder` +0x12C + analog axes +0x130..0x133 (`Player_PackInputStateToEntity`
+@0x4df450), `sectionMask` +0x134, `parentEntity` +0x16C, `destroyTimer` +0x1B0, `boneB/boneA`
++0x214/+0x215, `weaponByte` +0x21A, `scoreFlag` +0x270. Two id-field clarifications: the 32-bit id the
+`Entity_*ByNetId` family matches across pools 0/1/2 is `DcbId` @+124 (BMS/DCB script id), distinct from
+the streaming netId near +348 and the authority id at +46 (`Entity_GetNetIdIfAuthority` @0x4e4010); and
+`Entity_SetNetId` @0x43b8f0 is an auto-namer misnomer — it writes `Health` @+286, so it is really
+`Entity_SetHealth`.
+
 ### 5.2c Map spawn-marker selection — where the human player's pose comes from (2026-06-22)
 
 §5.2a/§5.2b resolve how the host *builds and field-inits* its own player entity but leave the
@@ -2547,6 +2561,64 @@ deferred client-side smoothing concern (OpenNova's SP-as-listen-server host rend
 the decoded client-view, ADR 0011; no non-authority World motor exists yet). [follow-up: client-side
 smooth-target interpolation — the @0x4b9a8c math is fully witnessed above, ready to port when a
 non-authority client path exists.]
+
+#### 5.38b Joiner-side self-identification — the name-match in the S2C 0x0C organic-spawn stream (D.0 witness, 2026-06-23)
+
+§5.38a settled the HOST disposition (snap, never interpolate). This is its CLIENT-side counterpart: how a
+JOINER (`is_authority == 0`) learns WHICH wire entity is its own player, so it can simulate that player
+locally (the §5.38 motor) and stamp the right handle in its C2S `0x0C` uplink. Witnessed from
+`.scratch/host_and_join_lan.pcapng` (joiner "cdouglass" → host "biggy", mission dvxi5) cross-read with
+Jointops.exe; behavioral, read-only (no IDB writes).
+
+- **Self-ID is a NAME-MATCH in the S2C `0x0C` organic-spawn stream, NOT a slot-assignment packet. [D-NET-92]**
+  The joiner's own player is the type-`0x14B9` organic in the host's S2C `0x0C` batch (§5.23) whose
+  `entity_name` equals the joiner's own player name; matching it sets `g_local_player_entity @0xB75FC8`, and
+  that record's `slot_id` IS the joiner's wire handle **H**. In the capture, record 5 of the f=516 `0x0C`
+  batch = `slot=0x0005 pool0/s5 type=0x14B9 name="cdouglass" pos=(70,25,55.4) yaw=270° team=2` — the
+  joiner's own entity. H (`0x0005`) is fixed at this named spawn (f=516), BEFORE the game-start bundle
+  (f=559) and BEFORE the first C2S `0x0C hdl=0x0005` (f=561). It is NOT learned from `0x51` (absent in the
+  capture) nor from `0x46` PlayerSync (whose `slot=1 entity=0x0005` arrived f=564, AFTER the first uplink).
+  `[orig: NapiNPClientMsg_0x00C @ 0x42E730]`
+- **`NapiNPClientMsg_0x00F` (WORLD-STATE-LOAD, §5.29) drives the post-load client burst when `!is_authority`.**
+  It applies the spawn pos/yaw to the already-identified `g_local_player_entity` and clears the §5.6
+  movement gate (`Flags & 1`); on a non-authority client it additionally caches the spawn at
+  `dword_A87068/6C/70` and QUEUES the witnessed reply burst `0x28 / 0x29 / 0x2D / 0x32` (then `0x22 / 0x23`).
+  `[orig: NapiNPClientMsg_0x00F @ 0x42E200]`
+- **`NapiNPClientMsg_PlayerSync` (`0x046`) is a SECONDARY slot↔handle channel, not the primary self-ID.** It
+  binds a player-table slot to an entity (`entity_slot_id → Pool_GetEntryUnchecked(0, id)`; playerTable
+  `slot+36` = entity, `slot+15` = entity_slot_id) and arrives AFTER the joiner already self-identified via
+  the `0x0C` name-match. `[orig: NapiNPClientMsg_PlayerSync @ 0x431370]` (full layout §5.21)
+- **The witnessed joiner C2S in-match sequence:** `0x00`(JOIN, VERSIONCRCSTRING) → `0x01` → `0x02` (256 B) →
+  `0x4E/0x03/0x48/0x47/0x33` → `0x22` → `0x37` → `0x09` → `0x0A` → `0x2F ×2 / 0x0B` (the gate-tripping
+  loadout/status burst). The NW-service auth (`0x00/0x01/0x02`) is the `0x41/0x42` Hello/Auth handshake; the
+  `0x37/0x09/…/0x2F/0x0B` burst is the in-match spawn-gate drive (it trips the host's
+  `loadout_synced`/`mission_status_received` gate, §5.2a). The joiner sends NO C2S `0x0C` before it knows H
+  — there is no pre-spawn pose uplink on the wire.
+- **Unpinned (low-risk):** the exact store that writes `g_local_player_entity` on the name-match — the
+  `0x42E730` handler exceeds a clean single decompile — is not byte-anchored; the mechanism is empirically
+  certain from the wire (H == the named record's `slot_id`, set before any C2S `0x0C`).
+
+**Port (libs/novaworld + godot/engine, this session; verdict MATCHING, unit-tested by `joiner_session` +
+`netsim_build_player_uplink`):**
+- `JoinerSession` (`libs/novaworld/src/joiner_session.cpp`) — the CLIENT MIRROR of `HostSessionAccept`:
+  ClientHello/Auth handshake (the joiner's player name rides `ClientHello.co`, the free/unvalidated field
+  the host echoes into the organic-spawn `entity_name`), then `pump()` drives the in-match spawn-gate burst,
+  then the S2C `0x0C` handler name-matches `entity_name == player_name` → adopts `slot_id` as the wire
+  handle **H**. It does NOT compose `ClientSession` (whose post-`0x82` path is the matchmaking lobby-verify
+  flow, the wrong channel for the in-match game connection).
+- Two-handle reconciliation: the joiner simulates its OWN local player (handle L, motor-driven per §5.38)
+  and stamps **H** (the wire identity) in its C2S `0x0C` sub-header so the host's `apply_player_intent`
+  (§5.38a) resolves the right peer; the wire present is self-filtered on H (render local L, not the host's
+  SNAP of self). The joiner-side `NovaSimulation` mode is the next increment.
+- Host side: `NovaSimulation::announce_joiner_organic_spawn` builds a 1-record `OrganicSpawnBatch
+  {slot_id = the admitted handle, entity_name = the joiner's `ClientHello.co`, type 0x14B9, pose}` →
+  `encode_organic_spawn_batch` → `HostSessionAccept::frame_in_match_s2c(peer, 0x0C, …)`, so the joiner can
+  name-match. `HostSessionAccept` now captures `ClientHello.co` into `PeerState.player_name` and surfaces it
+  on the `PeerSpawned` event.
+- ctests: `tests/novaworld/joiner_session_test` (drives a real `JoinerSession` against a real
+  `HostSessionAccept` in-process: handshake → name-match → InMatch with H → C2S `0x0C` uplink →
+  `PeerC2SInMatch` → `NetSystem` apply SNAP; plus a wrong-name decoy that must NOT match);
+  `tests/netsim/build_player_uplink_test` (the joiner-side uplink body builder).
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 

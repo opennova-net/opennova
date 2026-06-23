@@ -158,6 +158,10 @@ private:
 	// shared with the test hook). Idempotent per peer.
 	opennova::world::EntityHandle admit_remote_peer(const opennova::PeerAddr &peer,
 	                                                const opennova::HostJoinerPose &pose);
+	// PeerSpawned reaction: admit_remote_peer + stream the joiner's entity as a NAMED
+	// S2C 0x0C organic-spawn so the joiner name-matches its own player and learns H.
+	void announce_joiner_organic_spawn(const opennova::PeerAddr &peer,
+	                                   const opennova::HostAcceptEvent &ev);
 	opennova::world::PlayerSpawn spawn_from_pose(const opennova::HostJoinerPose &pose) const;
 	void send_datagram(const opennova::PeerAddr &peer, const std::vector<uint8_t> &dg);
 	static opennova::PeerAddr peer_from_addr(const String &ip, int port);

@@ -271,6 +271,14 @@ Host read-apply / remote-peer SNAP mover (Phase 4, 2026-06-23; net-re §5.38a):
 | `NetPacket_SerializePlayerState` (case 4 tail) | `0x4c2000` | host read-apply/SNAP: gates (entity+0x24 bit1 / `g_spawn_success_gate` / conn==6 / `dword_C8D824`), stage smooth-target +0x234/240/244, mirror live +0x10/+0x14, SNAP live +4/8/C iff entity+0x24 bit0, reset +0x27C; heading/pitch = `movsx`+`shl 16` (no 90°), pos = absolute world (no map-origin) | disasm; §5.38a / D-NET-89/90/91 (paired to `EntityWireBridge::apply_player_intent`, `libs/netsim/src/entity_wire_bridge.cpp`) | matching (`netsim_loopback_identity`) |
 | `Entity_UpdateInfantryAI` (net-snap skip) | `0x4b9a03` | `test [esi+24h],1; jnz loc_4BFC8B` — net-snapped (entity+0x24 bit0) entity full-skips the motor (host never re-simulates a read-applied peer) | disasm; §5.38a / D-NET-89 (paired to `tick_infantry` net-peer skip-guard, `libs/world/src/infantry.cpp`) | matching (`netsim_loopback_identity`) |
 
+Joiner-side self-identification (D.0, 2026-06-23; net-re §5.38b; `host_and_join_lan.pcapng` cross-read):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `NapiNPClientMsg_0x00C` (joiner self-ID) | `0x42E730` | the joiner name-matches its own `entity_name` in the S2C 0x0C organic-spawn batch → `g_local_player_entity`; that record's `slot_id` = the joiner's wire handle H (fixed at the named spawn, before the first C2S 0x0C; NOT from 0x46/0x51) | pcap + disasm; §5.38b / D-NET-92 (paired to `JoinerSession` 0x0C name-match, `libs/novaworld/src/joiner_session.cpp`) | matching (`joiner_session`) |
+| `NapiNPClientMsg_0x00F` | `0x42E200` | world-state-load (§5.29): applies spawn pos/yaw to `g_local_player_entity` + clears `Flags & 1`; when `!is_authority` caches spawn + queues the `0x28/0x29/0x2D/0x32` reply burst | pcap + disasm; §5.38b / §5.29 (joiner in-match C2S burst driven by `JoinerSession::pump`; the 0x0F-apply itself is the joiner `NovaSimulation` mode, next increment) | confirm-only |
+| `NapiNPClientMsg_PlayerSync` | `0x431370` | 0x046 secondary slot↔handle channel — binds player-slot→entity; arrives AFTER the 0x0C name-match, so it is not the primary self-ID | pcap + disasm; §5.38b / §5.21 | confirm-only |
+
 Vehicle-board AI command (`waypoint_id` 123–127 = Goto SSN/Group/Player; world-wac-ai-re §11/§4.12; witnessed 2026-06-22):
 
 | original | addr | role | evidence | status |

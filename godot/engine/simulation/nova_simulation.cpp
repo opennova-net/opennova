@@ -11,6 +11,8 @@
 
 #include "netsim/connection.h"
 
+#include <novaworld/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
+
 #include <mission/bms.h>
 #include <mission/mission_systems.h>
 #include <world/angle.h>
@@ -1177,6 +1179,38 @@ opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
 	return h;
 }
 
+void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &peer,
+                                                   const opennova::HostAcceptEvent &ev) {
+	// Admit the joiner's entity and stream it back as a NAMED S2C 0x0C organic-spawn so
+	// the joiner can name-match its own player (entity_name == its ClientHello.co) and
+	// learn its wire handle H = the admitted entity's packed handle (D.0, §5.23). H (the
+	// slot_id) is the wire handle the joiner stamps in its C2S 0x0C; net_id is the distinct
+	// SSN. [orig: NapiNPClientMsg_0x00C @0x42E730]
+	const opennova::world::EntityHandle h = admit_remote_peer(peer, ev.pose);
+	if (!h.valid() || !world_ || !accept_) return;
+	const opennova::world::Entity *spawned = world_->registry.get(h);
+
+	opennova::OrganicSpawnBatch batch;
+	batch.entity_count = 1;
+	opennova::OrganicSpawnRecord rec;
+	rec.slot_id = h.packed;             // the wire handle H the joiner adopts
+	rec.has_body = true;
+	rec.item_type_id = 0x14B9;          // player infantry template
+	rec.entity_name = ev.peer_name;     // the name-match key (the joiner's ClientHello.co)
+	rec.pos_x = ev.pose.pos_x;          // mission i32 16.16 — the host-advertised spawn
+	rec.pos_y = ev.pose.pos_y;
+	rec.pos_z = ev.pose.pos_z;
+	rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16; // i16 wire heading -> 32-bit BAM
+	rec.team = ev.pose.team;
+	rec.net_id = spawned ? spawned->net_id : 0;
+	batch.records.push_back(rec);
+
+	std::vector<uint8_t> dg;
+	if (accept_->frame_in_match_s2c(peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
+		send_datagram(peer, dg);
+	}
+}
+
 void NovaSimulation::host_net_poll() {
 	if (!host_listen_ || pump_.is_null() || !accept_ || !net_ || !world_) return;
 	pump_->poll();
@@ -1195,7 +1229,7 @@ void NovaSimulation::host_net_poll() {
 		for (const opennova::HostAcceptEvent &ev : r.events) {
 			switch (ev.kind) {
 				case opennova::HostAcceptEvent::Kind::PeerSpawned:
-					admit_remote_peer(peer, ev.pose);
+					announce_joiner_organic_spawn(peer, ev);
 					break;
 				case opennova::HostAcceptEvent::Kind::PeerC2SInMatch: {
 					auto rp = remote_peers_.find(peer);

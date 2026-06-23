@@ -104,6 +104,13 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // round-trip with decode_pool_spawn_batch is field-identical.
 std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 
+// Encode a §5.23 S2C 0x0C organic-entity spawn batch — the inverse of
+// decode_organic_spawn_batch and the bytes a host streams so a JOINER can name-match its
+// own pool-0 player (the type-0x14b9 organic whose entity_name == the joiner's player name)
+// and learn its wire handle. Every field after has_body is unconditional (no flag gates),
+// so this is a straight field-order write. [orig: NapiNPClientMsg_0x00C @ 0x42E730.]
+std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch);
+
 // Encode a §5.14 infantry / AI compact record (14 B fixed) — the bytes
 // `decode_infantry_compact_record` consumes, and the byte order produced by
 // [orig: NetPacket_SerializeInfantryEntityState case 1 (write, type 11) @ 0x4C0320].

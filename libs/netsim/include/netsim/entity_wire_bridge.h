@@ -2,8 +2,9 @@
 
 #include <vector>
 
-#include <novaworld/ingame_decode.h>   // EntityClass
+#include <novaworld/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
 #include <novaworld/replication_min.h> // GameEntitySnapshot
+#include <world/ai.h>                  // AiEntity (engine-frame live pose)
 #include <world/entity.h>
 #include <world/world.h>
 
@@ -49,5 +50,18 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // false if the handle is unresolved, it is the local player, or the movement/spawn gate
 // (Entity.flags bit1) is set.
 bool apply_player_intent(world::World &world, const PlayerIntent &intent);
+
+// The JOINER-side inverse of apply_player_intent: synthesize the C2S 0x0C extended
+// (type-10) player-uplink BODY (the 43-byte PlayerExtendedUplink) from the joiner's own
+// live local-player state, sent each frame so the HOST SNAPs it via apply_player_intent.
+// Position is the live engine-frame AiEntity.pos[] (i32 16.16 — the exact store the host
+// writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
+// `intent.heading << 16`). On-foot only (vehicle_handle = 0xFFFF; the mounted vehicle-local
+// transform is deferred). The anti-cheat weapon/fire counters are left 0 — the §5.38a
+// receive path has NO counter gate, so the host read-apply ignores them. The 5-byte
+// sub-header (handle = the host-assigned wire handle H, item_type_id = e.item_id, sub_op =
+// 0x0A) is built by the caller. [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
+// NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
+PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::AiEntity &ae);
 
 } // namespace opennova::netsim

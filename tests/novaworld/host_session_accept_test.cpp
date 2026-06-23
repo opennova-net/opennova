@@ -119,6 +119,7 @@ bool run() {
 	// --- 0x41 ClientHello -> 0x81 ServerHello ---
 	ClientHello hello;
 	hello.pn = "JointOperations";
+	hello.co = "TestJoiner"; // the joiner's player name (CO) — must reach PeerSpawned
 	hello.ci = 1;
 	auto r41 = accept.handle_datagram(peer, nullptr, 0); // empty: must not crash / no events
 	(void)r41;
@@ -209,6 +210,8 @@ bool run() {
 		const HostAcceptEvent *spawn = find_event(r, HostAcceptEvent::Kind::PeerSpawned);
 		if (!expect(spawn != nullptr, "loadout burst trips the gate -> PeerSpawned")) return false;
 		if (!expect(spawn->peer == peer, "PeerSpawned names the joiner peer")) return false;
+		if (!expect(spawn->peer_name == "TestJoiner",
+		            "PeerSpawned carries the joiner's ClientHello.co player name")) return false;
 		if (!expect(spawn->pose.pos_valid, "PeerSpawned pose is from the joiner uplink")) return false;
 		if (!expect(spawn->pose.entity_handle == up_handle, "PeerSpawned entity handle matches 0x0C")) return false;
 		if (!expect(spawn->pose.item_type_id == up_type, "PeerSpawned item type matches 0x0C")) return false;

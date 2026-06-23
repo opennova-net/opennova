@@ -581,6 +581,13 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     if (ctx.pre_mission) return;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
+    // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
+    // entity==g_local_player branch (line below, no authority guard) motor-sims the
+    // joiner's own player from input, while NPC think/select stays authority-gated, so
+    // local-promote copies of remote entities just hold (idle). The joiner renders every
+    // REMOTE entity's pose from the host's S2C 0x0A (present reads ClientState, not these
+    // local copies), so their idle ticking is harmless. [orig: the client also runs the
+    // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
         // A mounted occupant (manned gun/seat) follows its seat and never path-follows; skip the

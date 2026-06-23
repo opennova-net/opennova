@@ -437,11 +437,14 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     ctx.logic_tick = logic_tick;
     ctx.is_authority = is_authority;
     ctx.pre_mission = pre_mission;
-    // Scripting + sim run only on the authoritative host (faithful: WAC/BMS live
-    // inside Server_TickUpdate). Non-authority peers only apply replicated state.
-    if (is_authority) {
-        for (ISystem *s : systems_) s->tick(*this, ctx);
-    }
+    // The system loop runs on BOTH the authoritative host and a non-authority client
+    // (the original client also runs a tick): each system self-gates on
+    // ctx.is_authority. WacSystem / BmsEventSystem / NetSystem early-out on a client
+    // (scripting + C2S drain are host-only); AiSystem on a client simulates ONLY the
+    // local player (the §5.38 entity==local-player branch) and leaves every other
+    // entity to the replicated wire state. [orig: the client tick still steps the
+    // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
+    for (ISystem *s : systems_) s->tick(*this, ctx);
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
 }
 

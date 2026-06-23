@@ -173,6 +173,42 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 	return out;
 }
 
+// [orig: NapiNPClientMsg_0x00C @ 0x42E730] — the inverse of decode_organic_spawn_batch
+// (§5.23). Header u16 entity_count, then per record: u16 slot_id, u8 has_body, and (when
+// has_body) the unconditional field block. A field-identical round-trip with the decoder.
+std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(batch.entity_count);
+	for (const OrganicSpawnRecord &rec : batch.records) {
+		w.u16(rec.slot_id);
+		w.u8(rec.has_body ? 1 : 0);
+		if (!rec.has_body) continue; // empty spawn ends after the has_body byte (@ 0x42e813)
+		w.u16(rec.item_type_id);
+		w.u32(rec.entity_flags);
+		w.cstr(rec.entity_name);
+		w.u16(rec.minimap_flags);
+		w.u32(uint32_t(rec.pos_x));
+		w.u32(uint32_t(rec.pos_y));
+		w.u32(uint32_t(rec.pos_z));
+		w.u32(uint32_t(rec.orientation));
+		w.u8(rec.team);
+		w.u8(rec.ai_state);
+		w.u8(rec.anim_slot);
+		w.u16(rec.net_id);
+		w.u8(rec.weapon_state);
+		w.u8(rec.ai_action);
+		w.u8(rec.skip_byte);
+		w.u8(rec.unused_byte);
+		w.u8(rec.alert_level);
+		w.u8(rec.sub_type);
+		w.u8(rec.weapon_type);
+		w.u8(rec.parent_slot);
+		w.u16(rec.parent_handle);
+	}
+	return out;
+}
+
 // [orig: NetPacket_SerializeInfantryEntityState case 1 (write, type 11) @ 0x4C0320]
 // Fixed 14 B; positions are the already-compressed u16s (see ingame_encode.h).
 std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord &rec) {
