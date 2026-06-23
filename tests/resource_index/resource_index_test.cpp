@@ -129,7 +129,7 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 14);
+	TEST_EXPECT(all_files.size() == 15);  // +2 over base: hudpos.def + Avatars.def both classify
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Avatars.def"));
 	TEST_EXPECT(!has_relative_path(all_files, "weapon.def"));  // co-extension .def stays unbrowsable
