@@ -121,6 +121,22 @@ definitions ([GOALS.md](../GOALS.md)). Honoring those conventions instead of
 hardcoding is the project's second pillar; modeling them as an asset dependency
 graph is the editor's long-term aim (same doc).
 
+### Wire format / network compatibility
+
+The network byte stream is a parity surface like any other. Encoders and decoders are
+witnessed against retail and cited inline (`[orig: Name @ 0xADDR]`), exactly like a file
+format — the goal is **wire compatibility**: our clients can join original servers, our
+servers can serve original clients, and opennova↔opennova works the same way. opennova↔
+opennova requires encoder/decoder self-consistency; retail interop requires byte-parity.
+
+The original runs single-player **through** an in-process listen server (socketless
+transport, byte loopback), so SP / co-op / MP all share **one** replication path — only
+the transport mode differs, never the codec
+([ADR 0011](adr/0011-single-player-in-process-listen-server.md);
+[ADR 0009](adr/0009-in-match-net-seam.md) for the in-match seam,
+[ADR 0012](adr/0012-player-is-host-side-server-entity.md) for the player entity). The
+protocol RE record is [net/novaworld-net-re.md](net/novaworld-net-re.md).
+
 ## 4. Subsystem index
 
 Verdicts below are a snapshot for orientation; [correspondence.md §1](correspondence.md)
@@ -140,7 +156,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Models (`.3di`: 3DI3 + GP) | `libs/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
 | Particles (`.ptl`) | — | [particles/ptl-format-re.md](particles/ptl-format-re.md) | redesign in flight |
-| NovaWorld networking | — | [net/novaworld-net-re.md](net/novaworld-net-re.md) | unlanded (PR #37, reverted PR #50) |
+| NovaWorld networking | `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
 
 No dedicated RE record yet — documented by code and tests only: terrain, foliage,
 tiles, fonts, credits, the importer pipeline, and the VFS/PFF mount stack (the PFF

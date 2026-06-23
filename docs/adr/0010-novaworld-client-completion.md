@@ -43,8 +43,12 @@ here.
 2. **The endpoint is selectable, not hardcoded.** A persisted setting chooses the target: OpenNova
    (the configured/localhost host) or real NovaWorld (`gs.novaworld.net`, the existing
    `GATE_DEFAULT_HOST` in `libs/novaworld/gate_probe.h`). The client already exposes
-   `host`/`gate_port`; the panel reads the setting instead of a hardcoded export. Primary target stays
-   OpenNova; real NovaWorld is an opt-in parity/testing target — see Consequences.
+   `host`/`gate_port`; the panel reads the setting instead of a hardcoded export. Wire compatibility
+   is a standing design requirement either way (the client speaks the protocol such that it can join
+   original servers, exactly as our server serves original clients and opennova↔opennova works). What
+   is opt-in and done sparingly is *pointing the client at NovaLogic's **live hosted** service*
+   (`gs.novaworld.net`) — a parity/testing target, not the everyday path; opennova↔opennova remains the
+   primary product path. See Consequences.
 
 3. **Reuse the libs, mirror `onnw`, grill only the client direction.** Each leg wires existing
    encoders/parsers/crypto, mirrors the corresponding `onnw` server module (inverting request/
@@ -126,6 +130,19 @@ here.
   state machine.
 - The work reuses the already-verified crypto and the existing builders/parsers, so the surface area
   of *new* code per leg is small (mostly state wiring + the client HTTP flows).
-- Posture: connecting a reimplemented client to NovaLogic's live service is done sparingly, for
-  parity testing, without load or abuse. The retail executable remains the normal way to play on the
-  official servers; OpenNova remains our primary target.
+- Posture: **wire compatibility is always the design target** — our clients can join original
+  servers, our servers can serve original clients, and opennova↔opennova works the same way. The
+  caution is narrow and specific, and is about traffic to live infrastructure, not about how we write
+  code: connecting a reimplemented client to NovaLogic's **live hosted** service is done sparingly,
+  for parity testing, without load or abuse, and the retail executable remains the normal way to play
+  on the official servers. opennova↔opennova remains our primary product path.
+
+## Amendment (2026-06-22) — wire compatibility is a standing requirement, distinct from live-service traffic
+
+The original Decision 2 / Posture wording read as if interop with original endpoints were only a
+parity-testing artifact subordinate to opennova↔opennova. It is not. Wire compatibility — our clients
+joining original servers, our servers serving original clients, opennova↔opennova on the same protocol
+— is a first-class design requirement, the parity rule applied to the byte stream (root `CLAUDE.md`
+Conventions; `docs/engine-primer.md` §3). The "sparingly / no load or abuse" caution is narrowed here
+to its real subject: sending traffic to NovaLogic's *live hosted* service. That caution does not
+license writing non-wire-compatible code.

@@ -3029,12 +3029,16 @@ pre-connect web login that authorizes the join.)
    in the 0x42.** Our gate parser already captures `UDPCODE1/2`; the missing pieces are (a) the web
    login that makes the gate issue them and (b) attaching the CU-chunk set to `ClientAuth`.
 
-**Scope note — product vs parity.** This entire auth chain is required only to impersonate a retail
-client against **live NovaLogic NW** (parity testing). The OpenNova **product** path is OpenNova
-client ↔ the OpenNova server (`apps/novaworld_server`), whose `cb_server_0`/`cb_server_1` are
-permissive — there the full handshake already reaches `Verified` (`client_session_loopback_test`).
-The `session_join` timeout is therefore expected against live NW and is **not** a blocker for the
-OpenNova-server path; it gates only the retail-impersonation parity scenario.
+**Scope note — wire compatibility vs live-service traffic.** Wire compatibility is a standing design
+requirement in all directions — our clients join original servers, our servers serve original clients,
+and opennova↔opennova works the same way on one protocol (root `CLAUDE.md` Conventions;
+`../engine-primer.md` §3). What *this particular auth chain* buys is narrower: its full form is required
+only to impersonate a retail client against **NovaLogic's live hosted NW**, a parity-testing scenario
+done sparingly (no load/abuse). The everyday OpenNova path is OpenNova client ↔ the OpenNova server
+(`apps/novaworld_server`), whose `cb_server_0`/`cb_server_1` are permissive — there the full handshake
+already reaches `Verified` (`client_session_loopback_test`). The `session_join` timeout is therefore
+expected against live NW and is **not** a blocker for the OpenNova-server path; it gates only the
+retail-impersonation parity scenario.
 
 Empirical ground truth available cheaply: retail JO logs the entire gate dialogue to
 `_connectlog.txt` (every `GATE LINE #NN [...]`, set by `ProcessResponse`'s `g_ConnectLogEnabled`

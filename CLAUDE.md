@@ -77,6 +77,15 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Rendering targets the original fixed-function look, not PBR.
+- Networking is wire-compatible by design — the parity rule applied to the byte stream.
+  We write code such that our clients can join original (retail) servers, our servers can
+  serve original clients, and opennova↔opennova works the same way. Every encoder produces
+  bytes a stock client/server accepts; every decoder reads what a stock client/server
+  emits; opennova↔opennova requires encoder/decoder self-consistency, retail interop
+  requires byte-parity. (Pointing a client at NovaLogic's *live hosted* service is a
+  separate matter, done sparingly with no load/abuse — that caution is not a license to
+  write non-wire-compatible code.) See [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)
+  and ADRs 0009–0012.
 - Editor UI copy is artist-facing: "draw distance", "blend layer" — not "CDEP",
   "LOD bitstream", "mip slot".
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
