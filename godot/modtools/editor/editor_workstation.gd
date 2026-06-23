@@ -10,10 +10,11 @@ const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
 const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
+const HudWorkspaceAdapter = preload("res://modtools/hud/hud_workspace.gd")
 const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
-enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU }
+enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, HUD }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
 # shows the non-popup ones in order. The enum below stays only as stable id
@@ -320,6 +321,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),
 		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
+			WorkspaceDef.make(Workspace.HUD, HudWorkspaceAdapter, false, &"Interface", &"hud"),
 		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
 		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),

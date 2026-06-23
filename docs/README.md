@@ -46,6 +46,7 @@ behavior is summarized and cited.
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
+| Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (engine-research; HUD port in flight) |
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed |
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |

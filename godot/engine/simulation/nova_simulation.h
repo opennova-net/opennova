@@ -218,6 +218,11 @@ public:
 	// camera). yaw = 90 - heading; pitch up positive. 0 when no player is spawned.
 	float get_local_player_yaw_deg() const;
 	float get_local_player_pitch_deg() const;
+	// The local player's current/max health and team for the HUD, mirroring the original
+	// per-frame HUD info. [orig: HUD_BuildEntityInfo @0x4b8440 — health ratio +92, team +374]
+	int get_local_player_health() const;
+	int get_local_player_max_health() const;
+	int get_local_player_team() const;
 	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
 	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
 	int get_local_player_anim_slot() const;

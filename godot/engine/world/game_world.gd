@@ -568,6 +568,15 @@ func local_player_anim_key() -> String:
 func local_player_anim_phase_ticks() -> int:
 	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
 
+func local_player_health() -> int:
+	return _runtime.local_player_health() if _runtime != null else 0
+
+func local_player_max_health() -> int:
+	return _runtime.local_player_max_health() if _runtime != null else 100
+
+func local_player_team() -> int:
+	return _runtime.local_player_team() if _runtime != null else 0
+
 func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool, crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
 	if _runtime != null:
 		_runtime.set_player_input(forward, back, left, right, run, crouch, prone, jump, look_yaw_deg, look_pitch_deg)

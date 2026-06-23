@@ -333,6 +333,9 @@ DEF_EXPORT int def_parse_items_memory(const uint8_t *data, size_t size, DefItems
 DEF_EXPORT void def_free_items(DefItemsFile *f);
 
 DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out);
+/* Parse hudpos.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_hudpos as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out);
 DEF_EXPORT void def_free_hudpos(DefHudPosFile *f);
 
 DEF_EXPORT int def_parse_def(const char *path, DefFile *out);

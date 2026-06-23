@@ -82,6 +82,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
     object/nova_skeletal_anim.cpp
+    hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
     simulation/nova_simulation.cpp

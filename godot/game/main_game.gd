@@ -10,6 +10,7 @@ extends Node3D
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
+const GameHudScript := preload("res://game/game_hud.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
@@ -65,6 +66,8 @@ var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
+var _game_hud       # GameHud, built on the first frame a mission has a local player
+var _hud_objective := ""  # latest mission-effect text line shown by the HUD
 var _player_host: LocalPlayerHost = null
 var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
 var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
@@ -155,6 +158,63 @@ func _toggle_debug_overlay() -> void:
 
 func _current_runtime():
 	return _world.get_runtime() if _world != null else null
+
+
+# The in-game HUD over the live runtime: built lazily the first frame a mission has a
+# local player (so net spectators, which have none, never get it). Reads the witnessed
+# hudpos.def layout from the world's mounted VFS and draws under $HUD, so
+# _set_hud_visible hides it behind menus. [orig: HUD_RenderAllOverlays @0x5a8070]
+func _ensure_game_hud() -> void:
+	if _game_hud != null:
+		return
+	_game_hud = GameHudScript.new()
+	_game_hud.name = "GameHud"
+	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var host: Node = _hud if _hud != null else self
+	host.add_child(_game_hud)
+	_game_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var hudpos := NovaHudPos.new()
+	var root: NovaResourceRoot = _world.get_resource_root() if _world != null and _world.has_method("get_resource_root") else null
+	if root != null:
+		hudpos.load_from_resource_root(root, "hudpos.def")
+	_game_hud.set_layout(hudpos, root)
+	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
+		_world.mission_effects.connect(_on_mission_effects)
+
+
+# Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
+# original rebuilding its HUD info struct each frame. [orig: HUD_BuildEntityInfo @0x4b8440]
+func _update_game_hud() -> void:
+	if _state != State.WORLD or not _world.is_loaded() or not _world.has_local_player():
+		return
+	_ensure_game_hud()
+	if _game_hud == null:
+		return
+	var max_h: int = _world.local_player_max_health()
+	var frac := float(_world.local_player_health()) / float(max_h) if max_h > 0 else 0.0
+	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip key).
+	var anim_key := _world.local_player_anim_key()
+	var stance := 0
+	if "prone" in anim_key:
+		stance = 2
+	elif "crouch" in anim_key:
+		stance = 1
+	_game_hud.update_info({
+		"health_fraction": clampf(frac, 0.0, 1.0),
+		"stance": stance,
+		"team": _world.local_player_team(),
+		"objective": _hud_objective,
+	})
+
+
+# Mission effects feed the HUD's objective/subtitle line (the WAC/mission text the
+# original routes to the HUD). Best-effort: pick up any text-bearing effect.
+func _on_mission_effects(effects: Array) -> void:
+	for e in effects:
+		if e is Dictionary:
+			var t := String(e.get("text", e.get("message", "")))
+			if not t.is_empty():
+				_hud_objective = t
 
 
 func _on_skeleton_debug_toggled(enabled: bool) -> void:
@@ -365,6 +425,12 @@ func _on_return_to_menu() -> void:
 	if _net_killfeed != null:
 		_net_killfeed.queue_free()
 		_net_killfeed = null
+	if _game_hud != null:
+		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(_on_mission_effects):
+			_world.mission_effects.disconnect(_on_mission_effects)
+		_game_hud.queue_free()
+		_game_hud = null
+		_hud_objective = ""
 	if _root != null:
 		_enter_menu(_root.get_root_dir())
 
@@ -399,6 +465,7 @@ func _process(delta: float) -> void:
 	_world.tick(_camera.global_position, _camera.global_transform, delta)
 	if _player_host != null:
 		_player_host.after_world_tick()
+	_update_game_hud()
 
 
 # WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns

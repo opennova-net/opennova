@@ -130,6 +130,63 @@ int main(void) {
     }
     printf("Declutter OK (%zu entries)\n", hud->declutter_count);
 
+    /* Memory-variant equivalence: parsing the same bytes via
+       def_parse_hudpos_memory must reproduce the path parse field-for-field. */
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "FAIL: cannot reopen fixture for memory test\n");
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char *bytes = (unsigned char *)malloc((size_t)sz);
+    if (!bytes || fread(bytes, 1, (size_t)sz, f) != (size_t)sz) {
+        fprintf(stderr, "FAIL: cannot read fixture bytes\n");
+        free(bytes);
+        fclose(f);
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+    fclose(f);
+
+    DefHudPosFile hudpos_mem;
+    memset(&hudpos_mem, 0, sizeof(hudpos_mem));
+    if (def_parse_hudpos_memory(bytes, (size_t)sz, &hudpos_mem) != 0) {
+        fprintf(stderr, "FAIL: def_parse_hudpos_memory failed\n");
+        free(bytes);
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+    free(bytes);
+
+    const DefHudPosDef *m = &hudpos_mem.hud;
+    int mem_ok =
+        memcmp(m->health, hud->health, sizeof(hud->health)) == 0 &&
+        m->hud_textcolor.r == hud->hud_textcolor.r &&
+        m->hud_textcolor.g == hud->hud_textcolor.g &&
+        m->hud_textcolor.b == hud->hud_textcolor.b &&
+        m->spinmap_x1 == hud->spinmap_x1 && m->spinmap_x2 == hud->spinmap_x2 &&
+        m->spinmap_y1 == hud->spinmap_y1 && m->spinmap_y2 == hud->spinmap_y2 &&
+        m->stances_count == hud->stances_count &&
+        m->declutter_count == hud->declutter_count &&
+        m->hud_chline == hud->hud_chline &&
+        strcmp(m->font_hi, hud->font_hi) == 0;
+    if (mem_ok && hud->stances_count > 0) {
+        mem_ok = m->stances[0].id == hud->stances[0].id &&
+                 strcmp(m->stances[0].texture, hud->stances[0].texture) == 0 &&
+                 strcmp(m->stances[0].name, hud->stances[0].name) == 0;
+    }
+    if (!mem_ok) {
+        fprintf(stderr, "FAIL: memory parse differs from path parse\n");
+        def_free_hudpos(&hudpos_mem);
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+    def_free_hudpos(&hudpos_mem);
+    printf("Memory-variant equivalence OK\n");
+
     def_free_hudpos(&hudpos);
     printf("PASS: hudpos parsing OK\n");
     return 0;

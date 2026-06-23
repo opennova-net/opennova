@@ -314,6 +314,9 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_slot"), &NovaSimulation::get_local_player_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
+	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
+	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
+	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -592,6 +595,28 @@ int NovaSimulation::get_local_player_anim_phase_ticks() const {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	return p ? p->inf.clip_phase : 0;
+}
+
+// HUD health/team. The original rebuilds these into its per-frame HUD info struct every frame
+// (health ratio at +92 = currentHealth/maxHealth, team byte at +374). We surface the raw values
+// and let the HUD compute the ratio. [orig: HUD_BuildEntityInfo @0x4b8440]
+int NovaSimulation::get_local_player_health() const {
+	if (!world_ || !world_->cached.local_player.valid()) return 0;
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e ? e->health : 0;
+}
+
+int NovaSimulation::get_local_player_max_health() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 100;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p || p->inf.max_health <= 0) return 100;
+	return p->inf.max_health;
+}
+
+int NovaSimulation::get_local_player_team() const {
+	if (!world_ || !world_->cached.local_player.valid()) return 0;
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e ? static_cast<int>(e->team) : 0;
 }
 
 void NovaSimulation::restart() {

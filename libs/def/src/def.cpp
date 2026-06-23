@@ -866,13 +866,9 @@ DEF_EXPORT void def_free_items(DefItemsFile *f) {
 /* HudPos Parsing                                                            */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared buffer parser for hudpos.def, used by both the path and memory entry
+   points (mirrors parse_items_buf). Assumes `out` was zeroed by the caller. */
+static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out) {
     DefHudPosDef *hud = &out->hud;
     /* Set default alpha for all colors */
     hud->health_border.a = 255;
@@ -1278,8 +1274,23 @@ DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_hudpos_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_hudpos_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_hudpos(DefHudPosFile *f) {
