@@ -8,7 +8,7 @@
 #include <novaworld/ingame_decode.h> // EntityClass
 
 #include "netsim/client_state.h"
-#include "netsim/loopback_channel.h"
+#include "netsim/session_transport.h"
 
 namespace opennova::netsim {
 
@@ -22,7 +22,7 @@ public:
 	explicit NetClientView(std::function<EntityClass(uint16_t)> resolver);
 
 	// Drain every pending S2C datagram and apply it to the held ClientState.
-	void pump(LoopbackChannel &channel);
+	void pump(ISessionTransport &channel);
 
 	const ClientState &state() const { return state_; }
 	ClientState &state() { return state_; }

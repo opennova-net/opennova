@@ -4,7 +4,7 @@
 
 #include <world/world.h>
 
-#include "netsim/loopback_channel.h"
+#include "netsim/session_transport.h"
 
 namespace opennova::netsim {
 
@@ -19,14 +19,14 @@ namespace opennova::netsim {
 // Phase 1 keeps send_command a no-op shim so the seam is wired (World::net points
 // here); Phase 2+ serializes the command onto the channel.
 struct SerializingSink : world::INetCommandSink {
-	explicit SerializingSink(LoopbackChannel &channel) : channel_(channel) {}
+	explicit SerializingSink(ISessionTransport &channel) : channel_(channel) {}
 
 	bool is_authority(world::EntityHandle) override { return true; }
 	void send_command(world::EntityHandle owner, uint16_t command_id,
 	                  const int32_t *args, int argc) override;
 
 private:
-	LoopbackChannel &channel_;
+	ISessionTransport &channel_;
 };
 
 } // namespace opennova::netsim

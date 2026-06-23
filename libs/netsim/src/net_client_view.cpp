@@ -30,7 +30,7 @@ NetClientView::NetClientView()
 NetClientView::NetClientView(std::function<EntityClass(uint16_t)> resolver)
 		: resolver_(std::move(resolver)) {}
 
-void NetClientView::pump(LoopbackChannel &channel) {
+void NetClientView::pump(ISessionTransport &channel) {
 	Datagram dg;
 	while (channel.client_recv(dg)) {
 		switch (dg.tag) {

@@ -6,7 +6,7 @@
 #include <world/world.h>
 
 #include "netsim/entity_wire_bridge.h"
-#include "netsim/loopback_channel.h"
+#include "netsim/session_transport.h"
 
 namespace opennova::netsim {
 
@@ -28,7 +28,7 @@ inline constexpr uint8_t kTag0aFrameUpdate = 0x0A;
 // order without tripping the run_logic_tick authority guard.
 class NetSystem : public world::ISystem {
 public:
-	explicit NetSystem(LoopbackChannel &channel) : channel_(channel) {}
+	explicit NetSystem(ISessionTransport &channel) : channel_(channel) {}
 
 	const char *name() const override { return "net"; }
 	void tick(world::World &world, const world::TickContext &ctx) override;
@@ -39,7 +39,7 @@ public:
 	void emit_s2c(const world::World &w, const PlayerReplicationState &anchor);
 
 private:
-	LoopbackChannel &channel_;
+	ISessionTransport &channel_;
 };
 
 } // namespace opennova::netsim
