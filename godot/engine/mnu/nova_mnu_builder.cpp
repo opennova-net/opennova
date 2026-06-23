@@ -2,6 +2,7 @@
 
 #include "util/nova_string_convert.h"
 
+#include "mnu_item_cell.h"
 #include "mnu_itemlist_common.h"
 #include "mnu_outline.h"
 #include "nova_mnu_button.h"
@@ -22,6 +23,8 @@
 #include "nova_mnu_spinlist.h"
 #include "nova_mnu_table.h"
 
+#include "cbin/cbin_credits_resource.h"
+#include "cbin/nova_credits_player.h"
 #include "fnt/nova_fnt_resource.h"
 #include "mns_stylesheet.h"
 #include "resource_index/nova_resource_root.h"
@@ -212,14 +215,6 @@ Ref<Texture2D> get_texture(MnuBuildContext &ctx, const std::vector<mnu::Appearan
 	return Ref<Texture2D>();
 }
 
-Ref<Image> resolve_image(MnuBuildContext &ctx, const std::string &name) {
-	Ref<Texture2D> tex = resolve_texture(ctx, name);
-	if (tex.is_null()) {
-		return Ref<Image>();
-	}
-	return tex->get_image();
-}
-
 // Resolve a (possibly %VAR%) font name to a Godot Font. Returns null when the
 // name is a still-unresolved variable or cannot be loaded; out_fixed_size
 // carries the bitmap font's native pixel size for correct rendering.
@@ -282,13 +277,19 @@ bool has_outline(const std::vector<mnu::Appearance> &apps) {
 	return false;
 }
 
-Color get_appearance_color(const std::vector<mnu::Appearance> &apps, const std::string &type,
-		const std::string &state, bool &found) {
+Color get_appearance_color(MnuBuildContext &ctx, const std::vector<mnu::Appearance> &apps,
+		const std::string &type, const std::string &state, bool &found) {
 	found = false;
 	for (const auto &app : apps) {
 		if (app.state == state && app.type == type && !app.value.empty()) {
+			// The value is frequently a %VAR% (e.g. %COLOR_BLACK% / %TRIM_COLOR% on a
+			// LIST_BOX background or outline); resolve it through the stylesheet before
+			// parsing the hex [orig: NapiXML_ExpandVariablesInText @ 0x63a000]. Without
+			// this every %VAR% color appearance silently failed (transparent combo
+			// popups, container backgrounds, outlines).
+			const std::string hex = resolve_color(ctx, app.value);
 			uint8_t r, g, b, a;
-			if (mnu::parse_hex_color(app.value, r, g, b, a)) {
+			if (!hex.empty() && mnu::parse_hex_color(hex, r, g, b, a)) {
 				found = true;
 				return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
 			}
@@ -365,12 +366,19 @@ void add_frame(MnuBuildContext &ctx, Control *parent, const mnu::Frame &frame) {
 	}
 
 	if (stencil.is_null() && brush.is_null()) {
-		ColorRect *bg = memnew(ColorRect);
-		bg->set_name("FrameBackground");
-		bg->set_color(Color(0.02f, 0.02f, 0.02f, 0.92f));
-		bg->set_anchors_preset(Control::PRESET_FULL_RECT);
-		bg->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-		parent->add_child(bg);
+		// The original draws nothing when neither frame texture resolves: every draw
+		// in CUIElement_DrawFrame is guarded by a successful texture load
+		// [orig: CUIElement_DrawFrame @ 0x64a210 -> sub_654370 >= 0 checks]. So at
+		// runtime an unresolved frame is simply absent (no opaque panel). In the
+		// editor only, leave a faint placeholder so an author can see the region.
+		if (ctx.edit_mode) {
+			ColorRect *bg = memnew(ColorRect);
+			bg->set_name("FramePlaceholder");
+			bg->set_color(Color(1.0f, 1.0f, 1.0f, 0.04f));
+			bg->set_anchors_preset(Control::PRESET_FULL_RECT);
+			bg->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+			parent->add_child(bg);
+		}
 		return;
 	}
 
@@ -422,27 +430,12 @@ void add_frame(MnuBuildContext &ctx, Control *parent, const mnu::Frame &frame) {
 		}
 	}
 
-	// MONOGRAM: a logo/watermark drawn centered on the framed panel. Placement is
-	// a heuristic (centered, natural size) pending an IDA pass on the real game's
-	// monogram positioning; rendering it beats leaving it parsed-but-invisible.
-	if (!frame.monogram.empty()) {
-		Ref<Image> mono_img = resolve_image(ctx, frame.monogram);
-		if (mono_img.is_valid()) {
-			if (mono_img->is_compressed()) {
-				mono_img->decompress();
-			}
-			Ref<ImageTexture> mono_tex = ImageTexture::create_from_image(mono_img);
-			if (mono_tex.is_valid()) {
-				TextureRect *mono = memnew(TextureRect);
-				mono->set_name("Monogram");
-				mono->set_texture(mono_tex);
-				mono->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
-				mono->set_anchors_preset(Control::PRESET_FULL_RECT);
-				mono->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-				parent->add_child(mono);
-			}
-		}
-	}
+	// MONOGRAM is parsed and round-tripped but intentionally NOT drawn: the shipped
+	// engine never renders the menu monogram. The window render path draws frame +
+	// appearance + text + children only [orig: CStaticWnd_Render @ 0x657b10], and
+	// CUIElement_DrawFrame @ 0x64a210 has no monogram pass; the only "monogram.tga"
+	// use is the loading screen (Game_StartMission @ 0x525aa3), not menus. The earlier
+	// centered-heuristic draw produced a stray glyph in the middle of framed panels.
 }
 
 // --- Text / label -----------------------------------------------------------
@@ -472,9 +465,11 @@ String resolve_text(MnuBuildContext &ctx, const mnu::String &sd) {
 	return to_gd(mnu::strip_hotkey_marker(to_std(text)));
 }
 
-void apply_label_font(MnuBuildContext &ctx, Label *lbl, const mnu::Font &font) {
+// Build a LabelSettings from the widget font (name + default fg color), or null when
+// the font carries nothing to apply. Shared by plain labels and item cells.
+Ref<LabelSettings> make_label_settings(MnuBuildContext &ctx, const mnu::Font &font) {
 	if (font.name.empty() && font.default_fg.empty()) {
-		return;
+		return Ref<LabelSettings>();
 	}
 	Ref<LabelSettings> settings;
 	settings.instantiate();
@@ -492,7 +487,14 @@ void apply_label_font(MnuBuildContext &ctx, Label *lbl, const mnu::Font &font) {
 	if (!fg.empty()) {
 		settings->set_font_color(parse_color(to_gd(fg)));
 	}
-	lbl->set_label_settings(settings);
+	return settings;
+}
+
+void apply_label_font(MnuBuildContext &ctx, Label *lbl, const mnu::Font &font) {
+	Ref<LabelSettings> settings = make_label_settings(ctx, font);
+	if (settings.is_valid()) {
+		lbl->set_label_settings(settings);
+	}
 }
 
 // --- Positioning ([orig: CUIElement_ParseXMLDefinition @ 0x648120]) ----------
@@ -618,9 +620,9 @@ void apply_position(MnuBuildContext &ctx, Control *node, const mnu::Window &w,
 // 1px outline border drawn with four ColorRects, added after children so it
 // renders on top (port of the outline pass in create_window). The 4-rect recipe
 // is shared via mnu_outline.h so the richer M9 widgets can reuse it.
-void add_outline(Control *node, const std::vector<mnu::Appearance> &apps) {
+void add_outline(MnuBuildContext &ctx, Control *node, const std::vector<mnu::Appearance> &apps) {
 	bool found = false;
-	const Color outline_color = get_appearance_color(apps, "outline", "default", found);
+	const Color outline_color = get_appearance_color(ctx, apps, "outline", "default", found);
 	if (!found) {
 		return;
 	}
@@ -823,7 +825,7 @@ Control *build_container(MnuBuildContext &ctx, const mnu::Window &w, const mnu::
 
 	if (has_color(w.appearances)) {
 		bool found = false;
-		const Color bg_color = get_appearance_color(w.appearances, "color", "default", found);
+		const Color bg_color = get_appearance_color(ctx, w.appearances, "color", "default", found);
 		if (found) {
 			ColorRect *rect = memnew(ColorRect);
 			rect->set_name("ColorBg");
@@ -965,7 +967,7 @@ Control *build_edit(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font 
 	// Colour background -> StyleBoxFlat (LineEdit can't host a render-behind child).
 	if (has_color(w.appearances)) {
 		bool found = false;
-		const Color bg = get_appearance_color(w.appearances, "color", "default", found);
+		const Color bg = get_appearance_color(ctx, w.appearances, "color", "default", found);
 		if (found) {
 			Ref<StyleBoxFlat> sb;
 			sb.instantiate();
@@ -1030,6 +1032,32 @@ String resolve_item_text(MnuBuildContext &ctx, const mnu::Item &item) {
 		}
 	}
 	return to_gd(mnu::strip_hotkey_marker(item.text));
+}
+
+// Resolve one ITEM to its visual: text/id (string), image (the element-text filename
+// as a texture), or color (the element-text hex as an opaque swatch). Mirrors the
+// original item parse + draw: type IMAGE loads the text as a texture, type COLOR reads
+// the text as a base-16 RRGGBB value forced opaque [orig: CUISpinList_ParseXMLDefinition
+// @ 0x64bd10 (wcstoul base 16) + CSpinListWnd_Render @ 0x64b220 (color | 0xFF000000)].
+MnuItemVisual resolve_item(MnuBuildContext &ctx, const mnu::Item &item) {
+	MnuItemVisual v;
+	v.text = resolve_item_text(ctx, item);
+	if (iequals(item.type, "image")) {
+		Ref<Texture2D> tex = resolve_texture(ctx, item.text);
+		if (tex.is_valid()) {
+			v.kind = MnuItemVisual::IMAGE;
+			v.texture = tex;
+		}
+		// An unresolved image falls back to TEXT (the filename), as elsewhere.
+	} else if (iequals(item.type, "color")) {
+		const std::string hex = resolve_color(ctx, item.text);
+		if (!hex.empty()) {
+			v.kind = MnuItemVisual::COLOR;
+			v.color = parse_color(to_gd(hex));
+			v.color.a = 1.0f; // the original forces full alpha (| 0xFF000000)
+		}
+	}
+	return v;
 }
 
 // Theme an ItemList from the widget font + the ITEMS selection colour.
@@ -1102,11 +1130,21 @@ Control *build_multi(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	return list;
 }
 
-// Build one SpinUp/SpinDown button from a parsed SpinButton, positioned relative
-// to the spinlist's own rect (MNU spin positions are absolute board coordinates).
-// The buttons carry no nav actions: they only drive the parent spinlist.
+// Build one SpinUp/SpinDown button from a parsed SpinButton. The buttons carry no
+// nav actions: they only drive the parent spinlist.
+//
+// SPINUP/SPINDOWN POSITION is parent-relative to the spinlist: the original parses
+// each into a child window and accumulates ancestor offsets at draw, so e.g. a right
+// arrow at LEFT=56 sits just right of a 45px-wide value box, a left arrow at LEFT=-27
+// just left of it [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 ->
+// CWnd_AccumulateAncestorOffset @ 0x6465e0]. The buttons are Godot children of the
+// spinlist, so the authored coords are used directly (the prior code subtracted the
+// spinlist origin, throwing the arrows far off and producing the doubled/misplaced
+// look). A missing far edge sizes from the appearance texture (the three-stage POSITION
+// fallback), not a fixed default.
 void add_spin_button(MnuBuildContext &ctx, Control *spin, const mnu::Window &w,
 		const mnu::SpinButton &sb, const char *name) {
+	(void)w;
 	if (!sb.present) {
 		return;
 	}
@@ -1127,50 +1165,56 @@ void add_spin_button(MnuBuildContext &ctx, Control *spin, const mnu::Window &w,
 	if (ctx.edit_mode) {
 		btn->set_disabled(true);
 	}
-	if (sb.position.has_left) {
-		const int base_x = w.position.has_left ? w.position.left : 0;
-		const int base_y = w.position.has_top ? w.position.top : 0;
-		const int rx = sb.position.left - base_x;
-		const int ry = sb.position.top - base_y;
-		const int rw = sb.position.has_right ? sb.position.right - sb.position.left : 16;
-		const int rh = sb.position.has_bottom ? sb.position.bottom - sb.position.top : 12;
-		btn->set_position(Vector2(rx, ry));
-		btn->set_size(Vector2(rw, rh));
+	if (sb.position.has_left || sb.position.has_top) {
+		const int x = sb.position.has_left ? sb.position.left : 0;
+		const int y = sb.position.has_top ? sb.position.top : 0;
+		int ext_w = 0;
+		int ext_h = 0;
+		measure_appearance_extents(ctx, sb.appearances, ext_w, ext_h);
+		int rw = sb.position.has_right ? (sb.position.right - sb.position.left)
+									   : (ext_w > 0 ? ext_w : 16);
+		int rh = sb.position.has_bottom ? (sb.position.bottom - sb.position.top)
+										: (ext_h > 0 ? ext_h : 12);
+		btn->set_position(Vector2(x, y));
+		btn->set_size(Vector2(MAX(rw, 0), MAX(rh, 0)));
 	}
 	spin->add_child(btn);
 }
 
-// Spinner (type="spinlist"): a value Label cycled by SpinUp/SpinDown children.
+// Spinner (type="spinlist"): a value cell (text / image / color swatch) cycled by
+// SpinUp/SpinDown children [orig: CSpinListWnd_Render @ 0x64b220].
 Control *build_spinlist(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
 	NovaMnuSpinList *spin = memnew(NovaMnuSpinList);
 	spin->set_menu(ctx.owner);
 	spin->set_edit_mode(ctx.edit_mode);
 	spin->set_sounds(make_widget_sounds(w.sounds));
 
-	NovaMnuLabel *lbl = memnew(NovaMnuLabel);
-	lbl->set_name("Value");
-	lbl->set_anchors_preset(Control::PRESET_FULL_RECT);
-	lbl->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	apply_label_font(ctx, lbl, font);
+	// The value cell hosts a text label, an image preview, or a color swatch; the
+	// spinlist shows the right one per selected item.
+	Control *value_host = memnew(Control);
+	value_host->set_name("Value");
+	value_host->set_anchors_preset(Control::PRESET_FULL_RECT);
+	value_host->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	const String justify = to_gd(w.items.justify).to_upper();
+	HorizontalAlignment halign = HORIZONTAL_ALIGNMENT_CENTER; // spinlist default is centered
 	if (justify == "LEFT") {
-		lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_LEFT);
+		halign = HORIZONTAL_ALIGNMENT_LEFT;
 	} else if (justify == "RIGHT") {
-		lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
-	} else {
-		lbl->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+		halign = HORIZONTAL_ALIGNMENT_RIGHT;
 	}
-	lbl->set_vertical_alignment(VERTICAL_ALIGNMENT_CENTER);
-	spin->add_child(lbl);
+	mnu_build_item_cell(value_host, halign, make_label_settings(ctx, font));
+	spin->add_child(value_host);
 
-	PackedStringArray values;
+	std::vector<MnuItemVisual> visuals;
 	for (const auto &it : w.items.items) {
-		values.push_back(resolve_item_text(ctx, it));
+		visuals.push_back(resolve_item(ctx, it));
 	}
-	if (ctx.edit_mode && values.is_empty()) {
-		values.push_back("--"); // empty-value placeholder for the WYSIWYG canvas
+	if (ctx.edit_mode && visuals.empty()) {
+		MnuItemVisual placeholder;
+		placeholder.text = "--"; // empty-value placeholder for the WYSIWYG canvas
+		visuals.push_back(placeholder);
 	}
-	spin->set_values(values);
+	spin->set_item_visuals(visuals);
 
 	add_spin_button(ctx, spin, w, w.spinup, "SpinUp");
 	add_spin_button(ctx, spin, w, w.spindown, "SpinDown");
@@ -1234,7 +1278,7 @@ Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 
 	// Popup styling from the LIST_BOX.
 	bool found = false;
-	const Color bgc = get_appearance_color(w.list_box.appearances, "color", "default", found);
+	const Color bgc = get_appearance_color(ctx, w.list_box.appearances, "color", "default", found);
 	if (found) {
 		combo->set_popup_bg_color(bgc);
 	}
@@ -1243,7 +1287,7 @@ Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 		combo->set_popup_bg_texture(bgt);
 	}
 	bool ofound = false;
-	const Color oc = get_appearance_color(w.list_box.appearances, "outline", "default", ofound);
+	const Color oc = get_appearance_color(ctx, w.list_box.appearances, "outline", "default", ofound);
 	if (ofound) {
 		combo->set_popup_outline_color(oc);
 	}
@@ -1503,7 +1547,7 @@ void add_view_background(MnuBuildContext &ctx, Control *parent, const mnu::Windo
 	}
 	if (has_color(w.appearances)) {
 		bool found = false;
-		const Color c = get_appearance_color(w.appearances, "color", "default", found);
+		const Color c = get_appearance_color(ctx, w.appearances, "color", "default", found);
 		if (found) {
 			ColorRect *rect = memnew(ColorRect);
 			rect->set_name("ColorBg");
@@ -1566,9 +1610,33 @@ String resolve_marquee_datasource(MnuBuildContext &ctx, const mnu::Window &w) {
 	return String();
 }
 
-// Scrolling credits (type="marquee"): resolves DATASOURCE text (or STRING / a sample
-// in edit_mode); a host can repush content at runtime.
+// Scrolling credits (type="marquee" / "marquee_wnd"). A marquee_wnd DATASOURCE is a
+// CBIN-encrypted credits config (ENV scroll settings + TEXT entries with ~C/~F/~I/~J/<CR>),
+// not plain text — reading it as a string surfaced the "CBIN" magic instead of credits.
+// A CBIN datasource is routed to the dedicated scroller; a plain-text datasource (e.g.
+// credits.txt) falls through to the simple marquee [orig: marquee_load_credits_from_ini
+// @ 0x65c5a0]. A host can repush content at runtime.
 Control *build_marquee(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font &font) {
+	if (!w.datasource.empty() && ctx.root != nullptr) {
+		const PackedByteArray bytes = ctx.root->read_file(to_gd(w.datasource));
+		Ref<CbinCreditsResource> credits = CbinCreditsResource::from_cbin_bytes(bytes);
+		if (credits.is_valid()) {
+			NovaCreditsPlayer *player = memnew(NovaCreditsPlayer);
+			player->set_name("Credits");
+			player->set_anchors_preset(Control::PRESET_FULL_RECT);
+			player->set_clip_contents(true);
+			player->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+			player->set_credits_resource(credits);
+			if (!ctx.edit_mode) {
+				player->set_autoplay(true); // roll the credits at runtime
+			}
+			return player;
+		}
+		if (bytes.is_empty()) {
+			ctx.unresolved_assets.insert(w.datasource);
+		}
+	}
+
 	NovaMnuMarquee *m = memnew(NovaMnuMarquee);
 	m->set_menu(ctx.owner);
 	m->set_edit_mode(ctx.edit_mode);
@@ -1757,7 +1825,7 @@ Control *build_window(MnuBuildContext &ctx, const mnu::Window &w, NameTracker &n
 	if ((w.type == mnu::WindowType::Window || w.type == mnu::WindowType::Static ||
 				w.type == mnu::WindowType::Label) &&
 			has_outline(w.appearances)) {
-		add_outline(node, w.appearances);
+		add_outline(ctx, node, w.appearances);
 	}
 
 	return node;

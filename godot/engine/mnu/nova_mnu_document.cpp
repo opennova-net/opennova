@@ -311,11 +311,11 @@ Error NovaMnuDocument::load_from_bytes(const PackedByteArray &p_bytes) {
 	}
 	doc_ = std::move(parsed);
 	rebuild_ids();
-	// Derive the design canvas from the authored content so the editor preview
-	// letterboxes real menus correctly: JO menus are 800x600, while the 640x480
-	// default only fit the older / hand-authored ones (the cause of the preview
-	// not filling its pane). The runtime ignores menu_size_; it only drives the
-	// editor fit. Leaves the default untouched if no window carries a position.
+	// Derive the document's content extent (max authored right/bottom) for the editor
+	// and MCP info. NOTE: this is informational only now — both the runtime and the
+	// editor canvas scale a fixed 800x600 design space anamorphically to the screen
+	// [orig: CUIScene_SetScreenScale @ 0x639480], so neither uses menu_size_ for the
+	// fit. Leaves the default untouched if no window carries a position.
 	{
 		int max_r = 0;
 		int max_b = 0;

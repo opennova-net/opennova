@@ -1,35 +1,39 @@
 #pragma once
 
 #include <godot_cpp/classes/control.hpp>
-#include <godot_cpp/classes/label.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include <vector>
+
+#include "mnu_item_cell.h"
 #include "nova_mnu_widget_behavior.h"
 
 namespace godot {
 
 class NovaMnuMenu;
 
-// A spinner (type="spinlist"): a value Label cycled by SpinUp / SpinDown button
-// children. The .mnu seeds a value set; a runtime host replaces it via set_values()
-// (e.g. the cyclable difficulty / option list). Up/down wrap and emit
-// value_changed(index, value) and relay through the owning menu. Inert in edit_mode
-// (the spin buttons are built disabled and nothing is wired).
+// A spinner (type="spinlist"): a value cell cycled by SpinUp / SpinDown button
+// children. Each item is text, an image, or a color swatch (the original draws the
+// selected item three ways: text, a native-size image, or a full-rect color swatch
+// [orig: CSpinListWnd_Render @ 0x64b220]). The .mnu seeds the item set; a runtime host
+// can replace the text values via set_values() (e.g. the cyclable difficulty list).
+// Up/down wrap and emit value_changed(index, value) and relay through the owning menu.
+// Inert in edit_mode (the spin buttons are built disabled and nothing is wired).
 class NovaMnuSpinList : public Control {
 	GDCLASS(NovaMnuSpinList, Control)
 
 private:
 	MnuWidgetBehavior behavior_;
-	PackedStringArray values_;
+	std::vector<MnuItemVisual> visuals_;
 	int index_ = 0;
-	Label *value_label_ = nullptr;
+	Control *value_host_ = nullptr;
 
 	void on_spin_up();
 	void on_sound_mouse_entered();
 	void on_sound_mouse_exited();
 	void on_spin_down();
-	void update_label();
+	void update_value_cell();
 
 protected:
 	static void _bind_methods();
@@ -41,14 +45,16 @@ public:
 	void set_menu(NovaMnuMenu *p_menu) { behavior_.set_menu(p_menu); }
 	void set_edit_mode(bool p_edit) { behavior_.set_edit_mode(p_edit); }
 	void set_sounds(const MnuWidgetSounds &p_sounds) { behavior_.set_sounds(p_sounds); }
+	// The full per-item visuals (text / image / color), from the builder.
+	void set_item_visuals(const std::vector<MnuItemVisual> &p_visuals);
 
 	// --- Runtime data binding ---
-	void set_values(const PackedStringArray &p_values);
+	void set_values(const PackedStringArray &p_values); // text-only items (host)
 	void set_value_index(int p_index); // programmatic; clamps, no emit
 	int get_value_index() const { return index_; }
 	String get_value() const;
-	int get_value_count() const { return values_.size(); }
-	// Advance by delta with wrap-around; updates the label, plays the click sound,
+	int get_value_count() const { return static_cast<int>(visuals_.size()); }
+	// Advance by delta with wrap-around; updates the cell, plays the click sound,
 	// and emits value_changed (the SpinUp/SpinDown buttons drive this).
 	void cycle(int p_delta);
 };

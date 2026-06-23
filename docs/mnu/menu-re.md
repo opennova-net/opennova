@@ -7,7 +7,9 @@ and `godot/engine/mnu` correspond to it.
 Reverse-engineered from `Jointops.exe` (Joint Operations: Combined Arms, imagebase
 `0x400000`, IDB `Jointops.exe.kong.i64`). All addresses are absolute in that image.
 This is the menu-slice grill (2026-06-09), closing the render/sound divergences the
-2026-06-01 format pass deferred.
+2026-06-01 format pass deferred. The 2026-06-23 render grill added the coordinate system,
+per-item image/color rendering, spinlist arrows, the combo dropdown, the marquee CBIN
+credits, and the monogram (parsed-but-not-drawn) — see the sections below.
 
 ---
 
@@ -68,6 +70,121 @@ border hanging OUTSIDE the window rect by `SIZE` and pulled back by the authored
 modulated by `0x7F7F7F` (neutral in the modulate-2x fixed-function path -> no tint).
 Reimpl: `add_frame` in `nova_mnu_builder.cpp` (8 `TextureRect` pieces + a tiled fill).
 The old 4x4 mirrored-corner NinePatch bake with hardcoded 16/24 insets is retired.
+
+When NEITHER the stencil nor the brush texture resolves, the original draws nothing:
+every draw in `CUIElement_DrawFrame` is guarded by a successful texture load
+(`sub_654370 >= 0`). The reimpl matches this at runtime (no panel); the editor keeps a
+faint placeholder so an author can still see the framed region. The old opaque dark
+ColorRect fallback (the "big black box" on the in-game ESC menu when `BORDER2.tga`/
+`BOXTILE.tga` were absent) is retired.
+
+### MONOGRAM is parsed but NOT drawn
+
+`<FRAME><MONOGRAM>` is parsed and round-tripped, but the shipped engine never renders
+the menu monogram. The window render path draws frame + appearance(s) + text + children
+only `[orig: CStaticWnd_Render @ 0x657b10]`, and `CUIElement_DrawFrame @ 0x64a210` has no
+monogram pass. The only `monogram.tga` reference in the binary is the loading screen
+(`Game_StartMission @ 0x525aa3`), not menus. The earlier reimpl heuristic (a centered
+`Monogram` `TextureRect`) produced a stray glyph in the middle of every framed panel and
+is removed. The deferred "subtype 0x600" note below is resolved: there is no menu
+monogram draw to witness.
+
+## Coordinate system / scale `[orig: CUIScene_SetScreenScale @ 0x639480]`
+
+Menus are authored in a **fixed 800x600 virtual design space** and scaled to the actual
+back-buffer with **independent X/Y factors (anamorphic fill)** — no aspect preservation,
+no letterbox bars, origin (0,0). On a widescreen display the 4:3 menu is stretched
+horizontally, as in the retail game. The scene scale is computed on every video-mode
+change:
+
+```
+scene.scaleX = screenWidth  * 0.00125      // = 1/800   [orig: CUIScene_SetScreenScale @ 0x639480]
+scene.scaleY = screenHeight * 0.0016666667 // = 1/600
+```
+
+and propagated to every widget by `CWnd_SetScaleRecursive @ 0x646c60` (writes
+`elem+264`=scaleX, `elem+268`=scaleY, recursing to children); the caller is
+`apply_video_mode_change @ 0x55a590`, which passes the real new resolution. At draw, each
+element rect is multiplied by the scale and truncated to int
+(`CUIElement_DrawStretchedTexture @ 0x647d40`), with ancestor offsets accumulated up the
+parent chain (`CWnd_AccumulateAncestorOffset @ 0x6465e0`).
+
+Reimpl: the menu-root CanvasItem is given an 800x600 box and a non-uniform
+`scale = (screenW/800, screenH/600)`, position 0 — authored coords stay in 800x600 design
+space (`menu_shell.gd::_recompute_fit`, `mnu_canvas.gd::_recompute_fit`). The old reimpl
+used a hardcoded 640x480 board with uniform letterbox + centering, which overhung and
+mis-centered the 800x600 `jo_game.mnu` (the badly-placed ESC menu) and letterboxed every
+menu. `D-MNU-4`: the original truncates each scaled quad to int per element; the reimpl
+applies one float CanvasItem scale, a sub-pixel divergence (accepted).
+
+## Widget item rendering `[orig: CSpinListWnd_Render @ 0x64b220; CUISpinList_ParseXMLDefinition @ 0x64bd10]`
+
+`<ITEMS>`/`<ITEM type="id|image|color">` rows render three ways; the selected item is
+drawn by the widget's render method:
+
+- **id / text**: the string (id resolved through the RTXT table), drawn as text.
+- **image**: the element TEXT is a texture filename, loaded into the item entry
+  (`entry+48`) at parse (`CUISpinList_ParseXMLDefinition`). The selected image draws at its
+  **native size**, aligned in the widget rect per JUSTIFY/VJUSTIFY (spinlist default is
+  centre/centre) `[orig: CSpinListWnd_Render @ 0x64b220 -> CUIElement_DrawTextureNative
+  @ 0x647e40, aligned by the native texture extents]`.
+- **color**: the element TEXT is a base-16 `RRGGBB` value (`wcstoul(text, 16)` at parse),
+  drawn as a **full-rect swatch** forced opaque (`color | 0xFF000000`)
+  `[orig: CSpinListWnd_Render @ 0x64b220]`.
+
+Reimpl: `resolve_item` -> `MnuItemVisual {kind, text, texture, color}`; the shared
+`mnu_render_item_cell` (`mnu_item_cell.h`) hosts a Label / native-centered TextureRect /
+full-rect ColorRect and shows the one matching the current item, swapping as the spinlist
+cycles. The old code ran every item through `resolve_item_text` and drew the raw string,
+so an image item showed its filename (`cross01.tga`) and a color item showed its hex
+(`FFFFFF`) as text — the crosshair-preview and color-picker bugs. The same model backs
+combo/list items (a host can populate text-only at runtime). `D-MNU-5`: shipped menus use
+image/color items only in spinlists; the combo closed cell still renders text-only (its
+LIST_BOX items are all `type="id"`).
+
+### `%VAR%` colors in APPEARANCE
+
+A `<APPEARANCE type="color">` value is frequently a stylesheet variable (e.g.
+`%COLOR_BLACK%` on a LIST_BOX background, `%TRIM_COLOR%` on an outline). The reimpl now
+resolves the var through the stylesheet before parsing the hex
+(`get_appearance_color` -> `resolve_color`, `[orig: NapiXML_ExpandVariablesInText
+@ 0x63a000]`). Previously every `%VAR%` color appearance silently failed, leaving combo
+dropdown popups, container backgrounds, and outlines transparent (the "stacked-inline /
+overlapping" video-options dropdowns).
+
+## Spinlist arrows `[orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0]`
+
+`<SPINUP>`/`<SPINDOWN>` are full child windows of the spinlist (objects at `this+816` /
+`this+1588`), each carrying its own `<POSITION>` + `<APPEARANCE>`. The POSITION is
+**parent-relative to the spinlist** (the original adds them as children and accumulates
+ancestor offsets at draw, `CWnd_AccumulateAncestorOffset @ 0x6465e0`), so e.g.
+`XHAIR_COLOR` (a 45px box at LEFT=210) places its right arrow at LEFT=56 (just right of
+the box) and its left arrow at LEFT=-27 (just left). Reimpl: `add_spin_button` uses the
+authored coords directly and sizes a missing far edge from the appearance texture (the
+three-stage POSITION fallback). The old code subtracted the spinlist origin, throwing the
+arrows ~150px left and producing the doubled/misplaced look.
+
+## Combo dropdown `[orig: CComboWnd @ 0x65be40; CComboWnd_Render @ 0x65bfd0]`
+
+A combobox is a closed `CButtonWnd` (showing the selected item) plus an embedded
+`CListWnd` popup (`this+1536`), shown/hidden with its own `<LIST_BOX>` POSITION + clip and
+appearance background. Reimpl `NovaMnuCombo`: a TextureButton + a clamped, scrollable
+in-tree popup styled from the LIST_BOX. The visible bug was the popup background (a
+`%COLOR_BLACK%` color appearance) not resolving — fixed by the `%VAR%` color change above.
+
+## Marquee / credits `[orig: CMarqueeWnd @ 0x65c430; marquee_load_credits_from_ini @ 0x65c5a0]`
+
+A `marquee_wnd`'s `<DATASOURCE>` (e.g. `nlist.kda`) is a CBIN-encrypted credits config,
+NOT plain text: `ConfigFile_LoadGlobal` reads an `[ENV]` section (`SCROLL_RATE`,
+`CENTER_X`, `VERTICAL_SPACE`) and a `[TEXT]` section whose lines are AES-decrypted and
+carry formatting codes (`~C` colour, `~F` font, `~I`/`~F` image, `~J` justify, `<CR>`
+newline) `[orig: marquee_load_credits_from_ini @ 0x65c5a0]`. Reimpl: a CBIN datasource is
+routed to the existing `NovaCreditsPlayer` (fed by a `CbinCreditsResource` decoded from
+the file's bytes via `CbinCreditsResource::from_cbin_bytes`, so it works from a PFF); a
+plain-text datasource keeps the simple `NovaMnuMarquee`. The old code read the binary
+`.kda` as a string, so the credits showed the literal `CBIN` magic and did not scroll.
+`D-MNU-6`: the CBIN credits' custom fonts/textures are not yet resolved from the resource
+root (text scrolls with the default font); a follow-up.
 
 ## Sound `[orig: widget_process_mouse_event @ 0x647a00]`
 
@@ -162,6 +279,12 @@ three-stage POSITION layout + texture-into-rect, the 8-piece frame + data-driven
 stencil insets, per-state sound slots + per-element bank resolution + the set/layer
 play and master volume, the XML entity policy, and the format round-trip (ADR 0002).
 
+**matching** (2026-06-23 render grill): the 800x600 anamorphic coordinate system, the
+draw-nothing frame fallback, MONOGRAM-parsed-but-not-drawn, spinlist/list/combo item
+rendering (text / native image / full-rect color swatch), `%VAR%` color appearances,
+spinlist SPINUP/SPINDOWN parent-relative geometry, the combo closed-cell + LIST_BOX
+popup, and the marquee_wnd CBIN-credits datasource.
+
 Accepted/divergent (each a documented decision, not a defect):
 
 - **D-MNU-1 (`%VAR%` mechanism):** per-field build-time expansion vs whole-buffer
@@ -173,11 +296,19 @@ Accepted/divergent (each a documented decision, not a defect):
 - **D-MNU-3 (strictness / authoring superset):** the format layer preserves attributes
   the runtime ignores (ADR 0002) and a host `sound_profile` fallback services file-less
   `<SOUND>` nodes the engine would fail to parse.
+- **D-MNU-4 (per-quad int truncation):** the original truncates each scaled element rect
+  to int per element (`@ 0x647d40`); the reimpl applies one float CanvasItem scale to the
+  whole menu tree - a sub-pixel divergence only.
+- **D-MNU-5 (item rendering scope):** shipped menus use image/color items only in
+  spinlists; the combo closed cell + popup render text-only (their LIST_BOX items are all
+  `type="id"`). The shared `resolve_item` model can back combo/list image/color if a
+  future menu needs it.
+- **D-MNU-6 (CBIN credits assets):** the marquee CBIN credits scroll with the default
+  font; resolving the credits' custom `~F` fonts / `~I` images from the resource root
+  (not a disk dir) is a follow-up.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
-- MONOGRAM frame-overlay placement (subtype 0x600, drawn separately from the frame
-  pass) - currently a centered heuristic.
 - The hotkey consume-on-effect vtable path (`CUIWidget_HandleScriptedAction @ 0x649790`,
   no direct xrefs) and MUSICVAR host dedup policy.
 - `GLB_TABLE/RADIOEDIT/LAN_LIST/GOPHER` runtime behavior (multiplayer-browser widgets;
@@ -214,12 +345,25 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `libs/mnu/src/mnu.cpp` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `libs/mnu/src/mnu.cpp` |
 | `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `libs/mnu/src/mnu.cpp` |
-| `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill) |
+| `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill; draws nothing when textures absent; no monogram) |
+| `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); confirms the menu monogram is never drawn |
+| `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `menu_shell.gd` / `mnu_canvas.gd` |
+| `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
+| `CUIElement_DrawStretchedTexture @ 0x647d40` | `apply_position` texture-into-rect; the scaled-rect int truncation is D-MNU-4 |
+| `CWnd_AccumulateAncestorOffset @ 0x6465e0` (was `sub_6465E0`) | Godot parent-child nesting (positions are parent-relative) |
+| `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
+| `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `add_spin_button` (parent-relative SPINUP/SPINDOWN) — `nova_mnu_builder.cpp` |
+| `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` |
+| `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
 
-IDB state note (2026-06-10): `0x64ad90` is still unnamed (`sub_64AD90`) and `0x649790`
-currently folds into the `0x648120` function body (vtable-reached, no direct xrefs);
-naming/splitting them is part of the proposed edits.
+IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
+CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `sub_6394E0 ->
+CUIScene_GetActiveScreenName`, `sub_647E40 -> CUIElement_DrawTextureNative`, `sub_654E60
+-> CTextureManager_DrawScaledRect`, `sub_65BE40 -> CComboWnd_Construct`, and `sub_65CEB0
+-> CMarqueeWnd_ParseXMLDefinition` (all anchored). `0x64ad90` is still unnamed
+(`sub_64AD90`) and `0x649790` folds into the `0x648120` body (vtable-reached, no direct
+xrefs); naming/splitting them remains a proposed edit.
 
 ### Element struct fields (witnessed offsets)
 

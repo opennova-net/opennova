@@ -7,8 +7,8 @@
 using namespace godot;
 
 void NovaMnuSpinList::_ready() {
-	value_label_ = Object::cast_to<Label>(get_node_or_null(NodePath("Value")));
-	update_label();
+	value_host_ = Object::cast_to<Control>(get_node_or_null(NodePath("Value")));
+	update_value_cell();
 	if (behavior_.edit_mode) {
 		// Inert while authoring: the value shows but the buttons are not wired.
 		return;
@@ -40,49 +40,69 @@ void NovaMnuSpinList::on_spin_down() {
 	cycle(-1);
 }
 
-void NovaMnuSpinList::update_label() {
-	if (value_label_ != nullptr) {
-		value_label_->set_text(get_value());
+void NovaMnuSpinList::update_value_cell() {
+	if (value_host_ == nullptr) {
+		return;
 	}
+	if (index_ >= 0 && index_ < static_cast<int>(visuals_.size())) {
+		mnu_show_item_cell(value_host_, visuals_[index_]);
+	} else {
+		mnu_show_item_cell(value_host_, MnuItemVisual());
+	}
+}
+
+void NovaMnuSpinList::set_item_visuals(const std::vector<MnuItemVisual> &p_visuals) {
+	visuals_ = p_visuals;
+	if (index_ >= static_cast<int>(visuals_.size())) {
+		index_ = visuals_.empty() ? 0 : static_cast<int>(visuals_.size()) - 1;
+	}
+	update_value_cell();
 }
 
 void NovaMnuSpinList::set_values(const PackedStringArray &p_values) {
-	values_ = p_values;
-	if (index_ >= values_.size()) {
-		index_ = values_.is_empty() ? 0 : values_.size() - 1;
+	// Host-supplied text values: build text-kind visuals so the cell shows them.
+	visuals_.clear();
+	for (int i = 0; i < p_values.size(); ++i) {
+		MnuItemVisual v;
+		v.kind = MnuItemVisual::TEXT;
+		v.text = p_values[i];
+		visuals_.push_back(v);
 	}
-	update_label();
+	if (index_ >= static_cast<int>(visuals_.size())) {
+		index_ = visuals_.empty() ? 0 : static_cast<int>(visuals_.size()) - 1;
+	}
+	update_value_cell();
 }
 
 void NovaMnuSpinList::set_value_index(int p_index) {
-	if (values_.is_empty()) {
+	if (visuals_.empty()) {
 		index_ = 0;
-		update_label();
+		update_value_cell();
 		return;
 	}
 	if (p_index < 0) {
 		p_index = 0;
-	} else if (p_index >= values_.size()) {
-		p_index = values_.size() - 1;
+	} else if (p_index >= static_cast<int>(visuals_.size())) {
+		p_index = static_cast<int>(visuals_.size()) - 1;
 	}
 	index_ = p_index;
-	update_label();
+	update_value_cell();
 }
 
 String NovaMnuSpinList::get_value() const {
-	if (values_.is_empty() || index_ < 0 || index_ >= values_.size()) {
+	if (index_ < 0 || index_ >= static_cast<int>(visuals_.size())) {
 		return String();
 	}
-	return values_[index_];
+	return visuals_[index_].text;
 }
 
 void NovaMnuSpinList::cycle(int p_delta) {
-	if (values_.is_empty()) {
+	if (visuals_.empty()) {
 		return;
 	}
-	const int n = values_.size();
+	const int n = static_cast<int>(visuals_.size());
 	index_ = ((index_ + p_delta) % n + n) % n; // wrap, handling negative delta
-	update_label();
+	update_value_cell();
 	behavior_.play_click();
 	emit_signal("value_changed", index_, get_value());
 	behavior_.notify_value(String(get_name()), "spinlist", index_, get_value());

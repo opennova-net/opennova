@@ -177,7 +177,7 @@ func test_spinlist_structure_and_values() -> void:
 	assert_true(spin is Control, "NovaMnuSpinList is a Control")
 	assert_eq(spin.get_value_count(), 3, "three values seeded from ITEMS")
 	assert_eq(spin.get_value(), "OPTION_LOW", "starts on first value")
-	assert_not_null(spin.find_child("Value", true, false), "has a Value label")
+	assert_not_null(spin.find_child("Value", true, false), "has a Value cell host")
 	var up := spin.find_child("SpinUp", true, false)
 	var down := spin.find_child("SpinDown", true, false)
 	assert_true(up is NovaMnuButton, "SpinUp built from SPINUP art")
@@ -199,8 +199,39 @@ func test_spinlist_cycle_wraps_and_emits() -> void:
 	spin.set_value_index(2)
 	spin.cycle(1)
 	assert_eq(spin.get_value_index(), 0, "wraps past the end to the start")
-	var label := spin.find_child("Value", true, false) as Label
-	assert_eq(label.text, "OPTION_LOW", "Value label tracks the current value")
+	# Text items render in the cell's CellLabel (image/color items use CellImage/CellSwatch).
+	var label := spin.find_child("CellLabel", true, false) as Label
+	assert_eq(label.text, "OPTION_LOW", "Value cell label tracks the current value")
+
+
+func test_spinlist_color_items_render_swatches() -> void:
+	# type="color" items draw as a full-rect color swatch; the color is the element-text
+	# hex (RRGGBB), forced opaque [orig: CSpinListWnd_Render @ 0x64b220].
+	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
+		"<WINDOW type=\"spinlist\" name=\"COLOR\">" + \
+		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>60</RIGHT><BOTTOM>30</BOTTOM></POSITION>" + \
+		"<ITEMS><ITEM type=\"color\" value=\"16711680\">FF0000</ITEM>" + \
+		"<ITEM type=\"color\" value=\"65280\">00FF00</ITEM></ITEMS>" + \
+		"</WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic color spinlist parses")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var spin := menu.find_child("COLOR", true, false)
+	assert_true(spin is NovaMnuSpinList, "color spinlist builds")
+	var swatch := spin.find_child("CellSwatch", true, false) as ColorRect
+	assert_not_null(swatch, "color item renders a CellSwatch")
+	if swatch == null:
+		return
+	assert_true(swatch.visible, "swatch shown for a color item")
+	assert_eq(swatch.color, Color(1, 0, 0, 1), "first color is opaque red (FF0000)")
+	var cell_label := spin.find_child("CellLabel", true, false) as Label
+	assert_false(cell_label.visible, "the text label is hidden for a color item")
+	spin.cycle(1)
+	assert_eq(swatch.color, Color(0, 1, 0, 1), "swatch follows the selection (00FF00)")
 
 
 func test_spinlist_button_press_cycles_at_runtime() -> void:

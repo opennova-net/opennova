@@ -23,6 +23,15 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 # menu's set_music_var_index default and the engine tests' set_var(0, ...) path).
 const MUSIC_VAR_INDEX := 0
 
+# Menus are authored in a fixed 800x600 virtual design space and scaled to the
+# screen by independent X/Y factors (anamorphic fill, no letterbox, origin 0,0):
+# the original computes scaleX = screenW/800, scaleY = screenH/600 and applies it
+# to every widget rect at draw [orig: CUIScene_SetScreenScale @ 0x639480, constants
+# 0.00125 = 1/800 and 0.0016666667 = 1/600; recomputed on resolution change in
+# apply_video_mode_change @ 0x55a590]. We reproduce it by scaling the menu root
+# CanvasItem; authored coords stay in 800x600 space.
+const DESIGN_SIZE := Vector2(800, 600)
+
 # Friendly labels for known expansions. The list item + persisted key stay the raw
 # folder name (e.g. "jox01"); unknown expansions display their raw folder name.
 const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
@@ -104,7 +113,6 @@ var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back s
 var _current_file := ""
 var _selected_mission := ""
 var _selected_expansion := ""
-var _menu_size := Vector2(640, 480)
 var _in_game := false
 var _ready_done := false
 # Optional delegate that owns game-specific menus the generic shell does not handle
@@ -171,6 +179,11 @@ func _assemble_assets() -> void:
 		_menu.set_sound_profile(_sound_profile)
 	_menu.set_music_director(_director)
 	_menu.set_music_var_index(MUSIC_VAR_INDEX)
+	# Pin the menu root at the top-left, sized to the 800x600 design space; the
+	# anamorphic scale is applied per-resize in _recompute_fit. Top-left anchors keep
+	# the explicit size from being overridden, so PRESET_FULL_RECT screens fill 800x600.
+	_menu.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_menu.size = DESIGN_SIZE
 	add_child(_menu)
 
 	# Connect once on the persistent menu node (the child screen tree is rebuilt
@@ -194,7 +207,6 @@ func open_menu(file: String, target_screen: String) -> bool:
 		return false
 	_current_file = file
 	_selected_mission = ""
-	_menu_size = Vector2(doc.get_menu_size())
 	# Shipped same-file screen jumps name their own file (mp.mnu does); the menu
 	# routes them as in-menu navigation by comparing against its own basename.
 	_menu.set_menu_file(file.get_file())
@@ -613,17 +625,20 @@ func _load_music(path: String) -> NovaMusicScript:
 	return res as NovaMusicScript
 
 
-# --- Layout (uniform letterbox fit of the menu's design size to the window) ----
-
+# --- Layout (anamorphic fill of the 800x600 design space to the window) --------
+#
+# Faithful to the original: the 800x600 design space is stretched to fill the whole
+# window with independent X/Y factors (no aspect preservation, no letterbox bars,
+# origin 0,0). On a widescreen display the 4:3 menu is stretched horizontally, as in
+# the retail game [orig: CUIScene_SetScreenScale @ 0x639480].
 func _recompute_fit(_unused: Variant = null) -> void:
-	if _menu == null or _menu_size.x <= 0.0 or _menu_size.y <= 0.0:
+	if _menu == null:
 		return
 	if size.x <= 1.0 or size.y <= 1.0:
 		return
-	var fit := minf(size.x / _menu_size.x, size.y / _menu_size.y)
-	fit = maxf(fit, 0.01)
-	_menu.scale = Vector2(fit, fit)
-	_menu.position = (size - _menu_size * fit) * 0.5
+	_menu.position = Vector2.ZERO
+	_menu.size = DESIGN_SIZE
+	_menu.scale = Vector2(size.x / DESIGN_SIZE.x, size.y / DESIGN_SIZE.y)
 
 
 # --- Misc helpers / accessors -------------------------------------------------

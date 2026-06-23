@@ -207,8 +207,8 @@ func test_canvas_builds_inert_preview_with_single_screen() -> void:
 	assert_eq(screens, 2, "Both screens are built.")
 	assert_eq(visible, 1, "Exactly one screen is visible in the preview.")
 
-	# Uniform letterbox fit: min(320/640, 240/480) == 0.5.
-	assert_almost_eq(preview.scale.x, 0.5, 0.01, "Preview scales to fit the canvas (letterbox).")
+	# Anamorphic fill: the 800x600 board fills the 320x240 canvas -> 320/800 == 240/600 == 0.4.
+	assert_almost_eq(preview.scale.x, 0.4, 0.01, "Preview scales to fill the canvas (anamorphic).")
 
 	canvas.show_screen_named("OPTIONS")
 	var options_visible := false

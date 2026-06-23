@@ -136,6 +136,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/nova_mnu_map.cpp
     mnu/nova_mnu_globe.cpp
     mnu/nova_mnu_marquee.cpp
+    mnu/mnu_item_cell.cpp
     mnu/nova_mnu_builder.cpp
     mnu/nova_mnu_menu.cpp
 )

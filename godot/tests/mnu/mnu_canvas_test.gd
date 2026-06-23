@@ -21,13 +21,13 @@ func _first_root_child(doc: NovaMnuDocument, index: int) -> int:
 	return doc.get_child_ids(root)[index]
 
 
-# A canvas sized exactly to the 640x480 board, so the letterbox fit is identity
+# A canvas sized exactly to the 800x600 design board, so the anamorphic fit is identity
 # (scale 1, offset 0): a canvas point equals a board point. Returns [canvas, doc].
 func _canvas_with_fixture() -> Array:
 	var doc := _load_doc()
 	var canvas = MnuCanvasScript.new()
 	add_child_autofree(canvas)
-	canvas.size = Vector2(640, 480)
+	canvas.size = Vector2(800, 600)
 	await get_tree().process_frame
 	canvas.set_menu(doc, null, null)
 	await get_tree().process_frame
@@ -152,7 +152,7 @@ func test_reset_view_restores_identity_fit() -> void:
 	var canvas = pair[0]
 	canvas._zoom_at(Vector2(200, 200), 4.0)
 	canvas.reset_view()
-	# Back to the 640x480 identity fit: a canvas point equals its board point.
+	# Back to the 800x600 identity fit: a canvas point equals its board point.
 	assert_almost_eq(canvas._canvas_to_board(Vector2(300, 150)).x, 300.0, 0.01, "Fit reset restores identity x.")
 	assert_almost_eq(canvas._canvas_to_board(Vector2(300, 150)).y, 150.0, 0.01, "Fit reset restores identity y.")
 
@@ -266,7 +266,7 @@ func test_keyboard_nudge_guarded_by_screen_selection() -> void:
 # --- Pure snap helper -----------------------------------------------------------
 
 func test_snap_rect_pure_helper() -> void:
-	var sz := Vector2(640, 480)
+	var sz := Vector2(800, 600)
 	# Both coords are clear of the board edges, so they round to the grid (24->24,
 	# 11->8); a coord within SNAP_EDGE_TOL of 0/extent would snap to the edge instead.
 	var moved = MnuCanvasScript._snap_rect(Rect2(11, 21, 100, 30), MnuCanvasScript.Gesture.MOVE, -1, sz, true)
@@ -290,13 +290,13 @@ func test_snap_rect_pure_helper() -> void:
 
 func test_rect_off_board_pure_helper() -> void:
 	var pair = await _canvas_with_fixture()
-	var canvas = pair[0]  # board derived to 640x480
+	var canvas = pair[0]  # board is the 800x600 design space
 	assert_false(canvas._rect_off_board(Rect2(10, 10, 100, 30)), "A rect fully inside the board is on-board.")
-	assert_true(canvas._rect_off_board(Rect2(600, 10, 100, 30)), "A rect overhanging the right edge is off-board.")
-	assert_true(canvas._rect_off_board(Rect2(10, 470, 40, 40)), "A rect overhanging the bottom edge is off-board.")
+	assert_true(canvas._rect_off_board(Rect2(760, 10, 100, 30)), "A rect overhanging the right edge is off-board.")
+	assert_true(canvas._rect_off_board(Rect2(10, 580, 40, 40)), "A rect overhanging the bottom edge is off-board.")
 	assert_true(canvas._rect_off_board(Rect2(-5, 10, 20, 20)), "A negative origin is off-board.")
 	assert_false(canvas._rect_off_board(Rect2(50, 50, 0, 0)), "A zero-size rect is skipped (not flagged).")
-	assert_false(canvas._rect_off_board(Rect2(0, 0, 640, 480)), "An exact board-fit is on-board (inclusive).")
+	assert_false(canvas._rect_off_board(Rect2(0, 0, 800, 600)), "An exact board-fit is on-board (inclusive).")
 
 
 func test_is_selection_off_board_tracks_selection() -> void:
@@ -306,7 +306,7 @@ func test_is_selection_off_board_tracks_selection() -> void:
 	var start_id := _first_root_child(doc, 1)  # StartBtn (270,120,100,30), on-board
 	canvas.set_selected(start_id)
 	assert_false(canvas.is_selection_off_board(), "An on-board selection is not flagged.")
-	doc.set_window_rect(start_id, Rect2(600, 120, 100, 30))  # right edge 700 > 640
+	doc.set_window_rect(start_id, Rect2(760, 120, 100, 30))  # right edge 860 > 800
 	canvas.set_selected(start_id)
 	assert_true(canvas.is_selection_off_board(), "A selection pushed past the edge is flagged.")
 
