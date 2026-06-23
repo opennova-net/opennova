@@ -48,7 +48,7 @@ behavior is summarized and cited.
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
 | Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (engine-research; HUD port in flight) |
-| Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed |
+| Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown geometry/row-height grill, D-MNU-7/8 fixed) |
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | relanded on the `web-nw-for-real-master` integration branch (see `plan/`) |

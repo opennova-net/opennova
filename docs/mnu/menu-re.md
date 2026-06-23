@@ -177,13 +177,31 @@ authored coords directly and sizes a missing far edge from the appearance textur
 three-stage POSITION fallback). The old code subtracted the spinlist origin, throwing the
 arrows ~150px left and producing the doubled/misplaced look.
 
-## Combo dropdown `[orig: CComboWnd @ 0x65be40; CComboWnd_Render @ 0x65bfd0]`
+## Combo dropdown `[orig: CComboWnd @ 0x65be40; CComboWnd_Render @ 0x65bfd0; CComboWnd_ParseXMLDefinition @ 0x65c0d0]`
 
-A combobox is a closed `CButtonWnd` (showing the selected item) plus an embedded
-`CListWnd` popup (`this+1536`), shown/hidden with its own `<LIST_BOX>` POSITION + clip and
-appearance background. Reimpl `NovaMnuCombo`: a TextureButton + a clamped, scrollable
-in-tree popup styled from the LIST_BOX. The visible bug was the popup background (a
-`%COLOR_BLACK%` color appearance) not resolving — fixed by the `%VAR%` color change above.
+A combobox is a closed `CButtonWnd` (`this+764`, showing the selected item) plus an
+embedded `CListWnd` popup (`this+1536`) `[orig: CComboWnd ctor @ 0x65be40]`. The parse
+`[orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0]` delegates the `<LIST_BOX>` content to
+that embedded list, whose own window RECT (`this+13`) is set from the authored
+`<LIST_BOX>` `<POSITION>` — combo-relative, in 800x600 design space. So the dropdown is a
+**fixed authored rect**, not a runtime-computed box: it can sit below, beside, or above
+the combo (`player.mnu` PLAYERVOICE authors a negative `TOP` to open upward).
+
+The list render `[orig: CListWnd_DrawItems @ 0x643f30]` lays rows out inside `row_rect =
+this+13`, advancing by `row_height` per row and truncating each row's text to the rect
+width, with a `<SCROLLBAR>` child for overflow. The row height is the font "W" glyph
+height `[orig: sub_653680 @ 0x653680]`, overridden by `this+201` (the `<MI>` /
+`<MIN_ITEM_HEIGHT>` value; ctor default `-1` `[orig: CListWnd ctor @ 0x643bb0]`) only when
+`>= 0`.
+
+Reimpl `NovaMnuCombo`: a TextureButton + an in-tree layered popup. `build_combo` now
+passes the authored `list_box.position` via `set_popup_rect`, and `open_popup` opens at
+that rect (falling back to a below-combo clamped/scrollable box only for host-built combos
+with no authored LIST_BOX, e.g. server browsers); `effective_item_height` uses the
+authored `MIN_ITEM_HEIGHT`, else the item font line height, else 16. Two earlier bugs are
+fixed: the popup background (`%COLOR_BLACK%`/`%SEMIOPAQUE_BLACK%` color appearance) not
+resolving (the `%VAR%` color change above), and the popup geometry being recomputed below
+the combo instead of using the authored rect — see **D-MNU-7** and **D-MNU-8**.
 
 ## Marquee / credits `[orig: CMarqueeWnd @ 0x65c430; marquee_load_credits_from_ini @ 0x65c5a0]`
 
@@ -371,6 +389,16 @@ popup, the marquee_wnd CBIN-credits datasource, and the `DRAW_FRAME` frame-draw 
 (`elem+0x134` in `CStaticWnd_Render`; the old own-frame-drawn-unconditionally bug that put
 full-window camo behind the in-game ESC menu and options screen is fixed).
 
+**matching** (2026-06-23c combo-dropdown grill): the combobox dropdown is the embedded
+`CListWnd` opened at the authored `<LIST_BOX>` POSITION rect (`CComboWnd` ctor `@ 0x65be40`,
+`CComboWnd_ParseXMLDefinition @ 0x65c0d0`, list render `CListWnd_DrawItems @ 0x643f30`), with
+the row height from `<MIN_ITEM_HEIGHT>`/font and below/beside/upward placement honored. The
+old reimpl recomputed the popup below the combo, which dropped `player.mnu`'s semi-transparent
+NATIONALITY list over the sibling DIVISION/COMBO_LIST combos (text bled through) — fixed
+(D-MNU-7); the hardcoded 16px row-height default is replaced by the font/authored height
+(D-MNU-8). Pinned by `mnu_combo_test.gd::test_combo_popup_uses_authored_listbox_rect` and
+`::test_combo_popup_fallback_when_no_listbox_rect`.
+
 **matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
 Class-id->name table + per-device row build), the byte-exact default keyboard bindings, the Control
 column format (key-name decode + `Ctrl-`/`Shift-`/`OR`), and the three table-render fixes (header
@@ -407,6 +435,27 @@ Accepted/divergent (each a documented decision, not a defect):
 - **D-MNU-6 (CBIN credits assets):** the marquee CBIN credits scroll with the default
   font; resolving the credits' custom `~F` fonts / `~I` images from the resource root
   (not a disk dir) is a follow-up.
+- **D-MNU-7 (combo popup geometry) — FIXED 2026-06-23c:** the original dropdown is the
+  embedded `CListWnd` (`this+1536`) whose window RECT (`this+13`) is the authored
+  `<LIST_BOX>` `<POSITION>` (combo-relative, design space), drawn over whatever sits
+  beneath `[orig: CComboWnd ctor @ 0x65be40; CComboWnd_ParseXMLDefinition @ 0x65c0d0;
+  CListWnd_DrawItems @ 0x643f30]`. The reimpl ignored `list_box.position` and recomputed
+  the popup at `(0, combo.height)` with `width = combo.width` and a height clamped against
+  `get_viewport_rect()` (window pixels mixed with design space). For `player.mnu`
+  NATIONALITY (LIST_BOX POSITION `0,65 -> 214,306`, `%SEMIOPAQUE_BLACK%` background) this
+  placed the translucent list at `y=20` over the sibling DIVISION/COMBO_LIST combos, whose
+  text bled through — the "overlapping dropdown" look. Fixed: `build_combo` passes
+  `list_box.position` via `NovaMnuCombo::set_popup_rect`; `open_popup` uses the authored
+  rect when present (which also gives PLAYERVOICE its upward open), else the below-combo
+  fallback for host-built combos.
+- **D-MNU-8 (combo row-height default) — FIXED 2026-06-23c:** the list row height is the
+  font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> sub_653680 @ 0x653680]`,
+  overridden by `this+201` (the `<MI>`/`<MIN_ITEM_HEIGHT>` value; ctor default `-1`
+  `[orig: CListWnd ctor @ 0x643bb0]`) only when `>= 0`. The reimpl defaulted to a hardcoded
+  16px. Fixed: `NovaMnuCombo::effective_item_height` returns the authored MIN_ITEM_HEIGHT,
+  else the item font line height, else 16. The shipped `player.mnu` lists author
+  MIN_ITEM_HEIGHT=20, so they were already correct; the default fallback is the latent
+  divergence this closes.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
@@ -415,6 +464,10 @@ Deferred (unwitnessed or out of bar; backlog, not blocking):
 - `GLB_TABLE/RADIOEDIT/LAN_LIST/GOPHER` runtime behavior (multiplayer-browser widgets;
   build as containers, behavior rides with the net workspace).
 - Real 3D globe; the table SCROLLBAR delegate `(*(tableWnd[244]+60)) @ 0x643b22`.
+- Combo dropdown scrollbar art: the original draws the authored `<SCROLLBAR>` sprites
+  (`m_scrolV.tga` / `shuttlev.tga` / arrows) inside the listbox; the reimpl wraps the rows
+  in a Godot `ScrollContainer` (default scrollbar). Geometry/rows now match (D-MNU-7/8);
+  skinning the scrollbar to the authored art is the remaining fidelity gap.
 
 ---
 
@@ -445,7 +498,10 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL `ORIENTATION` + `HEIGHT/WIDTH` thickness in `mnu::parse_window` |
 | `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `libs/mnu/src/mnu.cpp` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `libs/mnu/src/mnu.cpp` |
-| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `libs/mnu/src/mnu.cpp` |
+| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `libs/mnu/src/mnu.cpp` (`<MI>`/`<MIN_ITEM_HEIGHT>` -> `this+201`; justify/vjustify/items/appearances) |
+| `CListWnd_Construct @ 0x643bb0` (embedded `CScrollWnd@+976`; row-height sentinel `this+201 = -1`) | `NovaMnuCombo` popup defaults — `godot/engine/mnu/nova_mnu_combo.cpp` (D-MNU-8) |
+| `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `NovaMnuCombo::open_popup` + `effective_item_height` — `nova_mnu_combo.cpp` (D-MNU-7/8) |
+| `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `build_combo` `set_popup_rect(list_box.position)` — `godot/engine/mnu/nova_mnu_builder.cpp` (D-MNU-7) |
 | `CUIElement_DrawFrame @ 0x64a210` | `add_frame` — `godot/engine/mnu/nova_mnu_builder.cpp` (8 border pieces + tiled fill; draws nothing when textures absent; no monogram) |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> `build_container` gates `add_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
 | `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `menu_shell.gd` / `mnu_canvas.gd` |
@@ -454,7 +510,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_AccumulateAncestorOffset @ 0x6465e0` (was `sub_6465E0`) | Godot parent-child nesting (positions are parent-relative) |
 | `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
 | `CSpinListWnd_CreateUpDownChildren @ 0x64b8b0` | `add_spin_button` (parent-relative SPINUP/SPINDOWN) — `nova_mnu_builder.cpp` |
-| `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` |
+| `CComboWnd_Construct @ 0x65be40` + `CComboWnd_Render @ 0x65bfd0` | `NovaMnuCombo` — `godot/engine/mnu/nova_mnu_combo.cpp` (dropdown geometry from authored LIST_BOX POSITION, D-MNU-7) |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `NovaCreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `NovaMnuMarquee` (plain text) |
 | `CUIWidget_HandleScriptedAction @ 0x649790` | `NovaMnuMenu::dispatch_action` — `godot/engine/mnu/nova_mnu_menu.cpp` |
 | `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`libs/controls/src/controls.cpp`) + `menu_shell.gd::_fill_control_mapping` |
@@ -473,6 +529,14 @@ CUIScene_GetActiveScreenName`, `sub_647E40 -> CUIElement_DrawTextureNative`, `su
 -> CMarqueeWnd_ParseXMLDefinition` (all anchored). `0x64ad90` is still unnamed
 (`sub_64AD90`) and `0x649790` folds into the `0x648120` body (vtable-reached, no direct
 xrefs); naming/splitting them remains a proposed edit.
+
+IDB state note (2026-06-23c combo-dropdown grill): renamed `sub_65C0D0 ->
+CComboWnd_ParseXMLDefinition` (`0x65c0d0`, anchored: combo vtable[15] parse slot, delegates
+to `CUIButtonWidget_ParseXMLAttributes` and feeds the embedded `CListWnd` at `this+384`).
+Comments added and `idb_save` done: `0x644070` (row height = `this+201` / font-W default),
+`0x644060` (`row_rect = this+13` from `<LIST_BOX>` POSITION), `0x65c16e` (combo parse feeds
+the embedded `CListWnd` `this+384`). `CListWnd_DrawItems @ 0x643f30` and `CListWnd_Construct
+@ 0x643bb0` were already curated-named and left as-is.
 
 ### Element struct fields (witnessed offsets)
 
