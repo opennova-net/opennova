@@ -27,6 +27,11 @@ extends RefCounted
 # against [orig: TextResource_GetStringWithFallback(resource, "Avatars", nameKey)].
 const ATBL_SECTION := "Avatars"
 
+# The 3D character preview (head/body/arms .3di composited), reused from the ONED
+# Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the resolved
+# combo; static at rest (no .adm bound) behind the D-PLAYERINFO-1 seam.
+const AvatarPreviewScript := preload("res://modtools/avatar/avatar_preview.gd")
+
 var _menu: Node                         # the built NovaMnuMenu (typed Node: only its tree is used)
 var _root: NovaResourceRoot
 var _text: RtxtStringFile               # the "Avatars" string table (from menutxt.BIN)
@@ -36,6 +41,7 @@ var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality
 var _sel_nat := -1
 var _sel_div := -1
 var _populating := false                # guards the cascade against programmatic-fill re-entry
+var _preview                            # AvatarPreview mounted in PLAYER_PREVIEW (null until wired)
 
 # The current selection, for the ACCEPT/commit seam (Phase 5). main_game persists it.
 signal avatar_chosen(profile: Dictionary)
@@ -64,6 +70,7 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	# SIDE_BLUE is CHECKED in player.mnu; team follows whichever radio is set.
 	_team = 1 if _radio_checked("SIDE_RED") else 0
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
+	_wire_preview()
 
 
 # --- Avatars.def + RTXT loading (best-effort; degrade to empty combos) ---------
@@ -156,6 +163,7 @@ func _populate_combos() -> void:
 			rows.append("%s - %s" % [last, first])
 	_set_combo_items(combo, rows)
 	_populate_voices()
+	_refresh_preview()
 
 
 # The voice list is avatar-derived: a default entry plus the selected character's
@@ -186,6 +194,43 @@ func _selected_combo_head_voice() -> int:
 	return int(head.get("voice", -1))
 
 
+# --- 3D character preview (PLAYER_PREVIEW) ------------------------------------
+
+# Mount the head/body/arms 3D preview into the PLAYER_PREVIEW widget rect (a custom
+# button surface in player.mnu) and feed it the current combo. Null-guarded: a menu
+# without the widget, or without an avatar db / resource root, simply shows no preview.
+func _wire_preview() -> void:
+	var rect := _find("PLAYER_PREVIEW")
+	if rect == null or not (rect is Control):
+		return
+	_preview = AvatarPreviewScript.new()
+	_preview.name = "PlayerInfoAvatarPreview"
+	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the button keep its clicks
+	(rect as Control).add_child(_preview)
+	_preview.set_resource_root(_root)
+	_refresh_preview()
+
+
+func _refresh_preview() -> void:
+	if _preview == null or _db == null or _sel_nat < 0 or _sel_div < 0:
+		return
+	var idx := _selected_combo_index()
+	if idx < 0 or idx >= _db.get_combo_count(_sel_nat, _sel_div):
+		return
+	# [orig: combo -> spawned-player model is D-PLAYERINFO-1, unwitnessed; the preview
+	# stops at the resolved part .3di geometry, as the ONED Avatars workspace does.]
+	_preview.load_combo(_db.resolve_combo(_sel_nat, _sel_div, idx))
+
+
+func _selected_combo_index() -> int:
+	var combo := _combo("COMBO_LIST")
+	if combo == null:
+		return -1
+	var idx := combo.get_selected()
+	return idx if idx >= 0 else 0
+
+
 # --- Selection handlers (cascade edges) ---------------------------------------
 
 func _on_nat_selected(row: int, _value: String) -> void:
@@ -206,6 +251,7 @@ func _on_combo_selected(_row: int, _value: String) -> void:
 	if _populating:
 		return
 	_populate_voices()  # the voice list is avatar-derived; refresh on a combo change
+	_refresh_preview()
 
 
 # --- Team radios (SIDE_BLUE / SIDE_RED) ---------------------------------------

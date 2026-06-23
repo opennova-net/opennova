@@ -131,6 +131,20 @@ func test_degrades_without_avatar_db() -> void:
 	assert_eq(_combo(menu, "NATIONALITY").get_item_count(), 0, "no Avatars.def -> empty combos, no crash")
 
 
+func test_mounts_3d_preview_when_widget_present() -> void:
+	var host := PlayerInfoMenuHost.new()
+	host._db = _load_db()
+	var menu := _make_menu()
+	var preview_rect := Control.new()
+	preview_rect.name = "PLAYER_PREVIEW"
+	menu.add_child(preview_rect)
+	# No resource root, so the preview mounts but loads no .3di (graceful); we only
+	# assert the surface is wired into PLAYER_PREVIEW.
+	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
+	assert_not_null(preview_rect.find_child("PlayerInfoAvatarPreview", true, false),
+		"the 3D character preview is mounted into PLAYER_PREVIEW")
+
+
 func test_snapshot_reports_current_selection() -> void:
 	var host := PlayerInfoMenuHost.new()
 	host._db = _load_db()
