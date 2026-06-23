@@ -107,12 +107,22 @@ var _selected_expansion := ""
 var _menu_size := Vector2(640, 480)
 var _in_game := false
 var _ready_done := false
+# Optional delegate that owns game-specific menus the generic shell does not handle
+# (the JO multiplayer menu — mp_menu_host.gd). Null for a plain shell.
+var _companion = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	if not resized.is_connected(_recompute_fit):
 		resized.connect(_recompute_fit)
+
+
+# Install a companion that owns game-specific menus the generic shell does not handle
+# (e.g. the JO multiplayer menu, mp_menu_host.gd). When the companion claims the loaded
+# menu, the shell delegates its named-control wiring to it (see _wire_named_controls).
+func set_companion(companion) -> void:
+	_companion = companion
 
 
 # Build the shell against a resource root and open the main menu. Idempotent on
@@ -234,6 +244,12 @@ func open_ingame_menu() -> bool:
 # start controls are left to the menu's own actions. Binding them globally is what
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
+	# A companion (e.g. the multiplayer menu driver) can own a whole menu: when it claims
+	# this one, hand it the named-control wiring and skip the generic launch/mission wiring,
+	# so e.g. START_GAME means "host a game" rather than "launch the first mission".
+	if _companion != null and _companion.owns_menu(_menu):
+		_companion.on_menu_built(_menu, _current_file, _menu.current_screen, _root)
+		return
 	var has_mission_list := false
 	for list_name in mission_list_names:
 		var list := _menu.find_child(list_name, true, false)

@@ -76,6 +76,7 @@ var _skeleton_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
 var _playable := true
+var _host_config: Dictionary = {}  # set by load_mission_as_host; consumed once by _start_runtime
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
 var _perf_runtime_us: int = 0
@@ -163,6 +164,25 @@ func load_mission(bms_name: String, dir: String = "") -> int:
 		load_failed.emit("failed to parse %s: %s" % [bms_name, mission.get_last_error()])
 		return ERR_CANT_OPEN
 	return _load_mission_internal(mission, bms_name, resource_root)
+
+
+## Load a mission as a LAN co-op HOST. Same load path as load_mission, but the runtime
+## starts the in-process listen server (ADR 0011) — bound to a real socket transport
+## (Phase 2) and advertised on the LAN (Phase 3) once those land. `config` is the mp.mnu
+## host screen's co-op-minimal readback: { mission|missions[], server_name, max_players,
+## game_type, net_transport, bind_port, ... }. Returns the same codes as load_mission.
+func load_mission_as_host(config: Dictionary) -> int:
+	_host_config = config.duplicate()
+	var bms := String(config.get("mission", ""))
+	if bms.is_empty():
+		var missions: Array = config.get("missions", [])
+		if missions.size() > 0:
+			bms = String(missions[0])
+	if bms.is_empty():
+		_host_config = {}
+		load_failed.emit("host start: no mission selected")
+		return ERR_INVALID_PARAMETER
+	return load_mission(bms, String(config.get("dir", "")))
 
 
 ## Load an IN-MEMORY mission (the editor's live document, unsaved edits included):
@@ -692,6 +712,15 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# Playable hosts run the SP in-process listen server and spawn their own player
 	# (ADR 0011/0012, net-re §5.2b/§5.38). Diagnostic previews can explicitly opt out.
 	opts["playable"] = _playable
+	# A LAN host start threads its config (server name, mission rotation, player cap, and the
+	# socket transport mode) through to the listen server. Consumed once per load; absent for
+	# a normal single-player start, which keeps the in-process (socketless) listen server.
+	if not _host_config.is_empty():
+		opts["listen_server"] = true
+		for k in ["server_name", "max_players", "game_type", "net_transport", "bind_port", "advertise"]:
+			if _host_config.has(k):
+				opts[k] = _host_config[k]
+		_host_config = {}
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")

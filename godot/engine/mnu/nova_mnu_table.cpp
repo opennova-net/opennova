@@ -241,10 +241,36 @@ void NovaMnuTable::set_cell_image(int p_row, int p_col, const Ref<Texture2D> &p_
 	rebuild_rows();
 }
 
+void NovaMnuTable::remove_row(int p_row) {
+	if (p_row < 0 || p_row >= static_cast<int>(rows_.size())) {
+		return;
+	}
+	rows_.erase(rows_.begin() + p_row);
+	// Re-index the selection: drop the removed row, shift higher indices down one.
+	std::set<int> updated;
+	for (const int r : selected_rows_) {
+		if (r < p_row) {
+			updated.insert(r);
+		} else if (r > p_row) {
+			updated.insert(r - 1);
+		}
+	}
+	selected_rows_.swap(updated);
+	rebuild_rows();
+}
+
 void NovaMnuTable::clear_rows() {
 	rows_.clear();
 	selected_rows_.clear();
 	rebuild_rows();
+}
+
+String NovaMnuTable::get_cell_text(int p_row, int p_col) const {
+	if (p_row < 0 || p_row >= static_cast<int>(rows_.size()) || p_col < 0 ||
+			p_col >= static_cast<int>(rows_[p_row].size())) {
+		return String();
+	}
+	return rows_[p_row][p_col].text;
 }
 
 PackedInt32Array NovaMnuTable::get_selected_rows() const {
@@ -311,15 +337,19 @@ void NovaMnuTable::rebuild() {
 }
 
 void NovaMnuTable::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("add_column", "width", "h_align", "bitmap_draw"),
+			&NovaMnuTable::add_column);
 	ClassDB::bind_method(D_METHOD("add_row"), &NovaMnuTable::add_row);
 	ClassDB::bind_method(D_METHOD("add_row_values", "cells"), &NovaMnuTable::add_row_values);
 	ClassDB::bind_method(D_METHOD("set_row", "row", "cells"), &NovaMnuTable::set_row);
 	ClassDB::bind_method(D_METHOD("set_cell_text", "row", "col", "text"), &NovaMnuTable::set_cell_text);
 	ClassDB::bind_method(D_METHOD("set_cell_value", "row", "col", "value"), &NovaMnuTable::set_cell_value);
 	ClassDB::bind_method(D_METHOD("set_cell_image", "row", "col", "tex"), &NovaMnuTable::set_cell_image);
+	ClassDB::bind_method(D_METHOD("remove_row", "row"), &NovaMnuTable::remove_row);
 	ClassDB::bind_method(D_METHOD("clear_rows"), &NovaMnuTable::clear_rows);
 	ClassDB::bind_method(D_METHOD("get_row_count"), &NovaMnuTable::get_row_count);
 	ClassDB::bind_method(D_METHOD("get_column_count"), &NovaMnuTable::get_column_count);
+	ClassDB::bind_method(D_METHOD("get_cell_text", "row", "col"), &NovaMnuTable::get_cell_text);
 	ClassDB::bind_method(D_METHOD("get_selected_rows"), &NovaMnuTable::get_selected_rows);
 	ClassDB::bind_method(D_METHOD("get_selected_row"), &NovaMnuTable::get_selected_row);
 	ClassDB::bind_method(D_METHOD("select_row", "row", "additive"), &NovaMnuTable::select_row, DEFVAL(false));

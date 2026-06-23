@@ -120,9 +120,11 @@ public:
 	void set_cell_text(int p_row, int p_col, const String &p_text);
 	void set_cell_value(int p_row, int p_col, const String &p_value);
 	void set_cell_image(int p_row, int p_col, const Ref<Texture2D> &p_tex);
+	void remove_row(int p_row);
 	void clear_rows();
 	int get_row_count() const { return static_cast<int>(rows_.size()); }
 	int get_column_count() const { return static_cast<int>(columns_.size()); }
+	String get_cell_text(int p_row, int p_col) const;
 
 	PackedInt32Array get_selected_rows() const;
 	int get_selected_row() const;

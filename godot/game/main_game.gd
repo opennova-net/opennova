@@ -67,6 +67,9 @@ var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
 var _game_hud       # GameHud, built on the first frame a mission has a local player
+var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
+var _sp_shot_path := ""        # NW_SP_SHOT: dev/test — capture a viewport PNG then quit
+var _sp_shot_countdown := -1   # frames to wait (after the world loads) before the capture
 var _hud_objective := ""  # latest mission-effect text line shown by the HUD
 var _player_host: LocalPlayerHost = null
 var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
@@ -78,6 +81,7 @@ var _player_crouch := false
 var _player_prone := false
 var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); null until built
 var _player_viewmodel: Node3D = null  # host-managed FP arms+weapon (shown in 1P); null until built
+var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 
 
 func _ready() -> void:
@@ -102,6 +106,15 @@ func _ready() -> void:
 		_request_resource_dir()
 		return
 	_enter_menu(dir)
+	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
+	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
+	# exercised without menu navigation. Off by default; mirrors the NW_REPLAY direct-launch above.
+	var sp_mission := OS.get_environment("NW_SP_MISSION")
+	if not sp_mission.is_empty():
+		_on_start_requested(sp_mission)
+		_sp_shot_path = OS.get_environment("NW_SP_SHOT")
+		if not _sp_shot_path.is_empty():
+			_sp_shot_countdown = 90  # let the world + HUD settle, then capture and quit
 
 
 # F9 (re)opens the asset-folder picker from the front-end so the player can point
@@ -175,8 +188,10 @@ func _ensure_game_hud() -> void:
 	_game_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var hudpos := NovaHudPos.new()
 	var root: NovaResourceRoot = _world.get_resource_root() if _world != null and _world.has_method("get_resource_root") else null
-	if root != null:
-		hudpos.load_from_resource_root(root, "hudpos.def")
+	if root == null:
+		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
+	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
+		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_layout(hudpos, root)
 	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
 		_world.mission_effects.connect(_on_mission_effects)
@@ -185,7 +200,12 @@ func _ensure_game_hud() -> void:
 # Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
 # original rebuilding its HUD info struct each frame. [orig: HUD_BuildEntityInfo @0x4b8440]
 func _update_game_hud() -> void:
-	if _state != State.WORLD or not _world.is_loaded() or not _world.has_local_player():
+	if _state != State.WORLD or not _world.is_loaded():
+		return
+	if not _world.has_local_player():
+		if not _warned_hud_no_player:
+			_warned_hud_no_player = true
+			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
 		return
 	_ensure_game_hud()
 	if _game_hud == null:
@@ -262,6 +282,12 @@ func _wire_host() -> void:
 	_menu_host.resume_requested.connect(_on_resume)
 	if _menu_host.has_signal("novaworld_requested"):
 		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
+	# The multiplayer menu (mp.mnu) is driven by a companion the shell delegates to.
+	_mp_host = MpMenuHost.new()
+	if _menu_host.has_method("set_companion"):
+		_menu_host.set_companion(_mp_host)
+	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
+	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
 
 
 # --- Resource dir picker (first launch) ---------------------------------------
@@ -338,6 +364,27 @@ func _on_novaworld_closed() -> void:
 # --- Menu <-> world transitions ----------------------------------------------
 
 func _on_start_requested(bms_name: String) -> void:
+	_begin_world_load()
+	_world.load_mission(bms_name)
+
+
+# Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
+# world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
+func _on_lan_host_start_requested(config: Dictionary) -> void:
+	_begin_world_load()
+	_world.load_mission_as_host(config)
+
+
+# The player picked a discovered LAN server to join. The client transport lands in a later
+# phase; for now record the intent so the menu->net seam is exercised end to end.
+func _on_lan_join_requested(server: Dictionary) -> void:
+	push_warning("MainGame: LAN join requested (%s) — client transport lands in a later phase" %
+		String(server.get("name", server.get("host_ip", "?"))))
+
+
+# Shared menu->world handoff: hide the menu, show the world + HUD, enter WORLD state, and
+# connect the load-result signals. The caller then starts the specific load.
+func _begin_world_load() -> void:
 	_menu_host.hide_menu()
 	_world.visible = true
 	_set_hud_visible(true)
@@ -346,7 +393,6 @@ func _on_start_requested(bms_name: String) -> void:
 		_world.world_loaded.connect(_on_world_loaded)
 	if not _world.load_failed.is_connected(_on_world_load_failed):
 		_world.load_failed.connect(_on_world_load_failed)
-	_world.load_mission(bms_name)
 
 
 # Spectate a net session (no menu). The source (replay tool or a real server) is
@@ -431,6 +477,7 @@ func _on_return_to_menu() -> void:
 		_game_hud.queue_free()
 		_game_hud = null
 		_hud_objective = ""
+	_warned_hud_no_player = false
 	if _root != null:
 		_enter_menu(_root.get_root_dir())
 
@@ -466,6 +513,22 @@ func _process(delta: float) -> void:
 	if _player_host != null:
 		_player_host.after_world_tick()
 	_update_game_hud()
+	if _sp_shot_countdown > 0:
+		_sp_shot_countdown -= 1
+		if _sp_shot_countdown == 0:
+			_capture_sp_shot()
+
+
+# Dev/test (NW_SP_SHOT): once the world has settled, save the rendered viewport (HUD included)
+# to a PNG and quit — automated visual verification without a human at the window.
+func _capture_sp_shot() -> void:
+	var img := get_viewport().get_texture().get_image()
+	if img != null:
+		var err := img.save_png(_sp_shot_path)
+		print("SP_SHOT %s -> %s (%dx%d)" % ["OK" if err == OK else "ERR %d" % err, _sp_shot_path, img.get_width(), img.get_height()])
+	else:
+		print("SP_SHOT: no viewport image")
+	get_tree().quit()
 
 
 # WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns
