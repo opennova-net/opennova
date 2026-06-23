@@ -49,6 +49,7 @@
 #include "rtxt/rtxt_resource_format.h"
 #include "network/nova_world_client.h"
 #include "network/nova_net_client.h"
+#include "network/nova_udp_pump.h"
 #include "util/nova_data_format.h"
 #include "util/nova_paths.h"
 #include "util/nova_texture_format.h"
@@ -211,6 +212,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMnuMenu);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(NovaNetClient);
+	GDREGISTER_CLASS(NovaUdpPump);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);
