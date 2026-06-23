@@ -403,4 +403,47 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	return out;
 }
 
+// [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0] — the 5-byte C2S 0x0C sub-header.
+std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader &hdr) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(hdr.handle);
+	w.u16(hdr.item_type_id);
+	w.u8(hdr.sub_op);
+	return out;
+}
+
+// [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] — the 43-B extended
+// uplink body, the exact bytes decode_player_extended_uplink consumes. The host
+// driver fills PlayerExtendedUplink from the joiner's owned entity; this writes the
+// wire bytes. Positions are i32 16.16 (vehicle-local when vehicle_handle != 0xFFFF).
+std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(r.vehicle_handle);
+	w.u32(uint32_t(r.pos_x));
+	w.u32(uint32_t(r.pos_y));
+	w.u32(uint32_t(r.pos_z));
+	w.u16(uint16_t(r.heading));
+	w.u16(uint16_t(r.pitch));
+	w.u8(r.reserved_18);
+	w.u8(r.anim_slot_low);
+	w.u8(r.flags_xor);
+	w.u8(r.anim_def_1);
+	w.u8(r.anim_def_2);
+	w.u8(r.anim_def_3);
+	w.u8(r.reserved_24);
+	w.u8(r.stat_byte_0);
+	w.u8(r.stat_byte_1);
+	w.u16(r.weapon_id_0);
+	w.u16(r.fire_counter_0);
+	w.u16(r.weapon_id_1);
+	w.u16(r.fire_counter_1);
+	w.u16(r.weapon_id_2);
+	w.u16(r.fire_counter_2);
+	w.u16(r.weapon_id_3);
+	w.u16(r.fire_counter_3);
+	return out;
+}
+
 } // namespace opennova

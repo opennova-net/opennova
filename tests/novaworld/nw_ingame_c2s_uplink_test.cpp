@@ -9,6 +9,7 @@
 // docs/net/novaworld-net-re.md and let nw_pp regress on either side.
 
 #include <novaworld/ingame_decode.h>
+#include <novaworld/ingame_encode.h>
 
 #include <cassert>
 #include <cstdint>
@@ -218,6 +219,40 @@ int test_client_checksum_reply() {
 	return 0;
 }
 
+// The joiner-side encoder must reproduce the exact wire bytes the host decodes:
+// decode a real capture frame, re-encode, assert byte-identity. This is the
+// wire-compat bar for the C2S 0x0C uplink (the inverse-pair guarantee).
+int test_extended_uplink_roundtrip() {
+	size_t consumed = 0;
+
+	// 5-byte sub-header re-encodes to the exact wire bytes.
+	EntityPacketSubHeader hdr;
+	EXPECT(decode_entity_packet_sub_header(
+		kFrame1905_full, sizeof(kFrame1905_full), hdr, consumed));
+	const std::vector<uint8_t> hb = encode_entity_packet_sub_header(hdr);
+	EXPECT(hb.size() == 5);
+	EXPECT(std::memcmp(hb.data(), kFrame1905_full, 5) == 0);
+
+	// On-foot body (f=1905) round-trips byte-for-byte (world coords + map origin).
+	PlayerExtendedUplink r1;
+	EXPECT(decode_player_extended_uplink(
+		kFrame1905_full + 5, sizeof(kFrame1905_full) - 5, r1, consumed));
+	const std::vector<uint8_t> b1 = encode_player_extended_uplink(r1);
+	EXPECT(b1.size() == 43);
+	EXPECT(std::memcmp(b1.data(), kFrame1905_full + 5, 43) == 0);
+
+	// Mounted body (f=2053) round-trips byte-for-byte (vehicle-local branch).
+	PlayerExtendedUplink r2;
+	EXPECT(decode_player_extended_uplink(
+		kFrame2053_body, sizeof(kFrame2053_body), r2, consumed));
+	const std::vector<uint8_t> b2 = encode_player_extended_uplink(r2);
+	EXPECT(b2.size() == 43);
+	EXPECT(std::memcmp(b2.data(), kFrame2053_body, 43) == 0);
+
+	std::printf("PASS extended_uplink encode round-trip (on-foot + mounted)\n");
+	return 0;
+}
+
 int test_extended_uplink_short_body() {
 	// 42 B is one short of the fixed 43 B body — decoder must reject.
 	uint8_t short_body[42] = {};
@@ -237,6 +272,7 @@ int main() {
 	rc |= test_sub_header_parse();
 	rc |= test_extended_uplink_stationary_on_foot();
 	rc |= test_extended_uplink_mounted_vehicle();
+	rc |= test_extended_uplink_roundtrip();
 	rc |= test_extended_uplink_short_body();
 	rc |= test_client_fired_round();
 	rc |= test_client_checksum_reply();

@@ -165,4 +165,21 @@ std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec);
 // relative to the anchor) and this emits the wire bytes the client decodes.
 std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu);
 
+// ===========================================================================
+// C2S encoders — the joiner-side uplinks (a remote client PRODUCES these; the
+// host decodes them). Byte-exact inverses of the ingame_decode.cpp C2S parsers,
+// validated against real capture frames by nw_ingame_c2s_uplink_test.
+// ===========================================================================
+
+// Encode the 5-byte C2S 0x0C sub-header — inverse of decode_entity_packet_sub_header.
+// `[u16 handle][u16 item_type_id][u8 sub_op]`.
+// [orig: Pool_SerializeEntityViaVTable @ 0x4D64E0]
+std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader &hdr);
+
+// Encode the §5.10 extended (type-10) player uplink body — 43 B fixed, the inverse
+// of decode_player_extended_uplink. This is the C2S 0x0C body a remote joiner sends
+// for its own player each frame; the 5-byte sub-header (encode_entity_packet_sub_header)
+// precedes it on the wire. [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0]
+std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r);
+
 } // namespace opennova
