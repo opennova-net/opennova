@@ -8,6 +8,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
@@ -133,6 +134,7 @@ public:
 	// Introspection
 	int get_total_instances() const;
 	int get_cached_cells() const;
+	Dictionary get_dispatch_stats() const;
 
 protected:
 	static void _bind_methods();
@@ -162,10 +164,22 @@ private:
 		std::vector<Color> colors;
 		int64_t touch = 0;
 	};
+	struct DispatchStats {
+		int64_t dispatch_calls = 0;
+		int64_t coverage_skips = 0;
+		int64_t rebuilt_slots = 0;
+		int64_t instance_uploads = 0;
+		int64_t cell_cache_hits = 0;
+		int64_t cell_cache_misses = 0;
+	};
 
 	// CELL_GRID algorithm: cell (cell_x, cell_z, slot) -> placed instances.
 	std::unordered_map<CellKey, LRUEntry, CellKeyHash> lru_;
 	int64_t touch_counter_ = 0;
+	DispatchStats dispatch_stats_;
+	bool last_cell_grid_base_valid_ = false;
+	int last_cell_grid_base_x_ = 0;
+	int last_cell_grid_base_z_ = 0;
 
 	// ENGINE_CENTERS algorithm: one shared-core dispatcher per foliage slot.
 	std::array<opennova::foliage::Dispatcher, opennova::FOLIAGE_MAX_DEFS> engine_dispatchers_{};
@@ -219,6 +233,7 @@ private:
 	float _sample_height(float world_x, float world_z) const;
 	Dictionary _build_defs_by_match() const;
 	void _clear_children();
+	void _invalidate_dispatch_coverage();
 	Ref<Mesh> _fallback_mesh() const;
 };
 

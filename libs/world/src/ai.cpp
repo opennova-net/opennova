@@ -425,12 +425,30 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
 // ----------------------------------------------------------------------------
 // AiSystem.
 // ----------------------------------------------------------------------------
+AiSystem::AiSystem() {
+    clear_handle_index();
+}
+
+void AiSystem::clear_handle_index() {
+    handle_to_ai_index_.assign(65536, -1);
+}
+
+void AiSystem::rebuild_handle_index() {
+    clear_handle_index();
+    for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
+        const EntityHandle h = entities_[i].handle;
+        if (h.valid()) handle_to_ai_index_[h.packed] = i;
+    }
+}
+
 int AiSystem::attach(EntityHandle h) {
     AiEntity e;
     e.handle = h;
     e.brain.f[AiBrain::kOwner] = 1; // nonzero = live slot
     entities_.push_back(e);
-    return static_cast<int>(entities_.size()) - 1;
+    const int index = static_cast<int>(entities_.size()) - 1;
+    if (h.valid()) handle_to_ai_index_[h.packed] = index;
+    return index;
 }
 
 AiEntity *AiSystem::at(int ai_index) {
@@ -439,9 +457,12 @@ AiEntity *AiSystem::at(int ai_index) {
 }
 
 AiEntity *AiSystem::for_handle(EntityHandle h) {
-    for (AiEntity &e : entities_)
-        if (e.handle == h) return &e;
-    return nullptr;
+    if (!h.valid()) return nullptr;
+    if (handle_to_ai_index_.size() != 65536) return nullptr;
+    const int index = handle_to_ai_index_[h.packed];
+    if (index < 0 || index >= static_cast<int>(entities_.size())) return nullptr;
+    AiEntity &e = entities_[index];
+    return e.handle == h ? &e : nullptr;
 }
 
 // [orig: AI_BeginUpdate @0x457b40] copy working fields, then the shared-budget gate.
@@ -682,6 +703,7 @@ void AiSystem::capture_spawn_baseline() {
 // mission clean. The nav table is read-only path data and is left intact.
 void AiSystem::on_load(World &) {
     if (baseline_captured_) entities_ = spawn_baseline_;
+    rebuild_handle_index();
     events.clear();
     scheduler.budget = 0;
     relmat_calls.clear();

@@ -663,7 +663,7 @@ Dictionary NovaSimulation::get_wac_state() const {
 	return out;
 }
 
-godot::Dictionary godot::NovaSimulation::get_runtime_perf_counters() const {
+Dictionary NovaSimulation::get_runtime_perf_counters() const {
 	Dictionary out;
 	out["loaded"] = loaded_;
 	out["listen_server"] = listen_server_;

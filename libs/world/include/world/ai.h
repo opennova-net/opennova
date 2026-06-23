@@ -418,6 +418,8 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
 // The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
 class AiSystem : public ISystem {
 public:
+    AiSystem();
+
     const char *name() const override { return "ai"; }
     void tick(World &world, const TickContext &ctx) override;
 
@@ -575,8 +577,12 @@ public:
     const StateRow &row(int32_t state) const;
 
 private:
+    void clear_handle_index();
+    void rebuild_handle_index();
+
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
+    std::vector<int> handle_to_ai_index_;
     bool baseline_captured_ = false;
 };
 

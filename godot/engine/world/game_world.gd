@@ -512,7 +512,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> voi
 				_dispatcher.dispatch(camera_pos, camera_xform)
 			else:
 				_dispatcher.dispatch_centers(centers, camera_xform)
-	_perf_foliage_us = Time.get_ticks_usec() - foliage_start
+		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
@@ -520,11 +520,11 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> voi
 	# run exactly as before.
 	if _loaded and _runtime != null and _runtime.is_playing():
 		_runtime.tick()
-	_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
-	_perf_audio_us = Time.get_ticks_usec() - audio_start
+		_perf_audio_us = Time.get_ticks_usec() - audio_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 
 

@@ -42,9 +42,12 @@ var _item_db  # NovaItemDatabase
 var _bank: NovaSoundBank
 var _dbf  # NovaDbfData (mission co-named dialog bank; null if absent)
 var _audio_root: Node3D
-var _markers: Array = []  # [{ node:Node3D, pos:Vector3 }]
+var _markers: Array = []  # [{ node:Node3D, pos:Vector3, players:Array, paused:bool }]
 var _strategy: int = STRATEGY_ITEM_SOUNDLOOP
 var _stats: Dictionary = {}
+var _perf_tick_us: int = 0
+var _perf_markers: int = 0
+var _perf_voice_writes: int = 0
 
 
 func _init(resource_root, item_db) -> void:
@@ -89,9 +92,13 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
 		var node := _bank.spawn_ambient(_audio_root, pos, name, AMBIENT_BUS)
 		if node != null:
-			_markers.append({"node": node, "pos": pos})
+			var players: Array[AudioStreamPlayer3D] = []
+			for child in node.get_children():
+				if child is AudioStreamPlayer3D:
+					players.append(child)
+			_markers.append({"node": node, "pos": pos, "players": players, "paused": false})
 			_stats.markers_resolved += 1
-			_stats.voices += node.get_child_count()
+			_stats.voices += players.size()
 
 	_apply_reverb(int(mission.get_info().get("reverb", 0)))
 	_apply_music(int(mission.get_info().get("music", 0)))
@@ -100,6 +107,14 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 
 func get_stats() -> Dictionary:
 	return _stats
+
+
+func get_perf_counters() -> Dictionary:
+	return {
+		"tick_us": _perf_tick_us,
+		"markers": _perf_markers,
+		"voice_writes": _perf_voice_writes,
+	}
 
 
 func get_bank() -> NovaSoundBank:
@@ -161,15 +176,26 @@ func resolve_dialog_set(wav_id: int) -> String:
 ## Pause ambient voices outside the cull radius around the listener; resume inside.
 ## Godot's max_distance already silences far voices; this also frees their mixing.
 func tick(camera_pos: Vector3) -> void:
+	var start := Time.get_ticks_usec()
 	var cull_sq := CULL_RADIUS * CULL_RADIUS
+	var writes := 0
 	for m in _markers:
 		var holder: Node3D = m.node
 		if holder == null or not is_instance_valid(holder):
 			continue
 		var paused: bool = (m.pos as Vector3).distance_squared_to(camera_pos) > cull_sq
-		for child in holder.get_children():
-			if child is AudioStreamPlayer3D:
-				child.stream_paused = paused
+		if bool(m.get("paused", false)) == paused:
+			continue
+		m["paused"] = paused
+		var players: Array = m.get("players", [])
+		for player in players:
+			if player is AudioStreamPlayer3D and is_instance_valid(player):
+				if player.stream_paused != paused:
+					player.stream_paused = paused
+					writes += 1
+	_perf_markers = _markers.size()
+	_perf_voice_writes = writes
+	_perf_tick_us = Time.get_ticks_usec() - start
 
 
 func teardown() -> void:

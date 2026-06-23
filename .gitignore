@@ -88,3 +88,6 @@ CLAUDE.local.md
 .superpowers/
 
 .scratch/
+
+# Local reverse-engineering notes/dumps
+ida_dumps/

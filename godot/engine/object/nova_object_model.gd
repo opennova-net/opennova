@@ -48,6 +48,8 @@ var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk"
 var _anim_time := 0.0               # playhead seconds into the active clip
 var _anim_playing := false
 var _anim_external_phase := false   # true when the sim, not _process(delta), owns _anim_time
+var _body_pose_dirty := true
+var _bounds_dirty := true
 
 
 func _ready() -> void:
@@ -122,6 +124,7 @@ func set_skeletal_anim(skeletal) -> void:
 	_anim_time = 0.0
 	_anim_playing = false
 	_anim_external_phase = false
+	_body_pose_dirty = true
 	rebuild()
 
 
@@ -149,6 +152,7 @@ func play_body_clip(key: String) -> void:
 	_anim_time = 0.0
 	_anim_playing = true
 	_anim_external_phase = false
+	_body_pose_dirty = true
 
 
 ## Pose a main-body clip at the authoritative infantry motor playhead. IDA's
@@ -157,14 +161,21 @@ func play_body_clip(key: String) -> void:
 func play_body_clip_at(key: String, phase_ticks: int) -> void:
 	if _skeletal == null or not _skeletal.has_clip(key):
 		return
-	_anim_key = key
+	var previous_key := _anim_key
+	var previous_time := _anim_time
+	var previous_external := _anim_external_phase
 	var fps: float = _skeletal.get_clip_fps(key)
 	var seconds := 0.0
 	if fps > 0.0:
 		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
+	var same_external := previous_external and key == previous_key and is_equal_approx(previous_time, seconds)
+	_anim_key = key
 	_set_body_playhead(seconds)
 	_anim_playing = false
 	_anim_external_phase = true
+	if same_external and not _body_pose_dirty:
+		return
+	_body_pose_dirty = true
 	_advance_body_anim(0.0)
 
 
@@ -217,6 +228,7 @@ func set_animation_time(seconds: float) -> void:
 		return
 	_anim_external_phase = false
 	_set_body_playhead(seconds)
+	_body_pose_dirty = true
 	_advance_body_anim(0.0)
 
 
@@ -258,17 +270,27 @@ func get_active_lod() -> int:
 func set_ctrl_value(name: String, value: int) -> void:
 	if name.is_empty():
 		return
-	_ctrl_values[name] = clampi(value, 0, 65535)
+	var next_value := clampi(value, 0, 65535)
+	if int(_ctrl_values.get(name, -1)) == next_value:
+		return
+	_ctrl_values[name] = next_value
+	_bounds_dirty = true
 	_apply_runtime_state(0.0)
 
 
 func clear_ctrl_value(name: String) -> void:
+	if not _ctrl_values.has(name):
+		return
 	_ctrl_values.erase(name)
+	_bounds_dirty = true
 	_apply_runtime_state(0.0)
 
 
 func clear_ctrl_values() -> void:
+	if _ctrl_values.is_empty():
+		return
 	_ctrl_values.clear()
+	_bounds_dirty = true
 	_apply_runtime_state(0.0)
 
 
@@ -333,8 +355,12 @@ func set_part_phase(channel: int, phase: int) -> void:
 	var register := _resolve_anim_channel_register(channel - 1)
 	if register.is_empty():
 		return
+	var next_phase := clampi(phase, 0, 65535)
+	if int(_ctrl_values.get(register, -1)) == next_phase and not _part_anims.has(register):
+		return
 	_part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
-	_ctrl_values[register] = clampi(phase, 0, 65535)
+	_ctrl_values[register] = next_phase
+	_bounds_dirty = true
 
 
 ## Stop a single channel's part animation (freeze in place); no-op if the channel is not animating.
@@ -365,19 +391,25 @@ func _resolve_anim_channel_register(slot: int) -> String:
 # Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
 # Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
 # the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
-func _advance_part_anims(delta: float) -> void:
+func _advance_part_anims(delta: float) -> bool:
 	if _part_anims.is_empty() or delta <= 0.0:
-		return
+		return false
 	var finished: Array = []
+	var changed := false
 	for register in _part_anims.keys():
 		var anim: Dictionary = _part_anims[register]
+		var old_value := int(_ctrl_values.get(register, 0))
 		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
 		anim["value"] = value
-		_ctrl_values[register] = int(round(value))
+		var next_value := int(round(value))
+		_ctrl_values[register] = next_value
+		changed = changed or old_value != next_value
 		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
 			finished.append(register)  # reached the clamp endpoint; the part holds there
 	for register in finished:
 		_part_anims.erase(register)
+	_bounds_dirty = _bounds_dirty or changed
+	return changed
 
 
 # Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
@@ -386,14 +418,18 @@ func _advance_part_anims(delta: float) -> void:
 func _advance_body_anim(delta: float) -> void:
 	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
 		return
-	if _is_playing and _anim_playing and not _anim_external_phase:
+	if _is_playing and _anim_playing and not _anim_external_phase and delta != 0.0:
 		_anim_time += delta
+		_body_pose_dirty = true
+	if not _body_pose_dirty:
+		return
 	var pose: Array = _skeletal.eval_pose(_anim_key, _anim_time)
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):
 		var t: Transform3D = pose[i]
 		_skeleton.set_bone_pose_position(i, t.origin)
 		_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+	_body_pose_dirty = false
 
 
 func rebuild() -> void:
@@ -408,6 +444,8 @@ func rebuild() -> void:
 	_anim_frames_by_mat.clear()
 	_material_cache.clear()
 	_material_defs.clear()
+	_body_pose_dirty = true
+	_bounds_dirty = true
 	if object_data == null or not object_data.has_document():
 		_set_model_bounds(AABB())
 		return
@@ -451,7 +489,6 @@ func rebuild() -> void:
 
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
-	_set_model_bounds(_compute_transformed_mesh_bounds())
 
 
 # Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
@@ -578,7 +615,7 @@ func _apply_runtime_state(delta: float) -> void:
 		return
 	if _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
-	_advance_part_anims(delta)
+	var part_changed := _advance_part_anims(delta)
 	_advance_body_anim(delta)
 	for i in range(_surface_materials.size()):
 		var material := _surface_materials[i]
@@ -599,21 +636,28 @@ func _apply_runtime_state(delta: float) -> void:
 			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
-	_apply_robj_transforms()
+	var robj_changed := _apply_robj_transforms()
 	_apply_lights()
 	_apply_environment_to_materials()
-	_set_model_bounds(_compute_transformed_mesh_bounds())
+	if _bounds_dirty or part_changed or robj_changed:
+		_set_model_bounds(_compute_transformed_mesh_bounds())
+		_bounds_dirty = false
 
 
-func _apply_robj_transforms() -> void:
+func _apply_robj_transforms() -> bool:
 	if object_data == null or not object_data.has_method("evaluate_panm") or _robj_nodes.is_empty():
-		return
+		return false
 	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
+	var changed := false
 	for key in transforms.keys():
 		var robj_index := int(key)
 		if _robj_nodes.has(robj_index):
 			var node := _robj_nodes[robj_index] as Node3D
-			node.transform = transforms[key]
+			var next_transform: Transform3D = transforms[key]
+			if node.transform != next_transform:
+				node.transform = next_transform
+				changed = true
+	return changed
 
 
 func _apply_lights() -> void:
