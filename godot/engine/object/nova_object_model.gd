@@ -51,6 +51,16 @@ var _anim_external_phase := false   # true when the sim, not _process(delta), ow
 var _body_pose_dirty := true
 var _bounds_dirty := true
 
+# Per-frame work skips. Each cached value is re-derived in rebuild() (or on the exact
+# mutator), so a skip only ever omits re-pushing state that is byte-identical to what is
+# already resident on the materials -- invisible in Godot's retained-mode renderer, and so
+# parity-preserving against the original engine's output.
+var _has_lights := false
+var _material_needs_eval: Array[bool] = []          # parallel to _surface_materials
+var _dynamic_material_slots: PackedInt32Array = PackedInt32Array()
+var _last_env_gen := -1
+var _last_env_values: Dictionary = {}
+
 
 func _ready() -> void:
 	set_process(true)
@@ -75,6 +85,8 @@ func get_object_data() -> NovaObjectData:
 
 func set_environment_node(value: Node) -> void:
 	_environment_node = value
+	_last_env_gen = -1
+	_last_env_values = {}
 	_apply_environment_to_materials()
 
 
@@ -446,6 +458,11 @@ func rebuild() -> void:
 	_material_defs.clear()
 	_body_pose_dirty = true
 	_bounds_dirty = true
+	_has_lights = false
+	_material_needs_eval.clear()
+	_dynamic_material_slots = PackedInt32Array()
+	_last_env_gen = -1
+	_last_env_values = {}
 	if object_data == null or not object_data.has_document():
 		_set_model_bounds(AABB())
 		return
@@ -487,6 +504,8 @@ func rebuild() -> void:
 		_surface_materials.append(material)
 		_collect_anim_frames(material_index)
 
+	_classify_materials()
+	_has_lights = object_data.has_method("get_light_count") and int(object_data.get_light_count()) > 0
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
 
@@ -517,6 +536,12 @@ func _build_skeleton() -> void:
 func _on_object_changed() -> void:
 	var update_mask := _last_object_update_mask()
 	if update_mask == OED_UPDATE_PANM or update_mask == OED_UPDATE_LGHT or update_mask == (OED_UPDATE_PANM | OED_UPDATE_LGHT):
+		# get_last_oed_update_mask() reports only the final mask of a deferred-flush window,
+		# so a coalesced batch could read LGHT/PANM even when a material's generator style
+		# also changed. Reclassify here (cheap, idempotent) so the dynamic-material set can
+		# never go stale relative to the current IR -- otherwise a newly-animated material
+		# would stay frozen on this no-rebuild fast path.
+		_classify_materials()
 		_apply_runtime_state(0.0)
 		return
 	rebuild()
@@ -617,12 +642,20 @@ func _apply_runtime_state(delta: float) -> void:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
 	var part_changed := _advance_part_anims(delta)
 	_advance_body_anim(delta)
-	for i in range(_surface_materials.size()):
+	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
+	# advances) need a per-frame push; a fully-static material already carries its identity
+	# values from _create_material, so re-evaluating it each frame just re-writes identical
+	# bytes. _dynamic_material_slots holds exactly the slots that can change (built in
+	# _classify_materials); _material_needs_eval[i] distinguishes the eval path from the
+	# texture-flip-book-only path.
+	var has_eval := object_data.has_method("eval_material_runtime")
+	var has_frame := object_data.has_method("compute_anim_frame")
+	for i in _dynamic_material_slots:
 		var material := _surface_materials[i]
 		if material == null:
 			continue
 		var material_index := int(_surface_material_indices[i])
-		if object_data.has_method("eval_material_runtime"):
+		if _material_needs_eval[i] and has_eval:
 			var runtime: Dictionary = object_data.eval_material_runtime(material_index, _anim_time_ms, _ctrl_values)
 			if not runtime.is_empty():
 				material.set_shader_parameter("u_uv_offset", runtime.get("uv_offset", Vector2.ZERO))
@@ -632,7 +665,7 @@ func _apply_runtime_state(delta: float) -> void:
 				material.set_shader_parameter("u_rgb_mod", rgb)
 				material.set_shader_parameter("u_alpha_mod", runtime.get("alpha_mod", 1.0))
 		var frames: Array = _anim_frames_by_mat.get(material_index, [])
-		if frames.size() > 1 and object_data.has_method("compute_anim_frame"):
+		if frames.size() > 1 and has_frame:
 			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
@@ -661,6 +694,12 @@ func _apply_robj_transforms() -> bool:
 
 
 func _apply_lights() -> void:
+	# A model with no .3di lights keeps the count-0 light defaults written at material
+	# creation (_create_material); evaluate_lights would return empty and this loop would
+	# only re-write those same defaults every frame. _has_lights is recomputed in rebuild(),
+	# the only path that can change the (immutable, IR-backed) light count.
+	if not _has_lights:
+		return
 	if object_data == null or not object_data.has_method("evaluate_lights"):
 		return
 	var lights: Array = object_data.evaluate_lights(_anim_time_ms, _ctrl_values)
@@ -827,8 +866,69 @@ func _apply_default_environment_to_material(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_fog_type", DEFAULT_FOG_TYPE)
 
 
+# A surface material needs per-frame UV/RGB/alpha evaluation only if one of its generators
+# animates. The native get_material_runtime_kind (faithful style taxonomy, single-sourced in
+# libs/renderer) is preferred when present; until it is built, the conservative fallback
+# treats any non-zero generator style as dynamic -- it can only over-evaluate, never freeze
+# an animation (a fully-static material's eval is the identity that _create_material already set).
+func _material_runtime_is_dynamic(material_index: int) -> bool:
+	if object_data == null:
+		return true
+	if object_data.has_method("get_material_runtime_kind"):
+		return int(object_data.get_material_runtime_kind(material_index)) != 0  # 0 == STATIC
+	if not object_data.has_method("get_material_info"):
+		return true
+	var info: Dictionary = object_data.get_material_info(material_index)
+	if info.is_empty():
+		return true
+	return int(info.get("uv_u_style", 0)) != 0 \
+		or int(info.get("uv_v_style", 0)) != 0 \
+		or int(info.get("rgb_gen_style", 0)) != 0 \
+		or int(info.get("alpha_gen_style", 0)) != 0
+
+
+# Partition the surface materials into those that change at runtime (UV/RGB/alpha generators
+# or a multi-frame texture animation) and the static remainder. Only the dynamic slots are
+# visited per frame; static slots keep the identity values written at material creation.
+func _classify_materials() -> void:
+	_material_needs_eval.clear()
+	_dynamic_material_slots = PackedInt32Array()
+	var kind_cache: Dictionary = {}
+	for i in range(_surface_materials.size()):
+		var material_index := int(_surface_material_indices[i])
+		var needs_eval: bool
+		if kind_cache.has(material_index):
+			needs_eval = bool(kind_cache[material_index])
+		else:
+			needs_eval = _material_runtime_is_dynamic(material_index)
+			kind_cache[material_index] = needs_eval
+		_material_needs_eval.append(needs_eval)
+		var frames: Array = _anim_frames_by_mat.get(material_index, [])
+		if needs_eval or frames.size() > 1:
+			_dynamic_material_slots.append(i)
+
+
 func _apply_environment_to_materials() -> void:
+	# The environment is shared and changes slowly (time-of-day) or not at all. NovaWeather
+	# re-stamps it every frame, but the smoothed colours quantise to identical bytes once
+	# settled, so the 9 values these materials consume are byte-stable in steady state. Skip
+	# the 9 cross-language reads + 9-uniform-per-material push when nothing changed since the
+	# last push: a NovaEnvironment generation makes the steady-state check a single int
+	# compare; the value cache is the fallback for env nodes without one. Either way the skip
+	# only ever omits re-pushing identical uniforms (retained mode -> invisible), so the
+	# rendered lighting/fog is byte-identical to pushing every frame.
+	var gen := -1
+	var has_gen: bool = _environment_node != null and _environment_node.has_method("get_env_generation")
+	if has_gen:
+		gen = int(_environment_node.get_env_generation())
+		if gen == _last_env_gen and not _last_env_values.is_empty():
+			return
 	var values := _environment_values()
+	if _env_values_equal(values, _last_env_values):
+		_last_env_gen = gen
+		return
+	_last_env_values = values
+	_last_env_gen = gen
 	for material in _surface_materials:
 		if material == null:
 			continue
@@ -881,3 +981,21 @@ func _set_model_bounds(bounds: AABB) -> void:
 
 func _aabb_equal_approx(a: AABB, b: AABB) -> bool:
 	return a.position.is_equal_approx(b.position) and a.size.is_equal_approx(b.size)
+
+
+# True when two _environment_values() dicts carry the same lighting/fog the shaders consume.
+# Colours are compared with is_equal_approx (the weather smoother quantises to 8-bit, so real
+# changes are >= 1/255, far above epsilon); an empty cache (first push after rebuild) is never
+# equal, forcing the initial push.
+func _env_values_equal(a: Dictionary, b: Dictionary) -> bool:
+	if a.is_empty() or b.is_empty():
+		return false
+	return (a.get("ambient", Vector3.ZERO) as Vector3).is_equal_approx(b.get("ambient", Vector3.ONE)) \
+		and (a.get("dir", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir", Vector3.ONE)) \
+		and (a.get("dir_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir_color", Vector3.ONE)) \
+		and (a.get("fill", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fill", Vector3.ONE)) \
+		and bool(a.get("fog_enabled", false)) == bool(b.get("fog_enabled", true)) \
+		and (a.get("fog_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fog_color", Vector3.ONE)) \
+		and is_equal_approx(float(a.get("fog_start", 0.0)), float(b.get("fog_start", -1.0))) \
+		and is_equal_approx(float(a.get("fog_end", 0.0)), float(b.get("fog_end", -1.0))) \
+		and int(a.get("fog_type", 0)) == int(b.get("fog_type", -1))

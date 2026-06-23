@@ -40,6 +40,12 @@ var _sun_light := Vector3(0.9, 0.85, 0.75)
 var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
 var _fog_distance: float = 1000.0
 
+# Monotonic counter bumped only when a value object materials consume (lighting/fog) actually
+# changes -- via _update_tod (TOD scrub / reload / day_speed advance) or the per-frame weather
+# setters below (guarded so a settled smoother stops bumping). NovaObjectModel caches the last
+# generation it applied and skips its per-material environment push while this is unchanged.
+var _env_generation: int = 0
+
 
 func _ready() -> void:
 	set_process_priority(-20)
@@ -100,6 +106,10 @@ func _update_tod() -> void:
 		var fog_raw: Vector3 = _tod.get("fog", _fog_color_rt * 0.5)
 		_fog_color_rt = _double_vec3(fog_raw)
 	_fog_distance = environment_data.get_fog_level()
+	# A TOD recompute can move any object-consumed value; this path runs only on discrete
+	# changes (scrub / reload / day_speed advance), never per-frame at rest, so an
+	# unconditional bump here costs nothing in steady state.
+	_env_generation += 1
 	_write_shader_globals()
 
 
@@ -262,15 +272,27 @@ func get_skyfog_color() -> Vector3:
 
 
 func set_fill_light(value: Vector3) -> void:
-	_fill_light = value
+	if value != _fill_light:
+		_fill_light = value
+		_env_generation += 1
 
 
 func set_sun_light(value: Vector3) -> void:
-	_sun_light = value
+	if value != _sun_light:
+		_sun_light = value
+		_env_generation += 1
 
 
 func set_fog_color_rt(value: Vector3) -> void:
-	_fog_color_rt = value
+	if value != _fog_color_rt:
+		_fog_color_rt = value
+		_env_generation += 1
+
+
+## Monotonic generation, bumped only when a lighting/fog value object materials read actually
+## changes. Lets a NovaObjectModel skip its per-material environment push with one int compare.
+func get_env_generation() -> int:
+	return _env_generation
 
 
 func get_fog_distance() -> float:
