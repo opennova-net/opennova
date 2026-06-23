@@ -33,7 +33,7 @@ bool can_extract(const std::string& name) {
     const std::string base = detail::lower_ascii(detail::basename_of(name));
     const std::string ext = detail::ext_of(base);
     return ext == "env" || ext == "kda" || ext == "3di" || ext == "bms" || ext == "mnu" ||
-           base == "items.def";
+           base == "items.def" || base == "avatars.def";
 }
 
 bool extract(const std::string& source_path, const uint8_t* data, size_t size,
@@ -62,6 +62,9 @@ bool extract(const std::string& source_path, const uint8_t* data, size_t size,
     }
     if (base == "items.def") {
         return detail::extract_items_def(source_path, data, size, out, error);
+    }
+    if (base == "avatars.def") {
+        return detail::extract_avatars_def(source_path, data, size, out, error);
     }
     // Unrecognized formats are not an error: callers sweep whole file lists.
     return true;
