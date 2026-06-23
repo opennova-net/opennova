@@ -139,11 +139,11 @@ func get_player_host():
 
 # The literal game-shell per-frame order (main_game._process): drive the loaded
 # world's foliage + runtime + audio around the play camera.
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _playing and _world != null and _world.is_loaded():
 		if _player_host != null:
-			_player_host.before_world_tick(_delta, true)
-		_world.tick(_camera.global_position, _camera.global_transform)
+			_player_host.before_world_tick(delta, true)
+		_world.tick(_camera.global_position, _camera.global_transform, delta)
 		if _player_host != null:
 			_player_host.after_world_tick()
 

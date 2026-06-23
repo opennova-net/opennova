@@ -396,7 +396,7 @@ func _process(delta: float) -> void:
 		return
 	if _player_host != null:
 		_player_host.before_world_tick(delta, _state == State.WORLD)
-	_world.tick(_camera.global_position, _camera.global_transform)
+	_world.tick(_camera.global_position, _camera.global_transform, delta)
 	if _player_host != null:
 		_player_host.after_world_tick()
 

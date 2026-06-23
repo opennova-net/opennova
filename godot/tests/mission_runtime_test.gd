@@ -166,3 +166,107 @@ func test_effects_drained_signal_fires() -> void:
 		rt.step_once()
 	assert_eq(drained.size(), 1, "one effect drained through the signal")
 	assert_eq(String((drained[0] as Dictionary)["kind"]), "text", "OutputText -> text effect")
+
+
+# --- Fixed-timestep accumulator (tick_realtime): the sim runs at a constant 62.5 Hz independent of
+# the render/frame rate. [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0] -----
+
+func test_tick_realtime_accumulates_fixed_quanta() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.play()
+	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
+	assert_eq(rt.tick_realtime(0.1), 6, "0.1 s banks 6 fixed-step ticks")
+	# Sub-quantum deltas accumulate ACROSS calls instead of each firing a tick.
+	assert_eq(rt.tick_realtime(0.008), 0, "half a quantum (plus the 0.004 remainder) fires nothing yet")
+	assert_eq(rt.tick_realtime(0.008), 1, "the banked remainder crosses one quantum and fires once")
+
+
+func test_tick_realtime_clamps_catchup() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.play()
+	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's catch-up.
+	assert_eq(rt.tick_realtime(1.0), MissionRuntime.MAX_CATCHUP_TICKS, "a long stall is clamped to the catch-up cap")
+	# The clamp DROPS the backlog (no banked spiral): a tiny delta afterward fires nothing.
+	assert_eq(rt.tick_realtime(0.001), 0, "the backlog was dropped, not carried into the next frames")
+
+
+func test_tick_realtime_ignored_when_not_playing() -> void:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
+	assert_eq(rt.tick_realtime(1.0), 0, "a paused runtime banks nothing")
+	rt.play()
+	assert_eq(rt.tick_realtime(0.0), 0, "play() reset the accumulator; zero delta fires nothing")
+
+
+func test_tick_realtime_presents_latest_state_once() -> void:
+	# The node is authored far from spawn; after a catch-up batch the single present puts it on the
+	# sim's LATEST position (decoupled render = present once per host frame, no inter-tick interpolation).
+	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.play()
+	assert_gt(rt.tick_realtime(0.1), 0, "the batch ran at least one tick")
+	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
+	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
+		"the node ends on the latest sim position after the batch")
+	assert_false((w.model as Node3D).position.is_equal_approx(Vector3(99, 99, 99)),
+		"the node left its authored position")
+
+
+func test_tick_realtime_drains_effects_per_tick() -> void:
+	# Effects must drain PER logic tick INSIDE the catch-up batch (not coalesced into one emit at the
+	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_event(0, 0, 0).is_empty())
+	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(md, container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.play()
+	var drained: Array = []
+	rt.effects_drained.connect(func(effects): drained.append_array(effects))
+	# 20.5 quanta of wall-clock in ONE frame -> 20 ticks; crosses the 16th-tick quarter-pass boundary.
+	assert_eq(rt.tick_realtime(0.328), 20, "20+ quanta of wall-clock run 20 logic ticks in one frame")
+	assert_eq(drained.size(), 1, "the per-tick one-shot effect surfaced from inside the batch")
+	assert_eq(String((drained[0] as Dictionary)["kind"]), "text")
+
+
+func test_distance_per_real_second_is_frame_rate_independent() -> void:
+	# THE regression test for the reported bug. Drive two identical worlds for the SAME total wall-clock
+	# (one real second), one at ~100 FPS, one at ~10 FPS. The accumulator must run the SAME number of
+	# logic ticks (62 at 62.5 Hz) and leave entities at the same position. Because the per-tick motor
+	# integrates a fixed displacement, equal tick count over equal wall-clock = equal distance =
+	# locomotion speed decoupled from frame rate. The old "one tick per frame" path would have run 100
+	# vs 10 ticks here (10x speed difference) — exactly the symptom this fixes.
+	var hi := _run_realtime(0.01, 100)  # ~100 FPS for 1.0 s
+	var lo := _run_realtime(0.1, 10)    #  ~10 FPS for 1.0 s
+	assert_eq(hi.ticks, lo.ticks, "same wall-clock runs the same tick count regardless of frame rate")
+	assert_eq(hi.ticks, 62, "~62.5 Hz over one real second")
+	assert_true(hi.pos.is_equal_approx(lo.pos), "the deterministic sim lands the entity at one position")
+
+
+# Drive a fresh MissionRuntime with `count` frames of `step` seconds each and report total ticks +
+# the entity position. Fixed iteration count (not a while-elapsed loop) keeps the fed wall-clock exact.
+func _run_realtime(step: float, count: int) -> Dictionary:
+	var w := _make_world(Transform3D.IDENTITY)
+	var rt := MissionRuntime.new()
+	add_child_autofree(rt)
+	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_DIVIDED })
+	rt.play()
+	var ticks := 0
+	for _i in range(count):
+		ticks += rt.tick_realtime(step)
+	return { "ticks": ticks, "pos": rt.get_sim().get_entity_position(0) }

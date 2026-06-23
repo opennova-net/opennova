@@ -25,6 +25,13 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
+# Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
+# loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
+# independently of the variable render rate — multiple ticks on a long frame, zero on a short one.
+# [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0 (one current_tick++ @ 0x24c1968)]
+const TICK_DT := 1.0 / 62.5          # 0.016 s; matches AiEventQueue::kFrameDt (world/ai.h)
+const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms / 16 ms accumulator cap
+
 var _sim: NovaSimulation
 var _present
 var _index
@@ -36,6 +43,8 @@ var _perf_sim_us: int = 0
 var _perf_present_us: int = 0
 var _perf_effects_us: int = 0
 var _perf_did_tick := false
+var _accum := 0.0                    # banked real time (s) not yet consumed by a logic tick
+var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
@@ -212,8 +221,9 @@ func is_playing() -> bool:
 	return _playing
 
 
-## Advance one cadence step and present. Returns true when a logic tick fired (and effects were drained).
-## The host calls this in its own per-frame order (game), or _process self-ticks it (editor).
+## Advance EXACTLY ONE cadence step and present. Returns true when a logic tick fired (and effects
+## were drained). The deterministic single-tick primitive: editor Step, the MCP, and tests use this.
+## Real-time hosts (game + editor preview) use tick_realtime() instead, which accumulates wall-clock.
 func tick() -> bool:
 	if _sim == null:
 		_perf_tick_us = 0
@@ -221,9 +231,26 @@ func tick() -> bool:
 		_perf_present_us = 0
 		_perf_effects_us = 0
 		_perf_did_tick = false
+		_ticks_last_frame = 0
 		return false
 	var tick_start := Time.get_ticks_usec()
-	var sim_start := tick_start
+	var did_tick := _advance_one_tick_no_present()
+	_perf_present_us = 0
+	if did_tick and _present != null:
+		var present_start := Time.get_ticks_usec()
+		_present.present()
+		_perf_present_us = Time.get_ticks_usec() - present_start
+	_perf_tick_us = Time.get_ticks_usec() - tick_start
+	_perf_did_tick = did_tick
+	_ticks_last_frame = 1 if did_tick else 0
+	return did_tick
+
+
+# One logic tick + drain/emit effects, WITHOUT presenting. Shared by tick() (which presents once
+# after) and tick_realtime() (which presents once after the whole catch-up batch). Updates the
+# sim/effects perf counters. Returns true when a logic tick fired.
+func _advance_one_tick_no_present() -> bool:
+	var sim_start := Time.get_ticks_usec()
 	var did_tick: bool
 	if _sim.get_tick_mode() == NovaSimulation.TICK_EVERY_PROCESS:
 		_sim.step()
@@ -231,21 +258,55 @@ func tick() -> bool:
 	else:
 		did_tick = _sim.advance_frame()  # one frame = one 62 Hz logic tick (WAC self-gates inside)
 	_perf_sim_us = Time.get_ticks_usec() - sim_start
-	_perf_present_us = 0
 	_perf_effects_us = 0
 	if did_tick:
-		if _present != null:
-			var present_start := Time.get_ticks_usec()
-			_present.present()
-			_perf_present_us = Time.get_ticks_usec() - present_start
 		var effects_start := Time.get_ticks_usec()
 		var effects := _sim.drain_effects()
 		_perf_effects_us = Time.get_ticks_usec() - effects_start
 		if not effects.is_empty():
 			effects_drained.emit(effects)
-	_perf_tick_us = Time.get_ticks_usec() - tick_start
-	_perf_did_tick = did_tick
 	return did_tick
+
+
+## Real-time host entry: bank `delta`, drain it in fixed TICK_DT quanta, run that many single logic
+## ticks (clamped to MAX_CATCHUP_TICKS), and present ONCE after the batch. This is the faithful
+## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
+## host frame rate, with no inter-tick interpolation (present reads current sim state). A long frame
+## runs several ticks, a short frame runs none. Effects drain per tick (the original's per-tick
+## emission). Returns the number of logic ticks run this call. [orig: Game_MainLoop @ 0x52b630]
+func tick_realtime(delta: float) -> int:
+	if _sim == null or not _playing:
+		_ticks_last_frame = 0
+		return 0
+	var tick_start := Time.get_ticks_usec()
+	_accum += delta
+	var n := int(_accum / TICK_DT)
+	if n <= 0:
+		_ticks_last_frame = 0
+		_perf_tick_us = 0
+		_perf_did_tick = false
+		return 0
+	_accum -= float(n) * TICK_DT
+	if n > MAX_CATCHUP_TICKS:
+		n = MAX_CATCHUP_TICKS
+		_accum = 0.0  # drop the backlog so a load hitch doesn't spiral into the next frames
+	var sim_us := 0
+	var effects_us := 0
+	for _i in range(n):
+		_advance_one_tick_no_present()
+		sim_us += _perf_sim_us
+		effects_us += _perf_effects_us
+	_perf_sim_us = sim_us
+	_perf_effects_us = effects_us
+	_perf_present_us = 0
+	if _present != null:
+		var present_start := Time.get_ticks_usec()
+		_present.present()
+		_perf_present_us = Time.get_ticks_usec() - present_start
+	_perf_tick_us = Time.get_ticks_usec() - tick_start
+	_perf_did_tick = true
+	_ticks_last_frame = n
+	return n
 
 
 func get_perf_counters() -> Dictionary:
@@ -255,29 +316,33 @@ func get_perf_counters() -> Dictionary:
 		"present_us": _perf_present_us,
 		"effects_us": _perf_effects_us,
 		"did_tick": _perf_did_tick,
+		"ticks": _ticks_last_frame,
 		"sim": _sim.get_runtime_perf_counters() if _sim != null and _sim.has_method("get_runtime_perf_counters") else {},
 	}
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _self_tick and _playing:
-		tick()
+		tick_realtime(delta)
 
 
 # --- Editor transport (Play / Step / Stop) ------------------------------------
 
 func play() -> void:
 	_playing = true
+	_accum = 0.0  # discard wall-clock banked while paused / loading, so Play doesn't burst-catch-up
 
 
 func pause() -> void:
 	_playing = false
+	_accum = 0.0
 
 
 ## One manual tick (editor Step): one logic tick + present, without running the self-tick loop.
 ## Both tick modes advance one logic tick per call, so Step behaves identically under DIVIDED.
 func step_once() -> void:
 	_playing = false
+	_accum = 0.0  # manual stepping is fully decoupled from wall-clock
 	tick()
 
 
@@ -285,6 +350,7 @@ func step_once() -> void:
 ## placed world is left exactly as it was. Safe to call when never played.
 func stop() -> void:
 	_playing = false
+	_accum = 0.0  # a Stop -> Play cycle must not replay banked time
 	if _sim != null:
 		_sim.restart()  # World::restore baseline (registry/vars/env/clock) + AI re-seed
 	_restore_transforms()

@@ -89,10 +89,25 @@ count `dword_B76568`) for records whose word +528 references that event, sets th
 pending byte +536 (backward-chaining via byte +535), then `SpawnPoint_SkipBlocked
 @0x4de310`. Spawn points are not ported — D-EVT-1.
 
-### 1.6 Cadence — three passes, per-system dividers
+### 1.6 Cadence — the fixed-timestep outer loop and per-system dividers
 
-Witnessed frame structure (`Game_ProcessMainFrame @0x5263f0`, the 62 Hz engine tick —
-`current_tick @0x24c1968` increments once per call):
+The 62 Hz engine tick is dispatched by the master loop's **fixed-timestep accumulator**
+(`Game_MainLoop @0x52b630`, witnessed 2026-06-22). Per outer iteration it banks real elapsed
+time (`GetTickCount`, in 1/16 ms units, `+= 16 * elapsed_ms` @0x52b7b2) and drains it in 4 ms
+quanta; it invokes the UPDATE callback `Game_ProcessMainFrame @0x5263f0` (one `current_tick++`)
+once per **16 ms = 62.5 Hz** — the inner loop consumes 64 units (4 ms) per pass (@0x52ba21) and
+fires UPDATE only on `(phase & 3) == 0` (@0x52ba47), i.e. every 4×4 ms. It then invokes the
+RENDER callback once per outer iteration (`Render_ProcessMainSceneFrame @0x5ca0f0`, the scene
+descriptor's +0x28 slot @0x52bac6) at the **variable render rate**. So the simulation is
+**decoupled from rendering**: a long frame runs **multiple** sim ticks (catch-up), a short frame
+runs **zero**; the accumulator is clamped at **500 ms / ~31 ticks** (`0x1F40` units @0x52b83e)
+against the spiral of death (plus a 7/8 frame-time EMA @0x52b85b and an optional vsync `Sleep`
+cap @0x52b8b2 that gate only render). There is **no inter-tick render interpolation** — the
+render callback reads current entity state. (The integer `62` in `Game_ProcessMainFrame`'s
+per-second counters is the engine's rounding of the 16 ms / 62.5 Hz quantum.)
+
+Witnessed per-tick frame structure inside `Game_ProcessMainFrame @0x5263f0` (the UPDATE
+callback; `current_tick @0x24c1968` increments once per call):
 
 1. `Server_TickUpdate @0x51d7e0` (authority only):
    - `sub_4F81A0 @0x51d8bf` — the **WAC executor**: 14-instruction wrapper that gates
@@ -136,13 +151,33 @@ yet witnessed (D-EVT-4).
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | `mission_systems.h`: grill-gate comment replaced with the witnessed order | @0x5263f0 |
-| engine: NovaSimulation drops the TickService member; `advance_frame()` = one tick per host frame (both tick modes equivalent pending a fixed-62 Hz accumulator, slice D) | — |
+| engine: NovaSimulation drops the TickService member; `advance_frame()` = one tick per host frame (both tick modes equivalent pending a fixed-62 Hz accumulator, slice D — **resolved 2026-06-22, see §2a**) | — |
 
 Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: cadence,
 delay, signed wrap, cooldown window, reset_after=0 refire, pre-pass exclusivity, cat-3
 window, ResetEvent), `tests/wac/wac_behavior_test.cpp` (`test_execution_cadence`),
 `tests/mission/promote_test.cpp` (authored SSNs, pool-3 markers, find_by_net_id),
 GUT `nova_simulation_test.gd` / `mission_runtime_test.gd`.
+
+## 2a. Fixed-timestep accumulator landed (2026-06-22, nw-merge)
+
+The slice-D seam is closed. The reimpl previously advanced **one logic tick per rendered
+`_process` frame** (`NovaSimulation.advance_frame()` once per `MissionRuntime.tick()`),
+discarding the frame `delta` — a divergence from `Game_MainLoop @0x52b630` (§1.6) that coupled
+gameplay speed to the render frame rate (the shared per-tick infantry motor, `tick_infantry`,
+integrates a fixed displacement per tick, so locomotion/animation ran fast at high FPS and slow
+at low FPS).
+
+`MissionRuntime.tick_realtime(delta)` now ports the original's accumulator: it banks `delta`,
+runs `floor(accum / (1/62.5))` single ticks (clamped to `MAX_CATCHUP_TICKS = 31`, the 500 ms
+cap), and presents **once** after the batch — sim at a constant 62.5 Hz, render decoupled at the
+host frame rate, no inter-tick interpolation (faithful to §1.6). The single-tick
+`MissionRuntime.tick()` survives as the deterministic primitive for editor Step / the MCP /
+tests. The game host (`main_game._process` → `game_world.tick` → `tick_realtime`) and the editor
+mission preview (`mission_runtime._process` self-tick) both thread real `delta`. The portable
+`libs/world` per-tick motors are unchanged — they were already correct per tick; only the host
+tick **cadence** was wrong. Pinned by `mission_runtime_test.gd`
+(`test_tick_realtime_*`, `test_distance_per_real_second_is_frame_rate_independent`).
 
 ## 3. Tracked deviations
 

@@ -31,6 +31,7 @@ const NetEventView := preload("res://engine/world/net_event_view.gd")
 const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
+const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -495,7 +496,7 @@ func is_loaded() -> bool:
 ## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
 ## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
-func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> void:
+func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
 	var tick_start := Time.get_ticks_usec()
 	var foliage_start := tick_start
 	_perf_foliage_us = 0
@@ -519,7 +520,12 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D()) -> voi
 	# just the editor preview. _start_runtime calls play(), so normal missions
 	# run exactly as before.
 	if _loaded and _runtime != null and _runtime.is_playing():
-		_runtime.tick()
+		# Fixed-timestep accumulator: the sim runs at a constant 62.5 Hz regardless of render rate.
+		# Guard keeps the duck-typed test stubs (game_world_test.gd) that only implement tick() green.
+		if _runtime.has_method("tick_realtime"):
+			_runtime.tick_realtime(delta)
+		else:
+			_runtime.tick()
 		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
