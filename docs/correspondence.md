@@ -256,12 +256,20 @@ Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
 
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
-| `Entity_UpdateInfantryAI` | `0x4b9910` | infantry motor; branch @0x4b9a74 jumps to `loc_4B9C3E` (SIMULATE) when `is_authority` OR `entity==g_local_player_entity` — so the local player ALWAYS simulates; fall-through @0x4b9a8c = network interpolation toward smooth-target +0x234 (REMOTE entities on a client only) | disasm; §5.38 (paired to `AiSystem::tick_infantry`, world-wac-ai-re) | confirm-only |
+| `Entity_UpdateInfantryAI` | `0x4b9910` | infantry motor; branch @0x4b9a74 jumps to `loc_4B9C3E` (SIMULATE) when `is_authority` OR `entity==g_local_player_entity` — so the local player ALWAYS simulates; fall-through @0x4b9a8c = network interpolation toward smooth-target +0x234 (REMOTE entities on a client only — `is_authority` is GLOBAL, so a host never interpolates: §5.38a/D-NET-89) | disasm; §5.38/§5.38a (paired to `AiSystem::tick_infantry`, world-wac-ai-re) | confirm-only |
 | `Input_ProcessMouseAxisBindings` | `0x499680` | LOOK: mouse deltas × sensitivity (`dword_24D207C<<11`, 16.16) → `Input_TryTriggerMouseAxisBinding(.., entity, dX, dY)` → Yaw(+0x10)/Pitch(+0x14) | disasm; §5.38 | confirm-only |
 | `Player_PackInputStateToEntity` | `0x4df450` | MOVE: `g_inputFlags` → 8-way move index → `entity->pad7[12]` (= entity+0x12C): index, +8 is_moving, fire/lean/scope/grenade bits; analog → pad7[16..19] | disasm; §5.38 | confirm-only |
 | `Input_ProcessPlayerFrame` | `0x49d4c0` | per-frame input binding dispatch (keyboard/mouse-axis/toggle/analog); calls `Input_ProcessMouseAxisBindings` | disasm; §5.38 | confirm-only |
 | `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) | disasm; §5.38 | confirm-only |
-| `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
+| `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` (SEND-side only — no such gate on receive, §5.38a) → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
+
+Host read-apply / remote-peer SNAP mover (Phase 4, 2026-06-23; net-re §5.38a):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `dispatch_entity_packet_callback` | `0x4d6a80` | C2S entity-packet receive dispatch: gates `is_authority` + `owner_ctx` + `entity==*owner_ctx` + `+356` cb, sets ctx mode=4; NO `entity+286`/`+36` health gate (send-side only) | disasm; §5.38a / §5.10 (paired to `NetSystem::tick` C2S 0x0C drain, `libs/netsim/src/net_system.cpp`) | matching (`netsim_loopback_identity`) |
+| `NetPacket_SerializePlayerState` (case 4 tail) | `0x4c2000` | host read-apply/SNAP: gates (entity+0x24 bit1 / `g_spawn_success_gate` / conn==6 / `dword_C8D824`), stage smooth-target +0x234/240/244, mirror live +0x10/+0x14, SNAP live +4/8/C iff entity+0x24 bit0, reset +0x27C; heading/pitch = `movsx`+`shl 16` (no 90°), pos = absolute world (no map-origin) | disasm; §5.38a / D-NET-89/90/91 (paired to `EntityWireBridge::apply_player_intent`, `libs/netsim/src/entity_wire_bridge.cpp`) | matching (`netsim_loopback_identity`) |
+| `Entity_UpdateInfantryAI` (net-snap skip) | `0x4b9a03` | `test [esi+24h],1; jnz loc_4BFC8B` — net-snapped (entity+0x24 bit0) entity full-skips the motor (host never re-simulates a read-applied peer) | disasm; §5.38a / D-NET-89 (paired to `tick_infantry` net-peer skip-guard, `libs/world/src/infantry.cpp`) | matching (`netsim_loopback_identity`) |
 
 Vehicle-board AI command (`waypoint_id` 123–127 = Goto SSN/Group/Player; world-wac-ai-re §11/§4.12; witnessed 2026-06-22):
 

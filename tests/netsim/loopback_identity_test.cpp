@@ -18,13 +18,16 @@
 #include "netsim/net_system.h"
 #include "netsim/serializing_sink.h"
 
-#include <novaworld/ingame_encode.h> // network_compress_fixedpoint
+#include <novaworld/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <novaworld/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/world.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -161,10 +164,173 @@ bool run_header_only_records_are_ignored_by_client_view() {
 	return true;
 }
 
+// Build a 48-byte C2S 0x0C extended uplink (5-B sub-header + 43-B body) from the encoders.
+std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32_t z,
+                                    int16_t heading, int16_t pitch) {
+	nw::EntityPacketSubHeader hdr;
+	hdr.handle = handle;
+	hdr.item_type_id = 0x14B9; // player infantry
+	hdr.sub_op = 0x0A;         // extended (type 10)
+	nw::PlayerExtendedUplink up;
+	up.vehicle_handle = 0xFFFF; // unmounted
+	up.pos_x = x;
+	up.pos_y = y;
+	up.pos_z = z;
+	up.heading = heading;
+	up.pitch = pitch;
+	std::vector<uint8_t> body = nw::encode_entity_packet_sub_header(hdr);
+	const std::vector<uint8_t> tail = nw::encode_player_extended_uplink(up);
+	body.insert(body.end(), tail.begin(), tail.end());
+	return body;
+}
+
+// The host read-applies a remote peer's C2S 0x0C uplink: NetSystem::tick drains it and
+// EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
+// frame re-broadcasts), mirrors the engine-frame AiEntity, and stages the smooth-target.
+// [orig: dispatch_entity_packet_callback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
+// @0x4c2042-0x4c20a9; §5.10/§5.38]
+bool run_apply_player_intent_stages_remote_peer() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9; // player infantry template
+	peer.position = {0.0f, 0.0f, 0.0f};
+	peer.yaw = 0;
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	if (!expect(ph.valid(), "peer spawned")) return false;
+
+	// The engine-frame mirror. AiSystem is wired (so apply mirrors it) but NOT ticked —
+	// this isolates the host read-apply from the motor.
+	w::AiSystem ai;
+	world.ai = &ai;
+	ai.attach(ph);
+
+	// A DIFFERENT handle is the local player, so the read-apply guard does not reject the peer.
+	world.cached.local_player = w::EntityHandle::make(0, 7);
+
+	const int32_t wx = w::to_fixed(100.0);
+	const int32_t wy = w::to_fixed(200.0);
+	const int32_t wz = w::to_fixed(-50.0);
+	const int16_t wheading = 0x2000; // BAM-high i16 -> mission yaw 45 deg
+	const int16_t wpitch = 0x0100;
+
+	ns::LoopbackChannel channel;
+	channel.client_send(0x0C, make_0c_uplink(ph.packed, wx, wy, wz, wheading, wpitch));
+	if (!expect(channel.c2s_pending() == 1, "one C2S 0x0C queued")) return false;
+
+	// Drain directly (the authority host's top-of-tick C2S drain).
+	ns::NetSystem net(channel);
+	w::TickContext ctx;
+	ctx.world = &world;
+	ctx.is_authority = true;
+	net.tick(world, ctx);
+	if (!expect(channel.c2s_pending() == 0, "C2S drained by the tick")) return false;
+
+	// Registry Entity SNAPPED (absolute world pos; no map-origin add on the extended wire).
+	const w::Entity *pe = world.registry.get(ph);
+	if (!expect(pe != nullptr, "peer still present")) return false;
+	if (!expect(pe->position.x == static_cast<float>(w::from_fixed(wx)) &&
+	            pe->position.y == static_cast<float>(w::from_fixed(wy)) &&
+	            pe->position.z == static_cast<float>(w::from_fixed(wz)),
+	            "registry Entity position snapped to the wire pose")) return false;
+	if (!expect(pe->yaw == 45, "registry yaw = 90 - BAM/deg (== 45)")) return false;
+
+	// Engine-frame AiEntity mirrored + smooth-target staged + net-snapped.
+	const w::AiEntity *ae = ai.for_handle(ph);
+	if (!expect(ae != nullptr, "peer has an AiEntity")) return false;
+	if (!expect(ae->net_is_remote_peer, "peer marked net-snapped")) return false;
+	const int32_t heading_bam = static_cast<int32_t>(wheading) << 16;
+	const int32_t pitch_bam = static_cast<int32_t>(wpitch) << 16;
+	if (!expect(ae->pos[0] == wx && ae->pos[1] == wy && ae->pos[2] == wz,
+	            "AiEntity live pos = wire pose")) return false;
+	if (!expect(ae->heading == heading_bam && ae->pitch == pitch_bam,
+	            "AiEntity heading/pitch = i16<<16 (pure widen, no 90-offset)")) return false;
+	if (!expect(ae->net_smooth_target[0] == wx && ae->net_smooth_target[1] == wy &&
+	            ae->net_smooth_target[2] == wz,
+	            "smooth-target staged (+0x234/238/23C)")) return false;
+	if (!expect(ae->net_smooth_heading == heading_bam && ae->net_smooth_pitch == pitch_bam,
+	            "smooth heading/pitch staged (+0x240/244)")) return false;
+	if (!expect(ae->net_interp_progress == 0, "interp progress reset (+0x27C)")) return false;
+	return true;
+}
+
+// Parity-critical negative: the host NEVER read-applies its OWN player (§5.38 / ADR-0012).
+bool run_apply_rejects_own_player() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9;
+	peer.position = {1.0f, 2.0f, 3.0f};
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	w::AiSystem ai;
+	world.ai = &ai;
+	ai.attach(ph);
+
+	// Make the peer the local player -> the read-apply must reject it.
+	world.cached.local_player = ph;
+
+	ns::LoopbackChannel channel;
+	channel.client_send(0x0C, make_0c_uplink(ph.packed, w::to_fixed(999.0), 0, 0, 0x4000, 0));
+	ns::NetSystem net(channel);
+	w::TickContext ctx;
+	ctx.world = &world;
+	ctx.is_authority = true;
+	net.tick(world, ctx);
+	if (!expect(channel.c2s_pending() == 0, "C2S drained even when rejected")) return false;
+
+	const w::Entity *pe = world.registry.get(ph);
+	if (!expect(pe->position.x == 1.0f && pe->position.y == 2.0f && pe->position.z == 3.0f,
+	            "own-player pose NOT overwritten by a read-apply")) return false;
+	const w::AiEntity *ae = ai.for_handle(ph);
+	if (!expect(ae != nullptr && !ae->net_is_remote_peer,
+	            "own player not marked net-snapped")) return false;
+	return true;
+}
+
+// The infantry motor SKIPS a net-snapped remote peer entirely — its pose is host-snapped,
+// never re-simulated. [orig: Entity_UpdateInfantryAI @0x4b9a03 entity+0x24 bit0 -> full exit.]
+bool run_motor_skips_net_peer() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9;
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	w::AiSystem ai;
+	world.ai = &ai;
+	ai.attach(ph);
+	w::AiEntity *ae = ai.for_handle(ph);
+	if (!expect(ae != nullptr, "peer AiEntity")) return false;
+
+	// Seed state the motor would otherwise change; mark net-snapped so it skips entirely.
+	ae->inf.active = true;
+	ae->inf.body_heading = 12345;
+	ae->inf.target_heading = 9999999;
+	ae->pos[0] = 111;
+	ae->pos[1] = 222;
+	ae->pos[2] = 333;
+	ae->heading = 4444;
+	ae->net_is_remote_peer = true;
+	ai.tick_infantry(*ae, world, 0);
+
+	if (!expect(ae->inf.body_heading == 12345 && ae->inf.target_heading == 9999999,
+	            "skip-guard: heading state untouched")) return false;
+	if (!expect(ae->pos[0] == 111 && ae->pos[1] == 222 && ae->pos[2] == 333,
+	            "skip-guard: live pos untouched")) return false;
+	if (!expect(ae->heading == 4444, "skip-guard: engine heading untouched")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
-	const bool ok = run() && run_header_only_records_are_ignored_by_client_view();
+	const bool ok = run() &&
+	                run_header_only_records_are_ignored_by_client_view() &&
+	                run_apply_player_intent_stages_remote_peer() &&
+	                run_apply_rejects_own_player() &&
+	                run_motor_skips_net_peer();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

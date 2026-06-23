@@ -7,6 +7,8 @@
 #include <world/entity.h>
 #include <world/world.h>
 
+#include "netsim/player_intent.h" // PlayerIntent
+
 namespace opennova::netsim {
 
 // The single deliberate bridge between the libs/world runtime entity model
@@ -34,5 +36,18 @@ GameEntitySnapshot snapshot_of(const world::Entity &e);
 // Walk the live registry into the replicated entity set. Entities with no 0x0A
 // compact form (EntityClass::Unknown) are skipped.
 std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
+
+// Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
+// REMOTE PEER entity — the host-side mover [orig: NetPacket_SerializePlayerState case 4
+// @0x4c2042-0x4c20a9; docs/net/novaworld-net-re.md §5.38a/§5.10]. The inverse of
+// snapshot_of's two-store read at the wire
+// boundary: it SNAPS the registry Entity pose (the store snapshot_of re-broadcasts) and
+// mirrors the engine-frame AiEntity (live pose + heading/pitch) + stages the smooth-target
+// the CLIENT interpolation consumes, marking the entity net-snapped so the motor skips it
+// [orig: Entity_UpdateInfantryAI @0x4b9a03]. Per §5.38 / ADR-0012 this is ONLY ever called
+// for a remote peer — the host NEVER read-applies its own player (motor-from-input). Returns
+// false if the handle is unresolved, it is the local player, or the movement/spawn gate
+// (Entity.flags bit1) is set.
+bool apply_player_intent(world::World &world, const PlayerIntent &intent);
 
 } // namespace opennova::netsim

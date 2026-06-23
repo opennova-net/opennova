@@ -1,6 +1,9 @@
 #include "netsim/entity_wire_bridge.h"
 
-#include <world/geom.h> // to_fixed
+#include <cmath>      // std::lround
+
+#include <world/ai.h>   // AiEntity / AiSystem (engine-frame mirror)
+#include <world/geom.h> // to_fixed / from_fixed
 
 namespace opennova::netsim {
 
@@ -59,6 +62,75 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		out.push_back(s);
 	});
 	return out;
+}
+
+bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
+	// 1. Resolve the joiner's owned entity by its wire handle (pool<<12 | slot).
+	//    [orig: dispatch_entity_packet_callback @0x4D6A80 resolves g_pool_list[h>>12] and
+	//    verifies `entity == *owner_ctx` before invoking the +356 callback — the receive
+	//    path has NO entity+286/entity+36 health gate; that gate is send-side only
+	//    (Player_BuildTag0CInputBody @0x42A550).]
+	world::Entity *ent =
+			world.registry.get(world::EntityHandle{static_cast<uint16_t>(intent.entity_handle)});
+	if (ent == nullptr) return false;
+
+	// 2. Never read-apply the host's OWN player — it is motor-from-raw-input, never a
+	//    self-applied pose (§5.38 / ADR-0012 amendment).
+	if (world.cached.local_player.valid() && ent->handle == world.cached.local_player)
+		return false;
+
+	// 3. Movement/spawn gate: skip the apply while entity+0x24 bit1 is set (spawning).
+	//    [orig: case 4 gate @0x4c2000 `test [edi+24h], 2; jnz skip`.] The host-session
+	//    globals the original also gates on (g_spawn_success_gate==0, playerSlot+0x20==6
+	//    in-game, dword_C8D824==0 @0x4c200a-0x4c2028) hold for an active in-game peer and
+	//    are modeled implicitly here (the SP listen-server only drains C2S for joined peers).
+	if ((ent->flags & 0x2u) != 0)
+		return false;
+
+	// Engine-frame conversions. Heading/pitch on the extended wire are an i16 sign-extended
+	// and << 16 = a full 32-bit BAM — a PURE widen, NOT the (90 - yaw) mission framing the
+	// FORWARD snapshot_of applies (the joiner serialized its live entity+0x10, already
+	// engine-framed). [orig: case 4 @0x4c1da6 `movsx eax, ax; shl eax, 10h` / @0x4c1dca.]
+	const int32_t heading_bam = static_cast<int32_t>(intent.heading) << 16;
+	const int32_t pitch_bam = static_cast<int32_t>(intent.pitch) << 16;
+
+	// 4. SNAP the registry Entity — the store snapshot_of reads and the S2C 0x0A frame
+	//    re-broadcasts. The inverse of snapshot_of's two-store read at the wire boundary.
+	//    [orig: case 4 live-pos snap @0x4c2084-0x4c208e + live orientation mirror
+	//    @0x4c206a/@0x4c206d.] Extended-wire position is ABSOLUTE world (no map-origin add
+	//    on receive); the mounted vehicle-local transform (vehicle_handle != 0xFFFF) is a
+	//    tracked deferral [orig: Entity_TransformLocalToWorld @0x43BD00].
+	ent->position.x = static_cast<float>(world::from_fixed(intent.pos_x));
+	ent->position.y = static_cast<float>(world::from_fixed(intent.pos_y));
+	ent->position.z = static_cast<float>(world::from_fixed(intent.pos_z));
+	// BAM32 -> mission yaw degrees: yaw = 90 - bam / kBamPerDegree (the exact inverse of
+	// snapshot_of's `(90 - yaw) * kBamPerDegree`), normalized into [0, 360).
+	constexpr double kBamPerDegree = 11930464.0; // 2^32 / 360 (matches snapshot_of)
+	const long yaw_deg = std::lround(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
+	ent->yaw = static_cast<int16_t>(((yaw_deg % 360) + 360) % 360);
+
+	// 5. Mirror the engine-frame store (AiEntity) and stage the smooth-target the CLIENT
+	//    interpolation consumes; mark the entity net-snapped so the infantry motor SKIPS it
+	//    (the host does not re-simulate a read-applied peer). [orig: case 4 staging +0x234/
+	//    240/244 @0x4c2042-0x4c205e, live +4/+0x10/+0x14 mirror, progress +0x27C=0 @0x4c20a9;
+	//    motor skip @0x4b9a03.] No AiEntity (peer not AI-attached) -> registry snap stands alone.
+	if (world.ai != nullptr) {
+		if (world::AiEntity *ae = world.ai->for_handle(ent->handle)) {
+			ae->net_is_remote_peer = true;
+			ae->pos[0] = intent.pos_x; // live +4/+8/+0xC
+			ae->pos[1] = intent.pos_y;
+			ae->pos[2] = intent.pos_z;
+			ae->heading = heading_bam; // live +0x10
+			ae->pitch = pitch_bam;     // live +0x14
+			ae->net_smooth_target[0] = intent.pos_x; // +0x234
+			ae->net_smooth_target[1] = intent.pos_y; // +0x238
+			ae->net_smooth_target[2] = intent.pos_z; // +0x23C
+			ae->net_smooth_heading = heading_bam;    // +0x240
+			ae->net_smooth_pitch = pitch_bam;        // +0x244
+			ae->net_interp_progress = 0;             // +0x27C reset
+		}
+	}
+	return true;
 }
 
 } // namespace opennova::netsim

@@ -230,6 +230,25 @@ struct AiEntity {
     int32_t heading = 0;       // entity+16 (32-bit binary angle); copied to brain[132]
     int32_t pitch = 0;         // entity+20
     int32_t roll = 0;          // entity+24
+
+    // --- network receive-apply: a remote peer's pose, read-applied on the host ---
+    // The host stages a joiner's reported 0x0C pose into these engine-frame slots
+    // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. net_is_remote_peer
+    // is the entity+0x24-bit0 "network-snapped" flag: when set the host SNAPS the live pose
+    // to the report and the infantry motor SKIPS the entity (no re-simulation)
+    // [orig: Entity_UpdateInfantryAI @0x4b9a03]. net_smooth_target/heading/pitch are staged
+    // for the CLIENT-side interpolation smoothing (motor fall-through @0x4b9a8c, is_authority==0)
+    // — a deferred, client-only concern; the authority host never interpolates. NEVER set for
+    // the host's own player (ADR-0012 amendment / §5.38).
+    bool    net_is_remote_peer = false;  // entity+0x24 bit0 (net-snap + motor-skip)
+    int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world)
+    int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; also mirrored to heading/+0x10)
+    int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; also mirrored to pitch/+0x14)
+    int16_t net_interp_progress = 0;     // entity+0x27C (reset to 0 on each read-apply)
+    // Deferred client-interp bookkeeping (consumed by the @0x4b9a8c fall-through only):
+    int32_t net_saved_live_pose[3] = {}; // entity+0x80/+0x84/+0x88 (interp delta basis)
+    int16_t net_interp_steps = 0;        // entity+0x27E (2..16; buckets {3,4,5,8,16})
+
     int32_t vel_x = 0;         // entity+152
     int32_t vel_z = 0;         // entity+156
     int16_t health = 100;      // entity+286 (<=0 -> death path)

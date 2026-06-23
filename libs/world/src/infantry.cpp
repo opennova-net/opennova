@@ -435,6 +435,15 @@ void AiSystem::infantry_slope_slide(AiEntity &e) {
 // The per-tick motor. [orig: Entity_UpdateInfantryAI @0x4b9910]
 // ----------------------------------------------------------------------------
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
+    // Network-snapped remote peer: its pose is SNAPPED each frame by the host read-apply
+    // (netsim EntityWireBridge::apply_player_intent), so the motor must NOT re-simulate it
+    // — it fully skips, exactly as the original exits before any motor work when the
+    // entity+0x24 bit0 net-snap flag is set. The host never interpolates; the smooth-target
+    // is staged for CLIENT-side interpolation only (a deferred concern).
+    // [orig: Entity_UpdateInfantryAI @0x4b9a03 `test [esi+24h], 1; jnz loc_4BFC8B`;
+    // docs/net/novaworld-net-re.md §5.38a / D-NET-89.]
+    if (e.net_is_remote_peer) return;
+
     InfantryState &inf = e.inf;
     // Per-entity stagger key. [orig: tickCounter = current_tick + 36 * entity[31]]
     const uint32_t key = logic_tick + 36u * static_cast<uint32_t>(e.net_id);

@@ -1230,7 +1230,7 @@ including a host-validated anti-cheat block:
 | off | bytes | field | landing (host receiver, case 4) |
 |---|---|---|---|
 | 0 | 2 | vehicleHandle (`0xFFFF`=none; `(h&0xF000)>=0x5000` invalid) | pool resolve via `g_pool_list` |
-| 2 | 4 | posX (i32 LE, 16.16; vehicle-local if mounted) | smooth-target entity+0x234 (+ map origin if no vehicle) |
+| 2 | 4 | posX (i32 LE, 16.16; vehicle-local if mounted) | smooth-target entity+0x234 (ABSOLUTE world — NO map-origin add on receive; mounted = vehicle-local lift via `Entity_TransformLocalToWorld @0x43BD00`; §5.38a / D-NET-91) |
 | 6 | 4 | posY | entity+0x238 |
 | 10 | 4 | posZ | entity+0x23C |
 | 14 | 2 | heading (i16 LE, sign-ext ×0x10000) | entity+0x240 / +0x10 (32-bit BAM) |
@@ -2432,9 +2432,10 @@ cmp entity, g_local_player_entity ; jz loc_4B9C3E ; jump if entity IS the local 
   difference is the move-order source.
 - **Fall-through (0x4b9a8c) = network INTERPOLATION (remote entities on a client only).** Reads
   the smooth-target entity+0x234/+0x238/+0x23C minus the saved live pose (+0x80/+0x84/+0x88),
-  computes a 3D distance → step count 2..16 (thresholds
-  `0x2000/0x2AAA/0x4000/0x5555/0x8000/0x20000`) at +0x27E, applies one per-step delta to the live
-  pose, progress counter at +0x27C. The smooth-target is staged by the C2S 0x0C read-apply
+  computes a 3D distance → step count **{3,4,5,8,16}** (refined in §5.38a — NOT "2..16"; exact
+  thresholds `0x2AAA/0x4000/0x5555/0x8000` plus the `>0x20000` snap / `<0x2000` ignore edges) at
+  +0x27E, applies one per-step delta to the live pose, progress counter at +0x27C. The smooth-target
+  is staged by the C2S 0x0C read-apply
   `[orig: dispatch_entity_packet_callback @ 0x4D6A80]` (ctx_flags=4, §5.10) — the RECEIVE side of a
   remote player's reported pose.
 
@@ -2478,6 +2479,74 @@ player's *movement* is the motor simulation, not a self-read-apply.
 `set_comments` at 0x4b9a74 (simulate-vs-interpolate gate; corrects the inverted note), 0x4b9a80
 (gate 2nd half), 0x4b9a8c (remote-interpolation detail), 0x4df68f (move-order write to
 entity+0x12C), 0x499680 (mouse look→Yaw/Pitch front end); `idb_save`.
+
+#### 5.38a Host-side remote-peer disposition RESOLVED — the host SNAPS, never interpolates (Phase 4 grill, 2026-06-23)
+
+§5.38 deferred "the host-side remote-peer receive path" to Phase 4. Grilled this session to gate the
+libs/netsim co-op host mover. All anchored (exact disasm; IDB comments saved at 0x4c2000 / 0x4b9a03 /
+0x4b9a8c). It settles the two-hypothesis question — **H1** the host interpolates a remote peer locally
+vs **H2** the host snaps and only clients interpolate — decisively in favour of **H2**.
+
+- **`is_authority` is GLOBAL** (`g_napi_np_ctx.is_authority`), read directly at the
+  simulate-vs-interpolate gate `[orig: Entity_UpdateInfantryAI @ 0x4b9a74]`. A listen-server host
+  (`is_authority != 0`) therefore takes the SIMULATE branch (`loc_4B9C3E`) for EVERY entity — local
+  player, AI, and remote peers alike — and **never reaches the interpolation fall-through @0x4b9a8c**.
+  Interpolation toward the smooth-target is **client-only** (reached only when `!is_authority &&
+  entity != g_local_player_entity`). [D-NET-89]
+- **The host mover is the read-apply SNAP, not the motor.** `[orig: NetPacket_SerializePlayerState
+  case 4 tail @ 0x4c2000-0x4c20a9]`: after four gates — `(entity+0x24 & 2)==0` (movement/spawn gate),
+  `g_spawn_success_gate (dword_24C1928)==0`, `playerSlot(packetCtx+0x20)+0x20 == 6` (in-game
+  connection state), `dword_C8D824==0` — it STAGES the smooth-target (+0x234/+0x238/+0x23C pos,
+  +0x240 heading, +0x244 pitch, +0x248), ALWAYS mirrors the LIVE orientation to +0x10 (heading) /
+  +0x14 (pitch), SNAPS the LIVE position +4/+8/+0xC **iff `(entity+0x24 & 1)`** (the net-snap flag),
+  and resets the interp progress +0x27C = 0. If the entity is the local player it also caches heading
+  into `dword_B75FCC`. [D-NET-90]
+- **`entity+0x24 bit0` = the network-snapped / motor-skip flag.** The motor full-skips a net-snapped
+  entity `[orig: Entity_UpdateInfantryAI @ 0x4b9a03 (test [esi+24h],1; jnz loc_4BFC8B)]` — it never
+  re-simulates a read-applied peer; the same bit gates the live-pos snap @0x4c207e. It is cleared
+  @0x4b99ff when `is_authority && entity+0x354 owner-ptr valid && team bytes (+0x162) match &&
+  owner+0x21C >= 0x10000`. [D-NET-89]
+- **Heading/pitch receive framing — pure widen, no 90° offset (confirms §5.10).** Case 4 reads the
+  i16 and does `movsx; shl 16` straight into +0x240/+0x10 (heading @0x4c1da6/0x4c1da9) and
+  +0x244/+0x14 (pitch @0x4c1dc7/0x4c1dca) — NO `(90 − yaw)` framing and NO `kBamPerDegree` multiply
+  on receive (the wire is already engine-frame BAM; the (90−yaw) conversion is the
+  mission-degrees↔BAM boundary only, applied by `snapshot_of` on the FORWARD path).
+- **Extended (type-10) position is ABSOLUTE WORLD on receive.** Case 4 stores the raw i32 with NO
+  map-origin (`dword_C867A4/8/AC`) add; only the mounted branch lifts vehicle-local via `[orig:
+  Entity_TransformLocalToWorld @ 0x43BD00]`. Corrects the §5.10 case-4 table note "(+ map origin if
+  no vehicle)" — that add does not exist on the extended receive path. [D-NET-91]
+- **Interp math refinement** of the @0x4b9a8c note in §5.38: the saved-live pose +0x80/+0x84/+0x88 is
+  recaptured from the live pose +4/+8/+0xC EVERY tick (top of func @0x4b9a5f); the step bucket is
+  **{3,4,5,8,16}, not "2..16"** — `dist > 0x20000` SNAPS live to the smooth-target, `dist < 0x2000`
+  zeroes it (steps 0), else thresholds 0x2AAA/0x4000/0x5555/0x8000 → 3/4/5/8 else 16; the per-step
+  delta `(d + N/2)/N` (signed round) is re-stored into +0x234/+0x238/+0x23C and one step added to the
+  live pose each tick; progress +0x27C caps at 512 (@0x4b9c09).
+- **Receive dispatch gate** `[orig: dispatch_entity_packet_callback @ 0x4D6A80]`: only
+  `g_napi_np_ctx.is_authority` + `owner_ctx` present + `entity == *owner_ctx` (the wire handle
+  resolves to the sender's owned entity) + entity_def + the +356 callback; sets ctx mode = 4. **No**
+  `entity+286`/`entity+36` health gate on receive — that gate is SEND-side only, confirmed at `[orig:
+  Player_BuildTag0CInputBody @ 0x42A550]` (`!entity || !healthMax(+286) || (entity+36 & 2)`).
+
+**Port (libs/netsim + libs/world, this session; verdict MATCHING, unit-tested by
+`netsim_loopback_identity`):**
+- `EntityWireBridge::apply_player_intent` (`libs/netsim/src/entity_wire_bridge.cpp`) — the host
+  read-apply/snap as a two-store wire-boundary write (the inverse of `snapshot_of`): snaps the
+  registry `Entity.position/yaw` (the store the S2C 0x0A frame re-broadcasts), mirrors the
+  engine-frame `AiEntity` (live pos + heading/pitch BAM), stages the `AiEntity` smooth-target, resets
+  interp progress, marks the entity net-snapped; gated on `Entity.flags` bit1 clear; REJECTS the local
+  player (the host never read-applies its own pose).
+- `NetSystem::tick` (`libs/netsim/src/net_system.cpp`) — the C2S 0x0C drain (authority-gated): decode
+  sub-header + extended uplink → `PlayerIntent` → `apply_player_intent`.
+- `world::AiEntity` (`libs/world/include/world/ai.h`) — `net_smooth_target/heading/pitch`,
+  `net_interp_progress/steps`, `net_saved_live_pose`, `net_is_remote_peer`.
+- `AiSystem::tick_infantry` (`libs/world/src/infantry.cpp`) — the net-peer skip-guard
+  (`if (e.net_is_remote_peer) return;`), the OpenNova analog of the @0x4b9a03 bit-0 full-exit.
+
+The motor interpolation branch (@0x4b9a8c) is **client-only and intentionally NOT ported** — a
+deferred client-side smoothing concern (OpenNova's SP-as-listen-server host renders its own view from
+the decoded client-view, ADR 0011; no non-authority World motor exists yet). [follow-up: client-side
+smooth-target interpolation — the @0x4b9a8c math is fully witnessed above, ready to port when a
+non-authority client path exists.]
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 
