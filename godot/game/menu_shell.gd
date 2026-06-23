@@ -41,6 +41,9 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var main_menu_file := "main.mnu"
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
+# The gametext table (the original's g_TextGameText). Carries the "Avatars", weapon, and
+# macro sections the PLAYER_INFO host and others consume; registered into NovaStrings.
+@export var game_text_file := "Game.bin"
 # The menu stylesheet has a fixed canonical name the original engine looks for
 # ("named menu_style.mns for the game to find it"). It is usually PFF-archived;
 # .mns is indexed as the "menu_style" kind (so list_files and the editor's
@@ -177,6 +180,15 @@ func _assemble_assets() -> void:
 	add_child(_director)
 
 	_text = _load_text(menu_text_file)
+	# Register the engine text tables into the shared NovaStrings registry, the way the
+	# original loads its TextResource globals at boot [orig: Game_InitSubsystems @ 0x4A6CD0]:
+	# menutxt (UI/voice labels) and gametext = Game.bin (the "Avatars"/weapon/macro sections
+	# host companions, the killfeed, and the HUD GameText path resolve against).
+	if _text != null:
+		NovaStrings.register_table("menutxt", _text)
+	var gametext := _load_text(game_text_file)
+	if gametext != null:
+		NovaStrings.register_table("gametext", gametext)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_bank = _load_bank(_discover_path(menu_sound_bank_file, ".sbf", "menu"))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))

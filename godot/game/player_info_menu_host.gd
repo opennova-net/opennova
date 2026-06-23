@@ -34,7 +34,6 @@ const AvatarPreviewScript := preload("res://modtools/avatar/avatar_preview.gd")
 
 var _menu: Node                         # the built NovaMnuMenu (typed Node: only its tree is used)
 var _root: NovaResourceRoot
-var _text: RtxtStringFile               # the "Avatars" string table (from menutxt.BIN)
 var _db: NovaAvatarDatabase
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
@@ -62,7 +61,6 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	_menu = menu
 	_root = root
 	_ensure_db()
-	_ensure_text()
 	_wire_team_radios()
 	_connect_combo("NATIONALITY", _on_nat_selected)
 	_connect_combo("DIVISION", _on_div_selected)
@@ -75,7 +73,7 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	_connect_pressed("ACCEPT", commit)  # [orig: save_player_info_from_dialog @ 0x55ee10]
 
 
-# --- Avatars.def + RTXT loading (best-effort; degrade to empty combos) ---------
+# --- Avatars.def loading (best-effort; degrade to empty combos) ----------------
 
 func _ensure_db() -> void:
 	if _db != null or _root == null:
@@ -87,26 +85,19 @@ func _ensure_db() -> void:
 		_db = null
 
 
-# Load the menu string table ourselves from the VFS so we stay decoupled from the
-# shell internals; the nationality/division/combo display keys resolve against its
-# "Avatars" section. Absent -> names fall back to their raw keys (still populates).
-func _ensure_text() -> void:
-	if _text != null or _root == null:
-		return
-	var bytes: PackedByteArray = _root.read_file("menutxt.BIN")
-	if bytes.is_empty():
-		return
-	var t := RtxtStringFile.new()
-	if t.load_from_byte_array(bytes) == OK:
-		_text = t
-
-
+# Resolve a nationality/division/combo display key against the gametext table's "Avatars"
+# section -- the table the original consults for these names
+# [orig: GameText_GetStringWithFallback @ 0x51eb90 / g_TextGameText @ 0xB4C2AC; "Avatars"
+# section, docs/playerinfo/avatars-re.md]. The shell registers gametext (Game.bin) into the
+# shared NovaStrings registry at boot. A miss falls back to the raw key (the witnessed
+# fallback; not the "??section:key??" debug marker NovaStrings.lookup would return).
 func _display_name(key: String) -> String:
 	if key.is_empty():
 		return ""
-	if _text != null and _text.has_string_in_section(ATBL_SECTION, key):
-		return _text.get_string_in_section(ATBL_SECTION, key)
-	return key  # faithful fallback: the raw key shows when there is no string entry
+	var t: RtxtStringFile = NovaStrings.get_table("gametext")
+	if t != null and t.has_string_in_section(ATBL_SECTION, key):
+		return t.get_string_in_section(ATBL_SECTION, key)
+	return key
 
 
 # --- Population (the cascade) -------------------------------------------------
@@ -210,6 +201,10 @@ func _wire_preview() -> void:
 	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the button keep its clicks
 	(rect as Control).add_child(_preview)
+	# Static menu portrait: no grid/axes, camera locked, character facing the viewer,
+	# pose held steady across combo changes. The editor Avatars workspace keeps the
+	# interactive fly camera; only this runtime mount opts into the fixed portrait.
+	_preview.set_menu_preview(true)
 	_preview.set_resource_root(_root)
 	_refresh_preview()
 
@@ -331,12 +326,13 @@ func _radio_checked(name: String) -> bool:
 
 
 func _menu_text(key: String, fallback: String) -> String:
-	# DEFAULT_VOICE / CHARVOICE_%d are menu UI strings; try the common sections, else
-	# the readable fallback. Voice labels are cosmetic, so a miss never blocks population.
-	if _text != null:
-		for section in ["Menu", ATBL_SECTION]:
-			if _text.has_string_in_section(section, key):
-				return _text.get_string_in_section(section, key)
+	# DEFAULT_VOICE / CHARVOICE_%d are menu UI strings: try menutxt's "Menu" then gametext's
+	# "Avatars" in the shared registry, else the readable fallback. Voice labels are cosmetic,
+	# so a miss never blocks population.
+	for spec in [["menutxt", "Menu"], ["gametext", ATBL_SECTION]]:
+		var t: RtxtStringFile = NovaStrings.get_table(spec[0])
+		if t != null and t.has_string_in_section(spec[1], key):
+			return t.get_string_in_section(spec[1], key)
 	return fallback
 
 

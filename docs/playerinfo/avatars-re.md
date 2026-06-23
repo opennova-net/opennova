@@ -220,6 +220,20 @@ So the menu reads the parsed object directly; the display vocabulary lives in th
 `"Avatars"` RTXT string table, keyed by the name fields, and the head/body
 display names form a "lastname - firstname" character label.
 
+**The `"Avatars"` section lives in `Game.bin`** — the *gametext* resource the
+engine loads into `g_TextGameText` at boot
+`[orig: Game_InitSubsystems @ 0x4A6CD0; lookup GameText_GetStringWithFallback
+@ 0x51eb90]` (NOT `menutxt.BIN`, which carries only `Menu`/`MenuStats`). Verified
+by extraction: the retail `Game.bin` has sections `MENU / RemapActions / RemapKeys
+/ WeaponDescriptions / Macros / Avatars`, and the `Avatars` keys resolve
+(`AV_NAT_RUSSIA → "Russia"`, `AV_DIV_SEAL → "SEAL"`, `AV_BOONIEHAT → "Boonie
+Hat"`). Reimpl: `menu_shell.gd` registers `Game.bin` into the shared `NovaStrings`
+registry as `gametext`, and `player_info_menu_host.gd::_display_name` resolves the
+nationality/division/combo keys against `gametext`'s `"Avatars"` section (raw-key
+fallback on a miss). On-disk-miss fallback to the raw key is the witnessed
+`GetStringWithFallback` behavior; the expansion override table (JOX avatars) is a
+follow-up via `NovaStrings.set_override_table`.
+
 ## Screen orchestration — witness map (grilled 2026-06-23)
 
 The four populate functions above are driven by a per-screen init plus per-control

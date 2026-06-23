@@ -19,6 +19,20 @@ const NovaEnvironmentScript = preload("res://engine/environment/nova_environment
 # Part slot keys, matching resolve_combo()'s head/body/arms sub-dictionaries.
 const SLOTS := ["head", "body", "arms"]
 
+# Menu-preview tuning (set_menu_preview): a front portrait of a standing soldier for
+# the player.mnu PLAYER_PREVIEW pane. Camera yaw 0 puts the orbit camera on +Z and the
+# .3di parts import +Z-forward (see MissionObjectPlacer.bms_to_godot_basis), so the
+# character faces the viewer with no model rotation. The distance scale fits a ~1.8 m
+# figure in the tall pane; the slight downward pitch reads like a person standing just
+# below eye level. The pose is framed once and held stable across selections (no jump).
+const MENU_DISTANCE_SCALE := 2.7
+const MENU_PITCH := -0.06
+
+# The menu's anamorphic design space (menu_shell.gd scales the whole menu tree from this
+# to the window). In menu mode the SubViewport is rendered at the on-screen pixel size
+# (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
+const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
+
 var _resource_root  # NovaResourceRoot, or null (headless / no shell)
 
 var _viewport_container: SubViewportContainer
@@ -33,6 +47,11 @@ var _axis_material: StandardMaterial3D
 var _grid_visible := true
 var _axes_visible := true
 var _has_framed := false
+# Static menu mode (runtime PLAYER_INFO): grid/axes hidden, camera locked, a fixed
+# front-facing pose framed once and held across combo changes. Off by default so the
+# ONED Avatars workspace keeps its interactive fly camera + grid.
+var _menu_preview := false
+var _menu_pose_set := false
 
 # Loaded part models keyed by slot ("head"/"body"/"arms") -> NovaObjectModel.
 var _part_models: Dictionary = {}
@@ -53,6 +72,66 @@ func set_resource_root(root) -> void:
 
 func get_resource_root():
 	return _resource_root
+
+
+# Switch to the static menu portrait used by the runtime PLAYER_INFO screen: hide the
+# grid + axis gizmo, lock the camera (no orbit / pan / fly), stop the SubViewport from
+# eating clicks so the PLAYER_PREVIEW button keeps them, and frame a fixed front pose
+# that stays put across combo selections. Idempotent; safe to call before or after the
+# first combo loads (the framing applies on the next non-empty load_combo()).
+func set_menu_preview(enabled: bool) -> void:
+	_menu_preview = enabled
+	if not enabled:
+		return
+	set_grid_visible(false)
+	set_axes_visible(false)
+	if _camera != null and _camera.has_method("set_gameplay_locked"):
+		_camera.set_gameplay_locked(true)
+	if _viewport_container != null:
+		_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _viewport != null:
+		_viewport.gui_disable_input = true
+		_viewport.msaa_3d = Viewport.MSAA_4X  # edges stay clean at the higher render res
+	# Render the 3D at true on-screen resolution. This subtree is scaled anamorphically by
+	# the menu (menu_shell.gd::_recompute_fit), so a design-size SubViewport gets upscaled
+	# and blurred; sizing it to on-screen px keeps it sharp and undistorted. Recompute on
+	# window resize too. No-op in the ONED workspace (no parent scale, s == 1).
+	if is_inside_tree() and get_viewport() != null \
+			and not get_viewport().size_changed.is_connected(_apply_menu_viewport_resolution):
+		get_viewport().size_changed.connect(_apply_menu_viewport_resolution)
+	_apply_menu_viewport_resolution()
+	# Re-pose now if a combo is already loaded; otherwise the next load_combo() frames it.
+	_menu_pose_set = false
+	_refresh_preview_guides()
+
+
+# Size the SubViewport to the true on-screen pixel footprint of this pane. The menu scales
+# this control by s = window / 800x600; counter-scaling the container by 1/s while sizing it
+# to base*s makes SubViewportContainer.stretch render the viewport at base*s (on-screen px)
+# yet still visually fill the design-space rect. Guarded so a zero/!inside-tree size is a
+# no-op; only runs in menu mode.
+func _apply_menu_viewport_resolution() -> void:
+	if not _menu_preview or _viewport_container == null or not is_inside_tree():
+		return
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var win := vp.get_visible_rect().size
+	var base := size  # design-space size (FULL_RECT inside PLAYER_PREVIEW)
+	if base.x < 1.0 or base.y < 1.0 or win.x < 1.0 or win.y < 1.0:
+		return
+	var s := Vector2(win.x / MENU_DESIGN_SIZE.x, win.y / MENU_DESIGN_SIZE.y)
+	_viewport_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_viewport_container.position = Vector2.ZERO
+	_viewport_container.size = base * s
+	_viewport_container.scale = Vector2(1.0 / s.x, 1.0 / s.y)
+
+
+func _notification(what: int) -> void:
+	# The pane's design-space size is fixed, so its own RESIZED fires only when layout first
+	# assigns it -- the moment to (re)apply the on-screen render resolution in menu mode.
+	if what == NOTIFICATION_RESIZED and _menu_preview:
+		_apply_menu_viewport_resolution()
 
 
 func _build_viewport() -> void:
@@ -120,7 +199,7 @@ func _build_viewport() -> void:
 func load_combo(combo: Dictionary) -> void:
 	clear()
 	_missing_parts = PackedStringArray()
-	for slot in SLOTS:
+	for slot in _active_slots():
 		var part: Variant = combo.get(slot, null)
 		if part == null or not (part is Dictionary):
 			continue
@@ -135,6 +214,16 @@ func load_combo(combo: Dictionary) -> void:
 			apply_camo(Vector3(float(camo[0]), float(camo[1]), float(camo[2])) / 255.0)
 	_refresh_status_label()
 	_refresh_preview_guides()
+
+
+# Slots to compose for the current mode. The menu portrait shows the standing
+# character (head + body) only; the `arms` part is the first-person arms model and
+# reads wrong overlaid on the full figure, so it is dropped there. The ONED Avatars
+# workspace keeps all three for inspection.
+func _active_slots() -> Array:
+	if _menu_preview:
+		return ["head", "body"]
+	return SLOTS
 
 
 # Load one part .3di by basename into a sibling NovaObjectModel under the root.
@@ -256,10 +345,19 @@ func _composed_bounds() -> AABB:
 
 func _refresh_preview_guides() -> void:
 	var bounds := _composed_bounds()
-	if bounds.size == Vector3.ZERO:
+	var empty := bounds.size == Vector3.ZERO
+	if empty:
 		bounds = AABB(Vector3(-1.0, 0.0, -1.0), Vector3(2.0, 2.0, 2.0))
 	_refresh_grid(bounds)
-	_frame_bounds(bounds)
+	if _menu_preview:
+		# Fixed front portrait: frame once on the first real character, then hold the
+		# pose so the camera never jumps as the player cycles combos. Skip the empty
+		# fallback so the pose locks to an actual soldier's bounds.
+		if not _menu_pose_set and not empty:
+			_frame_menu_pose(bounds)
+			_menu_pose_set = true
+	else:
+		_frame_bounds(bounds)
 
 
 func _refresh_grid(bounds: AABB) -> void:
@@ -364,3 +462,17 @@ func _frame_bounds(bounds: AABB) -> void:
 	if not _has_framed:
 		_camera.call("frame_bounds_custom", center, radius, 1.5, maxf(radius * 8.0, 6.0), 2.8, -0.18)
 		_has_framed = true
+
+
+# Front-facing menu portrait: yaw 0 sits the camera on +Z looking down -Z, and the .3di
+# parts import +Z-forward, so the character faces the viewer. Framed once and held — the
+# caller gates re-entry on _menu_pose_set so selections never move the camera.
+func _frame_menu_pose(bounds: AABB) -> void:
+	if _camera == null:
+		return
+	var center := bounds.get_center()
+	var radius := maxf(bounds.size.length() * 0.5, 1.0)
+	_camera.near = clampf(radius * 0.001, 0.02, 5.0)
+	_camera.far = maxf(radius * 12.0, 50.0)
+	if _camera.has_method("frame_bounds_custom"):
+		_camera.call("frame_bounds_custom", center, radius, MENU_DISTANCE_SCALE, maxf(radius * 8.0, 6.0), 0.0, MENU_PITCH)
