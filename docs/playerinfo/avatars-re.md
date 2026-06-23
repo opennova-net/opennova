@@ -313,8 +313,16 @@ by `entry+68` (1/2/0); display name = `entry+0` (else the id at `entry-40`). A
 `[orig: populate_weapon_accessory_ammo_ui @ 0x55e8b0]` (the `*_AMMO*` combos) and
 `[orig: update_player_info_weight_and_weapon_icons @ 0x55f480]` (the
 `STATIC_TOTAL_WEIGHT` budget + weapon icons; light/normal/heavy, sibling of
-`UI_UpdateWeaponWeightDisplay @ 0x565640`). The weapon/ammo source tables are the
-`weapon.def`/`ammo.def` data — porting that data path is a separate phase.
+`UI_UpdateWeaponWeightDisplay @ 0x565640`). The weapon table itself is built by
+`[orig: WeaponDef_LoadAll @ 0x54dd10]` (zeroes `g_weaponDefTable @ 0x2540CE0`, 0xBF40 B,
+count `@ 0x2540CDC` starting at 1 with a `"None"` entry, then
+`File_ParseASCIIFile("weapon.def", WeaponDef_ParseProperty, key 0x2A56F6AD)`); the
+loadout table `@ 0x2540D08` is that table at `g_weaponDefTable + 0x28`. The reimpl's
+`libs/def` `DefWeaponDef` parses `weapon.def` but does **not** yet capture the
+slot/class/weight/team-mask the loadout filter reads — porting the loadout is a
+separate phase: grill `WeaponDef_ParseProperty` for those tokens, extend `libs/def`
+(weapon.def + ammo.def), add a `NovaWeaponDatabase` binding, then wire the combos +
+weight. Tracked in TODO.md (Player info / loadout).
 
 ## Divergence / quirk catalog (D-PLAYERINFO)
 
@@ -372,8 +380,11 @@ Applied to `Jointops.exe.kong.i64` (all auto-named, anchored; saved):
   `dword_25DC54C → g_playerInfoTeamMask`, `dword_25510FC → g_curPlayerProfile`,
   `dword_25506B8 → g_curProfileSlot`, `byte_2551130 → g_charSelClass`,
   `byte_2551131 → g_charSelNationality`, `byte_2551132 → g_charSelDivision`,
-  `word_2551134 → g_charSelCombo`.
-- Entry comments linking the eight orchestration functions to this record.
+  `word_2551134 → g_charSelCombo`; `dword_2540CE0 → g_weaponDefTable`,
+  `dword_2540CDC → g_weaponDefCount` (the loadout weapon table, anchored via
+  `WeaponDef_LoadAll @ 0x54dd10`).
+- Entry comments linking the eight orchestration functions + `WeaponDef_LoadAll` to
+  this record.
 
 Names already curated (used as-is): `PlayerInfo_PopulateAllControls @ 0x5606f0`,
 `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_RegisterAllControls @
