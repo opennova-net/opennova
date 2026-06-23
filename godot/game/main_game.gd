@@ -68,8 +68,6 @@ var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
 var _game_hud       # GameHud, built on the first frame a mission has a local player
 var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
-var _sp_shot_path := ""        # NW_SP_SHOT: dev/test — capture a viewport PNG then quit
-var _sp_shot_countdown := -1   # frames to wait (after the world loads) before the capture
 var _hud_objective := ""  # latest mission-effect text line shown by the HUD
 var _player_host: LocalPlayerHost = null
 var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
@@ -112,9 +110,6 @@ func _ready() -> void:
 	var sp_mission := OS.get_environment("NW_SP_MISSION")
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
-		_sp_shot_path = OS.get_environment("NW_SP_SHOT")
-		if not _sp_shot_path.is_empty():
-			_sp_shot_countdown = 90  # let the world + HUD settle, then capture and quit
 
 
 # F9 (re)opens the asset-folder picker from the front-end so the player can point
@@ -513,22 +508,6 @@ func _process(delta: float) -> void:
 	if _player_host != null:
 		_player_host.after_world_tick()
 	_update_game_hud()
-	if _sp_shot_countdown > 0:
-		_sp_shot_countdown -= 1
-		if _sp_shot_countdown == 0:
-			_capture_sp_shot()
-
-
-# Dev/test (NW_SP_SHOT): once the world has settled, save the rendered viewport (HUD included)
-# to a PNG and quit — automated visual verification without a human at the window.
-func _capture_sp_shot() -> void:
-	var img := get_viewport().get_texture().get_image()
-	if img != null:
-		var err := img.save_png(_sp_shot_path)
-		print("SP_SHOT %s -> %s (%dx%d)" % ["OK" if err == OK else "ERR %d" % err, _sp_shot_path, img.get_width(), img.get_height()])
-	else:
-		print("SP_SHOT: no viewport image")
-	get_tree().quit()
 
 
 # WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns
