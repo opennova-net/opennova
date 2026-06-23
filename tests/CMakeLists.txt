@@ -1269,3 +1269,10 @@ add_test(NAME netsim_loopback_channel COMMAND netsim_loopback_channel_test)
 add_executable(netsim_loopback_identity_test netsim/loopback_identity_test.cpp)
 target_link_libraries(netsim_loopback_identity_test PRIVATE opennova_netsim)
 add_test(NAME netsim_loopback_identity COMMAND netsim_loopback_identity_test)
+
+# The co-op-LAN fan-out guard: one World snapshot fanned to a connection table (loopback
+# self + a socket-free UdpSessionTransport joiner), per-connection anchoring, and the
+# host-side C2S 0x0C drain/SNAP — no Godot, no OS sockets (Increment A).
+add_executable(netsim_two_peer_fanout_test netsim/two_peer_fanout_test.cpp)
+target_link_libraries(netsim_two_peer_fanout_test PRIVATE opennova_netsim)
+add_test(NAME netsim_two_peer_fanout COMMAND netsim_two_peer_fanout_test)

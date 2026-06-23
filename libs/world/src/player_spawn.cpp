@@ -9,7 +9,13 @@
 
 namespace opennova::world {
 
-EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
+namespace {
+
+// The shared faithful §5.2b spawn: alloc a pool-0 0x14B9 entity, init health, place the pose,
+// clear the movement gate, and mount the infantry motor. `is_local` selects the host's OWN
+// player (input-ordered, publishes World::cached.local_player) vs a REMOTE peer (a joiner's
+// entity the host snaps from the wire — never the local player). [orig: net-re §5.2b/§5.38]
+EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is_local) {
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
     // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
     Entity seed;
@@ -35,8 +41,9 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
     // [orig: Entity_ResetToSpawnState @0x4B9610]
     entity_reset_to_spawn_state(*ent);
 
-    // Mount the infantry motor as the local player — same motor as an NPC organic, but
-    // ordered from input and never AI-think/routed. [orig: net-re §5.38; ADR 0012]
+    // Mount the infantry motor — same motor as an NPC organic. The host's own player is ordered
+    // from input and never AI-think/routed; a remote peer is snapped from the wire and the motor
+    // skips it once net-snapped (inf.is_local_player stays false). [orig: net-re §5.38; ADR 0012]
     if (world.ai == nullptr) return EntityHandle{};
     const int idx = world.ai->attach(h);
     AiEntity &ae = *world.ai->at(idx);
@@ -49,15 +56,26 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
     ae.net_id = spawn.net_id;
     ae.health = spawn.health;
     ae.inf.active = true;
-    ae.inf.is_local_player = true;
+    ae.inf.is_local_player = is_local;
     ae.inf.body_heading = ae.heading;
     ae.inf.target_heading = ae.heading;
     ae.inf.max_health = spawn.health;
     ae.inf.anim_state = anim_state::kIdle;
 
-    // Publish the local-player handle — the net anchor + present resolve it. [ADR 0012]
-    world.cached.local_player = h;
+    // Publish the local-player handle ONLY for the host's own player — the net anchor + present
+    // resolve it. A remote peer never becomes the local player. [ADR 0012]
+    if (is_local) world.cached.local_player = h;
     return h;
+}
+
+} // namespace
+
+EntityHandle spawn_player(World &world, const PlayerSpawn &spawn) {
+    return spawn_player_entity(world, spawn, /*is_local=*/true);
+}
+
+EntityHandle spawn_remote_player(World &world, const PlayerSpawn &spawn) {
+    return spawn_player_entity(world, spawn, /*is_local=*/false);
 }
 
 } // namespace opennova::world

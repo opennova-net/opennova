@@ -36,6 +36,16 @@ struct PlayerSpawn {
 // full or the World has no AiSystem wired. [orig: net-re §5.2b/§5.38; ADR 0012]
 EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 
+// Spawn a REMOTE PEER's player entity on the host (a joiner). The SAME faithful §5.2b sequence
+// as spawn_player, EXCEPT it is NOT the host's own player: inf.is_local_player stays false and
+// World::cached.local_player is NOT republished (the host keeps its own player as the local
+// one). The peer is a full pool-0 0x14B9 entity the host SNAPs from the joiner's C2S 0x0C
+// uplinks (netsim EntityWireBridge::apply_player_intent) and the motor skips once the entity is
+// net-snapped. Pass a distinct net_id per joiner (the default 0xFFF0 is the host's own player).
+// [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> player_ServerAdd @0x51cbc0 registers a
+// joined player's entity without assigning g_local_player_entity; net-re §5.2a/§5.2b.]
+EntityHandle spawn_remote_player(World &world, const PlayerSpawn &spawn);
+
 } // namespace opennova::world
 
 #endif // OPENNOVA_WORLD_PLAYER_SPAWN_H

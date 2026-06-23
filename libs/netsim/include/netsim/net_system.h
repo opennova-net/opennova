@@ -1,10 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <novaworld/replication_min.h> // PlayerReplicationState, GameEntitySnapshot
+#include <world/player_spawn.h>         // PlayerSpawn (admit_peer)
 #include <world/world.h>
 
+#include "netsim/connection.h"
 #include "netsim/entity_wire_bridge.h"
 #include "netsim/session_transport.h"
 
@@ -26,20 +30,52 @@ inline constexpr uint8_t kTag0aFrameUpdate = 0x0A;
 // run_logic_tick — deliberately NOT an ISystem hook — so the outbound serialize
 // happens post-logic, mirroring the original's net-before-logic / serialize-after
 // order without tripping the run_logic_tick authority guard.
+//
+// NetSystem holds the host's CONNECTION TABLE (the reimpl of the original's per-connection
+// fan): emit_s2c builds the world snapshot ONCE then sends a per-connection-anchored 0x0A to
+// each connection [orig: NapiNPServer_SendFiltered @0x4C87E0 walks connection_list -> one
+// SendToConn @0x4c4f20 per node]; tick drains every connection's C2S queue [orig:
+// NapiNPConnection_ParseMessages @0x625BC0 / PumpRecvQueues]. The host's own client is a
+// transport-mode-1 LoopbackChannel connection; a remote LAN peer is a UdpSessionTransport
+// connection of the same shape. The single-arg ctor registers exactly one loopback connection
+// so every SP call site stays byte-identical (one connection, default anchor = the local
+// player via the passed anchor).
 class NetSystem : public world::ISystem {
 public:
-	explicit NetSystem(ISessionTransport &channel) : channel_(channel) {}
+	NetSystem() = default;
+	// SP / single-connection: register one mode-1 loopback connection (no owned entity — it
+	// rides the passed anchor, which compute_net_anchor builds from the local player).
+	explicit NetSystem(ISessionTransport &channel) {
+		connections_.push_back(Connection{&channel, TransportMode::Loopback, {}, 0});
+	}
 
 	const char *name() const override { return "net"; }
 	void tick(world::World &world, const world::TickContext &ctx) override;
 
-	// Serialize the live world into one S2C 0x0A frame onto the loopback. `anchor`
-	// is the subject (local player) identity/spawn the frame is built around — its
-	// world position is the frame anchor each compact record compresses against.
-	void emit_s2c(const world::World &w, const PlayerReplicationState &anchor);
+	// Serialize the live world into one S2C 0x0A frame PER connection. `fallback_anchor` is the
+	// subject the frame is built around for any connection with no owned entity yet (the host's
+	// own loopback connection, or a joiner still in the handshake); a connection WITH an owned
+	// entity is anchored to that entity's live position so its compact deltas stay small around
+	// its own player — the original's per-player anchoring.
+	void emit_s2c(const world::World &w, const PlayerReplicationState &fallback_anchor);
+
+	// --- the connection table (the host's HandleNewConnection / ParseMessages surface) ---
+	std::size_t add_connection(const Connection &c);
+	void clear_connections();
+	std::size_t connection_count() const { return connections_.size(); }
+	Connection &connection(std::size_t i) { return connections_[i]; }
+	const Connection &connection(std::size_t i) const { return connections_[i]; }
+
+	// Spawn a joiner's owned pool-0 player entity (a REMOTE peer — NOT the host's own player)
+	// and bind it to connection `conn_index`. The reimpl of the host accepting a join and
+	// registering its entity [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> player_ServerAdd
+	// @0x51cbc0; §5.2a]. The real handshake (Increment C) calls this on reaching the Spawned
+	// phase. Returns the spawned handle (invalid if the index is out of range or pool 0 is full).
+	world::EntityHandle admit_peer(world::World &w, std::size_t conn_index,
+	                               const world::PlayerSpawn &spawn);
 
 private:
-	ISessionTransport &channel_;
+	std::vector<Connection> connections_;
 };
 
 } // namespace opennova::netsim

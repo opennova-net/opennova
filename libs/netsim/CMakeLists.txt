@@ -4,6 +4,7 @@ add_library(opennova_netsim STATIC
     src/entity_wire_bridge.cpp
     src/net_client_view.cpp
     src/net_system.cpp
+    src/udp_session_transport.cpp
 )
 
 target_include_directories(opennova_netsim
