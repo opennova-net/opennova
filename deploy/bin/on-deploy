@@ -189,6 +189,14 @@ SSHCFG
   # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
   # state file is on the mounted disk from `infra apply`.
   export BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  # The prod overlay requires SERVER_IMAGE/WEB_IMAGE to interpolate for EVERY
+  # compose action (status/logs/down parse them too), but only `deploy` sets
+  # them from --tag. Default the rest so those actions work; `ps`/`logs` match
+  # by service name, not image, so the tag is immaterial there. `:-` keeps the
+  # explicit values `deploy` already exported.
+  local owner; owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+  export SERVER_IMAGE="${SERVER_IMAGE:-ghcr.io/${owner}/novaworld-server:latest}"
+  export WEB_IMAGE="${WEB_IMAGE:-ghcr.io/${owner}/novaworld-web:latest}"
   # compose files + env, evaluated against the remote engine.
   COMPOSE_ARGS=(-f "$COMPOSE_DIR/docker-compose.yml"
                 -f "$COMPOSE_DIR/docker-compose.prod.yml"
