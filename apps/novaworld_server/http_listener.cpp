@@ -685,7 +685,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	});
 
 	// Admin: list recent expansion-release rows. Mirrors admin.py:183-187.
-	CROW_ROUTE(app, "/api/admin/releases")([this, admin_authorized](const crow::request &req) {
+	CROW_ROUTE(app, "/api/admin/releases")([this, admin_authorized, release_to_json](const crow::request &req) {
 		if (!admin_authorized(req)) {
 			crow::response res(401);
 			res.body = "unauthorized";
