@@ -9,4 +9,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec docker compose -f "$here/docker-compose.deploy.yml" run --rm deploy "$@"
+
+# When stdout is captured (e.g. `gh secret set -b "$(./run.sh infra output -raw …)"`),
+# disable the container's pseudo-TTY so the value isn't mangled with CR/ANSI bytes
+# that break downstream consumers (a stray CR in an AWS key crashes SigV4 signing).
+# Keep the TTY for interactive terminals so progress/colors still render.
+tty_flag=""
+[ -t 1 ] || tty_flag="-T"
+
+exec docker compose -f "$here/docker-compose.deploy.yml" run --rm $tty_flag deploy "$@"

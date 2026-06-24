@@ -58,5 +58,9 @@ All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
 `ONNET_{GATE_UDP,NW_UDP,HTTP}_PORT`, `DATABASE_PATH`, `MIGRATIONS_DIR`, `SEED_DIR`,
 `TEMPLATES_DIR`, `STATIC_DIR`, `WEB_DIST_DIR`, `HEARTBEAT_TIMEOUT_MS`,
 `TICK_INTERVAL_MS`, `HOST_SWEEP_INTERVAL_MS`, `HOST_STALE_WINDOW_MS`,
-`ADMIN_API_TOKEN`. Build + run via Docker: [`Dockerfile`](Dockerfile) and the
-compose files under [`deploy/`](../../deploy/).
+`ADMIN_API_TOKEN`. Expansion-publish pipeline: `EXPANSION_GITHUB_TOKEN` (PAT the
+server tags the expansion repos with) and `EXPANSION_PUBLISH_TOKEN` (bearer the
+repos' CI presents to `/admin/internal/.../publish`); both empty by default.
+Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
+`test`/`foo` accounts) — leave unset in production. Build + run via Docker:
+[`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
