@@ -896,6 +896,36 @@ is now named for its INFANTRY/AI interpretation (`GamePlayerEntity` → 135 memb
 entity the same offsets (`0x2bc+`) hold position/status state (`world-wac-ai-re.md §3`). `GamePlayerEntity`
 is now substantially mapped — the residual padding is genuine gaps + sparse AI-brain scratch.
 
+**Accessor-function finds (2026-06-23 pass 4).** A sweep of small, single-purpose `Entity_*` accessors
+pinned more fields, each named for the function that reveals it (`GamePlayerEntity` now 111 named / 904):
+- `groundEntity` +0x28 (`GamePlayerEntity*`) — the nearest entity directly below, cached from a downward
+  10.0-unit raycast `[orig: Entity_CreateBoundingProxy @0x407d60]`; NULL on bare terrain; read as the
+  support surface (is it a vehicle?) in `Entity_UpdateIdleCheck @0x408430`.
+- `attachBone` +0x364 (u8) + `attachParent` +0x184 (`GamePlayerEntity*`) — the model userpoint named
+  "attach" (index+1) and its pool-1 parent `[orig: Entity_FindAttachBone @0x4b9580]`.
+- `renderInstance` +0x64 (void*, the 812-byte render/anim instance — distinct from the 172-byte
+  `aiRuntime` +0x68 AI slot `[orig: Entity_AllocateAISlot @0x40d2c0]`, so NOT the AI brain).
+- `modelPtr0/1/2` +0xa4/+0xa8/+0xac `[orig: Entity_SetDefaultModelPtrsA/B/C @0x4435a0/0x4435c0/0x443610]`;
+  `orientationMatrix` +0xb4 (i32[9] fixed-point) + `animData` +0x158 (gate) `[orig: Entity_UpdateOrientationMatrix @0x43b440]`;
+  `weaponSlots` +0x1d0 `[orig: Entity_GetWeaponSlotsPtr @0x510010 → entity+464]`; `aiTargetRefCount`
+  +0x212 (u16) `[orig: Entity_SetAITarget @0x45d760]`; `mountedChild` +0x268 (`GamePlayerEntity*`, the
+  attached passenger; passenger's +0x170 = `parentVehicle`) `[orig: Entity_AttachToVehicle @0x43c130]`;
+  `damageTimer` +0x2f8 + `wasHit` +0x36b + `lastAttacker` +0x2f4 `[orig: Entity_OnDamageReceived @0x4af800]`;
+  `collisionCallback` +0x2b8 `[orig: Entity_InvokeCollisionCallback @0x442350]`; `fireFlag` +0x2c6
+  `[orig: Entity_InvokeFireCallback @0x442810]`.
+- Callback refinement: `updateCallback` +0x1c4 is the per-frame update/physics fn ptr (`==
+  Entity_UpdateShellBounce` for shells `[orig: Entity_IsShellProjectile @0x4e4040]`); `Callback1` +0x1c8
+  stays the death/lifecycle handler. **Polymorphic:** `animStateId` +0x2bc is invoked as a fire callback
+  on weapon entities (`Entity_InvokeFireCallback`); `ownerSession` +0x1cc reads as a session/transport
+  ref (Destroy/Reset) but an entity back-ref in `Entity_ClearWeaponTarget @0x453580` (name kept pending
+  a decisive witness; that function may itself be a misnomer).
+- **`boundRadius` +0x0 is NOT padding** — the very first dword is the model **bounding-sphere radius**
+  (`+0x1000` margin), the proximity/cull radius every `Entity_*` reads; marker/waypoint entities store
+  their trigger radius there instead `[orig: Entity_InitFromModel @0x40dc30; Entity_SpawnFromBMSRecord]`.
+  The same model-init also writes `bboxCenter` +0x1fc (`SpecialVec3`) + `bboxRadius` +0x208 (local
+  collision bbox, scaled), `heatSig` +0x1a4 / `radarSig` +0x1a6 (from `ItemDef`), and `shadowSlot0/1`
+  +0x1b6/+0x1b8 (shadow-decal slots). `weaponSlots` +0x1d0 is the 44-byte block before the bbox.
+
 ### 5.2c Map spawn-marker selection — where the human player's pose comes from (2026-06-22)
 
 §5.2a/§5.2b resolve how the host *builds and field-inits* its own player entity but leave the
