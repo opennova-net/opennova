@@ -279,6 +279,12 @@ Joiner-side self-identification (D.0, 2026-06-23; net-re §5.38b; `host_and_join
 | `NapiNPClientMsg_0x00F` | `0x42E200` | world-state-load (§5.29): applies spawn pos/yaw to `g_local_player_entity` + clears `Flags & 1`; when `!is_authority` caches spawn + queues the `0x28/0x29/0x2D/0x32` reply burst | pcap + disasm; §5.38b / §5.29 (joiner in-match C2S burst driven by `JoinerSession::pump`; the 0x0F-apply itself is the joiner `NovaSimulation` mode, next increment) | confirm-only |
 | `NapiNPClientMsg_PlayerSync` | `0x431370` | 0x046 secondary slot↔handle channel — binds player-slot→entity; arrives AFTER the 0x0C name-match, so it is not the primary self-ID | pcap + disasm; §5.38b / §5.21 | confirm-only |
 
+The D.1 `JoinerSession` and D.2 joiner `NovaSimulation` mode (`enable_join`) + wire-direct present are
+LIVE-CONFIRMED (two-instance localhost run, 2026-06-23): the remote player renders in-game, not just in the
+headless `coop_two_sim_test`. Open faithful-render gaps (net-re §5.38b): the joiner sees only the host
+player (no AI/static spawn-batch over the wire yet), remote bodies don't animate, and the joiner's local
+player still uses the NPC motor.
+
 Vehicle-board AI command (`waypoint_id` 123–127 = Goto SSN/Group/Player; world-wac-ai-re §11/§4.12; witnessed 2026-06-22):
 
 | original | addr | role | evidence | status |

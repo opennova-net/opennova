@@ -2751,6 +2751,24 @@ reaches InMatch, the host admits it, and the two-handle present resolves both wa
   goes quiet mid-join. Equivalent in effect to the original server proactively pushing the organic-spawn
   when its gate opens.
 
+**Live confirmation + open issues (2026-06-23).** The two-instance localhost demo now WORKS end-to-end
+(beyond the headless `coop_two_sim_test`): a host and a joiner on one machine, and the joiner sees the
+remote player rendered in-game. Launch contract (the host listens on the witnessed `32768`): host =
+`NW_LAN_HOST=<m.bms>`; joiner = `NW_LAN_JOIN=<ip>:32768 NW_LAN_MISSION=<m.bms>`. **Footgun:** the joiner
+must pass the mission via `NW_LAN_MISSION`, NOT `NW_LAN_HOST` — `main_game.gd` tests `NW_LAN_HOST` first and
+takes the HOST path before it ever reads `NW_LAN_JOIN`, so a joiner with `NW_LAN_HOST` set silently becomes a
+second host (its `32768` bind fails, it falls back to a socketless listen server, and never dials).
+Three faithful-render gaps remain (the next work):
+1. **The joiner sees only the host player, not the NPCs/statics.** The host emits its own player's
+   organic-spawn + per-frame `0x0A`, but does NOT stream a spawn batch (the §5.25 S2C `0x10` entity batch /
+   §5.23 organic-spawn) for its AI and placed entities; the joiner skips local dynamic placement and renders
+   purely wire-direct, so those entities never appear. Host `emit_s2c` must replicate the full entity set.
+2. **Remote bodies glide — body animation is not carried over the wire.** The `0x0A` motion stream moves the
+   model but no anim-state rides it, so remote soldiers slide in their rest pose (the "soldier-glide" gap).
+3. **The joiner's local player uses the NPC motor.** On a non-authority client, L does not route through the
+   `is_local_player` infantry-motor branch (§5.38) the SP host uses, so the joiner's own movement reads as
+   NPC locomotion. Investigate the joiner `spawn_player` + motor gating under `run_logic_tick(false)`.
+
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 
 The moving player's view, witnessed for a faithful first-person camera (the §5.38 player). All
