@@ -185,6 +185,36 @@ func load_mission_as_host(config: Dictionary) -> int:
 	return load_mission(bms, String(config.get("dir", "")))
 
 
+## Load a mission as a LAN co-op JOINER (a non-authority client). Same load path as a host
+## (terrain + environment from the .bms header), but the runtime dials the host and runs the
+## witnessed in-match JOIN instead of starting a listen server; dynamic entities (the host,
+## other joiners, NPCs) render WIRE-DIRECT (no .bms placement), so _place_mission_objects is
+## skipped for dynamics (statics/buildings arrive via S2C 0x10 in a follow-up). `server` is the
+## discovered/selected row { host_ip, port, mission }, `player_name` rides the ClientHello.co
+## (the host echoes it back so we self-identify by name-match). Returns the load_mission codes.
+func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
+	_host_config = {
+		"net_transport": "lan-join",
+		"host_ip": String(server.get("host_ip", "127.0.0.1")),
+		"port": int(server.get("port", 32768)),
+		"player_name": player_name,
+	}
+	var bms := String(server.get("mission", ""))
+	if bms.is_empty():
+		bms = mission_file
+	if bms.is_empty():
+		_host_config = {}
+		load_failed.emit("join: no mission name (the host's mission must be known)")
+		return ERR_INVALID_PARAMETER
+	return load_mission(bms, String(server.get("dir", "")))
+
+
+# True between load_mission_as_joiner and _start_runtime's config consume: this load is a
+# co-op joiner, so dynamic objects render from the wire rather than from local placement.
+func _is_joiner() -> bool:
+	return String(_host_config.get("net_transport", "")) == "lan-join"
+
+
 ## Load an IN-MEMORY mission (the editor's live document, unsaved edits included):
 ## terrain + environment resolve from the injected (or mounted) root by the
 ## mission's own header refs, then the one shared load path runs. `bms_name` is
@@ -359,6 +389,18 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	if _resource_root == null or mission == null:
 		return
 	_placer = MissionObjectPlacer.new(_resource_root)
+	# A co-op joiner renders all dynamic entities WIRE-DIRECT (the faithful client model), so
+	# it does NOT place the .bms organics/vehicles — they would be frozen duplicates of the
+	# wire avatars. Still build the placer (the local-player avatar + the wire present pass
+	# resolve models through it) and an empty MissionObjects container (the wire avatars'
+	# parent + the unload() teardown target). Statics/buildings (S2C 0x10) are a follow-up.
+	if _is_joiner():
+		var wire_container := Node3D.new()
+		wire_container.name = MissionObjectPlacer.CONTAINER_NAME
+		add_child(wire_container)
+		_mission_stats = {}
+		print("GameWorld(joiner): mission objects render wire-direct — local placement skipped.")
+		return
 	var options := { "environment_node": _env }
 	if timeline != null:
 		options["timeline"] = timeline
@@ -713,14 +755,21 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# (ADR 0011/0012, net-re §5.2b/§5.38). Diagnostic previews can explicitly opt out.
 	opts["playable"] = _playable
 	# A LAN host start threads its config (server name, mission rotation, player cap, and the
-	# socket transport mode) through to the listen server. Consumed once per load; absent for
+	# socket transport mode) through to the listen server. A LAN JOINER threads the dial target
+	# (host_ip/port/player_name) and is NOT a listen server. Consumed once per load; absent for
 	# a normal single-player start, which keeps the in-process (socketless) listen server.
 	if not _host_config.is_empty():
-		opts["listen_server"] = true
-		for k in ["server_name", "max_players", "game_type", "net_transport", "bind_port", "advertise"]:
+		if String(_host_config.get("net_transport", "")) != "lan-join":
+			opts["listen_server"] = true
+		for k in ["server_name", "max_players", "game_type", "net_transport", "bind_port",
+				"advertise", "host_ip", "port", "player_name"]:
 			if _host_config.has(k):
 				opts[k] = _host_config[k]
 		_host_config = {}
+	# The placer + environment node let the joiner's wire present pass resolve + light its
+	# remote-entity avatars (build_player_animated_model); unused by the host present path.
+	opts["placer"] = _placer
+	opts["env_node"] = _env
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")

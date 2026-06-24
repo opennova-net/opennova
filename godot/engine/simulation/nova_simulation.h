@@ -36,6 +36,7 @@
 
 #include <novaworld/connection/registry.h>   // PeerAddr / PeerAddrHash
 #include <novaworld/host_session_accept.h>
+#include <novaworld/joiner_session.h>
 #include "network/nova_udp_pump.h"
 
 #include <unordered_map>
@@ -96,6 +97,8 @@ public:
 		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
 		PF_ALIVE,      // 1 when alive
+		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
+		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
 		PF_STRIDE      // record length; also the count of fields above
 	};
 
@@ -172,6 +175,34 @@ private:
 	PackedFloat32Array present_snapshot_from_client_view() const;
 	// Post-logic listen-server step: emit S2C -> loopback -> client decode. No-op off.
 	void net_tick();
+
+	// --- co-op LAN joiner (D.2). The symmetric inverse of the co-op host above: a
+	// pure non-authority CLIENT. One JoinerSession drives the witnessed in-match JOIN
+	// over a dialed NovaUdpPump; the host's per-frame S2C 0x0A feeds the SAME
+	// client_view_ the listen server uses (via joiner_feed_, an identity-framed
+	// UdpSessionTransport conduit). The joiner runs run_logic_tick(false), NEVER emits
+	// S2C, and never registers/drains NetSystem. Its own player L is a motor-driven
+	// pool-0 entity spawned at the H-learned pose; remote entities (the host + peers +
+	// NPCs) render wire-direct (present + wire_present_pass). OFF by default —
+	// enable_join turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C
+	// @0x42E730 self name-match; the joiner C2S burst from the host_and_join_lan capture]
+	bool joiner_ = false;
+	std::unique_ptr<opennova::JoinerSession> joiner_session_;
+	std::unique_ptr<opennova::netsim::UdpSessionTransport> joiner_feed_; // S2C 0x0A -> client_view_
+	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
+	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
+	uint16_t joiner_self_wire_handle_ = 0; // H: stamped in the C2S 0x0C + present self-filter
+	uint16_t joiner_local_net_id_ = 0;     // host-assigned SSN from the spawn record (L's identity)
+	// Top-of-frame, before logic: start/poll the handshake, ship outbound, feed S2C
+	// 0x0A into the client view, and on the name-match spawn L at the learned pose.
+	void joiner_net_poll();
+	// Post-logic: ship L's per-frame C2S 0x0C player uplink (stamped with H). No-op
+	// until InMatch + L spawned.
+	void joiner_net_flush();
+	// Send one framed datagram to the dialed host (the joiner's send_datagram).
+	void ship_to_host(const std::vector<uint8_t> &dg);
+	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
+	opennova::world::PlayerSpawn spawn_from_self(const opennova::JoinerSession::SelfSpawn &s) const;
 
 	// Phase 2 (the moving player): the latest input from the host controller, applied to the
 	// local player's AiEntity at the TOP of each frame (net-before-logic, ADR 0009). The
@@ -250,6 +281,22 @@ public:
 	// spawned + bound. No-op unless host listening is on.
 	bool admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team);
 
+	// --- co-op LAN joiner (D.2) -------------------------------------------
+	// Turn the sim into a co-op LAN JOINER: dial the host at `host_ip:port` and run
+	// the witnessed in-match JOIN as a non-authority client. `player_name` rides the
+	// ClientHello.co and is the key the host echoes into our organic-spawn record so
+	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
+	// the mission (the next load arms the joiner frame path). Implies the client view;
+	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
+	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
+	bool is_joiner() const { return joiner_; }
+	// True once the joiner has name-matched its organic-spawn record (self handle H known).
+	bool is_joined_in_match() const;
+	// The JoinerSession phase as an int (JoinerSession::Phase), -1 when not joining.
+	int get_joiner_phase() const;
+	// The learned wire handle H, 0 until in-match (debug / test).
+	int get_joiner_self_handle() const;
+
 	// --- the local player (ADR 0012; net-re §5.2b/§5.38) -------------------
 	// Spawn the host's own player as an authoritative pool-0 entity at a Godot-space position
 	// (yaw in mission degrees). Call AFTER a mission is loaded (the spawn needs the AI system
@@ -265,6 +312,10 @@ public:
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
+	// The local player's wire handle ((pool<<12)|slot), 0 when none. The wire present pass
+	// excludes it — the local player is drawn by LocalPlayerHost, not from the wire stream
+	// (host: its own pool-0 player; joiner: L, never present in the wire stream anyway).
+	int get_local_player_wire_handle() const;
 	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
 	// to the player's body input at the top of the next frame. The original drives
 	// entity Yaw@+0x10 / Pitch@+0x14 straight from the mouse [orig: Input_HandleActionBinding_0

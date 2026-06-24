@@ -23,6 +23,7 @@ signal effects_drained(effects: Array)
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
+const WirePresentPass := preload("res://engine/world/wire_present_pass.gd")
 const MissionSeatDiagnostics := preload("res://engine/world/mission_seat_diagnostics.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
@@ -33,7 +34,8 @@ const TICK_DT := 1.0 / 62.5          # 0.016 s; matches AiEventQueue::kFrameDt (
 const MAX_CATCHUP_TICKS := 31        # spiral-of-death clamp: port of the 500 ms / 16 ms accumulator cap
 
 var _sim: NovaSimulation
-var _present
+var _present                          # MissionPresentPass: placed nodes (host/SP/editor); null on a joiner
+var _wire_present                     # WirePresentPass: un-placed remote players (co-op host + joiner); else null
 var _index
 var _self_tick := false              # editor: self-tick via _process while playing; game: host calls tick()
 var _playing := false
@@ -60,7 +62,17 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# A co-op LAN host additionally binds a real UDP socket and accepts joiners through
 	# the witnessed handshake (enable_host_listen implies the listen server).
 	var playable := bool(options.get("playable", false))
-	if String(options.get("net_transport", "")) == "lan":
+	var net_transport := String(options.get("net_transport", ""))
+	var is_joiner := net_transport == "lan-join"
+	if is_joiner:
+		# Co-op LAN JOINER (a non-authority client): dial the host and run the witnessed
+		# in-match JOIN. The local player L is spawned on the name-match (inside the sim's
+		# joiner poll), NOT here. The player_name rides the ClientHello.co. [net-re §5.38b]
+		if not _sim.enable_join(String(options.get("host_ip", "127.0.0.1")),
+				int(options.get("port", 32768)), String(options.get("player_name", "Player"))):
+			push_warning("MissionRuntime: could not dial co-op host %s:%d — joiner disabled." % [
+				String(options.get("host_ip", "127.0.0.1")), int(options.get("port", 32768))])
+	elif net_transport == "lan":
 		# Default to the witnessed retail LAN host port — the first of the [32768, 32787]
 		# range [orig: game.cfg mplanserverportmin/max, JO_SERVER]; matches host_and_join_lan.pcapng.
 		var bind_port := int(options.get("bind_port", 32768))
@@ -104,14 +116,28 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_self_tick = bool(options.get("self_tick", false))
 	_index = MissionEntityRegistry.new()
 	_index.build(container, mission)
-	_present = MissionPresentPass.new()
-	_present.setup(_sim, _index, options.get("present_options", {}))
+	# The registry present drives placed mission nodes (host listen-server / SP / editor preview);
+	# a joiner has none, so it skips it.
+	if not is_joiner:
+		_present = MissionPresentPass.new()
+		_present.setup(_sim, _index, options.get("present_options", {}))
+	# Co-op needs remote PLAYERS rendered WIRE-DIRECT: a dynamically-spawned player (an admitted
+	# joiner on the host, or — on the joiner — the host + everyone) has no .bms placement, so
+	# MissionPresentPass can't resolve it. The host keeps MissionPresentPass for its placed NPCs and
+	# adds this pass for the spawned players, deferring any row that resolves to a placed node (via
+	# _index) so nothing double-renders. The joiner places nothing (index null -> render every row).
+	if is_joiner or _sim.is_host_listening():
+		_wire_present = WirePresentPass.new()
+		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
+			null if is_joiner else _index)
 	# Spawn the host's own player as an authoritative pool-0 entity (ADR 0012 / net-re §5.2b).
 	# After load (the spawn needs the AI system wired). The spawn POSE is selected the way the
 	# original engine does — by game type, from the mission's player-START marker FARTHEST from the
 	# enemy set — NOT from the first NPC's position (net-re §5.2c). The player then runs the infantry
 	# motor from input (set_player_input); visible translation needs walk clips.
-	if playable or options.get("player", false):
+	# A joiner's local player L is spawned at the host-advertised pose on the name-match (inside
+	# the sim's joiner poll), NOT from a local start marker — so skip the host spawn here.
+	if (playable or options.get("player", false)) and not is_joiner:
 		var spawn_status := int(_sim.spawn_local_player_at_start())
 		if spawn_status < 0:
 			push_warning("MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)")
@@ -254,9 +280,12 @@ func tick() -> bool:
 	var tick_start := Time.get_ticks_usec()
 	var did_tick := _advance_one_tick_no_present()
 	_perf_present_us = 0
-	if did_tick and _present != null:
+	if did_tick:
 		var present_start := Time.get_ticks_usec()
-		_present.present()
+		if _present != null:
+			_present.present()
+		if _wire_present != null:
+			_wire_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = did_tick
@@ -317,9 +346,12 @@ func tick_realtime(delta: float) -> int:
 	_perf_sim_us = sim_us
 	_perf_effects_us = effects_us
 	_perf_present_us = 0
-	if _present != null:
+	if _present != null or _wire_present != null:
 		var present_start := Time.get_ticks_usec()
-		_present.present()
+		if _present != null:
+			_present.present()
+		if _wire_present != null:
+			_wire_present.present()
 		_perf_present_us = Time.get_ticks_usec() - present_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	_perf_did_tick = true

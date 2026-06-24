@@ -2620,6 +2620,31 @@ Jointops.exe; behavioral, read-only (no IDB writes).
   `PeerC2SInMatch` → `NetSystem` apply SNAP; plus a wrong-name decoy that must NOT match);
   `tests/netsim/build_player_uplink_test` (the joiner-side uplink body builder).
 
+**Port status — D.2 (joiner `NovaSimulation` mode + wire-direct present, 2026-06-23).** The joiner-side
+runtime is built and green (`godot/tests/net/coop_two_sim_test` — a host listen server + a joiner in one
+process, each on a real loopback `NovaUdpPump`, free-running their own `advance_frame`; asserts the joiner
+reaches InMatch, the host admits it, and the two-handle present resolves both ways):
+- `NovaSimulation::enable_join(host_ip, port, name)` mirrors `enable_host_listen`: dial a pump, drive a
+  `JoinerSession`, feed the host's S2C `0x0A` into the SAME `NetClientView`/`ClientState` the listen server
+  uses (via an identity-framed `UdpSessionTransport` conduit). The joiner runs `run_logic_tick(false)`,
+  never emits S2C, never registers `NetSystem`; on the name-match it `spawn_player`s **L** at the
+  H-learned pose and per-frame builds the C2S `0x0C` uplink stamped with **H**.
+- **Remote entities render WIRE-DIRECT** (`wire_present_pass.gd`), the faithful client model (§5.23/§5.25):
+  a non-authority client cannot resolve the host's entities through its local `MissionEntityRegistry` (the
+  wire handles live in the host's handle space), so it builds one model per wire handle, keyed by the wire
+  `type_id`, posed from the decoded `0x0A` position + coarse yaw. The host keeps the registry-resolved
+  `MissionPresentPass` for its placed NPCs and adds the wire pass ONLY for un-placed spawned players (an
+  admitted joiner has no `.bms` node) — so co-op is bidirectional on both sides. Each side excludes its own
+  local player from the wire pass (drawn by `LocalPlayerHost`); the joiner keys that exclusion on **H**,
+  not L (L collides with a host-side slot). The present buffer gained `PF_TYPE_ID`/`PF_WIRE_HANDLE`.
+- **Refinement [D-NET-96]:** the host surfaces `PeerSpawned` REACTIVELY, from `handle_datagram` on an
+  incoming SESSION packet (`host_session_accept.cpp` — not from `tick_handshakes`), so once the
+  late-spawn gate opens (which takes ~tens of server ticks of world streaming) there must be an inbound
+  `0x43` to surface it on. `JoinerSession::pump` therefore keeps streaming a per-frame keepalive (the
+  witnessed `0x22` player-sync) after the spawn-gate burst instead of going silent — the real client never
+  goes quiet mid-join. Equivalent in effect to the original server proactively pushing the organic-spawn
+  when its gate opens.
+
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 
 The moving player's view, witnessed for a faithful first-person camera (the §5.38 player). All

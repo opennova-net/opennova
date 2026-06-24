@@ -191,7 +191,15 @@ std::vector<std::vector<uint8_t>> JoinerSession::pump(uint32_t /*now_tick*/) {
 		}));
 		break;
 	default:
-		return out; // all stages sent
+		// Keepalive after the gate-tripping burst: the real client never goes silent
+		// mid-join — it keeps streaming C2S status while the server's spawn gate opens
+		// (which takes several server ticks of world streaming). The host detects the spawn
+		// REACTIVELY, on an incoming SESSION packet (host_session_accept.cpp: PeerSpawned is
+		// surfaced from handle_datagram, not from the tick), so the joiner must keep sending
+		// a 0x43 each frame or the gate could open with no inbound packet to surface it on.
+		// Re-send the witnessed player-sync ack (idempotent host-side). [net-re §5.38b]
+		out.push_back(frame_session({make_protocol_message(0x22, {0x00, 0xF7, 0x1C})}));
+		break;
 	}
 	++pump_stage_;
 	return out;

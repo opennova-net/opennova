@@ -110,6 +110,31 @@ func _ready() -> void:
 	var sp_mission := OS.get_environment("NW_SP_MISSION")
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
+		return
+	# Co-op LAN demo hooks (LAN discovery isn't built yet, so there's no server to click):
+	# NW_LAN_HOST=<mission.bms> boots straight in as a co-op host on port 32768;
+	# NW_LAN_JOIN=<ip[:port]> boots as a joiner dialing that host (mission from NW_LAN_MISSION).
+	# Two instances on localhost = the bidirectional co-op demo. Mirrors NW_SP_MISSION above.
+	var lan_host := OS.get_environment("NW_LAN_HOST")
+	if not lan_host.is_empty():
+		_on_lan_host_start_requested({
+			"mission": lan_host,
+			"net_transport": "lan",
+			"bind_port": int(OS.get_environment("NW_LAN_PORT")) if not OS.get_environment("NW_LAN_PORT").is_empty() else 32768,
+			"game_type": "COOP",
+			"server_name": "DEMOHOST",
+			"max_players": 4,
+		})
+		return
+	var lan_join := OS.get_environment("NW_LAN_JOIN")
+	if not lan_join.is_empty():
+		var jp := lan_join.split(":")
+		_on_lan_join_requested({
+			"host_ip": jp[0] if jp.size() > 0 else "127.0.0.1",
+			"port": int(jp[1]) if jp.size() > 1 else 32768,
+			"mission": OS.get_environment("NW_LAN_MISSION"),
+			"player_name": _resolve_player_callsign(),
+		})
 
 
 # F9 (re)opens the asset-folder picker from the front-end so the player can point
@@ -370,11 +395,22 @@ func _on_lan_host_start_requested(config: Dictionary) -> void:
 	_world.load_mission_as_host(config)
 
 
-# The player picked a discovered LAN server to join. The client transport lands in a later
-# phase; for now record the intent so the menu->net seam is exercised end to end.
+# The player picked a discovered LAN server to join: dial it as a co-op JOINER. Same
+# menu->world handoff as a host start; the world loads as a non-authority client that runs
+# the witnessed in-match JOIN and renders the host + NPCs wire-direct (net-re §5.38b). The
+# server row carries host_ip/port (+ mission, until LAN discovery streams it).
 func _on_lan_join_requested(server: Dictionary) -> void:
-	push_warning("MainGame: LAN join requested (%s) — client transport lands in a later phase" %
-		String(server.get("name", server.get("host_ip", "?"))))
+	_begin_world_load()
+	var pname := String(server.get("player_name", _resolve_player_callsign()))
+	_world.load_mission_as_joiner(server, pname)
+
+
+# The local player's callsign — rides the ClientHello.co (the host echoes it back so we
+# self-identify by name-match, so any stable value works). NW_LAN_NAME overrides for the
+# two-instance demo; a persisted-profile callsign is a follow-up.
+func _resolve_player_callsign() -> String:
+	var n := OS.get_environment("NW_LAN_NAME")
+	return n if not n.is_empty() else "Player"
 
 
 # Shared menu->world handoff: hide the menu, show the world + HUD, enter WORLD state, and
