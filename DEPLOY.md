@@ -180,3 +180,31 @@ Players install the launcher (published from CI to `downloads.<domain>`). It
 redirects `gs.novaworld.net` to your server via a managed hosts-file block and
 resolves your server IP from `GET /api/server-info`, so you do not hardcode it
 into the launcher. See `launcher/README.md`.
+
+### Cutting a launcher release
+
+`.github/workflows/launcher-publish.yml` fires on a `launcher-v*` tag: it builds
+the single-file `OpenNovaLauncher.exe`, attaches it to a GitHub Release, and — if
+the AWS secrets/vars below are set — uploads the exe plus two manifests to
+`downloads.<domain>/launcher/`: `version.json` (the launcher's AutoUpdater feed)
+and `app.json` (the web download box on the landing page reads this).
+
+One-time, wire the CI credentials from the infra output (reuse the launcher_ci
+IAM user) + the bucket variable:
+
+```bash
+gh secret  set LAUNCHER_AWS_ACCESS_KEY_ID     -b "$(./deploy/run.sh infra output -raw ci_user_access_key_id)"
+gh secret  set LAUNCHER_AWS_SECRET_ACCESS_KEY -b "$(./deploy/run.sh infra output -raw ci_user_secret_access_key)"
+gh variable set DOWNLOADS_BUCKET -b downloads.opennova.net   # mandatory; DOWNLOADS_DOMAIN/AWS_REGION default OK
+```
+
+Then cut a release (the tag version must match `<Version>` in
+`launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj` — currently `0.2.0`):
+
+```bash
+git tag launcher-v0.2.0 && git push origin launcher-v0.2.0
+```
+
+Once it runs, the landing page's download button appears automatically (it
+fetches `downloads.<domain>/launcher/app.json`). To bump versions later, edit the
+csproj `<Version>` first, commit, then tag the matching `launcher-v<x>`.
