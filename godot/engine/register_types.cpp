@@ -28,6 +28,7 @@
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
+#include "object/nova_weapon_database.h"
 #include "object/nova_avatar_database.h"
 #include "object/nova_skeletal_anim.h"
 #include "hud/nova_hud_pos.h"
@@ -149,6 +150,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaObjectData);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
 	GDREGISTER_CLASS(NovaItemDatabase);
+	GDREGISTER_CLASS(NovaWeaponDatabase);
 	GDREGISTER_CLASS(NovaAvatarDatabase);
 	GDREGISTER_CLASS(NovaSkeletalAnim);
 	GDREGISTER_CLASS(NovaHudPos);

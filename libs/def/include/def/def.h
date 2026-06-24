@@ -114,6 +114,20 @@ typedef struct DefWeaponDef {
     size_t sights_count;
     char (*raw_lines)[512];
     size_t raw_lines_count;
+    /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
+       consumer populate_weapon_slot_lists @ 0x560430]. Appended to keep the leading
+       struct offsets (and the FFI mirrors) stable. */
+    int loadout_selectable;        /* +32: a row appears only when non-zero */
+    int loadout_subclasses;        /* +36: sub-entry expansion count */
+    char loadout_menu_textid[64];  /* +40: GameText "WepDes" key -> display name */
+    char loadout_menu_ttdesc[128]; /* +44: tooltip text id */
+    char loadout_menu_icon[64];    /* +144: icon texture */
+    int weapon_class;              /* +108: slot 0=accessory 1=primary 2=secondary 3=grenade */
+    int teamfilter;                /* +112: mask blue/yellow=2, red/violet=1 */
+    int charfilter;                /* +116: mask medic1 sniper2 gunner4 rifleman8 engineer16 */
+    float weaponweight;            /* +120 */
+    int maxclips;                  /* +136 */
+    float clipweight;              /* +140 */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {
@@ -321,9 +335,15 @@ typedef struct DefFile {
 /* ========================================================================= */
 
 DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out);
+/* Parse ammo.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_ammo as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
 DEF_EXPORT void def_free_ammo(DefAmmoFile *f);
 
 DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out);
+/* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f);
 
 DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out);

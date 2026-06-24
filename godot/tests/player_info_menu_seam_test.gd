@@ -214,3 +214,74 @@ func test_accept_emits_avatar_chosen() -> void:
 	var profile: Dictionary = get_signal_parameters(host, "avatar_chosen")[0]
 	assert_eq(String(profile.get("name", "")), "Sandman", "the committed profile carries the name")
 	assert_eq(int(profile.get("nationality", -1)), 0, "the committed profile carries the selection")
+
+
+# --- Loadout (PRIMARY/SECONDARY/ACCESSORY) ------------------------------------
+
+const WEAPON_FIXTURE := "res://../fixtures/def/weapon.def"
+
+
+func _load_weapons() -> NovaWeaponDatabase:
+	var wdb := NovaWeaponDatabase.new()
+	var path := ProjectSettings.globalize_path(WEAPON_FIXTURE)
+	assert_eq(wdb.load(path), OK, "weapon.def fixture loads")
+	return wdb
+
+
+# A stand-in PLAYER_INFO menu with just the loadout controls: the three weapon combos plus
+# PLAYERCLASS carrying the CHARTYPE values 5..9 (as the .mnu's static items do).
+func _make_loadout_menu() -> Node:
+	var menu := Node.new()
+	menu.name = "Menu"
+	add_child_autofree(menu)
+	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
+		var c := NovaMnuCombo.new()
+		c.name = n
+		menu.add_child(c)
+	var cls := NovaMnuCombo.new()
+	cls.name = "PLAYERCLASS"
+	for v in range(5, 10):  # Medic..Engineer = values 5..9
+		cls.add_item("class %d" % v, str(v))
+	cls.select_silent(0)  # Medic (value 5) -> class mask 1
+	menu.add_child(cls)
+	return menu
+
+
+func _combo_texts(c: NovaMnuCombo) -> Array:
+	var out: Array = []
+	for i in c.get_item_count():
+		out.append(c.get_item_text(i))
+	return out
+
+
+func test_populates_loadout_slots_filtered_by_class_and_team() -> void:
+	var host := PlayerInfoMenuHost.new()
+	var wdb := _load_weapons()
+	host._weapons = wdb
+	host._menu = _make_loadout_menu()
+	host._team = 0  # blue -> team mask 2
+	host._populate_loadout()
+
+	var primary := host._menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	# Medic (class mask 1), blue (team mask 2): the DB's filtered set plus a leading NONE row.
+	var expected := wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 1, 2)
+	assert_gt(expected.size(), 0, "the fixture has medic/blue primary weapons")
+	assert_eq(primary.get_item_count(), expected.size() + 1, "PRIMARY = NONE + the filtered weapons")
+	assert_eq(primary.get_item_text(0), "None", "NONE leads the slot (fallback with no string table)")
+
+
+func test_loadout_class_filter_includes_and_excludes() -> void:
+	var host := PlayerInfoMenuHost.new()
+	host._weapons = _load_weapons()
+	host._menu = _make_loadout_menu()
+	host._team = 0
+	var primary := host._menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+
+	# Medic (value 5): WPN_M4AUTO (charfilter medic|rifleman|engineer, blue) is a primary -> present.
+	host._populate_loadout()
+	assert_true(_combo_texts(primary).has("WPN_M4AUTO"), "M4 shows for Medic")
+
+	# Sniper (value 6): M4's charfilter excludes sniper -> absent after re-fill.
+	(host._menu.find_child("PLAYERCLASS", true, false) as NovaMnuCombo).select_silent(1)
+	host._populate_loadout()
+	assert_false(_combo_texts(primary).has("WPN_M4AUTO"), "M4 is hidden for Sniper")

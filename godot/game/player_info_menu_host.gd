@@ -35,6 +35,7 @@ const AvatarPreviewScript := preload("res://modtools/avatar/avatar_preview.gd")
 var _menu: Node                         # the built NovaMnuMenu (typed Node: only its tree is used)
 var _root: NovaResourceRoot
 var _db: NovaAvatarDatabase
+var _weapons: NovaWeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality DB index
 var _sel_nat := -1
@@ -69,6 +70,11 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 	_team = 1 if _radio_checked("SIDE_RED") else 0
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
 	_wire_preview()
+	# Loadout: PLAYERCLASS drives the class mask, the team radios the team mask; both
+	# filter the weapon slot lists [orig: populate_weapon_slot_lists @ 0x560430].
+	_ensure_weapons()
+	_connect_combo("PLAYERCLASS", _on_class_selected)
+	_populate_loadout()
 	# OK saves the chosen avatar; the .mnu's own ACTION still navigates back to main.mnu.
 	_connect_pressed("ACCEPT", commit)  # [orig: save_player_info_from_dialog @ 0x55ee10]
 
@@ -98,6 +104,70 @@ func _display_name(key: String) -> String:
 	if t != null and t.has_string_in_section(ATBL_SECTION, key):
 		return t.get_string_in_section(ATBL_SECTION, key)
 	return key
+
+
+# --- Loadout (weapon slot lists) ----------------------------------------------
+
+# Load weapon.def into the loadout table (best-effort; absent -> empty slot lists).
+func _ensure_weapons() -> void:
+	if _weapons != null or _root == null:
+		return
+	_weapons = NovaWeaponDatabase.new()
+	if _weapons.load_from_resource_root(_root, "weapon.def") != OK or not _weapons.is_loaded():
+		push_warning("PlayerInfoMenuHost: weapon.def not loaded (%s); loadout combos stay empty"
+			% _weapons.get_last_error())
+		_weapons = null
+
+
+# Fill PRIMARY/SECONDARY/ACCESSORY for the selected class + team, each led by a "NONE" row.
+# [orig: populate_weapon_slot_lists @ 0x560430]
+func _populate_loadout() -> void:
+	if _weapons == null:
+		return
+	var class_mask := _selected_class_mask()
+	var team_mask := 2 if _team == 0 else 1  # [orig: g_playerInfoTeamMask = 2 - (team != 0)]
+	_fill_weapon_slot("PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
+	_fill_weapon_slot("SECONDARY", NovaWeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
+	_fill_weapon_slot("ACCESSORY", NovaWeaponDatabase.SLOT_ACCESSORY, class_mask, team_mask)
+
+
+func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: int) -> void:
+	var combo := _combo(control)
+	if combo == null:
+		return
+	var rows := PackedStringArray()
+	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
+	for w in _weapons.get_slot_weapons(slot, class_mask, team_mask):
+		rows.append(_weapon_label(w))
+	_set_combo_items(combo, rows)
+
+
+# Weapon display name = loadout_menu_textid resolved in gametext's "WepDes" section, else the
+# raw weapon id [orig: populate_weapon_slot_lists @ 0x560430: entry+40 textid else entry+0].
+func _weapon_label(w: Dictionary) -> String:
+	var textid := String(w.get("display_textid", ""))
+	if not textid.is_empty():
+		var t: RtxtStringFile = NovaStrings.get_table("gametext")
+		if t != null and t.has_string_in_section("WepDes", textid):
+			return t.get_string_in_section("WepDes", textid)
+	return String(w.get("name", ""))
+
+
+# PLAYERCLASS carries values 5..9 (Medic..Engineer); the class mask is the matching
+# power-of-two bit [orig: PlayerInfo_SetTeamAndClassMask @ 0x55de60: 5->1,6->2,7->4,8->8,9->16].
+func _selected_class_mask() -> int:
+	var combo := _combo("PLAYERCLASS")
+	if combo == null:
+		return 0x1F  # no class control -> show every class's weapons (defensive)
+	var val := combo.get_selected_value()
+	var cls := int(val) if val.is_valid_int() else 0
+	return (1 << (cls - 5)) if cls >= 5 and cls <= 9 else 0
+
+
+func _on_class_selected(_row: int, _value: String) -> void:
+	if _populating:
+		return
+	_populate_loadout()  # the class mask re-filters the weapon slot lists
 
 
 # --- Population (the cascade) -------------------------------------------------
@@ -284,6 +354,7 @@ func _set_team(team: int) -> void:
 		return
 	_team = team
 	_populate_nationalities()
+	_populate_loadout()  # the team mask re-filters the weapon slot lists
 
 
 # --- ACCEPT seam (Phase 5) ----------------------------------------------------

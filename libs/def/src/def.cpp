@@ -306,13 +306,9 @@ static void parse_pos_aligned(Token *vals, int n, int *out) {
 /* Ammo Parsing                                                              */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared buffer parser for ammo.def, used by both the path and memory entry points
+   (mirrors parse_items_buf). Assumes `out` was zeroed by the caller; does not free buf. */
+static int parse_ammo_buf(const char *buf, size_t file_len, DefAmmoFile *out) {
     size_t entries_cap = 0;
     LineIter it = {buf, file_len, 0};
     const char *line; size_t line_len;
@@ -409,8 +405,23 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_ammo_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_ammo_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_ammo(DefAmmoFile *f) {
@@ -427,13 +438,9 @@ DEF_EXPORT void def_free_ammo(DefAmmoFile *f) {
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared buffer parser for weapon.def, used by both the path and memory entry points
+   (mirrors parse_items_buf). Assumes `out` was zeroed by the caller; does not free buf. */
+static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
 
@@ -507,6 +514,61 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "round_type", 10)) {
                 consume_value_str(trimmed, tlen, 10, cw.round_type, sizeof(cw.round_type));
+                parsed = 1;
+            /* PLAYER_INFO loadout tokens [orig: WeaponDef_ParseProperty @ 0x54d730]. */
+            } else if (lower_match_key(lower, ll, "weapon_class", 12)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
+                if (vbl == 9 && memcmp(vb, "accessory", 9) == 0) cw.weapon_class = 0;
+                else if (vbl == 7 && memcmp(vb, "primary", 7) == 0) cw.weapon_class = 1;
+                else if (vbl == 9 && memcmp(vb, "secondary", 9) == 0) cw.weapon_class = 2;
+                else if (vbl == 7 && memcmp(vb, "grenade", 7) == 0) cw.weapon_class = 3;
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "teamfilter", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
+                if ((vbl == 4 && memcmp(vb, "blue", 4) == 0) || (vbl == 6 && memcmp(vb, "yellow", 6) == 0))
+                    cw.teamfilter |= 2;
+                else if ((vbl == 3 && memcmp(vb, "red", 3) == 0) || (vbl == 6 && memcmp(vb, "violet", 6) == 0))
+                    cw.teamfilter |= 1;
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "charfilter", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
+                if (vbl == 5 && memcmp(vb, "medic", 5) == 0) cw.charfilter |= 1;
+                else if (vbl == 6 && memcmp(vb, "sniper", 6) == 0) cw.charfilter |= 2;
+                else if (vbl == 6 && memcmp(vb, "gunner", 6) == 0) cw.charfilter |= 4;
+                else if (vbl == 8 && memcmp(vb, "rifleman", 8) == 0) cw.charfilter |= 8;
+                else if (vbl == 8 && memcmp(vb, "engineer", 8) == 0) cw.charfilter |= 16;
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "weaponweight", 12)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                cw.weaponweight = parse_float_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "clipweight", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                cw.clipweight = parse_float_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "maxclips", 8)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                cw.maxclips = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_selectable", 18)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+                cw.loadout_selectable = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_subclasses", 18)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+                cw.loadout_subclasses = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_menu_textid", 19)) {
+                consume_value_str(trimmed, tlen, 19, cw.loadout_menu_textid, sizeof(cw.loadout_menu_textid));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_menu_ttdesc", 19)) {
+                consume_value_str(trimmed, tlen, 19, cw.loadout_menu_ttdesc, sizeof(cw.loadout_menu_ttdesc));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_menu_icon", 17)) {
+                consume_value_str(trimmed, tlen, 17, cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon));
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "animadm", 7)) {
                 consume_value_str(trimmed, tlen, 7, cw.animadm, sizeof(cw.animadm));
@@ -674,8 +736,23 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_weapons_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_weapons_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f) {

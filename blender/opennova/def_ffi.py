@@ -61,6 +61,18 @@ class DefWeaponDef(ctypes.Structure):
         ("sights_count", ctypes.c_size_t),
         ("raw_lines", ctypes.c_void_p),
         ("raw_lines_count", ctypes.c_size_t),
+        # PLAYER_INFO loadout fields (appended; mirror libs/def/include/def/def.h).
+        ("loadout_selectable", ctypes.c_int),
+        ("loadout_subclasses", ctypes.c_int),
+        ("loadout_menu_textid", ctypes.c_char * 64),
+        ("loadout_menu_ttdesc", ctypes.c_char * 128),
+        ("loadout_menu_icon", ctypes.c_char * 64),
+        ("weapon_class", ctypes.c_int),
+        ("teamfilter", ctypes.c_int),
+        ("charfilter", ctypes.c_int),
+        ("weaponweight", ctypes.c_float),
+        ("maxclips", ctypes.c_int),
+        ("clipweight", ctypes.c_float),
     ]
 
 
