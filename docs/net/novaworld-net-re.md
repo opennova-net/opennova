@@ -806,19 +806,95 @@ index from `type_id 0x14B9` (`ItemList_FindIndexByTypeId` → `entity+28`) →
 `Position` / `Yaw` / `Team` → `Entity_ResetToSpawnState` (clears `Flags & 2`, the gate). The
 host then streams the loading sequence (§5.2a step 3) to its own local client in-process.
 
-**IDB struct expansion (2026-06-23 `Entity_*` grill).** `GamePlayerEntity` (ordinal 357) now carries
-the full named field set in `Jointops.exe.kong.i64` (49 members, size unchanged 904), and the
-`GamePlayerEntity *` type is applied to ~197 `Entity_*` prototypes so field access renders across the
-family. Fields named (each corroborated by a witnessed write or the §5.9 tag-0x10 map): `ItemTypeIndex`
-+28, `itemDef` +32 (`ItemDef*`), `rtCounter0/1/2` +48/+52/+56 (init from `ItemDef`; +0x30 is reused at
-runtime as a weapon/AI data pointer), `aiRuntime` +104, `Armor` +0x120 (`= ItemDef.armorMax`),
-`ammoCount` +0x122, `MoveOrder` +0x12C + analog axes +0x130..0x133 (`Player_PackInputStateToEntity`
-@0x4df450), `sectionMask` +0x134, `parentEntity` +0x16C, `destroyTimer` +0x1B0, `boneB/boneA`
-+0x214/+0x215, `weaponByte` +0x21A, `scoreFlag` +0x270. Two id-field clarifications: the 32-bit id the
-`Entity_*ByNetId` family matches across pools 0/1/2 is `DcbId` @+124 (BMS/DCB script id), distinct from
-the streaming netId near +348 and the authority id at +46 (`Entity_GetNetIdIfAuthority` @0x4e4010); and
-`Entity_SetNetId` @0x43b8f0 is an auto-namer misnomer — it writes `Health` @+286, so it is really
-`Entity_SetHealth`.
+**IDB struct expansion (2026-06-23 `Entity_*` grill, deepened pass).** `GamePlayerEntity` (ordinal 357)
+now carries a deepened named field set in `Jointops.exe.kong.i64` (**65 members**, size unchanged 904),
+and `GamePlayerEntity *` is applied to **234 `Entity_*` prototypes** (every one whose first arg is a
+slot pointer; 57 raw-`int`/`void*` params retyped this pass) so field access renders across the family.
+The cleanest single witness is the tag-0x0C organic-spawn writer `[orig: NapiNPClientMsg_0x00C @
+0x42E730]`, which stores each field at a cited site; cross-checked against the BMS spawner `[orig:
+Entity_SpawnFromBMSRecord @ 0x40e9f0]` and `Entity_ResetToSpawnState @0x4b9610`. Fields named:
+`ItemTypeIndex` +28, `itemDef` +32 (`ItemDef*`), `Flags` +36 (minimap/render + movement-gate bit 1),
+`Ssn` +0x2e, `rtCounter0/1/2` +48/+52/+56 (init from `ItemDef`; +0x30 reused at runtime as a weapon/AI
+data ptr), `CharacterEntity` +0x3c, `aiRuntime` +104, `entityFlags` +0x78 (`[@0x42e864]`), `DcbId`
++0x7c, `commandGroup` +0x11c (u16), `Health` +0x11e, `Armor` +0x120 (`= ItemDef.armorMax`), `ammoCount`
++0x122, `MoveOrder` +0x12C + analog axes +0x130..0x133 (`Player_PackInputStateToEntity` @0x4df450),
+`sectionMask` +0x134, `weaponType` +0x157 (`[@0x42ea4a]`), `NetId` +0x15c (u16, `[@0x42e9bc]`), `Team`
++0x162, `parentSlot` +0x168 (`[@0x42ea62]`, resolves to the `parentEntity` ptr +0x16c), `destroyTimer`
++0x1B0, `Callback0/Callback1` +0x1c4/+0x1c8 (copied from `ItemDef.pad_130[40]/[8]` by
+`Entity_InitFromItemDef @0x49e550`; `Callback1` is the death/lifecycle handler invoked by
+`Entity_KillByNetId @0x43dbd0`), `subType` +0x214 (`[@0x42ea35]`), `refNum` +0x215 (`[@0x42ea20]`, see
+D-NET-94), `weaponByte` +0x21A, `scoreFlag` +0x270, `weaponState` +0x294 (`[@0x42e9d5]`), `Weapon`
++0x298, `aiState` +0x2b4 (`[@0x42e991]`; also the `memset(entity,0,0x2B4)` base/extended-region
+boundary), `SpawnOrigin` +0x318 (set by `Entity_ResetToSpawnState`), `animSlot` +0x374 (`[@0x42e9a6]`).
+
+**Three id fields stay distinct.** The 32-bit id the `Entity_*ByNetId` family matches across pools
+0/1/2 is `DcbId` @+124 (BMS/DCB script id) `[orig: Entity_FindByNetId @0x4655b0 matches `+124`;
+Entity_KillByNetId @0x43dbd0 matches `+124` and clears `Health` @+286 then calls `Callback1` @+0x1c8]`
+— distinct from `NetId` @+0x15c (the streaming id from the spawn packet) and `Ssn` @+0x2e (the
+authority id, `Entity_GetNetIdIfAuthority @0x4e4010`).
+
+**Name corrections (this pass):**
+- **D-NET-93** — `Entity_SetNetId @0x43b8f0` is an auto-namer misnomer: it writes `Health` @+286, so it
+  is renamed **`Entity_SetHealth`** (`int16_t(GamePlayerEntity*, int16_t health)`).
+- **D-NET-94** — +0x214/+0x215, auto-named `boneB`/`boneA`, are **not bones**. The wire spawn writes
+  them as `subType`/`alertLevel`, but +0x215 is really a small **registration/group id**: BMS registers
+  `byte_A77648[bmsRec[153]]` `[@0x40ebcb]` and `Entity_Destroy @0x43e810` uses it as a minimap-DynArray
+  group index + streaming-destroy gate. Named **`subType`** (+0x214) and **`refNum`** (+0x215). The
+  actual AI alert STANCE is `aiRuntime+136` (0/1/2 stand/crouch/kneel), set by
+  `Entity_HandleAlertStateEvent @0x43dee0` — NOT an entity field.
+- **D-NET-95** — the +0x11c word, auto-named `pad6_post`, is the trigger **`commandGroup`**: entities
+  are matched by it `[orig: Entity_HandleAlertCommand @0x43cf10 matches `+284`]` then driven by
+  `TriggerGroup_Set{Patrol,Inactive,Active}`; BMS writes `bmsRec[78]` there `[@0x40ebb7]`.
+
+(Open: `CharacterEntity` @+0x3c — the net 0x0C path writes a minimap-slot handle there
+`[@0x42eb1d, MinimapSlot_FindOrAllocByEntityId]`; the prior name is kept pending a reader witness, as
+the slot may be a union/overload.)
+
+**Base-region padding named (2026-06-23 pass 2 — `padXX` grill).** The base region `0x0–0x2b3` (up to
+the `memset(entity,0,0x2B4)` boundary) held ~660 bytes of unnamed padding; the well-witnessed,
+single-meaning fields are now named (`GamePlayerEntity` → 101 members, 73 named, size still 904). Each
+is backed by a witnessed access (consumer in parens) and most are already mapped in the cited sections
+— this pass makes the IDB render them:
+- **Locomotion / motor** — `currentSpeed` +0x29c (per-tick forward speed; `pos += speed<<13`, drives
+  footstep sounds), `speedAccel` +0x2a0 (per-tick delta toward target; spawn reuses for
+  waypointId/spawnTimer), `bodyHeading/bodyPitch/bodyRoll` +0x8c/+0x90/+0x94 (the rendered body
+  orientation, distinct from the input `Yaw/Pitch/Roll` @+0x10/+0x14/+0x18; `bodyRoll` doubles as
+  `Entity_FindByNetId`'s scratch result slot), `velocityX/Y` +0x98/+0x9c, `slideDecay` +0xa0,
+  `leanAngle` +0xb0 (feeds `Roll` in bone transform), `moveTimer` +0x148 (`62*N` ticks), `spawnPhase`
+  +0x2ac `[orig: Entity_UpdatePlayerInfantryMovement @0x483fe0; Entity_ProcessInfantryPhysics @0x46e100]`.
+- **Net smooth-target / interp** (the §5.10/§5.38a cluster, now named in the struct) — `savedLivePose`
+  +0x80 (`SpecialVec3`), `smoothTargetPos` +0x234 (`SpecialVec3`), `smoothTargetHeading/Pitch/Stage`
+  +0x240/+0x244/+0x248 (**= the vehicle Euler triple eulerZ/X/Y on a vehicle entity, §5.13**),
+  `interpProgress` +0x27c, `interpStepBucket` +0x27e. The local infantry motor reuses this cluster for
+  post-respawn/teleport smoothing (same fields as the net read-apply path).
+- **Mount / lifecycle / render** — `renderInstance` +0x64 (the render-instance ptr `Entity_Destroy`
+  `memset`s 0x32C), `parentVehicle` +0x170, `overlayFlags` +0x178, `animChannelA/B` +0x18c/+0x188,
+  `mountHandles[10]` +0x190 (the seat/attach handle array `Entity_Destroy` walks to detach),
+  `effectHandle` +0x1b4, `ownerSession` +0x1cc, `targetHeading` +0x1a8, `thinkCooldown` +0x128
+  `[orig: Entity_Destroy @0x43e810; Entity_KillByNetId @0x43dbd0 (+0x178); world-wac-ai-re.md §3]`.
+
+**Extended AI/anim/aim region named (2026-06-23 pass 3 — `0x2b8–0x387`).** The post-`aiState` region
+is now named for its INFANTRY/AI interpretation (`GamePlayerEntity` → 135 members, 96 named; size still
+904). Witnessed via `Entity_UpdateInfantryAI @0x4b9910` + `Entity_BuildBoneTransformMatrices @0x4b1290`
++ `Entity_ResetToSpawnState @0x4b9610`, corroborated by `world-wac-ai-re.md §3` (entity[N]·4 = offset):
+- **Anim state** — `animStateId` +0x2bc (entity[175]; indexes the state→name table `dword_8139E8` /
+  `off_8135F0`), `animSlotIndex` +0x2c0 (`Entity_ComputeAnimSlotIndex`), `prevAnimStateId` +0x2c8
+  (entity[178]).
+- **Aim / torso / head** (incremental `+= chase` writes; reset to body yaw on spawn) — `aimPitch`
+  +0x2d0 (entity[180]), `torsoYaw/Pitch/Roll` +0x2d4/+0x2d8/+0x2dc (entity[181-183]; feed the render
+  Yaw/Pitch/Roll bones), `headLookYaw/Pitch` +0x2e4/+0x2e8 (entity[185/186]), `aimHeading` +0x2ec
+  (entity[187]; render yaw chases it), `pitchBlend` +0x380 (added to render Pitch), `headLookDecay`
+  +0x36c.
+- **AI targeting** — `aimPoint` +0x30c (`SpecialVec3`, entity[195-197]; cast in
+  `Entity_CheckGroundHeightAtPosition`), `aiFocus` +0x338 (`GamePlayerEntity*`, entity[206], the focus
+  target), `headLookTarget` +0x344 (`GamePlayerEntity*`, entity[209]), plus `aiRef0/1/2`
+  +0x2f0/+0x2f4/+0x350 (`GamePlayerEntity*` cross-refs cleared when the referent despawns).
+- **Bone-walk** — `aimFlag` +0x360 (entity+864; gates the render-yaw aim chase), `boneWalkStage` +0x361
+  (entity+865), `boneWalkSlot` +0x362 (entity+866), `boneIdxA/B` +0x366/+0x367.
+
+**Polymorphic note (single-member naming):** these are the infantry/AI meanings; on a projectile/shell
+entity the same offsets (`0x2bc+`) hold position/status state (`world-wac-ai-re.md §3`). `GamePlayerEntity`
+is now substantially mapped — the residual padding is genuine gaps + sparse AI-brain scratch.
 
 ### 5.2c Map spawn-marker selection — where the human player's pose comes from (2026-06-22)
 
@@ -1038,7 +1114,7 @@ entity:
 | team | u8 | `flags & 0x10` | entity+354 |
 | parentSlot | i32 | `flags & 0x20` | entity+36 |
 | ammoCount | u8 | **always** | entity+290 (u16) |
-| boneA / boneB | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 |
+| refNum / subType | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 (D-NET-94; not bones) |
 | scoreFlag | u8 | `flags & 0x100` | entity+624 (i32) |
 | weaponByte | u8 | **always** | entity+538 |
 | attachRef | u16 | `weaponByte != 0 \|\| flags & 0x200` | entity+350 |
@@ -1377,8 +1453,8 @@ consumed exactly on every payload).
 | — | 4 | aiProfile1 | `spawnFlags & 0x0800` | trailer → aiSlot+16 |
 | — | 4 | aiProfile2 | `spawnFlags & 0x0800` | trailer → aiSlot+20 |
 | — | cstr | aiName | `spawnFlags & 0x0800` | trailer → aiSlot+156 |
-| — | 1 | alertByte | `spawnFlags & 0x0040` | entity+533 |
-| — | 1 | actionByte | `spawnFlags & 0x0080` | entity+532 |
+| — | 1 | refNum | `spawnFlags & 0x0040` | entity+533 (D-NET-94; not an alert level) |
+| — | 1 | subType | `spawnFlags & 0x0080` | entity+532 |
 | — | 1 | weaponTypeByte | `spawnFlags & 0x1000` | entity+176 |
 | — | 1 | healthByte | `spawnFlags & 0x2000` | entity+538 |
 | — | 2 | healthShort | `spawnFlags & 0x2000` (extra read) | entity+350 |
@@ -1944,8 +2020,8 @@ flags-first).
 | 16 | u8 | aiAction | `*(entity+104)+32` (AI sub-struct) | hasBody |
 | 17 | u8 | *(skip)* | cursor advance only, discarded `[@ 0x42e9f5]` | hasBody |
 | 18 | u8 | unusedByte | entity+340 (0x154) | hasBody |
-| 19 | u8 | alertLevel | entity+533 (0x215) | hasBody |
-| 20 | u8 | subType | entity+532 (0x214) | hasBody |
+| 19 | u8 | refNum (registration/group id, NOT alert level — D-NET-94) | entity+533 (0x215) | hasBody `[@ 0x42ea20]` |
+| 20 | u8 | subType | entity+532 (0x214) | hasBody `[@ 0x42ea35]` |
 | 21 | u8 | weaponType | entity+343 (0x157) | hasBody |
 | 22 | u8 | parentSlot | entity+360 (0x168) | hasBody |
 | 23 | u16 | parentHandle `(pool<<12)\|slot` | resolved → entity+364 (0x16C) | hasBody `[@ 0x42ea6e]` |
