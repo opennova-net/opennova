@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <string>
 
 namespace opennova::server {
@@ -72,6 +73,23 @@ struct ServerConfig {
 	// ADMIN_API_TOKEN env var to enable. Tokens are compared with a
 	// constant-time string compare in `auth.cpp`.
 	std::string admin_api_token;
+
+	// Expansion-publish pipeline (ported from onnet). Both default empty:
+	//   expansion_github_token  (EXPANSION_GITHUB_TOKEN) — a GitHub PAT with
+	//     contents:write on the expansion repos. When empty, POST .../release
+	//     still records the release row but reports the tag step as failed
+	//     (onnet admin.py:71-74).
+	//   expansion_publish_token (EXPANSION_PUBLISH_TOKEN) — bearer token the
+	//     expansion repo's CI presents to /admin/internal/.../publish|fail.
+	//     When empty those routes return 500 (onnet admin_internal.py:18-19).
+	// These are distinct from admin_api_token.
+	std::string expansion_github_token;
+	std::string expansion_publish_token;
+
+	// slug -> "owner/repo" for the tag push. Defaults to onnet's mapping
+	// (admin.py:19-23); overridable via EXPANSION_REPOSITORIES as a
+	// comma-separated "slug=owner/repo,..." list.
+	std::map<std::string, std::string> expansion_repositories;
 
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the

@@ -57,6 +57,56 @@ std::vector<GameRow>      list_games(opennova::db::Database &db);
 std::vector<ExpansionRow> list_expansions(opennova::db::Database &db);
 std::vector<ReleaseRow>   list_recent_releases(opennova::db::Database &db, int limit);
 
+// --- Write side: the expansion-release / publish pipeline ----------------
+// Ported from onnet's onnw/admin.py + admin_internal.py +
+// expansion_releases.py + expansions.py (Postgres -> SQLite dialect). The
+// HTTP routes in http_listener.cpp are the only callers. Multi-statement
+// helpers run inside a transaction so a crash can't desync the expansion
+// version from its release row.
+
+// Result of a slug lookup. `found` distinguishes "no such expansion" (404)
+// from a real row. Mirrors onnet ExpansionRepository.get_by_slug.
+struct ExpansionLookup {
+	int64_t     id = 0;
+	int64_t     game_id = 0;
+	std::string version;
+	bool        found = false;
+};
+
+ExpansionLookup find_expansion_by_slug(opennova::db::Database &db,
+                                       const std::string &slug);
+
+// onnet admin.py:252-263 (_set_expansion_version).
+void set_expansion_version(opennova::db::Database &db, int64_t expansion_id,
+                           const std::string &version);
+
+// onnet expansion_releases.py:27-58 (create). Upserts a pending release;
+// re-releasing the same (slug, version) resets it to pending and clears the
+// tag/publish bookkeeping.
+void create_or_reset_release(opennova::db::Database &db, const std::string &slug,
+                             const std::string &version, const std::string &repo_ref,
+                             const std::optional<std::string> &notes);
+
+// onnet expansion_releases.py:60-94 (update_status). NULL args preserve the
+// existing workflow_url / target_commit / published_at via COALESCE.
+void update_release_status(opennova::db::Database &db, const std::string &slug,
+                           const std::string &version, const std::string &status,
+                           const std::optional<std::string> &error_message,
+                           const std::optional<std::string> &workflow_url,
+                           const std::optional<std::string> &target_commit,
+                           const std::optional<std::string> &published_at);
+
+// onnet expansions.py:135-159 (upsert_file). DELETE-then-INSERT by
+// (expansion_id, order_index).
+void upsert_expansion_file(opennova::db::Database &db, int64_t expansion_id,
+                           const std::string &download_url, const std::string &sha256,
+                           const std::optional<int64_t> &size_bytes,
+                           const std::string &file_type = "archive",
+                           int order_index = 1);
+
+std::optional<ReleaseRow> get_release(opennova::db::Database &db,
+                                      const std::string &slug, const std::string &version);
+
 } // namespace catalog
 
 } // namespace opennova::server

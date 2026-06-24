@@ -6,6 +6,20 @@ namespace {
 
 opennova::db::BindValue i64(int64_t v) { return opennova::db::BindValue(v); }
 
+// Bind a std::string by value.
+opennova::db::BindValue txt(const std::string &v) { return opennova::db::BindValue(v); }
+
+// Bind an optional text column: NULL (monostate) when absent, else the text.
+opennova::db::BindValue opt_txt(const std::optional<std::string> &v) {
+	if (v) return opennova::db::BindValue(*v);
+	return opennova::db::BindValue(std::monostate{});
+}
+
+opennova::db::BindValue opt_i64(const std::optional<int64_t> &v) {
+	if (v) return opennova::db::BindValue(*v);
+	return opennova::db::BindValue(std::monostate{});
+}
+
 GameRow row_to_game(const opennova::db::Row &r) {
 	GameRow g;
 	g.id              = r.as_int(0).value_or(0);
@@ -84,6 +98,112 @@ std::vector<ReleaseRow> list_recent_releases(opennova::db::Database &db, int lim
 	out.reserve(rows.size());
 	for (const auto &r : rows) out.push_back(row_to_release(r));
 	return out;
+}
+
+// --- Write side ----------------------------------------------------------
+
+ExpansionLookup find_expansion_by_slug(opennova::db::Database &db,
+                                       const std::string &slug) {
+	ExpansionLookup out;
+	auto rows = db.query(
+		"SELECT id, game_id, version FROM expansions WHERE slug = ? LIMIT 1;",
+		{txt(slug)});
+	if (rows.empty()) return out;  // found == false
+	const auto &r = rows.front();
+	out.id      = r.as_int(0).value_or(0);
+	out.game_id = r.as_int(1).value_or(0);
+	out.version = r.as_text(2).value_or("");
+	out.found   = true;
+	return out;
+}
+
+void set_expansion_version(opennova::db::Database &db, int64_t expansion_id,
+                           const std::string &version) {
+	// onnet admin.py:252-263.
+	db.exec(
+		"UPDATE expansions SET version = ?, updated_at = CURRENT_TIMESTAMP "
+		"WHERE id = ?;",
+		{txt(version), i64(expansion_id)});
+}
+
+void create_or_reset_release(opennova::db::Database &db, const std::string &slug,
+                             const std::string &version, const std::string &repo_ref,
+                             const std::optional<std::string> &notes) {
+	// onnet expansion_releases.py:27-58. Postgres EXCLUDED -> SQLite excluded.
+	db.exec(
+		"INSERT INTO expansion_releases (slug, version, repo_ref, notes) "
+		"VALUES (?, ?, ?, ?) "
+		"ON CONFLICT(slug, version) DO UPDATE SET "
+		"    repo_ref = excluded.repo_ref, "
+		"    notes = excluded.notes, "
+		"    status = 'pending', "
+		"    error_message = NULL, "
+		"    workflow_url = NULL, "
+		"    target_commit = NULL, "
+		"    published_at = NULL, "
+		"    updated_at = CURRENT_TIMESTAMP;",
+		{txt(slug), txt(version), txt(repo_ref), opt_txt(notes)});
+}
+
+void update_release_status(opennova::db::Database &db, const std::string &slug,
+                           const std::string &version, const std::string &status,
+                           const std::optional<std::string> &error_message,
+                           const std::optional<std::string> &workflow_url,
+                           const std::optional<std::string> &target_commit,
+                           const std::optional<std::string> &published_at) {
+	// onnet expansion_releases.py:60-94. COALESCE preserves existing values
+	// when the corresponding arg is NULL.
+	db.exec(
+		"UPDATE expansion_releases SET "
+		"    status = ?, "
+		"    error_message = ?, "
+		"    workflow_url = COALESCE(?, workflow_url), "
+		"    target_commit = COALESCE(?, target_commit), "
+		"    published_at = COALESCE(?, published_at), "
+		"    updated_at = CURRENT_TIMESTAMP "
+		"WHERE slug = ? AND version = ?;",
+		{txt(status), opt_txt(error_message), opt_txt(workflow_url),
+		 opt_txt(target_commit), opt_txt(published_at), txt(slug), txt(version)});
+}
+
+void upsert_expansion_file(opennova::db::Database &db, int64_t expansion_id,
+                           const std::string &download_url, const std::string &sha256,
+                           const std::optional<int64_t> &size_bytes,
+                           const std::string &file_type, int order_index) {
+	// onnet expansions.py:135-159: DELETE then INSERT. onnet deletes by
+	// (expansion_id, order_index) while the table UNIQUE is
+	// (expansion_id, file_type, order_index); with the default
+	// file_type='archive'/order_index=1 these coincide. Kept faithful to
+	// onnet — revisit if multiple file_types per expansion are ever added.
+	db.begin();
+	try {
+		db.exec(
+			"DELETE FROM expansion_files "
+			"WHERE expansion_id = ? AND order_index = ?;",
+			{i64(expansion_id), i64(order_index)});
+		db.exec(
+			"INSERT INTO expansion_files "
+			"    (expansion_id, download_url, sha256, size_bytes, file_type, order_index) "
+			"VALUES (?, ?, ?, ?, ?, ?);",
+			{i64(expansion_id), txt(download_url), txt(sha256), opt_i64(size_bytes),
+			 txt(file_type), i64(order_index)});
+		db.commit();
+	} catch (...) {
+		db.rollback();
+		throw;
+	}
+}
+
+std::optional<ReleaseRow> get_release(opennova::db::Database &db,
+                                      const std::string &slug, const std::string &version) {
+	auto rows = db.query(
+		"SELECT id, slug, version, status, repo_ref, "
+		"       workflow_url, target_commit, created_at, "
+		"       published_at, error_message "
+		"FROM expansion_releases WHERE slug = ? AND version = ? LIMIT 1;",
+		{txt(slug), txt(version)});
+	if (rows.empty()) return std::nullopt;
+	return row_to_release(rows.front());
 }
 
 } // namespace opennova::server::catalog

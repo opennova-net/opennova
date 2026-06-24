@@ -12,6 +12,7 @@ if(BUILD_NOVAWORLD_HTTP)
         session_store.cpp
         auth.cpp
         catalog_repository.cpp
+        github_client.cpp
     )
 endif()
 
@@ -27,7 +28,10 @@ target_link_libraries(opennova_novaworld_server
 )
 
 if(BUILD_NOVAWORLD_HTTP)
-    target_link_libraries(opennova_novaworld_server PRIVATE Crow::Crow)
+    # libcurl powers the outbound GitHub tag API call in github_client.cpp.
+    # Required only for the HTTP build, so lib-only / Godot builds never need it.
+    find_package(CURL REQUIRED)
+    target_link_libraries(opennova_novaworld_server PRIVATE Crow::Crow CURL::libcurl)
     target_compile_definitions(opennova_novaworld_server PRIVATE
         OPENNOVA_HTTP_ENABLED
     )

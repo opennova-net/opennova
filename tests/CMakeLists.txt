@@ -1271,6 +1271,19 @@ target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME backend_schema COMMAND backend_schema_test)
 
+# Expansion-release / publish repository writes (the SQL ported from onnet).
+# Compiles catalog_repository.cpp straight in — no Crow/libcurl needed, the
+# write layer depends only on the sqlite wrapper in opennova_novaworld.
+add_executable(expansion_publish_test
+    novaworld/expansion_publish_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/catalog_repository.cpp)
+target_link_libraries(expansion_publish_test PRIVATE opennova_novaworld)
+target_include_directories(expansion_publish_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(expansion_publish_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME expansion_publish COMMAND expansion_publish_test)
+
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
 # real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
 add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)

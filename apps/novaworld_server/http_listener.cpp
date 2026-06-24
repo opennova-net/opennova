@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "github_client.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <random>
 #include <cstdio>
@@ -39,6 +41,22 @@ std::string read_file_text(const std::filesystem::path &p) {
 	std::ostringstream os;
 	os << in.rdbuf();
 	return os.str();
+}
+
+// UTC "YYYY-MM-DD HH:MM:SS", matching SQLite's CURRENT_TIMESTAMP format so a
+// server-generated published_at sorts/compares the same as DB-stamped rows.
+// Mirrors onnet passing datetime.utcnow() (admin_internal.py:79).
+std::string now_utc_timestamp() {
+	std::time_t t = std::time(nullptr);
+	std::tm tm_utc{};
+#if defined(_WIN32)
+	gmtime_s(&tm_utc, &t);
+#else
+	gmtime_r(&t, &tm_utc);
+#endif
+	char buf[32];
+	std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_utc);
+	return std::string(buf);
 }
 
 // ---- cookie + form helpers (Phase E.1) ---------------------------------
@@ -340,6 +358,16 @@ bool HttpListener::start(const ServerConfig &config) {
 	            admin_token.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)"
 	                                : "ENABLED");
 
+	// Expansion-publish pipeline config (ported from onnet). Captured by the
+	// /release + /admin/internal routes below.
+	const std::string expansion_github_token  = config.expansion_github_token;
+	const std::string expansion_publish_token = config.expansion_publish_token;
+	const std::map<std::string, std::string> expansion_repos =
+		config.expansion_repositories;
+	std::printf("[http] expansion github token %s, publish token %s\n",
+	            expansion_github_token.empty()  ? "DISABLED" : "ENABLED",
+	            expansion_publish_token.empty() ? "DISABLED" : "ENABLED");
+
 	// Constant-time string compare (timing-safe). Returns false on length
 	// mismatch or any byte difference. Used by admin endpoints below.
 	auto admin_authorized = [admin_token](const crow::request &req) {
@@ -355,6 +383,43 @@ bool HttpListener::start(const ServerConfig &config) {
 			      ^ static_cast<unsigned>(admin_token[i]);
 		}
 		return diff == 0;
+	};
+
+	// Bearer-token gate for the /admin/internal/* publish callback. Distinct
+	// from admin_authorized — it checks EXPANSION_PUBLISH_TOKEN, not the admin
+	// token. Returns the HTTP status to send (0 == authorized), preserving
+	// onnet's distinct codes (admin_internal.py:17-27): 500 token unset, 401
+	// malformed/absent header, 403 mismatch.
+	auto publish_authorized = [expansion_publish_token](const crow::request &req) -> int {
+		if (expansion_publish_token.empty()) return 500;
+		std::string auth = req.get_header_value("Authorization");
+		if (auth.rfind("Bearer ", 0) != 0) return 401;
+		const std::string presented = auth.substr(7);
+		if (presented.size() != expansion_publish_token.size()) return 403;
+		unsigned diff = 0;
+		for (size_t i = 0; i < presented.size(); ++i) {
+			diff |= static_cast<unsigned>(presented[i])
+			      ^ static_cast<unsigned>(expansion_publish_token[i]);
+		}
+		return diff == 0 ? 0 : 403;
+	};
+
+	// Serialize a release row to JSON. Shared by GET /api/admin/releases and
+	// the POST .../release response (snake_case keys, matching the rest of
+	// the admin API).
+	auto release_to_json = [](const catalog::ReleaseRow &r) {
+		crow::json::wvalue e;
+		e["id"]            = r.id;
+		e["slug"]          = r.slug;
+		e["version"]       = r.version;
+		e["status"]        = r.status;
+		e["repo_ref"]      = r.repo_ref;
+		e["workflow_url"]  = r.workflow_url;
+		e["target_commit"] = r.target_commit;
+		e["created_at"]    = r.created_at;
+		if (r.published_at)  e["published_at"]  = *r.published_at;
+		if (r.error_message) e["error_message"] = *r.error_message;
+		return e;
 	};
 
 	CROW_ROUTE(app, "/api/admin/server-status").methods("GET"_method)(
@@ -634,20 +699,8 @@ bool HttpListener::start(const ServerConfig &config) {
 		crow::json::wvalue out;
 		try {
 			std::vector<crow::json::wvalue> arr;
-			for (const auto &r : catalog::list_recent_releases(db_, limit)) {
-				crow::json::wvalue e;
-				e["id"]            = r.id;
-				e["slug"]          = r.slug;
-				e["version"]       = r.version;
-				e["status"]        = r.status;
-				e["repo_ref"]      = r.repo_ref;
-				e["workflow_url"]  = r.workflow_url;
-				e["target_commit"] = r.target_commit;
-				e["created_at"]    = r.created_at;
-				if (r.published_at)  e["published_at"]  = *r.published_at;
-				if (r.error_message) e["error_message"] = *r.error_message;
-				arr.push_back(std::move(e));
-			}
+			for (const auto &r : catalog::list_recent_releases(db_, limit))
+				arr.push_back(release_to_json(r));
 			out["releases"] = std::move(arr);
 		} catch (const db::SqliteError &e) {
 			out["error"] = e.what();
@@ -656,6 +709,226 @@ bool HttpListener::start(const ServerConfig &config) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
+	});
+
+	// Admin: request an expansion release. Ports onnet admin.py:190-245.
+	// Records (or resets) the release row, then pushes a git tag to the
+	// mapped GitHub repo using EXPANSION_GITHUB_TOKEN. Status becomes
+	// 'tagged' on success, 'failed' otherwise. Admin-token gated.
+	CROW_ROUTE(app, "/api/admin/expansions/<string>/release").methods("POST"_method)(
+	    [this, admin_authorized, release_to_json, expansion_github_token, expansion_repos]
+	    (const crow::request &req, const std::string &slug) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+
+		auto fail = [](int code, const std::string &message) {
+			crow::json::wvalue out;
+			out["ok"]    = false;
+			out["error"] = message;
+			crow::response res(code);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		};
+
+		auto body = crow::json::load(req.body);
+		if (!body) return fail(400, "Expected JSON object payload");
+
+		auto trim = [](std::string s) {
+			size_t a = s.find_first_not_of(" \t\r\n");
+			size_t b = s.find_last_not_of(" \t\r\n");
+			return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
+		};
+
+		const std::string version = body.has("version")
+			? trim(std::string(body["version"].s())) : std::string();
+		if (version.empty()) return fail(400, "'version' is required");
+
+		std::string repo_ref;
+		if (body.has("repoRef"))       repo_ref = trim(std::string(body["repoRef"].s()));
+		else if (body.has("repo_ref")) repo_ref = trim(std::string(body["repo_ref"].s()));
+		if (repo_ref.empty()) repo_ref = slug + "-v" + version;
+
+		std::optional<std::string> notes;
+		if (body.has("notes")) notes = std::string(body["notes"].s());
+
+		try {
+			auto exp = catalog::find_expansion_by_slug(db_, slug);
+			if (!exp.found) return fail(404, "Unknown expansion '" + slug + "'");
+
+			catalog::set_expansion_version(db_, exp.id, version);
+			catalog::create_or_reset_release(db_, slug, version, repo_ref, notes);
+
+			// Push the git tag (onnet _create_git_tag). A missing token or
+			// unmapped slug short-circuits to failure with onnet's message.
+			github::TagResult tag;
+			auto it = expansion_repos.find(slug);
+			if (expansion_github_token.empty() || it == expansion_repos.end()) {
+				tag.success = false;
+				tag.message = "GitHub token or repository mapping missing";
+			} else {
+				tag = github::create_git_tag(it->second, repo_ref,
+				                             expansion_github_token);
+			}
+
+			const std::string status = tag.success ? "tagged" : "failed";
+			std::optional<std::string> error_message;
+			if (!tag.success) error_message = tag.message;
+			catalog::update_release_status(db_, slug, version, status,
+			                               error_message,
+			                               /*workflow_url*/ std::nullopt,
+			                               tag.target_commit,
+			                               /*published_at*/ std::nullopt);
+
+			auto rel = catalog::get_release(db_, slug, version);
+			crow::json::wvalue out;
+			out["ok"]      = tag.success;
+			out["message"] = tag.success ? tag.message
+			                             : ("Failed to create tag: " + tag.message);
+			if (rel) out["release"] = release_to_json(*rel);
+
+			crow::response res(tag.success ? 200 : 400);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		} catch (const db::SqliteError &e) {
+			return fail(500, e.what());
+		}
+	});
+
+	// Internal: CI publish callback. The expansion repo's build workflow
+	// calls this after uploading the package to S3. Bearer-gated by
+	// EXPANSION_PUBLISH_TOKEN. Ports onnet admin_internal.py:37-82.
+	CROW_ROUTE(app, "/admin/internal/expansions/<string>/publish").methods("POST"_method)(
+	    [this, publish_authorized](const crow::request &req, const std::string &slug) {
+		if (int code = publish_authorized(req); code != 0) {
+			crow::response res(code);
+			res.body = (code == 500) ? "EXPANSION_PUBLISH_TOKEN is not configured"
+			                         : "unauthorized";
+			return res;
+		}
+
+		auto bad = [](const std::string &message) {
+			crow::response res(400);
+			res.body = message;
+			return res;
+		};
+
+		auto body = crow::json::load(req.body);
+		if (!body) return bad("Expected JSON object payload");
+
+		auto trim = [](std::string s) {
+			size_t a = s.find_first_not_of(" \t\r\n");
+			size_t b = s.find_last_not_of(" \t\r\n");
+			return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
+		};
+
+		const std::string version = body.has("version")
+			? trim(std::string(body["version"].s())) : std::string();
+		const std::string download_url = body.has("download_url")
+			? trim(std::string(body["download_url"].s())) : std::string();
+		const std::string sha256 = body.has("sha256")
+			? trim(std::string(body["sha256"].s())) : std::string();
+		if (version.empty() || download_url.empty() || sha256.empty())
+			return bad("'version', 'download_url', and 'sha256' are required");
+
+		std::optional<int64_t> size_bytes;
+		if (body.has("size_bytes")) {
+			// onnet rejects a non-integer size_bytes with 400.
+			const auto &sb = body["size_bytes"];
+			if (sb.t() == crow::json::type::Number)
+				size_bytes = static_cast<int64_t>(sb.i());
+			else
+				return bad("'size_bytes' must be an integer");
+		}
+		std::optional<std::string> workflow_url;
+		if (body.has("workflow_url")) workflow_url = std::string(body["workflow_url"].s());
+		std::optional<std::string> target_commit;
+		if (body.has("target_commit")) target_commit = std::string(body["target_commit"].s());
+
+		try {
+			auto exp = catalog::find_expansion_by_slug(db_, slug);
+			if (!exp.found) {
+				crow::response res(404);
+				res.body = "Expansion '" + slug + "' not found";
+				return res;
+			}
+			catalog::upsert_expansion_file(db_, exp.id, download_url, sha256, size_bytes);
+			catalog::update_release_status(db_, slug, version, "published",
+			                               /*error_message*/ std::nullopt,
+			                               workflow_url, target_commit,
+			                               now_utc_timestamp());
+			crow::json::wvalue out;
+			out["status"] = "ok";
+			crow::response res(200);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		} catch (const db::SqliteError &e) {
+			crow::response res(500);
+			res.body = e.what();
+			return res;
+		}
+	});
+
+	// Internal: CI publish-failure callback. Ports onnet admin_internal.py:85-108.
+	CROW_ROUTE(app, "/admin/internal/expansions/<string>/fail").methods("POST"_method)(
+	    [this, publish_authorized](const crow::request &req, const std::string &slug) {
+		if (int code = publish_authorized(req); code != 0) {
+			crow::response res(code);
+			res.body = (code == 500) ? "EXPANSION_PUBLISH_TOKEN is not configured"
+			                         : "unauthorized";
+			return res;
+		}
+
+		auto body = crow::json::load(req.body);
+		if (!body) {
+			crow::response res(400);
+			res.body = "Expected JSON object payload";
+			return res;
+		}
+
+		auto trim = [](std::string s) {
+			size_t a = s.find_first_not_of(" \t\r\n");
+			size_t b = s.find_last_not_of(" \t\r\n");
+			return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
+		};
+
+		const std::string version = body.has("version")
+			? trim(std::string(body["version"].s())) : std::string();
+		if (version.empty()) {
+			crow::response res(400);
+			res.body = "'version' is required";
+			return res;
+		}
+
+		std::string error_message = "Unknown error";
+		if (body.has("error"))             error_message = std::string(body["error"].s());
+		else if (body.has("error_message")) error_message = std::string(body["error_message"].s());
+		std::optional<std::string> workflow_url;
+		if (body.has("workflow_url")) workflow_url = std::string(body["workflow_url"].s());
+		std::optional<std::string> target_commit;
+		if (body.has("target_commit")) target_commit = std::string(body["target_commit"].s());
+
+		try {
+			catalog::update_release_status(db_, slug, version, "failed",
+			                               error_message, workflow_url, target_commit,
+			                               /*published_at*/ std::nullopt);
+			crow::json::wvalue out;
+			out["status"] = "recorded";
+			crow::response res(200);
+			res.body = out.dump();
+			res.set_header("Content-Type", "application/json");
+			return res;
+		} catch (const db::SqliteError &e) {
+			crow::response res(500);
+			res.body = e.what();
+			return res;
+		}
 	});
 
 	// ----- Phase J: admin user CRUD ------------------------------------
