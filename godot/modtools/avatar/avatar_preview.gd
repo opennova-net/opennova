@@ -580,6 +580,18 @@ func is_hovered() -> bool:
 func _process(delta: float) -> void:
 	if not _menu_preview or not _menu_framed:
 		return
+	# Hover by mouse-position-over-this-pane, not the PLAYER_PREVIEW widget's mouse_entered
+	# signal: the menu's anamorphic scaling + the IGNORE mouse filters (which let the button
+	# keep its clicks) stop that signal from firing. This matches the original's cursor-over-
+	# widget position test [orig: sub_6467D0 @ 0x6467d0].
+	# Only when this pane has a real laid-out rect (true in the live menu; a bare unit-test
+	# preview has a zero rect, where an explicit set_hovered() drives the zoom instead).
+	if is_inside_tree():
+		var r := get_global_rect()
+		if r.has_area():
+			var hov: bool = r.has_point(get_global_mouse_position())
+			if hov != _hovered:
+				_hovered = hov
 	# Damped zoom toward 1 (hover) / 0 (rest); the per-tick 0.05 factor is made frame-rate
 	# robust by scaling against the original's 62.5 Hz cadence.
 	var target := 1.0 if _hovered else 0.0
