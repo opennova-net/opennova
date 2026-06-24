@@ -173,6 +173,11 @@ remote_compose() {
   export GIT_SSH_COMMAND="ssh -i $key -o StrictHostKeyChecking=accept-new"
   # docker's ssh transport reads the key via the ssh binary; point it there.
   export DOCKER_SSH_OPTS="-i $key -o StrictHostKeyChecking=accept-new"
+  # The prod overlay's backup sidecar interpolates ${BACKUP_BUCKET} (required),
+  # and every compose invocation parses it — so resolve it for ALL app actions
+  # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
+  # state file is on the mounted disk from `infra apply`.
+  export BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
   # compose files + env, evaluated against the remote engine.
   COMPOSE_ARGS=(-f "$COMPOSE_DIR/docker-compose.yml"
                 -f "$COMPOSE_DIR/docker-compose.prod.yml"
