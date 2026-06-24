@@ -721,7 +721,9 @@ int main() {
         e->inf.is_local_player = true;
         e->health = 100;
 
-        e->inf.move_mode = 3; e->inf.target_dist = 0x10000; // moving forward
+        // Local-player motion is driven by the raw-input player_moving flag, not the
+        // NPC move_mode/target_dist (which apply_player_body_input clears). [a61a7e04]
+        e->inf.player_moving = true; // moving forward
         e->inf.stance = InfantryState::Stance::kCrouch;
         run_ticks(ai, w, 0, 1);
         CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // 11
@@ -736,7 +738,7 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // ...still crouch WALK (11)
         e->inf.alert_timer = 0;
 
-        e->inf.move_mode = 0; e->inf.target_dist = 0; // stationary
+        e->inf.player_moving = false; // stationary
         e->inf.stance = InfantryState::Stance::kCrouch;
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.anim_state == anim_state::kIdleCrouch); // 45
@@ -760,7 +762,7 @@ int main() {
         AiEntity *e = soldier(ai);
         e->inf.is_local_player = true;
         e->health = 100;
-        e->inf.move_mode = 3; e->inf.target_dist = 0x10000;
+        e->inf.player_moving = true;
         e->inf.stance = InfantryState::Stance::kCrouch;
         run_ticks(ai, w, 0, 1);
         CHECK(e->inf.anim_state == anim_state::kWalkForward); // crouch-walk -> stand walk
@@ -849,7 +851,7 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->pos[0] == fx(10) + 8 * 0x2000);
 
-        e->inf.move_mode = 3; e->inf.target_dist = 0x10000; // walk forward
+        e->inf.player_moving = true; // walk forward
         run_ticks(ai, w, 8, 14);
         CHECK(e->inf.anim_state == anim_state::kWalkForward);
         CHECK(e->pos[0] > fx(10)); // a movement state DOES translate the same clip step
@@ -896,7 +898,7 @@ int main() {
         stand->health = 100;
         stand->pos[0] = fx(100); stand->pos[1] = fx(100); stand->pos[2] = fx(50);
         stand->inf.adm_id = 0;
-        stand->inf.move_mode = 3; stand->inf.target_dist = 0x10000;
+        stand->inf.player_moving = true;
         stand->inf.anim_state = anim_state::kWalkForward;
 
         crouch->inf.is_local_player = true;
@@ -904,7 +906,7 @@ int main() {
         crouch->pos[0] = fx(100); crouch->pos[1] = fx(100); crouch->pos[2] = fx(50);
         crouch->inf.adm_id = 1;
         crouch->inf.stance = InfantryState::Stance::kCrouch;
-        crouch->inf.move_mode = 3; crouch->inf.target_dist = 0x10000;
+        crouch->inf.player_moving = true;
         crouch->inf.anim_state = anim_state::kWalkCrouchForward;
 
         run_ticks(ai, w, 0, 3);
