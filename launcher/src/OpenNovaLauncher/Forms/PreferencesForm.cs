@@ -153,7 +153,19 @@ public sealed partial class PreferencesForm : Form
 
     private static string GetAssemblyVersion()
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        // Prefer the informational version: it carries the full label including any
+        // -dev/PR suffix (set by the publish workflow), so a dev build reads e.g.
+        // "0.2.1-pr123" while a stable build reads "0.2.0". Strip the "+<gitsha>"
+        // build metadata. Falls back to the numeric assembly version.
+        var assembly = Assembly.GetExecutingAssembly();
+        var info = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(info))
+        {
+            var plus = info.IndexOf('+');
+            return plus >= 0 ? info[..plus] : info;
+        }
+
+        var version = assembly.GetName().Version;
         return version?.ToString() ?? "Unknown";
     }
 }

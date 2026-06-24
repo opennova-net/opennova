@@ -8,7 +8,9 @@ name: Launcher publish
 
 on:
   push:
-    tags: ['launcher-v*']
+    # launcher-v* = stable (writes the prod auto-update manifest);
+    # launcher-dev-v* = dev/PR build (GitHub prerelease only, never touches prod).
+    tags: ['launcher-v*', 'launcher-dev-v*']
   workflow_dispatch:
     inputs:
       version:
@@ -31,25 +33,47 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Resolve version
+      - name: Resolve version + channel
         id: ver
         shell: bash
         run: |
-          v="${{ github.event.inputs.version }}"
-          if [ -z "$v" ] && [[ "${{ github.ref }}" == refs/tags/launcher-v* ]]; then
-            v="${GITHUB_REF#refs/tags/launcher-v}"
+          ref="${GITHUB_REF}"
+          is_dev=false
+          if [[ "$ref" == refs/tags/launcher-dev-v* ]]; then
+            is_dev=true
+            label="${ref#refs/tags/launcher-dev-v}"
+          elif [[ "$ref" == refs/tags/launcher-v* ]]; then
+            label="${ref#refs/tags/launcher-v}"
+          else
+            label="${{ github.event.inputs.version }}"
+            if [ -z "$label" ]; then
+              label="$(grep -oPm1 '(?<=<Version>)[^<]+' launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj)"
+            fi
           fi
-          if [ -z "$v" ]; then
-            v="$(grep -oPm1 '(?<=<Version>)[^<]+' launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj)"
-          fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "Launcher version: $v"
+          if [ -z "$label" ]; then echo "could not resolve a version"; exit 1; fi
+          # numeric = leading MAJOR.MINOR.PATCH (pad to 3), what AutoUpdater parses.
+          core="$(printf '%s' "$label" | grep -oE '^[0-9]+(\.[0-9]+){0,2}' || true)"
+          if [ -z "$core" ]; then echo "no numeric version in '$label'"; exit 1; fi
+          IFS='.' read -r a b c <<< "$core"
+          numeric="${a:-0}.${b:-0}.${c:-0}"
+          echo "is_dev=$is_dev"   >> "$GITHUB_OUTPUT"
+          echo "label=$label"     >> "$GITHUB_OUTPUT"
+          echo "numeric=$numeric" >> "$GITHUB_OUTPUT"
+          echo "Launcher: label=$label numeric=$numeric is_dev=$is_dev"
 
       - name: Test
         run: dotnet test launcher/OpenNovaLauncher.sln -c Release --nologo
 
       - name: Publish single-file exe
-        run: dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+        # Stamp the version from the tag: AssemblyVersion/FileVersion stay numeric
+        # (AutoUpdater reads AssemblyVersion); the full label (incl. any -dev/PR
+        # suffix) rides on InformationalVersion for display only.
+        run: >
+          dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+          -p:Version=${{ steps.ver.outputs.label }}
+          -p:AssemblyVersion=${{ steps.ver.outputs.numeric }}.0
+          -p:FileVersion=${{ steps.ver.outputs.numeric }}.0
+          -p:InformationalVersion=${{ steps.ver.outputs.label }}+${{ github.sha }}
 
       - name: Stage artifact
         id: stage
@@ -63,12 +87,13 @@ jobs:
           echo "size=$size" >> "$GITHUB_OUTPUT"
 
       - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/launcher-v')
+        if: startsWith(github.ref, 'refs/tags/launcher-')
         uses: softprops/action-gh-release@v2
         with:
           files: out/OpenNovaLauncher.exe
           tag_name: ${{ github.ref_name }}
-          name: Launcher ${{ steps.ver.outputs.version }}
+          name: Launcher ${{ steps.ver.outputs.label }}${{ steps.ver.outputs.is_dev == 'true' && ' (dev)' || '' }}
+          prerelease: ${{ steps.ver.outputs.is_dev }}
           fail_on_unmatched_files: true
 
       # ---- optional S3 + manifests (only if launcher-CI AWS keys are set) ----
@@ -81,12 +106,15 @@ jobs:
           if [ -n "$AWS_KEY" ]; then echo "have=true" >> "$GITHUB_OUTPUT"; else echo "have=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Write manifests
-        if: steps.awscheck.outputs.have == 'true'
+        # Stable channel only — a dev/PR build must never overwrite the prod
+        # auto-update manifest. version.json carries the NUMERIC version so
+        # AutoUpdater.NET can always parse it (a -dev suffix would crash it).
+        if: steps.awscheck.outputs.have == 'true' && steps.ver.outputs.is_dev == 'false'
         shell: bash
         env:
           DOMAIN: ${{ vars.DOWNLOADS_DOMAIN }}
         run: |
-          v="${{ steps.ver.outputs.version }}"
+          v="${{ steps.ver.outputs.numeric }}"
           dom="${DOMAIN:-downloads.opennova.net}"
           url="https://${dom}/launcher/OpenNovaLauncher.exe"
           # AutoUpdater.NET manifest
@@ -99,7 +127,7 @@ jobs:
           JSON
 
       - name: Configure AWS credentials
-        if: steps.awscheck.outputs.have == 'true'
+        if: steps.awscheck.outputs.have == 'true' && steps.ver.outputs.is_dev == 'false'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.LAUNCHER_AWS_ACCESS_KEY_ID }}
@@ -107,7 +135,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Upload to S3
-        if: steps.awscheck.outputs.have == 'true'
+        if: steps.awscheck.outputs.have == 'true' && steps.ver.outputs.is_dev == 'false'
         shell: bash
         env:
           BUCKET: ${{ vars.DOWNLOADS_BUCKET }}
@@ -120,7 +148,7 @@ jobs:
                       "s3://${BUCKET}/launcher/archive/OpenNovaLauncher-${prev}.exe" --only-show-errors || true
           fi
           aws s3 cp out/OpenNovaLauncher.exe "s3://${BUCKET}/launcher/OpenNovaLauncher.exe" \
-            --metadata "version=${{ steps.ver.outputs.version }}" --only-show-errors
+            --metadata "version=${{ steps.ver.outputs.numeric }}" --only-show-errors
           aws s3 cp out/version.json "s3://${BUCKET}/launcher/version.json" --content-type application/json --only-show-errors
           aws s3 cp out/app.json     "s3://${BUCKET}/launcher/app.json"     --content-type application/json --only-show-errors
-          echo "Published launcher ${{ steps.ver.outputs.version }} to s3://${BUCKET}/launcher/"
+          echo "Published launcher ${{ steps.ver.outputs.numeric }} to s3://${BUCKET}/launcher/"
