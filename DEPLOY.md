@@ -23,8 +23,8 @@ service-account token.
 ## 1. Create the vault
 
 Create a vault named `OpenNova-Deploy` (the service account comes in step 2; it
-needs read + write + create access, the write/create for the terraform-state
-documents). Then create these items (paste-ready):
+needs read + write access, the write for the terraform-state documents). Then
+create these items (paste-ready):
 
 ```bash
 op vault create OpenNova-Deploy
@@ -41,11 +41,26 @@ op item create --vault OpenNova-Deploy --title ghcr --category 'Secure Note' \
 op item create --vault OpenNova-Deploy --title app-prod --category 'Server' \
   admin_api_token="$(openssl rand -hex 24)" \
   admin_basic_auth_user=admin \
-  admin_basic_auth_password="$(openssl rand -hex 16)"
+  admin_basic_auth_password="$(openssl rand -hex 16)" \
+  expansion_github_token="ghp_replace_with_a_PAT_with_contents_write" \
+  expansion_publish_token="$(openssl rand -hex 24)"
 
 # 1Password-generated SSH key the EC2 instance trusts.
 op item create --vault OpenNova-Deploy --title ssh --category 'SSH Key'
+
+# GitHub provisioning (infra/github): manages the expansion repos + their
+# Actions secrets. token = a PAT with repo + admin:repo_hook scopes on the
+# owner org; owner = the GitHub org/user that owns the expansion repos.
+op item create --vault OpenNova-Deploy --title github --category 'API Credential' \
+  token="ghp_replace_with_a_repo_admin_PAT" \
+  owner=opennova-net
 ```
+
+`app-prod` carries two expansion secrets: `expansion_github_token` (a GitHub PAT
+with `contents:write` on the expansion repos — the server pushes a release tag
+with it) and `expansion_publish_token` (the bearer the expansion repo's CI
+presents to the server's `/admin/internal/.../publish` callback; the same value
+is set as an Actions secret on each expansion repo by the `infra/github` stack).
 
 The `op://` reference paths the toolbox reads are listed in
 `deploy/env/terraform.env.tpl` and `deploy/env/app.prod.env.tpl`.
@@ -54,18 +69,19 @@ The `op://` reference paths the toolbox reads are listed in
 
 The toolbox authenticates with a single 1Password **service account** — no
 interactive login on the deploy host. Create one scoped to this vault with
-**read + write + create** items (write/create are required so terraform state
-can be stored as vault documents):
+**read + write** items (`write_items` is required so terraform state can be
+stored as vault documents — for service accounts it covers creating items and
+documents; there is no separate `create_items` permission):
 
 ```bash
 # signed in to your own 1Password account as an owner/admin:
 op service-account create opennova-deploy \
-  --vault 'OpenNova-Deploy:read_items,write_items,create_items' --expires-in 90d
+  --vault 'OpenNova-Deploy:read_items,write_items' --expires-in 90d
 # prints the ops_... token ONCE — store it somewhere safe (e.g. a personal 1P item).
 ```
 
 Web alternative: **Developer → Service Accounts → Create**, grant the
-`OpenNova-Deploy` vault Read/Write/Create, and copy the `ops_...` token. (Service
+`OpenNova-Deploy` vault Read/Write, and copy the `ops_...` token. (Service
 accounts need a paid 1Password plan with the feature enabled.)
 
 Point the toolbox at the token and verify:
@@ -80,20 +96,60 @@ before continuing.
 
 ## 3. Stand up the infrastructure
 
+First create the non-secret terraform var-file (gitignored). The toolbox injects
+secrets from the vault as `TF_VAR_*`, but the non-secret knobs (bucket names,
+instance size, region, the proxied toggle) come from this file:
+
+```bash
+cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars
+# edit downloads_bucket_name / backup_bucket_name etc. for your deployment
+```
+
+Then plan and apply:
+
 ```bash
 ./deploy/run.sh infra plan                     # review the plan
 ./deploy/run.sh infra apply                    # VPC, EC2, EIP, DNS, S3, CDN
 ```
 
-Terraform state is stored as a 1Password document (`tfstate-prod`), pulled before
-and pushed after each run, so any operator with vault access can deploy. Review
-the plan: after the first apply, pin `ami_id` in `infra/aws/terraform.tfvars`
-so AMI drift never replaces your instance and releases the EIP.
+Terraform state is stored as a 1Password document (`tfstate`), pulled before and
+pushed after each run, so any operator with vault access can deploy. Review the
+plan: after the first apply, pin `ami_id` in `infra/aws/terraform.tfvars` so AMI
+drift never replaces your instance and releases the EIP.
 
 Set `ONNET_PUBLIC_HOST` in `deploy/env/app.prod.env` to the EIP that
 `infra apply` reports (`terraform output public_ip`).
 
-## 4. Publish and deploy the images
+`infra apply` also creates the `launcher_ci` IAM user (S3 upload to the
+downloads bucket) and outputs its keys. Store them in the vault so the GitHub
+stack (next step) can hand them to the expansion repos:
+
+```bash
+op item create --vault OpenNova-Deploy --title expansions-ci --category 'API Credential' \
+  access_key_id="$(./deploy/run.sh infra output -raw ci_user_access_key_id)" \
+  secret_access_key="$(./deploy/run.sh infra output -raw ci_user_secret_access_key)"
+```
+
+## 4. Provision the GitHub stack (expansion repos)
+
+The expansion content repos and their Actions secrets are managed by
+`infra/github`. Because the repos already exist, adopt them once with an import,
+then apply:
+
+```bash
+./deploy/run.sh github import                  # one time — adopt revx02/onjo01/ondx01
+./deploy/run.sh github plan                    # should show no creates/destroys
+./deploy/run.sh github apply                   # set the Actions secrets
+```
+
+State lives in its own 1Password document (`tfstate-github`). The Actions secrets
+let each expansion repo's build workflow upload its package to S3 and call the
+server's `/admin/internal/.../publish` endpoint. See `infra/github/README.md` for
+the full pipeline and `docs/net/expansion-publish-workflow.yml.example` for the
+workflow the expansion repos copy in. On a brand-new GitHub org with no repos,
+skip `github import` and run `github apply` directly.
+
+## 5. Publish and deploy the images
 
 The server and web images publish to GHCR from CI (`.github/workflows/
 novaworld-images.yml`). Make those packages public once so the target can pull
@@ -109,7 +165,7 @@ them without credentials. Then:
 from the vault into a tmpfs, and drives the remote docker engine over
 `DOCKER_HOST=ssh://`. The host never needs anything but docker and sshd.
 
-## 5. Backups
+## 6. Backups
 
 ```bash
 ./deploy/run.sh backup now                     # sqlite .backup -> S3

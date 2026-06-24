@@ -32,8 +32,9 @@ Create the vault and these items. **Field names are exact** — the toolbox read
 | `aws` | API Credential | `access_key_id`, `secret_access_key`, `region` | terraform AWS provider |
 | `cloudflare` | API Credential | `api_token`, `zone_id`, `domain` | terraform Cloudflare DNS |
 | `ssh` | SSH Key | auto-generated `public key`, `private key` | EC2 key pair (public) + `app deploy` over `ssh://` (private) |
-| `app-prod` | Server | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password` | server/web admin gate |
+| `app-prod` | Server | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password`, `expansion_github_token`, `expansion_publish_token` | server/web admin gate + expansion-publish pipeline |
 | `ghcr` | Secure Note | `owner` | image pull `ghcr.io/<owner>/novaworld-{server,web}` |
+| `github` | API Credential | `token`, `owner` | `infra/github` stack: manage the expansion repos + their Actions secrets |
 
 - `aws`: an IAM access key that can manage VPC / EC2 / EIP / S3 / CloudFront / IAM in your account.
 - `cloudflare`: `api_token` = a token with **Zone · DNS · Edit** on your zone; `zone_id` from the
@@ -41,23 +42,23 @@ Create the vault and these items. **Field names are exact** — the toolbox read
 - `ssh`: a 1Password-generated **SSH Key** item — it auto-creates both `public key` and
   `private key` fields; nothing to fill in.
 - You do **not** pre-create any terraform-state item: the toolbox stores state as the `tfstate`
-  *document* on the first `infra apply` — which is why the service account below needs write/create
-  access.
+  *document* on the first `infra apply` — which is why the service account below needs write
+  access (for service accounts `write_items` covers creating items and documents).
 
 ### c. The service-account token (`ops_...`)
 The toolbox authenticates with one 1Password **service account** scoped to the vault with
-**read + write + create** (write/create for the state document). It is the only secret you ever
-handle:
+**read + write** (`write_items` covers the state document; there is no separate `create_items`
+permission for service accounts). It is the only secret you ever handle:
 
 ```bash
 op service-account create opennova-deploy \
-  --vault 'OpenNova-Deploy:read_items,write_items,create_items' --expires-in 90d
+  --vault 'OpenNova-Deploy:read_items,write_items' --expires-in 90d
 # prints the ops_... token ONCE — store it somewhere safe.
 export OP_SERVICE_ACCOUNT_TOKEN=ops_...
 ./deploy/run.sh secrets check        # green = every item/field path resolves before you spend on infra
 ```
 (Web alternative: **Developer → Service Accounts → Create**, grant `OpenNova-Deploy`
-Read/Write/Create, copy the `ops_...` token. Service accounts need a paid 1Password plan.)
+Read/Write, copy the `ops_...` token. Service accounts need a paid 1Password plan.)
 
 ### d. GHCR packages public
 The server+web images are built to GHCR by `.github/workflows/novaworld-images.yml`. Make the two

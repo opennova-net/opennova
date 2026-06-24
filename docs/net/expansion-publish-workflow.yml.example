@@ -1,0 +1,116 @@
+# Expansion-publish workflow — TEMPLATE.
+#
+# This file does NOT run in opennova-godot. Copy it into each expansion content
+# repo (revx02 / onjo01 / ondx01) as `.github/workflows/publish.yml`. The
+# `infra/github` stack provisions the four Actions secrets it needs; the
+# OpenNova server pushes the trigger tag and receives the publish callback.
+#
+# Pipeline (see infra/github/README.md):
+#   server POST /api/admin/expansions/<slug>/release
+#     -> pushes refs/tags/<slug>-vX.Y.Z onto this repo  (THIS workflow fires)
+#     -> package + sha256 + size, upload to S3
+#     -> POST <server>/admin/internal/expansions/<slug>/publish (or /fail)
+#     -> server marks the release published; web /expansions lists it.
+#
+# Secrets (set by infra/github):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY  - S3 upload (the launcher_ci keys)
+#   EXPANSION_PUBLISH_TOKEN                    - bearer for the publish callback
+#   NOVAWORLD_SERVER_URL                       - e.g. https://nw.<domain>
+#   DOWNLOADS_BUCKET                           - e.g. downloads.<domain>
+#
+# Convention: the tag is "<slug>-v<version>"; slug == this repo's name. The
+# packaged content is everything under `content/` (adjust PACK_DIR as needed).
+
+name: Publish expansion
+
+on:
+  push:
+    tags:
+      - '*-v*'
+
+permissions:
+  contents: read
+
+env:
+  PACK_DIR: content
+  AWS_REGION: us-east-1
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive slug + version from the tag
+        id: meta
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          slug="${{ github.event.repository.name }}"
+          version="${tag#${slug}-v}"
+          if [ "$version" = "$tag" ]; then
+            echo "tag '$tag' does not match '<slug>-v<version>'"; exit 1
+          fi
+          echo "slug=$slug"        >> "$GITHUB_OUTPUT"
+          echo "version=$version"  >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"          >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        id: pack
+        run: |
+          set -euo pipefail
+          out="${{ steps.meta.outputs.tag }}.zip"
+          ( cd "$PACK_DIR" && zip -r -X "../$out" . )
+          sha256="$(sha256sum "$out" | awk '{print $1}')"
+          size="$(stat -c %s "$out")"
+          echo "file=$out"      >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "size=$size"     >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        id: upload
+        run: |
+          set -euo pipefail
+          slug="${{ steps.meta.outputs.slug }}"
+          file="${{ steps.pack.outputs.file }}"
+          key="expansions/${slug}/${file}"
+          aws s3 cp "$file" "s3://${{ secrets.DOWNLOADS_BUCKET }}/${key}" \
+            --content-type application/zip
+          # DOWNLOADS_BUCKET doubles as the public CDN host (downloads.<domain>).
+          echo "download_url=https://${{ secrets.DOWNLOADS_BUCKET }}/${key}" >> "$GITHUB_OUTPUT"
+
+      - name: Notify server (publish)
+        if: success()
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            "${{ secrets.NOVAWORLD_SERVER_URL }}/admin/internal/expansions/${{ steps.meta.outputs.slug }}/publish" \
+            -H "Authorization: Bearer ${{ secrets.EXPANSION_PUBLISH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg version  '${{ steps.meta.outputs.version }}' \
+              --arg url      '${{ steps.upload.outputs.download_url }}' \
+              --arg sha      '${{ steps.pack.outputs.sha256 }}' \
+              --argjson size  ${{ steps.pack.outputs.size }} \
+              --arg wf       "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              --arg commit    '${{ github.sha }}' \
+              '{version:$version, download_url:$url, sha256:$sha, size_bytes:$size, workflow_url:$wf, target_commit:$commit}')"
+
+      - name: Notify server (fail)
+        if: failure()
+        run: |
+          curl -fsS -X POST \
+            "${{ secrets.NOVAWORLD_SERVER_URL }}/admin/internal/expansions/${{ steps.meta.outputs.slug }}/fail" \
+            -H "Authorization: Bearer ${{ secrets.EXPANSION_PUBLISH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg version '${{ steps.meta.outputs.version }}' \
+              --arg err     'build/upload failed; see workflow_url' \
+              --arg wf      "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              '{version:$version, error:$err, workflow_url:$wf}')" || true
