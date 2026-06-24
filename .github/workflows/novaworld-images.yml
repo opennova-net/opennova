@@ -60,6 +60,9 @@ jobs:
           git lfs install --local
           git lfs pull --include="fixtures/novaworld/**"
 
+      - name: Install libcurl (server links it when HTTP is ON)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
       - name: Configure + build net targets (HTTP on)
         run: |
           cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
