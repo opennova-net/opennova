@@ -736,6 +736,12 @@ jobs:
             ${{ needs.package-godot-macos-editor.outputs.artifact_id }},
             ${{ needs.package-godot-macos-runtime.outputs.artifact_id }}
           merge-multiple: true
+          # The package jobs upload with `archive: false` (raw blob, no archive
+          # wrapper), so the .zip deliverables are stored as the bare .zip. Without
+          # skip-decompress, download-artifact@v8 decompresses those payload zips and
+          # dumps their CONTENTS into dist/ — the .zip files themselves go missing and
+          # validation fails. skip-decompress keeps each artifact as its raw file.
+          skip-decompress: true
 
       - name: Validate release deliverables
         run: python scripts/validate_release_deliverables.py --release-version 0.0.0-ci
