@@ -73,7 +73,7 @@ std::string extension_for_name(const std::string &name) {
 
 std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
 	const std::string extension = extension_for_name(name);
-	if (extension == ".bms") {
+	if (extension == ".bms" || extension == ".mis") {
 		return "mission";
 	}
 	if (extension == ".trn") {
@@ -133,7 +133,7 @@ std::string normalize_kind(const std::string &kind) {
 	if (key.empty() || key == "*" || key == "all") {
 		return "";
 	}
-	if (key == "bms") {
+	if (key == "bms" || key == "mis") {
 		return "mission";
 	}
 	if (key == "trn") {

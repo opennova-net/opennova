@@ -3,7 +3,7 @@ extends GutTest
 # Phase 3: MissionEditorWorkspace shell hooks. Covers the capability hooks the
 # editor shell reads to wire the Open action, resource browser, title, and
 # inspector — without standing up the whole EditorWorkstation. The mission "kind"
-# (-> .bms in the resource index) and the *.bms dialog filter are what make the
+# (-> mission resources in the resource index) and the mission dialog filters are what make the
 # Open flow reach a mission at all.
 
 const MissionWorkspace := preload("res://modtools/editor/mission_workspace.gd")
@@ -14,12 +14,24 @@ func test_open_resource_kind_is_mission() -> void:
 	assert_eq(ws.get_open_resource_kind(), "mission")
 
 
-func test_open_dialog_offers_bms() -> void:
+func test_open_dialog_offers_bms_and_mis() -> void:
 	var ws = MissionWorkspace.new()
 	var joined := ""
 	for filter in ws.get_open_dialog_filters():
 		joined += String(filter)
 	assert_string_contains(joined.to_lower(), "bms")
+	assert_string_contains(joined.to_lower(), "mis")
+
+
+func test_save_as_uses_file_dialog_with_bms_and_mis_filters() -> void:
+	var ws = MissionWorkspace.new()
+	assert_true(ws.uses_save_file_dialog(), "Mission Save As chooses a file path, not just a directory")
+	var joined := ""
+	for filter in ws.get_save_file_dialog_filters():
+		joined += String(filter)
+	assert_string_contains(joined.to_lower(), "bms")
+	assert_string_contains(joined.to_lower(), "mis")
+	assert_eq(ws.get_save_file_dialog_default_name(), "mission.bms")
 
 
 func test_defaults_without_an_editor() -> void:

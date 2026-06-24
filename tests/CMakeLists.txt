@@ -91,6 +91,12 @@ target_link_libraries(mission_bms_test PRIVATE opennova_mission)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_bms COMMAND mission_bms_test)
 
+add_executable(mission_mis_test mission/mission_mis_test.cpp)
+target_link_libraries(mission_mis_test PRIVATE opennova_mission)
+target_include_directories(mission_mis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_mis_test PRIVATE cxx_std_17)
+add_test(NAME mission_mis COMMAND mission_mis_test)
+
 add_executable(mission_c_abi_test mission/mission_c_abi_test.cpp)
 target_link_libraries(mission_c_abi_test PRIVATE opennova_mission)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

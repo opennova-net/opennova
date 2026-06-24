@@ -32,7 +32,7 @@ std::string ext_of(const std::string& basename) {
 bool can_extract(const std::string& name) {
     const std::string base = detail::lower_ascii(detail::basename_of(name));
     const std::string ext = detail::ext_of(base);
-    return ext == "env" || ext == "kda" || ext == "3di" || ext == "bms" || ext == "mnu" ||
+    return ext == "env" || ext == "kda" || ext == "3di" || ext == "bms" || ext == "mis" || ext == "mnu" ||
            base == "items.def";
 }
 
@@ -54,7 +54,7 @@ bool extract(const std::string& source_path, const uint8_t* data, size_t size,
     if (ext == "3di") {
         return detail::extract_threedi(source_path, data, size, out, error);
     }
-    if (ext == "bms") {
+    if (ext == "bms" || ext == "mis") {
         return detail::extract_mission(source_path, data, size, out, error);
     }
     if (ext == "mnu") {
