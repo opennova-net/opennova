@@ -44,16 +44,14 @@ SELECT id, 'ondx01', 'OpenNova Demo Mod',
        '0.0.0', 'zip', 'expansion/ondx01', 0
 FROM games WHERE slug = 'dfx2_consumer';
 
--- One file per featured expansion so the download link in the Vue UI isn't
--- empty. Real SHA-256s and sizes get populated by an admin workflow run.
-INSERT OR IGNORE INTO expansion_files (
-    expansion_id, download_url, sha256, size_bytes, file_type, order_index
-)
-SELECT id,
-       'https://downloads.opennova.net/expansions/revx02-20240515.zip',
-       '0000000000000000000000000000000000000000000000000000000000000000',
-       NULL, 'archive', 1
-FROM expansions WHERE slug = 'revx02';
+-- No expansion_files are seeded. Downloadable files (download_url + real sha256 +
+-- size) are written only by cutting a release: admin POST /api/admin/expansions/
+-- <slug>/release tags the repo, the repo's CI uploads the package to S3 and calls
+-- back to /admin/internal/expansions/<slug>/publish. Until then an expansion shows
+-- in the catalogue (this seed) but reads as "Not published yet" in the launcher and
+-- omits the Download button on the web Expansions page. (A placeholder row with a
+-- fake URL / all-zero sha used to live here; it made expansions look installable
+-- but 404'd on download, so it was removed.)
 
 -- Default test users so somebody can log in immediately.
 -- Mirrors onnet/onnw/seed.py — passwords are bcrypt-hashed at server startup

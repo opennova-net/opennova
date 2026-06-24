@@ -208,3 +208,36 @@ git tag launcher-v0.2.0 && git push origin launcher-v0.2.0
 Once it runs, the landing page's download button appears automatically (it
 fetches `downloads.<domain>/launcher/app.json`). To bump versions later, edit the
 csproj `<Version>` first, commit, then tag the matching `launcher-v<x>`.
+
+## Cutting an expansion release
+
+Expansions appear in the web Expansions page and the launcher's Expansion Manager
+as soon as they're seeded in the catalogue (`backend/seed/0001_games_and_expansions.sql`)
+— but that's metadata only. The downloadable file is written by **cutting a release**,
+which is separate. Until you do, the launcher shows the expansion as "Not published
+yet" (Install disabled) and the web page omits its Download button.
+
+To publish one (e.g. the `onjo01` demo mod), with the admin token from the vault:
+
+```bash
+ADMIN=$(op read op://OpenNova-Deploy/app-prod/admin_api_token)
+curl -X POST https://nw.<domain>/api/admin/expansions/onjo01/release \
+  -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"version":"0.0.1"}'
+```
+
+That tags `onjo01-v0.0.1` on `opennova-net/onjo01`; the repo's publish workflow
+packages its LFS content, uploads to `downloads.<domain>/expansion/onjo01/...`, and
+calls back to `/admin/internal/expansions/onjo01/publish` which writes the
+`expansion_files` row. Verify:
+
+```bash
+curl https://nw.<domain>/api/admin/releases -H "Authorization: Bearer $ADMIN"  # status: published
+curl https://nw.<domain>/api/expansions                                         # onjo01 has files[].downloadUrl
+```
+
+Then the launcher (Refresh) shows it as installable. **Prerequisite:** the
+`opennova-net/<slug>` repo must actually contain packageable content (a `.pff` at the
+repo root, LFS-tracked); an empty repo produces an empty zip. The repo's workflow must
+be the reconciled form (see `docs/net/expansion-publish-workflow.yml.example`) and its
+Actions secrets come from `infra/github`.

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -82,6 +83,14 @@ public sealed class BackendApiClient : IDisposable
                         foreach (var fileDto in expansionDto.Files)
                         {
                             if (fileDto == null || string.IsNullOrWhiteSpace(fileDto.DownloadUrl) || string.IsNullOrWhiteSpace(fileDto.Sha256))
+                            {
+                                continue;
+                            }
+
+                            // An all-zero sha256 is the seed/placeholder marker (no real
+                            // release published). Skip it so the expansion reads as
+                            // "Not published yet" rather than offering a download that 404s.
+                            if (fileDto.Sha256.All(c => c == '0'))
                             {
                                 continue;
                             }

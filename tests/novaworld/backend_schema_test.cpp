@@ -125,10 +125,9 @@ int test_seed_populates_games_and_expansions() {
 	);
 	TEST_EXPECT(files.size() == 3);
 	for (const auto &row : files) {
-		const auto slug = row.as_text(0).value();
-		const auto count = row.as_int(1).value();
-		if (slug == "revx02") TEST_EXPECT(count == 1);
-		else TEST_EXPECT(count == 0);
+		// No expansion_files are seeded for any expansion — downloadable files are
+		// written only by cutting a release (the publish callback), not the seed.
+		TEST_EXPECT(row.as_int(1).value() == 0);
 	}
 
 	auto access = db.query(
@@ -192,7 +191,7 @@ int test_seed_is_idempotent() {
 	auto expansions = db.query("SELECT COUNT(*) FROM expansions;");
 	TEST_EXPECT(expansions[0].as_int(0).value() == 3);
 	auto files = db.query("SELECT COUNT(*) FROM expansion_files;");
-	TEST_EXPECT(files[0].as_int(0).value() == 1);
+	TEST_EXPECT(files[0].as_int(0).value() == 0);
 	auto foo = db.query(
 		"SELECT pcid, nwh, nwhandle, account_status FROM players "
 		"WHERE username='foo';"

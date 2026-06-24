@@ -102,13 +102,24 @@ internal partial class ExpansionManagerForm : Form
         UpdateButtons();
     }
 
-    private static string RenderState(ExpansionStatus status) => status.State switch
+    private static string RenderState(ExpansionStatus status)
     {
-        ExpansionState.Installed => "Installed",
-        ExpansionState.UpdateAvailable => "Update available",
-        ExpansionState.NeedsGameDirectory => "Needs setup",
-        _ => "Not installed",
-    };
+        // An expansion with no downloadable files exists in the catalogue but has
+        // no release published yet — surface that instead of "Not installed", which
+        // would imply an Install that only errors out.
+        if (status.Descriptor.Files.Count == 0)
+        {
+            return "Not published yet";
+        }
+
+        return status.State switch
+        {
+            ExpansionState.Installed => "Installed",
+            ExpansionState.UpdateAvailable => "Update available",
+            ExpansionState.NeedsGameDirectory => "Needs setup",
+            _ => "Not installed",
+        };
+    }
 
     private static string RenderDetails(ExpansionStatus status)
         => status.StatusMessage;
@@ -199,6 +210,9 @@ internal partial class ExpansionManagerForm : Form
         buttonInstall.Text = selected.State == ExpansionState.UpdateAvailable ? "Update" : "Install";
         buttonInstall.Enabled = selected.State is ExpansionState.NotInstalled or ExpansionState.UpdateAvailable;
         buttonInstall.Enabled &= gameStatus.IsConfigured;
+        // Nothing to download until a release is published — keep Install disabled so
+        // the user never triggers the "no files to download" error dialog.
+        buttonInstall.Enabled &= selected.Descriptor.Files.Count > 0;
 
         buttonRemove.Enabled = selected.State is ExpansionState.Installed or ExpansionState.UpdateAvailable;
     }
