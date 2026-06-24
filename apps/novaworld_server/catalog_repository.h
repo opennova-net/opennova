@@ -40,6 +40,10 @@ struct ExpansionRow {
 	std::string game_slug;
 	std::string package_type;
 	std::string install_subdir;
+	// owner/repo the release pipeline tags. Sourced from the Terraform-managed
+	// catalogue seed (infra/github/local.expansions); the admin release handler
+	// reads this instead of a hardcoded slug->repo map.
+	std::string github_repo;
 };
 
 // A published file for an expansion (the launcher's Expansion Manager fetches
@@ -49,6 +53,7 @@ struct ExpansionFileRow {
 	std::string                sha256;
 	std::optional<int64_t>     size_bytes;
 	std::string                file_type;
+	int                        order_index = 1;
 };
 
 struct ReleaseRow {
@@ -60,6 +65,8 @@ struct ReleaseRow {
 	std::string workflow_url;
 	std::string target_commit;
 	std::string created_at;
+	std::string updated_at;
+	std::optional<std::string> notes;
 	std::optional<std::string> published_at;
 	std::optional<std::string> error_message;
 };
@@ -82,6 +89,7 @@ struct ExpansionLookup {
 	int64_t     id = 0;
 	int64_t     game_id = 0;
 	std::string version;
+	std::string github_repo;
 	bool        found = false;
 };
 

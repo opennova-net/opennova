@@ -10,10 +10,11 @@ variable "github_owner" {
   default     = "opennova-net"
 }
 
-variable "repository_secrets" {
+variable "shared_repository_secrets" {
   description = <<-EOT
-    Map of repository name -> Actions secrets to manage on it. For each
-    expansion repo the build workflow expects:
+    Actions secrets applied to EVERY expansion repo (local.expansions). The same
+    values go on every repo, so they're declared once here rather than per-repo.
+    The build workflow expects:
       AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  (S3 upload to the downloads bucket;
         the launcher_ci keys output by infra/aws are reused)
       EXPANSION_PUBLISH_TOKEN                    (bearer for the server publish callback;
@@ -21,7 +22,7 @@ variable "repository_secrets" {
       NOVAWORLD_SERVER_URL                       (publish callback base, e.g. https://nw.<domain>)
       DOWNLOADS_BUCKET                           (S3 bucket name for the upload)
   EOT
-  type      = map(map(string))
+  type      = map(string)
   default   = {}
   sensitive = true
 }

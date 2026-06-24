@@ -63,35 +63,11 @@ ServerConfig ServerConfig::from_env() {
 
 	if (auto v = getenv_safe("ADMIN_API_TOKEN"))     c.admin_api_token = v;
 
-	// Expansion-publish pipeline (onnet admin.py / admin_internal.py).
+	// Expansion-publish pipeline (onnet admin.py / admin_internal.py). The
+	// slug -> repo mapping is no longer configured here; it's read per-release
+	// from the expansions.github_repo column (Terraform-managed catalogue).
 	if (auto v = getenv_safe("EXPANSION_GITHUB_TOKEN"))  c.expansion_github_token = v;
 	if (auto v = getenv_safe("EXPANSION_PUBLISH_TOKEN")) c.expansion_publish_token = v;
-
-	// Default slug -> repo mapping (onnet admin.py:19-23).
-	c.expansion_repositories = {
-		{"revx02", "opennova-net/revx02"},
-		{"onjo01", "opennova-net/onjo01"},
-		{"ondx01", "opennova-net/ondx01"},
-	};
-	// Optional override: "slug=owner/repo,slug2=owner/repo2".
-	if (auto v = getenv_safe("EXPANSION_REPOSITORIES")) {
-		c.expansion_repositories.clear();
-		std::string spec = v;
-		size_t pos = 0;
-		while (pos < spec.size()) {
-			size_t comma = spec.find(',', pos);
-			std::string pair = spec.substr(pos, comma - pos);
-			size_t eq = pair.find('=');
-			if (eq != std::string::npos) {
-				std::string slug = pair.substr(0, eq);
-				std::string repo = pair.substr(eq + 1);
-				if (!slug.empty() && !repo.empty())
-					c.expansion_repositories[slug] = repo;
-			}
-			if (comma == std::string::npos) break;
-			pos = comma + 1;
-		}
-	}
 
 	if (auto v = getenv_safe("ONNET_CLIENT_REFLECT_IP")) c.client_reflect_ip = v;
 	c.client_reflect_gate_port      = getenv_u16("ONNET_CLIENT_REFLECT_GATE_PORT",      c.client_reflect_gate_port);

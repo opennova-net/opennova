@@ -78,7 +78,6 @@
               </div>
 
               <RouterLink
-                v-if="hasDetailPage(expansion.slug)"
                 :to="detailPath(expansion.slug)"
                 class="mt-auto inline-flex items-center justify-center rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90"
               >
@@ -119,7 +118,6 @@ const standaloneExpansions = ref<ExpansionSummary[]>([]);
 const isLoading = ref(true);
 const errorMessage = ref<string | null>(null);
 const openNotes = reactive<Record<string, boolean>>({});
-const expansionsWithDetail = new Set(['revx02', 'onjo01', 'ondx01']);
 
 onMounted(async () => {
   try {
@@ -168,10 +166,6 @@ function toggleNotes(slug: string) {
 
 function isNotesOpen(slug: string): boolean {
   return !!openNotes[slug];
-}
-
-function hasDetailPage(slug: string): boolean {
-  return expansionsWithDetail.has(slug);
 }
 
 function detailPath(slug: string): string {

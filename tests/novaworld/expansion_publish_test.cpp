@@ -61,6 +61,9 @@ int test_find_expansion() {
 	TEST_EXPECT(found.found);
 	TEST_EXPECT(found.id > 0);
 	TEST_EXPECT(found.game_id > 0);
+	// github_repo comes from the Terraform-generated catalogue seed and is what
+	// the admin release handler tags (replaces the old hardcoded slug->repo map).
+	TEST_EXPECT(found.github_repo == "opennova-net/revx02");
 
 	auto missing = catalog::find_expansion_by_slug(db, "does-not-exist");
 	TEST_EXPECT(!missing.found);

@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <map>
 #include <string>
 
 namespace opennova::server {
@@ -92,10 +91,9 @@ struct ServerConfig {
 	std::string expansion_github_token;
 	std::string expansion_publish_token;
 
-	// slug -> "owner/repo" for the tag push. Defaults to onnet's mapping
-	// (admin.py:19-23); overridable via EXPANSION_REPOSITORIES as a
-	// comma-separated "slug=owner/repo,..." list.
-	std::map<std::string, std::string> expansion_repositories;
+	// The slug -> "owner/repo" mapping for the tag push is no longer held here:
+	// it lives in the expansions table's github_repo column, sourced from the
+	// Terraform-managed catalogue seed and read per-release in http_listener.
 
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the

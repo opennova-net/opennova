@@ -44,6 +44,7 @@ ExpansionRow row_to_expansion(const opennova::db::Row &r) {
 	e.game_slug      = r.as_text(6).value_or("");
 	e.package_type   = r.as_text(7).value_or("");
 	e.install_subdir = r.as_text(8).value_or("");
+	e.github_repo    = r.as_text(9).value_or("");
 	return e;
 }
 
@@ -57,8 +58,10 @@ ReleaseRow row_to_release(const opennova::db::Row &r) {
 	rel.workflow_url  = r.as_text(5).value_or("");
 	rel.target_commit = r.as_text(6).value_or("");
 	rel.created_at    = r.as_text(7).value_or("");
-	if (auto v = r.as_text(8); v && !v->empty()) rel.published_at  = *v;
-	if (auto v = r.as_text(9); v && !v->empty()) rel.error_message = *v;
+	rel.updated_at    = r.as_text(8).value_or("");
+	if (auto v = r.as_text(9);  v && !v->empty()) rel.notes         = *v;
+	if (auto v = r.as_text(10); v && !v->empty()) rel.published_at  = *v;
+	if (auto v = r.as_text(11); v && !v->empty()) rel.error_message = *v;
 	return rel;
 }
 
@@ -78,7 +81,8 @@ std::vector<GameRow> list_games(opennova::db::Database &db) {
 std::vector<ExpansionRow> list_expansions(opennova::db::Database &db) {
 	auto rows = db.query(
 		"SELECT e.id, e.slug, e.display_name, e.summary, e.version, "
-		"       e.featured, g.slug AS game_slug, e.package_type, e.install_subdir "
+		"       e.featured, g.slug AS game_slug, e.package_type, e.install_subdir, "
+		"       e.github_repo "
 		"FROM expansions e JOIN games g ON g.id = e.game_id "
 		"ORDER BY e.featured DESC, e.slug;");
 	std::vector<ExpansionRow> out;
@@ -90,7 +94,7 @@ std::vector<ExpansionRow> list_expansions(opennova::db::Database &db) {
 std::vector<ExpansionFileRow> list_expansion_files(opennova::db::Database &db,
                                                    int64_t expansion_id) {
 	auto rows = db.query(
-		"SELECT download_url, sha256, size_bytes, file_type "
+		"SELECT download_url, sha256, size_bytes, file_type, order_index "
 		"FROM expansion_files WHERE expansion_id = ? ORDER BY order_index;",
 		{i64(expansion_id)});
 	std::vector<ExpansionFileRow> out;
@@ -101,6 +105,7 @@ std::vector<ExpansionFileRow> list_expansion_files(opennova::db::Database &db,
 		f.sha256       = r.as_text(1).value_or("");
 		if (auto v = r.as_int(2)) f.size_bytes = *v;
 		f.file_type    = r.as_text(3).value_or("archive");
+		f.order_index  = static_cast<int>(r.as_int(4).value_or(1));
 		out.push_back(std::move(f));
 	}
 	return out;
@@ -111,8 +116,8 @@ std::vector<ReleaseRow> list_recent_releases(opennova::db::Database &db, int lim
 	if (limit > 100) limit = 100;
 	auto rows = db.query(
 		"SELECT id, slug, version, status, repo_ref, "
-		"       workflow_url, target_commit, created_at, "
-		"       published_at, error_message "
+		"       workflow_url, target_commit, created_at, updated_at, "
+		"       notes, published_at, error_message "
 		"FROM expansion_releases ORDER BY created_at DESC LIMIT ?;",
 		{i64(limit)});
 	std::vector<ReleaseRow> out;
@@ -127,14 +132,15 @@ ExpansionLookup find_expansion_by_slug(opennova::db::Database &db,
                                        const std::string &slug) {
 	ExpansionLookup out;
 	auto rows = db.query(
-		"SELECT id, game_id, version FROM expansions WHERE slug = ? LIMIT 1;",
+		"SELECT id, game_id, version, github_repo FROM expansions WHERE slug = ? LIMIT 1;",
 		{txt(slug)});
 	if (rows.empty()) return out;  // found == false
 	const auto &r = rows.front();
-	out.id      = r.as_int(0).value_or(0);
-	out.game_id = r.as_int(1).value_or(0);
-	out.version = r.as_text(2).value_or("");
-	out.found   = true;
+	out.id          = r.as_int(0).value_or(0);
+	out.game_id     = r.as_int(1).value_or(0);
+	out.version     = r.as_text(2).value_or("");
+	out.github_repo = r.as_text(3).value_or("");
+	out.found       = true;
 	return out;
 }
 
@@ -219,8 +225,8 @@ std::optional<ReleaseRow> get_release(opennova::db::Database &db,
                                       const std::string &slug, const std::string &version) {
 	auto rows = db.query(
 		"SELECT id, slug, version, status, repo_ref, "
-		"       workflow_url, target_commit, created_at, "
-		"       published_at, error_message "
+		"       workflow_url, target_commit, created_at, updated_at, "
+		"       notes, published_at, error_message "
 		"FROM expansion_releases WHERE slug = ? AND version = ? LIMIT 1;",
 		{txt(slug), txt(version)});
 	if (rows.empty()) return std::nullopt;

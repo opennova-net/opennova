@@ -6,6 +6,14 @@ workflows need. It complements `infra/aws` so the entire stack — cloud
 infrastructure **and** the CI repos that feed the expansion-publish pipeline —
 boots from our own infra.
 
+**`expansions.tf` (`local.expansions`) is the single source of truth for
+expansions.** Each entry there drives, in one `terraform apply`: the GitHub repo,
+its Actions secrets, and the server's DB catalogue seed
+(`backend/seed/0002_expansions.generated.sql`, rendered by
+`local_file.expansions_seed`). That seed carries each expansion's `github_repo`,
+so the server reads the slug→repo mapping from the DB instead of a hardcoded map.
+Adding an expansion needs no C++, SQL, or web edits — see "Add an expansion" below.
+
 Run it through the deploy toolbox, not bare terraform, so state lives in the
 shared 1Password document and secrets come from the vault:
 
@@ -17,7 +25,7 @@ shared 1Password document and secrets come from the vault:
 
 (`deploy/bin/on-deploy` runs `terraform -chdir=infra/github` with its own
 `tfstate-github` 1Password document and injects `TF_VAR_github_token` /
-`TF_VAR_github_owner` / `repository_secrets` from `deploy/env/github.env.tpl`.)
+`TF_VAR_github_owner` / `shared_repository_secrets` from `deploy/env/github.env.tpl`.)
 
 ## One-time import of the existing repos
 
@@ -42,7 +50,8 @@ needs one).
 
 ## The secrets and the publish-callback contract
 
-`repository_secrets` (see `terraform.tfvars.example`) sets, per expansion repo:
+`shared_repository_secrets` (see `terraform.tfvars.example`) is one set of
+secrets applied to **every** expansion repo:
 
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — the `launcher_ci` keys output
   by `infra/aws` (reused; they already grant `PutObject` on the downloads bucket).
@@ -68,11 +77,28 @@ The pipeline, end to end:
 4. The server upserts the expansion's file row and flips the release to
    `published`; the package then appears in the web `/expansions` catalogue.
 
+## Add an expansion
+
+1. Add an entry to `local.expansions` in `expansions.tf` (slug = map key) with its
+   `github_repo`, `game_slug` (must match a row seeded by
+   `backend/seed/0001_games.sql`), `display_name`, `summary`, `version`,
+   `package_type`, `install_subdir`, `featured`, `description`, `topics`.
+2. `./deploy/run.sh github apply` — creates the repo, sets its secrets, and
+   regenerates `backend/seed/0002_expansions.generated.sql` (via
+   `local_file.expansions_seed`). If the repo already exists, `github import`
+   first.
+3. Commit the regenerated seed. CI bakes it into the server image; the server
+   UPSERTs the catalogue row on its next boot (preserving any released `version`).
+
+No C++, hand-written SQL, or web edits are needed — the server reads the
+catalogue (and the slug→repo mapping) from the DB, and the web reads it from
+`/api/expansions`.
+
 ## Notes
 
 - `prevent_destroy` is set on every repo to avoid accidental deletion. Remove it
   deliberately if you ever need terraform to destroy one.
 - `description`, `homepage_url`, and `topics` are ignored for drift so
   maintainers can adjust them by hand.
-- Add a repo by extending `local.repositories` in `main.tf`, then
-  `github import` (if it exists) and `github apply`.
+- `backend/seed/0002_expansions.generated.sql` is generated — never hand-edit it;
+  change `local.expansions` and re-apply.

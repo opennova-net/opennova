@@ -374,8 +374,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	// /release + /admin/internal routes below.
 	const std::string expansion_github_token  = config.expansion_github_token;
 	const std::string expansion_publish_token = config.expansion_publish_token;
-	const std::map<std::string, std::string> expansion_repos =
-		config.expansion_repositories;
+	// The slug->repo mapping is read per-release from the expansions table
+	// (Terraform-managed catalogue), not from config.
 	std::printf("[http] expansion github token %s, publish token %s\n",
 	            expansion_github_token.empty()  ? "DISABLED" : "ENABLED",
 	            expansion_publish_token.empty() ? "DISABLED" : "ENABLED");
@@ -417,20 +417,23 @@ bool HttpListener::start(const ServerConfig &config) {
 	};
 
 	// Serialize a release row to JSON. Shared by GET /api/admin/releases and
-	// the POST .../release response (snake_case keys, matching the rest of
-	// the admin API).
+	// the POST .../release response. camelCase keys, faithful to onnet's
+	// admin.py:_serialize_release — the Vue admin UI (web/src/types/admin.ts
+	// AdminRelease) reads these directly.
 	auto release_to_json = [](const catalog::ReleaseRow &r) {
 		crow::json::wvalue e;
-		e["id"]            = r.id;
-		e["slug"]          = r.slug;
-		e["version"]       = r.version;
-		e["status"]        = r.status;
-		e["repo_ref"]      = r.repo_ref;
-		e["workflow_url"]  = r.workflow_url;
-		e["target_commit"] = r.target_commit;
-		e["created_at"]    = r.created_at;
-		if (r.published_at)  e["published_at"]  = *r.published_at;
-		if (r.error_message) e["error_message"] = *r.error_message;
+		e["id"]           = r.id;
+		e["slug"]         = r.slug;
+		e["version"]      = r.version;
+		e["status"]       = r.status;
+		e["repoRef"]      = r.repo_ref;
+		e["workflowUrl"]  = r.workflow_url;
+		e["targetCommit"] = r.target_commit;
+		e["createdAt"]    = r.created_at;
+		e["updatedAt"]    = r.updated_at;
+		if (r.notes)         e["notes"]        = *r.notes;
+		if (r.published_at)  e["publishedAt"]  = *r.published_at;
+		if (r.error_message) e["errorMessage"] = *r.error_message;
 		return e;
 	};
 
@@ -704,14 +707,34 @@ bool HttpListener::start(const ServerConfig &config) {
 		try {
 			std::vector<crow::json::wvalue> arr;
 			for (const auto &x : catalog::list_expansions(db_)) {
+				// camelCase admin shape, faithful to onnet admin.py:
+				// _serialize_expansion. The Vue Available Expansions table
+				// (web/src/types/admin.ts AdminExpansion) reads install.subdir
+				// + files[]; keep distinct from the public card's install.target.
 				crow::json::wvalue e;
-				e["id"]           = x.id;
-				e["slug"]         = x.slug;
-				e["display_name"] = x.display_name;
-				e["summary"]      = x.summary;
-				e["version"]      = x.version;
-				e["featured"]     = x.featured;
-				e["game_slug"]    = x.game_slug;
+				e["id"]          = x.id;
+				e["slug"]        = x.slug;
+				e["displayName"] = x.display_name;
+				e["summary"]     = x.summary;
+				e["version"]     = x.version;
+				e["packageType"] = x.package_type;
+				e["featured"]    = x.featured;
+				e["gameSlug"]    = x.game_slug;
+				e["githubRepo"]  = x.github_repo;
+				crow::json::wvalue install;
+				install["subdir"] = x.install_subdir;
+				e["install"] = std::move(install);
+				std::vector<crow::json::wvalue> files;
+				for (const auto &f : catalog::list_expansion_files(db_, x.id)) {
+					crow::json::wvalue fj;
+					fj["downloadUrl"] = f.download_url;
+					fj["sha256"]      = f.sha256;
+					if (f.size_bytes) fj["sizeBytes"] = *f.size_bytes;
+					fj["fileType"]    = f.file_type;
+					fj["orderIndex"]  = f.order_index;
+					files.push_back(std::move(fj));
+				}
+				e["files"] = std::move(files);
 				arr.push_back(std::move(e));
 			}
 			out["expansions"] = std::move(arr);
@@ -756,7 +779,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	// mapped GitHub repo using EXPANSION_GITHUB_TOKEN. Status becomes
 	// 'tagged' on success, 'failed' otherwise. Admin-token gated.
 	CROW_ROUTE(app, "/api/admin/expansions/<string>/release").methods("POST"_method)(
-	    [this, admin_authorized, release_to_json, expansion_github_token, expansion_repos]
+	    [this, admin_authorized, release_to_json, expansion_github_token]
 	    (const crow::request &req, const std::string &slug) {
 		if (!admin_authorized(req)) {
 			crow::response res(401);
@@ -803,15 +826,16 @@ bool HttpListener::start(const ServerConfig &config) {
 			catalog::set_expansion_version(db_, exp.id, version);
 			catalog::create_or_reset_release(db_, slug, version, repo_ref, notes);
 
-			// Push the git tag (onnet _create_git_tag). A missing token or
-			// unmapped slug short-circuits to failure with onnet's message.
+			// Push the git tag (onnet _create_git_tag). The owner/repo comes
+			// from the expansion row (Terraform-managed catalogue), not a
+			// hardcoded map. A missing token or unmapped repo short-circuits
+			// to failure with onnet's message.
 			github::TagResult tag;
-			auto it = expansion_repos.find(slug);
-			if (expansion_github_token.empty() || it == expansion_repos.end()) {
+			if (expansion_github_token.empty() || exp.github_repo.empty()) {
 				tag.success = false;
 				tag.message = "GitHub token or repository mapping missing";
 			} else {
-				tag = github::create_git_tag(it->second, repo_ref,
+				tag = github::create_git_tag(exp.github_repo, repo_ref,
 				                             expansion_github_token);
 			}
 

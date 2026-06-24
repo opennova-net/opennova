@@ -209,13 +209,25 @@ Once it runs, the landing page's download button appears automatically (it
 fetches `downloads.<domain>/launcher/app.json`). To bump versions later, edit the
 csproj `<Version>` first, commit, then tag the matching `launcher-v<x>`.
 
+## Adding an expansion
+
+Expansions are defined once in Terraform: `local.expansions` in
+`infra/github/expansions.tf`. Add an entry, then `./deploy/run.sh github apply`
+(`github import` first if the repo already exists). That one apply creates the
+GitHub repo, sets its Actions secrets, and regenerates the catalogue seed
+`backend/seed/0002_expansions.generated.sql` — commit the regenerated file so CI
+bakes it into the server image. No C++/SQL/web edits; the server reads the
+catalogue (and slug→repo mapping) from the DB, the web from `/api/expansions`.
+See `infra/github/README.md` → "Add an expansion".
+
 ## Cutting an expansion release
 
 Expansions appear in the web Expansions page and the launcher's Expansion Manager
-as soon as they're seeded in the catalogue (`backend/seed/0001_games_and_expansions.sql`)
-— but that's metadata only. The downloadable file is written by **cutting a release**,
-which is separate. Until you do, the launcher shows the expansion as "Not published
-yet" (Install disabled) and the web page omits its Download button.
+as soon as their catalogue row is seeded (the Terraform-generated
+`backend/seed/0002_expansions.generated.sql`) — but that's metadata only. The
+downloadable file is written by **cutting a release**, which is separate. Until
+you do, the launcher shows the expansion as "Not published yet" (Install disabled)
+and the web page omits its Download button.
 
 To publish one (e.g. the `onjo01` demo mod), with the admin token from the vault:
 

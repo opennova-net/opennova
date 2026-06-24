@@ -15,6 +15,10 @@ terraform {
       source  = "integrations/github"
       version = "~> 5.40"
     }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.4"
+    }
   }
 }
 
@@ -23,48 +27,28 @@ provider "github" {
   owner = var.github_owner
 }
 
-locals {
-  # The expansion content packages. Their build workflows tag -> package ->
-  # upload to S3 -> call the server's /admin/internal/.../publish callback.
-  repositories = {
-    revx02 = {
-      description = "NovaWorld expansion: RevX02 content package."
-      visibility  = "private"
-      topics      = ["novaworld", "opennova", "expansion"]
-    }
-    onjo01 = {
-      description = "NovaWorld expansion: Joint Operations content package."
-      visibility  = "private"
-      topics      = ["novaworld", "opennova", "expansion"]
-    }
-    ondx01 = {
-      description = "NovaWorld expansion: DFX2 content package."
-      visibility  = "private"
-      topics      = ["novaworld", "opennova", "expansion"]
-    }
-  }
-}
-
+# One repo per expansion (local.expansions, expansions.tf). Their build
+# workflows tag -> package -> upload to S3 -> call the server's
+# /admin/internal/.../publish callback.
 resource "github_repository" "managed" {
-  for_each = local.repositories
+  for_each = local.expansions
 
   name                   = each.key
-  description            = lookup(each.value, "description", null)
-  visibility             = lookup(each.value, "visibility", "private")
-  has_issues             = lookup(each.value, "has_issues", true)
-  has_projects           = lookup(each.value, "has_projects", false)
-  has_wiki               = lookup(each.value, "has_wiki", false)
-  allow_merge_commit     = lookup(each.value, "allow_merge_commit", true)
-  allow_rebase_merge     = lookup(each.value, "allow_rebase_merge", true)
-  allow_squash_merge     = lookup(each.value, "allow_squash_merge", true)
-  delete_branch_on_merge = lookup(each.value, "delete_branch_on_merge", true)
-  vulnerability_alerts   = lookup(each.value, "vulnerability_alerts", true)
+  description            = each.value.description
+  visibility             = "private"
+  has_issues             = true
+  has_projects           = false
+  has_wiki               = false
+  allow_merge_commit     = true
+  allow_rebase_merge     = true
+  allow_squash_merge     = true
+  delete_branch_on_merge = true
+  vulnerability_alerts   = true
   archive_on_destroy     = true
   # A fresh repo needs a default branch for the release-tag step to resolve a
   # head SHA. Ignored when importing an existing (already-initialized) repo.
-  auto_init    = lookup(each.value, "auto_init", true)
-  topics       = lookup(each.value, "topics", [])
-  homepage_url = lookup(each.value, "homepage_url", null)
+  auto_init = true
+  topics    = each.value.topics
 
   lifecycle {
     prevent_destroy = true
@@ -77,14 +61,16 @@ resource "github_repository" "managed" {
 }
 
 locals {
-  # Flatten var.repository_secrets (map of repo -> map of secret -> value) into
-  # a single keyed map without exposing secret values in resource keys.
+  # Every expansion repo gets the same CI secrets (var.shared_repository_secrets).
+  # Flatten into a single keyed map without exposing secret values in resource
+  # keys. Replaces the old per-repo var.repository_secrets triple — adding an
+  # expansion no longer means re-declaring its secrets.
   repository_secret_pairs = {
     for pair in flatten([
-      for repo_name, secrets in nonsensitive(var.repository_secrets) : [
-        for secret_name, secret_value in secrets : {
-          key        = "${repo_name}:${secret_name}"
-          repository = repo_name
+      for slug in keys(local.expansions) : [
+        for secret_name, secret_value in nonsensitive(var.shared_repository_secrets) : {
+          key        = "${slug}:${secret_name}"
+          repository = slug
           name       = secret_name
           value      = secret_value
         }
@@ -99,4 +85,14 @@ resource "github_actions_secret" "repository" {
   repository      = github_repository.managed[each.value.repository].name
   secret_name     = each.value.name
   plaintext_value = each.value.value
+}
+
+# Render the server's DB catalogue seed from local.expansions. Committed so CI
+# bakes it into the server image; the server applies SEED_DIR at boot. After
+# editing expansions.tf, run `terraform apply` and commit the regenerated file.
+resource "local_file" "expansions_seed" {
+  filename = "${path.module}/../../backend/seed/0002_expansions.generated.sql"
+  content = templatefile("${path.module}/templates/expansions_seed.sql.tftpl", {
+    expansions = local.expansions
+  })
 }

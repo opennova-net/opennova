@@ -8,12 +8,14 @@ export interface AdminExpansionFile {
 
 export interface AdminExpansion {
   id: number;
-  gameId: number;
+  gameSlug: string;
   slug: string;
   displayName: string;
   summary?: string | null;
   version: string;
   packageType: string;
+  featured: boolean;
+  githubRepo?: string | null;
   install: {
     subdir: string;
   };

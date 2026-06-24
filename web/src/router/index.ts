@@ -6,9 +6,7 @@ import ExpansionsPage from '../pages/ExpansionsPage.vue';
 import AdminExpansionsPage from '../pages/AdminExpansionsPage.vue';
 import AdminUsersPage from '../pages/AdminUsersPage.vue';
 import ModToolsPage from '../pages/ModToolsPage.vue';
-import Revx02Page from '../pages/expansions/Revx02Page.vue';
-import Onjo01Page from '../pages/expansions/Onjo01Page.vue';
-import Ondx01Page from '../pages/expansions/Ondx01Page.vue';
+import ExpansionDetailPage from '../pages/expansions/ExpansionDetailPage.vue';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -17,9 +15,7 @@ const router = createRouter({
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
     { path: '/expansions', component: ExpansionsPage },
-    { path: '/expansions/revx02', component: Revx02Page },
-    { path: '/expansions/onjo01', component: Onjo01Page },
-    { path: '/expansions/ondx01', component: Ondx01Page },
+    { path: '/expansions/:slug', component: ExpansionDetailPage },
     { path: '/mod-tools', component: ModToolsPage },
     { path: '/admin', component: AdminExpansionsPage },
     { path: '/admin/expansions', component: AdminExpansionsPage },
