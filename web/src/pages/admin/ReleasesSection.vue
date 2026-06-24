@@ -1,6 +1,5 @@
 <template>
-  <AdminGate>
-  <div class="mx-auto max-w-6xl px-6 py-10 space-y-10">
+  <div class="space-y-10">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-semibold text-ink">Expansion Releases</h1>
@@ -166,15 +165,13 @@
       </section>
     </template>
   </div>
-  </AdminGate>
 </template>
 
 <script setup lang="ts">
 import { isAxiosError } from 'axios';
 import { onMounted, reactive, ref } from 'vue';
-import AdminGate from '../components/AdminGate.vue';
-import { createExpansionRelease, fetchAdminExpansions, fetchAdminReleases } from '../api/admin';
-import type { AdminExpansion, AdminRelease } from '../types/admin';
+import { createExpansionRelease, fetchAdminExpansions, fetchAdminReleases } from '../../api/admin';
+import type { AdminExpansion, AdminRelease } from '../../types/admin';
 
 const loading = ref(true);
 const refreshing = ref(false);

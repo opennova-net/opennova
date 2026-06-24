@@ -5,8 +5,10 @@ import { adminClient } from './client';
 import type {
   AdminExpansionsResponse,
   AdminReleasesResponse,
+  ConnectionsResponse,
   CreateReleaseRequest,
   CreateReleaseResponse,
+  ServerStatus,
 } from '../types/admin';
 
 export async function fetchAdminExpansions(signal?: AbortSignal) {
@@ -30,5 +32,20 @@ export async function createExpansionRelease(
     `/expansions/${encodeURIComponent(slug)}/release`,
     payload,
   );
+  return response.data;
+}
+
+export async function fetchServerStatus(signal?: AbortSignal): Promise<ServerStatus> {
+  const response = await adminClient.get<ServerStatus>('/server-status', { signal });
+  return response.data;
+}
+
+export async function updateServerStatus(payload: ServerStatus): Promise<ServerStatus> {
+  const response = await adminClient.put<ServerStatus>('/server-status', payload);
+  return response.data;
+}
+
+export async function fetchConnections(signal?: AbortSignal): Promise<ConnectionsResponse> {
+  const response = await adminClient.get<ConnectionsResponse>('/connections', { signal });
   return response.data;
 }
