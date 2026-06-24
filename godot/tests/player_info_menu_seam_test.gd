@@ -285,3 +285,30 @@ func test_loadout_class_filter_includes_and_excludes() -> void:
 	(host._menu.find_child("PLAYERCLASS", true, false) as NovaMnuCombo).select_silent(1)
 	host._populate_loadout()
 	assert_false(_combo_texts(primary).has("WPN_M4AUTO"), "M4 is hidden for Sniper")
+
+
+# End-to-end against the REAL player.mnu (built controls + nesting), so the loadout fills
+# through the same control names/tree the runtime uses, not just a stand-in. Runs in GUT so
+# the autoloads (NovaStrings) and the GDExtension are loaded.
+func test_real_player_mnu_loadout_populates() -> void:
+	var doc := NovaMnuDocument.new()
+	doc.load_from_bytes(FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu"))
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.set_edit_mode(false)
+	menu.menu = doc
+
+	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var pclass := menu.find_child("PLAYERCLASS", true, false) as NovaMnuCombo
+	assert_not_null(primary, "the real player.mnu builds a PRIMARY combobox")
+	assert_not_null(pclass, "the real player.mnu builds a PLAYERCLASS combobox")
+	assert_gt(pclass.get_item_count(), 0, "PLAYERCLASS carries its static class items")
+
+	var host := PlayerInfoMenuHost.new()
+	host._db = _load_db()
+	host._weapons = _load_weapons()  # injected (root-less unit), as if weapon.def had loaded
+	host.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
+
+	assert_gt(primary.get_item_count(), 1,
+		"PRIMARY populates (NONE + weapons) through the real menu's control tree")
