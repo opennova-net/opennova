@@ -617,8 +617,15 @@ func _compute_transformed_mesh_bounds() -> AABB:
 	var bounds := AABB()
 	var has_bounds := false
 	var model_inverse := global_transform.affine_inverse()
-	for robj_node in _robj_nodes.values():
-		var node := robj_node as Node3D
+	# Static / rigid submeshes hang under their Robj part nodes; skinned (and rigid-fake-skinned)
+	# submeshes hang under the shared Skeleton3D (see rebuild()). Walk both, so a fully-skinned
+	# model (e.g. an avatar body) still reports real bounds -- get_model_bounds drives consumers
+	# like the menu-portrait framing, which would otherwise see an empty AABB and never frame.
+	var roots: Array = _robj_nodes.values()
+	if _skeleton != null:
+		roots.append(_skeleton)
+	for root_node in roots:
+		var node := root_node as Node3D
 		if node == null:
 			continue
 		for child in node.get_children():

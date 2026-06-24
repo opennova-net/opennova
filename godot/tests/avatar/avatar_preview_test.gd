@@ -187,6 +187,108 @@ func test_menu_preview_hover_zooms_in_and_out() -> void:
 	assert_lt(_preview._zoom_blend, 0.5, "un-hover relaxes the zoom blend toward 0")
 
 
+# --- Skeletal idle (D-PLAYERINFO-1) -------------------------------------------
+# The composed parts share one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip) when those
+# raw .bad assets resolve [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]. Without them the
+# preview stays static — a valid degraded state that must never error.
+
+func test_preview_skeletal_is_null_without_bad_assets() -> void:
+	# The avatars fixture dir has no Dt1rst.bad / PI_Idle.BAD, so the lazy builder returns null
+	# and the preview composes static parts (no crash, no error).
+	var root = _resource_root_for_fixture()
+	if root == null:
+		pending("fixtures/avatars not mountable")
+		return
+	_preview.set_resource_root(root)
+	assert_null(_preview._ensure_preview_skeletal(),
+		"no skeletal idle built when the .bad assets are absent")
+
+
+func test_preview_skeletal_builds_when_bad_assets_resolve() -> void:
+	# Stage a root that DOES carry the two raw .bad files (copy the committed idle.bad under the
+	# names the preview binds) and assert the lazy builder produces a loaded, cached skeletal idle.
+	var root = _staged_idle_root()
+	if root == null:
+		pending("could not stage Dt1rst.bad / PI_Idle.BAD from fixtures/anim")
+		return
+	_preview.set_resource_root(root)
+	var sk = _preview._ensure_preview_skeletal()
+	assert_not_null(sk, "skeletal idle built when both .bad files resolve")
+	if sk != null:
+		assert_true(sk.is_loaded(), "the skeletal set is loaded")
+		assert_true(sk.has_clip("anim_idle"), "the idle clip is registered under anim_idle")
+	assert_eq(_preview._ensure_preview_skeletal(), sk, "the skeletal idle is cached (built once)")
+
+
+func test_menu_preview_binds_idle_on_skinned_parts_with_real_assets() -> void:
+	# On a machine with the retail PFFs (OPENNOVA_JO_DIR), the menu portrait binds the skeletal
+	# idle onto the skinned head/body parts. Gated: pends when the real assets aren't reachable
+	# (the live visual verify covers the on-screen result).
+	var root = _retail_root()
+	if root == null:
+		pending("OPENNOVA_JO_DIR / retail PFFs not configured; skeletal idle bind verified live")
+		return
+	var combo := _resolved_combo()
+	if combo.is_empty():
+		pending("Avatars.def fixture missing or has no combos")
+		return
+	_preview.set_menu_preview(true)
+	_preview.set_resource_root(root)
+	_preview.load_combo(combo)
+	await get_tree().process_frame
+	var body = _preview.get_part_model("body")
+	if body == null:
+		pending("body part .3di not resolved from the mounted root")
+		return
+	var data = body.get_object_data()
+	if data != null and data.is_skinned(0):
+		assert_true(body.has_skeleton(), "the skinned body part builds a Skeleton3D under the idle")
+		assert_eq(body.get_active_body_clip(), "anim_idle", "the idle clip is playing on the part")
+	else:
+		pending("body part is not vertex-skinned on this asset set (rigid-attach is D-PLAYERINFO-1)")
+
+
+# Copy the committed fixtures/anim/idle.bad into a temp dir under the names the preview binds
+# (Dt1rst.bad + PI_Idle.BAD) and mount it. Returns null if the source fixture is missing.
+func _staged_idle_root():
+	# Read the committed clip through NovaResourceRoot (C++ path-normalized; FileAccess chokes on
+	# the res://../ path), then write it out under the two names the preview binds.
+	var src_root := NovaResourceRoot.new()
+	if src_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim")) != OK:
+		return null
+	var bytes := src_root.read_file("idle.bad")
+	if bytes.is_empty():
+		return null
+	# Stage under the cache dir (LocalAppData), not user:// — NovaResourceRoot.set_root_dir
+	# rejects any path under the Godot user-data dir (is_valid_root).
+	var dir := OS.get_cache_dir().path_join("opennova_avatar_idle_test")
+	DirAccess.make_dir_recursive_absolute(dir)
+	for name in ["Dt1rst.bad", "PI_Idle.BAD"]:
+		var f := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
+		if f == null:
+			return null
+		f.store_buffer(bytes)
+		f.close()
+	var root := NovaResourceRoot.new()
+	if root.set_root_dir(dir) != OK:
+		return null
+	return root
+
+
+# A NovaResourceRoot on the retail PFF install named by OPENNOVA_JO_DIR (machine-specific;
+# set in settings.local.json env, never tracked). Null when unset or the .bad set is absent.
+func _retail_root():
+	var dir := OS.get_environment("OPENNOVA_JO_DIR")
+	if dir.is_empty() or not DirAccess.dir_exists_absolute(dir):
+		return null
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir, "", false, "jo") != OK:
+		return null
+	if not root.has_file("PI_Idle.BAD") or not root.has_file("Dt1rst.bad"):
+		return null
+	return root
+
+
 # A NovaResourceRoot mounted on the directory that holds the part .3di files, if
 # one is configured for this machine. The fixtures dir holds only Avatars.def, so
 # part graphics will not resolve there — return null and let the test fall back.

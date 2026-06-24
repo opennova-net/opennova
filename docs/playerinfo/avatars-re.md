@@ -252,11 +252,17 @@ consumed by the preview render:
   sinusoidal sway `sin(GetTickCount·0.0008)·2^28` (≈ ±22.5°). (Constants: `0.95`/`0.05`
   damping; sway freq `0.0008`/ms, amplitude `2^28` BAM.)
 
-Reimpl `AvatarPreview` (menu mode) ports the **transform** half faithfully: a spin node
-rotates the composed model (idle spin + hover sway) while the camera only zooms (`_process`,
-`set_hovered`). The **skeletal idle** (`PI_Idle.BAD` on a shared skeleton, the combo→skeleton
-binding) is still open under **D-PLAYERINFO-1** — the preview composes static part geometry,
-now transform-animated, but does not yet play the idle clip.
+Reimpl `AvatarPreview` ports **both** halves. The **transform** half: a spin node rotates the
+composed model (idle spin + hover sway, seeded with the original's random initial yaw
+`(rand()%180)·0xB60B60`) while the camera only zooms (`_process`, `set_hovered`). The **skeletal
+idle**: it builds one shared `NovaSkeletalAnim` from the raw `Dt1rst.bad` (rest/skeleton) +
+`PI_Idle.BAD` (looping idle clip) via `NovaSkeletalAnim.load_from_bad_files` — the no-`.adm`
+raw-`.bad` path that mirrors the original's two `BoneFile_Load` calls — and binds it onto every
+skinned part (`set_skeletal_anim` + `play_body_clip("anim_idle")`). The avatars.def head/body/arms
+part `.3di` are vertex-skinned to the 19-bone `Dt1rst` skeleton (confirmed via
+`NovaObjectData.is_skinned`), so the composed soldier deforms through the idle as the original
+does. The `.bad` assets resolve from the retail PFFs; when absent (a loose mount lacking them) the
+parts render static at rest. (`HwmCube.dds` reflection map: not yet applied — minor.)
 
 ## Screen orchestration — witness map (grilled 2026-06-23)
 
@@ -403,7 +409,7 @@ stable.
 
 | ID | Original (Jointops.exe) | Why / consequence for the port |
 | --- | --- | --- |
-| D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **partially open**. The runtime model resolution from a selected combo (and the preview's `PI_Idle.BAD` skeletal idle) is not yet witnessed; the port composes resolved part geometry. The preview *transform* animation IS witnessed and ported (idle spin + hover zoom/sway) — see "Preview animation" above (`update_player_preview_animation @ 0x55dba0`, `PlayerInfo_InitPreviewModel @ 0x5600d0`). |
+| D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **partially open**. The **preview** is witnessed + ported in full: the transform animation (`update_player_preview_animation @ 0x55dba0`) AND the skeletal idle (`PlayerInfo_InitPreviewModel @ 0x5600d0` binds `Dt1rst.bad` rest + `PI_Idle.BAD` idle on a `BoneSystem_Init` skeleton) — `AvatarPreview` plays `PI_Idle.BAD` on the 19-bone `Dt1rst` skeleton across the vertex-skinned combo parts (see "Preview animation" above). Still open: the **in-world** (spawned-player) combo→model binding — how a selected combo drives the in-mission avatar — which remains untraced. |
 | D-PLAYERINFO-2 | `>= 512` parts → `MessageBoxA("ComboObj Parse Error")` + abort | the part-pool cap is 512; the port should enforce it (error, not silent truncation). |
 | D-PLAYERINFO-3 | `graphic` and `graphic_d` write the **same** part field (+76) | `graphic_d` aliases/overwrites `graphic`; only `graphic_j` (+92) and `graphic_s` (+108) are distinct slots. A faithful parser stores both keywords into one field (last wins). |
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |

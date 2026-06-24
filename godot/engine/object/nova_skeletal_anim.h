@@ -5,10 +5,13 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <utility>
 #include <vector>
 
 #include <anim/anim_sample.h>
@@ -48,6 +51,14 @@ private:
 
 	const LoadedClip *find_clip(const String &p_key) const;
 
+	// Shared core: build bones_/bind_local_/clips_ from already-resolved .bad bytes.
+	// p_reset_bytes defines the shared skeleton + bind pose; each (key, bytes) pair is sampled
+	// against the shared rest origins and registered as a clip. Caller clears state first and
+	// sets adm_name_. Returns false (with last_error_) on an unusable reset .bad or when no clip
+	// survives. Shared by load_from_resource_root and load_from_bad_files.
+	bool build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
+			const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads);
+
 protected:
 	static void _bind_methods();
 
@@ -55,6 +66,17 @@ public:
 	// Load + sample a model's animation set. p_adm_name is the .adm file name resolvable
 	// through the resource root (the .bad clips it lists are read the same way).
 	bool load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name);
+
+	// Load + sample a skeletal set from EXPLICIT raw .bad files (no .adm), as the original
+	// PLAYER_INFO preview does: p_skeleton_bad is the rest/bind source (e.g. "Dt1rst.bad") and
+	// p_key_to_bad maps each clip key (e.g. "anim_idle") to a clip .bad basename (e.g.
+	// "PI_Idle.BAD"); all resolved through the resource root. The skeleton .bad provides the
+	// shared bone offsets + bind pose; each clip is sampled against it. Missing clip .bads are
+	// skipped (a missing skeleton .bad fails).
+	// [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 -> BoneFile_Load("PI_Idle.BAD"/"Dt1rst.bad")
+	//  + AnimChannel_InitFromData; reimpl wraps both raw .bad files as one shared skeletal set.]
+	bool load_from_bad_files(const Ref<NovaResourceRoot> &p_resource_root,
+			const String &p_skeleton_bad, const Dictionary &p_key_to_bad);
 
 	bool is_loaded() const { return loaded_; }
 	String get_last_error() const { return last_error_; }

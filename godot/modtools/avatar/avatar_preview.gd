@@ -8,9 +8,11 @@ extends Control
 # bounds framing, and the arms-overlay idea (a sibling NovaObjectModel sharing one
 # NovaSkeletalAnim) generalized to three part slots.
 #
-# A combo's parts are static at rest here (no .adm is bound): the original
-# combo -> spawned-player model binding is unwitnessed (docs/playerinfo/avatars-re.md
-# D-PLAYERINFO-1), so the preview stops at the resolved part geometry behind that seam.
+# Each combo's skinned parts share one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip),
+# matching the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0].
+# When those .bad assets aren't resolvable (e.g. a loose ONED mount that lacks them) the parts
+# render static at rest — a valid degraded state. The remaining unwitnessed piece of
+# D-PLAYERINFO-1 is the in-world (spawned-player) combo binding, not this preview idle.
 
 const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
@@ -42,6 +44,14 @@ const MENU_IDLE_SPEED_DEG_PER_SEC := 43.9  # 0x800000 BAM/frame x 62.5 Hz
 const MENU_SWAY_FREQ_RAD_PER_SEC := 0.8    # sin(GetTickCount * 0.0008/ms)
 const MENU_SWAY_AMP_DEG := 22.5            # 2^28 BAM amplitude
 const MENU_TICK_HZ := 62.5                 # the original's menu update cadence
+
+# Skeletal idle for the composed character [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]:
+# the original binds the rest skeleton Dt1rst.bad + the looping idle clip PI_Idle.BAD (raw
+# .bad files, no .adm) and plays the idle on the skinned parts. Registered under the canonical
+# idle key so play_body_clip / slot_to_key resolve it.
+const PREVIEW_SKELETON_BAD := "Dt1rst.bad"
+const PREVIEW_IDLE_BAD := "PI_Idle.BAD"
+const PREVIEW_IDLE_KEY := "anim_idle"
 
 var _resource_root  # NovaResourceRoot, or null (headless / no shell)
 
@@ -75,6 +85,11 @@ var _menu_framed := false
 
 # Loaded part models keyed by slot ("head"/"body"/"arms") -> NovaObjectModel.
 var _part_models: Dictionary = {}
+# Shared skeletal idle (Dt1rst.bad + PI_Idle.BAD), built lazily once and bound onto every
+# skinned part so the composed character plays the idle. Null when the .bad assets aren't
+# resolvable; _skeletal_tried gates the one-time build so a missing-asset mount reads once.
+var _skeletal  # NovaSkeletalAnim or null
+var _skeletal_tried := false
 # Camo tint requested per combo, applied to all part models (see apply_camo).
 var _camo := Vector3.ONE
 var _missing_parts := PackedStringArray()
@@ -88,6 +103,9 @@ func _ready() -> void:
 
 func set_resource_root(root) -> void:
 	_resource_root = root
+	# Re-evaluate the skeletal idle against the new mount (a remount may add/remove the .bad set).
+	_skeletal = null
+	_skeletal_tried = false
 
 
 func get_resource_root():
@@ -252,6 +270,28 @@ func _active_slots() -> Array:
 	return SLOTS
 
 
+# Build the shared skeletal idle once from the two raw .bad files the original binds
+# [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 BoneFile_Load + AnimChannel_InitFromData].
+# Returns null (parts stay static) when there's no resource root, the .bad assets aren't
+# present (a loose mount that lacks them), the native raw-.bad method is missing (stale DLL),
+# or the load fails — all non-fatal degraded states. Cached; _skeletal_tried reads once.
+func _ensure_preview_skeletal():
+	if _skeletal_tried:
+		return _skeletal
+	_skeletal_tried = true
+	if _resource_root == null:
+		return null
+	if not _resource_root.has_file(PREVIEW_SKELETON_BAD) or not _resource_root.has_file(PREVIEW_IDLE_BAD):
+		return null
+	var sk := NovaSkeletalAnim.new()
+	if not sk.has_method("load_from_bad_files"):
+		return null  # native extension predates the raw-.bad path; render static
+	if not sk.load_from_bad_files(_resource_root, PREVIEW_SKELETON_BAD, {PREVIEW_IDLE_KEY: PREVIEW_IDLE_BAD}):
+		return null
+	_skeletal = sk
+	return _skeletal
+
+
 # Load one part .3di by basename into a sibling NovaObjectModel under the root.
 # No resource root, an empty name, or a load failure leaves the slot empty.
 func _load_part(slot: String, graphic: String) -> void:
@@ -271,10 +311,15 @@ func _load_part(slot: String, graphic: String) -> void:
 	model.set_environment_node(_environment)
 	model.set_object_data(data)
 	model.set_active_lod(0)  # always the finest LOD in the portrait (defensive; 0 is the default)
-	# No skeletal clip is bound yet: the original PLAYER_INFO preview plays the PI_Idle.BAD
-	# idle animation on a shared skeleton [orig: sub_5600D0 @ 0x5600d0 -> BoneSystem_Init +
-	# AnimChannel_InitFromData("PI_Idle.BAD")]; that combo->skeleton binding is D-PLAYERINFO-1
-	# (open). The transform animation (idle spin + hover zoom/sway) is driven in _process.
+	# Bind the shared skeletal idle so the skinned part plays PI_Idle.BAD on the Dt1rst skeleton,
+	# like the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 ->
+	# BoneFile_Load + AnimChannel_InitFromData("PI_Idle.BAD")]. Only skinned parts pose; an absent
+	# .bad set or a static part leaves the slot at rest. The transform animation (idle spin +
+	# hover zoom/sway) is driven separately in _process.
+	var sk = _ensure_preview_skeletal()
+	if sk != null and data.is_skinned(0):
+		model.set_skeletal_anim(sk)
+		model.play_body_clip(PREVIEW_IDLE_KEY)
 	_part_models[slot] = model
 
 
@@ -502,6 +547,9 @@ func _frame_menu_pose(bounds: AABB) -> void:
 	_menu_radius = maxf(bounds.size.length() * 0.5, 1.0)
 	_camera.near = clampf(_menu_radius * 0.001, 0.02, 5.0)
 	_camera.far = maxf(_menu_radius * 12.0, 50.0)
+	# Random initial yaw [orig: 0x5600d0 dword_25DC53C = (rand()%180)*0xB60B60 — 0-179 deg in
+	# BAM]; the continuous idle spin in _process accumulates from this starting facing.
+	_idle_angle = deg_to_rad(float(randi() % 180))
 	_menu_framed = true
 	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
 
