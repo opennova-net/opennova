@@ -212,8 +212,12 @@ cmd_app() {
       ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
         "ubuntu@$(target_ip)" "docker --version" >/dev/null \
         || die "cannot reach docker on the target over SSH"
-      docker compose "${COMPOSE_ARGS[@]}" pull
-      docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
+      # Pull only the published images; the backup sidecar has no registry image
+      # (it's built from deploy/backup/), so a blanket `pull` fails on it.
+      docker compose "${COMPOSE_ARGS[@]}" pull novaworld web
+      # `up --build` pulls server/web (pull_policy: always) and builds the backup
+      # sidecar on the remote in one shot.
+      docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans --build
       log "deploy complete."
       ;;
     status)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" ps ;;
