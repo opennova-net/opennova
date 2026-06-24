@@ -60,11 +60,6 @@ private:
 	SessionStore &sessions_;
 	std::thread worker_;
 	std::atomic<bool> running_{false};
-	// Round-robin counter for dev-mode user assignment. Each POST
-	// /NWLogin.dll from a NEW retail process bumps this and picks
-	// players[idx % N]. Same retail process keeps the same user across
-	// reconnects via the persistent_to_user_id_ pinning below.
-	std::atomic<size_t> next_dev_user_idx_{0};
 	// PERSISTENTEXPRESSLOGINDATA cookie → players.id. Retail's IB3 sets
 	// this cookie itself (we never set it) and ships it on every HTTP
 	// request from the same retail process. Acts as a stable per-process
@@ -83,6 +78,13 @@ private:
 	// Optional unknown-message tracker (set via set_unknown_tracker). Read
 	// by /api/unknowns; written by the catch-all 404 path. Null in tests.
 	opennova::UnknownTracker *tracker_ = nullptr;
+	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
+	// @GSB_SERVER@). Built once in start() from config.public_host +
+	// config.http_port — the retail client is REMOTE, so these must point at
+	// the public host, never 127.0.0.1 (else the client POSTs its host
+	// registration / fetches the server browser from its own localhost).
+	std::string host_url_;
+	std::string gsb_url_;
 };
 
 } // namespace opennova::server

@@ -177,14 +177,16 @@ crow::response render_legacy_message(const std::string &templates_dir,
                                      const std::string &message,
                                      const std::string &failure_template,
                                      const std::string &msg_template,
-                                     const std::string &remote_ip) {
+                                     const std::string &remote_ip,
+                                     const std::string &host_url,
+                                     const std::string &gsb_url) {
 	TemplateVars vars{
 		{"MESSAGE",     message},
 		{"IN",          failure_template},
 		{"OUT",         failure_template},
 		{"MSGBASE",     msg_template},
-		{"HOST_URL",    "http://127.0.0.1:8080/nwhost.dll"},
-		{"GSB_SERVER",  "http://127.0.0.1:8080/jop_2.gsb"},
+		{"HOST_URL",    host_url},
+		{"GSB_SERVER",  gsb_url},
 		{"JOINLAN_URL", ""},
 	};
 	crow::response res(200);
@@ -357,6 +359,16 @@ bool HttpListener::start(const ServerConfig &config) {
 	std::printf("[http] admin api %s\n",
 	            admin_token.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)"
 	                                : "ENABLED");
+
+	// Client-facing URLs injected into the menus. The retail client is REMOTE,
+	// so HOST_URL/GSB_SERVER must advertise the public host:port (not 127.0.0.1,
+	// which would point the client at its own machine — host registration + the
+	// server browser would silently never reach us).
+	const std::string http_base = "http://" + public_host + ":" +
+	                              std::to_string(config.http_port);
+	host_url_ = http_base + "/nwhost.dll";
+	gsb_url_  = http_base + "/jop_2.gsb";
+	std::printf("[http] HOST_URL=%s\n", host_url_.c_str());
 
 	// Expansion-publish pipeline config (ported from onnet). Captured by the
 	// /release + /admin/internal routes below.
@@ -1379,8 +1391,8 @@ bool HttpListener::start(const ServerConfig &config) {
 		            cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
-			{"HOST_URL",     "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",   "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",     host_url_},
+			{"GSB_SERVER",   gsb_url_},
 			{"JOINLAN_URL",  ""},
 		};
 		crow::response res(200);
@@ -1415,8 +1427,8 @@ bool HttpListener::start(const ServerConfig &config) {
 			{"IN",          in_p},
 			{"OUT",         out_p},
 			{"MSGBASE",     msgbase},
-			{"HOST_URL",    "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",  "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
@@ -1506,7 +1518,7 @@ bool HttpListener::start(const ServerConfig &config) {
 			const std::string fail_tpl = field_or("failure", std::string("jop_2_main.htm"));
 			const std::string msg_tpl  = field_or("msgbase", std::string("jop_2_msg.htm"));
 			return render_legacy_message(templates_dir, message, fail_tpl, msg_tpl,
-			                             req.remote_ip_address);
+			                             req.remote_ip_address, host_url_, gsb_url_);
 		};
 
 		const auto server_status = get_server_status(db_);
@@ -1561,22 +1573,14 @@ bool HttpListener::start(const ServerConfig &config) {
 			}
 		}
 		if (!user) {
-			auto players = list_dev_players(db_);
-			if (!players.empty()) {
-				const size_t idx = next_dev_user_idx_.fetch_add(1) % players.size();
-				user = players[idx];
-				resolution = "round-robin";
-			}
-		}
-		if (!user) {
-			std::fprintf(stderr, "[http] WARN no user resolved — falling back to DevUser stub\n");
-			UserRecord u;
-			u.username = "DevUser";
-			u.pcid     = "00000001";
-			u.nwh      = "1";
-			u.nwhandle = "DevUser";
-			user = u;
-			resolution = "stub";
+			// No EPASK-authenticated user and no persist-pin match → reject.
+			// Login requires real authentication; we never invent a session
+			// from a seeded/stub user. Retail always carries EPASK creds or a
+			// persist cookie, so a legitimate client never lands here. (Same
+			// behaviour in dev and prod — dev just seeds the test accounts.)
+			std::fprintf(stderr,
+			             "[http] POST /NWLogin.dll rejected: unauthenticated\n");
+			return render_login_message("Invalid username or password");
 		}
 		std::string effective_exp_bits = (game_slug == "dfx2_consumer") ? "1" : "3";
 		if (user->id != 0) {
@@ -1689,8 +1693,8 @@ bool HttpListener::start(const ServerConfig &config) {
 		TemplateVars vars{
 			{"MESSAGE",          "Contacting login databases..."},
 			{"REFRESH_ENDPOINT", "NWLogin.dll"},
-			{"HOST_URL",         "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",       "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",         host_url_},
+			{"GSB_SERVER",       gsb_url_},
 			{"JOINLAN_URL",      ""},
 		};
 		crow::response res(200);
@@ -1737,24 +1741,17 @@ bool HttpListener::start(const ServerConfig &config) {
 			// is visible.
 			std::printf("[http] GET %s WARN stale/unknown tag '%s' — minting fresh login session\n",
 			            req.url.c_str(), tag.c_str());
+			// Mint a fresh, UNAUTHENTICATED session so retail doesn't hit a
+			// blank screen on a cross-restart tag — but it carries no user.
+			// The POST /NWLogin.dll path is the only auth gate; a stale tag
+			// must re-authenticate there rather than be silently re-bound to
+			// an account here. (user_id stays 0 → no active session, and any
+			// authenticated action downstream still requires a real login.)
 			LoginSession fresh;
 			fresh.session_tag = sessions_.generate_tag("NWLogin.dll");
 			fresh.success = "jop_2_main.htm";
 			fresh.failure = "jop_2_main.htm";
 			fresh.msgbase = "jop_2_msg.htm";
-			auto players = list_dev_players(db_);
-			if (!players.empty()) {
-				const size_t idx = next_dev_user_idx_.fetch_add(1) % players.size();
-				const auto &u = players[idx];
-				fresh.user_id  = u.id;
-				fresh.username = u.username;
-				fresh.pcid     = u.pcid;
-				fresh.nwh      = u.nwh;
-				fresh.nwhandle = u.nwhandle;
-				if (auto access = get_game_access(db_, u.id, "jop_2_consumer")) {
-					if (!access->exp_bits.empty()) fresh.exp_bits = access->exp_bits;
-				}
-			}
 			tag = fresh.session_tag;
 			sessions_.put_login(tag, std::move(fresh));
 			session = sessions_.get_login(tag);
@@ -1775,8 +1772,8 @@ bool HttpListener::start(const ServerConfig &config) {
 			{"IN",           session->success},
 			{"OUT",          session->failure},
 			{"MSGBASE",      session->msgbase},
-			{"HOST_URL",     "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",   "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",     host_url_},
+			{"GSB_SERVER",   gsb_url_},
 			{"JOINLAN_URL",  ""},
 		};
 		const std::string success_template = session->success.empty() ? "jop_2_main.htm" : session->success;
@@ -1923,8 +1920,8 @@ bool HttpListener::start(const ServerConfig &config) {
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting game server...."},
 				{"REFRESH_ENDPOINT", "NWJoin.dll"},
-				{"HOST_URL",         "http://127.0.0.1:8080/nwhost.dll"},
-				{"GSB_SERVER",       "http://127.0.0.1:8080/jop_2.gsb"},
+				{"HOST_URL",         host_url_},
+				{"GSB_SERVER",       gsb_url_},
 				{"JOINLAN_URL",      ""},
 			};
 			crow::response res(200);
@@ -2013,8 +2010,8 @@ bool HttpListener::start(const ServerConfig &config) {
 			{"NP",          std::to_string(host.host_port)},
 			{"BK",          BK_VALUE},
 			{"SERVER_NAME", host.server_name.empty() ? std::string("OpenNova Server") : host.server_name},
-			{"HOST_URL",    "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",  "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
 			{"JOINLAN_URL", ""},
 		};
 		const std::string success_template = session->success.empty() ? "jop_2_join.joi" : session->success;
@@ -2098,7 +2095,7 @@ bool HttpListener::start(const ServerConfig &config) {
 						: session->needexpkey;
 					return render_legacy_message(templates_dir,
 						"This NovaWorld account does not have the required expansion key.",
-						fail_tpl, msg_tpl, req.remote_ip_address);
+						fail_tpl, msg_tpl, req.remote_ip_address, host_url_, gsb_url_);
 				}
 			}
 			if (host_pcid_key.empty()) {
@@ -2224,8 +2221,8 @@ bool HttpListener::start(const ServerConfig &config) {
 		const std::filesystem::path tpl_path =
 			std::filesystem::path(templates_dir) / success_tpl;
 		TemplateVars vars{
-			{"HOST_URL",    "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",  "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
@@ -2296,8 +2293,8 @@ bool HttpListener::start(const ServerConfig &config) {
 			return res;
 		}
 		TemplateVars vars{
-			{"HOST_URL",    "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",  "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
 			{"JOINLAN_URL", ""},
 			{"NWHANDLE",    user ? user->nwhandle : std::string()},
 			{"PCID",        user ? user->pcid     : std::string()},
@@ -2389,8 +2386,8 @@ bool HttpListener::start(const ServerConfig &config) {
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
 				{"REFRESH_ENDPOINT", "NWHost.dll"},
-				{"HOST_URL",         "http://127.0.0.1:8080/nwhost.dll"},
-				{"GSB_SERVER",       "http://127.0.0.1:8080/jop_2.gsb"},
+				{"HOST_URL",         host_url_},
+				{"GSB_SERVER",       gsb_url_},
 				{"JOINLAN_URL",      ""},
 			};
 			crow::response res(200);
@@ -2417,8 +2414,8 @@ bool HttpListener::start(const ServerConfig &config) {
 
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
-			{"HOST_URL",    "http://127.0.0.1:8080/nwhost.dll"},
-			{"GSB_SERVER",  "http://127.0.0.1:8080/jop_2.gsb"},
+			{"HOST_URL",    host_url_},
+			{"GSB_SERVER",  gsb_url_},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
