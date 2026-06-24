@@ -232,7 +232,11 @@ cmd_app() {
     logs)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" logs --tail=200 "${1:-}" ;;
     restart) remote_compose; docker compose "${COMPOSE_ARGS[@]}" restart "${1:-}" ;;
     down)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" down ;;
-    *) die "unknown: app $action (try: deploy|status|logs|restart|down)" ;;
+    # Run SQL against the live SQLite DB via the backup sidecar (it has sqlite3
+    # and the nw_data volume rw). E.g. one-off admin cleanup.
+    sql)     remote_compose; docker compose "${COMPOSE_ARGS[@]}" exec -T backup \
+               sqlite3 /data/novaworld.db "$*" ;;
+    *) die "unknown: app $action (try: deploy|status|logs|restart|down|sql)" ;;
   esac
 }
 
