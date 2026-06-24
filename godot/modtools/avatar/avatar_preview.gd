@@ -33,6 +33,16 @@ const MENU_PITCH := -0.06
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 
+# Preview animation [orig: update_player_preview_animation @ 0x55dba0]: a damped zoom on
+# hover plus a continuous idle rotation that gains a gentle sinusoidal sway on hover. BAM
+# angles map 2^32 = 360 deg; the original ticks at ~62.5 Hz.
+const MENU_ZOOM_DAMP := 0.05               # blend += (target-blend)*0.05 per tick (orig 0.95/0.05)
+const MENU_ZOOM_IN := 0.78                 # camera distance scale at full hover (closer)
+const MENU_IDLE_SPEED_DEG_PER_SEC := 43.9  # 0x800000 BAM/frame x 62.5 Hz
+const MENU_SWAY_FREQ_RAD_PER_SEC := 0.8    # sin(GetTickCount * 0.0008/ms)
+const MENU_SWAY_AMP_DEG := 22.5            # 2^28 BAM amplitude
+const MENU_TICK_HZ := 62.5                 # the original's menu update cadence
+
 var _resource_root  # NovaResourceRoot, or null (headless / no shell)
 
 var _viewport_container: SubViewportContainer
@@ -52,6 +62,16 @@ var _has_framed := false
 # ONED Avatars workspace keeps its interactive fly camera + grid.
 var _menu_preview := false
 var _menu_pose_set := false
+# Menu-portrait animation state (see _process). The part models hang off a spin node so the
+# model rotates without moving the camera or grid; the camera only zooms.
+var _model_root: Node3D
+var _hovered := false
+var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
+var _idle_angle := 0.0      # continuous idle rotation (radians)
+var _anim_time := 0.0       # seconds, drives the hover sway
+var _menu_center := Vector3.ZERO
+var _menu_radius := 1.0
+var _menu_framed := false
 
 # Loaded part models keyed by slot ("head"/"body"/"arms") -> NovaObjectModel.
 var _part_models: Dictionary = {}
@@ -168,6 +188,12 @@ func _build_viewport() -> void:
 	_guide_root.name = "AvatarPreviewGuides"
 	_root.add_child(_guide_root)
 
+	# Part models hang off this spin node so the menu portrait can rotate the model while
+	# the camera and grid stay put. Identity (no rotation) in the ONED workspace.
+	_model_root = Node3D.new()
+	_model_root.name = "AvatarModelRoot"
+	_root.add_child(_model_root)
+
 	_camera = FlyCameraScript.new()
 	_camera.current = true
 	_camera.fov = 42.0
@@ -241,12 +267,14 @@ func _load_part(slot: String, graphic: String) -> void:
 		return
 	var model = NovaObjectModelScript.new()
 	model.name = "AvatarPart_%s" % slot
-	_root.add_child(model)
+	_model_root.add_child(model)
 	model.set_environment_node(_environment)
 	model.set_object_data(data)
-	# No .adm is bound (combo -> skeleton binding unwitnessed, D-PLAYERINFO-1), so
-	# the part renders static at rest. If a future seam loads a shared skeleton it
-	# would be set here via model.set_skeletal_anim(shared) before framing.
+	model.set_active_lod(0)  # always the finest LOD in the portrait (defensive; 0 is the default)
+	# No skeletal clip is bound yet: the original PLAYER_INFO preview plays the PI_Idle.BAD
+	# idle animation on a shared skeleton [orig: sub_5600D0 @ 0x5600d0 -> BoneSystem_Init +
+	# AnimChannel_InitFromData("PI_Idle.BAD")]; that combo->skeleton binding is D-PLAYERINFO-1
+	# (open). The transform animation (idle spin + hover zoom/sway) is driven in _process.
 	_part_models[slot] = model
 
 
@@ -276,7 +304,7 @@ func get_part_model_count() -> int:
 func clear() -> void:
 	for model in _part_models.values():
 		if model != null and is_instance_valid(model):
-			_root.remove_child(model)
+			_model_root.remove_child(model)
 			model.queue_free()
 	_part_models.clear()
 	_camo = Vector3.ONE
@@ -470,9 +498,49 @@ func _frame_bounds(bounds: AABB) -> void:
 func _frame_menu_pose(bounds: AABB) -> void:
 	if _camera == null:
 		return
-	var center := bounds.get_center()
-	var radius := maxf(bounds.size.length() * 0.5, 1.0)
-	_camera.near = clampf(radius * 0.001, 0.02, 5.0)
-	_camera.far = maxf(radius * 12.0, 50.0)
-	if _camera.has_method("frame_bounds_custom"):
-		_camera.call("frame_bounds_custom", center, radius, MENU_DISTANCE_SCALE, maxf(radius * 8.0, 6.0), 0.0, MENU_PITCH)
+	_menu_center = bounds.get_center()
+	_menu_radius = maxf(bounds.size.length() * 0.5, 1.0)
+	_camera.near = clampf(_menu_radius * 0.001, 0.02, 5.0)
+	_camera.far = maxf(_menu_radius * 12.0, 50.0)
+	_menu_framed = true
+	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
+
+
+# Position the menu camera front-on at the current zoom. The model's rotation lives on
+# _model_root (see _process), so the camera stays put and only its distance changes.
+func _apply_menu_camera() -> void:
+	if _camera == null or not _menu_framed or not _camera.has_method("frame_bounds_custom"):
+		return
+	var dist_scale: float = MENU_DISTANCE_SCALE * lerpf(1.0, MENU_ZOOM_IN, _zoom_blend)
+	_camera.call("frame_bounds_custom", _menu_center, _menu_radius, dist_scale,
+		maxf(_menu_radius * 8.0, 6.0), 0.0, MENU_PITCH)
+
+
+# Hover toggles the zoom + sway, matching the original's "active when over the preview/lists"
+# test [orig: update_player_preview_animation @ 0x55dba0].
+func set_hovered(value: bool) -> void:
+	_hovered = value
+
+
+func is_hovered() -> bool:
+	return _hovered
+
+
+# Per-frame menu portrait animation [orig: update_player_preview_animation @ 0x55dba0]:
+# a damped zoom toward the hover target, a continuous idle rotation, and a sinusoidal sway
+# that fades in on hover. No-op outside menu mode (the ONED workspace drives its own camera).
+func _process(delta: float) -> void:
+	if not _menu_preview or not _menu_framed:
+		return
+	# Damped zoom toward 1 (hover) / 0 (rest); the per-tick 0.05 factor is made frame-rate
+	# robust by scaling against the original's 62.5 Hz cadence.
+	var target := 1.0 if _hovered else 0.0
+	var t: float = clampf(MENU_ZOOM_DAMP * delta * MENU_TICK_HZ, 0.0, 1.0)
+	_zoom_blend = lerpf(_zoom_blend, target, t)
+	# Continuous idle spin; on hover a gentle sway fades in over it (scaled by the zoom blend).
+	_idle_angle += deg_to_rad(MENU_IDLE_SPEED_DEG_PER_SEC) * delta
+	_anim_time += delta
+	var sway: float = sin(_anim_time * MENU_SWAY_FREQ_RAD_PER_SEC) * deg_to_rad(MENU_SWAY_AMP_DEG) * _zoom_blend
+	if _model_root != null:
+		_model_root.rotation.y = _idle_angle + sway
+	_apply_menu_camera()

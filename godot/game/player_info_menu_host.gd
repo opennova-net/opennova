@@ -201,12 +201,23 @@ func _wire_preview() -> void:
 	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the button keep its clicks
 	(rect as Control).add_child(_preview)
-	# Static menu portrait: no grid/axes, camera locked, character facing the viewer,
-	# pose held steady across combo changes. The editor Avatars workspace keeps the
-	# interactive fly camera; only this runtime mount opts into the fixed portrait.
+	# Static menu portrait: no grid/axes, camera locked, character facing the viewer.
+	# The editor Avatars workspace keeps the interactive fly camera; only this runtime
+	# mount opts into the portrait (idle spin + hover zoom/sway, see AvatarPreview).
 	_preview.set_menu_preview(true)
 	_preview.set_resource_root(_root)
+	# Mousing over the preview button drives the zoom + sway, like the original
+	# [orig: update_player_preview_animation active test @ 0x55dba0].
+	var preview_button := rect as Control
+	if not preview_button.mouse_entered.is_connected(_on_preview_hover):
+		preview_button.mouse_entered.connect(_on_preview_hover.bind(true))
+		preview_button.mouse_exited.connect(_on_preview_hover.bind(false))
 	_refresh_preview()
+
+
+func _on_preview_hover(hovered: bool) -> void:
+	if _preview != null and is_instance_valid(_preview):
+		_preview.set_hovered(hovered)
 
 
 func _refresh_preview() -> void:

@@ -154,6 +154,39 @@ func test_menu_preview_renders_at_onscreen_resolution() -> void:
 	assert_true(c.stretch, "stretch stays on so the SubViewport renders at the container size")
 
 
+func test_menu_preview_idle_spins_and_holds_the_camera() -> void:
+	# At rest the model rotates continuously (idle spin) while the camera holds its front pose.
+	_preview.set_menu_preview(true)
+	_preview._frame_menu_pose(_soldier_bounds())
+	var cam = _preview.get_editor_camera()
+	var before_angle: float = _preview._model_root.rotation.y
+	var rest_dist: float = (cam.global_position - _preview._menu_center).length()
+	for i in range(5):
+		_preview._process(0.1)
+	assert_gt(_preview._model_root.rotation.y, before_angle, "the model idle-spins")
+	var dist_after: float = (cam.global_position - _preview._menu_center).length()
+	assert_almost_eq(dist_after, rest_dist, 0.05, "the camera holds its distance at rest (no zoom)")
+	assert_gt(cam.global_position.z, _preview._menu_center.z, "camera stays in front (+Z)")
+
+
+func test_menu_preview_hover_zooms_in_and_out() -> void:
+	# Mouseover ramps the zoom blend toward 1 and pulls the camera closer; un-hover relaxes it.
+	_preview.set_menu_preview(true)
+	_preview._frame_menu_pose(_soldier_bounds())
+	var cam = _preview.get_editor_camera()
+	var rest_dist: float = (cam.global_position - _preview._menu_center).length()
+	_preview.set_hovered(true)
+	for i in range(30):
+		_preview._process(0.1)
+	assert_gt(_preview._zoom_blend, 0.5, "hover ramps the zoom blend toward 1")
+	var hover_dist: float = (cam.global_position - _preview._menu_center).length()
+	assert_lt(hover_dist, rest_dist, "the camera zooms in (closer) on hover")
+	_preview.set_hovered(false)
+	for i in range(30):
+		_preview._process(0.1)
+	assert_lt(_preview._zoom_blend, 0.5, "un-hover relaxes the zoom blend toward 0")
+
+
 # A NovaResourceRoot mounted on the directory that holds the part .3di files, if
 # one is configured for this machine. The fixtures dir holds only Avatars.def, so
 # part graphics will not resolve there — return null and let the test fall back.

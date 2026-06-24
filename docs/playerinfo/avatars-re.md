@@ -234,6 +234,29 @@ fallback on a miss). On-disk-miss fallback to the raw key is the witnessed
 `GetStringWithFallback` behavior; the expansion override table (JOX avatars) is a
 follow-up via `NovaStrings.set_override_table`.
 
+### Preview animation (PLAYER_PREVIEW)
+
+The 3D preview is initialized by `[orig: PlayerInfo_InitPreviewModel @ 0x5600d0]` (from
+`PlayerInfo_InitProfileSelector`): it sets up a skeleton (`BoneSystem_Init` + `BoneFile_Load`)
+and binds the **idle animation** `AnimChannel_InitFromData("PI_Idle.BAD")` (plus `Dt1rst.bad`),
+a `HwmCube.dds` reflection map, and the preview render target. So the original character
+preview plays a **skeletal idle animation**, not a static pose.
+
+Per frame, `[orig: update_player_preview_animation @ 0x55dba0]` drives two transform values
+consumed by the preview render:
+- **Zoom blend** `flt_25DC538 = blend*0.95 + target*0.05` — `target` is 1 while the cursor is
+  over `PLAYER_PREVIEW`/`COMBO_LIST`/`DIVISION`/`NATIONALITY` (`sub_6467D0` = widget-hovered
+  test), else 0; a damped 0→1 ramp that zooms the view in on hover.
+- **Rotation** `dword_25DC53C` (BAM): idle `+= 0x800000`/frame (a steady spin); on hover a
+  sinusoidal sway `sin(GetTickCount·0.0008)·2^28` (≈ ±22.5°). (Constants: `0.95`/`0.05`
+  damping; sway freq `0.0008`/ms, amplitude `2^28` BAM.)
+
+Reimpl `AvatarPreview` (menu mode) ports the **transform** half faithfully: a spin node
+rotates the composed model (idle spin + hover sway) while the camera only zooms (`_process`,
+`set_hovered`). The **skeletal idle** (`PI_Idle.BAD` on a shared skeleton, the combo→skeleton
+binding) is still open under **D-PLAYERINFO-1** — the preview composes static part geometry,
+now transform-animated, but does not yet play the idle clip.
+
 ## Screen orchestration — witness map (grilled 2026-06-23)
 
 The four populate functions above are driven by a per-screen init plus per-control
@@ -345,7 +368,7 @@ stable.
 
 | ID | Original (Jointops.exe) | Why / consequence for the port |
 | --- | --- | --- |
-| D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **open** — see follow-ups. The runtime model resolution from a selected combo is not yet witnessed; the port stops at resolved combo data behind this seam. |
+| D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **partially open**. The runtime model resolution from a selected combo (and the preview's `PI_Idle.BAD` skeletal idle) is not yet witnessed; the port composes resolved part geometry. The preview *transform* animation IS witnessed and ported (idle spin + hover zoom/sway) — see "Preview animation" above (`update_player_preview_animation @ 0x55dba0`, `PlayerInfo_InitPreviewModel @ 0x5600d0`). |
 | D-PLAYERINFO-2 | `>= 512` parts → `MessageBoxA("ComboObj Parse Error")` + abort | the part-pool cap is 512; the port should enforce it (error, not silent truncation). |
 | D-PLAYERINFO-3 | `graphic` and `graphic_d` write the **same** part field (+76) | `graphic_d` aliases/overwrites `graphic`; only `graphic_j` (+92) and `graphic_s` (+108) are distinct slots. A faithful parser stores both keywords into one field (last wins). |
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |
