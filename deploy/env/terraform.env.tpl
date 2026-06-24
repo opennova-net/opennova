@@ -1,5 +1,5 @@
 # 1Password-referenced terraform credentials. `op inject`/`op run` resolves
-# these op:// references against the vault at deploy time; the resolved
+# these 1Password references against the vault at deploy time; the resolved
 # values never touch disk outside the tmpfs. Edit the vault, not this file.
 AWS_ACCESS_KEY_ID=op://OpenNova-Deploy/aws/access_key_id
 AWS_SECRET_ACCESS_KEY=op://OpenNova-Deploy/aws/secret_access_key

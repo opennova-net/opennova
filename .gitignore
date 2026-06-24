@@ -55,11 +55,14 @@ Testing/Temporary/
 # Runtime logs
 *.log
 
-# Terraform (state and providers are never committed; the .terraform.lock.hcl
-# provider pins ARE committed; see DEPLOY.md)
+# Terraform (state, providers, and operator var-files are never committed; the
+# .terraform.lock.hcl provider pins and *.tfvars.example ARE committed; see DEPLOY.md)
 infra/aws/.terraform/
+infra/github/.terraform/
 *.tfstate
 *.tfstate.*
+terraform.tfvars
+*.auto.tfvars
 
 # Blender addon native libs and wheels (built/downloaded artifacts)
 blender/lib/**/*.so

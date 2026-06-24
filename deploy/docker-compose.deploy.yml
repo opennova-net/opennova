@@ -15,6 +15,9 @@ services:
     working_dir: /workspace
     volumes:
       - ../:/workspace
+      # Lets `on-deploy aws ...` run the official amazon/aws-cli image as a
+      # sibling container (the AWS CLI can't run natively on this Alpine base).
+      - /var/run/docker.sock:/var/run/docker.sock
     tmpfs:
       - /run/secrets
     environment:

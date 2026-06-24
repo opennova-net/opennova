@@ -1,0 +1,27 @@
+{
+  "github_token": "op://OpenNova-Deploy/github/token",
+  "github_owner": "op://OpenNova-Deploy/github/owner",
+  "repository_secrets": {
+    "revx02": {
+      "AWS_ACCESS_KEY_ID": "op://OpenNova-Deploy/expansions-ci/access_key_id",
+      "AWS_SECRET_ACCESS_KEY": "op://OpenNova-Deploy/expansions-ci/secret_access_key",
+      "EXPANSION_PUBLISH_TOKEN": "op://OpenNova-Deploy/app-prod/expansion_publish_token",
+      "NOVAWORLD_SERVER_URL": "https://nw.op://OpenNova-Deploy/cloudflare/domain",
+      "DOWNLOADS_BUCKET": "downloads.op://OpenNova-Deploy/cloudflare/domain"
+    },
+    "onjo01": {
+      "AWS_ACCESS_KEY_ID": "op://OpenNova-Deploy/expansions-ci/access_key_id",
+      "AWS_SECRET_ACCESS_KEY": "op://OpenNova-Deploy/expansions-ci/secret_access_key",
+      "EXPANSION_PUBLISH_TOKEN": "op://OpenNova-Deploy/app-prod/expansion_publish_token",
+      "NOVAWORLD_SERVER_URL": "https://nw.op://OpenNova-Deploy/cloudflare/domain",
+      "DOWNLOADS_BUCKET": "downloads.op://OpenNova-Deploy/cloudflare/domain"
+    },
+    "ondx01": {
+      "AWS_ACCESS_KEY_ID": "op://OpenNova-Deploy/expansions-ci/access_key_id",
+      "AWS_SECRET_ACCESS_KEY": "op://OpenNova-Deploy/expansions-ci/secret_access_key",
+      "EXPANSION_PUBLISH_TOKEN": "op://OpenNova-Deploy/app-prod/expansion_publish_token",
+      "NOVAWORLD_SERVER_URL": "https://nw.op://OpenNova-Deploy/cloudflare/domain",
+      "DOWNLOADS_BUCKET": "downloads.op://OpenNova-Deploy/cloudflare/domain"
+    }
+  }
+}

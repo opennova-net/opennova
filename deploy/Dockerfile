@@ -16,6 +16,13 @@ ARG TERRAFORM_VERSION=1.9.5
 RUN apk add --no-cache \
         bash ca-certificates curl unzip jq openssh-client git
 
+# Note: the AWS CLI is NOT installed in this image. Python-based aws-cli does
+# not run on musl/Alpine (v1 hits a pyexpat/libexpat ABI skew; v2's bundled
+# PyInstaller needs glibc's dladdr1, absent under gcompat). Instead, the `aws`
+# subcommand in on-deploy runs the official glibc `amazon/aws-cli` image via the
+# Docker socket (mounted in docker-compose.deploy.yml) — always works, no
+# musl-python pain.
+
 # 1Password CLI
 RUN set -eux; \
     case "$(apk --print-arch)" in \
