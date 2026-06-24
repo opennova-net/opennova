@@ -28,7 +28,7 @@ remains unwitnessed/open as **D-PLAYERINFO-1**.
 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade + team) | **matching (read-only grill, 2026-06-23)** | `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_PopulateAllControls @ 0x5606f0`, `PlayerInfo_RegisterAllControls @ 0x561470`, cascade handlers `@ 0x560600`/`@ 0x560690` decompiled; no reimpl yet — the `player.mnu` host wiring is the next phase (D-PLAYERINFO-7/8/12) |
 | Voice preview + PLAYERVOICE list | **matching (read-only grill, 2026-06-23)** | `PlayerInfo_PreviewVoice @ 0x55ff70` (`VOICE_%d` via `g_MenuSoundBank`), `PlayerInfo_HandleVoiceSelect @ 0x55fe00` decompiled (D-PLAYERINFO-10) |
 | ACCEPT commit + profile persistence | **matching (read-only grill, 2026-06-23)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; profile field offsets + selection-state globals pinned (D-PLAYERINFO-9/12) |
-| Loadout (PRIMARY/SECONDARY/ACCESSORY + `*_AMMO*` + weight) | **matching (read-only grill, 2026-06-23)** | `populate_weapon_slot_lists @ 0x560430`, weapon table `@ 0x2540D08`, class/team mask filter; ammo `@ 0x55e8b0` + weight `@ 0x55f480` anchored (D-PLAYERINFO-11; weapon.def/ammo.def port is a separate phase) |
+| Loadout (PRIMARY/SECONDARY/ACCESSORY + `*_AMMO*` + weight) | **matching (read-only grill, 2026-06-23/24)** | producer `WeaponDef_ParseProperty @ 0x54d730` (full field map) + consumer `populate_weapon_slot_lists @ 0x560430`, weapon table `@ 0x2540D08`, class/team mask filter; ammo `@ 0x55e8b0` + weight `@ 0x55f480` anchored (D-PLAYERINFO-11; libs/def + NovaWeaponDatabase + host wiring is the open implementation) |
 
 ## Load entry — witness map
 
@@ -354,12 +354,46 @@ by `entry+68` (1/2/0); display name = `entry+0` (else the id at `entry-40`). A
 `[orig: WeaponDef_LoadAll @ 0x54dd10]` (zeroes `g_weaponDefTable @ 0x2540CE0`, 0xBF40 B,
 count `@ 0x2540CDC` starting at 1 with a `"None"` entry, then
 `File_ParseASCIIFile("weapon.def", WeaponDef_ParseProperty, key 0x2A56F6AD)`); the
-loadout table `@ 0x2540D08` is that table at `g_weaponDefTable + 0x28`. The reimpl's
-`libs/def` `DefWeaponDef` parses `weapon.def` but does **not** yet capture the
-slot/class/weight/team-mask the loadout filter reads — porting the loadout is a
-separate phase: grill `WeaponDef_ParseProperty` for those tokens, extend `libs/def`
-(weapon.def + ammo.def), add a `NovaWeaponDatabase` binding, then wire the combos +
-weight. Tracked in TODO.md (Player info / loadout).
+loadout table `@ 0x2540D08` is that table at `g_weaponDefTable + 0x28` (so the
+consumer's `+68/+72/+76` and the `-40` name fallback are the absolute offsets below
+minus `0x28`).
+
+**Producer field map — `[orig: WeaponDef_ParseProperty @ 0x54d730]`** (192 B/entry,
+written at `g_weaponDefTable + 192*count`; absolute offsets):
+
+| Off | weapon.def token | Meaning |
+|---|---|---|
+| `+0`   | `weapon "<id>"` | weapon id / raw name (char[]) |
+| `+32`  | `loadout_selectable` | **gate** — row appears only when non-zero |
+| `+36`  | `loadout_subclasses` | sub-entry expansion count |
+| `+40`  | `loadout_menu_textid` | display name = `GameText_GetString("WepDes", id)` ptr |
+| `+44`  | `loadout_menu_ttdesc` | tooltip (char[]) |
+| `+108` | `weapon_class` | **slot**: accessory=0, primary=1, secondary=2, grenade=3 |
+| `+112` | `teamfilter` | mask: `blue`/`yellow` `\|= 2`, `red`/`violet` `\|= 1` |
+| `+116` | `charfilter` | mask: medic=1, sniper=2, gunner=4, rifleman=8, engineer=16 |
+| `+120` | `weaponweight` | float |
+| `+124` | `startrounds` | int |
+| `+128` | `round_type` | ammo name = `GameText_GetString("WepDes", id)` ptr |
+| `+132` | `clipsize` | int |
+| `+136` | `maxclips` | int |
+| `+140` | `clipweight` | float |
+| `+144` | `loadout_menu_icon` | char[32] |
+| `+184`/`+188` | `flags` | lo/hi bit masks (table `off_830BF0`) |
+
+Consumer `populate_weapon_slot_lists @ 0x560430` shows a row when `loadout_selectable
+(+32) != 0` **and** `(charfilter +116 & g_playerInfoClassMask) != 0` **and**
+`(teamfilter +112 & g_playerInfoTeamMask) != 0`; routes by `weapon_class (+108)` (1→
+PRIMARY, 2→SECONDARY, 0→ACCESSORY; 3=grenade is handled by the ammo UI, not these
+three lists); display = `loadout_menu_textid (+40)` resolved string, else the raw
+`weapon_name (+0)`; `"NONE"` (`GameText "Menu"/"NONE"`) at index 0. Names resolve
+through `g_TextGameText` (Game.bin) section `"WepDes"` `[orig: GameText_GetString
+@ 0x51ebd0]` (REVX02's Game.bin ships that section empty, so names there fall back to
+raw ids; the retail install carries the strings).
+
+Reimpl plan (now fully witnessed; producer + consumer + masks): extend `libs/def`
+`DefWeaponDef` to capture the loadout fields above + add VFS (in-memory) parsers, add
+a `NovaWeaponDatabase` binding, then wire the host combos + ammo + weight. Tracked in
+TODO.md (Player info / loadout).
 
 ## Divergence / quirk catalog (D-PLAYERINFO)
 
@@ -378,7 +412,7 @@ stable.
 | D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | the loadout list is filtered by `(weapon.classMask & playerClassMask)` and `(teamMask & weapon.teamMask)`; the port gates the loadout by selected class + team. |
 | D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55ee10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | the host commit mirrors this field map, the automedic inversion, and the name validation; selections live in per-slot/per-team globals, not the profile. |
 | D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's voice; PLAYERVOICE list = DEFAULT_VOICE + per-character `CHARVOICE_%d` | voice preview needs the `menu.lwf` bank + the `VOICE_%d` trigger; the voice list is avatar-derived (`PlayerInfo_HandleVoiceSelect @ 0x55fe00`). |
-| D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `entry+68` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480` | the loadout port reads `weapon.def`/`ammo.def` into this slot/mask/weight model — a separate subsystem (Phase 4), not required for avatar-list population. |
+| D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `weapon_class +108` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480`. Producer `WeaponDef_ParseProperty @ 0x54d730` now grilled — full `weapon.def` field map (above). | the loadout port reads `weapon.def`/`ammo.def` into this slot/mask/weight model — implementation (libs/def + `NovaWeaponDatabase` + host wiring) is the open work; the format is fully witnessed. |
 | D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_charSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | the host keys avatar/loadout selection by (profile slot, team) and keeps it separate from the profile-level fields; the simplified single-profile host may collapse the slot dimension but must keep the team dimension (D-PLAYERINFO-5/7). |
 
 ## Implementation grill notes (2026-06-16)
