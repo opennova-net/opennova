@@ -3165,6 +3165,11 @@ retail gate-probe identity.
 
 ### 6.8 `ItemDef` health fields (net-spawn relevant)
 
+> The full 2780-byte `ItemDef` layout, the `type`/`attrib`/`attrib2` enums, and
+> the complete `ItemDef → GamePlayerEntity` copy table now live in
+> [`../world/itemdef-re.md`](../world/itemdef-re.md) (D-ITEMDEF-n). The two
+> health fields below are the net-spawn-relevant slice.
+
 The 2780-byte `ItemDef` got two fields lifted out of `pad_17C` during the spawn
 investigation:
 
