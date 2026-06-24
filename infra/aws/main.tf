@@ -610,12 +610,19 @@ resource "aws_cloudfront_distribution" "downloads" {
 
   aliases = [var.downloads_bucket_name]
 
+  # The downloads bucket is public-read, so CloudFront fetches over plain HTTPS
+  # from the bucket's regional REST endpoint — a custom HTTP origin, not an S3
+  # origin. (s3_origin_config with an empty origin_access_identity does not
+  # round-trip through the aws provider and produces a perpetual in-place diff.)
   origin {
     domain_name = aws_s3_bucket.downloads[0].bucket_regional_domain_name
     origin_id   = "downloads-s3-origin"
 
-    s3_origin_config {
-      origin_access_identity = ""
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 
