@@ -23,6 +23,12 @@ services:
     pull_policy: always
     build: !reset null
     network_mode: host
+    # The baked nginx.conf proxies to host.docker.internal:8080 (a Docker Desktop
+    # name). Under host networking on Linux that doesn't resolve and nginx
+    # [emerg]-exits. The server shares the host netns and listens on :8080, so map
+    # the name to the loopback so nginx reaches it.
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"
     env_file:
       - ../env/app.prod.env
 
