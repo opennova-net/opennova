@@ -264,7 +264,10 @@ cmd_state() {
   case "$action" in
     pull) log "pulling state '$doc' from vault…"
           mkdir -p "$(dirname "$statefile")"
-          op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force 2>/dev/null \
+          # `op document get --out-file` echoes the path to STDOUT — redirect it
+          # so it can't pollute captured output (e.g. `$(... infra output -raw)`,
+          # which runs a state pull first). All progress goes via log() to stderr.
+          op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force >/dev/null 2>&1 \
             && log "wrote $statefile" || log "no remote state yet (first run)" ;;
     push) log "pushing state to vault document '$doc'…"
           [ -f "$statefile" ] || die "no local state at $statefile"
