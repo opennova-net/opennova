@@ -35,13 +35,15 @@ GameRow row_to_game(const opennova::db::Row &r) {
 
 ExpansionRow row_to_expansion(const opennova::db::Row &r) {
 	ExpansionRow e;
-	e.id           = r.as_int(0).value_or(0);
-	e.slug         = r.as_text(1).value_or("");
-	e.display_name = r.as_text(2).value_or("");
-	e.summary      = r.as_text(3).value_or("");
-	e.version      = r.as_text(4).value_or("");
-	e.featured     = static_cast<int>(r.as_int(5).value_or(0));
-	e.game_slug    = r.as_text(6).value_or("");
+	e.id             = r.as_int(0).value_or(0);
+	e.slug           = r.as_text(1).value_or("");
+	e.display_name   = r.as_text(2).value_or("");
+	e.summary        = r.as_text(3).value_or("");
+	e.version        = r.as_text(4).value_or("");
+	e.featured       = static_cast<int>(r.as_int(5).value_or(0));
+	e.game_slug      = r.as_text(6).value_or("");
+	e.package_type   = r.as_text(7).value_or("");
+	e.install_subdir = r.as_text(8).value_or("");
 	return e;
 }
 
@@ -76,12 +78,31 @@ std::vector<GameRow> list_games(opennova::db::Database &db) {
 std::vector<ExpansionRow> list_expansions(opennova::db::Database &db) {
 	auto rows = db.query(
 		"SELECT e.id, e.slug, e.display_name, e.summary, e.version, "
-		"       e.featured, g.slug AS game_slug "
+		"       e.featured, g.slug AS game_slug, e.package_type, e.install_subdir "
 		"FROM expansions e JOIN games g ON g.id = e.game_id "
 		"ORDER BY e.featured DESC, e.slug;");
 	std::vector<ExpansionRow> out;
 	out.reserve(rows.size());
 	for (const auto &r : rows) out.push_back(row_to_expansion(r));
+	return out;
+}
+
+std::vector<ExpansionFileRow> list_expansion_files(opennova::db::Database &db,
+                                                   int64_t expansion_id) {
+	auto rows = db.query(
+		"SELECT download_url, sha256, size_bytes, file_type "
+		"FROM expansion_files WHERE expansion_id = ? ORDER BY order_index;",
+		{i64(expansion_id)});
+	std::vector<ExpansionFileRow> out;
+	out.reserve(rows.size());
+	for (const auto &r : rows) {
+		ExpansionFileRow f;
+		f.download_url = r.as_text(0).value_or("");
+		f.sha256       = r.as_text(1).value_or("");
+		if (auto v = r.as_int(2)) f.size_bytes = *v;
+		f.file_type    = r.as_text(3).value_or("archive");
+		out.push_back(std::move(f));
+	}
 	return out;
 }
 

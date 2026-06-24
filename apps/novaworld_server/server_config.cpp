@@ -32,6 +32,12 @@ uint64_t getenv_u64(const char *name, uint64_t fallback) {
 	}
 }
 
+bool getenv_bool(const char *name, bool fallback) {
+	const char *v = getenv_safe(name);
+	if (!v) return fallback;
+	return *v == '1' || *v == 't' || *v == 'T' || *v == 'y' || *v == 'Y';
+}
+
 } // namespace
 
 ServerConfig ServerConfig::from_env() {
@@ -45,6 +51,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("DATABASE_PATH"))       c.database_path = v;
 	if (auto v = getenv_safe("MIGRATIONS_DIR"))      c.migrations_dir = v;
 	if (auto v = getenv_safe("SEED_DIR"))            c.seed_dir = v;
+	c.seed_dev_users = getenv_bool("SEED_DEV_USERS", c.seed_dev_users);
 	if (auto v = getenv_safe("WEB_DIST_DIR"))        c.web_dist_dir = v;
 	if (auto v = getenv_safe("TEMPLATES_DIR"))       c.templates_dir = v;
 	if (auto v = getenv_safe("STATIC_DIR"))          c.static_dir = v;

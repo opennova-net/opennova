@@ -36,6 +36,9 @@ services:
       # never reaches the container. Without this the admin API stays CLOSED and
       # the web /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-dev-admin-token}
+      # Keep the local multi-client test accounts (test/foo) in dev only; prod
+      # leaves this unset so 0002_dev_users.sql is skipped.
+      SEED_DEV_USERS: "1"
       ONNET_CLIENT_REFLECT_IP: ${ONNET_CLIENT_REFLECT_IP:-192.168.10.120}
       # Two reflect ports, mirroring onnet's separate gate/nw_udp processes and
       # JO game.cfg. Each is the retail client's LOCAL UDP port for that socket

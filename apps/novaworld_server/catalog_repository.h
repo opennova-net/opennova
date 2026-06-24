@@ -38,6 +38,17 @@ struct ExpansionRow {
 	std::string version;
 	int         featured = 0;
 	std::string game_slug;
+	std::string package_type;
+	std::string install_subdir;
+};
+
+// A published file for an expansion (the launcher's Expansion Manager fetches
+// download_url to stage the package). Mirrors onnet's public api.py files[].
+struct ExpansionFileRow {
+	std::string                download_url;
+	std::string                sha256;
+	std::optional<int64_t>     size_bytes;
+	std::string                file_type;
 };
 
 struct ReleaseRow {
@@ -53,9 +64,10 @@ struct ReleaseRow {
 	std::optional<std::string> error_message;
 };
 
-std::vector<GameRow>      list_games(opennova::db::Database &db);
-std::vector<ExpansionRow> list_expansions(opennova::db::Database &db);
-std::vector<ReleaseRow>   list_recent_releases(opennova::db::Database &db, int limit);
+std::vector<GameRow>          list_games(opennova::db::Database &db);
+std::vector<ExpansionRow>     list_expansions(opennova::db::Database &db);
+std::vector<ExpansionFileRow> list_expansion_files(opennova::db::Database &db, int64_t expansion_id);
+std::vector<ReleaseRow>       list_recent_releases(opennova::db::Database &db, int limit);
 
 // --- Write side: the expansion-release / publish pipeline ----------------
 // Ported from onnet's onnw/admin.py + admin_internal.py +

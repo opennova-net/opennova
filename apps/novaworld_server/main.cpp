@@ -42,7 +42,8 @@ void install_signal_handlers() {
 }
 
 void apply_seed(opennova::db::Database &db,
-                const std::filesystem::path &seed_dir) {
+                const std::filesystem::path &seed_dir,
+                bool include_dev_users) {
 	if (!std::filesystem::exists(seed_dir)) {
 		std::printf("[boot] seed dir %s missing; skipping seed\n",
 		            seed_dir.string().c_str());
@@ -50,7 +51,16 @@ void apply_seed(opennova::db::Database &db,
 	}
 	std::vector<std::filesystem::path> files;
 	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
-		if (e.path().extension() == ".sql") files.push_back(e.path());
+		if (e.path().extension() != ".sql") continue;
+		// Dev-only seed (the `test`/`foo` accounts with public passwords) is
+		// skipped unless SEED_DEV_USERS is set — production must not create them.
+		if (!include_dev_users &&
+		    e.path().filename().string().find("dev_users") != std::string::npos) {
+			std::printf("[boot] seed skipped (dev-only): %s\n",
+			            e.path().filename().string().c_str());
+			continue;
+		}
+		files.push_back(e.path());
 	}
 	std::sort(files.begin(), files.end());
 	for (const auto &p : files) {
@@ -111,7 +121,7 @@ int main() {
 		return 1;
 	}
 
-	apply_seed(*dbh, config.seed_dir);
+	apply_seed(*dbh, config.seed_dir, config.seed_dev_users);
 
 	// --- Connection manager (shared across listeners) ---------------------
 	ConnectionManager manager(config.heartbeat_timeout_ms);

@@ -422,6 +422,34 @@ bool HttpListener::start(const ServerConfig &config) {
 		return e;
 	};
 
+	// Public expansion serialization (camelCase + files[]), faithful to onnet's
+	// onnw/api.py. The launcher's Expansion Manager consumes files[].downloadUrl
+	// to stage the package. Shared by GET /api/games (embedded per game) and
+	// GET /api/expansions.
+	auto expansion_card_json = [this](const catalog::ExpansionRow &x) {
+		crow::json::wvalue e;
+		e["slug"]        = x.slug;
+		e["displayName"] = x.display_name;
+		e["summary"]     = x.summary;
+		e["version"]     = x.version;
+		e["packageType"] = x.package_type;
+		e["featured"]    = x.featured;
+		crow::json::wvalue install;
+		install["target"] = x.install_subdir;
+		e["install"] = std::move(install);
+		std::vector<crow::json::wvalue> files;
+		for (const auto &f : catalog::list_expansion_files(db_, x.id)) {
+			crow::json::wvalue fj;
+			fj["downloadUrl"] = f.download_url;
+			fj["sha256"]      = f.sha256;
+			if (f.size_bytes) fj["sizeBytes"] = *f.size_bytes;
+			fj["fileType"]    = f.file_type;
+			files.push_back(std::move(fj));
+		}
+		e["files"] = std::move(files);
+		return e;
+	};
+
 	CROW_ROUTE(app, "/api/admin/server-status").methods("GET"_method)(
 	    [this, admin_authorized](const crow::request &req) {
 		if (!admin_authorized(req)) {
@@ -1178,9 +1206,13 @@ bool HttpListener::start(const ServerConfig &config) {
 		return res;
 	});
 
-	CROW_ROUTE(app, "/api/games")([this]() {
+	CROW_ROUTE(app, "/api/games")([this, expansion_card_json]() {
 		crow::json::wvalue out;
 		try {
+			// One expansions read, grouped per game below — onnet's
+			// api.py:list_games embeds each game's expansions (with files) so
+			// the Expansions page can render them under their title.
+			const auto exps = catalog::list_expansions(db_);
 			std::vector<crow::json::wvalue> arr;
 			for (const auto &g : catalog::list_games(db_)) {
 				crow::json::wvalue e;
@@ -1195,6 +1227,11 @@ bool HttpListener::start(const ServerConfig &config) {
 				e["executableName"] = g.executable_name;
 				e["ver1"]           = g.ver1;
 				e["ver2"]           = g.ver2;
+				std::vector<crow::json::wvalue> game_exps;
+				for (const auto &x : exps)
+					if (x.game_slug == g.slug)
+						game_exps.push_back(expansion_card_json(x));
+				e["expansions"] = std::move(game_exps);
 				arr.push_back(std::move(e));
 			}
 			out["games"] = std::move(arr);
@@ -1204,21 +1241,15 @@ bool HttpListener::start(const ServerConfig &config) {
 		return out;
 	});
 
-	CROW_ROUTE(app, "/api/expansions")([this]() {
+	CROW_ROUTE(app, "/api/expansions")([this, expansion_card_json]() {
 		crow::json::wvalue out;
 		try {
 			std::vector<crow::json::wvalue> arr;
 			for (const auto &x : catalog::list_expansions(db_)) {
-				crow::json::wvalue e;
-				// camelCase to match the web type + /api/games (the frontend
-				// reads displayName/gameSlug; snake_case here showed up as a
-				// localeCompare-on-undefined crash on the Expansions page).
-				e["slug"]        = x.slug;
-				e["displayName"] = x.display_name;
-				e["summary"]     = x.summary;
-				e["version"]     = x.version;
-				e["featured"]    = x.featured;
-				e["gameSlug"]    = x.game_slug;
+				// Faithful to onnet api.py: full card + files[]; gameSlug drives
+				// the web's standalone-vs-grouped split.
+				crow::json::wvalue e = expansion_card_json(x);
+				e["gameSlug"] = x.game_slug;
 				arr.push_back(std::move(e));
 			}
 			out["expansions"] = std::move(arr);

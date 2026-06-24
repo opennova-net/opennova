@@ -39,6 +39,12 @@ struct ServerConfig {
 	std::filesystem::path migrations_dir = "backend/migrations";
 	std::filesystem::path seed_dir       = "backend/seed";
 
+	// Whether to apply the dev-only seed files (0002_dev_users.sql — the
+	// `test`/`foo` accounts with publicly-documented passwords). OFF by
+	// default so production never creates them; the dev compose sets
+	// SEED_DEV_USERS=1 to keep the local multi-client test accounts.
+	bool seed_dev_users = false;
+
 	// Vue static assets (the `npm run build` output). Served by the HTTP
 	// fallback route. If missing, /api/* still works but the SPA route
 	// returns 404.
