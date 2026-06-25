@@ -34,7 +34,9 @@ int32_t heading_bam(int16_t yaw) {
 }
 
 // A world with one entity in each of the four pools (the four EntityKinds promote into).
-w::World make_four_pool_world() {
+// `pool1_ai_capable` stamps the pool-1 item's Entity::is_ai_capable (items.def AIData /
+// ItemDefAttrib & 0x100000), which gates the faithful 0x0D AI-trailer (D-NET-97).
+w::World make_four_pool_world(bool pool1_ai_capable = false) {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
@@ -60,6 +62,7 @@ w::World make_four_pool_world() {
 	item.yaw = 90;
 	item.team = 1;
 	item.health = 250;
+	item.is_ai_capable = pool1_ai_capable;
 	world.registry.spawn(1, item);
 
 	w::Entity building;
@@ -102,8 +105,24 @@ bool run_pool0_organic() {
 	return true;
 }
 
-bool run_pool1_spawn() {
-	w::World world = make_four_pool_world();
+// The non-AI-trailer fields are identical regardless of AI-capability; share the check.
+bool check_pool1_common(const nw::PoolSpawnRecord &r) {
+	if (!expect(r.slot_id == w::EntityHandle::make(1, 0).packed, "slot_id = pool-1 handle")) return false;
+	if (!expect(r.item_type_id == 0x050E, "item type id")) return false;
+	if (!expect(r.entity_name == "crate", "name carried")) return false;
+	if (!expect(r.pos_x == w::to_fixed(30.0), "pos 16.16")) return false;
+	if (!expect(r.euler_z == heading_bam(90), "euler_z = engine heading BAM")) return false;
+	if (!expect(r.team_byte == 1, "team carried")) return false;
+	if (!expect(r.health_short == 250, "health carried (0x8000 path)")) return false;
+	return true;
+}
+
+// AI-capable pool-1 item (Entity::is_ai_capable = items.def AIData / ItemDefAttrib & 0x100000):
+// the 0x0D record FAITHFULLY carries the 0x0800 AI-trailer — matching the stock decoder's own
+// gate (itemDef.attrib & 0x100000 @0x433327), so it is crash-safe (the strcpy @0x433370 reads a
+// valid in-packet NUL-terminated name). [D-NET-97]
+bool run_pool1_spawn_ai_capable() {
+	w::World world = make_four_pool_world(/*pool1_ai_capable=*/true);
 	nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);
 	if (!expect(batch.records.size() == 1, "exactly one pool-1 item")) return false;
 
@@ -112,20 +131,31 @@ bool run_pool1_spawn() {
 	if (!expect(nw::decode_pool_spawn_batch(wire.data(), wire.size(), out), "0x0D round-trip")) return false;
 	if (!expect(out.records.size() == 1, "one decoded item")) return false;
 	const nw::PoolSpawnRecord &r = out.records[0];
-	if (!expect(r.slot_id == w::EntityHandle::make(1, 0).packed, "slot_id = pool-1 handle")) return false;
-	if (!expect(r.item_type_id == 0x050E, "item type id")) return false;
-	if (!expect(r.entity_name == "crate", "name carried")) return false;
-	if (!expect(r.pos_x == w::to_fixed(30.0), "pos 16.16")) return false;
-	if (!expect(r.euler_z == heading_bam(90), "euler_z = engine heading BAM")) return false;
-	if (!expect(r.team_byte == 1, "team carried")) return false;
-	if (!expect(r.health_short == 250, "health carried (0x8000 path)")) return false;
-	// Every pool-1 record carries a forced 0x0800 AI-trailer so an AI-capable item def never hits
-	// the stock 0x0D decoder's flag-clear strcpy crash (@0x433370, D-NET-97). ai_name is the
-	// in-packet NUL-terminated strcpy source; the profiles mirror pos like the retail trucks.
-	if (!expect((r.spawn_flags & 0x0800) != 0, "0x0800 AI-trailer forced on every pool-1 record")) return false;
+	if (!check_pool1_common(r)) return false;
+	if (!expect((r.spawn_flags & 0x0800) != 0, "0x0800 AI-trailer present for AI-capable item")) return false;
 	if (!expect(r.ai_name == "crate", "ai_name carried (the strcpy-safe trailer name)")) return false;
 	if (!expect(r.ai_profile_1 == w::to_fixed(30.0), "ai_profile_1 mirrors pos_x (retail trailer convention)")) return false;
-	std::printf("PASS pool1_spawn\n");
+	std::printf("PASS pool1_spawn_ai_capable\n");
+	return true;
+}
+
+// Non-AI pool-1 item (Entity::is_ai_capable = false): the 0x0D record carries NO AI-trailer —
+// the 0x0800 flag is clear and no name rides the wire, matching retail (the stock decoder never
+// enters its attrib-gated strcpy for a non-AI item). [D-NET-97]
+bool run_pool1_spawn_non_ai() {
+	w::World world = make_four_pool_world(/*pool1_ai_capable=*/false);
+	nw::PoolSpawnBatch batch = ns::build_pool1_spawn_batch(world);
+	if (!expect(batch.records.size() == 1, "exactly one pool-1 item")) return false;
+
+	std::vector<uint8_t> wire = nw::encode_pool_spawn_batch(batch);
+	nw::PoolSpawnBatch out;
+	if (!expect(nw::decode_pool_spawn_batch(wire.data(), wire.size(), out), "0x0D round-trip")) return false;
+	if (!expect(out.records.size() == 1, "one decoded item")) return false;
+	const nw::PoolSpawnRecord &r = out.records[0];
+	if (!check_pool1_common(r)) return false;
+	if (!expect((r.spawn_flags & 0x0800) == 0, "0x0800 AI-trailer absent for non-AI item")) return false;
+	if (!expect(r.ai_name.empty(), "no ai_name on a non-AI record")) return false;
+	std::printf("PASS pool1_spawn_non_ai\n");
 	return true;
 }
 
@@ -205,7 +235,8 @@ bool run_pools_are_disjoint() {
 int main() {
 	bool ok = true;
 	ok = run_pool0_organic() && ok;
-	ok = run_pool1_spawn() && ok;
+	ok = run_pool1_spawn_ai_capable() && ok;
+	ok = run_pool1_spawn_non_ai() && ok;
 	ok = run_pool2_static() && ok;
 	ok = run_pool2_static_slot_alignment() && ok;
 	ok = run_pool3_marker() && ok;

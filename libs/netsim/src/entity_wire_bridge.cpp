@@ -115,22 +115,19 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		rec.pos_z = world::to_fixed(e.position.z);
 		rec.euler_z = engine_heading_bam(e.yaw);
 		rec.team_byte = e.team;
-		// Force the 0x0800 AI-trailer on EVERY pool-1 record so the stock 0x0D decoder never
-		// crashes. [orig: NapiNPClientMsg_0x00D @0x432c40] READS the trailer when the wire flag
-		// 0x0800 is set (@0x433111), but only WRITES it to the entity's aiSlot when the item def is
-		// AI-capable (itemDef.attrib & 0x100000, @0x433327); the unguarded strcpy @0x433370 then
-		// copies aiNameStr. The crash is ONLY 0x0800-CLEAR + AI-capable: aiNameStr is NULL -> strcpy
-		// reads [NULL]. Over-emitting the trailer on a plain non-AI structure (HQ/tent) is
-		// read-and-discarded (the aiSlot block is attrib-gated) — witnessed safe. libs/def has no
-		// faithful attrib source (D-NET-97), so rather than risk an under-emit crash on a
-		// mis-classified AI item, we ALWAYS emit a valid in-packet NUL-terminated ai_name (e.name)
-		// + the retail opaque profiles (pos mirror). DIVERGENCE from retail's attrib-gated trailer,
-		// tracked as a D-NET-97 follow-up (gate on attrib once libs/def parses it).
-		rec.ai_name = e.name;
-		rec.ai_profile_1 = rec.pos_x; // retail mirrors pos into the opaque AI profiles (aiSlot+0x10/+0x14)
-		rec.ai_profile_2 = rec.pos_y;
-		if (rec.ai_name.empty() && !rec.ai_profile_1 && !rec.ai_profile_2)
-			rec.ai_profile_1 = 1; // guarantee the encoder's 0x0800 gate fires even at the world origin
+		// Faithful 0x0800 AI-trailer gate: emit the trailer ONLY for AI-capable item defs
+		// (items.def ItemDefAttrib & 0x100000 = AIData, resolved into Entity::is_ai_capable). This
+		// matches the stock 0x0D decoder's own gate exactly (itemDef.attrib & 0x100000 @0x433327),
+		// so it is BOTH byte-faithful (retail emits the trailer iff AI-capable) AND crash-safe (the
+		// decoder strcpys the trailer name @0x433370 iff AI-capable, so an AI-capable record always
+		// carries a valid in-packet NUL-terminated name). [orig: NapiNPClientMsg_0x00D @0x432c40; D-NET-97]
+		if (e.is_ai_capable) {
+			rec.ai_name = e.name;          // strcpy source @0x433370 (empty = one 0x00, still safe)
+			rec.ai_profile_1 = rec.pos_x;  // retail mirrors pos into the opaque AI profiles (aiSlot+0x10/+0x14)
+			rec.ai_profile_2 = rec.pos_y;
+			if (rec.ai_name.empty() && !rec.ai_profile_1 && !rec.ai_profile_2)
+				rec.ai_profile_1 = 1;      // guarantee the encoder's 0x0800 gate fires even at the world origin
+		}
 		// health rides the 0x8000-only path when alive (the encoder gates on health_short).
 		if (e.health > 0 && e.health <= 0xFFFF)
 			rec.health_short = static_cast<uint16_t>(e.health);

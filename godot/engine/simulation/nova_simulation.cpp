@@ -15,6 +15,7 @@
 #include <novaworld/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
 #include <mission/bms.h>
+#include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
 #include <mission/mission_systems.h>
 #include <world/angle.h>
 #include <world/player_spawn.h>
@@ -186,6 +187,31 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 		if (adm_id >= 0) e->inf.adm_id = adm_id;
 	}
 	apply_root_motion_to_ai();
+}
+
+// Stamp every live entity's Entity::is_ai_capable from its items.def ItemDefAttrib & 0x100000
+// (AIData) via the item database. The host's pool-1 0x0D world-stream then emits its AI-trailer
+// iff the item is AI-capable — matching the stock 0x0D decoder's own gate exactly (itemDef.attrib
+// & 0x100000 @0x433327), so the wire is BOTH byte-faithful and crash-safe. The registry's for_each
+// is const-only, so collect the live handles first, then re-fetch each as a mutable Entity* (the
+// non-const get overload) — the same mutate-by-handle shape resolve_infantry_adm_ids uses.
+//
+// ID SPACE (load-bearing): Entity::item_id is the WIRE type id — the small on-disk .bms type that
+// build_pool*_batch puts on the wire verbatim (e.g. 0x050E). NovaItemDatabase is keyed by the
+// items.def id, which is wire + kItemIdOffset (mission_bms_test: bms_type_id 1291 -> item_id
+// 101291; nova_net_client.cpp wire = def_id - 100000). The offset here is mandatory: without it
+// is_ai_capable misses EVERY pool-1 item, all trailers drop, and an AI-capable vehicle re-triggers
+// the stock decoder's flag-clear strcpy crash.
+// [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
+void NovaSimulation::resolve_item_ai_capability(const Ref<NovaItemDatabase> &p_item_db) {
+	if (!world_ || p_item_db.is_null()) return;
+	std::vector<opennova::world::EntityHandle> handles;
+	world_->registry.for_each([&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
+	for (const opennova::world::EntityHandle h : handles) {
+		opennova::world::Entity *e = world_->registry.get(h);
+		if (!e) continue;
+		e->is_ai_capable = p_item_db->is_ai_capable(static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset);
+	}
 }
 
 opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
@@ -396,6 +422,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_item_seat_specs", "specs"), &NovaSimulation::set_item_seat_specs);
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
+	ClassDB::bind_method(D_METHOD("resolve_item_ai_capability", "item_db"), &NovaSimulation::resolve_item_ai_capability);
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);

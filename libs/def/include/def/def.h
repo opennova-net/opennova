@@ -149,6 +149,8 @@ typedef struct DefItemDef {
     char move_function[16];
     char render_function[16];
     char disk_function[16];
+    unsigned int attrib;   /* ItemDefAttrib (+0x54) bitmask; attrib: tokens -> bits. AIData 0x100000 = AI class. [orig: ItemDef_ParseProperty; docs/world/itemdef-re.md] */
+    unsigned int attrib2;  /* ItemDefAttrib2 (+0x58) bitmask. */
     char (*raw_lines)[512];
     size_t raw_lines_count;
 } DefItemDef;

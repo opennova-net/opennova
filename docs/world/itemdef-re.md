@@ -23,7 +23,7 @@ behavioral ctest is produced here — the evidence is the cited decompilation.
 | `ItemDef` struct layout (2780 B) | **MATCHING (read-only grill)** | 142 members named from the parser/dumper/allocator/resolver/loader; field offsets witnessed by `ItemDef_ParseProperty @0x49eb00`, `ItemDef_DumpToFile @0x49e250`, `ItemDef_AllocateWithDefaults @0x49e3b0`, `ItemDef_ResolveAllResources @0x49e5f0`, `EntityDef_LoadModelsAndCallbacks @0x439f50` |
 | `ItemDef → GamePlayerEntity` copy | **MATCHING** | `Entity_InitFromItemDef @0x49e550` decompiles field-for-field clean (callbacks/models/health/armor/timer) |
 | `type` enum (`ItemDef+0x5c`) | **DIVERGENT** | `libs/def` `item_type_from_string` uses different integer values than the engine — see **D-ITEMDEF-1** |
-| `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented** | full bit map witnessed in `ItemDef_ParseProperty`; not yet consumed by `libs/` (no conflict surface) |
+| `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented + parsed** | full bit map witnessed in `ItemDef_ParseProperty`; now parsed into `DefItemDef.attrib`/`attrib2` (`libs/def`, `attrib:` token line) and consumed by the net `0x0D` AI-trailer gate (`Entity::is_ai_capable` ← `attrib & 0x100000` / `AIData`; see net-re D-NET-97) |
 | `DefItemDef` parsed model (`libs/def`) | **partial, MATCHING on covered fields** | parses a faithful subset (id/type/graphic/anim_def/husk/hp/sound_profile/soundloops/shots/`*_function`); the runtime struct is far wider (see follow-ups) |
 
 ## Globals

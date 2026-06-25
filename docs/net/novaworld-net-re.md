@@ -2855,20 +2855,25 @@ assigns the pool at promotion by BMS `EntityKind`: `Organic→0`, `Item→1`, `B
 per-pool wire BYTES stay §5.x-faithful (each `encode_*_batch` round-trips its witnessed decoder); only the
 static-vs-destructible split heuristic differs.
 
-**Why pool-1 `0x0D` is deferred (a live crash, not theoretical):** the retail `0x0D` decoder
-`[orig: NapiNPClientMsg_0x00D @0x432c40]` enters an AI-name `strcpy` **whenever the record's item def is
-AI-capable** (`if (itemDef->attrib & 0x100000)` `@0x433327`), reading the `0x0800` AI-trailer name pointer
-`aiNameStr`. That pointer is **NULL unless the record set spawn-flag `0x0800`** — and the original serializer
-GUARANTEES `0x0800` for any AI-capable item def. Our `build_pool1_spawn_batch` never populates the AI trailer
-(it has no item-def access in libs/netsim), so an `EntityKind::Item` that maps to an AI-capable retail item
-def crashes the stock client at **`0x433370`** (`mov cl,[edx]` with `edx==0` → access violation reading
-`0x00000000`; SYSDUMP confirmed 2026-06-25, last packet `#13`=`0x0D`). The pool-0 (`0x0C`), pool-2 (`0x10`)
-and pool-3 (`0x20`) handlers are crash-safe (`0x0C` reads its name inline/always-present; `0x10`/`0x20` have
-no name/AI branch). **Fix path to re-enable pool-1:** populate the `0x0D` AI trailer (`ai_name` + profiles)
-from item-def AI flags at the host emit layer (`NovaItemDatabase`, `itemDef+604`) so `0x0800` is set whenever
-the item is AI-capable — the invariant the original maintains. Until then `stream_world_state_to_peer` skips
-the `0x0D` phase. Byte-matching a specific retail mission also wants the item-def flag gate from
-`serialize_entity_pool_to_packet_0 @0x503940`.
+**Pool-1 `0x0D` AI-trailer — now FAITHFULLY gated (was a live crash, RESOLVED 2026-06-25):** the retail
+`0x0D` decoder `[orig: NapiNPClientMsg_0x00D @0x432c40]` enters an AI-name `strcpy` **whenever the record's
+item def is AI-capable** (`if (itemDef->attrib & 0x100000)` `@0x433327`), reading the `0x0800` AI-trailer name
+pointer `aiNameStr`. That pointer is **NULL unless the record set spawn-flag `0x0800`** — and the original
+serializer GUARANTEES `0x0800` for any AI-capable item def. The crash window is therefore exactly:
+`0x0800`-clear **and** AI-capable → `aiNameStr==NULL` → `strcpy[NULL]` at **`0x433370`** (`mov cl,[edx]` with
+`edx==0` → access violation; SYSDUMP confirmed 2026-06-25, last packet `#13`=`0x0D`). **Fix (landed):**
+`build_pool1_spawn_batch` now emits the `0x0800` AI-trailer **iff the entity is AI-capable**
+(`Entity::is_ai_capable`), which is resolved from `items.def ItemDefAttrib & 0x100000` (the `AIData` token) —
+parsed into `DefItemDef.attrib` (`libs/def`), surfaced as `NovaItemDatabase::is_ai_capable`, and stamped onto
+every live entity by the host's `NovaSimulation::resolve_item_ai_capability` post-load pass (called from
+`MissionRuntime` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
+decoder's own gate (`attrib & 0x100000`), an AI-capable record ALWAYS carries the `0x0800` flag + a valid
+in-packet NUL-terminated name → byte-faithful (retail emits the trailer iff AI-capable) AND crash-safe. The
+earlier dc90f64f stopgap (force `0x0800` on EVERY pool-1 record) is removed — no remaining divergence on the
+trailer. The pool-0 (`0x0C`), pool-2 (`0x10`) and pool-3 (`0x20`) handlers are crash-safe (`0x0C` reads its
+name inline/always-present; `0x10`/`0x20` have no name/AI branch). Byte-matching a specific retail mission
+also wants the item-def flag gate from `serialize_entity_pool_to_packet_0 @0x503940` (the pool ROUTING split,
+still by `EntityKind` here — the residual D-NET-97 simplification).
 
 **D-NET-98 [SCOPE — the load-time world-stream is the DYNAMIC set, not the full static mission].** The
 golden retail capture `.scratch/host_and_join_lan.pcapng` (a real host+join, mission dvxi5) shows the host's

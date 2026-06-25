@@ -26,6 +26,7 @@ private:
 	struct Item {
 		int id = 0;
 		int type = 0;
+		uint32_t attrib = 0; // items.def ItemDefAttrib (+0x54); 0x100000 = AIData (AI class)
 		String display_name;
 		String graphic;
 		String anim_def;
@@ -83,6 +84,11 @@ public:
 	String get_ai_function(int id) const;
 	String get_move_function(int id) const;
 	int get_item_type(int id) const;
+	// items.def ItemDefAttrib & 0x100000 (AIData): true when the item def is AI-capable. The
+	// host's pool-1 0x0D stream gates the AI-trailer on this so the wire matches the stock
+	// decoder's own gate (itemDef.attrib & 0x100000 @0x433327). [docs/world/itemdef-re.md;
+	// docs/net/novaworld-net-re.md D-NET-97]
+	bool is_ai_capable(int id) const;
 	String get_display_name(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.

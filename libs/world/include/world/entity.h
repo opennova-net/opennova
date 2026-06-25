@@ -81,6 +81,8 @@ struct Entity {
 
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
+    bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
+                                // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
 
     Vec3 position;            // mission space (Z-up)
     int16_t yaw = 0;
