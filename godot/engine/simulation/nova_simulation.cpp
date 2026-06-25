@@ -1298,18 +1298,116 @@ void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &pee
 	}
 }
 
+void NovaSimulation::stream_world_state_to_peer(const opennova::PeerAddr &peer) {
+	if (!world_ || !accept_) return;
+	auto rpit = remote_peers_.find(peer);
+	if (rpit == remote_peers_.end()) return;
+	RemotePeer &rp = rpit->second;
+	if (rp.world_streamed) return; // stream the world exactly once, during load
+
+	// SCOPE — stream only the DYNAMIC/networked entity set, NOT the full static mission.
+	// The golden retail capture (.scratch/host_and_join_lan.pcapng) proves a real host's
+	// world-stream is a SMALL per-pool batch during load: empty 0x10, ~5 organics in 0x0C, a
+	// few markers in 0x20 — it does NOT stream the hundreds of buildings/markers. In the
+	// original, static geometry (buildings, nav markers) is CLIENT-LOCAL mission data loaded
+	// from the .bms; only players + AI (pool-0 organics) are server-authoritative and streamed.
+	// Our promote_mission over-populates the networked pools with the entire static mission
+	// (here 816 statics + 497 markers), so streaming pools 2/3 in full floods the client and
+	// walks Pool_GetEntryUnchecked past its capacity -> reset/reload/kick. So: organics (0x0C) +
+	// pool-1 items/vehicles/emplacements (0x0D) — the networkable dynamic set — with empty 0x10
+	// and a small spawn-marker 0x20 to drive the witnessed load-progress phases (NapiNPClientMsg_
+	// 0x010 sets g_loading_progress=2, _0x020 sets 5). Pool-1 0x0D is NOW streamed: every record
+	// carries a forced 0x0800 AI-trailer (build_pool1_spawn_batch) so an AI-capable item def never
+	// hits the decoder's flag-clear strcpy crash (D-NET-97). Static buildings (pool-2) stay
+	// CLIENT-LOCAL (loaded from the .bms), not a host broadcast. [D-NET-98, net-re §5.2a/§5.38c]
+	opennova::OrganicSpawnBatch organics = opennova::netsim::build_pool0_organic_batch(*world_);
+	// Drop remote-peer entities from the pool-0 organic batch — each joiner's OWN player is
+	// streamed by announce_joiner_organic_spawn with its dcb at entity+0x78 (entity_flags) +
+	// minimap 0x100; re-emitting it here with entity_flags 0 would break the retail dcb match.
+	auto is_remote_peer = [&](uint16_t handle_packed) {
+		for (const auto &kv : remote_peers_)
+			if (kv.second.entity.valid() && kv.second.entity.packed == handle_packed) return true;
+		return false;
+	};
+	organics.records.erase(
+			std::remove_if(organics.records.begin(), organics.records.end(),
+					[&](const opennova::OrganicSpawnRecord &r) { return is_remote_peer(r.slot_id); }),
+			organics.records.end());
+	organics.entity_count = static_cast<uint16_t>(organics.records.size());
+
+	constexpr size_t kRecPerMsg = 12;
+	auto send_body = [&](uint8_t tag, std::vector<uint8_t> body) {
+		std::vector<uint8_t> dg;
+		if (accept_->frame_in_match_s2c(peer, tag, std::move(body), dg)) send_datagram(peer, dg);
+	};
+
+	// 0x10 — empty pool-2 batch (phase marker; statics are client-local). Matches golden (len=4).
+	send_body(0x10, opennova::encode_static_entity_batch(opennova::StaticEntityBatch{}));
+	// 0x0D — pool-1 items / vehicles / emplacements (the mission's networkable dynamic objects).
+	// Every record carries a forced 0x0800 AI-trailer (build_pool1_spawn_batch) so an AI-capable
+	// item def never hits the stock decoder's flag-clear strcpy crash (@0x433370, D-NET-97). Paged
+	// like the organics; the stock decoder bounds-rejects any slot >= its pool-1 capacity
+	// (@0x432d00), so an over-capacity mission truncates safely rather than corrupting. Retail
+	// load order is 0x10 -> 0x0D -> 0x0C -> 0x20 [orig: Server_SendInitialGameStateToPlayer @0x51bba0].
+	opennova::PoolSpawnBatch pool1 = opennova::netsim::build_pool1_spawn_batch(*world_);
+	for (size_t base = 0; base < pool1.records.size(); base += kRecPerMsg) {
+		const size_t n = std::min(kRecPerMsg, pool1.records.size() - base);
+		opennova::PoolSpawnBatch page;
+		page.records.assign(pool1.records.begin() + base, pool1.records.begin() + base + n);
+		page.entity_count = static_cast<int16_t>(page.records.size());
+		send_body(0x0D, opennova::encode_pool_spawn_batch(page));
+	}
+	// 0x0C — the dynamic set: host player + AI organics, paged (slot id explicit per record).
+	for (size_t base = 0; base < organics.records.size(); base += kRecPerMsg) {
+		const size_t n = std::min(kRecPerMsg, organics.records.size() - base);
+		opennova::OrganicSpawnBatch page;
+		page.records.assign(organics.records.begin() + base, organics.records.begin() + base + n);
+		page.entity_count = static_cast<uint16_t>(page.records.size());
+		send_body(0x0C, opennova::encode_organic_spawn_batch(page));
+	}
+	// 0x20 — the SPAWN-POINT markers (the 60xx start family only, NOT all 497 nav markers). The
+	// client's spawn-select reads these via Entity_BuildSpawnPointList @0x42de40; with an empty
+	// pool-3 the joiner spams C2S 0x0f and never deploys -> timeout -> kicked to login (§5.38c).
+	// Streaming only the spawn family keeps the batch small (the flood is the full pool-3, D-NET-98).
+	opennova::Pool3SyncBatch spawns = opennova::netsim::build_pool3_spawn_marker_batch(*world_);
+	if (spawns.records.empty()) {
+		send_body(0x20, opennova::encode_pool3_sync_batch(opennova::Pool3SyncBatch{}));
+	} else {
+		for (size_t base = 0; base < spawns.records.size(); base += kRecPerMsg) {
+			const size_t n = std::min(kRecPerMsg, spawns.records.size() - base);
+			opennova::Pool3SyncBatch page;
+			page.start_index = static_cast<uint16_t>(base);
+			page.records.assign(spawns.records.begin() + base, spawns.records.begin() + base + n);
+			page.entity_count = static_cast<int16_t>(page.records.size());
+			send_body(0x20, opennova::encode_pool3_sync_batch(page));
+		}
+	}
+
+	rp.world_streamed = true;
+}
+
 void NovaSimulation::dispatch_host_accept_event(const opennova::PeerAddr &peer,
                                                 const opennova::HostAcceptEvent &ev) {
 	switch (ev.kind) {
 		case opennova::HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
-			// Early: spawn the joiner's pool-0 entity + stream its dcb-bearing 0x0C during
-			// the client's world-load, before the game-start bundle (F3). No 0x0A yet.
+			// Stream ONLY the joiner's own dcb-bearing 0x0C here, EARLY (during the client's
+			// world-load, before the game-start bundle). It must arrive before the client's
+			// Player_InitPlayer pool-0 self-scan (Player_FindLocalPlayerEntity @0x4e0090 ->
+			// Player_BuildNetIdLookupOrFatalError @0x4dff60 = fatal "Could not find player dcb").
+			// In our flow that scan runs BEFORE our bundle (the client is NOT held in the
+			// verify-WAIT like retail — see the plan's HOLD / Phase 2), so the joiner's OWN 0x0C
+			// cannot be deferred without re-crashing (proven twice). Keep it early. The WORLD
+			// snapshot (host player + AI organics + markers) is deferred to PeerSpawned so it
+			// follows the bundle's 0x0F world-state-load (retail order). net-re §5.38c.
 			announce_joiner_organic_spawn(peer, ev);
 			break;
 		case opennova::HostAcceptEvent::Kind::PeerSpawned:
-			// In-match: ensure the 0x0C went out (idempotent if streaming already did it),
-			// then bind the connection so the per-frame 0x0A starts.
+			// Fires in the SAME host_net_poll burst as the game-start bundle (the bundle and this
+			// event land in one HandleResult; host_net_poll ships r.outbound before r.events). So
+			// the WORLD snapshot streams AFTER the bundle's 0x0F — retail order. The joiner's own
+			// 0x0C call is idempotent (organic_announced latch) if PeerEnteredWorldStreaming ran.
 			announce_joiner_organic_spawn(peer, ev);
+			stream_world_state_to_peer(peer);
 			admit_remote_peer(peer, ev.pose);
 			break;
 		case opennova::HostAcceptEvent::Kind::PeerC2SInMatch: {
@@ -1486,6 +1584,16 @@ void NovaSimulation::joiner_net_poll() {
 			framed.reserve(1 + body.size());
 			framed.push_back(opennova::netsim::kTag0aFrameUpdate); // 0x0A
 			framed.insert(framed.end(), body.begin(), body.end());
+			joiner_feed_->push_inbound(framed);
+		}
+		// Feed the load-time world stream (0x0C/0x0D/0x10/0x20 spawn + static batches) the
+		// same way, so NetClientView upserts the FULL entity set — AI, buildings, items,
+		// markers — not just the host player. [net-re §5.2a world-stream]
+		for (const auto &tb : res.inbound_world) {
+			std::vector<uint8_t> framed;
+			framed.reserve(1 + tb.second.size());
+			framed.push_back(tb.first); // the original tag (0x0C/0x0D/0x10/0x20)
+			framed.insert(framed.end(), tb.second.begin(), tb.second.end());
 			joiner_feed_->push_inbound(framed);
 		}
 		// On the name-match: learn H + spawn the local player L at the advertised pose. L

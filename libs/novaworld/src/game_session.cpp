@@ -1201,12 +1201,15 @@ GameSessionDispatchResult GameSession::tick(GameSessionState &state,
 			state.state4_player_sync_requested = false;
 			state.state4_player_sync_sent = true;
 		}
-		if (pre_game_state4 &&
-				state.state4_player_sync_sent &&
-				!state.state4_loading_gate_queued &&
-				state.entity_batch_count >= 17) {
-			queue_state4_loading_gate(state, player_replication_state(), now_tick);
-		}
+		// The canned state-4 loading gate (queue_state4_loading_gate: verbatim retail-capture
+		// 0x0D/0x0C/0x20/0x45 spawn blobs) is DELIBERATELY NOT queued. It streamed entity-spawn-
+		// shaped messages to the joiner DURING the load WAIT, before the game-start bundle's 0x0F
+		// world-state-load — the inverse of retail, which sends no entity spawns during the wait
+		// and streams the world snapshot only AFTER the bundle. The live world snapshot now comes
+		// from NovaSimulation on PeerSpawned (after the bundle). Readiness
+		// (is_ready_for_late_spawn_acceptance) does not depend on this gate — it keys on
+		// loadout_synced/mission_status_received + entity_batch_count>0, which the empty 0x10
+		// heartbeat below still drives. See plan §"Server-state model" / net-re §5.38c.
 		if (!config_.replicated_entities.empty()) {
 			EntityBatchBuildResult batch = build_tag_10_entity_batch(
 					config_.replicated_entities, state.entity_batch_cursor, 620);

@@ -274,43 +274,29 @@ bool check_observed_loading_flow_enters_world_streaming() {
 	const int sync_tag10 = find_tag(sync_tick.replies, 0x10);
 	if (!expect(tag46 >= 0 && sync_tag10 >= 0 && tag46 < sync_tag10,
 			"state 4 player sync precedes the next tag=0x10")) return false;
-	std::vector<opennova::ProtocolMessage> loading_gate;
-	for (int i = 0; i < 64 && find_tag(loading_gate, 0x1A) < 0; ++i) {
+	// The canned state-4 loading gate (verbatim retail 0x0D/0x0C/0x20/0x45/0x7E/0x1A spawn
+	// blobs) is DELIBERATELY no longer queued: it streamed entity-spawn-shaped messages to the
+	// joiner DURING the load WAIT, before the game-start bundle's 0x0F world-state-load — the
+	// inverse of retail (which sends no entity spawns during the wait; the world snapshot
+	// follows the bundle, emitted live by NovaSimulation on PeerSpawned). Drive the stream and
+	// assert NONE of those canned spawn blobs appear, only the empty/replicated 0x10 heartbeat.
+	std::vector<opennova::ProtocolMessage> wait_phase;
+	for (int i = 0; i < 64; ++i) {
 		auto tick = session.tick(state, 300, static_cast<uint32_t>(400 + i));
-		loading_gate.insert(loading_gate.end(),
+		wait_phase.insert(wait_phase.end(),
 				std::make_move_iterator(tick.replies.begin()),
 				std::make_move_iterator(tick.replies.end()));
 	}
-	const int tag0d = find_tag(loading_gate, 0x0D);
-	const int pre_gate_tag16 = find_tag(loading_gate, 0x16);
-	const int tag0d_after_tag16 = find_tag(loading_gate, 0x0D, pre_gate_tag16 + 1);
-	const int tag0c = find_tag(loading_gate, 0x0C);
-	const int tag20 = find_tag(loading_gate, 0x20);
-	const int tag45 = find_tag(loading_gate, 0x45);
-	const int gate_tag16 = find_tag(loading_gate, 0x16, tag45 + 1);
-	const int second_tag45 = find_tag(loading_gate, 0x45, tag45 + 1);
-	const int tag7e = find_tag(loading_gate, 0x7E);
-	const int tag1a = find_tag(loading_gate, 0x1A);
-	if (!expect(count_tag(loading_gate, 0x0D) == 10,
-			"state 4 loading gate emits ten retail tag=0x0D chunks")) return false;
-	if (!expect(tag0d >= 0, "state 4 loading gate emits retail tag=0x0D chunks")) return false;
-	if (!expect(tag0c >= 0, "state 4 loading gate emits retail tag=0x0C pre-gate payload")) return false;
-	if (!expect(loading_gate[static_cast<size_t>(tag0c)].payload.size() ==
-			opennova::retail_loading_blobs::kState4Tag0cPreGate.size,
-			"state 4 tag=0x0C pre-gate payload length matches capture3")) return false;
-	if (!expect(tag20 >= 0, "state 4 loading gate emits retail tag=0x20 chunks")) return false;
-	if (!expect(tag45 >= 0, "state 4 loading gate emits retail tag=0x45 chunks")) return false;
-	if (!expect(pre_gate_tag16 >= 0 && tag0d_after_tag16 >= 0,
-			"state 4 loading gate groups retail player-list 0x16 before a tag=0x0D chunk")) return false;
-	if (!expect(gate_tag16 >= 0, "state 4 loading gate repeats retail player-list 0x16 before second tag=0x45")) return false;
-	if (!expect(second_tag45 >= 0, "state 4 loading gate emits second retail tag=0x45 chunk")) return false;
-	if (!expect(tag7e >= 0, "state 4 loading gate emits retail tag=0x7E")) return false;
-	if (!expect(tag1a >= 0, "state 4 loading gate emits retail tag=0x1A")) return false;
-	if (!expect(tag0d < pre_gate_tag16 && pre_gate_tag16 < tag0d_after_tag16 &&
-			tag0d_after_tag16 < tag0c && tag0c < tag20 &&
-			tag20 < tag45 && tag45 < gate_tag16 && gate_tag16 < second_tag45 &&
-			second_tag45 < tag7e && tag7e < tag1a,
-			"state 4 loading gate follows retail 0x0D/0x0C/0x20/0x45/0x16/0x45/0x7E/0x1A order")) return false;
+	if (!expect(find_tag(wait_phase, 0x0D) < 0,
+			"WAIT no longer emits the canned state-4 0x0D spawn blobs")) return false;
+	if (!expect(find_tag(wait_phase, 0x0C) < 0,
+			"WAIT no longer emits the canned state-4 0x0C pre-gate spawn payload")) return false;
+	if (!expect(find_tag(wait_phase, 0x20) < 0,
+			"WAIT no longer emits the canned state-4 0x20 spawn blobs")) return false;
+	if (!expect(find_tag(wait_phase, 0x45) < 0,
+			"WAIT no longer emits the canned state-4 0x45 blobs")) return false;
+	if (!expect(find_tag(wait_phase, 0x10) >= 0,
+			"WAIT still emits the 0x10 entity-batch heartbeat (drives entity_batch_count)")) return false;
 	if (!expect(!state.spawned, "tag=0x10 stream does not imply spawned")) return false;
 	if (!expect(state.entity_batch_count > 0, "entity batch counter advances")) return false;
 	return true;

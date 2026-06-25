@@ -2,8 +2,9 @@
 
 #include <cmath>      // std::lround
 
-#include <world/ai.h>   // AiEntity / AiSystem (engine-frame mirror)
-#include <world/geom.h> // to_fixed / from_fixed
+#include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
+#include <world/geom.h>        // to_fixed / from_fixed
+#include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)
 
 namespace opennova::netsim {
 
@@ -62,6 +63,155 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		out.push_back(s);
 	});
 	return out;
+}
+
+namespace {
+
+constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360 (matches snapshot_of)
+
+// Engine-frame heading BAM the wire carries at entity+16 — (90 - mission_yaw) deg, the
+// same convention snapshot_of writes and every spawn decoder reads (D-NET-86).
+int32_t engine_heading_bam(int16_t mission_yaw) {
+	return static_cast<int32_t>(static_cast<int64_t>(90 - mission_yaw) * kBamPerDegree);
+}
+
+} // namespace
+
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
+	OrganicSpawnBatch batch;
+	w.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 0) return;
+		OrganicSpawnRecord rec;
+		rec.slot_id = e.handle.packed;                 // the wire handle (pool<<12|slot)
+		rec.has_body = true;
+		rec.item_type_id = static_cast<uint16_t>(e.item_id);
+		rec.entity_flags = 0;                          // entity+0x78: the dcb-bearing self record
+		                                               // is streamed separately (announce_joiner_*)
+		rec.entity_name = e.name;
+		rec.minimap_flags = (e.item_id == 0x14B9) ? 0x100 : 0; // local-player/minimap-register flag
+		rec.pos_x = world::to_fixed(e.position.x);
+		rec.pos_y = world::to_fixed(e.position.y);
+		rec.pos_z = world::to_fixed(e.position.z);
+		rec.orientation = engine_heading_bam(e.yaw);
+		rec.team = e.team;
+		rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
+		rec.net_id = e.net_id;
+		batch.records.push_back(std::move(rec));
+	});
+	batch.entity_count = static_cast<uint16_t>(batch.records.size());
+	return batch;
+}
+
+PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
+	PoolSpawnBatch batch;
+	w.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 1) return;
+		PoolSpawnRecord rec;
+		rec.slot_id = e.handle.packed;
+		rec.item_type_id = static_cast<uint16_t>(e.item_id);
+		rec.entity_name = e.name;
+		rec.pos_x = world::to_fixed(e.position.x);
+		rec.pos_y = world::to_fixed(e.position.y);
+		rec.pos_z = world::to_fixed(e.position.z);
+		rec.euler_z = engine_heading_bam(e.yaw);
+		rec.team_byte = e.team;
+		// Force the 0x0800 AI-trailer on EVERY pool-1 record so the stock 0x0D decoder never
+		// crashes. [orig: NapiNPClientMsg_0x00D @0x432c40] READS the trailer when the wire flag
+		// 0x0800 is set (@0x433111), but only WRITES it to the entity's aiSlot when the item def is
+		// AI-capable (itemDef.attrib & 0x100000, @0x433327); the unguarded strcpy @0x433370 then
+		// copies aiNameStr. The crash is ONLY 0x0800-CLEAR + AI-capable: aiNameStr is NULL -> strcpy
+		// reads [NULL]. Over-emitting the trailer on a plain non-AI structure (HQ/tent) is
+		// read-and-discarded (the aiSlot block is attrib-gated) — witnessed safe. libs/def has no
+		// faithful attrib source (D-NET-97), so rather than risk an under-emit crash on a
+		// mis-classified AI item, we ALWAYS emit a valid in-packet NUL-terminated ai_name (e.name)
+		// + the retail opaque profiles (pos mirror). DIVERGENCE from retail's attrib-gated trailer,
+		// tracked as a D-NET-97 follow-up (gate on attrib once libs/def parses it).
+		rec.ai_name = e.name;
+		rec.ai_profile_1 = rec.pos_x; // retail mirrors pos into the opaque AI profiles (aiSlot+0x10/+0x14)
+		rec.ai_profile_2 = rec.pos_y;
+		if (rec.ai_name.empty() && !rec.ai_profile_1 && !rec.ai_profile_2)
+			rec.ai_profile_1 = 1; // guarantee the encoder's 0x0800 gate fires even at the world origin
+		// health rides the 0x8000-only path when alive (the encoder gates on health_short).
+		if (e.health > 0 && e.health <= 0xFFFF)
+			rec.health_short = static_cast<uint16_t>(e.health);
+		batch.records.push_back(std::move(rec));
+	});
+	batch.entity_count = static_cast<int16_t>(batch.records.size());
+	return batch;
+}
+
+StaticEntityBatch build_pool2_static_batch(const world::World &w) {
+	// The 0x10 record carries no slot id — the client's slot is start_index + iteration
+	// index — so emit slot-aligned: start at 0, one record per slot 0..max_live_slot, with
+	// empty-slot sentinels (item_type_id 0) for holes (faithful to the pool cursor walk).
+	StaticEntityBatch batch;
+	std::vector<const world::Entity *> by_slot;
+	int max_slot = -1;
+	w.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 2) return;
+		const int slot = e.handle.slot();
+		if (slot > max_slot) max_slot = slot;
+		if (static_cast<int>(by_slot.size()) <= slot) by_slot.resize(slot + 1, nullptr);
+		by_slot[slot] = &e;
+	});
+	if (max_slot < 0) return batch; // empty pool -> empty batch
+	batch.start_index = 0;
+	for (int slot = 0; slot <= max_slot; ++slot) {
+		StaticEntityRecord rec;
+		const world::Entity *e = by_slot[static_cast<size_t>(slot)];
+		if (e == nullptr) {
+			rec.is_empty_slot = true; // bare [u16 0] sentinel
+			batch.records.push_back(rec);
+			continue;
+		}
+		rec.item_type_id = static_cast<uint16_t>(e->item_id);
+		rec.pos_x = world::to_fixed(e->position.x);
+		rec.pos_y = world::to_fixed(e->position.y);
+		rec.pos_z = world::to_fixed(e->position.z);
+		rec.euler_z = engine_heading_bam(e->yaw); // entity+16 heading (gates 0x0001 if non-zero)
+		rec.team_byte = e->team;
+		batch.records.push_back(rec);
+	}
+	batch.entity_count = static_cast<int16_t>(batch.records.size());
+	return batch;
+}
+
+static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
+	Pool3SyncRecord rec;
+	rec.item_type_id = static_cast<uint16_t>(e.item_id);
+	rec.net_handle = e.handle.packed;            // entitySlot+124 — the wire handle (always)
+	rec.pos_x = world::to_fixed(e.position.x);   // entitySlot+4/8/12 (always)
+	rec.pos_y = world::to_fixed(e.position.y);
+	rec.pos_z = world::to_fixed(e.position.z);
+	rec.movement_val = static_cast<uint32_t>(engine_heading_bam(e.yaw)); // entry+16 BAM (D-NET-59)
+	rec.team_byte = e.team;
+	return rec;
+}
+
+Pool3SyncBatch build_pool3_marker_batch(const world::World &w) {
+	Pool3SyncBatch batch;
+	w.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 3) return;
+		batch.records.push_back(pool3_record_of(e));
+	});
+	batch.entity_count = static_cast<int16_t>(batch.records.size());
+	return batch;
+}
+
+Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w) {
+	Pool3SyncBatch batch;
+	w.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 3) return;
+		// Only the 60xx start-marker family — the spawn points the client's spawn-select reads.
+		bool is_spawn = false;
+		for (size_t i = 0; i < world::kSpawnMarkerStartTypeCount; ++i) {
+			if (e.item_id == world::kSpawnMarkerStartTypes[i]) { is_spawn = true; break; }
+		}
+		if (!is_spawn) return;
+		batch.records.push_back(pool3_record_of(e));
+	});
+	batch.entity_count = static_cast<int16_t>(batch.records.size());
+	return batch;
 }
 
 bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
