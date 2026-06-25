@@ -62,6 +62,19 @@ struct LobbyDispatchResult {
 	// Diagnostic label — the message name we dispatched ("ClientConnected",
 	// "ClientHostRequest", or "unknown:<name>"). Logged by the listener.
 	std::string label;
+
+	// Set on ClientPlayerEnterRequest: the joiner reports its own dcb
+	// (ConnectionId = its NapiNPConnection.unk_18) tagged with its GAME
+	// connection endpoint (IpAddress / PortNumber fields). The host correlates
+	// these to the in-match peer and stamps `ConnectionId` into that peer's S2C
+	// 0x0C organic-spawn `entity_flags` (entity+0x78), which the retail client
+	// matches against its own connection+0x18 in Player_FindLocalPlayerEntity
+	// @0x4e0090. [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0 reads
+	// ConnectionId/IpAddress/PortNumber from the connection's +0x18/+0x30/+0x34]
+	bool        has_player_enter = false;
+	uint32_t    player_connection_id = 0; // the joiner's dcb
+	std::string player_ip_field;          // IpAddress field, verbatim (decimal string)
+	uint16_t    player_game_port = 0;     // PortNumber field
 };
 
 // Utility: peel "ClientVarList" children out of a parsed Container into

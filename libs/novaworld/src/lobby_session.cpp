@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <iomanip>
 #include <random>
@@ -206,20 +207,31 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	else if (name == "ClientPlayerEnterRequest") {
 		NapiMessage reply;
 		reply.name = "ServerPlayerEnterResult";
-		std::string connection_id;
+		std::string connection_id, ip_field, port_field;
 		for (const auto &f : inner_message.fields) {
 			const auto value = field_to_string(&f);
 			if (f.name == "ConnectionId") {
 				connection_id = value;
 				set_field(reply, "ConnectionID", value);
 			} else {
+				if (f.name == "IpAddress")  ip_field = value;
+				if (f.name == "PortNumber") port_field = value;
 				set_field(reply, f.name, value);
 			}
 		}
 		if (connection_id.empty()) set_field(reply, "ConnectionID", "0");
 		set_field(reply, "Success", "1");
 		set_field(reply, "MsgCode", "0");
-		return {{std::move(reply)}, "ClientPlayerEnterRequest"};
+		// Surface the joiner's reported dcb + game endpoint so the host can stamp
+		// it into the in-match 0x0C entity_flags (see LobbyDispatchResult docs).
+		LobbyDispatchResult out{{std::move(reply)}, "ClientPlayerEnterRequest"};
+		out.has_player_enter = true;
+		out.player_connection_id = static_cast<uint32_t>(std::strtoul(
+				connection_id.empty() ? "0" : connection_id.c_str(), nullptr, 10));
+		out.player_ip_field = ip_field;
+		out.player_game_port = static_cast<uint16_t>(std::strtoul(
+				port_field.empty() ? "0" : port_field.c_str(), nullptr, 10));
+		return out;
 	}
 	// Retail sends ClientHostPlayerAdded immediately after a successful host
 	// registration (the host itself counts as the first player); onnet doesn't

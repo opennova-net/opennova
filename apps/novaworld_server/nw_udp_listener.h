@@ -130,6 +130,18 @@ private:
 	// route to the component without re-parsing PN each datagram.
 	HostSessionAccept accept_;
 	std::unordered_set<PeerAddr, PeerAddrHash> jo_peers_;
+	// Per-JO-peer dcb (the joiner's NapiNPConnection.unk_18) and pool-0 wire
+	// slot, assigned at PeerSpawned and stamped into the S2C 0x0C organic-spawn
+	// `entity_flags`/`slot_id`. dcb is taken from the lobby ClientPlayerEnterRequest
+	// the joiner sent (correlated by its reported game PortNumber); a join-order
+	// counter is the fallback when no lobby entry exists.
+	struct JoPeerSpawn { uint32_t dcb = 0; uint16_t slot = 0; bool announced = false; };
+	std::unordered_map<PeerAddr, JoPeerSpawn, PeerAddrHash> jo_spawns_;
+	uint32_t next_jo_dcb_ = 1;   // host/server reserves 0 (witnessed: dedicatedserver=0)
+	uint16_t next_jo_slot_ = 1;  // pool-0 slot counter for joiners
+	// game PortNumber -> ConnectionId(dcb), populated from the lobby
+	// ClientPlayerEnterRequest (the joiner reports its own unk_18 + game port).
+	std::unordered_map<uint16_t, uint32_t> dcb_by_game_port_;
 	mutable std::mutex lobby_states_mu_;
 	std::unordered_map<PeerAddr, LobbyConnState, PeerAddrHash> lobby_states_;
 	opennova::db::Database *db_ = nullptr;

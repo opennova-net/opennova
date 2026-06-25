@@ -9,6 +9,8 @@
 #include <novaworld/connection/manager.h>
 #include <novaworld/db/sqlite.h>
 #include <novaworld/host_repository.h>
+#include <novaworld/ingame_decode.h> // OrganicSpawnBatch/Record
+#include <novaworld/ingame_encode.h> // encode_organic_spawn_batch
 #include <novaworld/lobby_session.h>
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/protocol_message.h>
@@ -269,7 +271,62 @@ void NwUdpListener::run_loop() {
 			for (const auto &dg : result.outbound) {
 				opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
 			}
-			if (opcode == SESSION_OPCODE_CLIENT_GOODBYE) jo_peers_.erase(peer);
+			// React to the host-accept events (the in-engine listen server does
+			// this in NovaSimulation::host_net_poll; the standalone server used to
+			// DISCARD them, so the joiner never got a named, dcb-bearing 0x0C and
+			// the retail client fatal'd in Player_FindLocalPlayerEntity @0x4e0090).
+			// We have no World, so we don't admit_peer into a sim — we only stream
+			// the one S2C 0x0C organic-spawn the client needs to self-identify.
+			for (const auto &ev : result.events) {
+				if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
+					jo_spawns_.erase(peer);
+					continue;
+				}
+				if (ev.kind != HostAcceptEvent::Kind::PeerSpawned) continue;
+				JoPeerSpawn &js = jo_spawns_[peer];
+				if (js.announced) continue; // once per peer
+				js.announced = true;
+				// dcb = the joiner's own ConnectionId (unk_18) it reported in the
+				// lobby ClientPlayerEnterRequest, correlated by its game port; else
+				// a join-order fallback (host/server reserves 0).
+				{
+					std::lock_guard<std::mutex> lk(lobby_states_mu_);
+					auto it = dcb_by_game_port_.find(peer.port);
+					js.dcb = (it != dcb_by_game_port_.end()) ? it->second
+					                                          : next_jo_dcb_++;
+				}
+				js.slot = next_jo_slot_++; // pool-0 wire handle H
+
+				opennova::OrganicSpawnBatch batch;
+				batch.entity_count = 1;
+				opennova::OrganicSpawnRecord rec;
+				rec.slot_id = js.slot;          // pool 0, slot js.slot -> H
+				rec.has_body = true;
+				rec.item_type_id = 0x14B9;      // player infantry template
+				rec.entity_name = ev.peer_name; // joiner's ClientHello.co
+				rec.entity_flags = js.dcb;      // entity+0x78 == its connection+0x18
+				rec.minimap_flags = 0x100;      // entity+0x36 local-player/minimap bit
+				rec.pos_x = ev.pose.pos_x;
+				rec.pos_y = ev.pose.pos_y;
+				rec.pos_z = ev.pose.pos_z;
+				rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16;
+				rec.team = ev.pose.team;
+				rec.net_id = static_cast<uint16_t>(0x0200u + js.slot);
+				batch.records.push_back(rec);
+
+				std::vector<uint8_t> dg;
+				if (accept_.frame_in_match_s2c(
+				        peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
+					opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
+					std::printf("[nwudp] %s spawned -> 0x0C dcb=%u slot=%u name=%s\n",
+					            client_label.c_str(), js.dcb, js.slot,
+					            ev.peer_name.c_str());
+				}
+			}
+			if (opcode == SESSION_OPCODE_CLIENT_GOODBYE) {
+				jo_peers_.erase(peer);
+				jo_spawns_.erase(peer);
+			}
 			continue;
 		}
 
@@ -482,6 +539,19 @@ void NwUdpListener::run_loop() {
 						if (result.label.empty()) {
 							result = lobby_session_.dispatch(outer, lobby_state.lobby,
 							                                client_ip_str, from.port);
+						}
+						// The joiner reported its own dcb (ConnectionId) + game port
+						// in ClientPlayerEnterRequest. Record it so the JO branch can
+						// stamp it into that peer's 0x0C entity_flags (correlate by the
+						// game PortNumber == the JO peer's UDP source port). Under
+						// lobby_states_mu_ (held here); the JO branch locks it to read.
+						if (result.has_player_enter && result.player_game_port != 0) {
+							dcb_by_game_port_[result.player_game_port] =
+								result.player_connection_id;
+							std::printf("[nwudp] player-enter dcb=%u game_port=%u ip=%s\n",
+							            result.player_connection_id,
+							            result.player_game_port,
+							            result.player_ip_field.c_str());
 						}
 						if (!result.label.empty()) {
 							std::printf("[nwudp] %s SESSION recv name=%s -> %zu replies\n",

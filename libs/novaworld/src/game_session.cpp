@@ -313,9 +313,15 @@ std::vector<uint8_t> build_tag0c_local_player_entity(const GameSessionConfig &cf
 	append_u16_le(spawn, 0);      // slot_id: pool 0, slot 0.
 	spawn.push_back(1);           // full data.
 	append_u16_le(spawn, 0x14B9); // player item type.
-	append_u32_le(spawn, 0x3CDE); // ServerAuth MI.
+	// entity_flags (entity+0x78) = this record's dcb (NapiNPConnection.unk_18).
+	// This is the host/server's OWN slot-0 record; a dedicated server reserves
+	// dcb 0 (witnessed: "dedicatedserver" eFlags=0 in the retail capture). It was
+	// erroneously the ServerAuth MI (0x3CDE), which made this record claim a bogus
+	// dcb. [orig: NapiNPClientMsg_0x00C @0x42E730 field #4; player_ServerAdd
+	// @0x51cbc0 writes entity+0x78 = conn->unk_18]
+	append_u32_le(spawn, 0x00000000); // host/server dcb (0).
 	append_cstr(spawn, cfg.player_name);
-	append_u16_le(spawn, 0x0100); // PLAYER flag.
+	append_u16_le(spawn, 0x0100); // minimap/local-player flag (entity+0x36 bit 0x100).
 	append_u32_le(spawn, cfg.spawn_x);
 	append_u32_le(spawn, cfg.spawn_y);
 	append_u32_le(spawn, cfg.spawn_z);

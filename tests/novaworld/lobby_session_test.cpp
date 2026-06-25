@@ -282,6 +282,8 @@ int test_client_player_enter_request_returns_result() {
 	NapiMessage in;
 	in.name = "ClientPlayerEnterRequest";
 	in.fields.push_back({"ConnectionId", std::vector<uint8_t>{'4','2'}});
+	in.fields.push_back({"IpAddress", std::vector<uint8_t>{'2','0','8','6','5','3','4','4','8','0'}});
+	in.fields.push_back({"PortNumber", std::vector<uint8_t>{'6','2','6','0','0'}});
 	in.fields.push_back({"Pcid", std::vector<uint8_t>{'0','0','0','0','0','0','0','2'}});
 	auto r = sess.dispatch(in, state, "127.0.0.1", 32768);
 	TEST_EXPECT(r.label == "ClientPlayerEnterRequest");
@@ -292,6 +294,12 @@ int test_client_player_enter_request_returns_result() {
 	TEST_EXPECT(field_str(find_field(reply, "Pcid")) == "00000002");
 	TEST_EXPECT(field_str(find_field(reply, "Success")) == "1");
 	TEST_EXPECT(field_str(find_field(reply, "MsgCode")) == "0");
+	// The joiner's reported dcb + game endpoint are surfaced for the host to
+	// stamp into the in-match 0x0C entity_flags (correlate by game port).
+	TEST_EXPECT(r.has_player_enter);
+	TEST_EXPECT(r.player_connection_id == 42);
+	TEST_EXPECT(r.player_game_port == 62600);
+	TEST_EXPECT(r.player_ip_field == "2086534480");
 	return 0;
 }
 

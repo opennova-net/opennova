@@ -337,13 +337,16 @@ void print_organic_record(int index, const OrganicSpawnRecord &r) {
 		return;
 	}
 	std::printf("        record %d slot=%s type=%s name=%-12s pos=(%.1f, %.1f, %.1f) "
-	            "yaw=%.2f\xc2\xb0(0x%08x) team=0x%02x parent=%s\n",
+	            "yaw=%.2f\xc2\xb0(0x%08x) team=0x%02x parent=%s eFlags(+0x78)=0x%08x "
+	            "miniFlags(+36)=0x%04x%s net=0x%04x\n",
 	            index, handle_str(r.slot_id).c_str(),
 	            type_str(r.item_type_id).c_str(),
 	            ("\"" + r.entity_name + "\"").c_str(), fp16(r.pos_x), fp16(r.pos_y),
 	            fp16(r.pos_z),
 	            double(uint32_t(r.orientation)) / 4294967296.0 * 360.0,
-	            uint32_t(r.orientation), r.team, handle_str(r.parent_handle).c_str());
+	            uint32_t(r.orientation), r.team, handle_str(r.parent_handle).c_str(),
+	            r.entity_flags, r.minimap_flags,
+	            (r.minimap_flags & 0x100) ? " [LOCAL0x100]" : "", r.net_id);
 }
 
 void print_tag_0c(const std::vector<uint8_t> &body) {
@@ -1057,10 +1060,46 @@ void print_tag_44(const std::vector<uint8_t> &body) {
 	            unsigned(p.field0), int(p.net_id), unsigned(p.subtype), p.body_size);
 }
 
+// Render one NWU NapiMessage tree (lobby KV statement) indented.
+void print_napi_message(const NapiMessage &m, int depth) {
+	std::string pad(8 + depth * 2, ' ');
+	std::printf("%s<%s>\n", pad.c_str(), m.name.c_str());
+	for (const auto &f : m.fields) {
+		bool printable = !f.data.empty();
+		for (size_t i = 0; i + 1 < f.data.size(); ++i) // allow trailing NUL
+			if (f.data[i] < 0x20 || f.data[i] > 0x7e) { printable = false; break; }
+		if (printable) {
+			std::string v(f.data.begin(), f.data.end());
+			while (!v.empty() && v.back() == '\0') v.pop_back();
+			std::printf("%s  %s = \"%s\"\n", pad.c_str(), f.name.c_str(), v.c_str());
+		} else {
+			std::printf("%s  %s = ", pad.c_str(), f.name.c_str());
+			for (uint8_t b : f.data) std::printf("%02x ", b);
+			std::printf("(%zu B)\n", f.data.size());
+		}
+	}
+	for (const auto &c : m.children) print_napi_message(c, depth + 1);
+}
+
+// S2C/C2S tag 0x00 — the NWU lobby key-value statement stream (ClientConnected,
+// ServerVerifyResult, ClientPlayerEnterRequest/ServerPlayerEnterResult with
+// ConnectionId, ClientHostPlayerAdded/PlayerNumber, ...). Only when the payload
+// is a 0x02-framed container; otherwise (e.g. the in-match VERSIONCRCSTRING JOIN)
+// fall back to the hex sample the default case prints.
+bool print_tag_00_kv(const std::vector<uint8_t> &body) {
+	if (body.empty() || body[0] != 0x02) return false;
+	std::vector<NapiMessage> msgs;
+	size_t consumed = 0;
+	if (napi_stream_decode(body.data(), body.size(), msgs, &consumed) != 0 || msgs.empty())
+		return false;
+	for (const auto &m : msgs) print_napi_message(m, 0);
+	return true;
+}
+
 void print_payload(char dir, int frame, int tag,
-                   const std::vector<uint8_t> &payload) {
+                   const std::vector<uint8_t> &payload, int session = 0) {
 	const char *label = tag_label(dir, tag);
-	std::printf("[%c f=%-4d tag=0x%02x%s%s%s len=%zu]\n", dir, frame, tag,
+	std::printf("[%c f=%-4d s=%-5d tag=0x%02x%s%s%s len=%zu]\n", dir, frame, session, tag,
 	            label ? "[" : "", label ? label : "", label ? "]" : "",
 	            payload.size());
 	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
@@ -1102,6 +1141,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'C' && tag == 0x28) print_tag_28_c2s(payload);
 	else if (dir == 'C' && tag == 0x29) print_tag_29_c2s(payload);
 	else if (dir == 'C' && tag == 0x4C) print_tag_4c_c2s(payload);
+	else if (tag == 0x00 && print_tag_00_kv(payload)) { /* NWU KV rendered */ }
 	else if (!payload.empty()) std::printf("        %s\n",
 	                                       to_hex_sample(payload.data(),
 	                                                     payload.size()).c_str());
@@ -1169,10 +1209,21 @@ int main(int argc, char *argv[]) {
 	const char *path = nullptr;
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
+	bool stream_mode = false;
+	long max_frames = 0; // 0 = unlimited
+	long skip_frames = 0;
 	for (int i = 1; i < argc; ++i) {
 		const char *a = argv[i];
 		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
 			items_path = argv[++i];
+		} else if (std::strcmp(a, "--stream") == 0) {
+			stream_mode = true;
+		} else if (std::strcmp(a, "--max-frames") == 0 && i + 1 < argc) {
+			max_frames = std::strtol(argv[++i], nullptr, 10);
+			stream_mode = true; // a frame budget only makes sense streaming
+		} else if (std::strcmp(a, "--skip") == 0 && i + 1 < argc) {
+			skip_frames = std::strtol(argv[++i], nullptr, 10);
+			stream_mode = true;
 		} else if (a[0] == '0' && (a[1] == 'x' || a[1] == 'X')) {
 			tag_filter.insert(int(std::strtol(a, nullptr, 16)));
 		} else if (!path) {
@@ -1183,8 +1234,12 @@ int main(int argc, char *argv[]) {
 	if (!items_path) items_path = std::getenv("NW_PP_ITEMS");
 	if (!path || !*path) {
 		std::fprintf(stderr,
-		             "usage: nw_pp <capture-path> [--items <items.def>] [0xNN ...]\n"
+		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
+		             "[--max-frames N] [--skip N] [0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
+		             "       --stream decodes lazily (flat memory) for multi-GB "
+		             "captures; --skip N starts after N datagrams; --max-frames N "
+		             "stops after N (implies --stream)\n"
 		             "       or a hexcap text file (one '<srcport> <frame> "
 		             "<hex>' per line)\n"
 		             "       NW_INGAME_HEXCAP env supplies a hexcap path\n"
@@ -1198,6 +1253,47 @@ int main(int argc, char *argv[]) {
 	if (items_path && *items_path) {
 		const size_t n = load_items_def(items_path);
 		std::fprintf(stderr, "loaded %zu item names from %s\n", n, items_path);
+	}
+
+	// Streaming path: for multi-GB captures the whole-file load below OOMs. Feed
+	// each datagram straight into a resumable CaptureDecoder and print messages as
+	// they complete — flat memory regardless of file size (wire_capture.h). Only
+	// the pcap reader differs; the per-message print is identical to the batch path.
+	if (stream_mode && is_pcap_path(path)) {
+		opennova::CaptureDecoder decoder;
+		long seen = 0, printed_through = 0;
+		bool stopped_early = false;
+		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
+			++seen;
+			if (skip_frames > 0 && seen <= skip_frames) return true;
+			opennova::CaptureDatagram cd;
+			cd.frame_index = pk.frame_index;
+			cd.src_port = pk.srcport;
+			cd.dst_port = pk.dstport;
+			cd.payload = pk.payload; // copy: reference only valid during the callback
+			for (const auto &m : decoder.push(cd)) {
+				if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
+				const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
+				print_payload(m.dir, m.frame_index, display_tag, m.payload, m.session);
+			}
+			printed_through = pk.frame_index;
+			if (max_frames > 0 && (seen - skip_frames) >= max_frames) {
+				stopped_early = true;
+				return false; // budget reached — stop streaming
+			}
+			return true;
+		};
+		if (!net::stream_pcap_udp_file(path, on_dg)) {
+			if (!stopped_early) {
+				std::fprintf(stderr, "FAILED to stream pcap %s\n", path);
+				return 1;
+			}
+		}
+		std::fprintf(stderr,
+		             "streamed %ld datagrams from %s%s (through frame %ld)\n",
+		             seen, path, stopped_early ? " [budget reached]" : "",
+		             printed_through);
+		return 0;
 	}
 
 	std::vector<Datagram> dgrams;
@@ -1250,7 +1346,7 @@ int main(int argc, char *argv[]) {
 	for (const auto &m : decode_capture_to_messages(caps)) {
 		if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
 		const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
-		print_payload(m.dir, m.frame_index, display_tag, m.payload);
+		print_payload(m.dir, m.frame_index, display_tag, m.payload, m.session);
 	}
 	return 0;
 }

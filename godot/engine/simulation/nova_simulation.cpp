@@ -1209,6 +1209,7 @@ opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
 		const opennova::netsim::Connection conn{fresh.transport.get(),
 				opennova::netsim::TransportMode::Client, {}, 0};
 		fresh.conn_index = net_->add_connection(conn);
+		fresh.dcb_id = next_joiner_dcb_id_++; // host=2, first joiner=3 (retail scheme)
 		it = remote_peers_.emplace(peer, std::move(fresh)).first;
 	}
 	RemotePeer &rp = it->second;
@@ -1231,6 +1232,13 @@ void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &pee
 	if (!h.valid() || !world_ || !accept_) return;
 	const opennova::world::Entity *spawned = world_->registry.get(h);
 
+	// The dcb id this peer was assigned at admit; the retail client must find it at its own
+	// pool-0 entity+0x78 (== its local NP connection+0x18) or Player_FindLocalPlayerEntity
+	// @0x4e0090 returns NULL and Player_InitPlayer fatals ("Could not find player dcb").
+	uint32_t dcb_id = 0;
+	if (auto rpit = remote_peers_.find(peer); rpit != remote_peers_.end())
+		dcb_id = rpit->second.dcb_id;
+
 	opennova::OrganicSpawnBatch batch;
 	batch.entity_count = 1;
 	opennova::OrganicSpawnRecord rec;
@@ -1238,6 +1246,8 @@ void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &pee
 	rec.has_body = true;
 	rec.item_type_id = 0x14B9;          // player infantry template
 	rec.entity_name = ev.peer_name;     // the name-match key (the joiner's ClientHello.co)
+	rec.entity_flags = dcb_id;          // entity+0x78: matched against the client's local_session_id
+	rec.minimap_flags = 0x100;          // entity+0x36 bit 0x100: the local-player/minimap-register flag
 	rec.pos_x = ev.pose.pos_x;          // mission i32 16.16 — the host-advertised spawn
 	rec.pos_y = ev.pose.pos_y;
 	rec.pos_z = ev.pose.pos_z;
