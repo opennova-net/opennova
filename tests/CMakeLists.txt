@@ -1031,6 +1031,26 @@ target_link_libraries(client_session_loopback_test PRIVATE opennova_novaworld op
 target_include_directories(client_session_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_session_loopback COMMAND client_session_loopback_test)
 
+# Host registration through the REAL apps/novaworld_server NwUdpListener over a
+# loopback UDP socket (not the in-process LobbySession mock): drives ClientSession
+# to Verified, sends a ClientHostRequest, asserts the host shows in snapshot_hosted
+# (the /api/hosts + GSB source). Compiles the listener sources directly — they live
+# in the server exe, not a lib. No DB (snapshot reads in-memory lobby state).
+add_executable(nw_host_register_e2e_test
+    novaworld/nw_host_register_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nw_host_register_e2e_test PRIVATE
+    opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_host_register_e2e_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server
+    ${CMAKE_SOURCE_DIR}/apps/common)
+if(WIN32)
+    target_link_libraries(nw_host_register_e2e_test PRIVATE ws2_32)
+endif()
+add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
+
 # ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
 # credential POST body with the login helpers and decodes it through a copy of
 # the server's parse_form_body + EPASK path, then checks the cookie jar carries
