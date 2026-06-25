@@ -56,7 +56,7 @@ behavior is summarized and cited.
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
 | World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed |
-| World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed |
+| World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide, engine-research) |
 
 Systems documented mainly by code and tests so far (no dedicated RE record
 yet): terrain, foliage, tiles, fonts, credits, the importer pipeline, and the

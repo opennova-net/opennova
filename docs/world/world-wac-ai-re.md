@@ -651,3 +651,93 @@ placement? All addresses dfx2med.exe.
   byte-identical (we never bake on load). Open visual check: whether the self-consistent bake
   byte-matches the engine's raw subtraction depends on the model↔entity axis consistency of our
   import pipeline — verify by loading an original `.bms` and checking objects sit on terrain.
+
+## 13. Appendix: held-weapon visibility on mount/attach (engine-research, 2026-06-24)
+
+Question: how does the original suppress the soldier's **held weapon** (the third-person gun
+in the hands) when the soldier is attached to a vehicle seat or emplacement? Status:
+**engine-research / confirm-only** — originals witnessed; OpenNova does not render a
+third-person held weapon yet (the body `.adm` clip names encode the gait+weapon, but no
+separate weapon model is mounted), so there is no reimpl to diverge. This records the
+mechanism for when held-weapon rendering lands. Complements §9 (mount/emplacement) and §4.15
+(mounted poses). All addresses `Jointops.exe.kong.i64`, imagebase 0x400000.
+
+### 13.1 The render gate — `BoneCallback_org0_World @ 0x4e3940`
+The per-class render callback for **organic** entities (the model class tag `org`; used by the
+local player, remote players, AND NPCs alike — render is class-keyed independently of the
+org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
+(`Entity_BuildBoneTransformMatrices @ 0x4b1290`) then issues up to **six**
+`Render_SubmitEntity @ 0x5dad80` draws, in order:
+1. **shadow blob** (gated on `entity+0x378`/`+0x37A`),
+2. **body** — `key` model; suppressed for the camera-tracked entity in first person
+   (`entity == dword_A890CC` = the camera target, unless `dword_A890C8` third-person — see
+   §5.39 / correspondence.md `Camera_SetTrackedEntity @ 0x4391d0`),
+3. **muzzle flash** — gated on `Flags & 4` (`entity+0x24`), drawn at the flare bone,
+4. **weapon sight/scope** — gated on `dword_8139E8[animStateId] & 0x40 && (Flags & 8)`
+   (the per-anim-state flag table of §3.4),
+5. **held weapon** — see §13.2,
+6. **mounted-child overlay** — gated on `mountedChild` (`entity+0x268`), draws the carried
+   child/flag at a Z-rotated transform.
+
+Draws 5 and 6 are *both* additionally suppressed wholesale when the render-pass flag
+`numEntries & 0x10000000` is set (`skipWeaponOverlay` — e.g. a shadow/special pass).
+
+### 13.2 The held-weapon submit (draw 5) and its predicate
+[orig: `BoneCallback_org0_World @ 0x4e3940`]
+```
+if ( !(numEntries & 0x10000000) )            // not the overlay-skip pass
+  if ( entity[0x2B0] )                        // held-weapon ADM index (u8) != 0
+    if ( Entity_CanFireWeapon(entity) ) {     // <-- THE HIDE GATE
+      weaponDef = AdmDef_GetEntryByIndex(entity[0x2B0]);   // [orig: 0x53fc80]
+      entity->Weapon /* +0x298 */ = weaponDef;
+      ... Render_SubmitEntity( weaponFrameData, boneMatrices @ hand/'prim' bone ) ...
+    }
+```
+- `GamePlayerEntity+0x2B0` (typed `pad_2b0` today) = the **held-weapon ADM model index**;
+  `+0x298` (`Weapon`) caches the resolved `AdmDef`. The weapon model is posed at the
+  hand/`prim` bone matrix from `Entity_BuildBoneTransformMatrices @ 0x4b1290` (the same `prim`
+  user-point the AI scans in `Entity_InitVehicleAI @ 0x460200`, §7.1).
+- **The weapon is drawn iff the soldier may *fire* it.** One predicate,
+  `Entity_CanFireWeapon @ 0x4dcb10`, drives both gameplay fire-permission and this draw.
+
+### 13.3 `Entity_CanFireWeapon @ 0x4dcb10` — seat type decides
+Returns 0 (→ weapon hidden) by the rider's **seat type in `parentSlot` (`entity+0x168`)**:
+- Top gate, both branches: `if (entity->Flags & 2) return 0` — a separate "weapon disabled"
+  state on `entity+0x24` (independent of mounting; cleared on spawn/respawn, §5.6
+  `Entity_ResetToSpawnState`).
+- **Remote** entities (NPCs + other players): `parentSlot ∈ {2, 3, 5} → return 0`.
+- **Local** player (`entity == g_local_player_entity`): not mounted (`!parentEntity`) →
+  return 1; else `parentSlot == 2 → 0`; `parentSlot == 3 → 0` *only if* `dword_A890C8`
+  (third-person/vehicle camera, §5.39); `parentSlot == 5 → 0`.
+- In both branches `parentSlot == 1` (passenger) is **not** in the hide set → the personal
+  weapon stays visible (subject to the normal ammo checks).
+
+### 13.4 Seat-type source and assignment
+`parentSlot` is the seat-type code, classified from the vehicle/emplacement model's
+**user-point name prefix** [orig: `Entity_GetBoneSlotType @ 0x434ed0`] and stored on the rider
+at attach time [orig: `Entity_ProcessVehicleAttach @ 0x435aa0`; plumbing
+`Entity_AttachToVehicleSeat @ 0x4364a0` → `Entity_AttachToVehicleSlot @ 0x4946d0` /
+`Entity_AttachToVehicleSeat_0 @ 0x546b80`]. Same classifier as §9.1/§11:
+
+| user-point prefix | `parentSlot` | role | held weapon |
+|---|---|---|---|
+| `sitex` | 1 | passenger | **shown** (can fire) |
+| `ctrlx` | 2 | control / weapon-station | hidden |
+| `UseGun` | 3 | gunner / **fixed emplacement** | hidden |
+| `drvrx` | 5 | driver | hidden |
+
+Fixed emplacements (mounted MGs) are manned through a `UseGun` slot, so they take the gunner
+case (3) and hide the personal weapon. (Mounted *pose* selection — emplaced 67–75, `sit_N`,
+driver-lean — is the separate system of §4.15.)
+
+### 13.5 Note for the OpenNova port
+The requester's premise listed **passenger** among the hidden cases; the binary disagrees —
+`sitex` passengers keep the personal weapon visible and may fire (open boats/trucks). Only
+control (2), gunner (3), and driver (5) hide it. When third-person held-weapon rendering is
+implemented, gate the weapon node's visibility on this predicate, reusing the existing seat
+taxonomy (`godot/engine/world/mission_seat_diagnostics.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
+DRIVER) and the `mount_type` already exported through `nova_simulation.cpp`. The exact
+`Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
+gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
+`pad_2b0` → `heldWeaponAdmIndex`; comment `Entity_CanFireWeapon` as the weapon-visibility
+gate) is proposed but unapplied (shared IDB state).

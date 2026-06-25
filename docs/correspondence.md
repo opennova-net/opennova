@@ -324,6 +324,15 @@ First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (net-re §5.
 | `Math_BuildFixedPointRotationMatrixYXZ` | `0x615400` | 10.22 fixed rotation matrix (0x400000=1.0) from (yaw,pitch,roll), order Z·X·Y; identity at zero angles | disasm; §5.40 | confirm-only |
 | `Math_FixedPointTransformPoint22` | `0x615810` | transforms a point by a 10.22 fixed matrix (round 1<<21, >>22); preserves the point's unit scale | disasm; §5.40 | confirm-only |
 
+Held-weapon visibility on mount/attach (engine-research, 2026-06-24; world-wac-ai-re §13; no reimpl — OpenNova renders no third-person held weapon yet):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `BoneCallback_org0_World` | `0x4e3940` | organic (`org`) render callback; 6 `Render_SubmitEntity` draws — held weapon = draw 5, gated on `Entity_CanFireWeapon`; held-weapon ADM index @ entity+0x2B0, posed at the `prim` hand bone; draws 5/6 skipped when `numEntries & 0x10000000` | disasm; world-wac-ai-re §13.1/§13.2 | confirm-only |
+| `Entity_CanFireWeapon` | `0x4dcb10` | weapon shown iff can-fire: `Flags & 2` disables; seat type `parentSlot` (entity+0x168) ∈ {2 control, 3 gunner, 5 driver} hides (remote: any; local: gunner only in 3P `dword_A890C8`); passenger (1) keeps weapon | disasm; world-wac-ai-re §13.3 | confirm-only |
+| `Entity_GetBoneSlotType` | `0x434ed0` | user-point prefix → seat type (sitex=1/ctrlx=2/UseGun=3/drvrx=5); fixed emplacements = `UseGun` | decompile; world-wac-ai-re §13.4 / §9.1 | confirm-only |
+| `Entity_ProcessVehicleAttach` | `0x435aa0` | assigns `parentSlot` (seat type) on attach; net 0x26 path | decompile; world-wac-ai-re §13.4 | confirm-only |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,
