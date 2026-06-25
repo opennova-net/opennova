@@ -514,18 +514,24 @@ void add_game_start_bundle(GameSessionDispatchResult &result,
 	add_reply(result, 0x42, build_tag42_spawn_gate_retail_fixture());
 	add_reply(result, 0x0A, build_tag_0a_world_reference(ctx));
 
-	// tag=0x25 RESET_AND_START — closes the WaitForGameStart loading
-	// gate (`dword_24C1928 = 1`). MUST come BEFORE tag=0x0F because
-	// tag=0x25's handler also sets `dword_24C195C = 1` as a side effect,
-	// and tag=0x25 alone makes Input_HandleActionBinding silently
-	// consume the spawn-menu action IDs (100, 101, 109-111) at
-	// instruction `0x49b9ad: cmp dword_24C195C, 0; jnz default-case`.
-	// Tag=0x0F's handler at instr 0x42e396 explicitly clears
-	// `dword_24C195C = 0`, so emitting it AFTER tag=0x25 in the bundle
-	// re-enables the menu input. See `notes/spawn_gate_24C1928.md`
-	// 2026-04-26 addendum for the disasm citations and live-test
-	// history (run 3: tag=0x25 at end → menu blocked, freeze).
-	add_reply(result, 0x25, build_tag_25_reset_and_start());
+	// tag=0x25 RESET_AND_START is DELIBERATELY OMITTED for a mid-match joiner.
+	// Its client handler NapiNPClientMsg_GameReset @0x422800 (non-authority
+	// branch) SETS the spawn gate `g_spawn_success_gate (dword_24C1928) = 1`
+	// [orig: @0x422849], which (a) BLOCKS the auto-deploy C2S 0x0C uplink —
+	// Client_ProcessNetworkFrame gates it on `!g_spawn_success_gate`
+	// [orig: @0x42c46d] — and (b) arms the `dword_C8D820 -> reason=4` auto-kick
+	// [orig: @0x42c3c1]. That gate is cleared by exactly one writer,
+	// Game_StartMission [orig: @0x524a1f], which the joiner already ran at its
+	// Game-Loop mode-enter (join FSM `MultiPlayer_JoinSessionStateMachine`
+	// state 7, @0x56a91d) BEFORE this bundle arrives. So a 0x25 here re-arms the
+	// gate with nothing left to clear it -> the joiner sticks at spawn-select,
+	// floods C2S 0x0F (item-resync), and auto-kicks. WIRE PROOF: the working
+	// retail initial join `.scratch/host_and_join_lan.pcapng` sends NO 0x25
+	// before the joiner deploys (its only 0x25 is a later round-reset at f=895,
+	// long after the deploy at f=561). The old "0x25 before 0x0F so 0x0F clears
+	// dword_24C195C / unblocks the menu" rationale was the manual-spawn-select
+	// path, not retail auto-deploy parity. See docs/net/novaworld-net-re.md
+	// §5.38c / D-NET-99. (build_tag_25_reset_and_start retained but unused.)
 
 	// Frame 745: 0x0F, 0x4D, 0x61, 0x3E, then the cap7 game-start trailer
 	// (0x40 ×4, 0x6F ×4, 0x6E, second 0x0A, 0x57). The trailer was missing

@@ -366,18 +366,17 @@ bool check_observed_spawn_readiness_accepts_once() {
 	// then disconnects. Confirmed in 2026-04-26 live test.
 	if (!expect(find_tag(loadout.replies, 0x1D) < 0,
 			"loadout/status packet does NOT emit tag=0x1D (round-end side effect)")) return false;
-	// tag=0x25 RESET_AND_START — closes the spawn gate (dword_24C1928=1)
-	// and (as a side effect) sets dword_24C195C=1. Must precede tag=0x0F
-	// because tag=0x0F clears dword_24C195C back to 0, which is required
-	// for Input_HandleActionBinding @ 0x49b9ad to dispatch spawn-menu
-	// actions instead of silently consuming them. Empty payload — the
-	// client-side handler reads zero bytes.
-	const int tag25 = find_tag(loadout.replies, 0x25);
-	if (!expect(tag25 >= 0, "loadout/status packet emits tag=0x25 reset-and-start")) return false;
-	if (!expect(tag25 < tag0f,
-			"tag=0x25 must precede tag=0x0F so dword_24C195C ends at 0 (menu unblocked)")) return false;
-	if (!expect(loadout.replies[static_cast<size_t>(tag25)].payload.empty(),
-			"tag=0x25 payload is empty (handler reads zero bytes)")) return false;
+	// tag=0x25 RESET_AND_START MUST NOT be in the bundle. Its handler
+	// NapiNPClientMsg_GameReset @0x422800 SETS the spawn gate
+	// g_spawn_success_gate (dword_24C1928)=1 [@0x422849], which blocks the
+	// joiner's auto-deploy C2S 0x0C (Client_ProcessNetworkFrame @0x42c46d) and
+	// arms the reason=4 auto-kick. The joiner already cleared the gate via
+	// Game_StartMission @0x524a1f at Game-Loop entry, so a 0x25 here re-arms it
+	// with nothing left to clear it. The working retail initial join
+	// (host_and_join_lan.pcapng) sends NO 0x25 before deploy. net-re §5.38c /
+	// D-NET-99.
+	if (!expect(find_tag(loadout.replies, 0x25) < 0,
+			"loadout/status packet does NOT emit tag=0x25 (re-arms spawn gate, blocks deploy)")) return false;
 	if (!expect(find_tag(loadout.replies, 0x1E) < 0,
 			"loadout/status packet does not emit speculative tag=0x1E")) return false;
 	if (!expect(state.spawned, "loadout/status packet marks session spawned")) return false;

@@ -224,15 +224,18 @@ bool run() {
 		            "PeerSpawned heading/pitch match 0x0C")) return false;
 		if (!expect(accept.peer_spawned(peer), "peer marked spawned after the gate")) return false;
 
-		// The game-start bundle must be in the framed reply: 0x25 RESET_AND_START
-		// then 0x0F WORLD-STATE-LOAD (the joiner's spawn pos/slot).
+		// The game-start bundle must carry 0x0F WORLD-STATE-LOAD (the joiner's
+		// spawn pos/slot) but MUST NOT carry 0x25 RESET_AND_START — 0x25 re-arms
+		// the spawn gate g_spawn_success_gate after the joiner's Game_StartMission
+		// cleared it, blocking deploy + arming the reason=4 kick (net-re §5.38c /
+		// D-NET-99; retail host_and_join_lan.pcapng sends no 0x25 before deploy).
 		if (!expect(!r.outbound.empty(), "spawn burst produces a framed 0x83 reply")) return false;
 		ProtocolPacketHeader hdr;
 		std::vector<ProtocolMessage> msgs;
 		if (!expect(decode_s2c(r.outbound.back(), server_scrk, hdr, msgs),
 		            "spawn reply decodes as a 0x83 SESSION packet")) return false;
 		if (!expect(hdr.session_id == client_ck, "S2C session_id == joiner's ClientAuth.ck")) return false;
-		if (!expect(reply_has_tag(msgs, 0x25), "game-start bundle carries 0x25 reset-and-start")) return false;
+		if (!expect(!reply_has_tag(msgs, 0x25), "game-start bundle does NOT carry 0x25 (re-arms spawn gate)")) return false;
 		if (!expect(reply_has_tag(msgs, 0x0F), "game-start bundle carries 0x0F world-state-load")) return false;
 	}
 
