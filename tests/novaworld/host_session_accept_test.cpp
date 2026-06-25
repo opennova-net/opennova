@@ -281,6 +281,134 @@ bool run() {
 	return true;
 }
 
+// F3 dcb-timing: the joiner's own organic-spawn 0x0C must be admitted during world
+// streaming (PeerEnteredWorldStreaming) STRICTLY BEFORE the game-start bundle
+// (PeerSpawned), so the retail client's load-time Player_InitPlayer @0x4e15f0 finds its
+// dcb in pool 0 (else Player_BuildNetIdLookupOrFatalError fatals). This proves the event
+// ORDERING in the accept component; the wire-level 0x0C-before-0x0F is a NovaSimulation /
+// GUT concern (the 0x0C is emitted above the libs layer, by announce_joiner_organic_spawn).
+bool run_joiner_0c_streams_before_game_start() {
+	HostSessionAccept accept;
+	accept.start();
+
+	const PeerAddr peer{0x0100007Fu, 30500}; // 127.0.0.1:30500
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB"; // 61
+	const uint32_t client_ck = 0xCAFEF00Du;
+
+	// --- handshake + auth ---
+	{
+		ClientHello hello;
+		hello.pn = "JointOperations";
+		hello.co = "StreamJoiner"; // the joiner's player name, echoed into the 0x0C name
+		hello.ci = 1;
+		auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+		accept.handle_datagram(peer, dg.data(), dg.size(), 1);
+	}
+	{
+		ClientAuth auth;
+		auth.pn = "JointOperations";
+		auth.ci = 1;
+		auth.ck = client_ck;
+		auth.na = "jop:cus2";
+		auth.scrk = client_scrk;
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		accept.handle_datagram(peer, dg.data(), dg.size(), 2);
+	}
+
+	uint32_t seq = 1;
+	{
+		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x37, {})});
+		accept.handle_datagram(peer, dg.data(), dg.size(), 100);
+	}
+
+	// The joiner reports its own ConnectionId (unk_18 = its dcb) in a 0x48 client-ack during
+	// the early handshake. The host must learn this and stamp it into the joiner's 0x0C
+	// entity_flags (else Player_FindLocalPlayerEntity fails). Use a non-sequential value to
+	// prove the host carries the WIRE value, not a guess. [F3, capture2.pcapng ack=0x113F]
+	const uint32_t kJoinerDcb = 0x0000113Fu;
+	{
+		std::vector<uint8_t> ack = {0x3F, 0x11, 0x00, 0x00}; // LE 0x113F
+		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x48, ack)});
+		accept.handle_datagram(peer, dg.data(), dg.size(), 110);
+	}
+
+	// Capture the FIRST PeerEnteredWorldStreaming (from either the periodic tick path or
+	// the datagram path) and whether the peer was still pre-spawn at that moment.
+	bool got_stream = false;
+	bool spawned_at_stream = true;
+	uint32_t stream_self_id = 0;
+	std::string stream_name;
+	auto scan_ticks = [&](const std::vector<HostSessionAccept::TickOut> &outs) {
+		for (const auto &t : outs)
+			for (const auto &e : t.events)
+				if (e.kind == HostAcceptEvent::Kind::PeerEnteredWorldStreaming && !got_stream) {
+					got_stream = true;
+					stream_name = e.peer_name;
+					stream_self_id = e.self_id;
+					spawned_at_stream = accept.peer_spawned(peer);
+				}
+	};
+	auto scan_res = [&](const HostSessionAccept::HandleResult &r) {
+		for (const auto &e : r.events)
+			if (e.kind == HostAcceptEvent::Kind::PeerEnteredWorldStreaming && !got_stream) {
+				got_stream = true;
+				stream_name = e.peer_name;
+				stream_self_id = e.self_id;
+				spawned_at_stream = accept.peer_spawned(peer);
+			}
+	};
+
+	// Drain the mission bootstrap + climb entity_batch_count past 0 (streaming begins).
+	for (int i = 0; i < 40; ++i) {
+		auto o = accept.tick_handshakes(300, static_cast<uint32_t>(1000 + i));
+		scan_ticks(o);
+	}
+	{
+		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x09, {})});
+		auto r = accept.handle_datagram(peer, dg.data(), dg.size(), 200);
+		scan_res(r);
+	}
+	for (int i = 0; i < 6; ++i) {
+		auto o = accept.tick_handshakes(300, static_cast<uint32_t>(2000 + i));
+		scan_ticks(o);
+	}
+
+	if (!expect(got_stream, "PeerEnteredWorldStreaming surfaces once world streaming begins")) return false;
+	if (!expect(stream_self_id == kJoinerDcb,
+	            "streaming event carries the joiner's 0x48-ack ConnectionId for the 0x0C entity_flags")) return false;
+	if (!expect(stream_name == "StreamJoiner",
+	            "streaming event carries the joiner's ClientHello.co for the 0x0C name-match")) return false;
+	if (!expect(!spawned_at_stream,
+	            "joiner is NOT yet spawned when its 0x0C streams (0x0C precedes the game-start bundle)")) return false;
+	if (!expect(!accept.peer_spawned(peer), "still pre-spawn after the streaming ticks")) return false;
+
+	// Now trip the spawn gate: the loadout/status burst -> PeerSpawned, strictly AFTER
+	// the streaming event observed above.
+	{
+		auto body = make_uplink_0c(0x0003, 0x14B9, 0x2222, 0x11223344u, 0x55667788u, 0x99AABBCCu,
+		                           0x1234, 0x5678);
+		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x0C, body)});
+		accept.handle_datagram(peer, dg.data(), dg.size(), 300);
+	}
+	{
+		auto dg = craft_session(client_scrk, seq++, {make_protocol_message(0x22, {0x00, 0xF7, 0x1C})});
+		accept.handle_datagram(peer, dg.data(), dg.size(), 320);
+	}
+	accept.tick_handshakes(300, 2500);
+	{
+		auto dg = craft_session(client_scrk, seq++, {
+				make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+				make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+				make_protocol_message(0x0B, std::vector<uint8_t>(13, 0)),
+		});
+		auto r = accept.handle_datagram(peer, dg.data(), dg.size(), 450);
+		if (!expect(find_event(r, HostAcceptEvent::Kind::PeerSpawned) != nullptr,
+		            "loadout burst trips the gate -> PeerSpawned (strictly after streaming)")) return false;
+	}
+	if (!expect(accept.peer_spawned(peer), "peer spawned after the gate")) return false;
+	return true;
+}
+
 bool run_non_jo_peer_is_ignored() {
 	// A NOVAWORLDUDP (lobby) hello must not register a JO peer — the owner
 	// routes lobby PNs elsewhere; the component drops it.
@@ -302,6 +430,7 @@ bool run_non_jo_peer_is_ignored() {
 int main() {
 	bool ok = true;
 	ok = run() && ok;
+	ok = run_joiner_0c_streams_before_game_start() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	return ok ? 0 : 1;
 }

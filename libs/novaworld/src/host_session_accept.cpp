@@ -147,6 +147,23 @@ HostSessionAccept::HandleResult HostSessionAccept::handle_datagram(
 		}
 		st.last_inbound_seq = hdr.seq_num;
 
+		// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb) from its
+		// in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
+		// Player_FindLocalPlayerEntity @0x4e0090 compares entity+0x78 against, so the host
+		// MUST stamp it into the joiner's 0x0C entity_flags — a guessed sequential id does
+		// NOT match (witnessed: capture2.pcapng ack=0x113F vs our guessed 3 -> crash; the
+		// working retail join had ack==eFlags==3). The ack arrives during the early
+		// handshake, before world streaming, so it's known by the time we stream the 0x0C.
+		for (const ProtocolMessage &m : messages) {
+			if (m.tag == 0x48 && m.payload.size() >= 4) {
+				st.self_id = static_cast<uint32_t>(m.payload[0]) |
+						(static_cast<uint32_t>(m.payload[1]) << 8) |
+						(static_cast<uint32_t>(m.payload[2]) << 16) |
+						(static_cast<uint32_t>(m.payload[3]) << 24);
+				st.self_id_seen = true;
+			}
+		}
+
 		// Drive the reactive handshake/spawn state machine (also caches the
 		// joiner's 0x0C pose into client_*); BYPASS GameSession::tick here — the
 		// periodic emitter runs via tick_handshakes (pre-Spawned) / NetSystem.
@@ -158,14 +175,37 @@ HostSessionAccept::HandleResult HostSessionAccept::handle_datagram(
 			if (!dg.empty()) out.outbound.push_back(std::move(dg));
 		}
 
-		// Detect the handshake reaching Spawned — surface the joiner's pose once.
 		const GameSessionState *gss = game_runtime_.session_state(st.session_id);
+
+		// Surface the streaming-entered event once the host's tick has begun emitting
+		// entity batches (the joiner is provably in its world-load pump). Checked BEFORE
+		// the spawned latch so the owner admits early + streams the joiner's own 0x0C
+		// during load, ahead of the game-start bundle's 0x0F — else the client's
+		// Player_InitPlayer can't find its dcb (F3). Mirrors is_ready_for_late_spawn_
+		// acceptance's entity_batch_count>0 readiness; one-shot via world_stream_announced.
+		// Also gate on self_id_seen: the joiner's 0x0C entity_flags must carry its real
+		// ConnectionId (from the 0x48 ack), so don't admit/stream until we've learned it.
+		// (The ack always precedes streaming, so this never actually defers in practice.)
+		if (gss != nullptr && gss->entity_batch_count > 0 && !gss->spawned &&
+				st.self_id_seen && !st.world_stream_announced) {
+			st.world_stream_announced = true;
+			HostAcceptEvent ev;
+			ev.kind = HostAcceptEvent::Kind::PeerEnteredWorldStreaming;
+			ev.peer = peer;
+			ev.pose = pose_from_session(*gss);
+			ev.self_id = st.self_id;
+			ev.peer_name = st.player_name;
+			out.events.push_back(std::move(ev));
+		}
+
+		// Detect the handshake reaching Spawned — surface the joiner's pose once.
 		if (gss != nullptr && gss->spawned && !st.spawned_announced) {
 			st.spawned_announced = true;
 			HostAcceptEvent ev;
 			ev.kind = HostAcceptEvent::Kind::PeerSpawned;
 			ev.peer = peer;
 			ev.pose = pose_from_session(*gss);
+			ev.self_id = st.self_id;
 			ev.peer_name = st.player_name; // for the joiner-side name-match (D.0)
 			out.events.push_back(std::move(ev));
 		}
@@ -215,12 +255,33 @@ std::vector<HostSessionAccept::TickOut> HostSessionAccept::tick_handshakes(
 		if (gss == nullptr) continue; // session not created yet (no 0x43 dispatched)
 		if (gss->spawned) continue;   // NetSystem owns spawned peers' per-frame 0x0A
 		GameServerDispatch disp = game_runtime_.tick_session(st.session_id, elapsed_ms, now_tick);
-		if (disp.replies.empty()) continue;
-		std::vector<uint8_t> dg = frame_session_replies(st, disp.replies);
-		if (dg.empty()) continue;
+
 		TickOut to;
 		to.peer = kv.first;
-		to.outbound.push_back(std::move(dg));
+		if (!disp.replies.empty()) {
+			std::vector<uint8_t> dg = frame_session_replies(st, disp.replies);
+			if (!dg.empty()) to.outbound.push_back(std::move(dg));
+		}
+
+		// This loop drives the phase into WorldStreaming + increments entity_batch_count,
+		// so it catches the streaming transition on the tick it happens. Re-read post-tick
+		// state (gss points at the live session struct, mutated by tick_session). Surface
+		// PeerEnteredWorldStreaming once so the owner admits early + streams the joiner's
+		// own dcb-bearing 0x0C before the game-start bundle (F3). Same latch as the
+		// datagram-driven path, whichever observes batches first wins.
+		if (gss->entity_batch_count > 0 && !gss->spawned && st.self_id_seen &&
+				!st.world_stream_announced) {
+			st.world_stream_announced = true;
+			HostAcceptEvent ev;
+			ev.kind = HostAcceptEvent::Kind::PeerEnteredWorldStreaming;
+			ev.peer = kv.first;
+			ev.pose = pose_from_session(*gss);
+			ev.self_id = st.self_id;
+			ev.peer_name = st.player_name;
+			to.events.push_back(std::move(ev));
+		}
+
+		if (to.outbound.empty() && to.events.empty()) continue;
 		out.push_back(std::move(to));
 	}
 	return out;

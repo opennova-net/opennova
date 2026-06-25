@@ -41,18 +41,42 @@ struct HostJoinerPose {
 	uint8_t  team = 1;
 };
 
-// One event surfaced by handle_datagram. Owner reacts: PeerSpawned -> admit_peer
-// + bind a connection; PeerC2SInMatch -> route each 0x0C into the live sim;
+// One event surfaced by handle_datagram / tick_handshakes. Owner reacts:
+// PeerEnteredWorldStreaming -> admit the joiner EARLY (spawn its pool-0 entity +
+// stream its own dcb-bearing 0x0C) so the record is present in the client's load
+// pump before its Player_InitPlayer runs; PeerSpawned -> bind the connection so the
+// per-frame S2C 0x0A starts; PeerC2SInMatch -> route each 0x0C into the live sim;
 // PeerGoodbye -> drop the connection.
+//
+// PeerEnteredWorldStreaming is the F3 dcb-timing fix: the retail client's load-time
+// Player_InitPlayer @0x4e15f0 -> Player_FindLocalPlayerEntity @0x4e0090 scans pool 0
+// for its own entity (Flags&0x100 && entity+0x78 == its ConnectionId); that entity is
+// created by the S2C 0x0C organic-spawn, which therefore must arrive DURING world
+// streaming, before the game-start bundle. Emitting it reactively on PeerSpawned (after
+// the bundle) is too late -> "Could not find player dcb" fatal @0x4dff60.
 struct HostAcceptEvent {
-	enum class Kind { PeerHandshakeAdvanced, PeerSpawned, PeerC2SInMatch, PeerGoodbye };
+	enum class Kind {
+		PeerHandshakeAdvanced,
+		PeerEnteredWorldStreaming,
+		PeerSpawned,
+		PeerC2SInMatch,
+		PeerGoodbye
+	};
 	Kind kind = Kind::PeerHandshakeAdvanced;
 	PeerAddr peer;
-	HostJoinerPose pose;                       // valid when kind == PeerSpawned
-	std::string peer_name;                     // valid when kind == PeerSpawned: the
-	                                           // joiner's ClientHello.co (player name),
-	                                           // streamed back as the S2C 0x0C organic
-	                                           // entity_name so the joiner name-matches.
+	HostJoinerPose pose;                       // valid for PeerEnteredWorldStreaming / PeerSpawned
+	uint32_t self_id = 0;                      // valid for PeerEnteredWorldStreaming / PeerSpawned:
+	                                           // the joiner's own ConnectionId (NapiNPConnection.unk_18
+	                                           // = its dcb), learned from its in-match 0x48 client-ack.
+	                                           // The host MUST stamp this into the joiner's 0x0C
+	                                           // entity_flags (entity+0x78) or the client's
+	                                           // Player_FindLocalPlayerEntity self-scan fails
+	                                           // ("Could not find player dcb"). Witnessed: working
+	                                           // retail join ack==eFlags==3; a hardcoded guess does not.
+	std::string peer_name;                     // valid for PeerEnteredWorldStreaming / PeerSpawned:
+	                                           // the joiner's ClientHello.co (player name), streamed
+	                                           // back as the S2C 0x0C organic entity_name so the
+	                                           // joiner name-matches.
 	std::vector<ProtocolMessage> in_match_c2s; // valid when kind == PeerC2SInMatch
 };
 
@@ -79,9 +103,16 @@ public:
 
 	// Drive the periodic emitter for every peer NOT yet Spawned (so
 	// entity_batch_count climbs and the spawn gate opens) and frame each
-	// session's replies. Owner sends each TickOut.outbound to TickOut.peer.
-	// Spawned peers are skipped — NetSystem owns their per-frame 0x0A.
-	struct TickOut { PeerAddr peer; std::vector<std::vector<uint8_t>> outbound; };
+	// session's replies. Owner sends each TickOut.outbound to TickOut.peer and
+	// dispatches each TickOut.events (PeerEnteredWorldStreaming surfaces here the
+	// tick a peer's batches start, so the joiner's own 0x0C is admitted + streamed
+	// during the client's load — see HostAcceptEvent). Spawned peers are skipped —
+	// NetSystem owns their per-frame 0x0A.
+	struct TickOut {
+		PeerAddr peer;
+		std::vector<std::vector<uint8_t>> outbound;
+		std::vector<HostAcceptEvent> events;
+	};
 	std::vector<TickOut> tick_handshakes(int elapsed_ms, uint32_t now_tick);
 
 	// Wrap one in-match S2C inner message (e.g. NetSystem's 0x0A body) into a
@@ -109,6 +140,10 @@ private:
 		uint32_t next_outbound_seq = 1;
 		uint32_t last_inbound_seq = 0;
 		std::string session_id;     // key into GameServerRuntime sessions_ (the peer label)
+		uint32_t self_id = 0;       // the joiner's own ConnectionId / dcb (unk_18), read from its
+		                            // in-match 0x48 client-ack; streamed back as the 0x0C entity_flags
+		bool self_id_seen = false;  // true once the 0x48 client-ack has been parsed
+		bool world_stream_announced = false; // edge-latch so PeerEnteredWorldStreaming fires once
 		bool spawned_announced = false; // edge-latch so PeerSpawned fires once
 	};
 

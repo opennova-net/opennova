@@ -146,7 +146,10 @@ private:
 	struct RemotePeer {
 		std::unique_ptr<opennova::netsim::UdpSessionTransport> transport;
 		std::size_t conn_index = 0;
-		bool admitted = false;
+		opennova::world::EntityHandle entity{}; // pool-0 entity, spawned at world-streaming
+		                                        // (PeerEnteredWorldStreaming), bound at PeerSpawned
+		bool organic_announced = false; // the joiner's own S2C 0x0C streamed once (during load)
+		bool admitted = false;          // owned_entity bound + per-frame 0x0A flowing (in-match)
 		uint32_t dcb_id = 0;           // host-assigned dcb id streamed as entityFlags (entity+0x78)
 	};
 	std::unordered_map<opennova::PeerAddr, RemotePeer, opennova::PeerAddrHash> remote_peers_;
@@ -163,12 +166,24 @@ private:
 	// Post-emit: advance pre-Spawned peers' handshakes + ship each admitted
 	// peer's per-frame S2C 0x0A (from emit_s2c) as a framed SESSION datagram.
 	void host_net_flush();
-	// Spawn + bind a joiner to a fresh connection (the PeerSpawned reaction,
-	// shared with the test hook). Idempotent per peer.
+	// Dispatch one event surfaced by the accept component (shared by host_net_poll's
+	// datagram path and host_net_flush's tick_handshakes path).
+	void dispatch_host_accept_event(const opennova::PeerAddr &peer,
+	                                const opennova::HostAcceptEvent &ev);
+	// Early-admit (PeerEnteredWorldStreaming): register the connection (null transport,
+	// so emit_s2c skips it) + assign the dcb + spawn the joiner's pool-0 entity, WITHOUT
+	// binding owned_entity. Returns the spawned handle. Idempotent per peer. This runs
+	// during the client's world-load so the joiner's own 0x0C can be streamed before its
+	// Player_InitPlayer (F3 dcb timing fix).
+	opennova::world::EntityHandle prestream_remote_peer(const opennova::PeerAddr &peer,
+	                                                    const opennova::HostJoinerPose &pose);
+	// In-match admit (PeerSpawned reaction, shared with the test hook): prestream_remote_peer
+	// (no-op if already spawned) + BIND owned_entity/transport so the per-frame 0x0A flows.
+	// Idempotent per peer.
 	opennova::world::EntityHandle admit_remote_peer(const opennova::PeerAddr &peer,
 	                                                const opennova::HostJoinerPose &pose);
-	// PeerSpawned reaction: admit_remote_peer + stream the joiner's entity as a NAMED
-	// S2C 0x0C organic-spawn so the joiner name-matches its own player and learns H.
+	// Stream the joiner's entity as a NAMED S2C 0x0C organic-spawn (once) so the joiner
+	// name-matches its own player + the retail client finds its dcb at entity+0x78.
 	void announce_joiner_organic_spawn(const opennova::PeerAddr &peer,
 	                                   const opennova::HostAcceptEvent &ev);
 	opennova::world::PlayerSpawn spawn_from_pose(const opennova::HostJoinerPose &pose) const;

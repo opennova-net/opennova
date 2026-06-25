@@ -1198,7 +1198,7 @@ opennova::world::PlayerSpawn NovaSimulation::spawn_from_pose(
 	return spawn;
 }
 
-opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
+opennova::world::EntityHandle NovaSimulation::prestream_remote_peer(
 		const opennova::PeerAddr &peer, const opennova::HostJoinerPose &pose) {
 	if (!net_ || !world_) return {};
 	auto it = remote_peers_.find(peer);
@@ -1206,18 +1206,45 @@ opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
 		RemotePeer fresh;
 		fresh.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
 				opennova::netsim::UdpSessionTransport::Role::Host);
-		const opennova::netsim::Connection conn{fresh.transport.get(),
+		// Register the connection with a NULL transport so emit_s2c/tick skip it until the
+		// peer is in-match (admit_remote_peer binds the transport at PeerSpawned). This keeps
+		// the host from fanning per-frame 0x0A to a client still in its world-load pump.
+		const opennova::netsim::Connection conn{nullptr,
 				opennova::netsim::TransportMode::Client, {}, 0};
 		fresh.conn_index = net_->add_connection(conn);
 		fresh.dcb_id = next_joiner_dcb_id_++; // host=2, first joiner=3 (retail scheme)
 		it = remote_peers_.emplace(peer, std::move(fresh)).first;
 	}
 	RemotePeer &rp = it->second;
-	if (rp.admitted) return net_->connection(rp.conn_index).owned_entity;
-	opennova::world::PlayerSpawn spawn = spawn_from_pose(pose);
-	spawn.net_id = next_joiner_net_id_++; // distinct SSN per joiner (host is 0xFFF0)
-	const opennova::world::EntityHandle h = net_->admit_peer(*world_, rp.conn_index, spawn);
-	rp.admitted = h.valid();
+	if (!rp.entity.valid()) {
+		// spawn_remote_player WITHOUT the owned_entity bind that NetSystem::admit_peer
+		// couples in — the entity exists in pool 0 (so the joiner's 0x0C can reference it
+		// + the client's pool-0 self-scan finds it) but the connection is not yet a 0x0A fan
+		// target. [orig: player_ServerAdd @0x51cbc0 registers a joined player's entity]
+		opennova::world::PlayerSpawn spawn = spawn_from_pose(pose);
+		spawn.net_id = next_joiner_net_id_++; // distinct SSN per joiner (host is 0xFFF0)
+		rp.entity = opennova::world::spawn_remote_player(*world_, spawn);
+	}
+	return rp.entity;
+}
+
+opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
+		const opennova::PeerAddr &peer, const opennova::HostJoinerPose &pose) {
+	// Ensure the joiner's pool-0 entity exists + its connection is registered (this also
+	// happens earlier, at PeerEnteredWorldStreaming, so the dcb-bearing 0x0C is streamed
+	// during the client's load); then BIND it so the per-frame S2C 0x0A starts now that the
+	// client is in-match.
+	const opennova::world::EntityHandle h = prestream_remote_peer(peer, pose);
+	if (!h.valid()) return {};
+	auto it = remote_peers_.find(peer);
+	if (it == remote_peers_.end()) return h; // unreachable: prestream created it
+	RemotePeer &rp = it->second;
+	if (!rp.admitted) {
+		opennova::netsim::Connection &conn = net_->connection(rp.conn_index);
+		conn.transport = rp.transport.get();
+		conn.owned_entity = h;
+		rp.admitted = true;
+	}
 	return h;
 }
 
@@ -1228,16 +1255,24 @@ void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &pee
 	// learn its wire handle H = the admitted entity's packed handle (D.0, §5.23). H (the
 	// slot_id) is the wire handle the joiner stamps in its C2S 0x0C; net_id is the distinct
 	// SSN. [orig: NapiNPClientMsg_0x00C @0x42E730]
-	const opennova::world::EntityHandle h = admit_remote_peer(peer, ev.pose);
+	// Spawn the joiner's entity WITHOUT binding the connection (no 0x0A yet) — this runs
+	// during the client's world-load so the record is in pool 0 before its Player_InitPlayer.
+	const opennova::world::EntityHandle h = prestream_remote_peer(peer, ev.pose);
 	if (!h.valid() || !world_ || !accept_) return;
+	auto rpit = remote_peers_.find(peer);
+	if (rpit == remote_peers_.end()) return;
+	RemotePeer &rp = rpit->second;
+	if (rp.organic_announced) return; // stream the joiner's own 0x0C exactly once
 	const opennova::world::Entity *spawned = world_->registry.get(h);
 
-	// The dcb id this peer was assigned at admit; the retail client must find it at its own
-	// pool-0 entity+0x78 (== its local NP connection+0x18) or Player_FindLocalPlayerEntity
-	// @0x4e0090 returns NULL and Player_InitPlayer fatals ("Could not find player dcb").
-	uint32_t dcb_id = 0;
-	if (auto rpit = remote_peers_.find(peer); rpit != remote_peers_.end())
-		dcb_id = rpit->second.dcb_id;
+	// The dcb the retail client must find at its own pool-0 entity+0x78 (==
+	// NapiNPConnection.unk_18) or Player_FindLocalPlayerEntity @0x4e0090 returns NULL and
+	// Player_InitPlayer fatals ("Could not find player dcb"). It is the joiner's OWN
+	// ConnectionId, learned from its 0x48 client-ack (ev.self_id) — NOT a host-side guess.
+	// (capture2.pcapng: the joiner's ack/unk_18 was 0x113F, our old guess 3 -> crash; the
+	// working retail join had ack==eFlags==3.) Fall back to the sequential id only if the
+	// ack was somehow never seen (shouldn't happen — it precedes streaming).
+	const uint32_t dcb_id = ev.self_id != 0 ? ev.self_id : rp.dcb_id;
 
 	opennova::OrganicSpawnBatch batch;
 	batch.entity_count = 1;
@@ -1259,6 +1294,55 @@ void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &pee
 	std::vector<uint8_t> dg;
 	if (accept_->frame_in_match_s2c(peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
 		send_datagram(peer, dg);
+		rp.organic_announced = true; // latch only on a successful send (retry otherwise)
+	}
+}
+
+void NovaSimulation::dispatch_host_accept_event(const opennova::PeerAddr &peer,
+                                                const opennova::HostAcceptEvent &ev) {
+	switch (ev.kind) {
+		case opennova::HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
+			// Early: spawn the joiner's pool-0 entity + stream its dcb-bearing 0x0C during
+			// the client's world-load, before the game-start bundle (F3). No 0x0A yet.
+			announce_joiner_organic_spawn(peer, ev);
+			break;
+		case opennova::HostAcceptEvent::Kind::PeerSpawned:
+			// In-match: ensure the 0x0C went out (idempotent if streaming already did it),
+			// then bind the connection so the per-frame 0x0A starts.
+			announce_joiner_organic_spawn(peer, ev);
+			admit_remote_peer(peer, ev.pose);
+			break;
+		case opennova::HostAcceptEvent::Kind::PeerC2SInMatch: {
+			auto rp = remote_peers_.find(peer);
+			if (rp != remote_peers_.end() && rp->second.transport) {
+				for (const opennova::ProtocolMessage &m : ev.in_match_c2s) {
+					// Identity-reframe [tag][payload] into the transport inbound
+					// FIFO so NetSystem::tick's host_recv drains it next tick.
+					std::vector<uint8_t> framed;
+					framed.reserve(1 + m.payload.size());
+					framed.push_back(m.tag);
+					framed.insert(framed.end(), m.payload.begin(), m.payload.end());
+					rp->second.transport->push_inbound(framed);
+				}
+			}
+			break;
+		}
+		case opennova::HostAcceptEvent::Kind::PeerGoodbye: {
+			auto rp = remote_peers_.find(peer);
+			if (rp != remote_peers_.end()) {
+				// Retire the connection in place (nulled transport is skipped by
+				// emit_s2c/tick) before destroying the transport it points at.
+				if (rp->second.conn_index < net_->connection_count()) {
+					net_->connection(rp->second.conn_index).transport = nullptr;
+					net_->connection(rp->second.conn_index).owned_entity = {};
+				}
+				remote_peers_.erase(rp);
+			}
+			break;
+		}
+		case opennova::HostAcceptEvent::Kind::PeerHandshakeAdvanced:
+		default:
+			break;
 	}
 }
 
@@ -1278,42 +1362,7 @@ void NovaSimulation::host_net_poll() {
 			send_datagram(peer, dg);
 		}
 		for (const opennova::HostAcceptEvent &ev : r.events) {
-			switch (ev.kind) {
-				case opennova::HostAcceptEvent::Kind::PeerSpawned:
-					announce_joiner_organic_spawn(peer, ev);
-					break;
-				case opennova::HostAcceptEvent::Kind::PeerC2SInMatch: {
-					auto rp = remote_peers_.find(peer);
-					if (rp != remote_peers_.end() && rp->second.transport) {
-						for (const opennova::ProtocolMessage &m : ev.in_match_c2s) {
-							// Identity-reframe [tag][payload] into the transport inbound
-							// FIFO so NetSystem::tick's host_recv drains it next tick.
-							std::vector<uint8_t> framed;
-							framed.reserve(1 + m.payload.size());
-							framed.push_back(m.tag);
-							framed.insert(framed.end(), m.payload.begin(), m.payload.end());
-							rp->second.transport->push_inbound(framed);
-						}
-					}
-					break;
-				}
-				case opennova::HostAcceptEvent::Kind::PeerGoodbye: {
-					auto rp = remote_peers_.find(peer);
-					if (rp != remote_peers_.end()) {
-						// Retire the connection in place (nulled transport is skipped by
-						// emit_s2c/tick) before destroying the transport it points at.
-						if (rp->second.conn_index < net_->connection_count()) {
-							net_->connection(rp->second.conn_index).transport = nullptr;
-							net_->connection(rp->second.conn_index).owned_entity = {};
-						}
-						remote_peers_.erase(rp);
-					}
-					break;
-				}
-				case opennova::HostAcceptEvent::Kind::PeerHandshakeAdvanced:
-				default:
-					break;
-			}
+			dispatch_host_accept_event(peer, ev);
 		}
 	}
 	++net_frame_counter_;
@@ -1326,6 +1375,11 @@ void NovaSimulation::host_net_flush() {
 	for (opennova::HostSessionAccept::TickOut &t : accept_->tick_handshakes(16, net_frame_counter_)) {
 		for (const std::vector<uint8_t> &dg : t.outbound) {
 			send_datagram(t.peer, dg);
+		}
+		// PeerEnteredWorldStreaming surfaces here (the tick batches start) — admit the
+		// joiner early + stream its own dcb-bearing 0x0C while the client is still loading.
+		for (const opennova::HostAcceptEvent &ev : t.events) {
+			dispatch_host_accept_event(t.peer, ev);
 		}
 	}
 	// Ship each admitted peer's per-frame S2C 0x0A (staged by emit_s2c into its
