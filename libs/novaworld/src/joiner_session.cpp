@@ -142,31 +142,37 @@ void JoinerSession::on_server_session(const std::vector<uint8_t> &body, PollResu
 	last_inbound_seq_ = hdr.seq_num;
 	for (const ProtocolMessage &m : messages) {
 		if (m.tag == 0x0C) {
-			// S2C 0x0C organic-spawn batch — the self name-match (§5.23).
+			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the
+			// whole batch to the NetClientView (below) so every other organic upserts too.
 			OrganicSpawnBatch batch;
-			if (!decode_organic_spawn_batch(m.payload.data(), m.payload.size(), batch)) continue;
-			for (const OrganicSpawnRecord &rec : batch.records) {
-				if (!rec.has_body || rec.entity_name != player_name_) continue;
-				self_handle_ = rec.slot_id; // the wire handle H (pool<<12|slot)
-				has_self_handle_ = true;
-				spawn_.pos_x = rec.pos_x;
-				spawn_.pos_y = rec.pos_y;
-				spawn_.pos_z = rec.pos_z;
-				spawn_.orientation = rec.orientation;
-				spawn_.team = rec.team;
-				spawn_.item_type_id = rec.item_type_id;
-				spawn_.net_id = rec.net_id;
-				if (phase_ != Phase::InMatch) {
-					phase_ = Phase::InMatch;
-					out.reached_in_match = true;
+			if (decode_organic_spawn_batch(m.payload.data(), m.payload.size(), batch)) {
+				for (const OrganicSpawnRecord &rec : batch.records) {
+					if (!rec.has_body || rec.entity_name != player_name_) continue;
+					self_handle_ = rec.slot_id; // the wire handle H (pool<<12|slot)
+					has_self_handle_ = true;
+					spawn_.pos_x = rec.pos_x;
+					spawn_.pos_y = rec.pos_y;
+					spawn_.pos_z = rec.pos_z;
+					spawn_.orientation = rec.orientation;
+					spawn_.team = rec.team;
+					spawn_.item_type_id = rec.item_type_id;
+					spawn_.net_id = rec.net_id;
+					if (phase_ != Phase::InMatch) {
+						phase_ = Phase::InMatch;
+						out.reached_in_match = true;
+					}
 				}
 			}
+			out.inbound_world.emplace_back(m.tag, m.payload);
+		} else if (m.tag == 0x0D || m.tag == 0x10 || m.tag == 0x20) {
+			// The rest of the load-time world stream (§5.2a): pool-1 spawns / pool-2 statics /
+			// pool-3 markers. Surface raw for the caller's NetClientView to upsert.
+			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == 0x0A) {
 			// Per-frame world snapshot — surface for the caller's NetClientView.
 			out.inbound_0a.push_back(m.payload);
 		}
-		// All other tags (world-state load / streaming bundle) are ignored for D.1;
-		// the organic-spawn 0x0C is authoritative for both H and the spawn pose.
+		// Other tags (game-start bundle scalars, world-state-load 0x0F) are not entity data.
 	}
 }
 

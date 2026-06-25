@@ -217,7 +217,7 @@ tick **cadence** was wrong. Pinned by `mission_runtime_test.gd`
 
 Renames (dry-run validated 13/13):
 - `sub_454050` → `EventTrigger_EvaluateChain` (anchored)
-- `Entity_SetStateWreckage @0x454d50` → `EventTrigger_UpdateQuarterRoundRobin` (anchored; current name is wrong)
+- `Entity_SetStateWreckage @0x454d50` → `EventTrigger_UpdateQuarterRoundRobin` (anchored) — **APPLIED 2026-06-25** (during the GamePlayerEntity grill: it was a kong-misnomer in the `Entity_*` namespace; verified callee `EventTrigger_UpdateEntry` + caller `Server_TickUpdate`)
 - `EventTrigger_NotifyEntityDeath @0x452ce0` → `Event_OnEventFired_MarkLinkedSpawnEntries` (probable)
 - `sub_4F81A0` → `WacScript_TickEvery62` (anchored)
 - globals: `trigger @0xae0704`→`g_Events`, `dword_AE0700`→`g_EventCount`,
@@ -648,7 +648,7 @@ of §5 with the orig→reimpl correspondence made explicit.
 | addr | current | proposed | confidence |
 |---|---|---|---|
 | 0x454050 | sub_454050 | EventTrigger_EvaluateChain | anchored |
-| 0x454d50 | Entity_SetStateWreckage | EventTrigger_UpdateQuarterRoundRobin | anchored (current name WRONG) |
+| 0x454d50 | EventTrigger_UpdateQuarterRoundRobin | (applied) | **APPLIED 2026-06-25** (was kong-misnomer `Entity_SetStateWreckage`) |
 | 0x452ce0 | EventTrigger_NotifyEntityDeath | Event_OnEventFired_MarkLinkedSpawnEntries | probable (arg is the EVENT entry, not an entity) |
 | 0x4f81a0 | sub_4F81A0 | WacScript_TickEvery62 | anchored |
 | 0xae0704 | trigger | g_Events | anchored |

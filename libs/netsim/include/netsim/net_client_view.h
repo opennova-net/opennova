@@ -31,6 +31,13 @@ public:
 
 private:
 	void apply_frame_update(const std::vector<uint8_t> &body);
+	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
+	// ABSOLUTE world positions (no anchor) + the entity identity/type, so spawn-only entities
+	// (statics/markers) and not-yet-moving organics are present before any 0x0A motion arrives.
+	void apply_organic_spawn(const std::vector<uint8_t> &body); // 0x0C pool-0
+	void apply_pool_spawn(const std::vector<uint8_t> &body);    // 0x0D pool-1
+	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
+	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 
 	ClientState state_;
 	std::function<EntityClass(uint16_t)> resolver_;

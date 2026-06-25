@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace opennova {
@@ -70,6 +71,11 @@ public:
 	struct PollResult {
 		std::vector<std::vector<uint8_t>> outbound;   // datagrams to send back to the host
 		std::vector<std::vector<uint8_t>> inbound_0a; // raw S2C 0x0A bodies (for NetClientView)
+		// Raw S2C world-stream spawn/static bodies the host sends during load, as (tag, body):
+		// 0x0C organics, 0x0D pool-1, 0x10 statics, 0x20 markers. The owner re-frames each as
+		// [tag][body] into the client conduit so NetClientView upserts the full entity set
+		// (the joiner's own name-match still happens here, independently).
+		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_world;
 		bool reached_in_match = false;                // true on the datagram that learns H
 	};
 

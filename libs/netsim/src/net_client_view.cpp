@@ -37,12 +37,93 @@ void NetClientView::pump(ISessionTransport &channel) {
 		case kTag0aFrameUpdate:
 			apply_frame_update(dg.body);
 			break;
+		case 0x0C: // pool-0 organic spawn batch (§5.23)
+			apply_organic_spawn(dg.body);
+			break;
+		case 0x0D: // pool-1 entity spawn batch (§5.11)
+			apply_pool_spawn(dg.body);
+			break;
+		case 0x10: // pool-2 static entity batch (§5.9)
+			apply_static_batch(dg.body);
+			break;
+		case 0x20: // pool-3 marker/waypoint sync batch (§5.12)
+			apply_pool3_batch(dg.body);
+			break;
 		default:
-			// Phase 1 only reconstructs the per-frame 0x0A world reference; spawn /
-			// pool / event tags arrive in later phases.
+			// Game-start scalars / world-state-load and other non-entity tags.
 			++unknown_tags_;
 			break;
 		}
+	}
+}
+
+namespace {
+// The compact coarse heading the present rebuilds: yaw_byte = top 8 bits of the 32-bit
+// engine BAM (present does `bam = yaw_byte << 24`). [nova_simulation present.]
+inline uint8_t yaw_byte_from_bam(int32_t bam) {
+	return static_cast<uint8_t>(static_cast<uint32_t>(bam) >> 24);
+}
+} // namespace
+
+void NetClientView::apply_organic_spawn(const std::vector<uint8_t> &body) {
+	OrganicSpawnBatch batch;
+	decode_organic_spawn_batch(body.data(), body.size(), batch); // lenient: apply what decoded
+	for (const OrganicSpawnRecord &rec : batch.records) {
+		if (!rec.has_body) continue;
+		ClientEntityState &es = state_.upsert(rec.slot_id);
+		es.type_id = rec.item_type_id;
+		es.cls = resolver_(rec.item_type_id);
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(rec.orientation);
+	}
+}
+
+void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
+	PoolSpawnBatch batch;
+	decode_pool_spawn_batch(body.data(), body.size(), batch);
+	for (const PoolSpawnRecord &rec : batch.records) {
+		ClientEntityState &es = state_.upsert(rec.slot_id);
+		es.type_id = rec.item_type_id;
+		es.cls = resolver_(rec.item_type_id);
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+	}
+}
+
+void NetClientView::apply_static_batch(const std::vector<uint8_t> &body) {
+	StaticEntityBatch batch;
+	decode_static_entity_batch(body.data(), body.size(), batch);
+	// The 0x10 record carries no slot id — the entity's slot is start_index + iteration index.
+	for (size_t i = 0; i < batch.records.size(); ++i) {
+		const StaticEntityRecord &rec = batch.records[i];
+		if (rec.is_empty_slot) continue;
+		const uint16_t handle = static_cast<uint16_t>(0x2000u | ((batch.start_index + i) & 0x0FFFu));
+		ClientEntityState &es = state_.upsert(handle);
+		es.type_id = rec.item_type_id;
+		es.cls = EntityClass::Unknown; // a static has no 0x0A motion class; it never moves
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(rec.euler_z);
+	}
+}
+
+void NetClientView::apply_pool3_batch(const std::vector<uint8_t> &body) {
+	Pool3SyncBatch batch;
+	decode_pool3_sync_batch(body.data(), body.size(), batch);
+	for (const Pool3SyncRecord &rec : batch.records) {
+		if (rec.is_empty_slot) continue;
+		ClientEntityState &es = state_.upsert(rec.net_handle);
+		es.type_id = rec.item_type_id;
+		es.cls = EntityClass::Unknown;
+		es.x = rec.pos_x;
+		es.y = rec.pos_y;
+		es.z = rec.pos_z;
+		es.yaw_byte = yaw_byte_from_bam(static_cast<int32_t>(rec.movement_val));
 	}
 }
 

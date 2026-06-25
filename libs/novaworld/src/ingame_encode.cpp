@@ -173,6 +173,71 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 	return out;
 }
 
+// [orig: sub_5042F0] (the §5.2a world-stream phase-1 static serializer) — the inverse of
+// decode_static_entity_batch (§5.9). Header `[u16 start_index][u16 count]`, then per record
+// `[u16 item_type_id]` (0 ⇒ empty-slot sentinel, record ends), else `[u16 field_flags]
+// [i32 x][i32 y][i32 z]`, the flag-gated optionals, the ALWAYS ammo_count, more flag-gated
+// optionals, the ALWAYS weapon_byte, and attach_ref when `weapon_byte != 0 || flags & 0x200`.
+// Like the pool-3 / pool-spawn encoders the flag word is DERIVED from non-zero source fields
+// (the original sets each gate bit inside `if (value) { flags |= bit; <write> }`). Field→bit
+// map matches decode_static_entity_batch exactly (D-NET-70/71, byte-validated).
+// [orig: decode NapiNPClientMsg_0x010 @ 0x433400.]
+std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+
+	// Header — start index is the pool cursor; count is the number of slots emitted,
+	// INCLUDING empty-slot sentinels (the decoder loops `count` times, an empty slot is
+	// one iteration that consumes a bare `[u16 0]`).
+	w.u16(batch.start_index);
+	w.u16(uint16_t(batch.records.size()));
+
+	for (const StaticEntityRecord &rec : batch.records) {
+		// Empty-slot sentinel: bare `[u16 0]`, no body (decode reads item_type_id == 0
+		// and continues to the next record).
+		if (rec.is_empty_slot || rec.item_type_id == 0) {
+			w.u16(0);
+			continue;
+		}
+		w.u16(rec.item_type_id);
+
+		uint16_t f = 0;
+		if (rec.euler_z)      f |= 0x0001; // entity+16 yaw heading (32-bit BAM)
+		if (rec.euler_x)      f |= 0x0002; // entity+20
+		if (rec.euler_y)      f |= 0x0004; // entity+24
+		if (rec.section_mask) f |= 0x0008; // entity+308
+		if (rec.team_byte)    f |= 0x0010; // entity+354 (D-NET-58/62)
+		if (rec.parent_slot)  f |= 0x0020; // entity+36
+		if (rec.bone_a)       f |= 0x0040; // entity+533 (D-NET-94)
+		if (rec.bone_b)       f |= 0x0080; // entity+532 (D-NET-94)
+		if (rec.score_flag)   f |= 0x0100; // entity+624
+		// attach_ref is written when `weapon_byte != 0 || flags & 0x200`; force the 0x200
+		// gate only when attach_ref is populated but weapon_byte is zero (else weapon_byte
+		// already triggers the write and 0x200 would be redundant).
+		if (rec.attach_ref && rec.weapon_byte == 0) f |= 0x0200;
+
+		w.u16(f);
+		w.u32(uint32_t(rec.pos_x)); // entity+4
+		w.u32(uint32_t(rec.pos_y)); // entity+8
+		w.u32(uint32_t(rec.pos_z)); // entity+12
+
+		if (f & 0x0001) w.u32(uint32_t(rec.euler_z));
+		if (f & 0x0002) w.u32(uint32_t(rec.euler_x));
+		if (f & 0x0004) w.u32(uint32_t(rec.euler_y));
+		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
+		if (f & 0x0010) w.u8(rec.team_byte);
+		if (f & 0x0020) w.u32(uint32_t(rec.parent_slot));
+		w.u8(rec.ammo_count);          // ALWAYS, entity+290
+		if (f & 0x0040) w.u8(rec.bone_a);
+		if (f & 0x0080) w.u8(rec.bone_b);
+		if (f & 0x0100) w.u8(rec.score_flag);
+		w.u8(rec.weapon_byte);         // ALWAYS, entity+538
+		if (rec.weapon_byte != 0 || (f & 0x0200)) w.u16(rec.attach_ref); // entity+350
+	}
+
+	return out;
+}
+
 // [orig: NapiNPClientMsg_0x00C @ 0x42E730] — the inverse of decode_organic_spawn_batch
 // (§5.23). Header u16 entity_count, then per record: u16 slot_id, u8 has_body, and (when
 // has_body) the unconditional field block. A field-identical round-trip with the decoder.

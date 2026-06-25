@@ -104,6 +104,16 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 // round-trip with decode_pool_spawn_batch is field-identical.
 std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 
+// Encode a §5.9 S2C 0x10 pool-2 static-entity batch — the inverse of
+// decode_static_entity_batch and the bytes a host streams in phase 1 of the world-load
+// sequence for purely-static structures (buildings, oil-field props). Header
+// `[u16 start_index][u16 count]`, then per record `[u16 item_type_id]` (0 ⇒ empty-slot
+// sentinel) else the flag-driven body. The field_flags word is DERIVED from populated
+// fields (the original sets each gate bit inside `if (value) { flags |= bit; write }`), so
+// `StaticEntityRecord::field_flags` on the input is ignored and recomputed.
+// [orig: sub_5042F0 (write) / NapiNPClientMsg_0x010 @ 0x433400 (decode).]
+std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch);
+
 // Encode a §5.23 S2C 0x0C organic-entity spawn batch — the inverse of
 // decode_organic_spawn_batch and the bytes a host streams so a JOINER can name-match its
 // own pool-0 player (the type-0x14b9 organic whose entity_name == the joiner's player name)

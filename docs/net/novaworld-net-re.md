@@ -782,20 +782,30 @@ pointer into the slot. Slot/identity bookkeeping — not entity field-init.
 `[orig: Entity_InitFromItemDef @ 0x49e550]` reads the type index at `entity+28`; when
 `0 < idx < gItemCount` it caches `itemDef = &gItemDefs[idx]` at `entity+32` and copies:
 
-| dst | src | width |
+| dst (entity) | src (itemDef) | width |
 |---|---|---|
-| entity+32 | `&gItemDefs[idx]` (itemDef ptr) | ptr |
-| entity+286 | `itemDef->healthMax` | u16 |
-| entity+288 | `itemDef->armorMax` | u16 |
-| entity+48/52/56 | `rtCounter0/1/2` | u32 |
-| entity+432 | `destroyTiming0` | u32 |
-| entity+452 | `itemDef->pad_130[40]` | u32 |
-| entity+456 | `itemDef->pad_130[8]` | u32 |
+| `itemDef` +0x20 | `&gItemDefs[idx]` | ptr |
+| `deathCallback` +0x1c8 | `deathCallback` +0x138 | ptr |
+| `updateCallback` +0x1c4 | `updateCallback` +0x158 | ptr |
+| `graphicModel` +0x30 | `graphicModel` +0xf0 | ptr |
+| `huskModel` +0x34 | `huskModel` +0xf4 | ptr |
+| `huskFinalModel` +0x38 | `huskFinalModel` +0xf8 | ptr |
+| `destroyTimer` +0x1b0 | `destroyTiming0` +0x1a4 | u32 |
+| `Health` +0x11e | `healthMax` +0x17c | u16 |
+| `Armor` +0x120 | `armorMax` +0x17e | u16 |
 
-then, if the item's init callback `itemDef->pad_130[24]` is non-null and not itself,
-tail-calls `callback(entity)`. Confirms §6.9 (`entity+286 = ItemDef.healthMax`) and adds
-`entity+288 = armorMax`. The caller sets `entity+28` (the `gItemDefs` index, from
+then, if `itemDef->initCallback` +0x148 is non-null and not itself, tail-calls
+`callback(entity)`. Confirms §6.9 (`entity+286 = ItemDef.healthMax`) and `entity+288 = armorMax`.
+The caller sets `entity+0x1c ItemTypeIndex` (the `gItemDefs` index, from
 `ItemList_FindIndexByTypeId(type_id)`; player infantry `type_id 0x14B9`) BEFORE calling.
+
+**Correction (2026-06-25):** the prior version of this table listed `entity+48/52/56` as
+`rtCounter0/1/2 (u32)` and `entity+452/456` as `pad_130[40]/[8]`. With `ItemDef` now fully typed
+those are the **model-pointer triple** `graphicModel/huskModel/huskFinalModel` (`= ItemDef.graphic/
+husk/huskFinal` resolved to `void*` models @+0xf0/+0xf4/+0xf8) and the `updateCallback`/`deathCallback`
+pair. `graphicModel` +0x30 is the live render model — *dereferenced as a model pointer* in
+`Entity_ClassifyForMinimap @0x50fa70` (`m[56]`/`m[48]`), NOT an integer counter. `huskModel`/
+`huskFinalModel` are the damaged/destroyed render swaps (`ItemDef.huskSwapAt` threshold).
 
 **`Entity_ResetToSpawnState` — the spawn/respawn reset that CLEARS the `entity+36` gate.**
 `[orig: Entity_ResetToSpawnState @ 0x4B9610]` resolves §5.6's "remaining unsolved spawn
@@ -836,15 +846,16 @@ The cleanest single witness is the tag-0x0C organic-spawn writer `[orig: NapiNPC
 0x42E730]`, which stores each field at a cited site; cross-checked against the BMS spawner `[orig:
 Entity_SpawnFromBMSRecord @ 0x40e9f0]` and `Entity_ResetToSpawnState @0x4b9610`. Fields named:
 `ItemTypeIndex` +28, `itemDef` +32 (`ItemDef*`), `Flags` +36 (minimap/render + movement-gate bit 1),
-`Ssn` +0x2e, `rtCounter0/1/2` +48/+52/+56 (init from `ItemDef`; +0x30 reused at runtime as a weapon/AI
-data ptr), `CharacterEntity` +0x3c, `aiRuntime` +104, `entityFlags` +0x78 (`[@0x42e864]`), `DcbId`
+`Ssn` +0x2e, `graphicModel/huskModel/huskFinalModel` +0x30/+0x34/+0x38 (model-ptr triple copied from
+`ItemDef` — see the corrected `Entity_InitFromItemDef` table above; the 2026-06-23 `rtCounter0/1/2`
+reading was superseded once `ItemDef` was typed), `CharacterEntity` +0x3c, `aiRuntime` +104, `entityFlags` +0x78 (`[@0x42e864]`), `DcbId`
 +0x7c, `commandGroup` +0x11c (u16), `Health` +0x11e, `Armor` +0x120 (`= ItemDef.armorMax`), `ammoCount`
 +0x122, `MoveOrder` +0x12C + analog axes +0x130..0x133 (`Player_PackInputStateToEntity` @0x4df450),
 `sectionMask` +0x134, `weaponType` +0x157 (`[@0x42ea4a]`), `NetId` +0x15c (u16, `[@0x42e9bc]`), `Team`
 +0x162, `parentSlot` +0x168 (`[@0x42ea62]`, resolves to the `parentEntity` ptr +0x16c), `destroyTimer`
-+0x1B0, `Callback0/Callback1` +0x1c4/+0x1c8 (copied from `ItemDef.pad_130[40]/[8]` by
-`Entity_InitFromItemDef @0x49e550`; `Callback1` is the death/lifecycle handler invoked by
-`Entity_KillByNetId @0x43dbd0`), `subType` +0x214 (`[@0x42ea35]`), `refNum` +0x215 (`[@0x42ea20]`, see
++0x1B0, `updateCallback/deathCallback` +0x1c4/+0x1c8 (copied from `ItemDef.updateCallback @0x158` /
+`deathCallback @0x138` by `Entity_InitFromItemDef @0x49e550`; `deathCallback` is the death/lifecycle
+handler invoked by `Entity_KillByNetId @0x43dbd0`), `subType` +0x214 (`[@0x42ea35]`), `refNum` +0x215 (`[@0x42ea20]`, see
 D-NET-94), `weaponByte` +0x21A, `scoreFlag` +0x270, `weaponState` +0x294 (`[@0x42e9d5]`), `Weapon`
 +0x298, `aiState` +0x2b4 (`[@0x42e991]`; also the `memset(entity,0,0x2B4)` base/extended-region
 boundary), `SpawnOrigin` +0x318 (set by `Entity_ResetToSpawnState`), `animSlot` +0x374 (`[@0x42e9a6]`).
@@ -936,17 +947,39 @@ pinned more fields, each named for the function that reveals it (`GamePlayerEnti
   `collisionCallback` +0x2b8 `[orig: Entity_InvokeCollisionCallback @0x442350]`; `fireFlag` +0x2c6
   `[orig: Entity_InvokeFireCallback @0x442810]`.
 - Callback refinement: `updateCallback` +0x1c4 is the per-frame update/physics fn ptr (`==
-  Entity_UpdateShellBounce` for shells `[orig: Entity_IsShellProjectile @0x4e4040]`); `Callback1` +0x1c8
+  Entity_UpdateShellBounce` for shells `[orig: Entity_IsShellProjectile @0x4e4040]`); `deathCallback` +0x1c8
   stays the death/lifecycle handler. **Polymorphic:** `animStateId` +0x2bc is invoked as a fire callback
-  on weapon entities (`Entity_InvokeFireCallback`); `ownerSession` +0x1cc reads as a session/transport
-  ref (Destroy/Reset) but an entity back-ref in `Entity_ClearWeaponTarget @0x453580` (name kept pending
-  a decisive witness; that function may itself be a misnomer).
+  on weapon entities (`Entity_InvokeFireCallback`); `ownerSession` +0x1cc is **resolved (2026-06-25) as
+  two disjoint meanings** — a `CNapiTransport` session ref on networked entities (`Entity_Destroy
+  @0x43e810`: `if (+0x1cc) CNapiTransport_DetachFromSession`) AND an **effect-emitter handle** on
+  effect-bearing props (`sub_4540E0 @0x4540e0`: `entity[115] = CEffectWorld_SpawnEmitterAtPosition(...)`
+  for rope-trail def type 6088). The `@0x453580` callback (kong-misnamed `Entity_ClearWeaponTarget`,
+  renamed **`Entity_ClearOwnerSessionIfMatches`**) nulls `+0x1cc` when it still equals the dying emitter
+  — the effect-destroy cleanup hook, NOT a weapon-target clear. Field name `ownerSession` kept for the
+  networked meaning.
 - **`boundRadius` +0x0 is NOT padding** — the very first dword is the model **bounding-sphere radius**
   (`+0x1000` margin), the proximity/cull radius every `Entity_*` reads; marker/waypoint entities store
   their trigger radius there instead `[orig: Entity_InitFromModel @0x40dc30; Entity_SpawnFromBMSRecord]`.
   The same model-init also writes `bboxCenter` +0x1fc (`SpecialVec3`) + `bboxRadius` +0x208 (local
   collision bbox, scaled), `heatSig` +0x1a4 / `radarSig` +0x1a6 (from `ItemDef`), and `shadowSlot0/1`
   +0x1b6/+0x1b8 (shadow-decal slots). `weaponSlots` +0x1d0 is the 44-byte block before the bbox.
+
+**0x0C organic spawn verified bidirectionally + name corrections (2026-06-25 grill).** The pool-0
+0x0C organic spawn record was re-witnessed on BOTH sides — the WRITER `[orig:
+serialize_entity_states_to_buffer @0x5030a0]` and the READER `[orig: NapiNPClientMsg_0x00C @0x42e730]`
+— and they are field-for-field symmetric, re-confirming ~18 `GamePlayerEntity` members by witnessed
+wire access in *both* directions: `Position` +0x4/8/C, `Yaw` +0x10, `Flags` +0x24 (low u16 on the
+wire), `entityFlags` +0x78, `Name` +0xF4, `Team` +0x162, `aiState` +0x2B4, `animSlot` +0x374, `NetId`
++0x15C, `weaponState` +0x294, `aiAction` (`aiRuntime`+0x20), `refNum` +0x215, `subType` +0x214,
+`weaponType` +0x157, `parentSlot` +0x168, `parentEntity` +0x16C. The record's leading `[u8
+defType=itemDef->type][u16 itemId=itemDef->id]` pair is a non-zero has-body gate (0 ⇒ empty slot) plus
+the type-id the reader feeds to `ItemList_FindIndexByTypeId`. One byte — `entity+0x154` (read-side
+decompiler "unusedByte") — round-trips on the wire but its semantic is still open (currently inside
+`pad_14c`). The IDB struct now carries **154 named members** (was 111 at pass 4), all consistent with
+these witnesses. **IDB rename applied:** the kong-misnomer `Entity_SetStateWreckage @0x454d50` →
+`EventTrigger_UpdateQuarterRoundRobin` (it processes ¼ of the global `trigger` array per
+`Server_TickUpdate` frame via `EventTrigger_UpdateEntry`, NOT entity wreckage — already anchored in
+[`mission/bms-event-runtime-re.md`](../mission/bms-event-runtime-re.md)).
 
 ### 5.2c Map spawn-marker selection — where the human player's pose comes from (2026-06-22)
 
@@ -2698,15 +2731,28 @@ locally (the §5.38 motor) and stamp the right handle in its C2S `0x0C` uplink. 
 `.scratch/host_and_join_lan.pcapng` (joiner "cdouglass" → host "biggy", mission dvxi5) cross-read with
 Jointops.exe; behavioral, read-only (no IDB writes).
 
-- **Self-ID is a NAME-MATCH in the S2C `0x0C` organic-spawn stream, NOT a slot-assignment packet. [D-NET-92]**
-  The joiner's own player is the type-`0x14B9` organic in the host's S2C `0x0C` batch (§5.23) whose
-  `entity_name` equals the joiner's own player name; matching it sets `g_local_player_entity @0xB75FC8`, and
-  that record's `slot_id` IS the joiner's wire handle **H**. In the capture, record 5 of the f=516 `0x0C`
-  batch = `slot=0x0005 pool0/s5 type=0x14B9 name="cdouglass" pos=(70,25,55.4) yaw=270° team=2` — the
-  joiner's own entity. H (`0x0005`) is fixed at this named spawn (f=516), BEFORE the game-start bundle
-  (f=559) and BEFORE the first C2S `0x0C hdl=0x0005` (f=561). It is NOT learned from `0x51` (absent in the
-  capture) nor from `0x46` PlayerSync (whose `slot=1 entity=0x0005` arrived f=564, AFTER the first uplink).
-  `[orig: NapiNPClientMsg_0x00C @ 0x42E730]`
+- **Self-ID is a NAME-MATCH in the S2C `0x0C` organic-spawn stream, NOT a slot-assignment packet. [D-NET-92
+  — CORRECTED 2026-06-25, see below]** The joiner's own player is the type-`0x14B9` organic in the host's S2C
+  `0x0C` batch (§5.23) whose `entity_name` equals the joiner's own player name; matching it sets
+  `g_local_player_entity @0xB75FC8`, and that record's `slot_id` IS the joiner's wire handle **H**. In the
+  capture, record 5 of the f=516 `0x0C` batch = `slot=0x0005 pool0/s5 type=0x14B9 name="cdouglass"
+  pos=(70,25,55.4) yaw=270° team=2` — the joiner's own entity. H (`0x0005`) is fixed at this named spawn
+  (f=516), BEFORE the game-start bundle (f=559) and BEFORE the first C2S `0x0C hdl=0x0005` (f=561). It is NOT
+  learned from `0x51` (absent in the capture) nor from `0x46` PlayerSync (whose `slot=1 entity=0x0005` arrived
+  f=564, AFTER the first uplink). `[orig: NapiNPClientMsg_0x00C @ 0x42E730]`
+  - **CORRECTION (D-NET-92):** the RETAIL client's self-ID is **NUMERIC, not a name-match.**
+    `Player_FindLocalPlayerEntity @0x4e0090` scans pool 0 for `(entity.miniFlags+0x36 & 0x100) &&
+    (entity+0x78 == local_session_id)`, where `local_session_id` is the client's own
+    `NapiNPConnection.unk_18` (its ConnectionId / dcb, via `sub_4C6D40`). In `host_and_join_lan.pcapng` the
+    matched record happened to ALSO carry `name="cdouglass"`, so the name-match was coincidental — the
+    `entity+0x78` (eFlags) numeric match is the real mechanism (confirmed by the F3 dcb work,
+    `project_dcb_join_mechanism`; the crash is `Player_InitPlayer @0x4e15f0` →
+    `Player_BuildNetIdLookupOrFatalError @0x4dff60` when the scan returns NULL). **Host requirement:** for a
+    retail joiner the host MUST stamp the joiner's own `0x0C` `entity_flags (entity+0x78)` = the joiner's
+    ConnectionId (learned from its in-match `0x48` ack) AND `minimap_flags (entity+0x36)` bit `0x100` — a name
+    alone is insufficient. Our `JoinerSession` name-match (`entity_name == player_name`) is a separate
+    opennova-side decode convenience for the opennova↔opennova path; it does not reflect the retail client's
+    self-ID path. `[orig: Player_FindLocalPlayerEntity @0x4e0090]`
 - **`NapiNPClientMsg_0x00F` (WORLD-STATE-LOAD, §5.29) drives the post-load client burst when `!is_authority`.**
   It applies the spawn pos/yaw to the already-identified `g_local_player_entity` and clears the §5.6
   movement gate (`Flags & 1`); on a non-authority client it additionally caches the spawn at
@@ -2780,16 +2826,145 @@ remote player rendered in-game. Launch contract (the host listens on the witness
 must pass the mission via `NW_LAN_MISSION`, NOT `NW_LAN_HOST` — `main_game.gd` tests `NW_LAN_HOST` first and
 takes the HOST path before it ever reads `NW_LAN_JOIN`, so a joiner with `NW_LAN_HOST` set silently becomes a
 second host (its `32768` bind fails, it falls back to a socketless listen server, and never dials).
-Three faithful-render gaps remain (the next work):
-1. **The joiner sees only the host player, not the NPCs/statics.** The host emits its own player's
-   organic-spawn + per-frame `0x0A`, but does NOT stream a spawn batch (the §5.25 S2C `0x10` entity batch /
-   §5.23 organic-spawn) for its AI and placed entities; the joiner skips local dynamic placement and renders
-   purely wire-direct, so those entities never appear. Host `emit_s2c` must replicate the full entity set.
+Two faithful-render gaps remain (the next work):
+1. **[CLOSED 2026-06-25 — stream the DYNAMIC set during load]** *(was: the joiner saw only the host player,
+   not the NPCs.)* The host streams the networked/dynamic set during the joiner's world-load via
+   `NovaSimulation::stream_world_state_to_peer` (fired on the F3 `PeerEnteredWorldStreaming` event, after the
+   joiner's own dcb-bearing `0x0C`): an **empty `0x10`** phase marker, the **pool-0 organics (host player +
+   AI) in `0x0C`** (paged, remote peers excluded — their dcb record streams separately), then an **empty
+   `0x20`** phase marker (the empty 0x10/0x20 drive the witnessed `g_loading_progress` 2/5 phases without
+   data). **The host does NOT stream the static mission (buildings/markers) — see D-NET-98.** Built: the
+   faithful `encode_static_entity_batch` (`0x10`, byte-exact inverse of `decode_static_entity_batch`,
+   replacing the simplified `build_tag_10_entity_batch` stub); libs/netsim `build_pool{0..3}_*` extractors
+   (routed by `handle.pool()`); joiner reception (`JoinerSession` surfaces spawn bodies + `NetClientView::pump`
+   decodes `0x10`/`0x0C`/`0x20` into the single `ClientState`). Verified by `coop_two_sim_test` (the joiner's
+   present carries the host's two AI organics, not just the host player; statics are NOT wire-streamed) +
+   lib round-trips (`nw_ingame_encode`, `netsim_world_stream_extractors`). Pool-1 (`0x0D`) deferred (D-NET-97).
 2. **Remote bodies glide — body animation is not carried over the wire.** The `0x0A` motion stream moves the
    model but no anim-state rides it, so remote soldiers slide in their rest pose (the "soldier-glide" gap).
 3. **The joiner's local player uses the NPC motor.** On a non-authority client, L does not route through the
    `is_local_player` infantry-motor branch (§5.38) the SP host uses, so the joiner's own movement reads as
    NPC locomotion. Investigate the joiner `spawn_player` + motor gating under `run_logic_tick(false)`.
+
+**D-NET-97 [TRACKED SIMPLIFICATION + POOL-1 CRASH] — pool routing is by `EntityKind`, not item-def
+capability flags; pool-1 (`0x0D`) deferred.** The original routes an entity to a wire pool (and thus its
+stream tag) by item-def capability flags read off the live engine entity (`itemDef+604`,
+`itemDef+84 & 0x100000/0x40000`, `entity+100/+104`) — a purely-static structure goes to pool-2 (`0x10`), a
+destructible/AI-bearing object to pool-1 (`0x0D`). Our `pool_for_kind` (`libs/mission/src/promote.cpp`)
+assigns the pool at promotion by BMS `EntityKind`: `Organic→0`, `Item→1`, `Building→2`, `Marker→3`. The
+per-pool wire BYTES stay §5.x-faithful (each `encode_*_batch` round-trips its witnessed decoder); only the
+static-vs-destructible split heuristic differs.
+
+**Why pool-1 `0x0D` is deferred (a live crash, not theoretical):** the retail `0x0D` decoder
+`[orig: NapiNPClientMsg_0x00D @0x432c40]` enters an AI-name `strcpy` **whenever the record's item def is
+AI-capable** (`if (itemDef->attrib & 0x100000)` `@0x433327`), reading the `0x0800` AI-trailer name pointer
+`aiNameStr`. That pointer is **NULL unless the record set spawn-flag `0x0800`** — and the original serializer
+GUARANTEES `0x0800` for any AI-capable item def. Our `build_pool1_spawn_batch` never populates the AI trailer
+(it has no item-def access in libs/netsim), so an `EntityKind::Item` that maps to an AI-capable retail item
+def crashes the stock client at **`0x433370`** (`mov cl,[edx]` with `edx==0` → access violation reading
+`0x00000000`; SYSDUMP confirmed 2026-06-25, last packet `#13`=`0x0D`). The pool-0 (`0x0C`), pool-2 (`0x10`)
+and pool-3 (`0x20`) handlers are crash-safe (`0x0C` reads its name inline/always-present; `0x10`/`0x20` have
+no name/AI branch). **Fix path to re-enable pool-1:** populate the `0x0D` AI trailer (`ai_name` + profiles)
+from item-def AI flags at the host emit layer (`NovaItemDatabase`, `itemDef+604`) so `0x0800` is set whenever
+the item is AI-capable — the invariant the original maintains. Until then `stream_world_state_to_peer` skips
+the `0x0D` phase. Byte-matching a specific retail mission also wants the item-def flag gate from
+`serialize_entity_pool_to_packet_0 @0x503940`.
+
+**D-NET-98 [SCOPE — the load-time world-stream is the DYNAMIC set, not the full static mission].** The
+golden retail capture `.scratch/host_and_join_lan.pcapng` (a real host+join, mission dvxi5) shows the host's
+load-time world-stream is SMALL: `0x0b` BMS-header → `0x10` **empty (len=4)** → `0x0d` (192 B) → `0x0c`
+(278 B, ~5 organics) → `0x20` (92 B, a few markers) → game-start bundle (`0x42`/`0x0a`/`0x0f`/`0x61`). The
+host does NOT stream the hundreds of static buildings or nav markers — in the original, static mission
+geometry is CLIENT-LOCAL `.bms` data; only the server-authoritative DYNAMIC entities (players, AI, a few
+gameplay markers/destructibles) ride the wire. Our `promote_mission` over-populates the networked World pools
+with the ENTIRE static mission (00TRg/dvxi5: 816 statics → pool-2, 497 markers → pool-3), so a first cut that
+streamed pools 2/3 in full flooded the client and walked the retail `Pool_GetEntryUnchecked(2/3, start+i)`
+(`@0x4334a8` / `@0x425c77`, UNCHECKED) past pool capacity → memory corruption → the observed "load finishes,
+resets, reloads, kicked to login". FIX: `stream_world_state_to_peer` streams ONLY pool-0 organics (`0x0C`),
+with empty `0x10`/`0x20` as the witnessed load-progress phase markers (`g_loading_progress` 2/5). Open
+follow-ups: (a) the JOINER should load static geometry locally (like retail) rather than rely on the wire —
+`game_world.gd` currently skips ALL placement on a joiner, so opennova joiners won't see buildings until they
+place statics locally; (b) stream the small NETWORKED marker subset (spawn volumes / objectives) via `0x20`
+rather than all 497 — needs the witnessed "is this marker networked" gate. [net-re §5.2a world-stream pacing.]
+
+#### 5.38c The deploy gate — why a retail joiner stalls at spawn-select and auto-kicks (2026-06-25)
+
+Witnessed by diffing two captures of the SAME mission (AS – Dormant Volcano Isle / `ASH_I5A.BMS`):
+`.scratch/retail_nw_host_and_join_jored_host_ljim_client.pcapng` (a working NovaWorld retail-host →
+retail-client join) against `.scratch/capture5.pcapng` (our listen-host, a stock retail client joining and
+**failing**), cross-read with Jointops.exe (read-only, no IDB writes). In capture5 the joiner clears the
+"Could not find player dcb" crash (the F3 value fix holds), **reaches spawn-select, sends 0 C2S `0x0C`
+deploy uplinks, floods the host with ~378 C2S `0x0F` (2 B each), then auto-kicks**. Retail sends 31 C2S
+`0x0C` and 0 C2S `0x0F`.
+
+- **The C2S `0x0C` deploy uplink has TWO gates: `!dword_81474C && !g_spawn_success_gate (0x24C1928)`. [D-NET-99]**
+  `[orig: Client_ProcessNetworkFrame @0x42c46d / @0x42c4a3]`.
+  - `dword_81474C` (loading-wait): set at load start, cleared by the `0x0F` world-state-load handler
+    `[orig: @0x42E391]` (and `0x5A` loadout-sync `@0x429713`). **In capture5 this gate WAS satisfied** — the
+    client processed our `0x0F` (it sent the `0x0F`-triggered C2S burst `0x28/0x29/0x2D/0x32` at f=231, AFTER
+    the `0x0F` at f=224). So `dword_81474C` was clear when the flood began. **The `0x0F`-vs-`0x0C` load ORDER
+    is therefore NOT the deploy blocker** — an early hypothesis this session that was REFUTED by the capture,
+    and harmful: deferring the joiner's own `0x0C` past the game-start bundle re-triggers the dcb crash
+    (`Player_FindLocalPlayerEntity @0x4e0090` returns NULL → `Player_BuildNetIdLookupOrFatalError @0x4dff60`,
+    `__noreturn` MessageBox), because `Player_InitPlayer @0x4e15f0` runs the pool-0 self-scan during load,
+    BEFORE the late `0x0C` arrives. **The joiner's `0x0C` must stay EARLY** (streamed during world-load on
+    `PeerEnteredWorldStreaming`), as the F3 fix already had it.
+  - `g_spawn_success_gate (0x24C1928)` — **the actual deploy blocker. RESOLVED.** Complete writer set
+    (every encoding byte-searched at the global's address): **four SETTERS → 1** —
+    `NapiNPClientMsg_GameReset` (opcode **0x25**) `[orig: @0x422849]`, `NapiNPClientMsg_0x01D` (opcode 0x1D
+    round-end scoreboard, `mov …,1`) `[orig: @0x430858]`, `Server_ProcessRoundEnd` `[orig: @0x5168e4]`,
+    `Cine_StartPlayback` `[orig: @0x577848]` — and **one CLEARER → 0**: `Game_StartMission`
+    `[orig: @0x524a1f]` (mission-load; ebx held 0 from the entry `xor ebx,ebx @0x524381`). The setters all
+    mean "between rounds / pending / spectating"; the lone clearer means "actively playing." `Game_StartMission`
+    runs ONCE per mission/round at the client's **Game-Loop mode-enter**: the join FSM
+    `MultiPlayer_JoinSessionStateMachine` (`dword_25E58A0`, states 0-9) reaches **state 7** and does
+    `ui_nav_history_push("Game Loop")` `[orig: @0x56a91d]`, whose mode descriptor's enter-callback `loc_526370`
+    `[orig: @0x526370/@0x526377]` calls `Game_StartMission`. While the gate stays SET, the deploy uplink is
+    blocked AND `dword_C8D820` counts down to `reason = 4` `[orig: @0x42c3c1]` = the auto-kick.
+    **WIRE PROOF (`.scratch/host_and_join_lan.pcapng`, the full working retail LAN join):** the joiner sends
+    `C2S 0x03` at f=470 (the state→7 transition = `Game_StartMission`, `NetPacket_WriteSessionTick @0x56a70a`),
+    DEPLOYS at f=561 (`C2S 0x0C hdl=0x0005`, gate=0), and the capture's **only `0x25` is at f=895** — 334
+    frames AFTER deploy (a later round-reset). So a working initial join sends **no gate-setter before deploy**;
+    `Game_StartMission` leaves the gate clear and the joiner deploys. **Our bug:** capture5's joiner runs
+    `Game_StartMission` early (`C2S 0x03` at f=176 → gate=0), then our game-start bundle emits a `0x25` at f=224
+    → re-SETS the gate with nothing left to clear it → stuck + kicked. **FIX (landed):** drop the `0x25`
+    `RESET_AND_START` from the joiner's bundle (`game_session.cpp` `add_game_start_bundle`). Unit-proven by
+    `game_session_test` / `host_session_accept_test` ("bundle does NOT carry 0x25"); opennova↔opennova
+    `coop_two_sim` still green. Live retail re-test pending.
+- **The C2S `0x0F` flood is an entity item-resync request, NOT spawn-point enumeration.** Emitted inside the
+  per-frame `0x0A` handler `[orig: NapiNPClientMsg_0x00A @0x4307C6]` — a 2-byte "resend this entity, my
+  weapon-slot copy doesn't match the snapshot" request, one per mismatched slot. An undeployed joiner's local
+  entity has empty/default weapon slots, so every incoming `0x0A` keeps mismatching → the flood; it stops the
+  instant a real deploy populates the slots. (Corrects the prior "0x0F = capture-zone/spawn query" guess in
+  `project_dcb_join_mechanism`.) It is a SYMPTOM of being undeployed, not a cause.
+- **The spawn-select↔deploy VISUAL toggle is `byte_A860EC`, driven per-frame by `0x0A` flags1 bit0 — not by
+  the `0x0F` handler.** `NapiNPClientMsg_0x00A` sets `byte_A860EC=1` (enter spawn-select) when flags1 bit0 = 1
+  `[orig: @0x42ffa0]` and clears it to 0 the first frame flags1 bit0 = 0 `[orig: @0x43001e]`. The `0x0F`
+  handler only READS `byte_A860EC`. (Corrects the prior note pinning the gate to the `0x0F` handler.) Note
+  this is the camera/UI toggle; the deploy UPLINK is separately gated on `g_spawn_success_gate` above.
+- **In-match S2C `0x1A` is a secondary liability.** `NapiNPClientMsg_0x01A @0x425EB0` feeds
+  `NapiClient_WaitForGameStart @0x42cc10`, which re-sets `dword_81474C = 1` `[orig: @0x42cc14]`. Retail does
+  not send `0x1A` post-load; our `GameSession` leaks it (`game_session.cpp:442/458/483`). Hygiene, not the
+  blocker.
+- **Ruled out (IDA-verified red herrings):** `0x4E FF FF` is a zero-iteration no-op kill loop
+  `[orig: NapiNPClientMsg_HandleBatchSpawn @0x431891]`; the joiner's pool-0 slot index is irrelevant (self-ID
+  is `(miniFlags&0x100) && (eFlags==local_session_id)`, `[orig: @0x4B1124]`); pool 0 capacity is 256
+  `[orig: EntityPool_Allocate @0x4421CD]` so a 56-entity mission does not overflow.
+
+**Verdict / D-NET-99 status: FIX LANDED, live-validation pending.** The deploy blocker is
+`g_spawn_success_gate`, re-armed by the bundle's `0x25` GameReset after the joiner's `Game_StartMission`
+already cleared it — NOT the `0x0F` load ORDER (a hypothesis REFUTED this session). Fix: the joiner's
+game-start bundle no longer emits `0x25` (`game_session.cpp` `add_game_start_bundle`), matching the working
+retail initial join which sends no gate-setter before deploy. The joiner's own `0x0C` stays streamed EARLY
+during world-load (`PeerEnteredWorldStreaming`) — an earlier attempt to defer it to `PeerSpawned` was
+reverted because it re-triggered the `Player_BuildNetIdLookupOrFatalError` dcb crash (`Player_InitPlayer
+@0x4e15f0` scans pool 0 before the late `0x0C` arrives). Verified: `game_session` / `host_session_accept` /
+`game_server_runtime` ctests + `coop_two_sim` GUT green; the bundle is unit-asserted to omit `0x25`. Open:
+end-to-end confirmation with a stock retail client (joiner should now send C2S `0x0C` deploy uplinks and
+not flood `0x0F`). **Process lesson recorded:** two wrong fixes this session (the `0x0F`-ordering mechanism
+and the `PeerSpawned` deferral) both came from trusting wire-order intuition over the gate witnesses; the
+fix only converged after enumerating every writer of `g_spawn_success_gate` and reading the full LAN-join
+capture. Witness the gate, then diff the working capture, before editing emit code.
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 

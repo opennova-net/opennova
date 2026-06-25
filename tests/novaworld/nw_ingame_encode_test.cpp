@@ -160,6 +160,131 @@ int test_empty_batch() {
 	return 0;
 }
 
+// ---- S2C 0x10 pool-2 static batch (encode_static_entity_batch) -------------
+
+bool records_equal(const StaticEntityRecord &a, const StaticEntityRecord &b) {
+	return a.item_type_id == b.item_type_id && a.is_empty_slot == b.is_empty_slot &&
+	       a.pos_x == b.pos_x && a.pos_y == b.pos_y && a.pos_z == b.pos_z &&
+	       a.euler_z == b.euler_z && a.euler_x == b.euler_x && a.euler_y == b.euler_y &&
+	       a.section_mask == b.section_mask && a.team_byte == b.team_byte &&
+	       a.parent_slot == b.parent_slot && a.ammo_count == b.ammo_count &&
+	       a.bone_a == b.bone_a && a.bone_b == b.bone_b && a.score_flag == b.score_flag &&
+	       a.weapon_byte == b.weapon_byte && a.attach_ref == b.attach_ref;
+}
+
+int test_static_batch_all_flags() {
+	// Every gated field non-zero -> derived field_flags 0x03FF; weapon_byte non-zero
+	// triggers attach_ref unconditionally.
+	StaticEntityBatch in;
+	in.start_index = 9;
+	StaticEntityRecord r;
+	r.item_type_id = 0x0808;
+	r.pos_x        = int32_t(0x11223344);
+	r.pos_y        = int32_t(0x55667788);
+	r.pos_z        = int32_t(0x00ABCDEF);
+	r.euler_z      = int32_t(0x0A0B0C0D); // 0x0001
+	r.euler_x      = int32_t(0x01020304); // 0x0002
+	r.euler_y      = int32_t(0x05060708); // 0x0004
+	r.section_mask = int32_t(0x40);       // 0x0008
+	r.team_byte    = 2;                   // 0x0010
+	r.parent_slot  = int32_t(0x2003);     // 0x0020
+	r.ammo_count   = 30;                  // always
+	r.bone_a       = 5;                   // 0x0040
+	r.bone_b       = 6;                   // 0x0080
+	r.score_flag   = 1;                   // 0x0100
+	r.weapon_byte  = 3;                   // always -> attach_ref follows
+	r.attach_ref   = 0x7788;
+	in.records.push_back(r);
+
+	std::vector<uint8_t> wire = encode_static_entity_batch(in);
+	StaticEntityBatch out;
+	EXPECT(decode_static_entity_batch(wire.data(), wire.size(), out));
+	EXPECT(out.start_index == 9);
+	EXPECT(out.entity_count == 1);
+	EXPECT(out.records.size() == 1);
+	EXPECT(out.records[0].field_flags == 0x01FF); // 0x0001..0x0100 all set (no 0x0200)
+	EXPECT(records_equal(out.records[0], r));
+	std::printf("PASS static_batch_all_flags\n");
+	return 0;
+}
+
+int test_static_batch_minimal_and_length() {
+	// Building-shaped record: only pos + euler_z heading + team. body =
+	// type(2)+flags(2)+pos(12)+euler_z(4)+team(1)+ammo(1)+weapon(1) = 23; +header(4) = 27.
+	StaticEntityBatch in;
+	in.start_index = 0;
+	StaticEntityRecord r;
+	r.item_type_id = 0x044A;
+	r.pos_x = 1; r.pos_y = -2; r.pos_z = 3;
+	r.euler_z = int32_t(0x0B60B60); // heading set -> 0x0001
+	r.team_byte = 1;                // -> 0x0010
+	in.records.push_back(r);
+
+	std::vector<uint8_t> wire = encode_static_entity_batch(in);
+	EXPECT(wire.size() == 27);
+	StaticEntityBatch out;
+	EXPECT(decode_static_entity_batch(wire.data(), wire.size(), out));
+	EXPECT(out.records.size() == 1);
+	EXPECT(out.records[0].field_flags == 0x0011);
+	EXPECT(out.records[0].pos_y == -2);
+	EXPECT(out.records[0].euler_z == int32_t(0x0B60B60));
+	EXPECT(out.records[0].team_byte == 1);
+	EXPECT(out.records[0].weapon_byte == 0);
+	EXPECT(out.records[0].attach_ref == 0); // weapon_byte 0 && 0x200 clear -> not emitted
+	EXPECT(records_equal(out.records[0], r));
+	std::printf("PASS static_batch_minimal_and_length\n");
+	return 0;
+}
+
+int test_static_batch_attach_ref_via_0x200() {
+	// weapon_byte 0 but attach_ref populated -> the encoder forces the 0x0200 gate so
+	// the field round-trips (faithful: decode reads attach_ref iff weapon_byte||0x200).
+	StaticEntityBatch in;
+	StaticEntityRecord r;
+	r.item_type_id = 0x00FF;
+	r.attach_ref = 0x1234;
+	r.weapon_byte = 0;
+	in.records.push_back(r);
+
+	std::vector<uint8_t> wire = encode_static_entity_batch(in);
+	StaticEntityBatch out;
+	EXPECT(decode_static_entity_batch(wire.data(), wire.size(), out));
+	EXPECT(out.records.size() == 1);
+	EXPECT((out.records[0].field_flags & 0x0200) != 0);
+	EXPECT(out.records[0].attach_ref == 0x1234);
+	EXPECT(out.records[0].weapon_byte == 0);
+	std::printf("PASS static_batch_attach_ref_via_0x200\n");
+	return 0;
+}
+
+int test_static_batch_empty_slot_and_empty_batch() {
+	// Empty-slot sentinel mixed between real records, plus a fully empty batch.
+	StaticEntityBatch in;
+	in.start_index = 100;
+	StaticEntityRecord a; a.item_type_id = 0x0010; a.pos_x = 7; a.ammo_count = 1;
+	StaticEntityRecord empty; empty.is_empty_slot = true;
+	StaticEntityRecord b; b.item_type_id = 0x0020; b.pos_z = 9; b.weapon_byte = 1; b.attach_ref = 0x55;
+	in.records = {a, empty, b};
+
+	std::vector<uint8_t> wire = encode_static_entity_batch(in);
+	StaticEntityBatch out;
+	EXPECT(decode_static_entity_batch(wire.data(), wire.size(), out));
+	EXPECT(out.entity_count == 3);
+	EXPECT(out.records.size() == 3);
+	EXPECT(!out.records[0].is_empty_slot && out.records[0].pos_x == 7);
+	EXPECT(out.records[1].is_empty_slot && out.records[1].item_type_id == 0);
+	EXPECT(!out.records[2].is_empty_slot && out.records[2].attach_ref == 0x55);
+
+	StaticEntityBatch empty_in; empty_in.start_index = 42;
+	std::vector<uint8_t> ew = encode_static_entity_batch(empty_in);
+	EXPECT(ew.size() == 4); // [u16 start][u16 count=0]
+	StaticEntityBatch eout;
+	EXPECT(decode_static_entity_batch(ew.data(), ew.size(), eout));
+	EXPECT(eout.start_index == 42 && eout.entity_count == 0 && eout.records.empty());
+	std::printf("PASS static_batch_empty_slot_and_empty_batch\n");
+	return 0;
+}
+
 // ---- S2C 0x0D pool spawn (encode_pool_spawn_batch) -------------------------
 
 int test_pool_spawn_roundtrip_full() {
@@ -640,6 +765,10 @@ int main() {
 	rc |= test_flag_derivation_is_from_nonzero();
 	rc |= test_empty_slot_sentinel_and_mixed();
 	rc |= test_empty_batch();
+	rc |= test_static_batch_all_flags();
+	rc |= test_static_batch_minimal_and_length();
+	rc |= test_static_batch_attach_ref_via_0x200();
+	rc |= test_static_batch_empty_slot_and_empty_batch();
 	rc |= test_pool_spawn_roundtrip_full();
 	rc |= test_pool_spawn_minimal();
 	rc |= test_pool_spawn_health_alt_8000();

@@ -38,6 +38,35 @@ GameEntitySnapshot snapshot_of(const world::Entity &e);
 // compact form (EntityClass::Unknown) are skipped.
 std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 
+// ---------------------------------------------------------------------------
+// Per-pool LOAD-TIME spawn batches — the full world the host streams to a joiner
+// during its world-load sequence [orig: Server_SendInitialGameStateToPlayer @0x51bba0,
+// phases 0x10 -> 0x0D -> 0x0C -> 0x20]. SEPARATE from the per-frame 0x0A motion path
+// (snapshot_world): these carry IDENTITY/TYPE/SPAWN-POSE for every pool, including the
+// statics/markers that have no compact 0x0A form. Routing is by handle.pool(), which
+// pool_for_kind already assigns (Organic->0, Item->1, Building->2, Marker->3).
+//
+// Each extractor reads only the fields the libs/world Entity models; the wire fields a
+// freshly-promoted static/spawn does not carry (ammo, weapon block, AI trailer, ...) stay
+// zero — faithful for a load-time spawn record, and the flag word each encoder derives
+// (encode_*_batch) gates them out. The orientation field is the engine-frame heading BAM
+// (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
+
+// pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: serialize_entity_states_to_buffer @0x5030a0].
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w);
+// pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: serialize_entity_pool_to_packet_0 @0x503940].
+PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
+// pool-2 static structures -> S2C 0x10 [orig: sub_5042F0]. Slot-aligned (start_index 0, empty-slot
+// sentinels for holes) because the 0x10 record carries no slot id — the client's slot = start+index.
+StaticEntityBatch build_pool2_static_batch(const world::World &w);
+// pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: serialize_entity_pool_to_packet @0x503460].
+Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
+// pool-3 SPAWN-POINT markers only (item_id in the kSpawnMarkerStartTypes 60xx family) -> S2C 0x20.
+// The small networked subset the client's spawn-select reads via Entity_BuildSpawnPointList @0x42de40 —
+// streaming the full pool-3 (incl. every nav waypoint) floods the client (D-NET-98), but the spawn-select
+// screen STILL needs the spawn points or the joiner spams C2S 0x0f and never deploys (§5.38c).
+Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w);
+
 // Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
 // REMOTE PEER entity — the host-side mover [orig: NetPacket_SerializePlayerState case 4
 // @0x4c2042-0x4c20a9; docs/net/novaworld-net-re.md §5.38a/§5.10]. The inverse of

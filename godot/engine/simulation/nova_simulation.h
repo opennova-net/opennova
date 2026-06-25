@@ -149,6 +149,7 @@ private:
 		opennova::world::EntityHandle entity{}; // pool-0 entity, spawned at world-streaming
 		                                        // (PeerEnteredWorldStreaming), bound at PeerSpawned
 		bool organic_announced = false; // the joiner's own S2C 0x0C streamed once (during load)
+		bool world_streamed = false;    // the full pool 0/1/2/3 spawn batches streamed once (during load)
 		bool admitted = false;          // owned_entity bound + per-frame 0x0A flowing (in-match)
 		uint32_t dcb_id = 0;           // host-assigned dcb id streamed as entityFlags (entity+0x78)
 	};
@@ -186,6 +187,13 @@ private:
 	// name-matches its own player + the retail client finds its dcb at entity+0x78.
 	void announce_joiner_organic_spawn(const opennova::PeerAddr &peer,
 	                                   const opennova::HostAcceptEvent &ev);
+	// Stream the FULL in-match entity set (every pool the host owns) to a joiner during its
+	// world-load, in the faithful phase order 0x10 (statics) -> 0x0D (pool-1) -> 0x0C
+	// (organics) -> 0x20 (markers), paged to the datagram cap. The joiner's own dcb-bearing
+	// 0x0C is streamed separately (announce_joiner_organic_spawn) and remote-peer entities are
+	// excluded from the pool-0 batch here. Once per peer. [orig: Server_SendInitialGameStateToPlayer
+	// @0x51bba0 world-stream phases 1-4.]
+	void stream_world_state_to_peer(const opennova::PeerAddr &peer);
 	opennova::world::PlayerSpawn spawn_from_pose(const opennova::HostJoinerPose &pose) const;
 	void send_datagram(const opennova::PeerAddr &peer, const std::vector<uint8_t> &dg);
 	static opennova::PeerAddr peer_from_addr(const String &ip, int port);

@@ -15,11 +15,22 @@ extends GutTest
 # joiner's wire present carries the host player (type 0x14B9) while self-filtering its own echo H.
 
 
+# A tiny world covering every pool the host streams: two AI organics (pool 0, type 0x0816),
+# one static building (pool 2, type 0x0123) and one marker (pool 3, type 0x1773). The AI carry a
+# RESOLVABLE non-zero type id so they survive the present's `type_id != 0` filter — with the old
+# item_id 0 they were invisible by construction, which is why the joiner only ever saw the host
+# player. The host streams all of these at the joiner's world-load (S2C 0x0C/0x0D/0x10/0x20).
+const AI_TYPE := 0x0816       # AI infantry
+const BUILDING_TYPE := 0x0123 # a static structure
+const MARKER_TYPE := 0x1773   # a start marker
+
 func _two_organics() -> NovaMissionData:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
-	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)   # KIND_ORGANIC
-	md.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)
+	md.add_entity(3, AI_TYPE, Vector3(0, 0, 0), Vector3.ZERO)    # KIND_ORGANIC (pool 0)
+	md.add_entity(3, AI_TYPE, Vector3(10, 0, 0), Vector3.ZERO)
+	md.add_entity(2, BUILDING_TYPE, Vector3(20, 0, 0), Vector3.ZERO) # KIND_BUILDING (pool 2)
+	md.add_entity(0, MARKER_TYPE, Vector3(30, 0, 0), Vector3.ZERO)   # KIND_MARKER (pool 3)
 	return md
 
 
@@ -89,6 +100,23 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 			joiner_sees_host = true
 	assert_true(joiner_sees_host, "joiner's wire present includes the host player (0x14B9), not itself")
 	assert_false(saw_self_echo, "the joiner's own wire echo (handle H) is self-filtered from its present")
+
+	# JOINER sees the DYNAMIC set: the host streams the networked entities (pool-0 organics via
+	# S2C 0x0C) during load, so the joiner's wire present now carries the host's AI organics, not
+	# just the host player. Statics (pool-2 building) and markers (pool-3) are deliberately NOT
+	# wire-streamed — a real host streams only the small dynamic set (golden host_and_join_lan.pcapng:
+	# empty 0x10, ~5 organics in 0x0C, empty 0x20); static geometry is client-local mission data.
+	# Streaming the full static mission floods + crashes a stock client (D-NET-98). (net-re §5.38c)
+	var ai_seen := 0
+	var building_seen := false
+	for rec in range(jsnap.size() / stride):
+		var tid := int(jsnap[rec * stride + NovaSimulation.PF_TYPE_ID])
+		if tid == AI_TYPE:
+			ai_seen += 1
+		elif tid == BUILDING_TYPE:
+			building_seen = true
+	assert_eq(ai_seen, 2, "joiner's present carries both host AI organics (type 0x0816) from the 0x0C stream")
+	assert_false(building_seen, "static building is NOT wire-streamed (client-local geometry, not a host broadcast)")
 
 	host.free()
 	joiner.free()
