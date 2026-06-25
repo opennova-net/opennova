@@ -67,6 +67,11 @@ var _mission_audio: NovaMissionAudio
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
 var _net_event_view # NetEventView: draws the decoded event stream over the world
+# NovaWorldHost: registers a LAN/co-op listen host with the NovaWorld gate so a
+# retail client can browse + join it (F1). Only created when a gate was supplied
+# (via _host_config["nw_gate_host"]); absent for pure-LAN play. Fed the live
+# player count from tick(), torn down in unload().
+var _nw_host
 # A host-injected resource root (the editor's mounted VFS). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
@@ -463,6 +468,11 @@ func unload() -> void:
 	_net_event_view = null
 	_net_view = null
 	_net_client = null
+	# Gate registration teardown: tells the gate to drop the host row (ClientStopHosting).
+	if _nw_host != null:
+		_nw_host.stop()
+		_nw_host.queue_free()
+		_nw_host = null
 	if _mission_audio != null:
 		_mission_audio.teardown()
 	if _env != null and _env.environment_data != null:
@@ -589,6 +599,12 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		else:
 			_runtime.tick()
 		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+		# Keep the gate's advertised occupancy current (host + admitted joiners).
+		# set_player_count self-dedupes, so this is a no-op until the count changes.
+		if _nw_host != null and _runtime.has_method("get_sim"):
+			var sim = _runtime.get_sim()
+			if sim != null and sim.has_method("get_host_peer_count"):
+				_nw_host.set_player_count(1 + sim.get_host_peer_count())
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
@@ -762,7 +778,8 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		if String(_host_config.get("net_transport", "")) != "lan-join":
 			opts["listen_server"] = true
 		for k in ["server_name", "max_players", "game_type", "net_transport", "bind_port",
-				"advertise", "host_ip", "port", "player_name"]:
+				"advertise", "host_ip", "port", "player_name",
+				"nw_gate_host", "nw_gate_port", "region"]:
 			if _host_config.has(k):
 				opts[k] = _host_config[k]
 		_host_config = {}
@@ -774,9 +791,60 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	if _runtime.get_sim() == null:
 		push_warning("GameWorld: failed to start mission runtime")
 	_runtime.effects_drained.connect(_on_runtime_effects)
+	# A browsable listen host: register it with the NovaWorld gate (F1), if one was
+	# configured. No-op for single-player, joiners, and pure-LAN play.
+	_maybe_start_nw_host(opts, bms_name)
 	# The game starts running (tick() gates on is_playing, so the overlay's
 	# transport can pause/step a live mission).
 	_runtime.play()
+
+
+# Register a browsable listen host with the NovaWorld gate (F1, ADR 0010). The host-direction
+# sibling of the joiner's NovaWorldClient: it runs the NWU lobby handshake to the gate, then
+# ClientHostRequest + ClientHostUpdate heartbeats so the host shows in /api/hosts + the retail
+# server browser. Gated so it only fires for a real LAN listen server WITH a gate configured —
+# single-player, joiners, and pure-LAN play (no nw_gate_host) all skip it, unchanged.
+func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
+	if not bool(opts.get("listen_server", false)):
+		return
+	if String(opts.get("net_transport", "")) != "lan":
+		return
+	var gate_host := String(opts.get("nw_gate_host", ""))
+	if gate_host.is_empty():
+		return  # no gate configured -> pure LAN, nothing to register with
+	if not ClassDB.class_exists("NovaWorldHost"):
+		push_warning("GameWorld: NovaWorldHost unavailable; host is LAN-only (not browsable)")
+		return
+	var sim = _runtime.get_sim() if _runtime != null and _runtime.has_method("get_sim") else null
+	if sim == null or not sim.has_method("is_host_listening") or not sim.is_host_listening():
+		return  # the listen socket never came up; nothing reachable to advertise
+	_nw_host = ClassDB.instantiate("NovaWorldHost")
+	add_child(_nw_host)
+	_nw_host.host = gate_host
+	_nw_host.gate_port = int(opts.get("nw_gate_port", 7597))
+	_nw_host.server_name = String(opts.get("server_name", "OpenNova Host"))
+	_nw_host.mission_name = bms_name.get_basename()
+	_nw_host.max_players = int(opts.get("max_players", 32))
+	# The actually-bound game port the joiner will dial (not the requested bind_port).
+	_nw_host.game_port = sim.get_host_listen_port() if sim.has_method("get_host_listen_port") else int(opts.get("bind_port", 32768))
+	_nw_host.region = String(opts.get("region", "us"))
+	_nw_host.player_name = String(opts.get("player_name", "Host"))
+	var adv := String(opts.get("advertise", ""))
+	if not adv.is_empty():
+		_nw_host.advertise_ip = adv
+	if _nw_host.has_signal("registered"):
+		_nw_host.registered.connect(_on_nw_host_registered)
+	if _nw_host.has_signal("error_occurred"):
+		_nw_host.error_occurred.connect(_on_nw_host_error)
+	_nw_host.start()
+
+
+func _on_nw_host_registered() -> void:
+	print("GameWorld: listen host registered with the NovaWorld gate (browsable)")
+
+
+func _on_nw_host_error(message: String) -> void:
+	push_warning("GameWorld: NovaWorld host registration error: %s" % message)
 
 
 # Route the runtime's drained side effects: "dialog" actions to mission audio (resolved through the

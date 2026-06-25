@@ -392,6 +392,16 @@ func _on_start_requested(bms_name: String) -> void:
 # world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
 func _on_lan_host_start_requested(config: Dictionary) -> void:
 	_begin_world_load()
+	# Make the listen host browsable on the NovaWorld gate (F1) when a gate is
+	# configured: prod injects NW_GATE_HOST (the resolved gate IP); dev sets it to
+	# 127.0.0.1 to test against the local compose. Unset = pure LAN, no registration.
+	var gate_host := OS.get_environment("NW_GATE_HOST")
+	if not gate_host.is_empty():
+		config = config.duplicate()
+		config["nw_gate_host"] = gate_host
+		var gate_port_env := OS.get_environment("NW_GATE_PORT")
+		config["nw_gate_port"] = int(gate_port_env) if gate_port_env.is_valid_int() else NovaWorldSettings.GATE_PORT
+		config["player_name"] = _resolve_player_callsign()
 	_world.load_mission_as_host(config)
 
 
