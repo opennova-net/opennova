@@ -259,6 +259,15 @@ std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &contai
 	                               std::move(body_out));
 }
 
+std::vector<uint8_t> ClientSession::build_lobby_message(const NapiMessage &container) {
+	// Host registration (and any post-verify lobby traffic) rides the same 0x43
+	// envelope the verify exchange used. Gate it on Verified so a caller can't
+	// emit a lobby container before the SCRK/session_id are established (which
+	// would encrypt under a zero key the server rejects).
+	if (state_ != State::Verified) return {};
+	return build_lobby_packet(container);
+}
+
 std::vector<uint8_t> ClientSession::build_verify_request() {
 	// ClientRequestVerifyResult: SessIdString (empty on the first pass) + the
 	// "Cookie" var-list when configured. Witnessed in the genuine .204 capture

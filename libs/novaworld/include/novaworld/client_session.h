@@ -145,6 +145,12 @@ public:
 	// Build a ClientGoodBye (0x46) datagram and mark the session Closed.
 	std::vector<uint8_t> build_goodbye();
 
+	// Wrap one lobby container (e.g. a ClientHostRequest / ClientHostUpdate built
+	// via napi/session.h) as a ready-for-wire 0x43 ProtocolMessage — the
+	// host-registration send path. Valid only once Verified (returns an empty
+	// vector otherwise); advances our seq + acks the peer like any other 0x43.
+	std::vector<uint8_t> build_lobby_message(const NapiMessage &container);
+
 	State state() const { return state_; }
 	bool is_verified() const { return state_ == State::Verified; }
 

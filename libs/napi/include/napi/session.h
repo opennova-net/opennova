@@ -77,10 +77,6 @@ NovaWorldError novaworld_error_from_code(int code);
 NapiMessage make_client_connected();
 NapiMessage make_client_stop_hosting();
 NapiMessage make_client_stop_playing();
-NapiMessage make_client_host_request(NapiMessage host_setup,
-                                     NapiMessage host,
-                                     NapiMessage player_list);
-NapiMessage make_client_host_update(NapiMessage host, NapiMessage player_list);
 
 // One ClientVar entry inside a ClientVarList: VarFNum (a field number) + VarName
 // + VarValue — the wire shape NapiStatement_SerializeVarList @ 0x4d0660 emits
@@ -104,5 +100,24 @@ NapiMessage make_client_var_list(const std::string &list_name,
 NapiMessage make_client_play_request(int currently_playing,
                                      const std::vector<ClientVar> &cookie,
                                      const std::vector<ClientVar> &play_setup);
+
+// ClientHostRequest: a top-level "CurrentlyHosting" field (decimal of the flag)
+// FIRST, then "VarCheck"="1", then the Cookie, HostSetup, Host, and PlayerList
+// var-lists in that order (each a ClientVarList carrying a VarList name + one
+// ClientVar child per entry) — NOT containers literally named HostSetup/Host.
+// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700 — two NapiStatementParam_Create
+// (CurrentlyHosting, VarCheck) then four NapiStatement_SerializeVarList @ 0x4d0660
+// for "Cookie"(this+388) / "HostSetup"(+460) / "Host"(+532) / "PlayerList"(+604)]
+NapiMessage make_client_host_request(int currently_hosting,
+                                     const std::vector<ClientVar> &cookie,
+                                     const std::vector<ClientVar> &host_setup,
+                                     const std::vector<ClientVar> &host,
+                                     const std::vector<ClientVar> &player_list);
+
+// ClientHostUpdate: the Host and PlayerList var-lists only — no params, no
+// Cookie/HostSetup (the heartbeat refresh). [orig: CNapiGameSession_SendHostUpdate
+// @ 0x4d3860 — NapiStatement_SerializeVarList for "Host"(this+532) / "PlayerList"(+604)]
+NapiMessage make_client_host_update(const std::vector<ClientVar> &host,
+                                    const std::vector<ClientVar> &player_list);
 
 } // namespace opennova

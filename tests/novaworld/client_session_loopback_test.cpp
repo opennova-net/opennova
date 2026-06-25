@@ -20,6 +20,7 @@
 #include <novaworld/lobby_session.h>
 
 #include <napi/envelope.h>
+#include <napi/session.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
 
@@ -440,6 +441,55 @@ int main() {
 	expect(!hb.empty(), "heartbeat datagram non-empty");
 	auto hb_reply = server.respond(hb);
 	expect(hb_reply.empty(), "heartbeat draws no reply (ack-only) and doesn't error");
+
+	// 8) Host registration (F1) — a Verified session sends ClientHostRequest; the
+	// gate registers the host (ServerHostResult) and its lobby state reflects the
+	// advertised endpoint/name so /api/hosts + the GSB browser list it. This is
+	// the host-side use of make_client_host_request the LAN-direct path lacked.
+	// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
+	{
+		auto host_req = make_client_host_request(
+		    /*CurrentlyHosting*/ 1,
+		    /*Cookie*/    {{0, "NWUID", server.nwuid}},
+		    /*HostSetup*/ {{0, "AppId", "28"}, {0, "LobbyName", "jop_2_consumer"},
+		                   {0, "MaxPlayers", "32"}},
+		    /*Host*/      {{0, "ServerName", "OpenNova Host"}, {0, "ServerIP", "127.0.0.1"},
+		                   {0, "ServerPortNumber", "32768"}, {0, "Players", "1"},
+		                   {0, "Region", "us"}},
+		    /*PlayerList*/{{0, "Slot0", "Host"}});
+		auto d_host = client.build_lobby_message(host_req);
+		expect(!d_host.empty(), "host-request datagram non-empty (session Verified)");
+		auto s_host = server.respond(d_host);
+		expect(!s_host.empty(), "ServerHostResult datagram non-empty");
+		expect(server.lobby.hosting, "gate marks lobby hosting");
+		expect(server.lobby.server_name == "OpenNova Host", "gate stored ServerName");
+		expect(server.lobby.host_ip == "127.0.0.1", "gate stored ServerIP");
+		expect(server.lobby.host_port == 32768, "gate stored ServerPortNumber");
+		expect(server.lobby.max_players == 32, "gate stored MaxPlayers");
+		expect(server.lobby.player_count == 1, "gate stored Players");
+		expect(server.lobby.game == "jop_2_consumer", "gate stored LobbyName");
+		expect(server.lobby.rid != 0, "gate assigned a RID");
+		// The client decodes ServerHostResult without protocol error (it stays Verified).
+		out.clear();
+		expect(client.handle_datagram(s_host.data(), s_host.size(), out),
+		       "client handles ServerHostResult without error");
+		expect(client.is_verified(), "client still Verified after ServerHostResult");
+	}
+
+	// 9) Host heartbeat (F1) — ClientHostUpdate refreshes player count / name and
+	// is ack-only (no ServerHostResult). [orig: CNapiGameSession_SendHostUpdate
+	// @ 0x4d3860]
+	{
+		auto host_upd = make_client_host_update(
+		    /*Host*/      {{0, "Players", "2"}, {0, "ServerName", "OpenNova Host 2"}},
+		    /*PlayerList*/{{0, "Slot0", "Host"}, {0, "Slot1", "Joiner"}});
+		auto d_upd = client.build_lobby_message(host_upd);
+		expect(!d_upd.empty(), "host-update datagram non-empty");
+		auto s_upd = server.respond(d_upd);
+		expect(s_upd.empty(), "ClientHostUpdate draws no reply (ack-only)");
+		expect(server.lobby.player_count == 2, "gate update refreshed player count");
+		expect(server.lobby.server_name == "OpenNova Host 2", "gate update refreshed ServerName");
+	}
 
 	if (g_failures == 0) {
 		std::printf("OK: ClientSession handshake reached Verified (hk echo + 0x83 verify)\n");

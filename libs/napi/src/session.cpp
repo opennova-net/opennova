@@ -63,27 +63,44 @@ NapiMessage make_client_stop_playing() {
 	return m;
 }
 
-NapiMessage make_client_host_request(NapiMessage host_setup,
-                                     NapiMessage host,
-                                     NapiMessage player_list) {
+// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700] — the host-registration
+// statement: CurrentlyHosting + VarCheck params, then four serialized var-lists
+// (Cookie / HostSetup / Host / PlayerList). The earlier builder emitted three
+// containers literally named HostSetup/Host/PlayerList with no CurrentlyHosting/
+// VarCheck and no Cookie — a shape our own gate (extract_var_lists, which keys on
+// "ClientVarList" + the VarList field) could not parse, the same bug the
+// play-request builder already had corrected.
+NapiMessage make_client_host_request(int currently_hosting,
+                                     const std::vector<ClientVar> &cookie,
+                                     const std::vector<ClientVar> &host_setup,
+                                     const std::vector<ClientVar> &host,
+                                     const std::vector<ClientVar> &player_list) {
 	NapiMessage m;
 	m.name = "ClientHostRequest";
-	host_setup.name = "HostSetup";
-	host.name = "Host";
-	player_list.name = "PlayerList";
-	m.children.push_back(std::move(host_setup));
-	m.children.push_back(std::move(host));
-	m.children.push_back(std::move(player_list));
+	NapiField ch;
+	ch.name = "CurrentlyHosting";
+	const std::string ch_str = std::to_string(currently_hosting);
+	ch.data.assign(ch_str.begin(), ch_str.end());
+	m.fields.push_back(std::move(ch));
+	NapiField vc;
+	vc.name = "VarCheck";
+	vc.data.assign(1, '1');
+	m.fields.push_back(std::move(vc));
+	m.children.push_back(make_client_var_list("Cookie", cookie));
+	m.children.push_back(make_client_var_list("HostSetup", host_setup));
+	m.children.push_back(make_client_var_list("Host", host));
+	m.children.push_back(make_client_var_list("PlayerList", player_list));
 	return m;
 }
 
-NapiMessage make_client_host_update(NapiMessage host, NapiMessage player_list) {
+// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860] — the heartbeat refresh:
+// only the Host and PlayerList var-lists, no params, no Cookie/HostSetup.
+NapiMessage make_client_host_update(const std::vector<ClientVar> &host,
+                                    const std::vector<ClientVar> &player_list) {
 	NapiMessage m;
 	m.name = "ClientHostUpdate";
-	host.name = "Host";
-	player_list.name = "PlayerList";
-	m.children.push_back(std::move(host));
-	m.children.push_back(std::move(player_list));
+	m.children.push_back(make_client_var_list("Host", host));
+	m.children.push_back(make_client_var_list("PlayerList", player_list));
 	return m;
 }
 

@@ -48,6 +48,7 @@
 #include "rtxt/rtxt_string_file.h"
 #include "rtxt/rtxt_resource_format.h"
 #include "network/nova_world_client.h"
+#include "network/nova_world_host.h"
 #include "network/nova_net_client.h"
 #include "network/nova_udp_pump.h"
 #include "util/nova_data_format.h"
@@ -213,6 +214,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMnuMenu);
 	GDREGISTER_CLASS(NovaControlsModel);
 	GDREGISTER_CLASS(NovaWorldClient);
+	GDREGISTER_CLASS(NovaWorldHost);
 	GDREGISTER_CLASS(NovaNetClient);
 	GDREGISTER_CLASS(NovaUdpPump);
 

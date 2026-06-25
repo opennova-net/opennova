@@ -128,6 +128,28 @@ known NWEC mappings, additional host-var aliases retail emits for specific expan
 | `NK` | Encoded host network endpoint token. | `/NWJoin.dll` response. |
 | `BK` | Static join token value (onnet + retail captures). | `/NWJoin.dll` response. |
 
+### Host-registration statement shapes (Jointops.exe, retail)
+
+`ClientHostRequest` and `ClientHostUpdate` are NAPI statements built the same way the
+play-request is (a `CurrentlyXxx` param then `NapiStatement_SerializeVarList`-emitted
+`ClientVarList`s — each a `VarList`-named container of `ClientVar{VarFNum,VarName,VarValue}`).
+The earlier OpenNova builders modeled `HostSetup`/`Host`/`PlayerList` as containers named
+literally, which `extract_var_lists` (keyed on `ClientVarList` + the `VarList` field) could not
+parse — the same bug the play-request builder already had corrected.
+
+| statement | params (direct fields) | var-lists, in order | orig |
+|---|---|---|---|
+| `ClientHostRequest` | `CurrentlyHosting` (decimal), `VarCheck`="1" | `Cookie`, `HostSetup`, `Host`, `PlayerList` | `CNapiGameSession_SendHostRequest @ 0x4d3700` — `NapiStatementParam_Create` ×2 then `NapiStatement_SerializeVarList @ 0x4d0660` ×4 from `this+388/+460/+532/+604` |
+| `ClientHostUpdate` | (none) | `Host`, `PlayerList` | `CNapiGameSession_SendHostUpdate @ 0x4d3860` — two `NapiStatement_SerializeVarList` from `this+532/+604` |
+
+The gate reads `HostSetup{AppId, LobbyName, MaxPlayers, ServerPortNumber?}` and
+`Host{ServerIP, ServerPortNumber, ServerName, Players, Region/Country, + GSB fields}`
+(`handle_client_host_request`); `ClientHostUpdate` refreshes the same `Host` keys plus
+`HostKey`/`PCIDKey`. Ported in `libs/napi/session.cpp` (`make_client_host_request` /
+`make_client_host_update`) and sent over a verified session via
+`ClientSession::build_lobby_message` (host direction of ADR 0010); round-tripped against the
+gate parser in `tests/novaworld/client_session_loopback_test.cpp` (steps 8–9).
+
 ## 4. NAPI in-match dispatch
 
 ### Naming convention (load-bearing)

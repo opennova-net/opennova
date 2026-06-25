@@ -87,18 +87,41 @@ bool check_handshake_names() {
 	if (!expect(make_client_stop_hosting().name == "ClientStopHosting", "ClientStopHosting name")) return false;
 	if (!expect(make_client_stop_playing().name == "ClientStopPlaying", "ClientStopPlaying name")) return false;
 
-	auto hr = make_client_host_request(NapiMessage{}, NapiMessage{}, NapiMessage{});
+	// ClientHostRequest = CurrentlyHosting + VarCheck fields, then the Cookie,
+	// HostSetup, Host, PlayerList var-lists (each a ClientVarList carrying a
+	// VarList field + ClientVar children). [orig: CNapiGameSession_SendHostRequest
+	// @ 0x4d3700 / NapiStatement_SerializeVarList @ 0x4d0660]
+	using opennova::ClientVar;
+	auto hr = make_client_host_request(
+		1,
+		{{0, "NWUID", "u"}},                                   // Cookie
+		{{0, "AppId", "0"}, {0, "MaxPlayers", "65"}},          // HostSetup
+		{{0, "ServerName", "OpenNova Host"}, {0, "Players", "1"}}, // Host
+		{{0, "Slot0", "Taylor"}});                             // PlayerList
 	if (!expect(hr.name == "ClientHostRequest", "ClientHostRequest name")) return false;
-	if (!expect(hr.children.size() == 3, "ClientHostRequest has 3 children")) return false;
-	if (!expect(hr.children[0].name == "HostSetup", "child 0 HostSetup")) return false;
-	if (!expect(hr.children[1].name == "Host", "child 1 Host")) return false;
-	if (!expect(hr.children[2].name == "PlayerList", "child 2 PlayerList")) return false;
+	if (!expect(field_str(hr, "CurrentlyHosting") == "1", "CurrentlyHosting == \"1\"")) return false;
+	if (!expect(field_str(hr, "VarCheck") == "1", "VarCheck == \"1\"")) return false;
+	if (!expect(hr.children.size() == 4, "ClientHostRequest has 4 var-lists")) return false;
+	const char *hr_lists[] = {"Cookie", "HostSetup", "Host", "PlayerList"};
+	for (int i = 0; i < 4; ++i) {
+		if (!expect(hr.children[i].name == "ClientVarList", "host-request child is ClientVarList")) return false;
+		if (!expect(field_str(hr.children[i], "VarList") == hr_lists[i], "host-request VarList name")) return false;
+	}
+	// Host var-list carries its ClientVar entries (VarName/VarValue).
+	if (!expect(hr.children[2].children.size() == 2, "Host has 2 ClientVar")) return false;
+	if (!expect(field_str(hr.children[2].children[0], "VarName") == "ServerName" &&
+			field_str(hr.children[2].children[0], "VarValue") == "OpenNova Host",
+			"Host first ClientVar ServerName")) return false;
 
-	auto hu = make_client_host_update(NapiMessage{}, NapiMessage{});
+	auto hu = make_client_host_update(
+		{{0, "Players", "2"}},                                 // Host
+		{{0, "Slot0", "Taylor"}, {0, "Slot1", "Joiner"}});     // PlayerList
 	if (!expect(hu.name == "ClientHostUpdate", "ClientHostUpdate name")) return false;
-	if (!expect(hu.children.size() == 2, "2 children")) return false;
-	if (!expect(hu.children[0].name == "Host", "child 0 Host")) return false;
-	if (!expect(hu.children[1].name == "PlayerList", "child 1 PlayerList")) return false;
+	if (!expect(hu.children.size() == 2, "2 var-lists")) return false;
+	if (!expect(hu.children[0].name == "ClientVarList" &&
+			field_str(hu.children[0], "VarList") == "Host", "update child 0 ClientVarList(Host)")) return false;
+	if (!expect(hu.children[1].name == "ClientVarList" &&
+			field_str(hu.children[1], "VarList") == "PlayerList", "update child 1 ClientVarList(PlayerList)")) return false;
 
 	// ClientPlayRequest = a top-level CurrentlyPlaying field, then the Cookie and
 	// PlaySetup var-lists (each a ClientVarList carrying a VarList field + ClientVar
@@ -133,16 +156,10 @@ bool check_handshake_names() {
 // End-to-end: build a handshake message, serialize via napi_stream_encode,
 // round-trip-decode, and confirm structural equality.
 bool check_handshake_wire_roundtrip() {
-	opennova::NapiMessage host;
-	host.fields.push_back({"Addr", {0x7F, 0x00, 0x00, 0x01}});
-	host.fields.push_back({"Port", {0x5C, 0x11}}); // 0x115C = 4444
-	opennova::NapiMessage players;
-	opennova::NapiField slot;
-	slot.name = "Slot0";
-	slot.data = {'p', 'l', 'a', 'y', 'e', 'r'};
-	players.fields.push_back(slot);
-
-	auto req = opennova::make_client_host_update(host, players);
+	using opennova::ClientVar;
+	auto req = opennova::make_client_host_update(
+		{{0, "ServerIP", "127.0.0.1"}, {0, "ServerPortNumber", "4444"}},  // Host
+		{{0, "Slot0", "player"}});                                        // PlayerList
 	std::vector<opennova::NapiMessage> stream = {req};
 	std::vector<uint8_t> buf(opennova::napi_stream_size(stream) + 16, 0);
 	size_t enc_size = 0;
@@ -155,11 +172,18 @@ bool check_handshake_wire_roundtrip() {
 	if (!expect(decoded.size() == 1 && decoded[0].name == "ClientHostUpdate",
 			"decoded root is ClientHostUpdate")) return false;
 	if (!expect(decoded[0].children.size() == 2, "two children")) return false;
-	if (!expect(decoded[0].children[0].name == "Host", "Host child")) return false;
-	if (!expect(decoded[0].children[1].name == "PlayerList", "PlayerList child")) return false;
-	if (!expect(decoded[0].children[0].fields.size() == 2, "Host has 2 fields")) return false;
-	if (!expect(decoded[0].children[0].fields[0].name == "Addr", "Addr field")) return false;
-	if (!expect(decoded[0].children[0].fields[0].data == std::vector<uint8_t>({0x7F, 0x00, 0x00, 0x01}), "Addr bytes")) return false;
+	// Both children survive as ClientVarLists with their VarList names.
+	if (!expect(decoded[0].children[0].name == "ClientVarList", "child 0 ClientVarList")) return false;
+	if (!expect(field_str(decoded[0].children[0], "VarList") == "Host", "child 0 VarList=Host")) return false;
+	if (!expect(decoded[0].children[1].name == "ClientVarList", "child 1 ClientVarList")) return false;
+	if (!expect(field_str(decoded[0].children[1], "VarList") == "PlayerList", "child 1 VarList=PlayerList")) return false;
+	// The Host var-list's first ClientVar round-trips with its name/value.
+	const auto &host_list = decoded[0].children[0];
+	if (!expect(host_list.children.size() == 2, "Host var-list has 2 ClientVar")) return false;
+	if (!expect(host_list.children[0].name == "ClientVar", "Host child is ClientVar")) return false;
+	if (!expect(field_str(host_list.children[0], "VarName") == "ServerIP" &&
+			field_str(host_list.children[0], "VarValue") == "127.0.0.1",
+			"Host first ClientVar ServerIP")) return false;
 	return true;
 }
 
