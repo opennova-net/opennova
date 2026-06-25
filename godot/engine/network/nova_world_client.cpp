@@ -392,17 +392,12 @@ void NovaWorldClient::begin_session() {
 		}
 		return {};
 	};
-	cfg.cu_vars.push_back({"Application", "OpennovaGodotClient.exe", 2});
-	cfg.cu_vars.push_back({"BuildDateAndTime", "Jul 21 2009 18:54:41", 2});
-	cfg.cu_vars.push_back({"Debug", "0", 2});
-	cfg.cu_vars.push_back({"CountryName", "", 2});
-	cfg.cu_vars.push_back({"Language", "", 2});
-	cfg.cu_vars.push_back({"TimeZoneBias", "", 2});
-	cfg.cu_vars.push_back({"GateTag", cfg.na, 2});
-	cfg.cu_vars.push_back({"MetTag", gate_str("met_label"), 2});
-	cfg.cu_vars.push_back({"UdpCode1", gate_str("udp_code1"), 2});
-	cfg.cu_vars.push_back({"UdpCode2", gate_str("udp_code2"), 2});
-	cfg.cu_vars.push_back({"MaxPacketSize", "1300", 2});
+	opennova::NovaWorldJoinCu cu;
+	cu.gate_tag = cfg.na;
+	cu.met_tag = gate_str("met_label");
+	cu.udp_code1 = gate_str("udp_code1");
+	cu.udp_code2 = gate_str("udp_code2");
+	cfg.cu_vars = opennova::make_novaworld_join_cu(cu);
 
 	// Verify "Cookie" var-list (NW-S5) — the identity set the 892B
 	// ClientRequestVerifyResult carries (capture frame 10166). NWUID is filled by

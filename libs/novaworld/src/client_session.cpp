@@ -125,6 +125,25 @@ std::array<uint8_t, 16> pg_for_pn(const std::string &pn) {
 
 } // namespace
 
+std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorldJoinCu &in) {
+	// Order and contents mirror CNapiGameSession_ConnectToNovaWorld @ 0x4d4640
+	// (session+316 var list) exactly. type=2 on every chunk (retail .204 wire).
+	using CuVar = ClientSession::Config::CuVar;
+	return {
+	    CuVar{"Application", in.application, 2},
+	    CuVar{"BuildDateAndTime", "Jul 21 2009 18:54:41", 2},
+	    CuVar{"Debug", "0", 2},
+	    CuVar{"CountryName", "", 2},   // empty on the join; locale rides the verify Cookie
+	    CuVar{"Language", "", 2},
+	    CuVar{"TimeZoneBias", "", 2},
+	    CuVar{"GateTag", in.gate_tag, 2},
+	    CuVar{"MetTag", in.met_tag, 2},
+	    CuVar{"UdpCode1", in.udp_code1, 2},
+	    CuVar{"UdpCode2", in.udp_code2, 2},
+	    CuVar{"MaxPacketSize", in.max_packet_size, 2},
+	};
+}
+
 ClientSession::Config ClientSession::Config::jointoperations() {
 	Config c;
 	c.pn  = "JointOperations";       // flips the session to the in-match game protocol

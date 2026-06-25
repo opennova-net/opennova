@@ -1031,6 +1031,13 @@ target_link_libraries(client_session_loopback_test PRIVATE opennova_novaworld op
 target_include_directories(client_session_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_session_loopback COMMAND client_session_loopback_test)
 
+# NW-S3 closure: the 0x42 join carries the retail CU var set (make_novaworld_join_cu
+# builder + a ClientSession actually emitting the chunks in its ClientAuth).
+add_executable(client_session_cu_test novaworld/client_session_cu_test.cpp)
+target_link_libraries(client_session_cu_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto)
+target_include_directories(client_session_cu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_session_cu COMMAND client_session_cu_test)
+
 # Host registration through the REAL apps/novaworld_server NwUdpListener over a
 # loopback UDP socket (not the in-process LobbySession mock): drives ClientSession
 # to Verified, sends a ClientHostRequest, asserts the host shows in snapshot_hosted

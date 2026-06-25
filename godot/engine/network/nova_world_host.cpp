@@ -274,6 +274,12 @@ void NovaWorldHost::poll_gate() {
 			emit_signal("error_occurred", String("bad gate response"));
 			continue;
 		}
+		// Gate-issued session-auth codes the 0x42 join must carry as CU chunks
+		// (NW-S3): METLABEL -> MetTag, UDPCODE1/2 -> UdpCode1/2. Empty against the
+		// OpenNova gate; populated when registering against live NovaWorld.
+		gate_met_tag_ = parsed.met_label;
+		gate_udp_code1_ = parsed.udp_code1;
+		gate_udp_code2_ = parsed.udp_code2;
 		const auto colon = parsed.udp_novaworld.find(':');
 		if (colon == std::string::npos) {
 			enter_state(STATE_ERROR, String("UDPNOVAWORLD malformed"));
@@ -294,10 +300,23 @@ void NovaWorldHost::begin_session() {
 	opennova::ClientSession::Config cfg;
 	cfg.client_index = client_index_;
 	cfg.client_key = client_key_;
+
+	// 0x42-join CU set (NW-S3) — the same set retail builds in
+	// CNapiGameSession_ConnectToNovaWorld @ 0x4d4640 for any NovaWorld connection,
+	// host or join. Empty codes against the permissive OpenNova gate; populated
+	// from the gate response when registering against live NovaWorld so the
+	// server's join callbacks accept the host's session. GateTag = cfg.na (the
+	// const protocol/gate tag).
+	opennova::NovaWorldJoinCu cu;
+	cu.gate_tag = cfg.na;
+	cu.met_tag = gate_met_tag_;
+	cu.udp_code1 = gate_udp_code1_;
+	cu.udp_code2 = gate_udp_code2_;
+	cfg.cu_vars = opennova::make_novaworld_join_cu(cu);
+
 	// Minimal lobby identity — the OpenNova gate is permissive (verify is not
 	// credential-gated, NW-S5). NWUID is echoed from the ServerSessionInit so the
-	// verify request is well-formed. Targeting live NovaWorld would need the gate
-	// CU codes (F2, open RE); out of scope for host registration against our gate.
+	// verify request is well-formed.
 	cfg.verify_cookie_vars = {{"NWUID", ""}};
 	session_ = std::make_unique<opennova::ClientSession>(cfg);
 	enter_state(STATE_SESSION_HELLO);

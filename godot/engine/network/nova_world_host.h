@@ -146,6 +146,13 @@ private:
 	uint32_t client_key_ = 0;
 	std::string server_nwuid_;          // echoed from the SessionInit into the Cookie
 
+	// Gate-issued session-auth values captured from the gate response (NW-S3).
+	// Empty against the permissive OpenNova gate; carried as 0x42-join CU chunks
+	// for retail parity (live NW's join callbacks validate them).
+	std::string gate_met_tag_;          // gate VAR METLABEL  -> CU MetTag
+	std::string gate_udp_code1_;        // gate VAR UDPCODE1  -> CU UdpCode1
+	std::string gate_udp_code2_;        // gate VAR UDPCODE2  -> CU UdpCode2
+
 	double handshake_elapsed_ = 0.0;
 	double handshake_timeout_s_ = 5.0;
 	double keepalive_accum_ = 0.0;

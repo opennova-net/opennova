@@ -3332,11 +3332,27 @@ for completing the UDP AUTH, not a post-connect step. (`OnNovaWorldConnected @ 0
 *after* SessionInit and fills a separate in-game credential form; that is distinct from the
 pre-connect web login that authorizes the join.)
 
-**The auth chain, end to end (de-risk grill, 2026-06-11):**
+**The auth chain, end to end (de-risk grill, 2026-06-11; CU mapping re-grilled 2026-06-24):**
 1. `UDPCODE1`/`UDPCODE2` — the session-auth codes the 0x42 join carries as `UdpCode1`/`UdpCode2`
-   CU chunks — are **gate-response VAR keys**, parsed in `ProcessResponse @ 0x4ced20`
-   (`UDPCODE1 → CMissionInfo_SetGateTag`, `UDPCODE2 → CMissionInfo_SetMetTag`). Our
+   CU chunks — are **gate-response VAR keys**, parsed in `ProcessResponse @ 0x4ced20`. Our
    `gate_response.cpp` already parses both. So they come from the **gate**, not a separate endpoint.
+   The byte-global → CU-var mapping was witnessed end to end (2026-06-24): in `ProcessResponse`
+   the gate VAR handlers call mission-info setters on `&byte_B5F450` (the `CMissionInfo` base),
+   and `ConnectToNovaWorld @ 0x4d4640` reads those globals back to build the CU list. **The Kong
+   setter names `CMissionInfo_SetGateTag` / `_SetMetTag` are misnomers** — they do NOT write the
+   GateTag/MetTag CU values:
+   - `UDPCODE1 → CMissionInfo_SetGateTag @ 0x4cd990` writes base+1176 = `byte_B5F8E8` → emitted as
+     the **`UdpCode1`** CU.
+   - `UDPCODE2 → CMissionInfo_SetMetTag @ 0x4cd9b0` writes base+1208 = `byte_B5F908` → emitted as
+     the **`UdpCode2`** CU.
+   - `METLABEL → CMissionInfo_SetTargetName @ 0x4cd950` writes base+108 = `byte_B5F4BC` → emitted as
+     the **`MetTag`** CU.
+   - The **`GateTag`** CU is `stru_B5FF50.protocol`, a **const protocol/gate tag** (our ClientAuth
+     `na`, e.g. `"jop:cus2"`) — NOT sourced from any gate VAR.
+   So the faithful CU mapping is `GateTag = na`, `MetTag = METLABEL`, `UdpCode1 = UDPCODE1`,
+   `UdpCode2 = UDPCODE2` (built by `make_novaworld_join_cu`, libs/novaworld). The earlier
+   shorthand "`UDPCODE1 → SetGateTag`, `UDPCODE2 → SetMetTag`" described the *call targets*, whose
+   names mislead — it does **not** mean the GateTag/MetTag CUs carry UDPCODE1/2.
 2. The gate issues them only to an **authenticated** request. Authentication is a **web-form login**
    through the in-game browser (`CUIBrowser` @ `dword_2551100`): `load_persistent_login_credentials
    @ 0x557330` fills the `NAME` (username) + password fields; persisted creds live in
@@ -3345,6 +3361,19 @@ pre-connect web login that authorizes the join.)
 3. So **live-NW Phase 3 = web login → gate issues `UDPCODE1/2` → emit them (+ env vars) as CU chunks
    in the 0x42.** Our gate parser already captures `UDPCODE1/2`; the missing pieces are (a) the web
    login that makes the gate issue them and (b) attaching the CU-chunk set to `ClientAuth`.
+
+**Port status (F2, 2026-06-24): part (b) is done.** The 0x42-join CU set is now built faithfully by
+`make_novaworld_join_cu` (libs/novaworld) — the exact 11-chunk `ConnectToNovaWorld @ 0x4d4640` set
+in retail order, type 2, with `CountryName`/`Language`/`TimeZoneBias` empty on the join (locale
+rides the verify `Cookie`). **Both** NovaWorld directions carry it: `NovaWorldClient` (join) and
+`NovaWorldHost` (host registration) populate `ClientSession::Config.cu_vars` from the gate response
+(`MetTag ← METLABEL`, `UdpCode1/2 ← UDPCODE1/2`, `GateTag = na`). A `ClientSession` so configured
+emits the chunks in its generated `ClientAuth`, pinned by `tests/novaworld/client_session_cu_test`
+(builder shape + the 0x42 actually carrying all 11). This **closes the "our client sends no CU
+chunks" gap** in the verdict above. Remaining for live NW is only part (a), the HTTP account login
+(ADR 0010 Phase 3) — and per Wave 5 below it is needed for the **account/GSB** leg, not to reach the
+lobby `Verified`. Against the permissive OpenNova gate the codes are empty and acceptance does not
+depend on them.
 
 **Scope note — wire compatibility vs live-service traffic.** Wire compatibility is a standing design
 requirement in all directions — our clients join original servers, our servers serve original clients,

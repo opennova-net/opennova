@@ -208,4 +208,35 @@ private:
 	ProtocolReassemblyState reassembly_;
 };
 
+// The gate-sourced inputs to the 0x42-join CU var set. Both the join (client)
+// and the host-registration (host) connection carry this same set — retail
+// builds it once in CNapiGameSession_ConnectToNovaWorld, which serves both
+// directions. `gate_tag` is the const protocol/gate tag (our ClientAuth `na`,
+// e.g. "jop:cus2" — stru_B5FF50.protocol); the rest come straight from the
+// gate response (ProcessResponse @ 0x4ced20) and are empty against the
+// permissive OpenNova gate.
+struct NovaWorldJoinCu {
+	std::string application = "OpennovaGodotClient.exe";  // exe basename
+	std::string gate_tag;        // GateTag  <- stru_B5FF50.protocol (== na)
+	std::string met_tag;         // MetTag   <- gate VAR METLABEL  (byte_B5F4BC)
+	std::string udp_code1;       // UdpCode1 <- gate VAR UDPCODE1  (byte_B5F8E8)
+	std::string udp_code2;       // UdpCode2 <- gate VAR UDPCODE2  (byte_B5F908)
+	std::string max_packet_size = "1300";
+};
+
+// Build the 0x42-join CU var set exactly as
+// [orig: CNapiGameSession_ConnectToNovaWorld @ 0x4d4640] does: the session+316
+// var list (CNapiVarList_SetOrCreate @ 0x6318c0), emitted as CU chunks by
+// SendClientHello @ 0x61fe20. Retail order is fixed: Application,
+// BuildDateAndTime, Debug, CountryName, Language, TimeZoneBias, GateTag, MetTag,
+// UdpCode1, UdpCode2, MaxPacketSize. CountryName/Language/TimeZoneBias are EMPTY
+// on the join (retail fills locale only in the verify "Cookie"). All chunks use
+// type 2 (HandleClientJoin @ 0x62B750's CU loop accepts 1 or 2; the genuine .204
+// capture frame 8977 shows type 2). The byte-global -> CU-var mapping was
+// grilled (2026-06-24): the Kong setter names CMissionInfo_SetGateTag /
+// _SetMetTag are misnomers — SetGateTag writes byte_B5F8E8 (the UdpCode1 CU),
+// SetMetTag writes byte_B5F908 (the UdpCode2 CU); MetTag (byte_B5F4BC) is the
+// METLABEL field (CMissionInfo_SetTargetName, +108). See docs/net §8 NW-S3.
+std::vector<ClientSession::Config::CuVar> make_novaworld_join_cu(const NovaWorldJoinCu &in);
+
 } // namespace opennova
