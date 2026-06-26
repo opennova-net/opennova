@@ -1358,3 +1358,25 @@ add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extract
 add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
 target_link_libraries(npruntime_server_session_test PRIVATE opennova_npruntime)
 add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
+
+# P2: the per-connection handshake — server legs promoted from HostSessionAccept onto the np free
+# functions (handshake_server), the client mirror JoinerConnection driven against the real server
+# legs + NetSystem apply (joiner_connection), and the golden 0x81/0x82 byte-parity.
+add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.cpp)
+target_link_libraries(npruntime_handshake_server_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld)
+add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
+
+add_executable(npruntime_joiner_connection_test npruntime/joiner_connection_test.cpp)
+target_link_libraries(npruntime_joiner_connection_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
+add_test(NAME npruntime_joiner_connection COMMAND npruntime_joiner_connection_test)
+
+# Golden 0x81/0x82 byte-parity vs the local LAN host/join session capture. Env-gated + skip-if-absent
+# (no committed derived oracle); DEFAULT path points at the gitignored .scratch golden.
+add_executable(npruntime_golden_lan_join_session_test npruntime/golden_lan_join_session_test.cpp)
+target_link_libraries(npruntime_golden_lan_join_session_test
+    PRIVATE opennova_npruntime opennova_novaworld opennova_app_common)
+target_compile_definitions(npruntime_golden_lan_join_session_test PRIVATE
+    DEFAULT_LAN_JOIN_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join-session.pcapng")
+add_test(NAME npruntime_golden_lan_join_session COMMAND npruntime_golden_lan_join_session_test)

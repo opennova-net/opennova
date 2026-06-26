@@ -68,22 +68,36 @@ dedicated-host variant has no local client. All in `npruntime_server_session_tes
 > `+0x54 socket_state` (the socketless-vs-socket selector `SetTransportMode` writes). Both modeled
 > faithfully; `netsim::TransportMode` stays the per-connection mode on `NapiNPConnection.link`.
 
-### ▶ P2 — Per-connection handshake (NEXT)
-Promote `HostSessionAccept` legs onto `NapiNPProtocol::handle_client_hello/_join/_session/_goodbye`
-and `JoinerSession` onto a client `NapiNPConnection`, decoupled from `GameServerRuntime`. Keep the
-SCRK/seq/ack + handshake `Phase` state on `NapiNPConnection` (the node already has the
-`ConnectionPhase` enum and a `netsim::Connection link`). Port the **F3 dcb-timing fix** and the
-**D.0 name-match** verbatim.
-- Read first: `libs/novaworld/include/novaworld/host_session_accept.h` + `src/host_session_accept.cpp`
-  (server legs, `PeerState`, F3, the `0x41→0x81 / 0x42→0x82 / 0x43→0x83` dispatch), and
-  `joiner_session.{h,cpp}` (client legs, D.0 self-ID), plus `game_server_runtime.{h,cpp}` to see
-  the coupling being removed. Framing helpers: `nw_session_framing.h`, `protocol_message.h`.
-- Bar: ported `host_session_accept_test` / `joiner_session_test` pass against `npruntime`; the
-  golden `retail-lan-host-join-session.pcapng` `0x81`/`0x82` reply bytes match (seed-inject the
-  session id / SCRK / `host_start_tick` from the golden, byte-compare after a small normalization
-  mask for monotonic seq/timestamps).
+### ✅ P2 — Per-connection handshake (DONE)
+Promoted `HostSessionAccept`'s legs onto `opennova::np` free functions over `NapiNPServerCtx` /
+`NapiNPProtocol.connection_list` (`napi_np_protocol.{h,cpp}`): `handle_server_datagram` dispatches
+`handle_client_hello`→0x81 / `handle_client_join`→0x82 / `handle_client_session`→0x83 /
+`handle_client_goodbye`, plus `tick_connections` / `frame_in_match_s2c` / `bind_connection_player`.
+`JoinerSession` promoted to `np::JoinerConnection` (`joiner_connection.{h,cpp}`) over a type-2
+`NapiNPConnection`. The per-connection SCRK/seq/ack + handshake latches fold onto `NapiNPConnection`
+(`PeerState.self_id` unifies onto `connection_id`/`+0x18`). The **F3 dcb-timing fix** (dual-path
+streaming-entered latch) and the **D.0 name-match** are ported verbatim. The 0x43 spawn-gate machine
+is still driven through a reimpl-owned `ctx.game_runtime` (`GameServerRuntime`, retired P8 / replaced
+by the World-driven spawn at P3). Tests: `npruntime_handshake_server` (all 5 sub-runs incl. F3
+ordering, tag51, tag46, non-JO), `npruntime_joiner_connection` (real legs ↔ real `JoinerConnection`
+↔ real `NetSystem` apply), `npruntime_golden_lan_join_session` — all green; full `novaworld`/`netsim`
+suite unaffected.
 
-### P3 — World bring-up + initial S2C burst
+> Refinement vs plan (golden parity): the golden `retail-lan-host-join-session.pcapng` is a LAN
+> host/join — it starts mid-handshake (0x81 retransmits) so the **0x41 ClientHello is not captured**,
+> and full-datagram byte-parity of 0x81/0x82 is **not** achievable in P2 because the remaining
+> divergence lives entirely in the **`libs/novaworld` session builders** (`build_server_hello` /
+> `build_server_auth`), not in the promoted legs. The golden test therefore asserts the field-level
+> parity the legs *control* (0x81 HK/PN/PG; 0x82 CI/CK/CR/SK/SCRK/NA, seed-injecting host_key/SK/SCRK)
+> and logs the deferred builder gap rather than inventing values (faithful-port rule). Measured vs a
+> LAN host: 0x81 — retail `ServerHello.CI` = host node index (2, not the client echo), the
+> game-server field block (`is_game_server`: SF/P1/P2/NP/MP) is present, identity strings are the
+> retail build's; 0x82 — `MI` is host-specific (retail 3 vs our 0x113f default), the CS control-field
+> *values* are the retail set (ours are onnet's `[UNVERIFIED]` values), and a LAN host emits **no CU**
+> block (we append novaworld name/url/nwuid). **Follow-up:** a `libs/novaworld` session-builder grill
+> (witness CI/MI/CS/game-server-block/LAN-CU-suppression in IDA) to reach full 0x81/0x82 byte-parity.
+
+### ▶ P3 — World bring-up + initial S2C burst (NEXT)
 `Server_InitNewRoundState → ProcessPendingPlayerSpawns → BuildPlayerInfoAndAdd → PlayerAdd`
 spawns the pool-0 player in `World` (ADR 0012; writes `entity+0x78` ownerConnectionId).
 `Server_SendInitialGameStateToPlayer` = the §5.2a two-track machine, every body from

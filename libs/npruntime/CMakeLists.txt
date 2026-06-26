@@ -1,5 +1,7 @@
 add_library(opennova_npruntime STATIC
     src/server_session.cpp
+    src/napi_np_protocol.cpp
+    src/joiner_connection.cpp
 )
 
 target_include_directories(opennova_npruntime
@@ -11,7 +13,10 @@ target_include_directories(opennova_npruntime
 # loop). Builds on the netsim seam (world <-> wire bridge + transport) and the wire codecs.
 # Strictly Godot-free and socket-free: the owner (apps/nw_server or the Godot binding) pumps
 # bytes through netsim::ISessionTransport.
-target_link_libraries(opennova_npruntime PUBLIC opennova_netsim)
+# opennova_novaworld is already transitive via opennova_netsim; name it explicitly because P2's
+# server legs use its codecs + GameServerRuntime directly (direct-dependency hygiene). No cycle:
+# novaworld does not depend on npruntime.
+target_link_libraries(opennova_npruntime PUBLIC opennova_netsim opennova_novaworld)
 
 target_compile_features(opennova_npruntime PUBLIC cxx_std_17)
 

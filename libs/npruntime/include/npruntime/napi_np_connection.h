@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
-#include <netsim/connection.h> // netsim::Connection, netsim::TransportMode
+#include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
+#include <novaworld/connection/registry.h> // opennova::PeerAddr (the transport-addr key)
 
 namespace opennova::np {
 
@@ -61,6 +63,30 @@ struct NapiNPConnection {
 	// filter, modeled by netsim::Connection (TransportMode, owned_entity, send_mask). The
 	// transport is NON-OWNING: the binding/test owns the LoopbackChannel / UdpSessionTransport.
 	netsim::Connection link{};
+
+	// --- per-connection handshake state (P2: the old HostSessionAccept::PeerState, folded on) ---
+	// SCRK / seq / ack + the session-flow latches, witnessed as fields the original keeps on the
+	// NapiNPConnection node. Wire bytes stay byte-exact; this in-memory layout is not padded.
+
+	PeerAddr peer{};               // the transport-addr key (distinct from connection_id; the
+	                               // host scans connection_list by this to route a datagram).
+
+	std::string pn;                // ClientHello.pn — drives classify_session_protocol
+	std::string player_name;       // ClientHello.co — echoed into the organic-spawn 0x0C (D.0)
+	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
+	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
+	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C
+	uint32_t server_sk = 0;        // our ServerAuth.SK
+	uint32_t next_outbound_seq = 1;
+	uint32_t last_inbound_seq = 0;
+	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
+
+	// self_id (the joiner's own ConnectionId / dcb / unk_18, learned from its in-match 0x48
+	// client-ack) UNIFIES onto connection_id above (+0x18) — the value the client's
+	// Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. Written only once self_id_seen.
+	bool self_id_seen = false;             // true once the 0x48 client-ack has been parsed
+	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
+	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)
 };
 
 } // namespace opennova::np

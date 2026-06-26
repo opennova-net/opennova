@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,13 @@ class World;
 }
 namespace opennova::netsim {
 class NetSystem;
+}
+// The P2 SESSION leg drives the spawn-gate state machine through the still-extant
+// GameServerRuntime. Forward-declared (NOT included) so game_session.h stays out of this light
+// header; the runtime is held by unique_ptr with out-of-line ctor/dtor in napi_np_protocol.cpp.
+// This is a reimpl-owned collaborator, retired at P8 / replaced by the World-driven spawn at P3.
+namespace opennova {
+class GameServerRuntime;
 }
 
 namespace opennova::np {
@@ -118,6 +126,32 @@ struct NapiNPServerCtx {
 	// loading_progress <- dword_A82370 (walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land).
 	uint32_t spawn_success_gate = 0;
 	uint32_t loading_progress = 0;
+
+	// The 0x43 SESSION leg's spawn-gate driver (P2). configure_session_runtime() constructs it;
+	// the handshake legs call dispatch_in_match_session_messages / tick_session / session_state on
+	// it. unique_ptr<incomplete type> forces the out-of-line ctor/dtor below.
+	std::unique_ptr<GameServerRuntime> game_runtime;
+
+	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
+	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /
+	// make_dev_nwuid). For golden 0x82 byte-parity these must be reproducible, so the default
+	// leaves `forced` false (random, exactly as retail) and a golden test seed-injects the captured
+	// values — mirroring the P1 SessionStartup "pass in, don't sample" determinism approach.
+	struct ServerKeyMint {
+		bool forced = false;       // false => mint randomly (retail behavior)
+		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
+		uint32_t server_sk = 0;    // forced ServerAuth.sk
+		std::string nwuid;         // forced ServerAuth nwuid (60-char hex)
+		std::string novaworld_name = "NWServer";
+		std::string novaworld_web_url = "http://127.0.0.1:8080";
+	};
+	ServerKeyMint server_key_mint;
+
+	// Out-of-line so the incomplete GameServerRuntime is only completed in napi_np_protocol.cpp.
+	NapiNPServerCtx();
+	~NapiNPServerCtx();
+	NapiNPServerCtx(NapiNPServerCtx &&) noexcept;
+	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept;
 };
 
 } // namespace opennova::np
