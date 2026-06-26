@@ -17,6 +17,11 @@ constexpr int kTag10IntervalMs = 250;
 constexpr int kTag0aIntervalMs = 300;
 constexpr int kTag57IntervalMs = 1000;
 
+bool is_default_ash_session_config(const GameSessionConfig &cfg) {
+	return cfg.mission_name == "AS - Dormant Volcano Isle" &&
+			cfg.mission_file == "ASH_I5A.BMS";
+}
+
 void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {
 	out.push_back(static_cast<uint8_t>(v & 0xFFu));
 	out.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
@@ -104,6 +109,57 @@ void add_blob_reply(GameSessionDispatchResult &result,
 	add_reply(result, tag, std::vector<uint8_t>(blob.data, blob.data + blob.size));
 }
 
+void write_fixed_ascii(std::vector<uint8_t> &payload,
+                       size_t offset,
+                       size_t width,
+                       const std::string &value) {
+	if (offset + width > payload.size() || width == 0) {
+		return;
+	}
+	std::fill(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+			payload.begin() + static_cast<std::ptrdiff_t>(offset + width), 0);
+	const size_t copy_len = std::min(value.size(), width - 1);
+	std::memcpy(payload.data() + offset, value.data(), copy_len);
+}
+
+std::vector<uint8_t> build_tag0b_mission_state(const GameSessionConfig &cfg) {
+	constexpr size_t kBmsMissionNameOffset = 4;
+	constexpr size_t kBmsMissionNameWidth = 32;
+	if (cfg.mission_header_blob.size() == sizeof(retail_blobs::kTag0bState)) {
+		return cfg.mission_header_blob;
+	}
+
+	std::vector<uint8_t> payload(
+			retail_blobs::kTag0bState,
+			retail_blobs::kTag0bState + sizeof(retail_blobs::kTag0bState));
+	if (!is_default_ash_session_config(cfg)) {
+		const std::string label = !cfg.mission_name.empty() ? cfg.mission_name : cfg.mission_file;
+		write_fixed_ascii(payload, kBmsMissionNameOffset, kBmsMissionNameWidth, label);
+	}
+	return payload;
+}
+
+size_t skip_cstr_field(const uint8_t *data, size_t size, size_t offset) {
+	while (offset < size && data[offset] != 0) {
+		++offset;
+	}
+	return offset < size ? offset + 1 : size;
+}
+
+std::vector<uint8_t> build_tag58_mission_refresh(const GameSessionConfig &cfg) {
+	std::vector<uint8_t> payload;
+	append_cstr(payload, cfg.server_name);
+	append_cstr(payload, !cfg.mission_name.empty() ? cfg.mission_name : cfg.mission_file);
+
+	const retail_loading_blobs::RetailBlobRef &blob = retail_loading_blobs::kFrame749Tag58;
+	size_t tail = skip_cstr_field(blob.data, blob.size, 0);
+	tail = skip_cstr_field(blob.data, blob.size, tail);
+	if (tail < blob.size) {
+		payload.insert(payload.end(), blob.data + tail, blob.data + blob.size);
+	}
+	return payload;
+}
+
 size_t flush_queued_replies(GameSessionState &state,
                             GameSessionDispatchResult &result,
                             size_t max_replies) {
@@ -116,6 +172,16 @@ size_t flush_queued_replies(GameSessionState &state,
 	}
 	state.queued_replies.erase(state.queued_replies.begin(), state.queued_replies.begin() + static_cast<std::ptrdiff_t>(n));
 	return n;
+}
+
+void mark_state4_loading_gate_complete_if_drained(GameSessionState &state) {
+	if (state.state4_loading_gate_queued &&
+			!state.state4_loading_gate_complete &&
+			state.queued_replies.empty() &&
+			state.phase == GameSessionPhase::WorldStreaming &&
+			!state.game_start_bundle_sent) {
+		state.state4_loading_gate_complete = true;
+	}
 }
 
 bool queued_replies_have_tag(const GameSessionState &state, uint8_t tag) {
@@ -440,7 +506,15 @@ void add_initial_sync_player_state(GameSessionDispatchResult &result,
 	add_roster_sync(result, ctx);
 	add_reply(result, 0x19, {0x00, 0x00, 0x00, 0x00});
 	add_reply(result, 0x1A, build_tag1a_tick(now_tick));
-	add_reply(result, 0x0C, build_tag0c_local_player_entity(cfg));
+	(void)cfg;
+	// NO canned host-player 0x0C here. The host/server's OWN pool-0 entity is streamed LIVE by
+	// the state-4/world-load path. Emitting a canned static DevUser 0x0C at slot 0
+	// here COLLIDED with that live record at the same slot: the joiner's handle 0x0000 then failed
+	// the client's per-frame itemDef match (NapiNPClientMsg_0x00A @0x4307c4: local_entity.itemDef
+	// .type_id != wire type_id) and it flooded C2S 0x0F resend-requests for handle 0x0000, then
+	// 0xC9-disconnected. WIRE-PROVEN: .scratch/capture8 (530x C2S 0x0F for handle 0x0000) vs the
+	// earlier WORKING capture (no DevUser record). [orig: player_ServerAdd @0x51cbc0 adds a joined
+	// player AFTER the .bms load, one entity per pool-0 slot — there is no static placeholder.]
 	// Reverted: previously added tag=0x0D LOCAL_PLAYER_SPAWN here. Live
 	// 2026-04-25 test crashed JO_CLIENT at NapiNPClientMsg_0x00D + 0x730
 	// (NULL deref). type_id 0x14B9 is AI-flagged in ItemDef[+84] & 0x100000,
@@ -456,26 +530,19 @@ void queue_initial_sync_player_state(GameSessionState &state,
 	queue_roster_sync(state, ctx);
 	queue_reply(state, 0x19, {0x00, 0x00, 0x00, 0x00});
 	queue_reply(state, 0x1A, build_tag1a_tick(now_tick));
-	queue_reply(state, 0x0C, build_tag0c_local_player_entity(cfg));
+	(void)cfg;
+	// NO canned host-player 0x0C — see add_initial_sync_player_state above.
 }
 
 void queue_state4_loading_gate(GameSessionState &state,
                                const PlayerReplicationState &ctx,
                                uint32_t now_tick) {
-	size_t tag0d_index = 0;
-	for (const retail_loading_blobs::RetailBlobRef &blob :
-			retail_loading_blobs::kState4Tag0dSequence) {
-		if (tag0d_index == 3) {
-			queue_reply(state, 0x16, build_tag_16_player_list(ctx));
-		}
-		queue_blob_reply(state, 0x0D, blob);
-		++tag0d_index;
-	}
-	queue_blob_reply(state, 0x0C, retail_loading_blobs::kState4Tag0cPreGate);
-	for (const retail_loading_blobs::RetailBlobRef &blob :
-			retail_loading_blobs::kState4Tag20Sequence) {
-		queue_blob_reply(state, 0x20, blob);
-	}
+	state.state4_loading_gate_complete = false;
+	// GameSession gates timing only. Mission/player entity state is live per-session
+	// data streamed by the host bridge during state 4; replaying captured 0x0D/0x0C/0x20
+	// blobs here overwrites the joiner's DCB-bearing pool-0 record and can make
+	// Player_FindLocalPlayerEntity fail in the retail client.
+	queue_reply(state, 0x16, build_tag_16_player_list(ctx));
 	queue_blob_reply(state, 0x45, retail_loading_blobs::kState4Tag45First);
 	queue_reply(state, 0x16, build_tag_16_player_list(ctx));
 	queue_blob_reply(state, 0x45, retail_loading_blobs::kState4Tag45Second);
@@ -493,9 +560,7 @@ void queue_mission_bootstrap(GameSessionState &state,
 		queue_reply(state, 0x2A, build_tag2a_chat_history_retail_fixture());
 	}
 	queue_custom_reply(state, 0x00, 0x1C);
-	queue_reply(state, 0x0B, std::vector<uint8_t>(
-			retail_blobs::kTag0bState,
-			retail_blobs::kTag0bState + sizeof(retail_blobs::kTag0bState)));
+	queue_reply(state, 0x0B, build_tag0b_mission_state(cfg));
 	queue_reply(state, 0x66, {0x00});
 	queue_reply(state, 0x76, {0xFF, 0x03});
 	queue_reply(state, 0x11);
@@ -505,6 +570,7 @@ void queue_mission_bootstrap(GameSessionState &state,
 
 void add_game_start_bundle(GameSessionDispatchResult &result,
                            const PlayerReplicationState &ctx,
+                           const GameSessionConfig &cfg,
                            size_t loadout_replies_already_present = 0) {
 	// Mirrors retail's cap7 frame 743 + 745 game-start sequence in order.
 	// Frame 743: 0x5A, 0x5A, 0x42, 0x0A.
@@ -534,12 +600,13 @@ void add_game_start_bundle(GameSessionDispatchResult &result,
 	// §5.38c / D-NET-99. (build_tag_25_reset_and_start retained but unused.)
 
 	// Frame 745: 0x0F, 0x4D, 0x61, 0x3E, then the cap7 game-start trailer
-	// (0x40 ×4, 0x6F ×4, 0x6E, second 0x0A, 0x57). The trailer was missing
+	// (0x40 ×4, 0x6F ×4, 0x6E, 0x57). The trailer was missing
 	// from our prior bundle — without it the spawn-select menu stayed open
 	// even after tag=0x29→tag=0x51 spawn confirm completed (verified
 	// 2026-04-25 21:02 live test: player input frames flowing but UI
-	// overlay never closed). Bytes are SCRK-decrypted from cap7 frame 745
-	// and live in `retail_loading_blobs::kRetailGameStart*` constants.
+	// overlay never closed). The captured 0x0A compact-record pages are
+	// deliberately excluded because they publish capture-specific entity
+	// handles; the live tick path owns per-entity 0x0A updates.
 	add_reply(result, 0x0F, build_tag_0f_game_start(ctx));
 	add_reply(result, 0x4D, build_tag4d_retail_fixture());
 	add_reply(result, 0x61, build_tag61_dvxi5_retail_fixture());
@@ -553,7 +620,6 @@ void add_game_start_bundle(GameSessionDispatchResult &result,
 		add_blob_reply(result, 0x6F, blob);
 	}
 	add_blob_reply(result, 0x6E, retail_loading_blobs::kGameStartTag6E);
-	add_blob_reply(result, 0x0A, retail_loading_blobs::kGameStartTag0ASecond);
 	add_blob_reply(result, 0x57, retail_loading_blobs::kGameStartTag57);
 
 	// cap7 frame 749 — packet retail emits ~2ms after frame 745. Including
@@ -563,12 +629,15 @@ void add_game_start_bundle(GameSessionDispatchResult &result,
 	// frame 745 (frame 747 = first input), so frame 749 timing isn't strict.
 	add_blob_reply(result, 0x40, retail_loading_blobs::kFrame749Tag40);
 	add_blob_reply(result, 0x4E, retail_loading_blobs::kFrame749Tag4E);
-	add_blob_reply(result, 0x58, retail_loading_blobs::kFrame749Tag58);
+	add_reply(result, 0x58, build_tag58_mission_refresh(cfg));
 	add_custom_reply(result, 0x00, 0x5D, {});
-	add_blob_reply(result, 0x46, retail_loading_blobs::kFrame749Tag46);
+	// kFrame749Tag46 REMOVED — a canned 0x46 player-sync lifted from the retail capture; it binds
+	// the roster to the foreign player "jored", overwriting/orphaning our live host player record
+	// on the client (capture13: the client could not match its own dcb → "Could not find player
+	// dcb" crash). The live roster (add_initial_sync_player_state → build_tag_46_player_sync from
+	// the real host/joiner state) is the only 0x46 we send.
 	add_blob_reply(result, 0x4C, retail_loading_blobs::kFrame749Tag4C);
 	add_blob_reply(result, 0x57, retail_loading_blobs::kFrame749Tag57);
-	add_blob_reply(result, 0x0A, retail_loading_blobs::kFrame749Tag0A);
 }
 
 void mark_game_start_bundle_sent(GameSessionState &state) {
@@ -638,8 +707,7 @@ void arm_world_streaming(GameSessionState &state) {
 	}
 }
 
-bool is_ready_for_late_spawn_acceptance(const GameSessionState &state,
-                                        const GameSessionConfig &config) {
+bool is_ready_for_late_spawn_acceptance(const GameSessionState &state) {
 	return can_stream_world(state.phase) &&
 			!state.spawned &&
 			!state.spawn_acceptance_sent &&
@@ -647,9 +715,7 @@ bool is_ready_for_late_spawn_acceptance(const GameSessionState &state,
 			state.mission_status_received &&
 			state.initial_sync_complete &&
 			state.entity_batch_count > 0 &&
-			(!config.emit_spawn_point_entities ||
-					config.spawn_points.empty() ||
-					state.spawn_points_synced);
+			state.state4_loading_gate_complete;
 }
 
 struct InboundTagContext {
@@ -666,7 +732,6 @@ void reset_for_mission_request(GameSessionState &state) {
 	state.spawned = false;
 	state.loadout_synced = false;
 	state.mission_status_received = false;
-	state.spawn_points_synced = false;
 	state.spawn_acceptance_sent = false;
 	state.world_streaming_armed = false;
 	state.ida_initial_state = 2;
@@ -688,6 +753,7 @@ void reset_for_mission_request(GameSessionState &state) {
 	state.state4_player_sync_requested = false;
 	state.state4_player_sync_sent = false;
 	state.state4_loading_gate_queued = false;
+	state.state4_loading_gate_complete = false;
 	state.player_spawn_confirmed = false;
 }
 
@@ -695,7 +761,7 @@ void emit_reference_game_start_bundle(InboundTagContext &ctx,
                                       const char *label) {
 	ctx.state.phase = GameSessionPhase::SpawnRequested;
 	ctx.state.queued_replies.clear();
-	add_game_start_bundle(ctx.result, ctx.player,
+	add_game_start_bundle(ctx.result, ctx.player, ctx.config,
 			std::min<size_t>(2, count_replies_with_tag(ctx.result, 0x5A)));
 	mark_game_start_bundle_sent(ctx.state);
 	ctx.result.label = label;
@@ -854,7 +920,7 @@ void handle_tag_0e_spawn_request(InboundTagContext &ctx,
 		ctx.result.label = "in-game 0x0E->tag=0x1E respawn ack";
 		return;
 	}
-	if (is_ready_for_late_spawn_acceptance(ctx.state, ctx.config)) {
+	if (is_ready_for_late_spawn_acceptance(ctx.state)) {
 		emit_reference_game_start_bundle(ctx,
 				"in-game 0x0E->reference game-start bundle");
 	} else {
@@ -1015,10 +1081,31 @@ PlayerReplicationState GameSession::player_replication_state() const {
 	PlayerReplicationState ctx;
 	ctx.player_name = config_.player_name;
 	ctx.player_slot = 0;
-	ctx.entity_slot = 0;
+	ctx.entity_handle = config_.player_entity_handle;
 	ctx.spawn_x = config_.spawn_x;
 	ctx.spawn_y = config_.spawn_y;
 	ctx.spawn_z = config_.spawn_z;
+	ctx.spawn_names = config_.spawn_names;
+	if (ctx.spawn_names.empty() && !is_default_ash_session_config(config_)) {
+		if (!config_.mission_name.empty()) {
+			ctx.spawn_names.push_back(config_.mission_name);
+		} else if (!config_.mission_file.empty()) {
+			ctx.spawn_names.push_back(config_.mission_file);
+		}
+	}
+	return ctx;
+}
+
+PlayerReplicationState GameSession::player_replication_state(
+		const GameSessionState &state) const {
+	PlayerReplicationState ctx = player_replication_state();
+	if (state.player_binding_valid) {
+		ctx.player_name = state.player_name;
+		ctx.player_slot = state.player_slot;
+		ctx.entity_handle = state.player_entity_handle;
+	} else if (state.player_entity_handle != 0) {
+		ctx.entity_handle = state.player_entity_handle;
+	}
 	return ctx;
 }
 
@@ -1027,7 +1114,7 @@ GameSessionDispatchResult GameSession::handle_messages(
 		const std::vector<ProtocolMessage> &messages,
 		uint32_t now_tick) const {
 	GameSessionDispatchResult result;
-	const PlayerReplicationState rep_ctx = player_replication_state();
+	const PlayerReplicationState rep_ctx = player_replication_state(state);
 	bool started_initial_sync = false;
 
 	if (messages.empty()) {
@@ -1112,7 +1199,7 @@ GameSessionDispatchResult GameSession::handle_messages(
 		arm_world_streaming(state);
 	}
 
-	if (is_ready_for_late_spawn_acceptance(state, config_)) {
+	if (is_ready_for_late_spawn_acceptance(state)) {
 		InboundTagContext ctx{
 				state,
 				result,
@@ -1160,6 +1247,7 @@ GameSessionDispatchResult GameSession::tick(GameSessionState &state,
 				enter_ida_state4_world_streaming(state);
 			}
 		}
+		mark_state4_loading_gate_complete_if_drained(state);
 		result.label = "in-game queued replication";
 		if (state.phase == GameSessionPhase::WorldStreaming &&
 				!state.game_start_bundle_sent) {
@@ -1181,6 +1269,7 @@ GameSessionDispatchResult GameSession::tick(GameSessionState &state,
 		return result;
 	}
 
+	const PlayerReplicationState rep_ctx = player_replication_state(state);
 	state.ms_since_tag10 += elapsed_ms;
 	state.ms_since_tag0a += elapsed_ms;
 	state.ms_since_tag57 += elapsed_ms;
@@ -1190,26 +1279,29 @@ GameSessionDispatchResult GameSession::tick(GameSessionState &state,
 				state.phase == GameSessionPhase::WorldStreaming &&
 				!state.spawned &&
 				!state.game_start_bundle_sent;
+		if (pre_game_state4 && state.state4_loading_gate_queued) {
+			if (state.state4_player_sync_requested &&
+					!state.state4_player_sync_sent) {
+				add_reply(result, 0x46, build_tag_46_player_sync(rep_ctx));
+				state.state4_player_sync_requested = false;
+				state.state4_player_sync_sent = true;
+			}
+			state.ms_since_tag10 = 0;
+			return result;
+		}
 		if (pre_game_state4 && !state.state4_player_list_sent &&
 				state.entity_batch_count >= 5) {
-			add_reply(result, 0x16, build_tag_16_player_list(player_replication_state()));
+			add_reply(result, 0x16, build_tag_16_player_list(rep_ctx));
 			state.state4_player_list_sent = true;
 		}
 		if (pre_game_state4 && state.state4_player_sync_requested &&
 				!state.state4_player_sync_sent) {
-			add_reply(result, 0x46, build_tag_46_player_sync(player_replication_state()));
+			add_reply(result, 0x46, build_tag_46_player_sync(rep_ctx));
 			state.state4_player_sync_requested = false;
 			state.state4_player_sync_sent = true;
 		}
-		// The canned state-4 loading gate (queue_state4_loading_gate: verbatim retail-capture
-		// 0x0D/0x0C/0x20/0x45 spawn blobs) is DELIBERATELY NOT queued. It streamed entity-spawn-
-		// shaped messages to the joiner DURING the load WAIT, before the game-start bundle's 0x0F
-		// world-state-load — the inverse of retail, which sends no entity spawns during the wait
-		// and streams the world snapshot only AFTER the bundle. The live world snapshot now comes
-		// from NovaSimulation on PeerSpawned (after the bundle). Readiness
-		// (is_ready_for_late_spawn_acceptance) does not depend on this gate — it keys on
-		// loadout_synced/mission_status_received + entity_batch_count>0, which the empty 0x10
-		// heartbeat below still drives. See plan §"Server-state model" / net-re §5.38c.
+		// Open retail state 4 with tag=0x10, then queue 0x0D/0x0C/0x20
+		// and the loading gate before any game-start 0x0F bundle.
 		if (!config_.replicated_entities.empty()) {
 			EntityBatchBuildResult batch = build_tag_10_entity_batch(
 					config_.replicated_entities, state.entity_batch_cursor, 620);
@@ -1219,12 +1311,14 @@ GameSessionDispatchResult GameSession::tick(GameSessionState &state,
 			add_reply(result, 0x10, build_tag_10_entity_batch_empty());
 		}
 		++state.entity_batch_count;
+		if (pre_game_state4) {
+			queue_state4_loading_gate(state, rep_ctx, now_tick);
+		}
 		state.ms_since_tag10 = 0;
 	}
 	if (state.spawned && state.ms_since_tag0a >= kTag0aIntervalMs) {
 		add_reply(result, 0x0A,
-		          build_tag_0a_world_reference(player_replication_state(),
-		                                       config_.replicated_entities));
+		          build_tag_0a_world_reference(rep_ctx, config_.replicated_entities));
 		state.ms_since_tag0a = 0;
 	}
 	if (state.spawned && state.ms_since_tag57 >= kTag57IntervalMs) {

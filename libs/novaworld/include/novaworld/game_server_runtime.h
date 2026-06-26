@@ -21,7 +21,6 @@ struct GameServerSessionSnapshot {
 	bool spawned = false;
 	bool loadout_synced = false;
 	bool mission_status_received = false;
-	bool spawn_points_synced = false;
 	bool spawn_acceptance_sent = false;
 	bool world_streaming_armed = false;
 	uint16_t ida_initial_state = 0;
@@ -34,9 +33,10 @@ struct GameServerSessionSnapshot {
 	size_t queued_reply_count = 0;
 	size_t replicated_entity_count = 0;
 	size_t spawn_point_count = 0;
-	bool spawn_point_sync_enabled = false;
 	size_t entity_batch_cursor = 0;
 	size_t entity_batch_count = 0;
+	bool state4_loading_gate_queued = false;
+	bool state4_loading_gate_complete = false;
 	bool client_pos_valid = false;
 	uint32_t client_pos_x = 0;
 	uint32_t client_pos_y = 0;
@@ -110,6 +110,11 @@ public:
 	// handshake reach Spawned and recover the joiner's pose without a
 	// snapshot copy.
 	const GameSessionState *session_state(const std::string &session_id) const;
+
+	bool bind_session_player(const std::string &session_id,
+	                         std::string player_name,
+	                         uint8_t player_slot,
+	                         uint16_t entity_handle);
 
 	GameServerRuntimeSnapshot snapshot(const std::string &primary_session_id = "debug") const;
 

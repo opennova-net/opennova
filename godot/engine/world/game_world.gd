@@ -755,6 +755,12 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
 	add_child(_runtime)
+	var mission_file := bms_name.get_file()
+	if mission_file.is_empty():
+		mission_file = bms_name
+	var mission_label := mission.get_mission_name().strip_edges()
+	if mission_label.is_empty():
+		mission_label = mission_file.get_basename()
 	# A mission with no AI still ticks (BMS events / WAC); only a promote failure leaves a null sim.
 	# Hand the loaded terrain to the runtime so promoted AI grounds on it (entities hug the terrain),
 	# and the resource root so soldiers resolve their .adm/.bad root-motion clips.
@@ -763,6 +769,9 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		"terrain": _terrain_data,
 		"resource_root": _resource_root,
 		"wac_basename": bms_name.get_basename(),
+		"mission_file": mission_file,
+		"mission_name": mission_label,
+		"spawn_names": [mission_label],
 		# The placer's item database (item_id -> anim_def), so each soldier grounds off its own
 		# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
 		"item_db": _placer.get_item_db() if _placer != null else null,

@@ -126,6 +126,8 @@ public:
 	// True once `peer` has completed handshake + spawn (its connection is live).
 	bool peer_spawned(const PeerAddr &peer) const;
 
+	bool bind_peer_player_entity(const PeerAddr &peer, uint8_t player_slot, uint16_t entity_handle);
+
 	std::size_t peer_count() const { return peers_.size(); }
 
 private:

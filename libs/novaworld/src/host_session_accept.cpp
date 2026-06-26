@@ -304,4 +304,17 @@ bool HostSessionAccept::peer_spawned(const PeerAddr &peer) const {
 	return it != peers_.end() && it->second.spawned_announced;
 }
 
+bool HostSessionAccept::bind_peer_player_entity(
+		const PeerAddr &peer, uint8_t player_slot, uint16_t entity_handle) {
+	auto it = peers_.find(peer);
+	if (it == peers_.end() || it->second.session_id.empty()) {
+		return false;
+	}
+	const std::string player_name = !it->second.player_name.empty()
+			? it->second.player_name
+			: game_runtime_.config().session.player_name;
+	return game_runtime_.bind_session_player(
+			it->second.session_id, player_name, player_slot, entity_handle);
+}
+
 } // namespace opennova

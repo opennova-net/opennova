@@ -76,6 +76,19 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# Default to the witnessed retail LAN host port — the first of the [32768, 32787]
 		# range [orig: game.cfg mplanserverportmin/max, JO_SERVER]; matches host_and_join_lan.pcapng.
 		var bind_port := int(options.get("bind_port", 32768))
+		var session_options := options.duplicate()
+		var mission_name := String(session_options.get("mission_name", "")).strip_edges()
+		if mission_name.is_empty() and mission != null and mission.has_method("get_mission_name"):
+			mission_name = String(mission.get_mission_name()).strip_edges()
+		var mission_file := String(session_options.get("mission_file", ""))
+		if mission_name.is_empty() and not mission_file.is_empty():
+			mission_name = mission_file.get_basename()
+		if not mission_name.is_empty():
+			session_options["mission_name"] = mission_name
+			if not session_options.has("spawn_names") or Array(session_options.get("spawn_names", [])).is_empty():
+				session_options["spawn_names"] = [mission_name]
+		session_options["bind_port"] = bind_port
+		_sim.configure_host_session(session_options)
 		if not _sim.enable_host_listen(bind_port):
 			push_warning("MissionRuntime: could not bind co-op LAN host port %d — falling back to local listen server." % bind_port)
 			_sim.enable_listen_server(true)

@@ -2,6 +2,7 @@
 #include <novaworld/ingame_decode.h> // decode_frame_update (validate the field-driven 0x0A)
 #include <novaworld/retail_loading_blobs.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <iterator>
 #include <string>
@@ -34,6 +35,11 @@ int count_tag(const std::vector<opennova::ProtocolMessage> &messages, uint8_t ta
 		}
 	}
 	return count;
+}
+
+bool payload_contains(const std::vector<uint8_t> &payload, const char *needle) {
+	const std::string text(needle);
+	return std::search(payload.begin(), payload.end(), text.begin(), text.end()) != payload.end();
 }
 
 std::string read_cstr(const std::vector<uint8_t> &payload, size_t offset = 0) {
@@ -254,49 +260,35 @@ bool check_observed_loading_flow_enters_world_streaming() {
 			"pre-game state 4 does not emit early world-reference 0x0A")) return false;
 	if (!expect(find_tag(first_stream.replies, 0x57) < 0,
 			"pre-game state 4 does not emit early RTT 0x57")) return false;
+	if (!expect(state.state4_loading_gate_queued,
+			"first state 4 stream queues the retail loading gate")) return false;
 
-	bool saw_tag10 = find_tag(first_stream.replies, 0x10) >= 0;
-	bool saw_tag16 = false;
-	for (int i = 0; i < 6; ++i) {
-		const auto tick = session.tick(state, 300, static_cast<uint32_t>(200 + i));
-		saw_tag10 = find_tag(tick.replies, 0x10) >= 0;
-		saw_tag16 = saw_tag16 || find_tag(tick.replies, 0x16) >= 0;
-	}
-	if (!expect(!state.spawn_points_synced, "streaming tick does not emit speculative spawn points")) return false;
-	if (!expect(saw_tag10, "world streaming tick emits tag=0x10 before 0x0E")) return false;
-	if (!expect(saw_tag16, "state 4 stream emits retail player-list 0x16")) return false;
-	const auto sync_ack = session.handle_messages(
-			state, {opennova::make_protocol_message(0x22, {0x00, 0xF7, 0x1C})}, 300);
-	if (!expect(find_tag(sync_ack.replies, 0x46) < 0,
-			"0x22 queues player sync for the next stream tick")) return false;
-	const auto sync_tick = session.tick(state, 300, 301);
-	const int tag46 = find_tag(sync_tick.replies, 0x46);
-	const int sync_tag10 = find_tag(sync_tick.replies, 0x10);
-	if (!expect(tag46 >= 0 && sync_tag10 >= 0 && tag46 < sync_tag10,
-			"state 4 player sync precedes the next tag=0x10")) return false;
-	// The canned state-4 loading gate (verbatim retail 0x0D/0x0C/0x20/0x45/0x7E/0x1A spawn
-	// blobs) is DELIBERATELY no longer queued: it streamed entity-spawn-shaped messages to the
-	// joiner DURING the load WAIT, before the game-start bundle's 0x0F world-state-load — the
-	// inverse of retail (which sends no entity spawns during the wait; the world snapshot
-	// follows the bundle, emitted live by NovaSimulation on PeerSpawned). Drive the stream and
-	// assert NONE of those canned spawn blobs appear, only the empty/replicated 0x10 heartbeat.
+	// GameSession owns the retail state-4 timing/loading gate only. Mission/player
+	// entity snapshots are live world data streamed by the host bridge; replaying
+	// captured world blobs here overwrites the joiner's DCB-bearing 0x0C record.
 	std::vector<opennova::ProtocolMessage> wait_phase;
-	for (int i = 0; i < 64; ++i) {
+	for (int i = 0; i < 64 && !state.queued_replies.empty(); ++i) {
 		auto tick = session.tick(state, 300, static_cast<uint32_t>(400 + i));
 		wait_phase.insert(wait_phase.end(),
 				std::make_move_iterator(tick.replies.begin()),
 				std::make_move_iterator(tick.replies.end()));
 	}
 	if (!expect(find_tag(wait_phase, 0x0D) < 0,
-			"WAIT no longer emits the canned state-4 0x0D spawn blobs")) return false;
+			"WAIT does not emit canned state-4 0x0D world data")) return false;
 	if (!expect(find_tag(wait_phase, 0x0C) < 0,
-			"WAIT no longer emits the canned state-4 0x0C pre-gate spawn payload")) return false;
+			"WAIT does not emit canned state-4 0x0C player/DCB data")) return false;
 	if (!expect(find_tag(wait_phase, 0x20) < 0,
-			"WAIT no longer emits the canned state-4 0x20 spawn blobs")) return false;
-	if (!expect(find_tag(wait_phase, 0x45) < 0,
-			"WAIT no longer emits the canned state-4 0x45 blobs")) return false;
-	if (!expect(find_tag(wait_phase, 0x10) >= 0,
-			"WAIT still emits the 0x10 entity-batch heartbeat (drives entity_batch_count)")) return false;
+			"WAIT does not emit canned state-4 0x20 spawn-marker data")) return false;
+	if (!expect(find_tag(wait_phase, 0x45) >= 0,
+			"WAIT emits the retail state-4 0x45 loading gate")) return false;
+	if (!expect(find_tag(wait_phase, 0x7E) >= 0,
+			"WAIT emits the retail state-4 0x7E loading gate")) return false;
+	if (!expect(find_tag(wait_phase, 0x1A) >= 0,
+			"WAIT emits the retail state-4 0x1A loading tick")) return false;
+	if (!expect(find_tag(wait_phase, 0x0F) < 0,
+			"WAIT does not emit game-start before loadout/status readiness")) return false;
+	if (!expect(state.state4_loading_gate_complete,
+			"state 4 loading gate completes after queued replies drain")) return false;
 	if (!expect(!state.spawned, "tag=0x10 stream does not imply spawned")) return false;
 	if (!expect(state.entity_batch_count > 0, "entity batch counter advances")) return false;
 	return true;
@@ -315,12 +307,10 @@ bool check_observed_spawn_readiness_accepts_once() {
 	session.handle_messages(state, {opennova::make_protocol_message(0x37, {})}, 100);
 	drain_queued(session, state);
 	session.handle_messages(state, {opennova::make_protocol_message(0x09, {})}, 120);
-	for (int i = 0; i < 6; ++i) {
-		session.tick(state, 300, static_cast<uint32_t>(200 + i));
-	}
-	session.handle_messages(
-			state, {opennova::make_protocol_message(0x22, {0x00, 0xF7, 0x1C})}, 240);
-	session.tick(state, 300, 241);
+	session.tick(state, 300, 200);
+	drain_queued(session, state);
+	if (!expect(state.state4_loading_gate_complete,
+			"readiness waits for the state-4 loading gate to drain")) return false;
 
 	const auto loadout = session.handle_messages(state, {
 			opennova::make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
@@ -344,6 +334,20 @@ bool check_observed_spawn_readiness_accepts_once() {
 	if (!expect(tag5a < tag42 && tag42 < tag0a && tag0a < tag0f &&
 			tag0f < tag4d && tag4d < tag61 && tag61 < tag3e,
 			"loadout/status packet follows retail game-start order")) return false;
+	if (!expect(count_tag(loadout.replies, 0x0A) == 1,
+			"game-start emits only the live-scoped world-reference 0x0A")) return false;
+	{
+		const auto &frame = loadout.replies[static_cast<size_t>(tag0a)].payload;
+		auto class_of = [](uint16_t) {
+			return opennova::EntityClass::Unknown;
+		};
+		opennova::FrameUpdate fu;
+		if (!expect(opennova::decode_frame_update(frame.data(), frame.size(), class_of, fu) &&
+		            fu.complete && fu.consumed == frame.size(),
+		            "game-start world-reference 0x0A decodes cleanly")) return false;
+		if (!expect(fu.records.empty(),
+		            "game-start world-reference 0x0A does not replay captured compact records")) return false;
+	}
 	// tag=0x1D MUST NOT be in the bundle — it's the round-end signal,
 	// not round-start. See `notes/spawn_gate_24C1928.md` 2026-04-26
 	// addendum: emitting tag=0x1D unblocks the WaitForGameStart gate
@@ -372,8 +376,6 @@ bool check_observed_spawn_readiness_accepts_once() {
 	if (!expect(state.game_start_bundle_sent, "loadout/status packet records game-start bundle")) return false;
 	if (!expect(state.spawn_query_count == 0,
 			"retail game-start does not require pre-game 0x0F queries")) return false;
-	if (!expect(!state.spawn_points_synced,
-			"loadout/status packet leaves experimental spawn-point sync disabled")) return false;
 
 	std::vector<opennova::ProtocolMessage> readiness = {
 			opennova::make_protocol_message(0x0F, {0x01, 0x00}),
@@ -399,6 +401,82 @@ bool check_observed_spawn_readiness_accepts_once() {
 			"duplicate readiness does not emit another game-start")) return false;
 	if (!expect(count_tag(duplicate.replies, 0x1E) == 0,
 			"duplicate readiness does not emit another post-spawn event")) return false;
+	return true;
+}
+
+bool check_game_start_spawn_names_use_configured_mission() {
+	opennova::GameSessionConfig config;
+	config.mission_name = "Custom Island Test";
+	config.mission_file = "CUSTOM_A1.BMS";
+	opennova::GameSession session(config);
+	opennova::GameSessionState state;
+	session.handle_messages(state, {opennova::make_protocol_message(0x37, {})}, 100);
+	drain_queued(session, state);
+	session.handle_messages(state, {opennova::make_protocol_message(0x09, {})}, 120);
+	session.tick(state, 300, 200);
+	drain_queued(session, state);
+
+	const auto loadout = session.handle_messages(state, {
+			opennova::make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+			opennova::make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+			opennova::make_protocol_message(0x0B, std::vector<uint8_t>(13, 0)),
+	}, 450);
+	const int tag0f = find_tag(loadout.replies, 0x0F);
+	if (!expect(tag0f >= 0, "configured mission game-start emits tag=0x0F")) return false;
+	const auto &payload = loadout.replies[static_cast<size_t>(tag0f)].payload;
+	if (!expect(payload_contains(payload, "Custom Island Test"),
+			"tag=0x0F spawn-name list uses the configured mission label")) return false;
+	if (!expect(!payload_contains(payload, "North Sea Village"),
+			"tag=0x0F no longer leaks the default ASH spawn-name list")) return false;
+	return true;
+}
+
+bool check_mission_bootstrap_header_uses_configured_mission() {
+	opennova::GameSessionConfig config;
+	config.mission_name = "Custom Island Test";
+	config.mission_file = "CUSTOM_A1.BMS";
+	opennova::GameSession session(config);
+	opennova::GameSessionState state;
+	session.handle_messages(state, {opennova::make_protocol_message(0x37, {})}, 100);
+	const auto queued = drain_queued(session, state);
+	const int tag0b = find_tag(queued, 0x0B);
+	if (!expect(tag0b >= 0, "configured mission bootstrap emits tag=0x0B")) return false;
+	const auto &payload = queued[static_cast<size_t>(tag0b)].payload;
+	if (!expect(payload.size() == 616, "tag=0x0B remains a 616-byte BMS header")) return false;
+	if (!expect(payload_contains(payload, "Custom Island Test"),
+			"tag=0x0B BMS header uses the configured mission label")) return false;
+	if (!expect(!payload_contains(payload, "AS - Dormant Volcano Isle"),
+			"tag=0x0B BMS header does not leak the default ASH mission label")) return false;
+	return true;
+}
+
+bool check_frame749_mission_refresh_uses_configured_mission() {
+	opennova::GameSessionConfig config;
+	config.server_name = "Custom Host";
+	config.mission_name = "Custom Island Test";
+	config.mission_file = "CUSTOM_A1.BMS";
+	opennova::GameSession session(config);
+	opennova::GameSessionState state;
+	session.handle_messages(state, {opennova::make_protocol_message(0x37, {})}, 100);
+	drain_queued(session, state);
+	session.handle_messages(state, {opennova::make_protocol_message(0x09, {})}, 120);
+	session.tick(state, 300, 200);
+	drain_queued(session, state);
+
+	const auto loadout = session.handle_messages(state, {
+			opennova::make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+			opennova::make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
+			opennova::make_protocol_message(0x0B, std::vector<uint8_t>(13, 0)),
+	}, 450);
+	const int tag58 = find_tag(loadout.replies, 0x58);
+	if (!expect(tag58 >= 0, "configured mission game-start emits tag=0x58")) return false;
+	const auto &payload = loadout.replies[static_cast<size_t>(tag58)].payload;
+	if (!expect(payload_contains(payload, "Custom Host"),
+			"tag=0x58 mission refresh uses the configured server name")) return false;
+	if (!expect(payload_contains(payload, "Custom Island Test"),
+			"tag=0x58 mission refresh uses the configured mission label")) return false;
+	if (!expect(!payload_contains(payload, "AS - Dormant Volcano Isle"),
+			"tag=0x58 mission refresh does not leak the default ASH mission label")) return false;
 	return true;
 }
 
@@ -506,6 +584,7 @@ bool check_tick_emits_entity_batch_and_world_reference() {
 
 	state.spawned = true;
 	state.phase = opennova::GameSessionPhase::Spawned;
+	state.queued_replies.clear();
 	const auto spawned_tick = session.tick(state, 1000, 0xCAFEBABFu);
 	if (!expect(find_tag(spawned_tick.replies, 0x10) >= 0, "spawned tick emits tag=0x10")) return false;
 	if (!expect(find_tag(spawned_tick.replies, 0x0A) >= 0, "spawned tick emits tag=0x0A world reference")) return false;
@@ -582,6 +661,9 @@ int main() {
 	ok = check_spawn_request_acceptance_sequence() && ok;
 	ok = check_observed_loading_flow_enters_world_streaming() && ok;
 	ok = check_observed_spawn_readiness_accepts_once() && ok;
+	ok = check_game_start_spawn_names_use_configured_mission() && ok;
+	ok = check_mission_bootstrap_header_uses_configured_mission() && ok;
+	ok = check_frame749_mission_refresh_uses_configured_mission() && ok;
 	ok = check_tag_0f_query_silently_consumed() && ok;
 	ok = check_tag_29_emits_tag_51_spawn_confirm() && ok;
 	ok = check_tick_emits_entity_batch_and_world_reference() && ok;

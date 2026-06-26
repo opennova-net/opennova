@@ -28,9 +28,13 @@ void EntityRegistry::configure_pool(int pool, size_t capacity) {
 }
 
 EntityHandle EntityRegistry::spawn(int pool, const Entity &seed) {
+    return spawn_from(pool, 0, seed);
+}
+
+EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entity &seed) {
     if (pool < 0 || pool >= kPoolCount) return EntityHandle{};
     Pool &p = pools_[pool];
-    for (size_t s = 0; s < p.slots.size(); ++s) {
+    for (size_t s = first_slot; s < p.slots.size(); ++s) {
         if (!p.used[s]) {
             EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
             p.slots[s] = seed;

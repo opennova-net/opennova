@@ -36,6 +36,7 @@ namespace {
 
 constexpr double kFixed16 = 65536.0;
 constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
+constexpr uint16_t kRetailPlayerMinEntitySlot = 4;
 
 uint64_t perf_now_us() {
 	using Clock = std::chrono::steady_clock;
@@ -59,6 +60,32 @@ int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &it
 		return kPlayerVisualItemId;
 	}
 	return item_id;
+}
+
+std::string dictionary_string(const Dictionary &d, const char *key, const std::string &fallback) {
+	if (!d.has(key)) return fallback;
+	const String value = d.get(key, String());
+	return std::string(value.utf8().get_data());
+}
+
+void apply_dictionary_string(const Dictionary &d, const char *key, std::string &out) {
+	if (d.has(key)) {
+		out = dictionary_string(d, key, out);
+	}
+}
+
+uint16_t dictionary_u16(const Dictionary &d, const char *key, uint16_t fallback) {
+	if (!d.has(key)) return fallback;
+	const int value = static_cast<int>(d.get(key, static_cast<int>(fallback)));
+	return static_cast<uint16_t>(std::clamp(value, 0, 0xFFFF));
+}
+
+uint32_t dictionary_u32(const Dictionary &d, const char *key, uint32_t fallback) {
+	if (!d.has(key)) return fallback;
+	const int64_t value = static_cast<int64_t>(d.get(key, static_cast<int64_t>(fallback)));
+	if (value < 0) return 0;
+	if (value > 0xFFFFFFFFll) return 0xFFFFFFFFu;
+	return static_cast<uint32_t>(value);
 }
 
 // Build the same synthetic patrol mission the C++ promote_test uses: 3 markers forming a
@@ -343,6 +370,34 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	loaded_ = true;
 }
 
+void NovaSimulation::refresh_host_accept_config() {
+	if (!accept_) return;
+	const bool was_running = accept_->running();
+	accept_->configure(host_session_config_);
+	if (was_running || host_listen_) {
+		accept_->start();
+	}
+}
+
+void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File &file) {
+	std::vector<uint8_t> header_blob;
+	std::string error;
+	if (opennova::bms::encode_header_blob(file, header_blob, error)) {
+		host_session_config_.session.mission_header_blob = std::move(header_blob);
+	} else {
+		host_session_config_.session.mission_header_blob.clear();
+	}
+
+	const std::string mission_name = file.get_mission_name();
+	if (!mission_name.empty()) {
+		host_session_config_.session.mission_name = mission_name;
+		if (host_session_config_.session.spawn_names.empty()) {
+			host_session_config_.session.spawn_names.push_back(mission_name);
+		}
+	}
+	refresh_host_accept_config();
+}
+
 void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &NovaSimulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("load_mission_file", "path"), &NovaSimulation::load_mission_file);
@@ -361,6 +416,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_host_listening"), &NovaSimulation::is_host_listening);
 	ClassDB::bind_method(D_METHOD("get_host_listen_port"), &NovaSimulation::get_host_listen_port);
 	ClassDB::bind_method(D_METHOD("get_host_peer_count"), &NovaSimulation::get_host_peer_count);
+	ClassDB::bind_method(D_METHOD("configure_host_session", "options"), &NovaSimulation::configure_host_session);
+	ClassDB::bind_method(D_METHOD("get_host_session_config"), &NovaSimulation::get_host_session_config);
 	ClassDB::bind_method(D_METHOD("admit_test_remote_peer", "position", "yaw_deg", "team"), &NovaSimulation::admit_test_remote_peer);
 	ClassDB::bind_method(D_METHOD("enable_join", "host_ip", "port", "player_name"), &NovaSimulation::enable_join);
 	ClassDB::bind_method(D_METHOD("is_joiner"), &NovaSimulation::is_joiner);
@@ -478,6 +535,7 @@ bool NovaSimulation::load_from_mission_data(const Ref<NovaMissionData> &p_missio
 	const opennova::bms::File &file = p_mission->native_document().bms_file();
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
+	apply_host_session_mission_header(file);
 	return true;
 }
 
@@ -488,16 +546,20 @@ bool NovaSimulation::load_mission_file(const String &path) {
 	if (!opennova::bms::parse_file(std::string(path.utf8().get_data()), file, err)) {
 		return false;
 	}
+	host_session_config_.session.mission_file = std::string(path.get_file().utf8().get_data());
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
+	apply_host_session_mission_header(file);
 	return true;
 }
 
 void NovaSimulation::build_demo_mission() {
 	reset_world();
 	opennova::bms::File file = make_demo_mission();
+	host_session_config_.session.mission_file = "demo.bms";
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
+	apply_host_session_mission_header(file);
 }
 
 void NovaSimulation::step() {
@@ -562,6 +624,7 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 	                  static_cast<float>(p_position.y)};
 	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
 	spawn.team = static_cast<uint8_t>(p_team);
+	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 	if (!h.valid()) return false;
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
@@ -590,6 +653,7 @@ int NovaSimulation::spawn_local_player_at_start() {
 	// SP keeps the player's own team; the marker's team is not copied [orig: §5.2c]. Team 1 mirrors
 	// the prior placeholder until the MP team path lands.
 	spawn.team = 1;
+	if (listen_server_) spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
 	if (!h.valid()) return -1;
 	// Seed the look heading to the spawn facing so the body starts aligned. [(90 - yaw) BAM]
@@ -1167,7 +1231,12 @@ bool NovaSimulation::enable_host_listen(int p_port) {
 		host_listen_ = false;
 		return false;
 	}
-	if (!accept_) accept_ = std::make_unique<opennova::HostSessionAccept>();
+	host_session_config_.bind_port = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
+	if (!accept_) {
+		accept_ = std::make_unique<opennova::HostSessionAccept>(host_session_config_);
+	} else {
+		refresh_host_accept_config();
+	}
 	accept_->start();
 	host_listen_ = true;
 	return true;
@@ -1179,6 +1248,74 @@ int NovaSimulation::get_host_listen_port() const {
 
 int NovaSimulation::get_host_peer_count() const {
 	return accept_ ? static_cast<int>(accept_->peer_count()) : 0;
+}
+
+void NovaSimulation::configure_host_session(Dictionary p_options) {
+	opennova::GameServerRuntimeConfig config = host_session_config_;
+	config.bind_port = dictionary_u16(p_options, "bind_port", config.bind_port);
+	opennova::GameSessionConfig &session = config.session;
+	apply_dictionary_string(p_options, "server_name", session.server_name);
+	apply_dictionary_string(p_options, "mission_name", session.mission_name);
+	apply_dictionary_string(p_options, "mission_file", session.mission_file);
+	apply_dictionary_string(p_options, "player_name", session.player_name);
+	apply_dictionary_string(p_options, "expansion", session.expansion);
+	if (p_options.has("gametype")) {
+		session.gametype = dictionary_u32(p_options, "gametype", session.gametype);
+	} else if (p_options.has("game_type")) {
+		session.gametype = dictionary_u32(p_options, "game_type", session.gametype);
+	}
+	session.mpattrib = dictionary_u32(p_options, "mpattrib", session.mpattrib);
+	if (p_options.has("spawn_x") || p_options.has("spawn_y") || p_options.has("spawn_z")) {
+		session.spawn_x = dictionary_u32(p_options, "spawn_x", session.spawn_x);
+		session.spawn_y = dictionary_u32(p_options, "spawn_y", session.spawn_y);
+		session.spawn_z = dictionary_u32(p_options, "spawn_z", session.spawn_z);
+		session.spawn_valid = true;
+	}
+	if (p_options.has("player_entity_handle")) {
+		session.player_entity_handle = dictionary_u16(
+				p_options, "player_entity_handle", session.player_entity_handle);
+	}
+	if (p_options.has("spawn_names")) {
+		session.spawn_names.clear();
+		const Variant names_v = p_options.get("spawn_names", Array());
+		if (names_v.get_type() == Variant::ARRAY) {
+			const Array names = names_v;
+			for (int64_t i = 0; i < names.size(); ++i) {
+				const String name = names[i];
+				if (!name.is_empty()) {
+					session.spawn_names.emplace_back(name.utf8().get_data());
+				}
+			}
+		}
+	}
+	host_session_config_ = std::move(config);
+	refresh_host_accept_config();
+}
+
+Dictionary NovaSimulation::get_host_session_config() const {
+	const opennova::GameServerRuntimeConfig &config =
+			accept_ ? accept_->config() : host_session_config_;
+	const opennova::GameSessionConfig &session = config.session;
+	Dictionary out;
+	out["bind_port"] = static_cast<int>(config.bind_port);
+	out["server_name"] = String(session.server_name.c_str());
+	out["mission_name"] = String(session.mission_name.c_str());
+	out["mission_file"] = String(session.mission_file.c_str());
+	out["player_name"] = String(session.player_name.c_str());
+	out["expansion"] = String(session.expansion.c_str());
+	out["gametype"] = static_cast<int64_t>(session.gametype);
+	out["mpattrib"] = static_cast<int64_t>(session.mpattrib);
+	out["spawn_x"] = static_cast<int64_t>(session.spawn_x);
+	out["spawn_y"] = static_cast<int64_t>(session.spawn_y);
+	out["spawn_z"] = static_cast<int64_t>(session.spawn_z);
+	out["player_entity_handle"] = static_cast<int>(session.player_entity_handle);
+	out["mission_header_size"] = static_cast<int64_t>(session.mission_header_blob.size());
+	Array spawn_names;
+	for (const std::string &name : session.spawn_names) {
+		spawn_names.push_back(String(name.c_str()));
+	}
+	out["spawn_names"] = spawn_names;
+	return out;
 }
 
 opennova::PeerAddr NovaSimulation::peer_from_addr(const String &ip, int port) {
@@ -1239,6 +1376,8 @@ opennova::world::EntityHandle NovaSimulation::prestream_remote_peer(
 		const opennova::netsim::Connection conn{nullptr,
 				opennova::netsim::TransportMode::Client, {}, 0};
 		fresh.conn_index = net_->add_connection(conn);
+		fresh.player_slot = static_cast<uint8_t>(
+				std::min<std::size_t>(remote_peers_.size() + 1, 0xFFu));
 		fresh.dcb_id = next_joiner_dcb_id_++; // host=2, first joiner=3 (retail scheme)
 		it = remote_peers_.emplace(peer, std::move(fresh)).first;
 	}
@@ -1249,8 +1388,12 @@ opennova::world::EntityHandle NovaSimulation::prestream_remote_peer(
 		// + the client's pool-0 self-scan finds it) but the connection is not yet a 0x0A fan
 		// target. [orig: player_ServerAdd @0x51cbc0 registers a joined player's entity]
 		opennova::world::PlayerSpawn spawn = spawn_from_pose(pose);
+		spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 		spawn.net_id = next_joiner_net_id_++; // distinct SSN per joiner (host is 0xFFF0)
 		rp.entity = opennova::world::spawn_remote_player(*world_, spawn);
+	}
+	if (rp.entity.valid() && accept_) {
+		accept_->bind_peer_player_entity(peer, rp.player_slot, rp.entity.packed);
 	}
 	return rp.entity;
 }
@@ -1332,21 +1475,27 @@ void NovaSimulation::stream_world_state_to_peer(const opennova::PeerAddr &peer) 
 	RemotePeer &rp = rpit->second;
 	if (rp.world_streamed) return; // stream the world exactly once, during load
 
-	// SCOPE — stream only the DYNAMIC/networked entity set, NOT the full static mission.
-	// The golden retail capture (.scratch/host_and_join_lan.pcapng) proves a real host's
-	// world-stream is a SMALL per-pool batch during load: empty 0x10, ~5 organics in 0x0C, a
-	// few markers in 0x20 — it does NOT stream the hundreds of buildings/markers. In the
-	// original, static geometry (buildings, nav markers) is CLIENT-LOCAL mission data loaded
-	// from the .bms; only players + AI (pool-0 organics) are server-authoritative and streamed.
-	// Our promote_mission over-populates the networked pools with the entire static mission
-	// (here 816 statics + 497 markers), so streaming pools 2/3 in full floods the client and
-	// walks Pool_GetEntryUnchecked past its capacity -> reset/reload/kick. So: organics (0x0C) +
-	// pool-1 items/vehicles/emplacements (0x0D) — the networkable dynamic set — with empty 0x10
-	// and a small spawn-marker 0x20 to drive the witnessed load-progress phases (NapiNPClientMsg_
-	// 0x010 sets g_loading_progress=2, _0x020 sets 5). Pool-1 0x0D is NOW streamed: every record
-	// carries a forced 0x0800 AI-trailer (build_pool1_spawn_batch) so an AI-capable item def never
-	// hits the decoder's flag-clear strcpy crash (D-NET-97). Static buildings (pool-2) stay
-	// CLIENT-LOCAL (loaded from the .bms), not a host broadcast. [D-NET-98, net-re §5.2a/§5.38c]
+	// The listen-host's own player dcb (entity+0x78). Non-zero = a real player; 0 = the
+	// dedicated-server reservation. 2 matches the golden retail LAN serve-and-play host (the
+	// host's loopback client consumes dcb 0/1). Joiners report their own dcb via the 0x48 ack.
+	constexpr uint32_t kHostPlayerDcb = 2;
+
+	// SCOPE — stream ONLY the wire-delivered dynamic set, NOT the .bms-resident static mission.
+	// WITNESSED (Mission_LoadBMSFile @0x40f4e0): EVERY client — joiner included, with NO
+	// is_authority gate — spawns the full static mission LOCALLY from the .bms via four
+	// unconditional pool loops (pool-1 items/vehicles, pool-2 buildings, pool-3 markers, pool-0
+	// organics), each assigning the entity its own DcbId/refNum/handle locally
+	// (Entity_SpawnFromBMSRecord @0x40e9f0). The ONE class NOT spawned locally in a session is the
+	// type-5305 player-start (early-return when is_in_session @0x40ea5a) — PLAYERS arrive over the
+	// wire as pool-0 organics. So the host must stream only: the joiner's own dcb 0x0C
+	// (announce_joiner_organic_spawn), pool-0 player / host-driven organics (0x0C) + their
+	// per-frame 0x0A motion, and a small spawn-marker 0x20 for spawn-select. Streaming the
+	// .bms-resident pool-1 vehicles (0x0D) hands the client SERVER handles for entities it ALREADY
+	// built locally -> it cannot reconcile them and floods C2S 0x0F resend-requests for those
+	// pool-1 handles, then 0xC9-disconnects (WIRE-PROVEN: .scratch/capture7 floods 1306 C2S 0x0F
+	// for pool-1 handles vs the earlier WORKING capture which streamed ZERO 0x0D). GameSession
+	// emits the empty 0x10 phase marker; this bridge owns only the live world subset.
+	// [D-NET-97/98 corrected, net-re §5.2a/§5.38c]
 	opennova::OrganicSpawnBatch organics = opennova::netsim::build_pool0_organic_batch(*world_);
 	// Drop remote-peer entities from the pool-0 organic batch — each joiner's OWN player is
 	// streamed by announce_joiner_organic_spawn with its dcb at entity+0x78 (entity_flags) +
@@ -1362,28 +1511,38 @@ void NovaSimulation::stream_world_state_to_peer(const opennova::PeerAddr &peer) 
 			organics.records.end());
 	organics.entity_count = static_cast<uint16_t>(organics.records.size());
 
+	// The host's OWN player is a real networked player — it MUST carry a non-zero dcb at
+	// entity+0x78 (build_pool0_organic_batch zeroes entity_flags for the whole pool, correct for
+	// AI but NOT for the host player). A 0x14B9 record with dcb==0 is the dedicated-server
+	// reservation: the joining client does NOT keep a player entity for it, so that pool-0 slot
+	// stays empty and the per-frame 0x0A then floods C2S 0x0F for the handle every frame
+	// (NapiNPClientMsg_0x00A @0x4307c4: local_entity.itemDef==null) → 0xC9 disconnect. WIRE-PROVEN:
+	// the GOLDEN retail join host_and_join_lan.pcapng carries the host player at eFlags=2 and the
+	// joiner at 3 (AI at 0); our .scratch/capture9 streamed the host player at eFlags=0 and the
+	// retail client flooded 0x0F for exactly that handle (0x0000) while the eFlags!=0 joiner did
+	// not. [orig: player_ServerAdd @0x51cbc0 copies conn->unk_18 → entity+0x78; LAN serve-and-play
+	// host dcb = 2, the loopback client consumes 0/1.]
+	if (world_->cached.local_player.valid()) {
+		const uint16_t host_handle = static_cast<uint16_t>(world_->cached.local_player.packed);
+		for (opennova::OrganicSpawnRecord &r : organics.records) {
+			if (r.slot_id == host_handle) r.entity_flags = kHostPlayerDcb;
+		}
+	}
+
 	constexpr size_t kRecPerMsg = 12;
 	auto send_body = [&](uint8_t tag, std::vector<uint8_t> body) {
 		std::vector<uint8_t> dg;
 		if (accept_->frame_in_match_s2c(peer, tag, std::move(body), dg)) send_datagram(peer, dg);
 	};
 
-	// 0x10 — empty pool-2 batch (phase marker; statics are client-local). Matches golden (len=4).
-	send_body(0x10, opennova::encode_static_entity_batch(opennova::StaticEntityBatch{}));
-	// 0x0D — pool-1 items / vehicles / emplacements (the mission's networkable dynamic objects).
-	// Every record carries a forced 0x0800 AI-trailer (build_pool1_spawn_batch) so an AI-capable
-	// item def never hits the stock decoder's flag-clear strcpy crash (@0x433370, D-NET-97). Paged
-	// like the organics; the stock decoder bounds-rejects any slot >= its pool-1 capacity
-	// (@0x432d00), so an over-capacity mission truncates safely rather than corrupting. Retail
-	// load order is 0x10 -> 0x0D -> 0x0C -> 0x20 [orig: Server_SendInitialGameStateToPlayer @0x51bba0].
-	opennova::PoolSpawnBatch pool1 = opennova::netsim::build_pool1_spawn_batch(*world_);
-	for (size_t base = 0; base < pool1.records.size(); base += kRecPerMsg) {
-		const size_t n = std::min(kRecPerMsg, pool1.records.size() - base);
-		opennova::PoolSpawnBatch page;
-		page.records.assign(pool1.records.begin() + base, pool1.records.begin() + base + n);
-		page.entity_count = static_cast<int16_t>(page.records.size());
-		send_body(0x0D, opennova::encode_pool_spawn_batch(page));
-	}
+	// 0x0D pool-1 — DELIBERATELY NOT STREAMED. The client spawns the .bms-resident vehicles/items
+	// itself, locally and unconditionally (Mission_LoadBMSFile @0x40f4e0 pool-1 loop); a server
+	// 0x0D for those same statics is exactly what made the retail client flood C2S 0x0F for pool-1
+	// handles and 0xC9-disconnect (see SCOPE above; WIRE-PROVEN capture7 vs the working capture).
+	// build_pool1_spawn_batch is retained (unit-tested) for genuinely host-spawned NETWORKED
+	// dynamics — ASH_I5A has none, so nothing is emitted. Retail load order: 0x10 -> 0x0C -> 0x20
+	// with 0x10 supplied by GameSession and live 0x0C/0x20 supplied here.
+	// [orig: Server_SendInitialGameStateToPlayer @0x51bba0].
 	// 0x0C — the dynamic set: host player + AI organics, paged (slot id explicit per record).
 	for (size_t base = 0; base < organics.records.size(); base += kRecPerMsg) {
 		const size_t n = std::min(kRecPerMsg, organics.records.size() - base);
@@ -1417,22 +1576,27 @@ void NovaSimulation::dispatch_host_accept_event(const opennova::PeerAddr &peer,
                                                 const opennova::HostAcceptEvent &ev) {
 	switch (ev.kind) {
 		case opennova::HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
-			// Stream ONLY the joiner's own dcb-bearing 0x0C here, EARLY (during the client's
-			// world-load, before the game-start bundle). It must arrive before the client's
-			// Player_InitPlayer pool-0 self-scan (Player_FindLocalPlayerEntity @0x4e0090 ->
-			// Player_BuildNetIdLookupOrFatalError @0x4dff60 = fatal "Could not find player dcb").
-			// In our flow that scan runs BEFORE our bundle (the client is NOT held in the
-			// verify-WAIT like retail — see the plan's HOLD / Phase 2), so the joiner's OWN 0x0C
-			// cannot be deferred without re-crashing (proven twice). Keep it early. The WORLD
-			// snapshot (host player + AI organics + markers) is deferred to PeerSpawned so it
-			// follows the bundle's 0x0F world-state-load (retail order). net-re §5.38c.
+			// Stream the FULL pool-0 set — the joiner's own dcb-bearing 0x0C *and* the host
+			// player + AI organics + markers — here, EARLY (during the client's world-load,
+			// BEFORE the game-start bundle). WIRE-WITNESSED (golden retail host_and_join_lan.pcapng):
+			// the host streams ALL pool-0 entities in one 0x0C batch at f=516, BEFORE the 0x0F
+			// world-state-load bundle at f=559. The client integrates the entity set AT the bundle
+			// / game-start; a player streamed AFTER the bundle is NOT kept, so its pool-0 slot stays
+			// empty and the per-frame 0x0A then floods C2S 0x0F for that handle. Our earlier
+			// "bundle-first" reading (deferring the world snapshot to PeerSpawned) was WRONG — it
+			// left the host player at slot 0 streamed AFTER the bundle (.scratch/capture7-10) and
+			// the retail client flooded 0x0F for handle 0x0000 and disconnected. The joiner's own
+			// 0x0C must ALSO arrive before the client's Player_InitPlayer pool-0 self-scan
+			// (Player_FindLocalPlayerEntity @0x4e0090 -> Player_BuildNetIdLookupOrFatalError
+			// @0x4dff60 = fatal "Could not find player dcb"). net-re §5.38c.
 			announce_joiner_organic_spawn(peer, ev);
+			stream_world_state_to_peer(peer);
 			break;
 		case opennova::HostAcceptEvent::Kind::PeerSpawned:
-			// Fires in the SAME host_net_poll burst as the game-start bundle (the bundle and this
-			// event land in one HandleResult; host_net_poll ships r.outbound before r.events). So
-			// the WORLD snapshot streams AFTER the bundle's 0x0F — retail order. The joiner's own
-			// 0x0C call is idempotent (organic_announced latch) if PeerEnteredWorldStreaming ran.
+			// The world snapshot already streamed at PeerEnteredWorldStreaming (before the bundle,
+			// golden order). Here we only bind the joiner's live connection (0x0A fan-out) now that
+			// it has spawned. The 0x0C calls are idempotent (organic_announced / world_streamed
+			// latches) if they somehow run twice.
 			announce_joiner_organic_spawn(peer, ev);
 			stream_world_state_to_peer(peer);
 			admit_remote_peer(peer, ev.pose);

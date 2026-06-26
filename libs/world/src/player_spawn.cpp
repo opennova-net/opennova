@@ -33,7 +33,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.alive = true;
     seed.flags = 2u;            // the movement gate starts SET; the spawn reset clears it
 
-    const EntityHandle h = world.registry.spawn(0, seed);
+    const EntityHandle h = world.registry.spawn_from(0, spawn.min_entity_slot, seed);
     if (!h.valid()) return h;
     Entity *ent = world.registry.get(h);
 

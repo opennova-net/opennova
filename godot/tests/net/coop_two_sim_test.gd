@@ -19,7 +19,8 @@ extends GutTest
 # one static building (pool 2, type 0x0123) and one marker (pool 3, type 0x1773). The AI carry a
 # RESOLVABLE non-zero type id so they survive the present's `type_id != 0` filter — with the old
 # item_id 0 they were invisible by construction, which is why the joiner only ever saw the host
-# player. The host streams all of these at the joiner's world-load (S2C 0x0C/0x0D/0x10/0x20).
+# player. The host streams only the dynamic set at the joiner's world-load (pool-0 organics via
+# S2C 0x0C, empty 0x10, spawn-marker 0x20); pool-1 vehicles + pool-2 buildings are client-local.
 const AI_TYPE := 0x0816       # AI infantry
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker

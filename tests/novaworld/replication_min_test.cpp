@@ -74,7 +74,7 @@ bool check_tag_46_player_sync_layout() {
 	ctx.player_name = "DevUser";
 	ctx.clan_tag = "";
 	ctx.player_slot = 7;
-	ctx.entity_slot = 3;
+	ctx.entity_handle = 0x0005;
 	const auto buf = opennova::build_tag_46_player_sync(ctx);
 	// Phase D.0.26.4 retail-match layout:
 	//   slot(1) + flags(2) + entity(1) + "DevUser\0"(8) + "\0"(1)
@@ -84,7 +84,7 @@ bool check_tag_46_player_sync_layout() {
 	if (!expect(buf.size() == 36, "tag=0x46 retail-match payload is 36 bytes")) return false;
 	if (!expect(buf[0] == 7, "player_slot echoed")) return false;
 	if (!expect(le16(buf.data() + 1) == 0x1CF7, "flags = 0x1CF7 (retail-match)")) return false;
-	if (!expect(buf[3] == 3, "entity_slot echoed")) return false;
+	if (!expect(buf[3] == 5, "entity slot comes from entity_handle, not player_slot")) return false;
 	// Name region: 7 chars + NUL terminator at offset 4..11
 	if (!expect(std::strncmp(reinterpret_cast<const char *>(buf.data() + 4), "DevUser", 7) == 0,
 			"name 'DevUser' written")) return false;
@@ -240,6 +240,7 @@ bool check_tag_0d_local_player_spawn_layout() {
 	opennova::PlayerReplicationState ctx;
 	ctx.player_name = "DevUser";
 	ctx.player_slot = 0;
+	ctx.entity_handle = 0x0005;
 	ctx.team = 1;
 	ctx.entity_type_id = 0x14B9u;
 	ctx.spawn_x = 0xfe56f854u;
@@ -252,7 +253,7 @@ bool check_tag_0d_local_player_spawn_layout() {
 	if (!expect(buf.size() == 34, "tag=0x0D 1-player payload is 34 bytes")) return false;
 	if (!expect(le16(buf.data() + 0) == 1, "count = 1")) return false;
 	if (!expect(le16(buf.data() + 2) == 0x0030, "flags = team|entity36 (0x0030)")) return false;
-	if (!expect(le16(buf.data() + 4) == 0x0000, "slot_id = pool 0 slot 0")) return false;
+	if (!expect(le16(buf.data() + 4) == 0x0005, "slot_id = entity_handle 0x0005")) return false;
 	if (!expect(le16(buf.data() + 6) == 0x14B9, "type_id = 0x14B9 default infantry")) return false;
 	if (!expect(std::strncmp(reinterpret_cast<const char *>(buf.data() + 8), "DevUser", 7) == 0,
 			"name 'DevUser' written")) return false;
@@ -265,6 +266,22 @@ bool check_tag_0d_local_player_spawn_layout() {
 	if (!expect(le32(buf.data() + 28) == ctx.spawn_z, "pos_z echoed")) return false;
 	if (!expect(buf[32] == 1, "team byte = 1")) return false;
 	if (!expect(buf[33] == 0, "bone_attach = 0")) return false;
+	return true;
+}
+
+bool check_tag_51_player_spawn_uses_entity_handle() {
+	opennova::PlayerReplicationState ctx;
+	ctx.player_slot = 0;
+	ctx.entity_handle = 0x0005;
+	ctx.team = 1;
+	const auto buf = opennova::build_tag_51_player_spawn(ctx);
+	if (!expect(buf.size() == 8, "tag=0x51 payload is 8 bytes")) return false;
+	if (!expect(le16(buf.data() + 0) == 1, "team_u16 = 1")) return false;
+	if (!expect(le16(buf.data() + 2) == 0x0005,
+			"tag=0x51 entity slot comes from entity_handle, not player_slot")) return false;
+	if (!expect(buf[4] == 1, "team byte = 1")) return false;
+	if (!expect(le16(buf.data() + 5) == 0, "weapon index = 0")) return false;
+	if (!expect(buf[7] == 0, "camera byte = 0")) return false;
 	return true;
 }
 
@@ -390,6 +407,7 @@ int main() {
 	ok = check_tag_0a_euler_z_threading() && ok;
 	ok = check_tag_5a_weapon_loadout_bytes() && ok;
 	ok = check_tag_0d_local_player_spawn_layout() && ok;
+	ok = check_tag_51_player_spawn_uses_entity_handle() && ok;
 	ok = check_tag_1e_game_event_post_spawn_layout() && ok;
 	ok = check_long_name_truncation() && ok;
 	ok = check_tag_40_capture_zone_state_layout() && ok;

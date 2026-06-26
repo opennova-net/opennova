@@ -41,6 +41,33 @@ func test_enable_host_listen_binds_and_keeps_sp_present() -> void:
 	sim.free()
 
 
+func test_host_session_config_survives_native_accept_start() -> void:
+	var sim := NovaSimulation.new()
+	sim.configure_host_session({
+		"server_name": "Configured Host",
+		"mission_name": "Custom Island Test",
+		"mission_file": "CUSTOM_A1.BMS",
+		"player_name": "HostPlayer",
+		"spawn_names": ["Custom Island Test"],
+	})
+	assert_true(sim.enable_host_listen(0), "host bound an OS-assigned UDP port")
+	var config: Dictionary = sim.get_host_session_config()
+	assert_eq(String(config.get("server_name", "")), "Configured Host")
+	assert_eq(String(config.get("mission_name", "")), "Custom Island Test")
+	assert_eq(String(config.get("mission_file", "")), "CUSTOM_A1.BMS")
+	assert_eq(String(config.get("player_name", "")), "HostPlayer")
+	assert_eq(Array(config.get("spawn_names", [])).size(), 1)
+	sim.free()
+
+
+func test_loaded_host_session_installs_bms_header() -> void:
+	var sim := _host_sim(_two_organics())
+	var config: Dictionary = sim.get_host_session_config()
+	assert_eq(int(config.get("mission_header_size", 0)), 616,
+		"loaded host session has the BMS header sent by tag=0x0B")
+	sim.free()
+
+
 func test_host_receives_joiner_datagrams_without_disturbing_sp() -> void:
 	var sim := _host_sim(_two_organics())
 	var host_port: int = sim.get_host_listen_port()

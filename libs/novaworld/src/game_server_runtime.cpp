@@ -143,6 +143,23 @@ const GameSessionState *GameServerRuntime::session_state(const std::string &sess
 	return it == sessions_.end() ? nullptr : &it->second;
 }
 
+bool GameServerRuntime::bind_session_player(
+		const std::string &session_id,
+		std::string player_name,
+		uint8_t player_slot,
+		uint16_t entity_handle) {
+	auto it = sessions_.find(session_id);
+	if (it == sessions_.end()) {
+		return false;
+	}
+	it->second.player_binding_valid = true;
+	it->second.player_name = std::move(player_name);
+	it->second.player_slot = player_slot;
+	it->second.player_entity_handle = entity_handle;
+	last_event_ = "session player binding installed";
+	return true;
+}
+
 GameServerRuntimeSnapshot GameServerRuntime::snapshot(const std::string &primary_session_id) const {
 	GameServerRuntimeSnapshot out;
 	out.running = running_;
@@ -184,7 +201,6 @@ GameServerSessionSnapshot GameServerRuntime::snapshot_for(
 	out.spawned = state.spawned;
 	out.loadout_synced = state.loadout_synced;
 	out.mission_status_received = state.mission_status_received;
-	out.spawn_points_synced = state.spawn_points_synced;
 	out.spawn_acceptance_sent = state.spawn_acceptance_sent;
 	out.world_streaming_armed = state.world_streaming_armed;
 	out.ida_initial_state = state.ida_initial_state;
@@ -197,9 +213,10 @@ GameServerSessionSnapshot GameServerRuntime::snapshot_for(
 	out.queued_reply_count = state.queued_replies.size();
 	out.replicated_entity_count = config_.session.replicated_entities.size();
 	out.spawn_point_count = config_.session.spawn_points.size();
-	out.spawn_point_sync_enabled = config_.session.emit_spawn_point_entities;
 	out.entity_batch_cursor = state.entity_batch_cursor;
 	out.entity_batch_count = state.entity_batch_count;
+	out.state4_loading_gate_queued = state.state4_loading_gate_queued;
+	out.state4_loading_gate_complete = state.state4_loading_gate_complete;
 	out.client_pos_valid = state.client_pos_valid;
 	out.client_pos_x = state.client_pos_x;
 	out.client_pos_y = state.client_pos_y;

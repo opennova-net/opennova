@@ -25,13 +25,11 @@ struct GameSessionConfig {
 	uint32_t spawn_x = 0xfe56f854u;
 	uint32_t spawn_y = 0x0049f5f0u;
 	uint32_t spawn_z = 0x003a5e6au;
+	uint16_t player_entity_handle = 0;
+	std::vector<uint8_t> mission_header_blob;
+	std::vector<std::string> spawn_names;
 	std::vector<GameEntitySnapshot> replicated_entities;
 	std::vector<SpawnPointEntity> spawn_points;
-	// Pool-1 spawn-point entity sync is still experimental. The latest JO
-	// crash dump faults inside NapiNPClientMsg_0x00D when our minimal records
-	// are sent with empty names/flags, so live transports keep this disabled
-	// until the record layout is fully matched to retail.
-	bool emit_spawn_point_entities = false;
 };
 
 enum class GameSessionPhase {
@@ -51,7 +49,6 @@ struct GameSessionState {
 	bool spawned = false;
 	bool loadout_synced = false;
 	bool mission_status_received = false;
-	bool spawn_points_synced = false;
 	bool spawn_acceptance_sent = false;
 	bool world_streaming_armed = false;
 	uint16_t ida_initial_state = 0;
@@ -73,11 +70,16 @@ struct GameSessionState {
 	bool state4_player_sync_requested = false;
 	bool state4_player_sync_sent = false;
 	bool state4_loading_gate_queued = false;
+	bool state4_loading_gate_complete = false;
 	// Set after we emit our first tag=0x51 PLAYER-SPAWN reply. Used to break
 	// the tag=0x29 ↔ tag=0x51 ack loop: NapiNPClientMsg_HandlePlayerSpawn @
 	// 0x431BB0 always echoes back tag=0x29 with payload (team+1) after
 	// receiving tag=0x51, and re-replying would loop forever.
 	bool player_spawn_confirmed = false;
+	bool player_binding_valid = false;
+	std::string player_name;
+	uint8_t player_slot = 0;
+	uint16_t player_entity_handle = 0;
 	bool client_pos_valid = false;
 	uint16_t client_entity_handle = 0;
 	uint16_t client_item_type_id = 0;
@@ -109,6 +111,7 @@ public:
 	                               uint32_t now_tick) const;
 
 	PlayerReplicationState player_replication_state() const;
+	PlayerReplicationState player_replication_state(const GameSessionState &state) const;
 
 private:
 	GameSessionConfig config_;

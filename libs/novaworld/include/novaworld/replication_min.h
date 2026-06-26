@@ -19,8 +19,8 @@ struct PlayerReplicationState {
 	// Player identity for the joining client.
 	std::string player_name = "DevUser"; // ≤32 chars; what `tag=0x16` populates as the roster entry name and `tag=0x46` echoes back.
 	std::string clan_tag = "";           // ≤16 chars; mostly cosmetic.
-	uint8_t player_slot = 0;             // Slot index in `dword_A87048` player table; matches `Pool_GetEntryUnchecked(0, slot)`.
-	uint8_t entity_slot = 0;             // Index of the player's entity in pool 0.
+	uint8_t player_slot = 0;             // Slot index in `dword_A87048` player table.
+	uint16_t entity_handle = 0;          // Packed `(pool << 12) | slot` for the player's pool entity.
 	uint8_t team = 1;                    // entity+354 / tag=0x46 team field. 0 = "no team / spectator" (player can shoot but not move). 1 = blue team. 2 = red team. NapiNPClientMsg_0x05A@0x4290e0 reads g_local_player_entity->Team and treats Team==1 || Team==3 specially. Default 1 = playable.
 	uint32_t mi = 0x3CDEu;               // Server-side MI from ServerAuth — this is what `sub_4E0090@0x4E0090` matches against entity[120].
 	// Spawn coordinates for the player on the joining map (dvxi5 by default).
@@ -39,6 +39,10 @@ struct PlayerReplicationState {
 	// from the existing tag=0x0C spawn body in `apps/novaworld/src/main.cpp`.
 	// Kept for player-state builders that still need the infantry type id.
 	uint16_t entity_type_id = 0x14B9u;
+	// Spawn-point/menu labels for tag=0x0F. Empty preserves the retail ASH_I5A
+	// witness tail; configured sessions set this from their selected mission so
+	// a non-ASH host does not advertise the hardcoded ASH spawn names.
+	std::vector<std::string> spawn_names;
 };
 
 // Mission entity data shared by all game-server frontends. The CLI can fill
@@ -223,7 +227,7 @@ std::vector<uint8_t> build_tag_1e_game_event_post_spawn();
 // Layout per `NapiNPClientMsg_0x00D` decomp:
 //   [u16 count]                              // we send 1
 //   [u16 flags]                              // 0x0010 (team) | 0x0020 (entity+36 write) = 0x0030
-//   [u16 slot_id]                            // (0 << 12) | player_slot = pool 0, slot N
+//   [u16 slot_id]                            // player's packed pool handle
 //   [u16 type_id]                            // entity type — must be a valid ItemList type
 //   [name\0]                                 // null-terminated, player.player_name
 //   [u32 entity36]      because flags&0x20:  // 0 — clears ALL bits including bit 1

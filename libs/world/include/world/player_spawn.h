@@ -26,6 +26,7 @@ struct PlayerSpawn {
     uint8_t team = 0;
     uint16_t net_id = 0xFFF0;
     int16_t health = 100;
+    uint16_t min_entity_slot = 0;
 };
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)

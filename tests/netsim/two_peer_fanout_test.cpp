@@ -79,11 +79,13 @@ void carry(ns::UdpSessionTransport &from, ns::UdpSessionTransport &to) {
 	while (from.pop_outbound(raw)) to.push_inbound(raw);
 }
 
-w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
+w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
+                            uint16_t min_entity_slot = 0) {
 	w::PlayerSpawn s;
 	s.position = pos;
 	s.yaw = yaw;
 	s.net_id = net_id;
+	s.min_entity_slot = min_entity_slot;
 	return s;
 }
 
@@ -276,11 +278,60 @@ bool run_self_uplink_rejected() {
 	return true;
 }
 
+// Retail loads .bms-resident pool-0 organics before network players. The listen-server path
+// therefore starts host/joiner player allocation at slot 4 so live 0x0A records do not collide
+// with the retail client's local pool-0 slots 0..3.
+bool run_retail_player_slots_start_after_bms_organics() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	w::AiSystem ai;
+	world.ai = &ai;
+
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0, 4));
+	if (!expect(host_h == w::EntityHandle::make(0, 4), "retail host player uses slot 4"))
+		return false;
+
+	ns::NetSystem net;
+	ns::LoopbackChannel self_ch;
+	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
+	net.add_connection(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	const std::size_t conn_join =
+			net.add_connection(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
+	const w::EntityHandle joiner_h =
+			net.admit_peer(world, conn_join,
+			               player_spawn({10.0f, 0.0f, 0.0f}, 0, 0xFFF1, 4));
+	if (!expect(joiner_h == w::EntityHandle::make(0, 5), "retail joiner player uses slot 5"))
+		return false;
+
+	nw::PlayerReplicationState fallback;
+	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(0.0));
+	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(0.0));
+	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(0.0));
+	net.emit_s2c(world, fallback);
+
+	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
+	carry(udp_host, udp_join);
+	ns::NetClientView join_view;
+	join_view.pump(udp_join);
+	if (!expect(join_view.frames_applied() == 1, "join view applied retail-slot frame"))
+		return false;
+	if (!expect(join_view.state().find(0x0004) != nullptr,
+	            "live frame contains host player handle 0x0004")) return false;
+	if (!expect(join_view.state().find(0x0005) != nullptr,
+	            "live frame contains joiner player handle 0x0005")) return false;
+	if (!expect(join_view.state().find(0x0000) == nullptr &&
+	                    join_view.state().find(0x0001) == nullptr,
+	            "live frame does not advertise player handles 0x0000/0x0001")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
-	                run_self_uplink_rejected();
+	                run_self_uplink_rejected() &&
+	                run_retail_player_slots_start_after_bms_organics();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

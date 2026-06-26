@@ -737,6 +737,10 @@ bool parse_file(const std::string& path, File& out, std::string& error);
 // Write a BMS file to a byte buffer.
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error);
 
+// Write only the canonical 616-byte BMS header that the retail game-session
+// loader consumes before loading the mission body.
+bool encode_header_blob(const File& file, std::vector<uint8_t>& out, std::string& error);
+
 // Write a BMS file to disk.
 bool write_file(const File& file, const std::string& path, std::string& error);
 

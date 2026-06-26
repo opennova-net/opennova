@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,10 @@ void push_u32(std::vector<uint8_t> &b, uint32_t v) {
 	b.push_back(uint8_t((v >> 8) & 0xFF));
 	b.push_back(uint8_t((v >> 16) & 0xFF));
 	b.push_back(uint8_t((v >> 24) & 0xFF));
+}
+
+uint16_t le16(const uint8_t *p) {
+	return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
 }
 
 // Craft an inbound NW-UDP datagram (opcode + plaintext body) the way a joiner
@@ -412,6 +417,139 @@ bool run_joiner_0c_streams_before_game_start() {
 	return true;
 }
 
+bool run_bound_entity_handle_drives_tag51() {
+	HostSessionAccept accept;
+	accept.start();
+
+	const PeerAddr peer{0x0100007Fu, 30600};
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	const uint32_t client_ck = 0xBEEFCAFEu;
+
+	ClientHello hello;
+	hello.pn = "JointOperations";
+	hello.co = "SlotJoiner";
+	hello.ci = 1;
+	auto hello_dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	accept.handle_datagram(peer, hello_dg.data(), hello_dg.size(), 1);
+
+	std::string server_scrk;
+	ClientAuth auth;
+	auth.pn = "JointOperations";
+	auth.ci = 1;
+	auth.ck = client_ck;
+	auth.na = "jop:cus2";
+	auth.scrk = client_scrk;
+	auto auth_dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	auto auth_r = accept.handle_datagram(peer, auth_dg.data(), auth_dg.size(), 2);
+	if (!expect(auth_r.outbound.size() == 1, "auth produces one outbound")) return false;
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	if (!expect(nw_decode_inbound(auth_r.outbound[0].data(), auth_r.outbound[0].size(), op, body) &&
+	            op == SESSION_OPCODE_SERVER_AUTH, "auth reply decodes to 0x82")) return false;
+	ServerAuth sa;
+	if (!expect(parse_server_auth(body.data(), body.size(), sa), "0x82 parses")) return false;
+	server_scrk = sa.scrk;
+
+	uint32_t seq = 1;
+	auto mission_dg = craft_session(client_scrk, seq++, {make_protocol_message(0x37, {})});
+	accept.handle_datagram(peer, mission_dg.data(), mission_dg.size(), 100);
+	if (!expect(accept.bind_peer_player_entity(peer, 1, 0x0005),
+			"accept binds the peer session to its allocated player entity handle")) return false;
+
+	auto spawn_req = craft_session(client_scrk, seq++, {make_protocol_message(0x29, {0x00, 0x00})});
+	auto spawn_r = accept.handle_datagram(peer, spawn_req.data(), spawn_req.size(), 200);
+	if (!expect(!spawn_r.outbound.empty(), "0x29 produces a framed 0x83 reply")) return false;
+	ProtocolPacketHeader hdr;
+	std::vector<ProtocolMessage> msgs;
+	if (!expect(decode_s2c(spawn_r.outbound.back(), server_scrk, hdr, msgs),
+	            "0x29 reply decodes as a 0x83 SESSION packet")) return false;
+	const ProtocolMessage *tag51 = nullptr;
+	for (const ProtocolMessage &m : msgs) {
+		if (m.tag == 0x51) tag51 = &m;
+	}
+	if (!expect(tag51 != nullptr, "0x29 emits tag=0x51")) return false;
+	if (!expect(tag51->payload.size() == 8, "tag=0x51 payload is 8 bytes")) return false;
+	if (!expect(le16(tag51->payload.data() + 2) == 0x0005,
+			"tag=0x51 entity slot uses the accept-bound peer handle")) return false;
+	return true;
+}
+
+bool run_bound_peer_identity_drives_player_sync() {
+	HostSessionAccept accept;
+	accept.start();
+
+	const PeerAddr peer{0x0100007Fu, 30700};
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	const uint32_t client_ck = 0xABCD1234u;
+
+	ClientHello hello;
+	hello.pn = "JointOperations";
+	hello.co = "SlotJoiner";
+	hello.ci = 1;
+	auto hello_dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	accept.handle_datagram(peer, hello_dg.data(), hello_dg.size(), 1);
+
+	ClientAuth auth;
+	auth.pn = "JointOperations";
+	auth.ci = 1;
+	auth.ck = client_ck;
+	auth.na = "jop:cus2";
+	auth.scrk = client_scrk;
+	auto auth_dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	auto auth_r = accept.handle_datagram(peer, auth_dg.data(), auth_dg.size(), 2);
+	if (!expect(auth_r.outbound.size() == 1, "auth produces one outbound")) return false;
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	if (!expect(nw_decode_inbound(auth_r.outbound[0].data(), auth_r.outbound[0].size(), op, body) &&
+	            op == SESSION_OPCODE_SERVER_AUTH, "auth reply decodes to 0x82")) return false;
+	ServerAuth sa;
+	if (!expect(parse_server_auth(body.data(), body.size(), sa), "0x82 parses")) return false;
+	const std::string server_scrk = sa.scrk;
+
+	uint32_t seq = 1;
+	auto mission_dg = craft_session(client_scrk, seq++, {make_protocol_message(0x37, {})});
+	accept.handle_datagram(peer, mission_dg.data(), mission_dg.size(), 100);
+	if (!expect(accept.bind_peer_player_entity(peer, 1, 0x0005),
+			"accept binds the peer session to its allocated player entity handle")) return false;
+
+	for (int i = 0; i < 40; ++i) {
+		accept.tick_handshakes(300, static_cast<uint32_t>(1000 + i));
+	}
+	auto sync_ack = craft_session(client_scrk, seq++, {
+			make_protocol_message(0x22, {0x00, 0xF7, 0x1C}),
+	});
+	accept.handle_datagram(peer, sync_ack.data(), sync_ack.size(), 2000);
+
+	const ProtocolMessage *tag46 = nullptr;
+	std::vector<ProtocolMessage> decoded_msgs;
+	for (int i = 0; i < 20 && tag46 == nullptr; ++i) {
+		auto outs = accept.tick_handshakes(300, static_cast<uint32_t>(3000 + i));
+		for (const HostSessionAccept::TickOut &out : outs) {
+			for (const std::vector<uint8_t> &dg : out.outbound) {
+				ProtocolPacketHeader hdr;
+				std::vector<ProtocolMessage> msgs;
+				if (!decode_s2c(dg, server_scrk, hdr, msgs)) continue;
+				for (const ProtocolMessage &m : msgs) {
+					if (m.tag == 0x46) {
+						decoded_msgs.push_back(m);
+						tag46 = &decoded_msgs.back();
+						break;
+					}
+				}
+				if (tag46) break;
+			}
+			if (tag46) break;
+		}
+	}
+	if (!expect(tag46 != nullptr, "client player-sync ack produces tag=0x46")) return false;
+	if (!expect(tag46->payload.size() >= 12, "tag=0x46 payload carries slot/entity/name")) return false;
+	if (!expect(tag46->payload[0] == 1, "first remote peer uses player slot 1")) return false;
+	if (!expect(tag46->payload[3] == 5, "player sync entity slot uses the peer entity handle")) return false;
+	if (!expect(std::strncmp(reinterpret_cast<const char *>(tag46->payload.data() + 4),
+			"SlotJoiner", 10) == 0, "player sync name uses ClientHello.co")) return false;
+	return true;
+}
+
 bool run_non_jo_peer_is_ignored() {
 	// A NOVAWORLDUDP (lobby) hello must not register a JO peer — the owner
 	// routes lobby PNs elsewhere; the component drops it.
@@ -434,6 +572,8 @@ int main() {
 	bool ok = true;
 	ok = run() && ok;
 	ok = run_joiner_0c_streams_before_game_start() && ok;
+	ok = run_bound_entity_handle_drives_tag51() && ok;
+	ok = run_bound_peer_identity_drives_player_sync() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	return ok ? 0 : 1;
 }

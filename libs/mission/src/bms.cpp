@@ -1117,8 +1117,7 @@ bool parse_file(const std::string& path, File& out, std::string& error) {
     return parse(data.data(), data.size(), out, error);
 }
 
-bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
-    Writer w;
+bool encode_header_blob(const File& file, std::vector<uint8_t>& out, std::string& error) {
     std::vector<uint8_t> loadout_chunk;
     if (!write_weapon_loadout_chunk(file.loadout, loadout_chunk, error)) {
         return false;
@@ -1132,8 +1131,33 @@ bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
     header_file.header.weapon_loadout_chunk_len = static_cast<uint16_t>(loadout_chunk.size());
     header_file.header.secondary_chunk_len = static_cast<uint16_t>(item_availability_chunk.size());
 
-    // Write header
+    Writer w;
     write_header(w, header_file.header);
+    out = w.data();
+    if (out.size() != kHeaderSize) {
+        error = "Encoded BMS header size mismatch";
+        return false;
+    }
+    return true;
+}
+
+bool write(const File& file, std::vector<uint8_t>& out, std::string& error) {
+    Writer w;
+    std::vector<uint8_t> header_blob;
+    if (!encode_header_blob(file, header_blob, error)) {
+        return false;
+    }
+    std::vector<uint8_t> loadout_chunk;
+    if (!write_weapon_loadout_chunk(file.loadout, loadout_chunk, error)) {
+        return false;
+    }
+    std::vector<uint8_t> item_availability_chunk;
+    if (!write_item_availability_chunk(file.item_availability, item_availability_chunk, error)) {
+        return false;
+    }
+
+    // Write header
+    w.write_bytes(header_blob);
 
     // Write weapon loadout, then the item-availability chunk (mirrors the read order in parse()).
     w.write_bytes(loadout_chunk);

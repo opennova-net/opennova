@@ -22,6 +22,18 @@ bool has_tag(const std::vector<opennova::ProtocolMessage> &messages, uint8_t tag
 	return false;
 }
 
+const opennova::ProtocolMessage *find_tag(const std::vector<opennova::ProtocolMessage> &messages,
+                                          uint8_t tag) {
+	for (const opennova::ProtocolMessage &message : messages) {
+		if (message.tag == tag) return &message;
+	}
+	return nullptr;
+}
+
+uint16_t le16(const uint8_t *p) {
+	return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+}
+
 void drain_queued(opennova::GameServerRuntime &runtime) {
 	for (int i = 0; i < 64 && runtime.snapshot("debug").primary_session.queued_reply_count > 0; ++i) {
 		runtime.tick(16, static_cast<uint32_t>(1000 + i));
@@ -48,8 +60,10 @@ bool check_debug_mission_flow_updates_snapshot() {
 	if (!expect(snapshot.primary_session.ida_initial_state == 2, "mission request enters IDA initial state 2")) return false;
 	if (!expect(snapshot.primary_session.queued_reply_count == 14, "mission request queues IDA mission bootstrap")) return false;
 	if (!expect(snapshot.primary_session.spawn_point_count == 1, "runtime snapshot exposes spawn-point config")) return false;
-	if (!expect(!snapshot.primary_session.spawn_point_sync_enabled, "spawn-point sync is opt-in")) return false;
-	if (!expect(!snapshot.primary_session.spawn_points_synced, "mission request has not synced spawn points yet")) return false;
+	if (!expect(!snapshot.primary_session.state4_loading_gate_queued,
+			"mission request has not queued the state-4 loading gate yet")) return false;
+	if (!expect(!snapshot.primary_session.state4_loading_gate_complete,
+			"mission request has not completed the state-4 loading gate yet")) return false;
 	if (!expect(snapshot.messages_rx == 1, "runtime counts incoming messages")) return false;
 	if (!expect(snapshot.messages_tx == result.replies.size(), "runtime counts outgoing messages")) return false;
 	return true;
@@ -93,8 +107,11 @@ bool check_tick_driver_uses_runtime_sessions() {
 	if (!expect(snapshot.primary_session.world_streaming_armed, "runtime session records streaming arm")) return false;
 	if (!expect(snapshot.primary_session.world_streaming_ack_count == 0,
 			"server-driven state 4 does not count as a streaming ack")) return false;
-	if (!expect(!snapshot.primary_session.spawn_points_synced, "runtime session keeps experimental spawn-point sync disabled")) return false;
 	if (!expect(snapshot.primary_session.entity_batch_count > 0, "runtime snapshot counts entity batches")) return false;
+	if (!expect(snapshot.primary_session.state4_loading_gate_queued,
+			"runtime session queues the state-4 loading gate")) return false;
+	if (!expect(snapshot.primary_session.state4_loading_gate_complete,
+			"runtime session drains the state-4 loading gate without canned world data")) return false;
 	if (!expect(snapshot.tick_ms == 1660, "tick advances runtime clock")) return false;
 	if (!expect(snapshot.tick_counter == 15, "tick increments runtime counter")) return false;
 
@@ -115,11 +132,10 @@ bool check_post_load_readiness_uses_runtime_session() {
 	runtime.handle_message("debug", opennova::make_protocol_message(0x37, {}), 100);
 	drain_queued(runtime);
 	runtime.handle_message("debug", opennova::make_protocol_message(0x09, {}), 120);
-	for (int i = 0; i < 6; ++i) {
-		runtime.tick(300, static_cast<uint32_t>(200 + i));
-	}
-	runtime.handle_message("debug", opennova::make_protocol_message(0x22, {0x00, 0xF7, 0x1C}), 240);
-	runtime.tick(300, 241);
+	runtime.tick(300, 200);
+	drain_queued(runtime);
+	if (!expect(runtime.snapshot("debug").primary_session.state4_loading_gate_complete,
+			"runtime readiness waits for the state-4 loading gate to drain")) return false;
 
 	const auto loadout = runtime.handle_messages("debug", {
 			opennova::make_protocol_message(0x2F, std::vector<uint8_t>(35, 0)),
@@ -142,8 +158,23 @@ bool check_post_load_readiness_uses_runtime_session() {
 	if (!expect(snapshot.primary_session.spawn_query_count == 0,
 			"runtime game-start does not require pre-game spawn queries")) return false;
 	if (!expect(snapshot.primary_session.loadout_sync_count == 2, "runtime loadout/status counts loadout syncs")) return false;
-	if (!expect(!snapshot.primary_session.spawn_points_synced,
-			"runtime readiness does not emit experimental spawn-point sync by default")) return false;
+	return true;
+}
+
+bool check_bound_player_entity_handle_drives_spawn_confirm() {
+	opennova::GameServerRuntime runtime;
+	runtime.start();
+	runtime.handle_message("debug", opennova::make_protocol_message(0x37, {}), 100);
+	if (!expect(runtime.bind_session_player("debug", "RuntimeJoiner", 1, 0x0005),
+			"runtime binds a live session player entity handle")) return false;
+
+	const auto spawn = runtime.handle_message(
+			"debug", opennova::make_protocol_message(0x29, {0x00, 0x00}), 200);
+	const opennova::ProtocolMessage *tag51 = find_tag(spawn.replies, 0x51);
+	if (!expect(tag51 != nullptr, "0x29 emits tag=0x51")) return false;
+	if (!expect(tag51->payload.size() == 8, "tag=0x51 payload is 8 bytes")) return false;
+	if (!expect(le16(tag51->payload.data() + 2) == 0x0005,
+			"tag=0x51 entity slot uses the runtime-bound handle")) return false;
 	return true;
 }
 
@@ -163,6 +194,7 @@ int main() {
 	ok = check_debug_mission_flow_updates_snapshot() && ok;
 	ok = check_tick_driver_uses_runtime_sessions() && ok;
 	ok = check_post_load_readiness_uses_runtime_session() && ok;
+	ok = check_bound_player_entity_handle_drives_spawn_confirm() && ok;
 	ok = check_stopped_runtime_suppresses_dispatch() && ok;
 	return ok ? 0 : 1;
 }

@@ -35,6 +35,7 @@ public:
     void configure_pool(int pool, size_t capacity);
 
     EntityHandle spawn(int pool, const Entity &seed); // kInvalid if pool full
+    EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed); // first free >= first_slot
     void despawn(EntityHandle h);
     Entity *get(EntityHandle h);
     const Entity *get(EntityHandle h) const;

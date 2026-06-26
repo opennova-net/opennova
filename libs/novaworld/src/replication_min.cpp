@@ -37,6 +37,29 @@ void push_cstr(std::vector<uint8_t> &buf, const std::string &s, size_t max_chars
 // Jointops binary's data segment — see the Phase D.2.16 witness entry.
 constexpr size_t TAG_0F_TEAM_SCORE_DWORDS = 128;
 
+void replace_tag0f_spawn_name_tail(std::vector<uint8_t> &buf,
+                                   const std::vector<std::string> &spawn_names) {
+	if (spawn_names.empty()) {
+		return;
+	}
+	static constexpr char kRetailFirstSpawnName[] = "North Sea Village";
+	const auto first_name = std::search(buf.begin(), buf.end(),
+			std::begin(kRetailFirstSpawnName), std::end(kRetailFirstSpawnName) - 1);
+	if (first_name == buf.end()) {
+		return;
+	}
+	const size_t first_name_offset = static_cast<size_t>(first_name - buf.begin());
+	if (first_name_offset < 2) {
+		return;
+	}
+	buf.resize(first_name_offset - 2);
+	const size_t count = std::min<size_t>(spawn_names.size(), 0xFFFFu);
+	push_u16(buf, static_cast<uint16_t>(count));
+	for (size_t i = 0; i < count; ++i) {
+		push_cstr(buf, spawn_names[i], 64);
+	}
+}
+
 } // namespace
 
 std::vector<uint8_t> build_tag_0f_game_start(const PlayerReplicationState &ctx) {
@@ -118,6 +141,7 @@ std::vector<uint8_t> build_tag_0f_game_start(const PlayerReplicationState &ctx) 
 	put_u32_le(4, ctx.spawn_x);
 	put_u32_le(8, ctx.spawn_y);
 	put_u32_le(12, ctx.spawn_z);
+	replace_tag0f_spawn_name_tail(buf, ctx.spawn_names);
 	return buf;
 }
 
@@ -193,7 +217,7 @@ std::vector<uint8_t> build_tag_46_player_sync(const PlayerReplicationState &ctx)
 	push_u8(buf, ctx.player_slot);
 	const uint16_t flags = 0x1CF7u;
 	push_u16(buf, flags);
-	push_u8(buf, ctx.entity_slot);
+	push_u8(buf, static_cast<uint8_t>(ctx.entity_handle & 0x00FFu));
 	push_cstr(buf, ctx.player_name, 32);
 	push_cstr(buf, ctx.clan_tag, 16);
 
@@ -441,7 +465,7 @@ std::vector<uint8_t> build_tag_0d_local_player_spawn(const PlayerReplicationStat
 	push_u16(buf, 1); // count = 1
 	const uint16_t flags = 0x0010u | 0x0020u; // team + entity36
 	push_u16(buf, flags);
-	const uint16_t slot_id = static_cast<uint16_t>((0u << 12) | (ctx.player_slot & 0x0FFFu));
+	const uint16_t slot_id = ctx.entity_handle;
 	push_u16(buf, slot_id);
 	push_u16(buf, ctx.entity_type_id);
 	push_cstr(buf, ctx.player_name, 32);
@@ -470,8 +494,7 @@ std::vector<uint8_t> build_tag_51_player_spawn(const PlayerReplicationState &ctx
 	std::vector<uint8_t> buf;
 	buf.reserve(8);
 	push_u16(buf, ctx.team);
-	const uint16_t slot = static_cast<uint16_t>((0u << 12) | (ctx.player_slot & 0x0FFFu));
-	push_u16(buf, slot);
+	push_u16(buf, ctx.entity_handle);
 	push_u8(buf, static_cast<uint8_t>(ctx.team & 0xFF));
 	push_u16(buf, 0);
 	push_u8(buf, 0);

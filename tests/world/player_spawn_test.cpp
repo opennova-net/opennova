@@ -106,6 +106,28 @@ int main() {
         CHECK(ae->inf.is_local_player);
     }
 
+    // --- retail listen-server player allocation starts after .bms-resident pool-0 organics.
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+
+        PlayerSpawn ps;
+        ps.min_entity_slot = 4;
+        ps.net_id = 0xFFF0;
+        const EntityHandle host = spawn_player(w, ps);
+        CHECK(host == EntityHandle::make(0, 4));
+        CHECK(w.cached.local_player == host);
+
+        PlayerSpawn peer;
+        peer.min_entity_slot = 4;
+        peer.net_id = 0xFFF1;
+        const EntityHandle joiner = spawn_remote_player(w, peer);
+        CHECK(joiner == EntityHandle::make(0, 5));
+        CHECK(w.cached.local_player == host);
+    }
+
     // --- input -> 8-way player body mapping (the witnessed mapping + opposing-key cancel).
     {
         World w;
