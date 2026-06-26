@@ -26,6 +26,8 @@
 
 #include <npruntime/napi_np_protocol.h>
 
+#include "host_test_setup.h"
+
 #include <novaworld/connection/registry.h>
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/session_hello.h>
@@ -117,11 +119,13 @@ int main() {
 	// RIP/RPN are computed from the same address the host saw).
 	const PeerAddr peer{ga.rip, static_cast<uint16_t>(joiner_port)};
 
-	// Seed-inject the golden's volatile server keys, exactly the P1 "pass in, don't sample" approach.
+	// Stand the host up through the real P0->P1->P2 lifecycle, seeding the golden's host_key so the
+	// 0x81 HK is stamped (R1) and the golden's real 0x42 (auth.hk == gh.hk, pn == "JOINTOPERATIONS")
+	// passes the join gate. Then seed-inject the golden's volatile server keys (the P1 "pass in,
+	// don't sample" approach) so our 0x82 SK/SCRK match the golden's.
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
-	ctx.np_protocol.host_key = gh.hk;          // -> stamped into our 0x81 HK (R1)
-	ctx.server_key_mint.forced = true;          // -> our 0x82 SK/SCRK == the golden's
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless, gh.hk);
+	ctx.server_key_mint.forced = true;
 	ctx.server_key_mint.server_sk = ga.sk;
 	ctx.server_key_mint.server_scrk = ga.scrk;
 

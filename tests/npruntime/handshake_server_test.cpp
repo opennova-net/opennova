@@ -14,6 +14,10 @@
 
 #include <npruntime/napi_np_protocol.h>
 
+#include "host_test_setup.h"
+
+#include <netsim/loopback_channel.h>
+
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/protocol_message.h>
 #include <novaworld/session_hello.h>
@@ -29,6 +33,10 @@ namespace {
 
 using namespace opennova;
 namespace np = opennova::np;
+
+// The host advertises this key in ServerHello.hk; the join leg checks ClientAuth.hk against it, so
+// crafted joiners echo it. [orig: NapiNPProtocol_HandleClientJoin @0x62b750 HK gate]
+constexpr uint32_t kHostKey = 0x0FE0E112u;
 
 bool expect(bool condition, const char *message) {
 	if (condition) return true;
@@ -118,7 +126,7 @@ bool reply_has_tag(const std::vector<ProtocolMessage> &msgs, uint8_t tag) {
 
 bool run() {
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30000}; // 127.0.0.1:30000 (LE octet pack)
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB"; // 61
@@ -153,6 +161,7 @@ bool run() {
 		auth.pn = "JointOperations";
 		auth.ci = 1;
 		auth.ck = client_ck;
+		auth.hk = kHostKey; // echo ServerHello.hk (the join HK gate)
 		auth.na = "jop:cus2";
 		auth.scrk = client_scrk;
 		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
@@ -297,7 +306,7 @@ bool run() {
 // Player_FatalPlayerDcbNotFound fatals). This proves the event ORDERING in the server legs.
 bool run_joiner_0c_streams_before_game_start() {
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30500}; // 127.0.0.1:30500
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB"; // 61
@@ -317,6 +326,7 @@ bool run_joiner_0c_streams_before_game_start() {
 		auth.pn = "JointOperations";
 		auth.ci = 1;
 		auth.ck = client_ck;
+		auth.hk = kHostKey; // echo ServerHello.hk (the join HK gate)
 		auth.na = "jop:cus2";
 		auth.scrk = client_scrk;
 		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
@@ -419,7 +429,7 @@ bool run_joiner_0c_streams_before_game_start() {
 
 bool run_bound_entity_handle_drives_tag51() {
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30600};
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -437,6 +447,7 @@ bool run_bound_entity_handle_drives_tag51() {
 	auth.pn = "JointOperations";
 	auth.ci = 1;
 	auth.ck = client_ck;
+	auth.hk = kHostKey; // echo ServerHello.hk (the join HK gate)
 	auth.na = "jop:cus2";
 	auth.scrk = client_scrk;
 	auto auth_dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
@@ -476,7 +487,7 @@ bool run_bound_entity_handle_drives_tag51() {
 
 bool run_bound_peer_identity_drives_player_sync() {
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30700};
 	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -493,6 +504,7 @@ bool run_bound_peer_identity_drives_player_sync() {
 	auth.pn = "JointOperations";
 	auth.ci = 1;
 	auth.ck = client_ck;
+	auth.hk = kHostKey; // echo ServerHello.hk (the join HK gate)
 	auth.na = "jop:cus2";
 	auth.scrk = client_scrk;
 	auto auth_dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
@@ -550,19 +562,109 @@ bool run_bound_peer_identity_drives_player_sync() {
 	return true;
 }
 
+// Build a crafted 0x42 ClientAuth datagram with the given PN / HK (for the rejection cases).
+std::vector<uint8_t> craft_auth(const std::string &pn, uint32_t hk, uint32_t ck,
+                                std::string_view scrk) {
+	ClientAuth auth;
+	auth.pn = pn;
+	auth.ci = 1;
+	auth.ck = ck;
+	auth.hk = hk;
+	auth.na = "jop:cus2";
+	auth.scrk = scrk;
+	return craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+}
+
 bool run_non_jo_peer_is_ignored() {
-	// A NOVAWORLDUDP (lobby) hello must not register a JO peer — the owner routes lobby PNs
-	// elsewhere; the legs drop it.
+	// The join legs validate the JO identity + HK echo (the @0x62b750 gate): a lobby (non-JO) PN, a
+	// non-JO 0x42, and a wrong-HK 0x42 must all be dropped with no reply and no connection.
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 31000};
+	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+
+	// (a) non-JO ClientHello -> no ServerHello, no node.
+	{
+		ClientHello hello;
+		hello.pn = "NOVAWORLDUDP";
+		hello.ci = 1;
+		auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(r.outbound.empty(), "lobby PN produces no JO ServerHello")) return false;
+		if (!expect(np::connection_count(ctx) == 0, "lobby PN registers no JO connection")) return false;
+	}
+	// (b) non-JO ClientAuth -> no ServerAuth, no node (the join re-validates PN).
+	{
+		auto dg = craft_auth("NOVAWORLDUDP", kHostKey, 0xDEADBEEFu, scrk);
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 2);
+		if (!expect(r.outbound.empty(), "non-JO 0x42 produces no ServerAuth")) return false;
+		if (!expect(np::connection_count(ctx) == 0, "non-JO 0x42 registers no connection")) return false;
+	}
+	// (c) JO ClientAuth with the WRONG host key -> dropped (HK echo gate).
+	{
+		auto dg = craft_auth("JointOperations", kHostKey ^ 0x1u, 0xDEADBEEFu, scrk);
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 3);
+		if (!expect(r.outbound.empty(), "wrong-HK 0x42 produces no ServerAuth")) return false;
+		if (!expect(np::connection_count(ctx) == 0, "wrong-HK 0x42 registers no connection")) return false;
+	}
+	return true;
+}
+
+// Fix #2: a live handshake against a host that was NOT brought up (host_running == 0) is rejected.
+bool run_handshake_rejected_when_host_down() {
+	np::NapiNPServerCtx ctx;
+	np::configure_session_runtime(ctx); // runtime only — NO create_session, so host_running stays 0
+	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
+	const PeerAddr peer{0x0100007Fu, 31100};
+
 	ClientHello hello;
-	hello.pn = "NOVAWORLDUDP";
+	hello.pn = "JointOperations";
+	hello.co = "EarlyBird";
 	hello.ci = 1;
 	auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
-	if (!expect(r.outbound.empty(), "lobby PN produces no JO ServerHello")) return false;
-	if (!expect(np::connection_count(ctx) == 0, "lobby PN registers no JO connection")) return false;
+	if (!expect(r.outbound.empty(), "0x41 to a down host produces no ServerHello")) return false;
+	if (!expect(np::connection_count(ctx) == 0, "0x41 to a down host registers no connection")) return false;
+	return true;
+}
+
+// Fix #1: the full P0->P1->P2 listen-host bring-up preserves the host's own type-2 loopback through
+// configure_session_runtime, and a remote joiner is added alongside it (not in place of it).
+bool run_listen_host_lifecycle() {
+	netsim::LoopbackChannel loopback;
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+	                        kHostKey, &loopback);
+
+	if (!expect(ctx.is_in_session == 1, "listen host is in session")) return false;
+	if (!expect(ctx.is_authority == 1 && ctx.is_mp_session_peer == 1, "HostClient = host + client")) return false;
+	if (!expect(ctx.np_protocol.host_running == 1, "listen host is running")) return false;
+	if (!expect(ctx.np_protocol.host_key == kHostKey, "host key seeded")) return false;
+	// The loopback survived configure_session_runtime (only type-1 remote nodes are cleared).
+	if (!expect(np::connection_count(ctx) == 1, "loopback preserved through configure_session_runtime")) return false;
+	if (!expect(ctx.np_protocol.connection_list[0].type == 2, "preserved node is the type-2 loopback")) return false;
+
+	// A remote joiner handshakes -> a type-1 node is added ALONGSIDE the loopback.
+	const PeerAddr peer{0x0100007Fu, 31200};
+	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	ClientHello hello;
+	hello.pn = "JointOperations";
+	hello.co = "RemoteJoiner";
+	hello.ci = 1;
+	auto h = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	auto rh = np::handle_server_datagram(ctx, peer, h.data(), h.size(), 1);
+	if (!expect(rh.outbound.size() == 1, "remote 0x41 -> one ServerHello")) return false;
+	auto a = craft_auth("JointOperations", kHostKey, 0xDEADBEEFu, scrk);
+	auto ra = np::handle_server_datagram(ctx, peer, a.data(), a.size(), 2);
+	if (!expect(ra.outbound.size() == 1, "remote 0x42 -> one ServerAuth")) return false;
+
+	if (!expect(np::connection_count(ctx) == 2, "joiner added alongside the loopback")) return false;
+	int loopbacks = 0, remotes = 0;
+	for (const auto &c : ctx.np_protocol.connection_list) {
+		if (c.type == 2) ++loopbacks;
+		else if (c.type == 1) ++remotes;
+	}
+	if (!expect(loopbacks == 1 && remotes == 1, "exactly one loopback + one remote joiner")) return false;
 	return true;
 }
 
@@ -575,5 +677,7 @@ int main() {
 	ok = run_bound_entity_handle_drives_tag51() && ok;
 	ok = run_bound_peer_identity_drives_player_sync() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
+	ok = run_handshake_rejected_when_host_down() && ok;
+	ok = run_listen_host_lifecycle() && ok;
 	return ok ? 0 : 1;
 }

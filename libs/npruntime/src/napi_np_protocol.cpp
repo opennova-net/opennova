@@ -102,6 +102,13 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	if (classify_session_protocol(hello.pn) != SessionProtocolKind::JointOperations) {
 		return; // not an in-match game join — the owner routes lobby PNs elsewhere (no node created)
 	}
+	// The host must be up before it admits a join — Hello rejects while host_running == 0 (and only
+	// an authority accepts joins). This is P1's bring-up gate: create_session -> start_server sets
+	// is_in_session/is_authority/host_running. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0;
+	// host_running gate @+0x538]
+	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) {
+		return; // host not started — no ServerHello, no node created
+	}
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
 	conn.pn = hello.pn;
 	conn.player_name = hello.co; // the joiner's player name (CO is free/unvalidated); streamed back
@@ -128,6 +135,15 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
                         const std::vector<uint8_t> &body, HandleResult &out) {
 	ClientAuth auth;
 	if (!parse_client_auth(body.data(), body.size(), auth)) return;
+	// Validate the join before admitting it (no ServerAuth, no node, on failure). The original
+	// re-runs the SAME identity gate as Hello on the 0x42 and additionally checks the HK echo
+	// against the host key, dropping the join (return 0) otherwise. [orig:
+	// NapiNPProtocol_HandleClientJoin @0x62b750 — NVS/PN/PG/PV1 + HK == host_key]
+	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return; // host not started
+	if (classify_session_protocol(auth.pn) != SessionProtocolKind::JointOperations) return; // not JO
+	// HK echo: the joiner must echo the host key it learned in ServerHello.hk. Checked only when the
+	// host has a key set (a deterministic 0 seed means "unchecked", matching P1's pass-in startup).
+	if (ctx.np_protocol.host_key != 0 && auth.hk != ctx.np_protocol.host_key) return; // wrong host key
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
 	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
@@ -282,7 +298,16 @@ void configure_session_runtime(NapiNPServerCtx &ctx, GameServerRuntimeConfig con
 		ctx.game_runtime->configure(std::move(config));
 	}
 	ctx.game_runtime->start();
-	ctx.np_protocol.connection_list.clear(); // [orig: HostSessionAccept::configure clears peers_]
+	// [orig: HostSessionAccept::configure clears peers_] — peers_ held ONLY remote joiners (the
+	// host's own client lived elsewhere), so the faithful translation drops the server-side (type-1)
+	// remote-joiner nodes and PRESERVES the host's own type-2 loopback client that P1's
+	// create_session registered (else the canonical bring-up create_session(local_client) ->
+	// configure_session_runtime would silently delete it).
+	auto &list = ctx.np_protocol.connection_list;
+	for (auto it = list.begin(); it != list.end();) {
+		if (it->type == 1) it = list.erase(it);
+		else ++it;
+	}
 }
 
 HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,

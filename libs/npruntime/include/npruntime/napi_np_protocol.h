@@ -94,8 +94,14 @@ struct TickOut {
 };
 
 // Construct + configure + start the ctx's SESSION-leg spawn-gate runtime (the old
-// HostSessionAccept(config) ctor + start()), and clear connection_list (the old configure()).
-// Must be called before the first datagram. [orig: GameServerRuntime ownership in HostSessionAccept]
+// HostSessionAccept(config) ctor + start()), and drop the server-side (type-1) remote-joiner
+// connections — PRESERVING the host's own type-2 loopback (the faithful translation of
+// HostSessionAccept::configure's peers_.clear(), which only held remote joiners).
+//
+// Canonical listen-host bring-up (P0 -> P1 -> P2): set_connection_mode -> set_transport_mode ->
+// create_session(..., local_client) [P1: host_running=1, registers the loopback] ->
+// configure_session_runtime(runtime_config) [P2: builds the runtime, keeps the loopback]. The live
+// handshake legs reject until host_running == 1, so this bring-up must run before any datagram.
 void configure_session_runtime(NapiNPServerCtx &ctx, GameServerRuntimeConfig config = {});
 
 // Decode + dispatch one raw inbound datagram from `peer` (the bytes off the socket, envelope+NWU

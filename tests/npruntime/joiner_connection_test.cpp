@@ -19,6 +19,8 @@
 #include <npruntime/joiner_connection.h>
 #include <npruntime/napi_np_protocol.h>
 
+#include "host_test_setup.h"
+
 #include <novaworld/ingame_decode.h>
 #include <novaworld/ingame_encode.h>
 
@@ -92,7 +94,10 @@ bool run() {
 	const std::string kName = "JoinerOne";
 
 	np::NapiNPServerCtx ctx;
-	np::configure_session_runtime(ctx);
+	// Stand the host up through the real P0->P1->P2 lifecycle (host_running=1). The host advertises
+	// this key in ServerHello.hk; the real JoinerConnection echoes it in its ClientAuth, so the join
+	// HK gate passes.
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless, 0x0FE0E112u);
 	np::JoinerConnection joiner(ClientSession::Config::jointoperations(), kName);
 
 	// The host's live sim World — where the joiner's entity lives and where its C2S 0x0C uplink is
