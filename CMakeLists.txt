@@ -91,6 +91,11 @@ add_subdirectory(libs/bms)
 # Godot client GDExtension and the netsim tests, not the FFI shared lib.
 add_subdirectory(libs/netsim)
 
+# npruntime — the IDA-faithful in-match NAPI NP runtime (the named server/client
+# state machines + frame loop) built on the netsim seam. Godot-free and socket-free;
+# the owner (apps/nw_server, the Godot binding) pumps bytes through ISessionTransport.
+add_subdirectory(libs/npruntime)
+
 # Shared app utilities (UDP sockets, pcap writer) used by the standalone
 # servers and the loopback tests.
 add_subdirectory(apps/common)

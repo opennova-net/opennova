@@ -1351,3 +1351,10 @@ add_test(NAME netsim_build_player_uplink COMMAND netsim_build_player_uplink_test
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
 target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_netsim)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)
+
+# npruntime tests — the IDA-faithful in-match NAPI NP runtime (the named server/client
+# state machines + frame loop). Server-first (the plan's P0..P8).
+# P0/P1: the in-process listen-server bring-up state writes (§5.0).
+add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
+target_link_libraries(npruntime_server_session_test PRIVATE opennova_npruntime)
+add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
