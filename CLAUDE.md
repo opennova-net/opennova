@@ -55,7 +55,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `OPENNOVA_JO_DIR` (ctest install sweeps), `OPENNOVA_MISSION_CORPUS` (.bms corpus),
   `OPENNOVA_JO_ASSETS` (pytest DCC parity), `NOVA_RESOURCE_DIR` (screenshot capture),
   `JO_ASSETS_DIR` (perf probes), `NW_PROFILE_SPH_DIR` (folder with `host.sph`/`client.sph`
-  `/profile` recordings for the `nw_serverlog_decode` net witness).
+  `/profile` recordings for the `nw_serverlog_decode` net witness), and packet-capture
+  witnesses such as `NW_INGAME_HEXCAP`, `NW_DVXI5_PCAP`, `NW_DVXI3_PCAP`,
+  `NW_DVXC1_PCAP`, `NW_PROBE3AGAIN_PCAP`, `NW_PROBE3AGAIN_HOST_SPH`, and
+  `NW_WHITENOISE_PCAP`.
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/python, not PowerShell.
 
@@ -104,6 +107,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Deeper docs
 
+- [.agents/README.md](.agents/README.md) — agent runbooks for networking work:
+  architecture guardrails, retail interop, IDA witness rules, debugging, and task templates.
 - [docs/README.md](docs/README.md) — documentation index: ADRs, RE records by domain.
 - [docs/engine-primer.md](docs/engine-primer.md) — what the original engine is: binaries
   and IDBs, engine-wide conventions, subsystem index, and how to research it. Read it

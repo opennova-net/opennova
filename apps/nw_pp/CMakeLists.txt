@@ -1,9 +1,10 @@
 # nw_pp — NovaWorld in-game packet pretty-printer.
 #
-# Sibling RE / sanity-check tool: takes a hexcap (the same format
-# `nw_ingame_histogram_test` and `nw_ingame_pool_records_test` consume) and
-# prints each inner protocol message in human-readable form, with full field
-# expansion for the tags whose §5.x field maps are landed.
+# Sibling RE / sanity-check tool: takes a pcap/pcapng, .sph server log, or
+# hexcap (the same format `nw_ingame_histogram_test` and
+# `nw_ingame_pool_records_test` consume) and prints each inner protocol message
+# in human-readable form, with full field expansion for the tags whose §5.x
+# field maps are landed.
 #
 # Reuses the same outer-decode pipeline (napi envelope + novacrypto NWU +
 # novaworld protocol) so the bytes shown are exactly what the shipping libs

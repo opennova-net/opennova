@@ -107,8 +107,12 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 | HTTP / API | `8080/tcp` | `/api/*`, `/api/server-info`, the legacy `NW*.dll` routes |
 | web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
 
-Dev values come from `deploy/env/app.dev.env` (committed, non-secret): `ONNET_PUBLIC_HOST=127.0.0.1`,
-`admin`/`admin` basic auth, `ADMIN_API_TOKEN=dev-admin-token`. Sanity check and DB reset:
+Most dev values come from `deploy/env/app.dev.env` (committed, non-secret): `admin`/`admin`
+basic auth, `ADMIN_API_TOKEN=dev-admin-token`. The Docker dev override has
+machine-specific defaults for `ONNET_PUBLIC_HOST` and `ONNET_CLIENT_REFLECT_IP`; set them
+explicitly before retail host/join tests. Use `127.0.0.1` only when the retail client and
+server run on the same Windows host, and use the reachable LAN IP for second-machine tests.
+Sanity check and DB reset:
 
 ```bash
 curl http://127.0.0.1:8080/api/server-info
@@ -137,8 +141,11 @@ checkout from the repo root with no setup:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
 cmake --build build --config Release --target opennova_novaworld_server
 # run from the repo root so the default relative paths resolve:
-ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token ./build/apps/novaworld_server/opennova_novaworld_server
+ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token ./build/apps/novaworld_server/opennova-novaworld
 ```
+
+On Windows multi-config generators, the executable is under the selected config directory
+and has `.exe`, for example `build/apps/novaworld_server/Release/opennova-novaworld.exe`.
 
 Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`),
 `ONNET_GATE_UDP_PORT` (`7597`), `ONNET_NW_UDP_PORT` (`64206`), `ONNET_HTTP_PORT` (`8080`),

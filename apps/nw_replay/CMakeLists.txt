@@ -1,10 +1,10 @@
-# nw_replay — plays a captured NovaWorld session at N Godot game-client instances.
+# nw_replay — streams a representative captured NovaWorld S2C path to a spectator.
 #
-# Partitions the pcap by UDP port into roles (host + clients), assigns a role per
-# instance as it dials in, and paces each role's RAW captured datagrams to it.
-# The data plane is pure captured bytes (the Godot client decodes them like a real
-# server's stream); only role assignment is bespoke. Reuses apps/common's
-# pcap_reader + net_sockets and libs/novaworld's decode (for --validate).
+# Partitions the pcap by UDP port into roles (host + clients), can print/validate
+# the roles, and paces one representative host-to-client RAW captured stream to a
+# spectator. The data plane is pure captured bytes (the Godot client decodes them
+# like a real server's stream). Reuses apps/common's pcap_reader + net_sockets and
+# libs/novaworld's decode (for --validate).
 
 add_executable(nw_replay
     nw_replay.cpp

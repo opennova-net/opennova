@@ -98,14 +98,13 @@ add_subdirectory(apps/common)
 # Standalone novaworld server — gate UDP + NW UDP (+ HTTP when BUILD_NOVAWORLD_HTTP).
 add_subdirectory(apps/novaworld_server)
 
-# nw_pp — in-game packet pretty-printer for RE sanity-check (reads the
-# `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
+# nw_pp — in-game packet pretty-printer for RE sanity-check (reads pcap/pcapng,
+# .sph server logs, or `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
 add_subdirectory(apps/nw_pp)
 
-# nw_replay — plays a captured NovaWorld session at each Godot game-client
-# instance: partitions the pcap by UDP port into roles (host + clients), assigns
-# a role per instance as it dials in, and paces each role's raw datagrams to it.
-# The stand-in for "the network"; cut-over to real MP = point clients elsewhere.
+# nw_replay — streams a representative captured NovaWorld S2C path to a Godot
+# spectator endpoint. It can also print/validate the host/client role partition.
+# This is a debugging tool, not part of the runtime.
 add_subdirectory(apps/nw_replay)
 
 set(OPENNOVA_CORE_TARGETS
