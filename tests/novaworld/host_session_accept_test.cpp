@@ -292,7 +292,7 @@ bool run() {
 // F3 dcb-timing: the joiner's own organic-spawn 0x0C must be admitted during world
 // streaming (PeerEnteredWorldStreaming) STRICTLY BEFORE the game-start bundle
 // (PeerSpawned), so the retail client's load-time Player_InitPlayer @0x4e15f0 finds its
-// dcb in pool 0 (else Player_BuildNetIdLookupOrFatalError fatals). This proves the event
+// dcb in pool 0 (else Player_FatalPlayerDcbNotFound fatals). This proves the event
 // ORDERING in the accept component; the wire-level 0x0C-before-0x0F is a NovaSimulation /
 // GUT concern (the 0x0C is emitted above the libs layer, by announce_joiner_organic_spawn).
 bool run_joiner_0c_streams_before_game_start() {

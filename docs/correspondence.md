@@ -333,6 +333,21 @@ Held-weapon visibility on mount/attach (engine-research, 2026-06-24; world-wac-a
 | `Entity_GetBoneSlotType` | `0x434ed0` | user-point prefix → seat type (sitex=1/ctrlx=2/UseGun=3/drvrx=5); fixed emplacements = `UseGun` | decompile; world-wac-ai-re §13.4 / §9.1 | confirm-only |
 | `Entity_ProcessVehicleAttach` | `0x435aa0` | assigns `parentSlot` (seat type) on attach; net 0x26 path | decompile; world-wac-ai-re §13.4 | confirm-only |
 
+`Player_*` family naming + decomp grill (2026-06-26; net-re §5.41; read-only, adversarially re-derived):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `NapiNP_GetLocalConnectionId` (was `Player_MaybeGetLocalSessionId`) | `0x4c6d40` | returns local `NapiNPConnection.connection_id` (@+0x18) = ConnectionId/dcb (int); ret type fixed `NapiNPConnection*`→`unsigned int`; field `unk_18`→`connection_id` | disasm + 2 skeptic passes; §5.41 / D-NET-100 | confirm-only |
+| `Player_FindLocalPlayerEntity` | `0x4e0090` | pool-0 self-ID: `Flags&0x100 && ownerConnectionId(@0x78)==local ConnectionId`; sig fixed → `GamePlayerEntity*(void)` | disasm; §5.41 / §5.38b / D-NET-92 | confirm-only |
+| `Player_FatalPlayerDcbNotFound` (was `Player_BuildNetIdLookupOrFatalError`) | `0x4dff60` | `__noreturn` "Could not find player dcb" abort; reached from `Player_InitPlayer` on NULL self-ID | disasm; §5.41 / D-NET-102 | confirm-only |
+| `Player_InitPlayer` | `0x4e15f0` | local-player init; sig fixed → `int(int isRestore)` (3 phantom params dropped); resolves self-ID, loads weapon slots, sets camera offset | disasm; §5.41 / §5.2a | confirm-only |
+| `Server_PlayerAdd` (was `player_ServerAdd`) | `0x51cbc0` | server player-slot manager; writes `entity+0x78` (`ownerConnectionId`) `= joinEvent+76` | disasm; §5.41 (string "server_PlayerAdd()") | confirm-only |
+| `PlayerClass_InitEntity` (was `Player_InitLocalPlayer`) | `0x4b1060` | `"plyr"` entity-class init callback (sole xref = class table @0x813054) | disasm; §5.41 | confirm-only |
+| `Player_ToggleWeaponScope` | `0x4df0c0` | scope/ADS toggle: drives `g_scopeEngaged@0x82CE94` (mirrored → `g_weaponScopeActive@0xB76478`), `g_cameraFovDeg@0x26C6848`, `g_fpCameraInterp@0x82CE40` | disasm; §5.41 | confirm-only |
+| `Player_CanFireWeapon` | `0x5cf780` | fire gate: equipped-slot/seat/water/ADS checks; drives gunner zoom FOV | disasm; §5.41 | confirm-only |
+| `Player_GetClampedWeaponElevation` (was `…GetCurrentWeaponAmmoCapacity`) | `0x4dc6b0` | clamps `MountSlot.Elevation`→`WeaponDef.MaxElevation` (zoom level, not ammo) | disasm; §5.41 | confirm-only |
+| `Camera_ResetToLocalPlayer` (was `Player_ResetTerrainPosition`) | `0x4a3d30` | camera reset tracking the local player (not terrain) | disasm; §5.41 | confirm-only |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

@@ -105,7 +105,7 @@ world::EntityHandle NetSystem::admit_peer(world::World &w, std::size_t conn_inde
 	// A remote peer's entity is NOT the host's own player: spawn_remote_player runs the same
 	// faithful §5.2b sequence but leaves inf.is_local_player false and does NOT republish
 	// World::cached.local_player — so apply_player_intent accepts (snaps) it and the motor
-	// skips it once net-snapped. [orig: player_ServerAdd @0x51cbc0 registers a joined player's
+	// skips it once net-snapped. [orig: Server_PlayerAdd @0x51cbc0 registers a joined player's
 	// entity without assigning g_local_player_entity.]
 	const world::EntityHandle h = world::spawn_remote_player(w, spawn);
 	if (h.valid()) connections_[conn_index].owned_entity = h;

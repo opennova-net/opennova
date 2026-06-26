@@ -187,6 +187,7 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 		if (bom != 0x1A2B3C4Du) return false; // big-endian pcapng unsupported
 		uint32_t cur_linktype = LINKTYPE_ETHERNET;
 		std::vector<uint64_t> if_mult; // per-interface ns-per-tick (IDB order)
+		std::vector<uint32_t> if_linktype; // per-interface linktype (IDB order)
 		size_t off = 0;
 		while (off + 8 <= len) {
 			const uint32_t btype = read_u32_le(data + off);
@@ -197,25 +198,27 @@ bool read_pcap_udp(const uint8_t *data, size_t len, std::vector<PcapDatagram> &o
 			if (btype == PCAPNG_BLOCK_IDB && body_len >= 8) {
 				cur_linktype = read_u32_le(body) & 0xFFFF;
 				if_mult.push_back(idb_ns_multiplier(body, body_len));
+				if_linktype.push_back(cur_linktype);
 			} else if (btype == PCAPNG_BLOCK_EPB && body_len >= 20) {
 				// EPB: interface_id(4) ts_high(4) ts_low(4) cap_len(4) pkt_len(4) data...
 				// Timestamp units come from that interface's IDB if_tsresol option.
 				const uint32_t iface = read_u32_le(body);
 				const uint64_t mult = iface < if_mult.size() ? if_mult[iface] : 1000ull;
+				const uint32_t lt = iface < if_linktype.size() ? if_linktype[iface] : cur_linktype;
 				const uint64_t ts = (uint64_t(read_u32_le(body + 4)) << 32) |
 				                    uint64_t(read_u32_le(body + 8));
 				const uint64_t ts_nanos = ts * mult;
 				const uint32_t cap_len = read_u32_le(body + 12);
 				if (20 + cap_len <= body_len) {
 					frame_index++;
-					extract_ipv4_udp(body + 20, cap_len, cur_linktype, frame_index,
+					extract_ipv4_udp(body + 20, cap_len, lt, frame_index,
 					                 ts_nanos, emit, fragments_dropped);
 				}
 			} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
 				const uint32_t pkt_len = read_u32_le(body);
 				if (4 + pkt_len <= body_len) {
 					frame_index++;
-					extract_ipv4_udp(body + 4, pkt_len, cur_linktype, frame_index, 0,
+					extract_ipv4_udp(body + 4, pkt_len, (if_linktype.empty() ? cur_linktype : if_linktype[0]), frame_index, 0,
 					                 emit, fragments_dropped);
 				}
 			}
@@ -294,6 +297,7 @@ bool stream_pcap_udp_file(const std::string &path,
 		uint32_t cur_linktype = LINKTYPE_ETHERNET;
 		std::vector<uint64_t> if_mult;
 		std::vector<uint8_t> block;
+		std::vector<uint32_t> if_linktype; // per-interface linktype (IDB order)
 		uint8_t bh[8];
 		while (f.read(reinterpret_cast<char *>(bh), 8)) {
 			const uint32_t btype = read_u32_le(bh);
@@ -307,23 +311,25 @@ bool stream_pcap_udp_file(const std::string &path,
 			if (btype == PCAPNG_BLOCK_IDB && body_len >= 8) {
 				cur_linktype = read_u32_le(body) & 0xFFFF;
 				if_mult.push_back(idb_ns_multiplier(body, body_len));
+				if_linktype.push_back(cur_linktype);
 			} else if (btype == PCAPNG_BLOCK_EPB && body_len >= 20) {
 				const uint32_t iface = read_u32_le(body);
 				const uint64_t mult = iface < if_mult.size() ? if_mult[iface] : 1000ull;
+				const uint32_t lt = iface < if_linktype.size() ? if_linktype[iface] : cur_linktype;
 				const uint64_t ts = (uint64_t(read_u32_le(body + 4)) << 32) |
 				                    uint64_t(read_u32_le(body + 8));
 				const uint64_t ts_nanos = ts * mult;
 				const uint32_t cap_len = read_u32_le(body + 12);
 				if (20 + cap_len <= body_len) {
 					++frame_index;
-					extract_ipv4_udp(body + 20, cap_len, cur_linktype, frame_index,
+					extract_ipv4_udp(body + 20, cap_len, lt, frame_index,
 					                 ts_nanos, emit, fragments_dropped);
 				}
 			} else if (btype == PCAPNG_BLOCK_SPB && body_len >= 4) {
 				const uint32_t pkt_len = read_u32_le(body);
 				if (4 + pkt_len <= body_len) {
 					++frame_index;
-					extract_ipv4_udp(body + 4, pkt_len, cur_linktype, frame_index, 0,
+					extract_ipv4_udp(body + 4, pkt_len, (if_linktype.empty() ? cur_linktype : if_linktype[0]), frame_index, 0,
 					                 emit, fragments_dropped);
 				}
 			}

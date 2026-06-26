@@ -261,7 +261,7 @@ std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) 
 		w.u8(rec.ai_state);
 		w.u8(rec.anim_slot);
 		w.u16(rec.net_id);
-		w.u8(rec.weapon_state);
+		w.u8(rec.player_class);
 		w.u8(rec.ai_action);
 		w.u8(rec.skip_byte);
 		w.u8(rec.unused_byte);

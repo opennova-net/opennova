@@ -408,7 +408,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 		rec.ai_state = c.u8();
 		rec.anim_slot = c.u8();
 		rec.net_id = c.u16();
-		rec.weapon_state = c.u8();
+		rec.player_class = c.u8();
 		rec.ai_action = c.u8();
 		rec.skip_byte = c.u8();   // discarded by the handler (@ 0x42e9f5)
 		rec.unused_byte = c.u8();

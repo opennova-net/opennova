@@ -43,7 +43,7 @@ EntityHandle spawn_player(World &world, const PlayerSpawn &spawn);
 // one). The peer is a full pool-0 0x14B9 entity the host SNAPs from the joiner's C2S 0x0C
 // uplinks (netsim EntityWireBridge::apply_player_intent) and the motor skips once the entity is
 // net-snapped. Pass a distinct net_id per joiner (the default 0xFFF0 is the host's own player).
-// [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> player_ServerAdd @0x51cbc0 registers a
+// [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0 registers a
 // joined player's entity without assigning g_local_player_entity; net-re §5.2a/§5.2b.]
 EntityHandle spawn_remote_player(World &world, const PlayerSpawn &spawn);
 

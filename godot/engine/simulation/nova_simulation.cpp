@@ -1386,7 +1386,7 @@ opennova::world::EntityHandle NovaSimulation::prestream_remote_peer(
 		// spawn_remote_player WITHOUT the owned_entity bind that NetSystem::admit_peer
 		// couples in — the entity exists in pool 0 (so the joiner's 0x0C can reference it
 		// + the client's pool-0 self-scan finds it) but the connection is not yet a 0x0A fan
-		// target. [orig: player_ServerAdd @0x51cbc0 registers a joined player's entity]
+		// target. [orig: Server_PlayerAdd @0x51cbc0 registers a joined player's entity]
 		opennova::world::PlayerSpawn spawn = spawn_from_pose(pose);
 		spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 		spawn.net_id = next_joiner_net_id_++; // distinct SSN per joiner (host is 0xFFF0)
@@ -1520,7 +1520,7 @@ void NovaSimulation::stream_world_state_to_peer(const opennova::PeerAddr &peer) 
 	// the GOLDEN retail join host_and_join_lan.pcapng carries the host player at eFlags=2 and the
 	// joiner at 3 (AI at 0); our .scratch/capture9 streamed the host player at eFlags=0 and the
 	// retail client flooded 0x0F for exactly that handle (0x0000) while the eFlags!=0 joiner did
-	// not. [orig: player_ServerAdd @0x51cbc0 copies conn->unk_18 → entity+0x78; LAN serve-and-play
+	// not. [orig: Server_PlayerAdd @0x51cbc0 copies conn->connection_id → entity+0x78; LAN serve-and-play
 	// host dcb = 2, the loopback client consumes 0/1.]
 	if (world_->cached.local_player.valid()) {
 		const uint16_t host_handle = static_cast<uint16_t>(world_->cached.local_player.packed);
@@ -1587,7 +1587,7 @@ void NovaSimulation::dispatch_host_accept_event(const opennova::PeerAddr &peer,
 			// left the host player at slot 0 streamed AFTER the bundle (.scratch/capture7-10) and
 			// the retail client flooded 0x0F for handle 0x0000 and disconnected. The joiner's own
 			// 0x0C must ALSO arrive before the client's Player_InitPlayer pool-0 self-scan
-			// (Player_FindLocalPlayerEntity @0x4e0090 -> Player_BuildNetIdLookupOrFatalError
+			// (Player_FindLocalPlayerEntity @0x4e0090 -> Player_FatalPlayerDcbNotFound
 			// @0x4dff60 = fatal "Could not find player dcb"). net-re §5.38c.
 			announce_joiner_organic_spawn(peer, ev);
 			stream_world_state_to_peer(peer);

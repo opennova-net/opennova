@@ -848,7 +848,7 @@ Entity_SpawnFromBMSRecord @ 0x40e9f0]` and `Entity_ResetToSpawnState @0x4b9610`.
 `ItemTypeIndex` +28, `itemDef` +32 (`ItemDef*`), `Flags` +36 (minimap/render + movement-gate bit 1),
 `Ssn` +0x2e, `graphicModel/huskModel/huskFinalModel` +0x30/+0x34/+0x38 (model-ptr triple copied from
 `ItemDef` — see the corrected `Entity_InitFromItemDef` table above; the 2026-06-23 `rtCounter0/1/2`
-reading was superseded once `ItemDef` was typed), `CharacterEntity` +0x3c, `aiRuntime` +104, `entityFlags` +0x78 (`[@0x42e864]`), `DcbId`
+reading was superseded once `ItemDef` was typed), `CharacterEntity` +0x3c, `aiRuntime` +104, `ownerConnectionId` +0x78 (`[@0x42e864]`; was `entityFlags`, D-NET-101 — the join dcb / self-match field), `DcbId`
 +0x7c, `commandGroup` +0x11c (u16), `Health` +0x11e, `Armor` +0x120 (`= ItemDef.armorMax`), `ammoCount`
 +0x122, `MoveOrder` +0x12C + analog axes +0x130..0x133 (`Player_PackInputStateToEntity` @0x4df450),
 `sectionMask` +0x134, `weaponType` +0x157 (`[@0x42ea4a]`), `NetId` +0x15c (u16, `[@0x42e9bc]`), `Team`
@@ -856,15 +856,17 @@ reading was superseded once `ItemDef` was typed), `CharacterEntity` +0x3c, `aiRu
 +0x1B0, `updateCallback/deathCallback` +0x1c4/+0x1c8 (copied from `ItemDef.updateCallback @0x158` /
 `deathCallback @0x138` by `Entity_InitFromItemDef @0x49e550`; `deathCallback` is the death/lifecycle
 handler invoked by `Entity_KillByNetId @0x43dbd0`), `subType` +0x214 (`[@0x42ea35]`), `refNum` +0x215 (`[@0x42ea20]`, see
-D-NET-94), `weaponByte` +0x21A, `scoreFlag` +0x270, `weaponState` +0x294 (`[@0x42e9d5]`), `Weapon`
+D-NET-94), `weaponByte` +0x21A, `scoreFlag` +0x270, `playerClass` +0x294 (`[@0x42e9d5]`; was `weaponState` — D-NET-103, the soldier CLASS 5-9, not a runtime weapon state), `Weapon`
 +0x298, `aiState` +0x2b4 (`[@0x42e991]`; also the `memset(entity,0,0x2B4)` base/extended-region
-boundary), `SpawnOrigin` +0x318 (set by `Entity_ResetToSpawnState`), `animSlot` +0x374 (`[@0x42e9a6]`).
+boundary), `SpawnOrigin` +0x318 (set by `Entity_ResetToSpawnState`), `animSlot` +0x374 (`[@0x42e9a6]`; the character-model / anim-set selector — BMS `AnimSlot` via `Entity_SpawnFromAnimSlotProperty`, the player's avatar via `Player_InitPlayer`, or the wire spawn; D-NET-103).
 
-**Three id fields stay distinct.** The 32-bit id the `Entity_*ByNetId` family matches across pools
+**Four id fields stay distinct.** The 32-bit id the `Entity_*ByNetId` family matches across pools
 0/1/2 is `DcbId` @+124 (BMS/DCB script id) `[orig: Entity_FindByNetId @0x4655b0 matches `+124`;
 Entity_KillByNetId @0x43dbd0 matches `+124` and clears `Health` @+286 then calls `Callback1` @+0x1c8]`
 — distinct from `NetId` @+0x15c (the streaming id from the spawn packet) and `Ssn` @+0x2e (the
-authority id, `Entity_GetNetIdIfAuthority @0x4e4010`).
+authority id, `Entity_GetNetIdIfAuthority @0x4e4010`). The FOURTH is `ownerConnectionId` @+0x78
+(was `entityFlags`) — the owner ConnectionId the joiner self-matches (D-NET-92/101); the "Could not find
+player dcb" abort keys on it, NOT on `DcbId@0x7C`.
 
 **Name corrections (this pass):**
 - **D-NET-93** — `Entity_SetNetId @0x43b8f0` is an auto-namer misnomer: it writes `Health` @+286, so it
@@ -2753,6 +2755,10 @@ Jointops.exe; behavioral, read-only (no IDB writes).
     alone is insufficient. Our `JoinerSession` name-match (`entity_name == player_name`) is a separate
     opennova-side decode convenience for the opennova↔opennova path; it does not reflect the retail client's
     self-ID path. `[orig: Player_FindLocalPlayerEntity @0x4e0090]`
+  - **Naming (2026-06-26, §5.41):** `entity+0x78` is now `GamePlayerEntity.ownerConnectionId` (was
+    `entityFlags`; D-NET-101); the local-id getter `sub_4C6D40` is now `NapiNP_GetLocalConnectionId`
+    returning `NapiNPConnection.connection_id` (D-NET-100); the NULL-abort `0x4dff60` is now
+    `Player_FatalPlayerDcbNotFound` (D-NET-102).
 - **`NapiNPClientMsg_0x00F` (WORLD-STATE-LOAD, §5.29) drives the post-load client burst when `!is_authority`.**
   It applies the spawn pos/yaw to the already-identified `g_local_player_entity` and clears the §5.6
   movement gate (`Flags & 1`); on a non-authority client it additionally caches the spawn at
@@ -3065,6 +3071,123 @@ Hardcoded to WPN_MP5SD until a weapon.def Godot binding resolves the equipped we
 per-weapon `pos`/`tpos` from a weapon.def binding; the `pos`→`tpos` ADS swap (entity `Flags & 2`); the
 small per-weapon `Bone.rot`; velocity lead + prone drop; the model-facing basis and the two small
 lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certain one).
+
+### 5.41 `Player_*` family — naming validation + decomp cleanup grill (2026-06-26)
+
+A full read-only grill of the **32 `Player_*` functions** (the local-player input / weapon / camera /
+net-identity cluster, `0x42a550`–`0x5cf780`) plus their player-subsystem neighbors. Method: per-function
+decompile / disasm / xref + struct-field witnessing, with every proposed rename adversarially re-derived
+from its address by two independent skeptic passes (read-only multi-agent refutation). Verdict:
+**MATCHING (read-only grill)** — the family is faithfully named after the corrections below; this is a
+naming/typing grill of original engine code, not a reimpl-equivalence claim. IDB names/types/comments
+were updated this session (log at the end).
+
+**Naming corrections (the misnomers the grill caught; each UPHELD by the adversarial pass):**
+
+| Addr | Old name | → New name | Why (witness) |
+|---|---|---|---|
+| `0x4c6d40` | `Player_MaybeGetLocalSessionId` | `NapiNP_GetLocalConnectionId` | returns `NapiNPConnection.connection_id` (@+0x18) — the ConnectionId/dcb, an int; return type was wrongly `NapiNPConnection*` (D-NET-100) |
+| `0x4dff60` | `Player_BuildNetIdLookupOrFatalError` | `Player_FatalPlayerDcbNotFound` | `__noreturn`; loop never matches, always `MessageBoxA("Could not find player dcb…")`+crash; the "lookup" tables are dead (D-NET-102) |
+| `0x4b1060` | `Player_InitLocalPlayer` | `PlayerClass_InitEntity` | sole xref = the `"plyr"` entity-class descriptor table @`0x813054`; inits the passed entity, not specifically "local" |
+| `0x4a3d30` | `Player_ResetTerrainPosition` | `Camera_ResetToLocalPlayer` | `Camera_ClearViewState` + `Camera_SetTrackedEntity(local)` + cam-height/offset globals; nothing terrain |
+| `0x4dc6b0` | `Player_GetCurrentWeaponAmmoCapacity` | `Player_GetClampedWeaponElevation` | reads/clamps `MountSlot.Elevation` → `WeaponDef.MaxElevation`; feeds the FOV zoom divisor; no ammo |
+| `0x4dcc80` | `Player_GetVehicleAutoAimRange` | `Player_IsEquippedWeaponScoped` | returns `g_weaponScopeActive` gated on `Def->Flags&1`; not a range |
+| `0x4dcd30` | `Player_IsGunnerInVehicle` | `Player_IsVehicleGunnerScoped` | returns `g_weaponScopeActive` gated on gunner seat (`Flags&2`, `Type!=7`); not a clean bool |
+| `0x51cbc0` | `player_ServerAdd` | `Server_PlayerAdd` | own string `"server_PlayerAdd():"`; server subsystem |
+| `0x59b280` | `sub_59B280` | `Radar_AddBlip` | bearing(atan2) + compass-edge marker + 128-slot blip array (pos/type/lifetime 62/color); `OnDamageReceived` uses it for damage direction |
+| `0x541690` | `sub_541690` | `WeaponOverlay_BuildTypeLookup` | memset 0x200; iterate 780 slots; index by slot-type byte +216; action-specific overlays (state 5-9) |
+
+**Signature corrections:** `Player_FindLocalPlayerEntity @0x4e0090` → `GamePlayerEntity* __cdecl(void)`
+(the decompiled `stream`/`playerData` params are spurious; returns the matched entity); `Player_InitPlayer
+@0x4e15f0` → `int __cdecl(int isRestore)` (3 phantom trailing params; the caller pushes a single `1`; the
+body uses only `isRestore`); `NapiNP_GetLocalConnectionId @0x4c6d40` → `unsigned int __thiscall(NapiNPServerCtx*)`.
+
+**Names VALIDATED correct (confirm-only, no change):** the equipped-slot getters
+`Player_IsVehicleHasAutoAim` / `…HasAttackCapability` / `IsDriverInVehicle` / `IsVehicleSeatHasFlag4` /
+`…Flag8` (all read `EquippedSlot->Def` capability bits — "Vehicle*" is contextual: the equipped slot is
+the held weapon for infantry, a seat when mounted; `Field0C&0x200` = alternate scope-camera, NOT provably
+"auto-aim"); the weapon-slot family `Select` / `Mount` / `Cycle` / `SwitchToWeaponByHandle` /
+`EquipWeaponByEntity` / `ToggleWeaponScope`; `AdjustWeaponZoomLevel` (scope zoom level, `MountSlot[1]+0x24`)
+vs `AdjustWeaponElevation` (`MountSlot.Elevation@0xC`) — distinct fields, both correct;
+`UpdateFirstPersonCamera`, `RenderFirstPersonViewModel`, `OnDamageReceived`, `StartRoundEndTransition`,
+`PackInputStateToEntity`, `CanFireWeapon`, `UpdatePerFrame`. The neighbor `calculate_kill_score @0x5407e0`
+is correctly named (sums entity-type score + weapon pass value); a recon claim that it was "only a
+slot-eligibility predicate" was REFUTED — it IS reused as an eligibility predicate by Cycle/Switch, but
+its identity is kill-scoring.
+
+**The weapon scope / ADS state machine (globals named this pass).** `g_scopeEngaged @0x82CE94` is the
+master scoped flag (set/cleared by `Player_ToggleWeaponScope`); `Player_UpdatePerFrame` mirrors it each
+frame into `g_weaponScopeActive @0xB76478` (`= g_scopeEngaged != 0`) once the scope-camera interp settles.
+`g_weaponScopeActive` is the effective flag read by `CanFireWeapon` + the equipped-slot getters + the
+unscope-on-move / leave-FP / round-reset paths; `g_scopeHipfire @0x82CE98` is the complement.
+`g_cameraFovDeg @0x26C6848` (16.16°, default `0x500000` = 80.0; scope recomputes `80.0 / elevation`) is
+the current camera FOV, env-interpolated (target `g_cameraFovDegTarget @0x26C684C`). `g_currentWeaponSlot
+@0xB76474` is the current equipped weapon-slot flat index (group×65 + offset into the 780-entry
+`weaponSlotArrayBase` pool). `g_inputFlags @0xB3B728` is the raw per-frame input bitfield
+(`Player_PackInputStateToEntity` packs it into `entity->MoveOrder@0x12C`, saves to `g_inputFlagsPrev`).
+
+**The local-player camera/view block `0x82CE40..0x82CEF8` — two `CNetPlayerInterp` instances (Phase 3).**
+`CNetPlayerInterp_Setup @0x4ddfd0` proves `0x82CE40` and `0x82CEA0` are `CNetPlayerInterp` (84 B:
+stepCount, per-step pos/angle velocity, current pos/angles, target pos/angles, `entitySlotPtr@0x4C`,
+`activeFlag@0x50`). Typed + named **`g_fpCameraInterp @0x82CE40`** (first-person / scope camera;
+`activeFlag != 0` gates scope-toggle/fire) and **`g_roundEndCameraInterp @0x82CEA0`** (round-end / death
+camera; `Player_StartRoundEndTransition` target = weapon bone, Z −1.0). This collapsed ~20 stray
+`dword_82CExx` globals into two named interp instances + the scope scalars above.
+
+**Divergence catalog (new IDs, stable).**
+- **D-NET-100** [naming, FIXED] `Player_MaybeGetLocalSessionId @0x4c6d40` → **`NapiNP_GetLocalConnectionId`**:
+  returns `NapiNPConnection.connection_id` (@+0x18, renamed from `unk_18`) — the local ConnectionId / join
+  "dcb" — as an `unsigned int`. The decompiled `NapiNPConnection*` return type was wrong (the value is an
+  int id; all 5 callers treat it as an integer, none derefs). The dcb chain now reads cleanly:
+  `Player_FindLocalPlayerEntity` stores it and compares `entity->ownerConnectionId == it`. `[orig:
+  NapiNP_GetLocalConnectionId @0x4c6d40]`
+- **D-NET-101** [naming, FIXED] `GamePlayerEntity.entityFlags @0x78` → **`ownerConnectionId`**: it is NOT
+  flags (the real flags are `Flags@0x24`). It holds the entity's owner ConnectionId — the join "dcb" — the
+  field `Player_FindLocalPlayerEntity @0x4e0090` self-matches against the local ConnectionId (D-NET-92),
+  written by `Server_PlayerAdd @0x51cbc0` (`entity+0x78 = joinEvent+76`, the same ConnectionId
+  `PlayerSession_InitFromProfile` stashes at `playerCtx+0x18`) and by the wire spawn handlers (`[orig:
+  NapiNPClientMsg_0x04F @0x4288bb / @0x4288cd]` writes +0x78 and +0x7C from consecutive independent wire
+  dwords). It is **distinct from `DcbId @0x7C`** (the BMS/.dcb-script id keyed by `Entity_*ByNetId`): the
+  "Could not find player dcb" abort searches `@0x78`, not `@0x7C`. So §5.2b's "three id fields" is really
+  FOUR — `ownerConnectionId@0x78` (join/self-match dcb = ConnectionId), `DcbId@0x7C` (BMS script id),
+  `NetId@0x15c` (streaming id), `Ssn@0x2e` (authority id). `[orig: Player_FindLocalPlayerEntity @0x4e0090]`
+- **D-NET-102** [naming, FIXED] `Player_BuildNetIdLookupOrFatalError @0x4dff60` →
+  **`Player_FatalPlayerDcbNotFound`**: `__noreturn`; the pool loop has no break-on-match and always falls
+  through to the "Could not find player dcb" MessageBox + crash; the two stack lookup tables it fills
+  (`entry+0x24`, `entry+0x78`) are never read. Reached from `Player_InitPlayer` when
+  `Player_FindLocalPlayerEntity` returns NULL. `[orig: Player_FatalPlayerDcbNotFound @0x4dff60]`
+- **D-NET-103** [naming, FIXED] `GamePlayerEntity.weaponState @0x294` → **`playerClass`** — the soldier
+  CLASS (5-9) from the char-select `g_charSelClass`; `Player_InitPlayer` copies the per-team
+  `g_charClassTeam1/2`; indexed by class in `WeaponOverlay_BuildTypeLookup` + `Entity_GetHealthClassification`
+  and gated `== 6` in `Player_AdjustWeaponElevation` — never a runtime weapon state (kong `weaponState`
+  was an auto-guess; NPCs get it from `Entity_SetHealthFromDifficultyByte`). Session globals renamed:
+  `dword_24D20E0` / `pool` → `g_charClassTeam1` / `g_charClassTeam2` and `byte_24D4DFE` / `…DFF` →
+  `g_avatarTeam1` / `g_avatarTeam2` (sourced in `apply_session_settings_to_globals`; team split {1,3} vs
+  {2,4}). **`animSlot @0x374` was investigated and KEPT** (an interim `avatarIndex` rename was REVERTED):
+  it is the general character-model / anim-set selector that `Entity_SpawnFromAnimSlotProperty @0x43c522`
+  (the BMS `AnimSlot` property), the player's avatar (`g_avatarTeam1/2` via `Player_InitPlayer`), and the
+  wire spawn all write — so the engine's own `animSlot` term is faithful and the avatar is only the
+  player's source. `PlayerSession_InitFromProfile`'s `weaponClassA/B` params are the avatar bytes (`avatarA/B`).
+  `[orig: Player_InitPlayer @0x4e15f0 / apply_session_settings_to_globals @0x551500 / Entity_SpawnFromAnimSlotProperty @0x43c522]`
+
+**IDB changes made during the session (2026-06-26).**
+- Functions renamed: `0x4a3d30 Camera_ResetToLocalPlayer`, `0x4dc6b0 Player_GetClampedWeaponElevation`,
+  `0x4c6d40 NapiNP_GetLocalConnectionId`, `0x4dff60 Player_FatalPlayerDcbNotFound`, `0x4b1060
+  PlayerClass_InitEntity`, `0x4dcc80 Player_IsEquippedWeaponScoped`, `0x4dcd30 Player_IsVehicleGunnerScoped`,
+  `0x51cbc0 Server_PlayerAdd`, `0x59b280 Radar_AddBlip`, `0x541690 WeaponOverlay_BuildTypeLookup`.
+- Signatures: `0x4e0090` `GamePlayerEntity*(void)`; `0x4e15f0` `int(int isRestore)`; `0x4c6d40`
+  `unsigned int(NapiNPServerCtx*)`.
+- Globals named/typed: `g_cameraFovDeg` + `g_cameraFovDegTarget` (`0x26C6848/4C`), `g_weaponScopeActive`
+  (`0xB76478`), `g_currentWeaponSlot` (`0xB76474`), `g_inputFlags` + `g_inputFlagsPrev` (`0xB3B728/2C`),
+  `g_scopeEngaged` + `g_scopeHipfire` (`0x82CE94/98`); `0x82CE40` + `0x82CEA0` typed `CNetPlayerInterp` →
+  `g_fpCameraInterp` / `g_roundEndCameraInterp`.
+- Struct members: `NapiNPConnection.unk_18` → `connection_id`; `GamePlayerEntity.entityFlags@0x78` →
+  `ownerConnectionId`.
+- Comments added at the net-identity, scope-state, camera-interp, and `calculate_kill_score` sites.
+- Follow-up (the `Player_InitPlayer` team-block dig, D-NET-103): struct `GamePlayerEntity.weaponState@0x294`
+  → `playerClass` (`animSlot@0x374` kept — an interim `avatarIndex` rename was reverted, D-NET-103); session globals `g_charClassTeam1/2` (`0x24D20E0/E4`,
+  was `dword_24D20E0`/`pool`) + `g_avatarTeam1/2` (`0x24D4DFE/DFF`); `Player_InitPlayer` local
+  `teamByte`→`avatarByte`; `PlayerSession_InitFromProfile` params `weaponClassA/B`→`avatarA/B`. Final `idb_save`.
 
 ## 6. Struct reference
 

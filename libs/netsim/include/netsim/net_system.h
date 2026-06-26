@@ -68,7 +68,7 @@ public:
 
 	// Spawn a joiner's owned pool-0 player entity (a REMOTE peer — NOT the host's own player)
 	// and bind it to connection `conn_index`. The reimpl of the host accepting a join and
-	// registering its entity [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> player_ServerAdd
+	// registering its entity [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd
 	// @0x51cbc0; §5.2a]. The real handshake (Increment C) calls this on reaching the Spawned
 	// phase. Returns the spawned handle (invalid if the index is out of range or pool 0 is full).
 	world::EntityHandle admit_peer(world::World &w, std::size_t conn_index,

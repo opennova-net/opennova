@@ -383,7 +383,7 @@ std::vector<uint8_t> build_tag0c_local_player_entity(const GameSessionConfig &cf
 	// This is the host/server's OWN slot-0 record; a dedicated server reserves
 	// dcb 0 (witnessed: "dedicatedserver" eFlags=0 in the retail capture). It was
 	// erroneously the ServerAuth MI (0x3CDE), which made this record claim a bogus
-	// dcb. [orig: NapiNPClientMsg_0x00C @0x42E730 field #4; player_ServerAdd
+	// dcb. [orig: NapiNPClientMsg_0x00C @0x42E730 field #4; Server_PlayerAdd
 	// @0x51cbc0 writes entity+0x78 = conn->unk_18]
 	append_u32_le(spawn, 0x00000000); // host/server dcb (0).
 	append_cstr(spawn, cfg.player_name);
@@ -513,7 +513,7 @@ void add_initial_sync_player_state(GameSessionDispatchResult &result,
 	// the client's per-frame itemDef match (NapiNPClientMsg_0x00A @0x4307c4: local_entity.itemDef
 	// .type_id != wire type_id) and it flooded C2S 0x0F resend-requests for handle 0x0000, then
 	// 0xC9-disconnected. WIRE-PROVEN: .scratch/capture8 (530x C2S 0x0F for handle 0x0000) vs the
-	// earlier WORKING capture (no DevUser record). [orig: player_ServerAdd @0x51cbc0 adds a joined
+	// earlier WORKING capture (no DevUser record). [orig: Server_PlayerAdd @0x51cbc0 adds a joined
 	// player AFTER the .bms load, one entity per pool-0 slot — there is no static placeholder.]
 	// Reverted: previously added tag=0x0D LOCAL_PLAYER_SPAWN here. Live
 	// 2026-04-25 test crashed JO_CLIENT at NapiNPClientMsg_0x00D + 0x730

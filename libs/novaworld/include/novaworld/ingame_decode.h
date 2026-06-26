@@ -271,9 +271,9 @@ struct OrganicSpawnRecord {
 
 	uint8_t  team = 0;           // entity+354 (Team 0x162) — BMS team 1=Blue/2=Red (D-NET-58/62)
 	uint8_t  ai_state = 0;       // entity+692 (0x2B4)
-	uint8_t  anim_slot = 0;      // entity+884 (0x374)
+	uint8_t  anim_slot = 0;      // entity+884 (0x374 = GamePlayerEntity.animSlot, the character-model/anim-set selector — BMS AnimSlot / avatar / wire; net-re §5.2b)
 	uint16_t net_id = 0;         // entity+348 (0x15C)
-	uint8_t  weapon_state = 0;   // entity+660 (0x294)
+	uint8_t  player_class = 0;   // entity+660 (0x294 = GamePlayerEntity.playerClass, the soldier class 5-9; net-re D-NET-103)
 	uint8_t  ai_action = 0;      // *(entity+104)+32 (AI sub-struct)
 	uint8_t  skip_byte = 0;      // cursor advance only; retail discards it
 	uint8_t  unused_byte = 0;    // entity+340 (0x154)

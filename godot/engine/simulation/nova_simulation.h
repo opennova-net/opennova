@@ -153,15 +153,15 @@ private:
 		bool world_streamed = false;    // the full pool 0/1/2/3 spawn batches streamed once (during load)
 		bool admitted = false;          // owned_entity bound + per-frame 0x0A flowing (in-match)
 		uint8_t player_slot = 0;        // retail player slot; host is slot 0, first remote is slot 1
-		uint32_t dcb_id = 0;           // host-assigned dcb id streamed as entityFlags (entity+0x78)
+		uint32_t dcb_id = 0;           // host-assigned dcb id streamed as ownerConnectionId (entity+0x78)
 	};
 	std::unordered_map<opennova::PeerAddr, RemotePeer, opennova::PeerAddrHash> remote_peers_;
 	uint32_t net_frame_counter_ = 0;   // monotonic now_tick fed to the handshake driver
 	uint16_t next_joiner_net_id_ = 0xFFF1; // joiner SSNs, distinct from the host's 0xFFF0
 	// The dcb id a retail client must find at its own pool-0 entity+0x78 to satisfy
-	// Player_FindLocalPlayerEntity (else Player_BuildNetIdLookupOrFatalError fatals). Retail
+	// Player_FindLocalPlayerEntity (else Player_FatalPlayerDcbNotFound fatals). Retail
 	// assigns the host 2 and the first remote joiner 3 (witnessed in host_and_join_lan.pcapng);
-	// mirror that. [orig: player_ServerAdd @0x51cbc0 writes entity+0x78 = joinEvent+76]
+	// mirror that. [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = joinEvent+76]
 	uint32_t next_joiner_dcb_id_ = 3;
 	// Top-of-frame: drain the socket, run each datagram through the accept
 	// component, admit spawned peers + route their in-match C2S. Before logic.
