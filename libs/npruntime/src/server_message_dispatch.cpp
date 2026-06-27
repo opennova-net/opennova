@@ -12,10 +12,12 @@ namespace opennova::np {
 namespace {
 
 // ---------------------------------------------------------------------------
-// Byte helpers (relocated verbatim from the retired game_session.cpp / replication_min.cpp). The reply
-// bodies below are captured-from-observation fixtures (net-re §5.45 / D-NET-127); the faithful per-body
-// serializers (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740, write_entity_packet
-// @0x506bb0, ...) are the deferred body-grill wave.
+// Byte helpers (relocated verbatim from the retired game_session.cpp / replication_min.cpp). The §5.1
+// identity bodies (0x7A PCID, 0x7B session info) are now FAITHFUL ports of the witnessed serializers
+// (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
+// 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializeWeaponOverlaySlotState @0x505e80 —
+// a flag-driven slot-state record, and 0x51 write_entity_packet @0x506bb0) carry approximations
+// pending slot-state modeling; the witnessed field maps are landed in net-re §5.45 (D-NET-127).
 // ---------------------------------------------------------------------------
 
 void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {
@@ -90,24 +92,27 @@ std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 	return payload;
 }
 
-// tag=0x7A player name. [orig: NetPacket_WritePCID @0x5076e0 — deferred; D-NET-127 fixture.]
-std::vector<uint8_t> build_tag7a_player_name(const SessionReplyConfig &cfg) {
+// tag=0x7A: the player's PCID string (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
+// copies player+0x250]. Empty on a dev host -> a single NUL (golden frame 134 = len 1, body 00).
+std::vector<uint8_t> build_tag7a_pcid(const SessionReplyConfig &cfg) {
 	std::vector<uint8_t> payload;
-	append_cstr(payload, cfg.player_name);
+	append_cstr(payload, cfg.pcid);
 	return payload;
 }
 
-// tag=0x7B session summary. [orig: NapiNPMsg_0x7B_BuildPayload @0x507740 — deferred; D-NET-127.]
+// tag=0x7B session/player info. [orig: NapiNPMsg_0x7B_BuildPayload @0x507740] field order:
+// player_name, PCID, server_name, title(mission name), map_file, gametype(u32), empty_str, expansion.
+// (The PCID slot previously carried an invented "DEV-A02-0001" literal — D-NET-127; now sourced.)
 std::vector<uint8_t> build_tag7b_session_summary(const SessionReplyConfig &cfg) {
 	std::vector<uint8_t> payload;
-	append_cstr(payload, cfg.player_name);
-	append_cstr(payload, "DEV-A02-0001");
-	append_cstr(payload, cfg.server_name);
-	append_cstr(payload, cfg.mission_name);
-	append_cstr(payload, cfg.mission_file);
-	append_u32_le(payload, cfg.gametype);
-	payload.push_back(0);
-	append_cstr(payload, cfg.expansion);
+	append_cstr(payload, cfg.player_name); // [orig player_data+128]
+	append_cstr(payload, cfg.pcid);        // [orig entity+592] PCID
+	append_cstr(payload, cfg.server_name); // [orig g_server_name_str]
+	append_cstr(payload, cfg.mission_name);// [orig title: MissionText "title" / g_GameType title]
+	append_cstr(payload, cfg.mission_file);// [orig g_map_file_name]
+	append_u32_le(payload, cfg.gametype);  // [orig g_GameType]
+	payload.push_back(0);                  // [orig g_empty_str] empty C string
+	append_cstr(payload, cfg.expansion);   // [orig g_ExpansionName]
 	return payload;
 }
 
@@ -298,7 +303,7 @@ void emit_post_handshake_burst(const SessionReplyConfig &cfg, std::vector<Protoc
 	out.push_back(make_protocol_message(0x00, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x00, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}));
-	out.push_back(make_protocol_message(0x7A, build_tag7a_player_name(cfg)));
+	out.push_back(make_protocol_message(0x7A, build_tag7a_pcid(cfg)));
 	out.push_back(make_protocol_message(0x7B, build_tag7b_session_summary(cfg)));
 	out.push_back(make_protocol_message(0x03, {0x01, 0x01, 0x00, 0x01, 0x00}));
 	out.push_back(make_protocol_message(0x05, {0x01}));

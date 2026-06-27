@@ -35,6 +35,8 @@ struct SessionReplyConfig {
 	std::string mission_file = "ASH_I5A.BMS";
 	std::string expansion = "jox01";
 	std::string player_name = "DevUser";
+	std::string pcid;             // [orig player+0x250] the player's PCID string (0x7A body /
+	                              // 0x7B field 2). Empty on a dev host -> the 0x7A body is a single NUL.
 	uint32_t gametype = 0x00010010u;
 	uint32_t mpattrib = 14854u;
 	uint32_t spawn_x = 0xfe56f854u;
