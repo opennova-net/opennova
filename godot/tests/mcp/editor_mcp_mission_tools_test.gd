@@ -405,32 +405,6 @@ func test_analyze_mounts_reports_static_prediction_from_shared_runtime_rules() -
 	assert_eq(int(by_path.structured["total"]), 1, "path mode re-parses a BMS without opening it")
 
 
-func test_sim_control_locks_editing_and_steps() -> void:
-	var idle: McpToolResult = await _call("get_sim_state")
-	assert_false(bool(idle.structured["active"]))
-	# No AI entities -> play reports an actionable failure.
-	var no_ai: McpToolResult = await _call("sim_control", { "action": "play" })
-	assert_true(no_ai.is_error)
-	# Give it an AI organic directly (the gizmo test's pattern) and play.
-	controller.get_mission().add_entity(NovaMissionData.KIND_ORGANIC, 0, Vector3(10, 0, 0), Vector3.ZERO)
-	controller._rebake_objects()
-	var played: McpToolResult = await _call("sim_control", { "action": "play" })
-	assert_false(played.is_error, str(played.content))
-	assert_true(bool(played.structured["simulating"]))
-	var locked: McpToolResult = await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
-	assert_true(locked.is_error, "the running sim rejects editing tools")
-	assert_true(String(locked.content[0]["text"]).contains("sim_control"))
-	var before_tick := int((await _call("get_sim_state")).structured["tick"])
-	var stepped: McpToolResult = await _call("sim_control", { "action": "step", "steps": 5 })
-	assert_false(stepped.is_error)
-	assert_gt(int(stepped.structured["tick"]), before_tick, "stepping advances the logic tick")
-	var live: McpToolResult = await _call("get_sim_state", { "entity": 0 })
-	assert_true(bool(live.structured["active"]))
-	assert_true(live.structured.has("entity"))
-	var stopped: McpToolResult = await _call("sim_control", { "action": "stop" })
-	assert_false(bool(stopped.structured["simulating"]))
-	var unlocked: McpToolResult = await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
-	assert_false(unlocked.is_error, "stop unlocks editing")
 
 
 func test_set_camera_frame_point_and_entity() -> void:
@@ -442,3 +416,7 @@ func test_set_camera_frame_point_and_entity() -> void:
 	assert_false(entity.is_error)
 	var modeless: McpToolResult = await _call("set_camera", {})
 	assert_true(modeless.is_error)
+
+
+# (P7: test_sim_control_locks_editing_and_steps deleted — editor MCP sim control is de-scoped under
+#  the listen-server preview unification.)

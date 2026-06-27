@@ -103,13 +103,6 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	sim.free()
 
 
-func test_listen_server_off_uses_ai_pool_present() -> void:
-	# Default (no listen server): get_present_snapshot() is the direct AI-pool path, one
-	# record per sim entity — unchanged from before the net seam.
-	var sim := NovaSimulation.new()
-	sim.build_demo_mission()
-	assert_false(sim.is_listen_server(), "listen server off by default")
-	var snap: PackedFloat32Array = sim.get_present_snapshot()
-	assert_eq(snap.size(), sim.get_entity_count() * sim.get_present_stride(),
-		"AI-pool present: one record per sim entity")
-	sim.free()
+# (P7: test_listen_server_off_uses_ai_pool_present deleted — the no-net AI-pool present is retired;
+#  the present is always the listen-server ClientState now.)
+

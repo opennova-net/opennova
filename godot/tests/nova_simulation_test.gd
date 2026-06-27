@@ -91,9 +91,8 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
 	assert_almost_eq(sim.get_entity_yaw_deg(0), 45.0, 0.01,
 		"non-gunner mounted seats carry their local yaw offset")
-	var snap := sim.get_present_snapshot()
-	var stride := sim.get_present_stride()
-	assert_eq(int(snap[NovaSimulation.PF_ANIM_STATE]), 100, "mounted ctrlx24 infantry renders anim_sit_24")
+	# The mounted anim state (100 = anim_sit_24) is asserted via the debug card below; the present
+	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
 	var card: Dictionary = sim.get_entity_debug(0)
 	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
 	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
@@ -112,7 +111,6 @@ func test_item_seat_specs_mount_command_125_spawn() -> void:
 	assert_eq(int((target_seats[1] as Dictionary)["pose_index"]), 24)
 	assert_eq(int(card["anim_state"]), 100)
 	assert_eq(String(card["anim_key"]), "anim_sit_24")
-	assert_eq(stride, NovaSimulation.PF_STRIDE)
 	sim.free()
 
 
@@ -168,9 +166,8 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 		}
 	])
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
-	var snap := sim.get_present_snapshot()
-	assert_eq(int(snap[NovaSimulation.PF_ANIM_STATE]), 67,
-		"UseGun falls back to base anim_emplaced when the emplaced variant clip is unavailable")
+	# The mounted anim state (67 = anim_emplaced) is asserted via the debug card below; the present
+	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
 	var card: Dictionary = sim.get_entity_debug(0)
 	assert_true(bool(card["mounted"]), "debug card marks UseGun occupant mounted")
 	assert_eq(int(card["mount_type"]), 3, "seat type is UseGun/gunner")
@@ -180,53 +177,9 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	sim.free()
 
 
-func test_present_snapshot_shape_and_stride() -> void:
-	# ONE batched present snapshot replaces ~10 Variant-boxed scalar getter calls per entity in the
-	# per-tick present loop. Its length must be count * stride, and the bound stride must match the
-	# PF_STRIDE layout constant the GDScript present pass mirrors.
-	var sim := NovaSimulation.new()
-	sim.build_demo_mission()
-	var stride: int = sim.get_present_stride()
-	assert_eq(stride, NovaSimulation.PF_STRIDE, "bound stride == PF_STRIDE layout constant")
-	var snap: PackedFloat32Array = sim.get_present_snapshot()
-	assert_eq(snap.size(), sim.get_entity_count() * stride, "snapshot is count * stride floats")
-	sim.free()
+# (P7: the 3 no-net AI-pool present-snapshot tests were deleted — the present is now the listen-
+#  server ClientState, covered by nova_listen_server_test; the editor no-net preview is retired.)
 
-func test_present_snapshot_matches_scalar_getters() -> void:
-	# The batched snapshot must carry exactly what the scalar getters report (it's the same source),
-	# so the present pass and any scalar consumer agree. Checked at spawn (pre-tick).
-	var sim := NovaSimulation.new()
-	sim.build_demo_mission()
-	var snap: PackedFloat32Array = sim.get_present_snapshot()
-	var stride: int = sim.get_present_stride()
-	for i in range(sim.get_entity_count()):
-		var base := i * stride
-		var pos: Vector3 = sim.get_entity_position(i)
-		assert_almost_eq(snap[base + NovaSimulation.PF_POS_X], pos.x, 0.001, "pos.x matches")
-		assert_almost_eq(snap[base + NovaSimulation.PF_POS_Y], pos.y, 0.001, "pos.y matches")
-		assert_almost_eq(snap[base + NovaSimulation.PF_POS_Z], pos.z, 0.001, "pos.z matches")
-		assert_almost_eq(snap[base + NovaSimulation.PF_YAW_DEG], sim.get_entity_yaw_deg(i), 0.01, "yaw_deg matches")
-		assert_eq(int(snap[base + NovaSimulation.PF_BMS_ID]), sim.get_entity_bms_id(i), "bms_id matches")
-		assert_eq(int(snap[base + NovaSimulation.PF_KIND]), sim.get_entity_kind(i), "kind matches")
-		assert_eq(int(snap[base + NovaSimulation.PF_NET_ID]), sim.get_entity_net_id(i), "net_id matches")
-		assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "spawned entity is alive")
-	sim.free()
-
-
-func test_present_snapshot_carries_infantry_anim_state_and_phase() -> void:
-	var sim := NovaSimulation.new()
-	sim.build_demo_mission()
-	var snap: PackedFloat32Array = sim.get_present_snapshot()
-	var stride: int = sim.get_present_stride()
-	assert_eq(stride, NovaSimulation.PF_STRIDE, "bound stride includes the anim fields")
-	assert_lt(NovaSimulation.PF_ANIM_STATE, NovaSimulation.PF_STRIDE, "anim state is inside the record")
-	assert_lt(NovaSimulation.PF_ANIM_PHASE_TICKS, NovaSimulation.PF_STRIDE, "anim phase is inside the record")
-	assert_false(snap.is_empty(), "demo mission has present records")
-	var base := 0
-	assert_eq(int(snap[base + NovaSimulation.PF_ANIM_STATE]), 43, "demo infantry starts in IDA idle state")
-	assert_gte(int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS]), 0, "clip phase is exported as ticks")
-	assert_eq(NovaSimulation.infantry_anim_key(43), "anim_idle", "state id resolves to the .adm clip key")
-	sim.free()
 
 
 func test_transport_play_flag() -> void:

@@ -1395,71 +1395,16 @@ bool NovaSimulation::get_entity_hidden(int p_index) const {
 
 PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 	const uint64_t start_us = perf_now_us();
-	// ADR 0011 Decision 1: under the listen server the present pass reads the state the
-	// LOCAL CLIENT decoded off the wire, not the authoritative sim directly — so SP
-	// renders exactly what a networked peer would. A co-op JOINER takes the same path
-	// (it IS a client): it renders remote entities wire-direct. Off (the editor/preview
-	// default), the direct AI-pool path below is unchanged.
-	if ((listen_server_ || joiner_) && runtime_) {
-		PackedFloat32Array out = present_snapshot_from_client_view();
-		last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
-		last_present_snapshot_us_ = perf_now_us() - start_us;
-		return out;
-	}
+	// P7 (ADR 0011 Decision 1): every play path is the in-process listen server — the present pass
+	// reads the state the LOCAL CLIENT decoded off the wire (ClientState), not the authoritative sim
+	// directly. SP, a LAN host, and the editor preview all render exactly what a networked peer would;
+	// a joiner renders remote entities wire-direct. The old no-net AI-pool present is retired. Empty
+	// when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the AI pool for tooling.
 	PackedFloat32Array out;
-	if (!ai_ || !world_) {
-		last_present_entity_count_ = 0;
-		last_present_snapshot_us_ = perf_now_us() - start_us;
-		return out;
+	if (runtime_) {
+		out = present_snapshot_from_client_view();
 	}
-	const int count = ai_->count();
-	last_present_entity_count_ = count;
-	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
-	float *w = out.ptrw();
-	for (int i = 0; i < count; ++i) {
-		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
-		// Defaults for a missing/invalid entity: -1 ids, identity transform, inactive, dead/hidden.
-		r[PF_KIND] = -1.0f; r[PF_INDEX] = -1.0f; r[PF_BMS_ID] = 0.0f; r[PF_NET_ID] = 0.0f;
-		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
-		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
-		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
-		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 0.0f;
-		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
-
-		AiEntity *e = ai_->at(i);
-		if (!e) continue;
-		const opennova::world::Entity *ent = world_->registry.get(e->handle);
-		if (ent) {
-			r[PF_KIND] = static_cast<float>(ent->spawn_origin >> 24);        // [orig promote: (kind<<24)|index]
-			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
-			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
-			r[PF_ANIM_SLOT] = static_cast<float>(ent->anim_slot);
-			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
-			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
-			r[PF_TYPE_ID] = static_cast<float>(ent->item_id);
-		}
-		r[PF_WIRE_HANDLE] = static_cast<float>(e->handle.packed);
-		r[PF_NET_ID] = static_cast<float>(e->net_id);
-		// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
-		r[PF_POS_X] = static_cast<float>(e->pos[0] / kFixed16);
-		r[PF_POS_Y] = static_cast<float>(e->pos[2] / kFixed16);
-		r[PF_POS_Z] = static_cast<float>(-e->pos[1] / kFixed16);
-		// Yaw-only today: MISSION-space yaw degrees for the host basis (bms_to_godot_basis). The brain
-		// stores ENGINE-frame heading (90 - yaw); convert back so a moving unit (whose heading is the
-		// mover's atan2 bearing) faces its travel direction, not 90 deg off. Pitch/roll reserved (0).
-		r[PF_YAW_DEG] = static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(e->heading));
-		const int phase1 = e->brain.f[AiBrain::kPartAnimPhase0];
-		const int phase2 = e->brain.f[AiBrain::kPartAnimPhase0 + 1];
-		r[PF_PHASE1] = static_cast<float>(phase1);
-		r[PF_PHASE2] = static_cast<float>(phase2);
-		r[PF_ACTIVE1] = (e->brain.f[AiBrain::kPartAnimRate0] != 0 || phase1 != 0) ? 1.0f : 0.0f;
-		r[PF_ACTIVE2] = (e->brain.f[AiBrain::kPartAnimRate0 + 1] != 0 || phase2 != 0) ? 1.0f : 0.0f;
-		if (e->inf.active) {
-			r[PF_ANIM_STATE] = static_cast<float>(e->inf.anim_state);
-			r[PF_ANIM_PHASE_TICKS] = static_cast<float>(e->inf.clip_phase);
-		}
-	}
+	last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
 	last_present_snapshot_us_ = perf_now_us() - start_us;
 	return out;
 }

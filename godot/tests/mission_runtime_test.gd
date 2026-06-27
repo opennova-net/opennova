@@ -97,9 +97,11 @@ func test_setup_promotes_and_counts() -> void:
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	var count := int(rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_EVERY_PROCESS }))
-	assert_eq(count, 1, "one organic promoted to an AI entity")
+	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
+	# the world is the one authored organic + the host player.
+	assert_eq(count, 2, "one organic + the auto-spawned host player")
 	assert_not_null(rt.get_sim(), "sim created")
-	assert_eq(rt.entity_count(), 1)
+	assert_eq(rt.entity_count(), 2)
 
 
 func test_tick_presents_sim_position_onto_node() -> void:
@@ -117,16 +119,10 @@ func test_tick_presents_sim_position_onto_node() -> void:
 		"node left its authored position while playing")
 
 
-func test_stop_restores_authored_transform() -> void:
-	var authored := Transform3D(Basis(), Vector3(99, 99, 99))
-	var w := _make_world(authored)
-	var rt := MissionRuntime.new()
-	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, { "tick_mode": NovaSimulation.TICK_EVERY_PROCESS })
-	rt.step_once()  # moves the node off its authored transform
-	rt.stop()
-	assert_true((w.model as Node3D).transform.is_equal_approx(authored),
-		"Stop restored the authored node transform")
+# (P7: test_stop_restores_authored_transform deleted — the editor Stop's node-transform restore
+#  is de-scoped; Stop still rewinds the sim via NovaSimulation.restart(). The present is the
+#  listen-server ClientState, empty pre-tick, so the setup-time capture no longer applies.)
+
 
 
 func test_divided_mode_ticks_and_steps_like_the_game() -> void:
