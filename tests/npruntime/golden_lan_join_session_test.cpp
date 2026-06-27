@@ -11,17 +11,21 @@
 //   These are exactly the fields handle_client_hello / handle_client_join own.
 //
 // WHAT IS DEFERRED (documented, NOT faked green):
-//   Full-datagram byte-parity of 0x81/0x82 is NOT asserted. The remaining divergence lives entirely
-//   in the libs/novaworld session builders (build_server_hello / build_server_auth), NOT in the P2
-//   legs, and reproducing it faithfully needs IDA witness we don't yet have — so inventing the values
-//   would violate the faithful-port rule (ADR / no-passthrough discipline). Measured against this
-//   golden, a LAN host's replies differ from our builders in:
-//     0x81: ServerHello.CI is the host node index (retail=2), not the client echo; the game-server
-//           field block (is_game_server=1: SF/P1/P2/NP/MP) is present; identity strings AP/BDAT/PV3/SN
-//           are the retail build's, not our defaults; UT is a live uptime.
-//     0x82: MI is host-specific (retail=3, our default 0x113f); the CS control-field VALUES are the
-//           retail set (ours are onnet's [UNVERIFIED] values); a LAN host emits NO CU block (we append
-//           novaworld name/url/nwuid). => a libs/novaworld session-builder grill is the follow-up.
+//   Full-datagram byte-parity of 0x81/0x82 is NOT asserted. The remaining divergence lives in the
+//   libs/novaworld session builders (build_server_hello / build_server_auth), NOT the P2 legs. The
+//   builders are now GRILLED (2026-06-27, D-NET Wave 3): 0x81 = NapiNPProtocol_SendServerInfoPacket
+//   @0x6204b0 (FIXED — flat builder, SF unconditional, no PL; D-NET-16/18), 0x82 =
+//   CNapiNPConnection_SendSessionInit @0x620ef0 (witnessed; see its IDB comment). Measured against this
+//   golden, a LAN host's replies still differ from our builders in:
+//     0x81: ServerHello.CI is the host node index (retail=2), not the client echo; identity strings
+//           AP/BDAT/PV3/SN are the retail build's, not our defaults; UT is a live uptime.
+//     0x82: MI is host-specific (retail=3, our default 0x113f — seed-injected in the test); the CS
+//           control-field VALUES (per-channel timeout_ms) need a cross-check vs the witnessed
+//           cs_dir0/cs_dir1 init (ours = onnet engine_cs_fields, plausible but [UNVERIFIED]); a LAN
+//           host emits NO CU (we append novaworld name/url/nwuid — the witnessed fix is to gate CU on
+//           NovaWorld transport, since CU is sourced from the host's type-3 msg_out queue which a LAN
+//           host never populates). => the libs/novaworld 0x82 CU-gate + CS-value cross-check is the
+//           remaining follow-up (witness in hand).
 //   The full byte diff is printed below for the record.
 
 #include <npruntime/napi_np_protocol.h>

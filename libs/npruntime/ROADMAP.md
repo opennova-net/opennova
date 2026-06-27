@@ -111,6 +111,14 @@ suite unaffected.
 > *values* are the retail set (ours are onnet's `[UNVERIFIED]` values), and a LAN host emits **no CU**
 > block (we append novaworld name/url/nwuid). **Follow-up:** a `libs/novaworld` session-builder grill
 > (witness CI/MI/CS/game-server-block/LAN-CU-suppression in IDA) to reach full 0x81/0x82 byte-parity.
+>
+> **GRILLED 2026-06-27 (D-NET Wave 3):** 0x81 `NapiNPProtocol_SendServerInfoPacket @0x6204b0` —
+> **FIXED** (`server_hello_to_bytes` now the flat builder: SF unconditional, P1/P2/NP/MP nonzero-gated,
+> no PL fiction; D-NET-16/18). 0x82 `CNapiNPConnection_SendSessionInit @0x620ef0` — **witnessed**
+> (full field order + the CS x30 `{dir,idx,u32 timeout_ms}` shape + CU-from-type-3-msg-queue with
+> LAN-suppression; IDB comment @0x620ef0). Remaining 0x82 work (witness in hand): gate the novaworld CU
+> on NovaWorld transport (LAN queues none) + cross-check `engine_cs_fields` timeout_ms vs the cs-config
+> init. CI(host-node-index)/MI(host dcb) are seed-injected per-host, not builder bugs.
 
 > P2 follow-up fixes (grill 2026-06-26, docs/net §5.0a — D-NET-104/105/106): a code review of the
 > promotion found the join leg had only part of the witnessed `0x42` behavior. Now witnessed against
