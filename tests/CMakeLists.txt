@@ -1415,3 +1415,24 @@ target_link_libraries(npruntime_golden_gameplay_test
 target_compile_definitions(npruntime_golden_gameplay_test PRIVATE
     DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
 add_test(NAME npruntime_golden_gameplay COMMAND npruntime_golden_gameplay_test)
+
+# P5 — the headless CLIENT runtime (np::ClientRuntime / Client_ProcessNetworkFrame). Always-on
+# in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
+# plus the host-as-client D-NET-121/122 anchor/fold path. No capture needed.
+add_executable(npruntime_client_runtime_test npruntime/client_runtime_test.cpp)
+target_link_libraries(npruntime_client_runtime_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
+add_test(NAME npruntime_client_runtime COMMAND npruntime_client_runtime_test)
+
+# P5 Level-3 golden — drive the REAL client emission path (np::JoinerConnection::frame_c2s_uplink via
+# client_runtime) seeded from the gameplay capture and assert the emitted C2S 0x0C datagram is
+# byte-identical to the captured client datagram (emitted C2S == client-origin); plus fold the
+# capture's S2C 0x0A through NetClientView and cross-check decompressed positions against the
+# world-stream absolute spawn positions (an independent in-pcap oracle, not the same decoder). Default
+# resolves the gitignored golden under .scratch/golden; env-gated NW_GOLDEN_GAMEPLAY; skip-if-absent.
+add_executable(npruntime_golden_client_test npruntime/golden_client_test.cpp)
+target_link_libraries(npruntime_golden_client_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_app_common)
+target_compile_definitions(npruntime_golden_client_test PRIVATE
+    DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
+add_test(NAME npruntime_golden_client COMMAND npruntime_golden_client_test)

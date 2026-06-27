@@ -43,6 +43,7 @@ public:
 	void client_send(uint8_t tag, std::vector<uint8_t> body) override; // -> outbound (C2S)
 	bool host_recv(Datagram &out) override;   // <- inbound (C2S, host endpoint)
 	bool client_recv(Datagram &out) override; // <- inbound (S2C, client endpoint)
+	void deliver_c2s(uint8_t tag, std::vector<uint8_t> body) override; // inject into inbound FIFO
 
 	// --- owner byte boundary (the PacketPeerUDP pump / the harness) ---
 	// Stage a raw datagram that arrived on the wire; reframed into the inbound FIFO.

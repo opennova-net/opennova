@@ -92,6 +92,15 @@ public:
 	std::vector<uint8_t> frame_c2s_uplink(uint16_t handle_H, uint16_t type,
 	                                      const PlayerExtendedUplink &body);
 
+	// Deterministic golden replay: force the in-match connection state so frame_c2s_uplink
+	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the ROADMAP "Determinism" seed-inject).
+	// session_id = the captured 0x43 header session_id (= ServerAuth.sk); client_scrk = the captured
+	// client SCRK (its ClientAuth.scrk); next_seq/last_ack = the captured datagram's seq/ack;
+	// self_handle/self_type = its 0x0C sub-header. server_scrk lets the same runtime also decode the
+	// capture's S2C 0x83 stream. Skips the live handshake — for replay/parity only.
+	void seed_in_match(uint32_t session_id, std::string client_scrk, std::string server_scrk,
+	                   uint32_t next_seq, uint32_t last_ack, uint16_t self_handle, uint16_t self_type);
+
 	Phase phase() const { return phase_; }
 	bool in_match() const { return phase_ == Phase::InMatch; }
 	bool has_self_handle() const { return has_self_handle_; }

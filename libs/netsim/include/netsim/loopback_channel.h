@@ -21,6 +21,7 @@ public:
 	void client_send(uint8_t tag, std::vector<uint8_t> body) override;
 	bool host_recv(Datagram &out) override;   // pulls a C2S datagram (host side)
 	bool client_recv(Datagram &out) override; // pulls an S2C datagram (client side)
+	void deliver_c2s(uint8_t tag, std::vector<uint8_t> body) override; // inject into the C2S FIFO
 
 	void clear();
 	std::size_t s2c_pending() const { return s2c_.size(); }

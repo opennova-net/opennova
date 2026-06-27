@@ -30,31 +30,33 @@ NetClientView::NetClientView()
 NetClientView::NetClientView(std::function<EntityClass(uint16_t)> resolver)
 		: resolver_(std::move(resolver)) {}
 
+void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
+	switch (tag) {
+	case kTag0aFrameUpdate:
+		apply_frame_update(body);
+		break;
+	case 0x0C: // pool-0 organic spawn batch (§5.23)
+		apply_organic_spawn(body);
+		break;
+	case 0x0D: // pool-1 entity spawn batch (§5.11)
+		apply_pool_spawn(body);
+		break;
+	case 0x10: // pool-2 static entity batch (§5.9)
+		apply_static_batch(body);
+		break;
+	case 0x20: // pool-3 marker/waypoint sync batch (§5.12)
+		apply_pool3_batch(body);
+		break;
+	default:
+		// Game-start scalars / world-state-load and other non-entity tags.
+		++unknown_tags_;
+		break;
+	}
+}
+
 void NetClientView::pump(ISessionTransport &channel) {
 	Datagram dg;
-	while (channel.client_recv(dg)) {
-		switch (dg.tag) {
-		case kTag0aFrameUpdate:
-			apply_frame_update(dg.body);
-			break;
-		case 0x0C: // pool-0 organic spawn batch (§5.23)
-			apply_organic_spawn(dg.body);
-			break;
-		case 0x0D: // pool-1 entity spawn batch (§5.11)
-			apply_pool_spawn(dg.body);
-			break;
-		case 0x10: // pool-2 static entity batch (§5.9)
-			apply_static_batch(dg.body);
-			break;
-		case 0x20: // pool-3 marker/waypoint sync batch (§5.12)
-			apply_pool3_batch(dg.body);
-			break;
-		default:
-			// Game-start scalars / world-state-load and other non-entity tags.
-			++unknown_tags_;
-			break;
-		}
-	}
+	while (channel.client_recv(dg)) apply(dg.tag, dg.body);
 }
 
 namespace {

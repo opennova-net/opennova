@@ -121,6 +121,17 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 bool frame_in_match_s2c(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t inner_tag,
                         const std::vector<uint8_t> &inner_body, std::vector<uint8_t> &out_datagram);
 
+// P5 — the production PeerC2SInMatch consumer. Route each decoded in-match C2S 0x0C carried by a
+// PeerC2SInMatch `event` onto its owning connection's transport (ISessionTransport::deliver_c2s), so
+// the NEXT Server_TickUpdate's drain_connection_c2s read-applies it. This is the owner-boundary form
+// of the manual push tests/npruntime/joiner_connection_test does inline. Deliberately SEPARATE from
+// handle_client_session (which only SURFACES the event): the single C2S drain/apply is
+// Server_TickUpdate (D-NET-125), so the consumer stages into that drain rather than applying inline
+// (which would be a double-apply trap). A null/unbound owning transport or a non-0x0C inner message
+// is skipped. Returns the number of 0x0C uplinks staged. [D-NET-126; orig: NapiNPServerMsg_0x00C
+// @0x501c30 -> dispatch_entity_packet_callback @0x4D6A80; docs/net/novaworld-net-re.md §5.44]
+std::size_t apply_in_match_c2s(NapiNPServerCtx &ctx, const HostAcceptEvent &event);
+
 // True once `peer` has completed handshake + spawn (its connection is live).
 bool connection_spawned(const NapiNPServerCtx &ctx, const PeerAddr &peer);
 

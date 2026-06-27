@@ -41,6 +41,12 @@ void UdpSessionTransport::push_inbound(const std::vector<uint8_t> &raw) {
 	if (unframe(raw, dg)) inbound_.push_back(std::move(dg));
 }
 
+void UdpSessionTransport::deliver_c2s(uint8_t tag, std::vector<uint8_t> body) {
+	// Inject an already-decoded C2S {tag,body} straight onto the host-side inbound FIFO host_recv
+	// pops (the consumer already unwrapped the 0x43 SESSION envelope, so this skips unframe).
+	inbound_.push_back(Datagram{tag, std::move(body)});
+}
+
 bool UdpSessionTransport::pop_outbound(std::vector<uint8_t> &raw) {
 	if (outbound_.empty()) return false;
 	raw = std::move(outbound_.front());

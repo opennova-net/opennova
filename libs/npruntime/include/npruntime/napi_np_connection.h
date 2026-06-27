@@ -120,4 +120,16 @@ struct NapiNPConnection {
 	InitialStateBurst burst{};
 };
 
+// [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A
+// emit fan (it was an inline `conn.burst.spawned` in each). In-match = the §5.2a initial-state burst
+// has completed (game_state 9 -> burst.spawned). BOTH a remote joiner AND the host's OWN type-2
+// loopback latch this the SAME way: tick_connections drives every connection's §5.2a burst
+// (including the host loopback, D-NET-114) until completion, THEN this flips true. So the host's own
+// loopback is no longer starved of its per-frame 0x0A once Server_TickUpdate is the SP/host driver.
+// Its 0x0A anchors correctly (not the D-NET-121 dvxi5 fallback) because Server_BuildPlayerInfoAndAdd
+// binds conn.link.owned_entity to the host player when it spawns. [orig: the per-frame replicate fan
+// is is_in_session-gated inside Server_TickUpdate; the per-connection in-match selector is the burst
+// completion]
+inline bool is_in_match(const NapiNPConnection &conn) { return conn.burst.spawned; }
+
 } // namespace opennova::np

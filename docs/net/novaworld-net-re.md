@@ -477,17 +477,30 @@ This is what a reimplemented server must **handle**.
 
 ### Open questions
 
-- Magic `0x7C08C6` in every dispatch entry — guessed a build/version stamp, but `0x7C08C6` is
-  also the **address** of the global `font_name` (an empty/default C-string used widely as a
-  default arg; see §5.0). Re-examine whether the field is a pointer to that string rather than a
-  stamp.
-- `handler2` of `NapiNPMsgInfo` — always zero in observed entries; possibly the
-  `cb_server_3`/`cb_client_0` callback slots per the dispatcher decompile.
+- **RESOLVED (D-NET-118)** — Magic `0x7C08C6` in every dispatch entry is the **address of
+  `g_empty_str`** (the shared empty/default C-string, `[orig: g_empty_str @ 0x7C08C6]`, bytes
+  `00 00…`). Every *valid* `NapiNPMsgInfo`/`NapiNPOpcodeInfo` entry carries `&g_empty_str` in the
+  field; the terminator carries `0`. So it is a pointer initialized to the empty-string default,
+  NOT a build/version stamp, and the dispatcher's `magic != 0` test is a "non-null = valid entry"
+  check (plausibly a per-message label pointer that is empty for all shipped entries — struct
+  field retype to `const char *` left as a low-priority follow-up, value/use unchanged).
+- **CONFIRMED** — `handler2` of `NapiNPMsgInfo` is `0` across every entry of all three tables
+  (client/server/high-bit); only the high-bit entry H:0x02 carries a non-null `handler2`
+  (`nullsub_280 @ 0x61db90`, a no-op). Vestigial/unused for the gameplay tables.
 - High-table payload depth beyond `H:0x00` — registered entries and routing are witnessed
   (§4 high-table control messages), but `H:0x01..H:0x03` still have only purpose-level names.
-- Opcode handlers `0x6213B0`..`0x624340` mostly lack descriptive names.
-- msg_id values `0x86`/`0x87`/`0x88+` observed in the client-table tail; dispatch assignment
-  unclear (possibly dead entries).
+- **RESOLVED (D-NET-118)** — Opcode handlers `0x6213B0`..`0x624340` are all named: the full
+  `g_np_opcode_handlers @ 0x849D90` table (14 legs + sentinel) is 0x41 `HandleClientHello` /
+  0x42 `HandleClientJoin` / 0x43 `Nwu_HandleClientSession` / 0x44 `Nwu_HandleClientResendList` /
+  0x45 `Nwu_HandleClientPing` / 0x46 `Nwu_HandleClientGoodbye` / 0x47 `Nwu_HandleClientProbe` /
+  0x81 `Nwu_HandleServerHello` / 0x82 `NapiNP_HandleServerJoinResponse` / 0x83
+  `Nwu_HandleServerSession` / 0x84 `Nwu_HandleServerResendList` / 0x85 `Nwu_HandleServerPing` /
+  0x86 `Nwu_HandleServerGoodbye` / 0x87 `Nwu_HandleServerProbe`.
+- **RESOLVED (D-NET-118)** — the earlier "msg_id `0x86`/`0x87`/`0x88+` in the client-table tail"
+  was a conflation of *opcode* with *msg_id*: the S2C `g_np_msginfo_client` table tops out at
+  msg_id `0x83` (123 entries + sentinel) and the C2S `g_np_msginfo_server` at `0x51` (72 + sentinel);
+  `0x86`/`0x87` exist only as session *opcodes* (`Nwu_HandleServerGoodbye`/`Probe`, above), not
+  message ids. No dead client-table entries.
 - Phase B (full C2S decompile sweep): 0x47 / 0x48 / 0x06 / 0x21 / 0x0C-extended landed
   (§5.10, §5.16, §5.17, plus the 0x47/0x48 entries above) against the 3-player loopback
   pcap. Remaining C2S candidates without field maps yet: 0x22 / 0x23 / 0x28 / 0x29 (the
@@ -3520,6 +3533,9 @@ the emit step with no resolvable owned entity (the host's own loopback, or a pee
 anchors its 0x0A there, so a receiver decompresses every entity offset by the gap to the real local
 position. Today the only caller is the golden test (which binds an owned entity); revisit before a
 production driver fans to an owned-entity-less connection. `[orig: replication_min.h dvxi5 defaults]`
+**RESOLVED (P5, §5.44):** the host's own loopback binds `owned_entity` to the host player
+(`Server_BuildPlayerInfoAndAdd`), so it never anchors on the dvxi5 fallback; the fallback now bites only
+the no-owned-entity edge (a despawn mid-match), still deferred.
 
 **D-NET-122** [reimpl divergence, DOCUMENTED] **The 0x0A fan is gated on `burst.spawned`.** This narrows
 the legacy `NetSystem::emit_s2c`, which emits to every transport-bearing connection (its host loopback
@@ -3527,6 +3543,9 @@ has no burst field). When `Server_TickUpdate` replaces `NetSystem` as the host/S
 loopback whose `burst.spawned` never latches would be starved of its 0x0A (frozen local view). Revisit
 the in-match predicate (shared verbatim with the drain loop — a single `is_in_match(conn)` helper) at
 P5. `[orig: NapiNPServer_SendFiltered @0x4C87E0]`
+**RESOLVED (P5, §5.44):** the drain + emit loops now share the single `is_in_match(conn)` predicate, and
+the host loopback latches `burst.spawned` via its §5.2a burst completion (D-NET-114) like any joiner, so
+it gets its per-frame 0x0A.
 
 **D-NET-123** [reimpl deferral, DOCUMENTED] **`Server_TickUpdate` owns the logic tick.** It calls
 `world.run_logic_tick(true)` itself — the inverse of the legacy seam, where the C2S drain ran INSIDE
@@ -3547,6 +3566,106 @@ Nothing in code prevents a binding from both registering a `netsim::NetSystem` I
 and the other sees nothing, with no compile- or run-time signal. P7 folds the tables onto one transport
 and removes `ctx.net`; until then the guardrail is the header comment on `Server_TickUpdate`. `[orig:
 ADR 0011 single-owner connection table]`
+
+### 5.44 `Client_ProcessNetworkFrame` — the per-frame client net role (P5, 2026-06-27)
+
+The client counterpart of `Server_TickUpdate` (§5.42 / P4). Witnessed `[orig: Client_ProcessNetworkFrame
+@0x42c180]`, called by `[orig: Game_ProcessMainFrame @0x5263f0 @0x526692]` — **no args, NOT
+authority-gated** (it runs on every machine: the SP listen-server host-as-client AND a remote client),
+positioned **after `Input_ProcessFrame @0x52661d` and before `Server_TickUpdate @0x5266b6`**. The raw
+recv into the FIFO happens earlier in the frame via `[orig: CNapiNetwork_PumpManagerReceive @0x4c4d10
+@0x526528]`. Drives `libs/npruntime`'s `client_runtime.{h,cpp}` (`np::ClientRuntime`, P5).
+
+**Frame order (the witnessed structure):**
+1. `[orig: Player_UpdatePerFrame @0x42c18e]` (skipped when `dword_A87050`, the cinematic/pause flag).
+2. **recv pump** `[orig: CNapiNetwork_PumpClientProtocolRecv @0x42c228]` → `[orig: NapiNPProtocol_Pump
+   @0x62a650]` with **flags 26**, 250 ms — drains the recv FIFO and dispatches each S2C by opcode to the
+   per-tag `NapiNPClientMsg_*` handlers (e.g. the `0x0A` fold, §5.9).
+3. periodic housekeeping: `0x34` keepalive (~29760 ticks), `0x4C` anti-cheat (310 ticks,
+   `is_mp_session_peer`), `PlayerSlot` type/subtype sync (62 ticks), terrain colour ramps.
+4. **send block**, gated `if (np_connection)` and `if (!np_connection->send_holdoff_countdown)`:
+   - `[orig: Player_PackInputStateToEntity @0x42c3e9]` — writes raw input to `entity->pad7[12]`; runs
+     for **everyone, the host included** (the ADR-0012-R1 motor-from-raw-input path, §5.38).
+   - if `is_in_session && !is_authority && !dword_81474C && !g_spawn_success_gate`: a `0x2C` RTT
+     timestamp ping (`GetTickCount`, 62-tick holdoff via `dword_A860D8`) **and** the C2S `0x0C` uplink —
+     `[orig: Player_BuildTag0CInputBody @0x42a550]` (`sub_op = 0x0A` extended) → `[orig:
+     CNapiNetwork_QueueReliableMessage @0x4c4fa0]` `(0x0C, …)`.
+   - **flush** `[orig: CNapiNetwork_PumpClientProtocolSend @0x42c4bc]` → `NapiNPProtocol_Pump` with
+     **flags 738**, 250 ms.
+
+**The decisive gate — the `0x0C` uplink is `!is_authority`.** The SP listen-server host (mode 3 =
+host + client, §5.0) is `is_authority == 1`, so it **never uplinks its own player**: its player is a
+server-side entity driven by `Player_PackInputStateToEntity` + the motor under `Server_TickUpdate`
+(ADR 0011/0012). Only a non-authority client layers the `0x0C` pose uplink on top. So the frame
+invariant is **recv/fold first, then raw-input pack, then send-C2S, then flush** — and the reimpl
+`ClientRuntime` mirrors exactly that order.
+
+**Gate polarity (resolved).** `g_spawn_success_gate` (`dword_24C1928`) is **SET** on death/spectator
+(the per-frame `0x0A` `flags1 & 0x01`, §5.9) and at spawn-select (`0x1D`, §5.2), and **CLEARED on
+deploy** — so `!g_spawn_success_gate` means **deployed/alive**, and the `0x0C`/`0x2C` sends flow only
+while deployed. `dword_81474C` is the companion respawn/loading-wait latch (set by `[orig:
+Game_InitNewRound @0x422740]` and the `0x0F` world-state-load handler `[orig: NapiNPClientMsg_0x00F
+@0x42e200]`; cleared as the round comes up). `[orig: reads @0x42c3bb/0x42c40a/0x42c467 +
+0x42c402/0x42c45f/0x42c4a8]`
+
+**Inner-message framing (the `0x0C` byte format).** `QueueReliableMessage` drops its `flags` arg and
+calls `[orig: CNapiNPConnection_QueueMessage @0x628640]` → `[orig: NapiNPMessage_Create @0x627fc0]` with
+`msg_flags = 0`; the latter computes `len_field_size` = **3 for payloads 1..255** (the LEN8 inner-message
+flag `0x20`), 4 for >255 (LEN16), 2 for empty — and `msg_flags = 0` means **no SKIP1/SKIP2 reliability
+bytes** in the inner wire framing. So a 48-byte `0x0C` (5-byte sub-header + 43-byte extended body, §5.10)
+serializes as `[0x20][0x0C][48][payload]` — exactly what the reimpl's generic
+`make_protocol_message(0x0C, payload)` produces (§3 inner-message layout). This is the byte-witness that
+makes full client-emission parity achievable.
+
+**Reimpl shape (P5).** `np::ClientRuntime` composes the connect-leg state machine (`np::JoinerConnection`,
+P2: Idle → Hello → Auth → Driving spawn-gate burst → InMatch; the lobby GATE → VERIFY → READY → PLAY
+legs are the SEPARATE ADR-0010 `ClientSession` matchmaking flow, owned by the binding, NOT this runtime)
+with the S2C → `ClientState` fold (`netsim::NetClientView`). It is role-aware, mirroring the
+not-authority-gated original: **Joiner** (a remote client — drives the legs + per-frame folds S2C and
+emits the `0x0C`) and **HostClient** (the SP host's own loopback view — handshake-less, `is_authority`,
+recv-fold only, `0x0C` suppressed). The two framing layers are kept strictly separate (the P5 design
+review): a Joiner's traffic is whole NWU-framed datagrams (`JoinerConnection` does the `0x83`/SCRK decode
+and surfaces inner bodies, folded via the new public `netsim::NetClientView::apply(tag,body)`); a
+HostClient reads inner `{tag,body}` off the in-process loopback via `NetClientView::pump` (the ADR-0011
+§3 SP crypto bypass). The witnessed housekeeping (the `0x34`/`0x4C`/`0x2C`-RTT sends and the
+`send_holdoff_countdown` send-block gate) is **deferred-and-logged**, not silently dropped — it lands at
+P6 (real UDP / retail wire-compat); `Player_PackInputStateToEntity` (step 4a) is the host-side motor seam
+(ADR 0012 R1), not part of the headless client (which takes the already-built `0x0C` body as its
+per-frame input).
+
+**D-NET-126** [behavior, reimpl divergence FIXED] **The production `PeerC2SInMatch` consumer routes a
+joiner's C2S `0x0C` into the host drain.** `handle_client_session` only *surfaces* `PeerC2SInMatch`
+(P4 left an inline apply as a dead-code / double-apply trap, D-NET-125); P5 adds `np::apply_in_match_c2s`
+at the owner boundary, which `deliver_c2s`-injects each decoded in-match `0x0C` onto its owning
+connection's transport so the NEXT `Server_TickUpdate` `drain_connection_c2s` read-applies it (the single
+drain). A new `netsim::ISessionTransport::deliver_c2s(tag,body)` (impl on `LoopbackChannel` +
+`UdpSessionTransport`) is the uniform inbound-inject the consumer needs (a host endpoint's `client_send`
+stages OUTBOUND and never reaches `host_recv`). `[orig: NapiNPServerMsg_0x00C @0x501c30 →
+dispatch_entity_packet_callback @0x4d6a80]`
+
+**D-NET-121** and **D-NET-122 — RESOLVED (P5).** The two P4 deferrals about the host's own loopback are
+closed together. `Server_TickUpdate`'s C2S drain and S2C `0x0A` fan now both gate on the single
+`is_in_match(conn)` predicate (`napi_np_connection.h`; == `burst.spawned`) instead of an inline
+`burst.spawned` in each (the D-NET-122 ask). The host's own type-2 loopback latches `burst.spawned` the
+SAME way a remote joiner does — `tick_connections` drives its §5.2a initial-state burst to completion
+(D-NET-114) — so it is no longer starved of its per-frame `0x0A`. Its `0x0A` anchors to its
+`owned_entity` (the host player, bound by `Server_BuildPlayerInfoAndAdd @0x51d560`, §5.43), NOT the
+D-NET-121 dvxi5 `fallback_anchor` (which is reached only by an in-match connection with no resolvable
+owned entity — a deferred edge that no longer includes the host loopback). Verified by the host-as-client
+section of `npruntime_client_runtime` (anchor == host player position, explicitly `!=` the dvxi5
+fallback).
+
+**Evidence.** `npruntime_client_runtime` (always-on): the full in-process round-trip — `ClientRuntime`
+↔ the real np server legs ↔ `Server_TickUpdate` + `apply_in_match_c2s` + the `NetClientView` fold
+(handshake → spawn-gate burst → name-match → per-frame `0x0C` → drain/SNAP → `0x0A` → `ClientState`),
+plus the host-as-client D-NET-121/122 anchor path. `npruntime_golden_client` (env-gated
+`NW_GOLDEN_GAMEPLAY`, skip-clean): against `retail-gameplay-session.pcapng`, the real client emission
+path (`frame_c2s_uplink`) reproduces the captured `0x0C` **inner message byte-for-byte** (flags +
+sub-header + 43-B body), our framing re-frames the captured 9-message bundle into a **byte-identical**
+datagram (`0x43` header + SCRK + NWU/CRC), and the first S2C `0x0A` anchor lands **0.87 world units**
+from the nearest world-stream spawn (a non-circular cross-decoder oracle). No IDB renames this session
+(symbols already named); a summary witness comment was added at `Client_ProcessNetworkFrame @0x42c180`
+and `@0x42c482`.
 
 ## 6. Struct reference
 
@@ -4653,6 +4772,54 @@ network-context method family, 2026-06-27; IDB-only — no reimpl behaviour chan
   - **Globals named/typed:** `g_is_dedicated_server` (0xB5F4E4), `g_server_join_locked` (0xC94794), `g_local_net_address_str` (0x7CA298), `g_net_spawn_suspended` (0x24D1DE0, formerly `dword_24D1DE0`, the mission-loading spawn gate, §5.42).
   - Adversarially re-verified (independent pass): all renames/types re-checked against witnessing accesses; no duplicate types; `connection_mode`@0x5C flagged WEAK (writer `CGameSession_SetConnectionMode @0x4c49f0` confirmed, no in-family reader). [orig: CNapiNetwork_Init @ 0x4ca4a0 / CNapiNetwork_ClearState @ 0x4c8690 / CNapiNetwork_RandomizeTimeout @ 0x4c4d80 / CNapiNetwork_DisconnectActiveConnection @ 0x4c9140 / NapiNPProtocol_Pump @ 0x62a650 / CNapiNPConnection_PumpFlags @ 0x629780]
 
+NapiNP dispatch-surface + crypto IDB-hygiene grill (decomp cleanup, name validation, global
+typing across the whole `*napinp*` roster, 2026-06-27; IDB-only — no reimpl behaviour change):
+- **D-NET-118** [INFO, IDB] **The full `*napinp*` dispatch/message-table + crypto surface was
+  validated and its remaining naming errors fixed (Jointops.exe.kong.i64).** Roster: 356 functions;
+  a typed-prototype scan found **352/356 already clean** (the 4 "rough" — `DestroyEntityList`,
+  `NapiNPClientMsg_0x00C`, `NapiNPPlayer_Destroy`, `NapiNPManager_Shutdown` — are accurate
+  `__usercall`/register-arg Hex-Rays representations with named args, not dirty). The prior
+  D-NET-116/117 grills had already cleaned the connection/network-context families; this pass
+  audited the dispatch tables, the message handlers, the opcode legs and the crypto helpers.
+  - **All four dispatch tables cross-checked by reading the data and resolving every handler.**
+    `g_np_msginfo_client @ 0x82AE28` (123+sentinel) and `g_np_msginfo_server @ 0x82B5D8`
+    (72+sentinel): **every generic `NapiNP{Client,Server}Msg_0xNNN` suffix equals its wire
+    `msg_id` (hex) — zero mismatches.** `g_np_opcode_handlers @ 0x849D90` (14+sentinel) and
+    `g_np_msginfo_highbit @ 0x849E80` (4+sentinel, all `CNapiNPConnection_Handle*`) fully named.
+  - **Three genuine misnomers fixed** (each single-xref'd from the C2S table — bogus auto-applied
+    names, not shared utilities): `server_broadcast_entity_kill @ 0x515390` →
+    **`Server_BroadcastMedicRequest`** (anchored: the handler formats `GameText "Server"/"STRSRV_MEDREQ"`
+    and sends opcode 0x14 param 310 — it is the medic-request broadcast, matching D-NET-108 which the
+    IDB had drifted from; comment corrected from "kill message"); `Path_ReplaceExtension @ 0x500ec0`
+    → **`NapiNPServerMsg_0x03D`** (body is an authority-gated entity write `slot+352→entity+192`,
+    stores `dword_A87060`→`entity+97560`; role uncharacterized — `unknown`); `ErrorLog_Write @ 0x500e10`
+    → **`NapiNPServerMsg_0x03E`** (single `retn` no-op stub). Plus one convention-normalize:
+    `napi_np_server_msg_0x049_parse_player_status @ 0x510f40` → `NapiNPServerMsg_0x049_ParsePlayerStatus`.
+  - **Opcode legs `0x44`–`0x47`/`0x84`–`0x87` confirmed named + behaviourally correct** (resolving
+    the §4 open question): `Nwu_HandleClientResendList @ 0x6241f0` delegates `NapiNP_HandleResendList(…,1)`
+    (NACK/resend), `Nwu_HandleClientProbe @ 0x624280` = `!disable_processing && FindConnection(...)`.
+    Opcode-handler prototype: `int __cdecl(NapiNPProtocol*, NapiNPOpcodeInfo*, int addr, int port,
+    u8* data, int len, int arg6)`.
+  - **Magic `0x7C08C6` resolved** = `&g_empty_str` (the empty-string default), carried by every
+    valid msginfo/opcodeinfo entry; sentinel = 0. A non-null validity marker, not a stamp.
+    `handler2` confirmed `0` across all gameplay-table entries (only high-bit H:0x02 → `nullsub_280`).
+  - **Net-owned global typed:** `g_napi_prng_state @ 0x31C1078` set to the existing **`LCGState`**
+    struct (reused — no new type): `seed` / `multiplier = 78665521` (NWU_LCG_MAGIC) / `counter`;
+    the NapiNP connection-entropy LCG, seeded by `PRNG_InitFromTimestamp @ 0x794260`, drawn 4× in
+    `NapiNPServer_HandleNewConnection @ 0x4c8040`. The ~76 remaining auto-named globals in the net
+    core are per-function static scratch (`stru_80EAxx` family), log-record dwords, and rodata
+    format pointers — not net-semantic state; left unnamed per the net-owned-only scope.
+  - **Crypto confirmed MATCHING (read-only):** `CNapiNPConnection_SendSessionPacket @ 0x61edd0`
+    two-layer NWU encrypt (per-connection key `conn+204` then static `aNwuSessionKey`
+    "asdfj2349857…"); naming/typing of the `NapiNP_*` crypto/TLV family unchanged from the prior
+    byte-exact grills. Behavioural handler spot-checks found no drift beyond the medic case
+    (`ClearAnimSlot` 0x41, `SpawnEffect` 0x27 vs `HandleSpawnEffect` 0x21 all accurate + distinct).
+  - Adversarially re-verified (independent pass): renames re-checked against witnessing accesses
+    and single-xref provenance; no duplicate types introduced (`LCGState`/`NapiNPMsgInfo` reused).
+    `idb_save`d. [orig: Server_BroadcastMedicRequest @ 0x515390 / NapiNPServerMsg_0x03D @ 0x500ec0 /
+    g_np_opcode_handlers @ 0x849D90 / g_empty_str @ 0x7C08C6 / g_napi_prng_state @ 0x31C1078 /
+    CNapiNPConnection_SendSessionPacket @ 0x61edd0]
+
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;
 over-length field clamp is low-priority. No code change required.
@@ -4684,3 +4851,73 @@ pool-3 0x20 runtime wiring (D-NET-55, the sibling of the now-FIXED D-NET-50 — 
 path, which D-NET-84 confirms is load-only, not a gameplay tick); and giving
 `make_client_host_request` the same `ClientVarList` wrapping `make_client_play_request`
 now has (D-NET-38). Each carries its `[orig]` anchor and corrected behavior above.
+
+NetPacket serializer + client-loop/scoreboard-state IDB-hygiene grill (decomp cleanup, naming
+of remaining `sub_*` net helpers + net-state globals, name validation, 2026-06-27; IDB-only — no
+reimpl behaviour change):
+- **D-NET-119** [INFO, IDB] **The remaining unnamed `sub_*` helpers in the in-match packet/serializer
+  band (0x500000-0x509000) and the client per-frame net-loop / scoreboard-message state globals were
+  named and validated against the bytes (Jointops.exe.kong.i64).** The prior D-NET-116/117/118 passes
+  had cleaned the connection / network-context / dispatch-table families; this pass took the leaf
+  `NetPacket_Write*` serializers, the `CNetQuality` client tracker, and the decoded net-message
+  globals. Changes:
+  - **Functions named (24, all were `sub_*`).** Packet serializers (all single-purpose `Write` leaves,
+    `NetPacket_*`-family convention): `NetPacket_WriteEntityHandleAndTeam @ 0x503770`
+    (pool<<12|slot + team, 4 B), `NetPacket_WritePositionTeamAndName @ 0x503800` (3×i32 pos + i16 team
+    + cstr name), `NetPacket_WriteOverlayAction @ 0x505D50`, `NetPacket_WriteTerrainTiles @ 0x506570`
+    (via `serialize_terrain_tiles`), `NetPacket_WriteBriefingText @ 0x506620` (briefing3 + briefing2/
+    briefing cstrs), `NetPacket_WriteReplayStreamChunk @ 0x506F60`, `NetPacket_WriteType6SlotStates @
+    0x507100`, `NetPacket_WriteReplayDataBlock @ 0x5071F0`, `NetPacket_WriteFixed180Block @ 0x507300`.
+    Net state/util: `CNapiNetwork_StartClientConnection @ 0x4CA160` (begin client connect to a selected
+    discovered session — wires `OnConnectedToServer`/`OnDisconnectedFromServer` callbacks, auth ticket,
+    2000/30000 timeouts, parses the NovaWorld `.joi` join tokens ni/np/bk/nk into the connection, then
+    `CNapiNPConnection_InitFromSession`; only caller `UI_JoinSelectedSession @ 0x5699d0`),
+    `CNetQuality_Reset @ 0x4C58C0` (resets the `g_netQuality` link-quality/anti-cheat tracker — domain
+    confirmed by `CNetQuality_SetCheatFlag @ 0x4c34f0` reading the same +7 flags/+8 display-timer/+12
+    cooldown offsets), `Network_DrawDebugScreen @ 0x500EF0` (Server/Client debug overlay: FPS, CPU,
+    local/remote QuantumSize = `cs_dir*.send_holdoff_ticks`), `NetSync_IsEntityEligibleInWindow @
+    0x507AA0` (pool-handle validity gate: pool bounds + timestamp window + state-flag mask, used to
+    filter entities for a net update), `Server_InitServerTicks @ 0x5018C0` (constructs the two
+    `CServerTick` instances from CC.BIN), `ItemPoolIterator_Advance @ 0x501740` (cat<<12|slot pool
+    iterator). MP/server gameplay siblings reached through the same serializer band, named for
+    completeness: `Spawn_FindNearestMarkerByTypeAndTeam @ 0x501000` (team@entity+354, matching §5.x),
+    `EntityLimit_InitTable @ 0x509A70` / `EntityLimit_SetEntry @ 0x500E50` (per-entity-type, 70-per-team
+    MP spawn-limit table), `Game_AccumulateTeamScores @ 0x508D70`, `Game_CountAlivePlayersPerTeam @
+    0x5001C0`, `Player_ComputeScore @ 0x500A80`, `PlayerSlot_FindByEntityTypeName @ 0x5009E0`,
+    `Server_DumpPuntLogToFile @ 0x500260` (batch-dumps the in-memory kick log to `punt.log` — distinct
+    from the live `Server_WritePuntLog @ 0x4f9c70` which appends one event to `_PUNT.TXT`),
+    `CNapiVarEntry_AddToIntValue @ 0x6305F0` (NW container var helper).
+  - **Globals named/typed (23).** Net state: `g_netQuality @ 0x82BF88` (CNetQuality tracker),
+    `g_netMsgLen @ 0xB5CBB4` (shared outgoing message-length scratch, set by every `NetPacket_Write*`
+    then passed to `CNapiNetwork_QueueReliableMessage`), `g_lastKeepaliveTick @ 0xA822A0` (msg 0x34
+    timestamp keepalive, ~480 s), `g_netQualityReportTimer @ 0xA85B84` (msg 0x4C every 310 ticks),
+    `g_slotRefreshTimer @ 0xA85B80` (62-tick), `g_tag2CSendCooldown @ 0xA860D8`, `g_netPlayerCount @
+    0x24C1A90`, `g_poolListEnd @ 0xA8933C`, `g_replayBlockMagic @ 0xC86FC4`. Scoreboard-message (0x056)
+    decode outputs: `g_scoreGameType @ 0x24C1970`, `g_scoreTeamScore0/1 @ 0x24C1974/78`,
+    `g_scoreTeamCount @ 0x24C197C`, `g_scorePlayerStats @ 0x24C1AD0`, `g_scoreReassemblyStream @
+    0xA82324` (CDataStream chunk reassembly), `g_scoreboardDirty @ 0xA81B28`. MP/server: `g_serverFps
+    @ 0xC8FC64`, `g_serverCpuPct @ 0xC8FC68`, `g_entityLimitTable @ 0xC7B480`, `g_entityLimitCount @
+    0xC84680`, `g_puntLog @ 0xC74480`, `g_puntReasonStrings @ 0x82F148`.
+  - **Wire-critical names re-validated MATCHING (read-only):** `Network_CompressFixedPoint @ 0x4c2780`
+    / `Network_DecompressFixedPoint @ 0x4c27e0` — bit layout (sign=bit0 via ROR1+ASR31, exp=bits1-3
+    used as the shift, mantissa=bits4-15) is self-consistent compress↔decompress and matches the §5
+    position-compression record. Generic `NapiNP{Client,Server}Msg_0xNNN` suffix↔msg_id correctness
+    was already re-confirmed by D-NET-118; not re-derived.
+  - **One suspected misnomer flagged, NOT renamed (insufficient proof):** `Network_CalcSendRateTiers @
+    0x5b7c50` is called ONLY from the scoreboard/playerlist net handlers `NapiNPClientMsg_0x01D`/`_0x056`
+    (right after `g_netPlayerCount` is refreshed) and writes `dword_28E4DE8/DEC/DF0` from player-count +
+    dedicated-flag thresholds (17/25/34/50/51). The same three globals are consumed by `sub_5BAF20` as a
+    clamped position and zeroed on respawn (`sub_5B71B0`), so the name may describe an overlay/scoreboard
+    display tier rather than a UDP send-rate throttle. The `Network_` prefix is *plausible* (player-count-
+    driven send throttling is real) and the name is human-curated, so per the shared-state rule it was
+    left in place with an IDB comment marking it NEEDS VERIFICATION; `28E4DE8/DEC/DF0` left unnamed.
+  - **Adversarial false-positives kept OUT of the net picture:** address-range proximity alone is not
+    evidence — `sub_4CD460` (terrain/water/environment mission setup), `sub_5B71B0` (mission/respawn
+    state reset), and `sub_5BAF20` (the clamp helper above) sit inside the net bands but are not net code
+    and were deliberately left unnamed / not net-tagged. Every rename in this pass was gated on a
+    witnessed access or single-xref provenance; no duplicate types introduced (CNetQuality left as the
+    named global without forcing a speculative struct — layout only partially witnessed). `idb_save`d.
+    [orig: CNapiNetwork_StartClientConnection @ 0x4CA160 / CNetQuality_Reset @ 0x4C58C0 /
+    CNetQuality_SetCheatFlag @ 0x4c34f0 / NetPacket_WritePositionTeamAndName @ 0x503800 /
+    NetSync_IsEntityEligibleInWindow @ 0x507AA0 / Network_DecompressFixedPoint @ 0x4c27e0 /
+    NapiNPClientMsg_0x056 @ 0x431d10 / Network_CalcSendRateTiers @ 0x5b7c50]

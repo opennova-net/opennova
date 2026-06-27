@@ -263,7 +263,7 @@ Local-player input→pose locomotion (Phase 2, 2026-06-20; net-re §5.38):
 | `Input_ProcessMouseAxisBindings` | `0x499680` | LOOK: mouse deltas × sensitivity (`dword_24D207C<<11`, 16.16) → `Input_TryTriggerMouseAxisBinding(.., entity, dX, dY)` → Yaw(+0x10)/Pitch(+0x14) | disasm; §5.38 | confirm-only |
 | `Player_PackInputStateToEntity` | `0x4df450` | MOVE: `g_inputFlags` → 8-way move index → `entity->pad7[12]` (= entity+0x12C): index, +8 is_moving, fire/lean/scope/grenade bits; analog → pad7[16..19] | disasm; §5.38 | confirm-only |
 | `Input_ProcessPlayerFrame` | `0x49d4c0` | per-frame input binding dispatch (keyboard/mouse-axis/toggle/analog); calls `Input_ProcessMouseAxisBindings` | disasm; §5.38 | confirm-only |
-| `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) | disasm; §5.38 | confirm-only |
+| `Client_ProcessNetworkFrame` | `0x42c180` | client net frame: `Player_PackInputStateToEntity` (@0x42c3e9) then build C2S 0x0C via `Player_BuildTag0CInputBody` (@0x42c482) — fully grilled P5 (frame order + `!is_authority` 0x0C gate + gate polarity), reimpl `np::ClientRuntime` | decompile; §5.38 / §5.44 | MATCHING (behavioral proof: `npruntime_client_runtime`, `npruntime_golden_client`) |
 | `Player_BuildTag0CInputBody` | `0x42a550` | serializes the live pose into C2S 0x0C; gate `entity+286 (healthMax)!=0 && (entity+36 & 2)==0` (SEND-side only — no such gate on receive, §5.38a) → `NetPacket_SerializePlayerState` | disasm; §5.38 / §5.6 | confirm-only |
 
 Host read-apply / remote-peer SNAP mover (Phase 4, 2026-06-23; net-re §5.38a):
@@ -361,6 +361,42 @@ Held-weapon visibility on mount/attach (engine-research, 2026-06-24; world-wac-a
 | `Server_CheckWinConditions` | `0x51ad40` | per-gametype win eval → `Server_ProcessRoundEnd`; sig `(int,int*)`→`void(void)` (Tick phantom-arg source) | decompile; §5.42 / D-NET-110 | confirm-only |
 | `Server_HandleEntitySync` (was `server_handle_entity_sync`) | `0x510990` | net msg handler (table `@0x82b5d8`); sig `()`→`(int ctx,u8*,int)` | decompile; §5.42 / D-NET-110 | confirm-only |
 | `Server_ValidatePlayerJoinRequest` | `0x512100` | join gate (version/ban/expansion/squad/PCID/banned-name/jointicket); names `g_expansion_checksum`/`g_banned_*`/`g_squad_*` | decompile; §5.42 | confirm-only |
+
+`*napinp*` dispatch-surface + crypto naming/typing grill (2026-06-27; net-re §4 / D-NET-118; IDB-only):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `NapiNPServerMsg_0x03D` (was `Path_ReplaceExtension`) | `0x500ec0` | C2S msg 0x3D handler; authority-gated entity write (`slot+352→entity+192`, stores `dword_A87060`→`entity+97560`); bogus auto-name; sig → `(ctx,data,len)` | decompile; single C2S-table xref; §4 / D-NET-118 | confirm-only (role `unknown`) |
+| `NapiNPServerMsg_0x03E` (was `ErrorLog_Write`) | `0x500e10` | C2S msg 0x3E handler; single `retn` no-op stub; bogus auto-name | disasm; single C2S-table xref; §4 / D-NET-118 | confirm-only |
+| `NapiNPServerMsg_0x049_ParsePlayerStatus` (was `napi_np_server_msg_0x049_parse_player_status`) | `0x510f40` | C2S msg 0x49 handler; snake-case→family normalize | §4 / D-NET-118 | confirm-only |
+| `g_np_opcode_handlers` | `0x849D90` | session opcode table (14 legs+sentinel); legs 0x44–0x47/0x84–0x87 confirmed named (`Nwu_HandleClient/Server_{ResendList,Ping,Goodbye,Probe}`) | read table data + decompile; §4 / D-NET-118 | confirm-only |
+| `g_empty_str` | `0x7C08C6` | the msginfo/opcodeinfo "magic" value = `&g_empty_str` (empty-string default, non-null validity marker; NOT a build stamp) | data read; §4 open-q / D-NET-118 | confirm-only |
+| `g_napi_prng_state` | `0x31C1078` | NapiNP connection-entropy LCG; typed `LCGState` (seed/multiplier=78665521 NWU_LCG_MAGIC/counter); seeded `PRNG_InitFromTimestamp @0x794260`, drawn 4× in `NapiNPServer_HandleNewConnection @0x4c8040` | decompile; §4 / D-NET-118 | confirm-only |
+
+## 5.7 Per-frame client net role (P5, 2026-06-27; net-re §5.44)
+
+The client counterpart of `Server_TickUpdate`. Witnessed + ported into `libs/npruntime`
+(`np::ClientRuntime`) / `libs/netsim`. Verified by `npruntime_client_runtime` (always-on in-process
+round-trip + host-as-client) and `npruntime_golden_client` (C2S 0x0C inner + framing byte-parity vs the
+gameplay capture; S2C anchor cross-check). Findings landed in [net/novaworld-net-re.md §5.44](net/novaworld-net-re.md).
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Client_ProcessNetworkFrame` | `0x42c180` | per-frame client net role: recv-pump (`0x42c228`) → raw-input pack (`0x42c3e9`) → C2S 0x0C (`0x42c482`, gated `is_in_session && !is_authority && !dword_81474C && !g_spawn_success_gate`) → send-pump (`0x42c4bc`); NOT authority-gated at its call site (`Game_ProcessMainFrame @0x526692`) | decompile; §5.44 | MATCHING (behavioral proof) |
+| `CNapiNetwork_PumpClientProtocolRecv` | `0x4c4fe0` | client recv pump → `NapiNPProtocol_Pump(np, flags=26, 250)` (drain+dispatch S2C) | decompile; §5.44 | confirm-only |
+| `CNapiNetwork_PumpClientProtocolSend` | `0x4c5000` | client send pump → `NapiNPProtocol_Pump(np, flags=738, 250)` (flush queued outbound) | decompile; §5.44 | confirm-only |
+| `CNapiNetwork_QueueReliableMessage` | `0x4c4fa0` | queues a message on `napi_conn`; drops its `flags` arg → `CNapiNPConnection_QueueMessage(…, msg_flags=0, …, 1024)` | decompile; §5.44 | confirm-only |
+| `NapiNPMessage_Create` | `0x627fc0` | builds the outgoing message; `len_field_size` = 3 (LEN8 inner-flag `0x20`) for payload 1..255 / 4 (LEN16) for >255, `msg_flags=0` ⇒ no SKIP bytes — the 0x0C inner-message byte format | decompile; §5.44 | MATCHING (byte-parity: `npruntime_golden_client`) |
+| `g_spawn_success_gate` | `0x24c1928` | deploy gate: SET on death/spectator (0x0A `flags1&0x01`) + spawn-select (0x1D), CLEARED on deploy → `!gate` = deployed/alive (the 0x0C send gate) | xrefs; §5.44 / §5.2 / §5.9 | confirm-only |
+
+Reimpl seam (opennova ↔ opennova self-consistent + retail byte-parity where cited):
+
+| reimpl | original anchor | role |
+|---|---|---|
+| `np::ClientRuntime` / `Client_ProcessNetworkFrame` | `Client_ProcessNetworkFrame @0x42c180` | role-aware headless client (Joiner + host-as-client); recv-fold → C2S 0x0C (`!is_authority`-gated) |
+| `np::apply_in_match_c2s` (D-NET-126) | `NapiNPServerMsg_0x00C @0x501c30` | production `PeerC2SInMatch` consumer → `deliver_c2s` onto the owning connection → `Server_TickUpdate` drain |
+| `np::is_in_match(conn)` (D-NET-121/122) | `NapiNPServer_SendFiltered @0x4c87e0` | single in-match predicate shared by the drain + emit fan; host loopback no longer starved, anchors to its player |
+| `netsim::NetClientView::apply` / `ISessionTransport::deliver_c2s` | `NapiNPProtocol_Pump @0x62a650` | remote-wire fold path / uniform C2S inbound-inject |
 
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 

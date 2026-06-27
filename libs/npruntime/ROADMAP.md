@@ -204,12 +204,36 @@ position (opennova↔opennova self-consistency); full-body byte-parity vs the ca
 (our World ≠ the capture's ASH_G3D entity set), printed not asserted, mirroring `npruntime_golden_lan_join`.
 Env-gated `NW_GOLDEN_GAMEPLAY` + skip-clean. `npruntime|netsim` ctest 13/13 green.
 
-### P5 — Headless client runtime
-`client_runtime.{h,cpp}`: connect legs (`GATE → HELLO → AUTH/VERIFY → READY → PLAY`, reusing
-`ClientSession` + promoted `JoinerSession`) + `Game_ProcessMainFrame` client role
-(`Client_ProcessNetworkFrame` packs C2S `0x0C`; `NetClientView::pump` folds S2C into `ClientState`).
-Bar: headless client ↔ headless server in-process full round-trip; gameplay replay folds into
-`ClientState`.
+### ✅ P5 — Headless client runtime (DONE)
+`client_runtime.{h,cpp}` (`np::ClientRuntime`): the faithful per-frame client role `[orig:
+Client_ProcessNetworkFrame @0x42c180]` (witnessed + landed net-re §5.44) composed with the connect-leg
+state machine and the S2C→`ClientState` fold. Frame order is the witnessed **recv-pump → raw-input pack
+→ C2S `0x0C` (gated `!is_authority`) → send-pump**. **Role-aware** (the original runs the same
+not-authority-gated frame on every machine): **Joiner** drives the in-match connect legs (reusing the
+P2-promoted `np::JoinerConnection` — Idle→Hello→Auth→Driving burst→InMatch — NOT the lobby
+GATE→VERIFY→READY→PLAY flow, which is the separate ADR-0010 `ClientSession` matchmaking path owned by the
+binding) then per frame folds S2C and emits the `0x0C` uplink; **HostClient** is the SP host's own
+loopback view (handshake-less, `is_authority`, recv-fold only, `0x0C` suppressed).
+
+> Refinement vs plan (connect legs): the original blurb's `GATE → HELLO → AUTH/VERIFY → READY → PLAY`
+> conflated the matchmaking lobby flow with the in-match leg. The IDA witness confirms only HELLO→AUTH→
+> in-match-burst→spawn is the in-match runtime; the lobby legs stay in `ClientSession` (§7.1).
+
+**Seam additions:** `netsim::NetClientView::apply(tag,body)` (the remote-wire fold path; `pump` is the
+loopback path — one fold path per role), `netsim::ISessionTransport::deliver_c2s` (uniform C2S
+inbound-inject), `np::apply_in_match_c2s` (the production `PeerC2SInMatch` consumer, D-NET-126), and the
+single `np::is_in_match(conn)` predicate shared by `Server_TickUpdate`'s drain + emit (resolving
+D-NET-121/122 — the host loopback's own per-frame `0x0A`, anchored to its player).
+
+Bar met: `npruntime_client_runtime` (always-on) — the full in-process client↔server round-trip
+(handshake → spawn → per-frame `0x0C` → `apply_in_match_c2s` → `Server_TickUpdate` drain/SNAP + `0x0A`
+fan → `NetClientView` fold) + the host-as-client D-NET-121/122 anchor path; `npruntime_golden_client`
+(env-gated `NW_GOLDEN_GAMEPLAY`, skip-clean) — the real emission path reproduces the captured retail
+`0x0C` **inner message byte-for-byte** and re-frames the captured 9-message bundle into a **byte-identical
+datagram** (emitted C2S == client-origin), with the S2C `0x0A` fold cross-checked against the
+world-stream spawn positions (0.87 world units, non-circular). `npruntime|netsim|novaworld` ctest green
+(55/55). **Deferred-and-logged (P6):** the per-frame housekeeping (`0x34` keepalive / `0x4C` anti-cheat /
+`0x2C` RTT ping) and the `send_holdoff_countdown` gate.
 
 ### P6 — Real UDP transport (MP)
 `UdpSessionTransport` real NWU/CRC/SCRK framing swap at the owner boundary; `apps/nw_server`

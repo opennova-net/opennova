@@ -21,8 +21,16 @@ public:
 	NetClientView();
 	explicit NetClientView(std::function<EntityClass(uint16_t)> resolver);
 
-	// Drain every pending S2C datagram and apply it to the held ClientState.
+	// Drain every pending S2C datagram and apply it to the held ClientState. Used for the
+	// host-as-client loopback path (inner {tag,body} datagrams, no handshake).
 	void pump(ISessionTransport &channel);
+
+	// Fold ONE already-decoded inner S2C body (tag + body, no NWU/SCRK framing) into the
+	// ClientState. The remote-joiner path calls this for each body JoinerConnection surfaces off
+	// its 0x83 SESSION decode (inbound_0a / inbound_world); pump() is the thin loopback loop over
+	// it. Exactly ONE of {pump, apply-per-body} drives a given ClientState per frame (one fold
+	// path per role) so frames_applied / seen_this_frame stay coherent.
+	void apply(uint8_t tag, const std::vector<uint8_t> &body);
 
 	const ClientState &state() const { return state_; }
 	ClientState &state() { return state_; }

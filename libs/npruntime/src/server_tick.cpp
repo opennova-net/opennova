@@ -26,8 +26,12 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// connection_list; a mid-match configure_session_runtime() erases them (napi_np_protocol.cpp),
 	// which would silently drop those peers from drain+replicate — revisit when reconfigure lands.
 	// drain_connection_c2s null-checks conn.link.transport internally + enforces the owner gate.
+	// [D-NET-122] is_in_match(conn) is the single predicate shared with the emit fan below (was an
+	// inline burst.spawned in each); the host's own loopback satisfies it once its §5.2a burst
+	// completes, so it is drained + emitted like any peer (its C2S is empty — is_authority suppresses
+	// the host's own 0x0C — but its 0x0A local view is no longer starved).
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (!conn.burst.spawned) continue;
+		if (!is_in_match(conn)) continue;
 		netsim::drain_connection_c2s(world, conn.link);
 	}
 
@@ -44,13 +48,16 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// world non-null) keeps ticking but stops fanning ghost 0x0A frames. Build the world snapshot
 	// ONCE, then fan a per-connection-anchored 0x0A to every in-match connection
 	// [orig: NapiNPServer_SendFiltered @0x4C87E0 once, SendToConn per node].
-	// [D-NET-122] This fan is gated on burst.spawned, narrowing the legacy NetSystem::emit_s2c (which
-	// emits to EVERY transport-bearing connection); revisit when Server_TickUpdate replaces NetSystem
-	// as the host/SP driver (P5) so the host's own loopback is not starved of its 0x0A.
+	// [D-NET-122 RESOLVED at P5] This fan uses the shared is_in_match(conn) predicate (was an inline
+	// burst.spawned). The host's own type-2 loopback now satisfies it once its §5.2a burst completes,
+	// so Server_TickUpdate (the SP/host driver) fans it a per-frame 0x0A — its local view is no longer
+	// starved (the gap the legacy NetSystem::emit_s2c filled by emitting to every transport-bearing
+	// connection). Its 0x0A anchors to its owned_entity (the host player, bound by
+	// Server_BuildPlayerInfoAndAdd), NOT the D-NET-121 dvxi5 fallback_anchor.
 	if (ctx.is_in_session) {
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!conn.burst.spawned) continue;
+			if (!is_in_match(conn)) continue;
 			netsim::emit_connection_s2c(world, conn.link, ents, fallback_anchor);
 		}
 	}

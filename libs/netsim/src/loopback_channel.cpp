@@ -26,6 +26,12 @@ bool LoopbackChannel::client_recv(Datagram &out) {
 	return true;
 }
 
+void LoopbackChannel::deliver_c2s(uint8_t tag, std::vector<uint8_t> body) {
+	// Inject onto the C2S FIFO host_recv pops (same queue client_send feeds — for the in-process
+	// loopback the host-side inject IS the C2S queue).
+	c2s_.push_back(Datagram{tag, std::move(body)});
+}
+
 void LoopbackChannel::clear() {
 	s2c_.clear();
 	c2s_.clear();

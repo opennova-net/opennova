@@ -242,6 +242,20 @@ std::vector<uint8_t> JoinerConnection::frame_c2s_uplink(uint16_t handle_H, uint1
 	return frame_session({make_protocol_message(0x0C, std::move(payload))});
 }
 
+void JoinerConnection::seed_in_match(uint32_t session_id, std::string client_scrk,
+                                     std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
+                                     uint16_t self_handle, uint16_t self_type) {
+	conn_.server_sk = session_id;            // 0x43 header session_id (= ServerAuth.sk)
+	conn_.client_scrk = std::move(client_scrk); // encrypts our outbound 0x43 (the captured client SCRK)
+	conn_.server_scrk = std::move(server_scrk); // decrypts inbound 0x83 (for the S2C fold half)
+	conn_.next_outbound_seq = next_seq;      // frame_session uses this as the packet's seq, post-increments
+	conn_.last_inbound_seq = last_ack;       // -> the 0x43 ack_count
+	self_handle_ = self_handle;
+	has_self_handle_ = true;
+	spawn_.item_type_id = self_type;
+	phase_ = Phase::InMatch;
+}
+
 void JoinerConnection::fail(std::string reason) {
 	last_error_ = std::move(reason);
 	phase_ = Phase::Error;

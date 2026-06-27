@@ -582,6 +582,19 @@ bool frame_in_match_s2c(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t inne
 	return !out_datagram.empty();
 }
 
+std::size_t apply_in_match_c2s(NapiNPServerCtx &ctx, const HostAcceptEvent &event) {
+	if (event.kind != HostAcceptEvent::Kind::PeerC2SInMatch) return 0;
+	NapiNPConnection *conn = find_connection(ctx, event.peer);
+	if (conn == nullptr || conn->link.transport == nullptr) return 0;
+	std::size_t staged = 0;
+	for (const ProtocolMessage &m : event.in_match_c2s) {
+		if (m.tag != 0x0C) continue; // only the player-state uplink this increment (§5.10)
+		conn->link.transport->deliver_c2s(0x0C, m.payload);
+		++staged;
+	}
+	return staged;
+}
+
 bool connection_spawned(const NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (c.peer == peer) return c.spawned_announced;

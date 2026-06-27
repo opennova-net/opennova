@@ -33,6 +33,15 @@ public:
 	// Drain one pending datagram in FIFO order; false when the queue is empty.
 	virtual bool host_recv(Datagram &out) = 0;   // a C2S datagram (host side)
 	virtual bool client_recv(Datagram &out) = 0; // an S2C datagram (client side)
+
+	// Inject a C2S {tag,body} datagram directly into the host-side inbound queue (the one
+	// host_recv pops). The owner-boundary consumer (np::apply_in_match_c2s) uses this to route a
+	// decoded in-match C2S 0x0C onto the owning connection's transport, so Server_TickUpdate's
+	// drain_connection_c2s read-applies it — the production form of the manual push the joiner
+	// test does inline. Distinct from client_send: a host endpoint's client_send would stage to
+	// OUTBOUND (never reaches host_recv), so a uniform inject method is required. [PeerC2SInMatch
+	// consumer; orig: NapiNPProtocol_HandleSessionPacket 0x0C surface -> the host recv FIFO]
+	virtual void deliver_c2s(uint8_t tag, std::vector<uint8_t> body) = 0;
 };
 
 } // namespace opennova::netsim
