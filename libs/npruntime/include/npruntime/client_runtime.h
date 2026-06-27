@@ -77,11 +77,13 @@ public:
 	//       [orig: Player_BuildTag0CInputBody->QueueReliableMessage(0x0C) @0x42c482]. The host
 	//       (is_authority) never uplinks its own player (witnessed !is_authority gate); HostClient
 	//       sends nothing.
-	// Returns the framed datagrams to ship (handshake replies + burst + the per-frame 0x0C). `uplink`
-	// is the §5.10 0x0C extended body (the OUTPUT of Player_BuildTag0CInputBody; the raw-input->entity
-	// motor, step 5a, runs host-side per ADR 0012 R1 and is NOT part of the headless client). DEFERRED
-	// & logged (faithful-port, P6): the 0x34 keepalive / 0x4C anti-cheat / 0x2C RTT-ping housekeeping
-	// and the send_holdoff_countdown gate.
+	// Returns the framed datagrams to ship (handshake replies + burst + the per-frame housekeeping +
+	// the 0x0C). `uplink` is the §5.10 0x0C extended body (the OUTPUT of Player_BuildTag0CInputBody; the
+	// raw-input->entity motor, step 5a, runs host-side per ADR 0012 R1 and is NOT part of the headless
+	// client). The witnessed per-frame housekeeping is now PORTED (P6, §5.44): the 0x34 keepalive
+	// (29760-tick), the 0x4C net-quality report (310-tick), the 0x2C RTT ping (every deployed frame),
+	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
+	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
 	                                                             uint32_t now_tick = 0);
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
@@ -122,6 +124,23 @@ private:
 	netsim::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
 	bool deployed_ = false;
+
+	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
+	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
+	// emits and the send-holdoff send-block gate, deferred-and-logged at P5, ported here. ---
+	uint32_t current_tick_ = 0;          // [orig: currentTick @0xA8229C] bumped once per run_frame
+	uint32_t last_keepalive_tick_ = 0;   // [orig: g_lastKeepaliveTick @0xA822A0] 0x34 send latch
+	uint32_t net_quality_timer_ = 0;     // [orig: g_netQualityReportTimer @0xA85B84] 0x4C cadence
+	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send,
+	                                     // decremented per frame; NOT read as a send gate in this fn
+	                                     // (a nuance vs §5.44 "62-tick holdoff" — see ROADMAP/re-doc).
+	uint8_t  net_quality_ = 0;           // [orig: g_netQuality byte @0x82BF88] 0 = best (host clamps 0..4)
+	uint32_t send_holdoff_countdown_ = 0;// [orig: NapiNPConnection+0x648] 0 = send block open (default)
+
+	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
+	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the
+	// determinism contract npruntime_golden_client asserts — seed_session is "for replay/parity only").
+	bool replay_mode_ = false;
 };
 
 } // namespace opennova::np

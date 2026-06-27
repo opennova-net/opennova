@@ -235,11 +235,49 @@ world-stream spawn positions (0.87 world units, non-circular). `npruntime|netsim
 (55/55). **Deferred-and-logged (P6):** the per-frame housekeeping (`0x34` keepalive / `0x4C` anti-cheat /
 `0x2C` RTT ping) and the `send_holdoff_countdown` gate.
 
-### P6 — Real UDP transport (MP)
-`UdpSessionTransport` real NWU/CRC/SCRK framing swap at the owner boundary; `apps/nw_server`
-`main.cpp` (`apps/common/net_sockets` + a fixed-cadence `Server_TickUpdate` loop); connection
-modes 2/3/4. Guard the CMake so `apps/nw_server` never pulls godot-cpp. Bar: two-endpoint over
-real sockets; full `retail-lan-host-join.pcapng` end-to-end.
+### ✅ P6 — Real UDP transport (MP) (DONE)
+A real-UDP **owner loop** drives the runtime over sockets — "real transport" is NOT a new socket/
+protocol layer (the runtime already emits/parses fully-framed NWU/CRC/SCRK datagrams via
+`handle_server_datagram` / `frame_in_match_s2c` / `tick_connections`); it is `apps/nw_server` driving
+`apps/common/net_sockets` against those entry points at a fixed 62 Hz cadence. `UdpSessionTransport`
+stays an identity byte-conduit; the framing/crypto stays in `libs/novaworld` (the owner reframes a
+popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43` through
+`handle_server_datagram`) — the `.agents/network.md` guardrail, satisfied without changing the transport.
+
+- **`apps/nw_server/host_owner_loop.h`** (header-only, shared by `main.cpp` AND the P6 test — one wire
+  owner loop) + **`apps/nw_server/main.cpp`** (a **Listen host**: `HostClient` + a loopback host player
+  at dcb 2, joiners at 3+; loads a mission via `NW_MISSION`, drift-free `sleep_until` 62 Hz loop, SIGINT
+  shutdown). The per-tick body is the §5.44 recv-before-send order: recv-drain → `tick_connections`
+  (pre-spawn §5.2a bursts) → `Server_TickUpdate` (single C2S drain + logic tick + 0x0A fan) → S2C flush
+  (`pop_outbound` → `frame_in_match_s2c` → `sendto`). The joiner spawn is AUTOMATIC (`tick_connections`
+  → `Server_ProcessPendingPlayerSpawns` binds `owned_entity`); the owner only attaches the peer's
+  `UdpSessionTransport` and streams the joiner's NAMED dcb-bearing `0x0C` (mirrors
+  `NovaSimulation::announce_joiner_organic_spawn`). **CMake godot-cpp guard is structural** — godot-cpp
+  is a separate SCons build never in this CMake graph; linking only `opennova_*` static libs makes the
+  target incapable of pulling it (there is no toggle).
+- **§5.44 housekeeping ported** into `ClientRuntime` (the P5 deferred-and-logged set): `0x34` keepalive
+  (29760-tick, both roles), `0x4C` net-quality (310-tick, Joiner in-match), `0x2C` RTT ping (every
+  deployed frame), and the `send_holdoff_countdown` send-block gate — all `[orig @0x42c1a9..0x42c4bc]`,
+  via a new public `JoinerConnection::frame_inner(tag,body)` so they ride the same `0x43`/SCRK envelope
+  as the `0x0C`. **Witness correction (re-doc §5.44):** `g_tag2CSendCooldown` (`@0xA860D8`) is set-to-62
+  + self-decremented but is **NOT read as a send gate** (the only three xrefs are this fn's read/dec/set)
+  — so the `0x2C` fires every deployed frame, NOT throttled 62-tick as §5.44 first phrased. `seed_session`
+  sets a `replay_mode_` that suppresses the housekeeping so a seeded golden replay reproduces only the
+  captured `0x0C` (`npruntime_golden_client` byte-parity preserved). HostClient emits no housekeeping
+  (recv-only loopback) — deferred-and-logged.
+- **`np::drop_connection(ctx, peer)`** added — owner-initiated eviction for the recv-timeout / dead-peer
+  path (no `0x46`); mirrors the goodbye teardown without surfacing an event.
+
+Bar met: **`npruntime_two_endpoint_socket`** (always-on) — a `ClientRuntime` joiner and the
+`apps/nw_server` owner loop, each on its own bound loopback UDP socket, run a full join → spawn → play
+loop over real `sendto`/`recvfrom` (single-thread poll-pump): the joiner reaches InMatch+deployed, the
+peer SNAPs to its C2S `0x0C` over the wire, the host's own player is untouched, and the S2C `0x0A` folds
+into `ClientState`. It also asserts the host's emitted §5.2a S2C tag order and (env-gated
+`NW_GOLDEN_LAN_JOIN`, skip-clean) cross-checks it against `retail-lan-host-join.pcapng` — **passes against
+the local golden**. `apps/nw_server` live-hosts a real 1333-entity JO mission at 62 Hz. `npruntime|netsim|
+novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`0x1A` and the unwitnessed
+§5.2a serializers stay deferred (structural P3) — our host emits `1C 0B 11 | 10 0C 20 | 0A…`; full body
+byte-parity and the retail `0x57` RTT pong are tracked follow-ups.
 
 ### P7 — Godot adapter rewrite
 `nova_simulation.cpp` becomes a thin adapter over `npruntime` (construct World + NetSystem + ctx;

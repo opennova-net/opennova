@@ -615,6 +615,15 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 			conn->session_id, player_name, player_slot, entity_handle);
 }
 
+bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
+	if (find_connection(ctx, peer) == nullptr) return false;
+	// Same teardown as a 0x46 ClientGoodbye, minus the surfaced event: reset the game_runtime session
+	// (if any) and erase the node. The owner releases its own non-owning transport for `peer`.
+	if (ctx.game_runtime) ctx.game_runtime->reset_session(peer_session_id(peer));
+	erase_connection(ctx, peer);
+	return true;
+}
+
 std::size_t connection_count(const NapiNPServerCtx &ctx) {
 	return ctx.np_protocol.connection_list.size();
 }

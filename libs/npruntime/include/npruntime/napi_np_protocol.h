@@ -138,6 +138,15 @@ bool connection_spawned(const NapiNPServerCtx &ctx, const PeerAddr &peer);
 bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t player_slot,
                             uint16_t entity_handle);
 
+// Owner-initiated eviction of `peer`'s connection node — the recv-timeout / dead-endpoint path where
+// no 0x46 ClientGoodbye ever arrives (a crashed or half-open peer would otherwise leak its
+// connection_list node and keep getting per-frame 0x0A framed to a dead address). Mirrors
+// handle_client_goodbye's teardown (reset the game_runtime session + erase the node) without emitting
+// an event — the owner already knows it is dropping. The owner is responsible for releasing its own
+// (non-owning) transport for that peer. Returns true if a node was dropped. [orig: the timeout sweep
+// under NapiNPProtocol_DrainTimers feeds Nwu_HandleDisconnect @0x624250 the same teardown.]
+bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer);
+
 std::size_t connection_count(const NapiNPServerCtx &ctx);
 
 } // namespace opennova::np

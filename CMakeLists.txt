@@ -103,6 +103,11 @@ add_subdirectory(apps/common)
 # Standalone novaworld server — gate UDP + NW UDP (+ HTTP when BUILD_NOVAWORLD_HTTP).
 add_subdirectory(apps/novaworld_server)
 
+# nw_server — the headless in-match game HOST (P6): a real-UDP owner loop over libs/npruntime
+# (Server_TickUpdate + handle_server_datagram), separate from the matchmaking novaworld_server.
+# Pure C++ — never links godot-cpp (it is not in this CMake graph; see apps/nw_server/CMakeLists.txt).
+add_subdirectory(apps/nw_server)
+
 # nw_pp — in-game packet pretty-printer for RE sanity-check (reads pcap/pcapng,
 # .sph server logs, or `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
 add_subdirectory(apps/nw_pp)

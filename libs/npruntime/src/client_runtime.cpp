@@ -4,6 +4,22 @@
 
 namespace opennova::np {
 
+namespace {
+
+// §5.44 housekeeping cadences/constants, witnessed in [orig: Client_ProcessNetworkFrame @0x42c180].
+constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks [orig @0x42c1c0]
+constexpr uint32_t kNetQualityInterval = 310;  // 0x4C net-quality report period [orig @0x42c23e]
+constexpr uint32_t kTag2CCooldown = 62;        // 0x2C cooldown set-value [orig @0x42c412] (vestigial gate)
+
+// Little-endian u32 body (the 0x34 currentTick body and the 0x2C timestamp prefix). Mirrors the inline
+// LE write the 0x48 ack uses (joiner_connection.cpp); there is no NetPacket_Write* helper in libs.
+std::vector<uint8_t> le32(uint32_t v) {
+	return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
+	        static_cast<uint8_t>(v >> 24)};
+}
+
+} // namespace
+
 ClientRuntime::ClientRuntime(ClientSession::Config config, std::string player_name)
 		: role_(Role::Joiner),
 		  joiner_(std::make_unique<JoinerConnection>(std::move(config), std::move(player_name))) {}
@@ -27,12 +43,26 @@ void ClientRuntime::seed_session(uint32_t session_id, std::string client_scrk,
 	if (role_ != Role::Joiner) return;
 	joiner_->seed_in_match(session_id, std::move(client_scrk), std::move(server_scrk), next_seq,
 	                       last_ack, self_handle, self_type);
-	deployed_ = true; // a seeded replay is post-deploy (the captured client was uplinking)
+	deployed_ = true;     // a seeded replay is post-deploy (the captured client was uplinking)
+	replay_mode_ = true;  // reproduce ONLY the captured 0x0C — suppress the live housekeeping (§5.44)
 }
 
 std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedUplink *uplink,
                                                            uint32_t now_tick) {
 	std::vector<std::vector<uint8_t>> outbound;
+
+	// Per-frame tick bump [orig: currentTick++ @0x42c1ab] — drives the housekeeping cadences below.
+	++current_tick_;
+
+	// (0x34) keepalive — runs for EVERYONE (NOT authority-gated), emitted before the recv pump in the
+	// original [orig @0x42c1a9..0x42c1ec]. Only a Joiner has a 0x43 framing path here (the HostClient's
+	// own-loopback keepalive is a no-op over the wire — deferred-and-logged, P6 §5.44). Suppressed in
+	// golden-replay mode.
+	if (joiner_ != nullptr && !replay_mode_ && current_tick_ != 0 &&
+	    current_tick_ - last_keepalive_tick_ > kKeepaliveInterval) {
+		outbound.push_back(joiner_->frame_inner(0x34, le32(current_tick_)));
+		last_keepalive_tick_ = current_tick_;
+	}
 
 	// (1) RECV pump — fold S2C into ClientState, recv-before-send [orig: PumpClientProtocolRecv
 	// @0x42c228 runs before the SEND block].
@@ -54,7 +84,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		}
 	}
 
-	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no 0x0C uplink
+	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
 
 	// (1b) CONNECT-DRIVE — while Driving, advance the in-match spawn-gate burst one stage per frame
 	// [the original drives the burst from the same per-frame pump loop, via NapiClient_WaitForGameStart].
@@ -62,12 +92,43 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 		for (std::vector<uint8_t> &d : joiner_->pump(now_tick)) outbound.push_back(std::move(d));
 	}
 
-	// (2) SEND — the C2S 0x0C player uplink, gated InMatch && deployed (the witnessed
-	// is_in_session && !is_authority && !dword_81474C && !g_spawn_success_gate; a Joiner is always
-	// !is_authority). The host (HostClient) returned above without ever reaching here.
-	if (uplink != nullptr && joiner_->in_match() && deployed_ && joiner_->has_self_handle()) {
-		outbound.push_back(joiner_->frame_c2s_uplink(joiner_->self_handle(),
-		                                             joiner_->spawn_pose().item_type_id, *uplink));
+	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
+	// is_mp_session_peer (a Joiner in-match satisfies both). [orig @0x42c23e..0x42c279]
+	if (!replay_mode_ && joiner_->in_match()) {
+		if (++net_quality_timer_ > kNetQualityInterval) {
+			net_quality_timer_ = 0;
+			outbound.push_back(joiner_->frame_inner(0x4C, std::vector<uint8_t>{net_quality_}));
+		}
+	}
+
+	// Cooldown self-decrement [orig @0x42c386]. The 0x2C send below sets it to 62, but it is NOT read
+	// as a send gate — the only xrefs to g_tag2CSendCooldown @0xA860D8 are this decrement + that set,
+	// so the 0x2C fires every deployed frame (corrects §5.44's "62-tick holdoff" note; re-doc).
+	if (tag2c_send_cooldown_ > 0) --tag2c_send_cooldown_;
+
+	// (2) SEND BLOCK — gated send_holdoff_countdown == 0 (NapiNPConnection+0x648; the original skips the
+	// whole block when set). [orig @0x42c3dd]
+	if (send_holdoff_countdown_ == 0) {
+		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
+		// !is_authority && !dword_81474C && !g_spawn_success_gate. A Joiner is always !is_authority;
+		// deployed_ mirrors !g_spawn_success_gate (§5.44).
+		const bool deployed_joiner = joiner_->in_match() && deployed_ && joiner_->has_self_handle();
+
+		// (0x2C) RTT timestamp ping — Joiner only. [orig @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
+		// (NetPacket_WriteInt32AndByte; echoFlag=1 requests the S2C 0x57 pong, §5.34). retail uses
+		// GetTickCount; now_tick keeps it deterministic (the RTT value is not validated opennova↔opennova).
+		if (!replay_mode_ && deployed_joiner) {
+			tag2c_send_cooldown_ = kTag2CCooldown;
+			std::vector<uint8_t> ping = le32(now_tick);
+			ping.push_back(0x01);
+			outbound.push_back(joiner_->frame_inner(0x2C, std::move(ping)));
+		}
+
+		// (0x0C) the C2S player uplink — unchanged P5 path, same deploy gate. [orig @0x42c46f..0x42c4a3]
+		if (uplink != nullptr && deployed_joiner) {
+			outbound.push_back(joiner_->frame_c2s_uplink(joiner_->self_handle(),
+			                                             joiner_->spawn_pose().item_type_id, *uplink));
+		}
 	}
 	return outbound;
 }

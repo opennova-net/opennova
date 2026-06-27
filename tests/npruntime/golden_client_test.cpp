@@ -20,10 +20,11 @@
 //   decoders, a DIFFERENT code path) folded into the ClientState. Non-circular: the local player's
 //   spawn from the world stream must coincide with the first-frame anchor.
 //
-// WHAT IS DEFERRED (faithful-port, never faked): the periodic housekeeping (0x34/0x4C/0x2C-RTT) and
-// send_holdoff are not emitted by the runtime yet (P6) — so the C2S parity targets a CLEAN 0x0C-only
-// datagram (the common case); if none exists in the capture, the C2S half is logged + skipped, not
-// faked.
+// HOUSEKEEPING (P6): the runtime now emits the periodic 0x34/0x4C/0x2C-RTT housekeeping live, but
+// seed_session() puts it in REPLAY MODE (replay_mode_) which suppresses that housekeeping — so a seeded
+// single-frame emission reproduces ONLY the captured 0x0C. The C2S parity therefore targets a CLEAN
+// 0x0C-only datagram (the common case); if none exists in the capture, the C2S half is logged + skipped,
+// not faked (faithful-port — never invent the captured datagram).
 
 #include <npruntime/client_runtime.h>
 

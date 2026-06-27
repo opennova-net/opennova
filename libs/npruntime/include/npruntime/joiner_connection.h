@@ -92,6 +92,16 @@ public:
 	std::vector<uint8_t> frame_c2s_uplink(uint16_t handle_H, uint16_t type,
 	                                      const PlayerExtendedUplink &body);
 
+	// Wrap one inner {tag,body} as a single 0x43 SESSION datagram over this connection's live SCRK +
+	// seq (advances the outbound seq, stamps the ack). The framing path the per-frame housekeeping
+	// rides (0x34 keepalive / 0x4C net-quality / 0x2C RTT, P6 §5.44) so those messages share the SAME
+	// 0x43/SCRK envelope and seq stream as the 0x0C uplink — the witnessed PumpClientProtocolSend flush
+	// bundles them into 0x43s the same way. [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 ->
+	// CNapiNPConnection_QueueMessage @0x628640]
+	std::vector<uint8_t> frame_inner(uint8_t tag, std::vector<uint8_t> body) {
+		return frame_session({make_protocol_message(tag, std::move(body))});
+	}
+
 	// Deterministic golden replay: force the in-match connection state so frame_c2s_uplink
 	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the ROADMAP "Determinism" seed-inject).
 	// session_id = the captured 0x43 header session_id (= ServerAuth.sk); client_scrk = the captured

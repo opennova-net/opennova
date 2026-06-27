@@ -584,6 +584,19 @@ replication loop in every case, which is why §5.1–§5.17 run identically unde
   the datagram into the local recv FIFO in place of `sendto`; (b) whether the SCRK stream cipher runs on
   that in-memory datagram — the `0x43`/`0x83` recv dispatch decrypts with SCRK, so crypto **likely** runs
   end-to-end in-process, but the transmit-side encrypt on the loopback is not yet byte-witnessed.
+- **Socket-open / pump path (witnessed P6, 2026-06-27).** The MP socket transport that mode 1 skips:
+  `[orig: CNapiNetwork_OpenTransportSocket @0x4c6a40]` early-returns `if (!is_in_session || np_manager->
+  udp_socket)`, picks a PORTMIN/PORTMAX/PORTDELTA/PORTRANDOM range from the per-mode config block,
+  resolves the host, opens the UDP socket via `CNapiNPManager_OpenTransportSocket @0x6232c0`, and sets
+  **recv+send buffer sizes to 0x10000 (64 KB)** (`CNapiUdpSocket_SetRecvBufferSize` /
+  `CNapiNPManager_SetSendBufferSize` / `_SetRecvBufferSize`), logging to `_connectlog.txt`. The per-frame
+  pump is `[orig: CNapiNetwork_PumpManagerReceive @0x4c4d10]` → `NapiNPManager_Pump(mgr, flags=4, 250ms)`
+  (the recv pass) and the wire send is `[orig: CNapiNetwork_SendUDPPacket @0x4c4d30]` →
+  `CNapiNPManager_SendTo @0x61ec20`. **Reimpl (P6):** `apps/common/net_sockets::udp_bind` /
+  `udp_recv_from` / `udp_send_to` cover the open / recv / send; the 64 KB `SO_RCVBUF`/`SO_SNDBUF` and the
+  PORTMIN..RANDOM selection are noted faithful details (irrelevant on the loopback `apps/nw_server` binds).
+  `apps/nw_server/host_owner_loop.h` is the owner pump; the real-socket peers run full SCRK via
+  `frame_in_match_s2c` (so the loopback crypto-bypass question (b) stays orthogonal to the MP path).
 - `font_name @ 0x7C08C6` is the empty/default-string global that `SinglePlayer_StartMission` and
   `CreateSession` copy (via `[orig: Napi_CopyString @ 0x617e10]`) into the unused password/config
   fields. Its **address** coincides with the dispatch-table `magic` constant `0x7C08C6` (§4 open
@@ -3587,9 +3600,16 @@ recv into the FIFO happens earlier in the frame via `[orig: CNapiNetwork_PumpMan
    - `[orig: Player_PackInputStateToEntity @0x42c3e9]` — writes raw input to `entity->pad7[12]`; runs
      for **everyone, the host included** (the ADR-0012-R1 motor-from-raw-input path, §5.38).
    - if `is_in_session && !is_authority && !dword_81474C && !g_spawn_success_gate`: a `0x2C` RTT
-     timestamp ping (`GetTickCount`, 62-tick holdoff via `dword_A860D8`) **and** the C2S `0x0C` uplink —
-     `[orig: Player_BuildTag0CInputBody @0x42a550]` (`sub_op = 0x0A` extended) → `[orig:
-     CNapiNetwork_QueueReliableMessage @0x4c4fa0]` `(0x0C, …)`.
+     timestamp ping (`GetTickCount`; body `[u32 ts][u8 0x01]` via `NetPacket_WriteInt32AndByte`, the
+     `0x01` echoFlag requests the S2C `0x57` pong) **and** the C2S `0x0C` uplink — `[orig:
+     Player_BuildTag0CInputBody @0x42a550]` (`sub_op = 0x0A` extended) → `[orig:
+     CNapiNetwork_QueueReliableMessage @0x4c4fa0]` `(0x0C, …)`. **Correction (P6 grill 2026-06-27):** the
+     `0x2C` is **NOT** 62-tick throttled — `g_tag2CSendCooldown` (`dword_A860D8`) is set to 62 here and
+     self-decremented at `@0x42c386`, but the only three xrefs to it are this fn's read/decrement/set, so
+     it is **never read as a send gate**; the `0x2C` fires **every deployed frame** (gated only by the
+     deploy condition above + `!send_holdoff_countdown`). The earlier "62-tick holdoff via `dword_A860D8`"
+     phrasing was an over-inference from the set-and-decrement pattern; the cooldown is vestigial in this
+     function. `[orig reads/dec/set @0x42c380/0x42c388/0x42c412]`
    - **flush** `[orig: CNapiNetwork_PumpClientProtocolSend @0x42c4bc]` → `NapiNPProtocol_Pump` with
      **flags 738**, 250 ms.
 
@@ -3628,10 +3648,15 @@ review): a Joiner's traffic is whole NWU-framed datagrams (`JoinerConnection` do
 and surfaces inner bodies, folded via the new public `netsim::NetClientView::apply(tag,body)`); a
 HostClient reads inner `{tag,body}` off the in-process loopback via `NetClientView::pump` (the ADR-0011
 §3 SP crypto bypass). The witnessed housekeeping (the `0x34`/`0x4C`/`0x2C`-RTT sends and the
-`send_holdoff_countdown` send-block gate) is **deferred-and-logged**, not silently dropped — it lands at
-P6 (real UDP / retail wire-compat); `Player_PackInputStateToEntity` (step 4a) is the host-side motor seam
-(ADR 0012 R1), not part of the headless client (which takes the already-built `0x0C` body as its
-per-frame input).
+`send_holdoff_countdown` send-block gate) is **PORTED at P6** onto the Joiner role (a new public
+`JoinerConnection::frame_inner(tag,body)` rides the same `0x43`/SCRK envelope/seq as the `0x0C`):
+`0x34` (29760-tick, both roles), `0x4C` (310-tick, Joiner in-match), `0x2C` (every deployed frame, per the
+correction above), gated by `send_holdoff_countdown_` (default 0 = open; the `NapiNPConnection+0x648`
+field is not yet modeled — a `GetSendHoldoffTicks @0x4C4AB0` follow-up). `seed_session` sets a
+`replay_mode_` that suppresses the housekeeping so a seeded golden replay reproduces only the captured
+`0x0C` byte-for-byte. HostClient's own-loopback housekeeping stays deferred-and-logged (recv-only, no
+outbound seam). `Player_PackInputStateToEntity` (step 4a) is the host-side motor seam (ADR 0012 R1), not
+part of the headless client (which takes the already-built `0x0C` body as its per-frame input).
 
 **D-NET-126** [behavior, reimpl divergence FIXED] **The production `PeerC2SInMatch` consumer routes a
 joiner's C2S `0x0C` into the host drain.** `handle_client_session` only *surfaces* `PeerC2SInMatch`

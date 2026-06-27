@@ -1436,3 +1436,23 @@ target_link_libraries(npruntime_golden_client_test
 target_compile_definitions(npruntime_golden_client_test PRIVATE
     DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
 add_test(NAME npruntime_golden_client COMMAND npruntime_golden_client_test)
+
+# P6 — two endpoints over REAL UDP sockets: a ClientRuntime joiner and the apps/nw_server host
+# owner-loop (host_owner_loop.h), each on its own bound loopback UDP socket, drive join->spawn->play
+# over the wire (single-thread poll-pump). Asserts mirror npruntime_client_runtime but over real
+# sockets, and adds the §5.2a S2C tag-order check (always-on, our host) + the env-gated cross-check vs
+# the retail LAN host/join capture (NW_GOLDEN_LAN_JOIN, skip-clean). Includes apps/nw_server for the
+# shared owner loop; opennova_mission for the minimal World/bms; opennova_app_common for net_sockets +
+# pcap_reader (+ ws2_32 transitively on WIN32).
+add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_test.cpp)
+target_include_directories(npruntime_two_endpoint_socket_test
+    PRIVATE ${CMAKE_SOURCE_DIR}/apps/nw_server)
+target_link_libraries(npruntime_two_endpoint_socket_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld
+            opennova_mission opennova_app_common)
+target_compile_definitions(npruntime_two_endpoint_socket_test PRIVATE
+    DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
+if(WIN32)
+    target_link_libraries(npruntime_two_endpoint_socket_test PRIVATE ws2_32)
+endif()
+add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
