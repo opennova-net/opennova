@@ -19,7 +19,8 @@ namespace opennova {
 //     the prior 0x4af990 citation was Entity_CheckTripleLOS, a wrong anchor)
 //   CNapiGameSession_SendStopHosting@0x4ae320 ("ClientStopHosting")
 //   CNapiGameSession_SendStopPlaying@0x4ae3b0 ("ClientStopPlaying")
-//   CNapiNetwork_RandomizeTimeout@0x4a6d50   (1000-9999ms random timeout)
+//   CNapiNetwork_RandomizeTimeout@0x4a6d50   (1000-9999ms random timeout;
+//     retail Jointops equivalent is @0x4c4d80 — see docs/net §6.2)
 
 // Session state codes as witnessed in `dword_989574` polling loops inside
 // CNapiGameSession_ConnectOrHost. The values match the jodemo globals so

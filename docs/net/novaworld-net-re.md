@@ -3458,8 +3458,9 @@ already scores farthest-from-enemy over the start family but (a) its avoid-set m
 players and (b) the `rand()` tiebreak was deferred. `[orig: Entity_FindBestSpawnPoint @0x50ccc0]`
 
 **D-NET-116** [behavior, DOCUMENTED] **The pending-spawn loop gates on the mission-load flag.**
-`CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0` runs only when `is_authority && !dword_24D1DE0 &&
-!g_spawn_success_gate`. `dword_24D1DE0` is the mission-LOADING-in-progress flag (written throughout
+`CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0` runs only when `is_authority && !g_net_spawn_suspended &&
+!g_spawn_success_gate`. `g_net_spawn_suspended` (0x24D1DE0, formerly `dword_24D1DE0`; renamed in the
+2026-06-27 grill, D-NET-117) is the mission-LOADING-in-progress flag (written throughout
 `Game_StartMission @0x524360`); the server does not process pending spawns until load completes and
 the pool-3 start markers are promoted — so the placement scan always has markers to choose from. (The
 same function also holds the spawn-time team-BALANCE gate — `CNapiServerConfig_BuildFlags & 0xF0`,
@@ -3498,42 +3499,67 @@ message-queue code) — it is not a real class.
 | `NapiNPMsgInfo` | `{u32 msg_id, u32 magic, handler, handler2}` | sentinel = `magic==0`; `handler2` always 0 in observed entries |
 | `NapiNPOpcodeInfo` | `{u32 index, u32 opcode, u32 magic, handler}` | magic always `0x7C08C6` (= addr of `font_name`; possible string pointer, see §5.0); sentinel `index=0xFFFFFFFF` |
 
-### 6.2 `CNapiNetwork` (~4524 B; methods 0x4a8040-0x4ca4a0; 32/33 typed)
+### 6.2 `CNapiNetwork_*` / `CNapiServer*` method family (42 methods; receiver = `NapiNPServerCtx`)
 
-| Offset | Field | Size | Notes |
-|---|---|---|---|
-| 0 | `list_heads[5]` | 80 | five linked-list head sentinels |
-| 80 | `transport_mode` | 4 | 0=down, 1=host, 2=client_relay, 3=client_direct (per method dispatch) |
-| 84 | `socket_state` | 4 | state machine 0..4 |
-| 88 | `field_58` | 4 | gates OpenTransportSocket |
-| 92-100 | `connection_mode` / `is_authority` / `is_mp_session_peer` | 12 | the host/client config sub-struct, resolved: written by `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` from the connection mode (§5.0, §6.3) |
-| 104 | pad | 3372 | unaccounted NAPI internals (queues / logging / per-session state) |
-| 3476 | `disconnect_event_buf` | 184 | `NapiNPDisconnectEvent` buffer; cleared by Shutdown |
-| 3660-3668 | `field_E4C/E50/E54` | 12 | |
-| 3672 | `np_manager` | 4 | `NapiNPManager *` |
-| 3676 | `np_protocol` | 4 | `NapiNPProtocol *` |
-| 3680 | `field_E60` | 4 | |
-| 3684 | `ping_manager` | 4 | `NapiPingManager *` |
-| 3688 | `game_settings` | 216 | inline `NapiGameSettings` (§6.4) |
-| 3904 | `server_info_buf` | 72 | |
-| 3976 | `net_config` | 520 | inline `NapiNetConfig` |
-| 4496 | `field_1190` | 4 | |
-| 4500 | pad | 20 | |
-| 4520 | `field_11A8` | 4 | |
+The NAPI "CNapiNetwork" class methods (range 0x4a8040-0x4ca4a0) all operate on the game
+singleton `g_napi_np_ctx` (§6.3). **There is no separate `CNapiNetwork` struct.** An undersized
+4432-B duplicate type by that name existed in the IDB and was **deleted 2026-06-27** (grill below);
+the single canonical receiver is `NapiNPServerCtx` (§6.3). All `__thiscall` methods are now typed
+`(NapiNPServerCtx *this)`; the callbacks are `__cdecl` with the ctx as the first arg.
 
-Key witnesses: `[orig: CNapiNetwork_Init @ 0x4ca4a0]` (all list heads + manager pointers +
-settings init; also configures the ping manager to 3000/2/10, §6.6),
-`[orig: CNapiNetwork_OpenTransportSocket @ 0x4c6a40]` (transport-mode dispatch),
-`[orig: CNapiNetwork_CheckPlayerTimeouts @ 0x4c8ad0]` (walks `np_protocol`'s connection list),
-`[orig: CNapiNetwork_Shutdown @ 0x4ca440]`. Open: one method missed in the typing batch
-(probably `CNapiNetwork_GetConnectionParams @ 0x4a8040`); the 3372-byte interior gap.
+Roster (retail `Jointops.exe`):
 
-### 6.3 `NapiNPServerCtx` — `g_napi_np_ctx @ 0xB5CBC8` (4520 B, 473 xrefs)
+- **Lifecycle:** `_Init @0x4ca4a0` (list heads + manager pointers + settings; ping 3000/2/10, §6.6),
+  `_ClearState @0x4c8690` (zeroes the whole **0x1470 = 5232 B** object + re-inits
+  `game_settings`/`net_config`; was Kong `CNapiServerInfo_Init` — a misnomer, it resets the ctx not a
+  sub-struct), `_Shutdown @0x4ca440`.
+- **Transport:** `_SetTransportMode @0x4c8750` (writes `socket_state` +0x54), `_OpenTransportSocket
+  @0x4c6a40` (opens a UDP socket only for modes 2/3/4), `_TearDownSocket @0x4c4c90`, `_SendUDPPacket
+  @0x4c4d30`, `_GetLocalAddress @0x4c4f60` (static `__stdcall`, no `this`).
+- **Pump** (thin wrappers over `NapiNP*_Pump`; flag bitmask decoded in-IDB): `_PumpManagerReceive
+  @0x4c4d10` (mgr flag 4 = receive pass), `_PumpServerProtocolRecv @0x4c4ee0` (flags 25),
+  `_PumpServerProtocolSend @0x4c4f00` (737), `_PumpClientProtocolRecv @0x4c4fe0` (26),
+  `_PumpClientProtocolSend @0x4c5000` (738), `_PumpTransportAndProtocol @0x4c6e00`, `_PumpAndCheckState
+  @0x4c6e80`, `_DrainProtocolTimers @0x4c6de0`, `_DrainPendingDataTransfers @0x4c6e50`. Kong named the
+  four protocol pumps `PumpProtocolType<flags>`; renamed recv/send × server/client per the
+  `[orig: NapiNPProtocol_Pump @ 0x62a650]` decode (bit 0x8 = `PumpRecvQueues`, 0x3F0 = per-conn) and
+  `[orig: CNapiNPConnection_PumpFlags @ 0x629780]` (0x20 = enumerator-send, 0x40 = state machine; low
+  bit 0x1 selects server-role connections, 0x2 client-role), corroborated by the caller split
+  (`Server_*` vs `Client_*`/`NetClient_*`).
+- **Session/state:** `_IsSessionActive @0x4c6f00`, `_GetSessionUptime @0x4c6ed0`,
+  `_UpdateSessionTimestamps @0x4c6f20`, `_RandomizeTimeout @0x4c4d80` (writes `randomized_timeout_ms`
+  +0x1194, value 1000-9999 ms — **retail addr; the `0x4a6d50` cited in `libs/napi` & `libs/novaworld`
+  is the jodemo image, a different binary**), `_UpdateDedicatedServerFlag @0x4c6d50`, `_FindPlayerByName
+  @0x4c69e0`, `_ParseServerVarList @0x4c4310`, `_SetNetLogFile @0x4c69a0`, `_QueueReliableMessage
+  @0x4c4fa0`, `_GetDisconnectReasonString @0x4c7000` (fills `disconnect_reason_buf` +0x1270),
+  `_DisconnectActiveConnection @0x4c9140` (builds a `NapiNPDisconnectEvent` on `napi_conn` then
+  `[orig: CNapiNPConnection_RequestDisconnect @ 0x61e0f0]`; was Kong `SendPunkBusterChat` — a misnomer,
+  there is no chat path, only a disconnect-with-reason).
+- **Callbacks (`__cdecl`, ctx as first arg):** `_ValidateJoinRequest @0x4c61b0`, `_OnConnectedToServer
+  @0x4c62e0` (writes `active_connection_id` +0x1190), `_OnDisconnectedFromServer @0x4c63d0` (writes
+  `disconnect_event_buf`), `_CheckPlayerTimeouts @0x4c8ad0`. `_OnSessionDiscovered @0x4c8470` and
+  `_OnSessionRemoved @0x4c68c0` take a session-list head (not the ctx); `_QueueEventEntry @0x4c6890`
+  takes a player object.
+- **Server subclass:** `CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0`,
+  `CNapiServer_DisconnectPendingSpawnBans @0x4c9290`, `CNapiServer_OnPlayerDisconnected @0x4c94d0`
+  (`__cdecl`), `CNapiServerConfig_BuildFlags @0x4c4dc0`. `CNapiServerInfo_SerializeToSession @0x4c3650`
+  and `CNapiServerInfo_ClearAllStrings @0x4cad10` genuinely operate on a separate ~520-B server-info
+  struct (fields BT/VN/BN/DB/.../PBC/NWUVERSION), not the ctx — names retained.
+- **Not a network method:** `0x4a8040` (Kong `CNapiNetwork_GetConnectionParams`) reads display
+  width/height/AA-level from the video-config object `off_840960`; sole caller `Game_InitSubsystems`
+  right after `Renderer_SetDisplayModeWithFallback`. Renamed `VideoConfig_GetResolution` and removed
+  from the family.
 
-The game-level singleton is a **`CNapiNetwork`-shaped header** plus game-specific trailing
-fields: field offsets line up byte-for-byte (CNapiNetwork is 4524 B, the singleton 4520 B; the
-difference is one trailing pointer), and every call site passes `&g_napi_np_ctx` cast to
-`CNapiNetwork *`. Applied (conservative) layout:
+### 6.3 `NapiNPServerCtx` — `g_napi_np_ctx @ 0xB5CBC8` (5232 B = 0x1470, 473 xrefs)
+
+`NapiNPServerCtx` is the **single canonical type** for this object and the receiver of the entire
+`CNapiNetwork_*`/`CNapiServer*` family (§6.2). The previously-documented separate `CNapiNetwork`
+struct was an undersized (4432 B) duplicate of the same layout and was deleted from the IDB
+2026-06-27. The **true size is 0x1470 = 5232 B**, witnessed by `[orig: CNapiNetwork_ClearState @
+0x4c8690]` doing `memset(&g_napi_np_ctx, 0, 0x1470)` and by `[orig: CNapiServer_OnPlayerDisconnected
+@ 0x4c94d0]` writing at +0x11A8; the struct was grown to 5232 and the four interior addresses that
+IDA had auto-named as standalone globals (0xB5DD70/74, 0xB5DDB4, 0xB5DDB8) were folded back in as
+ctx fields. Applied layout:
 
 | Offset | Field | Size | Notes |
 |---|---|---|---|
@@ -3554,12 +3580,15 @@ difference is one trailing pointer), and every call site passes `&g_napi_np_ctx`
 | 0xE68 | `game_settings` | 216 | inline `NapiGameSettings` (§6.4); side passwords at absolute 0xEA8/0xEC8 drive join-reject codes 19/20 |
 | 0xF40 | `server_info_buf` | 72 | `+0xF3C` region note: a PunkBuster handle/flag is read at 0xF3C (single witness, `Server_TickUpdate` → `PBServer_Shutdown`) |
 | 0xF88 | `net_config` | 520 | |
-| 0x1190 | `field_1190` | 4 | NAPI-internal only |
-| 0x1194 | pad | 4 | |
+| 0x1190 | `active_connection_id` | 4 | set on connect from the connection's id (`OnConnectedToServer`), cleared on disconnect. Was `field_1190` |
+| 0x1194 | `randomized_timeout_ms` | 4 | 1000-9999 ms, written by `[orig: CNapiNetwork_RandomizeTimeout @ 0x4c4d80]`. Was pad |
 | 0x1198 | `send_mask` | 4 | bitmask used by `NapiNPServer_SendFiltered` (preserved) |
 | 0x119C | `send_target_player` | 4 | preserved |
-| 0x11A0 | `send_target_state` | 4 | preserved |
+| 0x11A0 | `send_target_slot` | 4 | preserved (was `send_target_state`) |
 | 0x11A4 | `send_filter_416` | 4 | preserved |
+| 0x11A8 | `field_11A8` | 4 | cleared (=0) on player disconnect by `CNapiServer_OnPlayerDisconnected`; semantics unconfirmed |
+| 0x11AC | `field_11AC` / `field_11EC` / `field_11F0` | 196 | interior fields (formerly auto-named globals); not yet individually witnessed |
+| 0x1270 | `disconnect_reason_buf` | 512 | localized disconnect/error string built by `[orig: CNapiNetwork_GetDisconnectReasonString @ 0x4c7000]`; ends at 0x1470 |
 
 `is_mp_session_peer` rename rationale (user-approved, applied to the IDB): the literal
 "is dedicated server" reading is contradicted by three witnesses —
@@ -4549,6 +4578,16 @@ Stock-content validation (the FIRST capture of a normal retail Co-op session —
   - **`sub_6253C0 → CNapiNPConnection_TeardownActiveConnection`** — the leave/teardown invoked by `SetState` when departing `conn_state` 1/5 (and by `Destroy`/`InitFromSession`): sends throttled goodbye/disconnect packets (`SendDisconnectPacket`, 0x46/0x86, count clamped by `cs_dir0.recv_max_per_tick`≤32), fires server/client leave callbacks, rebuilds the quick-connection list, **clears `net_state.tx_crypto_key` + `crypto_key`/SCRK**, resets `connection_id`/session keys, clears DSP queues. The prior "processes up to 32 received messages/tick" comment was WRONG (the 32 is the send clamp). NOTE: Hex-Rays fails on this function (the `add esi,0x384` `this`-reassignment); read via disasm. Fixing its bogus auto-prototype also **un-stuck the Hex-Rays failure on `CNapiNPConnection_SetState @ 0x626250`** (a caller) — both were collateral of the corrupt callee type.
   - **Struct `NapiNPConnection` filled out (1960→1984 B = the real `[orig: CNapiNPConnection_Create @ 0x62acb0]` alloc).** New `NapiNPDisconnectEvent` (184 B @ +0x654) = `{valid, role(DS), reason_code(DC), param1(DP1), param2(DP2), char message[128](DSTR), dpc(DPC), char extra[32](DDSTR)}` — field→TLV map cross-validated against `SendDisconnectPacket` (emit) + `HandleDescriptionPacket`/`PumpStateMachine` (populate). Heartbeat/keepalive block named (+0x710..+0x730: `heartbeat_enabled`, `keepalive_idle_ms`=10000, `heartbeat_step_ms`=1000, `heartbeat_min_ms`, `heartbeat_max_ms`=60000, `heartbeat_cur_ms`, `heartbeat_next_tick`) validated against the `PumpStateMachine` clamp logic. Plus send/recv tick + flag fields (+0x63c..+0x650: `last_send_tick`, `last_send_interval_tick`, `last_recv_activity_tick`, `send_holdoff_countdown`, `send_flush_counter`, `has_pending_out`), `pending_disconnect`/`desc_sent` flags, and the trailing seq fields `out_packet_seq`(+0x7ac)/`recv_ack_seq`(+0x7b8). Param typing normalized on `SendPing`/`SendDisconnectPacket`/`PumpStateMachine` so connection fields render by name. (`SendEncryptedPayload`'s param is a DSP outgoing descriptor from `NapiNPDSPQueue_PumpOutgoing @ 0x625050`, NOT a bare connection — left `NapiNPConnection**` + a clarifying comment rather than force a false field map.)
   - **Globals named/typed:** `g_txkey_charset` (`char*`→"0123456789BCDFGHJKLMNPQRSTVWXYZ", the vowel-free key alphabet) + `g_txkey_charset_len` (lazy strlen cache, 3 xrefs all in `GenerateTxKey`), `aNwuSessionKey` (the `"asdfj…"` outer NWU key), `aDpc` ("DPC" disconnect TLV tag), `g_empty_str` (the misnamed `font_name` `""` blank-fill, 407 binary-wide refs), and 17 ClientJoin/SessionInit TLV tag strings (`aNpNvs`/`aNpCi`/`aNpHk`/… defined as C strings). Opcode legs confirmed in passing: **0x44/0x84** missing-seq (`SendMissingSeqList`, NACK-style — unwitnessed in the reimpl, candidate future decoder), **0x45/0x85** ping (`SendPing`, WR/MS TLVs), **0x47/0x87** DSP encrypted-fragment session-data (`SendEncryptedPayload`). Adversarially re-verified (independent pass): every renamed field re-checked against its witnessing access; struct singletons confirmed (no duplicate types); all 49 functions decompile except the documented `TeardownActiveConnection` Hex-Rays edge case. [orig: CNapiNPConnection_Create @ 0x62acb0 / CNapiNPConnection_SendClientJoin @ 0x61fe20 / CNapiNPConnection_SendDisconnectPacket @ 0x61f2a0 / CNapiNPConnection_PumpStateMachine @ 0x6292e0 / CNapiNPConnection_TeardownActiveConnection @ 0x6253c0 / NapiNPEnumerator_Create @ 0x625f50]
+
+`CNapiNetwork_*` / `CNapiServer*` IDB-hygiene grill (decomp cleanup + naming validation of the whole
+network-context method family, 2026-06-27; IDB-only — no reimpl behaviour change):
+- **D-NET-117** [INFO, IDB] **The `CNapiNetwork_*`/`CNapiServer*` family (42 functions, 0x4a8040-0x4ca4a0) was cleaned up and its names validated against the bytes.** Changes (Jointops.exe.kong.i64):
+  - **Receiver type consolidated onto `NapiNPServerCtx`** (user-approved). The duplicate `CNapiNetwork` struct (4432 B, `field_*` placeholders) was **deleted**; all 42 method `this`/ctx params now type as `NapiNPServerCtx *`, matching the type already on `g_napi_np_ctx`. `NapiNPServerCtx` grown from 4520 to its true **5232 B (0x1470)** (witnessed by `ClearState`'s `memset` and `OnPlayerDisconnected`'s +0x11A8 write); `field_5C`→`connection_mode`, new `active_connection_id`@0x1190, `randomized_timeout_ms`@0x1194, `disconnect_reason_buf`@0x1270; four interior auto-named globals folded back in as ctx fields. See §6.2/§6.3.
+  - **Calling-convention fixes:** `CheckPlayerTimeouts`, `DisconnectActiveConnection`, `ProcessPendingPlayerSpawns`, `DisconnectPendingSpawnBans`, `ClearState`, `SerializeToSession` were `__thiscall` mis-detected as `__cdecl`/no-args (used `ecx` as the object base); corrected so fields render by name.
+  - **Misnomers fixed (6):** Kong `PumpProtocolType25/737/26/738` → `PumpServerProtocolRecv`/`PumpServerProtocolSend`/`PumpClientProtocolRecv`/`PumpClientProtocolSend` (the suffix was the literal `flags` value; recv/send from the `NapiNPProtocol_Pump` 0x8/0x3F0 decode, server/client from the connection-type low-bit selector + caller split); `PumpManagerType4` → `PumpManagerReceive`; `SendPunkBusterChat @0x4c9140` → `DisconnectActiveConnection` (no chat — builds a `NapiNPDisconnectEvent` + `RequestDisconnect`); `CNapiServerInfo_Init @0x4c8690` → `CNapiNetwork_ClearState` (resets the whole ctx, not a sub-struct); `CNapiNetwork_GetConnectionParams @0x4a8040` → `VideoConfig_GetResolution` (**not a network function** — reads display width/height/AA from `off_840960`).
+  - **`RandomizeTimeout` retail address pinned: `0x4c4d80`.** The `0x4a6d50` cited in `libs/napi/include/napi/session.h` and `libs/novaworld/include/novaworld/connection/manager.h` is the **jodemo** image, not retail Jointops — migrated in lockstep.
+  - **Globals named/typed:** `g_is_dedicated_server` (0xB5F4E4), `g_server_join_locked` (0xC94794), `g_local_net_address_str` (0x7CA298), `g_net_spawn_suspended` (0x24D1DE0, formerly `dword_24D1DE0`, the mission-loading spawn gate, §5.42).
+  - Adversarially re-verified (independent pass): all renames/types re-checked against witnessing accesses; no duplicate types; `connection_mode`@0x5C flagged WEAK (writer `CGameSession_SetConnectionMode @0x4c49f0` confirmed, no in-family reader). [orig: CNapiNetwork_Init @ 0x4ca4a0 / CNapiNetwork_ClearState @ 0x4c8690 / CNapiNetwork_RandomizeTimeout @ 0x4c4d80 / CNapiNetwork_DisconnectActiveConnection @ 0x4c9140 / NapiNPProtocol_Pump @ 0x62a650 / CNapiNPConnection_PumpFlags @ 0x629780]
 
 C5 joi-regurl (PARTIAL): documentation only — NK separator ':' and HOSTKEY trim ('&' then ']')
 confirmed; `parse_joi_connection_string`'s NI/NP-presence gate is a defensible live-path choice;

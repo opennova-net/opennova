@@ -29,7 +29,7 @@ const char *drop_reason_name(DropReason r);
 // connection got evicted, and when retail resumed UDP after the user
 // clicked Host, the SESSION packets bounced as "before AUTH" forever.
 // Per-connection RandomizeTimeout window is still
-// (CNapiNetwork_RandomizeTimeout @ 0x4a6d50 → [1000, 9999]ms) but the
+// (CNapiNetwork_RandomizeTimeout @ 0x4a6d50 jodemo / 0x4c4d80 retail → [1000, 9999]ms) but the
 // SERVER's grace can be much wider since we only enforce eventual
 // cleanup. Override via HEARTBEAT_TIMEOUT_MS env var if needed.
 class ConnectionManager {
