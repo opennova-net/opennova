@@ -949,6 +949,11 @@ target_include_directories(gsb_real204_decode_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_definitions(gsb_real204_decode_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 add_test(NAME gsb_real204_decode COMMAND gsb_real204_decode_test)
 
+# ADR 0010 / P7 Part 2 — the lobby HTTP flow (login / GSB / NWJoin machines) driven bytes-in/out.
+add_executable(http_flow_test novaworld/http_flow_test.cpp)
+target_link_libraries(http_flow_test PRIVATE opennova_novaworld opennova_novacrypto)
+add_test(NAME http_flow COMMAND http_flow_test)
+
 add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
 target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_novacrypto)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

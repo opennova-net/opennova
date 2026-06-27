@@ -27,6 +27,7 @@ add_library(opennova_novaworld STATIC
     src/host_repository.cpp
     src/unknown_tracker.cpp
     src/http_login.cpp
+    src/http_flow.cpp
 )
 
 target_include_directories(opennova_novaworld
