@@ -28,26 +28,12 @@ void log_deferred_once(uint8_t tag) {
 // How the machine treats one tag this step.
 enum class Action { EmitEmpty, EmitBody, Defer, SkipSilent };
 
-} // namespace
-
-// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
-InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
-                                                     uint32_t now_tick) {
-	(void)now_tick; // reserved for the 0x1A timestamp body (currently deferred)
-	InitialStateStep step;
-
-	// Eligible only once the connection's pool-0 entity exists (PlayerAdded) and the World is wired.
-	if (ctx.world == nullptr) return step;            // P2 unit-test path: no-op (keep-green lever)
-	if (conn.phase < ConnectionPhase::PlayerAdded) return step;
-	if (conn.burst.spawned) return step;              // already complete
-
+// Advance the §5.2a burst by exactly ONE phase: resolve the current (tag, action) for the cursor,
+// emit it into `step` (or not), climb the world-batch counter, then move the cursor (handling the
+// player-sync -> world-stream transition and the terminator). The one-shot driver below loops this
+// until the burst completes. `b` is conn.burst.
+void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, InitialStateStep &step) {
 	InitialStateBurst &b = conn.burst;
-	if (b.sync_state == 0) {                            // start the player-sync track
-		b.sync_state = 2;
-		b.player_sync_subphase = 8;
-		b.game_state = 8;                              // [orig: CNetPlayer_SetGameState(.., 8)]
-	}
-
 	uint8_t tag = 0;
 	Action action = Action::SkipSilent;
 	bool is_world_batch = false;
@@ -143,6 +129,34 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 			++b.world_stream_phase;
 		}
 	}
+}
+
+} // namespace
+
+// [orig: Server_SendInitialGameStateToPlayer @0x51bba0]
+InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+                                                     uint32_t now_tick) {
+	(void)now_tick; // reserved for the 0x1A timestamp body (currently deferred)
+	InitialStateStep step;
+
+	// Eligible only once the connection's pool-0 entity exists (PlayerAdded) and the World is wired.
+	if (ctx.world == nullptr) return step;            // P2 unit-test path: no-op (keep-green lever)
+	if (conn.phase < ConnectionPhase::PlayerAdded) return step;
+	if (conn.burst.spawned) return step;              // already complete
+
+	InitialStateBurst &b = conn.burst;
+	if (b.sync_state == 0) {                            // start the player-sync track
+		b.sync_state = 2;
+		b.player_sync_subphase = 8;
+		b.game_state = 8;                              // [orig: CNetPlayer_SetGameState(.., 8)]
+	}
+
+	// [orig: Server_OnPlayerJoin @0x51a680; D-NET-114] The §5.2a burst is ONE-SHOT per join — the
+	// original emits the whole player-sync + world-stream sequence synchronously in a single call (one
+	// engine tick), NOT one phase per tick. Drain both tracks here (advance_burst_one_phase walks the
+	// cursor to the sync_state==5 terminator); the caller invokes this once per connection per tick and
+	// skips the connection afterwards (burst.spawned).
+	while (b.sync_state != 5) advance_burst_one_phase(ctx, conn, step);
 
 	step.advanced = true;
 	return step;

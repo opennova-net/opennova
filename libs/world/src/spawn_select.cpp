@@ -19,6 +19,13 @@ SpawnPointResult select_player_spawn(const World &world, const int32_t *types, s
     };
     std::vector<Marker> markers;
     std::vector<Vec3> avoid;
+    // The avoid set is every live Organic — which INCLUDES already-spawned players (they are
+    // Organic). This is the witnessed spread mechanism (D-NET-115): the original scores markers by
+    // nearest distance to any pool-0 entity with Flags & 0x100, and that flagged set contains the
+    // players already added, so the second player to spawn scores the first player's marker low and
+    // a different marker wins. With multiple start markers, players spread; with exactly ONE marker,
+    // every player lands on it — single-marker stacking is FAITHFUL (the original has no further
+    // push-apart). [orig: Entity_FindBestSpawnPoint @0x50ccc0]
     world.registry.for_each([&](const Entity &e) {
         if (e.kind == EntityKind::Marker) {
             markers.push_back({e.item_id, e.position, e.yaw});

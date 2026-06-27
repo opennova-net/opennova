@@ -157,6 +157,14 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 			p.heading = static_cast<int16_t>(
 					(static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
+			// Look-pitch: DEFERRED on the World path [D-NET-117]. The session pitch this mirrors
+			// (pose_from_session's gss.client_pitch) is the HIGH 16 bits of the BAM32 look-pitch
+			// (entity_wire_bridge stores ae.pitch >> 16). world::Entity::pitch is NOT that value — it is
+			// unset for a net-snapped remote peer (apply_player_intent writes AiEntity::pitch, not the
+			// world entity) and the LOW 16 bits for the local player (infantry.cpp narrows look_pitch) —
+			// so sourcing it here would report wrong-units pitch. Leave it 0 (the HostJoinerPose default)
+			// until the AiEntity look-pitch is threaded in; pitch is ~0 at spawn and never reaches the
+			// wire (the 0x0C/0x0A pitch comes from the AiEntity, not this in-process pose event).
 			p.team = e->team;
 			return p;
 		}
@@ -179,21 +187,40 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 			for (InitialStateMessage &m : msgs) conn.link.transport->host_send(m.tag, std::move(m.body));
 		return;
 	}
-	std::vector<ProtocolMessage> replies;
-	replies.reserve(msgs.size());
-	for (InitialStateMessage &m : msgs) replies.push_back(make_protocol_message(m.tag, std::move(m.body)));
-	std::vector<uint8_t> dg = frame_session_replies(conn, replies);
-	if (!dg.empty()) outbound.push_back(std::move(dg));
+	// Frame EACH drained burst message as its OWN 0x83 SESSION datagram — do NOT coalesce the whole
+	// burst into one packet. The original emits a separate NapiNPServer_SendFiltered per tag; coalescing
+	// the 616 B 0x0B BMS header plus the (un-paged) 0x0C pool-0 batch into one datagram would exceed the
+	// UDP MTU and IP-fragment. (The 0x0C batch is still un-paged here; a large mission needs MTU paging
+	// of build_pool0_organic_batch like the Godot listen host's kRecPerMsg — tracked follow-up.)
+	for (InitialStateMessage &m : msgs) {
+		std::vector<ProtocolMessage> reply{make_protocol_message(m.tag, std::move(m.body))};
+		std::vector<uint8_t> dg = frame_session_replies(conn, reply);
+		if (!dg.empty()) outbound.push_back(std::move(dg));
+	}
 }
 
 // The F3 (PeerEnteredWorldStreaming) + PeerSpawned edge-latched events, sourced from conn.burst. The
 // predicates are VERBATIM from the P2 legs — only the value source moved from the GameSessionState to
 // conn.burst. F3 is checked first so the owner admits early + streams the joiner's own dcb-bearing
 // 0x0C during load, ahead of the game-start bundle (else Player_InitPlayer can't find its dcb).
+//
+// NOTE (D-NET-114, host self-stream): the host's OWN type-2 loopback runs the §5.2a burst too — this
+// is FAITHFUL (the original's Server_OnPlayerJoin @0x51a680 runs for the host's own join, not just
+// remote joiners), so we do not suppress it here. But its PeerSpawned carries self_id == the host dcb
+// (kHostPlayerDcb): the event CONSUMER (the binding / NetSystem) must recognize self_id == its own
+// connection id and NOT admit a duplicate "ghost" host avatar — the host's local player is already
+// World::cached.local_player. (Self-filter belongs at the consumer, where the local connection id is
+// known; surfacing it here keeps the libs layer a faithful, consumer-agnostic event source.)
 void surface_burst_events(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                           std::vector<HostAcceptEvent> &events) {
-	if (conn.burst.entity_batch_count > 0 && !conn.burst.spawned && conn.self_id_seen &&
-			!conn.world_stream_announced) {
+	// F3 fires once the world-stream produced batches and the connection's id is known. Do NOT gate on
+	// !conn.burst.spawned: the World-path one-shot burst (D-NET-114) drains the whole §5.2a track in a
+	// single call, so entity_batch_count and spawned latch true together. The !world_stream_announced
+	// flag alone guarantees F3 fires exactly once, and because this block precedes the PeerSpawned block
+	// below, F3 is still surfaced AHEAD of PeerSpawned (the dcb-timing contract) even when both land on
+	// the same tick. (On the P2 path entity_batch_count climbs before spawned, so F3 already fired and
+	// world_stream_announced is latched — removing the !spawned guard is a no-op there.)
+	if (conn.burst.entity_batch_count > 0 && conn.self_id_seen && !conn.world_stream_announced) {
 		conn.world_stream_announced = true;
 		HostAcceptEvent ev;
 		ev.kind = HostAcceptEvent::Kind::PeerEnteredWorldStreaming;

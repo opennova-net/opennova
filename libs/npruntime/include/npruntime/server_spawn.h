@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <world/player_spawn.h> // world::kRetailPlayerMinEntitySlot (canonical)
+
 #include "npruntime/napi_np_connection.h"
 #include "npruntime/napi_np_server_ctx.h"
 
@@ -19,10 +21,9 @@ class World;
 
 namespace opennova::np {
 
-// The host reserves the low pool-0 slots for system/loopback bookkeeping; the player(s) land from
-// slot 4 — the retail player-entity slot (matches the Godot listen host's kRetailPlayerMinEntitySlot).
-// [orig: §5.2b spawn placement]
-inline constexpr uint16_t kRetailPlayerMinEntitySlot = 4;
+// Re-export the canonical world::kRetailPlayerMinEntitySlot into np for the spawn call sites (one
+// definition, shared with the Godot listen host). [orig: §5.2b spawn placement]
+inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEntitySlot;
 
 // High reserved SSN base for player entities — far above the small mission bms ids. P3 allocates
 // downward from this base and skips already-live ids so it never wraps into 0xFFFF/0x0000.

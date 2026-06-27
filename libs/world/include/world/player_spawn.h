@@ -17,6 +17,12 @@ class World;
 // The player infantry template id [orig: net-re §5.2b — type_id 0x14B9].
 inline constexpr int32_t kPlayerInfantryTypeId = 0x14B9;
 
+// The first pool-0 slot a player entity may occupy: the host reserves the low pool-0 slots for
+// system/loopback bookkeeping, so players land from slot 4. Canonical home for both the npruntime
+// host (np::kRetailPlayerMinEntitySlot re-exports this) and the Godot listen host
+// (nova_simulation.cpp). [orig: §5.2b spawn placement]
+inline constexpr uint16_t kRetailPlayerMinEntitySlot = 4;
+
 // Spawn parameters for the host's own player. `yaw` is the mission yaw in degrees (the same
 // convention as a BMS heading). `net_id` is the SSN the caller assigns (default a reserved
 // high value unlikely to collide with mission entities).

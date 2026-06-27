@@ -8,6 +8,14 @@ namespace opennova::np {
 
 namespace {
 
+// [D-NET-112] DIVERGENCE: the original has NO high-band player net-id allocator. It identifies
+// every entity on the wire by its handle (pool<<12|slot, serialize_entity_states_to_packet
+// @0x50f070) and carries four distinct id fields (ownerConnectionId@0x78=dcb, DcbId@0x7c=the
+// find_by_net_id key, Ssn@0x2e, NetId@0x15c). The reimpl collapses those into one
+// world::Entity::net_id, so a player's id must not collide with the small authored mission ids
+// that share that field — hence this reserved high band. Scan downward and skip live ids so the
+// sequence never wraps through 0xFFFF/0x0000 (fixes the prior count-based overflow + reuse). A
+// faithful multi-field id model is the follow-up. [orig: Server_PlayerAdd @0x51cbc0]
 uint16_t allocate_player_net_id(const world::World &world) {
 	for (uint32_t candidate = kPlayerNetIdBase; candidate >= 0x8000u; --candidate) {
 		const uint16_t id = static_cast<uint16_t>(candidate);
@@ -16,6 +24,28 @@ uint16_t allocate_player_net_id(const world::World &world) {
 		if (candidate == 0x8000u) break;
 	}
 	return 0;
+}
+
+// [orig: Server_AssignPlayerTeam @0x4fe310; D-NET-113] The spawning player's team.
+// Witnessed branch order (Server_AssignPlayerTeam): (0) spectator (+100567 && is_in_session) -> 0;
+// (1) co-op gametype ((game_type & 0xFFFDFFFF) == 0x10020) or any non-MP session (!is_in_session)
+// -> 1; (2) DM/TDM -> requested team name / preference, then autobalance. We DROP branch (0) — no
+// spectator field exists in the reimpl yet — so SP / co-op LAN land on team 1 faithfully via branch
+// (1), and a real DM/TDM session autobalances to the least-populated side over the LIVE pool-0
+// players already added (2-team: (t1 > t2) + 1). The spectator branch, the requested-team-name
+// (g_team1/2_name) and team-preference legs, and 4-team placement are the follow-up MP path (the
+// join request carries no team/spectator field yet); they default into the autobalance below.
+uint8_t assign_player_team(const NapiNPServerCtx &ctx, const world::World &world) {
+	constexpr uint32_t kCoopGameTypeMasked = 0x10020u;
+	const uint32_t gt = ctx.game_settings.game_type;
+	if (!ctx.is_in_session || (gt & 0xFFFDFFFFu) == kCoopGameTypeMasked) return 1;
+	uint32_t team1 = 0, team2 = 0;
+	world.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 0 || e.item_id != world::kPlayerInfantryTypeId) return;
+		if (e.team == 1) ++team1;
+		else if (e.team == 2) ++team2;
+	});
+	return static_cast<uint8_t>((team1 > team2) + 1);
 }
 
 } // namespace
@@ -32,7 +62,6 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world) {
-	(void)ctx;
 	// §5.2c spawn-pose selection from the mission's promoted start markers (never an NPC's spot).
 	const world::SpawnPointResult sel = world::select_player_spawn(world);
 	world::PlayerSpawn spawn;
@@ -45,10 +74,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.position = {0.0f, 0.0f, 0.0f};
 		spawn.yaw = 0;
 	}
-	spawn.team = 1; // placeholder until the MP team path (matches the Godot listen host)
+	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
-	// Distinct high-band SSN per player. Allocate by scanning downward from the reserved base so the
-	// sequence never wraps through 0xFFFF/0x0000 and never collides with authored mission net IDs.
+	// Reserved high-band player id (see allocate_player_net_id / D-NET-112 divergence note above).
 	spawn.net_id = allocate_player_net_id(world);
 	if (spawn.net_id == 0) return {};
 	// entity+0x78 = the owning connection's dcb (host loopback dcb / a joiner's ack dcb).
@@ -67,7 +95,14 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	return h;
 }
 
-// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0] — gated is_authority && !dword_24D1DE0 &&
+// !g_spawn_success_gate. dword_24D1DE0 is the mission-LOADING-in-progress flag (set/cleared all over
+// Game_StartMission @0x524360); the original does NOT process spawns until the load completes and the
+// pool-3 start markers are promoted. [D-NET-116] The reimpl maps g_spawn_success_gate -> spawn_success_gate
+// but has no dword_24D1DE0 equivalent — acceptable today because the only callers (tests + the future
+// host driver) wire ctx.world AFTER the world is loaded with its markers. A production driver that wires
+// ctx.world DURING load must add a load-complete gate here, else select_player_spawn finds no marker and
+// the idempotent origin fallback below latches the player at (0,0,0) permanently.
 int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_authority || ctx.spawn_success_gate != 0) return 0;
 	int spawned = 0;

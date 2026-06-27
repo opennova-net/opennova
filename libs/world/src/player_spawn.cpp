@@ -16,6 +16,11 @@ namespace {
 // player (input-ordered, publishes World::cached.local_player) vs a REMOTE peer (a joiner's
 // entity the host snaps from the wire — never the local player). [orig: net-re §5.2b/§5.38]
 EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is_local) {
+    // The infantry motor (mounted below) requires an AiSystem. Bail BEFORE allocating a pool-0
+    // slot so a missing AiSystem never leaks a half-initialized 0x14B9 entity into the pool (the
+    // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
+    if (world.ai == nullptr) return EntityHandle{};
+
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
     // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
     Entity seed;
@@ -48,7 +53,6 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // Mount the infantry motor — same motor as an NPC organic. The host's own player is ordered
     // from input and never AI-think/routed; a remote peer is snapped from the wire and the motor
     // skips it once net-snapped (inf.is_local_player stays false). [orig: net-re §5.38; ADR 0012]
-    if (world.ai == nullptr) return EntityHandle{};
     const int idx = world.ai->attach(h);
     AiEntity &ae = *world.ai->at(idx);
     ae.pos[0] = to_fixed(spawn.position.x);

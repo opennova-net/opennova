@@ -1,5 +1,7 @@
 #include "npruntime/server_session.h"
 
+#include "npruntime/server_spawn.h" // Server_InitNewRoundState (§5.2a step 1)
+
 namespace opennova::np {
 
 // [orig: CGameSession_SetConnectionMode @0x4c49f0] — stores the mode and decomposes it into the
@@ -40,7 +42,15 @@ void create_session(NapiNPServerCtx &ctx, const NapiGameSettings &settings,
 	ctx.np_protocol.max_players = settings.max_players;
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 
-	if (ctx.is_authority) start_server(ctx, startup);
+	if (ctx.is_authority) {
+		start_server(ctx, startup);
+		// §5.2a step 1 — round/local-player context init at session create. [orig:
+		// CNapiGameSession_BuildAndCreateSession @0x5694d0 + SinglePlayer_StartMission @0x561af0 both
+		// call Server_InitNewRoundState @0x51c8e0 here.] Previously declared but never invoked in
+		// production (the burst drove everything); wiring it at its faithful call site retires the
+		// dead-code path.
+		Server_InitNewRoundState(ctx);
+	}
 
 	// mode 3 (host + client): the listen server connects its own local client in-process.
 	if (ctx.connection_mode == ConnectionMode::HostClient && local_client != nullptr) {

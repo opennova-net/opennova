@@ -36,7 +36,8 @@ namespace {
 
 constexpr double kFixed16 = 65536.0;
 constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
-constexpr uint16_t kRetailPlayerMinEntitySlot = 4;
+// Canonical definition lives in libs/world/player_spawn.h (shared with the npruntime host).
+constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
 
 uint64_t perf_now_us() {
 	using Clock = std::chrono::steady_clock;
@@ -1512,8 +1513,10 @@ void NovaSimulation::stream_world_state_to_peer(const opennova::PeerAddr &peer) 
 	organics.entity_count = static_cast<uint16_t>(organics.records.size());
 
 	// The host's OWN player is a real networked player — it MUST carry a non-zero dcb at
-	// entity+0x78 (build_pool0_organic_batch zeroes entity_flags for the whole pool, correct for
-	// AI but NOT for the host player). A 0x14B9 record with dcb==0 is the dedicated-server
+	// entity+0x78. build_pool0_organic_batch now forwards entity_flags = owner_connection_id, but this
+	// (Godot listen-host) spawn path never sets owner_connection_id (unlike the npruntime host, which
+		// stamps it at spawn), so it arrives with entity_flags 0 and is re-stamped below. A 0x14B9
+		// record with dcb==0 is the dedicated-server
 	// reservation: the joining client does NOT keep a player entity for it, so that pool-0 slot
 	// stays empty and the per-frame 0x0A then floods C2S 0x0F for the handle every frame
 	// (NapiNPClientMsg_0x00A @0x4307c4: local_entity.itemDef==null) → 0xC9 disconnect. WIRE-PROVEN:

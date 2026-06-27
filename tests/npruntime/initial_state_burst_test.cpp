@@ -159,6 +159,50 @@ int main_impl() {
 		            "0x10 empty static batch carries the 4-byte header")) return 1;
 	}
 
+	// --- Regression (D-NET-114 one-shot burst F3 latch): driving the World path through
+	// tick_connections must surface BOTH PeerEnteredWorldStreaming (F3) AND PeerSpawned, with F3 first.
+	// The one-shot drain latches entity_batch_count and burst.spawned in the SAME call, so a
+	// !spawned-gated F3 predicate would drop F3 entirely on the World path (losing the dcb-timing
+	// signal). This drives a fresh host loopback (unspawned) so tick_connections runs the full burst. ---
+	{
+		w::World w2;
+		w::AiSystem ai2;
+		w2.ai = &ai2;
+		w2.registry.configure_pool(0, 16);
+		w2.registry.configure_pool(3, 16);
+		{
+			w::Entity m;
+			m.kind = w::EntityKind::Marker;
+			m.item_id = 6002;
+			m.position = {10.0f, 20.0f, 1.0f};
+			w2.registry.spawn(3, m);
+		}
+		ns::LoopbackChannel lb2;
+		np::NapiNPServerCtx ctx2;
+		np::test::bring_up_host(ctx2, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+		                        /*host_key=*/0, &lb2);
+		ctx2.world = &w2;
+		ctx2.mission = &mission;
+
+		const std::vector<np::TickOut> outs = np::tick_connections(ctx2, /*elapsed_ms=*/16, /*now_tick=*/1);
+		int f3_at = -1, spawned_at = -1, seq = 0;
+		for (const np::TickOut &to : outs) {
+			for (const np::HostAcceptEvent &ev : to.events) {
+				if (ev.kind == np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) {
+					if (!expect(ev.self_id == np::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
+					if (f3_at < 0) f3_at = seq;
+				} else if (ev.kind == np::HostAcceptEvent::Kind::PeerSpawned) {
+					if (!expect(ev.self_id == np::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
+					if (spawned_at < 0) spawned_at = seq;
+				}
+				++seq;
+			}
+		}
+		if (!expect(f3_at >= 0, "one-shot World burst still surfaces PeerEnteredWorldStreaming (F3)")) return 1;
+		if (!expect(spawned_at >= 0, "one-shot World burst surfaces PeerSpawned")) return 1;
+		if (!expect(f3_at < spawned_at, "F3 surfaces BEFORE PeerSpawned (dcb-timing order)")) return 1;
+	}
+
 	std::printf("OK\n");
 	return 0;
 }
