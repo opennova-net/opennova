@@ -5,8 +5,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <napi/session.h>           // opennova::ClientVar
 #include <novaworld/client_session.h>
+#include <novaworld/lobby_vars.h>   // opennova::HostRegistration
 
 #include <cstdint>
 #include <memory>
@@ -117,8 +117,8 @@ private:
 	void send_host_update();    // ClientHostUpdate (heartbeat refresh)
 	void enter_state(State next, const String &reason = String());
 
-	// Assemble the Host var-list shared by request + update.
-	std::vector<opennova::ClientVar> build_host_vars() const;
+	// Gather the GDScript-set host config the libs builders consume.
+	opennova::HostRegistration host_cfg() const;
 
 	// Config.
 	String host_ = "127.0.0.1";

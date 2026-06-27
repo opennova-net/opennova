@@ -280,18 +280,14 @@ void NovaWorldHost::poll_gate() {
 		gate_met_tag_ = parsed.met_label;
 		gate_udp_code1_ = parsed.udp_code1;
 		gate_udp_code2_ = parsed.udp_code2;
-		const auto colon = parsed.udp_novaworld.find(':');
-		if (colon == std::string::npos) {
+		std::string udp_host;
+		uint16_t udp_port = 0;
+		if (!opennova::parse_host_port(parsed.udp_novaworld, udp_host, udp_port)) {
 			enter_state(STATE_ERROR, String("UDPNOVAWORLD malformed"));
 			return;
 		}
-		nw_udp_host_ = String(parsed.udp_novaworld.substr(0, colon).c_str());
-		try {
-			nw_udp_port_ = static_cast<uint16_t>(std::stoi(parsed.udp_novaworld.substr(colon + 1)));
-		} catch (...) {
-			enter_state(STATE_ERROR, String("UDPNOVAWORLD port parse failed"));
-			return;
-		}
+		nw_udp_host_ = String(udp_host.c_str());
+		nw_udp_port_ = udp_port;
 		begin_session();
 	}
 }
@@ -378,36 +374,25 @@ void NovaWorldHost::sync_session_state() {
 	}
 }
 
-std::vector<opennova::ClientVar> NovaWorldHost::build_host_vars() const {
-	std::vector<opennova::ClientVar> host;
-	host.push_back({0, "ServerName", to_std(server_name_)});
-	host.push_back({0, "ServerPortNumber", std::to_string(game_port_)});
-	host.push_back({0, "Players", std::to_string(player_count_)});
-	host.push_back({0, "MaxPlayers", std::to_string(max_players_)});
-	host.push_back({0, "Region", to_std(region_)});
-	if (!advertise_ip_.is_empty()) {
-		host.push_back({0, "ServerIP", to_std(advertise_ip_)});
-	}
-	if (!mission_name_.is_empty()) {
-		host.push_back({0, "MissionName", to_std(mission_name_)});
-	}
-	return host;
+opennova::HostRegistration NovaWorldHost::host_cfg() const {
+	opennova::HostRegistration cfg;
+	cfg.server_name = to_std(server_name_);
+	cfg.mission_name = to_std(mission_name_);
+	cfg.max_players = max_players_;
+	cfg.region = to_std(region_);
+	cfg.player_name = to_std(player_name_);
+	cfg.game_port = game_port_;
+	cfg.advertise_ip = to_std(advertise_ip_);
+	cfg.app_id = to_std(app_id_);
+	cfg.lobby_name = to_std(lobby_name_);
+	cfg.player_count = player_count_;
+	return cfg;
 }
 
 void NovaWorldHost::send_host_request() {
 	if (!session_ || !session_->is_verified()) return;
 	// [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
-	std::vector<opennova::ClientVar> cookie = {{0, "NWUID", server_nwuid_}};
-	std::vector<opennova::ClientVar> host_setup = {
-	    {0, "AppId", to_std(app_id_)},
-	    {0, "LobbyName", to_std(lobby_name_)},
-	    {0, "MaxPlayers", std::to_string(max_players_)},
-	    {0, "ServerPortNumber", std::to_string(game_port_)},
-	};
-	std::vector<opennova::ClientVar> player_list = {{0, "Slot0", to_std(player_name_)}};
-
-	auto req = opennova::make_client_host_request(
-	    /*CurrentlyHosting*/ 1, cookie, host_setup, build_host_vars(), player_list);
+	auto req = opennova::make_host_request(host_cfg(), server_nwuid_);
 	send_nw_datagram(session_->build_lobby_message(req));
 
 	enter_state(STATE_HOSTING);
@@ -423,8 +408,7 @@ void NovaWorldHost::send_host_request() {
 void NovaWorldHost::send_host_update() {
 	if (!session_ || !session_->is_verified()) return;
 	// [orig: CNapiGameSession_SendHostUpdate @ 0x4d3860]
-	std::vector<opennova::ClientVar> player_list = {{0, "Slot0", to_std(player_name_)}};
-	auto upd = opennova::make_client_host_update(build_host_vars(), player_list);
+	auto upd = opennova::make_host_update(host_cfg());
 	send_nw_datagram(session_->build_lobby_message(upd));
 	emit_signal("host_update_sent");
 }

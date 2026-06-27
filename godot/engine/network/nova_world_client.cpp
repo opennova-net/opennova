@@ -13,12 +13,12 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <napi/envelope.h>
-#include <novacrypto/epask.h>
 #include <novaworld/client_session.h>
 #include <novaworld/gate_probe.h>
 #include <novaworld/gate_response.h>
 #include <novaworld/gsb.h>
-#include <novaworld/http_login.h>
+#include <novaworld/http_flow.h>
+#include <novaworld/lobby_vars.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -46,6 +46,16 @@ std::vector<uint8_t> from_pba(const PackedByteArray &pba) {
 	std::vector<uint8_t> out(pba.size());
 	if (!out.empty()) {
 		std::memcpy(out.data(), pba.ptr(), out.size());
+	}
+	return out;
+}
+
+// HTTPRequest delivers response headers as "Name: value" lines; the flow finds Set-Cookie itself.
+std::vector<std::string> pba_to_strvec(const PackedStringArray &arr) {
+	std::vector<std::string> out;
+	out.reserve(static_cast<size_t>(arr.size()));
+	for (int i = 0; i < arr.size(); ++i) {
+		out.emplace_back(String(arr[i]).utf8().get_data());
 	}
 	return out;
 }
@@ -153,12 +163,7 @@ void NovaWorldClient::start() {
 	client_key_ = pick_random_uint32();
 	session_.reset();
 	game_session_.reset();
-	cookie_jar_ = opennova::CookieJar{};
-	login_step_ = LOGIN_IDLE;
-	login_poll_count_ = 0;
-	join_step_ = JOIN_IDLE;
-	nwhandle_ = String();
-	pcid_ = String();
+	flow_.reset();
 	nw_udp_port_ = 0;
 	nw_udp_host_ = String();
 	nw_web_domain_ = String();
@@ -222,8 +227,7 @@ void NovaWorldClient::stop() {
 		join_http_->cancel_request();
 	}
 	gsb_request_in_flight_ = false;
-	login_step_ = LOGIN_IDLE;
-	join_step_ = JOIN_IDLE;
+	flow_.reset();
 	if (gate_socket_.is_valid()) {
 		gate_socket_->close();
 		gate_socket_.unref();
@@ -336,39 +340,17 @@ void NovaWorldClient::poll_gate() {
 		emit_signal("server_info_received", info);
 
 		// Parse "host:port" out of UDPNOVAWORLD.
-		const auto colon = parsed.udp_novaworld.find(':');
-		if (colon == std::string::npos) {
+		std::string udp_host;
+		uint16_t udp_port = 0;
+		if (!opennova::parse_host_port(parsed.udp_novaworld, udp_host, udp_port)) {
 			enter_state(STATE_ERROR, String("UDPNOVAWORLD malformed"));
 			return;
 		}
-		nw_udp_host_ = String(parsed.udp_novaworld.substr(0, colon).c_str());
-		try {
-			nw_udp_port_ = static_cast<uint16_t>(std::stoi(parsed.udp_novaworld.substr(colon + 1)));
-		} catch (...) {
-			enter_state(STATE_ERROR, String("UDPNOVAWORLD port parse failed"));
-			return;
-		}
+		nw_udp_host_ = String(udp_host.c_str());
+		nw_udp_port_ = udp_port;
 
 		begin_session();
 	}
-}
-
-// Deterministic [A-Z] string of `len` chars from a seed. Retail's NWPSSK/NWUSID
-// are machine hardware fingerprints (CDKey_GenerateHardwareFingerprint @ 0x4a4a00
-// / generate_hardware_fingerprint @ 0x4a4d00). The genuine .204 capture (frame
-// 10166) shows the lobby verify is NOT gated on them — NWCDKIID/NWCDKIIDEXP1 are
-// empty there and the server still returns Success=1 — so a stable plausible
-// value is sufficient for parity. Deliberately not a real hardware fingerprint.
-static std::string az_fingerprint(uint32_t seed, int len) {
-	static const char kAlpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	uint32_t x = seed ? seed : 0x12345678u;
-	std::string s;
-	s.reserve(static_cast<size_t>(len));
-	for (int i = 0; i < len; ++i) {
-		x = x * 1664525u + 1013904223u;
-		s.push_back(kAlpha[(x >> 24) % 26u]);
-	}
-	return s;
 }
 
 // Create the session state machine and send its ClientHello. Called once the
@@ -403,31 +385,21 @@ void NovaWorldClient::begin_session() {
 	// ClientRequestVerifyResult carries (capture frame 10166). NWUID is filled by
 	// ClientSession from the ServerSessionInit. CD-key fields are empty (retail
 	// sent them empty and still validated); the hardware fingerprints + NWHWI are
-	// best-effort telemetry the lobby verify does not gate on. Locale is filled
-	// here (unlike the join). Harmless against the permissive OpenNova server.
-	std::string country = "United States", language = "English", tz_bias = "0";
+	// best-effort telemetry the lobby verify does not gate on. Built once in libs,
+	// reused for BOTH the UDP verify var-list and the HTTP login cookies (the .204
+	// capture shows the same identity set in both places). TimeZoneBias is the only
+	// OS-sourced field — read it here and pass it in.
+	opennova::LobbyIdentityParams idp;
+	idp.client_index = client_index_;
+	idp.client_key = client_key_;
 	{
 		Dictionary tz = Time::get_singleton()->get_time_zone_from_system();
 		if (tz.has(String("bias"))) {
 			int64_t bias = tz[String("bias")];
-			tz_bias = std::to_string(bias);
+			idp.tz_bias = std::to_string(bias);
 		}
 	}
-	std::string nwhwi = std::string("OpenNova$0$2048$1920x1080$1920x1080");
-	// Built once, reused for BOTH the UDP verify var-list and the HTTP login
-	// cookies (the .204 capture shows the same identity set in both places).
-	identity_vars_ = {
-	    {"CountryName", country},
-	    {"Language", language},
-	    {"TimeZoneBias", tz_bias},
-	    {"MyInstalledExpBits", "0"},
-	    {"NWUID", ""},          // echoed from the ServerSessionInit at runtime
-	    {"NWCDKIID", ""},       // empty in retail; verify is not CD-key-gated
-	    {"NWCDKIIDEXP1", ""},
-	    {"NWPSSK", az_fingerprint(client_index_ ^ 0x5053534Bu, 23)},
-	    {"NWUSID", az_fingerprint(client_key_ ^ 0x55534944u, 16)},
-	    {"NWHWI", nwhwi},
-	};
+	identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	cfg.verify_cookie_vars = identity_vars_;
 
 	UtilityFunctions::print(String("[NovaWorldClient] 0x42 join carries ")
@@ -580,7 +552,7 @@ void NovaWorldClient::sync_session_state() {
 			handshake_elapsed_ = 0.0;
 			tick_accum_ = 0.0;
 			// Session is lobby-ready — fetch the server browser (Phase 2).
-			request_server_list();
+			trigger_gsb();
 		}
 		break;
 	case S::Error:
@@ -598,46 +570,62 @@ Array NovaWorldClient::get_server_rows() const {
 }
 
 void NovaWorldClient::refresh_server_list() {
-	request_server_list();
+	trigger_gsb();
 }
 
-// The GSB blob is served at <startup_url>/jop_2.gsb. The retail client GETs a
-// server-provided browser URL (NW-G3 — the path is not a client literal); for
-// OpenNova we derive it from the gate response's STARTUPURL so the same path
-// works for both the OpenNova and real-NovaWorld targets.
-String NovaWorldClient::gsb_url() const {
-	// The GSB lives at <host>/jop_2.gsb. Derive the host from the gate's
-	// STARTUPURL (which is the full /nwprepare.dll?... bootstrap URL, NOT a bare
-	// host), the same way the login/join legs do — appending to the full
-	// startup_url would yield ".../jop_2_start.htm/jop_2.gsb". This matches the
-	// server's own GSB_SERVER template value (http_listener.cpp).
-	const String base = http_base();
-	if (base.is_empty()) {
-		return String();
+// ---- Lobby HTTP pump (over libs/novaworld LobbyHttpFlow) ----------------
+
+// Snapshot the gate/session outputs into the flow context. The gate values
+// (startup_url/post_ip/post_port) are frozen once the gate replies; web_domain +
+// server_nwuid are frozen once the session is Verified — so re-syncing before each
+// leg is idempotent and cannot shift http_base() mid-login. set_context does NOT
+// touch the flow's cookie jar, so NWHANDLE/PCID survive login -> GSB -> join.
+void NovaWorldClient::sync_flow_context() {
+	opennova::LobbyHttpContext ctx;
+	if (server_info_.has("startup_url")) {
+		ctx.startup_url = std::string(String(server_info_["startup_url"]).utf8().get_data());
 	}
-	// ?a=1 matches the retail GSB fetch (capture frame 43624); a no-op query for
-	// the OpenNova server (it routes on the path).
-	return base + String("/jop_2.gsb?a=1");
+	if (server_info_.has("post_ip")) {
+		ctx.post_ip = std::string(String(server_info_["post_ip"]).utf8().get_data());
+	}
+	if (server_info_.has("post_port")) {
+		// post_port is stored as an int Variant in server_info_ (see poll_gate).
+		ctx.post_port = std::to_string(static_cast<int>(server_info_["post_port"]));
+	}
+	ctx.web_domain = std::string(nw_web_domain_.utf8().get_data());
+	ctx.server_nwuid = session_ ? session_->server_nwuid() : std::string();
+	ctx.locale = std::string(OS::get_singleton()->get_locale().utf8().get_data());
+	ctx.identity_vars = identity_vars_;
+	flow_.set_context(std::move(ctx));
 }
 
-void NovaWorldClient::request_server_list() {
+// Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body).
+Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
+	PackedStringArray headers;
+	for (const std::string &h : spec.headers) {
+		headers.push_back(String(h.c_str()));
+	}
+	const HTTPClient::Method method = (spec.method == opennova::HttpMethod::Post)
+		? HTTPClient::METHOD_POST : HTTPClient::METHOD_GET;
+	return http->request(String(spec.url.c_str()), headers, method, String(spec.body.c_str()));
+}
+
+void NovaWorldClient::trigger_gsb() {
 	if (browser_http_ == nullptr) {
 		return;
 	}
-	const String url = gsb_url();
-	if (url.is_empty()) {
-		return; // no startup_url yet — nothing to fetch
+	sync_flow_context();
+	const opennova::HttpRequestSpec spec = flow_.gsb_request();
+	if (!spec.valid) {
+		return; // no base URL yet — nothing to fetch
 	}
 	if (gsb_request_in_flight_) {
 		browser_http_->cancel_request();
 	}
-	// Carry the login cookie jar: on real NW the GSB fetch is cookie-authenticated
-	// (NW-S5/B3 — the engine attaches every subnet cookie to every request);
-	// harmless to the permissive OpenNova server (empty jar -> no Cookie header).
-	const Error err = browser_http_->request(url, request_headers(false));
-	if (err != OK) {
+	if (ship_spec(browser_http_, spec) != OK) {
 		gsb_request_in_flight_ = false;
-		UtilityFunctions::print(String("[NovaWorldClient] GSB request did not start: ") + url);
+		UtilityFunctions::print(String("[NovaWorldClient] GSB request did not start: ")
+			+ String(spec.url.c_str()));
 		return;
 	}
 	gsb_request_in_flight_ = true;
@@ -646,20 +634,15 @@ void NovaWorldClient::request_server_list() {
 void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
                                                const PackedStringArray &headers,
                                                const PackedByteArray &body) {
-	(void)headers;
+	(void)headers; // GSB does not merge Set-Cookie (the flow's contract)
 	gsb_request_in_flight_ = false;
 
-	if (result != HTTPRequest::RESULT_SUCCESS || response_code != 200) {
+	// NOTE: on_gsb_response's arg order differs from login/join — body 3rd, out 4th, no headers.
+	opennova::GsbResponse parsed;
+	if (!flow_.on_gsb_response(result == HTTPRequest::RESULT_SUCCESS, response_code,
+	                           from_pba(body), parsed)) {
 		UtilityFunctions::print(String("[NovaWorldClient] GSB fetch failed result=")
 			+ String::num_int64(result) + " code=" + String::num_int64(response_code));
-		return;
-	}
-
-	opennova::GsbResponse parsed;
-	if (!opennova::gsb_parse_response(reinterpret_cast<const uint8_t *>(body.ptr()),
-	                                  static_cast<size_t>(body.size()), parsed)) {
-		UtilityFunctions::print(String("[NovaWorldClient] GSB parse failed (")
-			+ String::num_int64(body.size()) + " bytes)");
 		return;
 	}
 
@@ -688,283 +671,57 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 	emit_signal("server_list_updated", server_rows_);
 }
 
-// ---- HTTP helpers (shared by login + join) -----------------------------
-
-// The HTTP base "scheme://host:port" the legacy NW*.dll routes live under,
-// derived from the gate response's STARTUPURL (which points at /nwprepare.dll on
-// that host). Falls back to the gate's POST ip:port.
-String NovaWorldClient::http_base() const {
-	// Real NW: the gate's startupurl carries a "[domainname]" placeholder; the
-	// concrete web host arrives in the SessionInit (e.g. 207.178.209.204:80). Use
-	// it ONLY in that templated case so the OpenNova path (concrete startupurl)
-	// stays byte-identical — our own SessionInit also carries a web-domain CU.
-	const bool templated = server_info_.has("startup_url") &&
-		String(server_info_["startup_url"]).find("[domainname]") >= 0;
-	if (templated && !nw_web_domain_.is_empty()) {
-		String d = nw_web_domain_;
-		if (!d.begins_with("http://") && !d.begins_with("https://")) {
-			d = String("http://") + d;
-		}
-		return d;
-	}
-	if (server_info_.has("startup_url")) {
-		String su = server_info_["startup_url"];
-		const int scheme = su.find("://");
-		if (scheme >= 0) {
-			const int path = su.find("/", scheme + 3);
-			return path >= 0 ? su.substr(0, path) : su;
-		}
-	}
-	if (server_info_.has("post_ip") && server_info_.has("post_port")) {
-		return String("http://") + String(server_info_["post_ip"]) + ":" +
-		       String::num_int64(static_cast<int64_t>(static_cast<int>(server_info_["post_port"])));
-	}
-	return String();
-}
-
-// Headers for an HTTP request: the cookie jar (retail attaches every subnet
-// cookie to every request — NW-S5/B3, so the GSB/join GETs carry NWHANDLE/PCID)
-// plus, for the login POST, the form content type.
-PackedStringArray NovaWorldClient::request_headers(bool form_content_type) const {
-	PackedStringArray h;
-	if (form_content_type) {
-		h.push_back("Content-Type: application/x-www-form-urlencoded");
-	}
-	const std::string ch = cookie_jar_.cookie_header();
-	if (!ch.empty()) {
-		h.push_back(String("Cookie: ") + String(ch.c_str()));
-	}
-	return h;
-}
-
-// Feed every `Set-Cookie:` response header into the jar (case-insensitive prefix;
-// HTTPRequest hands headers back as "Name: value" lines).
-void NovaWorldClient::merge_response_cookies(const PackedStringArray &headers) {
-	std::vector<std::string> values;
-	for (int i = 0; i < headers.size(); ++i) {
-		const String line = headers[i];
-		if (line.to_lower().begins_with("set-cookie:")) {
-			const String v = line.substr(11).strip_edges();  // strlen("set-cookie:") == 11
-			values.push_back(std::string(v.utf8().get_data()));
-		}
-	}
-	if (!values.empty()) {
-		cookie_jar_.merge_set_cookie_values(values);
-	}
-}
-
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------
-
-// Resolve the gate's startupurl. OpenNova serves a concrete URL (pass-through —
-// keeps the proven local path byte-identical); real NW serves a template with
-// [domainname]/[VER1]/[VER2]/[CC]/[GT] placeholders the client substitutes
-// (witnessed in the .204 capture: ver1=3, ver2=2345, cc=us, gt=jop:cus2,
-// domainname = the SessionInit web host).
-String NovaWorldClient::resolve_startup_url() const {
-	String su = server_info_.has("startup_url")
-		? String(server_info_["startup_url"]) : String();
-	if (su.is_empty() || su.find("[domainname]") < 0) {
-		return su;  // concrete (OpenNova) — unchanged
-	}
-	su = su.replace("[domainname]", nw_web_domain_);  // "host:port" from SessionInit
-	su = su.replace("[VER1]", "3").replace("[VER2]", "2345");
-	String cc = "us";  // [CC] = ISO country from the OS locale (en_US -> us)
-	const String locale = OS::get_singleton()->get_locale();
-	const int us = locale.find("_");
-	if (us >= 0) {
-		const String region = locale.substr(us + 1).to_lower();
-		if (!region.is_empty()) cc = region;
-	}
-	su = su.replace("[CC]", cc).replace("[GT]", "jop:cus2");
-	return su;
-}
-
-// Seed the CD-key/hardware identity into the jar — the real-NW login POST carries
-// these as cookies (capture frame 27663), the same set as the UDP verify var-list.
-// NWUID comes from the SessionInit.
-void NovaWorldClient::seed_identity_cookies() {
-	for (const auto &kv : identity_vars_) {
-		std::string value = kv.second;
-		if (kv.first == "NWUID" && value.empty() && session_) {
-			value = session_->server_nwuid();
-		}
-		cookie_jar_.set(kv.first, value);
-	}
-}
-
-// Build the credential POST body and send it. Every field is EPASK-encrypted
-// EXCEPT the echoed EPASK bundle (witnessed in the .204 capture, frame 27663 —
-// our earlier plaintext hidden fields were the source of the server's benign
-// "non-A-P decrypt" warnings). Identity cookies are already seeded into the jar.
-void NovaWorldClient::send_login_post() {
-	using opennova::LoginFormField;
-	std::vector<LoginFormField> fields = {
-		{"EPASK", opennova::epask_to_string(epask_), false},
-		{"NAME", std::string(login_user_.utf8().get_data()), true},
-		{"PASSWORD", std::string(login_pass_.utf8().get_data()), true},
-		{"rememberlogindata", "", false},
-		{"rememberlogin", "0", true},
-		{"pfid", "28", true},
-		{"needtoagree", "jop_2_needtoagree.htm", true},
-		{"nodb", "jop_2_nodb.htm", true},
-		{"relay", "jop_2_relay.htm", true},
-		{"msgbase", "jop_2_msg.htm", true},
-		{"enterkey", "jop_2_key.htm", true},
-		{"failure", "jop_2_login.htm", true},
-		{"success", "jop_2_main.htm", true},
-	};
-	const std::string post_body = opennova::build_login_post_body(epask_, fields);
-	login_step_ = LOGIN_POST;
-	const Error err = login_http_->request(http_base() + String("/NWLogin.dll"),
-		request_headers(true), HTTPClient::METHOD_POST, String(post_body.c_str()));
-	if (err != OK) {
-		login_step_ = LOGIN_IDLE;
-		emit_signal("login_failed", String("login POST failed to start"));
-	}
-}
 
 void NovaWorldClient::login(const String &username, const String &password) {
 	if (login_http_ == nullptr) {
 		emit_signal("login_failed", String("client not started"));
 		return;
 	}
-	if (login_step_ != LOGIN_IDLE) {
+	if (flow_.login_active()) {
 		return;  // a login is already in flight
 	}
-	const String prepare_url = resolve_startup_url();
-	if (prepare_url.is_empty()) {
-		emit_signal("login_failed", String("no gate startup_url yet — connect first"));
-		return;
+	sync_flow_context();
+	const opennova::LoginResult r = flow_.login(
+		std::string(username.utf8().get_data()), std::string(password.utf8().get_data()));
+	switch (r.kind) {
+	case opennova::LoginResult::Kind::NeedRequest:
+		// Prepare GET: sets the EPASK cookie (the bundle credentials encrypt under).
+		if (ship_spec(login_http_, r.request) != OK) {
+			flow_.on_login_response(false, 0, {}, {});  // drive the machine back to Idle
+			emit_signal("login_failed", String("prepare request failed"));
+		}
+		break;
+	case opennova::LoginResult::Kind::Failed:
+		// e.g. "no gate startup_url yet — connect first".
+		emit_signal("login_failed", String(r.reason.c_str()));
+		break;
+	default:
+		break;  // Succeeded is impossible synchronously
 	}
-	login_user_ = username;
-	login_pass_ = password;
-	login_step_ = LOGIN_PREPARE;
-	login_poll_count_ = 0;
-	// Prepare GET: sets the EPASK cookie (the bundle we encrypt credentials under).
-	const Error err = login_http_->request(prepare_url, request_headers(false),
-	                                        HTTPClient::METHOD_GET, String());
-	if (err != OK) {
-		login_step_ = LOGIN_IDLE;
-		emit_signal("login_failed", String("prepare request failed"));
-	}
-}
-
-// Build a /NWLogin.dll poll URL carrying the LOGINSESSIONTAG as ?tag= (an HTTP/1.0
-// cookie-loss workaround the OpenNova server reads; the cookie rides too, and real
-// NW reads the cookie). Returns the base URL when no tag is present.
-static String nwlogin_poll_url(const String &base, const opennova::CookieJar &jar) {
-	const std::string *tag = jar.find("LOGINSESSIONTAG");
-	if (tag && !tag->empty()) return base + String("/NWLogin.dll?tag=") + String(tag->c_str());
-	return base + String("/NWLogin.dll");
 }
 
 void NovaWorldClient::on_login_request_completed(int result, int response_code,
                                                  const PackedStringArray &headers,
                                                  const PackedByteArray &body) {
-	(void)body;
-	const LoginStep step = login_step_;
-	if (result != HTTPRequest::RESULT_SUCCESS || response_code != 200) {
-		login_step_ = LOGIN_IDLE;
-		emit_signal("login_failed", String("login HTTP failed (code ")
-			+ String::num_int64(response_code) + ")");
-		return;
-	}
-	merge_response_cookies(headers);
-
-	switch (step) {
-	case LOGIN_PREPARE: {
-		const std::string *epask = cookie_jar_.find("EPASK");
-		if (epask == nullptr || epask->empty()) {
-			login_step_ = LOGIN_IDLE;
-			emit_signal("login_failed", String("server issued no EPASK cookie"));
-			return;
-		}
-		try {
-			epask_ = opennova::epask_from_string(*epask);
-		} catch (const std::exception &e) {
-			login_step_ = LOGIN_IDLE;
-			emit_signal("login_failed", String("bad EPASK bundle: ") + String(e.what()));
-			return;
-		}
-		// Seed the identity cookies the login POST carries (the browser form
-		// fields OnNovaWorldConnected sets), NWUID from the SessionInit.
-		seed_identity_cookies();
-		// Real NW (templated startupurl) requires the NWStart.dll version/junction
-		// gate before the login POST (capture frame 12178); the OpenNova server
-		// answers the POST directly, so skip it there to keep the proven path.
-		const bool templated = server_info_.has("startup_url") &&
-			String(server_info_["startup_url"]).find("[domainname]") >= 0;
-		if (templated) {
-			login_step_ = LOGIN_NWSTART;
-			const String nwstart_url = http_base() + String("/NWStart.dll?MSGBASE=jop_2_msg.htm"
-				"&IN=jop_2_main.htm&OUT=jop_2_login.htm&verfile=jop_2.ver"
-				"&newupdateavailable=jop_2_newupdateavailable.htm"
-				"&newupdateavailablewithbypass=jop_2_newupdateavailable2.htm"
-				"&junction=jop_2_junction.htm");
-			const Error err = login_http_->request(nwstart_url, request_headers(false),
-				HTTPClient::METHOD_GET, String());
-			if (err != OK) {
-				login_step_ = LOGIN_IDLE;
-				emit_signal("login_failed", String("NWStart request failed to start"));
-			}
-		} else {
-			send_login_post();
+	const opennova::LoginResult r = flow_.on_login_response(
+		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	switch (r.kind) {
+	case opennova::LoginResult::Kind::NeedRequest:
+		// Re-ship on login_http_ (PREPARE -> NWSTART -> POST -> POLL, all in the flow).
+		if (ship_spec(login_http_, r.request) != OK) {
+			flow_.on_login_response(false, 0, {}, {});
+			emit_signal("login_failed", String("login request failed to start"));
 		}
 		break;
-	}
-	case LOGIN_NWSTART:
-		send_login_post();
+	case opennova::LoginResult::Kind::Succeeded:
+		UtilityFunctions::print(String("[NovaWorldClient] logged in as ")
+			+ String(r.nwhandle.c_str()) + " (PCID " + String(r.pcid.c_str()) + ")");
+		emit_signal("login_succeeded", String(r.nwhandle.c_str()));
+		trigger_gsb();  // re-fetch the browser now authenticated (NWHANDLE/PCID ride along)
 		break;
-	case LOGIN_POST: {
-		// The server sets LOGINSESSIONTAG only when it accepted the credential
-		// submit; its absence means bad credentials / a rendered failure page.
-		const std::string *tag = cookie_jar_.find("LOGINSESSIONTAG");
-		if (tag == nullptr || tag->empty()) {
-			login_step_ = LOGIN_IDLE;
-			emit_signal("login_failed", String("login rejected (no session tag)"));
-			return;
-		}
-		login_step_ = LOGIN_POLL;
-		login_poll_count_ = 0;
-		const Error err = login_http_->request(nwlogin_poll_url(http_base(), cookie_jar_),
-			request_headers(false), HTTPClient::METHOD_GET, String());
-		if (err != OK) {
-			login_step_ = LOGIN_IDLE;
-			emit_signal("login_failed", String("login poll failed to start"));
-		}
-		break;
-	}
-	case LOGIN_POLL: {
-		// Poll /NWLogin.dll until the auth completes and the identity cookies
-		// (NWHANDLE/PCID) populate (capture frames 28856 -> 39723).
-		const std::string *nh = cookie_jar_.find("NWHANDLE");
-		const std::string *pc = cookie_jar_.find("PCID");
-		if (nh && !nh->empty()) {
-			login_step_ = LOGIN_IDLE;
-			nwhandle_ = String(nh->c_str());
-			pcid_ = (pc && !pc->empty()) ? String(pc->c_str()) : String();
-			UtilityFunctions::print(String("[NovaWorldClient] logged in as ") + nwhandle_
-				+ " (PCID " + pcid_ + ")");
-			emit_signal("login_succeeded", nwhandle_);
-			request_server_list();
-			return;
-		}
-		static const int kMaxLoginPolls = 10;
-		if (++login_poll_count_ >= kMaxLoginPolls) {
-			login_step_ = LOGIN_IDLE;
-			emit_signal("login_failed", String("login did not complete (no account handle)"));
-			return;
-		}
-		const Error err = login_http_->request(nwlogin_poll_url(http_base(), cookie_jar_),
-			request_headers(false), HTTPClient::METHOD_GET, String());
-		if (err != OK) {
-			login_step_ = LOGIN_IDLE;
-			emit_signal("login_failed", String("login poll failed to start"));
-		}
-		break;
-	}
-	default:
-		login_step_ = LOGIN_IDLE;
+	case opennova::LoginResult::Kind::Failed:
+		emit_signal("login_failed", String(r.reason.c_str()));
 		break;
 	}
 }
@@ -976,88 +733,53 @@ void NovaWorldClient::join(int rid) {
 		emit_signal("error_occurred", String("client not started"));
 		return;
 	}
-	if (join_step_ != JOIN_IDLE) {
+	if (flow_.join_active()) {
 		return;  // a join is already in flight
 	}
-	if (http_base().is_empty()) {
-		emit_signal("error_occurred", String("no server base URL — connect first"));
-		return;
-	}
-	join_rid_ = rid;
-	join_step_ = JOIN_FIRST;
-	enter_state(STATE_JOINING);
-	// First NWJoin call: stores a NWJOINSESSIONTAG and returns the relay page. Full
-	// witnessed query (capture frame 59656); the OpenNova server ignores the extra
-	// template params (only rid/success matter to it).
-	const String url = http_base() + String("/NWJoin.dll?needexpkey=jop_2_key2err.htm"
-		"&success=jop_2_join.joi&failure=jop_2_main.htm&relay=jop_2_relay.htm"
-		"&msgbase=jop_2_msg.htm&nodb=jop_2_nodb.htm&pfid=28&mode=Login&rid=")
-		+ String::num_int64(rid);
-	const Error err = join_http_->request(url, request_headers(false),
-		HTTPClient::METHOD_GET, String());
-	if (err != OK) {
-		join_step_ = JOIN_IDLE;
-		emit_signal("error_occurred", String("join request failed to start"));
+	sync_flow_context();
+	const opennova::JoinResult r = flow_.join(static_cast<uint32_t>(rid));
+	switch (r.kind) {
+	case opennova::JoinResult::Kind::NeedRequest:
+		enter_state(STATE_JOINING);
+		// First NWJoin call: stores a NWJOINSESSIONTAG and returns the relay page.
+		if (ship_spec(join_http_, r.request) != OK) {
+			flow_.on_join_response(false, 0, {}, {});  // drive the machine back to Idle
+			emit_signal("error_occurred", String("join request failed to start"));
+		}
+		break;
+	case opennova::JoinResult::Kind::Failed:
+		// Synchronous failure (e.g. "no server base URL — connect first") — no state change.
+		emit_signal("error_occurred", String(r.reason.c_str()));
+		break;
+	default:
+		break;  // Resolved is impossible synchronously
 	}
 }
 
 void NovaWorldClient::on_join_request_completed(int result, int response_code,
                                                 const PackedStringArray &headers,
                                                 const PackedByteArray &body) {
-	const JoinStep step = join_step_;
-	if (result != HTTPRequest::RESULT_SUCCESS || response_code != 200) {
-		join_step_ = JOIN_IDLE;
-		emit_signal("error_occurred", String("join HTTP failed (code ")
-			+ String::num_int64(response_code) + ")");
-		return;
-	}
-	merge_response_cookies(headers);
-
-	switch (step) {
-	case JOIN_FIRST: {
-		const std::string *tag = cookie_jar_.find("NWJOINSESSIONTAG");
-		const String tagq = (tag && !tag->empty())
-			? (String("&tag=") + String(tag->c_str())) : String();
-		join_step_ = JOIN_SECOND;
-		// Second NWJoin call: resolves the host by rid and returns the .joi with
-		// the connection tokens.
-		const String url = http_base() + String("/NWJoin.dll?rid=")
-			+ String::num_int64(join_rid_) + tagq;
-		const Error err = join_http_->request(url, request_headers(false),
-			HTTPClient::METHOD_GET, String());
-		if (err != OK) {
-			join_step_ = JOIN_IDLE;
+	const opennova::JoinResult r = flow_.on_join_response(
+		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	switch (r.kind) {
+	case opennova::JoinResult::Kind::NeedRequest:
+		// Re-ship on join_http_ (FIRST -> SECOND, both resolved in the flow).
+		if (ship_spec(join_http_, r.request) != OK) {
+			flow_.on_join_response(false, 0, {}, {});
 			emit_signal("error_occurred", String("join resolve failed to start"));
 		}
 		break;
-	}
-	case JOIN_SECOND: {
-		join_step_ = JOIN_IDLE;
-		std::string body_str;
-		if (body.size() > 0) {
-			body_str.assign(reinterpret_cast<const char *>(body.ptr()),
-			                static_cast<size_t>(body.size()));
-		}
-		const opennova::JoiConnection conn = opennova::parse_joi_connection_string(body_str);
-		if (!conn.ok) {
-			emit_signal("error_occurred", String("join: no connection string in .joi"));
-			// Fall back to CONNECTED (still in the lobby).
-			enter_state(STATE_CONNECTED);
-			return;
-		}
-		int port = std::atoi(conn.host_port.c_str());
-		if (port <= 0 || port > 65535) {
-			emit_signal("error_occurred", String("join: bad host port"));
-			enter_state(STATE_CONNECTED);
-			return;
-		}
+	case opennova::JoinResult::Kind::Resolved:
 		UtilityFunctions::print(String("[NovaWorldClient] join resolved host ")
-			+ String(conn.host_ip.c_str()) + ":" + String(conn.host_port.c_str()));
-		send_jointops_hello(String(conn.host_ip.c_str()), static_cast<uint16_t>(port));
+			+ String(r.host_ip.c_str()) + ":"
+			+ String::num_int64(static_cast<int64_t>(r.host_port)));
+		send_jointops_hello(String(r.host_ip.c_str()), r.host_port);
 		break;
-	}
-	default:
-		join_step_ = JOIN_IDLE;
+	case opennova::JoinResult::Kind::Failed:
+		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
+		// the old non-200 (formerly stuck JOINING) and bad-.joi (CONNECTED) into one path.
+		emit_signal("error_occurred", String(r.reason.c_str()));
+		enter_state(STATE_CONNECTED);
 		break;
 	}
 }

@@ -954,6 +954,12 @@ add_executable(http_flow_test novaworld/http_flow_test.cpp)
 target_link_libraries(http_flow_test PRIVATE opennova_novaworld opennova_novacrypto)
 add_test(NAME http_flow COMMAND http_flow_test)
 
+# ADR 0010 / P7 Part 2 (B2) — the lobby var-builders (host request/update + identity + host:port)
+# proven byte-identical to the bindings' hand-assembly.
+add_executable(lobby_vars_test novaworld/lobby_vars_test.cpp)
+target_link_libraries(lobby_vars_test PRIVATE opennova_novaworld opennova_napi)
+add_test(NAME lobby_vars COMMAND lobby_vars_test)
+
 add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
 target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_novacrypto)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

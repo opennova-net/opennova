@@ -10,9 +10,9 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <novacrypto/epask.h>
 #include <novaworld/client_session.h>
-#include <novaworld/http_login.h>
+#include <novaworld/http_flow.h>
+#include <novaworld/lobby_vars.h>
 
 #include <cstdint>
 #include <memory>
@@ -119,20 +119,18 @@ private:
 	void poll_gate();
 	void poll_session();
 
-	// Server-browser HTTP leg. request_server_list() issues the GSB GET; the
-	// completion callback parses it via libs/novaworld/gsb and caches rows.
-	void request_server_list();
+	// Server-browser HTTP leg. trigger_gsb() ships the GSB GET the flow builds; the
+	// completion callback feeds the response back and caches the parsed rows.
+	void trigger_gsb();
 	void on_gsb_request_completed(int result, int response_code,
 	                              const PackedStringArray &headers,
 	                              const PackedByteArray &body);
-	String gsb_url() const;       // OpenNova GSB URL from the gate's startup_url
 
-	// Account login HTTP chain (ADR 0010 Phase 3).
+	// Account login HTTP chain (ADR 0010 Phase 3) — sequenced by LobbyHttpFlow.
 	void on_login_request_completed(int result, int response_code,
 	                                const PackedStringArray &headers,
 	                                const PackedByteArray &body);
-	void send_login_post();         // build the encrypted credential POST + send
-	// Join HTTP chain (ADR 0010 Phase 5).
+	// Join HTTP chain (ADR 0010 Phase 5) — sequenced by LobbyHttpFlow.
 	void on_join_request_completed(int result, int response_code,
 	                               const PackedStringArray &headers,
 	                               const PackedByteArray &body);
@@ -140,17 +138,13 @@ private:
 	// the proto-switch boundary.
 	void send_jointops_hello(const String &host, uint16_t port);
 
-	String http_base() const;     // scheme://host:port: SessionInit web domain (real NW) or startup_url
-	// Resolve the gate's startupurl template ([domainname]/[VER1]/[VER2]/[CC]/[GT])
-	// into a concrete prepare URL. On the OpenNova server (concrete startupurl) this
-	// is an identity pass-through; on real NW it substitutes the placeholders.
-	String resolve_startup_url() const;
-	// Seed the CD-key/hardware identity (CountryName..NWHWI — the same set as the UDP
-	// verify var-list) into the cookie jar; the real-NW login POST carries them as
-	// cookies (witnessed in the .204 capture). NWUID comes from the SessionInit.
-	void seed_identity_cookies();
-	PackedStringArray request_headers(bool form_content_type) const;  // Cookie + optional form CT
-	void merge_response_cookies(const PackedStringArray &headers);     // store Set-Cookie lines
+	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
+	// each leg-initiation point (login / GSB / join) — never inside a leg callback,
+	// so a multi-step login keeps a stable http_base(). set_context preserves the
+	// flow's shared cookie jar (NWHANDLE/PCID ride login -> GSB -> join).
+	void sync_flow_context();
+	// Ship one HttpRequestSpec over the given HTTPRequest child (method/url/headers/body).
+	Error ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec);
 
 	void enter_state(State next, const String &reason = String());
 
@@ -174,28 +168,18 @@ private:
 	// Server browser.
 	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
 	Array server_rows_;                     // cached GSB rows (Array of Dictionary)
-	bool gsb_request_in_flight_ = false;
+	bool gsb_request_in_flight_ = false;    // transport bookkeeping (cancel before re-issue)
 
 	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so
-	// the multi-leg login/join sequences don't race the GSB fetch.
+	// the multi-leg login/join sequences don't race the GSB fetch. The protocol/
+	// sequencing/cookie-jar all live in flow_ (libs/novaworld); these are pure pumps.
 	HTTPRequest *login_http_ = nullptr;
 	HTTPRequest *join_http_ = nullptr;
-	opennova::CookieJar cookie_jar_;        // EPASK + NWHANDLE/PCID/LOGINSESSIONTAG...
-	opennova::EpaskParams epask_;           // bundle from the prepare Set-Cookie
-	// Real-NW login chain (witnessed in the .204 capture): prepare GET (EPASK) ->
-	// NWStart GET (USEJUNCTION) -> NWLogin POST (encrypted form) -> poll NWLogin
-	// GET until NWHANDLE/PCID populate. Against the OpenNova server the NWStart +
-	// poll are harmless (it answers the POST directly).
-	enum LoginStep { LOGIN_IDLE = 0, LOGIN_PREPARE, LOGIN_NWSTART, LOGIN_POST, LOGIN_POLL };
-	LoginStep login_step_ = LOGIN_IDLE;
-	int login_poll_count_ = 0;              // bounded NWLogin.dll GET polls
-	String login_user_;
-	String login_pass_;
-	String nwhandle_;                       // captured on login success
-	String pcid_;
-	enum JoinStep { JOIN_IDLE = 0, JOIN_FIRST, JOIN_SECOND };
-	JoinStep join_step_ = JOIN_IDLE;
-	int join_rid_ = 0;
+	// The lobby HTTP orchestration: the EPASK login chain, the GSB fetch, and the
+	// NWJoin handshake (URL builders + shared cookie jar + LoginStep/JoinStep). The
+	// binding ships each HttpRequestSpec and feeds (transport_ok, code, headers, body)
+	// back in. Context is set from the gate/session legs via sync_flow_context().
+	opennova::LobbyHttpFlow flow_;
 
 	// In-match game session (PN=JointOperations). The third UDP socket; we send
 	// one ClientHello to the host and stop (the proto-switch milestone boundary).
