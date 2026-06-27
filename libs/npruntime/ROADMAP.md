@@ -279,10 +279,35 @@ novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`
 §5.2a serializers stay deferred (structural P3) — our host emits `1C 0B 11 | 10 0C 20 | 0A…`; full body
 byte-parity and the retail `0x57` RTT pong are tracked follow-ups.
 
-### P7 — Godot adapter rewrite
-`nova_simulation.cpp` becomes a thin adapter over `npruntime` (construct World + NetSystem + ctx;
-call the frame driver each `_process`); the net bindings become pure socket pumps, no protocol
-logic in Godot. Bar: `/gut` green; SP launches and renders via `ClientState`.
+### ✅ P7 — Godot adapter rewrite (in-match core DONE; lobby sweep in progress)
+`nova_simulation.cpp` is a thin adapter over `npruntime` — every in-match path funnels into one
+runtime, the binding owns sockets/signals only.
+
+- **In-match core — DONE** (`346da20c`): SP listen + LAN host construct `NapiNPServerCtx` + `World`
+  + the host owner loop (`host_pump` = recv→`handle_server_datagram` → `tick_connections` →
+  `Server_TickUpdate` → per-type-1 S2C reframe; `dispatch_event`/`admit_peer` named-0x0C announce),
+  the host's own dcb-2 loopback folds via a HostClient `ClientRuntime`; the joiner is a Joiner-role
+  `ClientRuntime` (`joiner_pump`). Faithful host-player auto-spawn (`Server_ProcessPendingPlayerSpawns`:
+  host `0xFFF0`, first joiner `0xFFEF` downward). Dropped the NetSystem-ISystem + the separate
+  `run_logic_tick` (D-NET-123/125); `ctx.net` stays null. ~470 lines of dead legacy net code removed
+  from the binding (legacy libs still compile for their other callers — P8 deletes them). Three new
+  owner helpers: `np::mark_host_client_in_match`, `np::admit_synthetic_peer` (the no-handshake test
+  admit), `ClientRuntime::spawn_pose()`.
+- **Present unified on the listen server — DONE** (`942bddc5`): the no-net AI-pool present is retired;
+  `MissionRuntime` always stands up the listen server (editor preview included). The editor in-place
+  Simulate + the debug-overlay live entity-list are degraded/un-tested (accepted — editor sim de-scoped;
+  the ~24 sim-coupled editor/debug tests were deleted/updated). Scalar `get_entity_*` getters stay.
+- **B1 — `libs/novaworld/http_flow` DONE** (`e4036223`): `LobbyHttpFlow` owns the EPASK login / GSB /
+  NWJoin machines (URL builders + cookie jar + LoginStep/JoinStep), reusing the existing byte helpers;
+  literals byte-preserved; ctest `http_flow` green. **Nothing consumes it yet.**
+- **B2/B3 — REMAINING**: rewire `godot/engine/network/nova_world_client.{h,cpp}` + `nova_world_host`
+  onto `LobbyHttpFlow` (delete the binding's ~355-line duplicate login/GSB/join machines; keep the 3
+  HTTPRequest nodes + signals as the transport pump) and move the thin host var-builders + a
+  `parse_host_port` into libs. CAVEAT: the lobby HTTP legs have no headless GUT coverage (they need a
+  live/local NovaWorld server) — verify via `http_flow` ctest + a manual lobby smoke.
+
+Bar (met for the in-match core): `/gut` full suite 1890 passing / 0 failing; 16 net ctests green; SP
+launches and renders via `ClientState`.
 
 ### P8 — Retire legacy glue
 Delete `game_session`, `game_server_runtime`, and the `replication_min` `build_tag_*` builders
