@@ -14,9 +14,6 @@
 namespace opennova::world {
 class World;
 }
-namespace opennova::netsim {
-class NetSystem;
-}
 // The loaded mission, read by the P3 initial-state burst for the S2C 0x0B BMS-header body
 // (bms::encode_header_blob). Forward-declared (NOT included) so bms.h stays out of this light header.
 namespace opennova::bms {
@@ -124,9 +121,10 @@ struct NapiNPServerCtx {
 	uint32_t send_target_state = 0;  // [orig +0x11A0]
 
 	// --- reimpl-owned, NOT in the original singleton ---
-	// The authoritative simulation and the in-match replication seam. Non-owning.
+	// The authoritative simulation. Non-owning. The in-match replication seam (the per-connection
+	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
+	// NetSystem (retired P8): the drain/emit primitives live in netsim/connection_fan.h.
 	world::World *world = nullptr;
-	netsim::NetSystem *net = nullptr;
 	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
 	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;

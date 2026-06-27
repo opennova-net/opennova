@@ -3,7 +3,7 @@ add_library(opennova_netsim STATIC
     src/serializing_sink.cpp
     src/entity_wire_bridge.cpp
     src/net_client_view.cpp
-    src/net_system.cpp
+    src/connection_fan.cpp
     src/udp_session_transport.cpp
 )
 

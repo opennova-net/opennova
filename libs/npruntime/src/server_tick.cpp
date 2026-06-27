@@ -3,7 +3,7 @@
 #include <vector>
 
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
-#include <netsim/net_system.h>         // drain_connection_c2s / emit_connection_s2c
+#include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/world.h>               // World::run_logic_tick
 
 namespace opennova::np {
@@ -37,9 +37,9 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 
 	// (2) one logic tick (the host is always authority here). WAC/BMS/AI advance the world.
 	// [D-NET-123] Server_TickUpdate OWNS this logic tick — the inverse of the legacy seam, where the
-	// C2S drain ran INSIDE run_logic_tick (NetSystem::tick as a World ISystem). A P7 binding that
-	// migrates to Server_TickUpdate must DROP its own run_logic_tick()/NetSystem registration or the
-	// sim advances twice per frame (and the C2S queue drains twice — the P7 guardrail in the header).
+	// C2S drain ran INSIDE run_logic_tick (a net ISystem, retired P8). A binding driving the runtime
+	// through Server_TickUpdate must NOT keep its own run_logic_tick() or a parallel connection-table
+	// driver, or the sim advances twice per frame (and the C2S queue drains twice — header guardrail).
 	world.run_logic_tick(/*is_authority=*/true);
 
 	// (3) serialize-after — SESSION-ONLY [D-NET-120]: the original's per-frame replicate/broadcast
@@ -51,7 +51,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// [D-NET-122 RESOLVED at P5] This fan uses the shared is_in_match(conn) predicate (was an inline
 	// burst.spawned). The host's own type-2 loopback now satisfies it once its §5.2a burst completes,
 	// so Server_TickUpdate (the SP/host driver) fans it a per-frame 0x0A — its local view is no longer
-	// starved (the gap the legacy NetSystem::emit_s2c filled by emitting to every transport-bearing
+	// starved (the gap the legacy net-ISystem emit filled by emitting to every transport-bearing
 	// connection). Its 0x0A anchors to its owned_entity (the host player, bound by
 	// Server_BuildPlayerInfoAndAdd), NOT the D-NET-121 dvxi5 fallback_anchor.
 	if (ctx.is_in_session) {

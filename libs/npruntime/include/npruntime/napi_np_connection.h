@@ -29,7 +29,7 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 //       -> PendingSpawn       [CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]
 //       -> PlayerAdded        [Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 //       -> SendingInitial     [Server_SendInitialGameStateToPlayer @0x51bba0]
-//       -> Spawned            (NetSystem::admit_peer binds owned_entity)
+//       -> Spawned            (spawn_remote_player binds owned_entity)
 //       -> InMatch            (per-frame 0x0A out / 0x0C in)
 //       -> Goodbye       0x46 [Nwu_HandleClientGoodbye @0x624250]
 //

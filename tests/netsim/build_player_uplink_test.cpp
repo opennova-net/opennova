@@ -6,9 +6,11 @@
 // moves on the host). [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
 // NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
 
+#include "netsim/connection_fan.h"
 #include "netsim/entity_wire_bridge.h"
 #include "netsim/loopback_channel.h"
-#include "netsim/net_system.h"
+
+#include "conn_fan_test_util.h"
 
 #include <novaworld/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <novaworld/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
@@ -58,7 +60,7 @@ bool run_field_mapping() {
 	return true;
 }
 
-// build -> encode -> decode -> NetSystem read-apply: the host peer SNAPs to the source pose.
+// build -> encode -> decode -> host read-apply (drain_connection_c2s): the host peer SNAPs to the source pose.
 bool run_roundtrip_to_host_snap() {
 	// Source: the joiner's live local-player pose (zero low-16 heading/pitch for exact round-trip).
 	w::Entity src_e{};
@@ -95,16 +97,14 @@ bool run_roundtrip_to_host_snap() {
 	const std::vector<uint8_t> body = nw::encode_player_extended_uplink(up);
 	payload.insert(payload.end(), body.begin(), body.end());
 
-	// Drain through the host's NetSystem C2S read-apply.
+	// Drain through the host's authority C2S read-apply.
 	ns::LoopbackChannel channel;
 	channel.client_send(0x0C, payload);
-	ns::NetSystem net(channel);
-	net.connection(0).owned_entity = ph; // the connection owns peer ph — the owner gate (D-NET-119)
-	                                     // requires the uplink handle to match conn.owned_entity
-	w::TickContext ctx;
-	ctx.world = &world;
-	ctx.is_authority = true;
-	net.tick(world, ctx);
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, ph, 0}); // the connection owns
+	                                     // peer ph — the owner gate (D-NET-119) requires the uplink
+	                                     // handle to match conn.owned_entity
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 
 	const w::Entity *pe = world.registry.get(ph);
 	if (!expect(pe != nullptr, "host peer present")) return false;

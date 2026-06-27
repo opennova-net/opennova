@@ -114,10 +114,10 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // Drive the periodic emitter for every connection NOT yet Spawned (so entity_batch_count climbs and
 // the spawn gate opens) and frame each session's replies. PeerEnteredWorldStreaming surfaces here
-// the tick a peer's batches start (F3). Spawned peers are skipped — NetSystem owns their 0x0A.
+// the tick a peer's batches start (F3). Spawned peers are skipped — Server_TickUpdate owns their 0x0A.
 std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick);
 
-// Wrap one in-match S2C inner message (e.g. NetSystem's 0x0A body) into a fully-framed 0x83 SESSION
+// Wrap one in-match S2C inner message (e.g. the per-frame 0x0A body) into a fully-framed 0x83 SESSION
 // datagram for `peer`, using that connection's live SCRK + seq (advances its outbound seq). False
 // if the peer is unknown / pre-auth.
 bool frame_in_match_s2c(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t inner_tag,

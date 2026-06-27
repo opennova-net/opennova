@@ -2798,8 +2798,9 @@ vs **H2** the host snaps and only clients interpolate — decisively in favour o
   engine-frame `AiEntity` (live pos + heading/pitch BAM), stages the `AiEntity` smooth-target, resets
   interp progress, marks the entity net-snapped; gated on `Entity.flags` bit1 clear; REJECTS the local
   player (the host never read-applies its own pose).
-- `NetSystem::tick` (`libs/netsim/src/net_system.cpp`) — the C2S 0x0C drain (authority-gated): decode
-  sub-header + extended uplink → `PlayerIntent` → `apply_player_intent`.
+- `drain_connection_c2s` (`libs/netsim/src/connection_fan.cpp`) — the per-connection C2S 0x0C drain
+  (authority-gated by the host driver Server_TickUpdate): decode sub-header + extended uplink →
+  `PlayerIntent` → `apply_player_intent`. (The legacy `NetSystem::tick` wrapper was retired at P8.)
 - `world::AiEntity` (`libs/world/include/world/ai.h`) — `net_smooth_target/heading/pitch`,
   `net_interp_progress/steps`, `net_saved_live_pose`, `net_is_remote_peer`.
 - `AiSystem::tick_infantry` (`libs/world/src/infantry.cpp`) — the net-peer skip-guard
@@ -4815,7 +4816,7 @@ Stock-content validation (the FIRST capture of a normal retail Co-op session —
 - **D-NET-55 / D-NET-64 — operation_whitenoise ALSO did NOT surface them (still OPEN).** Even a full stock Co-op session: all 1463 C2S `0x0c` uploads are sub_op `0x0a` (zero guided), **no** S2C `0x44` entity-routed, **no** S2C `0x59` deployed-item, and a single human shooter firing 2 ballistic weapons (`adm` 9 / 74). The `0x20` stream is the join-time load batch (D-NET-84), not a mid-game patrol. Net: D-NET-55 is no longer blocked on a capture (its remaining work is the inbound runtime wiring, spec now confirmed load-only); **D-NET-64 still requires a dedicated capture** of a player equipping+firing a guided weapon (Stinger / Javelin / AT4) or flying the rocket Little Bird.
 
 `CNapiNPConnection_*` IDB-hygiene grill (decomp cleanup + naming validation of the whole connection-node family, 2026-06-26; IDB-only — no reimpl code change):
-- **D-NET-116** [INFO, IDB] **The `NapiNPConnection_*` family decomp was cleaned up and its names validated against the bytes.** Scope: all 47 prefixed methods + 2 unprefixed high-table handlers + 1 unprefixed teardown sibling. Changes (Jointops.exe.kong.i64):
+- **D-NET-128** [INFO, IDB] (renumbered from D-NET-116 on 2026-06-27 — the IDB-hygiene ID collided with the §5.43 behavior entry **D-NET-116** "pending-spawn loop gates on the mission-load flag", which is cited in code and keeps the number) **The `NapiNPConnection_*` family decomp was cleaned up and its names validated against the bytes.** Scope: all 47 prefixed methods + 2 unprefixed high-table handlers + 1 unprefixed teardown sibling. Changes (Jointops.exe.kong.i64):
   - **Prefix normalized to the C++ method style `CNapiNPConnection_*`** (49 functions), matching the pre-existing C-prefixed siblings (`CNapiNPConnection_LogHostStarted`/`_HandlePingResponse`/`_NetworkThreadProc`/`_SendChatMessage`). Addresses unchanged; the `[orig:]` citations in this doc were migrated in lockstep.
   - **`SendClientHello @ 0x61fe20` → `CNapiNPConnection_SendClientJoin` (MISNOMER fixed).** It emits opcode **0x42**='B' (the client JOIN/auth leg, server analog `NapiNPProtocol_HandleClientJoin @ 0x62b750`), writing the full identity block (NVS/CO/AP/BDAT/PG/PV2/CI/HK/CK/NA/PW/SIP/SPN/CU/SCRK/NF/DCNT/RCNT), not the 0x41 hello. A stale repeatable comment ("previous name confirmed correct") was misattributed (it belongs to `InitFromSession`); the function's own `[OpenNova NW-S2]` note already proposed this rename. Reimpl = `client_auth_to_bytes`/`build_client_auth`.
   - **Three functions un-misfiled to `NapiNPEnumerator_*`** — `FindTimerById @0x621f20`, `DestroyAllTimers @0x6220c0`, `DrainTimerList @0x622140` operate on the `NapiNPEnumerator` (96 B, tag "NapiNPEnumerator", `[orig: NapiNPEnumerator_Create @ 0x625f50]`, stored in `conn->session_keys.unk2C` @+0x178), reading list heads at enum+0x3C/+0x4C — offsets that on a real `NapiNPConnection` land inside `net_state`. Confirmed: every caller of `DrainTimerList` dereferences `conn+0x178` first; none passes a raw connection. (`[orig: NapiNPEnumerator_DestroyTarget @ 0x624d40]` drains both lists.)
@@ -4825,7 +4826,7 @@ Stock-content validation (the FIRST capture of a normal retail Co-op session —
 
 `CNapiNetwork_*` / `CNapiServer*` IDB-hygiene grill (decomp cleanup + naming validation of the whole
 network-context method family, 2026-06-27; IDB-only — no reimpl behaviour change):
-- **D-NET-117** [INFO, IDB] **The `CNapiNetwork_*`/`CNapiServer*` family (42 functions, 0x4a8040-0x4ca4a0) was cleaned up and its names validated against the bytes.** Changes (Jointops.exe.kong.i64):
+- **D-NET-129** [INFO, IDB] (renumbered from D-NET-117 on 2026-06-27 — the IDB-hygiene ID collided with the §5.43 behavior entry **D-NET-117** "world-path pose look-pitch not yet sourced", which is cited in code and keeps the number) **The `CNapiNetwork_*`/`CNapiServer*` family (42 functions, 0x4a8040-0x4ca4a0) was cleaned up and its names validated against the bytes.** Changes (Jointops.exe.kong.i64):
   - **Receiver type consolidated onto `NapiNPServerCtx`** (user-approved). The duplicate `CNapiNetwork` struct (4432 B, `field_*` placeholders) was **deleted**; all 42 method `this`/ctx params now type as `NapiNPServerCtx *`, matching the type already on `g_napi_np_ctx`. `NapiNPServerCtx` grown from 4520 to its true **5232 B (0x1470)** (witnessed by `ClearState`'s `memset` and `OnPlayerDisconnected`'s +0x11A8 write); `field_5C`→`connection_mode`, new `active_connection_id`@0x1190, `randomized_timeout_ms`@0x1194, `disconnect_reason_buf`@0x1270; four interior auto-named globals folded back in as ctx fields. See §6.2/§6.3.
   - **Calling-convention fixes:** `CheckPlayerTimeouts`, `DisconnectActiveConnection`, `ProcessPendingPlayerSpawns`, `DisconnectPendingSpawnBans`, `ClearState`, `SerializeToSession` were `__thiscall` mis-detected as `__cdecl`/no-args (used `ecx` as the object base); corrected so fields render by name.
   - **Misnomers fixed (6):** Kong `PumpProtocolType25/737/26/738` → `PumpServerProtocolRecv`/`PumpServerProtocolSend`/`PumpClientProtocolRecv`/`PumpClientProtocolSend` (the suffix was the literal `flags` value; recv/send from the `NapiNPProtocol_Pump` 0x8/0x3F0 decode, server/client from the connection-type low-bit selector + caller split); `PumpManagerType4` → `PumpManagerReceive`; `SendPunkBusterChat @0x4c9140` → `DisconnectActiveConnection` (no chat — builds a `NapiNPDisconnectEvent` + `RequestDisconnect`); `CNapiServerInfo_Init @0x4c8690` → `CNapiNetwork_ClearState` (resets the whole ctx, not a sub-struct); `CNapiNetwork_GetConnectionParams @0x4a8040` → `VideoConfig_GetResolution` (**not a network function** — reads display width/height/AA from `off_840960`).
@@ -4840,7 +4841,7 @@ typing across the whole `*napinp*` roster, 2026-06-27; IDB-only — no reimpl be
   a typed-prototype scan found **352/356 already clean** (the 4 "rough" — `DestroyEntityList`,
   `NapiNPClientMsg_0x00C`, `NapiNPPlayer_Destroy`, `NapiNPManager_Shutdown` — are accurate
   `__usercall`/register-arg Hex-Rays representations with named args, not dirty). The prior
-  D-NET-116/117 grills had already cleaned the connection/network-context families; this pass
+  D-NET-128/129 grills had already cleaned the connection/network-context families; this pass
   audited the dispatch tables, the message handlers, the opcode legs and the crypto helpers.
   - **All four dispatch tables cross-checked by reading the data and resolving every handler.**
     `g_np_msginfo_client @ 0x82AE28` (123+sentinel) and `g_np_msginfo_server @ 0x82B5D8`
@@ -4916,9 +4917,9 @@ now has (D-NET-38). Each carries its `[orig]` anchor and corrected behavior abov
 NetPacket serializer + client-loop/scoreboard-state IDB-hygiene grill (decomp cleanup, naming
 of remaining `sub_*` net helpers + net-state globals, name validation, 2026-06-27; IDB-only — no
 reimpl behaviour change):
-- **D-NET-119** [INFO, IDB] **The remaining unnamed `sub_*` helpers in the in-match packet/serializer
+- **D-NET-130** [INFO, IDB] (renumbered from D-NET-119 on 2026-06-27 — the IDB-hygiene ID collided with the §5.43 behavior entry **D-NET-119** "the C2S 0x0C drain enforces the per-connection owner gate", which is cited in code and keeps the number) **The remaining unnamed `sub_*` helpers in the in-match packet/serializer
   band (0x500000-0x509000) and the client per-frame net-loop / scoreboard-message state globals were
-  named and validated against the bytes (Jointops.exe.kong.i64).** The prior D-NET-116/117/118 passes
+  named and validated against the bytes (Jointops.exe.kong.i64).** The prior D-NET-128/129/118 passes
   had cleaned the connection / network-context / dispatch-table families; this pass took the leaf
   `NetPacket_Write*` serializers, the `CNetQuality` client tracker, and the decoded net-message
   globals. Changes:

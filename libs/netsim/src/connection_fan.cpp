@@ -1,4 +1,4 @@
-#include "netsim/net_system.h"
+#include "netsim/connection_fan.h"
 
 #include <cstddef>
 #include <utility>
@@ -7,7 +7,6 @@
 #include <novaworld/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <novaworld/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
 #include <world/geom.h>              // to_fixed
-#include <world/player_spawn.h>      // spawn_remote_player
 
 namespace opennova::netsim {
 
@@ -99,11 +98,9 @@ PlayerReplicationState anchor_for_connection(const world::World &w, const Connec
 
 } // namespace
 
-// Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport. Public
-// (declared in net_system.h) so npruntime's Server_TickUpdate shares this exact drain when it
-// walks NapiNPProtocol.connection_list instead of NetSystem's own table. Takes the whole Connection
-// (not a bare transport) so it can enforce the per-connection owner gate and null-checks the
-// transport internally — symmetric with emit_connection_s2c.
+// Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport. Takes the
+// whole Connection (not a bare transport) so it can enforce the per-connection owner gate and
+// null-checks the transport internally — symmetric with emit_connection_s2c.
 void drain_connection_c2s(world::World &world, const Connection &conn) {
 	if (conn.transport == nullptr) return;
 	Datagram dg;
@@ -149,55 +146,15 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 	}
 }
 
-// Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. Public
-// (net_system.h) — the per-connection emit body, shared by NetSystem::emit_s2c below and
-// npruntime's Server_TickUpdate fan over connection_list. anchor_for_connection stays file-static.
+// Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. anchor_for_connection
+// is file-static; the per-connection emit body is shared by the legacy listen-server binding and
+// npruntime's Server_TickUpdate fan over connection_list.
 void emit_connection_s2c(const world::World &w, const Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          const PlayerReplicationState &fallback_anchor) {
 	if (conn.transport == nullptr) return;
 	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
 	conn.transport->host_send(kTag0aFrameUpdate, build_0a_frame(anchor, ents));
-}
-
-void NetSystem::tick(world::World &world, const world::TickContext &ctx) {
-	// Drain queued C2S datagrams on EVERY connection and read-apply each player uplink to its
-	// (remote peer) entity, BEFORE WAC/BMS/AI run [orig: net-before-logic, Game_ProcessMainFrame
-	// @ 0x5263f0; PumpRecvQueues walks all connections, NapiNPConnection_ParseMessages @0x625BC0].
-	// Only the host (authority) receives C2S — a joiner never drains one
-	// [orig: dispatch_entity_packet_callback @0x4D6A80 gates on g_napi_np_ctx.is_authority].
-	if (!ctx.is_authority) return;
-	// drain_connection_c2s null-checks the transport + enforces the per-connection owner gate.
-	for (const Connection &conn : connections_) drain_connection_c2s(world, conn);
-}
-
-void NetSystem::emit_s2c(const world::World &w, const PlayerReplicationState &fallback_anchor) {
-	// Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to each connection
-	// [orig: NapiNPServer_SendFiltered @0x4C87E0 builds once, SendToConn @0x4c4f20 per node].
-	// No per-connection visibility cull this increment (broadcast the whole world to every
-	// connection — a filter==1 send); the per-connection send_mask is present but unread.
-	const std::vector<GameEntitySnapshot> ents = snapshot_world(w);
-	for (const Connection &conn : connections_) emit_connection_s2c(w, conn, ents, fallback_anchor);
-}
-
-std::size_t NetSystem::add_connection(const Connection &c) {
-	connections_.push_back(c);
-	return connections_.size() - 1;
-}
-
-void NetSystem::clear_connections() { connections_.clear(); }
-
-world::EntityHandle NetSystem::admit_peer(world::World &w, std::size_t conn_index,
-                                          const world::PlayerSpawn &spawn) {
-	if (conn_index >= connections_.size()) return world::EntityHandle{};
-	// A remote peer's entity is NOT the host's own player: spawn_remote_player runs the same
-	// faithful §5.2b sequence but leaves inf.is_local_player false and does NOT republish
-	// World::cached.local_player — so apply_player_intent accepts (snaps) it and the motor
-	// skips it once net-snapped. [orig: Server_PlayerAdd @0x51cbc0 registers a joined player's
-	// entity without assigning g_local_player_entity.]
-	const world::EntityHandle h = world::spawn_remote_player(w, spawn);
-	if (h.valid()) connections_[conn_index].owned_entity = h;
-	return h;
 }
 
 } // namespace opennova::netsim

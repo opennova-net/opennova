@@ -353,7 +353,7 @@ to fold into `Server_SendInitialGameStateToPlayer`) stay the tracked grill-wave 
 
 Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` + the mirror; reactive
 replies via `dispatch_session_replies`); the per-frame `0x0A` adapter (`build_tag_0a_world_reference`)
-lifted into `libs/netsim/net_system.cpp` (`build_0a_frame`); `apps/novaworld_server`'s JO routing
+lifted into `libs/netsim/connection_fan.cpp` (`build_0a_frame`); `apps/novaworld_server`'s JO routing
 re-pointed off `HostSessionAccept` onto a World-less `np::NapiNPServerCtx` session responder;
 `nova_simulation` `host_session_config_` retyped `GameServerRuntimeConfig` → `np::SessionReplyConfig`.
 Tests: the P2 `handshake_server_test` migrated to assert the reactive §5.1 replies (the World-driven
@@ -361,9 +361,25 @@ spawn/F3 flow is covered by `npruntime_client_runtime` / `npruntime_two_endpoint
 game_runtime-mirror tests (`game_session`/`game_server_runtime`/`replication_min`/`host_session_accept`/
 `joiner_session`/`joiner_connection`) removed; `session_protocol_test` trimmed to the classifier.
 
-> Carried-forward orphan (out of P8's named scope): `libs/novaworld/joiner_session.{h,cpp}` (the legacy
-> `novaworld::JoinerSession`, superseded by `np::JoinerConnection`) is now unreferenced but still compiled
-> — a trivial follow-up removal.
+### ✅ P8.1 — consolidate the dead remnants of the retired path (DONE, 2026-06-27)
+
+A structural cleanup pass after P8, removing the dead halves the retirement left behind (no behavior
+change; 223/223 ctest + GDExtension green):
+
+- **`netsim::NetSystem` class deleted.** Production (`Server_TickUpdate`) already drove the lifted free
+  functions `drain_connection_c2s`/`emit_connection_s2c`/`build_0a_frame`; the class itself had no
+  production consumer (only the 3 `netsim` tests). The file `net_system.{h,cpp}` was **renamed
+  `connection_fan.{h,cpp}`** (no `NetSystem` left in it = the old name was a misnomer); it now holds
+  only the per-connection drain/fan primitives + `kTag0aFrameUpdate`. The 3 tests moved to a small
+  explicit harness `tests/netsim/conn_fan_test_util.h` (a plain `std::vector<Connection>` + the free
+  functions + `spawn_remote_player`), keeping every assertion.
+- **`NapiNPServerCtx.net` field removed** (always `nullptr`; the "removed at P7" promise honored here)
+  + its forward decl + the `nova_simulation` assignment + the `server_tick.h` guardrail note.
+- **`libs/novaworld/joiner_session.{h,cpp}` deleted** (the carried-forward orphan, superseded by
+  `np::JoinerConnection`) + its `CMakeLists.txt` entry.
+- **Doc-integrity fix:** the D-NET-116/117/119 ID collisions (each assigned once as a §5.43 behavior
+  entry and once as a §8 IDB-hygiene entry) are resolved — the IDB-hygiene trio renumbered to
+  D-NET-128/129/130 (the code-cited behavior entries keep their numbers).
 
 ## Test harness (built up across phases)
 
@@ -393,6 +409,6 @@ Goldens (local, gitignored, captured 2026-06-26): `.scratch/golden/retail-lan-ho
 - Runbooks: `.agents/network.md` (architecture guardrails, module ownership, frame order),
   `.agents/interop.md`, `.agents/ida.md`, `.agents/debug.md`.
 - Promote-from: `libs/novaworld/include/novaworld/{host_session_accept.h,joiner_session.h}`.
-- Seam to finish: `libs/netsim/include/netsim/{net_system.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
+- Seam: `libs/netsim/include/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,
   `tests/novaworld/nw_pcap_stream_test.cpp`.

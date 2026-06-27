@@ -9,13 +9,13 @@
 namespace opennova {
 
 // Transport-neutral POD inputs shared by the in-match replication code: the netsim world<->wire bridge
-// (entity_wire_bridge / net_system), the npruntime per-frame 0x0A fan + Server_TickUpdate, and the
+// (entity_wire_bridge / connection_fan), the npruntime per-frame 0x0A fan + Server_TickUpdate, and the
 // reactive §5.1 reply dispatcher (server_message_dispatch). The CLI server, Godot server scene, and
 // tests share this one game-state model; the runtime never reaches back into a transport layer.
 //
 // The §5.1/§5.2a reply BUILDERS that used to live here were retired with game_session.cpp (P8, net-re
 // §5.45 / D-NET-127): the reactive reply bodies moved to libs/npruntime/server_message_dispatch.cpp,
-// and the per-frame S2C 0x0A frame builder (build_0a_frame) into libs/netsim/net_system.cpp. Only the
+// and the per-frame S2C 0x0A frame builder (build_0a_frame) into libs/netsim/connection_fan.cpp. Only the
 // shared POD structs remain here.
 
 struct PlayerReplicationState {

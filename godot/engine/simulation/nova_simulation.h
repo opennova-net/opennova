@@ -121,7 +121,7 @@ private:
 	// by default, so the editor / non-net preview path is the direct AI-pool present, untouched. When
 	// enabled (before load), bringup_host_runtime stands up the npruntime ctx_ + host_loop_ + runtime_
 	// (declared in the P7 block below) and the present pass reads the client-decoded ClientState
-	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the tick (no NetSystem).
+	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the per-frame tick.
 	bool listen_server_ = false;
 	uint64_t last_sim_tick_us_ = 0;
 	uint64_t last_net_tick_us_ = 0;
@@ -251,10 +251,10 @@ public:
 	int get_tick_mode() const { return tick_mode_; }
 
 	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
-	// real entity state through NetSystem onto an in-process loopback, the local client
-	// decodes it, and the present pass reads that decoded state. Call BEFORE loading a
-	// mission — the next load registers NetSystem ahead of WAC. Disabling reverts to the
-	// direct AI-pool present (the editor default).
+	// real entity state onto an in-process loopback (Server_TickUpdate's per-connection S2C
+	// fan), the local client decodes it, and the present pass reads that decoded state. Call
+	// BEFORE loading a mission — the next load stands up the npruntime host runtime. Disabling
+	// reverts to the direct AI-pool present (the editor default).
 	void enable_listen_server(bool p_enable);
 	bool is_listen_server() const { return listen_server_; }
 

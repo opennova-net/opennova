@@ -14,12 +14,14 @@
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
 #include "netsim/connection.h"
+#include "netsim/connection_fan.h"
 #include "netsim/entity_wire_bridge.h"
 #include "netsim/loopback_channel.h"
 #include "netsim/net_client_view.h"
-#include "netsim/net_system.h"
 #include "netsim/session_transport.h"
 #include "netsim/udp_session_transport.h"
+
+#include "conn_fan_test_util.h"
 
 #include <novaworld/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <novaworld/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
@@ -102,14 +104,14 @@ bool run_fanout_and_per_connection_anchor() {
 			w::spawn_player(world, player_spawn({5.0f, 10.0f, -3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 
-	ns::NetSystem net; // default ctor: empty table
+	std::vector<ns::Connection> conns; // the host's connection table
 	ns::LoopbackChannel self_ch;
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
-	const std::size_t conn_self =
-			net.add_connection(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
-	const std::size_t conn_join =
-			net.add_connection(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
-	if (!expect(net.connection_count() == 2, "two connections registered")) return false;
+	conns.push_back(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	const std::size_t conn_self = 0;
+	conns.push_back(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
+	const std::size_t conn_join = 1;
+	if (!expect(conns.size() == 2, "two connections registered")) return false;
 	(void)conn_self;
 
 	// Fallback anchor = the host player position (what NovaSimulation::compute_net_anchor builds).
@@ -120,7 +122,7 @@ bool run_fanout_and_per_connection_anchor() {
 
 	// --- sub-case a1: byte-identity. conn_join still has NO owned entity, so it rides the
 	//     fallback anchor = the host position = conn_self's anchor. Both frames identical. ---
-	net.emit_s2c(world, fallback);
+	ns::test::emit_all(world, conns, fallback);
 	if (!expect(self_ch.s2c_pending() == 1, "loopback got one S2C frame")) return false;
 	if (!expect(udp_host.outbound_pending() == 1, "udp got one S2C raw datagram")) return false;
 
@@ -139,13 +141,13 @@ bool run_fanout_and_per_connection_anchor() {
 	// --- sub-case a2: per-connection anchor. Admit the joiner -> conn_join now owns joiner_h
 	//     and anchors to ITS position; conn_self stays anchored to host_h. ---
 	const w::EntityHandle joiner_h =
-			net.admit_peer(world, conn_join, player_spawn({50.0f, 60.0f, -20.0f}, 90, 0xFFF1));
+			ns::test::admit_peer(world, conns, conn_join, player_spawn({50.0f, 60.0f, -20.0f}, 90, 0xFFF1));
 	if (!expect(joiner_h.valid() && joiner_h != host_h, "joiner spawned, distinct handle"))
 		return false;
 	if (!expect(world.cached.local_player == host_h,
 	            "admit_peer did NOT steal local_player from the host")) return false;
 
-	net.emit_s2c(world, fallback);
+	ns::test::emit_all(world, conns, fallback);
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
 
@@ -200,14 +202,14 @@ bool run_joiner_uplink_snaps_peer() {
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
 
-	ns::NetSystem net;
+	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel self_ch;
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
-	net.add_connection(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
-	const std::size_t conn_join =
-			net.add_connection(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
+	conns.push_back(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
+	const std::size_t conn_join = 1;
 	const w::EntityHandle joiner_h =
-			net.admit_peer(world, conn_join, player_spawn({1.0f, 1.0f, 1.0f}, 0, 0xFFF1));
+			ns::test::admit_peer(world, conns, conn_join, player_spawn({1.0f, 1.0f, 1.0f}, 0, 0xFFF1));
 	if (!expect(joiner_h.valid(), "joiner admitted")) return false;
 
 	// The joiner reports a new pose from its client endpoint.
@@ -219,10 +221,7 @@ bool run_joiner_uplink_snaps_peer() {
 	if (!expect(udp_host.inbound_pending() == 1, "joiner uplink reached the host endpoint"))
 		return false;
 
-	w::TickContext ctx;
-	ctx.world = &world;
-	ctx.is_authority = true;
-	net.tick(world, ctx);
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(udp_host.inbound_pending() == 0, "host drained the joiner connection")) return false;
 
 	// The joiner's registry entity SNAPPED to the wire pose.
@@ -257,16 +256,13 @@ bool run_self_uplink_rejected() {
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({7.0f, 8.0f, 9.0f}, 0, 0xFFF0));
 
-	ns::NetSystem net;
+	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel self_ch;
-	net.add_connection(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
 
 	// A (malicious/echo) 0x0C naming the host's own player.
 	self_ch.client_send(0x0C, make_0c_uplink(host_h.packed, w::to_fixed(999.0), 0, 0, 0x4000, 0));
-	w::TickContext ctx;
-	ctx.world = &world;
-	ctx.is_authority = true;
-	net.tick(world, ctx);
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(self_ch.c2s_pending() == 0, "self 0x0C drained even when rejected")) return false;
 
 	const w::Entity *he = world.registry.get(host_h);
@@ -296,17 +292,14 @@ bool run_cross_peer_uplink_rejected() {
 		return false;
 
 	// Connection A owns peer A. Its first uplink SPOOFS peer B's handle.
-	ns::NetSystem net;
+	std::vector<ns::Connection> conns;
 	ns::UdpSessionTransport udp_a(ns::UdpSessionTransport::Role::Host);
-	net.add_connection(ns::Connection{&udp_a, ns::TransportMode::Client, peer_a, 0});
+	conns.push_back(ns::Connection{&udp_a, ns::TransportMode::Client, peer_a, 0});
 	ns::UdpSessionTransport udp_a_client(ns::UdpSessionTransport::Role::Client);
 	udp_a_client.client_send(0x0C, make_0c_uplink(peer_b.packed, w::to_fixed(999.0), 0, 0, 0x4000, 0));
 	carry(udp_a_client, udp_a);
 
-	w::TickContext ctx;
-	ctx.world = &world;
-	ctx.is_authority = true;
-	net.tick(world, ctx);
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(udp_a.inbound_pending() == 0, "spoofed 0x0C drained even when rejected")) return false;
 
 	// Peer B was NOT snapped by peer A's connection (owner gate), and peer A is untouched (its
@@ -327,7 +320,7 @@ bool run_cross_peer_uplink_rejected() {
 	// admits the owner, it does not reject every uplink.
 	udp_a_client.client_send(0x0C, make_0c_uplink(peer_a.packed, w::to_fixed(100.0), 0, 0, 0x0000, 0));
 	carry(udp_a_client, udp_a);
-	net.tick(world, ctx);
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	const w::Entity *ae2 = world.registry.get(peer_a);
 	if (!expect(ae2 != nullptr && ae2->position.x == 100.0f,
 	            "peer A snapped by ITS OWN connection's uplink (owner gate admits the owner)"))
@@ -349,15 +342,15 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	if (!expect(host_h == w::EntityHandle::make(0, 4), "retail host player uses slot 4"))
 		return false;
 
-	ns::NetSystem net;
+	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel self_ch;
 	ns::UdpSessionTransport udp_host(ns::UdpSessionTransport::Role::Host);
-	net.add_connection(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
-	const std::size_t conn_join =
-			net.add_connection(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
+	conns.push_back(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&udp_host, ns::TransportMode::Client, {}, 0});
+	const std::size_t conn_join = 1;
 	const w::EntityHandle joiner_h =
-			net.admit_peer(world, conn_join,
-			               player_spawn({10.0f, 0.0f, 0.0f}, 0, 0xFFF1, 4));
+			ns::test::admit_peer(world, conns, conn_join,
+			                     player_spawn({10.0f, 0.0f, 0.0f}, 0, 0xFFF1, 4));
 	if (!expect(joiner_h == w::EntityHandle::make(0, 5), "retail joiner player uses slot 5"))
 		return false;
 
@@ -365,7 +358,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(0.0));
 	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(0.0));
 	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(0.0));
-	net.emit_s2c(world, fallback);
+	ns::test::emit_all(world, conns, fallback);
 
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);

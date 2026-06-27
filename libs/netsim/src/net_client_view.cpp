@@ -1,7 +1,7 @@
 #include "netsim/net_client_view.h"
 
 #include "netsim/entity_wire_bridge.h" // class_for_type_id (default resolver)
-#include "netsim/net_system.h"         // kTag0aFrameUpdate
+#include "netsim/connection_fan.h"     // kTag0aFrameUpdate
 
 namespace opennova::netsim {
 

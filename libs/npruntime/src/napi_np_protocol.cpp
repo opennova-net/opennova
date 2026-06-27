@@ -43,7 +43,7 @@ NapiNPConnection *find_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 
 // Linear scan + create-on-miss over connection_list — faithful to the original intrusive-list walk
 // (NapiNPServer_SendFiltered @0x4C87E0 -> SendToConn per node). connection_list stays authoritative
-// (P4 reconciles it vs the NetSystem table). A fresh node is a server-side connection (type 1).
+// (the single-owner table; there is no parallel connection table). A fresh node is a server-side connection (type 1).
 NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	if (NapiNPConnection *existing = find_connection(ctx, peer)) return *existing;
 	NapiNPConnection node;
@@ -166,7 +166,7 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 
 // Ship one burst step's messages for `conn`: a remote (type 1) gets one framed 0x83 SESSION datagram
 // (SCRK + seq); the host's own loopback (type 2, no SCRK) gets each [tag][body] pushed straight into
-// its in-process transport — the §5.2a step-4 socketless S2C delivery (what NetSystem::emit_s2c does
+// its in-process transport — the §5.2a step-4 socketless S2C delivery (what emit_connection_s2c does
 // for the loopback's per-frame 0x0A). [orig: NapiNPServer_SendToConn @0x4c4f20 / mode-1 in-process]
 void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage> &msgs,
                          std::vector<std::vector<uint8_t>> &outbound) {
@@ -196,7 +196,7 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 // NOTE (D-NET-114, host self-stream): the host's OWN type-2 loopback runs the §5.2a burst too — this
 // is FAITHFUL (the original's Server_OnPlayerJoin @0x51a680 runs for the host's own join, not just
 // remote joiners), so we do not suppress it here. But its PeerSpawned carries self_id == the host dcb
-// (kHostPlayerDcb): the event CONSUMER (the binding / NetSystem) must recognize self_id == its own
+// (kHostPlayerDcb): the event CONSUMER (the binding / ClientRuntime) must recognize self_id == its own
 // connection id and NOT admit a duplicate "ghost" host avatar — the host's local player is already
 // World::cached.local_player. (Self-filter belongs at the consumer, where the local connection id is
 // known; surfacing it here keeps the libs layer a faithful, consumer-agnostic event source.)
@@ -421,7 +421,7 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// / tick path observes the burst change first wins (one-shot via the *_announced latches).
 	surface_burst_events(ctx, conn, out.events);
 
-	// Once a connection exists, surface the joiner's in-match C2S 0x0C uplinks for NetSystem to
+	// Once a connection exists, surface the joiner's in-match C2S 0x0C uplinks for Server_TickUpdate to
 	// read-apply. Pre-spawn 0x0C only updates the cached pose (handled above) — no connection to
 	// route it to yet.
 	if (conn.spawned_announced) {
@@ -502,7 +502,7 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 	if (ctx.world != nullptr) Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.burst.spawned) continue; // spawned peers: NetSystem owns their per-frame 0x0A
+		if (conn.burst.spawned) continue; // spawned peers: Server_TickUpdate owns their per-frame 0x0A
 
 		TickOut to;
 		to.peer = conn.peer;

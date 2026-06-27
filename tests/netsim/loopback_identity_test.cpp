@@ -12,11 +12,13 @@
 // the pre-compression value — the codec is intentionally lossy). This guard must
 // stay green through every phase.
 
+#include "netsim/connection_fan.h"
 #include "netsim/entity_wire_bridge.h"
 #include "netsim/loopback_channel.h"
 #include "netsim/net_client_view.h"
-#include "netsim/net_system.h"
 #include "netsim/serializing_sink.h"
+
+#include "conn_fan_test_util.h"
 
 #include <novaworld/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <novaworld/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
@@ -74,16 +76,16 @@ bool run() {
 	anchor.spawn_y = static_cast<uint32_t>(w::to_fixed(18.0));
 	anchor.spawn_z = static_cast<uint32_t>(w::to_fixed(-5.0));
 
-	// --- NetSystem integrates as an ISystem (runs ahead of gameplay) ---
-	ns::NetSystem net(channel);
-	world.add_system(&net);
+	// --- one loopback connection in the host's table (no owned entity -> rides the fallback anchor) ---
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
 	world.load_systems();
 	const uint32_t t0 = world.logic_tick;
-	world.run_logic_tick(); // NetSystem::tick (no-op C2S drain) runs under authority
+	world.run_logic_tick(); // advances under authority (the C2S drain is host-driven, not an ISystem)
 	if (!expect(world.logic_tick == t0 + 1, "logic tick advanced")) return false;
 
 	// --- host emits the post-logic S2C frame; the local client decodes it ---
-	net.emit_s2c(world, anchor);
+	ns::test::emit_all(world, conns, anchor);
 	if (!expect(channel.s2c_pending() == 1, "one 0x0A frame on the loopback")) return false;
 
 	ns::NetClientView view;
@@ -128,7 +130,7 @@ bool run() {
 	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips (engine-frame BAM)")) return false;
 
 	// A second emit/pump applies cleanly (frame counter advances, entity reused).
-	net.emit_s2c(world, anchor);
+	ns::test::emit_all(world, conns, anchor);
 	view.pump(channel);
 	if (!expect(view.frames_applied() == 2 && view.state().entities.size() == 1,
 	            "second frame re-applies to the same entity")) return false;
@@ -184,8 +186,8 @@ std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32
 	return body;
 }
 
-// The host read-applies a remote peer's C2S 0x0C uplink: NetSystem::tick drains it and
-// EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
+// The host read-applies a remote peer's C2S 0x0C uplink: the authority drain (drain_connection_c2s)
+// reads it and EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
 // frame re-broadcasts), mirrors the engine-frame AiEntity, and stages the smooth-target.
 // [orig: dispatch_entity_packet_callback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
 // @0x4c2042-0x4c20a9; §5.10/§5.38]
@@ -221,12 +223,9 @@ bool run_apply_player_intent_stages_remote_peer() {
 
 	// Drain directly (the authority host's top-of-tick C2S drain). The connection owns peer ph — the
 	// owner gate (D-NET-119) requires the uplink handle to match conn.owned_entity for the apply.
-	ns::NetSystem net(channel);
-	net.connection(0).owned_entity = ph;
-	w::TickContext ctx;
-	ctx.world = &world;
-	ctx.is_authority = true;
-	net.tick(world, ctx);
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, ph, 0});
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(channel.c2s_pending() == 0, "C2S drained by the tick")) return false;
 
 	// Registry Entity SNAPPED (absolute world pos; no map-origin add on the extended wire).
@@ -275,13 +274,11 @@ bool run_apply_rejects_own_player() {
 
 	ns::LoopbackChannel channel;
 	channel.client_send(0x0C, make_0c_uplink(ph.packed, w::to_fixed(999.0), 0, 0, 0x4000, 0));
-	ns::NetSystem net(channel);
-	net.connection(0).owned_entity = ph; // owner gate passes (handle == owner); the §5.38 local-player
-	                                     // refusal is what must reject this self-uplink [D-NET-119]
-	w::TickContext ctx;
-	ctx.world = &world;
-	ctx.is_authority = true;
-	net.tick(world, ctx);
+	std::vector<ns::Connection> conns;
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, ph, 0}); // owner gate passes
+	                                     // (handle == owner); the §5.38 local-player refusal is what
+	                                     // must reject this self-uplink [D-NET-119]
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(channel.c2s_pending() == 0, "C2S drained even when rejected")) return false;
 
 	const w::Entity *pe = world.registry.get(ph);

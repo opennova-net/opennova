@@ -328,14 +328,14 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	world_->ai = ai_.get();
 	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
 	// over an in-process loopback, the faithful §5.0 path). Server_TickUpdate owns the logic tick +
-	// the C2S drain + the 0x0A fan, so there is NO NetSystem-as-ISystem here (D-NET-123/125) — the
+	// the C2S drain + the 0x0A fan, so there is NO net ISystem here (D-NET-123/125) — the
 	// present reads the host's own ClientRuntime view, and a LAN host adds the socket legs in host_pump.
 	if (listen_server_) {
 		bringup_host_runtime(file);
 	}
 	// P7 co-op LAN joiner: a pure non-authority client. Build a fresh np::ClientRuntime (Joiner role)
-	// per (re)load — start() fully resets the session, so a reload reconnects cleanly. NetSystem is NOT
-	// registered (the joiner never serializes; run_logic_tick(false) leaves World::net the default
+	// per (re)load — start() fully resets the session, so a reload reconnects cleanly. No net ISystem
+	// is registered (the joiner never serializes; run_logic_tick(false) leaves World::net the default
 	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump on the name-match.
 	if (joiner_) {
 		runtime_ = std::make_unique<opennova::np::ClientRuntime>(
@@ -572,8 +572,8 @@ bool NovaSimulation::advance_frame() {
 	//
 	// Listen-server frame order [orig: Game_ProcessMainFrame @ 0x5263f0]:
 	//   input -> net(drain C2S) -> run_logic_tick(WAC/BMS/AI) -> net(emit S2C) -> present.
-	// The C2S drain is NetSystem::tick (system index 0, runs at the top of the loop);
-	// the S2C emit + the local client's decode happen in net_tick(), after the logic.
+	// Server_TickUpdate owns the C2S drain at the top of the loop and the post-logic S2C fan;
+	// host_pump drives it and the local client's decode happens via the host's ClientRuntime.
 	const uint64_t sim_start = perf_now_us();
 	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
 		host_pump();
@@ -612,7 +612,8 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	ctx_ = np::NapiNPServerCtx{};
 	ctx_.world = world_.get();
 	ctx_.mission = &mission_file_;
-	ctx_.net = nullptr; // P7: NetSystem retired as a World ISystem; Server_TickUpdate owns the tick.
+	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
+	// separate net ISystem (retired P8).
 
 	// NapiGameSettings for create_session: a LAN host takes its lobby-visible name / gametype from
 	// the GDScript-configured host_session_config_; SP is the faithful "SINGLEPLAYERGAME" / 1 player.
@@ -1412,7 +1413,7 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 void NovaSimulation::enable_listen_server(bool p_enable) {
 	listen_server_ = p_enable;
 	// P7: the SP listen server now rides the npruntime in-match runtime (ctx_ / host_loop_ /
-	// runtime_), stood up per-load in bringup_host_runtime — there is no NetSystem-as-ISystem and
+	// runtime_), stood up per-load in bringup_host_runtime — there is no net ISystem and
 	// no legacy loopback seam here. (The LAN host still builds the legacy seam in enable_host_listen
 	// until A3; a sim is SP listen XOR LAN host XOR joiner.)
 }

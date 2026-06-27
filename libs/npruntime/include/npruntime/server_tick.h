@@ -27,10 +27,10 @@ namespace opennova::np {
 // @+0x58 gates the replicate/broadcast at step (3), not the C2S drain or the whole tick].
 //
 // IMPORTANT (P7 guardrail) [D-NET-125]: this IS the C2S drain AND it owns the logic tick. Do NOT also
-// register a netsim::NetSystem as a World ISystem (nor keep a separate run_logic_tick) when driving
-// the runtime through Server_TickUpdate, or the C2S queue drains — and the sim advances — twice. This
-// invariant is comment-only today; nothing in code prevents wiring both drivers (ctx.net stays a
-// settable NetSystem*). P7 folds the tables onto one transport and removes ctx.net.
+// keep a separate run_logic_tick (nor a parallel connection-table driver) when driving the runtime
+// through Server_TickUpdate, or the C2S queue drains — and the sim advances — twice. The drain/emit
+// primitives (netsim::drain_connection_c2s / emit_connection_s2c, connection_fan.h) are invoked ONLY
+// from here over connection_list; the legacy NetSystem-as-ISystem was retired at P8.
 void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallback_anchor = {});
 
 } // namespace opennova::np

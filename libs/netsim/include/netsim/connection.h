@@ -21,10 +21,10 @@ enum class TransportMode : uint8_t {
 // One client connection on the authoritative host — the reimpl of a NapiNPConnection node on
 // the server's connection list [orig: the list NapiNPServer_SendFiltered @0x4C87E0 walks, one
 // SendToConn @0x4c4f20 per node]. The transport is NON-OWNING: the Godot binding (or a test
-// harness) owns the LoopbackChannel / UdpSessionTransport; NetSystem only fans the per-frame
-// world reference over it and drains its C2S queue. Keeping the table inside NetSystem mirrors
-// the original — NetSystem IS our NapiNPServer (it already owns the per-frame world-state
-// build and the receive drain).
+// harness) owns the LoopbackChannel / UdpSessionTransport; the per-connection drain/fan
+// primitives (connection_fan.h) only fan the per-frame world reference over it and drain its
+// C2S queue. The connection TABLE is owned by the host driver — npruntime's Server_TickUpdate
+// over NapiNPProtocol.connection_list (each node embeds a Connection `link`).
 struct Connection {
 	// The byte transport for this peer (host's own client = a LoopbackChannel; a remote peer =
 	// a UdpSessionTransport). Never null for a registered connection.
@@ -36,7 +36,8 @@ struct Connection {
 	// The pool-0 player entity this connection drives — the SUBJECT its S2C 0x0A frame is
 	// anchored to, and the owner the host verifies a C2S 0x0C uplink against [orig:
 	// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx`]. The host spawns it for
-	// a joiner (NetSystem::admit_peer). An INVALID handle = pre-spawn (still handshaking): emit
+	// a joiner (spawn_remote_player, bound by the host driver). An INVALID handle = pre-spawn
+	// (still handshaking): emit
 	// falls back to the default anchor. The host's own loopback connection leaves this invalid
 	// and rides the default anchor (= the local player; compute_net_anchor), preserving SP.
 	world::EntityHandle owned_entity{};
