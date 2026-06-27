@@ -173,14 +173,36 @@ unaffected; full ctest 223/223.
 > the joiner's C2S-`0x0F` flood — reconcile whether the joiner suppresses its local `.bms` pool-1/2
 > spawn when *joining* (vs hosting), which would let the host stream them without conflict.
 
-### P4 — Per-frame host loop (SP)
-`Server_TickUpdate` (`server_tick.h`): **(1)** drain C2S (`NapiNPProtocol_Pump` →
+### ✅ P4 — Per-frame host loop (SP) (DONE)
+`Server_TickUpdate` (`server_tick.{h,cpp}`): **(1)** drain C2S (`NapiNPProtocol_Pump` →
 `PumpRecvQueues` → `DispatchOpcode` → `DispatchMessage`; in-match `0x0C` →
 `dispatch_entity_packet_callback` → `NetPacket_SerializePlayerState` SNAP) **(2)** `World::run_logic_tick`
-**(3)** `NetSystem::emit_s2c` per-connection fan **(4)** flush. Finish the netsim stubs
-(`SerializingSink::send_command`, per-connection emit fan, loopback). Reconcile the connection
-table: `NapiNPProtocol.connection_list` vs `NetSystem`'s internal table (decide single owner).
-Bar: gameplay golden `0x0C`-in → `0x0A`-out round-trip.
+**(3)** per-connection S2C `0x0A` fan **(4)** flush.
+
+**Single-owner decision:** `NapiNPProtocol.connection_list` is the one connection table (each node's
+embedded `netsim::Connection link`). `Server_TickUpdate` walks it directly and drains/emits over each
+`conn.link`; it constructs/registers NO `NetSystem` and registers NO net ISystem (so the C2S queue
+never double-drains — P7 guardrail noted in `server_tick.h`). `NetSystem` stays byte-for-byte unchanged
+as the *legacy* `nova_simulation` table until P7 folds it onto `connection_list`; `ctx.net` stays
+declared-but-unused (removed at P7). To keep ONE drain/emit implementation, the two `net_system.cpp`
+file-statics were promoted to public free functions `netsim::drain_connection_c2s` /
+`emit_connection_s2c`; `NetSystem::tick`/`emit_s2c` became thin loops over them (behavior-preserving —
+all `netsim_*` tests stay green).
+
+**Deliberately NOT changed:** `handle_client_session` (it still only *surfaces* `PeerC2SInMatch`; the
+owner reframes it onto `conn.link.transport->push_inbound`, the proven path — npruntime has no
+production `PeerC2SInMatch` consumer yet, so an inline apply would be dead code + a P7 double-apply
+trap). The per-frame `0x0A` codec is unchanged: `build_tag_0a_world_reference` already returns
+`encode_frame_update` (the witnessed §5.9 bytes `decode_frame_update`/`NetClientView` round-trip) — the
+P8 cleanup just lifts the snapshot→`FrameUpdate` adapter into netsim. `SerializingSink::send_command`
+stays the structural no-op: the `0x23` entity-command body is unwitnessed and the sink has zero callers
+(faithful-port — never invent bytes; grill `NapiNPServer_SendFiltered` 0x23 then port once a caller exists).
+
+Bar met: `npruntime_golden_gameplay` — the gameplay golden's real retail C2S `0x0C` (2351 extended
+uplinks) drains → SNAPs the owned entity → the emitted S2C `0x0A` anchor IS that entity's post-SNAP
+position (opennova↔opennova self-consistency); full-body byte-parity vs the capture is DEFERRED
+(our World ≠ the capture's ASH_G3D entity set), printed not asserted, mirroring `npruntime_golden_lan_join`.
+Env-gated `NW_GOLDEN_GAMEPLAY` + skip-clean. `npruntime|netsim` ctest 13/13 green.
 
 ### P5 — Headless client runtime
 `client_runtime.{h,cpp}`: connect legs (`GATE → HELLO → AUTH/VERIFY → READY → PLAY`, reusing

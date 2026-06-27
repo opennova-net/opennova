@@ -28,7 +28,11 @@ PlayerReplicationState anchor_for_connection(const world::World &w, const Connec
 	return a;
 }
 
-// Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport.
+} // namespace
+
+// Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport. Public
+// (declared in net_system.h) so npruntime's Server_TickUpdate shares this exact drain when it
+// walks NapiNPProtocol.connection_list instead of NetSystem's own table.
 void drain_connection_c2s(world::World &world, ISessionTransport &transport) {
 	Datagram dg;
 	while (transport.host_recv(dg)) {
@@ -63,7 +67,16 @@ void drain_connection_c2s(world::World &world, ISessionTransport &transport) {
 	}
 }
 
-} // namespace
+// Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. Public
+// (net_system.h) — the per-connection emit body, shared by NetSystem::emit_s2c below and
+// npruntime's Server_TickUpdate fan over connection_list. anchor_for_connection stays file-static.
+void emit_connection_s2c(const world::World &w, const Connection &conn,
+                         const std::vector<GameEntitySnapshot> &ents,
+                         const PlayerReplicationState &fallback_anchor) {
+	if (conn.transport == nullptr) return;
+	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
+	conn.transport->host_send(kTag0aFrameUpdate, build_tag_0a_world_reference(anchor, ents));
+}
 
 void NetSystem::tick(world::World &world, const world::TickContext &ctx) {
 	// Drain queued C2S datagrams on EVERY connection and read-apply each player uplink to its
@@ -84,12 +97,7 @@ void NetSystem::emit_s2c(const world::World &w, const PlayerReplicationState &fa
 	// No per-connection visibility cull this increment (broadcast the whole world to every
 	// connection — a filter==1 send); the per-connection send_mask is present but unread.
 	const std::vector<GameEntitySnapshot> ents = snapshot_world(w);
-	for (const Connection &conn : connections_) {
-		if (conn.transport == nullptr) continue;
-		const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
-		std::vector<uint8_t> body = build_tag_0a_world_reference(anchor, ents);
-		conn.transport->host_send(kTag0aFrameUpdate, std::move(body));
-	}
+	for (const Connection &conn : connections_) emit_connection_s2c(w, conn, ents, fallback_anchor);
 }
 
 std::size_t NetSystem::add_connection(const Connection &c) {

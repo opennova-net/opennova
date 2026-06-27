@@ -4,6 +4,7 @@ add_library(opennova_npruntime STATIC
     src/joiner_connection.cpp
     src/server_spawn.cpp
     src/server_initial_state.cpp
+    src/server_tick.cpp
 )
 
 target_include_directories(opennova_npruntime

@@ -1404,3 +1404,14 @@ target_link_libraries(npruntime_golden_lan_join_test
 target_compile_definitions(npruntime_golden_lan_join_test PRIVATE
     DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
 add_test(NAME npruntime_golden_lan_join COMMAND npruntime_golden_lan_join_test)
+
+# P4 golden — np::Server_TickUpdate round-trips a REAL retail C2S 0x0C uplink into an S2C 0x0A frame
+# (0x0C-in -> SNAP -> 0x0A-out), sourced from the in-match gameplay capture. Env-gated + skip-if-absent
+# (no committed derived oracle); unlike the order-only lan_join golden this drives the npruntime runtime,
+# so it links opennova_npruntime + opennova_netsim + opennova_world.
+add_executable(npruntime_golden_gameplay_test npruntime/golden_gameplay_test.cpp)
+target_link_libraries(npruntime_golden_gameplay_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_app_common)
+target_compile_definitions(npruntime_golden_gameplay_test PRIVATE
+    DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
+add_test(NAME npruntime_golden_gameplay COMMAND npruntime_golden_gameplay_test)

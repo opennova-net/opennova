@@ -78,4 +78,20 @@ private:
 	std::vector<Connection> connections_;
 };
 
+// --- per-connection primitives, shared by NetSystem (the legacy nova_simulation table) and
+// npruntime's Server_TickUpdate (which fans over NapiNPProtocol.connection_list instead) so the
+// single owner decision (ADR 0011 / npruntime ROADMAP P4) keeps ONE drain/emit implementation. ---
+
+// Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport (the SNAP)
+// [orig: dispatch_entity_packet_callback @0x4D6A80 -> NetPacket_SerializePlayerState]. Only
+// sub_op 0x0A (extended) this increment; 0x0B compact is deferred.
+void drain_connection_c2s(world::World &world, ISessionTransport &transport);
+
+// Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its owned entity (or
+// `fallback_anchor` when it has none), and host_send it onto that connection's transport. `ents`
+// is the world snapshot built ONCE by the caller [orig: NapiNPServer_SendToConn @0x4c4f20 per node].
+void emit_connection_s2c(const world::World &w, const Connection &conn,
+                         const std::vector<GameEntitySnapshot> &ents,
+                         const PlayerReplicationState &fallback_anchor);
+
 } // namespace opennova::netsim
