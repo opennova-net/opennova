@@ -279,7 +279,7 @@ novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`
 §5.2a serializers stay deferred (structural P3) — our host emits `1C 0B 11 | 10 0C 20 | 0A…`; full body
 byte-parity and the retail `0x57` RTT pong are tracked follow-ups.
 
-### ✅ P7 — Godot adapter rewrite (in-match core DONE; lobby sweep in progress)
+### ✅ P7 — Godot adapter rewrite (DONE — in-match core + lobby sweep)
 `nova_simulation.cpp` is a thin adapter over `npruntime` — every in-match path funnels into one
 runtime, the binding owns sockets/signals only.
 
@@ -300,18 +300,46 @@ runtime, the binding owns sockets/signals only.
 - **B1 — `libs/novaworld/http_flow` DONE** (`e4036223`): `LobbyHttpFlow` owns the EPASK login / GSB /
   NWJoin machines (URL builders + cookie jar + LoginStep/JoinStep), reusing the existing byte helpers;
   literals byte-preserved; ctest `http_flow` green. **Nothing consumes it yet.**
-- **B2/B3 — REMAINING**: rewire `godot/engine/network/nova_world_client.{h,cpp}` + `nova_world_host`
-  onto `LobbyHttpFlow` (delete the binding's ~355-line duplicate login/GSB/join machines; keep the 3
-  HTTPRequest nodes + signals as the transport pump) and move the thin host var-builders + a
-  `parse_host_port` into libs. CAVEAT: the lobby HTTP legs have no headless GUT coverage (they need a
-  live/local NovaWorld server) — verify via `http_flow` ctest + a manual lobby smoke.
+- **B2/B3 — DONE** (`42c49b62`): the lobby bindings are now pure pumps over `LobbyHttpFlow`.
+  **B2** = new `libs/novaworld/lobby_vars.{h,cpp}` (`HostRegistration` + `make_host_var_list`/
+  `make_host_request`/`make_host_update`→`NapiMessage`; `az_fingerprint` + `LobbyIdentityParams`/
+  `make_lobby_identity_vars` = the NW-S5 10-var identity set; `parse_host_port`) — the host var-builders
+  + the client identity assembly + the `UDPNOVAWORLD` split moved out of BOTH bindings; ctest
+  `lobby_vars` proves byte-equality vs the old hand-assembly. The host keeps
+  `verify_cookie_vars={{NWUID,""}}` (the 10-var set is client-only). **B3** = `nova_world_client` holds
+  one `opennova::LobbyHttpFlow flow_`; `sync_flow_context()` snapshots the gate/session outputs into
+  `LobbyHttpContext` at each leg-init (NEVER inside a leg callback — keeps `http_base()` stable
+  mid-login); `ship_spec()` maps `HttpRequestSpec`→`HTTPRequest`; the 3 `request_completed` callbacks
+  feed `on_login`/`on_gsb`/`on_join_response` and re-ship `NeedRequest` on the same per-leg node (mind
+  `on_gsb_response`'s arg order: body 3rd, out 4th, no headers). Deleted ~355 lines (login/GSB/join
+  machines + `cookie_jar_`/`epask_`/Login+JoinStep). D-1 (flagged): async join `Failed` → uniform
+  `STATE_CONNECTED` fallback. **Verified:** `lobby_vars`+`http_flow` ctest green; 23/23 net ctest green;
+  GDExtension compiles; `nova_world_client`/`host` GUT 4/4 each; and a **live headless our-stack lobby
+  smoke** against the local Docker NovaWorld server (our `NovaWorldHost`+`NovaWorldClient`,
+  `SEED_DEV_USERS` `test`/`test`) ran host-register → connect → login(TestPlayer) → GSB browse →
+  NWJoin → `joined_game 127.0.0.1:32768`, the shared cookie jar carrying NWHANDLE/PCID into the join
+  legs. Docker GOTCHA (Windows): NW UDP 64206 is in a reserved port range — remap (`ONNET_NW_UDP_PORT`)
+  + run loopback with `ONNET_PUBLIC_HOST=127.0.0.1 ONNET_CLIENT_REFLECT_IP=127.0.0.1`. Pre-existing
+  faithful note (not a regression): the server's STARTUPURL leaves `[GT]/[VER1]/[VER2]/[CC]`
+  unsubstituted (`resolve_startup_url` only fills when `[domainname]` is present; the server tolerates it).
 
-Bar (met for the in-match core): `/gut` full suite 1890 passing / 0 failing; 16 net ctests green; SP
-launches and renders via `ClientState`.
+Bar (met): `/gut` full suite passing / 0 failing; net ctests green; SP launches and renders via
+`ClientState`; lobby smoke (login → browse → join) green against a local NovaWorld server.
 
-### P8 — Retire legacy glue
-Delete `game_session`, `game_server_runtime`, and the `replication_min` `build_tag_*` builders
-once unreferenced. Bar: full ctest + GUT green; no references to retired symbols.
+### P8 — Retire legacy glue (NEXT)
+Delete `libs/novaworld/game_session.{h,cpp}` + `game_server_runtime.{h,cpp}` and the
+`replication_min` `build_tag_*` builders (keep the POD structs) once unreferenced. Bar: full ctest +
+GUT green; no references to retired symbols.
+
+**Gating prerequisite (do this FIRST):** `ctx.game_runtime` (`GameServerRuntime`) is still load-bearing
+for the **§5.1 joiner handshake-reply bodies** — P3 kept it solely for that (`napi_np_protocol.cpp`
+mirrors its `GameSessionState` onto `conn.burst` when `ctx.world==nullptr`, and the P2 unit tests run
+that path). So P8 is NOT a pure delete: (1) witness the §5.1 reply bodies in IDA and port them into the
+npruntime spawn/burst path off `game_runtime` (the tag-burst order in `game_session.cpp` IS the spec for
+`Server_SendInitialGameStateToPlayer` — read it, don't keep it); (2) drop `game_runtime` from
+`NapiNPServerCtx` + the P2/P3 mirror path; (3) confirm `apps/novaworld_server` + `tests/*` no longer
+reference the retired symbols; (4) delete. Likely couples with the deferred §5.2a serializer grill wave
+(those ~8 emit-nothing serializers are the same burst).
 
 ## Test harness (built up across phases)
 
