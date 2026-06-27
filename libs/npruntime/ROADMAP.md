@@ -279,8 +279,8 @@ into `ClientState`. It also asserts the host's emitted §5.2a S2C tag order and 
 `NW_GOLDEN_LAN_JOIN`, skip-clean) cross-checks it against `retail-lan-host-join.pcapng` — **passes against
 the local golden**. `apps/nw_server` live-hosts a real 1333-entity JO mission at 62 Hz. `npruntime|netsim|
 novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`0x1A` and the unwitnessed
-§5.2a serializers stay deferred (structural P3) — our host emits `1C 0B 11 | 10 0C 20 | 0A…`; full body
-byte-parity and the retail `0x57` RTT pong are tracked follow-ups.
+§5.2a serializers stayed deferred at P6 (structural P3) — **now closed by D-NET Wave 1 (P8.2 below)**;
+the retail `0x57` RTT pong remains a tracked follow-up (Wave 5).
 
 ### ✅ P7 — Godot adapter rewrite (DONE — in-match core + lobby sweep)
 `nova_simulation.cpp` is a thin adapter over `npruntime` — every in-match path funnels into one
@@ -380,6 +380,24 @@ change; 223/223 ctest + GDExtension green):
 - **Doc-integrity fix:** the D-NET-116/117/119 ID collisions (each assigned once as a §5.43 behavior
   entry and once as a §8 IDB-hygiene entry) are resolved — the IDB-hygiene trio renumbered to
   D-NET-128/129/130 (the code-cited behavior entries keep their numbers).
+
+### ✅ P8.2 — port the §5.2a initial-state serializers (DONE, 2026-06-27, D-NET Wave 1)
+
+The player-sync serializers that P3-P6 left as "emit nothing / deferred" are ported from the witnessed
+originals (grilled vs `Server_SendInitialGameStateToPlayer @0x51bba0` and cross-checked byte-for-byte
+against the retail-lan-host-join golden). See net-re §5.2a serializer-grill table for the full witness
+map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now `2C 08 2A×6 1C 0B 66 76
+11 | 10 0C 20 1A` (was `1C 0B 11 | 10 0C 20`).
+
+- New `ServerRules` (the 0x08 block) + `weapon_restrictions` on `NapiNPServerCtx`; the serializers live
+  in `server_initial_state.cpp` (0x2C serverName+mapFile, 0x08 server-config + `build_server_config_flags`
+  @0x4c4dc0, 0x2A const table×6, 0x66 weapon-restrictions, 0x76 server-tick16, 0x1A timestamp).
+- 0x45 terrain-delta + 0x7E briefing are emitted by the original ONLY when present; both `return 0` and
+  the orig skips otherwise, so they are faithfully ABSENT on the headless host (not deferrals).
+- IDB hygiene: `WriteTypeNameAndBaseName → NetPacket_WriteServerNameAndMapFile`; `byte_24D1FC4 →
+  g_server_name_str`; `baseName → g_map_file_name` (the wire proved serverName+mapFile, not type/base).
+- Tests: `npruntime_initial_state_burst` (full order + per-body byte assertions), `npruntime_golden_lan_join`
+  (retail 0x2A byte-parity + 0x2C/0x08/0x66/0x76 structure-parity). 22/22 net ctest + GDExtension green.
 
 ## Test harness (built up across phases)
 

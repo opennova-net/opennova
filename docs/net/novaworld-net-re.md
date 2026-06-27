@@ -832,6 +832,42 @@ clears the gate. Open: byte-confirm that the first post-spawn `0x0A` sets `flags
 server-side `0x0A` builder's spawn-flag logic is unwitnessed; the `0x430000`-page `0x1D`/`0x0A`
 handlers currently fail to decompile — an analysis gap on that page).
 
+#### 5.2a player-sync + world-stream serializer grill (2026-06-27, D-NET Wave 1)
+
+`[orig: Server_SendInitialGameStateToPlayer @ 0x51bba0]` now decompiles cleanly (no longer the
+analysis gap noted above — that was the `0x430000`-page client handlers, not this orchestrator). It
+is a two-track state machine over `playerSlot+32` (`sync_state`): **state 2 = player-sync** (subphase
+`playerSlot+89878`, 8..16) then **state 4 = world-stream** (phase `playerSlot+89882`, 0..7). Each
+phase calls `NapiNPServer_SendFiltered(&g_napi_np_ctx, <tag>, 1, 0, buf, len)` (`send_mask=32`,
+`send_target_slot=playerSlot`). The full burst, cross-checked **byte-for-byte vs the
+retail-lan-host-join golden** (frames 144-160), with each serializer ported into
+`libs/npruntime/src/server_initial_state.cpp` (was "emit nothing / deferred" through P3-P6):
+
+| tag | serializer | body | reimpl source |
+|---|---|---|---|
+| 0x2C | `NetPacket_WriteServerNameAndMapFile @0x505780` (Kong-misnamed `WriteTypeNameAndBaseName` — FIXED) | `g_server_name_str` ("Untitled") + `g_map_file_name` ("TDH_I5A.BMS"), two NUL C-strings | `SessionReplyConfig.server_name`/`mission_file` |
+| 0x08 | `ServerConfig_SerializeToPacket @0x505bd0` | 51 B = 10 rule dwords [respawn 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _] + 7 bytes + flags dword (`CNapiServerConfig_BuildFlags @0x4c4dc0`) | `NapiNPServerCtx.rules` (ServerRules) + `build_server_config_flags` |
+| 0x2A ×6 | `NetPacket_CopyTenBytes @0x503900` over table `@0x82F1D8` | const 10-B record `{00 04 b0 ab b2 b2 bf bc bd ba}` ×6 (table = 6 records, threshold 0 ⇒ all sent; gate `threshold > playerSlot[+7]`) | `k0x2aRecord` const (**byte-exact vs golden**) |
+| 0x66 | `NetPacket_SerializeWeaponRestrictionTable @0x5102c0` | count byte + (index,value) pairs for each restricted weapon (value 0/2) in `unused6[255]`; golden = `00` (no restrictions) | `ctx.weapon_restrictions` (restricted-set vector; empty ⇒ `{0}`) |
+| 0x76 | `NetPacket_WriteServerTick16 @0x510350` | `dword_24D59FC` server tick, u16 (golden `ff 03`) | `now_tick & 0xFFFF` |
+| 0x1C / 0x11 | (empty markers, ≥subphase 16) | 0-length | EmitEmpty |
+| 0x0B | `NetPacket_WriteBMSHeader @0x502ca0` | 616-B BMS header (§5.4) | `bms::encode_header_blob` |
+| world-stream 0x10/0x0D/0x0C/0x20 | pool serializers (§5.11/5.12/5.23) | per-pool batches | netsim extractors (0x0D pool-1 omitted, D-NET-97/98) |
+| 0x45 | `NetPacket_WriteTerrainTiles @0x506570` → `serialize_terrain_tiles @0x6080f0` | terrain-tile delta from `entity+89884`; **`return 0` (orig skips) when no delta** | faithfully ABSENT (headless host streams no per-player terrain delta) |
+| 0x7E | `NetPacket_WriteBriefingText @0x506620` | MissionText `briefing3` + `briefing2`/`briefing` C-strings; 0 when empty | faithfully ABSENT (no MissionText wired) |
+| 0x1A | `NetPacket_WriteTimestamp @0x5046c0` | `GetTickCount()` u32 (OS primitive — excluded; reimpl uses `now_tick`) | `now_tick` |
+
+**Verdict: MATCHING.** The config-independent 0x2A const is byte-exact vs every retail 0x2A body
+(golden, 6 records); the host-config serializers (0x2C/0x08/0x66/0x76) reproduce the witnessed layout
+(VALUES are the host's own config). 0x45/0x7E are emitted by the original **only** when a terrain
+delta / briefing text is present — both `return 0` and the orig skips otherwise — so their absence on
+the headless host is faithful, not a deferral (the golden carries neither). Tests:
+`npruntime_initial_state_burst` (full order + per-body byte assertions), `npruntime_golden_lan_join`
+(retail byte-parity 0x2A, structure-parity 0x2C/0x08/0x66/0x76). **Was: the "§5.2a serializer wave"
+the ROADMAP / D-NET-127 repeatedly cited as the deferred grill — now closed for the player-sync
+bundle.** Remaining §5.2a deferral: the retail host's *static-mission* world-stream (0x10 content +
+0x0D pool-1) which our host omits by design (D-NET-98 / D-NET-97).
+
 **IDB names applied (2026-06-16, this grill; addresses are the join key, so older prose keeps the
 `dword_*` spellings):** `sub_62B5E0 → NapiNPProtocol_StartServer @ 0x62b5e0`;
 `dword_24C1928 → g_spawn_success_gate`; `dword_24C1878 → g_loading_timeout_flag`;

@@ -1,9 +1,10 @@
 // P3 — the §5.2a two-track initial-state burst machine (server_initial_state.{h,cpp}). Drives the
 // host's own loopback connection (the §5.2a step-4 in-process client) through the burst over a real
-// World + bms::File and asserts: (1) the emitted tag ORDER matches §5.2a for the tags we control;
-// (2) each emittable body decodes + round-trips field-identical; (3) the 0x0C organic carries the
-// host player's dcb at entity+0x78 (the §1 wiring, end to end); (4) burst.game_state==9 / spawned at
-// the terminator; (5) the unwitnessed serializers + pool-1 0x0D emit NOTHING (no fixtures).
+// World + bms::File + host config and asserts: (1) the full §5.2a emitted tag ORDER; (2) each body
+// decodes / round-trips / byte-matches the golden-witnessed value (incl. the 0x2C/0x08/0x2A/0x66/0x76/
+// 0x1A serializers ported 2026-06-27); (3) the 0x0C organic carries the host player's dcb at
+// entity+0x78 (the §1 wiring, end to end); (4) burst.game_state==9 / spawned at the terminator;
+// (5) the pool-1 0x0D + the conditional terrain/briefing tags stay absent (faithful, no fixtures).
 
 #include <npruntime/server_initial_state.h>
 #include <npruntime/server_session.h>
@@ -87,22 +88,25 @@ int main_impl() {
 	if (!expect(conn.burst.spawned && conn.burst.game_state == 9, "burst marks spawned + game_state 9")) return 1;
 	if (!expect(conn.phase == np::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
 
-	// (1) The emitted tag order — exactly the tags we control, in §5.2a order (deferred/skip omitted).
-	const std::vector<uint8_t> want_order = {0x1C, 0x0B, 0x11, 0x10, 0x0C, 0x20};
+	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
+	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream: 0x10, 0x0C, 0x20,
+	// 0x1A (0x0D pool-1 + 0x45 terrain + 0x7E briefing are faithfully absent — D-NET-97/98 + the
+	// witnessed conditional empties).
+	const std::vector<uint8_t> want_order = {0x2C, 0x08, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A,
+	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0C, 0x20, 0x1A};
 	std::vector<uint8_t> got_order;
 	for (auto &m : emitted) got_order.push_back(m.tag);
-	if (!expect(got_order == want_order, "emitted tag order matches §5.2a (0x1C,0x0B,0x11,0x10,0x0C,0x20)")) {
+	if (!expect(got_order == want_order, "emitted tag order matches §5.2a (full player-sync + world-stream)")) {
 		std::fprintf(stderr, "  got:");
 		for (uint8_t t : got_order) std::fprintf(stderr, " 0x%02X", t);
 		std::fprintf(stderr, "\n");
 		return 1;
 	}
 
-	// No deferred/omitted tag was emitted (no fixtures).
+	// The pool-1 0x0D and the conditional terrain/briefing tags stay absent (no fixtures, faithful).
 	for (auto &m : emitted) {
-		if (m.tag == 0x2C || m.tag == 0x08 || m.tag == 0x2A || m.tag == 0x66 || m.tag == 0x76 ||
-		    m.tag == 0x45 || m.tag == 0x7E || m.tag == 0x1A || m.tag == 0x0D) {
-			std::fprintf(stderr, "FAIL: deferred/omitted tag 0x%02X was emitted\n", m.tag);
+		if (m.tag == 0x0D || m.tag == 0x45 || m.tag == 0x7E) {
+			std::fprintf(stderr, "FAIL: conditionally-absent tag 0x%02X was emitted\n", m.tag);
 			return 1;
 		}
 	}
@@ -157,6 +161,48 @@ int main_impl() {
 		if (!expect(b->size() == 4 && batch.start_index == 0 && batch.entity_count == 0 &&
 		                    batch.records.empty(),
 		            "0x10 empty static batch carries the 4-byte header")) return 1;
+	}
+
+	// (6) The §5.2a serializers ported from IDA (grilled 2026-06-27). Bodies cross-checked vs the
+	// retail-lan-host-join golden (frames 144-160).
+	{
+		// 0x2C = server name + mission file, two NUL-terminated C strings (from session_config).
+		const std::vector<uint8_t> *b = body_of(0x2C);
+		const std::string sn = ctx.session_config.server_name, mf = ctx.session_config.mission_file;
+		std::vector<uint8_t> want;
+		want.insert(want.end(), sn.begin(), sn.end()); want.push_back(0);
+		want.insert(want.end(), mf.begin(), mf.end()); want.push_back(0);
+		if (!expect(b && *b == want, "0x2C = serverName\\0 + missionFile\\0")) return 1;
+	}
+	{
+		// 0x08 = the 51-byte server-config block (10 rule dwords default 0 + 7 bytes + flags dword).
+		const std::vector<uint8_t> *b = body_of(0x08);
+		if (!expect(b && b->size() == 51, "0x08 server-config is 51 bytes")) return 1;
+		bool dwords_zero = true; // default ServerRules -> all 10 rule dwords 0
+		for (int i = 0; i < 40; ++i) dwords_zero = dwords_zero && ((*b)[i] == 0);
+		if (!expect(dwords_zero, "0x08 default rule dwords are 0")) return 1;
+	}
+	{
+		// 0x2A ×6 — each the const table record {00 04 b0 ab b2 b2 bf bc bd ba} (golden frames 148-158).
+		static const std::vector<uint8_t> kRec = {0x00, 0x04, 0xb0, 0xab, 0xb2, 0xb2, 0xbf, 0xbc, 0xbd, 0xba};
+		int count_2a = 0;
+		for (auto &m : emitted) {
+			if (m.tag != 0x2A) continue;
+			++count_2a;
+			if (!expect(m.body == kRec, "0x2A record == const table payload")) return 1;
+		}
+		if (!expect(count_2a == 6, "exactly six 0x2A records emitted")) return 1;
+	}
+	{
+		// 0x66 weapon-restrictions: no restrictions -> single count byte 0 (golden frame 160).
+		const std::vector<uint8_t> *b = body_of(0x66);
+		if (!expect(b && b->size() == 1 && (*b)[0] == 0, "0x66 empty restriction table = {0}")) return 1;
+		// 0x76 server-tick16 = now_tick low 16 (now_tick=1 -> 01 00).
+		const std::vector<uint8_t> *t = body_of(0x76);
+		if (!expect(t && *t == std::vector<uint8_t>{0x01, 0x00}, "0x76 server-tick16 = now_tick low16")) return 1;
+		// 0x1A timestamp = now_tick u32 (now_tick=1 -> 01 00 00 00).
+		const std::vector<uint8_t> *ts = body_of(0x1A);
+		if (!expect(ts && *ts == std::vector<uint8_t>{0x01, 0x00, 0x00, 0x00}, "0x1A timestamp = now_tick u32")) return 1;
 	}
 
 	// --- Regression (D-NET-114 one-shot burst F3 latch): driving the World path through

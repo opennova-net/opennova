@@ -9,11 +9,13 @@
 //   0x1A order. This is the ground-truth cross-check of our ordering model. (Our host's OWN emitted
 //   order is asserted field-for-field by npruntime_initial_state_burst.)
 //
-// WHAT IS DEFERRED (documented, NOT faked green):
-//   Full-datagram body byte-parity is NOT asserted — the ~8 unwitnessed §5.2a serializers
-//   (0x2C/0x08/0x2A/0x66/0x76/0x45/0x7E/0x1A) are a tracked grill follow-up, and our world-stream
-//   bodies are built from our own World (not the capture's mission), so they would not byte-match.
-//   The observed sequence + the deferred-tag set are printed for the record.
+// BYTE-PARITY (added 2026-06-27, §5.2a serializers ported):
+//   The config-independent 0x2A table record is asserted byte-equal to the retail capture's 0x2A
+//   bodies (our port reproduces retail exactly). The host-config-dependent serializers (0x2C/0x08/
+//   0x66/0x76) are asserted STRUCTURE-equal (the layout our serializer emits — string count / fixed
+//   size / count-prefix), since their VALUES are the capture host's config (server name, rules, tick)
+//   and our host's differ. World-stream bodies are built from our own World (not the capture's
+//   mission), so those stay order-only.
 
 #include <novaworld/wire_capture.h>
 
@@ -88,11 +90,13 @@ int main() {
 	}
 	const std::vector<InGameMessage> msgs = decode_capture_to_messages(caps);
 
-	// The host->joiner (dir 'S') in-match tag sequence — the burst the retail host emitted.
+	// The host->joiner (dir 'S') in-match tag sequence + bodies — the burst the retail host emitted.
 	std::vector<uint8_t> s2c_tags;
+	std::vector<const InGameMessage *> s2c;
 	for (const InGameMessage &m : msgs) {
 		if (m.dir != 'S' || m.settings_update) continue;
 		s2c_tags.push_back(static_cast<uint8_t>(m.tag & 0xFF));
+		s2c.push_back(&m);
 	}
 	if (!expect(!s2c_tags.empty(),
 	            "golden decoded a host->joiner S2C stream (handshake present so SCRK recovered)"))
@@ -121,16 +125,47 @@ int main() {
 	            "§5.2a: 0x20 precedes the 0x1A world-stream timestamp") && ok;
 	if (!ok) return 1;
 
-	// --- Deferred-gap note (NOT asserted): the unwitnessed §5.2a serializers our host omits. ---
-	const uint8_t deferred[] = {0x2C, 0x08, 0x2A, 0x66, 0x76, 0x45, 0x7E, 0x1A};
-	std::printf("[golden] DEFERRED §5.2a serializers (our host emits nothing pending the grill wave;"
-	            " present in this retail capture =");
-	for (uint8_t t : deferred) {
-		if (first_of(s2c_tags, t) >= 0) std::printf(" %02X", t);
+	// --- §5.2a serializer byte-parity / structure-parity (ported 2026-06-27). ---
+	auto first_msg = [&](uint8_t tag) -> const InGameMessage * {
+		for (const InGameMessage *m : s2c)
+			if (static_cast<uint8_t>(m->tag & 0xFF) == tag) return m;
+		return nullptr;
+	};
+
+	// 0x2A: config-independent const table record. Our serializer (server_initial_state.cpp
+	// k0x2aRecord) must byte-match EVERY 0x2A body the retail host sent. This is exact retail parity.
+	static const std::vector<uint8_t> kRec2a = {0x00, 0x04, 0xb0, 0xab, 0xb2, 0xb2, 0xbf, 0xbc, 0xbd, 0xba};
+	int n2a = 0;
+	for (const InGameMessage *m : s2c) {
+		if (static_cast<uint8_t>(m->tag & 0xFF) != 0x2A) continue;
+		++n2a;
+		ok = expect(m->payload == kRec2a, "§5.2a: retail 0x2A body == our const table record (byte-parity)") && ok;
 	}
-	std::printf(")\n");
-	std::printf("[golden] body byte-parity DEFERRED (our world-stream bodies are built from our own"
-	            " World, not the capture's mission). §5.2a tag ORDER validated above.\n");
+	if (n2a > 0)
+		ok = expect(n2a == 6, "§5.2a: retail capture carries six 0x2A records (matches our table)") && ok;
+
+	// 0x2C: two NUL-terminated C strings (serverName, mapFile) — our serializer emits exactly that
+	// shape. Assert the retail body ends in a NUL and contains exactly two NUL terminators.
+	if (const InGameMessage *m = first_msg(0x2C)) {
+		int nuls = 0;
+		for (uint8_t b : m->payload) if (b == 0) ++nuls;
+		ok = expect(!m->payload.empty() && m->payload.back() == 0 && nuls == 2,
+		            "§5.2a: retail 0x2C is two NUL-terminated strings (our serializer's shape)") && ok;
+	}
+	// 0x08: fixed 51-byte server-config block — our serializer emits exactly 51.
+	if (const InGameMessage *m = first_msg(0x08))
+		ok = expect(m->payload.size() == 51, "§5.2a: retail 0x08 server-config is 51 bytes (== our serializer)") && ok;
+	// 0x66: count byte + (index,value) pairs — our serializer emits 1 + 2*count.
+	if (const InGameMessage *m = first_msg(0x66))
+		ok = expect(!m->payload.empty() && m->payload.size() == 1u + 2u * m->payload[0],
+		            "§5.2a: retail 0x66 is count + 2*count pairs (== our serializer shape)") && ok;
+	// 0x76: server tick16 — 2 bytes.
+	if (const InGameMessage *m = first_msg(0x76))
+		ok = expect(m->payload.size() == 2, "§5.2a: retail 0x76 server-tick16 is 2 bytes (== our serializer)") && ok;
+	if (!ok) return 1;
+
+	std::printf("[golden] §5.2a serializer parity: 0x2A byte-exact (%d records); 0x2C/0x08/0x66/0x76"
+	            " structure-exact. World-stream bodies stay order-only (built from our World).\n", n2a);
 
 	std::printf("OK\n");
 	return 0;

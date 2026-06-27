@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "npruntime/napi_np_connection.h"
@@ -70,6 +71,36 @@ struct NapiGameSettings {
 	uint32_t mp_attributes = 0;    // [orig +0xD0] mpattrib bitmask
 };
 
+// [orig: ServerConfig_SerializeToPacket @0x505bd0] The host game-rules block the §5.2a initial-state
+// burst serializes as S2C 0x08 (10 dwords + 7 bytes + a flags dword = 51 B). These mirror the
+// original's g_* rule globals (g_respawn_time @0x24D2140, g_time_limit_minutes @0x24D2144,
+// g_GameType @0x24D2128, g_score_limit @0x24D2134, g_StartDelay @0x24D2160, ...). Default 0 for a
+// headless dev host; a real host / the golden test seeds them (verified vs retail-lan-host-join
+// frame 146: [respawn 30, timelimit 10, 1, gametype 0x10000, 100, score 50, 5, 0, 0, 1]). The four
+// config_word_* fields are witnessed in the wire layout but their gameplay semantics are not yet
+// pinned (kept named by position). The bool/string flag inputs feed CNapiServerConfig_BuildFlags
+// @0x4c4dc0 (the trailing flags dword); the squad/perm-death/misc globals it reads default off.
+struct ServerRules {
+	uint32_t respawn_time = 0;        // [orig g_respawn_time @0x24D2140]   dword[0]
+	uint32_t time_limit_minutes = 0; // [orig g_time_limit_minutes @0x24D2144] dword[1]
+	uint32_t config_word_2 = 0;      // [orig dword_24D2120]               dword[2] (semantic UNWITNESSED)
+	uint32_t game_type = 0;          // [orig g_GameType @0x24D2128]       dword[3]
+	uint32_t config_word_4 = 0;      // [orig dword_24D2130]               dword[4] (semantic UNWITNESSED)
+	uint32_t score_limit = 0;        // [orig g_score_limit @0x24D2134]    dword[5]
+	uint32_t config_word_6 = 0;      // [orig dword_24D214C]               dword[6] (semantic UNWITNESSED)
+	uint32_t start_delay = 0;        // [orig g_StartDelay @0x24D2160]     dword[7]
+	uint32_t config_word_8 = 0;      // [orig dword_24D2164]               dword[8] (semantic UNWITNESSED)
+	uint32_t config_word_9 = 0;      // [orig dword_24D2168]               dword[9] (semantic UNWITNESSED)
+	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + dword_24D2110 low byte]
+
+	// CNapiServerConfig_BuildFlags inputs the game_settings don't already carry.
+	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
+	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
+	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
+	bool config_flag_2550A04 = false;  // [orig dword_2550A04 & 4]   (semantic UNWITNESSED) -> |0x4
+	bool config_flag_2550CA4 = false;  // [orig dword_2550CA4]       (semantic UNWITNESSED) -> |0x10000
+};
+
 // [orig: g_napi_np_ctx.np_protocol @+0xE5C] NapiNPProtocol (§6.5) — the host state block reached
 // from the singleton. Only the fields the in-match runtime needs now are modeled; offsets cited.
 struct NapiNPProtocol {
@@ -113,6 +144,13 @@ struct NapiNPServerCtx {
 
 	NapiGameSettings game_settings; // [orig +0xE68]
 	NapiNPProtocol np_protocol;     // [orig +0xE5C] (pointer in the original; embedded here)
+
+	// [§5.2a] The host game-rules block (S2C 0x08) + the advertised weapon-restriction set (S2C 0x66).
+	// The original reads scattered g_* rule globals + a 255-entry restriction table (unused6 @0x24D5600);
+	// modeled here as the host's own config. weapon_restrictions holds only the RESTRICTED (index,value)
+	// entries (value 0 or 2); empty = no restrictions -> 0x66 emits a single count byte 0 (golden frame 160).
+	ServerRules rules;
+	std::vector<std::pair<uint8_t, uint8_t>> weapon_restrictions;
 
 	// [orig +0x1198..0x11A0] the SendFiltered send descriptor (preserved names). Present but the
 	// 2-peer MVP broadcasts the whole world (filter == 1); the per-connection cull is deferred.
