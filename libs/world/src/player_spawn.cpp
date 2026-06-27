@@ -32,6 +32,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.health = spawn.health; // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
     seed.alive = true;
     seed.flags = 2u;            // the movement gate starts SET; the spawn reset clears it
+    // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The
+    // 0x0C organic-spawn carries it so the client self-matches its own player. [orig: Server_PlayerAdd
+    // @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2b]
+    seed.owner_connection_id = spawn.owner_connection_id;
 
     const EntityHandle h = world.registry.spawn_from(0, spawn.min_entity_slot, seed);
     if (!h.valid()) return h;

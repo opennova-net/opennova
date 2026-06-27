@@ -8,6 +8,16 @@
 
 namespace opennova::np {
 
+// dcb (ConnectionId) reservation on a LAN listen server. The host's loopback client consumes
+// ConnectionId 0/1; the host's own PLAYER is dcb 2; remote joiners are assigned from 3 up. A
+// 0x14B9 organic with entity+0x78 == 0 is the dedicated-server reservation, which makes a joining
+// client keep no player entity for that slot and flood C2S 0x0F → 0xC9 disconnect — so the host
+// player MUST carry a non-zero dcb. Wire-proven by the golden host_and_join_lan.pcapng (host player
+// eFlags=2, first joiner 3, AI 0). [orig: NapiNP_GetLocalConnectionId @0x4c6d40; Server_PlayerAdd
+// @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2a/§5.2b]
+inline constexpr uint32_t kHostPlayerDcb = 2;
+inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
+
 // The per-connection lifecycle phase a server-side node walks from a fresh datagram to an
 // in-match player (§5.0 / §5.2a). Names mirror the witnessed original flow:
 //
@@ -37,6 +47,21 @@ enum class ConnectionPhase : uint8_t {
 	Spawned,
 	InMatch,
 	Goodbye,
+};
+
+// The §5.2a initial-state burst cursor for one connection — Server_SendInitialGameStateToPlayer's
+// per-player phase counters, folded onto the connection node like P2 folded PeerState. After P3 this
+// is the SINGLE authority for the connection's spawn-gate progress (the F3 / PeerSpawned latches read
+// entity_batch_count / spawned here, no longer the game_runtime GameSessionState).
+// [orig: the playerSlot+0x20 sync-state + playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
+struct InitialStateBurst {
+	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 4 world-stream / 5 done
+	uint16_t player_sync_subphase = 8;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
+	uint8_t  world_stream_phase = 0;    // [playerSlot+89882] 0 not-started, 1=0x10 .. 7=0x1A
+	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
+	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
+	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
+	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
 };
 
 // One node on the host's connection_list — the reimpl of a NapiNPConnection [orig: the list
@@ -90,6 +115,9 @@ struct NapiNPConnection {
 	bool self_id_seen = false;             // true once the 0x48 client-ack has been parsed
 	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
 	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)
+
+	// --- P3: the World-driven initial-state burst cursor (Server_SendInitialGameStateToPlayer) ---
+	InitialStateBurst burst{};
 };
 
 } // namespace opennova::np

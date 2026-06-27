@@ -79,6 +79,13 @@ struct Entity {
                               // (MissionEntityRegistry), distinct from the runtime net_id/SSN.
     EntityHandle handle;      // self-handle (assigned at spawn)
 
+    // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
+    // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This
+    // is the runtime home of what the wire models as OrganicSpawnRecord::entity_flags (the 0x0C
+    // entity+0x78 field). [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id;
+    // matched in Player_FindLocalPlayerEntity @0x4e0090; net-re §5.2b / D-NET-92/101]
+    uint32_t owner_connection_id = 0;
+
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the

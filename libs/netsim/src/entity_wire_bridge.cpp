@@ -85,8 +85,9 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		rec.slot_id = e.handle.packed;                 // the wire handle (pool<<12|slot)
 		rec.has_body = true;
 		rec.item_type_id = static_cast<uint16_t>(e.item_id);
-		rec.entity_flags = 0;                          // entity+0x78: the dcb-bearing self record
-		                                               // is streamed separately (announce_joiner_*)
+		rec.entity_flags = e.owner_connection_id;      // entity+0x78: the owning connection's dcb,
+		                                               // stamped at spawn (host loopback / joiner ack).
+		                                               // [orig: Server_PlayerAdd @0x51cbc0; D-NET-92/101]
 		rec.entity_name = e.name;
 		rec.minimap_flags = (e.item_id == 0x14B9) ? 0x100 : 0; // local-player/minimap-register flag
 		rec.pos_x = world::to_fixed(e.position.x);

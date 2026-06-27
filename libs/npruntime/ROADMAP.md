@@ -134,16 +134,44 @@ suite unaffected.
 > `run_capacity_rejects_when_full`; `npruntime_joiner_connection` now asserts the host surfaces F3 for
 > a real `JoinerConnection` (no test-crafted `0x48`). `npruntime|novaworld|netsim` all green.
 
-### ▶ P3 — World bring-up + initial S2C burst (NEXT)
-`Server_InitNewRoundState → ProcessPendingPlayerSpawns → BuildPlayerInfoAndAdd → PlayerAdd`
-spawns the pool-0 player in `World` (ADR 0012; writes `entity+0x78` ownerConnectionId).
-`Server_SendInitialGameStateToPlayer` = the §5.2a two-track machine, every body from
-`ingame_encode` over real `World`+`bms::File` state (ADR 0003, no fixtures):
+### ✅ P3 — World bring-up + initial S2C burst (DONE — structural)
+`Server_InitNewRoundState → ProcessPendingPlayerSpawns → Server_BuildPlayerInfoAndAdd`
+(`server_spawn.{h,cpp}`) spawns the pool-0 player in `World` over `world::spawn_player` /
+`spawn_remote_player` (ADR 0012), writing `entity+0x78` ownerConnectionId — the host's own type-2
+loopback at the wire-proven host dcb (`kHostPlayerDcb=2`, joiners assigned from 3), surfaced through
+`entity_wire_bridge`'s 0x0C `entity_flags`. `Server_SendInitialGameStateToPlayer`
+(`server_initial_state.{h,cpp}`) is the §5.2a two-track machine over a per-connection `InitialStateBurst`
+cursor, every emittable body from real `World`+`bms::File` (ADR 0003, no fixtures):
 - player-sync track: `0x2C → 0x08 → 0x2A×6 → 0x1C → 0x0B → 0x66 → 0x76 → 0x11`
 - world-stream track: `0x10 → 0x0D → 0x0C → 0x20 → 0x45 → 0x7E → 0x1A` → game-state 9
 
-**Retire `game_session.cpp` fixtures here.** Bar: `retail-lan-host-join.pcapng` burst order + bodies
-match §5.2a; `World` has the spawned player.
+The world-stream bodies reuse the proven `entity_wire_bridge` pool extractors (0x0C/0x20) + the empty
+0x10 marker; 0x0B = `bms::encode_header_blob`; 0x1C/0x11 empty. The spawn-gate latches (F3
+`PeerEnteredWorldStreaming` / `PeerSpawned`) were **re-sourced verbatim** off `conn.burst`; `ctx.world`
+is the path selector (the World-driven burst when wired, else the P2 `game_runtime` GameSessionState
+mirrored onto `conn.burst` — so the P2 unit tests stay value/tick-identical). `game_runtime` is kept
+only for the §5.1 joiner handshake-reply bodies (retired P8). Tests: `npruntime_server_spawn`,
+`npruntime_initial_state_burst`, `npruntime_golden_lan_join` (all green); the existing
+`npruntime_handshake_server` (F3 ordering) / `npruntime_joiner_connection` / `..._golden_lan_join_session`
+unaffected; full ctest 223/223.
+
+> Refinement vs plan (scope): **structural P3** — the ~8 §5.2a serializers with no witnessed byte
+> format (`0x2C/0x08/0x2A/0x66/0x76/0x45/0x7E/0x1A`) are **emitted as nothing + logged once**, never
+> faked (faithful-port rule; mirrors P2's deferred-builder-gap). Full burst byte-parity is the
+> follow-up grill wave (witness each serializer @ the addresses cited in `server_initial_state.cpp` →
+> `ingame_encode`, land via `re-doc`). The fixture burst in `game_session.cpp`
+> (`queue_mission_bootstrap` / `queue_state4_loading_gate`) is no longer on the npruntime spawn/burst
+> path; its full deletion is P8, once `game_runtime`'s §5.1 reply role is also grilled.
+
+> Refinement vs plan (golden): the `retail-lan-host-join.pcapng` host→joiner S2C stream decodes to the
+> §5.2a order **byte-for-byte** — `2C 08 2A×6 1C 0B 66 76 11 | 10×N 0D×7 0C 20×N 45 45 7E 1A | 5A 5A
+> 42 0A 0F …` — and `npruntime_golden_lan_join` asserts that ordering (player-sync before world-stream;
+> `0x10→0x0C→0x20→0x1A`) against the capture, validating the model on ground truth. Body byte-parity is
+> print-only/deferred (our world-stream bodies are built from our own `World`, not the capture's
+> mission). **Observation for the grill wave:** the retail host streams pool-1 `0x0D` and many full
+> `0x10` records, whereas our host follows D-NET-97/98 (empty `0x10`, pool-1 `0x0D` omitted) to avoid
+> the joiner's C2S-`0x0F` flood — reconcile whether the joiner suppresses its local `.bms` pool-1/2
+> spawn when *joining* (vs hosting), which would let the host stream them without conflict.
 
 ### P4 — Per-frame host loop (SP)
 `Server_TickUpdate` (`server_tick.h`): **(1)** drain C2S (`NapiNPProtocol_Pump` →

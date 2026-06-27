@@ -1,10 +1,20 @@
 #include "npruntime/napi_np_protocol.h"
 
+#include "npruntime/server_initial_state.h" // Server_SendInitialGameStateToPlayer (the §5.2a burst)
+#include "npruntime/server_spawn.h"         // Server_ProcessPendingPlayerSpawns (World-driven spawn)
+
 #include <novaworld/game_server_runtime.h>
 #include <novaworld/nw_session_framing.h>
+#include <novaworld/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
 #include <novaworld/session_protocol.h>
+
+#include <netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
+
+#include <world/entity.h>
+#include <world/geom.h> // to_fixed
+#include <world/world.h>
 
 #include <cstdio>
 #include <utility>
@@ -121,6 +131,99 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 		return {};
 	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
+}
+
+// ---------------------------------------------------------------------------
+// P3 — the World-driven spawn-gate. conn.burst is the SINGLE authority for a connection's spawn
+// progress; the F3 / PeerSpawned latches read it. It is driven by the World burst machine when
+// ctx.world is wired, or MIRRORED from the still-extant game_runtime GameSessionState on the P2
+// unit-test path (ctx.world == nullptr) so the latches stay value/tick-identical (keep-green lever).
+// ---------------------------------------------------------------------------
+
+// The joiner/host pose surfaced with the F3 / PeerSpawned events. Prefer the live World entity the
+// spawn pipeline bound (World path); fall back to the game_runtime session pose (P2 path).
+HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
+	if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
+		if (const world::Entity *e = ctx.world->registry.get(conn.link.owned_entity)) {
+			HostJoinerPose p;
+			p.pos_valid = true;
+			p.entity_handle = e->handle.packed;
+			p.item_type_id = static_cast<uint16_t>(e->item_id);
+			p.pos_x = world::to_fixed(e->position.x);
+			p.pos_y = world::to_fixed(e->position.y);
+			p.pos_z = world::to_fixed(e->position.z);
+			// Match the wire heading convention the P2 pose / the 0x0C body use: the high 16 bits of
+			// the engine-frame BAM = (90 - mission_yaw) deg (D-NET-86), NOT raw mission degrees.
+			constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
+			p.heading = static_cast<int16_t>(
+					(static_cast<int64_t>(90 - e->yaw) * kBamPerDegree) >> 16);
+			p.team = e->team;
+			return p;
+		}
+	}
+	const GameSessionState *gss =
+			ctx.game_runtime ? ctx.game_runtime->session_state(conn.session_id) : nullptr;
+	if (gss != nullptr) return pose_from_session(ctx, *gss);
+	return {};
+}
+
+// Ship one burst step's messages for `conn`: a remote (type 1) gets one framed 0x83 SESSION datagram
+// (SCRK + seq); the host's own loopback (type 2, no SCRK) gets each [tag][body] pushed straight into
+// its in-process transport — the §5.2a step-4 socketless S2C delivery (what NetSystem::emit_s2c does
+// for the loopback's per-frame 0x0A). [orig: NapiNPServer_SendToConn @0x4c4f20 / mode-1 in-process]
+void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage> &msgs,
+                         std::vector<std::vector<uint8_t>> &outbound) {
+	if (msgs.empty()) return;
+	if (conn.type == 2) {
+		if (conn.link.transport != nullptr)
+			for (InitialStateMessage &m : msgs) conn.link.transport->host_send(m.tag, std::move(m.body));
+		return;
+	}
+	std::vector<ProtocolMessage> replies;
+	replies.reserve(msgs.size());
+	for (InitialStateMessage &m : msgs) replies.push_back(make_protocol_message(m.tag, std::move(m.body)));
+	std::vector<uint8_t> dg = frame_session_replies(conn, replies);
+	if (!dg.empty()) outbound.push_back(std::move(dg));
+}
+
+// The F3 (PeerEnteredWorldStreaming) + PeerSpawned edge-latched events, sourced from conn.burst. The
+// predicates are VERBATIM from the P2 legs — only the value source moved from the GameSessionState to
+// conn.burst. F3 is checked first so the owner admits early + streams the joiner's own dcb-bearing
+// 0x0C during load, ahead of the game-start bundle (else Player_InitPlayer can't find its dcb).
+void surface_burst_events(NapiNPServerCtx &ctx, NapiNPConnection &conn,
+                          std::vector<HostAcceptEvent> &events) {
+	if (conn.burst.entity_batch_count > 0 && !conn.burst.spawned && conn.self_id_seen &&
+			!conn.world_stream_announced) {
+		conn.world_stream_announced = true;
+		HostAcceptEvent ev;
+		ev.kind = HostAcceptEvent::Kind::PeerEnteredWorldStreaming;
+		ev.peer = conn.peer;
+		ev.pose = pose_for_conn(ctx, conn);
+		ev.self_id = conn.connection_id;
+		ev.peer_name = conn.player_name;
+		events.push_back(std::move(ev));
+	}
+	if (conn.burst.spawned && !conn.spawned_announced) {
+		conn.spawned_announced = true;
+		conn.phase = ConnectionPhase::Spawned;
+		HostAcceptEvent ev;
+		ev.kind = HostAcceptEvent::Kind::PeerSpawned;
+		ev.peer = conn.peer;
+		ev.pose = pose_for_conn(ctx, conn);
+		ev.self_id = conn.connection_id;
+		ev.peer_name = conn.player_name; // for the joiner-side name-match (D.0)
+		events.push_back(std::move(ev));
+	}
+}
+
+// Mirror the game_runtime spawn-gate state onto conn.burst (P2 path only — no World wired). The World
+// path drives conn.burst directly via Server_SendInitialGameStateToPlayer.
+void mirror_game_runtime_burst(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+	if (ctx.world != nullptr || !ctx.game_runtime) return;
+	if (const GameSessionState *gss = ctx.game_runtime->session_state(conn.session_id)) {
+		conn.burst.entity_batch_count = static_cast<uint32_t>(gss->entity_batch_count);
+		conn.burst.spawned = gss->spawned;
+	}
 }
 
 // 0x41 ClientHello -> 0x81 ServerHello. [orig: NapiNPProtocol_HandleClientHello @0x6213b0]
@@ -284,54 +387,38 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 					(static_cast<uint32_t>(m.payload[2]) << 16) |
 					(static_cast<uint32_t>(m.payload[3]) << 24);
 			conn.self_id_seen = true;
+			// On LAN the ack echoes the host-assigned dcb (no-op); on NovaWorld it carries the
+			// gate-assigned id. If the player was already spawned (World path) with the prior id,
+			// re-stamp entity+0x78 so the joiner still self-matches. [orig: the dcb the client's
+			// Player_FindLocalPlayerEntity @0x4e0090 matches is whatever it adopted as its own]
+			if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
+				if (world::Entity *e = ctx.world->registry.get(conn.link.owned_entity))
+					e->owner_connection_id = conn.connection_id;
+			}
 		}
 	}
 
 	// Drive the reactive handshake/spawn state machine (also caches the joiner's 0x0C pose into
 	// client_*); BYPASS GameSession::tick here — the periodic emitter runs via tick_connections
-	// (pre-Spawned) / NetSystem.
-	SessionProtocolDispatchResult disp = dispatch_in_match_session_messages(
-			SessionProtocolKind::JointOperations, *ctx.game_runtime, conn.session_id,
-			messages, now_tick);
-	if (!disp.replies.empty()) {
-		std::vector<uint8_t> dg = frame_session_replies(conn, disp.replies);
-		if (!dg.empty()) out.outbound.push_back(std::move(dg));
+	// (pre-Spawned) / NetSystem. game_runtime is retained for the §5.1 handshake-reply bodies; guard
+	// it so a World-only deployment (no game_runtime wired) never null-derefs.
+	if (ctx.game_runtime) {
+		SessionProtocolDispatchResult disp = dispatch_in_match_session_messages(
+				SessionProtocolKind::JointOperations, *ctx.game_runtime, conn.session_id,
+				messages, now_tick);
+		if (!disp.replies.empty()) {
+			std::vector<uint8_t> dg = frame_session_replies(conn, disp.replies);
+			if (!dg.empty()) out.outbound.push_back(std::move(dg));
+		}
 	}
 
-	const GameSessionState *gss = ctx.game_runtime->session_state(conn.session_id);
-
-	// Surface the streaming-entered event once the host's tick has begun emitting entity batches
-	// (the joiner is provably in its world-load pump). Checked BEFORE the spawned latch so the owner
-	// admits early + streams the joiner's own 0x0C during load, ahead of the game-start bundle's
-	// 0x0F — else the client's Player_InitPlayer can't find its dcb (F3). Mirrors
-	// is_ready_for_late_spawn_ acceptance's entity_batch_count>0 readiness; one-shot via
-	// world_stream_announced. Also gate on self_id_seen: the joiner's 0x0C entity_flags must carry
-	// its real ConnectionId (from the 0x48 ack), so don't admit/stream until we've learned it. (The
-	// ack always precedes streaming, so this never actually defers in practice.)
-	if (gss != nullptr && gss->entity_batch_count > 0 && !gss->spawned &&
-			conn.self_id_seen && !conn.world_stream_announced) {
-		conn.world_stream_announced = true;
-		HostAcceptEvent ev;
-		ev.kind = HostAcceptEvent::Kind::PeerEnteredWorldStreaming;
-		ev.peer = peer;
-		ev.pose = pose_from_session(ctx, *gss);
-		ev.self_id = conn.connection_id;
-		ev.peer_name = conn.player_name;
-		out.events.push_back(std::move(ev));
-	}
-
-	// Detect the handshake reaching Spawned — surface the joiner's pose once.
-	if (gss != nullptr && gss->spawned && !conn.spawned_announced) {
-		conn.spawned_announced = true;
-		conn.phase = ConnectionPhase::Spawned;
-		HostAcceptEvent ev;
-		ev.kind = HostAcceptEvent::Kind::PeerSpawned;
-		ev.peer = peer;
-		ev.pose = pose_from_session(ctx, *gss);
-		ev.self_id = conn.connection_id;
-		ev.peer_name = conn.player_name; // for the joiner-side name-match (D.0)
-		out.events.push_back(std::move(ev));
-	}
+	// P3: conn.burst is the single spawn-gate authority. On the P2 path (no World) mirror it from the
+	// GameSessionState the dispatch above advanced, so the F3 / PeerSpawned latches are value-identical
+	// to the pre-P3 gss reads; on the World path tick_connections drives conn.burst. Then surface the
+	// (verbatim-predicate) edge-latched events. Dual-path: whichever of the datagram / tick path
+	// observes the burst change first wins (one-shot via the *_announced latches).
+	mirror_game_runtime_burst(ctx, conn);
+	surface_burst_events(ctx, conn, out.events);
 
 	// Once a connection exists, surface the joiner's in-match C2S 0x0C uplinks for NetSystem to
 	// read-apply. Pre-spawn 0x0C only updates the cached pose (handled above) — no connection to
@@ -413,37 +500,43 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick) {
 	std::vector<TickOut> out;
-	if (!ctx.game_runtime) return out;
+
+	// P3 World-driven path: spawn any accepted-but-unspawned players once per tick (idempotent), before
+	// walking the connections to advance their bursts.
+	if (ctx.world != nullptr) Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
+
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		const GameSessionState *gss = ctx.game_runtime->session_state(conn.session_id);
-		if (gss == nullptr) continue; // session not created yet (no 0x43 dispatched)
-		if (gss->spawned) continue;   // NetSystem owns spawned peers' per-frame 0x0A
-		GameServerDispatch disp = ctx.game_runtime->tick_session(conn.session_id, elapsed_ms, now_tick);
+		if (conn.burst.spawned) continue; // spawned peers: NetSystem owns their per-frame 0x0A
 
 		TickOut to;
 		to.peer = conn.peer;
-		if (!disp.replies.empty()) {
-			std::vector<uint8_t> dg = frame_session_replies(conn, disp.replies);
-			if (!dg.empty()) to.outbound.push_back(std::move(dg));
+
+		if (ctx.world != nullptr) {
+			// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
+			// World/bms state). conn.burst is authoritative for the spawn-gate latches.
+			if (conn.phase >= ConnectionPhase::PlayerAdded) {
+				InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
+				ship_burst_messages(conn, step.messages, to.outbound);
+			}
+		} else if (ctx.game_runtime != nullptr) {
+			// P2 path: the game_runtime periodic emitter climbs the GameSessionState; mirror it onto
+			// conn.burst so the latches read the same values they did pre-P3.
+			const GameSessionState *gss = ctx.game_runtime->session_state(conn.session_id);
+			if (gss == nullptr) continue; // session not created yet (no 0x43 dispatched)
+			if (gss->spawned) continue;   // NetSystem owns spawned peers' per-frame 0x0A
+			GameServerDispatch disp = ctx.game_runtime->tick_session(conn.session_id, elapsed_ms, now_tick);
+			if (!disp.replies.empty()) {
+				std::vector<uint8_t> dg = frame_session_replies(conn, disp.replies);
+				if (!dg.empty()) to.outbound.push_back(std::move(dg));
+			}
+			mirror_game_runtime_burst(ctx, conn); // re-read post-tick state onto conn.burst
+		} else {
+			continue;
 		}
 
-		// This loop drives the phase into WorldStreaming + increments entity_batch_count, so it
-		// catches the streaming transition on the tick it happens. Re-read post-tick state (gss
-		// points at the live session struct, mutated by tick_session). Surface
-		// PeerEnteredWorldStreaming once so the owner admits early + streams the joiner's own
-		// dcb-bearing 0x0C before the game-start bundle (F3). Same latch as the datagram-driven
-		// path, whichever observes batches first wins.
-		if (gss->entity_batch_count > 0 && !gss->spawned && conn.self_id_seen &&
-				!conn.world_stream_announced) {
-			conn.world_stream_announced = true;
-			HostAcceptEvent ev;
-			ev.kind = HostAcceptEvent::Kind::PeerEnteredWorldStreaming;
-			ev.peer = conn.peer;
-			ev.pose = pose_from_session(ctx, *gss);
-			ev.self_id = conn.connection_id;
-			ev.peer_name = conn.player_name;
-			to.events.push_back(std::move(ev));
-		}
+		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the
+		// datagram-driven handle_client_session path — whichever observes the burst change first wins.
+		surface_burst_events(ctx, conn, to.events);
 
 		if (to.outbound.empty() && to.events.empty()) continue;
 		out.push_back(std::move(to));

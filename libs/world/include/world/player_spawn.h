@@ -27,6 +27,10 @@ struct PlayerSpawn {
     uint16_t net_id = 0xFFF0;
     int16_t health = 100;
     uint16_t min_entity_slot = 0;
+    // The owning connection's ConnectionId/dcb -> Entity::owner_connection_id (entity+0x78). The host's
+    // own player carries the host dcb (the loopback connection_id); a joiner carries its 0x48-ack dcb.
+    // [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
+    uint32_t owner_connection_id = 0;
 };
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)

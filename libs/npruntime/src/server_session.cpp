@@ -45,12 +45,18 @@ void create_session(NapiNPServerCtx &ctx, const NapiGameSettings &settings,
 	// mode 3 (host + client): the listen server connects its own local client in-process.
 	if (ctx.connection_mode == ConnectionMode::HostClient && local_client != nullptr) {
 		NapiNPConnection self;
-		self.connection_id = 0; // the host's own client is connection 0
+		// The host's own player dcb (entity+0x78). NOT 0 — dcb 0 is the dedicated-server reservation
+		// that makes the joining client drop the player slot and flood C2S 0x0F (see kHostPlayerDcb).
+		// The host knows its own ConnectionId locally, so latch self_id_seen (no 0x48 ack arrives for
+		// the loopback). Joiners are assigned from kFirstJoinerDcb up so they never collide with it.
+		self.connection_id = kHostPlayerDcb;
+		self.self_id_seen = true;
 		self.type = 2;          // client-side connection [orig: NapiNPConnection_Create type 2]
 		self.phase = ConnectionPhase::New; // advanced by the host's own-player spawn flow (P3)
 		self.link.transport = local_client;
 		self.link.mode = netsim::TransportMode::Loopback; // socketless mode 1
 		ctx.np_protocol.connection_list.push_back(self);
+		ctx.np_protocol.next_connection_id = kFirstJoinerDcb;
 	}
 }
 

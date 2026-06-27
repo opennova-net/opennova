@@ -1359,6 +1359,21 @@ add_executable(npruntime_server_session_test npruntime/server_session_test.cpp)
 target_link_libraries(npruntime_server_session_test PRIVATE opennova_npruntime)
 add_test(NAME npruntime_server_session COMMAND npruntime_server_session_test)
 
+# P3: the World-driven host-side spawn pipeline (Server_InitNewRoundState ->
+# ProcessPendingPlayerSpawns -> Server_BuildPlayerInfoAndAdd) — spawns the pool-0 player in World,
+# stamping entity+0x78 ownerConnectionId; then the §1 dcb wiring surfaces it in the 0x0C batch.
+add_executable(npruntime_server_spawn_test npruntime/server_spawn_test.cpp)
+target_link_libraries(npruntime_server_spawn_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
+add_test(NAME npruntime_server_spawn COMMAND npruntime_server_spawn_test)
+
+# P3: the §5.2a two-track initial-state burst machine (Server_SendInitialGameStateToPlayer) over a
+# real World + bms::File — emitted tag order + per-tag body round-trip + the entity+0x78 dcb wiring.
+add_executable(npruntime_initial_state_burst_test npruntime/initial_state_burst_test.cpp)
+target_link_libraries(npruntime_initial_state_burst_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_mission)
+add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
+
 # P2: the per-connection handshake — server legs promoted from HostSessionAccept onto the np free
 # functions (handshake_server), the client mirror JoinerConnection driven against the real server
 # legs + NetSystem apply (joiner_connection), and the golden 0x81/0x82 byte-parity.
@@ -1380,3 +1395,12 @@ target_link_libraries(npruntime_golden_lan_join_session_test
 target_compile_definitions(npruntime_golden_lan_join_session_test PRIVATE
     DEFAULT_LAN_JOIN_SESSION_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join-session.pcapng")
 add_test(NAME npruntime_golden_lan_join_session COMMAND npruntime_golden_lan_join_session_test)
+
+# P3 golden — validate the §5.2a initial-state burst ORDER against the retail LAN host/join capture
+# (handshake + world-load). Env-gated + skip-if-absent (no committed derived oracle).
+add_executable(npruntime_golden_lan_join_test npruntime/golden_lan_join_test.cpp)
+target_link_libraries(npruntime_golden_lan_join_test
+    PRIVATE opennova_novaworld opennova_app_common)
+target_compile_definitions(npruntime_golden_lan_join_test PRIVATE
+    DEFAULT_LAN_JOIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-lan-host-join.pcapng")
+add_test(NAME npruntime_golden_lan_join COMMAND npruntime_golden_lan_join_test)

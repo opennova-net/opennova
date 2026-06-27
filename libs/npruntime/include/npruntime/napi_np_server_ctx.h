@@ -16,6 +16,11 @@ class World;
 namespace opennova::netsim {
 class NetSystem;
 }
+// The loaded mission, read by the P3 initial-state burst for the S2C 0x0B BMS-header body
+// (bms::encode_header_blob). Forward-declared (NOT included) so bms.h stays out of this light header.
+namespace opennova::bms {
+struct File;
+}
 // The P2 SESSION leg drives the spawn-gate state machine through the still-extant
 // GameServerRuntime. Forward-declared (NOT included) so game_session.h stays out of this light
 // header; the runtime is held by unique_ptr with out-of-line ctor/dtor in napi_np_protocol.cpp.
@@ -129,6 +134,9 @@ struct NapiNPServerCtx {
 	// The authoritative simulation and the in-match replication seam. Non-owning.
 	world::World *world = nullptr;
 	netsim::NetSystem *net = nullptr;
+	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
+	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
+	const bms::File *mission = nullptr;
 
 	// Load / spawn gates (§5.1 / §5.2). spawn_success_gate <- dword_24C1928 (drop loading screen);
 	// loading_progress <- dword_A82370 (walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land).
