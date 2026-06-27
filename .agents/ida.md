@@ -44,6 +44,43 @@ Compare the exact axis relevant to the task: constants, struct offsets,
 rounding, signedness, state transitions, call order, packet order, edge cases,
 tables, and captures.
 
+## Analysis and Curation
+
+The point of an IDA session is to leave the database more correct than you found
+it. Read deeply, then write your understanding back. The detailed write rules
+(confidence gates, dry-run, shared-state proposals, save cadence) live in
+`.claude/skills/grill-ida/IDA-WORKFLOW.md` — this is the analysis discipline that
+feeds them.
+
+1. **Decompilation analysis.** Inspect the decompiler output thoroughly. Work out
+   the actual functionality and purpose of each component from the code itself —
+   do not trust old or pre-existing comments and names; they are frequently
+   wrong. Record what you find with `set_comments` / `append_comments` as you go.
+
+2. **Improve readability in the database.** As understanding crystallizes, write
+   it back (per the IDA-WORKFLOW confidence gates):
+   - Rename variables and locals to sensible, descriptive names.
+   - Correct variable and argument types where wrong — especially pointers and
+     array types, where a bad type hides the real access pattern.
+   - Update function names to describe their actual purpose, matching the IDB's
+     `Subsystem_Action` style.
+
+3. **Deep dive when needed.** When the decompilation is insufficient or looks
+   wrong, drop to the disassembly (`disasm`, `insn_query`, `basic_blocks`) and
+   comment the findings at their address. Document low-level behavior that isn't
+   visible in the pseudocode (inlined `rep movsb`/`stosb`, register-passed args,
+   fixed-point scaling, table indexing). Use sub-agents for detailed,
+   self-contained analysis passes.
+
+4. **Constraints.**
+   - NEVER convert number bases by hand. Use the `int_convert` MCP tool for any
+     hex/decimal/binary conversion — a mis-typed conversion poisons every
+     downstream conclusion.
+   - Use the MCP tools to retrieve information; do not recall addresses,
+     offsets, or constants from memory.
+   - Derive every conclusion from actual analysis of the binary, never from
+     assumptions or from the existing (possibly wrong) names and comments.
+
 ## Safety
 
 - Do not commit raw decompiled code.
