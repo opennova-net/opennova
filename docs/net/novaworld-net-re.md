@@ -4725,7 +4725,7 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 `protocol_message.cpp` (A6):
 - **D-NET-5** [HIGH, FIXED] high-table/include-seq selector is flag bit **0x80**, not 0x01; `full_tag = (flags&0x80?0x100:0)|tag`; wire bit 0x01 is unused/reserved. [orig: CNapiNPConnection_DispatchMessage @ 0x622570 / NapiNPProtocol_FindMsgInfo @ 0x61e380 / NapiNP_WriteMessageRecord @ 0x61da90]
 - **D-NET-6** [HIGH, FIXED] LEN8(0x20)/LEN16(0x40) parse precedence inverted — retail tests LEN8 FIRST. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
-- **D-NET-7** [MED, TRACKED] reassembly must clear the buffer on the FIRST fragment (`(flags&6)==4`) before appending. [orig: CNapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
+- **D-NET-7** [MED, FIXED] reassembly clears the buffer on the FIRST fragment (`(flags&6)==4`) before appending — implemented in `reassemble_protocol_payload` (`protocol_message.cpp`, verified 2026-06-27; carries a regression-history note vs an earlier `frag_first && !frag_end` rewrite). [orig: CNapiNPConnection_DispatchMessage @ 0x622570 / NapiBuffer_SetLength @ 0x634220]
 - **D-NET-8** [LOW, TRACKED] truncated inner stream: retail substitutes 0 for missing fields and still dispatches; we bail. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
 
 `gate_response.cpp` (A2):
