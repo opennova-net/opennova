@@ -19,11 +19,11 @@
 //   golden, a LAN host's replies still differ from our builders in:
 //     0x81: ServerHello.CI is the host node index (retail=2), not the client echo; identity strings
 //           AP/BDAT/PV3/SN are the retail build's, not our defaults; UT is a live uptime.
-//     0x82: MI is host-specific (retail=3, our default 0x113f — seed-injected in the test). CU is now
-//           FIXED — a LAN host emits no CU (build_server_auth gates the novaworld CU on NovaWorld
-//           transport; D-NET Wave 3). The remaining 0x82 follow-up is the CS control-field VALUES
-//           (per-channel timeout_ms): ours = onnet engine_cs_fields, plausible but still [UNVERIFIED]
-//           pending a cross-check vs the witnessed cs_dir0/cs_dir1 init.
+//     0x82: MI is host-specific (retail=3, our default 0x113f — seed-injected in the test). The 0x82
+//           builder is now faithful: CU gated on NovaWorld transport (LAN emits none; D-NET Wave 3),
+//           CS = the WITNESSED engine_cs_fields template (D-NET-1), MI = the host-assigned dcb. The
+//           residual byte diff is purely the host-specific seed values (CI host-node-index, identity
+//           strings, live UT uptime), not builder logic.
 //   The full byte diff is printed below for the record.
 
 #include <npruntime/napi_np_protocol.h>

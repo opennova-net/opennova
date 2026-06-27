@@ -118,9 +118,11 @@ suite unaffected.
 > (full field order + the CS x30 `{dir,idx,u32 timeout_ms}` shape + CU-from-type-3-msg-queue with
 > LAN-suppression; IDB comment @0x620ef0). 0x82 **CU-gate FIXED** — `build_server_auth` gained an
 > `include_novaworld_cu` param (default true; npruntime `make_server_auth_datagram` passes
-> `transport_mode == NovaWorld`), so a LAN/SP host emits no CU (the witnessed LAN behavior). Remaining
-> 0x82 work: cross-check `engine_cs_fields` timeout_ms (session_hello.cpp:283) vs the witnessed
-> cs_dir0/cs_dir1 init. CI(host-node-index)/MI(host dcb) are seed-injected per-host, not builder bugs.
+> `transport_mode == NovaWorld`), so a LAN/SP host emits no CU (the witnessed LAN behavior). The CS
+> values were already the witnessed engine template (D-NET-1; `engine_cs_fields` matches it exactly —
+> the "[UNVERIFIED] onnet" note was stale). **0x82 is now faithful**; the residual golden byte-diff is
+> only host-specific seed values (CI host-node-index / MI host dcb / identity strings / live UT), not
+> builder logic. **Wave 3 (0x81 + 0x82 session builders) DONE.**
 
 > P2 follow-up fixes (grill 2026-06-26, docs/net §5.0a — D-NET-104/105/106): a code review of the
 > promotion found the join leg had only part of the witnessed `0x42` behavior. Now witnessed against
