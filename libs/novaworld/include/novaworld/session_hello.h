@@ -244,6 +244,10 @@ struct ServerAuth {
 //   novaworld_name = "NWServer" (was "OpenNova"; retail emits the literal "NWServer")
 //   nwuid          = 60-char ASCII hex ID; placeholder default is fine for dev, the
 //                    UDP listener overrides with a freshly-generated value per session.
+// [D-NET Wave 3] `include_novaworld_cu` gates the three NovaworldName/url/NWUID CU entries. The
+// witnessed 0x82 builder [orig: CNapiNPConnection_SendSessionInit @0x620ef0] sources CU from the host's
+// type-3 msg_out queue, which only the NovaWorld lobby flow populates — a LAN host queues none and emits
+// NO CU. Pass false for a LAN/SP host (the default stays true for the NovaWorld + standalone-server callers).
 ServerAuth build_server_auth(const ClientAuth &client,
                              uint32_t client_ip_net,
                              uint16_t client_port,
@@ -251,7 +255,8 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              std::string_view server_scrk,
                              std::string_view novaworld_name = "NWServer",
                              std::string_view novaworld_web_url = "http://127.0.0.1:8080",
-                             std::string_view nwuid = "0accd1b2cffac0e3f1efe6c80000000000000000000000000000000000000000");
+                             std::string_view nwuid = "0accd1b2cffac0e3f1efe6c80000000000000000000000000000000000000000",
+                             bool include_novaworld_cu = true);
 
 // Serialize a ServerAuth to flat-TLV bytes (ready to opcode-prefix +
 // NWU-encrypt + CRC-envelope).

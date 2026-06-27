@@ -116,9 +116,11 @@ suite unaffected.
 > **FIXED** (`server_hello_to_bytes` now the flat builder: SF unconditional, P1/P2/NP/MP nonzero-gated,
 > no PL fiction; D-NET-16/18). 0x82 `CNapiNPConnection_SendSessionInit @0x620ef0` — **witnessed**
 > (full field order + the CS x30 `{dir,idx,u32 timeout_ms}` shape + CU-from-type-3-msg-queue with
-> LAN-suppression; IDB comment @0x620ef0). Remaining 0x82 work (witness in hand): gate the novaworld CU
-> on NovaWorld transport (LAN queues none) + cross-check `engine_cs_fields` timeout_ms vs the cs-config
-> init. CI(host-node-index)/MI(host dcb) are seed-injected per-host, not builder bugs.
+> LAN-suppression; IDB comment @0x620ef0). 0x82 **CU-gate FIXED** — `build_server_auth` gained an
+> `include_novaworld_cu` param (default true; npruntime `make_server_auth_datagram` passes
+> `transport_mode == NovaWorld`), so a LAN/SP host emits no CU (the witnessed LAN behavior). Remaining
+> 0x82 work: cross-check `engine_cs_fields` timeout_ms (session_hello.cpp:283) vs the witnessed
+> cs_dir0/cs_dir1 init. CI(host-node-index)/MI(host dcb) are seed-injected per-host, not builder bugs.
 
 > P2 follow-up fixes (grill 2026-06-26, docs/net §5.0a — D-NET-104/105/106): a code review of the
 > promotion found the join leg had only part of the witnessed `0x42` behavior. Now witnessed against

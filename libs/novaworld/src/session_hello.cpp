@@ -299,16 +299,21 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              std::string_view server_scrk,
                              std::string_view novaworld_name,
                              std::string_view novaworld_web_url,
-                             std::string_view nwuid) {
+                             std::string_view nwuid,
+                             bool include_novaworld_cu) {
 	ServerAuth a;
 	a.ci = client.ci;
 	a.ck = client.ck;
 	a.sk = server_sk;
 	a.client_cs = default_client_cs_fields();
 	a.server_cs = default_server_cs_fields();
-	a.cu.emplace_back("NovaworldName", std::string(novaworld_name));
-	a.cu.emplace_back("NovaworldWebDomainNameAndPortNumber", std::string(novaworld_web_url));
-	a.cu.emplace_back("NWUID", std::string(nwuid));
+	// [D-NET Wave 3] CU is sourced from the host's type-3 msg_out queue (@0x620ef0); only the NovaWorld
+	// lobby flow populates it. A LAN/SP host queues none -> emits NO CU (verified vs the retail LAN golden).
+	if (include_novaworld_cu) {
+		a.cu.emplace_back("NovaworldName", std::string(novaworld_name));
+		a.cu.emplace_back("NovaworldWebDomainNameAndPortNumber", std::string(novaworld_web_url));
+		a.cu.emplace_back("NWUID", std::string(nwuid));
+	}
 	a.scrk = std::string(server_scrk);
 	a.na = client.na;
 	a.rip = client_ip_net;

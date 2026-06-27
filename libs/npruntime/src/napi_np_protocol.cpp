@@ -73,9 +73,12 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
                                                const PeerAddr &peer, const NapiNPConnection &conn) {
 	const std::string nwuid =
 			ctx.server_key_mint.forced ? ctx.server_key_mint.nwuid : make_dev_nwuid();
+	// [D-NET Wave 3] Only a NovaWorld-routed host appends the NovaworldName/url/NWUID CU block (sourced
+	// from the type-3 msg_out queue @0x620ef0); a LAN/SP host queues none and emits no CU.
+	const bool include_cu = ctx.transport_mode == NetworkType::NovaWorld;
 	ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, conn.server_sk, conn.server_scrk,
 	                                     ctx.server_key_mint.novaworld_name,
-	                                     ctx.server_key_mint.novaworld_web_url, nwuid);
+	                                     ctx.server_key_mint.novaworld_web_url, nwuid, include_cu);
 	// [orig: 0x82 MI TLV = conn->connection_id @ NapiNPConnection_SendSessionInit 0x620ef0] — the
 	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
 	reply.mi = conn.connection_id;
