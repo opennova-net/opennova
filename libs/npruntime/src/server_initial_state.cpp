@@ -69,7 +69,7 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	} else if (b.sync_state == 4) {
 		// World-stream track: one whole-pool batch per phase (1..7), then game-state 9.
 		switch (b.world_stream_phase) {
-		case 1: tag = 0x10; action = Action::EmitEmpty; is_world_batch = true; break; // empty marker (client builds pool-2 locally, D-NET-97/98)
+		case 1: tag = 0x10; action = Action::EmitBody; is_world_batch = true; break;  // empty static batch header (client builds pool-2 locally, D-NET-97/98)
 		case 2: tag = 0x0D; action = Action::SkipSilent; break;                       // pool-1 deliberately NOT streamed (D-NET-97/98)
 		case 3: tag = 0x0C; action = Action::EmitBody; is_world_batch = true; break;  // build_pool0_organic_batch (carries entity+0x78 dcb)
 		case 4: tag = 0x20; action = Action::EmitBody; is_world_batch = true; break;  // build_pool3_spawn_marker_batch
@@ -99,6 +99,9 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 				log_deferred_once(tag); // no mission wired -> skip 0x0B, never fabricate the header
 				action = Action::SkipSilent;
 			}
+		} else if (tag == 0x10) {
+			opennova::StaticEntityBatch batch;
+			body = opennova::encode_static_entity_batch(batch);
 		} else if (tag == 0x0C) {
 			body = opennova::encode_organic_spawn_batch(opennova::netsim::build_pool0_organic_batch(*ctx.world));
 		} else if (tag == 0x20) {

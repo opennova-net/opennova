@@ -145,9 +145,19 @@ int main_impl() {
 		if (!expect((*b)[0] == 'B' && (*b)[1] == 'M' && (*b)[2] == 'S', "0x0B header magic is 'BMS'")) return 1;
 	}
 
-	// Empty bodies are wire-valid.
-	if (!expect(body_of(0x1C)->empty() && body_of(0x11)->empty() && body_of(0x10)->empty(),
-	            "0x1C / 0x11 / 0x10 carry empty bodies")) return 1;
+	// Empty scalar bodies are wire-valid for 0x1C/0x11, but 0x10 is a static-entity batch and even
+	// an empty batch must carry its [u16 start_index][u16 count] header.
+	if (!expect(body_of(0x1C)->empty() && body_of(0x11)->empty(),
+	            "0x1C / 0x11 carry empty bodies")) return 1;
+	{
+		const std::vector<uint8_t> *b = body_of(0x10);
+		opennova::StaticEntityBatch batch;
+		if (!expect(b && opennova::decode_static_entity_batch(b->data(), b->size(), batch),
+		            "0x10 empty static batch decodes")) return 1;
+		if (!expect(b->size() == 4 && batch.start_index == 0 && batch.entity_count == 0 &&
+		                    batch.records.empty(),
+		            "0x10 empty static batch carries the 4-byte header")) return 1;
+	}
 
 	std::printf("OK\n");
 	return 0;

@@ -22,6 +22,7 @@
 #include <world/world.h>
 
 #include <cstdio>
+#include <set>
 
 namespace {
 namespace np = opennova::np;
@@ -118,6 +119,45 @@ int main() {
 	}
 	if (!expect(saw_host && saw_joiner,
 	            "build_pool0_organic_batch stamps entity_flags from owner_connection_id (host 2 + joiner 3)")) return 1;
+
+	// Net IDs must stay distinct and out of invalid / low mission-id space even past the 0xFFF0 high
+	// base boundary. The old base+count allocator wrapped through 0xFFFF and then into 0x0000.
+	{
+		w::World many_world;
+		w::AiSystem many_ai;
+		make_world(many_world, many_ai);
+		many_world.registry.configure_pool(0, 32);
+
+		np::NapiNPServerCtx many_ctx;
+		np::NapiGameSettings settings;
+		settings.max_players = 32;
+		np::test::bring_up_host(many_ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
+		                        /*host_key=*/0, nullptr, settings);
+		many_ctx.world = &many_world;
+		for (int i = 0; i < 20; ++i) {
+			np::NapiNPConnection joiner;
+			joiner.type = 1;
+			joiner.connection_id = static_cast<uint32_t>(np::kFirstJoinerDcb + i);
+			joiner.self_id_seen = true;
+			joiner.phase = np::ConnectionPhase::Joined;
+			many_ctx.np_protocol.connection_list.push_back(joiner);
+		}
+		const int spawned = np::Server_ProcessPendingPlayerSpawns(many_ctx, many_world);
+		if (!expect(spawned == 20, "twenty remote players spawned")) return 1;
+
+		std::set<uint16_t> net_ids;
+		many_world.registry.for_each([&](const w::Entity &e) {
+			if (e.handle.pool() == 0 && e.item_id == w::kPlayerInfantryTypeId) {
+				net_ids.insert(e.net_id);
+				if (e.net_id == 0 || e.net_id == 0xFFFFu || e.net_id < 0x8000u) {
+					std::fprintf(stderr, "FAIL: invalid/low player net_id 0x%04X\n", e.net_id);
+				}
+			}
+		});
+		if (!expect(net_ids.size() == 20, "twenty distinct player net ids")) return 1;
+		if (!expect(*net_ids.begin() >= 0x8000u && net_ids.count(0) == 0 && net_ids.count(0xFFFFu) == 0,
+		            "player net ids stay in the high reserved band and skip invalid sentinels")) return 1;
+	}
 
 	std::printf("OK\n");
 	return 0;

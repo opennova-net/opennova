@@ -49,14 +49,19 @@ int first_of(const std::vector<uint8_t> &tags, uint8_t tag) {
 // Assert §5.2a relative order for two tags ONLY when both are present (robust to a capture that omits
 // a tag): first(before) must precede first(after).
 bool order_ok(const std::vector<uint8_t> &tags, uint8_t before, uint8_t after, const char *msg) {
+	(void)msg;
 	const int a = first_of(tags, before);
 	const int b = first_of(tags, after);
-	if (a < 0 || b < 0) return true; // one absent — nothing to assert
-	return expect(a < b, msg);
+	return a >= 0 && b >= 0 && a < b;
 }
 } // namespace
 
 int main() {
+	if (!expect(!order_ok(std::vector<uint8_t>{0x0B, 0x0C, 0x20}, 0x0B, 0x10,
+	                      "helper rejects a missing required world-stream tag"),
+	            "golden order helper fails closed when a required tag is absent"))
+		return 1;
+
 	std::string path;
 	if (const char *env = std::getenv("NW_GOLDEN_LAN_JOIN"); env && *env)
 		path = env;
@@ -101,13 +106,19 @@ int main() {
 	// --- §5.2a order assertions (only for tags actually present in this capture). ---
 	bool ok = true;
 	// player-sync bundle (0x0B BMS header) precedes the world-stream batches.
-	ok = order_ok(s2c_tags, 0x0B, 0x10, "§5.2a: 0x0B (player-sync BMS header) precedes 0x10 world-stream") && ok;
-	ok = order_ok(s2c_tags, 0x0B, 0x0C, "§5.2a: 0x0B precedes 0x0C organic spawns") && ok;
+	ok = expect(order_ok(s2c_tags, 0x0B, 0x10, "§5.2a: 0x0B (player-sync BMS header) precedes 0x10 world-stream"),
+	            "§5.2a: 0x0B (player-sync BMS header) precedes 0x10 world-stream") && ok;
+	ok = expect(order_ok(s2c_tags, 0x0B, 0x0C, "§5.2a: 0x0B precedes 0x0C organic spawns"),
+	            "§5.2a: 0x0B precedes 0x0C organic spawns") && ok;
 	// world-stream track: 0x10 -> 0x0D -> 0x0C -> 0x20 -> ... -> 0x1A.
-	ok = order_ok(s2c_tags, 0x10, 0x0C, "§5.2a: 0x10 static batch precedes 0x0C organic spawns") && ok;
-	ok = order_ok(s2c_tags, 0x0C, 0x20, "§5.2a: 0x0C organic spawns precede 0x20 pool-3 sync") && ok;
-	ok = order_ok(s2c_tags, 0x10, 0x1A, "§5.2a: 0x10 precedes the 0x1A world-stream timestamp") && ok;
-	ok = order_ok(s2c_tags, 0x20, 0x1A, "§5.2a: 0x20 precedes the 0x1A world-stream timestamp") && ok;
+	ok = expect(order_ok(s2c_tags, 0x10, 0x0C, "§5.2a: 0x10 static batch precedes 0x0C organic spawns"),
+	            "§5.2a: 0x10 static batch precedes 0x0C organic spawns") && ok;
+	ok = expect(order_ok(s2c_tags, 0x0C, 0x20, "§5.2a: 0x0C organic spawns precede 0x20 pool-3 sync"),
+	            "§5.2a: 0x0C organic spawns precede 0x20 pool-3 sync") && ok;
+	ok = expect(order_ok(s2c_tags, 0x10, 0x1A, "§5.2a: 0x10 precedes the 0x1A world-stream timestamp"),
+	            "§5.2a: 0x10 precedes the 0x1A world-stream timestamp") && ok;
+	ok = expect(order_ok(s2c_tags, 0x20, 0x1A, "§5.2a: 0x20 precedes the 0x1A world-stream timestamp"),
+	            "§5.2a: 0x20 precedes the 0x1A world-stream timestamp") && ok;
 	if (!ok) return 1;
 
 	// --- Deferred-gap note (NOT asserted): the unwitnessed §5.2a serializers our host omits. ---

@@ -348,6 +348,20 @@ Held-weapon visibility on mount/attach (engine-research, 2026-06-24; world-wac-a
 | `Player_GetClampedWeaponElevation` (was `…GetCurrentWeaponAmmoCapacity`) | `0x4dc6b0` | clamps `MountSlot.Elevation`→`WeaponDef.MaxElevation` (zoom level, not ammo) | disasm; §5.41 | confirm-only |
 | `Camera_ResetToLocalPlayer` (was `Player_ResetTerrainPosition`) | `0x4a3d30` | camera reset tracking the local player (not terrain) | disasm; §5.41 | confirm-only |
 
+`Server_*` family naming + decomp grill (2026-06-26; net-re §5.42; read-only; 120 fns validated):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Server_TickUpdate` | `0x51d7e0` | authoritative-server per-tick lifecycle; gates ~14 cadence timers (per-second block drives capture/win/violation/timeout) | decompile; §5.42 | confirm-only |
+| `Server_FindPlayerSlotByNetKeys` (was `Server_ProcessTeamChanges`) | `0x5008b0` | pure slot lookup matching net-player `+48`/`+52`; old name + stale comment wrong | decompile; §5.42 / D-NET-107 | confirm-only |
+| `Server_BroadcastMedicRequest` (was `server_broadcast_entity_kill`) | `0x515390` | medic-request broadcast (`STRSRV_MEDREQ`, msg 0x54+0x14, once-only); sig → `(ctx,data,len)`; no kill | decompile; §5.42 / D-NET-108 | confirm-only |
+| `Server_ClientFiredRound` (was `Server_ValidateAndFireRound`) | `0x50baa0` | C2S fired-round validate+queue; own string `"server_ClientFiredRound:"`; sig `()`→`(int fireRequest)` | decompile; §5.42 / D-NET-109 | confirm-only |
+| `Server_SendWeaponSlotListToPlayer` | `0x502550` | bogus `__stdcall(WndProc)` proto → cdecl `int(void*)` (plain `retn` proof) | disasm; §5.42 / D-NET-110 | confirm-only |
+| `Server_UpdateCaptureZoneEntities` | `0x519690` | bogus `__stdcall(display)` proto → cdecl `void(void)` (plain `retn` proof) | disasm; §5.42 / D-NET-110 | confirm-only |
+| `Server_CheckWinConditions` | `0x51ad40` | per-gametype win eval → `Server_ProcessRoundEnd`; sig `(int,int*)`→`void(void)` (Tick phantom-arg source) | decompile; §5.42 / D-NET-110 | confirm-only |
+| `Server_HandleEntitySync` (was `server_handle_entity_sync`) | `0x510990` | net msg handler (table `@0x82b5d8`); sig `()`→`(int ctx,u8*,int)` | decompile; §5.42 / D-NET-110 | confirm-only |
+| `Server_ValidatePlayerJoinRequest` | `0x512100` | join gate (version/ban/expansion/squad/PCID/banned-name/jointicket); names `g_expansion_checksum`/`g_banned_*`/`g_squad_*` | decompile; §5.42 | confirm-only |
+
 ## 6. Host Command wiring ([ADR 0001](adr/0001-mnu-action-command-boundary.md), matches)
 
 `UI_DispatchScreenEvent @ 0x54e6a0`, `UI_ShowPreGameMenuByState @ 0x568d10`,

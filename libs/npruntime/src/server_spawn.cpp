@@ -6,6 +6,20 @@
 
 namespace opennova::np {
 
+namespace {
+
+uint16_t allocate_player_net_id(const world::World &world) {
+	for (uint32_t candidate = kPlayerNetIdBase; candidate >= 0x8000u; --candidate) {
+		const uint16_t id = static_cast<uint16_t>(candidate);
+		if (id == 0 || id == 0xFFFFu) continue;
+		if (!world.registry.find_by_net_id(id).valid()) return id;
+		if (candidate == 0x8000u) break;
+	}
+	return 0;
+}
+
+} // namespace
+
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
@@ -33,15 +47,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	}
 	spawn.team = 1; // placeholder until the MP team path (matches the Godot listen host)
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
-	// Distinct high-band SSN per player — COUNTED, not derived from connection_id: a NovaWorld
-	// gate-assigned dcb (witnessed 0x113F) would make kPlayerNetIdBase + dcb overflow a uint16_t back
-	// into the small mission-id range. The pool-0 player count is bounded small, so base + index stays
-	// in the reserved band. (A faithful per-player SSN allocation is a follow-up.)
-	uint16_t player_index = 0;
-	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() == 0 && e.item_id == world::kPlayerInfantryTypeId) ++player_index;
-	});
-	spawn.net_id = static_cast<uint16_t>(kPlayerNetIdBase + player_index);
+	// Distinct high-band SSN per player. Allocate by scanning downward from the reserved base so the
+	// sequence never wraps through 0xFFFF/0x0000 and never collides with authored mission net IDs.
+	spawn.net_id = allocate_player_net_id(world);
+	if (spawn.net_id == 0) return {};
 	// entity+0x78 = the owning connection's dcb (host loopback dcb / a joiner's ack dcb).
 	// [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
 	spawn.owner_connection_id = conn.connection_id;

@@ -24,8 +24,8 @@ namespace opennova::np {
 // [orig: §5.2b spawn placement]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = 4;
 
-// High reserved SSN base for player entities — far above the small mission bms ids so it never
-// collides; each player gets base + its dcb. (world::PlayerSpawn defaults net_id to 0xFFF0.)
+// High reserved SSN base for player entities — far above the small mission bms ids. P3 allocates
+// downward from this base and skips already-live ids so it never wraps into 0xFFFF/0x0000.
 inline constexpr uint16_t kPlayerNetIdBase = 0xFFF0u;
 
 // §5.2a step 1 — [orig: Server_InitNewRoundState @0x51c8e0]. Set up the local-player/round context

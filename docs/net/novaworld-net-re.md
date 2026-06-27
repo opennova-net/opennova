@@ -3249,6 +3249,141 @@ camera; `Player_StartRoundEndTransition` target = weapon bone, Z −1.0). This c
   was `dword_24D20E0`/`pool`) + `g_avatarTeam1/2` (`0x24D4DFE/DFF`); `Player_InitPlayer` local
   `teamByte`→`avatarByte`; `PlayerSession_InitFromProfile` params `weaponClassA/B`→`avatarA/B`. Final `idb_save`.
 
+### 5.42 `Server_*` family — naming validation + decomp cleanup grill (2026-06-26)
+
+A full grill of the **120 `Server_*` functions** (the authoritative-server per-tick lifecycle:
+tick orchestration, player join/leave, teams/balance, scoring/rounds/win, capture zones, weapon
+validation, anti-cheat/admin, gate metrics, the `Server_Send*`/`Server_Broadcast*` packet
+wrappers, and the dedicated-server status screen; `0x4243a0`–`0x563af0`). Method: per-function
+decompile + xref + struct-field witnessing across 11 behavioral clusters, every rename/retype
+adversarially re-derived from behavior before landing, signatures cross-checked at call sites and
+(for `__stdcall` candidates) at the `retn` instruction. Verdict: **MATCHING (read-only grill)** —
+the family is faithfully named after the corrections below; this is a naming/typing/cleanup grill
+of original engine code, not a reimpl-equivalence claim. The server entry point is
+`Server_TickUpdate @0x51d7e0` (gates ~14 cadence timers; the per-second block at
+`g_periodic_second_timer == 0` drives capture/win/violation/timeout work).
+
+**Naming policy (user decision).** Several functions carry their own `__FUNCTION__` log strings
+proving the original module used lowercase `server_*` names (`server_PlayerAdd`,
+`server_ProcessClientRequestRespawn`, `server_ClientFiredRound`, …). Per the maintainer's call the
+whole family is normalized to the PascalCase `Server_*` house style; where a self-string proves an
+exact original *suffix*, that suffix is adopted (e.g. `ClientFiredRound`) in PascalCase. Lowercase
+functions renamed up: `server_handle_entity_sync`→`Server_HandleEntitySync`,
+`server_ProcessClientRequestRespawn`/`…SpectatorRespawn` (kept suffix),
+`server_broadcast_entity_kill`→ see D-NET-108, `server_handle_client_crc_validation`→
+`Server_HandleClientCRCValidation`, `server_PlayerPuntCRCMisMatch`→`Server_PlayerPuntCRCMisMatch`.
+
+**Naming corrections (the misnomers the grill caught):**
+
+| Addr | Old name | → New name | Why (witness) |
+|---|---|---|---|
+| `0x5008b0` | `Server_ProcessTeamChanges` | `Server_FindPlayerSlotByNetKeys` | body is a pure slot lookup matching `slot[7]→+184→+48/+52 == (k1,k2)`; changes/sends nothing; old name + a stale disasm comment both wrong (D-NET-107) |
+| `0x515390` | `server_broadcast_entity_kill` | `Server_BroadcastMedicRequest` | fetches `GameText("Server","STRSRV_MEDREQ")` (medic request), broadcasts msg 0x54+0x14, sets a once-only "notified" flag; no kill (D-NET-108) |
+| `0x50baa0` | `Server_ValidateAndFireRound` | `Server_ClientFiredRound` | own string `"server_ClientFiredRound: Player:%s Type:%d Ammo left:%d (NO AMMO!)"` (D-NET-109) |
+
+**Signature corrections — the wrong-prototype cascade (D-NET-110).** Many callees carried IDA-inferred
+prototypes with phantom params; their garbage flowed up as uninitialised `v*` args in
+`Server_TickUpdate` and elsewhere. Two sub-classes, both fixed:
+- *Extra cdecl params, body uses none/fewer:* `Server_BuildEntitySlotLists @0x4f97a0` (was
+  `__thiscall(char*,const char*)`) and `Server_UpdateEntityIdleTimers @0x50d770` (was `(int,int,char)`)
+  → `void(void)`; `Server_CheckWinConditions @0x51ad40` `void(void)`; `Server_UpdateBotMovement @0x51b960`
+  `void(void)`; `Server_SendEntityStateToPlayer @0x517ba0` `(int playerSlot)`;
+  `Server_SendMissionMetrics @0x4fb3a0` `void(void)`; `Server_BroadcastWeaponOverlayUpdate @0x509fc0`
+  `(int,int)`; `Server_SetNetworkDelay @0x50cbc0` `(int delayTicks)`; `Server_HandleBanPuntCommand @0x50b380`
+  `(uint,int)`; `Server_BuildEndOfRoundScoreboard @0x508f30` `(int enable,int winningTeam)`;
+  `Server_SendEntityStatePacket @0x509d70` had the opposite defect — a *dropped* 2nd param, restored to
+  `(int entityPtr,int param)` (caller pushes 2, verified at the call site).
+- *Bogus inherited `__stdcall` + WndProc/display arg names on a genuinely cdecl fn:*
+  `Server_SendWeaponSlotListToPlayer @0x502550` (args `msg/wParam/lParam`) and
+  `Server_UpdateCaptureZoneEntities @0x519690` (args `resolutionId/outWidth/outHeight`) — both end in a
+  **plain `retn`** (not `retn N`), proving caller-cleans = cdecl, so trimmed to `int(void*)` / `void(void)`.
+  `Server_UpdateCaptureZones @0x53b8f0` was `__usercall(...@<ecx>)` with a spurious `eax` input → `__fastcall(_DWORD*captureCtx)`.
+- *Net message-handler signature (dispatch table `@0x82b5d8`)* restored to `(int connectionCtx, data*, int dataLen)`:
+  `Server_HandleEntitySync @0x510990`, `Server_ProcessClientRequestRespawn @0x519af0`,
+  `Server_ProcessClientRequestSpectatorRespawn @0x51c840`, `Server_ValidateWeaponCRC @0x501f70`,
+  `Server_BroadcastMedicRequest @0x515390` — each had been declared `()` yet read `connectionCtx`/`data`/`len`
+  off the stack uninitialised.
+
+**Names VALIDATED correct (confirm-only, no change).** The bulk of the family was already accurate; the
+opcode of every `Server_Send*`/`Server_Broadcast*` wrapper was confirmed against its
+`NapiNPServer_SendFiltered(&g_napi_np_ctx, <op>, …)` call — e.g. entity-state 0x26/0x28/0x0A, chat 0x14,
+weapon overlay 0x46, player-info 0x7B, scoreboard 0x16/0x1D, round-end 0x61, kill/event 0x1E, medic 0x54,
+random-seed 0x61, despawn 0x12. `Server_PlayerAdd @0x51cbc0` (D-NET / §5.41) and `Server_ClientFiredRound`
+are the two C2S handlers with self-name strings. The two priority-list builders are correctly distinct:
+`Server_BuildEntityPriorityList @0x50e590` sends despawns (msg 0x12) + returns the `CPairList`;
+`…ForPlayer @0x50df20` writes caller out-arrays.
+
+**Server globals named/typed this pass (~45).** Tick cadence timers (witnessed by reset constant / action):
+`g_dirtyflag_clear_timer` (`0xC8D810`, 744 → `EntityPool_ClearDirtyFlags`), `g_botmove_timer` (`0xC8D814`, 15),
+`g_quarter_roundrobin_counter` (`0xC8D808`), `g_scoreboard_broadcast_timer` (`0xC8D80C`, 310),
+`g_serverinfo_update_timer` (`0xC8D818`, 1860), `g_mission_metrics_timer` (`0xC8D820`),
+`g_periodic_second_timer` (`0xC8D83C`, 62), `g_preround_delay_timer` (`0xC8D824`, = `dword_24D2160` at round
+start), `g_playerslot_broadcast_timer` (`0xC8D838`, 310), `g_spectator_broadcast_timer` (`0xC8D840`, 310),
+`g_weapon_broadcast_slot_cursor` (`0xC8D844`), `g_weapon_resend_timer` (`0xC947A0`, 62, KOTH).
+Replication: `g_priority_ref_x/y/z` (`0xC867A4/A8/AC`, the broadcast-origin eye position),
+`g_priority_pairlist` (`0xC86FE0`), `g_entity_send_budget` (`0xC8FC50`, BANDWIDTH cmd sets it 100-1600,
+default 600), `g_entity_action_queue` (`0xC86FDC`). Rules/config:
+`g_score_limit`/`g_kill_limit`/`g_time_limit_minutes`/`g_respawn_time` (`0x24D2134/38/44/40`),
+`g_autobalance_enabled`/`_min_diff`/`_trigger_diff` (`0x24D2190/94/98`), `g_team_change_entity_list`
+(`0xC947C8`), `g_team1_name`/`g_team2_name` (`0x24D1FF5`/`0x24D2006`), `g_num_teams_config` (`0x24D2150`),
+`g_capture_duration` (`0x24D2248`), `g_round_wins_team1..4` (`0xC8FF0C/10/14/18`), `g_total_rounds_played`
+(`0xC8FF1C`), `g_round_winning_team` (`0x24C1924`), `g_mission_time_ticks` (`0x24C1944`). Join/moderation:
+`g_expansion_checksum` (`0xB4C5A4`), `g_banned_name_count`/`g_banned_name_list`/`g_banned_id_list`
+(`0xC8FF20`/`0xC90728`/`0xC8FF28`), `g_squad_max_players`/`_password_required`/`_required_tag`
+(`0x2550924`/`0xC9478C`/`0x2550928`), `g_pcid_dupe_reject` (`0x25509E8`), `g_weapon_violation_limit`
+(`0x24D2178`), `g_votekick_enabled`/`_min_players`/`_percent` (`0x24D226C/70/74`), `g_network_delay_ticks`
+(`0xB4C29C`), `g_punt_log_enabled`/`g_cheat_log_enabled` (`0xC86FBC`/`0xC86FC0`), `g_gate_address`/
+`g_server_label` (`0xB5F4DC`/`0xB5F4BC`).
+
+**`g_napi_np_ctx` access note.** `Server_*` stage outgoing messages by writing past the typed
+`NapiNPServerCtx` end via `*((_DWORD*)&g_napi_np_ctx + 1126/1127/1128/1129)` — these reach the adjacent
+msg-staging globals `g_napi_msg_payload_buf @0xB5BBB0` / `g_napi_msg_payload_len @0xB5CBB0` (filter
+mode / target conn / target slot / target team); not a bug, an artifact of the contiguous staging block.
+
+**Divergence catalog (new IDs, stable).**
+- **D-NET-107** [naming, FIXED] `Server_ProcessTeamChanges @0x5008b0` → **`Server_FindPlayerSlotByNetKeys`**:
+  iterates player slots and returns the one whose net-player (`slot[7]→+184`) key fields `+48`/`+52` equal
+  the two args; it is a pure read (no state change, no packet). Old name and a stale "processes pending team
+  change… sends packets" disasm comment were both wrong. The exact meaning of the two key ints (`+48`/`+52`
+  of the inner net object) is **not yet witnessed** — follow-up. `[orig: Server_FindPlayerSlotByNetKeys @0x5008b0]`
+- **D-NET-108** [naming, FIXED] `server_broadcast_entity_kill @0x515390` → **`Server_BroadcastMedicRequest`**:
+  net msg handler (table `@0x82b5d8`) for a wounded player's medic call — formats `STRSRV_MEDREQ` with the
+  player name, broadcasts msg 0x54 (entity handle) + msg 0x14 (chat), sets `slot+89856` so it fires once, and
+  plays the help sound. No kill is involved. Signature restored to `(int connectionCtx, u8 *data, int dataLen)`.
+  `[orig: Server_BroadcastMedicRequest @0x515390]`
+- **D-NET-109** [naming, FIXED] `Server_ValidateAndFireRound @0x50baa0` → **`Server_ClientFiredRound`**: own
+  log string `"server_ClientFiredRound: …"` is the original name; the function validates a client fired-round
+  request (ammo, distance, ownership, weapon CRC) and queues it via `RoundData_AddRound`. Signature `()` →
+  `(int fireRequest)` (the body's `teamIndex` local was a misnamed pointer to the fire-request descriptor).
+  `[orig: Server_ClientFiredRound @0x50baa0]`
+- **D-NET-110** [signature, FIXED] **Wrong-prototype cascade across `Server_*`.** ~15 functions carried
+  IDA-inferred prototypes (extra phantom params, dropped params, or a bogus `__stdcall`+WndProc/display
+  prototype on a cdecl fn); the synthesized garbage surfaced as uninitialised `v*` call args in
+  `Server_TickUpdate`. All corrected (list above); `__stdcall` candidates were disambiguated by the actual
+  `retn` (plain `retn` = caller-cleans = cdecl). Re-decompiling the affected callers after a Hex-Rays cache
+  flush (`mark_cfunc_dirty`) clears the phantom args. `[orig: Server_TickUpdate @0x51d7e0]`
+- **D-NET-111** [type, FOLLOW-UP] **`CServerTick` is an undefined struct.** The telemetry instances
+  `dword_C87020` and `dword_C87598` (stride `0x578`) are accessed as raw dwords; layout partly witnessed —
+  `+0` phase enum (0..4), `+8` last `GetTickCount`, `+C/+10/+14/+18` per-phase accumulators, plus
+  player-count maxes, entity-type counts and the mission-metric fields (`g_mission_time_ticks` base
+  `0xC8759C`; phase durations `0xC875A4/A8/AC/B0`; max/most players `0xC8761C/0xC87620`; mission filename
+  `byte_C875DC`). Methods: `CServerTick_Construct @0x5017d0`, `_Reset @0x4f9f40`,
+  `_UpdateMaxPlayerCounts @0x4fa130`, `_AccumulateEntityTypeCounts @0x4fa1f0`,
+  `_SetState @0x4fa090`. **Not minted this pass** (conservative scope); grill the four methods to define
+  it, then type both globals. Other deferred items: `Server_UpdateCaptureZoneEntities` retn-verified cdecl
+  (FIXED); the `param4 @0x24D1DCC` server-terrain-CRC misnomer global in `HandleClientCRCValidation`; the
+  `entityIndex @0x252DCD0` misnomer (it is the 16×8 connection/slot table used by `BroadcastChatToAllPlayers`
+  + `Server_DestroyBatchedEntities`, not an index); `Server_ToggleDedicatedFlag @0x4dc9c0` name suspect
+  (toggles render-flags bit `0x100` of `dword_24C1930` + refreshes the LOCAL player's weapon overlay — reads
+  like a client view toggle, needs a `0x100`-consumer witness). `[orig: CServerTick_Construct @0x5017d0]`
+
+**IDB changes made during the session (2026-06-26).** Functions renamed (10): the 3 above + the 5 lowercase
+`server_*`→`Server_*` normalizations + `Server_PlayerAdd` (already done in §5.41). Signatures corrected on
+~18 functions (D-NET-110 list). ~45 server globals named/typed (list above). Comments added at the
+`FindPlayerSlotByNetKeys`, `BroadcastMedicRequest`, and `ClientFiredRound` sites documenting the rename
+rationale. No new local types were declared (zero duplicate-type risk). Per-cluster `idb_save`; final
+cache flush + `idb_save`.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
