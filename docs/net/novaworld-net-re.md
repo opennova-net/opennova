@@ -4686,7 +4686,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 |---|---|---|
 | A1 gate-probe | **matching** | crypto chain byte-verified end to end |
 | A2 gate-response | partial | literal parser still tracked (D-NET-9); leniency fixes landed (D-NET-10..15) |
-| A3 clienthello | partial | ServerHello two-branch model + PL fiction (D-NET-16..18) |
+| A3 clienthello | partial | ServerHello FIXED (flat builder, D-NET-16/18); ClientHello DE/PV3/PM/ET still unmodeled (D-NET-17) |
 | A4 clientauth | partial | CS-table/gating/JFC rejection fields fixed; remaining issues are outside A4 |
 | A5 client-session-fsm | partial | Success atol, Cookie parent, ClientConnected timing (D-NET-19..22) |
 | A6 protocol-message | partial | 0x80 selector + LEN8/16 fixed; frag reset/truncated stream remain (D-NET-7/8) |
@@ -4738,9 +4738,9 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-15** [LOW, FIXED] `atoi_loose` must skip leading whitespace (atol semantics). [orig: 0x4ced20 (atol @ 0x76ab0a)]
 
 `session_hello.cpp` (A3 ClientHello/ServerHello):
-- **D-NET-16** [MED, TRACKED] drop the is_game_server two-branch ServerHello model; emit SF UNCONDITIONALLY (0/1 flag); remove the fabricated PL tag; gate P1/P2/NP/MP on nonzero. [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
-- **D-NET-17** [LOW, TRACKED] ClientHello DE/PV3/PM/ET fields unmodeled (gated off for the stock client, so byte-correct for the common case). [orig: NapiNPSession_SendAnnouncePacket @ 0x61fa00]
-- **D-NET-18** [LOW, TRACKED] `server_hello_to_bytes` order: gate UT on nonzero, SF unconditional, never PL. [orig: 0x6204b0]
+- **D-NET-16** [MED, FIXED 2026-06-27] `server_hello_to_bytes` (`session_hello.cpp`) is now the witnessed FLAT builder: SF emitted UNCONDITIONALLY, P1/P2/NP/MP each only when nonzero, NO PL tag, SUS1/SUS2 gated on non-empty — the `is_game_server`/PL two-branch is removed from the encoder (the parser stays lenient so decoders still read a stray PL). Grilled vs the full decompile @0x6204b0 (CI/CO/AP/BDAT/DE/UT/PN/PG/PV1/PV2/PV3/HK/SN/SF/P1/P2/P3-P8/NP/MP/NPW/NC/RIP/RPN/SUS1-4/RIPE/EPN/ET, each individually gated). Tests: `session`/`client_session_loopback`/`golden_lan_join_session` green. [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
+- **D-NET-17** [LOW, TRACKED] ClientHello DE/PV3/PM/ET fields unmodeled (gated off for the stock client, so byte-correct for the common case). The SERVER side of these (DE/PV3/ET) is now witnessed @0x6204b0; the ClientHello PARSER modeling them is the remaining work. [orig: NapiNPSession_SendAnnouncePacket @ 0x61fa00]
+- **D-NET-18** [LOW, FIXED 2026-06-27] `server_hello_to_bytes` field order/gating now matches @0x6204b0 for the modeled field set (SF unconditional, never PL, count fields nonzero-gated, SUS non-empty-gated). Remaining nicety: UT could also be nonzero-gated (currently unconditional; cosmetic, low value).
 
 `client_session.cpp` (A5/A7):
 - **D-NET-19** [MED, FIXED] `Success` compared as exact "1"; retail uses `atol(Success) != 0`. [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800]

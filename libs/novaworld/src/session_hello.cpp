@@ -470,49 +470,29 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 	append_string_field(buf, "PV3", msg.pv3);
 	append_u32_field(buf, "HK", msg.hk);
 	append_string_field(buf, "SN", msg.sn);
-	if (msg.is_game_server) {
-		// Game-server ServerHello shape witnessed in retail capture frame
-		// 62334 (notes/retail_capture2_decoded.txt:599-623). Client-side
-		// processor name is not in our kong-named IDB yet (search xrefs
-		// to the literal field-name strings via the parse_napi_tlvs path
-		// from `Crypto_DecryptBuffer@0x5E5230` callers; the ClientHello
-		// parser at `parse_client_hello` / `NapiNPSession_SendDescription@0x5E9840`
-		// is the analog mirror). Field meanings observed across captured
-		// matches:
-		//   SF = server flags (retail = 0)
-		//   P1 = gametype bitmask (0x10000 = AS gametype; low 0x10 bit
-		//        unwitnessed — likely a per-mission feature flag, not a
-		//        terrain identifier)
-		//   P2 = game config (purpose unwitnessed; retail = 0x404)
-		//   NP = current player count
-		//   MP = max-players or game-mode parameter (retail = 2)
-		// Game-server hello REPLACES PL with these — PL is gone.
-		append_u32_field(buf, "SF", msg.sf);
-		append_u32_field(buf, "P1", msg.p1);
-		append_u32_field(buf, "P2", msg.p2);
-		append_u32_field(buf, "NP", msg.np);
-		append_u32_field(buf, "MP", msg.mp);
-	} else {
-		// Matchmaking hello on :64206 keeps PL (witnessed in retail capture
-		// frame 3608 / line 29-47 of retail_capture2_decoded.txt — no
-		// SF/P1/P2/NP/MP, no SUS1/SUS2). Same TLV-parser at the client side,
-		// just different field set seen by upstream consumers.
-		append_string_field(buf, "PL", msg.pl);
-	}
+	// [D-NET-16/17/18] Flat single-branch builder, faithful to the witnessed
+	// [orig: NapiNPProtocol_SendServerInfoPacket @0x6204b0] (the 0x81 reply to a 0x41 ClientHello):
+	//   - SF is emitted UNCONDITIONALLY (the original always writes it = `log_buffer[0] != 0`).
+	//   - P1 (server_flags) / P2 (build_flags) / NP (np_count) / MP (max_players) each ONLY when nonzero
+	//     (the original individually gates every count field; there is no all-or-nothing block).
+	//   - There is NO "PL" tag in this builder — the earlier game-server-vs-matchmaking two-branch was a
+	//     fiction (PL never appears on the 0x81 wire; the gate :64206 matchmaking hello is a SEPARATE
+	//     sender). The parser below stays lenient (it can still read a stray PL/SF from a foreign
+	//     capture) so decoders keep working; only the ENCODER is made faithful.
+	// Field meanings (cross-checked vs the retail-lan-host-join golden): P1 = gametype bitmask, P2 = game
+	// config, NP = current player count, MP = max-players/game-mode parameter.
+	append_u32_field(buf, "SF", msg.sf);
+	if (msg.p1) append_u32_field(buf, "P1", msg.p1);
+	if (msg.p2) append_u32_field(buf, "P2", msg.p2);
+	if (msg.np) append_u32_field(buf, "NP", msg.np);
+	if (msg.mp) append_u32_field(buf, "MP", msg.mp);
 	append_u32_field(buf, "NC", msg.nc);
 	append_u32_field(buf, "RIP", msg.rip);
 	append_u32_field(buf, "RPN", msg.rpn);
-	if (msg.is_game_server) {
-		// SUS1 = unique session id (GSID-NN-XXXXXXXX-timestamp-hash).
-		// SUS2 = expansion-pack archive name. 'jox01' is the Kendari
-		// expansion pack — one of its terrain datasets is `dvxi5`, used by
-		// the ASH_I5A.bms mission. The terrain itself is loaded from
-		// `Dvxi5.{trn,cpt,...}`; SUS2 just tells the client which expansion
-		// archive holds the assets.
-		// Both witnessed in retail capture frame 62334.
-		append_string_field(buf, "SUS1", msg.sus1);
-		append_string_field(buf, "SUS2", msg.sus2);
-	}
+	// SUS1 (unique session id GSID-NN-...) / SUS2 (expansion-pack archive, e.g. 'jox01' = Kendari) —
+	// the original gates each on a NON-EMPTY string, not on a game-server toggle (frame 62334).
+	if (!msg.sus1.empty()) append_string_field(buf, "SUS1", msg.sus1);
+	if (!msg.sus2.empty()) append_string_field(buf, "SUS2", msg.sus2);
 	append_u32_field(buf, "EIP", msg.eip);
 	append_u32_field(buf, "EPN", msg.epn);
 	return buf;
