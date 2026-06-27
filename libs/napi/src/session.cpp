@@ -19,6 +19,8 @@ std::string novaworld_error_tag(NovaWorldError err) {
 		case NovaWorldError::Reject3004: return "NWEC08";
 		case NovaWorldError::Reject3005: return "NWEC09";
 		case NovaWorldError::Reject3006: return "NWEC10";
+		case NovaWorldError::Reject1009: return "NWEC14"; // [D-NET-25] special-case reject
+		case NovaWorldError::UnknownReject: return "NWEC13";
 	}
 	// Binary's default branch is NWEC13 for unknown positive reject codes.
 	return "NWEC13";
@@ -38,10 +40,12 @@ NovaWorldError novaworld_error_from_code(int code) {
 		case 3004: return NovaWorldError::Reject3004;
 		case 3005: return NovaWorldError::Reject3005;
 		case 3006: return NovaWorldError::Reject3006;
+		case 1009: return NovaWorldError::Reject1009; // [D-NET-25] -> NWEC14
 		default:
-			// Binary treats "unknown 3xxx" by falling through to NWEC13 via
-			// dword_989588 default branch. Preserve that signal.
-			return NovaWorldError::TimeoutPoll;
+			// [D-NET-25] A reject with an unrecognized NONZERO code maps to NWEC13 (the dword_B60110
+			// switch default @0x4d4f10), NOT NWEC02 — NWEC02 is the poll-timeout path (code -1). Was
+			// wrongly returning TimeoutPoll (NWEC02) here.
+			return NovaWorldError::UnknownReject;
 	}
 }
 

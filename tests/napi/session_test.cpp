@@ -49,15 +49,22 @@ bool check_error_from_code() {
 	if (!expect(novaworld_error_from_code(200) == NovaWorldError::Banned, "200")) return false;
 	if (!expect(novaworld_error_from_code(203) == NovaWorldError::Restricted, "203")) return false;
 	if (!expect(novaworld_error_from_code(3006) == NovaWorldError::Reject3006, "3006")) return false;
-	if (!expect(novaworld_error_from_code(9999) == NovaWorldError::TimeoutPoll, "unknown falls through to TimeoutPoll (NWEC13-adjacent)")) return false;
+	// [D-NET-25] 1009 -> NWEC14; an unknown NONZERO reject -> UnknownReject -> NWEC13 (NOT the NWEC02
+	// poll-timeout path, which is code -1).
+	if (!expect(novaworld_error_from_code(1009) == NovaWorldError::Reject1009, "1009 -> Reject1009")) return false;
+	if (!expect(opennova::novaworld_error_tag(NovaWorldError::Reject1009) == "NWEC14", "1009 -> NWEC14")) return false;
+	if (!expect(novaworld_error_from_code(9999) == NovaWorldError::UnknownReject, "unknown reject -> UnknownReject")) return false;
+	if (!expect(opennova::novaworld_error_tag(NovaWorldError::UnknownReject) == "NWEC13", "unknown reject -> NWEC13")) return false;
+	if (!expect(novaworld_error_from_code(-1) == NovaWorldError::TimeoutPoll, "poll timeout -> NWEC02")) return false;
 	return true;
 }
 
 // Timing constants match the witnessed immediates.
 bool check_timing_constants() {
 	using namespace opennova;
-	if (!expect(SESSION_CONNECT_TIMEOUT_MS == 20000u, "connect timeout 20s (0x4E20)")) return false;
-	if (!expect(SESSION_HANDSHAKE_RETRANSMIT_MS == 1300u, "handshake retransmit 1300ms")) return false;
+	if (!expect(SESSION_CONNECT_TIMEOUT_MS == 60000u, "connect/host poll timeout 60s (0xEA60)")) return false;
+	if (!expect(SESSION_PERIODIC_UPDATE_TIMEOUT_MS == 20000u, "periodic-update timeout 20s (0x4E20)")) return false;
+	if (!expect(SESSION_MESSAGE_CHUNK_BYTES == 1300u, "message chunk size 1300 bytes")) return false;
 	if (!expect(SESSION_TIMEOUT_RANDOM_MIN_MS == 1000u, "transport random min")) return false;
 	if (!expect(SESSION_TIMEOUT_RANDOM_MAX_MS == 9999u, "transport random max")) return false;
 	return true;

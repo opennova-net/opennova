@@ -36,8 +36,15 @@ enum class SessionState : int {
 };
 
 // Handshake timing constants (witnessed as immediates in the binary).
-constexpr uint32_t SESSION_CONNECT_TIMEOUT_MS = 20000u; // 0x4E20 in CNapiGameSession_ConnectOrHost polling
-constexpr uint32_t SESSION_HANDSHAKE_RETRANSMIT_MS = 1300u; // last arg of CNapiSession_SendMessage
+// [D-NET-23] The connect/host poll loop in [orig: CNapiGameSession_ConnectOrHost @0x4d4f10] times out
+// at 0xEA60 = 60000 ms (BOTH the start-playing and start-hosting GetTickCount loops). The 20000 ms
+// (0x4E20) value is the SEPARATE periodic-update background timeout [orig: ProcessPeriodicUpdate
+// @0x4d4400] — kept below as its own named constant (the old 20000 here mis-cited the connect poll).
+constexpr uint32_t SESSION_CONNECT_TIMEOUT_MS = 60000u;          // 0xEA60 — ConnectOrHost poll
+constexpr uint32_t SESSION_PERIODIC_UPDATE_TIMEOUT_MS = 20000u;  // 0x4E20 — ProcessPeriodicUpdate
+// [D-NET-24] 1300 is a MESSAGE CHUNK SIZE in bytes (the QueueMessage fragment limit), not a ms
+// interval — renamed from the misnomer SESSION_HANDSHAKE_RETRANSMIT_MS. [orig: CNapiNPConnection_QueueMessage @0x628640]
+constexpr uint32_t SESSION_MESSAGE_CHUNK_BYTES = 1300u;
 constexpr uint32_t SESSION_TIMEOUT_RANDOM_MIN_MS = 1000u;  // rand()%0x2328 + 1000 in RandomizeTimeout
 constexpr uint32_t SESSION_TIMEOUT_RANDOM_MAX_MS = 9999u;  // 0x2328 == 9000; +1000 -> [1000,9999]
 
@@ -61,6 +68,9 @@ enum class NovaWorldError : int {
 	Reject3004 = 3004,     // -> NWEC08
 	Reject3005 = 3005,     // -> NWEC09
 	Reject3006 = 3006,     // -> NWEC10
+	Reject1009 = 1009,     // -> NWEC14 (witnessed special-case reject; [D-NET-25] @0x4d4f10)
+	UnknownReject = 0x7FFFFFFF, // sentinel for an unrecognized NONZERO reject code -> NWEC13 (the
+	                            // dword_B60110 default branch, distinct from the NWEC02 poll timeout)
 };
 
 // Map an error to its user-facing NWEC tag, or empty string if unknown.

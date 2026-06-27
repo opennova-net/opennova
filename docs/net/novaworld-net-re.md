@@ -4692,7 +4692,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | A6 protocol-message | partial | 0x80 selector + LEN8/16 fixed; frag reset/truncated stream remain (D-NET-7/8) |
 | A7 verify-containers | partial | Success atol (= D-NET-19); verify-cookie claim refuted |
 | A8 web-domain | **matching** | SessionInit CU web-domain install confirmed |
-| A9 session-timing | partial | timeout value/citation, NWEC13 default (D-NET-23..25) |
+| A9 session-timing | **matching** | timeout value/citation + NWEC defaults FIXED (D-NET-23..25, 2026-06-27) |
 | B1 nwu | **matching** | byte-exact (NW-C1) |
 | B2 epask | **matching** | byte-exact (NW-C2); edge cases fixed (D-NET-26/27) |
 | B3 pubcrypto | **matching** | byte-exact (NW-C3) |
@@ -4749,9 +4749,9 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-22** [LOW, BINDING] the verify Cookie var-list is data-driven (locale + NW* identity) from client env — registry/Win32 glue belongs in the Godot binding, not `libs/`. Also fix the `client_session.h:99-110` comment. [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 / CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0]
 
 `napi/session.{h,cpp}` (A9):
-- **D-NET-23** [MED, TRACKED] `SESSION_CONNECT_TIMEOUT_MS` mis-cited: ConnectOrHost poll is 60000ms (0xEA60); 20000ms (0x4E20) is the periodic-update background timeout. [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10 / ProcessPeriodicUpdate @ 0x4d4400]
-- **D-NET-24** [LOW, TRACKED] `SESSION_HANDSHAKE_RETRANSMIT_MS` is actually a 1300-byte message chunk size, not a ms interval — rename. [orig: CNapiNPConnection_QueueMessage @ 0x628640]
-- **D-NET-25** [LOW, TRACKED] add Reject1009→NWEC14; unknown-reject default → NWEC13 (currently NWEC02). [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10]
+- **D-NET-23** [MED, FIXED 2026-06-27] `SESSION_CONNECT_TIMEOUT_MS` corrected 20000→**60000** (0xEA60 — the ConnectOrHost connect/host poll, witnessed as the immediate in BOTH GetTickCount loops @0x4d4f10); the 20000ms (0x4E20) periodic-update timeout is now its own constant `SESSION_PERIODIC_UPDATE_TIMEOUT_MS`. (`libs/napi/session.h`; `napi session` test.) [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10 / ProcessPeriodicUpdate @ 0x4d4400]
+- **D-NET-24** [LOW, FIXED 2026-06-27] `SESSION_HANDSHAKE_RETRANSMIT_MS` was a misnomer (a 1300-BYTE message chunk size, not a ms interval) — renamed `SESSION_MESSAGE_CHUNK_BYTES`. [orig: CNapiNPConnection_QueueMessage @ 0x628640]
+- **D-NET-25** [LOW, FIXED 2026-06-27] added `Reject1009`→NWEC14; `novaworld_error_from_code` unknown-NONZERO-reject default now → `UnknownReject`→NWEC13 (was wrongly TimeoutPoll→NWEC02; NWEC02 is the code -1 poll-timeout path). (`libs/napi/session.{h,cpp}`.) [orig: CNapiGameSession_ConnectOrHost @ 0x4d4f10 dword_B60110 switch]
 
 `novacrypto/epask.cpp` (B2, edge-case only):
 - **D-NET-26** [LOW, FIXED] `epask_from_string` uses `_atoi64` semantics (return 0, no throw). [orig: parse_colon_delimited_string @ 0x666710]
