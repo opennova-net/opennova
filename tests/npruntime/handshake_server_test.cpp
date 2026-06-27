@@ -197,6 +197,24 @@ bool run_reactive_replies() {
 		if (!expect(!got || !reply_has_tag(msgs2, 0x51),
 		            "repeat 0x29 does NOT re-emit 0x51 (echo-loop guard)")) return false;
 	}
+	// 0x2C RTT probe -> 0x57 pong when echo_flag != 0 (the host bounces [u32 ts][u8 0]); echo_flag == 0
+	// is the client's return leg (server-internal RTT/kick, no reply). [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
+	{
+		std::vector<ProtocolMessage> msgs;
+		// timestamp 0x11223344 LE, echo_flag = 1.
+		if (!expect(send_session({make_protocol_message(0x2C, {0x44, 0x33, 0x22, 0x11, 0x01})}, 170, msgs) &&
+		            reply_has_tag(msgs, 0x57), "0x2C echo -> 0x57 pong")) return false;
+		bool body_ok = false;
+		for (const auto &m : msgs)
+			if (m.tag == 0x57)
+				body_ok = m.payload == std::vector<uint8_t>{0x44, 0x33, 0x22, 0x11, 0x00};
+		if (!expect(body_ok, "0x57 pong body = echoed timestamp + 0 byte")) return false;
+		// echo_flag = 0 -> no 0x57 reply (RTT compute only).
+		std::vector<ProtocolMessage> msgs0;
+		const bool got0 = send_session({make_protocol_message(0x2C, {0x44, 0x33, 0x22, 0x11, 0x00})}, 180, msgs0);
+		if (!expect(!got0 || !reply_has_tag(msgs0, 0x57),
+		            "0x2C echo_flag=0 -> no 0x57 (RTT compute only)")) return false;
+	}
 	return true;
 }
 

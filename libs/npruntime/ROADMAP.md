@@ -292,7 +292,9 @@ into `ClientState`. It also asserts the host's emitted §5.2a S2C tag order and 
 the local golden**. `apps/nw_server` live-hosts a real 1333-entity JO mission at 62 Hz. `npruntime|netsim|
 novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`0x1A` and the unwitnessed
 §5.2a serializers stayed deferred at P6 (structural P3) — **now closed by D-NET Wave 1 (P8.2 below)**;
-the retail `0x57` RTT pong remains a tracked follow-up (Wave 5).
+the retail `0x57` RTT pong is **also now LANDED** (D-NET Wave 5 — `dispatch_session_replies` bounces a
+C2S `0x2C` echoFlag!=0 as S2C `0x57`; §5.34). Remaining RTT/holdoff item: the `send_holdoff_countdown`
+gate model (`NapiNPConnection+0x648` / `GetSendHoldoffTicks @0x4C4AB0`).
 
 ### ✅ P7 — Godot adapter rewrite (DONE — in-match core + lobby sweep)
 `nova_simulation.cpp` is a thin adapter over `npruntime` — every in-match path funnels into one

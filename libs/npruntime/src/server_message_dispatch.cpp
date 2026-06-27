@@ -179,6 +179,17 @@ std::vector<uint8_t> build_tag64_mission_metadata(const SessionReplyConfig &cfg)
 	return reply;
 }
 
+// tag=0x57 RTT pong. [orig: NapiNPServerMsg_HandlePingResponse @0x515070 -> NetPacket_WriteInt32AndByte_0
+// @0x5070c0]: when a client's C2S 0x2C carries echo_flag != 0, the host bounces the timestamp back as
+// S2C 0x57 = [u32 timestamp][u8 0]. (A 0x2C with echo_flag == 0 is the client's return leg — the host
+// then computes RTT + runs the min/max-ping kick; no reply.)
+std::vector<uint8_t> build_tag57_pong(uint32_t timestamp) {
+	std::vector<uint8_t> b;
+	append_u32_le(b, timestamp);
+	b.push_back(0);
+	return b;
+}
+
 std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 	return {
 			static_cast<uint8_t>(now_tick & 0xFFu),
@@ -406,13 +417,25 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 			case 0x0C: // C2S player-input uplink — cache the pre-spawn pose
 				cache_client_pose(msg.payload, st);
 				break;
+			case 0x2C: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
+				// [u32 timestamp][u8 echo_flag]. echo_flag != 0 -> bounce S2C 0x57 [u32 ts][u8 0]; the
+				// echo_flag == 0 return leg is server-internal RTT stat + min/max-ping kick (no reply).
+				if (msg.payload.size() >= 5 && msg.payload[4] != 0) {
+					const uint32_t ts = static_cast<uint32_t>(msg.payload[0]) |
+					                    (static_cast<uint32_t>(msg.payload[1]) << 8) |
+					                    (static_cast<uint32_t>(msg.payload[2]) << 16) |
+					                    (static_cast<uint32_t>(msg.payload[3]) << 24);
+					replies.push_back(make_protocol_message(0x57, build_tag57_pong(ts)));
+				}
+				break;
+			}
 			case 0x0B: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
 				st.mission_status_received = true;
 				break;
 			default:
-				// 0x2C rtt echo / 0x22 player-sync ack / 0x0F entity-info query / 0x09 checksum / 0x48 +
-				// per-frame client updates: consumed (no reactive reply). The original 0x22->0x46 /
-				// 0x0F->0x18 paths are part of the deferred body grill wave.
+				// 0x22 player-sync ack / 0x0F entity-info query / 0x09 checksum / 0x48 + per-frame client
+				// updates: consumed (no reactive reply). The original 0x22->0x46 / 0x0F->0x18 paths are
+				// part of the deferred body grill wave.
 				break;
 		}
 	}

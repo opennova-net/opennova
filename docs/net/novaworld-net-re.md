@@ -2585,6 +2585,14 @@ two directions (e.g. `ts=0x2233240a`: C2S `0x2C` flag=1 → S2C `0x57` flag=0).
 **Note `0x2C` is direction-overloaded** — S2C `0x2C` (`@ 0x427E10`) is an unrelated chat-history entry, NOT
 RTT; only the C2S direction is the ping reply.
 
+**Server emit LANDED (2026-06-27, D-NET Wave 5).** `dispatch_session_replies` (`server_message_dispatch.cpp`)
+now handles a C2S `0x2C`: when `echoFlag != 0` it bounces an S2C `0x57` = `[u32 timestamp][u8 0]`
+(`build_tag57_pong`, the faithful port of `NetPacket_WriteInt32AndByte_0 @0x5070c0`); an `echoFlag == 0`
+return leg is the server-internal RTT/min-max-ping path (no reply). Was previously consumed with no reply.
+The `g_MinPing`/`g_MaxPing` strike-disconnect is a server-internal stat path not yet modeled (no wire
+output beyond the kick chat message — deferred). Tested: `npruntime_handshake_server` (0x2C echo→0x57 body
++ echoFlag=0→no reply).
+
 **Periodic request trio — S2C `0x68` / `0x43` / `0x39`.** Each parses a single `[u32]` (4 B) and queues a
 different fixed reply built from local state; the inbound parse is structurally identical, so one reader
 (`decode_u32_scalar`) serves all three. They fire together on a coarse period (~every 335 frames in probe3).
