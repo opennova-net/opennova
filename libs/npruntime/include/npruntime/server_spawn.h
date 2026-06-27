@@ -18,6 +18,9 @@
 namespace opennova::world {
 class World;
 }
+namespace opennova::netsim {
+class ISessionTransport;
+}
 
 namespace opennova::np {
 
@@ -51,5 +54,17 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 // AiSystem).
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world);
+
+// Synthetic in-process peer admit WITHOUT a handshake — an owner/test hook (the Godot binding's
+// admit_test_remote_peer). Spawns a pool-0 REMOTE player at `spawn` (allocating a reserved high-band
+// net_id when spawn.net_id == 0, skipping live ids — so with the host already at 0xFFF0 the next is
+// 0xFFF1), registers (or reuses) a type-1 connection for `peer` already in-match (burst.spawned), and
+// binds conn.link.owned_entity + the supplied NON-OWNING transport. Mirrors the post-PeerSpawned state
+// the handshake pipeline leaves, minus the socket legs; NEVER publishes World::cached.local_player
+// (spawn_remote_player). Returns the spawned handle (invalid if pool 0 is full / no AiSystem). The real
+// path is handle_server_datagram -> Server_ProcessPendingPlayerSpawns.
+world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &world, const PeerAddr &peer,
+                                         const world::PlayerSpawn &spawn,
+                                         netsim::ISessionTransport *transport);
 
 } // namespace opennova::np

@@ -117,4 +117,46 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 	return spawned;
 }
 
+// See header. Synthetic in-process peer admit (no handshake) — the owner/test hook.
+world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &world, const PeerAddr &peer,
+                                         const world::PlayerSpawn &spawn_in,
+                                         netsim::ISessionTransport *transport) {
+	// Reuse an existing connection for this peer, or prepare a fresh type-1 node id.
+	NapiNPConnection *conn = nullptr;
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.peer == peer) {
+			conn = &c;
+			break;
+		}
+	}
+	const uint32_t conn_id = conn ? conn->connection_id : ctx.np_protocol.next_connection_id;
+
+	world::PlayerSpawn spawn = spawn_in;
+	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
+	// Always allocate (mirroring Server_BuildPlayerInfoAndAdd) — PlayerSpawn::net_id defaults non-zero,
+	// so honoring an incoming value would collide every joiner onto the host's 0xFFF0. With the host
+	// findable at 0xFFF0 the downward allocator yields 0xFFEF for the first joiner, 0xFFEE next, ...
+	spawn.net_id = allocate_player_net_id(world);
+	if (spawn.net_id == 0) return {};
+	spawn.owner_connection_id = conn_id; // entity+0x78 dcb
+	const world::EntityHandle h = world::spawn_remote_player(world, spawn);
+	if (!h.valid()) return h;
+
+	if (conn == nullptr) {
+		NapiNPConnection c;
+		c.peer = peer;
+		c.type = 1; // server-side view of a remote client
+		c.connection_id = ctx.np_protocol.next_connection_id++;
+		c.self_id_seen = true;
+		ctx.np_protocol.connection_list.push_back(c);
+		conn = &ctx.np_protocol.connection_list.back();
+	}
+	conn->link.owned_entity = h;
+	conn->link.transport = transport;
+	conn->link.mode = netsim::TransportMode::Client;
+	conn->phase = ConnectionPhase::PlayerAdded;
+	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
+	return h;
+}
+
 } // namespace opennova::np

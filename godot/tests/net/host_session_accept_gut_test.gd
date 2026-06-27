@@ -32,12 +32,12 @@ func test_enable_host_listen_binds_and_keeps_sp_present() -> void:
 	assert_gt(sim.get_host_listen_port(), 0, "host got a real bound port")
 	assert_eq(sim.get_host_peer_count(), 0, "no joiners yet")
 
-	# The host's own SP listen-server present path is unchanged: one host frame replicates the
-	# two organics through the loopback wire into the client-decoded present.
+	# The host's own listen-server present path replicates the two organics + the auto-spawned host
+	# player (faithful §5.0 mode-3 bring-up) through the loopback wire into the client-decoded present.
 	sim.advance_frame()
 	var stride: int = sim.get_present_stride()
 	var records: int = sim.get_present_snapshot().size() / stride
-	assert_eq(records, 2, "host's own client present still replicates the two organics")
+	assert_eq(records, 3, "host's own client present replicates the two organics + the host player")
 	sim.free()
 
 
@@ -87,7 +87,7 @@ func test_host_receives_joiner_datagrams_without_disturbing_sp() -> void:
 	assert_eq(sim.get_host_peer_count(), 0, "garbage datagram registered no JointOperations peer")
 	var stride: int = sim.get_present_stride()
 	var records: int = sim.get_present_snapshot().size() / stride
-	assert_eq(records, 2, "host present undisturbed by the inbound socket traffic")
+	assert_eq(records, 3, "host present (2 organics + host player) undisturbed by the inbound socket traffic")
 	sim.free()
 
 
@@ -104,19 +104,22 @@ func test_admit_remote_peer_spawns_a_world_entity() -> void:
 	var after: int = sim.get_entity_count()
 	assert_eq(after, before + 1, "admitting a joiner adds exactly one pool-0 entity")
 
-	# The joiner carries a distinct SSN (0xFFF1) and sits at the admitted position (authoritative
-	# registry read; mission<->Godot round-trip). Z may settle on terrain (none here, so exact).
+	# The joiner carries a distinct SSN and sits at the admitted position (authoritative registry
+	# read; mission<->Godot round-trip). Z may settle on terrain (none here, so exact). The reserved
+	# high-band allocator scans DOWNWARD from 0xFFF0 skipping live ids, so with the host at 0xFFF0 the
+	# first joiner is 0xFFEF (D-NET-112; the legacy binding's upward 0xFFF1 counter is retired).
 	var found := false
 	for i in range(after):
-		if sim.get_entity_net_id(i) == 0xFFF1:
+		if sim.get_entity_net_id(i) == 0xFFEF:
 			found = true
 			var p: Vector3 = sim.get_entity_position(i)
 			assert_almost_eq(p.x, spawn_pos.x, 0.5, "joiner spawned at the admitted X")
 			assert_almost_eq(p.z, spawn_pos.z, 0.5, "joiner spawned at the admitted Z")
-	assert_true(found, "the admitted joiner is present with its own SSN")
+	assert_true(found, "the admitted joiner is present with its own SSN (0xFFEF)")
 
-	# The host's own player is NOT stolen — admit_peer uses spawn_remote_player (no local_player).
-	assert_false(sim.has_local_player(), "admitting a joiner does not claim the host's local player")
+	# The host's own (auto-spawned) player is untouched — admit uses spawn_remote_player, so the joiner
+	# is a distinct entity and the host keeps its own local player.
+	assert_true(sim.has_local_player(), "the host keeps its own auto-spawned local player after admitting a joiner")
 	sim.free()
 
 

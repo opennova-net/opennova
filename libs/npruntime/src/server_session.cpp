@@ -70,4 +70,16 @@ void create_session(NapiNPServerCtx &ctx, const NapiGameSettings &settings,
 	}
 }
 
+// See header. Latch the host's own type-2 loopback in-match so Server_TickUpdate fans it a 0x0A.
+bool mark_host_client_in_match(NapiNPServerCtx &ctx) {
+	bool found = false;
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.type == 2) {
+			c.burst.spawned = true;
+			found = true;
+		}
+	}
+	return found;
+}
+
 } // namespace opennova::np

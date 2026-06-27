@@ -14,6 +14,10 @@
 
 #include <novaworld/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
+#include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
+#include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
+#include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+
 #include <mission/bms.h>
 #include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
 #include <mission/mission_systems.h>
@@ -322,37 +326,23 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	// brains through World::ai; wire it before registering so the pre-mission pass can dispatch.
 	bms_->load(file.events, file.triggers, file.actions);
 	world_->ai = ai_.get();
-	// SP listen server (ADR 0009/0011): NetSystem runs AHEAD of WAC (net-before-logic,
-	// [orig: Game_ProcessMainFrame @ 0x5263f0]) and World::net routes through the
-	// serializing sink. register_mission_systems appends WAC->BMS->AI after it, so the
-	// system order becomes net -> WAC -> BMS -> AI. reset_world recreated a fresh World
-	// (empty systems_, net == LocalSink), so this re-wires cleanly on every (re)load.
-	if (listen_server_ && net_ && net_sink_ && client_view_) {
-		world_->net = net_sink_.get();
-		// Reset the connection table to just the host's own loopback (connection 0);
-		// co-op peers re-handshake into fresh connections after each (re)load. This
-		// keeps the SP listen server byte-identical (one loopback connection) and
-		// drops any stale per-peer transports from a prior mission.
-		net_->clear_connections();
-		net_->add_connection(opennova::netsim::Connection{
-				loopback_.get(), opennova::netsim::TransportMode::Loopback, {}, 0});
-		remote_peers_.clear();
-		world_->add_system(net_.get());
-		client_view_->state() = opennova::netsim::ClientState{};
-		loopback_->clear();
+	// P7 listen server (SP + LAN host): stand up the npruntime in-match runtime (mode-3 HostClient
+	// over an in-process loopback, the faithful §5.0 path). Server_TickUpdate owns the logic tick +
+	// the C2S drain + the 0x0A fan, so there is NO NetSystem-as-ISystem here (D-NET-123/125) — the
+	// present reads the host's own ClientRuntime view, and a LAN host adds the socket legs in host_pump.
+	if (listen_server_) {
+		bringup_host_runtime(file);
 	}
-	// Co-op LAN joiner (D.2): a pure non-authority client. NetSystem is NOT registered
-	// (the joiner never serializes; run_logic_tick(false) leaves World::net the default
-	// LocalSink for WAC/BMS sinks). Clear the decoded state + the S2C feed and re-arm the
-	// handshake so a (re)load reconnects cleanly (start() fully resets the session). The
-	// local player L is spawned in joiner_net_poll on the name-match, NOT here.
-	if (joiner_ && client_view_) {
-		client_view_->state() = opennova::netsim::ClientState{};
-		if (joiner_feed_) joiner_feed_->clear();
+	// P7 co-op LAN joiner: a pure non-authority client. Build a fresh np::ClientRuntime (Joiner role)
+	// per (re)load — start() fully resets the session, so a reload reconnects cleanly. NetSystem is NOT
+	// registered (the joiner never serializes; run_logic_tick(false) leaves World::net the default
+	// LocalSink for WAC/BMS sinks). The local player L is spawned in joiner_pump on the name-match.
+	if (joiner_) {
+		runtime_ = std::make_unique<opennova::np::ClientRuntime>(
+				opennova::ClientSession::Config::jointoperations(), joiner_player_name_);
 		joiner_started_ = false;
 		joiner_local_spawned_ = false;
 		joiner_self_wire_handle_ = 0;
-		joiner_local_net_id_ = 0;
 	}
 	opennova::mission::register_mission_systems(*world_, *wac_, *bms_, *ai_);
 	// Re-install the held script program onto the fresh WacSystem (reset_world
@@ -371,15 +361,6 @@ void NovaSimulation::finish_load(const opennova::bms::File &file) {
 	loaded_ = true;
 }
 
-void NovaSimulation::refresh_host_accept_config() {
-	if (!accept_) return;
-	const bool was_running = accept_->running();
-	accept_->configure(host_session_config_);
-	if (was_running || host_listen_) {
-		accept_->start();
-	}
-}
-
 void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File &file) {
 	std::vector<uint8_t> header_blob;
 	std::string error;
@@ -396,7 +377,8 @@ void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File
 			host_session_config_.session.spawn_names.push_back(mission_name);
 		}
 	}
-	refresh_host_accept_config();
+	// P7: host_session_config_ is consumed at the next load by bringup_host_runtime
+	// (configure_session_runtime + the §5.1 GameServerRuntime config); nothing to refresh live.
 }
 
 void NovaSimulation::_bind_methods() {
@@ -566,16 +548,20 @@ void NovaSimulation::build_demo_mission() {
 void NovaSimulation::step() {
 	if (!loaded_) return;
 	const uint64_t sim_start = perf_now_us();
-	apply_player_input_pre_tick(); // net-before-logic: player input -> body input
-	host_net_poll();          // co-op host: drain the socket + handshake/admit/route, before logic
-	joiner_net_poll();        // co-op joiner: handshake/spawn/feed the client view, before logic
-	world_->run_logic_tick(/*is_authority=*/!joiner_); // one logic tick (a joiner is non-authority)
+	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
+		host_pump();
+		last_sim_tick_us_ = perf_now_us() - sim_start;
+		return;
+	}
+	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
+		joiner_pump();
+		last_sim_tick_us_ = perf_now_us() - sim_start;
+		return;
+	}
+	// No-net editor/unit path: one authoritative logic tick, no replication.
+	apply_player_input_pre_tick();
+	world_->run_logic_tick(/*is_authority=*/true);
 	last_sim_tick_us_ = perf_now_us() - sim_start;
-	const uint64_t net_start = perf_now_us();
-	net_tick(); // serialize + loopback-decode when the listen server is on (no-op otherwise)
-	host_net_flush();         // co-op host: advance handshakes + ship per-peer S2C (no-op otherwise)
-	joiner_net_flush();       // co-op joiner: ship L's C2S 0x0C uplink (no-op otherwise)
-	last_net_tick_us_ = perf_now_us() - net_start;
 }
 
 bool NovaSimulation::advance_frame() {
@@ -589,26 +575,283 @@ bool NovaSimulation::advance_frame() {
 	// The C2S drain is NetSystem::tick (system index 0, runs at the top of the loop);
 	// the S2C emit + the local client's decode happen in net_tick(), after the logic.
 	const uint64_t sim_start = perf_now_us();
-	apply_player_input_pre_tick(); // input -> the local player's body input, before logic
-	host_net_poll();          // co-op host: poll socket -> handshake/admit/route, before logic
-	joiner_net_poll();        // co-op joiner: handshake/spawn/feed the client view, before logic
-	world_->run_logic_tick(/*is_authority=*/!joiner_); // a joiner is a pure non-authority client
+	if (listen_server_) { // P7 listen server (SP + LAN host) -> the npruntime owner loop
+		host_pump();
+		last_sim_tick_us_ = perf_now_us() - sim_start;
+		return true;
+	}
+	if (joiner_) { // P7 co-op joiner -> the npruntime ClientRuntime (non-authority)
+		joiner_pump();
+		last_sim_tick_us_ = perf_now_us() - sim_start;
+		return true;
+	}
+	// No-net editor/unit path: one authoritative logic tick, no replication.
+	apply_player_input_pre_tick();
+	world_->run_logic_tick(/*is_authority=*/true);
 	last_sim_tick_us_ = perf_now_us() - sim_start;
-	const uint64_t net_start = perf_now_us();
-	net_tick();
-	host_net_flush();         // co-op host: advance handshakes + ship per-peer S2C 0x0A
-	joiner_net_flush();       // co-op joiner: ship L's C2S 0x0C uplink
-	last_net_tick_us_ = perf_now_us() - net_start;
 	return true;
 }
 
 // The post-logic half of the listen-server frame: serialize the live world into one
 // S2C 0x0A frame, loop it back in-process, and let the local client decode it into the
 // ClientState the present pass reads. No-op when the listen server is off.
-void NovaSimulation::net_tick() {
-	if (!listen_server_ || !net_ || !client_view_ || !loopback_) return;
-	net_->emit_s2c(*world_, compute_net_anchor());
-	client_view_->pump(*loopback_);
+// P7: per-load host bring-up — the faithful §5.0 mode-3 in-process listen server
+// [orig: SinglePlayer_StartMission @0x561af0], mirroring apps/nw_server/main.cpp. The host's own
+// player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
+// select_player_spawn start marker), and its own loopback client renders the per-frame 0x0A.
+void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
+	namespace np = opennova::np;
+	// Persist the mission so ctx_.mission (read by the §5.1 0x0B BMS-header burst for LAN joiners)
+	// outlives the match — the load-local bms::File would dangle.
+	mission_file_ = file;
+	host_loop_.clear();
+	peers_.clear();
+	// Reload: a fresh ctx drops any stale connections / game_runtime from a prior mission. A reload is
+	// a new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
+	// D-NET-124).
+	ctx_ = np::NapiNPServerCtx{};
+	ctx_.world = world_.get();
+	ctx_.mission = &mission_file_;
+	ctx_.net = nullptr; // P7: NetSystem retired as a World ISystem; Server_TickUpdate owns the tick.
+
+	// NapiGameSettings for create_session: a LAN host takes its lobby-visible name / gametype from
+	// the GDScript-configured host_session_config_; SP is the faithful "SINGLEPLAYERGAME" / 1 player.
+	settings_ = np::NapiGameSettings{};
+	if (host_listen_) {
+		const opennova::GameSessionConfig &s = host_session_config_.session;
+		settings_.server_name = s.server_name.empty() ? std::string("OpenNova LAN Host") : s.server_name;
+		settings_.max_players = 16;
+		settings_.game_type = s.gametype;
+		settings_.mp_attributes = s.mpattrib;
+	} else {
+		settings_.server_name = "SINGLEPLAYERGAME";
+		settings_.max_players = 1;
+	}
+
+	np::set_connection_mode(ctx_, np::ConnectionMode::HostClient); // mode 3 (is_host + is_client)
+	np::set_transport_mode(ctx_, host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless);
+	// create_session registers the host's own type-2 loopback (self_id_seen latched) + Server_InitNewRoundState.
+	np::create_session(ctx_, settings_, np::SessionStartup{}, &host_loop_);
+	// configure_session_runtime once per match — preserves the type-2 loopback, drops only type-1 nodes.
+	// A LAN host feeds the §5.1 GameServerRuntime config (server name / mission / player name) for the
+	// joiner replies; SP needs none. (The §5.1 0x0B BMS-header body reads ctx_.mission directly.)
+	np::configure_session_runtime(ctx_, host_listen_ ? host_session_config_
+	                                                 : opennova::GameServerRuntimeConfig{});
+	// FAITHFUL auto-spawn: the host's own player at the start marker (§5.2c), binding the loopback's
+	// owned_entity (the 0x0A anchor) and publishing World::cached.local_player.
+	np::Server_ProcessPendingPlayerSpawns(ctx_, *world_);
+	// Latch the host loopback in-match so Server_TickUpdate fans it the per-frame whole-world 0x0A its
+	// local view renders from (no §5.2a self-stream needed — it holds the authoritative world).
+	np::mark_host_client_in_match(ctx_);
+	// The host's own client view (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
+	// each frame into the ClientState the present pass reads.
+	runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);
+
+	// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
+	// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
+	player_input_ = opennova::world::PlayerInput{};
+	if (world_->ai && world_->cached.local_player.valid()) {
+		if (const AiEntity *pe = world_->ai->for_handle(world_->cached.local_player)) {
+			player_input_.look_heading = pe->heading;
+		}
+	}
+}
+
+// P7: the per-frame host owner loop, the Godot equivalent of apps/nw_server/host_owner_loop.h
+// (the §5.44 recv-before-send order). For pure SP the socket legs (1)/(2-ship)/(4) are inert
+// (SocketMode::Socketless, no peers); a LAN host pumps NovaUdpPump for them.
+void NovaSimulation::host_pump() {
+	namespace np = opennova::np;
+	const uint32_t now = now_tick_;
+	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
+
+	// (1) recv-drain — LAN only: pump the socket, run each datagram through the host protocol, ship the
+	//     handshake replies (0x81/0x82/0x83), react to the surfaced events. Pure SP is socketless.
+	if (host_listen_ && pump_.is_valid()) {
+		pump_->poll();
+		while (pump_->has_inbound()) {
+			const Dictionary d = pump_->take_inbound();
+			const String ip = d.get("ip", String());
+			const int port = d.get("port", 0);
+			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+			const opennova::PeerAddr peer = peer_from_addr(ip, port);
+			np::HandleResult r = np::handle_server_datagram(
+					ctx_, peer, bytes.ptr(), static_cast<std::size_t>(bytes.size()), now);
+			for (const std::vector<uint8_t> &dg : r.outbound) send_datagram(peer, dg);
+			for (const np::HostAcceptEvent &ev : r.events) dispatch_event(peer, ev);
+		}
+	}
+
+	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst (+ Server_ProcessPendingPlayerSpawns,
+	//     idempotent); the in-match host loopback is skipped. Ship the burst datagrams (LAN) + react to F3/Spawned.
+	for (np::TickOut &t : np::tick_connections(ctx_, /*elapsed_ms=*/16, now)) {
+		if (host_listen_) {
+			for (const std::vector<uint8_t> &dg : t.outbound) send_datagram(t.peer, dg);
+		}
+		for (const np::HostAcceptEvent &ev : t.events) dispatch_event(t.peer, ev);
+	}
+
+	// (3) the authoritative per-frame host loop: single C2S drain + run_logic_tick(true) + per-connection
+	//     0x0A fan (incl. the host's own loopback -> host_loop_). NO separate run_logic_tick (D-NET-125).
+	np::Server_TickUpdate(ctx_);
+
+	// (4) S2C flush — LAN only: reframe each type-1 remote transport's [tag][body] as a 0x83 SESSION +
+	//     send. The host's own type-2 loopback is consumed in-process at step 5.
+	if (host_listen_) {
+		for (np::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
+			if (c.type != 1 || c.link.transport == nullptr) continue;
+			// A type-1 peer's transport is always the UdpSessionTransport admit_peer attached, so the
+			// downcast to pop_outbound (an owner-boundary method) is safe (the host's own type-2 loopback
+			// is skipped above).
+			auto *udp = static_cast<opennova::netsim::UdpSessionTransport *>(c.link.transport);
+			std::vector<uint8_t> raw;
+			while (udp->pop_outbound(raw)) {
+				if (raw.empty()) continue;
+				const uint8_t tag = raw[0];
+				const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
+				std::vector<uint8_t> dg;
+				if (np::frame_in_match_s2c(ctx_, c.peer, tag, body, dg)) send_datagram(c.peer, dg);
+			}
+		}
+	}
+
+	// (5) fold the host's own loopback 0x0A into ClientState for present (HostClient: recv-fold only, no 0x0C).
+	if (runtime_) runtime_->Client_ProcessNetworkFrame(now);
+	++now_tick_;
+}
+
+// P7: react to one HostAcceptEvent surfaced by handle_server_datagram / tick_connections — the
+// Godot port of apps/nw_server/host_owner_loop.h dispatch_event.
+void NovaSimulation::dispatch_event(const opennova::PeerAddr &peer, const opennova::np::HostAcceptEvent &ev) {
+	namespace np = opennova::np;
+	switch (ev.kind) {
+		case np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
+		case np::HostAcceptEvent::Kind::PeerSpawned:
+			admit_peer(peer, ev);
+			break;
+		case np::HostAcceptEvent::Kind::PeerC2SInMatch:
+			// STAGE the joiner's in-match 0x0C onto its transport; Server_TickUpdate is the single drain
+			// (D-NET-125 — never apply inline).
+			np::apply_in_match_c2s(ctx_, ev);
+			break;
+		case np::HostAcceptEvent::Kind::PeerGoodbye:
+			peers_.erase(peer);             // release the owner's transport (the node is erased by drop_connection)
+			np::drop_connection(ctx_, peer);
+			break;
+		case np::HostAcceptEvent::Kind::PeerHandshakeAdvanced:
+		default:
+			break;
+	}
+}
+
+// P7: attach a Godot-owned transport to a joiner's connection (idempotent) and, ONCE the spawn pipeline
+// has bound owned_entity, stream the joiner's NAMED dcb-bearing S2C 0x0C organic-spawn so it name-matches
+// its own player (entity_name == its ClientHello.co) and learns its wire handle H. Port of
+// apps/nw_server/host_owner_loop.h admit_peer (the legacy announce_joiner_organic_spawn). Announces once.
+void NovaSimulation::admit_peer(const opennova::PeerAddr &peer, const opennova::np::HostAcceptEvent &ev) {
+	namespace np = opennova::np;
+	PeerLink &link = peers_[peer];
+
+	np::NapiNPConnection *conn = nullptr;
+	for (np::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
+		if (c.peer == peer) {
+			conn = &c;
+			break;
+		}
+	}
+	if (conn == nullptr) return;
+
+	if (link.transport == nullptr) {
+		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
+				opennova::netsim::UdpSessionTransport::Role::Host);
+	}
+	if (conn->link.transport == nullptr) {
+		conn->link.transport = link.transport.get();
+		conn->link.mode = opennova::netsim::TransportMode::Client;
+	}
+
+	if (link.announced || !conn->link.owned_entity.valid()) return; // wait for the spawn pipeline
+
+	opennova::OrganicSpawnBatch batch;
+	batch.entity_count = 1;
+	opennova::OrganicSpawnRecord rec;
+	rec.slot_id = static_cast<uint16_t>(conn->link.owned_entity.packed); // wire handle H
+	rec.has_body = true;
+	rec.item_type_id = 0x14B9;                  // player infantry template
+	rec.entity_name = ev.peer_name;             // the name-match key (the joiner's ClientHello.co)
+	rec.entity_flags = ev.self_id;              // entity+0x78: the dcb the client self-matches
+	rec.minimap_flags = 0x100;                  // entity+0x36 bit 0x100: local-player/minimap register
+	rec.pos_x = ev.pose.pos_x;
+	rec.pos_y = ev.pose.pos_y;
+	rec.pos_z = ev.pose.pos_z;
+	rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16; // i16 wire heading -> 32-bit BAM
+	rec.team = ev.pose.team;
+	if (const opennova::world::Entity *e = world_->registry.get(conn->link.owned_entity)) {
+		rec.net_id = e->net_id;
+	}
+	batch.records.push_back(std::move(rec));
+
+	std::vector<uint8_t> dg;
+	if (np::frame_in_match_s2c(ctx_, peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
+		send_datagram(peer, dg);
+		link.announced = true; // latch only on a successful frame+send (retry otherwise)
+	}
+}
+
+// P7: the per-frame non-authority client loop — the Godot equivalent of the joiner half of
+// Client_ProcessNetworkFrame (§5.44). The recv-fold + the C2S 0x0C uplink are fused inside the
+// runtime; run_logic_tick(false) runs first so the uplink reflects L's just-integrated pose
+// (matches the legacy "uplink-after-tick"). The recv-fold writes only ClientState (read after the
+// frame), so folding it after the motor is harmless.
+void NovaSimulation::joiner_pump() {
+	namespace np = opennova::np;
+	if (!runtime_) return;
+	const uint32_t now = now_tick_;
+	// ClientHello once (Idle -> Hello) the first armed frame.
+	if (!joiner_started_) {
+		const std::vector<uint8_t> hello = runtime_->start();
+		if (!hello.empty()) ship_to_host(hello);
+		joiner_started_ = true;
+	}
+	// Deposit received framed datagrams for this frame's recv pump.
+	if (pump_.is_valid()) {
+		pump_->poll();
+		while (pump_->has_inbound()) {
+			const Dictionary d = pump_->take_inbound();
+			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+			runtime_->receive(bytes.ptr(), static_cast<std::size_t>(bytes.size()));
+		}
+	}
+	apply_player_input_pre_tick();                  // input -> L's body input
+	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+
+	// Run the client frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C uplink (gated
+	// InMatch && deployed inside the runtime). Build the uplink from L once it exists.
+	std::vector<std::vector<uint8_t>> outs;
+	const bool have_L = joiner_local_spawned_ && world_->ai && world_->cached.local_player.valid();
+	const opennova::world::Entity *e = have_L ? world_->registry.get(world_->cached.local_player) : nullptr;
+	const opennova::world::AiEntity *ae = have_L ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
+	if (e && ae) {
+		const opennova::PlayerExtendedUplink up = opennova::netsim::build_player_uplink(*e, *ae);
+		outs = runtime_->Client_ProcessNetworkFrame(up, now);
+	} else {
+		outs = runtime_->Client_ProcessNetworkFrame(now);
+	}
+	for (const std::vector<uint8_t> &dg : outs) ship_to_host(dg);
+
+	// On reaching in-match (detected by the recv-fold above): learn H + spawn L at the host-advertised
+	// pose. L is the joiner's OWN motor-driven pool-0 entity (publishes cached.local_player); H is the
+	// wire identity the host knows us by — the two stay distinct, reconciled by the name-match (§5.38b).
+	if (runtime_->in_match() && !joiner_local_spawned_ && world_->ai) {
+		joiner_self_wire_handle_ = runtime_->self_handle();
+		const np::JoinerConnection::SelfSpawn &sp = runtime_->spawn_pose();
+		const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
+		const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
+		joiner_local_spawned_ = h.valid();
+		player_input_ = opennova::world::PlayerInput{};
+		player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
+	}
+	++now_tick_;
 }
 
 void NovaSimulation::apply_player_input_pre_tick() {
@@ -619,6 +862,10 @@ void NovaSimulation::apply_player_input_pre_tick() {
 
 bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
 	if (!loaded_ || !world_ || !world_->ai) return false;
+	// P7: the npruntime listen server auto-spawns the host's own player at bring-up (the faithful §5.0
+	// mode-3 path), so an explicit spawn is a no-op success there. The legacy LAN host + any non-listen
+	// caller (no auto-spawn) still spawn at the requested pose below.
+	if (has_local_player()) return true;
 	opennova::world::PlayerSpawn spawn;
 	// Godot (x,y,z) -> mission (x, -z, y): the inverse of the present (x,y,z) -> (x, z, -y) remap.
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
@@ -636,6 +883,10 @@ bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int
 
 int NovaSimulation::spawn_local_player_at_start() {
 	if (!loaded_ || !world_ || !world_->ai) return -1;
+	// P7: the npruntime listen server auto-spawns the host's own player at bring-up via the SAME
+	// select_player_spawn start-marker scan (Server_BuildPlayerInfoAndAdd), so when a player already
+	// exists this is a no-op success (the player is at its start, input seeded by bringup_host_runtime).
+	if (has_local_player()) return 1;
 	// Pick the player-start marker the original would — scan the 60xx start-marker family (SP/DM,
 	// coop, team), FARTHEST from the enemy set — instead of the first NPC's position. Finds the
 	// authored start whatever the mission mode (e.g. a 6001-only SP training mission like 00TRa).
@@ -1149,7 +1400,7 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 	// renders exactly what a networked peer would. A co-op JOINER takes the same path
 	// (it IS a client): it renders remote entities wire-direct. Off (the editor/preview
 	// default), the direct AI-pool path below is unchanged.
-	if ((listen_server_ || joiner_) && client_view_) {
+	if ((listen_server_ || joiner_) && runtime_) {
 		PackedFloat32Array out = present_snapshot_from_client_view();
 		last_present_entity_count_ = static_cast<int>(out.size() / PF_STRIDE);
 		last_present_snapshot_us_ = perf_now_us() - start_us;
@@ -1215,31 +1466,25 @@ PackedFloat32Array NovaSimulation::get_present_snapshot() const {
 
 void NovaSimulation::enable_listen_server(bool p_enable) {
 	listen_server_ = p_enable;
-	if (!p_enable) return;
-	// Construct the loopback + seam objects once; they persist across reloads (they hold
-	// only a LoopbackChannel reference, never a World pointer). finish_load re-wires
-	// World::net and re-registers NetSystem on each load.
-	if (!loopback_) loopback_ = std::make_unique<opennova::netsim::LoopbackChannel>();
-	if (!net_sink_) net_sink_ = std::make_unique<opennova::netsim::SerializingSink>(*loopback_);
-	if (!net_) net_ = std::make_unique<opennova::netsim::NetSystem>(*loopback_);
-	if (!client_view_) client_view_ = std::make_unique<opennova::netsim::NetClientView>();
+	// P7: the SP listen server now rides the npruntime in-match runtime (ctx_ / host_loop_ /
+	// runtime_), stood up per-load in bringup_host_runtime — there is no NetSystem-as-ISystem and
+	// no legacy loopback seam here. (The LAN host still builds the legacy seam in enable_host_listen
+	// until A3; a sim is SP listen XOR LAN host XOR joiner.)
 }
 
 bool NovaSimulation::enable_host_listen(int p_port) {
-	enable_listen_server(true); // the host's own client rides the loopback stack
+	listen_server_ = true;
 	if (pump_.is_null()) pump_.instantiate();
 	if (pump_->bind_listen(p_port) != 0) {
 		host_listen_ = false;
 		return false;
 	}
-	host_session_config_.bind_port = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
-	if (!accept_) {
-		accept_ = std::make_unique<opennova::HostSessionAccept>(host_session_config_);
-	} else {
-		refresh_host_accept_config();
-	}
-	accept_->start();
 	host_listen_ = true;
+	// P7: the LAN host rides the npruntime runtime (ctx_ over a real UDP socket), stood up per-load in
+	// bringup_host_runtime with SocketMode::Lan. NovaUdpPump owns the socket; all protocol/crypto/
+	// framing stays in libs (ADR 0010). host_session_config_ keeps the GDScript-facing session options
+	// (the Dictionary getter + the §5.1 GameServerRuntime config fed to configure_session_runtime).
+	host_session_config_.bind_port = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
 	return true;
 }
 
@@ -1248,7 +1493,14 @@ int NovaSimulation::get_host_listen_port() const {
 }
 
 int NovaSimulation::get_host_peer_count() const {
-	return accept_ ? static_cast<int>(accept_->peer_count()) : 0;
+	// Count the type-1 (remote-joiner) connections in the npruntime table. The host's own type-2
+	// loopback is excluded; a pre-Hello garbage datagram registers no node (handle_server_datagram
+	// drops bad envelopes), so it stays 0 until a real JointOperations peer handshakes.
+	int n = 0;
+	for (const opennova::np::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
+		if (c.type == 1) ++n;
+	}
+	return n;
 }
 
 void NovaSimulation::configure_host_session(Dictionary p_options) {
@@ -1290,12 +1542,10 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 		}
 	}
 	host_session_config_ = std::move(config);
-	refresh_host_accept_config();
 }
 
 Dictionary NovaSimulation::get_host_session_config() const {
-	const opennova::GameServerRuntimeConfig &config =
-			accept_ ? accept_->config() : host_session_config_;
+	const opennova::GameServerRuntimeConfig &config = host_session_config_;
 	const opennova::GameSessionConfig &session = config.session;
 	Dictionary out;
 	out["bind_port"] = static_cast<int>(config.bind_port);
@@ -1346,385 +1596,36 @@ void NovaSimulation::send_datagram(const opennova::PeerAddr &peer,
 	pump_->send_to(String(ipbuf), static_cast<int>(peer.port), bytes);
 }
 
-opennova::world::PlayerSpawn NovaSimulation::spawn_from_pose(
-		const opennova::HostJoinerPose &pose) const {
-	opennova::world::PlayerSpawn spawn;
-	// Pose position is mission i32 16.16; PlayerSpawn.position is float mission units.
-	spawn.position = {static_cast<float>(pose.pos_x / kFixed16),
-	                  static_cast<float>(pose.pos_y / kFixed16),
-	                  static_cast<float>(pose.pos_z / kFixed16)};
-	// Heading is the joiner's wire heading (i16, sign-ext << 16 = 32-bit BAM); the
-	// spawn yaw is mission degrees (90 - heading), the same convention as the host
-	// player's spawn and apply_player_intent.
-	const int32_t heading_bam = static_cast<int32_t>(pose.heading) << 16;
-	spawn.yaw = static_cast<int16_t>(
-			std::lround(opennova::world::mission_yaw_deg_from_bam_heading(heading_bam)));
-	spawn.team = pose.team;
-	return spawn;
-}
-
-opennova::world::EntityHandle NovaSimulation::prestream_remote_peer(
-		const opennova::PeerAddr &peer, const opennova::HostJoinerPose &pose) {
-	if (!net_ || !world_) return {};
-	auto it = remote_peers_.find(peer);
-	if (it == remote_peers_.end()) {
-		RemotePeer fresh;
-		fresh.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
-				opennova::netsim::UdpSessionTransport::Role::Host);
-		// Register the connection with a NULL transport so emit_s2c/tick skip it until the
-		// peer is in-match (admit_remote_peer binds the transport at PeerSpawned). This keeps
-		// the host from fanning per-frame 0x0A to a client still in its world-load pump.
-		const opennova::netsim::Connection conn{nullptr,
-				opennova::netsim::TransportMode::Client, {}, 0};
-		fresh.conn_index = net_->add_connection(conn);
-		fresh.player_slot = static_cast<uint8_t>(
-				std::min<std::size_t>(remote_peers_.size() + 1, 0xFFu));
-		fresh.dcb_id = next_joiner_dcb_id_++; // host=2, first joiner=3 (retail scheme)
-		it = remote_peers_.emplace(peer, std::move(fresh)).first;
-	}
-	RemotePeer &rp = it->second;
-	if (!rp.entity.valid()) {
-		// spawn_remote_player WITHOUT the owned_entity bind that NetSystem::admit_peer
-		// couples in — the entity exists in pool 0 (so the joiner's 0x0C can reference it
-		// + the client's pool-0 self-scan finds it) but the connection is not yet a 0x0A fan
-		// target. [orig: Server_PlayerAdd @0x51cbc0 registers a joined player's entity]
-		opennova::world::PlayerSpawn spawn = spawn_from_pose(pose);
-		spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
-		spawn.net_id = next_joiner_net_id_++; // distinct SSN per joiner (host is 0xFFF0)
-		rp.entity = opennova::world::spawn_remote_player(*world_, spawn);
-	}
-	if (rp.entity.valid() && accept_) {
-		accept_->bind_peer_player_entity(peer, rp.player_slot, rp.entity.packed);
-	}
-	return rp.entity;
-}
-
-opennova::world::EntityHandle NovaSimulation::admit_remote_peer(
-		const opennova::PeerAddr &peer, const opennova::HostJoinerPose &pose) {
-	// Ensure the joiner's pool-0 entity exists + its connection is registered (this also
-	// happens earlier, at PeerEnteredWorldStreaming, so the dcb-bearing 0x0C is streamed
-	// during the client's load); then BIND it so the per-frame S2C 0x0A starts now that the
-	// client is in-match.
-	const opennova::world::EntityHandle h = prestream_remote_peer(peer, pose);
-	if (!h.valid()) return {};
-	auto it = remote_peers_.find(peer);
-	if (it == remote_peers_.end()) return h; // unreachable: prestream created it
-	RemotePeer &rp = it->second;
-	if (!rp.admitted) {
-		opennova::netsim::Connection &conn = net_->connection(rp.conn_index);
-		conn.transport = rp.transport.get();
-		conn.owned_entity = h;
-		rp.admitted = true;
-	}
-	return h;
-}
-
-void NovaSimulation::announce_joiner_organic_spawn(const opennova::PeerAddr &peer,
-                                                   const opennova::HostAcceptEvent &ev) {
-	// Admit the joiner's entity and stream it back as a NAMED S2C 0x0C organic-spawn so
-	// the joiner can name-match its own player (entity_name == its ClientHello.co) and
-	// learn its wire handle H = the admitted entity's packed handle (D.0, §5.23). H (the
-	// slot_id) is the wire handle the joiner stamps in its C2S 0x0C; net_id is the distinct
-	// SSN. [orig: NapiNPClientMsg_0x00C @0x42E730]
-	// Spawn the joiner's entity WITHOUT binding the connection (no 0x0A yet) — this runs
-	// during the client's world-load so the record is in pool 0 before its Player_InitPlayer.
-	const opennova::world::EntityHandle h = prestream_remote_peer(peer, ev.pose);
-	if (!h.valid() || !world_ || !accept_) return;
-	auto rpit = remote_peers_.find(peer);
-	if (rpit == remote_peers_.end()) return;
-	RemotePeer &rp = rpit->second;
-	if (rp.organic_announced) return; // stream the joiner's own 0x0C exactly once
-	const opennova::world::Entity *spawned = world_->registry.get(h);
-
-	// The dcb the retail client must find at its own pool-0 entity+0x78 (==
-	// NapiNPConnection.unk_18) or Player_FindLocalPlayerEntity @0x4e0090 returns NULL and
-	// Player_InitPlayer fatals ("Could not find player dcb"). It is the joiner's OWN
-	// ConnectionId, learned from its 0x48 client-ack (ev.self_id) — NOT a host-side guess.
-	// (capture2.pcapng: the joiner's ack/unk_18 was 0x113F, our old guess 3 -> crash; the
-	// working retail join had ack==eFlags==3.) Fall back to the sequential id only if the
-	// ack was somehow never seen (shouldn't happen — it precedes streaming).
-	const uint32_t dcb_id = ev.self_id != 0 ? ev.self_id : rp.dcb_id;
-
-	opennova::OrganicSpawnBatch batch;
-	batch.entity_count = 1;
-	opennova::OrganicSpawnRecord rec;
-	rec.slot_id = h.packed;             // the wire handle H the joiner adopts
-	rec.has_body = true;
-	rec.item_type_id = 0x14B9;          // player infantry template
-	rec.entity_name = ev.peer_name;     // the name-match key (the joiner's ClientHello.co)
-	rec.entity_flags = dcb_id;          // entity+0x78: matched against the client's local_session_id
-	rec.minimap_flags = 0x100;          // entity+0x36 bit 0x100: the local-player/minimap-register flag
-	rec.pos_x = ev.pose.pos_x;          // mission i32 16.16 — the host-advertised spawn
-	rec.pos_y = ev.pose.pos_y;
-	rec.pos_z = ev.pose.pos_z;
-	rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16; // i16 wire heading -> 32-bit BAM
-	rec.team = ev.pose.team;
-	rec.net_id = spawned ? spawned->net_id : 0;
-	batch.records.push_back(rec);
-
-	std::vector<uint8_t> dg;
-	if (accept_->frame_in_match_s2c(peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
-		send_datagram(peer, dg);
-		rp.organic_announced = true; // latch only on a successful send (retry otherwise)
-	}
-}
-
-void NovaSimulation::stream_world_state_to_peer(const opennova::PeerAddr &peer) {
-	if (!world_ || !accept_) return;
-	auto rpit = remote_peers_.find(peer);
-	if (rpit == remote_peers_.end()) return;
-	RemotePeer &rp = rpit->second;
-	if (rp.world_streamed) return; // stream the world exactly once, during load
-
-	// The listen-host's own player dcb (entity+0x78). Non-zero = a real player; 0 = the
-	// dedicated-server reservation. 2 matches the golden retail LAN serve-and-play host (the
-	// host's loopback client consumes dcb 0/1). Joiners report their own dcb via the 0x48 ack.
-	constexpr uint32_t kHostPlayerDcb = 2;
-
-	// SCOPE — stream ONLY the wire-delivered dynamic set, NOT the .bms-resident static mission.
-	// WITNESSED (Mission_LoadBMSFile @0x40f4e0): EVERY client — joiner included, with NO
-	// is_authority gate — spawns the full static mission LOCALLY from the .bms via four
-	// unconditional pool loops (pool-1 items/vehicles, pool-2 buildings, pool-3 markers, pool-0
-	// organics), each assigning the entity its own DcbId/refNum/handle locally
-	// (Entity_SpawnFromBMSRecord @0x40e9f0). The ONE class NOT spawned locally in a session is the
-	// type-5305 player-start (early-return when is_in_session @0x40ea5a) — PLAYERS arrive over the
-	// wire as pool-0 organics. So the host must stream only: the joiner's own dcb 0x0C
-	// (announce_joiner_organic_spawn), pool-0 player / host-driven organics (0x0C) + their
-	// per-frame 0x0A motion, and a small spawn-marker 0x20 for spawn-select. Streaming the
-	// .bms-resident pool-1 vehicles (0x0D) hands the client SERVER handles for entities it ALREADY
-	// built locally -> it cannot reconcile them and floods C2S 0x0F resend-requests for those
-	// pool-1 handles, then 0xC9-disconnects (WIRE-PROVEN: .scratch/capture7 floods 1306 C2S 0x0F
-	// for pool-1 handles vs the earlier WORKING capture which streamed ZERO 0x0D). GameSession
-	// emits the empty 0x10 phase marker; this bridge owns only the live world subset.
-	// [D-NET-97/98 corrected, net-re §5.2a/§5.38c]
-	opennova::OrganicSpawnBatch organics = opennova::netsim::build_pool0_organic_batch(*world_);
-	// Drop remote-peer entities from the pool-0 organic batch — each joiner's OWN player is
-	// streamed by announce_joiner_organic_spawn with its dcb at entity+0x78 (entity_flags) +
-	// minimap 0x100; re-emitting it here with entity_flags 0 would break the retail dcb match.
-	auto is_remote_peer = [&](uint16_t handle_packed) {
-		for (const auto &kv : remote_peers_)
-			if (kv.second.entity.valid() && kv.second.entity.packed == handle_packed) return true;
-		return false;
-	};
-	organics.records.erase(
-			std::remove_if(organics.records.begin(), organics.records.end(),
-					[&](const opennova::OrganicSpawnRecord &r) { return is_remote_peer(r.slot_id); }),
-			organics.records.end());
-	organics.entity_count = static_cast<uint16_t>(organics.records.size());
-
-	// The host's OWN player is a real networked player — it MUST carry a non-zero dcb at
-	// entity+0x78. build_pool0_organic_batch now forwards entity_flags = owner_connection_id, but this
-	// (Godot listen-host) spawn path never sets owner_connection_id (unlike the npruntime host, which
-		// stamps it at spawn), so it arrives with entity_flags 0 and is re-stamped below. A 0x14B9
-		// record with dcb==0 is the dedicated-server
-	// reservation: the joining client does NOT keep a player entity for it, so that pool-0 slot
-	// stays empty and the per-frame 0x0A then floods C2S 0x0F for the handle every frame
-	// (NapiNPClientMsg_0x00A @0x4307c4: local_entity.itemDef==null) → 0xC9 disconnect. WIRE-PROVEN:
-	// the GOLDEN retail join host_and_join_lan.pcapng carries the host player at eFlags=2 and the
-	// joiner at 3 (AI at 0); our .scratch/capture9 streamed the host player at eFlags=0 and the
-	// retail client flooded 0x0F for exactly that handle (0x0000) while the eFlags!=0 joiner did
-	// not. [orig: Server_PlayerAdd @0x51cbc0 copies conn->connection_id → entity+0x78; LAN serve-and-play
-	// host dcb = 2, the loopback client consumes 0/1.]
-	if (world_->cached.local_player.valid()) {
-		const uint16_t host_handle = static_cast<uint16_t>(world_->cached.local_player.packed);
-		for (opennova::OrganicSpawnRecord &r : organics.records) {
-			if (r.slot_id == host_handle) r.entity_flags = kHostPlayerDcb;
-		}
-	}
-
-	constexpr size_t kRecPerMsg = 12;
-	auto send_body = [&](uint8_t tag, std::vector<uint8_t> body) {
-		std::vector<uint8_t> dg;
-		if (accept_->frame_in_match_s2c(peer, tag, std::move(body), dg)) send_datagram(peer, dg);
-	};
-
-	// 0x0D pool-1 — DELIBERATELY NOT STREAMED. The client spawns the .bms-resident vehicles/items
-	// itself, locally and unconditionally (Mission_LoadBMSFile @0x40f4e0 pool-1 loop); a server
-	// 0x0D for those same statics is exactly what made the retail client flood C2S 0x0F for pool-1
-	// handles and 0xC9-disconnect (see SCOPE above; WIRE-PROVEN capture7 vs the working capture).
-	// build_pool1_spawn_batch is retained (unit-tested) for genuinely host-spawned NETWORKED
-	// dynamics — ASH_I5A has none, so nothing is emitted. Retail load order: 0x10 -> 0x0C -> 0x20
-	// with 0x10 supplied by GameSession and live 0x0C/0x20 supplied here.
-	// [orig: Server_SendInitialGameStateToPlayer @0x51bba0].
-	// 0x0C — the dynamic set: host player + AI organics, paged (slot id explicit per record).
-	for (size_t base = 0; base < organics.records.size(); base += kRecPerMsg) {
-		const size_t n = std::min(kRecPerMsg, organics.records.size() - base);
-		opennova::OrganicSpawnBatch page;
-		page.records.assign(organics.records.begin() + base, organics.records.begin() + base + n);
-		page.entity_count = static_cast<uint16_t>(page.records.size());
-		send_body(0x0C, opennova::encode_organic_spawn_batch(page));
-	}
-	// 0x20 — the SPAWN-POINT markers (the 60xx start family only, NOT all 497 nav markers). The
-	// client's spawn-select reads these via Entity_BuildSpawnPointList @0x42de40; with an empty
-	// pool-3 the joiner spams C2S 0x0f and never deploys -> timeout -> kicked to login (§5.38c).
-	// Streaming only the spawn family keeps the batch small (the flood is the full pool-3, D-NET-98).
-	opennova::Pool3SyncBatch spawns = opennova::netsim::build_pool3_spawn_marker_batch(*world_);
-	if (spawns.records.empty()) {
-		send_body(0x20, opennova::encode_pool3_sync_batch(opennova::Pool3SyncBatch{}));
-	} else {
-		for (size_t base = 0; base < spawns.records.size(); base += kRecPerMsg) {
-			const size_t n = std::min(kRecPerMsg, spawns.records.size() - base);
-			opennova::Pool3SyncBatch page;
-			page.start_index = static_cast<uint16_t>(base);
-			page.records.assign(spawns.records.begin() + base, spawns.records.begin() + base + n);
-			page.entity_count = static_cast<int16_t>(page.records.size());
-			send_body(0x20, opennova::encode_pool3_sync_batch(page));
-		}
-	}
-
-	rp.world_streamed = true;
-}
-
-void NovaSimulation::dispatch_host_accept_event(const opennova::PeerAddr &peer,
-                                                const opennova::HostAcceptEvent &ev) {
-	switch (ev.kind) {
-		case opennova::HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
-			// Stream the FULL pool-0 set — the joiner's own dcb-bearing 0x0C *and* the host
-			// player + AI organics + markers — here, EARLY (during the client's world-load,
-			// BEFORE the game-start bundle). WIRE-WITNESSED (golden retail host_and_join_lan.pcapng):
-			// the host streams ALL pool-0 entities in one 0x0C batch at f=516, BEFORE the 0x0F
-			// world-state-load bundle at f=559. The client integrates the entity set AT the bundle
-			// / game-start; a player streamed AFTER the bundle is NOT kept, so its pool-0 slot stays
-			// empty and the per-frame 0x0A then floods C2S 0x0F for that handle. Our earlier
-			// "bundle-first" reading (deferring the world snapshot to PeerSpawned) was WRONG — it
-			// left the host player at slot 0 streamed AFTER the bundle (.scratch/capture7-10) and
-			// the retail client flooded 0x0F for handle 0x0000 and disconnected. The joiner's own
-			// 0x0C must ALSO arrive before the client's Player_InitPlayer pool-0 self-scan
-			// (Player_FindLocalPlayerEntity @0x4e0090 -> Player_FatalPlayerDcbNotFound
-			// @0x4dff60 = fatal "Could not find player dcb"). net-re §5.38c.
-			announce_joiner_organic_spawn(peer, ev);
-			stream_world_state_to_peer(peer);
-			break;
-		case opennova::HostAcceptEvent::Kind::PeerSpawned:
-			// The world snapshot already streamed at PeerEnteredWorldStreaming (before the bundle,
-			// golden order). Here we only bind the joiner's live connection (0x0A fan-out) now that
-			// it has spawned. The 0x0C calls are idempotent (organic_announced / world_streamed
-			// latches) if they somehow run twice.
-			announce_joiner_organic_spawn(peer, ev);
-			stream_world_state_to_peer(peer);
-			admit_remote_peer(peer, ev.pose);
-			break;
-		case opennova::HostAcceptEvent::Kind::PeerC2SInMatch: {
-			auto rp = remote_peers_.find(peer);
-			if (rp != remote_peers_.end() && rp->second.transport) {
-				for (const opennova::ProtocolMessage &m : ev.in_match_c2s) {
-					// Identity-reframe [tag][payload] into the transport inbound
-					// FIFO so NetSystem::tick's host_recv drains it next tick.
-					std::vector<uint8_t> framed;
-					framed.reserve(1 + m.payload.size());
-					framed.push_back(m.tag);
-					framed.insert(framed.end(), m.payload.begin(), m.payload.end());
-					rp->second.transport->push_inbound(framed);
-				}
-			}
-			break;
-		}
-		case opennova::HostAcceptEvent::Kind::PeerGoodbye: {
-			auto rp = remote_peers_.find(peer);
-			if (rp != remote_peers_.end()) {
-				// Retire the connection in place (nulled transport is skipped by
-				// emit_s2c/tick) before destroying the transport it points at.
-				if (rp->second.conn_index < net_->connection_count()) {
-					net_->connection(rp->second.conn_index).transport = nullptr;
-					net_->connection(rp->second.conn_index).owned_entity = {};
-				}
-				remote_peers_.erase(rp);
-			}
-			break;
-		}
-		case opennova::HostAcceptEvent::Kind::PeerHandshakeAdvanced:
-		default:
-			break;
-	}
-}
-
-void NovaSimulation::host_net_poll() {
-	if (!host_listen_ || pump_.is_null() || !accept_ || !net_ || !world_) return;
-	pump_->poll();
-	while (pump_->has_inbound()) {
-		const Dictionary d = pump_->take_inbound();
-		const String ip = d.get("ip", String());
-		const int port = d.get("port", 0);
-		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
-		const opennova::PeerAddr peer = peer_from_addr(ip, port);
-
-		opennova::HostSessionAccept::HandleResult r = accept_->handle_datagram(
-				peer, bytes.ptr(), static_cast<size_t>(bytes.size()), net_frame_counter_);
-		for (const std::vector<uint8_t> &dg : r.outbound) {
-			send_datagram(peer, dg);
-		}
-		for (const opennova::HostAcceptEvent &ev : r.events) {
-			dispatch_host_accept_event(peer, ev);
-		}
-	}
-	++net_frame_counter_;
-}
-
-void NovaSimulation::host_net_flush() {
-	if (!host_listen_ || pump_.is_null() || !accept_ || !net_) return;
-	// Advance the handshake for pre-Spawned peers (drives GameSession::tick so the
-	// spawn gate opens) and ship their replies. ~16ms per host frame.
-	for (opennova::HostSessionAccept::TickOut &t : accept_->tick_handshakes(16, net_frame_counter_)) {
-		for (const std::vector<uint8_t> &dg : t.outbound) {
-			send_datagram(t.peer, dg);
-		}
-		// PeerEnteredWorldStreaming surfaces here (the tick batches start) — admit the
-		// joiner early + stream its own dcb-bearing 0x0C while the client is still loading.
-		for (const opennova::HostAcceptEvent &ev : t.events) {
-			dispatch_host_accept_event(t.peer, ev);
-		}
-	}
-	// Ship each admitted peer's per-frame S2C 0x0A (staged by emit_s2c into its
-	// transport's outbound FIFO) as a framed SESSION datagram.
-	for (auto &kv : remote_peers_) {
-		RemotePeer &rp = kv.second;
-		if (!rp.admitted || !rp.transport) continue;
-		std::vector<uint8_t> raw;
-		while (rp.transport->pop_outbound(raw)) {
-			if (raw.empty()) continue;
-			const uint8_t tag = raw[0];
-			const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
-			std::vector<uint8_t> dg;
-			if (accept_->frame_in_match_s2c(kv.first, tag, body, dg)) {
-				send_datagram(kv.first, dg);
-			}
-		}
-	}
-}
-
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
 
 bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
-	// Allocate ONLY the client view from the listen stack (the decode target); leave
-	// loopback_/net_sink_/net_ null so net_tick() and the host paths auto-no-op, and
-	// keep listen_server_ false (the present gate adds || joiner_). A sim is host XOR joiner.
-	if (!client_view_) client_view_ = std::make_unique<opennova::netsim::NetClientView>();
+	// P7: the joiner is a non-authority np::ClientRuntime (Joiner role) built per-load in finish_load;
+	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
+	// the socket + store the player name (the ClientHello.co the host echoes for the name-match). Leave
+	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
 	if (pump_.is_null()) pump_.instantiate();
 	if (pump_->dial(p_host_ip, p_port) != 0) {
 		joiner_ = false;
 		return false;
 	}
-	if (!joiner_feed_) {
-		joiner_feed_ = std::make_unique<opennova::netsim::UdpSessionTransport>(
-				opennova::netsim::UdpSessionTransport::Role::Client);
-	}
-	joiner_session_ = std::make_unique<opennova::JoinerSession>(
-			opennova::ClientSession::Config::jointoperations(),
-			std::string(p_player_name.utf8().get_data()));
+	joiner_player_name_ = std::string(p_player_name.utf8().get_data());
+	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
+	// the legacy joiner_session_ held); finish_load rebuilds it fresh on each (re)load.
+	runtime_ = std::make_unique<opennova::np::ClientRuntime>(
+			opennova::ClientSession::Config::jointoperations(), joiner_player_name_);
 	joiner_ = true;
 	joiner_started_ = false;
 	joiner_local_spawned_ = false;
 	joiner_self_wire_handle_ = 0;
-	joiner_local_net_id_ = 0;
 	return true;
 }
 
 bool NovaSimulation::is_joined_in_match() const {
-	return joiner_ && joiner_session_ && joiner_session_->in_match();
+	return joiner_ && runtime_ && runtime_->in_match();
 }
 
 int NovaSimulation::get_joiner_phase() const {
-	return (joiner_ && joiner_session_) ? static_cast<int>(joiner_session_->phase()) : -1;
+	return (joiner_ && runtime_) ? static_cast<int>(runtime_->phase()) : -1;
 }
 
 int NovaSimulation::get_joiner_self_handle() const {
@@ -1740,7 +1641,7 @@ void NovaSimulation::ship_to_host(const std::vector<uint8_t> &dg) {
 }
 
 opennova::world::PlayerSpawn NovaSimulation::spawn_from_self(
-		const opennova::JoinerSession::SelfSpawn &s) const {
+		const opennova::np::JoinerConnection::SelfSpawn &s) const {
 	opennova::world::PlayerSpawn spawn;
 	// SelfSpawn position is mission i32 16.16; PlayerSpawn.position is float mission units.
 	spawn.position = {static_cast<float>(s.pos_x / kFixed16),
@@ -1755,129 +1656,34 @@ opennova::world::PlayerSpawn NovaSimulation::spawn_from_self(
 	return spawn;
 }
 
-void NovaSimulation::joiner_net_poll() {
-	if (!joiner_ || pump_.is_null() || !joiner_session_ || !client_view_ || !joiner_feed_) return;
-	// Emit the ClientHello once (Idle -> Hello) the first frame the joiner is armed.
-	if (!joiner_started_) {
-		const std::vector<uint8_t> hello = joiner_session_->start();
-		if (!hello.empty()) ship_to_host(hello);
-		joiner_started_ = true;
-	}
-	pump_->poll();
-	while (pump_->has_inbound()) {
-		const Dictionary d = pump_->take_inbound();
-		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
-		opennova::JoinerSession::PollResult res =
-				joiner_session_->handle_datagram(bytes.ptr(), static_cast<size_t>(bytes.size()));
-		for (const std::vector<uint8_t> &dg : res.outbound) ship_to_host(dg);
-		// Feed each raw S2C 0x0A body into the client-view conduit as [0x0A][body] so
-		// NetClientView::pump's client_recv decodes it into ClientState (the same path
-		// the host listen server uses off its loopback). [orig: S2C 0x0A live replication]
-		for (const std::vector<uint8_t> &body : res.inbound_0a) {
-			std::vector<uint8_t> framed;
-			framed.reserve(1 + body.size());
-			framed.push_back(opennova::netsim::kTag0aFrameUpdate); // 0x0A
-			framed.insert(framed.end(), body.begin(), body.end());
-			joiner_feed_->push_inbound(framed);
-		}
-		// Feed the load-time world stream (0x0C/0x0D/0x10/0x20 spawn + static batches) the
-		// same way, so NetClientView upserts the FULL entity set — AI, buildings, items,
-		// markers — not just the host player. [net-re §5.2a world-stream]
-		for (const auto &tb : res.inbound_world) {
-			std::vector<uint8_t> framed;
-			framed.reserve(1 + tb.second.size());
-			framed.push_back(tb.first); // the original tag (0x0C/0x0D/0x10/0x20)
-			framed.insert(framed.end(), tb.second.begin(), tb.second.end());
-			joiner_feed_->push_inbound(framed);
-		}
-		// On the name-match: learn H + spawn the local player L at the advertised pose. L
-		// is the joiner's OWN motor-driven pool-0 entity (spawn_player publishes
-		// cached.local_player); H is the wire identity the host knows us by. The two stay
-		// distinct, reconciled by the name-match (§5.38b). [orig: NapiNPClientMsg_0x00C @0x42E730]
-		if (res.reached_in_match && !joiner_local_spawned_ && world_ && world_->ai) {
-			joiner_self_wire_handle_ = joiner_session_->self_handle();
-			const opennova::JoinerSession::SelfSpawn &sp = joiner_session_->spawn_pose();
-			joiner_local_net_id_ = sp.net_id;
-			const opennova::world::PlayerSpawn spawn = spawn_from_self(sp);
-			const opennova::world::EntityHandle h = opennova::world::spawn_player(*world_, spawn);
-			joiner_local_spawned_ = h.valid();
-			// Seed the look heading to the spawn facing so the body starts aligned.
-			player_input_ = opennova::world::PlayerInput{};
-			player_input_.look_heading = opennova::world::bam_heading_from_mission_yaw_deg(spawn.yaw);
-		}
-	}
-	// Drive the witnessed in-match spawn-gate burst, one stage per frame while Driving.
-	if (joiner_session_->phase() == opennova::JoinerSession::Phase::Driving) {
-		for (const std::vector<uint8_t> &dg : joiner_session_->pump(net_frame_counter_)) {
-			ship_to_host(dg);
-		}
-	}
-	// Decode any staged S2C 0x0A into ClientState (what the present pass reads).
-	client_view_->pump(*joiner_feed_);
-	++net_frame_counter_;
-}
-
-void NovaSimulation::joiner_net_flush() {
-	if (!joiner_ || pump_.is_null() || !joiner_session_ || !world_ || !world_->ai) return;
-	if (!joiner_session_->in_match() || !joiner_local_spawned_) return;
-	if (!world_->cached.local_player.valid()) return;
-	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	const opennova::world::AiEntity *ae = world_->ai->for_handle(world_->cached.local_player);
-	if (!e || !ae) return;
-	// Build the 43-byte C2S 0x0C body from L's live pose; frame it with the wire handle H
-	// so the host's apply_player_intent resolves the right peer. [net-re §5.6 / §5.38a]
-	const opennova::PlayerExtendedUplink body = opennova::netsim::build_player_uplink(*e, *ae);
-	const std::vector<uint8_t> dg = joiner_session_->frame_c2s_uplink(
-			joiner_self_wire_handle_, static_cast<uint16_t>(e->item_id), body);
-	ship_to_host(dg);
-}
+// (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through joiner_pump
+//  over an np::ClientRuntime; the legacy JoinerSession path is retired here.)
 
 bool NovaSimulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
-	if (!host_listen_ || !net_ || !world_) return false;
-	opennova::HostJoinerPose pose;
-	pose.pos_valid = true;
-	// Godot (x,y,z) -> mission (x,-z,y) -> i32 16.16, the inverse of the present remap.
-	pose.pos_x = static_cast<int32_t>(std::lround(static_cast<double>(p_position.x) * kFixed16));
-	pose.pos_y = static_cast<int32_t>(std::lround(static_cast<double>(-p_position.z) * kFixed16));
-	pose.pos_z = static_cast<int32_t>(std::lround(static_cast<double>(p_position.y) * kFixed16));
-	const int32_t bam = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
-	pose.heading = static_cast<int16_t>(bam >> 16);
-	pose.team = static_cast<uint8_t>(p_team);
-	// A synthetic loopback peer; distinct port per call so repeated admits don't alias.
-	const opennova::PeerAddr peer{0x0100007Fu,
-			static_cast<uint16_t>(40000 + remote_peers_.size())};
-	return admit_remote_peer(peer, pose).valid();
-}
-
-opennova::PlayerReplicationState NovaSimulation::compute_net_anchor() const {
-	opennova::PlayerReplicationState anchor; // sensible defaults if the world is empty
-	if (!world_) return anchor;
-	const opennova::world::Entity *subj = nullptr;
-	// Prefer the local player handle (Phase 2+); else the first replicated entity so the
-	// per-record compressed deltas stay small (the codec is lossy with magnitude).
-	if (world_->cached.local_player.valid()) {
-		subj = world_->registry.get(world_->cached.local_player);
+	if (!host_listen_ || !world_ || !world_->ai) return false;
+	opennova::world::PlayerSpawn spawn;
+	// Godot (x,y,z) -> mission (x,-z,y), the inverse of the present remap (same as spawn_local_player).
+	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
+	                  static_cast<float>(p_position.y)};
+	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
+	spawn.team = static_cast<uint8_t>(p_team);
+	// A synthetic loopback peer; distinct port per call so repeated admits don't alias. Own a transport
+	// so the connection is well-formed. The synthetic admit (no handshake) mirrors the post-PeerSpawned
+	// state; with the host already at net_id 0xFFF0 the joiner allocates 0xFFF1.
+	const opennova::PeerAddr peer{0x0100007Fu, static_cast<uint16_t>(40000 + peers_.size())};
+	PeerLink &link = peers_[peer];
+	if (!link.transport) {
+		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
+				opennova::netsim::UdpSessionTransport::Role::Host);
 	}
-	if (!subj) {
-		world_->registry.for_each([&](const opennova::world::Entity &e) {
-			if (subj) return;
-			if (opennova::netsim::entity_class_of(e) != opennova::EntityClass::Unknown) {
-				subj = &e;
-			}
-		});
-	}
-	if (subj) {
-		anchor.spawn_x = static_cast<uint32_t>(opennova::world::to_fixed(subj->position.x));
-		anchor.spawn_y = static_cast<uint32_t>(opennova::world::to_fixed(subj->position.y));
-		anchor.spawn_z = static_cast<uint32_t>(opennova::world::to_fixed(subj->position.z));
-	}
-	return anchor;
+	return opennova::np::admit_synthetic_peer(ctx_, *world_, peer, spawn, link.transport.get()).valid();
 }
 
 PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 	PackedFloat32Array out;
-	if (!client_view_ || !world_) return out;
-	const opennova::netsim::ClientState &cs = client_view_->state();
+	if (!world_ || !runtime_) return out;
+	// P7: every path (SP / LAN host / joiner) reads its own npruntime ClientRuntime view's ClientState.
+	const opennova::netsim::ClientState &cs = runtime_->state();
 	const int count = static_cast<int>(cs.entities.size());
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();

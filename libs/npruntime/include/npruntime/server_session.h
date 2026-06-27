@@ -53,4 +53,16 @@ void create_session(NapiNPServerCtx &ctx, const NapiGameSettings &settings,
 // is_authority.
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup);
 
+// Mark the host's own type-2 loopback connection(s) in-match (burst.spawned) so Server_TickUpdate
+// fans it the per-frame S2C 0x0A its local view renders from. The host's own loopback needs NO
+// §5.2a world-stream burst — it holds the authoritative world and receives every entity in the
+// per-frame 0x0A — so this latches the in-match predicate (is_in_match) directly: the §5.0 property
+// that "is_in_session gates the entire replication loop ... §5.1-§5.17 run identically under single
+// player". An owner (apps/nw_server or the Godot binding) calls it once at bring-up after
+// Server_ProcessPendingPlayerSpawns has bound the host player; tick_connections then skips the
+// loopback (burst.spawned), so no self-directed §5.2a stream runs. Returns true if a type-2 node was
+// found. (apps/nw_server lets tick_connections complete the loopback's burst instead; an eager owner
+// that must render from frame 1 latches it here — what the run_host_as_client test does inline.)
+bool mark_host_client_in_match(NapiNPServerCtx &ctx);
+
 } // namespace opennova::np

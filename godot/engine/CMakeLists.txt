@@ -52,6 +52,10 @@ add_subdirectory(../../third_party/sqlite opennova_sqlite)
 add_subdirectory(../../libs/novaworld opennova_novaworld)
 # netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
 add_subdirectory(../../libs/netsim opennova_netsim)
+# npruntime: the IDA-faithful in-match NAPI NP runtime (host owner loop + headless client).
+# PUBLIC-links netsim/novaworld/world/mission (all already linked below). The Godot binding
+# (nova_simulation) drives it as a thin adapter; protocol/crypto stay in libs (ADR 0009-0012).
+add_subdirectory(../../libs/npruntime opennova_npruntime)
 
 set(TARGET_NAME "opennova")
 
@@ -194,6 +198,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_napi
     opennova_novaworld
     opennova_netsim
+    opennova_npruntime
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

@@ -11,7 +11,7 @@ extends GutTest
 #
 # Asserts the DATA layer (the present snapshots both sides decode), not rendered nodes —
 # headless has no assets, so wire_present_pass builds nothing. The §5.38b two-handle (L vs H)
-# reconciliation shows up as: the host's present carries the joiner (SSN 0xFFF1), and the
+# reconciliation shows up as: the host's present carries the joiner (SSN 0xFFEF), and the
 # joiner's wire present carries the host player (type 0x14B9) while self-filtering its own echo H.
 
 
@@ -78,13 +78,14 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 
 	var stride: int = host.get_present_stride()
 
-	# HOST sees the JOINER: its client-decoded present carries the admitted joiner (SSN 0xFFF1).
+	# HOST sees the JOINER: its client-decoded present carries the admitted joiner. The host took the
+	# reserved 0xFFF0, so the downward allocator gives the joiner 0xFFEF (D-NET-112).
 	var hsnap: PackedFloat32Array = host.get_present_snapshot()
 	var host_sees_joiner := false
 	for rec in range(hsnap.size() / stride):
-		if int(hsnap[rec * stride + NovaSimulation.PF_NET_ID]) == 0xFFF1:
+		if int(hsnap[rec * stride + NovaSimulation.PF_NET_ID]) == 0xFFEF:
 			host_sees_joiner = true
-	assert_true(host_sees_joiner, "host's present includes the admitted joiner (SSN 0xFFF1)")
+	assert_true(host_sees_joiner, "host's present includes the admitted joiner (SSN 0xFFEF)")
 
 	# JOINER sees the HOST: its wire-decoded present carries a player row (type 0x14B9) that is
 	# NOT its own echo, and its own wire echo (handle H) is self-filtered out.
