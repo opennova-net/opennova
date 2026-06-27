@@ -965,40 +965,14 @@ target_link_libraries(protocol_message_test PRIVATE opennova_novaworld opennova_
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME protocol_message COMMAND protocol_message_test)
 
-add_executable(game_session_test novaworld/game_session_test.cpp)
-target_link_libraries(game_session_test PRIVATE opennova_novaworld)
-target_include_directories(game_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME game_session COMMAND game_session_test)
-
-add_executable(game_server_runtime_test novaworld/game_server_runtime_test.cpp)
-target_link_libraries(game_server_runtime_test PRIVATE opennova_novaworld)
-target_include_directories(game_server_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME game_server_runtime COMMAND game_server_runtime_test)
-
 add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_novaworld)
 target_include_directories(session_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME session_protocol COMMAND session_protocol_test)
 
-add_executable(host_session_accept_test novaworld/host_session_accept_test.cpp)
-target_link_libraries(host_session_accept_test PRIVATE opennova_novaworld)
-target_include_directories(host_session_accept_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME host_session_accept COMMAND host_session_accept_test)
-
-# JOINER co-op join (D.1): the client mirror of HostSessionAccept driven in-process
-# against a REAL HostSessionAccept; name-match self-id (organic 0x0C) -> wire handle H
-# -> C2S 0x0C uplink -> PeerC2SInMatch -> NetSystem apply_player_intent SNAP. Links
-# opennova_netsim (transitively pulls opennova_world + opennova_novaworld) for the
-# phase-6 receive-apply.
-add_executable(joiner_session_test novaworld/joiner_session_test.cpp)
-target_link_libraries(joiner_session_test PRIVATE opennova_netsim)
-target_include_directories(joiner_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME joiner_session COMMAND joiner_session_test)
-
-add_executable(replication_min_test novaworld/replication_min_test.cpp)
-target_link_libraries(replication_min_test PRIVATE opennova_novaworld)
-target_include_directories(replication_min_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME replication_min COMMAND replication_min_test)
+# NOTE (P8): the old joiner_session_test (the legacy novaworld::JoinerSession driven against the
+# retired HostSessionAccept) was deleted — np::JoinerConnection is the promoted in-match client and is
+# covered by tests/npruntime/joiner_connection_test.cpp against the real np server legs.
 
 # bms (mission-file) parser tests
 add_executable(bms_spawn_points_test bms/spawn_points_test.cpp)
@@ -1059,7 +1033,7 @@ add_executable(nw_host_register_e2e_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
 target_link_libraries(nw_host_register_e2e_test PRIVATE
-    opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+    opennova_novaworld opennova_npruntime opennova_napi opennova_novacrypto opennova_app_common)
 target_include_directories(nw_host_register_e2e_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server
@@ -1385,18 +1359,15 @@ target_link_libraries(npruntime_initial_state_burst_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_mission)
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
 
-# P2: the per-connection handshake — server legs promoted from HostSessionAccept onto the np free
-# functions (handshake_server), the client mirror JoinerConnection driven against the real server
-# legs + NetSystem apply (joiner_connection), and the golden 0x81/0x82 byte-parity.
+# P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
+# reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
+# joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate
+# mirror, was removed at P8: the real JoinerConnection join->spawn->C2S->SNAP flow is covered on the
+# World path by npruntime_client_runtime + npruntime_two_endpoint_socket.)
 add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.cpp)
 target_link_libraries(npruntime_handshake_server_test
     PRIVATE opennova_npruntime opennova_netsim opennova_novaworld)
 add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
-
-add_executable(npruntime_joiner_connection_test npruntime/joiner_connection_test.cpp)
-target_link_libraries(npruntime_joiner_connection_test
-    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld)
-add_test(NAME npruntime_joiner_connection COMMAND npruntime_joiner_connection_test)
 
 # Golden 0x81/0x82 byte-parity vs the local LAN host/join session capture. Env-gated + skip-if-absent
 # (no committed derived oracle); DEFAULT path points at the gitignored .scratch golden.

@@ -6,15 +6,11 @@ add_library(opennova_novaworld STATIC
     src/session_hello.cpp
     src/session_protocol.cpp
     src/nw_session_framing.cpp
-    src/host_session_accept.cpp
     src/joiner_session.cpp
     src/protocol_message.cpp
     src/client_session.cpp
-    src/game_session.cpp
-    src/game_server_runtime.cpp
     src/gsb.cpp
     src/join_identity.cpp
-    src/replication_min.cpp
     src/ingame_decode.cpp
     src/ingame_encode.cpp
     src/wire_capture.cpp

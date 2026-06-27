@@ -139,7 +139,16 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	bound_port_ = config.nw_udp_port;
 
 	stop_requested_.store(false);
-	accept_.start();
+	// Bring up the World-less JO session-responder host (P0->P1->P2): HostOnly authority over the UDP
+	// socket, accepting JointOperations joins so a probing JO client gets the §5.1 handshake replies.
+	// No World => session responder only (no spawn). host_key stays 0 (unchecked). [orig: §5.0]
+	np::set_connection_mode(jo_ctx_, np::ConnectionMode::HostOnly);
+	np::set_transport_mode(jo_ctx_, np::SocketMode::Lan);
+	np::NapiGameSettings jo_settings;
+	jo_settings.server_name = "OpenNova";
+	jo_settings.max_players = 64; // accept many JO probes (npruntime capacity gate, D-NET-106)
+	np::create_session(jo_ctx_, jo_settings, np::SessionStartup{}); // sets host_running (is_authority)
+	np::configure_session_runtime(jo_ctx_, {});
 	running_.store(true);
 	worker_ = std::thread([this] { run_loop(); });
 	std::printf("[nwudp] listening on UDP :%u\n",
@@ -150,7 +159,8 @@ bool NwUdpListener::start(const ServerConfig &config) {
 void NwUdpListener::stop() {
 	stop_requested_.store(true);
 	if (worker_.joinable()) worker_.join();
-	accept_.stop();
+	// The npruntime ctx owns no thread/socket (the worker above owns the socket), so there is no
+	// runtime to stop — dropping jo_ctx_ on destruction releases its connection state.
 	running_.store(false);
 }
 
@@ -216,7 +226,6 @@ void NwUdpListener::run_loop() {
 	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
 	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[nwudp] re-bind failed; aborting loop\n");
-		accept_.stop();
 		running_.store(false);
 		return;
 	}
@@ -246,13 +255,13 @@ void NwUdpListener::run_loop() {
 		              from.ip[0], from.ip[1], from.ip[2], from.ip[3]);
 		const std::string client_ip_str = ip_only_buf;
 
-		// JointOperations in-match join → the consolidated HostSessionAccept
-		// (the same accept the in-engine listen server drives). PN is learned at
-		// HELLO; thereafter route 0x42/0x43/0x46 by membership so the lobby
-		// (NOVAWORLDUDP) container path below only ever sees lobby peers. The
-		// component owns these peers' handshake/SCRK state + GameServerRuntime;
-		// it has no World here, so its spawn/in-match events are ignored — the
-		// standalone server is a session responder, not a live-sim host.
+		// JointOperations in-match join → the World-less npruntime session-responder ctx
+		// (np::handle_server_datagram — the same legs the in-engine listen server drives). PN is
+		// learned at HELLO; thereafter route 0x42/0x43/0x46 by membership so the lobby (NOVAWORLDUDP)
+		// container path below only ever sees lobby peers. jo_ctx_ owns these peers' handshake/SCRK
+		// state + the §5.1 reply config; with no World it answers the handshake but never drives a
+		// spawn (PeerSpawned does not surface) — the standalone server is a session responder, not a
+		// live-sim host.
 		bool route_jo = jo_peers_.count(peer) != 0;
 		if (opcode == SESSION_OPCODE_CLIENT_HELLO) {
 			ClientHello probe;
@@ -265,8 +274,8 @@ void NwUdpListener::run_loop() {
 		}
 		if (route_jo) {
 			manager_.notify_seen_addr(peer, now_ms());
-			auto result = accept_.handle_datagram(
-			        peer, rx, static_cast<size_t>(n),
+			auto result = np::handle_server_datagram(
+			        jo_ctx_, peer, rx, static_cast<size_t>(n),
 			        static_cast<uint32_t>(now_ms() & 0xFFFFFFFFu));
 			for (const auto &dg : result.outbound) {
 				opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
@@ -278,11 +287,11 @@ void NwUdpListener::run_loop() {
 			// We have no World, so we don't admit_peer into a sim — we only stream
 			// the one S2C 0x0C organic-spawn the client needs to self-identify.
 			for (const auto &ev : result.events) {
-				if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
+				if (ev.kind == np::HostAcceptEvent::Kind::PeerGoodbye) {
 					jo_spawns_.erase(peer);
 					continue;
 				}
-				if (ev.kind != HostAcceptEvent::Kind::PeerSpawned) continue;
+				if (ev.kind != np::HostAcceptEvent::Kind::PeerSpawned) continue;
 				JoPeerSpawn &js = jo_spawns_[peer];
 				if (js.announced) continue; // once per peer
 				js.announced = true;
@@ -315,8 +324,8 @@ void NwUdpListener::run_loop() {
 				batch.records.push_back(rec);
 
 				std::vector<uint8_t> dg;
-				if (accept_.frame_in_match_s2c(
-				        peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
+				if (np::frame_in_match_s2c(
+				        jo_ctx_, peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
 					opennova::net::udp_send_to(socket.get(), from, dg.data(), dg.size());
 					std::printf("[nwudp] %s spawned -> 0x0C dcb=%u slot=%u name=%s\n",
 					            client_label.c_str(), js.dcb, js.slot,
@@ -470,7 +479,7 @@ void NwUdpListener::run_loop() {
 
 			std::vector<ProtocolMessage> replies;
 			const SessionProtocolKind protocol = classify_session_protocol(conn_opt->pn);
-			// JointOperations peers are routed to HostSessionAccept above and
+			// JointOperations peers are routed to the npruntime jo_ctx_ above and
 			// never reach this switch — only the lobby (NOVAWORLDUDP) container
 			// path and unsupported PNs land here.
 			if (protocol == SessionProtocolKind::Lobby) {

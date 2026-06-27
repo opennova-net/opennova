@@ -41,10 +41,13 @@ rebuilds the *runtime* on top of those codecs as one faithful, maintainable core
 - **Promote (keep proven logic, re-target):** `HostSessionAccept` → `NapiNPProtocol` server
   handshake legs; `JoinerSession` → `client_runtime` in-match leg. **Port the F3 dcb-timing fix
   and D.0 name-match verbatim — do not "simplify".**
-- **Retire (after callers migrate, P8):** `libs/novaworld/game_session.{h,cpp}` +
-  `game_server_runtime.{h,cpp}` (the tag-burst order in `game_session.cpp` is the *spec* for
-  `Server_SendInitialGameStateToPlayer` — read it, don't keep it); `replication_min`
-  `build_tag_*` builders (keep the POD structs).
+- **Retired (P8, DONE):** `libs/novaworld/{game_session,game_server_runtime,host_session_accept,
+  replication_min}.{h,cpp}` + `session_protocol`'s `dispatch_in_match_session_messages` + the
+  `replication_min` `build_tag_*` builders. The `game_session.cpp` tag-burst order was the *spec* for
+  `Server_SendInitialGameStateToPlayer` (read, not kept — the empirical `tick()`/`queue_*` machine had no
+  original-engine counterpart and was dropped); the reactive §5.1 replies moved to
+  `npruntime/server_message_dispatch.cpp`, the per-frame `0x0A` adapter to `netsim/net_system.cpp`. Kept
+  the POD structs `PlayerReplicationState` / `GameEntitySnapshot`.
 
 ## Phases
 
@@ -326,20 +329,41 @@ runtime, the binding owns sockets/signals only.
 Bar (met): `/gut` full suite passing / 0 failing; net ctests green; SP launches and renders via
 `ClientState`; lobby smoke (login → browse → join) green against a local NovaWorld server.
 
-### P8 — Retire legacy glue (NEXT)
-Delete `libs/novaworld/game_session.{h,cpp}` + `game_server_runtime.{h,cpp}` and the
-`replication_min` `build_tag_*` builders (keep the POD structs) once unreferenced. Bar: full ctest +
-GUT green; no references to retired symbols.
+### ✅ P8 — Retire legacy glue (DONE)
+The legacy in-match net glue is deleted; `npruntime` is the single in-match runtime. Deleted:
+`libs/novaworld/{game_session,game_server_runtime,host_session_accept,replication_min}.{h,cpp}` +
+`session_protocol`'s `dispatch_in_match_session_messages` (kept `classify_session_protocol`) + the
+`replication_min` `build_tag_*` builders. Kept the POD structs `PlayerReplicationState` /
+`GameEntitySnapshot` (the `SpawnPointEntity` / `EntityBatchBuildResult` / `kSpawnPointTypeIds` burst-input
+structs went with the builders — no surviving caller). Bar met: full ctest **223/223** + the net scope
+**15/15**; GUT green; no code references to the retired symbols.
 
-**Gating prerequisite (do this FIRST):** `ctx.game_runtime` (`GameServerRuntime`) is still load-bearing
-for the **§5.1 joiner handshake-reply bodies** — P3 kept it solely for that (`napi_np_protocol.cpp`
-mirrors its `GameSessionState` onto `conn.burst` when `ctx.world==nullptr`, and the P2 unit tests run
-that path). So P8 is NOT a pure delete: (1) witness the §5.1 reply bodies in IDA and port them into the
-npruntime spawn/burst path off `game_runtime` (the tag-burst order in `game_session.cpp` IS the spec for
-`Server_SendInitialGameStateToPlayer` — read it, don't keep it); (2) drop `game_runtime` from
-`NapiNPServerCtx` + the P2/P3 mirror path; (3) confirm `apps/novaworld_server` + `tests/*` no longer
-reference the retired symbols; (4) delete. Likely couples with the deferred §5.2a serializer grill wave
-(those ~8 emit-nothing serializers are the same burst).
+The §5.1 gate (the prerequisite): a "grill-the-gate" IDA pass (net-re §5.45 / **D-NET-127**) confirmed the
+reactive reply *structure* matches the witnessed `NapiNPServerMsg_0x0NN` handlers (`0x002 @0x512FD0`,
+`0x022 @0x514C90`, `0x029 @0x514F10`) and that the one-shot join burst is `Server_OnPlayerJoin @0x51a680`
+(§5.43 / D-NET-114) — NOT the empirical `tick()`/`queue_*`/state4 spawn-gate machine `game_session.cpp`
+grew (a reimpl invention with no original-engine counterpart). So the faithful port (user-chosen "most in
+line with the original engine") **dropped that burst machine** — `Server_SendInitialGameStateToPlayer`
+over `conn.burst` is the sole spawn driver — and moved ONLY the reactive gameplay-message handlers into
+the new `libs/npruntime/server_message_dispatch.{h,cpp}` (`dispatch_session_replies` over
+`ctx.session_config` + the per-connection `NapiNPConnection.reply` state). Reply BODIES are carried
+verbatim (captured-from-observation fixtures, D-NET-127); the faithful per-body serializer port + the
+deferred §5.2a serializers + the `Server_OnPlayerJoin` join-burst tail (`0x42/0x0F/0x4D/seed/0x3E`,
+to fold into `Server_SendInitialGameStateToPlayer`) stay the tracked grill-wave follow-up.
+
+Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` + the mirror; reactive
+replies via `dispatch_session_replies`); the per-frame `0x0A` adapter (`build_tag_0a_world_reference`)
+lifted into `libs/netsim/net_system.cpp` (`build_0a_frame`); `apps/novaworld_server`'s JO routing
+re-pointed off `HostSessionAccept` onto a World-less `np::NapiNPServerCtx` session responder;
+`nova_simulation` `host_session_config_` retyped `GameServerRuntimeConfig` → `np::SessionReplyConfig`.
+Tests: the P2 `handshake_server_test` migrated to assert the reactive §5.1 replies (the World-driven
+spawn/F3 flow is covered by `npruntime_client_runtime` / `npruntime_two_endpoint_socket`); the World-less
+game_runtime-mirror tests (`game_session`/`game_server_runtime`/`replication_min`/`host_session_accept`/
+`joiner_session`/`joiner_connection`) removed; `session_protocol_test` trimmed to the classifier.
+
+> Carried-forward orphan (out of P8's named scope): `libs/novaworld/joiner_session.{h,cpp}` (the legacy
+> `novaworld::JoinerSession`, superseded by `np::JoinerConnection`) is now unreferenced but still compiled
+> — a trivial follow-up removal.
 
 ## Test harness (built up across phases)
 

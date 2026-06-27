@@ -64,6 +64,36 @@ struct InitialStateBurst {
 	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
 };
 
+// Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
+// server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner expects). Folded
+// onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
+// reactive NapiNPServerMsg_0x0NN handlers actually read (P8). The spawn-gate / world-stream burst
+// state lives in `burst` above (driven by Server_SendInitialGameStateToPlayer); this carries only the
+// reactive request→reply bookkeeping. [orig: per-player fields the NapiNPServerMsg_* handlers touch]
+struct SessionReplyState {
+	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
+	bool mission_status_received = false; // 0x0B mission-file status report seen
+	bool player_spawn_confirmed = false;  // 0x51 PLAYER-SPAWN sent — breaks the 0x29↔0x51 echo loop
+
+	// Joiner pose cached from the pre-spawn C2S 0x0C (the host pose fallback when no World entity is
+	// bound yet). [orig: NapiNPServerMsg_0x00C @0x501c30 caches the uplink into the player slot]
+	bool client_pos_valid = false;
+	uint16_t client_entity_handle = 0;
+	uint16_t client_item_type_id = 0;
+	uint16_t client_vehicle_handle = 0xFFFF;
+	uint32_t client_pos_x = 0;
+	uint32_t client_pos_y = 0;
+	uint32_t client_pos_z = 0;
+	int16_t client_heading = 0;
+	int16_t client_pitch = 0;
+
+	// Player binding (slot + entity handle) for the roster (0x46/0x16) + spawn-confirm (0x51) replies.
+	bool binding_valid = false;
+	std::string player_name;
+	uint8_t player_slot = 0;
+	uint16_t player_entity_handle = 0;
+};
+
 // One node on the host's connection_list — the reimpl of a NapiNPConnection [orig: the list
 // NapiNPServer_SendFiltered @0x4C87E0 walks, one SendToConn @0x4c4f20 per node; struct reached via
 // NapiNPProtocol.connection_list @+0xEBC, §6.5]. Named fields + cited offsets, idiomatic types
@@ -118,6 +148,9 @@ struct NapiNPConnection {
 
 	// --- P3: the World-driven initial-state burst cursor (Server_SendInitialGameStateToPlayer) ---
 	InitialStateBurst burst{};
+
+	// --- P8: the reactive gameplay-message reply state (the retired GameSessionState slice) ---
+	SessionReplyState reply{};
 };
 
 // [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A

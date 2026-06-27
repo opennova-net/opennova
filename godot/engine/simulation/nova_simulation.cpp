@@ -365,20 +365,20 @@ void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File
 	std::vector<uint8_t> header_blob;
 	std::string error;
 	if (opennova::bms::encode_header_blob(file, header_blob, error)) {
-		host_session_config_.session.mission_header_blob = std::move(header_blob);
+		host_session_config_.mission_header_blob = std::move(header_blob);
 	} else {
-		host_session_config_.session.mission_header_blob.clear();
+		host_session_config_.mission_header_blob.clear();
 	}
 
 	const std::string mission_name = file.get_mission_name();
 	if (!mission_name.empty()) {
-		host_session_config_.session.mission_name = mission_name;
-		if (host_session_config_.session.spawn_names.empty()) {
-			host_session_config_.session.spawn_names.push_back(mission_name);
+		host_session_config_.mission_name = mission_name;
+		if (host_session_config_.spawn_names.empty()) {
+			host_session_config_.spawn_names.push_back(mission_name);
 		}
 	}
 	// P7: host_session_config_ is consumed at the next load by bringup_host_runtime
-	// (configure_session_runtime + the §5.1 GameServerRuntime config); nothing to refresh live.
+	// (configure_session_runtime + the §5.1 reactive-reply config); nothing to refresh live.
 }
 
 void NovaSimulation::_bind_methods() {
@@ -529,7 +529,7 @@ bool NovaSimulation::load_mission_file(const String &path) {
 	if (!opennova::bms::parse_file(std::string(path.utf8().get_data()), file, err)) {
 		return false;
 	}
-	host_session_config_.session.mission_file = std::string(path.get_file().utf8().get_data());
+	host_session_config_.mission_file = std::string(path.get_file().utf8().get_data());
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
 	apply_host_session_mission_header(file);
@@ -539,7 +539,7 @@ bool NovaSimulation::load_mission_file(const String &path) {
 void NovaSimulation::build_demo_mission() {
 	reset_world();
 	opennova::bms::File file = make_demo_mission();
-	host_session_config_.session.mission_file = "demo.bms";
+	host_session_config_.mission_file = "demo.bms";
 	promo_ = opennova::mission::promote_mission(file, *world_, *ai_, promote_options());
 	finish_load(file);
 	apply_host_session_mission_header(file);
@@ -618,7 +618,7 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// the GDScript-configured host_session_config_; SP is the faithful "SINGLEPLAYERGAME" / 1 player.
 	settings_ = np::NapiGameSettings{};
 	if (host_listen_) {
-		const opennova::GameSessionConfig &s = host_session_config_.session;
+		const opennova::np::SessionReplyConfig &s = host_session_config_;
 		settings_.server_name = s.server_name.empty() ? std::string("OpenNova LAN Host") : s.server_name;
 		settings_.max_players = 16;
 		settings_.game_type = s.gametype;
@@ -633,10 +633,10 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// create_session registers the host's own type-2 loopback (self_id_seen latched) + Server_InitNewRoundState.
 	np::create_session(ctx_, settings_, np::SessionStartup{}, &host_loop_);
 	// configure_session_runtime once per match — preserves the type-2 loopback, drops only type-1 nodes.
-	// A LAN host feeds the §5.1 GameServerRuntime config (server name / mission / player name) for the
+	// A LAN host feeds the §5.1 reactive-reply config (server name / mission / player name) for the
 	// joiner replies; SP needs none. (The §5.1 0x0B BMS-header body reads ctx_.mission directly.)
 	np::configure_session_runtime(ctx_, host_listen_ ? host_session_config_
-	                                                 : opennova::GameServerRuntimeConfig{});
+	                                                 : opennova::np::SessionReplyConfig{});
 	// FAITHFUL auto-spawn: the host's own player at the start marker (§5.2c), binding the loopback's
 	// owned_entity (the 0x0A anchor) and publishing World::cached.local_player.
 	np::Server_ProcessPendingPlayerSpawns(ctx_, *world_);
@@ -1428,8 +1428,8 @@ bool NovaSimulation::enable_host_listen(int p_port) {
 	// P7: the LAN host rides the npruntime runtime (ctx_ over a real UDP socket), stood up per-load in
 	// bringup_host_runtime with SocketMode::Lan. NovaUdpPump owns the socket; all protocol/crypto/
 	// framing stays in libs (ADR 0010). host_session_config_ keeps the GDScript-facing session options
-	// (the Dictionary getter + the §5.1 GameServerRuntime config fed to configure_session_runtime).
-	host_session_config_.bind_port = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
+	// (the Dictionary getter + the §5.1 reactive-reply config fed to configure_session_runtime).
+	host_bind_port_ = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
 	return true;
 }
 
@@ -1449,39 +1449,33 @@ int NovaSimulation::get_host_peer_count() const {
 }
 
 void NovaSimulation::configure_host_session(Dictionary p_options) {
-	opennova::GameServerRuntimeConfig config = host_session_config_;
-	config.bind_port = dictionary_u16(p_options, "bind_port", config.bind_port);
-	opennova::GameSessionConfig &session = config.session;
-	apply_dictionary_string(p_options, "server_name", session.server_name);
-	apply_dictionary_string(p_options, "mission_name", session.mission_name);
-	apply_dictionary_string(p_options, "mission_file", session.mission_file);
-	apply_dictionary_string(p_options, "player_name", session.player_name);
-	apply_dictionary_string(p_options, "expansion", session.expansion);
+	opennova::np::SessionReplyConfig config = host_session_config_;
+	host_bind_port_ = dictionary_u16(p_options, "bind_port", host_bind_port_);
+	apply_dictionary_string(p_options, "server_name", config.server_name);
+	apply_dictionary_string(p_options, "mission_name", config.mission_name);
+	apply_dictionary_string(p_options, "mission_file", config.mission_file);
+	apply_dictionary_string(p_options, "player_name", config.player_name);
+	apply_dictionary_string(p_options, "expansion", config.expansion);
 	if (p_options.has("gametype")) {
-		session.gametype = dictionary_u32(p_options, "gametype", session.gametype);
+		config.gametype = dictionary_u32(p_options, "gametype", config.gametype);
 	} else if (p_options.has("game_type")) {
-		session.gametype = dictionary_u32(p_options, "game_type", session.gametype);
+		config.gametype = dictionary_u32(p_options, "game_type", config.gametype);
 	}
-	session.mpattrib = dictionary_u32(p_options, "mpattrib", session.mpattrib);
+	config.mpattrib = dictionary_u32(p_options, "mpattrib", config.mpattrib);
 	if (p_options.has("spawn_x") || p_options.has("spawn_y") || p_options.has("spawn_z")) {
-		session.spawn_x = dictionary_u32(p_options, "spawn_x", session.spawn_x);
-		session.spawn_y = dictionary_u32(p_options, "spawn_y", session.spawn_y);
-		session.spawn_z = dictionary_u32(p_options, "spawn_z", session.spawn_z);
-		session.spawn_valid = true;
-	}
-	if (p_options.has("player_entity_handle")) {
-		session.player_entity_handle = dictionary_u16(
-				p_options, "player_entity_handle", session.player_entity_handle);
+		config.spawn_x = dictionary_u32(p_options, "spawn_x", config.spawn_x);
+		config.spawn_y = dictionary_u32(p_options, "spawn_y", config.spawn_y);
+		config.spawn_z = dictionary_u32(p_options, "spawn_z", config.spawn_z);
 	}
 	if (p_options.has("spawn_names")) {
-		session.spawn_names.clear();
+		config.spawn_names.clear();
 		const Variant names_v = p_options.get("spawn_names", Array());
 		if (names_v.get_type() == Variant::ARRAY) {
 			const Array names = names_v;
 			for (int64_t i = 0; i < names.size(); ++i) {
 				const String name = names[i];
 				if (!name.is_empty()) {
-					session.spawn_names.emplace_back(name.utf8().get_data());
+					config.spawn_names.emplace_back(name.utf8().get_data());
 				}
 			}
 		}
@@ -1490,10 +1484,9 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 }
 
 Dictionary NovaSimulation::get_host_session_config() const {
-	const opennova::GameServerRuntimeConfig &config = host_session_config_;
-	const opennova::GameSessionConfig &session = config.session;
+	const opennova::np::SessionReplyConfig &session = host_session_config_;
 	Dictionary out;
-	out["bind_port"] = static_cast<int>(config.bind_port);
+	out["bind_port"] = static_cast<int>(host_bind_port_);
 	out["server_name"] = String(session.server_name.c_str());
 	out["mission_name"] = String(session.mission_name.c_str());
 	out["mission_file"] = String(session.mission_file.c_str());
@@ -1504,7 +1497,6 @@ Dictionary NovaSimulation::get_host_session_config() const {
 	out["spawn_x"] = static_cast<int64_t>(session.spawn_x);
 	out["spawn_y"] = static_cast<int64_t>(session.spawn_y);
 	out["spawn_z"] = static_cast<int64_t>(session.spawn_z);
-	out["player_entity_handle"] = static_cast<int>(session.player_entity_handle);
 	out["mission_header_size"] = static_cast<int64_t>(session.mission_header_blob.size());
 	Array spawn_names;
 	for (const std::string &name : session.spawn_names) {

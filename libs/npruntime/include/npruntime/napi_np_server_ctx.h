@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "npruntime/napi_np_connection.h"
+#include "npruntime/server_message_dispatch.h" // np::SessionReplyConfig — the §5.1 reactive-reply config (P8)
 
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
 // the in-match replication seam. No World/codec headers are pulled into this header, and there
@@ -21,14 +22,6 @@ class NetSystem;
 namespace opennova::bms {
 struct File;
 }
-// The P2 SESSION leg drives the spawn-gate state machine through the still-extant
-// GameServerRuntime. Forward-declared (NOT included) so game_session.h stays out of this light
-// header; the runtime is held by unique_ptr with out-of-line ctor/dtor in napi_np_protocol.cpp.
-// This is a reimpl-owned collaborator, retired at P8 / replaced by the World-driven spawn at P3.
-namespace opennova {
-class GameServerRuntime;
-}
-
 namespace opennova::np {
 
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
@@ -143,10 +136,12 @@ struct NapiNPServerCtx {
 	uint32_t spawn_success_gate = 0;
 	uint32_t loading_progress = 0;
 
-	// The 0x43 SESSION leg's spawn-gate driver (P2). configure_session_runtime() constructs it;
-	// the handshake legs call dispatch_in_match_session_messages / tick_session / session_state on
-	// it. unique_ptr<incomplete type> forces the out-of-line ctor/dtor below.
-	std::unique_ptr<GameServerRuntime> game_runtime;
+	// The §5.1 reactive-reply config (server / mission / player identity + advertised spawn), read by
+	// the gameplay-message dispatcher (server_message_dispatch.h, dispatch_session_replies). Seeded by
+	// configure_session_runtime(). Replaces the retired GameServerRuntime (P8): the per-connection reply
+	// state now lives on the node (NapiNPConnection.reply), the world-stream burst on
+	// NapiNPConnection.burst (Server_SendInitialGameStateToPlayer).
+	SessionReplyConfig session_config;
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
 	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /
@@ -163,11 +158,11 @@ struct NapiNPServerCtx {
 	};
 	ServerKeyMint server_key_mint;
 
-	// Out-of-line so the incomplete GameServerRuntime is only completed in napi_np_protocol.cpp.
-	NapiNPServerCtx();
-	~NapiNPServerCtx();
-	NapiNPServerCtx(NapiNPServerCtx &&) noexcept;
-	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept;
+	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
+	// compiler-default special members suffice.
+	NapiNPServerCtx() = default;
+	NapiNPServerCtx(NapiNPServerCtx &&) noexcept = default;
+	NapiNPServerCtx &operator=(NapiNPServerCtx &&) noexcept = default;
 };
 
 } // namespace opennova::np

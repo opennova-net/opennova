@@ -3692,6 +3692,42 @@ from the nearest world-stream spawn (a non-circular cross-decoder oracle). No ID
 (symbols already named); a summary witness comment was added at `Client_ProcessNetworkFrame @0x42c180`
 and `@0x42c482`.
 
+### 5.45 P8 reactive-reply gate — the `game_session.cpp` reply machine vs the witnessed serializers (2026-06-27)
+
+"Grill-the-gate" pass before retiring the legacy in-match glue (`libs/novaworld/game_session.cpp`
++ `game_server_runtime.cpp`, npruntime P8): confirm the *structure* of the gameplay-layer reactive
+reply handlers the reimpl drives through `ctx.game_runtime` so they can be ported onto `npruntime`
+off `game_runtime`. Verdict: **reply structure (recv-tag → reply-tag) MATCHING; reply BODIES are
+captured-from-observation fixtures** that diverge from the witnessed serializers (catalogued below
+as the deferred body-grill-wave targets). Read-only; no IDB renames (handlers already named).
+
+**Witnessed reactive-reply serializers** (the bodies a faithful port emits; the reimpl carries its
+captured-from-observation fixtures verbatim through P8, a tracked divergence — never invented bytes):
+
+| recv | handler | reply | witnessed serializer(s) | reimpl fixture (`game_session.cpp`) |
+|---|---|---|---|---|
+| 0x02 | `NapiNPServerMsg_0x002 @0x512FD0` | 0x01, 0x7A, 0x7B, 0x03 | `0x01`=dword `1`; `0x7A`=`NetPacket_WritePCID @0x5076e0`; `0x7B`=`NapiNPMsg_0x7B_BuildPayload @0x507740`; `0x03`=`NetPacket_WriteWeaponRestrictionFlag @0x502ac0` (sets game-state 7) | `build_tag7a_player_name` / `build_tag7b_session_summary` (off-by-one cstr) / `0x03={1,1,0,1,0}`; reimpl ALSO emits extra `0x00`×2 + `0x05` + `0x04` not in the witnessed handler |
+| 0x22 | `NapiNPServerMsg_0x022 @0x514C90` | 0x46 | `NetPacket_SerializeWeaponOverlaySlotState @0x505e80` (reads `[u8 slot][u16 fieldFlags]`, `slotPtr[25146*slot]`) | `build_tag_46_player_sync` |
+| 0x29 | `NapiNPServerMsg_0x029 @0x514F10` | 0x51 | `write_entity_packet @0x506bb0` (`CBufferList_GetAtIndex(g_team_change_entity_list, idx)`; gated `is_authority && !g_net_spawn_suspended && !g_spawn_success_gate`) | `build_tag_51_player_spawn` (8 B) |
+
+**D-NET-127** [reimpl divergence, DOCUMENTED] **The reactive §5.1/spawn-confirm reply bodies are
+captured-from-observation, structurally faithful but byte-divergent from the witnessed serializers.**
+`game_session.cpp`'s `build_tag02_push`/`build_tag7b_session_summary`/`build_tag60_server_info`/
+`build_tag64_mission_metadata` and the `replication_min` `build_tag_46`/`build_tag_51`/`build_tag_5a`
+fixtures, plus the `0x0E`→`add_game_start_bundle` (`0x5A×2/0x42/0x0A/0x0F/0x4D/0x61/0x3E/0x40…/0x6F…/
+0x6E/0x57/0x4E/0x58/0x5D/0x4C`), reproduce the *expected reply tags in the witnessed order* but with
+captured bytes. The witnessed join burst is **leaner** — `Server_OnPlayerJoin @0x51a680` (§5.43,
+D-NET-114) emits only `0x42`(`NetPacket_WriteInputStateFlags @0x505ba0`) → world-stream
+(`Server_SendEntityStateToPlayer @0x517ba0`) → `0x0F`(`serialize_player_state_to_packet @0x502d10`) →
+`0x4D`(player index byte) → seed (`Server_SendRandomSeedToPlayer @0x5101a0`, `0x61`) → `[0x14`
+cease-fire `NetPacket_WriteTwoBytesAndCString @0x5047a0]` → `[0x1D` weapon overlay
+`WeaponOverlay_SerializeToBuffer @0x505280` + game-state 11, when in-progress`]` → `0x3E`(empty
+terminator). **P8 moves the reply machine to `npruntime` carrying these fixture bodies verbatim (zero
+wire regression); the faithful per-body port — emitting the serializers cited above — is the deferred
+grill wave** (mirrors the §5.2a serializer wave that P3–P6 left deferred). `[orig: Server_OnPlayerJoin
+@0x51a680; NapiNPServerMsg_0x002 @0x512FD0; NapiNPServerMsg_0x022 @0x514C90; NapiNPServerMsg_0x029
+@0x514F10]`
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the

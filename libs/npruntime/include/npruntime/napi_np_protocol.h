@@ -3,8 +3,8 @@
 #include "npruntime/napi_np_server_ctx.h"
 
 #include <novaworld/connection/registry.h> // opennova::PeerAddr
-#include <novaworld/game_server_runtime.h>  // GameServerRuntimeConfig (by value into configure)
 #include <novaworld/protocol_message.h>     // opennova::ProtocolMessage
+// np::SessionReplyConfig arrives via napi_np_server_ctx.h -> server_message_dispatch.h (P8).
 
 #include <cstddef>
 #include <cstdint>
@@ -23,9 +23,11 @@
 //   0x46 ClientGoodbye                      [orig: Nwu_HandleClientGoodbye @0x624250]
 //
 // The per-connection SCRK/seq/ack + handshake latches live ON NapiNPConnection (folded from the
-// old PeerState). The 0x43 spawn-gate machine is still driven through ctx.game_runtime
-// (GameServerRuntime, retired at P8 / replaced by the World-driven spawn at P3). The F3 dcb-timing
-// fix and the D.0 name-match are ported VERBATIM. Wire bytes stay byte-exact.
+// old PeerState). The 0x43 reactive §5.1 replies are produced by the gameplay-message dispatcher
+// (server_message_dispatch.h, dispatch_session_replies) over ctx.session_config + the node's reply
+// state (P8 — the retired ctx.game_runtime / GameServerRuntime); the one-shot world-stream/spawn burst
+// is Server_SendInitialGameStateToPlayer over conn.burst. The F3 dcb-timing fix and the D.0 name-match
+// are ported VERBATIM. Wire bytes stay byte-exact.
 //
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00; NapiNPConnection_ParseMessages @0x625BC0;
 //  accept loop apps/novaworld_server/nw_udp_listener.cpp run_loop]
@@ -100,9 +102,9 @@ struct TickOut {
 //
 // Canonical listen-host bring-up (P0 -> P1 -> P2): set_connection_mode -> set_transport_mode ->
 // create_session(..., local_client) [P1: host_running=1, registers the loopback] ->
-// configure_session_runtime(runtime_config) [P2: builds the runtime, keeps the loopback]. The live
+// configure_session_runtime(config) [P2: seeds ctx.session_config, keeps the loopback]. The live
 // handshake legs reject until host_running == 1, so this bring-up must run before any datagram.
-void configure_session_runtime(NapiNPServerCtx &ctx, GameServerRuntimeConfig config = {});
+void configure_session_runtime(NapiNPServerCtx &ctx, SessionReplyConfig config = {});
 
 // Decode + dispatch one raw inbound datagram from `peer` (the bytes off the socket, envelope+NWU
 // still on). `now_tick` feeds the game-session tag clock. Returns the outbound datagrams to ship
@@ -141,7 +143,7 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 // Owner-initiated eviction of `peer`'s connection node — the recv-timeout / dead-endpoint path where
 // no 0x46 ClientGoodbye ever arrives (a crashed or half-open peer would otherwise leak its
 // connection_list node and keep getting per-frame 0x0A framed to a dead address). Mirrors
-// handle_client_goodbye's teardown (reset the game_runtime session + erase the node) without emitting
+// handle_client_goodbye's teardown (erase the node) without emitting
 // an event — the owner already knows it is dropping. The owner is responsible for releasing its own
 // (non-owning) transport for that peer. Returns true if a node was dropped. [orig: the timeout sweep
 // under NapiNPProtocol_DrainTimers feeds Nwu_HandleDisconnect @0x624250 the same teardown.]

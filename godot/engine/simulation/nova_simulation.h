@@ -32,7 +32,6 @@
 #include "netsim/udp_session_transport.h"     // PeerLink::transport (the LAN per-peer transport)
 
 #include <novaworld/connection/registry.h>    // PeerAddr / PeerAddrHash
-#include <novaworld/game_server_runtime.h>    // GameServerRuntimeConfig (host_session_config_)
 #include "network/nova_udp_pump.h"
 
 #include <mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
@@ -132,11 +131,12 @@ private:
 	// --- co-op LAN host: a real UDP socket (NovaUdpPump) over the npruntime runtime. enable_host_listen
 	// binds the socket (it implies the listen server); host_pump drives the owner loop, and
 	// dispatch_event/admit_peer admit joiners + stream the named dcb-bearing 0x0C. host_session_config_
-	// holds the GDScript-facing session options (the Dictionary getter + the §5.1 GameServerRuntime
-	// config fed to configure_session_runtime). Sockets live here, the protocol/crypto in libs (ADR 0010).
+	// holds the GDScript-facing session options (the Dictionary getter + the §5.1 reactive-reply config
+	// fed to configure_session_runtime). Sockets live here, the protocol/crypto in libs (ADR 0010).
 	bool host_listen_ = false;
 	Ref<NovaUdpPump> pump_;
-	opennova::GameServerRuntimeConfig host_session_config_;
+	opennova::np::SessionReplyConfig host_session_config_; // P8: was GameServerRuntimeConfig
+	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
 	void send_datagram(const opennova::PeerAddr &peer, const std::vector<uint8_t> &dg);
 	static opennova::PeerAddr peer_from_addr(const String &ip, int port);
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).

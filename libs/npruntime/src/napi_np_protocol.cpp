@@ -1,14 +1,14 @@
 #include "npruntime/napi_np_protocol.h"
 
-#include "npruntime/server_initial_state.h" // Server_SendInitialGameStateToPlayer (the §5.2a burst)
-#include "npruntime/server_spawn.h"         // Server_ProcessPendingPlayerSpawns (World-driven spawn)
+#include "npruntime/server_initial_state.h"    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
+#include "npruntime/server_message_dispatch.h" // dispatch_session_replies (the reactive §5.1 replies)
+#include "npruntime/server_spawn.h"            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
-#include <novaworld/game_server_runtime.h>
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>
-#include <novaworld/session_protocol.h>
+#include <novaworld/session_protocol.h> // classify_session_protocol
 
 #include <netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
@@ -21,18 +21,10 @@
 
 namespace opennova::np {
 
-// Out-of-line ctor/dtor/move: GameServerRuntime is incomplete in the ctx header (forward-declared
-// to keep game_session.h out of it), so the unique_ptr<GameServerRuntime> ctor/dtor must be
-// emitted here, where the type is complete.
-NapiNPServerCtx::NapiNPServerCtx() = default;
-NapiNPServerCtx::~NapiNPServerCtx() = default;
-NapiNPServerCtx::NapiNPServerCtx(NapiNPServerCtx &&) noexcept = default;
-NapiNPServerCtx &NapiNPServerCtx::operator=(NapiNPServerCtx &&) noexcept = default;
-
 namespace {
 
-// Stable "a.b.c.d:port" label — the GameServerRuntime sessions_ key. PeerAddr.ip is LE octet
-// packing (a | b<<8 | c<<16 | d<<24); print low->high so the label reads a.b.c.d (matches
+// Stable "a.b.c.d:port" label — the connection's session_id (NapiNPConnection.session_id). PeerAddr.ip
+// is LE octet packing (a | b<<8 | c<<16 | d<<24); print low->high so the label reads a.b.c.d (matches
 // nw_udp_listener's client_label). [orig: HostSessionAccept::peer_session_id]
 std::string peer_session_id(const PeerAddr &peer) {
 	char buf[32];
@@ -90,23 +82,22 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
 }
 
-HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const GameSessionState &gss) {
+HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &reply) {
 	// [orig: HostSessionAccept::pose_from_session]
 	HostJoinerPose p;
-	if (gss.client_pos_valid) {
+	if (reply.client_pos_valid) {
 		// The joiner already sent a C2S 0x0C — spawn it where it reported.
 		p.pos_valid = true;
-		p.entity_handle = gss.client_entity_handle;
-		p.item_type_id = gss.client_item_type_id != 0 ? gss.client_item_type_id : 0x14B9u;
-		p.pos_x = static_cast<int32_t>(gss.client_pos_x);
-		p.pos_y = static_cast<int32_t>(gss.client_pos_y);
-		p.pos_z = static_cast<int32_t>(gss.client_pos_z);
-		p.heading = gss.client_heading;
-		p.pitch = gss.client_pitch;
+		p.entity_handle = reply.client_entity_handle;
+		p.item_type_id = reply.client_item_type_id != 0 ? reply.client_item_type_id : 0x14B9u;
+		p.pos_x = static_cast<int32_t>(reply.client_pos_x);
+		p.pos_y = static_cast<int32_t>(reply.client_pos_y);
+		p.pos_z = static_cast<int32_t>(reply.client_pos_z);
+		p.heading = reply.client_heading;
+		p.pitch = reply.client_pitch;
 	} else {
-		// No uplink yet — fall back to the host-advertised spawn (the same position the
-		// game-start bundle's 0x0F told the joiner).
-		const GameSessionConfig &cfg = ctx.game_runtime->config().session;
+		// No uplink yet — fall back to the host-advertised spawn from the session config.
+		const SessionReplyConfig &cfg = ctx.session_config;
 		p.pos_valid = false;
 		p.item_type_id = 0x14B9u;
 		p.pos_x = static_cast<int32_t>(cfg.spawn_x);
@@ -134,14 +125,15 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 }
 
 // ---------------------------------------------------------------------------
-// P3 — the World-driven spawn-gate. conn.burst is the SINGLE authority for a connection's spawn
-// progress; the F3 / PeerSpawned latches read it. It is driven by the World burst machine when
-// ctx.world is wired, or MIRRORED from the still-extant game_runtime GameSessionState on the P2
-// unit-test path (ctx.world == nullptr) so the latches stay value/tick-identical (keep-green lever).
+// P3/P8 — the World-driven spawn-gate. conn.burst is the SINGLE authority for a connection's spawn
+// progress; the F3 / PeerSpawned latches read it. It is driven by the World burst machine
+// (Server_SendInitialGameStateToPlayer) when ctx.world is wired. Without a World (a session-responder
+// host) the burst never advances and the connection stays pre-spawn — the reactive §5.1 replies still
+// flow, but no PeerSpawned is surfaced (faithful: the original needs the server-side sim to spawn).
 // ---------------------------------------------------------------------------
 
 // The joiner/host pose surfaced with the F3 / PeerSpawned events. Prefer the live World entity the
-// spawn pipeline bound (World path); fall back to the game_runtime session pose (P2 path).
+// spawn pipeline bound (World path); fall back to the joiner's cached C2S 0x0C pose / advertised spawn.
 HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	if (ctx.world != nullptr && conn.link.owned_entity.valid()) {
 		if (const world::Entity *e = ctx.world->registry.get(conn.link.owned_entity)) {
@@ -169,10 +161,7 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 			return p;
 		}
 	}
-	const GameSessionState *gss =
-			ctx.game_runtime ? ctx.game_runtime->session_state(conn.session_id) : nullptr;
-	if (gss != nullptr) return pose_from_session(ctx, *gss);
-	return {};
+	return pose_from_session(ctx, conn.reply);
 }
 
 // Ship one burst step's messages for `conn`: a remote (type 1) gets one framed 0x83 SESSION datagram
@@ -240,16 +229,6 @@ void surface_burst_events(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 		ev.self_id = conn.connection_id;
 		ev.peer_name = conn.player_name; // for the joiner-side name-match (D.0)
 		events.push_back(std::move(ev));
-	}
-}
-
-// Mirror the game_runtime spawn-gate state onto conn.burst (P2 path only — no World wired). The World
-// path drives conn.burst directly via Server_SendInitialGameStateToPlayer.
-void mirror_game_runtime_burst(NapiNPServerCtx &ctx, NapiNPConnection &conn) {
-	if (ctx.world != nullptr || !ctx.game_runtime) return;
-	if (const GameSessionState *gss = ctx.game_runtime->session_state(conn.session_id)) {
-		conn.burst.entity_batch_count = static_cast<uint32_t>(gss->entity_batch_count);
-		conn.burst.spawned = gss->spawned;
 	}
 }
 
@@ -382,8 +361,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	out.events.push_back(std::move(ev));
 }
 
-// 0x43 SESSION -> 0x83 SESSION (drives the GameSession to Spawned; surfaces F3 + spawn + in-match
-// C2S). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00]
+// 0x43 SESSION -> 0x83 SESSION (produces the reactive §5.1 replies; surfaces F3 + spawn + in-match
+// C2S off conn.burst). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00]
 void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
                            const std::vector<uint8_t> &body, uint32_t now_tick, HandleResult &out) {
 	NapiNPConnection *connp = find_connection(ctx, peer);
@@ -425,26 +404,21 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		}
 	}
 
-	// Drive the reactive handshake/spawn state machine (also caches the joiner's 0x0C pose into
-	// client_*); BYPASS GameSession::tick here — the periodic emitter runs via tick_connections
-	// (pre-Spawned) / NetSystem. game_runtime is retained for the §5.1 handshake-reply bodies; guard
-	// it so a World-only deployment (no game_runtime wired) never null-derefs.
-	if (ctx.game_runtime) {
-		SessionProtocolDispatchResult disp = dispatch_in_match_session_messages(
-				SessionProtocolKind::JointOperations, *ctx.game_runtime, conn.session_id,
-				messages, now_tick);
-		if (!disp.replies.empty()) {
-			std::vector<uint8_t> dg = frame_session_replies(conn, disp.replies);
-			if (!dg.empty()) out.outbound.push_back(std::move(dg));
-		}
+	// Produce the reactive §5.1 replies (handshake / server-info / mission-metadata / loadout /
+	// spawn-confirm) for this datagram's gameplay messages, and cache the joiner's pre-spawn 0x0C pose
+	// into conn.reply. The one-shot world-stream/spawn burst is owned by
+	// Server_SendInitialGameStateToPlayer (tick_connections), NOT produced here. [orig: the 0x43 SESSION
+	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
+	std::vector<ProtocolMessage> replies =
+			dispatch_session_replies(ctx.session_config, conn, messages, now_tick);
+	if (!replies.empty()) {
+		std::vector<uint8_t> dg = frame_session_replies(conn, replies);
+		if (!dg.empty()) out.outbound.push_back(std::move(dg));
 	}
 
-	// P3: conn.burst is the single spawn-gate authority. On the P2 path (no World) mirror it from the
-	// GameSessionState the dispatch above advanced, so the F3 / PeerSpawned latches are value-identical
-	// to the pre-P3 gss reads; on the World path tick_connections drives conn.burst. Then surface the
-	// (verbatim-predicate) edge-latched events. Dual-path: whichever of the datagram / tick path
-	// observes the burst change first wins (one-shot via the *_announced latches).
-	mirror_game_runtime_burst(ctx, conn);
+	// conn.burst is the single spawn-gate authority (driven by the World burst in tick_connections).
+	// Surface the (verbatim-predicate) F3 / PeerSpawned edge-latched events — whichever of the datagram
+	// / tick path observes the burst change first wins (one-shot via the *_announced latches).
 	surface_burst_events(ctx, conn, out.events);
 
 	// Once a connection exists, surface the joiner's in-match C2S 0x0C uplinks for NetSystem to
@@ -467,7 +441,6 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // 0x46 ClientGoodbye. [orig: Nwu_HandleClientGoodbye @0x624250]
 void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleResult &out) {
-	if (ctx.game_runtime) ctx.game_runtime->reset_session(peer_session_id(peer));
 	erase_connection(ctx, peer);
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
@@ -477,13 +450,8 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleRes
 
 } // namespace
 
-void configure_session_runtime(NapiNPServerCtx &ctx, GameServerRuntimeConfig config) {
-	if (!ctx.game_runtime) {
-		ctx.game_runtime = std::make_unique<GameServerRuntime>(std::move(config));
-	} else {
-		ctx.game_runtime->configure(std::move(config));
-	}
-	ctx.game_runtime->start();
+void configure_session_runtime(NapiNPServerCtx &ctx, SessionReplyConfig config) {
+	ctx.session_config = std::move(config);
 	// [orig: HostSessionAccept::configure clears peers_] — peers_ held ONLY remote joiners (the
 	// host's own client lived elsewhere), so the faithful translation drops the server-side (type-1)
 	// remote-joiner nodes and PRESERVES the host's own type-2 loopback client that P1's
@@ -527,6 +495,7 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint32_t now_tick) {
 	std::vector<TickOut> out;
+	(void)elapsed_ms; // the world-stream burst is one-shot per join, not paced by elapsed time (D-NET-114)
 
 	// P3 World-driven path: spawn any accepted-but-unspawned players once per tick (idempotent), before
 	// walking the connections to advance their bursts.
@@ -538,27 +507,13 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 		TickOut to;
 		to.peer = conn.peer;
 
-		if (ctx.world != nullptr) {
-			// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
-			// World/bms state). conn.burst is authoritative for the spawn-gate latches.
-			if (conn.phase >= ConnectionPhase::PlayerAdded) {
-				InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
-				ship_burst_messages(conn, step.messages, to.outbound);
-			}
-		} else if (ctx.game_runtime != nullptr) {
-			// P2 path: the game_runtime periodic emitter climbs the GameSessionState; mirror it onto
-			// conn.burst so the latches read the same values they did pre-P3.
-			const GameSessionState *gss = ctx.game_runtime->session_state(conn.session_id);
-			if (gss == nullptr) continue; // session not created yet (no 0x43 dispatched)
-			if (gss->spawned) continue;   // NetSystem owns spawned peers' per-frame 0x0A
-			GameServerDispatch disp = ctx.game_runtime->tick_session(conn.session_id, elapsed_ms, now_tick);
-			if (!disp.replies.empty()) {
-				std::vector<uint8_t> dg = frame_session_replies(conn, disp.replies);
-				if (!dg.empty()) to.outbound.push_back(std::move(dg));
-			}
-			mirror_game_runtime_burst(ctx, conn); // re-read post-tick state onto conn.burst
-		} else {
-			continue;
+		if (ctx.world == nullptr) continue; // no World -> no world-stream burst to advance (the reactive
+		                                    // §5.1 replies are datagram-driven, not ticked)
+		// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
+		// World/bms state). conn.burst is authoritative for the spawn-gate latches.
+		if (conn.phase >= ConnectionPhase::PlayerAdded) {
+			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
+			ship_burst_messages(conn, step.messages, to.outbound);
 		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the
@@ -605,21 +560,19 @@ bool connection_spawned(const NapiNPServerCtx &ctx, const PeerAddr &peer) {
 bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t player_slot,
                             uint16_t entity_handle) {
 	NapiNPConnection *conn = find_connection(ctx, peer);
-	if (conn == nullptr || conn->session_id.empty() || !ctx.game_runtime) {
+	if (conn == nullptr || conn->session_id.empty()) {
 		return false;
 	}
 	const std::string player_name = !conn->player_name.empty()
 			? conn->player_name
-			: ctx.game_runtime->config().session.player_name;
-	return ctx.game_runtime->bind_session_player(
-			conn->session_id, player_name, player_slot, entity_handle);
+			: ctx.session_config.player_name;
+	return bind_session_reply_player(*conn, player_name, player_slot, entity_handle);
 }
 
 bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
 	if (find_connection(ctx, peer) == nullptr) return false;
-	// Same teardown as a 0x46 ClientGoodbye, minus the surfaced event: reset the game_runtime session
-	// (if any) and erase the node. The owner releases its own non-owning transport for `peer`.
-	if (ctx.game_runtime) ctx.game_runtime->reset_session(peer_session_id(peer));
+	// Same teardown as a 0x46 ClientGoodbye, minus the surfaced event: erase the node. The owner
+	// releases its own non-owning transport for `peer`.
 	erase_connection(ctx, peer);
 	return true;
 }

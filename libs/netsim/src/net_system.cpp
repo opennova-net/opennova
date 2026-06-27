@@ -5,12 +5,81 @@
 #include <vector>
 
 #include <novaworld/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
+#include <novaworld/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
 #include <world/geom.h>              // to_fixed
 #include <world/player_spawn.h>      // spawn_remote_player
 
 namespace opennova::netsim {
 
 namespace {
+
+// The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor + one tag=1 compact record
+// per replicated entity, each position compressed relative to the anchor (network_compress_fixedpoint).
+// Lifted into netsim from the retired replication_min build_tag_0a_world_reference (P8); the wire bytes
+// are unchanged (decode_frame_update round-trips them). [orig: NapiNPClientMsg_0x00A @0x42FEC0 /
+// NetPacket_SerializePlayerState case 1 @0x4C09C0]
+std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
+                                    const std::vector<GameEntitySnapshot> &entities) {
+	FrameUpdate fu;
+	const int32_t ax = int32_t(ctx.spawn_x);
+	const int32_t ay = int32_t(ctx.spawn_y);
+	const int32_t az = int32_t(ctx.spawn_z);
+	fu.anchor_x = ax;
+	fu.anchor_y = ay;
+	fu.anchor_z = az;
+	fu.flags1 = 0x00;
+	fu.flags2 = 0x00;          // sub-block 0 (aim) — the common gameplay frame
+	fu.aim.present = true;     // local-player view left zeroed (not authored yet)
+	fu.state_flag_byte = 0x00; // 7-byte tail: not mounted, full health, no extra state
+	fu.mount_handle = 0xFFFF;
+	fu.health = 100;
+	fu.state_word = 0;
+
+	for (const GameEntitySnapshot &e : entities) {
+		const uint16_t cx = network_compress_fixedpoint(e.x - ax);
+		const uint16_t cy = network_compress_fixedpoint(e.y - ay);
+		const uint16_t cz = network_compress_fixedpoint(e.z - az);
+		// Coarse wire heading from the engine BAM (D-NET-86): Player/Infantry carry the rounded high
+		// byte (v+0x800000)>>24; Vehicle carries the rounded high i16 (v+0x8000)>>16.
+		const uint8_t yaw_byte = uint8_t((uint32_t(e.euler_z) + 0x00800000u) >> 24);
+		const int16_t yaw_bam16 = int16_t((uint32_t(e.euler_z) + 0x00008000u) >> 16);
+		FrameUpdateRecord rec;
+		rec.handle = uint16_t((uint16_t(e.pool) << 12) | (e.slot & 0x0FFFu));
+		rec.type_id = e.type_id;
+		rec.cls = e.entity_class;
+		switch (e.entity_class) {
+		case EntityClass::Player:
+			rec.player.vehicle_handle = 0xFFFF;
+			rec.player.pos_x_compressed = cx;
+			rec.player.pos_y_compressed = cy;
+			rec.player.pos_z_compressed = cz;
+			rec.player.yaw_byte = yaw_byte;
+			break;
+		case EntityClass::Vehicle:
+			rec.vehicle.parent_slot_handle = 0xFFFF;
+			rec.vehicle.flags_byte = 0x00; // unmounted (world-relative position)
+			rec.vehicle.pos_x_compressed = cx;
+			rec.vehicle.pos_y_compressed = cy;
+			rec.vehicle.pos_z_compressed = cz;
+			rec.vehicle.euler_z = yaw_bam16;
+			break;
+		case EntityClass::Infantry:
+			rec.infantry.vehicle_slot_handle = 0xFFFF;
+			rec.infantry.pos_x_compressed = cx;
+			rec.infantry.pos_y_compressed = cy;
+			rec.infantry.pos_z_compressed = cz;
+			rec.infantry.yaw_byte = yaw_byte;
+			break;
+		case EntityClass::Guided:
+		case EntityClass::NoNetworkCallback:
+		case EntityClass::Unknown:
+		default:
+			continue; // no production 0x0A compact body
+		}
+		fu.records.push_back(std::move(rec));
+	}
+	return encode_frame_update(fu);
+}
 
 // The S2C 0x0A anchor for one connection: its owned entity's live position (so the compact
 // records compress small deltas around that client's own player), or the passed fallback when
@@ -88,7 +157,7 @@ void emit_connection_s2c(const world::World &w, const Connection &conn,
                          const PlayerReplicationState &fallback_anchor) {
 	if (conn.transport == nullptr) return;
 	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
-	conn.transport->host_send(kTag0aFrameUpdate, build_tag_0a_world_reference(anchor, ents));
+	conn.transport->host_send(kTag0aFrameUpdate, build_0a_frame(anchor, ents));
 }
 
 void NetSystem::tick(world::World &world, const world::TickContext &ctx) {

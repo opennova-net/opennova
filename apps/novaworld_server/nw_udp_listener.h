@@ -8,9 +8,10 @@
 #include <unordered_set>
 
 #include <novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
-#include <novaworld/host_session_accept.h>
 #include <novaworld/lobby_session.h>
 #include <novaworld/protocol_message.h>
+#include <npruntime/napi_np_protocol.h>     // np::handle_server_datagram / frame_in_match_s2c (P8)
+#include <npruntime/server_session.h>       // np::set_connection_mode / create_session (host bring-up)
 
 namespace opennova {
 class ConnectionManager;
@@ -56,8 +57,8 @@ struct ServerConfig;
 //   0x46 ClientGoodBye -> 0x86 ServerGoodBye + drop the connection
 //
 // PN dispatch happens at HELLO time. "NOVAWORLDUDP" peers use the lobby
-// container path; "JointOperations"/"JOINTOPERATIONS" peers use the in-match
-// GameServerRuntime on the same retail UDP session port.
+// container path; "JointOperations"/"JOINTOPERATIONS" peers use a World-less
+// npruntime session-responder ctx on the same retail UDP session port.
 class NwUdpListener {
 public:
 	explicit NwUdpListener(ConnectionManager &manager);
@@ -122,13 +123,14 @@ private:
 	// state lives in the map (keyed by PeerAddr — see erase_lobby_state
 	// comment above for why CI was the wrong key).
 	LobbySession lobby_session_;
-	// JointOperations in-match join: the consolidated host-accept component
-	// (the same one NovaSimulation's listen server drives). It owns the JO
-	// peers' handshake/SCRK state + the GameServerRuntime; the lobby
-	// (NOVAWORLDUDP) container path below is independent. `jo_peers_` tracks
-	// which peers classified as JointOperations at HELLO so 0x42/0x43/0x46
-	// route to the component without re-parsing PN each datagram.
-	HostSessionAccept accept_;
+	// JointOperations in-match join: a World-less npruntime session-responder ctx (the same legs the
+	// in-engine listen server drives via np::handle_server_datagram). It owns the JO peers'
+	// handshake/SCRK state + the reactive §5.1 reply config; the lobby (NOVAWORLDUDP) container path
+	// below is independent. `jo_peers_` tracks which peers classified as JointOperations at HELLO so
+	// 0x42/0x43/0x46 route to the ctx without re-parsing PN each datagram. With no World wired this is a
+	// session responder, not a live-sim host — it answers the handshake but never drives a spawn
+	// (PeerSpawned does not surface; the real in-match spawn happens on the host's listen server). (P8)
+	np::NapiNPServerCtx jo_ctx_;
 	std::unordered_set<PeerAddr, PeerAddrHash> jo_peers_;
 	// Per-JO-peer dcb (the joiner's NapiNPConnection.unk_18) and pool-0 wire
 	// slot, assigned at PeerSpawned and stamped into the S2C 0x0C organic-spawn
