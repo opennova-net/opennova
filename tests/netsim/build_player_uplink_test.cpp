@@ -99,6 +99,8 @@ bool run_roundtrip_to_host_snap() {
 	ns::LoopbackChannel channel;
 	channel.client_send(0x0C, payload);
 	ns::NetSystem net(channel);
+	net.connection(0).owned_entity = ph; // the connection owns peer ph — the owner gate (D-NET-119)
+	                                     // requires the uplink handle to match conn.owned_entity
 	w::TickContext ctx;
 	ctx.world = &world;
 	ctx.is_authority = true;

@@ -219,8 +219,10 @@ bool run_apply_player_intent_stages_remote_peer() {
 	channel.client_send(0x0C, make_0c_uplink(ph.packed, wx, wy, wz, wheading, wpitch));
 	if (!expect(channel.c2s_pending() == 1, "one C2S 0x0C queued")) return false;
 
-	// Drain directly (the authority host's top-of-tick C2S drain).
+	// Drain directly (the authority host's top-of-tick C2S drain). The connection owns peer ph — the
+	// owner gate (D-NET-119) requires the uplink handle to match conn.owned_entity for the apply.
 	ns::NetSystem net(channel);
+	net.connection(0).owned_entity = ph;
 	w::TickContext ctx;
 	ctx.world = &world;
 	ctx.is_authority = true;
@@ -274,6 +276,8 @@ bool run_apply_rejects_own_player() {
 	ns::LoopbackChannel channel;
 	channel.client_send(0x0C, make_0c_uplink(ph.packed, w::to_fixed(999.0), 0, 0, 0x4000, 0));
 	ns::NetSystem net(channel);
+	net.connection(0).owned_entity = ph; // owner gate passes (handle == owner); the §5.38 local-player
+	                                     // refusal is what must reject this self-uplink [D-NET-119]
 	w::TickContext ctx;
 	ctx.world = &world;
 	ctx.is_authority = true;

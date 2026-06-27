@@ -156,6 +156,7 @@ int main() {
 	np::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
+	ctx.is_in_session = 1; // an in-match host: the S2C 0x0A replicate fan is is_in_session-gated [D-NET-120]
 	np::NapiNPConnection conn;
 	conn.connection_id = 3; // the joiner dcb (cosmetic here)
 	conn.type = 1;          // server-side view of a remote client

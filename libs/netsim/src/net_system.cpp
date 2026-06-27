@@ -32,10 +32,13 @@ PlayerReplicationState anchor_for_connection(const world::World &w, const Connec
 
 // Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport. Public
 // (declared in net_system.h) so npruntime's Server_TickUpdate shares this exact drain when it
-// walks NapiNPProtocol.connection_list instead of NetSystem's own table.
-void drain_connection_c2s(world::World &world, ISessionTransport &transport) {
+// walks NapiNPProtocol.connection_list instead of NetSystem's own table. Takes the whole Connection
+// (not a bare transport) so it can enforce the per-connection owner gate and null-checks the
+// transport internally — symmetric with emit_connection_s2c.
+void drain_connection_c2s(world::World &world, const Connection &conn) {
+	if (conn.transport == nullptr) return;
 	Datagram dg;
-	while (transport.host_recv(dg)) {
+	while (conn.transport->host_recv(dg)) {
 		// §5.10 player-input uplink only this increment (other in-match C2S tags TBD).
 		if (dg.tag != 0x0C) continue;
 
@@ -45,6 +48,16 @@ void drain_connection_c2s(world::World &world, ISessionTransport &transport) {
 		if (!decode_entity_packet_sub_header(dg.body.data(), dg.body.size(), hdr, consumed))
 			continue;
 		if (hdr.sub_op != 0x0A) continue; // 0x0A=extended (type 10); 0x0B compact = later
+
+		// [D-NET-119] Owner gate: a connection may only SNAP its OWN entity. The original resolves
+		// the wire handle (pool<<12|slot) to an entity and verifies `entity == *owner_ctx` (the
+		// connection's authorized entity) before invoking the +356 read-apply callback; a handle
+		// naming any other entity is silently ignored — no apply, rejection, or disconnect (returns
+		// 0 @0x4d6b7e). An invalid owner (the host's own loopback, or a pre-spawn joiner) matches
+		// nothing, mirroring the original's `owner_ctx != null` guard @0x4d6ad3. [orig:
+		// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx` @0x4d6b08; owner_ctx <-
+		// NapiNPServerMsg_0x00C @0x501c30 connCtx+0x160 -> +0xC0 -> *.]
+		if (world::EntityHandle{hdr.handle} != conn.owned_entity) continue;
 
 		PlayerExtendedUplink up;
 		std::size_t body_consumed = 0;
@@ -85,10 +98,8 @@ void NetSystem::tick(world::World &world, const world::TickContext &ctx) {
 	// Only the host (authority) receives C2S — a joiner never drains one
 	// [orig: dispatch_entity_packet_callback @0x4D6A80 gates on g_napi_np_ctx.is_authority].
 	if (!ctx.is_authority) return;
-	for (Connection &conn : connections_) {
-		if (conn.transport == nullptr) continue;
-		drain_connection_c2s(world, *conn.transport);
-	}
+	// drain_connection_c2s null-checks the transport + enforces the per-connection owner gate.
+	for (const Connection &conn : connections_) drain_connection_c2s(world, conn);
 }
 
 void NetSystem::emit_s2c(const world::World &w, const PlayerReplicationState &fallback_anchor) {

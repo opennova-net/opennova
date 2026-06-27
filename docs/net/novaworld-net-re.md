@@ -3484,6 +3484,70 @@ gss.client_pitch; entity_wire_bridge ae.pitch >> 16]`
 
 No IDB changes this grill (all fields/functions already named in §5.41/§5.42); read-only.
 
+### P4 `Server_TickUpdate` host-loop review (2026-06-27)
+
+A correctness review of the P4 commit (`f61ee3fd`) cross-checked the reimpl host loop against the
+witnessed frame (`Server_TickUpdate @0x51d7e0`, gated at its call site by `Game_ProcessMainFrame
+@0x5263f0 @0x5266b4`). Two load-bearing gaps were FIXED in the follow-up; five lower-severity
+divergences are tracked as deferrals. IDB-only note: the host tick is gated by `is_authority` (+0x60)
+at its CALL site (not `is_in_session`), and the raw recv/send pumps (`CNapiNetwork_PumpServerProtocol
+Recv/Send`) are NOT `is_in_session`-gated — only the replicate/broadcast blocks inside the tick are.
+
+**D-NET-119** [behavior, reimpl divergence FIXED] **The C2S 0x0C drain enforces the per-connection
+owner gate.** The original resolves the wire handle (`pool<<12 | slot`) to an entity and verifies
+`entity == *owner_ctx` (@0x4d6b08) — `owner_ctx` is the connection's authorized entity (`connCtx+0x160
+-> +0xC0 -> *`, built + null-checked by `NapiNPServerMsg_0x00C @0x501c30`) — before invoking the
+`entity_def+356` read-apply callback. On mismatch it falls through to `return 0` (@0x4d6b7e): silent
+no-op, no apply/reject/disconnect. The reimpl `drain_connection_c2s` previously applied the wire handle
+with only a local-player refusal, so any peer could SNAP another peer's entity by naming its handle.
+Fixed: `drain_connection_c2s` now takes the `Connection` and skips any uplink whose handle
+`!= conn.owned_entity` (an invalid owner matches nothing, mirroring the original's `owner_ctx != null`
+guard @0x4d6ad3). `[orig: dispatch_entity_packet_callback @0x4D6A80]`
+
+**D-NET-120** [behavior, reimpl divergence FIXED] **The S2C 0x0A replicate fan is is_in_session-gated.**
+Inside `Server_TickUpdate` the replicate/broadcast blocks each read `is_in_session` (+0x58) as an inner
+gate (@0x51d9ab..0x51e3f3); the raw recv/send pumps are not — they run on active-connection only. The
+reimpl gated nothing on `is_in_session`, so a World kept alive past match-end (is_in_session flips to 0,
+world stays non-null) would keep fanning 0x0A. Fixed: step (3) (snapshot + emit) is wrapped in
+`if (ctx.is_in_session)`; the C2S drain + logic tick stay unconditional, faithful to the witnessed
+structure. The whole tick is gated at its call site by `is_authority`, not `is_in_session`. `[orig:
+Server_TickUpdate @0x51d7e0; Game_ProcessMainFrame @0x5266b4]`
+
+**D-NET-121** [reimpl deferral, DOCUMENTED] **`fallback_anchor = {}` is a non-zero (dvxi5) anchor.**
+`PlayerReplicationState` default-constructs `spawn_x/y/z` to the hardcoded dvxi5 map-center coords
+(`0xfe56f854/0x0049f5f0/0x003a5e6a`), team=1, mi=0x3CDE — not origin. A spawned connection that reaches
+the emit step with no resolvable owned entity (the host's own loopback, or a peer despawned mid-match)
+anchors its 0x0A there, so a receiver decompresses every entity offset by the gap to the real local
+position. Today the only caller is the golden test (which binds an owned entity); revisit before a
+production driver fans to an owned-entity-less connection. `[orig: replication_min.h dvxi5 defaults]`
+
+**D-NET-122** [reimpl divergence, DOCUMENTED] **The 0x0A fan is gated on `burst.spawned`.** This narrows
+the legacy `NetSystem::emit_s2c`, which emits to every transport-bearing connection (its host loopback
+has no burst field). When `Server_TickUpdate` replaces `NetSystem` as the host/SP driver (P5), a
+loopback whose `burst.spawned` never latches would be starved of its 0x0A (frozen local view). Revisit
+the in-match predicate (shared verbatim with the drain loop — a single `is_in_match(conn)` helper) at
+P5. `[orig: NapiNPServer_SendFiltered @0x4C87E0]`
+
+**D-NET-123** [reimpl deferral, DOCUMENTED] **`Server_TickUpdate` owns the logic tick.** It calls
+`world.run_logic_tick(true)` itself — the inverse of the legacy seam, where the C2S drain ran INSIDE
+`run_logic_tick` (NetSystem as a World ISystem driven by the host's existing `run_logic_tick` call). A
+P7 binding that migrates to `Server_TickUpdate` but keeps its own `run_logic_tick()` advances the sim
+(and drains the C2S queue) twice per frame. Enforced only by the header guardrail comment today
+(D-NET-125). `[orig: net-before-logic, Game_ProcessMainFrame @0x5263f0]`
+
+**D-NET-124** [reimpl deferral, DOCUMENTED] **The drain/emit fan assumes type-1 nodes stay resident.**
+`Server_TickUpdate` walks `np_protocol.connection_list` for both the drain and the emit; a mid-match
+`configure_session_runtime()` erases every type-1 (remote-joiner) node, which would silently drop those
+peers from replication for the rest of the round. No reconfigure path calls it mid-match today; revisit
+when round-restart / re-invoke lands. `[orig: tick_connections connection_list residency]`
+
+**D-NET-125** [reimpl guardrail, DOCUMENTED] **The single-drain / single-tick invariant is comment-only.**
+Nothing in code prevents a binding from both registering a `netsim::NetSystem` ISystem and calling
+`Server_TickUpdate` (`ctx.net` stays a settable `NetSystem*`); whichever runs first drains the C2S queue
+and the other sees nothing, with no compile- or run-time signal. P7 folds the tables onto one transport
+and removes `ctx.net`; until then the guardrail is the header comment on `Server_TickUpdate`. `[orig:
+ADR 0011 single-owner connection table]`
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the

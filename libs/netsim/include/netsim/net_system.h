@@ -82,10 +82,11 @@ private:
 // npruntime's Server_TickUpdate (which fans over NapiNPProtocol.connection_list instead) so the
 // single owner decision (ADR 0011 / npruntime ROADMAP P4) keeps ONE drain/emit implementation. ---
 
-// Drain + read-apply the queued C2S 0x0C player uplinks on one connection's transport (the SNAP)
-// [orig: dispatch_entity_packet_callback @0x4D6A80 -> NetPacket_SerializePlayerState]. Only
-// sub_op 0x0A (extended) this increment; 0x0B compact is deferred.
-void drain_connection_c2s(world::World &world, ISessionTransport &transport);
+// Drain + read-apply the queued C2S 0x0C player uplinks on `conn`'s transport (the SNAP), gated on
+// the connection's owned entity [D-NET-119; orig: dispatch_entity_packet_callback @0x4D6A80 verifies
+// `entity == *owner_ctx` before NetPacket_SerializePlayerState]. Null transport is a no-op (symmetric
+// with emit_connection_s2c). Only sub_op 0x0A (extended) this increment; 0x0B compact is deferred.
+void drain_connection_c2s(world::World &world, const Connection &conn);
 
 // Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its owned entity (or
 // `fallback_anchor` when it has none), and host_send it onto that connection's transport. `ents`

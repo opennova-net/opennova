@@ -278,6 +278,63 @@ bool run_self_uplink_rejected() {
 	return true;
 }
 
+// (d) [D-NET-119] OWNER GATE: a connection may SNAP only its OWN entity. A 0x0C whose handle names a
+//     DIFFERENT peer (spoofed or stale) is silently ignored — even though that handle resolves to a
+//     live, non-local entity — and the gate ADMITS the same connection's uplink for its own entity, so
+//     it discriminates by owner rather than rejecting unconditionally [orig:
+//     dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx`].
+bool run_cross_peer_uplink_rejected() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle peer_a =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF1));
+	const w::EntityHandle peer_b =
+			w::spawn_remote_player(world, player_spawn({4.0f, 5.0f, 6.0f}, 0, 0xFFF2));
+	if (!expect(peer_a.valid() && peer_b.valid() && peer_a != peer_b, "two distinct peers spawned"))
+		return false;
+
+	// Connection A owns peer A. Its first uplink SPOOFS peer B's handle.
+	ns::NetSystem net;
+	ns::UdpSessionTransport udp_a(ns::UdpSessionTransport::Role::Host);
+	net.add_connection(ns::Connection{&udp_a, ns::TransportMode::Client, peer_a, 0});
+	ns::UdpSessionTransport udp_a_client(ns::UdpSessionTransport::Role::Client);
+	udp_a_client.client_send(0x0C, make_0c_uplink(peer_b.packed, w::to_fixed(999.0), 0, 0, 0x4000, 0));
+	carry(udp_a_client, udp_a);
+
+	w::TickContext ctx;
+	ctx.world = &world;
+	ctx.is_authority = true;
+	net.tick(world, ctx);
+	if (!expect(udp_a.inbound_pending() == 0, "spoofed 0x0C drained even when rejected")) return false;
+
+	// Peer B was NOT snapped by peer A's connection (owner gate), and peer A is untouched (its
+	// uplink named B, not A) — neither entity moved.
+	const w::Entity *be = world.registry.get(peer_b);
+	if (!expect(be != nullptr && be->position.x == 4.0f && be->position.y == 5.0f &&
+	                    be->position.z == 6.0f,
+	            "peer B pose NOT overwritten by peer A's spoofed uplink")) return false;
+	const w::Entity *ae = world.registry.get(peer_a);
+	if (!expect(ae != nullptr && ae->position.x == 1.0f && ae->position.y == 2.0f &&
+	                    ae->position.z == 3.0f,
+	            "peer A pose unchanged (its uplink named B, not A)")) return false;
+	const w::AiEntity *bae = ai.for_handle(peer_b);
+	if (!expect(bae != nullptr && !bae->net_is_remote_peer, "peer B not net-snapped by the spoof"))
+		return false;
+
+	// Positive control: the SAME connection naming its OWN entity (A) DOES snap A — proving the gate
+	// admits the owner, it does not reject every uplink.
+	udp_a_client.client_send(0x0C, make_0c_uplink(peer_a.packed, w::to_fixed(100.0), 0, 0, 0x0000, 0));
+	carry(udp_a_client, udp_a);
+	net.tick(world, ctx);
+	const w::Entity *ae2 = world.registry.get(peer_a);
+	if (!expect(ae2 != nullptr && ae2->position.x == 100.0f,
+	            "peer A snapped by ITS OWN connection's uplink (owner gate admits the owner)"))
+		return false;
+	return true;
+}
+
 // Retail loads .bms-resident pool-0 organics before network players. The listen-server path
 // therefore starts host/joiner player allocation at slot 4 so live 0x0A records do not collide
 // with the retail client's local pool-0 slots 0..3.
@@ -330,7 +387,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
-	                run_self_uplink_rejected() &&
+	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
