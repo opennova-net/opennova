@@ -109,6 +109,31 @@ suite unaffected.
 > block (we append novaworld name/url/nwuid). **Follow-up:** a `libs/novaworld` session-builder grill
 > (witness CI/MI/CS/game-server-block/LAN-CU-suppression in IDA) to reach full 0x81/0x82 byte-parity.
 
+> P2 follow-up fixes (grill 2026-06-26, docs/net §5.0a — D-NET-104/105/106): a code review of the
+> promotion found the join leg had only part of the witnessed `0x42` behavior. Now witnessed against
+> `Jointops.exe` and ported (all green):
+> 1. **Retransmit re-sends, never re-mints (D-NET-104).** `HandleClientJoin @0x62b750` FindConnection-s
+>    first; an already-joined node with matching CI+CK re-sends the cached `0x82` via
+>    `NapiNPConnection_SendSessionInit @0x620ef0` — the promoted legs were re-minting the SCRK/SK on
+>    every `0x42`, stalling joins on a normal lossy-UDP retransmit.
+> 2. **MI = the host-assigned ConnectionId/dcb (D-NET-105).** The `0x82` MI TLV carries `conn+0x18`
+>    (the join-order dcb `++protocol[947]`), the client adopts it and echoes it in its `0x48`, and the
+>    host stamps it into the joiner's `0x0C` `ownerConnectionId`. The host now assigns + ships MI +
+>    latches `self_id_seen` on a LAN listen host, and the bundled `JoinerConnection`/`JoinerSession`
+>    now read MI + emit the `0x48` — so the F3 streaming-entered gate finally trips for an opennova
+>    client (it was dead: the client never sent a `0x48`). This also closes the "MI is host-specific
+>    (retail 3 vs our 0x113f default)" parity gap noted above — MI is now the assigned dcb, not the
+>    placeholder.
+> 3. **Capacity gate (D-NET-106, npruntime only).** `handle_client_join` rejects a join when
+>    host-loopback + already-joined joiners `>= max_players` (`CNapiNetwork_ValidateJoinRequest
+>    @0x4c61b0`). The reject is modeled as a silent drop (the overlay-reject packet is not modeled
+>    yet). `libs/novaworld/host_session_accept.cpp` does NOT model the capacity layer and is left as a
+>    tracked divergence (retires at P8); fixes 1 & 2 ARE mirrored in both copies.
+>
+> Tests: `npruntime_handshake_server` gains `run_retransmit_0x42_keeps_keys` +
+> `run_capacity_rejects_when_full`; `npruntime_joiner_connection` now asserts the host surfaces F3 for
+> a real `JoinerConnection` (no test-crafted `0x48`). `npruntime|novaworld|netsim` all green.
+
 ### ▶ P3 — World bring-up + initial S2C burst (NEXT)
 `Server_InitNewRoundState → ProcessPendingPlayerSpawns → BuildPlayerInfoAndAdd → PlayerAdd`
 spawns the pool-0 player in `World` (ADR 0012; writes `entity+0x78` ownerConnectionId).

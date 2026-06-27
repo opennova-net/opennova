@@ -633,8 +633,10 @@ bool run_handshake_rejected_when_host_down() {
 bool run_listen_host_lifecycle() {
 	netsim::LoopbackChannel loopback;
 	np::NapiNPServerCtx ctx;
+	np::NapiGameSettings settings;
+	settings.max_players = 8; // co-op listen host: host loopback + up to 7 joiners (capacity gate)
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
-	                        kHostKey, &loopback);
+	                        kHostKey, &loopback, settings);
 
 	if (!expect(ctx.is_in_session == 1, "listen host is in session")) return false;
 	if (!expect(ctx.is_authority == 1 && ctx.is_mp_session_peer == 1, "HostClient = host + client")) return false;
@@ -668,6 +670,70 @@ bool run_listen_host_lifecycle() {
 	return true;
 }
 
+// Defect #1: a retransmitted 0x42 ClientAuth (normal lossy UDP) for an already-joined connection
+// must RE-SEND the cached ServerAuth, not re-mint the server SCRK/SK. A re-mint rotates the keys the
+// joiner already latched from the first 0x82, so its later 0x83s would fail to decrypt and the join
+// would silently stall. [orig: HandleClientJoin @0x62b750 — conn_state==1 && CI && CK match ->
+// NapiNPConnection_SendSessionInit @0x620ef0]
+bool run_retransmit_0x42_keeps_keys() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	const PeerAddr peer{0x0100007Fu, 30800};
+	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	const uint32_t ck = 0x12345678u;
+
+	auto first_auth = [&](uint32_t now, ServerAuth &out_sa) -> bool {
+		auto a = craft_auth("JointOperations", kHostKey, ck, scrk); // craft_auth uses CI = 1
+		auto r = np::handle_server_datagram(ctx, peer, a.data(), a.size(), now);
+		if (!expect(r.outbound.size() == 1, "0x42 -> one ServerAuth")) return false;
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		if (!expect(nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+		            op == SESSION_OPCODE_SERVER_AUTH, "0x42 reply decodes to 0x82")) return false;
+		return expect(parse_server_auth(body.data(), body.size(), out_sa), "0x82 parses");
+	};
+
+	ServerAuth sa1, sa2;
+	if (!first_auth(1, sa1)) return false;
+	if (!first_auth(2, sa2)) return false; // identical retransmit (same CI + CK)
+
+	// SK is server-minted per join (make_random_session_u32) — the meaningful regression teeth: it
+	// would change on a re-mint. SCRK and MI (the connection_id) must also be stable.
+	if (!expect(sa2.sk == sa1.sk, "retransmit re-sends the SAME ServerAuth SK (no re-mint)")) return false;
+	if (!expect(sa2.scrk == sa1.scrk, "retransmit re-sends the SAME ServerAuth SCRK (no re-mint)")) return false;
+	if (!expect(sa2.mi == sa1.mi, "retransmit re-sends the SAME MI (connection_id)")) return false;
+	if (!expect(np::connection_count(ctx) == 1, "retransmit does not create a second node")) return false;
+	return true;
+}
+
+// Defect #3: the join leg enforces capacity. A dedicated host with max_players == 2 admits two
+// joiners; the third 0x42 is rejected with no ServerAuth and no node. [orig:
+// CNapiNetwork_ValidateJoinRequest @0x4c61b0 — current_player_count >= max_players]
+bool run_capacity_rejects_when_full() {
+	np::NapiNPServerCtx ctx;
+	np::NapiGameSettings settings;
+	settings.max_players = 2; // dedicated host: two joiner slots, no host loopback
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey,
+	                        nullptr, settings);
+	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+
+	auto join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
+		auto a = craft_auth("JointOperations", kHostKey, ck, scrk);
+		return np::handle_server_datagram(ctx, p, a.data(), a.size(), now);
+	};
+
+	if (!expect(join(PeerAddr{0x0100007Fu, 32001}, 0x1111u, 1).outbound.size() == 1,
+	            "joiner 1 admitted (ServerAuth)")) return false;
+	if (!expect(join(PeerAddr{0x0100007Fu, 32002}, 0x2222u, 2).outbound.size() == 1,
+	            "joiner 2 admitted (ServerAuth)")) return false;
+	if (!expect(np::connection_count(ctx) == 2, "two joiners fill the server")) return false;
+
+	auto r3 = join(PeerAddr{0x0100007Fu, 32003}, 0x3333u, 3);
+	if (!expect(r3.outbound.empty(), "over-capacity 0x42 produces no ServerAuth")) return false;
+	if (!expect(np::connection_count(ctx) == 2, "over-capacity join creates no node")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -679,5 +745,7 @@ int main() {
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
 	ok = run_listen_host_lifecycle() && ok;
+	ok = run_retransmit_0x42_keeps_keys() && ok;
+	ok = run_capacity_rejects_when_full() && ok;
 	return ok ? 0 : 1;
 }

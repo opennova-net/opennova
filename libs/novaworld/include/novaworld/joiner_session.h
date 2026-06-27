@@ -133,6 +133,9 @@ private:
 	std::string server_scrk_;  // ServerAuth.scrk; decrypts inbound 0x83 inner stream
 	uint32_t server_hk_ = 0;   // ServerHello.hk — echoed in ClientAuth.hk
 	uint32_t server_sk_ = 0;   // ServerAuth.sk — session_id on our outbound 0x43s
+	uint32_t connection_id_ = 0; // ServerAuth.mi — our host-assigned ConnectionId (dcb); echoed in
+	                             // the 0x48 client-ack so the host stamps it into our 0x0C
+	                             // ownerConnectionId [orig: NapiNP_GetLocalConnectionId @0x4c6d40]
 	uint32_t next_outbound_seq_ = 1; // 1-based, matching retail's first 0x43 seq
 	uint32_t last_inbound_seq_ = 0;
 

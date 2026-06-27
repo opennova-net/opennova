@@ -204,7 +204,14 @@ std::vector<CsField> default_server_cs_fields();
 
 struct ServerAuth {
 	uint32_t ci = 0;      // echo client.ci
-	uint32_t mi = 0x113fu; // Machine ID — retail capture pcap1 frame 28 = 4415 (0x113f); was 15582 from onnet, but retail's value disagrees so we follow the wire.
+	uint32_t mi = 0x113fu; // MI TLV = the host-assigned ConnectionId (dcb), NOT a "machine id": the
+	                       // client stores it as its own NapiNPConnection.connection_id (+0x18,
+	                       // NapiNP_GetLocalConnectionId @0x4c6d40) and the host stamps it into the
+	                       // joiner's 0x0C ownerConnectionId (+0x78) for Player_FindLocalPlayerEntity
+	                       // @0x4e0090. Host-assigned join-order on LAN [orig: ++protocol[947] @
+	                       // NapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
+	                       // the 0x113f default is a placeholder for callers that don't set it. Retail
+	                       // LAN capture frame 28 = 3 (= the 0x48 ack = the 0x0C eFlags).
 	uint32_t ck = 0;      // echo client.ck
 	uint32_t cr = 1;      // Connection Result (1 = OK)
 	uint32_t sk = 0;      // Server Key (server-generated)

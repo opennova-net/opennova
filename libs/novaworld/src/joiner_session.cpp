@@ -16,6 +16,7 @@ std::vector<uint8_t> JoinerSession::start() {
 	client_scrk_ = make_dev_scrk();
 	server_hk_ = 0;
 	server_sk_ = 0;
+	connection_id_ = 0;
 	server_scrk_.clear();
 	next_outbound_seq_ = 1;
 	last_inbound_seq_ = 0;
@@ -128,6 +129,9 @@ void JoinerSession::on_server_auth(const std::vector<uint8_t> &body, PollResult 
 	}
 	server_sk_ = sa.sk;          // session_id for our outbound 0x43s
 	server_scrk_ = sa.scrk;      // decrypts inbound 0x83 inner streams
+	connection_id_ = sa.mi;      // [orig: 0x82 MI TLV = the host-assigned dcb; we store it as our own
+	                             // ConnectionId and echo it in the 0x48 ack so the host stamps it
+	                             // into our 0x0C ownerConnectionId (NapiNP_GetLocalConnectionId @0x4c6d40)]
 	phase_ = Phase::Driving;
 	// NO auto-emit here (unlike ClientSession's lobby kick). pump() drives the
 	// in-match spawn-gate burst; the game connection has no lobby-verify leg.
@@ -180,9 +184,19 @@ std::vector<std::vector<uint8_t>> JoinerSession::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
 	if (phase_ != Phase::Driving) return out; // only the pre-spawn drive window
 	switch (pump_stage_) {
-	case 0: // mission request — begins world streaming
-		out.push_back(frame_session({make_protocol_message(0x37, {})}));
+	case 0: { // 0x48 client-ack (echo our host-assigned ConnectionId from the 0x82 MI) + 0x37 mission
+	          // request (begins world streaming). The host stamps our dcb into our 0x0C
+	          // ownerConnectionId from this ack (F3); bundling it with the first driving packet keeps
+	          // it "before world streaming" as witnessed. [orig: client 0x48 ConnectionId ack]
+		const uint32_t id = connection_id_;
+		std::vector<uint8_t> ack = {static_cast<uint8_t>(id), static_cast<uint8_t>(id >> 8),
+		                            static_cast<uint8_t>(id >> 16), static_cast<uint8_t>(id >> 24)};
+		out.push_back(frame_session({
+				make_protocol_message(0x48, std::move(ack)),
+				make_protocol_message(0x37, {}),
+		}));
 		break;
+	}
 	case 1: // transition marker
 		out.push_back(frame_session({make_protocol_message(0x09, {})}));
 		break;

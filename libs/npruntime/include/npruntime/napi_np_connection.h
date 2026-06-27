@@ -76,6 +76,9 @@ struct NapiNPConnection {
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
 	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C
+	uint32_t client_ci = 0;        // ClientAuth.ci — with client_ck, the retransmit-match key the join
+	                               // leg compares a repeat 0x42 against [orig: session_keys.client_id
+	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
 	uint32_t next_outbound_seq = 1;
 	uint32_t last_inbound_seq = 0;

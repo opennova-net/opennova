@@ -12,6 +12,8 @@
 
 namespace opennova {
 
+struct ClientAuth; // session_hello.h — used by build_auth_reply below
+
 // Host-side accept of a JointOperations in-match join — socket-free and
 // Godot-agnostic. This is the consolidated reimpl of the opcode switch that
 // used to live ONLY inside apps/novaworld_server's run_loop: both the
@@ -138,6 +140,8 @@ private:
 		std::string client_scrk;    // ClientAuth.scrk — decrypts inbound 0x43
 		std::string server_scrk;    // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 		uint32_t client_ck = 0;     // ClientAuth.ck → session_id on our S2C
+		uint32_t client_ci = 0;     // ClientAuth.ci — with client_ck, the retransmit-match key a repeat
+		                            // 0x42 is compared against [orig: HandleClientJoin @0x62b750]
 		uint32_t server_sk = 0;     // our ServerAuth.SK
 		uint32_t next_outbound_seq = 1;
 		uint32_t last_inbound_seq = 0;
@@ -153,9 +157,17 @@ private:
 	HostJoinerPose pose_from_session(const GameSessionState &gss) const;
 	std::vector<uint8_t> frame_session_replies(PeerState &state,
 	                                           const std::vector<ProtocolMessage> &replies);
+	// Build a 0x82 ServerAuth datagram from `state`'s CURRENT keys (server_sk/server_scrk/self_id):
+	// used for a fresh join AND to re-send on a retransmitted 0x42 without re-minting.
+	std::vector<uint8_t> build_auth_reply(const PeerState &state, const ClientAuth &auth,
+	                                      const PeerAddr &peer);
 
 	GameServerRuntime game_runtime_;
 	std::unordered_map<PeerAddr, PeerState, PeerAddrHash> peers_;
+	// [orig: ++protocol[947] @ NapiNPConnection_Create 0x62acb0] monotonic, non-zero dcb source.
+	// The host assigns each joiner's ConnectionId (PeerState.self_id) from this, ships it as the
+	// 0x82 MI, and stamps it into the joiner's 0x0C ownerConnectionId (the F3 self-match value).
+	uint32_t next_connection_id_ = 1;
 };
 
 } // namespace opennova

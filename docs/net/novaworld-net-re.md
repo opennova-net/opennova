@@ -577,6 +577,66 @@ replication loop in every case, which is why §5.1–§5.17 run identically unde
   items, §6.1) — the "magic = build/version stamp" guess should be re-examined as a possible
   pointer to this default-string global.
 
+### 5.0a — Join-leg lifecycle fixes (grill 2026-06-26; D-NET-104/105/106)
+
+A code review of the `libs/npruntime` P0–P2 promotion surfaced three places where the promoted
+handshake legs had only *part* of the witnessed `0x42` join behavior. All three are now witnessed
+against `Jointops.exe` and ported; the in-match flow is `0x41 → 0x81`, `0x42 → 0x82`,
+`0x43 → 0x83` (§5.0 / §3).
+
+- **D-NET-104 — a retransmitted `0x42` re-sends the cached ServerAuth, it does NOT re-mint.**
+  `[orig: NapiNPProtocol_HandleClientJoin @ 0x62b750]` does `FindConnection(proto, 1, addr, port)`
+  first and branches: if the found connection is `conn_state == 1` **and** `session_keys.client_id
+  == CI` (`0x7DFCBC`) **and** `session_keys.remote_key == CK` (`0x7DFD6C`), it calls
+  `[orig: NapiNPConnection_SendSessionInit @ 0x620ef0]` — which re-emits the *same* `0x82` from the
+  connection's stored keys — and returns. Only a connection with a **different** CI/CK (a new client
+  reusing the addr) is `[orig: NapiNPConnection_Destroy @ 0x62a4b0]`-ed and recreated. The promoted
+  legs were unconditionally re-minting `server_scrk`/`server_sk` on every `0x42`, so a normal lossy-UDP
+  ClientAuth retransmit rotated the session keys the joiner had already latched from the first `0x82`
+  → all later `0x83` failed to decrypt → silent join stall. **Reimpl:** `handle_client_join`
+  (npruntime) / `HostSessionAccept` `CLIENT_AUTH` (novaworld) now find-first, re-send on a
+  CI+CK-matching already-joined node, and only recreate on a genuine different-client collision.
+  CI/CK are stored on the connection (`client_ci`/`client_ck`) for the match.
+
+- **D-NET-105 — the `0x82` MI TLV is the host-assigned ConnectionId (the dcb), not a "machine id".**
+  `[orig: NapiNPConnection_SendSessionInit @ 0x620ef0]` writes the `MI` TLV (`0x7DFDF4`) from
+  `conn->connection_id` (`+0x18`); the connection's `connection_id` is the join-order dcb assigned at
+  `[orig: NapiNPConnection_Create @ 0x62acb0]` from `++protocol[947]` (the non-zero, wrapping
+  per-protocol counter at `+0xECC`). The **client** stores the received MI as its own
+  `NapiNPConnection.connection_id` (`+0x18`, read back by `[orig: NapiNP_GetLocalConnectionId @
+  0x4c6d40]`) and echoes it in its in-match `0x48` client-ack; the host stamps that id into the
+  joiner's `0x0C` `ownerConnectionId` (`+0x78`), which the client self-matches in
+  `[orig: Player_FindLocalPlayerEntity @ 0x4e0090]` (`Flags & 0x100 && ownerConnectionId == own id`).
+  Wire proof: the working retail LAN join had `MI(0x82) == 0x48-ack == 0x0C eFlags == 3` (all the same
+  join-order id). The promoted legs left MI at the `0x113f` placeholder, the client mirror never read
+  MI, and the bundled `JoinerConnection`/`JoinerSession` never emitted a `0x48` — so the host's
+  `self_id_seen` latch (the F3 streaming-entered gate) never tripped for an opennova client and F3 was
+  dead (the "Could not find player dcb" class — D-NET-92/101). **Reimpl:** on a LAN listen host the
+  host *assigns* the dcb at the `0x42`, ships it as MI, and latches `self_id_seen` on its own
+  assignment (it does not wait for the client); the client adopts MI as its own ConnectionId and
+  echoes it in a `0x48` (bundled with the `0x37` mission request). The existing `0x48`-learning path
+  is retained as the override for the NovaWorld case, where the dcb is gate-assigned, not
+  host-assigned (TODO(P6): gate the host-assignment on the LAN network type once NovaWorld transport
+  lands). This refines, but does not contradict, D-NET-92 (the client self-ID is numeric in retail;
+  the opennova `JoinerConnection` keeps its name-match per the ROADMAP).
+
+- **D-NET-106 — the join leg enforces capacity (`current_player_count >= max_players`).**
+  `[orig: CNapiNetwork_ValidateJoinRequest @ 0x4c61b0]` (installed as the join-validate callback by
+  `[orig: CNapiGameSession_CreateSession @ 0x4c97c0]`, invoked at the `0x42` join) rejects when
+  `networkCtx[11]` (current player count) `>= networkCtx[970]` (`max_players`, `+0xF28`; plus
+  `networkCtx[972]` spectator slots when `networkCtx[971]` spectator-enabled). It also rejects on
+  server-locked (`dword_C94794`, reason 2) and ban-list (`dword_C8FF28`, reason 3); a full server is
+  reason **4** (or **5** with spectators), overlay state **14**. The promoted legs admitted on
+  `is_authority && host_running` only, never reading the stored `max_players`. **Reimpl (npruntime
+  only):** `handle_client_join` rejects a new join when (host loopback + already-`Joined` joiners,
+  excluding the joining peer) `>= max_players`. Modeled as a silent drop (no ServerAuth, no node) —
+  consistent with the other `0x42` reject legs; the witnessed draw-overlay reject packet (state 14 /
+  reason 4) is **not modeled yet** (tracked divergence). **Copy divergence:** the capacity gate lives
+  only in npruntime, which models the `NapiNPProtocol.max_players` / CNapiNetwork capacity layer;
+  `libs/novaworld/host_session_accept.cpp` is the pre-`NapiNPProtocol` simplified copy (no
+  `max_players` model) and does NOT enforce capacity — it retires at ROADMAP P8 when npruntime takes
+  over. D-NET-104/105 *are* mirrored in both copies.
+
 ### 5.1 Loading-progress counter — `dword_A82370`
 
 The server walks the client's loading progress up via specific S2C tags. Each handler

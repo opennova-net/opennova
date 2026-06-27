@@ -89,6 +89,14 @@ struct NapiNPProtocol {
 	uint32_t host_stop_tick = 0;        // [orig +0x540] GetTickCount at StopServer
 	uint32_t host_run_duration_ms = 0;  // [orig +0x544] stop - start, frozen post-stop
 
+	// [orig +0xECC: protocol[947]] Monotonic, non-zero connection-id source. NapiNPConnection_Create
+	// @0x62acb0 stamps each new connection's dcb (connection_id, +0x18) from ++protocol[947] (wrapping
+	// 0 -> 1). On a LAN listen host the host ASSIGNS this dcb, ships it in the 0x82 ServerAuth MI TLV
+	// [orig: NapiNPConnection_SendSessionInit @0x620ef0], and stamps it into the joiner's 0x0C
+	// ownerConnectionId so the client's Player_FindLocalPlayerEntity @0x4e0090 numeric self-match
+	// (entity+0x78 == NapiNP_GetLocalConnectionId @0x4c6d40) succeeds.
+	uint32_t next_connection_id = 1;
+
 	// [orig +0x288] the session/server name ("HOST STARTED \"%s\"" log; lobby-visible).
 	std::string session_name;
 

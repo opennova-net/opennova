@@ -133,6 +133,10 @@ void JoinerConnection::on_server_auth(const std::vector<uint8_t> &body, PollResu
 	}
 	conn_.server_sk = sa.sk;      // session_id for our outbound 0x43s
 	conn_.server_scrk = sa.scrk;  // decrypts inbound 0x83 inner streams
+	conn_.connection_id = sa.mi;  // [orig: 0x82 MI TLV = the host-assigned dcb/ConnectionId; the
+	                              // client stores it on its own NapiNPConnection (+0x18,
+	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
+	                              // client-ack so the host stamps it into our 0x0C ownerConnectionId]
 	phase_ = Phase::Driving;
 	// NO auto-emit here. pump() drives the in-match spawn-gate burst; the game connection has no
 	// lobby-verify leg.
@@ -185,9 +189,20 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	std::vector<std::vector<uint8_t>> out;
 	if (phase_ != Phase::Driving) return out; // only the pre-spawn drive window
 	switch (pump_stage_) {
-	case 0: // mission request — begins world streaming
-		out.push_back(frame_session({make_protocol_message(0x37, {})}));
+	case 0: { // 0x48 client-ack (echo our host-assigned ConnectionId, learned from the 0x82 MI) +
+	          // 0x37 mission request (begins world streaming). The host stamps our dcb into our 0x0C
+	          // ownerConnectionId from this ack (F3); bundling it with the first driving packet keeps
+	          // it "before world streaming" as witnessed (capture: ack precedes the world stream).
+	          // [orig: client 0x48 ConnectionId ack]
+		const uint32_t id = conn_.connection_id;
+		std::vector<uint8_t> ack = {static_cast<uint8_t>(id), static_cast<uint8_t>(id >> 8),
+		                            static_cast<uint8_t>(id >> 16), static_cast<uint8_t>(id >> 24)};
+		out.push_back(frame_session({
+				make_protocol_message(0x48, std::move(ack)),
+				make_protocol_message(0x37, {}),
+		}));
 		break;
+	}
 	case 1: // transition marker
 		out.push_back(frame_session({make_protocol_message(0x09, {})}));
 		break;

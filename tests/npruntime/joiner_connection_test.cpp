@@ -149,14 +149,39 @@ bool run() {
 	}
 
 	// --- 3) Drive the in-match spawn-gate burst (pump stages + host ticks) ---
-	auto drive_stage = [&](int stage_ticks, uint32_t tick_base) {
-		for (auto &d : joiner.pump(tick)) np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
-		for (int i = 0; i < stage_ticks; ++i)
-			np::tick_connections(ctx, 300, tick_base + static_cast<uint32_t>(i));
+	// Capture the host's F3 event (PeerEnteredWorldStreaming) — the regression guard for Defect #2.
+	// A real JoinerConnection emits its own 0x48 ConnectionId ack (bundled with the 0x37 mission
+	// request) and the host latches the host-assigned dcb on the 0x42, so the host surfaces F3 during
+	// world streaming WITHOUT any test-crafted 0x48. Before the fix, JoinerConnection sent no 0x48,
+	// the host's self_id_seen latch never tripped, and F3 was dead for the bundled client (the
+	// "Could not find player dcb" class of bug F3 exists to prevent).
+	bool got_stream = false;
+	uint32_t stream_self_id = 0;
+	auto note_event = [&](const np::HostAcceptEvent &e) {
+		if (e.kind == np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming && !got_stream) {
+			got_stream = true;
+			stream_self_id = e.self_id;
+		}
 	};
-	drive_stage(40, 1000); // 0x37 mission request -> climb entity_batch_count via streaming
+	auto drive_stage = [&](int stage_ticks, uint32_t tick_base) {
+		for (auto &d : joiner.pump(tick)) {
+			auto r = np::handle_server_datagram(ctx, peer, d.data(), d.size(), tick++);
+			for (const auto &e : r.events) note_event(e);
+		}
+		for (int i = 0; i < stage_ticks; ++i)
+			for (const auto &t : np::tick_connections(ctx, 300, tick_base + static_cast<uint32_t>(i)))
+				for (const auto &e : t.events) note_event(e);
+	};
+	drive_stage(40, 1000); // 0x48 ack + 0x37 mission request -> climb entity_batch_count via streaming
 	drive_stage(6, 2000);  // 0x09 transition marker
 	drive_stage(1, 2500);  // 0x22 player-sync ack
+
+	if (!expect(got_stream,
+	            "host surfaces F3 PeerEnteredWorldStreaming for a real JoinerConnection (no manual 0x48)"))
+		return false;
+	if (!expect(stream_self_id != 0,
+	            "F3 carries the joiner's host-assigned ConnectionId (0x82 MI / 0x48 ack), not 0"))
+		return false;
 
 	// stage 3 = the 0x2F/0x2F/0x0B burst that trips the spawn gate -> PeerSpawned.
 	const np::HostAcceptEvent *spawn = nullptr;

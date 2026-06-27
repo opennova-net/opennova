@@ -51,6 +51,35 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	return ctx.np_protocol.connection_list.back();
 }
 
+// Drop the node keyed by `peer` from connection_list, if present (the goodbye-erase + the
+// HandleClientJoin "destroy a stale node before recreating" path [orig: NapiNPConnection_Destroy
+// @0x62a4b0]).
+void erase_connection(NapiNPServerCtx &ctx, const PeerAddr &peer) {
+	auto &list = ctx.np_protocol.connection_list;
+	for (auto it = list.begin(); it != list.end(); ++it) {
+		if (it->peer == peer) {
+			list.erase(it);
+			return;
+		}
+	}
+}
+
+// Build + frame a 0x82 ServerAuth for `conn` from its CURRENT keys (server_sk / server_scrk /
+// connection_id). Used for a fresh join AND to re-send on a retransmitted 0x42 (the original
+// re-sends the cached packet via NapiNPConnection_SendSessionInit @0x620ef0 rather than re-minting).
+std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const ClientAuth &auth,
+                                               const PeerAddr &peer, const NapiNPConnection &conn) {
+	const std::string nwuid =
+			ctx.server_key_mint.forced ? ctx.server_key_mint.nwuid : make_dev_nwuid();
+	ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, conn.server_sk, conn.server_scrk,
+	                                     ctx.server_key_mint.novaworld_name,
+	                                     ctx.server_key_mint.novaworld_web_url, nwuid);
+	// [orig: 0x82 MI TLV = conn->connection_id @ NapiNPConnection_SendSessionInit 0x620ef0] — the
+	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
+	reply.mi = conn.connection_id;
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
+}
+
 HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const GameSessionState &gss) {
 	// [orig: HostSessionAccept::pose_from_session]
 	HostJoinerPose p;
@@ -144,30 +173,79 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// HK echo: the joiner must echo the host key it learned in ServerHello.hk. Checked only when the
 	// host has a key set (a deterministic 0 seed means "unchecked", matching P1's pass-in startup).
 	if (ctx.np_protocol.host_key != 0 && auth.hk != ctx.np_protocol.host_key) return; // wrong host key
+
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] FindConnection, then branch on what it found.
+	// (Unlike retail — where the 0x41 leaves no persisted connection so the 0x42 always Creates —
+	// our handle_client_hello persists a HelloReceived node carrying the joiner's name; the normal
+	// first 0x42 therefore ADVANCES that node in place below, and only a genuine retransmit or a
+	// different client reusing the addr take the re-send / destroy paths.)
+	if (NapiNPConnection *existing = find_connection(ctx, peer);
+	    existing != nullptr && existing->phase >= ConnectionPhase::Joined) {
+		// Retransmitted 0x42 from the SAME client (matching CI + CK) on an already-joined connection:
+		// re-send the cached ServerAuth, do NOT re-mint. Re-minting would rotate the server SCRK/SK
+		// the joiner already latched from the first 0x82, so every later S2C 0x83 would fail to
+		// decrypt and the join would silently stall. [orig: conn_state == 1 &&
+		// session_keys.client_id == CI && session_keys.remote_key == CK ->
+		// NapiNPConnection_SendSessionInit @0x620ef0 (re-emits the same 0x82), return 1]
+		if (existing->client_ci == auth.ci && existing->client_ck == auth.ck) {
+			out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, *existing));
+			return;
+		}
+		// A different client (CI/CK) reusing an already-joined addr: drop the stale node and recreate
+		// fresh below. [orig: NapiNPConnection_Destroy then NapiNPConnection_Create]
+		erase_connection(ctx, peer);
+	}
+
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
+	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
+	// is already full: the witnessed gate rejects on current_player_count >= max_players (CNapiNetwork
+	// +0xF28; spectator slots add in when enabled). The player count is the host's own type-2 loopback
+	// (when present) plus already-admitted (>= Joined) joiners — matching networkCtx[11], which counts
+	// added players and the host but not this still-joining peer's pre-join Hello node. Retail replies
+	// with a draw-overlay reject (state 14, reason 4 "server full"); we model the reject as a silent
+	// drop + no node (consistent with the other 0x42 reject legs) — the overlay-reject packet is not
+	// modeled yet (tracked: D-NET overlay-reject).
+	std::size_t occupied = 0;
+	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.peer == peer) continue; // this joiner does not count against itself
+		if (c.type == 2 || c.phase >= ConnectionPhase::Joined) ++occupied;
+	}
+	if (occupied >= ctx.np_protocol.max_players) {
+		erase_connection(ctx, peer); // drop this peer's pre-join Hello node — the join is rejected
+		return;                      // server full
+	}
+
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
+	// The 0x42 also carries the joiner's name (CO) — keep the Hello node's name when present, else
+	// adopt the auth's (covers a fresh recreate where no Hello node survived).
+	if (conn.player_name.empty() && !auth.co.empty()) conn.player_name = auth.co;
 	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
 	// in ServerAuth so the client can read our replies.
 	conn.client_scrk = auth.scrk;
 	conn.client_ck = auth.ck;
+	conn.client_ci = auth.ci;
+	// [orig: NapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
+	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
+	// client), so latch self_id_seen now: the F3 streaming-entered gate no longer waits for the
+	// joiner's 0x48 client-ack (the bundled np::JoinerConnection still sends one, and on NovaWorld
+	// the gate-assigned id arrives via that 0x48 and overrides this in handle_client_session).
+	// TODO(P6): gate this on the LAN network type when NovaWorld transport lands — on NovaWorld the
+	// dcb is gate-assigned, not host-assigned.
+	conn.connection_id = ctx.np_protocol.next_connection_id++;
+	if (ctx.np_protocol.next_connection_id == 0) ctx.np_protocol.next_connection_id = 1; // wrap 0 -> 1
+	conn.self_id_seen = true;
 	// R2: mint the server SCRK / SK randomly (retail) unless a deterministic source is forced
-	// (golden byte-parity). [orig: make_dev_scrk / make_random_session_u32 / make_dev_nwuid]
-	std::string nwuid;
+	// (golden byte-parity). [orig: make_dev_scrk / make_random_session_u32]
 	if (ctx.server_key_mint.forced) {
 		conn.server_scrk = ctx.server_key_mint.server_scrk;
 		conn.server_sk = ctx.server_key_mint.server_sk;
-		nwuid = ctx.server_key_mint.nwuid;
 	} else {
 		conn.server_scrk = make_dev_scrk();
 		conn.server_sk = make_random_session_u32();
-		nwuid = make_dev_nwuid();
 	}
 	conn.phase = ConnectionPhase::Joined;
-	ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, conn.server_sk, conn.server_scrk,
-	                                     ctx.server_key_mint.novaworld_name,
-	                                     ctx.server_key_mint.novaworld_web_url, nwuid);
-	out.outbound.push_back(
-			nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply)));
+	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;
 	ev.peer = peer;
@@ -276,13 +354,7 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // 0x46 ClientGoodbye. [orig: Nwu_HandleClientGoodbye @0x624250]
 void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleResult &out) {
 	if (ctx.game_runtime) ctx.game_runtime->reset_session(peer_session_id(peer));
-	auto &list = ctx.np_protocol.connection_list;
-	for (auto it = list.begin(); it != list.end(); ++it) {
-		if (it->peer == peer) {
-			list.erase(it);
-			break;
-		}
-	}
+	erase_connection(ctx, peer);
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
 	ev.peer = peer;

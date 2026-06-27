@@ -57,6 +57,19 @@ HostJoinerPose HostSessionAccept::pose_from_session(const GameSessionState &gss)
 	return p;
 }
 
+std::vector<uint8_t> HostSessionAccept::build_auth_reply(const PeerState &state,
+                                                        const ClientAuth &auth,
+                                                        const PeerAddr &peer) {
+	ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, state.server_sk, state.server_scrk,
+	                                     /*novaworld_name=*/"NWServer",
+	                                     /*novaworld_web_url=*/"http://127.0.0.1:8080",
+	                                     /*nwuid=*/make_dev_nwuid());
+	// [orig: 0x82 MI TLV = conn->connection_id @ NapiNPConnection_SendSessionInit 0x620ef0] — the
+	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
+	reply.mi = state.self_id;
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
+}
+
 std::vector<uint8_t> HostSessionAccept::frame_session_replies(
 		PeerState &state, const std::vector<ProtocolMessage> &replies) {
 	// [orig: SESSION reply build apps/novaworld_server/nw_udp_listener.cpp:606-627]
@@ -111,20 +124,41 @@ HostSessionAccept::HandleResult HostSessionAccept::handle_datagram(
 	case SESSION_OPCODE_CLIENT_AUTH: {
 		ClientAuth auth;
 		if (!parse_client_auth(body.data(), body.size(), auth)) break;
-		PeerState &st = peers_[peer];
+		// [orig: NapiNPProtocol_HandleClientJoin @0x62b750] FindConnection, then branch on it.
+		if (auto it = peers_.find(peer); it != peers_.end() && !it->second.server_scrk.empty()) {
+			// An already-joined connection on this addr (server_scrk minted).
+			if (it->second.client_ci == auth.ci && it->second.client_ck == auth.ck) {
+				// Retransmitted 0x42 from the SAME client: re-send the cached ServerAuth, do NOT
+				// re-mint. Re-minting would rotate the SCRK/SK the joiner already latched from the
+				// first 0x82, so every later S2C 0x83 would fail to decrypt and the join would stall.
+				// [orig: conn_state==1 && CI && CK match -> NapiNPConnection_SendSessionInit @0x620ef0]
+				out.outbound.push_back(build_auth_reply(it->second, auth, peer));
+				break;
+			}
+			// A different client (CI/CK) reusing the addr: drop the stale peer + recreate fresh.
+			// [orig: NapiNPConnection_Destroy then NapiNPConnection_Create]
+			peers_.erase(it);
+		}
+		PeerState &st = peers_[peer]; // advance the HelloReceived peer, or create fresh
 		if (st.session_id.empty()) st.session_id = peer_session_id(peer);
+		// The 0x42 also carries the joiner's name (CO) — keep the Hello's when present.
+		if (st.player_name.empty() && !auth.co.empty()) st.player_name = auth.co;
 		// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound
 		// SESSION and is echoed in ServerAuth so the client can read our replies.
 		st.client_scrk = auth.scrk;
-		st.server_scrk = make_dev_scrk();
 		st.client_ck = auth.ck;
+		st.client_ci = auth.ci;
+		// [orig: NapiNPConnection_Create @0x62acb0 — connection_id = ++protocol[947]]. A LAN listen
+		// host ASSIGNS the joiner's dcb (it does not learn it from the client), ships it in the 0x82
+		// MI, and latches self_id_seen so the F3 streaming-entered gate no longer waits for the 0x48
+		// client-ack (the client still echoes it, and on NovaWorld the gate-assigned id overrides
+		// this in the 0x48 handler below).
+		st.self_id = next_connection_id_++;
+		if (next_connection_id_ == 0) next_connection_id_ = 1; // wrap 0 -> 1
+		st.self_id_seen = true;
+		st.server_scrk = make_dev_scrk();
 		st.server_sk = make_random_session_u32();
-		ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, st.server_sk,
-		                                     st.server_scrk, /*novaworld_name=*/"NWServer",
-		                                     /*novaworld_web_url=*/"http://127.0.0.1:8080",
-		                                     /*nwuid=*/make_dev_nwuid());
-		out.outbound.push_back(
-				nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply)));
+		out.outbound.push_back(build_auth_reply(st, auth, peer));
 		HostAcceptEvent ev;
 		ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;
 		ev.peer = peer;
