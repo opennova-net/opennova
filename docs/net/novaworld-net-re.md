@@ -3520,6 +3520,15 @@ at DcbId, (3) leave a player's DcbId/Ssn at 0 and identify it by handle + ownerC
 present already does via `cached.local_player`), (4) delete `allocate_player_net_id`.** This is a
 world/ai/wac/mission-wide reconciliation with its own test surface — a dedicated, test-driven session.
 
+**Why the fix is genuinely multi-site (final scope, 2026-06-27).** The reimpl's player net_id is NOT
+purely internal: the present surfaces it as `PF_NET_ID` (`nova_simulation.cpp:1662`) and — because a
+player has no BMS `(kind,index)` origin — the **player AVATAR is host-managed BY net_id** (the stable
+per-player key across frames; `nova_listen_server_test.gd:88-99`). Four GUT tests assert the high-band
+ids directly (`nova_listen_server` 0xFFF0, `host_session_accept_gut`/`coop_two_sim` 0xFFEF, plus
+`nova_simulation_test`). So step (3) above must ALSO migrate the present/avatar stable-key + those GUT
+tests from net_id to ownerConnectionId(dcb)+handle. Setting player net_id=0 naively breaks the avatar
+tracking + those tests — which is precisely why this is a dedicated session, not an inline edit.
+
 **D-NET-113** [behavior, MATCHING] **Player team assignment.** `Server_AssignPlayerTeam @0x4fe310`
 (called from `Server_PlayerAdd`, writes `playerSlot+416`):
 - spectator (`+100567 && is_in_session`) → team **0**;
