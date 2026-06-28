@@ -3490,6 +3490,23 @@ is a deliberate divergence pending a faithful multi-field id model; the prior co
 (uint16 overflow past 16 players + reuse-after-disconnect) is fixed by the downward collision-
 checked scan. `[orig: Server_PlayerAdd @0x51cbc0; serialize_entity_states_to_packet @0x50f070]`
 
+**Wave 4 grill (2026-06-27) — the faithful fix, fully scoped.** Re-grilled `Server_PlayerAdd @0x51cbc0`
++ `find_by_net_id` usage. The original NEVER registers a player in the SSN / `find_by_net_id` space:
+that space is the WAC/BMS mission-entity addressing (our `world.cpp` `set_ssn_*`/`kill_ssn` all
+`find_by_net_id(ssn)`); authored mission entities have a real SSN, players do not. A player is
+identified three ways, none of which is our collapsed `net_id`: (1) **wire** = the pool HANDLE
+`pool<<12|slot` (the 0x0C/0x0A bridge already uses this); (2) **client self-match** =
+`entity+0x78 ownerConnectionId/dcb` (`Player_FindLocalPlayerEntity @0x4e0090` vs
+`NapiNP_GetLocalConnectionId`), already modeled as `Entity.owner_connection_id`; (3) the separate
+`NetId@0x15c` for the 0x51 body. Our `allocate_player_net_id` exists ONLY because the **present pass /
+nova_simulation keys the local player on `Entity.net_id == 0xFFF0`**. **Faithful fix (DEEP, dedicated
+test-driven session):** migrate the present-pass / local-player identification from `net_id` to
+`owner_connection_id` (+ handle), then free `Entity.net_id` to its real value (0 for a player, so it
+stays out of the WAC SSN space) and DELETE `allocate_player_net_id`. Touches libs/world spawn +
+libs/netsim bridge + nova_simulation present + the GUT listen-server/present tests — hence not done
+inline (no-regression discipline). The current allocator is WIRE-CORRECT (handle-based wire identity),
+so this is internal-fidelity debt, not a wire bug.
+
 **D-NET-113** [behavior, MATCHING] **Player team assignment.** `Server_AssignPlayerTeam @0x4fe310`
 (called from `Server_PlayerAdd`, writes `playerSlot+416`):
 - spectator (`+100567 && is_in_session`) → team **0**;
