@@ -155,7 +155,7 @@ int main() {
 
 	// --- 0x82 leg: replay the REAL golden ClientAuth datagram through handle_client_join. ---
 	auto r82 = np::handle_server_datagram(ctx, peer, raw42.data(), raw42.size(), 2);
-	if (!expect(r82.outbound.size() == 1, "0x42 -> one ServerAuth")) return 1;
+	if (!expect(r82.outbound.size() >= 1, "0x42 -> ServerAuth + post-handshake")) return 1;
 	std::vector<uint8_t> o82;
 	{
 		uint8_t op = 0;

@@ -61,6 +61,18 @@ struct InitialStateBurst {
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
+	bool     loadout_received = false;  // C2S 0x2F (loadout request) received — gates the game-start
+	                                    // bundle (phase 8). Golden: 0x1A (end of world-stream, f316) ->
+	                                    // client sends 0x2F (f317) -> server replies 0x5A + game-start
+	                                    // (f318). Without this gate, 0x1A and game-start land in the
+	                                    // same datagram batch and the client never gets to send 0x2F.
+	uint8_t  loadout_wait_ticks = 0;    // ticks spent waiting at phase 8 — auto-advances after 2 ticks
+	                                    // so opennova clients (which don't send 0x2F) aren't stuck
+	uint16_t roster_wait_ticks = 0;     // ticks waited for the post-handshake round-trip (roster_pushed)
+	                                    // before starting the world-stream — auto-proceeds after a
+	                                    // generous window so the opennova client (which doesn't send
+	                                    // C2S 0x01/0x02) isn't stuck; the retail client sets
+	                                    // roster_pushed via its C2S 0x02 long before this fires.
 	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
 };
 
@@ -74,6 +86,12 @@ struct SessionReplyState {
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
 	bool mission_status_received = false; // 0x0B mission-file status report seen
 	bool player_spawn_confirmed = false;  // 0x51 PLAYER-SPAWN sent — breaks the 0x29↔0x51 echo loop
+	bool roster_pushed = false;           // 0x16/0x46 roster PUSHED proactively post-handshake (once) —
+	                                      // the working host pushes it before the joiner ever sends 0x0A
+	bool roster_repushed = false;         // 0x16 RE-PUSHED with the grown roster once this player spawned
+	                                      // (golden: 0x16 31→39 when the joiner is added, just before deploy)
+	uint8_t team = 1;                     // entity+354 team — the roster (0x16) / player-sync (0x46) team byte;
+	                                      // bound on spawn (Server_BuildPlayerInfoAndAdd) from the spawn team
 
 	// Joiner pose cached from the pre-spawn C2S 0x0C (the host pose fallback when no World entity is
 	// bound yet). [orig: NapiNPServerMsg_0x00C @0x501c30 caches the uplink into the player slot]

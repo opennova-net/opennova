@@ -82,6 +82,24 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	if (!h.valid()) return h;
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
+
+	// Bind the per-connection reply state so the §5.1 roster (0x16) / player-sync (0x46) / player-index
+	// (0x4D) all point at THIS player's REAL slot + entity handle. Without it the joiner is told
+	// player-slot 0 -> entity 0 (≠ its dcb entity at the actual pool-0 slot) and can never bind its
+	// local player -> never deploys (golden: 0x4D=1, 0x16 grows to slot 1, 0x46 slot 1 -> the joiner's
+	// own entity). Slot assignment = host loopback (type 2) = slot 0, joiners = 1, 2, ... by add order.
+	// [orig: Server_PlayerAdd @0x51cbc0 writes the player into dword_A87048[slot]; 0x4D/0x16/0x46 read it]
+	uint8_t player_slot = 0;
+	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (&c == &conn) continue;
+		if (c.phase >= ConnectionPhase::PlayerAdded) ++player_slot;
+	}
+	conn.reply.binding_valid = true;
+	conn.reply.player_slot = player_slot;
+	conn.reply.player_entity_handle = h.packed;
+	conn.reply.team = spawn.team;
+	if (!conn.player_name.empty()) conn.reply.player_name = conn.player_name;
+
 	conn.phase = ConnectionPhase::PlayerAdded;
 	return h;
 }

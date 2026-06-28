@@ -358,6 +358,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	conn.phase = ConnectionPhase::Joined;
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
+
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;
 	ev.peer = peer;
@@ -413,7 +414,8 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// Server_SendInitialGameStateToPlayer (tick_connections), NOT produced here. [orig: the 0x43 SESSION
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
 	std::vector<ProtocolMessage> replies =
-			dispatch_session_replies(ctx.session_config, conn, messages, now_tick);
+			dispatch_session_replies(ctx.session_config, conn, messages, now_tick,
+			                         ctx.np_protocol.connection_list);
 	if (!replies.empty()) {
 		std::vector<uint8_t> dg = frame_session_replies(conn, replies);
 		if (!dg.empty()) out.outbound.push_back(std::move(dg));
@@ -514,9 +516,31 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 		                                    // §5.1 replies are datagram-driven, not ticked)
 		// Advance this connection's §5.2a burst one step and frame/ship the bodies (built from real
 		// World/bms state). conn.burst is authoritative for the spawn-gate latches.
-		if (conn.phase >= ConnectionPhase::PlayerAdded) {
+		// Golden ordering: the post-handshake burst (case 0x02 → 0x16 player-list) PRECEDES the
+		// §5.2a world-stream. Without this gate, the burst fires in the same pump as the C2S 0x42
+		// join — before the post-handshake round-trip (C2S 0x01→S2C 0x02→C2S 0x02→burst) has
+		// completed, so the retail client receives the world-stream before it has reached join-FSM
+		// state 6 verification. roster_pushed is set by dispatch case 0x02; the host's own loopback
+		// (type 2) bypasses the gate. A generous tick fallback covers the opennova client, which
+		// doesn't send C2S 0x01/0x02 (the retail client sets roster_pushed well before it fires).
+		constexpr uint16_t kRosterWaitFallbackTicks = 120;
+		bool roster_ready = (conn.type != 1) || conn.reply.roster_pushed ||
+		                    (++conn.burst.roster_wait_ticks >= kRosterWaitFallbackTicks);
+		if (conn.phase >= ConnectionPhase::PlayerAdded && roster_ready) {
 			InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, conn, now_tick);
 			ship_burst_messages(conn, step.messages, to.outbound);
+		}
+
+		// Once this joiner has spawned, RE-PUSH the 0x16 player-list with the grown roster (now
+		// including this joiner's own slot). The post-handshake 0x16 went out BEFORE the spawn (host
+		// only); the client needs to see its OWN slot to bind its local player and deploy (golden:
+		// 0x16 31→39 just before the joiner's first C2S 0x0C). One-shot per connection.
+		if (conn.type == 1 && conn.burst.spawned && !conn.reply.roster_repushed) {
+			std::vector<ProtocolMessage> roster_reply{
+					build_player_list_message(ctx.session_config, ctx.np_protocol.connection_list)};
+			std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
+			if (!dg.empty()) to.outbound.push_back(std::move(dg));
+			conn.reply.roster_repushed = true;
 		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the

@@ -54,7 +54,15 @@ struct SessionReplyConfig {
 std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
-                                                      uint32_t now_tick);
+                                                      uint32_t now_tick,
+                                                      const std::vector<NapiNPConnection> &roster);
+
+// Build the S2C 0x16 PLAYER-LIST for the current roster (every PlayerAdded connection: host loopback
+// slot 0 + joiners 1+). Public so the per-tick host loop can RE-PUSH it when a joiner spawns (the
+// golden re-sends 0x16 with the grown roster just before the joiner deploys). [orig: NapiNPServerMsg_0x016
+// @0x42FAE0 reads the dword_A87048 player table]
+ProtocolMessage build_player_list_message(const SessionReplyConfig &config,
+                                          const std::vector<NapiNPConnection> &roster);
 
 // Install/refresh the per-connection player binding (slot + entity handle) the roster (0x46/0x16) +
 // spawn-confirm (0x51) replies read. [orig: a player bound to its allocated slot/entity at add]

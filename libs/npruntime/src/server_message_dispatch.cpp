@@ -203,18 +203,37 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // §5.1 reply bodies — roster / loadout / spawn-confirm (relocated from replication_min.cpp).
 // ---------------------------------------------------------------------------
 
-// tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_0x016 @0x42FAE0]
-std::vector<uint8_t> build_reply_tag_16(const PlayerReplicationState &ctx) {
+// One 8-byte player entry in the 0x16 PLAYER-LIST: [u8 slot][u16 ping][u16 score][u16 score2][u8 packed_team].
+void push_player_list_entry(std::vector<uint8_t> &buf, uint8_t slot, uint8_t team) {
+	push_u8(buf, slot);
+	push_u16(buf, 0);  // ping (v42)
+	push_u16(buf, 0);  // score (v44)
+	push_u16(buf, 0);  // score (v45)
+	push_u8(buf, static_cast<uint8_t>(team << 1)); // (team<<1)|spectator; team=1 -> 0x02, team=2 -> 0x04
+}
+
+// tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_0x016 @0x42FAE0] Enumerates the LIVE player roster — the
+// host loopback (slot 0) + each spawned joiner (slot 1+) — so a joining client sees ITS OWN slot and can
+// bind its local player (golden: 0x16 grows 31 B [host only] -> 39 B [host + joiner] right before the
+// joiner deploys). `roster` is the connection_list; `fallback` covers the World-less/test path (no
+// bound players -> a single default entry, preserving the old 31-byte shape).
+std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &roster,
+                                        const PlayerReplicationState &fallback) {
+	struct Entry { uint8_t slot; uint8_t team; };
+	std::vector<Entry> players;
+	for (const NapiNPConnection &c : roster) {
+		if (c.phase < ConnectionPhase::PlayerAdded || !c.reply.binding_valid) continue;
+		players.push_back({c.reply.player_slot, c.reply.team});
+	}
+	std::sort(players.begin(), players.end(),
+	          [](const Entry &a, const Entry &b) { return a.slot < b.slot; });
+	if (players.empty()) players.push_back({fallback.player_slot, fallback.team});
+
 	std::vector<uint8_t> buf;
-	buf.reserve(32);
-	push_u8(buf, 0x01);            // dword_A823B8 = 1 (HUD time-vs-score format flag)
-	push_u8(buf, 1);              // player_count = 1
-	push_u8(buf, ctx.player_slot); // player_id
-	push_u16(buf, 0);             // v42
-	push_u16(buf, 0);             // v44
-	push_u16(buf, 0);             // v45
-	const uint8_t packed_team = static_cast<uint8_t>(ctx.team << 1); // (team<<1)|spectator; team=1 -> 0x02
-	push_u8(buf, packed_team);
+	buf.reserve(16 + players.size() * 8);
+	push_u8(buf, 0x01);                                  // dword_A823B8 = 1 (HUD time-vs-score format flag)
+	push_u8(buf, static_cast<uint8_t>(players.size()));  // player_count
+	for (const Entry &e : players) push_player_list_entry(buf, e.slot, e.team);
 	push_u8(buf, 0x02);           // team_count = 2 (matches retail)
 	for (int i = 0; i < 3; ++i) { // (team_count + 1) iterations
 		push_u16(buf, 0); push_u16(buf, 0);
@@ -311,6 +330,7 @@ PlayerReplicationState make_rep_state(const SessionReplyConfig &cfg, const Sessi
 		ctx.player_name = st.player_name;
 		ctx.player_slot = st.player_slot;
 		ctx.entity_handle = st.player_entity_handle;
+		ctx.team = st.team;
 	} else if (st.player_entity_handle != 0) {
 		ctx.entity_handle = st.player_entity_handle;
 	}
@@ -334,12 +354,18 @@ void emit_post_handshake_burst(const SessionReplyConfig &cfg, std::vector<Protoc
 	}));
 }
 
-// tag=0x0A initial-sync roster. [orig: NapiNPServerMsg_0x00A @0x513260 -> player-sync + tick.]
-void emit_roster(const PlayerReplicationState &rep, uint32_t now_tick, std::vector<ProtocolMessage> &out) {
-	out.push_back(make_protocol_message(0x46, build_reply_tag_46(rep)));
-	out.push_back(make_protocol_message(0x16, build_reply_tag_16(rep)));
-	out.push_back(make_protocol_message(0x19, {0x00, 0x00, 0x00, 0x00}));
-	out.push_back(make_protocol_message(0x1A, build_tag1a_tick(now_tick)));
+// Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
+// the connection bound to that slot and serializes its real entity/team/name; falls back to `rep` (the
+// requesting connection's own binding) when no other player owns the slot. [orig: NapiNPServerMsg_0x022
+// @0x514C90 serializes the requested playerSlot from dword_A87048]
+PlayerReplicationState rep_for_slot(const SessionReplyConfig &config,
+                                    const std::vector<NapiNPConnection> &roster, uint8_t slot,
+                                    const PlayerReplicationState &fallback) {
+	for (const NapiNPConnection &c : roster) {
+		if (c.phase < ConnectionPhase::PlayerAdded || !c.reply.binding_valid) continue;
+		if (c.reply.player_slot == slot) return make_rep_state(config, c.reply);
+	}
+	return fallback;
 }
 
 // tag=0x0C C2S player-input uplink — cache the joiner's pre-spawn pose. [orig: NapiNPServerMsg_0x00C
@@ -372,10 +398,15 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
-                                                      uint32_t now_tick) {
+                                                      uint32_t now_tick,
+                                                      const std::vector<NapiNPConnection> &roster) {
 	std::vector<ProtocolMessage> replies;
 	SessionReplyState &st = conn.reply;
 	const PlayerReplicationState rep = make_rep_state(config, st);
+
+	// The loadout gate (burst phase 7→8) is opened ONLY by the C2S 0x2F handler (case 0x2F below).
+	// A prior auto-advance ("any C2S at phase 8") fired on stale handshake messages before the
+	// client had processed 0x1A, defeating the pacing. The loopback (type-2) bypasses the gate.
 
 	for (const ProtocolMessage &msg : messages) {
 		// Protocol-control + settings-update frames are not gameplay messages (the original filters
@@ -386,12 +417,32 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 			case 0x00: // JOIN ack [orig: NapiNPServerMsg_0x000 @0x512AA0]
 				replies.push_back(make_protocol_message(0x00, {}));
 				break;
-			case 0x01: // handshake push [orig: NapiNPServerMsg_0x001 @0x512ED0]
+			case 0x01: // handshake push -> S2C 0x02 GLB_JOIN push [orig: NapiNPServerMsg_0x001 @0x512ED0]
+				// Golden round-trip (f131-134): C 0x01 -> S 0x02 push -> C 0x02 -> S post-handshake
+				// burst. The retail client's join-FSM verification (state 6->7, 0x424740) needs this
+				// SEQUENCED exchange — a collapsed all-at-once burst leaves it stuck at "Verifying".
 				replies.push_back(make_protocol_message(0x02, build_tag02_push(now_tick)));
 				break;
-			case 0x02: // GLB_JOIN burst [orig: NapiNPServerMsg_0x002 @0x512FD0]
-				emit_post_handshake_burst(config, replies);
+			case 0x02: // GLB_JOIN reply -> the post-handshake burst + 0x16 [orig: NapiNPServerMsg_0x002 @0x512FD0]
+				// Reactive to the client's C2S 0x02 (the golden's f133->f134 leg). Sets roster_pushed,
+				// which unblocks the §5.2a world-stream burst in tick_connections — so the post-handshake
+				// (0x01/0x7a/0x7b/0x03/0x16) reliably PRECEDES the world-stream (golden f134-142 vs f144).
+				if (!st.roster_pushed) {
+					emit_post_handshake_burst(config, replies);
+					replies.push_back(make_protocol_message(0x16, build_reply_tag_16(roster, rep)));
+					st.roster_pushed = true;
+				}
 				break;
+			case 0x22: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
+				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
+				// (body byte 0); reply 0x46 for THAT slot so the joiner binds its own player (its 0x4D slot
+				// -> its real entity). A wrong/default slot leaves the client unable to map itself -> stuck
+				// undeployed, flooding C2S 0x0f. (golden f143->f144 slot 0; the joiner also syncs its own.)
+				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
+				const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep);
+				replies.push_back(make_protocol_message(0x46, build_reply_tag_46(prs)));
+				break;
+			}
 			case 0x47: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
 				replies.push_back(make_protocol_message(0x75, {0x00, 0x02}));
 				break;
@@ -403,11 +454,21 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 				replies.push_back(make_protocol_message(0x64, build_tag64_mission_metadata(config)));
 				break;
 			case 0x2F: // loadout request -> 0x5A [orig: NapiNPServerMsg_0x02F @0x515790]
+				// Golden (f317-318): C 0x2F -> S 0x5A + game-start bundle. The 0x5A populates
+				// the joiner's weapon slots BEFORE the first 0x0A; without it every 0x0A triggers
+				// the weapon-slot mismatch -> C2S 0x0F flood. Also unlatches the burst's phase 8
+				// gate so the game-start bundle emits on the next tick.
 				replies.push_back(make_protocol_message(0x5A, build_tag_5a_weapon_loadout()));
 				st.loadout_synced = true;
+				conn.burst.loadout_received = true;
 				break;
-			case 0x0A: // initial-sync roster [orig: NapiNPServerMsg_0x00A @0x513260]
-				emit_roster(rep, now_tick, replies);
+			case 0x0A: // initial-sync roster ack [orig: NapiNPServerMsg_0x00A @0x513260]
+				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
+				// emit_roster sent 0x46/0x16/0x19/0x1A — the unsolicited 0x1A re-sets
+				// dword_81474C (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
+				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
+				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
+				replies.push_back(make_protocol_message(0x19, build_tag1a_tick(now_tick)));
 				break;
 			case 0x29: // spawn-slot request -> 0x51 PLAYER-SPAWN [orig: NapiNPServerMsg_0x029 @0x514F10].
 				// Echo-loop guard: HandlePlayerSpawn @0x431BB0 re-sends 0x29 after our 0x51, so reply once.
@@ -446,9 +507,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 				st.mission_status_received = true;
 				break;
 			default:
-				// 0x22 player-sync ack / 0x0F entity-info query / 0x09 checksum / 0x48 + per-frame client
-				// updates: consumed (no reactive reply). The original 0x22->0x46 / 0x0F->0x18 paths are
-				// part of the deferred body grill wave.
+				// 0x0F entity-info query / 0x09 checksum / 0x48 + per-frame client updates: consumed (no
+				// reactive reply). The original 0x0F->0x18 path is still part of the deferred body grill wave;
+				// 0x22->0x46 is now handled above (the join request->response chain).
 				break;
 		}
 	}
@@ -462,6 +523,15 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 	conn.reply.player_slot = player_slot;
 	conn.reply.player_entity_handle = entity_handle;
 	return true;
+}
+
+ProtocolMessage build_player_list_message(const SessionReplyConfig &config,
+                                          const std::vector<NapiNPConnection> &roster) {
+	// `fallback` only matters for an empty roster (World-less path); a real host always has >=1 bound
+	// player, so the enumerated roster wins. Build a minimal fallback rep from the config.
+	PlayerReplicationState fallback;
+	fallback.player_name = config.player_name;
+	return make_protocol_message(0x16, build_reply_tag_16(roster, fallback));
 }
 
 } // namespace opennova::np

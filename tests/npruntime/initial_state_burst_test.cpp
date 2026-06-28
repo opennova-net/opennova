@@ -4,7 +4,8 @@
 // decodes / round-trips / byte-matches the golden-witnessed value (incl. the 0x2C/0x08/0x2A/0x66/0x76/
 // 0x1A serializers ported 2026-06-27); (3) the 0x0C organic carries the host player's dcb at
 // entity+0x78 (the §1 wiring, end to end); (4) burst.game_state==9 / spawned at the terminator;
-// (5) the pool-1 0x0D + the conditional terrain/briefing tags stay absent (faithful, no fixtures).
+// (5) the full world-stream pages every pool (0x10/0x0D/0x0C/0x20); only the conditional 0x45 terrain
+// + 0x7E briefing tags stay absent (deferred — no per-player terrain delta / MissionText wired).
 
 #include <npruntime/server_initial_state.h>
 #include <npruntime/server_session.h>
@@ -75,6 +76,8 @@ int main_impl() {
 	np::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 
 	// Drive the burst to completion, collecting the emitted (tag, body) in order.
+	// The HOST LOOPBACK (type-2) skips the loadout gate and drains in one shot — it has no remote
+	// client sending C2S 0x2F. The loadout gate only applies to REMOTE JOINERS (type-1).
 	std::vector<np::InitialStateMessage> emitted;
 	bool reached = false;
 	for (int i = 0; i < 64 && !reached; ++i) {
@@ -89,11 +92,14 @@ int main_impl() {
 	if (!expect(conn.phase == np::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
 
 	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
-	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream: 0x10, 0x0C, 0x20,
-	// 0x1A (0x0D pool-1 + 0x45 terrain + 0x7E briefing are faithfully absent — D-NET-97/98 + the
-	// witnessed conditional empties).
+	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream streams EVERY pool in
+	// full (paged ~640 B/datagram): 0x10 pool-2, 0x0D pool-1, 0x0C pool-0, 0x20 pool-3, then 0x1A. Then
+	// the GAME-START BUNDLE 0x42 / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the joiner's
+	// load-gate; matches golden frames 318-319). (0x45 terrain + 0x7E briefing remain deferred.) In THIS
+	// minimal World pool-2/pool-1 are empty, so 0x10/0x0D are single header-only pages.
 	const std::vector<uint8_t> want_order = {0x2C, 0x08, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A,
-	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0C, 0x20, 0x1A};
+	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0D, 0x0C, 0x20, 0x1A,
+	                                         0x42, 0x0F, 0x4D, 0x61, 0x3E};
 	std::vector<uint8_t> got_order;
 	for (auto &m : emitted) got_order.push_back(m.tag);
 	if (!expect(got_order == want_order, "emitted tag order matches §5.2a (full player-sync + world-stream)")) {
@@ -103,9 +109,10 @@ int main_impl() {
 		return 1;
 	}
 
-	// The pool-1 0x0D and the conditional terrain/briefing tags stay absent (no fixtures, faithful).
+	// Only the conditional terrain (0x45) / briefing (0x7E) tags stay absent — deferred, no per-player
+	// terrain delta / MissionText wired. The pool-1 0x0D IS now streamed (full world-stream).
 	for (auto &m : emitted) {
-		if (m.tag == 0x0D || m.tag == 0x45 || m.tag == 0x7E) {
+		if (m.tag == 0x45 || m.tag == 0x7E) {
 			std::fprintf(stderr, "FAIL: conditionally-absent tag 0x%02X was emitted\n", m.tag);
 			return 1;
 		}
@@ -247,6 +254,79 @@ int main_impl() {
 		if (!expect(f3_at >= 0, "one-shot World burst still surfaces PeerEnteredWorldStreaming (F3)")) return 1;
 		if (!expect(spawned_at >= 0, "one-shot World burst surfaces PeerSpawned")) return 1;
 		if (!expect(f3_at < spawned_at, "F3 surfaces BEFORE PeerSpawned (dcb-timing order)")) return 1;
+	}
+
+	// --- Loadout gate pacing: a TYPE-1 (remote joiner) connection PAUSES at phase 7→8 until
+	// loadout_received is set. The golden (f316-318) shows: S 0x1A (end of world-stream) -> C 0x2F
+	// (client sends loadout request) -> S 0x5A + game-start. Without the gate, 0x1A and the
+	// game-start would land together and the client couldn't send 0x2F between them. ---
+	{
+		w::World w3;
+		w::AiSystem ai3;
+		w3.ai = &ai3;
+		w3.registry.configure_pool(0, 16);
+		w3.registry.configure_pool(3, 16);
+		{
+			w::Entity m;
+			m.kind = w::EntityKind::Marker;
+			m.item_id = 6002;
+			m.position = {10.0f, 20.0f, 1.0f};
+			w3.registry.spawn(3, m);
+		}
+		np::NapiNPServerCtx ctx3;
+		ns::LoopbackChannel lb3;
+		np::test::bring_up_host(ctx3, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+		                        /*host_key=*/0, &lb3);
+		ctx3.world = &w3;
+		ctx3.mission = &mission;
+		np::Server_InitNewRoundState(ctx3);
+		np::Server_ProcessPendingPlayerSpawns(ctx3, w3);
+
+		// Simulate a remote joiner by adding a type-1 connection with PlayerAdded phase.
+		np::NapiNPConnection joiner{};
+		joiner.type = 1;
+		joiner.connection_id = np::kFirstJoinerDcb;
+		joiner.phase = np::ConnectionPhase::PlayerAdded;
+		joiner.burst.sync_state = 0;
+		ctx3.np_protocol.connection_list.push_back(joiner);
+		np::NapiNPConnection &jconn = ctx3.np_protocol.connection_list.back();
+
+		// A REMOTE (type-1) joiner is PACED: each call emits only a few datagrams (kPacedMsgsPerTick),
+		// so the burst takes many calls to stream the player-sync + world-stream and then PAUSE at the
+		// phase 7→8 loadout gate. Drive it until it pauses (bounded loop).
+		bool reached_loadout_gate = false;
+		int paced_calls = 0;
+		for (int i = 0; i < 256 && !reached_loadout_gate; ++i) {
+			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			++paced_calls;
+			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
+			// The per-tick budget means each call emits a bounded number of datagrams (the game-start
+			// bundle is the only atomic >budget batch, and it's past the gate).
+			if (jconn.burst.sync_state == 4 && jconn.burst.world_stream_phase == 8 &&
+			    !jconn.burst.loadout_received) {
+				reached_loadout_gate = true;
+			}
+		}
+		if (!expect(reached_loadout_gate, "paced joiner burst reaches the phase 7->8 loadout gate")) return 1;
+		if (!expect(paced_calls > 3, "burst was actually PACED across multiple calls (not one-shot)")) return 1;
+		if (!expect(!jconn.burst.spawned, "joiner burst not yet spawned (waiting for loadout)")) return 1;
+
+		// Simulate the C2S 0x2F -> sets loadout_received; drive to completion.
+		jconn.burst.loadout_received = true;
+		bool saw_0f = false, saw_42 = false, saw_3e = false;
+		bool reached = false;
+		for (int i = 0; i < 16 && !reached; ++i) {
+			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
+			for (const auto &m : s.messages) {
+				if (m.tag == 0x42) saw_42 = true;
+				if (m.tag == 0x0F) saw_0f = true;
+				if (m.tag == 0x3E) saw_3e = true;
+			}
+			reached = s.reached_in_game;
+		}
+		if (!expect(reached, "joiner burst reached game-state 9 after loadout gate opened")) return 1;
+		if (!expect(jconn.burst.spawned, "joiner burst spawned after loadout gate opened")) return 1;
+		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;
 	}
 
 	std::printf("OK\n");
