@@ -259,16 +259,20 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout() {
 	return std::vector<uint8_t>(std::begin(kRetailTag5aPayload), std::end(kRetailTag5aPayload));
 }
 
-// tag=0x51 PLAYER-SPAWN. [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0; server write_entity_packet
-// @0x506bb0 — deferred; D-NET-127 8-byte fixture.]
-std::vector<uint8_t> build_reply_tag_51(const PlayerReplicationState &ctx) {
+// tag=0x51 PLAYER-SPAWN. [orig: write_entity_packet @0x506bb0] witnessed 8-byte layout:
+//   [u16 requested_index (echoed from the C2S 0x29)][u16 handle = pool<<12|slot][u8 team]
+//   [u16 NetId if entity Flags&0x100 else 0][u8 animSlot if Flags&0x100 else 0].
+// (Was wrongly [team][handle][team][0][0] — the leading field is the echoed request index, not team.)
+// NetId/animSlot need the spawned entity's net_id/anim threaded into the reply binding — defaulted 0
+// today (D-NET-127 sub-item). Safe: our client treats 0x51 as a spawn signal (does not field-parse it).
+std::vector<uint8_t> build_reply_tag_51(const PlayerReplicationState &ctx, uint16_t requested_index) {
 	std::vector<uint8_t> buf;
 	buf.reserve(8);
-	push_u16(buf, ctx.team);
+	push_u16(buf, requested_index);
 	push_u16(buf, ctx.entity_handle);
 	push_u8(buf, static_cast<uint8_t>(ctx.team & 0xFF));
-	push_u16(buf, 0);
-	push_u8(buf, 0);
+	push_u16(buf, 0); // NetId (binding plumbing TODO)
+	push_u8(buf, 0);  // animSlot (binding plumbing TODO)
 	return buf;
 }
 
@@ -403,7 +407,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 			case 0x29: // spawn-slot request -> 0x51 PLAYER-SPAWN [orig: NapiNPServerMsg_0x029 @0x514F10].
 				// Echo-loop guard: HandlePlayerSpawn @0x431BB0 re-sends 0x29 after our 0x51, so reply once.
 				if (!st.player_spawn_confirmed) {
-					replies.push_back(make_protocol_message(0x51, build_reply_tag_51(rep)));
+					// The C2S 0x29 carries the requested buffer index (u16) the 0x51 echoes back.
+					uint16_t req_idx = 0;
+					if (msg.payload.size() >= 2)
+						req_idx = static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8));
+					replies.push_back(make_protocol_message(0x51, build_reply_tag_51(rep, req_idx)));
 					st.player_spawn_confirmed = true;
 				}
 				break;
