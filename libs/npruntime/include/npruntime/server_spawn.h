@@ -28,10 +28,6 @@ namespace opennova::np {
 // definition, shared with the Godot listen host). [orig: §5.2b spawn placement]
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEntitySlot;
 
-// High reserved SSN base for player entities — far above the small mission bms ids. P3 allocates
-// downward from this base and skips already-live ids so it never wraps into 0xFFFF/0x0000.
-inline constexpr uint16_t kPlayerNetIdBase = 0xFFF0u;
-
 // §5.2a step 1 — [orig: Server_InitNewRoundState @0x51c8e0]. Set up the local-player/round context
 // for an authority host. Structural: clears the loading-progress counter for a fresh round (the
 // timeout gate, NOT the spawn-success gate, which the per-frame 0x0A drops, §5.2a step 4). No-op
@@ -56,9 +52,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
                                                  world::World &world);
 
 // Synthetic in-process peer admit WITHOUT a handshake — an owner/test hook (the Godot binding's
-// admit_test_remote_peer). Spawns a pool-0 REMOTE player at `spawn` (allocating a reserved high-band
-// net_id when spawn.net_id == 0, skipping live ids — so with the host already at 0xFFF0 the next is
-// 0xFFF1), registers (or reuses) a type-1 connection for `peer` already in-match (burst.spawned), and
+// admit_test_remote_peer). Spawns a pool-0 REMOTE player at `spawn` (net_id forced to 0 — a player
+// carries no SSN, D-NET-112; identity is handle + ownerConnectionId), registers (or reuses) a type-1
+// connection for `peer` already in-match (burst.spawned), and
 // binds conn.link.owned_entity + the supplied NON-OWNING transport. Mirrors the post-PeerSpawned state
 // the handshake pipeline leaves, minus the socket legs; NEVER publishes World::cached.local_player
 // (spawn_remote_player). Returns the spawned handle (invalid if pool 0 is full / no AiSystem). The real

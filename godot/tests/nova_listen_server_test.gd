@@ -23,15 +23,22 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 
 	# The faithful §5.0 mode-3 bring-up auto-spawns the host's own player (ADR 0012), so the world is
 	# the 2 organics + the host player. The AI-pool truth is readable through the scalar getters (they
-	# read the sim directly); key it by net_id (pos + kind) so we can match the decoded records.
-	var truth := {}  # net_id -> { pos: Vector3 (Godot space), kind: int }
+	# read the sim directly); key it by WIRE HANDLE (pool<<12|slot — unique per entity) so we can match
+	# the decoded records. [D-NET-112: a player carries NO SSN (net_id 0); it is identified by its handle
+	# + ownerConnectionId(dcb), not a reserved net_id — net_id is no longer a unique key.]
+	var truth := {}  # wire_handle -> { pos: Vector3 (Godot space), kind: int }
+	var host_handle := -1
 	for i in range(sim.get_entity_count()):
-		truth[sim.get_entity_net_id(i)] = {
+		var wh := sim.get_entity_wire_handle(i)
+		truth[wh] = {
 			"pos": sim.get_entity_position(i),
 			"kind": sim.get_entity_kind(i),
 		}
+		if sim.get_entity_owner_connection_id(i) != 0:  # the host's own player carries the host dcb
+			host_handle = wh
 	assert_eq(truth.size(), 3, "two organics + the auto-spawned host player")
-	assert_true(truth.has(0xFFF0), "the host player carries the reserved high-band net_id 0xFFF0")
+	assert_true(host_handle != -1,
+		"the host player is identified by its ownerConnectionId (dcb), not an SSN (D-NET-112)")
 
 	# One host frame: Server_TickUpdate fans the host loopback its whole-world S2C 0x0A; the host's
 	# own ClientRuntime folds it into the ClientState the present pass now reads.
@@ -46,18 +53,18 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	for rec in range(records):
 		var base := rec * stride
 		assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "decoded entity is alive")
-		var nid := int(snap[base + NovaSimulation.PF_NET_ID])
-		assert_true(truth.has(nid), "decoded net_id maps back to a sim entity")
+		var wh := int(snap[base + NovaSimulation.PF_WIRE_HANDLE])
+		assert_true(truth.has(wh), "decoded wire handle maps back to a sim entity")
 		# Organics resolve KIND_ORGANIC (3) from the registry behind the decoded handle; the host
 		# player has no BMS placement so it carries no (kind,index) origin (kind 0).
-		assert_eq(int(snap[base + NovaSimulation.PF_KIND]), int(truth[nid]["kind"]),
+		assert_eq(int(snap[base + NovaSimulation.PF_KIND]), int(truth[wh]["kind"]),
 			"kind matches the AI-pool truth for the entity behind the decoded handle")
 		var p := Vector3(snap[base + NovaSimulation.PF_POS_X],
 			snap[base + NovaSimulation.PF_POS_Y],
 			snap[base + NovaSimulation.PF_POS_Z])
 		# Position rides the wire compressed (lossy); the reconstruction lands within a
 		# codec quantization step of the authoritative value.
-		assert_lt(p.distance_to(truth[nid]["pos"]), 0.5,
+		assert_lt(p.distance_to(truth[wh]["pos"]), 0.5,
 			"decoded position round-trips within codec tolerance")
 		matched += 1
 	assert_eq(matched, 3, "every decoded entity matched a sim entity")
@@ -85,18 +92,20 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	for _i in range(8):
 		sim.advance_frame()
 
-	# The player replicates through the wire as one present record, keyed by its net_id 0xFFF0.
+	# The player replicates through the wire as one present record, keyed by its WIRE HANDLE.
+	# [D-NET-112: the player carries no SSN (net_id 0); it is identified by its handle, not 0xFFF0.]
+	var player_handle := sim.get_local_player_wire_handle()
 	var stride: int = sim.get_present_stride()
 	var snap: PackedFloat32Array = sim.get_present_snapshot()
 	var records: int = snap.size() / stride
 	var found_player := false
 	for rec in range(records):
 		var base := rec * stride
-		if int(snap[base + NovaSimulation.PF_NET_ID]) == 0xFFF0:
+		if int(snap[base + NovaSimulation.PF_WIRE_HANDLE]) == player_handle:
 			found_player = true
 			assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "player is alive")
 			# The player has no BMS placement, so it carries no (kind,index) origin (PF_KIND 0)
-			# — unlike placed mission nodes, its avatar is host-managed by net_id.
+			# — unlike placed mission nodes, its avatar is host-managed by handle + ownerConnectionId.
 			assert_eq(int(snap[base + NovaSimulation.PF_KIND]), 0,
 				"player carries no BMS (kind,index) origin")
 	assert_true(found_player, "the auto-spawned local player replicated into the client-decoded present")

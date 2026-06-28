@@ -8,23 +8,14 @@ namespace opennova::np {
 
 namespace {
 
-// [D-NET-112] DIVERGENCE: the original has NO high-band player net-id allocator. It identifies
-// every entity on the wire by its handle (pool<<12|slot, serialize_entity_states_to_packet
-// @0x50f070) and carries four distinct id fields (ownerConnectionId@0x78=dcb, DcbId@0x7c=the
-// find_by_net_id key, Ssn@0x2e, NetId@0x15c). The reimpl collapses those into one
-// world::Entity::net_id, so a player's id must not collide with the small authored mission ids
-// that share that field — hence this reserved high band. Scan downward and skip live ids so the
-// sequence never wraps through 0xFFFF/0x0000 (fixes the prior count-based overflow + reuse). A
-// faithful multi-field id model is the follow-up. [orig: Server_PlayerAdd @0x51cbc0]
-uint16_t allocate_player_net_id(const world::World &world) {
-	for (uint32_t candidate = kPlayerNetIdBase; candidate >= 0x8000u; --candidate) {
-		const uint16_t id = static_cast<uint16_t>(candidate);
-		if (id == 0 || id == 0xFFFFu) continue;
-		if (!world.registry.find_by_net_id(id).valid()) return id;
-		if (candidate == 0x8000u) break;
-	}
-	return 0;
-}
+// [D-NET-112 FIXED 2026-06-27] The original assigns a player NO net-id/SSN. `Entity_SpawnFromAnimSlotProperty
+// @0x43c390` memsets the entity and writes ONLY entity+0x78 (ownerConnectionId/dcb) as an id — Ssn@0x2e /
+// DcbId@0x7c / NetId@0x15c are left 0. A player is identified by its pool HANDLE (pool<<12|slot, the wire
+// identity) + ownerConnectionId (the client self-match, Player_FindLocalPlayerEntity @0x4e0090) — never by
+// an SSN. The prior reimpl invented a high-band `allocate_player_net_id` only because tracking keyed on
+// Entity.net_id; that allocator is DELETED. A player now carries net_id 0 (faithful), so it stays out of
+// the WAC/BMS find_by_net_id SSN space (authored mission entities own that space); tracking is by handle +
+// owner_connection_id. [orig: Server_PlayerAdd @0x51cbc0 / Entity_SpawnFromAnimSlotProperty @0x43c390]
 
 // [orig: Server_AssignPlayerTeam @0x4fe310; D-NET-113] The spawning player's team.
 // Witnessed branch order (Server_AssignPlayerTeam): (0) spectator (+100567 && is_in_session) -> 0;
@@ -76,9 +67,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	}
 	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
-	// Reserved high-band player id (see allocate_player_net_id / D-NET-112 divergence note above).
-	spawn.net_id = allocate_player_net_id(world);
-	if (spawn.net_id == 0) return {};
+	// [D-NET-112] A player carries no SSN (net_id 0) — faithful to the original, which identifies it by
+	// handle + ownerConnectionId, not an SSN (see the note above). Keeps players out of the WAC find_by_net_id space.
+	spawn.net_id = 0;
 	// entity+0x78 = the owning connection's dcb (host loopback dcb / a joiner's ack dcb).
 	// [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
 	spawn.owner_connection_id = conn.connection_id;
@@ -133,11 +124,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 
 	world::PlayerSpawn spawn = spawn_in;
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
-	// Always allocate (mirroring Server_BuildPlayerInfoAndAdd) — PlayerSpawn::net_id defaults non-zero,
-	// so honoring an incoming value would collide every joiner onto the host's 0xFFF0. With the host
-	// findable at 0xFFF0 the downward allocator yields 0xFFEF for the first joiner, 0xFFEE next, ...
-	spawn.net_id = allocate_player_net_id(world);
-	if (spawn.net_id == 0) return {};
+	// [D-NET-112] No SSN for a player (net_id 0) — faithful; identity is handle + ownerConnectionId(dcb).
+	spawn.net_id = 0;
 	spawn.owner_connection_id = conn_id; // entity+0x78 dcb
 	const world::EntityHandle h = world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;

@@ -78,14 +78,18 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 
 	var stride: int = host.get_present_stride()
 
-	# HOST sees the JOINER: its client-decoded present carries the admitted joiner. The host took the
-	# reserved 0xFFF0, so the downward allocator gives the joiner 0xFFEF (D-NET-112).
+	# HOST sees the JOINER: its client-decoded present carries the admitted joiner. [D-NET-112] Both
+	# players carry net_id 0 (no SSN); a player is identified by its WIRE HANDLE, so the joiner is the
+	# player row (PF_KIND 0, no BMS origin) whose handle is NOT the host's own player handle.
+	var host_own: int = host.get_local_player_wire_handle()
 	var hsnap: PackedFloat32Array = host.get_present_snapshot()
 	var host_sees_joiner := false
 	for rec in range(hsnap.size() / stride):
-		if int(hsnap[rec * stride + NovaSimulation.PF_NET_ID]) == 0xFFEF:
+		var base := rec * stride
+		if int(hsnap[base + NovaSimulation.PF_KIND]) == 0 \
+				and int(hsnap[base + NovaSimulation.PF_WIRE_HANDLE]) != host_own:
 			host_sees_joiner = true
-	assert_true(host_sees_joiner, "host's present includes the admitted joiner (SSN 0xFFEF)")
+	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
 
 	# JOINER sees the HOST: its wire-decoded present carries a player row (type 0x14B9) that is
 	# NOT its own echo, and its own wire echo (handle H) is self-filtered out.

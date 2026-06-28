@@ -3477,8 +3477,18 @@ interchangeable:
   (`return is_in_session && !is_authority ? 0 : entity->Ssn`).
 - `NetId @0x15c` (uint16) — a separate streaming id field; left 0 by the player spawn path.
 
-**D-NET-112** [reimpl divergence, DOCUMENTED] **No high-band player net-id allocator exists in the
-original.** `Server_PlayerAdd` finds an empty *player slot* (`sub_4FD7B0`/`sub_500A50`) and spawns
+**D-NET-112** [reimpl divergence, **FIXED 2026-06-27**] **No high-band player net-id allocator exists in the
+original.** **FIX EXECUTED:** `allocate_player_net_id` + `kPlayerNetIdBase` deleted; a player now spawns with
+`net_id = 0` (faithful — `Entity_SpawnFromAnimSlotProperty @0x43c390` leaves Ssn/DcbId/NetId at 0, writing
+only ownerConnectionId@0x78). A player is identified by its pool HANDLE (wire) + `owner_connection_id` (dcb,
+the client self-match), never an SSN — so it stays out of the WAC/BMS `find_by_net_id` space (mission
+entities own that). Production rendering was already handle-based; the present-pass/avatar tracking + the
+3 GUT tests (`nova_listen_server`, `host_session_accept_gut`, `coop_two_sim`) + `server_spawn_test` were
+migrated from net_id-keying to handle/`owner_connection_id` (new `get_entity_owner_connection_id` /
+`get_entity_wire_handle` getters). Verified: 31 net+world+wac+mission ctest + 25 GUT green, zero regressions.
+The residual Ssn@0x2e-vs-DcbId@0x7c field LABEL nicety (find_by_net_id keys our single field, which plays the
+WAC-address role regardless of name) is a cosmetic follow-up, not a behavior gap. **(Original DOCUMENTED note,
+for history:)** `Server_PlayerAdd` finds an empty *player slot* (`sub_4FD7B0`/`sub_500A50`) and spawns
 the entity; the per-frame entity stream (`serialize_entity_states_to_packet @0x50f070`, sent by
 `Server_SendEntityStateToPlayer @0x517ba0`) identifies every entity on the wire by its **handle
 (`pool<<12 | slot`)**, not by an allocated 16-bit net id. There is no count-based or

@@ -120,8 +120,8 @@ int main() {
 	if (!expect(saw_host && saw_joiner,
 	            "build_pool0_organic_batch stamps entity_flags from owner_connection_id (host 2 + joiner 3)")) return 1;
 
-	// Net IDs must stay distinct and out of invalid / low mission-id space even past the 0xFFF0 high
-	// base boundary. The old base+count allocator wrapped through 0xFFFF and then into 0x0000.
+	// [D-NET-112] Players carry no SSN (net_id 0); they are distinguished by their distinct
+	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)
 	{
 		w::World many_world;
 		w::AiSystem many_ai;
@@ -145,18 +145,22 @@ int main() {
 		const int spawned = np::Server_ProcessPendingPlayerSpawns(many_ctx, many_world);
 		if (!expect(spawned == 20, "twenty remote players spawned")) return 1;
 
-		std::set<uint16_t> net_ids;
+		// [D-NET-112] A player carries NO SSN (net_id 0) — faithful: the original identifies a player by
+		// its pool HANDLE + ownerConnectionId(dcb), never an allocated id. Verify every player has net_id
+		// 0 and they are distinguished by distinct dcbs (the high-band allocator is gone).
+		std::set<uint32_t> dcbs;
+		int player_count = 0;
+		bool all_ssn_zero = true;
 		many_world.registry.for_each([&](const w::Entity &e) {
 			if (e.handle.pool() == 0 && e.item_id == w::kPlayerInfantryTypeId) {
-				net_ids.insert(e.net_id);
-				if (e.net_id == 0 || e.net_id == 0xFFFFu || e.net_id < 0x8000u) {
-					std::fprintf(stderr, "FAIL: invalid/low player net_id 0x%04X\n", e.net_id);
-				}
+				++player_count;
+				dcbs.insert(e.owner_connection_id);
+				if (e.net_id != 0) all_ssn_zero = false;
 			}
 		});
-		if (!expect(net_ids.size() == 20, "twenty distinct player net ids")) return 1;
-		if (!expect(*net_ids.begin() >= 0x8000u && net_ids.count(0) == 0 && net_ids.count(0xFFFFu) == 0,
-		            "player net ids stay in the high reserved band and skip invalid sentinels")) return 1;
+		if (!expect(player_count == 20, "twenty players spawned")) return 1;
+		if (!expect(all_ssn_zero, "every player carries net_id 0 (no SSN — D-NET-112)")) return 1;
+		if (!expect(dcbs.size() == 20, "twenty distinct ownerConnectionId(dcb) — the player identity")) return 1;
 	}
 
 	std::printf("OK\n");

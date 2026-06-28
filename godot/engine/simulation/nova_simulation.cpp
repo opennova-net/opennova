@@ -452,6 +452,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_state", "index"), &NovaSimulation::get_entity_state);
 	ClassDB::bind_method(D_METHOD("get_entity_net_id", "index"), &NovaSimulation::get_entity_net_id);
 	ClassDB::bind_method(D_METHOD("get_entity_bms_id", "index"), &NovaSimulation::get_entity_bms_id);
+	ClassDB::bind_method(D_METHOD("get_entity_owner_connection_id", "index"),
+	                     &NovaSimulation::get_entity_owner_connection_id);
+	ClassDB::bind_method(D_METHOD("get_entity_wire_handle", "index"),
+	                     &NovaSimulation::get_entity_wire_handle);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &NovaSimulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &NovaSimulation::get_entity_part_anim_active);
 	ClassDB::bind_method(D_METHOD("get_entity_anim_slot", "index"), &NovaSimulation::get_entity_anim_slot);
@@ -1360,6 +1364,25 @@ int NovaSimulation::get_entity_bms_id(int p_index) const {
 	if (!e) return 0;
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
 	return ent ? ent->bms_id : 0;
+}
+
+// [D-NET-112] entity+0x78 ownerConnectionId (the connection/dcb that owns this entity). A networked
+// PLAYER is identified by this + its handle, NOT by an SSN (players carry net_id 0). 0 = unowned (AI /
+// mission entity / the host's dedicated reservation).
+int NovaSimulation::get_entity_owner_connection_id(int p_index) const {
+	if (!ai_ || !world_) return 0;
+	AiEntity *e = ai_->at(p_index);
+	if (!e) return 0;
+	const opennova::world::Entity *ent = world_->registry.get(e->handle);
+	return ent ? static_cast<int>(ent->owner_connection_id) : 0;
+}
+
+// The entity's wire handle (pool<<12|slot) — the per-entity identity carried on the 0x0A/0x0C wire and
+// the decoded present's PF_WIRE_HANDLE. Unique per entity (unlike a player's net_id, which is now 0).
+int NovaSimulation::get_entity_wire_handle(int p_index) const {
+	if (!ai_) return 0;
+	AiEntity *e = ai_->at(p_index);
+	return e ? static_cast<int>(e->handle.packed) : 0;
 }
 
 int NovaSimulation::get_entity_part_anim_phase(int p_index, int channel) const {

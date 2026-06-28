@@ -104,18 +104,19 @@ func test_admit_remote_peer_spawns_a_world_entity() -> void:
 	var after: int = sim.get_entity_count()
 	assert_eq(after, before + 1, "admitting a joiner adds exactly one pool-0 entity")
 
-	# The joiner carries a distinct SSN and sits at the admitted position (authoritative registry
-	# read; mission<->Godot round-trip). Z may settle on terrain (none here, so exact). The reserved
-	# high-band allocator scans DOWNWARD from 0xFFF0 skipping live ids, so with the host at 0xFFF0 the
-	# first joiner is 0xFFEF (D-NET-112; the legacy binding's upward 0xFFF1 counter is retired).
+	# [D-NET-112] The joiner carries NO SSN (net_id 0) — faithful: a networked player is identified by
+	# its handle + ownerConnectionId(dcb), not an allocated id. Find it by the admitted position + a
+	# nonzero ownerConnectionId (the host player is elsewhere). Z may settle on terrain (none here, exact).
 	var found := false
 	for i in range(after):
-		if sim.get_entity_net_id(i) == 0xFFEF:
+		var p: Vector3 = sim.get_entity_position(i)
+		if abs(p.x - spawn_pos.x) < 0.5 and abs(p.z - spawn_pos.z) < 0.5 \
+				and sim.get_entity_owner_connection_id(i) != 0:
 			found = true
-			var p: Vector3 = sim.get_entity_position(i)
+			assert_eq(sim.get_entity_net_id(i), 0, "joiner carries net_id 0 (no SSN — D-NET-112)")
 			assert_almost_eq(p.x, spawn_pos.x, 0.5, "joiner spawned at the admitted X")
 			assert_almost_eq(p.z, spawn_pos.z, 0.5, "joiner spawned at the admitted Z")
-	assert_true(found, "the admitted joiner is present with its own SSN (0xFFEF)")
+	assert_true(found, "the admitted joiner is present at the admitted position with its own dcb")
 
 	# The host's own (auto-spawned) player is untouched — admit uses spawn_remote_player, so the joiner
 	# is a distinct entity and the host keeps its own local player.
