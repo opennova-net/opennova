@@ -3507,6 +3507,19 @@ libs/netsim bridge + nova_simulation present + the GUT listen-server/present tes
 inline (no-regression discipline). The current allocator is WIRE-CORRECT (handle-based wire identity),
 so this is internal-fidelity debt, not a wire bug.
 
+**Deeper grill (2026-06-27, the field-identity reconciliation the fix must do first).** Two more
+witnesses make the model precise: (a) `Entity_SpawnFromAnimSlotProperty @0x43c390` (the player entity
+spawn) memsets the entity and writes ONLY `entity+0x78` (ownerConnectionId/dcb = spawnData[6]) as an id —
+it never writes Ssn@0x2e, DcbId@0x7c, or NetId@0x15c, so a player's Ssn/DcbId/NetId are all 0. (b)
+`EntityPool_FindByNetId @0x4f0a20` keys on **`entity+0x7C` (DcbId)**, NOT Ssn@0x2e (and has no netId==0
+guard). So the WAC/BMS `set_ssn_*` addressing is actually by **DcbId**. The reimpl conflates this: our
+`EntityRegistry::find_by_net_id` matches `Entity.net_id` (entity.h labels it "SSN"), while the original's
+key is DcbId@0x7c (= our `AiEntity.net_id`, ai.h). **The faithful net-id model must therefore (1) split
+the conflated field into Ssn@0x2e / DcbId@0x7c (the find key) / NetId@0x15c, (2) repoint `find_by_net_id`
+at DcbId, (3) leave a player's DcbId/Ssn at 0 and identify it by handle + ownerConnectionId (as the
+present already does via `cached.local_player`), (4) delete `allocate_player_net_id`.** This is a
+world/ai/wac/mission-wide reconciliation with its own test surface — a dedicated, test-driven session.
+
 **D-NET-113** [behavior, MATCHING] **Player team assignment.** `Server_AssignPlayerTeam @0x4fe310`
 (called from `Server_PlayerAdd`, writes `playerSlot+416`):
 - spectator (`+100567 && is_in_session`) → team **0**;
