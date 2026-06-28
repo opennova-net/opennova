@@ -189,8 +189,25 @@ bool check_fragment_reassembly_three_fragments() {
 
 } // namespace
 
+// [D-NET-8] A truncated inner stream still dispatches the final partial message, zero-padded to its
+// claimed length — matching CNapiNPConnection_ParseMessages @0x625bc0 (it substitutes 0 for missing
+// bytes rather than bailing). Earlier our parser dropped the partial.
+bool check_truncated_message_is_dispatched_zero_padded() {
+	const uint8_t bytes[] = {0x20, 0x42, 0x05, 0xAA, 0xBB}; // flags=LEN8, tag=0x42, len=5, only 2 body bytes
+	std::vector<opennova::ProtocolMessage> decoded;
+	if (!expect(opennova::parse_protocol_messages(bytes, sizeof(bytes), decoded),
+	            "truncated stream still parses")) return false;
+	if (!expect(decoded.size() == 1, "the truncated partial message is dispatched, not dropped")) return false;
+	if (!expect(decoded[0].tag == 0x42, "truncated message keeps its tag")) return false;
+	const std::vector<uint8_t> want = {0xAA, 0xBB, 0x00, 0x00, 0x00};
+	if (!expect(decoded[0].payload == want, "payload = available bytes zero-padded to the claimed length"))
+		return false;
+	return true;
+}
+
 int main() {
 	bool ok = true;
+	ok = check_truncated_message_is_dispatched_zero_padded() && ok;
 	ok = check_plaintext_encode_decode_roundtrip() && ok;
 	ok = check_custom_flags_encode() && ok;
 	ok = check_settings_update_selects_high_table() && ok;

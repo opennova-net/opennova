@@ -96,12 +96,23 @@ bool parse_protocol_messages(const uint8_t *data, size_t len,
 				(msg.flags.msg_type_high_bit ? 0x100u : 0u) | msg.tag);
 		pos += 2;
 
+		// [D-NET-8] On a truncated inner stream the original substitutes 0 for the missing field and
+		// STILL dispatches this final (partial, zero-filled) message before stopping — it does not bail
+		// [orig: CNapiNPConnection_ParseMessages @0x625bc0: each guarded read falls back to 0 / the value
+		// is read from the zero-padded 64 KB buffer]. So on truncation we emit the partial message (its
+		// payload is the available bytes zero-padded to the claimed length) and stop, rather than dropping
+		// it. Valid packets never hit these branches, so their parse is unchanged.
+		auto emit_partial_and_stop = [&] {
+			msg.payload.assign(data + pos, data + len);
+			msg.payload.resize(msg.length, 0); // zero-pad to the claimed length (length 0 -> empty)
+			out.push_back(std::move(msg));
+		};
 		if (msg.flags.len8) {
-			if (pos + 1 > len) return true;
+			if (pos + 1 > len) { emit_partial_and_stop(); break; }
 			msg.length = data[pos];
 			pos += 1;
 		} else if (msg.flags.len16) {
-			if (pos + 2 > len) return true; // tolerant: stop cleanly
+			if (pos + 2 > len) { emit_partial_and_stop(); break; }
 			msg.length = static_cast<uint32_t>(data[pos]) |
 					(static_cast<uint32_t>(data[pos + 1]) << 8);
 			pos += 2;
@@ -115,18 +126,18 @@ bool parse_protocol_messages(const uint8_t *data, size_t len,
 		// offset; retain the consumed bytes on the message in case a
 		// caller wants to re-encode bit-for-bit.
 		if (msg.flags.skip1) {
-			if (pos + 1 > len) return true;
+			if (pos + 1 > len) { emit_partial_and_stop(); break; } // [D-NET-8]
 			msg.skip_bytes.assign(data + pos, data + pos + 1);
 			pos += 1;
 		} else if (msg.flags.skip2) {
-			if (pos + 2 > len) return true;
+			if (pos + 2 > len) { emit_partial_and_stop(); break; } // [D-NET-8]
 			msg.skip_bytes.assign(data + pos, data + pos + 2);
 			pos += 2;
 		}
 
 		if (pos + msg.length > len) {
-			// Bad/truncated packet. Keep what we parsed.
-			return true;
+			emit_partial_and_stop(); // [D-NET-8] truncated payload -> dispatch available bytes, zero-padded
+			break;
 		}
 		if (msg.length > 0) {
 			msg.payload.assign(data + pos, data + pos + msg.length);
