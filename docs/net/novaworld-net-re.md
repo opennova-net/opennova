@@ -4732,7 +4732,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | System | Verdict | Note |
 |---|---|---|
 | A1 gate-probe | **matching** | crypto chain byte-verified end to end |
-| A2 gate-response | partial | literal parser still tracked (D-NET-9); leniency fixes landed (D-NET-10..15) |
+| A2 gate-response | partial | multi-radix literal parse witnessed, deferred low-value (D-NET-9); leniency fixes landed (D-NET-10..15) |
 | A3 clienthello | partial | ServerHello FIXED (flat builder, D-NET-16/18); ClientHello DE/PV3/PM/ET still unmodeled (D-NET-17) |
 | A4 clientauth | partial | CS-table/gating/JFC rejection fields fixed; remaining issues are outside A4 |
 | A5 client-session-fsm | partial | Success atol, Cookie parent, ClientConnected timing (D-NET-19..22) |
@@ -4776,7 +4776,7 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-8** [LOW, FIXED 2026-06-27] truncated inner stream: the original substitutes 0 for missing fields and still dispatches the final partial message (read from its zero-padded 64 KB buffer), then stops — it does not bail. `parse_protocol_messages` (`protocol_message.cpp`) now emits the partial message (payload = available bytes zero-padded to the claimed length) on a truncated LEN8/LEN16/SKIP/body field instead of dropping it; valid packets are unaffected. Test: `protocol_message` `check_truncated_message_is_dispatched_zero_padded`. [orig: CNapiNPConnection_ParseMessages @ 0x625bc0]
 
 `gate_response.cpp` (A2):
-- **D-NET-9** [MED, TRACKED] port fields need full literal parse (char/hex/octal/binary/decimal, in order). [orig: NapiScript_ParseLiteralValue @ 0x62db00]
+- **D-NET-9** [LOW, WITNESSED — deferred low-value] `NapiScript_ParseLiteralValue @0x62db00` tries, in order: char-literal `'x'` → `NapiScript_ParseHexValue @0x62d610` → `parse_octal_integer @0x62d7b0` → `parse_binary_literal @0x62d900` → `NapiScript_ParseDecimalIntegerB @0x62da20`. The reimpl parses gate port/literal fields as DECIMAL only. Real gate responses are decimal, so the other four radixes are unexercised robustness — re-prioritized MED→LOW; the 4-radix port is witnessed-and-ready but deferred (poor value/risk). [orig: NapiScript_ParseLiteralValue @ 0x62db00]
 - **D-NET-10** [MED, FIXED] store full 32-bit port; drop the [0,65535] reject (retail stores verbatim, presence = non-zero). [orig: CNapiGateManager_ProcessResponse @ 0x4ced20 (@ 0x4cf1ae)]
 - **D-NET-11** [MED, FIXED] IPv4 octets >255 accepted (mask to uint8), not rejected. [orig: Network_ParseIPv4AddressOctets @ 0x62dc10]
 - **D-NET-12** [LOW, FIXED] IPv4 parse stops after the 4th octet, ignores trailing chars. [orig: 0x62dc10]
