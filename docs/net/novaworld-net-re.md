@@ -4745,7 +4745,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | B3 pubcrypto | **matching** | byte-exact (NW-C3) |
 | B4 url-cipher | **matching** | byte-exact (NW-C4) |
 | B5 crc32-table | **matching** | table identical @0x849938, check 0x0376E6E7 |
-| B6 napi-tlv | **matching** | builder-layer length guard only (D-NET-28) |
+| B6 napi-tlv | **matching** | statement-param length guard added (D-NET-28 FIXED) |
 | B7 napi-envelope | **matching** | 4-byte mode exact; var-header mode out of scope (D-NET-29) |
 | C1 http-login-build | partial | all 3 reported claims refuted; POST/all-encrypted model correct |
 | C2 cookie-jar | partial | one-`Cookie:`-header-per-cookie (D-NET-30) |
@@ -4805,7 +4805,7 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-27** [LOW, FIXED] `epask_encrypt` truncates plaintext at first NUL (strlen). [orig: sub_6669A0 @ 0x6669a0]
 
 `napi` tlv/envelope (B6/B7):
-- **D-NET-28** [LOW, TRACKED] enforce name length [1,63] and data length [0,4095] at the novaworld builder layer (not the TLV codec). [orig: NapiStatementParam_Create @ 0x632b30]
+- **D-NET-28** [LOW, FIXED 2026-06-27] The statement-param limits are WITNESSED real at `NapiStatementParam_Create @0x632b30` (name `strlen-1 > 0x3E` ⇒ 1..63; `dataSize >= 4096` ⇒ 0..4095; reject = error flag + null). `make_client_var_list` (`libs/napi/session.cpp`) now skips a ClientVar whose name/value data exceeds 4095 (the param names are the fixed VarFNum/VarName/VarValue literals, always in [1,63]) — the faithful reject. Note: this is the gate STATEMENT layer, distinct from the in-match TLV codec `NapiNP_WriteTLV @0x61dd60`, which uses a plain u16 length (0xFFFF) with no such limit — our `libs/napi/tlv.cpp` already matches that. [orig: NapiStatementParam_Create @ 0x632b30]
 - **D-NET-29** [LOW, SCOPE] envelope variable-header (first-dword==0) decode mode unsupported — documented scope decision. [orig: NapiNP_UnpackPacket @ 0x62ca20]
 
 `http_login.cpp` + binding (C2/C3):

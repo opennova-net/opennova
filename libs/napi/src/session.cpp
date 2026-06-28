@@ -122,6 +122,13 @@ NapiMessage make_client_var_list(const std::string &list_name,
 	var_list.data.assign(list_name.begin(), list_name.end());
 	list.fields.push_back(std::move(var_list));
 	for (const auto &v : vars) {
+		// [D-NET-28] The statement param builder rejects a param whose name is not 1..63 chars or whose
+		// data exceeds 4095 bytes (sets an error flag + returns null). [orig: NapiStatementParam_Create
+		// @0x632b30: `strlen(name)-1 > 0x3E` / `dataSize >= 4096`]. Our param NAMES are the fixed
+		// "VarFNum"/"VarName"/"VarValue" literals (always valid); the data limit applies to the values
+		// (v.name carried as the VarName param's data, v.value as VarValue's). Skip a violating entry —
+		// the faithful reject (never triggers with in-range config; defensive parity).
+		if (v.name.size() > 4095 || v.value.size() > 4095) continue;
 		NapiMessage entry;
 		entry.name = "ClientVar";
 		auto add = [&entry](const char *name, const std::string &value) {
