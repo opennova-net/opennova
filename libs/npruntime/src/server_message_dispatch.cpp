@@ -225,8 +225,13 @@ std::vector<uint8_t> build_reply_tag_16(const PlayerReplicationState &ctx) {
 	return buf;
 }
 
-// tag=0x46 PLAYER-SYNC. [orig: NapiNPClientMsg_0x046 @0x431370; server NetPacket_SerializeWeaponOverlay
-// SlotState @0x505e80 — deferred; D-NET-127 fixture.]
+// tag=0x46 PLAYER-SYNC. [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80; client receiver
+// NapiNPClientMsg_PlayerSync @0x431370]. Faithful flag-driven format: [u8 slot][u16 fieldFlags]
+// [u8 entitySlot] then, in source order, the bit-gated fields — 0x1 name(cstr), 0x2 team-string(cstr),
+// 0x10 vehicle-name(cstr), 0x4 team(u8), 0x20/0x1000/0x40/0x80(u8), 0x400 weapon-type(u8), 0x800
+// timer(u32). Round-trips through decode_player_sync (verified). flags 0x1CF7 = the roster-sync field
+// set. VALUES default to a fresh on-foot player (no vehicle -> empty vehicle-name); per-field slot-state
+// modeling (score/squad/side/timer) is the remaining D-NET-127 nicety — but the wire SHAPE is faithful.
 std::vector<uint8_t> build_reply_tag_46(const PlayerReplicationState &ctx) {
 	std::vector<uint8_t> buf;
 	buf.reserve(48);
@@ -234,9 +239,9 @@ std::vector<uint8_t> build_reply_tag_46(const PlayerReplicationState &ctx) {
 	const uint16_t flags = 0x1CF7u;
 	push_u16(buf, flags);
 	push_u8(buf, static_cast<uint8_t>(ctx.entity_handle & 0x00FFu));
-	push_cstr(buf, ctx.player_name, 32);
-	push_cstr(buf, ctx.clan_tag, 16);
-	push_cstr(buf, std::string("A-A02-000000"), 16);
+	push_cstr(buf, ctx.player_name, 32);  // 0x1 name
+	push_cstr(buf, ctx.clan_tag, 16);     // 0x2 team-string (clan)
+	push_cstr(buf, std::string(), 16);    // 0x10 vehicle-name — empty for an on-foot player (was an invented "A-A02-..." literal)
 	push_u8(buf, ctx.team);  // team byte (entity+354)
 	push_u8(buf, 0);         // squad
 	push_u8(buf, 0);         // ticket-validated
