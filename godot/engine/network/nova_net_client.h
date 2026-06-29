@@ -21,17 +21,19 @@ namespace godot {
 
 class NovaItemDatabase;
 
-// The in-match NovaWorld spectator client — the production multiplayer RECEIVE
-// path.
+// The in-match NovaWorld spectator/replay client — a DEV TOOL, not the live
+// gameplay receive path.
 //
-// It binds a UDP socket, receives the in-match wire stream, decodes it
-// incrementally with the same libs the cross-validation tests use
-// (CaptureDecoder + build_replay_timeline), and exposes the resulting per-entity
-// world model + the mission name (read off the wire) to GDScript. Replay vs real
-// differ ONLY by where the bytes come from: today nw_replay (a captured session)
-// streams the authoritative world to it; cutting over to real multiplayer means
-// pointing this at a real server instead — nothing in the decode/render path
-// changes.
+// The live in-match receive path is NovaSimulation's joiner (enable_join ->
+// joiner_pump -> ClientRuntime) rendered by wire_present_pass; that is what a
+// player uses to join and play. NovaNetClient is the read-only spectator that
+// binds a UDP socket, receives the in-match wire stream, decodes it incrementally
+// with the same libs the cross-validation tests use (CaptureDecoder +
+// build_replay_timeline), and exposes the resulting per-entity world model + the
+// mission name (read off the wire) to GDScript. Its source is interchangeable:
+// today nw_replay (a captured session) streams the authoritative world to it, and
+// it can equally be pointed at a live server to observe — but it is a spectator/
+// debugging surface, not the joiner that owns the in-match handshake.
 //
 // Bootstrap: connect_to_replay() binds the socket and sends a small REGISTER ping
 // so the source learns this client's address (resent until the first datagram

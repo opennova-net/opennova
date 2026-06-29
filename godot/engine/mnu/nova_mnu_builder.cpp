@@ -1051,6 +1051,7 @@ String resolve_item_text(MnuBuildContext &ctx, const mnu::Item &item) {
 MnuItemVisual resolve_item(MnuBuildContext &ctx, const mnu::Item &item) {
 	MnuItemVisual v;
 	v.text = resolve_item_text(ctx, item);
+	v.value = to_gd(item.value); // the `value=` attribute (semantic value), kept beside the display text
 	if (iequals(item.type, "image")) {
 		Ref<Texture2D> tex = resolve_texture(ctx, item.text);
 		if (tex.is_valid()) {

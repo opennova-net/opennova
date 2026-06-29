@@ -613,9 +613,15 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
 	// D-NET-124). serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
 	// fold it into ClientState (runtime_) to render the host's own view.
+	// Serve-and-play (default) vs dedicated. SP / editor preview are ALWAYS serve-and-play (they render
+	// the host's own player); a LAN host honors the UI server-type (host_serve_and_play_, from
+	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn + the
+	// local view below and lets host_session_pump discard the host loopback (step 5) — mirroring
+	// start_host_session's gating [orig: SinglePlayer_StartMission @0x561af0].
+	const bool serve_and_play = host_listen_ ? host_serve_and_play_ : true;
 	host_owner_ = np::HostOwner{};
 	host_owner_.host_loopback = &host_loop_;
-	host_owner_.serve_and_play = true;
+	host_owner_.serve_and_play = serve_and_play;
 	ctx_.world = world_.get();
 	ctx_.mission = &mission_file_;
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
@@ -627,7 +633,7 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	if (host_listen_) {
 		const opennova::np::SessionReplyConfig &s = host_session_config_;
 		settings_.server_name = s.server_name.empty() ? std::string("OpenNova LAN Host") : s.server_name;
-		settings_.max_players = 16;
+		settings_.max_players = host_max_players_; // the UI player cap (configure_host_session clamped 1..65)
 		settings_.game_type = s.gametype;
 		settings_.mp_attributes = s.mpattrib;
 	} else {
@@ -644,23 +650,36 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// joiner replies; SP needs none. (The §5.1 0x0B BMS-header body reads ctx_.mission directly.)
 	np::configure_session_runtime(ctx_, host_listen_ ? host_session_config_
 	                                                 : opennova::np::SessionReplyConfig{});
-	// FAITHFUL auto-spawn: the host's own player at the start marker (§5.2c), binding the loopback's
-	// owned_entity (the 0x0A anchor) and publishing World::cached.local_player.
-	np::Server_ProcessPendingPlayerSpawns(ctx_, *world_);
-	// Latch the host loopback in-match so Server_TickUpdate fans it the per-frame whole-world 0x0A its
-	// local view renders from (no §5.2a self-stream needed — it holds the authoritative world).
-	np::mark_host_client_in_match(ctx_);
-	// The host's own client view (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
-	// each frame into the ClientState the present pass reads.
-	runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);
+	if (serve_and_play) {
+		// FAITHFUL auto-spawn: the host's own player at the start marker (§5.2c), binding the loopback's
+		// owned_entity (the 0x0A anchor) and publishing World::cached.local_player.
+		np::Server_ProcessPendingPlayerSpawns(ctx_, *world_);
+		// Latch the host loopback in-match so Server_TickUpdate fans it the per-frame whole-world 0x0A its
+		// local view renders from (no §5.2a self-stream needed — it holds the authoritative world).
+		np::mark_host_client_in_match(ctx_);
+		// The host's own client view (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
+		// each frame into the ClientState the present pass reads.
+		runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);
 
-	// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
-	// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
-	player_input_ = opennova::world::PlayerInput{};
-	if (world_->ai && world_->cached.local_player.valid()) {
-		if (const AiEntity *pe = world_->ai->for_handle(world_->cached.local_player)) {
-			player_input_.look_heading = pe->heading;
+		// Seed the look heading from the auto-spawned player's facing so the body starts aligned (the
+		// motor drives entity Yaw from player_input_.look_heading each frame, else input snaps it to 0).
+		player_input_ = opennova::world::PlayerInput{};
+		if (world_->ai && world_->cached.local_player.valid()) {
+			if (const AiEntity *pe = world_->ai->for_handle(world_->cached.local_player)) {
+				player_input_.look_heading = pe->heading;
+			}
 		}
+	} else {
+		// Dedicated (UI "serve only"). The witnessed original makes this a true host-only session
+		// [orig: HG_SERVEONLY -> CGameSession_SetConnectionMode(1), is_host=1/is_client=0; HostDialog
+		// read @0x555940, dispatch @0x556d00, mode switch @0x4c49f0]. We instead keep the single mode-3
+		// listen-server path (ADR 0011) with serve_and_play=false — wire-equivalent to the joiner (mode 1
+		// vs 3 changes only the host's OWN client bookkeeping, never the S2C stream a peer receives),
+		// tracked as a divergence (docs/net/novaworld-net-re.md, D-NET-131). No host player spawns (a slot
+		// fills lazily via tick_connections if a peer needs it) and host_session_pump discards the host
+		// loopback (step 5): there is no local view, so runtime_ stays null — host_pump's fold and the
+		// present snapshot both guard on it.
+		runtime_.reset();
 	}
 }
 
@@ -1432,6 +1451,20 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 				}
 			}
 		}
+	}
+	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
+	// loopback fold at bring-up; max_players is the lobby-advertised cap, clamped to the witnessed 1..65.
+	if (p_options.has("serve_and_play")) {
+		host_serve_and_play_ = static_cast<bool>(p_options["serve_and_play"]);
+	}
+	if (p_options.has("max_players")) {
+		uint32_t mp = dictionary_u32(p_options, "max_players", host_max_players_);
+		if (mp < 1u) {
+			mp = 1u;
+		} else if (mp > 65u) {
+			mp = 65u;
+		}
+		host_max_players_ = mp;
 	}
 	host_session_config_ = std::move(config);
 }

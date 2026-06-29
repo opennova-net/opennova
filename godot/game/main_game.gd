@@ -369,16 +369,77 @@ func _on_novaworld_requested() -> void:
 	_novaworld_panel = NovaWorldPanel.new()
 	# Dev default: localhost. A prod build sets the server host from the
 	# resolved server IP before showing the panel.
+	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
+	# own root is null until a mission loads). Set BEFORE add_child so the panel's _build_ui sees it.
+	_novaworld_panel.resource_root = _root
 	_menu_host.hide_menu()
 	$MenuLayer.add_child(_novaworld_panel)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
+	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
+	# NW_LAN_JOIN env use); the panel's join dict { host_ip, port, mission, player_name } matches
+	# load_mission_as_joiner's row. Hosting from the panel routes through the shared host bring-up.
+	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
+	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
 
 
 func _on_novaworld_closed() -> void:
+	_dismiss_novaworld_panel()
+	_menu_host.show_menu()
+
+
+func _dismiss_novaworld_panel() -> void:
 	if _novaworld_panel != null:
 		_novaworld_panel.queue_free()
 		_novaworld_panel = null
-	_menu_host.show_menu()
+
+
+# The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
+# available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
+# the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + channel=NovaWorld, so
+# game_world._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+func _on_novaworld_host_requested(config: Dictionary) -> void:
+	# The panel picks the map; fall back to the first available .bms only if it sent none.
+	var mission := String(config.get("mission", ""))
+	if mission.is_empty():
+		mission = _resolve_default_mission()
+	if mission.is_empty():
+		# Report back so the panel leaves "Starting..." instead of hanging silently.
+		push_warning("MainGame: NovaWorld host requested but no mission is available")
+		if _novaworld_panel != null and _novaworld_panel.has_method("host_failed"):
+			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
+		return
+	_dismiss_novaworld_panel()
+	config = config.duplicate()
+	config["mission"] = mission
+	config["net_transport"] = "lan"
+	config["bind_port"] = 32768
+	config["player_name"] = _resolve_player_callsign()
+	config["server_name"] = String(config.get("server_name", "OpenNova Host"))
+	_begin_world_load()
+	_world.load_mission_as_host(config)
+
+
+# The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
+# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (info already carries
+# host_ip/port/mission/player_name).
+func _on_novaworld_join_requested(info: Dictionary) -> void:
+	_dismiss_novaworld_panel()
+	_on_lan_join_requested(info)
+
+
+# A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
+# first .bms the resource root exposes. Empty when no mission is reachable.
+func _resolve_default_mission() -> String:
+	if _menu_host != null and _menu_host.has_method("get_selected_mission"):
+		var sel := String(_menu_host.get_selected_mission())
+		if not sel.is_empty():
+			return sel
+	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
+	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
+	if _root != null and _root.has_method("list_files"):
+		for m in _root.list_files(".bms"):
+			return String(m).get_file()
+	return ""
 
 
 # --- Menu <-> world transitions ----------------------------------------------

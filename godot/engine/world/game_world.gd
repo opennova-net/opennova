@@ -790,7 +790,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 			opts["listen_server"] = true
 		for k in ["server_name", "max_players", "game_type", "net_transport", "bind_port",
 				"advertise", "host_ip", "port", "player_name",
-				"nw_gate_host", "nw_gate_port", "region"]:
+				"nw_gate_host", "nw_gate_port", "region", "dedicated", "channel"]:
 			if _host_config.has(k):
 				opts[k] = _host_config[k]
 		_host_config = {}
@@ -820,8 +820,14 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 		return
 	if String(opts.get("net_transport", "")) != "lan":
 		return
+	# Register with the NovaWorld gate when the host picked the NovaWorld channel (a browsable
+	# online host) or when a gate was injected via env (NW_GATE_HOST). The in-match wire is the
+	# SAME either way (net_transport "lan"); only discovery/registration differs (LAN vs NovaWorld).
+	var channel := String(opts.get("channel", "LAN"))
 	var gate_host := String(opts.get("nw_gate_host", ""))
 	if gate_host.is_empty():
+		if channel == "NovaWorld":
+			push_warning("GameWorld: NovaWorld host requested but no gate address (nw_gate_host) — gate registration skipped; host is LAN-reachable only")
 		return  # no gate configured -> pure LAN, nothing to register with
 	if not ClassDB.class_exists("NovaWorldHost"):
 		push_warning("GameWorld: NovaWorldHost unavailable; host is LAN-only (not browsable)")

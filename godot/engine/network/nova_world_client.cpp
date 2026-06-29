@@ -773,7 +773,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		UtilityFunctions::print(String("[NovaWorldClient] join resolved host ")
 			+ String(r.host_ip.c_str()) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
-		send_jointops_hello(String(r.host_ip.c_str()), r.host_port);
+		resolve_join_target(String(r.host_ip.c_str()), r.host_port);
 		break;
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
@@ -784,31 +784,17 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 	}
 }
 
-// Open a UDP session to the host and send the JointOperations ClientHello. This
-// is the proto-switch boundary: the connection protocol flips from NOVAWORLDUDP
-// (the lobby session on nw_socket_) to JointOperations (the game session on
-// game_socket_). We send exactly one hello and stop — in-match gameplay is out
-// of scope (ADR 0009 seam). On our own server the hello is rejected at the PN
-// check and recorded by the unknown-tracker pn: channel, which is the proof.
-void NovaWorldClient::send_jointops_hello(const String &host, uint16_t port) {
-	game_socket_.instantiate();
-	if (game_socket_->bind(0, "0.0.0.0") != OK) {
-		enter_state(STATE_ERROR, String("game UDP bind failed"));
-		return;
-	}
-	auto cfg = opennova::ClientSession::Config::jointoperations();
-	cfg.client_index = pick_random_uint32();
-	cfg.client_key = pick_random_uint32();
-	game_session_ = std::make_unique<opennova::ClientSession>(cfg);
-
-	const auto hello = game_session_->start();
-	game_socket_->set_dest_address(host, port);
-	game_socket_->put_packet(to_pba(hello));
-	UtilityFunctions::print(String("[NovaWorldClient] >> JointOperations ClientHello ")
-		+ String::num_int64(static_cast<int64_t>(hello.size())) + "B to " + host + ":"
+// The NWJoin handshake has resolved the in-match host:port. Hand that off to the game layer and
+// stop — the panel routes joined_game into NovaSimulation's joiner (load_mission_as_joiner ->
+// enable_join), which owns the SINGLE in-match ClientHello (joiner_pump's runtime_->start(), the
+// witnessed CNapiGameSession_InitNPConnection path). We deliberately do NOT send our own in-match
+// hello here: that would be a second, conflicting handshake on a third socket (the old "send one
+// hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
+// on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
+void NovaWorldClient::resolve_join_target(const String &host, uint16_t port) {
+	UtilityFunctions::print(String("[NovaWorldClient] join target resolved ") + host + ":"
 		+ String::num_int64(static_cast<int64_t>(port))
-		+ " — proto switched NOVAWORLDUDP -> JointOperations");
-
+		+ " — handing off to the in-match joiner (NovaSimulation owns the ClientHello)");
 	enter_state(STATE_IN_GAME_HELLO);
 	emit_signal("joined_game", host, static_cast<int>(port));
 }

@@ -55,7 +55,7 @@ Promote a sanitized golden under `.scratch\golden\`.
 
 Two retail↔retail LAN goldens captured 2026-06-26 (single box, own LAN IP, host
 `:32768` <-> joiner `:32769`, captured on the loopback adapter). Decode with
-`--items <ITEMS.DEF>` (e.g. `~/Desktop/REVX02/ITEMS.DEF`) — without it the `0x0a`
+`--items <ITEMS.DEF>` (use `~/Desktop/JOX/ITEMS.DEF`) — without it the `0x0a`
 per-frame-update records can't be length-resolved and print `(DECODE INCOMPLETE)`.
 
 | File | Contents |

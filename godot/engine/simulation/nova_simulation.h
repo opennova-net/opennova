@@ -138,6 +138,12 @@ private:
 	Ref<NovaUdpPump> pump_;
 	opennova::np::SessionReplyConfig host_session_config_; // P8: was GameServerRuntimeConfig
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
+	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
+	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
+	// lets host_session_pump discard the loopback (step 5). Mirrors HostConfig.serve_and_play /
+	// start_host_session's gating [orig: the §5.0 listen-host bring-up, SinglePlayer_StartMission @0x561af0].
+	bool host_serve_and_play_ = true;
+	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
 	PackedFloat32Array present_snapshot_from_client_view() const;
 

@@ -88,6 +88,12 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			if not session_options.has("spawn_names") or Array(session_options.get("spawn_names", [])).is_empty():
 				session_options["spawn_names"] = [mission_name]
 		session_options["bind_port"] = bind_port
+		# Server type: serve-and-play (default) spawns + renders the host's own player and folds its
+		# loopback view; a DEDICATED host (config "dedicated") runs the listen server with NO local
+		# player and discards its loopback (net-re §5.2b, host_session_pump step 5). max_players is the
+		# lobby-advertised cap (clamped host-side to the witnessed 1..65).
+		session_options["serve_and_play"] = not bool(options.get("dedicated", false))
+		session_options["max_players"] = int(options.get("max_players", 16))
 		_sim.configure_host_session(session_options)
 		if not _sim.enable_host_listen(bind_port):
 			push_warning("MissionRuntime: could not bind co-op LAN host port %d — falling back to local listen server." % bind_port)

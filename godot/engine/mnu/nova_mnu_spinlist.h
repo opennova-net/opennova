@@ -53,6 +53,9 @@ public:
 	void set_value_index(int p_index); // programmatic; clamps, no emit
 	int get_value_index() const { return index_; }
 	String get_value() const;
+	// The selected item's `value=` attribute (the semantic value, e.g. SERVERTYPE 0/1), as
+	// opposed to get_value()'s localized display text. Empty when the item carries no value.
+	String get_value_attr() const;
 	int get_value_count() const { return static_cast<int>(visuals_.size()); }
 	// Advance by delta with wrap-around; updates the cell, plays the click sound,
 	// and emits value_changed (the SpinUp/SpinDown buttons drive this).

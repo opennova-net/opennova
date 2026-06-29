@@ -18,6 +18,13 @@ extends Control
 @export var player_name := "Player"
 
 signal closed()
+# The NWJoin handshake resolved the in-match host:port — enter the match as a JOINER. The arg is
+# the joiner row { host_ip, port, mission, player_name } MainGame hands to GameWorld.load_mission_as_joiner
+# (the SAME entry the LAN browser + NW_LAN_JOIN env use — one in-match joiner seam, ADR 0009).
+signal join_in_match_requested(info: Dictionary)
+# Host a NovaWorld game. The panel supplies the gate (the server it's connected to); MainGame fills in
+# the mission + callsign and stands up a browsable listen host (game_world._maybe_start_nw_host).
+signal host_requested(config: Dictionary)
 
 var _client            # NovaWorldClient (created at runtime if the class exists)
 var _status_label: Label
@@ -33,6 +40,15 @@ var _target: int = NovaWorldSettings.Target.OPENNOVA
 var _rows: Array = []          # GSB rows, parallel to _server_list items (index -> row)
 var _can_login := false        # true once the gate reply gives us a startup_url
 var _logged_in := false
+# Stashed at join time: the selected row's mission + our callsign. joined_game(host, port) carries
+# only the resolved address, so we remember the mission (the joiner must know the host's mission to
+# load it) and pair them when the join resolves.
+var _pending_mission := ""
+var _pending_player := ""
+# The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
+# install's .bms missions (the panel owns no mission list; the world's root is null until a load).
+var resource_root  # NovaResourceRoot
+var _mission_option: OptionButton
 
 
 func _ready() -> void:
@@ -96,6 +112,18 @@ func _build_ui() -> void:
 	_server_list.item_selected.connect(_on_server_selected)
 	box.add_child(_server_list)
 
+	# Map to host: the install's .bms missions (from the mounted root MainGame injects). Empty when
+	# no root/missions — Host then reports it via host_failed instead of hanging.
+	var map_row := HBoxContainer.new()
+	box.add_child(map_row)
+	var map_label := Label.new()
+	map_label.text = "Map:"
+	map_row.add_child(map_label)
+	_mission_option = OptionButton.new()
+	_mission_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_row.add_child(_mission_option)
+	_populate_missions()
+
 	var buttons := HBoxContainer.new()
 	box.add_child(buttons)
 
@@ -108,6 +136,7 @@ func _build_ui() -> void:
 	_host_button = Button.new()
 	_host_button.text = "Host a Game"
 	_host_button.disabled = true
+	_host_button.tooltip_text = "Host a game and register it on the gate. Available on OpenNova servers only — we never advertise a host on NovaLogic's live service."
 	_host_button.pressed.connect(_on_host_pressed)
 	buttons.add_child(_host_button)
 
@@ -194,8 +223,15 @@ func _on_state_changed(state: int) -> void:
 
 
 func _on_connected() -> void:
-	_set_status("Connected. Choose a server or host your own.")
-	_host_button.disabled = false
+	# Hosting registers a game on the gate — allowed only on OpenNova servers, never on NovaLogic's
+	# live service. Disable (don't just block-on-click) the Host button when "Original NovaWorld" is the
+	# target so it reads as unavailable rather than broken.
+	var can_host := _target != NovaWorldSettings.Target.REAL
+	_host_button.disabled = not can_host
+	if can_host:
+		_set_status("Connected. Choose a server or host your own.")
+	else:
+		_set_status("Connected to NovaWorld. Choose a server to join — hosting is OpenNova-only.")
 	_refresh_servers()
 
 
@@ -298,24 +334,79 @@ func _on_join_pressed() -> void:
 		return
 	var row: Dictionary = _rows[index]
 	var rid := int(row.get("rid", 0))
+	# Remember what we need for the in-match join — joined_game only carries the resolved address.
+	_pending_mission = String(row.get("mission_name", ""))
+	_pending_player = player_name
 	_set_status("Joining %s..." % String(row.get("name", "server")))
 	if _client != null and _client.has_method("join"):
 		_client.join(rid)
 
 
-# The client has switched the connection protocol from the lobby (NOVAWORLDUDP)
-# to the in-match game (JointOperations) by sending the ClientHello to the host.
-# In-match gameplay is not implemented yet, so this is where the flow ends.
+# The NWJoin handshake resolved the host's in-match address. Hand it (with the stashed mission +
+# callsign) up to MainGame, which loads the mission as a co-op JOINER and runs the witnessed in-match
+# join through NovaSimulation (the SAME path the LAN browser / NW_LAN_JOIN env use). The lobby client
+# does not send the in-match ClientHello itself — the joiner runtime owns it.
 func _on_joined_game(host: String, port: int) -> void:
-	_set_status("Joined — switched to JointOperations (%s:%d)." % [host, port])
+	if _pending_mission.is_empty():
+		_set_status("Joined %s:%d, but the host's mission is unknown — cannot enter the match." % [host, port])
+		return
+	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
+	join_in_match_requested.emit({
+		"host_ip": host,
+		"port": port,
+		"mission": _pending_mission,
+		"player_name": _pending_player,
+	})
 
 
+# Host a NovaWorld game: hand the gate (the server we're connected to) up to MainGame, which fills in
+# the mission + callsign and stands up a browsable listen host (game_world._maybe_start_nw_host). We
+# register on the OpenNova gate only — never advertise a host on NovaLogic's live service.
 func _on_host_pressed() -> void:
-	if _client != null and _client.has_method("host_game"):
-		_client.host_game()
-		_set_status("Hosting a game...")
-	else:
-		_set_status("Hosting is not available yet in this build.")
+	if _target == NovaWorldSettings.Target.REAL:
+		_set_status("Hosting is available on OpenNova servers only.")
+		return
+	var mission := _selected_mission()
+	if mission.is_empty():
+		_set_status("No missions are available to host (check the game folder).")
+		return
+	_set_status("Starting a NovaWorld host...")
+	host_requested.emit({
+		"channel": "NovaWorld",
+		"nw_gate_host": _resolved_host(),
+		"nw_gate_port": gate_port,
+		"server_name": "%s's Game" % player_name,
+		"mission": mission,
+	})
+
+
+# Populate the Map picker from the injected resource root. Empty (no root / no .bms) leaves the
+# dropdown empty; Host then reports "no missions" rather than emitting an unhostable request.
+func _populate_missions() -> void:
+	if _mission_option == null:
+		return
+	_mission_option.clear()
+	if resource_root != null and resource_root.has_method("list_files"):
+		for m in resource_root.list_files(".bms"):
+			_mission_option.add_item(String(m).get_file())
+	if _mission_option.item_count > 0:
+		_mission_option.select(0)
+
+
+# The Map dropdown's current selection (the .bms basename), or "" when none.
+func _selected_mission() -> String:
+	if _mission_option == null or _mission_option.item_count == 0:
+		return ""
+	var idx := _mission_option.selected
+	return _mission_option.get_item_text(idx) if idx >= 0 else ""
+
+
+# Called by MainGame when a requested host could not start (no mission, load failed). Reports it on
+# the panel instead of leaving the stale "Starting..." status, and re-enables Host (REAL stays off).
+func host_failed(reason: String) -> void:
+	_set_status(reason)
+	if _host_button != null:
+		_host_button.disabled = (_target == NovaWorldSettings.Target.REAL)
 
 
 func _on_close_pressed() -> void:

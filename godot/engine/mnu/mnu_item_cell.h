@@ -17,6 +17,11 @@ struct MnuItemVisual {
 	enum Kind { TEXT, IMAGE, COLOR };
 	Kind kind = TEXT;
 	String text;
+	// The item's `value=` attribute — the semantic value the original reads (e.g. SERVERTYPE
+	// 0/1, GAME_TYPE COOP=2), distinct from the localized display `text`. The original parses
+	// it with wcstoul [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10]; a host reads it to map
+	// the selection to behavior. Empty for host-supplied (set_values) text lists.
+	String value;
 	Ref<Texture2D> texture;
 	Color color = Color(1, 1, 1, 1);
 };

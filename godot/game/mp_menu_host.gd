@@ -188,7 +188,7 @@ func _read_host_config() -> Dictionary:
 		"mission": String(missions[0]) if missions.size() > 0 else "",
 		"max_players": max_players,
 		"game_type": "COOP",                       # co-op-minimal: forced
-		"game_type_raw": _spin_value("GAME_TYPE", ""),  # the spinlist choice, for later
+		"game_type_raw": _spin_attr("GAME_TYPE", ""),  # the GAME_TYPE value attr (HG_COOP=2, ...), for later
 		"channel": "LAN",
 		"net_transport": "lan",
 		"bind_port": 32768,                        # witnessed retail LAN host port [game.cfg mplanserverport 32768-32787]
@@ -197,13 +197,11 @@ func _read_host_config() -> Dictionary:
 
 
 # Serve-and-play (default) vs dedicated: a DEDICATED host runs the listen server but spawns NO local
-# player. Read off a "DEDICATED" toggle when mp.mnu provides one (its exact control name is the wiring
-# follow-up); absent -> serve-and-play, the playable co-op host.
+# player. mp.mnu's host screen carries this as the SERVERTYPE spinlist [orig: host dialog server-type
+# read, UI_HandleHostSessionStart @0x556d00]: HG_SERVEPLAY value="0" (serve-and-play) vs HG_SERVEONLY
+# value="1" (dedicated). We read the item's value attr (not its localized label). Absent/0 -> serve-and-play.
 func _is_dedicated() -> bool:
-	var node := _find("DEDICATED")
-	if node is BaseButton:
-		return (node as BaseButton).button_pressed
-	return false
+	return _spin_attr("SERVERTYPE", "0") == "1"
 
 
 func _selected_missions() -> Array:
@@ -250,4 +248,13 @@ func _spin_value(name: String, default_value: String) -> String:
 	var node := _find(name)
 	if node != null and node.has_method("get_value"):  # NovaMnuSpinList
 		return String(node.get_value())
+	return default_value
+
+
+# Like _spin_value but returns the selected item's `value=` attribute (the semantic value the
+# original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
+func _spin_attr(name: String, default_value: String) -> String:
+	var node := _find(name)
+	if node != null and node.has_method("get_value_attr"):  # NovaMnuSpinList
+		return String(node.get_value_attr())
 	return default_value

@@ -96,6 +96,13 @@ String NovaMnuSpinList::get_value() const {
 	return visuals_[index_].text;
 }
 
+String NovaMnuSpinList::get_value_attr() const {
+	if (index_ < 0 || index_ >= static_cast<int>(visuals_.size())) {
+		return String();
+	}
+	return visuals_[index_].value;
+}
+
 void NovaMnuSpinList::cycle(int p_delta) {
 	if (visuals_.empty()) {
 		return;
@@ -112,6 +119,7 @@ void NovaMnuSpinList::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_values", "values"), &NovaMnuSpinList::set_values);
 	ClassDB::bind_method(D_METHOD("set_value_index", "index"), &NovaMnuSpinList::set_value_index);
 	ClassDB::bind_method(D_METHOD("get_value_index"), &NovaMnuSpinList::get_value_index);
+	ClassDB::bind_method(D_METHOD("get_value_attr"), &NovaMnuSpinList::get_value_attr);
 	ClassDB::bind_method(D_METHOD("get_value"), &NovaMnuSpinList::get_value);
 	ClassDB::bind_method(D_METHOD("get_value_count"), &NovaMnuSpinList::get_value_count);
 	ClassDB::bind_method(D_METHOD("cycle", "delta"), &NovaMnuSpinList::cycle);

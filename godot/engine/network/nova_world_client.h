@@ -53,9 +53,9 @@ public:
 		STATE_DISCONNECTED,
 		STATE_ERROR,
 		// Join legs (ADD only at the end — existing values must stay stable for
-		// GDScript). STATE_JOINING: NWJoin HTTP in flight. STATE_IN_GAME_HELLO:
-		// the JointOperations ClientHello has been sent to the host — the proto
-		// switch boundary (terminal for this milestone; no in-match gameplay).
+		// GDScript). STATE_JOINING: NWJoin HTTP in flight. STATE_IN_GAME_HELLO: the
+		// in-match host:port has been resolved and handed to the game layer (joined_game);
+		// NovaSimulation's joiner takes over the in-match handshake from here.
 		STATE_JOINING,
 		STATE_IN_GAME_HELLO,
 	};
@@ -93,11 +93,11 @@ public:
 	// login_failed. Session-only (nothing persisted).
 	void login(const String &username, const String &password);
 
-	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake
-	// for the GSB row's `rid`, resolves the host address, and opens a session to
-	// the host with PN="JointOperations" — flipping the connection protocol from
-	// the lobby to the in-match game. Stops at the JointOperations ClientHello
-	// (the proto-switch boundary); emits joined_game(host, port).
+	// Join a hosted game (ADR 0010 Phase 5). Runs the NWJoin.dll HTTP handshake for
+	// the GSB row's `rid`, resolves the in-match host address, and emits
+	// joined_game(host, port). The game layer (NovaWorldPanel -> MainGame) then drives
+	// the in-match join through NovaSimulation's joiner — this client does not send the
+	// in-match ClientHello itself (one joiner seam for LAN / NW / env joins).
 	void join(int rid);
 
 	// Engine hooks.
@@ -134,9 +134,10 @@ private:
 	void on_join_request_completed(int result, int response_code,
 	                               const PackedStringArray &headers,
 	                               const PackedByteArray &body);
-	// Open a UDP session to the host and send the JointOperations ClientHello —
-	// the proto-switch boundary.
-	void send_jointops_hello(const String &host, uint16_t port);
+	// The NWJoin handshake resolved the in-match host:port — hand it off to the game
+	// layer via joined_game(host, port). Does NOT send an in-match hello; NovaSimulation's
+	// joiner owns the single ClientHello (see the .cpp for why).
+	void resolve_join_target(const String &host, uint16_t port);
 
 	// Snapshot the gate/session outputs into the flow's LobbyHttpContext. Called at
 	// each leg-initiation point (login / GSB / join) — never inside a leg callback,

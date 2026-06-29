@@ -234,6 +234,34 @@ func test_spinlist_color_items_render_swatches() -> void:
 	assert_eq(swatch.color, Color(0, 1, 0, 1), "swatch follows the selection (00FF00)")
 
 
+func test_spinlist_get_value_attr_returns_value_not_label() -> void:
+	# A host reads the item's `value=` attribute (the semantic value the original reads with wcstoul
+	# [orig: CUISpinList_ParseXMLDefinition @0x64bd10]) to map a selection to behavior — e.g. the host
+	# screen's SERVERTYPE spinlist: HG_SERVEPLAY=0 (serve-and-play) vs HG_SERVEONLY=1 (dedicated). This
+	# is distinct from get_value()'s localized DISPLAY text. (MpMenuHost._is_dedicated reads the attr.)
+	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
+		"<WINDOW type=\"spinlist\" name=\"SERVERTYPE\">" + \
+		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>60</RIGHT><BOTTOM>30</BOTTOM></POSITION>" + \
+		"<ITEMS><ITEM type=\"id\" value=\"0\">HG_SERVEPLAY</ITEM>" + \
+		"<ITEM type=\"id\" value=\"1\">HG_SERVEONLY</ITEM></ITEMS>" + \
+		"</WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic SERVERTYPE spinlist parses")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var spin := menu.find_child("SERVERTYPE", true, false)
+	assert_true(spin is NovaMnuSpinList, "spinlist builds")
+	# get_value() is the display text; get_value_attr() is the `value=` attribute.
+	assert_eq(spin.get_value(), "HG_SERVEPLAY", "get_value() starts on the first item's display text")
+	assert_eq(spin.get_value_attr(), "0", "get_value_attr() returns the first item's value (serve-and-play)")
+	spin.cycle(1)
+	assert_eq(spin.get_value(), "HG_SERVEONLY", "get_value() advances to the second item's text")
+	assert_eq(spin.get_value_attr(), "1", "get_value_attr() follows the selection (dedicated)")
+
+
 func test_spinlist_button_press_cycles_at_runtime() -> void:
 	var menu := _build_menu()
 	var spin := menu.find_child("Difficulty", true, false)

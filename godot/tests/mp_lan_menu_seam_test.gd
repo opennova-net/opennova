@@ -91,6 +91,10 @@ func test_start_game_emits_host_config() -> void:
 	assert_eq(config.get("game_type"), "COOP", "co-op-minimal forces COOP")
 	assert_eq(config.get("mission"), "alpha.bms")
 	assert_eq(config.get("channel"), "LAN")
+	# SERVERTYPE absent in the stand-in menu -> serve-and-play (dedicated=false). The real screen's
+	# SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is unit-tested in
+	# mnu_widgets_test (test_spinlist_get_value_attr_returns_value_not_label).
+	assert_eq(config.get("dedicated"), false, "no SERVERTYPE control -> serve-and-play default")
 
 
 func test_start_game_defaults() -> void:
