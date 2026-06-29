@@ -52,6 +52,7 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 	s.euler_z = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
 	s.entity_class = entity_class_of(e);
+	s.health = e.health; // §5.10 health-classification byte source — non-zero keeps the player alive
 	return s;
 }
 
@@ -97,6 +98,18 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		rec.team = e.team;
 		rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
 		rec.net_id = e.net_id;
+		// playerClass (entity+0x294): a player MUST advertise a valid soldier class (5..9) or the
+		// JOINER's client skips body-anim channel (+0x188) registration at round-load and then cannot
+		// move/crouch/prone — the body motor early-bails on a NULL anim channel. The client resolves the
+		// soldier model from playerClass at round-load, NOT from the wire avatar/anim_slot. [orig:
+		// Game_ReloadEntityModelsAndCallbacks @0x522830 -> AnimMap_GetSlotPropertyInt(playerClass)
+		// @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60; class 0 -> slot 15 -> empty ADM ->
+		// registration skipped -> Entity_UpdateInfantryPlayerBody @0x4b40e0 bails @0x4b4135. re-grill
+		// 2026-06-28.] Carry the entity's loadout class; default a player to 8 (golden) until per-player
+		// loadout class is wired.
+		rec.player_class = e.player_class;
+		if (e.item_id == kPlayerInfantryTypeId && (rec.player_class < 5 || rec.player_class > 9))
+			rec.player_class = 8;
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<uint16_t>(batch.records.size());

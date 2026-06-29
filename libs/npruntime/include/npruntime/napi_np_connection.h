@@ -66,8 +66,13 @@ struct InitialStateBurst {
 	                                    // client sends 0x2F (f317) -> server replies 0x5A + game-start
 	                                    // (f318). Without this gate, 0x1A and game-start land in the
 	                                    // same datagram batch and the client never gets to send 0x2F.
-	uint8_t  loadout_wait_ticks = 0;    // ticks spent waiting at phase 8 — auto-advances after 2 ticks
-	                                    // so opennova clients (which don't send 0x2F) aren't stuck
+	uint16_t loadout_wait_ticks = 0;    // ticks spent waiting at phase 8 for the client's C2S 0x2F
+	                                    // (loadout select). The golden delivers S2C 0x5A (loadout)
+	                                    // BEFORE the game-start; the host must WAIT for 0x2F so the
+	                                    // player deploys WITH a loadout (else it spawns weaponless and
+	                                    // cannot move). Both the retail client (selects) and the
+	                                    // opennova joiner (pump stage 3) send 0x2F; the long fallback
+	                                    // is only a safety net against a client that never selects.
 	uint16_t roster_wait_ticks = 0;     // ticks waited for the post-handshake round-trip (roster_pushed)
 	                                    // before starting the world-stream — auto-proceeds after a
 	                                    // generous window so the opennova client (which doesn't send

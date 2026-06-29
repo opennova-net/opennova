@@ -67,6 +67,12 @@ struct GameEntitySnapshot {
 	// Unknown / NoNetworkCallback / Guided are not emitted by the production 0x0A frame builder;
 	// authoring/runtime code sets this from the item's *_function class tag.
 	EntityClass entity_class = EntityClass::Unknown;
+	// Entity Health (entity+286). The §5.10 player/infantry compact record's "health classification"
+	// byte (field 17 -> Entity_SetHealthFromDifficultyByte @0x4AD580) is built from this; a living
+	// entity MUST replicate non-zero or the client marks its own player dead and the C2S 0x0C move
+	// uplink (Player_BuildTag0CInputBody @0x42a59d, gated on entity->Health != 0) never fires. Default
+	// 100 keeps positional-only inits alive.
+	int32_t health = 100;
 };
 
 } // namespace opennova

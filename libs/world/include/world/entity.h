@@ -106,6 +106,14 @@ struct Entity {
     Vec3 spawn_position;
 
     uint8_t team = 0;
+    // GamePlayerEntity.playerClass (entity+0x294) — the soldier class 5..9. The joiner's client
+    // resolves its body-anim model from THIS at round-load [orig: Game_ReloadEntityModelsAndCallbacks
+    // @0x522830 -> AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity
+    // @0x40bb60 writes animChannelB(+0x188)]. The MP branch preloads classes 5..9 only; class 0 maps
+    // to slot 15 -> empty ADM -> no anim channel -> Entity_UpdateInfantryPlayerBody @0x4b40e0 bails,
+    // so the player cannot move/crouch/prone. Set from the player's loadout at spawn (default a valid
+    // class for players); 0 = unset / non-player. [orig: re-grill 2026-06-28; net-re §5.2b/§5.23]
+    uint8_t player_class = 0;
     uint8_t group_id = 0;     // named-group membership
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
     int32_t wp_number = 0;    // position along that route

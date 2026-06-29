@@ -53,6 +53,14 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			rec.player.pos_y_compressed = cy;
 			rec.player.pos_z_compressed = cz;
 			rec.player.yaw_byte = yaw_byte;
+			// §5.10 health-classification byte (field 17 -> Entity_SetHealthFromDifficultyByte). A
+			// living player MUST replicate non-zero or the client marks its own player dead and the
+			// C2S 0x0C move uplink (Player_BuildTag0CInputBody, gated on entity->Health != 0) never
+			// fires — i.e. the joiner spawns but cannot move. Send the entity's health clamped to a
+			// byte (dead -> 0). The exact difficulty-byte classification is a follow-up grill of
+			// Entity_SetHealthFromDifficultyByte @0x4AD580; non-zero is the deploy/move requirement.
+			rec.player.health_class_byte =
+					e.health > 0 ? static_cast<uint8_t>(e.health < 255 ? e.health : 255) : 0;
 			break;
 		case EntityClass::Vehicle:
 			rec.vehicle.parent_slot_handle = 0xFFFF;

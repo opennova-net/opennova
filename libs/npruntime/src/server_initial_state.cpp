@@ -457,8 +457,13 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced
 	while (b.sync_state != 5) {
 		if (is_remote && b.sync_state == 4 && b.world_stream_phase == 8 && !b.loadout_received) {
-			if (++b.loadout_wait_ticks < 2) break; // give the client 1 frame to send 0x2F
-			b.loadout_received = true; // auto-advance (opennova clients don't send 0x2F)
+			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start, so
+			// the player deploys WITH a loadout (golden order: 0x5A precedes the game-start). The
+			// retail client + the opennova joiner both send 0x2F; this long fallback only guards
+			// against a client that never selects (avoids an infinite stall). ~10 s @ 62 Hz.
+			constexpr uint16_t kLoadoutWaitFallbackTicks = 600;
+			if (++b.loadout_wait_ticks < kLoadoutWaitFallbackTicks) break;
+			b.loadout_received = true;
 		}
 		if (step.messages.size() >= budget) break; // per-tick pacing cap — resume next tick
 		advance_burst_one_phase(ctx, conn, step, now_tick, budget);
