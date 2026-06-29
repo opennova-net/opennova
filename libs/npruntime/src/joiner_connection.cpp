@@ -34,43 +34,17 @@ std::vector<uint8_t> JoinerConnection::start() {
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
-	ClientHello hello;
-	hello.nvs  = cfg_.nvs;
-	hello.co   = player_name_; // the name-match key: the host echoes CO into the organic-spawn entity_name
-	hello.ap   = cfg_.ap;
-	hello.bdat = cfg_.bdat;
-	hello.pn   = cfg_.pn;
-	hello.pv1  = cfg_.pv1;
-	hello.pv2  = cfg_.pv2;
-	hello.pg   = cfg_.pg;       // jointoperations() sets the explicit JO GUID (use_default_pg=false);
-	hello.pg_present = true;    // our host validates PN only, so PG bytes are non-gating here
-	hello.ci   = cfg_.client_index;
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	// CO = the joiner's player name (the host echoes it into the organic-spawn entity_name — the
+	// name-match key). The identity struct-fill is shared with the lobby ClientSession (make_client_hello
+	// in novaworld/client_session.h); only the framing envelope (nw_encode_outbound) differs.
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
+	                          client_hello_to_bytes(make_client_hello(cfg_, player_name_)));
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	ClientAuth auth;
-	// Identity block — same values as the hello (the host re-validates PN; the real NW server
-	// re-validates the whole block on the 0x42 join).
-	auth.nvs  = cfg_.nvs;
-	auth.co   = player_name_;
-	auth.ap   = cfg_.ap;
-	auth.bdat = cfg_.bdat;
-	auth.pn   = cfg_.pn;
-	auth.pg   = cfg_.pg;
-	auth.pg_present = true;
-	auth.pv1  = cfg_.pv1;
-	auth.pv2  = cfg_.pv2;
-
-	auth.ci   = cfg_.client_index;
-	auth.hk   = server_hk_;     // echo ServerHello.hk
-	auth.ck   = cfg_.client_key;
-	auth.na   = cfg_.na;
-	auth.scrk = conn_.client_scrk;
-	for (const auto &v : cfg_.cu_vars) {
-		auth.cu.push_back(make_client_cu_chunk(v.type, v.name, v.value));
-	}
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	return nw_encode_outbound(
+			SESSION_OPCODE_CLIENT_AUTH,
+			client_auth_to_bytes(make_client_auth(cfg_, player_name_, server_hk_, conn_.client_scrk)));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {

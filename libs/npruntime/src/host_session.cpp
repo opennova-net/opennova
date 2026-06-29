@@ -1,0 +1,174 @@
+#include "npruntime/host_session.h"
+
+#include "npruntime/server_session.h" // set_connection_mode / set_transport_mode / create_session / ...
+#include "npruntime/server_spawn.h"   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
+#include "npruntime/server_tick.h"    // Server_TickUpdate
+
+#include <novaworld/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
+#include <novaworld/ingame_encode.h> // encode_organic_spawn_batch
+
+#include <world/entity.h>
+#include <world/world.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
+namespace opennova::np {
+
+void admit_peer(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr &peer,
+                const HostAcceptEvent &ev) {
+	PeerLink &link = owner.peers[peer];
+
+	NapiNPConnection *conn = nullptr;
+	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
+		if (c.peer == peer) {
+			conn = &c;
+			break;
+		}
+	}
+	if (conn == nullptr) return;
+
+	if (link.transport == nullptr) {
+		link.transport =
+				std::make_unique<netsim::UdpSessionTransport>(netsim::UdpSessionTransport::Role::Host);
+	}
+	if (conn->link.transport == nullptr) {
+		conn->link.transport = link.transport.get();
+		conn->link.mode = netsim::TransportMode::Client;
+	}
+
+	if (link.announced || !conn->link.owned_entity.valid()) return; // wait for the spawn pipeline
+
+	OrganicSpawnBatch batch;
+	batch.entity_count = 1;
+	OrganicSpawnRecord rec;
+	rec.slot_id = static_cast<uint16_t>(conn->link.owned_entity.packed); // wire handle H
+	rec.has_body = true;
+	rec.item_type_id = 0x14B9;                  // player infantry template
+	rec.entity_name = ev.peer_name;             // the name-match key (the joiner's ClientHello.co)
+	rec.entity_flags = ev.self_id;              // entity+0x78: the dcb the client self-matches (0x48 ack)
+	rec.minimap_flags = 0x100;                  // entity+0x36 bit 0x100: local-player/minimap register
+	rec.pos_x = ev.pose.pos_x;
+	rec.pos_y = ev.pose.pos_y;
+	rec.pos_z = ev.pose.pos_z;
+	rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16; // i16 wire heading -> 32-bit BAM
+	rec.team = ev.pose.team;
+	if (owner.ctx.world != nullptr) {
+		if (const world::Entity *e = owner.ctx.world->registry.get(conn->link.owned_entity)) {
+			rec.net_id = e->net_id;
+		}
+	}
+	batch.records.push_back(std::move(rec));
+
+	std::vector<uint8_t> dg;
+	if (frame_in_match_s2c(owner.ctx, peer, 0x0C, encode_organic_spawn_batch(batch), dg)) {
+		sock.send_to(peer, dg.data(), dg.size());
+		link.announced = true; // latch only on a successful frame+send (retry otherwise)
+	}
+}
+
+void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr &peer,
+                    const HostAcceptEvent &ev) {
+	switch (ev.kind) {
+	case HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
+	case HostAcceptEvent::Kind::PeerSpawned:
+		admit_peer(owner, sock, peer, ev);
+		break;
+	case HostAcceptEvent::Kind::PeerC2SInMatch:
+		// STAGE the joiner's in-match 0x0C onto its transport; Server_TickUpdate is the single drain
+		// (D-NET-125 — never apply inline).
+		apply_in_match_c2s(owner.ctx, ev);
+		break;
+	case HostAcceptEvent::Kind::PeerGoodbye:
+		owner.peers.erase(peer);              // release the owner's transport (the node is already erased)
+		drop_connection(owner.ctx, peer);     // idempotent if the goodbye already erased it
+		break;
+	case HostAcceptEvent::Kind::PeerHandshakeAdvanced:
+	default:
+		break;
+	}
+}
+
+void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock) {
+	const uint32_t now = owner.now_tick;
+
+	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the adapter.
+	uint8_t buf[4096];
+	for (;;) {
+		PeerAddr peer{};
+		const int n = sock.recv_from(buf, sizeof(buf), peer);
+		if (n <= 0) break; // 0 = nothing left/timeout, <0 = error
+		HandleResult r = handle_server_datagram(owner.ctx, peer, buf, static_cast<std::size_t>(n), now);
+		for (const std::vector<uint8_t> &dg : r.outbound) {
+			sock.send_to(peer, dg.data(), dg.size()); // 0x81/0x82/0x83 handshake replies
+		}
+		for (const HostAcceptEvent &ev : r.events) dispatch_event(owner, sock, peer, ev);
+	}
+
+	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
+	for (TickOut &t : tick_connections(owner.ctx, /*elapsed_ms=*/16, now)) {
+		for (const std::vector<uint8_t> &dg : t.outbound) {
+			sock.send_to(t.peer, dg.data(), dg.size()); // framed 0x83 burst datagrams
+		}
+		for (const HostAcceptEvent &ev : t.events) dispatch_event(owner, sock, t.peer, ev);
+	}
+
+	// (3) the authoritative per-frame host loop (single C2S drain + logic tick + 0x0A fan).
+	Server_TickUpdate(owner.ctx);
+
+	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
+	// The host's own type-2 loopback is skipped (its 0x0A is consumed in-process, step 5).
+	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
+		if (c.type != 1 || c.link.transport == nullptr) continue;
+		// A type-1 remote peer's transport is always the UdpSessionTransport admit_peer attached, so the
+		// downcast to reach pop_outbound (an owner-boundary method, not on the base ISessionTransport) is
+		// safe — the host's own type-2 loopback (a LoopbackChannel) is skipped above.
+		auto *udp = static_cast<netsim::UdpSessionTransport *>(c.link.transport);
+		std::vector<uint8_t> raw;
+		while (udp->pop_outbound(raw)) {
+			if (raw.empty()) continue;
+			const uint8_t tag = raw[0];
+			const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
+			std::vector<uint8_t> dg;
+			if (frame_in_match_s2c(owner.ctx, c.peer, tag, body, dg)) {
+				sock.send_to(c.peer, dg.data(), dg.size());
+			}
+		}
+	}
+
+	// (5) drain the host's own loopback 0x0A / burst (a headless Listen host has no local view to
+	// consume it — without this its FIFO grows unbounded). A serve-and-play owner instead FOLDS the
+	// loopback into its ClientState (to render the host's own view) AFTER this pump, so it must keep
+	// the data — skip the discard for it.
+	if (owner.host_loopback != nullptr && !owner.serve_and_play) {
+		netsim::Datagram discard;
+		while (owner.host_loopback->client_recv(discard)) { /* discard the host's own view */ }
+	}
+
+	++owner.now_tick;
+}
+
+void start_host_session(HostOwner &owner, const HostConfig &cfg) {
+	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
+	// The witnessed §5.0 listen-host bring-up [orig: SinglePlayer_StartMission @0x561af0]. mode 3 =
+	// host + client; the host's own dcb-2 loopback (owner.host_loopback) registers as the local client.
+	set_connection_mode(owner.ctx, ConnectionMode::HostClient);
+	set_transport_mode(owner.ctx, cfg.socket_mode);
+	SessionStartup startup;
+	startup.host_key = cfg.host_key;
+	create_session(owner.ctx, cfg.settings, startup, owner.host_loopback);
+	configure_session_runtime(owner.ctx, cfg.reply_config);
+	Server_InitNewRoundState(owner.ctx);
+
+	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
+		// Serve-and-play: spawn the host's own player now and latch its loopback in-match so it gets the
+		// per-frame 0x0A its local view renders from. A dedicated/headless host skips this — its player
+		// spawns lazily via tick_connections in the pump, and its loopback is discarded (pump step 5).
+		Server_ProcessPendingPlayerSpawns(owner.ctx, *owner.ctx.world);
+		mark_host_client_in_match(owner.ctx);
+	}
+}
+
+} // namespace opennova::np

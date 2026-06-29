@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -207,6 +208,17 @@ private:
 	bool sent_verify_request_ = false;
 	ProtocolReassemblyState reassembly_;
 };
+
+// Shared identity-message builders — the ClientHello / ClientAuth struct-fill that BOTH the lobby
+// ClientSession (above) and the in-match np::JoinerConnection (libs/npruntime) use. The two builders
+// differ ONLY in the CO source (lobby company vs the joiner's player name) and which envelope frames
+// the bytes (encode_session_outbound vs nw_encode_outbound), so the struct-fill is dedup'd here.
+// [orig: one CNapiNPConnection identity block — NapiNPConnection_SendClientHello @0x61fe20 sources it
+// from the same protocol config for both the 0x41 hello and the 0x42 join; the lobby/game paths split
+// AFTER 0x82, not in the identity emit.]
+ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view co);
+ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view co, uint32_t server_hk,
+                            std::string_view client_scrk);
 
 // The gate-sourced inputs to the 0x42-join CU var set. Both the join (client)
 // and the host-registration (host) connection carry this same set — retail

@@ -21,7 +21,7 @@ target_compile_features(opennova_nw_server PRIVATE cxx_std_17)
 set_target_properties(opennova_nw_server PROPERTIES OUTPUT_NAME "nw-server")
 
 if(WIN32)
-    # belt-and-braces: opennova_app_common already PUBLIC-links ws2_32, but main.cpp/host_owner_loop.h
-    # use net_sockets directly.
+    # belt-and-braces: opennova_app_common already PUBLIC-links ws2_32, but main.cpp uses net_sockets
+    # (+ net_datagram_socket) directly.
     target_link_libraries(opennova_nw_server PRIVATE ws2_32)
 endif()

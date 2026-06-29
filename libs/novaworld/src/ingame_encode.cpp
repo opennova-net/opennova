@@ -34,6 +34,13 @@ struct Writer {
 		for (char ch : s) out.push_back(uint8_t(ch));
 		out.push_back(0);
 	}
+	// Fixed-width NUL-terminated string: up to (max_chars-1) chars + NUL (the retail slot-state writer).
+	void cstr_fixed(const std::string &s, size_t max_chars) {
+		const size_t cap = max_chars > 0 ? max_chars - 1 : 0;
+		const size_t n = s.size() < cap ? s.size() : cap;
+		for (size_t i = 0; i < n; ++i) out.push_back(uint8_t(s[i]));
+		out.push_back(0);
+	}
 };
 
 } // namespace
@@ -544,6 +551,70 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 	w.u16(r.fire_counter_2);
 	w.u16(r.weapon_id_3);
 	w.u16(r.fire_counter_3);
+	return out;
+}
+
+// ---------------------------------------------------------------------------
+// §5.1 reply-body encoders (relocated from npruntime/server_message_dispatch.cpp so encode + decode
+// share the lib). The host-side input is the PlayerReplicationState reply POD.
+// ---------------------------------------------------------------------------
+
+// [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80] — round-trips through decode_player_sync.
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(ctx.player_slot);
+	w.u16(0x1CF7u); // field flags — the roster-sync field set
+	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // entity slot
+	w.cstr_fixed(ctx.player_name, 32); // 0x0001 name
+	w.cstr_fixed(ctx.clan_tag, 16);    // 0x0002 team-string (clan)
+	w.cstr_fixed(std::string(), 16);   // 0x0010 vehicle-name — empty for an on-foot player
+	w.u8(ctx.team); // 0x0004 team byte (entity+354)
+	w.u8(0);        // 0x0020 squad
+	w.u8(0);        // 0x1000 ticket-validated
+	w.u8(0xFF);     // 0x0040 — no squad leader
+	w.u8(0);        // 0x0080
+	w.u8(1);        // 0x0400 quality
+	w.u32(0);       // 0x0800 entity_ref — null
+	return out;
+}
+
+// [orig: write_entity_packet @0x506bb0] — 8-byte spawn confirm.
+std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint16_t requested_index) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(requested_index);
+	w.u16(ctx.entity_handle);
+	w.u8(static_cast<uint8_t>(ctx.team & 0xFF));
+	// NetId — a player carries net_id 0 BY DESIGN (D-NET-112: Entity_SpawnFromAnimSlotProperty @0x43c390
+	// leaves NetId@0x15c zero; identity is the pool handle + ownerConnectionId, never an SSN). 0 is
+	// faithful, not a placeholder. animSlot — default; write_entity_packet writes it only when Flags&0x100,
+	// and the client treats 0x51 as a spawn signal (does not field-parse it), so 0 is safe.
+	w.u16(0);
+	w.u8(0);
+	return out;
+}
+
+// [orig: NapiNPClientMsg_0x016 @0x42FAE0] — round-trips through decode_player_list.
+std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(0x01);                                  // HUD time-vs-score format flag (dword_A823B8)
+	w.u8(static_cast<uint8_t>(players.size()));  // player_count
+	for (const PlayerListEntry &e : players) {
+		w.u8(e.slot);
+		w.u16(0); // ping
+		w.u16(0); // score
+		w.u16(0); // score2
+		w.u8(static_cast<uint8_t>(e.team << 1)); // (team<<1)|spectator; team=1 -> 0x02, team=2 -> 0x04
+	}
+	w.u8(0x02); // team_count = 2 (matches retail)
+	for (int i = 0; i < 3; ++i) { // (team_count + 1) iterations
+		w.u16(0); w.u16(0);
+		w.u8(0); w.u8(0);
+	}
+	w.u8(0x02); // dword_A85B3C
+	w.u8(0x00); // dword_A85B40
 	return out;
 }
 

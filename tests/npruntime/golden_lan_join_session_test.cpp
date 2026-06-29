@@ -30,7 +30,7 @@
 
 #include "host_test_setup.h"
 
-#include <novaworld/connection/registry.h>
+#include <novaworld/peer_addr.h>
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/session_hello.h>
 #include <novaworld/session_keys.h>

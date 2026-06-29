@@ -752,6 +752,45 @@ int test_frame_update_unknown_class_still_fails_closed() {
 	return 0;
 }
 
+// The relocated §5.1 reply encoders (moved from npruntime/server_message_dispatch.cpp in B3) round-trip
+// through their ingame_decode partners — the encode/decode-in-one-lib symmetry the move enables.
+int test_player_sync_roundtrip() {
+	PlayerReplicationState rep;
+	rep.player_slot = 3;
+	rep.entity_handle = 0x0042; // pool-0 slot 0x42
+	rep.player_name = "SocketJoiner";
+	rep.clan_tag = "OPN";
+	rep.team = 2;
+	const std::vector<uint8_t> wire = encode_player_sync(rep);
+	PlayerSync out;
+	EXPECT(decode_player_sync(wire.data(), wire.size(), out));
+	EXPECT(out.slot_id == rep.player_slot);
+	EXPECT(out.field_bitmask == 0x1CF7u);
+	EXPECT(out.entity_slot_id == static_cast<uint8_t>(rep.entity_handle & 0xFF));
+	EXPECT(out.name == rep.player_name);
+	EXPECT(out.clan == rep.clan_tag);
+	EXPECT(out.team == rep.team);
+	EXPECT(out.quality == 1);
+	std::printf("PASS player_sync_roundtrip\n");
+	return 0;
+}
+
+int test_player_list_roundtrip() {
+	std::vector<PlayerListEntry> players = {{0, 1}, {1, 2}, {2, 2}};
+	const std::vector<uint8_t> wire = encode_player_list(players);
+	PlayerList out;
+	EXPECT(decode_player_list(wire.data(), wire.size(), out));
+	EXPECT(out.player_count == players.size());
+	EXPECT(out.players.size() == players.size());
+	for (size_t i = 0; i < players.size(); ++i) {
+		EXPECT(out.players[i].slot_id == players[i].slot);
+		EXPECT(static_cast<uint8_t>(out.players[i].flags >> 1) == players[i].team); // team = flags >> 1
+	}
+	EXPECT(out.team_count == 2);
+	std::printf("PASS player_list_roundtrip\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -777,6 +816,8 @@ int main() {
 	rc |= test_vehicle_compact_roundtrip_mounted();
 	rc |= test_vehicle_compact_roundtrip_unmounted();
 	rc |= test_player_compact_roundtrip();
+	rc |= test_player_sync_roundtrip();
+	rc |= test_player_list_roundtrip();
 	if (rc == 0) std::printf("ALL nw_ingame_encode tests passed\n");
 	return rc;
 }

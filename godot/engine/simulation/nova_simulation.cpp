@@ -609,11 +609,13 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// outlives the match — the load-local bms::File would dangle.
 	mission_file_ = file;
 	host_loop_.clear();
-	peers_.clear();
-	// Reload: a fresh ctx drops any stale connections / game_runtime from a prior mission. A reload is
-	// a new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
-	// D-NET-124).
-	ctx_ = np::NapiNPServerCtx{};
+	// Reload: a fresh host_owner_ drops any stale connections / peers from a prior mission. A reload is a
+	// new match (Stop -> load), so configure_session_runtime runs once per match (never mid-match,
+	// D-NET-124). serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
+	// fold it into ClientState (runtime_) to render the host's own view.
+	host_owner_ = np::HostOwner{};
+	host_owner_.host_loopback = &host_loop_;
+	host_owner_.serve_and_play = true;
 	ctx_.world = world_.get();
 	ctx_.mission = &mission_file_;
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
@@ -662,146 +664,73 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	}
 }
 
-// P7: the per-frame host owner loop, the Godot equivalent of apps/nw_server/host_owner_loop.h
-// (the §5.44 recv-before-send order). For pure SP the socket legs (1)/(2-ship)/(4) are inert
-// (SocketMode::Socketless, no peers); a LAN host pumps NovaUdpPump for them.
+namespace {
+// NovaUdpPump-backed netsim::IDatagramSocket — the Godot adapter the shared host owner loop pumps. A
+// null/closed pump (pure SP) yields recv 0 / send no-op, so the loop's socket legs go inert exactly as
+// the old host_listen_-gated code did. PeerAddr <-> "a.b.c.d" uses the LE octet packing PeerAddr
+// documents (octet 0 in the low byte; 127.0.0.1 -> 0x0100007F) — the conversion formerly in
+// peer_from_addr / send_datagram.
+class NovaUdpPumpDatagramSocket : public opennova::netsim::IDatagramSocket {
+public:
+	explicit NovaUdpPumpDatagramSocket(NovaUdpPump *pump) : pump_(pump) {}
+
+	int recv_from(uint8_t *buf, std::size_t cap, opennova::PeerAddr &from) override {
+		if (pump_ == nullptr || !pump_->is_open()) return 0;
+		if (!pump_->has_inbound()) {
+			pump_->poll();
+			if (!pump_->has_inbound()) return 0;
+		}
+		const Dictionary d = pump_->take_inbound();
+		const String ip = d.get("ip", String());
+		const int port = d.get("port", 0);
+		const PackedByteArray bytes = d.get("bytes", PackedByteArray());
+		uint32_t packed = 0;
+		const PackedStringArray parts = ip.split(".");
+		if (parts.size() == 4) {
+			packed = static_cast<uint32_t>(parts[0].to_int() & 0xFF) |
+			         (static_cast<uint32_t>(parts[1].to_int() & 0xFF) << 8) |
+			         (static_cast<uint32_t>(parts[2].to_int() & 0xFF) << 16) |
+			         (static_cast<uint32_t>(parts[3].to_int() & 0xFF) << 24);
+		}
+		from = opennova::PeerAddr{packed, static_cast<uint16_t>(port)};
+		const std::size_t n = std::min(cap, static_cast<std::size_t>(bytes.size()));
+		if (n > 0) std::memcpy(buf, bytes.ptr(), n);
+		return static_cast<int>(n);
+	}
+
+	void send_to(const opennova::PeerAddr &to, const uint8_t *data, std::size_t len) override {
+		if (pump_ == nullptr || !pump_->is_open() || len == 0) return;
+		char ipbuf[32];
+		std::snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", to.ip & 0xFFu, (to.ip >> 8) & 0xFFu,
+		              (to.ip >> 16) & 0xFFu, (to.ip >> 24) & 0xFFu);
+		PackedByteArray bytes;
+		bytes.resize(static_cast<int64_t>(len));
+		std::memcpy(bytes.ptrw(), data, len);
+		pump_->send_to(String(ipbuf), to.port, bytes);
+	}
+
+private:
+	NovaUdpPump *pump_;
+};
+} // namespace
+
+// P7/A5: the per-frame host owner loop is now a THIN delegation to the shared core host_session_pump
+// (libs/npruntime) — the SAME loop apps/nw_server runs, so the headless server and the Godot host can no
+// longer drift. NovaSimulation supplies the socket (a NovaUdpPump adapter; SP passes a null pump and the
+// loop's socket legs go inert) and folds the host's own loopback 0x0A into ClientState for the present
+// pass (serve_and_play: host_session_pump skips the loopback discard so we can read it here).
 void NovaSimulation::host_pump() {
 	namespace np = opennova::np;
-	const uint32_t now = now_tick_;
+	const uint32_t now = host_owner_.now_tick;
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
-
-	// (1) recv-drain — LAN only: pump the socket, run each datagram through the host protocol, ship the
-	//     handshake replies (0x81/0x82/0x83), react to the surfaced events. Pure SP is socketless.
-	if (host_listen_ && pump_.is_valid()) {
-		pump_->poll();
-		while (pump_->has_inbound()) {
-			const Dictionary d = pump_->take_inbound();
-			const String ip = d.get("ip", String());
-			const int port = d.get("port", 0);
-			const PackedByteArray bytes = d.get("bytes", PackedByteArray());
-			const opennova::PeerAddr peer = peer_from_addr(ip, port);
-			np::HandleResult r = np::handle_server_datagram(
-					ctx_, peer, bytes.ptr(), static_cast<std::size_t>(bytes.size()), now);
-			for (const std::vector<uint8_t> &dg : r.outbound) send_datagram(peer, dg);
-			for (const np::HostAcceptEvent &ev : r.events) dispatch_event(peer, ev);
-		}
-	}
-
-	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst (+ Server_ProcessPendingPlayerSpawns,
-	//     idempotent); the in-match host loopback is skipped. Ship the burst datagrams (LAN) + react to F3/Spawned.
-	for (np::TickOut &t : np::tick_connections(ctx_, /*elapsed_ms=*/16, now)) {
-		if (host_listen_) {
-			for (const std::vector<uint8_t> &dg : t.outbound) send_datagram(t.peer, dg);
-		}
-		for (const np::HostAcceptEvent &ev : t.events) dispatch_event(t.peer, ev);
-	}
-
-	// (3) the authoritative per-frame host loop: single C2S drain + run_logic_tick(true) + per-connection
-	//     0x0A fan (incl. the host's own loopback -> host_loop_). NO separate run_logic_tick (D-NET-125).
-	np::Server_TickUpdate(ctx_);
-
-	// (4) S2C flush — LAN only: reframe each type-1 remote transport's [tag][body] as a 0x83 SESSION +
-	//     send. The host's own type-2 loopback is consumed in-process at step 5.
-	if (host_listen_) {
-		for (np::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
-			if (c.type != 1 || c.link.transport == nullptr) continue;
-			// A type-1 peer's transport is always the UdpSessionTransport admit_peer attached, so the
-			// downcast to pop_outbound (an owner-boundary method) is safe (the host's own type-2 loopback
-			// is skipped above).
-			auto *udp = static_cast<opennova::netsim::UdpSessionTransport *>(c.link.transport);
-			std::vector<uint8_t> raw;
-			while (udp->pop_outbound(raw)) {
-				if (raw.empty()) continue;
-				const uint8_t tag = raw[0];
-				const std::vector<uint8_t> body(raw.begin() + 1, raw.end());
-				std::vector<uint8_t> dg;
-				if (np::frame_in_match_s2c(ctx_, c.peer, tag, body, dg)) send_datagram(c.peer, dg);
-			}
-		}
-	}
-
-	// (5) fold the host's own loopback 0x0A into ClientState for present (HostClient: recv-fold only, no 0x0C).
-	if (runtime_) runtime_->Client_ProcessNetworkFrame(now);
-	++now_tick_;
+	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
+	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
+	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
 }
 
-// P7: react to one HostAcceptEvent surfaced by handle_server_datagram / tick_connections — the
-// Godot port of apps/nw_server/host_owner_loop.h dispatch_event.
-void NovaSimulation::dispatch_event(const opennova::PeerAddr &peer, const opennova::np::HostAcceptEvent &ev) {
-	namespace np = opennova::np;
-	switch (ev.kind) {
-		case np::HostAcceptEvent::Kind::PeerEnteredWorldStreaming:
-		case np::HostAcceptEvent::Kind::PeerSpawned:
-			admit_peer(peer, ev);
-			break;
-		case np::HostAcceptEvent::Kind::PeerC2SInMatch:
-			// STAGE the joiner's in-match 0x0C onto its transport; Server_TickUpdate is the single drain
-			// (D-NET-125 — never apply inline).
-			np::apply_in_match_c2s(ctx_, ev);
-			break;
-		case np::HostAcceptEvent::Kind::PeerGoodbye:
-			peers_.erase(peer);             // release the owner's transport (the node is erased by drop_connection)
-			np::drop_connection(ctx_, peer);
-			break;
-		case np::HostAcceptEvent::Kind::PeerHandshakeAdvanced:
-		default:
-			break;
-	}
-}
-
-// P7: attach a Godot-owned transport to a joiner's connection (idempotent) and, ONCE the spawn pipeline
-// has bound owned_entity, stream the joiner's NAMED dcb-bearing S2C 0x0C organic-spawn so it name-matches
-// its own player (entity_name == its ClientHello.co) and learns its wire handle H. Port of
-// apps/nw_server/host_owner_loop.h admit_peer (the legacy announce_joiner_organic_spawn). Announces once.
-void NovaSimulation::admit_peer(const opennova::PeerAddr &peer, const opennova::np::HostAcceptEvent &ev) {
-	namespace np = opennova::np;
-	PeerLink &link = peers_[peer];
-
-	np::NapiNPConnection *conn = nullptr;
-	for (np::NapiNPConnection &c : ctx_.np_protocol.connection_list) {
-		if (c.peer == peer) {
-			conn = &c;
-			break;
-		}
-	}
-	if (conn == nullptr) return;
-
-	if (link.transport == nullptr) {
-		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
-				opennova::netsim::UdpSessionTransport::Role::Host);
-	}
-	if (conn->link.transport == nullptr) {
-		conn->link.transport = link.transport.get();
-		conn->link.mode = opennova::netsim::TransportMode::Client;
-	}
-
-	if (link.announced || !conn->link.owned_entity.valid()) return; // wait for the spawn pipeline
-
-	opennova::OrganicSpawnBatch batch;
-	batch.entity_count = 1;
-	opennova::OrganicSpawnRecord rec;
-	rec.slot_id = static_cast<uint16_t>(conn->link.owned_entity.packed); // wire handle H
-	rec.has_body = true;
-	rec.item_type_id = 0x14B9;                  // player infantry template
-	rec.entity_name = ev.peer_name;             // the name-match key (the joiner's ClientHello.co)
-	rec.entity_flags = ev.self_id;              // entity+0x78: the dcb the client self-matches
-	rec.minimap_flags = 0x100;                  // entity+0x36 bit 0x100: local-player/minimap register
-	rec.pos_x = ev.pose.pos_x;
-	rec.pos_y = ev.pose.pos_y;
-	rec.pos_z = ev.pose.pos_z;
-	rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16; // i16 wire heading -> 32-bit BAM
-	rec.team = ev.pose.team;
-	if (const opennova::world::Entity *e = world_->registry.get(conn->link.owned_entity)) {
-		rec.net_id = e->net_id;
-	}
-	batch.records.push_back(std::move(rec));
-
-	std::vector<uint8_t> dg;
-	if (np::frame_in_match_s2c(ctx_, peer, 0x0C, opennova::encode_organic_spawn_batch(batch), dg)) {
-		send_datagram(peer, dg);
-		link.announced = true; // latch only on a successful frame+send (retry otherwise)
-	}
-}
+// host_pump's dispatch_event + admit_peer were promoted into libs/npruntime (np::dispatch_event /
+// np::admit_peer over host_owner_, driven by host_session_pump) — the SAME code apps/nw_server runs, so
+// the Godot host and the headless server can no longer drift.
 
 // P7: the per-frame non-authority client loop — the Godot equivalent of the joiner half of
 // Client_ProcessNetworkFrame (§5.44). The recv-fold + the C2S 0x0C uplink are fused inside the
@@ -1530,33 +1459,6 @@ Dictionary NovaSimulation::get_host_session_config() const {
 	return out;
 }
 
-opennova::PeerAddr NovaSimulation::peer_from_addr(const String &ip, int port) {
-	// "a.b.c.d" -> LE octet packing (a | b<<8 | c<<16 | d<<24), the ip_to_le
-	// convention PeerAddr uses (octet 0 in the low byte).
-	uint32_t packed = 0;
-	PackedStringArray parts = ip.split(".");
-	if (parts.size() == 4) {
-		packed = (static_cast<uint32_t>(parts[0].to_int() & 0xFF)) |
-		         (static_cast<uint32_t>(parts[1].to_int() & 0xFF) << 8) |
-		         (static_cast<uint32_t>(parts[2].to_int() & 0xFF) << 16) |
-		         (static_cast<uint32_t>(parts[3].to_int() & 0xFF) << 24);
-	}
-	return opennova::PeerAddr{packed, static_cast<uint16_t>(port)};
-}
-
-void NovaSimulation::send_datagram(const opennova::PeerAddr &peer,
-                                   const std::vector<uint8_t> &dg) {
-	if (pump_.is_null() || dg.empty()) return;
-	char ipbuf[32];
-	std::snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u",
-	              peer.ip & 0xFFu, (peer.ip >> 8) & 0xFFu,
-	              (peer.ip >> 16) & 0xFFu, (peer.ip >> 24) & 0xFFu);
-	PackedByteArray bytes;
-	bytes.resize(static_cast<int64_t>(dg.size()));
-	std::memcpy(bytes.ptrw(), dg.data(), dg.size());
-	pump_->send_to(String(ipbuf), static_cast<int>(peer.port), bytes);
-}
-
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
 
 bool NovaSimulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
@@ -1631,8 +1533,8 @@ bool NovaSimulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg,
 	// A synthetic loopback peer; distinct port per call so repeated admits don't alias. Own a transport
 	// so the connection is well-formed. The synthetic admit (no handshake) mirrors the post-PeerSpawned
 	// state; with the host already at net_id 0xFFF0 the joiner allocates 0xFFF1.
-	const opennova::PeerAddr peer{0x0100007Fu, static_cast<uint16_t>(40000 + peers_.size())};
-	PeerLink &link = peers_[peer];
+	const opennova::PeerAddr peer{0x0100007Fu, static_cast<uint16_t>(40000 + host_owner_.peers.size())};
+	opennova::np::PeerLink &link = host_owner_.peers[peer];
 	if (!link.transport) {
 		link.transport = std::make_unique<opennova::netsim::UdpSessionTransport>(
 				opennova::netsim::UdpSessionTransport::Role::Host);

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "novaworld/ingame_decode.h"
+#include "novaworld/replication_min.h" // PlayerReplicationState — the §5.1 reply encoders' host-side input
 
 namespace opennova {
 
@@ -198,5 +199,40 @@ std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader
 // for its own player each frame; the 5-byte sub-header (encode_entity_packet_sub_header)
 // precedes it on the wire. [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0]
 std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r);
+
+// ===========================================================================
+// §5.1 reply-body encoders — colocated with their ingame_decode.cpp partners so the reply tags are
+// round-trippable in the same lib (the encode side previously lived in npruntime/server_message_
+// dispatch.cpp, decoupled from its decoder). The host-side SOURCE is the PlayerReplicationState reply
+// POD; npruntime's reactive dispatcher fills it and calls these.
+// ===========================================================================
+
+// tag=0x46 PLAYER-SYNC — the inverse of decode_player_sync (PlayerSync). Flag-driven slot-state record:
+// [u8 slot][u16 fieldFlags=0x1CF7][u8 entitySlot] then the bit-gated fields (name/clan/vehicle-name/
+// team/...). [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80; client NapiNPClientMsg_PlayerSync
+// @0x431370]. Per-field slot-state modeling (score/squad/side/timer) is the remaining D-NET-127 nicety;
+// the wire SHAPE is faithful and round-trips through decode_player_sync.
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx);
+
+// tag=0x51 PLAYER-SPAWN — [orig: write_entity_packet @0x506bb0] 8-byte layout:
+// [u16 requested_index (echoed from the C2S 0x29)][u16 handle = pool<<12|slot][u8 team]
+// [u16 NetId if Flags&0x100 else 0][u8 animSlot if Flags&0x100 else 0]. NetId is 0 BY DESIGN — a player
+// carries net_id 0 (D-NET-112: Entity_SpawnFromAnimSlotProperty @0x43c390 leaves it zero; identity is the
+// pool handle + ownerConnectionId). animSlot defaults to 0; the client treats 0x51 as a spawn signal and
+// does not field-parse it.
+std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint16_t requested_index);
+
+// One 0x16 PLAYER-LIST entry (the host roster row the dispatcher extracts from the live connection list).
+struct PlayerListEntry {
+	uint8_t slot = 0;
+	uint8_t team = 0;
+};
+
+// tag=0x16 PLAYER-LIST — the inverse of decode_player_list. [orig: NapiNPClientMsg_0x016 @0x42FAE0].
+// The dispatcher builds `players` from the roster (the npruntime-side walk that can see NapiNPConnection);
+// this serializes the witnessed wire shape: [u8 fmt=1][u8 count] then per-player
+// [u8 slot][u16 ping][u16 score][u16 score2][u8 (team<<1)], then [u8 team_count=2] + a 3-iteration team
+// trailer + [0x02][0x00].
+std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players);
 
 } // namespace opennova

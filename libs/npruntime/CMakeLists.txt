@@ -7,6 +7,7 @@ add_library(opennova_npruntime STATIC
     src/server_initial_state.cpp
     src/server_tick.cpp
     src/client_runtime.cpp
+    src/host_session.cpp
 )
 
 target_include_directories(opennova_npruntime

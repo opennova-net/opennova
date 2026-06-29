@@ -4,7 +4,7 @@
 #include <string>
 
 #include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
-#include <novaworld/connection/registry.h> // opennova::PeerAddr (the transport-addr key)
+#include <novaworld/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
 
 namespace opennova::np {
 

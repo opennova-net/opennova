@@ -179,66 +179,68 @@ std::vector<uint8_t> ClientSession::start() {
 	return build_client_hello();
 }
 
-std::vector<uint8_t> ClientSession::build_client_hello() {
+// The shared identity struct-fill (declared in client_session.h) — used by ClientSession below AND by
+// np::JoinerConnection (libs/npruntime). The two builders differ only in the CO source and the framing
+// envelope, so the fill lives here once. [orig: one CNapiNPConnection identity block @0x61fe20.]
+ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view co) {
 	ClientHello hello;
-	hello.nvs  = cfg_.nvs;
-	hello.co   = cfg_.co;
-	hello.ap   = cfg_.ap;
-	hello.bdat = cfg_.bdat;
-	hello.pn   = cfg_.pn;
-	hello.pv1  = cfg_.pv1;
-	hello.pv2  = cfg_.pv2;
-	hello.ci   = cfg_.client_index;
-	hello.eip  = 0;
-	hello.epn  = 0;
-
-	// PG — the 16-byte protocol GUID the real server validates (HandleClientHello
-	// @ 0x6213B0 compares 16 bytes at proto+284). Defaults to the GUID for `pn`
-	// (NOVAWORLDUDP lobby vs JointOperations game); an explicit cfg_.pg overrides.
-	hello.pg = cfg_.use_default_pg ? pg_for_pn(cfg_.pn) : cfg_.pg;
+	hello.nvs  = cfg.nvs;
+	hello.co   = std::string(co);
+	hello.ap   = cfg.ap;
+	hello.bdat = cfg.bdat;
+	hello.pn   = cfg.pn;
+	hello.pv1  = cfg.pv1;
+	hello.pv2  = cfg.pv2;
+	hello.ci   = cfg.client_index;
+	// PG — the 16-byte protocol GUID the real server validates (HandleClientHello @0x6213B0 compares 16
+	// bytes at proto+284): the GUID for `pn` (NOVAWORLDUDP lobby vs JointOperations game), or the
+	// explicit cfg.pg when use_default_pg is false. CO/AP/BDAT are read but never validated.
+	hello.pg = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
 	hello.pg_present = true;
+	// eip/epn stay 0 (retail zeroes them).
+	return hello;
+}
 
+ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view co, uint32_t server_hk,
+                            std::string_view client_scrk) {
+	ClientAuth auth;
+	// Identity block — the real server re-validates NVS/PN/PG/PV1 (+PV2 in its is_server branch) on the
+	// 0x42 join exactly as on the 0x41 hello (HandleClientJoin @0x62B750); without it real NW silently
+	// drops the join (return 0, no ServerAuth -> session_join timeout). Retail's 0x42 builder
+	// (NapiNPConnection_SendClientHello @0x61fe20) emits the SAME identity block as the hello.
+	auth.nvs  = cfg.nvs;
+	auth.co   = std::string(co);
+	auth.ap   = cfg.ap;
+	auth.bdat = cfg.bdat;
+	auth.pn   = cfg.pn;
+	auth.pg   = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
+	auth.pg_present = true;
+	auth.pv1  = cfg.pv1;
+	auth.pv2  = cfg.pv2;
+	auth.ci   = cfg.client_index;
+	auth.hk   = server_hk;        // echo ServerHello.hk
+	auth.ck   = cfg.client_key;
+	auth.na   = cfg.na;
+	auth.scrk = std::string(client_scrk);
+	// CU chunks (NW-S3) — the gate-issued session-auth codes + client env the live NW server validates.
+	// Empty for the OpenNova server (permissive callbacks); the binding fills cfg.cu_vars from the gate
+	// response when targeting live NW.
+	for (const auto &v : cfg.cu_vars) {
+		auth.cu.push_back(make_client_cu_chunk(v.type, v.name, v.value));
+	}
+	// sip/spn stay 0 (retail omits the tag when 0).
+	return auth;
+}
+
+std::vector<uint8_t> ClientSession::build_client_hello() {
 	return encode_session_outbound(SESSION_OPCODE_CLIENT_HELLO,
-	                               client_hello_to_bytes(hello));
+	                               client_hello_to_bytes(make_client_hello(cfg_, cfg_.co)));
 }
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
-	ClientAuth auth;
-	// Identity block — the real server re-validates NVS/PN/PG/PV1 (and PV2 in
-	// its is_server branch) on the 0x42 join exactly as it does on the 0x41
-	// hello (HandleClientJoin @ 0x62B750). Without it real NW silently drops
-	// the join (return 0) and never sends ServerAuth -> session_join timeout.
-	// Same values as build_client_hello: retail's 0x42 builder
-	// (NapiNPConnection_SendClientHello @ 0x61fe20) emits one shared identity
-	// block sourced from the same protocol config.
-	auth.nvs  = cfg_.nvs;
-	auth.co   = cfg_.co;
-	auth.ap   = cfg_.ap;
-	auth.bdat = cfg_.bdat;
-	auth.pn   = cfg_.pn;
-	auth.pg   = cfg_.use_default_pg ? pg_for_pn(cfg_.pn) : cfg_.pg;
-	auth.pg_present = true;
-	auth.pv1  = cfg_.pv1;
-	auth.pv2  = cfg_.pv2;
-
-	auth.ci   = cfg_.client_index;
-	auth.hk   = server_hk_;   // [Phase 1] echo ServerHello.hk (was hardcoded 0)
-	auth.ck   = cfg_.client_key;
-	auth.na   = cfg_.na;
-	auth.sip  = 0;
-	auth.spn  = 0;
-	auth.scrk = client_scrk_;
-
-	// CU chunks (NW-S3) — the gate-issued session-auth codes + client env the
-	// live NW server validates. Empty for the OpenNova server (permissive
-	// callbacks); the binding fills cfg_.cu_vars from the gate response when
-	// targeting live NW.
-	for (const auto &v : cfg_.cu_vars) {
-		auth.cu.push_back(make_client_cu_chunk(v.type, v.name, v.value));
-	}
-
-	return encode_session_outbound(SESSION_OPCODE_CLIENT_AUTH,
-	                               client_auth_to_bytes(auth));
+	return encode_session_outbound(
+			SESSION_OPCODE_CLIENT_AUTH,
+			client_auth_to_bytes(make_client_auth(cfg_, cfg_.co, server_hk_, client_scrk_)));
 }
 
 std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &container) {

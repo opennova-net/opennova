@@ -8,26 +8,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <novaworld/peer_addr.h> // opennova::PeerAddr / PeerAddrHash (moved out of this header)
+
 namespace opennova {
-
-// Identifies a remote UDP peer. NovaLogic protocol is IPv4-only on the wire.
-struct PeerAddr {
-	uint32_t ip = 0;    // LE octet packing: a.b.c.d -> a | b<<8 | c<<16 | d<<24
-	                    // (octet 0 in the low byte; see ip_to_le in
-	                    // nw_udp_listener.cpp). Format low->high to print a.b.c.d.
-	uint16_t port = 0;
-
-	bool operator==(const PeerAddr &other) const {
-		return ip == other.ip && port == other.port;
-	}
-};
-
-struct PeerAddrHash {
-	std::size_t operator()(const PeerAddr &a) const noexcept {
-		// Splash port into the upper bits of a 64-bit mix.
-		return (static_cast<std::size_t>(a.ip) << 16) ^ a.port;
-	}
-};
 
 // Lifecycle phases observed by the manager. The wire-level handshake lives
 // in libs/napi (NWSession) — the Registry only mirrors lifecycle so the

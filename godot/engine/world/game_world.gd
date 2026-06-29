@@ -776,9 +776,11 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 		# model's .adm clip set (per-entity capsule_bottom), not the shared default. [D-INF-6]
 		"item_db": _placer.get_item_db() if _placer != null else null,
 	}
-	# Playable hosts run the SP in-process listen server and spawn their own player
-	# (ADR 0011/0012, net-re §5.2b/§5.38). Diagnostic previews can explicitly opt out.
-	opts["playable"] = _playable
+	# Serve-and-play hosts run the listen server AND spawn their own player (ADR 0011/0012, net-re
+	# §5.2b/§5.38). A DEDICATED host (config "dedicated") serves WITHOUT a local player — same listen
+	# server, just no own-player spawn; main_game skips the HUD when there is no local player. Diagnostic
+	# previews opt out via _playable.
+	opts["playable"] = _playable and not bool(_host_config.get("dedicated", false))
 	# A LAN host start threads its config (server name, mission rotation, player cap, and the
 	# socket transport mode) through to the listen server. A LAN JOINER threads the dial target
 	# (host_ip/port/player_name) and is NOT a listen server. Consumed once per load; absent for

@@ -1,7 +1,7 @@
 // P6 — two endpoints over REAL UDP sockets run a full join -> spawn -> play loop. Converts the P5
 // in-process round-trip (client_runtime_test) to two bound loopback UDP sockets driven single-threaded
 // (poll-pump, no threads/sleeps beyond the socket recv timeouts): a np::ClientRuntime joiner on one
-// socket and the apps/nw_server host owner-loop (host_owner_loop.h, the SAME loop main.cpp runs) on the
+// socket and the host owner-loop (npruntime/host_session.h, the SAME loop main.cpp runs) on the
 // other. Bytes cross via real sendto/recvfrom — the only difference from the in-process test.
 //
 // WHAT THIS PROVES (the P6 bar):
@@ -17,7 +17,9 @@
 //       host/join capture's S2C order on the common tags. Order-only (body byte-parity is deferred: our
 //       world stream is built from our own minimal World, not the capture's mission).
 
-#include "host_owner_loop.h" // the shared apps/nw_server owner loop (recorded include dir)
+#include <npruntime/host_session.h> // the host owner loop (promoted to libs/npruntime; SAME loop main.cpp runs)
+
+#include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter (for the host loop)
 
 #include <npruntime/client_runtime.h>
 #include <npruntime/napi_np_connection.h>
@@ -60,7 +62,6 @@ namespace {
 using namespace opennova;
 namespace np = opennova::np;
 namespace ns = opennova::netsim;
-namespace nw = opennova::nw_server;
 namespace w = opennova::world;
 
 bool expect(bool cond, const char *msg) {
@@ -83,7 +84,7 @@ bool order_ok(const std::vector<uint8_t> &tags, uint8_t before, uint8_t after) {
 }
 
 // The host's view of the joiner's address: both sockets bind 127.0.0.1, so the joiner's PeerAddr is
-// {0x0100007F, joiner_port} (the same packing host_owner_loop's to_peer produces from a recvfrom).
+// {0x0100007F, joiner_port} (the same packing NetDatagramSocket::to_peer produces from a recvfrom).
 PeerAddr joiner_peer_addr(uint16_t joiner_port) { return PeerAddr{0x0100007Fu, joiner_port}; }
 
 } // namespace
@@ -99,6 +100,9 @@ int main() {
 		return 1;
 	}
 	const net::Endpoint host_ep{{127, 0, 0, 1}, host_port};
+	// The host owner loop pumps the host socket through this adapter. recv_timeout_ms=30 lets the
+	// single-threaded poll-pump block briefly for the joiner's datagram (the old host_owner_pump arg).
+	net::NetDatagramSocket host_dgram(host_sock.get(), 30);
 
 	// ---- host: a minimal World (one 6002 start marker => spawn-select + a 0x20 pool-3 record) + a
 	//      minimal in-memory mission (0x0B BMS header). Mirrors initial_state_burst_test. ----
@@ -122,17 +126,17 @@ int main() {
 	mission.header.magic[3] = static_cast<char>(bms::kMinVersion);
 
 	// ---- host: stand up the Listen-host runtime (HostClient + a loopback host player at dcb 2). ----
-	nw::HostOwner owner;
+	np::HostOwner owner;
 	ns::LoopbackChannel host_loop;
 	owner.host_loopback = &host_loop;
-	np::NapiGameSettings settings;
-	settings.server_name = "OpenNova nw-server";
-	settings.max_players = 16; // the host loopback occupies dcb 2; leave room for the joiner (D-NET-106)
-	np::test::bring_up_host(owner.ctx, np::ConnectionMode::HostClient, np::SocketMode::Lan,
-	                        /*host_key=*/0, &host_loop, settings);
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
-	np::Server_InitNewRoundState(owner.ctx);
+	np::HostConfig host_cfg;
+	host_cfg.settings.server_name = "OpenNova nw-server";
+	host_cfg.settings.max_players = 16; // host loopback occupies dcb 2; leave room for the joiner (D-NET-106)
+	host_cfg.socket_mode = np::SocketMode::Lan;
+	host_cfg.serve_and_play = false;         // headless: the loopback is discarded (mirrors apps/nw_server)
+	np::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up apps/nw_server runs
 
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
@@ -172,7 +176,7 @@ int main() {
 	ship_joiner(client.start());
 	bool ready = false;
 	for (int f = 0; f < 400 && !ready; ++f) {
-		nw::host_owner_pump(owner, host_sock.get(), /*recv_timeout_ms=*/30);
+		np::host_session_pump(owner, host_dgram);
 		drain_joiner();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
 		++tick;
@@ -210,7 +214,7 @@ int main() {
 	for (int f = 0; f < 12; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) ship_joiner(d);
 		++tick;
-		nw::host_owner_pump(owner, host_sock.get(), /*recv_timeout_ms=*/30);
+		np::host_session_pump(owner, host_dgram);
 		drain_joiner();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d); // fold + 0x2C
 		++tick;

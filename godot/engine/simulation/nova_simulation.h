@@ -31,13 +31,14 @@
 #include "netsim/loopback_channel.h"          // host_loop_ (the host's own dcb-2 client)
 #include "netsim/udp_session_transport.h"     // PeerLink::transport (the LAN per-peer transport)
 
-#include <novaworld/connection/registry.h>    // PeerAddr / PeerAddrHash
+#include <novaworld/peer_addr.h>    // PeerAddr / PeerAddrHash
 #include "network/nova_udp_pump.h"
 
 #include <mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
 #include <npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / NapiGameSettings / ConnectionMode / SocketMode
 #include <npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
 #include <npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
+#include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
 
 #include <unordered_map>
 
@@ -137,8 +138,6 @@ private:
 	Ref<NovaUdpPump> pump_;
 	opennova::np::SessionReplyConfig host_session_config_; // P8: was GameServerRuntimeConfig
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
-	void send_datagram(const opennova::PeerAddr &peer, const std::vector<uint8_t> &dg);
-	static opennova::PeerAddr peer_from_addr(const String &ip, int port);
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
 	PackedFloat32Array present_snapshot_from_client_view() const;
 
@@ -172,21 +171,18 @@ private:
 	// host_loop_ MUST be declared before runtime_: the HostClient ClientRuntime holds a
 	// non-owning reference into host_loop_, so the loopback has to outlive (and not move under)
 	// the runtime.
-	opennova::np::NapiNPServerCtx ctx_;                       // host only (is_authority); move-only, direct member OK
+	// The host state — ctx + per-peer transports + now_tick + serve_and_play — shared with the promoted
+	// owner loop host_session_pump (libs/npruntime). MUST be declared before ctx_ (the alias) and before
+	// host_loop_ (host_owner_.host_loopback points at host_loop_, set at bring-up). Replaces the old
+	// ctx_/peers_/PeerLink members; admit_peer/dispatch_event moved into libs (np::, over host_owner_).
+	opennova::np::HostOwner host_owner_;
+	opennova::np::NapiNPServerCtx &ctx_ = host_owner_.ctx;    // alias: host only (is_authority)
 	opennova::netsim::LoopbackChannel host_loop_;             // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
 	std::unique_ptr<opennova::np::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
 	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
 	opennova::np::NapiGameSettings settings_;                 // filled from configure_host_session (LAN host)
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
-	uint32_t now_tick_ = 0;                                   // monotonic per-frame clock fed to the runtime
-	// LAN host: the Godot-owned per-peer transport the owner pumps (the connection's
-	// link.transport is a non-owning pointer into it) + the once-latch for the named dcb-bearing
-	// organic-spawn announce. Mirrors apps/nw_server/host_owner_loop.h PeerLink.
-	struct PeerLink {
-		std::unique_ptr<opennova::netsim::UdpSessionTransport> transport;
-		bool announced = false;
-	};
-	std::unordered_map<opennova::PeerAddr, PeerLink, opennova::PeerAddrHash> peers_;
+	uint32_t now_tick_ = 0;                                   // the JOINER's per-frame clock (the host uses host_owner_.now_tick)
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
 	void bringup_host_runtime(const opennova::bms::File &file);
@@ -196,11 +192,6 @@ private:
 	// The per-frame non-authority client loop (recv -> run_logic_tick(false) for L's motor ->
 	// Client_ProcessNetworkFrame -> ship the C2S 0x0C; spawn L on the in-match edge).
 	void joiner_pump();
-	// React to one HostAcceptEvent surfaced by handle_server_datagram / tick_connections (LAN host).
-	void dispatch_event(const opennova::PeerAddr &peer, const opennova::np::HostAcceptEvent &ev);
-	// Attach a Godot-owned transport to a joiner's connection and stream its NAMED dcb-bearing
-	// S2C 0x0C once owned_entity is bound (mirrors the legacy announce_joiner_organic_spawn).
-	void admit_peer(const opennova::PeerAddr &peer, const opennova::np::HostAcceptEvent &ev);
 
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive

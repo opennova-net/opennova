@@ -2,7 +2,7 @@
 
 #include "npruntime/napi_np_server_ctx.h"
 
-#include <novaworld/connection/registry.h> // opennova::PeerAddr
+#include <novaworld/peer_addr.h> // opennova::PeerAddr
 #include <novaworld/protocol_message.h>     // opennova::ProtocolMessage
 // np::SessionReplyConfig arrives via napi_np_server_ctx.h -> server_message_dispatch.h (P8).
 

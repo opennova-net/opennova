@@ -3,15 +3,15 @@
 // witnessed SP/co-op shape, §5.0), opens a real UDP socket, and drives the in-match host loop at the
 // original 62 Hz cadence so retail-wire-compatible clients (opennova or, as a follow-up, stock retail)
 // can join -> spawn -> play. All protocol/crypto/framing live in the libs; this binary only owns the
-// socket + the cadence (host_owner_loop.h is the shared owner loop, also used by the two-endpoint test).
+// socket + the cadence (npruntime/host_session.h is the shared owner loop, also used by the P6 test).
 //
 // It NEVER links godot-cpp (godot-cpp is a separate SCons build, not in this CMake graph). Separate from
 // the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
 
-#include "host_owner_loop.h"
+#include <npruntime/host_session.h> // the host owner loop, promoted to libs/npruntime (P7/A3)
 
-#include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / start
-#include <npruntime/server_spawn.h>   // Server_InitNewRoundState
+#include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
+#include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
 
 #include <netsim/loopback_channel.h> // the host's own dcb-2 client (Listen host)
 
@@ -47,7 +47,6 @@ uint16_t env_port(const char *name, uint16_t fallback) {
 
 int main() {
 	using namespace opennova;
-	namespace nw = opennova::nw_server;
 
 	// Mission source: NW_MISSION env var (no committed fixture — ADR 0003 forbids inventing one).
 	const char *mission_path = std::getenv("NW_MISSION");
@@ -85,23 +84,18 @@ int main() {
 
 	// --- Stand up the npruntime runtime as a LISTEN host (HostClient + a loopback host player at
 	//     dcb 2; joiners get dcb 3+, reproducing the retail LAN host/join scheme, §5.0 / §5.2a). ---
-	nw::HostOwner owner;
+	np::HostOwner owner;
 	netsim::LoopbackChannel host_loop; // the host's own dcb-2 client (its 0x0A drained in-process)
 	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
 	owner.ctx.mission = &doc.bms_file();
 
-	np::NapiGameSettings settings;
-	settings.server_name = "OpenNova nw-server";
-	settings.max_players = 16;
-	np::SessionStartup startup; // deterministic host-start values (a real host mints host_key randomly)
-	startup.host_key = 0;
-
-	np::set_connection_mode(owner.ctx, np::ConnectionMode::HostClient); // §5.0 mode 3 (host + client)
-	np::set_transport_mode(owner.ctx, np::SocketMode::Lan);             // a real LAN socket (was 1 for SP)
-	np::create_session(owner.ctx, settings, startup, &host_loop);       // registers the dcb-2 loopback
-	np::configure_session_runtime(owner.ctx, {});                       // ONCE — never mid-match (D-NET-124)
-	np::Server_InitNewRoundState(owner.ctx); // §5.2a step 1 (the host player then spawns via the loop)
+	np::HostConfig host_cfg;
+	host_cfg.settings.server_name = "OpenNova nw-server";
+	host_cfg.settings.max_players = 16;
+	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
+	host_cfg.serve_and_play = false;            // headless dedicated host: the loopback view is discarded
+	np::start_host_session(owner, host_cfg);    // the §5.0 listen-host bring-up; host player spawns in the loop
 
 	std::signal(SIGINT, on_signal);
 	std::signal(SIGTERM, on_signal);
@@ -111,8 +105,9 @@ int main() {
 	using clock = std::chrono::steady_clock;
 	const auto baseline = clock::now();
 	constexpr int64_t kPeriodNs = 1000000000LL / 62; // ~16.129 ms per engine tick (the original cadence)
+	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
 	for (uint64_t frame = 0; !g_shutdown.load(); ++frame) {
-		nw::host_owner_pump(owner, sock.get());
+		np::host_session_pump(owner, dgram);
 		std::this_thread::sleep_until(
 				baseline + std::chrono::nanoseconds(static_cast<int64_t>(frame + 1) * kPeriodNs));
 	}

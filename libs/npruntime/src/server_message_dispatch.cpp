@@ -1,6 +1,7 @@
 #include "npruntime/server_message_dispatch.h"
 
 #include <novaworld/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
+#include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_spawn / encode_player_list (§5.1)
 #include <novaworld/replication_min.h> // PlayerReplicationState (POD, kept) — the reply builders' input
 
 #include <algorithm>
@@ -55,23 +56,6 @@ void append_kv(std::vector<uint8_t> &out, const char *name, const void *data, ui
 
 void append_string_kv(std::vector<uint8_t> &out, const char *name, const std::string &value) {
 	append_kv(out, name, value.c_str(), static_cast<uint32_t>(value.size() + 1));
-}
-
-inline void push_u8(std::vector<uint8_t> &buf, uint8_t v) { buf.push_back(v); }
-inline void push_u16(std::vector<uint8_t> &buf, uint16_t v) {
-	buf.push_back(static_cast<uint8_t>(v & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
-}
-inline void push_u32(std::vector<uint8_t> &buf, uint32_t v) {
-	buf.push_back(static_cast<uint8_t>(v & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 8) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 16) & 0xFFu));
-	buf.push_back(static_cast<uint8_t>((v >> 24) & 0xFFu));
-}
-void push_cstr(std::vector<uint8_t> &buf, const std::string &s, size_t max_chars) {
-	const size_t n = std::min(s.size(), max_chars > 0 ? max_chars - 1 : 0);
-	for (size_t i = 0; i < n; ++i) buf.push_back(static_cast<uint8_t>(s[i]));
-	buf.push_back(0);
 }
 
 bool is_default_ash_session_config(const SessionReplyConfig &cfg) {
@@ -203,72 +187,24 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // §5.1 reply bodies — roster / loadout / spawn-confirm (relocated from replication_min.cpp).
 // ---------------------------------------------------------------------------
 
-// One 8-byte player entry in the 0x16 PLAYER-LIST: [u8 slot][u16 ping][u16 score][u16 score2][u8 packed_team].
-void push_player_list_entry(std::vector<uint8_t> &buf, uint8_t slot, uint8_t team) {
-	push_u8(buf, slot);
-	push_u16(buf, 0);  // ping (v42)
-	push_u16(buf, 0);  // score (v44)
-	push_u16(buf, 0);  // score (v45)
-	push_u8(buf, static_cast<uint8_t>(team << 1)); // (team<<1)|spectator; team=1 -> 0x02, team=2 -> 0x04
-}
-
 // tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_0x016 @0x42FAE0] Enumerates the LIVE player roster — the
 // host loopback (slot 0) + each spawned joiner (slot 1+) — so a joining client sees ITS OWN slot and can
 // bind its local player (golden: 0x16 grows 31 B [host only] -> 39 B [host + joiner] right before the
-// joiner deploys). `roster` is the connection_list; `fallback` covers the World-less/test path (no
-// bound players -> a single default entry, preserving the old 31-byte shape).
+// joiner deploys). `roster` is the connection_list; `fallback` covers the World-less/test path (no bound
+// players -> a single default entry). The wire SERIALIZE lives in encode_player_list (novaworld); this is
+// just the npruntime-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
+// entry list.
 std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &roster,
                                         const PlayerReplicationState &fallback) {
-	struct Entry { uint8_t slot; uint8_t team; };
-	std::vector<Entry> players;
+	std::vector<PlayerListEntry> players;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.reply.binding_valid) continue;
 		players.push_back({c.reply.player_slot, c.reply.team});
 	}
 	std::sort(players.begin(), players.end(),
-	          [](const Entry &a, const Entry &b) { return a.slot < b.slot; });
+	          [](const PlayerListEntry &a, const PlayerListEntry &b) { return a.slot < b.slot; });
 	if (players.empty()) players.push_back({fallback.player_slot, fallback.team});
-
-	std::vector<uint8_t> buf;
-	buf.reserve(16 + players.size() * 8);
-	push_u8(buf, 0x01);                                  // dword_A823B8 = 1 (HUD time-vs-score format flag)
-	push_u8(buf, static_cast<uint8_t>(players.size()));  // player_count
-	for (const Entry &e : players) push_player_list_entry(buf, e.slot, e.team);
-	push_u8(buf, 0x02);           // team_count = 2 (matches retail)
-	for (int i = 0; i < 3; ++i) { // (team_count + 1) iterations
-		push_u16(buf, 0); push_u16(buf, 0);
-		push_u8(buf, 0); push_u8(buf, 0);
-	}
-	push_u8(buf, 0x02);           // dword_A85B3C
-	push_u8(buf, 0x00);           // dword_A85B40
-	return buf;
-}
-
-// tag=0x46 PLAYER-SYNC. [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80; client receiver
-// NapiNPClientMsg_PlayerSync @0x431370]. Faithful flag-driven format: [u8 slot][u16 fieldFlags]
-// [u8 entitySlot] then, in source order, the bit-gated fields — 0x1 name(cstr), 0x2 team-string(cstr),
-// 0x10 vehicle-name(cstr), 0x4 team(u8), 0x20/0x1000/0x40/0x80(u8), 0x400 weapon-type(u8), 0x800
-// timer(u32). Round-trips through decode_player_sync (verified). flags 0x1CF7 = the roster-sync field
-// set. VALUES default to a fresh on-foot player (no vehicle -> empty vehicle-name); per-field slot-state
-// modeling (score/squad/side/timer) is the remaining D-NET-127 nicety — but the wire SHAPE is faithful.
-std::vector<uint8_t> build_reply_tag_46(const PlayerReplicationState &ctx) {
-	std::vector<uint8_t> buf;
-	buf.reserve(48);
-	push_u8(buf, ctx.player_slot);
-	const uint16_t flags = 0x1CF7u;
-	push_u16(buf, flags);
-	push_u8(buf, static_cast<uint8_t>(ctx.entity_handle & 0x00FFu));
-	push_cstr(buf, ctx.player_name, 32);  // 0x1 name
-	push_cstr(buf, ctx.clan_tag, 16);     // 0x2 team-string (clan)
-	push_cstr(buf, std::string(), 16);    // 0x10 vehicle-name — empty for an on-foot player (was an invented "A-A02-..." literal)
-	push_u8(buf, ctx.team);  // team byte (entity+354)
-	push_u8(buf, 0);         // squad
-	push_u8(buf, 0);         // ticket-validated
-	push_u8(buf, 0xFF);      // byte+48 — no squad leader
-	push_u8(buf, 0);         // byte+49
-	push_u8(buf, 1);         // quality
-	push_u32(buf, 0);        // entity_ref — null
-	return buf;
+	return encode_player_list(players);
 }
 
 // tag=0x5A WEAPON-LOADOUT-SYNC — verbatim retail frame-82537 payload. [orig: NapiNPClientMsg_0x05A
@@ -281,23 +217,6 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout() {
 		0xff, 0xff, 0xff, 0xff
 	};
 	return std::vector<uint8_t>(std::begin(kRetailTag5aPayload), std::end(kRetailTag5aPayload));
-}
-
-// tag=0x51 PLAYER-SPAWN. [orig: write_entity_packet @0x506bb0] witnessed 8-byte layout:
-//   [u16 requested_index (echoed from the C2S 0x29)][u16 handle = pool<<12|slot][u8 team]
-//   [u16 NetId if entity Flags&0x100 else 0][u8 animSlot if Flags&0x100 else 0].
-// (Was wrongly [team][handle][team][0][0] — the leading field is the echoed request index, not team.)
-// NetId/animSlot need the spawned entity's net_id/anim threaded into the reply binding — defaulted 0
-// today (D-NET-127 sub-item). Safe: our client treats 0x51 as a spawn signal (does not field-parse it).
-std::vector<uint8_t> build_reply_tag_51(const PlayerReplicationState &ctx, uint16_t requested_index) {
-	std::vector<uint8_t> buf;
-	buf.reserve(8);
-	push_u16(buf, requested_index);
-	push_u16(buf, ctx.entity_handle);
-	push_u8(buf, static_cast<uint8_t>(ctx.team & 0xFF));
-	push_u16(buf, 0); // NetId (binding plumbing TODO)
-	push_u8(buf, 0);  // animSlot (binding plumbing TODO)
-	return buf;
 }
 
 // tag=0x1E GAME-EVENT (post-spawn) — verbatim retail frame-82540 payload. [orig: GameEvent_BuildPayload
@@ -440,7 +359,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 				// undeployed, flooding C2S 0x0f. (golden f143->f144 slot 0; the joiner also syncs its own.)
 				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
 				const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep);
-				replies.push_back(make_protocol_message(0x46, build_reply_tag_46(prs)));
+				replies.push_back(make_protocol_message(0x46, encode_player_sync(prs)));
 				break;
 			}
 			case 0x47: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]
@@ -477,7 +396,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 					uint16_t req_idx = 0;
 					if (msg.payload.size() >= 2)
 						req_idx = static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8));
-					replies.push_back(make_protocol_message(0x51, build_reply_tag_51(rep, req_idx)));
+					replies.push_back(make_protocol_message(0x51, encode_player_spawn(rep, req_idx)));
 					st.player_spawn_confirmed = true;
 				}
 				break;

@@ -192,7 +192,18 @@ func _read_host_config() -> Dictionary:
 		"channel": "LAN",
 		"net_transport": "lan",
 		"bind_port": 32768,                        # witnessed retail LAN host port [game.cfg mplanserverport 32768-32787]
+		"dedicated": _is_dedicated(),              # serve-and-play (false, default) vs dedicated (no local player)
 	}
+
+
+# Serve-and-play (default) vs dedicated: a DEDICATED host runs the listen server but spawns NO local
+# player. Read off a "DEDICATED" toggle when mp.mnu provides one (its exact control name is the wiring
+# follow-up); absent -> serve-and-play, the playable co-op host.
+func _is_dedicated() -> bool:
+	var node := _find("DEDICATED")
+	if node is BaseButton:
+		return (node as BaseButton).button_pressed
+	return false
 
 
 func _selected_missions() -> Array:
