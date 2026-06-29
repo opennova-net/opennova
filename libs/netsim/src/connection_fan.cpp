@@ -27,11 +27,36 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.anchor_y = ay;
 	fu.anchor_z = az;
 	fu.flags1 = 0x00;
-	fu.flags2 = 0x00;          // sub-block 0 (aim) — the common gameplay frame
-	fu.aim.present = true;     // local-player view left zeroed (not authored yet)
-	fu.state_flag_byte = 0x00; // 7-byte tail: not mounted, full health, no extra state
+	// Sub-block 1 (server-status/timer), NOT sub-block 0 (aim): the golden cycles flags2 1/2/3 and
+	// never sends the aim sub-block in gameplay (the local player's aim is client-authoritative).
+	// Sub-block 1 is LOAD-BEARING — it carries the client's fall-damage tolerance dword_C6EAE4. Left at
+	// its BSS default 0, the body motor's landing-impact check `velZ <= C6EAE4 * -1057` has threshold 0,
+	// so the per-frame micro-gravity velocity trips fall damage EVERY grounded frame -> constant
+	// screen-red + camera-shake + minimap-red (Player_OnDamageReceived) though the player never dies
+	// (health loss is authority-gated). Send the retail default 13. [orig: Entity_UpdateInfantryPlayerBody
+	// landing check @0x4b7cf4-0x4b7d2d; NapiNPClientMsg_0x00A sub-block-1 read @0x4301a1-0x4301bc;
+	// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28]. (env sub-block 2 / objective 3 cycling is
+	// a follow-up — the client keeps its mission-loaded env meanwhile.)
+	fu.flags2 = 0x01;            // sub-block 1: [u8 C6EAE0][u8 C6EAE4][u8 serverFps][u8 serverCpuPct][i16 timer]
+	fu.timer.present = true;
+	fu.timer.state0 = 20;        // dword_C6EAE0 (retail default)
+	fu.timer.state1 = 13;        // dword_C6EAE4 = fall-damage tolerance (retail default; 0 => constant fall dmg)
+	fu.timer.state2 = 62;        // g_serverFps (cosmetic netgraph)
+	fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
+	fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
+	fu.state_flag_byte = 0x00; // 7-byte tail: not mounted, no stance bits yet (crouch/prone echo TBD)
 	fu.mount_handle = 0xFFFF;
-	fu.health = 100;
+	// TAIL health (v121) -> g_local_player_entity->Health. MUST equal the player's healthMax: the
+	// client's per-frame decrease-detector trips (screen-red + camera-shake + minimap-red) on every
+	// frame where tail < Health, and the client's own heal-to-max clamp keeps Health pinned at
+	// healthMax, so any tail < max means CONSTANT damage feedback though the player never dies. Sending
+	// full health every frame is exactly what the golden does (tail=150). The per-entity record health
+	// byte is a DON'T-CARE for the LOCAL player (NetPacket_SerializePlayerState skips the health-byte
+	// apply for g_local_player_entity). [orig: NapiNPClientMsg_0x00A decrease check @0x4305a1; heal-up
+	// clamp sub_43C290 @0x43c390; local-skip @0x4c11ac; grill 2026-06-28]. class-8 player healthMax=150;
+	// real damage-driven health is a follow-up (thread the connection's live health here).
+	constexpr int kPlayerHealthMax = 150;
+	fu.health = kPlayerHealthMax;
 	fu.state_word = 0;
 
 	for (const GameEntitySnapshot &e : entities) {

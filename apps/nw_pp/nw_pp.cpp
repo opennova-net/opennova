@@ -594,7 +594,14 @@ void print_weapon_hit_record(const WeaponHitRecord &r) {
 void print_tag_0a(const std::vector<uint8_t> &body) {
 	auto class_of = [](uint16_t t) -> EntityClass {
 		auto it = g_item_class.find(t);
-		return it == g_item_class.end() ? EntityClass::Unknown : it->second;
+		if (it != g_item_class.end()) return it->second;
+		// Fallback for the universal player template (0x14B9) so the 0x0A trailer's
+		// player compact records decode even without --items (the items.def class
+		// map). Other types still need --items; an Unknown there halts the walker,
+		// with the "pass --items" hint printed below — so a missing classifier never
+		// masquerades as a malformed/short stream.
+		if (t == 0x14B9) return EntityClass::Player;
+		return EntityClass::Unknown;
 	};
 	FrameUpdate fu;
 	const bool ok = decode_frame_update(body.data(), body.size(), class_of, fu,
@@ -660,8 +667,11 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		print_weapon_hit_record(h);
 	}
 	if (!ok)
-		std::printf("            (decode halted after %zu B of %zu)\n",
-		            fu.consumed, body.size());
+		std::printf("            (decode halted after %zu B of %zu%s)\n",
+		            fu.consumed, body.size(),
+		            g_item_class.empty()
+		                    ? " — likely an unclassifiable trailer record; pass --items <ITEMS.def>"
+		                    : "");
 }
 
 // S2C 0x1E game event — kill feed + objectives + zone control.
