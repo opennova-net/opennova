@@ -1341,14 +1341,14 @@ header; the rest is client-side.
 |---|---|---|
 | ref0/ref1/ref2 | 3× i32 | tick/reference header → dword_A822E4/E8/EC |
 | flags1 | u8 | `0x04`→loadprog `dword_A8235C=10`; `0x02`→`byte_A860DC`; `0x01`→death/spectator (camera reset, `CameraOffset.Z=0xD000`, spawn-gate `dword_24C1928`) |
-| flags2 | u8 | low 2 bits select sub-block; bit 3 (`0x08`) gates a 6 B vehicle-passenger record after the fixed tail (joiner-as-passenger; only the `(flags2 & 0xF) == 8` exact value triggers it — i.e. sub-block 0 + passenger bit) [orig: 0x430459] |
+| flags2 | u8 | low 2 bits select the sub-block AND its ROLE: **0** = aim/player-view (client-authoritative — the working golden does NOT send it in gameplay), **1** = server-status/timer, **2** = ENV, **3** = objective (gametype-gated). The golden CYCLES 1/2/3. bit 3 (`0x08`) gates a 6 B vehicle-passenger record after the fixed tail (joiner-as-passenger; only the `(flags2 & 0xF) == 8` exact value triggers it — i.e. sub-block 0 + passenger bit) [orig: 0x430459] |
 | sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32, 11 B | player aim/state → dword_A85B5C… [orig: 0x430054..0x43012E] |
-| sub-block 1 | `==1`: 4× u8 + i16, 6 B | `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: 0x430191..0x430210] |
+| sub-block 1 (server-status/timer) | `==1`: 4× u8 + i16, 6 B | `[u8→dword_C6EAE0][u8→dword_C6EAE4][u8→g_serverFps (0xC8FC64)][u8→g_serverCpuPct (0xC8FC68)][i16 timer]`; each u8 is `movzx`-widened from one wire byte; `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: C6EAE0@0x4301a1, C6EAE4@0x4301bc, g_serverFps@0x4301e0, g_serverCpuPct@0x430200, timer@0x430210]. Init defaults [orig: 0x4f638b C6EAE0=20, **C6EAE4=13**, C6EAE8=10]. **`dword_C6EAE4` is the fall-damage tolerance (§5.38d)** — a server that only ever sends sub-block 0 leaves the client's C6EAE4 at 0 → per-frame fall damage [orig: read @0x4b7d0d] |
 | sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8, 11 B | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, u8<<8, `Env_OvercastBlendTarget=u8<<8`, u8 [orig: 0x430253..0x430341] |
 | sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | dword_AC86E8… — gate is wire-invisible, so `decode_frame_update` reads the body only when its `is_objective_gametype` hint is set. **First witnessed in probe3** (Co-op, `g_GameType 0x30020`; 771 frames, body all-zero); the `flags2 & 0xF0` high bits don't change sub-block selection (D-NET-75) [orig: 0x430361..0x4303C8] |
 | state_flag_byte | u8 | bit 0→`dword_B76484`, bit 1→`dword_B76480`, bits 0/1→`g_local_player_entity.pad7[12]` bits 8/9 (the `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
 | mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) [orig: 0x430408] |
-| health | i16 | → `g_local_player_entity->Health` (drop triggers damage flash) [orig: 0x430428] |
+| health | i16 | read @0x430428; applied late in the handler — compares the new value to the stored `Health` (`cmp dx,[entity+0x11E]` @0x43059a, `jge` skip @0x4305a1) and, ONLY when it DROPPED, fires INLINE COSMETIC feedback (red flash `dword_B764B4+=0x78` @0x4305a3, camera-shake `dword_B764B0+=0x0A` @0x4305c1; both capped 0xFF; **no `Radar_AddBlip`** — distinct from the body motor's `Player_OnDamageReceived`, §5.38d) — then stores `Health` @0x4305df. ⇒ stream this at full health (`healthMax`) or any below-stored tail self-triggers the flash [orig: 0x430428 / 0x43059a / 0x4305df] |
 | state_word | i16 | → `*(WORD*)g_local_player_entity->pad7` (packed state) — bytes 6/7 of the 7 B tail; previously misread as two separate `hdr_trail_a/b` bytes [orig: 0x430442] |
 | **passenger record (conditional, `(flags2 & 0xF) == 8`)** | 6 B (or 2 B early-skip) | — |
 | passenger_handle | u16 | passenger entity handle; `0xFFFF` early-skips the next 4 B [orig: 0x430474] |
@@ -1512,7 +1512,7 @@ Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
 | 14 | 1 | weapon-anim state | → entity+0x2B8 / 0x2BC |
 | 15 | 1 | priority | → entity+0x377 |
 | 16 | 1 | anim def index | → entity+0x2B0 |
-| 17 | 1 | health classification | `Entity_SetHealthFromDifficultyByte @ 0x4AD580` |
+| 17 | 1 | health classification | `Entity_SetHealthFromDifficultyByte @ 0x4AD580`: `tier=(byte>>4)&3` @0x4ad596 → `Health = {tier2 ≈0.875×, tier1 ≈0.594×, tier0/3 ≈0.219×} × ItemDef.healthMax` (@0x4ad5f4 / 0x4ad65b / 0x4ad68c), low nibble → `playerClass` +0x294 @0x4ad5a2. **Don't-care for the LOCAL player**: `NetPacket_SerializePlayerState` SKIPS this apply for `g_local_player_entity` (`cmp edi,g_local_player_entity; jz` @0x4c11ac → local branch only floors `Health` at 1 @0x4c11c4); the local player's health comes from the §5.9 0x0A tail, not this byte |
 
 **Spawn hook (load-bearing):** when `state flags & 2` is set AND the entity is the local
 player, the engine fires `Game_InitNewRound @ 0x422740` + `Entity_ResetToSpawnState @ 0x4B9610`
@@ -2238,6 +2238,13 @@ flags-first).
 Decoder: `libs/novaworld/ingame_decode.{h,cpp}` `decode_organic_spawn_batch` /
 `OrganicSpawnRecord`. **Both spawn paths land team at entity+354** (the unified team landing,
 D-NET-58); 0x0C orientation at entity+16 is the same 32-bit BAM as 0x20 `movement_val` (§5.12).
+
+**Record field 15 (`weaponState`, entity+0x294) is the soldier `playerClass`** (D-NET-103, §5.2b). For a
+JOINER'S OWN player spawn it MUST be ∈ 5-9: the client registers its body-anim channel (`animChannelB`,
+entity+0x188 — the move/crouch/prone gate) at ROUND-LOAD only for `playerClass` ∈ 5-9, and this `0x0C`
+handler registers no channels (it calls the leaf `Entity_InitFromItemDef @0x49e550`). See §5.38d for the
+registration path and the consequence (`+0x188 == NULL` ⇒ the body motor bails ⇒ look works, locomotion
+does not).
 
 ### 5.24 Authored-mission cross-validation — pools 1/2/3 (D-NET-62)
 
@@ -3107,6 +3114,68 @@ not flood `0x0F`). **Process lesson recorded:** two wrong fixes this session (th
 and the `PeerSpawned` deferral) both came from trusting wire-order intuition over the gate witnesses; the
 fix only converged after enumerating every writer of `g_spawn_success_gate` and reading the full LAN-join
 capture. Witness the gate, then diff the working capture, before editing emit code.
+
+#### 5.38d Local-player body motor — fall-damage tolerance, anim-channel gate, spectator divert (retail-join grills, 2026-06-28)
+
+`[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]` is the local-player/infantry BODY motor (look,
+stance, body anim, ground collision, fall-damage) — distinct from the AI/infantry locomotion-integration
+motor `Entity_UpdateInfantryAI @ 0x4b9910` (§5.38/§5.38a); the exact division of labour between the two is
+a follow-up. Witnessed this session debugging a retail joiner that could look but not move and took constant
+damage; cross-checked against `.scratch/golden/retail-lan-host-join.pcapng`. All anchored (exact disasm,
+imagebase `0x400000`); read-only.
+
+**Early gates (in entry order):**
+- **Spectator / spawn-select divert.** `cmp byte_A860EC, 0` @0x4b40f8: while `byte_A860EC` is SET, if
+  `entity == g_local_player_entity` the motor calls `Camera_UpdateFreeFly @ 0x4b2980` and RETURNS @0x4b410d-
+  0x4b411a — look-only, no body simulation. `byte_A860EC` is the spawn-select / spectator flag, set by S2C
+  `0x075` `[orig: NapiNPClientMsg_SetSpectatorMode @ 0x4259e0]` and per-frame by `0x0A` flags1 bit0 (set
+  @0x42ffa0 / clear @0x43001e, §5.38c). Our build sends flags1 bit0 = 0, so this is NOT a blocker for us —
+  it is the witnessed look-only path, confirming the spawn-select camera is this divert.
+- **Flags bit 0 gate.** `mov edx,[esi+24h]; test dl,1; jnz loc_4B83A9` @0x4b411b-0x4b4127 — bail (no
+  locomotion) if `Flags` (entity+0x24) bit 0 is set.
+- **Anim-channel gate (the move/look split).** `mov eax,[esi+188h]; cmp eax,ebp(=0); jz loc_4B83A9`
+  @0x4b412d-0x4b4135 — if `animChannelB` (entity+0x188, §5.2b) is NULL the motor BAILS before any
+  walk/crouch/prone (the 8-way move order is read immediately after: `mov eax,[esi+12Ch]; and ecx,7`
+  @0x4b414b-0x4b4153). So a local player with `+0x188 == NULL` can still LOOK (the separate
+  `Camera_UpdateFreeFly` path) but cannot LOCOMOTE. `animChannelB` is written ONLY by
+  `[orig: AnimMap_RegisterEntity @ 0x40bb60]`.
+
+**Where the local player's `animChannelB` gets registered (the move gate's source).** At ROUND-LOAD,
+`[orig: Game_ReloadEntityModelsAndCallbacks @ 0x522830]` walks pool 0; for each player with `Flags & 0x100`
+(@0x522c59) it resolves the soldier model from `[orig: AnimMap_GetSlotPropertyInt(entity->playerClass
+/*+0x294, §5.2b/D-NET-103*/, lod_level) @ 0x4127b0]` (@0x522c91 / 0x522c85 / 0x522c79 per LOD) →
+`ItemList_FindIndexByTypeId` → entity+28 → `EntityDef_LoadModelsAndCallbacks`; then IFF the resolved
+item-def's ADM filename (`ItemDef+192`) is non-empty (@0x522d07) it loads the ADM
+(`AnimMap_LoadAdmFile @0x522d14`) and calls `AnimMap_RegisterEntity @0x522d38` (→ writes `+0x188`). An MP
+session (`g_napi_np_ctx.is_in_session`) preloads EXACTLY soldier classes 5-9 @0x522872-0x5228e5. A player
+whose `playerClass` is outside 5-9 resolves to a slot with no soldier ADM → no register → `+0x188` stays
+NULL → the body motor bails. ⇒ **the joiner's own §5.23 `0x0C` player spawn MUST carry a valid `playerClass`
+∈ 5-9** (the byte after `NetId` in the `0x0C` record, stored @0x42e9d5, §5.2b), **and the spawn must reach
+the client BEFORE its round-load.** The `0x0C` handler `[orig: NapiNPClientMsg_0x00C @ 0x42e730]` itself
+calls `Entity_InitFromItemDef @0x49e550` (a leaf, §5.2b) and registers NO channels — registration is the
+client-local round-load path above.
+
+**Landing-impact / fall-damage (the constant-damage root).** After ground/collision resolution
+(`[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]`, returns the ground delta) @0x4b7cf4, when
+GROUNDED (delta ≤ 0; `jg` skips otherwise @0x4b7d04) the motor compares vertical velocity `velZ`
+(entity+0xA0) to `dword_C6EAE4 × -1057` (`imul eax,0FFFFFBDFh` @0x4b7d15; `cmp [esi+0A0h],eax; jg` skip
+@0x4b7d1b): if `velZ ≤ threshold` AND `entity == g_local_player_entity` it calls
+`[orig: Player_OnDamageReceived @ 0x4dd880]` @0x4b7d2d — screen-red `dword_B764B4 += 120` (cap 255),
+camera-shake `dword_B764B0 += 10` (cap 255), and (self-attacker) `Radar_AddBlip(…, 255)` = minimap-red. The
+HEALTH reduction in the sibling block @0x4b7d3b is `g_napi_np_ctx.is_authority`-gated (only the server lowers
+`Health`), so a client shows the feedback but never dies from it. The death site (`Health ≤ 0`) is the
+sibling branch @0x4b61f5. With **C6EAE4 = 13** (init default, @0x4f638b) the threshold is −13741 (only a real
+hard fall trips it); with **C6EAE4 = 0** the threshold is 0, so any downward micro-velocity trips it EVERY
+grounded frame → constant red/shake/minimap-red while `Health` stays full (authority-gated). ⇒ a server MUST
+stream the `0x0A` sub-block 1 (§5.9) carrying `C6EAE4 ≠ 0` (retail 13); a server that only ever sends
+sub-block 0 leaves the client's tolerance at 0 and inflicts per-frame fall damage. This is the REAL
+constant-damage path (minimap-red ⇒ `Radar_AddBlip`), separate from the §5.9 0x0A tail-health decrease
+detector (cosmetic red/shake only, no `Radar_AddBlip`).
+
+(`Entity_GetMaxHealthWithDifficulty @ 0x43b8a0` and its heal-to-max clamp `sub_43C290 @ 0x43c290` (raise
+`Health` up to max, store @0x43c2aa) run on the SPAWN/respawn paths — `Entity_ResetToSpawnState @0x4b9610`,
+`PlayerClass_InitEntity @0x4b1060`, `Server_ProcessPlayerDeath @0x517740` (xrefs) — NOT per-frame, so they
+are not part of the 0x0A loop.)
 
 ### 5.39 First/third-person player camera (Phase 2.5, 2026-06-20)
 

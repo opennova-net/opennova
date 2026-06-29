@@ -46,15 +46,14 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
 	fu.state_flag_byte = 0x00; // 7-byte tail: not mounted, no stance bits yet (crouch/prone echo TBD)
 	fu.mount_handle = 0xFFFF;
-	// TAIL health (v121) -> g_local_player_entity->Health. MUST equal the player's healthMax: the
-	// client's per-frame decrease-detector trips (screen-red + camera-shake + minimap-red) on every
-	// frame where tail < Health, and the client's own heal-to-max clamp keeps Health pinned at
-	// healthMax, so any tail < max means CONSTANT damage feedback though the player never dies. Sending
-	// full health every frame is exactly what the golden does (tail=150). The per-entity record health
-	// byte is a DON'T-CARE for the LOCAL player (NetPacket_SerializePlayerState skips the health-byte
-	// apply for g_local_player_entity). [orig: NapiNPClientMsg_0x00A decrease check @0x4305a1; heal-up
-	// clamp sub_43C290 @0x43c390; local-skip @0x4c11ac; grill 2026-06-28]. class-8 player healthMax=150;
-	// real damage-driven health is a follow-up (thread the connection's live health here).
+	// TAIL health (v121) -> g_local_player_entity->Health [orig: @0x4305df]. Send the player's healthMax
+	// so the HUD reads 100% and the tail decrease-detector (`if v121 < Health` -> a brief damage flash
+	// [orig: @0x43059a]) cannot self-trigger from an under-max tail. NOTE: this is only the minor health
+	// flash — the CONSTANT screen-red/shake/minimap-red was the fall-damage tolerance C6EAE4 (the
+	// flags2=1 sub-block above), NOT the tail. The per-entity record health byte is a DON'T-CARE for the
+	// LOCAL player (NetPacket_SerializePlayerState skips the health-byte apply for g_local_player_entity
+	// [orig: @0x4c11ac]). class-8 healthMax=150; real damage-driven health is a follow-up (thread the
+	// connection's live health here).
 	constexpr int kPlayerHealthMax = 150;
 	fu.health = kPlayerHealthMax;
 	fu.state_word = 0;
