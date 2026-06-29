@@ -19,8 +19,10 @@ extends GutTest
 # one static building (pool 2, type 0x0123) and one marker (pool 3, type 0x1773). The AI carry a
 # RESOLVABLE non-zero type id so they survive the present's `type_id != 0` filter — with the old
 # item_id 0 they were invisible by construction, which is why the joiner only ever saw the host
-# player. The host streams only the dynamic set at the joiner's world-load (pool-0 organics via
-# S2C 0x0C, empty 0x10, spawn-marker 0x20); pool-1 vehicles + pool-2 buildings are client-local.
+# player. The witnessed initial-state burst streams EVERY entity pool to the joiner at world-load
+# [orig: Server_SendInitialGameStateToPlayer @0x51bba0]: pool-2 statics (0x10), pool-1 (0x0D, omitted
+# by our host — D-NET-97), pool-0 dynamics (0x0C), pool-3 markers (0x20). Only client-local BMS map
+# geometry (rebuilt from the 0x0B header) is not re-streamed.
 const AI_TYPE := 0x0816       # AI infantry
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
@@ -107,12 +109,14 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	assert_true(joiner_sees_host, "joiner's wire present includes the host player (0x14B9), not itself")
 	assert_false(saw_self_echo, "the joiner's own wire echo (handle H) is self-filtered from its present")
 
-	# JOINER sees the DYNAMIC set: the host streams the networked entities (pool-0 organics via
-	# S2C 0x0C) during load, so the joiner's wire present now carries the host's AI organics, not
-	# just the host player. Statics (pool-2 building) and markers (pool-3) are deliberately NOT
-	# wire-streamed — a real host streams only the small dynamic set (golden host_and_join_lan.pcapng:
-	# empty 0x10, ~5 organics in 0x0C, empty 0x20); static geometry is client-local mission data.
-	# Streaming the full static mission floods + crashes a stock client (D-NET-98). (net-re §5.38c)
+	# JOINER sees the host's full ENTITY world: the witnessed initial-state burst streams EVERY entity
+	# pool to a joining player [orig: Server_SendInitialGameStateToPlayer @0x51bba0, sync-state 4] —
+	# phase 1 pool-2 statics under S2C 0x10, phase 2 pool-1 under 0x0D, phase 3 pool-0 dynamics (AI +
+	# players) under 0x0C, phase 4 pool-3 markers under 0x20 (each bounded by Pool_GetUsedCount(idx)).
+	# So the joiner's present carries the host AI organics AND the pool-2 building. The thing that is NOT
+	# re-streamed is client-local BMS MAP GEOMETRY (terrain/props the joiner rebuilds from the 0x0B
+	# mission header) — distinct from pool-2 entity instances, which DO stream. (D-NET-98 corrected;
+	# net-re §5.38c.)
 	var ai_seen := 0
 	var building_seen := false
 	for rec in range(jsnap.size() / stride):
@@ -122,7 +126,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 		elif tid == BUILDING_TYPE:
 			building_seen = true
 	assert_eq(ai_seen, 2, "joiner's present carries both host AI organics (type 0x0816) from the 0x0C stream")
-	assert_false(building_seen, "static building is NOT wire-streamed (client-local geometry, not a host broadcast)")
+	assert_true(building_seen, "pool-2 static building IS wire-streamed to the joiner under S2C 0x10 (the join burst's phase 1) [orig: @0x51bba0]")
 
 	host.free()
 	joiner.free()

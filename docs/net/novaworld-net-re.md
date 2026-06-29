@@ -852,7 +852,7 @@ retail-lan-host-join golden** (frames 144-160), with each serializer ported into
 | 0x76 | `NetPacket_WriteServerTick16 @0x510350` | `dword_24D59FC` server tick, u16 (golden `ff 03`) | `now_tick & 0xFFFF` |
 | 0x1C / 0x11 | (empty markers, ≥subphase 16) | 0-length | EmitEmpty |
 | 0x0B | `NetPacket_WriteBMSHeader @0x502ca0` | 616-B BMS header (§5.4) | `bms::encode_header_blob` |
-| world-stream 0x10/0x0D/0x0C/0x20 | pool serializers (§5.11/5.12/5.23) | per-pool batches | netsim extractors (0x0D pool-1 omitted, D-NET-97/98) |
+| world-stream 0x10/0x0D/0x0C/0x20 | pool serializers (§5.11/5.12/5.23) | per-pool batches | netsim extractors — ALL four pools streamed, paged, in the witnessed phase order [orig: @0x51bba0]; residual divergence is pool-2 CONTENTS (promotion over-populates), not omission (D-NET-98 UPDATE) |
 | 0x45 | `NetPacket_WriteTerrainTiles @0x506570` → `serialize_terrain_tiles @0x6080f0` | terrain-tile delta from `entity+89884`; **`return 0` (orig skips) when no delta** | faithfully ABSENT (headless host streams no per-player terrain delta) |
 | 0x7E | `NetPacket_WriteBriefingText @0x506620` | MissionText `briefing3` + `briefing2`/`briefing` C-strings; 0 when empty | faithfully ABSENT (no MissionText wired) |
 | 0x1A | `NetPacket_WriteTimestamp @0x5046c0` | `GetTickCount()` u32 (OS primitive — excluded; reimpl uses `now_tick`) | `now_tick` |
@@ -865,8 +865,12 @@ the headless host is faithful, not a deferral (the golden carries neither). Test
 `npruntime_initial_state_burst` (full order + per-body byte assertions), `npruntime_golden_lan_join`
 (retail byte-parity 0x2A, structure-parity 0x2C/0x08/0x66/0x76). **Was: the "§5.2a serializer wave"
 the ROADMAP / D-NET-127 repeatedly cited as the deferred grill — now closed for the player-sync
-bundle.** Remaining §5.2a deferral: the retail host's *static-mission* world-stream (0x10 content +
-0x0D pool-1) which our host omits by design (D-NET-98 / D-NET-97).
+bundle.** The §5.2a world-stream (all four pools, 0x10/0x0D/0x0C/0x20) is now IMPLEMENTED and matches
+the witnessed phase order [orig: Server_SendInitialGameStateToPlayer @0x51bba0]; pool-1 (0x0D) is
+streamed with the AI-trailer crash fixed (D-NET-97). The residual §5.2a divergence is that our
+`promote_mission` over-populates pool 2 with client-local map geometry retail keeps out, so our 0x10
+carries more entities than a retail host's (D-NET-98 UPDATE) — a stock client accepts it, but it is
+not byte-equal to retail for a mission with many statics.
 
 **IDB names applied (2026-06-16, this grill; addresses are the join key, so older prose keeps the
 `dword_*` spellings):** `sub_62B5E0 → NapiNPProtocol_StartServer @ 0x62b5e0`;
@@ -2977,13 +2981,16 @@ Two faithful-render gaps remain (the next work):
    joiner's own dcb-bearing `0x0C`): an **empty `0x10`** phase marker, the **pool-0 organics (host player +
    AI) in `0x0C`** (paged, remote peers excluded — their dcb record streams separately), then an **empty
    `0x20`** phase marker (the empty 0x10/0x20 drive the witnessed `g_loading_progress` 2/5 phases without
-   data). **The host does NOT stream the static mission (buildings/markers) — see D-NET-98.** Built: the
+   data). **(SUPERSEDED: this is the original MINIMAL stream — dynamic-only, empty 0x10/0x20 — which stalled
+a live retail join at 7%. The host now streams ALL four pools paged in the witnessed phase order
+0x10→0x0D→0x0C→0x20 [orig: Server_SendInitialGameStateToPlayer @0x51bba0]; see the D-NET-98 UPDATE.)** Built: the
    faithful `encode_static_entity_batch` (`0x10`, byte-exact inverse of `decode_static_entity_batch`,
    replacing the simplified `build_tag_10_entity_batch` stub); libs/netsim `build_pool{0..3}_*` extractors
    (routed by `handle.pool()`); joiner reception (`JoinerSession` surfaces spawn bodies + `NetClientView::pump`
    decodes `0x10`/`0x0C`/`0x20` into the single `ClientState`). Verified by `coop_two_sim_test` (the joiner's
-   present carries the host's two AI organics, not just the host player; statics are NOT wire-streamed) +
-   lib round-trips (`nw_ingame_encode`, `netsim_world_stream_extractors`). Pool-1 (`0x0D`) deferred (D-NET-97).
+   present carries the host's two AI organics AND the pool-2 building — which IS wire-streamed under 0x10,
+   matching @0x51bba0 phase 1; D-NET-98 UPDATE) + lib round-trips (`nw_ingame_encode`,
+   `netsim_world_stream_extractors`). Pool-1 (`0x0D`) is now streamed, AI-trailer crash fixed (D-NET-97).
 2. **Remote bodies glide — body animation is not carried over the wire.** The `0x0A` motion stream moves the
    model but no anim-state rides it, so remote soldiers slide in their rest pose (the "soldier-glide" gap).
 3. **The joiner's local player uses the NPC motor.** On a non-authority client, L does not route through the
@@ -3035,6 +3042,30 @@ follow-ups: (a) the JOINER should load static geometry locally (like retail) rat
 `game_world.gd` currently skips ALL placement on a joiner, so opennova joiners won't see buildings until they
 place statics locally; (b) stream the small NETWORKED marker subset (spawn volumes / objectives) via `0x20`
 rather than all 497 — needs the witnessed "is this marker networked" gate. [net-re §5.2a world-stream pacing.]
+
+**D-NET-98 UPDATE (2026-06-29) — the original DOES stream pool-2 statics; the divergence is PROMOTION,
+not streaming. The "stream only pool-0 / empty 0x10" FIX above is SUPERSEDED.** Witnessed in
+`[orig: Server_SendInitialGameStateToPlayer @0x51bba0]`: the per-joiner initial-state is a frame-paced
+state machine whose **sync-state 4 walks ALL FOUR pools in a fixed phase order**, each under its own tag,
+each bounded by `[orig: Pool_GetUsedCount @0x441f80]` (= `g_pool_list[idx].used`, arg is a pool index 0..3):
+phase 1 **pool-2 statics → `0x10`** `[orig: loc_5042F0 @0x5042F0]`, phase 2 pool-1 → `0x0D`
+`[orig: serialize_entity_pool_to_packet_0 @0x503940]`, phase 3 pool-0 dynamics → `0x0C`
+`[orig: serialize_entity_states_to_buffer @0x5030a0]`, phase 4 pool-3 markers → `0x20`
+`[orig: serialize_entity_pool_to_packet @0x503460]`. The `0x10` body is `[WORD cursorStart][WORD count]`
+then per-entity `[orig: Pool_GetEntryUnchecked @0x441fc0]` records of `handle + XYZ(int32×3) + flag-gated
+optionals`, re-emitted each tick (~650 B) advancing the per-player cursor `playerSlot+0x15F1C` until
+`Pool_GetUsedCount(2)` — i.e. the **full pool-2 set IS streamed**, as paced `0x10` batches. So the host
+does NOT skip statics. The golden's `0x10` **empty (len=4)** = `[cursorStart=0][count=0]` is simply
+retail's **pool 2 being EMPTY in that session**: retail keeps client-local BMS *map geometry* out of
+entity pool 2 (only networked statics are pool-2 entities), so its `0x10` is header-only — it is NOT
+evidence the host skips statics. **The actual opennova divergence is PROMOTION:** our `promote_mission`
+puts the ENTIRE static mission into pool 2 (816 statics), so our (correct, paged) `0x10` carries them
+while a retail host's is near-empty. Current code (`server_initial_state.cpp` sync_state 4,
+`emit_paged_pool` per pool) already streams all four pools in this phase order (the comment "reverses the
+D-NET-97/98 shortcut") — wire-FORMAT-faithful and crash-safe (paged, bounded), which fixed the 7% stall;
+a stock client accepts it. Residual divergence = the pool-2 **contents** (promotion should exclude
+client-local map geometry to be byte-equal to retail). `coop_two_sim_test` now asserts the pool-2 building
+IS streamed under `0x10` (matching the binary), not absent.
 
 #### 5.38c The deploy gate — why a retail joiner stalls at spawn-select and auto-kicks (2026-06-25)
 
@@ -5148,3 +5179,23 @@ reimpl behaviour change):
     CNetQuality_SetCheatFlag @ 0x4c34f0 / NetPacket_WritePositionTeamAndName @ 0x503800 /
     NetSync_IsEntityEligibleInWindow @ 0x507AA0 / Network_DecompressFixedPoint @ 0x4c27e0 /
     NapiNPClientMsg_0x056 @ 0x431d10 / Network_CalcSendRateTiers @ 0x5b7c50]
+
+**D-NET-131** [reimpl divergence, DOCUMENTED] **A "serve only" (dedicated) host is represented as a
+mode-3 listen server with `serve_and_play=false`, not the original's mode-1 host-only.** Witnessed in
+`[orig: UI_HandleHostSessionStart @0x556d00]`: the LAN host branch reads the `SERVERTYPE` spinlist value
+`[orig: HostDialog_ReadSettings @0x555940, dword_2550AB8 = CSpinListWnd_GetSelectedValue]` and, for
+`HG_SERVEONLY` (value 1, dedicated), calls `[orig: CGameSession_SetConnectionMode @0x4c49f0]` with mode
+**1** → `is_host=1, is_client=0` (a genuine host-only with NO local client role); `HG_SERVEPLAY` (value 0)
+→ mode **3** (host+client). Transport: LAN host → `[orig: CNapiNetwork_SetTransportMode @0x4c8750]`
+mode **3**, NovaWorld host → mode **4** (both real UDP; the NovaWorld `=4` is witnessed in the dead-code
+reference `[orig: Game_HostMultiplayerSession @0x4a65a0]`, not yet pinned to the live call site reached
+after HTTP registration). **Our choice:** opennova keeps the single mode-3 in-process listen-server path
+(ADR 0011 — the host always runs the client role) and expresses "dedicated" as `HostOwner.serve_and_play
+= false` (`bringup_host_runtime`): the host's own player is not spawned and `host_session_pump` discards
+the host loopback (step 5), so there is no local view. This is **wire-equivalent from a joiner's
+perspective** — mode 1 vs 3 changes only whether the host maintains its OWN client bookkeeping, never the
+S2C stream a peer receives (and with `serve_and_play=false` that bookkeeping is discarded anyway) — so no
+byte divergence reaches a connected client. We diverge to reuse one listen-server bring-up rather than add
+a second host-only path. Cited at `nova_simulation.cpp bringup_host_runtime`. Follow-up if true mode-1
+fidelity is ever needed (e.g. an exact host-internal-state match): thread `ConnectionMode` from the UI
+server-type and teach `HostOwner`/`host_session_pump` a no-loopback-client mode.
