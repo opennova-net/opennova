@@ -5,6 +5,7 @@
 
 #include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
 #include <novaworld/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
+#include <novaworld/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 
 namespace opennova::np {
 
@@ -171,8 +172,7 @@ struct NapiNPConnection {
 	                               // leg compares a repeat 0x42 against [orig: session_keys.client_id
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
-	uint32_t next_outbound_seq = 1;
-	uint32_t last_inbound_seq = 0;
+	SessionSequencing seq{};       // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
 
 	// self_id (the joiner's own ConnectionId / dcb / unk_18, learned from its in-match 0x48

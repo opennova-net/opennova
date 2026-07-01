@@ -255,6 +255,28 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 	return true;
 }
 
+bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
+                          const std::vector<ProtocolMessage> &messages,
+                          std::vector<uint8_t> &body_out) {
+	ProtocolPacketHeader hdr;
+	hdr.session_id = crypto.session_id;
+	hdr.seq_num = seq.next_outbound_seq++; // post-increment: the pre-increment value is stamped
+	hdr.ack_count = seq.last_inbound_seq;
+	hdr.connection_flags = 0; // always 0 on every witnessed encode site
+	return encode_protocol_packet_plaintext(hdr, messages, crypto.out_scrk, body_out);
+}
+
+bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
+                            const uint8_t *body, size_t body_len,
+                            ProtocolPacketHeader &hdr_out,
+                            std::vector<ProtocolMessage> &messages_out) {
+	if (!decode_protocol_packet_plaintext(body, body_len, crypto.in_scrk, hdr_out, messages_out)) {
+		return false; // leave seq untouched; the caller applies its own failure policy
+	}
+	seq.last_inbound_seq = hdr_out.seq_num;
+	return true;
+}
+
 // Fragment reassembly per NapiNPConnection_DispatchMessage @ 0x622570
 // (three-state model in retail) and onnet's nw_udp_server.py
 // process_protocol_message (None/START/MIDDLE/END classification).

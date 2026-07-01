@@ -114,15 +114,12 @@ HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &
 
 std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
                                            const std::vector<ProtocolMessage> &replies) {
-	// [orig: SESSION reply build apps/novaworld_server/nw_udp_listener.cpp:606-627]
-	ProtocolPacketHeader rhdr;
-	rhdr.session_id = conn.client_ck;            // retail's local_key == ClientAuth.ck
-	rhdr.seq_num = conn.next_outbound_seq++;
-	rhdr.ack_count = conn.last_inbound_seq;
-	rhdr.connection_flags = 0;
-
+	// [orig: SESSION reply build apps/novaworld_server/nw_udp_listener.cpp:606-627] Host S2C direction:
+	// encrypt with our server_scrk, stamp session_id = the ClientAuth.ck (retail's local_key). Shared
+	// seq/ack framing via frame_session_packet (ADR 0013).
 	std::vector<uint8_t> body_out;
-	if (!encode_protocol_packet_plaintext(rhdr, replies, conn.server_scrk, body_out)) {
+	if (!frame_session_packet(conn.seq, SessionCrypto{conn.server_scrk, {}, conn.client_ck}, replies,
+	                          body_out)) {
 		return {};
 	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
@@ -377,13 +374,13 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	NapiNPConnection &conn = *connp;
 
+	// Host recv: decrypt with the joiner's client_scrk; deframe latches conn.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
-	if (!decode_protocol_packet_plaintext(body.data(), body.size(), conn.client_scrk,
-	                                       hdr, messages)) {
+	if (!deframe_session_packet(conn.seq, SessionCrypto{{}, conn.client_scrk, 0}, body.data(),
+	                            body.size(), hdr, messages)) {
 		return;
 	}
-	conn.last_inbound_seq = hdr.seq_num;
 
 	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
 	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's

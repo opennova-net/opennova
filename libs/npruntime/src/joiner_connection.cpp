@@ -22,8 +22,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	server_hk_ = 0;
 	conn_.server_sk = 0;
 	conn_.server_scrk.clear();
-	conn_.next_outbound_seq = 1;
-	conn_.last_inbound_seq = 0;
+	conn_.seq = SessionSequencing{1, 0};
 	pump_stage_ = 0;
 	has_self_handle_ = false;
 	self_handle_ = 0;
@@ -48,13 +47,11 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 }
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
-	ProtocolPacketHeader hdr;
-	hdr.session_id = conn_.server_sk; // peer's local_key = the server's SK (ServerAuth.sk)
-	hdr.seq_num = conn_.next_outbound_seq++;
-	hdr.ack_count = conn_.last_inbound_seq;
-	hdr.connection_flags = 0;
+	// Joiner C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK
+	// (ServerAuth.sk, the peer's local_key). Shared seq/ack framing (ADR 0013).
 	std::vector<uint8_t> body;
-	if (!encode_protocol_packet_plaintext(hdr, messages, conn_.client_scrk, body)) {
+	if (!frame_session_packet(conn_.seq, SessionCrypto{conn_.client_scrk, {}, conn_.server_sk}, messages,
+	                          body)) {
 		return {};
 	}
 	return nw_encode_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(body));
@@ -117,12 +114,13 @@ void JoinerConnection::on_server_auth(const std::vector<uint8_t> &body, PollResu
 }
 
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
+	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
-	if (!decode_protocol_packet_plaintext(body.data(), body.size(), conn_.server_scrk, hdr, messages)) {
+	if (!deframe_session_packet(conn_.seq, SessionCrypto{{}, conn_.server_scrk, 0}, body.data(),
+	                            body.size(), hdr, messages)) {
 		return; // lenient: an in-match streaming packet we can't parse is not fatal
 	}
-	conn_.last_inbound_seq = hdr.seq_num;
 	for (const ProtocolMessage &m : messages) {
 		if (m.tag == 0x0C) {
 			// S2C 0x0C organic-spawn batch — the self name-match (§5.23). ALSO surface the whole
@@ -222,8 +220,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, std::string client_scr
 	conn_.server_sk = session_id;            // 0x43 header session_id (= ServerAuth.sk)
 	conn_.client_scrk = std::move(client_scrk); // encrypts our outbound 0x43 (the captured client SCRK)
 	conn_.server_scrk = std::move(server_scrk); // decrypts inbound 0x83 (for the S2C fold half)
-	conn_.next_outbound_seq = next_seq;      // frame_session uses this as the packet's seq, post-increments
-	conn_.last_inbound_seq = last_ack;       // -> the 0x43 ack_count
+	conn_.seq = SessionSequencing{next_seq, last_ack}; // frame_session stamps next_seq then post-increments; last_ack -> 0x43 ack_count
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;

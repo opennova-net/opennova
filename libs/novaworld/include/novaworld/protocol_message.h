@@ -165,6 +165,44 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
                                       std::string_view scrk,
                                       std::vector<uint8_t> &body_out);
 
+// The per-session SEQUENCING state (ADR 0013): one outbound counter + the last inbound seq echoed as
+// ack. Shared by the three framing paths (host S2C / joiner C2S / lobby C2S) that all fill a
+// ProtocolPacketHeader with `seq_num = next_outbound_seq++` and `ack_count = last_inbound_seq`. The
+// per-site initial value differs by convention and is preserved by each owner (in-match starts at 1;
+// the lobby field default is 0 but ClientSession::start() resets it to 1 — the live first packet is
+// seq=1 either way).
+struct SessionSequencing {
+	uint32_t next_outbound_seq = 1; // post-incremented per framed packet
+	uint32_t last_inbound_seq = 0;  // = last decoded hdr.seq_num, echoed as the next outbound ack_count
+};
+
+// A per-session CRYPTO view (ADR 0013), assembled at frame/deframe time from a connection's handshake
+// SCRK fields. It captures the direction asymmetry the three paths differ by: which SCRK encrypts our
+// outbound inner region vs. decrypts the peer's inbound one, and which negotiated key is stamped into
+// the outbound header session_id. (The views are non-owning — they point into the connection's stable
+// std::string SCRK members and are consumed within one synchronous frame/deframe call.)
+struct SessionCrypto {
+	std::string_view out_scrk;       // encrypts our outbound inner region (frame_session_packet)
+	std::string_view in_scrk;        // decrypts the peer's inbound inner region (deframe_session_packet)
+	uint32_t session_id = 0;         // the peer local_key stamped into the outbound header
+};
+
+// Frame `messages` into a ProtocolPacketHeader + SCRK-encrypted inner body (NO outer NWU envelope — the
+// caller applies nw_encode_outbound / encode_session_outbound). Stamps session_id, seq_num =
+// seq.next_outbound_seq++, ack_count = seq.last_inbound_seq, connection_flags = 0. Returns false only if
+// the inner encode fails. [orig: the CNapiNPConnection header-fill + SCRK encode shared by both directions]
+bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
+                          const std::vector<ProtocolMessage> &messages,
+                          std::vector<uint8_t> &body_out);
+
+// Inverse: SCRK-decrypt `body` into `hdr_out` + `messages_out` and latch seq.last_inbound_seq =
+// hdr_out.seq_num. Returns false (leaving seq untouched) if the inner decode fails; the caller applies
+// its own failure policy. The outer NWU envelope must already be stripped by the caller.
+bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
+                            const uint8_t *body, size_t body_len,
+                            ProtocolPacketHeader &hdr_out,
+                            std::vector<ProtocolMessage> &messages_out);
+
 // Applies retail fragment semantics and returns true when `payload_out`
 // contains a complete payload ready for higher-level dispatch.
 bool reassemble_protocol_payload(ProtocolReassemblyState &state,

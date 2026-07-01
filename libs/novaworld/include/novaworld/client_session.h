@@ -203,8 +203,8 @@ private:
 	std::string sess_id_string_;   // ServerVerifyResult.SessIdString
 	std::string last_error_;
 
-	uint32_t next_outbound_seq_ = 0;
-	uint32_t last_inbound_seq_ = 0;
+	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
+	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]
 	bool sent_verify_request_ = false;
 	ProtocolReassemblyState reassembly_;
 };

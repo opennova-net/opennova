@@ -172,8 +172,7 @@ std::vector<uint8_t> ClientSession::start() {
 	// client's first protocol packet is seq=1 (capture frame 9739). Starting at
 	// 0 makes ack=0 ambiguous with "acked nothing" in the peer's reliable-delivery
 	// layer, which stalls the verify exchange against live NW (NW-S5).
-	next_outbound_seq_ = 1;
-	last_inbound_seq_ = 0;
+	seq_ = SessionSequencing{1, 0};
 	sent_verify_request_ = false;
 	reassembly_ = ProtocolReassemblyState{};
 	return build_client_hello();
@@ -263,17 +262,11 @@ std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &contai
 	pm.length = static_cast<uint32_t>(stream_size);
 	pm.payload = std::move(stream_bytes);
 
-	ProtocolPacketHeader hdr;
-	// session_id = peer's local_key = the server's SK (advertised in
-	// ServerAuth). Mirror of the server setting session_id = client's CK on
-	// its outbound 0x83 (nw_udp_listener.cpp + protocol_message.h witness).
-	hdr.session_id = server_sk_;
-	hdr.seq_num = next_outbound_seq_++;
-	hdr.ack_count = last_inbound_seq_;
-	hdr.connection_flags = 0;
-
+	// Lobby C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK (the peer's
+	// local_key, advertised in ServerAuth — mirror of the server setting session_id = client's CK on its
+	// 0x83). Shared seq/ack framing (ADR 0013).
 	std::vector<uint8_t> body_out;
-	if (!encode_protocol_packet_plaintext(hdr, {pm}, client_scrk_, body_out)) {
+	if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, {pm}, body_out)) {
 		return {};
 	}
 	return encode_session_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
@@ -410,12 +403,12 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
                                                std::vector<std::vector<uint8_t>> &out) {
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> messages;
-	if (!decode_protocol_packet_plaintext(body.data(), body.size(), server_scrk_,
-	                                      hdr, messages)) {
+	// Lobby recv: decrypt inbound 0x83 with the server's SCRK; deframe latches seq_.last_inbound_seq.
+	if (!deframe_session_packet(seq_, SessionCrypto{{}, server_scrk_, 0}, body.data(), body.size(), hdr,
+	                            messages)) {
 		fail("bad 0x83 protocol packet");
 		return;
 	}
-	last_inbound_seq_ = hdr.seq_num;
 
 	const size_t out_before = out.size();
 	const bool had_messages = !messages.empty();
@@ -484,13 +477,9 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 }
 
 std::vector<uint8_t> ClientSession::build_heartbeat() {
-	ProtocolPacketHeader hdr;
-	hdr.session_id = server_sk_;
-	hdr.seq_num = next_outbound_seq_++;
-	hdr.ack_count = last_inbound_seq_;
-	hdr.connection_flags = 0;
+	// Heartbeat: a header-only (empty inner) 0x43 in the lobby C2S direction. Shared framing (ADR 0013).
 	std::vector<uint8_t> body_out;
-	if (!encode_protocol_packet_plaintext(hdr, {}, client_scrk_, body_out)) {
+	if (!frame_session_packet(seq_, SessionCrypto{client_scrk_, {}, server_sk_}, {}, body_out)) {
 		return {};
 	}
 	return encode_session_outbound(SESSION_OPCODE_PROTOCOL_MESSAGE,
