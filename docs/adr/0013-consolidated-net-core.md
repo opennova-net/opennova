@@ -102,6 +102,14 @@ host-session tests. `create_session` owns the single `Server_InitNewRoundState` 
     `SessionReplyState.{binding_valid, player_entity_handle, team}` cache; the pre-World reactive path
     (`bind_session_reply_player`) stamps `owned_entity` with the bare wire handle. Wire-neutral on the
     byte-parity goldens.
-  - **Remaining:** a shared `SessionSequencing` / `SessionCrypto` retiring the 3× seq/ack + SCRK copies;
-    and a shared spawn-batch chunker. Each is wire-neutral and belongs to the server-state pass, driven
-    by the golden-diff worklist.
+  - **DONE (2026-06-30):** a shared spawn-batch chunker — `np::slice_batch_pages`
+    (`libs/npruntime/.../batch_chunker.h`), the byte-budget world-stream pager factored out of
+    `emit_paged_pool` so the §5.2a burst pages every pool through one named, unit-tested component
+    [orig: `Server_SendInitialGameStateToPlayer @0x51bba0`].
+  - **DONE (2026-06-30):** a shared `SessionSequencing` / `SessionCrypto` retiring the 3× seq/ack + SCRK
+    copies — `frame_session_packet` / `deframe_session_packet` (`libs/novaworld/.../protocol_message.h`),
+    used by the host S2C (`NapiNPConnection`), joiner C2S (`JoinerConnection`), and lobby C2S
+    (`ClientSession`) framing paths (each keeps its own byte-identical outer NWU envelope). Wire-neutral.
+  - **Remaining:** collapsing the two byte-identical outer framers (`encode_session_outbound` /
+    `nw_encode_outbound`); folding `nw_udp_listener`'s app-side server-direction `lobby_state` onto the
+    shared helper. Both optional, wire-neutral, low priority.
