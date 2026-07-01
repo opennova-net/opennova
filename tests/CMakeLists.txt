@@ -1372,6 +1372,12 @@ target_link_libraries(npruntime_initial_state_burst_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_mission)
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
 
+# ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
+# pages every world pool through — page-fit, lone-oversized-record, per-call budget, cursor resume.
+add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
+target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_npruntime)
+add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
+
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
 # reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
 # joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate

@@ -1,5 +1,7 @@
 #include "npruntime/server_initial_state.h"
 
+#include "npruntime/batch_chunker.h" // np::slice_batch_pages (the shared byte-budget pager, ADR 0013)
+
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -216,27 +218,17 @@ bool emit_paged_pool(uint8_t tag, std::size_t n_records, EncodePage encode_page,
 		b.phase_loop_counter = 0;
 		return true;
 	}
-	std::size_t i = b.phase_loop_counter;
-	while (i < n_records && step.messages.size() < budget) {
-		std::size_t cnt = 1;
-		std::vector<uint8_t> body = encode_page(i, cnt);
-		while (i + cnt < n_records) {
-			std::vector<uint8_t> grown = encode_page(i, cnt + 1);
-			if (grown.size() > kMaxPageBytes) break;
-			body.swap(grown);
-			++cnt;
-		}
-		i += cnt;
+	// Page from the saved cursor within this tick's remaining datagram budget, via the shared chunker.
+	const std::size_t max_pages = budget > step.messages.size() ? budget - step.messages.size() : 0;
+	BatchPageResult res =
+			slice_batch_pages(n_records, kMaxPageBytes, encode_page, b.phase_loop_counter, max_pages);
+	for (std::vector<uint8_t> &body : res.pages) {
 		step.messages.push_back(InitialStateMessage{tag, std::move(body)});
 		++b.entity_batch_count;
 		++step.world_batches_emitted;
 	}
-	if (i >= n_records) {
-		b.phase_loop_counter = 0;
-		return true; // pool exhausted
-	}
-	b.phase_loop_counter = static_cast<uint16_t>(i); // resume here next tick
-	return false; // per-tick budget hit mid-pool
+	b.phase_loop_counter = res.exhausted ? 0 : static_cast<uint16_t>(res.next_cursor);
+	return res.exhausted;
 }
 
 // Advance the §5.2a burst by exactly ONE phase: resolve the current (tag, action) for the cursor,

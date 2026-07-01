@@ -182,9 +182,10 @@ void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage
 	}
 	// Frame EACH drained burst message as its OWN 0x83 SESSION datagram — do NOT coalesce the whole
 	// burst into one packet. The original emits a separate NapiNPServer_SendFiltered per tag; coalescing
-	// the 616 B 0x0B BMS header plus the (un-paged) 0x0C pool-0 batch into one datagram would exceed the
-	// UDP MTU and IP-fragment. (The 0x0C batch is still un-paged here; a large mission needs MTU paging
-	// of build_pool0_organic_batch like the Godot listen host's kRecPerMsg — tracked follow-up.)
+	// the 616 B 0x0B BMS header plus the 0x0C pool-0 batch into one datagram would exceed the UDP MTU and
+	// IP-fragment. Each message is already MTU-sized upstream: the world-stream pools (0x10/0x0D/0x0C/0x20)
+	// are byte-budget paged (<= kMaxPageBytes) by the shared chunker (np::slice_batch_pages via
+	// emit_paged_pool, ADR 0013), so this loop just frames one already-paged message per datagram.
 	for (InitialStateMessage &m : msgs) {
 		std::vector<ProtocolMessage> reply{make_protocol_message(m.tag, std::move(m.body))};
 		std::vector<uint8_t> dg = frame_session_replies(conn, reply);
