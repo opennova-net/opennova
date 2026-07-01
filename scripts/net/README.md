@@ -108,3 +108,22 @@ It fails the build on any non-deferred GAP or any spurious S2C tag; knowingly
 deferred tags live in `kDeferredGaps` (with a `D-NET-*` reference) in
 `tests/novaworld/nw_golden_diff_test.cpp`, never silently skipped. `nw_pp
 --histogram <capture>` emits the same per-(dir,tag) `HIST` lines by hand.
+
+`diff_vs_golden.ps1` is a per-TAG coverage diff (which messages flow). For the
+in-match replication core, `diff_0a.py` is a per-FIELD **shape** diff of just the
+S2C `0x0A` stream — the two captures are different sessions, so it compares what
+should match between any two hosts on the same map rather than raw bytes:
+
+```bash
+python scripts/net/diff_0a.py \
+    --ours   .scratch/ov-<stamp>.pcapng \
+    --golden .scratch/retail-ashi5a-<stamp>.pcapng \
+    --items ~/Desktop/JOX/ITEMS.DEF
+```
+
+It reports the sub-block cycle (golden rotates `flags2` low-2 through aim/timer/env/
+gametype), the record-class mix (golden replicates vehicles; a `Vehicle ours=0`
+row means we send none), the header field value-sets, and per-record-class field
+population (a field golden always fills but we leave zero is an under-send). The
+golden's parsed profile caches to `<golden>.0a.json`, so iterating on our encoder
+only re-decodes our own capture; pass `--refresh` after a decoder change.

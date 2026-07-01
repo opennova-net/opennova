@@ -1,5 +1,7 @@
 #include "npruntime/server_message_dispatch.h"
 
+#include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
+
 #include <novaworld/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_spawn / encode_player_list (§5.1)
 #include <novaworld/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
@@ -459,10 +461,40 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case 0x0B: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
 				st.mission_status_received = true;
 				break;
+			case 0x0F: { // entity-info query [u16 handle] -> S2C 0x18 FULL-ENTITY-SPAWN (the self-heal).
+				// [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180 — validates pool <= 1 &&
+				// slot < capacity, serializes the REQUESTED entity via serialize_object_to_buffer
+				// @0x504d10, replies msg 0x18 to the requester only (send_mask 0x20).] The client sends
+				// 0x0F when its per-frame 0x0A cross-check finds a stale/mismatched entity
+				// (NapiNPClientMsg_0x00A tail @0x4307c4); NapiNPClientMsg_FullEntitySpawn @0x433780
+				// then DESTROYS + fully REBUILDS the entity from the record — itemDef, models,
+				// playerClass, minimap slot, ADM/anim registration. A healthy join never exercises it
+				// (the retail↔retail golden has zero 0x0F), but a joiner whose round-load re-resolve
+				// broke an entity queries EVERY 0x0A frame — leaving it unanswered strands the broken
+				// entity forever (the retail-join DBuggy-host-player + ~1000/session C 0x0F flood).
+				// An in-capacity EMPTY slot still replies: retail serializes the empty pool slot
+				// (itemDef null -> type 0), which the client answers by clearing its stale entity.
+				const uint16_t handle =
+						msg.payload.size() >= 2
+								? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
+								: 0;
+				const int pool = handle >> 12;
+				if (world != nullptr && pool <= 1) {
+					const world::EntityHandle h{handle};
+					if (static_cast<size_t>(h.slot()) < world->registry.pool_capacity(pool)) {
+						FullEntitySpawnRecord frec;
+						if (const world::Entity *e = world->registry.get(h)) {
+							frec = netsim::build_full_entity_spawn(*e, conn.link.owned_entity);
+						} else {
+							frec.slot_id = handle; // empty slot: type-0 record clears the client's entity
+						}
+						replies.push_back(make_protocol_message(0x18, encode_full_entity_spawn(frec)));
+					}
+				}
+				break;
+			}
 			default:
-				// 0x0F entity-info query / 0x09 checksum / 0x48 + per-frame client updates: consumed (no
-				// reactive reply). The original 0x0F->0x18 path is still part of the deferred body grill wave;
-				// 0x22->0x46 is now handled above (the join request->response chain).
+				// 0x09 checksum / 0x48 + per-frame client updates: consumed (no reactive reply).
 				break;
 		}
 	}

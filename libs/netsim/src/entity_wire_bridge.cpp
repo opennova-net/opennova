@@ -77,6 +77,56 @@ int32_t engine_heading_bam(int16_t mission_yaw) {
 	return static_cast<int32_t>(static_cast<int64_t>(90 - mission_yaw) * kBamPerDegree);
 }
 
+// entity+36 GamePlayerEntity Flags word for a PLAYER spawn record, written verbatim by the
+// original serializers [orig: serialize_entity_states_to_buffer @0x5030a0 writes
+// *(u16)(entity+36); serialize_object_to_buffer @0x504d10 likewise]. bit 0x100 =
+// player/minimap-register (set for EVERY player so the client's handler re-resolves the model
+// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01 = "THIS IS THE RECIPIENT'S OWN
+// player": a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the host sends 0x0101
+// ONLY for the joiner's own entity and 0x0100 for every OTHER player. Sending 0x0101 for a
+// REMOTE player mis-marks it as the recipient's own and the client mishandles it — so bit 0 is
+// per-recipient: set iff this entity == the recipient's owned entity. Carry the movement/spawn
+// gate (0x02) through while the entity is still spawning [orig: entity+36 bit 1].
+uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient_own) {
+	uint16_t flags = 0x0100u;
+	if (recipient_own.valid() && e.handle == recipient_own) flags |= 0x01u;
+	if ((e.flags & 0x2u) != 0) flags |= 0x2u;
+	return flags;
+}
+
+// entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
+// (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the
+// two). The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0
+// fills player_slot+442 (team 1) / +444 (team 2) via lookup_entity_slot_and_pack_entry,
+// serialized at serialize_entity_states_to_buffer @0x5030a0 name+21 = *(u16)(entity+348)]. It
+// MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0) match the first
+// zero-initialized slot [orig: sub_57A270 @0x57a270 — index/type fields all 0 == packed_id 0],
+// so its handler SKIPS minimap allocation and the remote player is left unregistered — the
+// remote-only divergence behind the C2S 0x0F flood grill, while the joiner's OWN player is
+// immune (its minimap slot is set by local deploy, not this wire record). Golden retail sends
+// 0x0200 (team 1) / 0x8207 (team 2, 0x8000 team bit). Mirror that: a nonzero,
+// per-entity-distinct, team-keyed id so HasEntity returns false and the joiner allocates a
+// real slot. [golden diff + minimap grill 2026-07-01]
+uint16_t player_minimap_net_id(const world::Entity &e) {
+	return static_cast<uint16_t>((e.team == 2 ? 0x8000u : 0u) | 0x0200u |
+	                             (e.handle.slot() & 0x1Fu));
+}
+
+// playerClass (entity+0x294) for the wire: a player MUST advertise a valid soldier class
+// (5..9) or the JOINER's client skips body-anim channel (+0x188) registration at round-load
+// and then cannot move/crouch/prone — the body motor early-bails on a NULL anim channel. The
+// client resolves the soldier model from playerClass at round-load, NOT from the wire
+// avatar/anim_slot. [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
+// AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
+// class 0 -> slot 15 -> empty ADM -> registration skipped -> Entity_UpdateInfantryPlayerBody
+// @0x4b40e0 bails @0x4b4135. re-grill 2026-06-28.] Carry the entity's loadout class; default a
+// player to 8 (golden) until per-player loadout class is wired.
+uint8_t player_class_for_wire(const world::Entity &e) {
+	if (e.item_id == kPlayerInfantryTypeId && (e.player_class < 5 || e.player_class > 9))
+		return 8;
+	return e.player_class;
+}
+
 } // namespace
 
 OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own) {
@@ -91,59 +141,65 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		                                               // stamped at spawn (host loopback / joiner ack).
 		                                               // [orig: Server_PlayerAdd @0x51cbc0; D-NET-92/101]
 		rec.entity_name = e.name;
-		// entity+36 GamePlayerEntity Flags, written verbatim by the original 0x0C organic serializer
-		// [orig: serialize_entity_states_to_buffer @0x5030a0 writes *(u16)(entity+36)]. bit 0x100 =
-		// player/minimap-register (set for EVERY player so the client's 0x0C handler re-resolves the model
-		// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01 = "THIS IS THE RECIPIENT'S OWN player":
-		// a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the host sends 0x0101 ONLY for the
-		// joiner's own entity and 0x0100 for every OTHER player (the remote host player). Sending 0x0101 for
-		// a REMOTE player mis-marks it as the recipient's own and the client mishandles it. So bit 0 is
-		// per-recipient: set iff this entity == the recipient's owned entity. Carry the movement/spawn gate
-		// (0x02) through while the entity is still spawning [orig: entity+36 bit 1].
-		uint16_t player_flags = 0x0100u;
-		if (recipient_own.valid() && e.handle == recipient_own) player_flags |= 0x01u;
-		if ((e.flags & 0x2u) != 0) player_flags |= 0x2u;
-		rec.minimap_flags = (e.item_id == kPlayerInfantryTypeId) ? player_flags : 0;
+		// Player-record wire rules (flags/minimap net_id/playerClass) are shared with the
+		// S2C 0x18 repair record — see the witness comments on the helpers above.
+		rec.minimap_flags =
+				(e.item_id == kPlayerInfantryTypeId) ? player_wire_flags(e, recipient_own) : 0;
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
 		rec.orientation = engine_heading_bam(e.yaw);
 		rec.team = e.team;
 		rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
-		rec.net_id = e.net_id;
-		// entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
-		// (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the two).
-		// The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0 fills
-		// player_slot+442 (team 1) / +444 (team 2) via lookup_entity_slot_and_pack_entry, serialized at
-		// serialize_entity_states_to_buffer @0x5030a0 name+21 = *(u16)(entity+348)]. It MUST be nonzero:
-		// a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0) match the first zero-initialized slot
-		// [orig: sub_57A270 @0x57a270 — index/type fields all 0 == packed_id 0], so its 0x0C handler
-		// SKIPS minimap allocation (`if (!HasEntity(NetId))` is false) and the remote player is left
-		// unregistered — the exact remote-only divergence behind the residual C2S 0x0F flood on the host
-		// player (0x0004), while the joiner's OWN player is immune (its minimap slot is set by local
-		// deploy, not this wire record). Golden retail sends 0x0200 (team 1) / 0x8207 (team 2, 0x8000
-		// team bit). Mirror that: a nonzero, per-entity-distinct, team-keyed id so HasEntity returns
-		// false and the joiner allocates a real slot. [golden diff + minimap grill 2026-07-01]
-		if (e.item_id == kPlayerInfantryTypeId) {
-			rec.net_id = static_cast<uint16_t>((e.team == 2 ? 0x8000u : 0u) | 0x0200u |
-			                                   (e.handle.slot() & 0x1Fu));
-		}
-		// playerClass (entity+0x294): a player MUST advertise a valid soldier class (5..9) or the
-		// JOINER's client skips body-anim channel (+0x188) registration at round-load and then cannot
-		// move/crouch/prone — the body motor early-bails on a NULL anim channel. The client resolves the
-		// soldier model from playerClass at round-load, NOT from the wire avatar/anim_slot. [orig:
-		// Game_ReloadEntityModelsAndCallbacks @0x522830 -> AnimMap_GetSlotPropertyInt(playerClass)
-		// @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60; class 0 -> slot 15 -> empty ADM ->
-		// registration skipped -> Entity_UpdateInfantryPlayerBody @0x4b40e0 bails @0x4b4135. re-grill
-		// 2026-06-28.] Carry the entity's loadout class; default a player to 8 (golden) until per-player
-		// loadout class is wired.
-		rec.player_class = e.player_class;
-		if (e.item_id == kPlayerInfantryTypeId && (rec.player_class < 5 || rec.player_class > 9))
-			rec.player_class = 8;
+		rec.net_id = (e.item_id == kPlayerInfantryTypeId) ? player_minimap_net_id(e) : e.net_id;
+		rec.player_class = player_class_for_wire(e);
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<uint16_t>(batch.records.size());
 	return batch;
+}
+
+FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
+                                              world::EntityHandle recipient_own) {
+	FullEntitySpawnRecord rec;
+	rec.slot_id = e.handle.packed;
+	rec.item_type_id = static_cast<uint16_t>(e.item_id);
+	// items.def `type` byte (itemDef+0x5C) — the value that lets the client run the rebuild at
+	// all (@0x433b5a; ItemType_Person=3 additionally gates ADM/anim registration @0x433d6e).
+	// The engine's pools ARE typed (pool 0 = organics/person, pool 1 = vehicles) and the retail
+	// 0x0F handler only serves pools 0/1, so derive from the pool until world::Entity carries
+	// the resolved item-def type.
+	rec.item_type = (e.handle.pool() == 0) ? 3u : 1u;
+	rec.team = e.team;
+	rec.minimap_flags =
+			(e.item_id == kPlayerInfantryTypeId) ? player_wire_flags(e, recipient_own) : 0;
+	rec.entity_flags = e.owner_connection_id;
+	// Retail gates the name on itemDef attrib & 0x100000 (aidata — the player def carries it,
+	// JOX "Player #1, Multiplayer"). Entity::is_ai_capable is not yet populated for spawned
+	// players, so send the name we have: an unnamed entity yields the empty string either way,
+	// and the client re-checks its LOCAL def attrib before copying (@0x433d3e).
+	rec.entity_name = e.name;
+	// Mount links: the ridden vehicle lives at entity+364 [orig: Entity_AttachToVehicleSlot
+	// @0x4946d0 writes occupant+364]; entity+368 (attach parent) and entity+40 (ground entity)
+	// are not modeled on world::Entity and stay 0xFFFF.
+	if (e.mounted && e.mount_target.valid()) rec.parent_entity_handle = e.mount_target.packed;
+	// Seat block: one bit per seat this entity OFFERS (the Seat vector mirrors the def's seat
+	// list = itemDef+604), occupant handle or 0xFFFF [orig: entity+400+2i].
+	for (size_t i = 0; i < e.seats.size() && i < 8; ++i) {
+		rec.seat_mask |= static_cast<uint8_t>(1u << i);
+		rec.mount_handles[i] =
+				e.seats[i].occupant.valid() ? e.seats[i].occupant.packed : 0xFFFFu;
+	}
+	rec.pos_x = world::to_fixed(e.position.x);
+	rec.pos_y = world::to_fixed(e.position.y);
+	rec.pos_z = world::to_fixed(e.position.z);
+	// Yaw high word — the client restores Yaw = (i16)heading_hi << 16 (@0x433aa1), so this is
+	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation).
+	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(engine_heading_bam(e.yaw)) >> 16);
+	rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
+	rec.net_id = (e.item_id == kPlayerInfantryTypeId) ? player_minimap_net_id(e) : e.net_id;
+	rec.player_class = player_class_for_wire(e);
+	return rec;
 }
 
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {

@@ -680,6 +680,56 @@ int check_S_45_terrain_load() {
 	return 0;
 }
 
+// S2C 0x18 — full-entity-spawn (§5.46): the reply to a C2S 0x0F entity-info query.
+// A hand-built player record per the witnessed serializer layout
+// [orig: serialize_object_to_buffer @0x504d10]; asserts the client-handler field
+// order [orig: NapiNPClientMsg_FullEntitySpawn @0x433780] consumes cleanly.
+int check_S_18_full_entity_spawn() {
+	LE w;
+	w.u16(0x0000);      // slot handle (pool 0, slot 0)
+	w.u16(0x14B9);      // wire type id ("Player #1, Multiplayer")
+	w.u8(3);            // itemDef type = ItemType_Person
+	w.u8(1);            // team (entity+354)
+	w.u16(0x0100);      // Flags word (entity+36) — remote player
+	w.u32(0x0000000C);  // owner connection id (entity+120)
+	w.u8('P'); w.u8('l'); w.u8('r'); w.u8(0); // name cstr
+	w.u16(0xFFFF);      // parent vehicle (entity+368)
+	w.u16(0xFFFF);      // ground entity (entity+40)
+	w.u16(0xFFFF);      // parent entity (entity+364)
+	w.u8(0x02);         // seat mask: only seat 1 carried
+	w.u16(0x0001);      // seat-1 occupant handle
+	w.u16(0); w.u16(0); // mount handles 8/9 (entity+416/418)
+	w.u32(0x00120000); w.u32(0x00340000); w.u32(0x00050000); // pos 16.16
+	w.u16(0x005A);      // yaw high word
+	w.u16(0x0000);      // pitch high word
+	w.u8(0);            // ai_state (entity+692)
+	w.u8(0);            // anim_slot (entity+884)
+	w.u16(0x0200);      // minimap net_id (entity+348)
+	w.u8(8);            // playerClass (entity+660)
+	w.u8(0);            // hard-0 skip byte
+	w.u8(0);            // entity+340
+	w.u8(0);            // entity+533
+	w.u8(0);            // entity+532
+	EXPECT(w.b.size() == 54);
+	FullEntitySpawnRecord r;
+	EXPECT(decode_full_entity_spawn(w.b.data(), w.b.size(), r));
+	EXPECT(r.slot_id == 0x0000);
+	EXPECT(r.item_type_id == 0x14B9);
+	EXPECT(r.item_type == 3);
+	EXPECT(r.team == 1);
+	EXPECT(r.minimap_flags == 0x0100);
+	EXPECT(r.entity_flags == 0x0C);
+	EXPECT(r.entity_name == "Plr");
+	EXPECT(r.seat_mask == 0x02);
+	EXPECT(r.mount_handles[0] == 0xFFFF && r.mount_handles[1] == 0x0001);
+	EXPECT(uint32_t(r.pos_x) == 0x00120000);
+	EXPECT(r.heading_hi == 0x005A);
+	EXPECT(r.net_id == 0x0200);
+	EXPECT(r.player_class == 8);
+	cover('S', 0x18);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -737,6 +787,7 @@ int main() {
 	if (check_S_2A_chat_history()) return 1;
 	if (check_S_59_deployed_item()) return 1;
 	if (check_S_45_terrain_load()) return 1;
+	if (check_S_18_full_entity_spawn()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

@@ -230,6 +230,57 @@ bool run_pools_are_disjoint() {
 	return true;
 }
 
+// The S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) — the 0x0F-query reply. A PLAYER record
+// must carry the same wire rules as its 0x0C sibling (per-recipient flags, minimap
+// net_id, playerClass clamp) or the client's rebuild re-breaks what the query was
+// trying to repair. [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180]
+bool run_full_entity_spawn_player() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity player;
+	player.kind = w::EntityKind::Organic;
+	player.item_id = 0x14B9;             // the player infantry template
+	player.name = "Player";
+	player.position = {12.0f, 34.0f, 5.0f};
+	player.yaw = 30;
+	player.team = 1;
+	player.player_class = 0;             // unset -> must clamp to 8 on the wire
+	player.owner_connection_id = 0x0C;
+	const w::EntityHandle h = world.registry.spawn(0, player);
+	const w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "player spawned")) return false;
+
+	// Remote view (requester != owner): flags 0x0100, minimap net_id, class 8.
+	nw::FullEntitySpawnRecord rec = ns::build_full_entity_spawn(*e);
+	if (!expect(rec.slot_id == h.packed, "slot_id = wire handle")) return false;
+	if (!expect(rec.item_type_id == 0x14B9, "type id carried")) return false;
+	if (!expect(rec.item_type == 3, "pool 0 -> ItemType_Person")) return false;
+	if (!expect(rec.minimap_flags == 0x0100, "remote player flags 0x0100")) return false;
+	if (!expect(rec.entity_flags == 0x0C, "owner connection id carried")) return false;
+	if (!expect(rec.entity_name == "Player", "name carried")) return false;
+	if (!expect(rec.net_id == (0x0200u | (h.slot() & 0x1Fu)), "minimap net_id (team 1)")) return false;
+	if (!expect(rec.player_class == 8, "playerClass clamped to 8")) return false;
+	if (!expect(rec.parent_entity_handle == 0xFFFF && rec.seat_mask == 0, "on foot, no seats")) return false;
+	if (!expect(rec.pos_x == w::to_fixed(12.0), "pos 16.16")) return false;
+	const uint16_t want_heading = static_cast<uint16_t>(static_cast<uint32_t>(heading_bam(30)) >> 16);
+	if (!expect(rec.heading_hi == want_heading, "heading = engine BAM high word")) return false;
+
+	// Own view (requester == owner): bit 0 set, same everything else.
+	nw::FullEntitySpawnRecord own = ns::build_full_entity_spawn(*e, h);
+	if (!expect(own.minimap_flags == 0x0101, "own player flags 0x0101")) return false;
+
+	// And the record survives the wire byte-identically.
+	std::vector<uint8_t> wire = nw::encode_full_entity_spawn(rec);
+	nw::FullEntitySpawnRecord out;
+	if (!expect(nw::decode_full_entity_spawn(wire.data(), wire.size(), out), "0x18 round-trip")) return false;
+	if (!expect(out.item_type_id == rec.item_type_id && out.minimap_flags == rec.minimap_flags &&
+	                    out.net_id == rec.net_id && out.player_class == rec.player_class &&
+	                    out.entity_name == rec.entity_name && out.heading_hi == rec.heading_hi,
+	            "decoded fields match")) return false;
+	std::printf("PASS full_entity_spawn_player\n");
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -241,6 +292,7 @@ int main() {
 	ok = run_pool2_static_slot_alignment() && ok;
 	ok = run_pool3_marker() && ok;
 	ok = run_pools_are_disjoint() && ok;
+	ok = run_full_entity_spawn_player() && ok;
 	if (ok) std::printf("ALL netsim_world_stream_extractors tests passed\n");
 	return ok ? 0 : 1;
 }

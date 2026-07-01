@@ -394,6 +394,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_tick_mode", "mode"), &NovaSimulation::set_tick_mode);
 	ClassDB::bind_method(D_METHOD("get_tick_mode"), &NovaSimulation::get_tick_mode);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);
+	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &NovaSimulation::set_terrain_til_data);
 	ClassDB::bind_method(D_METHOD("is_listen_server"), &NovaSimulation::is_listen_server);
 	ClassDB::bind_method(D_METHOD("enable_host_listen", "port"), &NovaSimulation::enable_host_listen);
 	ClassDB::bind_method(D_METHOD("is_host_listening"), &NovaSimulation::is_host_listening);
@@ -624,6 +625,7 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	host_owner_.serve_and_play = serve_and_play;
 	ctx_.world = world_.get();
 	ctx_.mission = &mission_file_;
+	ctx_.terrain_til_data = terrain_til_data_; // S2C 0x45 terrain-tile load source (empty => skipped, §5.37)
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
 	// separate net ISystem (retired P8).
 
@@ -1384,6 +1386,10 @@ void NovaSimulation::enable_listen_server(bool p_enable) {
 	// runtime_), stood up per-load in bringup_host_runtime — there is no net ISystem and
 	// no legacy loopback seam here. (The LAN host still builds the legacy seam in enable_host_listen
 	// until A3; a sim is SP listen XOR LAN host XOR joiner.)
+}
+
+void NovaSimulation::set_terrain_til_data(const PackedByteArray &p_til_bytes) {
+	terrain_til_data_.assign(p_til_bytes.ptr(), p_til_bytes.ptr() + p_til_bytes.size());
 }
 
 bool NovaSimulation::enable_host_listen(int p_port) {

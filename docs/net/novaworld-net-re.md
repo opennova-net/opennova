@@ -290,7 +290,7 @@ sweep; blank = not yet characterized.
 | 0x14 | 0x42F240 | `_0x014` | |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
-| 0x18 | 0x433780 | `_0x018` | does not fire in normal multiplayer (§5.7); an early "EntitySpawn" label is unverified |
+| 0x18 | 0x433780 | `FullEntitySpawn` | reply to C2S 0x0F: destroy + FULL single-entity rebuild (itemDef/models/playerClass/minimap/anim registration). Absent from healthy sessions (self-heal, §5.46) — the early "does not fire" note meant nothing needed healing, not an inert path. Field map §5.46 (decoded) |
 | 0x19 | 0x425E80 | `_0x019` | |
 | 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock) |
 | 0x1B | 0x426080 | `_0x01B` | |
@@ -1272,10 +1272,13 @@ Do **not** use S2C 0x0D to spawn the local player. Verified by live crash + deco
   at +36 — and `entity[+36]` bit 1 is now witnessed as cleared by the spawn-state reset
   `[orig: Entity_ResetToSpawnState @ 0x4B9610]` (§5.2b), not by any wire message.
 
-### 5.7 Spurious tag 0x18
+### 5.7 Tag 0x18 — superseded by §5.46
 
-S2C 0x18 does not fire in normal multiplayer (the `NapiNPServerMsg_0x00F → 0x18` reply path is
-inert); the reverted stack emitted it speculatively and it was marked for removal.
+Early finding: S2C 0x18 "does not fire in normal multiplayer", and the reverted stack's speculative
+emission was removed. Both halves are now fully witnessed (§5.46): 0x18 is the REPLY to a C2S 0x0F
+entity-info query — the client's self-heal request for a stale/mismatched entity. It is absent from
+healthy sessions because nothing needs healing, not because the `NapiNPServerMsg_0x00F → 0x18` path is
+inert; a host that leaves 0x0F unanswered strands a broken client entity forever (D-NET-133).
 
 ### 5.8 Wire-format verification gaps
 
@@ -3924,6 +3927,122 @@ grill wave** (mirrors the §5.2a serializer wave that P3–P6 left deferred). `[
 
 **D-NET-127 UPDATE (2026-06-27, D-NET Wave 2 partial).** The §5.2a serializer wave this entry cross-references is CLOSED (Wave 1 / §5.2a serializer-grill, MATCHING). For the reactive-reply bodies: the `0x7A` PCID and `0x7B` session-info bodies are now FAITHFUL ports (the invented `"DEV-A02-0001"` literal removed; `0x7A` was wrongly writing the player name instead of the PCID — golden frame 134 proves len 1 / empty). The witnessed field maps for `0x46` (`NetPacket_SerializeWeaponOverlaySlotState @0x505e80` — `[u8 type][u16 fieldFlags]` then per-bit fields: 0x1=name, 0x2=team-string, 0x4=score@slot+416, 0x8=damage/alert, 0x10=vehicle-name, 0x20=score2, 0x40=squad, 0x80=side, 0x400=weaponType, 0x800=timer-dword, 0x1000=alert2) and `0x51` (`write_entity_packet @0x506bb0` — `[u16 header][u16 handle=pool<<12|slot][u8 team][u16 NetId-if-Flags&0x100-else-0][u8 animSlot-if-Flags&0x100-else-0]`) are now landed (no longer "unwitnessed"); they carry approximations pending slot-state / entity-handle modeling (the `0x46` flag-driven body reads ~10 slot/entity fields the headless host does not yet model; tracked, not invented). **0x51 layout FIXED (2026-06-27):** `build_reply_tag_51` now emits the witnessed `[u16 requested_index (echoed from C2S 0x29)][u16 handle][u8 team][u16 NetId][u8 animSlot]` (was wrongly `[team][handle][team][0][0]`); the index is sourced from the 0x29 payload. NetId/animSlot still default 0 pending the spawned entity's net_id/anim threaded into the reply binding. **0x46 confirmed structurally FAITHFUL (2026-06-27):** `build_reply_tag_46` already emits the witnessed flag-driven format — `[u8 slot][u16 fieldFlags][u8 entitySlot]` then the bit-gated fields in source order — and **round-trips through `decode_player_sync` (@0x431370, the client inverse)**. The invented `"A-A02-000000"` literal in field 0x10 (vehicle-name) is removed (empty for an on-foot player). The remaining gap is only per-field slot-state VALUES (score/squad/side/timer) for fields the headless host doesn't model — defaults, the wire SHAPE is faithful. Remaining D-NET-127 work (all LOW/cosmetic): the `0x46` per-field slot-state values, the `0x51` NetId/anim binding plumbing, and the `0x02`-handler extra `0x00`/`0x05`/`0x04` owner attribution.
 
+### 5.46 C2S 0x0F entity-info query → S2C 0x18 FULL-ENTITY-SPAWN — the self-heal path (2026-07-01)
+
+**The repair loop the retail-join DBuggy/0x0F-flood investigation surfaced.** When the client's per-frame
+0x0A tail entity-chain cross-check finds a live entity whose local resolve disagrees with the wire —
+`!itemDef || itemDef.id != wireType || ItemTypeIndex != ItemList_FindIndexByTypeId(wireType)` [orig:
+`NapiNPClientMsg_0x00A @ 0x42FEC0`, cross-check @ 0x4307c4] — it queues **C2S 0x0F `[u16 handle]`** (one
+per offending 0x0A frame). The server handler [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`]
+gates on authority + a live session, reads the u16 handle (0 if len < 2), validates `pool <= 1 && slot <
+g_pool_list[pool].capacity` (organics + vehicles only), resolves the POOL SLOT POINTER (no liveness check
+— an empty in-capacity slot serializes as zeros), serializes it via `serialize_object_to_buffer @ 0x504d10`
+and replies **S2C 0x18, msgClass 1, send_mask 0x20** (the requester only). The client handler [orig:
+`NapiNPClientMsg_FullEntitySpawn @ 0x433780`] `Entity_Destroy`s + `memset(entity, 0, 0x2B4)`s the slot,
+then — gated on wire `item_type != 0` @ 0x433b5a — FULLY REBUILDS it: `ItemTypeIndex =
+FindIndexByTypeId(type_id)`, itemDef + death/update callbacks, `EntityDef_LoadModelsAndCallbacks`,
+graphic/husk models, health/armor, the three entity links, and for `ItemType_Person` (3) the ADM load +
+`AnimMap_InitBoneTypes` + `AnimMap_RegisterEntity @ 0x40bb60` + minimap slot allocation (Flags & 0x100,
+`MinimapSlot_HasEntity`/`MinimapSlot_FindOrAllocByEntityId`), ending in `Entity_InitFromModel` + the
+itemDef initCallback. A type-0 record (empty slot) therefore CLEARS the client's stale entity — destroy
+semantics, observably identical to retail serializing a zeroed slot.
+
+Field order (offsets float after the name; all LE), server source → client target:
+
+| # | field | type | server source | client store |
+|---|---|---|---|---|
+| 1 | slot_id | u16 | recomputed from the entity ptr (pool scan) | `0xFFFF` ⇒ immediate return |
+| 2 | item_type_id | u16 | itemDef+0x50 low16 (wire type id) | `FindIndexByTypeId` → ItemTypeIndex/itemDef |
+| 3 | item_type | u8 | itemDef+0x5C (ItemDefType; 1=vehicle, 3=person) | 0 ⇒ stop after destroy+memset |
+| 4 | team | u8 | entity+354 | Team low byte |
+| 5 | minimap_flags | u16 | entity+36 low16 | Flags (bit 0x100 gates minimap registration) |
+| 6 | entity_flags | u32 | entity+120 | ownerConnectionId |
+| 7 | entity_name | cstr | entity+244 iff itemDef attrib & 0x100000, else `""` | copied iff LOCAL def attrib & 0x100000 (+ `Entity_AllocateAISlot`) |
+| 8–10 | parent_vehicle / ground_entity / parent_entity | 3×u16 | entity+368 / +40 / +364 ptrs → handles (0xFFFF null) | parentVehicle / groundEntity / parentEntity |
+| 11 | seat_mask + occupants | u8 + N×u16 | itemDef+604; entity+400+2i per set bit | mountHandles[0..7] (prefilled 0xFFFF) |
+| 12–13 | mount8 / mount9 | 2×u16 | entity+416 / +418 | mountHandles[8]/[9] |
+| 14–16 | pos x/y/z | 3×i32 | entity+4/+8/+12 (16.16 world) | Position |
+| 17–18 | yaw_hi / pitch_hi | 2×u16 | entity+18 / +22 (BAM high words) | Yaw/Pitch = (i16)<<16 |
+| 19–20 | ai_state / anim_slot | 2×u8 | entity+692 / +884 | aiState / animSlot |
+| 21 | net_id | u16 | entity+348 (minimap id) | NetId (minimap alloc iff Flags&0x100 && !HasEntity) |
+| 22 | player_class | u8 | entity+660 | playerClass |
+| 23 | (zero) | u8 | hard 0 | discarded (cursor advance) |
+| 24–26 | tail bytes | 3×u8 | entity+340 / +533 / +532 | +0x154 / refNum / subType |
+
+**Why every healthy capture has zero 0x0F/0x18:** the loop only runs when an entity is broken; the
+same-map retail↔retail golden (retail-ashi5a) carries none — which is why the early §5.7 read "does not
+fire in normal multiplayer". It is nonetheless MANDATORY host surface: in the retail-join defect
+(DBuggy-host-player + ~1000/session C 0x0F flood, 2026-07-01) the joiner's round-load re-resolve garbages
+the REMOTE host player's itemDef (`Game_ReloadEntityModelsAndCallbacks @ 0x522830` re-resolves
+`FindIndexByTypeId(AnimMap_GetSlotPropertyInt(playerClass@+0x294, camoProp))`; the camoProp switch has NO
+default for lod_level ∉ {0,1,2} and class 0 reads unloaded charattr slot 15 → garbage → an unstable
+pool-1 vehicle index) and the client then asks the host to repair it EVERY 0x0A frame — a host that
+consumes the query silently strands the vehicle-resolved player entity forever. The flood starts exactly
+at the deploy bundle (C 0x28/0x29/0x22/0x23 + the first 0x0F burst, capture ov-til45c f=65791), placing
+the break at `Game_StartMission`'s reload, not at 0x0C application.
+
+**Reimpl (2026-07-01, all 46 net+world ctests green):** `encode_full_entity_spawn` /
+`decode_full_entity_spawn` (libs/novaworld/ingame_{encode,decode}); `netsim::build_full_entity_spawn`
+(entity_wire_bridge — shares the player wire rules with the 0x0C builder: per-recipient flags, minimap
+net_id, playerClass clamp; D-NET-133 documents the source approximations); npruntime dispatch `case 0x0F`
+(server_message_dispatch.cpp — in-capacity empty slots reply the type-0 record;
+`EntityRegistry::pool_capacity` mirrors the capacity gate); nw_pp `print_tag_18` + catalog row
+`S 0x18 full-entity-spawn` (Decoded) and the C 0x0F rename `spawn-query → entity-info-query` (the old
+name was the §5.9-era guess). Tests: `nw_ingame_encode` (55-B player-record layout / sparse seat block /
+type-0 empty slot), `netsim_world_stream_extractors` (player wire rules + roundtrip),
+`nw_message_coverage` (S 0x18 Decoded drift guard).
+
+### 5.47 Server per-frame S2C 0x0A emit — phase counter + sub-block cycle + priority/budget entity loop (2026-07-01)
+
+The authoritative host builds every recipient's `0x0A` in `Server_SendEntityStateToPlayer @0x517ba0`
+(one call per connected player per frame): gate on the recipient's player-slot being active and
+`state(+0x20) == 6` (deployed); set the priority reference `g_priority_ref_{x,y,z}` to the recipient's
+EYE position (`entity.pos + camera_offset`, `entity[1..3] + entity[27..29]`); build the distance-sorted
+priority list `Server_BuildEntityPriorityList @0x50e590`; write the header (`NetPacket_WritePlayerState`)
+then the entity loop (`serialize_entity_states_to_packet`); send via `NapiNPServer_SendFiltered`
+(mask `0xA0`, tag `0x0A`). New/stale recipients (`uptime > 2000` ticks) get `g_entity_send_budget >> 1`
+for that frame — a ramp-up.
+
+**Header + sub-block cycle** `[orig: NetPacket_WritePlayerState @0x4ff6b0]`. The header is
+`[i32 ref_x][i32 ref_y][i32 ref_z][u8 state_flags][u8 phase_byte]`, where `phase_byte = playerSlot+100566`
+is a per-player-slot counter incremented once per send (`++` at `@0x517be8`). `phase_byte & 3` selects
+the header sub-block, so a free-running counter cycles all four evenly; `phase_byte & 0xF == 8` gates an
+additional mounted-vehicle/turret tail every 16th frame:
+
+| `phase & 3` | sub-block | 11/6/16/0-byte body |
+|---|---|---|
+| 0 | weapon/ammo/uniform | `[u8 preround_timer][u8 slot360][u8 slot368][u8 slot364][u8 slot356][u8 slot460][u8 ammo][u32 CWeaponSlotManager_GetUniformTeamMask]` (11 B) |
+| 1 | server-status | `[u8 C6EAE0][u8 C6EAE4 fall-dmg tol][u8 g_serverFps][u8 g_serverCpuPct][i16 dword_24C1958/62]` (6 B) |
+| 2 | environment | `[u16 word_26C6822 fog][u16 (FogDistAccelClamp+255)>>8][u16 (CurTimeFixed24+4096)>>13 tod][u8 quake][u8 cloud>>10][u8 dword_26C6880>>8][u8 OvercastBlend>>8][u8 dword_2C059D0]` (11 B) |
+| 3 | gametype | 4×`i32` scores, **only if `g_GameType & 0x20000`** (`@0x4ffc2d`) — else 0 B |
+
+Env scales witnessed against the decoder (`NapiNPClientMsg_0x00A @0x430244` case 2) and the golden:
+`CurTimeFixed24 = hours × 2^24` (the day spans `0x18000000 = 24 × 0x1000000`,
+`Environment_ComputeTimeOfDayColors @0x57de40`), so wire `tod = CurTimeFixed24 >> 13` and, for our
+`EnvState.time_of_day` (hours × 2^16), `wire_tod = time_of_day >> 5` — verified by the golden ASH_I5A
+value `todFixed=0x7905` (= 15.13 h). Fog is `wire_fog = fog_dist(16.16) >> 16` (client re-`<< 16`s it into
+`Env_FogDistTarget`). Then the always-tail (non-local recipient): `[u8 health][u16 target_handle]
+[u16 entity+286][u16 entity+288]` and, when `phase & 0xF == 8`, the mounted vehicle handle + turret words.
+
+**Entity loop** `[orig: serialize_entity_states_to_packet @0x50f070]`. Walks the priority pairlist and, for
+EVERY entity whose `itemDef` has a serialize callback (`itemDef+0x164` — players, vehicles, and AI alike),
+emits `[u8 1][u16 handle][u16 type = *(itemDef+0x50)][compact body]`, then the projectile chain as
+`[u8 2]…`, then a `[u8 0]` terminator. It stops once the packet reaches `g_entity_send_budget` bytes, so
+each frame emits a distance-prioritized SUBSET and the priority cursor round-robins across frames — the
+mechanism by which a retail host replicates dozens of vehicles/AI a few per frame rather than all at once.
+
+**Reimpl status.** The header phase-counter + sub-block cycle is ported (`netsim::Connection::s2c_phase` =
+`playerSlot+100566`; `emit_connection_s2c` advances it; `build_0a_frame` dispatches on `flags2 & 3`,
+`libs/netsim/src/connection_fan.cpp`). We cycle the SAFE subset `{1 server-status, 0 weapon, 3 gametype}`;
+**sub-block 2 (env) is DEFERRED (D-NET-134)** because our headless host does not yet author `world.env`
+(env is set only by WAC `TOD`/`fogdist` commands, which ASH_I5A drives from its `.env` file, not on the
+netsim world) — emitting it would OVERWRITE the client's correct mission-loaded sky. The passenger block
+(`phase & 0xF == 8`) is likewise deferred pending vehicle-mount modeling. The **entity loop still emits
+only players** (our `entity_class_of` returns `Unknown` for pool-1 vehicles) with no priority/budget/
+round-robin — porting the priority pairlist + budget + all-class replication is the tracked next step
+(the under-send that leaves the retail joiner's world incomplete; §5.46 flood context). Verified:
+`netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`) + the shape harness `scripts/net/diff_0a.py`.
+
 ## 6. Struct reference
 
 All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
@@ -5322,3 +5441,32 @@ net ctests + the byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_go
 @0x505bd0 / NapiNPMsg_0x7B_BuildPayload @0x507740 / CNapiServerConfig_BuildFlags @0x4c4dc0 /
 NetPacket_WriteServerNameAndMapFile @0x505780 / CAdminServer_HandleStatus @0x402e30 /
 CAdminServer_HandleSetCommand @0x405a60]
+**D-NET-133** [reimpl approximation, DOCUMENTED 2026-07-01] **`build_full_entity_spawn` sources four
+S2C 0x18 fields from approximations pending richer world modeling** (wire SHAPE faithful; §5.46):
+(1) `item_type` (itemDef+0x5C) is derived from the handle's pool (0 → person, 1 → vehicle) — the pools
+are type-homogeneous and the 0x0F handler serves only pools 0/1, but the def's own `type` byte is the
+true source once `world::Entity` carries it. (2) The name gate is `e.name` non-empty, not itemDef attrib
+& 0x100000 (`Entity::is_ai_capable` is unpopulated for spawned players — the same gap that leaves the
+0x0D AI-trailer names empty, D-NET-97); observably equal for named players (JOX "Player #1, Multiplayer"
+carries `aidata`). (3) entity+368 (attach parent) / entity+40 (ground entity) are unmodeled → 0xFFFF; the
+ridden vehicle (entity+364) maps from `Entity::mount_target`. (4) mount_handle_8/9, ai_state and the
++340/+533/+532 tail bytes are 0 (unmodeled). Also: an in-capacity EMPTY slot replies a zeroed type-0
+record — retail serializes the slot's raw memory (stale bytes possible), but with itemDef null the client
+stops at the type gate either way, so the observable effect (destroy + clear) is identical.
+
+**D-NET-134** [reimpl divergence, DOCUMENTED 2026-07-01] **The per-frame S2C 0x0A sub-block phase counter
+cycles a SAFE 3-value subset `{1,0,3}` instead of the original's free-running 4-value counter (§5.47).**
+The original `NetPacket_WritePlayerState @0x4ff6b0` writes `flags2 = playerSlot+100566` (a free byte
+counter), so `flags2 & 3` cycles all four sub-blocks — including **2 (env)** — evenly, and `flags2 & 0xF
+== 8` emits a passenger block every 16th frame. Our `emit_connection_s2c` advances the same counter
+(`netsim::Connection::s2c_phase`) but maps it to `{1 server-status, 0 weapon, 3 gametype}`, omitting env
+and passenger. Reason: env sub-block 2 authoritatively OVERWRITES the client's `Env_FogDistTarget` /
+`Env_CurTimeFixed24`, and our headless host does not populate `world.env` (it is set only by WAC
+`TOD`/`fogdist` commands; ASH_I5A drives TOD from its `.env` file, which the netsim world does not load) —
+so emitting it would darken/de-fog the client's correctly mission-loaded sky. Sending nothing leaves the
+client's own env intact (the correct visual). Weapon sub-block 0 is emitted with the golden-witnessed
+co-op steady value (all-zero slots + zero uniform mask) pending a recipient-weapon-slot model; gametype
+sub-block 3 is 0 bytes for a non-objective gametype (faithful). Both env and passenger slot back into the
+free counter unchanged once `world.env` authoring and vehicle-mount modeling land. First send is phase 1
+so the load-bearing `C6EAE4` fall-damage tolerance reaches the client on frame 1 (matches the original,
+which increments to 1 before its first write).

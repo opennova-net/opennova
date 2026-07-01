@@ -115,12 +115,34 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch);
 // [orig: sub_5042F0 (write) / NapiNPClientMsg_0x010 @ 0x433400 (decode).]
 std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch);
 
+// Encode a §5.37 S2C 0x45 terrain-tile load chunk — the inverse of
+// decode_terrain_load_batch and the bytes a host streams in phase 5 of the world-load
+// sequence so a JOINER loads the mission's terrain-tile (.til) array. The first chunk carries
+// the header (wire start word 0xFFFF + `'til0'` magic + total tile_count + hdr2/hdr3); every
+// chunk then writes its `[start_index]..[end_index)` run of 12-B opaque tile entries. The full
+// tile set is PAGED into ~650 B datagrams by the host emit loop (one TerrainLoadBatch per page).
+// [orig: serialize_terrain_tiles @ 0x6080F0 (write) / PolyTrn_LoadTileData @ 0x6081D0 (read) /
+//  NapiNPClientMsg_0x045 @ 0x422890 (handler); D-NET-83.]
+std::vector<uint8_t> encode_terrain_load_batch(const TerrainLoadBatch &batch);
+
 // Encode a §5.23 S2C 0x0C organic-entity spawn batch — the inverse of
 // decode_organic_spawn_batch and the bytes a host streams so a JOINER can name-match its
 // own pool-0 player (the type-0x14b9 organic whose entity_name == the joiner's player name)
 // and learn its wire handle. Every field after has_body is unconditional (no flag gates),
 // so this is a straight field-order write. [orig: NapiNPClientMsg_0x00C @ 0x42E730.]
 std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch);
+
+// Encode a §5.46 S2C 0x18 FULL-ENTITY-SPAWN — the inverse of decode_full_entity_spawn
+// and the host's reply to a C2S 0x0F entity-info query (the client's self-heal request
+// for a stale/mismatched entity). Faithful port of the retail reply serializer
+// [orig: serialize_object_to_buffer @ 0x504d10, invoked by
+// NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180 with the queried pool-0/1 entity].
+// Field order is unconditional except the seat block (one u16 occupant handle per set
+// seat_mask bit) and the name (always a cstr on the wire; the original writes the
+// entity name iff itemDef attrib & 0x100000, else the empty string — callers model
+// that gate by leaving entity_name empty). The original writes the post-player_class
+// byte as a hard 0, so skip_byte is written as 0 regardless of input.
+std::vector<uint8_t> encode_full_entity_spawn(const FullEntitySpawnRecord &rec);
 
 // Encode a §5.14 infantry / AI compact record (14 B fixed) — the bytes
 // `decode_infantry_compact_record` consumes, and the byte order produced by

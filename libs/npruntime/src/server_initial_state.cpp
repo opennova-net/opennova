@@ -315,7 +315,56 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			}, step, b, budget);
 			break;
 		}
-		case 5: break; // 0x45 terrain-tile delta — deferred (no per-player terrain delta wired yet)
+		case 5: { // 0x45 terrain-tile (.til) load [orig: serialize_terrain_tiles @0x6080F0, §5.37/D-NET-83]
+			// Stream the mission's terrain-tile array so the joiner's g_loading_progress climbs 5 -> 6 and
+			// its terrain finishes loading. The raw .til header maps 1:1 onto the 0x45 header
+			// (`[u32 'til0'][u32 count][u32 res0][u32 res1]` then count × 12-B entries). EMPTY .til =>
+			// faithfully skip (serialize_terrain_tiles returns 0 with no tile data). Page boundaries are set
+			// by the shared byte-budget chunker (client reassembles by start/end index, so the split is
+			// transport-transparent — not a byte-parity field like the entity pools).
+			action = Action::SkipSilent;
+			const std::vector<uint8_t> &til = ctx.terrain_til_data;
+			constexpr std::size_t kTilHeaderBytes = 16, kTilEntryBytes = 12;
+			auto rd_u32 = [](const uint8_t *p) -> uint32_t {
+				return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+			};
+			if (til.size() < kTilHeaderBytes || rd_u32(til.data()) != 0x74696C30u) {
+				world_pool_done = true; // no (valid) .til -> emit nothing, advance past phase 5
+				break;
+			}
+			const uint32_t total_count = rd_u32(til.data() + 4);
+			const uint32_t res0 = rd_u32(til.data() + 8);
+			const uint32_t res1 = rd_u32(til.data() + 12);
+			std::size_t avail = (til.size() - kTilHeaderBytes) / kTilEntryBytes;
+			std::size_t n_tiles = total_count < avail ? total_count : avail; // bound to actual bytes
+			if (n_tiles == 0) { // no tiles -> serialize_terrain_tiles returns 0 (emit nothing), not an empty marker
+				world_pool_done = true;
+				break;
+			}
+			world_pool_done = emit_paged_pool(0x45, n_tiles, [&](std::size_t off, std::size_t cnt) {
+				opennova::TerrainLoadBatch batch;
+				batch.has_header = (off == 0);
+				batch.start_index = static_cast<uint16_t>(off);
+				batch.end_index = static_cast<uint16_t>(off + cnt);
+				if (batch.has_header) {
+					batch.magic = 0x74696C30u;
+					batch.tile_count = total_count;   // TOTAL set size (drives the client's alloc)
+					batch.header_field2 = res0;
+					batch.header_field3 = res1;
+				}
+				batch.tiles.reserve(cnt);
+				for (std::size_t i = 0; i < cnt; ++i) {
+					const uint8_t *e = til.data() + kTilHeaderBytes + (off + i) * kTilEntryBytes;
+					opennova::TerrainTileEntry t;
+					t.word0 = rd_u32(e);
+					t.word1 = rd_u32(e + 4);
+					t.word2 = rd_u32(e + 8);
+					batch.tiles.push_back(t);
+				}
+				return opennova::encode_terrain_load_batch(batch);
+			}, step, b, budget);
+			break;
+		}
 		case 6: break; // 0x7E briefing text — deferred (no MissionText wired)
 		case 7: tag = 0x1A; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
 		case 8: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.

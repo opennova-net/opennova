@@ -124,6 +124,14 @@ struct NapiNPServerCtx {
 	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;
 
+	// The mission's raw terrain-tile (.til) file bytes: `[u32 'til0'][u32 count][u32 res0][u32 res1]`
+	// then count × 12-B entries. Streamed to a joiner as the S2C 0x45 terrain-tile load (phase 5) so the
+	// client's g_loading_progress climbs 5 -> 6 and its terrain finishes loading [orig: serialize_terrain_tiles
+	// @0x6080F0 reads g_TerrainTileData; the 0x45 header magic/count/hdr2/hdr3 map 1:1 onto the .til
+	// header]. Owning copy set by the host at mission load (Godot-free: the caller resolves the .til via
+	// libs/til). EMPTY => 0x45 is faithfully skipped (serialize_terrain_tiles returns 0 with no tile data).
+	std::vector<uint8_t> terrain_til_data;
+
 	// Spawn gate (§5.2). spawn_success_gate <- dword_24C1928 (drop the loading screen; cleared later by
 	// the per-frame 0x0A flags1 & 0x01, §5.2a step 4). The load-progress counter dword_A82370
 	// (g_loading_progress, walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land) is CLIENT state, not host

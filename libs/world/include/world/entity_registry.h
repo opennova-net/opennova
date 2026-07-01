@@ -62,6 +62,13 @@ public:
 
     size_t live_count() const;
 
+    // Configured slot capacity of `pool` (0 for an unconfigured/invalid pool) — the bound
+    // the original validates wire handles against [orig: g_pool_list[pool].capacity reads,
+    // e.g. NapiNPServerMsg_HandlePlayerInfoRequest @0x514180].
+    size_t pool_capacity(int pool) const {
+        return (pool >= 0 && pool < kPoolCount) ? pools_[pool].slots.size() : 0;
+    }
+
     template <class F>
     void for_each(F &&fn) const {
         for (const Pool &p : pools_) {

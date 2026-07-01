@@ -12,13 +12,15 @@ namespace opennova::netsim {
 
 namespace {
 
-// The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor + one tag=1 compact record
-// per replicated entity, each position compressed relative to the anchor (network_compress_fixedpoint).
-// Lifted into netsim from the retired build_tag_0a_world_reference (P8); the wire bytes
-// are unchanged (decode_frame_update round-trips them). [orig: NapiNPClientMsg_0x00A @0x42FEC0 /
-// NetPacket_SerializePlayerState case 1 @0x4C09C0]
+// The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor, the phase-selected header
+// sub-block, the 7-byte local-player tail, then one tag=1 compact record per replicated entity (each
+// position compressed relative to the anchor). Faithful port of the header writer
+// [orig: NetPacket_WritePlayerState @0x4ff6b0]: `flags2` is the per-connection phase byte and
+// `flags2 & 3` selects the sub-block (0 weapon / 1 server-status / 2 env / 3 gametype). The entity
+// loop mirrors serialize_entity_states_to_packet @0x50f070 (priority/budget port = step 2).
+// [orig: NapiNPClientMsg_0x00A @0x42FEC0 (reader) / NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
-                                    const std::vector<GameEntitySnapshot> &entities) {
+                                    const std::vector<GameEntitySnapshot> &entities, uint8_t flags2) {
 	FrameUpdate fu;
 	const int32_t ax = int32_t(ctx.spawn_x);
 	const int32_t ay = int32_t(ctx.spawn_y);
@@ -26,24 +28,45 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.anchor_x = ax;
 	fu.anchor_y = ay;
 	fu.anchor_z = az;
-	fu.flags1 = 0x00;
-	// Sub-block 1 (server-status/timer), NOT sub-block 0 (aim): the golden cycles flags2 1/2/3 and
-	// never sends the aim sub-block in gameplay (the local player's aim is client-authoritative).
-	// Sub-block 1 is LOAD-BEARING — it carries the client's fall-damage tolerance dword_C6EAE4. Left at
-	// its BSS default 0, the body motor's landing-impact check `velZ <= C6EAE4 * -1057` has threshold 0,
-	// so the per-frame micro-gravity velocity trips fall damage EVERY grounded frame -> constant
-	// screen-red + camera-shake + minimap-red (Player_OnDamageReceived) though the player never dies
-	// (health loss is authority-gated). Send the retail default 13. [orig: Entity_UpdateInfantryPlayerBody
-	// landing check @0x4b7cf4-0x4b7d2d; NapiNPClientMsg_0x00A sub-block-1 read @0x4301a1-0x4301bc;
-	// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28]. (env sub-block 2 / objective 3 cycling is
-	// a follow-up — the client keeps its mission-loaded env meanwhile.)
-	fu.flags2 = 0x01;            // sub-block 1: [u8 C6EAE0][u8 C6EAE4][u8 serverFps][u8 serverCpuPct][i16 timer]
-	fu.timer.present = true;
-	fu.timer.state0 = 20;        // dword_C6EAE0 (retail default)
-	fu.timer.state1 = 13;        // dword_C6EAE4 = fall-damage tolerance (retail default; 0 => constant fall dmg)
-	fu.timer.state2 = 62;        // g_serverFps (cosmetic netgraph)
-	fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
-	fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
+	fu.flags1 = 0x00; // state_flags (death/spectator/load signals) — event-driven, 0 in steady play.
+	fu.flags2 = flags2;
+
+	// Header sub-block, selected by `flags2 & 3` [orig: NetPacket_WritePlayerState @0x4ff6b0 phase
+	// switch]. emit_connection_s2c drives flags2 from the per-connection phase counter.
+	switch (flags2 & 0x03) {
+	case 0:
+		// Weapon/ammo/uniform block [orig: @0x4ff81b phase-0: preround timer + weapon slots 360/368/
+		// 364/356/460 + ammo + CWeaponSlotManager_GetUniformTeamMask]. Our host does not model the
+		// recipient's weapon-slot state yet, so emit the golden-witnessed co-op steady value (all-zero
+		// slots + zero uniform mask) — the shape a retail co-op host sends for a standard-loadout
+		// player (golden ASH_I5A: view 0, extra 8). (FrameAimBlock is a witnessed misnomer for this
+		// weapon block; the rename is tracked as a follow-up.)
+		fu.aim.present = true;
+		break;
+	case 1:
+		// Server-status block [orig: @0x4ff9d5 phase-1]. LOAD-BEARING — carries the client's
+		// fall-damage tolerance dword_C6EAE4. Left at its BSS default 0, the body motor's landing check
+		// `velZ <= C6EAE4 * -1057` has threshold 0, so per-frame micro-gravity trips fall damage EVERY
+		// grounded frame -> constant screen-red + shake + minimap-red (Player_OnDamageReceived), though
+		// the player never dies (health loss is authority-gated). The client PERSISTS these between
+		// updates, so sending them once per phase cycle suffices. [orig: Entity_UpdateInfantryPlayerBody
+		// landing check @0x4b7cf4-0x4b7d2d; NapiNPClientMsg_0x00A phase-1 read @0x4301a1-0x4301bc;
+		// defaults @0x4f638b C6EAE0=20/C6EAE4=13; grill 2026-06-28.]
+		fu.timer.present = true;
+		fu.timer.state0 = 20;        // dword_C6EAE0 (retail default)
+		fu.timer.state1 = 13;        // dword_C6EAE4 = fall-damage tolerance (0 => constant fall dmg)
+		fu.timer.state2 = 62;        // g_serverFps (cosmetic netgraph)
+		fu.timer.state3 = 0;         // g_serverCpuPct (cosmetic netgraph)
+		fu.timer.timer_seconds = -1; // dword_24C1958 = -1 -> no round time limit
+		break;
+	default:
+		// Sub-block 3 (gametype): 0 bytes on the wire for a non-objective gametype [orig gate
+		// g_GameType & 0x20000 @0x4ffc2d — off for co-op]. Sub-block 2 (env) is DEFERRED and never
+		// selected here (see emit_connection_s2c): our host does not author world.env, so emitting it
+		// would clobber the client's mission-loaded sky.
+		break;
+	}
+
 	fu.state_flag_byte = 0x00; // 7-byte tail: not mounted, no stance bits yet (crouch/prone echo TBD)
 	fu.mount_handle = 0xFFFF;
 	// TAIL health (v121) -> g_local_player_entity->Health [orig: @0x4305df]. Send the player's healthMax
@@ -184,12 +207,26 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 // Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. anchor_for_connection
 // is file-static; the per-connection emit body is shared by the legacy listen-server binding and
 // npruntime's Server_TickUpdate fan over connection_list.
-void emit_connection_s2c(const world::World &w, const Connection &conn,
+void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          const PlayerReplicationState &fallback_anchor) {
 	if (conn.transport == nullptr) return;
 	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
-	conn.transport->host_send(kTag0aFrameUpdate, build_0a_frame(anchor, ents));
+
+	// Advance the per-connection 0x0A sub-block phase and select this frame's header sub-block
+	// [orig: ++playerSlot+100566 then NetPacket_WritePlayerState writes it as flags2, phase&3 =
+	// sub-block]. The original free-runs an 8-bit counter, so phase&3 cycles all four sub-blocks
+	// (0 weapon / 1 server-status / 2 env / 3 gametype) evenly and phase&0xF==8 emits the passenger
+	// block every 16th frame. We cycle a SAFE 3-value subset {1,0,3} for now — env (2) is DEFERRED
+	// because our host does not yet author world.env, so sending it would OVERWRITE the client's
+	// correct mission-loaded sky (fog/time-of-day); the passenger block needs vehicle-mount modeling.
+	// Both slot back into the free counter once those land. First send is phase 1 (server-status), so
+	// the load-bearing fall-damage tolerance reaches the client on frame 1 (matches the original, which
+	// increments to 1 before its first write @0x517be8).
+	static constexpr uint8_t kSafeSubCycle[3] = {1, 0, 3}; // -> sub 1(status) / 0(weapon) / 3(gametype)
+	const uint8_t flags2 = kSafeSubCycle[conn.s2c_phase % 3u];
+	++conn.s2c_phase;
+	conn.transport->host_send(kTag0aFrameUpdate, build_0a_frame(anchor, ents, flags2));
 }
 
 } // namespace opennova::netsim

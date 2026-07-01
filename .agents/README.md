@@ -16,6 +16,10 @@ Read these first for any networking task:
 - `docs/net/novaworld-net-re.md`
 - `.agents/network.md`, `.agents/interop.md`, `.agents/ida.md`, and
   `.agents/debug.md`
+- `.agents/porting-0a-emit.md` — runbook for porting the per-frame S2C 0x0A emit
+  from the witnessed retail chain (phase counter + sub-blocks + priority/budget
+  entity loop), with the verify loop (`scripts/net/diff_0a.py` + the golden) and
+  the current ported-vs-not state.
 
 ## Working Rules
 

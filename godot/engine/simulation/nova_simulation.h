@@ -144,6 +144,10 @@ private:
 	// start_host_session's gating [orig: the §5.0 listen-host bring-up, SinglePlayer_StartMission @0x561af0].
 	bool host_serve_and_play_ = true;
 	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
+	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot host (which owns the resource
+	// root) before load; copied into ctx_.terrain_til_data at bring-up so the initial-state burst streams
+	// the S2C 0x45 terrain-tile load (phase 5). Empty => 0x45 faithfully skipped. [§5.37]
+	std::vector<uint8_t> terrain_til_data_;
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
 	PackedFloat32Array present_snapshot_from_client_view() const;
 
@@ -253,6 +257,12 @@ public:
 	// reverts to the direct AI-pool present (the editor default).
 	void enable_listen_server(bool p_enable);
 	bool is_listen_server() const { return listen_server_; }
+
+	// Feed the mission's raw terrain-tile (.til) file bytes so the listen host streams the S2C 0x45
+	// terrain-tile load to joiners (climbs the client's g_loading_progress 5 -> 6; §5.37). The Godot
+	// host owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
+	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
+	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
 
 	// --- co-op LAN host (Increment C) ------------------------------------
 	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port`

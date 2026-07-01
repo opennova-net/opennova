@@ -364,6 +364,24 @@ void print_tag_0c(const std::vector<uint8_t> &body) {
 		print_organic_record(int(i), batch.records[i]);
 }
 
+// S2C 0x18 FULL-ENTITY-SPAWN (§5.46) — the reply to a C2S 0x0F entity-info query;
+// the client destroys + fully rebuilds the entity from this record.
+void print_tag_18(const std::vector<uint8_t> &body) {
+	FullEntitySpawnRecord r;
+	const bool clean = decode_full_entity_spawn(body.data(), body.size(), r);
+	std::printf("        [0x18] slot=%s type=%s defType=%u name=%s team=0x%02x "
+	            "flags(+36)=0x%04x owner(+0x78)=0x%08x pos=(%.1f, %.1f, %.1f) yawHi=0x%04x "
+	            "net=0x%04x player_class=%u anim_slot=%u links=(%s,%s,%s) seatMask=0x%02x%s\n",
+	            handle_str(r.slot_id).c_str(), type_str(r.item_type_id).c_str(),
+	            unsigned(r.item_type), ("\"" + r.entity_name + "\"").c_str(), r.team,
+	            r.minimap_flags, r.entity_flags, fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
+	            r.heading_hi, r.net_id, unsigned(r.player_class), unsigned(r.anim_slot),
+	            handle_str(r.parent_vehicle_handle).c_str(),
+	            handle_str(r.ground_entity_handle).c_str(),
+	            handle_str(r.parent_entity_handle).c_str(), r.seat_mask,
+	            clean ? "" : " DECODE INCOMPLETE");
+}
+
 void print_tag_20(const std::vector<uint8_t> &body) {
 	Pool3SyncBatch batch;
 	const bool clean = decode_pool3_sync_batch(body.data(), body.size(), batch);
@@ -1192,6 +1210,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x10) print_tag_10(payload);
 	else if (dir == 'S' && tag == 0x40) print_tag_40(payload);
 	else if (dir == 'S' && tag == 0x16) print_tag_16(payload);
+	else if (dir == 'S' && tag == 0x18) print_tag_18(payload);
 	else if (dir == 'S' && tag == 0x46) print_tag_46(payload);
 	else if (dir == 'S' && tag == 0x1E) print_tag_1e(payload);
 	else if (dir == 'S' && tag == 0x26) print_tag_26(payload);

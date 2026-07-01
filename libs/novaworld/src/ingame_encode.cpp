@@ -245,6 +245,35 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 	return out;
 }
 
+// [orig: serialize_terrain_tiles @ 0x6080F0] — the inverse of decode_terrain_load_batch
+// (§5.37, D-NET-83). One paged chunk of the terrain-tile (.til) load stream. The header chunk
+// writes the wire start word 0xFFFF, end_index, then the `'til0'` magic + total tile_count +
+// hdr2/hdr3; continuation chunks write `[start_index][end_index]`. Every chunk then writes its
+// (end_index - start_index) opaque 12-B tile entries. Byte-identical round-trip with the decoder.
+std::vector<uint8_t> encode_terrain_load_batch(const TerrainLoadBatch &batch) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+
+	if (batch.has_header) {
+		w.u16(0xFFFFu);                                            // first-chunk sentinel (start_index := 0)
+		w.u16(batch.end_index);
+		w.u32(batch.magic != 0 ? batch.magic : 0x74696C30u);      // 'til0' (reader bails on mismatch)
+		w.u32(batch.tile_count);                                   // total tiles in the full set
+		w.u32(batch.header_field2);                                // g_TerrainTileData[2]
+		w.u32(batch.header_field3);                                // g_TerrainTileData[3]
+	} else {
+		w.u16(batch.start_index);
+		w.u16(batch.end_index);
+	}
+
+	for (const TerrainTileEntry &e : batch.tiles) {               // 12-B opaque records (never interpreted)
+		w.u32(e.word0);
+		w.u32(e.word1);
+		w.u32(e.word2);
+	}
+	return out;
+}
+
 // [orig: NapiNPClientMsg_0x00C @ 0x42E730] — the inverse of decode_organic_spawn_batch
 // (§5.23). Header u16 entity_count, then per record: u16 slot_id, u8 has_body, and (when
 // has_body) the unconditional field block. A field-identical round-trip with the decoder.
@@ -278,6 +307,46 @@ std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) 
 		w.u8(rec.parent_slot);
 		w.u16(rec.parent_handle);
 	}
+	return out;
+}
+
+// [orig: serialize_object_to_buffer @ 0x504d10] — the S2C 0x18 reply body. The
+// original recomputes the leading handle from the entity pointer (pool scan) and
+// resolves the three link pointers to handles (0xFFFF when null); here both arrive
+// pre-resolved on the record. An itemDef-null slot sends type_id/item_type 0 and
+// the empty name — the same bytes this encoder produces from a default record.
+std::vector<uint8_t> encode_full_entity_spawn(const FullEntitySpawnRecord &rec) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(rec.slot_id);            // [0x504d5f]
+	w.u16(rec.item_type_id);       // itemDef+0x50 low16 [0x504d79]
+	w.u8(rec.item_type);           // itemDef+0x5C low8  [0x504dc8]
+	w.u8(rec.team);                // entity+354         [0x504dee]
+	w.u16(rec.minimap_flags);      // entity+36          [0x504e00]
+	w.u32(rec.entity_flags);       // entity+120         [0x504e12]
+	w.cstr(rec.entity_name);       // entity+244 / g_empty_str [0x504e5a / 0x504e7c]
+	w.u16(rec.parent_vehicle_handle); // entity+368 → handle [0x504ec5]
+	w.u16(rec.ground_entity_handle);  // entity+40  → handle [0x504f3a]
+	w.u16(rec.parent_entity_handle);  // entity+364 → handle [0x504fb4]
+	w.u8(rec.seat_mask);           // itemDef+604 [0x505004]
+	for (int bit = 0; bit < 8; ++bit) { // one occupant handle per set bit [0x50504c..0x5050da]
+		if ((rec.seat_mask & (1u << bit)) != 0) w.u16(rec.mount_handles[bit]);
+	}
+	w.u16(rec.mount_handle_8);     // entity+416 [0x505118]
+	w.u16(rec.mount_handle_9);     // entity+418 [0x50512e]
+	w.u32(uint32_t(rec.pos_x));    // entity+4  [0x505140]
+	w.u32(uint32_t(rec.pos_y));    // entity+8  [0x505153]
+	w.u32(uint32_t(rec.pos_z));    // entity+12 [0x505164]
+	w.u16(rec.heading_hi);         // entity+18 [0x505176]
+	w.u16(rec.pitch_hi);           // entity+22 [0x505189]
+	w.u8(rec.ai_state);            // entity+692 [0x50519e]
+	w.u8(rec.anim_slot);           // entity+884 [0x5051b2]
+	w.u16(rec.net_id);             // entity+348 [0x5051c6]
+	w.u8(rec.player_class);        // entity+660 [0x5051db]
+	w.u8(0);                       // hard 0 in the original [0x5051e8]
+	w.u8(rec.unused_byte);         // entity+340 [0x5051fd]
+	w.u8(rec.alert_level);         // entity+533 [0x505211]
+	w.u8(rec.sub_type);            // entity+532 [0x50522c]
 	return out;
 }
 

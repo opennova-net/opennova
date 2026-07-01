@@ -376,12 +376,62 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	return true;
 }
 
+// (f) The per-connection S2C 0x0A sub-block PHASE CYCLE — a faithful port of the original's
+//     per-player-slot send counter [orig: ++playerSlot+100566 @0x517be8; NetPacket_WritePlayerState
+//     writes it as flags2 and phase&3 selects the header sub-block @0x4ff6b0]. We cycle the SAFE
+//     subset {1 server-status, 0 weapon, 3 gametype}; env (2) is deferred (host does not author
+//     world.env). First send is phase 1 so the load-bearing fall-damage tolerance reaches the client
+//     on frame 1.
+bool run_0a_subblock_phase_cycle() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	if (!expect(host_h.valid(), "host player spawned")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+
+	nw::PlayerReplicationState fallback;
+	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(1.0));
+	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(2.0));
+	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(3.0));
+
+	// Two full cycles: status(1) -> weapon(0) -> gametype(3), repeating.
+	const uint8_t want_flags2[6] = {1, 0, 3, 1, 0, 3};
+	for (int i = 0; i < 6; ++i) {
+		ns::test::emit_all(world, conns, fallback);
+		ns::Datagram dg;
+		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+		if (!expect(dg.tag == ns::kTag0aFrameUpdate, "tag 0x0A")) return false;
+		nw::FrameUpdate fu;
+		if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+		            "0x0A frame decodes as a well-formed frame")) return false;
+		if (!expect(fu.flags2 == want_flags2[i], "flags2 cycles {1,0,3}")) return false;
+		if ((want_flags2[i] & 3u) == 1) {
+			if (!expect(fu.timer.present && fu.timer.state1 == 13,
+			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
+		} else if ((want_flags2[i] & 3u) == 0) {
+			if (!expect(fu.aim.present, "phase 0 = weapon sub-block present")) return false;
+		}
+		// phase 3 (gametype) = 0 bytes for a non-objective gametype: nothing to assert.
+	}
+	// The connection's phase counter advanced once per send.
+	if (!expect(conns[0].s2c_phase == 6, "phase counter advanced once per send")) return false;
+	std::printf("PASS 0a_subblock_phase_cycle\n");
+	return true;
+}
+
 } // namespace
 
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
-	                run_retail_player_slots_start_after_bms_organics();
+	                run_retail_player_slots_start_after_bms_organics() &&
+	                run_0a_subblock_phase_cycle();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

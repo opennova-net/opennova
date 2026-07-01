@@ -298,6 +298,56 @@ struct OrganicSpawnBatch {
 bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
                                 OrganicSpawnBatch &out);
 
+// S2C 0x18 FULL-ENTITY-SPAWN (§5.46) — the reactive single-entity repair record.
+// A client whose per-frame 0x0A tail cross-check finds a stale/mismatched entity
+// (@0x4307c4: !itemDef || itemDef.id != wire type || ItemTypeIndex !=
+// FindIndexByTypeId(wire type)) queues C2S 0x0F [u16 handle]; the server answers
+// with this record and the client DESTROYS + fully REBUILDS the entity from it
+// (itemDef/models/playerClass/minimap slot/anim registration). It never appears
+// in a healthy join — the retail↔retail golden carries zero 0x0F/0x18 — it is
+// the self-heal path. [orig: server NapiNPServerMsg_HandlePlayerInfoRequest
+// @0x514180 → serialize_object_to_buffer @0x504d10; client
+// NapiNPClientMsg_FullEntitySpawn @0x433780]
+struct FullEntitySpawnRecord {
+	uint16_t slot_id = 0;          // (pool<<12)|slot; 0xFFFF ⇒ client returns immediately
+	uint16_t item_type_id = 0;     // itemDef+0x50 low16 (wire type id); 0 on an empty slot
+	uint8_t  item_type = 0;        // itemDef+0x5C ItemDefType low byte (1=vehicle, 3=person);
+	                               // 0 ⇒ the client stops after the destroy+memset (slot cleared)
+	uint8_t  team = 0;             // entity+354 (0x162)
+	uint16_t minimap_flags = 0;    // entity+36 (0x24) low16; bit 0x100 gates minimap registration
+	uint32_t entity_flags = 0;     // entity+120 (0x78) — the owning connection id (dcb)
+	std::string entity_name;       // entity+244; sent iff itemDef attrib & 0x100000 (aidata), else ""
+	uint16_t parent_vehicle_handle = 0xFFFF; // entity+368 (0x170), pointer resolved to a handle
+	uint16_t ground_entity_handle = 0xFFFF;  // entity+40  (0x28)
+	uint16_t parent_entity_handle = 0xFFFF;  // entity+364 (0x16C) — the mounted vehicle
+	                                         // [orig: Entity_AttachToVehicleSlot @0x4946d0]
+	uint8_t  seat_mask = 0;        // itemDef+604 seatMask; bit i ⇒ mount_handles[i] on the wire
+	uint16_t mount_handles[8] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+	                             0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF}; // entity+400+2i seat occupants
+	uint16_t mount_handle_8 = 0;   // entity+416 — always present, after the seat block
+	uint16_t mount_handle_9 = 0;   // entity+418
+	int32_t  pos_x = 0;            // entity+4 (i32 16.16 world)
+	int32_t  pos_y = 0;            // entity+8
+	int32_t  pos_z = 0;            // entity+12
+	uint16_t heading_hi = 0;       // entity+18 — Yaw high word; client restores Yaw = (i16)<<16
+	uint16_t pitch_hi = 0;         // entity+22 — Pitch high word
+	uint8_t  ai_state = 0;         // entity+692 (0x2B4)
+	uint8_t  anim_slot = 0;        // entity+884 (0x374)
+	uint16_t net_id = 0;           // entity+348 (0x15C) minimap slot id
+	uint8_t  player_class = 0;     // entity+660 (0x294)
+	uint8_t  skip_byte = 0;        // wire constant 0 (client discards; cursor advance only)
+	uint8_t  unused_byte = 0;      // entity+340 (0x154)
+	uint8_t  alert_level = 0;      // entity+533 (0x215)
+	uint8_t  sub_type = 0;         // entity+532 (0x214)
+};
+
+// Decode a S2C 0x18 body per the §5.46 field map. A slot_id of 0xFFFF mirrors
+// the client's immediate return (true iff the sentinel is the whole body).
+// Otherwise same return contract as decode_organic_spawn_batch.
+// [orig: NapiNPClientMsg_FullEntitySpawn @ 0x433780]
+bool decode_full_entity_spawn(const uint8_t *body, size_t len,
+                              FullEntitySpawnRecord &out);
+
 // S2C 0x16 player-list (§5.20) — the scoreboard. One message = the full list;
 // the server may re-sort rows between frames, so slot_id is authoritative.
 // [orig: NapiNPClientMsg_PlayerList @ 0x42FAE0]

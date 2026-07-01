@@ -213,6 +213,28 @@ via `apps/common/pcap_reader`, `nw_pool_decode_unit_test` inline-pcap round-trip
 | `NapiNPClientMsg_0x020` | `0x425C00` | S2C 0x20 pool-3 sync — type/pos/team/heading (90−facing) vs authored knowns | D-NET-59/62 | matching |
 | `serialize_entity_pool_to_packet_0` | `0x503940` | team source = entity+354 (onhook +146/+196 ruled out) | D-NET-62 | matching |
 
+C2S 0x0F entity-info query → S2C 0x18 full-entity-spawn self-heal (§5.46; grill 2026-07-01; reimpl
+`encode_full_entity_spawn`/`decode_full_entity_spawn` in `libs/novaworld`, `build_full_entity_spawn`
+in `libs/netsim`, dispatch `case 0x0F` in `libs/npruntime`; `nw_ingame_encode` +
+`netsim_world_stream_extractors` + `nw_message_coverage` pin the layout):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `NapiNPServerMsg_HandlePlayerInfoRequest` | `0x514180` | C2S 0x0F handler — validates pool ≤ 1 + slot < capacity, serializes the queried entity, replies S2C 0x18 to the requester only (send_mask 0x20) | D-NET-133 | matching |
+| `serialize_object_to_buffer` | `0x504D10` | the S2C 0x18 body writer — 26-field single-entity record (§5.46 field map); link ptrs → handles; name attrib-gated; seat block per itemDef+604 | D-NET-133 | matching |
+| `NapiNPClientMsg_FullEntitySpawn` | `0x433780` | S2C 0x18 handler — destroy + memset(0x2B4) + full rebuild (itemDef/models/playerClass/minimap/ADM anim registration); type-0 record = clear slot | — | matching (decode side; client-side rebuild is retail-only) |
+
+Server per-frame S2C 0x0A emit (§5.47; witnessed 2026-07-01; reimpl in `libs/netsim/src/connection_fan.cpp`
++ `netsim::Connection::s2c_phase`; `netsim_two_peer_fanout` `run_0a_subblock_phase_cycle` + shape harness
+`scripts/net/diff_0a.py`):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `Server_SendEntityStateToPlayer` | `0x517ba0` | per-recipient 0x0A build: `state==6` deploy gate, eye-pos priority ref, build priority list, header + entity loop, budget save/halve, SendFiltered mask 0xA0 | D-NET-134 | header ported; deploy-gate/eye-ref/budget = step 2 |
+| `NetPacket_WritePlayerState` | `0x4ff6b0` | 0x0A header: ref pos + state_flags + phase byte (`playerSlot+100566`), `phase&3` sub-block (0 weapon/1 status/2 env/3 gametype), recipient tail | D-NET-134 | phase counter + sub-blocks {1,0,3} ported; env(2)/passenger deferred |
+| `serialize_entity_states_to_packet` | `0x50f070` | 0x0A entity loop — all callback entities from the priority list, `[1][handle][type][compact]`, budget-limited round-robin, `[0]` terminator | — | players only; priority/budget/all-class = step 2 |
+| `Server_BuildEntityPriorityList` | `0x50e590` | distance-sorted priority pairlist per recipient (eye-pos ref) | — | not yet ported (step 2) |
+
 Kill feed + replay event/environment streams (§5.26/§5.27; one-host/one-client capture 2026-06-17;
 `nw_pp` printers + `libs/novaworld` decoders, `nw_replay_timeline` `test_event_stream`):
 

@@ -791,6 +791,173 @@ int test_player_list_roundtrip() {
 	return 0;
 }
 
+// §5.37 S2C 0x45 terrain-tile (.til) load — encode/decode byte-identical round-trip.
+static int test_terrain_load_header_chunk_roundtrip() {
+	TerrainLoadBatch in{};
+	in.has_header = true;
+	in.end_index = 3;                 // header chunk carries tiles [0,3)
+	in.magic = 0x74696C30u;           // 'til0'
+	in.tile_count = 7;                // full set is larger than this chunk
+	in.header_field2 = 0x11223344u;
+	in.header_field3 = 0xAABBCCDDu;
+	in.tiles = { {1, 2, 3}, {4, 5, 6}, {7, 8, 9} };
+
+	std::vector<uint8_t> wire = encode_terrain_load_batch(in);
+	// 4 (start/end) + 16 (magic+count+hdr2+hdr3) + 3*12 = 56 B
+	EXPECT(wire.size() == 56);
+	EXPECT(wire[0] == 0xFF && wire[1] == 0xFF); // first-chunk sentinel
+
+	TerrainLoadBatch out{};
+	EXPECT(decode_terrain_load_batch(wire.data(), wire.size(), out)); // consumed exactly
+	EXPECT(out.has_header);
+	EXPECT(out.start_index == 0);
+	EXPECT(out.end_index == 3);
+	EXPECT(out.magic == 0x74696C30u);
+	EXPECT(out.tile_count == 7);
+	EXPECT(out.header_field2 == 0x11223344u);
+	EXPECT(out.header_field3 == 0xAABBCCDDu);
+	EXPECT(out.tiles.size() == 3);
+	EXPECT(out.tiles[2].word0 == 7 && out.tiles[2].word1 == 8 && out.tiles[2].word2 == 9);
+	std::printf("PASS terrain_load_header_chunk_roundtrip\n");
+	return 0;
+}
+
+static int test_terrain_load_continuation_chunk_roundtrip() {
+	TerrainLoadBatch in{};
+	in.has_header = false;
+	in.start_index = 3;
+	in.end_index = 5;                 // continuation chunk carries tiles [3,5)
+	in.tiles = { {0xDEADBEEFu, 0, 1}, {2, 3, 0xFEEDFACEu} };
+
+	std::vector<uint8_t> wire = encode_terrain_load_batch(in);
+	// 4 (start/end) + 2*12 = 28 B, no header block
+	EXPECT(wire.size() == 28);
+	EXPECT(!(wire[0] == 0xFF && wire[1] == 0xFF)); // start_index=3, not the sentinel
+
+	TerrainLoadBatch out{};
+	EXPECT(decode_terrain_load_batch(wire.data(), wire.size(), out));
+	EXPECT(!out.has_header);
+	EXPECT(out.start_index == 3);
+	EXPECT(out.end_index == 5);
+	EXPECT(out.tiles.size() == 2);
+	EXPECT(out.tiles[0].word0 == 0xDEADBEEFu);
+	EXPECT(out.tiles[1].word2 == 0xFEEDFACEu);
+	std::printf("PASS terrain_load_continuation_chunk_roundtrip\n");
+	return 0;
+}
+
+// §5.46 S2C 0x18 FULL-ENTITY-SPAWN — the 0x0F-query reply record.
+// Byte layout pinned against the witnessed serializer [orig: serialize_object_to_buffer
+// @0x504d10]; the decode side is the independent inverse port of the client handler
+// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780].
+static int test_full_entity_spawn_player_layout() {
+	FullEntitySpawnRecord in{};
+	in.slot_id = 0x0000;         // host player, pool 0 slot 0
+	in.item_type_id = 0x14B9;    // "Player #1, Multiplayer" wire id
+	in.item_type = 3;            // ItemType_Person
+	in.team = 1;
+	in.minimap_flags = 0x0100;   // remote player (not the recipient's own)
+	in.entity_flags = 0x0C;      // owning connection id
+	in.entity_name = "Player";
+	in.pos_x = 0x1234;
+	in.pos_y = 0x5678;
+	in.pos_z = 0x0C50;
+	in.heading_hi = 0x005A;
+	in.net_id = 0x0200;
+	in.player_class = 8;
+	in.skip_byte = 0xEE;         // encoder must write the original's hard 0 instead
+
+	const std::vector<uint8_t> wire = encode_full_entity_spawn(in);
+	// 12 head + 7 name + 6 links + 1 seat mask (no seats) + 4 mount8/9 + 12 pos
+	// + 4 yaw/pitch + 2 ai/anim + 2 net_id + 5 tail = 55 B
+	EXPECT(wire.size() == 55);
+	EXPECT(wire[0] == 0x00 && wire[1] == 0x00);   // slot
+	EXPECT(wire[2] == 0xB9 && wire[3] == 0x14);   // type id
+	EXPECT(wire[4] == 0x03);                      // itemDef type = person
+	EXPECT(wire[5] == 0x01);                      // team
+	EXPECT(wire[6] == 0x00 && wire[7] == 0x01);   // flags 0x0100
+	EXPECT(wire[8] == 0x0C && wire[11] == 0x00);  // owner connection id u32
+	EXPECT(wire[12] == 'P' && wire[18] == 0x00);  // "Player" + NUL
+	EXPECT(wire[19] == 0xFF && wire[24] == 0xFF); // three 0xFFFF links
+	EXPECT(wire[25] == 0x00);                     // seat mask 0 -> no occupant words
+	EXPECT(wire[30] == 0x34 && wire[31] == 0x12); // pos_x LE
+	EXPECT(wire[42] == 0x5A && wire[43] == 0x00); // heading high word
+	EXPECT(wire[48] == 0x00 && wire[49] == 0x02); // minimap net_id
+	EXPECT(wire[50] == 0x08);                     // playerClass
+	EXPECT(wire[51] == 0x00);                     // hard 0 (input 0xEE ignored)
+
+	FullEntitySpawnRecord out{};
+	EXPECT(decode_full_entity_spawn(wire.data(), wire.size(), out));
+	EXPECT(out.slot_id == in.slot_id);
+	EXPECT(out.item_type_id == in.item_type_id);
+	EXPECT(out.item_type == in.item_type);
+	EXPECT(out.team == in.team);
+	EXPECT(out.minimap_flags == in.minimap_flags);
+	EXPECT(out.entity_flags == in.entity_flags);
+	EXPECT(out.entity_name == in.entity_name);
+	EXPECT(out.parent_vehicle_handle == 0xFFFF);
+	EXPECT(out.ground_entity_handle == 0xFFFF);
+	EXPECT(out.parent_entity_handle == 0xFFFF);
+	EXPECT(out.seat_mask == 0);
+	EXPECT(out.pos_x == in.pos_x && out.pos_y == in.pos_y && out.pos_z == in.pos_z);
+	EXPECT(out.heading_hi == in.heading_hi && out.pitch_hi == 0);
+	EXPECT(out.net_id == in.net_id);
+	EXPECT(out.player_class == in.player_class);
+	EXPECT(out.skip_byte == 0);
+	std::printf("PASS full_entity_spawn_player_layout\n");
+	return 0;
+}
+
+// Sparse seat mask: only the set bits carry an occupant word, and the decoder leaves
+// unset seats at the handler's 0xFFFF prefill (@0x433935).
+static int test_full_entity_spawn_seat_block_roundtrip() {
+	FullEntitySpawnRecord in{};
+	in.slot_id = 0x1002;         // pool-1 vehicle, slot 2
+	in.item_type_id = 0x050B;    // dune buggy
+	in.item_type = 1;            // ItemType_Vehicle
+	in.seat_mask = 0x05;         // seats 0 and 2 only
+	in.mount_handles[0] = 0x0001;
+	in.mount_handles[2] = 0xFFFF; // offered but empty
+	in.mount_handles[3] = 0x0BAD; // NOT in the mask -> must not hit the wire
+
+	const std::vector<uint8_t> wire = encode_full_entity_spawn(in);
+	// 12 head + 1 empty name + 6 links + 1 mask + 2*2 occupants + 4 mount8/9 + 12 pos
+	// + 4 yaw/pitch + 2 ai/anim + 2 net_id + 5 tail = 53 B
+	EXPECT(wire.size() == 53);
+
+	FullEntitySpawnRecord out{};
+	EXPECT(decode_full_entity_spawn(wire.data(), wire.size(), out));
+	EXPECT(out.seat_mask == 0x05);
+	EXPECT(out.mount_handles[0] == 0x0001);
+	EXPECT(out.mount_handles[1] == 0xFFFF); // prefill, not on the wire
+	EXPECT(out.mount_handles[2] == 0xFFFF);
+	EXPECT(out.mount_handles[3] == 0xFFFF); // masked-out input never crossed
+	std::printf("PASS full_entity_spawn_seat_block_roundtrip\n");
+	return 0;
+}
+
+// An in-capacity EMPTY pool slot: retail serializes the slot with a null itemDef ->
+// type_id/item_type 0 + empty name; the client destroys+memsets and stops at the
+// type gate (@0x433b5a) — the "clear your stale entity" reply.
+static int test_full_entity_spawn_empty_slot_record() {
+	FullEntitySpawnRecord in{};
+	in.slot_id = 0x0003;
+
+	const std::vector<uint8_t> wire = encode_full_entity_spawn(in);
+	// 12 head + 1 empty name + 6 links + 1 mask + 4 + 12 + 4 + 2 + 2 + 5 = 49 B
+	EXPECT(wire.size() == 49);
+	EXPECT(wire[2] == 0x00 && wire[3] == 0x00); // type id 0
+	EXPECT(wire[4] == 0x00);                    // itemDef type 0 -> client skips the rebuild
+
+	FullEntitySpawnRecord out{};
+	EXPECT(decode_full_entity_spawn(wire.data(), wire.size(), out));
+	EXPECT(out.slot_id == 0x0003);
+	EXPECT(out.item_type_id == 0 && out.item_type == 0);
+	EXPECT(out.entity_name.empty());
+	std::printf("PASS full_entity_spawn_empty_slot_record\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -818,6 +985,11 @@ int main() {
 	rc |= test_player_compact_roundtrip();
 	rc |= test_player_sync_roundtrip();
 	rc |= test_player_list_roundtrip();
+	rc |= test_terrain_load_header_chunk_roundtrip();
+	rc |= test_terrain_load_continuation_chunk_roundtrip();
+	rc |= test_full_entity_spawn_player_layout();
+	rc |= test_full_entity_spawn_seat_block_roundtrip();
+	rc |= test_full_entity_spawn_empty_slot_record();
 	if (rc == 0) std::printf("ALL nw_ingame_encode tests passed\n");
 	return rc;
 }

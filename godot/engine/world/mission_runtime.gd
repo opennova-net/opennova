@@ -103,6 +103,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_sim.enable_listen_server(true)
 	if options.get("resource_root") != null and options.get("item_db") != null:
 		_sim.set_item_seat_specs(_build_item_seat_specs(mission, options["resource_root"], options["item_db"]))
+	# Feed the mission's raw .til bytes BEFORE load so the host bring-up streams the S2C 0x45 terrain-tile
+	# load to joiners (net-re §5.37). Harmless for SP/joiner (only the host bring-up reads it).
+	if options.has("terrain_til"):
+		_sim.set_terrain_til_data(options["terrain_til"])
 	if mission == null or not _sim.load_from_mission_data(mission):
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null

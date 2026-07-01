@@ -70,6 +70,24 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 // screen STILL needs the spawn points or the joiner spams C2S 0x0f and never deploys (§5.38c).
 Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w);
 
+// One S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) for a live World entity — the host's
+// reply body to a C2S 0x0F entity-info query, the client's self-heal request for a
+// stale/mismatched entity (its 0x0A tail cross-check @0x4307c4 failed for this handle).
+// The client DESTROYS + fully REBUILDS the entity from this record, so it carries the
+// same identity fields as the 0x0C organic record (type/flags/owner/name/net_id/
+// player_class — sourced with the SAME per-recipient minimap_flags + minimap net_id +
+// player_class rules as build_pool0_organic_batch) plus the live pose and the mount
+// links. item_type is the items.def `type` byte (person/vehicle), derived from the
+// handle's pool (pool 0 = organics = person, pool 1 = vehicles) until world::Entity
+// carries the resolved item-def type. pitch_hi stays 0: Entity.pitch is mission
+// degrees, not the wire's engine BAM frame, and the per-frame 0x0A pose supersedes
+// this record's pose immediately after the rebuild. Source approximations are
+// catalogued as docs/net/novaworld-net-re.md D-NET-133.
+// [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180 →
+// serialize_object_to_buffer @0x504d10]
+FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
+                                              world::EntityHandle recipient_own = {});
+
 // Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
 // REMOTE PEER entity — the host-side mover [orig: NetPacket_SerializePlayerState case 4
 // @0x4c2042-0x4c20a9; docs/net/novaworld-net-re.md §5.38a/§5.10]. The inverse of

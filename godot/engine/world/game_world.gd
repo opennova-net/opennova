@@ -780,6 +780,16 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	# §5.2b/§5.38). A DEDICATED host (config "dedicated") serves WITHOUT a local player — same listen
 	# server, just no own-player spawn; main_game skips the HUD when there is no local player. Diagnostic
 	# previews opt out via _playable.
+	# Terrain-tile (.til) bytes for the S2C 0x45 terrain-tile load a listen host streams to joiners so
+	# their g_loading_progress climbs 5 -> 6 and terrain finishes loading (net-re §5.37). The tile-overlay
+	# .til is named after the MISSION (localres.pff: ASH_I5A.til), not the terrain tileinfo
+	# [orig: Terrain_LoadTileInfoFile @0x5CA730 loads <mission>.til]. Read it raw from the resource root;
+	# absent when the mission has none.
+	if _resource_root != null:
+		var til_name := mission_file.get_basename() + ".til"
+		var til_bytes: PackedByteArray = _resource_root.read_file(til_name) if _resource_root.has_file(til_name) else PackedByteArray()
+		if til_bytes.size() > 0:
+			opts["terrain_til"] = til_bytes
 	opts["playable"] = _playable and not bool(_host_config.get("dedicated", false))
 	# A LAN host start threads its config (server name, mission rotation, player cap, and the
 	# socket transport mode) through to the listen server. A LAN JOINER threads the dial target

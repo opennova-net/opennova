@@ -426,6 +426,47 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 	return (c.p == c.end);
 }
 
+bool decode_full_entity_spawn(const uint8_t *body, size_t len,
+                              FullEntitySpawnRecord &out) {
+	out = FullEntitySpawnRecord{};
+	Cursor c{body, body + len, true};
+	out.slot_id = c.u16();
+	if (!c.ok) return false;
+	// Sentinel: retail returns before reading anything else (@ 0x4337c5).
+	if (out.slot_id == 0xFFFF) return (c.p == c.end);
+	out.item_type_id = c.u16();
+	out.item_type = c.u8();
+	out.team = c.u8();
+	out.minimap_flags = c.u16();
+	out.entity_flags = c.u32();
+	out.entity_name = c.cstr();
+	out.parent_vehicle_handle = c.u16();
+	out.ground_entity_handle = c.u16();
+	out.parent_entity_handle = c.u16();
+	// Seat block: the handler pre-fills mountHandles[0..7] with 0xFFFF, then
+	// overwrites one per set mask bit (@ 0x433935..0x4339f2).
+	out.seat_mask = c.u8();
+	for (int bit = 0; bit < 8; ++bit) {
+		if ((out.seat_mask & (1u << bit)) != 0) out.mount_handles[bit] = c.u16();
+	}
+	out.mount_handle_8 = c.u16();
+	out.mount_handle_9 = c.u16();
+	out.pos_x = int32_t(c.u32());
+	out.pos_y = int32_t(c.u32());
+	out.pos_z = int32_t(c.u32());
+	out.heading_hi = c.u16();
+	out.pitch_hi = c.u16();
+	out.ai_state = c.u8();
+	out.anim_slot = c.u8();
+	out.net_id = c.u16();
+	out.player_class = c.u8();
+	out.skip_byte = c.u8();   // discarded by the handler (@ 0x433b26)
+	out.unused_byte = c.u8();
+	out.alert_level = c.u8();
+	out.sub_type = c.u8();
+	return c.ok && (c.p == c.end);
+}
+
 // S2C 0x40 minimap-overlay update / capture-zone state (§5.19).
 // [orig: NapiNPClientMsg_0x040 @ 0x425A50 → MapOverlay_DecodeOverlayEntries @ 0x5BEBB0 (6-byte walker)]
 bool decode_capture_zone_overlay(const uint8_t *body, size_t len,

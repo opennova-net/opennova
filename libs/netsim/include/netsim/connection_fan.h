@@ -40,7 +40,9 @@ void drain_connection_c2s(world::World &world, const Connection &conn);
 // Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its owned entity (or
 // `fallback_anchor` when it has none), and host_send it onto that connection's transport. `ents`
 // is the world snapshot built ONCE by the caller [orig: NapiNPServer_SendToConn @0x4c4f20 per node].
-void emit_connection_s2c(const world::World &w, const Connection &conn,
+// `conn` is non-const because each send ADVANCES the connection's 0x0A sub-block phase counter
+// [orig: ++playerSlot+100566 in Server_SendEntityStateToPlayer @0x517be8].
+void emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          const PlayerReplicationState &fallback_anchor);
 
