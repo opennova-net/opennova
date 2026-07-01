@@ -79,7 +79,7 @@ int32_t engine_heading_bam(int16_t mission_yaw) {
 
 } // namespace
 
-OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own) {
 	OrganicSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0) return;
@@ -91,7 +91,19 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		                                               // stamped at spawn (host loopback / joiner ack).
 		                                               // [orig: Server_PlayerAdd @0x51cbc0; D-NET-92/101]
 		rec.entity_name = e.name;
-		rec.minimap_flags = (e.item_id == 0x14B9) ? 0x100 : 0; // local-player/minimap-register flag
+		// entity+36 GamePlayerEntity Flags, written verbatim by the original 0x0C organic serializer
+		// [orig: serialize_entity_states_to_buffer @0x5030a0 writes *(u16)(entity+36)]. bit 0x100 =
+		// player/minimap-register (set for EVERY player so the client's 0x0C handler re-resolves the model
+		// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01 = "THIS IS THE RECIPIENT'S OWN player":
+		// a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the host sends 0x0101 ONLY for the
+		// joiner's own entity and 0x0100 for every OTHER player (the remote host player). Sending 0x0101 for
+		// a REMOTE player mis-marks it as the recipient's own and the client mishandles it. So bit 0 is
+		// per-recipient: set iff this entity == the recipient's owned entity. Carry the movement/spawn gate
+		// (0x02) through while the entity is still spawning [orig: entity+36 bit 1].
+		uint16_t player_flags = 0x0100u;
+		if (recipient_own.valid() && e.handle == recipient_own) player_flags |= 0x01u;
+		if ((e.flags & 0x2u) != 0) player_flags |= 0x2u;
+		rec.minimap_flags = (e.item_id == kPlayerInfantryTypeId) ? player_flags : 0;
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
@@ -99,6 +111,23 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		rec.team = e.team;
 		rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
 		rec.net_id = e.net_id;
+		// entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
+		// (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the two).
+		// The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0 fills
+		// player_slot+442 (team 1) / +444 (team 2) via lookup_entity_slot_and_pack_entry, serialized at
+		// serialize_entity_states_to_buffer @0x5030a0 name+21 = *(u16)(entity+348)]. It MUST be nonzero:
+		// a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0) match the first zero-initialized slot
+		// [orig: sub_57A270 @0x57a270 — index/type fields all 0 == packed_id 0], so its 0x0C handler
+		// SKIPS minimap allocation (`if (!HasEntity(NetId))` is false) and the remote player is left
+		// unregistered — the exact remote-only divergence behind the residual C2S 0x0F flood on the host
+		// player (0x0004), while the joiner's OWN player is immune (its minimap slot is set by local
+		// deploy, not this wire record). Golden retail sends 0x0200 (team 1) / 0x8207 (team 2, 0x8000
+		// team bit). Mirror that: a nonzero, per-entity-distinct, team-keyed id so HasEntity returns
+		// false and the joiner allocates a real slot. [golden diff + minimap grill 2026-07-01]
+		if (e.item_id == kPlayerInfantryTypeId) {
+			rec.net_id = static_cast<uint16_t>((e.team == 2 ? 0x8000u : 0u) | 0x0200u |
+			                                   (e.handle.slot() & 0x1Fu));
+		}
 		// playerClass (entity+0x294): a player MUST advertise a valid soldier class (5..9) or the
 		// JOINER's client skips body-anim channel (+0x188) registration at round-load and then cannot
 		// move/crouch/prone — the body motor early-bails on a NULL anim channel. The client resolves the

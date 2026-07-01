@@ -290,7 +290,10 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			break;
 		}
 		case 3: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner name-match) [orig: serialize_entity_states_to_buffer @0x5030a0]
-			const opennova::OrganicSpawnBatch full = opennova::netsim::build_pool0_organic_batch(*ctx.world);
+			// Pass THIS joiner's owned entity so ONLY its own record gets minimap_flags bit 0x01
+			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
+			const opennova::OrganicSpawnBatch full =
+					opennova::netsim::build_pool0_organic_batch(*ctx.world, conn.link.owned_entity);
 			world_pool_done = emit_paged_pool(0x0C, full.records.size(), [&](std::size_t off, std::size_t cnt) {
 				opennova::OrganicSpawnBatch p;
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),

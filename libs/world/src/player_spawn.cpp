@@ -31,6 +31,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.bms_id = static_cast<int32_t>(spawn.net_id);
     seed.kind = EntityKind::Organic;
     seed.item_id = kPlayerInfantryTypeId;
+    seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;
     seed.team = spawn.team;

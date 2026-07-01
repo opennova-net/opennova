@@ -100,7 +100,17 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// wire handle off owned_entity.packed and the team off the live entity (team @entity+344). Only the
 	// roster ORDER (player_slot) and the echoed name stay on conn.reply.
 	conn.reply.player_slot = player_slot;
-	if (!conn.player_name.empty()) conn.reply.player_name = conn.player_name;
+	// Golden parity: a player carries a NAME in BOTH its 0x0C organic record (entity name, read by
+	// build_pool0_organic_batch) and its 0x46 player-sync (conn.reply.player_name). The host's own
+	// loopback connection carries no ClientHello name, so fall back to the host profile name
+	// (config.player_name) — an EMPTY host-player name diverges from the golden retail host record
+	// (name="cdouglass") and leaves the joiner's roster slot / minimap tag unnamed. [golden diff 2026-07-01]
+	const std::string resolved_name =
+			!conn.player_name.empty() ? conn.player_name : ctx.config.player_name;
+	if (!resolved_name.empty()) {
+		conn.reply.player_name = resolved_name;
+		if (world::Entity *e = world.registry.get(h)) e->name = resolved_name;
+	}
 
 	conn.phase = ConnectionPhase::PlayerAdded;
 	return h;

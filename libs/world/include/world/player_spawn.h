@@ -17,11 +17,13 @@ class World;
 // The player infantry template id [orig: net-re §5.2b — type_id 0x14B9].
 inline constexpr int32_t kPlayerInfantryTypeId = 0x14B9;
 
-// The first pool-0 slot a player entity may occupy: the host reserves the low pool-0 slots for
-// system/loopback bookkeeping, so players land from slot 4. Canonical home for both the npruntime
-// host (np::kRetailPlayerMinEntitySlot re-exports this) and the Godot listen host
-// (nova_simulation.cpp). [orig: §5.2b spawn placement]
-inline constexpr uint16_t kRetailPlayerMinEntitySlot = 4;
+// The first pool-0 slot a player entity may occupy. Retail assigns players the LOWEST free pool-0
+// slots — a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the listen host's own player at
+// slot 0 and the joiner at slot 1 (roster slot N -> entity slot N when the mission has no pool-0 AI).
+// The prior value 4 (a mistaken "low slots reserved" assumption) offset every player by +4 vs retail.
+// Canonical home for both the npruntime host (np::kRetailPlayerMinEntitySlot re-exports this) and the
+// Godot listen host (nova_simulation.cpp). [orig: §5.2b spawn placement; Server_PlayerAdd @0x51cbc0]
+inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 
 // Spawn parameters for the host's own player. `yaw` is the mission yaw in degrees (the same
 // convention as a BMS heading). `net_id` is the SSN the caller assigns (default a reserved
@@ -37,6 +39,11 @@ struct PlayerSpawn {
     // own player carries the host dcb (the loopback connection_id); a joiner carries its 0x48-ack dcb.
     // [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
     uint32_t owner_connection_id = 0;
+    // The soldier class (5..9 MP personas; entity+0x294 playerClass). Default 8 (rifleman) — the class
+    // the client re-resolves the soldier model from at round-load [AnimMap_GetSlotPropertyInt(class,lod)].
+    // The spawn seed MUST carry it, or the World entity keeps player_class 0 (which build_pool0 masks to 8
+    // on the wire, but the host's own logic then reads 0). [net-re §5.2b; host-diag 2026-07-01]
+    uint8_t player_class = 8;
 };
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)

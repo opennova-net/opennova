@@ -53,7 +53,10 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
 
 // pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: serialize_entity_states_to_buffer @0x5030a0].
-OrganicSpawnBatch build_pool0_organic_batch(const world::World &w);
+// `recipient_own` is the handle of THIS recipient's owned player entity: its 0x0C record gets minimap_flags
+// bit 0x01 (the "recipient's own player" marker), every OTHER player gets 0x0100 — the per-recipient split a
+// same-map retail capture confirmed (2026-07-01). Pass an invalid handle for a recipient-agnostic batch.
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own = {});
 // pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: serialize_entity_pool_to_packet_0 @0x503940].
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
 // pool-2 static structures -> S2C 0x10 [orig: sub_5042F0]. Slot-aligned (start_index 0, empty-slot

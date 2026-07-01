@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -41,32 +42,16 @@ void admit_peer(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr 
 
 	if (link.announced || !conn->link.owned_entity.valid()) return; // wait for the spawn pipeline
 
-	OrganicSpawnBatch batch;
-	batch.entity_count = 1;
-	OrganicSpawnRecord rec;
-	rec.slot_id = static_cast<uint16_t>(conn->link.owned_entity.packed); // wire handle H
-	rec.has_body = true;
-	rec.item_type_id = 0x14B9;                  // player infantry template
-	rec.entity_name = ev.peer_name;             // the name-match key (the joiner's ClientHello.co)
-	rec.entity_flags = ev.self_id;              // entity+0x78: the dcb the client self-matches (0x48 ack)
-	rec.minimap_flags = 0x100;                  // entity+0x36 bit 0x100: local-player/minimap register
-	rec.pos_x = ev.pose.pos_x;
-	rec.pos_y = ev.pose.pos_y;
-	rec.pos_z = ev.pose.pos_z;
-	rec.orientation = static_cast<int32_t>(ev.pose.heading) << 16; // i16 wire heading -> 32-bit BAM
-	rec.team = ev.pose.team;
-	if (owner.ctx.world != nullptr) {
-		if (const world::Entity *e = owner.ctx.world->registry.get(conn->link.owned_entity)) {
-			rec.net_id = e->net_id;
-		}
-	}
-	batch.records.push_back(std::move(rec));
-
-	std::vector<uint8_t> dg;
-	if (frame_in_match_s2c(owner.ctx, peer, 0x0C, encode_organic_spawn_batch(batch), dg)) {
-		sock.send_to(peer, dg.data(), dg.size());
-		link.announced = true; // latch only on a successful frame+send (retry otherwise)
-	}
+	// The joiner's own pool-0 spawn record now ships IN-PHASE via build_pool0_organic_batch (the
+	// initial-state world stream: 0x10 -> 0x0D -> 0x0C -> 0x20), which already carries its name, dcb
+	// (entity+0x78), net_id, playerClass and per-recipient minimap_flags. A same-map retail↔retail
+	// ASH_I5A capture (2026-07-01) shows the host sends each player's 0x0C EXACTLY ONCE, in that phase
+	// order — NOT an early out-of-band 0x0C. The prior early send here was a duplicate that put a 0x0C on
+	// the wire right after the first static batch, diverging from retail's load order (load-sequence diff
+	// 2026-07-01). Latch announced so the pipeline proceeds; the in-phase stream is the single source.
+	(void)sock;
+	(void)ev;
+	link.announced = true;
 }
 
 void dispatch_event(HostOwner &owner, netsim::IDatagramSocket &sock, const PeerAddr &peer,

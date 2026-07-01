@@ -560,11 +560,12 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // ---------------------------------------------------------------------------
 
 // [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80] — round-trips through decode_player_sync.
-std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx) {
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool with_ack) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u8(ctx.player_slot);
-	w.u16(0x1CF7u); // field flags — the roster-sync field set
+	// field flags — the roster-sync field set; 0x4000 = ack (drives the client's roster walk to slot+1).
+	w.u16(static_cast<uint16_t>(0x1CF7u | (with_ack ? 0x4000u : 0u)));
 	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // entity slot
 	w.cstr_fixed(ctx.player_name, 32); // 0x0001 name
 	w.cstr_fixed(ctx.clan_tag, 16);    // 0x0002 team-string (clan)
@@ -576,6 +577,17 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx) {
 	w.u8(0);        // 0x0080
 	w.u8(1);        // 0x0400 quality
 	w.u32(0);       // 0x0800 entity_ref — null
+	return out;
+}
+
+std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(slot);
+	// 0x8000 removal + optional 0x4000 ack (golden's 0xC000): the client clears the slot and, with the
+	// ack bit, requests the next one — so the walk terminates at max_players. [orig: NapiNPClientMsg_PlayerSync
+	// @0x431370 — a 0x8000 record reads NO entity slot / fields, just [u8 slot][u16 flags].]
+	w.u16(static_cast<uint16_t>(0x8000u | (with_ack ? 0x4000u : 0u)));
 	return out;
 }
 

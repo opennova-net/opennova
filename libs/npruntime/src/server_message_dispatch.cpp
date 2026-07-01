@@ -369,12 +369,31 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			case 0x22: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
-				// (body byte 0); reply 0x46 for THAT slot so the joiner binds its own player (its 0x4D slot
-				// -> its real entity). A wrong/default slot leaves the client unable to map itself -> stuck
-				// undeployed, flooding C2S 0x0f. (golden f143->f144 slot 0; the joiner also syncs its own.)
+				// (body byte 0); reply 0x46 for THAT slot so the joiner binds it. The golden host ACK-WALKS
+				// the whole roster: it sets fieldFlags 0x4000 so the client re-requests slot+1, sending a
+				// real 0x46 for each occupied slot and a REMOVAL (0x8000) for empty ones, until max_players.
+				// Without the ack the joiner only ever binds its OWN slot, leaving other players (the host's
+				// serve-and-play player) unbound (residual 0x0F flood grill 2026-07-01).
 				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
-				const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
-				replies.push_back(make_protocol_message(0x46, encode_player_sync(prs)));
+				bool slot_has_player = false;
+				for (const NapiNPConnection &c : roster) {
+					if (c.phase >= ConnectionPhase::PlayerAdded && c.link.owned_entity.valid() &&
+					    c.reply.player_slot == req_slot) {
+						slot_has_player = true;
+						break;
+					}
+				}
+				// Keep the client walking while there are more slots below max_players; drop the ack at the
+				// last slot so the walk terminates cleanly.
+				const bool keep_walking =
+						static_cast<int>(req_slot) + 1 < static_cast<int>(config.max_players);
+				if (slot_has_player) {
+					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
+					replies.push_back(make_protocol_message(0x46, encode_player_sync(prs, keep_walking)));
+				} else {
+					replies.push_back(
+							make_protocol_message(0x46, encode_player_sync_removal(req_slot, keep_walking)));
+				}
 				break;
 			}
 			case 0x47: // re-broadcast entity-state request -> 0x75 [orig: handler @0x510ED0]

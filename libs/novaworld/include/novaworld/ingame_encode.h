@@ -212,7 +212,19 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // team/...). [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80; client NapiNPClientMsg_PlayerSync
 // @0x431370]. Per-field slot-state modeling (score/squad/side/timer) is the remaining D-NET-127 nicety;
 // the wire SHAPE is faithful and round-trips through decode_player_sync.
-std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx);
+//
+// `with_ack` sets fieldFlags bit 0x4000 — the ROSTER-WALK ack. On receipt the client re-requests the NEXT
+// slot (C2S 0x22 for slot+1) until slot >= max_players [orig: NapiNPClientMsg_PlayerSync @0x431370 tail:
+// `if (slot < byte_A860D1) QueueReliableMessage(0x22, slot+1)`]. The golden host ack-walks the whole
+// roster (0x5CF7 = 0x1CF7|0x4000) so EVERY player slot binds on the joiner; without it the joiner never
+// walks past its own slot and a remote player is left unbound (D-NET — residual 0x0F flood grill 2026-07-01).
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool with_ack = false);
+
+// tag=0x46 PLAYER-SYNC REMOVAL — a 3-byte record [u8 slot][u16 flags] with the 0x8000 removal bit set
+// (and 0x4000 ack to keep the walk going, matching golden's 0xC000). The client clears/unlinks that slot
+// [orig: NapiNPClientMsg_PlayerSync @0x431370 `if (fieldBitmask & 0x8000) PlayerSlot_ClearAndUnlink`].
+// Sent for empty roster slots the client's ack-walk requests, so the walk terminates cleanly at max_players.
+std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = true);
 
 // tag=0x51 PLAYER-SPAWN — [orig: write_entity_packet @0x506bb0] 8-byte layout:
 // [u16 requested_index (echoed from the C2S 0x29)][u16 handle = pool<<12|slot][u8 team]
