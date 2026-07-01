@@ -33,6 +33,20 @@ Read these first for any networking task:
 - Treat `plan/status.md` and source as newer than old phase notes when they
   disagree.
 
+## Consolidated net core (ADR 0013)
+
+- **Message catalog is the single source of truth**:
+  `libs/novaworld/include/novaworld/ingame_message_catalog.h` maps `(dir, tag) → name →
+  coverage → decoder → doc §`, shared by `nw_pp` and the `nw_message_coverage` gate. Add a
+  message there first; `nw_pp --coverage <capture>` ranks the undecoded backlog by volume.
+- **Capture → validate-vs-golden loop**: host from the Godot game, `dumpcap`, then
+  `scripts/net/diff_vs_golden.ps1 -Ours <cap> -Golden .scratch/golden/retail-gameplay-session.pcapng`
+  (GAP = worklist, SPURIOUS = regression). Pin in CI with the env-gated `nw_golden_diff`
+  ctest. Full loop in `scripts/net/README.md`.
+- **Server state authority is `world::EntityRegistry`** — the net layer reads handle/pose/
+  team *through* it, never a parallel cache. Host bring-up is the one shared
+  `np::start_host_session` helper. See `docs/adr/0013-consolidated-net-core.md`.
+
 ## Task Routing
 
 - Packet mismatch or retail interop failure: start with

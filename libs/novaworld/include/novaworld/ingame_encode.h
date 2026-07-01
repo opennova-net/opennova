@@ -12,9 +12,9 @@
 // the §5.2a "Server-side S2C serializer map" pairs each load-track tag with its
 // originating serializer). Field names mirror the ingame_decode.h structs.
 //
-// Per ADR 0003 / ADR 0011 §3 these encoders replace the map-locked fixture
-// blobs in replication_min.cpp: every byte is produced from the in-memory state
-// model, never carried through from a capture.
+// Per ADR 0003 / ADR 0011 §3 these encoders replace the old map-locked fixture
+// blobs: every byte is produced from the in-memory replication model, never
+// carried through from a capture.
 //
 // [orig: serialize_entity_pool_to_packet   @ 0x503460]  — S2C 0x20 bulk pool-3 sync.
 // [orig: serialize_entity_pool_to_packet_0 @ 0x503940]  — S2C 0x0D pool spawn (TODO).
@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "novaworld/ingame_decode.h"
-#include "novaworld/replication_min.h" // PlayerReplicationState — the §5.1 reply encoders' host-side input
+#include "novaworld/replication_model.h" // PlayerReplicationState — the §5.1 reply encoders' host-side input
 
 namespace opennova {
 

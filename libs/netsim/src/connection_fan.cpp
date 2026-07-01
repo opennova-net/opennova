@@ -14,7 +14,7 @@ namespace {
 
 // The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor + one tag=1 compact record
 // per replicated entity, each position compressed relative to the anchor (network_compress_fixedpoint).
-// Lifted into netsim from the retired replication_min build_tag_0a_world_reference (P8); the wire bytes
+// Lifted into netsim from the retired build_tag_0a_world_reference (P8); the wire bytes
 // are unchanged (decode_frame_update round-trips them). [orig: NapiNPClientMsg_0x00A @0x42FEC0 /
 // NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
@@ -67,7 +67,10 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		const uint8_t yaw_byte = uint8_t((uint32_t(e.euler_z) + 0x00800000u) >> 24);
 		const int16_t yaw_bam16 = int16_t((uint32_t(e.euler_z) + 0x00008000u) >> 16);
 		FrameUpdateRecord rec;
-		rec.handle = uint16_t((uint16_t(e.pool) << 12) | (e.slot & 0x0FFFu));
+		// The authoritative wire handle carried off the registry Entity (snapshot_of), not
+		// re-derived here — EntityRegistry stays the one source of handle truth. Equals the
+		// former (pool<<12 | slot) reconstruction by construction, so the bytes are unchanged.
+		rec.handle = e.wire_handle;
 		rec.type_id = e.type_id;
 		rec.cls = e.entity_class;
 		switch (e.entity_class) {

@@ -641,22 +641,20 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 		settings_.max_players = 1;
 	}
 
-	np::set_connection_mode(ctx_, np::ConnectionMode::HostClient); // mode 3 (is_host + is_client)
-	np::set_transport_mode(ctx_, host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless);
-	// create_session registers the host's own type-2 loopback (self_id_seen latched) + Server_InitNewRoundState.
-	np::create_session(ctx_, settings_, np::SessionStartup{}, &host_loop_);
-	// configure_session_runtime once per match — preserves the type-2 loopback, drops only type-1 nodes.
-	// A LAN host feeds the §5.1 reactive-reply config (server name / mission / player name) for the
-	// joiner replies; SP needs none. (The §5.1 0x0B BMS-header body reads ctx_.mission directly.)
-	np::configure_session_runtime(ctx_, host_listen_ ? host_session_config_
-	                                                 : opennova::np::SessionReplyConfig{});
+	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
+	// (mode 3 -> set_transport_mode -> create_session(&host_loop_) [+ Server_InitNewRoundState] ->
+	// configure_session_runtime; then, when serve_and_play, FAITHFUL auto-spawn of the host's own player
+	// at the start marker + latch its loopback in-match so Server_TickUpdate fans it the per-frame
+	// whole-world 0x0A its local view renders from). host_owner_.host_loopback / .serve_and_play + ctx_.world
+	// were set above; this replaces the copy that had drifted out of the helper. [orig: SinglePlayer_StartMission
+	// @0x561af0]. A LAN host feeds the §5.1 reactive-reply config for the joiner replies; SP needs none.
+	np::HostConfig host_cfg;
+	host_cfg.settings = settings_;
+	host_cfg.socket_mode = host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless;
+	host_cfg.reply_config = host_listen_ ? host_session_config_ : opennova::np::SessionReplyConfig{};
+	host_cfg.serve_and_play = serve_and_play;
+	np::start_host_session(host_owner_, host_cfg);
 	if (serve_and_play) {
-		// FAITHFUL auto-spawn: the host's own player at the start marker (§5.2c), binding the loopback's
-		// owned_entity (the 0x0A anchor) and publishing World::cached.local_player.
-		np::Server_ProcessPendingPlayerSpawns(ctx_, *world_);
-		// Latch the host loopback in-match so Server_TickUpdate fans it the per-frame whole-world 0x0A its
-		// local view renders from (no §5.2a self-stream needed — it holds the authoritative world).
-		np::mark_host_client_in_match(ctx_);
 		// The host's own client view (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
 		// each frame into the ClientState the present pass reads.
 		runtime_ = std::make_unique<np::ClientRuntime>(host_loop_);

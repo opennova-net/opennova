@@ -51,6 +51,12 @@ struct PlayerReplicationState {
 struct GameEntitySnapshot {
 	uint8_t pool = 2;
 	uint16_t slot = 0;
+	// The packed wire handle (pool<<12 | slot) carried straight off the registry Entity
+	// (world::Entity::handle.packed) so the per-frame S2C 0x0A builder emits the authoritative
+	// handle rather than re-deriving the bit-packing at emit time. Filled by snapshot_of (the
+	// sole producer feeding the 0x0A fan); pool/slot stay for consumers that key on the split
+	// fields. Value equals (pool<<12 | slot) by construction, so the wire bytes are unchanged.
+	uint16_t wire_handle = 0;
 	uint16_t type_id = 0;
 	uint16_t flags = 0;
 	uint8_t team = 0;

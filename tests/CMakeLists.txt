@@ -1200,6 +1200,19 @@ target_compile_definitions(nw_capture_decoder_test PRIVATE
     DEFAULT_PROBE3AGAIN_PCAP="${CMAKE_SOURCE_DIR}/.scratch/probe3_again.pcapng")
 add_test(NAME nw_capture_decoder COMMAND nw_capture_decoder_test)
 
+# Golden coverage diff — compare OUR freshly captured retail-join session
+# (NW_GOLDEN_OURS, produced live by scripts/net/diff_vs_golden.ps1's capture leg)
+# against a golden retail<->retail capture, by message coverage per (dir,tag). A
+# missing or spurious S2C tag fails the build; the CI-gated counterpart to the
+# diff_vs_golden.ps1 harness. Skips clean when NW_GOLDEN_OURS is unset (no
+# committed "ours" oracle). Golden defaults to the gitignored .scratch/golden.
+add_executable(nw_golden_diff_test novaworld/nw_golden_diff_test.cpp)
+target_link_libraries(nw_golden_diff_test PRIVATE opennova_novaworld opennova_napi opennova_novacrypto opennova_app_common)
+target_include_directories(nw_golden_diff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_golden_diff_test PRIVATE
+    DEFAULT_GAMEPLAY_PCAP="${CMAKE_SOURCE_DIR}/.scratch/golden/retail-gameplay-session.pcapng")
+add_test(NAME nw_golden_diff COMMAND nw_golden_diff_test)
+
 # nw_replay role partition — pins that the replay tool splits a session into host
 # + client roles from the NAPI session opcode + UDP ports, ignores gate/SSDP
 # noise, and preserves each role's handshake. Compiles the partition unit

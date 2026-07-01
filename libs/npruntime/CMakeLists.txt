@@ -20,7 +20,7 @@ target_include_directories(opennova_npruntime
 # Strictly Godot-free and socket-free: the owner (apps/nw_server or the Godot binding) pumps
 # bytes through netsim::ISessionTransport.
 # opennova_novaworld is already transitive via opennova_netsim; name it explicitly because the server
-# legs + the reactive reply dispatcher use its codecs (protocol_message, ingame_decode, replication_min
+# legs + the reactive reply dispatcher use its codecs (protocol_message, ingame_decode, replication_model
 # POD structs) directly (direct-dependency hygiene). No cycle: novaworld does not depend on npruntime.
 # opennova_world / opennova_mission are transitive via opennova_netsim; name them explicitly because
 # P3's spawn pipeline + initial-state burst use world::spawn_player / select_player_spawn and

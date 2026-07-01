@@ -88,16 +88,17 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &reply) {
 	// [orig: HostSessionAccept::pose_from_session]
 	HostJoinerPose p;
-	if (reply.client_pos_valid) {
+	const PreSpawnJoinerPose &pose = reply.pre_spawn_pose;
+	if (pose.valid) {
 		// The joiner already sent a C2S 0x0C — spawn it where it reported.
 		p.pos_valid = true;
-		p.entity_handle = reply.client_entity_handle;
-		p.item_type_id = reply.client_item_type_id != 0 ? reply.client_item_type_id : 0x14B9u;
-		p.pos_x = static_cast<int32_t>(reply.client_pos_x);
-		p.pos_y = static_cast<int32_t>(reply.client_pos_y);
-		p.pos_z = static_cast<int32_t>(reply.client_pos_z);
-		p.heading = reply.client_heading;
-		p.pitch = reply.client_pitch;
+		p.entity_handle = pose.entity_handle;
+		p.item_type_id = pose.item_type_id != 0 ? pose.item_type_id : 0x14B9u;
+		p.pos_x = static_cast<int32_t>(pose.pos_x);
+		p.pos_y = static_cast<int32_t>(pose.pos_y);
+		p.pos_z = static_cast<int32_t>(pose.pos_z);
+		p.heading = pose.heading;
+		p.pitch = pose.pitch;
 	} else {
 		// No uplink yet — fall back to the host-advertised spawn from the session config.
 		const SessionReplyConfig &cfg = ctx.session_config;

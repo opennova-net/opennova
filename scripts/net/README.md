@@ -17,6 +17,7 @@ All output goes to `<repo>\.scratch\` (gitignored). Never commit raw captures,
 | `capture.ps1` | `-Action start\|stop -Tag <t>` — dumpcap to `.scratch\<tag>-<stamp>.pcapng`. Defaults to the loopback adapter; `-Iface` for a real NIC. |
 | `decode.ps1` | Decode a `.pcapng`/`.sph` with `nw_pp` (+ optional `nw_replay --print-roles`). Finds the tool in Release or Debug. |
 | `launch_retail.ps1` | Phase 0: launch stock `Jointops.exe` with `/connectlog` + `/profile` oracle flags (host/join still manual). Needs `-GameDir` or `$env:JO_GAME_DIR`. |
+| `diff_vs_golden.ps1` | `-Ours <our.pcapng> -Golden <golden.pcapng> [-Items <items.def>]` -- decode both with `nw_pp --histogram` and report per-(direction, wire tag) coverage: GAP (retail emits it, we don't), SPURIOUS (we emit an S2C tag retail doesn't), plus any messages in ours that did not decode cleanly. Writes `<our>.vs-golden.txt`; exits non-zero on any gap/spurious/decode-failure. |
 
 (Phase 2 adds `tools/retail_driver` to drive retail host/join unattended; Phase 3
 adds `host_opennova.ps1`/`join_opennova.ps1` and the `run_*` orchestrators.)
@@ -67,3 +68,43 @@ per-frame-update records can't be length-resolved and print `(DECODE INCOMPLETE)
 Each has a `.pcapng.txt` decode (regenerate with `decode.ps1 -Items <ITEMS.DEF>`).
 These are the oracle to diff OpenNova-host-vs-retail-joiner against when chasing the
 join "floating / no map entities" bug.
+
+## Capture + validate-vs-golden loop (the consolidation harness)
+
+Capture the game traffic between a retail client and OUR Godot game host, then diff
+its message coverage against a golden retail capture. The game server is the opennova
+Godot game (it owns the in-match `World` + the 62 Hz host loop); the docker NovaWorld
+stack is only matchmaking / NAT rendezvous, so capture the game session itself.
+
+```powershell
+pwsh -File scripts\net\detect_capture.ps1                      # expect CAPTURE_READY=loopback
+pwsh -File scripts\net\capture.ps1 -Action start -Tag ov-host  # dumpcap (loopback; -All for a real NIC)
+# bring up matchmaking, host from the Godot game, join from the retail client, play, deploy:
+#   docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.dev.yml up --build
+#   (Godot game) Multiplayer -> Host ;  (retail client) browse NovaWorld -> Join
+pwsh -File scripts\net\capture.ps1 -Action stop -Tag ov-host
+pwsh -File scripts\net\diff_vs_golden.ps1 `
+     -Ours <printed CAPTURE_FILE> `
+     -Golden .scratch\golden\retail-gameplay-session.pcapng `
+     -Items ~\Desktop\JOX\ITEMS.DEF
+```
+
+`diff_vs_golden.ps1` prints the coverage table and writes `<Ours>.vs-golden.txt`:
+the **GAP** rows are the prioritized worklist for aligning the server (replication
+tags retail sends that ours doesn't), **SPURIOUS** rows are wire-illegal regressions,
+and **DECODE FAILURES** are our own malformed emissions. Pass `--items` so the per
+-frame `0x0A` records length-resolve (without it they print `DECODE INCOMPLETE` and
+inflate the failure count).
+
+To pin a result in CI, point the env-gated `nw_golden_diff` ctest at the captured
+file (it skips clean when unset, like the other capture-gated tests):
+
+```bash
+NW_GOLDEN_OURS=.scratch/ov-host-<stamp>.pcapng \
+  ctest --test-dir build -C Release -R nw_golden_diff --output-on-failure
+```
+
+It fails the build on any non-deferred GAP or any spurious S2C tag; knowingly
+deferred tags live in `kDeferredGaps` (with a `D-NET-*` reference) in
+`tests/novaworld/nw_golden_diff_test.cpp`, never silently skipped. `nw_pp
+--histogram <capture>` emits the same per-(dir,tag) `HIST` lines by hand.

@@ -140,8 +140,9 @@ merge. Status 2026-06-12:
 ADR: PN=JOINTOPERATIONS gameplay traffic enters the single World tick as a
 `NetSystem : ISystem` behind the existing `INetCommandSink` boundary in
 `libs/world/world.h`, preserving determinism and the 62-frame cadence. The §4 msginfo
-tables are the wire enumeration. `game_session`, `game_server_runtime`,
-`replication_min`, and `libs/bms` stay experimental pending that ADR.
+tables are the wire enumeration. `game_session`, `game_server_runtime`, the replication
+model (the POD structs since consolidated into `replication_model.h`), and `libs/bms` stay
+experimental pending that ADR.
 
 ## GameWorld rename (PR 2)
 

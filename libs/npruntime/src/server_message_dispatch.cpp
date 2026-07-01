@@ -2,7 +2,7 @@
 
 #include <novaworld/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_spawn / encode_player_list (§5.1)
-#include <novaworld/replication_min.h> // PlayerReplicationState (POD, kept) — the reply builders' input
+#include <novaworld/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <algorithm>
 #include <cstring>
@@ -13,7 +13,7 @@ namespace opennova::np {
 namespace {
 
 // ---------------------------------------------------------------------------
-// Byte helpers (relocated verbatim from the retired game_session.cpp / replication_min.cpp). The §5.1
+// Byte helpers (relocated verbatim from the retired game_session.cpp reply builders). The §5.1
 // identity bodies (0x7A PCID, 0x7B session info) are now FAITHFUL ports of the witnessed serializers
 // (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
 // 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializeWeaponOverlaySlotState @0x505e80 —
@@ -184,7 +184,7 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 }
 
 // ---------------------------------------------------------------------------
-// §5.1 reply bodies — roster / loadout / spawn-confirm (relocated from replication_min.cpp).
+// §5.1 reply bodies — roster / loadout / spawn-confirm (relocated from the retired reply builders).
 // ---------------------------------------------------------------------------
 
 // tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_0x016 @0x42FAE0] Enumerates the LIVE player roster — the
@@ -299,15 +299,16 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 		if (decode_player_extended_uplink(payload.data() + header_consumed,
 		                                  payload.size() - header_consumed, uplink, body_consumed) &&
 		    header_consumed + body_consumed == payload.size()) {
-			st.client_entity_handle = hdr.handle;
-			st.client_item_type_id = hdr.item_type_id;
-			st.client_vehicle_handle = uplink.vehicle_handle;
-			st.client_pos_x = static_cast<uint32_t>(uplink.pos_x);
-			st.client_pos_y = static_cast<uint32_t>(uplink.pos_y);
-			st.client_pos_z = static_cast<uint32_t>(uplink.pos_z);
-			st.client_heading = uplink.heading;
-			st.client_pitch = uplink.pitch;
-			st.client_pos_valid = true;
+			PreSpawnJoinerPose &pose = st.pre_spawn_pose;
+			pose.entity_handle = hdr.handle;
+			pose.item_type_id = hdr.item_type_id;
+			pose.vehicle_handle = uplink.vehicle_handle;
+			pose.pos_x = static_cast<uint32_t>(uplink.pos_x);
+			pose.pos_y = static_cast<uint32_t>(uplink.pos_y);
+			pose.pos_z = static_cast<uint32_t>(uplink.pos_z);
+			pose.heading = uplink.heading;
+			pose.pitch = uplink.pitch;
+			pose.valid = true;
 		}
 	}
 }

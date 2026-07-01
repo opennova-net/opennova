@@ -40,16 +40,19 @@
 
 #include "pcap_reader.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace opennova;
@@ -1107,6 +1110,75 @@ bool print_tag_00_kv(const std::vector<uint8_t> &body) {
 	return true;
 }
 
+// --- histogram mode (machine-readable coverage; --histogram) ----------------
+//
+// Tally per (dir, tag) message count + total inner-payload bytes, decoupled from
+// the pretty-printer's per-tag layout so the golden-diff harness
+// (scripts/net/diff_vs_golden.ps1) and CI parse a stable contract regardless of
+// how the human renderer evolves. One line per (dir, tag):
+//
+//   HIST <dir> 0x<tag> count=<n> bytes=<total> name=<catalog-name-or-?>
+//
+// followed by a TOTAL line. Tags are the low byte (the 0x1000 settings-update
+// display bit is masked off — a settings update is still the same wire tag).
+struct HistCell { long count = 0; long bytes = 0; };
+std::map<std::pair<char, int>, HistCell> g_hist;
+
+void hist_tally(char dir, int tag, size_t payload_len) {
+	HistCell &c = g_hist[{dir, tag & 0xFF}];
+	c.count += 1;
+	c.bytes += long(payload_len);
+}
+
+void hist_emit() {
+	long total_msgs = 0, total_bytes = 0;
+	for (const auto &kv : g_hist) {
+		const char dir = kv.first.first;
+		const int tag = kv.first.second;
+		const char *name = tag_label(dir, tag);
+		std::printf("HIST %c 0x%02x count=%ld bytes=%ld name=%s\n", dir, tag,
+		            kv.second.count, kv.second.bytes, name ? name : "?");
+		total_msgs += kv.second.count;
+		total_bytes += kv.second.bytes;
+	}
+	std::printf("TOTAL msgs=%ld bytes=%ld tags=%zu\n", total_msgs, total_bytes,
+	            g_hist.size());
+}
+
+// --coverage: join the histogram with the shared catalog's coverage class and
+// rank the DECODE BACKLOG — every (dir,tag) the capture carries that has no
+// structured decoder yet (PrinterOnly / Unhandled / uncatalogued), ordered by
+// volume, so "what should we field-map next?" is one command, not a manual cross
+// of the histogram against docs. The catalog (ingame_message_catalog.h) is the
+// single source of truth shared with nw_message_coverage; this just reports it.
+void coverage_emit() {
+	const char *cov_name[] = {"Decoded", "PrinterOnly", "Unhandled"};
+	// Backlog = seen tags whose coverage is not Decoded, sorted by count desc.
+	std::vector<std::pair<long, std::string>> backlog;
+	long covered = 0, partial = 0;
+	for (const auto &kv : g_hist) {
+		const char dir = kv.first.first;
+		const uint8_t tag = uint8_t(kv.first.second);
+		const MsgCatalogEntry *e = lookup_ingame_message(dir, tag);
+		const bool decoded = e && e->coverage == MsgCoverage::Decoded;
+		if (decoded) { covered += kv.second.count; continue; }
+		partial += kv.second.count;
+		const char *cls = e ? cov_name[int(e->coverage)] : "UNCATALOGUED";
+		const char *name = e ? e->name : "?";
+		char buf[160];
+		std::snprintf(buf, sizeof(buf), "%c 0x%02x %-22s %-12s count=%ld%s%s", dir,
+		              tag, name, cls, kv.second.count, e && e->note ? "  " : "",
+		              e && e->note ? e->note : "");
+		backlog.push_back({kv.second.count, buf});
+	}
+	std::sort(backlog.begin(), backlog.end(),
+	          [](const auto &a, const auto &b) { return a.first > b.first; });
+	std::printf("=== decode backlog (tags present with no structured decoder, by volume) ===\n");
+	for (const auto &b : backlog) std::printf("BACKLOG %s\n", b.second.c_str());
+	std::printf("COVERAGE decoded_msgs=%ld undecoded_msgs=%ld backlog_tags=%zu\n",
+	            covered, partial, backlog.size());
+}
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload, int session = 0) {
 	const char *label = tag_label(dir, tag);
@@ -1221,12 +1293,19 @@ int main(int argc, char *argv[]) {
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
 	bool stream_mode = false;
+	bool histogram_mode = false;
+	bool coverage_mode = false;
 	long max_frames = 0; // 0 = unlimited
 	long skip_frames = 0;
 	for (int i = 1; i < argc; ++i) {
 		const char *a = argv[i];
 		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
 			items_path = argv[++i];
+		} else if (std::strcmp(a, "--histogram") == 0) {
+			histogram_mode = true;
+		} else if (std::strcmp(a, "--coverage") == 0) {
+			coverage_mode = true;
+			histogram_mode = true; // coverage joins the histogram tally with the catalog
 		} else if (std::strcmp(a, "--stream") == 0) {
 			stream_mode = true;
 		} else if (std::strcmp(a, "--max-frames") == 0 && i + 1 < argc) {
@@ -1246,8 +1325,13 @@ int main(int argc, char *argv[]) {
 	if (!path || !*path) {
 		std::fprintf(stderr,
 		             "usage: nw_pp <capture-path> [--items <items.def>] [--stream] "
-		             "[--max-frames N] [--skip N] [0xNN ...]\n"
+		             "[--histogram] [--max-frames N] [--skip N] [0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
+		             "       --histogram emits one machine-readable 'HIST <dir> "
+		             "0x<tag> count=.. bytes=.. name=..' line per (dir,tag) + a "
+		             "TOTAL line (for scripts/net/diff_vs_golden.ps1 + CI)\n"
+		             "       --coverage ranks the DECODE BACKLOG: tags present in "
+		             "the capture with no structured decoder yet, by volume\n"
 		             "       --stream decodes lazily (flat memory) for multi-GB "
 		             "captures; --skip N starts after N datagrams; --max-frames N "
 		             "stops after N (implies --stream)\n"
@@ -1284,6 +1368,7 @@ int main(int argc, char *argv[]) {
 			cd.payload = pk.payload; // copy: reference only valid during the callback
 			for (const auto &m : decoder.push(cd)) {
 				if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
+				if (histogram_mode) { hist_tally(m.dir, m.tag, m.payload.size()); continue; }
 				const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
 				print_payload(m.dir, m.frame_index, display_tag, m.payload, m.session);
 			}
@@ -1304,6 +1389,8 @@ int main(int argc, char *argv[]) {
 		             "streamed %ld datagrams from %s%s (through frame %ld)\n",
 		             seen, path, stopped_early ? " [budget reached]" : "",
 		             printed_through);
+		if (coverage_mode) coverage_emit();
+		else if (histogram_mode) hist_emit();
 		return 0;
 	}
 
@@ -1356,8 +1443,11 @@ int main(int argc, char *argv[]) {
 
 	for (const auto &m : decode_capture_to_messages(caps)) {
 		if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
+		if (histogram_mode) { hist_tally(m.dir, m.tag, m.payload.size()); continue; }
 		const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
 		print_payload(m.dir, m.frame_index, display_tag, m.payload, m.session);
 	}
+	if (coverage_mode) coverage_emit();
+	else if (histogram_mode) hist_emit();
 	return 0;
 }

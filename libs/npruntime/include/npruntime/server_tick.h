@@ -1,6 +1,6 @@
 #pragma once
 
-#include <novaworld/replication_min.h> // PlayerReplicationState (opennova::)
+#include <novaworld/replication_model.h> // PlayerReplicationState (opennova::)
 
 #include "npruntime/napi_np_server_ctx.h" // NapiNPServerCtx
 

@@ -167,10 +167,12 @@ struct NapiNPServerCtx {
 	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;
 
-	// Load / spawn gates (§5.1 / §5.2). spawn_success_gate <- dword_24C1928 (drop loading screen);
-	// loading_progress <- dword_A82370 (walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land).
+	// Spawn gate (§5.2). spawn_success_gate <- dword_24C1928 (drop the loading screen; cleared later by
+	// the per-frame 0x0A flags1 & 0x01, §5.2a step 4). The load-progress counter dword_A82370
+	// (g_loading_progress, walks 3 -> 5 -> 6 as 0x0D/0x20/0x45 land) is CLIENT state, not host
+	// bookkeeping — the host's spawn/load clock is the per-connection InitialStateBurst cursor
+	// (conn.burst). It was write-only here and is removed (D-NET-132).
 	uint32_t spawn_success_gate = 0;
-	uint32_t loading_progress = 0;
 
 	// The §5.1 reactive-reply config (server / mission / player identity + advertised spawn), read by
 	// the gameplay-message dispatcher (server_message_dispatch.h, dispatch_session_replies). Seeded by

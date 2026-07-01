@@ -3739,7 +3739,7 @@ Server_TickUpdate @0x51d7e0; Game_ProcessMainFrame @0x5266b4]`
 the emit step with no resolvable owned entity (the host's own loopback, or a peer despawned mid-match)
 anchors its 0x0A there, so a receiver decompresses every entity offset by the gap to the real local
 position. Today the only caller is the golden test (which binds an owned entity); revisit before a
-production driver fans to an owned-entity-less connection. `[orig: replication_min.h dvxi5 defaults]`
+production driver fans to an owned-entity-less connection. `[orig: replication_model.h dvxi5 defaults]`
 **RESOLVED (P5, §5.44):** the host's own loopback binds `owned_entity` to the host player
 (`Server_BuildPlayerInfoAndAdd`), so it never anchors on the dvxi5 fallback; the fallback now bites only
 the no-owned-entity edge (a despawn mid-match), still deferred.
@@ -3907,7 +3907,7 @@ captured-from-observation fixtures verbatim through P8, a tracked divergence —
 **D-NET-127** [reimpl divergence, DOCUMENTED] **The reactive §5.1/spawn-confirm reply bodies are
 captured-from-observation, structurally faithful but byte-divergent from the witnessed serializers.**
 `game_session.cpp`'s `build_tag02_push`/`build_tag7b_session_summary`/`build_tag60_server_info`/
-`build_tag64_mission_metadata` and the `replication_min` `build_tag_46`/`build_tag_51`/`build_tag_5a`
+`build_tag64_mission_metadata` and the reply-builder `build_tag_46`/`build_tag_51`/`build_tag_5a`
 fixtures, plus the `0x0E`→`add_game_start_bundle` (`0x5A×2/0x42/0x0A/0x0F/0x4D/0x61/0x3E/0x40…/0x6F…/
 0x6E/0x57/0x4E/0x58/0x5D/0x4C`), reproduce the *expected reply tags in the witnessed order* but with
 captured bytes. The witnessed join burst is **leaner** — `Server_OnPlayerJoin @0x51a680` (§5.43,
@@ -4275,6 +4275,69 @@ class flag relevant to §5.6 is `ItemDef[+84] & 0x100000`. Open ItemDef follow-u
 `entity[+456]` (post-physics handler / model ptr?), `+0x148` init-callback fn ptr (with
 recursion guard vs `Entity_InitFromItemDef` itself), `+0x158` → `entity[+452]`, 28 unknown
 bytes after `armorMax`.
+
+### 6.9 `CAdminServer` — remote admin/RCON console + the authoritative server-state field map
+
+`CAdminServer_*` (30 methods, `0x402bf0`–`0x406f50`) is the original engine's **remote
+admin/RCON server**: a TCP listener (`[orig: CAdminServer_Listen @ 0x406e00]` →
+`AcceptConnection @0x405580` → `HandleLogin @0x405870`) that parses text commands
+(`[orig: CAdminServer_DispatchCommand @ 0x406720]`) and reads/writes live server state.
+It is **not** the in-match game-state owner (that is the listen-server host, §5.0/§5.2a) —
+but because its `SET`/`STATUS`/`GET` verbs read and write the *same* globals the host
+advertises and the config save mirrors, it is the single best **enumeration** of what
+"server state" the engine actually keeps. Use it as the spec for our consolidated
+`GameConfig` + authoritative server state (faithful-port target; ADR 0013).
+
+**Settable config — `[orig: CAdminServer_HandleSetCommand @ 0x405a60]`.** Each `SET <key>
+<val>` writes a **runtime global** AND a **persisted shadow** (`dword_2550xxx`, flushed by
+`[orig: Game_SaveConfig @ 0x54c490]`); the rule *flags* pack into one bitfield
+`g_rules_flags @ 0x24D1E34` (shadow `0x2550A04`). On a name/password change the host
+recomputes the wire-advertised `np_protocol->server_flags = game_settings.game_type` and
+`build_flags = [orig: CNapiServerConfig_BuildFlags @ 0x4c4dc0]` (§6.5). Identity strings
+route into `g_napi_np_ctx.game_settings` (§6.4) via `CAITask_SetName @0x402bd0` /
+`CAdminServer_SetSidePassword @0x402bf0`.
+
+| `SET` key | runtime global | notes |
+|---|---|---|
+| `ServerName` | `g_ServerName @ 0x2550A5D` (32 B) | also → `np_protocol->nstmout_path` (advertised name) |
+| `ServerPassword` | `g_ServerPassword @ 0x2550A08` (17 B) | empty arg clears; → `game_settings` |
+| `SideAPassword` / `SideBPassword` | `g_SideAPassword @ 0x2550A3B` / `g_SideBPassword @ 0x2550A4C` (17 B) | per-side join gate (§3 reject 19/20) |
+| `GameTime` | `g_respawn_time @ 0x24D2140` | also sets `dword_24C1958 = 3720 * val` (frame budget) |
+| `KOTHLimit` | `g_time_limit_minutes @ 0x24D2144` | |
+| `KillLimit` | `g_score_limit @ 0x24D2134` | **name/global swap**: `KillLimit`→`score_limit` |
+| `MaxScore` | `g_kill_limit @ 0x24D2138` | **name/global swap**: `MaxScore`→`kill_limit` |
+| `MaxFriendlyKills` | `g_max_friendly_kills @ 0x24D2244` | |
+| `StartDelay` | `g_StartDelay @ 0x24D2160` | |
+| `AutoBalanceOnRecycle` | `g_autobalance_enabled @ 0x24D2190` | |
+| `PuntVote`/`VotePercent`/`VoteNumPlayersReq` | `g_votekick_enabled @ 0x24D226C` / `g_votekick_percent @ 0x24D2274` (float) / `g_votekick_min_players @ 0x24D2270` | |
+| `ChangeTeamInterval`/`Penalty`/`Delay` | `0x24D2280` / `0x24D2284` / `g_capture_duration @ 0x24D2248` | |
+| `DoMinPingCheck`/`MinPing`/`DoMaxPingCheck`/`MaxPing` | `0x24D21B0`/`0x24D21AC`/`0x24D21B8`/`0x24D21B4` | |
+| `FatBullets`/`OneShotKill`/`ArmoryTimer` | `0x24D21A0`/`0x24D219C`/`g_ArmoryTimer @ 0x25510F0` | |
+| `Tracers` | `g_rules_flags & 0x1` (inverted) | flag bit |
+| `ChangeTeam` | `g_rules_flags & 0x4` | flag bit |
+| `FriendlyFire` | `g_rules_flags & 0x200` (inverted) | flag bit |
+| `FriendlyTags` | `g_rules_flags & 0x400` (inverted) | flag bit |
+| `TeamTriggerClaymore` | `g_rules_flags & 0x8000` | flag bit |
+
+**Live state — `[orig: CAdminServer_HandleStatus @ 0x402e30]`.** The status read enumerates
+the *runtime* server state, and is load-bearing for the "pools / entities / bookkeeping"
+model: the **roster is the player-entity slot array itself**, not a connection-side cache.
+`STATUS` walks `capacity @ 0x24C0CA4` slots from `g_player_slots @ 0x24C0CA8` (stride
+`0x18E88` bytes), and for each active slot reads name/team/class/kills/deaths/ping **off the
+entity** (`name @ entity-32`, `slot# @ entity-13 dwords`, `team @ entity+344`, `class`,
+kills/deaths via `[orig: CRenderState_GetFieldByIndex @ 0x52d7d0]` fields 6/4, ping). Plus
+the session header: active server name `0x24D1FA4`, uptime `[orig: CSessionTimer @ 0x24E3E88]`,
+TOD `Env_CurTimeFixed24`, current map `g_map_file_name @ 0x24D1F3E`, `g_GameType @ 0x24D2128`,
+and the mission-rotation queue `g_entity_action_queue @ 0xC86FDC` (current/next/one-shot/
+flipped/2x flags) against `missionListOut @ 0x2551118` (stride 4584).
+
+**Consequence for the reimpl (D-NET-132, ADR 0013):** team/class/slot/kills/deaths are
+derived from the authoritative pool-0 entity, so our `NapiNPConnection` should hold the
+entity *handle* (`link.owned_entity`) as the single binding and read those fields through it
+— not duplicate them in a per-connection reply cache. Our `ServerRules` + `NapiGameSettings`
+(§6.3/6.4) collapse to one `GameConfig` mirroring the `SET` field set above; the persisted
+`dword_2550xxx` shadow + `g_rules_flags` packing are a config-file concern we model only if
+we add cfg persistence.
 
 ## 7. Landed architecture
 

@@ -32,6 +32,7 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	GameEntitySnapshot s;
 	s.pool = static_cast<uint8_t>(e.handle.pool());
 	s.slot = static_cast<uint16_t>(e.handle.slot());
+	s.wire_handle = e.handle.packed; // the authoritative registry handle (pool<<12 | slot)
 	s.type_id = static_cast<uint16_t>(e.item_id);
 	s.flags = 0;
 	s.team = e.team;

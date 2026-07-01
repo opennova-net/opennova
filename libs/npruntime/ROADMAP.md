@@ -345,10 +345,12 @@ Bar (met): `/gut` full suite passing / 0 failing; net ctests green; SP launches 
 
 ### ✅ P8 — Retire legacy glue (DONE)
 The legacy in-match net glue is deleted; `npruntime` is the single in-match runtime. Deleted:
-`libs/novaworld/{game_session,game_server_runtime,host_session_accept,replication_min}.{h,cpp}` +
-`session_protocol`'s `dispatch_in_match_session_messages` (kept `classify_session_protocol`) + the
-`replication_min` `build_tag_*` builders. Kept the POD structs `PlayerReplicationState` /
-`GameEntitySnapshot` (the `SpawnPointEntity` / `EntityBatchBuildResult` / `kSpawnPointTypeIds` burst-input
+`libs/novaworld/{game_session,game_server_runtime,host_session_accept}.{h,cpp}` + `replication_min.cpp` +
+`session_protocol`'s `dispatch_in_match_session_messages` (kept `classify_session_protocol`) + the retired
+`build_tag_*` builders. Kept the POD structs `PlayerReplicationState` / `GameEntitySnapshot` — the
+surviving `replication_min.h` header that holds them is now `replication_model.h` (the "min" implied a
+minimal build; we are reimplementing the full server). (The `SpawnPointEntity` / `EntityBatchBuildResult` /
+`kSpawnPointTypeIds` burst-input
 structs went with the builders — no surviving caller). Bar met: full ctest **223/223** + the net scope
 **15/15**; GUT green; no code references to the retired symbols.
 

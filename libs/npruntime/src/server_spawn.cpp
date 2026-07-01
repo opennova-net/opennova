@@ -44,10 +44,12 @@ uint8_t assign_player_team(const NapiNPServerCtx &ctx, const world::World &world
 // [orig: Server_InitNewRoundState @0x51c8e0] — local-player/round context for an authority host.
 void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
-	// Fresh round: reset the loading-progress counter (the §5.1 dword_A82370 walk restarts). The
-	// spawn-success gate is dropped later by the per-frame 0x0A flags1 & 0x01 (§5.2a step 4), not here
-	// — the original clears the loading-*timeout* gate at this step, not the spawn gate.
-	ctx.loading_progress = 0;
+	// Fresh round: the per-connection §5.2a burst cursor (conn.burst) is the host-side spawn/load clock
+	// — there is no host-global load-progress counter (the client's dword_A82370 walk is client state,
+	// not host bookkeeping; D-NET-132). The spawn-success gate is dropped later by the per-frame 0x0A
+	// flags1 & 0x01 (§5.2a step 4), not here — the original clears the loading-*timeout* gate at this
+	// step, not the spawn gate.
+	(void)ctx;
 }
 
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]

@@ -158,9 +158,8 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	set_transport_mode(owner.ctx, cfg.socket_mode);
 	SessionStartup startup;
 	startup.host_key = cfg.host_key;
-	create_session(owner.ctx, cfg.settings, startup, owner.host_loopback);
+	create_session(owner.ctx, cfg.settings, startup, owner.host_loopback); // also runs Server_InitNewRoundState (§5.2a step 1)
 	configure_session_runtime(owner.ctx, cfg.reply_config);
-	Server_InitNewRoundState(owner.ctx);
 
 	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
 		// Serve-and-play: spawn the host's own player now and latch its loopback in-match so it gets the

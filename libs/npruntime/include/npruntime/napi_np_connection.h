@@ -81,6 +81,24 @@ struct InitialStateBurst {
 	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
 };
 
+// The joiner's pose cached from its pre-spawn C2S 0x0C uplink — the host's fallback spawn/pose
+// while no World entity is bound yet. Valid ONLY until the spawn pipeline binds the connection's
+// owned_entity; pose_for_conn then prefers the live registry Entity. Consolidated from the loose
+// SessionReplyState.client_* fields so the pre-spawn fallback is one named unit distinct from the
+// live World binding (owned_entity). [orig: NapiNPServerMsg_0x00C @0x501c30 caches the uplink into
+// the player slot; the pose fallback is HostSessionAccept::pose_from_session]
+struct PreSpawnJoinerPose {
+	bool valid = false;                // a pre-spawn C2S 0x0C has been cached
+	uint16_t entity_handle = 0;
+	uint16_t item_type_id = 0;
+	uint16_t vehicle_handle = 0xFFFF;
+	uint32_t pos_x = 0;
+	uint32_t pos_y = 0;
+	uint32_t pos_z = 0;
+	int16_t heading = 0;
+	int16_t pitch = 0;
+};
+
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
 // server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner expects). Folded
 // onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
@@ -98,19 +116,21 @@ struct SessionReplyState {
 	uint8_t team = 1;                     // entity+354 team — the roster (0x16) / player-sync (0x46) team byte;
 	                                      // bound on spawn (Server_BuildPlayerInfoAndAdd) from the spawn team
 
-	// Joiner pose cached from the pre-spawn C2S 0x0C (the host pose fallback when no World entity is
-	// bound yet). [orig: NapiNPServerMsg_0x00C @0x501c30 caches the uplink into the player slot]
-	bool client_pos_valid = false;
-	uint16_t client_entity_handle = 0;
-	uint16_t client_item_type_id = 0;
-	uint16_t client_vehicle_handle = 0xFFFF;
-	uint32_t client_pos_x = 0;
-	uint32_t client_pos_y = 0;
-	uint32_t client_pos_z = 0;
-	int16_t client_heading = 0;
-	int16_t client_pitch = 0;
+	// Joiner pose cached from the pre-spawn C2S 0x0C — the host's pose fallback when no World entity
+	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).
+	PreSpawnJoinerPose pre_spawn_pose{};
 
-	// Player binding (slot + entity handle) for the roster (0x46/0x16) + spawn-confirm (0x51) replies.
+	// The reactive-reply ROSTER IDENTITY (slot + entity handle + team) the §5.1 roster (0x16) /
+	// player-sync (0x46) / spawn-confirm (0x51) replies serialize. The World-path spawn
+	// (Server_BuildPlayerInfoAndAdd) sets these ALONGSIDE link.owned_entity, keeping
+	// player_entity_handle == owned_entity.packed and team == entity+344; the reactive-reply path
+	// (bind_connection_player) can set them pre-World (a session-responder / test host that has no World).
+	//
+	// TARGET END-STATE (D-NET-132 / ADR 0013 §6.9): on the real game server (which always owns a World)
+	// this collapses to link.owned_entity as the SINGLE binding, with team/class/handle read THROUGH the
+	// authoritative pool-0 entity rather than cached here. That collapse is DEFERRED to the server-state
+	// pass because it must first resolve the pre-World reactive path above (unify or retire it); until
+	// then player_slot (roster ORDER, not stored on the entity) stays a field regardless.
 	bool binding_valid = false;
 	std::string player_name;
 	uint8_t player_slot = 0;
