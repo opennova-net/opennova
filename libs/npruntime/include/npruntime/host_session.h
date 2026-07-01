@@ -84,10 +84,11 @@ void host_session_pump(HostOwner &owner, netsim::IDatagramSocket &sock);
 // Host bring-up config. The owner sets owner.ctx.world / owner.ctx.mission and owner.host_loopback (its
 // dcb-2 LoopbackChannel) BEFORE start_host_session; this fills the rest.
 struct HostConfig {
-	NapiGameSettings settings;                // server name / max players / passwords / game type
+	// The ONE consolidated GameConfig (ADR 0013): §6.4 identity (server name / max players / passwords /
+	// game type) + the §6.9 rule globals + the §5.1 reactive-reply config (mission / player / spawn).
+	GameConfig config;
 	SocketMode socket_mode = SocketMode::Lan; // Lan (real socket) / Socketless (SP in-process loopback)
 	uint32_t host_key = 0;                     // deterministic for tests; a real host mints randomly
-	SessionReplyConfig reply_config;           // the §5.1 reactive-reply config (server / mission / player)
 	bool serve_and_play = false;               // true: spawn + latch the host's own player for a local view
 };
 

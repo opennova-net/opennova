@@ -35,7 +35,7 @@
 #include "network/nova_udp_pump.h"
 
 #include <mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
-#include <npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / NapiGameSettings / ConnectionMode / SocketMode
+#include <npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
 #include <npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
 #include <npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
 #include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
@@ -136,7 +136,7 @@ private:
 	// fed to configure_session_runtime). Sockets live here, the protocol/crypto in libs (ADR 0010).
 	bool host_listen_ = false;
 	Ref<NovaUdpPump> pump_;
-	opennova::np::SessionReplyConfig host_session_config_; // P8: was GameServerRuntimeConfig
+	opennova::np::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
 	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
 	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
 	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
@@ -186,7 +186,6 @@ private:
 	opennova::netsim::LoopbackChannel host_loop_;             // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
 	std::unique_ptr<opennova::np::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
 	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
-	opennova::np::NapiGameSettings settings_;                 // filled from configure_host_session (LAN host)
 	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
 	uint32_t now_tick_ = 0;                                   // the JOINER's per-frame clock (the host uses host_owner_.now_tick)
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime

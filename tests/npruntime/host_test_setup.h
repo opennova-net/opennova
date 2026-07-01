@@ -18,13 +18,13 @@ namespace opennova::np::test {
 inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode socket,
                           uint32_t host_key = 0,
                           netsim::ISessionTransport *local_client = nullptr,
-                          const NapiGameSettings &settings = NapiGameSettings{}) {
+                          const GameConfig &config = GameConfig{}) {
 	set_connection_mode(ctx, mode);
 	set_transport_mode(ctx, socket);
 	SessionStartup startup;
 	startup.host_key = host_key;
-	create_session(ctx, settings, startup, local_client); // P1: is_in_session=1, host_running=1
-	configure_session_runtime(ctx, {});                   // P2: builds runtime, keeps the loopback
+	create_session(ctx, config, startup, local_client); // P1: is_in_session=1, host_running=1
+	configure_session_runtime(ctx);                     // P2: drops type-1 joiners, keeps the loopback
 }
 
 } // namespace opennova::np::test

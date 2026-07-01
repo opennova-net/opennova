@@ -6,7 +6,7 @@
 //
 // This is the P2 port of tests/novaworld/host_session_accept_test.cpp, retargeted onto the promoted np
 // free functions over a NapiNPServerCtx (connection state on NapiNPConnection; the reactive replies
-// produced by server_message_dispatch off ctx.session_config, P8). The WORLD-driven spawn / F3-ordering
+// produced by server_message_dispatch off ctx.config, P8). The WORLD-driven spawn / F3-ordering
 // flow is covered by joiner_connection_test / initial_state_burst_test / two_endpoint_socket_test (which
 // wire ctx.world); this World-less test asserts the reactive replies + the handshake legs.
 //
@@ -311,7 +311,7 @@ bool run_handshake_rejected_when_host_down() {
 bool run_listen_host_lifecycle() {
 	netsim::LoopbackChannel loopback;
 	np::NapiNPServerCtx ctx;
-	np::NapiGameSettings settings;
+	np::GameConfig settings;
 	settings.max_players = 8; // co-op listen host: host loopback + up to 7 joiners (capacity gate)
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 	                        kHostKey, &loopback, settings);
@@ -382,7 +382,7 @@ bool run_retransmit_0x42_keeps_keys() {
 // 0x42 is rejected. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 — current_player_count >= max]
 bool run_capacity_rejects_when_full() {
 	np::NapiNPServerCtx ctx;
-	np::NapiGameSettings settings;
+	np::GameConfig settings;
 	settings.max_players = 2; // dedicated host: two joiner slots, no host loopback
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);

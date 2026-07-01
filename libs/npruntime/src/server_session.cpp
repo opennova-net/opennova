@@ -28,18 +28,18 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
 	if (p.gen_session_seed_flag) p.session_seed_id = startup.session_seed_id;
-	p.max_players = ctx.game_settings.max_players; // MP TLV mirror
+	p.max_players = ctx.config.max_players; // MP TLV mirror
 	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
 }
 
 // [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
-void create_session(NapiNPServerCtx &ctx, const NapiGameSettings &settings,
+void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
                     const SessionStartup &startup, netsim::ISessionTransport *local_client) {
-	ctx.game_settings = settings;
-	ctx.np_protocol.session_name = settings.server_name; // "HOST STARTED \"%s\"" log name
-	ctx.np_protocol.max_players = settings.max_players;
+	ctx.config = config;
+	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
+	ctx.np_protocol.max_players = config.max_players;
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 
 	if (ctx.is_authority) {

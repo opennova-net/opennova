@@ -113,28 +113,21 @@ struct SessionReplyState {
 	                                      // the working host pushes it before the joiner ever sends 0x0A
 	bool roster_repushed = false;         // 0x16 RE-PUSHED with the grown roster once this player spawned
 	                                      // (golden: 0x16 31→39 when the joiner is added, just before deploy)
-	uint8_t team = 1;                     // entity+354 team — the roster (0x16) / player-sync (0x46) team byte;
-	                                      // bound on spawn (Server_BuildPlayerInfoAndAdd) from the spawn team
 
 	// Joiner pose cached from the pre-spawn C2S 0x0C — the host's pose fallback when no World entity
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).
 	PreSpawnJoinerPose pre_spawn_pose{};
 
-	// The reactive-reply ROSTER IDENTITY (slot + entity handle + team) the §5.1 roster (0x16) /
-	// player-sync (0x46) / spawn-confirm (0x51) replies serialize. The World-path spawn
-	// (Server_BuildPlayerInfoAndAdd) sets these ALONGSIDE link.owned_entity, keeping
-	// player_entity_handle == owned_entity.packed and team == entity+344; the reactive-reply path
-	// (bind_connection_player) can set them pre-World (a session-responder / test host that has no World).
-	//
-	// TARGET END-STATE (D-NET-132 / ADR 0013 §6.9): on the real game server (which always owns a World)
-	// this collapses to link.owned_entity as the SINGLE binding, with team/class/handle read THROUGH the
-	// authoritative pool-0 entity rather than cached here. That collapse is DEFERRED to the server-state
-	// pass because it must first resolve the pre-World reactive path above (unify or retire it); until
-	// then player_slot (roster ORDER, not stored on the entity) stays a field regardless.
-	bool binding_valid = false;
+	// The reactive-reply ROSTER IDENTITY. D-NET-132 / ADR 0013 §6.9 COLLAPSED the cached team + entity
+	// handle onto link.owned_entity: `CAdminServer_HandleStatus @0x402e30` reads name/team/class OFF the
+	// pool-0 entity (team @entity+344), so the reply builders now read the handle from
+	// link.owned_entity.packed and the team from the live registry Entity through it — not a parallel
+	// cache. player_slot (roster ORDER, not stored on the entity) stays a field; player_name is the
+	// echoed ClientHello.co the entity does not carry in the reimpl. The pre-World reactive path
+	// (bind_session_reply_player) now stamps link.owned_entity with the bare wire handle instead of a
+	// separate handle cache, so a World-less session-responder host resolves the same way.
 	std::string player_name;
 	uint8_t player_slot = 0;
-	uint16_t player_entity_handle = 0;
 };
 
 // One node on the host's connection_list — the reimpl of a NapiNPConnection [orig: the list

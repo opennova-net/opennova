@@ -91,9 +91,17 @@ host-session tests. `create_session` owns the single `Server_InitNewRoundState` 
   (`nw_message_coverage`, `nw_golden_diff`) staying green, plus the GDExtension building.
 - **Adding a message is one path**, not three: registry entry → decoder → round-trip
   test → doc §5.x → `nw_pp` verify, and `--coverage` surfaces what is still missing.
-- **Scoped-next (this ADR names them so they are not silently skipped):** the
-  `binding → owned_entity` collapse above; merging `NapiGameSettings` + `ServerRules` +
-  `SessionReplyConfig` into one `GameConfig` mirroring the `CAdminServer` `SET` field set
-  (§6.9); a shared `SessionSequencing` / `SessionCrypto` retiring the 3× seq/ack + SCRK
-  copies; and a shared spawn-batch chunker. Each is wire-neutral and belongs to the
-  server-state pass, driven by the golden-diff worklist.
+- **Scoped-next (this ADR names them so they are not silently skipped):**
+  - **DONE (D-NET-132, 2026-06-30):** merged `NapiGameSettings` + `ServerRules` +
+    `SessionReplyConfig` into one `GameConfig` (`libs/npruntime/.../game_config.h`) mirroring the
+    `CAdminServer SET` field set (§6.9), collapsing the reimpl's three diverging `g_GameType` copies
+    onto the one field IDA proves the 0x08 block AND the 0x7B body read (`ServerConfig_SerializeToPacket
+    @0x505bd0` / `NapiNPMsg_0x7B_BuildPayload @0x507740`). And collapsed the reactive-reply roster
+    identity onto `link.owned_entity`: team (@entity+344, `CAdminServer_HandleStatus @0x402e30`) + the
+    wire handle are read THROUGH the live registry entity, retiring the
+    `SessionReplyState.{binding_valid, player_entity_handle, team}` cache; the pre-World reactive path
+    (`bind_session_reply_player`) stamps `owned_entity` with the bare wire handle. Wire-neutral on the
+    byte-parity goldens.
+  - **Remaining:** a shared `SessionSequencing` / `SessionCrypto` retiring the 3× seq/ack + SCRK copies;
+    and a shared spawn-batch chunker. Each is wire-neutral and belongs to the server-state pass, driven
+    by the golden-diff worklist.

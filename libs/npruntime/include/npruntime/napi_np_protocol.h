@@ -4,7 +4,7 @@
 
 #include <novaworld/peer_addr.h> // opennova::PeerAddr
 #include <novaworld/protocol_message.h>     // opennova::ProtocolMessage
-// np::SessionReplyConfig arrives via napi_np_server_ctx.h -> server_message_dispatch.h (P8).
+// np::GameConfig (the consolidated server-state config) arrives via napi_np_server_ctx.h (ADR 0013).
 
 #include <cstddef>
 #include <cstdint>
@@ -24,7 +24,7 @@
 //
 // The per-connection SCRK/seq/ack + handshake latches live ON NapiNPConnection (folded from the
 // old PeerState). The 0x43 reactive §5.1 replies are produced by the gameplay-message dispatcher
-// (server_message_dispatch.h, dispatch_session_replies) over ctx.session_config + the node's reply
+// (server_message_dispatch.h, dispatch_session_replies) over ctx.config + the node's reply
 // state (P8 — the retired ctx.game_runtime / GameServerRuntime); the one-shot world-stream/spawn burst
 // is Server_SendInitialGameStateToPlayer over conn.burst. The F3 dcb-timing fix and the D.0 name-match
 // are ported VERBATIM. Wire bytes stay byte-exact.
@@ -101,10 +101,11 @@ struct TickOut {
 // HostSessionAccept::configure's peers_.clear(), which only held remote joiners).
 //
 // Canonical listen-host bring-up (P0 -> P1 -> P2): set_connection_mode -> set_transport_mode ->
-// create_session(..., local_client) [P1: host_running=1, registers the loopback] ->
-// configure_session_runtime(config) [P2: seeds ctx.session_config, keeps the loopback]. The live
-// handshake legs reject until host_running == 1, so this bring-up must run before any datagram.
-void configure_session_runtime(NapiNPServerCtx &ctx, SessionReplyConfig config = {});
+// create_session(config, local_client) [P1: seeds ctx.config incl. the §5.1 reply slice,
+// host_running=1, registers the loopback] -> configure_session_runtime() [P2: drops the type-1
+// remote-joiner nodes, keeps the loopback]. The live handshake legs reject until host_running == 1,
+// so this bring-up must run before any datagram.
+void configure_session_runtime(NapiNPServerCtx &ctx);
 
 // Decode + dispatch one raw inbound datagram from `peer` (the bytes off the socket, envelope+NWU
 // still on). `now_tick` feeds the game-session tag clock. Returns the outbound datagrams to ship

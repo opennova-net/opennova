@@ -72,7 +72,7 @@ bool check_create_session_brings_up_host() {
 	opennova::np::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::np::set_transport_mode(ctx, SocketMode::Socketless);
 
-	opennova::np::NapiGameSettings settings;
+	opennova::np::GameConfig settings;
 	settings.server_name = "SINGLEPLAYERGAME"; // §5.0 default
 	settings.max_players = 1;
 
@@ -109,7 +109,7 @@ bool check_dedicated_host_has_no_local_client() {
 	NapiNPServerCtx ctx;
 	opennova::np::set_connection_mode(ctx, ConnectionMode::HostOnly);
 	opennova::np::set_transport_mode(ctx, SocketMode::Lan);
-	opennova::np::NapiGameSettings settings;
+	opennova::np::GameConfig settings;
 	settings.max_players = 16;
 	opennova::np::create_session(ctx, settings, opennova::np::SessionStartup{}, nullptr);
 	if (!expect(ctx.np_protocol.host_running == 1, "dedicated host running")) return false;

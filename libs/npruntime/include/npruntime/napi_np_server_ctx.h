@@ -6,8 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "npruntime/game_config.h"       // np::GameConfig — the ONE consolidated server-state config
 #include "npruntime/napi_np_connection.h"
-#include "npruntime/server_message_dispatch.h" // np::SessionReplyConfig — the §5.1 reactive-reply config (P8)
 
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
 // the in-match replication seam. No World/codec headers are pulled into this header, and there
@@ -56,51 +56,6 @@ enum class SocketMode : uint32_t {
 	NovaWorldSocket = 4,  // NovaWorld-routed socket
 };
 
-// [orig +0xE68] NapiGameSettings (216 B inline; §6.4). The same struct SP and MP fill — SP uses
-// server_name = "SINGLEPLAYERGAME", max_players = 1.
-struct NapiGameSettings {
-	std::string server_name;      // [orig +0x00] char[32] lobby-visible name
-	std::string server_password;  // [orig +0x20] char[32]
-	std::string side_a_password;  // [orig +0x40] char[32] mismatch -> join-reject 19
-	std::string side_b_password;  // [orig +0x60] char[32] mismatch -> join-reject 20
-	std::string internet_address; // [orig +0x80] char[64] default "0.0.0.0"
-	uint32_t max_players = 1;      // [orig +0xC0] clamped 1..65
-	uint32_t use_lineup_queue = 0; // [orig +0xC4]
-	uint32_t lineup_queue_size = 0;// [orig +0xC8]
-	uint32_t game_type = 0;        // [orig +0xCC] mp_gametype enum
-	uint32_t mp_attributes = 0;    // [orig +0xD0] mpattrib bitmask
-};
-
-// [orig: ServerConfig_SerializeToPacket @0x505bd0] The host game-rules block the §5.2a initial-state
-// burst serializes as S2C 0x08 (10 dwords + 7 bytes + a flags dword = 51 B). These mirror the
-// original's g_* rule globals (g_respawn_time @0x24D2140, g_time_limit_minutes @0x24D2144,
-// g_GameType @0x24D2128, g_score_limit @0x24D2134, g_StartDelay @0x24D2160, ...). Default 0 for a
-// headless dev host; a real host / the golden test seeds them (verified vs retail-lan-host-join
-// frame 146: [respawn 30, timelimit 10, 1, gametype 0x10000, 100, score 50, 5, 0, 0, 1]). The four
-// config_word_* fields are witnessed in the wire layout but their gameplay semantics are not yet
-// pinned (kept named by position). The bool/string flag inputs feed CNapiServerConfig_BuildFlags
-// @0x4c4dc0 (the trailing flags dword); the squad/perm-death/misc globals it reads default off.
-struct ServerRules {
-	uint32_t respawn_time = 0;        // [orig g_respawn_time @0x24D2140]   dword[0]
-	uint32_t time_limit_minutes = 0; // [orig g_time_limit_minutes @0x24D2144] dword[1]
-	uint32_t config_word_2 = 0;      // [orig dword_24D2120]               dword[2] (semantic UNWITNESSED)
-	uint32_t game_type = 0;          // [orig g_GameType @0x24D2128]       dword[3]
-	uint32_t config_word_4 = 0;      // [orig dword_24D2130]               dword[4] (semantic UNWITNESSED)
-	uint32_t score_limit = 0;        // [orig g_score_limit @0x24D2134]    dword[5]
-	uint32_t config_word_6 = 0;      // [orig dword_24D214C]               dword[6] (semantic UNWITNESSED)
-	uint32_t start_delay = 0;        // [orig g_StartDelay @0x24D2160]     dword[7]
-	uint32_t config_word_8 = 0;      // [orig dword_24D2164]               dword[8] (semantic UNWITNESSED)
-	uint32_t config_word_9 = 0;      // [orig dword_24D2168]               dword[9] (semantic UNWITNESSED)
-	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + dword_24D2110 low byte]
-
-	// CNapiServerConfig_BuildFlags inputs the game_settings don't already carry.
-	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
-	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
-	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
-	bool config_flag_2550A04 = false;  // [orig dword_2550A04 & 4]   (semantic UNWITNESSED) -> |0x4
-	bool config_flag_2550CA4 = false;  // [orig dword_2550CA4]       (semantic UNWITNESSED) -> |0x10000
-};
-
 // [orig: g_napi_np_ctx.np_protocol @+0xE5C] NapiNPProtocol (§6.5) — the host state block reached
 // from the singleton. Only the fields the in-match runtime needs now are modeled; offsets cited.
 struct NapiNPProtocol {
@@ -142,14 +97,16 @@ struct NapiNPServerCtx {
 	uint32_t is_authority = 0;          // [orig +0x60] is_host bit of connection_mode
 	uint32_t is_mp_session_peer = 0;    // [orig +0x64] is_client bit of connection_mode
 
-	NapiGameSettings game_settings; // [orig +0xE68]
-	NapiNPProtocol np_protocol;     // [orig +0xE5C] (pointer in the original; embedded here)
+	// The ONE consolidated server-state config (ADR 0013 / §6.9): §6.4 identity + the §6.9 rule globals
+	// (S2C 0x08) + the §5.1 reactive-reply mission/player/spawn. Merged from the former game_settings +
+	// rules + session_config. Seeded by create_session (see server_session.h).
+	GameConfig config;             // [orig g_napi_np_ctx.game_settings @+0xE68 + the scattered g_* rule globals]
+	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)
 
-	// [§5.2a] The host game-rules block (S2C 0x08) + the advertised weapon-restriction set (S2C 0x66).
-	// The original reads scattered g_* rule globals + a 255-entry restriction table (unused6 @0x24D5600);
-	// modeled here as the host's own config. weapon_restrictions holds only the RESTRICTED (index,value)
-	// entries (value 0 or 2); empty = no restrictions -> 0x66 emits a single count byte 0 (golden frame 160).
-	ServerRules rules;
+	// [§5.2a] The advertised weapon-restriction set (S2C 0x66). The original reads a 255-entry
+	// restriction table (unused6 @0x24D5600); weapon_restrictions holds only the RESTRICTED
+	// (index,value) entries (value 0 or 2); empty = no restrictions -> 0x66 emits a single count byte 0
+	// (golden frame 160).
 	std::vector<std::pair<uint8_t, uint8_t>> weapon_restrictions;
 
 	// [orig +0x1198..0x11A0] the SendFiltered send descriptor (preserved names). Present but the
@@ -173,13 +130,6 @@ struct NapiNPServerCtx {
 	// bookkeeping — the host's spawn/load clock is the per-connection InitialStateBurst cursor
 	// (conn.burst). It was write-only here and is removed (D-NET-132).
 	uint32_t spawn_success_gate = 0;
-
-	// The §5.1 reactive-reply config (server / mission / player identity + advertised spawn), read by
-	// the gameplay-message dispatcher (server_message_dispatch.h, dispatch_session_replies). Seeded by
-	// configure_session_runtime(). Replaces the retired GameServerRuntime (P8): the per-connection reply
-	// state now lives on the node (NapiNPConnection.reply), the world-stream burst on
-	// NapiNPConnection.burst (Server_SendInitialGameStateToPlayer).
-	SessionReplyConfig session_config;
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
 	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /

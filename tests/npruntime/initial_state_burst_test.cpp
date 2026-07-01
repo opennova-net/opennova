@@ -173,9 +173,9 @@ int main_impl() {
 	// (6) The §5.2a serializers ported from IDA (grilled 2026-06-27). Bodies cross-checked vs the
 	// retail-lan-host-join golden (frames 144-160).
 	{
-		// 0x2C = server name + mission file, two NUL-terminated C strings (from session_config).
+		// 0x2C = server name + mission file, two NUL-terminated C strings (from ctx.config).
 		const std::vector<uint8_t> *b = body_of(0x2C);
-		const std::string sn = ctx.session_config.server_name, mf = ctx.session_config.mission_file;
+		const std::string sn = ctx.config.server_name, mf = ctx.config.mission_file;
 		std::vector<uint8_t> want;
 		want.insert(want.end(), sn.begin(), sn.end()); want.push_back(0);
 		want.insert(want.end(), mf.begin(), mf.end()); want.push_back(0);
@@ -185,7 +185,7 @@ int main_impl() {
 		// 0x08 = the 51-byte server-config block (10 rule dwords default 0 + 7 bytes + flags dword).
 		const std::vector<uint8_t> *b = body_of(0x08);
 		if (!expect(b && b->size() == 51, "0x08 server-config is 51 bytes")) return 1;
-		bool dwords_zero = true; // default ServerRules -> all 10 rule dwords 0
+		bool dwords_zero = true; // default GameConfig -> all 10 rule dwords 0
 		for (int i = 0; i < 40; ++i) dwords_zero = dwords_zero && ((*b)[i] == 0);
 		if (!expect(dwords_zero, "0x08 default rule dwords are 0")) return 1;
 	}

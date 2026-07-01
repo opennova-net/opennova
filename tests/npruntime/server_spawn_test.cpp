@@ -129,7 +129,7 @@ int main() {
 		many_world.registry.configure_pool(0, 32);
 
 		np::NapiNPServerCtx many_ctx;
-		np::NapiGameSettings settings;
+		np::GameConfig settings;
 		settings.max_players = 32;
 		np::test::bring_up_host(many_ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan,
 		                        /*host_key=*/0, nullptr, settings);

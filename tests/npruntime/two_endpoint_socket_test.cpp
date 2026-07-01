@@ -132,8 +132,8 @@ int main() {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	np::HostConfig host_cfg;
-	host_cfg.settings.server_name = "OpenNova nw-server";
-	host_cfg.settings.max_players = 16; // host loopback occupies dcb 2; leave room for the joiner (D-NET-106)
+	host_cfg.config.server_name = "OpenNova nw-server";
+	host_cfg.config.max_players = 16; // host loopback occupies dcb 2; leave room for the joiner (D-NET-106)
 	host_cfg.socket_mode = np::SocketMode::Lan;
 	host_cfg.serve_and_play = false;         // headless: the loopback is discarded (mirrors apps/nw_server)
 	np::start_host_session(owner, host_cfg); // the SAME §5.0 bring-up apps/nw_server runs

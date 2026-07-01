@@ -144,11 +144,11 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	// No World => session responder only (no spawn). host_key stays 0 (unchecked). [orig: §5.0]
 	np::set_connection_mode(jo_ctx_, np::ConnectionMode::HostOnly);
 	np::set_transport_mode(jo_ctx_, np::SocketMode::Lan);
-	np::NapiGameSettings jo_settings;
-	jo_settings.server_name = "OpenNova";
-	jo_settings.max_players = 64; // accept many JO probes (npruntime capacity gate, D-NET-106)
-	np::create_session(jo_ctx_, jo_settings, np::SessionStartup{}); // sets host_running (is_authority)
-	np::configure_session_runtime(jo_ctx_, {});
+	np::GameConfig jo_config;
+	jo_config.server_name = "OpenNova";
+	jo_config.max_players = 64; // accept many JO probes (npruntime capacity gate, D-NET-106)
+	np::create_session(jo_ctx_, jo_config, np::SessionStartup{}); // sets host_running (is_authority)
+	np::configure_session_runtime(jo_ctx_);
 	running_.store(true);
 	worker_ = std::thread([this] { run_loop(); });
 	std::printf("[nwudp] listening on UDP :%u\n",

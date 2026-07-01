@@ -101,7 +101,7 @@ HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &
 		p.pitch = pose.pitch;
 	} else {
 		// No uplink yet — fall back to the host-advertised spawn from the session config.
-		const SessionReplyConfig &cfg = ctx.session_config;
+		const GameConfig &cfg = ctx.config;
 		p.pos_valid = false;
 		p.item_type_id = 0x14B9u;
 		p.pos_x = static_cast<int32_t>(cfg.spawn_x);
@@ -415,8 +415,8 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// Server_SendInitialGameStateToPlayer (tick_connections), NOT produced here. [orig: the 0x43 SESSION
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
 	std::vector<ProtocolMessage> replies =
-			dispatch_session_replies(ctx.session_config, conn, messages, now_tick,
-			                         ctx.np_protocol.connection_list);
+			dispatch_session_replies(ctx.config, conn, messages, now_tick,
+			                         ctx.np_protocol.connection_list, ctx.world);
 	if (!replies.empty()) {
 		std::vector<uint8_t> dg = frame_session_replies(conn, replies);
 		if (!dg.empty()) out.outbound.push_back(std::move(dg));
@@ -456,8 +456,10 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleRes
 
 } // namespace
 
-void configure_session_runtime(NapiNPServerCtx &ctx, SessionReplyConfig config) {
-	ctx.session_config = std::move(config);
+void configure_session_runtime(NapiNPServerCtx &ctx) {
+	// The reply/runtime config (§5.1 mission/player/spawn) now lives in ctx.config, seeded by
+	// create_session with the host's full GameConfig — so this step no longer copies a config; it only
+	// performs the peer-list reset below.
 	// [orig: HostSessionAccept::configure clears peers_] — peers_ held ONLY remote joiners (the
 	// host's own client lived elsewhere), so the faithful translation drops the server-side (type-1)
 	// remote-joiner nodes and PRESERVES the host's own type-2 loopback client that P1's
@@ -538,7 +540,7 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 		// 0x16 31→39 just before the joiner's first C2S 0x0C). One-shot per connection.
 		if (conn.type == 1 && conn.burst.spawned && !conn.reply.roster_repushed) {
 			std::vector<ProtocolMessage> roster_reply{
-					build_player_list_message(ctx.session_config, ctx.np_protocol.connection_list)};
+					build_player_list_message(ctx.config, ctx.np_protocol.connection_list, ctx.world)};
 			std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
 			if (!dg.empty()) to.outbound.push_back(std::move(dg));
 			conn.reply.roster_repushed = true;
@@ -593,7 +595,7 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 	}
 	const std::string player_name = !conn->player_name.empty()
 			? conn->player_name
-			: ctx.session_config.player_name;
+			: ctx.config.player_name;
 	return bind_session_reply_player(*conn, player_name, player_slot, entity_handle);
 }
 

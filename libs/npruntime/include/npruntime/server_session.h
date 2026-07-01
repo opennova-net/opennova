@@ -37,13 +37,14 @@ struct SessionStartup {
 };
 
 // Step 3 — the shared SP/MP session creator [orig: CNapiGameSession_CreateSession @0x4c97c0].
-// Fills game_settings, copies max_players + the lobby-visible session_name onto np_protocol,
-// marks is_in_session, and (when is_authority) calls start_server. When the mode is HostClient
-// and `local_client` is supplied, registers the host's own local client connection (type 2,
-// TransportMode::Loopback) on the connection_list — the in-process listen-server's own client
-// (§5.0: "creates a local client connection with NapiNPConnection_Create"). The transport is
-// NON-OWNING (the binding/test owns the LoopbackChannel).
-void create_session(NapiNPServerCtx &ctx, const NapiGameSettings &settings,
+// Copies the whole GameConfig onto the ctx (identity + rules + the §5.1 reply slice), copies
+// max_players + the lobby-visible session_name onto np_protocol, marks is_in_session, and (when
+// is_authority) calls start_server. When the mode is HostClient and `local_client` is supplied,
+// registers the host's own local client connection (type 2, TransportMode::Loopback) on the
+// connection_list — the in-process listen-server's own client (§5.0: "creates a local client
+// connection with NapiNPConnection_Create"). The transport is NON-OWNING (the binding/test owns
+// the LoopbackChannel).
+void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
                     const SessionStartup &startup,
                     netsim::ISessionTransport *local_client = nullptr);
 

@@ -91,8 +91,8 @@ int main() {
 	owner.ctx.mission = &doc.bms_file();
 
 	np::HostConfig host_cfg;
-	host_cfg.settings.server_name = "OpenNova nw-server";
-	host_cfg.settings.max_players = 16;
+	host_cfg.config.server_name = "OpenNova nw-server";
+	host_cfg.config.max_players = 16;
 	host_cfg.socket_mode = np::SocketMode::Lan; // a real LAN socket (Socketless=1 would be in-process SP)
 	host_cfg.serve_and_play = false;            // headless dedicated host: the loopback view is discarded
 	np::start_host_session(owner, host_cfg);    // the §5.0 listen-host bring-up; host player spawns in the loop

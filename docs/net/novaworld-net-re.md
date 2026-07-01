@@ -845,8 +845,8 @@ retail-lan-host-join golden** (frames 144-160), with each serializer ported into
 
 | tag | serializer | body | reimpl source |
 |---|---|---|---|
-| 0x2C | `NetPacket_WriteServerNameAndMapFile @0x505780` (Kong-misnamed `WriteTypeNameAndBaseName` — FIXED) | `g_server_name_str` ("Untitled") + `g_map_file_name` ("TDH_I5A.BMS"), two NUL C-strings | `SessionReplyConfig.server_name`/`mission_file` |
-| 0x08 | `ServerConfig_SerializeToPacket @0x505bd0` | 51 B = 10 rule dwords [respawn 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _] + 7 bytes + flags dword (`CNapiServerConfig_BuildFlags @0x4c4dc0`) | `NapiNPServerCtx.rules` (ServerRules) + `build_server_config_flags` |
+| 0x2C | `NetPacket_WriteServerNameAndMapFile @0x505780` (Kong-misnamed `WriteTypeNameAndBaseName` — FIXED) | `g_server_name_str` ("Untitled") + `g_map_file_name` ("TDH_I5A.BMS"), two NUL C-strings | `GameConfig.server_name`/`mission_file` |
+| 0x08 | `ServerConfig_SerializeToPacket @0x505bd0` | 51 B = 10 rule dwords [respawn 30, timelimit 10, _, `g_GameType`, _, score 50, _, startdelay, _, _] + 7 bytes + flags dword (`CNapiServerConfig_BuildFlags @0x4c4dc0`) | `GameConfig` (rule globals; `dword[3]` = `game_type`, the same field the 0x7B body reads, §6.9) + `build_server_config_flags` |
 | 0x2A ×6 | `NetPacket_CopyTenBytes @0x503900` over table `@0x82F1D8` | const 10-B record `{00 04 b0 ab b2 b2 bf bc bd ba}` ×6 (table = 6 records, threshold 0 ⇒ all sent; gate `threshold > playerSlot[+7]`) | `k0x2aRecord` const (**byte-exact vs golden**) |
 | 0x66 | `NetPacket_SerializeWeaponRestrictionTable @0x5102c0` | count byte + (index,value) pairs for each restricted weapon (value 0/2) in `unused6[255]`; golden = `00` (no restrictions) | `ctx.weapon_restrictions` (restricted-set vector; empty ⇒ `{0}`) |
 | 0x76 | `NetPacket_WriteServerTick16 @0x510350` | `dword_24D59FC` server tick, u16 (golden `ff 03`) | `now_tick & 0xFFFF` |
@@ -4331,13 +4331,44 @@ TOD `Env_CurTimeFixed24`, current map `g_map_file_name @ 0x24D1F3E`, `g_GameType
 and the mission-rotation queue `g_entity_action_queue @ 0xC86FDC` (current/next/one-shot/
 flipped/2x flags) against `missionListOut @ 0x2551118` (stride 4584).
 
-**Consequence for the reimpl (D-NET-132, ADR 0013):** team/class/slot/kills/deaths are
-derived from the authoritative pool-0 entity, so our `NapiNPConnection` should hold the
-entity *handle* (`link.owned_entity`) as the single binding and read those fields through it
-— not duplicate them in a per-connection reply cache. Our `ServerRules` + `NapiGameSettings`
-(§6.3/6.4) collapse to one `GameConfig` mirroring the `SET` field set above; the persisted
-`dword_2550xxx` shadow + `g_rules_flags` packing are a config-file concern we model only if
-we add cfg persistence.
+The status read is byte-precise about *where* each roster field lives — witnessed at the
+`sprintf` @0x403182 that formats one player line off `renderState` (the per-slot entity):
+`name @ entity-32` (`%-16s`), `slot# @ *(entity-13 dwords)`, **`team @ *((uint8_t*)entity + 344)`**,
+`class @ entity[22437]`, `deaths/kills` via `[orig: CRenderState_GetFieldByIndex @0x52d7d0]`
+fields 4/6, `ping @ entity[23582]`. The session header reads `g_GameType @0x24D2128` (via
+`get_game_type_abbreviation @0x520fd0`), so STATUS, the S2C 0x08 block, and the S2C 0x7B body
+all read the SAME game-type global (see the witness note below).
+
+**Witness — one `g_GameType`, one `g_server_name_str`, one BuildFlags copy.** The reimpl had
+split each of these into multiple diverging copies; IDA shows the wire serializers read one
+global each:
+- **`g_GameType @0x24D2128`** is read by BOTH `[orig: ServerConfig_SerializeToPacket @0x505bd0]`
+  (the S2C 0x08 block, `dword[3]` @0x505c2b) AND `[orig: NapiNPMsg_0x7B_BuildPayload @0x507740]`
+  (the S2C 0x7B `gametype` u32 @0x5078ce and its title-selection gate `(g_GameType & 0xFFFDFFFF)
+  == 0x10020` @0x507822) AND STATUS above. `[orig: CNapiServerConfig_BuildFlags @0x4c4dc0]` reads
+  a SEPARATE `game_settings.game_type` copy (ctx+0xCC @0x4c4e3a) for its `& 0x10000` team-gate — a
+  snapshot of `g_GameType` set at session build, equal in a live session.
+- **`g_server_name_str @0x24D1FC4`** is read by BOTH `[orig: NetPacket_WriteServerNameAndMapFile
+  @0x505780]` (the S2C 0x2C) AND `NapiNPMsg_0x7B_BuildPayload` (the 0x7B serverName @0x5077f1);
+  `game_settings.server_name` (ctx+0xE68) is the distinct lobby/`nstmout_path` name.
+- The 0x08 block's other 9 dwords map to the standalone rule globals in wire order (`g_respawn_time
+  @0x24D2140`, `g_time_limit_minutes @0x24D2144`, `dword_24D2120`, **`g_GameType`**, `dword_24D2130`,
+  `g_score_limit @0x24D2134`, `dword_24D214C`, `g_StartDelay @0x24D2160`, `dword_24D2164`,
+  `dword_24D2168`), then 7 bytes (`byte_24D234C..byte_24D2360` + `dword_24D2110` low byte), then the
+  BuildFlags dword.
+
+**Consequence for the reimpl (D-NET-132, ADR 0013) — IMPLEMENTED:** team/class/slot/kills/deaths
+are derived from the authoritative pool-0 entity, so `NapiNPConnection` holds the entity *handle*
+(`link.owned_entity`) as the single binding and the §5.1 reply builders read team (@entity+344) and
+the wire handle THROUGH it from the live `world::EntityRegistry` — no per-connection reply cache.
+The pre-World reactive path (`bind_session_reply_player`, a World-less session-responder / test host)
+stamps `owned_entity` with the bare wire handle, so it resolves the same way (team defaults when no
+live entity backs the handle). `player_slot` (roster ORDER, not on the entity) + the echoed
+`player_name` stay on `conn.reply`. The former `ServerRules` + `NapiGameSettings` (§6.3/6.4) +
+`SessionReplyConfig` (§5.1) are merged into one `GameConfig` (`libs/npruntime/.../game_config.h`)
+mirroring the `SET` field set above, with the three diverging gametype copies collapsed onto the one
+`g_GameType`-role field; the persisted `dword_2550xxx` shadow + `g_rules_flags` packing are a
+config-file concern modeled only if we add cfg persistence.
 
 ## 7. Landed architecture
 
@@ -5262,3 +5293,32 @@ byte divergence reaches a connected client. We diverge to reuse one listen-serve
 a second host-only path. Cited at `nova_simulation.cpp bringup_host_runtime`. Follow-up if true mode-1
 fidelity is ever needed (e.g. an exact host-internal-state match): thread `ConnectionMode` from the UI
 server-type and teach `HostOwner`/`host_session_pump` a no-loopback-client mode.
+
+**D-NET-132** [reimpl consolidation, IMPLEMENTED 2026-06-30] **One `GameConfig` server-state struct +
+roster identity read THROUGH `link.owned_entity`, not a per-connection cache (ADR 0013 §6.9).** Two
+faithful-port findings, both wire-neutral on the byte-parity goldens:
+(1) **The three diverging config structs are merged into one `GameConfig`** (`libs/npruntime/include/
+npruntime/game_config.h`), mirroring the `CAdminServer SET` field set (§6.9). The reimpl had modeled the
+one `g_GameType @0x24D2128` as THREE copies feeding different serializers with different values
+(`rules.game_type`=0 → 0x08 dword[3]; `session_config.gametype`=0x10010 → 0x7B; `game_settings.game_type`
+=0 → BuildFlags) — an artifact. IDA proves `[orig: ServerConfig_SerializeToPacket @0x505bd0]` (0x08 dword[3]
+@0x505c2b) and `[orig: NapiNPMsg_0x7B_BuildPayload @0x507740]` (0x7B gametype @0x5078ce) read the SAME
+`g_GameType`; `[orig: CNapiServerConfig_BuildFlags @0x4c4dc0]` reads a `game_settings.game_type` copy
+(ctx+0xCC) equal to it in a live session. So the reimpl collapses to one `game_type` field feeding 0x08 +
+0x7B + BuildFlags + `assign_player_team`. On the dev/test default (`game_type`=0) the 0x7B/0x60 gametype
+byte shifts `0x10010`→0 (unpinned, and now self-consistent with the 0x08 block); on a real host `game_type`
+seeds the mission gametype so 0x08 dword[3] and 0x7B agree — the faithful behavior (retail frame-146 0x08
+carries the gametype, not 0). (2) **The reactive-reply roster identity collapses onto `link.owned_entity`.**
+`[orig: CAdminServer_HandleStatus @0x402e30]` proves the roster IS the player-slot entity array and reads
+name/**team (@entity+344)**/class/kills/deaths/ping OFF each entity (`sprintf @0x403182`), so the §5.1 reply
+builders (`build_reply_tag_16`/`rep_for_slot`/`make_rep_state`) now read the wire handle off
+`owned_entity.packed` and the team off the live `world::EntityRegistry` Entity through it — the former
+`SessionReplyState.{binding_valid, player_entity_handle, team}` cache is removed. `player_slot` (roster
+ORDER) + the echoed `player_name` stay on `conn.reply`. The pre-World reactive path
+(`bind_session_reply_player`, a World-less session-responder / `handshake_server_test`) stamps the bare wire
+handle onto `owned_entity` so it resolves the same way (team defaults when no live entity backs it). All 21
+net ctests + the byte-parity goldens (`npruntime_golden_lan_join`, `npruntime_golden_gameplay`,
+`nw_golden_diff`, `nw_message_coverage`, `nw_capture_decoder`) stay green. [orig: ServerConfig_SerializeToPacket
+@0x505bd0 / NapiNPMsg_0x7B_BuildPayload @0x507740 / CNapiServerConfig_BuildFlags @0x4c4dc0 /
+NetPacket_WriteServerNameAndMapFile @0x505780 / CAdminServer_HandleStatus @0x402e30 /
+CAdminServer_HandleSetCommand @0x405a60]

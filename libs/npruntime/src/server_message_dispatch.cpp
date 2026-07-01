@@ -4,6 +4,9 @@
 #include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_spawn / encode_player_list (§5.1)
 #include <novaworld/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
+#include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
+#include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
+
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -58,7 +61,7 @@ void append_string_kv(std::vector<uint8_t> &out, const char *name, const std::st
 	append_kv(out, name, value.c_str(), static_cast<uint32_t>(value.size() + 1));
 }
 
-bool is_default_ash_session_config(const SessionReplyConfig &cfg) {
+bool is_default_ash_session_config(const GameConfig &cfg) {
 	return cfg.mission_name == "AS - Dormant Volcano Isle" && cfg.mission_file == "ASH_I5A.BMS";
 }
 
@@ -78,7 +81,7 @@ std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 
 // tag=0x7A: the player's PCID string (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
 // copies player+0x250]. Empty on a dev host -> a single NUL (golden frame 134 = len 1, body 00).
-std::vector<uint8_t> build_tag7a_pcid(const SessionReplyConfig &cfg) {
+std::vector<uint8_t> build_tag7a_pcid(const GameConfig &cfg) {
 	std::vector<uint8_t> payload;
 	append_cstr(payload, cfg.pcid);
 	return payload;
@@ -87,29 +90,29 @@ std::vector<uint8_t> build_tag7a_pcid(const SessionReplyConfig &cfg) {
 // tag=0x7B session/player info. [orig: NapiNPMsg_0x7B_BuildPayload @0x507740] field order:
 // player_name, PCID, server_name, title(mission name), map_file, gametype(u32), empty_str, expansion.
 // (The PCID slot previously carried an invented "DEV-A02-0001" literal — D-NET-127; now sourced.)
-std::vector<uint8_t> build_tag7b_session_summary(const SessionReplyConfig &cfg) {
+std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg) {
 	std::vector<uint8_t> payload;
 	append_cstr(payload, cfg.player_name); // [orig player_data+128]
 	append_cstr(payload, cfg.pcid);        // [orig entity+592] PCID
 	append_cstr(payload, cfg.server_name); // [orig g_server_name_str]
 	append_cstr(payload, cfg.mission_name);// [orig title: MissionText "title" / g_GameType title]
 	append_cstr(payload, cfg.mission_file);// [orig g_map_file_name]
-	append_u32_le(payload, cfg.gametype);  // [orig g_GameType]
+	append_u32_le(payload, cfg.game_type);  // [orig g_GameType]
 	payload.push_back(0);                  // [orig g_empty_str] empty C string
 	append_cstr(payload, cfg.expansion);   // [orig g_ExpansionName]
 	return payload;
 }
 
 // tag=0x60 chunked server-info KV transfer. [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350]
-std::vector<uint8_t> build_tag60_server_info(const SessionReplyConfig &cfg) {
+std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg) {
 	std::vector<uint8_t> info_body;
 	append_string_kv(info_body, "SERVERNAME", cfg.server_name);
 	append_string_kv(info_body, "MISSIONNAME", cfg.mission_name);
 	uint8_t gametype_le[4] = {
-			static_cast<uint8_t>(cfg.gametype & 0xFFu),
-			static_cast<uint8_t>((cfg.gametype >> 8) & 0xFFu),
-			static_cast<uint8_t>((cfg.gametype >> 16) & 0xFFu),
-			static_cast<uint8_t>((cfg.gametype >> 24) & 0xFFu),
+			static_cast<uint8_t>(cfg.game_type & 0xFFu),
+			static_cast<uint8_t>((cfg.game_type >> 8) & 0xFFu),
+			static_cast<uint8_t>((cfg.game_type >> 16) & 0xFFu),
+			static_cast<uint8_t>((cfg.game_type >> 24) & 0xFFu),
 	};
 	append_kv(info_body, "GAMETYPE", gametype_le, 4);
 	const std::string custom_text = "OpenNova dev server.";
@@ -126,7 +129,7 @@ std::vector<uint8_t> build_tag60_server_info(const SessionReplyConfig &cfg) {
 }
 
 // tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_0x064 @0x432410]
-std::vector<uint8_t> build_tag64_mission_metadata(const SessionReplyConfig &cfg) {
+std::vector<uint8_t> build_tag64_mission_metadata(const GameConfig &cfg) {
 	std::vector<uint8_t> mission_blob(180, 0);
 	auto write_str = [&](size_t off, const std::string &s) {
 		const size_t n = std::min<size_t>(s.size(), 31);
@@ -149,7 +152,7 @@ std::vector<uint8_t> build_tag64_mission_metadata(const SessionReplyConfig &cfg)
 	write_u32_le(mission_blob, 36, 2);
 	mission_blob[40] = 0x10;
 	mission_blob[42] = 0x01;
-	write_u32_le(mission_blob, 44, cfg.mpattrib);
+	write_u32_le(mission_blob, 44, cfg.mp_attributes);
 	write_u32_le(mission_blob, 48, 1);
 	write_str(52, cfg.server_name);
 	write_str(84, cfg.mission_file);
@@ -195,11 +198,16 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // just the npruntime-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
 // entry list.
 std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &roster,
-                                        const PlayerReplicationState &fallback) {
+                                        const PlayerReplicationState &fallback,
+                                        const world::World *world) {
 	std::vector<PlayerListEntry> players;
 	for (const NapiNPConnection &c : roster) {
-		if (c.phase < ConnectionPhase::PlayerAdded || !c.reply.binding_valid) continue;
-		players.push_back({c.reply.player_slot, c.reply.team});
+		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
+		// team @entity+344 read THROUGH owned_entity (D-NET-132); the World-less path defaults to 1.
+		uint8_t team = 1;
+		if (world != nullptr)
+			if (const world::Entity *e = world->registry.get(c.link.owned_entity)) team = e->team;
+		players.push_back({c.reply.player_slot, team});
 	}
 	std::sort(players.begin(), players.end(),
 	          [](const PlayerListEntry &a, const PlayerListEntry &b) { return a.slot < b.slot; });
@@ -232,7 +240,8 @@ std::vector<uint8_t> build_tag_1e_game_event_post_spawn() {
 
 // Build the per-reply PlayerReplicationState from the session config + the connection's binding (the
 // retired GameSession::player_replication_state). [orig: the player slot the reply serializers read]
-PlayerReplicationState make_rep_state(const SessionReplyConfig &cfg, const SessionReplyState &st) {
+PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnection &conn,
+                                      const world::World *world) {
 	PlayerReplicationState ctx;
 	ctx.player_name = cfg.player_name;
 	ctx.player_slot = 0;
@@ -245,20 +254,24 @@ PlayerReplicationState make_rep_state(const SessionReplyConfig &cfg, const Sessi
 		if (!cfg.mission_name.empty()) ctx.spawn_names.push_back(cfg.mission_name);
 		else if (!cfg.mission_file.empty()) ctx.spawn_names.push_back(cfg.mission_file);
 	}
-	if (st.binding_valid) {
-		ctx.player_name = st.player_name;
-		ctx.player_slot = st.player_slot;
-		ctx.entity_handle = st.player_entity_handle;
-		ctx.team = st.team;
-	} else if (st.player_entity_handle != 0) {
-		ctx.entity_handle = st.player_entity_handle;
+	// D-NET-132 / §6.9: the roster identity is read THROUGH link.owned_entity (the single binding) — the
+	// wire handle off owned_entity.packed and the team off the live registry Entity (team @entity+344).
+	// player_slot / player_name stay on conn.reply (roster order + the echoed ClientHello.co). A
+	// World-less bind (bind_session_reply_player) stamps owned_entity with the bare wire handle, so the
+	// handle resolves here and the team keeps its default.
+	if (conn.link.owned_entity.valid()) {
+		ctx.player_name = conn.reply.player_name;
+		ctx.player_slot = conn.reply.player_slot;
+		ctx.entity_handle = conn.link.owned_entity.packed;
+		if (world != nullptr)
+			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) ctx.team = e->team;
 	}
 	return ctx;
 }
 
 // tag=0x02 GLB_JOIN post-handshake burst. [orig: NapiNPServerMsg_0x002 @0x512FD0 — witnessed handler
 // emits 0x01/0x7A/0x7B/0x03; the extra 0x00x2/0x05/0x04 are captured-from-observation, D-NET-127.]
-void emit_post_handshake_burst(const SessionReplyConfig &cfg, std::vector<ProtocolMessage> &out) {
+void emit_post_handshake_burst(const GameConfig &cfg, std::vector<ProtocolMessage> &out) {
 	out.push_back(make_protocol_message(0x00, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x00, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}));
@@ -277,12 +290,12 @@ void emit_post_handshake_burst(const SessionReplyConfig &cfg, std::vector<Protoc
 // the connection bound to that slot and serializes its real entity/team/name; falls back to `rep` (the
 // requesting connection's own binding) when no other player owns the slot. [orig: NapiNPServerMsg_0x022
 // @0x514C90 serializes the requested playerSlot from dword_A87048]
-PlayerReplicationState rep_for_slot(const SessionReplyConfig &config,
+PlayerReplicationState rep_for_slot(const GameConfig &config,
                                     const std::vector<NapiNPConnection> &roster, uint8_t slot,
-                                    const PlayerReplicationState &fallback) {
+                                    const PlayerReplicationState &fallback, const world::World *world) {
 	for (const NapiNPConnection &c : roster) {
-		if (c.phase < ConnectionPhase::PlayerAdded || !c.reply.binding_valid) continue;
-		if (c.reply.player_slot == slot) return make_rep_state(config, c.reply);
+		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
+		if (c.reply.player_slot == slot) return make_rep_state(config, c, world);
 	}
 	return fallback;
 }
@@ -315,14 +328,15 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 
 } // namespace
 
-std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &config,
+std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
-                                                      const std::vector<NapiNPConnection> &roster) {
+                                                      const std::vector<NapiNPConnection> &roster,
+                                                      const world::World *world) {
 	std::vector<ProtocolMessage> replies;
 	SessionReplyState &st = conn.reply;
-	const PlayerReplicationState rep = make_rep_state(config, st);
+	const PlayerReplicationState rep = make_rep_state(config, conn, world);
 
 	// The loadout gate (burst phase 7→8) is opened ONLY by the C2S 0x2F handler (case 0x2F below).
 	// A prior auto-advance ("any C2S at phase 8") fired on stale handshake messages before the
@@ -349,7 +363,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 				// (0x01/0x7a/0x7b/0x03/0x16) reliably PRECEDES the world-stream (golden f134-142 vs f144).
 				if (!st.roster_pushed) {
 					emit_post_handshake_burst(config, replies);
-					replies.push_back(make_protocol_message(0x16, build_reply_tag_16(roster, rep)));
+					replies.push_back(make_protocol_message(0x16, build_reply_tag_16(roster, rep, world)));
 					st.roster_pushed = true;
 				}
 				break;
@@ -359,7 +373,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 				// -> its real entity). A wrong/default slot leaves the client unable to map itself -> stuck
 				// undeployed, flooding C2S 0x0f. (golden f143->f144 slot 0; the joiner also syncs its own.)
 				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
-				const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep);
+				const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
 				replies.push_back(make_protocol_message(0x46, encode_player_sync(prs)));
 				break;
 			}
@@ -438,20 +452,22 @@ std::vector<ProtocolMessage> dispatch_session_replies(const SessionReplyConfig &
 
 bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, uint8_t player_slot,
                                uint16_t entity_handle) {
-	conn.reply.binding_valid = true;
+	// D-NET-132: the bare wire handle IS the binding — stamp it onto owned_entity (the single source the
+	// reply builders read the handle/team through). player_name/slot stay on conn.reply.
+	conn.link.owned_entity.packed = entity_handle;
 	conn.reply.player_name = std::move(player_name);
 	conn.reply.player_slot = player_slot;
-	conn.reply.player_entity_handle = entity_handle;
 	return true;
 }
 
-ProtocolMessage build_player_list_message(const SessionReplyConfig &config,
-                                          const std::vector<NapiNPConnection> &roster) {
+ProtocolMessage build_player_list_message(const GameConfig &config,
+                                          const std::vector<NapiNPConnection> &roster,
+                                          const world::World *world) {
 	// `fallback` only matters for an empty roster (World-less path); a real host always has >=1 bound
 	// player, so the enumerated roster wins. Build a minimal fallback rep from the config.
 	PlayerReplicationState fallback;
 	fallback.player_name = config.player_name;
-	return make_protocol_message(0x16, build_reply_tag_16(roster, fallback));
+	return make_protocol_message(0x16, build_reply_tag_16(roster, fallback, world));
 }
 
 } // namespace opennova::np

@@ -43,7 +43,7 @@ void put_cstr(std::vector<uint8_t> &b, const std::string &s) {
 // [orig: NetPacket_WriteServerNameAndMapFile @0x505780] S2C 0x2C: server name + map file, two
 // NUL-terminated C strings (was Kong-misnamed "TypeNameAndBaseName"). golden frame 144 = "Untitled\0"
 // + "TDH_I5A.BMS\0". Sourced from the session config (the host's own server name + mission file).
-std::vector<uint8_t> serialize_server_name_map(const SessionReplyConfig &cfg) {
+std::vector<uint8_t> serialize_server_name_map(const GameConfig &cfg) {
 	std::vector<uint8_t> b;
 	put_cstr(b, cfg.server_name);
 	put_cstr(b, cfg.mission_file);
@@ -52,8 +52,8 @@ std::vector<uint8_t> serialize_server_name_map(const SessionReplyConfig &cfg) {
 
 // [orig: CNapiServerConfig_BuildFlags @0x4c4dc0] The trailing flags dword of the 0x08 block.
 uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
-	const ServerRules &r = ctx.rules;
-	const NapiGameSettings &gs = ctx.game_settings;
+	const GameConfig &r = ctx.config;   // rule-flag inputs (squad / perm-death / config_flag_*)
+	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
 	if (!ctx.is_in_session) return flags;     // gated on is_in_session (+0x58)
 	if (r.config_flag_2550A04) flags = 4;
@@ -82,7 +82,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
 
 // [orig: ServerConfig_SerializeToPacket @0x505bd0] S2C 0x08: 10 rule dwords + 7 bytes + flags dword.
 std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
-	const ServerRules &r = ctx.rules;
+	const GameConfig &r = ctx.config;
 	std::vector<uint8_t> b;
 	b.reserve(51);
 	put_u32(b, r.respawn_time);
@@ -139,9 +139,9 @@ std::vector<uint8_t> serialize_timestamp(uint32_t now_tick) {
 // the §5.29 field map / the WorldStateLoad struct decode_world_state_load consumes.
 std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const NapiNPConnection &conn,
                                                 uint32_t now_tick) {
-	int32_t px = static_cast<int32_t>(ctx.session_config.spawn_x);
-	int32_t py = static_cast<int32_t>(ctx.session_config.spawn_y);
-	int32_t pz = static_cast<int32_t>(ctx.session_config.spawn_z);
+	int32_t px = static_cast<int32_t>(ctx.config.spawn_x);
+	int32_t py = static_cast<int32_t>(ctx.config.spawn_y);
+	int32_t pz = static_cast<int32_t>(ctx.config.spawn_z);
 	int16_t yaw = 0;
 	// Prefer the joiner's live spawned pool-0 entity (bound by Server_ProcessPendingPlayerSpawns before
 	// the burst); fall back to the host-advertised spawn from the session config.
@@ -369,7 +369,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				action = Action::SkipSilent;
 			}
 		} else if (tag == 0x2C) {
-			body = serialize_server_name_map(ctx.session_config);
+			body = serialize_server_name_map(ctx.config);
 		} else if (tag == 0x08) {
 			body = serialize_server_config(ctx);
 		} else if (tag == 0x2A) {

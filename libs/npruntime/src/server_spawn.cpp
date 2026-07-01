@@ -28,7 +28,7 @@ namespace {
 // join request carries no team/spectator field yet); they default into the autobalance below.
 uint8_t assign_player_team(const NapiNPServerCtx &ctx, const world::World &world) {
 	constexpr uint32_t kCoopGameTypeMasked = 0x10020u;
-	const uint32_t gt = ctx.game_settings.game_type;
+	const uint32_t gt = ctx.config.game_type;
 	if (!ctx.is_in_session || (gt & 0xFFFDFFFFu) == kCoopGameTypeMasked) return 1;
 	uint32_t team1 = 0, team2 = 0;
 	world.registry.for_each([&](const world::Entity &e) {
@@ -96,10 +96,10 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		if (&c == &conn) continue;
 		if (c.phase >= ConnectionPhase::PlayerAdded) ++player_slot;
 	}
-	conn.reply.binding_valid = true;
+	// D-NET-132: link.owned_entity (bound above) IS the roster binding — the reply builders read the
+	// wire handle off owned_entity.packed and the team off the live entity (team @entity+344). Only the
+	// roster ORDER (player_slot) and the echoed name stay on conn.reply.
 	conn.reply.player_slot = player_slot;
-	conn.reply.player_entity_handle = h.packed;
-	conn.reply.team = spawn.team;
 	if (!conn.player_name.empty()) conn.reply.player_name = conn.player_name;
 
 	conn.phase = ConnectionPhase::PlayerAdded;

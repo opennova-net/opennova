@@ -627,18 +627,18 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// Server_TickUpdate owns the per-frame C2S drain + S2C fan over connection_list; there is no
 	// separate net ISystem (retired P8).
 
-	// NapiGameSettings for create_session: a LAN host takes its lobby-visible name / gametype from
-	// the GDScript-configured host_session_config_; SP is the faithful "SINGLEPLAYERGAME" / 1 player.
-	settings_ = np::NapiGameSettings{};
+	// The ONE consolidated GameConfig for create_session (ADR 0013): a LAN host takes its lobby name /
+	// gametype / mission + the §5.1 reply slice from the GDScript-configured host_session_config_; SP is
+	// the faithful "SINGLEPLAYERGAME" / 1 player. game_type (g_GameType) now feeds BOTH the S2C 0x08
+	// block dword[3] AND the 0x7B/0x60 bodies (§6.9; NapiNPMsg_0x7B_BuildPayload @0x507740).
+	np::GameConfig host_config;
 	if (host_listen_) {
-		const opennova::np::SessionReplyConfig &s = host_session_config_;
-		settings_.server_name = s.server_name.empty() ? std::string("OpenNova LAN Host") : s.server_name;
-		settings_.max_players = host_max_players_; // the UI player cap (configure_host_session clamped 1..65)
-		settings_.game_type = s.gametype;
-		settings_.mp_attributes = s.mpattrib;
+		host_config = host_session_config_; // mission/player/spawn + game_type/mp_attributes from the UI
+		if (host_config.server_name.empty()) host_config.server_name = "OpenNova LAN Host";
+		host_config.max_players = host_max_players_; // the UI player cap (configure_host_session clamped 1..65)
 	} else {
-		settings_.server_name = "SINGLEPLAYERGAME";
-		settings_.max_players = 1;
+		host_config.server_name = "SINGLEPLAYERGAME";
+		host_config.max_players = 1;
 	}
 
 	// The witnessed §5.0 listen-host bring-up, dedup'd to the ONE shared helper start_host_session
@@ -647,11 +647,10 @@ void NovaSimulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// at the start marker + latch its loopback in-match so Server_TickUpdate fans it the per-frame
 	// whole-world 0x0A its local view renders from). host_owner_.host_loopback / .serve_and_play + ctx_.world
 	// were set above; this replaces the copy that had drifted out of the helper. [orig: SinglePlayer_StartMission
-	// @0x561af0]. A LAN host feeds the §5.1 reactive-reply config for the joiner replies; SP needs none.
+	// @0x561af0]. The one GameConfig carries the §5.1 reactive-reply config for the joiner replies too.
 	np::HostConfig host_cfg;
-	host_cfg.settings = settings_;
+	host_cfg.config = host_config;
 	host_cfg.socket_mode = host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless;
-	host_cfg.reply_config = host_listen_ ? host_session_config_ : opennova::np::SessionReplyConfig{};
 	host_cfg.serve_and_play = serve_and_play;
 	np::start_host_session(host_owner_, host_cfg);
 	if (serve_and_play) {
@@ -1419,7 +1418,7 @@ int NovaSimulation::get_host_peer_count() const {
 }
 
 void NovaSimulation::configure_host_session(Dictionary p_options) {
-	opennova::np::SessionReplyConfig config = host_session_config_;
+	opennova::np::GameConfig config = host_session_config_;
 	host_bind_port_ = dictionary_u16(p_options, "bind_port", host_bind_port_);
 	apply_dictionary_string(p_options, "server_name", config.server_name);
 	apply_dictionary_string(p_options, "mission_name", config.mission_name);
@@ -1427,11 +1426,11 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 	apply_dictionary_string(p_options, "player_name", config.player_name);
 	apply_dictionary_string(p_options, "expansion", config.expansion);
 	if (p_options.has("gametype")) {
-		config.gametype = dictionary_u32(p_options, "gametype", config.gametype);
+		config.game_type = dictionary_u32(p_options, "gametype", config.game_type);
 	} else if (p_options.has("game_type")) {
-		config.gametype = dictionary_u32(p_options, "game_type", config.gametype);
+		config.game_type = dictionary_u32(p_options, "game_type", config.game_type);
 	}
-	config.mpattrib = dictionary_u32(p_options, "mpattrib", config.mpattrib);
+	config.mp_attributes = dictionary_u32(p_options, "mpattrib", config.mp_attributes);
 	if (p_options.has("spawn_x") || p_options.has("spawn_y") || p_options.has("spawn_z")) {
 		config.spawn_x = dictionary_u32(p_options, "spawn_x", config.spawn_x);
 		config.spawn_y = dictionary_u32(p_options, "spawn_y", config.spawn_y);
@@ -1468,7 +1467,7 @@ void NovaSimulation::configure_host_session(Dictionary p_options) {
 }
 
 Dictionary NovaSimulation::get_host_session_config() const {
-	const opennova::np::SessionReplyConfig &session = host_session_config_;
+	const opennova::np::GameConfig &session = host_session_config_;
 	Dictionary out;
 	out["bind_port"] = static_cast<int>(host_bind_port_);
 	out["server_name"] = String(session.server_name.c_str());
@@ -1476,8 +1475,8 @@ Dictionary NovaSimulation::get_host_session_config() const {
 	out["mission_file"] = String(session.mission_file.c_str());
 	out["player_name"] = String(session.player_name.c_str());
 	out["expansion"] = String(session.expansion.c_str());
-	out["gametype"] = static_cast<int64_t>(session.gametype);
-	out["mpattrib"] = static_cast<int64_t>(session.mpattrib);
+	out["gametype"] = static_cast<int64_t>(session.game_type);
+	out["mpattrib"] = static_cast<int64_t>(session.mp_attributes);
 	out["spawn_x"] = static_cast<int64_t>(session.spawn_x);
 	out["spawn_y"] = static_cast<int64_t>(session.spawn_y);
 	out["spawn_z"] = static_cast<int64_t>(session.spawn_z);
