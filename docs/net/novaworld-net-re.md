@@ -271,13 +271,13 @@ sweep; blank = not yet characterized.
 |---|---|---|---|
 | 0x00 | 0x42E0E0 | `NapiNPClientMsg_0x000` | tiny stub no-op |
 | 0x01 | 0x425360 | `_0x001` | reads u32 sync state |
-| 0x02 | 0x42E0F0 | `_0x002` | game-start confirm + position ACK |
+| 0x02 | 0x42E0F0 | `_HandleJoinResponse` | join position-ack + PADDING PROBE: reads [i32 posX][i32 posY][i32 paddingLen] (rest of the ~512-B body = ignored filler); client replies C2S 0x02 = position + paddingLen random bytes + resets send holdoff. Field map §5.55 (decoded) |
 | 0x03 | 0x425390 | `_0x003` | u8 + 2×u16 sync tick |
-| 0x04 | 0x425410 | `_0x004` | session config (max players, flags) |
+| 0x04 | 0x425410 | `_SessionSlotConfig` | session slot config (24 B): [4×i32 skipped][u8 cfg][u8 teamMode][u8 maxPlayers → PlayerSlotTable_Reallocate][i32 skipped][u8]. Field map §5.53 (decoded) |
 | 0x05 | 0x42E180 | `_HandleGameStart` | the actual GAME-START UI signal: reads u8 flag; if non-zero, client replies C2S 0x4E and resets game-state dwords; toggles `dword_A86C28`, queues UI notification, resets game timers |
 | 0x06 | 0x432BC0 | `_HandleChatCommand` | server→client chat |
 | 0x07 | 0x422730 | `_0x007` | per-frame keep-alive stub |
-| 0x08 | 0x4281D0 | `_0x008` | game-state snapshot / delta entity updates (~2 KB) |
+| 0x08 | 0x4281D0 | `_HandleSessionConfig` | SESSION CONFIG, fixed 51 B (the old "~2 KB snapshot" note was wrong): [10×i32 (f3=gameType→g_GameType)][7×u8][u32 bitflags, bits 13/15/16 latched]. Field map §5.54 (decoded) |
 | 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
@@ -287,11 +287,11 @@ sweep; blank = not yet characterized.
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
 | 0x12 | 0x425EE0 | `_0x012` | |
 | 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]` → Health=0 + death cb (§5.35) |
-| 0x14 | 0x42F240 | `_0x014` | |
+| 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast [u8 senderSlot][u8 channel][cstr formatted] → Chat_DispatchToChannel; the fan-out of C2S 0x0D. Field map §5.52 (decoded) |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
 | 0x17 | 0x4226F0 | `_0x017` | |
 | 0x18 | 0x433780 | `FullEntitySpawn` | reply to C2S 0x0F: destroy + FULL single-entity rebuild (itemDef/models/playerClass/minimap/anim registration). Absent from healthy sessions (self-heal, §5.46) — the early "does not fire" note meant nothing needed healing, not an inert path. Field map §5.46 (decoded) |
-| 0x19 | 0x425E80 | `_0x019` | |
+| 0x19 | 0x425E80 | `_0x019` | spawn-ack timestamp [u32] → `dword_A82360` — the requester-only reply to C2S 0x0A spawn-menu request (§5.52a; emitted @0x513260 via NetPacket_WriteTimestampB) |
 | 0x1A | 0x425EB0 | `_0x01A` | sets `dword_A82364` (WaitForGameStart return-0 unlock) |
 | 0x1B | 0x426080 | `_0x01B` | |
 | 0x1C | 0x4227F0 | `_0x01C` | empty stub |
@@ -310,7 +310,7 @@ sweep; blank = not yet characterized.
 | 0x29 | 0x427D00 | `_0x029` | |
 | 0x2A | 0x425BA0 | `_0x02A` | chat-history entry `[i32][i32][i16]` (10 B) → Chat_AddToHistory (§5.35) |
 | 0x2B | 0x427DF0 | `_0x02B` | |
-| 0x2C | 0x427E10 | `_0x02C` | chat entry |
+| 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
 | 0x2D | 0x427E90 | `_0x02D` | |
 | 0x2E | 0x427F80 | `_0x02E` | |
 | 0x2F | 0x430E10 | `_0x02F` | |
@@ -318,7 +318,7 @@ sweep; blank = not yet characterized.
 | 0x31 | 0x4311E0 | `_0x031` | CRC request for weapon loadout → C2S 0x21 |
 | 0x32 | 0x428060 | `_0x032` | |
 | 0x33 | 0x425FA0 | `_0x033` | |
-| 0x34 | 0x4283A0 | `_0x034` | |
+| 0x34 | 0x4283A0 | `_PlaySoundByName` | PLAY-SOUND [u8 flag][cstr profileName][flag==1: 3×i16 pos <<16]; flag 0 = flat, 1 = positioned 3D full-volume (kong name "GotoTeleport" was a misnomer, renamed). Field map §5.50 (decoded) |
 | 0x35 | 0x4261A0 | `_0x035` | |
 | 0x36 | 0x426120 | `_0x036` | |
 | 0x37 | 0x431250 | `_0x037` | |
@@ -342,14 +342,14 @@ sweep; blank = not yet characterized.
 | 0x4D | 0x4317B0 | `_HandleSpawnSlot` | reads u8 slot; local slot → tip event; otherwise client replies C2S 0x22+0x23; reads `dword_24C1928` as a skip-tip-if-already-spawned guard (never writes it) |
 | 0x4E | 0x431870 | `_HandleBatchSpawn` (misleading) | u16 count + per-slot u16; calls `Entity_KillBySlotId` (kill, not spawn), then replies C2S 0x28 |
 | 0x4F | 0x4286C0 | `_0x04F` | |
-| 0x50 | 0x431910 | `_0x050` | |
+| 0x50 | 0x431910 | `_TeamAssign` | team assign (6 B): [u16 handle][u8 team][u16 spawnPointId][u8 squadLeader] → entity team + team loadout init |
 | 0x51 | 0x431BB0 | `_0x051` | |
 | 0x52 | 0x428A80 | `_0x052` | |
-| 0x53 | 0x428AE0 | `_0x053` | |
+| 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 modeA][u8 modeB→entity+547][u16 start_s][u16 end_s][u8 rate], ×62 s→ticks; capture/takeover HUD channel. Field map §5.49 (decoded) |
 | 0x54 | 0x429040 | `_0x054` | |
 | 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
-| 0x58 | 0x4228C0 | `_0x058` | texture loader (terrain assets) |
+| 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
 | 0x59 | 0x4228E0 | `_0x059` | deployed-item / weapon-overlay spawn (32 B): item ids + owner + slot + parent + 3×i32 pos + 3×u16 ang (§5.36) |
 | 0x5A | 0x4290E0 | `_0x05A` | weapon-loadout sync: `[u8 avatarClass]` + a `{typeId, ammoP, ammoS, ammoAlt}` slot chain to a `0xFF` terminator (typeId = AdmDef index); resets `dword_81474C=0`. Field map **§5.30** (decoded) |
 | 0x5B | 0x4322B0 | `_0x05B` | |
@@ -371,7 +371,7 @@ sweep; blank = not yet characterized.
 | 0x6C | 0x428FC0 | `_0x06C` | |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
 | 0x6E | 0x429880 | `_0x06E` | team/squad roster sync: `[u8 teamCount]` + per team `{u16 entityHandle, u16 slotIdx, u8 memberCount, u16 slotHandle, u16 members[]}`. Field map **§5.31** (decoded) |
-| 0x6F | 0x428D60 | `_0x06F` | cinematic camera assignment |
+| 0x6F | 0x428D60 | `_ZoneTimerValue` | ZONE-TIMER VALUE (15 B; NOT cinematic camera — that label was wrong): [u16 zoneHandle][u8 mode][i32 value 16.16 s][i32 limit][i16 rate][u8→+544][u8→+545], ×62 s→ticks into g_zone_timer_list; nearest-zone tracking for HUD_DrawTakeoverStatus. Field map §5.49 (decoded) |
 | 0x70 | 0x429A30 | `_0x070` | |
 | 0x71 | 0x425600 | `_0x071` | |
 | 0x72 | 0x425710 | `_0x072` | |
@@ -379,7 +379,7 @@ sweep; blank = not yet characterized.
 | 0x74 | 0x4258B0 | `_0x074` | |
 | 0x75 | 0x4259E0 | `_0x075` | spectator-mode flags (2 B); sets `byte_A860EC`, `dword_24D1DF4` |
 | 0x76 | 0x42D540 | `_0x076` | u16 → `dword_24D59FC` |
-| 0x78 | 0x4259070 | `_0x078` | (address as recorded in the source note has 7 hex digits — likely a typo; re-verify in the IDB) |
+| 0x78 | 0x425970 | `_0x078` | (address verified from the dispatch table @0x82B4F4 — the prior 7-digit `0x4259070` was a typo) |
 | 0x79 | 0x429B00 | `_0x079` | spectator-mode flag (1 B → `dword_82BEE4`) (§5.35) |
 | 0x7A | 0x429B40 | `_0x07A` | player name (max 64 chars) → server-info struct |
 | 0x7B | 0x429BB0 | `_0x07B` | full player/session info: 5×cstring + u32 + 2×cstring. Field map **§5.32** (decoded) — roles witnessed from the landing globals + PunkBuster cvars (the Hex-Rays "clan/squad/rank" comment is wrong): name / **playerId** (NovaWorld account id, **not** a clan tag) / serverName / missionName / mapFile / … / gameName |
@@ -388,7 +388,7 @@ sweep; blank = not yet characterized.
 | 0x7E | 0x425E20 | `_0x07E` | two cstrings → `byte_A86520` / `byte_A86120` (server config strings) |
 | 0x7F | 0x429E60 | `_0x07F` | |
 | 0x80 | 0x42A070 | `_0x080` | |
-| 0x81 | 0x42A0B0 | `_0x081` | |
+| 0x81 | 0x42A0B0 | `_ScoreDeltaSound` | [i32 score] → dword_A82300; positive delta plays a tiered hit-confirm sound (thresholds word_24D5A10) |
 | 0x82 | 0x42A0E0 | `_0x082` | |
 | 0x83 | 0x4326E0 | `_0x083` | |
 
@@ -405,17 +405,17 @@ This is what a reimplemented server must **handle**.
 | 0x00 | 0x512AA0 | **JOIN** — initial client→server packet (allocates session, returns session key) |
 | 0x01 | 0x512ED0 | likely FORM_POST; also compares side passwords during early join (§6.4) |
 | 0x02 | 0x512FD0 | likely GLB_JOIN |
-| 0x03 | 0x501BE0 | |
+| 0x03 | 0x501BE0 | `[i32]` → requester player entity+372 (0x174) |
 | 0x04 | 0x5199D0 | |
 | 0x06 | 0x513310 | `_0x006_ClientFiredRound` |
 | 0x07 | 0x4FC970 | |
 | 0x08 | 0x502210 | time-sync / anti-speedhack — `[u32 sessionId][u32 gameTimestamp]`; host checks the client's reported game-time deltas stay within 3% of wall-clock (`GetTickCount`). NOT movement. [orig: `validate_time_sync @ 0x502210`] |
 | 0x09 | 0x513200 | client checksum response |
-| 0x0A | 0x513260 | |
+| 0x0A | 0x513260 | SPAWN-MENU REQUEST (len 0): game state → 9 (spawning), session+32=4, replies S2C 0x19 timestamp to the requester (mask 0x20) |
 | 0x0B | 0x51AB10 | |
 | 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
-| 0x0D | 0x513760 | replication frame ACK |
-| 0x0E | 0x519AF0 | |
+| 0x0D | 0x513760 | CHAT MESSAGE uplink (`NapiNPServer_HandleChatMessage`; the old "replication frame ACK" note was WRONG): [u8 channel][cstr text]; strips `<...>` tags, 1000 ms rate limit, prepends name(/squad), fans out S2C 0x14 per recipient (2=team, 4/5=side, 11/12=squad, 13=proximity ≤100 u, default=all). §5.52 |
+| 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle]; 0xFFFE = auto team spawn (gametype-keyed) — `Server_ProcessClientRequestRespawn` |
 | 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); host validates shooter authority + ammo via Server_ValidateAndFireRound and may emit S2C 0x0A trailing weapon-hit (§5.9.1) |
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
 | 0x13 | 0x514330 | |
@@ -434,15 +434,15 @@ This is what a reimplemented server must **handle**.
 | 0x23 | 0x514D50 | visible-players request (empty body) → host replies S2C 0x4C snapshot (§5.33); 0x0F/0x4D reply-burst member |
 | 0x24 | 0x514DC0 | |
 | 0x25 | 0x514DF0 | weapon-reload request (mid-game) — note the direction asymmetry vs S2C 0x25 (§5.3) |
-| 0x26 | 0x502390 | |
-| 0x27 | 0x4FC980 | |
+| 0x26 | 0x502390 | VEHICLE-ATTACH request — server overwrites wire word0 with the requester's OWN handle (anti-spoof) → Entity_ProcessVehicleAttach(vehicle/seat words) |
+| 0x27 | 0x4FC980 | VEHICLE-DETACH request: [u16 handle] → Entity_DetachFromVehicle(entity, entity+364) |
 | 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
 | 0x29 | 0x514F10 | entity-packet request `[u16 bufferIndex]` → host writes that entity's packet & replies S2C 0x51 (§5.33); reply-burst member |
 | 0x2B | 0x514FE0 | |
 | 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
 | 0x2D | 0x502430 | burst-member receiver |
 | 0x2E | 0x515390 | |
-| 0x2F | 0x515790 | |
+| 0x2F | 0x515790 | LOADOUT SUBMIT (spawn-menu accept): [u8 class 1..4][u8 soldierType 5..9][u32 weaponSlotIdx] + [u8 admIdx][u8 ammoPri][u8 ammoSec][u8 variant]× until 0xFF; soldierType → entity+660 playerClass (restriction mask dword_24D59FC, out-of-range → 8); replies S2C 0x5A. Field map §5.56 (decoded) |
 | 0x30 | 0x5029B0 | |
 | 0x31 | 0x5024A0 | |
 | 0x32 | 0x51A600 | burst-member receiver |
@@ -457,7 +457,7 @@ This is what a reimplemented server must **handle**.
 | 0x3D | 0x500EC0 | entity-index list reply (to S2C 0x68, §5.34) |
 | 0x3E | 0x500E10 | |
 | 0x3F | 0x518F10 | |
-| 0x40 | 0x51C4C0 | |
+| 0x40 | 0x51C4C0 | VEHICLE-SPAWN request (`NapiNPServerMsg_HandleVehicleSpawnRequest`): [u16 sourceHandle][u8 typeIndex]; gates itemDef+2772 bit + team + availability; spawns at the source model's `boat`/`helo` userpoint (else z+2.0) and broadcasts S2C 0x18 (mask 0x90) for the spawned entity + every pool-1 entity sharing refNum(+0x215). §5.46 |
 | 0x41 | 0x510540 | |
 | 0x42 | 0x510930 | |
 | 0x43 | 0x510990 | |
@@ -3981,6 +3981,19 @@ consumes the query silently strands the vehicle-resolved player entity forever. 
 at the deploy bundle (C 0x28/0x29/0x22/0x23 + the first 0x0F burst, capture ov-til45c f=65791), placing
 the break at `Game_StartMission`'s reload, not at 0x0C application.
 
+**Re-grill 2026-07-01 (full-field verify vs fresh decompilation): MATCHING both directions.** Three
+additions: (1) `serialize_object_to_buffer @ 0x504d10` takes FOUR args — the IDB's 3-arg prototype was
+wrong (all 3 callsites clean up 0x10; fixed in the IDB); arg 4 is the serialized entity, arg 3 (the
+requester's slot) is unused. (2) **S2C 0x18 has a SECOND emitter**: the C2S 0x40 vehicle-spawn handler
+`[orig: NapiNPServerMsg_HandleVehicleSpawnRequest @ 0x51C4C0]` broadcasts the record (send_mask 0x90 =
+alive + exclude-host) for the freshly spawned deployable AND every pool-1 entity sharing its refNum
+(+0x215) — 0x18 is "full entity (re)spawn", not exclusively the 0x0F reply. (3) The client tests the
+wire `item_type` byte ONLY against zero (@ 0x433b5a); the rebuild's person-vs-vehicle behavior comes from
+the LOCAL itemDef's type (@ 0x433d6e), so any nonzero value is observably equivalent — D-NET-133's
+pool-derived approximation is provably safe. Also witnessed: the 0x0F handler additionally gates on the
+requester having a session player (`session+192` non-null) — our host replies regardless (safe direction;
+noted in D-NET-133).
+
 **Reimpl (2026-07-01, all 46 net+world ctests green):** `encode_full_entity_spawn` /
 `decode_full_entity_spawn` (libs/novaworld/ingame_{encode,decode}); `netsim::build_full_entity_spawn`
 (entity_wire_bridge — shares the player wire rules with the 0x0C builder: per-recipient flags, minimap
@@ -4042,6 +4055,125 @@ only players** (our `entity_class_of` returns `Unknown` for pool-1 vehicles) wit
 round-robin — porting the priority pairlist + budget + all-class replication is the tracked next step
 (the under-send that leaves the retail joiner's world incomplete; §5.46 flood context). Verified:
 `netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`) + the shape harness `scripts/net/diff_0a.py`.
+
+### 5.48–5.56 The 2026-07-01 wire-coverage sweep — session/HUD state channel (decoded)
+
+One grill wave took every tag the retail↔retail goldens carry that `nw_pp` could not yet name or decode
+— after it, **all three goldens decode with zero unnamed tags in both directions** (`nw_pp --histogram`).
+Reimpl: `libs/novaworld/ingame_decode.{h,cpp}` (`decode_session_status` / `decode_zone_timer_value` /
+`decode_zone_timer_window` / `decode_play_sound` / `decode_mission_map_names` / `decode_chat_uplink` /
+`decode_chat_broadcast` / `decode_session_slot_config` / `decode_session_config` /
+`decode_join_padding_probe` / `decode_loadout_submit`), nw_pp printers + catalog rows, pinned by
+`nw_message_coverage` (crafted-body consumption + Decoded-set drift guard).
+
+**§5.48 S2C 0x58 SESSION-STATUS** `[orig: NapiNPClientMsg_SessionStatus @ 0x4228C0 →
+SessionStatus_ParseFromBuffer @ 0x530ED0]` — the old "texture loader" naming was wrong (functions renamed
+in the IDB). Wire: `[cstr serverName (≤31 kept)][cstr missionTitle (≤63 kept)][u8×3][u32 uptimeMs]
+[39×i32 statPointValues][u8 kvCount][(u8 key≤9, u32 val)×N]`. Parsed into the single global
+`g_session_status @ 0x24E3E88`: serverName feeds the end-game STROVER_SERVERNAME line, uptimeMs is
+elapsed-at-send (client stamps GetTickCount at parse; `CSessionTimer_GetElapsedMS` = wire − parseTick +
+now — the admin-status "UP-TIME"), the 39 i32s are the STROVER_STATVAR00..38 per-stat score rules read by
+`Overlay_BuildEndGameStatsText @ 0x54A240` via `SessionStatus_GetStatPointValue @ 0x52D5D0` (index ≤ 0x26,
+reads block[30+i]). Wire tolerances witnessed from the golden: kvCount may exceed the pairs present
+(reader is bounds-tolerant, missing pairs read as zeros @ 0x531055), and the body may carry trailing
+bytes the parser never reads (golden: 5 zero bytes; the dispatcher never requires full consumption).
+Golden: server="Untitled", mission="TD - Dormant Volcano Isle", uptime=45063 ms, 8 nonzero stat values.
+
+**§5.49 S2C 0x6F / 0x53 ZONE TIMERS** — NOT cinematic-camera messages (that §4 label and the kong
+"CTerrainRenderer color ramp / CColorGradient" names were wrong; renamed `ZoneTimerList_*` in the IDB).
+Both program per-zone-entity timer entries in `g_zone_timer_list @ 0x24E41B0` (13-dword entries keyed by
+entity ptr, count at +0x1A00), advanced every client frame by `ZoneTimerList_AdvancePerTick @ 0x537D60`
+(value += rate, clamp [0, limit]) and consumed by the capture-point HUD — `HUD_DrawTakeoverStatus
+@ 0x59B630` draws the entry returned by `find_nearest_entity_in_proximity_list(g_zone_timer_list,
+&player.Position, …)`; `draw_capture_point_detail_panel` / `render_capture_point_labels` / the
+death-screen overlays read the same list.
+- **0x6F ZONE-TIMER VALUE** (15 B) `[orig: NapiNPClientMsg_ZoneTimerValue @ 0x428D60 →
+  ZoneTimerList_SetEntryValue @ 0x537EC0]`: `[u16 zoneHandle][u8 mode][i32 value][i32 limit][i16 rate]
+  [u8 → entity+544][u8 → entity+545]`. value/limit are 16.16-fixed SECONDS, scaled ×62 into tick-fixed
+  by the handler (golden: 1.0 s for owned zones, rate 0, targets pool-1 zone entities). Also maintains
+  the tracked nearest-zone accumulator cluster `dword_A85BA4..BB8` (advanced per frame in
+  `Client_ProcessNetworkFrame @ 0x42C34F`).
+- **0x53 ZONE-TIMER WINDOW** (9 B) `[orig: NapiNPClientMsg_ZoneTimerWindow @ 0x428AE0 →
+  ZoneTimerList_SetEntryWindow @ 0x537DE0]`: `[u16 zoneHandle][u8 modeA][u8 modeB → entity+547]
+  [u16 start_s][u16 end_s][u8 rate]`, start/end ×62 s→ticks; tracked cluster `dword_A85B88..BA0`; a new
+  nearest zone is only adopted within 20.0 world units (1310720 in 16.16, @ 0x428cf5).
+  `ZoneTimers_ResetState @ 0x4244A0` (ex-"CineEditor_ResetState") zeroes the list count + sync globals
+  at mission start.
+
+**§5.50 S2C 0x34 PLAY-SOUND** `[orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]` — the kong name
+"GotoTeleport" was a misnomer (renamed). Wire: `[u8 flag][cstr soundProfileName]` + (flag==1 only)
+`3×i16 pos`, each `<<16` into 16.16 world space. flag 0 → flat play; flag 1 → positioned 3D one-shot at
+full volume (`Entity_PlaySound3D_FullVolume @ 0x528E20` against a zeroed temp entity). Gated
+`is_mp_session_peer`. Resolver: `SoundProfile_FindLoadedByName @ 0x5274F0`.
+
+**§5.51 S2C 0x2C SESSION + MISSION-FILE NAMES** `[orig: NapiNPClientMsg_MissionMapNames @ 0x427E10]` —
+the old "chat entry" note was wrong (chat-history is 0x2A). Wire: `[cstr sessionName → byte_A82378]
+[cstr bmsFileName → g_map_file_name @ 0x24D1F3E]`; bumps `g_loading_progress` to ≥ 1; gated
+`!is_authority`. Golden: "Untitled" + "TDH_I5A.BMS".
+
+**§5.52 CHAT (C2S 0x0D → S2C 0x14)** — the C2S table's "replication frame ACK" note for 0x0D was WRONG:
+`[orig: NapiNPServer_HandleChatMessage @ 0x513760]` is the chat uplink `[u8 channel][cstr text]`. The
+server strips `<...>` tags, rate-limits 1000 ms/player (+100360), prepends the player name (+ squad tag
+via CLinkedList_FindByTag), and fans the formatted line out as **S2C 0x14** `[u8][u8][cstr]`
+(`NetPacket_WriteTwoBytesAndCString @ 0x5047A0`, send_mask 0x20 per recipient) with channel routing:
+2 = team (+354 match; also appends the nearest pool-3 type-2044 marker name as a `:[<location>]` tag),
+4/5 = side 2/1, 11/12 = squad/commander, 13 = proximity ≤ 0x640000 (100.0 world units) per axis,
+default = all. Client receive: `[orig: NapiNPClientMsg_ChatMessage @ 0x42F240]` →
+`Chat_DispatchToChannel @ 0x42B910`.
+**§5.52a** C2S 0x0A SPAWN-MENU REQUEST (len 0) `[orig: NapiNPServerMsg_HandlePlayerSpawnRequest
+@ 0x513260]`: game state → 9 (spawning), session+32 = 4, replies **S2C 0x19** = `[u32 timestamp]`
+(NetPacket_WriteTimestampB) to the requester only → client stores it in `dword_A82360` (read by the
+0x0F world-state-load and batch-spawn handlers).
+
+**§5.53 S2C 0x04 SESSION SLOT CONFIG** (24 B) `[orig: NapiNPClientMsg_SessionSlotConfig @ 0x425410]`:
+`[4×i32 skipped][u8 sessionConfig → dword_24D2110][u8 teamMode → byte_A860D0][u8 maxPlayers →
+byte_A860D1 + PlayerSlotTable_Reallocate @ 0x434B90][i32 skipped][u8 → byte_A85B48]`.
+
+**§5.54 S2C 0x08 SESSION CONFIG** (fixed 51 B) `[orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]`
+— the old "game-state snapshot / delta entity updates (~2 KB)" table note was wrong. Wire:
+`[10×i32 → dword_A821BC..A821E0]` (fields[3] = gameType → `g_GameType`), `[7×u8 → byte_A821E8..ED +
+dword_24D2110]`, `[u32 bitflags → dword_A821E4]` with bits 13/15/16 latched into byte_A821EE/EF/F0.
+Bumps `g_loading_progress` to ≥ 1.
+
+**§5.55 S2C 0x02 JOIN POSITION-ACK + PADDING PROBE** `[orig: NapiNPClientMsg_HandleJoinResponse
+@ 0x42E0F0]`: the handler reads only `[i32 posX][i32 posY][i32 paddingLen]`; the rest of the ~512-B body
+is ignored filler. The client replies **C2S 0x02** = position + paddingLen random bytes
+(`NetPacket_WritePositionWithPadding @ 0x42A360`) and resets its send-holdoff counter — golden: S 0x02
+512 B ⇄ C 0x02 256 B (paddingLen=256).
+
+**§5.56 C2S 0x2F LOADOUT SUBMIT** `[orig: NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]` — the
+spawn-menu accept, and the uplink that sets the wire-visible playerClass. Wire: `[u8 class 1..4]
+[u8 soldierType 5..9][u32 weaponSlotIdx]` then `[u8 admIndex][u8 ammoPri][u8 ammoSec][u8 variant]`
+entries until an `0xFF` admIndex terminator (the same slot vocabulary as the §5.30 S2C 0x5A downlink).
+Server validation: class 1..4 (else just re-sends the slot list); soldierType 5..9 gated by the
+restriction mask `dword_24D59FC` (masked-off → first allowed; still out-of-range → **8**, the same
+default our §5.23/§5.46 playerClass clamp mirrors); soldierType → entity+660; rebuilds the avatar
+display list + weapon slots and replies S2C 0x5A. Golden: class=2 soldierType=8 + 7 ADM entries.
+Related C2S rows witnessed in the same wave: 0x03 (`[i32] → entity+372`), 0x0E respawn/deploy request
+(`[i16 spawnHandle]`, 0xFFFE = auto team spawn, `Server_ProcessClientRequestRespawn @ 0x519AF0`),
+0x26/0x27 vehicle attach/detach (@ 0x502390 / @ 0x4FC980 — attach overwrites wire word0 with the
+requester's own handle, an anti-spoof), and S2C 0x50 team-assign / 0x81 score-delta-sound (§4 rows).
+
+**IDB changes (2026-07-01 wire-coverage grill).** Function renames:
+`TerrainTexDef_ParseFromBuffer → SessionStatus_ParseFromBuffer @ 0x530ED0`,
+`sub_52D5D0 → SessionStatus_GetStatPointValue`, `NapiNPClientMsg_0x058 → _SessionStatus @ 0x4228C0`,
+`CTerrainRenderer_AdvanceColorRamps → ZoneTimerList_AdvancePerTick @ 0x537D60`,
+`CColorGradient_AddOrUpdateRamp → ZoneTimerList_SetEntryWindow @ 0x537DE0`,
+`CTerrainRenderer_AddOrUpdateColorRamp → ZoneTimerList_SetEntryValue @ 0x537EC0`,
+`CineEditor_ResetState → ZoneTimers_ResetState @ 0x4244A0`,
+`NapiNPClientMsg_0x06F → _ZoneTimerValue @ 0x428D60`, `NapiNPClientMsg_0x053 → _ZoneTimerWindow
+@ 0x428AE0`, `NapiNPClientMsg_GotoTeleport → _PlaySoundByName @ 0x4283A0`, `NapiNPClientMsg_0x02C →
+_MissionMapNames @ 0x427E10`, `NapiNPClientMsg_0x014 → _ChatMessage @ 0x42F240`,
+`NapiNPClientMsg_0x004 → _SessionSlotConfig @ 0x425410`, `NapiNPServerMsg_0x026 →
+_HandleVehicleAttach @ 0x502390`, `NapiNPServerMsg_0x027 → _HandleVehicleDetach @ 0x4FC980`,
+`NapiNPClientMsg_0x050 → _TeamAssign @ 0x431910`, `NapiNPClientMsg_0x081 → _ScoreDeltaSound
+@ 0x42A0B0`. Data renames: `dword_24E3E88 → g_session_status`, `dword_24E41B0 → g_zone_timer_list`.
+Type fix: `serialize_object_to_buffer @ 0x504D10` re-prototyped to its true FOUR-arg form
+`(char *buf, int cap, void *requester_unused, GamePlayerEntity *entity)` — the 3-arg prototype made
+Hex-Rays mis-render all three callsites. Plus ~34 local renames across @ 0x433780 / @ 0x504D10 /
+@ 0x514180 / @ 0x5030A0 (wrong Hex-Rays inferences: "texture name" → entity name, "minimapWidth" →
+mountHandles[8], "cameraByte" → playerClass, position dwords mis-named as damage/health, …) and
+reimpl reverse-link comments on every grilled handler.
 
 ## 6. Struct reference
 
@@ -5453,6 +5585,12 @@ ridden vehicle (entity+364) maps from `Entity::mount_target`. (4) mount_handle_8
 +340/+533/+532 tail bytes are 0 (unmodeled). Also: an in-capacity EMPTY slot replies a zeroed type-0
 record — retail serializes the slot's raw memory (stale bytes possible), but with itemDef null the client
 stops at the type gate either way, so the observable effect (destroy + clear) is identical.
+**AMENDED 2026-07-01 (re-grill):** (1) is now provably safe, not just plausible — the client tests the
+wire item_type ONLY against zero (@ 0x433b5a); rebuild behavior keys off the LOCAL itemDef type
+(@ 0x433d6e), so any nonzero byte is observably equivalent. New approximation (5): retail's 0x0F handler
+also gates on the requester having a session player (session+192 non-null, @ 0x5141a8); our dispatch
+replies regardless — over-answering, never under-answering (a pre-admission 0x0F cannot strand a broken
+entity).
 
 **D-NET-134** [reimpl divergence, DOCUMENTED 2026-07-01] **The per-frame S2C 0x0A sub-block phase counter
 cycles a SAFE 3-value subset `{1,0,3}` instead of the original's free-running 4-value counter (§5.47).**

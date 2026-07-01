@@ -1294,4 +1294,184 @@ struct TerrainLoadBatch {
 // Returns true iff the body was consumed exactly (header + N×12-B entries).
 bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch &out);
 
+// ===========================================================================
+// Session/HUD state channel (§5.48–§5.55) — the 2026-07-01 coverage-sweep wave.
+// ===========================================================================
+
+// §5.48 S2C 0x58 — SESSION-STATUS block (server name, mission name, session
+// up-time sync, and the end-game scoring-rule table). The client parses it into
+// the single global g_session_status (0x24E3E88): server name feeds the
+// STROVER_SERVERNAME end-game line, uptime_ms is elapsed-at-send (the client
+// stamps GetTickCount at parse so elapsed = wire − parseTick + now,
+// CSessionTimer_GetElapsedMS), and the 39 i32s are the per-stat point values
+// STROVER_STATVAR00..38 the end-game stats screen awards (positive) or
+// penalizes (negative). Historic "texture loader (terrain assets)" note was
+// wrong. [orig: NapiNPClientMsg_SessionStatus @ 0x4228C0 →
+// SessionStatus_ParseFromBuffer @ 0x530ED0; readers Overlay_BuildEndGameStatsText
+// @ 0x54A240, SessionStatus_GetStatPointValue @ 0x52D5D0]
+struct SessionStatusKV {
+	uint8_t  key = 0;    // key <= 9 kept (first 8 pairs stored)
+	uint32_t value = 0;
+};
+struct SessionStatusBlock {
+	std::string server_name;   // cstr; client keeps <= 31 chars
+	std::string mission_name;  // cstr; client keeps <= 63 chars
+	uint8_t  byte0 = 0, byte1 = 0, byte2 = 0; // → g_session_status[25..27]
+	uint32_t uptime_ms = 0;    // session elapsed ms at send time
+	int32_t  stat_values[39] = {}; // STROVER_STATVAR00..38 point table
+	uint8_t  kv_count = 0;     // wire count; MAY exceed the pairs present (reader
+	                           // is bounds-tolerant, missing pairs read as zeros)
+	std::vector<SessionStatusKV> kv; // the pairs actually on the wire
+	size_t   trailing_bytes = 0; // bytes after the kv pairs the retail parser
+	                             // never reads (golden carries 5 zero bytes)
+};
+bool decode_session_status(const uint8_t *body, size_t len, SessionStatusBlock &out);
+
+// §5.49 S2C 0x6F — ZONE-TIMER VALUE update (15 B). Programs the per-zone-entity
+// timer entry the capture/takeover HUD reads: value/limit are SECONDS on the
+// wire, scaled ×62 into 62 Hz ticks by the client; rate is the per-tick
+// increment (the client advances value += rate each frame, clamped at limit).
+// Also tracks the nearest zone entity to the local player for the takeover
+// widget. NOT a cinematic-camera message (historic label was wrong).
+// [orig: NapiNPClientMsg_ZoneTimerValue @ 0x428D60 → ZoneTimerList_SetEntryValue
+//  @ 0x537EC0; per-frame advance Client_ProcessNetworkFrame @ 0x42C2E6;
+//  consumer HUD_DrawTakeoverStatus @ 0x59B630]
+struct ZoneTimerValue {
+	uint16_t zone_handle = 0;  // (pool<<12)|slot of the zone entity
+	uint8_t  mode = 0;
+	int32_t  value_s = 0;      // current value, 16.16 fixed seconds (client ×62 → tick-fixed)
+	int32_t  limit_s = 0;      // clamp limit, 16.16 fixed seconds (golden: 1.0 for owned zones)
+	int16_t  rate = 0;         // per-tick accumulator increment
+	uint8_t  byte544 = 0;      // → zone entity+544
+	uint8_t  byte545 = 0;      // → zone entity+545
+};
+bool decode_zone_timer_value(const uint8_t *body, size_t len,
+                             ZoneTimerValue &out, size_t &consumed);
+
+// §5.49 S2C 0x53 — ZONE-TIMER WINDOW update (9 B). The companion channel of the
+// same zone-timer entry: a [start, end) window in SECONDS (client ×62 → ticks)
+// plus a rate byte; mode_b lands at zone entity+547. The tracked-nearest-zone
+// adoption additionally requires the zone within 20.0 world units (1310720 in
+// 16.16). [orig: NapiNPClientMsg_ZoneTimerWindow @ 0x428AE0 →
+//  ZoneTimerList_SetEntryWindow @ 0x537DE0]
+struct ZoneTimerWindow {
+	uint16_t zone_handle = 0;
+	uint8_t  mode_a = 0;
+	uint8_t  mode_b = 0;       // → zone entity+547
+	uint16_t start_s = 0;      // window start, seconds
+	uint16_t end_s = 0;        // window end, seconds
+	uint8_t  rate = 0;
+};
+bool decode_zone_timer_window(const uint8_t *body, size_t len,
+                              ZoneTimerWindow &out, size_t &consumed);
+
+// §5.50 S2C 0x34 — PLAY-SOUND by sound-profile name. flag 0 → flat/ambient
+// play; flag 1 → positioned 3D one-shot at full volume (the 3 i16 coords are
+// shifted << 16 into 16.16 world space). No position block on the wire when
+// flag != 1. Gated is_mp_session_peer. The IDB name "GotoTeleport" was a
+// misnomer. [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0 →
+//  SoundProfile_FindLoadedByName @ 0x5274F0 / Entity_PlaySound3D_FullVolume @ 0x528E20]
+struct PlaySoundCommand {
+	uint8_t     flag = 0;      // 0 = flat play, 1 = positioned 3D
+	std::string sound_name;    // sound-profile name (cstr)
+	bool        has_pos = false; // true iff flag == 1 (position block present)
+	int16_t     pos_x = 0, pos_y = 0, pos_z = 0; // world units (engine shifts << 16)
+};
+bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out);
+
+// §5.51 S2C 0x2C — SESSION + MISSION-FILE NAME assign: [cstr sessionName]
+// [cstr bmsFileName] → byte_A82378 / g_map_file_name; bumps g_loading_progress
+// to >= 1. A join-burst member; the historic "chat entry" table note was wrong
+// (chat-history is 0x2A). Golden values: "Untitled" (the host's session name,
+// matching the 0x58 server name) + "TDH_I5A.BMS".
+// [orig: NapiNPClientMsg_MissionMapNames @ 0x427E10]
+struct MissionMapNames {
+	std::string session_name;   // → byte_A82378 (host session/server name)
+	std::string map_file_name;  // → g_map_file_name (0x24D1F3E), the .BMS file
+};
+bool decode_mission_map_names(const uint8_t *body, size_t len, MissionMapNames &out);
+
+// §5.52 chat text channel. C2S 0x0D uplink: [u8 channel][cstr text] — the
+// server strips <...> tags, rate-limits 1000 ms/player, prepends name(/squad),
+// then fans the formatted line out as S2C 0x14 [u8][u8][cstr] per recipient
+// (channel routing: 2=team, 4/5=per-side, 11/12=squad/commander, 13=proximity
+// <= 100.0 world units, default=all). The historic C2S 0x0D "replication frame
+// ACK" note was wrong. [orig: uplink NapiNPServer_HandleChatMessage @ 0x513760;
+//  downlink NapiNPClientMsg_ChatMessage @ 0x42F240 → Chat_DispatchToChannel @ 0x42B910]
+struct ChatUplink {
+	uint8_t     channel = 0;
+	std::string text;
+};
+bool decode_chat_uplink(const uint8_t *body, size_t len, ChatUplink &out);
+struct ChatBroadcast {
+	uint8_t     sender_slot = 0; // one of the two header bytes (see §5.52 note)
+	uint8_t     channel = 0;     // the other header byte
+	std::string text;            // formatted "name(/squad): text" line
+};
+bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
+
+// §5.53 S2C 0x04 — SESSION SLOT CONFIG (24 B): four leading i32s the handler
+// skips, then [u8 sessionConfig][u8 teamMode][u8 maxPlayers] (maxPlayers drives
+// PlayerSlotTable_Reallocate), one more skipped i32, and a trailing byte.
+// [orig: NapiNPClientMsg_SessionSlotConfig @ 0x425410]
+struct SessionSlotConfig {
+	uint32_t skipped[4] = {};   // on the wire, not read by the handler
+	uint8_t  session_config = 0; // → dword_24D2110
+	uint8_t  team_mode = 0;      // → byte_A860D0
+	uint8_t  max_players = 0;    // → byte_A860D1 + PlayerSlotTable_Reallocate
+	uint32_t skipped4 = 0;       // on the wire, not read
+	uint8_t  trailing = 0;       // → byte_A85B48
+};
+bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConfig &out);
+
+// §5.54 S2C 0x08 — SESSION CONFIG (fixed 51 B; the historic "game-state
+// snapshot ~2 KB" note was wrong): [10 × i32][7 × u8][u32 bitflags]. fields[3]
+// = gameType (→ g_GameType); bitflags bits 13/15/16 are latched into
+// byte_A821EE/EF/F0. Bumps g_loading_progress to >= 1.
+// [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
+struct SessionConfig {
+	int32_t  fields[10] = {};  // → dword_A821BC..A821E0; fields[3] = gameType
+	uint8_t  bytes[7] = {};    // → byte_A821E8..ED + dword_24D2110
+	uint32_t bitflags = 0;     // → dword_A821E4 (bits 13/15/16 latched)
+};
+bool decode_session_config(const uint8_t *body, size_t len, SessionConfig &out);
+
+// §5.55 S2C 0x02 — JOIN POSITION-ACK + PADDING PROBE. The handler reads only
+// [i32 posX][i32 posY][i32 paddingLen]; the rest of the (typically ~512 B) body
+// is ignored filler. The client replies C2S 0x02 = position + paddingLen random
+// bytes (NetPacket_WritePositionWithPadding) and resets its send holdoff.
+// The decoder consumes the filler explicitly (filler_bytes = len - 12).
+// [orig: NapiNPClientMsg_HandleJoinResponse @ 0x42E0F0]
+struct JoinPaddingProbe {
+	int32_t  pos_x = 0;
+	int32_t  pos_y = 0;
+	uint32_t padding_len = 0;  // random-filler byte count the client must echo
+	size_t   filler_bytes = 0; // trailing wire bytes after the 12-B header
+};
+bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe &out);
+
+// §5.56 C2S 0x2F — LOADOUT SUBMIT (spawn-menu accept). The client uploads its
+// chosen class/soldier-type plus the ADM weapon-slot picks; the server
+// validates (class 1..4; type 5..9 gated by the restriction mask
+// dword_24D59FC, out-of-range → forced 8), writes soldier type to
+// entity+660 (playerClass), rebuilds the avatar display list + weapon slots,
+// and replies with the S2C 0x5A weapon-slot list. Entries repeat until an
+// 0xFF adm_index terminator — the same {typeId, ammoP, ammoS, variant} slot
+// vocabulary as the §5.30 S2C 0x5A downlink.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]
+struct LoadoutSubmitEntry {
+	uint8_t adm_index = 0;      // AdmDef index (0xFF = list terminator, not stored)
+	uint8_t ammo_primary = 0;   // clamped to admEntry[83], scaled by admEntry[22]
+	uint8_t ammo_secondary = 0; // sub-entry ammo
+	uint8_t variant = 0;        // → player+89688+admEntry[1]
+};
+struct LoadoutSubmit {
+	uint8_t  player_class = 0;      // wire byte 0; server accepts 1..4
+	uint8_t  soldier_type = 0;      // wire byte 1; 5..9 → entity+660 playerClass
+	uint32_t weapon_slot_index = 0; // selected weapon slot (entity+280 binding)
+	std::vector<LoadoutSubmitEntry> entries;
+	bool     terminated = false;    // saw the 0xFF terminator
+};
+bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out);
+
 } // namespace opennova

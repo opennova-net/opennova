@@ -382,6 +382,145 @@ void print_tag_18(const std::vector<uint8_t> &body) {
 	            clean ? "" : " DECODE INCOMPLETE");
 }
 
+// S2C 0x58 SESSION-STATUS (§5.48) — server/mission names + up-time + scoring rules.
+void print_tag_58(const std::vector<uint8_t> &body) {
+	SessionStatusBlock s;
+	const bool clean = decode_session_status(body.data(), body.size(), s);
+	std::printf("        [0x58] server=\"%s\" mission=\"%s\" bytes=(%u,%u,%u) uptime=%ums",
+	            s.server_name.c_str(), s.mission_name.c_str(),
+	            s.byte0, s.byte1, s.byte2, s.uptime_ms);
+	int nonzero = 0;
+	for (int i = 0; i < 39; ++i) if (s.stat_values[i] != 0) ++nonzero;
+	std::printf(" kvCount=%u statVars(nonzero)=%d:", s.kv_count, nonzero);
+	for (int i = 0; i < 39; ++i)
+		if (s.stat_values[i] != 0) std::printf(" [%02d]=%d", i, s.stat_values[i]);
+	for (const SessionStatusKV &kv : s.kv) std::printf(" kv%u=%u", kv.key, kv.value);
+	if (s.trailing_bytes > 0) std::printf(" +%zuB unread tail", s.trailing_bytes);
+	std::printf("%s\n", clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x6F ZONE-TIMER VALUE (§5.49) — capture/takeover HUD meter, seconds on the wire.
+void print_tag_6f(const std::vector<uint8_t> &body) {
+	ZoneTimerValue z;
+	size_t consumed = 0;
+	const bool clean = decode_zone_timer_value(body.data(), body.size(), z, consumed)
+	                   && consumed == body.size();
+	std::printf("        [0x6f] zone=%s mode=%u value=%.2fs limit=%.2fs rate=%d "
+	            "b544=0x%02x b545=0x%02x%s\n",
+	            handle_str(z.zone_handle).c_str(), z.mode, fp16(z.value_s),
+	            fp16(z.limit_s), z.rate, z.byte544, z.byte545,
+	            clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x53 ZONE-TIMER WINDOW (§5.49).
+void print_tag_53(const std::vector<uint8_t> &body) {
+	ZoneTimerWindow z;
+	size_t consumed = 0;
+	const bool clean = decode_zone_timer_window(body.data(), body.size(), z, consumed)
+	                   && consumed == body.size();
+	std::printf("        [0x53] zone=%s modeA=%u modeB=%u window=[%us..%us] rate=%u%s\n",
+	            handle_str(z.zone_handle).c_str(), z.mode_a, z.mode_b,
+	            z.start_s, z.end_s, z.rate, clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x34 PLAY-SOUND (§5.50).
+void print_tag_34(const std::vector<uint8_t> &body) {
+	PlaySoundCommand s;
+	const bool clean = decode_play_sound(body.data(), body.size(), s);
+	std::printf("        [0x34] flag=%u sound=\"%s\"", s.flag, s.sound_name.c_str());
+	if (s.has_pos)
+		std::printf(" pos=(%d, %d, %d)", s.pos_x, s.pos_y, s.pos_z);
+	std::printf("%s\n", clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x2C SESSION + MISSION-FILE NAMES (§5.51).
+void print_tag_2c_s2c(const std::vector<uint8_t> &body) {
+	MissionMapNames n;
+	const bool clean = decode_mission_map_names(body.data(), body.size(), n);
+	std::printf("        [0x2c] session=\"%s\" bms=\"%s\"%s\n",
+	            n.session_name.c_str(), n.map_file_name.c_str(),
+	            clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x14 CHAT broadcast (§5.52).
+void print_tag_14(const std::vector<uint8_t> &body) {
+	ChatBroadcast m;
+	const bool clean = decode_chat_broadcast(body.data(), body.size(), m);
+	std::printf("        [0x14] slot=%u chan=%u text=\"%s\"%s\n",
+	            m.sender_slot, m.channel, m.text.c_str(),
+	            clean ? "" : " DECODE INCOMPLETE");
+}
+
+// C2S 0x0D CHAT uplink (§5.52).
+void print_tag_0d_c2s(const std::vector<uint8_t> &body) {
+	ChatUplink m;
+	const bool clean = decode_chat_uplink(body.data(), body.size(), m);
+	std::printf("        [C 0x0d] chan=%u text=\"%s\"%s\n",
+	            m.channel, m.text.c_str(), clean ? "" : " DECODE INCOMPLETE");
+}
+
+// C2S 0x2F LOADOUT SUBMIT (§5.56) — spawn-menu accept: class/type + ADM slots.
+void print_tag_2f_c2s(const std::vector<uint8_t> &body) {
+	LoadoutSubmit l;
+	const bool clean = decode_loadout_submit(body.data(), body.size(), l);
+	std::printf("        [C 0x2f] class=%u soldierType=%u weaponSlot=%u entries=%zu:",
+	            l.player_class, l.soldier_type, l.weapon_slot_index, l.entries.size());
+	for (const LoadoutSubmitEntry &e : l.entries)
+		std::printf(" {adm=%u ammo=%u/%u var=%u}", e.adm_index, e.ammo_primary,
+		            e.ammo_secondary, e.variant);
+	std::printf("%s\n", clean ? "" : " DECODE INCOMPLETE");
+}
+
+// C2S 0x0F entity-info query (§5.46) — [u16 handle], the self-heal request.
+void print_tag_0f_c2s(const std::vector<uint8_t> &body) {
+	const uint16_t handle = body.size() >= 2
+	        ? uint16_t(body[0] | (uint16_t(body[1]) << 8)) : 0;
+	std::printf("        [C 0x0f] query=%s%s\n", handle_str(handle).c_str(),
+	            body.size() == 2 ? "" : " (short body -> handle 0)");
+}
+
+// S2C 0x04 SESSION SLOT CONFIG (§5.53).
+void print_tag_04(const std::vector<uint8_t> &body) {
+	SessionSlotConfig s;
+	const bool clean = decode_session_slot_config(body.data(), body.size(), s);
+	std::printf("        [0x04] cfg=%u teamMode=%u maxPlayers=%u trailing=%u "
+	            "skipped=(0x%08x,0x%08x,0x%08x,0x%08x,0x%08x)%s\n",
+	            s.session_config, s.team_mode, s.max_players, s.trailing,
+	            s.skipped[0], s.skipped[1], s.skipped[2], s.skipped[3], s.skipped4,
+	            clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x08 SESSION CONFIG (§5.54).
+void print_tag_08_s2c(const std::vector<uint8_t> &body) {
+	SessionConfig s;
+	const bool clean = decode_session_config(body.data(), body.size(), s);
+	std::printf("        [0x08] gameType=%d fields=(", s.fields[3]);
+	for (int i = 0; i < 10; ++i)
+		std::printf("%s%d", i ? "," : "", s.fields[i]);
+	std::printf(") bytes=(");
+	for (int i = 0; i < 7; ++i)
+		std::printf("%s%u", i ? "," : "", s.bytes[i]);
+	std::printf(") flags=0x%08x%s\n", s.bitflags, clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x02 JOIN POSITION-ACK + PADDING PROBE (§5.55).
+void print_tag_02_s2c(const std::vector<uint8_t> &body) {
+	JoinPaddingProbe p;
+	const bool clean = decode_join_padding_probe(body.data(), body.size(), p);
+	std::printf("        [0x02] pos=(%.1f, %.1f) paddingLen=%u filler=%zuB%s\n",
+	            fp16(p.pos_x), fp16(p.pos_y), p.padding_len, p.filler_bytes,
+	            clean ? "" : " DECODE INCOMPLETE");
+}
+
+// S2C 0x19 — [i32] -> dword_A82360 sync var.
+void print_tag_19(const std::vector<uint8_t> &body) {
+	uint32_t v = 0;
+	size_t consumed = 0;
+	const bool clean = decode_u32_scalar(body.data(), body.size(), v, consumed)
+	                   && consumed == body.size();
+	std::printf("        [0x19] value=0x%08x%s\n", v, clean ? "" : " DECODE INCOMPLETE");
+}
+
 void print_tag_20(const std::vector<uint8_t> &body) {
 	Pool3SyncBatch batch;
 	const bool clean = decode_pool3_sync_batch(body.data(), body.size(), batch);
@@ -1234,6 +1373,19 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == 0x59) print_tag_59(payload);
 	else if (dir == 'S' && tag == 0x45) print_tag_45(payload);
 	else if (dir == 'S' && tag == 0x44) print_tag_44(payload);
+	else if (dir == 'S' && tag == 0x58) print_tag_58(payload);
+	else if (dir == 'S' && tag == 0x6F) print_tag_6f(payload);
+	else if (dir == 'S' && tag == 0x53) print_tag_53(payload);
+	else if (dir == 'S' && tag == 0x34) print_tag_34(payload);
+	else if (dir == 'S' && tag == 0x2C) print_tag_2c_s2c(payload);
+	else if (dir == 'S' && tag == 0x14) print_tag_14(payload);
+	else if (dir == 'S' && tag == 0x04) print_tag_04(payload);
+	else if (dir == 'S' && tag == 0x08) print_tag_08_s2c(payload);
+	else if (dir == 'S' && tag == 0x02) print_tag_02_s2c(payload);
+	else if (dir == 'S' && tag == 0x19) print_tag_19(payload);
+	else if (dir == 'C' && tag == 0x0D) print_tag_0d_c2s(payload);
+	else if (dir == 'C' && tag == 0x0F) print_tag_0f_c2s(payload);
+	else if (dir == 'C' && tag == 0x2F) print_tag_2f_c2s(payload);
 	else if (dir == 'C' && tag == 0x2C) print_tag_2c_c2s(payload);
 	else if (dir == 'C' && tag == 0x0C) print_tag_0c_c2s(payload);
 	else if (dir == 'C' && tag == 0x06) print_tag_06_c2s(payload);

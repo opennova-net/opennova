@@ -509,8 +509,8 @@ int check_rtt_sample() {
 	return 0;
 }
 
-// S2C 0x68 / 0x43 / 0x39 — periodic request trio: a single [u32] (4 B). One
-// reader serves all three; cover() each.
+// S2C 0x68 / 0x43 / 0x39 / 0x19 — periodic scalar quartet: a single [u32] (4 B).
+// One reader serves all four; cover() each.
 int check_u32_scalar_trio() {
 	LE w;
 	w.u32(0x00003D5D);
@@ -523,6 +523,7 @@ int check_u32_scalar_trio() {
 	cover('S', 0x68);
 	cover('S', 0x43);
 	cover('S', 0x39);
+	cover('S', 0x19);
 	return 0;
 }
 
@@ -730,6 +731,194 @@ int check_S_18_full_entity_spawn() {
 	return 0;
 }
 
+// S2C 0x58 — session-status block (§5.48): names + 3 bytes + uptime + 39 stat
+// values + 2 kv pairs. [orig: SessionStatus_ParseFromBuffer @ 0x530ED0]
+int check_S_58_session_status() {
+	LE w;
+	auto str = [&](const char *s) { for (const char *p = s; *p; ++p) w.u8(uint8_t(*p)); w.u8(0); };
+	str("biggy");            // server name
+	str("ASH_I5A");          // mission name
+	w.u8(1); w.u8(2); w.u8(3);
+	w.u32(123456);           // uptime ms at send
+	for (int i = 0; i < 39; ++i) w.u32(uint32_t(i == 4 ? -5 : (i == 0 ? 10 : 0)));
+	w.u8(2);                 // kv count
+	w.u8(1); w.u32(100);
+	w.u8(9); w.u32(200);
+	SessionStatusBlock out;
+	EXPECT(decode_session_status(w.b.data(), w.b.size(), out));
+	EXPECT(out.server_name == "biggy");
+	EXPECT(out.mission_name == "ASH_I5A");
+	EXPECT(out.uptime_ms == 123456);
+	EXPECT(out.stat_values[0] == 10 && out.stat_values[4] == -5);
+	EXPECT(out.kv.size() == 2 && out.kv[1].key == 9 && out.kv[1].value == 200);
+	cover('S', 0x58);
+	return 0;
+}
+
+// S2C 0x6F — zone-timer value (§5.49): fixed 15 B.
+int check_S_6F_zone_timer_value() {
+	LE w;
+	w.u16(0x3001);           // zone entity handle (pool 3)
+	w.u8(2);                 // mode
+	w.u32(uint32_t(30));     // value seconds
+	w.u32(uint32_t(60));     // limit seconds
+	w.u16(1);                // rate (i16)
+	w.u8(0xAA); w.u8(0xBB);  // entity+544 / +545
+	EXPECT(w.b.size() == 15);
+	ZoneTimerValue out;
+	size_t consumed = 0;
+	EXPECT(decode_zone_timer_value(w.b.data(), w.b.size(), out, consumed));
+	EXPECT(consumed == 15);
+	EXPECT(out.zone_handle == 0x3001);
+	EXPECT(out.value_s == 30 && out.limit_s == 60 && out.rate == 1);
+	cover('S', 0x6F);
+	return 0;
+}
+
+// S2C 0x53 — zone-timer window (§5.49): fixed 9 B.
+int check_S_53_zone_timer_window() {
+	LE w;
+	w.u16(0x3001);
+	w.u8(1); w.u8(4);        // modeA / modeB (entity+547)
+	w.u16(10); w.u16(40);    // window seconds
+	w.u8(2);                 // rate
+	EXPECT(w.b.size() == 9);
+	ZoneTimerWindow out;
+	size_t consumed = 0;
+	EXPECT(decode_zone_timer_window(w.b.data(), w.b.size(), out, consumed));
+	EXPECT(consumed == 9);
+	EXPECT(out.zone_handle == 0x3001 && out.mode_b == 4);
+	EXPECT(out.start_s == 10 && out.end_s == 40 && out.rate == 2);
+	cover('S', 0x53);
+	return 0;
+}
+
+// S2C 0x34 — play-sound (§5.50): flag 1 carries the 3×i16 position block.
+int check_S_34_play_sound() {
+	LE w;
+	w.u8(1);                 // positioned 3D
+	w.u8('w'); w.u8('a'); w.u8('v'); w.u8(0);
+	w.u16(uint16_t(100)); w.u16(uint16_t(-50)); w.u16(uint16_t(7));
+	PlaySoundCommand out;
+	EXPECT(decode_play_sound(w.b.data(), w.b.size(), out));
+	EXPECT(out.flag == 1 && out.has_pos);
+	EXPECT(out.sound_name == "wav");
+	EXPECT(out.pos_x == 100 && out.pos_y == -50 && out.pos_z == 7);
+	// flag 0: no position block on the wire.
+	LE w0;
+	w0.u8(0);
+	w0.u8('s'); w0.u8(0);
+	PlaySoundCommand flat;
+	EXPECT(decode_play_sound(w0.b.data(), w0.b.size(), flat));
+	EXPECT(!flat.has_pos);
+	cover('S', 0x34);
+	return 0;
+}
+
+// S2C 0x2C — mission + map names (§5.51): two cstrings.
+int check_S_2C_mission_map_names() {
+	LE w;
+	auto str = [&](const char *s) { for (const char *p = s; *p; ++p) w.u8(uint8_t(*p)); w.u8(0); };
+	str("ASH_I5A.bms");
+	str("ASH_I5A");
+	MissionMapNames out;
+	EXPECT(decode_mission_map_names(w.b.data(), w.b.size(), out));
+	EXPECT(out.session_name == "ASH_I5A.bms");
+	EXPECT(out.map_file_name == "ASH_I5A");
+	cover('S', 0x2C);
+	return 0;
+}
+
+// §5.52 chat pair — C2S 0x0D uplink and its S2C 0x14 fan-out.
+int check_chat_pair() {
+	LE up;
+	up.u8(2);                 // team channel
+	up.u8('h'); up.u8('i'); up.u8(0);
+	ChatUplink u;
+	EXPECT(decode_chat_uplink(up.b.data(), up.b.size(), u));
+	EXPECT(u.channel == 2 && u.text == "hi");
+	cover('C', 0x0D);
+	LE dn;
+	dn.u8(3);                 // sender slot
+	dn.u8(2);                 // channel
+	dn.u8('P'); dn.u8(':'); dn.u8('h'); dn.u8('i'); dn.u8(0);
+	ChatBroadcast b;
+	EXPECT(decode_chat_broadcast(dn.b.data(), dn.b.size(), b));
+	EXPECT(b.sender_slot == 3 && b.channel == 2 && b.text == "P:hi");
+	cover('S', 0x14);
+	return 0;
+}
+
+// S2C 0x04 — session slot config (§5.53): fixed 24 B.
+int check_S_04_session_slot_config() {
+	LE w;
+	for (int i = 0; i < 4; ++i) w.u32(0x11111111u * unsigned(i + 1));
+	w.u8(5);                 // session config
+	w.u8(1);                 // team mode
+	w.u8(32);                // max players
+	w.u32(0xAABBCCDD);
+	w.u8(9);
+	EXPECT(w.b.size() == 24);
+	SessionSlotConfig out;
+	EXPECT(decode_session_slot_config(w.b.data(), w.b.size(), out));
+	EXPECT(out.session_config == 5 && out.team_mode == 1 && out.max_players == 32);
+	EXPECT(out.trailing == 9);
+	cover('S', 0x04);
+	return 0;
+}
+
+// S2C 0x08 — session config (§5.54): fixed 51 B; fields[3] = gameType.
+int check_S_08_session_config() {
+	LE w;
+	for (int i = 0; i < 10; ++i) w.u32(uint32_t(i == 3 ? 0x10001 : i));
+	for (int i = 0; i < 7; ++i) w.u8(uint8_t(i));
+	w.u32(uint32_t((1u << 13) | (1u << 16)));
+	EXPECT(w.b.size() == 51);
+	SessionConfig out;
+	EXPECT(decode_session_config(w.b.data(), w.b.size(), out));
+	EXPECT(out.fields[3] == 0x10001);
+	EXPECT(out.bytes[6] == 6);
+	EXPECT((out.bitflags & (1u << 13)) != 0);
+	cover('S', 0x08);
+	return 0;
+}
+
+// S2C 0x02 — join position-ack + padding probe (§5.55): 12-B header + filler.
+int check_S_02_join_padding_probe() {
+	LE w;
+	w.u32(0x00120000);       // pos x
+	w.u32(0x00340000);       // pos y
+	w.u32(500);              // padding_len the client must echo
+	w.zeros(20);             // ignored wire filler
+	JoinPaddingProbe out;
+	EXPECT(decode_join_padding_probe(w.b.data(), w.b.size(), out));
+	EXPECT(uint32_t(out.pos_x) == 0x00120000);
+	EXPECT(out.padding_len == 500);
+	EXPECT(out.filler_bytes == 20);
+	cover('S', 0x02);
+	return 0;
+}
+
+// C2S 0x2F — loadout submit (§5.56): header + 2 ADM entries + 0xFF terminator.
+int check_C_2F_loadout_submit() {
+	LE w;
+	w.u8(2);                 // class
+	w.u8(8);                 // soldier type
+	w.u32(1);                // weapon slot index
+	w.u8(10); w.u8(3); w.u8(2); w.u8(0);   // entry: adm 10
+	w.u8(24); w.u8(1); w.u8(0); w.u8(5);   // entry: adm 24
+	w.u8(0xFF);              // terminator
+	EXPECT(w.b.size() == 15);
+	LoadoutSubmit out;
+	EXPECT(decode_loadout_submit(w.b.data(), w.b.size(), out));
+	EXPECT(out.player_class == 2 && out.soldier_type == 8);
+	EXPECT(out.entries.size() == 2);
+	EXPECT(out.entries[1].adm_index == 24 && out.entries[1].variant == 5);
+	EXPECT(out.terminated);
+	cover('C', 0x2F);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -788,6 +977,16 @@ int main() {
 	if (check_S_59_deployed_item()) return 1;
 	if (check_S_45_terrain_load()) return 1;
 	if (check_S_18_full_entity_spawn()) return 1;
+	if (check_S_58_session_status()) return 1;
+	if (check_S_6F_zone_timer_value()) return 1;
+	if (check_S_53_zone_timer_window()) return 1;
+	if (check_S_34_play_sound()) return 1;
+	if (check_S_2C_mission_map_names()) return 1;
+	if (check_chat_pair()) return 1;
+	if (check_S_04_session_slot_config()) return 1;
+	if (check_S_08_session_config()) return 1;
+	if (check_S_02_join_padding_probe()) return 1;
+	if (check_C_2F_loadout_submit()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

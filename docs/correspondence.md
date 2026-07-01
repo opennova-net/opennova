@@ -224,6 +224,36 @@ in `libs/netsim`, dispatch `case 0x0F` in `libs/npruntime`; `nw_ingame_encode` +
 | `serialize_object_to_buffer` | `0x504D10` | the S2C 0x18 body writer — 26-field single-entity record (§5.46 field map); link ptrs → handles; name attrib-gated; seat block per itemDef+604 | D-NET-133 | matching |
 | `NapiNPClientMsg_FullEntitySpawn` | `0x433780` | S2C 0x18 handler — destroy + memset(0x2B4) + full rebuild (itemDef/models/playerClass/minimap/ADM anim registration); type-0 record = clear slot | — | matching (decode side; client-side rebuild is retail-only) |
 
+2026-07-01 re-grill of the §5.46 pair: `serialize_object_to_buffer @ 0x504D10` re-prototyped to its
+true 4-arg form (arg 4 = serialized entity; the 3-arg IDB prototype mis-rendered all callsites); S2C
+0x18's SECOND emitter witnessed (C2S 0x40 vehicle spawn, mask 0x90); wire item_type gate is !=0 only
+(pool-derived approximation provably safe). Verdicts unchanged (matching).
+
+Wire-coverage sweep (§5.48–§5.56; grill 2026-07-01; reimpl `libs/novaworld/ingame_decode` decoders +
+`nw_pp` printers + catalog rows; `nw_message_coverage` pins every layout; all three retail goldens decode
+with zero unnamed tags in both directions):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `NapiNPClientMsg_SessionStatus` → `SessionStatus_ParseFromBuffer` | `0x4228C0` / `0x530ED0` | S2C 0x58 session-status block (names + up-time sync + STROVER_STATVAR score rules; ex-"TerrainTexDef", renamed) | — | matching (decode side) |
+| `SessionStatus_GetStatPointValue` | `0x52D5D0` | stat-point accessor block[30+i], i ≤ 0x26 (end-game stats) | — | matching (read-only) |
+| `NapiNPClientMsg_ZoneTimerValue` → `ZoneTimerList_SetEntryValue` | `0x428D60` / `0x537EC0` | S2C 0x6F zone-timer value (16.16 s ×62 → ticks; capture/takeover HUD; ex-"cinematic camera", renamed) | — | matching (decode side) |
+| `NapiNPClientMsg_ZoneTimerWindow` → `ZoneTimerList_SetEntryWindow` | `0x428AE0` / `0x537DE0` | S2C 0x53 zone-timer window (+ 20.0-unit nearest-zone adoption gate) | — | matching (decode side) |
+| `ZoneTimerList_AdvancePerTick` | `0x537D60` | per-frame value += rate, clamp [0, limit] (consumer HUD_DrawTakeoverStatus @ 0x59B630) | — | matching (read-only) |
+| `NapiNPClientMsg_PlaySoundByName` | `0x4283A0` | S2C 0x34 play-sound (profile name + optional 3D pos; ex-"GotoTeleport", renamed) | — | matching (decode side) |
+| `NapiNPClientMsg_MissionMapNames` | `0x427E10` | S2C 0x2C session + BMS-file names (ex-"chat entry" note corrected) | — | matching (decode side) |
+| `NapiNPServer_HandleChatMessage` | `0x513760` | C2S 0x0D chat uplink (ex-"replication frame ACK" corrected) → S2C 0x14 fan-out, channel routing + 1000 ms rate limit | — | matching (decode side) |
+| `NapiNPClientMsg_ChatMessage` | `0x42F240` | S2C 0x14 chat receive → Chat_DispatchToChannel | — | matching (decode side) |
+| `NapiNPClientMsg_SessionSlotConfig` | `0x425410` | S2C 0x04 slot config (maxPlayers → PlayerSlotTable_Reallocate) | — | matching (decode side) |
+| `NapiNPClientMsg_HandleSessionConfig` | `0x4281D0` | S2C 0x08 session config, fixed 51 B (ex-"~2 KB snapshot" corrected) | — | matching (decode side) |
+| `NapiNPClientMsg_HandleJoinResponse` | `0x42E0F0` | S2C 0x02 position-ack + padding probe (client echoes C2S 0x02 + N random bytes) | — | matching (decode side) |
+| `NapiNPServerMsg_HandlePlayerLoadout` | `0x515790` | C2S 0x2F loadout submit (soldierType → entity+660 playerClass; restriction mask; → S2C 0x5A) | — | matching (decode side) |
+| `NapiNPServerMsg_HandlePlayerSpawnRequest` | `0x513260` | C2S 0x0A spawn-menu request → S2C 0x19 timestamp ack | — | matching (read-only) |
+| `Server_ProcessClientRequestRespawn` | `0x519AF0` | C2S 0x0E respawn/deploy request ([i16 spawnHandle], 0xFFFE = auto) | — | matching (read-only) |
+| `NapiNPServerMsg_HandleVehicleAttach` / `_HandleVehicleDetach` | `0x502390` / `0x4FC980` | C2S 0x26/0x27 vehicle attach (anti-spoof word0 overwrite) / detach | — | matching (read-only) |
+| `NapiNPServerMsg_HandleVehicleSpawnRequest` | `0x51C4C0` | C2S 0x40 vehicle spawn → S2C 0x18 broadcast (mask 0x90) at the source model's boat/helo userpoint | — | matching (read-only) |
+| `NapiNPClientMsg_TeamAssign` / `_ScoreDeltaSound` | `0x431910` / `0x42A0B0` | S2C 0x50 team assign / 0x81 score-delta hit-confirm sound | — | matching (read-only) |
+
 Server per-frame S2C 0x0A emit (§5.47; witnessed 2026-07-01; reimpl in `libs/netsim/src/connection_fan.cpp`
 + `netsim::Connection::s2c_phase`; `netsim_two_peer_fanout` `run_0a_subblock_phase_cycle` + shape harness
 `scripts/net/diff_0a.py`):

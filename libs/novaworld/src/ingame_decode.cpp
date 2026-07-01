@@ -1425,4 +1425,172 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 	return c.p == c.end;  // consumed exactly
 }
 
+// §5.48 S2C 0x58 — [orig: SessionStatus_ParseFromBuffer @ 0x530ED0]. The client
+// truncates the strings on store (31/63 kept) and keeps only the first 8 kv
+// pairs with key <= 9; the decoder carries the wire values verbatim.
+bool decode_session_status(const uint8_t *body, size_t len, SessionStatusBlock &out) {
+	out = SessionStatusBlock{};
+	Cursor c{body, body + len, true};
+	out.server_name = c.cstr();
+	out.mission_name = c.cstr();
+	out.byte0 = c.u8();
+	out.byte1 = c.u8();
+	out.byte2 = c.u8();
+	out.uptime_ms = c.u32();
+	for (int i = 0; i < 39; ++i) out.stat_values[i] = c.i32();
+	out.kv_count = c.u8();
+	if (!c.ok) return false;
+	// The retail reader is bounds-tolerant: each of the kv_count pairs reads 0
+	// on underflow (@0x531055/@0x531067), so a wire count larger than the pairs
+	// actually present is legal — golden retail sends it. Mirror that: stop at
+	// the end of the body without flagging an error.
+	for (uint8_t i = 0; i < out.kv_count && c.p < c.end; ++i) {
+		SessionStatusKV kv;
+		kv.key = c.u8();
+		kv.value = c.u32();
+		if (!c.ok) break;
+		out.kv.push_back(kv);
+	}
+	// The retail parser stops here; the dispatcher never requires full
+	// consumption, and golden retail carries trailing zero bytes after the kv
+	// pairs. Tolerate + surface them.
+	out.trailing_bytes = c.ok ? size_t(c.end - c.p) : 0;
+	if (c.ok) c.skip(out.trailing_bytes);
+	return c.ok;
+}
+
+// §5.49 S2C 0x6F — [orig: NapiNPClientMsg_ZoneTimerValue @ 0x428D60]. Fixed 15 B.
+bool decode_zone_timer_value(const uint8_t *body, size_t len,
+                             ZoneTimerValue &out, size_t &consumed) {
+	out = ZoneTimerValue{};
+	Cursor c{body, body + len, true};
+	out.zone_handle = c.u16();
+	out.mode = c.u8();
+	out.value_s = c.i32();
+	out.limit_s = c.i32();
+	out.rate = c.i16();
+	out.byte544 = c.u8();
+	out.byte545 = c.u8();
+	consumed = c.ok ? size_t(c.p - body) : 0;
+	return c.ok;
+}
+
+// §5.49 S2C 0x53 — [orig: NapiNPClientMsg_ZoneTimerWindow @ 0x428AE0]. Fixed 9 B.
+bool decode_zone_timer_window(const uint8_t *body, size_t len,
+                              ZoneTimerWindow &out, size_t &consumed) {
+	out = ZoneTimerWindow{};
+	Cursor c{body, body + len, true};
+	out.zone_handle = c.u16();
+	out.mode_a = c.u8();
+	out.mode_b = c.u8();
+	out.start_s = c.u16();
+	out.end_s = c.u16();
+	out.rate = c.u8();
+	consumed = c.ok ? size_t(c.p - body) : 0;
+	return c.ok;
+}
+
+// §5.50 S2C 0x34 — [orig: NapiNPClientMsg_PlaySoundByName @ 0x4283A0]. The
+// position block exists on the wire only when flag == 1.
+bool decode_play_sound(const uint8_t *body, size_t len, PlaySoundCommand &out) {
+	out = PlaySoundCommand{};
+	Cursor c{body, body + len, true};
+	out.flag = c.u8();
+	out.sound_name = c.cstr();
+	if (out.flag == 1) {
+		out.has_pos = true;
+		out.pos_x = c.i16();
+		out.pos_y = c.i16();
+		out.pos_z = c.i16();
+	}
+	return c.ok && (c.p == c.end);
+}
+
+// §5.51 S2C 0x2C — [orig: NapiNPClientMsg_MissionMapNames @ 0x427E10].
+bool decode_mission_map_names(const uint8_t *body, size_t len, MissionMapNames &out) {
+	out = MissionMapNames{};
+	Cursor c{body, body + len, true};
+	out.session_name = c.cstr();
+	out.map_file_name = c.cstr();
+	return c.ok && (c.p == c.end);
+}
+
+// §5.52 C2S 0x0D — [orig: NapiNPServer_HandleChatMessage @ 0x513760].
+bool decode_chat_uplink(const uint8_t *body, size_t len, ChatUplink &out) {
+	out = ChatUplink{};
+	Cursor c{body, body + len, true};
+	out.channel = c.u8();
+	out.text = c.cstr();
+	return c.ok && (c.p == c.end);
+}
+
+// §5.52 S2C 0x14 — [orig: NapiNPClientMsg_ChatMessage @ 0x42F240].
+bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) {
+	out = ChatBroadcast{};
+	Cursor c{body, body + len, true};
+	out.sender_slot = c.u8();
+	out.channel = c.u8();
+	out.text = c.cstr();
+	return c.ok && (c.p == c.end);
+}
+
+// §5.53 S2C 0x04 — [orig: NapiNPClientMsg_SessionSlotConfig @ 0x425410]. Fixed 24 B.
+bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConfig &out) {
+	out = SessionSlotConfig{};
+	Cursor c{body, body + len, true};
+	for (int i = 0; i < 4; ++i) out.skipped[i] = c.u32();
+	out.session_config = c.u8();
+	out.team_mode = c.u8();
+	out.max_players = c.u8();
+	out.skipped4 = c.u32();
+	out.trailing = c.u8();
+	return c.ok && (c.p == c.end);
+}
+
+// §5.54 S2C 0x08 — [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]. Fixed 51 B.
+bool decode_session_config(const uint8_t *body, size_t len, SessionConfig &out) {
+	out = SessionConfig{};
+	Cursor c{body, body + len, true};
+	for (int i = 0; i < 10; ++i) out.fields[i] = c.i32();
+	for (int i = 0; i < 7; ++i) out.bytes[i] = c.u8();
+	out.bitflags = c.u32();
+	return c.ok && (c.p == c.end);
+}
+
+// §5.55 S2C 0x02 — [orig: NapiNPClientMsg_HandleJoinResponse @ 0x42E0F0]. The
+// handler reads 12 B and ignores the rest of the body (random filler); consume
+// it explicitly so the coverage contract ("body accounted for") holds.
+bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe &out) {
+	out = JoinPaddingProbe{};
+	Cursor c{body, body + len, true};
+	out.pos_x = c.i32();
+	out.pos_y = c.i32();
+	out.padding_len = c.u32();
+	if (!c.ok) return false;
+	out.filler_bytes = size_t(c.end - c.p);
+	c.skip(out.filler_bytes);
+	return c.ok && (c.p == c.end);
+}
+
+// §5.56 C2S 0x2F — [orig: NapiNPServerMsg_HandlePlayerLoadout @ 0x515790].
+bool decode_loadout_submit(const uint8_t *body, size_t len, LoadoutSubmit &out) {
+	out = LoadoutSubmit{};
+	Cursor c{body, body + len, true};
+	out.player_class = c.u8();
+	out.soldier_type = c.u8();
+	out.weapon_slot_index = c.u32();
+	while (c.ok) {
+		const uint8_t adm = c.u8();
+		if (!c.ok) break;
+		if (adm == 0xFF) { out.terminated = true; break; }
+		LoadoutSubmitEntry e;
+		e.adm_index = adm;
+		e.ammo_primary = c.u8();
+		e.ammo_secondary = c.u8();
+		e.variant = c.u8();
+		if (c.ok) out.entries.push_back(e);
+	}
+	return c.ok && out.terminated && (c.p == c.end);
+}
+
 } // namespace opennova
