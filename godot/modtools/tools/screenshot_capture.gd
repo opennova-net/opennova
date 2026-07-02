@@ -255,9 +255,7 @@ func _run_all() -> bool:
 
 
 func _workspace_for_capture(workspace_id: int) -> EditorWorkspace:
-	if workspace_id == EditorWorkstation.Workspace.ENVIRONMENT:
-		return _workstation._environment_workspace
-	return _workstation._workspaces.get(workspace_id)
+	return _workstation.get_workspace_adapter(workspace_id)
 
 
 func _resolve_asset(asset_name: String) -> String:

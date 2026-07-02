@@ -103,7 +103,8 @@ var editor: Node
 var _active_workspace_id: int = Workspace.MISSION
 var _workspaces: Dictionary = {}
 var _workspace_defs_cache: Array = []
-var _environment_workspace: EnvironmentEditorWorkspace
+# Popup workspaces (WorkspaceDef.popup) live outside _workspaces: id -> adapter.
+var _popup_workspaces: Dictionary = {}
 var _workspace_buttons: Dictionary = {}
 var _workspace_action_buttons: Dictionary = {}
 # Top-bar overflow ("More") menu holding the secondary document actions
@@ -243,8 +244,10 @@ func _handle_close_request() -> void:
 		var ws := workspace as EditorWorkspace
 		if ws != null and ws.has_unsaved_changes():
 			dirty.append(ws.get_workspace_label())
-	if _environment_workspace != null and _environment_workspace.has_unsaved_changes():
-		dirty.append("Environment")
+	for workspace in _popup_workspaces.values():
+		var ws := workspace as EditorWorkspace
+		if ws != null and ws.has_unsaved_changes():
+			dirty.append(ws.get_workspace_label())
 	if dirty.is_empty():
 		get_tree().quit()
 		return
@@ -274,8 +277,8 @@ func set_editor(value: Node) -> void:
 	_ensure_workspaces()
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).bind_to_editor(value)
-	if _environment_workspace != null:
-		_environment_workspace.bind_to_editor(value)
+	for workspace in _popup_workspaces.values():
+		(workspace as EditorWorkspace).bind_to_editor(value)
 	_reset_environment_popup_content()
 	# A floating environment window must not sit empty until its next toggle.
 	if _environment_panel_host != null and _environment_panel_host.is_floating():
@@ -326,7 +329,7 @@ func _workspace_defs() -> Array:
 		WorkspaceDef.make(Workspace.CREDITS, CreditsWorkspaceAdapter, false, &"Interface", &"credits"),
 		WorkspaceDef.make(Workspace.STRINGS, StringsWorkspaceAdapter, false, &"Interface", &"strings"),
 		WorkspaceDef.make(Workspace.MNU, MnuWorkspaceAdapter, false, &"Interface", &"menu"),
-			WorkspaceDef.make(Workspace.HUD, HudWorkspaceAdapter, false, &"Interface", &"hud"),
+		WorkspaceDef.make(Workspace.HUD, HudWorkspaceAdapter, false, &"Interface", &"hud"),
 		WorkspaceDef.make(Workspace.MUSIC, MusicWorkspaceAdapter, false, &"Audio", &"music"),
 		WorkspaceDef.make(Workspace.SOUND, SoundWorkspaceAdapter, false, &"Atmosphere", &"sound"),
 		WorkspaceDef.make(Workspace.ENVIRONMENT, EnvironmentWorkspaceAdapter, true, &"Atmosphere", &"environment"),
@@ -339,9 +342,10 @@ func _ensure_workspaces() -> void:
 	for def_v in _workspace_defs_cache:
 		var def := def_v as WorkspaceDef
 		if def.popup:
-			if _environment_workspace == null:
-				_environment_workspace = def.adapter_script.new()
-				_environment_workspace.set_editor_shell(self)
+			if not _popup_workspaces.has(def.id):
+				var popup_workspace: EditorWorkspace = def.adapter_script.new()
+				popup_workspace.set_editor_shell(self)
+				_popup_workspaces[def.id] = popup_workspace
 		elif not _workspaces.has(def.id):
 			var workspace: EditorWorkspace = def.adapter_script.new()
 			workspace.set_editor_shell(self)
@@ -679,7 +683,11 @@ func _on_workspace_pressed(workspace_id: int) -> void:
 # itself); user navigation records through _on_workspace_pressed and
 # open_in_workspace.
 func set_active_workspace(workspace_id: int) -> void:
-	if workspace_id == Workspace.ENVIRONMENT:
+	var def := _def_for_id(workspace_id)
+	if def != null and def.popup:
+		# Popup workspaces overlay the active view instead of replacing it. One
+		# popover surface exists today; a second popup workspace would need the
+		# surface generalized alongside this routing.
 		_set_environment_popup_visible(true)
 		_refresh_workspace_buttons()
 		return
@@ -769,11 +777,14 @@ func _workspace_for_id(workspace_id: int) -> EditorWorkspace:
 	var workspace := _get_workspace(workspace_id)
 	if workspace != null:
 		return workspace
-	for def_v in _workspace_defs_cache:
-		var def := def_v as WorkspaceDef
-		if def.id == workspace_id and def.popup:
-			return _environment_workspace
-	return null
+	return _popup_workspaces.get(workspace_id)
+
+
+## The workspace adapter registered for `workspace_id`, main rail or popup.
+## The one accessor for tools/tests/MCP - shell internals may re-shape freely.
+func get_workspace_adapter(workspace_id: int) -> EditorWorkspace:
+	_ensure_workspaces()
+	return _workspace_for_id(workspace_id)
 
 
 # Cross-jump used by the Credits and Menus workspaces' font references. Fonts open
@@ -1033,8 +1044,9 @@ func _any_workspace_busy() -> bool:
 	for workspace in _workspaces.values():
 		if (workspace as EditorWorkspace).is_busy():
 			return true
-	if _environment_workspace != null and _environment_workspace.is_busy():
-		return true
+	for workspace in _popup_workspaces.values():
+		if (workspace as EditorWorkspace).is_busy():
+			return true
 	return false
 
 
@@ -1793,12 +1805,21 @@ func _reset_environment_popup_content() -> void:
 			child.free()
 
 
+# The workspace behind the single popup surface (%EnvironmentPopup). One popup
+# workspace exists today; a second requires generalizing the surface too.
+func _popup_workspace() -> EditorWorkspace:
+	for workspace in _popup_workspaces.values():
+		return workspace
+	return null
+
+
 func _ensure_environment_popup_content() -> void:
-	if _environment_workspace == null:
+	var popup_workspace := _popup_workspace()
+	if popup_workspace == null:
 		return
 	if _environment_actions_host != null and _environment_action_buttons.is_empty():
 		_rebuild_action_buttons(
-			_environment_workspace,
+			popup_workspace,
 			_environment_actions_host,
 			_environment_action_buttons,
 			Callable(self, "_on_environment_action_pressed"),
@@ -1806,17 +1827,18 @@ func _ensure_environment_popup_content() -> void:
 			32.0
 		)
 	if _environment_inspector_host != null and _environment_inspector_host.get_child_count() == 0:
-		_environment_workspace.build_inspector(_environment_inspector_host)
+		popup_workspace.build_inspector(_environment_inspector_host)
 
 
 func _refresh_environment_popup_state() -> void:
-	var title := _environment_workspace.get_project_title() if _environment_workspace != null else "Environment"
+	var popup_workspace := _popup_workspace()
+	var title := popup_workspace.get_project_title() if popup_workspace != null else "Environment"
 	if _environment_popup_title != null:
 		_environment_popup_title.text = title
 	if _environment_panel_host != null and _environment_panel_host.is_floating():
 		# The dirty "*" reaches the floating window through its OS title.
 		_environment_panel_host.set_window_title("Environment — %s" % title)
-	_refresh_action_buttons_state(_environment_workspace, _environment_action_buttons)
+	_refresh_action_buttons_state(_popup_workspace(), _environment_action_buttons)
 
 
 func _on_settings_toggle_toggled(pressed: bool) -> void:
@@ -2085,7 +2107,7 @@ func _on_workspace_action_pressed(action_id: int) -> void:
 
 
 func _on_environment_action_pressed(action_id: int) -> void:
-	_run_workspace_action(_environment_workspace, action_id)
+	_run_workspace_action(_popup_workspace(), action_id)
 	_refresh_environment_popup_state()
 
 
@@ -2149,18 +2171,20 @@ func get_reference_index() -> NovaReferenceIndex:
 
 
 # Resolves the active workspace's current resource path for the browser's
-# "(open)" marker; the environment popup retargets it to the environment
-# workspace. Stays on the shell (reads popup/workspace state) and is injected
+# "(open)" marker; an open popup workspace retargets it for the kinds it
+# claims. Stays on the shell (reads popup/workspace state) and is injected
 # into EditorResourceBrowser as a capability callable.
 func _current_resource_path_for_browser(kind: String) -> String:
 	var workspace := _get_active_workspace()
-	# The environment panel counts as open whether docked OR floating - the
-	# popover hides while the content floats, but its document is still the
-	# one the "(open)" marker should follow.
-	var environment_open := (_environment_popup != null and _environment_popup.visible) \
+	# The popup panel counts as open whether docked OR floating - the popover
+	# hides while the content floats, but its document is still the one the
+	# "(open)" marker should follow.
+	var popup_open := (_environment_popup != null and _environment_popup.visible) \
 			or (_environment_panel_host != null and _environment_panel_host.is_floating())
-	if environment_open and kind == "environment":
-		workspace = _environment_workspace
+	var popup_workspace := _popup_workspace()
+	if popup_open and popup_workspace != null \
+			and kind in popup_workspace.get_open_resource_kinds():
+		workspace = popup_workspace
 	if workspace != null:
 		return workspace.get_current_resource_path()
 	return ""

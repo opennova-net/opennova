@@ -679,7 +679,7 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 
 	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
 	sun_button.toggled.emit(true)
@@ -722,7 +722,7 @@ func test_environment_open_uses_resource_browser() -> void:
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_environment")
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index environment files.")
 
 	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
@@ -899,7 +899,7 @@ func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup(
 	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 
 	var camera_button: Button = workstation.get_node("%CameraToggleButton")
 	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
@@ -1971,7 +1971,7 @@ func _teardown(workstation) -> void:
 func _attach_environment_document(workstation) -> Node:
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 	return environment_editor
 
 

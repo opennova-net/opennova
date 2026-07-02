@@ -83,9 +83,11 @@ func workspace(id := "") -> Variant:
 		for candidate in table.values():
 			if candidate != null and candidate.has_method("get_workspace_id") and String(candidate.get_workspace_id()) == id:
 				return candidate
-	var popup: Variant = shell.get("_environment_workspace")
-	if popup != null and popup.has_method("get_workspace_id") and String(popup.get_workspace_id()) == id:
-		return popup
+	var popups: Variant = shell.get("_popup_workspaces")
+	if popups is Dictionary:
+		for candidate in popups.values():
+			if candidate != null and candidate.has_method("get_workspace_id") and String(candidate.get_workspace_id()) == id:
+				return candidate
 	return null
 
 

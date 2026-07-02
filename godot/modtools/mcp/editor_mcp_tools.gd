@@ -178,9 +178,9 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 	var workspaces: Array = []
 	var table: Variant = shell.get("_workspaces")
 	var instances: Array = table.values() if table is Dictionary else []
-	var popup: Variant = shell.get("_environment_workspace")
-	if popup != null:
-		instances.append(popup)
+	var popups: Variant = shell.get("_popup_workspaces")
+	if popups is Dictionary:
+		instances.append_array(popups.values())
 	for ws in instances:
 		workspaces.append(_workspace_state(ws))
 	var active: Variant = ctx.workspace()
