@@ -73,12 +73,22 @@ struct GameEntitySnapshot {
 	// Unknown / NoNetworkCallback / Guided are not emitted by the production 0x0A frame builder;
 	// authoring/runtime code sets this from the item's *_function class tag.
 	EntityClass entity_class = EntityClass::Unknown;
-	// Entity Health (entity+286). The §5.10 player/infantry compact record's "health classification"
-	// byte (field 17 -> Entity_SetHealthFromDifficultyByte @0x4AD580) is built from this; a living
-	// entity MUST replicate non-zero or the client marks its own player dead and the C2S 0x0C move
-	// uplink (Player_BuildTag0CInputBody @0x42a59d, gated on entity->Health != 0) never fires. Default
+	// Entity Health (entity+286). The §5.10 player compact record's "health classification" byte
+	// (field 17) is quantized from this against health_max — see health_classification_byte
+	// [orig: Entity_GetHealthClassification @ 0x4AD4E0]. A living entity MUST replicate a non-zero
+	// byte or the client marks its own player dead and the C2S 0x0C move uplink
+	// (Player_BuildTag0CInputBody @0x42a59d, gated on entity->Health != 0) never fires. Default
 	// 100 keeps positional-only inits alive.
 	int32_t health = 100;
+	// itemDef->healthMax (itemDef+0x17C), the field-17 tier denominator. world::Entity does not
+	// carry the resolved item def yet, so the default is the class-8 player healthMax (150) — the
+	// same stopgap the 0x0A tail health uses; resolving per-item healthMax from items.def is a
+	// tracked follow-up.
+	int32_t health_max = 150;
+	// playerClass (entity+0x294) — the field-17 low nibble the client apply writes back to
+	// entity->playerClass and re-resolves the soldier model/itemDef from (@0x4AD580 / @0x4c1248).
+	// Filled by snapshot_of via player_class_for_wire (retail [5,9]-else-8 clamp for players).
+	uint8_t player_class = 0;
 };
 
 } // namespace opennova

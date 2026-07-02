@@ -34,6 +34,14 @@ EntityClass entity_class_of(const world::Entity &e);
 // i32 16.16 (world::to_fixed). euler_z is the engine heading (entity+16, D-NET-86).
 GameEntitySnapshot snapshot_of(const world::Entity &e);
 
+// The §5.10 player compact-record field-17 byte: `(healthTier << 4) | (playerClass & 0xF)`,
+// the tier quantized from health/health_max in 16.16 (boundaries 49152 = 0.75 and 28671 =
+// 0.4375). Exact inverse of the client apply Entity_SetHealthFromDifficultyByte @0x4AD580,
+// which writes the low nibble back to entity->playerClass and re-resolves itemDef from it —
+// so a mis-packed byte re-breaks a remote entity every applied frame (the C2S 0x0F flood,
+// D-NET-138). [orig: Entity_GetHealthClassification @ 0x4AD4E0]
+uint8_t health_classification_byte(int32_t health, int32_t health_max, uint8_t player_class);
+
 // Walk the live registry into the replicated entity set. Entities with no 0x0A
 // compact form (EntityClass::Unknown) are skipped.
 std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);

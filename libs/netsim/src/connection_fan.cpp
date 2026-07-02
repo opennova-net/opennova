@@ -8,6 +8,8 @@
 #include <novaworld/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
 #include <world/geom.h>              // to_fixed
 
+#include "netsim/entity_wire_bridge.h" // health_classification_byte (the field-17 pack)
+
 namespace opennova::netsim {
 
 namespace {
@@ -103,20 +105,18 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			rec.player.pos_y_compressed = cy;
 			rec.player.pos_z_compressed = cz;
 			rec.player.yaw_byte = yaw_byte;
-			// §5.10 health-classification byte (field 17 -> Entity_SetHealthFromDifficultyByte). A
-			// living player MUST replicate non-zero or the client marks its own player dead and the
-			// C2S 0x0C move uplink (Player_BuildTag0CInputBody, gated on entity->Health != 0) never
-			// fires — i.e. the joiner spawns but cannot move. WITNESSED (grill 2026-07-01): the byte
-			// is PACKED, not raw health — the client apply @0x4AD580 unpacks low nibble ->
-			// entity->playerClass (+660) and bits 4-5 -> a health TIER scaled off itemDef->healthMax
-			// (tier 0 ~21.9%, 1 ~59.4%, 2 ~87.5%; 16.16 mults 28671/49152 + 0x8000 rounding). Our raw
-			// clamped health (e.g. 150=0x96) decodes remotely as playerClass 6 + tier 1. The LOCAL
-			// player skips this apply [orig: @0x4c11ac], so the joiner's own player is unaffected;
-			// remote players get a wrong class/health until the faithful pack lands. The server-side
-			// tier quantization inside NetPacket_SerializePlayerState @0x4C09C0 is still unwitnessed —
-			// docs/net/novaworld-net-re.md (D-NET-138).
+			// §5.10 health-classification byte (field 17): PACKED `(tier<<4)|(playerClass&0xF)`,
+			// witnessed server-side in Entity_GetHealthClassification @0x4AD4E0 (called from the
+			// case-1 compact write @0x4c0d71, byte store @0x4c0d89 — D-NET-138 FIXED). The client
+			// apply @0x4AD580 writes the low nibble to entity->playerClass (+660) and immediately
+			// re-resolves itemDef/ItemTypeIndex FROM playerClass (@0x4c1248-0x4c12be) — the old raw
+			// clamped-health byte (e.g. 0x64 -> class 4) therefore mis-classed every remote player
+			// on every applied frame and re-broke the @0x4307c4 cross-check right after each 0x18
+			// repair: the retail-join C2S 0x0F flood. The LOCAL player skips the apply [orig:
+			// @0x4c11ac]. The class nibble is 5..9 (player_class_for_wire), so a player's byte is
+			// always non-zero — keeps the joiner's C2S 0x0C uplink gate (entity->Health != 0) alive.
 			rec.player.health_class_byte =
-					e.health > 0 ? static_cast<uint8_t>(e.health < 255 ? e.health : 255) : 0;
+					health_classification_byte(e.health, e.health_max, e.player_class);
 			break;
 		case EntityClass::Vehicle:
 			rec.vehicle.parent_slot_handle = 0xFFFF;

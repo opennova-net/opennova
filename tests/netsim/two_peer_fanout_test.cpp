@@ -425,13 +425,80 @@ bool run_0a_subblock_phase_cycle() {
 	return true;
 }
 
+// (g) [D-NET-138] The §5.10 field-17 health-classification byte is PACKED
+//     `(tier << 4) | (playerClass & 0xF)` — tier boundaries 49152 (0.75) / 28671 (0.4375) in
+//     16.16 of health/healthMax [orig: Entity_GetHealthClassification @ 0x4AD4E0]. A raw-health
+//     byte here mis-classes remote players every applied frame (the client apply @0x4AD580
+//     writes the low nibble back to playerClass and re-resolves itemDef from it) — the
+//     retail-join C2S 0x0F flood.
+bool run_0a_health_class_byte_packed() {
+	// Quantizer boundaries, exact: health_max 65536 makes the 16.16 ratio == health.
+	if (!expect(ns::health_classification_byte(28671, 65536, 8) == 0x08,
+	            "ratio 28671 (boundary) -> tier 0")) return false;
+	if (!expect(ns::health_classification_byte(28672, 65536, 8) == 0x18,
+	            "ratio 28672 -> tier 1")) return false;
+	if (!expect(ns::health_classification_byte(49152, 65536, 8) == 0x18,
+	            "ratio 49152 (boundary) -> tier 1")) return false;
+	if (!expect(ns::health_classification_byte(49153, 65536, 8) == 0x28,
+	            "ratio 49153 -> tier 2")) return false;
+	if (!expect(ns::health_classification_byte(0, 65536, 8) == 0x08,
+	            "health 0 -> tier 0 | class (death is signalled elsewhere, faithful)")) return false;
+	if (!expect(ns::health_classification_byte(150, 150, 5) == 0x25,
+	            "full health -> tier 2 | class 5")) return false;
+	if (!expect(ns::health_classification_byte(1, 0, 9) == 0x29,
+	            "healthMax 0 rides the divide guard [orig: healthMax ? healthMax : 1]")) return false;
+	if (!expect(ns::health_classification_byte(100, 150, 0x18) == 0x18,
+	            "class nibble masked & 0xF")) return false;
+
+	// End-to-end: the emitted 0x0A player record carries the packed byte. spawn_player defaults:
+	// class 8, health 100, snapshot healthMax 150 -> ratio 43690 -> tier 1 -> 0x18.
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	if (!expect(host_h.valid(), "host player spawned")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	nw::PlayerReplicationState fallback;
+
+	const auto emitted_health_byte = [&](uint8_t &out) -> bool {
+		ns::test::emit_all(world, conns, fallback);
+		ns::Datagram dg;
+		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+		nw::FrameUpdate fu;
+		if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+		            "0x0A frame decodes")) return false;
+		for (const auto &rec : fu.records) {
+			if (rec.handle != host_h.packed) continue;
+			out = rec.player.health_class_byte;
+			return true;
+		}
+		return expect(false, "player record present in the frame");
+	};
+
+	uint8_t byte = 0;
+	if (!emitted_health_byte(byte)) return false;
+	if (!expect(byte == 0x18, "health 100/150 emits packed 0x18 (tier 1 | class 8), not raw 0x64"))
+		return false;
+
+	world.registry.get(host_h)->health = 150; // full health -> tier 2
+	if (!emitted_health_byte(byte)) return false;
+	if (!expect(byte == 0x28, "health 150/150 emits packed 0x28 (tier 2 | class 8)")) return false;
+	std::printf("PASS 0a_health_class_byte_packed\n");
+	return true;
+}
+
 } // namespace
 
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
-	                run_0a_subblock_phase_cycle();
+	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

@@ -28,6 +28,42 @@ EntityClass entity_class_of(const world::Entity &e) {
 	return EntityClass::Unknown;
 }
 
+namespace {
+
+// playerClass (entity+0x294) for the wire: a player MUST advertise a valid soldier class
+// (5..9) or the JOINER's client skips body-anim channel (+0x188) registration at round-load
+// and then cannot move/crouch/prone — the body motor early-bails on a NULL anim channel. The
+// client resolves the soldier model from playerClass at round-load, NOT from the wire
+// avatar/anim_slot. [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
+// AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
+// class 0 -> slot 15 -> empty ADM -> registration skipped -> Entity_UpdateInfantryPlayerBody
+// @0x4b40e0 bails @0x4b4135. re-grill 2026-06-28.] Carry the entity's loadout class; default a
+// player to 8 (golden) until per-player loadout class is wired. The [5,9]-else-8 clamp is the
+// EXACT retail rule: Server_PlayerAdd @0x51d102 forces player_slot+89820 AND entity+660 to 8
+// when the requested class is outside [5,9] (grill 2026-07-01: byte-faithful).
+uint8_t player_class_for_wire(const world::Entity &e) {
+	if (e.item_id == kPlayerInfantryTypeId && (e.player_class < 5 || e.player_class > 9))
+		return 8;
+	return e.player_class;
+}
+
+} // namespace
+
+uint8_t health_classification_byte(int32_t health, int32_t health_max, uint8_t player_class) {
+	// The §5.10 field-17 pack: `(tier << 4) | (playerClass & 0xF)`, tier quantized from
+	// Health/healthMax in 16.16 fixed point — tier 2 above 0.75 (49152), tier 1 above 0.4375
+	// (28671), else tier 0. The client apply (Entity_SetHealthFromDifficultyByte @0x4AD580)
+	// reconstructs the tier MIDPOINT (87.5% / 59.375% / 21.875% of healthMax) with the same
+	// two constants, so this pack is its exact inverse. The original's null-entity/null-itemDef
+	// paths return tier 2; our snapshot always carries both inputs, so only the healthMax==0
+	// divide guard is reachable. [orig: Entity_GetHealthClassification @ 0x4AD4E0]
+	const int32_t max = health_max != 0 ? health_max : 1; // [orig: healthMax ? healthMax : 1]
+	const int64_t ratio = (static_cast<int64_t>(health) << 16) / max;
+	const uint8_t cls = player_class & 0x0Fu;
+	if (ratio > 49152) return static_cast<uint8_t>(0x20u | cls);          // tier 2 @0x4ad552
+	return static_cast<uint8_t>((ratio > 28671 ? 0x10u : 0x00u) | cls);   // tier 1/0 @0x4ad56e
+}
+
 GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	GameEntitySnapshot s;
 	s.pool = static_cast<uint8_t>(e.handle.pool());
@@ -53,7 +89,10 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 	s.euler_z = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
 	s.entity_class = entity_class_of(e);
-	s.health = e.health; // §5.10 health-classification byte source — non-zero keeps the player alive
+	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
+	// health_max keeps the struct's class-8 player default (150) — world::Entity carries no
+	// resolved itemDef healthMax yet (see GameEntitySnapshot::health_max).
+	s.player_class = player_class_for_wire(e); // field-17 low nibble (entity+0x294)
 	return s;
 }
 
@@ -123,22 +162,7 @@ uint16_t player_minimap_net_id(const world::Entity &e) {
 	                             (e.handle.slot() & 0x1Fu));
 }
 
-// playerClass (entity+0x294) for the wire: a player MUST advertise a valid soldier class
-// (5..9) or the JOINER's client skips body-anim channel (+0x188) registration at round-load
-// and then cannot move/crouch/prone — the body motor early-bails on a NULL anim channel. The
-// client resolves the soldier model from playerClass at round-load, NOT from the wire
-// avatar/anim_slot. [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
-// AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
-// class 0 -> slot 15 -> empty ADM -> registration skipped -> Entity_UpdateInfantryPlayerBody
-// @0x4b40e0 bails @0x4b4135. re-grill 2026-06-28.] Carry the entity's loadout class; default a
-// player to 8 (golden) until per-player loadout class is wired. The [5,9]-else-8 clamp is the
-// EXACT retail rule: Server_PlayerAdd @0x51d102 forces player_slot+89820 AND entity+660 to 8
-// when the requested class is outside [5,9] (grill 2026-07-01: byte-faithful).
-uint8_t player_class_for_wire(const world::Entity &e) {
-	if (e.item_id == kPlayerInfantryTypeId && (e.player_class < 5 || e.player_class > 9))
-		return 8;
-	return e.player_class;
-}
+// player_class_for_wire (the [5,9]-else-8 clamp) lives above snapshot_of, which shares it.
 
 } // namespace
 
