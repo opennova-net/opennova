@@ -30,6 +30,12 @@ NetClientView::NetClientView()
 NetClientView::NetClientView(std::function<EntityClass(uint16_t)> resolver)
 		: resolver_(std::move(resolver)) {}
 
+EntityClass NetClientView::classify(uint16_t type_id) const {
+	const auto it = learned_classes_.find(type_id);
+	if (it != learned_classes_.end()) return it->second;
+	return resolver_(type_id);
+}
+
 void NetClientView::apply(uint8_t tag, const std::vector<uint8_t> &body) {
 	switch (tag) {
 	case kTag0aFrameUpdate:
@@ -86,9 +92,12 @@ void NetClientView::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	PoolSpawnBatch batch;
 	decode_pool_spawn_batch(body.data(), body.size(), batch);
 	for (const PoolSpawnRecord &rec : batch.records) {
+		// A 0x0D spawn is pool-1 by construction — learn the type's 0x0A replication
+		// class so the vehicle compact body decodes for it (see classify()).
+		learned_classes_[rec.item_type_id] = EntityClass::Vehicle;
 		ClientEntityState &es = state_.upsert(rec.slot_id);
 		es.type_id = rec.item_type_id;
-		es.cls = resolver_(rec.item_type_id);
+		es.cls = EntityClass::Vehicle;
 		es.x = rec.pos_x;
 		es.y = rec.pos_y;
 		es.z = rec.pos_z;
@@ -133,7 +142,8 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 	FrameUpdate fu;
 	// decode_frame_update leaves everything it walked in `fu` even on a short read,
 	// so we apply whatever decoded cleanly (out.complete reflects a clean terminator).
-	decode_frame_update(body.data(), body.size(), resolver_, fu);
+	decode_frame_update(body.data(), body.size(),
+	                    [this](uint16_t tid) { return classify(tid); }, fu);
 
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;

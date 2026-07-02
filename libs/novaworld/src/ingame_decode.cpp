@@ -509,9 +509,9 @@ bool decode_player_compact_record(const uint8_t *body, size_t len,
 	out.pitch_byte        = c.u8();
 	out.anim_slot_low     = c.u8();
 	out.state_flags       = c.u8();
-	out.weapon_anim_state = c.u8();
-	out.priority          = c.u8();
-	out.anim_def_index    = c.u8();
+	out.weapon_id          = c.u8();
+	out.anim_channel_ratio = c.u8();
+	out.anim_def_index     = c.u8();
 	out.health_class_byte = c.u8();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);

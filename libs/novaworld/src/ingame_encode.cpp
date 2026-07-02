@@ -417,9 +417,9 @@ std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec
 	w.u8(rec.pitch_byte);
 	w.u8(rec.anim_slot_low);      // entity+0x12C
 	w.u8(rec.state_flags);        // entity+0x24 (bit2 spawning, bit4 mounted)
-	w.u8(rec.weapon_anim_state);  // entity+0x2B8 / 0x2BC
-	w.u8(rec.priority);           // entity+0x377
-	w.u8(rec.anim_def_index);     // entity+0x2B0
+	w.u8(rec.weapon_id);          // entity+0x2B8 ?: entity+0x2BC [orig: @0x4c0cc7]
+	w.u8(rec.anim_channel_ratio); // entity+0x188 channel ratio [orig: @0x4c0cf2]
+	w.u8(rec.anim_def_index);     // entity+0x2B0 [orig: @0x4c0d59]
 	w.u8(rec.health_class_byte);  // -> Entity_SetHealthFromDifficultyByte on read
 	return out; // 18 B
 }

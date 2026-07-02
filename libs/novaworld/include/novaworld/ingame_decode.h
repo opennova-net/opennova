@@ -448,8 +448,14 @@ struct PlayerCompactRecord {
 	uint8_t  pitch_byte = 0;          // -> entity+0x14 (pitch) on read [D-NET-57]
 	uint8_t  anim_slot_low = 0;       // entity+0x12C
 	uint8_t  state_flags = 0;         // entity+0x24 (bit 2 = spawning, bit 4 = mounted)
-	uint8_t  weapon_anim_state = 0;   // entity+0x2B8 / 0x2BC
-	uint8_t  priority = 0;            // entity+0x377
+	uint8_t  weapon_id = 0;           // small weapon/item id, entity+0x2B8 ?: entity+0x2BC (read
+	                                  // side indexes dword_8139E8[id]) [orig: @0x4c0cc7; renamed
+	                                  // from the weapon_anim_state misnomer, witness 2026-07-02]
+	uint8_t  anim_channel_ratio = 0;  // 0..255 float ratio off the entity+0x188 anim-channel object
+	                                  // (f32[+0x28]/f32[+0x2C] or f32[+8]/f32[+0xC] by obj+0x14);
+	                                  // read side stores it at entity+0x377 [orig: @0x4c0cf2;
+	                                  // renamed from the `priority` misnomer — the read-side +0x377
+	                                  // name misled; witness 2026-07-02]
 	uint8_t  anim_def_index = 0;      // entity+0x2B0
 	uint8_t  health_class_byte = 0;   // → Entity_SetHealthFromDifficultyByte
 };

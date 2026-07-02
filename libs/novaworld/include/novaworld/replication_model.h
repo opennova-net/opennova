@@ -73,6 +73,19 @@ struct GameEntitySnapshot {
 	// Unknown / NoNetworkCallback / Guided are not emitted by the production 0x0A frame builder;
 	// authoring/runtime code sets this from the item's *_function class tag.
 	EntityClass entity_class = EntityClass::Unknown;
+	// Engine pitch (entity+0x14, BAM32). The player compact record's pitch byte is its rounded
+	// high byte `(v + 0x800000) >> 24` [orig: @0x4c0c77]. Pure degree->BAM widen (no (90-x)
+	// frame inversion — that is yaw-only).
+	int32_t pitch_bam = 0;
+	// entity+0x12C low byte — the player compact record's anim-slot byte [orig: @0x4c0c9c].
+	uint8_t anim_slot_low = 0;
+	// entity+0x24 (Flags) low byte, written UNMASKED to the player compact record's state byte
+	// [orig: @0x4c0c7d — masking is read-side only: local 0xE1 / remote 0xFD]. Also the vehicle
+	// compact record's flags byte [orig: @0x460d22].
+	uint8_t state_flags = 0;
+	// The player record's off-2 anchor handle: the RIDDEN vehicle (entity+0x16C) when mounted,
+	// else the parent/ground entity (entity+0x28, unmodeled -> 0xFFFF) [orig: @0x4c0a08/@0x4c0a20].
+	uint16_t mount_handle = 0xFFFF;
 	// Entity Health (entity+286). The §5.10 player compact record's "health classification" byte
 	// (field 17) is quantized from this against health_max — see health_classification_byte
 	// [orig: Entity_GetHealthClassification @ 0x4AD4E0]. A living entity MUST replicate a non-zero

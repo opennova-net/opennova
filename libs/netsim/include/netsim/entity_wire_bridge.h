@@ -20,9 +20,12 @@ namespace opennova::netsim {
 
 // Map a wire type_id to its §5.10b replication class. Phase 1 uses a minimal table
 // (the player infantry template vs everything-else-is-infantry); Phase 3 replaces
-// it with an items.def *_function class-tag resolver [orig: ItemDef+356]. It MUST
-// agree with entity_class_of for any entity that is actually replicated, so the
-// host's chosen compact encoder matches the client's chosen compact decoder.
+// it with an items.def *_function class-tag resolver [orig: ItemDef+356]. From a bare
+// type_id it CANNOT see vehicle classes (that knowledge is items.def-side), so
+// decoders that must agree with entity_class_of for pool-1 vehicles layer a learned
+// table over it — NetClientView records type->Vehicle from the 0x0D pool-1 spawn
+// batch (see NetClientView::classify). The host's chosen compact encoder and the
+// client's chosen compact decoder must agree or the record chain desyncs.
 EntityClass class_for_type_id(uint16_t type_id);
 
 // The §5.10b replication class a live World entity replicates as. EntityClass::Unknown

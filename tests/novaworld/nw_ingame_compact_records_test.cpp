@@ -25,7 +25,7 @@ namespace {
 int test_player_compact_18_bytes() {
 	// §5.10 — 18 B fixed. Build a record on-foot (vehicle_handle 0xFFFF).
 	// vehicleBone=0, seatType=0, vehHandle=0xFFFF, posXYZ compressed, yaw/pitch,
-	// animSlot, stateFlags, weapAnim, priority, animDef, healthClass.
+	// animSlot, stateFlags, weaponId, animChannelRatio, animDef, healthClass.
 	const uint8_t body[] = {
 		0x00, 0x00,             // vehicle_bone, seat_type
 		0xFF, 0xFF,             // vehicle_handle (none)
@@ -36,8 +36,8 @@ int test_player_compact_18_bytes() {
 		0x00,                   // pitch_byte
 		0x12,                   // anim_slot_low
 		0x02,                   // state_flags (bit 1 = spawning)
-		0x05,                   // weapon_anim_state
-		0x10,                   // priority
+		0x05,                   // weapon_id
+		0x10,                   // anim_channel_ratio
 		0x07,                   // anim_def_index
 		0x80,                   // health_class_byte
 		0xAA,                   // trailing byte to prove prefix-consume
@@ -53,7 +53,7 @@ int test_player_compact_18_bytes() {
 	EXPECT(rec.pos_z_compressed == 0xBCD7);
 	EXPECT(rec.yaw_byte == 0x40);
 	EXPECT(rec.state_flags == 0x02);
-	EXPECT(rec.priority == 0x10);
+	EXPECT(rec.anim_channel_ratio == 0x10);
 	EXPECT(rec.health_class_byte == 0x80);
 	std::printf("PASS player_compact 18B\n");
 	return 0;

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <unordered_map>
 #include <vector>
 
 #include <novaworld/ingame_decode.h> // EntityClass
@@ -47,8 +48,18 @@ private:
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 
+	// Effective record classifier for the 0x0A event loop: the class LEARNED from the world
+	// spawn stream wins, then the injected resolver. The retail client classifies via each
+	// type's items.def serialize callback [orig: itemDef+356 dispatch @0x50f2e2 /
+	// ItemList_FindIndexByTypeId]; without an items table, a 0x0D pool-1 spawn is the
+	// witnessed signal that a type replicates as a VEHICLE (pool 1 = the vehicle pool), so
+	// the view records type->Vehicle there and decodes the 15/21-B vehicle compact body for
+	// those types (a Player/Infantry misparse would desync the whole record chain).
+	EntityClass classify(uint16_t type_id) const;
+
 	ClientState state_;
 	std::function<EntityClass(uint16_t)> resolver_;
+	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::size_t unknown_tags_ = 0;
 };
 

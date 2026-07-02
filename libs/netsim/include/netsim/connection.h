@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include <world/entity.h> // EntityHandle
@@ -55,6 +56,15 @@ struct Connection {
 	// `phase & 3` selects the header sub-block (0 weapon / 1 server-status / 2 env / 3 gametype),
 	// while `phase & 0xF == 8` gates the passenger block. emit_connection_s2c advances it per send.
 	uint8_t s2c_phase = 0;
+
+	// Per-connection entity AGE bytes for the 0x0A priority loop — the reimpl of the original's
+	// per-player-slot age arrays: pool-0 ages at slot+89978 (256 B), pool-1 at slot+90234 (+256)
+	// [orig: Server_BuildEntityPriorityList @ 0x50e590 saturating `paddusb +1` sweep @0x50e60f].
+	// Index = (pool==1 ? 256 : 0) + (slot & 0xFF). Aged +1 (saturating) every emit, reset to 0
+	// when the entity's record is serialized [orig: @0x50f168]; age raises the priority key and
+	// age >= 50 force-admits past the 1124-tile distance gate, so budget-starved entities climb
+	// until they win a slot — the original's round-robin is EMERGENT from aging (no resume cursor).
+	std::array<uint8_t, 512> s2c_entity_age{};
 };
 
 } // namespace opennova::netsim

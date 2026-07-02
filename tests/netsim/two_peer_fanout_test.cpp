@@ -492,13 +492,174 @@ bool run_0a_health_class_byte_packed() {
 	return true;
 }
 
+// (h) [D-NET-134 step 2] The 0x0A entity loop: pool-1 vehicles replicate as Vehicle compact
+//     records, the byte budget caps each frame [orig: g_entity_send_budget @0xC8FC50 = 600,
+//     soft cap @0x50f34b], and AGING gives budget-starved entities the next frame's slots
+//     [orig: paddusb sweep @0x50e60f, age reset @0x50f168] — the original's round-robin has
+//     no cursor; it is emergent from the age term of the priority key.
+bool run_0a_vehicle_budget_round_robin() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 64);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 0, 0xFFF0));
+	if (!expect(host_h.valid(), "host player spawned")) return false;
+
+	// 40 pool-1 vehicles clustered at one spot (uniform distance -> deterministic ordering:
+	// within a frame the tie-break is snapshot order; across frames age dominates).
+	constexpr int kVehicles = 40;
+	for (int i = 0; i < kVehicles; ++i) {
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050B; // dune buggy
+		veh.position = {120.0f, 100.0f, 10.0f};
+		veh.yaw = 90;
+		veh.team = 1;
+		if (!expect(world.registry.spawn(1, veh).valid(), "vehicle spawned")) return false;
+	}
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	nw::PlayerReplicationState fallback;
+
+	// Frame math (flags2=1 first send): header 28 B + player 23 B + N x 26-B vehicle records
+	// (tail B, flags 0); the soft cap completes the record crossing 600 -> 22 vehicles/frame.
+	const auto pump_frame = [&](nw::FrameUpdate &fu) -> bool {
+		ns::test::emit_all(world, conns, fallback);
+		ns::Datagram dg;
+		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+		const auto resolver = [](uint16_t tid) {
+			return tid == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Vehicle;
+		};
+		if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), resolver, fu),
+		            "0x0A frame decodes")) return false;
+		if (!expect(dg.body.size() <= 600 + 26, "frame stays within the soft byte cap"))
+			return false;
+		return true;
+	};
+
+	std::vector<bool> seen(kVehicles, false);
+	int seen_count = 0;
+	const auto fold_frame = [&](const nw::FrameUpdate &fu, int &vehicles, bool &player) {
+		vehicles = 0;
+		player = false;
+		for (const auto &rec : fu.records) {
+			if (rec.cls == nw::EntityClass::Player && rec.handle == host_h.packed) player = true;
+			if (rec.cls != nw::EntityClass::Vehicle) continue;
+			++vehicles;
+			const int slot = rec.handle & 0xFFF;
+			if (slot < kVehicles && !seen[slot]) { seen[slot] = true; ++seen_count; }
+		}
+	};
+
+	nw::FrameUpdate f1, f2;
+	int v1 = 0, v2 = 0;
+	bool p1 = false, p2 = false;
+	if (!pump_frame(f1)) return false;
+	fold_frame(f1, v1, p1);
+	if (!expect(p1, "own player present in frame 1 (+1000 boost)")) return false;
+	if (!expect(v1 == 22, "frame 1 carries 22 budget-capped vehicle records")) return false;
+
+	// Frame 2 rides the phase-0 weapon sub-block (11-B vs 6-B header -> 33+23 = 56 header+player
+	// bytes), so one fewer vehicle fits: 56 + 21*26 = 602 crosses the soft cap at 21.
+	if (!pump_frame(f2)) return false;
+	fold_frame(f2, v2, p2);
+	if (!expect(p2, "own player present in frame 2")) return false;
+	if (!expect(v2 == 21, "frame 2 carries 21 vehicle records (bigger sub-block)")) return false;
+	if (!expect(seen_count == kVehicles,
+	            "aging round-robin: two frames cover ALL 40 vehicles (18 starved + repeats)"))
+		return false;
+
+	// Decoded vehicle position reconstructs against the frame anchor (codec sanity).
+	const int32_t vx = w::to_fixed(120.0), vy = w::to_fixed(100.0), vz = w::to_fixed(10.0);
+	const int32_t ax = w::to_fixed(100.0), ay = w::to_fixed(100.0), az = w::to_fixed(10.0);
+	bool vehicle_pos_ok = false;
+	for (const auto &rec : f1.records) {
+		if (rec.cls != nw::EntityClass::Vehicle) continue;
+		vehicle_pos_ok =
+				f1.anchor_x + nw::network_decompress_fixedpoint(rec.vehicle.pos_x_compressed) ==
+						codec_recon(vx, ax) &&
+				f1.anchor_y + nw::network_decompress_fixedpoint(rec.vehicle.pos_y_compressed) ==
+						codec_recon(vy, ay) &&
+				f1.anchor_z + nw::network_decompress_fixedpoint(rec.vehicle.pos_z_compressed) ==
+						codec_recon(vz, az);
+		break;
+	}
+	if (!expect(vehicle_pos_ok, "vehicle record position reconstructs against the anchor"))
+		return false;
+
+	// NetClientView LEARNS the vehicle class from the 0x0D pool-1 spawn batch and then decodes
+	// the vehicle compact bodies with its DEFAULT resolver (which alone cannot know them).
+	ns::NetClientView view;
+	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
+	ns::test::emit_all(world, conns, fallback);
+	view.pump(ch);
+	if (!expect(view.frames_applied() == 1, "view applied the 0x0A frame")) return false;
+	int view_vehicles = 0;
+	for (const auto &es : view.state().entities)
+		if (es.cls == nw::EntityClass::Vehicle && (es.handle >> 12) == 1) ++view_vehicles;
+	if (!expect(view_vehicles == kVehicles,
+	            "view holds all pool-1 vehicles as Vehicle class (0x0D-learned)")) return false;
+	std::printf("PASS 0a_vehicle_budget_round_robin\n");
+	return true;
+}
+
+// (i) The witnessed player compact-record field sources [orig: NetPacket_SerializePlayerState
+//     @0x4C09C0 case 1]: TRUNCATED yaw byte (@0x4c0c5d — not rounded), rounded pitch byte
+//     (@0x4c0c77), anim slot low (entity+0x12C @0x4c0c9c), unmasked state flags (entity+0x24
+//     @0x4c0c7d).
+bool run_0a_player_record_field_sources() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(host_h);
+	if (!expect(e != nullptr, "host entity resolvable")) return false;
+	e->anim_slot = 0x21;
+	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
+	e->pitch = 45;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "0x0A frame decodes")) return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == host_h.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present")) return false;
+
+	// yaw 0 -> engine BAM (90-0)*11930464 = 0x3FFFFFC0: TRUNCATED high byte = 0x3F (rounding
+	// would give 0x40 — the exact bit the witness corrected).
+	if (!expect(rec->player.yaw_byte == 0x3F, "yaw byte is the TRUNCATED high byte")) return false;
+	// pitch 45 deg -> BAM 0x1FFFFFE0 -> rounded high byte 0x20.
+	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
+	if (!expect(rec->player.anim_slot_low == 0x21, "anim slot low carried")) return false;
+	if (!expect((rec->player.state_flags & 0x40) != 0, "state flags carried unmasked")) return false;
+	if (!expect(rec->player.vehicle_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
+	std::printf("PASS 0a_player_record_field_sources\n");
+	return true;
+}
+
 } // namespace
 
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
-	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed();
+	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
+	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

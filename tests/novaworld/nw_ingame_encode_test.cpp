@@ -543,10 +543,10 @@ int test_player_compact_roundtrip() {
 	r.yaw_byte          = 0x40;
 	r.pitch_byte        = 0x10;
 	r.anim_slot_low     = 0x12;
-	r.state_flags       = 0x06;       // bit1 spawning + bit2 mounted bits set
-	r.weapon_anim_state = 0x05;
-	r.priority          = 0x10;
-	r.anim_def_index    = 0x07;
+	r.state_flags        = 0x06;      // bit1 spawning + bit2 mounted bits set
+	r.weapon_id          = 0x05;
+	r.anim_channel_ratio = 0x10;
+	r.anim_def_index     = 0x07;
 	r.health_class_byte = 0x80;
 
 	std::vector<uint8_t> wire = encode_player_compact_record(r);
@@ -561,7 +561,7 @@ int test_player_compact_roundtrip() {
 	EXPECT(d.pos_z_compressed == 0xBCD7);
 	EXPECT(d.yaw_byte == 0x40 && d.pitch_byte == 0x10);
 	EXPECT(d.anim_slot_low == 0x12 && d.state_flags == 0x06);
-	EXPECT(d.weapon_anim_state == 0x05 && d.priority == 0x10);
+	EXPECT(d.weapon_id == 0x05 && d.anim_channel_ratio == 0x10);
 	EXPECT(d.anim_def_index == 0x07 && d.health_class_byte == 0x80);
 	std::printf("PASS player_compact_roundtrip\n");
 	return 0;

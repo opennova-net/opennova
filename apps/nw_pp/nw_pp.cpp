@@ -575,14 +575,14 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 void print_player_compact_record(const PlayerCompactRecord &r) {
 	std::printf("            player: vehBone=%u seat=%u vehHdl=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
-	            "anim=%u state=0x%02x weapAnim=%u prio=%u animDef=%u health=0x%02x\n",
+	            "anim=%u state=0x%02x weapId=%u animRatio=%u animDef=%u health=0x%02x\n",
 	            unsigned(r.vehicle_bone), unsigned(r.seat_type),
 	            handle_str(r.vehicle_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.pitch_byte),
 	            unsigned(r.anim_slot_low), unsigned(r.state_flags),
-	            unsigned(r.weapon_anim_state), unsigned(r.priority),
+	            unsigned(r.weapon_id), unsigned(r.anim_channel_ratio),
 	            unsigned(r.anim_def_index), unsigned(r.health_class_byte));
 }
 
