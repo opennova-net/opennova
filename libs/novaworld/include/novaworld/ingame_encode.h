@@ -166,7 +166,8 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 // The mounted/unmounted split is gated on `flags_byte & 0x04` — the original
 // branches on `entity+36 & 4`, so this encoder branches on the flag bit (not the
 // cached `is_mounted`). Positions/headings are the already-compressed u16s
-// (`turret_pitch_raw` is a raw i16); `Network_CompressFixedPoint` /
+// (`health_word` is the raw entity+286 vehicle health u16 — a 0 kills the vehicle
+// on the receiving client, @0x460aff); `Network_CompressFixedPoint` /
 // `Entity_TransformWorldToLocal` run at the World->record layer upstream.
 std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &rec);
 

@@ -147,15 +147,24 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// 15/21-B vehicle compact record [orig: Entity_SerializeMountedVehicleState @0x460560
 			// op 1]. parent (entity+0x28 @0x460ba1) unmodeled -> 0xFFFF = world-frame position;
 			// flags = entity+36 low byte verbatim [orig: @0x460d22] — its bit 0x04 selects the
-			// 4-B rider-Euler tail over the 10-B weapon tail, which encode_vehicle_compact_record
-			// mirrors. Weapon-tail fields (entity+160 / +286 / vehicleData 132/135/136) are
-			// unmodeled and ride the witnessed zero defaults.
+			// 4-B rider-Euler tail over the 10-B weapon tail (which encode_vehicle_compact_record
+			// mirrors), and bit 0x02 is the DESTROYED state whose wire transitions drive
+			// Entity_KillBySlotId / Entity_RespawnVehicle on the client [orig: @0x460a25/@0x460918].
 			rec.vehicle.parent_slot_handle = 0xFFFF;
 			rec.vehicle.flags_byte = e.state_flags;
 			rec.vehicle.pos_x_compressed = cx;
 			rec.vehicle.pos_y_compressed = cy;
 			rec.vehicle.pos_z_compressed = cz;
 			rec.vehicle.euler_z = yaw_bam16; // heading i16 [orig: @0x460d0a]
+			// entity+286 = the vehicle HEALTH word, stored back verbatim by the read
+			// [orig: write @0x460d9b, read store @0x460aff]. Sending 0 here zeroed every
+			// vehicle's health each frame — live-witnessed as all map vehicles dying
+			// repeatedly (retail-join v12). The old `turret_pitch_raw` name was an
+			// unwitnessed decode-era guess (D-NET-63 correction).
+			rec.vehicle.health_word = static_cast<uint16_t>(
+					e.health > 0 ? (e.health < 0xFFFF ? e.health : 0xFFFF) : 0);
+			// Weapon-aim tail fields (entity+160 / vehicleData 132/135/136) stay 0 —
+			// turret state is unmodeled.
 			break;
 		case EntityClass::Infantry:
 			rec.infantry.vehicle_slot_handle = 0xFFFF;

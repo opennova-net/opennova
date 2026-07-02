@@ -480,9 +480,17 @@ struct VehicleCompactRecord {
 	int16_t  euler_y = 0;                 // src entity+24 -> read-dest entity+584
 	int16_t  euler_x = 0;                 // src entity+20 -> read-dest entity+580
 
-	// Unmounted branch (is_mounted = false) — turret pitch + weapon-aim block:
+	// Unmounted branch (is_mounted = false) — vehicle health + weapon-aim block:
 	uint16_t weapon_x = 0;                // entity+160 (compressed)
-	int16_t  turret_pitch_raw = 0;        // entity+286 (raw i16, not compressed)
+	uint16_t health_word = 0;             // entity+286 (raw u16) = the vehicle HEALTH word: the
+	                                      // read stores it back to entity+286 [orig: @0x460aff]
+	                                      // and the destroyed-transition kill gates on it being
+	                                      // non-zero [orig: @0x460a99 -> Entity_KillBySlotId
+	                                      // @0x460ad9]. Renamed from the `turret_pitch_raw`
+	                                      // misnomer (an unwitnessed decode-era guess, D-NET-63):
+	                                      // a 0 here zeroes the vehicle's health EVERY frame —
+	                                      // live-witnessed as all map vehicles dying repeatedly
+	                                      // (retail-join v12, 2026-07-02).
 	uint16_t weapon_aim_y = 0;            // src vehicleData[136] -> read-dest vehicleData[177] (compressed)
 	uint16_t weapon_aim_z = 0;            // src vehicleData[135] -> read-dest vehicleData[178] (compressed)
 	int16_t  weapon_heading_bam = 0;      // src vehicleData[132] -> read-dest vehicleData[179] (BAM high i16)

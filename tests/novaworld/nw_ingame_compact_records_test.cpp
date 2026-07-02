@@ -107,7 +107,7 @@ int test_vehicle_unmounted_21_bytes() {
 		0x00, 0x40,             // euler_z
 		0x01,                   // flags_byte (mounted bit CLEAR)
 		0x11, 0x22,             // weapon_x
-		0x33, 0x44,             // turret_pitch_raw
+		0x33, 0x44,             // health_word
 		0x55, 0x66,             // weapon_aim_y
 		0x77, 0x88,             // weapon_aim_z
 		0x99, 0xAA,             // weapon_heading_bam
@@ -121,7 +121,7 @@ int test_vehicle_unmounted_21_bytes() {
 	EXPECT(rec.is_mounted == false);
 	EXPECT(rec.parent_slot_handle == 0xFFFF);
 	EXPECT(rec.weapon_x == 0x2211);
-	EXPECT(rec.turret_pitch_raw == int16_t(0x4433));
+	EXPECT(rec.health_word == 0x4433);
 	EXPECT(rec.weapon_aim_y == 0x6655);
 	EXPECT(rec.weapon_aim_z == 0x8877);
 	EXPECT(rec.weapon_heading_bam == int16_t(0xAA99));

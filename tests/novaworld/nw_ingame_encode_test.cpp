@@ -508,7 +508,7 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	r.euler_z = int16_t(0x0DDD);
 	r.flags_byte = 0x00;            // unmounted
 	r.weapon_x = 0x0101;
-	r.turret_pitch_raw = int16_t(0x0202);
+	r.health_word = 0x0202;
 	r.weapon_aim_y = 0x0303;
 	r.weapon_aim_z = 0x0404;
 	r.weapon_heading_bam = int16_t(0x0505);
@@ -523,7 +523,7 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	EXPECT(d.parent_slot_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xAAAA);
 	EXPECT(d.weapon_x == 0x0101);
-	EXPECT(d.turret_pitch_raw == int16_t(0x0202));
+	EXPECT(d.health_word == 0x0202);
 	EXPECT(d.weapon_aim_y == 0x0303);
 	EXPECT(d.weapon_aim_z == 0x0404);
 	EXPECT(d.weapon_heading_bam == int16_t(0x0505));

@@ -536,9 +536,9 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 		out.euler_y = int16_t(c.u16());
 		out.euler_x = int16_t(c.u16());
 	} else {
-		// Unmounted: turret pitch (raw) + weapon-aim Y/Z + heading BAM.
+		// Unmounted: weaponX + vehicle HEALTH word (entity+286) + weapon-aim Y/Z + heading BAM.
 		out.weapon_x           = c.u16();
-		out.turret_pitch_raw   = int16_t(c.u16());
+		out.health_word        = c.u16();
 		out.weapon_aim_y       = c.u16();
 		out.weapon_aim_z       = c.u16();
 		out.weapon_heading_bam = int16_t(c.u16());

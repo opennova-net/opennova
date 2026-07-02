@@ -579,6 +579,11 @@ bool run_0a_vehicle_budget_round_robin() {
 	bool vehicle_pos_ok = false;
 	for (const auto &rec : f1.records) {
 		if (rec.cls != nw::EntityClass::Vehicle) continue;
+		// entity+286 vehicle health word — MUST be the live health (spawn default 100), never 0:
+		// the client stores it back verbatim (@0x460aff), so a 0 kills the vehicle every frame
+		// (the live v12 all-vehicles-dying regression).
+		if (!expect(rec.vehicle.health_word == 100, "vehicle record carries live health"))
+			return false;
 		vehicle_pos_ok =
 				f1.anchor_x + nw::network_decompress_fixedpoint(rec.vehicle.pos_x_compressed) ==
 						codec_recon(vx, ax) &&
