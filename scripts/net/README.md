@@ -22,6 +22,19 @@ All output goes to `<repo>\.scratch\` (gitignored). Never commit raw captures,
 (Phase 2 adds `tools/retail_driver` to drive retail host/join unattended; Phase 3
 adds `host_opennova.ps1`/`join_opennova.ps1` and the `run_*` orchestrators.)
 
+## Multi-interface dumpcap gotchas (learned 2026-07-02)
+
+- A `-f <filter>` argument binds to the **preceding** `-i`; a filter given BEFORE any `-i`
+  becomes the default for all. `dumpcap -i A -i B -f udp` filters ONLY B. For multi-interface
+  captures put `-f` before each `-i` (or before all of them).
+- Same-PC retail-client↔host sessions addressed to the machine's LAN IP do not reliably appear
+  on any single adapter — one round captured fully, an identical setup caught nothing. ALWAYS
+  sanity-check mid-round: copy the rolling pcapng and run `nw_pp --histogram` on the copy the
+  moment the join completes; re-arm on more interfaces if the session is absent. A rolling
+  dumpcap file is readable while capture continues (copy first, decode the copy).
+- diff_0a.py caches a `<capture>.0a.json` sidecar NEXT TO each input — keep golden captures
+  inside the current worktree's `.scratch/` so `--refresh` never writes into a sibling worktree.
+
 ## Prerequisites (verified on this machine 2026-06-26)
 
 - Wireshark/dumpcap at `C:\Program Files\Wireshark\dumpcap.exe`; Npcap running with

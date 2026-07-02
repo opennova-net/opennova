@@ -43,19 +43,32 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | vehicle record health word (+286) | DONE (D-NET-63 corrected) | live items.def hp via `resolve_item_traits`; 0 = wreck, small = burning (v12/v13 regressions) |
 | player record field sources (input/state/pitch/yaw-trunc/mount) | DONE | witnessed apply map in §5.10; off-12 is MOVEMENT INPUT (uplink-echoed), off-13 bit2 = dead/undeployed |
 | 0x5A loadout reply derived from C2S 0x2F | DONE (set+order) | `build_tag_5a_weapon_loadout` (server_message_dispatch) |
-| **0x5A ammo bytes (real counts)** | **OPEN — D-NET-141** | needs the weapon.def parse + the adm INDEX-allocation witness (§5.57 OPEN) |
-| **C2S 0x25 → S2C 0x49 reload relay** | **OPEN — D-NET-142** | host silently ignores 0x25 → one reload attempt wedges the joiner's weapon (§5.58) |
-| **off-14/16 anim defaults (43 idle / adm index)** | **OPEN — D-NET-143** | we send 0/0xFF; retail spawn defaults = state 0x2B + WPN_M4AUTO index [orig: @0x4B1116]; uplink carries +0x2B0 (our `reserved_24`) |
-| joiner spawn health (tier byte 0x28) | OPEN — D-NET-144 | seed 150/150 or re-stamp item traits on player spawn |
+| 0x5A ammo bytes (real counts) | DONE (D-NET-141; index rule CLOSED §5.57) | `world::WeaponTable` fed via `NovaSimulation::load_weapon_table`; rules in `weapon_table_build.cpp` [orig: WeaponSlot_GetTotalClips @0x5425F0]; table-less hosts keep the echo fallback |
+| C2S 0x25 → S2C 0x49 reload relay | DONE (D-NET-142) | dispatch case 0x25 stages the relayed 0x49 on EVERY in-match transport incl. the requester [orig: @0x514DF0 → SendFiltered @0x4C87E0]; host-side clip bookkeeping deferred |
+| off-14/16 anim defaults (43 idle / adm index) | DONE (D-NET-143) | off-14 = 0x2B idle default; off-16 = `Entity::equipped_adm_index` (the uplink byte-24 echo — ex-`reserved_24` — category<11-gated [orig: @0x4C20A3]; spawn default = the armory's WPN_M4AUTO index [orig: @0x4B1116]) |
+| joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::player_item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
 | deploy gate / eye-pos ref / budget ramp | not ported | `emit_connection_s2c` anchors to entity pos, no `state==6` gate |
-| body motor for net-snapped peers | not ported (D-NET-143 tail) | retail host SIMULATES remote players; ours net-snaps — anim state/ratio stay defaults |
+| body motor for net-snapped peers | not ported (D-NET-143 tail) | retail host SIMULATES remote players; ours net-snaps — anim STATE stays the 0x2B idle default until the motor drives peers |
 
-**Next (round 3): the four v15 defects — D-NET-141..144.** Order: witness the adm index-allocation
-rule (the `weapon` block-open handler in the loc_543680 parse callback + `AdmDef_FindFreeSlot
-@0x53FC50`; does `loadout_subclasses N` reserve N slots?), then the weapon.def parser (libs/def) +
-engine feed, then 0x5A ammo resolve + 0x2F validation, the 0x25→0x49 relay (needs a broadcast path
-in the npruntime dispatch — replies currently go only to the requesting connection), the anim
-defaults + `reserved_24`→equipped-adm uplink ingest/echo, and the spawn-health seed.
+**Next (round 5): the v18-witnessed spawn-record divergences.**
+- **D-NET-146** — the joiner's 0x0C organic `animSlot` byte: golden host=1/joiner=4, ours 1 for
+  both (`build_pool0_organic_batch` echoes `Entity::anim_slot`); live symptom = the DBuggy1
+  SHADOW blob under the joiner's own player. Witness what writes entity+0x374 host-side
+  (team/class → slot?) + the client consumer (apply @0x42E730 stores it; §5.46 slot-indexed
+  model/shadow resolve family), then fix the emit.
+- **D-NET-147** — the 0x10 static records omit parent_slot(0x020)/bone_b(0x080)/ammo_count:
+  golden buildings carry flags 0x0A1 + ammo 0xFF; live symptom = entering a building/armory
+  sometimes teleports the joiner to map origin (parent frame resolves null). Needs static
+  parent links plumbed from the mission promote + the 0x10 serializer witness.
+
+**Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
+channel ratio — remote players render idle-posed); host-side `WeaponSlot_ReloadAmmo` bookkeeping
+for the 0x25 relay; the armory-enable restriction table (`unused6 @ 0x24D5600` / player+89688 —
+4th 0x5A byte, observed 0); the env sub-block (D-NET-134); the passenger tail; a weapon.def feed
+for table-less hosts (headless `nw_server`). NOTE the armory truth is the HOST'S RESOLVED
+weapon.def (VFS view — a live JO:CA root resolves 126 weapons; the committed fixture is a
+94-weapon extract), so live index anchors belong to wire gates, not unit tests (§5.57 "Index
+numbering").
 
 ## Verify loop (fast iteration)
 
