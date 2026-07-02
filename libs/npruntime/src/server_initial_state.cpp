@@ -501,13 +501,17 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced
 	while (b.sync_state != 5) {
 		if (is_remote && b.sync_state == 4 && b.world_stream_phase == 8 && !b.loadout_received) {
-			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start, so
-			// the player deploys WITH a loadout (golden order: 0x5A precedes the game-start). The
-			// retail client + the opennova joiner both send 0x2F; this long fallback only guards
-			// against a client that never selects (avoids an infinite stall). ~10 s @ 62 Hz.
-			constexpr uint16_t kLoadoutWaitFallbackTicks = 600;
-			if (++b.loadout_wait_ticks < kLoadoutWaitFallbackTicks) break;
-			b.loadout_received = true;
+			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start
+			// bundle AND the per-frame 0x0A stream — with NO timeout. The golden retail host
+			// emits NOTHING in-match until the joiner's 0x2F: its first S2C 0x0A directly follows
+			// the 0x5A reply (retail-ashi5a f223117-f223118), and the 0x2F is the client's
+			// load-complete signal (it cannot build a loadout before its own weapon.def/AdmDef
+			// table exists). The prior reimpl-invented ~10 s fallback force-opened this gate and
+			// blasted 0x0A at a still-LOADING client; once the records carried real anim-def
+			// bytes, the client's UNGATED off-16 apply (§5.10) touched its mid-build AdmDef table
+			// — the live-witnessed v16 loading wedge (D-NET-145). A joiner that never selects
+			// never deploys, exactly like retail (the session-level timeout reaps true zombies).
+			break;
 		}
 		if (step.messages.size() >= budget) break; // per-tick pacing cap — resume next tick
 		advance_burst_one_phase(ctx, conn, step, now_tick, budget);
