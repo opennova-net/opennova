@@ -33,6 +33,8 @@ struct PlayerSpawn {
     int16_t yaw = 0;
     uint8_t team = 0;
     uint16_t net_id = 0xFFF0;
+    // Item-less FALLBACK only: when World::player_item_hp is resolved (the items.def Player hp,
+    // 150), the spawn seeds THAT at full [orig: Entity_InitFromItemDef @0x49e550]. (D-NET-144)
     int16_t health = 100;
     uint16_t min_entity_slot = 0;
     // The owning connection's ConnectionId/dcb -> Entity::owner_connection_id (entity+0x78). The host's

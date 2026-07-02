@@ -228,6 +228,12 @@ public:
     AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
                                // this world, so the AI-change command family can reach brains.
 
+    // items.def Player-template hp (class-8 Player = 150), stamped by the host's item-traits
+    // sweep so LATE-JOINER spawns (which happen after the sweep) seed full health without an
+    // item-db reach-back from libs/ [orig: Entity_InitFromItemDef @0x49e550 — spawn Health =
+    // itemDef->healthMax]. 0 = unresolved: player_spawn falls back to the spawn seed. (D-NET-144)
+    int32_t player_item_hp = 0;
+
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.
     //  Per-system cadences divide it: the WAC VM executes every 62nd tick

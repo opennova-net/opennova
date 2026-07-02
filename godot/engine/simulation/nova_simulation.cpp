@@ -247,6 +247,12 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
 void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
+	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
+	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
+	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
+	world_->player_item_hp = p_item_db->get_hp(
+			static_cast<int>(opennova::world::kPlayerInfantryTypeId) +
+			opennova::mission::kItemIdOffset);
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each([&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
 	for (const opennova::world::EntityHandle h : handles) {

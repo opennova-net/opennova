@@ -21,6 +21,13 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
     if (world.ai == nullptr) return EntityHandle{};
 
+    // Spawn at FULL health [orig: Entity_InitFromItemDef @0x49e550 — Health = healthMax]: the
+    // items.def Player hp when the host's traits sweep resolved it (class-8 Player = 150), else
+    // the spawn seed's fallback. health_max is stamped alongside so the §5.10 field-17 tier
+    // denominator reads the spawn value (full => tier 2 => the golden 0x28) even for a joiner
+    // spawning AFTER the mission-load sweep. (D-NET-144)
+    const int32_t hp = world.player_item_hp > 0 ? world.player_item_hp : spawn.health;
+
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
     // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
     Entity seed;
@@ -35,7 +42,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;
     seed.team = spawn.team;
-    seed.health = spawn.health; // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
+    seed.health = hp;     // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
+    seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
     seed.alive = true;
     seed.flags = 2u;            // the movement gate starts SET; the spawn reset clears it
     // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The
@@ -63,12 +71,12 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.heading = bam_heading_from_mission_yaw_deg(spawn.yaw);
     ae.team = spawn.team;
     ae.net_id = spawn.net_id;
-    ae.health = spawn.health;
+    ae.health = hp;
     ae.inf.active = true;
     ae.inf.is_local_player = is_local;
     ae.inf.body_heading = ae.heading;
     ae.inf.target_heading = ae.heading;
-    ae.inf.max_health = spawn.health;
+    ae.inf.max_health = hp;
     ae.inf.anim_state = anim_state::kIdle;
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present

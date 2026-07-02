@@ -452,12 +452,14 @@ bool run_0a_health_class_byte_packed() {
 	if (!expect(ns::health_classification_byte(100, 150, 0x18) == 0x18,
 	            "class nibble masked & 0xF")) return false;
 
-	// End-to-end: the emitted 0x0A player record carries the packed byte. spawn_player defaults:
-	// class 8, health 100, snapshot healthMax 150 -> ratio 43690 -> tier 1 -> 0x18.
+	// End-to-end: the emitted 0x0A player record carries the packed byte. With the traits sweep
+	// resolved (player_item_hp = 150), the spawn seeds FULL health 150/150 [orig:
+	// Entity_InitFromItemDef @0x49e550] -> tier 2 -> 0x28, the golden joiner byte (D-NET-144).
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	w::AiSystem ai;
 	world.ai = &ai;
+	world.player_item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
@@ -484,12 +486,14 @@ bool run_0a_health_class_byte_packed() {
 
 	uint8_t byte = 0;
 	if (!emitted_health_byte(byte)) return false;
-	if (!expect(byte == 0x18, "health 100/150 emits packed 0x18 (tier 1 | class 8), not raw 0x64"))
+	if (!expect(byte == 0x28, "spawn-at-full 150/150 emits packed 0x28 (tier 2 | class 8) — the "
+	                          "golden joiner byte (D-NET-144)"))
 		return false;
 
-	world.registry.get(host_h)->health = 150; // full health -> tier 2
+	world.registry.get(host_h)->health = 100; // damaged below the 0.75 boundary -> tier 1
 	if (!emitted_health_byte(byte)) return false;
-	if (!expect(byte == 0x28, "health 150/150 emits packed 0x28 (tier 2 | class 8)")) return false;
+	if (!expect(byte == 0x18, "health 100/150 emits packed 0x18 (tier 1 | class 8), not raw 0x64"))
+		return false;
 	std::printf("PASS 0a_health_class_byte_packed\n");
 	return true;
 }
