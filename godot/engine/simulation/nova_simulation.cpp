@@ -18,6 +18,9 @@
 #include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
 #include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+#include <npruntime/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
+
+#include <def/def.h> // def_parse_weapons_memory / def_free_weapons
 
 #include <mission/bms.h>
 #include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
@@ -274,6 +277,28 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	}
 }
 
+// weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
+// parses literally "weapon.def" through WeaponDefs_LoadFile right after AnimDef_InitAll wipes
+// the AdmDef table [orig: @0x5254b3/@0x5254bd]); build_weapon_table ports the witnessed
+// allocation rule (null@0 + by-name-reuse-else-lowest-free = file order; §5.57, D-NET-141).
+Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_root,
+                                        const String &p_name) {
+	if (!world_) return ERR_UNCONFIGURED;
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
+		return ERR_INVALID_PARAMETER;
+	const String file_name = p_name.get_file();
+	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
+	const PackedByteArray bytes = p_resource_root->read_file(file_name);
+	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
+
+	DefWeaponsFile file = {};
+	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
+		return ERR_CANT_OPEN;
+	world_->weapons = opennova::np::build_weapon_table(file);
+	def_free_weapons(&file);
+	return OK;
+}
+
 opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
 	opennova::mission::PromoteOptions opts;
 	opts.item_seat_specs = item_seat_specs_;
@@ -496,6 +521,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
+	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
+	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);

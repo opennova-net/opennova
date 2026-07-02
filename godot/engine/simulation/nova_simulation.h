@@ -471,6 +471,14 @@ public:
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
 
+	// Parse weapon.def from the resource root and install the armory table on the sim world
+	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the
+	// extended-uplink equipped-weapon gate, and the player-spawn WPN_M4AUTO default
+	// (D-NET-141/143). [orig: Game_StartMission @0x5254bd -> WeaponDefs_LoadFile @0x5450A0,
+	// right after AnimDef_InitAll @0x5254b3]. Idempotent; call after load.
+	Error load_weapon_table(const Ref<class NovaResourceRoot> &p_resource_root,
+	                        const String &p_name = "weapon.def");
+
 	int get_spawned_count() const { return promo_.spawned; }
 	int get_brain_count() const { return promo_.brains; }
 };

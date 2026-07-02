@@ -16,6 +16,7 @@
 #include "world/entity.h"
 #include "world/entity_registry.h"
 #include "world/var_store.h"
+#include "world/weapon_table.h"
 
 namespace opennova::world {
 
@@ -233,6 +234,11 @@ public:
     // item-db reach-back from libs/ [orig: Entity_InitFromItemDef @0x49e550 — spawn Health =
     // itemDef->healthMax]. 0 = unresolved: player_spawn falls back to the spawn seed. (D-NET-144)
     int32_t player_item_hp = 0;
+
+    // The weapon.def armory table (empty until the host feeds it — NovaSimulation::
+    // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
+    // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
+    WeaponTable weapons;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.

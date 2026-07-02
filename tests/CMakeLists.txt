@@ -1378,6 +1378,14 @@ add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
 target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_npruntime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
+# D-NET-141: the weapon.def armory table — witnessed index allocation (null@0 + file order),
+# ammo-clip resolution, and charfilter/teamfilter masks, against the committed fixture; §5.57.
+add_executable(npruntime_weapon_table_test npruntime/weapon_table_test.cpp)
+target_link_libraries(npruntime_weapon_table_test
+    PRIVATE opennova_npruntime opennova_world opennova_def)
+target_include_directories(npruntime_weapon_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
+
 # D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
 # connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.
 add_executable(npruntime_reload_relay_test npruntime/reload_relay_test.cpp)
@@ -1392,7 +1400,8 @@ add_test(NAME npruntime_reload_relay COMMAND npruntime_reload_relay_test)
 # World path by npruntime_client_runtime + npruntime_two_endpoint_socket.)
 add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.cpp)
 target_link_libraries(npruntime_handshake_server_test
-    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld)
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world opennova_def)
+target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
 
 # Golden 0x81/0x82 byte-parity vs the local LAN host/join session capture. Env-gated + skip-if-absent
