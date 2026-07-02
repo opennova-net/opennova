@@ -41,11 +41,13 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	case 0:
 		// Weapon/ammo/uniform block [orig: @0x4ff81b phase-0: preround timer + weapon slots 360/368/
 		// 364/356/460 + ammo + CWeaponSlotManager_GetUniformTeamMask]. Our host does not model the
-		// recipient's weapon-slot state yet, so emit the golden-witnessed co-op steady value (all-zero
-		// slots + zero uniform mask) — the shape a retail co-op host sends for a standard-loadout
-		// player (golden ASH_I5A: slots 0, uniform mask 8). (Renamed from the FrameAimBlock misnomer
-		// to FrameWeaponBlock, grill 2026-07-01.)
+		// recipient's weapon-slot state yet, so emit the golden-witnessed co-op steady value: all-zero
+		// slots + uniform team mask 8 — the exact bytes a retail co-op host sends steadily for a
+		// standard-loadout player (golden ASH_I5A, re-verified against the v13 capture diff: golden
+		// uniformMask=0x8 on every phase-0 frame; ours was 0). (Renamed from the FrameAimBlock
+		// misnomer to FrameWeaponBlock, grill 2026-07-01.)
 		fu.weapon.present = true;
+		fu.weapon.uniform_team_mask = 0x8;
 		break;
 	case 1:
 		// Server-status block [orig: @0x4ff9d5 phase-1]. LOAD-BEARING — carries the client's

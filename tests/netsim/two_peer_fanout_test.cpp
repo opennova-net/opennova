@@ -416,6 +416,8 @@ bool run_0a_subblock_phase_cycle() {
 			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
 		} else if ((want_flags2[i] & 3u) == 0) {
 			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
+			if (!expect(fu.weapon.uniform_team_mask == 0x8,
+			            "phase 0 uniform team mask = 8 (golden steady value)")) return false;
 		}
 		// phase 3 (gametype) = 0 bytes for a non-objective gametype: nothing to assert.
 	}
