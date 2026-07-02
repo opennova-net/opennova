@@ -316,7 +316,7 @@ func test_action_and_toggle_buttons_have_icons() -> void:
 	# Action buttons rebuild on a workspace switch (_refresh_workspace_surface).
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame
-	var buttons: Dictionary = workstation._workspace_action_buttons
+	var buttons: Dictionary = workstation._top_action_bar.buttons()
 	assert_gt(buttons.size(), 0, "the active workspace exposes at least one action button")
 	for action_id in buttons:
 		var btn := buttons[action_id] as Button
