@@ -1378,6 +1378,13 @@ add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
 target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_npruntime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
+# D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
+# connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.
+add_executable(npruntime_reload_relay_test npruntime/reload_relay_test.cpp)
+target_link_libraries(npruntime_reload_relay_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_reload_relay COMMAND npruntime_reload_relay_test)
+
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
 # reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
 # joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate

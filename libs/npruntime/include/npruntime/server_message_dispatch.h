@@ -39,13 +39,16 @@ namespace opennova::np {
 // remote (type-1) connection and the host's own type-2 loopback both run this the same way.
 // `world` is MUTABLE: the witnessed handlers write server state (the 0x2F loadout handler stamps
 // entity+660 playerClass [orig: @0x515ab0]) — matching the original, whose handlers mutate the
-// live entity/player tables directly.
+// live entity/player tables directly. `roster` is MUTABLE for the same reason: broadcast handlers
+// (the 0x25 reload relay) stage an S2C send on EVERY in-match connection's transport [orig:
+// NapiNPServer_SendFiltered @0x4C87E0 walks the connection list doing one SendToConn per node];
+// each recipient's flush frames the body with its own sequencing.
 // [orig: per-message NapiNPServerMsg_0x0NN handlers reached from the 0x43 SESSION dispatch]
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
-                                                      const std::vector<NapiNPConnection> &roster,
+                                                      std::vector<NapiNPConnection> &roster,
                                                       world::World *world);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every PlayerAdded connection: host loopback

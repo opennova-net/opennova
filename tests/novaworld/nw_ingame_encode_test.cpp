@@ -567,6 +567,23 @@ int test_player_compact_roundtrip() {
 	return 0;
 }
 
+int test_weapon_reload_roundtrip() {
+	// §5.58 S2C 0x49 (the C2S 0x25 relay) -> 4 B fixed.
+	WeaponReload r;
+	r.entity_handle = 0x1005; // pool 1, slot 5
+	r.reload_param  = 0x00C3; // weaponSlotCombo = category*65 + rank
+	std::vector<uint8_t> wire = encode_weapon_reload(r);
+	EXPECT(wire.size() == 4);
+	WeaponReload d;
+	size_t consumed = 0;
+	EXPECT(decode_weapon_reload(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(d.entity_handle == 0x1005);
+	EXPECT(d.reload_param == 0x00C3);
+	std::printf("PASS weapon_reload_roundtrip\n");
+	return 0;
+}
+
 // network_compress_fixedpoint <-> network_decompress_fixedpoint, the position
 // codec the field-driven 0x0A builder uses. The codec is lossy (12-bit float-like)
 // and its XOR-fold is asymmetric for negatives, so only representable positives are
@@ -983,6 +1000,7 @@ int main() {
 	rc |= test_vehicle_compact_roundtrip_mounted();
 	rc |= test_vehicle_compact_roundtrip_unmounted();
 	rc |= test_player_compact_roundtrip();
+	rc |= test_weapon_reload_roundtrip();
 	rc |= test_player_sync_roundtrip();
 	rc |= test_player_list_roundtrip();
 	rc |= test_terrain_load_header_chunk_roundtrip();

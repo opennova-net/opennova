@@ -125,7 +125,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'C', 0x23, "visible-players-request", MsgCoverage::Decoded,     "§5.33 decode_burst_visible_request"},
 		{'C', 0x28, "loadout-request",         MsgCoverage::Decoded,     "§5.33 decode_burst_loadout_request"},
 		{'C', 0x29, "entity-request",          MsgCoverage::Decoded,     "§5.33 decode_burst_entity_request"},
-		{'C', 0x25, "weapon-reload-request",   MsgCoverage::PrinterOnly, "mid-game reload request @0x514DF0 (direction asymmetry vs S2C 0x25, §5.3)"},
+		{'C', 0x25, "weapon-reload-request",   MsgCoverage::Decoded,     "§5.58 decode_weapon_reload (same 4-B body as S2C 0x49; host broadcasts it back @0x514DF0; direction asymmetry vs S2C 0x25, §5.3)"},
 		{'C', 0x26, "vehicle-attach-request",  MsgCoverage::PrinterOnly, "word0 overwritten with requester's own handle -> Entity_ProcessVehicleAttach @0x502390"},
 		{'C', 0x27, "vehicle-detach-request",  MsgCoverage::PrinterOnly, "[u16 handle] -> Entity_DetachFromVehicle(entity, entity+364) @0x4FC980"},
 		{'C', 0x2C, "rtt-consumed",            MsgCoverage::Decoded,     "§5.34 decode_rtt_sample"},

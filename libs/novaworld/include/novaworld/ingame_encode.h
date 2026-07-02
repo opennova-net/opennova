@@ -277,4 +277,11 @@ std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &play
 // 4-byte group per slot; terminator @0x5028b5.]
 std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
 
+// S2C 0x49 WEAPON-RELOAD — [u16 entityHandle][u16 weaponSlotCombo] (4 B): the host's broadcast
+// relay of a C2S 0x25 reload request (same payload, rebuilt per ADR 0003). The client-side apply
+// (NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 -> WeaponSlot_ReloadAmmo @0x541720) is the ONLY
+// place a client's clip refills / the slot's 0x80 reload-pending flag clears (§5.58, D-NET-142).
+// [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
+std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
+
 } // namespace opennova

@@ -386,7 +386,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
-                                                      const std::vector<NapiNPConnection> &roster,
+                                                      std::vector<NapiNPConnection> &roster,
                                                       world::World *world) {
 	std::vector<ProtocolMessage> replies;
 	SessionReplyState &st = conn.reply;
@@ -534,6 +534,26 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case 0x0B: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
 				st.mission_status_received = true;
 				break;
+			case 0x25: { // reload request -> S2C 0x49 BROADCAST [orig: NapiNPServerMsg_HandleReloadRequest
+				// @0x514DF0 — validates the [u16 entityHandle][u16 weaponSlotCombo] body, then relays it
+				// verbatim as S2C 0x49 via two NapiNPServer_SendFiltered @0x4C87E0 sends that together
+				// reach ALL in-match connections INCLUDING the requester. The client's 0x49 apply is the
+				// ONLY place its clip refills / the slot's 0x80 reload-pending flag clears — a host that
+				// ignores 0x25 wedges the joiner's weapon after one attempt (§5.58, D-NET-142). Staged on
+				// each recipient's transport; the per-connection flush frames it with that connection's
+				// own sequencing. Host-side WeaponSlot_ReloadAmmo bookkeeping needs the weapon-slot/pool
+				// model — deferred (tracked, D-NET-142 tail).]
+				WeaponReload req;
+				size_t consumed = 0;
+				if (!decode_weapon_reload(msg.payload.data(), msg.payload.size(), req, consumed))
+					break;
+				const std::vector<uint8_t> body = encode_weapon_reload(req); // rebuilt, never raw (ADR 0003)
+				for (NapiNPConnection &c : roster) {
+					if (!is_in_match(c) || c.link.transport == nullptr) continue;
+					c.link.transport->host_send(0x49, body);
+				}
+				break;
+			}
 			case 0x0F: { // entity-info query [u16 handle] -> S2C 0x18 FULL-ENTITY-SPAWN (the self-heal).
 				// [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180 — validates pool <= 1 &&
 				// slot < capacity, serializes the REQUESTED entity via serialize_object_to_buffer

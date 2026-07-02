@@ -558,6 +558,24 @@ int check_S_49_weapon_reload() {
 	return 0;
 }
 
+// C2S 0x25 — weapon-reload request: same 4-B [u16 handle][u16 weaponSlotCombo] body the host
+// relays back as S2C 0x49 (§5.58). Round-trip via the real encoder.
+int check_C_25_reload_request() {
+	WeaponReload out;
+	out.entity_handle = 0x0006;
+	out.reload_param  = 0x00C3; // weaponSlotCombo = category*65 + rank
+	const std::vector<uint8_t> wire = encode_weapon_reload(out);
+	EXPECT(wire.size() == 4);
+	WeaponReload r;
+	size_t consumed = 0;
+	EXPECT(decode_weapon_reload(wire.data(), wire.size(), r, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(r.entity_handle == 0x0006);
+	EXPECT(r.reload_param == 0x00C3);
+	cover('C', 0x25);
+	return 0;
+}
+
 // S2C 0x13 — entity death (second path): [u16 handle][i16 killerSource] (4 B).
 int check_S_13_entity_death() {
 	LE w;
@@ -969,6 +987,7 @@ int main() {
 	if (check_u32_scalar_trio()) return 1;
 	if (check_S_6B_minimap()) return 1;
 	if (check_S_49_weapon_reload()) return 1;
+	if (check_C_25_reload_request()) return 1;
 	if (check_S_13_entity_death()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_42_input_flags()) return 1;

@@ -1040,6 +1040,19 @@ void print_tag_29_c2s(const std::vector<uint8_t> &body) {
 	            unsigned(r.buffer_index));
 }
 
+// C2S 0x25 weapon-reload request (§5.58) — same 4-B body as the S2C 0x49 relay.
+void print_tag_25_c2s(const std::vector<uint8_t> &body) {
+	WeaponReload r;
+	size_t used = 0;
+	if (!decode_weapon_reload(body.data(), body.size(), r, used)) {
+		std::printf("        [0x25 C2S] weapon-reload decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x25 C2S] weapon-reload-request handle=%s slotCombo=%u\n",
+	            handle_str(r.entity_handle).c_str(), unsigned(r.reload_param));
+}
+
 // C2S 0x4C client quality/state byte.
 void print_tag_4c_c2s(const std::vector<uint8_t> &body) {
 	BurstClientQuality r;
@@ -1395,6 +1408,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'C' && tag == 0x23) print_tag_23_c2s(payload);
 	else if (dir == 'C' && tag == 0x28) print_tag_28_c2s(payload);
 	else if (dir == 'C' && tag == 0x29) print_tag_29_c2s(payload);
+	else if (dir == 'C' && tag == 0x25) print_tag_25_c2s(payload);
 	else if (dir == 'C' && tag == 0x4C) print_tag_4c_c2s(payload);
 	else if (tag == 0x00 && print_tag_00_kv(payload)) { /* NWU KV rendered */ }
 	else if (!payload.empty()) std::printf("        %s\n",

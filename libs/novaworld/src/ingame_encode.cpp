@@ -723,4 +723,14 @@ std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout) {
 	return out;
 }
 
+// [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0 — S2C 0x49 carries the same
+// [u16 handle][u16 weaponSlotCombo] payload as the C2S 0x25 request it relays (§5.58)]
+std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(reload.entity_handle);
+	w.u16(reload.reload_param);
+	return out;
+}
+
 } // namespace opennova
