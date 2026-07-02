@@ -69,7 +69,7 @@ bool run_field_mapping() {
 bool run_roundtrip_to_host_snap() {
 	// Source: the joiner's live local-player pose (zero low-16 heading/pitch for exact round-trip).
 	w::Entity src_e{};
-	src_e.anim_slot = -1;
+	src_e.body_anim_slot = -1;
 	w::AiEntity src_ae{};
 	const int32_t sx = w::to_fixed(100.0), sy = w::to_fixed(200.0), sz = w::to_fixed(-50.0);
 	src_ae.pos[0] = sx;

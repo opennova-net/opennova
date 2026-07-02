@@ -95,6 +95,24 @@ struct PreSpawnJoinerPose {
 	int16_t pitch = 0;
 };
 
+// The joiner's character/profile join vars, uploaded as CU chunks in its game-session 0x42
+// ClientAuth: the per-SIDE character selection (side A = teams 1/3, side B = teams 2/4).
+//   CI0/CI1 = per-side minimap/character-slot ids (u16 truncation of retail's atol),
+//   TR      = requested side (0 = A, 1 = B; anything else clamps to 0xFF = auto),
+//   CTA/CTB = per-side soldier class, VCA/VCB = per-side avatar byte (-> entity+0x374 animSlot).
+// 0 everywhere = "tag absent" (retail's zero-initialized NapiNetConfig). The player add picks the
+// side by the ASSIGNED team and stamps the entity. [orig: client emit
+// CNapiServerInfo_SerializeToSession @0x4c3650; host parse NapiNPProtocol_HandleClientJoin
+// @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260 (jsp[56..63] + ci0.lo); consume
+// Server_PlayerAdd @0x51cbc0. Wire: golden retail-ashi5a 0x42 f=199140 carries CI0=512 CI1=33287
+// TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the joiner's 0x0C record echoes 0x8207/4. net-re D-NET-146]
+struct CharacterJoinVars {
+	uint16_t char_id[2] = {0, 0};   // CI0 / CI1 -> jsp[56] / jsp[58]
+	uint8_t team_request = 0;       // TR -> jsp[60] (retail clamp: != 0xFF && >= 2 -> 0xFF)
+	uint8_t char_class[2] = {0, 0}; // CTA / CTB -> jsp[61] / jsp[62]
+	uint8_t avatar[2] = {0, 0};     // VCA / VCB -> jsp[63] / ci0 low byte
+};
+
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
 // server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner expects). Folded
 // onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
@@ -182,6 +200,9 @@ struct NapiNPConnection {
 
 	// --- P8: the reactive gameplay-message reply state (the retired GameSessionState slice) ---
 	SessionReplyState reply{};
+
+	// The joiner's 0x42 CU character vars (above) — parsed at the join, consumed by the player add.
+	CharacterJoinVars char_vars{};
 };
 
 // [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A

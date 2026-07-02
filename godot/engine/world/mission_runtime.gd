@@ -203,8 +203,8 @@ func local_player_yaw_deg() -> float:
 func local_player_pitch_deg() -> float:
 	return _sim.get_local_player_pitch_deg() if _sim != null else 0.0
 
-func local_player_anim_slot() -> int:
-	return _sim.get_local_player_anim_slot() if _sim != null else -1
+func local_player_body_anim_slot() -> int:
+	return _sim.get_local_player_body_anim_slot() if _sim != null else -1
 
 func local_player_anim_key() -> String:
 	return String(_sim.get_local_player_anim_key()) if _sim != null else ""

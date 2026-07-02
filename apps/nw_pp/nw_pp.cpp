@@ -105,6 +105,11 @@ bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
 // is shared too: libs/novaworld/wire_capture.h decode_capture_to_messages.
 
 std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
+	// NW_PP_HEXCAP_MAX overrides the per-dump byte cap (witness sessions need whole payloads).
+	if (const char *env = std::getenv("NW_PP_HEXCAP_MAX"); env != nullptr && env[0] != '\0') {
+		const long v = std::strtol(env, nullptr, 10);
+		if (v > 0) cap = static_cast<size_t>(v);
+	}
 	std::string s;
 	char buf[4];
 	for (size_t i = 0; i < n && i < cap; ++i) {
@@ -1472,6 +1477,72 @@ int run_server_log(const char *path) {
 	return clean ? 0 : 2;
 }
 
+// --handshake: print the OUTER session handshake datagrams (0x41 ClientHello /
+// 0x42 ClientAuth / 0x81 ServerHello / 0x82 ServerAuth) that the in-game stream
+// pipeline consumes silently (wire_capture recovers SCRK from them and moves
+// on). The 0x42 dump expands the CU chunks — the joiner's character/profile
+// vars (CI0/CI1/TR/CTA/CTB/VCA/VCB ...) the host feeds into the player add
+// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 <- NapiNPProtocol_HandleClientJoin
+// @0x62b750 CU loop; client builder CNapiServerInfo_SerializeToSession @0x4c3650].
+int run_handshake(const char *path) {
+	long seen = 0, shown = 0;
+	auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
+		++seen;
+		std::vector<uint8_t> stripped(pk.payload.size());
+		size_t out_len = 0;
+		if (napi_envelope_decode(pk.payload.data(), pk.payload.size(), stripped.data(),
+		                         stripped.size(), &out_len) != 0)
+			return true;
+		stripped.resize(out_len);
+		if (stripped.empty()) return true;
+		const uint8_t opcode = stripped[0];
+		if (opcode != 0x41 && opcode != 0x42 && opcode != 0x81 && opcode != 0x82) return true;
+		std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
+		// Outer NWU transform: decrypt-on-receive is nwu_encrypt (names swapped).
+		if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
+		++shown;
+		std::printf("[f=%d %d->%d op=0x%02x len=%zu]\n", pk.frame_index, pk.srcport,
+		            pk.dstport, unsigned(opcode), body.size());
+		if (opcode == 0x42) {
+			ClientAuth auth;
+			if (!parse_client_auth(body.data(), body.size(), auth)) {
+				std::printf("        ClientAuth: PARSE FAILED  raw=%s\n",
+				            to_hex_sample(body.data(), body.size()).c_str());
+				return true;
+			}
+			std::printf("        ClientAuth co=\"%s\" na=\"%s\" ci=%u hk=0x%08x ck=0x%08x "
+			            "cu_chunks=%zu\n",
+			            auth.co.c_str(), auth.na.c_str(), auth.ci, auth.hk, auth.ck,
+			            auth.cu.size());
+			// Each CU chunk: [type:1B][name + NUL][LE16 data_len][value + NUL] — the
+			// wire shape of NapiNPChunk_Create @0x624720 (parse_client_cu_chunk).
+			for (const auto &cu : auth.cu) {
+				uint8_t ctype = 0;
+				std::string name, value;
+				if (parse_client_cu_chunk(cu.data(), cu.size(), ctype, name, value)) {
+					std::printf("          CU type=%u %s = \"%s\"\n", unsigned(ctype),
+					            name.c_str(), value.c_str());
+				} else {
+					std::printf("          CU (undecoded) raw=%s\n",
+					            to_hex_sample(cu.data(), cu.size()).c_str());
+				}
+			}
+		} else if (opcode == 0x41) {
+			ClientHello hello;
+			if (parse_client_hello(body.data(), body.size(), hello))
+				std::printf("        ClientHello co=\"%s\" pn=\"%s\"\n", hello.co.c_str(),
+				            hello.pn.c_str());
+		}
+		return true;
+	};
+	if (!net::stream_pcap_udp_file(path, on_dg)) {
+		std::fprintf(stderr, "FAILED to stream pcap %s\n", path);
+		return 1;
+	}
+	std::fprintf(stderr, "scanned %ld datagrams, %ld handshake datagrams shown\n", seen, shown);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -1479,6 +1550,7 @@ int main(int argc, char *argv[]) {
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
 	bool stream_mode = false;
+	bool handshake_mode = false;
 	bool histogram_mode = false;
 	bool coverage_mode = false;
 	long max_frames = 0; // 0 = unlimited
@@ -1494,6 +1566,8 @@ int main(int argc, char *argv[]) {
 			histogram_mode = true; // coverage joins the histogram tally with the catalog
 		} else if (std::strcmp(a, "--stream") == 0) {
 			stream_mode = true;
+		} else if (std::strcmp(a, "--handshake") == 0) {
+			handshake_mode = true;
 		} else if (std::strcmp(a, "--max-frames") == 0 && i + 1 < argc) {
 			max_frames = std::strtol(argv[++i], nullptr, 10);
 			stream_mode = true; // a frame budget only makes sense streaming
@@ -1530,6 +1604,13 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 	if (is_sph_path(path)) return run_server_log(path);
+	if (handshake_mode) {
+		if (!is_pcap_path(path)) {
+			std::fprintf(stderr, "--handshake needs a pcap/pcapng input\n");
+			return 1;
+		}
+		return run_handshake(path);
+	}
 
 	if (items_path && *items_path) {
 		const size_t n = load_items_def(items_path);

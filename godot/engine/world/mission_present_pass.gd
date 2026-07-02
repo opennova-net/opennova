@@ -16,7 +16,7 @@ extends RefCounted
 #  - Main-body skeletal (.bad via .adm): the primary infantry/view-model animation, selected by AI
 #    state. The infantry motor exports both off_8135F0 anim_state and clip_phase in the present
 #    snapshot, so this pass poses the model to the same .bad phase that produced root motion.
-#    PF_ANIM_SLOT remains a coarse fallback for non-infantry/compat nodes.
+#    PF_BODY_ANIM_SLOT remains a coarse fallback for non-infantry/compat nodes.
 #
 # Per-entity visual contract (NovaEntityVisual): the present pass is host-agnostic and drives each
 # resolved node through a small duck-typed surface (GDScript) that NovaObjectModel implements:
@@ -112,8 +112,8 @@ func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
 
 # Main-body skeletal clip (.bad via .adm). Infantry uses the full IDA anim state plus clip phase:
 # the skeleton is posed to the exact phase that produced root motion, so idles stay planted instead
-# of host-side free-running against a separately advanced root track. PF_ANIM_SLOT is the coarse
-# fallback path for compatible non-infantry nodes.
+# of host-side free-running against a separately advanced root track. PF_BODY_ANIM_SLOT is the
+# coarse fallback path for compatible non-infantry nodes.
 func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
 	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
 	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
@@ -122,11 +122,11 @@ func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
 		if not key.is_empty():
 			node.play_body_clip_at(key, anim_phase)
 			return
-	var anim_slot := int(snap[base + NovaSimulation.PF_ANIM_SLOT])
-	if anim_slot < 0:
+	var body_anim_slot := int(snap[base + NovaSimulation.PF_BODY_ANIM_SLOT])
+	if body_anim_slot < 0:
 		return
 	if node.has_method("play_body_anim_at"):
-		node.play_body_anim_at(anim_slot, anim_phase)
+		node.play_body_anim_at(body_anim_slot, anim_phase)
 		return
 	if node.has_method("play_body_anim"):
-		node.play_body_anim(anim_slot)
+		node.play_body_anim(body_anim_slot)

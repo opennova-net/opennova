@@ -546,6 +546,69 @@ bool run_loadout_resolve_with_armory() {
 	return true;
 }
 
+// The 0x42 CU chunks carry the joiner's character/profile vars — the per-side character selection
+// (CI0/CI1 per-side char ids, TR requested side, CTA/CTB classes, VCA/VCB avatars). Parsed with the
+// witnessed LoadFromConnTags semantics: type-2 chunks only, case-insensitive names, atol values
+// (u16 truncation for CI, TR clamped to {0,1,0xFF}). [orig: NapiNPProtocol_HandleClientJoin
+// @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260; wire: retail-ashi5a f=199140;
+// D-NET-146]
+bool run_character_join_vars_parsed() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	const PeerAddr peer{0x0100007Fu, 30900};
+
+	ClientAuth auth;
+	auth.pn = "JointOperations";
+	auth.ci = 1;
+	auth.ck = 0x0BADF00Du;
+	auth.hk = kHostKey;
+	auth.na = "jop:cus2";
+	auth.scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	// The golden retail set, with wrinkles the parser must honor: CI0 as the full profile u32
+	// ("8126976" = 0x7C0200 — only the low u16 lands, the LoadFromConnTags WORD store), a
+	// lower-case tag name (Napi_StrCaseEqual is case-insensitive), TR=-1 (valid "auto"), and a
+	// type-1 chunk that must be IGNORED (only type-2 chunks are tag-list vars).
+	auth.cu.push_back(make_client_cu_chunk(2, "CI0", "8126976"));  // -> 0x0200
+	auth.cu.push_back(make_client_cu_chunk(2, "CI1", "33287"));    // -> 0x8207
+	auth.cu.push_back(make_client_cu_chunk(2, "TR", "-1"));        // -> 0xFF (auto)
+	auth.cu.push_back(make_client_cu_chunk(2, "cta", "8"));        // case-insensitive
+	auth.cu.push_back(make_client_cu_chunk(2, "CTB", "5"));
+	auth.cu.push_back(make_client_cu_chunk(2, "VCA", "1"));
+	auth.cu.push_back(make_client_cu_chunk(2, "VCB", "4"));
+	auth.cu.push_back(make_client_cu_chunk(1, "CI0", "9999"));     // type 1: NOT a tag var
+	auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	if (!expect(r.outbound.size() >= 1, "0x42 with CU vars admitted")) return false;
+
+	const np::NapiNPConnection *conn = nullptr;
+	for (const auto &c : ctx.np_protocol.connection_list) {
+		if (c.peer == peer) conn = &c;
+	}
+	if (!expect(conn != nullptr, "joiner node exists")) return false;
+	if (!expect(conn->char_vars.char_id[0] == 0x0200, "CI0 u16-truncated (8126976 -> 0x0200)")) return false;
+	if (!expect(conn->char_vars.char_id[1] == 0x8207, "CI1 parsed (33287 = 0x8207)")) return false;
+	if (!expect(conn->char_vars.team_request == 0xFF, "TR=-1 kept as 0xFF (auto)")) return false;
+	if (!expect(conn->char_vars.char_class[0] == 8, "lower-case 'cta' matched (case-insensitive)")) return false;
+	if (!expect(conn->char_vars.char_class[1] == 5, "CTB parsed")) return false;
+	if (!expect(conn->char_vars.avatar[0] == 1 && conn->char_vars.avatar[1] == 4,
+	            "VCA/VCB avatar bytes parsed (golden 1/4)")) return false;
+
+	// TR out-of-range clamps to 0xFF [orig: @0x4c752f tr != -1 && (u8)tr >= 2 -> -1].
+	np::NapiNPServerCtx ctx2;
+	np::test::bring_up_host(ctx2, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	const PeerAddr peer2{0x0100007Fu, 30901};
+	ClientAuth auth2 = auth;
+	auth2.cu.clear();
+	auth2.cu.push_back(make_client_cu_chunk(2, "TR", "7"));
+	auto dg2 = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth2));
+	np::handle_server_datagram(ctx2, peer2, dg2.data(), dg2.size(), 1);
+	for (const auto &c : ctx2.np_protocol.connection_list) {
+		if (c.peer == peer2 &&
+		    !expect(c.char_vars.team_request == 0xFF, "TR=7 clamps to 0xFF")) return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -558,5 +621,6 @@ int main() {
 	ok = run_listen_host_lifecycle() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_character_join_vars_parsed() && ok;
 	return ok ? 0 : 1;
 }

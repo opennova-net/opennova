@@ -15,6 +15,30 @@ JoinerConnection::JoinerConnection(ClientSession::Config config, std::string pla
 		: cfg_(std::move(config)), player_name_(std::move(player_name)) {
 	conn_.type = 2;                  // client-side connection (the joiner's view of the host)
 	conn_.player_name = player_name_;
+	// Game-session 0x42 character vars — the per-side character selection the HOST folds into
+	// our player record (per-side minimap/char ids, requested side, soldier classes, avatar
+	// bytes). Without them the host stamps animSlot/NetId defaults and OTHER retail clients bind
+	// our player to a wrong-type character slot (the mirror of D-NET-146). Values = a fresh
+	// retail profile's defaults, wire-witnessed on both LAN captures (retail-ashi5a f=199140 /
+	// retail_join_v18 f=47676): CI0=512 (0x0200) CI1=33287 (0x8207) TR=-1 CTA=CTB=8 (rifleman)
+	// VCA=1 VCB=4. Only append when the caller hasn't provided its own set. [orig: client emit
+	// CNapiServerInfo_SerializeToSession @0x4c3650, type-2 chunks; host consume
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 -> Server_PlayerAdd @0x51cbc0]
+	const bool has_char_vars = [&] {
+		for (const auto &v : cfg_.cu_vars) {
+			if (v.name == "CI0" || v.name == "VCA") return true;
+		}
+		return false;
+	}();
+	if (!has_char_vars) {
+		const std::pair<const char *, const char *> kCharVars[] = {
+				{"CI0", "512"}, {"CI1", "33287"}, {"TR", "-1"},  {"CTA", "8"},
+				{"CTB", "8"},   {"VCA", "1"},     {"VCB", "4"},
+		};
+		for (const auto &[name, value] : kCharVars) {
+			cfg_.cu_vars.push_back(ClientSession::Config::CuVar{name, value, /*type=*/2});
+		}
+	}
 }
 
 std::vector<uint8_t> JoinerConnection::start() {

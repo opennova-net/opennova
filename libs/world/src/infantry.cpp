@@ -641,11 +641,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // Body-anim slot for the present pass. The infantry motor (player AND AI) bypasses the
         // brain-state update_body_anim_slot (the ai.cpp dispatch `continue`s before reaching it),
         // so derive the present-pass BodyAnim slot from the motor's selected clip state here — else
-        // every org1 soldier renders a static T-pose (anim_slot stays -1 and _apply_body_anim
+        // every org1 soldier renders a static T-pose (body_anim_slot stays -1 and _apply_body_anim
         // no-ops). Leave the slot on death (the present hides / holds the death pose).
         // [orig: Entity_UpdateInfantryAI @0x4b9910 selects the body anim each tick]
         if (ent->alive && ent->health > 0)
-            ent->anim_slot = body_anim_slot_from_state(inf.anim_state);
+            ent->body_anim_slot = body_anim_slot_from_state(inf.anim_state);
     }
 
     advance_part_anim(e); // PANM channels integrate regardless of the motor path

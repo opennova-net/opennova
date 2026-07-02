@@ -142,7 +142,24 @@ struct Entity {
     int32_t engage_min = 0;
     int32_t engage_max = 0;
     int32_t attack_max = 0;
-    int32_t anim_slot = -1;
+    // The body-anim CLIP the present pass plays (kBodyAnim*, body_anim.h), selected by the
+    // infantry motor / AI brain each tick; -1 = no clip / hold rest. RENAMED from `anim_slot`:
+    // this is presentation state, NOT the retail entity+0x374 `animSlot` below — echoing it
+    // onto the wire was the D-NET-146 DBuggy-shadow bug.
+    int32_t body_anim_slot = -1;
+    // GamePlayerEntity.animSlot (entity+0x374) — the character-model/anim-set selector: the
+    // BMS AnimSlot spawn property, or a player's per-side avatar (the joiner's VCA/VCB 0x42
+    // join vars picked by ASSIGNED team, host default 1). Serialized raw as field 13 of the
+    // 0x0C organic / 0x18 full-entity spawn records. [orig: Entity_SpawnFromAnimSlotProperty
+    // @0x43c390 (+0x374 write @0x43c522); Server_PlayerAdd @0x51cbc0 (@0x51d0b1);
+    // Server_InitAllPlayerEntitiesForRound @0x516aa0 (@0x516b8e); net-re §5.23 D-NET-146]
+    uint8_t anim_slot = 0;
+    // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per
+    // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol). 0 = unassigned
+    // (the encoder falls back to its D-NET-137 shim). Non-players serialize Entity::net_id
+    // (the WAC SSN space) there instead. [orig: Server_PlayerAdd @0x51cbc0 slot+440 ->
+    // entity+0x15C; NapiNetConfig_LoadFromConnTags @0x4c7260 jsp[56]/jsp[58]]
+    uint16_t minimap_net_id = 0;
     // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
     // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2

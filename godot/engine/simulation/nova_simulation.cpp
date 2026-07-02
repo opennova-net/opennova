@@ -487,7 +487,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
-	ClassDB::bind_method(D_METHOD("get_local_player_anim_slot"), &NovaSimulation::get_local_player_anim_slot);
+	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
@@ -530,7 +530,7 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_entity_wire_handle);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &NovaSimulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &NovaSimulation::get_entity_part_anim_active);
-	ClassDB::bind_method(D_METHOD("get_entity_anim_slot", "index"), &NovaSimulation::get_entity_anim_slot);
+	ClassDB::bind_method(D_METHOD("get_entity_body_anim_slot", "index"), &NovaSimulation::get_entity_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_entity_hidden", "index"), &NovaSimulation::get_entity_hidden);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaSimulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
@@ -565,7 +565,7 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_ACTIVE1);
 	BIND_ENUM_CONSTANT(PF_PHASE2);
 	BIND_ENUM_CONSTANT(PF_ACTIVE2);
-	BIND_ENUM_CONSTANT(PF_ANIM_SLOT);
+	BIND_ENUM_CONSTANT(PF_BODY_ANIM_SLOT);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
@@ -997,18 +997,18 @@ float NovaSimulation::get_local_player_pitch_deg() const {
 	return static_cast<float>(static_cast<double>(p->pitch) * opennova::world::kDegreesPerBam);
 }
 
-int NovaSimulation::get_local_player_anim_slot() const {
+int NovaSimulation::get_local_player_body_anim_slot() const {
 	if (!world_ || !world_->cached.local_player.valid()) return -1;
-	// The same Entity.anim_slot the present pass reads for NPC models (written by the infantry
-	// motor mirror, infantry.cpp). The avatar is host-managed and not in the present registry,
-	// so main_game drives its body clip from this getter.
+	// The same Entity.body_anim_slot the present pass reads for NPC models (written by the
+	// infantry motor mirror, infantry.cpp). The avatar is host-managed and not in the present
+	// registry, so main_game drives its body clip from this getter.
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	return e ? e->anim_slot : -1;
+	return e ? e->body_anim_slot : -1;
 }
 
 String NovaSimulation::get_local_player_anim_key() const {
 	// The local player's full anim-state clip key ("anim_<name>"), straight from the motor's
-	// selected state. Unlike the 8-slot BodyAnim enum (get_local_player_anim_slot), this carries
+	// selected state. Unlike the 8-slot BodyAnim enum (get_local_player_body_anim_slot), this carries
 	// stance + jump (anim_idle_crouch / anim_walk_prone_forward / anim_jump_loop / ...), so
 	// main_game drives the 3rd-person avatar via play_body_clip(key) for full stance fidelity.
 	// [orig: off_8135F0 names ARE the .adm keys without the "anim_" prefix]
@@ -1234,7 +1234,7 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["hidden"] = ent ? ent->hidden : false;
 	out["held"] = ent ? ent->held : false;
 	out["disabled"] = ent ? ent->disabled : false;
-	out["anim_slot"] = ent ? ent->anim_slot : -1;
+	out["body_anim_slot"] = ent ? ent->body_anim_slot : -1;
 	out["mounted"] = ent ? ent->mounted : false;
 	out["mount_target_net_id"] = 0;
 	out["mount_seat"] = ent ? static_cast<int>(ent->mount_seat) : -1;
@@ -1421,12 +1421,12 @@ bool NovaSimulation::get_entity_part_anim_active(int p_index, int channel) const
 	       e->brain.f[AiBrain::kPartAnimPhase0 + slot] != 0;
 }
 
-int NovaSimulation::get_entity_anim_slot(int p_index) const {
+int NovaSimulation::get_entity_body_anim_slot(int p_index) const {
 	if (!ai_ || !world_) return -1;
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return -1;
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	return ent ? ent->anim_slot : -1;
+	return ent ? ent->body_anim_slot : -1;
 }
 
 bool NovaSimulation::get_entity_hidden(int p_index) const {
@@ -1666,7 +1666,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
+		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
 		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
 		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
 
@@ -1694,7 +1694,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
 			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
 			r[PF_NET_ID] = static_cast<float>(ent->net_id);
-			r[PF_ANIM_SLOT] = static_cast<float>(ent->anim_slot);
+			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent->body_anim_slot);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
 		}

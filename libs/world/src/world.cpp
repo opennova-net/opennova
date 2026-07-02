@@ -134,7 +134,7 @@ bool EntityCommands::set_ssn_attack_max(uint16_t ssn, int32_t v) {
 bool EntityCommands::set_ssn_anim(uint16_t ssn, int32_t anim_slot) {
     Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
     if (!e) return false;
-    e->anim_slot = anim_slot;
+    e->body_anim_slot = anim_slot; // the present-pass clip channel (not the +0x374 selector)
     return true;
 }
 

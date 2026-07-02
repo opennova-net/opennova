@@ -15,7 +15,7 @@ namespace {
 
 // Minimal port of Entity_UpdateInfantryAI @0x4b9910's anim selection: pick a body-anim slot
 // from the brain state + movement so 3rd-person NPCs walk/idle instead of sliding at rest.
-// Writes the world Entity's anim_slot (what the present snapshot reads). Full fidelity
+// Writes the world Entity's body_anim_slot (what the present snapshot reads). Full fidelity
 // (randomized idle variants, jog/run thresholds, attack/death clips) is a grill follow-up.
 void update_body_anim_slot(AiEntity &e, World &world) {
     Entity *ent = world.registry.get(e.handle);
@@ -29,7 +29,7 @@ void update_body_anim_slot(AiEntity &e, World &world) {
     } else {
         slot = kBodyAnimIdle;
     }
-    ent->anim_slot = slot;
+    ent->body_anim_slot = slot;
 }
 
 int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, const InfantryState &inf,
@@ -644,7 +644,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.inf.anim_pending = 0;
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
-        occ->anim_slot = body_anim_slot_from_state(e.inf.anim_state);
+        occ->body_anim_slot = body_anim_slot_from_state(e.inf.anim_state);
     }
     return true;
 }

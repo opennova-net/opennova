@@ -663,6 +663,38 @@ against `Jointops.exe` and ported; the in-match flow is `0x41 → 0x81`, `0x42 �
   `max_players` model) and does NOT enforce capacity — it retires at ROADMAP P8 when npruntime takes
   over. D-NET-104/105 *are* mirrored in both copies.
 
+### 5.0b — The game-session 0x42 CU var set (the joiner's character/profile upload; D-NET-146)
+
+The game-session ClientAuth carries a CU chunk set DISTINCT from the NovaWorld-gate connect set
+(§8 NW-S3's Application/BuildDateAndTime/.../UdpCode1/UdpCode2): the joiner's client/profile
+environment plus its per-SIDE character selection. Emitter: `[orig:
+CNapiServerInfo_SerializeToSession @ 0x4c3650]` — one `NapiNPChunk_Create(conn, 2, name, value)`
+per field, each omitted when the value is 0/empty, values printed as decimal strings. Host parse:
+`[orig: NapiNPProtocol_HandleClientJoin @ 0x62b750]`'s CU loop stores type-1/2 chunks on the
+connection tag list; `[orig: NapiNetConfig_LoadFromConnTags @ 0x4c7260]` folds type-2 tags into
+the per-player `NapiNetConfig` (case-insensitive names via `Napi_StrCaseEqual @ 0x616e70`, `atol`
+values). Wire witness: the golden retail-ashi5a f=199140 (retail joiner → retail host) and
+retail_join_v18 f=47676 (retail joiner → opennova host) carry the identical 18-tag set.
+
+| tag | NapiNetConfig landing | meaning | fresh-profile wire value |
+|---|---|---|---|
+| `BT`/`VN`/`BN`/`DB`/`MBN`/`SOPD` | +0x00..+0x14 | build/version/debug stamps | 0/2/1/0/20042002/180 |
+| `VERSIONSTRING` | +0x58 | client version | "V1.7.5.7" |
+| `COUNTRYCODE` | +0x98 | locale | "us" |
+| `APPID` | (+0x40 slot) | application id | 9360 (host-varies) |
+| `CI0` / `CI1` | jsp[56] / jsp[58] (u16 of atol) | per-SIDE minimap/character-slot id | 512 (0x0200) / 33287 (0x8207) |
+| `TR` | jsp[60] (≠0xFF && ≥2 → 0xFF @ 0x4c752f) | requested side (0=A, 1=B, 0xFF auto) | -1 |
+| `CTA` / `CTB` | jsp[61] / jsp[62] | per-SIDE soldier class (5..9) | 8 / 8 |
+| `VCA` / `VCB` | jsp[63] / ci0 low byte | per-SIDE avatar byte (→ entity+0x374) | 1 / 4 |
+| `TZB` | +0x1A8 | timezone bias | 300 |
+| `MPS` | +0x1AC | max packet size | 1300 |
+
+"Side" is the team pairing {1,3} = A, {2,4} = B — the player add picks the side by the ASSIGNED
+team and the session gametype's team-based bit (see D-NET-146 for the full consume chain
+`Server_BuildPlayerInfoAndAdd @ 0x51d560 → Server_PlayerAdd @ 0x51cbc0`). Note the IDB's
+`NapiNetConfig` field names are first-seen-tag artifacts shifted by one from these landings
+(e.g. the struct's `bt` field holds APPID); the table above is the witnessed tag→offset truth.
+
 ### 5.1 Loading-progress counter — `dword_A82370`
 
 The server walks the client's loading progress up via specific S2C tags. Each handler
@@ -5946,7 +5978,12 @@ not field-parse it). Faithful fix: model the minimap slot array and allocate/pac
 Exonerated for the C2S 0x0F flood (2026-07-02 recon): in the 0x18 apply the record's net_id feeds
 ONLY the minimap path (`@ 0x433ddd`, gated on `Flags & 0x100` + person type) — it is never an input
 to the `@ 0x4307c4` itemDef/ItemTypeIndex cross-check that queues 0x0F (the flood was D-NET-138's
-field-17 byte). Stays DOCUMENTED-TOLERABLE: divergence risk is minimap-cosmetic only.
+field-17 byte). UPDATE 2026-07-02 (D-NET-146): the joiner path is now retail-faithful — the id is
+SEEDED from the joiner's own uploaded CI0/CI1 join vars, picked per assigned team and echoed via
+`Entity::minimap_net_id` (golden 0x8207 reproduced exactly), so the shim only backstops var-less
+players (the host's own player emits its golden 0x0200 through it). Residual gap = the
+character-slot REGISTRY itself (HasEntity/realloc on collision, and the deploy-time allocation for
+the host player) — still DOCUMENTED-TOLERABLE at that reduced scope.
 
 **D-NET-138** [reimpl divergence, FIXED 2026-07-02] **The 0x0A player compact-record field-17
 byte was sent as raw clamped health; retail packs `[bits 4-5 health tier | bits 0-3 playerClass]`.**
@@ -6039,18 +6076,63 @@ retail-join v17/v18 (2026-07-02): the host-player flicker/spazz is gone (user-co
 wire shows animState=43 / animDef=9 / the joiner's uplinked equipped index echoed; diff_0a
 reports player.animDef + animState populated exactly like the golden.
 
-**D-NET-146** [reimpl divergence, TRACKED 2026-07-02] **The joiner's S2C 0x0C organic-spawn
-record carries the wrong `animSlot` byte — ours echoes `Entity::anim_slot` (1 for every
-player), the golden retail host sends 1 for its own (team-1) player and 4 for the (team-2)
-joiner.** Wire-witnessed on ASH_I5A (golden f218939 record 1 `anim_slot=4(+0x374)` vs ours
-record 1 `anim_slot=1`; host records match at 1). The client apply stores the byte to
-`entity->animSlot` [orig: NapiNPClientMsg_0x00C @ 0x42E730] and the §5.46 family resolves
-model/shadow properties through slot-indexed tables — the live-witnessed symptom is a DBuggy1
-SHADOW blob (mesh correct) under the joiner's own player (v17/v18). The same records diverge
-in the minimap `netId` low bits (golden 0x8207 vs ours 0x8201; host 0x0200 both — likely the
-client-side minimap slot alloc, cosmetic). OPEN: witness what writes entity+0x374 host-side
-(team/class → slot rule?) and the client-side consumer chain before fixing
-`build_pool0_organic_batch` (libs/netsim/src/entity_wire_bridge.cpp:212).
+**D-NET-146** [reimpl divergence, FIXED 2026-07-02] **The joiner's S2C 0x0C organic-spawn
+record carried the wrong `animSlot` byte and a mis-packed `netId` — ours echoed the
+body-anim CLIP slot (`Entity::anim_slot`, 1 for every standing player) and the D-NET-137
+netId shim (0x8201, pool slot leaking into the TYPE bits); the golden retail host sends the
+joiner's own uploaded per-side character selection (animSlot 4, netId 0x8207).** The
+live-witnessed symptom was a DBuggy1 SHADOW blob (mesh correct) under the joiner's own
+player (v17/v18): the client's 0x0C apply binds every minimap-registered entity to a
+character-slot registry entry keyed by the packed NetId (`entity->CharacterEntity =
+MinimapSlot_FindOrAllocByEntityId(&count_and_entries, entity, NetId)` [orig:
+NapiNPClientMsg_0x00C @ 0x42E730, alloc @ 0x42eb1d, re-alloc-on-miss @ 0x42eafb]), so a
+type-1-packed id + a wrong avatar byte resolve a vehicle-archetype entry's shadow decal
+while the mesh (resolved from playerClass) stays correct.
+
+The witnessed chain, end to end: (1) the retail joiner uploads its per-SIDE character
+selection as CU chunks in the game-session 0x42 ClientAuth — `CI0`/`CI1` = per-side
+minimap/character-slot ids (u16 of atol), `TR` = requested side (0/1, else clamps 0xFF
+auto @ 0x4c752f), `CTA`/`CTB` = per-side soldier class, `VCA`/`VCB` = per-side avatar byte
+[orig: client emit CNapiServerInfo_SerializeToSession @ 0x4c3650 (each tag omitted when 0);
+wire: golden retail-ashi5a f=199140 and retail_join_v18 f=47676 both carry CI0=512(0x0200)
+CI1=33287(0x8207) TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the fresh-profile defaults]. (2) The host
+parses them into the connection's NapiNetConfig [orig: NapiNPProtocol_HandleClientJoin
+@ 0x62b750 CU loop (type-2 gate) -> NapiNetConfig_LoadFromConnTags @ 0x4c7260 ->
+jsp[56..63] + ci0.lo, Napi_StrCaseEqual names, atol values]. (3) `Server_BuildPlayerInfoAndAdd
+@ 0x51d560` copies jsp[56..64] into the add-event (validating the ids via MinimapSlot_HasEntity
+@ 0x57b140 / lookup_entity_slot_and_pack_entry @ 0x57ad40 against the character-slot
+registry `count_and_entries` — the 288-byte-stride table whose entry+284 is the avatar byte,
+see sub_57AE60). (4) `Server_PlayerAdd @ 0x51cbc0` assigns the team, then picks per ASSIGNED
+team — side A when team ∈ {1,3} or the session gametype is non-team-based ((g_GameType &
+0x10000) == 0), side B otherwise [@ 0x51cff7] — stamping entity+0x374 = the picked avatar
+byte [@ 0x51d0b1] and entity+0x15C = the picked char id [slot+440]; playerClass = TR ? CTB :
+CTA (absent -> 8 in-session [@ 0x51d02b], outside [5,9] -> 8 [@ 0x51d102]) -> entity+0x294.
+`Server_InitAllPlayerEntitiesForRound @ 0x516aa0` re-stamps entity+0x374 = slot+89857 every
+round [@ 0x516b8e]; `Server_ChangePlayerTeam @ 0x518d70` re-picks on a team change
+[@ 0x518e8c]; the host's OWN player takes the LOCAL path instead: animSlot = g_avatarTeam1/2
+by team split {1,3}/{2,4} [orig: Player_InitPlayer @ 0x4e15f0 @ 0x4e1843], sourced from the
+profile avatar byte with a not-found default of 1 [orig: apply_session_settings_to_globals
+@ 0x551500 -> sub_57AE60 default-return 1] — the golden host record's animSlot 1. (5) The
+0x0C/0x18 serializers read entity+0x374/+0x15C raw [orig: serialize_entity_states_to_buffer
+@ 0x5030a0 (+0x374 read @ 0x5032b8) / serialize_object_to_buffer @ 0x504d10]. g_GameType
+itself is the HOST's chosen session setting, seeded at host start [orig: g_GameType =
+session gametype setting @ 0x4a6657 / ServerConfig_ApplyHostSetting @ 0x4a6000 @ 0x4a6587;
+golden ASH_I5A 0x08 advertises gameType=0x10010 — team-based bit 0x10000 set].
+
+REIMPL: `Entity::anim_slot` was a semantic conflation and is SPLIT — the body-anim clip is
+now `Entity::body_anim_slot` (present-pass state, never wire), and `Entity::anim_slot` is
+the retail +0x374 character selector, plus `Entity::minimap_net_id` = the +0x15C wire id
+(players; 0 -> the D-NET-137 shim fallback). handle_client_join parses the CU character
+vars onto the connection (npruntime napi_np_protocol.cpp), Server_BuildPlayerInfoAndAdd
+stamps the spawn per assigned team (server_spawn.cpp), the 0x0C/0x18 builders echo the new
+fields (entity_wire_bridge.cpp), our joiner uploads the fresh-profile default set
+(joiner_connection.cpp), and the NW_LAN_HOST dev boot seeds gametype 0x10010 (golden parity;
+NW_LAN_GAMETYPE overrides). DEFERRED (tracked here): the host-side character-slot REGISTRY
+validation/realloc (two joiners uploading the same CI collide — retail reallocs, we echo;
+harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (the mission
+promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
+clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
++0x374 vs the clip channel — is unwitnessed).
 
 **D-NET-147** [reimpl divergence, TRACKED 2026-07-02] **The S2C 0x10 static-entity records
 omit the building/armory linkage fields — golden building records carry `field_flags 0x0A1`

@@ -16,12 +16,26 @@
 #include <world/geom.h> // to_fixed
 #include <world/world.h>
 
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 
 namespace opennova::np {
 
 namespace {
+
+// ASCII case-insensitive tag-name compare [orig: Napi_StrCaseEqual @0x616e70 — the
+// NapiNetConfig_LoadFromConnTags match].
+bool str_case_equal(const std::string &a, const char *b) {
+	size_t i = 0;
+	for (; i < a.size() && b[i] != '\0'; ++i) {
+		if (std::tolower(static_cast<unsigned char>(a[i])) !=
+		    std::tolower(static_cast<unsigned char>(b[i])))
+			return false;
+	}
+	return i == a.size() && b[i] == '\0';
+}
 
 // Stable "a.b.c.d:port" label — the connection's session_id (NapiNPConnection.session_id). PeerAddr.ip
 // is LE octet packing (a | b<<8 | c<<16 | d<<24); print low->high so the label reads a.b.c.d (matches
@@ -336,6 +350,41 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.client_scrk = auth.scrk;
 	conn.client_ck = auth.ck;
 	conn.client_ci = auth.ci;
+	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
+	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
+	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
+	// {0, 1, 0xFF}, the rest keep the low u8. Only type-2 chunks are tag-list vars. [orig:
+	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
+	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
+	for (const auto &blob : auth.cu) {
+		uint8_t cu_type = 0;
+		std::string cu_name, cu_value;
+		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
+		if (cu_type != 2) continue;
+		const long v = std::strtol(cu_value.c_str(), nullptr, 10); // retail atol
+		if (str_case_equal(cu_name, "CI0")) {
+			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
+		} else if (str_case_equal(cu_name, "CI1")) {
+			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
+		} else if (str_case_equal(cu_name, "TR")) {
+			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
+			uint8_t tr = static_cast<uint8_t>(v);
+			if (tr != 0xFF && tr >= 2) tr = 0xFF;
+			conn.char_vars.team_request = tr;
+		} else if (str_case_equal(cu_name, "CTA")) {
+			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
+		} else if (str_case_equal(cu_name, "CTB")) {
+			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
+		} else if (str_case_equal(cu_name, "VCA")) {
+			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
+		} else if (str_case_equal(cu_name, "VCB")) {
+			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
+		}
+		// The remaining game-join tags (BT/VN/BN/DB/MBN/SOPD/VERSIONSTRING/COUNTRYCODE/APPID/
+		// TZB/MPS...) land in retail's NapiNetConfig too but nothing downstream of the player
+		// add consumes them yet — ignored here like the parser ignores unknown TLVs.
+	}
 	// [orig: NapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
 	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
 	// client), so latch self_id_seen now: the F3 streaming-entered gate no longer waits for the

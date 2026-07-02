@@ -63,7 +63,7 @@ class FakeSim:
 			out[b + NovaSimulation.PF_ACTIVE1] = float(e.get("active1", 0))
 			out[b + NovaSimulation.PF_PHASE2] = float(e.get("phase2", 0))
 			out[b + NovaSimulation.PF_ACTIVE2] = float(e.get("active2", 0))
-			out[b + NovaSimulation.PF_ANIM_SLOT] = float(e.get("anim_slot", -1))
+			out[b + NovaSimulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
 			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
 			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
 			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
@@ -118,7 +118,7 @@ func test_body_clip_poses_to_sim_anim_state_phase() -> void:
 	var index := FakeIndex.new()
 	index.by_bms_id = { 11: model }
 	var sim := FakeSim.new()
-	sim.entities = [{ "bms_id": 11, "anim_slot": 1, "anim_state": 43, "anim_phase": 9 }]
+	sim.entities = [{ "bms_id": 11, "body_anim_slot": 1, "anim_state": 43, "anim_phase": 9 }]
 	_make_pass(index, sim).present()
 	assert_eq(model.body_calls.size(), 1, "one body clip posed")
 	assert_eq(String((model.body_calls[0] as Array)[0]), "anim_idle", "infantry anim state resolves to .adm key")

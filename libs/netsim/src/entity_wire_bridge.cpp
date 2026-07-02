@@ -209,8 +209,16 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		rec.pos_z = world::to_fixed(e.position.z);
 		rec.orientation = engine_heading_bam(e.yaw);
 		rec.team = e.team;
-		rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
-		rec.net_id = (e.item_id == kPlayerInfantryTypeId) ? player_minimap_net_id(e) : e.net_id;
+		// Field 13 = entity+0x374 animSlot, the character-model/anim-set selector — serialized RAW
+		// [orig: serialize_entity_states_to_buffer @0x5030a0 reads +0x374 @0x5032b8]. For players the
+		// spawn stamped it from the joiner's per-side VCA/VCB join var (golden joiner=4); NEVER the
+		// body-anim clip — echoing Entity::body_anim_slot here was the DBuggy1-shadow bug (D-NET-146).
+		rec.anim_slot = e.anim_slot;
+		// Players: the per-team minimap/char-slot id picked at add (CI0/CI1 join vars) when present,
+		// else the D-NET-137 encoding shim (host's own player / var-less peers).
+		rec.net_id = (e.item_id == kPlayerInfantryTypeId)
+				? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
+				: e.net_id;
 		rec.player_class = player_class_for_wire(e);
 		batch.records.push_back(std::move(rec));
 	});
@@ -255,8 +263,12 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	// Yaw high word — the client restores Yaw = (i16)heading_hi << 16 (@0x433aa1), so this is
 	// the engine-frame heading BAM's top half (same convention as the 0x0C orientation).
 	rec.heading_hi = static_cast<uint16_t>(static_cast<uint32_t>(engine_heading_bam(e.yaw)) >> 16);
-	rec.anim_slot = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
-	rec.net_id = (e.item_id == kPlayerInfantryTypeId) ? player_minimap_net_id(e) : e.net_id;
+	// Same field sources as the 0x0C organic record: entity+0x374 raw + the per-team minimap id
+	// (see build_pool0_organic_batch; D-NET-146/137).
+	rec.anim_slot = e.anim_slot;
+	rec.net_id = (e.item_id == kPlayerInfantryTypeId)
+			? (e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e))
+			: e.net_id;
 	rec.player_class = player_class_for_wire(e);
 	return rec;
 }

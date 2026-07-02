@@ -85,6 +85,40 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
 	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]
 	const bool is_host_own = (conn.type == 2);
+
+	// Character stamp from the joiner's 0x42 CU vars, picked per ASSIGNED team — side A for teams
+	// 1/3 or any non-team-based game type, side B otherwise [orig: Server_PlayerAdd @0x51cbc0
+	// @0x51cff7]. The picked avatar byte is the entity+0x374 animSlot [@0x51d0b1] and the picked
+	// char id the entity+0x15C wire NetId [slot+440] — the joiner's own 0x0C record must echo the
+	// values it uploaded (golden ASH_I5A: VCB=4/CI1=0x8207 -> record 4/0x8207) or its client binds
+	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. Retail additionally validates
+	// the char id against the character-slot registry (MinimapSlot_HasEntity @0x57b140 -> realloc
+	// @0x57ad40); the reimpl has no registry yet, so the id is echoed unvalidated and 0 falls back
+	// to the encoder's D-NET-137 shim (two default-profile joiners colliding on 0x8207 is a
+	// tracked deferral, harmless at 2-player scope).
+	const int side = (spawn.team == 1 || spawn.team == 3 ||
+	                  (ctx.config.game_type & 0x10000u) == 0)
+	        ? 0
+	        : 1;
+	if (is_host_own) {
+		// The host's own player never uploads CU vars — retail stamps its animSlot on the LOCAL
+		// path from the profile avatar byte, default-resolved to 1 when the profile carries none
+		// (the golden host record). Its NetId comes from local deploy, not this record -> keep 0
+		// (the encoder shim emits the golden 0x0200). [orig: Player_InitPlayer @0x4e15f0
+		// (@0x4e1843) <- g_avatarTeam1/2 <- apply_session_settings_to_globals @0x551500 with the
+		// sub_57AE60 not-found default 1]
+		spawn.anim_slot = 1;
+	} else {
+		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
+		spawn.minimap_net_id = conn.char_vars.char_id[side]; // 0 -> encoder shim
+		// playerClass = TR ? CTB : CTA [orig: Server_BuildPlayerInfoAndAdd @0x51d711 buf[52]];
+		// absent (0) -> 8 in-session [@0x51d02b]; outside [5,9] -> 8 [@0x51d102]. The joiner's
+		// later C2S 0x2F loadout re-stamps it (server_message_dispatch case 0x2F), same as retail.
+		const uint8_t cls = conn.char_vars.team_request != 0 ? conn.char_vars.char_class[1]
+		                                                     : conn.char_vars.char_class[0];
+		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+	}
+
 	const world::EntityHandle h =
 			is_host_own ? world::spawn_player(world, spawn) : world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;

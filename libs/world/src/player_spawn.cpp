@@ -45,6 +45,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.health = hp;     // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
     seed.equipped_adm_index = spawn.equipped_adm_index; // entity+0x2B0 spawn default (D-NET-143)
+    // entity+0x374 character selector + entity+0x15C wire NetId, picked per assigned team from
+    // the joiner's 0x42 join vars by the npruntime add. [orig: Server_PlayerAdd @0x51cbc0
+    // @0x51d0b1 / slot+440; D-NET-146]
+    seed.anim_slot = spawn.anim_slot;
+    seed.minimap_net_id = spawn.minimap_net_id;
     seed.alive = true;
     seed.flags = 2u;            // the movement gate starts SET; the spawn reset clears it
     // entity+0x78: the owning connection's dcb (host loopback dcb / a joiner's 0x48-ack dcb). The

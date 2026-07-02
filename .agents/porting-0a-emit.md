@@ -50,12 +50,25 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | deploy gate / eye-pos ref / budget ramp | not ported | `emit_connection_s2c` anchors to entity pos, no `state==6` gate |
 | body motor for net-snapped peers | not ported (D-NET-143 tail) | retail host SIMULATES remote players; ours net-snaps — anim STATE stays the 0x2B idle default until the motor drives peers |
 
-**Next (round 5): the v18-witnessed spawn-record divergences.**
-- **D-NET-146** — the joiner's 0x0C organic `animSlot` byte: golden host=1/joiner=4, ours 1 for
-  both (`build_pool0_organic_batch` echoes `Entity::anim_slot`); live symptom = the DBuggy1
-  SHADOW blob under the joiner's own player. Witness what writes entity+0x374 host-side
-  (team/class → slot?) + the client consumer (apply @0x42E730 stores it; §5.46 slot-indexed
-  model/shadow resolve family), then fix the emit.
+**Round 5 (2026-07-02): D-NET-146 FIXED — the DBuggy1 shadow.** The joiner's 0x0C
+`animSlot`/`netId` are the joiner's OWN uploaded per-side character selection: 0x42 CU vars
+CI0/CI1/TR/CTA/CTB/VCA/VCB (net-re §5.0b) → `NapiNetConfig_LoadFromConnTags @0x4c7260` →
+`Server_PlayerAdd @0x51cbc0` picks by ASSIGNED team (side A = teams 1/3 or a non-team
+gametype) and stamps entity+0x374 / entity+0x15C; the 0x0C serializer echoes them raw
+(@0x5032b8). Ours echoed the body-anim CLIP slot + the netId shim — the client's
+character-slot registry (`MinimapSlot_FindOrAllocByEntityId @0x42eb1d`, keyed by the packed
+NetId) then bound a vehicle-archetype entry → the DBuggy1 shadow decal under a correct mesh.
+Reimpl: `Entity::anim_slot` SPLIT from the new `Entity::body_anim_slot` (present-pass clip;
+never wire), `minimap_net_id` added, `handle_client_join` parses the CU vars, the spawn
+stamps per side, our joiner uploads the fresh-profile default set (CI0=512 CI1=33287 TR=-1
+CTA=CTB=8 VCA=1 VCB=4), and the NW_LAN_HOST boot seeds `gametype 0x10010` (the golden
+ASH_I5A session g_GameType [orig: seeded from the host settings @0x4a6657]; its team-based
+bit 0x10000 drives the side pick; NW_LAN_GAMETYPE overrides). `nw_pp --handshake` dumps the
+outer 0x41/0x42/0x81/0x82 incl. the CU chunks; `NW_PP_HEXCAP_MAX` widens raw dumps. Full
+chain + deferrals (char-slot registry realloc, BMS AnimSlot promote, WAC set_ssn_anim
+target) in net-re D-NET-146.
+
+**Next (round 5 remainder):**
 - **D-NET-147** — the 0x10 static records omit parent_slot(0x020)/bone_b(0x080)/ammo_count:
   golden buildings carry flags 0x0A1 + ammo 0xFF; live symptom = entering a building/armory
   sometimes teleports the joiner to map origin (parent frame resolves null). Needs static

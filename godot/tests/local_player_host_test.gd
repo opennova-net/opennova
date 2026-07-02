@@ -59,7 +59,7 @@ class FakeWorld:
 	func local_player_anim_phase_ticks() -> int:
 		return 0
 
-	func local_player_anim_slot() -> int:
+	func local_player_body_anim_slot() -> int:
 		return -1
 
 

@@ -93,7 +93,7 @@ public:
 		PF_ACTIVE1,    // 1 when channel 1 has a live part-anim to render, else 0
 		PF_PHASE2,     // PANM channel 2 phase
 		PF_ACTIVE2,
-		PF_ANIM_SLOT,  // Entity.anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
+		PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
@@ -339,7 +339,7 @@ public:
 	int get_local_player_team() const;
 	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
 	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
-	int get_local_player_anim_slot() const;
+	int get_local_player_body_anim_slot() const;
 	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
 	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
 	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
@@ -424,10 +424,11 @@ public:
 	// True when channel has a live part-anim to render (rate set or phase moved off rest), so the
 	// host only poses commanded channels and leaves untouched parts at their default.
 	bool get_entity_part_anim_active(int p_index, int channel) const;
-	// Entity.anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written by
-	// EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam today
-	// (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 = none.
-	int get_entity_anim_slot(int p_index) const;
+	// Entity.body_anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written
+	// by EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam
+	// today (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 =
+	// none. (Distinct from world Entity.anim_slot = the retail +0x374 character-model selector.)
+	int get_entity_body_anim_slot(int p_index) const;
 	// True when the entity is flagged hidden (HideSingle / held). The present pass maps
 	// (not hidden and alive) -> Node3D.visible.
 	bool get_entity_hidden(int p_index) const;

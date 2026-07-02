@@ -50,6 +50,15 @@ struct PlayerSpawn {
     // spawn resolves the WPN_M4AUTO table index when the armory is fed [orig: PlayerClass_InitEntity
     // @0x4B1116 resolves by name]; 0xFF = none (table-less hosts). (D-NET-143)
     uint8_t equipped_adm_index = 0xFF;
+    // GamePlayerEntity.animSlot (entity+0x374): the character-model/avatar selector — the joiner's
+    // per-side VCA/VCB 0x42 join var picked by ASSIGNED team, or the host's own avatar (retail
+    // default 1 when the profile carries none). 0 = "tag absent" (retail sends the raw 0).
+    // [orig: Server_PlayerAdd @0x51cbc0 (@0x51d0b1); sub_57AE60 default-return 1; D-NET-146]
+    uint8_t anim_slot = 0;
+    // The wire NetId (entity+0x15C): the minimap/character-slot id picked per assigned team from
+    // the joiner's CI0/CI1 join vars (low u16). 0 = unassigned -> the encoder's D-NET-137 shim.
+    // [orig: Server_PlayerAdd @0x51cbc0 slot+440 -> entity+0x15C]
+    uint16_t minimap_net_id = 0;
 };
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)
