@@ -128,7 +128,7 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.action_byte)               f |= 0x0080; // entity+532  [orig: 0x503e60]
 		if (rec.weapon_type_byte)          f |= 0x1000; // entity+100  [orig: 0x503e7f]
 		if (rec.health_byte)               f |= 0x2000; // entity+538  [orig: 0x503ecc]
-		else if (rec.health_short)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
+		else if (rec.zone_radius_short)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
 		if (rec.difficulty_byte)           f |= 0x4000; // entity+624  [orig: 0x503f4c]
 
 		w.u16(f);                       // spawn_flags  [orig: *flags_write_pos @ 0x503f90]
@@ -174,9 +174,9 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 
 		if (f & 0x2000) {               // [orig: 0x503ee5 health block]
 			w.u8(rec.health_byte);      // entity+538 (the break-out byte)
-			w.u16(rec.health_short);    // entity+350
+			w.u16(rec.zone_radius_short);    // entity+350
 		} else if (f & 0x8000) {
-			w.u16(rec.health_short);    // entity+350 [orig: 0x503f43]
+			w.u16(rec.zone_radius_short);    // entity+350 [orig: 0x503f43]
 		}
 		if (f & 0x4000) w.u8(rec.difficulty_byte);   // entity+624 [orig: 0x503f7e]
 	}
@@ -416,9 +416,9 @@ std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec
 	w.u16(rec.pos_z_compressed);  // entity+0xC
 	w.u8(rec.yaw_byte);           // entity+0x14 high byte
 	w.u8(rec.pitch_byte);
-	w.u8(rec.anim_slot_low);      // entity+0x12C
+	w.u8(rec.move_input_byte);      // entity+0x12C
 	w.u8(rec.state_flags);        // entity+0x24 (bit2 spawning, bit4 mounted)
-	w.u8(rec.weapon_id);          // entity+0x2B8 ?: entity+0x2BC [orig: @0x4c0cc7]
+	w.u8(rec.anim_state_id);          // entity+0x2B8 ?: entity+0x2BC [orig: @0x4c0cc7]
 	w.u8(rec.anim_channel_ratio); // entity+0x188 channel ratio [orig: @0x4c0cf2]
 	w.u8(rec.anim_def_index);     // entity+0x2B0 [orig: @0x4c0d59]
 	w.u8(rec.health_class_byte);  // -> Entity_SetHealthFromDifficultyByte on read
@@ -609,7 +609,7 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 	w.u16(uint16_t(r.heading));
 	w.u16(uint16_t(r.pitch));
 	w.u8(r.reserved_18);
-	w.u8(r.anim_slot_low);
+	w.u8(r.move_input_byte);
 	w.u8(r.flags_xor);
 	w.u8(r.anim_def_1);
 	w.u8(r.anim_def_2);
@@ -703,6 +703,23 @@ std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &play
 	}
 	w.u8(0x02); // dword_A85B3C
 	w.u8(0x00); // dword_A85B40
+	return out;
+}
+
+// [orig: Server_SendWeaponSlotListToPlayer @ 0x502550] — one 4-byte group per weapon slot
+// ([u8 admIdx @0x50273b][u8 ammo/status @0x502794][u8 alt @0x50286f][u8 restriction @0x50288a]),
+// 0xFF terminator @0x5028b5, after the leading avatar-class byte (playerSlot+89820 @0x5025e6).
+std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(loadout.avatar_class);
+	for (const WeaponLoadoutSlot &s : loadout.slots) {
+		w.u8(s.type_id);
+		w.u8(s.ammo_primary);
+		w.u8(s.ammo_secondary);
+		w.u8(s.ammo_alt);
+	}
+	w.u8(0xFF);
 	return out;
 }
 

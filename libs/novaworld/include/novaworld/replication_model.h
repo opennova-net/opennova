@@ -78,7 +78,7 @@ struct GameEntitySnapshot {
 	// frame inversion — that is yaw-only).
 	int32_t pitch_bam = 0;
 	// entity+0x12C low byte — the player compact record's anim-slot byte [orig: @0x4c0c9c].
-	uint8_t anim_slot_low = 0;
+	uint8_t move_input_byte = 0;
 	// entity+0x24 (Flags) low byte, written UNMASKED to the player compact record's state byte
 	// [orig: @0x4c0c7d — masking is read-side only: local 0xE1 / remote 0xFD]. Also the vehicle
 	// compact record's flags byte [orig: @0x460d22].

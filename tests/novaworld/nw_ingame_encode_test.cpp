@@ -314,8 +314,8 @@ int test_pool_spawn_roundtrip_full() {
 	r.alert_byte = 7;                // -> 0x0040
 	r.action_byte = 9;               // -> 0x0080
 	r.weapon_type_byte = 3;          // -> 0x1000
-	r.health_byte = 80;              // -> 0x2000 (+ health_short)
-	r.health_short = 1000;
+	r.health_byte = 80;              // -> 0x2000 (+ zone_radius_short)
+	r.zone_radius_short = 1000;
 	r.difficulty_byte = 4;           // -> 0x4000
 	in.records.push_back(r);
 
@@ -350,7 +350,7 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.action_byte == 9);
 	EXPECT(d.weapon_type_byte == 3);
 	EXPECT(d.health_byte == 80);
-	EXPECT(d.health_short == 1000);
+	EXPECT(d.zone_radius_short == 1000);
 	EXPECT(d.difficulty_byte == 4);
 	std::printf("PASS pool_spawn_roundtrip_full\n");
 	return 0;
@@ -381,11 +381,11 @@ int test_pool_spawn_minimal() {
 }
 
 int test_pool_spawn_health_alt_8000() {
-	// health_byte 0 but health_short non-zero -> 0x8000 path (health_short only).
+	// health_byte 0 but zone_radius_short non-zero -> 0x8000 path (zone_radius_short only).
 	PoolSpawnBatch in;
 	PoolSpawnRecord r;
 	r.slot_id = 0x1003; r.item_type_id = 0x0100;
-	r.health_byte = 0; r.health_short = 250;
+	r.health_byte = 0; r.zone_radius_short = 250;
 	r.bone_byte = 2;
 	in.records.push_back(r);
 
@@ -394,7 +394,7 @@ int test_pool_spawn_health_alt_8000() {
 	EXPECT(decode_pool_spawn_batch(wire.data(), wire.size(), out));
 	EXPECT(out.records.size() == 1);
 	EXPECT(out.records[0].health_byte == 0);
-	EXPECT(out.records[0].health_short == 250);
+	EXPECT(out.records[0].zone_radius_short == 250);
 	std::printf("PASS pool_spawn_health_alt_8000\n");
 	return 0;
 }
@@ -542,9 +542,9 @@ int test_player_compact_roundtrip() {
 	r.pos_z_compressed  = 0xBCD7;
 	r.yaw_byte          = 0x40;
 	r.pitch_byte        = 0x10;
-	r.anim_slot_low     = 0x12;
+	r.move_input_byte     = 0x12;
 	r.state_flags        = 0x06;      // bit1 spawning + bit2 mounted bits set
-	r.weapon_id          = 0x05;
+	r.anim_state_id          = 0x05;
 	r.anim_channel_ratio = 0x10;
 	r.anim_def_index     = 0x07;
 	r.health_class_byte = 0x80;
@@ -560,8 +560,8 @@ int test_player_compact_roundtrip() {
 	EXPECT(d.pos_x_compressed == 0xBE8F);
 	EXPECT(d.pos_z_compressed == 0xBCD7);
 	EXPECT(d.yaw_byte == 0x40 && d.pitch_byte == 0x10);
-	EXPECT(d.anim_slot_low == 0x12 && d.state_flags == 0x06);
-	EXPECT(d.weapon_id == 0x05 && d.anim_channel_ratio == 0x10);
+	EXPECT(d.move_input_byte == 0x12 && d.state_flags == 0x06);
+	EXPECT(d.anim_state_id == 0x05 && d.anim_channel_ratio == 0x10);
 	EXPECT(d.anim_def_index == 0x07 && d.health_class_byte == 0x80);
 	std::printf("PASS player_compact_roundtrip\n");
 	return 0;

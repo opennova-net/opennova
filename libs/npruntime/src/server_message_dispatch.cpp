@@ -217,16 +217,47 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 	return encode_player_list(players);
 }
 
-// tag=0x5A WEAPON-LOADOUT-SYNC — verbatim retail frame-82537 payload. [orig: NapiNPClientMsg_0x05A
-// @0x4290e0; clears dword_81474C -> unblocks the joiner's input emission.]
-std::vector<uint8_t> build_tag_5a_weapon_loadout() {
-	static constexpr uint8_t kRetailTag5aPayload[34] = {
-		0x08, 0x02, 0xff, 0xff, 0x00, 0x03, 0x05, 0xff, 0x00, 0x13,
-		0x0a, 0xff, 0x00, 0x33, 0x03, 0xff, 0x00, 0x34, 0x03, 0xff,
-		0x00, 0x35, 0x03, 0xff, 0x00, 0x37, 0x02, 0xff, 0xff, 0x38,
-		0xff, 0xff, 0xff, 0xff
-	};
-	return std::vector<uint8_t>(std::begin(kRetailTag5aPayload), std::end(kRetailTag5aPayload));
+// tag=0x5A WEAPON-LOADOUT-SYNC, built from the joiner's own C2S 0x2F loadout submit.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790 — parses the request, validates each adm
+// entry (class/type masks @0x515a36 + the armory-enable table `unused6` @0x515a3f; both need the
+// AdmDef armory table, unmodeled -> entries accepted verbatim, tracked divergence), clamps the
+// soldier type to [5,9]-else-8 (@0x515913), stamps entity+660 playerClass (@0x515ab0), loads the
+// entries into the player's weapon-slot table, then Server_SendWeaponSlotListToPlayer @0x502550
+// walks that table in AdmDef-index order emitting one slot group per entry.]
+//
+// The reply set therefore equals the ACCEPTED REQUEST SET sorted ascending by adm index — the
+// exact golden shape (request {21,3,83,76,77,78,2} -> reply {2,3,21,76,77,78,83}). Ammo bytes:
+// retail resolves live mag counts off the slot table; we ECHO the request's bytes (the standard
+// client sends 255 = "max"). BEHAVIORALLY IDENTICAL: the client clamps the byte to the adm
+// entry's max-mags and scales by rounds-per-mag on apply [orig: NapiNPClientMsg_
+// HandleWeaponLoadoutSync @0x4290e0, clamp @0x4295d7-0x4295e9] — byte-level parity with a retail
+// host needs the AdmDef table (tracked). The 4th slot byte is the per-adm restriction byte,
+// witnessed 0 on the wire (@0x502871 reads a table the 0x2F handler keys differently).
+// The OLD implementation replied a verbatim retail DVXI5 capture blob — wrong adm indices for
+// any other mission/armory; live-witnessed as the joiner's wrong loadout + broken gun switching
+// (retail-join v13/v14, 2026-07-02).
+std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &request_payload) {
+	LoadoutSubmit req;
+	decode_loadout_submit(request_payload.data(), request_payload.size(), req);
+
+	WeaponLoadout reply;
+	// Soldier-type accept: 5..9 pass, everything else forces 8 [orig: @0x515913; the
+	// allowed-class restriction mask dword_24D59FC is server armory config, unmodeled].
+	reply.avatar_class =
+			(req.soldier_type >= 5 && req.soldier_type <= 9) ? req.soldier_type : 8;
+	for (const LoadoutSubmitEntry &e : req.entries) {
+		WeaponLoadoutSlot s;
+		s.type_id = e.adm_index;
+		s.ammo_primary = e.ammo_primary;     // echoed; client clamps on apply (@0x4295d7)
+		s.ammo_secondary = e.ammo_secondary; // echoed; sub-slot clamp (@0x429652)
+		s.ammo_alt = 0;                      // restriction byte — witnessed 0 (@0x502871)
+		reply.slots.push_back(s);
+	}
+	std::sort(reply.slots.begin(), reply.slots.end(),
+	          [](const WeaponLoadoutSlot &a, const WeaponLoadoutSlot &b) {
+		          return a.type_id < b.type_id;
+	          }); // slot-table walk order = ascending AdmDef index [orig: @0x5026e5]
+	return encode_weapon_loadout(reply);
 }
 
 // tag=0x1E GAME-EVENT (post-spawn) — verbatim retail frame-82540 payload. [orig: GameEvent_BuildPayload
@@ -356,7 +387,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       const std::vector<NapiNPConnection> &roster,
-                                                      const world::World *world) {
+                                                      world::World *world) {
 	std::vector<ProtocolMessage> replies;
 	SessionReplyState &st = conn.reply;
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
@@ -436,15 +467,29 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(0x75, {0x00, 0x02}));
 				replies.push_back(make_protocol_message(0x64, build_tag64_mission_metadata(config)));
 				break;
-			case 0x2F: // loadout request -> 0x5A [orig: NapiNPServerMsg_0x02F @0x515790]
+			case 0x2F: { // loadout request -> 0x5A [orig: NapiNPServerMsg_0x02F @0x515790]
 				// Golden (f317-318): C 0x2F -> S 0x5A + game-start bundle. The 0x5A populates
 				// the joiner's weapon slots BEFORE the first 0x0A; without it every 0x0A triggers
 				// the weapon-slot mismatch -> C2S 0x0F flood. Also unlatches the burst's phase 8
-				// gate so the game-start bundle emits on the next tick.
-				replies.push_back(make_protocol_message(0x5A, build_tag_5a_weapon_loadout()));
+				// gate so the game-start bundle emits on the next tick. The reply derives from
+				// THIS request (see build_tag_5a_weapon_loadout).
+				replies.push_back(
+						make_protocol_message(0x5A, build_tag_5a_weapon_loadout(msg.payload)));
+				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
+				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
+				if (world != nullptr && conn.link.owned_entity.valid()) {
+					if (world::Entity *pe = world->registry.get(conn.link.owned_entity)) {
+						LoadoutSubmit req;
+						decode_loadout_submit(msg.payload.data(), msg.payload.size(), req);
+						pe->player_class =
+								(req.soldier_type >= 5 && req.soldier_type <= 9)
+										? req.soldier_type : 8;
+					}
+				}
 				st.loadout_synced = true;
 				conn.burst.loadout_received = true;
 				break;
+			}
 			case 0x0A: // initial-sync roster ack [orig: NapiNPServerMsg_0x00A @0x513260]
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
 				// emit_roster sent 0x46/0x16/0x19/0x1A — the unsolicited 0x1A re-sets

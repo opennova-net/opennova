@@ -121,17 +121,28 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			rec.player.yaw_byte = yaw_byte_trunc;       // truncated high byte [orig: @0x4c0c5d]
 			rec.player.pitch_byte =
 					uint8_t((uint32_t(e.pitch_bam) + 0x00800000u) >> 24); // [orig: @0x4c0c77]
-			rec.player.anim_slot_low = e.anim_slot_low; // entity+0x12C [orig: @0x4c0c9c]
+			// Movement-input byte (entity+0x12C): remote players are MOTOR-DRIVEN from this
+			// replicated input [orig: write @0x4c0c9c; remote apply @0x4c11ec]. Echoes the
+			// owning client's uplinked byte (apply_player_intent ingests it); 0 = no input
+			// (idle) for players without an uplink source (the host's own player until its
+			// input state is exported).
+			rec.player.move_input_byte = e.move_input_byte;
 			rec.player.state_flags = e.state_flags;     // entity+0x24 low byte, unmasked
 			                                            // [orig: @0x4c0c7d; read-side masks
-			                                            // local 0xE1 / remote 0xFD]
-			rec.player.weapon_id = 0;          // entity+0x2B8 ?: +0x2BC [orig: @0x4c0cc7];
-			                                   // weapon runtime unmodeled — 0 is the witnessed
-			                                   // both-zero value
+			                                            // local 0xE1 / remote 0xFD; bit 0x02 =
+			                                            // dead/undeployed, spawn hook on 1->0]
+			rec.player.anim_state_id = 0;      // body/weapon anim-STATE id, entity+0x2B8 ?:
+			                                   // +0x2BC vs the dword_8139E8 state-flags table
+			                                   // [orig: @0x4c0cc7 / apply @0x4c1153]; the anim
+			                                   // FSM is unmodeled — 0 = idle state (safe)
 			rec.player.anim_channel_ratio = 0; // entity+0x188 channel ratio [orig: @0x4c0cf2];
 			                                   // anim channel unmodeled — 0 is the witnessed
 			                                   // null-object value
-			rec.player.anim_def_index = 0;     // entity+0x2B0 [orig: @0x4c0d59]; unmodeled
+			rec.player.anim_def_index = 0xFF;  // ADM anim-def index, entity+0x2B0. 0 is a VALID
+			                                   // index — 0xFF is the null sentinel the apply
+			                                   // skips [orig: @0x4c11f2; witness 2026-07-02:
+			                                   // sending 0 made remote clients apply adm entry 0
+			                                   // every frame]
 			// §5.10 health-classification byte (field 17): PACKED `(tier<<4)|(playerClass&0xF)`,
 			// witnessed server-side in Entity_GetHealthClassification @0x4AD4E0 (called from the
 			// case-1 compact write @0x4c0d71, byte store @0x4c0d89 — D-NET-138 FIXED). The client
@@ -376,7 +387,8 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 		intent.pos_z = up.pos_z;
 		intent.heading = up.heading;
 		intent.pitch = up.pitch;
-		intent.anim = up.anim_slot_low;
+		intent.move_input = up.move_input_byte; // entity+0x12C — echoed in the 0x0A off-12
+		intent.flags_xor = up.flags_xor;        // bits 2-4 -> entity+0x24 (crouch/prone family)
 		intent.buttons = 0; // extended uplink carries flagsXor/anim-defs, not a buttons word
 		apply_player_intent(world, intent);
 	}

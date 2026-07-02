@@ -138,10 +138,10 @@ struct PoolSpawnRecord {
 	uint8_t weapon_type_byte = 0;    // 0x1000   entity+176
 
 	// Health block: `0x2000` reads (u8 health_byte → entity+538, u16
-	// health_short → entity+350); `0x8000` without `0x2000` reads u16
-	// health_short alone.
+	// zone_radius_short → entity+350); `0x8000` without `0x2000` reads u16
+	// zone_radius_short alone.
 	uint8_t  health_byte = 0;        // 0x2000   entity+538
-	uint16_t health_short = 0;       // 0x2000 OR 0x8000   entity+350
+	uint16_t zone_radius_short = 0;       // 0x2000 OR 0x8000   entity+350
 
 	uint8_t  difficulty_byte = 0;    // 0x4000   entity+624
 };
@@ -446,17 +446,27 @@ struct PlayerCompactRecord {
 	uint16_t pos_z_compressed = 0;    // entity+0xC
 	uint8_t  yaw_byte = 0;            // high byte of 32-bit BAM -> entity+0x10 (heading) on read [D-NET-57]
 	uint8_t  pitch_byte = 0;          // -> entity+0x14 (pitch) on read [D-NET-57]
-	uint8_t  anim_slot_low = 0;       // entity+0x12C
-	uint8_t  state_flags = 0;         // entity+0x24 (bit 2 = spawning, bit 4 = mounted)
-	uint8_t  weapon_id = 0;           // small weapon/item id, entity+0x2B8 ?: entity+0x2BC (read
-	                                  // side indexes dword_8139E8[id]) [orig: @0x4c0cc7; renamed
-	                                  // from the weapon_anim_state misnomer, witness 2026-07-02]
+	uint8_t  move_input_byte = 0;     // the movement-INPUT bitfield, entity+0x12C low byte — remote
+	                                  // players are motor-driven from replicated input; the read
+	                                  // re-derives stance bits 8-9 from the anim-state flag table
+	                                  // [orig: apply @0x4c11ec-0x4c1246, remote-only @0x4c11d7;
+	                                  // renamed from the anim_slot_low misnomer, witness 2026-07-02]
+	uint8_t  state_flags = 0;         // entity+0x24. Bit 0x02 = DEAD/UNDEPLOYED (the spawn hook
+	                                  // fires on its 1->0 edge @0x4c1109; the XOR masks exclude it:
+	                                  // local 0xE1 / remote 0xFD @0x4c12ff)
+	uint8_t  anim_state_id = 0;       // body/weapon anim-STATE id -> entity+0x2BC (vs the per-state
+	                                  // flags table dword_8139E8; transition-arbitrated, remote-only
+	                                  // apply except the wire-bit2 dead path) [orig: @0x4c1153;
+	                                  // renamed from weapon_anim_state/weapon_id — witness 2026-07-02]
 	uint8_t  anim_channel_ratio = 0;  // 0..255 float ratio off the entity+0x188 anim-channel object
 	                                  // (f32[+0x28]/f32[+0x2C] or f32[+8]/f32[+0xC] by obj+0x14);
-	                                  // read side stores it at entity+0x377 [orig: @0x4c0cf2;
-	                                  // renamed from the `priority` misnomer — the read-side +0x377
-	                                  // name misled; witness 2026-07-02]
-	uint8_t  anim_def_index = 0;      // entity+0x2B0
+	                                  // read side stores it at entity+0x377, remote-only and ONLY
+	                                  // inside the anim-state-accept branch [orig: @0x4c0cf2 write /
+	                                  // @0x4c11a6 read; renamed from the `priority` misnomer]
+	uint8_t  anim_def_index = 0;      // ADM anim-def index -> entity+0x2B0 + AdmDef_GetEntryByIndex
+	                                  // -> entity+0x298. 0 is a VALID index — 0xFF is the null
+	                                  // sentinel (entries stride 1120) [orig: @0x4c11f2/@0x4c120d;
+	                                  // witness 2026-07-02 — an unknowing sender must use 0xFF]
 	uint8_t  health_class_byte = 0;   // → Entity_SetHealthFromDifficultyByte
 };
 
@@ -859,7 +869,9 @@ struct PlayerExtendedUplink {
 	int16_t  heading = 0;              // entity+0x240 (sign-ext ×0x10000 = 32-bit BAM)
 	int16_t  pitch   = 0;              // entity+0x244 (sign-ext ×0x10000)
 	uint8_t  reserved_18 = 0;          // cursor advance, no read on host
-	uint8_t  anim_slot_low = 0;        // entity+0x12C low byte
+	uint8_t  move_input_byte = 0;      // entity+0x12C low byte — the movement-INPUT bitfield the
+	                                   // client reports for its own player (renamed from the
+	                                   // anim_slot_low misnomer; witness 2026-07-02)
 	uint8_t  flags_xor = 0;            // bits 2-4 XOR'd into entity+0x24
 	uint8_t  anim_def_1 = 0;           // entity+0x130
 	uint8_t  anim_def_2 = 0;           // entity+0x131

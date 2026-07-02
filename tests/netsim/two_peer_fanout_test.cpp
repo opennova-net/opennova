@@ -646,7 +646,7 @@ bool run_0a_player_record_field_sources() {
 			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	w::Entity *e = world.registry.get(host_h);
 	if (!expect(e != nullptr, "host entity resolvable")) return false;
-	e->anim_slot = 0x21;
+	e->net_move_input = 0x21; // the uplink-ingested +0x12C movement-input byte the record echoes
 	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
 	e->pitch = 45;
 
@@ -671,9 +671,12 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(rec->player.yaw_byte == 0x3F, "yaw byte is the TRUNCATED high byte")) return false;
 	// pitch 45 deg -> BAM 0x1FFFFFE0 -> rounded high byte 0x20.
 	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
-	if (!expect(rec->player.anim_slot_low == 0x21, "anim slot low carried")) return false;
+	if (!expect(rec->player.move_input_byte == 0x21, "movement-input byte echoed")) return false;
 	if (!expect((rec->player.state_flags & 0x40) != 0, "state flags carried unmasked")) return false;
 	if (!expect(rec->player.vehicle_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
+	// ADM anim-def index: 0 is a VALID adm entry — the null sentinel is 0xFF [orig: @0x4c11f2].
+	if (!expect(rec->player.anim_def_index == 0xFF, "anim-def null sentinel is 0xFF, not 0"))
+		return false;
 	std::printf("PASS 0a_player_record_field_sources\n");
 	return true;
 }

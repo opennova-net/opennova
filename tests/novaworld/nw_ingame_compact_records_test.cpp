@@ -34,9 +34,9 @@ int test_player_compact_18_bytes() {
 		0xD7, 0xBC,             // posZ
 		0x40,                   // yaw_byte
 		0x00,                   // pitch_byte
-		0x12,                   // anim_slot_low
+		0x12,                   // move_input_byte
 		0x02,                   // state_flags (bit 1 = spawning)
-		0x05,                   // weapon_id
+		0x05,                   // anim_state_id
 		0x10,                   // anim_channel_ratio
 		0x07,                   // anim_def_index
 		0x80,                   // health_class_byte

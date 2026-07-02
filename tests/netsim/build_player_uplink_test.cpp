@@ -38,7 +38,7 @@ bool expect(bool cond, const char *msg) {
 // The state->struct field mapping (the inverse of apply_player_intent's reads).
 bool run_field_mapping() {
 	w::Entity src_e{};
-	src_e.anim_slot = 3;
+	src_e.net_move_input = 3; // the +0x12C movement-input byte (NOT the visual anim slot)
 	w::AiEntity src_ae{};
 	src_ae.pos[0] = w::to_fixed(12.5);
 	src_ae.pos[1] = w::to_fixed(-34.0);
@@ -54,7 +54,8 @@ bool run_field_mapping() {
 	            "heading = BAM32 high half")) return false;
 	if (!expect(up.pitch == static_cast<int16_t>(src_ae.pitch >> 16),
 	            "pitch = BAM32 high half")) return false;
-	if (!expect(up.anim_slot_low == 3, "anim slot low carried from Entity.anim_slot")) return false;
+	if (!expect(up.move_input_byte == 3, "movement-input byte carried from Entity.net_move_input"))
+		return false;
 	if (!expect(up.weapon_id_0 == 0 && up.fire_counter_0 == 0,
 	            "anti-cheat counters 0 (host receive ignores them)")) return false;
 	return true;

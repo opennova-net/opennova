@@ -113,7 +113,11 @@ bool check_pool1_common(const nw::PoolSpawnRecord &r) {
 	if (!expect(r.pos_x == w::to_fixed(30.0), "pos 16.16")) return false;
 	if (!expect(r.euler_z == heading_bam(90), "euler_z = engine heading BAM")) return false;
 	if (!expect(r.team_byte == 1, "team carried")) return false;
-	if (!expect(r.health_short == 250, "health carried (0x8000 path)")) return false;
+	// The 0x8000-gated u16 is the capture-zone radius (entity+0x15E), NOT health — unmodeled,
+	// so it must stay ABSENT (golden ASH_I5A vehicle records carry no 0x8000 flag). The old
+	// build planted Entity::health here (witness 2026-07-02).
+	if (!expect((r.spawn_flags & 0x8000) == 0, "zone-radius word absent")) return false;
+	if (!expect(r.zone_radius_short == 0, "zone radius not populated")) return false;
 	return true;
 }
 

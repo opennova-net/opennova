@@ -20,7 +20,10 @@ struct PlayerIntent {
 	int32_t  pos_z = 0;
 	int16_t  heading = 0;              // entity+16 yaw intent
 	int16_t  pitch = 0;               // entity+0x14 pitch intent
-	uint8_t  anim = 0;
+	uint8_t  move_input = 0;          // entity+0x12C movement-input byte (the wire off-12 echo
+	                                  // source; renamed from the `anim` misnomer, witness 2026-07-02)
+	uint8_t  flags_xor = 0;           // uplink flags-xor byte — bits 2-4 XOR into entity+0x24
+	                                  // [orig: case-4 apply; §5.10 extended uplink field map]
 	uint32_t buttons = 0;             // fire / action bitmask
 };
 

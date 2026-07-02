@@ -91,7 +91,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 //   0x0010 team_byte!=0 (entity+354; D-NET-58) · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
 //   0x0400 weapon_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
 //   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 weapon_type_byte!=0
-//   0x2000 health_byte!=0 (writes health_byte+health_short) ELSE 0x8000 health_short!=0
+//   0x2000 health_byte!=0 (writes health_byte+zone_radius_short) ELSE 0x8000 zone_radius_short!=0
 //   0x4000 difficulty_byte!=0.
 // Weapon block (D-NET-56): when 0x0400 is set, `extra_handle_0/1` are ALWAYS
 // written after the per-set-bit handles. The original only sets 0x0400 when the
@@ -269,5 +269,12 @@ struct PlayerListEntry {
 // [u8 slot][u16 ping][u16 score][u16 score2][u8 (team<<1)], then [u8 team_count=2] + a 3-iteration team
 // trailer + [0x02][0x00].
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players);
+
+// tag=0x5A WEAPON-LOADOUT — the inverse of decode_weapon_loadout:
+// `[u8 avatarClass]` then per slot `[u8 typeId][u8 ammoPrimary][u8 ammoSecondary][u8 ammoAlt]`,
+// 0xFF-terminated. [orig: Server_SendWeaponSlotListToPlayer @ 0x502550 — walks the player's
+// weapon-slot table (loaded from the accepted C2S 0x2F entries, AdmDef-index order) emitting one
+// 4-byte group per slot; terminator @0x5028b5.]
+std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
 
 } // namespace opennova

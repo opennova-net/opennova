@@ -295,9 +295,9 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 	if (r.spawn_flags & 0x1000)
 		std::printf(" weapType=0x%02x", r.weapon_type_byte);
 	if (r.spawn_flags & 0x2000)
-		std::printf(" health=0x%02x/0x%04x", r.health_byte, r.health_short);
+		std::printf(" health=0x%02x/0x%04x", r.health_byte, r.zone_radius_short);
 	else if (r.spawn_flags & 0x8000)
-		std::printf(" healthShort=0x%04x", r.health_short);
+		std::printf(" zoneRadius=0x%04x", r.zone_radius_short);
 	if (r.spawn_flags & 0x4000) std::printf(" diff=0x%02x", r.difficulty_byte);
 	std::printf("\n");
 }
@@ -575,14 +575,14 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 void print_player_compact_record(const PlayerCompactRecord &r) {
 	std::printf("            player: vehBone=%u seat=%u vehHdl=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
-	            "anim=%u state=0x%02x weapId=%u animRatio=%u animDef=%u health=0x%02x\n",
+	            "input=%u state=0x%02x animState=%u animRatio=%u animDef=%u health=0x%02x\n",
 	            unsigned(r.vehicle_bone), unsigned(r.seat_type),
 	            handle_str(r.vehicle_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.pitch_byte),
-	            unsigned(r.anim_slot_low), unsigned(r.state_flags),
-	            unsigned(r.weapon_id), unsigned(r.anim_channel_ratio),
+	            unsigned(r.move_input_byte), unsigned(r.state_flags),
+	            unsigned(r.anim_state_id), unsigned(r.anim_channel_ratio),
 	            unsigned(r.anim_def_index), unsigned(r.health_class_byte));
 }
 
@@ -623,7 +623,7 @@ void print_player_extended_uplink(const PlayerExtendedUplink &r) {
 	            handle_str(r.vehicle_handle).c_str(),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
 	            int(r.heading), int(r.pitch),
-	            unsigned(r.anim_slot_low), unsigned(r.flags_xor),
+	            unsigned(r.move_input_byte), unsigned(r.flags_xor),
 	            unsigned(r.anim_def_1), unsigned(r.anim_def_2),
 	            unsigned(r.anim_def_3),
 	            unsigned(r.stat_byte_0), unsigned(r.stat_byte_1));

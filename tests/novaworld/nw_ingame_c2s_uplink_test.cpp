@@ -42,7 +42,7 @@ const uint8_t kFrame1905_full[] = {
 	0x2d, 0x38,                   // body[14..15] heading i16 LE = 0x382D = 14381
 	0x00, 0x00,                   // body[16..17] pitch i16 LE = 0
 	0x00,                         // body[18]     reserved_18
-	0x00,                         // body[19]     anim_slot_low
+	0x00,                         // body[19]     move_input_byte
 	0x01,                         // body[20]     flags_xor (wire bit 0; host masks to 0x1C)
 	0x00, 0x00, 0x00,             // body[21..23] anim_def_1/2/3
 	0x07,                         // body[24]     reserved_24 (read into AL, discarded)
@@ -86,7 +86,7 @@ int test_extended_uplink_stationary_on_foot() {
 	EXPECT(r.heading == 14381);  // body[14..15] = `2d 38` LE
 	EXPECT(r.pitch == 0);
 	EXPECT(r.reserved_18 == 0x00);
-	EXPECT(r.anim_slot_low == 0x00);
+	EXPECT(r.move_input_byte == 0x00);
 	EXPECT(r.flags_xor == 0x01);
 	EXPECT(r.anim_def_1 == 0x00);
 	EXPECT(r.anim_def_2 == 0x00);
@@ -114,7 +114,7 @@ const uint8_t kFrame2053_body[] = {
 	0x91, 0x80, 0xf8, 0xff,       // posZ ≈ -7.997 (i32 negative)
 	0xd8, 0x22,                   // heading = 0x22d8 = 8920 (i16)
 	0x00, 0x00,                   // pitch = 0
-	0x00, 0x00,                   // reserved_18 / anim_slot_low
+	0x00, 0x00,                   // reserved_18 / move_input_byte
 	0x00, 0x00, 0x00, 0x00, 0x00, // flags_xor / anim_defs / reserved_24
 	0x36, 0x00,                   // stat_byte_0 = 0x36, stat_byte_1 = 0
 	0x21, 0x10, 0xce, 0x07,

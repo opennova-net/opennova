@@ -106,7 +106,10 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	// Engine pitch BAM (entity+0x14): a pure degree widen — pitch has no (90-x) frame
 	// inversion (that is yaw-only, D-NET-86). Entity::pitch is mission degrees.
 	s.pitch_bam = static_cast<int32_t>(static_cast<int64_t>(e.pitch) * kBamPerDegree);
-	s.anim_slot_low = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
+	// The +0x12C movement-INPUT byte the owning client uplinked (apply_player_intent ingests
+	// it) — NOT the visual anim slot: remote players are motor-driven from replicated input
+	// [orig: case-2 apply @0x4c11ec; witness 2026-07-02 corrected the anim_slot misnomer].
+	s.move_input_byte = e.net_move_input;
 	s.state_flags = static_cast<uint8_t>(e.flags & 0xFF); // entity+0x24 low byte, unmasked
 	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : 0xFFFFu;
 	return s;
@@ -281,9 +284,14 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 			if (rec.ai_name.empty() && !rec.ai_profile_1 && !rec.ai_profile_2)
 				rec.ai_profile_1 = 1;      // guarantee the encoder's 0x0800 gate fires even at the world origin
 		}
-		// health rides the 0x8000-only path when alive (the encoder gates on health_short).
-		if (e.health > 0 && e.health <= 0xFFFF)
-			rec.health_short = static_cast<uint16_t>(e.health);
+		// The 0x8000-gated u16 is the CAPTURE-ZONE/PROXIMITY RADIUS (entity+0x15E, filled from
+		// .bms record word 14 [orig: read store @0x433206; consumers CaptureZone_* /
+		// render_minimap_slot_blip; witness 2026-07-02 — the old `health_short` name was a
+		// decode-era guess]), NOT health: the client spawns 0x0D entities and later lifts them to
+		// itemDef->healthMax at Game_StartMission's reload (@0x522830) / via 0x18 (@0x433780).
+		// We do not model zone radii yet, so the field stays absent — matching the golden ASH_I5A
+		// vehicle records (no 0x8000 flag). The prior code sent Entity::health here, planting the
+		// health VALUE into every vehicle's zone-radius word.
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<int16_t>(batch.records.size());
@@ -409,6 +417,14 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	const long yaw_deg = std::lround(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
 	ent->yaw = static_cast<int16_t>(((yaw_deg % 360) + 360) % 360);
 
+	// Ingest the uplinked wire-state bytes the 0x0A echo re-broadcasts (the faithful
+	// uplink -> entity -> 0x0A loop): the +0x12C movement-input byte [orig: case-4 store; the
+	// case-2 remote apply @0x4c11ec motor-drives peers from it] and the flags-xor byte —
+	// bits 2-4 of entity+0x24 [orig: case-4 apply; §5.10 extended-uplink field map]. Without
+	// this the echo re-emits zeros and remote observers see the peer frozen at idle.
+	ent->net_move_input = intent.move_input;
+	ent->flags ^= (static_cast<uint32_t>(intent.flags_xor) & 0x1Cu);
+
 	// 5. Mirror the engine-frame store (AiEntity) and stage the smooth-target the CLIENT
 	//    interpolation consumes; mark the entity net-snapped so the infantry motor SKIPS it
 	//    (the host does not re-simulate a read-applied peer). [orig: case 4 staging +0x234/
@@ -445,9 +461,11 @@ PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::Ai
 	up.pos_z = ae.pos[2];
 	up.heading = static_cast<int16_t>(ae.heading >> 16);
 	up.pitch = static_cast<int16_t>(ae.pitch >> 16);
-	// Cosmetic anim byte (entity+0x12C low) — the host read-apply does not consume it; carried
-	// for fidelity. -1 (no slot) maps to 0.
-	up.anim_slot_low = static_cast<uint8_t>(e.anim_slot >= 0 ? (e.anim_slot & 0xFF) : 0);
+	// The +0x12C movement-INPUT byte for our own player (the host ingests + echoes it in our
+	// 0x0A record so OTHER clients motor-drive our avatar). Until the local input bitfield is
+	// exported from the motor, carry the last known value (0 = idle). [witness 2026-07-02:
+	// corrected from the anim_slot misnomer — this byte is locomotion input, not an anim slot.]
+	up.move_input_byte = e.net_move_input;
 	return up;
 }
 

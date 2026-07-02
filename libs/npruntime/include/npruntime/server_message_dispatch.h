@@ -37,13 +37,16 @@ namespace opennova::np {
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into
 // `conn.reply`; gates the spawn-confirm replies on `conn.burst` (the faithful spawn authority). A
 // remote (type-1) connection and the host's own type-2 loopback both run this the same way.
+// `world` is MUTABLE: the witnessed handlers write server state (the 0x2F loadout handler stamps
+// entity+660 playerClass [orig: @0x515ab0]) — matching the original, whose handlers mutate the
+// live entity/player tables directly.
 // [orig: per-message NapiNPServerMsg_0x0NN handlers reached from the 0x43 SESSION dispatch]
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       const std::vector<NapiNPConnection> &roster,
-                                                      const world::World *world);
+                                                      world::World *world);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every PlayerAdded connection: host loopback
 // slot 0 + joiners 1+). Public so the per-tick host loop can RE-PUSH it when a joiner spawns (the

@@ -173,9 +173,9 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 
 		if (rec.spawn_flags & 0x2000) {
 			rec.health_byte = c.u8();
-			rec.health_short = c.u16();
+			rec.zone_radius_short = c.u16();
 		} else if (rec.spawn_flags & 0x8000) {
-			rec.health_short = c.u16();
+			rec.zone_radius_short = c.u16();
 		}
 		if (rec.spawn_flags & 0x4000) rec.difficulty_byte = c.u8();
 
@@ -507,9 +507,9 @@ bool decode_player_compact_record(const uint8_t *body, size_t len,
 	out.pos_z_compressed  = c.u16();
 	out.yaw_byte          = c.u8();
 	out.pitch_byte        = c.u8();
-	out.anim_slot_low     = c.u8();
+	out.move_input_byte     = c.u8();
 	out.state_flags       = c.u8();
-	out.weapon_id          = c.u8();
+	out.anim_state_id          = c.u8();
 	out.anim_channel_ratio = c.u8();
 	out.anim_def_index     = c.u8();
 	out.health_class_byte = c.u8();
@@ -600,7 +600,7 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 	out.heading        = int16_t(c.u16());
 	out.pitch          = int16_t(c.u16());
 	out.reserved_18    = c.u8();
-	out.anim_slot_low  = c.u8();
+	out.move_input_byte  = c.u8();
 	out.flags_xor      = c.u8();
 	out.anim_def_1     = c.u8();
 	out.anim_def_2     = c.u8();

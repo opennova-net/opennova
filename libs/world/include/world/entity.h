@@ -143,6 +143,13 @@ struct Entity {
     int32_t engage_max = 0;
     int32_t attack_max = 0;
     int32_t anim_slot = -1;
+    // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
+    // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
+    // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
+    // apply @0x4c11ec; consumers Entity_UpdatePlayerInfantryMovement @0x48496d,
+    // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
+    // remote peers; stays 0 (no input / idle) for entities without an uplink source.
+    uint8_t net_move_input = 0;
     bool hidden = false;
     bool held = false;
     bool disabled = false;
