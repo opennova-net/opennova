@@ -510,7 +510,7 @@ func open_mission(bms_path: String) -> Error:
 
 	# Loading the referenced terrain is an atomic dependency of opening the mission,
 	# not a separate user action, so it goes straight to open_trn rather than the
-	# terrain editor's dirty-guarded request_open_trn. When the resolved .trn is
+	# terrain workspace's dirty-guarded open_file. When the resolved .trn is
 	# already the mounted terrain and it carries no unsaved edits, the remount is
 	# skipped — the dominant browse-missions-on-one-map flow pays the terrain build
 	# once. A dirty terrain always reloads (predictable authoring semantics).

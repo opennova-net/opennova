@@ -18,22 +18,41 @@ var _saved_state_config := PackedByteArray()
 var _had_state_config := false
 
 
-# Minimal editor double for prompt routing tests: the workstation only needs the
-# three pending-action hooks, so this avoids set_editor()'s full workspace bind.
-class PromptEditorStub:
+# Minimal terrain-editor double for the dirty-replace guard tests: dirty, no
+# project directory yet, records saves/opens. Avoids set_editor()'s full bind
+# cost being the point of the test.
+class DirtyTerrainStub:
 	extends Node
-	var saved := false
-	var discarded := false
-	var cancelled := false
+	var is_dirty := true
+	var opened := PackedStringArray()
+	var saved_dirs := PackedStringArray()
 
-	func confirm_pending_action_save() -> void:
-		saved = true
+	func is_export_running() -> bool:
+		return false
 
-	func confirm_pending_action_discard() -> void:
-		discarded = true
+	func open_trn(path: String) -> Error:
+		opened.append(path)
+		return OK
 
-	func cancel_pending_action() -> void:
-		cancelled = true
+	func new_terrain() -> void:
+		pass
+
+	func save_project_to_current_dir() -> Error:
+		# No project directory yet - the shell's save_then must fall back to Save As.
+		return ERR_INVALID_PARAMETER
+
+	func save_project(dir_path: String) -> Error:
+		saved_dirs.append(dir_path)
+		return OK
+
+	func has_current_project_dir() -> bool:
+		return false
+
+	func get_current_project_dir() -> String:
+		return ""
+
+	func get_last_save_dir() -> String:
+		return ""
 
 
 func before_each() -> void:
@@ -1045,7 +1064,7 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	workstation.prompt_unsaved_changes("quit")
+	workstation.prompt_unsaved_for(func() -> void: pass, func() -> void: pass)
 
 	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
 	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
@@ -1062,40 +1081,76 @@ func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 
 func test_unsaved_dialog_cancel_keeps_editing() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var stub := PromptEditorStub.new()
-	autofree(stub)
-	workstation.editor = stub
+	var outcome := {"saved": 0, "discarded": 0, "cancelled": 0}
 
-	workstation.prompt_unsaved_changes("quit")
+	workstation.prompt_unsaved_for(
+		func() -> void: outcome.saved += 1,
+		func() -> void: outcome.discarded += 1,
+		func() -> void: outcome.cancelled += 1)
 	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
 	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
 	if dialog == null:
 		return
 	dialog.canceled.emit()
 
-	assert_true(stub.cancelled, "Cancel/Escape should cancel the pending action (keep editing).")
-	assert_false(stub.discarded, "Cancel should not discard.")
-	assert_false(stub.saved, "Cancel should not save.")
+	assert_eq(outcome.cancelled, 1, "Cancel/Escape should run the keep-editing outcome.")
+	assert_eq(outcome.discarded, 0, "Cancel should not discard.")
+	assert_eq(outcome.saved, 0, "Cancel should not save.")
 
 
 func test_unsaved_dialog_confirm_saves_and_discard_action_discards() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var stub := PromptEditorStub.new()
-	autofree(stub)
-	workstation.editor = stub
+	var outcome := {"saved": 0, "discarded": 0}
+	var on_save := func() -> void: outcome.saved += 1
+	var on_discard := func() -> void: outcome.discarded += 1
 
-	workstation.prompt_unsaved_changes("quit")
+	workstation.prompt_unsaved_for(on_save, on_discard)
 	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
 	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
 	if dialog == null:
 		return
 
 	dialog.confirmed.emit()
-	assert_true(stub.saved, "Confirm should save the pending action.")
-	assert_false(stub.discarded, "Confirm should not discard.")
+	assert_eq(outcome.saved, 1, "Confirm should run the save outcome.")
+	assert_eq(outcome.discarded, 0, "Confirm should not discard.")
 
+	# Outcomes are consumed on dispatch; a fresh prompt rearms the same dialog.
+	workstation.prompt_unsaved_for(on_save, on_discard)
 	dialog.custom_action.emit(&"discard")
-	assert_true(stub.discarded, "The Discard custom action should discard the pending action.")
+	assert_eq(outcome.discarded, 1, "The Discard custom action should run the discard outcome.")
+	assert_eq(outcome.saved, 1, "Discard should not save again.")
+
+
+func test_dirty_open_prompts_and_save_routes_through_save_as() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub: DirtyTerrainStub = autofree(DirtyTerrainStub.new())
+	# Bind only the terrain workspace (set_editor's full bind would drag every
+	# workspace through a remount this test doesn't exercise).
+	var ws: EditorWorkspace = workstation._get_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	ws.set_terrain_editor(stub)
+
+	assert_eq(ws.open_file("C:/maps/next.trn"), OK, "A dirty-guarded open reports OK while the prompt owns the action.")
+	assert_eq(stub.opened.size(), 0, "The open must wait for the prompt outcome.")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Replacing a dirty terrain should prompt.")
+	if dialog == null:
+		return
+
+	# Save: no project directory yet, so the save routes through the Save As
+	# directory dialog and the open stays deferred until the save lands. The OK
+	# button hides the dialog before confirmed fires; mirror that order so the
+	# follow-up dialog can take the exclusive slot.
+	dialog.hide()
+	dialog.confirmed.emit()
+	assert_eq(stub.saved_dirs.size(), 0, "Without a project dir the save waits for the Save As pick.")
+	var file_dialog: FileDialog = workstation._ensure_file_dialogs().get_dialog()
+	assert_not_null(file_dialog, "Save should route through the Save As directory dialog.")
+	if file_dialog == null:
+		return
+	file_dialog.dir_selected.emit("C:/maps/project")
+
+	assert_eq(stub.saved_dirs, PackedStringArray(["C:/maps/project"]), "The picked directory receives the save.")
+	assert_eq(stub.opened, PackedStringArray(["C:/maps/next.trn"]), "The deferred open runs after a successful save.")
 
 
 func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:

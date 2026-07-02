@@ -202,8 +202,6 @@ func get_height_revision() -> int:
 var _last_open_dir: String = ""
 var _last_save_dir: String = ""
 var _last_export_dir: String = ""
-var _pending_unsaved_action: Callable = Callable()
-var _pending_unsaved_action_name: String = ""
 var _previous_window_min_size: Vector2i = Vector2i.ZERO
 var _ui_state_version: int = 0
 var _uses_workspace_viewport: bool = false
@@ -228,7 +226,7 @@ func _ready() -> void:
 	_init_clone_marker()
 	_init_axes_gizmo()
 	if camera.has_signal("escape_pressed"):
-		camera.connect("escape_pressed", Callable(self, "request_quit_editor"))
+		camera.connect("escape_pressed", Callable(self, "_on_camera_escape"))
 	_load_editor_state()
 	if workstation and workstation.has_method("set_editor"):
 		workstation.set_editor(self)
@@ -2001,10 +1999,6 @@ func _mark_ui_state_changed() -> void:
 		workstation.sync_from_editor_state()
 
 
-func has_pending_unsaved_action() -> bool:
-	return _pending_unsaved_action.is_valid()
-
-
 func get_current_project_dir() -> String:
 	return _document.current_project_dir
 
@@ -2029,87 +2023,12 @@ func get_last_export_dir() -> String:
 	return _last_export_dir
 
 
-func request_new_terrain() -> void:
-	if _queue_unsaved_action("create a new terrain", Callable(self, "new_terrain")):
-		return
-	new_terrain()
-
-
-func request_open_trn(trn_path: String) -> Error:
-	# Single entry point for "user picked a .trn". Project vs. import mode is
-	# auto-detected inside open_trn by the presence of a sibling <name>_depth.raw
-	# (project) vs. a .cpt alongside (imported game asset).
-	if _queue_unsaved_action("open a terrain", Callable(self, "open_trn").bind(trn_path)):
-		return OK
-	return open_trn(trn_path)
-
-
-func request_quit_editor() -> void:
-	if _queue_unsaved_action("quit", Callable(self, "_quit_editor")):
-		return
-	_quit_editor()
-
-
-func confirm_pending_action_save() -> void:
-	if not _pending_unsaved_action.is_valid():
-		return
-	if _document.current_project_dir.is_empty():
-		if workstation and workstation.has_method("prompt_save_directory_for_pending_action"):
-			workstation.prompt_save_directory_for_pending_action(_pending_unsaved_action_name)
-		return
-	var err := save_project(_document.current_project_dir)
-	if err == OK:
-		_execute_pending_action()
-	else:
-		_notify_status("Save failed (error %d)" % err)
-
-
-func confirm_pending_action_save_as(dir_path: String) -> void:
-	if not _pending_unsaved_action.is_valid():
-		return
-	var err := save_project(dir_path)
-	if err == OK:
-		_execute_pending_action()
-	else:
-		_notify_status("Save failed (error %d)" % err)
-
-
-func confirm_pending_action_discard() -> void:
-	if not _pending_unsaved_action.is_valid():
-		return
-	_execute_pending_action()
-
-
-func cancel_pending_action() -> void:
-	_clear_pending_action()
-
-
-func _queue_unsaved_action(action_name: String, action: Callable) -> bool:
-	if is_export_running():
-		return true
-	if not is_dirty:
-		return false
-	_pending_unsaved_action = action
-	_pending_unsaved_action_name = action_name
-	if workstation and workstation.has_method("prompt_unsaved_changes"):
-		workstation.prompt_unsaved_changes(action_name)
-	return true
-
-
-func _execute_pending_action() -> void:
-	var action := _pending_unsaved_action
-	_clear_pending_action()
-	if action.is_valid():
-		action.call()
-
-
-func _clear_pending_action() -> void:
-	_pending_unsaved_action = Callable()
-	_pending_unsaved_action_name = ""
-
-
-func _quit_editor() -> void:
-	get_tree().quit()
+# Escape asks the shell to close (the unified close guard, which lists every
+# dirty workspace). The dirty-replace guard for New/Open lives on the terrain
+# workspace adapter, through the shell's shared unsaved-changes dialog.
+func _on_camera_escape() -> void:
+	if workstation != null and workstation.has_method("request_close"):
+		workstation.request_close()
 
 
 func _load_editor_state() -> void:
@@ -2638,8 +2557,8 @@ func _get_material() -> ShaderMaterial:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		# Embedded in the editor shell? The shell owns the unified close guard,
-		# which already lists this workspace among the dirty ones. Only a
-		# standalone terrain scene (no workstation) handles its own close.
+		# which already lists this workspace among the dirty ones. A standalone
+		# terrain scene (no workstation) has no guard of its own and just quits.
 		if workstation != null:
 			return
-		request_quit_editor()
+		get_tree().quit()

@@ -299,7 +299,13 @@ func get_new_action_label() -> String:
 func new_current() -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
-	terrain_editor.request_new_terrain()
+	if is_busy():
+		return OK
+	var ed: Node = terrain_editor
+	var make_new := func() -> void: ed.new_terrain()
+	if _prompt_dirty_guard(make_new):
+		return OK
+	ed.new_terrain()
 	return OK
 
 
@@ -333,10 +339,39 @@ func get_current_resource_path() -> String:
 	return ""
 
 
+# Single entry point for "user picked a .trn". Project vs. import mode is
+# auto-detected inside open_trn by the presence of a sibling <name>_depth.raw
+# (project) vs. a .cpt alongside (imported game asset).
 func open_file(path: String) -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
-	return terrain_editor.request_open_trn(path)
+	if is_busy():
+		return OK
+	var ed: Node = terrain_editor
+	var open_it := func() -> void: ed.open_trn(path)
+	if _prompt_dirty_guard(open_it):
+		return OK
+	return ed.open_trn(path)
+
+
+# Dirty guard for actions that replace the open terrain (New/Open): pops the
+# shell's shared unsaved-changes dialog and returns true when the prompt now
+# owns the action. Save routes through the shell's save_then, which falls back
+# to Save As while the project has no directory yet. Headless (no shell):
+# nothing can prompt, so callers run the action directly.
+func _prompt_dirty_guard(run: Callable) -> bool:
+	if terrain_editor == null or not terrain_editor.is_dirty:
+		return false
+	if editor_shell == null or not editor_shell.has_method("prompt_unsaved_for"):
+		return false
+	# Locals only in the lambdas: capturing `self` members would hold this
+	# RefCounted workspace through the shell's callable stash.
+	var shell: Object = editor_shell
+	var ws: EditorWorkspace = self
+	shell.prompt_unsaved_for(
+		func() -> void: shell.save_then(ws, run),
+		run)
+	return true
 
 
 func can_save() -> bool:

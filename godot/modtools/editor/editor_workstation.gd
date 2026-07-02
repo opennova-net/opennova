@@ -135,12 +135,11 @@ var _pending_export_dir: String = ""
 var _overlay_tween: Tween
 var _unsaved_dialog: ConfirmationDialog
 # App-close guard: one prompt covering every workspace with unsaved work,
-# separate from _unsaved_dialog (the terrain editor's per-action save prompt).
+# separate from _unsaved_dialog (the per-action save prompt).
 var _close_guard_dialog: ConfirmationDialog
-# When set, the unsaved-changes dialog routes Save/Discard/Cancel here instead
-# of the terrain editor's pending-action flow (prompt_unsaved_for vs the legacy
-# prompt_unsaved_changes). Cleared before each invocation, so a stale callable
-# can never hijack a later prompt.
+# The unsaved-changes dialog routes Save/Discard/Cancel to these
+# prompt_unsaved_for callables. Consumed (cleared) on first dispatch, so a
+# stale callable can never hijack a later prompt.
 var _unsaved_on_save := Callable()
 var _unsaved_on_discard := Callable()
 var _unsaved_on_cancel := Callable()
@@ -230,6 +229,12 @@ func _exit_tree() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_handle_close_request()
+
+
+## Public close entry (camera Escape, tools): runs the same unified close guard
+## as the OS window close button.
+func request_close() -> void:
+	_handle_close_request()
 
 
 func _handle_close_request() -> void:
@@ -1159,17 +1164,25 @@ func _close_active_document(workspace: EditorWorkspace) -> void:
 
 
 func _save_then_close_active_document(workspace: EditorWorkspace) -> void:
+	var close_after_save := func() -> void:
+		_close_active_document(workspace)
+	save_then(workspace, close_after_save, "Save failed - keeping the tab open.")
+
+
+## Saves the workspace's current document, then runs on_done. A document with no
+## path yet (ERR_INVALID_PARAMETER) routes through Save As and runs on_done only
+## on success; any other failure toasts failure_message and drops on_done.
+## Shared by the document-tab close and the workspaces' dirty-replace guards.
+func save_then(workspace: EditorWorkspace, on_done: Callable, failure_message := "Save failed.") -> void:
 	var err := workspace.save_current()
 	if err == OK:
-		_close_active_document(workspace)
+		if on_done.is_valid():
+			on_done.call()
 		return
 	if err == ERR_INVALID_PARAMETER:
-		# No path yet: route through Save As; close only on success.
-		var close_after_save := func() -> void:
-			_close_active_document(workspace)
-		_open_save_as_dialog(workspace, close_after_save, "Save failed - keeping the tab open.")
+		_open_save_as_dialog(workspace, on_done, failure_message)
 		return
-	show_status_message("Save failed (error %d) - keeping the tab open." % err, 6.0)
+	show_status_message("%s (error %d)" % [failure_message.trim_suffix("."), err], 6.0)
 
 
 func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
@@ -2513,20 +2526,10 @@ func _on_tile_gizmo_delete_pressed() -> void:
 		editor.delete_selected_tileinfo_entry()
 
 
-func prompt_unsaved_changes(_action_name: String) -> void:
-	# Legacy entry: clears the callables so the dialog routes Save/Discard/Cancel
-	# to the terrain editor's pending-action flow (the dispatchers' fallback).
-	_unsaved_on_save = Callable()
-	_unsaved_on_discard = Callable()
-	_unsaved_on_cancel = Callable()
-	_ensure_unsaved_dialog()
-	_unsaved_dialog.popup_centered()
-	show_status_message("Save or discard your changes to continue.", 6.0)
-
-
-## Pops the shared unsaved-changes dialog with caller-supplied outcomes (e.g. a
-## document tab close: save-then-close / close / keep). Same dialog, same
-## buttons — only the routing differs from prompt_unsaved_changes.
+## Pops the shared unsaved-changes dialog with caller-supplied outcomes (a
+## document tab close: save-then-close / close / keep; a workspace's dirty
+## guard before New/Open replaces the document). Pair with save_then() for the
+## save outcome so path-less documents route through Save As.
 func prompt_unsaved_for(on_save: Callable, on_discard: Callable, on_cancel := Callable()) -> void:
 	_unsaved_on_save = on_save
 	_unsaved_on_discard = on_discard
@@ -2551,21 +2554,6 @@ func _take_unsaved_callable(which: StringName) -> Callable:
 	return cb
 
 
-func _has_unsaved_callables() -> bool:
-	return _unsaved_on_save.is_valid() or _unsaved_on_discard.is_valid() or _unsaved_on_cancel.is_valid()
-
-
-func prompt_save_directory_for_pending_action(_action_name: String) -> void:
-	var save_pending_as := func(dir_path: String) -> void:
-		if editor:
-			editor.confirm_pending_action_save_as(dir_path)
-	_open_dir_dialog(
-		"Select project save directory",
-		save_pending_as,
-		_preferred_save_dir()
-	)
-
-
 func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 	var plural := "" if count == 1 else "s"
 	_cdep_fix_callback = on_fix_callback
@@ -2576,33 +2564,21 @@ func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 
 
 func _on_prompt_save_changes() -> void:
-	if _has_unsaved_callables():
-		var cb := _take_unsaved_callable(&"save")
-		if cb.is_valid():
-			cb.call()
-		return
-	if editor:
-		editor.confirm_pending_action_save()
+	var cb := _take_unsaved_callable(&"save")
+	if cb.is_valid():
+		cb.call()
 
 
 func _on_prompt_discard_changes() -> void:
-	if _has_unsaved_callables():
-		var cb := _take_unsaved_callable(&"discard")
-		if cb.is_valid():
-			cb.call()
-		return
-	if editor:
-		editor.confirm_pending_action_discard()
+	var cb := _take_unsaved_callable(&"discard")
+	if cb.is_valid():
+		cb.call()
 
 
 func _on_prompt_keep_editing() -> void:
-	if _has_unsaved_callables():
-		var cb := _take_unsaved_callable(&"cancel")
-		if cb.is_valid():
-			cb.call()
-		return
-	if editor:
-		editor.cancel_pending_action()
+	var cb := _take_unsaved_callable(&"cancel")
+	if cb.is_valid():
+		cb.call()
 
 
 func _show_export_flavor_dialog(dir_path: String) -> void:
