@@ -17,8 +17,9 @@ const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_setti
 enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, HUD }
 
 # Workspaces are declared as WorkspaceDef rows in _workspace_defs(); the rail
-# shows the non-popup ones in order. The enum below stays only as stable id
-# constants and for the two genuine per-workspace branches (env popup, tile gizmo).
+# shows the non-popup ones in order. The enum above stays only as the stable id
+# constants those rows (and tests/tools via get_workspace_adapter) key on — the
+# shell itself never branches on a specific workspace.
 
 
 enum WorkspaceAction { NEW, OPEN, SAVE, SAVE_AS, EXPORT }
@@ -1736,16 +1737,13 @@ func _refresh_camera_popup_state() -> void:
 			_camera_settings_panel.sync_from_editor_state()
 
 
+# The active workspace's camera via its capability hook; null in workspaces
+# without a 3D view (the camera popup then reports no camera instead of
+# silently editing a hidden terrain camera).
 func get_editor_camera() -> Camera3D:
 	var workspace := _get_active_workspace()
 	if workspace != null:
-		var workspace_camera := workspace.get_viewport_camera()
-		if workspace_camera != null:
-			return workspace_camera
-	if editor != null and editor.has_method("get_editor_camera"):
-		return editor.get_editor_camera()
-	if editor != null:
-		return editor.get("camera") as Camera3D
+		return workspace.get_viewport_camera()
 	return null
 
 

@@ -12,7 +12,7 @@ easier to relay than to rediscover.
   wac, world, audio, pff, vfs, ...). Godot-agnostic — no Godot types ever. Consumed via
   flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
 - `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes),
-  `modtools/` (the OpenNova Editor "ONED" — ten authoring workspaces), `game/` (runtime),
+  `modtools/` (the OpenNova Editor "ONED" — eleven authoring workspaces), `game/` (runtime),
   `tests/` (GUT suite).
 - `apps/importer/` — Python + native FFI importer behind `onimport.exe`; `blender/` and
   `opennova_max/` are the DCC export plugins; `pyopennova/` is the Python FFI layer.
