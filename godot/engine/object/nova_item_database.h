@@ -36,6 +36,7 @@ private:
 		// renderer doesn't use them. Stored raw so the object DB stays net-agnostic.
 		String ai_function;
 		String move_function;
+		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
 		// items.def soundloop_1..7 — the looping ambient sound-set names for a
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
 		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
@@ -83,6 +84,8 @@ public:
 	// net layer turns these into a wire dispatch class.
 	String get_ai_function(int id) const;
 	String get_move_function(int id) const;
+	// items.def hp (itemDef+0x17C healthMax); 0 if unknown/none declared.
+	int get_hp(int id) const;
 	int get_item_type(int id) const;
 	// items.def ItemDefAttrib & 0x100000 (AIData): true when the item def is AI-capable. The
 	// host's pool-1 0x0D stream gates the AI-trailer on this so the wire matches the stock

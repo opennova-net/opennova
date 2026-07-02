@@ -508,16 +508,31 @@ bool run_0a_vehicle_budget_round_robin() {
 	if (!expect(host_h.valid(), "host player spawned")) return false;
 
 	// 40 pool-1 vehicles clustered at one spot (uniform distance -> deterministic ordering:
-	// within a frame the tie-break is snapshot order; across frames age dominates).
+	// within a frame the tie-break is snapshot order; across frames age dominates). The
+	// replication class comes from the items.def *_function tag stamped as net_class_code by
+	// the host's item-traits sweep — pool membership alone NEVER selects the vehicle record.
 	constexpr int kVehicles = 40;
 	for (int i = 0; i < kVehicles; ++i) {
 		w::Entity veh;
 		veh.kind = w::EntityKind::Item;
 		veh.item_id = 0x050B; // dune buggy
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle); // ai_function cveh
+		veh.health = 3000;                                      // items.def hp (full spawn)
+		veh.health_max = 3000;
 		veh.position = {120.0f, 100.0f, 10.0f};
 		veh.yaw = 90;
 		veh.team = 1;
 		if (!expect(world.registry.spawn(1, veh).valid(), "vehicle spawned")) return false;
+	}
+	// One UNRESOLVED pool-1 item (an ewep-like emplacement without a stamped class): it must
+	// NOT be serialized at all — emitting it with the vehicle record desyncs the client
+	// mid-frame (the retail-join v13 regression).
+	{
+		w::Entity ewep;
+		ewep.kind = w::EntityKind::Item;
+		ewep.item_id = 0x074D; // Mounted Grenade Launcher on Tripod (ai_function ewep)
+		ewep.position = {121.0f, 100.0f, 10.0f};
+		if (!expect(world.registry.spawn(1, ewep).valid(), "emplacement spawned")) return false;
 	}
 
 	std::vector<ns::Connection> conns;
@@ -579,10 +594,10 @@ bool run_0a_vehicle_budget_round_robin() {
 	bool vehicle_pos_ok = false;
 	for (const auto &rec : f1.records) {
 		if (rec.cls != nw::EntityClass::Vehicle) continue;
-		// entity+286 vehicle health word — MUST be the live health (spawn default 100), never 0:
-		// the client stores it back verbatim (@0x460aff), so a 0 kills the vehicle every frame
-		// (the live v12 all-vehicles-dying regression).
-		if (!expect(rec.vehicle.health_word == 100, "vehicle record carries live health"))
+		// entity+286 vehicle health word — MUST be the live healthMax-scale health, never 0
+		// (0 kills the vehicle every frame — v12) and never a small stopgap (renders it
+		// burning — v13): the client stores it back verbatim (@0x460aff).
+		if (!expect(rec.vehicle.health_word == 3000, "vehicle record carries live full health"))
 			return false;
 		vehicle_pos_ok =
 				f1.anchor_x + nw::network_decompress_fixedpoint(rec.vehicle.pos_x_compressed) ==
@@ -606,8 +621,12 @@ bool run_0a_vehicle_budget_round_robin() {
 	int view_vehicles = 0;
 	for (const auto &es : view.state().entities)
 		if (es.cls == nw::EntityClass::Vehicle && (es.handle >> 12) == 1) ++view_vehicles;
-	if (!expect(view_vehicles == kVehicles,
-	            "view holds all pool-1 vehicles as Vehicle class (0x0D-learned)")) return false;
+	// +1: the 0x0D spawn batch carries the emplacement too, and the view's learned table
+	// treats every pool-1 spawn as vehicle-CLASS for decode purposes (safe: no host —
+	// retail or ours — emits 0x0A records for null-callback classes, so the guess is
+	// never exercised against a record body).
+	if (!expect(view_vehicles == kVehicles + 1,
+	            "view holds all pool-1 spawns as Vehicle class (0x0D-learned)")) return false;
 	std::printf("PASS 0a_vehicle_budget_round_robin\n");
 	return true;
 }

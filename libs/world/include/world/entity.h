@@ -90,6 +90,14 @@ struct Entity {
     int32_t item_id = 0;      // items.def type id
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
+    // The §5.10b wire replication class, resolved from the item's items.def *_function class
+    // tag (ai_function, else move_function -> ItemDef+356 serialize callback) and stamped by
+    // the host's post-promotion item-traits sweep. Stored as an OPAQUE code (the novaworld
+    // EntityClass value; libs/world stays net-agnostic) — 0xFF = unresolved, netsim falls back
+    // to its minimal heuristic. Load-bearing: a pool-1 item that is NOT a vehicle class (e.g.
+    // ai_function ewep emplacements) must NOT be serialized with the vehicle compact record or
+    // the client desyncs mid-frame (retail-join v13, 2026-07-02).
+    uint8_t net_class_code = 0xFF;
 
     Vec3 position;            // mission space (Z-up)
     int16_t yaw = 0;
@@ -122,6 +130,12 @@ struct Entity {
     int32_t ai_state = 0;     // AI component state
     int32_t ai_target = -1;   // net id of current AI target, -1 = none
     int32_t health = 100;     // 0 -> dead
+    // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
+    // (0 = unresolved). The original spawns entities at Health = healthMax
+    // [orig: Entity_InitFromItemDef @0x49e550]; the sweep mirrors that by lifting health
+    // to hp for entities still at their spawn default. Feeds the §5.10 field-17 tier
+    // denominator and the §5.13 vehicle health word.
+    int32_t health_max = 0;
     bool alive = true;
     uint32_t ai_flags = 0;    // BmsiAttributeFlags
     int32_t move_speed_kph = 0;

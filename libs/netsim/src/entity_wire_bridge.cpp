@@ -21,19 +21,19 @@ EntityClass class_for_type_id(uint16_t type_id) {
 }
 
 EntityClass entity_class_of(const world::Entity &e) {
+	// The resolved items.def class wins: the host's item-traits sweep stamps
+	// Entity::net_class_code from the item's *_function tag (ai_function, else move_function)
+	// via class_from_tag — the same directive that drives the original's ItemDef+356 serialize
+	// callback [orig: admission @0x50e6d3 / dispatch @0x50f2e2 in the 0x0A loop]. This is
+	// load-bearing per-ITEM, not per-pool: an ewep emplacement is pool-1 but has its own
+	// callback layout — serializing it with the vehicle compact record desynced the retail
+	// client mid-frame on EVERY 0x0A (retail-join v13, 2026-07-02).
+	if (e.net_class_code != 0xFFu) return static_cast<EntityClass>(e.net_class_code);
+	// Unresolved world (no items.def fed — tests / bare CLI): the phase-1 minimal heuristic.
+	// Pool-1 items stay Unknown (NOT vehicles) — only a resolved class tag may select the
+	// vehicle record.
 	if (e.item_id == kPlayerInfantryTypeId) return EntityClass::Player;
 	if (e.kind == world::EntityKind::Organic) return EntityClass::Infantry;
-	// Pool-1 items replicate as vehicles. The original loop is class-agnostic — it admits any
-	// pool-0/1 entity whose itemDef carries a serialize callback (itemDef+356) and dispatches
-	// through it [orig: Server_BuildEntityPriorityList @ 0x50e590 admission @0x50e6d3;
-	// serialize_entity_states_to_packet @ 0x50f070 dispatch @0x50f2e2] — the pool-1 vehicle
-	// callback is Entity_SerializeMountedVehicleState @ 0x460560. Until items.def *_function
-	// class tags are resolved onto world::Entity, every pool-1 item is treated as a vehicle
-	// (true for the mission vehicle pools this host streams; a non-vehicle pool-1 item would
-	// need the per-item tag). Decoders learn this class from the 0x0D spawn batch
-	// (NetClientView::learned class table) — class_for_type_id alone cannot know it.
-	if (e.kind == world::EntityKind::Item) return EntityClass::Vehicle;
-	// Markers / buildings have no §5.10b compact form — not 0x0A-replicated.
 	return EntityClass::Unknown;
 }
 
@@ -99,8 +99,9 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.euler_z = static_cast<int32_t>(static_cast<int64_t>(90 - e.yaw) * kBamPerDegree);
 	s.entity_class = entity_class_of(e);
 	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
-	// health_max keeps the struct's class-8 player default (150) — world::Entity carries no
-	// resolved itemDef healthMax yet (see GameEntitySnapshot::health_max).
+	// items.def-resolved healthMax when the item-traits sweep stamped it; else the struct's
+	// class-8 player default (150) stands (see GameEntitySnapshot::health_max).
+	if (e.health_max > 0) s.health_max = e.health_max;
 	s.player_class = player_class_for_wire(e); // field-17 low nibble (entity+0x294)
 	// Engine pitch BAM (entity+0x14): a pure degree widen — pitch has no (90-x) frame
 	// inversion (that is yaw-only, D-NET-86). Entity::pitch is mission degrees.

@@ -3037,7 +3037,7 @@ serializer GUARANTEES `0x0800` for any AI-capable item def. The crash window is 
 `build_pool1_spawn_batch` now emits the `0x0800` AI-trailer **iff the entity is AI-capable**
 (`Entity::is_ai_capable`), which is resolved from `items.def ItemDefAttrib & 0x100000` (the `AIData` token) —
 parsed into `DefItemDef.attrib` (`libs/def`), surfaced as `NovaItemDatabase::is_ai_capable`, and stamped onto
-every live entity by the host's `NovaSimulation::resolve_item_ai_capability` post-load pass (called from
+every live entity by the host's `NovaSimulation::resolve_item_traits` post-load pass (called from
 `MissionRuntime` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
 decoder's own gate (`attrib & 0x100000`), an AI-capable record ALWAYS carries the `0x0800` flag + a valid
 in-packet NUL-terminated name → byte-faithful (retail emits the trailer iff AI-capable) AND crash-safe. The

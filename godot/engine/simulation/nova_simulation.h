@@ -463,12 +463,13 @@ public:
 	void resolve_infantry_adm_ids(const Ref<class NovaResourceRoot> &p_resource_root,
 	                              const Ref<class NovaItemDatabase> &p_item_db);
 
-	// Per-entity AI-capability resolution: stamp each live entity's Entity::is_ai_capable from
-	// its items.def ItemDefAttrib & 0x100000 (AIData) via the item database. The pool-1 0x0D
-	// world-stream gates its AI-trailer on this so the wire matches the stock decoder's own gate
-	// (itemDef.attrib & 0x100000 @0x433327) — byte-faithful AND crash-safe. Idempotent; call after
-	// load (and again after spawning the local player). [docs/net/novaworld-net-re.md D-NET-97]
-	void resolve_item_ai_capability(const Ref<class NovaItemDatabase> &p_item_db);
+	// Per-entity items.def trait resolution: stamp each live entity's is_ai_capable (AIData
+	// attrib — gates the 0x0D AI-trailer, D-NET-97), net_class_code (§5.10b *_function class
+	// tag -> the 0x0A serialize class; an unresolved/ewep item must NOT be serialized as a
+	// vehicle or the client desyncs), and health_max/health (items.def hp = healthMax
+	// [orig: Entity_InitFromItemDef @0x49e550]). Idempotent; call after load (and again after
+	// spawning the local player).
+	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
 
 	int get_spawned_count() const { return promo_.spawned; }
 	int get_brain_count() const { return promo_.brains; }

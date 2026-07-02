@@ -172,11 +172,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# set. Runs after the NPC promote AND the player spawn so both are covered. [D-INF-6]
 	if options.get("resource_root") != null and options.get("item_db") != null:
 		_sim.resolve_infantry_adm_ids(options["resource_root"], options["item_db"])
-	# Stamp each entity's AI-capability (items.def ItemDefAttrib & 0x100000 = AIData) so the host's
-	# pool-1 0x0D world-stream gates its AI-trailer faithfully (matches the stock decoder's gate;
-	# crash-safe). [D-NET-97]
+	# Stamp each entity's items.def wire traits: AI-capability (0x0D AI-trailer gate, D-NET-97),
+	# the §5.10b replication class (0x0A serialize dispatch — an ewep emplacement must not ride
+	# the vehicle record), and hp -> health/health_max (vehicles spawn at full health on the wire).
 	if options.get("item_db") != null:
-		_sim.resolve_item_ai_capability(options["item_db"])
+		_sim.resolve_item_traits(options["item_db"])
 	_log_infantry_debug_mounts()
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.

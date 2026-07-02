@@ -12,6 +12,7 @@
 #include "netsim/connection.h"
 #include "netsim/entity_wire_bridge.h" // build_player_uplink (joiner-side C2S 0x0C body)
 
+#include <novaworld/ingame_decode.h> // class_from_tag (§5.10b *_function -> wire class)
 #include <novaworld/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
 #include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
@@ -221,28 +222,49 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 	apply_root_motion_to_ai();
 }
 
-// Stamp every live entity's Entity::is_ai_capable from its items.def ItemDefAttrib & 0x100000
-// (AIData) via the item database. The host's pool-1 0x0D world-stream then emits its AI-trailer
-// iff the item is AI-capable — matching the stock 0x0D decoder's own gate exactly (itemDef.attrib
-// & 0x100000 @0x433327), so the wire is BOTH byte-faithful and crash-safe. The registry's for_each
-// is const-only, so collect the live handles first, then re-fetch each as a mutable Entity* (the
-// non-const get overload) — the same mutate-by-handle shape resolve_infantry_adm_ids uses.
+// Stamp every live entity's items.def-derived wire traits via the item database:
+// - Entity::is_ai_capable from ItemDefAttrib & 0x100000 (AIData): the host's pool-1 0x0D stream
+//   emits its AI-trailer iff AI-capable, matching the stock 0x0D decoder's own gate exactly
+//   (itemDef.attrib & 0x100000 @0x433327) — byte-faithful AND crash-safe (D-NET-97).
+// - Entity::net_class_code from the items.def class tag (ai_function, else move_function — the
+//   directive that drives the ItemDef+356 serialize-callback lookup [orig: ingame_decode.h §5.10b])
+//   via opennova::class_from_tag. Load-bearing: only witnessed callback classes may be serialized
+//   into the 0x0A event loop — classifying a pool-1 ewep emplacement as a vehicle desyncs the
+//   retail client mid-frame (retail-join v13, 2026-07-02).
+// - Entity::health_max (+ health lift) from items.def hp (itemDef+0x17C healthMax): the original
+//   spawns Health = healthMax [orig: Entity_InitFromItemDef @0x49e550]; entities still at the
+//   promotion default (100) are lifted to full health. Feeds the §5.13 vehicle health word (a
+//   too-small value renders every vehicle burning) and the §5.10 field-17 tier denominator.
+//
+// The registry's for_each is const-only, so collect the live handles first, then re-fetch each as
+// a mutable Entity* — the same mutate-by-handle shape resolve_infantry_adm_ids uses.
 //
 // ID SPACE (load-bearing): Entity::item_id is the WIRE type id — the small on-disk .bms type that
 // build_pool*_batch puts on the wire verbatim (e.g. 0x050E). NovaItemDatabase is keyed by the
 // items.def id, which is wire + kItemIdOffset (mission_bms_test: bms_type_id 1291 -> item_id
 // 101291; nova_net_client.cpp wire = def_id - 100000). The offset here is mandatory: without it
-// is_ai_capable misses EVERY pool-1 item, all trailers drop, and an AI-capable vehicle re-triggers
-// the stock decoder's flag-clear strcpy crash.
+// every pool-1 lookup misses.
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
-void NovaSimulation::resolve_item_ai_capability(const Ref<NovaItemDatabase> &p_item_db) {
+void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each([&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
 	for (const opennova::world::EntityHandle h : handles) {
 		opennova::world::Entity *e = world_->registry.get(h);
 		if (!e) continue;
-		e->is_ai_capable = p_item_db->is_ai_capable(static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset);
+		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+		e->is_ai_capable = p_item_db->is_ai_capable(def_id);
+		// §5.10b replication class from the *_function tag (ai_function, else move_function).
+		const String ai_fn = p_item_db->get_ai_function(def_id);
+		const String tag = ai_fn.is_empty() ? p_item_db->get_move_function(def_id) : ai_fn;
+		e->net_class_code =
+				static_cast<uint8_t>(opennova::class_from_tag(tag.utf8().get_data()));
+		// items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
+		const int hp = p_item_db->get_hp(def_id);
+		if (hp > 0) {
+			e->health_max = hp;
+			if (e->health == 100) e->health = hp; // still at the promotion default
+		}
 	}
 }
 
@@ -467,7 +489,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_item_seat_specs", "specs"), &NovaSimulation::set_item_seat_specs);
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
-	ClassDB::bind_method(D_METHOD("resolve_item_ai_capability", "item_db"), &NovaSimulation::resolve_item_ai_capability);
+	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);
