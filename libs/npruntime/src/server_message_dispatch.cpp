@@ -1,5 +1,7 @@
 #include "npruntime/server_message_dispatch.h"
 
+#include "npruntime/weapon_table_build.h" // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
+
 #include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <novaworld/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
@@ -218,25 +220,24 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 }
 
 // tag=0x5A WEAPON-LOADOUT-SYNC, built from the joiner's own C2S 0x2F loadout submit.
-// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790 — parses the request, validates each adm
-// entry (class/type masks @0x515a36 + the armory-enable table `unused6` @0x515a3f; both need the
-// AdmDef armory table, unmodeled -> entries accepted verbatim, tracked divergence), clamps the
-// soldier type to [5,9]-else-8 (@0x515913), stamps entity+660 playerClass (@0x515ab0), loads the
-// entries into the player's weapon-slot table, then Server_SendWeaponSlotListToPlayer @0x502550
-// walks that table in AdmDef-index order emitting one slot group per entry.]
+// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790 — parses the request, clamps the soldier
+// type to [5,9]-else-8 (@0x515913), stamps entity+660 playerClass (@0x515ab0), loads the entries
+// into the player's 780-slot weapon table, then Server_SendWeaponSlotListToPlayer @0x502550
+// walks that table ascending by weapon-slot combo (category*65 + rank, @0x5026e5..@0x5028a0),
+// filtering each slot by the team/char masks (@0x502716) and emitting one 4-byte group:
+// [admIdx = AvatarDef_FindIndexByName @0x50273b][ammoPrimary = WeaponSlot_GetTotalClips
+// @0x502794][ammoSecondary = the same count for the first different-ammoclass sub-variant in
+// parent+1..parent+LSC (@0x5027c8), else 0xFF][restriction byte, witnessed 0 (@0x502871)].]
 //
-// The reply set therefore equals the ACCEPTED REQUEST SET sorted ascending by adm index — the
-// exact golden shape (request {21,3,83,76,77,78,2} -> reply {2,3,21,76,77,78,83}). Ammo bytes:
-// retail resolves live mag counts off the slot table; we ECHO the request's bytes (the standard
-// client sends 255 = "max"). BEHAVIORALLY IDENTICAL: the client clamps the byte to the adm
-// entry's max-mags and scales by rounds-per-mag on apply [orig: NapiNPClientMsg_
-// HandleWeaponLoadoutSync @0x4290e0, clamp @0x4295d7-0x4295e9] — byte-level parity with a retail
-// host needs the AdmDef table (tracked). The 4th slot byte is the per-adm restriction byte,
-// witnessed 0 on the wire (@0x502871 reads a table the 0x2F handler keys differently).
-// The OLD implementation replied a verbatim retail DVXI5 capture blob — wrong adm indices for
-// any other mission/armory; live-witnessed as the joiner's wrong loadout + broken gun switching
-// (retail-join v13/v14, 2026-07-02).
-std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &request_payload) {
+// With the armory table fed (world::World::weapons), the reply resolves REAL counts through the
+// witnessed rules (weapon_table_build: loadout_entry_permitted / resolve_loadout_ammo) — the
+// golden ASH_I5A reply {2:255, 3:10, 21:10, 76:1, 77:2, 78:3, 83:3} reproduces from the host's
+// own resolved weapon.def (D-NET-141). Table-less hosts (unit paths / no resource root) keep the
+// prior request-echo: the client clamps echoed bytes on apply [orig: @0x4295d7-0x4295e9], a
+// tracked divergence for that configuration only. The armory-enable restriction table
+// (`unused6` @0x515a3f / player+89688) stays unmodeled — 4th byte 0 as witnessed.
+std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &request_payload,
+                                                 const world::WeaponTable *table) {
 	LoadoutSubmit req;
 	decode_loadout_submit(request_payload.data(), request_payload.size(), req);
 
@@ -245,6 +246,31 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &req
 	// allowed-class restriction mask dword_24D59FC is server armory config, unmodeled].
 	reply.avatar_class =
 			(req.soldier_type >= 5 && req.soldier_type <= 9) ? req.soldier_type : 8;
+
+	if (table != nullptr && !table->empty()) {
+		// Sort key per accepted entry: the weapon-slot combo the original's table walk implies
+		// [orig: slot = category*65 + rank, WeaponSlotTable_LoadAllFromDefs @0x5415D3].
+		std::vector<std::pair<uint16_t, WeaponLoadoutSlot>> accepted;
+		for (const LoadoutSubmitEntry &e : req.entries) {
+			const world::WeaponTableEntry *we = table->by_index(e.adm_index);
+			if (we == nullptr) continue; // the AdmDef_GetEntryByIndex fail leg
+			if (!loadout_entry_permitted(*we, req.player_class, reply.avatar_class))
+				continue; // team/char mask filter [orig: @0x502716]
+			const LoadoutAmmoBytes ammo = resolve_loadout_ammo(*table, e.adm_index, e.ammo_primary);
+			WeaponLoadoutSlot s;
+			s.type_id = e.adm_index;
+			s.ammo_primary = ammo.primary;
+			s.ammo_secondary = ammo.secondary;
+			s.ammo_alt = 0; // restriction byte — witnessed 0 (@0x502871)
+			accepted.emplace_back(
+					static_cast<uint16_t>(we->category * 65u + we->rank), s);
+		}
+		std::sort(accepted.begin(), accepted.end(),
+		          [](const auto &a, const auto &b) { return a.first < b.first; });
+		for (const auto &p : accepted) reply.slots.push_back(p.second);
+		return encode_weapon_loadout(reply);
+	}
+
 	for (const LoadoutSubmitEntry &e : req.entries) {
 		WeaponLoadoutSlot s;
 		s.type_id = e.adm_index;
@@ -256,7 +282,7 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &req
 	std::sort(reply.slots.begin(), reply.slots.end(),
 	          [](const WeaponLoadoutSlot &a, const WeaponLoadoutSlot &b) {
 		          return a.type_id < b.type_id;
-	          }); // slot-table walk order = ascending AdmDef index [orig: @0x5026e5]
+	          }); // table-less fallback: ascending adm index (coincides for the golden kit)
 	return encode_weapon_loadout(reply);
 }
 
@@ -472,9 +498,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the joiner's weapon slots BEFORE the first 0x0A; without it every 0x0A triggers
 				// the weapon-slot mismatch -> C2S 0x0F flood. Also unlatches the burst's phase 8
 				// gate so the game-start bundle emits on the next tick. The reply derives from
-				// THIS request (see build_tag_5a_weapon_loadout).
+				// THIS request + the armory table when the host fed one (see
+				// build_tag_5a_weapon_loadout; D-NET-141).
+				const world::WeaponTable *armory =
+						(world != nullptr && !world->weapons.empty()) ? &world->weapons : nullptr;
 				replies.push_back(
-						make_protocol_message(0x5A, build_tag_5a_weapon_loadout(msg.payload)));
+						make_protocol_message(0x5A, build_tag_5a_weapon_loadout(msg.payload, armory)));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (world != nullptr && conn.link.owned_entity.valid()) {

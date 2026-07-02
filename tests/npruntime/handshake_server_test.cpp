@@ -15,7 +15,12 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <npruntime/napi_np_protocol.h>
+#include <npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
+#include <def/def.h>
+#include <world/world.h>
+
+#include "common/test_paths.h"
 #include "host_test_setup.h"
 
 #include <netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
@@ -433,11 +438,120 @@ bool run_capacity_rejects_when_full() {
 	return true;
 }
 
+// Armory-fed loadout resolve (D-NET-141): with world.weapons built from the committed fixture,
+// the 0x5A reply resolves REAL ammo counts through the witnessed rules instead of echoing —
+// filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
+// (min(req,maxclips) on an explicit request), the alt byte carries the first different-ammoclass
+// sub-variant, and the reply sorts by weapon-slot combo (category*65+rank).
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550 / WeaponSlot_GetTotalClips @0x5425F0]
+// NOTE fixture truth ≠ live-install truth: a real JO:CA root resolves a larger weapon.def whose
+// indices reproduce the golden bytes end-to-end — that equality is the live v16 wire gate.
+bool run_loadout_resolve_with_armory() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+
+	// The armory: fixtures/def/weapon.def -> the witnessed table (null@0 + file order).
+	const char *repo_root = test_paths_repo_root(__FILE__);
+	char def_path[4096];
+	std::snprintf(def_path, sizeof(def_path), "%s/fixtures/def/weapon.def", repo_root);
+	DefWeaponsFile wf{};
+	if (!expect(def_parse_weapons(def_path, &wf) == 0, "fixture weapon.def parses")) return false;
+	world::World world;
+	world.weapons = np::build_weapon_table(wf);
+	def_free_weapons(&wf);
+	ctx.world = &world;
+
+	const PeerAddr peer{0x0100007Fu, 30100};
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	std::string server_scrk;
+	if (!handshake(ctx, peer, client_scrk, 0xDEADBEE2u, server_scrk)) return false;
+
+	uint32_t seq = 1;
+	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
+	                        std::vector<ProtocolMessage> &out) -> bool {
+		auto dg = craft_session(client_scrk, seq++, msgs);
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		if (r.outbound.empty()) return false;
+		ProtocolPacketHeader hdr;
+		return decode_s2c(r.outbound.back(), server_scrk, hdr, out);
+	};
+
+	auto loadout_reply = [&](const std::vector<uint8_t> &req, uint32_t now,
+	                         WeaponLoadout &lo) -> bool {
+		std::vector<ProtocolMessage> msgs;
+		if (!expect(send_session({make_protocol_message(0x2F, req)}, now, msgs) &&
+		            reply_has_tag(msgs, 0x5A), "0x2F -> 0x5A loadout"))
+			return false;
+		for (const ProtocolMessage &m : msgs) {
+			if (m.tag != 0x5A) continue;
+			return expect(decode_weapon_loadout(m.payload.data(), m.payload.size(), lo),
+			              "0x5A reply decodes");
+		}
+		return false;
+	};
+
+	// The live retail v14 request (class 2 red / soldier 8 rifleman, default 0xFF ammo). Fixture
+	// truth: {2 KNIFE2, 3 colt45, 21 AK47M203AUTO} pass the masks; {76,77,78,83} land on
+	// unfiltered emplaced/vehicle entries in the 94-weapon fixture and are dropped.
+	{
+		std::vector<uint8_t> req = {0x02, 0x08, 0xC3, 0x00, 0x00, 0x00};
+		for (uint8_t adm : {uint8_t(21), uint8_t(3), uint8_t(83), uint8_t(76), uint8_t(77),
+		                    uint8_t(78), uint8_t(2)}) {
+			req.push_back(adm); req.push_back(0xFF); req.push_back(0xFF); req.push_back(0xFF);
+		}
+		req.push_back(0xFF);
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 130, lo)) return false;
+		if (!expect(lo.avatar_class == 8, "avatarClass = accepted soldier type")) return false;
+		if (!expect(lo.slots.size() == 3, "mask filter drops the unfiltered emplaced entries"))
+			return false;
+		// Sorted by slot combo: KNIFE2 (1*65+1=66), colt45 (2*65+0=130), AK47M203AUTO (3*65+12=207).
+		if (!expect(lo.slots[0].type_id == 2 && lo.slots[0].ammo_primary == 0xFF &&
+		                    lo.slots[0].ammo_secondary == 0xFF,
+		            "KNIFE2: clipsize -1 -> the 0xFF no-clip sentinel")) return false;
+		if (!expect(lo.slots[1].type_id == 3 && lo.slots[1].ammo_primary == 5 &&
+		                    lo.slots[1].ammo_secondary == 0xFF,
+		            "colt45: startrounds 35 / clipsize 7 -> 5 clips")) return false;
+		if (!expect(lo.slots[2].type_id == 21 && lo.slots[2].ammo_primary == 10 &&
+		                    lo.slots[2].ammo_secondary == 6,
+		            "AK47M203AUTO: 300/30 -> 10; alt = the different-class M203HE 6/1 -> 6"))
+			return false;
+		for (const WeaponLoadoutSlot &s : lo.slots)
+			if (!expect(s.ammo_alt == 0, "restriction byte 0")) return false;
+	}
+
+	// Soldier-type mask in isolation: a BLUE sniper (class 1 / soldier 6) requests M4AUTO + the
+	// blue KNIFE — the team mask passes both, the charfilter drops only the M4AUTO
+	// (rifleman|medic|engineer band). The all-class KNIFE (idx 1) survives alone.
+	{
+		std::vector<uint8_t> req = {0x01, 0x06, 0xC3, 0x00, 0x00, 0x00,
+		                            9, 0xFF, 0xFF, 0xFF, 1, 0xFF, 0xFF, 0xFF, 0xFF};
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 140, lo)) return false;
+		if (!expect(lo.avatar_class == 6, "soldier 6 accepted verbatim")) return false;
+		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 1,
+		            "charfilter drops the rifleman-band M4AUTO for a sniper")) return false;
+	}
+
+	// Explicit requested count: blue rifleman asks 4 mags of M4AUTO -> min(4, maxclips 10) = 4.
+	{
+		std::vector<uint8_t> req = {0x01, 0x08, 0xC3, 0x00, 0x00, 0x00,
+		                            9, 4, 0xFF, 0xFF, 0xFF};
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 150, lo)) return false;
+		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 9 &&
+		                    lo.slots[0].ammo_primary == 4 && lo.slots[0].ammo_secondary == 0xFF,
+		            "explicit request -> min(requested, maxclips) clips")) return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok = run_reactive_replies() && ok;
+	ok = run_loadout_resolve_with_armory() && ok;
 	ok = run_bound_entity_handle_drives_tag51() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
