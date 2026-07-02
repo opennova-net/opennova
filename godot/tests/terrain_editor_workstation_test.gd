@@ -1212,7 +1212,7 @@ func test_dirty_open_prompts_and_save_routes_through_save_as() -> void:
 	dialog.hide()
 	dialog.confirmed.emit()
 	assert_eq(stub.saved_dirs.size(), 0, "Without a project dir the save waits for the Save As pick.")
-	var file_dialog: FileDialog = workstation._ensure_file_dialogs().get_dialog()
+	var file_dialog: FileDialog = workstation._save_export._ensure_file_dialogs().get_dialog()
 	assert_not_null(file_dialog, "Save should route through the Save As directory dialog.")
 	if file_dialog == null:
 		return
@@ -1225,7 +1225,7 @@ func test_dirty_open_prompts_and_save_routes_through_save_as() -> void:
 func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	workstation._show_export_flavor_dialog("C:/Exports/TestTerrain")
+	workstation._save_export.show_export_flavor_dialog("C:/Exports/TestTerrain")
 
 	var dialog = workstation.find_child("ExportFlavorDialog", true, false)
 	assert_not_null(dialog, "Export should open a native flavor dialog.")
@@ -1663,8 +1663,8 @@ func test_popover_close_button_dismisses_via_shared_signal() -> void:
 
 func test_file_and_dir_dialogs_share_one_native_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation._open_file_dialog("Open file", PackedStringArray(), func(_p): pass)
-	workstation._open_dir_dialog("Open dir", func(_p): pass)
+	workstation._save_export.open_file_dialog("Open file", PackedStringArray(), func(_p): pass)
+	workstation._save_export.open_dir_dialog("Open dir", func(_p): pass)
 
 	var dialogs := []
 	for child in workstation.get_children():

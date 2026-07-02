@@ -123,27 +123,15 @@ var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
 var _inspector_workspace_id: int = -1
-var _export_ui_active: bool = false
-var _pending_export_dir: String = ""
-var _overlay_tween: Tween
-var _unsaved_dialog: ConfirmationDialog
+var _save_export := ShellSaveExportFlow.new()
+var _export_progress := ShellExportProgress.new()
 # App-close guard: one prompt covering every workspace with unsaved work,
-# separate from _unsaved_dialog (the per-action save prompt).
+# separate from the flow module's per-action UnsavedChangesDialog.
 var _close_guard_dialog: ConfirmationDialog
-# The unsaved-changes dialog routes Save/Discard/Cancel to these
-# prompt_unsaved_for callables. Consumed (cleared) on first dispatch, so a
-# stale callable can never hijack a later prompt.
-var _unsaved_on_save := Callable()
-var _unsaved_on_discard := Callable()
-var _unsaved_on_cancel := Callable()
-var _cdep_dialog: ConfirmationDialog
-var _export_dialog: ExportFlavorDialog
-var _cdep_fix_callback: Callable = Callable()
 var _resource_browser := EditorResourceBrowser.new()
 # The persistent Resource Browser pane (lazy: built on first show).
 var _browser_pane: ResourceBrowserPane
 var _pff_tool := EditorPffTool.new()
-var _file_dialogs: FileDialogHelper
 # Detachable panels (B6): the camera/environment popovers can pop their
 # content into floating windows. State machines live in the hosts; the cached
 # restore dicts make persisted "open floating" decisions without re-reading
@@ -165,19 +153,38 @@ func _ready() -> void:
 	_resource_browser.setup(
 		self,
 		_resource_library,
-		_open_file_dialog,
+		_save_export.open_file_dialog,
 		func() -> void: _set_settings_popup_visible(true),
 		_current_resource_path_for_browser,
 		func() -> void: _scan_resource_root(false)
 	)
 	_pff_tool.setup(
 		self,
-		_open_files_dialog,
-		_open_dir_dialog,
+		_save_export.open_files_dialog,
+		_save_export.open_dir_dialog,
 		show_status_message,
 		_on_pff_extracted
 	)
 	var active_workspace_supplier := func() -> EditorWorkspace: return _get_active_workspace()
+	_save_export.setup(
+		self,
+		active_workspace_supplier,
+		show_status_message,
+		func(workspace: EditorWorkspace, on_pick: Callable) -> void:
+			_open_resource_browser(workspace, on_pick)
+	)
+	_export_progress.setup(
+		self,
+		_progress_backdrop,
+		_progress_panel,
+		_progress_title_label,
+		_progress_message_label,
+		_progress_bar,
+		_progress_counts_label,
+		active_workspace_supplier,
+		show_status_message,
+		func() -> void: _refresh_shell_state()
+	)
 	_top_action_bar.setup(
 		_workspace_actions_host,
 		Callable(self, "_on_workspace_action_pressed"),
@@ -328,7 +335,7 @@ func sync_from_editor_state() -> void:
 	_refresh_shell_state()
 	_status.refresh()
 	_tile_gizmo_overlay.refresh()
-	_sync_export_progress()
+	_export_progress.sync()
 	_refresh_camera_popup_state()
 	_refresh_environment_popup_state()
 	var workspace := _get_active_workspace()
@@ -341,7 +348,7 @@ func sync_from_editor_state() -> void:
 
 func _process(_delta: float) -> void:
 	_refresh_shell_state()
-	_sync_export_progress()
+	_export_progress.sync()
 	_status.refresh()
 	_tile_gizmo_overlay.refresh()
 
@@ -1661,7 +1668,7 @@ func _on_settings_browse_resource_dir_pressed() -> void:
 		if _settings_resource_dir_edit != null:
 			_settings_resource_dir_edit.text = path
 		_apply_resource_settings(true)
-	_open_dir_dialog("Select resource directory", on_pick, _preferred_resource_root_dir())
+	_save_export.open_dir_dialog("Select resource directory", on_pick, _preferred_resource_root_dir())
 
 
 func _on_settings_apply_resource_dir_pressed() -> void:
@@ -1834,47 +1841,12 @@ func _preferred_resource_root_dir() -> String:
 
 
 func _on_workspace_action_pressed(action_id: int) -> void:
-	_run_workspace_action(_get_active_workspace(), action_id)
+	_save_export.run_workspace_action(_get_active_workspace(), action_id)
 
 
 func _on_environment_action_pressed(action_id: int) -> void:
-	_run_workspace_action(_popup_workspace(), action_id)
+	_save_export.run_workspace_action(_popup_workspace(), action_id)
 	_refresh_environment_popup_state()
-
-
-func _run_workspace_action(workspace: EditorWorkspace, action_id: int) -> void:
-	if workspace == null:
-		return
-	var open_trn := func(path: String) -> void:
-		var err: Error = workspace.open_file(path)
-		if err != OK:
-			show_status_message("Open failed (error %d)" % err, 6.0)
-	match action_id:
-		ShellActionBar.Action.NEW:
-			if workspace.can_new() and _flush_workspace_or_status(workspace):
-				workspace.new_current()
-		ShellActionBar.Action.OPEN:
-			if not workspace.can_open():
-				return
-			if _flush_workspace_or_status(workspace):
-				_open_resource_browser(workspace, open_trn)
-		ShellActionBar.Action.SAVE:
-			_on_save_pressed(workspace)
-		ShellActionBar.Action.SAVE_AS:
-			if _flush_workspace_or_status(workspace):
-				_open_save_as_dialog(workspace)
-		ShellActionBar.Action.EXPORT:
-			_on_export_pressed(workspace)
-
-
-func _flush_workspace_or_status(workspace: EditorWorkspace) -> bool:
-	if workspace == null:
-		return false
-	var err := workspace.flush_pending_edits()
-	if err != OK:
-		show_status_message("Resolve source parse errors before continuing.", 6.0)
-		return false
-	return true
 
 
 func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> void:
@@ -1919,119 +1891,6 @@ func _current_resource_path_for_browser(kind: String) -> String:
 	if workspace != null:
 		return workspace.get_current_resource_path()
 	return ""
-
-
-# File and directory pickers share one cached native dialog (FileDialogHelper)
-# instead of building and freeing a new FileDialog per open.
-func _ensure_file_dialogs() -> FileDialogHelper:
-	if _file_dialogs == null:
-		_file_dialogs = FileDialogHelper.new(self)
-	return _file_dialogs
-
-
-func _open_file_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
-	_ensure_file_dialogs().open(title, filters, on_pick, current_dir)
-
-
-func _open_dir_dialog(title: String, on_pick: Callable, current_dir: String = "") -> void:
-	_ensure_file_dialogs().open_dir(title, on_pick, current_dir)
-
-
-func _open_save_as_dialog(workspace: EditorWorkspace, on_success: Callable = Callable(), failure_message: String = "") -> void:
-	if workspace == null:
-		return
-	var report_failure := func(err: Error) -> void:
-		if not failure_message.is_empty():
-			show_status_message(failure_message, 6.0)
-		else:
-			show_status_message("Save failed (error %d)" % err, 6.0)
-	if workspace.uses_save_file_dialog():
-		var save_file_as := func(path: String) -> void:
-			var err: Error = workspace.save_as_file(path)
-			if err == OK:
-				if on_success.is_valid():
-					on_success.call()
-			else:
-				report_failure.call(err)
-		_ensure_file_dialogs().save_file(
-			workspace.get_save_dialog_title(),
-			workspace.get_save_file_dialog_filters(),
-			workspace.get_save_file_dialog_default_name(),
-			save_file_as,
-			_preferred_save_dir(workspace)
-		)
-		return
-	var save_project_as := func(dir_path: String) -> void:
-		var err: Error = workspace.save_as(dir_path)
-		if err == OK:
-			if on_success.is_valid():
-				on_success.call()
-		else:
-			report_failure.call(err)
-	_open_dir_dialog(
-		workspace.get_save_dialog_title(),
-		save_project_as,
-		_preferred_save_dir(workspace)
-	)
-
-
-func _open_files_dialog(title: String, filters: PackedStringArray, on_pick: Callable, current_dir: String = "") -> void:
-	_ensure_file_dialogs().open_files(title, filters, on_pick, current_dir)
-
-
-# Dialog start dirs come from the workspace hooks alone (get_save_dialog_dir /
-# get_export_dialog_dir); an empty result falls back to the OS default. The
-# terrain-editor fallback chain died with the terrain-rooted boot.
-func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:
-	if workspace == null:
-		workspace = _get_active_workspace()
-	if workspace != null:
-		return workspace.get_save_dialog_dir()
-	return ""
-
-
-func _preferred_export_dir(workspace: EditorWorkspace = null) -> String:
-	if workspace == null:
-		workspace = _get_active_workspace()
-	if workspace != null:
-		return workspace.get_export_dialog_dir()
-	return ""
-
-
-func _on_save_pressed(workspace: EditorWorkspace = null) -> void:
-	if workspace == null:
-		workspace = _get_active_workspace()
-	if workspace == null:
-		return
-	var err: Error = workspace.save_current()
-	if err == ERR_PARSE_ERROR:
-		show_status_message("Resolve source parse errors before saving.", 6.0)
-		return
-	if err == ERR_INVALID_PARAMETER:
-		_open_save_as_dialog(workspace)
-	elif err != OK:
-		show_status_message("%s save is not available." % workspace.get_workspace_label(), 4.0)
-
-
-func _on_export_pressed(workspace: EditorWorkspace = null) -> void:
-	if workspace == null:
-		workspace = _get_active_workspace()
-	if workspace == null or not workspace.can_export():
-		return
-	var choose_export_dir := func(dir_path: String) -> void:
-		if not workspace.get_export_flavors().is_empty():
-			_show_export_flavor_dialog(dir_path)
-		else:
-			var err: Error = workspace.begin_export(dir_path, 0)
-			if err == OK:
-				show_status_message("%s exported." % workspace.get_workspace_label(), 4.0)
-			else:
-				show_status_message("Export failed (error %d)" % err, 6.0)
-	_open_dir_dialog(
-		workspace.get_export_dialog_title(),
-		choose_export_dir,
-		_preferred_export_dir(workspace)
-	)
 
 
 func _refresh_shell_state() -> void:
@@ -2126,235 +1985,27 @@ func show_status_message(text: String, duration: float = 4.0) -> void:
 	_status.show_status_message(text, duration)
 
 
-## Saves the workspace's current document, then runs on_done. A document with no
-## path yet (ERR_INVALID_PARAMETER) routes through Save As and runs on_done only
-## on success; any other failure toasts failure_message and drops on_done.
-## Shared by the document-tab close and the workspaces' dirty-replace guards.
+## Saves the workspace's current document, then runs on_done (Save As fallback
+## for path-less documents). Public seam for workspaces + the tab strip.
 func save_then(workspace: EditorWorkspace, on_done: Callable, failure_message := "Save failed.") -> void:
-	var err := workspace.save_current()
-	if err == OK:
-		if on_done.is_valid():
-			on_done.call()
-		return
-	if err == ERR_INVALID_PARAMETER:
-		_open_save_as_dialog(workspace, on_done, failure_message)
-		return
-	show_status_message("%s (error %d)" % [failure_message.trim_suffix("."), err], 6.0)
+	_save_export.save_then(workspace, on_done, failure_message)
 
 
-## Pops the shared unsaved-changes dialog with caller-supplied outcomes (a
-## document tab close: save-then-close / close / keep; a workspace's dirty
-## guard before New/Open replaces the document). Pair with save_then() for the
-## save outcome so path-less documents route through Save As.
+## Pops the shared unsaved-changes dialog with caller-supplied outcomes. Pair
+## with save_then() so path-less documents route through Save As.
 func prompt_unsaved_for(on_save: Callable, on_discard: Callable, on_cancel := Callable()) -> void:
-	_unsaved_on_save = on_save
-	_unsaved_on_discard = on_discard
-	_unsaved_on_cancel = on_cancel
-	_ensure_unsaved_dialog()
-	_unsaved_dialog.popup_centered()
-	show_status_message("Save or discard your changes to continue.", 6.0)
-
-
-func _take_unsaved_callable(which: StringName) -> Callable:
-	var cb := Callable()
-	match which:
-		&"save":
-			cb = _unsaved_on_save
-		&"discard":
-			cb = _unsaved_on_discard
-		&"cancel":
-			cb = _unsaved_on_cancel
-	_unsaved_on_save = Callable()
-	_unsaved_on_discard = Callable()
-	_unsaved_on_cancel = Callable()
-	return cb
+	_save_export.prompt_unsaved_for(on_save, on_discard, on_cancel)
 
 
 func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
-	var plural := "" if count == 1 else "s"
-	_cdep_fix_callback = on_fix_callback
-	_ensure_cdep_dialog()
-	_cdep_dialog.dialog_text = "%d area%s exceed the JO/DFX limit.\nBHD exports are unaffected." % [count, plural]
-	_cdep_dialog.popup_centered()
-	show_status_message("%d area%s too steep for Joint Operations / DFX export." % [count, plural], 6.0)
+	_save_export.prompt_cdep_violations(count, on_fix_callback)
 
 
-func _on_prompt_save_changes() -> void:
-	var cb := _take_unsaved_callable(&"save")
-	if cb.is_valid():
-		cb.call()
-
-
-func _on_prompt_discard_changes() -> void:
-	var cb := _take_unsaved_callable(&"discard")
-	if cb.is_valid():
-		cb.call()
-
-
-func _on_prompt_keep_editing() -> void:
-	var cb := _take_unsaved_callable(&"cancel")
-	if cb.is_valid():
-		cb.call()
-
-
-func _show_export_flavor_dialog(dir_path: String) -> void:
-	_pending_export_dir = dir_path
-	_ensure_export_dialog()
-	_export_dialog.select_flavor(ExportFlavorDialog.FLAVOR_DFX_JO)
-	_export_dialog.popup_centered()
-
-
-func _on_prompt_export_confirmed() -> void:
-	if editor == null or _pending_export_dir.is_empty():
-		return
-	var workspace := _get_active_workspace()
-	if workspace == null:
-		return
-	var flavor: int = _export_dialog.get_flavor() if _export_dialog != null else ExportFlavorDialog.FLAVOR_DFX_JO
-	var err: Error = workspace.begin_export(_pending_export_dir, flavor)
-	_pending_export_dir = ""
-	if err != OK:
-		show_status_message("Export failed (error %d)" % err, 6.0)
-
-
-func _on_prompt_cancel() -> void:
-	_pending_export_dir = ""
-
-
-# The three confirms below are themed native dialogs (the editor theme styles
-# ConfirmationDialog/AcceptDialog/Window). Each is created once as a child of the
-# shell and given the shell theme explicitly, because an embedded Window does not
-# resolve the in-tree theme through the Control parent chain (same pattern as the
-# resource browser).
-func _ensure_unsaved_dialog() -> void:
-	if _unsaved_dialog != null and is_instance_valid(_unsaved_dialog):
-		return
-	_unsaved_dialog = ConfirmationDialog.new()
-	_unsaved_dialog.name = "UnsavedChangesDialog"
-	_unsaved_dialog.title = "Unsaved changes"
-	_unsaved_dialog.dialog_text = "Save changes?"
-	_unsaved_dialog.exclusive = true
-	if theme != null:
-		_unsaved_dialog.theme = theme
-	add_child(_unsaved_dialog)
-	_unsaved_dialog.get_ok_button().text = "Save"
-	_unsaved_dialog.get_cancel_button().text = "Cancel"
-	_unsaved_dialog.add_button("Discard", false, "discard")
-	# OK confirms (Save), Cancel/Escape keeps editing, the custom Discard button
-	# discards. Custom-action buttons do not auto-hide, so the handler hides it.
-	_unsaved_dialog.confirmed.connect(_on_prompt_save_changes)
-	_unsaved_dialog.canceled.connect(_on_prompt_keep_editing)
-	_unsaved_dialog.custom_action.connect(_on_unsaved_custom_action)
-
-
-func _on_unsaved_custom_action(action: StringName) -> void:
-	if action == &"discard":
-		if _unsaved_dialog != null:
-			_unsaved_dialog.hide()
-		_on_prompt_discard_changes()
-
-
-func _ensure_cdep_dialog() -> void:
-	if _cdep_dialog != null and is_instance_valid(_cdep_dialog):
-		return
-	_cdep_dialog = ConfirmationDialog.new()
-	_cdep_dialog.name = "CdepFlattenDialog"
-	_cdep_dialog.title = "Flatten before export?"
-	_cdep_dialog.exclusive = true
-	if theme != null:
-		_cdep_dialog.theme = theme
-	add_child(_cdep_dialog)
-	_cdep_dialog.get_ok_button().text = "Flatten automatically"
-	_cdep_dialog.get_cancel_button().text = "Leave as-is"
-	_cdep_dialog.confirmed.connect(_on_cdep_flatten_confirmed)
-
-
-func _on_cdep_flatten_confirmed() -> void:
-	if _cdep_fix_callback.is_valid():
-		_cdep_fix_callback.call()
-
-
-func _ensure_export_dialog() -> void:
-	if _export_dialog != null and is_instance_valid(_export_dialog):
-		return
-	_export_dialog = ExportFlavorDialog.new()
-	_export_dialog.name = "ExportFlavorDialog"
-	_export_dialog.exclusive = true
-	if theme != null:
-		_export_dialog.theme = theme
-	add_child(_export_dialog)
-	_export_dialog.confirmed.connect(_on_prompt_export_confirmed)
-	_export_dialog.canceled.connect(_on_prompt_cancel)
-
-
-func on_export_started(_dir_path: String) -> void:
-	# The workspace hook, not a hard-coded "Exporting terrain..." — any
-	# exporting workspace announces itself (the same title the progress
-	# overlay shows).
-	var workspace := _get_active_workspace()
-	show_status_message(workspace.get_export_progress_title() if workspace != null else "Exporting...", 30.0)
-	_set_export_ui_active(true)
-	_sync_export_progress()
+## Export lifecycle, called by exporting workspaces' domain editors.
+func on_export_started(dir_path: String) -> void:
+	_export_progress.on_export_started(dir_path)
 
 
 func on_export_completed(err: Error, message: String) -> void:
-	_set_export_ui_active(false)
-	if not message.is_empty():
-		show_status_message(message, 6.0)
-	else:
-		show_status_message("Export failed (error %d)" % err, 6.0)
-	_refresh_shell_state()
+	_export_progress.on_export_completed(err, message)
 
-
-func _sync_export_progress() -> void:
-	var workspace := _get_active_workspace()
-	if workspace == null:
-		_set_export_ui_active(false)
-		return
-
-	var export_running: bool = workspace.is_busy()
-	if export_running != _export_ui_active:
-		_set_export_ui_active(export_running)
-	if not export_running:
-		return
-
-	var phase: String = workspace.get_export_progress_phase()
-	var message: String = workspace.get_export_progress_message()
-	var current: int = workspace.get_export_progress_current()
-	var total: int = workspace.get_export_progress_total()
-	var ratio: float = clampf(workspace.get_export_progress_ratio(), 0.0, 1.0)
-
-	_progress_title_label.text = workspace.get_export_progress_title()
-	if not phase.is_empty():
-		_progress_message_label.text = phase.capitalize() + ": " + message
-	else:
-		_progress_message_label.text = message
-	_progress_bar.value = ratio * 100.0
-	if total > 0:
-		_progress_counts_label.text = "%d / %d" % [current, total]
-	else:
-		_progress_counts_label.text = ""
-
-
-func _set_export_ui_active(active: bool) -> void:
-	if _export_ui_active == active and _progress_backdrop.visible == active:
-		return
-	_export_ui_active = active
-	if _overlay_tween:
-		_overlay_tween.kill()
-	_overlay_tween = create_tween()
-	if active:
-		_progress_backdrop.visible = true
-		_progress_panel.visible = true
-		_progress_backdrop.modulate = Color(1.0, 1.0, 1.0, 0.0)
-		_progress_panel.modulate = Color(1.0, 1.0, 1.0, 0.0)
-		_overlay_tween.tween_property(_progress_backdrop, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.16).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		_overlay_tween.parallel().tween_property(_progress_panel, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.16).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	else:
-		_overlay_tween.tween_property(_progress_backdrop, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.14).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-		_overlay_tween.parallel().tween_property(_progress_panel, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.14).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-		_overlay_tween.finished.connect(func() -> void:
-			if not _export_ui_active:
-				_progress_backdrop.visible = false
-				_progress_panel.visible = false
-		, CONNECT_ONE_SHOT)

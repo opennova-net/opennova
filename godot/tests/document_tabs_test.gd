@@ -149,8 +149,8 @@ func test_prompt_callables_are_consumed_on_dispatch() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var outcome := {"saved": 0}
 	workstation.prompt_unsaved_for(func() -> void: outcome.saved += 1, func() -> void: pass)
-	workstation._on_prompt_save_changes()
-	workstation._on_prompt_save_changes()
+	workstation._save_export._on_prompt_save_changes()
+	workstation._save_export._on_prompt_save_changes()
 	assert_eq(outcome.saved, 1, "the save outcome runs exactly once")
 
 
