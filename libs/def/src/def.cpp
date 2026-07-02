@@ -501,13 +501,8 @@ DEF_EXPORT void def_free_ammo(DefAmmoFile *f) {
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
+static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
 
@@ -578,6 +573,66 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
             } else if (lower_match_key(lower, ll, "startrounds", 11)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 cw.startrounds = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "statid", 6)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+                cw.statid = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "maxclips", 8)) {
+                /* [orig: parse @0x5440A9 -> AdmDef[83]+0x14C] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                cw.maxclips = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "ammobucket", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                cw.ammobucket = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "ammoclass", 9)) {
+                /* ammoclass <CLASS_NAME> <pool-units-per-round> [orig: parse @0x5441CB] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                if (n >= 1) safe_copy(cw.ammo_class, sizeof(cw.ammo_class), tok[0].s, tok[0].len);
+                if (n >= 2) cw.ammo_class_count = parse_int_n(tok[1].s, tok[1].len);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_selectable", 18)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+                cw.loadout_selectable = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_subclasses", 18)) {
+                /* [orig: parse @0x544E43 -> AdmDef[235]+0x3AC] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+                cw.loadout_subclasses = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "weapon_class", 12)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                if (n >= 1) safe_copy(cw.weapon_class, sizeof(cw.weapon_class), tok[0].s, tok[0].len);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "charfilter", 10)) {
+                /* Repeatable, one soldier-type token per line [orig: parse @0x543F6E] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                for (int ti = 0; ti < n; ++ti) {
+                    if (cw.charfilter_count >= 8) break;
+                    safe_copy(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
+                              tok[ti].s, tok[ti].len);
+                    ++cw.charfilter_count;
+                }
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "teamfilter", 10)) {
+                /* Repeatable, one team token per line [orig: parse @0x543FE3] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                for (int ti = 0; ti < n; ++ti) {
+                    if (cw.teamfilter_count >= 4) break;
+                    safe_copy(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
+                              tok[ti].s, tok[ti].len);
+                    ++cw.teamfilter_count;
+                }
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "round_type", 10)) {
                 consume_value_str(trimmed, tlen, 10, cw.round_type, sizeof(cw.round_type));
@@ -748,8 +803,23 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_weapons_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_weapons_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f) {

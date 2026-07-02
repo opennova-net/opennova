@@ -90,6 +90,20 @@ typedef struct DefWeaponDef {
     int rank;
     int clipsize;
     int startrounds;
+    /* Loadout/armory keys (docs/net/novaworld-net-re.md §5.57); absent key = 0/empty.
+       charfilter/teamfilter hold the raw file tokens — bit packing is a consumer concern. */
+    int statid;
+    int maxclips;
+    int ammobucket;
+    char ammo_class[64];
+    int ammo_class_count;
+    char charfilter[8][16];
+    size_t charfilter_count;
+    char teamfilter[4][16];
+    size_t teamfilter_count;
+    int loadout_selectable;
+    int loadout_subclasses;
+    char weapon_class[32];
     char round_type[64];
     char animadm[128];
     char launch_user_point[64];
@@ -326,6 +340,9 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out);
 DEF_EXPORT void def_free_ammo(DefAmmoFile *f);
 
 DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out);
+/* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f);
 
 DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out);
