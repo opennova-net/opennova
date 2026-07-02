@@ -1061,6 +1061,66 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
 
 
+# Minimal tileinfo surface for the gizmo capability hooks.
+class TileGizmoTerrainStub:
+	extends Node
+
+	class Entry:
+		extends RefCounted
+
+		func get_tile_index() -> int:
+			return 7
+
+		func get_cell_x() -> int:
+			return 3
+
+		func get_cell_z() -> int:
+			return 4
+
+	var current_tool := TerrainEditor.Tool.TILE_STAMP
+	var rotations := 0
+	var cleared := 0
+
+	func has_selected_tileinfo_entry() -> bool:
+		return true
+
+	func get_selected_tileinfo_entry() -> Variant:
+		return Entry.new()
+
+	func get_selected_tileinfo_world_center() -> Vector3:
+		return Vector3(10, 0, 20)
+
+	func rotate_selected_tileinfo_clockwise() -> void:
+		rotations += 1
+
+	func clear_tileinfo_selection() -> void:
+		cleared += 1
+
+
+func test_tile_gizmo_state_and_actions_ride_the_workspace_hooks() -> void:
+	# The shell's in-world gizmo is capability-driven: it reads
+	# get_tile_gizmo_state() and routes buttons through run_tile_gizmo_action(),
+	# never touching the terrain editor directly.
+	var ws: EditorWorkspace = TerrainWorkspaceScript.new()
+	var stub: TileGizmoTerrainStub = autofree(TileGizmoTerrainStub.new())
+	ws.set_terrain_editor(stub)
+
+	var state := ws.get_tile_gizmo_state()
+	assert_eq(String(state.get("label", "")), "Editing tile 007 @ (3, 4)",
+		"The workspace formats the gizmo label from the selected tile.")
+	assert_eq(state.get("anchor_world"), Vector3(10, 2, 20),
+		"The anchor floats 2u above the tile's world center.")
+
+	ws.run_tile_gizmo_action(&"rotate")
+	assert_eq(stub.rotations, 1, "Gizmo actions route to the terrain editor through the hook.")
+	ws.run_tile_gizmo_action(&"done")
+	assert_eq(stub.cleared, 1, "Done clears the selection through the hook.")
+
+	stub.current_tool = TerrainEditor.Tool.RAISE
+	assert_true(ws.get_tile_gizmo_state().is_empty(),
+		"Outside the Tile workflow the gizmo reports no state.")
+
+
 func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 

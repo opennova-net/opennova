@@ -85,6 +85,19 @@ func shows_tile_gizmo() -> bool:
 	return false
 
 
+# In-world tile gizmo payload (shows_tile_gizmo() opt-in). The shell polls this
+# each frame and shows the gizmo while it returns a non-empty Dictionary:
+#   {"label": String, "anchor_world": Vector3}
+# Empty means no active selection - gizmo hidden.
+func get_tile_gizmo_state() -> Dictionary:
+	return {}
+
+
+# Gizmo button actions: &"done", &"rotate", &"flip_x", &"flip_y", &"delete".
+func run_tile_gizmo_action(_action: StringName) -> void:
+	pass
+
+
 # View guides (reference grid / origin axes) in a 3D preview. Workspaces with a
 # guide overlay override shows_view_guides() so the shell offers Show grid / Show
 # axes toggles, and the two setters to apply them; other workspaces stay silent.

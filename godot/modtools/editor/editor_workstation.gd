@@ -2463,25 +2463,20 @@ func _refresh_tile_gizmo() -> void:
 		return
 	_tile_gizmo.visible = false
 	var active_workspace := _get_active_workspace()
-	if active_workspace == null or not active_workspace.shows_tile_gizmo() or editor == null or _current_workflow_id != TerrainWorkspaceAdapter.Workflow.STAMP or not editor.has_selected_tileinfo_entry():
+	if active_workspace == null or not active_workspace.shows_tile_gizmo():
+		return
+	var state := active_workspace.get_tile_gizmo_state()
+	if state.is_empty():
 		return
 
-	var camera: Camera3D = editor.get_editor_camera()
+	var camera: Camera3D = active_workspace.get_viewport_camera()
 	if camera == null:
 		return
 
-	var entry: Variant = editor.get_selected_tileinfo_entry()
-	if entry == null:
-		return
-
-	var anchor_world: Vector3 = editor.get_selected_tileinfo_world_center() + Vector3(0.0, 2.0, 0.0)
+	var anchor_world: Vector3 = state.get("anchor_world", Vector3.ZERO)
 	var lane_rect := _viewport_lane.get_global_rect()
 	var lane_end := lane_rect.position + lane_rect.size
-	_tile_gizmo_label.text = "Editing tile %03d @ (%d, %d)" % [
-		entry.get_tile_index(),
-		entry.get_cell_x(),
-		entry.get_cell_z(),
-	]
+	_tile_gizmo_label.text = String(state.get("label", ""))
 
 	var gizmo_size := _tile_gizmo.get_combined_minimum_size()
 	_tile_gizmo.size = gizmo_size
@@ -2501,29 +2496,30 @@ func _refresh_tile_gizmo() -> void:
 	_tile_gizmo.visible = true
 
 
+func _run_tile_gizmo_action(action: StringName) -> void:
+	var workspace := _get_active_workspace()
+	if workspace != null:
+		workspace.run_tile_gizmo_action(action)
+
+
 func _on_tile_gizmo_rotate_pressed() -> void:
-	if editor:
-		editor.rotate_selected_tileinfo_clockwise()
+	_run_tile_gizmo_action(&"rotate")
 
 
 func _on_tile_gizmo_done_pressed() -> void:
-	if editor:
-		editor.clear_tileinfo_selection()
+	_run_tile_gizmo_action(&"done")
 
 
 func _on_tile_gizmo_flip_x_pressed() -> void:
-	if editor:
-		editor.flip_selected_tileinfo_x()
+	_run_tile_gizmo_action(&"flip_x")
 
 
 func _on_tile_gizmo_flip_y_pressed() -> void:
-	if editor:
-		editor.flip_selected_tileinfo_y()
+	_run_tile_gizmo_action(&"flip_y")
 
 
 func _on_tile_gizmo_delete_pressed() -> void:
-	if editor:
-		editor.delete_selected_tileinfo_entry()
+	_run_tile_gizmo_action(&"delete")
 
 
 ## Pops the shared unsaved-changes dialog with caller-supplied outcomes (a
