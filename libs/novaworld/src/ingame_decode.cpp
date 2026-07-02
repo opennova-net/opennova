@@ -813,16 +813,17 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 	out.sub_block = uint8_t(out.flags2 & 0x03);
 	switch (out.sub_block) {
 	case 0:
-		// Local-player view/aim + current-target state (11 B) [orig: 0x430054..0x430136].
-		out.aim.present     = true;
-		out.aim.view0       = c.u8();
-		out.aim.view1       = c.u8();
-		out.aim.view2       = c.u8();
-		out.aim.view3       = c.u8();
-		out.aim.view4       = c.u8();
-		out.aim.view5       = c.u8();
-		out.aim.target_slot = c.u8();
-		out.aim.aim_extra   = c.i32();
+		// Local-player weapon/reload/uniform state (11 B) [orig: NetPacket_WritePlayerState
+		// @0x4ff81b (writer) / 0x430054..0x430136 (reader)].
+		out.weapon.present           = true;
+		out.weapon.preround_timer    = c.u8();
+		out.weapon.slot_state360     = c.u8();
+		out.weapon.slot_state368     = c.u8();
+		out.weapon.slot_state364     = c.u8();
+		out.weapon.slot_state356     = c.u8();
+		out.weapon.slot_state460     = c.u8();
+		out.weapon.reload_seconds    = c.u8();
+		out.weapon.uniform_team_mask = c.i32();
 		break;
 	case 1:
 		// Round/game timer (6 B) [orig: 0x430191..0x430235].

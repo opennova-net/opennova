@@ -34,8 +34,12 @@ struct Writer {
 		for (char ch : s) out.push_back(uint8_t(ch));
 		out.push_back(0);
 	}
-	// Fixed-width NUL-terminated string: up to (max_chars-1) chars + NUL (the retail slot-state writer).
-	void cstr_fixed(const std::string &s, size_t max_chars) {
+	// Capped VARIABLE-length NUL-terminated string: strlen+1 bytes on the wire, truncated to
+	// (max_chars-1) chars. The retail slot-state writer emits strlen+1
+	// (NetPacket_SerializeWeaponOverlaySlotState @0x505f9b) and the client reads strlen+1 with the
+	// same char cap (NapiNPClientMsg_PlayerSync @0x431370) — never a fixed-width field. (Renamed
+	// from the misnomer `cstr_fixed`.)
+	void cstr_capped(const std::string &s, size_t max_chars) {
 		const size_t cap = max_chars > 0 ? max_chars - 1 : 0;
 		const size_t n = s.size() < cap ? s.size() : cap;
 		for (size_t i = 0; i < n; ++i) out.push_back(uint8_t(s[i]));
@@ -507,11 +511,11 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 	w.u8(fu.flags2);
 
 	switch (fu.flags2 & 0x03) {
-	case 0: // aim (11 B)
-		w.u8(fu.aim.view0); w.u8(fu.aim.view1); w.u8(fu.aim.view2);
-		w.u8(fu.aim.view3); w.u8(fu.aim.view4); w.u8(fu.aim.view5);
-		w.u8(fu.aim.target_slot);
-		w.u32(uint32_t(fu.aim.aim_extra));
+	case 0: // weapon/reload/uniform (11 B) [orig: NetPacket_WritePlayerState @0x4ff81b]
+		w.u8(fu.weapon.preround_timer); w.u8(fu.weapon.slot_state360); w.u8(fu.weapon.slot_state368);
+		w.u8(fu.weapon.slot_state364); w.u8(fu.weapon.slot_state356); w.u8(fu.weapon.slot_state460);
+		w.u8(fu.weapon.reload_seconds);
+		w.u32(uint32_t(fu.weapon.uniform_team_mask));
 		break;
 	case 1: // timer (6 B)
 		w.u8(fu.timer.state0); w.u8(fu.timer.state1);
@@ -635,17 +639,17 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool 
 	w.u8(ctx.player_slot);
 	// field flags — the roster-sync field set; 0x4000 = ack (drives the client's roster walk to slot+1).
 	w.u16(static_cast<uint16_t>(0x1CF7u | (with_ack ? 0x4000u : 0u)));
-	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // entity slot
-	w.cstr_fixed(ctx.player_name, 32); // 0x0001 name
-	w.cstr_fixed(ctx.clan_tag, 16);    // 0x0002 team-string (clan)
-	w.cstr_fixed(std::string(), 16);   // 0x0010 vehicle-name — empty for an on-foot player
-	w.u8(ctx.team); // 0x0004 team byte (entity+354)
-	w.u8(0);        // 0x0020 squad
-	w.u8(0);        // 0x1000 ticket-validated
-	w.u8(0xFF);     // 0x0040 — no squad leader
-	w.u8(0);        // 0x0080
-	w.u8(1);        // 0x0400 quality
-	w.u32(0);       // 0x0800 entity_ref — null
+	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // pool-0 entity index [orig: Pool_GetIndexFromPtr @0x505f40]
+	w.cstr_capped(ctx.player_name, 32); // 0x0001 name (variable-length, [orig: slot+40 @0x505f9b])
+	w.cstr_capped(ctx.clan_tag, 16);    // 0x0002 team-string — retail ALWAYS writes "" here (@0x505ff7)
+	w.cstr_capped(std::string(), 16);   // 0x0010 vehicle-name — "" for an on-foot player (@0x50601f)
+	w.u8(ctx.team); // 0x0004 team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
+	w.u8(0);        // 0x0020 vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
+	w.u8(0);        // 0x1000 late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
+	w.u8(0xFF);     // 0x0040 squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
+	w.u8(0);        // 0x0080 side [orig: slot+100577]
+	w.u8(1);        // 0x0400 quality [orig: slot+418; client clamps <=4 @0x431370]
+	w.u32(0);       // 0x0800 vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
 	return out;
 }
 
@@ -667,10 +671,12 @@ std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint
 	w.u16(requested_index);
 	w.u16(ctx.entity_handle);
 	w.u8(static_cast<uint8_t>(ctx.team & 0xFF));
-	// NetId — a player carries net_id 0 BY DESIGN (D-NET-112: Entity_SpawnFromAnimSlotProperty @0x43c390
-	// leaves NetId@0x15c zero; identity is the pool handle + ownerConnectionId, never an SSN). 0 is
-	// faithful, not a placeholder. animSlot — default; write_entity_packet writes it only when Flags&0x100,
-	// and the client treats 0x51 as a spawn signal (does not field-parse it), so 0 is safe.
+	// [orig @0x506bb0]: when entity Flags&0x100 (every player after Server_PlayerAdd) retail writes
+	// [u16 NetId (entity+348 = the per-team MINIMAP slot id, nonzero — see player_minimap_net_id in
+	// netsim/entity_wire_bridge.cpp / D-NET-137)][u8 animSlot]; only a NON-0x100 entity gets 0/0.
+	// We still send 0/0: the client treats 0x51 as a spawn signal (does not field-parse it), so this
+	// is wire-tolerable, but it is a known divergence of the same D-NET-137 family, not "faithful 0"
+	// (the old D-NET-112 SSN framing predated the minimap-id witness; corrected grill 2026-07-01).
 	w.u16(0);
 	w.u8(0);
 	return out;

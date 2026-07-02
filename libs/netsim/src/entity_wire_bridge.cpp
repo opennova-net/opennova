@@ -81,12 +81,17 @@ int32_t engine_heading_bam(int16_t mission_yaw) {
 // original serializers [orig: serialize_entity_states_to_buffer @0x5030a0 writes
 // *(u16)(entity+36); serialize_object_to_buffer @0x504d10 likewise]. bit 0x100 =
 // player/minimap-register (set for EVERY player so the client's handler re-resolves the model
-// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01 = "THIS IS THE RECIPIENT'S OWN
-// player": a same-map retail↔retail ASH_I5A capture (2026-07-01) shows the host sends 0x0101
-// ONLY for the joiner's own entity and 0x0100 for every OTHER player. Sending 0x0101 for a
-// REMOTE player mis-marks it as the recipient's own and the client mishandles it — so bit 0 is
-// per-recipient: set iff this entity == the recipient's owned entity. Carry the movement/spawn
-// gate (0x02) through while the entity is still spawning [orig: entity+36 bit 1].
+// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01: WITNESSED to be PER-ENTITY host
+// state, not per-recipient — Server_PlayerAdd @0x51cbc0 sets `entity+36 |= 1` once at add time
+// (@0x51d0da, gated on add_event+108 = NapiNPPlayer+0x37, remote adds only; the host's LOCAL
+// player takes the early-return path @0x51cc31 and never gets it), and the serializer copies
+// entity+36 verbatim with no recipient-conditional logic, so retail cannot vary this bit per
+// recipient. The same-map ASH_I5A capture (0x0101 on the joiner's record, 0x0100 on the host's)
+// is fully explained by remote-vs-local add. Our per-recipient computation below is wire-
+// identical for a host+1-joiner session but DIVERGES for >=3 players (retail would send 0x0101
+// for OTHER remote players too) — kept until the NapiNPPlayer+0x37 gate semantics is witnessed;
+// docs/net/novaworld-net-re.md (D-NET-136). Carry the movement/spawn gate (0x02) through while
+// the entity is still spawning [orig: entity+36 bit 1].
 uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient_own) {
 	uint16_t flags = 0x0100u;
 	if (recipient_own.valid() && e.handle == recipient_own) flags |= 0x01u;
@@ -97,16 +102,22 @@ uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient
 // entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
 // (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the
 // two). The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0
-// fills player_slot+442 (team 1) / +444 (team 2) via lookup_entity_slot_and_pack_entry,
-// serialized at serialize_entity_states_to_buffer @0x5030a0 name+21 = *(u16)(entity+348)]. It
-// MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0) match the first
-// zero-initialized slot [orig: sub_57A270 @0x57a270 — index/type fields all 0 == packed_id 0],
-// so its handler SKIPS minimap allocation and the remote player is left unregistered — the
-// remote-only divergence behind the C2S 0x0F flood grill, while the joiner's OWN player is
-// immune (its minimap slot is set by local deploy, not this wire record). Golden retail sends
-// 0x0200 (team 1) / 0x8207 (team 2, 0x8000 team bit). Mirror that: a nonzero,
-// per-entity-distinct, team-keyed id so HasEntity returns false and the joiner allocates a
-// real slot. [golden diff + minimap grill 2026-07-01]
+// fills player_slot+442 (team 1) / +444 (team 2) — seeded from the JOINING client's own JSP
+// fields (jsp[56]/jsp[58], Server_BuildPlayerInfoAndAdd @0x51d560), validated by
+// MinimapSlot_HasEntity @0x57b140 and reallocated via lookup_entity_slot_and_pack_entry
+// @0x57ad40 when stale; serialized at serialize_entity_states_to_buffer @0x5030a0 name+21 =
+// *(u16)(entity+348)]. The REAL packing (witnessed in the packer @0x57ae47 and its decoder
+// MinimapSlot_FindByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
+// alive(15) over the 288-byte minimap slot array — golden 0x0200 = index 1, 0x8207 = type 7 +
+// index 1 + alive. It MUST be nonzero: a 0 net_id makes the JOINER's MinimapSlot_HasEntity(0)
+// match the first zero-initialized slot, so its handler SKIPS minimap allocation and the remote
+// player is left unregistered — the remote-only divergence behind the C2S 0x0F flood grill,
+// while the joiner's OWN player is immune (its minimap slot is set by local deploy, not this
+// wire record). Our formula below is an ENCODING SHIM, not the retail packing (its 0x8000 sits
+// in the `alive` bit, `slot` lands in the `type` field): interop-safe because the client
+// self-heals any UNMATCHED net_id — NapiNPClientMsg_0x00C @0x42eadb reallocates and overwrites
+// entity->NetId when MinimapSlot_HasEntity fails. Faithful port = minimap slot-array alloc;
+// docs/net/novaworld-net-re.md (D-NET-137). [golden diff + minimap grill 2026-07-01]
 uint16_t player_minimap_net_id(const world::Entity &e) {
 	return static_cast<uint16_t>((e.team == 2 ? 0x8000u : 0u) | 0x0200u |
 	                             (e.handle.slot() & 0x1Fu));
@@ -120,7 +131,9 @@ uint16_t player_minimap_net_id(const world::Entity &e) {
 // AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
 // class 0 -> slot 15 -> empty ADM -> registration skipped -> Entity_UpdateInfantryPlayerBody
 // @0x4b40e0 bails @0x4b4135. re-grill 2026-06-28.] Carry the entity's loadout class; default a
-// player to 8 (golden) until per-player loadout class is wired.
+// player to 8 (golden) until per-player loadout class is wired. The [5,9]-else-8 clamp is the
+// EXACT retail rule: Server_PlayerAdd @0x51d102 forces player_slot+89820 AND entity+660 to 8
+// when the requested class is outside [5,9] (grill 2026-07-01: byte-faithful).
 uint8_t player_class_for_wire(const world::Entity &e) {
 	if (e.item_id == kPlayerInfantryTypeId && (e.player_class < 5 || e.player_class > 9))
 		return 8;

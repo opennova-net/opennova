@@ -12,6 +12,16 @@
 // Server_SendInitialGameStateToPlayer @0x51bba0]. This is the pure byte-budget page slicer, factored out
 // of server_initial_state.cpp's emit_paged_pool so it is ONE named, unit-tested chunker (it holds no
 // InitialStateStep / InitialStateBurst coupling; emit_paged_pool is a thin wrapper over it).
+//
+// [orig] The per-pool serializers own the cap: each fills a 4096 B caller buffer but self-limits with a
+// guard checked AFTER writing a full record — serialize_entity_states_to_buffer @0x5030a0 (0x0C) breaks
+// when `written + 100 > 650`; serialize_entity_pool_to_packet @0x503460 (0x20) breaks when
+// `written + 30 > 650`. The common budget is 650; the headroom margin is the pool's max single-record
+// size (0x0C carries a variable name string → 100; 0x20's records are small → 30). Our chunker uses a
+// single fixed `max_page_bytes` checked BEFORE the record is added (never over-fills), so batch bodies top
+// out ~640 and the record-per-datagram split can differ from retail by one record on a boundary. Every
+// page is still a valid count-prefixed sub-batch a stock client reassembles into the identical world —
+// interop-equivalent, not byte-identical batching. See docs/net/novaworld-net-re.md (D-NET-135).
 namespace opennova::np {
 
 // The result of paging up to `max_pages` datagrams' worth of records out of a batch from a cursor.

@@ -415,7 +415,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(fu.timer.present && fu.timer.state1 == 13,
 			            "phase 1 = server-status carrying fall-damage tolerance 13")) return false;
 		} else if ((want_flags2[i] & 3u) == 0) {
-			if (!expect(fu.aim.present, "phase 0 = weapon sub-block present")) return false;
+			if (!expect(fu.weapon.present, "phase 0 = weapon sub-block present")) return false;
 		}
 		// phase 3 (gametype) = 0 bytes for a non-objective gametype: nothing to assert.
 	}

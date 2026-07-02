@@ -265,6 +265,34 @@ Server per-frame S2C 0x0A emit (§5.47; witnessed 2026-07-01; reimpl in `libs/ne
 | `serialize_entity_states_to_packet` | `0x50f070` | 0x0A entity loop — all callback entities from the priority list, `[1][handle][type][compact]`, budget-limited round-robin, `[0]` terminator | — | players only; priority/budget/all-class = step 2 |
 | `Server_BuildEntityPriorityList` | `0x50e590` | distance-sorted priority pairlist per recipient (eye-pos ref) | — | not yet ported (step 2) |
 
+Wave 8 branch-validation grill (2026-07-01; net-re §8 Wave 8; reimpl in `libs/novaworld/protocol_message.{h,cpp}`,
+`libs/npruntime/{batch_chunker.h,game_config.h,server_message_dispatch.cpp}`, `libs/netsim/entity_wire_bridge.cpp`,
+`connection_fan.cpp`; full ctest 226 green incl. `npruntime_golden_lan_join`, `novaworld_protocol_message`,
+`npruntime_batch_chunker`, `netsim_two_peer_fanout`, `nw_message_coverage`):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `CNapiNPConnection_SendSessionPacket` | `0x61edd0` | session framing: opcode 0x43/0x83, header `[remote_key][seq][ack][u8 0]`, inner SCRK (TX key conn+0xCC) + outer static NWU key → `frame_session_packet` | — | matching |
+| `CNapiNPConnection_ParseMessages` | `0x625bc0` | session deframing: outer/inner decrypt (RX key conn+0x10c), `recv_ack_seq` latch, msg walk → `deframe_session_packet` | — | matching |
+| `CNapiNPConnection_BuildOutgoingPackets` | `0x628430` | `++out_packet_seq` per packet; per-packet message assignment (resend-capable); max_packet_bytes ≥26 | — | matching (wire; our frame-at-send model resends none) |
+| `CNapiNPConnection_GenerateTxKey` | `0x61dfe0` | 63-char self TX SCRK into conn+0xCC — pins the TX/RX key direction split `SessionCrypto` models | — | matching (read-only) |
+| `serialize_pool2_static_to_buffer` | `0x5042F0` | S2C 0x10 pool-2 static batch, 650-B budget margin 40 (was `loc_5042F0` code-island; defined + named this session) | D-NET-135 | matching (model) |
+| `Server_PlayerAdd` | `0x51cbc0` | player add: `entity+36 \|= 1` per-entity (remote adds), minimap ids slot+442/444, playerClass [5,9]-else-8 clamp, entity+120 = connection_id, 0x46 broadcast fieldFlags 0x1CF7 | D-NET-136/137 | witnessed (flags model divergence recorded) |
+| `lookup_entity_slot_and_pack_entry` | `0x57ad40` | minimap slot packer: `type(0-4)\|subtype(5-8)\|index(9-14)\|alive(15)`, 288-B stride array | D-NET-137 | witnessed (reimpl shim divergence recorded) |
+| `MinimapSlot_FindByPackedId` | `0x57a270` | packed-id → slot lookup (renamed from `sub_57A270`); `MinimapSlot_HasEntity @0x57b140` wrapper | D-NET-137 | witnessed |
+| `NetPacket_SerializeWeaponOverlaySlotState` | `0x505e80` | 0x46 body: 0x8000 removal, 0x4000 ECHO from request, `fieldFlags & 0x7FFF` pass-through, per-bit fields (slot-state sources pinned) | D-NET-127 | matching (echo fix applied; per-field values remain approximated) |
+| `NapiNPClientMsg_PlayerSync` | `0x431370` | client 0x46 handler: variable-length strings, removal = no entity byte, ack-walk re-request `[slot+1][0x5CF7]` while `< byte_A860D1` | — | matching (decode side) |
+| `CNapiServer_ProcessPendingPlayerSpawns` | `0x4c8dc0` | spawn pump: team-balance gate; emits 0x03 → PlayerAdd → 0x05 → 0x04 → 0x7B | D-NET-127 | matching (order + bodies) |
+| `NetPacket_WriteWeaponRestrictionFlag` | `0x502ac0` | 0x03 body `[u8 1][u16 node count][u16 weapon mask]` / `[u8 0]` | D-NET-127 | witnessed |
+| `NetPacket_WriteBoolTrue` | `0x502c00` | 0x05 body = `{0x01}` | D-NET-127 | matching |
+| `NetPacket_WriteSlotAssignment` | `0x502b30` | 0x04 body (24 B): stat dwords, g_mode, player_slot, slot capacity, team → `build_tag04_slot_assignment` (rename from `sub_502B30` proposed) | D-NET-127 | matching |
+| `CNapiNPConnection_SendConfigUpdate` | `0x6286e0` | settings-flag 0x00 msg: `[u8 dir==0][u32 mask][u32 cs value per bit]` | D-NET-127 | matching |
+| `write_entity_packet` | `0x506bb0` | 0x51 spawn confirm: `[u16 hdr][u16 handle][u8 team][u16 NetId][u8 animSlot]` when Flags&0x100 | D-NET-137 | layout matching; NetId/anim zeros tolerable |
+| `Entity_SetHealthFromDifficultyByte` | `0x4AD580` | client apply of the 0x0A player field-17 byte: `[tier(4-5) \| playerClass(0-3)]`, tier ≈ 21.9/59.4/87.5 % of healthMax | D-NET-138 | witnessed (reimpl sends raw health — tracked) |
+| `apply_session_settings_to_globals` | `0x551500` | settings-UI → live rule globals copy; names the five 0x08-block dwords | — | witnessed (read-only) |
+| `Config_ParseSettingsLine` | `0x54f740` | cfg-file setting names: `replay`/`max_team_lives`/`timeout`/`destroybuild`/`deathmes`/`mp_allowsniperscopezoom` | — | witnessed (read-only) |
+| `ServerConfig_ApplyHostSetting` | `0x4a6000` | SET-command → `dword_2550A04` mpattrib bitfield (`TeamChoose` bit 0x4, `TeamFF`/`FriendlyTag` inverted 0x200/0x400) | — | witnessed (read-only) |
+
 Kill feed + replay event/environment streams (§5.26/§5.27; one-host/one-client capture 2026-06-17;
 `nw_pp` printers + `libs/novaworld` decoders, `nw_replay_timeline` `test_event_stream`):
 

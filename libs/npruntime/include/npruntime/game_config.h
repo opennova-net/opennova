@@ -47,15 +47,21 @@ struct GameConfig {
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire
 	// order. Default 0 for a dev host; a real host / the golden seeds them (retail frame 146:
 	// [respawn 30, timelimit 10, _, gametype, _, score 50, _, startdelay, _, _]).
+	// The five formerly-UNWITNESSED words were named 2026-07-01 by tracing each 0x08-block global to
+	// its Config_ParseSettingsLine @0x54f740 setting-name compare (via apply_session_settings_to_globals
+	// @0x551500, which copies the parsed cfg global into the live rule global).
 	uint32_t respawn_time = 0;         // [orig g_respawn_time @0x24D2140]      dword[0]; SET `GameTime`
 	uint32_t time_limit_minutes = 0;  // [orig g_time_limit_minutes @0x24D2144] dword[1]; SET `KOTHLimit`
-	uint32_t config_word_2 = 0;       // [orig dword_24D2120]                  dword[2] (semantic UNWITNESSED)
-	uint32_t config_word_4 = 0;       // [orig dword_24D2130]                  dword[4] (semantic UNWITNESSED)
+	uint32_t replay_enabled = 0;      // [orig g_replay_enabled @0x24D2120 <- cfg `replay` @0x2550B24]      dword[2]
+	uint32_t max_team_lives = 0;      // [orig g_max_team_lives @0x24D2130 <- cfg `max_team_lives` @0x2550ABC] dword[4]
 	uint32_t score_limit = 0;         // [orig g_score_limit @0x24D2134]       dword[5]; SET `KillLimit` (name-swap)
-	uint32_t config_word_6 = 0;       // [orig dword_24D214C]                  dword[6] (semantic UNWITNESSED)
+	uint32_t respawn_timeout = 0;     // [orig g_respawn_timeout @0x24D214C <- cfg `timeout` @0x2550B34]    dword[6];
+	                                  //   read by GameEvent_PlayerDeath @0x516dd0 / Server_UpdateBotMovement
 	uint32_t start_delay = 0;         // [orig g_StartDelay @0x24D2160]        dword[7]; SET `StartDelay`
-	uint32_t config_word_8 = 0;       // [orig dword_24D2164]                  dword[8] (semantic UNWITNESSED)
-	uint32_t config_word_9 = 0;       // [orig dword_24D2168]                  dword[9] (semantic UNWITNESSED)
+	uint32_t destroy_buildings = 0;   // [orig g_destroy_buildings @0x24D2164 <- cfg `destroybuild` @0x2550ACC] dword[8];
+	                                  //   read by Entity_ApplyWeaponDamage @0x4e6820
+	uint32_t death_messages = 0;      // [orig g_death_messages @0x24D2168 <- cfg `deathmes` @0x2550AD0]    dword[9];
+	                                  //   read x3 by GameEvent_PlayerDeath @0x516dd0
 	uint8_t config_bytes[7] = {0, 0, 0, 0, 0, 0, 0}; // [orig byte_24D234C..byte_24D2360 + dword_24D2110 low byte]
 
 	// CNapiServerConfig_BuildFlags @0x4c4dc0 inputs beyond game_settings (the g_rules_flags bitfield
@@ -64,8 +70,13 @@ struct GameConfig {
 	bool squad_enforced = false;       // [orig g_squad_max_players @0x2550924 != 0] -> |0x2000
 	std::string squad_required_tag;    // [orig g_squad_required_tag @0x2550928]      -> |0x4000
 	bool permanent_death = false;      // [orig g_MpPermanentDeath @0x2550C9C]        -> |0x8000
-	bool config_flag_2550A04 = false;  // [orig dword_2550A04 & 4]   (semantic UNWITNESSED) -> |0x4
-	bool config_flag_2550CA4 = false;  // [orig dword_2550CA4]       (semantic UNWITNESSED) -> |0x10000
+	// Both flags named 2026-07-01: dword_2550A04 is the mpattrib BITFIELD store itself
+	// (ServerConfig_ApplyHostSetting @0x4a6000: SET `TeamChoose`->bit 0x4 direct, `TeamFF`->0x200
+	// inverted, `FriendlyTag`->0x400 inverted, `ClaymorePref` ...).
+	bool team_choose = false;          // [orig dword_2550A04 & 4 = SET `TeamChoose` @0x4a63d9] -> |0x4
+	bool allow_sniper_scope_zoom = false; // [orig g_mp_allowsniperscopezoom @0x2550CA4, cfg
+	                                      //  `mp_allowsniperscopezoom` @0x550ac9; read by
+	                                      //  WeaponSlot_InitFromDef @0x53ee70] -> |0x10000
 
 	// --- §5.1 reactive-reply mission / player identity + advertised spawn ---------------------------
 	// The server / mission / player fields the reactive NapiNPServerMsg_0x0NN reply handlers read

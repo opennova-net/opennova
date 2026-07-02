@@ -616,9 +616,9 @@ int test_frame_update_roundtrip() {
 		FrameUpdate in;
 		in.anchor_x = 0x00112233; in.anchor_y = int32_t(0xFFAABBCC); in.anchor_z = 0x0044EE55;
 		in.flags1 = 0x02; in.flags2 = 0x00;
-		in.aim.view0 = 1; in.aim.view1 = 2; in.aim.view2 = 3;
-		in.aim.view3 = 4; in.aim.view4 = 5; in.aim.view5 = 6;
-		in.aim.target_slot = 0xFF; in.aim.aim_extra = 0x12345678;
+		in.weapon.preround_timer = 1; in.weapon.slot_state360 = 2; in.weapon.slot_state368 = 3;
+		in.weapon.slot_state364 = 4; in.weapon.slot_state356 = 5; in.weapon.slot_state460 = 6;
+		in.weapon.reload_seconds = 0xFF; in.weapon.uniform_team_mask = 0x12345678;
 		in.state_flag_byte = 0x07; in.mount_handle = 0xFFFF; in.health = 96; in.state_word = -3;
 
 		FrameUpdateRecord p; p.handle = 0x0001; p.type_id = 100; p.cls = EntityClass::Player;
@@ -642,7 +642,7 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.consumed == wire.size());
 		EXPECT(out.anchor_x == in.anchor_x && out.anchor_y == in.anchor_y && out.anchor_z == in.anchor_z);
 		EXPECT(out.flags1 == 0x02 && out.flags2 == 0x00);
-		EXPECT(out.aim.present && out.aim.aim_extra == 0x12345678 && out.aim.view5 == 6);
+		EXPECT(out.weapon.present && out.weapon.uniform_team_mask == 0x12345678 && out.weapon.slot_state460 == 6);
 		EXPECT(out.health == 96 && out.state_word == -3 && out.mount_handle == 0xFFFF);
 		EXPECT(out.records.size() == 3);
 		EXPECT(out.records[0].cls == EntityClass::Player && out.records[0].handle == 0x0001);

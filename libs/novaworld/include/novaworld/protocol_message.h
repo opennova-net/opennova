@@ -190,7 +190,14 @@ struct SessionCrypto {
 // Frame `messages` into a ProtocolPacketHeader + SCRK-encrypted inner body (NO outer NWU envelope — the
 // caller applies nw_encode_outbound / encode_session_outbound). Stamps session_id, seq_num =
 // seq.next_outbound_seq++, ack_count = seq.last_inbound_seq, connection_flags = 0. Returns false only if
-// the inner encode fails. [orig: the CNapiNPConnection header-fill + SCRK encode shared by both directions]
+// the inner encode fails.
+// [orig: CNapiNPConnection_SendSessionPacket @ 0x61edd0] fills the same 13-byte header after the opcode:
+//   [0] remote_key (session_keys.remote_key @ conn+0x150) -> session_id
+//   [4] packet_seq  (out_packet_seq @ conn+0x7ac, ++'d per packet in BuildOutgoingPackets @ 0x628430)
+//   [8] ack_seq     (recv_ack_seq  @ conn+0x7b8, = last inbound packet seq)
+//   [12] reserved byte 0 -> connection_flags
+// then SCRK-encrypts the inner records with the OUTBOUND tx_crypto_key (net_state+0x9e @ conn+0xCC),
+// and the caller wraps header+records in the static NWU session key (opcode excluded).
 bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                           const std::vector<ProtocolMessage> &messages,
                           std::vector<uint8_t> &body_out);
@@ -198,6 +205,10 @@ bool frame_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 // Inverse: SCRK-decrypt `body` into `hdr_out` + `messages_out` and latch seq.last_inbound_seq =
 // hdr_out.seq_num. Returns false (leaving seq untouched) if the inner decode fails; the caller applies
 // its own failure policy. The outer NWU envelope must already be stripped by the caller.
+// [orig: CNapiNPConnection_ParseMessages @ 0x625bc0] reads seq at payload+0, ack at payload+4, the
+// reserved byte at payload+8, sets conn->recv_ack_seq = inbound seq (the value echoed as the next
+// outbound ack), and SCRK-decrypts the records with the INBOUND crypto_key (@ conn+0x10c) — the peer
+// key, distinct from the outbound tx_crypto_key. This direction split is what SessionCrypto models.
 bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             const uint8_t *body, size_t body_len,
                             ProtocolPacketHeader &hdr_out,

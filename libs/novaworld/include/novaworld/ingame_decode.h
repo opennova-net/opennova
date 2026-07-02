@@ -648,19 +648,24 @@ struct FrameEnv {
 };
 
 // The 0x0A header's sub-block case 0 (`flags2 & 3 == 0`, the common gameplay
-// frame) — local-player per-frame view/aim + current-target state. Read on both
-// host and client. Field roles beyond their landing globals are unwitnessed; the
-// landings are exact. [orig: NapiNPClientMsg_0x00A @ 0x430054..0x430136]
-struct FrameAimBlock {
+// frame) — the recipient's WEAPON/reload/uniform state (the former name
+// `FrameAimBlock` was a misnomer; server-side grill 2026-07-01). Written by
+// NetPacket_WritePlayerState @0x4ff81b: preround timer, five per-player-slot
+// weapon-overlay bytes (+360/+368 gated on entity+36 bit 1), the reload
+// countdown, and the uniform team mask (CWeaponSlotManager_GetUniformTeamMask
+// @0x4a2620). Client landings are exact. [orig: NetPacket_WritePlayerState
+// @0x4ff81b (writer) / NapiNPClientMsg_0x00A @ 0x430054..0x430136 (reader)]
+struct FrameWeaponBlock {
 	bool     present = false;
-	uint8_t  view0 = 0;         // → dword_A85B64  [0x430064]
-	uint8_t  view1 = 0;         // → dword_A85B5C  [0x430084]
-	uint8_t  view2 = 0;         // → dword_A85B60  [0x43009F]
-	uint8_t  view3 = 0;         // → dword_A85B68  [0x4300C3]
-	uint8_t  view4 = 0;         // → dword_A85B6C  [0x4300E3]
-	uint8_t  view5 = 0;         // → word_A85B7C   [0x430104]
-	uint8_t  target_slot = 0;   // 0xFF=none → dword_A85B70/B74 (current target idx) [0x43014D]
-	int32_t  aim_extra = 0;     // → dword_A85BBC  [0x430136]
+	uint8_t  preround_timer = 0; // [orig: g_preround_delay_timer @0xC8D824] → dword_A85B64 [0x430064]
+	uint8_t  slot_state360 = 0;  // playerSlot+360 (0 unless entity+36 bit 1) → dword_A85B5C [0x430084]
+	uint8_t  slot_state368 = 0;  // playerSlot+368 (0 unless entity+36 bit 1) → dword_A85B60 [0x43009F]
+	uint8_t  slot_state364 = 0;  // playerSlot+364 → dword_A85B68  [0x4300C3]
+	uint8_t  slot_state356 = 0;  // playerSlot+356 → dword_A85B6C  [0x4300E3]
+	uint8_t  slot_state460 = 0;  // playerSlot+460 → word_A85B7C   [0x430104]
+	uint8_t  reload_seconds = 0; // reload countdown secs (0xFE cap; 0xFF = belt-fed special; 0 = idle)
+	                             // [orig: @0x4ff8f0..0x4ff992] → dword_A85B70/B74 [0x43014D]
+	int32_t  uniform_team_mask = 0; // [orig: @0x4ff9a3] → dword_A85BBC  [0x430136]
 };
 
 // The 0x0A header's sub-block case 1 (`flags2 & 3 == 1`) — the round/game timer
@@ -708,7 +713,7 @@ struct FrameUpdate {
 	uint16_t mount_handle = 0xFFFF; // local-player vehicle-mount (header tail)
 	int16_t  health = 0;            // local-player health
 	int16_t  state_word = 0;
-	FrameAimBlock       aim;        // valid iff sub_block == 0
+	FrameWeaponBlock    weapon;     // valid iff sub_block == 0
 	FrameTimerBlock     timer;      // valid iff sub_block == 1
 	FrameEnv            env;        // valid iff sub_block == 2
 	FrameObjectiveBlock objective;  // valid iff sub_block == 3 (+ objective gate)

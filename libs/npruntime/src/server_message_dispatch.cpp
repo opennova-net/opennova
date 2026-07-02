@@ -271,21 +271,42 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 	return ctx;
 }
 
-// tag=0x02 GLB_JOIN post-handshake burst. [orig: NapiNPServerMsg_0x002 @0x512FD0 — witnessed handler
-// emits 0x01/0x7A/0x7B/0x03; the extra 0x00x2/0x05/0x04 are captured-from-observation, D-NET-127.]
+// tag=0x04 join/slot-assignment body (24 B) [orig: NetPacket_WriteSlotAssignment @0x502b30, sent from
+// CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]: [4x u32 netPlayer+60..72 stat dwords (0 on a fresh
+// join)][u8 g_mode dword_24D2110][u8 player_slot (slot+20)][u8 slot capacity @0x24c0ca4][u32 0]
+// [u8 team (slot+416)]. Every fixture byte is now witnessed field-for-field (grill 2026-07-01).
+std::vector<uint8_t> build_tag04_slot_assignment(uint8_t player_slot, uint8_t slot_capacity,
+                                                 uint8_t team) {
+	std::vector<uint8_t> payload(24, 0);
+	payload[16] = 0;             // g_mode byte [orig dword_24D2110 low byte] — 0 on the golden host
+	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
+	payload[18] = slot_capacity; // player-slot array capacity [orig `capacity` @0x24c0ca4]
+	payload[23] = team;          // [orig slot+416]
+	return payload;
+}
+
+// tag=0x02 GLB_JOIN post-handshake burst. [orig: NapiNPServerMsg_0x002 @0x512FD0 emits 0x01/0x7A/0x7B;
+// the spawn pump CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0 emits 0x03/0x05/0x04. ALL bodies now
+// witnessed (grill 2026-07-01), closing the former D-NET-127 observation-carry for this burst:
+//   0x00 (settings flag 0xA0) = CS-config update [orig: CNapiNPConnection_SendConfigUpdate @0x6286e0:
+//        [u8 direction==0][u32 bit mask][u32 value per set bit]] — ours sets field idx 3 = 12 for both
+//        directions, matching the golden.
+//   0x03 = NetPacket_WriteWeaponRestrictionFlag @0x502ac0: [u8 1][u16 list-node count][u16 weapon mask
+//        (netPlayer inner+76)] when restriction data exists, else [u8 0].
+//   0x05 = NetPacket_WriteBoolTrue @0x502c00: exactly {0x01}.
+//   0x04 = NetPacket_WriteSlotAssignment @0x502b30 (build_tag04_slot_assignment above).]
 void emit_post_handshake_burst(const GameConfig &cfg, std::vector<ProtocolMessage> &out) {
 	out.push_back(make_protocol_message(0x00, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x00, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}));
 	out.push_back(make_protocol_message(0x7A, build_tag7a_pcid(cfg)));
 	out.push_back(make_protocol_message(0x7B, build_tag7b_session_summary(cfg)));
+	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(0x03, {0x01, 0x01, 0x00, 0x01, 0x00}));
 	out.push_back(make_protocol_message(0x05, {0x01}));
-	out.push_back(make_protocol_message(0x04, {
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-			0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x02,
-	}));
+	// Golden join: slot 1 of capacity 2, team 2. TODO(roster): thread the live slot/capacity/team of
+	// the joining connection here once emit_post_handshake_burst receives the connection identity.
+	out.push_back(make_protocol_message(0x04, build_tag04_slot_assignment(1, 2, 2)));
 }
 
 // Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
@@ -371,12 +392,20 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			case 0x22: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
-				// (body byte 0); reply 0x46 for THAT slot so the joiner binds it. The golden host ACK-WALKS
-				// the whole roster: it sets fieldFlags 0x4000 so the client re-requests slot+1, sending a
-				// real 0x46 for each occupied slot and a REMOVAL (0x8000) for empty ones, until max_players.
-				// Without the ack the joiner only ever binds its OWN slot, leaving other players (the host's
-				// serve-and-play player) unbound (residual 0x0F flood grill 2026-07-01).
+				// (body byte 0) + a fieldFlags word (bytes 1-2); reply 0x46 for THAT slot so the joiner
+				// binds it. The ACK-WALK is CLIENT-driven: the server ECHOES bit 0x4000 from the request
+				// into the reply (NetPacket_SerializeWeaponOverlaySlotState @0x505f05 `if (fieldFlags &
+				// 0x4000) adjusted |= 0x4000`), and the CLIENT, on seeing the echoed ack, re-requests
+				// slot+1 with fieldFlags 0x5CF7 until slot+1 >= its max-player count byte_A860D1
+				// (NapiNPClientMsg_PlayerSync @0x431370 tail) — the server never terminates the walk.
+				// An inactive slot / NULL entity forces a 0x8000 removal reply (@0x505ecb..0x505ee0).
+				// Without the walk the joiner only ever binds its OWN slot, leaving other players (the
+				// host's serve-and-play player) unbound (residual 0x0F flood grill 2026-07-01).
 				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
+				const uint16_t req_flags =
+						msg.payload.size() >= 3
+								? static_cast<uint16_t>(msg.payload[1] | (msg.payload[2] << 8))
+								: 0;
 				bool slot_has_player = false;
 				for (const NapiNPConnection &c : roster) {
 					if (c.phase >= ConnectionPhase::PlayerAdded && c.link.owned_entity.valid() &&
@@ -385,16 +414,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						break;
 					}
 				}
-				// Keep the client walking while there are more slots below max_players; drop the ack at the
-				// last slot so the walk terminates cleanly.
-				const bool keep_walking =
-						static_cast<int>(req_slot) + 1 < static_cast<int>(config.max_players);
+				// Echo the client's ack bit [orig: @0x505f05]. The retail client stops the walk itself at
+				// its max-player count (fed from our 0x08 ServerConfig block), so no server-side cap.
+				const bool echo_ack = (req_flags & 0x4000u) != 0;
 				if (slot_has_player) {
 					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
-					replies.push_back(make_protocol_message(0x46, encode_player_sync(prs, keep_walking)));
+					replies.push_back(make_protocol_message(0x46, encode_player_sync(prs, echo_ack)));
 				} else {
 					replies.push_back(
-							make_protocol_message(0x46, encode_player_sync_removal(req_slot, keep_walking)));
+							make_protocol_message(0x46, encode_player_sync_removal(req_slot, echo_ack)));
 				}
 				break;
 			}

@@ -58,7 +58,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
 	const GameConfig &gs = ctx.config;  // §6.4 game_settings inputs (passwords / game_type / mp_attributes)
 	uint32_t flags = 0;
 	if (!ctx.is_in_session) return flags;     // gated on is_in_session (+0x58)
-	if (r.config_flag_2550A04) flags = 4;
+	if (r.team_choose) flags = 4; // [orig dword_2550A04 & 4 = SET `TeamChoose`]
 	switch (static_cast<uint32_t>(ctx.transport_mode)) {
 	case 1: flags |= 0x400u; break;           // single-player host
 	case 2: flags |= 0x100u; break;           // LAN
@@ -78,7 +78,7 @@ uint32_t build_server_config_flags(const NapiNPServerCtx &ctx) {
 		if (!r.squad_required_tag.empty()) flags |= 0x4000u;
 	}
 	if (r.permanent_death) flags |= 0x8000u;
-	if (r.config_flag_2550CA4) flags |= 0x10000u;
+	if (r.allow_sniper_scope_zoom) flags |= 0x10000u; // [orig g_mp_allowsniperscopezoom @0x2550CA4]
 	return flags;
 }
 
@@ -89,14 +89,14 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	b.reserve(51);
 	put_u32(b, r.respawn_time);
 	put_u32(b, r.time_limit_minutes);
-	put_u32(b, r.config_word_2);
+	put_u32(b, r.replay_enabled);      // [orig g_replay_enabled @0x24D2120, SET `replay`]
 	put_u32(b, r.game_type);
-	put_u32(b, r.config_word_4);
+	put_u32(b, r.max_team_lives);      // [orig g_max_team_lives @0x24D2130, SET `max_team_lives`]
 	put_u32(b, r.score_limit);
-	put_u32(b, r.config_word_6);
+	put_u32(b, r.respawn_timeout);     // [orig g_respawn_timeout @0x24D214C, SET `timeout`]
 	put_u32(b, r.start_delay);
-	put_u32(b, r.config_word_8);
-	put_u32(b, r.config_word_9);
+	put_u32(b, r.destroy_buildings);   // [orig g_destroy_buildings @0x24D2164, SET `destroybuild`]
+	put_u32(b, r.death_messages);      // [orig g_death_messages @0x24D2168, SET `deathmes`]
 	for (int i = 0; i < 7; ++i) b.push_back(r.config_bytes[i]);
 	put_u32(b, build_server_config_flags(ctx));
 	return b; // 51 bytes

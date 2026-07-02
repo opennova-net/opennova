@@ -85,16 +85,16 @@ int test_catalog_consistency() {
 // (2) Per-Decoded-tag consumption
 // ---------------------------------------------------------------------------
 
-// S2C 0x0A — minimal valid frame: 12-B anchor + flags + sub-block 0 (aim, 11 B)
+// S2C 0x0A — minimal valid frame: 12-B anchor + flags + sub-block 0 (weapon, 11 B)
 // + 7-B tail + tag-0 terminator = 33 B. Asserts the walk consumes it cleanly.
 int check_S_0A_frame_update() {
 	LE w;
 	w.u32(0); w.u32(0); w.u32(0);       // anchor x/y/z
 	w.u8(0);                            // flags1
 	w.u8(0);                            // flags2 -> sub_block 0, no passenger
-	w.zeros(6);                         // aim view0..5
-	w.u8(0xFF);                         // aim target_slot (none)
-	w.u32(0);                           // aim_extra i32
+	w.zeros(6);                         // weapon: preround + slot-state bytes
+	w.u8(0xFF);                         // weapon reload_seconds (belt-fed special)
+	w.u32(0);                           // uniform_team_mask i32
 	w.u8(0); w.u16(0); w.u16(0); w.u16(0); // tail: state_flag, mount, health, state_word
 	w.u8(0);                            // event-loop terminator (tag 0)
 	EXPECT(w.b.size() == 33);

@@ -773,13 +773,14 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 	            unsigned(fu.flags1), unsigned(fu.flags2), unsigned(fu.sub_block),
 	            ok ? "" : " (DECODE INCOMPLETE)");
 
-	if (fu.aim.present)
-		std::printf("            aim: view=(%u,%u,%u,%u,%u,%u) target=%s extra=0x%08x\n",
-		            unsigned(fu.aim.view0), unsigned(fu.aim.view1), unsigned(fu.aim.view2),
-		            unsigned(fu.aim.view3), unsigned(fu.aim.view4), unsigned(fu.aim.view5),
-		            fu.aim.target_slot == 0xFF ? "none"
-		                : (std::string("s") + std::to_string(fu.aim.target_slot)).c_str(),
-		            uint32_t(fu.aim.aim_extra));
+	if (fu.weapon.present)
+		std::printf("            wpn: preround=%u slots=(%u,%u,%u,%u,%u) reload=%s uniformMask=0x%08x\n",
+		            unsigned(fu.weapon.preround_timer), unsigned(fu.weapon.slot_state360),
+		            unsigned(fu.weapon.slot_state368), unsigned(fu.weapon.slot_state364),
+		            unsigned(fu.weapon.slot_state356), unsigned(fu.weapon.slot_state460),
+		            fu.weapon.reload_seconds == 0xFF ? "belt"
+		                : (std::to_string(fu.weapon.reload_seconds) + "s").c_str(),
+		            uint32_t(fu.weapon.uniform_team_mask));
 	if (fu.timer.present)
 		std::printf("            timer: state=(%u,%u,%u,%u) seconds=%d\n",
 		            unsigned(fu.timer.state0), unsigned(fu.timer.state1),

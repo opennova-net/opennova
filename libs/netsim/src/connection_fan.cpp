@@ -39,9 +39,9 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// 364/356/460 + ammo + CWeaponSlotManager_GetUniformTeamMask]. Our host does not model the
 		// recipient's weapon-slot state yet, so emit the golden-witnessed co-op steady value (all-zero
 		// slots + zero uniform mask) — the shape a retail co-op host sends for a standard-loadout
-		// player (golden ASH_I5A: view 0, extra 8). (FrameAimBlock is a witnessed misnomer for this
-		// weapon block; the rename is tracked as a follow-up.)
-		fu.aim.present = true;
+		// player (golden ASH_I5A: slots 0, uniform mask 8). (Renamed from the FrameAimBlock misnomer
+		// to FrameWeaponBlock, grill 2026-07-01.)
+		fu.weapon.present = true;
 		break;
 	case 1:
 		// Server-status block [orig: @0x4ff9d5 phase-1]. LOAD-BEARING — carries the client's
@@ -106,9 +106,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// §5.10 health-classification byte (field 17 -> Entity_SetHealthFromDifficultyByte). A
 			// living player MUST replicate non-zero or the client marks its own player dead and the
 			// C2S 0x0C move uplink (Player_BuildTag0CInputBody, gated on entity->Health != 0) never
-			// fires — i.e. the joiner spawns but cannot move. Send the entity's health clamped to a
-			// byte (dead -> 0). The exact difficulty-byte classification is a follow-up grill of
-			// Entity_SetHealthFromDifficultyByte @0x4AD580; non-zero is the deploy/move requirement.
+			// fires — i.e. the joiner spawns but cannot move. WITNESSED (grill 2026-07-01): the byte
+			// is PACKED, not raw health — the client apply @0x4AD580 unpacks low nibble ->
+			// entity->playerClass (+660) and bits 4-5 -> a health TIER scaled off itemDef->healthMax
+			// (tier 0 ~21.9%, 1 ~59.4%, 2 ~87.5%; 16.16 mults 28671/49152 + 0x8000 rounding). Our raw
+			// clamped health (e.g. 150=0x96) decodes remotely as playerClass 6 + tier 1. The LOCAL
+			// player skips this apply [orig: @0x4c11ac], so the joiner's own player is unaffected;
+			// remote players get a wrong class/health until the faithful pack lands. The server-side
+			// tier quantization inside NetPacket_SerializePlayerState @0x4C09C0 is still unwitnessed —
+			// docs/net/novaworld-net-re.md (D-NET-138).
 			rec.player.health_class_byte =
 					e.health > 0 ? static_cast<uint8_t>(e.health < 255 ? e.health : 255) : 0;
 			break;
