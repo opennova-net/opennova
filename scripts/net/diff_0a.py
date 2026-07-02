@@ -154,9 +154,12 @@ def report(ours, gold):
     print(f"frames: ours={ours['frames']}  golden={gold['frames']}\n")
 
     print("SUB-BLOCK usage (flags2 low2 -> which per-frame sub-block):")
-    for s in sorted(set(ours["subs"]) | set(gold["subs"])):
-        o = ours["subs"].get(str(s), ours["subs"].get(s, 0))
-        g = gold["subs"].get(str(s), gold["subs"].get(s, 0))
+    # A fresh profile keys subs by int; a .0a.json cache round-trips them to str.
+    osubs = {int(k): v for k, v in ours["subs"].items()}
+    gsubs = {int(k): v for k, v in gold["subs"].items()}
+    for s in sorted(set(osubs) | set(gsubs)):
+        o = osubs.get(s, 0)
+        g = gsubs.get(s, 0)
         flag = ""
         if g > 0 and o == 0:
             flag = "  <- GAP: golden emits this sub-block, we never do"
