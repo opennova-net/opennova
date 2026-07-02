@@ -94,12 +94,18 @@ class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer s
                  // shared command layer can reach an entity's AI component in-engine)
 
 // Snap a mounted occupant onto its seat: occ.position = vehicle.position +
-// rotate(seat.seat_local, vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
-// others face the vehicle. Pure geometry (no AI), shared by EntityCommands::mount (the
-// attach-time pose) and the AI tick (the per-tick seat-follow). [orig: the clean stand-in
-// for Entity_SerializeMountedVehicleState @0x460560's Entity_TransformLocalToWorld
-// seat-follow; true bone-transform follow @0x4b0c50 is a tracked-deferred swap of this body.]
+// rotate(seat.seat_local, -vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
+// others face vehicle.yaw + seat.yaw_offset. Pure geometry (no AI), shared by
+// EntityCommands::mount (the attach-time pose) and the AI tick (the per-tick seat-follow).
+// [orig: stand-in for Entity_SerializeMountedVehicleState @0x460560's seat follow; true
+// bone-transform follow is Entity_GetBoneTransformAndOrientation @0x4b0c50.]
 void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
+
+enum class SeatSelectionMode : uint8_t {
+    Any = 0,
+    PassengerOnly,     // command 123: only `sitex`
+    RejectController,  // command 124: retail gate rejects `ctrlx`, keeps `drvrx` eligible
+};
 
 // ----------------------------------------------------------------------------
 // Shared entity-command primitive layer. Models the original Entity_* mutation
@@ -147,13 +153,19 @@ public:
     // --- mount / emplacement (AttachToEmplaced) ---
     // [orig: Entity_FindBestSeatSlot @0x4351f0] Pick the best free seat on `target` for `occupant`:
     // skip None/taken seats, weight by type (driver/ctrl 0x2000 < gunner 0x20000 < passenger
-    // 0x200000; lower wins), return its index or -1. (Child-entity traversal + the player-class
-    // 123/124 gate are deferred — tracked.)
-    int find_best_seat(const Entity &target, EntityHandle occupant) const;
+    // 0x200000; lower wins), return its index or -1. Child-entity traversal is deferred — tracked.
+    int find_best_seat(const Entity &target, EntityHandle occupant,
+                       SeatSelectionMode mode = SeatSelectionMode::Any) const;
     // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best
     // free seat: reject if the occupant is already mounted or the target has no free seat; write both
     // sides + pose immediately. Returns false on any reject.
-    bool mount(uint16_t occupant_ssn, uint16_t target_ssn);
+    bool mount(uint16_t occupant_ssn, uint16_t target_ssn,
+               SeatSelectionMode mode = SeatSelectionMode::Any);
+    // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail
+    // symbol. Retail path: Entity_UpdateInfantryAI @0x4ba9ad -> Entity_FindBestSeatSlot
+    // @0x4351f0 -> Entity_AttachToVehicleSeat @0x4364a0. FindBestSeatSlot applies the rules:
+    // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
+    bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
     // carries ONLY the occupant SSN; the original finds the vehicle via the occupant model's +144
     // hierarchy link. We don't model that link, so the target is the nearest emplacement with a free

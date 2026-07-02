@@ -29,6 +29,7 @@
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
 #include "object/nova_skeletal_anim.h"
+#include "hud/nova_hud_pos.h"
 #include "mission/nova_mission_data.h"
 #include "simulation/nova_simulation.h"
 #include "wac/nova_wac_program.h"
@@ -46,6 +47,10 @@
 #include "editor/nova_edit_history.h"
 #include "rtxt/rtxt_string_file.h"
 #include "rtxt/rtxt_resource_format.h"
+#include "network/nova_world_client.h"
+#include "network/nova_world_host.h"
+#include "network/nova_net_client.h"
+#include "network/nova_udp_pump.h"
 #include "util/nova_data_format.h"
 #include "util/nova_paths.h"
 #include "util/nova_texture_format.h"
@@ -81,6 +86,7 @@
 #include "mnu/nova_mnu_globe.h"
 #include "mnu/nova_mnu_marquee.h"
 #include "mnu/nova_mnu_menu.h"
+#include "mnu/nova_controls_model.h"
 
 using namespace godot;
 
@@ -144,6 +150,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaObjectShaderCache);
 	GDREGISTER_CLASS(NovaItemDatabase);
 	GDREGISTER_CLASS(NovaSkeletalAnim);
+	GDREGISTER_CLASS(NovaHudPos);
 	GDREGISTER_CLASS(NovaMissionData);
 	GDREGISTER_CLASS(NovaSimulation);
 	GDREGISTER_CLASS(NovaEditHistory);
@@ -205,6 +212,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaMnuGlobe);
 	GDREGISTER_CLASS(NovaMnuMarquee);
 	GDREGISTER_CLASS(NovaMnuMenu);
+	GDREGISTER_CLASS(NovaControlsModel);
+	GDREGISTER_CLASS(NovaWorldClient);
+	GDREGISTER_CLASS(NovaWorldHost);
+	GDREGISTER_CLASS(NovaNetClient);
+	GDREGISTER_CLASS(NovaUdpPump);
 
 	trn_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);

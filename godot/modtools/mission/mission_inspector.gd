@@ -55,6 +55,9 @@ var _loading: bool = false
 
 var _identity_label: Label  # heading: the selected model's name (or kind + index)
 var _identity_sub: Label    # muted subline: kind + index, shown when a name resolved
+var _identity_graphic_row: HBoxContainer
+var _identity_graphic: ResourceRefWidget # read-only items.def graphic link, when resolved
+var _user_points_check: CheckBox
 var _animated_note: Label
 var _behavior_flags_box: VBoxContainer  ## container for the AI-attribute checkboxes (built lazily)
 var _behavior_flag_checks: Array = []  ## [{ "bit": int, "check": CheckBox }]
@@ -198,7 +201,7 @@ var _props_toggle: CheckButton
 var _props_box: VBoxContainer
 var _props_binder: FieldBinder
 # Link-widget services (resolve/pick/jump Callables from the shell). They arrive
-# AFTER setup() builds the form (the workspace injects them post-build), so the
+# AFTER setup() builds the forms (the workspace injects them post-build), so the
 # setter re-configures the already-built widgets.
 var _ref_services: Dictionary = {}
 var _terrain_ref_widget: ResourceRefWidget
@@ -549,6 +552,26 @@ func _build_edit_panel() -> void:
 	# sees "Humvee" rather than just "Item #42".
 	_identity_label = ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
 	_identity_sub = ObjectUiHelpers.add_muted_label(_edit_box, "")
+	_identity_graphic_row = HBoxContainer.new()
+	_identity_graphic_row.name = "MissionSelectedGraphicRow"
+	_identity_graphic_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_edit_box.add_child(_identity_graphic_row)
+	var graphic_label := Label.new()
+	graphic_label.text = "Graphic"
+	graphic_label.tooltip_text = "Graphic declared by this entity's items.def row."
+	graphic_label.clip_text = true
+	graphic_label.custom_minimum_size = Vector2(ObjectUiHelpers.LABEL_COL_WIDTH, 0)
+	_identity_graphic_row.add_child(graphic_label)
+	_identity_graphic = ResourceRefWidget.new()
+	_identity_graphic.name = "MissionSelectedGraphic"
+	_identity_graphic.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_identity_graphic_row.add_child(_identity_graphic)
+	_configure_selected_graphic_ref()
+	_user_points_check = CheckBox.new()
+	_user_points_check.name = "MissionUserPointsCheck"
+	_user_points_check.text = "User points"
+	_user_points_check.tooltip_text = "Show this model's named userpoints in the viewport."
+	_edit_box.add_child(_user_points_check)
 
 	ObjectUiHelpers.add_section_heading(_edit_box, "Position")
 	_pos_spins = [
@@ -600,7 +623,21 @@ func _build_edit_panel() -> void:
 		_rot_spins[axis].value_changed.connect(_on_rotation_axis.bind(axis))
 	# The Team and Group dropdowns are wired through the FieldBinder, not here.
 	# Behavior fields likewise wire themselves through the FieldBinder in _build_behavior_section.
+	_user_points_check.toggled.connect(_on_user_points_toggled)
 	_delete_button.pressed.connect(_on_delete_pressed)
+
+
+func _configure_selected_graphic_ref() -> void:
+	if _identity_graphic == null or not is_instance_valid(_identity_graphic):
+		return
+	_identity_graphic.configure("object_model", "Graphic", _ref_services)
+	_identity_graphic.name_edit.editable = false
+	_identity_graphic.name_edit.focus_mode = Control.FOCUS_NONE
+	_identity_graphic.name_edit.tooltip_text = "Graphic declared by this entity's items.def row."
+	# The selected entity's graphic is derived from items.def, not authored on the
+	# mission record. Keep browse/clear hidden so the row reads as a jump target.
+	_identity_graphic.browse_button.visible = false
+	_identity_graphic.clear_button.visible = false
 
 
 # Build the collapsed-by-default "Behavior" section: a toggle that shows / hides a box of
@@ -823,6 +860,13 @@ func _refresh_option_caches() -> void:
 func _refresh_edit_panel() -> void:
 	var entity: Dictionary = _controller.get_selected_entity() if _controller != null else {}
 	if entity.is_empty():
+		_loading = true
+		if _identity_graphic != null:
+			_identity_graphic.set_value("")
+		if _identity_graphic_row != null:
+			_identity_graphic_row.visible = false
+		_sync_user_points_check(false)
+		_loading = false
 		_edit_box.visible = false
 		return
 	_edit_box.visible = true
@@ -840,6 +884,14 @@ func _refresh_edit_panel() -> void:
 		_identity_label.text = model_name
 		_identity_sub.text = kind_index
 		_identity_sub.visible = true
+	var graphic_name: String = _controller.get_selected_graphic_name() if _controller != null else ""
+	if graphic_name.is_empty():
+		_identity_graphic.set_value("")
+		_identity_graphic_row.visible = false
+	else:
+		_identity_graphic.set_value(graphic_name)
+		_identity_graphic_row.visible = true
+	_sync_user_points_check(true)
 	# Use _sync_spin (focus-aware) so a refresh that lands while the user is mid-typing a position /
 	# rotation value does not clobber the keystroke -- matching the zone-bounds and scripting spins.
 	# The _loading bracket still suppresses the value_changed echo for the spins that do get written.
@@ -862,6 +914,27 @@ func _refresh_edit_panel() -> void:
 
 	var summary: Dictionary = _controller.get_selection_summary() if _controller != null else {}
 	_animated_note.visible = bool(summary.get("animated", false))
+
+
+func _sync_user_points_check(has_selection: bool) -> void:
+	if _user_points_check == null:
+		return
+	var has_points := false
+	var visible := false
+	var simulating := false
+	if has_selection and _controller != null:
+		has_points = _controller.selected_has_user_points() if _controller.has_method("selected_has_user_points") else false
+		visible = _controller.is_selected_user_points_visible() if _controller.has_method("is_selected_user_points_visible") else false
+		simulating = _controller.is_simulating() if _controller.has_method("is_simulating") else false
+	_user_points_check.disabled = not has_points or simulating
+	_user_points_check.button_pressed = has_points and visible
+
+
+func _on_user_points_toggled(pressed: bool) -> void:
+	if _loading or _controller == null:
+		return
+	if _controller.has_method("set_selected_user_points_visible"):
+		_controller.set_selected_user_points_visible(pressed)
 
 
 func _on_position_axis(value: float, axis: int) -> void:
@@ -2704,6 +2777,7 @@ func _add_props_ref(field: String, kind: String, label: String, tooltip: String 
 ## the form is built.
 func set_reference_services(services: Dictionary) -> void:
 	_ref_services = services
+	_configure_selected_graphic_ref()
 	if _terrain_ref_widget != null and is_instance_valid(_terrain_ref_widget):
 		_terrain_ref_widget.configure("terrain", "Terrain", services)
 	if _env_ref_widget != null and is_instance_valid(_env_ref_widget):

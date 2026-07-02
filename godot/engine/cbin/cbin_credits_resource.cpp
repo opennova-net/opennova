@@ -1,9 +1,99 @@
 #include "cbin_credits_resource.h"
 
 #include <cstdio>
+#include <string>
 #include <godot_cpp/core/class_db.hpp>
 
+#include "cbin/cbin.h"
+
 namespace godot {
+
+// Build a credits resource from raw CBIN bytes. Mirrors the ENV + entry conversion in
+// KdaResourceFormatLoader::_load (collapsing Color/Justify control codes into per-text
+// state) but without disk-relative font/texture resolution, so it works from a PFF
+// datasource [orig: marquee_load_credits_from_ini @ 0x65c5a0: [ENV] SCROLL_RATE/CENTER_X/
+// VERTICAL_SPACE + [TEXT] ~C/~F/~I/~J/<CR>].
+Ref<CbinCreditsResource> CbinCreditsResource::from_cbin_bytes(const PackedByteArray &p_data) {
+	if (p_data.is_empty() || !cbin::is_cbin(p_data.ptr(), static_cast<size_t>(p_data.size()))) {
+		return Ref<CbinCreditsResource>();
+	}
+	cbin::Credits credits;
+	std::string error;
+	if (!cbin::decode_credits(p_data.ptr(), static_cast<size_t>(p_data.size()), credits, error)) {
+		return Ref<CbinCreditsResource>();
+	}
+
+	Ref<CbinCreditsResource> resource;
+	resource.instantiate();
+	resource->set_scroll_rate(credits.scroll_rate);
+	resource->set_vertical_space(credits.vertical_space);
+	resource->set_center_x(credits.center_x);
+	if (credits.has_top_y) {
+		resource->set_top_y(credits.top_y);
+	}
+	if (credits.has_bottom_y) {
+		resource->set_bottom_y(credits.bottom_y);
+	}
+
+	Color current_color(1, 1, 1);
+	CbinJustify current_justify = CBIN_JUSTIFY_CENTER;
+	for (const auto &src : credits.entries) {
+		switch (src.type) {
+			case cbin::EntryType::Text: {
+				Ref<CbinTextEntry> entry;
+				entry.instantiate();
+				entry->set_text(String(src.text.c_str()).replace("_", " "));
+				entry->set_color(current_color);
+				entry->set_justify(current_justify);
+				if (!src.font.empty()) {
+					entry->set_font_name(String(src.font.c_str()));
+				}
+				resource->add_entry(entry);
+				break;
+			}
+			case cbin::EntryType::Color: {
+				const float r = ((src.color >> 16) & 0xFF) / 255.0f;
+				const float g = ((src.color >> 8) & 0xFF) / 255.0f;
+				const float b = (src.color & 0xFF) / 255.0f;
+				current_color = Color(r, g, b);
+				break;
+			}
+			case cbin::EntryType::Newline: {
+				Ref<CbinNewlineEntry> entry;
+				entry.instantiate();
+				resource->add_entry(entry);
+				break;
+			}
+			case cbin::EntryType::Image: {
+				Ref<CbinImageEntry> entry;
+				entry.instantiate();
+				if (!src.image_path.empty()) {
+					entry->set_texture_name(String(src.image_path.c_str()));
+				}
+				entry->set_display_x(src.image_display_x);
+				entry->set_display_y(src.image_display_y);
+				entry->set_advances_y(src.use_simple_image_format);
+				resource->add_entry(entry);
+				break;
+			}
+			case cbin::EntryType::Justify: {
+				switch (src.justify) {
+					case cbin::Justify::Left:
+						current_justify = CBIN_JUSTIFY_LEFT;
+						break;
+					case cbin::Justify::Center:
+						current_justify = CBIN_JUSTIFY_CENTER;
+						break;
+					case cbin::Justify::Right:
+						current_justify = CBIN_JUSTIFY_RIGHT;
+						break;
+				}
+				break;
+			}
+		}
+	}
+	return resource;
+}
 
 // ============================================================================
 // CbinEntry (base class)

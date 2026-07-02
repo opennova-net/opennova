@@ -55,6 +55,15 @@ Testing/Temporary/
 # Runtime logs
 *.log
 
+# Terraform (state, providers, and operator var-files are never committed; the
+# .terraform.lock.hcl provider pins and *.tfvars.example ARE committed; see DEPLOY.md)
+infra/aws/.terraform/
+infra/github/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.auto.tfvars
+
 # Blender addon native libs and wheels (built/downloaded artifacts)
 blender/lib/**/*.so
 blender/lib/**/*.dll
@@ -80,3 +89,12 @@ godot/addons/gut/
 
 CLAUDE.local.md
 .superpowers/
+
+.scratch/
+
+# Local-only Windows dev helper: per-machine compose override that moves the NovaWorld UDP
+# port off the Hyper-V/WinNAT reserved range (see DEVELOPING.md). Not for commit.
+deploy/compose/docker-compose.winport.yml
+
+# Local reverse-engineering notes/dumps
+ida_dumps/

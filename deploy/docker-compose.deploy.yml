@@ -1,0 +1,29 @@
+# The deploy toolbox container. The operator runs it via deploy/run.sh
+# (or run.ps1), supplying only OP_SERVICE_ACCOUNT_TOKEN. The repo is
+# mounted at /workspace; secrets are rendered to a tmpfs that never
+# touches disk.
+#
+#   export OP_SERVICE_ACCOUNT_TOKEN=ops_...
+#   ./deploy/run.sh secrets check
+
+services:
+  deploy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: opennova-deploy:local
+    working_dir: /workspace
+    volumes:
+      - ../:/workspace
+      # Lets `on-deploy aws ...` run the official amazon/aws-cli image as a
+      # sibling container (the AWS CLI can't run natively on this Alpine base).
+      - /var/run/docker.sock:/var/run/docker.sock
+    tmpfs:
+      - /run/secrets
+    environment:
+      OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:?set OP_SERVICE_ACCOUNT_TOKEN to your 1Password service-account token}
+      OP_VAULT: ${OP_VAULT:-OpenNova-Deploy}
+      # Lets the toolbox drive the remote docker engine over SSH.
+      TARGET_HOST: ${TARGET_HOST:-}
+    stdin_open: true
+    tty: true

@@ -12,8 +12,15 @@ const PresentPass := preload("res://engine/world/mission_present_pass.gd")
 class FakeModel:
 	extends Node3D
 	var phases: Array = []        # [channel, phase]
+	var body_calls: Array = []    # [key_or_slot, phase]
 	func set_part_phase(channel: int, phase: int) -> void:
 		phases.append([channel, phase])
+	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+		body_calls.append([key, phase_ticks])
+	func play_body_anim_at(slot: int, phase_ticks: int) -> void:
+		body_calls.append([slot, phase_ticks])
+	func play_body_anim(slot: int) -> void:
+		body_calls.append([slot, -1])
 
 
 # resolve(bms_id, kind, index) like MissionEntityRegistry: bms_id primary, (kind,index) fallback.
@@ -57,6 +64,8 @@ class FakeSim:
 			out[b + NovaSimulation.PF_PHASE2] = float(e.get("phase2", 0))
 			out[b + NovaSimulation.PF_ACTIVE2] = float(e.get("active2", 0))
 			out[b + NovaSimulation.PF_ANIM_SLOT] = float(e.get("anim_slot", -1))
+			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
+			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
 			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
 			out[b + NovaSimulation.PF_ALIVE] = float(e.get("alive", 1))
 		return out
@@ -103,6 +112,19 @@ func test_both_channels_posed() -> void:
 	assert_eq(model.phases.size(), 2, "both active channels posed")
 
 
+func test_body_clip_poses_to_sim_anim_state_phase() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 11: model }
+	var sim := FakeSim.new()
+	sim.entities = [{ "bms_id": 11, "anim_slot": 1, "anim_state": 43, "anim_phase": 9 }]
+	_make_pass(index, sim).present()
+	assert_eq(model.body_calls.size(), 1, "one body clip posed")
+	assert_eq(String((model.body_calls[0] as Array)[0]), "anim_idle", "infantry anim state resolves to .adm key")
+	assert_eq(int((model.body_calls[0] as Array)[1]), 9, "sim clip phase passes through")
+
+
 func test_resolves_by_kind_index_fallback() -> void:
 	# Editor path: the in-memory mission has no stable bms_id (0). The pass must fall back to (kind,index).
 	var model := FakeModel.new()
@@ -130,6 +152,25 @@ func test_transform_applied_from_snapshot() -> void:
 	# yaw 90 -> RotY(180 - 90) = RotY(90deg); model +x maps toward -z.
 	var fwd := model.transform.basis * Vector3(1, 0, 0)
 	assert_almost_eq(fwd.z, -1.0, 0.001, "yaw drives the heading basis (RotY(180 - yaw))")
+
+
+func test_transform_ignores_body_clip_visual_offsets() -> void:
+	var model := FakeModel.new()
+	add_child_autofree(model)
+	var index := FakeIndex.new()
+	index.by_bms_id = { 6: model }
+	var sim := FakeSim.new()
+	sim.entities = [{
+		"bms_id": 6,
+		"pos_x": 10.0,
+		"pos_y": 2.0,
+		"pos_z": 3.0,
+		"yaw_deg": 180.0,
+		"anim_state": 86,
+	}]
+	_make_pass(index, sim).present()
+	assert_true(model.position.is_equal_approx(Vector3(10.0, 2.0, 3.0)),
+		"sim entity position remains authoritative even for seated infantry clips")
 
 
 func test_visibility_from_hidden_and_alive() -> void:

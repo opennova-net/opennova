@@ -1294,8 +1294,8 @@ float NovaTerrainData::get_height_world_bilinear(const Vector3 &p_world_pos) con
 Color NovaTerrainData::get_colormap_color_world(float world_x, float world_z) const {
 	// Engine: Terrain_GetModulatedColorAtPos@0x005C5FE0 indexes the colormap
 	// directly as x & 0x3FF, (-z) & 0x3FF. It does not go through sector-grid
-	// quadrant remapping; Foliage_BuildGeometry@0x005BF5F0 passes world fixed
-	// coords to it when baking foliage vertex colors.
+	// quadrant remapping; the foliage render-emitter caller is still pending a
+	// verified retail anchor.
 	if (!_ensure_colormap_cpu_cache()) {
 		return Color(1.0f, 1.0f, 1.0f, 1.0f);
 	}

@@ -35,6 +35,7 @@ public:
     void configure_pool(int pool, size_t capacity);
 
     EntityHandle spawn(int pool, const Entity &seed); // kInvalid if pool full
+    EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed); // first free >= first_slot
     void despawn(EntityHandle h);
     Entity *get(EntityHandle h);
     const Entity *get(EntityHandle h) const;
@@ -60,6 +61,13 @@ public:
     int intern_group(std::string_view name); // stable id for a named group
 
     size_t live_count() const;
+
+    // Configured slot capacity of `pool` (0 for an unconfigured/invalid pool) — the bound
+    // the original validates wire handles against [orig: g_pool_list[pool].capacity reads,
+    // e.g. NapiNPServerMsg_HandlePlayerInfoRequest @0x514180].
+    size_t pool_capacity(int pool) const {
+        return (pool >= 0 && pool < kPoolCount) ? pools_[pool].slots.size() : 0;
+    }
 
     template <class F>
     void for_each(F &&fn) const {

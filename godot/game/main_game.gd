@@ -1,7 +1,7 @@
 extends Node3D
 
 # Runtime shell: boots into the game's menu front-end (NovaMenuHost, driving the
-# .mnu menu set + audio from the chosen resource dir) and hands off to a NovaWorld
+# .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand. The
 # engine ships no game data; everything (menus, audio, terrain, missions) loads
 # from the chosen resource dir. The first-launch directory picker lives here
@@ -9,6 +9,10 @@ extends Node3D
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
+const NetKillFeedScript := preload("res://game/net_killfeed.gd")
+const GameHudScript := preload("res://game/game_hud.gd")
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -16,10 +20,42 @@ const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const CHANGE_DIR_KEY := KEY_F9
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
+# Faithful first-person camera. The eye is +1.0
+# world unit above the player [orig: Camera_ComputeThirdPersonView @0x437d10]; F4 swaps to a
+# behind+above third person [orig: ThirdPersonCamera_Update @0x437af0]. The mouse drives look
+# yaw/pitch (pitch clamped ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]).
+const PLAYER_EYE_HEIGHT := 1.0          # +0x10000 = +1.0 world unit above Position
+const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
+const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
+const PLAYER_TP_DISTANCE := 5.0         # 3P camera distance behind the player
+const PLAYER_TP_HEIGHT := 1.5           # 3P camera height bump
+# First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
+# The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
+# the view orientation, then draws the gun (gfx1) + character arms at that view root
+# [orig: Player_UpdateFirstPersonCamera @0x4dd380 -> g_view_euler_translation_out;
+# Player_RenderFirstPersonViewModel @0x4ded60]. The weapon.def parser stores the pos/tpos POSITION as
+# `atof(str) * 256.0` (a 16.16 fixed-point world coord; scale flt_7D1D70 @0x544770) and the ROTATION
+# as degrees -> 32-bit BAM (`* 0x0B60B60` = 2^32/360) [orig: weapon.def 'tpos' handler @0x54471f].
+# The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
+# offset is simply `file_value / 256`. The view-local frame is (x = right, y = forward, z = up): the
+# dominant `pos[2]` is the grip's DOWN offset (barrel reaches forward via the model), not depth — see
+# `_viewmodel_offset` for the axis map and derivation. The Sighted/ADS path swaps `pos` -> `tpos`
+# (WeaponDef.AltCamOffset @0x10C, read when entity Flags & 2).
+# Units are WPN_AK47AUTO (REVX02\WEAPON.DEF) — hardcoded with the fixed-default model until a
+# weapon.def Godot binding resolves the equipped weapon's pos/tpos per-weapon. (Swapped from WPN_MP5SD
+# to confirm the placement generalizes; AK47AUTO pos is a near-pure vertical drop = a clean test.)
+const WEAPON_DEF_POS_SCALE := 256.0                                    # flt_7D1D70: file unit -> /256 world units
+const PLAYER_VIEWMODEL_POS_UNITS := Vector3(10.0, 0.0, -201.0)         # weapon.def `pos`  (hip)
+const PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-28.046, 21.531, -187.857)  # weapon.def `tpos` (ADS/sighted)
+# FP viewmodel model-facing rotation, euler DEGREES, camera-local. Our NovaObjectModel mesh is
+# model-native (Y-up, only X-negated) so it must NOT get the world-object bms_to_godot_basis; this
+# lays the gun barrel down-range relative to the view. The small per-weapon `pos`-rotation columns
+# (Bone.rot, yaw/pitch/roll BAM — AK47AUTO = 0.0 / 0.0 / 1.0 deg) are a separate fine-tune, deferred.
+const PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 
 enum State { MENU, WORLD, PAUSED }
 
-@onready var _world: NovaWorld = $World
+@onready var _world: GameWorld = $World
 @onready var _camera: Camera3D = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
 @onready var _menu_host = $MenuLayer/MenuHost
@@ -29,6 +65,21 @@ var _root: NovaResourceRoot
 var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
+var _net_killfeed   # net spectator kill feed, built while in a net session
+var _game_hud       # GameHud, built on the first frame a mission has a local player
+var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
+var _hud_objective := ""  # latest mission-effect text line shown by the HUD
+var _player_host: LocalPlayerHost = null
+var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
+var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
+var _player_third_person := false  # F4 toggles first/third person
+# Stance is toggled on a key edge (C = crouch, Z = prone), mirroring the original's edge-toggle;
+# the two are mutually exclusive. Jump is momentary (polled). [orig: stance bits on entity+0x12C]
+var _player_crouch := false
+var _player_prone := false
+var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); null until built
+var _player_viewmodel: Node3D = null  # host-managed FP arms+weapon (shown in 1P); null until built
+var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 
 
 func _ready() -> void:
@@ -38,11 +89,52 @@ func _ready() -> void:
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
 		_camera.connect("escape_pressed", _on_camera_escape)
+	_player_host = LocalPlayerHostScript.new()
+	_player_host.name = "LocalPlayerHost"
+	add_child(_player_host)
+	_player_host.setup(_world, _camera)
+	# Net-replay connect mode: when NW_REPLAY is set (the env all F5/F6 instances
+	# inherit from the editor), skip the menu and dial the replay tool / server
+	# directly — each instance gets slotted into a role on connect.
+	if not OS.get_environment("NW_REPLAY").is_empty():
+		_enter_net_session()
+		return
 	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		_request_resource_dir()
 		return
 	_enter_menu(dir)
+	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
+	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
+	# exercised without menu navigation. Off by default; mirrors the NW_REPLAY direct-launch above.
+	var sp_mission := OS.get_environment("NW_SP_MISSION")
+	if not sp_mission.is_empty():
+		_on_start_requested(sp_mission)
+		return
+	# Co-op LAN demo hooks (LAN discovery isn't built yet, so there's no server to click):
+	# NW_LAN_HOST=<mission.bms> boots straight in as a co-op host on port 32768;
+	# NW_LAN_JOIN=<ip[:port]> boots as a joiner dialing that host (mission from NW_LAN_MISSION).
+	# Two instances on localhost = the bidirectional co-op demo. Mirrors NW_SP_MISSION above.
+	var lan_host := OS.get_environment("NW_LAN_HOST")
+	if not lan_host.is_empty():
+		_on_lan_host_start_requested({
+			"mission": lan_host,
+			"net_transport": "lan",
+			"bind_port": int(OS.get_environment("NW_LAN_PORT")) if not OS.get_environment("NW_LAN_PORT").is_empty() else 32768,
+			"game_type": "COOP",
+			"server_name": "DEMOHOST",
+			"max_players": 4,
+		})
+		return
+	var lan_join := OS.get_environment("NW_LAN_JOIN")
+	if not lan_join.is_empty():
+		var jp := lan_join.split(":")
+		_on_lan_join_requested({
+			"host_ip": jp[0] if jp.size() > 0 else "127.0.0.1",
+			"port": int(jp[1]) if jp.size() > 1 else 32768,
+			"mission": OS.get_environment("NW_LAN_MISSION"),
+			"player_name": _resolve_player_callsign(),
+		})
 
 
 # F9 (re)opens the asset-folder picker from the front-end so the player can point
@@ -59,6 +151,26 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == DEBUG_OVERLAY_KEY:
 		_toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
+		return
+	if _player_host != null and _player_host.handle_key_input(event, _state == State.WORLD):
+		get_viewport().set_input_as_handled()
+		return
+	# F4 toggles first/third person for the local player [orig: dword_A890C8 mode flag].
+	if key.keycode == KEY_F4 and _world.has_local_player():
+		_player_third_person = not _player_third_person
+		get_viewport().set_input_as_handled()
+	# C / Z toggle the player's stance (crouch / prone), mutually exclusive — the original toggles
+	# stance on a key edge. [orig: NapiNPServerMsg_HandleStanceChange @0x501c60; crouch wins]
+	elif key.keycode == KEY_C and _world.has_local_player():
+		_player_crouch = not _player_crouch
+		if _player_crouch:
+			_player_prone = false
+		get_viewport().set_input_as_handled()
+	elif key.keycode == KEY_Z and _world.has_local_player():
+		_player_prone = not _player_prone
+		if _player_prone:
+			_player_crouch = false
+		get_viewport().set_input_as_handled()
 
 
 # F3: the mission debug overlay over the live runtime. Built lazily; without a
@@ -71,11 +183,88 @@ func _toggle_debug_overlay() -> void:
 		var host: Node = _hud if _hud != null else self
 		host.add_child(_debug_overlay)
 		_debug_overlay.set_runtime_source(_current_runtime)
+		# The View tab toggles: the overlay only emits intent; we own the world.
+		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
+		_debug_overlay.foliage_hidden_toggled.connect(_on_foliage_hidden_toggled)
 	_debug_overlay.toggle()
 
 
 func _current_runtime():
 	return _world.get_runtime() if _world != null else null
+
+
+# The in-game HUD over the live runtime: built lazily the first frame a mission has a
+# local player (so net spectators, which have none, never get it). Reads the witnessed
+# hudpos.def layout from the world's mounted VFS and draws under $HUD, so
+# _set_hud_visible hides it behind menus. [orig: HUD_RenderAllOverlays @0x5a8070]
+func _ensure_game_hud() -> void:
+	if _game_hud != null:
+		return
+	_game_hud = GameHudScript.new()
+	_game_hud.name = "GameHud"
+	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var host: Node = _hud if _hud != null else self
+	host.add_child(_game_hud)
+	_game_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var hudpos := NovaHudPos.new()
+	var root: NovaResourceRoot = _world.get_resource_root() if _world != null and _world.has_method("get_resource_root") else null
+	if root == null:
+		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
+	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
+		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
+	_game_hud.set_layout(hudpos, root)
+	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
+		_world.mission_effects.connect(_on_mission_effects)
+
+
+# Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
+# original rebuilding its HUD info struct each frame. [orig: HUD_BuildEntityInfo @0x4b8440]
+func _update_game_hud() -> void:
+	if _state != State.WORLD or not _world.is_loaded():
+		return
+	if not _world.has_local_player():
+		if not _warned_hud_no_player:
+			_warned_hud_no_player = true
+			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
+		return
+	_ensure_game_hud()
+	if _game_hud == null:
+		return
+	var max_h: int = _world.local_player_max_health()
+	var frac := float(_world.local_player_health()) / float(max_h) if max_h > 0 else 0.0
+	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip key).
+	var anim_key := _world.local_player_anim_key()
+	var stance := 0
+	if "prone" in anim_key:
+		stance = 2
+	elif "crouch" in anim_key:
+		stance = 1
+	_game_hud.update_info({
+		"health_fraction": clampf(frac, 0.0, 1.0),
+		"stance": stance,
+		"team": _world.local_player_team(),
+		"objective": _hud_objective,
+	})
+
+
+# Mission effects feed the HUD's objective/subtitle line (the WAC/mission text the
+# original routes to the HUD). Best-effort: pick up any text-bearing effect.
+func _on_mission_effects(effects: Array) -> void:
+	for e in effects:
+		if e is Dictionary:
+			var t := String(e.get("text", e.get("message", "")))
+			if not t.is_empty():
+				_hud_objective = t
+
+
+func _on_skeleton_debug_toggled(enabled: bool) -> void:
+	if _world != null:
+		_world.set_skeleton_debug(enabled)
+
+
+func _on_foliage_hidden_toggled(hidden: bool) -> void:
+	if _world != null:
+		_world.set_foliage_hidden(hidden)
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end
@@ -111,6 +300,14 @@ func _wire_host() -> void:
 	_menu_host.exit_to_desktop_requested.connect(_on_exit_to_desktop)
 	_menu_host.return_to_menu_requested.connect(_on_return_to_menu)
 	_menu_host.resume_requested.connect(_on_resume)
+	if _menu_host.has_signal("novaworld_requested"):
+		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
+	# The multiplayer menu (mp.mnu) is driven by a companion the shell delegates to.
+	_mp_host = MpMenuHost.new()
+	if _menu_host.has_method("set_companion"):
+		_menu_host.set_companion(_mp_host)
+	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
+	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
 
 
 # --- Resource dir picker (first launch) ---------------------------------------
@@ -162,9 +359,134 @@ func _cleanup_picker() -> void:
 		_picker = null
 
 
+# --- NovaWorld (online multiplayer) ------------------------------------------
+
+var _novaworld_panel: NovaWorldPanel
+
+func _on_novaworld_requested() -> void:
+	if _novaworld_panel != null:
+		return
+	_novaworld_panel = NovaWorldPanel.new()
+	# Dev default: localhost. A prod build sets the server host from the
+	# resolved server IP before showing the panel.
+	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
+	# own root is null until a mission loads). Set BEFORE add_child so the panel's _build_ui sees it.
+	_novaworld_panel.resource_root = _root
+	_menu_host.hide_menu()
+	$MenuLayer.add_child(_novaworld_panel)
+	_novaworld_panel.closed.connect(_on_novaworld_closed)
+	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
+	# NW_LAN_JOIN env use); the panel's join dict { host_ip, port, mission, player_name } matches
+	# load_mission_as_joiner's row. Hosting from the panel routes through the shared host bring-up.
+	_novaworld_panel.join_in_match_requested.connect(_on_novaworld_join_requested)
+	_novaworld_panel.host_requested.connect(_on_novaworld_host_requested)
+
+
+func _on_novaworld_closed() -> void:
+	_dismiss_novaworld_panel()
+	_menu_host.show_menu()
+
+
+func _dismiss_novaworld_panel() -> void:
+	if _novaworld_panel != null:
+		_novaworld_panel.queue_free()
+		_novaworld_panel = null
+
+
+# The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
+# available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
+# the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + channel=NovaWorld, so
+# game_world._maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+func _on_novaworld_host_requested(config: Dictionary) -> void:
+	# The panel picks the map; fall back to the first available .bms only if it sent none.
+	var mission := String(config.get("mission", ""))
+	if mission.is_empty():
+		mission = _resolve_default_mission()
+	if mission.is_empty():
+		# Report back so the panel leaves "Starting..." instead of hanging silently.
+		push_warning("MainGame: NovaWorld host requested but no mission is available")
+		if _novaworld_panel != null and _novaworld_panel.has_method("host_failed"):
+			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
+		return
+	_dismiss_novaworld_panel()
+	config = config.duplicate()
+	config["mission"] = mission
+	config["net_transport"] = "lan"
+	config["bind_port"] = 32768
+	config["player_name"] = _resolve_player_callsign()
+	config["server_name"] = String(config.get("server_name", "OpenNova Host"))
+	_begin_world_load()
+	_world.load_mission_as_host(config)
+
+
+# The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
+# through the SAME joiner entry the LAN browser + NW_LAN_JOIN env use (info already carries
+# host_ip/port/mission/player_name).
+func _on_novaworld_join_requested(info: Dictionary) -> void:
+	_dismiss_novaworld_panel()
+	_on_lan_join_requested(info)
+
+
+# A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
+# first .bms the resource root exposes. Empty when no mission is reachable.
+func _resolve_default_mission() -> String:
+	if _menu_host != null and _menu_host.has_method("get_selected_mission"):
+		var sel := String(_menu_host.get_selected_mission())
+		if not sel.is_empty():
+			return sel
+	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
+	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
+	if _root != null and _root.has_method("list_files"):
+		for m in _root.list_files(".bms"):
+			return String(m).get_file()
+	return ""
+
+
 # --- Menu <-> world transitions ----------------------------------------------
 
 func _on_start_requested(bms_name: String) -> void:
+	_begin_world_load()
+	_world.load_mission(bms_name)
+
+
+# Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
+# world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
+func _on_lan_host_start_requested(config: Dictionary) -> void:
+	_begin_world_load()
+	# Make the listen host browsable on the NovaWorld gate (F1) when a gate is
+	# configured: prod injects NW_GATE_HOST (the resolved gate IP); dev sets it to
+	# 127.0.0.1 to test against the local compose. Unset = pure LAN, no registration.
+	var gate_host := OS.get_environment("NW_GATE_HOST")
+	if not gate_host.is_empty():
+		config = config.duplicate()
+		config["nw_gate_host"] = gate_host
+		var gate_port_env := OS.get_environment("NW_GATE_PORT")
+		config["nw_gate_port"] = int(gate_port_env) if gate_port_env.is_valid_int() else NovaWorldSettings.GATE_PORT
+		config["player_name"] = _resolve_player_callsign()
+	_world.load_mission_as_host(config)
+
+
+# The player picked a discovered LAN server to join: dial it as a co-op JOINER. Same
+# menu->world handoff as a host start; the world loads as a non-authority client that runs
+# the witnessed in-match JOIN and renders the host + NPCs wire-direct (net-re §5.38b). The
+# server row carries host_ip/port (+ mission, until LAN discovery streams it).
+func _on_lan_join_requested(server: Dictionary) -> void:
+	_begin_world_load()
+	var pname := String(server.get("player_name", _resolve_player_callsign()))
+	_world.load_mission_as_joiner(server, pname)
+
+
+# The local player's callsign — rides the ClientHello.co (the host echoes it back so we
+# self-identify by name-match, so any stable value works). NW_LAN_NAME overrides for the
+# two-instance demo; a persisted-profile callsign is a follow-up.
+func _resolve_player_callsign() -> String:
+	var n := OS.get_environment("NW_LAN_NAME")
+	return n if not n.is_empty() else "Player"
+
+
+# Shared menu->world handoff: hide the menu, show the world + HUD, enter WORLD state, and
+# connect the load-result signals. The caller then starts the specific load.
+func _begin_world_load() -> void:
 	_menu_host.hide_menu()
 	_world.visible = true
 	_set_hud_visible(true)
@@ -173,7 +495,42 @@ func _on_start_requested(bms_name: String) -> void:
 		_world.world_loaded.connect(_on_world_loaded)
 	if not _world.load_failed.is_connected(_on_world_load_failed):
 		_world.load_failed.connect(_on_world_load_failed)
-	_world.load_mission(bms_name)
+
+
+# Spectate a net session (no menu). The source (replay tool or a real server) is
+# at NW_REPLAY="host:port"; the map name comes off the wire, so only the resource
+# dir is needed: NW_REPLAY_DIR (else the persisted one), NW_REPLAY_LOOSE for a flat
+# extract, and NW_REPLAY_ITEMS as an optional items.def override.
+func _enter_net_session() -> void:
+	var ep := OS.get_environment("NW_REPLAY")
+	var parts := ep.split(":")
+	_menu_host.hide_menu()
+	_world.visible = true
+	_set_hud_visible(true)
+	_state = State.WORLD
+	if not _world.world_loaded.is_connected(_on_world_loaded):
+		_world.world_loaded.connect(_on_world_loaded)
+	if not _world.load_failed.is_connected(_on_world_load_failed):
+		_world.load_failed.connect(_on_world_load_failed)
+	var err := _world.load_net_session({
+		"replay_host": parts[0] if parts.size() > 0 else "127.0.0.1",
+		"replay_port": int(parts[1]) if parts.size() > 1 else 42000,
+		"dir": OS.get_environment("NW_REPLAY_DIR"),
+		"loose": not OS.get_environment("NW_REPLAY_LOOSE").is_empty(),
+		"items": OS.get_environment("NW_REPLAY_ITEMS"),
+		"camera": _camera,
+	})
+	if err != OK:
+		push_warning("MainGame: net session failed to start (%d)" % err)
+		return
+	# Kill feed over the spectator: reads the same decoded event stream NetEventView
+	# draws in 3D, posting kill / objective lines to a top-right HUD feed.
+	if _net_killfeed == null:
+		_net_killfeed = NetKillFeedScript.new()
+		_net_killfeed.name = "NetKillFeed"
+		var host: Node = _hud if _hud != null else self
+		host.add_child(_net_killfeed)
+	_net_killfeed.set_client(_world.get_net_client())
 
 
 func _on_world_loaded() -> void:
@@ -208,7 +565,21 @@ func _on_resume() -> void:
 
 
 func _on_return_to_menu() -> void:
+	if _player_host != null:
+		_player_host.teardown()
 	_world.unload()
+	if _player_host != null:
+		_player_host.setup(_world, _camera)
+	if _net_killfeed != null:
+		_net_killfeed.queue_free()
+		_net_killfeed = null
+	if _game_hud != null:
+		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(_on_mission_effects):
+			_world.mission_effects.disconnect(_on_mission_effects)
+		_game_hud.queue_free()
+		_game_hud = null
+		_hud_objective = ""
+	_warned_hud_no_player = false
 	if _root != null:
 		_enter_menu(_root.get_root_dir())
 
@@ -232,6 +603,113 @@ func _set_hud_visible(v: bool) -> void:
 # world finishes loading. Gating on "loaded, not paused" rather than State.WORLD
 # also lets a host that drives load_world() directly (the headless runtime probe,
 # which stays in MENU) keep dispatching foliage.
-func _process(_delta: float) -> void:
-	if _state != State.PAUSED and _world.is_loaded():
-		_world.tick(_camera.global_position)
+func _process(delta: float) -> void:
+	# Release the captured mouse while paused / unloaded so the menus stay usable.
+	if _state == State.PAUSED or not _world.is_loaded():
+		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		return
+	if _player_host != null:
+		_player_host.before_world_tick(delta, _state == State.WORLD)
+	_world.tick(_camera.global_position, _camera.global_transform, delta)
+	if _player_host != null:
+		_player_host.after_world_tick()
+	_update_game_hud()
+
+
+# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns
+# the look (see _unhandled_input). Shift runs. [orig: Player_PackInputStateToEntity @0x4df450]
+func _drive_local_player(_delta: float) -> void:
+	var fwd: bool = Input.is_key_pressed(KEY_W)
+	var back: bool = Input.is_key_pressed(KEY_S)
+	var left: bool = Input.is_key_pressed(KEY_A)
+	var right: bool = Input.is_key_pressed(KEY_D)
+	var run: bool = Input.is_key_pressed(KEY_SHIFT)
+	var jump: bool = Input.is_key_pressed(KEY_SPACE)  # momentary; the motor jumps once when grounded
+	_world.set_local_player_input(fwd, back, left, right, run, _player_crouch, _player_prone, jump,
+		_player_look_yaw, _player_look_pitch)
+
+
+# Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
+# Yaw@+0x10 / Pitch@+0x14, Input_HandleActionBinding_0 @0x4e1330]. Signs are tunable.
+func _unhandled_input(event: InputEvent) -> void:
+	if _player_host != null and _player_host.handle_input(
+			event,
+			_state == State.WORLD and _world.is_loaded() and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED):
+		get_viewport().set_input_as_handled()
+		return
+	if not (event is InputEventMouseMotion):
+		return
+	if _state != State.WORLD or not _world.is_loaded() or not _world.has_local_player():
+		return
+	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
+		return
+	var mm := event as InputEventMouseMotion
+	_player_look_yaw += mm.relative.x * PLAYER_MOUSE_SENS_DEG
+	_player_look_pitch = clampf(_player_look_pitch - mm.relative.y * PLAYER_MOUSE_SENS_DEG,
+		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
+
+
+# Place the camera from the player's authoritative pose. First person: eye = player + 1.0u
+# looking along the facing. Third person (F4): behind + above, looking at the player. The
+# mission yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission facing
+# yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
+func _update_player_camera() -> void:
+	var pos: Vector3 = _world.local_player_position()
+	var yr := deg_to_rad(_world.local_player_yaw_deg())
+	var pr := deg_to_rad(_world.local_player_pitch_deg())
+	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
+	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
+	if _player_third_person:
+		_camera.global_position = eye - forward * PLAYER_TP_DISTANCE + Vector3(0, PLAYER_TP_HEIGHT, 0)
+		_camera.look_at(eye, Vector3.UP)
+	else:
+		_camera.global_position = eye
+		_camera.look_at(eye + forward, Vector3.UP)
+	# Host-managed avatar: stand it at the player facing the look yaw (the body doesn't pitch);
+	# shown in third person, hidden in first (the FP arms viewmodel is a later weapon-phase step).
+	if _player_avatar != null and is_instance_valid(_player_avatar):
+		_player_avatar.global_position = pos
+		_player_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
+		_player_avatar.visible = _player_third_person
+		# Drive the body clip from the player's authoritative anim STATE + phase. The sim/root track
+		# owns phase; the model only poses the matching .bad clip so root motion and skeleton do not
+		# drift apart. Fall back to the old selector path for compatibility.
+		var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
+		var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
+		if not anim_key.is_empty() and _player_avatar.has_method("play_body_clip_at"):
+			_player_avatar.play_body_clip_at(anim_key, anim_phase)
+		elif not anim_key.is_empty() and _player_avatar.has_method("play_body_clip"):
+			_player_avatar.play_body_clip(anim_key)
+		elif _player_avatar.has_method("play_body_anim_at"):
+			_player_avatar.play_body_anim_at(_world.local_player_anim_slot(), anim_phase)
+		elif _player_avatar.has_method("play_body_anim"):
+			_player_avatar.play_body_anim(_world.local_player_anim_slot())
+	# First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1, shown in
+	# first person only (hidden in 3P, where the body avatar shows instead). The original biases the
+	# CAMERA by the weapon's `pos`/`tpos` view offset and draws the model at the view root
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380]; placing it in camera space is the faithful
+	# structural equivalent (camera.global_transform == the engine view transform here).
+	if _player_viewmodel != null and is_instance_valid(_player_viewmodel):
+		var vm_basis := Basis.from_euler(Vector3(
+			deg_to_rad(PLAYER_VIEWMODEL_ROT.x), deg_to_rad(PLAYER_VIEWMODEL_ROT.y), deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
+		var vm_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)  # TODO: -> TPOS when ADS (entity Flags & 2)
+		_player_viewmodel.global_transform = _camera.global_transform * Transform3D(vm_basis, vm_offset)
+		_player_viewmodel.visible = not _player_third_person
+
+
+# Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.
+# Faithful to the witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380; scale
+# flt_7D1D70=256 @0x544770]: the camera adds `ftol(Bone.pos)` straight onto g_view_pos, and at a
+# level look the view matrix is identity [orig: Math_BuildFixedPointRotationMatrixYXZ @0x615400], so
+# component i lands on world axis i (world Z = up). The view-local frame is therefore
+# (x = right, y = forward, z = up) — `pos[2]` is the grip's DOWN offset (the dominant term; the barrel
+# reaches forward via the model), NOT depth. Godot camera-local is (x right, y up, -z forward), so:
+#   file x (right)   -> Godot  x
+#   file y (forward) -> Godot -z
+#   file z (up)      -> Godot  y      (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
+# The two small lateral/forward terms (x, y) are sign-confirmable by drive; the z->y (down) term is
+# the certain one. (oscarmike WeaponManager._jo_to_godot_position agrees on /256 + z->up/down.)
+func _viewmodel_offset(units: Vector3) -> Vector3:
+	return Vector3(units.x, units.z, -units.y) / WEAPON_DEF_POS_SCALE

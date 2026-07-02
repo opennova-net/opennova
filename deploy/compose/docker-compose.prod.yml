@@ -1,0 +1,52 @@
+# Prod overlay: pull the published GHCR images (no build on the target),
+# use host networking so the game UDP ports are reachable directly, and
+# inject the vault-sourced app secrets. Layered on docker-compose.yml.
+#
+# Driven remotely by the deploy toolbox over DOCKER_HOST=ssh://; the
+# operator never SSHes by hand.
+
+services:
+  novaworld:
+    image: ${SERVER_IMAGE:?set SERVER_IMAGE to the ghcr.io/...:tag to deploy}
+    pull_policy: always
+    build: !reset null
+    network_mode: host
+    env_file:
+      - ../env/app.prod.env
+    environment:
+      # app.prod.env supplies ONNET_PUBLIC_HOST; the vault-injected file
+      # (mounted by the toolbox) supplies ADMIN_API_TOKEN.
+      DATABASE_PATH: /data/novaworld.db
+
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE to the ghcr.io/...:tag to deploy}
+    pull_policy: always
+    build: !reset null
+    network_mode: host
+    # The baked nginx.conf proxies to host.docker.internal:8080 (a Docker Desktop
+    # name). Under host networking on Linux that doesn't resolve and nginx
+    # [emerg]-exits. The server shares the host netns and listens on :8080, so map
+    # the name to the loopback so nginx reaches it.
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"
+    env_file:
+      - ../env/app.prod.env
+
+  # Nightly SQLite snapshot -> S3, plus the on-demand backup/list/restore the
+  # deploy toolbox runs. AWS creds come from the instance IAM role (IMDSv2);
+  # no keys in the container. Reads the DB from the shared nw_data volume.
+  backup:
+    image: ${BACKUP_IMAGE:-opennova-backup:local}
+    build:
+      context: ../backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      # rw so `restore` can write the db back (server must be down first);
+      # backup/list only read.
+      - nw_data:/data
+    environment:
+      DATABASE_PATH: /data/novaworld.db
+      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET (the backups S3 bucket from terraform output)}
+      BACKUP_PREFIX: ${BACKUP_PREFIX:-novaworld}

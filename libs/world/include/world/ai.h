@@ -230,6 +230,25 @@ struct AiEntity {
     int32_t heading = 0;       // entity+16 (32-bit binary angle); copied to brain[132]
     int32_t pitch = 0;         // entity+20
     int32_t roll = 0;          // entity+24
+
+    // --- network receive-apply: a remote peer's pose, read-applied on the host ---
+    // The host stages a joiner's reported 0x0C pose into these engine-frame slots
+    // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. net_is_remote_peer
+    // is the entity+0x24-bit0 "network-snapped" flag: when set the host SNAPS the live pose
+    // to the report and the infantry motor SKIPS the entity (no re-simulation)
+    // [orig: Entity_UpdateInfantryAI @0x4b9a03]. net_smooth_target/heading/pitch are staged
+    // for the CLIENT-side interpolation smoothing (motor fall-through @0x4b9a8c, is_authority==0)
+    // — a deferred, client-only concern; the authority host never interpolates. NEVER set for
+    // the host's own player (ADR-0012 amendment / §5.38).
+    bool    net_is_remote_peer = false;  // entity+0x24 bit0 (net-snap + motor-skip)
+    int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world)
+    int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; also mirrored to heading/+0x10)
+    int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; also mirrored to pitch/+0x14)
+    int16_t net_interp_progress = 0;     // entity+0x27C (reset to 0 on each read-apply)
+    // Deferred client-interp bookkeeping (consumed by the @0x4b9a8c fall-through only):
+    int32_t net_saved_live_pose[3] = {}; // entity+0x80/+0x84/+0x88 (interp delta basis)
+    int16_t net_interp_steps = 0;        // entity+0x27E (2..16; buckets {3,4,5,8,16})
+
     int32_t vel_x = 0;         // entity+152
     int32_t vel_z = 0;         // entity+156
     int16_t health = 100;      // entity+286 (<=0 -> death path)
@@ -418,6 +437,8 @@ int32_t ai_score_target(int angle_diff, int distance, int primary_fov, int secon
 // The AI subsystem: a world::ISystem ticking all AI brains on the shared world.
 class AiSystem : public ISystem {
 public:
+    AiSystem();
+
     const char *name() const override { return "ai"; }
     void tick(World &world, const TickContext &ctx) override;
 
@@ -463,7 +484,12 @@ public:
     GroundClearance ground_clearance{};
     // [orig: the +0x50000 the movers add after grounding — AI_ProcessMovementStep @0x466db0
     // brain[131] = ground + 0x50000; AI_UpdateMovementTarget @0x460e40 adds def heightOffset.]
-    int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16
+    // NOTE: the INFANTRY motor (tick_infantry — player AND AI) does NOT use this. It settles
+    // pos[2] to ground + the anim frame's capsule_bottom (origin->feet) per the witnessed
+    // collision capsule [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0; D-INF-6];
+    // +0x50000 is only the id-3 death-fall mover's vertical target slot. Still used by the
+    // vehicle/SM path (apply_ground_clamp).
+    int32_t ground_stand_offset = 0x50000; // 5.0 in 16.16 (vehicle/SM ground clamp only)
 
     // ---- Infantry motor (org1 soldiers; docs/world/world-wac-ai-re.md §3) ----
     // Root-motion provider; injected like `terrain`. Null = no clips: every state is
@@ -563,15 +589,19 @@ public:
     // fallbacks) and commit it under the lock/emote rules.
     void infantry_select(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
-    int infantry_resolve_state(int state) const;
+    int infantry_resolve_state(int adm_id, int state) const;
     // Slope sampling + slide [orig: every-8 block, 4 probes around the entity].
     void infantry_slope_slide(AiEntity &e);
 
     const StateRow &row(int32_t state) const;
 
 private:
+    void clear_handle_index();
+    void rebuild_handle_index();
+
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
+    std::vector<int> handle_to_ai_index_;
     bool baseline_captured_ = false;
 };
 

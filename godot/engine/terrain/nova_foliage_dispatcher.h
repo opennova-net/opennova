@@ -8,6 +8,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
@@ -27,9 +28,9 @@ class NovaTerrainData;
 // Foliage adapter for the shared engine-spec placement/dispatcher core.
 //
 // Engine provenance:
-//   - Jointops.exe Foliage_RenderAtPosition@0x5C1940 (per-slot dispatcher)
-//   - Jointops.exe Foliage_BuildPatchData@0x5C0240 (per-cell placement)
-//   - docs/engine_spec_foliage.md 4.3-4.4
+//   - Jointops.exe terrain_update_foliage_tiles@0x601F50 (visible-center dispatcher)
+//   - Jointops.exe generate_foliage_instances@0x600980 (per-cell placement)
+//   - Jointops.exe sub_606620@0x606620 (foliage map sampler)
 //
 // Fidelity:
 //   - ENGINE_CENTERS uses shared `opennova::foliage::Dispatcher` instances and
@@ -112,6 +113,9 @@ public:
 	void set_surface_offset(float p_offset);
 	float get_surface_offset() const;
 
+	void set_engine_view_radius_fixed(int p_radius);
+	int get_engine_view_radius_fixed() const;
+
 	// Main API --------------------------------------------------------------
 
 	// Dispatch around `centre` using the configured coverage algorithm.
@@ -130,6 +134,7 @@ public:
 	// Introspection
 	int get_total_instances() const;
 	int get_cached_cells() const;
+	Dictionary get_dispatch_stats() const;
 
 protected:
 	static void _bind_methods();
@@ -159,10 +164,22 @@ private:
 		std::vector<Color> colors;
 		int64_t touch = 0;
 	};
+	struct DispatchStats {
+		int64_t dispatch_calls = 0;
+		int64_t coverage_skips = 0;
+		int64_t rebuilt_slots = 0;
+		int64_t instance_uploads = 0;
+		int64_t cell_cache_hits = 0;
+		int64_t cell_cache_misses = 0;
+	};
 
 	// CELL_GRID algorithm: cell (cell_x, cell_z, slot) -> placed instances.
 	std::unordered_map<CellKey, LRUEntry, CellKeyHash> lru_;
 	int64_t touch_counter_ = 0;
+	DispatchStats dispatch_stats_;
+	bool last_cell_grid_base_valid_ = false;
+	int last_cell_grid_base_x_ = 0;
+	int last_cell_grid_base_z_ = 0;
 
 	// ENGINE_CENTERS algorithm: one shared-core dispatcher per foliage slot.
 	std::array<opennova::foliage::Dispatcher, opennova::FOLIAGE_MAX_DEFS> engine_dispatchers_{};
@@ -188,6 +205,7 @@ private:
 	int lru_capacity_ = 128;
 	float quad_half_width_ = 2.0f;
 	float surface_offset_ = 0.05f;
+	int32_t engine_view_radius_fixed_ = 0x40000;
 
 	bool mm_dirty_ = true;
 
@@ -215,6 +233,7 @@ private:
 	float _sample_height(float world_x, float world_z) const;
 	Dictionary _build_defs_by_match() const;
 	void _clear_children();
+	void _invalidate_dispatch_coverage();
 	Ref<Mesh> _fallback_mesh() const;
 };
 

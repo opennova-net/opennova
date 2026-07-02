@@ -271,15 +271,17 @@ static int convert_userpoints(const Threedi3di3 *model, ThreediModelIR *ir) {
 
         memcpy(du->name, su->name, sizeof(du->name) - 1);
 
-        // Convert from fixed-point (16.16) to float, with coordinate swizzle
-        // Original: x->z, y->x, z->y
-        du->position[0] = (float)su->y / 65536.0f;  // x coord
+        // Convert from fixed-point (16.16) to float, with coordinate swizzle.
+        // Original: x->z, y->x, z->y. Userpoints need the side axis mirrored
+        // here so NovaObjectData's render-space -X transform preserves the
+        // authored driver/passenger side.
+        du->position[0] = -(float)su->y / 65536.0f; // x coord
         du->position[1] = (float)su->z / 65536.0f;  // y coord
         du->position[2] = (float)su->x / 65536.0f;  // z coord
 
         // rot_x/y/z are the local Z-axis direction vector (unit vector),
         // stored as fixed-point with same swizzle as position.
-        du->direction[0] = (float)su->rot_y / 65536.0f;
+        du->direction[0] = -(float)su->rot_y / 65536.0f;
         du->direction[1] = (float)su->rot_z / 65536.0f;
         du->direction[2] = (float)su->rot_x / 65536.0f;
 

@@ -1,7 +1,8 @@
 # godot/modtools/ — the OpenNova Editor (ONED)
 
 - Naming: this is "the OpenNova Editor (ONED)" or "the editor" — never "terrain editor".
-  Terrain is one of its ten workspaces.
+  Terrain is one of its eleven workspaces; the scene root is the EditorApp node
+  (`editor/editor_app.gd`), which owns boot wiring, window sizing, and the MCP service.
 - Code-first: no `.tres` workspace resources, and the shell never switches on workspace
   type — it reads capability hooks off each workspace. The contract is
   `framework/editor_workspace.gd`; the how-to (add a workspace / add an inspector) is in

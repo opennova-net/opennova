@@ -20,7 +20,11 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_item", "id"), &NovaItemDatabase::has_item);
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &NovaItemDatabase::get_graphic);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &NovaItemDatabase::get_anim_def);
+	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &NovaItemDatabase::get_ai_function);
+	ClassDB::bind_method(D_METHOD("get_hp", "id"), &NovaItemDatabase::get_hp);
+	ClassDB::bind_method(D_METHOD("get_move_function", "id"), &NovaItemDatabase::get_move_function);
 	ClassDB::bind_method(D_METHOD("get_item_type", "id"), &NovaItemDatabase::get_item_type);
+	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &NovaItemDatabase::is_ai_capable);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
 	ClassDB::bind_method(D_METHOD("get_sound_profile", "id"), &NovaItemDatabase::get_sound_profile);
 	ClassDB::bind_method(D_METHOD("get_sound_loops", "id"), &NovaItemDatabase::get_sound_loops);
@@ -61,10 +65,14 @@ Error NovaItemDatabase::load(const String &path) {
 		Item item;
 		item.id = entry.id;
 		item.type = entry.type;
+		item.attrib = static_cast<uint32_t>(entry.attrib);
 		item.display_name = String(entry.display_name);
 		item.graphic = String(entry.graphic);
 		item.anim_def = String(entry.anim_def);
 		item.sound_profile = String(entry.sound_profile);
+		item.ai_function = String(entry.ai_function);
+		item.move_function = String(entry.move_function);
+		item.hp = entry.hp;
 		for (int s = 0; s < 7; ++s) {
 			item.soundloops[s] = String(entry.soundloops[s]);
 		}
@@ -104,10 +112,14 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 		Item item;
 		item.id = entry.id;
 		item.type = entry.type;
+		item.attrib = static_cast<uint32_t>(entry.attrib);
 		item.display_name = String(entry.display_name);
 		item.graphic = String(entry.graphic);
 		item.anim_def = String(entry.anim_def);
 		item.sound_profile = String(entry.sound_profile);
+		item.ai_function = String(entry.ai_function);
+		item.move_function = String(entry.move_function);
+		item.hp = entry.hp;
 		for (int s = 0; s < 7; ++s) {
 			item.soundloops[s] = String(entry.soundloops[s]);
 		}
@@ -149,9 +161,32 @@ String NovaItemDatabase::get_anim_def(int id) const {
 	return it == items.end() ? String() : it->second.anim_def;
 }
 
+String NovaItemDatabase::get_ai_function(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.ai_function;
+}
+
+String NovaItemDatabase::get_move_function(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.move_function;
+}
+
+int NovaItemDatabase::get_hp(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0 : it->second.hp;
+}
+
 int NovaItemDatabase::get_item_type(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? static_cast<int>(TYPE_UNKNOWN) : it->second.type;
+}
+
+// items.def ItemDefAttrib & 0x100000 (AIData). Mirrors the stock 0x0D decoder's own gate
+// (itemDef.attrib & 0x100000 @0x433327) so the host emits the AI-trailer iff the item is
+// AI-capable. [docs/world/itemdef-re.md; docs/net/novaworld-net-re.md D-NET-97]
+bool NovaItemDatabase::is_ai_capable(int id) const {
+	const auto it = items.find(id);
+	return it != items.end() && (it->second.attrib & 0x100000u) != 0;
 }
 
 String NovaItemDatabase::get_display_name(int id) const {

@@ -27,13 +27,25 @@ var _distance: float = 200.0
 var _orbiting: bool = false
 var _panning: bool = false
 var _flying: bool = false
+var _gameplay_locked: bool = false
 
 func _ready() -> void:
 	_yaw = rotation.y
 	_pitch = rotation.x
 	_pivot = global_position - global_transform.basis.z * _distance
 
+func set_gameplay_locked(locked: bool) -> void:
+	_gameplay_locked = locked
+	if locked:
+		_orbiting = false
+		_panning = false
+		_flying = false
+
 func _unhandled_input(event: InputEvent) -> void:
+	if _gameplay_locked:
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			escape_pressed.emit()
+		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			if event.pressed:
@@ -117,7 +129,7 @@ func frame_bounds_custom(center: Vector3, radius: float, distance_scale: float =
 	_update_orbit()
 
 func _process(delta: float) -> void:
-	if not _flying:
+	if _gameplay_locked or not _flying:
 		return
 
 	var speed: float = fly_speed * (3.0 if Input.is_key_pressed(KEY_SHIFT) else 1.0)

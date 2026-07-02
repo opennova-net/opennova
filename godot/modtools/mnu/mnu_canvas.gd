@@ -2,10 +2,11 @@ class_name MnuCanvas
 extends Control
 
 # WYSIWYG edit surface for the Menus workspace. Hosts a live NovaMnuMenu in
-# edit_mode (inert: no navigation, audio, or cursor side effects) scaled with
-# uniform letterbox scaling to fit the document's authoring size (currently a
-# fixed 640x480 design resolution, the standard for Joint Operations (JO) and
-# newer menus; the engine does not yet parse a per-menu resolution).
+# edit_mode (inert: no navigation, audio, or cursor side effects) scaled to the
+# fixed 800x600 design space all Joint Operations (JO) and newer menus are authored
+# in. The fit is anamorphic (independent X/Y factors, no letterbox bars), matching
+# the runtime so the canvas previews exactly what the game draws [orig:
+# CUIScene_SetScreenScale @ 0x639480].
 #
 # M8a: the canvas owns layout gestures. It picks the widget under the cursor
 # (computing absolute board-space rects so deeply nested widgets pick correctly),
@@ -64,13 +65,20 @@ var _document: NovaMnuDocument
 var _resource_root: NovaResourceRoot
 var _text_resource: RtxtStringFile
 var _stylesheet: MnsStyleSheet
+# The document's own .mnu basename (shipped self-file screen actions compare
+# against it; see NovaMnuMenu.set_menu_file).
+var _menu_file := ""
 
-var _menu_size := Vector2(640, 480)
-# _fit_scale / _fit_offset are the base letterbox fit (board -> canvas). _zoom and
-# _pan layer on top so the user can magnify small widgets and scroll around; the
-# effective transform is _eff_scale() / _eff_offset(), which everything routes
-# through (so picking, handles, snapping, and the live preview all stay aligned).
-var _fit_scale := 1.0
+# The fixed 800x600 design space all JO+ menus author in (the engine scales it to
+# the screen anamorphically; we do the same here) [orig: CUIScene_SetScreenScale
+# @ 0x639480].
+var _menu_size := Vector2(800, 600)
+# _fit_scale / _fit_offset are the base anamorphic fit (board -> canvas), with
+# independent X/Y scale factors. _zoom (scalar) and _pan layer on top so the user can
+# magnify small widgets and scroll around; the effective transform is _eff_scale() /
+# _eff_offset(), which everything routes through (so picking, handles, snapping, and
+# the live preview all stay aligned).
+var _fit_scale := Vector2.ONE
 var _fit_offset := Vector2.ZERO
 var _zoom := 1.0
 var _pan := Vector2.ZERO
@@ -152,14 +160,16 @@ func _ready() -> void:
 
 
 # Point the preview at a document. resource_root/text_resource are optional; when
-# absent the builder degrades to placeholder visuals (M3 behavior).
-func set_menu(doc: NovaMnuDocument, resource_root: NovaResourceRoot, text_resource: RtxtStringFile, stylesheet: MnsStyleSheet = null) -> void:
+# absent the builder degrades to placeholder visuals (M3 behavior). menu_file is
+# the document's own .mnu basename (refreshed on every rebind; a Save As while
+# the preview plays keeps the old name until the next rebind).
+func set_menu(doc: NovaMnuDocument, resource_root: NovaResourceRoot, text_resource: RtxtStringFile, stylesheet: MnsStyleSheet = null, menu_file := "") -> void:
 	_document = doc
 	_resource_root = resource_root
 	_text_resource = text_resource
 	_stylesheet = stylesheet
+	_menu_file = menu_file
 	if doc != null:
-		_menu_size = Vector2(doc.get_menu_size())
 		# Re-seed the visible screen when it is empty OR a stale name the new
 		# document lacks, so a document swap never leaves every screen hidden
 		# (mirrors NovaMnuMenu::build resetting current_screen_).
@@ -278,6 +288,7 @@ func _rebuild_preview() -> void:
 	_preview.set_resource_root(_resource_root)
 	_preview.set_text_resource(_text_resource)
 	_preview.set_stylesheet(_stylesheet)
+	_preview.set_menu_file(_menu_file)
 	# Assigning the menu rebuilds the widget tree when the preview is in the tree;
 	# in edit_mode build() shows every screen, so re-apply single-screen visibility.
 	_preview.menu = _document
@@ -309,13 +320,15 @@ func _recompute_fit() -> void:
 		return
 	if size.x <= 1.0 or size.y <= 1.0:
 		return
-	_fit_scale = minf(size.x / _menu_size.x, size.y / _menu_size.y)
-	_fit_scale = maxf(_fit_scale, 0.01)
-	_fit_offset = (size - _menu_size * _fit_scale) * 0.5
+	# Anamorphic fill (matches the runtime): the 800x600 board stretches to fill the
+	# canvas with independent X/Y factors, no letterbox bars [orig:
+	# CUIScene_SetScreenScale @ 0x639480]. Zoom + pan layer on top for authoring.
+	_fit_scale = Vector2(maxf(size.x / _menu_size.x, 0.01), maxf(size.y / _menu_size.y, 0.01))
+	_fit_offset = Vector2.ZERO
 	_clamp_pan()
 	if _preview != null:
 		_preview.position = _eff_offset()
-		_preview.scale = Vector2(_eff_scale(), _eff_scale())
+		_preview.scale = _eff_scale()
 
 
 # --- Coordinate helpers ---------------------------------------------------------
@@ -323,7 +336,7 @@ func _recompute_fit() -> void:
 # The effective board -> canvas transform = base letterbox fit composed with the
 # user's zoom + pan. Everything (picking, draw, drag deltas, the preview node)
 # routes through these two so the overlay never drifts from the rendered menu.
-func _eff_scale() -> float:
+func _eff_scale() -> Vector2:
 	return _fit_scale * _zoom
 
 
@@ -364,7 +377,8 @@ func _zoom_at(canvas_point: Vector2, factor: float) -> void:
 
 
 # Pure: the pan that makes board_pt map back to canvas_pt at new_zoom. Unit-testable.
-static func _pan_for_zoom_at(fit_scale: float, fit_offset: Vector2, board_pt: Vector2, canvas_pt: Vector2, new_zoom: float) -> Vector2:
+# fit_scale is the anamorphic (per-axis) base fit; the zoom multiplies it uniformly.
+static func _pan_for_zoom_at(fit_scale: Vector2, fit_offset: Vector2, board_pt: Vector2, canvas_pt: Vector2, new_zoom: float) -> Vector2:
 	return canvas_pt - fit_offset - board_pt * (fit_scale * new_zoom)
 
 

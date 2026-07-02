@@ -39,7 +39,7 @@ const SETTLE_FRAMES_3D := 48
 const OUT_DIR := "res://../screenshots"
 
 # Asset names, resolved case-insensitively against the resource dir at runtime.
-# Dvxi5.trn / full_00.env are the runtime's hardcoded world files (NovaWorld).
+# Dvxi5.trn / full_00.env are the runtime's hardcoded world files (GameWorld).
 const TERRAIN_NAME := "Dvxi5.trn"
 const ENV_NAME := "full_00.env"
 const FONT_NAME := "Serpen36"  # bare basename; the fonts workspace appends .fnt
@@ -71,6 +71,7 @@ var _shots: Array = [
 	[EditorWorkstation.Workspace.ENVIRONMENT, ENV_NAME, "environment.png"],
 ]
 
+var _app: EditorApp
 var _editor: TerrainEditor
 var _workstation: EditorWorkstation
 var _root := ""
@@ -96,14 +97,15 @@ func _ready() -> void:
 	ResourceDirSettings.set_resource_dir(_root)
 	print("[capture] resource dir: ", _root)
 
-	_editor = EditorScene.instantiate()
-	add_child(_editor)
-	# Let the editor's _ready run (window config, new_terrain, workstation bind).
+	_app = EditorScene.instantiate()
+	add_child(_app)
+	# Let the app's _ready run (window config, new_terrain, workstation bind).
 	await get_tree().process_frame
+	_editor = _app.get_terrain_editor()
 	_maximize_window()
 	for _i in 8:
 		await get_tree().process_frame
-	_workstation = _editor.workstation
+	_workstation = _app.workstation
 	# Re-apply the root explicitly: re-seeds VegAssets search roots and rescans,
 	# so foliage .3di resolve from the dir regardless of _ready ordering.
 	_workstation.set_resource_root_dir(_root)
@@ -111,14 +113,14 @@ func _ready() -> void:
 	# Light the world: open an environment so the terrain shader gets sun/fog,
 	# the sky dome renders, and the object preview (shared environment_editor)
 	# is lit too. Without this the 3D views are flat grey on black.
-	if _editor.environment_editor != null:
+	if _app.environment_editor != null:
 		var env_path := NovaPaths.resolve_file(_root, ENV_NAME)
 		if env_path.is_empty():
 			_fail("[capture] %s not found in %s" % [ENV_NAME, _root])
 			get_tree().quit(1)
 			return
 		else:
-			var env_err: int = _editor.environment_editor.open_env(env_path)
+			var env_err: int = _app.environment_editor.open_env(env_path)
 			if env_err != OK:
 				_fail("[capture] open_env failed (%d): %s" % [env_err, env_path])
 				get_tree().quit(1)
@@ -255,9 +257,7 @@ func _run_all() -> bool:
 
 
 func _workspace_for_capture(workspace_id: int) -> EditorWorkspace:
-	if workspace_id == EditorWorkstation.Workspace.ENVIRONMENT:
-		return _workstation._environment_workspace
-	return _workstation._workspaces.get(workspace_id)
+	return _workstation.get_workspace_adapter(workspace_id)
 
 
 func _resolve_asset(asset_name: String) -> String:

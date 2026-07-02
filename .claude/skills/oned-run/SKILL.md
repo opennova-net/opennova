@@ -6,9 +6,9 @@ description: Launches this repo's Godot project — the ONED editor or the game 
 # Run ONED / the OpenNova runtime
 
 The Godot project is `godot/` (Godot 4.6.1). The default scene is
-`res://modtools/editor/editor_main.tscn` — the whole ONED shell with all ten
-workspaces. The game runtime is `res://game/main_game.tscn`. All commands are
-Git Bash, from the repo root.
+`res://modtools/editor/editor_main.tscn` — the EditorApp root hosting the whole
+ONED shell with all eleven workspaces. The game runtime is
+`res://game/main_game.tscn`. All commands are Git Bash, from the repo root.
 
 ## 1. Find the Godot binary
 

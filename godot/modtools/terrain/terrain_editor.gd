@@ -14,7 +14,6 @@ const HM_SIZE := 1024
 const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
-const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
@@ -22,7 +21,6 @@ const TerrainEditorDocument = preload("res://modtools/terrain/terrain_editor_doc
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
-const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
 const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
@@ -41,7 +39,10 @@ const DEFAULT_SECTOR_PATTERN := [
 @onready var terrain_world_root: Node3D = $TerrainWorldRoot
 @onready var terrain_mesh: EditorTerrainMesh = $TerrainWorldRoot/EditorTerrainMesh
 @onready var camera: Camera3D = $TerrainWorldRoot/FlyCamera
-@onready var workstation = $CanvasLayer/EditorWorkstation
+
+# The shell, injected by the app root (EditorApp) before set_editor; null in
+# headless tests, so every use guards.
+var workstation: Node = null
 
 var _document: TerrainEditorDocument = TerrainEditorDocument.new()
 var _brush_session: TerrainEditorBrushSession = TerrainEditorBrushSession.new()
@@ -202,9 +203,6 @@ func get_height_revision() -> int:
 var _last_open_dir: String = ""
 var _last_save_dir: String = ""
 var _last_export_dir: String = ""
-var _pending_unsaved_action: Callable = Callable()
-var _pending_unsaved_action_name: String = ""
-var _previous_window_min_size: Vector2i = Vector2i.ZERO
 var _ui_state_version: int = 0
 var _uses_workspace_viewport: bool = false
 var _viewport_active: bool = false
@@ -213,8 +211,9 @@ var _viewport_mouse_position: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
-	get_tree().auto_accept_quit = false
-	_configure_editor_window()
+	# World furniture and persisted state only. The app root (EditorApp._ready,
+	# which runs after this) injects the environment document + workstation,
+	# binds the shell, boots MCP, and seeds the initial terrain.
 	camera.position = Vector3(512, 80, 600)
 	camera.rotation_degrees = Vector3(-30, 0, 0)
 	_init_environment_preview()
@@ -224,31 +223,12 @@ func _ready() -> void:
 	_init_clone_marker()
 	_init_axes_gizmo()
 	if camera.has_signal("escape_pressed"):
-		camera.connect("escape_pressed", Callable(self, "request_quit_editor"))
+		camera.connect("escape_pressed", Callable(self, "_on_camera_escape"))
 	_load_editor_state()
-	if workstation and workstation.has_method("set_editor"):
-		workstation.set_editor(self)
-	new_terrain()
 
 
-func _exit_tree() -> void:
-	var window := get_window()
-	if window:
-		window.min_size = _previous_window_min_size
-
-
-func _configure_editor_window() -> void:
-	var window := get_window()
-	if window == null:
-		return
-	_previous_window_min_size = window.min_size
-	window.min_size = EDITOR_MIN_WINDOW_SIZE
-	if window.mode == Window.MODE_WINDOWED:
-		var next_size := window.size
-		next_size.x = maxi(next_size.x, EDITOR_MIN_WINDOW_SIZE.x)
-		next_size.y = maxi(next_size.y, EDITOR_MIN_WINDOW_SIZE.y)
-		if next_size != window.size:
-			window.size = next_size
+func set_workstation(value: Node) -> void:
+	workstation = value
 
 
 ## Forward a short status message to the workstation UI.
@@ -342,11 +322,9 @@ func _init_water_plane() -> void:
 	_water_node.set_height_override(float(get_water_height()))
 
 
+# World-side preview nodes only. The environment DOCUMENT (EnvironmentEditor)
+# is app-owned and arrives later via set_environment_editor.
 func _init_environment_preview() -> void:
-	environment_editor = EnvironmentEditorScript.new()
-	environment_editor.name = "EnvironmentEditor"
-	add_child(environment_editor)
-
 	_environment_node = Node.new()
 	_environment_node.name = "EditorEnvironment"
 	_environment_node.set_script(NovaEnvironmentScript)
@@ -367,6 +345,12 @@ func _init_environment_preview() -> void:
 	_weather_node.environment_path = NodePath("../EditorEnvironment")
 	terrain_world_root.add_child(_weather_node)
 
+
+## Wire the app-owned environment document into the world preview.
+func set_environment_editor(value) -> void:
+	environment_editor = value
+	if environment_editor == null:
+		return
 	if not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
 		environment_editor.environment_changed.connect(_on_environment_editor_changed)
 	if not environment_editor.state_changed.is_connected(_on_environment_state_changed):
@@ -1982,10 +1966,6 @@ func _mark_ui_state_changed() -> void:
 		workstation.sync_from_editor_state()
 
 
-func has_pending_unsaved_action() -> bool:
-	return _pending_unsaved_action.is_valid()
-
-
 func get_current_project_dir() -> String:
 	return _document.current_project_dir
 
@@ -2010,87 +1990,12 @@ func get_last_export_dir() -> String:
 	return _last_export_dir
 
 
-func request_new_terrain() -> void:
-	if _queue_unsaved_action("create a new terrain", Callable(self, "new_terrain")):
-		return
-	new_terrain()
-
-
-func request_open_trn(trn_path: String) -> Error:
-	# Single entry point for "user picked a .trn". Project vs. import mode is
-	# auto-detected inside open_trn by the presence of a sibling <name>_depth.raw
-	# (project) vs. a .cpt alongside (imported game asset).
-	if _queue_unsaved_action("open a terrain", Callable(self, "open_trn").bind(trn_path)):
-		return OK
-	return open_trn(trn_path)
-
-
-func request_quit_editor() -> void:
-	if _queue_unsaved_action("quit", Callable(self, "_quit_editor")):
-		return
-	_quit_editor()
-
-
-func confirm_pending_action_save() -> void:
-	if not _pending_unsaved_action.is_valid():
-		return
-	if _document.current_project_dir.is_empty():
-		if workstation and workstation.has_method("prompt_save_directory_for_pending_action"):
-			workstation.prompt_save_directory_for_pending_action(_pending_unsaved_action_name)
-		return
-	var err := save_project(_document.current_project_dir)
-	if err == OK:
-		_execute_pending_action()
-	else:
-		_notify_status("Save failed (error %d)" % err)
-
-
-func confirm_pending_action_save_as(dir_path: String) -> void:
-	if not _pending_unsaved_action.is_valid():
-		return
-	var err := save_project(dir_path)
-	if err == OK:
-		_execute_pending_action()
-	else:
-		_notify_status("Save failed (error %d)" % err)
-
-
-func confirm_pending_action_discard() -> void:
-	if not _pending_unsaved_action.is_valid():
-		return
-	_execute_pending_action()
-
-
-func cancel_pending_action() -> void:
-	_clear_pending_action()
-
-
-func _queue_unsaved_action(action_name: String, action: Callable) -> bool:
-	if is_export_running():
-		return true
-	if not is_dirty:
-		return false
-	_pending_unsaved_action = action
-	_pending_unsaved_action_name = action_name
-	if workstation and workstation.has_method("prompt_unsaved_changes"):
-		workstation.prompt_unsaved_changes(action_name)
-	return true
-
-
-func _execute_pending_action() -> void:
-	var action := _pending_unsaved_action
-	_clear_pending_action()
-	if action.is_valid():
-		action.call()
-
-
-func _clear_pending_action() -> void:
-	_pending_unsaved_action = Callable()
-	_pending_unsaved_action_name = ""
-
-
-func _quit_editor() -> void:
-	get_tree().quit()
+# Escape asks the shell to close (the unified close guard, which lists every
+# dirty workspace). The dirty-replace guard for New/Open lives on the terrain
+# workspace adapter, through the shell's shared unsaved-changes dialog.
+func _on_camera_escape() -> void:
+	if workstation != null and workstation.has_method("request_close"):
+		workstation.request_close()
 
 
 func _load_editor_state() -> void:
@@ -2616,11 +2521,3 @@ func _get_material() -> ShaderMaterial:
 	return terrain_mesh.get_material()
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		# Embedded in the editor shell? The shell owns the unified close guard,
-		# which already lists this workspace among the dirty ones. Only a
-		# standalone terrain scene (no workstation) handles its own close.
-		if workstation != null:
-			return
-		request_quit_editor()

@@ -1,13 +1,67 @@
 extends GutTest
 
 # MissionPlayController: the play-in-editor host — the real game world
-# (nova_world.tscn) in an editor-owned SubViewport. Headless coverage is the
+# (game_world.tscn) in an editor-owned SubViewport. Headless coverage is the
 # state machine and rejection paths (a successful boot needs real game assets:
 # terrain + env + models; see screenshot_capture's mission_play target and the
 # manual A/B against the standalone game).
 
 const PlayController := preload("res://modtools/mission/mission_play_controller.gd")
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
+
+
+class FakeWorld:
+	extends Node3D
+	var input_calls: Array = []
+
+	func is_loaded() -> bool:
+		return true
+
+	func has_local_player() -> bool:
+		return true
+
+	func build_local_player_avatar() -> Node3D:
+		var node := Node3D.new()
+		add_child(node)
+		return node
+
+	func build_local_player_viewmodel() -> Node3D:
+		var node := Node3D.new()
+		add_child(node)
+		return node
+
+	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool,
+			crouch: bool, prone: bool, jump: bool, look_yaw_deg: float, look_pitch_deg: float) -> void:
+		input_calls.append({
+			"forward": forward,
+			"back": back,
+			"left": left,
+			"right": right,
+			"run": run,
+			"crouch": crouch,
+			"prone": prone,
+			"jump": jump,
+			"yaw": look_yaw_deg,
+			"pitch": look_pitch_deg,
+		})
+
+	func local_player_position() -> Vector3:
+		return Vector3.ZERO
+
+	func local_player_yaw_deg() -> float:
+		return 0.0
+
+	func local_player_pitch_deg() -> float:
+		return 0.0
+
+	func local_player_anim_key() -> String:
+		return ""
+
+	func local_player_anim_phase_ticks() -> int:
+		return 0
+
+	func local_player_anim_slot() -> int:
+		return -1
 
 
 func _make_play():
@@ -27,10 +81,33 @@ func test_builds_the_play_stack() -> void:
 	await get_tree().process_frame
 	assert_not_null(play.get_node_or_null("PlayViewportContainer/PlayViewport"), "embedded SubViewport exists")
 	assert_not_null(play.get_node_or_null("PlayViewportContainer/PlayViewport/World"), "the packaged game world is instanced")
-	assert_not_null(play.get_play_camera(), "a fly camera drives the play view")
+	assert_not_null(play.get_play_camera(), "the shared local-player host owns the play camera")
+	assert_null(play.get_play_camera().get_script(), "editor Play Mission no longer uses FlyCamera movement")
+	assert_not_null(play.get_player_host(), "editor Play Mission installs the same local-player host as the game")
+	assert_not_null(play.get_node_or_null("PlayViewportContainer/PlayViewport/PlayInputRouter"),
+		"embedded Play Mission routes SubViewport input to the player host")
 	assert_true(play.get_node("PlayViewportContainer/PlayViewport").own_world_3d,
 		"the play world is isolated from the editor's 3D world")
 	assert_false(play.is_playing())
+
+
+func test_play_viewport_input_route_drives_mouse_look() -> void:
+	var play = _make_play()
+	await get_tree().process_frame
+	var world := FakeWorld.new()
+	add_child_autofree(world)
+	play.get_player_host().setup(world, play.get_play_camera())
+	play._playing = true
+
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(40.0, -20.0)
+	assert_true(play.handle_viewport_input(motion), "SubViewport input path must feed gameplay look")
+	play.get_player_host().before_world_tick(0.016)
+
+	assert_eq(world.input_calls.size(), 1)
+	assert_gt(world.input_calls[0]["yaw"], 0.0)
+	assert_gt(world.input_calls[0]["pitch"], 0.0)
+	play._playing = false
 
 
 func test_start_rejects_missing_or_unloaded_mission() -> void:
@@ -57,7 +134,7 @@ func test_start_rejects_missing_root() -> void:
 
 func test_failed_world_boot_leaves_a_clean_stopped_state() -> void:
 	# The dvxi5 fixture has the terrain but no .env, so the real mission load
-	# fails inside NovaWorld; the controller must come back not-playing with the
+	# fails inside GameWorld; the controller must come back not-playing with the
 	# failure surfaced, ready for the workspace to swap the edit viewport back.
 	var play = _make_play()
 	await get_tree().process_frame

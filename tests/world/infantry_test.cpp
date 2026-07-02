@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <array>
 #include <set>
 #include <vector>
 
@@ -40,7 +41,11 @@ constexpr int32_t fx(double units) { return static_cast<int32_t>(units * 65536.0
 // Constants under test (mirrors of the cited values in infantry.cpp).
 constexpr int32_t kClamp = 69273360;       // body turn clamp / tick
 constexpr int32_t kTerminal = -32768;      // terminal fall velocity
-constexpr int32_t kFloorStand = 0x50000;   // AiSystem::ground_stand_offset default
+constexpr int32_t kFloorStand = 0;         // infantry settles pos[2] to ground + the anim
+                                           // frame's capsule_bottom; these tests use capsule 0,
+                                           // so the floor is bare
+                                           // ground (+0x50000 is the death-mover target, not the
+                                           // on-foot floor — infantry.cpp / D-INF-6).
 
 // A 512x512 height field with a caller-supplied raw16 column function (uniform in the
 // second axis where not stated). Same wiring as tests/world/ground_height_test.cpp.
@@ -63,23 +68,26 @@ struct Field {
     }
 };
 
-// Synthetic clip source: a configurable clip set; gait clips move `step` forward per
+// Test root source: a configurable clip set; gait clips move `step` forward per
 // tick, everything else plays without root motion.
 struct TestSource : IRootMotionSource {
     std::set<int> clips;
     int32_t step = 0x4000;
+    int32_t capsule_bottom = 0; // absolute origin->feet the on-foot ground settle floors to
 
     static bool gait(int id) {
         return id == anim_state::kWalkForward || id == anim_state::kRunForward ||
                id == anim_state::kJogForward || id == anim_state::kWoundedWalk ||
-               id == anim_state::kWoundedRun;
+               id == anim_state::kWoundedRun || id == anim_state::kWalkCrouchForward ||
+               id == anim_state::kWalkProneForward;
     }
-    bool has_clip(int id) const override { return clips.count(id) != 0; }
-    bool advance(int id, int32_t &phase, RootMotionFrame &out) override {
+    bool has_clip(int /*adm_id*/, int id) const override { return clips.count(id) != 0; }
+    bool advance(int /*adm_id*/, int id, int32_t &phase, RootMotionFrame &out) override {
         if (clips.count(id) == 0) return false;
         ++phase;
         out = RootMotionFrame{};
         if (gait(id)) out.dx = step;
+        out.capsule_bottom = capsule_bottom;
         return true;
     }
 };
@@ -302,20 +310,18 @@ int main() {
         route(ai, e,
               {node(fx(3), 0, fx(1), /*facing=*/0, /*wait=*/248), node(fx(6), 0, fx(1))}, 1);
 
-        // Motion lags the order by one tick (each tick's root frame is fetched from the
-        // current clip before think/select switch it): walking covers t=1..16 -> 2u, the
-        // t=32 think arrives at node0 (pos 3.875u, dist 0.875u <= radius), and that
-        // tick's already-fetched walk frame parks the soldier at exactly 4u.
+        // Selection happens before root evaluation: walking covers t=0..15 -> 2u, and
+        // the t=16 think arrives because the authored radius is 1u around the 3u marker.
         run_ticks(ai, w, 0, 33);
-        CHECK(e->pos[0] == fx(4));
-        CHECK(e->inf.wait_cooldown == 16);          // (248 + 8) >> 4
+        CHECK(e->pos[0] == fx(2));
+        CHECK(e->inf.wait_cooldown == 15);          // (248 + 8) >> 4, decremented at t=32
         CHECK(e->slot.f[38] == 1);                  // advanced past node0
         CHECK(ai.relmat_calls.size() == 2);         // SetBitB + SetBitA at the arrival
         if (!ai.relmat_calls.empty())
             CHECK(ai.relmat_calls[0].channel == 1 && ai.relmat_calls[0].node == 0);
 
         run_ticks(ai, w, 33, 200); // mid-hold: standing in idle, cooldown draining
-        CHECK(e->pos[0] == fx(4));
+        CHECK(e->pos[0] == fx(2));
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown > 0);
 
@@ -500,6 +506,27 @@ int main() {
         CHECK(e->health == 100);
     }
 
+    // ---- gravity cadence: the NPC (org1) falls EVERY tick; the player (org2) keeps the 2-tick
+    //      discretization. [orig: NPC -416/tick @0x4bf7bf; player -416 every 2 ticks; D-INF-10]
+    {
+        Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
+        World w;
+        AiSystem ai;
+        ai.terrain = &ground0.field;
+
+        soldier(ai); // index 0: NPC (is_local_player defaults false)
+        soldier(ai); // index 1: player (attach may realloc the AI vector — set fields AFTER both)
+        ai.at(0)->health = 100;
+        ai.at(0)->pos[0] = fx(100); ai.at(0)->pos[1] = fx(100); ai.at(0)->pos[2] = fx(100); // high up
+        ai.at(1)->health = 100;
+        ai.at(1)->inf.is_local_player = true;
+        ai.at(1)->pos[0] = fx(120); ai.at(1)->pos[1] = fx(120); ai.at(1)->pos[2] = fx(100);
+
+        run_ticks(ai, w, 0, 2); // ticks 0 (even) and 1 (odd); both stay airborne (100u up)
+        CHECK(ai.at(0)->inf.vel[2] == -2 * 416); // NPC: two gravity steps -> per-tick fall
+        CHECK(ai.at(1)->inf.vel[2] == -416);     // player: one gravity step -> 2-tick discretization
+    }
+
     // ---- slope slide: steep ground drifts the soldier downhill + leans the body ----
     // [orig: dump 930-1000 — probes ±22528-dir; pitch slope <<14 vs threshold 0x22222200;
     //  slide (cos|sin)<<11>>22 = 2048 per 8-tick pass at heading 0; lean eighth-step]
@@ -519,21 +546,19 @@ int main() {
 
         // First pass (t=0), pinned exactly: probes at ±0.34375u see a 0.6875u rise ->
         // pitch slope 45056<<14 = 738197504, clamped to 656175520, over the 0x22222200
-        // threshold -> vel gains -2048 along the facing ((cos<<11)>>22), integrates once,
-        // and the same tick's ground contact zeroes it. The lean chases the clamped slope
-        // by an eighth-step: pitch = (656175520 + 4) >> 3.
+        // threshold -> vel gains -2048 along the facing ((cos<<11)>>22), then the
+        // NPC horizontal decay from 0x4b9910 damps it before integration.
+        // The lean chases the clamped slope by an eighth-step: pitch = (656175520 + 4) >> 3.
         run_ticks(ai, w, 0, 8);
-        CHECK(e->pos[0] == fx(100) - 2048);
+        CHECK(e->pos[0] < fx(100) - 2048);
         CHECK(e->pos[1] == fx(100));    // no roll component on an X-only ramp
         CHECK(e->pos[2] == fx(100) + kFloorStand); // landed back on the (cached) floor
-        CHECK(e->inf.vel[0] == 0 && e->inf.vel[2] == 0);
+        CHECK(e->inf.vel[0] < 0 && e->inf.vel[2] == 0);
         CHECK(e->pitch == (656175520 + 4) >> 3);
         CHECK(e->roll == 0);
 
-        // Long run: once the soldier drifts, the 8-tick ground-cache lag lets the slide
-        // velocity persist a few ticks before a landing zeroes it (a property of the
-        // D-INF-3 resolver model), so the drift outpaces one impulse per pass — assert
-        // the qualitative shape, not the trajectory.
+        // Long run: slide velocity persists through the IDA decay path, so assert the
+        // qualitative shape rather than a hand-derived trajectory.
         run_ticks(ai, w, 8, 80);
         CHECK(e->pos[0] < fx(100) - 8 * 2048);  // kept sliding downhill
         CHECK(e->pos[0] > fx(92));              // ...at a bounded rate
@@ -542,6 +567,366 @@ int main() {
         CHECK(e->pitch <= 656175520);           // ...never past the clamped slope
         CHECK(e->pos[2] < fx(100) + kFloorStand);        // followed the ground down
         CHECK(e->pos[2] > fx(90) + kFloorStand);
+    }
+
+    // ---- ground settle floors pos[2] to ground + the frame's capsule_bottom (origin->feet),
+    //      NOT the death-fall mover's +0x50000 [orig: Entity_ProcessCollisionAndPlatformPhysics
+    //      @0x4b2bd0 settles entity[3]=entityRadius+ground @0x4b3da3; entityRadius = the .bad
+    //      capsule_bottom*65536 via AnimMap_UpdateEntity @0x40b82f; D-INF-6]. ----
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); }); // 50u everywhere
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1); // 1u origin->feet for the held idle pose
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(200); // dropped well above the floor
+
+        // is_authority=false so think/select never retargets the held idle clip; the ground
+        // clamp itself has no authority gate, so the soldier still settles.
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.is_authority = false;
+        for (uint32_t t = 0; t < 600; ++t) {
+            ctx.logic_tick = t;
+            ai.tick(w, ctx);
+        }
+
+        CHECK(e->pos[2] == fx(50) + fx(1)); // ground + capsule_bottom, not ground + 0x50000
+    }
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(50) + fx(1) + 0x8000; // positive foot gap, but <= 0xF000
+
+        run_ticks(ai, w, 1, 2);
+
+        // Per-tick NPC gravity (D-INF-10) steps pos.z down one step, but the small positive
+        // foot clearance (<= 0xF000) is otherwise left alone — NOT snapped to the floor, NOT airborne.
+        CHECK(e->pos[2] == fx(50) + fx(1) + 0x8000 - 2 * 416);
+        CHECK(e->pos[2] > fx(50) + fx(1)); // still above the floor (clearance not snapped)
+        CHECK(!e->inf.airborne);
+    }
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(50) + fx(1) - 0x1000; // foot penetrates the ground
+
+        run_ticks(ai, w, 1, 2);
+
+        CHECK(e->pos[2] == fx(50) + fx(1)); // only negative/zero clearance lifts
+    }
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100);
+        e->pos[1] = fx(100);
+        e->pos[2] = fx(50) + fx(1);
+        e->inf.vel[0] = 64;
+        e->inf.vel[1] = -64;
+
+        run_ticks(ai, w, 1, 2);
+
+        CHECK(e->inf.vel[0] != 0); // ground contact does not clear horizontal slide
+        CHECK(e->inf.vel[1] != 0);
+    }
+
+    // ---- player slide damp: a GROUNDED player's horizontal slide decays by (63*v)>>6 each tick
+    //      (org2 block A, no deadzone), so a slope-slide impulse settles instead of drifting
+    //      forever — the player's slide was previously never damped. [orig: @0x4b7949;
+    //      D-INF-9]
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = fx(50) + fx(1);
+
+        run_ticks(ai, w, 0, 1); // settle grounded
+        CHECK(!e->inf.airborne);
+
+        e->inf.vel[0] = 6400;
+        e->inf.vel[1] = -6400;
+        run_ticks(ai, w, 1, 2); // one grounded tick: org2 (63*v)>>6, NOT the NPC (7v+4)>>3 (=5600)
+        CHECK(e->inf.vel[0] == (63 * 6400) >> 6);  // 6300
+        CHECK(e->inf.vel[1] == (63 * -6400) >> 6); // -6300
+
+        run_ticks(ai, w, 2, 300); // ...and it keeps decaying (the drift bug is fixed)
+        CHECK(e->inf.vel[0] >= 0 && e->inf.vel[0] < 100);
+        CHECK(e->inf.vel[1] <= 0 && e->inf.vel[1] > -100);
+    }
+
+    // ---- stance: crouch/prone remap the gait + idle to the stance clips (player) ----
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — moving base 1/11/19, idle 43/45/48;
+    //  player body tests prone bit 0x100 before crouch bit 0x200]
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kRunForward, anim_state::kIdle,
+                     anim_state::kStop, anim_state::kWalkCrouchForward, anim_state::kWalkProneForward,
+                     anim_state::kIdleCrouch, anim_state::kIdleProne};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+
+        // Local-player motion is driven by the raw-input player_moving flag, not the
+        // NPC move_mode/target_dist (which apply_player_body_input clears). [a61a7e04]
+        e->inf.player_moving = true; // moving forward
+        e->inf.stance = InfantryState::Stance::kCrouch;
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // 11
+
+        e->inf.stance = InfantryState::Stance::kProne;
+        run_ticks(ai, w, 1, 2);
+        CHECK(e->inf.anim_state == anim_state::kWalkProneForward); // 19
+
+        e->inf.alert_timer = 16; // alerted -> run gait, but crouch has no run clip...
+        e->inf.stance = InfantryState::Stance::kCrouch;
+        run_ticks(ai, w, 2, 3);
+        CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward); // ...still crouch WALK (11)
+        e->inf.alert_timer = 0;
+
+        e->inf.player_moving = false; // stationary
+        e->inf.stance = InfantryState::Stance::kCrouch;
+        run_ticks(ai, w, 3, 4);
+        CHECK(e->inf.anim_state == anim_state::kIdleCrouch); // 45
+
+        e->inf.stance = InfantryState::Stance::kProne;
+        run_ticks(ai, w, 4, 5);
+        CHECK(e->inf.anim_state == anim_state::kIdleProne); // 48
+
+        e->inf.stance = InfantryState::Stance::kStand;
+        run_ticks(ai, w, 5, 6);
+        CHECK(e->inf.anim_state == anim_state::kIdle); // 43
+    }
+
+    // ---- stance availability fallback: a model with no crouch/prone clips uses stand siblings ----
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kIdle}; // no crouch/prone clips
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.player_moving = true;
+        e->inf.stance = InfantryState::Stance::kCrouch;
+        run_ticks(ai, w, 0, 1);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward); // crouch-walk -> stand walk
+        e->inf.stance = InfantryState::Stance::kProne;
+        run_ticks(ai, w, 1, 2);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward); // prone-walk -> crouch -> stand walk
+    }
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kWalkCrouchForward,
+                     anim_state::kIdle, anim_state::kIdleCrouch};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->health = 100;
+        e->inf.is_local_player = false;
+        e->inf.stance = InfantryState::Stance::kCrouch;
+        route(ai, e, {node(fx(500), 0, fx(1))}, 0);
+
+        run_ticks(ai, w, 0, 1);
+
+        CHECK(e->inf.anim_state == anim_state::kWalkForward); // NPC stance is not player input
+    }
+
+    // ---- player jump: a grounded jump request launches the vel_z impulse + jump-loop clip,
+    //      then gravity brings it back to the floor. [orig: @0x4b7ee5 vel_z=0x1600 + in-air;
+    //      jump_loop 31; gravity -416/2t] ----
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        const int32_t floor_z = fx(50);
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kJumpLoop};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = floor_z;
+
+        run_ticks(ai, w, 0, 2);               // settle on the ground first
+        CHECK(!e->inf.airborne);
+        CHECK(e->pos[2] == floor_z);
+
+        e->inf.jump_requested = true;
+        run_ticks(ai, w, 2, 3);               // the jump tick
+        CHECK(e->inf.airborne);
+        CHECK(e->inf.vel[2] == 0x1600 - 416); // launch impulse minus one gravity step
+        CHECK(e->inf.anim_state == anim_state::kJumpLoop);
+        CHECK(e->pos[2] > floor_z);           // rose off the ground
+
+        run_ticks(ai, w, 3, 400);             // ...arcs up and lands
+        CHECK(!e->inf.airborne);
+        CHECK(e->pos[2] == floor_z);
+    }
+
+    // ---- idle root output is still entity root motion: the movement flag gates state commits,
+    //      not position integration. [orig: AnimMap_UpdateEntity @0x40b82f produces root output;
+    //      Entity_UpdateInfantryAI @0x4BF684 integrates it on the authoritative path without a
+    //      dword_8139E8 movement-bit gate.] ----
+    {
+        World w;
+        AiSystem ai;
+        // A source whose clip carries a forward step for EVERY state: the motor consumes it
+        // even while the selected state is idle, matching the original's unconditional root
+        // integration. Real idle clips may author zero mean root velocity; the gate is data.
+        struct SwaySource : IRootMotionSource {
+            bool has_clip(int, int) const override { return true; }
+            bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
+                ++phase;
+                out = RootMotionFrame{};
+                out.dx = 0x2000;
+                return true;
+            }
+        } src;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->pos[0] = fx(10);
+
+        e->inf.move_mode = 0; e->inf.target_dist = 0; // idle: no move order
+        run_ticks(ai, w, 0, 8);
+        CHECK(e->inf.anim_state == anim_state::kIdle);
+        CHECK(e->pos[0] == fx(10) + 8 * 0x2000);
+
+        e->inf.player_moving = true; // walk forward
+        run_ticks(ai, w, 8, 14);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+        CHECK(e->pos[0] > fx(10)); // a movement state DOES translate the same clip step
+    }
+
+    // ---- per-ADM root motion: each soldier uses its own clip set for both movement and
+    //      capsule_bottom grounding. [orig: AnimMap_UpdateEntity @0x40b5f0 evaluates each
+    //      entity's own anim map; the out-transform bottom becomes the on-foot floor] ----
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        struct PerAdmSource : IRootMotionSource {
+            std::array<std::set<int>, 2> clips;
+            std::array<int32_t, 2> step = {0x1000, 0x3000};
+            std::array<int32_t, 2> capsule = {fx(1), fx(3)};
+
+            bool has_clip(int adm_id, int id) const override {
+                if (adm_id < 0 || adm_id >= static_cast<int>(clips.size())) return false;
+                return clips[static_cast<size_t>(adm_id)].count(id) != 0;
+            }
+            bool advance(int adm_id, int id, int32_t &phase, RootMotionFrame &out) override {
+                if (!has_clip(adm_id, id)) return false;
+                ++phase;
+                out = RootMotionFrame{};
+                out.dx = step[static_cast<size_t>(adm_id)];
+                out.capsule_bottom = capsule[static_cast<size_t>(adm_id)];
+                return true;
+            }
+        } src;
+        src.clips[0] = {anim_state::kWalkForward, anim_state::kIdle};
+        src.clips[1] = {anim_state::kWalkCrouchForward, anim_state::kIdleCrouch};
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        ai.root_motion = &src;
+        soldier(ai);
+        soldier(ai);
+        AiEntity *stand = ai.at(0);
+        AiEntity *crouch = ai.at(1);
+        stand->handle = EntityHandle::make(0, 0);
+        crouch->handle = EntityHandle::make(0, 1);
+
+        stand->inf.is_local_player = true;
+        stand->health = 100;
+        stand->pos[0] = fx(100); stand->pos[1] = fx(100); stand->pos[2] = fx(50);
+        stand->inf.adm_id = 0;
+        stand->inf.player_moving = true;
+        stand->inf.anim_state = anim_state::kWalkForward;
+
+        crouch->inf.is_local_player = true;
+        crouch->health = 100;
+        crouch->pos[0] = fx(100); crouch->pos[1] = fx(100); crouch->pos[2] = fx(50);
+        crouch->inf.adm_id = 1;
+        crouch->inf.stance = InfantryState::Stance::kCrouch;
+        crouch->inf.player_moving = true;
+        crouch->inf.anim_state = anim_state::kWalkCrouchForward;
+
+        run_ticks(ai, w, 0, 3);
+
+        CHECK(stand->inf.anim_state == anim_state::kWalkForward);
+        CHECK(crouch->inf.anim_state == anim_state::kWalkCrouchForward);
+        CHECK(stand->pos[0] == fx(100) + 3 * src.step[0]);
+        CHECK(crouch->pos[0] == fx(100) + 3 * src.step[1]);
+        CHECK(stand->pos[2] == fx(50) + src.capsule[0]);
+        CHECK(crouch->pos[2] == fx(50) + src.capsule[1]);
+    }
+
+    // ---- body-anim slot mapping: the motor's clip state -> present-pass BodyAnim slot ----
+    {
+        CHECK(body_anim_slot_from_state(anim_state::kIdle) == kBodyAnimIdle);
+        CHECK(body_anim_slot_from_state(anim_state::kWalkForward) == kBodyAnimWalkForward);
+        CHECK(body_anim_slot_from_state(anim_state::kJogForward) == kBodyAnimJogForward);
+        CHECK(body_anim_slot_from_state(anim_state::kRunForward) == kBodyAnimRunForward);
+        CHECK(body_anim_slot_from_state(anim_state::kWoundedRun) == kBodyAnimRunForward);
+        CHECK(body_anim_slot_from_state(anim_state::kDeathFire) == kBodyAnimIdle); // unmapped -> idle
     }
 
     if (failures == 0) std::printf("infantry_test: OK\n");

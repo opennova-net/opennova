@@ -553,6 +553,42 @@ button_pressed = true
 text = "Show axes"
 tooltip_text = "Show the origin axis gizmo in the 3D preview."
 
+[node name="SettingsMcpSection" type="VBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SettingsMcpLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsMcpSection"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "Agent server (MCP)"
+
+[node name="SettingsMcpRow" type="HBoxContainer" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsMcpSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SettingsMcpToggle" type="CheckBox" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsMcpSection/SettingsMcpRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+button_pressed = true
+text = "Enable on port"
+tooltip_text = "Serve the MCP agent endpoint on 127.0.0.1 while ONED runs. Connected agents can inspect assets, control the editor, and run scripts in-process."
+
+[node name="SettingsMcpPortEdit" type="LineEdit" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsMcpSection/SettingsMcpRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+text = "8975"
+max_length = 5
+tooltip_text = "Port to listen on (Enter to apply; rebinds a running server)."
+
+[node name="SettingsMcpStatusLabel" type="Label" parent="TopPopoverLayer/SettingsPopup/SettingsPopupMargin/SettingsPopupBox/SettingsMcpSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+text = "Stopped"
+
 [node name="RightSplit" type="HSplitContainer" parent="WorkstationLayout/BodyLane/BodyRow/CenterRightSplit"]
 unique_name_in_owner = true
 layout_mode = 2

@@ -38,6 +38,10 @@ func set_terrain_editor(value: Node) -> void:
 
 
 func bind_to_editor(value: Node) -> void:
+	# The shell binds the app root; unwrap to the terrain domain editor. Tests
+	# that bind a bare TerrainEditor keep working (no unwrap hook -> as-is).
+	if value != null and value.has_method("get_terrain_editor"):
+		value = value.get_terrain_editor()
 	set_terrain_editor(value)
 
 
@@ -51,6 +55,40 @@ func shows_camera_status() -> bool:
 
 func shows_tile_gizmo() -> bool:
 	return true
+
+
+# Non-empty only while the Tile workflow has a placed-tile selection. Leaving
+# TILE_STAMP clears the selection (set_tool), so gating on the active workflow
+# id matches the shell's old workflow check exactly.
+func get_tile_gizmo_state() -> Dictionary:
+	if terrain_editor == null or get_active_workflow_id() != Workflow.STAMP:
+		return {}
+	if not terrain_editor.has_selected_tileinfo_entry():
+		return {}
+	var entry: Variant = terrain_editor.get_selected_tileinfo_entry()
+	if entry == null:
+		return {}
+	return {
+		"label": "Editing tile %03d @ (%d, %d)" % [
+			entry.get_tile_index(), entry.get_cell_x(), entry.get_cell_z()],
+		"anchor_world": terrain_editor.get_selected_tileinfo_world_center() + Vector3(0.0, 2.0, 0.0),
+	}
+
+
+func run_tile_gizmo_action(action: StringName) -> void:
+	if terrain_editor == null:
+		return
+	match action:
+		&"done":
+			terrain_editor.clear_tileinfo_selection()
+		&"rotate":
+			terrain_editor.rotate_selected_tileinfo_clockwise()
+		&"flip_x":
+			terrain_editor.flip_selected_tileinfo_x()
+		&"flip_y":
+			terrain_editor.flip_selected_tileinfo_y()
+		&"delete":
+			terrain_editor.delete_selected_tileinfo_entry()
 
 
 # View guides: a flat y=0 reference grid would be buried under (or float
@@ -299,7 +337,13 @@ func get_new_action_label() -> String:
 func new_current() -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
-	terrain_editor.request_new_terrain()
+	if is_busy():
+		return OK
+	var ed: Node = terrain_editor
+	var make_new := func() -> void: ed.new_terrain()
+	if _prompt_dirty_guard(make_new):
+		return OK
+	ed.new_terrain()
 	return OK
 
 
@@ -333,10 +377,39 @@ func get_current_resource_path() -> String:
 	return ""
 
 
+# Single entry point for "user picked a .trn". Project vs. import mode is
+# auto-detected inside open_trn by the presence of a sibling <name>_depth.raw
+# (project) vs. a .cpt alongside (imported game asset).
 func open_file(path: String) -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
-	return terrain_editor.request_open_trn(path)
+	if is_busy():
+		return OK
+	var ed: Node = terrain_editor
+	var open_it := func() -> void: ed.open_trn(path)
+	if _prompt_dirty_guard(open_it):
+		return OK
+	return ed.open_trn(path)
+
+
+# Dirty guard for actions that replace the open terrain (New/Open): pops the
+# shell's shared unsaved-changes dialog and returns true when the prompt now
+# owns the action. Save routes through the shell's save_then, which falls back
+# to Save As while the project has no directory yet. Headless (no shell):
+# nothing can prompt, so callers run the action directly.
+func _prompt_dirty_guard(run: Callable) -> bool:
+	if terrain_editor == null or not terrain_editor.is_dirty:
+		return false
+	if editor_shell == null or not editor_shell.has_method("prompt_unsaved_for"):
+		return false
+	# Locals only in the lambdas: capturing `self` members would hold this
+	# RefCounted workspace through the shell's callable stash.
+	var shell: Object = editor_shell
+	var ws: EditorWorkspace = self
+	shell.prompt_unsaved_for(
+		func() -> void: shell.save_then(ws, run),
+		run)
+	return true
 
 
 func can_save() -> bool:

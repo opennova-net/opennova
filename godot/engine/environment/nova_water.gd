@@ -8,7 +8,17 @@ extends Node3D
 # [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] (docs/env/env-tod-re.md).
 
 @export var environment_path: NodePath
-@export var terrain_data: NovaTerrainData
+@export var terrain_data: NovaTerrainData:
+	set(value):
+		terrain_data = value
+		# Terrain carries the map's water height. It's assigned after the .trn loads
+		# — long after _ready — so recompute the fallback here too, or the plane stays
+		# at the scene default instead of dropping to the map's level. The .env still
+		# wins when it carries its own water_height (see _apply_environment_water_height).
+		_recompute_terrain_water_fallback()
+		_apply_environment_water_height()
+		if mesh_instance:
+			mesh_instance.position.y = water_height
 @export_range(-100, 200, 0.1) var water_height: float = 0.0:
 	set(value):
 		water_height = value
@@ -37,13 +47,21 @@ var _terrain_fallback_water_height: float = 0.0
 
 func _ready() -> void:
 	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	_recompute_terrain_water_fallback()
+	if _terrain_fallback_water_height != 0.0:
+		water_height = _terrain_fallback_water_height
+	_apply_environment_water_height()
+	build()
+
+
+# The map's water height (engine half-world units) from the loaded terrain, used as
+# the fallback when the .env carries none. Zero when there's no terrain or no water.
+func _recompute_terrain_water_fallback() -> void:
+	_terrain_fallback_water_height = 0.0
 	if terrain_data and terrain_data.is_loaded():
 		var raw := terrain_data.get_water_height()
 		if raw > 0:
 			_terrain_fallback_water_height = float(raw) * 0.5
-			water_height = _terrain_fallback_water_height
-	_apply_environment_water_height()
-	build()
 
 
 func build() -> void:

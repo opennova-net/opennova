@@ -61,7 +61,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | P2 combat/targeting | `AI_FindBestTargetB` etc. | 0x466f60+ | prior adversarial grill | **matching** (recorded deviations stand) |
 | `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); HELO/vehicle physics remain visible `not_yet_ported` stubs | tracked model (vehicle slice) |
 | organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; `AiSystem::tick` branches before the SM | **matching** |
-| `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..5 (enumerated below) |
+| `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
 | `kInfantryAnimNames/Flags` | `off_8135F0` / `dword_8139E8` | 0x8135F0/0x8139E8 | all 200 entries index-verified vs IDB | **matching** |
 | promote `init_infantry` + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer | **matching** |
 | `InfantryRootMotion` (engine host) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
@@ -83,8 +83,11 @@ Everything below was decompiled and read this session (pseudocode dumps:
 ### 3.2 Navigation think (every 16 ticks)
 `AiSlot = entity+104` (172 B, our struct): `slot[37] @+148` = **waypoint channel id**, with
 **123–127 reserved as commands** → usable mission path ids are 1..122 (format truth!):
-126 = hold/guard (10 u radius), 127 = follow local player (radius `max(slot[16], 4u)`),
-123/124/125 = move-order family. `slot[38] @+152` = node index. `slot[35]` = active flag,
+126 = hold/guard the group (10 u radius), 127 = follow local player (radius `max(slot[16], 4u)`),
+123/124/125 = **Goto-SSN-and-board** (runtime seat filters: 123 `sitex`/passenger-only,
+124 rejects `ctrlx`, 125 any; MED labels are in §11). `slot[38] @+152` = node index for a real path
+(1..122), or the **target SSN**
+(= `wp_number`) for the 123–125 Goto-SSN commands. `slot[35]` = active flag,
 `slot[36]` = located entity ptr (rescans pools 0/1/2 by id when stale).
 - Target node = pool-3 marker entity via `entryIndex[34*ch + node]` (`Pool_GetEntryUnchecked(3,·)`);
   the nav tables are the same `Buffer/dword_A71DD4/entryIndex` aliases our port rebased.
@@ -220,7 +223,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     against other soldiers' claims, then approach `E`→`S`/`G`→`H` stages via entity+865 with stop
     147 / guard 140 alignment and eighth-step position pulls) ending in `Entity_FindBestSeatSlot`
     + `Entity_AttachToVehicleSeat`; `UseGun` bone = emplacement manning (radius 1u/3u); net-ids
-    11000/12000/12001 get hardcoded escort/approach offsets (heading ±90° at 2–4u).
+    11000/12000/12001 get hardcoded escort/approach offsets (heading ±90° at 2–4u). The board path is
+    gated by the waypoint_id command sentinel — `slot[148] ∈ {123,124,125}` (Goto SSN; MED names in
+    §11) with target SSN = `wp_number` (`slot[152]`) [orig: `Entity_UpdateInfantryAI @ 0x4ba9ad` tests
+    `slot[148]==125` → keep carrier `slot[144]`, else clear]. Cross-validated on 00TRa: SSN 1/1715
+    (List 125, Number 11/1714) → board DTruck1/DTruck2.
 13. **Idle look-at system** (dump 4089–4429, rides the combat pass; D-INF-5): every-256-tick
     interest scan over predicted positions (≤ min(slot+68, 20u) per axis) scoring closeness +
     facing-me (+4, < 2u and bearing−their-heading < ~25°) + local-player (+2) − re-stare (−12,
@@ -236,7 +243,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
 15. **Mounted pose states** (dump 4464–4539, mount/B2 pass): emplaced gunners force 67–75
     (`emplaced_N` by mount config +2156); seat passengers pose from the seat bone and take
     `sit_N` = `atol(bone_name_digits) + 76`; sit_24 (=100) drivers lean 107–110 by steering
-    (entity+24 of the vehicle, ±71582784) and speed (+668).
+    (entity+24 of the vehicle, ±71582784) and speed (+668). Port status: `UseGun`/gunner seats
+    select `anim_emplaced` 67 plus a host-fed variant when that clip exists; non-gunner seats use
+    the parsed `sitexNN`/`ctrlxNN`/`drvrxNN` pose index (`anim_sit_N`). Remaining gaps: deriving the
+    emplaced variant from the real mount config, the driver-lean 107–110 overlay, and true per-tick
+    seat-bone follow (see §9.2).
 16. **Playhead rate**: channel time is normalized [0,1) advanced by a per-clip dt seeded at
     `AnimChannel_InitFromParams` (the literal 4096 param) — the exact dt derivation (sim-tick →
     clip-frame rate, blend-window advance) is unpinned; the IRootMotionSource seam owns phase
@@ -245,16 +256,69 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
 ## 5. Per-system equivalence verdict (2026-06-10, infantry port complete)
 
 - **Infantry ground locomotion** (`Entity_UpdateInfantryAI @ 0x4b9910` → `AiSystem::tick_infantry`,
-  libs/world/src/infantry.cpp): **MATCHING**, with five named, cited deviations —
+  libs/world/src/infantry.cpp): **MATCHING**, with the named, cited deviations —
   - **D-INF-1** no blend windows (clip switches reset phase; the original blends 10/15 ticks,
     root motion included) — rides the skeletal/blend pass.
-  - **D-INF-2** command channels 123–127 decoded but not driven (move-to-entity bodies incl. the
-    staged vehicle boarding are documented in §4.12) — rides the command-source phase.
-  - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water/capsule
-    pending, `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
+  - **D-INF-2** command channels 123–127 (`waypoint_id`; MED "Goto SSN/Group/Player", §11) are
+    partially driven. Commands 123/124/125 authored spawn attachment now resolve `wp_number` as the
+    target SSN, apply the IDA-confirmed seat filter (123 passenger-only, 124 rejects `ctrlx`, 125 any),
+    mount occupants already authored near a host-provided seat, and render `UseGun`/gunner seats with
+    `anim_emplaced` plus available variants (00TRa class). Remaining gaps: staged E/S/G/H
+    walk-to-seat, 126/127, child-seat traversal, true seat-bone transform follow, and driver-lean
+    mounted poses.
+  - **D-INF-3** ground/water resolver modeled as terrain-clamp + landing (platforms/water + the
+    horizontal capsule pending; the vertical capsule-bottom settle now landed — see **D-INF-6** —
+    `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
     zeroes on contact; the airborne anim overlay waits on the entity+36 flags.
   - **D-INF-4** computed sin/cos tables (trunc(f(idx)·2^22)) for the runtime-built originals.
   - **D-INF-5** idle look-at system + its spotting side effects (§4.13) — rides the combat pass.
+  - **D-INF-6** infantry/player grounding settles `pos[2]` (the model origin) to **`ground +
+    capsule_bottom`**, so the entity's collision-capsule bottom (the origin→feet offset) rests on
+    the terrain and a waist-origin model's feet land exactly on the ground. WITNESSED end-to-end
+    (re-confirmed against `Jointops.exe.kong.i64`, imagebase 0x400000, this session):
+    `Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0` resettles `entity[3] = entityRadius +
+    groundHeight` (`@0x4b3da3`; `groundHeight = heightDelta − entityRadius @0x4b3d90`), where
+    `entityRadius` is the current animation frame's `capsule_bottom × 65536` fed from the
+    `.bad`/`.adm` root record [orig: `AnimMap_UpdateEntity @0x40b5f0` (out-transform block `@0x40b82f`) `out_transform[3] =
+    bottom*65536 @0x40b84d`; `out_transform[4] = top*65536 + 0x2000` is the capsule top]. Both
+    on-foot callers pass it straight in [orig: org1 `@0x4bf7fa`, org2 `@0x4b7cf9`]. The model
+    renders at `pos[2]` with **no render-side lift** [orig: `Math_BuildFixedPointToFloatMatrix4x4
+    @0x612200` Z store `@0x612457` — pure 1/65536 scale, only Y negated]. Stance-aware: crouch/
+    prone clips carry a smaller `capsule_bottom`, lowering feet *and* the FP eye (`pos[2] + 0x10000`
+    [orig: `Camera_ComputeThirdPersonView @0x437e8f`]). The `+0x50000` [orig: `AI_ProcessMovementStep
+    @0x466db0` `ai_comp[131] = ground + 0x50000 @0x466e2d`] is the id-3 death-fall mover's vertical
+    TARGET slot, **NOT** the live `pos[2]` — applying it to the render Z floated soldiers ~1 body
+    (the regression this entry corrects; the earlier feet-origin/no-offset reading is REFUTED —
+    dropping the term sinks them waist-deep). Our port: `RootMotionFrame` carries absolute
+    `capsule_bottom`/`capsule_top` (godot `InfantryRootMotion` emits them from the `.bad` bottom/top
+    tracks); `tick_infantry` — player AND AI, the player via `InfantryState::is_local_player` — floors
+    `pos[2] = ground_cache + frame.capsule_bottom` (`libs/world/src/infantry.cpp`). The shared
+    `ai_->root_motion` is loaded from `E_STAND.adm` at mission load (`mission_runtime.gd`), so every
+    motor-driven soldier resolves a real standing `capsule_bottom`. `ground_stand_offset` (0x50000)
+    is retained only for the vehicle/SM `apply_ground_clamp` path. Guarded by the capsule-settle case
+    in `tests/world/infantry_test.cpp`.
+  - **D-INF-9** player horizontal-slide decay. The player shares the NPC's slide-velocity damp, but
+    the original splits it by the grounded flag: a GROUNDED player decays `inf.vel[0]/[1]` by
+    `(63·v)>>6` with NO deadzone [orig: `Entity_UpdateInfantryPlayerBody @0x4b7949` — `shl 6 / sub /
+    sar 6` on `entity+0x98/0x9C`, selected by the `entity+0x24 & 0x2000` grounded flag `@0x4b78ab`];
+    an AIRBORNE player uses the same `(7v+4)>>3` + `abs<=8→0` deadzone as the NPC [orig: `@0x4b7982`].
+    The two formulas are mutually exclusive, not sequential. A prior pass gated slide damping behind
+    `!is_local_player` (and dropped the grounded velocity zero), so the player's slope-slide impulse
+    drifted forever; FIXED in `tick_infantry` (`libs/world/src/infantry.cpp`), guarded by the
+    player-slide case in `tests/world/infantry_test.cpp`. (Our `inf.airborne` here reads last tick's
+    value — the vertical resolve updates it after — a negligible 1-tick lag vs the original reading
+    the flag set in the same physics pass.)
+  - **D-INF-10** per-tick gravity, asymmetric by motor. Neither infantry mover gates the vertical step
+    on tick parity. The NPC (org1) falls `vel_z -= 416` EVERY tick then `pos.z += 2·vel_z` [orig:
+    `Entity_UpdateInfantryAI @0x4bf7bf` (`add … 0xFFFFFE60`) / `@0x4bf7ec` (`add edx,edx`; `add
+    [esi+0Ch],edx`)]; the player (org2) falls `vel_z -= 208` EVERY tick then `pos.z += vel_z` (once)
+    [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf` (`add … 0xFFFFFF30`) / `@0x4b7cef`]; both clamp
+    to terminal −32768. A prior pass applied one `−416 every 2 ticks` + `pos += 2·vel` to BOTH, which
+    nets to the player's −208/tick + vel/tick (org2) but left the NPC at HALF the org1 fall rate.
+    FIXED for the NPC (faithful per-tick `−416` + `2·vel`); the player keeps the 2-tick discretization
+    (net-equivalent to org2 — its jump/fall tuning + tests pin the `−416`-per-application step, so
+    making it per-tick `−208` is deferred to a dedicated player-physics grill). `libs/world/src/
+    infantry.cpp`; guarded by the gravity-cadence case in `tests/world/infantry_test.cpp`.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
@@ -438,7 +502,9 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   (0 = empty); occupant u16 at `vehicle[400+2·slot]` (free if 0xFFFF or == playerHandle). Seat-bone
   NAME classification (bone record stride 48, name at +32): `sitex` → 1 passenger, `ctrlx` → 2
   controller (vehicle entity only), `drvrx` → 5 driver (vehicle entity only), `UseGun` → 3 gunner;
-  else skip. Player-class gate: model+148 == 124 ⇒ ctrl-only; == 123 ⇒ anything but passenger.
+  else skip. Command/player-class acceptance gate: `model+148 == 123` accepts only passenger
+  (`seatType == 1`); `model+148 == 124` rejects controller (`seatType != 2`); all other values
+  accept any classified seat. This corrects the older "124 not-driver" reading.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
 - True occupant pose comes from the seat bone transform (`Entity_GetBoneTransformAndOrientation @
@@ -447,20 +513,29 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
 
 ### 9.2 Port (libs/world + libs/mission) and tracked deviations
 Shipped: `Entity.seats` + occupant refs riding the registry value-copy (`World::Snapshot` ⇒ Play→Stop
-rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_best, dismount,
-find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0; `pose_mounted_occupant`
-(occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw − yaw_offset);
-`AiSystem::pose_if_mounted` skips SM + locomotion and auto-dismounts when the vehicle is gone;
-event-runtime case 0x25 → `mount_best(param1)`. Deviations (NOT silently absorbed):
+rewinds mounts for free); `EntityCommands::{find_best_seat, mount, mount_boarding_command,
+mount_best, dismount, find_mounted_on}` mirroring 0x4351f0/0x4f70f0/0x4355f0/0x4359f0;
+`pose_mounted_occupant` (occ.pos = veh.pos + rotate(seat_local, veh.yaw), gunner yaw = veh.yaw −
+yaw_offset); `AiSystem::pose_if_mounted` skips SM + locomotion and auto-dismounts when the vehicle
+is gone; event-runtime case 0x25 → `mount_best(param1)`; command-123/124/125 promotion mounts
+already-near occupants onto their target SSN with the runtime gate above; mounted infantry pose class
+is selected from the occupied seat (`UseGun` → 67+variant if that clip exists, other seats →
+`anim_sit_N` from the seat name digits). GDExtension debug cards expose the selected seat source name
+and the full target-seat candidate list (`source_name`, type, pose index, local offset, occupancy) for
+00TRa-style audits. Deviations (NOT silently absorbed):
 1. **Proximity proxy vs occupant-model+144.** The original's vehicle is the occupant's model hierarchy
    link; we pick the nearest free-seat entity within 20 units (`kMountRadius`). Faithful for a soldier
    placed on its gun; wrong if two guns overlap.
-2. **`is_emplacement_item` table is EMPTY.** The original reads `UseGun` from the model's seat bones
-   (model[605..]); we don't load model bones in promotion, so the data-driven auto-seed of real
-   missions waits on the items.def emplacement set. Mechanism complete + tested.
-3. **Child-entity seat traversal + the player-class 123/124 gate** deferred (single-entity seats only).
-4. **Seat-local pose stand-in** — seat_local/yaw_offset default 0 (gunner at the gun origin) until the
-   true bone transform is read.
+2. **Seat specs are host-fed.** The original reads model seat bones directly (model[605..]); the
+   port consumes host-extracted model userpoints through `ItemSeatSpec`, so callers without model
+   metadata still seed no seats.
+3. **Child-entity seat traversal** deferred (single-entity seats only).
+4. **Mounted-pose variants are partial.** `UseGun` can consume a host-fed emplaced variant and
+   non-gunners consume numbered `sit_N`, but deriving the variant from the real mount config and the
+   sit_24 driver-lean variants remain open.
+5. **Seat-local pose stand-in** — seat_local/yaw_offset come from host userpoints when available, but
+   the true per-tick bone transform (`Entity_GetBoneTransformAndOrientation`) is still deferred. This
+   is the known suspect when a rider attaches to the right logical seat but appears too far forward.
 
 ## 10. Appendix: coordinate frames + terrain grounding (2026-06-08)
 
@@ -517,8 +592,9 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
 
 ## 11. Appendix: waypoint slot model (2026-06-07)
 
-- `waypoint_id` (BMS entity record **byte 79**) is a fixed path NUMBER, 0..127. dfx2med
-  `Med_ParamWaypointList @ 0x449c60` lists path numbers 1..127 (0 = None), each backed by a 127-entry
+- `waypoint_id` (BMS entity record **byte 79**) holds 0..127: 0 = None, **1..122 = path numbers**,
+  **123..127 = AI commands** (Goto SSN/Group/Player — see the last bullet, not paths). dfx2med
+  `Med_ParamWaypointList @ 0x449c60` lists 1..127 (0 = None), each backed by a 127-entry
   name array (stride 1548); the packer `Med_PackEntityRecord @ 0x44c8e0` writes byte 79. Our parser
   stores exactly **128 positional waypoint records** (`kWaypointRecordCount`), so array index == path
   number. Byte 78 = group/parent ref.
@@ -530,10 +606,26 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
   (`Entity_ToggleVehicleMount @ 0x436950`, `find_entity_mounted_on_vehicle @ 0x4359f0`). "Attached To
   SSN" / "ATTACH_TO_EMPLACED" are trigger/action name-table entries (PlayerAttachedToSsn = trigger 38,
   AttachToEmplaced = action 37), not entity-dialog fields.
-- A `waypoint_id` pointing at an EMPTY slot (0 markers) is valid leftover data — units that man a gun
-  or ride a vehicle never path-follow, and the game ignores it (the "Value 125" inspector mystery; not
-  a read/write bug, byte-exact round-trip holds). The inspector now labels such values
-  "Path N (no markers)".
+- **`waypoint_id` 123–127 are AI COMMAND channels, not path numbers** (the MED "Waypoints > List"
+  dropdown; usable mission path ids are 1..122). The dropdown names them: **123 = Goto SSN (not
+  driver, gunner)**, **124 = Goto SSN (not driver)**, **125 = Goto SSN (any)**, **126 = Goto Group**,
+  **127 = Goto Player**. So a 123–127 value backed by an empty path slot is EXPECTED — it is a
+  command, not a route. For 123–125 the command = navigate to the entity whose SSN = `wp_number` (the
+  editor "Number" field; spawn stores it in `slot[152]`, §7.1) and **BOARD it**. Runtime seat filter
+  truth from `Entity_FindBestSeatSlot @0x4351f0`: 123 accepts only `sitex`/passenger, 124 rejects
+  `ctrlx`/controller while keeping `drvrx` eligible, 125 accepts any classified seat. Engine witness:
+  the server-authority infantry think tests `slot[148]==125` [orig: `Entity_UpdateInfantryAI
+  @0x4ba9ad`] — `==125` preserves the carrier vehicle pointer in `slot[144]`, else clears it; when set
+  it runs `Entity_FindBestSeatSlot @ 0x4351f0` (seat-type filter) → `Entity_AttachToVehicleSeat
+  @ 0x4364a0`.
+  **CORRECTION (overturns the prior revision of this note):** an earlier version called 125 "valid
+  leftover data … the game ignores it (the 'Value 125' inspector mystery)" — that was WRONG; 125 is an
+  active Goto-SSN-and-board command. An inspector should name 123–127 by their command, not "Path N
+  (no markers)". Cross-validated on `00TRa.bms` (env JOX): organic SSN 1 = List 125 / Number 11
+  (= DTruck1, `id 101294`), SSN 1715 = List 125 / Number 1714 (= DTruck2, `id 101420`) — both
+  "Goto SSN (any) → board the adjacent 5-ton truck". This is the root cause of the OpenNova "two
+  friendly soldiers float in a crouched idle pose" bug in 00TRa: the reimpl never honors the 123–127
+  command channels (**D-INF-2**), so the soldiers idle on the terrain instead of riding their carrier.
 
 ## 12. Appendix: entity placement — Ground userpoint (dfx2med.exe)
 
@@ -559,3 +651,93 @@ placement? All addresses dfx2med.exe.
   byte-identical (we never bake on load). Open visual check: whether the self-consistent bake
   byte-matches the engine's raw subtraction depends on the model↔entity axis consistency of our
   import pipeline — verify by loading an original `.bms` and checking objects sit on terrain.
+
+## 13. Appendix: held-weapon visibility on mount/attach (engine-research, 2026-06-24)
+
+Question: how does the original suppress the soldier's **held weapon** (the third-person gun
+in the hands) when the soldier is attached to a vehicle seat or emplacement? Status:
+**engine-research / confirm-only** — originals witnessed; OpenNova does not render a
+third-person held weapon yet (the body `.adm` clip names encode the gait+weapon, but no
+separate weapon model is mounted), so there is no reimpl to diverge. This records the
+mechanism for when held-weapon rendering lands. Complements §9 (mount/emplacement) and §4.15
+(mounted poses). All addresses `Jointops.exe.kong.i64`, imagebase 0x400000.
+
+### 13.1 The render gate — `BoneCallback_org0_World @ 0x4e3940`
+The per-class render callback for **organic** entities (the model class tag `org`; used by the
+local player, remote players, AND NPCs alike — render is class-keyed independently of the
+org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
+(`Entity_BuildBoneTransformMatrices @ 0x4b1290`) then issues up to **six**
+`Render_SubmitEntity @ 0x5dad80` draws, in order:
+1. **shadow blob** (gated on `entity+0x378`/`+0x37A`),
+2. **body** — `key` model; suppressed for the camera-tracked entity in first person
+   (`entity == dword_A890CC` = the camera target, unless `dword_A890C8` third-person — see
+   §5.39 / correspondence.md `Camera_SetTrackedEntity @ 0x4391d0`),
+3. **muzzle flash** — gated on `Flags & 4` (`entity+0x24`), drawn at the flare bone,
+4. **weapon sight/scope** — gated on `dword_8139E8[animStateId] & 0x40 && (Flags & 8)`
+   (the per-anim-state flag table of §3.4),
+5. **held weapon** — see §13.2,
+6. **mounted-child overlay** — gated on `mountedChild` (`entity+0x268`), draws the carried
+   child/flag at a Z-rotated transform.
+
+Draws 5 and 6 are *both* additionally suppressed wholesale when the render-pass flag
+`numEntries & 0x10000000` is set (`skipWeaponOverlay` — e.g. a shadow/special pass).
+
+### 13.2 The held-weapon submit (draw 5) and its predicate
+[orig: `BoneCallback_org0_World @ 0x4e3940`]
+```
+if ( !(numEntries & 0x10000000) )            // not the overlay-skip pass
+  if ( entity[0x2B0] )                        // held-weapon ADM index (u8) != 0
+    if ( Entity_CanFireWeapon(entity) ) {     // <-- THE HIDE GATE
+      weaponDef = AdmDef_GetEntryByIndex(entity[0x2B0]);   // [orig: 0x53fc80]
+      entity->Weapon /* +0x298 */ = weaponDef;
+      ... Render_SubmitEntity( weaponFrameData, boneMatrices @ hand/'prim' bone ) ...
+    }
+```
+- `GamePlayerEntity+0x2B0` (typed `pad_2b0` today) = the **held-weapon ADM model index**;
+  `+0x298` (`Weapon`) caches the resolved `AdmDef`. The weapon model is posed at the
+  hand/`prim` bone matrix from `Entity_BuildBoneTransformMatrices @ 0x4b1290` (the same `prim`
+  user-point the AI scans in `Entity_InitVehicleAI @ 0x460200`, §7.1).
+- **The weapon is drawn iff the soldier may *fire* it.** One predicate,
+  `Entity_CanFireWeapon @ 0x4dcb10`, drives both gameplay fire-permission and this draw.
+
+### 13.3 `Entity_CanFireWeapon @ 0x4dcb10` — seat type decides
+Returns 0 (→ weapon hidden) by the rider's **seat type in `parentSlot` (`entity+0x168`)**:
+- Top gate, both branches: `if (entity->Flags & 2) return 0` — a separate "weapon disabled"
+  state on `entity+0x24` (independent of mounting; cleared on spawn/respawn, §5.6
+  `Entity_ResetToSpawnState`).
+- **Remote** entities (NPCs + other players): `parentSlot ∈ {2, 3, 5} → return 0`.
+- **Local** player (`entity == g_local_player_entity`): not mounted (`!parentEntity`) →
+  return 1; else `parentSlot == 2 → 0`; `parentSlot == 3 → 0` *only if* `dword_A890C8`
+  (third-person/vehicle camera, §5.39); `parentSlot == 5 → 0`.
+- In both branches `parentSlot == 1` (passenger) is **not** in the hide set → the personal
+  weapon stays visible (subject to the normal ammo checks).
+
+### 13.4 Seat-type source and assignment
+`parentSlot` is the seat-type code, classified from the vehicle/emplacement model's
+**user-point name prefix** [orig: `Entity_GetBoneSlotType @ 0x434ed0`] and stored on the rider
+at attach time [orig: `Entity_ProcessVehicleAttach @ 0x435aa0`; plumbing
+`Entity_AttachToVehicleSeat @ 0x4364a0` → `Entity_AttachToVehicleSlot @ 0x4946d0` /
+`Entity_AttachToVehicleSeat_0 @ 0x546b80`]. Same classifier as §9.1/§11:
+
+| user-point prefix | `parentSlot` | role | held weapon |
+|---|---|---|---|
+| `sitex` | 1 | passenger | **shown** (can fire) |
+| `ctrlx` | 2 | control / weapon-station | hidden |
+| `UseGun` | 3 | gunner / **fixed emplacement** | hidden |
+| `drvrx` | 5 | driver | hidden |
+
+Fixed emplacements (mounted MGs) are manned through a `UseGun` slot, so they take the gunner
+case (3) and hide the personal weapon. (Mounted *pose* selection — emplaced 67–75, `sit_N`,
+driver-lean — is the separate system of §4.15.)
+
+### 13.5 Note for the OpenNova port
+The requester's premise listed **passenger** among the hidden cases; the binary disagrees —
+`sitex` passengers keep the personal weapon visible and may fire (open boats/trucks). Only
+control (2), gunner (3), and driver (5) hide it. When third-person held-weapon rendering is
+implemented, gate the weapon node's visibility on this predicate, reusing the existing seat
+taxonomy (`godot/engine/world/mission_seat_diagnostics.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
+DRIVER) and the `mount_type` already exported through `nova_simulation.cpp`. The exact
+`Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
+gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
+`pad_2b0` → `heldWeaponAdmIndex`; comment `Entity_CanFireWeapon` as the weapon-visibility
+gate) is proposed but unapplied (shared IDB state).

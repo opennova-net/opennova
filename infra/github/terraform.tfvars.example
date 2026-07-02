@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in locally (do NOT commit), or — preferred —
+# let the deploy toolbox inject these from 1Password (deploy/env/github.env.tpl).
+#
+# github_token = "ghp_your_repo_admin_token"   # prefer TF_VAR_github_token
+# github_owner = "opennova-net"
+
+# Actions secrets applied to EVERY expansion repo (one set, not per-repo) so its
+# build workflow can package, upload to S3, and call the server's publish
+# callback. AWS_* are the launcher_ci keys from `terraform -chdir=infra/aws
+# output`; EXPANSION_PUBLISH_TOKEN matches app-prod/expansion_publish_token;
+# NOVAWORLD_SERVER_URL is https://nw.<domain>.
+#
+# The set of expansions themselves lives in expansions.tf (local.expansions),
+# not here — add an expansion there.
+shared_repository_secrets = {
+  AWS_ACCESS_KEY_ID       = "replace-with-launcher-ci-access-key"
+  AWS_SECRET_ACCESS_KEY   = "replace-with-launcher-ci-secret-key"
+  EXPANSION_PUBLISH_TOKEN = "replace-with-app-prod-expansion-publish-token"
+  NOVAWORLD_SERVER_URL    = "https://nw.opennova.net"
+  DOWNLOADS_BUCKET        = "downloads.opennova.net"
+}

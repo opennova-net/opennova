@@ -1,0 +1,117 @@
+# Retail Interop and Packet Capture
+
+Use this file when starting local OpenNova, retail JO, packet capture, replay,
+or NovaWorld redirection work.
+
+## Topology Choices
+
+Pick and record one topology before launching anything:
+
+- Same-machine retail and native/local server:
+  `ONNET_PUBLIC_HOST=127.0.0.1`, launcher Developer mode on, managed hosts entry
+  maps `gs.novaworld.net` to `127.0.0.1`.
+- Second-machine retail:
+  `ONNET_PUBLIC_HOST=<server LAN IP or EIP>`, and the retail machine must resolve
+  `gs.novaworld.net` to that reachable address. Do not use `127.0.0.1` on a
+  second retail machine.
+- Docker/dev stack:
+  override the dev compose example IP. Set both `ONNET_PUBLIC_HOST` and
+  `ONNET_CLIENT_REFLECT_IP` to the actual reachable adapter IP for the run.
+
+Ports to check:
+
+- `ONNET_GATE_UDP_PORT`, default `7597/udp`
+- `ONNET_NW_UDP_PORT`, default `64206/udp`
+- `ONNET_HTTP_PORT`, default `8080/tcp`
+- Vite dev UI, default `5173/tcp`
+- Retail host reflection defaults:
+  `ONNET_CLIENT_REFLECT_GATE_PORT=49152` and
+  `ONNET_CLIENT_REFLECT_NOVAWORLD_PORT=32768`
+
+Launcher variables:
+
+- `ONLAUNCHER_API_BASE_URL`
+- `ONLAUNCHER_NW_ANCHOR_HOST`
+- `ONLAUNCHER_UPDATE_MANIFEST_URL`
+
+Godot direct-launch variables:
+
+- Host: `NW_LAN_HOST`, `NW_LAN_PORT`, `NW_GATE_HOST`, `NW_GATE_PORT`,
+  `NW_LAN_NAME`
+- Joiner: `NW_LAN_JOIN`, `NW_LAN_MISSION`, `NW_LAN_NAME`
+- Replay spectator: `NW_REPLAY`, `NW_REPLAY_DIR`, `NW_REPLAY_LOOSE`,
+  `NW_REPLAY_ITEMS`
+
+## What Can Be Automated Today
+
+- OpenNova server startup and API smoke checks.
+- Godot/OpenNova listen host and joiner through `NW_LAN_*` env hooks.
+- NovaWorld host registration for a Godot listen host.
+- Retail launch with stock files through the launcher after hosts redirection.
+- API polling through `/api/server-info`, `/api/hosts`, `/api/lobbies`, and
+  `/api/unknowns`.
+- Packet decode with `nw_pp` and replay/spectator streaming with `nw_replay`.
+
+Retail menu navigation, credentials, choosing host/join rows, and deterministic
+in-match control still require a human operator or a future external UI driver.
+Do not jump directly to an injected DLL. Keep any future retail driver opt-in,
+research-only, version-gated, and separate from the public launcher.
+
+## Capture Policy
+
+- Prefer `.pcapng` in `.scratch/`.
+- Capture from process start through the behavior under study. Mid-stream
+  captures usually miss the handshake and cannot recover SCRK/session keys.
+- Keep raw retail captures, `.sph` logs, account names, local paths, and machine
+  IPs out of tracked files.
+- Promote only small sanitized fixtures such as `.nwmsg`, focused `.hexcap`,
+  `.gsb`, or manifest rows.
+
+Supported inputs:
+
+- `nw_pp <capture.pcapng>` or `nw_pp <capture.pcap>`
+- `nw_pp <capture.hexcap>`
+- `nw_pp <host.sph>` or `nw_pp <client.sph>`
+- `nw_replay <capture.pcapng> --print-roles`
+- `nw_replay <capture.pcapng> --validate --items <items.def>`
+
+Useful env-gated witnesses:
+
+- `NW_INGAME_HEXCAP`
+- `NW_PROFILE_SPH_DIR`
+- `NW_DVXI5_PCAP`, `NW_DVXI3_PCAP`, `NW_DVXC1_PCAP`
+- `NW_PROBE3AGAIN_PCAP`, `NW_PROBE3AGAIN_HOST_SPH`
+- `NW_WHITENOISE_PCAP`
+
+## Packet-Diff Matrix
+
+Capture comparable runs for:
+
+- Retail host + retail joiner
+- OpenNova host + retail joiner
+- Retail host + OpenNova joiner
+- OpenNova host + OpenNova joiner
+
+Decode with `nw_pp --stream --items <items.def>` and compare decoded direction,
+frame, session, tag, length, and fields. Do not compare encrypted raw bytes as
+the primary signal.
+
+For host/join load failures, focus on:
+
+`0x0B`, `0x10`, `0x0D`, `0x0C`, `0x20`, `0x42`, `0x0A`, `0x0F`,
+`0x61`, `0x25`, and `0x1A`.
+
+Expected retail-compatible host signatures:
+
+- Early self `0x0C` organic spawn during world load.
+- Required dynamic world stream only.
+- No pre-deploy S2C `0x25`.
+- Game-start bundle only after the load gate.
+
+Failure signatures to report:
+
+- Retail joiner never emits C2S `0x0C` deploy uplinks.
+- Retail joiner floods short C2S `0x0F` item resync requests.
+- GOODBYE/kick follows deploy gate.
+- Terrain/map missing while dynamic actors still appear.
+

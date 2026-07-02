@@ -2,6 +2,8 @@
 #include "mission/promote.h"
 
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace opennova::mission {
 
@@ -25,23 +27,51 @@ int pool_for_kind(EntityKind k) {
     return 0;
 }
 
-// Whether an items.def type id is an emplaced gun (offers a UseGun seat). The original derives this
-// from the model's seat-bone names (model[605..], "UseGun") at Entity_FindBestSeatSlot @0x4351f0; we
-// don't load model bones in promotion, so this is a data table. It is EMPTY pending the items.def
-// emplacement set: the mount MECHANISM (Entity.seats + EntityCommands::mount/mount_best/dismount +
-// the AttachToEmplaced action + the seat-follow poser) is complete and tested, but auto-seeding
-// which placed items are guns needs the def/model data. Tracked-TODO (notes/mission).
-bool is_emplacement_item(int32_t /*item_id*/) {
-    return false;
+const ItemSeatSpec *seat_spec_for_type(const PromoteOptions &opts, int32_t type_id) {
+    for (const ItemSeatSpec &spec : opts.item_seat_specs) {
+        if (spec.type_id == type_id) return &spec;
+    }
+    return nullptr;
 }
 
-// Seed the seats an emplaced gun offers: one Gunner seat at the model origin (seat-local +
-// yaw_offset default 0 until the real seat-bone transform is read).
-void seed_emplacement_seats(Entity &item) {
-    if (!is_emplacement_item(item.item_id)) return;
-    Seat s;
-    s.type = SeatType::Gunner;
-    item.seats.push_back(s);
+void seed_authored_seats(Entity &entity, const PromoteOptions &opts) {
+    const ItemSeatSpec *spec = seat_spec_for_type(opts, entity.item_id);
+    if (spec == nullptr) return;
+    entity.emplaced_pose_variant = spec->emplaced_pose_variant;
+    if (spec->seats.empty()) return;
+    entity.seats = spec->seats;
+    for (Seat &seat : entity.seats) {
+        seat.occupant = EntityHandle{};
+    }
+}
+
+bool within_mount_radius(const Entity &occupant, const Entity &target, float radius) {
+    const float dx = occupant.position.x - target.position.x;
+    const float dy = occupant.position.y - target.position.y;
+    const float dz = occupant.position.z - target.position.z;
+    return dx * dx + dy * dy + dz * dz <= radius * radius;
+}
+
+struct PendingCommandMount {
+    uint16_t occupant_ssn = 0;
+    uint16_t target_ssn = 0;
+    uint8_t command_id = 0;
+    EntityHandle occupant_handle;
+};
+
+void apply_command_mounts(const std::vector<PendingCommandMount> &pending, World &world,
+                          AiSystem &ai, const PromoteOptions &opts) {
+    for (const PendingCommandMount &p : pending) {
+        Entity *occupant = world.registry.get(p.occupant_handle);
+        Entity *target = world.registry.get(world.registry.find_by_net_id(p.target_ssn));
+        if (occupant == nullptr || target == nullptr) continue;
+        if (!within_mount_radius(*occupant, *target, opts.command_mount_radius)) continue;
+        if (!world.commands.mount_boarding_command(p.occupant_ssn, p.target_ssn, p.command_id))
+            continue;
+        if (AiEntity *ae = ai.for_handle(p.occupant_handle)) {
+            ai.pose_if_mounted(*ae, world);
+        }
+    }
 }
 
 Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t origin) {
@@ -237,6 +267,7 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // EntityPool_FindByNetId @0x4f0a20 matches its low 16 bits over pools 0..3] — so the
     // seed copies e.id verbatim (no load-time assignment). Spawn order mirrors the file
     // order in Mission_LoadBMSFile @0x40f4e0: items -> buildings -> markers -> organics.
+    std::vector<PendingCommandMount> command_mounts;
     auto promote_vec = [&](const std::vector<bms::Entity> &vec, EntityKind kind, bool ai_capable) {
         uint32_t idx = 0;
         for (const bms::Entity &e : vec) {
@@ -246,8 +277,8 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);
             if (!h.valid()) { ++r.dropped; continue; }
             ++r.spawned;
-            if (kind == EntityKind::Item) {
-                if (Entity *spawned = world.registry.get(h)) seed_emplacement_seats(*spawned);
+            if (Entity *spawned = world.registry.get(h)) {
+                seed_authored_seats(*spawned, opts);
             }
             if (ai_capable) {
                 int ai_idx = ai.attach(h);
@@ -263,12 +294,22 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
                 ae.health = 100;
                 ++r.brains;
             }
+            if (kind == EntityKind::Organic && e.waypoint_id >= 123 && e.waypoint_id <= 125 &&
+                e.wp_number > 0 && e.wp_number <= 0xFFFF) {
+                command_mounts.push_back(PendingCommandMount{
+                    static_cast<uint16_t>(e.id),
+                    static_cast<uint16_t>(e.wp_number),
+                    static_cast<uint8_t>(e.waypoint_id),
+                    h,
+                });
+            }
         }
     };
     promote_vec(m.items, EntityKind::Item, /*ai_capable=*/false);
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);
     promote_vec(m.markers, EntityKind::Marker, /*ai_capable=*/false);
     promote_vec(m.organics, EntityKind::Organic, /*ai_capable=*/true);
+    apply_command_mounts(command_mounts, world, ai, opts);
 
     return r;
 }

@@ -135,6 +135,41 @@ func test_table_subst_value_to_image() -> void:
 	assert_not_null((cell2 as TextureRect).texture, "SUBST resolved value 'lan' to its image")
 
 
+func test_table_add_rows_bulk() -> void:
+	var menu := _build_menu()
+	var table := _table(menu)
+	var batch: Array[PackedStringArray] = [
+		PackedStringArray(["A", "1", ""]),
+		PackedStringArray(["B", "2", ""]),
+		PackedStringArray(["C", "3", ""]),
+	]
+	table.add_rows(batch)
+	assert_eq(table.get_row_count(), 3, "add_rows appended all rows in one call")
+	var cell := table.find_child("Row2", true, false).find_child("Cell0", true, false) as Label
+	assert_eq(cell.text, "C", "bulk-added cell text")
+
+
+# The Options -> Controls (CONTROL_MAPPING) catalog model: byte-exact JO defaults,
+# class grouping, and the player-facing visibility filter. [orig:
+# UI_PopulateControlMappingList @ 0x55c0c0; aAbsoluteTurnLe @ 0x8159cb]
+func test_controls_model_keyboard_defaults() -> void:
+	var model := NovaControlsModel.new()
+	var rows: Array = model.get_rows(NovaControlsModel.DEVICE_KEYBOARD)
+	assert_gt(rows.size(), 40, "keyboard catalog populated")
+	var found_forward := false
+	for r in rows:
+		var cells := r as PackedStringArray
+		assert_eq(cells.size(), 3, "row is [class, action, control]")
+		if cells[1] == "Forward":
+			found_forward = true
+			assert_eq(cells[0], "Movement", "Forward is in the Movement class")
+			assert_eq(cells[2], "W or Up", "Forward default keyboard binding")
+		# Admin/internal classes are hidden from the player-facing remap table.
+		assert_ne(cells[0], "Server", "admin class hidden")
+		assert_ne(cells[0], "Cheat", "cheat class hidden")
+	assert_true(found_forward, "Forward row present in the keyboard rows")
+
+
 func test_table_inert_in_edit_mode() -> void:
 	var menu := _build_menu(true)
 	var table := _table(menu)

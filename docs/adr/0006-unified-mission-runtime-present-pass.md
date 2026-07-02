@@ -2,20 +2,24 @@
 
 Status: accepted (branch `unified-edit-history`)
 
+> The game-side host class `NovaWorld` discussed here was renamed `GameWorld`
+> in June 2026 (the `NovaWorld` name now belongs to the online service); this
+> record uses the new name.
+
 ## Context
 
 A prior change consolidated the mission **logic** onto one faithful tick (`libs/world` `World` +
 `TickService` + `ISystem`s WAC→BMS→AI, modelled on `sub_4F81A0`). But the layer **above** the logic —
 "drive the sim and draw its entities onto the scene" — was still split into two divergent paths:
 
-- **Game**: `nova_world.gd` → `MissionCommandHost` applied **only PANM part-anim phase**, keyed by
+- **Game**: `game_world.gd` → `MissionCommandHost` applied **only PANM part-anim phase**, keyed by
   `bms_id` via `MissionEntityRegistry`. In-game NPCs did not move (static-placed).
 - **Editor "Play"**: `mission_sim_driver.gd` `_apply()` applied **only position + yaw**, keyed by
   `(kind, index)` via a `_pickable` array. No part-anim.
 
 Each rendered a different half of the same entity state, through a separate `NovaSimulation`, with its
 own loop and its own entity→node index. There were ~7 parallel entity→node indexing schemes. The two
-single-action/object-preview part-anim integrators added more duplication. `nova_world.gd` even
+single-action/object-preview part-anim integrators added more duplication. `game_world.gd` even
 claimed in a comment to be "the one path both go through" while the editor bypassed it entirely.
 
 ## Decision
@@ -24,7 +28,7 @@ One runtime, one present pass, one present index — both hosts go through them.
 
 - **`mission_runtime.gd`** (Node) owns `{ NovaSimulation, MissionPresentPass, MissionEntityRegistry }`
   and single-sources the per-tick order: **advance logic → present → drain effects**. The game drives
-  it explicitly from `NovaWorld.tick()` (DIVIDED, 62-frame divider); the editor self-ticks it via
+  it explicitly from `GameWorld.tick()` (DIVIDED, 62-frame divider); the editor self-ticks it via
   `_process` while playing (EVERY_PROCESS). Stop rewinds the world (`World::restore`) **and** restores
   the authored node transforms captured at setup.
 - **`mission_present_pass.gd`** applies each entity's **transform + PANM channels + visibility** from

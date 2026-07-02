@@ -18,22 +18,44 @@ var _saved_state_config := PackedByteArray()
 var _had_state_config := false
 
 
-# Minimal editor double for prompt routing tests: the workstation only needs the
-# three pending-action hooks, so this avoids set_editor()'s full workspace bind.
-class PromptEditorStub:
+# Minimal terrain-editor double for the dirty-replace guard tests: dirty, no
+# project directory yet, records saves/opens. Avoids set_editor()'s full bind
+# cost being the point of the test.
+class DirtyTerrainStub:
 	extends Node
-	var saved := false
-	var discarded := false
-	var cancelled := false
+	var is_dirty := true
+	var opened := PackedStringArray()
+	var saved_dirs := PackedStringArray()
 
-	func confirm_pending_action_save() -> void:
-		saved = true
+	func is_export_running() -> bool:
+		return false
 
-	func confirm_pending_action_discard() -> void:
-		discarded = true
+	func set_viewport_active(_active: bool, _edit_input: bool) -> void:
+		pass
 
-	func cancel_pending_action() -> void:
-		cancelled = true
+	func open_trn(path: String) -> Error:
+		opened.append(path)
+		return OK
+
+	func new_terrain() -> void:
+		pass
+
+	func save_project_to_current_dir() -> Error:
+		# No project directory yet - the shell's save_then must fall back to Save As.
+		return ERR_INVALID_PARAMETER
+
+	func save_project(dir_path: String) -> Error:
+		saved_dirs.append(dir_path)
+		return OK
+
+	func has_current_project_dir() -> bool:
+		return false
+
+	func get_current_project_dir() -> String:
+		return ""
+
+	func get_last_save_dir() -> String:
+		return ""
 
 
 func before_each() -> void:
@@ -47,7 +69,8 @@ func after_each() -> void:
 	# restore below (a runtime error mid-test skips the in-body teardown). Kill
 	# any lingering children NOW so their exit-time writes land first.
 	for child in get_children():
-		if child is TerrainEditor or (child is Control and child.get_script() == EditorWorkstationScript):
+		if child is EditorApp or child is TerrainEditor \
+				or (child is Control and child.get_script() == EditorWorkstationScript):
 			child.queue_free()
 	await get_tree().process_frame
 	# Persistence tests write user://terrain_editor_state.cfg; restore it so they
@@ -232,7 +255,7 @@ func test_workstation_starts_with_domain_workspaces() -> void:
 		if child is Button:
 			var bar_label := child.find_child("BarButtonLabel", true, false) as Label
 			row_texts.append(bar_label.text if bar_label != null else "")
-	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "Music", "Sound"],
+	assert_eq(row_texts, ["Mission", "Terrain", "Object", "Fonts", "Credits", "Strings", "Menus", "HUD", "Music", "Sound"],
 		"The bar should list every viewport workspace; Environment stays on its top-bar toggle, not the bar.")
 
 	assert_false(_has_label_text(workspace_rail, "World"), "Workspace groups should use separators, not inline category words.")
@@ -273,7 +296,7 @@ func test_every_workspace_rail_button_has_an_icon() -> void:
 			if icon_rect != null:
 				assert_not_null(icon_rect.texture, "the dock button icon should resolve to a workspace texture")
 			checked += 1
-	assert_eq(checked, 9, "all nine workspace rows checked")
+	assert_eq(checked, 10, "all ten workspace rows checked")
 
 
 func test_icon_library_resolves_every_registered_icon_id() -> void:
@@ -293,7 +316,7 @@ func test_action_and_toggle_buttons_have_icons() -> void:
 	# Action buttons rebuild on a workspace switch (_refresh_workspace_surface).
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.CREDITS)
 	await get_tree().process_frame
-	var buttons: Dictionary = workstation._workspace_action_buttons
+	var buttons: Dictionary = workstation._top_action_bar.buttons()
 	assert_gt(buttons.size(), 0, "the active workspace exposes at least one action button")
 	for action_id in buttons:
 		var btn := buttons[action_id] as Button
@@ -660,7 +683,7 @@ func test_environment_sun_popup_exposes_env_document_controls() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 
 	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
 	sun_button.toggled.emit(true)
@@ -703,7 +726,7 @@ func test_environment_open_uses_resource_browser() -> void:
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_environment")
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index environment files.")
 
 	var sun_button: Button = workstation.get_node("%EnvironmentToggleButton")
@@ -778,9 +801,10 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 
 
 func test_camera_button_exposes_global_viewport_settings() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 
 	var top_bar := workstation.get_node("%TopBar") as PanelContainer
 	var camera_button: Button = workstation.get_node("%CameraToggleButton")
@@ -819,9 +843,10 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 
 
 func test_camera_button_targets_object_preview_camera_when_object_is_active() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var host: Control = workstation.get_node("%ViewportHost")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
@@ -854,9 +879,10 @@ func test_camera_button_targets_object_preview_camera_when_object_is_active() ->
 
 
 func test_object_workspace_uses_only_global_environment_viewport_button() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var host: Control = workstation.get_node("%ViewportHost")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
@@ -875,12 +901,13 @@ func test_object_workspace_uses_only_global_environment_viewport_button() -> voi
 
 
 func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 
 	var camera_button: Button = workstation.get_node("%CameraToggleButton")
 	var environment_button: Button = workstation.get_node("%EnvironmentToggleButton")
@@ -995,9 +1022,10 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 
 
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var host: Control = workstation.get_node("%ViewportHost")
 
 	assert_eq(host.get_child_count(), 1, "Mission should own the viewport host by default.")
@@ -1042,10 +1070,70 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
 
 
+# Minimal tileinfo surface for the gizmo capability hooks.
+class TileGizmoTerrainStub:
+	extends Node
+
+	class Entry:
+		extends RefCounted
+
+		func get_tile_index() -> int:
+			return 7
+
+		func get_cell_x() -> int:
+			return 3
+
+		func get_cell_z() -> int:
+			return 4
+
+	var current_tool := TerrainEditor.Tool.TILE_STAMP
+	var rotations := 0
+	var cleared := 0
+
+	func has_selected_tileinfo_entry() -> bool:
+		return true
+
+	func get_selected_tileinfo_entry() -> Variant:
+		return Entry.new()
+
+	func get_selected_tileinfo_world_center() -> Vector3:
+		return Vector3(10, 0, 20)
+
+	func rotate_selected_tileinfo_clockwise() -> void:
+		rotations += 1
+
+	func clear_tileinfo_selection() -> void:
+		cleared += 1
+
+
+func test_tile_gizmo_state_and_actions_ride_the_workspace_hooks() -> void:
+	# The shell's in-world gizmo is capability-driven: it reads
+	# get_tile_gizmo_state() and routes buttons through run_tile_gizmo_action(),
+	# never touching the terrain editor directly.
+	var ws: EditorWorkspace = TerrainWorkspaceScript.new()
+	var stub: TileGizmoTerrainStub = autofree(TileGizmoTerrainStub.new())
+	ws.set_terrain_editor(stub)
+
+	var state := ws.get_tile_gizmo_state()
+	assert_eq(String(state.get("label", "")), "Editing tile 007 @ (3, 4)",
+		"The workspace formats the gizmo label from the selected tile.")
+	assert_eq(state.get("anchor_world"), Vector3(10, 2, 20),
+		"The anchor floats 2u above the tile's world center.")
+
+	ws.run_tile_gizmo_action(&"rotate")
+	assert_eq(stub.rotations, 1, "Gizmo actions route to the terrain editor through the hook.")
+	ws.run_tile_gizmo_action(&"done")
+	assert_eq(stub.cleared, 1, "Done clears the selection through the hook.")
+
+	stub.current_tool = TerrainEditor.Tool.RAISE
+	assert_true(ws.get_tile_gizmo_state().is_empty(),
+		"Outside the Tile workflow the gizmo reports no state.")
+
+
 func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	workstation.prompt_unsaved_changes("quit")
+	workstation.prompt_unsaved_for(func() -> void: pass, func() -> void: pass)
 
 	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
 	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
@@ -1062,46 +1150,82 @@ func test_unsaved_changes_opens_native_confirmation_dialog() -> void:
 
 func test_unsaved_dialog_cancel_keeps_editing() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var stub := PromptEditorStub.new()
-	autofree(stub)
-	workstation.editor = stub
+	var outcome := {"saved": 0, "discarded": 0, "cancelled": 0}
 
-	workstation.prompt_unsaved_changes("quit")
+	workstation.prompt_unsaved_for(
+		func() -> void: outcome.saved += 1,
+		func() -> void: outcome.discarded += 1,
+		func() -> void: outcome.cancelled += 1)
 	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
 	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
 	if dialog == null:
 		return
 	dialog.canceled.emit()
 
-	assert_true(stub.cancelled, "Cancel/Escape should cancel the pending action (keep editing).")
-	assert_false(stub.discarded, "Cancel should not discard.")
-	assert_false(stub.saved, "Cancel should not save.")
+	assert_eq(outcome.cancelled, 1, "Cancel/Escape should run the keep-editing outcome.")
+	assert_eq(outcome.discarded, 0, "Cancel should not discard.")
+	assert_eq(outcome.saved, 0, "Cancel should not save.")
 
 
 func test_unsaved_dialog_confirm_saves_and_discard_action_discards() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var stub := PromptEditorStub.new()
-	autofree(stub)
-	workstation.editor = stub
+	var outcome := {"saved": 0, "discarded": 0}
+	var on_save := func() -> void: outcome.saved += 1
+	var on_discard := func() -> void: outcome.discarded += 1
 
-	workstation.prompt_unsaved_changes("quit")
+	workstation.prompt_unsaved_for(on_save, on_discard)
 	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
 	assert_not_null(dialog, "Unsaved changes should open a native confirmation dialog.")
 	if dialog == null:
 		return
 
 	dialog.confirmed.emit()
-	assert_true(stub.saved, "Confirm should save the pending action.")
-	assert_false(stub.discarded, "Confirm should not discard.")
+	assert_eq(outcome.saved, 1, "Confirm should run the save outcome.")
+	assert_eq(outcome.discarded, 0, "Confirm should not discard.")
 
+	# Outcomes are consumed on dispatch; a fresh prompt rearms the same dialog.
+	workstation.prompt_unsaved_for(on_save, on_discard)
 	dialog.custom_action.emit(&"discard")
-	assert_true(stub.discarded, "The Discard custom action should discard the pending action.")
+	assert_eq(outcome.discarded, 1, "The Discard custom action should run the discard outcome.")
+	assert_eq(outcome.saved, 1, "Discard should not save again.")
+
+
+func test_dirty_open_prompts_and_save_routes_through_save_as() -> void:
+	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var stub: DirtyTerrainStub = autofree(DirtyTerrainStub.new())
+	# Bind only the terrain workspace (set_editor's full bind would drag every
+	# workspace through a remount this test doesn't exercise).
+	var ws: EditorWorkspace = workstation._get_workspace(EditorWorkstationScript.Workspace.TERRAIN)
+	ws.set_terrain_editor(stub)
+
+	assert_eq(ws.open_file("C:/maps/next.trn"), OK, "A dirty-guarded open reports OK while the prompt owns the action.")
+	assert_eq(stub.opened.size(), 0, "The open must wait for the prompt outcome.")
+	var dialog := workstation.find_child("UnsavedChangesDialog", true, false) as ConfirmationDialog
+	assert_not_null(dialog, "Replacing a dirty terrain should prompt.")
+	if dialog == null:
+		return
+
+	# Save: no project directory yet, so the save routes through the Save As
+	# directory dialog and the open stays deferred until the save lands. The OK
+	# button hides the dialog before confirmed fires; mirror that order so the
+	# follow-up dialog can take the exclusive slot.
+	dialog.hide()
+	dialog.confirmed.emit()
+	assert_eq(stub.saved_dirs.size(), 0, "Without a project dir the save waits for the Save As pick.")
+	var file_dialog: FileDialog = workstation._save_export._ensure_file_dialogs().get_dialog()
+	assert_not_null(file_dialog, "Save should route through the Save As directory dialog.")
+	if file_dialog == null:
+		return
+	file_dialog.dir_selected.emit("C:/maps/project")
+
+	assert_eq(stub.saved_dirs, PackedStringArray(["C:/maps/project"]), "The picked directory receives the save.")
+	assert_eq(stub.opened, PackedStringArray(["C:/maps/next.trn"]), "The deferred open runs after a successful save.")
 
 
 func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 
-	workstation._show_export_flavor_dialog("C:/Exports/TestTerrain")
+	workstation._save_export.show_export_flavor_dialog("C:/Exports/TestTerrain")
 
 	var dialog = workstation.find_child("ExportFlavorDialog", true, false)
 	assert_not_null(dialog, "Export should open a native flavor dialog.")
@@ -1539,8 +1663,8 @@ func test_popover_close_button_dismisses_via_shared_signal() -> void:
 
 func test_file_and_dir_dialogs_share_one_native_dialog() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	workstation._open_file_dialog("Open file", PackedStringArray(), func(_p): pass)
-	workstation._open_dir_dialog("Open dir", func(_p): pass)
+	workstation._save_export.open_file_dialog("Open file", PackedStringArray(), func(_p): pass)
+	workstation._save_export.open_dir_dialog("Open dir", func(_p): pass)
 
 	var dialogs := []
 	for child in workstation.get_children():
@@ -1856,7 +1980,7 @@ func _teardown(workstation) -> void:
 func _attach_environment_document(workstation) -> Node:
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
-	workstation._environment_workspace.set_environment_editor(environment_editor)
+	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
 	return environment_editor
 
 
@@ -2058,9 +2182,10 @@ func test_camera_panel_detaches_and_force_redocks_keeping_the_preference() -> vo
 	# The camera panel shares the host machinery but has its own shell guards:
 	# detach needs a live camera, and losing the camera force-redocks WITHOUT
 	# erasing the user's floating preference (transient editor rebinds).
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 
 	workstation._set_camera_popup_visible(true)
 	assert_true((workstation.get_node("%CameraPopup") as Control).visible,

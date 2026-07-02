@@ -1,0 +1,28 @@
+<HTML>
+<HEAD>
+<META NAME="Author" CONTENT="Eric Milota">
+<TITLE></TITLE>
+<META http-equiv="refresh" CONTENT=0;URL="{{REFRESH_ENDPOINT}}">
+<META HTTP-EQUIV="PRAGMA" CONTENT="NO-CACHE">
+<META HTTP-EQUIV="CACHE-CONTROL" CONTENT="NO-CACHE">
+</HEAD>
+<BODY TEXT="#FFFFFF" BGCOLOR="#3A6BBB" LINK="#FFFF00" VLINK="#FFFF00" ALINK="#00FFFF">
+<br>
+<br>
+<br>
+<center>
+<IB3_SUBST name="@MESSAGE@">
+{{MESSAGE}}<br>
+</IB3_SUBST>
+<IB3_FORM value="1">
+
+</IB3_FORM>
+</center>
+</BODY>
+</HTML>
+
+<IB3_COND name="@OPTIONAL_BUTTON@" if="EXISTS NWServerAutoForm" then="SHOWN" else="HIDDEN"></IB3_COND>
+<IB3_DEFINE name="@TARGET@" source="NWServerAutoForm"></IB3_DEFINE>
+<IB3_DEFINE name="@NAME@" source="NWServerSubmitContinueButton"></IB3_DEFINE>
+
+<IB3_TEMPLATE file="jop_2_relay.mnx">

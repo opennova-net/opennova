@@ -1,0 +1,108 @@
+# Expansion-publish workflow — TEMPLATE / reference.
+#
+# This is the canonical shape of the workflow that lives in each expansion repo
+# (opennova-net/revx02, onjo01, ondx01) as .github/workflows/publish.yml. It does
+# NOT run in opennova-godot. The `infra/github` stack provisions the Actions
+# secrets it needs; the OpenNova server pushes the trigger tag and receives the
+# publish callback.
+#
+# Pipeline (see infra/github/README.md):
+#   admin POSTs /api/admin/expansions/<slug>/release on the server
+#     -> server pushes refs/tags/<slug>-v<version> onto this repo  (THIS fires)
+#     -> package the repo content (LFS-hydrated) + sha256 + size, upload to S3
+#     -> POST <server>/admin/internal/expansions/<slug>/publish (or .../fail)
+#     -> server marks the release published; the launcher's Expansion Manager
+#        consumes the download_url.
+#
+# Secrets (set per repo by infra/github; the deps reconcile to our infra — there
+# is intentionally no EXPANSION_PUBLISH_URL / AWS_REGION secret):
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  - S3 upload (the launcher_ci keys)
+#   EXPANSION_PUBLISH_TOKEN                    - bearer for the publish callback
+#   NOVAWORLD_SERVER_URL                       - e.g. https://nw.opennova.net
+#
+# Convention: the tag is "<slug>-v<version>"; the repo content (the .pff files,
+# at the repo root, LFS-tracked) is zipped whole. SLUG below is the repo name.
+
+name: Publish Expansion
+
+on:
+  push:
+    tags:
+      - '*-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      SLUG: ${{ github.event.repository.name }}
+      BUCKET: downloads.opennova.net
+      PREFIX: expansion
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Hydrate LFS assets
+        run: git lfs pull
+
+      - name: Derive version from the tag
+        id: meta
+        run: |
+          version="${GITHUB_REF_NAME#${SLUG}-v}"
+          if [ "$version" = "$GITHUB_REF_NAME" ]; then
+            echo "tag '$GITHUB_REF_NAME' does not match '${SLUG}-v<version>'"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package expansion archive
+        run: zip -r "${SLUG}.zip" . -x '.git/*'
+
+      - name: Compute checksum
+        id: hash
+        run: echo "sha=$(sha256sum "${SLUG}.zip" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload archive to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          aws s3 cp "${SLUG}.zip" \
+            "s3://${BUCKET}/${PREFIX}/${SLUG}/${SLUG}-${v}.zip" \
+            --content-type application/zip
+
+      - name: Notify backend (publish)
+        if: success()
+        env:
+          SERVER_URL: ${{ secrets.NOVAWORLD_SERVER_URL }}
+          TOKEN: ${{ secrets.EXPANSION_PUBLISH_TOKEN }}
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          url="https://${BUCKET}/${PREFIX}/${SLUG}/${SLUG}-${v}.zip"
+          size=$(stat -c%s "${SLUG}.zip")
+          curl -sSf -X POST "${SERVER_URL}/admin/internal/expansions/${SLUG}/publish" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg version "$v" --arg url "$url" --arg sha "${{ steps.hash.outputs.sha }}" \
+                  --argjson size "$size" \
+                  --arg wf "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+                  --arg commit "${GITHUB_SHA}" \
+                  '{version:$version, download_url:$url, sha256:$sha, size_bytes:$size, workflow_url:$wf, target_commit:$commit}')"
+
+      - name: Notify backend (fail)
+        if: failure()
+        env:
+          SERVER_URL: ${{ secrets.NOVAWORLD_SERVER_URL }}
+          TOKEN: ${{ secrets.EXPANSION_PUBLISH_TOKEN }}
+        run: |
+          v="${{ steps.meta.outputs.version }}"
+          curl -sSf -X POST "${SERVER_URL}/admin/internal/expansions/${SLUG}/fail" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg version "$v" --arg err 'build/upload failed; see workflow_url' \
+                  --arg wf "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+                  '{version:$version, error:$err, workflow_url:$wf}')" || true

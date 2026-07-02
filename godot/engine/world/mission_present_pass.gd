@@ -14,14 +14,14 @@ extends RefCounted
 #  - Procedural part-anim (PANM): the vehicle/emplacement part system (turret/dish), PLAYPARTANIM
 #    case 0x22, integrated in-engine; applied here via set_part_phase. IMPLEMENTED.
 #  - Main-body skeletal (.bad via .adm): the primary infantry/view-model animation, selected by AI
-#    state. The AI writes a canonical body-anim slot into Entity.anim_slot (a minimal port of
-#    Entity_UpdateInfantryAI @0x4b9910); it arrives here as PF_ANIM_SLOT and is applied via
-#    play_body_anim, which the model resolves to a clip in its .adm. IMPLEMENTED (walk/idle; the
-#    player avatar's off_8135F0 slots + blend/transition fidelity are later grill follow-ups).
+#    state. The infantry motor exports both off_8135F0 anim_state and clip_phase in the present
+#    snapshot, so this pass poses the model to the same .bad phase that produced root motion.
+#    PF_ANIM_SLOT remains a coarse fallback for non-infantry/compat nodes.
 #
 # Per-entity visual contract (NovaEntityVisual): the present pass is host-agnostic and drives each
 # resolved node through a small duck-typed surface (GDScript) that NovaObjectModel implements:
-#   transform (Node3D), set_part_phase(channel, phase), visible (Node3D), play_body_anim(slot).
+#   transform (Node3D), set_part_phase(channel, phase), visible (Node3D),
+#   play_body_clip_at(key, phase_ticks) / play_body_anim_at(slot, phase_ticks).
 # has_method guards keep non-animated/static nodes untouched. See docs/adr/0007.
 #
 # Targets resolve through ONE shared index (MissionEntityRegistry.resolve: bms_id primary, (kind,index)
@@ -78,7 +78,7 @@ func present() -> void:
 			node.visible = visible
 			if not visible:
 				_stats.hidden += 1
-		_apply_body_anim(node, int(snap[base + NovaSimulation.PF_ANIM_SLOT]))
+		_apply_body_anim(node, snap, base)
 
 
 # Position is already Godot-space (x, z, -y); rotation is mission-space degrees. Build the basis
@@ -110,12 +110,23 @@ func _apply_procedural_part(node, snap: PackedFloat32Array, base: int) -> void:
 		_stats.posed += 1
 
 
-# Main-body skeletal clip (.bad via .adm), selected by the AI's canonical body-anim slot. The model
-# (NovaObjectModel) resolves the slot to a clip in its .adm and poses its Skeleton3D; play_body_anim is
-# idempotent so calling it every tick keeps a loop running without restarting it. No-op on slot < 0
-# (no change / rest) and on nodes that aren't animated (static props, non-skeletal models).
-func _apply_body_anim(node, anim_slot: int) -> void:
+# Main-body skeletal clip (.bad via .adm). Infantry uses the full IDA anim state plus clip phase:
+# the skeleton is posed to the exact phase that produced root motion, so idles stay planted instead
+# of host-side free-running against a separately advanced root track. PF_ANIM_SLOT is the coarse
+# fallback path for compatible non-infantry nodes.
+func _apply_body_anim(node, snap: PackedFloat32Array, base: int) -> void:
+	var anim_phase := int(snap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
+	var anim_state := int(snap[base + NovaSimulation.PF_ANIM_STATE])
+	if anim_state >= 0 and node.has_method("play_body_clip_at"):
+		var key := NovaSimulation.infantry_anim_key(anim_state)
+		if not key.is_empty():
+			node.play_body_clip_at(key, anim_phase)
+			return
+	var anim_slot := int(snap[base + NovaSimulation.PF_ANIM_SLOT])
 	if anim_slot < 0:
+		return
+	if node.has_method("play_body_anim_at"):
+		node.play_body_anim_at(anim_slot, anim_phase)
 		return
 	if node.has_method("play_body_anim"):
 		node.play_body_anim(anim_slot)

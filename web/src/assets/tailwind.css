@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* ONED "tactical tool" palette — RGB channels so Tailwind alpha modifiers
+     (e.g. bg-accent/22, border-border/50) keep working. Single source of truth;
+     edit this block to re-skin the whole site. Values lifted from
+     godot/modtools/terrain/ui/theme/editor_theme.tres. */
+  --surface: 22 24 32; /* #161820 darkest: app bg, inputs, pressed, tab bg */
+  --panel: 29 32 36; /* #1D2024 card / panel background */
+  --raised: 35 39 56; /* #232738 normal control fill / subtle border */
+  --hover: 45 51 57; /* #2D3339 hover fill / separators / scroll grabber */
+  --border: 35 39 56; /* #232738 default 1px border */
+  --border-strong: 60 65 74; /* #3C414A hover / window border */
+  --ink: 228 228 231; /* #E4E4E7 primary text */
+  --ink-muted: 156 163 175; /* #9CA3AF secondary / disabled text */
+  --ink-bright: 255 255 255; /* #FFFFFF hover / focus text */
+  --on-accent: 22 24 32; /* dark text on an orange fill (== surface) */
+  --accent: 214 140 74; /* #D68C4A tactical orange */
+  --danger: 240 68 68; /* #F04444 errors */
+  --warn: 234 179 5; /* #EAB305 warnings / pending */
+  --online: 74 222 128; /* #4ADE80 online / success */
+
+  background-color: rgb(var(--surface));
+  color: rgb(var(--ink));
+}

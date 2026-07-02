@@ -49,3 +49,43 @@ _Avoid_: play mode, runtime (it is still a preview)
 **Tab**:
 A Window shown or hidden by a sibling button's `window` Action (e.g. the Options panels). Not a widget type, just an authored convention: one button per panel, each `<ACTION type="window">` hiding the siblings and showing its own.
 _Avoid_: page, panel (when you mean the toggling mechanism)
+
+## World & NovaWorld
+
+The vocabulary separating the in-game world from the online service. The names collided
+historically; they are now distinct.
+
+**GameWorld**:
+The runtime world-sim host scene (`godot/engine/world/game_world.tscn`): terrain, environment, mission runtime, and audio under one embeddable root. The game shell and play-in-editor both instance it. Formerly named `NovaWorld`.
+_Avoid_: NovaWorld (that name now belongs to the service), world scene
+
+**NovaWorld**:
+NovaLogic's online matchmaking and account service, and our reimplementation of it (`apps/novaworld_server`, `libs/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
+_Avoid_: emulator, lobby server
+
+**Gate**:
+The first-contact UDP service (`novaworld_gate`, port 7597) that bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint.
+_Avoid_: lobby
+
+**Browser**:
+The in-game server list (`novaworld_browser`) populated from the service's GSB/GLB data.
+_Avoid_: lobby, server list (in code)
+
+**Wire-compatible / wire protocol**:
+Code that produces and consumes the exact byte stream the original game uses, so original
+and OpenNova endpoints interoperate: our clients can join original servers, our servers can
+serve original clients, and opennova↔opennova works the same way. The protocol witness
+record is `docs/net/novaworld-net-re.md`.
+_Avoid_: "our own protocol", custom packet format
+
+**Host / Client**:
+The authoritative side of an in-match session (the **host**) versus a connected peer (a
+**client**). Under the listen server the host runs a local client too.
+_Avoid_: master/slave, owner (when you mean the host)
+
+**Listen server**:
+A host that is simultaneously the authoritative server and a local client. OpenNova's
+single-player runs this way — the sim serializes real entity state through the wire codec
+and the present pass renders the locally-decoded result, so SP, co-op, and multiplayer
+share one replication path (only the transport differs). See ADR 0011.
+_Avoid_: standalone server, dedicated server (those have no local player)

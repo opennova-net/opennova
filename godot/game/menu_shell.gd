@@ -4,7 +4,7 @@ extends Control
 # Runtime menu shell: drives a live NovaMnuMenu (the same engine node the ONED
 # Menus workspace previews, here with edit_mode off so it is fully interactive)
 # and a NovaMusicDirector, loading the game's .mnu menu set + audio from the
-# user's resource directory. It is the runtime counterpart to NovaWorld: NovaWorld
+# user's resource directory. It is the runtime counterpart to GameWorld: GameWorld
 # turns a resource dir into a playable world, this turns it into the playable
 # menu front-end, and main_game.gd hands off between the two.
 #
@@ -22,6 +22,15 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 # Menu var index the director uses for the current-screen MUSICVAR (matches the
 # menu's set_music_var_index default and the engine tests' set_var(0, ...) path).
 const MUSIC_VAR_INDEX := 0
+
+# Menus are authored in a fixed 800x600 virtual design space and scaled to the
+# screen by independent X/Y factors (anamorphic fill, no letterbox, origin 0,0):
+# the original computes scaleX = screenW/800, scaleY = screenH/600 and applies it
+# to every widget rect at draw [orig: CUIScene_SetScreenScale @ 0x639480, constants
+# 0.00125 = 1/800 and 0.0016666667 = 1/600; recomputed on resolution change in
+# apply_video_mode_change @ 0x55a590]. We reproduce it by scaling the menu root
+# CanvasItem; authored coords stay in 800x600 space.
+const DESIGN_SIZE := Vector2(800, 600)
 
 # Friendly labels for known expansions. The list item + persisted key stay the raw
 # folder name (e.g. "jox01"); unknown expansions display their raw folder name.
@@ -69,6 +78,19 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var mod_desc_names := PackedStringArray([
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
+# The Options -> Controls key-binding table, and the device radios that switch it
+# (Keyboard/Mouse/Joystick). The host fills the table from the libs/controls catalog.
+@export var control_table_names := PackedStringArray([
+	"CONTROL_MAPPING",
+])
+@export var control_device_names := PackedStringArray([
+	"KEYBOARD", "MOUSE", "JOYSTICK",
+])
+# Controls that open NovaWorld (online multiplayer). The shipped JO main menu
+# carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
+@export var novaworld_control_names := PackedStringArray([
+	"NW_MULTI_PLAYER", "NOVAWORLD", "NOVAWORLD_LOGIN", "INTERNET_GAME",
+])
 
 # Host -> main_game intents. The host never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
@@ -76,6 +98,9 @@ signal start_requested(bms_name: String)
 signal exit_to_desktop_requested()
 signal return_to_menu_requested()
 signal resume_requested()
+# The player chose NovaWorld (online multiplayer) from the menu. main_game
+# opens the NovaWorld panel; the host stays out of the networking itself.
+signal novaworld_requested()
 # Emitted when the player activates an expansion/mod in Options. The choice is also
 # mounted onto the live root and persisted (read back at the next launch/world load
 # by main_game.gd), so it affects gameplay, not just the menu.
@@ -96,15 +121,26 @@ var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back s
 var _current_file := ""
 var _selected_mission := ""
 var _selected_expansion := ""
-var _menu_size := Vector2(640, 480)
 var _in_game := false
 var _ready_done := false
+# Optional delegate that owns game-specific menus the generic shell does not handle
+# (the JO multiplayer menu — mp_menu_host.gd). Null for a plain shell.
+var _companion = null
+# Lazily-built Options -> Controls key-binding catalog (libs/controls).
+var _controls_model: NovaControlsModel = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	if not resized.is_connected(_recompute_fit):
 		resized.connect(_recompute_fit)
+
+
+# Install a companion that owns game-specific menus the generic shell does not handle
+# (e.g. the JO multiplayer menu, mp_menu_host.gd). When the companion claims the loaded
+# menu, the shell delegates its named-control wiring to it (see _wire_named_controls).
+func set_companion(companion) -> void:
+	_companion = companion
 
 
 # Build the shell against a resource root and open the main menu. Idempotent on
@@ -153,6 +189,11 @@ func _assemble_assets() -> void:
 		_menu.set_sound_profile(_sound_profile)
 	_menu.set_music_director(_director)
 	_menu.set_music_var_index(MUSIC_VAR_INDEX)
+	# Pin the menu root at the top-left, sized to the 800x600 design space; the
+	# anamorphic scale is applied per-resize in _recompute_fit. Top-left anchors keep
+	# the explicit size from being overridden, so PRESET_FULL_RECT screens fill 800x600.
+	_menu.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_menu.size = DESIGN_SIZE
 	add_child(_menu)
 
 	# Connect once on the persistent menu node (the child screen tree is rebuilt
@@ -176,7 +217,9 @@ func open_menu(file: String, target_screen: String) -> bool:
 		return false
 	_current_file = file
 	_selected_mission = ""
-	_menu_size = Vector2(doc.get_menu_size())
+	# Shipped same-file screen jumps name their own file (mp.mnu does); the menu
+	# routes them as in-menu navigation by comparing against its own basename.
+	_menu.set_menu_file(file.get_file())
 	_menu.menu = doc  # in-tree -> rebuilds synchronously, fires screen/music signals
 	if not target_screen.is_empty():
 		_menu.show_screen(target_screen)
@@ -223,6 +266,12 @@ func open_ingame_menu() -> bool:
 # start controls are left to the menu's own actions. Binding them globally is what
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
+	# A companion (e.g. the multiplayer menu driver) can own a whole menu: when it claims
+	# this one, hand it the named-control wiring and skip the generic launch/mission wiring,
+	# so e.g. START_GAME means "host a game" rather than "launch the first mission".
+	if _companion != null and _companion.owns_menu(_menu):
+		_companion.on_menu_built(_menu, _current_file, _menu.current_screen, _root)
+		return
 	var has_mission_list := false
 	for list_name in mission_list_names:
 		var list := _menu.find_child(list_name, true, false)
@@ -235,12 +284,17 @@ func _wire_named_controls() -> void:
 		if mod_list is NovaMnuList:
 			has_mod_list = true
 			_seed_mod_list(mod_list as NovaMnuList)
+	for table_name in control_table_names:
+		var ctl_table := _menu.find_child(table_name, true, false)
+		if ctl_table is NovaMnuTable:
+			_seed_control_mapping(ctl_table as NovaMnuTable)
 	if has_mission_list:
 		_connect_named(start_control_names, _on_start_control)
 	elif has_mod_list:
 		_connect_named(start_control_names, _on_apply_selected_mod)
 	_connect_named(exit_control_names, _on_exit_control)
 	_connect_named(return_control_names, _on_return_control)
+	_connect_named(novaworld_control_names, _on_novaworld_control)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -258,6 +312,32 @@ func _seed_mission_list(list: NovaMnuList) -> void:
 	list.set_items(names)
 	if not list.item_activated.is_connected(_on_mission_activated):
 		list.item_activated.connect(_on_mission_activated)
+
+
+# --- Controls remap table (Options -> Controls) -------------------------------
+
+# Fill the CONTROL_MAPPING table with the key-binding catalog and wire the
+# Keyboard/Mouse/Joystick device radios to repopulate it. Read-only for now: the
+# rows show the byte-exact default bindings; double-click rebinding is not wired
+# (see docs/mnu/menu-re.md D-CTRL-*). The radio nodes are rebuilt with the menu, so
+# the connections are re-made fresh each open without duplicating.
+func _seed_control_mapping(table: NovaMnuTable) -> void:
+	if _controls_model == null:
+		_controls_model = NovaControlsModel.new()
+	_fill_control_mapping(table, NovaControlsModel.DEVICE_KEYBOARD)
+	for i in control_device_names.size():
+		var radio := _menu.find_child(control_device_names[i], true, false)
+		if radio is BaseButton:
+			var device := i  # 0=keyboard, 1=mouse, 2=joystick (NovaControlsModel.Device)
+			(radio as BaseButton).pressed.connect(func() -> void:
+				_fill_control_mapping(table, device))
+
+
+func _fill_control_mapping(table: NovaMnuTable, device: int) -> void:
+	if _controls_model == null:
+		return
+	table.clear_rows()
+	table.add_rows(_controls_model.get_rows(device))
 
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------
@@ -418,6 +498,10 @@ func _on_exit_control() -> void:
 
 func _on_return_control() -> void:
 	return_to_menu_requested.emit()
+
+
+func _on_novaworld_control() -> void:
+	novaworld_requested.emit()
 
 
 func _on_mission_activated(index: int) -> void:
@@ -581,17 +665,20 @@ func _load_music(path: String) -> NovaMusicScript:
 	return res as NovaMusicScript
 
 
-# --- Layout (uniform letterbox fit of the menu's design size to the window) ----
-
+# --- Layout (anamorphic fill of the 800x600 design space to the window) --------
+#
+# Faithful to the original: the 800x600 design space is stretched to fill the whole
+# window with independent X/Y factors (no aspect preservation, no letterbox bars,
+# origin 0,0). On a widescreen display the 4:3 menu is stretched horizontally, as in
+# the retail game [orig: CUIScene_SetScreenScale @ 0x639480].
 func _recompute_fit(_unused: Variant = null) -> void:
-	if _menu == null or _menu_size.x <= 0.0 or _menu_size.y <= 0.0:
+	if _menu == null:
 		return
 	if size.x <= 1.0 or size.y <= 1.0:
 		return
-	var fit := minf(size.x / _menu_size.x, size.y / _menu_size.y)
-	fit = maxf(fit, 0.01)
-	_menu.scale = Vector2(fit, fit)
-	_menu.position = (size - _menu_size * fit) * 0.5
+	_menu.position = Vector2.ZERO
+	_menu.size = DESIGN_SIZE
+	_menu.scale = Vector2(size.x / DESIGN_SIZE.x, size.y / DESIGN_SIZE.y)
 
 
 # --- Misc helpers / accessors -------------------------------------------------

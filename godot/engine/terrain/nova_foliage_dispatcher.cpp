@@ -28,11 +28,10 @@ namespace godot {
 namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
-constexpr int32_t RUNTIME_VIEW_RADIUS_FIXED = 0x40000;
 
-// Engine foliage lighting is not normal/slope lighting. Foliage_BuildGeometry
-// @0x005BF5F0 samples Terrain_GetModulatedColorAtPos@0x005C5FE0; sub_5C0240
-// only prepares height/patch-control data for the later render emitter.
+// Foliage color remains a MultiMesh tint approximation. The old
+// Foliage_BuildGeometry@0x005BF5F0 citation is stale; keep this path tied to the
+// verified placement/sampler functions until the retail render emitter is anchored.
 
 uint32_t color_to_argb(const Color &color) {
 	auto to_byte = [](float value) -> uint32_t {
@@ -79,6 +78,10 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_quad_half_width"), &NovaFoliageDispatcher::get_quad_half_width);
 	ClassDB::bind_method(D_METHOD("set_surface_offset", "offset"), &NovaFoliageDispatcher::set_surface_offset);
 	ClassDB::bind_method(D_METHOD("get_surface_offset"), &NovaFoliageDispatcher::get_surface_offset);
+	ClassDB::bind_method(D_METHOD("set_engine_view_radius_fixed", "radius"),
+	                     &NovaFoliageDispatcher::set_engine_view_radius_fixed);
+	ClassDB::bind_method(D_METHOD("get_engine_view_radius_fixed"),
+	                     &NovaFoliageDispatcher::get_engine_view_radius_fixed);
 	ClassDB::bind_method(D_METHOD("dispatch", "centre", "view_xform"),
 	                     &NovaFoliageDispatcher::dispatch, DEFVAL(Transform3D()));
 	ClassDB::bind_method(D_METHOD("dispatch_centers", "centers", "view_xform"),
@@ -86,6 +89,7 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset"), &NovaFoliageDispatcher::reset);
 	ClassDB::bind_method(D_METHOD("get_total_instances"), &NovaFoliageDispatcher::get_total_instances);
 	ClassDB::bind_method(D_METHOD("get_cached_cells"), &NovaFoliageDispatcher::get_cached_cells);
+	ClassDB::bind_method(D_METHOD("get_dispatch_stats"), &NovaFoliageDispatcher::get_dispatch_stats);
 
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "foliage_defs"), "set_foliage_defs", "get_foliage_defs");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "slot_meshes", PROPERTY_HINT_ARRAY_TYPE, "Mesh"),
@@ -104,6 +108,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "lru_capacity"), "set_lru_capacity", "get_lru_capacity");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "quad_half_width"), "set_quad_half_width", "get_quad_half_width");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "surface_offset"), "set_surface_offset", "get_surface_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "engine_view_radius_fixed"),
+	             "set_engine_view_radius_fixed", "get_engine_view_radius_fixed");
 
 	BIND_CONSTANT(DISPATCH_ALGORITHM_ENGINE_CENTERS);
 	BIND_CONSTANT(DISPATCH_ALGORITHM_CELL_GRID);
@@ -126,7 +132,10 @@ void NovaFoliageDispatcher::set_slot_meshes(const Array &p_meshes) {
 
 Array NovaFoliageDispatcher::get_slot_meshes() const { return slot_meshes_; }
 
-void NovaFoliageDispatcher::set_height_sampler(const Callable &p_sampler) { height_sampler_ = p_sampler; }
+void NovaFoliageDispatcher::set_height_sampler(const Callable &p_sampler) {
+	height_sampler_ = p_sampler;
+	_invalidate_dispatch_coverage();
+}
 Callable NovaFoliageDispatcher::get_height_sampler() const { return height_sampler_; }
 
 void NovaFoliageDispatcher::set_foliage_sampler(const Callable &p_sampler) {
@@ -189,6 +198,7 @@ int NovaFoliageDispatcher::get_preview_cell_radius() const { return get_cell_gri
 
 void NovaFoliageDispatcher::set_lru_capacity(int p_capacity) {
 	lru_capacity_ = p_capacity < 1 ? 1 : p_capacity;
+	_invalidate_dispatch_coverage();
 }
 
 int NovaFoliageDispatcher::get_lru_capacity() const { return lru_capacity_; }
@@ -207,6 +217,13 @@ void NovaFoliageDispatcher::set_surface_offset(float p_offset) {
 
 float NovaFoliageDispatcher::get_surface_offset() const { return surface_offset_; }
 
+void NovaFoliageDispatcher::set_engine_view_radius_fixed(int p_radius) {
+	engine_view_radius_fixed_ = p_radius < 0 ? 0 : p_radius;
+	reset();
+}
+
+int NovaFoliageDispatcher::get_engine_view_radius_fixed() const { return engine_view_radius_fixed_; }
+
 bool NovaFoliageDispatcher::_has_sampling_source() const {
 	return terrain_data_.is_valid() || (height_sampler_.is_valid() && foliage_sampler_.is_valid());
 }
@@ -214,6 +231,8 @@ bool NovaFoliageDispatcher::_has_sampling_source() const {
 void NovaFoliageDispatcher::reset() {
 	lru_.clear();
 	touch_counter_ = 0;
+	dispatch_stats_ = DispatchStats{};
+	_invalidate_dispatch_coverage();
 	engine_frame_counter_ = 0;
 	render_algorithm_ = dispatch_algorithm_;
 	for (auto &dispatcher : engine_dispatchers_) {
@@ -256,9 +275,41 @@ int NovaFoliageDispatcher::get_total_instances() const {
 	return total;
 }
 
+Dictionary NovaFoliageDispatcher::get_dispatch_stats() const {
+	Dictionary out;
+	out["dispatch_calls"] = dispatch_stats_.dispatch_calls;
+	out["coverage_skips"] = dispatch_stats_.coverage_skips;
+	out["rebuilt_slots"] = dispatch_stats_.rebuilt_slots;
+	out["instance_uploads"] = dispatch_stats_.instance_uploads;
+	out["cell_cache_hits"] = dispatch_stats_.cell_cache_hits;
+	out["cell_cache_misses"] = dispatch_stats_.cell_cache_misses;
+	out["cached_cells"] = get_cached_cells();
+	out["total_instances"] = get_total_instances();
+	return out;
+}
+
+void NovaFoliageDispatcher::_invalidate_dispatch_coverage() {
+	last_cell_grid_base_valid_ = false;
+	last_cell_grid_base_x_ = 0;
+	last_cell_grid_base_z_ = 0;
+}
+
 void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
+	++dispatch_stats_.dispatch_calls;
 	if (foliage_defs_.is_empty()) {
 		return;
+	}
+
+	if (dispatch_algorithm_ == DISPATCH_ALGORITHM_CELL_GRID && terrain_data_.is_valid() &&
+	    render_algorithm_ == DISPATCH_ALGORITHM_CELL_GRID && !mm_dirty_) {
+		const int base_x = static_cast<int>(std::floor(centre.x / 16.0f) * 16.0f);
+		const int base_z = static_cast<int>(std::floor(centre.z / 16.0f) * 16.0f + 16.0f);
+		if (last_cell_grid_base_valid_ &&
+		    last_cell_grid_base_x_ == base_x &&
+		    last_cell_grid_base_z_ == base_z) {
+			++dispatch_stats_.coverage_skips;
+			return;
+		}
 	}
 
 	Dictionary defs_by_match = _build_defs_by_match();
@@ -281,6 +332,7 @@ void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
 }
 
 void NovaFoliageDispatcher::dispatch_centers(PackedVector3Array centers, Transform3D view_xform) {
+	++dispatch_stats_.dispatch_calls;
 	if (foliage_defs_.is_empty() || centers.is_empty()) {
 		return;
 	}
@@ -300,6 +352,9 @@ void NovaFoliageDispatcher::_dispatch_cell_grid(Vector3 centre, const Dictionary
 	// CELL_GRID algorithm: scan a wider 16u cell grid around the supplied center.
 	const float base_x = std::floor(centre.x / 16.0f) * 16.0f;
 	const float base_z = std::floor(centre.z / 16.0f) * 16.0f + 16.0f;
+	last_cell_grid_base_valid_ = true;
+	last_cell_grid_base_x_ = static_cast<int>(base_x);
+	last_cell_grid_base_z_ = static_cast<int>(base_z);
 
 	const int num_slots = foliage_defs_.size();
 	for (int slot_index = 0; slot_index < num_slots && slot_index < opennova::FOLIAGE_MAX_DEFS; ++slot_index) {
@@ -316,8 +371,10 @@ void NovaFoliageDispatcher::_dispatch_cell_grid(Vector3 centre, const Dictionary
 				auto it = lru_.find(key);
 				if (it != lru_.end()) {
 					it->second.touch = touch_counter_;
+					++dispatch_stats_.cell_cache_hits;
 					continue;
 				}
+				++dispatch_stats_.cell_cache_misses;
 
 				std::vector<Transform3D> transforms;
 				std::vector<Color> colors;
@@ -405,9 +462,8 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
 	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
 
-	// Jointops.exe Foliage_BuildGeometry@0x005BF5F0 averages four 0x8000
-	// fixed-point offsets around each source vertex. MultiMesh has one color per
-	// instance, so use the instance center as the proxy source vertex.
+	// Verified render-emitter parity is still pending; MultiMesh has one color
+	// per instance, so use the instance center as the proxy source vertex.
 	const uint32_t c0 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz - 0.5f));
 	const uint32_t c1 = color_to_argb(td->get_colormap_color_world(wx + 0.5f, wz - 0.5f));
 	const uint32_t c2 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz + 0.5f));
@@ -575,7 +631,7 @@ void NovaFoliageDispatcher::_dispatch_engine_centers(const PackedVector3Array &c
 			                                         centre_x_fixed,
 			                                         centre_z_fixed,
 			                                         engine_view_camera_z,
-			                                         RUNTIME_VIEW_RADIUS_FIXED,
+			                                         engine_view_radius_fixed_,
 			                                         engine_frame_counter_,
 			                                         config,
 			                                         samplers,
@@ -780,6 +836,8 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 			}
 			continue;
 		}
+		++dispatch_stats_.rebuilt_slots;
+		dispatch_stats_.instance_uploads += count;
 
 		Ref<Mesh> slot_mesh = mesh_for_slot(s);
 		if (mm_by_slot_[s] == nullptr) {

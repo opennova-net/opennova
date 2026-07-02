@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# OpenNova NovaWorld deploy orchestrator. Runs inside the deploy toolbox
+# container (deploy/Dockerfile). The operator supplies only
+# OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
+# vault at run time and rendered to a tmpfs (/run/secrets) that never
+# touches disk.
+#
+# Subcommands:
+#   secrets check                 dry-run every op:// reference
+#   infra plan|apply|destroy      terraform (AWS + Cloudflare)
+#   github import|plan|apply      terraform (expansion repos + Actions secrets)
+#   aws <args...>                 run the AWS CLI with vault credentials
+#   app deploy [--tag SHA]        pull GHCR images + compose up on the target
+#   app status|logs [svc]|restart|down
+#   backup now|list               trigger / list the sqlite backups
+#   state push|pull               terraform state <-> 1Password document
+#
+# OP_VAULT (default OpenNova-Deploy) names the vault.
+set -euo pipefail
+
+VAULT="${OP_VAULT:-OpenNova-Deploy}"
+SECRETS_DIR="/run/secrets"
+TF_DIR="/workspace/infra/aws"
+GH_TF_DIR="/workspace/infra/github"
+COMPOSE_DIR="/workspace/deploy/compose"
+TF_ENV_TPL="/workspace/deploy/env/terraform.env.tpl"
+APP_ENV_TPL="/workspace/deploy/env/app.prod.env.tpl"
+GH_TFVARS_TPL="/workspace/deploy/env/github.tfvars.json.tpl"
+
+# Progress/diagnostics go to STDERR so stdout stays clean for captured output
+# (e.g. `infra output -raw`, `aws ...` in command substitutions).
+log()  { printf '\033[1;36m[deploy]\033[0m %s\n' "$*" >&2; }
+err()  { printf '\033[1;31m[deploy:error]\033[0m %s\n' "$*" >&2; }
+die()  { err "$*"; exit 1; }
+
+require_op() {
+  [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || die "OP_SERVICE_ACCOUNT_TOKEN is not set"
+  op whoami >/dev/null 2>&1 || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN)"
+}
+
+# Render an op:// template to a tmpfs file (0600). Echoes the path.
+inject() {
+  local tpl="$1" out="$2"
+  op inject -i "$tpl" -o "$out" -f >/dev/null
+  chmod 600 "$out"
+  printf '%s' "$out"
+}
+
+# Read the SSH private key from the vault to a tmpfs file; echo the path.
+ssh_key_file() {
+  local key="$SECRETS_DIR/ssh_key"
+  op read "op://$VAULT/ssh/private key?ssh-format=openssh" > "$key"
+  chmod 600 "$key"
+  printf '%s' "$key"
+}
+
+# Resolve the target host IP: explicit override, else terraform output.
+target_ip() {
+  if [ -n "${TARGET_HOST:-}" ]; then
+    printf '%s' "$TARGET_HOST"
+    return
+  fi
+  terraform -chdir="$TF_DIR" output -raw public_ip 2>/dev/null \
+    || die "no public_ip output; run 'infra apply' first or set TARGET_HOST"
+}
+
+tf_init() {
+  terraform -chdir="$TF_DIR" init -input=false >/dev/null
+}
+
+# ---------------------------------------------------------------------------
+cmd_secrets() {
+  require_op
+  case "${1:-check}" in
+    check)
+      log "checking vault '$VAULT' references (dry run)…"
+      local rc=0
+      op inject -f -i "$TF_ENV_TPL"   -o /dev/null >/dev/null \
+        && log "  terraform.env.tpl    OK" || { err "  terraform.env.tpl    FAILED"; rc=1; }
+      op inject -f -i "$APP_ENV_TPL"  -o /dev/null >/dev/null \
+        && log "  app.prod.env.tpl     OK" || { err "  app.prod.env.tpl     FAILED"; rc=1; }
+      op inject -f -i "$GH_TFVARS_TPL" -o /dev/null >/dev/null \
+        && log "  github.tfvars.json   OK" || { err "  github.tfvars.json   FAILED"; rc=1; }
+      op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null \
+        && log "  ssh private key      OK" || { err "  ssh private key      FAILED"; rc=1; }
+      [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
+      log "all references resolved."
+      ;;
+    *) die "unknown: secrets $1 (try: check)" ;;
+  esac
+}
+
+cmd_infra() {
+  require_op
+  cmd_state pull
+  tf_init
+  local action="${1:-plan}"
+  log "terraform $action…"
+  # op run injects AWS + Cloudflare + ssh pubkey as env for the terraform run.
+  case "$action" in
+    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false ;;
+    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve
+             cmd_state push ;;
+    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve
+             cmd_state push ;;
+    output)  shift; terraform -chdir="$TF_DIR" output "$@" ;;
+    list)    shift; terraform -chdir="$TF_DIR" state list "$@" ;;
+    *) die "unknown: infra $action (try: plan|apply|destroy|output|list)" ;;
+  esac
+}
+
+# Run the AWS CLI with credentials injected from the vault, so the operator
+# never configures AWS locally. The CLI can't run natively on this Alpine
+# image (musl vs python-aws-cli), so we shell out to the official glibc
+# `amazon/aws-cli` image via the mounted Docker socket. `op run` resolves the
+# AWS_* refs in terraform.env.tpl into the env, and `docker run -e` forwards
+# them (by name) into the aws container, whose entrypoint is `aws`.
+#   ./deploy/run.sh aws ec2 describe-instances ...
+AWS_CLI_IMAGE="${AWS_CLI_IMAGE:-amazon/aws-cli:latest}"
+cmd_aws() {
+  require_op
+  op run --env-file="$TF_ENV_TPL" -- \
+    docker run --rm -i \
+      -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+      -e AWS_REGION -e AWS_DEFAULT_REGION \
+      "$AWS_CLI_IMAGE" "$@"
+}
+
+# GitHub stack: the expansion repos + their Actions secrets. Separate
+# terraform root (infra/github), separate state document (tfstate-github),
+# different provider (integrations/github). Secrets are op-injected to a tmpfs
+# var-file and passed as -var-file (the repository_secrets map is nested, so a
+# var-file is cleaner than env injection).
+cmd_github() {
+  require_op
+  local action="${1:-plan}"
+  cmd_state pull tfstate-github "$GH_TF_DIR"
+  terraform -chdir="$GH_TF_DIR" init -input=false >/dev/null
+  local varfile
+  varfile="$(inject "$GH_TFVARS_TPL" "$SECRETS_DIR/github.tfvars.json")"
+  log "github terraform $action…"
+  case "$action" in
+    import)
+      # Adopt the pre-existing expansion repos once. Idempotent: skip any
+      # already in state. A fresh org with no repos can skip this and apply.
+      for repo in revx02 onjo01 ondx01; do
+        if terraform -chdir="$GH_TF_DIR" state show \
+             "github_repository.managed[\"$repo\"]" >/dev/null 2>&1; then
+          log "  $repo already in state — skipping"
+        else
+          log "  importing $repo"
+          terraform -chdir="$GH_TF_DIR" import -input=false -var-file="$varfile" \
+            "github_repository.managed[\"$repo\"]" "$repo"
+        fi
+      done
+      cmd_state push tfstate-github "$GH_TF_DIR" ;;
+    plan)
+      terraform -chdir="$GH_TF_DIR" plan -input=false -var-file="$varfile" ;;
+    apply)
+      terraform -chdir="$GH_TF_DIR" apply -input=false -auto-approve -var-file="$varfile"
+      cmd_state push tfstate-github "$GH_TF_DIR" ;;
+    *) die "unknown: github $action (try: import|plan|apply)" ;;
+  esac
+}
+
+# Build the compose invocation for the remote host (DOCKER_HOST=ssh://).
+remote_compose() {
+  local ip key app_env
+  ip="$(target_ip)"
+  key="$(ssh_key_file)"
+  app_env="$(inject "$APP_ENV_TPL" "$SECRETS_DIR/app.prod.env")"
+  export DOCKER_HOST="ssh://ubuntu@${ip}"
+  export GIT_SSH_COMMAND="ssh -i $key -o StrictHostKeyChecking=accept-new"
+  # docker's ssh:// transport invokes `ssh` WITHOUT -i (there is no DOCKER_SSH_OPTS
+  # variable), so it must find the vault key via ~/.ssh/config. Point the host's
+  # IdentityFile at the tmpfs key; IdentitiesOnly avoids agent/default-key probing.
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  cat > "$HOME/.ssh/config" <<SSHCFG
+Host ${ip}
+  HostName ${ip}
+  User ubuntu
+  IdentityFile ${key}
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+SSHCFG
+  chmod 600 "$HOME/.ssh/config"
+  # The prod overlay's backup sidecar interpolates ${BACKUP_BUCKET} (required),
+  # and every compose invocation parses it — so resolve it for ALL app actions
+  # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
+  # state file is on the mounted disk from `infra apply`.
+  export BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  # The prod overlay requires SERVER_IMAGE/WEB_IMAGE to interpolate for EVERY
+  # compose action (status/logs/down parse them too), but only `deploy` sets
+  # them from --tag. Default the rest so those actions work; `ps`/`logs` match
+  # by service name, not image, so the tag is immaterial there. `:-` keeps the
+  # explicit values `deploy` already exported.
+  local owner; owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+  export SERVER_IMAGE="${SERVER_IMAGE:-ghcr.io/${owner}/novaworld-server:latest}"
+  export WEB_IMAGE="${WEB_IMAGE:-ghcr.io/${owner}/novaworld-web:latest}"
+  # compose files + env, evaluated against the remote engine.
+  COMPOSE_ARGS=(-f "$COMPOSE_DIR/docker-compose.yml"
+                -f "$COMPOSE_DIR/docker-compose.prod.yml"
+                --env-file "$COMPOSE_DIR/../env/app.prod.env"
+                --env-file "$app_env")
+}
+
+cmd_app() {
+  require_op
+  local action="${1:-status}"; shift || true
+  case "$action" in
+    deploy)
+      local tag="latest"
+      [ "${1:-}" = "--tag" ] && { tag="$2"; shift 2; }
+      local owner repo
+      owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+      export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
+      export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
+      remote_compose
+      log "deploying $SERVER_IMAGE + $WEB_IMAGE to $(target_ip)…"
+      ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
+        "ubuntu@$(target_ip)" "docker --version" >/dev/null \
+        || die "cannot reach docker on the target over SSH"
+      # Pull only the published images; the backup sidecar has no registry image
+      # (it's built from deploy/backup/), so a blanket `pull` fails on it.
+      docker compose "${COMPOSE_ARGS[@]}" pull novaworld web
+      # `up --build` pulls server/web (pull_policy: always) and builds the backup
+      # sidecar on the remote in one shot.
+      docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans --build
+      log "deploy complete."
+      ;;
+    status)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" ps ;;
+    logs)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" logs --tail=200 "${1:-}" ;;
+    restart) remote_compose; docker compose "${COMPOSE_ARGS[@]}" restart "${1:-}" ;;
+    down)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" down ;;
+    # Run SQL against the live SQLite DB via the backup sidecar (it has sqlite3
+    # and the nw_data volume rw). E.g. one-off admin cleanup.
+    sql)     remote_compose; docker compose "${COMPOSE_ARGS[@]}" exec -T backup \
+               sqlite3 /data/novaworld.db "$*" ;;
+    *) die "unknown: app $action (try: deploy|status|logs|restart|down|sql)" ;;
+  esac
+}
+
+cmd_backup() {
+  require_op
+  # The backup S3 bucket comes from terraform output.
+  BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
+  [ -n "$BACKUP_BUCKET" ] || die "no backup_bucket_name output; run 'infra apply' first"
+  export BACKUP_BUCKET
+  case "${1:-now}" in
+    now)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/backup.sh ;;
+    list) remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/list.sh ;;
+    *) die "unknown: backup $1 (try: now|list)" ;;
+  esac
+}
+
+cmd_state() {
+  require_op
+  # Optional args let other stacks reuse this: state <pull|push> [doc] [tfdir].
+  # Defaults target the AWS stack (tfstate / infra/aws).
+  local action="${1:-pull}"
+  local doc="${2:-tfstate}"
+  local tfdir="${3:-$TF_DIR}"
+  local statefile="$tfdir/terraform.tfstate"
+  case "$action" in
+    pull) log "pulling state '$doc' from vault…"
+          mkdir -p "$(dirname "$statefile")"
+          # `op document get --out-file` echoes the path to STDOUT — redirect it
+          # so it can't pollute captured output (e.g. `$(... infra output -raw)`,
+          # which runs a state pull first). All progress goes via log() to stderr.
+          op document get "$doc" --vault "$VAULT" --out-file "$statefile" --force >/dev/null 2>&1 \
+            && log "wrote $statefile" || log "no remote state yet (first run)" ;;
+    push) log "pushing state to vault document '$doc'…"
+          [ -f "$statefile" ] || die "no local state at $statefile"
+          if op document get "$doc" --vault "$VAULT" >/dev/null 2>&1; then
+            op document edit "$doc" "$statefile" --vault "$VAULT"
+          else
+            op document create "$statefile" --title "$doc" --vault "$VAULT"
+          fi
+          log "state pushed." ;;
+    *) die "unknown: state $action (try: pull|push)" ;;
+  esac
+}
+
+usage() {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+main() {
+  local group="${1:-help}"; shift || true
+  case "$group" in
+    secrets) cmd_secrets "$@" ;;
+    infra)   cmd_infra "$@" ;;
+    github)  cmd_github "$@" ;;
+    aws)     cmd_aws "$@" ;;
+    app)     cmd_app "$@" ;;
+    backup)  cmd_backup "$@" ;;
+    state)   cmd_state "$@" ;;
+    help|-h|--help) usage ;;
+    *) err "unknown command: $group"; usage; exit 1 ;;
+  esac
+}
+
+main "$@"

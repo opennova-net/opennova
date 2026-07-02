@@ -163,6 +163,11 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 
 ## Building
 
+New to the project? [DEVELOPING.md](DEVELOPING.md) is the full local-development
+walkthrough: toolchain setup, building the GDExtension, running the NovaWorld servers
+locally, and testing against both retail Joint Operations and our own client. The quick
+commands are below.
+
 ### Prerequisites
 
 - CMake 3.16+

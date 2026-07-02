@@ -5,7 +5,7 @@ extends RefCounted
 # Given a parsed mission (NovaMissionData), a resource root, and an item database
 # (items.def), this resolves each placed entity to its visual model and instances
 # it under a "MissionObjects" container parented to the caller's world root. It is
-# the one genuinely shared piece between the runtime (NovaWorld) and the editor
+# the one genuinely shared piece between the runtime (GameWorld) and the editor
 # Mission workspace: the terrain editor / runtime each own the terrain + camera;
 # this only knows how to turn entities into renderables.
 #
@@ -34,6 +34,8 @@ const CollisionHull := preload("res://engine/object/collision_hull.gd")
 
 const CONTAINER_NAME := "MissionObjects"
 const RENDER_LOD := 0
+const PLAYER_RUNTIME_TYPE_ID := 0x14B9
+const PLAYER_VISUAL_ITEM_ID := 105310
 
 var resource_root: NovaResourceRoot
 var item_db: NovaItemDatabase
@@ -309,6 +311,85 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	return stats
 
 
+## Build ONE animated NovaObjectModel for an item type, in its rest pose, parented under
+## `parent` -- for a host-managed entity with no BMS placement (the local-player avatar in
+## first/third-person). The caller positions/orients it and toggles visibility; it is NOT
+## tagged or registered for the present pass. Returns null when the item type has no
+## resolvable graphic (the same resolution path the animated entities in place() use).
+func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -> Node3D:
+	var graphic := _graphic_for(item_id)
+	if graphic.is_empty():
+		return null
+	var data := _load_object_data(graphic)
+	if data == null:
+		return null
+	var model: Node3D = NovaObjectModelScript.new()
+	model.name = "PlayerAvatar_%s" % graphic
+	parent.add_child(model)
+	if env_node != null and model.has_method("set_environment_node"):
+		model.set_environment_node(env_node)
+	_apply_skeletal_anim(model, item_id)
+	model.set_object_data(data)
+	return model
+
+
+## Resolve runtime-only player type ids to the authored items.def visual item. Keep the runtime
+## entity item/type id unchanged; this only chooses graphics/ADM data for presentation.
+func resolve_player_visual_item_id(runtime_type_id: int) -> int:
+	_ensure_item_db()
+	if runtime_type_id == PLAYER_RUNTIME_TYPE_ID and item_db != null and item_db.has_item(PLAYER_VISUAL_ITEM_ID):
+		return PLAYER_VISUAL_ITEM_ID
+	return runtime_type_id
+
+
+func build_player_animated_model(runtime_type_id: int, parent: Node3D, env_node: Node = null) -> Node3D:
+	return build_animated_model(resolve_player_visual_item_id(runtime_type_id), parent, env_node)
+
+
+## Build ONE animated NovaObjectModel from an EXPLICIT graphic (.3di basename) + an explicit .adm
+## name, in rest pose, parented under `parent`. For host-managed viewmodels that resolve their
+## model + animation directly from weapon.def (gfx1/gfx1a + animadm) rather than from an items.def
+## item id — the first-person weapon viewmodel. Returns null when the graphic doesn't resolve.
+func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", env_node: Node = null) -> Node3D:
+	if graphic.is_empty() or parent == null:
+		return null
+	var data := _load_object_data(graphic)
+	if data == null:
+		return null
+	var model: Node3D = NovaObjectModelScript.new()
+	model.name = "Viewmodel_%s" % graphic
+	parent.add_child(model)
+	if env_node != null and model.has_method("set_environment_node"):
+		model.set_environment_node(env_node)
+	if not adm_name.is_empty():
+		_apply_skeletal_anim_by_name(model, adm_name)
+	model.set_object_data(data)
+	# Pose into a starting clip (e.g. the FP weapon idle "anim_wpn_idle" -> mp5_1i) so the model
+	# holds that pose rather than its bind/T-pose; the model self-ticks the clip via _process.
+	if not clip_key.is_empty() and model.has_method("play_body_clip"):
+		model.play_body_clip(clip_key)
+	return model
+
+
+# Attach a skeletal anim set from an EXPLICIT .adm name (vs _apply_skeletal_anim, which resolves it
+# from an item def's anim_def). Same per-.adm cache + load path; leaves the model static if the
+# .adm fails to load.
+func _apply_skeletal_anim_by_name(model: Node3D, adm_name_in: String) -> void:
+	if model == null or resource_root == null:
+		return
+	var adm_name := adm_name_in if adm_name_in.to_lower().ends_with(".adm") else adm_name_in + ".adm"
+	var skeletal
+	if _skeletal_cache.has(adm_name):
+		skeletal = _skeletal_cache[adm_name]
+	else:
+		skeletal = NovaSkeletalAnim.new()
+		if not skeletal.load_from_resource_root(resource_root, adm_name):
+			skeletal = null
+		_skeletal_cache[adm_name] = skeletal
+	if skeletal != null and model.has_method("set_skeletal_anim"):
+		model.set_skeletal_anim(skeletal)
+
+
 # --- Incremental placement (editor authoring) ---------------------------------
 
 ## Render one freshly-added entity into an existing MissionObjects container without
@@ -515,6 +596,11 @@ func _ground_anchor_for(graphic: String, data: NovaObjectData) -> Vector3:
 func ground_anchor_godot(graphic: String) -> Vector3:
 	_check_epoch()
 	return _ground_anchor_for(graphic, _load_object_data(graphic))
+
+
+func object_data_for(graphic: String) -> NovaObjectData:
+	_check_epoch()
+	return _load_object_data(graphic)
 
 
 # The model-local ground anchor mapped to mission (BMS) axes, for the engine's

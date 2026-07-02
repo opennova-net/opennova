@@ -6,6 +6,7 @@
 #include "world/body_anim.h"
 #include "world/world.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace opennova::world {
@@ -29,6 +30,25 @@ void update_body_anim_slot(AiEntity &e, World &world) {
         slot = kBodyAnimIdle;
     }
     ent->anim_slot = slot;
+}
+
+int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, const InfantryState &inf,
+                                const IRootMotionSource *root_motion) {
+    if (seat.type == SeatType::Gunner) {
+        const int variant = std::clamp<int>(target.emplaced_pose_variant, 0, 8);
+        if (variant > 0) {
+            const int candidate = anim_state::kEmplaced + variant;
+            if (root_motion != nullptr && root_motion->has_clip(inf.adm_id, candidate)) {
+                return candidate;
+            }
+        }
+        return anim_state::kEmplaced;
+    }
+
+    // The original derives this from the mounted seat bone name: sitexNN/ctrlxNN/drvrxNN
+    // becomes anim_sit + NN. The dynamic sit_24 driver lean states need vehicle control fields
+    // that are not modeled in this port yet, so this resolver intentionally stops at base sit_N.
+    return anim_state::kSit + std::clamp<int>(seat.pose_index, 0, 30);
 }
 
 // radians -> 32-bit binary angle. [orig: dbl_7C19D8 = 0x41C45F306DC9C883.]
@@ -405,12 +425,30 @@ void AiEventQueue::process_timed(AiSystem &sys, World &world) {
 // ----------------------------------------------------------------------------
 // AiSystem.
 // ----------------------------------------------------------------------------
+AiSystem::AiSystem() {
+    clear_handle_index();
+}
+
+void AiSystem::clear_handle_index() {
+    handle_to_ai_index_.assign(65536, -1);
+}
+
+void AiSystem::rebuild_handle_index() {
+    clear_handle_index();
+    for (int i = 0; i < static_cast<int>(entities_.size()); ++i) {
+        const EntityHandle h = entities_[i].handle;
+        if (h.valid()) handle_to_ai_index_[h.packed] = i;
+    }
+}
+
 int AiSystem::attach(EntityHandle h) {
     AiEntity e;
     e.handle = h;
     e.brain.f[AiBrain::kOwner] = 1; // nonzero = live slot
     entities_.push_back(e);
-    return static_cast<int>(entities_.size()) - 1;
+    const int index = static_cast<int>(entities_.size()) - 1;
+    if (h.valid()) handle_to_ai_index_[h.packed] = index;
+    return index;
 }
 
 AiEntity *AiSystem::at(int ai_index) {
@@ -419,9 +457,12 @@ AiEntity *AiSystem::at(int ai_index) {
 }
 
 AiEntity *AiSystem::for_handle(EntityHandle h) {
-    for (AiEntity &e : entities_)
-        if (e.handle == h) return &e;
-    return nullptr;
+    if (!h.valid()) return nullptr;
+    if (handle_to_ai_index_.size() != 65536) return nullptr;
+    const int index = handle_to_ai_index_[h.packed];
+    if (index < 0 || index >= static_cast<int>(entities_.size())) return nullptr;
+    AiEntity &e = entities_[index];
+    return e.handle == h ? &e : nullptr;
 }
 
 // [orig: AI_BeginUpdate @0x457b40] copy working fields, then the shared-budget gate.
@@ -540,6 +581,13 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     if (ctx.pre_mission) return;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
+    // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
+    // entity==g_local_player branch (line below, no authority guard) motor-sims the
+    // joiner's own player from input, while NPC think/select stays authority-gated, so
+    // local-promote copies of remote entities just hold (idle). The joiner renders every
+    // REMOTE entity's pose from the host's S2C 0x0A (present reads ClientState, not these
+    // local copies), so their idle ticking is harmless. [orig: the client also runs the
+    // per-entity AI tick; Entity_UpdateInfantryAI @0x4b9910 simulate-when entity==local.]
     for (int i = 0; i < count(); ++i) {
         AiEntity &e = *at(i);
         // A mounted occupant (manned gun/seat) follows its seat and never path-follows; skip the
@@ -576,7 +624,8 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         return false;
     }
     if (occ->mount_seat < 0 || occ->mount_seat >= static_cast<int>(veh->seats.size())) return false;
-    pose_mounted_occupant(*occ, *veh, veh->seats[occ->mount_seat]);
+    const Seat &seat = veh->seats[occ->mount_seat];
+    pose_mounted_occupant(*occ, *veh, seat);
     // Mirror the world Entity transform into the AiEntity the present snapshot reads (organics are
     // presented from pos[]/heading, not Entity.position; promote seeds them the same way).
     e.pos[0] = to_fixed(occ->position.x);
@@ -585,6 +634,18 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     // Engine-frame heading (90 - mission yaw), matching the spawn seed + the mover; the present
     // converts back to mission yaw for the basis. [orig: entity heading = (90 - yaw) @0x40e9f0.]
     e.heading = static_cast<int32_t>(static_cast<int64_t>(90 - occ->yaw) * kBamPerDegree);
+    if (e.inf.active) {
+        const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
+        if (e.inf.anim_state != mounted_state) {
+            e.inf.anim_prev = e.inf.anim_state;
+            e.inf.anim_state = mounted_state;
+            e.inf.clip_phase = 0;
+        }
+        e.inf.anim_pending = 0;
+        e.inf.move_mode = 0;
+        e.inf.target_dist = 0;
+        occ->anim_slot = body_anim_slot_from_state(e.inf.anim_state);
+    }
     return true;
 }
 
@@ -649,6 +710,7 @@ void AiSystem::capture_spawn_baseline() {
 // mission clean. The nav table is read-only path data and is left intact.
 void AiSystem::on_load(World &) {
     if (baseline_captured_) entities_ = spawn_baseline_;
+    rebuild_handle_index();
     events.clear();
     scheduler.budget = 0;
     relmat_calls.clear();

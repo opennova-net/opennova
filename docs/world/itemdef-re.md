@@ -1,0 +1,184 @@
+# ItemDef — reverse-engineering record
+
+Structure-mapping record for the original engine's runtime **`ItemDef`** (the
+per-item-type template loaded from `items.def`) and its copy into the 904-byte
+`GamePlayerEntity`. The reimplementation surface is the parsed model
+`DefItemDef` (`libs/def`, `apps/importer/pyopennova`) and the Godot wrapper
+`NovaItemDatabase` (`godot/engine/object`); the runtime entity copy lands in
+`libs/world` / `libs/netsim`. Binary: retail **Jointops.exe** (IDB
+`Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
+the committed home for the divergence catalog code comments cite as
+`docs/world/itemdef-re.md (D-ITEMDEF-…)`.
+
+This record was produced by a read-only IDA grill: the `ItemDef` and
+`GamePlayerEntity` structs in the IDB were expanded/renamed during the session
+(`ItemDef` 71 → 142 named members; the entity gained the model-pointer and
+`deathCallback` names), and 1821 dead `KONG_*` analyzer types were purged. No
+behavioral ctest is produced here — the evidence is the cited decompilation.
+
+## Verdict table
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| `ItemDef` struct layout (2780 B) | **MATCHING (read-only grill)** | 142 members named from the parser/dumper/allocator/resolver/loader; field offsets witnessed by `ItemDef_ParseProperty @0x49eb00`, `ItemDef_DumpToFile @0x49e250`, `ItemDef_AllocateWithDefaults @0x49e3b0`, `ItemDef_ResolveAllResources @0x49e5f0`, `EntityDef_LoadModelsAndCallbacks @0x439f50` |
+| `ItemDef → GamePlayerEntity` copy | **MATCHING** | `Entity_InitFromItemDef @0x49e550` decompiles field-for-field clean (callbacks/models/health/armor/timer) |
+| `type` enum (`ItemDef+0x5c`) | **DIVERGENT** | `libs/def` `item_type_from_string` uses different integer values than the engine — see **D-ITEMDEF-1** |
+| `attrib` / `attrib2` flags (`+0x54`/`+0x58`) | **documented + parsed** | full bit map witnessed in `ItemDef_ParseProperty`; now parsed into `DefItemDef.attrib`/`attrib2` (`libs/def`, `attrib:` token line) and consumed by the net `0x0D` AI-trailer gate (`Entity::is_ai_capable` ← `attrib & 0x100000` / `AIData`; see net-re D-NET-97) |
+| `DefItemDef` parsed model (`libs/def`) | **partial, MATCHING on covered fields** | parses a faithful subset (id/type/graphic/anim_def/husk/hp/sound_profile/soundloops/shots/`*_function`); the runtime struct is far wider (see follow-ups) |
+
+## Globals
+
+- `gItemDefs @ 0xB46250` — `ItemDef[]`, stride **2780** (0xADC).
+- `gItemCount @ 0xB46254` — populated count.
+- `ItemList_FindIndexByTypeId @ 0x49e100` — linear scan matching `.id`
+  (`ItemDef+0x50`) → array index; the index is what lands in `entity+28`.
+
+## Witness map
+
+- **`ItemDef_ParseProperty @ 0x49eb00`** (0x31B0 B) — the NSI property
+  dispatcher. Each `_stricmp(propName, "<name>")` branch stores into
+  `gItemDefs[ctx.idx]+offset`; this is the primary source of the field map.
+  Passed as the per-property callback by `ItemDefs_LoadAndValidate @0x4a1da0`
+  and `ItemDefs_LoadFromNSIFiles @0x4a1cb0`.
+- **`ItemDef_DumpToFile @ 0x49e250`** — debug dump; the cleanest field↔name
+  pairs: `type_id` `+0x50`, `attrib` `+0x54`, `attrib2` `+0x58`, `type`
+  `+0x5c`, `graphicName` `+0x60`, `huskName` `+0x70`, `shadowName` `+0xa0`,
+  `graphic ptr` `+0xf0`, `graphicx ptr` `+0xf4`.
+- **`ItemDef_AllocateWithDefaults @ 0x49e3b0`** — `memset(0, 2780)`, sets
+  `defaultRes = SoundProfile_FindSlotByName("default")` (so the `defaultRes*`
+  slots are sound-profile handles), then the vehicle-physics defaults
+  (climbSpeed=1, torque=3, mass=5, shock=4, springComp=20, lean=5, flip=45…).
+- **`ItemDef_ParsePhysicsProperty @ 0x49d870`** — parses the physics block at
+  `+0x8d8…+0x948` (already named in-IDB).
+- **`ItemDef_ResolveAllResources @ 0x49e5f0`** — resolves the sound region of
+  `pad_270`: a 7-entry stride-24 name array (`soundDeath`/door/shot-TOD at
+  `0x6db…0x76b`), `soundLoop[7]` names `0x783…0x82b` → resolved ids
+  `0x82c…0x844`, then door/shot/death resolved ids `0x848…0x863`; also copies
+  default-resource render/anim slots into the `pad_86C` anim scratch.
+- **`ItemDef_ResetAllRuntimeCounters @ 0x49e9c0`** — zeroes exactly the
+  resolved-sound-id dwords `pad_270[1468…1520]` (NOT `0xf0…0x12c`; that
+  confirms `0xf0…0x12c` are load-time model pointers, not runtime counters —
+  **D-ITEMDEF-2**).
+- **`EntityDef_LoadModelsAndCallbacks @ 0x439f50`** — loads each name string
+  via `sub_5B6160` into its model pointer (`graphic→0xf0`, `husk→0xf4`,
+  `huskFinal→0xf8`, `graphicEnemy→0xfc`, `huskShadow→0x118`,
+  `virtualDisplay→0x12c`), binds bone callbacks, and resolves seat attach
+  points from the primary model's bone user-points: `"sitex"` → `seatMask`
+  `+0x25c` bit + `seatBoneIndex[8]` `+0x25d`; `"ctrlx"`/`"drvrx"` →
+  `controlBone` `+0x265`; `"UseGun"` → `useGunBone` `+0x266`. `type==8`
+  (effect) and `type==3` (person) take special branches.
+- **`Entity_InitFromItemDef @ 0x49e550`** — the item-template→entity copy
+  (table below).
+
+## ItemDef field map (2780 B; selected — full layout is in the IDB)
+
+| Offset | Field | Type | Source property / note |
+|---|---|---|---|
+| 0x00 | `name` | char[48] | definition name |
+| 0x30 | `alias` | char[16] | |
+| 0x40 | `uiname` | char[16] | `uiname` |
+| 0x50 | `id` | u32 | unique type_id (player infantry = 0x14B9) |
+| 0x54 | `attrib` | `ItemDefAttrib` | `attrib:` bitset (`&0x100000` = AI class, §5.6) |
+| 0x58 | `attrib2` | `ItemDefAttrib2` | second bitset (vehicle/turret/shadow) |
+| 0x5c | `type` | `ItemDefType` | `type` (person/vehicle/…) — see enum + **D-ITEMDEF-1** |
+| 0x60/0x70/0x80 | `graphic`/`husk`/`huskFinal` | char[16] | model names |
+| 0x90/0xa0/0xb0 | `graphicEnemy`/`shadow`/`huskShadow` | char[16] | model names |
+| 0xc0/0xd0/0xe0 | `animDef`/`virtualDisplay`/`attachBoneName` | char[16] | |
+| 0xf0–0xfc | `graphicModel`/`huskModel`/`huskFinalModel`/`graphicEnemyModel` | void* | resolved by `EntityDef_LoadModelsAndCallbacks` |
+| 0x118 / 0x12c | `huskShadowModel` / `virtualDisplayModel` | void* | |
+| 0x130/0x13c/0x150/0x15c/0x168 | `aiFunctionClass`/`renderFunctionClass`/`moveFunctionClass`/`diskFunctionClass`/`inputFunctionClass` | void* | `*_function` class slots (§5.10b) |
+| 0x138/0x148/0x158/0x164 | `deathCallback`/`initCallback`/`updateCallback`/`serializeCallback` | void* | the four entity-copied callbacks |
+| 0x178/0x17a | `radarSig`/`heatSig` | u16 | |
+| 0x17c/0x17e | `healthMax`/`armorMax` | i16 | `hp` / `armor`(=`mana`) → entity (§6.8) |
+| 0x180/0x182/0x184 | `criticalHp`/`criticalDrain`/`nonCriticalRegen` | i16 | |
+| 0x188 | `damageReducPp` | float | `damage_reduc_pp` |
+| 0x194/0x196/0x198 | `score`/`unitType`/`kz` | i16/i16/float | |
+| 0x1a4–0x1ac | `destroyTiming0..2` | i32 | `destroy_timing` → entity `destroyTimer` |
+| 0x1b0/0x1b2/0x1b8/0x1bc | `reverb`/`music`/`scale`/`debrisScale` | i16/i16/float/float | |
+| 0x218 | `lightTransfer` | float | |
+| 0x25c–0x266 | `seatMask`/`seatBoneIndex[8]`/`controlBone`/`useGunBone` | u8 | resolved from model bone user-points |
+| 0x268/0x26c | `defaultRes`/`defaultResDup` | u32 | sound-profile slot handles |
+| 0x270 | `foliageDebrisRef` | u32 | `cactdeb`/`palmdeb`/… |
+| 0x278 | `particleEffects` | char[723] | particle-effect descriptor table (per-effect bases in the IDB: `particlefx@0x278`, `particlefxs@0x2ae`, `particlefxw1-4`, `particledeath@0x416`, …) |
+| 0x54b–0x60b | `primaryWeapon`/`ammo*`(×4)/`launchups*`(×3) | char[32]/char[16] | weapon-loadout strings |
+| 0x61b | `weaponPickupAnims` | char[12][16] | `weapl/r b/m/c up[2]` |
+| 0x6db–0x76b | `soundDeath`/`doorOpenSound`/`doorCloseSound`/`dawnShot`/`dayShot`/`duskShot`/`nightShot` | char[24] | sound names |
+| 0x783 | `soundLoop` | char[7][24] | `soundloop_1..7` |
+| 0x82b–0x863 | `soundFlags`/`soundLoopId[7]`/`doorOpenSoundId`/`doorCloseSoundId`/`shotSoundId[4]`/`deathSoundId` | u8/u32 | resolved sound ids |
+| 0x864/0x868 | `defaultResPlus64`/`…Dup` | u32 | sound-profile + 64 |
+| 0x890–0x8a0 | `deathTime`/`clipsize`/`doorType`/`openRate`/`maxAngle` | i32/float | polymorphic: `clipsize`@0x894 is the door-item `door_dir` slot reused |
+| 0x8d8–0x948 | physics block (`minAI`,`mass`,`torque`,`spring`,`flip`,…) | i32 | `ItemDef_ParsePhysicsProperty` |
+| 0xa74 | `hudImage` | char[32] | `hud_image` |
+| 0xad4/0xad8 | `groupMask`/`groupFlags` | u32 | |
+
+## `ItemDef → GamePlayerEntity` copy (`Entity_InitFromItemDef @ 0x49e550`)
+
+The caller sets `entity->ItemTypeIndex` (`+28`, from
+`ItemList_FindIndexByTypeId`) first; then:
+
+| ItemDef field | → GamePlayerEntity field (offset) |
+|---|---|
+| `&gItemDefs[idx]` | `itemDef` (+0x20) |
+| `deathCallback` (0x138) | `deathCallback` (+0x1c8) — invoked by `Entity_KillByNetId` |
+| `updateCallback` (0x158) | `updateCallback` (+0x1c4) |
+| `graphicModel`/`huskModel`/`huskFinalModel` (0xf0/0xf4/0xf8) | `graphicModel`/`huskModel`/`huskFinalModel` (+0x30/+0x34/+0x38, was `rtCounter0/1/2`) |
+| `destroyTiming0` (0x1a4) | `destroyTimer` (+0x1b0) |
+| `healthMax` (0x17c) | `Health` (+0x11e) |
+| `armorMax` (0x17e) | `Armor` (+0x120) |
+| `initCallback` (0x148) | tail-called as `cb(entity)` if non-null and not `Entity_InitFromItemDef` itself |
+
+## Enums (witnessed in `ItemDef_ParseProperty`)
+
+**`ItemDefType` (`+0x5c`)** — note non-sequential, with shared values:
+
+| value | names |
+|---|---|
+| 1 | vehicle |
+| 2 | decoration, foliage |
+| 3 | person |
+| 4 | marker |
+| 5 | building |
+| 6 | powerup, object |
+| 8 | effect |
+
+`0` = unset; `7` is unused. `EntityDef_LoadModelsAndCallbacks` branches on
+`type==3` (person registration) and `type==8` (effect: sets `entity+436=60`).
+
+**`ItemDefAttrib` (`+0x54`, bitmask)** — `Movecb 0x1`, `Powerup 0x2`,
+`NoMoveShoot 0x4`, `NoTool 0x8`, `Snap 0x10`, `EWeap 0x20`, `PlayerControl
+0x40`, `Door 0x80`, `NoTarget 0x100`, `Landable 0x200`, `Missile 0x400`, `Tire
+0x800`, `FastRope 0x1000`, `Takeable 0x2000`, `Easy 0x4000`, `4Team 0x10000`,
+`ChangeTeam 0x20000`, `SpawnPoint 0x40000`, `Armory 0x80000`, **`Aidata
+0x100000`** (the §5.6 AI-class flag), `LeaveCorpse 0x400000`, `NoDismember
+0x800000`, `NoWeapon 0x1000000`, `Reflect 0x2000000`, `NoShadow 0x4000000`,
+`Concave 0x8000000`, `NoScar 0x10000000`, `NoHud 0x20000000`, `NoDie
+0x40000000`.
+
+**`ItemDefAttrib2` (`+0x58`, bitmask)** — `VehicleBay 0x1`, `AutoInheritTeam
+0x2`, `VehicleSpawn 0x4`, `DynamicShadow 0x10`, `StaticShadow 0x20`,
+`TunnelPiece 0x40`, `UseVK 0x80`, `StaticDeath 0x100`, `OnTurret 0x400`,
+`HasTurret 0x800`, `IsTurret 0x1000`, `Farp 0x2000`, `LandMine 0x4000`.
+
+## Divergence catalog
+
+| ID | Ours | Original (Jointops.exe) | Why / consequence |
+| --- | --- | --- | --- |
+| D-ITEMDEF-1 | `libs/def` `item_type_from_string` (`def.cpp:700`): marker=1, vehicle=2, person=3, building=4, decoration=5, foliage=6, object=7, powerup=8; `effect` unhandled | `ItemDef_ParseProperty`: **vehicle=1, decoration=2, foliage=2, person=3, marker=4, building=5, powerup=6, object=6, effect=8** | the reimpl invented sequential-by-order values; only `person=3` agrees. `type` is not wire-serialized, so no interop break yet, but any runtime/editor branch on `DefItemDef.type` expecting engine semantics (e.g. effect=8, person=3 special-casing in `EntityDef_LoadModelsAndCallbacks`) is wrong. **Fix:** make `item_type_from_string` return engine values and fix the `def.h:134` comment. |
+| D-ITEMDEF-2 | (IDB) `ItemDef+0xf0…0x12c` were auto-named `rtCounter0..4`; entity `+0x30/34/38` likewise | they are load-time resolved **model pointers** (`graphicModel`/`huskModel`/`huskFinalModel`/`graphicEnemyModel`/`virtualDisplayModel`), copied to the entity by `Entity_InitFromItemDef` | renamed in-IDB this session. The actual runtime counters are the resolved-sound-id block `+0x82c…` zeroed by `ItemDef_ResetAllRuntimeCounters`. Supersedes the "+48/52/56 counters" wording in `correspondence.md`/net-re §5.2b. |
+| D-ITEMDEF-3 | net-re **§6.8** lifted `healthMax`/`armorMax` out of `pad_17C` and referenced a "§6.9" | full struct now mapped here; there is no §6.9 in net-re | net-re §6.8 is superseded by this record; the `+286`/`+288` health/armor flow is unchanged and re-cited here. |
+
+## Open follow-ups (unwitnessed / partial)
+
+- `particleEffects` (0x278–0x54b) is mapped as one blob; the per-effect record
+  layout (name + params, with 1–3 weapon-variant sub-slots for `particlefxs`/
+  `particlefxw1-4`) is documented only by base offset, not fully decomposed.
+- The `*_function` class slots (`0x130/0x13c/0x150/0x15c/0x168`) are typed
+  `void*` from their single-store witness; the exact class-binding record
+  (tag vs resolved fn pointers, and how the chosen class' `fn[3]` lands in
+  `serializeCallback`/§5.10b dispatch) is not fully traced.
+- Residual `gap_*` spans remain genuinely unwitnessed: `+0x1c0…0x218`
+  (`addeweap*`/`tool_help` bytes seen at `0x1c1-0x1c3`), `+0x21c…0x25c`,
+  `pad_94C` interior, parts of `pad_86C`/`pad_1B0`.
+- `DefItemDef` covers only the net/render-relevant subset; the physics block,
+  attrib flags, seat/weapon/door/particle/sound tables are not yet parsed by
+  `libs/def`.

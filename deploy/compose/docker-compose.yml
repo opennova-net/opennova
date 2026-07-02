@@ -1,0 +1,40 @@
+# Base compose for the OpenNova NovaWorld stack: the C++ server (gate UDP,
+# NW UDP, HTTP) plus the nginx web portal. SQLite lives in the nw_data
+# volume. Overlays add dev (published ports, dev env) or prod (host
+# networking, GHCR images, backup sidecar) on top of this file.
+#
+# Run from this directory, e.g.:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  novaworld:
+    image: ${SERVER_IMAGE:-opennova-novaworld:local}
+    build:
+      # Build context is the repo root (two levels up) so the Dockerfile
+      # can reach libs/, backend/, third_party/, apps/.
+      context: ../..
+      dockerfile: apps/novaworld_server/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - nw_data:/data
+    environment:
+      ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
+      DATABASE_PATH: /data/novaworld.db
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      EXPANSION_GITHUB_TOKEN: ${EXPANSION_GITHUB_TOKEN:-}
+      EXPANSION_PUBLISH_TOKEN: ${EXPANSION_PUBLISH_TOKEN:-}
+
+  web:
+    image: ${WEB_IMAGE:-opennova-web:local}
+    build:
+      context: ../../web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER:-}
+      ADMIN_BASIC_AUTH_PASSWORD: ${ADMIN_BASIC_AUTH_PASSWORD:-}
+    depends_on:
+      - novaworld
+
+volumes:
+  nw_data:

@@ -41,6 +41,81 @@ add_subdirectory(libs/dbf)
 add_subdirectory(libs/audio)
 add_subdirectory(libs/oned_edit)
 add_subdirectory(libs/refs)
+add_subdirectory(libs/controls)
+
+# Vendored third-party deps that the net stack pulls in.
+add_subdirectory(third_party/sqlite)
+add_subdirectory(third_party/bcrypt)
+
+# Crow — async C++ HTTP framework for the standalone novaworld server.
+# Header-only; needs standalone Asio. Off by default to keep the lib-only /
+# Godot-only build paths fast; the Linux server build + deploy image turn it on.
+option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
+if(BUILD_NOVAWORLD_HTTP)
+    include(FetchContent)
+
+    # Standalone Asio — Crow requires it but doesn't bundle it in 1.2.x.
+    # Asio is header-only; we just need to expose ASIO_INCLUDE_DIR for
+    # Crow's Findasio.cmake to pick up.
+    FetchContent_Declare(asio
+        GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+        GIT_TAG        asio-1-30-2
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(asio)
+    set(ASIO_INCLUDE_DIR "${asio_SOURCE_DIR}/asio/include" CACHE PATH "" FORCE)
+
+    set(CROW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(CROW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(CROW_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(crow
+        GIT_REPOSITORY https://github.com/CrowCpp/Crow.git
+        GIT_TAG        v1.2.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(crow)
+endif()
+
+# Net stack (relanded from PR #37; protocol RE record: docs/net/novaworld-net-re.md).
+# These libs are NOT bundled into the FFI shared lib; they are linked into the
+# standalone novaworld server (apps/novaworld_server) and the Godot client
+# GDExtension (godot/engine/network).
+add_subdirectory(libs/novacrypto)
+add_subdirectory(libs/napi)
+add_subdirectory(libs/novaworld)
+add_subdirectory(libs/bms)
+
+# netsim — the in-match net seam (ADR 0009/0011): NetSystem + the World<->wire
+# bridge + the in-process loopback. The single lib depending on BOTH the runtime
+# world (opennova_world) and the wire codec (opennova_novaworld); linked into the
+# Godot client GDExtension and the netsim tests, not the FFI shared lib.
+add_subdirectory(libs/netsim)
+
+# npruntime — the IDA-faithful in-match NAPI NP runtime (the named server/client
+# state machines + frame loop) built on the netsim seam. Godot-free and socket-free;
+# the owner (apps/nw_server, the Godot binding) pumps bytes through ISessionTransport.
+add_subdirectory(libs/npruntime)
+
+# Shared app utilities (UDP sockets, pcap writer) used by the standalone
+# servers and the loopback tests.
+add_subdirectory(apps/common)
+
+# Standalone novaworld server — gate UDP + NW UDP (+ HTTP when BUILD_NOVAWORLD_HTTP).
+add_subdirectory(apps/novaworld_server)
+
+# nw_server — the headless in-match game HOST (P6): a real-UDP owner loop over libs/npruntime
+# (Server_TickUpdate + handle_server_datagram), separate from the matchmaking novaworld_server.
+# Pure C++ — never links godot-cpp (it is not in this CMake graph; see apps/nw_server/CMakeLists.txt).
+add_subdirectory(apps/nw_server)
+
+# nw_pp — in-game packet pretty-printer for RE sanity-check (reads pcap/pcapng,
+# .sph server logs, or `NW_INGAME_HEXCAP`-style hexcap and dumps decoded tags).
+add_subdirectory(apps/nw_pp)
+
+# nw_replay — streams a representative captured NovaWorld S2C path to a Godot
+# spectator endpoint. It can also print/validate the host/client role partition.
+# This is a debugging tool, not part of the runtime.
+add_subdirectory(apps/nw_replay)
 
 set(OPENNOVA_CORE_TARGETS
     opennova_pcx

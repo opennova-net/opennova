@@ -12,7 +12,7 @@ easier to relay than to rediscover.
   wac, world, audio, pff, vfs, ...). Godot-agnostic — no Godot types ever. Consumed via
   flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
 - `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes),
-  `modtools/` (the OpenNova Editor "ONED" — ten authoring workspaces), `game/` (runtime),
+  `modtools/` (the OpenNova Editor "ONED" — eleven authoring workspaces), `game/` (runtime),
   `tests/` (GUT suite).
 - `apps/importer/` — Python + native FFI importer behind `onimport.exe`; `blender/` and
   `opennova_max/` are the DCC export plugins; `pyopennova/` is the Python FFI layer.
@@ -24,6 +24,11 @@ easier to relay than to rediscover.
   place — bump submodules upstream.
 
 ## Build & test
+
+Important: in this linked worktree, run build/test/bootstrap/Godot commands outside the sandbox
+(request escalation). The submodule bootstrap and Godot test runner touch git metadata and
+processes in the main checkout outside the worktree, so sandboxed runs can fail or leave stuck
+processes.
 
 ```bash
 scripts/build.sh          # C++ build + full ctest (Release); BUILD_GODOT=0 skips the GDExtension
@@ -49,7 +54,11 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   paths — set them in `.claude/settings.local.json` `env`, never in tracked files):
   `OPENNOVA_JO_DIR` (ctest install sweeps), `OPENNOVA_MISSION_CORPUS` (.bms corpus),
   `OPENNOVA_JO_ASSETS` (pytest DCC parity), `NOVA_RESOURCE_DIR` (screenshot capture),
-  `JO_ASSETS_DIR` (perf probes).
+  `JO_ASSETS_DIR` (perf probes), `NW_PROFILE_SPH_DIR` (folder with `host.sph`/`client.sph`
+  `/profile` recordings for the `nw_serverlog_decode` net witness), and packet-capture
+  witnesses such as `NW_INGAME_HEXCAP`, `NW_DVXI5_PCAP`, `NW_DVXI3_PCAP`,
+  `NW_DVXC1_PCAP`, `NW_PROBE3AGAIN_PCAP`, `NW_PROBE3AGAIN_HOST_SPH`, and
+  `NW_WHITENOISE_PCAP`.
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/python, not PowerShell.
 
@@ -71,6 +80,15 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Rendering targets the original fixed-function look, not PBR.
+- Networking is wire-compatible by design — the parity rule applied to the byte stream.
+  We write code such that our clients can join original (retail) servers, our servers can
+  serve original clients, and opennova↔opennova works the same way. Every encoder produces
+  bytes a stock client/server accepts; every decoder reads what a stock client/server
+  emits; opennova↔opennova requires encoder/decoder self-consistency, retail interop
+  requires byte-parity. (Pointing a client at NovaLogic's *live hosted* service is a
+  separate matter, done sparingly with no load/abuse — that caution is not a license to
+  write non-wire-compatible code.) See [docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md)
+  and ADRs 0009–0012.
 - Editor UI copy is artist-facing: "draw distance", "blend layer" — not "CDEP",
   "LOD bitstream", "mip slot".
 - Public-facing copy (README, release notes): name "JO and newer" titles (JO/DFX/DFX2),
@@ -89,6 +107,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Deeper docs
 
+- [.agents/README.md](.agents/README.md) — agent runbooks for networking work:
+  architecture guardrails, retail interop, IDA witness rules, debugging, and task templates.
 - [docs/README.md](docs/README.md) — documentation index: ADRs, RE records by domain.
 - [docs/engine-primer.md](docs/engine-primer.md) — what the original engine is: binaries
   and IDBs, engine-wide conventions, subsystem index, and how to research it. Read it

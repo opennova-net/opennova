@@ -42,11 +42,29 @@ add_subdirectory(../../libs/lwf opennova_lwf)
 add_subdirectory(../../libs/dbf opennova_dbf)
 add_subdirectory(../../libs/audio opennova_audio)
 add_subdirectory(../../libs/oned_edit opennova_oned_edit)
+add_subdirectory(../../libs/controls opennova_controls)
+add_subdirectory(../../libs/novacrypto opennova_novacrypto)
+add_subdirectory(../../libs/napi opennova_napi)
+# novaworld depends on sqlite (db/), so pull sqlite in too. The Godot
+# extension only uses the protocol bits, but linking the whole library is
+# fine — the .a is small.
+add_subdirectory(../../third_party/sqlite opennova_sqlite)
+add_subdirectory(../../libs/novaworld opennova_novaworld)
+# netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
+add_subdirectory(../../libs/netsim opennova_netsim)
+# npruntime: the IDA-faithful in-match NAPI NP runtime (host owner loop + headless client).
+# PUBLIC-links netsim/novaworld/world/mission (all already linked below). The Godot binding
+# (nova_simulation) drives it as a thin adapter; protocol/crypto stay in libs (ADR 0009-0012).
+add_subdirectory(../../libs/npruntime opennova_npruntime)
 
 set(TARGET_NAME "opennova")
 
 add_library(${TARGET_NAME} SHARED
     register_types.cpp
+    network/nova_world_client.cpp
+    network/nova_world_host.cpp
+    network/nova_net_client.cpp
+    network/nova_udp_pump.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_build_job.cpp
     terrain/nova_terrain_data.cpp
@@ -71,6 +89,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
     object/nova_skeletal_anim.cpp
+    hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/infantry_root_motion.cpp
     simulation/nova_simulation.cpp
@@ -124,8 +143,10 @@ add_library(${TARGET_NAME} SHARED
     mnu/nova_mnu_map.cpp
     mnu/nova_mnu_globe.cpp
     mnu/nova_mnu_marquee.cpp
+    mnu/mnu_item_cell.cpp
     mnu/nova_mnu_builder.cpp
     mnu/nova_mnu_menu.cpp
+    mnu/nova_controls_model.cpp
 )
 
 target_include_directories(${TARGET_NAME} PRIVATE
@@ -172,6 +193,12 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_dbf
     opennova_audio
     opennova_oned_edit
+    opennova_controls
+    opennova_novacrypto
+    opennova_napi
+    opennova_novaworld
+    opennova_netsim
+    opennova_npruntime
 )
 
 # The bake worker thread in nova_terrain_build_job.cpp installs

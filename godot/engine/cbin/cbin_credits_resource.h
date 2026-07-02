@@ -3,6 +3,7 @@
 
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
@@ -179,6 +180,13 @@ public:
 	// Text serialization for editor.
 	String to_text() const;
 	bool from_text(const String &p_text);
+
+	// Build a credits resource from raw CBIN bytes (the .kda/.cbin DATASOURCE of a
+	// marquee_wnd, loadable from a PFF via the resource root). Converts the ENV section
+	// and the TEXT entries (text / color / justify / newline / image); asset names are
+	// recorded on the entries, but font/texture resolution is left to the caller.
+	// Returns null when the bytes are not a valid CBIN file.
+	static Ref<CbinCreditsResource> from_cbin_bytes(const PackedByteArray &p_data);
 
 private:
 	float scroll_rate_ = 0.5f;

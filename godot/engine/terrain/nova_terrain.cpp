@@ -81,6 +81,7 @@ void NovaTerrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &NovaTerrain::get_traversal_stats);
 	ClassDB::bind_method(D_METHOD("get_lod_distribution"), &NovaTerrain::get_lod_distribution);
 	ClassDB::bind_method(D_METHOD("get_patches_active"), &NovaTerrain::get_patches_active);
+	ClassDB::bind_method(D_METHOD("get_foliage_dispatch_centers"), &NovaTerrain::get_foliage_dispatch_centers);
 
 	ClassDB::bind_method(D_METHOD("set_debug_no_frustum", "enabled"), &NovaTerrain::set_debug_no_frustum);
 	ClassDB::bind_method(D_METHOD("get_debug_no_frustum"), &NovaTerrain::get_debug_no_frustum);
@@ -215,9 +216,15 @@ void NovaTerrain::_notification(int p_what) {
 			Viewport* vp = get_viewport();
 			if (vp) cam = vp->get_camera_3d();
 		}
-		if (!cam) return;
+		if (!cam) {
+			foliage_dispatch_centers.clear();
+			return;
+		}
 
-		if (!cam->is_inside_tree()) return;
+		if (!cam->is_inside_tree()) {
+			foliage_dispatch_centers.clear();
+			return;
+		}
 
 		Vector3 cam_pos = cam->get_global_position();
 
@@ -313,6 +320,7 @@ void NovaTerrain::_notification(int p_what) {
 		// Assign visible patches to pool via RenderingServer
 		RenderingServer* rs = RenderingServer::get_singleton();
 		int count = std::min(static_cast<int>(visible.size()), PATCH_POOL_SIZE);
+		foliage_dispatch_centers.clear();
 
 		for (int i = 0; i < count; i++) {
 			const auto& vp = visible[i];
@@ -337,6 +345,12 @@ void NovaTerrain::_notification(int p_what) {
 				}
 				continue;
 			}
+
+			const auto& tm = tile_mesh_meta[vp.tile_index];
+			foliage_dispatch_centers.push_back(Vector3(
+				vp.sector_ox + tm.center[0],
+				tm.center[1],
+				vp.sector_oz + tm.center[2]));
 
 			// Only update mesh if changed
 			RID mesh_rid = ti.lod_meshes[lod]->get_rid();
@@ -660,6 +674,7 @@ void NovaTerrain::_clear_terrain() {
 	_clear_collision_bodies();
 	_clear_patch_pool();
 	_clear_tile_overlay_texture();
+	foliage_dispatch_centers.clear();
 
 	tile_infos.clear();
 	quad_nodes.clear();
@@ -1043,6 +1058,10 @@ PackedInt32Array NovaTerrain::get_lod_distribution() const {
 
 int NovaTerrain::get_patches_active() const {
 	return patches_active;
+}
+
+PackedVector3Array NovaTerrain::get_foliage_dispatch_centers() const {
+	return foliage_dispatch_centers;
 }
 
 void NovaTerrain::set_debug_no_frustum(bool v) { traversal_config.no_frustum = v; }

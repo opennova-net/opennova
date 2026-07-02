@@ -104,6 +104,10 @@ guessed → probable before a single write happens.
 - **Stale pseudocode after a retype** — Hex-Rays caches decompilation; after `set_type` /
   `declare_type` the target refreshes but **callers** may serve pre-retype views. Re-`decompile`
   anything you quote after a type edit; never diff against a cached view.
+- **Never convert number bases by hand** — use `int_convert` for any hex/dec/bin conversion. A
+  mis-typed conversion silently poisons every downstream offset, constant, and citation. Pull all
+  addresses/offsets/constants from the tools, not from memory, and derive conclusions from the
+  binary, never from the existing (often wrong) names and comments.
 - **When the decompiler is wrong** — odd pseudocode (a bare `while (count--) *dst++ = *src++;`, an
   impossible parameter) → `disasm` the range. `rep movsb` / `rep stosb` are inlined memcpy/memset;
   MSVC fastcall passes args in ECX/EDX and Hex-Rays sometimes misreads a prologue. These are

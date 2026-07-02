@@ -143,23 +143,15 @@ func test_strip_is_not_rebuilt_by_the_per_frame_poll() -> void:
 		"with no document events, the strip's children survive frames untouched (signal-driven, not polled)")
 
 
-func test_legacy_prompt_flow_still_routes_to_the_editor() -> void:
-	# prompt_unsaved_changes (terrain pending-action flow) must be untouched by
-	# the callable routing: with no callables set, Save goes to the editor hook.
+func test_prompt_callables_are_consumed_on_dispatch() -> void:
+	# The dialog outcomes are one-shot: after Save dispatches, a stray second
+	# dispatch (double signal, stale dialog) must not re-run the callable.
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var fake: _FakePendingEditor = autofree(_FakePendingEditor.new())
-	workstation.editor = fake
-	workstation.prompt_unsaved_changes("save")
-	workstation._on_prompt_save_changes()
-	assert_eq(fake.saves, 1, "legacy routing reaches confirm_pending_action_save")
-
-
-class _FakePendingEditor:
-	extends Node
-	var saves := 0
-
-	func confirm_pending_action_save() -> void:
-		saves += 1
+	var outcome := {"saved": 0}
+	workstation.prompt_unsaved_for(func() -> void: outcome.saved += 1, func() -> void: pass)
+	workstation._save_export._on_prompt_save_changes()
+	workstation._save_export._on_prompt_save_changes()
+	assert_eq(outcome.saved, 1, "the save outcome runs exactly once")
 
 
 # --- DocumentTabSet (the model) ---

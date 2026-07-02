@@ -126,7 +126,12 @@ godot::Ref<godot::Texture2D> load_existing_texture_path(const godot::String &pat
 		return texture_from_image(decode_pcx_image(bytes.ptr(), bytes.size()));
 	}
 
-	if (ext == "dds" && godot::bytes_look_like_dds(bytes)) {
+	// DDS (DXT/BC) payload by MAGIC, not extension: NovaLogic ships compressed
+	// textures under .tga (and .mdt) names, so a "KPier2.TGA" whose bytes begin
+	// with "DDS " must decode as DDS. Mirrors load_texture_from_bytes() below so the
+	// two raw-bytes decoders stay identical (the extension-gated version rendered
+	// these object textures white).
+	if (godot::bytes_look_like_dds(bytes)) {
 		godot::Ref<godot::Image> image;
 		image.instantiate();
 		if (image->load_dds_from_buffer(bytes) != godot::OK) {

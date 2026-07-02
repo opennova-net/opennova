@@ -26,7 +26,7 @@ flag, editor gestures supplied from outside the node.
 
 The Terrain editor instantiates the runtime `NovaEnvironment` / `NovaSky` /
 `NovaWater` nodes and drives them through the same `environment_data` +
-`environment_changed` path `NovaWorld` uses at runtime. The Environment
+`environment_changed` path `GameWorld` uses at runtime. The Environment
 workspace edits apply to the same nodes the game renders with; water is fully
 unified (parameterized, not forked).
 
@@ -47,7 +47,7 @@ system shared and abstract only the data source behind a sampler seam.
 ### Mission simulation — one runtime driver, two transports
 
 `godot/engine/world/mission_runtime.gd` is THE driver both hosts go through:
-the game (`NovaWorld`) drives it with explicit `tick()` calls ordered against
+the game (`GameWorld`) drives it with explicit `tick()` calls ordered against
 its other passes; the Mission workspace self-ticks it via `_process`. Both run
 `TICK_DIVIDED` with the sim's default `loco_scale`, so the editor preview is
 the game's pacing. While simulating, editing is locked out (the present pass is

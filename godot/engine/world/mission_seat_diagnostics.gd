@@ -1,0 +1,266 @@
+class_name MissionSeatDiagnostics
+extends RefCounted
+
+const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
+const SEAT_NONE := 0
+const SEAT_PASSENGER := 1
+const SEAT_CONTROLLER := 2
+const SEAT_GUNNER := 3
+const SEAT_DRIVER := 5
+
+const COMMAND_PASSENGER_ONLY := 123
+const COMMAND_SKIP_CONTROLLER := 124
+const COMMAND_ANY_SEAT := 125
+
+
+static func model_name_for_graphic(graphic: String) -> String:
+	var basename := graphic.get_file().get_basename()
+	return "" if basename.is_empty() else basename + ".3di"
+
+
+static func build_item_seat_specs(mission, resource_root, item_db, include_raw := false) -> Array:
+	var specs: Array = []
+	if mission == null or resource_root == null or item_db == null:
+		return specs
+	var seen_types: Dictionary = {}
+	for raw in mission.get_all_entities():
+		var entity: Dictionary = raw
+		var item_id := int(entity.get("item_id", 0))
+		var type_id := int(entity.get("type_id", 0))
+		if item_id == 0 or type_id == 0 or seen_types.has(type_id):
+			continue
+		seen_types[type_id] = true
+		var resolved := seat_specs_for_item(resource_root, item_db, item_id, type_id, include_raw)
+		if not (resolved.get("seats", []) as Array).is_empty():
+			specs.append(resolved)
+	return specs
+
+
+static func seat_specs_for_item(resource_root, item_db, item_id: int, type_id := 0, include_raw := false) -> Dictionary:
+	var out := {
+		"item_id": item_id,
+		"type_id": type_id,
+		"display_name": "",
+		"graphic": "",
+		"model": "",
+		"seats": [],
+		"error": "",
+	}
+	if resource_root == null or item_db == null:
+		out["error"] = "missing_resource_root_or_item_db"
+		return out
+	if item_db.has_method("has_item") and not item_db.has_item(item_id):
+		out["error"] = "item_not_found"
+		return out
+	out["display_name"] = String(item_db.get_display_name(item_id)) if item_db.has_method("get_display_name") else ""
+	var graphic := String(item_db.get_graphic(item_id))
+	out["graphic"] = graphic
+	if graphic.is_empty():
+		out["error"] = "missing_graphic"
+		return out
+	var model_name := model_name_for_graphic(graphic)
+	out["model"] = model_name
+	if model_name.is_empty():
+		out["error"] = "missing_model_name"
+		return out
+	var data := NovaObjectData.new()
+	if data.open_from_resource_root(resource_root, model_name) != OK:
+		out["error"] = "model_not_found"
+		return out
+	out["seats"] = seat_specs_from_model(data, include_raw)
+	return out
+
+
+static func seat_specs_from_model(data: NovaObjectData, include_raw := false) -> Array:
+	var seats: Array = []
+	if data == null:
+		return seats
+	for i in range(data.get_user_point_count()):
+		var up: Dictionary = data.get_user_point_info(i)
+		var source_name := String(up.get("name", ""))
+		var canonical := canonical_seat_name(source_name)
+		var seat_type := seat_type_for_user_point(source_name)
+		if seat_type == SEAT_NONE:
+			continue
+		var position: Vector3 = seat_local_from_user_point_position(up.get("position", Vector3.ZERO))
+		var seat := {
+			"type": seat_type,
+			"type_label": seat_type_label(seat_type),
+			"position": position,
+			"local": position,
+			"bone_index": i + 1,
+			"pose_index": seat_pose_index_for_user_point(source_name),
+			"source_name": source_name,
+			"canonical_name": canonical,
+			"yaw_offset": seat_yaw_offset_from_user_point_rotation(up.get("rotation", Vector3.ZERO)),
+		}
+		if include_raw:
+			seat["raw_position"] = up.get("position", Vector3.ZERO)
+			seat["raw_rotation"] = up.get("rotation", Vector3.ZERO)
+		seats.append(seat)
+	return seats
+
+
+static func seat_local_from_user_point_position(pos: Vector3) -> Vector3:
+	return MissionObjectPlacer.godot_to_bms_position(
+			MissionObjectPlacer.bms_to_godot_basis(Vector3.ZERO) * pos)
+
+
+static func seat_yaw_offset_from_user_point_rotation(direction: Vector3) -> int:
+	if direction.length_squared() < 0.000001:
+		return 0
+	var local := MissionObjectPlacer.godot_to_bms_position(
+			MissionObjectPlacer.bms_to_godot_basis(Vector3.ZERO) * direction.normalized())
+	if absf(local.x) < 0.000001 and absf(local.y) < 0.000001:
+		return 0
+	return int(round(rad_to_deg(atan2(local.x, local.y))))
+
+
+static func seat_type_for_user_point(name: String) -> int:
+	var canonical := canonical_seat_name(name)
+	if canonical.begins_with("sitex"):
+		return SEAT_PASSENGER
+	if canonical.begins_with("ctrlx"):
+		return SEAT_CONTROLLER
+	if canonical.begins_with("usegun"):
+		return SEAT_GUNNER
+	if canonical.begins_with("drvrx"):
+		return SEAT_DRIVER
+	return SEAT_NONE
+
+
+static func seat_pose_index_for_user_point(name: String) -> int:
+	var canonical := canonical_seat_name(name)
+	if not (canonical.begins_with("sitex") or canonical.begins_with("ctrlx") or canonical.begins_with("drvrx")):
+		return 0
+	var digits := ""
+	var suffix := canonical.substr(5)
+	for i in range(suffix.length()):
+		var c := suffix.unicode_at(i)
+		if c < 48 or c > 57:
+			break
+		digits += suffix.substr(i, 1)
+	if digits.is_empty():
+		return 0
+	return clampi(int(digits), 0, 30)
+
+
+static func canonical_seat_name(name: String) -> String:
+	var lower := name.to_lower().strip_edges()
+	for prefix in ["sitex", "ctrlx", "usegun", "drvrx"]:
+		var at := lower.find(prefix)
+		if at >= 0:
+			return lower.substr(at)
+	return lower
+
+
+static func seat_type_label(seat_type: int) -> String:
+	match seat_type:
+		SEAT_PASSENGER:
+			return "passenger"
+		SEAT_CONTROLLER:
+			return "controller"
+		SEAT_GUNNER:
+			return "gunner"
+		SEAT_DRIVER:
+			return "driver"
+	return "none"
+
+
+static func command_rule(command_id: int) -> Dictionary:
+	match command_id:
+		COMMAND_PASSENGER_ONLY:
+			return {
+				"id": command_id,
+				"mode": "passenger_only",
+				"description": "command 123 accepts sitex/passenger seats only",
+			}
+		COMMAND_SKIP_CONTROLLER:
+			return {
+				"id": command_id,
+				"mode": "no_controller",
+				"description": "command 124 rejects ctrlx/controller seats",
+			}
+		COMMAND_ANY_SEAT:
+			return {
+				"id": command_id,
+				"mode": "any_seat",
+				"description": "command 125 accepts passenger, controller, driver, and gunner seats",
+			}
+	return {
+		"id": command_id,
+		"mode": "not_mount_command",
+		"description": "not an attach-to-seat command",
+	}
+
+
+static func command_allows_seat(command_id: int, seat_type: int) -> bool:
+	if seat_type == SEAT_NONE:
+		return false
+	match command_id:
+		COMMAND_PASSENGER_ONLY:
+			return seat_type == SEAT_PASSENGER
+		COMMAND_SKIP_CONTROLLER:
+			return seat_type != SEAT_CONTROLLER
+		COMMAND_ANY_SEAT:
+			return true
+	return false
+
+
+static func seat_priority_weight(seat: Dictionary) -> int:
+	match int(seat.get("type", SEAT_NONE)):
+		SEAT_CONTROLLER, SEAT_DRIVER:
+			return 0x2000
+		SEAT_GUNNER:
+			return 0x20000
+		SEAT_PASSENGER:
+			return 0x200000
+	return 0x7fffffff
+
+
+static func predict_best_seat(seats: Array, command_id: int) -> Dictionary:
+	var candidates: Array = []
+	var best_index := -1
+	var best_weight := 0x7fffffff
+	for i in range(seats.size()):
+		var seat: Dictionary = seats[i]
+		var seat_type := int(seat.get("type", SEAT_NONE))
+		var occupied := bool(seat.get("occupied", false))
+		var allowed := command_allows_seat(command_id, seat_type)
+		var weight := seat_priority_weight(seat)
+		var status := "eligible"
+		var reason := ""
+		if occupied:
+			status = "skipped"
+			reason = "occupied"
+		elif not allowed:
+			status = "skipped"
+			reason = "command_filter"
+		elif weight < best_weight:
+			best_weight = weight
+			best_index = i
+		var candidate := seat.duplicate(true)
+		candidate["index"] = i
+		candidate["type_label"] = seat_type_label(seat_type)
+		candidate["eligible"] = allowed and not occupied
+		candidate["weight"] = weight
+		candidate["status"] = status
+		candidate["skip_reason"] = reason
+		candidates.append(candidate)
+	if best_index >= 0:
+		var selected: Dictionary = candidates[best_index]
+		selected["status"] = "selected"
+		candidates[best_index] = selected
+		return {
+			"command": command_rule(command_id),
+			"seat_index": best_index,
+			"seat": selected,
+			"candidates": candidates,
+		}
+	return {
+		"command": command_rule(command_id),
+		"seat_index": -1,
+		"seat": {},
+		"candidates": candidates,
+	}

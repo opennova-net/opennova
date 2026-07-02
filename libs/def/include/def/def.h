@@ -142,6 +142,15 @@ typedef struct DefItemDef {
     char dawnshot[128];
     char duskshot[128];
     char dayshot[128];
+    /* §5.10b dispatch tags. ai_function on the player is `plyr` (witnessed
+       on items.def id 105305 = wire 0x14B9, matching the orig SerializePlayerState
+       callback), so ai_function is the field that drives ItemDef+356 lookup. */
+    char ai_function[16];
+    char move_function[16];
+    char render_function[16];
+    char disk_function[16];
+    unsigned int attrib;   /* ItemDefAttrib (+0x54) bitmask; attrib: tokens -> bits. AIData 0x100000 = AI class. [orig: ItemDef_ParseProperty; docs/world/itemdef-re.md] */
+    unsigned int attrib2;  /* ItemDefAttrib2 (+0x58) bitmask. */
     char (*raw_lines)[512];
     size_t raw_lines_count;
 } DefItemDef;
@@ -326,6 +335,9 @@ DEF_EXPORT int def_parse_items_memory(const uint8_t *data, size_t size, DefItems
 DEF_EXPORT void def_free_items(DefItemsFile *f);
 
 DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out);
+/* Parse hudpos.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_hudpos as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out);
 DEF_EXPORT void def_free_hudpos(DefHudPosFile *f);
 
 DEF_EXPORT int def_parse_def(const char *path, DefFile *out);

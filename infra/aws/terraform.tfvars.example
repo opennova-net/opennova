@@ -1,0 +1,37 @@
+# Terraform variables for the OpenNova NovaWorld infrastructure.
+#
+# Copy to terraform.tfvars (gitignored): `cp terraform.tfvars.example terraform.tfvars`.
+# The deploy toolbox runs terraform against the mounted repo, so terraform
+# auto-loads this file. It holds the NON-SECRET deployment knobs.
+#
+# Do NOT put secrets here. The toolbox injects these from the vault as TF_VAR_*
+# env at run time (deploy/env/terraform.env.tpl), so leave them OUT of this file:
+#   cloudflare_api_token, cloudflare_zone_id, cloudflare_domain, ssh_public_key
+# (terraform.tfvars would OVERRIDE the vault values — that's why domain/zone are
+# vault-only below).
+
+region           = "us-east-1"
+ssh_allowed_cidr = "0.0.0.0/0"   # restrict to your IP(s)
+allowed_cidrs    = ["0.0.0.0/0"] # game-service ingress CIDRs
+instance_type    = "c7i.large"
+instance_name    = "opennova-server"
+
+# The downloads bucket name doubles as its public hostname: it is served via
+# CloudFront + an ACM cert on this name + a Cloudflare CNAME (downloads ->
+# CloudFront). So name it for the domain you front it with.
+downloads_bucket_name = "downloads.opennova.net"
+backup_bucket_name    = "opennova-backups"
+create_ci_user        = true
+
+allocate_eip = true
+
+# Cloudflare: domain + zone_id come from the vault (TF_VAR_cloudflare_domain /
+# TF_VAR_cloudflare_zone_id), NOT this file. Only the proxied toggle lives here
+# (it has no vault field). NOTE: onnet called this cloudflare_proxied.
+cloudflare_web_proxied = true   # web @/www behind Cloudflare TLS; nw is always unproxied
+
+# Optional overrides
+# game_http_port = 8080
+# web_http_port  = 80
+# web_https_port = 443
+# ami_id         = ""  # pin after the first prod apply (see variable docs)

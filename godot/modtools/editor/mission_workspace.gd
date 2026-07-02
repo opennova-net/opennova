@@ -83,6 +83,10 @@ func set_terrain_editor(value: Node) -> void:
 
 
 func bind_to_editor(value: Node) -> void:
+	# The shell binds the app root; unwrap to the terrain domain editor (the
+	# mission edit world lives under it). Bare TerrainEditor binds pass through.
+	if value != null and value.has_method("get_terrain_editor"):
+		value = value.get_terrain_editor()
 	set_terrain_editor(value)
 
 
@@ -270,7 +274,7 @@ func get_viewport_camera() -> Camera3D:
 
 
 # --- Play-in-editor (PIE M4) ----------------------------------------------
-# Play boots the REAL game loop (nova_world.tscn + MissionRuntime at the game
+# Play boots the REAL game loop (game_world.tscn + MissionRuntime at the game
 # cadence) over the OPEN in-memory mission in a play viewport that replaces the
 # edit viewport; the edit world survives unmounted. Structural input safety:
 # while playing, the edit input router is out of the tree.
@@ -351,8 +355,27 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.lock_writes("Editing is off while simulating from the editor.")
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
+		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
+		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
 		editor_shell.add_child(_debug_overlay)
 	_debug_overlay.toggle()
+
+
+# The View tab toggles act on the PIE world (game_world.tscn) the same way the game host
+# does. Only Play Mission has a GameWorld; the in-place Simulate driver has none, so the
+# toggles are inert there (consistent with the editor's read-only overlay stance).
+func _on_overlay_skeleton_debug(enabled: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_skeleton_debug(enabled)
+
+
+func _on_overlay_foliage_hidden(hidden: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_foliage_hidden(hidden)
 
 
 func is_debug_overlay_open() -> bool:
@@ -368,6 +391,13 @@ func _debug_runtime_source():
 		var world = _play_node().get_world()
 		return world.get_runtime() if world != null else null
 	return _controller.get_sim_runtime() if _controller != null else null
+
+
+## The live runtime an external surface (the MCP agent service) should read:
+## the PIE world's when playing, else the in-place sim driver, else null.
+## Public mirror of _debug_runtime_source, same resolution order.
+func get_active_runtime():
+	return _debug_runtime_source()
 
 
 # The overlay drives the live runtime DIRECTLY (it is host-neutral and only

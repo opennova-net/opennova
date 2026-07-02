@@ -1,0 +1,36 @@
+<HTML>
+<HEAD>
+<META http-equiv="refresh" CONTENT="10;URL=dfx2_0_jend.htm">
+<META NAME="Author" CONTENT="Eric Milota">
+<TITLE>
+[NK={{NK}}&CK={{CK}}&NI={{NI}}&NP={{NP}}&BK={{BK}}&]
+</TITLE>
+</HEAD>
+
+<BODY TEXT="#FFFFFF" BGCOLOR="#3A6BBB" LINK="#FF0000" VLINK="#FF0000" ALINK="#00FFFF">
+<FONT SIZE="-1">
+<br>
+
+
+<CENTER><P><I><FONT SIZE=+2>Joining {{SERVER_NAME}}...</FONT></I></P>
+</CENTER>
+
+<CENTER><FONT SIZE=+1>
+<p>If you don't automatically join the game, it could be due to one of
+the following reasons:
+<br>1) there is not enough time left in the game
+<br>2) the game does not have room for any more players
+<br>3) the sysop has locked the game from further player joins
+</p>
+<A HREF="dfx2_0_lobby.htm">Cancel</A><BR>
+</FONT>
+</CENTER>
+
+<CENTER>
+<FONT SIZE=-1>
+Please send all problem reports to support@novalogic.com<BR>
+</FONT>
+</CENTER>
+
+</BODY>
+</HTML>

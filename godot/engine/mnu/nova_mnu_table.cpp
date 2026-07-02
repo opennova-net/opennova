@@ -49,7 +49,13 @@ float NovaMnuTable::total_width() const {
 }
 
 float NovaMnuTable::scrollbar_width() const {
-	return scrollbar_ != nullptr ? 16.0f : 0.0f;
+	if (scrollbar_ == nullptr) {
+		return 0.0f;
+	}
+	if (has_scrollbar_rect_ && scrollbar_rect_.size.x > 0.0f) {
+		return scrollbar_rect_.size.x;
+	}
+	return 16.0f;
 }
 
 void NovaMnuTable::_ready() {
@@ -72,13 +78,25 @@ void NovaMnuTable::layout() {
 
 	header_row_->set_position(Vector2(0, 0));
 	header_row_->set_size(Vector2(sz.x, headerh));
+
+	// Scrollbar geometry: honor the authored <SCROLLBAR><POSITION> (table-relative)
+	// when present, else a default right-edge strip below the header. Rows stop at
+	// the scrollbar's left edge so they never underlap it.
+	float content_w = sz.x - sbw;
+	if (scrollbar_ != nullptr) {
+		if (has_scrollbar_rect_) {
+			scrollbar_->set_position(scrollbar_rect_.position);
+			scrollbar_->set_size(Vector2(sbw,
+					scrollbar_rect_.size.y > 0.0f ? scrollbar_rect_.size.y : body_h));
+			content_w = scrollbar_rect_.position.x;
+		} else {
+			scrollbar_->set_position(Vector2(sz.x - sbw, headerh));
+			scrollbar_->set_size(Vector2(sbw, body_h));
+		}
+	}
 	if (viewport_ != nullptr) {
 		viewport_->set_position(Vector2(0, headerh));
-		viewport_->set_size(Vector2(sz.x - sbw, body_h));
-	}
-	if (scrollbar_ != nullptr) {
-		scrollbar_->set_position(Vector2(sz.x - sbw, headerh));
-		scrollbar_->set_size(Vector2(sbw, body_h));
+		viewport_->set_size(Vector2(content_w > 0.0f ? content_w : 0.0f, body_h));
 	}
 	update_scrollbar();
 }
@@ -157,6 +175,16 @@ void NovaMnuTable::rebuild_rows() {
 				row->add_child(lbl);
 			}
 		}
+		// Per-row rule (the ITEMS %TRIM_COLOR% outline) so rows read as a grid.
+		if (has_outline_) {
+			ColorRect *rule = memnew(ColorRect);
+			rule->set_name("Rule");
+			rule->set_color(outline_color_);
+			rule->set_position(Vector2(0, row_height_ - 1));
+			rule->set_size(Vector2(width, 1));
+			rule->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+			row->add_child(rule);
+		}
 		rows_container_->add_child(row);
 	}
 	rows_container_->set_size(Vector2(width, rows_.size() * row_height_));
@@ -192,6 +220,18 @@ int NovaMnuTable::add_row_values(const PackedStringArray &p_cells) {
 	rows_.push_back(row);
 	rebuild_rows();
 	return static_cast<int>(rows_.size()) - 1;
+}
+
+void NovaMnuTable::add_rows(const TypedArray<PackedStringArray> &p_rows) {
+	for (int i = 0; i < p_rows.size(); ++i) {
+		const PackedStringArray cells = p_rows[i];
+		std::vector<Cell> row(columns_.size());
+		for (int c = 0; c < static_cast<int>(columns_.size()) && c < cells.size(); ++c) {
+			row[c].text = cells[c];
+		}
+		rows_.push_back(row);
+	}
+	rebuild_rows();
 }
 
 void NovaMnuTable::set_row(int p_row, const PackedStringArray &p_cells) {
@@ -241,10 +281,36 @@ void NovaMnuTable::set_cell_image(int p_row, int p_col, const Ref<Texture2D> &p_
 	rebuild_rows();
 }
 
+void NovaMnuTable::remove_row(int p_row) {
+	if (p_row < 0 || p_row >= static_cast<int>(rows_.size())) {
+		return;
+	}
+	rows_.erase(rows_.begin() + p_row);
+	// Re-index the selection: drop the removed row, shift higher indices down one.
+	std::set<int> updated;
+	for (const int r : selected_rows_) {
+		if (r < p_row) {
+			updated.insert(r);
+		} else if (r > p_row) {
+			updated.insert(r - 1);
+		}
+	}
+	selected_rows_.swap(updated);
+	rebuild_rows();
+}
+
 void NovaMnuTable::clear_rows() {
 	rows_.clear();
 	selected_rows_.clear();
 	rebuild_rows();
+}
+
+String NovaMnuTable::get_cell_text(int p_row, int p_col) const {
+	if (p_row < 0 || p_row >= static_cast<int>(rows_.size()) || p_col < 0 ||
+			p_col >= static_cast<int>(rows_[p_row].size())) {
+		return String();
+	}
+	return rows_[p_row][p_col].text;
 }
 
 PackedInt32Array NovaMnuTable::get_selected_rows() const {
@@ -311,15 +377,20 @@ void NovaMnuTable::rebuild() {
 }
 
 void NovaMnuTable::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("add_column", "width", "h_align", "bitmap_draw"),
+			&NovaMnuTable::add_column);
 	ClassDB::bind_method(D_METHOD("add_row"), &NovaMnuTable::add_row);
 	ClassDB::bind_method(D_METHOD("add_row_values", "cells"), &NovaMnuTable::add_row_values);
+	ClassDB::bind_method(D_METHOD("add_rows", "rows"), &NovaMnuTable::add_rows);
 	ClassDB::bind_method(D_METHOD("set_row", "row", "cells"), &NovaMnuTable::set_row);
 	ClassDB::bind_method(D_METHOD("set_cell_text", "row", "col", "text"), &NovaMnuTable::set_cell_text);
 	ClassDB::bind_method(D_METHOD("set_cell_value", "row", "col", "value"), &NovaMnuTable::set_cell_value);
 	ClassDB::bind_method(D_METHOD("set_cell_image", "row", "col", "tex"), &NovaMnuTable::set_cell_image);
+	ClassDB::bind_method(D_METHOD("remove_row", "row"), &NovaMnuTable::remove_row);
 	ClassDB::bind_method(D_METHOD("clear_rows"), &NovaMnuTable::clear_rows);
 	ClassDB::bind_method(D_METHOD("get_row_count"), &NovaMnuTable::get_row_count);
 	ClassDB::bind_method(D_METHOD("get_column_count"), &NovaMnuTable::get_column_count);
+	ClassDB::bind_method(D_METHOD("get_cell_text", "row", "col"), &NovaMnuTable::get_cell_text);
 	ClassDB::bind_method(D_METHOD("get_selected_rows"), &NovaMnuTable::get_selected_rows);
 	ClassDB::bind_method(D_METHOD("get_selected_row"), &NovaMnuTable::get_selected_row);
 	ClassDB::bind_method(D_METHOD("select_row", "row", "additive"), &NovaMnuTable::select_row, DEFVAL(false));

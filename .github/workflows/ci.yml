@@ -6,7 +6,9 @@ on:
   pull_request:
     # Include unified-edit-history so PRs stacked on the Mission Workspace branch
     # (e.g. the .lwf sound PR) get CI before that branch lands on master.
-    branches: [master, unified-edit-history]
+    # web-nw-for-real-master is the NovaWorld integration trunk (see plan/);
+    # PRs for that effort target it instead of master until it lands.
+    branches: [master, unified-edit-history, web-nw-for-real-master]
   workflow_dispatch:
 
 # On a PR, github.head_ref is the source branch, so a new push cancels the older
@@ -50,6 +52,42 @@ jobs:
         env:
           BUILD_GODOT: "0"
         run: scripts/build.sh
+
+  # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
+  # plus the net-scoped ctests. This mirrors what the deploy image builds; the
+  # win/mac `test` matrix compiles the same net libs and runs the same tests
+  # with BUILD_NOVAWORLD_HTTP=OFF (no Crow/asio FetchContent on the hot legs).
+  # Target-scoped build: the wider lib corpus is win/mac-covered and this repo
+  # has no other Linux leg yet.
+  novaworld-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false   # net stack consumes no LFS game assets
+
+      - name: Install libcurl (server links it when HTTP is ON)
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Configure (BUILD_NOVAWORLD_HTTP=ON)
+        run: cmake -S . -B build-server -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
+
+      - name: Build server + net tests
+        run: |
+          cmake --build build-server -j "$(nproc)" --target opennova_novaworld_server \
+            url_cipher_test crc32_test nwu_test pubcrypto_test epask_test \
+            envelope_test tlv_test session_test \
+            registration_url_test gate_response_test gate_probe_test lobby_update_test \
+            gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
+            bms_spawn_points_test connection_registry_test connection_manager_test \
+            db_sqlite_test session_hello_roundtrip_test lobby_session_test \
+            backend_schema_test
+
+      - name: Run net ctests
+        run: |
+          ctest --test-dir build-server --output-on-failure -R \
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|bms_spawn_points|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema)$"
 
   modsuperoed-smoke:
     runs-on: windows-latest
@@ -101,6 +139,35 @@ jobs:
         env:
           OPENNOVA_MODSUPEROED_DIR: ${{ github.workspace }}\third_party\modsuperoed
         run: uv run pytest tests/test_modsuperoed_automation.py::test_external_modsuperoed_smoke -q
+
+  # Type-check + build the NovaWorld web portal (web/). The built dist is an
+  # artifact only; production images bake it via web/Dockerfile (Track B).
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install and build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload web dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: web_dist
+          if-no-files-found: error
+          path: web/dist
 
   # Compile the GDExtension (godot/engine + libs/ + the pinned third_party/godot-cpp)
   # ONCE per OS. godot-tests and the four package jobs download these DLLs instead of
@@ -668,6 +735,12 @@ jobs:
             ${{ needs.package-godot-macos-editor.outputs.artifact_id }},
             ${{ needs.package-godot-macos-runtime.outputs.artifact_id }}
           merge-multiple: true
+          # The package jobs upload with `archive: false` (raw blob, no archive
+          # wrapper), so the .zip deliverables are stored as the bare .zip. Without
+          # skip-decompress, download-artifact@v8 decompresses those payload zips and
+          # dumps their CONTENTS into dist/ — the .zip files themselves go missing and
+          # validation fails. skip-decompress keeps each artifact as its raw file.
+          skip-decompress: true
 
       - name: Validate release deliverables
         run: python scripts/validate_release_deliverables.py --release-version 0.0.0-ci
@@ -726,3 +799,31 @@ jobs:
               // failing CI. Same-repo branch PRs (the normal path here) always work.
               core.warning(`Could not post build-links comment (forked PR or token lacks pull-requests:write?): ${err.message}`);
             }
+
+  # Build + test the OpenNova launcher (launcher/, C# WinForms, hosts-file
+  # redirection model). Publishes the single-file exe as an artifact; the
+  # release flow (launcher-publish workflow) handles distribution.
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          submodules: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test
+        run: dotnet test launcher/OpenNovaLauncher.sln -c Release --nologo
+
+      - name: Publish single-file exe
+        run: dotnet publish launcher/src/OpenNovaLauncher/OpenNovaLauncher.csproj -c Release -r win-x64
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenNovaLauncher-win-x64
+          if-no-files-found: error
+          path: launcher/src/OpenNovaLauncher/bin/Release/net8.0-windows/win-x64/publish/OpenNovaLauncher.exe

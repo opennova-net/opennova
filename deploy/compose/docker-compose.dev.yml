@@ -1,0 +1,72 @@
+# Dev overlay: publish the game ports to the host, load the committed dev
+# env, and serve the web UI via Vite with hot-reload (no image rebuild on
+# web changes). On a Windows + WSL2 docker host the published ports reach
+# the Windows host, so a retail JO process on the same machine (with the
+# launcher in dev mode pointing hosts at 127.0.0.1) connects straight through.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   # then open the web UI at http://localhost:5173 (Vite, hot-reload)
+#
+# NOTE on networking: we deliberately use the published-port BRIDGE network
+# here, NOT `network_mode: host`. Host mode was tried so the server could
+# observe the real client source IP for the host/join reflection flow, and it
+# did (the gate saw 127.0.0.1) — but on Docker Desktop + WSL2 it left the NW
+# UDP (:64206) handshake unreachable and bounced the engine. Instead the join
+# endpoint is made reachable via the reflection override (see the novaworld
+# `environment:` block below), which forces the advertised host endpoint to a
+# locally reachable address without depending on source observation.
+
+services:
+  novaworld:
+    env_file:
+      - ../env/app.dev.env
+    # Local host/join (peer-to-peer) config — MACHINE-SPECIFIC. Set these to your
+    # adapter's LAN IPv4 (ipconfig) and point the launcher at the same IP, so
+    # retail binds its host game socket where the server advertises it; a
+    # loopback/LAN mismatch leaves joiners stuck on "Enumerating". They live here
+    # (not app.dev.env) because the base compose sets ONNET_PUBLIC_HOST in its
+    # `environment:` block, which overrides env_file. Override per machine via
+    # shell env, e.g.:
+    #   ONNET_PUBLIC_HOST=192.168.1.50 ONNET_CLIENT_REFLECT_IP=192.168.1.50 \
+    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+    environment:
+      ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-192.168.10.120}
+      # Re-set here for the same reason as ONNET_PUBLIC_HOST: the base compose's
+      # `environment:` block overrides app.dev.env, so the dev token set there
+      # never reaches the container. Without this the admin API stays CLOSED and
+      # the web /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-dev-admin-token}
+      # Seed the local test accounts (test/foo) for dev only; prod leaves this
+      # unset so 0002_dev_users.sql is skipped. This is test DATA only — the
+      # login/auth logic is identical in dev and prod.
+      SEED_DEV_USERS: "1"
+      ONNET_CLIENT_REFLECT_IP: ${ONNET_CLIENT_REFLECT_IP:-192.168.10.120}
+      # Two reflect ports, mirroring onnet's separate gate/nw_udp processes and
+      # JO game.cfg. Each is the retail client's LOCAL UDP port for that socket
+      # (docker hides the real source, so we set them):
+      #   gate-server socket = mpgateserverlocalport (49152) -> ReflectedPortNumber
+      #   novaworld session  = mpnovaworldport (32768) -> advertised to joiners
+      ONNET_CLIENT_REFLECT_GATE_PORT: ${ONNET_CLIENT_REFLECT_GATE_PORT:-49152}
+      ONNET_CLIENT_REFLECT_NOVAWORLD_PORT: ${ONNET_CLIENT_REFLECT_NOVAWORLD_PORT:-32768}
+    ports:
+      - "7597:7597/udp"      # novaworld_gate
+      - "64206:64206/udp"    # NovaWorld UDP
+      - "8080:8080/tcp"      # HTTP / API
+
+  # Web UI via the Vite dev server. Edits to web/ hot-reload live at
+  # http://localhost:5173 with no rebuild. Vite proxies /api to the novaworld
+  # server on the compose network (see web/vite.config.ts; its polling watch
+  # makes file changes reliable on WSL2). The nginx image (base web + the prod
+  # overlay) is the production path and is left untouched.
+  web:
+    image: node:21-alpine
+    build: !reset null
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    volumes:
+      - ../../web:/app
+      - /app/node_modules    # container-owned; keep the host bind-mount off node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_TARGET: http://novaworld:8080

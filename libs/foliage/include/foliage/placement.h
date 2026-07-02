@@ -52,9 +52,9 @@ struct PlacementConfig {
 	uint8_t attrib_flags[FOLIAGE_MAX_DEFS] = {};
 	// Per-slot quad half-width. Engine source: flt_15F9154[17 * slot].
 	float quad_half_width[FOLIAGE_MAX_DEFS] = {1.0f, 1.0f, 1.0f, 1.0f};
-	// Per-slot color modes parsed from the .trn. Foliage_BuildGeometry@0x005BF5F0
-	// consumes these against terrain-modulated colormap samples; placement keeps
-	// them in config for downstream render parity.
+	// Per-slot color modes parsed from the .trn. The final retail render emitter
+	// still needs a verified anchor; placement keeps these in config for downstream
+	// render parity.
 	int color_lower[FOLIAGE_MAX_DEFS] = {0, 0, 0, 0};
 	int color_upper[FOLIAGE_MAX_DEFS] = {0, 0, 0, 0};
 };

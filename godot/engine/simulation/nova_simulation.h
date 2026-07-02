@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -20,10 +21,26 @@
 
 #include "wac/nova_wac_program.h"
 #include <world/ai.h>
+#include <world/player_input.h>
+#include <world/player_spawn.h>
 #include <world/world.h>
 
 #include "mission/nova_mission_data.h"
 #include "simulation/infantry_root_motion.h"
+
+#include "netsim/loopback_channel.h"          // host_loop_ (the host's own dcb-2 client)
+#include "netsim/udp_session_transport.h"     // PeerLink::transport (the LAN per-peer transport)
+
+#include <novaworld/peer_addr.h>    // PeerAddr / PeerAddrHash
+#include "network/nova_udp_pump.h"
+
+#include <mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)
+#include <npruntime/napi_np_server_ctx.h>     // NapiNPServerCtx / GameConfig / ConnectionMode / SocketMode
+#include <npruntime/napi_np_protocol.h>       // HostAcceptEvent + the host owner-loop entry points
+#include <npruntime/client_runtime.h>         // ClientRuntime (HostClient / Joiner roles)
+#include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
+
+#include <unordered_map>
 
 namespace godot {
 
@@ -77,8 +94,12 @@ public:
 		PF_PHASE2,     // PANM channel 2 phase
 		PF_ACTIVE2,
 		PF_ANIM_SLOT,  // Entity.anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
+		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
+		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
 		PF_ALIVE,      // 1 when alive
+		PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
+		PF_WIRE_HANDLE,// (pool<<12)|slot wire handle from the decoded stream (joiner render key; 0 = none)
 		PF_STRIDE      // record length; also the count of fields above
 	};
 
@@ -97,6 +118,90 @@ private:
 	bool have_baseline_ = false;
 	int tick_mode_ = TICK_DIVIDED;
 
+	// --- in-match net runtime (P7, ADR 0009/0011): the SP / LAN host in-process listen server. OFF
+	// by default, so the editor / non-net preview path is the direct AI-pool present, untouched. When
+	// enabled (before load), bringup_host_runtime stands up the npruntime ctx_ + host_loop_ + runtime_
+	// (declared in the P7 block below) and the present pass reads the client-decoded ClientState
+	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the per-frame tick.
+	bool listen_server_ = false;
+	uint64_t last_sim_tick_us_ = 0;
+	uint64_t last_net_tick_us_ = 0;
+	mutable uint64_t last_present_snapshot_us_ = 0;
+	mutable int last_present_entity_count_ = 0;
+
+	// --- co-op LAN host: a real UDP socket (NovaUdpPump) over the npruntime runtime. enable_host_listen
+	// binds the socket (it implies the listen server); host_pump drives the owner loop, and
+	// dispatch_event/admit_peer admit joiners + stream the named dcb-bearing 0x0C. host_session_config_
+	// holds the GDScript-facing session options (the Dictionary getter + the §5.1 reactive-reply config
+	// fed to configure_session_runtime). Sockets live here, the protocol/crypto in libs (ADR 0010).
+	bool host_listen_ = false;
+	Ref<NovaUdpPump> pump_;
+	opennova::np::GameConfig host_session_config_; // the ONE consolidated server-state config (ADR 0013)
+	uint16_t host_bind_port_ = 64220;                      // the lobby-advertised bind port (UI only)
+	// UI server-type: serve-and-play (default true) spawns + renders the host's own player and folds
+	// host_loop_ into runtime_; a DEDICATED host (false) runs the listen server with NO local player and
+	// lets host_session_pump discard the loopback (step 5). Mirrors HostConfig.serve_and_play /
+	// start_host_session's gating [orig: the §5.0 listen-host bring-up, SinglePlayer_StartMission @0x561af0].
+	bool host_serve_and_play_ = true;
+	uint32_t host_max_players_ = 16; // the lobby-advertised player cap; clamped host-side to the witnessed 1..65 [orig +0xC0]
+	// The mission's raw terrain-tile (.til) file bytes, fed from the Godot host (which owns the resource
+	// root) before load; copied into ctx_.terrain_til_data at bring-up so the initial-state burst streams
+	// the S2C 0x45 terrain-tile load (phase 5). Empty => 0x45 faithfully skipped. [§5.37]
+	std::vector<uint8_t> terrain_til_data_;
+	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
+	PackedFloat32Array present_snapshot_from_client_view() const;
+
+	// --- co-op LAN joiner: a pure non-authority np::ClientRuntime (Joiner role, built in enable_join /
+	// finish_load; the runtime_ member is declared in the P7 block below). joiner_pump drives the
+	// connect legs + the per-frame S2C->ClientState fold + the C2S 0x0C uplink over a dialed NovaUdpPump.
+	// It runs run_logic_tick(false) for its own player L (a motor-driven pool-0 entity spawned at the
+	// H-learned pose); remote entities render wire-direct (present + wire_present_pass). enable_join
+	// turns it on; a sim is host XOR joiner. [orig: NapiNPClientMsg_0x00C @0x42E730 self name-match]
+	bool joiner_ = false;
+	bool joiner_started_ = false;          // ClientHello emitted (Idle -> Hello)
+	bool joiner_local_spawned_ = false;    // L spawned at reached_in_match (one-shot guard)
+	uint16_t joiner_self_wire_handle_ = 0; // H: stamped in the C2S 0x0C + present self-filter
+	// Send one framed datagram to the dialed host (the joiner's send_datagram).
+	void ship_to_host(const std::vector<uint8_t> &dg);
+	// SelfSpawn (mission i32 16.16 + full BAM32 orientation) -> PlayerSpawn for L.
+	opennova::world::PlayerSpawn spawn_from_self(const opennova::np::JoinerConnection::SelfSpawn &s) const;
+
+	// Phase 2 (the moving player): the latest input from the host controller, applied to the
+	// local player's AiEntity at the TOP of each frame (net-before-logic, ADR 0009). The
+	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
+	opennova::world::PlayerInput player_input_{};
+	void apply_player_input_pre_tick();
+
+	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
+	// One in-match runtime funnels every path: the host/SP/editor-preview is the §5.0 mode-3
+	// listen server (NapiNPServerCtx ctx_ + its own loopback client over host_loop_, driven by
+	// the npruntime owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
+	// the joiner is a non-authority np::ClientRuntime. The Godot net bindings stay PURE socket
+	// pumps — all protocol/crypto/framing lives in libs (ADR 0009-0012, .agents/network.md).
+	// host_loop_ MUST be declared before runtime_: the HostClient ClientRuntime holds a
+	// non-owning reference into host_loop_, so the loopback has to outlive (and not move under)
+	// the runtime.
+	// The host state — ctx + per-peer transports + now_tick + serve_and_play — shared with the promoted
+	// owner loop host_session_pump (libs/npruntime). MUST be declared before ctx_ (the alias) and before
+	// host_loop_ (host_owner_.host_loopback points at host_loop_, set at bring-up). Replaces the old
+	// ctx_/peers_/PeerLink members; admit_peer/dispatch_event moved into libs (np::, over host_owner_).
+	opennova::np::HostOwner host_owner_;
+	opennova::np::NapiNPServerCtx &ctx_ = host_owner_.ctx;    // alias: host only (is_authority)
+	opennova::netsim::LoopbackChannel host_loop_;             // the host's own dcb-2 client; Server_TickUpdate's 0x0A target
+	std::unique_ptr<opennova::np::ClientRuntime> runtime_;    // HostClient (host/SP) OR Joiner; the present-snapshot source
+	opennova::bms::File mission_file_;                        // persisted so ctx_.mission outlives the match (the 0x0B burst body)
+	std::string joiner_player_name_;                          // persisted for the Joiner runtime ctor on (re)load
+	uint32_t now_tick_ = 0;                                   // the JOINER's per-frame clock (the host uses host_owner_.now_tick)
+	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
+	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
+	void bringup_host_runtime(const opennova::bms::File &file);
+	// The per-frame host owner loop (recv-drain -> tick_connections -> Server_TickUpdate -> S2C
+	// flush -> fold host_loop_ into ClientState). Socket legs gated on host_listen_ (pure SP has none).
+	void host_pump();
+	// The per-frame non-authority client loop (recv -> run_logic_tick(false) for L's motor ->
+	// Client_ProcessNetworkFrame -> ship the C2S 0x0C; spawn L on the in-match edge).
+	void joiner_pump();
+
 	// Terrain the AI grounds on. We own copies of the host's depth buffer + 16x16 sector grid so
 	// the portable TerrainHeightField's raw pointers outlive the source NovaTerrainData and survive
 	// a reload (reset_world rebuilds ai_; apply_terrain_to_ai re-points it). Empty = no grounding.
@@ -110,11 +215,15 @@ private:
 	// ai_ is re-pointed at it like the terrain field. Empty = soldiers hold and stand.
 	InfantryRootMotion infantry_anim_;
 	void apply_root_motion_to_ai();
+	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
+	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
 	// Shared post-promote wiring: load the BMS arrays, register the systems, run the
 	// pre-mission pass, capture the restore baseline. Marks the sim loaded.
 	void finish_load(const opennova::bms::File &file);
+	void apply_host_session_mission_header(const opennova::bms::File &file);
+	void refresh_host_accept_config();
 
 protected:
 	static void _bind_methods();
@@ -141,6 +250,102 @@ public:
 	void set_tick_mode(int p_mode) { tick_mode_ = p_mode; }
 	int get_tick_mode() const { return tick_mode_; }
 
+	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
+	// real entity state onto an in-process loopback (Server_TickUpdate's per-connection S2C
+	// fan), the local client decodes it, and the present pass reads that decoded state. Call
+	// BEFORE loading a mission — the next load stands up the npruntime host runtime. Disabling
+	// reverts to the direct AI-pool present (the editor default).
+	void enable_listen_server(bool p_enable);
+	bool is_listen_server() const { return listen_server_; }
+
+	// Feed the mission's raw terrain-tile (.til) file bytes so the listen host streams the S2C 0x45
+	// terrain-tile load to joiners (climbs the client's g_loading_progress 5 -> 6; §5.37). The Godot
+	// host owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
+	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
+	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
+
+	// --- co-op LAN host (Increment C) ------------------------------------
+	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port`
+	// (0 = an OS-assigned ephemeral port) and accept joiners through the
+	// witnessed session handshake, spawning each into the live World on join.
+	// Implies enable_listen_server(true) — call BEFORE loading a mission.
+	// Returns false if the socket can't bind.
+	bool enable_host_listen(int p_port);
+	bool is_host_listening() const { return host_listen_; }
+	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
+	int get_host_peer_count() const;   // joiners in handshake or admitted
+	void configure_host_session(Dictionary p_options);
+	Dictionary get_host_session_config() const;
+	// Debug/test hook: directly admit a synthetic remote peer at a Godot-space
+	// position, exercising the admit_peer + connection wiring without a live
+	// socket handshake (the handshake itself is unit-tested in libs —
+	// tests/novaworld/host_session_accept_test). Returns true if an entity was
+	// spawned + bound. No-op unless host listening is on.
+	bool admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team);
+
+	// --- co-op LAN joiner (D.2) -------------------------------------------
+	// Turn the sim into a co-op LAN JOINER: dial the host at `host_ip:port` and run
+	// the witnessed in-match JOIN as a non-authority client. `player_name` rides the
+	// ClientHello.co and is the key the host echoes into our organic-spawn record so
+	// we self-identify (name-match) and learn our wire handle H. Call BEFORE loading
+	// the mission (the next load arms the joiner frame path). Implies the client view;
+	// a sim is host XOR joiner. Returns false if the socket can't be dialed.
+	bool enable_join(const String &p_host_ip, int p_port, const String &p_player_name);
+	bool is_joiner() const { return joiner_; }
+	// True once the joiner has name-matched its organic-spawn record (self handle H known).
+	bool is_joined_in_match() const;
+	// The JoinerSession phase as an int (JoinerSession::Phase), -1 when not joining.
+	int get_joiner_phase() const;
+	// The learned wire handle H, 0 until in-match (debug / test).
+	int get_joiner_self_handle() const;
+
+	// --- the local player (ADR 0012; net-re §5.2b/§5.38) -------------------
+	// Spawn the host's own player as an authoritative pool-0 entity at a Godot-space position
+	// (yaw in mission degrees). Call AFTER a mission is loaded (the spawn needs the AI system
+	// wired). Returns false if no mission is loaded or pool 0 is full. The player then runs
+	// the infantry motor from input (set_player_input), not AI think.
+	bool spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team);
+	// Spawn the host's own player at the mission's player-START marker, selected the way the
+	// original engine does — by game type, FARTHEST from the enemy set — NOT at any NPC's
+	// position (net-re §5.2c). Single-player resolves the type-6002 start marker. Call AFTER a
+	// mission is loaded. Returns: 1 = spawned at a real start marker; 0 = no start marker, spawned
+	// at a safe fallback origin (never an NPC); -1 = failed (no mission / pool 0 full).
+	// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
+	int spawn_local_player_at_start();
+	// True once a local player has been spawned (World::cached.local_player valid).
+	bool has_local_player() const;
+	// The local player's wire handle ((pool<<12)|slot), 0 when none. The wire present pass
+	// excludes it — the local player is drawn by LocalPlayerHost, not from the wire stream
+	// (host: its own pool-0 player; joiner: L, never present in the wire stream anyway).
+	int get_local_player_wire_handle() const;
+	// Feed one frame of player input: the move keys + look yaw/pitch (mission degrees). Applied
+	// to the player's body input at the top of the next frame. The original drives
+	// entity Yaw@+0x10 / Pitch@+0x14 straight from the mouse [orig: Input_HandleActionBinding_0
+	// @0x4e1330]; the caller clamps pitch to ±80°.
+	void set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right, bool p_run,
+	                      bool p_crouch, bool p_prone, bool p_jump,
+	                      float p_look_yaw_deg, float p_look_pitch_deg);
+	// The local player's authoritative position in Godot world space (for the follow camera);
+	// Vector3() when no player is spawned.
+	Vector3 get_local_player_position() const;
+	// The local player's authoritative look yaw / pitch in mission degrees (for the first-person
+	// camera). yaw = 90 - heading; pitch up positive. 0 when no player is spawned.
+	float get_local_player_yaw_deg() const;
+	float get_local_player_pitch_deg() const;
+	// The local player's current/max health and team for the HUD, mirroring the original
+	// per-frame HUD info. [orig: HUD_BuildEntityInfo @0x4b8440 — health ratio +92, team +374]
+	int get_local_player_health() const;
+	int get_local_player_max_health() const;
+	int get_local_player_team() const;
+	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
+	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
+	int get_local_player_anim_slot() const;
+	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
+	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
+	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
+	String get_local_player_anim_key() const;
+	int get_local_player_anim_phase_ticks() const;
+
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
 	// loaded and re-applied on every (re)load. Pass null to uninstall.
@@ -152,6 +357,8 @@ public:
 	bool compile_and_set_wac(const PackedStringArray &p_sources);
 	// { loaded, paused, runs, event_count, code_size } for transport/debug UI.
 	Dictionary get_wac_state() const;
+	// Last-frame microsecond counters for the runtime hot path. Allocates only when queried.
+	Dictionary get_runtime_perf_counters() const;
 	// Script-disable gate [orig: dword_C6EB28].
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;
@@ -195,6 +402,8 @@ public:
 	// Human-readable AI state name, "?" for the id gaps
 	// [orig: Entity_LookupAIStateName @0x455cc0].
 	static String ai_state_name(int p_state);
+	// Infantry anim state id -> ADM clip key ("anim_<off_8135F0 name>"), empty for invalid gaps.
+	static String infantry_anim_key(int p_state);
 
 	// Entity query. The (kind, index) pair lets the editor map a sim entity back to its placed
 	// mission record + its already-rendered node (MissionController._pickable).
@@ -207,6 +416,8 @@ public:
 	int get_entity_state(int p_index) const;        // AI state id (16 = GROUND_FOLLOWWP)
 	int get_entity_net_id(int p_index) const;       // runtime SSN (WAC/BMS addressing), 0 if none
 	int get_entity_bms_id(int p_index) const;       // file entity id; the host maps this to a placed node
+	int get_entity_owner_connection_id(int p_index) const; // entity+0x78 dcb; the networked-player identity (D-NET-112)
+	int get_entity_wire_handle(int p_index) const;  // (pool<<12)|slot — the per-entity wire identity
 	// Part-anim channel phase 0..65535 (PLAYPARTANIM); channel is 1 or 2. The host renders the
 	// model part from this (the engine computes it; the host only reads it).
 	int get_entity_part_anim_phase(int p_index, int channel) const;
@@ -232,6 +443,7 @@ public:
 	// Null/unloaded clears grounding (entities keep their authored Z). The editor preview and the
 	// game runtime both call this once in MissionRuntime.setup() so they ground identically.
 	void set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain);
+	void set_item_seat_specs(const Array &p_specs);
 
 	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
 	void set_loco_scale(int p_scale);
@@ -242,7 +454,22 @@ public:
 	// of anim states with a usable clip (0 = nothing loaded; org1 soldiers then stand —
 	// motion comes from clips, as in the original). Survives reset_world like the terrain.
 	int set_infantry_anim_map(const Ref<class NovaResourceRoot> &p_resource_root, const String &p_adm_name);
-	int get_infantry_clip_count() const { return infantry_anim_.clip_count(); }
+	int get_infantry_clip_count() const { return infantry_anim_.clip_count(0); }
+
+	// Per-entity grounding: resolve every active infantry soldier's OWN model .adm (from its
+	// items.def type id via the item database) and store its registry adm_id on the entity, so
+	// each grounds + locomotes off its own clip rather than the shared default set. Idempotent;
+	// call after load and again after spawning the local player.
+	void resolve_infantry_adm_ids(const Ref<class NovaResourceRoot> &p_resource_root,
+	                              const Ref<class NovaItemDatabase> &p_item_db);
+
+	// Per-entity items.def trait resolution: stamp each live entity's is_ai_capable (AIData
+	// attrib — gates the 0x0D AI-trailer, D-NET-97), net_class_code (§5.10b *_function class
+	// tag -> the 0x0A serialize class; an unresolved/ewep item must NOT be serialized as a
+	// vehicle or the client desyncs), and health_max/health (items.def hp = healthMax
+	// [orig: Entity_InitFromItemDef @0x49e550]). Idempotent; call after load (and again after
+	// spawning the local player).
+	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
 
 	int get_spawned_count() const { return promo_.spawned; }
 	int get_brain_count() const { return promo_.brains; }

@@ -20,6 +20,7 @@ class FakeController:
 
 	var entity: Dictionary = {}
 	var display_name: String = ""  # resolved model name for the identity line
+	var graphic_name: String = ""  # resolved items.def graphic basename for the identity block
 	var dirty: bool = false
 	var team_calls: int = 0
 	var group_calls: int = 0
@@ -53,6 +54,10 @@ class FakeController:
 	var sim_pause_calls: int = 0
 	var sim_step_calls: int = 0
 	var sim_stop_calls: int = 0
+	# Selected-object userpoint overlay hooks.
+	var selected_user_points_available: bool = false
+	var selected_user_points_visible: bool = false
+	var user_point_visibility_calls: Array = []
 
 	func get_mission():
 		return mission_ref
@@ -75,6 +80,9 @@ class FakeController:
 
 	func get_selected_display_name() -> String:
 		return display_name
+
+	func get_selected_graphic_name() -> String:
+		return graphic_name
 
 	func get_selected_position() -> Vector3:
 		return entity.get("position", Vector3.ZERO)
@@ -214,6 +222,17 @@ class FakeController:
 		sim_stop_calls += 1
 		simulating = false
 		sim_playing = false
+		changed.emit()
+
+	func selected_has_user_points() -> bool:
+		return selected_user_points_available
+
+	func is_selected_user_points_visible() -> bool:
+		return selected_user_points_visible
+
+	func set_selected_user_points_visible(value: bool) -> void:
+		user_point_visibility_calls.append(value)
+		selected_user_points_visible = value
 		changed.emit()
 
 	# Placed-objects browser state. `object_list` rows mirror MissionController.get_object_list
@@ -706,10 +725,88 @@ func test_identity_shows_resolved_model_name() -> void:
 	assert_eq(ctx.inspector._identity_sub.text, "Organic #4", "the subline carries the kind and index")
 
 
+func test_identity_shows_resolved_graphic_name() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.fake.graphic_name = "SpecOps"
+	ctx.inspector._refresh()
+	assert_true(ctx.inspector._identity_graphic_row.visible, "the graphic row shows when a graphic resolves")
+	assert_eq(ctx.inspector._identity_graphic.get_value(), "SpecOps", "the graphic row names the items.def graphic")
+	assert_false(ctx.inspector._identity_graphic.name_edit.editable, "the selected graphic is read-only derived data")
+	assert_false(ctx.inspector._identity_graphic.browse_button.visible, "browse is hidden: this row does not set the graphic")
+	assert_false(ctx.inspector._identity_graphic.clear_button.visible, "clear is hidden: this row does not set the graphic")
+
+
+func test_identity_graphic_jump_opens_resolved_object_model() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.fake.graphic_name = "SpecOps"
+	var log := {}
+	ctx.inspector.set_reference_services({
+		"resolve": func(kind: String, name: String) -> Dictionary:
+			log["resolve"] = [kind, name]
+			return {"status": "found", "path": "C:/res/SpecOps.3di"},
+		"pick": func(kind: String, title: String, _on_pick: Callable) -> void:
+			log["pick"] = [kind, title],
+		"jump": func(kind: String, path: String) -> void:
+			log["jump"] = [kind, path],
+	})
+	ctx.inspector._refresh()
+	assert_eq(log["resolve"], ["object_model", "SpecOps"], "the selected graphic resolves as an object model")
+	assert_true(ctx.inspector._identity_graphic.jump_button.visible, "resolved graphics expose the jump button")
+	assert_false(ctx.inspector._identity_graphic.jump_button.disabled, "resolved graphics can jump")
+	assert_false(ctx.inspector._identity_graphic.browse_button.visible, "browse stays hidden even when picker services exist")
+	ctx.inspector._identity_graphic.jump_button.pressed.emit()
+	assert_eq(log["jump"], ["object_model", "C:/res/SpecOps.3di"],
+		"jump carries the object_model kind and resolved .3di path")
+
+
+func test_identity_hides_graphic_line_without_a_graphic() -> void:
+	var ctx := _make(_sample_entity())
+	assert_false(ctx.inspector._identity_graphic_row.visible, "no resolved graphic -> no graphic row clutter")
+	assert_eq(ctx.inspector._identity_graphic.get_value(), "", "hidden graphic row is cleared")
+
+
 func test_identity_falls_back_to_kind_and_index_without_a_name() -> void:
 	var ctx := _make(_sample_entity())  # display_name left ""
 	assert_eq(ctx.inspector._identity_label.text, "Organic #4", "no resolved name -> kind + index heading")
 	assert_false(ctx.inspector._identity_sub.visible, "and no redundant subline")
+
+
+func test_userpoint_checkbox_syncs_selected_overlay_state() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.fake.selected_user_points_available = true
+	ctx.fake.selected_user_points_visible = true
+	ctx.inspector._refresh()
+	var check := ctx.inspector.find_child("MissionUserPointsCheck", true, false) as CheckBox
+	assert_not_null(check, "Selection editor should expose a userpoint visibility checkbox.")
+	if check == null:
+		return
+	assert_false(check.disabled, "Userpoint checkbox is enabled when the selected model has points.")
+	assert_true(check.button_pressed, "Userpoint checkbox mirrors the controller visibility state.")
+
+
+func test_userpoint_checkbox_toggles_controller_once() -> void:
+	var ctx := _make(_sample_entity())
+	ctx.fake.selected_user_points_available = true
+	ctx.inspector._refresh()
+	var check := ctx.inspector.find_child("MissionUserPointsCheck", true, false) as CheckBox
+	assert_not_null(check, "Selection editor should expose a userpoint visibility checkbox.")
+	if check == null:
+		return
+
+	check.toggled.emit(true)
+
+	assert_eq(ctx.fake.user_point_visibility_calls, [true], "Userpoint checkbox toggles the controller once.")
+	assert_true(ctx.fake.selected_user_points_visible, "The controller visibility state is updated.")
+
+
+func test_userpoint_checkbox_disables_without_selected_points() -> void:
+	var ctx := _make(_sample_entity())
+	var check := ctx.inspector.find_child("MissionUserPointsCheck", true, false) as CheckBox
+	assert_not_null(check, "Selection editor should expose a userpoint visibility checkbox.")
+	if check == null:
+		return
+	assert_true(check.disabled, "Userpoint checkbox disables when the selected model has no points.")
+	assert_false(check.button_pressed, "Unavailable userpoints should not show as enabled.")
 
 
 func test_editing_team_commits_exactly_once() -> void:
@@ -1295,6 +1392,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 	var controller := MissionController.new(null)
 	var required := [
 		"get_mission", "get_stats", "get_selection_summary", "get_selected_entity",
+		"get_selected_display_name", "get_selected_graphic_name",
 		"get_selected_position", "get_selected_rotation",
 		"set_selected_position", "set_selected_rotation", "set_selected_team",
 		"set_selected_group", "set_selected_property", "delete_selected", "is_dirty",

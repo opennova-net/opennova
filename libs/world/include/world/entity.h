@@ -63,6 +63,8 @@ enum class SeatType : uint8_t {
 struct Seat {
     SeatType type = SeatType::None;
     uint8_t bone_index = 0;     // [orig: model[605+slot] seat-bone index]
+    uint8_t pose_index = 0;     // `sitexNN`/`ctrlxNN`/`drvrxNN` -> anim_sit + NN
+    std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
     int16_t yaw_offset = 0;     // gunner facing offset vs the vehicle yaw [orig: @0x43656c]
     EntityHandle occupant;      // [orig: vehicle[400+2*slot]] kInvalid = empty
@@ -77,15 +79,49 @@ struct Entity {
                               // (MissionEntityRegistry), distinct from the runtime net_id/SSN.
     EntityHandle handle;      // self-handle (assigned at spawn)
 
+    // The owning connection's ConnectionId/dcb (GamePlayerEntity entity+0x78). The joining client's
+    // self-scan matches it against its own ConnectionId; a host/dedicated-server reserves dcb 0. This
+    // is the runtime home of what the wire models as OrganicSpawnRecord::entity_flags (the 0x0C
+    // entity+0x78 field). [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id;
+    // matched in Player_FindLocalPlayerEntity @0x4e0090; net-re §5.2b / D-NET-92/101]
+    uint32_t owner_connection_id = 0;
+
     EntityKind kind = EntityKind::Item;
     int32_t item_id = 0;      // items.def type id
+    bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
+                                // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
+    // The §5.10b wire replication class, resolved from the item's items.def *_function class
+    // tag (ai_function, else move_function -> ItemDef+356 serialize callback) and stamped by
+    // the host's post-promotion item-traits sweep. Stored as an OPAQUE code (the novaworld
+    // EntityClass value; libs/world stays net-agnostic) — 0xFF = unresolved, netsim falls back
+    // to its minimal heuristic. Load-bearing: a pool-1 item that is NOT a vehicle class (e.g.
+    // ai_function ewep emplacements) must NOT be serialized with the vehicle compact record or
+    // the client desyncs mid-frame (retail-join v13, 2026-07-02).
+    uint8_t net_class_code = 0xFF;
 
     Vec3 position;            // mission space (Z-up)
     int16_t yaw = 0;
     int16_t pitch = 0;
     int16_t roll = 0;
 
+    // Runtime entity flags — the GamePlayerEntity `Flags` at entity+36. Bit 1 is the
+    // movement gate cleared at spawn and checked before the C2S 0x0C input uplink
+    // [orig: Entity_ResetToSpawnState @0x4B9610 / Player_BuildTag0CInputBody @0x42A550;
+    // docs/net/novaworld-net-re.md §5.2b/§5.6]. Distinct from ai_flags (BMS attributes).
+    uint32_t flags = 0;
+    // Spawn-point backup of position, written by world::entity_reset_to_spawn_state
+    // [orig: Entity_ResetToSpawnState backs Position into pad9[124/128/132]].
+    Vec3 spawn_position;
+
     uint8_t team = 0;
+    // GamePlayerEntity.playerClass (entity+0x294) — the soldier class 5..9. The joiner's client
+    // resolves its body-anim model from THIS at round-load [orig: Game_ReloadEntityModelsAndCallbacks
+    // @0x522830 -> AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity
+    // @0x40bb60 writes animChannelB(+0x188)]. The MP branch preloads classes 5..9 only; class 0 maps
+    // to slot 15 -> empty ADM -> no anim channel -> Entity_UpdateInfantryPlayerBody @0x4b40e0 bails,
+    // so the player cannot move/crouch/prone. Set from the player's loadout at spawn (default a valid
+    // class for players); 0 = unset / non-player. [orig: re-grill 2026-06-28; net-re §5.2b/§5.23]
+    uint8_t player_class = 0;
     uint8_t group_id = 0;     // named-group membership
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
     int32_t wp_number = 0;    // position along that route
@@ -94,6 +130,12 @@ struct Entity {
     int32_t ai_state = 0;     // AI component state
     int32_t ai_target = -1;   // net id of current AI target, -1 = none
     int32_t health = 100;     // 0 -> dead
+    // items.def hp (itemDef+0x17C healthMax), stamped by the host's item-traits sweep
+    // (0 = unresolved). The original spawns entities at Health = healthMax
+    // [orig: Entity_InitFromItemDef @0x49e550]; the sweep mirrors that by lifting health
+    // to hp for entities still at their spawn default. Feeds the §5.10 field-17 tier
+    // denominator and the §5.13 vehicle health word.
+    int32_t health_max = 0;
     bool alive = true;
     uint32_t ai_flags = 0;    // BmsiAttributeFlags
     int32_t move_speed_kph = 0;
@@ -101,6 +143,13 @@ struct Entity {
     int32_t engage_max = 0;
     int32_t attack_max = 0;
     int32_t anim_slot = -1;
+    // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
+    // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
+    // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
+    // apply @0x4c11ec; consumers Entity_UpdatePlayerInfantryMovement @0x48496d,
+    // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
+    // remote peers; stays 0 (no input / idle) for entities without an uplink source.
+    uint8_t net_move_input = 0;
     bool hidden = false;
     bool held = false;
     bool disabled = false;
@@ -112,6 +161,7 @@ struct Entity {
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
     // Empty for plain entities; an emplaced gun seeds one Gunner seat.
     std::vector<Seat> seats;
+    uint8_t emplaced_pose_variant = 0; // model config 1..8 -> anim_emplaced_2..9 when available
     // Occupant side: this entity is RIDING mount_target's seat mount_seat. [orig: occupant+364
     // vehicle ptr / +360 seat index / +36 & 0x40 mounted flag, written by
     // Entity_AttachToVehicleSlot @0x4946d0.] mounted == false => the rest are unset.

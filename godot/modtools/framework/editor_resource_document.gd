@@ -91,6 +91,24 @@ func save_as(dir_path: String) -> Error:
 	return err
 
 
+## Save to an exact path and adopt it as the document's current path. The
+## workspace Save As flow passes a directory (save_as, filename derived);
+## scripted flows — the MCP save tools — pass exact filenames. Mirrors the
+## mission controller's save_as_path.
+func save_as_path(path: String) -> Error:
+	if path.is_empty() or path.get_extension().to_lower() != _file_extension():
+		return ERR_INVALID_PARAMETER
+	var mkdir := DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	if mkdir != OK:
+		return mkdir
+	var err := _save_to(path)
+	if err == OK:
+		remember_save_dir(path.get_base_dir())
+		set_current_path(path)
+		state_changed.emit()
+	return err
+
+
 func has_unsaved_changes() -> bool:
 	return is_dirty
 

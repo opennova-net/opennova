@@ -47,6 +47,19 @@ var _skeleton_skin: Skin
 var _anim_key := ""                 # active clip key (ADM key, e.g. "anim_walk")
 var _anim_time := 0.0               # playhead seconds into the active clip
 var _anim_playing := false
+var _anim_external_phase := false   # true when the sim, not _process(delta), owns _anim_time
+var _body_pose_dirty := true
+var _bounds_dirty := true
+
+# Per-frame work skips. Each cached value is re-derived in rebuild() (or on the exact
+# mutator), so a skip only ever omits re-pushing state that is byte-identical to what is
+# already resident on the materials -- invisible in Godot's retained-mode renderer, and so
+# parity-preserving against the original engine's output.
+var _has_lights := false
+var _material_needs_eval: Array[bool] = []          # parallel to _surface_materials
+var _dynamic_material_slots: PackedInt32Array = PackedInt32Array()
+var _last_env_gen := -1
+var _last_env_values: Dictionary = {}
 
 
 func _ready() -> void:
@@ -72,6 +85,8 @@ func get_object_data() -> NovaObjectData:
 
 func set_environment_node(value: Node) -> void:
 	_environment_node = value
+	_last_env_gen = -1
+	_last_env_values = {}
 	_apply_environment_to_materials()
 
 
@@ -106,6 +121,7 @@ func set_playing(value: bool) -> void:
 func reset_animation_time() -> void:
 	_anim_time_ms = 0
 	_anim_time = 0.0
+	_anim_external_phase = false
 	_apply_runtime_state(0.0)
 
 
@@ -119,6 +135,8 @@ func set_skeletal_anim(skeletal) -> void:
 	_anim_key = ""
 	_anim_time = 0.0
 	_anim_playing = false
+	_anim_external_phase = false
+	_body_pose_dirty = true
 	rebuild()
 
 
@@ -138,13 +156,44 @@ func has_skeleton() -> bool:
 func play_body_clip(key: String) -> void:
 	if _skeletal == null or not _skeletal.has_clip(key):
 		return
+	if key == _anim_key:
+		_anim_external_phase = false
+		_anim_playing = true
+		return
 	_anim_key = key
 	_anim_time = 0.0
 	_anim_playing = true
+	_anim_external_phase = false
+	_body_pose_dirty = true
+
+
+## Pose a main-body clip at the authoritative infantry motor playhead. IDA's
+## AnimMap phase advances in half-frame ticks, so seconds = ticks / (2 * clip_fps).
+## The model does not free-run this clip between sim snapshots.
+func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	if _skeletal == null or not _skeletal.has_clip(key):
+		return
+	var previous_key := _anim_key
+	var previous_time := _anim_time
+	var previous_external := _anim_external_phase
+	var fps: float = _skeletal.get_clip_fps(key)
+	var seconds := 0.0
+	if fps > 0.0:
+		seconds = float(maxi(phase_ticks, 0)) / (2.0 * fps)
+	var same_external := previous_external and key == previous_key and is_equal_approx(previous_time, seconds)
+	_anim_key = key
+	_set_body_playhead(seconds)
+	_anim_playing = false
+	_anim_external_phase = true
+	if same_external and not _body_pose_dirty:
+		return
+	_body_pose_dirty = true
+	_advance_body_anim(0.0)
 
 
 func stop_body_clip() -> void:
 	_anim_playing = false
+	_anim_external_phase = false
 
 
 func get_active_body_clip() -> String:
@@ -159,9 +208,21 @@ func play_body_anim(slot: int) -> void:
 	if _skeletal == null or slot < 0:
 		return
 	var key: String = _skeletal.slot_to_key(slot)
-	if key.is_empty() or key == _anim_key:
+	if key.is_empty():
+		return
+	if key == _anim_key and not _anim_external_phase:
 		return
 	play_body_clip(key)
+
+
+## Pose a main-body animation slot at the authoritative infantry motor playhead.
+func play_body_anim_at(slot: int, phase_ticks: int) -> void:
+	if _skeletal == null or slot < 0:
+		return
+	var key: String = _skeletal.slot_to_key(slot)
+	if key.is_empty():
+		return
+	play_body_clip_at(key, phase_ticks)
 
 
 func get_animation_time_ms() -> int:
@@ -177,6 +238,13 @@ func get_animation_time_ms() -> int:
 func set_animation_time(seconds: float) -> void:
 	if _skeletal == null or _anim_key.is_empty():
 		return
+	_anim_external_phase = false
+	_set_body_playhead(seconds)
+	_body_pose_dirty = true
+	_advance_body_anim(0.0)
+
+
+func _set_body_playhead(seconds: float) -> void:
 	var length: float = _skeletal.get_clip_length(_anim_key)
 	if length <= 0.0:
 		_anim_time = 0.0
@@ -184,7 +252,6 @@ func set_animation_time(seconds: float) -> void:
 		_anim_time = fposmod(seconds, length)
 	else:
 		_anim_time = clampf(seconds, 0.0, length)
-	_advance_body_anim(0.0)
 
 
 ## The active body clip's playhead in seconds, loop-wrapped (one-shots clamp),
@@ -215,17 +282,27 @@ func get_active_lod() -> int:
 func set_ctrl_value(name: String, value: int) -> void:
 	if name.is_empty():
 		return
-	_ctrl_values[name] = clampi(value, 0, 65535)
+	var next_value := clampi(value, 0, 65535)
+	if int(_ctrl_values.get(name, -1)) == next_value:
+		return
+	_ctrl_values[name] = next_value
+	_bounds_dirty = true
 	_apply_runtime_state(0.0)
 
 
 func clear_ctrl_value(name: String) -> void:
+	if not _ctrl_values.has(name):
+		return
 	_ctrl_values.erase(name)
+	_bounds_dirty = true
 	_apply_runtime_state(0.0)
 
 
 func clear_ctrl_values() -> void:
+	if _ctrl_values.is_empty():
+		return
 	_ctrl_values.clear()
+	_bounds_dirty = true
 	_apply_runtime_state(0.0)
 
 
@@ -290,8 +367,12 @@ func set_part_phase(channel: int, phase: int) -> void:
 	var register := _resolve_anim_channel_register(channel - 1)
 	if register.is_empty():
 		return
+	var next_phase := clampi(phase, 0, 65535)
+	if int(_ctrl_values.get(register, -1)) == next_phase and not _part_anims.has(register):
+		return
 	_part_anims.erase(register)  # the engine owns this channel's phase; no host integrator on it
-	_ctrl_values[register] = clampi(phase, 0, 65535)
+	_ctrl_values[register] = next_phase
+	_bounds_dirty = true
 
 
 ## Stop a single channel's part animation (freeze in place); no-op if the channel is not animating.
@@ -322,19 +403,25 @@ func _resolve_anim_channel_register(slot: int) -> String:
 # Advance each active channel's phase toward its endpoint at the authored speed, clamping at [0,65535].
 # Writes straight into _ctrl_values (NOT set_ctrl_value, which would eagerly re-evaluate per channel);
 # the enclosing _apply_runtime_state applies the result once, in the same frame, to materials + PANM.
-func _advance_part_anims(delta: float) -> void:
+func _advance_part_anims(delta: float) -> bool:
 	if _part_anims.is_empty() or delta <= 0.0:
-		return
+		return false
 	var finished: Array = []
+	var changed := false
 	for register in _part_anims.keys():
 		var anim: Dictionary = _part_anims[register]
+		var old_value := int(_ctrl_values.get(register, 0))
 		var value := clampf(float(anim["value"]) + float(anim["speed"]) * float(anim["dir"]) * delta, 0.0, 65535.0)
 		anim["value"] = value
-		_ctrl_values[register] = int(round(value))
+		var next_value := int(round(value))
+		_ctrl_values[register] = next_value
+		changed = changed or old_value != next_value
 		if (int(anim["dir"]) > 0 and value >= 65535.0) or (int(anim["dir"]) < 0 and value <= 0.0):
 			finished.append(register)  # reached the clamp endpoint; the part holds there
 	for register in finished:
 		_part_anims.erase(register)
+	_bounds_dirty = _bounds_dirty or changed
+	return changed
 
 
 # Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
@@ -343,14 +430,18 @@ func _advance_part_anims(delta: float) -> void:
 func _advance_body_anim(delta: float) -> void:
 	if _skeleton == null or _skeletal == null or _anim_key.is_empty():
 		return
-	if _is_playing and _anim_playing:
+	if _is_playing and _anim_playing and not _anim_external_phase and delta != 0.0:
 		_anim_time += delta
+		_body_pose_dirty = true
+	if not _body_pose_dirty:
+		return
 	var pose: Array = _skeletal.eval_pose(_anim_key, _anim_time)
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):
 		var t: Transform3D = pose[i]
 		_skeleton.set_bone_pose_position(i, t.origin)
 		_skeleton.set_bone_pose_rotation(i, t.basis.get_rotation_quaternion())
+	_body_pose_dirty = false
 
 
 func rebuild() -> void:
@@ -365,6 +456,13 @@ func rebuild() -> void:
 	_anim_frames_by_mat.clear()
 	_material_cache.clear()
 	_material_defs.clear()
+	_body_pose_dirty = true
+	_bounds_dirty = true
+	_has_lights = false
+	_material_needs_eval.clear()
+	_dynamic_material_slots = PackedInt32Array()
+	_last_env_gen = -1
+	_last_env_values = {}
 	if object_data == null or not object_data.has_document():
 		_set_model_bounds(AABB())
 		return
@@ -406,9 +504,10 @@ func rebuild() -> void:
 		_surface_materials.append(material)
 		_collect_anim_frames(material_index)
 
+	_classify_materials()
+	_has_lights = object_data.has_method("get_light_count") and int(object_data.get_light_count()) > 0
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
-	_set_model_bounds(_compute_transformed_mesh_bounds())
 
 
 # Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
@@ -437,6 +536,12 @@ func _build_skeleton() -> void:
 func _on_object_changed() -> void:
 	var update_mask := _last_object_update_mask()
 	if update_mask == OED_UPDATE_PANM or update_mask == OED_UPDATE_LGHT or update_mask == (OED_UPDATE_PANM | OED_UPDATE_LGHT):
+		# get_last_oed_update_mask() reports only the final mask of a deferred-flush window,
+		# so a coalesced batch could read LGHT/PANM even when a material's generator style
+		# also changed. Reclassify here (cheap, idempotent) so the dynamic-material set can
+		# never go stale relative to the current IR -- otherwise a newly-animated material
+		# would stay frozen on this no-rebuild fast path.
+		_classify_materials()
 		_apply_runtime_state(0.0)
 		return
 	rebuild()
@@ -535,14 +640,22 @@ func _apply_runtime_state(delta: float) -> void:
 		return
 	if _is_playing:
 		_anim_time_ms = (_anim_time_ms + int(delta * 1000.0)) & 0x7fffffff
-	_advance_part_anims(delta)
+	var part_changed := _advance_part_anims(delta)
 	_advance_body_anim(delta)
-	for i in range(_surface_materials.size()):
+	# Only materials whose UV/RGB/alpha generators animate (or whose texture flip-book
+	# advances) need a per-frame push; a fully-static material already carries its identity
+	# values from _create_material, so re-evaluating it each frame just re-writes identical
+	# bytes. _dynamic_material_slots holds exactly the slots that can change (built in
+	# _classify_materials); _material_needs_eval[i] distinguishes the eval path from the
+	# texture-flip-book-only path.
+	var has_eval := object_data.has_method("eval_material_runtime")
+	var has_frame := object_data.has_method("compute_anim_frame")
+	for i in _dynamic_material_slots:
 		var material := _surface_materials[i]
 		if material == null:
 			continue
 		var material_index := int(_surface_material_indices[i])
-		if object_data.has_method("eval_material_runtime"):
+		if _material_needs_eval[i] and has_eval:
 			var runtime: Dictionary = object_data.eval_material_runtime(material_index, _anim_time_ms, _ctrl_values)
 			if not runtime.is_empty():
 				material.set_shader_parameter("u_uv_offset", runtime.get("uv_offset", Vector2.ZERO))
@@ -552,28 +665,41 @@ func _apply_runtime_state(delta: float) -> void:
 				material.set_shader_parameter("u_rgb_mod", rgb)
 				material.set_shader_parameter("u_alpha_mod", runtime.get("alpha_mod", 1.0))
 		var frames: Array = _anim_frames_by_mat.get(material_index, [])
-		if frames.size() > 1 and object_data.has_method("compute_anim_frame"):
+		if frames.size() > 1 and has_frame:
 			var frame_index := int(object_data.compute_anim_frame(material_index, _anim_time_ms, _ctrl_values))
 			if frame_index >= 0 and frame_index < frames.size() and frames[frame_index] is Texture2D:
 				material.set_shader_parameter("u_diffuse", frames[frame_index])
-	_apply_robj_transforms()
+	var robj_changed := _apply_robj_transforms()
 	_apply_lights()
 	_apply_environment_to_materials()
-	_set_model_bounds(_compute_transformed_mesh_bounds())
+	if _bounds_dirty or part_changed or robj_changed:
+		_set_model_bounds(_compute_transformed_mesh_bounds())
+		_bounds_dirty = false
 
 
-func _apply_robj_transforms() -> void:
+func _apply_robj_transforms() -> bool:
 	if object_data == null or not object_data.has_method("evaluate_panm") or _robj_nodes.is_empty():
-		return
+		return false
 	var transforms: Dictionary = object_data.evaluate_panm(_active_lod, _anim_time_ms, _ctrl_values)
+	var changed := false
 	for key in transforms.keys():
 		var robj_index := int(key)
 		if _robj_nodes.has(robj_index):
 			var node := _robj_nodes[robj_index] as Node3D
-			node.transform = transforms[key]
+			var next_transform: Transform3D = transforms[key]
+			if node.transform != next_transform:
+				node.transform = next_transform
+				changed = true
+	return changed
 
 
 func _apply_lights() -> void:
+	# A model with no .3di lights keeps the count-0 light defaults written at material
+	# creation (_create_material); evaluate_lights would return empty and this loop would
+	# only re-write those same defaults every frame. _has_lights is recomputed in rebuild(),
+	# the only path that can change the (immutable, IR-backed) light count.
+	if not _has_lights:
+		return
 	if object_data == null or not object_data.has_method("evaluate_lights"):
 		return
 	var lights: Array = object_data.evaluate_lights(_anim_time_ms, _ctrl_values)
@@ -740,8 +866,69 @@ func _apply_default_environment_to_material(material: ShaderMaterial) -> void:
 	material.set_shader_parameter("u_fog_type", DEFAULT_FOG_TYPE)
 
 
+# A surface material needs per-frame UV/RGB/alpha evaluation only if one of its generators
+# animates. The native get_material_runtime_kind (faithful style taxonomy, single-sourced in
+# libs/renderer) is preferred when present; until it is built, the conservative fallback
+# treats any non-zero generator style as dynamic -- it can only over-evaluate, never freeze
+# an animation (a fully-static material's eval is the identity that _create_material already set).
+func _material_runtime_is_dynamic(material_index: int) -> bool:
+	if object_data == null:
+		return true
+	if object_data.has_method("get_material_runtime_kind"):
+		return int(object_data.get_material_runtime_kind(material_index)) != 0  # 0 == STATIC
+	if not object_data.has_method("get_material_info"):
+		return true
+	var info: Dictionary = object_data.get_material_info(material_index)
+	if info.is_empty():
+		return true
+	return int(info.get("uv_u_style", 0)) != 0 \
+		or int(info.get("uv_v_style", 0)) != 0 \
+		or int(info.get("rgb_gen_style", 0)) != 0 \
+		or int(info.get("alpha_gen_style", 0)) != 0
+
+
+# Partition the surface materials into those that change at runtime (UV/RGB/alpha generators
+# or a multi-frame texture animation) and the static remainder. Only the dynamic slots are
+# visited per frame; static slots keep the identity values written at material creation.
+func _classify_materials() -> void:
+	_material_needs_eval.clear()
+	_dynamic_material_slots = PackedInt32Array()
+	var kind_cache: Dictionary = {}
+	for i in range(_surface_materials.size()):
+		var material_index := int(_surface_material_indices[i])
+		var needs_eval: bool
+		if kind_cache.has(material_index):
+			needs_eval = bool(kind_cache[material_index])
+		else:
+			needs_eval = _material_runtime_is_dynamic(material_index)
+			kind_cache[material_index] = needs_eval
+		_material_needs_eval.append(needs_eval)
+		var frames: Array = _anim_frames_by_mat.get(material_index, [])
+		if needs_eval or frames.size() > 1:
+			_dynamic_material_slots.append(i)
+
+
 func _apply_environment_to_materials() -> void:
+	# The environment is shared and changes slowly (time-of-day) or not at all. NovaWeather
+	# re-stamps it every frame, but the smoothed colours quantise to identical bytes once
+	# settled, so the 9 values these materials consume are byte-stable in steady state. Skip
+	# the 9 cross-language reads + 9-uniform-per-material push when nothing changed since the
+	# last push: a NovaEnvironment generation makes the steady-state check a single int
+	# compare; the value cache is the fallback for env nodes without one. Either way the skip
+	# only ever omits re-pushing identical uniforms (retained mode -> invisible), so the
+	# rendered lighting/fog is byte-identical to pushing every frame.
+	var gen := -1
+	var has_gen: bool = _environment_node != null and _environment_node.has_method("get_env_generation")
+	if has_gen:
+		gen = int(_environment_node.get_env_generation())
+		if gen == _last_env_gen and not _last_env_values.is_empty():
+			return
 	var values := _environment_values()
+	if _env_values_equal(values, _last_env_values):
+		_last_env_gen = gen
+		return
+	_last_env_values = values
+	_last_env_gen = gen
 	for material in _surface_materials:
 		if material == null:
 			continue
@@ -794,3 +981,21 @@ func _set_model_bounds(bounds: AABB) -> void:
 
 func _aabb_equal_approx(a: AABB, b: AABB) -> bool:
 	return a.position.is_equal_approx(b.position) and a.size.is_equal_approx(b.size)
+
+
+# True when two _environment_values() dicts carry the same lighting/fog the shaders consume.
+# Colours are compared with is_equal_approx (the weather smoother quantises to 8-bit, so real
+# changes are >= 1/255, far above epsilon); an empty cache (first push after rebuild) is never
+# equal, forcing the initial push.
+func _env_values_equal(a: Dictionary, b: Dictionary) -> bool:
+	if a.is_empty() or b.is_empty():
+		return false
+	return (a.get("ambient", Vector3.ZERO) as Vector3).is_equal_approx(b.get("ambient", Vector3.ONE)) \
+		and (a.get("dir", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir", Vector3.ONE)) \
+		and (a.get("dir_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir_color", Vector3.ONE)) \
+		and (a.get("fill", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fill", Vector3.ONE)) \
+		and bool(a.get("fog_enabled", false)) == bool(b.get("fog_enabled", true)) \
+		and (a.get("fog_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fog_color", Vector3.ONE)) \
+		and is_equal_approx(float(a.get("fog_start", 0.0)), float(b.get("fog_start", -1.0))) \
+		and is_equal_approx(float(a.get("fog_end", 0.0)), float(b.get("fog_end", -1.0))) \
+		and int(a.get("fog_type", 0)) == int(b.get("fog_type", -1))

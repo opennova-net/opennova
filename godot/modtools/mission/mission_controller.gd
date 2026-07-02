@@ -7,7 +7,7 @@ extends RefCounted
 # terrain + environment from the shared resource root, load them through the
 # terrain editor (read-only viewport), then run the host-agnostic
 # MissionObjectPlacer under the terrain editor's world root. The resolve + place
-# logic is the same piece the runtime uses (NovaWorld.load_mission); this is the
+# logic is the same piece the runtime uses (GameWorld.load_mission); this is the
 # thin editor binding around it.
 #
 # Read-only for now: mission authoring (place / move / save entities) is deferred,
@@ -26,6 +26,7 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const MissionWaypointOverlay := preload("res://engine/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://engine/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://engine/mission/mission_marker_overlay.gd")
+const ObjectUserPointOverlayScript := preload("res://engine/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
@@ -159,6 +160,7 @@ var _selected_ref: Dictionary = {}
 # node, plus its tracked container-local transform and authored rotation (degrees).
 var _selected_records: Array = []
 var _selected_node: Node3D
+var _selected_graphic := ""
 # For an animated selection, the model's ground-anchor offset (Transform3D applied
 # as node.transform = entity_xform * offset). Static entities bake the same offset
 # into each MultiMesh instance via the pickable record, so it only needs tracking
@@ -166,6 +168,8 @@ var _selected_node: Node3D
 var _selected_node_offset: Transform3D = Transform3D.IDENTITY
 var _selected_xform: Transform3D = Transform3D.IDENTITY
 var _selected_rotation_deg: Vector3 = Vector3.ZERO
+var _selected_user_point_overlay: ObjectUserPointOverlay
+var _selected_user_points_visible := false
 # In-editor PLAYPARTANIM preview: the model node currently being previewed (or null), plus a registry
 # (cached, rebuilt when the entity set changes via _membership_rev) to resolve a scripting action's
 # target SSN/group/zone to its live model -- the same MissionEntityRegistry the runtime host uses.
@@ -352,6 +356,23 @@ func get_selected_display_name() -> String:
 	return entity_display_name(int(_selected_ref["kind"]), int(_selected_ref["index"]))
 
 
+# The items.def graphic basename for the current selection, or "" when nothing is
+# selected / no item database is loaded / the item has no declared graphic.
+func get_selected_graphic_name() -> String:
+	if _selected_ref.is_empty():
+		return ""
+	var entity := _find_entity(int(_selected_ref["kind"]), int(_selected_ref["index"]))
+	if entity.is_empty():
+		return ""
+	var db := _item_db()
+	if db == null:
+		return ""
+	var item_id := int(entity.get("item_id", 0))
+	if not db.has_item(item_id):
+		return ""
+	return db.get_graphic(item_id).strip_edges()
+
+
 # { kind, index, position (mission-space Vector3), animated } for the selected
 # entity, or empty when nothing is selected. Drives the inspector's selection line.
 func get_selection_summary() -> Dictionary:
@@ -363,6 +384,33 @@ func get_selection_summary() -> Dictionary:
 		"position": MissionObjectPlacer.godot_to_bms_position(_selected_xform.origin),
 		"animated": _selected_node != null,
 	}
+
+
+func selected_has_user_points() -> bool:
+	var data := _selected_object_data()
+	return data != null \
+		and data.has_method("get_user_point_count") \
+		and data.get_user_point_count() > 0
+
+
+func is_selected_user_points_visible() -> bool:
+	return _selected_user_points_visible and selected_has_user_points()
+
+
+func set_selected_user_points_visible(value: bool) -> void:
+	_selected_user_points_visible = value and selected_has_user_points() and not is_simulating()
+	_refresh_selected_user_points_overlay()
+	_notify_changed()
+
+
+func _selected_object_data() -> NovaObjectData:
+	if _selected_ref.is_empty() or _selected_graphic.is_empty() or _placer == null:
+		return null
+	if int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		return null
+	if not _placer.has_method("object_data_for"):
+		return null
+	return _placer.object_data_for(_selected_graphic)
 
 
 # Select an object from the inspector's "Placed objects" browser by kind + array index,
@@ -462,7 +510,7 @@ func open_mission(bms_path: String) -> Error:
 
 	# Loading the referenced terrain is an atomic dependency of opening the mission,
 	# not a separate user action, so it goes straight to open_trn rather than the
-	# terrain editor's dirty-guarded request_open_trn. When the resolved .trn is
+	# terrain workspace's dirty-guarded open_file. When the resolved .trn is
 	# already the mounted terrain and it carries no unsaved edits, the remount is
 	# skipped — the dominant browse-missions-on-one-map flow pays the terrain build
 	# once. A dirty terrain always reloads (predictable authoring semantics).
@@ -766,6 +814,35 @@ func reground_drifted() -> int:
 	return moved
 
 
+## Snap EVERY entity onto the current surface as one undo step — the bulk-repair
+## seam (MCP reground_mission). Unlike reground_drifted there is NO baseline
+## filter: rows whose terrain never moved are re-grounded too, which is exactly
+## the mis-grounded-mission repair the drift path is designed to skip (its
+## filter protects deliberate off-surface authoring; this seam plants those
+## too, so callers must warn). Returns { checked, moved }.
+func reground_all() -> Dictionary:
+	if _mission == null or _reject_edit_while_simulating():
+		return { "checked": 0, "moved": 0 }
+	var requests := _reground_requests_cached()
+	_flush_edit()
+	_mission.begin_edit()
+	var result: Dictionary = _mission.reground_entities_apply(requests, REGROUND_EPSILON)
+	var moved := int(result.get("moved", 0))
+	_mission.commit_edit() # pushes one step only if something actually moved
+	# Same pure-z reasoning as reground_drifted: the cached rows stay byte-valid
+	# for the post-apply document, so re-key the token before re-recording.
+	_reground_cache_token = _reground_token()
+	_record_ground_state()
+	if moved > 0:
+		if not _apply_reground_world_update(requests,
+				result.get("rows", PackedInt32Array()),
+				result.get("positions", PackedVector3Array())):
+			_rebake_objects()
+		mark_dirty()
+	_report("Re-grounded %d of %d entities." % [moved, requests.size()])
+	return { "checked": requests.size(), "moved": moved }
+
+
 # Post-apply world sync for a bulk re-ground: rewrite only the moved entities'
 # MultiMesh slots / animated nodes / pick bodies in place — the same absolute
 # writes _apply_selected_xform does for the selection — instead of re-baking
@@ -1006,6 +1083,29 @@ func save_as_file(path: String) -> Error:
 		_notify_changed()
 	else:
 		_last_status = "Could not save %s: %s" % [filename, _mission.get_last_error()]
+	return err as Error
+
+
+## Save to an explicit .bms file path (the MCP save seam). Mirrors save_as(),
+## which takes a directory and composes the filename from the current path;
+## this takes the full destination and adopts it as the current path.
+func save_as_path(path: String) -> Error:
+	if _mission == null:
+		return ERR_UNAVAILABLE
+	if path.is_empty() or path.get_extension().to_lower() != "bms":
+		return ERR_INVALID_PARAMETER
+	var mkdir := DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	if mkdir != OK:
+		return mkdir
+	var err := int(_mission.save_as(path))
+	if err == OK:
+		_current_path = path
+		_last_open_dir = path.get_base_dir()
+		_mission.mark_clean()
+		_last_status = "Saved %s." % path.get_file()
+		_notify_changed()
+	else:
+		_last_status = "Could not save %s: %s" % [path.get_file(), _mission.get_last_error()]
 	return err as Error
 
 
@@ -1672,9 +1772,11 @@ func _select(kind: int, index: int) -> void:
 	# does), otherwise SpinBox edits to two different objects fold into a single undo step.
 	_flush_edit()
 	stop_preview()
+	_clear_selected_user_points()
 	_selected_ref = { "kind": kind, "index": index }
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	var graphic := ""
 	for rec in _pickable:
@@ -1698,6 +1800,7 @@ func _select(kind: int, index: int) -> void:
 	_selected_collider = _selected_pick_collider()
 	_selected_ground_offset = Vector3.ZERO
 	if _placer != null and not graphic.is_empty():
+		_selected_graphic = graphic
 		_selected_ground_offset = _placer.ground_anchor_godot(graphic)
 	var entity := _find_entity(kind, index)
 	_selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
@@ -1716,11 +1819,13 @@ func _select(kind: int, index: int) -> void:
 
 func _deselect() -> void:
 	stop_preview()
+	_clear_selected_user_points()
 	if _selected_ref.is_empty():
 		return
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_collider = null
 	_selected_ground_offset = Vector3.ZERO
@@ -1730,6 +1835,44 @@ func _deselect() -> void:
 	if _marker_overlay != null and is_instance_valid(_marker_overlay):
 		_marker_overlay.set_selected_marker(-1)
 	_notify_changed()
+
+
+func _refresh_selected_user_points_overlay() -> void:
+	if not _selected_user_points_visible or not selected_has_user_points():
+		_free_selected_user_points_overlay()
+		return
+	var container := _objects_container()
+	if container == null:
+		_free_selected_user_points_overlay()
+		return
+	var data := _selected_object_data()
+	if data == null:
+		_free_selected_user_points_overlay()
+		return
+	if _selected_user_point_overlay == null or not is_instance_valid(_selected_user_point_overlay):
+		_selected_user_point_overlay = ObjectUserPointOverlayScript.new()
+		_selected_user_point_overlay.name = "MissionSelectedUserPoints"
+		container.add_child(_selected_user_point_overlay)
+	_selected_user_point_overlay.set_object_data(data)
+	if _selected_node != null and is_instance_valid(_selected_node):
+		_selected_user_point_overlay.set_source_model(_selected_node)
+		_selected_user_point_overlay.set_entity_transform(Transform3D.IDENTITY)
+	else:
+		_selected_user_point_overlay.set_source_model(null)
+		_selected_user_point_overlay.set_entity_transform(_selected_xform)
+	_selected_user_point_overlay.refresh_points()
+	_selected_user_point_overlay.set_points_visible(true)
+
+
+func _clear_selected_user_points() -> void:
+	_selected_user_points_visible = false
+	_free_selected_user_points_overlay()
+
+
+func _free_selected_user_points_overlay() -> void:
+	if _selected_user_point_overlay != null and is_instance_valid(_selected_user_point_overlay):
+		_selected_user_point_overlay.queue_free()
+	_selected_user_point_overlay = null
 
 
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
@@ -1831,6 +1974,7 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 func _apply_selected_xform(xform: Transform3D) -> void:
 	_selected_xform = xform
 	if not _selected_ref.is_empty() and int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		_clear_selected_user_points()
 		# A marker is mesh-less: preview its gizmo (container-local origin) via the overlay. No mesh
 		# records / node to move, and the selection box stays hidden.
 		if _marker_overlay != null and is_instance_valid(_marker_overlay):
@@ -1849,6 +1993,7 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 	# position, not applied here). No-op for a marker (no body).
 	if _selected_collider != null and is_instance_valid(_selected_collider):
 		_selected_collider.transform = _selected_xform
+	_refresh_selected_user_points_overlay()
 	_update_selection_box()
 	# Keep the transform gizmo on the selection. During a gizmo drag, only reposition (keep the
 	# captured drag plane + ring orientation frozen); otherwise re-orient the rings to the new
@@ -1872,6 +2017,24 @@ func _commit_selected_transform() -> void:
 		if int(_selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
 			_refresh_marker_overlay()
 		mark_dirty()
+
+
+## Programmatic grounded move (the MCP edit seam): drop the SELECTED entity so
+## its ground point sits at a world-space terrain hit — the viewport drag's
+## anchor bake (origin = hit − rotated ground anchor; hit stored directly for
+## markers) — as one closed undo step. Returns false with no selection, no
+## mission, or while simulating.
+func move_selected_to_world_grounded(global_hit: Vector3) -> bool:
+	if _selected_ref.is_empty() or _mission == null:
+		return false
+	if _reject_edit_while_simulating():
+		return false
+	_flush_edit()
+	begin_edit()
+	_move_selected_to_world(global_hit)
+	_commit_selected_transform()
+	commit_edit()
+	return true
 
 
 # --- Authoring (Phase 2): numeric / property edits from the inspector ---------
@@ -2314,11 +2477,13 @@ func set_mode(mode: int) -> void:
 	_mode = mode
 	# A mode switch is a fresh context: stop any running part-animation preview.
 	stop_preview()
+	_clear_selected_user_points()
 	# Exclusive selection: clear the object selection refs + its box, the marker selection,
 	# the zone selection, and any armed placement tool.
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_collider = null
 	_selected_ground_offset = Vector3.ZERO
@@ -3599,9 +3764,11 @@ func _clear_hover() -> void:
 # the dangling ref.
 func _reset_selection_state() -> void:
 	stop_preview()
+	_clear_selected_user_points()
 	_selected_ref = {}
 	_selected_records = []
 	_selected_node = null
+	_selected_graphic = ""
 	_selected_node_offset = Transform3D.IDENTITY
 	_selected_xform = Transform3D.IDENTITY
 	_selected_rotation_deg = Vector3.ZERO
@@ -3659,6 +3826,16 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 		if env_path.is_empty():
 			note = "environment %s was not found" % env_ref
 		elif env_editor.has_method("open_env") and int(env_editor.open_env(env_path)) == OK:
+			# Game parity: the runtime layers the mission's attrib-gated fog/water
+			# overrides on top of the .env (get_environment_overrides builds exactly
+			# the apply_mission_overrides payload). Apply them to the preview too,
+			# then re-fan-out — open_env already emitted with the bare .env values.
+			var env_file: Variant = env_editor.get("env_file")
+			var overrides: Dictionary = mission.get_environment_overrides()
+			if env_file != null and not overrides.is_empty() and env_file.has_method("apply_mission_overrides"):
+				env_file.apply_mission_overrides(overrides)
+				if env_editor.has_method("_emit_all_changed"):
+					env_editor._emit_all_changed()
 			return ""  # loaded the mission's own environment; nothing to reset or note
 		else:
 			note = "environment %s could not be loaded" % env_ref
@@ -3668,6 +3845,20 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 	if env_editor.has_method("create_default_environment"):
 		env_editor.create_default_environment(false)
 	return note
+
+
+## Re-apply the open mission's environment (ref + fog/water overrides) to the
+## editor preview — the seam the MCP set_mission_header tool calls after the
+## `environment` header changes, since open/new are otherwise the only times
+## the preview tracks the mission. Returns the load note ("" on success).
+func reload_environment() -> String:
+	if _mission == null:
+		return "no mission open"
+	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root() \
+			if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
+	if resource_root == null:
+		return "no resource root mounted"
+	return _load_environment(_mission, resource_root)
 
 
 func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, timeline: PerfTimeline = null) -> void:
@@ -3759,11 +3950,12 @@ func _ensure_sim_driver() -> bool:
 	cancel_drag()
 	disarm_placement()
 	_clear_hover()
+	_clear_selected_user_points()
 	_sim_driver = MissionRuntime.new()
 	_sim_driver.name = "MissionRuntime"
 	container.add_child(_sim_driver)
 	# TICK_DIVIDED + self_tick + the sim's default loco_scale: the exact options the game's
-	# NovaWorld path runs, so the preview IS the game's pacing. The old EVERY_PROCESS +
+	# GameWorld path runs, so the preview IS the game's pacing. The old EVERY_PROCESS +
 	# loco_scale 4096 combo (32768/8, a slowed compensation for uncapped editor fps) was an
 	# editor-only divergence. The driver builds its present index over `container`. Pass the
 	# editor's loaded terrain so the preview grounds AI exactly like the game runtime, and the
@@ -3774,8 +3966,10 @@ func _ensure_sim_driver() -> bool:
 	if int(_sim_driver.setup(_mission, container, {
 			"tick_mode": NovaSimulation.TICK_DIVIDED,
 			"self_tick": true,
+			"playable": false,
 			"terrain": terrain_data,
 			"resource_root": sim_root,
+			"item_db": _item_db(),
 		})) <= 0:
 		sim_stop()
 		_report("No AI entities to simulate in this mission.", false)

@@ -177,7 +177,7 @@ func test_spinlist_structure_and_values() -> void:
 	assert_true(spin is Control, "NovaMnuSpinList is a Control")
 	assert_eq(spin.get_value_count(), 3, "three values seeded from ITEMS")
 	assert_eq(spin.get_value(), "OPTION_LOW", "starts on first value")
-	assert_not_null(spin.find_child("Value", true, false), "has a Value label")
+	assert_not_null(spin.find_child("Value", true, false), "has a Value cell host")
 	var up := spin.find_child("SpinUp", true, false)
 	var down := spin.find_child("SpinDown", true, false)
 	assert_true(up is NovaMnuButton, "SpinUp built from SPINUP art")
@@ -199,8 +199,67 @@ func test_spinlist_cycle_wraps_and_emits() -> void:
 	spin.set_value_index(2)
 	spin.cycle(1)
 	assert_eq(spin.get_value_index(), 0, "wraps past the end to the start")
-	var label := spin.find_child("Value", true, false) as Label
-	assert_eq(label.text, "OPTION_LOW", "Value label tracks the current value")
+	# Text items render in the cell's CellLabel (image/color items use CellImage/CellSwatch).
+	var label := spin.find_child("CellLabel", true, false) as Label
+	assert_eq(label.text, "OPTION_LOW", "Value cell label tracks the current value")
+
+
+func test_spinlist_color_items_render_swatches() -> void:
+	# type="color" items draw as a full-rect color swatch; the color is the element-text
+	# hex (RRGGBB), forced opaque [orig: CSpinListWnd_Render @ 0x64b220].
+	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
+		"<WINDOW type=\"spinlist\" name=\"COLOR\">" + \
+		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>60</RIGHT><BOTTOM>30</BOTTOM></POSITION>" + \
+		"<ITEMS><ITEM type=\"color\" value=\"16711680\">FF0000</ITEM>" + \
+		"<ITEM type=\"color\" value=\"65280\">00FF00</ITEM></ITEMS>" + \
+		"</WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic color spinlist parses")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var spin := menu.find_child("COLOR", true, false)
+	assert_true(spin is NovaMnuSpinList, "color spinlist builds")
+	var swatch := spin.find_child("CellSwatch", true, false) as ColorRect
+	assert_not_null(swatch, "color item renders a CellSwatch")
+	if swatch == null:
+		return
+	assert_true(swatch.visible, "swatch shown for a color item")
+	assert_eq(swatch.color, Color(1, 0, 0, 1), "first color is opaque red (FF0000)")
+	var cell_label := spin.find_child("CellLabel", true, false) as Label
+	assert_false(cell_label.visible, "the text label is hidden for a color item")
+	spin.cycle(1)
+	assert_eq(swatch.color, Color(0, 1, 0, 1), "swatch follows the selection (00FF00)")
+
+
+func test_spinlist_get_value_attr_returns_value_not_label() -> void:
+	# A host reads the item's `value=` attribute (the semantic value the original reads with wcstoul
+	# [orig: CUISpinList_ParseXMLDefinition @0x64bd10]) to map a selection to behavior — e.g. the host
+	# screen's SERVERTYPE spinlist: HG_SERVEPLAY=0 (serve-and-play) vs HG_SERVEONLY=1 (dedicated). This
+	# is distinct from get_value()'s localized DISPLAY text. (MpMenuHost._is_dedicated reads the attr.)
+	var mnu_text := "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
+		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" + \
+		"<WINDOW type=\"spinlist\" name=\"SERVERTYPE\">" + \
+		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>60</RIGHT><BOTTOM>30</BOTTOM></POSITION>" + \
+		"<ITEMS><ITEM type=\"id\" value=\"0\">HG_SERVEPLAY</ITEM>" + \
+		"<ITEM type=\"id\" value=\"1\">HG_SERVEONLY</ITEM></ITEMS>" + \
+		"</WINDOW></WINDOW></SCREEN>"
+	var doc := NovaMnuDocument.new()
+	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic SERVERTYPE spinlist parses")
+	var menu := NovaMnuMenu.new()
+	menu.build_on_ready = false
+	add_child_autofree(menu)
+	menu.menu = doc
+	var spin := menu.find_child("SERVERTYPE", true, false)
+	assert_true(spin is NovaMnuSpinList, "spinlist builds")
+	# get_value() is the display text; get_value_attr() is the `value=` attribute.
+	assert_eq(spin.get_value(), "HG_SERVEPLAY", "get_value() starts on the first item's display text")
+	assert_eq(spin.get_value_attr(), "0", "get_value_attr() returns the first item's value (serve-and-play)")
+	spin.cycle(1)
+	assert_eq(spin.get_value(), "HG_SERVEONLY", "get_value() advances to the second item's text")
+	assert_eq(spin.get_value_attr(), "1", "get_value_attr() follows the selection (dedicated)")
 
 
 func test_spinlist_button_press_cycles_at_runtime() -> void:

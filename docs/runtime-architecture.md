@@ -6,38 +6,48 @@ the ADRs under `docs/adr/` (specific decisions).
 
 ## The original main loop (target shape)
 
-The original engine runs, per frame, roughly:
+The master loop is a **fixed-timestep accumulator** (`Game_MainLoop @0x52b630`): it banks
+real elapsed time and dispatches the simulation update at a constant **62.5 Hz (16 ms)**,
+**decoupled** from rendering, which runs once per outer iteration at the variable frame rate:
 
 ```
-input  ->  net  ->  Game_ProcessMainFrame (62 Hz engine tick)   ->  client entity render  ->  audio
-                    (per-system dividers: WAC / BMS events / AI)    (draw each entity)
+Game_MainLoop @0x52b630  (per outer iteration; render rate)
+  bank real elapsed time (16 ms quantum)
+  while banked >= one quantum:                          fixed-timestep catch-up (0, 1, or N)
+      Game_ProcessMainFrame (one 62.5 Hz engine tick)   input -> net -> per-system dividers (WAC/BMS/AI)
+  Render_ProcessMainSceneFrame (once)                   draw each entity, then audio
 ```
 
-The engine tick is `Game_ProcessMainFrame @0x5263f0` (62 Hz; `current_tick @0x24c1968`).
-Dividers are **per system**, inside each system: the WAC VM (`sub_4F81A0 @0x4f81a0`)
-executes once per **62 ticks** (the `0x3E` divider), normal BMS events run a 16-tick gate
-over a quarter cursor, and the AI/entity motor runs every tick — witnessed in
-[bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6. The client then renders
-the entity pool, then audio mixes. OpenNova mirrors this shape.
+A long frame runs **multiple** sim ticks; a short frame runs **zero**; the accumulator is
+clamped at ~500 ms / ~31 ticks against the spiral of death, and there is **no inter-tick
+render interpolation** (render reads current entity state). The engine tick itself is
+`Game_ProcessMainFrame @0x5263f0` (`current_tick @0x24c1968`). Dividers are **per system**,
+inside each system: the WAC VM (`sub_4F81A0 @0x4f81a0`) executes once per **62 ticks** (the
+`0x3E` divider), normal BMS events run a 16-tick gate over a quarter cursor, and the
+AI/entity motor runs every tick — witnessed in
+[bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6. OpenNova mirrors this shape.
 
 ## How OpenNova maps onto it
 
 ```
-main_game.gd / editor _process
-  -> NovaWorld.tick(camera)                         host frame (game)
+main_game.gd / editor _process(delta)
+  -> GameWorld.tick(camera, delta)                  host frame (game)
        foliage dispatch                             client render pass
-       MissionRuntime.tick()                        == the server tick + entity render:
-         NovaSimulation.advance_frame()               engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
-           World.run_logic_tick()                      WAC -> BMS -> AI over one world
-         MissionPresentPass.present()                  draw each entity (transform/PANM/visibility)
-         drain effects -> effects_drained             host-presentation side effects
+       MissionRuntime.tick_realtime(delta)          == the fixed-timestep server tick + entity render:
+         bank delta; for each banked 16 ms quantum:   [Game_MainLoop @0x52b630 accumulator, 62.5 Hz]
+           NovaSimulation.advance_frame()               one engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
+             World.run_logic_tick()                       WAC -> BMS -> AI over one world
+           drain effects -> effects_drained             host-presentation side effects (per tick)
+         MissionPresentPass.present()                  draw each entity once after the batch (transform/PANM/visibility)
        NovaMissionAudio.tick(camera)                 audio render pass
 ```
 
-The editor "Play the mission" goes through the **same** `MissionRuntime` + `MissionPresentPass`,
-just in `EVERY_PROCESS` cadence (one tick per frame) and self-ticking via `_process`. There is
+The editor "Play the mission" goes through the **same** `MissionRuntime` + `MissionPresentPass`
+and the same `tick_realtime` accumulator (the editor preview self-ticks via `_process`). There is
 one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unified-mission-runtime-present-pass.md).
-`NovaWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one
+The single-tick `MissionRuntime.tick()` survives as the deterministic primitive for editor Step,
+the MCP, and tests.
+`GameWorld` (game) and `MissionController` (editor) are **sibling hosts** of that one runtime: exactly one
 `NovaSimulation` per host context is intentional, not duplication.
 
 ## Layers
@@ -53,7 +63,9 @@ one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unif
   (`get_present_snapshot()` → a flat `PackedFloat32Array`, `PF_*` field layout) so the per-tick
   present loop makes one call, not ~10 Variant-boxed scalar getters per entity.
 - **Runtime driver (GDScript)** — `mission_runtime.gd` owns `{sim, present pass, index}` and
-  single-sources the per-tick order (advance → present → drain). Both `nova_world.gd` (game) and
+  single-sources the per-tick order (advance → drain → present). `tick_realtime(delta)` is the
+  fixed-timestep accumulator (banks `delta`, runs 0..N 62.5 Hz ticks, presents once); `tick()` is
+  the deterministic single-tick primitive (Step / MCP / tests). Both `game_world.gd` (game) and
   `mission_controller.gd` (editor) drive it.
 - **Present pass (GDScript)** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
@@ -88,9 +100,12 @@ one runtime, one present pass, one entity index — see [ADR 0006](adr/0006-unif
   `off_8135F0` slot table, two-channel upper/lower-body blend, aim/lean overlays, fixed-tick playhead.
 - Present transform is **yaw-only**; pitch/roll are reserved fields in the snapshot (`PF_PITCH_DEG`/
   `PF_ROLL_DEG`, emitted as 0) gated behind a basis-parity check.
-- No inter-tick interpolation (entities step once per engine tick); the game host currently runs
-  one tick per host frame — the fixed-62 Hz accumulator is a tracked seam
-  ([bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §2, slice D).
+- The fixed-62.5 Hz accumulator is **implemented** (`MissionRuntime.tick_realtime`): the sim runs
+  at a constant rate decoupled from the render frame rate, faithful to `Game_MainLoop @0x52b630`
+  ([bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6 / §2a). There is no inter-tick
+  render interpolation — entities step at 62.5 Hz and the present pass writes current state once per
+  host frame; this matches the original (which also does not interpolate), so it is a faithful
+  property, not a gap.
 - Audio: reverb preset table (`Audio_LoadReverbDefs @0x766d80`) and MUS music
   (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays host-side (it is bound
   to `NovaDbfData`).

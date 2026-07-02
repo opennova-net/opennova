@@ -13,12 +13,14 @@
 namespace godot {
 
 void InfantryRootMotion::clear() {
-	tracks_.clear();
-	adm_name_ = String();
+	sets_.clear();
+	by_name_.clear();
 }
 
-int InfantryRootMotion::load(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name) {
-	clear();
+int InfantryRootMotion::parse_adm(const Ref<NovaResourceRoot> &p_resource_root,
+                                  const String &p_adm_name, ClipSet &out) {
+	out.tracks.clear();
+	out.adm_name = String();
 	if (p_resource_root.is_null()) {
 		return 0;
 	}
@@ -31,7 +33,7 @@ int InfantryRootMotion::load(const Ref<NovaResourceRoot> &p_resource_root, const
 	                     static_cast<size_t>(adm_bytes.size()), &adm) != 0) {
 		return 0;
 	}
-	adm_name_ = p_adm_name;
+	out.adm_name = p_adm_name;
 
 	// .bad basename resolution, as in NovaSkeletalAnim::load_from_resource_root.
 	auto resolve_bad = [](const String &value) -> String {
@@ -43,7 +45,7 @@ int InfantryRootMotion::load(const Ref<NovaResourceRoot> &p_resource_root, const
 	};
 
 	// Several states usually share one clip (walk_* dirs, idles): cache parsed tracks by
-	// resolved .bad name so each file is read + parsed once.
+	// resolved .bad name so each file is read + parsed once per .adm.
 	std::unordered_map<std::string, Track> by_file;
 	auto track_for = [&](const String &value) -> const Track * {
 		const String bad_name = resolve_bad(value);
@@ -65,11 +67,13 @@ int InfantryRootMotion::load(const Ref<NovaResourceRoot> &p_resource_root, const
 				t.fwd.resize(n);
 				t.lat.resize(n);
 				t.bottom.resize(n);
+				t.top.resize(n);
 				t.trigger.resize(n);
 				for (size_t i = 0; i < n; ++i) {
 					t.fwd[i] = bf.events[i].velocity[2];
 					t.lat[i] = bf.events[i].velocity[0];
 					t.bottom[i] = bf.events[i].bottom;
+					t.top[i] = bf.events[i].top;
 					t.trigger[i] = static_cast<uint32_t>(bf.events[i].trigger);
 				}
 			}
@@ -100,20 +104,45 @@ int InfantryRootMotion::load(const Ref<NovaResourceRoot> &p_resource_root, const
 			continue;
 		}
 		if (const Track *t = track_for(it->second)) {
-			tracks_.emplace(state, *t);
+			out.tracks.emplace(state, *t);
 		}
 	}
-	return clip_count();
+	return static_cast<int>(out.tracks.size());
 }
 
-bool InfantryRootMotion::has_clip(int state_id) const {
-	return tracks_.find(state_id) != tracks_.end();
+int InfantryRootMotion::register_adm(const Ref<NovaResourceRoot> &p_resource_root,
+                                     const String &p_adm_name) {
+	const std::string key{p_adm_name.to_lower().utf8().get_data()};
+	auto cached = by_name_.find(key);
+	if (cached != by_name_.end()) {
+		return cached->second;
+	}
+	ClipSet set;
+	if (parse_adm(p_resource_root, p_adm_name, set) <= 0) {
+		return -1; // no usable clips: caller leaves the entity at adm_id 0 / sourceless
+	}
+	const int adm_id = static_cast<int>(sets_.size());
+	sets_.push_back(std::move(set));
+	by_name_.emplace(key, adm_id);
+	return adm_id;
 }
 
-bool InfantryRootMotion::advance(int state_id, int32_t &phase_ticks,
+bool InfantryRootMotion::has_clip(int adm_id, int state_id) const {
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+		return false;
+	}
+	const auto &tracks = sets_[adm_id].tracks;
+	return tracks.find(state_id) != tracks.end();
+}
+
+bool InfantryRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
                                  opennova::world::RootMotionFrame &out) {
-	auto it = tracks_.find(state_id);
-	if (it == tracks_.end()) {
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+		return false;
+	}
+	const auto &tracks = sets_[adm_id].tracks;
+	auto it = tracks.find(state_id);
+	if (it == tracks.end()) {
 		return false;
 	}
 	const Track &t = it->second;
@@ -144,10 +173,31 @@ bool InfantryRootMotion::advance(int state_id, int32_t &phase_ticks,
 	// reset) starts with no cross-clip delta [orig: anim_slot[19] prev, reset semantics].
 	out.dz = static_cast<int32_t>(sample(t.bottom, phase_ticks) * 65536.0f) -
 	         static_cast<int32_t>(sample(t.bottom, prev) * 65536.0f);
+	// Absolute capsule extents for THIS frame — the on-foot ground settle floors pos[2] to
+	// ground + capsule_bottom (origin->feet) [orig: AnimMap_UpdateEntity @0x40b82f
+	// out_transform[3]=bottom*65536, out_transform[4]=top*65536+0x2000; consumed by
+	// tick_infantry's ground clamp — docs/world/world-wac-ai-re.md D-INF-6].
+	out.capsule_bottom = static_cast<int32_t>(sample(t.bottom, phase_ticks) * 65536.0f);
+	out.capsule_top = static_cast<int32_t>(sample(t.top, phase_ticks) * 65536.0f) + 0x2000;
 	// Event bits from the lower keyframe of the current position [orig: trigger unlerped;
 	// consumers sample on alternating ticks, so the per-frame repeat is faithful].
 	out.events = t.trigger[static_cast<size_t>(pos_of(phase_ticks) >> 1)];
 	return true;
+}
+
+int InfantryRootMotion::clip_count(int adm_id) const {
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+		return 0;
+	}
+	return static_cast<int>(sets_[adm_id].tracks.size());
+}
+
+const String &InfantryRootMotion::adm_name(int adm_id) const {
+	static const String empty;
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+		return empty;
+	}
+	return sets_[adm_id].adm_name;
 }
 
 } // namespace godot

@@ -529,7 +529,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
   `NovaColorSmoother`; engine-faithful `nova_environment`/`nova_sky`/
   `nova_water`/`nova_weather`; new `nova_celestial` + two celestial shaders;
   BMS override fields through `NovaMissionData`; runtime apply/clear in
-  `nova_world`.
+  `game_world`.
 - `godot/modtools`: terrain preview unified onto `NovaWater` + `EditorWeather`
   (PR #24 parity); Environment workspace undo/redo, save-path gate, and sky-model
   fields.
@@ -583,7 +583,7 @@ image and the env grill did not close (terrain-lighting / foliage scope):
 | `Terrain_SetLightingColors @ 0x5C4B10` | VERIFY-pending | no fn at that address; `render_visibility_portal_traversal @ 0x5c4ae0` at −48. Entity/sector lighting was since anchored at `terrain_sector_compute_lighting @ 0x5c7550` (§iris) |
 | `Render_ConfigureFog @ 0x5F9890` | VERIFY-pending | unnamed `sub_5F98A0` at +16, body unconfirmed; the device fog path was since anchored at `CD3DDevice_SetFogParameters @ 0x677960` (§Fog policy) |
 | `Terrain_GetModulatedColorAtPos @ 0x5C5FE0` | VERIFY-pending | nearest `Entity_BuildProjectileTrailRay @ 0x5c6090` at +176 — likely a different function |
-| `Foliage_BuildGeometry @ 0x5BF5F0` | VERIFY-pending (foliage-audit scope) | nearest `build_shader_pass_name @ 0x5bf5d0` at −32 |
+| `Foliage_BuildGeometry @ 0x5BF5F0` | stale / do not cite | address resolves inside `build_shader_pass_name @ 0x5bf5d0`; foliage placement anchors are `terrain_update_foliage_tiles @ 0x601F50`, `generate_foliage_instances @ 0x600980`, and `sub_606620 @ 0x606620` |
 | jodemo `sub_5D0A90` (terrain-init caller of the loader) | closed by the grill | `Terrain_LoadEnvironmentConfig @ 0x610940` (§BMS overrides) |
 
 ### Gap-walk dispositions

@@ -408,9 +408,13 @@ func test_url_action_emits_url_requested() -> void:
 	assert_signal_emitted_with_parameters(menu, "url_requested", ["www.novalogic.com/buy"])
 
 
-func test_monogram_renders_as_centered_overlay() -> void:
-	# A window FRAME with a MONOGRAM gets a centered "Monogram" overlay when the
-	# texture resolves. A synthetic menu + temp texture drive the resolved path.
+func test_monogram_parsed_but_not_drawn() -> void:
+	# The shipped engine parses a FRAME's MONOGRAM but never draws it: the window
+	# render path is frame + appearance + text only [orig: CStaticWnd_Render @ 0x657b10],
+	# and CUIElement_DrawFrame @ 0x64a210 has no monogram pass (the only "monogram.tga"
+	# use is the loading screen). So the frame stencil renders but no Monogram overlay
+	# is created (the earlier centered heuristic produced a stray glyph). A synthetic menu
+	# + temp textures drive the resolved path.
 	var dir := OS.get_temp_dir().path_join("mnu_mono_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
 	_write_png(dir.path_join("border2.png"), 64, 64, Color(0.7, 0.7, 0.7, 1.0))
@@ -421,8 +425,10 @@ func test_monogram_renders_as_centered_overlay() -> void:
 		pass_test("temp resource root unavailable: %s" % root.get_last_error())
 		return
 
+	# DRAW_FRAME so the frame actually draws (this test's point is that the frame
+	# renders but the MONOGRAM does not) [orig: CStaticWnd_Render @ 0x657b10 -> +0x134].
 	var mnu_text := "<SCREEN><NAME>S</NAME>" + \
-		"<WINDOW type=\"window\" name=\"PANEL\">" + \
+		"<WINDOW type=\"window\" name=\"PANEL\" DRAW_FRAME>" + \
 		"<FRAME><STENCIL size=\"64\">border2.tga</STENCIL><MONOGRAM>mono.tga</MONOGRAM></FRAME>" + \
 		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION>" + \
 		"</WINDOW></SCREEN>"
@@ -435,11 +441,10 @@ func test_monogram_renders_as_centered_overlay() -> void:
 	menu.set_resource_root(root)
 	menu.menu = doc
 
-	var mono := menu.find_child("Monogram", true, false) as TextureRect
-	assert_not_null(mono, "MONOGRAM rendered as a centered Monogram overlay")
-	if mono != null:
-		assert_not_null(mono.texture, "monogram texture resolved")
-		assert_eq(mono.stretch_mode, TextureRect.STRETCH_KEEP_CENTERED, "centered, natural size")
+	# The frame stencil still renders...
+	assert_not_null(menu.find_child("FrameTL", true, false), "frame stencil pieces drawn")
+	# ...but the MONOGRAM is not (parity: the engine does not draw the menu monogram).
+	assert_null(menu.find_child("Monogram", true, false), "MONOGRAM is parsed but not drawn")
 
 	DirAccess.remove_absolute(dir.path_join("border2.png"))
 	DirAccess.remove_absolute(dir.path_join("mono.png"))

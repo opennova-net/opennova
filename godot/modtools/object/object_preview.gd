@@ -5,6 +5,7 @@ const FlyCameraScript = preload("res://engine/fly_camera.gd")
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
 const CollisionHull = preload("res://engine/object/collision_hull.gd")
+const ObjectUserPointOverlayScript = preload("res://engine/object/object_user_point_overlay.gd")
 
 var object_data: NovaObjectData
 
@@ -18,12 +19,14 @@ var _camera: Camera3D
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
 var _collision_materials: Dictionary = {}
+var _user_point_overlay: ObjectUserPointOverlay
 var _environment_file: EnvFile
 var _environment_time := 1200.0
 var _wireframe := false
 var _grid_visible := true
 var _axes_visible := true
 var _collision_visible := false
+var _user_points_visible := true
 var _has_framed := false
 
 var _material_defs: Dictionary = {}
@@ -59,6 +62,7 @@ func set_object_data(value: NovaObjectData) -> void:
 		_sync_model_debug_refs()
 		_refresh_preview_guides()
 		_refresh_collision_overlay()
+		_refresh_user_point_overlay()
 
 
 func get_object_model():
@@ -100,6 +104,13 @@ func _build_viewport() -> void:
 	_root.add_child(_model)
 	_model.bounds_changed.connect(_on_model_bounds_changed)
 	_model.set_object_data(object_data)
+
+	_user_point_overlay = ObjectUserPointOverlayScript.new()
+	_user_point_overlay.name = "ObjectUserPoints"
+	_root.add_child(_user_point_overlay)
+	_user_point_overlay.set_source_model(_model)
+	_user_point_overlay.set_object_data(object_data)
+	_user_point_overlay.set_points_visible(_user_points_visible and has_user_points())
 
 	_camera = FlyCameraScript.new()
 	_camera.current = true
@@ -277,6 +288,7 @@ func set_active_lod(lod_index: int) -> void:
 	_model.set_active_lod(lod_index)
 	_sync_model_debug_refs()
 	_refresh_preview_guides()
+	_refresh_user_point_overlay()
 
 
 func get_active_lod() -> int:
@@ -326,6 +338,30 @@ func set_collision_visible(value: bool) -> void:
 
 func has_collision() -> bool:
 	return object_data != null and object_data.has_method("has_collision") and object_data.has_collision()
+
+
+func is_user_points_visible() -> bool:
+	return _user_points_visible and has_user_points()
+
+
+func set_user_points_visible(value: bool) -> void:
+	_user_points_visible = value
+	_refresh_user_point_overlay()
+
+
+func has_user_points() -> bool:
+	return object_data != null \
+		and object_data.has_method("get_user_point_count") \
+		and object_data.get_user_point_count() > 0
+
+
+func _refresh_user_point_overlay() -> void:
+	if _user_point_overlay == null:
+		return
+	_user_point_overlay.set_source_model(_model)
+	_user_point_overlay.set_object_data(object_data)
+	_user_point_overlay.refresh_points()
+	_user_point_overlay.set_points_visible(_user_points_visible and has_user_points())
 
 
 # Rebuild the collision-volume overlay: one ConvexPolygonShape3D per parsed
@@ -420,6 +456,7 @@ func _apply_environment_to_model() -> void:
 
 func _on_model_bounds_changed(bounds: AABB) -> void:
 	_sync_model_debug_refs()
+	call_deferred("_refresh_user_point_overlay")
 	call_deferred("_refresh_bounds_guides", bounds)
 
 

@@ -3,6 +3,7 @@
 // the BMS AttachToEmplaced action path (emits no unported_action), and snapshot/restore
 // rewinding the mount. [orig chain: EventAction_Dispatch case 0x25 @0x4542e0 ->
 // WacScript_TryMountEntityToVehicle @0x4f70f0 -> Entity_FindBestSeatSlot @0x4351f0.]
+#include <cmath>
 #include <cstdio>
 
 #include "mission/event_runtime.h"
@@ -17,6 +18,8 @@ using world::AiSystem;
 using world::Entity;
 using world::EntityHandle;
 using world::EntityKind;
+using world::IRootMotionSource;
+using world::RootMotionFrame;
 using world::Seat;
 using world::SeatType;
 using world::TickContext;
@@ -27,6 +30,17 @@ static int failures = 0;
 #define CHECK(c)                                                              \
     do {                                                                      \
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
+    } while (0)
+
+#define CHECK_NEAR(a, b, eps)                                                 \
+    do {                                                                      \
+        const double _a = (a);                                                 \
+        const double _b = (b);                                                 \
+        if (std::fabs(_a - _b) > (eps)) {                                      \
+            std::printf("FAIL %s:%d  %s ~= %s  got %.6f expected %.6f\n",      \
+                        __FILE__, __LINE__, #a, #b, _a, _b);                  \
+            ++failures;                                                       \
+        }                                                                     \
     } while (0)
 
 static Entity make_gun(uint16_t ssn, float x, float y, float z, int16_t yaw) {
@@ -48,6 +62,19 @@ static Entity make_soldier(uint16_t ssn, float x, float y, float z) {
     e.position = {x, y, z};
     return e;
 }
+
+struct ClipSource : IRootMotionSource {
+    int available_state = -1;
+
+    bool has_clip(int /*adm_id*/, int state_id) const override {
+        return state_id == available_state;
+    }
+
+    bool advance(int /*adm_id*/, int /*state_id*/, int32_t &/*phase_ticks*/,
+                 RootMotionFrame &/*out*/) override {
+        return false;
+    }
+};
 
 int main() {
     // ---- mount sets both sides + poses onto the seat ----
@@ -101,6 +128,31 @@ int main() {
         CHECK(w.commands.mount(101, 201));   // a free gun works
     }
 
+    // ---- mounted seat local rotates in the same frame as placed vehicle models ----
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {100.f, 200.f, 7.f};
+        vehicle.yaw = -90;
+        Seat control;
+        control.type = SeatType::Controller;
+        control.seat_local = {-0.7148895f, -0.1189880f, 2.1048889f};
+        vehicle.seats.push_back(control);
+        w.registry.spawn(1, vehicle);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+
+        CHECK(w.commands.mount(100, 200));
+        Entity *occ = w.registry.get(sh);
+        CHECK(occ->mounted);
+        CHECK_NEAR(occ->position.x, 100.1189880, 0.0001);
+        CHECK_NEAR(occ->position.y, 199.2851105, 0.0001);
+        CHECK_NEAR(occ->position.z, 9.1048889, 0.0001);
+    }
+
     // ---- AI tick seat-follow: occupant tracks the seat, never path-follows ----
     {
         World w;
@@ -112,6 +164,9 @@ int main() {
         w.ai = &ai;
         const int idx = ai.attach(sh);
         ai.at(idx)->net_id = 100;
+        ai.at(idx)->inf.active = true;
+        ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
+        ai.at(idx)->inf.clip_phase = 42;
         CHECK(w.commands.mount(100, 200));
 
         TickContext ctx{};
@@ -121,6 +176,8 @@ int main() {
         CHECK(ae->pos[0] == to_fixed(10.0));
         CHECK(ae->pos[1] == to_fixed(20.0));
         CHECK(ae->pos[2] == to_fixed(5.0));
+        CHECK(ae->inf.anim_state == 67); // anim_emplaced
+        CHECK(ae->inf.clip_phase == 0);
 
         // Move the gun -> the gunner follows next tick.
         w.registry.get(gh)->position = {30.f, 40.f, 5.f};
@@ -138,6 +195,86 @@ int main() {
         w.registry.despawn(gh);
         ai.tick(w, ctx);
         CHECK(!w.registry.get(sh)->mounted);
+    }
+
+    // ---- mounted pose selection follows seat context, not just "is mounted" ----
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        const EntityHandle gh = w.registry.spawn(1, make_gun(200, 0.f, 0.f, 0.f, 0));
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        w.registry.get(gh)->emplaced_pose_variant = 3;
+
+        AiSystem ai;
+        ClipSource clips;
+        ai.root_motion = &clips;
+        w.ai = &ai;
+        const int idx = ai.attach(sh);
+        ai.at(idx)->net_id = 100;
+        ai.at(idx)->inf.active = true;
+        ai.at(idx)->inf.adm_id = 12;
+
+        CHECK(w.commands.mount(100, 200));
+        TickContext ctx{};
+        ctx.is_authority = true;
+        ai.tick(w, ctx);
+        CHECK(ai.at(idx)->inf.anim_state == 67); // variant configured, but clip missing -> base
+
+        clips.available_state = 70; // emplaced_4 = base 67 + variant 3
+        ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
+        ai.tick(w, ctx);
+        CHECK(ai.at(idx)->inf.anim_state == 70);
+    }
+
+    // ---- non-gunner seats carry a local facing offset, not just vehicle yaw ----
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(1, 16);
+        Entity vehicle;
+        vehicle.net_id = 200;
+        vehicle.kind = EntityKind::Item;
+        vehicle.position = {10.f, 20.f, 5.f};
+        vehicle.yaw = 15;
+        Seat passenger;
+        passenger.type = SeatType::Passenger;
+        passenger.yaw_offset = 90;
+        passenger.pose_index = 24;
+        vehicle.seats.push_back(passenger);
+        const EntityHandle vh = w.registry.spawn(1, vehicle);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        AiSystem ai;
+        w.ai = &ai;
+        const int idx = ai.attach(sh);
+        ai.at(idx)->net_id = 100;
+        ai.at(idx)->inf.active = true;
+        ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
+
+        CHECK(w.commands.mount(100, 200));
+        Entity *occ = w.registry.get(sh);
+        CHECK(occ->mounted);
+        CHECK(occ->mount_target == vh);
+        CHECK(occ->yaw == 105);
+
+        TickContext ctx{};
+        ctx.is_authority = true;
+        ai.tick(w, ctx);
+        CHECK(ai.at(idx)->inf.anim_state == 100); // anim_sit_24
+    }
+
+    // ---- unmounted stance stays under normal infantry logic, not mount pose logic ----
+    {
+        World w;
+        w.registry.configure_pool(0, 16);
+        const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
+        AiSystem ai;
+        const int idx = ai.attach(sh);
+        ai.at(idx)->net_id = 100;
+        ai.at(idx)->inf.active = true;
+        ai.at(idx)->inf.anim_state = world::anim_state::kIdleCrouch;
+        CHECK(!ai.pose_if_mounted(*ai.at(idx), w));
+        CHECK(ai.at(idx)->inf.anim_state == world::anim_state::kIdleCrouch);
     }
 
     // ---- BMS AttachToEmplaced: emits no unported_action + mounts via proximity ----

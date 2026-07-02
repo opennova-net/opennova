@@ -2375,6 +2375,12 @@ bool MissionDocument::set_header_int(const std::string &field, int value) {
 		header.wind_speed = static_cast<uint32_t>(value);
 	} else if (field == "wind_direction") {
 		header.wind_direction = static_cast<uint32_t>(value);
+	} else if (field == "water_override") {
+		// s16 half-world-units; only takes effect when attrib_flags WaterOverrideEnable (0x1) is set.
+		header.water_override = static_cast<uint16_t>(value);
+	} else if (field == "fog_override") {
+		// fog distance in world units; only takes effect when attrib_flags FogDistanceOverrideEnable (0x2) is set.
+		header.fog_override = static_cast<uint16_t>(value);
 	} else {
 		impl_->last_error = "Unknown header int field: " + field;
 		return false;

@@ -16,9 +16,9 @@ constexpr uint8_t FOLIAGE_ATTRIB_FORCE_ON = 1 << 0;
 constexpr uint8_t FOLIAGE_ATTRIB_SHADOW = 1 << 1;
 constexpr uint8_t FOLIAGE_ATTRIB_KNOWN_MASK = FOLIAGE_ATTRIB_FORCE_ON | FOLIAGE_ATTRIB_SHADOW;
 
-// Values observed in shipped .trn files. Direct jodemo RE shows
-// Foliage_BuildGeometry@0x005BF5F0 applies them to terrain-modulated colormap
-// samples as color modes; Foliage_BuildPatchData does not compute final RGB.
+// Values observed in shipped .trn files. The placement paths preserve them for
+// the render emitter; the previously cited 0x005BF5F0 address is stale and the
+// final color-mode consumer still needs a verified retail anchor.
 enum class FoliageColorMode : int {
 	MatchGround = 0,
 	Blend50 = 1,

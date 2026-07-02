@@ -62,6 +62,29 @@ int main() {
         CHECK(e.brain.f[AiBrain::kPendState] == 17);
     }
 
+    // ---- handle lookup index ----
+    {
+        AiSystem sys;
+        EntityHandle h0 = EntityHandle::make(0, 4);
+        EntityHandle h1 = EntityHandle::make(2, 9);
+        EntityHandle h2 = EntityHandle::make(3, 7);
+        CHECK(sys.for_handle(h0) == nullptr);
+        int i0 = sys.attach(h0);
+        int i1 = sys.attach(h1);
+        CHECK(sys.for_handle(h0) == sys.at(i0));
+        CHECK(sys.for_handle(h1) == sys.at(i1));
+        CHECK(sys.for_handle(EntityHandle{}) == nullptr);
+
+        sys.capture_spawn_baseline();
+        sys.attach(h2);
+        CHECK(sys.for_handle(h2) != nullptr);
+        World w;
+        sys.on_load(w);
+        CHECK(sys.for_handle(h0) == sys.at(i0));
+        CHECK(sys.for_handle(h1) == sys.at(i1));
+        CHECK(sys.for_handle(h2) == nullptr);
+    }
+
     // ---- state-machine dispatcher transition (authority) ----
     {
         World w;

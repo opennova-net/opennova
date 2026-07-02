@@ -59,13 +59,19 @@ OpenNova.
 
 ## NovaWorld and multiplayer
 
-Multiplayer is an ultimate goal, but the in-match networking has barely been looked
-at. The nearer priority is a faithful reimplementation of NovaWorld, the matchmaking
-and server backend, so the original games keep working as their official services
-age out. The protocol reverse engineering is recorded in
-[docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md); an initial
-implementation landed once and was reverted while that work matures. Broader
-gameplay netcode comes later.
+Networking is held to the same parity bar as everything else, applied to the byte
+stream: it is **wire-compatible by design**. The aim is that our clients can join
+original (retail) servers, our servers can serve original clients, and opennova↔opennova
+works the same way — so the original games keep working as their official services age
+out, and our runtime and theirs are interchangeable on the same protocol. The
+matchmaking and server backend (NovaWorld) is reimplemented and maturing
+(`apps/novaworld_server`, `libs/novaworld`); in-match replication is decode-complete
+against real captures, with the encode side in progress. The protocol reverse
+engineering is recorded in
+[docs/net/novaworld-net-re.md](docs/net/novaworld-net-re.md). Single-player already runs
+as an in-process listen server, so co-op and multiplayer share one replication path
+([the listen-server ADR](docs/adr/0011-single-player-in-process-listen-server.md));
+broader in-match gameplay netcode comes later.
 
 ## Where we are today
 

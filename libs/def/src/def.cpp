@@ -231,6 +231,80 @@ static int lookup_flag(const char *name, size_t len) {
     return 0;
 }
 
+/* items.def `attrib:` tokens -> ItemDefAttrib (+0x54) bits. Token names lowercased (the
+   parser lowercases before compare). Full witnessed map: docs/world/itemdef-re.md:147-155.
+   [orig: ItemDef_ParseProperty @0x49eb00] */
+static const FlagEntry item_attrib_table[] = {
+    {"movecb",       6, 0x1},
+    {"powerup",      7, 0x2},
+    {"nomoveshoot",  11, 0x4},
+    {"notool",       6, 0x8},
+    {"snap",         4, 0x10},
+    {"eweap",        5, 0x20},
+    {"playercontrol",13, 0x40},
+    {"door",         4, 0x80},
+    {"notarget",     8, 0x100},
+    {"landable",     8, 0x200},
+    {"missile",      7, 0x400},
+    {"tire",         4, 0x800},
+    {"fastrope",     8, 0x1000},
+    {"takeable",     8, 0x2000},
+    {"easy",         4, 0x4000},
+    {"4team",        5, 0x10000},
+    {"changeteam",   10, 0x20000},
+    {"spawnpoint",   10, 0x40000},
+    {"armory",       6, 0x80000},
+    {"aidata",       6, 0x100000},   /* the §5.6 AI-class flag — gates the 0x0D AI-trailer */
+    {"leavecorpse",  11, 0x400000},
+    {"nodismember",  11, 0x800000},
+    {"noweapon",     8, 0x1000000},
+    {"reflect",      7, 0x2000000},
+    {"noshadow",     8, 0x4000000},
+    {"concave",      7, 0x8000000},
+    {"noscar",       6, 0x10000000},
+    {"nohud",        5, 0x20000000},
+    {"nodie",        5, 0x40000000},
+};
+static const int item_attrib_table_count =
+    sizeof(item_attrib_table) / sizeof(item_attrib_table[0]);
+
+/* items.def `attrib:` tokens -> ItemDefAttrib2 (+0x58) bits. docs/world/itemdef-re.md:157-160. */
+static const FlagEntry item_attrib2_table[] = {
+    {"vehiclebay",      10, 0x1},
+    {"autoinheritteam", 15, 0x2},
+    {"vehiclespawn",    12, 0x4},
+    {"dynamicshadow",   13, 0x10},
+    {"staticshadow",    12, 0x20},
+    {"tunnelpiece",     11, 0x40},
+    {"usevk",           5, 0x80},
+    {"staticdeath",     11, 0x100},
+    {"onturret",        8, 0x400},
+    {"hasturret",       9, 0x800},
+    {"isturret",        8, 0x1000},
+    {"farp",            4, 0x2000},
+    {"landmine",        8, 0x4000},
+};
+static const int item_attrib2_table_count =
+    sizeof(item_attrib2_table) / sizeof(item_attrib2_table[0]);
+
+static int lookup_item_attrib(const char *name, size_t len) {
+    for (int i = 0; i < item_attrib_table_count; ++i) {
+        if (len == item_attrib_table[i].name_len &&
+            memcmp(name, item_attrib_table[i].name, len) == 0)
+            return item_attrib_table[i].bit;
+    }
+    return 0;
+}
+
+static int lookup_item_attrib2(const char *name, size_t len) {
+    for (int i = 0; i < item_attrib2_table_count; ++i) {
+        if (len == item_attrib2_table[i].name_len &&
+            memcmp(name, item_attrib2_table[i].name, len) == 0)
+            return item_attrib2_table[i].bit;
+    }
+    return 0;
+}
+
 /* Alignment parser: left=0, right=1, center=2 */
 static int parse_alignment(const char *s, size_t len) {
     if (len == 5 && memcmp(s, "right", 5) == 0) return 1;
@@ -815,6 +889,34 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             while (end < vl && !isspace((unsigned char)v[end])) ++end;
             safe_copy(current.dayshot, sizeof(current.dayshot), v, end);
             parsed = 1;
+        } else if (lower_match_key(lower, ll, "ai_function", 11)) {
+            consume_value_str(trimmed, tlen, 11, current.ai_function, sizeof(current.ai_function));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "move_function", 13)) {
+            consume_value_str(trimmed, tlen, 13, current.move_function, sizeof(current.move_function));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "render_function", 15)) {
+            consume_value_str(trimmed, tlen, 15, current.render_function, sizeof(current.render_function));
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "disk_function", 13)) {
+            consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "attrib:", 7)) {
+            /* Space-separated capability tokens -> ItemDefAttrib/Attrib2 bits. Unknown tokens
+               (exp1, pilotonly, forceasset, neutral, ...) are not in the witnessed map and stay
+               unmapped. [orig: ItemDef_ParseProperty @0x49eb00; docs/world/itemdef-re.md] */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            Token tok[MAX_TOKENS];
+            int ntok = split_values(v, vl, tok, MAX_TOKENS);
+            for (int ti = 0; ti < ntok; ++ti) {
+                char lo[32];
+                size_t k = tok[ti].len < sizeof(lo) - 1 ? tok[ti].len : sizeof(lo) - 1;
+                to_lower_buf(lo, tok[ti].s, k);
+                int b = lookup_item_attrib(lo, k);
+                if (b) { current.attrib |= (unsigned)b; }
+                else { int b2 = lookup_item_attrib2(lo, k); if (b2) current.attrib2 |= (unsigned)b2; }
+            }
+            parsed = 1;
         }
 
         if (!parsed) {
@@ -854,13 +956,9 @@ DEF_EXPORT void def_free_items(DefItemsFile *f) {
 /* HudPos Parsing                                                            */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared buffer parser for hudpos.def, used by both the path and memory entry
+   points (mirrors parse_items_buf). Assumes `out` was zeroed by the caller. */
+static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out) {
     DefHudPosDef *hud = &out->hud;
     /* Set default alpha for all colors */
     hud->health_border.a = 255;
@@ -1266,8 +1364,23 @@ DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_hudpos(const char *path, DefHudPosFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_hudpos_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_hudpos_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_hudpos(DefHudPosFile *f) {
