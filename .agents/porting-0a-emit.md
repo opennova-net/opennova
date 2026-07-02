@@ -26,24 +26,36 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
   serialize callback (`itemDef+0x164` — players, vehicles, AI), `[1][handle][type=*(itemDef+0x50)]
   [compact]`; projectiles `[2]…`; `[0]` terminator. **Budget-limited round-robin** across frames.
 
-## What is ported vs not
+## What is ported vs not (updated 2026-07-02, post v11-v15 live rounds)
 
 | piece | status | where |
 |---|---|---|
 | phase counter (`playerSlot+100566`) | DONE | `netsim::Connection::s2c_phase`; advanced in `emit_connection_s2c` |
 | header sub-block dispatch (`phase & 3`) | DONE | `build_0a_frame` switch, `connection_fan.cpp` |
 | sub-block 1 (server-status, C6EAE4 fall-dmg) | DONE | load-bearing; first send is phase 1 |
-| sub-block 0 (weapon) | DONE (golden-safe near-zero) | recipient weapon-slot model pending |
+| sub-block 0 (weapon) | DONE (golden steady: slots 0, uniformMask 8) | recipient weapon-slot model pending |
 | sub-block 3 (gametype) | DONE (0 B for non-objective) | objective-gametype body pending |
 | **sub-block 2 (env)** | **DEFERRED — D-NET-134** | host doesn't author `world.env`; would clobber client sky |
 | passenger tail (`phase & 0xF == 8`) | deferred | needs vehicle-mount modeling |
-| **entity loop: vehicles + priority + budget** | **NOT PORTED (step 2)** | `entity_class_of` returns `Unknown` for pool-1; we emit players only |
+| entity loop: priority + aging + 600-B budget | DONE (D-NET-134 step 2) | `select_frame_entities`, `connection_fan.cpp`; round-robin is EMERGENT from aging (no cursor) |
+| replication classes from items.def | DONE (load-bearing) | `resolve_item_traits` (NovaSimulation) stamps `Entity::net_class_code` via `class_from_tag`; pool alone NEVER selects a record (ewep desync, v13) |
+| field-17 health byte (packed tier\|class) | DONE (D-NET-138 FIXED) | `health_classification_byte` [orig: @0x4AD4E0]; killed the 0x0F flood (v11: 0 C 0x0F) |
+| vehicle record health word (+286) | DONE (D-NET-63 corrected) | live items.def hp via `resolve_item_traits`; 0 = wreck, small = burning (v12/v13 regressions) |
+| player record field sources (input/state/pitch/yaw-trunc/mount) | DONE | witnessed apply map in §5.10; off-12 is MOVEMENT INPUT (uplink-echoed), off-13 bit2 = dead/undeployed |
+| 0x5A loadout reply derived from C2S 0x2F | DONE (set+order) | `build_tag_5a_weapon_loadout` (server_message_dispatch) |
+| **0x5A ammo bytes (real counts)** | **OPEN — D-NET-141** | needs the weapon.def parse + the adm INDEX-allocation witness (§5.57 OPEN) |
+| **C2S 0x25 → S2C 0x49 reload relay** | **OPEN — D-NET-142** | host silently ignores 0x25 → one reload attempt wedges the joiner's weapon (§5.58) |
+| **off-14/16 anim defaults (43 idle / adm index)** | **OPEN — D-NET-143** | we send 0/0xFF; retail spawn defaults = state 0x2B + WPN_M4AUTO index [orig: @0x4B1116]; uplink carries +0x2B0 (our `reserved_24`) |
+| joiner spawn health (tier byte 0x28) | OPEN — D-NET-144 | seed 150/150 or re-stamp item traits on player spawn |
 | deploy gate / eye-pos ref / budget ramp | not ported | `emit_connection_s2c` anchors to entity pos, no `state==6` gate |
+| body motor for net-snapped peers | not ported (D-NET-143 tail) | retail host SIMULATES remote players; ours net-snaps — anim state/ratio stay defaults |
 
-**Next (step 2, highest value):** the entity loop. `entity_class_of` must classify pool-1 as `Vehicle`
-(the compact encoder already exists), then port the distance-priority list + byte budget + round-robin so
-the joiner sees vehicles/AI. This is the under-send behind the §5.46 flood (the joiner's world is
-incomplete). Do NOT dump all entities every frame — that is not the original's budgeted behavior.
+**Next (round 3): the four v15 defects — D-NET-141..144.** Order: witness the adm index-allocation
+rule (the `weapon` block-open handler in the loc_543680 parse callback + `AdmDef_FindFreeSlot
+@0x53FC50`; does `loadout_subclasses N` reserve N slots?), then the weapon.def parser (libs/def) +
+engine feed, then 0x5A ammo resolve + 0x2F validation, the 0x25→0x49 relay (needs a broadcast path
+in the npruntime dispatch — replies currently go only to the requesting connection), the anim
+defaults + `reserved_24`→equipped-adm uplink ingest/echo, and the spawn-health seed.
 
 ## Verify loop (fast iteration)
 
