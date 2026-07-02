@@ -1519,7 +1519,7 @@ Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
 | 14 | 1 | weapon-anim state | → entity+0x2B8 / 0x2BC |
 | 15 | 1 | priority | → entity+0x377 |
 | 16 | 1 | anim def index | → entity+0x2B0 |
-| 17 | 1 | health classification | `Entity_SetHealthFromDifficultyByte @ 0x4AD580`: `tier=(byte>>4)&3` @0x4ad596 → `Health = {tier2 ≈0.875×, tier1 ≈0.594×, tier0/3 ≈0.219×} × ItemDef.healthMax` (@0x4ad5f4 / 0x4ad65b / 0x4ad68c), low nibble → `playerClass` +0x294 @0x4ad5a2. **Don't-care for the LOCAL player**: `NetPacket_SerializePlayerState` SKIPS this apply for `g_local_player_entity` (`cmp edi,g_local_player_entity; jz` @0x4c11ac → local branch only floors `Health` at 1 @0x4c11c4); the local player's health comes from the §5.9 0x0A tail, not this byte |
+| 17 | 1 | health classification | Write side (server): `Entity_GetHealthClassification @ 0x4AD4E0` (called @0x4c0d71, stored @0x4c0d89 as the record's last byte): `byte = (tier<<4) \| (playerClass@+0x294 & 0xF)`, tier from `ratio = (Health@+0x11E << 16) / max(healthMax@itemDef+0x17C, 1)` — tier 2 if `> 49152`, tier 1 if `> 28671`, else 0 (D-NET-138). Read side: `Entity_SetHealthFromDifficultyByte @ 0x4AD580`: `tier=(byte>>4)&3` @0x4ad596 → `Health = {tier2 ≈0.875×, tier1 ≈0.594×, tier0/3 ≈0.219×} × ItemDef.healthMax` (@0x4ad5f4 / 0x4ad65b / 0x4ad68c — the tier midpoints of the write-side boundaries), low nibble → `playerClass` +0x294 @0x4ad5a2, then the item is RE-RESOLVED from playerClass (@0x4c1248 — see §5.46). **Don't-care for the LOCAL player**: `NetPacket_SerializePlayerState` SKIPS this apply for `g_local_player_entity` (`cmp edi,g_local_player_entity; jz` @0x4c11ac → local branch only floors `Health` at 1 @0x4c11c4); the local player's health comes from the §5.9 0x0A tail, not this byte |
 
 **Spawn hook (load-bearing):** when `state flags & 2` is set AND the entity is the local
 player, the engine fires `Game_InitNewRound @ 0x422740` + `Entity_ResetToSpawnState @ 0x4B9610`
@@ -4017,6 +4017,26 @@ consumes the query silently strands the vehicle-resolved player entity forever. 
 at the deploy bundle (C 0x28/0x29/0x22/0x23 + the first 0x0F burst, capture ov-til45c f=65791), placing
 the break at `Game_StartMission`'s reload, not at 0x0C application.
 
+**Root cause CLOSED (2026-07-02): the sustaining loop was our field-17 byte (D-NET-138), witnessed
+end-to-end.** Why each S2C 0x18 repair did not stick: the client's 0x0A person deserializer (case 2 of
+`NetPacket_SerializePlayerState`) applies `Entity_SetHealthFromDifficultyByte @ 0x4AD580` for every
+REMOTE player (`@ 0x4c11ba`; local skip `@ 0x4c11ac`), which writes `entity->playerClass = field17 &
+0xF`, and then IMMEDIATELY re-resolves the entity's item from playerClass (`@ 0x4c1248-0x4c12be`:
+`AnimMap_GetSlotPropertyInt(playerClass, lod-prop 0x0B/0x0A/0x0C)` → `ItemList_FindIndexByTypeId @
+0x49E100` → overwrites `ItemTypeIndex` (+0x1C) and `itemDef` (+0x20) — the exact inputs of the
+`@ 0x4307c4` cross-check). Our pre-fix raw-health byte `0x64` decodes as playerClass 4 (real class 8), so
+the cycle was: 0x18 repairs (class 8, itemDef 0x14B9) → next applied 0x0A stamps class 4 and re-resolves
+a wrong itemDef → the following 0x0A frame fails the cross-check → C2S 0x0F → S2C 0x18 → repeat (~2-frame
+oscillation, 1,526 C 0x0F in the v10 session). The 0x18 record itself was exonerated: it fully
+re-establishes `ItemTypeIndex`/`itemDef` from its u16 item_type_id (`@ 0x433bc7`/`@ 0x433bdf`); its
+item_type byte is a nonzero gate only (`@ 0x433b5a`) and its net_id feeds only the minimap path
+(`@ 0x433ddd`) — see D-NET-137/D-NET-138. With the packed byte (D-NET-138 fix), live retail-join v11
+(full join+deploy+move, 4,774 S 0x0A / 395 C 0x0C) carries **zero** C2S 0x0F — matching the golden.
+**Open lead:** a SECOND C2S 0x0F trigger sits inside the person read path itself
+(`@ 0x4c107b-0x4c10ae`): if the record's mounted-vehicle handle resolves to an entity whose itemDef is
+null, the client queues 0x0F for the VEHICLE handle and abandons the record — relevant once vehicle
+mounting replicates.
+
 **Re-grill 2026-07-01 (full-field verify vs fresh decompilation): MATCHING both directions.** Three
 additions: (1) `serialize_object_to_buffer @ 0x504d10` takes FOUR args — the IDB's 3-arg prototype was
 wrong (all 3 callsites clean up 0x10; fixed in the IDB); arg 4 is the serialized entity, arg 3 (the
@@ -4092,15 +4112,17 @@ round-robin — porting the priority pairlist + budget + all-class replication i
 (the under-send that leaves the retail joiner's world incomplete; §5.46 flood context). Verified:
 `netsim_two_peer_fanout` (`run_0a_subblock_phase_cycle`) + the shape harness `scripts/net/diff_0a.py`.
 
-**Player-record health byte is PACKED, not raw health (grill 2026-07-01, D-NET-138).** The §5.10
-player compact record's field-17 byte decodes client-side via `Entity_SetHealthFromDifficultyByte
-@ 0x4AD580`: low nibble → `entity->playerClass` (+660), bits 4–5 → a health TIER scaled off
-`itemDef->healthMax` (tier 0 ≈ 21.9 %, 1 ≈ 59.4 %, 2 ≈ 87.5 %; 16.16 multiplies 28671/49152 with
-0x8000 rounding). The LOCAL player skips the apply (`@ 0x4c11ac`), so a wrong byte only affects how
-REMOTE players render. Our `build_0a_frame` currently sends raw clamped health (e.g. 150 = 0x96 →
-would decode remotely as playerClass 6 + tier 1); the server-side tier quantization inside
-`NetPacket_SerializePlayerState @ 0x4C09C0` is still unwitnessed — the faithful pack is the tracked
-fix.
+**Player-record health byte is PACKED, not raw health (grill 2026-07-01; pack witnessed + ported
+2026-07-02, D-NET-138 FIXED).** The §5.10 player compact record's field-17 byte decodes client-side
+via `Entity_SetHealthFromDifficultyByte @ 0x4AD580`: low nibble → `entity->playerClass` (+660), bits
+4–5 → a health TIER scaled off `itemDef->healthMax` (tier 0 ≈ 21.9 %, 1 ≈ 59.4 %, 2 ≈ 87.5 %; 16.16
+multiplies 28671/49152 with 0x8000 rounding). The LOCAL player skips the apply (`@ 0x4c11ac`), so a
+wrong byte only affects how REMOTE players render — and, worse, re-breaks them: the read path
+re-resolves the item FROM playerClass right after the apply (`@ 0x4c1248`; the §5.46 0x0F-flood
+re-break). The server-side pack is `Entity_GetHealthClassification @ 0x4AD4E0` (case-1 write call
+`@ 0x4c0d71`): `(tier << 4) | (playerClass & 0xF)`, tier boundaries `ratio > 49152` / `> 28671` in
+16.16 of `Health / max(healthMax, 1)` — ported as `netsim::health_classification_byte`
+(`build_0a_frame` now sends the packed byte; boundary tests in `netsim_two_peer_fanout`).
 
 ### 5.48–5.56 The 2026-07-01 wire-coverage sweep — session/HUD state channel (decoded)
 
@@ -5285,7 +5307,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 | `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (model)** — boundary divergence D-NET-135 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0` — function defined + named this session, was `loc_5042F0` code-island). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`libs/netsim/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
 | 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < byte_A860D1`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
-| 0x0A ported subset | `build_0a_frame`/`emit_connection_s2c` (`libs/netsim/connection_fan.cpp`) | ported subset **matching**; deferrals correctly characterized (D-NET-134 stands); health byte **divergent** (D-NET-138) | `Server_SendEntityStateToPlayer @ 0x517ba0` (deploy gate `+32==6`, `++phase` before first write, eye ref, budget halving `+89876`/uptime>2000, unreliable send flags (0,1)); sub-block 0 = weapon/reload/uniform (`@ 0x4ff81b`; `FrameAimBlock` → `FrameWeaponBlock` rename everywhere); sub-block 1 values confirmed (C6EAE0=20/C6EAE4=13/fps/cpu/round-secs). |
+| 0x0A ported subset | `build_0a_frame`/`emit_connection_s2c` (`libs/netsim/connection_fan.cpp`) | ported subset **matching**; deferrals correctly characterized (D-NET-134 stands); health byte **divergent (D-NET-138 — FIXED 2026-07-02**, pack ported from `Entity_GetHealthClassification @ 0x4AD4E0`; live v11: 0 C 0x0F**)** | `Server_SendEntityStateToPlayer @ 0x517ba0` (deploy gate `+32==6`, `++phase` before first write, eye ref, budget halving `+89876`/uptime>2000, unreliable send flags (0,1)); sub-block 0 = weapon/reload/uniform (`@ 0x4ff81b`; `FrameAimBlock` → `FrameWeaponBlock` rename everywhere); sub-block 1 values confirmed (C6EAE0=20/C6EAE4=13/fps/cpu/round-secs). |
 | GameConfig unwitnessed fields | `libs/npruntime/game_config.h` | **all 7 named** (§6.9 update) | `Config_ParseSettingsLine @ 0x54f740` + `apply_session_settings_to_globals @ 0x551500` + `ServerConfig_ApplyHostSetting @ 0x4a6000`: `replay`/`max_team_lives`/`timeout`/`destroybuild`/`deathmes`/`TeamChoose`(bit 0x4 of the mpattrib store `dword_2550A04`)/`mp_allowsniperscopezoom`. |
 | D-NET-127 post-handshake bodies | `emit_post_handshake_burst` (`server_message_dispatch.cpp`) | **fully witnessed; observation-carry closed** (§5.45 update) | trio owner = `CNapiServer_ProcessPendingPlayerSpawns @ 0x4c8dc0`; `0x03` = `NetPacket_WriteWeaponRestrictionFlag @ 0x502ac0`; `0x05` = `NetPacket_WriteBoolTrue @ 0x502c00`; `0x04` = `NetPacket_WriteSlotAssignment @ 0x502b30` (24-B field map); `0x00` pair = `CNapiNPConnection_SendConfigUpdate @ 0x6286e0`. |
 
@@ -5739,13 +5761,25 @@ index 1 + alive. Our `player_minimap_net_id` emits `(team==2?0x8000:0)|0x0200|(s
 whenever `MinimapSlot_HasEntity` fails — any nonzero, per-entity-distinct id works. The 0x51
 spawn-confirm's NetId/animSlot zeros are the same family (client treats 0x51 as a spawn signal, does
 not field-parse it). Faithful fix: model the minimap slot array and allocate/pack for real.
+Exonerated for the C2S 0x0F flood (2026-07-02 recon): in the 0x18 apply the record's net_id feeds
+ONLY the minimap path (`@ 0x433ddd`, gated on `Flags & 0x100` + person type) — it is never an input
+to the `@ 0x4307c4` itemDef/ItemTypeIndex cross-check that queues 0x0F (the flood was D-NET-138's
+field-17 byte). Stays DOCUMENTED-TOLERABLE: divergence risk is minimap-cosmetic only.
 
-**D-NET-138** [reimpl divergence, TRACKED 2026-07-01] **The 0x0A player compact-record field-17
-byte is sent as raw clamped health; retail packs `[bits 4-5 health tier | bits 0-3 playerClass]`.**
-Client apply `Entity_SetHealthFromDifficultyByte @ 0x4AD580`: low nibble → `entity->playerClass`
-(+660); tier scales `itemDef->healthMax` — tier 0 ≈ 21.9 % (`28671/65536 / 2`), tier 1 ≈ 59.4 %,
-tier 2 ≈ 87.5 % (49152 blend), 16.16 multiplies with 0x8000 rounding. The LOCAL player skips the
-apply (`@ 0x4c11ac`), so our raw byte (e.g. 150 = 0x96 → remote decode: playerClass 6, tier 1) only
-mis-renders REMOTE players. Blocked on witnessing the server-side tier quantization inside
-`NetPacket_SerializePlayerState @ 0x4C09C0` (52-KB function; the pack site was not located this
-session); fix = pack `(tier << 4) | (playerClass & 0xF)` once the thresholds are pinned.
+**D-NET-138** [reimpl divergence, FIXED 2026-07-02] **The 0x0A player compact-record field-17
+byte was sent as raw clamped health; retail packs `[bits 4-5 health tier | bits 0-3 playerClass]`.**
+The server-side quantizer is now witnessed: `Entity_GetHealthClassification @ 0x4AD4E0`, called
+from the case-1 compact write in `NetPacket_SerializePlayerState @ 0x4C09C0` (call @ 0x4c0d71, byte
+store @ 0x4c0d89 — the LAST byte of the compact record). Formula: `ratio = (Health<<16) /
+max(itemDef->healthMax, 1)` (16.16; Health @ entity+0x11E, healthMax @ itemDef+0x17C); tier 2 if
+`ratio > 49152` (0.75), tier 1 if `ratio > 28671` (0.4375), else tier 0; `byte = (tier << 4) |
+(entity->playerClass & 0xF)` (playerClass @ +0x294). Null entity → 0x20; null itemDef → `0x20 |
+(playerClass & 0xF)`. The client apply `Entity_SetHealthFromDifficultyByte @ 0x4AD580` is the exact
+inverse — it reconstructs the tier MIDPOINT (87.5 % / 59.375 % / 21.875 % of healthMax) from the
+same two constants with 0x8000 rounding; the LOCAL player skips the apply (`@ 0x4c11ac`). Ported as
+`netsim::health_classification_byte` (`libs/netsim/entity_wire_bridge.cpp`), fed by
+`GameEntitySnapshot::player_class` (the [5,9]-else-8 clamp) and `health_max` (class-8 150 stopgap
+until items.def healthMax is resolved onto the world entity); boundary-exact unit tests in
+`netsim_two_peer_fanout`. **This byte was also the C2S 0x0F flood root cause** (§5.46): the raw
+byte re-classed remote players every applied frame. Live retail-join verification 2026-07-02
+(v11 capture, full join+deploy+move): **0 C2S 0x0F** vs 1,526 in the pre-fix v10 session.
