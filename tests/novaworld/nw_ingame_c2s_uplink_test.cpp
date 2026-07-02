@@ -45,7 +45,9 @@ const uint8_t kFrame1905_full[] = {
 	0x00,                         // body[19]     move_input_byte
 	0x01,                         // body[20]     flags_xor (wire bit 0; host masks to 0x1C)
 	0x00, 0x00, 0x00,             // body[21..23] anim_def_1/2/3
-	0x07,                         // body[24]     reserved_24 (read into AL, discarded)
+	0x07,                         // body[24]     equipped_adm_index (entity+0x2B0 — the joiner's
+	                              //              equipped weapon; the host echoes it at 0x0A
+	                              //              off-16 [orig: @0x4C20A3], D-NET-143)
 	0x00, 0x00,                   // body[25..26] stat_byte_0/1
 	0x21, 0x10, 0xce, 0x07,       // body[27..30] weapon_id_0 / fire_counter_0
 	0x2d, 0x10, 0x69, 0x07,       // body[31..34] weapon_id_1 / fire_counter_1
@@ -91,7 +93,7 @@ int test_extended_uplink_stationary_on_foot() {
 	EXPECT(r.anim_def_1 == 0x00);
 	EXPECT(r.anim_def_2 == 0x00);
 	EXPECT(r.anim_def_3 == 0x00);
-	EXPECT(r.reserved_24 == 0x07);
+	EXPECT(r.equipped_adm_index == 0x07); // the joiner's live equipped weapon (entity+0x2B0)
 	EXPECT(r.stat_byte_0 == 0x00);
 	EXPECT(r.stat_byte_1 == 0x00);
 
@@ -115,7 +117,7 @@ const uint8_t kFrame2053_body[] = {
 	0xd8, 0x22,                   // heading = 0x22d8 = 8920 (i16)
 	0x00, 0x00,                   // pitch = 0
 	0x00, 0x00,                   // reserved_18 / move_input_byte
-	0x00, 0x00, 0x00, 0x00, 0x00, // flags_xor / anim_defs / reserved_24
+	0x00, 0x00, 0x00, 0x00, 0x00, // flags_xor / anim_defs / equipped_adm_index
 	0x36, 0x00,                   // stat_byte_0 = 0x36, stat_byte_1 = 0
 	0x21, 0x10, 0xce, 0x07,
 	0x2d, 0x10, 0x69, 0x07,

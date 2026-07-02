@@ -150,6 +150,13 @@ struct Entity {
     // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
     // remote peers; stays 0 (no input / idle) for entities without an uplink source.
     uint8_t net_move_input = 0;
+    // Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
+    // (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
+    // index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
+    // AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; host-spawned players default
+    // to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
+    // (D-NET-143)
+    uint8_t equipped_adm_index = 0xFF;
     bool hidden = false;
     bool held = false;
     bool disabled = false;

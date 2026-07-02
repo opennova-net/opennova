@@ -614,7 +614,7 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 	w.u8(r.anim_def_1);
 	w.u8(r.anim_def_2);
 	w.u8(r.anim_def_3);
-	w.u8(r.reserved_24);
+	w.u8(r.equipped_adm_index);
 	w.u8(r.stat_byte_0);
 	w.u8(r.stat_byte_1);
 	w.u16(r.weapon_id_0);

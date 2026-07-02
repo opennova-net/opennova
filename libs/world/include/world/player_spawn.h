@@ -46,6 +46,10 @@ struct PlayerSpawn {
     // The spawn seed MUST carry it, or the World entity keeps player_class 0 (which build_pool0 masks to 8
     // on the wire, but the host's own logic then reads 0). [net-re §5.2b; host-diag 2026-07-01]
     uint8_t player_class = 8;
+    // Equipped-weapon AdmDef index (entity+0x2B0) — the 0x0A off-16 echo default. The npruntime
+    // spawn resolves the WPN_M4AUTO table index when the armory is fed [orig: PlayerClass_InitEntity
+    // @0x4B1116 resolves by name]; 0xFF = none (table-less hosts). (D-NET-143)
+    uint8_t equipped_adm_index = 0xFF;
 };
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)

@@ -24,6 +24,10 @@ struct PlayerIntent {
 	                                  // source; renamed from the `anim` misnomer, witness 2026-07-02)
 	uint8_t  flags_xor = 0;           // uplink flags-xor byte — bits 2-4 XOR into entity+0x24
 	                                  // [orig: case-4 apply; §5.10 extended uplink field map]
+	uint8_t  equipped_adm_index = 0xFF; // entity+0x2B0 equipped-weapon AdmDef index — ingested
+	                                    // from the extended uplink gated AdmDefs[idx].category
+	                                    // < 11, echoed at 0x0A off-16 [orig: @0x4C20A3]
+	                                    // (D-NET-143). 0xFF = none.
 	uint32_t buttons = 0;             // fire / action bitmask
 };
 

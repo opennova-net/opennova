@@ -75,6 +75,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// entity+0x78 = the owning connection's dcb (host loopback dcb / a joiner's ack dcb).
 	// [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
 	spawn.owner_connection_id = conn.connection_id;
+	// Equipped-weapon spawn default = the WPN_M4AUTO armory index, resolved BY NAME like retail
+	// [orig: PlayerClass_InitEntity @0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")];
+	// 0xFF (none) when no armory table is fed (unit-test hosts). A joiner's own extended uplink
+	// overwrites it on the first drained 0x0C. (D-NET-143)
+	const int m4 = world.weapons.index_of("WPN_M4AUTO");
+	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
 
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
 	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]

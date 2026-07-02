@@ -876,7 +876,11 @@ struct PlayerExtendedUplink {
 	uint8_t  anim_def_1 = 0;           // entity+0x130
 	uint8_t  anim_def_2 = 0;           // entity+0x131
 	uint8_t  anim_def_3 = 0;           // entity+0x132
-	uint8_t  reserved_24 = 0;          // read into AL, discarded
+	uint8_t  equipped_adm_index = 0;   // entity+0x2B0 equipped-weapon AdmDef index — case-4 store
+	                                   // @0x4C20A3 gated AdmDefs[idx].category < 11; the host
+	                                   // ECHOES it at 0x0A off-16 (renamed from the reserved_24
+	                                   // "read into AL, discarded" misnomer; witness 2026-07-02,
+	                                   // D-NET-143)
 	uint8_t  stat_byte_0 = 0;          // playerSlot+0x15F78
 	uint8_t  stat_byte_1 = 0;          // playerSlot+0x15F79
 

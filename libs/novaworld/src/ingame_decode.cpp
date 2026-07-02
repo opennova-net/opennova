@@ -605,7 +605,7 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 	out.anim_def_1     = c.u8();
 	out.anim_def_2     = c.u8();
 	out.anim_def_3     = c.u8();
-	out.reserved_24    = c.u8();
+	out.equipped_adm_index = c.u8(); // entity+0x2B0 [orig: case-4 store @0x4C20A3]
 	out.stat_byte_0    = c.u8();
 	out.stat_byte_1    = c.u8();
 	out.weapon_id_0    = c.u16();

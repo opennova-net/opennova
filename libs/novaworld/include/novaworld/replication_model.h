@@ -77,8 +77,12 @@ struct GameEntitySnapshot {
 	// high byte `(v + 0x800000) >> 24` [orig: @0x4c0c77]. Pure degree->BAM widen (no (90-x)
 	// frame inversion — that is yaw-only).
 	int32_t pitch_bam = 0;
-	// entity+0x12C low byte — the player compact record's anim-slot byte [orig: @0x4c0c9c].
+	// entity+0x12C low byte — the player compact record's movement-input byte [orig: @0x4c0c9c].
 	uint8_t move_input_byte = 0;
+	// entity+0x2B0 — the equipped-weapon AdmDef index the player record's off-16 anim_def_index
+	// echoes (uplink ingest @0x4C20A3 / the WPN_M4AUTO spawn default @0x4B1116). 0xFF = none
+	// (the client apply skips it; 0 is a valid index). (D-NET-143)
+	uint8_t equipped_adm_index = 0xFF;
 	// entity+0x24 (Flags) low byte, written UNMASKED to the player compact record's state byte
 	// [orig: @0x4c0c7d — masking is read-side only: local 0xE1 / remote 0xFD]. Also the vehicle
 	// compact record's flags byte [orig: @0x460d22].

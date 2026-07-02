@@ -131,18 +131,25 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			                                            // [orig: @0x4c0c7d; read-side masks
 			                                            // local 0xE1 / remote 0xFD; bit 0x02 =
 			                                            // dead/undeployed, spawn hook on 1->0]
-			rec.player.anim_state_id = 0;      // body/weapon anim-STATE id, entity+0x2B8 ?:
+			rec.player.anim_state_id = 0x2B;   // body/weapon anim-STATE id, entity+0x2B8 ?:
 			                                   // +0x2BC vs the dword_8139E8 state-flags table
-			                                   // [orig: @0x4c0cc7 / apply @0x4c1153]; the anim
-			                                   // FSM is unmodeled — 0 = idle state (safe)
+			                                   // [orig: @0x4c0cc7 / apply @0x4c1153]. The body
+			                                   // FSM is unmodeled — send the retail spawn/idle
+			                                   // default 0x2B (43) [orig: PlayerClass_InitEntity
+			                                   // @0x4B1116 sets +0x2BC = 0x2B], NOT 0: state 0
+			                                   // has no table flags and pins the body to the
+			                                   // null clip (the v15 flicker). Live anim states
+			                                   // need the peer body motor (D-NET-143 residual).
 			rec.player.anim_channel_ratio = 0; // entity+0x188 channel ratio [orig: @0x4c0cf2];
 			                                   // anim channel unmodeled — 0 is the witnessed
 			                                   // null-object value
-			rec.player.anim_def_index = 0xFF;  // ADM anim-def index, entity+0x2B0. 0 is a VALID
-			                                   // index — 0xFF is the null sentinel the apply
-			                                   // skips [orig: @0x4c11f2; witness 2026-07-02:
-			                                   // sending 0 made remote clients apply adm entry 0
-			                                   // every frame]
+			rec.player.anim_def_index = e.equipped_adm_index;
+			                                   // ADM anim-def index, entity+0x2B0 = the player's
+			                                   // equipped-weapon adm index (the extended-uplink
+			                                   // echo / the WPN_M4AUTO spawn default). 0 is a
+			                                   // VALID index — 0xFF is the none sentinel the
+			                                   // apply skips [orig: echo @0x4C20A3, apply-skip
+			                                   // @0x4c11f2] (D-NET-143)
 			// §5.10 health-classification byte (field 17): PACKED `(tier<<4)|(playerClass&0xF)`,
 			// witnessed server-side in Entity_GetHealthClassification @0x4AD4E0 (called from the
 			// case-1 compact write @0x4c0d71, byte store @0x4c0d89 — D-NET-138 FIXED). The client
@@ -389,6 +396,8 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 		intent.pitch = up.pitch;
 		intent.move_input = up.move_input_byte; // entity+0x12C — echoed in the 0x0A off-12
 		intent.flags_xor = up.flags_xor;        // bits 2-4 -> entity+0x24 (crouch/prone family)
+		intent.equipped_adm_index = up.equipped_adm_index; // entity+0x2B0 — echoed at 0x0A off-16
+		                                                   // [orig: @0x4C20A3] (D-NET-143)
 		intent.buttons = 0; // extended uplink carries flagsXor/anim-defs, not a buttons word
 		apply_player_intent(world, intent);
 	}

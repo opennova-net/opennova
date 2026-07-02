@@ -296,6 +296,24 @@ Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_
 		return ERR_CANT_OPEN;
 	world_->weapons = opennova::np::build_weapon_table(file);
 	def_free_weapons(&file);
+
+	// The host's own player spawns in finish_load, BEFORE this feed — re-stamp its equipped
+	// default now that WPN_M4AUTO resolves by name [orig: PlayerClass_InitEntity @0x4B1116].
+	// Joiners spawn after the feed and get the default in Server_BuildPlayerInfoAndAdd.
+	// (D-NET-143)
+	const int m4 = world_->weapons.index_of("WPN_M4AUTO");
+	if (m4 >= 0) {
+		std::vector<opennova::world::EntityHandle> handles;
+		world_->registry.for_each([&](const opennova::world::Entity &e) {
+			if (e.item_id == opennova::world::kPlayerInfantryTypeId &&
+			    e.equipped_adm_index == 0xFF)
+				handles.push_back(e.handle);
+		});
+		for (const opennova::world::EntityHandle h : handles) {
+			if (opennova::world::Entity *e = world_->registry.get(h))
+				e->equipped_adm_index = static_cast<uint8_t>(m4);
+		}
+	}
 	return OK;
 }
 

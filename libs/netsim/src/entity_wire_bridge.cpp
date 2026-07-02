@@ -110,6 +110,9 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	// it) — NOT the visual anim slot: remote players are motor-driven from replicated input
 	// [orig: case-2 apply @0x4c11ec; witness 2026-07-02 corrected the anim_slot misnomer].
 	s.move_input_byte = e.net_move_input;
+	// The equipped-weapon adm index (entity+0x2B0) — the 0x0A off-16 echo source: uplink
+	// ingest for peers, the WPN_M4AUTO spawn default for host-spawned players (D-NET-143).
+	s.equipped_adm_index = e.equipped_adm_index;
 	s.state_flags = static_cast<uint8_t>(e.flags & 0xFF); // entity+0x24 low byte, unmasked
 	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : 0xFFFFu;
 	return s;
@@ -425,6 +428,18 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	ent->net_move_input = intent.move_input;
 	ent->flags ^= (static_cast<uint32_t>(intent.flags_xor) & 0x1Cu);
 
+	// Equipped-weapon adm index (entity+0x2B0), the 0x0A off-16 echo source. Retail gates the
+	// ingest by AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; a table-less world
+	// (unit paths — a live host always feeds weapon.def) accepts the byte verbatim, and an
+	// index with no table entry (including the 0xFF none sentinel) is NOT stored, mirroring
+	// the failed AdmDef_GetEntryByIndex leg. (D-NET-143)
+	if (world.weapons.empty()) {
+		ent->equipped_adm_index = intent.equipped_adm_index;
+	} else if (const world::WeaponTableEntry *we =
+	                   world.weapons.by_index(intent.equipped_adm_index)) {
+		if (we->category < 11) ent->equipped_adm_index = intent.equipped_adm_index;
+	}
+
 	// 5. Mirror the engine-frame store (AiEntity) and stage the smooth-target the CLIENT
 	//    interpolation consumes; mark the entity net-snapped so the infantry motor SKIPS it
 	//    (the host does not re-simulate a read-applied peer). [orig: case 4 staging +0x234/
@@ -466,6 +481,11 @@ PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::Ai
 	// exported from the motor, carry the last known value (0 = idle). [witness 2026-07-02:
 	// corrected from the anim_slot misnomer — this byte is locomotion input, not an anim slot.]
 	up.move_input_byte = e.net_move_input;
+	// The equipped-weapon adm index for our own player — the host ingests it (category-gated)
+	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def. Carries
+	// the spawn default (WPN_M4AUTO) until joiner-side weapon switching exports a live value.
+	// [orig: the client fills byte 24 from entity+0x2B0; case-4 store @0x4C20A3] (D-NET-143)
+	up.equipped_adm_index = e.equipped_adm_index;
 	return up;
 }
 

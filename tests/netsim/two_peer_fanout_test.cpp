@@ -653,6 +653,7 @@ bool run_0a_player_record_field_sources() {
 	e->net_move_input = 0x21; // the uplink-ingested +0x12C movement-input byte the record echoes
 	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
 	e->pitch = 45;
+	e->equipped_adm_index = 0x09; // the equipped-weapon adm index the record's off-16 echoes
 
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
@@ -678,8 +679,15 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(rec->player.move_input_byte == 0x21, "movement-input byte echoed")) return false;
 	if (!expect((rec->player.state_flags & 0x40) != 0, "state flags carried unmasked")) return false;
 	if (!expect(rec->player.vehicle_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
-	// ADM anim-def index: 0 is a VALID adm entry — the null sentinel is 0xFF [orig: @0x4c11f2].
-	if (!expect(rec->player.anim_def_index == 0xFF, "anim-def null sentinel is 0xFF, not 0"))
+	// ADM anim-def index (off-16) = the entity's equipped-weapon adm index (the uplink echo /
+	// spawn default); 0 is a VALID adm entry — the none sentinel is 0xFF [orig: echo @0x4C20A3,
+	// apply-skip @0x4c11f2] (D-NET-143).
+	if (!expect(rec->player.anim_def_index == 0x09, "anim-def index echoes equipped_adm_index"))
+		return false;
+	// Anim-STATE id (off-14): the body FSM is unmodeled — the wire carries the retail
+	// spawn/idle default 0x2B (43), never 0 (the null clip; the v15 flicker) [orig:
+	// PlayerClass_InitEntity @0x4B1116] (D-NET-143).
+	if (!expect(rec->player.anim_state_id == 0x2B, "anim-state id is the 0x2B idle default"))
 		return false;
 	std::printf("PASS 0a_player_record_field_sources\n");
 	return true;
