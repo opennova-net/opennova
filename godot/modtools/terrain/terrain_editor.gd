@@ -14,7 +14,6 @@ const HM_SIZE := 1024
 const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
-const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
@@ -22,7 +21,6 @@ const TerrainEditorDocument = preload("res://modtools/terrain/terrain_editor_doc
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
-const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
 const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
@@ -41,7 +39,10 @@ const DEFAULT_SECTOR_PATTERN := [
 @onready var terrain_world_root: Node3D = $TerrainWorldRoot
 @onready var terrain_mesh: EditorTerrainMesh = $TerrainWorldRoot/EditorTerrainMesh
 @onready var camera: Camera3D = $TerrainWorldRoot/FlyCamera
-@onready var workstation = $CanvasLayer/EditorWorkstation
+
+# The shell, injected by the app root (EditorApp) before set_editor; null in
+# headless tests, so every use guards.
+var workstation: Node = null
 
 var _document: TerrainEditorDocument = TerrainEditorDocument.new()
 var _brush_session: TerrainEditorBrushSession = TerrainEditorBrushSession.new()
@@ -202,21 +203,17 @@ func get_height_revision() -> int:
 var _last_open_dir: String = ""
 var _last_save_dir: String = ""
 var _last_export_dir: String = ""
-var _previous_window_min_size: Vector2i = Vector2i.ZERO
 var _ui_state_version: int = 0
 var _uses_workspace_viewport: bool = false
 var _viewport_active: bool = false
 var _viewport_edit_input_active: bool = false
 var _viewport_mouse_position: Vector2 = Vector2.ZERO
 
-## The embedded MCP agent service (modtools/mcp/editor_mcp_service.gd), or
-## null in runtime_game builds. The Settings popup reaches it through here.
-var mcp_service: Node = null
-
 
 func _ready() -> void:
-	get_tree().auto_accept_quit = false
-	_configure_editor_window()
+	# World furniture and persisted state only. The app root (EditorApp._ready,
+	# which runs after this) injects the environment document + workstation,
+	# binds the shell, boots MCP, and seeds the initial terrain.
 	camera.position = Vector3(512, 80, 600)
 	camera.rotation_degrees = Vector3(-30, 0, 0)
 	_init_environment_preview()
@@ -228,44 +225,10 @@ func _ready() -> void:
 	if camera.has_signal("escape_pressed"):
 		camera.connect("escape_pressed", Callable(self, "_on_camera_escape"))
 	_load_editor_state()
-	if workstation and workstation.has_method("set_editor"):
-		workstation.set_editor(self)
-	_init_mcp_service()
-	new_terrain()
 
 
-func _exit_tree() -> void:
-	var window := get_window()
-	if window:
-		window.min_size = _previous_window_min_size
-
-
-# Boot the embedded MCP (agent) server. ONED-only by construction: the runtime
-# export excludes modtools/*, so this is the single start path; the feature
-# guard is belt-and-braces. Whether it actually listens is McpSettings'
-# decision (on by default, never headless, --mcp-off/--mcp-port override).
-func _init_mcp_service() -> void:
-	if OS.has_feature("runtime_game"):
-		return
-	var service := EditorMcpService.new()
-	service.name = "McpService"
-	add_child(service)
-	service.setup(self, workstation)
-	mcp_service = service
-
-
-func _configure_editor_window() -> void:
-	var window := get_window()
-	if window == null:
-		return
-	_previous_window_min_size = window.min_size
-	window.min_size = EDITOR_MIN_WINDOW_SIZE
-	if window.mode == Window.MODE_WINDOWED:
-		var next_size := window.size
-		next_size.x = maxi(next_size.x, EDITOR_MIN_WINDOW_SIZE.x)
-		next_size.y = maxi(next_size.y, EDITOR_MIN_WINDOW_SIZE.y)
-		if next_size != window.size:
-			window.size = next_size
+func set_workstation(value: Node) -> void:
+	workstation = value
 
 
 ## Forward a short status message to the workstation UI.
@@ -359,11 +322,9 @@ func _init_water_plane() -> void:
 	_water_node.set_height_override(float(get_water_height()))
 
 
+# World-side preview nodes only. The environment DOCUMENT (EnvironmentEditor)
+# is app-owned and arrives later via set_environment_editor.
 func _init_environment_preview() -> void:
-	environment_editor = EnvironmentEditorScript.new()
-	environment_editor.name = "EnvironmentEditor"
-	add_child(environment_editor)
-
 	_environment_node = Node.new()
 	_environment_node.name = "EditorEnvironment"
 	_environment_node.set_script(NovaEnvironmentScript)
@@ -384,6 +345,12 @@ func _init_environment_preview() -> void:
 	_weather_node.environment_path = NodePath("../EditorEnvironment")
 	terrain_world_root.add_child(_weather_node)
 
+
+## Wire the app-owned environment document into the world preview.
+func set_environment_editor(value) -> void:
+	environment_editor = value
+	if environment_editor == null:
+		return
 	if not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
 		environment_editor.environment_changed.connect(_on_environment_editor_changed)
 	if not environment_editor.state_changed.is_connected(_on_environment_state_changed):
@@ -2554,11 +2521,3 @@ func _get_material() -> ShaderMaterial:
 	return terrain_mesh.get_material()
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		# Embedded in the editor shell? The shell owns the unified close guard,
-		# which already lists this workspace among the dirty ones. A standalone
-		# terrain scene (no workstation) has no guard of its own and just quits.
-		if workstation != null:
-			return
-		get_tree().quit()

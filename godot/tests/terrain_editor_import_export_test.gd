@@ -33,7 +33,7 @@ func after_each() -> void:
 
 
 func test_dvxi5_import_then_export_matches_fixture_bytes() -> void:
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 
 	assert_eq(editor.open_trn(_fixture_path("Dvxi5.trn")), OK, "Dvxi5 fixture should import through the editor.")
 	assert_false(editor.is_dirty, "A no-edit import should remain clean before export.")

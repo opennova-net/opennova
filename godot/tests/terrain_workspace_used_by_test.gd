@@ -53,7 +53,7 @@ func test_asset_dock_offers_used_by_without_triggering_index_build() -> void:
 	ref_file.store_string("existence is what resolve_file probes")
 	ref_file.close()
 
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	assert_eq(editor.open_trn(_fixture_trn()), OK, "the dvxi5 fixture opens")
 
@@ -106,7 +106,7 @@ func test_asset_dock_offers_used_by_without_triggering_index_build() -> void:
 
 
 func test_asset_dock_without_shell_mounts_no_strip() -> void:
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 
 	var workspace = autofree(TerrainWorkspaceScript.new(editor))
@@ -124,7 +124,7 @@ func test_asset_dock_without_shell_mounts_no_strip() -> void:
 
 
 func test_view_guides_drive_grid_guide_and_axes() -> void:
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 
 	var workspace = autofree(TerrainWorkspaceScript.new(editor))

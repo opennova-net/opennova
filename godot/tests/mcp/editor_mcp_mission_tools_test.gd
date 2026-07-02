@@ -8,9 +8,9 @@ extends GutTest
 #
 # Assertions read mission records (never MultiMesh readbacks — headless gotcha).
 
-# The root editor scene (renamed terrain_editor.tscn -> editor_main.tscn in #151);
-# its root is the TerrainEditor node, so open_trn() loads live terrain heights.
-const TerrainEditorScene = preload("res://modtools/editor/editor_main.tscn")
+# The editor scene: an EditorApp root hosting the TerrainEditor node, whose
+# open_trn() loads live terrain heights.
+const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 const MissionWorkspace := preload("res://modtools/editor/mission_workspace.gd")
 
 const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
@@ -52,7 +52,7 @@ func _abs(p: String) -> String:
 
 
 func before_each() -> void:
-	editor = add_child_autofree(TerrainEditorScene.instantiate())
+	editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	assert_eq(editor.open_trn(_abs(DVXI5_TRN)), OK, "the dvxi5 fixture terrain loads")
 	workspace = MissionWorkspace.new(editor)
 	assert_eq(int(workspace.new_current()), OK)

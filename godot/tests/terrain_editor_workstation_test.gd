@@ -30,6 +30,9 @@ class DirtyTerrainStub:
 	func is_export_running() -> bool:
 		return false
 
+	func set_viewport_active(_active: bool, _edit_input: bool) -> void:
+		pass
+
 	func open_trn(path: String) -> Error:
 		opened.append(path)
 		return OK
@@ -66,7 +69,8 @@ func after_each() -> void:
 	# restore below (a runtime error mid-test skips the in-body teardown). Kill
 	# any lingering children NOW so their exit-time writes land first.
 	for child in get_children():
-		if child is TerrainEditor or (child is Control and child.get_script() == EditorWorkstationScript):
+		if child is EditorApp or child is TerrainEditor \
+				or (child is Control and child.get_script() == EditorWorkstationScript):
 			child.queue_free()
 	await get_tree().process_frame
 	# Persistence tests write user://terrain_editor_state.cfg; restore it so they
@@ -797,9 +801,10 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 
 
 func test_camera_button_exposes_global_viewport_settings() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 
 	var top_bar := workstation.get_node("%TopBar") as PanelContainer
 	var camera_button: Button = workstation.get_node("%CameraToggleButton")
@@ -838,9 +843,10 @@ func test_camera_button_exposes_global_viewport_settings() -> void:
 
 
 func test_camera_button_targets_object_preview_camera_when_object_is_active() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var host: Control = workstation.get_node("%ViewportHost")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
@@ -873,9 +879,10 @@ func test_camera_button_targets_object_preview_camera_when_object_is_active() ->
 
 
 func test_object_workspace_uses_only_global_environment_viewport_button() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var host: Control = workstation.get_node("%ViewportHost")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.OBJECT)
@@ -894,9 +901,10 @@ func test_object_workspace_uses_only_global_environment_viewport_button() -> voi
 
 
 func test_viewport_popups_are_mutually_exclusive_and_escape_closes_active_popup() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var environment_editor = add_child_autofree(EnvironmentEditorScript.new())
 	environment_editor.create_default_environment(false)
 	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.ENVIRONMENT).set_environment_editor(environment_editor)
@@ -1014,9 +1022,10 @@ func test_workstation_mounts_workspace_specific_right_docks() -> void:
 
 
 func test_workspace_switching_mounts_terrain_and_mission_viewports() -> void:
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 	var host: Control = workstation.get_node("%ViewportHost")
 
 	assert_eq(host.get_child_count(), 1, "Mission should own the viewport host by default.")
@@ -2173,9 +2182,10 @@ func test_camera_panel_detaches_and_force_redocks_keeping_the_preference() -> vo
 	# The camera panel shares the host machinery but has its own shell guards:
 	# detach needs a live camera, and losing the camera force-redocks WITHOUT
 	# erasing the user's floating preference (transient editor rebinds).
-	var editor: TerrainEditor = add_child_autofree(EditorMainScene.instantiate())
+	var app: EditorApp = add_child_autofree(EditorMainScene.instantiate())
 	await get_tree().process_frame
-	var workstation: EditorWorkstation = editor.get_node("CanvasLayer/EditorWorkstation")
+	var editor: TerrainEditor = app.get_terrain_editor()
+	var workstation: EditorWorkstation = app.workstation
 
 	workstation._set_camera_popup_visible(true)
 	assert_true((workstation.get_node("%CameraPopup") as Control).visible,

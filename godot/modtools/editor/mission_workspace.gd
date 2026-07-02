@@ -83,6 +83,10 @@ func set_terrain_editor(value: Node) -> void:
 
 
 func bind_to_editor(value: Node) -> void:
+	# The shell binds the app root; unwrap to the terrain domain editor (the
+	# mission edit world lives under it). Bare TerrainEditor binds pass through.
+	if value != null and value.has_method("get_terrain_editor"):
+		value = value.get_terrain_editor()
 	set_terrain_editor(value)
 
 

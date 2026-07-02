@@ -29,7 +29,7 @@ func after_each() -> void:
 
 
 func test_new_mission_end_to_end_on_a_real_terrain() -> void:
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	assert_eq(editor.open_trn(_abs(DVXI5_TRN)), OK, "the real dvxi5 terrain loads through the editor")
 
 	# The New Mission flow the shell drives: can_new lights the button, new_current creates it.

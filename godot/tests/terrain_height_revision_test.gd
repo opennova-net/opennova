@@ -11,7 +11,7 @@ const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
 
 
 func test_new_terrain_bumps_and_revision_is_monotonic() -> void:
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	var rev0: int = editor.get_height_revision()
 	editor.new_terrain()
@@ -22,7 +22,7 @@ func test_new_terrain_bumps_and_revision_is_monotonic() -> void:
 
 
 func test_surface_only_history_restore_does_not_bump() -> void:
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	editor.new_terrain()
 	var rev: int = editor.get_height_revision()
@@ -40,7 +40,7 @@ func test_sample_height_world_reads_the_live_editable_surface() -> void:
 	# the LIVE editable heightmap (what brushes mutate and placement raycasts
 	# ground on), never the baked CPT — which height edits leave stale and which a
 	# never-exported project terrain does not have at all.
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	editor.new_terrain()
 	# A fresh terrain's active region is centred on the world origin.
@@ -63,7 +63,7 @@ func test_batch_sampler_matches_the_scalar_live_surface_sampler() -> void:
 	# pins the sample LOCATION as well as the height source (a flat fill cannot
 	# tell a remap bug from a correct read), and it is written AFTER new_terrain,
 	# so parity here also proves the batch path reads live edits.
-	var editor = add_child_autofree(EditorMainScene.instantiate())
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	editor.new_terrain()
 	var img: Image = editor.terrain_mesh.get_heightmap_image()

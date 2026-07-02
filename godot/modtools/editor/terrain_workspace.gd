@@ -38,6 +38,10 @@ func set_terrain_editor(value: Node) -> void:
 
 
 func bind_to_editor(value: Node) -> void:
+	# The shell binds the app root; unwrap to the terrain domain editor. Tests
+	# that bind a bare TerrainEditor keep working (no unwrap hook -> as-is).
+	if value != null and value.has_method("get_terrain_editor"):
+		value = value.get_terrain_editor()
 	set_terrain_editor(value)
 
 

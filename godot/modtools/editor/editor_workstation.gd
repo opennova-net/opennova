@@ -2091,15 +2091,7 @@ func _save_resource_state() -> void:
 
 
 func _preferred_resource_root_dir() -> String:
-	var root := _resource_library.get_root_dir()
-	if not root.is_empty():
-		return root
-	if editor != null:
-		if editor.has_current_project_dir():
-			return editor.get_current_project_dir()
-		if not editor.get_last_open_dir().is_empty():
-			return editor.get_last_open_dir()
-	return ""
+	return _resource_library.get_root_dir()
 
 
 func _on_workspace_action_pressed(action_id: int) -> void:
@@ -2248,34 +2240,23 @@ func _open_files_dialog(title: String, filters: PackedStringArray, on_pick: Call
 	_ensure_file_dialogs().open_files(title, filters, on_pick, current_dir)
 
 
+# Dialog start dirs come from the workspace hooks alone (get_save_dialog_dir /
+# get_export_dialog_dir); an empty result falls back to the OS default. The
+# terrain-editor fallback chain died with the terrain-rooted boot.
 func _preferred_save_dir(workspace: EditorWorkspace = null) -> String:
 	if workspace == null:
 		workspace = _get_active_workspace()
 	if workspace != null:
-		var dir: String = workspace.get_save_dialog_dir()
-		if not dir.is_empty():
-			return dir
-	if editor == null:
-		return ""
-	if editor.has_current_project_dir():
-		return editor.get_current_project_dir()
-	return editor.get_last_save_dir()
+		return workspace.get_save_dialog_dir()
+	return ""
 
 
 func _preferred_export_dir(workspace: EditorWorkspace = null) -> String:
 	if workspace == null:
 		workspace = _get_active_workspace()
 	if workspace != null:
-		var dir: String = workspace.get_export_dialog_dir()
-		if not dir.is_empty():
-			return dir
-	if editor == null:
-		return ""
-	if not editor.get_last_export_dir().is_empty():
-		return editor.get_last_export_dir()
-	if editor.has_current_project_dir():
-		return editor.get_current_project_dir()
-	return editor.get_last_save_dir()
+		return workspace.get_export_dialog_dir()
+	return ""
 
 
 func _on_save_pressed(workspace: EditorWorkspace = null) -> void:
