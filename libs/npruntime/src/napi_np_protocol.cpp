@@ -529,6 +529,9 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleRes
 				other.link.transport->host_send(
 						0x46, encode_player_sync_removal(slot, /*with_ack=*/false));
 			}
+			// Roster shrank — stale every survivor's 0x16 so HUD player counts follow
+			// the leave too (D-NET-155).
+			++ctx.np_protocol.roster_generation;
 		}
 	}
 	erase_connection(ctx, peer);
@@ -618,16 +621,26 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 			ship_burst_messages(conn, step.messages, to.outbound);
 		}
 
-		// Once this joiner has spawned, RE-PUSH the 0x16 player-list with the grown roster (now
-		// including this joiner's own slot). The post-handshake 0x16 went out BEFORE the spawn (host
-		// only); the client needs to see its OWN slot to bind its local player and deploy (golden:
-		// 0x16 31→39 just before the joiner's first C2S 0x0C). One-shot per connection.
-		if (conn.type == 1 && conn.burst.spawned && !conn.reply.roster_repushed) {
+		// Roster versioning (D-NET-155): the first time we observe ANY connection spawned,
+		// the roster grew — bump the generation so EVERY in-match client refreshes its 0x16
+		// player list (the HUD player count follows it). The old one-shot-per-connection
+		// re-push only reached the JOINING client, so existing clients' lists went stale
+		// when a later joiner arrived (v29: HUD stuck at 2 with 3 players in).
+		if (conn.burst.spawned && !conn.reply.roster_counted) {
+			conn.reply.roster_counted = true;
+			++ctx.np_protocol.roster_generation;
+		}
+		// (Re)push the list to a spawned joiner whenever its seen generation is stale.
+		// Covers the joiner's OWN spawn — the client needs its own slot to bind its local
+		// player and deploy (golden: 0x16 31→39 just before the first C2S 0x0C) — and every
+		// later roster change (join/leave). One framed push per generation per connection.
+		if (conn.type == 1 && conn.burst.spawned &&
+		    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
 			std::vector<ProtocolMessage> roster_reply{
 					build_player_list_message(ctx.config, ctx.np_protocol.connection_list, ctx.world)};
 			std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
 			if (!dg.empty()) to.outbound.push_back(std::move(dg));
-			conn.reply.roster_repushed = true;
+			conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the

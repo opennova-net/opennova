@@ -114,9 +114,17 @@ target) in net-re D-NET-146.
   Server_TickUpdate death routing + host respawn release → NovaSimulation::load_ammo_table.
   Pinned by `npruntime_round_sim_test` + `def_parse_ammo` (real 5.56 fixture fields).
   MVP deferrals in round_sim.h: bone zones, drag/gravity, spread, vehicles, explosion kill
-  zones, arm-age child, 0x52/0x54/0x32, scoring. **NEXT = v29 live verify — TWO retail
-  clients (shooter + observer: the positive tag-2 wire witness) + shoot the host player
-  (death + kill feed + respawn).**
+  zones, arm-age child, 0x52/0x54/0x32, scoring. **v29 LIVE (same day, 2 retail clients):**
+  kills + death broadcast worked (one 0x13+0x1E pair on the wire to both clients; victim
+  redeployed) but three defects surfaced, all fixed same-day: **D-NET-153** fire-direction
+  frame (0x06 yaw = the MISSION BEARING, not the euler_z 90−yaw frame — wire-proven off the
+  duel geometry; caused "first joiner kills second, second can't kill first" via the 45°
+  coincidence), **D-NET-154** tag-2 starvation (rounds got only the entity walk's budget
+  leftovers = 0 with a real vehicle set + the watermark still advanced — rounds now select
+  FIRST), **D-NET-155** stale 0x16 roster (one-shot re-push to the joiner only → HUD count
+  stuck at 2; now generation-driven to every in-match client, golden 31→39 preserved).
+  Anims = the tracked body-motor item. **NEXT = v30 live: kill symmetry both ways + the
+  positive tag-2 witness + HUD count 3.**
 
 **Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
 channel ratio — remote players render idle-posed; the v28 diff confirms `animRatio` still zero);

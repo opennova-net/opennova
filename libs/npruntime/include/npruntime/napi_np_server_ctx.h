@@ -84,6 +84,13 @@ struct NapiNPProtocol {
 	// [orig +0xEBC] connection_list — the NapiListHead SendFiltered / timeouts walk. Modeled as a
 	// vector of nodes (faithful structural translation of the intrusive list).
 	std::vector<NapiNPConnection> connection_list;
+
+	// Reimpl-owned roster version: bumped when any player spawns or disconnects; each
+	// connection's roster_seen_gen drives its 0x16 player-list (re)push so every client's
+	// HUD count tracks the LIVE roster (D-NET-155) [orig: the retail host re-broadcasts
+	// the list via Server_BuildAndBroadcastScoreboard @0x50de00 — its exact trigger set
+	// is a tracked follow-up; the golden single-joiner 31→39 grow is preserved].
+	uint32_t roster_generation = 1;
 };
 
 // [orig: g_napi_np_ctx @0xB5CBC8] NapiNPServerCtx (§6.3) — the game-level singleton, the full

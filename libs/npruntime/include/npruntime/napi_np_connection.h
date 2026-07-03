@@ -143,8 +143,14 @@ struct SessionReplyState {
 	bool mission_status_received = false; // 0x0B mission-file status report seen
 	bool roster_pushed = false;           // 0x16/0x46 roster PUSHED proactively post-handshake (once) —
 	                                      // the working host pushes it before the joiner ever sends 0x0A
-	bool roster_repushed = false;         // 0x16 RE-PUSHED with the grown roster once this player spawned
-	                                      // (golden: 0x16 31→39 when the joiner is added, just before deploy)
+	// Roster versioning (D-NET-155): roster_counted marks this connection's spawn as
+	// tallied into NapiNPProtocol.roster_generation; roster_seen_gen is the last roster
+	// version 0x16-pushed to this client — stale => re-push (covers the own-spawn grow,
+	// golden 0x16 31→39 just before deploy, AND every later join/leave; the old
+	// one-shot-per-connection re-push left existing clients' player lists stale when a
+	// later joiner arrived — the v29 stuck HUD count).
+	bool roster_counted = false;
+	uint32_t roster_seen_gen = 0;
 
 	// Joiner pose cached from the pre-spawn C2S 0x0C — the host's pose fallback when no World entity
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).

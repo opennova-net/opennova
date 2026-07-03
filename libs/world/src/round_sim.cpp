@@ -87,12 +87,15 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params) {
     }
     if (slot < 0) return -1; // pool exhausted [orig: allocator scan @0xB7DFA0 flags]
 
-    // Wire fire direction -> mission-frame unit vector. The engine-frame yaw BAM maps to
-    // a mission bearing via the same (90deg - yaw) inversion the 0x0A heading uses
-    // (angle.h, entity_wire_bridge); pitch is mission-signed (positive = up), planar
-    // component scaled by cos(pitch) [orig: the SpawnRound yaw/pitch trig @0x4ec430].
-    const double yaw_rad = double(params.dir_yaw_bam) * kRadPerBam;
-    const double bearing = kPi / 2.0 - yaw_rad;
+    // Wire fire direction -> mission-frame unit vector. The 0x06 yaw BAM IS the mission
+    // bearing directly — NOT the 0x0A euler_z heading frame (which is 90deg - mission
+    // yaw): wire-validated on the v29 duel baselines (wire yaw -122.0/45.6 deg vs true
+    // shooter->victim bearings -122.4/44.2 deg; the old 90-minus mapping missed by 26 deg
+    // and only coincided on the 45-deg diagonal — the asymmetric-kill bug, D-NET-153).
+    // The original spawner builds X=sinYaw*cosPitch, Y=cosYaw*cosPitch, Z=sinPitch in
+    // engine axes [orig: RoundData_SpawnRound @0x4ec5e9 / Weapon_SpawnSingleProjectile
+    // @0x4ebf51]; in this mission frame that lands as (cos yaw, sin yaw, sin pitch).
+    const double bearing = double(params.dir_yaw_bam) * kRadPerBam;
     const double pitch = double(params.dir_pitch_bam) * kRadPerBam;
     const double cp = std::cos(pitch);
     const double speed_per_tick = double(ammo->velocity) / 62.0; // [orig: speed/62 @0x4ec508]

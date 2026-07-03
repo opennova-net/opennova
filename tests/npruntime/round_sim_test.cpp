@@ -144,12 +144,12 @@ int main() {
 	world.ai = &ai;
 	world.player_item_hp = 150; // items.def Player hp (D-NET-144)
 
-	// Host player down-range past the victim on the same +Y line; shooter at the origin.
-	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0, 0.0f, 60.0f, 10.0f));
+	// Host player down-range past the victim on the same +X line; shooter at the origin.
+	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0, 60.0f, 0.0f, 10.0f));
 	const w::EntityHandle hb =
 			w::spawn_remote_player(world, player_spawn(0xFFF1, 0.0f, 0.0f, 10.0f)); // shooter
 	const w::EntityHandle hc =
-			w::spawn_remote_player(world, player_spawn(0xFFF2, 0.0f, 30.0f, 10.0f)); // victim
+			w::spawn_remote_player(world, player_spawn(0xFFF2, 30.0f, 0.0f, 10.0f)); // victim
 	if (!expect(ha.valid() && hb.valid() && hc.valid(), "three players spawned")) return 1;
 	if (!expect(world.registry.get(hc)->health == 150, "victim spawns at template hp 150"))
 		return 1;
@@ -203,8 +203,8 @@ int main() {
 	const PlayerReplicationState anchor{};
 
 	// --- 1. Fire spawns one live round with the witnessed velocity step. ---
-	// Wire yaw BAM 0 -> mission bearing 90 deg = +Y (the (90 - yaw) frame, angle.h);
-	// muzzle at torso height (victim hit sphere centers at z + 0.9).
+	// Wire yaw BAM 0 -> mission bearing 0 = +X: the 0x06 yaw IS the mission bearing
+	// (v29 wire-validated; D-NET-153). Muzzle at torso height (hit spheres at z + 0.9).
 	const int32_t muzzle_z = int32_t((10.0 + 0.9) * 65536.0);
 	dispatch_fire(roster[1], roster, world, fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
 	if (!expect(world.round_sim.active_count == 1, "one live round after the fire")) return 1;
@@ -216,12 +216,12 @@ int main() {
 		if (!expect(std::fabs(speed - 854.0f / 62.0f) < 0.01f,
 		            "round speed = ammo velocity / 62 per tick [orig: @0x4ec508]"))
 			return 1;
-		if (!expect(r.vel.y > 13.0f && std::fabs(r.vel.x) < 0.1f && std::fabs(r.vel.z) < 0.1f,
-		            "wire yaw BAM 0 flies +Y (the 90-minus frame)"))
+		if (!expect(r.vel.x > 13.0f && std::fabs(r.vel.y) < 0.1f && std::fabs(r.vel.z) < 0.1f,
+		            "wire yaw BAM 0 flies +X (bearing = wire yaw; D-NET-153)"))
 			return 1;
 	}
 
-	// --- 2. Three ticks reach the victim at y=30; the hit applies the kinetic number:
+	// --- 2. Three ticks reach the victim at x=30; the hit applies the kinetic number:
 	// min(62*13.77, 1219)=854 -> 854*62/875 = 60. ---
 	for (int i = 0; i < 3; ++i) np::Server_TickUpdate(ctx, anchor);
 	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
@@ -265,7 +265,7 @@ int main() {
 			return 1;
 		const int16_t px = int16_t(f[4] | (f[5] << 8));
 		const int16_t py = int16_t(f[6] | (f[7] << 8));
-		if (!expect(px == 0 && py == 30, "0x1E event position in metres")) return 1;
+		if (!expect(px == 30 && py == 0, "0x1E event position in metres")) return 1;
 	}
 	if (!expect(ctx.respawn_queue.empty(), "a client-owned victim does NOT auto-respawn"))
 		return 1;
@@ -283,12 +283,12 @@ int main() {
 		// Displace the corpse to prove the release snaps back [orig: the D-NET-66
 		// death/respawn teleport].
 		w::Entity *host = world.registry.get(ha);
-		host->position.y = 12.0f;
+		host->position.x = 12.0f;
 		for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx, anchor);
 		if (!expect(ctx.respawn_queue.empty(), "respawn released after the timer")) return 1;
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;
-		if (!expect(std::fabs(host->position.y - 60.0f) < 0.01f,
+		if (!expect(std::fabs(host->position.x - 60.0f) < 0.01f,
 		            "respawn snaps to the spawn point"))
 			return 1;
 	}

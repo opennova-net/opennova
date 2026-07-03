@@ -2108,8 +2108,8 @@ ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[
 | 8 | 4 | `pos_x` (i32 LE, 16.16) | shooter world position at fire moment (entity+4 + map origin); → `dest[4]` |
 | 12 | 4 | `pos_y` | → `dest[5]` |
 | 16 | 4 | `pos_z` | → `dest[6]` |
-| 20 | 4 | `dir_x` (i32 LE) | fire direction — host applies `<< 16` (`dir_x_shifted`); wire is raw i32 LE; → `dest[7]` |
-| 24 | 4 | `dir_y` | same `<< 16` shift; → `dest[8]` |
+| 20 | 4 | `dir_x` (i32 LE) | fire YAW as a 16.16 TURN FRACTION — the MISSION BEARING directly, NOT the 0x0A euler_z heading frame (which is 90° − yaw): v29 wire-proof, two duel baselines within 1.4° (D-NET-153). Host applies `<< 16` (= BAM32, `dir_x_shifted`); → `dest[7]` |
+| 24 | 4 | `dir_y` | fire PITCH, same encoding + `<< 16` shift; → `dest[8]` |
 | 28 | 2 | `target_handle` (u16 LE) | hit entity; `0xFFFF` = no specific target; → `dest[16]` |
 | 30 | 2 | `hit_part` (u16 LE) | body-part / collision sub-section index; → `dest[17]` |
 | 32 | 1 | `extra_byte1` (u8) | → `dest[18]` |
@@ -5343,6 +5343,17 @@ host respawn snap). MVP deferrals tracked in round_sim.h + here: bone-zone multi
 explosion kill zones, arm-age child swap, 0x52/0x54/0x32 emits, scoring, the shooter-class
 0.9/1.1 bytes.
 
+**v29 LIVE (2026-07-03, two retail clients + the host player,
+`.scratch/retail_join_v29_game.pcapng`):** the pipeline worked end-to-end — 35 C 0x06
+across both joiners, one kill applied host-side, and the death broadcast REACHED THE WIRE
+(one S2C 0x13 + 0x1E pair delivered to BOTH clients; the killed joiner redeployed through
+its own deploy request). Three defects surfaced and were fixed same-day: the fire-direction
+frame (D-NET-153 — the kill asymmetry the user reported), tag-2 budget starvation
+(D-NET-154 — zero round events despite live observers), and the stale 0x16 roster
+(D-NET-155 — HUD player count stuck). The positive tag-2 witness and the corrected-frame
+kill symmetry re-verify in v30. The "anims not quite correct" report is the tracked
+body-motor item (off-14 states / off-15 channel ratio), not a new defect.
+
 **Port follow-ups (witness at port time):** the payload writers
 (`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
 `NetPacket_WriteEntityHandleWithByte`, `NetPacket_WriteEntityHandleAndTeam`) byte layouts;
@@ -6518,6 +6529,40 @@ harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (t
 promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
+
+**D-NET-155** [reimpl gap, FIXED 2026-07-03 (v29)] **The 0x16 player-list re-push was
+one-shot-per-connection to the JOINING client only — every existing client's roster (and
+its HUD player count) went stale when a later joiner arrived** (v29: three players in, the
+count stuck at 2). FIXED: a roster generation on `NapiNPProtocol` (bumped on every
+observed spawn and on the disconnect teardown) + a per-connection `roster_seen_gen`; every
+spawned type-1 connection re-receives the framed 0x16 whenever its generation is stale.
+The golden single-joiner 31→39 grow is preserved byte-for-byte (one push, same tick;
+golden ctests green). [orig: the retail broadcast is `Server_BuildAndBroadcastScoreboard
+@ 0x50DE00` — its exact trigger set is a tracked follow-up.]
+
+**D-NET-154** [reimpl divergence, FIXED 2026-07-03 (v29)] **Tag-2 round events starved to
+ZERO on the wire: the grouped-order port gave `select_round_events` only the budget
+LEFTOVER after the tag-1 entity walk.** A real-world entity set (players + ~21 vehicles)
+fills the 600-B frame budget alone, so the round budget was 0 every frame — and the sweep
+still advanced the per-connection watermark, permanently discarding every round echo
+(v29: 35 C 0x06 with two live observers, 0 tag-2 anywhere). FIXED: rounds select FIRST
+under the shared budget (each ≤ 20 B, 255-cap), entities absorb the remainder — the
+`@0x50f312` interleave's OUTCOME without the interleave [orig: the one-budget loop
+`@0x50f070`]. The positive tag-2 wire witness therefore remains pending → v30.
+
+**D-NET-153** [reimpl divergence, FIXED 2026-07-03 (v29)] **The round sim's fire
+direction used the 0x0A euler_z heading frame (90° − yaw); the C2S 0x06 dir yaw is the
+MISSION BEARING directly** (a 16.16 turn fraction; `<<16` = BAM32, §5.16). Wire-proof from
+the v29 duel: joiner 2 at `(-396.6, 413.1)` firing wire yaw −122.0° at joiner 1 standing
+at `(-402.7, 403.5)` = true shooter→victim bearing −122.4° (0.4° residual); joiner 1's
+kill line 45.6° vs true 44.2°. The 90°−yaw mapping missed by ~26° everywhere EXCEPT the
+45° diagonal where the two frames coincide — joiner 1's duel line sat exactly there, so
+"the first joiner could kill the second but the second could not kill the first". FIXED in
+`world::RoundSim::spawn`: bearing = the wire yaw; consistent with the spawner component
+form X=sinYaw·cosPitch, Y=cosYaw·cosPitch, Z=sinPitch in engine axes [orig:
+`RoundData_SpawnRound @0x4ec5e9` / `Weapon_SpawnSingleProjectile @0x4ebf51`]. Pinned:
+`npruntime_round_sim_test` (wire yaw 0 → +X). The pitch SIGN is still unverified by wire
+(v29 shots were level) — tracked.
 
 **D-NET-152** [reimpl gap, FIXED 2026-07-03, **live-verified v28 (2026-07-03)**: 95/95 C 0x06
 uplinks decoded (fixed 45 B, zero failures), shooter = the joiner's own `0x0001` throughout

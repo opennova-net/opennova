@@ -600,17 +600,21 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// the full record set; that frame never leaves the process, so retail interop is
 	// unaffected (D-NET-140).
 	const std::size_t header_bytes = frame_header_bytes(flags2);
+	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
+	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
+	// The first grouped-order port handed rounds only the leftovers — a real-world
+	// entity set (players + ~21 vehicles) fills the 600-B budget alone, so tag-2
+	// starved to ZERO on the wire and the sweep still advanced the watermark,
+	// discarding every round echo (v29; D-NET-154). Rounds are rare and <= 20 B each;
+	// entities absorb the remainder — same cap, and the retail decode loop is
+	// tag-driven either way. (D-NET-152/154)
+	std::vector<RoundEventRecord> rounds =
+			select_round_events(w, conn, anchor, std::size_t(kEntitySendBudget) - header_bytes);
+	std::size_t rounds_bytes = 0;
+	for (const RoundEventRecord &r : rounds)
+		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	const std::vector<GameEntitySnapshot> selected =
-			select_frame_entities(conn, ents, anchor, header_bytes);
-	// Remaining frame budget for the tag-2 round events. The original interleaves
-	// tag-1/tag-2 pairs under ONE budget [orig: @0x50f070 loop]; ours selects
-	// entities first, rounds into the remainder — same cap, grouped order (the
-	// retail decode loop is tag-driven either way). (D-NET-152)
-	std::size_t used = header_bytes;
-	for (const GameEntitySnapshot &e : selected) used += record_wire_size(e);
-	const std::size_t round_budget =
-			used < std::size_t(kEntitySendBudget) ? std::size_t(kEntitySendBudget) - used : 0;
-	std::vector<RoundEventRecord> rounds = select_round_events(w, conn, anchor, round_budget);
+			select_frame_entities(conn, ents, anchor, header_bytes + rounds_bytes);
 	conn.transport->host_send(kTag0aFrameUpdate,
 	                          build_0a_frame(anchor, selected, flags2, std::move(rounds)));
 }
