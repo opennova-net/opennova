@@ -6190,8 +6190,12 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
-**D-NET-150** [reimpl divergence, FIXED 2026-07-02 (gate + throttle ported); cold-join
-re-verify pending] **The host started the §5.2a world stream unrequested and unthrottled —
+**D-NET-150** [reimpl divergence, FIXED 2026-07-02, **VERIFIED live 2026-07-03 (v25)**: cold
+join = arms + human shadow (user-confirmed, first cold pass ever clean), warm rejoin = arms +
+shadow good; wire (retail_join_v25.pcapng) shows every join parking after S 0x11 until the
+client's C 0x0A (cold: 0x11 f=172064 → 828-frame park → C 0x0A f=172892 → S 0x19 +1 → first
+0x10 +2, batches in ack-window clumps; rejoins f=394137/583879 park 701/597 frames the same
+way)] **The host started the §5.2a world stream unrequested and unthrottled —
 racing a COLD client's mission build; the 0x0C organic batch then landed mid-`Game_StartMission`
 and the client's self-bind (§5.59) resolved against a HALF-BUILT character registry (the
 cold-join DBuggy blob shadow + missing first-person arms).** Live-witnessed v22–v24: 5/5 data
