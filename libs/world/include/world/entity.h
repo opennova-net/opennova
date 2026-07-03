@@ -220,6 +220,12 @@ struct Entity {
     // carrier the owning client uplinked (§5.10; D-NET-151) and the 0x0A echo re-emits
     // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
     EntityHandle ground_target;         // kInvalid = free-standing
+
+    // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
+    // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],
+    // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +
+    // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
+    EntityHandle last_fire_target;      // kInvalid = no target claimed
 };
 
 } // namespace opennova::world

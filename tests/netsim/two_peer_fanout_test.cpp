@@ -838,13 +838,137 @@ bool run_pose_transform_roundtrip() {
 
 } // namespace
 
+// (l) [D-NET-152] The §5.9.1 tag-2 ROUND-EVENT fan: an accepted fire appends a world
+//     round-ring event; the per-recipient sweep serves it to every OTHER in-match
+//     connection exactly once (watermark), skipping the shooter's own rounds (its client
+//     already simulated them [orig: @0x4fff97]) and never replaying the pre-join backlog
+//     (the arm gate [orig: the playerSlot+97544 non-zero gate]). The origin compresses
+//     against the RECIPIENT's anchor and the direction BAM high words survive rounded
+//     [orig: Server_BuildRoundEventListForPlayer @0x4ffee0 ->
+//     NetPacket_SerializeRoundEvent @0x504820].
+bool run_round_event_fanout() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	const w::EntityHandle peer_h =
+			w::spawn_remote_player(world, player_spawn({4.0f, 5.0f, 6.0f}, 0, 0xFFF1));
+	if (!expect(host_h.valid() && peer_h.valid(), "host + peer spawned")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch_host;
+	ns::LoopbackChannel ch_peer; // loopback transports keep the harness socket-free
+	conns.push_back(ns::Connection{&ch_host, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&ch_peer, ns::TransportMode::Client, peer_h, 0});
+
+	nw::PlayerReplicationState fallback;
+	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(1.0));
+	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(2.0));
+	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(3.0));
+
+	auto next_frame = [&](ns::LoopbackChannel &ch, nw::FrameUpdate &fu) {
+		ns::Datagram dg;
+		if (!ch.client_recv(dg) || dg.tag != ns::kTag0aFrameUpdate) return false;
+		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
+		                               fu);
+	};
+
+	// A round fired BEFORE either connection's first emit = the pre-join backlog; the
+	// arm gate must swallow it for both.
+	{
+		w::RoundEvent backlog;
+		backlog.shooter_handle = peer_h.packed;
+		backlog.adm_index = 9;
+		world.rounds.add(backlog);
+	}
+	ns::test::emit_all(world, conns, fallback);
+	{
+		nw::FrameUpdate fh, fp;
+		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "arm frames decode"))
+			return false;
+		if (!expect(fh.round_events.empty() && fp.round_events.empty(),
+		            "pre-arm backlog never replays to a joiner"))
+			return false;
+	}
+
+	// The PEER fires: origin near its own pos, direction words as the C2S 0x06 carries
+	// them (<< 16), a claimed target stamped on the shooter entity.
+	const int32_t ox = w::to_fixed(4.5), oy = w::to_fixed(5.5), oz = w::to_fixed(6.5);
+	{
+		w::Entity *shooter = world.registry.get(peer_h);
+		if (!expect(shooter != nullptr, "shooter entity live")) return false;
+		shooter->last_fire_target = host_h; // [orig: @0x50c2ad]
+		w::RoundEvent ev;
+		ev.shooter_handle = peer_h.packed;
+		ev.origin_x = ox;
+		ev.origin_y = oy;
+		ev.origin_z = oz;
+		ev.dir_yaw = int32_t(0x1234u << 16);
+		ev.dir_pitch = int32_t(0xFEDCu << 16);
+		ev.shot_seq = 77;
+		ev.mode_flags = 0x22;
+		ev.subtype = 12;
+		ev.slot_byte = 0;
+		ev.adm_index = 11;
+		world.rounds.add(ev);
+	}
+	ns::test::emit_all(world, conns, fallback);
+	{
+		nw::FrameUpdate fh;
+		if (!expect(next_frame(ch_host, fh), "host frame decodes")) return false;
+		if (!expect(fh.round_events.size() == 1, "host (observer) gets ONE round event"))
+			return false;
+		const nw::RoundEventRecord &re = fh.round_events[0];
+		if (!expect(re.shooter_handle == peer_h.packed, "round shooter = the firing peer"))
+			return false;
+		if (!expect((re.flags & 0x40) != 0 && re.target_handle == host_h.packed,
+		            "live fire target rides the 0x40 word"))
+			return false;
+		if (!expect((re.flags & 0x80) == 0, "zero slot byte stays un-gated")) return false;
+		if (!expect((re.flags & 0x3F) == 0x22 && re.adm_index == 11 && re.subtype == 12 &&
+		                    re.shot_seq == 77,
+		            "mode/adm/subtype/shot_seq round-trip"))
+			return false;
+		// Origin reconstructs against the RECIPIENT's own anchor.
+		const int32_t hax = int32_t(w::to_fixed(1.0));
+		if (!expect(nw::network_decompress_fixedpoint(re.pos_x_compressed) + fh.anchor_x ==
+		                    codec_recon(ox, hax),
+		            "fire origin decompresses against the recipient anchor"))
+			return false;
+		if (!expect(re.yaw_bam_high == 0x1234 && re.pitch_bam_high == 0xFEDC,
+		            "direction BAM high words intact"))
+			return false;
+		nw::FrameUpdate fp;
+		if (!expect(next_frame(ch_peer, fp), "peer frame decodes")) return false;
+		if (!expect(fp.round_events.empty(), "the shooter's OWN round is never echoed back"))
+			return false;
+	}
+
+	// Watermark: the same round never repeats on the next frame.
+	ns::test::emit_all(world, conns, fallback);
+	{
+		nw::FrameUpdate fh, fp;
+		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp),
+		            "watermark frames decode"))
+			return false;
+		if (!expect(fh.round_events.empty() && fp.round_events.empty(),
+		            "a swept round never repeats (per-connection watermark)"))
+			return false;
+	}
+	std::printf("PASS round_event_fanout\n");
+	return true;
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
 	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
-	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip();
+	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
+	                run_round_event_fanout();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

@@ -477,18 +477,19 @@ ReplayTimeline build_replay_timeline(
 				es.overcast = fu.env.overcast;
 				b.tl.environment.push_back(es);
 			}
-			// Weapon-hit events (0x0A tag==2): impact world pos = decompress + anchor.
-			for (const auto &h : fu.hits) {
+			// Round events (0x0A tag==2): fire ORIGIN world pos = decompress + anchor
+			// (the record is a round-fired event, not an impact — §5.9.1/D-NET-152).
+			for (const auto &re : fu.round_events) {
 				ReplayEvent ev;
 				ev.frame_index = m.frame_index;
 				ev.kind = ReplayEventKind::Hit;
 				ev.has_pos = true;
-				ev.x = network_decompress_fixedpoint(h.pos_x_compressed) + fu.anchor_x;
-				ev.y = network_decompress_fixedpoint(h.pos_y_compressed) + fu.anchor_y;
-				ev.z = network_decompress_fixedpoint(h.pos_z_compressed) + fu.anchor_z;
-				ev.target = h.target_handle;
-				ev.aux = h.weapon_handle;
-				ev.adm_index = h.adm_index;
+				ev.x = network_decompress_fixedpoint(re.pos_x_compressed) + fu.anchor_x;
+				ev.y = network_decompress_fixedpoint(re.pos_y_compressed) + fu.anchor_y;
+				ev.z = network_decompress_fixedpoint(re.pos_z_compressed) + fu.anchor_z;
+				ev.target = re.shooter_handle; // the round's owner (ex "target" — misdecoded)
+				ev.aux = re.target_handle;     // the shooter's claimed target, iff flags&0x40
+				ev.adm_index = re.adm_index;
 				ev.sound = true;
 				b.tl.events.push_back(std::move(ev));
 			}

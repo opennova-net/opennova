@@ -278,7 +278,7 @@ sweep; blank = not yet characterized.
 | 0x06 | 0x432BC0 | `_HandleChatCommand` | server→client chat |
 | 0x07 | 0x422730 | `_0x007` | per-frame keep-alive stub |
 | 0x08 | 0x4281D0 | `_HandleSessionConfig` | SESSION CONFIG, fixed 51 B (the old "~2 KB snapshot" note was wrong): [10×i32 (f3=gameType→g_GameType)][7×u8][u32 bitflags, bits 13/15/16 latched]. Field map §5.54 (decoded) |
-| 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
+| 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + round-event loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
@@ -416,7 +416,7 @@ This is what a reimplemented server must **handle**.
 | 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
 | 0x0D | 0x513760 | CHAT MESSAGE uplink (`NapiNPServer_HandleChatMessage`; the old "replication frame ACK" note was WRONG): [u8 channel][cstr text]; strips `<...>` tags, 1000 ms rate limit, prepends name(/squad), fans out S2C 0x14 per recipient (2=team, 4/5=side, 11/12=squad, 13=proximity ≤100 u, default=all). §5.52 |
 | 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle]; 0xFFFE = auto team spawn (gametype-keyed) — `Server_ProcessClientRequestRespawn` |
-| 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); host validates shooter authority + ammo via Server_ValidateAndFireRound and may emit S2C 0x0A trailing weapon-hit (§5.9.1) |
+| 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); anti-spoof + fire-rate gate, then `Server_ClientFiredRound @0x50baa0`: net primary fire runs the adm 'fire' action (slot-latched client pose) → local re-entry → `RoundData_AddRound @0x4fdb40` → the per-recipient §5.9.1 tag-2 round-event echo; ammo clip decremented (`consume_weapon_ammo @0x540850`), cooldown stamped (slot+96472 = tick + adm[276]). D-NET-152 |
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
 | 0x13 | 0x514330 | |
 | 0x14 | 0x501E00 | |
@@ -1401,7 +1401,7 @@ header; the rest is client-side.
 | passenger_handle | u16 | passenger entity handle; `0xFFFF` early-skips the next 4 B [orig: 0x430474] |
 | seat_yaw | u16 | rider body yaw [orig: 0x4304C3] |
 | seat_pitch | u16 | rider body pitch [orig: 0x4304DC] |
-| event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 weapon-hit; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
+| event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 round event; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
 
 (The handler was undefined in the IDB — a data blob mis-marked at the `0x430000` page boundary;
 defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
@@ -1409,30 +1409,38 @@ defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
 — it's the high half of the `state_word i16`. The `(flags2 & 0xF) == 8` vehicle-passenger record
 appears 4× in the 2026-06-16b loopback capture, all on sub-block 0 frames.)
 
-#### 5.9.1 Weapon-hit record (event-loop `tag==2`) — wire decoded 2026-06-16d
+#### 5.9.1 Round-event record (event-loop `tag==2`) — wire decoded 2026-06-16d; server side witnessed 2026-07-03 (D-NET-152)
 
-The trailing event loop's `tag==2` branch is the projectile/melee impact record. Decoded by
-`NetPacket_DeserializeWeaponHit @ 0x42F270` — sole receiver, called from `0x4306EF` inside
-`NapiNPClientMsg_0x00A`. The record is 17-20 B, variable by `flags` gate bits `0x80` / `0x40`:
+The trailing event loop's `tag==2` branch is a **fired-round EVENT — the fire origin +
+direction of a round shot by another player — not an impact record** (the 2026-06-16 "weapon
+hit / impact" reading was a decode-era guess; every "impact" label below was really the
+muzzle). The receiving client re-simulates the round locally from origin + direction
+(`RoundData_SpawnRound @ 0x4EC0D0` — spread, velocity, tracer/projectile spawn), which is why
+no impact ever needs to be on the wire. Client read side:
+`NetPacket_DeserializeRoundEvent @ 0x42F270` (renamed from `…DeserializeWeaponHit`) — sole
+receiver, called from `0x4306EF` inside `NapiNPClientMsg_0x00A`. Host write side (witnessed
+2026-07-03): `NetPacket_SerializeRoundEvent @ 0x504820` (renamed from
+`serialize_projectile_to_packet`) serializes one `g_round_ring @ 0xC8D848` record. The record
+is 17-20 B, variable by `flags` gate bits `0x80` / `0x40`:
 
-| Field | Bytes | Gate | Landing |
+| Field | Bytes | Gate | Source (host write @0x504820) → landing (client read @0x42F270) |
 |---|---|---|---|
-| `flags` | u8 | always | local; bits 0x80 → `parent_byte` present, 0x40 → `weapon_handle` present, low bits 0x01/0x02 gate downstream damage-processing branches (not wire reads) [orig: 0x42f2a8] |
-| `adm_index` | u8 | always | → `AdmDef_GetEntryByIndex(adm_index)` resolves the action-descriptor entry [orig: 0x42f2ca] |
-| `hit_subtype` | u8 | always | → `dword_A822E0` (last-hit subtype global; categorises the hit) [orig: 0x42f2e2] |
-| `parent_byte` | u8 | `flags & 0x80` | `pos_z_decompressed` local → `hitDataPtr[5]` low byte; bone/seat index for the parent of the hit [orig: 0x42f30a] |
-| `target_handle` | u16 | always | `(pool<<12)\|slot` of the hit entity; `0xFFFF` = no target (early `return result`); validated against `g_pool_list` capacity [orig: 0x42f337] |
-| `weapon_handle` | u16 | `flags & 0x40` | parent-weapon sub-handle stored at `entity_link+12` for AI damage attribution; `0xFFFF` = sentinel (no parent weapon) [orig: 0x42f359] |
-| `damage_extra_raw` | u16 | always | raw u16 → `word_B7C670` global (weapon-extra slot; observed as a monotonic per-shot counter in the 2026-06-16d capture) [orig: 0x42f37e] |
-| `pos_x_compressed` | u16 | always | `Network_DecompressFixedPoint(.) + dword_A822E4` → `position[0]` (impact world X) [orig: 0x42f39c] |
-| `pos_y_compressed` | u16 | always | `+ dword_A822E8` → `position[1]` [orig: 0x42f3c7] |
-| `pos_z_compressed` | u16 | always | `+ dword_A822EC` → `position[2]` [orig: 0x42f3f2] |
-| `yaw_bam_high` | u16 | always | raw u16 reinterpreted as the high 16 bits of a 32-bit BAM (`raw << 16`); impact heading [orig: 0x42f41f] |
-| `pitch_bam_high` | u16 | always | raw u16 reinterpreted as BAM high word; impact pitch [orig: 0x42f43c] |
+| `flags` | u8 | always | ring+30 = the C2S 0x06 fire-mode byte (bit0 alt-fire, bit1 adm-indexed, bits 4-5 weapon-slot combo) `\| 0x40` iff the shooter's live fire target is set [orig: 0x5048c1] `\| 0x80` iff ring+32 non-zero [orig: 0x5048c8]; client: low bits 0x01/0x02 select the projectile vs direct spawn branches [orig: 0x42f2a8] |
+| `adm_index` | u8 | always | ring+33 → `AdmDef_GetEntryByIndex(adm_index)` resolves the weapon [orig: 0x42f2ca] |
+| `subtype` | u8 | always | ring+31 = the shooter fire-context composite `(extra_byte2 & 0x3F) \| ((extra_byte2>>7)<<7)` [orig: @0x50bd83 / roundParams[4] @0x50c7bd] → `dword_A822E0` (ex `hit_subtype`) [orig: 0x42f2e2] |
+| `slot_byte` | u8 | `flags & 0x80` | ring+32 = weapon-slot id / the uplink `misc_byte` (ex `parent_byte`) [orig: 0x4fdcfc] → `hitDataPtr[5]` low byte [orig: 0x42f30a] |
+| `shooter_handle` | u16 | always | ring+4 — **the SHOOTER** `(pool<<12)\|slot` (`RoundData_AddRound @ 0x4fdca8` resolves the shooter entity, NOT the hit target — the ex-`target_handle` reading was wrong); the client resolves it as the round's owner (team tracer color, attribution) [orig: 0x42f337] |
+| `target_handle` | u16 | `flags & 0x40` | the shooter's claimed fire target, read LIVE off `shooter+104→+12` at serialize time [orig: 0x50485a] (stamped per accepted 0x06 [orig: @0x50c2ad]; ex `weapon_handle`) → `entity_link+12` [orig: 0x42f359] |
+| `shot_seq` | u16 | always | ring+28 — per-shot sequence; the C2S 0x06 `hit_part` fire counter round-trips here via `word_B7C670` → the spawned round's +120 word (ex `damage_extra_raw`; the monotonic per-shot counter observed 2026-06-16d) [orig: @0x50c2ba → 0x4fdcf5 → 0x42f37e] |
+| `pos_x_compressed` | u16 | always | `Network_CompressFixedPoint(origin_x − g_priority_ref_x)` — the FIRE ORIGIN vs the recipient-eye anchor (the same refs the 0x0A header carries) [orig: 0x504994] → decompress + `dword_A822E4` [orig: 0x42f39c] |
+| `pos_y_compressed` | u16 | always | origin_y − ref_y [orig: 0x5049be / 0x42f3c7] |
+| `pos_z_compressed` | u16 | always | origin_z − ref_z [orig: 0x5049e8 / 0x42f3f2] |
+| `yaw_bam_high` | u16 | always | `(ring+20 + 0x8000) >> 16` — the FIRE DIRECTION yaw BAM32 high word (ring stores the C2S 0x06 raw `dir_x << 16`) [orig: 0x504a18] → `<< 16` on apply [orig: 0x42f41f] |
+| `pitch_bam_high` | u16 | always | `(ring+24 + 0x8000) >> 16` — fire direction pitch [orig: 0x504a3c / 0x42f43c] |
 
 **Closed byte-sum table by flags combination:**
 
-| flags & 0xC0 | parent_byte? | weapon_handle? | total |
+| flags & 0xC0 | slot_byte? | target_handle? | total |
 |---|---|---|---|
 | `0x00` | no | no | **17 B** |
 | `0x80` | yes (+1) | no | **18 B** |
@@ -1440,28 +1448,66 @@ The trailing event loop's `tag==2` branch is the projectile/melee impact record.
 | `0xC0` | yes (+1) | yes (+2) | **20 B** |
 
 After deserialization the receiver dispatches into the action-descriptor execution path:
-`flags & 1` enters projectile-impact, `flags & 2` enters direct-damage; both ultimately call
-`RoundData_ProcessHit` with the (`position`, `entity_ptr`, `adm_index`, `flags`, `hit_subtype`,
-`parent_byte`) tuple. The yaw/pitch BAM words feed FOV-cone sound playback at the impact site.
+`flags & 1` enters the alt/projectile branch, `flags & 2` the standard round branch; both
+ultimately call `RoundData_SpawnRound` (renamed from `…ProcessHit` — it spawns the round;
+no hit is processed at fire time) with the (`origin`, `shooter`, `adm_index`, `flags`,
+`subtype`, `slot_byte`) tuple. The yaw/pitch BAM words feed the round's trajectory and the
+FOV-cone fire sound.
+
+**The server-side staging chain (witnessed 2026-07-03, D-NET-152).** Per recipient, per
+frame, inside the §5.47 emit:
+
+1. **`RoundData_AddRound @ 0x4FDB40`** — the ONLY ring writer — appends a 36-B record to
+   the 256-entry ring `g_round_ring @ 0xC8D848` (cursor `g_round_ring_cursor @ 0xC8FC4C`,
+   saturating count `g_round_ring_count @ 0xC8FC48`, reset by `Game_StartMission
+   @ 0x525b7a`) and spawns the authoritative round via `RoundData_SpawnRound` inline. The
+   ring stores the PRE-SPREAD origin/direction (read from the fire request before the
+   spawn applies weapon spread [orig: @0x4fdbce]) and stamps ring+0 = `stat_id @ 0xC86FB0`.
+2. **`Server_BuildRoundEventListForPlayer @ 0x4FFEE0`** (renamed from the
+   `compute_entity_angular_priority` misnomer; called from `Server_BuildEntityPriorityList
+   @ 0x50e59c`) — walks ring records with `stat >` the recipient's watermark
+   (`playerSlot+97544`; its non-zero gate arms a fresh player at the current stat so the
+   pre-join backlog never replays), **skips rounds whose SHOOTER == the recipient**
+   [orig: @0x4fff97] (your own rounds are never echoed back — the firing client already
+   simulated them, see §5.16), scores each by the recipient's perpendicular distance from
+   the round's LINE OF FIRE (x87 double trig scaled 2^22; projection clamped to
+   [0, 1000u]; z half-weighted; `score = 0x4000 − lateral>>12`, floor 0 [orig: @0x500115]),
+   shell-sorts descending, writes up to 255 record ptrs to `g_round_event_refs @ 0xC863A0`,
+   and stamps the watermark = `stat_id` [orig: @0x5001ae].
+3. **`serialize_entity_states_to_packet @ 0x50F070`** — the event loop interleaves ONE
+   tag-1 entity record and ONE tag-2 round event per iteration under the shared
+   `g_entity_send_budget` [orig: tag-2 write @0x50f326 → NetPacket_SerializeRoundEvent
+   @0x50f331], `[0]` terminator.
+
+The whole-path consequence: a round fired by client A reaches client B (origin + direction,
+compressed vs B's own eye anchor) and B's engine re-fires it locally — tracer, sound,
+impact, and cosmetic damage all client-computed; the HOST's authoritative damage runs in
+its own `RoundData_SpawnRound` projectile (impact handlers `Projectile_Handle*Impact
+@ 0x4e93xx` — next-round scope).
 
 **Cross-witness (capture `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`,
-2026-06-16d).** 20 weapon-hit records across 672 0x0A frames, all decoded byte-exact, zero
-walker halts. Observed flag bytes: `{0x02, 0x12, 0x22, 0x32}` (none with 0x80/0x40 set — all
-17 B minimum). Two distinct (`adm_index`, `hit_subtype`) tuples: `(68, 12)` × 13 hits, target
-`p0/s1`; `(7, 12)` × 7 hits, target `p0/s0`. `damage_extra_raw` increments monotonically per
-shot in each weapon's sequence (`0x020b…0x0217`, `0x0005…0x0006`), suggesting a per-weapon
-shot-id counter rather than damage value. Sample wire bytes — first record (17 B):
+2026-06-16d), relabeled 2026-07-03.** 20 round events across 672 0x0A frames, all decoded
+byte-exact, zero walker halts. Observed flag bytes: `{0x02, 0x12, 0x22, 0x32}` — exactly the
+fire-mode byte shape `((slotCombo & 3) << 4) | 2` the fire action builds [orig:
+WeaponAction_Fire @0x542c11], none with 0x80/0x40. Two distinct (`adm_index`, `subtype`)
+tuples now read correctly as the two SHOOTERS and their weapons: `(68, 12)` × 13 rounds by
+`p0/s1`; `(7, 12)` × 7 rounds by `p0/s0`. `shot_seq` increments monotonically per shooter
+(`0x020b…0x0217`, `0x0005…0x0006`) — the per-shot fire counter (= the C2S 0x06 `hit_part`
+field, §5.16). Sample wire bytes — first record (17 B):
 
 ```
 02 44 0c 01 00 0b 02 9a 44 38 6d d6 ea bc 73 02 f9
-flags=02 adm=44(=68) sub=0c(=12) target=0x0001 dmgExtra=0x020b
-pos=(0x449a,0x6d38,0xead6) yaw_BAM=0x73bc pitch_BAM=0xf902
+flags=02 adm=44(=68) sub=0c(=12) shooter=0x0001 shotSeq=0x020b
+origin=(0x449a,0x6d38,0xead6) yaw_BAM=0x73bc pitch_BAM=0xf902
 ```
 
 The decoder is bounds-checked end-to-end (libs/novaworld §5.9.1
-`decode_weapon_hit_record`) and the nw_pp walker advances past tag==2 records to keep decoding
-the rest of the frame — previously the walker halted on the first hit per frame, masking
-subsequent records.
+`decode_round_event_record`, ex `decode_weapon_hit_record`) and the nw_pp walker advances
+past tag==2 records to keep decoding the rest of the frame. REIMPL (D-NET-152): the host
+side is ported — `world::RoundRing` (round_ring.h), the per-connection watermark + the
+line-of-fire scoring in netsim `select_round_events`, and the `RoundEventRecord` codec
+rename sweep (struct/codec/nw_pp/replay/tests; old nw_pp dumps show the pre-rename
+`weapon-hit`/`target`/`dmgExtra` labels).
 
 **Tag 0x0C (C2S) — entity sub-packet** `[orig: NapiNPServerMsg_0x00C @ 0x501C30 →
 dispatch_entity_packet_callback @ 0x4D6A80]`. The joiner's per-frame uplink for an entity it
@@ -2094,9 +2140,52 @@ per entry, populated when the engine loads the `.adm` action-descriptor data —
 game-data library), not a wire decoder; `nw_pp` therefore prints `adm` raw. Scoped as a future item —
 this is the same AdmDef index space shared by §5.9.1 (weapon-hit) and §5.30 (0x5A loadout).
 
-**Open follow-up:** `Server_ValidateAndFireRound` (sub_50BAA0) decompile would resolve how
-`current_tick` gates the ammo-cooldown check and what `dest[2]` / `dest[9]` are seeded for.
-Not pursued in this round.
+**The full host pipeline (witnessed 2026-07-03, D-NET-152 — closes the old follow-up).**
+`NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310` gates on authority, `!g_InCeaseFire`,
+the connection's player slot (+352→+192), `!slot+100567`, and `CServerTick` phase == 3;
+anti-spoofs the claimed shooter against the slot's OWN entity [orig: @0x51358d] and runs the
+fire-rate/freshness gate `PlayerSlot_IsActive @ 0x4FC760` (with `slot+96480` armed, fire is
+rejected until the uplink tick passes `slot+96472` — stamped on success as
+`tick + AdmDef[276]` cooldown ticks [orig: @0x513740]; `dest[9]` = the zeroed third direction
+component, `dest[2]` = the shooter entity ptr). Then `Server_ClientFiredRound @ 0x50BAA0`:
+
+- **Guards**: grounded+moving reject (`Flags & 0x100 && Flags & 2` → −10); adm lookup
+  (−3 "Tried to fire NULL wpn"); NULL dcb (−8); dcb ≠ shooter (−9 "bad addround owner");
+  mounted-only weapon unmounted (`admFlags & 0x80` → −12/−18); the parachute-weapon anim
+  gate (−14); the ammo check `WeaponSlot_CanFire @ 0x541BA0` (ex
+  `should_send_entity_update` misnomer: busy weapon child, underwater-fire ban vs
+  `Env_WaterHeightFixed`, **clip u16 slot+16** or the adm+220 pool, the adm+224 score-lock)
+  → −15 `"server_ClientFiredRound: … (NO AMMO!)"`.
+- **Warp compensation**: `savedLivePose − Position` for the shooter AND its `groundEntity`
+  carrier [orig: @0x50bbac] — `savedLivePose (+0x80)` is Position saved at the TOP of every
+  entity physics frame (all `Entity_*Physics/Movement` updates, e.g. @0x46e12d/@0x484054),
+  so the delta is the current tick's not-yet-reported motion. A carrier that moved > 0xF
+  units re-anchors the fire to the live pose (rounddef flags 0x400, or a camera raycast
+  that hits the shooter's own carrier) [orig: @0x50bc41].
+- **Side stamps**: `entity+352` = the wire extra_byte1 word; `entity+688` = adm on PRIMARY
+  fire (the §5.10 `equipped_adm_index` mirror [orig: @0x50bd56]); `shooter+104→+12` = the
+  claimed target (read LIVE by the §5.9.1 tag-2 serializer [orig: @0x50c2ad]);
+  `word_B7C670` = `hit_part` (the per-shot sequence the tag-2 `shot_seq` echoes).
+- **NET PRIMARY fire** does NOT call `RoundData_AddRound` directly: the validator resolves
+  the per-player weapon slot (the 100-B array at `playerSlot+464`, index
+  `adm[4] + 65*adm[0]` = rank + 65*category [orig: @0x50c0d7]; vehicle modes take the
+  vehicle's slot), stamps the slot's +64..84 pose = the CLIENT's claimed origin/direction,
+  latches slot+94 bit0, and invokes the adm **'fire' ACTION** — `*(admEntry+684)`, action
+  slot 3 of the 12-action table at admEntry+676 (suffix/default table @0x830B94), default
+  handler `WeaponAction_Fire @ 0x542B10`. The fire action re-checks can-fire, reads the
+  latched pose (`Entity_CalcWeaponFirePosition @ 0x4DC750` returns slot+64..84 when the
+  bit0 latch is set), calls `Entity_FireWeaponAndSendPacket @ 0x42BD80` — which on the
+  authority builds a LOCAL-mode fire request and **re-enters `Server_ClientFiredRound`**
+  (local path: ~2u origin-distance clamp vs the entity, scoring, then
+  `RoundData_AddRound @ 0x4FDB40` → the §5.9.1 ring + `RoundData_SpawnRound`) — then
+  decrements ammo (`consume_weapon_ammo @ 0x540850`: clip u16 slot+16 when adm+220 == 0,
+  else the per-player pool `playerSlot+89176 + 4*adm220` / the global `data @ 0xB761E8`
+  for AI), runs the 3-round-burst counter (`Flags & 0x20`), chains action 3 RECOIL, and
+  plays the fire sound. **ALT fire** (bit 0) and the HOST'S OWN local fire call
+  `RoundData_AddRound` directly; a 0x06 whose dcb is the host's local player returns 0
+  untouched [orig: @0x50c18d] — the client-side of the same function is where a CLIENT
+  calls `RoundData_SpawnRound` itself for its own fire and queues the C2S 0x06 (client
+  prediction; why a shooter's own rounds are never tag-2-echoed back, §5.9.1).
 
 ### 5.17 C2S 0x21 — anti-cheat CRC reply (3-player loopback 2026-06-16d)
 
@@ -3605,6 +3694,11 @@ functions renamed up: `server_handle_entity_sync`→`Server_HandleEntitySync`,
 | `0x5008b0` | `Server_ProcessTeamChanges` | `Server_FindPlayerSlotByNetKeys` | body is a pure slot lookup matching `slot[7]→+184→+48/+52 == (k1,k2)`; changes/sends nothing; old name + a stale disasm comment both wrong (D-NET-107) |
 | `0x515390` | `server_broadcast_entity_kill` | `Server_BroadcastMedicRequest` | fetches `GameText("Server","STRSRV_MEDREQ")` (medic request), broadcasts msg 0x54+0x14, sets a once-only "notified" flag; no kill (D-NET-108) |
 | `0x50baa0` | `Server_ValidateAndFireRound` | `Server_ClientFiredRound` | own string `"server_ClientFiredRound: Player:%s Type:%d Ammo left:%d (NO AMMO!)"` (D-NET-109) |
+| `0x541ba0` | `should_send_entity_update` | `WeaponSlot_CanFire` | the "NO AMMO!" gate: reads the slot's weapon child, the underwater-fire ban, the clip u16 slot+16 / adm+220 pool, and the adm+224 score-lock; no entity update anywhere (D-NET-152) |
+| `0x4ffee0` | `compute_entity_angular_priority` | `Server_BuildRoundEventListForPlayer` | walks `g_round_ring` since the recipient's `playerSlot+97544` watermark, skips own rounds, scores by line-of-fire proximity into `g_round_event_refs` — round events, not entity priorities (D-NET-152) |
+| `0x504820` | `serialize_projectile_to_packet` | `NetPacket_SerializeRoundEvent` | writes one §5.9.1 tag-2 ROUND-EVENT record (fire origin + direction) from a ring record; no projectile entity involved (D-NET-152) |
+| `0x42f270` | `NetPacket_DeserializeWeaponHit` | `NetPacket_DeserializeRoundEvent` | the same record's client read side — a round FIRED event the client re-simulates; nothing about it is a hit (D-NET-152) |
+| `0x4ec0d0` | `RoundData_ProcessHit` | `RoundData_SpawnRound` | SPAWNS the round from a fire request (projectile-pool entity, spread, velocity, tracer/guided/burst dispatch); no hit is processed at fire time (D-NET-152) |
 
 **Signature corrections — the wrong-prototype cascade (D-NET-110).** Many callees carried IDA-inferred
 prototypes with phantom params; their garbage flowed up as uninitialised `v*` args in
@@ -3678,8 +3772,11 @@ mode / target conn / target slot / target team); not a bug, an artifact of the c
   `[orig: Server_BroadcastMedicRequest @0x515390]`
 - **D-NET-109** [naming, FIXED] `Server_ValidateAndFireRound @0x50baa0` → **`Server_ClientFiredRound`**: own
   log string `"server_ClientFiredRound: …"` is the original name; the function validates a client fired-round
-  request (ammo, distance, ownership, weapon CRC) and queues it via `RoundData_AddRound`. Signature `()` →
+  request (ammo, distance, ownership, weapon CRC). Signature `()` →
   `(int fireRequest)` (the body's `teamIndex` local was a misnamed pointer to the fire-request descriptor).
+  (2026-07-03 correction: only the ALT-fire / AI / local-host paths queue via `RoundData_AddRound`
+  directly — a NET primary fire goes through the adm 'fire' action and re-enters this function in
+  LOCAL mode before reaching the ring; the full pipeline is §5.16 / D-NET-152.)
   `[orig: Server_ClientFiredRound @0x50baa0]`
 - **D-NET-110** [signature, FIXED] **Wrong-prototype cascade across `Server_*`.** ~15 functions carried
   IDA-inferred prototypes (extra phantom params, dropped params, or a bogus `__stdcall`+WndProc/display
@@ -5017,6 +5114,17 @@ Reload ammo math: `WeaponSlot_ReloadAmmo` transfers `def[22] (clipsize) × def[5
 ignores C2S 0x25 permanently wedges the joiner's weapon (one attempt sets 0x80; no 0x49 ever
 clears it) — D-NET-142.
 
+Host-side bookkeeping (witnessed in full 2026-07-03): after the two relayed sends, the host
+calls `WeaponSlot_ReloadAmmo @ 0x541720` on its OWN copy iff the requester is REMOTE
+[orig: @0x514f03 `g_local_player_entity != *player`], keyed by the wire slot combo
+(`slot = playerSlot+464 + 100*combo` @0x54176d): clears the slot+90 0x80 flag, REFUNDS the
+remaining clip into the adm+216-typed ammo pool, and refills `clip u16 slot+16` to
+`capacity(adm+88)` clamped by what the pool affords [orig: @0x541811/@0x541850]. This is the
+same clip the C2S 0x06 fire pipeline decrements (§5.16) — a host that tracks fire without
+tracking reload wedges its OWN ammo authority one clip in. REIMPL (D-NET-152): the dispatch
+0x25 case refills the tracked clip to capacity (pool refund/clamp deferred with the pool
+model).
+
 ### 5.59 The character-slot binding family — C2S 0x29, S2C 0x29/0x50/0x51, and the registry/blip structures (2026-07-02)
 
 The client binds every `Flags & 0x100` (player-flagged) entity to a CHARACTER DESCRIPTOR via
@@ -6139,10 +6247,12 @@ refills the clip (§5.58, `NapiNPServerMsg_HandleReloadRequest @ 0x514DF0` →
 reload". FIXED: dispatch case 0x25 decodes + re-encodes the `[u16 handle][u16 weaponSlotCombo]`
 body (ADR 0003) and stages S2C 0x49 on EVERY in-match connection's transport INCLUDING the
 requester (the original's two filtered sends @0x4C87E0), each framed with its own sequencing at
-the flush boundary (`server_message_dispatch.cpp`; npruntime_reload_relay_test). The host-side
-`WeaponSlot_ReloadAmmo` bookkeeping needs the weapon-slot/pool model and stays deferred.
-LIVE-VERIFIED retail-join v17 (2026-07-02): the joiner reloads normally (user-confirmed; the
-v15 wedge is gone).
+the flush boundary (`server_message_dispatch.cpp`; npruntime_reload_relay_test). LIVE-VERIFIED retail-join v17
+(2026-07-02): the joiner reloads normally (user-confirmed; the v15 wedge is gone). TAIL
+CLOSED 2026-07-03 (D-NET-152): the host-side `WeaponSlot_ReloadAmmo @ 0x541720` refill is
+witnessed (remote-requester-only, refund + capacity clamp — §5.58) and the dispatch 0x25
+case now refills the same per-slot clip the 0x06 fire pipeline decrements
+(npruntime_client_fire_test; the ammo-pool refund/clamp stays deferred with the pool model).
 
 **D-NET-143** [reimpl divergence, FIXED 2026-07-02 (defaults + echo); body motor tracked]
 **The 0x0A player records sent anim_state_id 0 (the null clip — the v15 flicker/spazz) and a
@@ -6220,6 +6330,59 @@ harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (t
 promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
+
+**D-NET-152** [reimpl gap, FIXED 2026-07-03 (pipeline ported; live verify pending v28)]
+**The host had NO dispatch case for C2S 0x06 (client fired round) — every shot a retail
+joiner fired was silently dropped: no ammo authority, no fire echo, other observers saw
+nothing (retail-join v26: 51 C 0x06 uplinks, zero host response; client prediction hid the
+shooter's own view).** The full original pipeline is now witnessed end-to-end (§5.16 the
+validate/fire chain, §5.9.1 the per-recipient tag-2 round-event echo): handler
+`@ 0x513310` (anti-spoof: claimed shooter == the connection slot's own entity `@0x51358d`;
+`PlayerSlot_IsActive @ 0x4FC760` fire-rate gate on `slot+96472/96480`, stamped
+`tick + AdmDef[276]` on success `@0x513740`) → `Server_ClientFiredRound @ 0x50BAA0` (guards
+−3/−8/−9/−10/−12/−14/−15; ammo via `WeaponSlot_CanFire @ 0x541BA0` — clip u16 slot+16 /
+pools; warp compensation `savedLivePose − Position` for shooter + carrier; equipped-adm +
+fire-target stamps) → net primary latches the client's origin/direction into the weapon
+slot (+64..84, +94 bit0) and runs the adm 'fire' ACTION (`admEntry+684` →
+`WeaponAction_Fire @ 0x542B10` → `Entity_FireWeaponAndSendPacket @ 0x42BD80` → LOCAL
+re-entry → `RoundData_AddRound @ 0x4FDB40`; `consume_weapon_ammo @ 0x540850` decrements) →
+the 256-record ring `g_round_ring @ 0xC8D848` fans per recipient
+(`Server_BuildRoundEventListForPlayer @ 0x4FFEE0`: watermark `playerSlot+97544`, own-rounds
+skip `@0x4fff97`, line-of-fire proximity score; `NetPacket_SerializeRoundEvent @ 0x504820`
+interleaved `@0x50f312`). PORTED at the reimpl altitude: dispatch case 0x06
+(`server_message_dispatch.cpp` — decode, anti-spoof, armory adm lookup, per-combo clip
+seed/decrement on `world::WeaponTable.clipsize` (−1 = no-clip weapons free), equipped-adm +
+`Entity::last_fire_target` stamps, `world::RoundRing` append of the PRE-SPREAD claimed
+pose); the 0x25 case refills the same clip (the D-NET-142 tail, `WeaponSlot_ReloadAmmo
+@ 0x541720` remote-only `@0x514f03`); netsim `select_round_events` ports the per-connection
+watermark + arm gate + own-shooter skip + the x87 line-of-fire scoring (2π/2^32 BAM,
+2^22 trig scale, 1000u projection clamp, z half-weight, `0x4000 − lateral>>12`) and
+compresses origins against the recipient anchor; `build_0a_frame` emits the tag-2 records.
+Codec rename sweep rides along (§5.9.1): `RoundEventRecord` /
+`decode_round_event_record` / `encode_round_event_record` / `FrameUpdate::round_events` with
+the corrected field semantics (`shooter_handle` mandatory — ex "target"; optional 0x40 word
+= the shooter's live TARGET — ex "weapon_handle"; `shot_seq` — ex "damage_extra"; origin +
+direction — ex "impact"); IDB renames `NetPacket_DeserializeWeaponHit →
+NetPacket_DeserializeRoundEvent`, `serialize_projectile_to_packet →
+NetPacket_SerializeRoundEvent`, `compute_entity_angular_priority →
+Server_BuildRoundEventListForPlayer`, `should_send_entity_update → WeaponSlot_CanFire`,
+`RoundData_ProcessHit → RoundData_SpawnRound`, globals `g_round_ring{,_cursor,_count}` +
+`g_round_event_refs`. Pinned by `npruntime_client_fire_test` (anti-spoof, NULL-wpn, clip
+seed/decrement/exhaustion/0x25-refill, alt-fire no-decrement, loopback no-op, table-less
+accept, ring field sources) and `netsim_two_peer_fanout` (round_event_fanout: arm gate
+swallows the pre-join backlog, observer gets exactly-once with anchor-correct origin +
+intact direction BAMs + the live 0x40 target word, shooter never echoed its own round).
+DEFERRED (tracked here): the authoritative round SPAWN + damage
+(`RoundData_SpawnRound @ 0x4EC0D0` — projectile-pool entity, weapon spread, tracer
+interval; impact handlers `Projectile_Handle*Impact @ 0x4e93xx` → health → the death
+family) = the next round's scope; the cease-fire gate (`g_InCeaseFire` unmodeled); the
+`+96472` fire-rate stamp (the adm[276] cooldown dword is not in `WeaponTableEntry` — needs
+its weapon.def token witnessed); the savedLivePose warp compensation (our net-snapped peers
+have zero intra-tick motion, so the delta is 0 by construction until a peer motor lands);
+the moving-carrier re-anchor (`@0x50bc41`); the shared ammo POOLS (adm+220 belt / adm+216
+ammo-point classes — clips only for now, refill to capacity without the pool clamp); and
+the tag-1/tag-2 INTERLEAVE order (ours groups rounds after entities under the same budget —
+the retail decode loop is tag-driven, so grouped order reads identically).
 
 **D-NET-151** [reimpl divergence, FIXED 2026-07-03, **live-verified v27 (2026-07-03)**:
 user-confirmed the building/vehicle-deck run improved with no teleport reported; the v27

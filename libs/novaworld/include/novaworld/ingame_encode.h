@@ -195,9 +195,10 @@ std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
                                                GuidedFieldGroup group,
                                                const GuidedRecord &rec);
 
-// Encode a §5.9.1 weapon-hit record — the inverse of decode_weapon_hit_record.
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. 17-20 B by the flags gate.
-std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec);
+// Encode a §5.9.1 round-event record — the host write side of the tag-2 stream.
+// [orig: NetPacket_SerializeRoundEvent @ 0x504820; client read
+// NetPacket_DeserializeRoundEvent @ 0x42F270]. 17-20 B by the flags gate.
+std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec);
 
 // Build a complete S2C 0x0A frame from a FrameUpdate — the inverse of the §5.9
 // decode_frame_update walk. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]. The host

@@ -469,19 +469,19 @@ std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
 	return out;
 }
 
-// §5.9.1 weapon-hit record — the inverse of decode_weapon_hit_record.
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. 17-20 B by the flags gate
-// (0x80 adds parent_byte, 0x40 adds weapon_handle).
-std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec) {
+// §5.9.1 round-event record — the host write side of the tag-2 stream.
+// [orig: NetPacket_SerializeRoundEvent @ 0x504820]. 17-20 B by the flags gate
+// (0x80 adds slot_byte @0x504919, 0x40 adds target_handle @0x504953).
+std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u8(rec.flags);
 	w.u8(rec.adm_index);
-	w.u8(rec.hit_subtype);
-	if (rec.flags & 0x80) w.u8(rec.parent_byte);
-	w.u16(rec.target_handle);
-	if (rec.flags & 0x40) w.u16(rec.weapon_handle);
-	w.u16(rec.damage_extra_raw);
+	w.u8(rec.subtype);
+	if (rec.flags & 0x80) w.u8(rec.slot_byte);
+	w.u16(rec.shooter_handle);
+	if (rec.flags & 0x40) w.u16(rec.target_handle);
+	w.u16(rec.shot_seq);
 	w.u16(rec.pos_x_compressed);
 	w.u16(rec.pos_y_compressed);
 	w.u16(rec.pos_z_compressed);
@@ -547,7 +547,10 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 		}
 	}
 
-	// Event loop: tag=1 per-entity compacts, then tag=2 weapon-hits, then tag=0.
+	// Event loop: tag=1 per-entity compacts, then tag=2 round events, then tag=0.
+	// (The original interleaves 1/2 pairs under the send budget
+	// [orig: serialize_entity_states_to_packet @0x50f070]; the retail decode loop
+	// is tag-driven, so grouped order is read identically.)
 	for (const FrameUpdateRecord &rec : fu.records) {
 		switch (rec.cls) {
 		case EntityClass::Player:
@@ -577,9 +580,9 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 			break;
 		}
 	}
-	for (const WeaponHitRecord &hit : fu.hits) {
+	for (const RoundEventRecord &ev : fu.round_events) {
 		w.u8(2);
-		append(encode_weapon_hit_record(hit));
+		append(encode_round_event_record(ev));
 	}
 	w.u8(0); // event-loop terminator
 	return out;

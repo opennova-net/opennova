@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 
 #include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
@@ -118,6 +119,19 @@ struct CharacterJoinVars {
 	uint8_t avatar[2] = {0, 0};     // VCA / VCB -> jsp[63] / ci0 low byte
 };
 
+// Host-side fire state for ONE of this player's weapon slots — the clip the C2S 0x06 fire
+// pipeline checks + decrements and the C2S 0x25 reload relay refills. Keyed (in the map
+// below) by the weapon-slot combo = category*65 + rank [orig: the per-player 100-B
+// weapon-slot array playerSlot+464, index roundSlotIndex = adm[4] + 65*adm[0]
+// (Server_ClientFiredRound @0x50c0d7); the u16 clip = slot+16 (WeaponSlot_CanFire
+// @0x541ba0 reads it, consume_weapon_ammo @0x540850 decrements it, WeaponSlot_ReloadAmmo
+// @0x541720 refills it)]. The shared ammo pools (adm+220 belt / adm+216 ammo-point
+// classes) and the +96472 fire-rate stamp are deferred — D-NET-152 tails.
+struct WeaponSlotState {
+	uint8_t adm_index = 0; // the weapon bound to this combo [orig: slot+32 adm ptr]
+	int16_t clip = 0;      // rounds left in the magazine [orig: slot+16]
+};
+
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
 // server-info / mission-metadata / loadout replies a retail joiner expects). Folded
 // onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
@@ -216,6 +230,10 @@ struct NapiNPConnection {
 
 	// The joiner's 0x42 CU character vars (above) — parsed at the join, consumed by the player add.
 	CharacterJoinVars char_vars{};
+
+	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
+	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
+	std::map<uint16_t, WeaponSlotState> weapon_slots;
 };
 
 // [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A

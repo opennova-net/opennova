@@ -15,6 +15,7 @@
 
 #include "world/entity.h"
 #include "world/entity_registry.h"
+#include "world/round_ring.h"
 #include "world/var_store.h"
 #include "world/weapon_table.h"
 
@@ -239,6 +240,11 @@ public:
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
+
+    // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
+    // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
+    // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
+    RoundRing rounds;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.

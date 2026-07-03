@@ -751,17 +751,17 @@ void print_tag_21_c2s(const std::vector<uint8_t> &body) {
 	std::printf("\n");
 }
 
-void print_weapon_hit_record(const WeaponHitRecord &r) {
-	std::printf("            weapon-hit: flags=0x%02x adm=%u sub=%u target=%s "
-	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%04x pitch=0x%04x dmgExtra=0x%04x",
+void print_round_event_record(const RoundEventRecord &r) {
+	std::printf("            round-event: flags=0x%02x adm=%u sub=%u shooter=%s "
+	            "origin=(0x%04x,0x%04x,0x%04x) yaw=0x%04x pitch=0x%04x shotSeq=0x%04x",
 	            unsigned(r.flags), unsigned(r.adm_index),
-	            unsigned(r.hit_subtype), handle_str(r.target_handle).c_str(),
+	            unsigned(r.subtype), handle_str(r.shooter_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_bam_high), unsigned(r.pitch_bam_high),
-	            unsigned(r.damage_extra_raw));
-	if (r.has_parent_byte())   std::printf(" parent=0x%02x", unsigned(r.parent_byte));
-	if (r.has_weapon_handle()) std::printf(" weap=%s", handle_str(r.weapon_handle).c_str());
+	            unsigned(r.shot_seq));
+	if (r.has_slot_byte())     std::printf(" slot=0x%02x", unsigned(r.slot_byte));
+	if (r.has_target_handle()) std::printf(" target=%s", handle_str(r.target_handle).c_str());
 	std::printf("\n");
 }
 
@@ -843,9 +843,9 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 			default: break;
 		}
 	}
-	for (const WeaponHitRecord &h : fu.hits) {
-		std::printf("            tag=0x02 weapon-hit\n");
-		print_weapon_hit_record(h);
+	for (const RoundEventRecord &re : fu.round_events) {
+		std::printf("            tag=0x02 round-event\n");
+		print_round_event_record(re);
 	}
 	if (!ok)
 		std::printf("            (decode halted after %zu B of %zu%s)\n",

@@ -649,8 +649,8 @@ int test_frame_update_roundtrip() {
 		inf.infantry.vehicle_slot_handle = 0xFFFF; inf.infantry.pos_x_compressed = 0xABCD;
 		in.records.push_back(inf);
 
-		WeaponHitRecord hit; hit.flags = 0x00; hit.adm_index = 9; hit.target_handle = 0x100A;
-		hit.pos_x_compressed = 0x0011; in.hits.push_back(hit);
+		RoundEventRecord hit; hit.flags = 0x00; hit.adm_index = 9; hit.shooter_handle = 0x100A;
+		hit.pos_x_compressed = 0x0011; in.round_events.push_back(hit);
 
 		std::vector<uint8_t> wire = encode_frame_update(in);
 		FrameUpdate out;
@@ -667,7 +667,8 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.records[1].cls == EntityClass::Vehicle && out.records[1].vehicle.weapon_x == 0x0101);
 		EXPECT(out.records[1].vehicle.weapon_aim_y == 0x0303);
 		EXPECT(out.records[2].cls == EntityClass::Infantry && out.records[2].infantry.pos_x_compressed == 0xABCD);
-		EXPECT(out.hits.size() == 1 && out.hits[0].adm_index == 9 && out.hits[0].target_handle == 0x100A);
+		EXPECT(out.round_events.size() == 1 && out.round_events[0].adm_index == 9 &&
+		       out.round_events[0].shooter_handle == 0x100A);
 	}
 
 	// (b) env sub-block (flags2=0x02), no records.

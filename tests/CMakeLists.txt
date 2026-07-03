@@ -1393,6 +1393,14 @@ target_link_libraries(npruntime_reload_relay_test
     PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
 add_test(NAME npruntime_reload_relay COMMAND npruntime_reload_relay_test)
 
+# D-NET-152: the C2S 0x06 client-fired-round pipeline — anti-spoof, clip authority (+ the 0x25
+# refill), and the g_round_ring append behind the §5.9.1 tag-2 echo
+# [orig: @0x513310 -> Server_ClientFiredRound @0x50baa0 -> RoundData_AddRound @0x4fdb40].
+add_executable(npruntime_client_fire_test npruntime/client_fire_test.cpp)
+target_link_libraries(npruntime_client_fire_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_client_fire COMMAND npruntime_client_fire_test)
+
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
 # reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
 # joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate

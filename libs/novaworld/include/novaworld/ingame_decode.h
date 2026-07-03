@@ -551,30 +551,40 @@ struct InfantryCompactRecord {
 	uint8_t  anim_byte = 0;                // entity+696 if non-zero else entity+700
 };
 
-// One §5.9.1 weapon-hit record. Decoded by
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. Sole sender is the tag==2
+// One §5.9.1 ROUND-EVENT record (ex "weapon-hit" — a decode-era misnomer): a round
+// FIRED by another player, carried as the fire origin + direction the receiving
+// client re-simulates the round from (RoundData_SpawnRound); no impact is on the
+// wire. Host write side: NetPacket_SerializeRoundEvent @0x504820 serializes one
+// g_round_ring record per event; client read side:
+// [orig: NetPacket_DeserializeRoundEvent @ 0x42F270], sole sender is the tag==2
 // branch of the S2C 0x0A event loop [0x4306EF]. Variable length 17-20 B by
-// `flags` gate bits:
+// `flags` gate bits (witness 2026-07-03, D-NET-152):
 //   17 B if flags == 0
-//   18 B if (flags & 0x80) — adds parent_byte
-//   19 B if (flags & 0x40) — adds weapon_handle
+//   18 B if (flags & 0x80) — adds slot_byte
+//   19 B if (flags & 0x40) — adds target_handle
 //   20 B if (flags & 0xC0) — adds both
-struct WeaponHitRecord {
-	uint8_t  flags = 0;              // gate byte; 0x80 → parent_byte, 0x40 → weapon_handle
-	uint8_t  adm_index = 0;          // → AdmDef_GetEntryByIndex (action descriptor index)
-	uint8_t  hit_subtype = 0;        // → dword_A822E0 (last-hit subtype global)
-	uint8_t  parent_byte = 0;        // present iff (flags & 0x80)
-	uint16_t target_handle = 0xFFFF; // (pool<<12)|slot of the hit entity; 0xFFFF=no target
-	uint16_t weapon_handle = 0xFFFF; // present iff (flags & 0x40); 0xFFFF=sentinel
-	uint16_t damage_extra_raw = 0;   // raw u16 → word_B7C670 (damage/radius/weapon-extra)
-	uint16_t pos_x_compressed = 0;   // Network_DecompressFixedPoint → position[0] + dword_A822E4
-	uint16_t pos_y_compressed = 0;   // → position[1] + dword_A822E8
-	uint16_t pos_z_compressed = 0;   // → position[2] + dword_A822EC
-	uint16_t yaw_bam_high = 0;       // raw u16 (interpreted as BAM high half via << 16)
-	uint16_t pitch_bam_high = 0;     // raw u16 (interpreted as BAM high half via << 16)
+struct RoundEventRecord {
+	uint8_t  flags = 0;               // fire-mode byte (ring+30: bit0 alt-fire, bit1 adm-indexed,
+	                                  // bits 4-5 weapon-slot combo) | 0x80 → slot_byte present
+	                                  // [ring+32 != 0 @0x5048bb] | 0x40 → target_handle present
+	                                  // [shooter's live fire target set @0x50485a]
+	uint8_t  adm_index = 0;           // → AdmDef_GetEntryByIndex (action descriptor index)
+	uint8_t  subtype = 0;             // shooter fire-context composite (ring+31) → dword_A822E0
+	uint8_t  slot_byte = 0;           // weapon-slot id / uplink misc_byte (ring+32); iff flags&0x80
+	uint16_t shooter_handle = 0xFFFF; // (pool<<12)|slot of the SHOOTER (ring+4) — the client
+	                                  // resolves it as the round's owner entity [0x42f337]
+	uint16_t target_handle = 0xFFFF;  // iff (flags & 0x40): the shooter's claimed target
+	                                  // (shooter+104→+12, stamped by @0x50c2ad); 0xFFFF=sentinel
+	uint16_t shot_seq = 0;            // per-shot sequence word (ring+28; the C2S 0x06 hit_part
+	                                  // fire counter round-trips here) → word_B7C670
+	uint16_t pos_x_compressed = 0;    // fire ORIGIN: Network_DecompressFixedPoint → + dword_A822E4
+	uint16_t pos_y_compressed = 0;    // → + dword_A822E8
+	uint16_t pos_z_compressed = 0;    // → + dword_A822EC
+	uint16_t yaw_bam_high = 0;        // fire DIRECTION yaw, BAM high half (<< 16 on apply)
+	uint16_t pitch_bam_high = 0;      // fire DIRECTION pitch, BAM high half
 
-	bool has_parent_byte() const { return (flags & 0x80) != 0; }
-	bool has_weapon_handle() const { return (flags & 0x40) != 0; }
+	bool has_slot_byte() const { return (flags & 0x80) != 0; }
+	bool has_target_handle() const { return (flags & 0x40) != 0; }
 };
 
 bool decode_player_compact_record(const uint8_t *body, size_t len,
@@ -586,8 +596,8 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 bool decode_infantry_compact_record(const uint8_t *body, size_t len,
                                     InfantryCompactRecord &out, size_t &consumed);
 
-bool decode_weapon_hit_record(const uint8_t *body, size_t len,
-                              WeaponHitRecord &out, size_t &consumed);
+bool decode_round_event_record(const uint8_t *body, size_t len,
+                               RoundEventRecord &out, size_t &consumed);
 
 // ===========================================================================
 // §5.15 Guided weapon record — per-(mode, field-group) projectile-state codec.
@@ -770,8 +780,8 @@ struct FrameUpdate {
 	FrameEnv            env;        // valid iff sub_block == 2
 	FrameObjectiveBlock objective;  // valid iff sub_block == 3 (+ objective gate)
 	FramePassenger      passenger;  // valid iff (flags2 & 0xF) == 8
-	std::vector<FrameUpdateRecord> records;  // tag==1 per-entity motion
-	std::vector<WeaponHitRecord>   hits;     // tag==2 weapon-hit events (§5.9.1)
+	std::vector<FrameUpdateRecord> records;      // tag==1 per-entity motion
+	std::vector<RoundEventRecord>  round_events; // tag==2 fired-round events (§5.9.1)
 	// Walk status: `complete` is true iff the event loop hit its terminator (tag
 	// 0 / end) cleanly. `consumed` is the byte count walked (for diagnostics).
 	bool   complete = false;
@@ -956,10 +966,13 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 
 // ===========================================================================
 // C2S 0x06 — "client fired round". Fixed 45 B. Joiner reports a single
-// weapon-fire event (origin + direction + target + body part hit + muzzle
-// offset block). Server validates against the shooter's authority + ammo
-// state and runs Server_ValidateAndFireRound (which may emit S2C 0x0A trailing
-// weapon-hit records, §5.9.1, when validation succeeds).
+// weapon-fire event (origin + direction + target + shot counter + muzzle
+// offset block). The host validates it in Server_ClientFiredRound @0x50baa0
+// (anti-spoof, cease-fire, adm lookup, warp compensation, mounted-fire, ammo)
+// and an accepted PRIMARY fire runs the adm 'fire' action → re-enters the
+// validator locally → RoundData_AddRound appends a g_round_ring event that
+// fans to every OTHER in-match recipient as an S2C 0x0A tag-2 round event
+// (§5.9.1); alt fire appends directly. (D-NET-152)
 // [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
 // ===========================================================================
 

@@ -253,9 +253,9 @@ std::vector<uint8_t> make_frame_update_env_hit(int32_t ax, int32_t ay, int32_t a
 	b.push_back(2);           // event tag 2 = weapon-hit
 	b.push_back(0);           // flags (no parent / no weapon -> 17 B)
 	b.push_back(adm);         // adm_index
-	b.push_back(0);           // hit_subtype
+	b.push_back(0);           // subtype
 	put_u16(b, hit_target);   // target_handle
-	put_u16(b, 0xF7FF);       // damage_extra
+	put_u16(b, 0xF7FF);       // shot_seq
 	put_u16(b, cpx); put_u16(b, cpy); put_u16(b, cpz); // compressed pos
 	put_u16(b, 0); put_u16(b, 0);                      // yaw / pitch
 	b.push_back(0);           // event tag 0 = EOB

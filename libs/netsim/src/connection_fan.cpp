@@ -24,7 +24,8 @@ namespace {
 // loop mirrors serialize_entity_states_to_packet @0x50f070 (priority/budget port = step 2).
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 (reader) / NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
-                                    const std::vector<GameEntitySnapshot> &entities, uint8_t flags2) {
+                                    const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
+                                    std::vector<RoundEventRecord> round_events = {}) {
 	FrameUpdate fu;
 	const int32_t ax = int32_t(ctx.spawn_x);
 	const int32_t ay = int32_t(ctx.spawn_y);
@@ -224,6 +225,9 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		}
 		fu.records.push_back(std::move(rec));
 	}
+	// Tag-2 fired-round events, already recipient-selected + wire-converted by
+	// select_round_events [orig: the g_round_event_refs interleave @0x50f312].
+	fu.round_events = std::move(round_events);
 	return encode_frame_update(fu);
 }
 
@@ -360,6 +364,142 @@ std::vector<GameEntitySnapshot> select_frame_entities(Connection &conn,
 	return selected;
 }
 
+// ---------------------------------------------------------------------------
+// Per-frame ROUND-EVENT selection for one recipient — the tag-2 half of the
+// per-recipient send [orig: Server_BuildRoundEventListForPlayer @0x4ffee0,
+// called from Server_BuildEntityPriorityList @0x50e59c; records serialized by
+// NetPacket_SerializeRoundEvent @0x504820 in the @0x50f070 interleave]. Walks
+// the world round ring for events newer than this connection's watermark,
+// SKIPS the recipient's own rounds (its client already simulated them
+// [orig: @0x4fff97 shooter==recipient reject]), scores each by how close its
+// line of fire passes to the recipient, sorts descending, and converts the
+// survivors to wire records compressed against the recipient anchor.
+// ---------------------------------------------------------------------------
+std::vector<RoundEventRecord> select_round_events(const world::World &w, Connection &conn,
+                                                  const PlayerReplicationState &anchor,
+                                                  std::size_t budget_left) {
+	std::vector<RoundEventRecord> out;
+	const world::RoundRing &ring = w.rounds;
+
+	// Watermark arm gate [orig: the playerSlot+97544 non-zero gate @0x4ffee8 — a
+	// fresh player is armed at the current sequence, so the pre-join ring backlog
+	// is never replayed to a joiner].
+	if (!conn.round_watermark_armed) {
+		conn.round_watermark_armed = true;
+		conn.round_watermark = ring.last_stat();
+		return out;
+	}
+	if (ring.count == 0 || budget_left == 0) {
+		conn.round_watermark = ring.last_stat();
+		return out;
+	}
+
+	const int64_t ax = int32_t(anchor.spawn_x);
+	const int64_t ay = int32_t(anchor.spawn_y);
+	const int64_t az = int32_t(anchor.spawn_z);
+	const uint16_t own_handle =
+			conn.owned_entity.valid() ? conn.owned_entity.packed : 0xFFFFu;
+
+	struct ScoredRound {
+		int32_t score;
+		const world::RoundEvent *ev;
+	};
+	std::vector<ScoredRound> scored;
+
+	for (int i = 0; i < ring.count; ++i) {
+		const world::RoundEvent &ev = ring.records[size_t(i)];
+		if (ev.stat <= conn.round_watermark) continue; // already swept [orig: @0x4fff3f]
+		if (ev.shooter_handle == 0xFFFF) continue;     // [orig: @0x4fff4c]
+		if (ev.shooter_handle == own_handle) continue; // own fire [orig: @0x4fff97]
+
+		// Line-of-fire proximity score [orig: @0x4fff9d..@0x500126]. The original
+		// builds the forward vector on the x87 (double sin/cos scaled 2^22, products
+		// >> 22 then >> 6 -> 16.16); component convention X=sinYaw*cosPitch,
+		// Y=cosYaw*cosPitch, Z=sinPitch per the round spawners
+		// [orig: Weapon_SpawnSingleProjectile @0x4ebf51 / RoundData_SpawnRound @0x4ec5e9].
+		constexpr double kBamToRad = 1.4629627251502471e-09; // [orig: dbl_7C3608 = 2pi/2^32]
+		constexpr double kTrigScale = 4194304.0;             // [orig: dbl_7C3600 = 2^22]
+		const double yaw = double(ev.dir_yaw) * kBamToRad;
+		const double pitch = double(ev.dir_pitch) * kBamToRad;
+		const int64_t sy = int64_t(std::sin(yaw) * kTrigScale);
+		const int64_t cy = int64_t(std::cos(yaw) * kTrigScale);
+		const int64_t sp = int64_t(std::sin(pitch) * kTrigScale);
+		const int64_t cp = int64_t(std::cos(pitch) * kTrigScale);
+		const int64_t fwd_x = ((sy * cp) >> 22) >> 6;
+		const int64_t fwd_y = ((cy * cp) >> 22) >> 6;
+		const int64_t fwd_z = sp >> 6;
+
+		const int64_t dx = ax - ev.origin_x; // recipient - fire origin [orig: @0x500015]
+		const int64_t dy = ay - ev.origin_y;
+		const int64_t dz = az - ev.origin_z;
+
+		// Projection of the recipient onto the fire line, clamped to [0, 1000u]
+		// [orig: @0x500072 rounding-summed dot; clamp @0x500081].
+		int64_t proj = ((fwd_x * dx + 0x8000) >> 16) + ((fwd_y * dy + 0x8000) >> 16) +
+		               ((fwd_z * dz + 0x8000) >> 16);
+		int64_t rx = dx, ry = dy, rz = dz;
+		if (proj > 0) {
+			if (proj > 65536000) proj = 65536000;
+			rx = dx - ((fwd_x * proj + 0x8000) >> 16); // [orig: @0x5000a1]
+			ry = dy - ((fwd_y * proj + 0x8000) >> 16);
+			rz = dz - ((fwd_z * proj + 0x8000) >> 16);
+		}
+		const int64_t rz_half = rz >> 1; // z half-weight [orig: @0x5000d7]
+		const int64_t lateral = static_cast<int64_t>(
+				std::sqrt(double(rx * rx + ry * ry + rz_half * rz_half)));
+		int32_t score = 0x4000 - int32_t(lateral >> 12); // [orig: @0x500115]
+		if (score < 0) score = 0;
+		scored.push_back({score, &ev});
+	}
+
+	// Closest-to-the-bullet-line first [orig: CPairList_ShellSortByValue @0x50016a].
+	std::stable_sort(scored.begin(), scored.end(),
+	                 [](const ScoredRound &a, const ScoredRound &b) { return a.score > b.score; });
+
+	// Convert to wire records — capped at 255 [orig: the g_round_event_refs array
+	// @0x500190] and by the remaining frame budget (soft cap, like the tag-1 walk
+	// [orig: @0x50f34b]).
+	std::size_t written = 0;
+	for (const ScoredRound &s : scored) {
+		if (out.size() >= 255) break;
+		const world::RoundEvent &ev = *s.ev;
+		RoundEventRecord rec;
+		rec.flags = ev.mode_flags;
+		rec.adm_index = ev.adm_index;
+		rec.subtype = ev.subtype;
+		rec.shooter_handle = ev.shooter_handle;
+		if (ev.slot_byte != 0) { // [orig: @0x5048bb]
+			rec.flags |= 0x80;
+			rec.slot_byte = ev.slot_byte;
+		}
+		// The shooter's fire target is read LIVE off its entity at serialize time
+		// [orig: @0x50485a reads shooter+104->+12; a freed shooter reads as no target].
+		const world::Entity *shooter = w.registry.get(world::EntityHandle{ev.shooter_handle});
+		if (shooter != nullptr && shooter->last_fire_target.valid()) {
+			rec.flags |= 0x40;
+			rec.target_handle = shooter->last_fire_target.packed;
+		}
+		rec.shot_seq = ev.shot_seq;
+		// Fire origin compressed against the SAME anchor the frame header carries
+		// [orig: @0x504994 subtracts g_priority_ref_x/y/z — the recipient refs].
+		rec.pos_x_compressed = network_compress_fixedpoint(int32_t(ev.origin_x - int32_t(ax)));
+		rec.pos_y_compressed = network_compress_fixedpoint(int32_t(ev.origin_y - int32_t(ay)));
+		rec.pos_z_compressed = network_compress_fixedpoint(int32_t(ev.origin_z - int32_t(az)));
+		// Direction BAM high words, rounded [orig: @0x504a18/@0x504a3c].
+		rec.yaw_bam_high = uint16_t((uint32_t(ev.dir_yaw) + 0x8000u) >> 16);
+		rec.pitch_bam_high = uint16_t((uint32_t(ev.dir_pitch) + 0x8000u) >> 16);
+
+		const std::size_t wire = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
+		                         ((rec.flags & 0x40) ? 2u : 0u);
+		out.push_back(rec);
+		written += wire;
+		if (written >= budget_left) break;
+	}
+
+	conn.round_watermark = ring.last_stat(); // [orig: @0x5001ae stamps stat_id]
+	return out;
+}
+
 // Header wire size for a given flags2, mirroring encode_frame_update: 12-B anchor +
 // 2 flag bytes + the phase sub-block (0 weapon 11 B / 1 timer 6 B / 2 env 11 B /
 // 3 gametype 0 B) + the 7-B local tail + the 1-B event-loop terminator. The passenger
@@ -459,9 +599,20 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	// view RENDERS FROM the loopback 0x0A fold (ADR 0011), so the loopback connection gets
 	// the full record set; that frame never leaves the process, so retail interop is
 	// unaffected (D-NET-140).
+	const std::size_t header_bytes = frame_header_bytes(flags2);
 	const std::vector<GameEntitySnapshot> selected =
-			select_frame_entities(conn, ents, anchor, frame_header_bytes(flags2));
-	conn.transport->host_send(kTag0aFrameUpdate, build_0a_frame(anchor, selected, flags2));
+			select_frame_entities(conn, ents, anchor, header_bytes);
+	// Remaining frame budget for the tag-2 round events. The original interleaves
+	// tag-1/tag-2 pairs under ONE budget [orig: @0x50f070 loop]; ours selects
+	// entities first, rounds into the remainder — same cap, grouped order (the
+	// retail decode loop is tag-driven either way). (D-NET-152)
+	std::size_t used = header_bytes;
+	for (const GameEntitySnapshot &e : selected) used += record_wire_size(e);
+	const std::size_t round_budget =
+			used < std::size_t(kEntitySendBudget) ? std::size_t(kEntitySendBudget) - used : 0;
+	std::vector<RoundEventRecord> rounds = select_round_events(w, conn, anchor, round_budget);
+	conn.transport->host_send(kTag0aFrameUpdate,
+	                          build_0a_frame(anchor, selected, flags2, std::move(rounds)));
 }
 
 } // namespace opennova::netsim

@@ -129,14 +129,14 @@ int test_vehicle_unmounted_21_bytes() {
 	return 0;
 }
 
-int test_weapon_hit_minimal_no_flags() {
-	// §5.9.1 — flags=0, no parent_byte, no weapon_handle → 17 B.
+int test_round_event_minimal_no_flags() {
+	// §5.9.1 — flags=0, no slot_byte, no target_handle → 17 B.
 	const uint8_t body[] = {
 		0x00,                   // flags = 0
 		0x09,                   // adm_index
-		0x03,                   // hit_subtype
-		0x12, 0x10,             // target_handle (pool 1 slot 0x012)
-		0x34, 0x12,             // damage_extra_raw
+		0x03,                   // subtype
+		0x12, 0x10,             // shooter_handle (pool 1 slot 0x012)
+		0x34, 0x12,             // shot_seq
 		0x11, 0x22,             // pos_x_compressed
 		0x33, 0x44,             // pos_y_compressed
 		0x55, 0x66,             // pos_z_compressed
@@ -144,113 +144,113 @@ int test_weapon_hit_minimal_no_flags() {
 		0x99, 0xAA,             // pitch_bam_high
 		0xCC,                   // trailing sentinel
 	};
-	WeaponHitRecord rec;
+	RoundEventRecord rec;
 	size_t consumed = 0;
-	const bool ok = decode_weapon_hit_record(body, sizeof(body), rec, consumed);
+	const bool ok = decode_round_event_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 17);
 	EXPECT(rec.flags == 0);
-	EXPECT(!rec.has_parent_byte());
-	EXPECT(!rec.has_weapon_handle());
+	EXPECT(!rec.has_slot_byte());
+	EXPECT(!rec.has_target_handle());
 	EXPECT(rec.adm_index == 9);
-	EXPECT(rec.hit_subtype == 3);
-	EXPECT(rec.target_handle == 0x1012);
-	EXPECT(rec.weapon_handle == 0xFFFF);  // default sentinel, gate clear
-	EXPECT(rec.damage_extra_raw == 0x1234);
+	EXPECT(rec.subtype == 3);
+	EXPECT(rec.shooter_handle == 0x1012);
+	EXPECT(rec.target_handle == 0xFFFF);  // default sentinel, gate clear
+	EXPECT(rec.shot_seq == 0x1234);
 	EXPECT(rec.pos_x_compressed == 0x2211);
 	EXPECT(rec.pos_z_compressed == 0x6655);
 	EXPECT(rec.yaw_bam_high == 0x8877);
 	EXPECT(rec.pitch_bam_high == 0xAA99);
-	std::printf("PASS weapon_hit minimal 17B\n");
+	std::printf("PASS round_event minimal 17B\n");
 	return 0;
 }
 
-int test_weapon_hit_flag_0x80_adds_byte() {
-	// §5.9.1 — flags=0x80 adds parent_byte → 18 B.
+int test_round_event_flag_0x80_adds_byte() {
+	// §5.9.1 — flags=0x80 adds slot_byte → 18 B.
 	const uint8_t body[] = {
-		0x80,                   // flags = 0x80 (parent_byte present)
-		0x09, 0x03,             // adm_index, hit_subtype
-		0x55,                   // parent_byte
-		0x12, 0x10,             // target_handle
-		0x34, 0x12,             // damage_extra_raw
+		0x80,                   // flags = 0x80 (slot_byte present)
+		0x09, 0x03,             // adm_index, subtype
+		0x55,                   // slot_byte
+		0x12, 0x10,             // shooter_handle
+		0x34, 0x12,             // shot_seq
 		0x11, 0x22, 0x33, 0x44, 0x55, 0x66,  // pos x/y/z
 		0x77, 0x88, 0x99, 0xAA,              // yaw, pitch
 		0xCC,                   // trailing
 	};
-	WeaponHitRecord rec;
+	RoundEventRecord rec;
 	size_t consumed = 0;
-	const bool ok = decode_weapon_hit_record(body, sizeof(body), rec, consumed);
+	const bool ok = decode_round_event_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 18);
-	EXPECT(rec.has_parent_byte());
-	EXPECT(!rec.has_weapon_handle());
-	EXPECT(rec.parent_byte == 0x55);
-	EXPECT(rec.target_handle == 0x1012);
-	EXPECT(rec.damage_extra_raw == 0x1234);
-	std::printf("PASS weapon_hit flag_0x80 18B\n");
+	EXPECT(rec.has_slot_byte());
+	EXPECT(!rec.has_target_handle());
+	EXPECT(rec.slot_byte == 0x55);
+	EXPECT(rec.shooter_handle == 0x1012);
+	EXPECT(rec.shot_seq == 0x1234);
+	std::printf("PASS round_event flag_0x80 18B\n");
 	return 0;
 }
 
-int test_weapon_hit_flag_0x40_adds_u16() {
-	// §5.9.1 — flags=0x40 adds weapon_handle → 19 B.
+int test_round_event_flag_0x40_adds_u16() {
+	// §5.9.1 — flags=0x40 adds target_handle → 19 B.
 	const uint8_t body[] = {
-		0x40,                   // flags = 0x40 (weapon_handle present)
-		0x09, 0x03,             // adm_index, hit_subtype
-		0x12, 0x10,             // target_handle
-		0xAB, 0x1A,             // weapon_handle (pool 1 slot 0xAAB)
-		0x34, 0x12,             // damage_extra_raw
+		0x40,                   // flags = 0x40 (target_handle present)
+		0x09, 0x03,             // adm_index, subtype
+		0x12, 0x10,             // shooter_handle
+		0xAB, 0x1A,             // target_handle (pool 1 slot 0xAAB)
+		0x34, 0x12,             // shot_seq
 		0x11, 0x22, 0x33, 0x44, 0x55, 0x66,  // pos x/y/z
 		0x77, 0x88, 0x99, 0xAA,              // yaw, pitch
 		0xCC,                   // trailing
 	};
-	WeaponHitRecord rec;
+	RoundEventRecord rec;
 	size_t consumed = 0;
-	const bool ok = decode_weapon_hit_record(body, sizeof(body), rec, consumed);
+	const bool ok = decode_round_event_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 19);
-	EXPECT(!rec.has_parent_byte());
-	EXPECT(rec.has_weapon_handle());
-	EXPECT(rec.weapon_handle == 0x1AAB);
-	EXPECT(rec.target_handle == 0x1012);
-	std::printf("PASS weapon_hit flag_0x40 19B\n");
+	EXPECT(!rec.has_slot_byte());
+	EXPECT(rec.has_target_handle());
+	EXPECT(rec.target_handle == 0x1AAB);
+	EXPECT(rec.shooter_handle == 0x1012);
+	std::printf("PASS round_event flag_0x40 19B\n");
 	return 0;
 }
 
-int test_weapon_hit_both_flags_20_bytes() {
+int test_round_event_both_flags_20_bytes() {
 	// §5.9.1 — flags=0xC0 adds both → 20 B.
 	const uint8_t body[] = {
 		0xC0,                   // flags = 0xC0 (both)
-		0x09, 0x03,             // adm_index, hit_subtype
-		0x55,                   // parent_byte
-		0x12, 0x10,             // target_handle
-		0xAB, 0x1A,             // weapon_handle
-		0x34, 0x12,             // damage_extra_raw
+		0x09, 0x03,             // adm_index, subtype
+		0x55,                   // slot_byte
+		0x12, 0x10,             // shooter_handle
+		0xAB, 0x1A,             // target_handle
+		0x34, 0x12,             // shot_seq
 		0x11, 0x22, 0x33, 0x44, 0x55, 0x66,  // pos x/y/z
 		0x77, 0x88, 0x99, 0xAA,              // yaw, pitch
 		0xCC,                   // trailing
 	};
-	WeaponHitRecord rec;
+	RoundEventRecord rec;
 	size_t consumed = 0;
-	const bool ok = decode_weapon_hit_record(body, sizeof(body), rec, consumed);
+	const bool ok = decode_round_event_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 20);
-	EXPECT(rec.has_parent_byte());
-	EXPECT(rec.has_weapon_handle());
-	EXPECT(rec.parent_byte == 0x55);
-	EXPECT(rec.weapon_handle == 0x1AAB);
-	std::printf("PASS weapon_hit both_flags 20B\n");
+	EXPECT(rec.has_slot_byte());
+	EXPECT(rec.has_target_handle());
+	EXPECT(rec.slot_byte == 0x55);
+	EXPECT(rec.target_handle == 0x1AAB);
+	std::printf("PASS round_event both_flags 20B\n");
 	return 0;
 }
 
-int test_weapon_hit_short_buffer_fails() {
+int test_round_event_short_buffer_fails() {
 	// Truncated body should fail closed.
 	const uint8_t body[5] = {0xC0, 0x09, 0x03, 0x55, 0x12};
-	WeaponHitRecord rec;
+	RoundEventRecord rec;
 	size_t consumed = 99;
-	const bool ok = decode_weapon_hit_record(body, sizeof(body), rec, consumed);
+	const bool ok = decode_round_event_record(body, sizeof(body), rec, consumed);
 	EXPECT(!ok);
 	EXPECT(consumed == 0);
-	std::printf("PASS weapon_hit short_buffer\n");
+	std::printf("PASS round_event short_buffer\n");
 	return 0;
 }
 
@@ -293,11 +293,11 @@ int main(void) {
 	rc |= test_vehicle_mounted_15_bytes();
 	rc |= test_vehicle_unmounted_21_bytes();
 	rc |= test_infantry_14_bytes();
-	rc |= test_weapon_hit_minimal_no_flags();
-	rc |= test_weapon_hit_flag_0x80_adds_byte();
-	rc |= test_weapon_hit_flag_0x40_adds_u16();
-	rc |= test_weapon_hit_both_flags_20_bytes();
-	rc |= test_weapon_hit_short_buffer_fails();
+	rc |= test_round_event_minimal_no_flags();
+	rc |= test_round_event_flag_0x80_adds_byte();
+	rc |= test_round_event_flag_0x40_adds_u16();
+	rc |= test_round_event_both_flags_20_bytes();
+	rc |= test_round_event_short_buffer_fails();
 	if (rc == 0) std::printf("ALL PASS\n");
 	return rc;
 }

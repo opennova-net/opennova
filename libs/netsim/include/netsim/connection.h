@@ -65,6 +65,14 @@ struct Connection {
 	// age >= 50 force-admits past the 1124-tile distance gate, so budget-starved entities climb
 	// until they win a slot — the original's round-robin is EMERGENT from aging (no resume cursor).
 	std::array<uint8_t, 512> s2c_entity_age{};
+
+	// Per-connection round-event watermark: the newest world.rounds sequence already swept
+	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after
+	// each Server_BuildRoundEventListForPlayer @0x4ffee0 sweep; its non-zero gate skips the walk
+	// until the player is armed]. Armed on the first in-match emit at the CURRENT ring sequence,
+	// so a joiner never receives the pre-join round backlog. (D-NET-152)
+	uint32_t round_watermark = 0;
+	bool round_watermark_armed = false;
 };
 
 } // namespace opennova::netsim

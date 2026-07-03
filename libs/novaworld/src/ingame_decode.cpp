@@ -700,23 +700,24 @@ bool decode_client_checksum_reply(const uint8_t *body, size_t len,
 	return consumed == 5;
 }
 
-// §5.9.1 weapon-hit record. 17-20 B variable by flags gate (0x80, 0x40).
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]
-bool decode_weapon_hit_record(const uint8_t *body, size_t len,
-                              WeaponHitRecord &out, size_t &consumed) {
+// §5.9.1 round-event record. 17-20 B variable by flags gate (0x80, 0x40).
+// [orig: NetPacket_DeserializeRoundEvent @ 0x42F270 (client read); host write side
+// NetPacket_SerializeRoundEvent @ 0x504820]
+bool decode_round_event_record(const uint8_t *body, size_t len,
+                               RoundEventRecord &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
 	out.flags        = c.u8();
 	out.adm_index    = c.u8();
-	out.hit_subtype  = c.u8();
+	out.subtype      = c.u8();
 	if (out.flags & 0x80) {
-		out.parent_byte = c.u8();
+		out.slot_byte = c.u8();
 	}
-	out.target_handle = c.u16();
+	out.shooter_handle = c.u16();
 	if (out.flags & 0x40) {
-		out.weapon_handle = c.u16();
+		out.target_handle = c.u16();
 	}
-	out.damage_extra_raw = c.u16();
+	out.shot_seq         = c.u16();
 	out.pos_x_compressed = c.u16();
 	out.pos_y_compressed = c.u16();
 	out.pos_z_compressed = c.u16();
@@ -725,8 +726,8 @@ bool decode_weapon_hit_record(const uint8_t *body, size_t len,
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	const size_t expected = 17
-		+ (out.has_parent_byte() ? 1u : 0u)
-		+ (out.has_weapon_handle() ? 2u : 0u);
+		+ (out.has_slot_byte() ? 1u : 0u)
+		+ (out.has_target_handle() ? 2u : 0u);
 	return consumed == expected;
 }
 
@@ -917,17 +918,17 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		}
 	}
 
-	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = weapon-hit.
+	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = round event.
 	while (c.ok && c.p < c.end) {
 		const uint8_t tag = c.u8();
 		if (tag == 0) return finish(true);
 		if (tag == 2) {
-			WeaponHitRecord wh;
+			RoundEventRecord re;
 			size_t consumed = 0;
-			if (!decode_weapon_hit_record(c.p, size_t(c.end - c.p), wh, consumed))
+			if (!decode_round_event_record(c.p, size_t(c.end - c.p), re, consumed))
 				return finish(false);
 			c.p += consumed;
-			out.hits.push_back(wh);
+			out.round_events.push_back(re);
 			continue;
 		}
 		if (tag == 1) {

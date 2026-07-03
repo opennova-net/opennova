@@ -582,6 +582,96 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case 0x0B: // mission-file status report [orig: NapiNPServerMsg_0x00B @0x51AB10]
 				st.mission_status_received = true;
 				break;
+			case 0x06: { // client fired round -> ammo authority + the S2C 0x0A tag-2 round echo
+				// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 ->
+				// Server_ClientFiredRound @0x50baa0]. An accepted PRIMARY fire re-enters the
+				// validator locally through the adm 'fire' action (WeaponAction_Fire @0x542b10
+				// -> Entity_FireWeaponAndSendPacket @0x42bd80), and RoundData_AddRound @0x4fdb40
+				// appends the g_round_ring event the per-recipient 0x0A fan serializes as the
+				// §5.9.1 tag-2 round event; ALT fire appends directly. Our altitude: validate ->
+				// clip bookkeeping -> ring append. Deferred (D-NET-152 tails): the round SPAWN
+				// (RoundData_SpawnRound @0x4ec0d0 — projectile entity, spread, damage), the
+				// cease-fire gate (g_InCeaseFire unmodeled), the +96472 fire-rate stamp (the adm
+				// cooldown dword adm[276] is unparsed), the savedLivePose warp compensation
+				// (@0x50bbac — our net-snapped peers have zero intra-tick motion), and the
+				// moving-carrier re-anchor (@0x50bc41).
+				if (world == nullptr || !conn.burst.spawned) break; // [orig: gates @0x513338..62]
+				// The host's own loopback fire is a net-path no-op [orig: @0x50c18d returns 0
+				// for the local player — its fire already ran locally].
+				if (conn.link.mode == netsim::TransportMode::Loopback) break;
+				ClientFiredRound fr;
+				size_t fire_consumed = 0;
+				if (!decode_client_fired_round(msg.payload.data(), msg.payload.size(), fr,
+				                               fire_consumed))
+					break;
+				// Handle validity [orig: @0x513543], then anti-spoof: the claimed shooter must
+				// BE this connection's own entity [orig: @0x51358d, doubled at @0x50bf37 -> -9].
+				if (fr.shooter_handle == 0xFFFF || (fr.shooter_handle & 0xF000u) >= 0x5000u)
+					break;
+				if (!conn.link.owned_entity.valid() ||
+				    conn.link.owned_entity.packed != fr.shooter_handle)
+					break;
+				world::Entity *shooter = world->registry.get(conn.link.owned_entity);
+				if (shooter == nullptr) break;
+
+				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
+				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
+				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
+				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
+				if (!world->weapons.empty() && !alt_fire) {
+					const world::WeaponTableEntry *adm = world->weapons.by_index(fr.adm_index);
+					if (adm == nullptr) break; // [orig: "Tried to fire NULL wpn, %i" @0x50bb49]
+					if (adm->clipsize != -1) { // [orig: adm+88 != -1 gates the ammo check
+						                       // @0x541caa AND the consume @0x542c6d]
+						const uint16_t combo =
+								uint16_t(adm->category) * 65u + adm->rank; // [orig: @0x50c0d7]
+						WeaponSlotState &slot = conn.weapon_slots[combo];
+						if (slot.adm_index != fr.adm_index) {
+							// First sight / weapon swap on this combo: bind + seed a full
+							// magazine [orig: the loadout binds slot+32; WeaponSlot_ReloadAmmo
+							// @0x541811 fills to capacity clamped by the ammo pool — pool
+							// clamp deferred].
+							slot.adm_index = fr.adm_index;
+							slot.clip = adm->clipsize;
+						}
+						if (slot.clip <= 0) break; // [orig: "(NO AMMO!)" reject @0x50c15c]
+						--slot.clip; // [orig: consume_weapon_ammo @0x540913 --u16 slot+16]
+					}
+					// Primary fire mirrors the equipped weapon onto the entity
+					// [orig: @0x50bd56 entity+688 = adm — the §5.10 off-16 source].
+					shooter->equipped_adm_index = fr.adm_index;
+				}
+				// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
+				// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
+				world::EntityHandle fire_target{};
+				if (fr.target_handle != 0xFFFF && (fr.target_handle & 0xF000u) < 0x5000u) {
+					const world::EntityHandle th{fr.target_handle};
+					if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
+				}
+				shooter->last_fire_target = fire_target;
+
+				// Ring append [orig: RoundData_AddRound @0x4fdb40]. The ring stores the
+				// PRE-SPREAD origin/direction — exactly the client's claimed fire pose
+				// [orig: @0x4fdbce reads the request before RoundData_SpawnRound's spread].
+				world::RoundEvent ev;
+				ev.shooter_handle = fr.shooter_handle;
+				ev.origin_x = fr.pos_x;
+				ev.origin_y = fr.pos_y;
+				ev.origin_z = fr.pos_z;
+				ev.dir_yaw = int32_t(uint32_t(fr.dir_x) << 16);   // [orig: @0x513436]
+				ev.dir_pitch = int32_t(uint32_t(fr.dir_y) << 16); // [orig: @0x513449]
+				ev.shot_seq = fr.hit_part;   // [orig: word_B7C670 = hit_part @0x50c2ba -> ring+28]
+				ev.mode_flags = fr.fire_flags; // [orig: ring+30 = the fire-mode byte @0x4fdcde]
+				// Shooter fire-context composite [orig: ctx & 0x3F @0x50bd83, recombined
+				// | (ctx >> 7) << 7 into roundParams[4] @0x50c7bd -> ring+31].
+				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
+				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
+				ev.adm_index = fr.adm_index;
+				world->rounds.add(ev);
+				// No reactive reply — the echo rides the per-frame 0x0A fan (netsim
+				// select_round_events), reaching every OTHER in-match recipient.
+				break;
+			}
 			case 0x25: { // reload request -> S2C 0x49 BROADCAST [orig: NapiNPServerMsg_HandleReloadRequest
 				// @0x514DF0 — validates the [u16 entityHandle][u16 weaponSlotCombo] body, then relays it
 				// verbatim as S2C 0x49 via two NapiNPServer_SendFiltered @0x4C87E0 sends that together
@@ -599,6 +689,21 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (NapiNPConnection &c : roster) {
 					if (!is_in_match(c) || c.link.transport == nullptr) continue;
 					c.link.transport->host_send(0x49, body);
+				}
+				// Host-side clip refill for a REMOTE requester [orig: WeaponSlot_ReloadAmmo
+				// @0x541720, called @0x514F03 after the relay iff requester != local player.
+				// Refund + ammo-pool clamp deferred -> refill to capacity @0x541811]. The wire
+				// combo (the second u16) keys the same slot the 0x06 pipeline decrements
+				// [orig: slotIndex = HIWORD @0x514f03; slot = playerSlot+464+100*combo @0x54176d].
+				if (world != nullptr && !world->weapons.empty() &&
+				    conn.link.mode != netsim::TransportMode::Loopback) {
+					auto slot_it = conn.weapon_slots.find(req.reload_param);
+					if (slot_it != conn.weapon_slots.end()) {
+						const world::WeaponTableEntry *adm =
+								world->weapons.by_index(slot_it->second.adm_index);
+						if (adm != nullptr && adm->clipsize != -1)
+							slot_it->second.clip = adm->clipsize; // [orig: slot+16 @0x541850]
+					}
 				}
 				break;
 			}
