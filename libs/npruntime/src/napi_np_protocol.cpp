@@ -4,6 +4,7 @@
 #include "npruntime/server_message_dispatch.h" // dispatch_session_replies (the reactive §5.1 replies)
 #include "npruntime/server_spawn.h"            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
+#include <novaworld/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <novaworld/session_hello.h>
@@ -502,6 +503,27 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // 0x46 ClientGoodbye. [orig: Nwu_HandleClientGoodbye @0x624250]
 void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleResult &out) {
+	// The player teardown, BEFORE the node erase [orig: Server_HandlePlayerDisconnect @0x51B5C0]:
+	// despawn the owned world entity — a leaked body keeps streaming forever and re-enters every
+	// future joiner's 0x0C batch (the retail-join v23 ghost players, D-NET-149) — and broadcast
+	// the roster slot's 0x46 REMOVAL to the remaining in-match peers (@0x51b8ad re-serializes
+	// fieldFlags 0x1CF7 over the memset player slot -> the 0x8000 removal record
+	// @0x505ecb..0x505ee0; send_mask 128 @0x51b8bc; the client's apply is
+	// PlayerSlot_ClearAndUnlink @0x431420). Deferred, tracked in D-NET-149: the 0x32
+	// minimap-slot + 0x6A squad broadcasts, the team spawn-token return (@0x51b661..0x51b67a),
+	// and a dead-peer timeout reap (today only the goodbye opcode tears down).
+	if (NapiNPConnection *conn = find_connection(ctx, peer)) {
+		if (conn->type == 1 && conn->link.owned_entity.valid()) {
+			if (ctx.world != nullptr) ctx.world->registry.despawn(conn->link.owned_entity);
+			const uint8_t slot = conn->reply.player_slot;
+			for (NapiNPConnection &other : ctx.np_protocol.connection_list) {
+				if (&other == conn || !is_in_match(other) || other.link.transport == nullptr)
+					continue;
+				other.link.transport->host_send(
+						0x46, encode_player_sync_removal(slot, /*with_ack=*/false));
+			}
+		}
+	}
 	erase_connection(ctx, peer);
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;

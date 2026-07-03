@@ -286,6 +286,41 @@ bool run_plain_join_tag29_draws_no_tag51() {
 	return true;
 }
 
+// ClientGoodbye tears the player down [orig: Server_HandlePlayerDisconnect @0x51B5C0]: the owned
+// world entity despawns — a leaked body kept streaming and re-entered every future joiner's 0x0C
+// batch (the retail-join v23 ghost players, D-NET-149) — and the node erases so the roster slot
+// frees. (The 0x46 removal fan to remaining in-match peers rides their transports; covered by the
+// staging call, no in-match second peer modeled here.)
+bool run_goodbye_despawns_player_entity() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+
+	world::World w;
+	w.registry.configure_pool(0, 8);
+	const world::EntityHandle h = w.registry.spawn(0, world::Entity{});
+	if (!expect(h.valid() && w.registry.get(h) != nullptr, "test entity spawns")) return false;
+	ctx.world = &w;
+
+	const PeerAddr peer{0x0100007Fu, 30700};
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	std::string server_scrk;
+	if (!handshake(ctx, peer, client_scrk, 0xC0FFEE01u, server_scrk)) return false;
+	if (!expect(np::bind_connection_player(ctx, peer, 1, h.packed),
+	            "connection binds the live world entity")) return false;
+
+	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, {});
+	np::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
+
+	if (!expect(w.registry.get(h) == nullptr,
+	            "goodbye despawns the owned world entity (D-NET-149)")) return false;
+	bool node_gone = true;
+	for (const auto &c : ctx.np_protocol.connection_list) {
+		if (c.peer == peer) node_gone = false;
+	}
+	if (!expect(node_gone, "goodbye erases the connection node")) return false;
+	return true;
+}
+
 bool run_non_jo_peer_is_ignored() {
 	// The join legs validate the JO identity + HK echo (the @0x62b750 gate): a lobby (non-JO) PN, a
 	// non-JO 0x42, and a wrong-HK 0x42 must all be dropped with no reply and no connection.
@@ -616,6 +651,7 @@ int main() {
 	ok = run_reactive_replies() && ok;
 	ok = run_loadout_resolve_with_armory() && ok;
 	ok = run_plain_join_tag29_draws_no_tag51() && ok;
+	ok = run_goodbye_despawns_player_entity() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
 	ok = run_listen_host_lifecycle() && ok;

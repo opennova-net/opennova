@@ -6181,6 +6181,25 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
+**D-NET-149** [reimpl divergence, FIXED 2026-07-02 (core); broadcasts partially deferred]
+**A disconnecting player's world entity leaked forever — the goodbye path erased only the
+connection node, so the body kept streaming (0x0A/0x20) and re-entered every future joiner's
+0x0C batch as a ghost player.** Live-witnessed retail-join v23: after two leave/rejoin cycles
+the 0x0C batch carried FOUR TestPlayer organics (slots 1-3 = the previous sessions' corpses,
+pool slots and eFlags/dcb accumulating 3→4→5) and the user saw the older bodies standing at
+their previous positions. The original tears the player down on disconnect [orig:
+Server_HandlePlayerDisconnect @ 0x51B5C0]: team spawn-token return (@ 0x51b661..0x51b67a),
+S2C 0x32 minimap-slot removal (`serialize_minimap_slot @ 0x505a60` mode 2, mask 128), squad
+S2C 0x6A, per-player slot struct memset, and a 0x46 broadcast re-serialized over the now-empty
+slot (fieldFlags 0x1CF7 @ 0x51b8ad → the 0x8000 REMOVAL record @ 0x505ecb..0x505ee0, mask 128
+@ 0x51b8bc; client apply = `PlayerSlot_ClearAndUnlink @ 0x431420`). FIXED: handle_client_goodbye
+(npruntime napi_np_protocol.cpp) now despawns `conn.link.owned_entity` from the world registry
+and stages the 0x46 removal on every remaining in-match peer's transport before the node erase;
+pinned by `npruntime_handshake_server` ("goodbye despawns the owned world entity"). DEFERRED
+(tracked here): the 0x32/0x6A broadcasts, the team spawn-token return, and a dead-peer TIMEOUT
+reap (only the 0x46-opcode goodbye tears down today — a hard-killed client still leaks until
+session timeout modeling lands).
+
 **D-NET-148** [reimpl divergence, FIXED 2026-07-02] **The host replied an invented,
 unconditional S2C 0x51 "spawn-confirm" (packed char id 0) to the joiner's deploy-time C2S
 0x29 — the retail-join DBuggy1 shadow.** The original `[orig: NapiNPServerMsg_0x029
