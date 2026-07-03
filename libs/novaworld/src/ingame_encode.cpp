@@ -36,7 +36,7 @@ struct Writer {
 	}
 	// Capped VARIABLE-length NUL-terminated string: strlen+1 bytes on the wire, truncated to
 	// (max_chars-1) chars. The retail slot-state writer emits strlen+1
-	// (NetPacket_SerializeWeaponOverlaySlotState @0x505f9b) and the client reads strlen+1 with the
+	// (NetPacket_SerializePlayerSync0x46 @0x505f9b) and the client reads strlen+1 with the
 	// same char cap (NapiNPClientMsg_PlayerSync @0x431370) — never a fixed-width field. (Renamed
 	// from the misnomer `cstr_fixed`.)
 	void cstr_capped(const std::string &s, size_t max_chars) {
@@ -127,8 +127,8 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.alert_byte)                f |= 0x0040; // entity+533  [orig: 0x503e3c]
 		if (rec.action_byte)               f |= 0x0080; // entity+532  [orig: 0x503e60]
 		if (rec.weapon_type_byte)          f |= 0x1000; // entity+100  [orig: 0x503e7f]
-		if (rec.health_byte)               f |= 0x2000; // entity+538  [orig: 0x503ecc]
-		else if (rec.zone_radius_short)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
+		if (rec.zone_number_rank)               f |= 0x2000; // entity+538  [orig: 0x503ecc]
+		else if (rec.zone_radius)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
 		if (rec.difficulty_byte)           f |= 0x4000; // entity+624  [orig: 0x503f4c]
 
 		w.u16(f);                       // spawn_flags  [orig: *flags_write_pos @ 0x503f90]
@@ -173,10 +173,10 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (f & 0x1000) w.u8(rec.weapon_type_byte);  // [orig: 0x503ec0]
 
 		if (f & 0x2000) {               // [orig: 0x503ee5 health block]
-			w.u8(rec.health_byte);      // entity+538 (the break-out byte)
-			w.u16(rec.zone_radius_short);    // entity+350
+			w.u8(rec.zone_number_rank);      // entity+538 (the break-out byte)
+			w.u16(rec.zone_radius);    // entity+350
 		} else if (f & 0x8000) {
-			w.u16(rec.zone_radius_short);    // entity+350 [orig: 0x503f43]
+			w.u16(rec.zone_radius);    // entity+350 [orig: 0x503f43]
 		}
 		if (f & 0x4000) w.u8(rec.difficulty_byte);   // entity+624 [orig: 0x503f7e]
 	}
@@ -615,9 +615,9 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 	w.u8(r.anticheat_flags);
 	w.u8(r.move_input_byte);
 	w.u8(r.state_flags_byte);
-	w.u8(r.anim_def_1);
-	w.u8(r.anim_def_2);
-	w.u8(r.anim_def_3);
+	w.u8(r.analog_x);
+	w.u8(r.analog_y);
+	w.u8(r.analog_z);
 	w.u8(r.equipped_adm_index);
 	w.u8(r.stat_byte_0);
 	w.u8(r.stat_byte_1);
@@ -637,24 +637,39 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // share the lib). The host-side input is the PlayerReplicationState reply POD.
 // ---------------------------------------------------------------------------
 
-// [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80] — round-trips through decode_player_sync.
-std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool with_ack) {
+// [orig: NetPacket_SerializePlayerSync0x46 @0x505e80] — round-trips through decode_player_sync.
+// The reply mask is serialized VERBATIM and gates each field, so the server answers exactly the
+// requested fieldFlags (ack bit 0x4000 included) [orig: the per-bit field writes; ack echo
+// @0x505f05]. Field order matches the witnessed write sites (ascending @0x505f9b..@0x506230)
+// and the decode_player_sync read order.
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint16_t field_flags) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u8(ctx.player_slot);
-	// field flags — the roster-sync field set; 0x4000 = ack (drives the client's roster walk to slot+1).
-	w.u16(static_cast<uint16_t>(0x1CF7u | (with_ack ? 0x4000u : 0u)));
+	w.u16(field_flags);
 	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // pool-0 entity index [orig: Pool_GetIndexFromPtr @0x505f40]
-	w.cstr_capped(ctx.player_name, 32); // 0x0001 name (variable-length, [orig: slot+40 @0x505f9b])
-	w.cstr_capped(ctx.clan_tag, 16);    // 0x0002 team-string — retail ALWAYS writes "" here (@0x505ff7)
-	w.cstr_capped(std::string(), 16);   // 0x0010 vehicle-name — "" for an on-foot player (@0x50601f)
-	w.u8(ctx.team); // 0x0004 team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
-	w.u8(0);        // 0x0020 vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
-	w.u8(0);        // 0x1000 late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
-	w.u8(0xFF);     // 0x0040 squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
-	w.u8(0);        // 0x0080 side [orig: slot+100577]
-	w.u8(1);        // 0x0400 quality [orig: slot+418; client clamps <=4 @0x431370]
-	w.u32(0);       // 0x0800 vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
+	if (field_flags & 0x0001u)
+		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
+	if (field_flags & 0x0002u)
+		w.cstr_capped(ctx.clan_tag, 16);    // team-string — retail ALWAYS writes "" here (@0x505ff7)
+	if (field_flags & 0x0010u)
+		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
+	if (field_flags & 0x0004u)
+		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
+	if (field_flags & 0x0008u)
+		w.u8(0);        // class/subtype byte (outside the 0x1CF7 set; slot-state default 0)
+	if (field_flags & 0x0020u)
+		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
+	if (field_flags & 0x1000u)
+		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
+	if (field_flags & 0x0040u)
+		w.u8(0xFF);     // squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
+	if (field_flags & 0x0080u)
+		w.u8(0);        // side [orig: slot+100577]
+	if (field_flags & 0x0400u)
+		w.u8(1);        // quality [orig: slot+418; client clamps <=4 @0x431370]
+	if (field_flags & 0x0800u)
+		w.u32(0);       // vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
 	return out;
 }
 
@@ -676,26 +691,32 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 // the packed char id) — a zeroed id re-bound the joiner to a vehicle archetype: the DBuggy1
 // shadow. Port the real record from @0x506bb0 when the team-change flow lands.)
 
-// [orig: NapiNPClientMsg_0x016 @0x42FAE0] — round-trips through decode_player_list.
+// [orig: NetPacket_SerializeScoreboard0x16 @0x504b80 (write) / NapiNPClientMsg_PlayerList
+// @0x42FAE0 (read)] — round-trips through decode_player_list. Byte 0 is a FLAGS byte (bit0
+// team-mode, bit1 timed-scores — the old `max` reading was a misnomer); the trailer carries
+// the LIVE [inGameCount][spectatorCount] pair. The HUD "Number of players" = accepted rows −
+// spectatorCount (g_scoreboard_row_count − g_scoreboard_spectator_count) — a hardcoded trailer pinned
+// every client's count at 2 (the v31 HUD-count defect, D-NET-158). Rows are accepted only for
+// 0x46-known slots; spectators are unmodeled (0).
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	w.u8(0x01);                                  // HUD time-vs-score format flag (dword_A823B8)
-	w.u8(static_cast<uint8_t>(players.size()));  // player_count
+	w.u8(0x01);                                  // flags: bit0 team-mode [orig: -> g_scoreboard_flags]
+	w.u8(static_cast<uint8_t>(players.size()));  // row count
 	for (const PlayerListEntry &e : players) {
 		w.u8(e.slot);
 		w.u16(0); // ping
 		w.u16(0); // score
-		w.u16(0); // score2
-		w.u8(static_cast<uint8_t>(e.team << 1)); // (team<<1)|spectator; team=1 -> 0x02, team=2 -> 0x04
+		w.u16(0); // deaths
+		w.u8(static_cast<uint8_t>(e.team << 1)); // bits1+ team, bit0 SPECTATOR (unmodeled 0)
 	}
 	w.u8(0x02); // team_count = 2 (matches retail)
-	for (int i = 0; i < 3; ++i) { // (team_count + 1) iterations
+	for (int i = 0; i < 3; ++i) { // (team_count + 1) blocks {score, deaths, kothHold, ctfFlag}
 		w.u16(0); w.u16(0);
 		w.u8(0); w.u8(0);
 	}
-	w.u8(0x02); // dword_A85B3C
-	w.u8(0x00); // dword_A85B40
+	w.u8(static_cast<uint8_t>(players.size())); // inGameCount  [orig: -> g_scoreboard_ingame_count]
+	w.u8(0x00);                                 // spectatorCount [orig: -> g_scoreboard_spectator_count]
 	return out;
 }
 

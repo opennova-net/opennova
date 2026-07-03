@@ -182,6 +182,26 @@ void test_team_marker_selection() {
     CHECK(t2.found && t2.position.x > 0.0f);  // 6004 sits east
 }
 
+void test_spawn_zone_presence_and_zone_info() {
+    AshFixture f;
+    // The join-time respawn-pending gate: ASH offers deploy-selectable zones
+    // [orig: SpawnZoneList_GetCount() > 0 @0x51a6f2 -> stateByte |= 0x10; D-NET-156].
+    CHECK(world_has_spawn_zone(f.w));
+    // The 0x0D packed zone byte = zoneNumber + 32*rank [orig: ZoneSlotChain_GetZoneInfo
+    // @0x503eeb]. The two zone-2 entities share a number: descending rank within it —
+    // golden ASH_I5A bunker 0x22 = zone 2 rank 1.
+    const Entity *z2a = f.w.registry.get(f.z2a);
+    const Entity *z2b = f.w.registry.get(f.z2b);
+    const Entity *z1 = f.w.registry.get(f.z1);
+    CHECK(zone_chain_zone_info_byte(f.w.zone_chain, *z2a) == (2 + 32 * 1));
+    CHECK(zone_chain_zone_info_byte(f.w.zone_chain, *z2b) == (2 + 32 * 0));
+    CHECK(zone_chain_zone_info_byte(f.w.zone_chain, *z1) == 1); // sole zone 1 -> rank 0
+    // A zone-less world offers nothing to hold the deploy screen for.
+    World bare;
+    bare.registry.configure_pool(1, 4);
+    CHECK(!world_has_spawn_zone(bare));
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +212,7 @@ int main() {
     test_auto_deploy_pick();
     test_resolve_spawn_target();
     test_team_marker_selection();
+    test_spawn_zone_presence_and_zone_info();
     if (failures == 0) std::printf("zone_chain_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -29,6 +29,7 @@
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/player_spawn.h> // spawn_player / spawn_remote_player
+#include <world/vehicle_attach.h> // entity_process_vehicle_attach / detach (0x26/0x27)
 #include <world/world.h>
 
 #include <cstdint>
@@ -687,12 +688,180 @@ bool run_0a_player_record_field_sources() {
 	// apply-skip @0x4c11f2] (D-NET-143).
 	if (!expect(rec->player.anim_def_index == 0x09, "anim-def index echoes equipped_adm_index"))
 		return false;
-	// Anim-STATE id (off-14): the body FSM is unmodeled — the wire carries the retail
-	// spawn/idle default 0x2B (43), never 0 (the null clip; the v15 flicker) [orig:
-	// PlayerClass_InitEntity @0x4B1116] (D-NET-143).
-	if (!expect(rec->player.anim_state_id == 0x2B, "anim-state id is the 0x2B idle default"))
+	// Anim-STATE id (off-14): the wire carries the entity's live body-anim state (the motor
+	// mirror; pending-wins [orig: @0x4c0cc7]) — a fresh spawn reads the Entity_ResetToSpawnState
+	// default 44, never 0 (the null clip; the v15 flicker) [orig: @0x4b9714] (D-NET-159).
+	if (!expect(rec->player.anim_state_id == 44, "anim-state id is the spawn default 44"))
+		return false;
+	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte.
+	e->net_anim_pending = 11; // a queued crouch-walk commit
+	e->net_anim_phase = 37;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "second 0x0A frame dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "second 0x0A frame decodes")) return false;
+	rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == host_h.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present (frame 2)")) return false;
+	if (!expect(rec->player.anim_state_id == 11, "pending anim state wins the off-14 byte"))
+		return false;
+	if (!expect(rec->player.anim_channel_ratio == 37, "anim channel ratio rides off-15"))
 		return false;
 	std::printf("PASS 0a_player_record_field_sources\n");
+	return true;
+}
+
+// (i2) D-NET-156 — the deploy-screen hold: a respawn-pending connection's 0x0A header carries
+//      flags1 bit1 EVERY frame (the client's deploy screen is g_deploy_screen_active = (flags1 & 2) each
+//      frame [orig: NetPacket_WritePlayerState @0x4ff7bd / NapiNPClientMsg_0x00A @0x42ff82]),
+//      and dropping the flag closes it. The recipient's own stance echoes in the tail state
+//      byte bits 0-1 [orig: tail read @0x4303e5 -> latches @0x430562/@0x430570].
+bool run_0a_deploy_hold_and_tail_stance() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "player entity resolvable")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	conns[0].respawn_pending = true;
+	e->flags |= 1u; // the hidden bit the join sets with the pending flag [orig: @0x4ff7dd]
+	e->net_stance_bits = 2; // crouched — the tail must echo it (bit1)
+
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "0x0A frame decodes")) return false;
+	if (!expect(fu.flags1 == 0x02, "flags1 bit1 held while respawn-pending")) return false;
+	if (!expect(fu.state_flag_byte == 0x02, "tail state byte echoes the crouch bit")) return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == h.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present")) return false;
+	if (!expect((rec->player.state_flags & 0x01) != 0,
+	            "record byte13 carries the pending hidden bit (golden 0x01)")) return false;
+
+	// Deploy clears the hold: flags1 drops to 0 on the very next frame (one bit1=0 frame
+	// closes the retail deploy screen).
+	conns[0].respawn_pending = false;
+	e->flags &= ~1u;
+	e->net_stance_bits = 0;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "post-deploy 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "post-deploy 0x0A decodes")) return false;
+	if (!expect(fu.flags1 == 0x00, "flags1 drops after the deploy clears pending")) return false;
+	if (!expect(fu.state_flag_byte == 0x00, "tail stance echo cleared")) return false;
+	std::printf("PASS 0a_deploy_hold_and_tail_stance\n");
+	return true;
+}
+
+// (i3) D-NET-157 — the 0x26 attach acceptance + the 0x0A mounted-branch echo: the accepted
+//      occupant's record carries the RAW wire bone at byte 0, the vehicle as its carrier, and
+//      CARRIER-LOCAL position; the recipient's own tail mount handle names its carrier. The
+//      detach drops it all back to the free-standing form. [orig: Entity_ProcessVehicleAttach
+//      @0x435AA0 / Entity_AttachToVehicleSlot @0x4946D0 tail @0x494752-75; record op1 @0x4c0a08]
+// Type resolver for the attach test's mixed frame: the player type decodes as Player,
+// the 0x1004 buggy as Vehicle (the default phase-1 resolver knows only the player type).
+nw::EntityClass attach_test_class(uint16_t type_id) {
+	if (type_id == 0x14B9) return nw::EntityClass::Player;
+	if (type_id == 0x1004) return nw::EntityClass::Vehicle;
+	return nw::EntityClass::Infantry;
+}
+
+bool run_0x26_attach_mounted_echo() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle ph =
+			w::spawn_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *player = world.registry.get(ph);
+	if (!expect(player != nullptr, "player entity resolvable")) return false;
+
+	// A pool-1 vehicle with one driver seat at bone 1 (the v31 wire bone).
+	w::EntityHandle vh;
+	{
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x1004;
+		veh.position = {12.0f, 20.0f, 3.0f};
+		veh.yaw = 0;
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		w::Seat drv;
+		drv.type = w::SeatType::Driver;
+		drv.bone_index = 1;
+		veh.seats.push_back(drv);
+		vh = world.registry.spawn_from(1, 0, veh);
+	}
+	if (!expect(vh.valid(), "vehicle spawned")) return false;
+
+	// The 0x26 acceptance path (dispatch calls this after the word0 anti-spoof overwrite).
+	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+		return false;
+	if (!expect(player->mounted && player->mount_target == vh, "mount fields written"))
+		return false;
+	if (!expect(player->mount_bone == 1, "raw wire bone recorded (entity+0x157)")) return false;
+	if (!expect((player->flags & 0x40u) != 0, "mounted flag 0x40 set")) return false;
+	// A second occupant cannot take the held seat [orig: @0x435ba9].
+	const w::EntityHandle ph2 =
+			w::spawn_player(world, player_spawn({11.0f, 20.0f, 3.0f}, 1, 0xFFF1));
+	if (!expect(!w::entity_process_vehicle_attach(world, ph2, vh, 1), "occupied seat rejects"))
+		return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
+	            "0x0A frame decodes")) return false;
+	if (!expect(fu.mount_handle == vh.packed, "tail mount handle names the recipient's carrier"))
+		return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == ph.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present")) return false;
+	if (!expect(rec->player.vehicle_bone == 1, "mounted record byte0 = the wire bone"))
+		return false;
+	if (!expect(rec->player.carrier_handle == vh.packed, "mounted record carrier = the vehicle"))
+		return false;
+	if (!expect((rec->player.state_flags & 0x40u) != 0, "record byte13 carries mounted 0x40"))
+		return false;
+
+	// Detach: seat freed, mount fields cleared, record back to free-standing.
+	if (!expect(w::entity_detach_from_vehicle(world, ph), "detach applies")) return false;
+	if (!expect(!player->mounted && player->mount_bone == 0, "mount fields cleared"))
+		return false;
+	w::Entity *veh = world.registry.get(vh);
+	if (!expect(veh != nullptr && !veh->seats[0].occupant.valid(), "seat occupant freed"))
+		return false;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "post-detach 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
+	            "post-detach 0x0A decodes")) return false;
+	rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == ph.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present post-detach")) return false;
+	if (!expect(rec->player.vehicle_bone == 0 && rec->player.carrier_handle == 0xFFFF,
+	            "post-detach record is free-standing")) return false;
+	std::printf("PASS 0x26_attach_mounted_echo\n");
 	return true;
 }
 
@@ -967,6 +1136,7 @@ int main() {
 	                run_retail_player_slots_start_after_bms_organics() &&
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
 	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
+	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
 	                run_round_event_fanout();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

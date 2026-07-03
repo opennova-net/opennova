@@ -75,6 +75,14 @@ struct ZoneChain; // world/zone_chain.h
 const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
                                    uint16_t handle);
 
+// The world offers at least one deploy-selectable spawn zone (an alive attrib-0x40000
+// "SpawnPoint" entity). Gates the join-time respawn-pending flag — the deploy screen only
+// holds when the mission has zones to pick [orig: Server_OnPlayerJoin @0x51a6f2
+// `|= 0x10 iff SpawnZoneList_GetCount() > 0`; same count gates the 0x0F game_flags bit0
+// @0x502da7; the client builds its own picker list from local BMS, pools 2+1, the same
+// def gate — Entity_BuildSpawnZoneList @0x43EAE0].
+bool world_has_spawn_zone(const World &world);
+
 // The 0xFFFE auto-deploy pick: the requester team's own zone that sits ON the
 // frontier — enemy-capturable, or carrying the team's frontier number — with
 // control fully secured (>= 0x10000). Co-op gametypes (game_type & 0x20000) take

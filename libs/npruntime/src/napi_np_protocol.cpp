@@ -648,6 +648,12 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 		if (conn.burst.spawned && !conn.reply.roster_counted) {
 			conn.reply.roster_counted = true;
 			++ctx.np_protocol.roster_generation;
+			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
+			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
+			// unknown-slot churn behind the stale HUD count (D-NET-158). [orig:
+			// Server_PlayerAdd @0x51D296]
+			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
+			                              ctx.world);
 		}
 		// (Re)push the list to a spawned joiner whenever its seen generation is stale.
 		// Covers the joiner's OWN spawn — the client needs its own slot to bind its local

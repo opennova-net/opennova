@@ -206,10 +206,10 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		if (rec.spawn_flags & 0x1000) rec.weapon_type_byte = c.u8();
 
 		if (rec.spawn_flags & 0x2000) {
-			rec.health_byte = c.u8();
-			rec.zone_radius_short = c.u16();
+			rec.zone_number_rank = c.u8();
+			rec.zone_radius = c.u16();
 		} else if (rec.spawn_flags & 0x8000) {
-			rec.zone_radius_short = c.u16();
+			rec.zone_radius = c.u16();
 		}
 		if (rec.spawn_flags & 0x4000) rec.difficulty_byte = c.u8();
 
@@ -331,7 +331,7 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 	out = PlayerList{};
 	Cursor c{body, body + len, true};
-	out.max_players = c.u8();
+	out.flags = c.u8();
 	out.player_count = c.u8();
 	if (!c.ok) return false;
 	out.players.reserve(out.player_count);
@@ -358,8 +358,8 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 		out.teams.push_back(t);
 		if (!c.ok) return false;
 	}
-	out.extra1 = c.u8();
-	out.extra2 = c.u8();
+	out.in_game_count = c.u8();
+	out.spectator_count = c.u8();
 	return (c.p == c.end);
 }
 
@@ -636,9 +636,9 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 	out.anticheat_flags  = c.u8();      // host apply discards this byte
 	out.move_input_byte  = c.u8();
 	out.state_flags_byte = c.u8();      // raw entity+0x24 low byte [orig: replace-bits apply @0x4c1e4d]
-	out.anim_def_1     = c.u8();
-	out.anim_def_2     = c.u8();
-	out.anim_def_3     = c.u8();
+	out.analog_x     = c.u8();
+	out.analog_y     = c.u8();
+	out.analog_z     = c.u8();
 	out.equipped_adm_index = c.u8(); // entity+0x2B0 [orig: case-4 store @0x4C20A3]
 	out.stat_byte_0    = c.u8();
 	out.stat_byte_1    = c.u8();
@@ -1579,7 +1579,7 @@ bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConf
 	Cursor c{body, body + len, true};
 	for (int i = 0; i < 4; ++i) out.skipped[i] = c.u32();
 	out.session_config = c.u8();
-	out.team_mode = c.u8();
+	out.local_player_slot = c.u8();
 	out.max_players = c.u8();
 	out.skipped4 = c.u32();
 	out.trailing = c.u8();

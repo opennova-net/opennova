@@ -113,6 +113,10 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // BMS byte 155 (.mis "lfp_group") -> entity+538 — the AS zone number (net-re §5.61).
     // [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     s.zone_number = e.lfp_group;
+    // BMS word 14 (wp_distance low u16) -> entity+350 — the capture-zone/proximity radius
+    // the 0x0D record's 0x2000/0x8000-gated u16 streams (golden ASH_I5A bunkers: 70).
+    // [orig: Entity_SpawnFromBMSRecord @0x40e9f0; net-re §5.11]
+    s.zone_radius = static_cast<uint16_t>(e.wp_distance & 0xFFFF);
     return s;
 }
 

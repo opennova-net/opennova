@@ -104,6 +104,21 @@ const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
     return e;
 }
 
+bool world_has_spawn_zone(const World &world) {
+    // [orig: SpawnZoneList_GetCount() > 0 — the join-time bit4 gate @0x51a6f2 and the
+    //  0x0F game_flags bit0 @0x502da7. The list registers alive def-attrib-0x40000
+    //  entities from pools 2+1 (Entity_BuildSpawnZoneList @0x43EAE0 is the client-side
+    //  twin of the same scan).]
+    bool any = false;
+    world.registry.for_each([&](const Entity &e) {
+        if (any) return;
+        const int pool = e.handle.pool();
+        if (pool != 1 && pool != 2) return;
+        if (e.is_spawn_point && e.alive) any = true;
+    });
+    return any;
+}
+
 const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
                                        uint8_t team, uint32_t game_type) {
     // [orig: find_spawn_entity_for_team @0x4fc810]

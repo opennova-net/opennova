@@ -1,7 +1,7 @@
 #include "npruntime/server_spawn.h"
 
 #include <world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
-#include <world/spawn_select.h> // select_player_spawn (§5.2c start-marker scan)
+#include <world/spawn_select.h> // select_player_spawn (§5.2c) / world_has_spawn_zone (§5.61)
 #include <world/world.h>        // World, registry, cached
 
 namespace opennova::np {
@@ -129,6 +129,22 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	if (!h.valid()) return h;
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
+
+	// RESPAWN-PENDING at join, iff the mission offers deploy-selectable spawn zones — the
+	// joiner enters UNDEPLOYED and its per-frame 0x0A flags1 bit1 holds the deploy screen
+	// open until a successful C2S 0x0E pick clears it [orig: Server_OnPlayerJoin @0x51a6f2
+	// stateByte |= 0x10 iff SpawnZoneList_GetCount() > 0; the pre-placed entity is the
+	// deploy-camera anchor]. The pending entity is HIDDEN (state_flags bit0 — the golden
+	// pre-deploy record byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs
+	// entity+36 bit0 each frame while pending]. The host's OWN loopback player skips the
+	// hold — it deploys through the local flow, not the wire. (D-NET-156)
+	if (!is_host_own && world::world_has_spawn_zone(world)) {
+		conn.link.respawn_pending = true;
+		if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
+		// The join-time respawn countdown (entity+292 = 620 ticks) is display/wave state the
+		// 0x6E status reports; with default host wave options the deploy is pick-driven, so
+		// only the pending flag is modeled (tracked, §5.61).
+	}
 
 	// Bind the per-connection reply state so the §5.1 roster (0x16) / player-sync (0x46) / player-index
 	// (0x4D) all point at THIS player's REAL slot + entity handle. Without it the joiner is told

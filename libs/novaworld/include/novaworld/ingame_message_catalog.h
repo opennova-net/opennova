@@ -98,7 +98,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', 0x6B, "minimap-overlay",         MsgCoverage::Decoded,     "§5.35 decode_minimap_overlay_batch"},
 		{'S', 0x6E, "roster-sync",             MsgCoverage::Decoded,     "§5.31 decode_roster_sync"},
 		{'S', 0x6F, "zone-timer-value",        MsgCoverage::Decoded,     "§5.49 decode_zone_timer_value (NOT cinematic camera)"},
-		{'S', 0x75, "spectator-flags",         MsgCoverage::PrinterOnly, "2 B → byte_A860EC/dword_24D1DF4 @0x4259E0"},
+		{'S', 0x75, "spectator-flags",         MsgCoverage::PrinterOnly, "2 B → g_death_screen_active/dword_24D1DF4 @0x4259E0"},
 		{'S', 0x76, "u16-var",                 MsgCoverage::PrinterOnly, "u16 → dword_24D59FC @0x42D540"},
 		{'S', 0x79, "spectator-flag",          MsgCoverage::Decoded,     "§5.35 decode_spectator_flag"},
 		{'S', 0x7A, "player-name",             MsgCoverage::PrinterOnly, "player name (≤64) → server-info struct @0x429B40"},

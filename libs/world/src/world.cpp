@@ -362,7 +362,7 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
 }
 
 uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {
-    // [orig: find_entity_mounted_on_vehicle @0x4359f0] first occupant riding target_ssn, else 0.
+    // [orig: Vehicle_HasEnemyOccupant @0x4359f0] first occupant riding target_ssn, else 0.
     EntityHandle th = world_.registry.find_by_net_id(target_ssn);
     if (!th.valid()) return 0;
     uint16_t result = 0;

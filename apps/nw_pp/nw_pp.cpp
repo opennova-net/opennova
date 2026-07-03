@@ -300,9 +300,10 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 	if (r.spawn_flags & 0x1000)
 		std::printf(" weapType=0x%02x", r.weapon_type_byte);
 	if (r.spawn_flags & 0x2000)
-		std::printf(" health=0x%02x/0x%04x", r.health_byte, r.zone_radius_short);
+		std::printf(" zone=%u rank=%u radius=%u", r.zone_number_rank & 0x1F,
+		            r.zone_number_rank >> 5, r.zone_radius);
 	else if (r.spawn_flags & 0x8000)
-		std::printf(" zoneRadius=0x%04x", r.zone_radius_short);
+		std::printf(" zoneRadius=%u", r.zone_radius);
 	if (r.spawn_flags & 0x4000) std::printf(" diff=0x%02x", r.difficulty_byte);
 	std::printf("\n");
 }
@@ -488,9 +489,9 @@ void print_tag_0f_c2s(const std::vector<uint8_t> &body) {
 void print_tag_04(const std::vector<uint8_t> &body) {
 	SessionSlotConfig s;
 	const bool clean = decode_session_slot_config(body.data(), body.size(), s);
-	std::printf("        [0x04] cfg=%u teamMode=%u maxPlayers=%u trailing=%u "
+	std::printf("        [0x04] cfg=%u mySlot=%u maxPlayers=%u trailing=%u "
 	            "skipped=(0x%08x,0x%08x,0x%08x,0x%08x,0x%08x)%s\n",
-	            s.session_config, s.team_mode, s.max_players, s.trailing,
+	            s.session_config, s.local_player_slot, s.max_players, s.trailing,
 	            s.skipped[0], s.skipped[1], s.skipped[2], s.skipped[3], s.skipped4,
 	            clean ? "" : " DECODE INCOMPLETE");
 }
@@ -636,14 +637,15 @@ void print_player_extended_uplink(const PlayerExtendedUplink &r) {
 	// carrier != none => pos/hdg are CARRIER-LOCAL (ground entity — any pool; D-NET-151).
 	std::printf("            extended: carrier=%s pos=(%.1f, %.1f, %.1f) "
 	            "hdg=%d pitch=%d ac=0x%02x input=0x%02x flags=0x%02x "
-	            "animDef=(%u,%u,%u) stat=(0x%02x,0x%02x)\n",
+	            "analog=(%u,%u,%u) adm=0x%02x fps=(%u,%u)\n",
 	            handle_str(r.carrier_handle).c_str(),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
 	            int(r.heading), int(r.pitch),
 	            unsigned(r.anticheat_flags),
 	            unsigned(r.move_input_byte), unsigned(r.state_flags_byte),
-	            unsigned(r.anim_def_1), unsigned(r.anim_def_2),
-	            unsigned(r.anim_def_3),
+	            unsigned(r.analog_x), unsigned(r.analog_y),
+	            unsigned(r.analog_z),
+	            unsigned(r.equipped_adm_index),
 	            unsigned(r.stat_byte_0), unsigned(r.stat_byte_1));
 	// The client's top-4 entity-INTEREST pairs (Server_BuildEntityPriorityListForPlayer,
 	// op3 @0x4c1be9) — the old "weapons (id,ctr)" labels were a decode-era misread.
@@ -902,11 +904,11 @@ void print_tag_4e(const std::vector<uint8_t> &body) {
 void print_tag_16(const std::vector<uint8_t> &body) {
 	PlayerList pl;
 	const bool clean = decode_player_list(body.data(), body.size(), pl);
-	std::printf("        [0x16] max=%u players=%u teams=%u%s\n",
-	            pl.max_players, pl.player_count, pl.team_count,
-	            clean ? "" : " DECODE INCOMPLETE");
+	std::printf("        [0x16] flags=0x%02x rows=%u teams=%u inGame=%u spect=%u%s\n",
+	            pl.flags, pl.player_count, pl.team_count, pl.in_game_count,
+	            pl.spectator_count, clean ? "" : " DECODE INCOMPLETE");
 	for (const auto &r : pl.players)
-		std::printf("        player slot=0x%02x ping=%u score=%u/%u flags=0x%02x (team=%u alive=%u)\n",
+		std::printf("        player slot=0x%02x ping=%u score=%u/%u flags=0x%02x (team=%u spect=%u)\n",
 		            r.slot_id, r.ping, r.score1, r.score2, r.flags,
 		            r.flags >> 1, r.flags & 1);
 }

@@ -162,6 +162,28 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	route_round_deaths(ctx, world);
 	release_due_respawns(ctx, world);
 
+	// (2c) Spawn-wave status: S2C 0x6E at 1 Hz to every PENDING or DEAD in-match player —
+	// the deploy/death screen's team-roster + wave panel feed. With no host wave options
+	// configured the body is the empty-group form (a single 0x00 group-count byte); wave
+	// groups land with g_spawn_wave_list (§5.61 deferral). [orig: Server_TickUpdate
+	// @0x51e089 emits NetPacket_WriteSpawnWaveStatus @0x507490 at 1 Hz; the recipient mask
+	// includes the respawn-pending bit4 (slot+89912 & 0x10 @0x5074c2) and dead players;
+	// golden ASH_I5A deploy window carries 0x6E ×11 at ~1 Hz]
+	if (ctx.is_in_session && world.logic_tick % 62u == 0) {
+		static const std::vector<uint8_t> kEmptyWaveStatus{0x00};
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+			if (conn.link.mode == netsim::TransportMode::Loopback) continue;
+			bool dead = false;
+			if (conn.link.owned_entity.valid()) {
+				const world::Entity *e = world.registry.get(conn.link.owned_entity);
+				dead = e != nullptr && e->health <= 0;
+			}
+			if (conn.link.respawn_pending || dead)
+				conn.link.transport->host_send(0x6E, kEmptyWaveStatus);
+		}
+	}
+
 	// (3) serialize-after — SESSION-ONLY [D-NET-120]: the original's per-frame replicate/broadcast
 	// blocks are each gated on is_in_session (+0x58) inside Server_TickUpdate (@0x51d9ab..0x51e3f3),
 	// while the C2S recv pump above is not — so a World kept alive past match-end (is_in_session 0,

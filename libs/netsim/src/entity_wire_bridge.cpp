@@ -6,6 +6,7 @@
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <world/geom.h>        // to_fixed / from_fixed
 #include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)
+#include <world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
 namespace opennova::netsim {
 
@@ -114,6 +115,13 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	// The equipped-weapon adm index (entity+0x2B0) — the 0x0A off-16 echo source: uplink
 	// ingest for peers, the WPN_M4AUTO spawn default for host-spawned players (D-NET-143).
 	s.equipped_adm_index = e.equipped_adm_index;
+	// Body-anim wire state (entity+0x2BC/+0x2B8 + the channel ratio), mirrored from the
+	// infantry motor each tick (AiSystem::mirror_wire_anim; remote peers get the authority
+	// selection pass) — the player record bytes 14/15 sources. (D-NET-159)
+	s.anim_state_id = e.net_anim_state;
+	s.anim_pending_id = e.net_anim_pending;
+	s.anim_channel_ratio = e.net_anim_phase;
+	s.veh_bone = e.mounted ? e.mount_bone : 0; // entity+0x157 [orig: mounted-only @0x4c0a1a]
 	s.state_flags = static_cast<uint8_t>(e.flags & 0xFF); // entity+0x24 low byte, unmasked
 	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : 0xFFFFu;
 	// entity+0x28 groundEntity — the standing-on carrier the player record echoes when not
@@ -326,14 +334,28 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 			if (rec.ai_name.empty() && !rec.ai_profile_1 && !rec.ai_profile_2)
 				rec.ai_profile_1 = 1;      // guarantee the encoder's 0x0800 gate fires even at the world origin
 		}
-		// The 0x8000-gated u16 is the CAPTURE-ZONE/PROXIMITY RADIUS (entity+0x15E, filled from
-		// .bms record word 14 [orig: read store @0x433206; consumers CaptureZone_* /
-		// render_minimap_slot_blip; witness 2026-07-02 — the old `health_short` name was a
-		// decode-era guess]), NOT health: the client spawns 0x0D entities and later lifts them to
-		// itemDef->healthMax at Game_StartMission's reload (@0x522830) / via 0x18 (@0x433780).
-		// We do not model zone radii yet, so the field stays absent — matching the golden ASH_I5A
-		// vehicle records (no 0x8000 flag). The prior code sent Entity::health here, planting the
-		// health VALUE into every vehicle's zone-radius word.
+		// The §5.11 zone/trait fields, per the witnessed serializer gates [orig:
+		// serialize_entity_pool_to_packet_0 @0x503940]: entity Flags dword (0x20 @0x503ae1),
+		// subType (0x80 @0x503e58), refNum (0x40), and the ZONE block — a NUMBERED zone
+		// (entity+538) emits 0x2000 + the packed (zoneNumber + 32*rank) byte + the u16 radius
+		// (entity+350) [orig: ZoneSlotChain_GetZoneInfo @0x503eeb; @0x503ecc-0x503f08]; an
+		// un-numbered SpawnPoint def (attrib 0x40000) emits 0x8000 + the radius alone
+		// (@0x503f29). Golden ASH_I5A bunkers (type 0x054F): flags 0x20a1/0x20b1 = zone 2
+		// rank 1, radius 70. Plain vehicles carry none of these (all-zero fields keep the
+		// gates clear — the golden vehicle records). NOT health: the client spawns 0x0D
+		// entities and lifts them to itemDef->healthMax at Game_StartMission's reload
+		// (@0x522830) / via 0x18 (@0x433780); the pre-v14 code sent Entity::health here,
+		// planting the health VALUE into every vehicle's zone-radius word.
+		rec.entity_flags = e.engine_flags;
+		rec.action_byte = e.sub_type; // entity+532 [orig: @0x503e58]
+		rec.alert_byte = e.ref_num;   // entity+533 [orig: @0x503e3c]
+		if (e.zone_number != 0) {
+			rec.zone_number_rank = world::zone_chain_zone_info_byte(w.zone_chain, e);
+			rec.zone_radius = e.zone_radius;
+		} else if (e.is_spawn_point) {
+			rec.zone_radius = e.zone_radius; // 0x8000 path (radius-0 defs stay absent —
+			                                 // the value-derived flag gate, D-NET-97 note)
+		}
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<int16_t>(batch.records.size());

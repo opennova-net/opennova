@@ -44,7 +44,7 @@ const uint8_t kFrame1905_full[] = {
 	0x00,                         // body[18]     anticheat_flags
 	0x00,                         // body[19]     move_input_byte
 	0x01,                         // body[20]     state_flags_byte (wire bit 0; host masks to 0x1C)
-	0x00, 0x00, 0x00,             // body[21..23] anim_def_1/2/3
+	0x00, 0x00, 0x00,             // body[21..23] analog_x/2/3
 	0x07,                         // body[24]     equipped_adm_index (entity+0x2B0 — the joiner's
 	                              //              equipped weapon; the host echoes it at 0x0A
 	                              //              off-16 [orig: @0x4C20A3], D-NET-143)
@@ -90,9 +90,9 @@ int test_extended_uplink_stationary_on_foot() {
 	EXPECT(r.anticheat_flags == 0x00);
 	EXPECT(r.move_input_byte == 0x00);
 	EXPECT(r.state_flags_byte == 0x01);
-	EXPECT(r.anim_def_1 == 0x00);
-	EXPECT(r.anim_def_2 == 0x00);
-	EXPECT(r.anim_def_3 == 0x00);
+	EXPECT(r.analog_x == 0x00);
+	EXPECT(r.analog_y == 0x00);
+	EXPECT(r.analog_z == 0x00);
 	EXPECT(r.equipped_adm_index == 0x07); // the joiner's live equipped weapon (entity+0x2B0)
 	EXPECT(r.stat_byte_0 == 0x00);
 	EXPECT(r.stat_byte_1 == 0x00);

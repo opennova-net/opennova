@@ -59,7 +59,7 @@ enum class SeatType : uint8_t {
 // One seat a vehicle/emplacement offers. Mirrors the original split: the slot's
 // seat-bone type lives at model[605+slot] and its occupant handle at
 // vehicle[400+2*slot] (0xFFFF = empty). [orig: Entity_FindBestSeatSlot @0x4351f0 /
-// Entity_AttachToVehicleSeat @0x4364a0.]
+// Entity_RequestVehicleAttach @0x4364a0.]
 struct Seat {
     SeatType type = SeatType::None;
     uint8_t bone_index = 0;     // [orig: model[605+slot] seat-bone index]
@@ -165,8 +165,28 @@ struct Entity {
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
     // apply @0x4c11ec; consumers Entity_UpdatePlayerInfantryMovement @0x48496d,
     // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
-    // remote peers; stays 0 (no input / idle) for entities without an uplink source.
+    // remote peers; mirrored from the packed local input for the host's own player (bits 0-2 =
+    // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).
     uint8_t net_move_input = 0;
+    // MoveOrder bits 8-9 (entity+0x12C >> 8): bit0 = prone (0x100), bit1 = crouch (0x200). The
+    // stance the server-side body-anim selection consumes for THIS player [orig:
+    // Entity_UpdateInfantryPlayerBody @0x4b4165-0x4b4181 reads MoveOrder&0x300]. A remote player's
+    // stance arrives as the C2S 0x1D STANCE-CHANGE code (169 crouch / 170 prone / 172 stand)
+    // [orig: NapiNPServerMsg_HandleStanceChange @0x501C60 rewrites MoveOrder bits 8-9]; vehicle
+    // attach/detach clears it [orig: @0x435c54 / @0x43561e]. Echoed to the OWNING client in its
+    // 0x0A header-tail state byte bits 0-1 (the client re-latches its own stance from that byte
+    // EVERY frame [orig: NapiNPClientMsg_0x00A tail read @0x4303e5 -> latch @0x430562/@0x430570]
+    // — a hardcoded 0 tail force-stands a crouched retail client, the pre-v32 crouch/prone bug).
+    uint8_t net_stance_bits = 0;
+    // Wire body-anim state (entity+0x2BC animStateId) + the queued arbitration target
+    // (entity+0x2B8 pendingAnimStateId) + the anim-channel elapsed-ticks-in-loop, mirrored from
+    // the infantry motor each tick for the 0x0A player record bytes 14/15 (emit reads
+    // pending ?: current [orig: @0x4c0cc7]; ratio = trunc ticks clamp 255 [orig:
+    // AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). Spawn default 44 (idle2)
+    // [orig: Entity_ResetToSpawnState @0x4b9714]; 43 = idle collapse.
+    uint8_t net_anim_state = 44;
+    uint8_t net_anim_pending = 0;
+    uint8_t net_anim_phase = 0;
     // Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
     // (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
     // index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
@@ -200,6 +220,12 @@ struct Entity {
     // entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;
     // 0 = not a chain zone (plain flag/base). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
     uint8_t zone_number = 0;
+    // entity+350 (0x15E) <- BMS record word 14 (wp_distance low u16) — the capture-zone /
+    // proximity radius. Streamed as the 0x0D record's 0x2000/0x8000-gated u16 (golden ASH_I5A
+    // bunkers: 70) and read by the client's zone-radius consumers (CaptureZone_* /
+    // render_minimap_slot_blip). [orig: Entity_SpawnFromBMSRecord @0x40e9f0; 0x0D writer
+    // serialize_entity_pool_to_packet_0 @0x503ecc/@0x503f29; net-re §5.11/§5.61]
+    uint16_t zone_radius = 0;
     // entity+540 — the 16.16 SECURE/control fraction 0..0x10000. A numbered zone accepts
     // spawns only at >= 0x10000; flips reset it to 0 and the owner re-secures. Seeded by the
     // chain latch (zone_chain_latch_control): 1.0 when the enemy frontier cannot reach it.
@@ -227,6 +253,12 @@ struct Entity {
     int8_t mount_seat = -1;
     SeatType mount_type = SeatType::None;
     bool mounted = false;
+    // The RAW wire seat-bone index this occupant attached by (entity+0x157 attachBoneId,
+    // 1-based into the vehicle MODEL's bone table) — the value the C2S 0x26 carried and the
+    // 0x0A mounted player record echoes as byte 0 (clients resolve their own seat from it).
+    // [orig: Entity_AttachToVehicleSlot @0x4946d0 common tail @0x494752-75 writes 0x157;
+    // record write @0x4c0a1a]
+    uint8_t mount_bone = 0;
 
     // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
     // building floor, a vehicle deck — any pool. Retail's platform physics maintains it

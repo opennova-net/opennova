@@ -168,4 +168,17 @@ void zone_chain_latch_control(World &world, const ZoneChain &chain) {
     }
 }
 
+uint8_t zone_chain_zone_info_byte(const ZoneChain &chain, const Entity &zone) {
+    // [orig: ZoneSlotChain_GetZoneInfo @0x503eeb — the registered entry's zoneNumber +
+    //  32 * rank; rank parallels chain.zones (ZoneSlotChain_AssignZoneRanks @0x4A27F0).
+    //  An unregistered numbered entity carries rank 0 (bare zone number).]
+    uint8_t rank = 0;
+    for (size_t i = 0; i < chain.zones.size(); ++i) {
+        if (chain.zones[i] != zone.handle) continue;
+        rank = i < chain.ranks.size() ? chain.ranks[i] : 0;
+        break;
+    }
+    return static_cast<uint8_t>(zone.zone_number + 32u * rank);
+}
+
 } // namespace opennova::world

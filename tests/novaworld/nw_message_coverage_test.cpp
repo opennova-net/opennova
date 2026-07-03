@@ -249,7 +249,7 @@ int check_S_10_static_entity() {
 // S2C 0x16 — player-list: header + 1 player row + team_count=1 (2 team rows) + trailer.
 int check_S_16_player_list() {
 	LE w;
-	w.u8(8);            // max_players
+	w.u8(1);            // flags (bit0 team-mode)
 	w.u8(1);            // player_count
 	w.u8(0x00);         // row: slot_id
 	w.u16(0);           //      ping
@@ -872,14 +872,14 @@ int check_S_04_session_slot_config() {
 	LE w;
 	for (int i = 0; i < 4; ++i) w.u32(0x11111111u * unsigned(i + 1));
 	w.u8(5);                 // session config
-	w.u8(1);                 // team mode
-	w.u8(32);                // max players
+	w.u8(1);                 // the recipient's own roster slot (g_local_player_slot_id)
+	w.u8(32);                // max players (g_max_player_slots — the roster-walk terminator)
 	w.u32(0xAABBCCDD);
 	w.u8(9);
 	EXPECT(w.b.size() == 24);
 	SessionSlotConfig out;
 	EXPECT(decode_session_slot_config(w.b.data(), w.b.size(), out));
-	EXPECT(out.session_config == 5 && out.team_mode == 1 && out.max_players == 32);
+	EXPECT(out.session_config == 5 && out.local_player_slot == 1 && out.max_players == 32);
 	EXPECT(out.trailing == 9);
 	cover('S', 0x04);
 	return 0;

@@ -16,6 +16,24 @@ namespace opennova::netsim {
 
 namespace {
 
+// The per-connection 0x0A header state emit_connection_s2c derives from the RECIPIENT — the
+// flags1 signal byte and the 7-byte local-player tail's stance/mount fields.
+struct FrameHeaderState {
+	// flags1 [orig: NetPacket_WritePlayerState @0x4ff793-0x4ff7dd]: bit0 = spectator
+	// (slot+100567 — unmodeled 0), bit1 = RESPAWN-PENDING (slot+89912 & 0x10) — re-asserted
+	// EVERY frame; the client's deploy screen is g_deploy_screen_active = (flags1 & 2) != 0 each frame,
+	// so one bit1=0 frame closes it [orig: NapiNPClientMsg_0x00A @0x42ff82]. bit2 = the
+	// one-shot load hint (entity+44 & 0x1000 — unmodeled). (D-NET-156)
+	uint8_t flags1 = 0;
+	// Tail state byte bits 0-1 = the recipient's OWN [prone, crouch] echo — the client
+	// re-latches its stance from this EVERY frame [orig: tail read @0x4303e5 (byte << 8 ->
+	// MoveOrder bits 8-9) -> latches @0x430562/@0x430570]; a hardcoded 0 force-stands a
+	// crouched retail client each frame (the pre-v32 crouch/prone bug).
+	uint8_t tail_state_byte = 0;
+	// Tail mount handle = the recipient's OWN carrier (its ridden vehicle), 0xFFFF free.
+	uint16_t tail_mount_handle = 0xFFFF;
+};
+
 // The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor, the phase-selected header
 // sub-block, the 7-byte local-player tail, then one tag=1 compact record per replicated entity (each
 // position compressed relative to the anchor). Faithful port of the header writer
@@ -25,6 +43,7 @@ namespace {
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 (reader) / NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
                                     const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
+                                    const FrameHeaderState &hdr,
                                     std::vector<RoundEventRecord> round_events = {}) {
 	FrameUpdate fu;
 	const int32_t ax = int32_t(ctx.spawn_x);
@@ -33,7 +52,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.anchor_x = ax;
 	fu.anchor_y = ay;
 	fu.anchor_z = az;
-	fu.flags1 = 0x00; // state_flags (death/spectator/load signals) — event-driven, 0 in steady play.
+	fu.flags1 = hdr.flags1; // per-recipient signal byte (deploy hold / spectator / load hint)
 	fu.flags2 = flags2;
 
 	// Header sub-block, selected by `flags2 & 3` [orig: NetPacket_WritePlayerState @0x4ff6b0 phase
@@ -74,8 +93,10 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		break;
 	}
 
-	fu.state_flag_byte = 0x00; // 7-byte tail: not mounted, no stance bits yet (crouch/prone echo TBD)
-	fu.mount_handle = 0xFFFF;
+	// 7-byte tail: the recipient's OWN stance echo (bits 0-1 = prone/crouch — the client
+	// re-latches from it every frame) + its own carrier handle. See FrameHeaderState.
+	fu.state_flag_byte = hdr.tail_state_byte;
+	fu.mount_handle = hdr.tail_mount_handle;
 	// TAIL health (v121) -> g_local_player_entity->Health [orig: @0x4305df]. Send the player's healthMax
 	// so the HUD reads 100% and the tail decrease-detector (`if v121 < Health` -> a brief damage flash
 	// [orig: @0x43059a]) cannot self-trigger from an under-max tail. NOTE: this is only the minor health
@@ -119,11 +140,13 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		switch (e.entity_class) {
 		case EntityClass::Player:
 			// 18-B player compact record, field sources witnessed in the case-1 write path
-			// [orig: NetPacket_SerializePlayerState @0x4C09C0 case 1]. vehicle_bone (entity+343,
-			// mounted only @0x4c0a1a) and seat_type (mount attribute bits @0x4c0a39) stay 0 —
-			// seat-bone/attribute data is not modeled on the snapshot; 0 is the witnessed
-			// unmounted AND grounded-standing value (a grounded record is bone=0 seat=0 +
-			// carrier handle).
+			// [orig: NetPacket_SerializePlayerState @0x4C09C0 case 1]. vehicle_bone = the raw
+			// attach bone (entity+0x157, mounted only @0x4c0a1a) — the client resolves ITS
+			// seat from it (Entity_TryAttachOrDetach @0x436610; bone 0 or no carrier =
+			// detach). seat_type stays 0 for our vehicle targets — 1/2 mark a mountable
+			// carried GUN (carrier itemDef.type != 1 && attrib 0x20 + the +0x326/+0x312 bits
+			// @0x4c0a39), which needs gun-carrier def modeling: deferred, D-NET-157.
+			rec.player.vehicle_bone = e.veh_bone;
 			if (player_carrier != 0xFFFFu && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
@@ -154,19 +177,19 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			rec.player.state_flags = e.state_flags;     // entity+0x24 low byte, unmasked
 			                                            // [orig: @0x4c0c7d; read-side masks
 			                                            // local 0xE1 / remote 0xFD; bit 0x02 =
-			                                            // dead/undeployed, spawn hook on 1->0]
-			rec.player.anim_state_id = 0x2B;   // body/weapon anim-STATE id, entity+0x2B8 ?:
-			                                   // +0x2BC vs the dword_8139E8 state-flags table
-			                                   // [orig: @0x4c0cc7 / apply @0x4c1153]. The body
-			                                   // FSM is unmodeled — send the retail spawn/idle
-			                                   // default 0x2B (43) [orig: PlayerClass_InitEntity
-			                                   // @0x4B1116 sets +0x2BC = 0x2B], NOT 0: state 0
-			                                   // has no table flags and pins the body to the
-			                                   // null clip (the v15 flicker). Live anim states
-			                                   // need the peer body motor (D-NET-143 residual).
-			rec.player.anim_channel_ratio = 0; // entity+0x188 channel ratio [orig: @0x4c0cf2];
-			                                   // anim channel unmodeled — 0 is the witnessed
-			                                   // null-object value
+			                                            // dead/undeployed, spawn hook on 1->0;
+			                                            // bit0 = hidden while respawn-pending
+			                                            // (the golden pre-deploy 0x01 byte13)]
+			// Body-anim state id, pending-wins [orig: @0x4c0cc7 reads +0x2B8 ?: +0x2BC; client
+			// apply @0x4c1153 arbitrates vs the g_animStateFlagsTable table]. Live states come from the
+			// infantry motor's wire mirror — the authority selection pass drives remote
+			// players from their replicated input (D-NET-159; the 43-hardcode was v31's
+			// frozen-body defect).
+			rec.player.anim_state_id =
+					e.anim_pending_id != 0 ? e.anim_pending_id : e.anim_state_id;
+			rec.player.anim_channel_ratio = e.anim_channel_ratio;
+			                                   // entity+0x188 channel elapsed-ticks-in-loop,
+			                                   // clamp 255 [orig: @0x4c0cf2]
 			rec.player.anim_def_index = e.equipped_adm_index;
 			                                   // ADM anim-def index, entity+0x2B0 = the player's
 			                                   // equipped-weapon adm index (the extended-uplink
@@ -615,8 +638,22 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
 	const std::vector<GameEntitySnapshot> selected =
 			select_frame_entities(conn, ents, anchor, header_bytes + rounds_bytes);
+
+	// Per-recipient header state: the deploy-screen hold + the recipient's own stance/mount
+	// tail echo (see FrameHeaderState). The pending player's entity also carries the hidden
+	// bit0 the record byte13 replicates — set/cleared with respawn_pending by the join/0x0E
+	// sites [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0 while pending].
+	FrameHeaderState hs;
+	hs.flags1 = conn.respawn_pending ? 0x02 : 0x00; // bit1 hold [orig: @0x4ff7bd] (D-NET-156)
+	if (conn.owned_entity.valid()) {
+		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
+			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
+			if (own->mounted && own->mount_target.valid())
+				hs.tail_mount_handle = own->mount_target.packed;
+		}
+	}
 	conn.transport->host_send(kTag0aFrameUpdate,
-	                          build_0a_frame(anchor, selected, flags2, std::move(rounds)));
+	                          build_0a_frame(anchor, selected, flags2, hs, std::move(rounds)));
 }
 
 } // namespace opennova::netsim

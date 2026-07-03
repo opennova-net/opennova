@@ -15,7 +15,7 @@ inline constexpr int kInfantryAnimStateCount = 200;
 // State id -> .adm key without the "anim_" prefix. [orig: off_8135F0]
 extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
 
-// Per-state behavior flags. [orig: dword_8139E8]
+// Per-state behavior flags. [orig: g_animStateFlagsTable]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];
 
 namespace anim_state {
@@ -137,6 +137,11 @@ struct InfantryState {
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
     int32_t clip_phase = 0;
+    // Standing-idle tick counter (entity+0x148): the player-body idle starts at 43 and
+    // promotes to 44 once >= 62 idle ticks; any movement resets it. [orig:
+    // Entity_UpdateInfantryPlayerBody @0x4b727b-0x4b7293 (state = 0x2B + (cnt >= 0x3E)),
+    // reset @0x4b719b]
+    int32_t idle_counter = 0;
     uint32_t last_events = 0;
     int32_t prev_capsule_bottom = 0;      // anim_slot[19]
     int32_t adm_id = 0;

@@ -153,7 +153,7 @@ target) in net-re D-NET-146.
   never appeared client-side; slice-1 handler unexercised). The advertising gap, ranked
   leads: the 0x0A phase-0 mask can't reach a deploy-screen client (state==6 gate in
   Server_SendEntityStateToPlayer @0x517BA0, D-NET-134) → the pre-deploy carrier is likely
-  the 0x0F BODY (`serialize_player_state_to_packet @0x502D10` — UNWITNESSED, reads
+  the 0x0F BODY (`NetPacket_WriteWorldStateLoad0x0F @0x502D10` — UNWITNESSED, reads
   g_respawn_requires_team_dead); the 1359 zone objects' 0x0D records may lack the D-NET-70
   team-gated `spawn_flags & 0x10` bit; the CLIENT deploy-list builder is unwitnessed.
   (2) Vehicle attach dead: 2 C2S 0x26 on the wire (bodies `02 00 | 04 10 | 01 00` /
@@ -168,6 +168,41 @@ target) in net-re D-NET-146.
   `.scratch/retail_join_v31_game.pcapng` (8.1 MB, udp.port==32768 filter of the 664 MB
   dual raw), host logs `host_std{out,err}_v31.log`, capture script `start_v31_capture.ps1`;
   histogram: 11046×0x0A / 921×0x0C / 45×0x06 / 6×0x16 / 0×0x0E / 2×0x26 / 4×0x13.
+
+- **Round 14 (2026-07-03): the v31 ALIGNMENT PASS — all four riders witnessed AND ported, one
+  session (D-NET-156..159; net-re §5.9/§5.10/§5.11/§5.20/§5.29/§5.33/§5.61 refreshed).**
+  (1) **Deploy screen (D-NET-156)**: the picker is HELD by the 0x0A header `flags1` bit1
+  (`slot+89912 & 0x10`, set at join iff `SpawnZoneList_GetCount() > 0` @0x51a6f2, cleared on
+  deploy @0x517791) re-asserted EVERY frame (`g_deploy_screen_active = flags1 & 2` @0x42ff82) —
+  our hardcoded `flags1 = 0x00` was the whole defect; the picker ROWS are client-local
+  (`Entity_BuildSpawnZoneList @0x43EAE0` from local BMS). Ported: `Connection::respawn_pending`
+  → per-connection flags1 + the entity hidden bit0 (byte13 0x01) + the 0x0E dead-or-pending
+  gate/clear + 0x6E 1 Hz empty-group to pending/dead + optional parity (0x0F location names ←
+  def-2044 markers, 0x0D zone byte/radius, live 0x04 slot bytes).
+  (2) **Vehicle attach (D-NET-157)**: dispatch cases 0x26/0x27 →
+  `world::entity_process_vehicle_attach/_detach` (anti-spoof word0, the @0x435AA0 validation
+  order, the @0x4946D0 writes, detach clamped to the sender); the 0x0A mounted branch echoes
+  bone byte0 + carrier + the header-tail mount handle — NO confirm tag exists.
+  (3) **HUD count (D-NET-158)**: `count = accepted 0x16 rows − spectatorCount`; rows accepted
+  only for 0x46-known slots. Fixed the trifecta: live 0x04 capacity byte (the walk terminator
+  `g_max_player_slots` — was hardcoded 2), the join-time 0x46 broadcast (0x1CF7 @0x51D296),
+  live 0x16 trailer counts (was `{2,0}`); 0x46 now answers the requested fieldFlags verbatim.
+  (4) **Body anims (D-NET-159)**: the server RECOMPUTES anims — `Entity_UpdateInfantryPlayerBody
+  @0x4B40E0` runs the selection for every player on the authority from the REPLICATED input;
+  stance arrives via the newly witnessed **C2S 0x1D stance-change** (169/170/172 → MoveOrder
+  bits 8-9), and the 0x0A TAIL state byte echoes the recipient's own stance back (our 0x00
+  tail was force-standing crouched clients every frame — the long-standing crouch/prone bug).
+  Ported: `AiSystem::remote_player_body_anim` + `mirror_wire_anim` + the 0x1D case + live
+  record bytes 14/15 + the local player's move-input export. Deferred in D-NET-159: run/jog
+  promotion (ADM gait class unplumbed), prone lean, real .adm channel rate for data-less hosts.
+  19 IDB renames applied (Vehicle_HasEnemyOccupant, NetPacket_SerializeScoreboard0x16/
+  PlayerSync0x46/WriteWorldStateLoad0x0F, Entity_RequestVehicleAttach/AttachToUseGunSlot,
+  Entity_BuildMapPoiLists, the scoreboard/deploy globals, 6 GamePlayerEntity members).
+  Tests: netsim_two_peer_fanout (hold + attach echo + anim bytes), infantry_test (remote
+  selection), zone_chain_test (zone-info byte); 230/230 ctest; GDExtension rebuilt. **NEXT =
+  v32 live**: picker appears + pick lands at the bunker, buggy enter (0x1004-family), HUD 3 +
+  leave update, remote anims move (animState varies / animRatio sweeps), standard sweep
+  (0 C 0x0F, no 0xC9).
 
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
@@ -195,8 +230,10 @@ FULL-AS-GAME gap list, in rough order:
   6. Combat completeness already tracked: drag/falloff, bone zones, spread, 0x52/0x54/0x32,
      scoring, vehicles.
 
-**Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
-channel ratio — remote players render idle-posed; the v28 diff confirms `animRatio` still zero);
+**Also open (tracked):** the D-NET-159 anim stand-ins (run/jog promotion — the ADM gait class
+`dword_24E808C[adm*0x460]` is not in our weapon table; prone lean 41/42; deathAnim variants;
+the 62-tick channel-rate stand-in on anim-data-less hosts); the D-NET-157 seat gaps (gun
+seatType byte via carrier +0x326/+0x312, the weapon-busy gate, ctrl-seat def attribs);
 the armory-enable restriction table (`unused6 @ 0x24D5600` / player+89688 —
 4th 0x5A byte, observed 0); the env sub-block (D-NET-134); the passenger tail; a weapon.def feed
 for table-less hosts (headless `nw_server`). NOTE the armory truth is the HOST'S RESOLVED

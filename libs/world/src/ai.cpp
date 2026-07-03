@@ -645,6 +645,7 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
         occ->body_anim_slot = body_anim_slot_from_state(e.inf.anim_state);
+        mirror_wire_anim(e, world); // seat-state anim bytes reach the 0x0A player record too
     }
     return true;
 }

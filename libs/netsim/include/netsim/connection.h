@@ -73,6 +73,18 @@ struct Connection {
 	// so a joiner never receives the pre-join round backlog. (D-NET-152)
 	uint32_t round_watermark = 0;
 	bool round_watermark_armed = false;
+
+	// RESPAWN-PENDING / undeployed — the reimpl of the player slot's stateByte bit4
+	// (slot+89912 & 0x10). Set at join iff the mission offers deploy-selectable spawn zones
+	// [orig: Server_OnPlayerJoin @0x51a6f2 `|= 0x10 iff SpawnZoneList_GetCount() > 0`];
+	// cleared by a successful 0x0E deploy [orig: Server_ProcessPlayerDeath @0x517791
+	// `and 0xEF`]. While set: the connection's 0x0A header flags1 carries bit1 EVERY frame
+	// (the client's deploy screen is held open by it — one flags1 bit1=0 frame closes it
+	// [orig: NetPacket_WritePlayerState @0x4ff7bd; client g_deploy_screen_active = (flags1 & 2) != 0
+	// @0x42ff82]), the player entity carries the hidden bit0, and the 0x0E handler accepts
+	// a deploy from an alive-but-undeployed player (the dead-or-pending gate @0x519cc7).
+	// Death does NOT set it — the death screen is client-local (D-NET-156).
+	bool respawn_pending = false;
 };
 
 } // namespace opennova::netsim

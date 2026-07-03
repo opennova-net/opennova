@@ -89,6 +89,17 @@ struct GameEntitySnapshot {
 	// echoes (uplink ingest @0x4C20A3 / the WPN_M4AUTO spawn default @0x4B1116). 0xFF = none
 	// (the client apply skips it; 0 is a valid index). (D-NET-143)
 	uint8_t equipped_adm_index = 0xFF;
+	// Body-anim wire state for the player record bytes 14/15: the anim-state id the emit
+	// selects as pending ?: current [orig: @0x4c0cc7 reads +0x2B8 ?: +0x2BC] and the anim
+	// channel's elapsed-ticks-in-loop clamped to 255 [orig: @0x4c0cf2]. Mirrored from the
+	// infantry motor (AiSystem::mirror_wire_anim). Defaults keep snapshot-only tests on the
+	// retail spawn/idle bytes (44/0). (D-NET-159)
+	uint8_t anim_state_id = 44;
+	uint8_t anim_pending_id = 0;
+	uint8_t anim_channel_ratio = 0;
+	// entity+0x157 attachBoneId — the RAW wire seat bone this player mounted by; the mounted
+	// player record's byte 0 [orig: @0x4c0a1a reads +0x157 when mounted]. 0 when unmounted.
+	uint8_t veh_bone = 0;
 	// entity+0x24 (Flags) low byte, written UNMASKED to the player compact record's state byte
 	// [orig: @0x4c0c7d — masking is read-side only: local 0xE1 / remote 0xFD]. Also the vehicle
 	// compact record's flags byte [orig: @0x460d22].

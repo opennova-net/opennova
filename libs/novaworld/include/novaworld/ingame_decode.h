@@ -153,11 +153,14 @@ struct PoolSpawnRecord {
 	uint8_t action_byte = 0;         // 0x0080   entity+532
 	uint8_t weapon_type_byte = 0;    // 0x1000   entity+176
 
-	// Health block: `0x2000` reads (u8 health_byte → entity+538, u16
-	// zone_radius_short → entity+350); `0x8000` without `0x2000` reads u16
-	// zone_radius_short alone.
-	uint8_t  health_byte = 0;        // 0x2000   entity+538
-	uint16_t zone_radius_short = 0;       // 0x2000 OR 0x8000   entity+350
+	// Zone block (the old "health" reading was a decode-era misnomer — these are
+	// zone-object fields, witness 2026-07-03): `0x2000` reads (u8 zone_number_rank =
+	// zoneNumber + 32*rank → entity+538 [orig: ZoneSlotChain_GetZoneInfo @0x503eeb],
+	// u16 zone_radius → entity+350); a def-attrib-0x40000 SpawnPoint without a zone
+	// number instead gates `0x8000` = u16 zone_radius alone [orig: @0x503f29]. Golden
+	// ASH_I5A bunkers: 0x22/0x0046 = zone 2 rank 1, radius 70.
+	uint8_t  zone_number_rank = 0;  // 0x2000   entity+538 (+ the chain rank in bits 5-7)
+	uint16_t zone_radius = 0;       // 0x2000 OR 0x8000   entity+350
 
 	uint8_t  difficulty_byte = 0;    // 0x4000   entity+624
 };
@@ -373,9 +376,10 @@ bool decode_full_entity_spawn(const uint8_t *body, size_t len,
 struct PlayerListRow {
 	uint8_t  slot_id = 0;
 	uint16_t ping = 0;
-	uint16_t score1 = 0;
-	uint16_t score2 = 0;
-	uint8_t  flags = 0;       // alive = flags & 1; team = flags >> 1
+	uint16_t score1 = 0;      // score
+	uint16_t score2 = 0;      // deaths
+	uint8_t  flags = 0;       // bit0 = SPECTATOR (subtracted from the HUD count), team = flags >> 1
+	                          // [orig: NapiNPClientMsg_PlayerList @0x42FAE0 row apply]
 };
 struct PlayerListTeamRow {
 	uint16_t score1 = 0;
@@ -384,13 +388,16 @@ struct PlayerListTeamRow {
 	uint8_t  alive_count = 0;
 };
 struct PlayerList {
-	uint8_t  max_players = 0;
-	uint8_t  player_count = 0;
-	std::vector<PlayerListRow> players;
+	uint8_t  flags = 0;        // byte 0 -> g_scoreboard_flags: bit0 team-mode, bit1 timed-scores
+	                           // (the old `max_players` reading was a misnomer, witness 2026-07-03)
+	uint8_t  player_count = 0; // row count -> g_scoreboard_row_count (HUD count minuend, D-NET-158)
+	std::vector<PlayerListRow> players; // rows accepted ONLY for 0x46-known slots; a row for an
+	                                    // unknown slot is dropped + retried via C2S 0x22 [slot, 0x1CF7]
 	uint8_t  team_count = 0;
 	std::vector<PlayerListTeamRow> teams;  // team_count + 1 rows (T0 neutral + per team)
-	uint8_t  extra1 = 0;                    // trailer
-	uint8_t  extra2 = 0;
+	uint8_t  in_game_count = 0;   // trailer -> g_scoreboard_ingame_count (g_scoreboard_ingame_count)
+	uint8_t  spectator_count = 0; // trailer -> g_scoreboard_spectator_count (g_scoreboard_spectator_count);
+	                              // HUD "Number of players" = accepted rows − this
 };
 bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
 
@@ -483,7 +490,7 @@ struct PlayerCompactRecord {
 	                                  // fires on its 1->0 edge @0x4c1109; the XOR masks exclude it:
 	                                  // local 0xE1 / remote 0xFD @0x4c12ff)
 	uint8_t  anim_state_id = 0;       // body/weapon anim-STATE id -> entity+0x2BC (vs the per-state
-	                                  // flags table dword_8139E8; transition-arbitrated, remote-only
+	                                  // flags table g_animStateFlagsTable; transition-arbitrated, remote-only
 	                                  // apply except the wire-bit2 dead path) [orig: @0x4c1153;
 	                                  // renamed from weapon_anim_state/weapon_id — witness 2026-07-02]
 	uint8_t  anim_channel_ratio = 0;  // 0..255 float ratio off the entity+0x188 anim-channel object
@@ -932,9 +939,9 @@ struct PlayerExtendedUplink {
 	                                   // flags_xor name and the xor-apply it induced were
 	                                   // wrong (witness 2026-07-03, D-NET-151; the crouch/
 	                                   // prone stance family is bits 2-4).
-	uint8_t  anim_def_1 = 0;           // entity+0x130
-	uint8_t  anim_def_2 = 0;           // entity+0x131
-	uint8_t  anim_def_3 = 0;           // entity+0x132
+	uint8_t  analog_x = 0;           // entity+0x130
+	uint8_t  analog_y = 0;           // entity+0x131
+	uint8_t  analog_z = 0;           // entity+0x132
 	uint8_t  equipped_adm_index = 0;   // entity+0x2B0 equipped-weapon AdmDef index — case-4 store
 	                                   // @0x4C20A3 gated AdmDefs[idx].category < 11; the host
 	                                   // ECHOES it at 0x0A off-16 (renamed from the reserved_24
@@ -1520,8 +1527,12 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 struct SessionSlotConfig {
 	uint32_t skipped[4] = {};   // on the wire, not read by the handler
 	uint8_t  session_config = 0; // → dword_24D2110
-	uint8_t  team_mode = 0;      // → byte_A860D0
-	uint8_t  max_players = 0;    // → byte_A860D1 + PlayerSlotTable_Reallocate
+	uint8_t  local_player_slot = 0; // → g_local_player_slot_id = g_local_player_slot_id, the recipient's
+	                                // OWN roster slot [orig: the write side is slot+20,
+	                                // NetPacket_WriteSlotAssignment @0x502b30; the old
+	                                // `team_mode` reading was a misnomer, witness 2026-07-03]
+	uint8_t  max_players = 0;    // → g_max_player_slots = g_max_player_slots + PlayerSlotTable_Reallocate;
+	                             // the 0x46/0x22 roster walk terminates at this count
 	uint32_t skipped4 = 0;       // on the wire, not read
 	uint8_t  trailing = 0;       // → byte_A85B48
 };

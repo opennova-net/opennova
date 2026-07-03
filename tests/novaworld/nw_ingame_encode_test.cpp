@@ -314,8 +314,8 @@ int test_pool_spawn_roundtrip_full() {
 	r.alert_byte = 7;                // -> 0x0040
 	r.action_byte = 9;               // -> 0x0080
 	r.weapon_type_byte = 3;          // -> 0x1000
-	r.health_byte = 80;              // -> 0x2000 (+ zone_radius_short)
-	r.zone_radius_short = 1000;
+	r.zone_number_rank = 80;              // -> 0x2000 (+ zone_radius)
+	r.zone_radius = 1000;
 	r.difficulty_byte = 4;           // -> 0x4000
 	in.records.push_back(r);
 
@@ -349,8 +349,8 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.alert_byte == 7);
 	EXPECT(d.action_byte == 9);
 	EXPECT(d.weapon_type_byte == 3);
-	EXPECT(d.health_byte == 80);
-	EXPECT(d.zone_radius_short == 1000);
+	EXPECT(d.zone_number_rank == 80);
+	EXPECT(d.zone_radius == 1000);
 	EXPECT(d.difficulty_byte == 4);
 	std::printf("PASS pool_spawn_roundtrip_full\n");
 	return 0;
@@ -381,11 +381,11 @@ int test_pool_spawn_minimal() {
 }
 
 int test_pool_spawn_health_alt_8000() {
-	// health_byte 0 but zone_radius_short non-zero -> 0x8000 path (zone_radius_short only).
+	// zone_number_rank 0 but zone_radius non-zero -> 0x8000 path (zone_radius only).
 	PoolSpawnBatch in;
 	PoolSpawnRecord r;
 	r.slot_id = 0x1003; r.item_type_id = 0x0100;
-	r.health_byte = 0; r.zone_radius_short = 250;
+	r.zone_number_rank = 0; r.zone_radius = 250;
 	r.bone_byte = 2;
 	in.records.push_back(r);
 
@@ -393,8 +393,8 @@ int test_pool_spawn_health_alt_8000() {
 	PoolSpawnBatch out;
 	EXPECT(decode_pool_spawn_batch(wire.data(), wire.size(), out));
 	EXPECT(out.records.size() == 1);
-	EXPECT(out.records[0].health_byte == 0);
-	EXPECT(out.records[0].zone_radius_short == 250);
+	EXPECT(out.records[0].zone_number_rank == 0);
+	EXPECT(out.records[0].zone_radius == 250);
 	std::printf("PASS pool_spawn_health_alt_8000\n");
 	return 0;
 }
@@ -805,6 +805,10 @@ int test_player_list_roundtrip() {
 		EXPECT(static_cast<uint8_t>(out.players[i].flags >> 1) == players[i].team); // team = flags >> 1
 	}
 	EXPECT(out.team_count == 2);
+	// Live trailer counts (D-NET-158): inGame = row count, spectators unmodeled 0 — the HUD
+	// player count is acceptedRows − spectatorCount, so a hardcoded trailer pinned it at 2.
+	EXPECT(out.in_game_count == players.size());
+	EXPECT(out.spectator_count == 0);
 	std::printf("PASS player_list_roundtrip\n");
 	return 0;
 }

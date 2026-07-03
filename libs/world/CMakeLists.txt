@@ -9,6 +9,7 @@ add_library(opennova_world STATIC
     src/player_spawn.cpp
     src/round_sim.cpp
     src/spawn_select.cpp
+    src/vehicle_attach.cpp
     src/zone_chain.cpp
 )
 

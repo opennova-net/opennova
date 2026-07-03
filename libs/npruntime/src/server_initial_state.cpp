@@ -159,7 +159,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 		}
 	}
 	std::vector<uint8_t> b;
-	b.reserve(539);
+	b.reserve(640);
 	put_u32(b, now_tick);                        // sessionTick
 	put_u32(b, static_cast<uint32_t>(px));        // spawn pos (16.16)
 	put_u32(b, static_cast<uint32_t>(py));
@@ -167,11 +167,34 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, static_cast<uint16_t>(yaw));       // yaw  (i16, client <<16)
 	put_u16(b, 0);                                // pitch
 	put_u16(b, 0);                                // roll
-	b.push_back(0x01);                            // gameFlags bit0 (matches the golden 0x0F)
-	for (int i = 0; i < 128; ++i) put_u32(b, 0);  // fixed 128-entry team-score block (zeroed)
-	put_u16(b, 0);                                // waypointCount = 0 (TDM/DM default)
-	put_u16(b, 0);                                // teamNameCount = 0
-	return b;                                     // 4 + 12 + 6 + 1 + 512 + 2 + 2 = 539 B
+	b.push_back(0x01);                            // gameFlags bit0 = spawn zones exist
+	                                              // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
+	// The fixed 128-i32 block is the per-slot-type SCORE table (client outTable @0xB75FE8;
+	// readers Entity_GetScoreValueBySlotType / WeaponSlot_*), NOT zone data — zeros are the
+	// fresh-round values and benign for the deploy picker (§5.29 correction, witness 2026-07-03).
+	for (int i = 0; i < 128; ++i) put_u32(b, 0);
+	put_u16(b, 0);                                // pool3Count = 0 (player+354 != 1 path)
+	// LOCATION NAMES [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 tail — u16 count +
+	// cstrings from g_location_names (64-B stride), registered at BMS spawn of def-type 2044
+	// markers in spawn order (Entity_SpawnFromBMSRecord @0x40f182-0x40f221; the text is the
+	// mission's Locations/LOCATION%03i string, fallback = the key string)]. The client's 0x0F
+	// handler overwrites its LOCAL copies — the deploy-map name labels (golden ASH_I5A: 6
+	// names, "North Sea Village".."Katulus' Mound"). Our registry carries the 2044 markers'
+	// key strings in promotion (= spawn) order; the mission-text resolution is the client's
+	// own local lookup, so key strings are what a retail host with no text table would send.
+	std::vector<std::string> location_names;
+	if (ctx.world != nullptr) {
+		ctx.world->registry.for_each([&](const world::Entity &e) {
+			if (e.handle.pool() != 3 || e.item_id != 2044) return;
+			location_names.push_back(e.name);
+		});
+	}
+	put_u16(b, static_cast<uint16_t>(location_names.size()));
+	for (const std::string &n : location_names) {
+		for (char ch : n) b.push_back(static_cast<uint8_t>(ch));
+		b.push_back(0);
+	}
+	return b; // 539 B + the location-name block (golden 624 B with the 6 ASH names)
 }
 
 // [orig: NetPacket_CopyTenBytes @0x503900 over the table @0x82F1D8] S2C 0x2A: one 10-byte record.

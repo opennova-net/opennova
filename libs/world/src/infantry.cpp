@@ -436,13 +436,18 @@ void AiSystem::infantry_slope_slide(AiEntity &e) {
 // ----------------------------------------------------------------------------
 void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Network-snapped remote peer: its pose is SNAPPED each frame by the host read-apply
-    // (netsim EntityWireBridge::apply_player_intent), so the motor must NOT re-simulate it
-    // — it fully skips, exactly as the original exits before any motor work when the
-    // entity+0x24 bit0 net-snap flag is set. The host never interpolates; the smooth-target
-    // is staged for CLIENT-side interpolation only (a deferred concern).
+    // (netsim EntityWireBridge::apply_player_intent), so the movement motor must NOT
+    // re-simulate it — it skips, exactly as the original exits before any motor work when
+    // the entity+0x24 bit0 net-snap flag is set. The host never interpolates; the
+    // smooth-target is staged for CLIENT-side interpolation only (a deferred concern).
     // [orig: Entity_UpdateInfantryAI @0x4b9a03 `test [esi+24h], 1; jnz loc_4BFC8B`;
     // docs/net/novaworld-net-re.md §5.38a / D-NET-89.]
-    if (e.net_is_remote_peer) return;
+    // The body-ANIM selection is NOT part of that skip: on the authority it runs for every
+    // player from the replicated input, feeding the 0x0A anim bytes (D-NET-159).
+    if (e.net_is_remote_peer) {
+        if (is_authority) remote_player_body_anim(e, world, logic_tick);
+        return;
+    }
 
     InfantryState &inf = e.inf;
     // Per-entity stagger key. [orig: tickCounter = current_tick + 36 * entity[31]]
@@ -559,7 +564,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         int32_t fwd = frame.dx, lat = frame.dy;
         // Root TRANSLATION is integrated for EVERY state, not just movement states. The original
         // advances the playing clip ONCE per tick (AnimMap_UpdateEntity @0x40b5f0) and integrates
-        // the root delta unconditionally: the dword_8139E8 bit0 flag gates the anim COMMIT rules
+        // the root delta unconditionally: the g_animStateFlagsTable bit0 flag gates the anim COMMIT rules
         // (@0x4bd85c) and the idle LOOK-AT scan (@0x4be95f), NOT the position integration. Idle
         // clips author a small mean-~0 root velocity — the bored weight-shift / "rock on the feet".
         // Integrating it sways the entity's centre of mass under the swaying skeleton, so the FEET
@@ -648,7 +653,132 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             ent->body_anim_slot = body_anim_slot_from_state(inf.anim_state);
     }
 
+    mirror_wire_anim(e, world); // wire-anim bytes for the 0x0A player record (D-NET-159)
+
     advance_part_anim(e); // PANM channels integrate regardless of the motor path
+}
+
+// Mirror the motor-selected body-anim state + channel phase onto the world Entity — the store
+// snapshot_of reads for the 0x0A player record bytes 14/15 (emit reads pending ?: current
+// [orig: @0x4c0cc7]; ratio = elapsed ticks in the current loop pass, clamp 255 [orig:
+// AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). The LOCAL player additionally exports
+// its packed MoveOrder low byte (bits 0-2 dir, bit 3 moving) so its own record echoes real
+// input to the peers that motor-drive its avatar [orig: Player_PackInputStateToEntity
+// @0x4df68f-0x4df6a1 packs it; the record write reads entity+0x12C low @0x4c0c9c].
+void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
+    if (!e.inf.active) return;
+    Entity *ent = world.registry.get(e.handle);
+    if (ent == nullptr) return;
+    const InfantryState &inf = e.inf;
+    ent->net_anim_state = static_cast<uint8_t>(inf.anim_state);
+    ent->net_anim_pending = static_cast<uint8_t>(inf.anim_pending);
+    ent->net_anim_phase =
+        static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));
+    if (inf.is_local_player) {
+        ent->net_move_input = static_cast<uint8_t>((inf.player_move_dir_index & 7) |
+                                                   (inf.player_moving ? 8 : 0));
+        // Local stance mirrors into the MoveOrder bits 8-9 model too (prone bit0/crouch bit1)
+        // so the host's own 0x0A tail echo carries it [orig: dword_B76484/dword_B76480 latch
+        // the same bits the packer writes @0x4df6a7-0x4df6cd].
+        ent->net_stance_bits = static_cast<uint8_t>(
+            inf.stance == InfantryState::Stance::kProne
+                ? 1u
+                : (inf.stance == InfantryState::Stance::kCrouch ? 2u : 0u));
+    }
+}
+
+// AUTHORITY body-anim selection for a net-snapped remote player (see the ai.h declaration).
+// Runs INSTEAD of the movement motor for wire-snapped peers: position/heading stay owned by
+// the read-apply snap; only the anim channel advances here. [orig: Entity_UpdateInfantryPlayerBody
+// @0x4b40e0 — the same function body the local player runs; the pose work is inert for a
+// net-snapped entity because the read-apply overwrites it, while the anim stores persist]
+void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick) {
+    InfantryState &inf = e.inf;
+    if (!inf.active) return;
+    Entity *ent = world.registry.get(e.handle);
+    if (ent == nullptr) return;
+
+    if (ent->health <= 0) {
+        // Death edge — one-shot to the death pose, same policy as the motor's death edge
+        // (generic torso-forward bullet death, else the 173 fire fallback; the +0x2C0
+        // deferred deathAnim / 175 falling-death variant selection is the combat pass).
+        // [orig: the @0x4b40e0 death leg; digest: death 175 / deathAnim]
+        if (infantry_anim_flags(inf.anim_state) != 0x82u) {
+            const int death = anim_state::kDeathBulletBase + 4;
+            inf.anim_prev = inf.anim_state;
+            inf.anim_state =
+                (root_motion != nullptr && root_motion->has_clip(inf.adm_id, death))
+                    ? death
+                    : anim_state::kDeathFire;
+            inf.anim_pending = 0;
+            inf.clip_phase = 0;
+        }
+    } else if ((logic_tick & 3u) == 0) {
+        // Every 4th tick [orig: `test tickCounter, 3` @0x4b70ce]: decode the REPLICATED
+        // MoveOrder byte (bits 0-2 = 8-way dir, bit 3 = moving [orig: @0x4b4153/@0x4b415c])
+        // + the stance bits (MoveOrder bits 8-9, fed by C2S 0x1D [orig: @0x4b4165-0x4b4181;
+        // prone suppressed by Flags & 0x10A000 — swim/parachute unmodeled]).
+        inf.player_moving = (ent->net_move_input & 0x08u) != 0;
+        inf.player_move_dir_index = ent->net_move_input & 0x07u;
+        inf.stance = (ent->net_stance_bits & 0x1u) != 0
+                         ? InfantryState::Stance::kProne
+                         : ((ent->net_stance_bits & 0x2u) != 0 ? InfantryState::Stance::kCrouch
+                                                               : InfantryState::Stance::kStand);
+        int target;
+        if (inf.player_moving) {
+            // Walk base 1 + the direction offset; the stance remap below lifts it to the
+            // crouch/prone blocks (11/19). Run/jog promotion (states 9/10 via the ADM gait
+            // class dword_24E808C[adm*0x460] + pitch) is deferred — the gait class is not
+            // in our weapon table yet (tracked, D-NET-159). [orig: @0x4b7196-0x4b7226]
+            inf.idle_counter = 0; // [orig: @0x4b719b zeroes entity+0x148]
+            target = anim_state::kWalkForward;
+        } else {
+            // Standing idle: 43 until 62 selection passes (one per 4 ticks, ~4 s) have
+            // elapsed, then 44. [orig: @0x4b727b-0x4b7293 state = 0x2B + (++entity[0x148]
+            // >= 0x3E), incremented once per selection]
+            ++inf.idle_counter;
+            target = inf.idle_counter >= 62 ? anim_state::kIdle2 : anim_state::kIdle;
+        }
+        target = player_stance_remap(target, inf.stance, inf.player_move_dir_index);
+        // Prone lean 41/42 from MoveOrder bits 6-7 [orig: @0x4b731b-0x4b7354, gated on prone
+        // and !(Flags & 0x112002)] is deferred with the lean input bits (never uplinked yet).
+        const int resolved = infantry_resolve_state(inf.adm_id, target);
+        if (resolved >= 0 && resolved != inf.anim_state) {
+            // Commit via the state-flags arbitration [orig: @0x4b7356-96]: an uninterruptible
+            // current (bit 0x4) queues the target to pending; an exit-gated current (0x20)
+            // commits only a movement-flagged (bit0) target; else commit now.
+            const uint32_t curf = infantry_anim_flags(inf.anim_state);
+            if ((curf & 0x4u) != 0) {
+                inf.anim_pending = resolved;
+            } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
+                inf.anim_prev = inf.anim_state;
+                inf.anim_state = resolved;
+                inf.anim_pending = 0;
+                inf.clip_phase = 0;
+            } else {
+                inf.anim_pending = resolved;
+            }
+        } else if (resolved == inf.anim_state) {
+            inf.anim_pending = 0;
+        }
+    }
+
+    // Advance the playing clip's channel every tick — the wire ratio source. Uses the real
+    // .adm loop rate when the host has anim data; without it the phase self-advances on a
+    // 62-tick loop stand-in (tracked divergence, D-NET-159 — the faithful source is the
+    // anim data rate). Root motion output is discarded: the pose is wire-owned.
+    if (root_motion != nullptr) {
+        RootMotionFrame discard;
+        root_motion->advance(inf.adm_id, inf.anim_state, inf.clip_phase, discard);
+    } else {
+        inf.clip_phase = (inf.clip_phase + 1) % 62;
+    }
+
+    // Present-pass clip for the host's own third-person view of this peer.
+    if (ent->alive && ent->health > 0)
+        ent->body_anim_slot = body_anim_slot_from_state(inf.anim_state);
+
+    mirror_wire_anim(e, world);
 }
 
 } // namespace opennova::world

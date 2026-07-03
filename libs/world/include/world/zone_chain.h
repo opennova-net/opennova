@@ -81,6 +81,13 @@ uint32_t zone_chain_owned_zone_mask(const World &world, const ZoneChain &chain, 
 // [orig: Server_UpdateCaptureZoneEntities @ 0x519690 latch @ 0x51975B..0x519764]
 void zone_chain_latch_control(World &world, const ZoneChain &chain);
 
+// The 0x0D record's packed zone byte for one numbered zone entity: zoneNumber + 32 * rank
+// (rank = the entity's descending index within its shared zone number; an entity outside
+// the trigger chain carries rank 0 — its bare zone number).
+// [orig: ZoneSlotChain_GetZoneInfo @0x503eeb feeding the 0x2000-gated byte in
+//  serialize_entity_pool_to_packet_0 @0x503ecc; golden ASH_I5A bunker 0x22 = zone 2 rank 1]
+uint8_t zone_chain_zone_info_byte(const ZoneChain &chain, const Entity &zone);
+
 } // namespace opennova::world
 
 #endif // OPENNOVA_WORLD_ZONE_CHAIN_H

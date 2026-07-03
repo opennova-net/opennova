@@ -91,7 +91,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 //   0x0010 team_byte!=0 (entity+354; D-NET-58) · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
 //   0x0400 weapon_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
 //   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 weapon_type_byte!=0
-//   0x2000 health_byte!=0 (writes health_byte+zone_radius_short) ELSE 0x8000 zone_radius_short!=0
+//   0x2000 zone_number_rank!=0 (writes zone_number_rank+zone_radius) ELSE 0x8000 zone_radius!=0
 //   0x4000 difficulty_byte!=0.
 // Weapon block (D-NET-56): when 0x0400 is set, `extra_handle_0/1` are ALWAYS
 // written after the per-set-bit handles. The original only sets 0x0400 when the
@@ -232,17 +232,21 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // ===========================================================================
 
 // tag=0x46 PLAYER-SYNC — the inverse of decode_player_sync (PlayerSync). Flag-driven slot-state record:
-// [u8 slot][u16 fieldFlags=0x1CF7][u8 entitySlot] then the bit-gated fields (name/clan/vehicle-name/
-// team/...). [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80; client NapiNPClientMsg_PlayerSync
-// @0x431370]. Per-field slot-state modeling (score/squad/side/timer) is the remaining D-NET-127 nicety;
-// the wire SHAPE is faithful and round-trips through decode_player_sync.
+// [u8 slot][u16 fieldFlags][u8 entitySlot] then the bit-gated fields in the witnessed order (name 0x1 /
+// clan 0x2 / vehicle-name 0x10 / team 0x4 / class 0x8 / vehicle-score 0x20 / late-join 0x1000 / squad
+// 0x40 / side 0x80 / quality 0x400 / vehicle-timer 0x800). [orig: NetPacket_SerializePlayerSync0x46
+// @0x505e80; client NapiNPClientMsg_PlayerSync @0x431370]. Per-field slot-state modeling
+// (score/squad/side/timer) is the remaining D-NET-127 nicety; the wire SHAPE is faithful and
+// round-trips through decode_player_sync.
 //
-// `with_ack` sets fieldFlags bit 0x4000 — the ROSTER-WALK ack. On receipt the client re-requests the NEXT
-// slot (C2S 0x22 for slot+1) until slot >= max_players [orig: NapiNPClientMsg_PlayerSync @0x431370 tail:
-// `if (slot < byte_A860D1) QueueReliableMessage(0x22, slot+1)`]. The golden host ack-walks the whole
-// roster (0x5CF7 = 0x1CF7|0x4000) so EVERY player slot binds on the joiner; without it the joiner never
-// walks past its own slot and a remote player is left unbound (D-NET — residual 0x0F flood grill 2026-07-01).
-std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool with_ack = false);
+// `field_flags` is the REPLY mask, serialized verbatim and gating each field — the server answers
+// EXACTLY the fieldFlags the C2S 0x22 requested, ack bit included [orig: @0x505f05 echoes 0x4000].
+// Bit 0x4000 = the ROSTER-WALK ack: on receipt the client re-requests the NEXT slot (C2S 0x22 for
+// slot+1, fieldFlags 0x5CF7) until slot >= max_players [orig: @0x431370 tail `if (slot < g_max_player_slots)
+// QueueReliableMessage(0x22, slot+1)`; g_max_player_slots = the 0x04 slot-config maxPlayers byte]. Default
+// 0x1CF7 = the join-broadcast field set [orig: Server_PlayerAdd @0x51d2bf `push 7415`].
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx,
+                                        uint16_t field_flags = 0x1CF7);
 
 // tag=0x46 PLAYER-SYNC REMOVAL — a 3-byte record [u8 slot][u16 flags] with the 0x8000 removal bit set
 // (and 0x4000 ack to keep the walk going, matching golden's 0xC000). The client clears/unlinks that slot
@@ -263,11 +267,14 @@ struct PlayerListEntry {
 	uint8_t team = 0;
 };
 
-// tag=0x16 PLAYER-LIST — the inverse of decode_player_list. [orig: NapiNPClientMsg_0x016 @0x42FAE0].
-// The dispatcher builds `players` from the roster (the npruntime-side walk that can see NapiNPConnection);
-// this serializes the witnessed wire shape: [u8 fmt=1][u8 count] then per-player
-// [u8 slot][u16 ping][u16 score][u16 score2][u8 (team<<1)], then [u8 team_count=2] + a 3-iteration team
-// trailer + [0x02][0x00].
+// tag=0x16 PLAYER-LIST/SCOREBOARD — the inverse of decode_player_list. [orig:
+// NetPacket_SerializeScoreboard0x16 @0x504b80 / client NapiNPClientMsg_PlayerList @0x42FAE0].
+// The dispatcher builds `players` from the roster (the npruntime-side walk that can see
+// NapiNPConnection); this serializes the witnessed wire shape: [u8 flags (bit0 team-mode, bit1
+// timed-scores)][u8 rowCount] then per-player [u8 slot][u16 ping][u16 score][u16 deaths]
+// [u8 (team<<1)|spectator], then [u8 team_count=2] + (team_count+1) × {u16 score, u16 deaths,
+// u8 kothHold, u8 ctfFlag}, then [u8 inGameCount][u8 spectatorCount] — the HUD player count is
+// acceptedRows − spectatorCount (D-NET-158).
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players);
 
 // tag=0x5A WEAPON-LOADOUT — the inverse of decode_weapon_loadout:

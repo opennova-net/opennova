@@ -172,7 +172,7 @@ public:
                SeatSelectionMode mode = SeatSelectionMode::Any);
     // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail
     // symbol. Retail path: Entity_UpdateInfantryAI @0x4ba9ad -> Entity_FindBestSeatSlot
-    // @0x4351f0 -> Entity_AttachToVehicleSeat @0x4364a0. FindBestSeatSlot applies the rules:
+    // @0x4351f0 -> Entity_RequestVehicleAttach @0x4364a0. FindBestSeatSlot applies the rules:
     // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
     bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
@@ -182,7 +182,7 @@ public:
     bool mount_best(uint16_t occupant_ssn);
     // [orig: Entity_DetachFromVehicle @0x4355f0] Free the occupant's seat + clear its mount ref.
     bool dismount(uint16_t occupant_ssn);
-    // [orig: find_entity_mounted_on_vehicle @0x4359f0] SSN of an entity riding target_ssn, else 0.
+    // [orig: Vehicle_HasEnemyOccupant @0x4359f0] SSN of an entity riding target_ssn, else 0.
     uint16_t find_mounted_on(uint16_t target_ssn) const;
 
     // --- AI command (the AI-change action family) ---

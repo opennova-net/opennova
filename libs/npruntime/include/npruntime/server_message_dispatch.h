@@ -51,13 +51,23 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world);
 
-// Build the S2C 0x16 PLAYER-LIST for the current roster (every PlayerAdded connection: host loopback
-// slot 0 + joiners 1+). Public so the per-tick host loop can RE-PUSH it when a joiner spawns (the
-// golden re-sends 0x16 with the grown roster just before the joiner deploys). [orig: NapiNPServerMsg_0x016
-// @0x42FAE0 reads the dword_A87048 player table]
+// Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
+// slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the
+// per-tick host loop can RE-PUSH it when a joiner spawns (the golden re-sends 0x16 with the grown
+// roster just before the joiner deploys). [orig: Server_BuildAndBroadcastScoreboard @0x50D960 /
+// client NapiNPClientMsg_PlayerList @0x42FAE0]
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
                                           const world::World *world);
+
+// Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
+// connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16
+// row without the unknown-slot 0x22 retry churn. [orig: Server_PlayerAdd @0x51CBC0 broadcasts 0x46
+// fieldFlags 0x1CF7 to all in-game @0x51D296 (`push 7415` @0x51d2bf); the 0x32 name broadcast
+// stays deferred with D-NET-149]
+void broadcast_player_sync_on_join(const GameConfig &config,
+                                   std::vector<NapiNPConnection> &roster,
+                                   const NapiNPConnection &joined, const world::World *world);
 
 // Install/refresh the per-connection player binding the roster (0x46/0x16)
 // replies read: stamps the bare wire `entity_handle` onto conn.link.owned_entity (the SINGLE binding,

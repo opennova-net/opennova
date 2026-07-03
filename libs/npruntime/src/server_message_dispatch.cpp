@@ -11,6 +11,7 @@
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
 #include <world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
 #include <world/spawn_select.h>  // resolve_spawn_target / find_spawn_zone_for_team / spawn_pose_for_target
+#include <world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
 #include <world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
 
@@ -26,7 +27,7 @@ namespace {
 // Byte helpers (relocated verbatim from the retired game_session.cpp reply builders). The §5.1
 // identity bodies (0x7A PCID, 0x7B session info) are now FAITHFUL ports of the witnessed serializers
 // (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
-// 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializeWeaponOverlaySlotState @0x505e80 —
+// 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializePlayerSync0x46 @0x505e80 —
 // a flag-driven slot-state record, and 0x51 write_entity_packet @0x506bb0) carry approximations
 // pending slot-state modeling; the witnessed field maps are landed in net-re §5.45 (D-NET-127).
 // ---------------------------------------------------------------------------
@@ -210,6 +211,11 @@ std::vector<uint8_t> build_reply_tag_16(const std::vector<NapiNPConnection> &ros
 	std::vector<PlayerListEntry> players;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
+		// Rows carry only IN-GAME players — a still-loading joiner (mid world-stream) is
+		// excluded until its burst completes, matching the golden 31 B -> 39 B grow right
+		// as the joiner enters the match [orig: the scoreboard rows exclude slots with the
+		// not-yet-in-game byte slot+100579; Server_BuildAndBroadcastScoreboard @0x50D960].
+		if (!is_in_match(c)) continue;
 		// team @entity+344 read THROUGH owned_entity (D-NET-132); the World-less path defaults to 1.
 		uint8_t team = 1;
 		if (world != nullptr)
@@ -367,7 +373,12 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t player_slot, uint8_t sl
 //        (netPlayer inner+76)] when restriction data exists, else [u8 0].
 //   0x05 = NetPacket_WriteBoolTrue @0x502c00: exactly {0x01}.
 //   0x04 = NetPacket_WriteSlotAssignment @0x502b30 (build_tag04_slot_assignment above).]
-void emit_post_handshake_burst(const GameConfig &cfg, std::vector<ProtocolMessage> &out) {
+// The 0x04 carries THIS connection's live slot + the host's slot capacity + the assigned team —
+// byte 17 lands in g_local_player_slot_id (the client's own slot id) and byte 18 in g_max_player_slots
+// (g_max_player_slots, the 0x46/0x22 roster-walk terminator): the prior hardcoded (1, 2, 2)
+// capped every client's walk at slot 1, so a third player's slot never bound (D-NET-158).
+void emit_post_handshake_burst(const GameConfig &cfg, const NapiNPConnection &conn,
+                               const world::World *world, std::vector<ProtocolMessage> &out) {
 	out.push_back(make_protocol_message(0x00, {0, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x00, {1, 0x08, 0, 0, 0, 0x0C, 0, 0, 0}, 0xA0));
 	out.push_back(make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00}));
@@ -376,9 +387,13 @@ void emit_post_handshake_burst(const GameConfig &cfg, std::vector<ProtocolMessag
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(0x03, {0x01, 0x01, 0x00, 0x01, 0x00}));
 	out.push_back(make_protocol_message(0x05, {0x01}));
-	// Golden join: slot 1 of capacity 2, team 2. TODO(roster): thread the live slot/capacity/team of
-	// the joining connection here once emit_post_handshake_burst receives the connection identity.
-	out.push_back(make_protocol_message(0x04, build_tag04_slot_assignment(1, 2, 2)));
+	uint8_t team = 2; // the golden joiner default for a pre-add edge (spawn pump not yet run)
+	if (world != nullptr && conn.link.owned_entity.valid())
+		if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) team = e->team;
+	const uint8_t capacity =
+			static_cast<uint8_t>(cfg.max_players < 251 ? cfg.max_players : 251); // [orig @0x24c0ca4]
+	out.push_back(make_protocol_message(
+			0x04, build_tag04_slot_assignment(conn.reply.player_slot, capacity, team)));
 }
 
 // Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
@@ -457,7 +472,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// which unblocks the §5.2a world-stream burst in tick_connections — so the post-handshake
 				// (0x01/0x7a/0x7b/0x03/0x16) reliably PRECEDES the world-stream (golden f134-142 vs f144).
 				if (!st.roster_pushed) {
-					emit_post_handshake_burst(config, replies);
+					emit_post_handshake_burst(config, conn, world, replies);
 					replies.push_back(make_protocol_message(0x16, build_reply_tag_16(roster, rep, world)));
 					st.roster_pushed = true;
 				}
@@ -466,9 +481,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
 				// (body byte 0) + a fieldFlags word (bytes 1-2); reply 0x46 for THAT slot so the joiner
 				// binds it. The ACK-WALK is CLIENT-driven: the server ECHOES bit 0x4000 from the request
-				// into the reply (NetPacket_SerializeWeaponOverlaySlotState @0x505f05 `if (fieldFlags &
+				// into the reply (NetPacket_SerializePlayerSync0x46 @0x505f05 `if (fieldFlags &
 				// 0x4000) adjusted |= 0x4000`), and the CLIENT, on seeing the echoed ack, re-requests
-				// slot+1 with fieldFlags 0x5CF7 until slot+1 >= its max-player count byte_A860D1
+				// slot+1 with fieldFlags 0x5CF7 until slot+1 >= its max-player count g_max_player_slots
 				// (NapiNPClientMsg_PlayerSync @0x431370 tail) — the server never terminates the walk.
 				// An inactive slot / NULL entity forces a 0x8000 removal reply (@0x505ecb..0x505ee0).
 				// Without the walk the joiner only ever binds its OWN slot, leaving other players (the
@@ -486,13 +501,23 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						break;
 					}
 				}
-				// Echo the client's ack bit [orig: @0x505f05]. The retail client stops the walk itself at
-				// its max-player count (fed from our 0x08 ServerConfig block), so no server-side cap.
+				// Answer EXACTLY the requested fieldFlags — ack bit included [orig:
+				// NetPacket_SerializePlayerSync0x46 @0x505E80 serializes the request mask
+				// verbatim; ack echo @0x505f05]. The retail client stops the walk itself at
+				// its max-player count g_max_player_slots (fed by our 0x04 slot-config byte 18), so
+				// no server-side cap. A zero/absent mask answers the 0x1CF7 field set.
 				const bool echo_ack = (req_flags & 0x4000u) != 0;
+				const uint16_t reply_flags =
+						(req_flags & ~0xC000u) != 0
+								? static_cast<uint16_t>(req_flags & ~0x8000u)
+								: static_cast<uint16_t>(0x1CF7u | (echo_ack ? 0x4000u : 0u));
 				if (slot_has_player) {
 					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
-					replies.push_back(make_protocol_message(0x46, encode_player_sync(prs, echo_ack)));
+					replies.push_back(
+							make_protocol_message(0x46, encode_player_sync(prs, reply_flags)));
 				} else {
+					// Empty/disconnected slot: the 0x8000 removal record (|0x4000 when the
+					// request asked for the ack) — the walk terminator [orig: @0x505ecb..ee0].
 					replies.push_back(
 							make_protocol_message(0x46, encode_player_sync_removal(req_slot, echo_ack)));
 				}
@@ -614,7 +639,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					    (target->team != player->team || target->zone_control < 0x10000))
 						break;
 				}
-				if (player->health > 0) break; // alive in-session: no reposition [orig: @0x519cce]
+				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
+				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
+				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
+				if (!conn.link.respawn_pending && player->health > 0) break;
 				world::SpawnPointResult pose;
 				if (target != nullptr) {
 					pose = world::spawn_pose_for_target(*target);
@@ -634,6 +662,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world->player_item_hp > 0) player->health = world->player_item_hp;
 				else if (player->health_max > 0) player->health = player->health_max;
 				else player->health = 100; // [orig: Entity_InitFromItemDef @0x49e550]
+				// Successful deploy CLEARS the respawn-pending flag + the hidden bit — the
+				// next 0x0A's flags1 bit1 drops, the client closes the deploy screen and
+				// enters the world; byte13 loses its 0x01. [orig: Server_ProcessPlayerDeath
+				// @0x517791 `and 0xEF` on slot+89912; the entity bit0 stops being re-ORed]
+				conn.link.respawn_pending = false;
+				player->flags &= ~1u;
+				player->alive = true;
 				// The frontier hint, only when a frontier zone exists [orig: the @0x5179e0
 				// `if (AvailableSlot)` gate].
 				const uint8_t frontier = zone_chain_frontier_zone(*world, world->zone_chain,
@@ -646,6 +681,54 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case 0x0C: // C2S player-input uplink — cache the pre-spawn pose
 				cache_client_pose(msg.payload, st);
 				break;
+			case 0x1D: { // STANCE CHANGE [i16 stanceCode] — the crouch/prone replication leg.
+				// [orig: NapiNPServerMsg_HandleStanceChange @0x501C60 — authority-gated; the
+				// SENDER connection's player entity (conn+352 -> +192 -> entity, the same
+				// chain as the vehicle attach); code 169 -> MoveOrder = (MoveOrder & ~0x300)
+				// | 0x200 (crouch), 170 -> | 0x100 (prone), 172 -> & ~0x300 (stand). The
+				// codes are the stance-TRANSITION anim-state ids. Feeds the body-anim
+				// selection's stance bases (11/19) and the recipient's own 0x0A tail echo.]
+				if (world == nullptr || !conn.burst.spawned || !conn.link.owned_entity.valid())
+					break;
+				world::Entity *pe = world->registry.get(conn.link.owned_entity);
+				if (pe == nullptr) break;
+				const int16_t code = msg.payload.size() >= 2
+						? static_cast<int16_t>(msg.payload[0] | (msg.payload[1] << 8))
+						: 0; // short body reads 0 [orig: @0x501ca8]
+				if (code == 169) pe->net_stance_bits = 2;      // crouch (0x200) [orig: @0x501d01]
+				else if (code == 170) pe->net_stance_bits = 1; // prone  (0x100) [orig: @0x501ce7]
+				else if (code == 172) pe->net_stance_bits = 0; // stand          [orig: @0x501cc9]
+				break;
+			}
+			case 0x26: { // VEHICLE ATTACH [u16 senderHandle][u16 vehicleHandle][u8 bone][u8 pad]
+				// [orig: NapiNPServerMsg_HandleVehicleAttach @0x502390 — authority-gated;
+				// word0 is OVERWRITTEN with the sender's authoritative handle (@0x502415,
+				// anti-spoof — the client value is never read); then Entity_ProcessVehicleAttach
+				// @0x435AA0 validates + attaches. NO reply message — the 0x0A compact record's
+				// mounted branch (carrier + bone byte0) is the confirmation for everyone
+				// including the requester.]
+				if (world == nullptr || !conn.burst.spawned || !conn.link.owned_entity.valid())
+					break;
+				if (msg.payload.size() < 5) break;
+				const uint16_t veh =
+						static_cast<uint16_t>(msg.payload[2] | (msg.payload[3] << 8));
+				const uint8_t bone = msg.payload[4];
+				world::entity_process_vehicle_attach(*world, conn.link.owned_entity,
+				                                     world::EntityHandle{veh}, bone);
+				break;
+			}
+			case 0x27: { // VEHICLE DETACH [u16 selfHandle][u16 vehicleHandle][u16 junk]
+				// [orig: NapiNPServerMsg_HandleVehicleDetach @0x4FC980 -> the @0x435D00 tail:
+				// sender conn must have a player block+cell; the wire word0 is TRUSTED in
+				// retail (no anti-spoof, no range guard) — we clamp the detach subject to the
+				// sender's own entity, a tracked hardening divergence (D-NET-157); then
+				// Entity_DetachFromVehicle(e, *(e+0x16C)) @0x435d40. The use-key dismount
+				// SENDS ONLY and waits for the 0x0A echo [orig: @0x4369c7].]
+				if (world == nullptr || !conn.burst.spawned || !conn.link.owned_entity.valid())
+					break;
+				world::entity_detach_from_vehicle(*world, conn.link.owned_entity);
+				break;
+			}
 			case 0x2C: { // RTT probe [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
 				// [u32 timestamp][u8 echo_flag]. echo_flag != 0 -> bounce S2C 0x57 [u32 ts][u8 0]; the
 				// echo_flag == 0 return leg is server-internal RTT stat + min/max-ping kick (no reply).
@@ -867,6 +950,21 @@ ProtocolMessage build_player_list_message(const GameConfig &config,
 	PlayerReplicationState fallback;
 	fallback.player_name = config.player_name;
 	return make_protocol_message(0x16, build_reply_tag_16(roster, fallback, world));
+}
+
+void broadcast_player_sync_on_join(const GameConfig &config,
+                                   std::vector<NapiNPConnection> &roster,
+                                   const NapiNPConnection &joined, const world::World *world) {
+	// [orig: Server_PlayerAdd @0x51D296 — one 0x46 (fieldFlags 0x1CF7, no ack: the walk is the
+	// JOINER's own concern) to every in-game connection]. Staged on each recipient's transport
+	// like the other broadcast handlers (0x49 relay / the leave removal); the per-connection
+	// flush frames it with that connection's own sequencing.
+	const PlayerReplicationState rep = make_rep_state(config, joined, world);
+	const std::vector<uint8_t> body = encode_player_sync(rep, 0x1CF7);
+	for (NapiNPConnection &c : roster) {
+		if (&c == &joined || !is_in_match(c) || c.link.transport == nullptr) continue;
+		c.link.transport->host_send(0x46, body);
+	}
 }
 
 } // namespace opennova::np
