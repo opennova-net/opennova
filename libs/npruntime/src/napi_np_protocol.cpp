@@ -597,7 +597,26 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 	if (ctx.world != nullptr) Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.burst.spawned) continue; // spawned peers: Server_TickUpdate owns their per-frame 0x0A
+		if (conn.burst.spawned) {
+			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
+			// version check must keep running here so EXISTING clients learn about LATER
+			// joins/leaves (D-NET-155). The first cut only evaluated it below this skip,
+			// i.e. once, on each connection's own burst-completion tick — the v30 wire
+			// showed the first joiner never received the grown 47-B 0x16 when the second
+			// spawned (its HUD count stayed at 2).
+			if (conn.type == 1 &&
+			    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
+				TickOut to;
+				to.peer = conn.peer;
+				std::vector<ProtocolMessage> roster_reply{build_player_list_message(
+						ctx.config, ctx.np_protocol.connection_list, ctx.world)};
+				std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
+				if (!dg.empty()) to.outbound.push_back(std::move(dg));
+				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
+				if (!to.outbound.empty()) out.push_back(std::move(to));
+			}
+			continue;
+		}
 
 		TickOut to;
 		to.peer = conn.peer;

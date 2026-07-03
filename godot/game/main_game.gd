@@ -127,7 +127,7 @@ func _ready() -> void:
 			"mission": lan_host,
 			"net_transport": "lan",
 			"bind_port": int(OS.get_environment("NW_LAN_PORT")) if not OS.get_environment("NW_LAN_PORT").is_empty() else 32768,
-			"game_type": "COOP",
+			"game_type": "AS",  # the bring-up target: Advance and Secure on ASH_I5A (gametype 0x10010)
 			"gametype": int(lan_gametype) if not lan_gametype.is_empty() else 0x10010,
 			"server_name": "DEMOHOST",
 			"max_players": 4,

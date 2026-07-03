@@ -123,8 +123,35 @@ target) in net-re D-NET-146.
   leftovers = 0 with a real vehicle set + the watermark still advanced — rounds now select
   FIRST), **D-NET-155** stale 0x16 roster (one-shot re-push to the joiner only → HUD count
   stuck at 2; now generation-driven to every in-match client, golden 31→39 preserved).
-  Anims = the tracked body-motor item. **NEXT = v30 live: kill symmetry both ways + the
-  positive tag-2 witness + HUD count 3.**
+  Anims = the tracked body-motor item. **v30 LIVE (same day): D-NET-153/154 wire-VERIFIED —
+  kills BOTH directions (0x13: victim 0x0001 killer 2 / victim 0x0002 killer 1 / the HOST
+  player 0x0000 killed too) + 25 tag-2 round-events = the §5.9.1 positive witness; no ghost
+  bodies (3 player entities all session, redeploy reuses the entity). D-NET-155's first cut
+  was half-broken (the version check sat below tick_connections' spawned-peer skip → only
+  ran on each conn's own completion tick; joiner 1 never got the 47-B list) — re-fixed:
+  spawned conns evaluate the roster version every tick.**
+
+**THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
+ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
+value).** The wire has advertised AS all along; the internal "COOP" label (main_game.gd /
+mp_menu_host.gd boot dicts) was a bring-up leftover and is renamed to "AS"; the menu-host
+path now seeds the numeric gametype 0x10010 explicitly (it previously advertised 0). The
+FULL-AS-GAME gap list, in rough order:
+  1. **Spawn selection** — retail AS deploys through a zone-spawn picker; our host pins one
+     spawn point (world::select_player_spawn) and sends a single 0x4D spawn tip. Needs the
+     spawn-zone advertising + the D-NET-150 deferred spawn-menu re-stream + the team-spawn
+     open item. (v30 user report: "I expected a spawn selection screen".)
+  2. **AS zone capture loop** — Server_UpdateCaptureZones @0x53b9c0 (S2C 0x53) +
+     Server_UpdateCaptureZoneEntities @0x51978x (0x6F + 0x1E zone events) +
+     Server_UpdateCaptureZoneProximity @0x508790; the flag/zone 0x1E cases 19-21/41-44/50-60.
+  3. **Scores** — 0x16 scoreboard refresh cadence (Server_BuildAndBroadcastScoreboard
+     @0x50de00 trigger set) + the 0x52 kill-stat pairs + kill/death tallies.
+  4. **Round end** — Server_CheckWinConditions @0x51ad40 (AS = zone-hold win) →
+     Server_ProcessRoundEnd (0x1D/0x61/0x25 family) → the next-round reset.
+  5. **Death presentation** — stream the death anim state (the body-motor off-14/off-15
+     item) so bodies lie down instead of idling at the death spot.
+  6. Combat completeness already tracked: drag/falloff, bone zones, spread, 0x52/0x54/0x32,
+     scoring, vehicles.
 
 **Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
 channel ratio — remote players render idle-posed; the v28 diff confirms `animRatio` still zero);

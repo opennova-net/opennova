@@ -187,8 +187,12 @@ func _read_host_config() -> Dictionary:
 		"missions": missions,
 		"mission": String(missions[0]) if missions.size() > 0 else "",
 		"max_players": max_players,
-		"game_type": "COOP",                       # co-op-minimal: forced
+		"game_type": "AS",                         # the bring-up target: one game type until a full
+		                                           # AS game plays end-to-end (gametype 0x10010 below)
 		"game_type_raw": _spin_attr("GAME_TYPE", ""),  # the GAME_TYPE value attr (HG_COOP=2, ...), for later
+		"gametype": 0x10010,                       # numeric g_GameType the S2C 0x08 advertises: AS + team
+		                                           # flag — the golden retail ASH_I5A value (D-NET-146);
+		                                           # without it a menu-hosted session advertised gametype 0
 		"channel": "LAN",
 		"net_transport": "lan",
 		"bind_port": 32768,                        # witnessed retail LAN host port [game.cfg mplanserverport 32768-32787]

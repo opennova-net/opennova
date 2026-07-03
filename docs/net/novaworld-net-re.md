@@ -5350,9 +5350,20 @@ across both joiners, one kill applied host-side, and the death broadcast REACHED
 its own deploy request). Three defects surfaced and were fixed same-day: the fire-direction
 frame (D-NET-153 — the kill asymmetry the user reported), tag-2 budget starvation
 (D-NET-154 — zero round events despite live observers), and the stale 0x16 roster
-(D-NET-155 — HUD player count stuck). The positive tag-2 witness and the corrected-frame
-kill symmetry re-verify in v30. The "anims not quite correct" report is the tracked
+(D-NET-155 — HUD player count stuck). The "anims not quite correct" report is the tracked
 body-motor item (off-14 states / off-15 channel ratio), not a new defect.
+
+**v30 LIVE (2026-07-03, same stack): D-NET-153 and D-NET-154 VERIFIED on the wire.** Kill
+symmetry both ways — the 0x13 bodies read victim 0x0001 killerSource 2 (the direction v29
+could not produce), victim 0x0002 killerSource 1, and victim 0x0000 killerSource 1 (the
+HOST player killed by a joiner); **25 tag-2 round-events on the wire = the §5.9.1 positive
+observer witness at last** (every one of the 25 fires echoed exactly once to the other
+client; sample: `shooter=0x0002 origin+yaw/pitch+shotSeq` intact). Exactly three player
+entities all session (0x0000/0x0001/0x0002) — a killed joiner's redeploy REUSES its entity,
+no ghost bodies; the body holding its death spot until respawn is the retail-correct
+D-NET-66 behavior (the standing-idle LOOK is the body-motor anim gap — the death anim
+state is not streamed yet). D-NET-155's first cut was found half-broken (see its entry) and
+re-fixed; HUD count re-verifies v31.
 
 **Port follow-ups (witness at port time):** the payload writers
 (`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
@@ -6538,7 +6549,11 @@ observed spawn and on the disconnect teardown) + a per-connection `roster_seen_g
 spawned type-1 connection re-receives the framed 0x16 whenever its generation is stale.
 The golden single-joiner 31→39 grow is preserved byte-for-byte (one push, same tick;
 golden ctests green). [orig: the retail broadcast is `Server_BuildAndBroadcastScoreboard
-@ 0x50DE00` — its exact trigger set is a tracked follow-up.]
+@ 0x50DE00` — its exact trigger set is a tracked follow-up.] **v30 wire caught the first
+cut incomplete**: the version check lived below tick_connections' spawned-peer skip, so it
+only ever ran on each connection's OWN burst-completion tick — joiner 1 got its 39-B list
+twice and never the grown 47-B list when joiner 2 spawned (HUD still 2). Fixed: spawned
+type-1 connections evaluate the roster version every tick before the skip; re-verify v31.
 
 **D-NET-154** [reimpl divergence, FIXED 2026-07-03 (v29)] **Tag-2 round events starved to
 ZERO on the wire: the grouped-order port gave `select_round_events` only the budget

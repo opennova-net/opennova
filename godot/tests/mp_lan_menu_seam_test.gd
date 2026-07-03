@@ -88,7 +88,7 @@ func test_start_game_emits_host_config() -> void:
 	var config: Dictionary = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.get("server_name"), "CoopNight")
 	assert_eq(config.get("max_players"), 6)
-	assert_eq(config.get("game_type"), "COOP", "co-op-minimal forces COOP")
+	assert_eq(config.get("game_type"), "AS", "the bring-up forces AS (one game type until it plays end-to-end)")
 	assert_eq(config.get("mission"), "alpha.bms")
 	assert_eq(config.get("channel"), "LAN")
 	# SERVERTYPE absent in the stand-in menu -> serve-and-play (dedicated=false). The real screen's
