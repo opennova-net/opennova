@@ -536,7 +536,7 @@ int test_player_compact_roundtrip() {
 	PlayerCompactRecord r;
 	r.vehicle_bone      = 1;
 	r.seat_type         = 2;
-	r.vehicle_handle    = 0xFFFF;     // on foot
+	r.carrier_handle    = 0xFFFF;     // on foot
 	r.pos_x_compressed  = 0xBE8F;
 	r.pos_y_compressed  = 0xB504;
 	r.pos_z_compressed  = 0xBCD7;
@@ -556,7 +556,7 @@ int test_player_compact_roundtrip() {
 	EXPECT(decode_player_compact_record(wire.data(), wire.size(), d, consumed));
 	EXPECT(consumed == 18);
 	EXPECT(d.vehicle_bone == 1 && d.seat_type == 2);
-	EXPECT(d.vehicle_handle == 0xFFFF);
+	EXPECT(d.carrier_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xBE8F);
 	EXPECT(d.pos_z_compressed == 0xBCD7);
 	EXPECT(d.yaw_byte == 0x40 && d.pitch_byte == 0x10);
@@ -639,7 +639,7 @@ int test_frame_update_roundtrip() {
 		in.state_flag_byte = 0x07; in.mount_handle = 0xFFFF; in.health = 96; in.state_word = -3;
 
 		FrameUpdateRecord p; p.handle = 0x0001; p.type_id = 100; p.cls = EntityClass::Player;
-		p.player.vehicle_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
+		p.player.carrier_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
 		in.records.push_back(p);
 		FrameUpdateRecord v; v.handle = 0x1002; v.type_id = 200; v.cls = EntityClass::Vehicle;
 		v.vehicle.parent_slot_handle = 0xFFFF; v.vehicle.flags_byte = 0x00;

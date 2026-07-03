@@ -35,24 +35,24 @@ namespace {
 // verbatim from nw_pp's hex dump of the 3-player capture's f=1905 datagram.
 const uint8_t kFrame1905_full[] = {
 	0x02, 0x00, 0xb9, 0x14, 0x0a, // header: handle=0x0002 typeId=0x14b9 sub_op=0x0a
-	0xff, 0xff,                   // body[0..1]  vehicle_handle = none
+	0xff, 0xff,                   // body[0..1]  carrier_handle = none
 	0x61, 0x48, 0x46, 0xfe,       // body[2..5]  posX = 0xfe464861 (i32 16.16) ≈ -441.7
 	0xec, 0xad, 0x78, 0x01,       // body[6..9]  posY = 0x0178adec ≈ 376.7
 	0x68, 0xde, 0x0b, 0x00,       // body[10..13] posZ = 0x000bde68 ≈ 11.9
 	0x2d, 0x38,                   // body[14..15] heading i16 LE = 0x382D = 14381
 	0x00, 0x00,                   // body[16..17] pitch i16 LE = 0
-	0x00,                         // body[18]     reserved_18
+	0x00,                         // body[18]     anticheat_flags
 	0x00,                         // body[19]     move_input_byte
-	0x01,                         // body[20]     flags_xor (wire bit 0; host masks to 0x1C)
+	0x01,                         // body[20]     state_flags_byte (wire bit 0; host masks to 0x1C)
 	0x00, 0x00, 0x00,             // body[21..23] anim_def_1/2/3
 	0x07,                         // body[24]     equipped_adm_index (entity+0x2B0 — the joiner's
 	                              //              equipped weapon; the host echoes it at 0x0A
 	                              //              off-16 [orig: @0x4C20A3], D-NET-143)
 	0x00, 0x00,                   // body[25..26] stat_byte_0/1
-	0x21, 0x10, 0xce, 0x07,       // body[27..30] weapon_id_0 / fire_counter_0
-	0x2d, 0x10, 0x69, 0x07,       // body[31..34] weapon_id_1 / fire_counter_1
-	0x00, 0x00, 0x32, 0x07,       // body[35..38] weapon_id_2 / fire_counter_2
-	0x1e, 0x10, 0x1c, 0x07,       // body[39..42] weapon_id_3 / fire_counter_3
+	0x21, 0x10, 0xce, 0x07,       // body[27..30] priority_handle_0 / priority_score_0
+	0x2d, 0x10, 0x69, 0x07,       // body[31..34] priority_handle_1 / priority_score_1
+	0x00, 0x00, 0x32, 0x07,       // body[35..38] priority_handle_2 / priority_score_2
+	0x1e, 0x10, 0x1c, 0x07,       // body[39..42] priority_handle_3 / priority_score_3
 };
 static_assert(sizeof(kFrame1905_full) == 48,
               "C2S 0x0C extended frame is 5 B header + 43 B body = 48 B");
@@ -73,7 +73,7 @@ int test_sub_header_parse() {
 
 int test_extended_uplink_stationary_on_foot() {
 	// Frame 1905 — joiner s2, on foot, holding still. Heading 14381 (BAM high),
-	// pitch 0. flags_xor=0x01 (wire byte; host masks to 0x1C before XOR).
+	// pitch 0. state_flags_byte=0x01 (wire byte; host masks to 0x1C before XOR).
 	PlayerExtendedUplink r;
 	size_t consumed = 0;
 	const bool ok = decode_player_extended_uplink(
@@ -81,15 +81,15 @@ int test_extended_uplink_stationary_on_foot() {
 	EXPECT(ok);
 	EXPECT(consumed == 43);
 
-	EXPECT(r.vehicle_handle == 0xFFFF);
+	EXPECT(r.carrier_handle == 0xFFFF);
 	EXPECT(uint32_t(r.pos_x) == 0xfe464861u);
 	EXPECT(uint32_t(r.pos_y) == 0x0178adecu);
 	EXPECT(uint32_t(r.pos_z) == 0x000bde68u);
 	EXPECT(r.heading == 14381);  // body[14..15] = `2d 38` LE
 	EXPECT(r.pitch == 0);
-	EXPECT(r.reserved_18 == 0x00);
+	EXPECT(r.anticheat_flags == 0x00);
 	EXPECT(r.move_input_byte == 0x00);
-	EXPECT(r.flags_xor == 0x01);
+	EXPECT(r.state_flags_byte == 0x01);
 	EXPECT(r.anim_def_1 == 0x00);
 	EXPECT(r.anim_def_2 == 0x00);
 	EXPECT(r.anim_def_3 == 0x00);
@@ -97,10 +97,10 @@ int test_extended_uplink_stationary_on_foot() {
 	EXPECT(r.stat_byte_0 == 0x00);
 	EXPECT(r.stat_byte_1 == 0x00);
 
-	EXPECT(r.weapon_id_0 == 0x1021);    EXPECT(r.fire_counter_0 == 0x07ce);
-	EXPECT(r.weapon_id_1 == 0x102d);    EXPECT(r.fire_counter_1 == 0x0769);
-	EXPECT(r.weapon_id_2 == 0x0000);    EXPECT(r.fire_counter_2 == 0x0732);
-	EXPECT(r.weapon_id_3 == 0x101e);    EXPECT(r.fire_counter_3 == 0x071c);
+	EXPECT(r.priority_handle_0 == 0x1021);    EXPECT(r.priority_score_0 == 0x07ce);
+	EXPECT(r.priority_handle_1 == 0x102d);    EXPECT(r.priority_score_1 == 0x0769);
+	EXPECT(r.priority_handle_2 == 0x0000);    EXPECT(r.priority_score_2 == 0x0732);
+	EXPECT(r.priority_handle_3 == 0x101e);    EXPECT(r.priority_score_3 == 0x071c);
 	std::printf("PASS extended_uplink stationary on-foot\n");
 	return 0;
 }
@@ -110,14 +110,14 @@ int test_extended_uplink_stationary_on_foot() {
 // add), so positions are now small near-zero deltas instead of world coords.
 // Anti-cheat counters carry across the mount.
 const uint8_t kFrame2053_body[] = {
-	0x33, 0x10,                   // vehicle_handle = 0x1033 (pool 1, slot 51)
+	0x33, 0x10,                   // carrier_handle = 0x1033 (pool 1, slot 51)
 	0x76, 0x01, 0x00, 0x00,       // posX (vehicle-local i32 16.16) = 0x00000176 ≈ 0.006
 	0x66, 0x37, 0x00, 0x00,       // posY ≈ 0.216
 	0x91, 0x80, 0xf8, 0xff,       // posZ ≈ -7.997 (i32 negative)
 	0xd8, 0x22,                   // heading = 0x22d8 = 8920 (i16)
 	0x00, 0x00,                   // pitch = 0
-	0x00, 0x00,                   // reserved_18 / move_input_byte
-	0x00, 0x00, 0x00, 0x00, 0x00, // flags_xor / anim_defs / equipped_adm_index
+	0x00, 0x00,                   // anticheat_flags / move_input_byte
+	0x00, 0x00, 0x00, 0x00, 0x00, // state_flags_byte / anim_defs / equipped_adm_index
 	0x36, 0x00,                   // stat_byte_0 = 0x36, stat_byte_1 = 0
 	0x21, 0x10, 0xce, 0x07,
 	0x2d, 0x10, 0x69, 0x07,
@@ -134,7 +134,7 @@ int test_extended_uplink_mounted_vehicle() {
 		kFrame2053_body, sizeof(kFrame2053_body), r, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 43);
-	EXPECT(r.vehicle_handle == 0x1033);  // mounted — vehicle-local branch
+	EXPECT(r.carrier_handle == 0x1033);  // mounted — vehicle-local branch
 	// Position is i32 16.16 vehicle-local. Sanity-check magnitudes only here;
 	// the wire-format guarantee is "i32 LE", which the byte-exact frame-1905
 	// test pins.

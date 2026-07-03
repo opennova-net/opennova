@@ -1515,9 +1515,28 @@ Callback context struct (built by `dispatch_entity_packet_callback` and `Pool_Se
 `Network_DecompressFixedPoint @ 0x4C27E0` / `Entity_TransformWorldToLocal @ 0x43BB50` /
 `Entity_TransformLocalToWorld @ 0x43BD00`]. The compressor packs an i32 16.16 into a `u16`:
 sign=bit0, exponent=bits1-3, mantissa=bits4-15. World→wire is delta from
-`dword_C867A4 / C867A8 / C867AC` (map origin); when mounted, position is vehicle-LOCAL
-instead (the case-3/4 vehicle branch transforms via `Entity_TransformWorldToLocal` before
-the cursor write).
+`g_priority_ref_x/y/z @ 0xC867A4/A8/AC` — NOT a map origin (the early reading): the
+per-recipient send sets them to the RECIPIENT'S EYE position (`entity+4..+0xC` +
+`CameraOffset entity+0x6C..`) right before serializing its frame [orig:
+`Server_SendEntityStateToPlayer @ 0x517ba0`, stores `@0x517bf5-0x517c13`], and the 0x0A
+header refs carry the same three dwords to the client (→ `dword_A822E4/E8/EC`). When a
+CARRIER is live — the mount (`entity+0x16C`), else the standing-on **groundEntity
+(`entity+0x28`)**, any pool 0-4 (buildings included) — position is CARRIER-LOCAL instead
+(`Entity_TransformWorldToLocal` before the cursor write) and the heading field goes
+carrier-relative (the transforms are 6-dword POSE transforms: `out[3] = heading ∓ carrier
+heading`, pitch/roll pass through — `@0x43bb7b-0x43bb8d` / `@0x43be7e`). D-NET-151.
+
+**The pool table behind every handle resolve** [orig: `EntityPool_Allocate @ 0x442168`]:
+`g_pool_list @ 0xA892E0` is five 16-B descriptors `{base, stride, used, capacity}` over one
+malloc'd heap (randomized base offset, anti-tamper). The strides ARE the per-pool entity
+struct sizes — the pools hold DIFFERENT structures: pool 0 players **904 B** (`0x388`,
+`GamePlayerEntity`) × 256, pool 1 vehicles/items **1360 B** (`0x550`) × 1200, pool 2
+statics/destructibles **812 B** (`0x32C`) × 1200, pool 3 projectiles **988 B** × 768,
+pool 4 effects **988 B** × 128. Handle encode/decode is a base+stride walk
+(`(pool<<12)|((ptr-base)/stride)` and back), so field offsets witnessed on one pool's
+struct (e.g. GamePlayerEntity's `+0x28 groundEntity`, `+0x157 attachBoneId`, `+0x16C
+parentEntity`) do NOT transfer to another pool's — only the low pose block (+4 pos,
++0x10..0x18 euler, +0x1C/+0x20 item, +0x24 flags) is layout-shared across pools.
 
 **Decompressor (the read-side inverse, solved 2026-06-17)** [orig: `Network_DecompressFixedPoint
 @ 0x4C27E0`] is a pure one-liner: `sign = (bit0 of c) sign-extended; world_delta = sign ^
@@ -1546,13 +1565,13 @@ Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
 
 | off | bytes | field | landing |
 |---|---|---|---|
-| 0 | 1 | vehicleBone | entity+0x157 |
-| 1 | 1 | seatType (0/1/2) | local seat-type byte |
-| 2 | 2 | vehicleHandle (`0xFFFF`=none) | pool resolve |
-| 4 | 2 | posX *compressed* | `DecompressFixedPoint` → entity+4 (vehicle-local if mounted, else world + `C867A4`) |
+| 0 | 1 | attachBone (0 unless seat-mounted) | entity+0x157 (`attachBoneId` — renamed from the `weaponType` IDB misnomer, D-NET-151) |
+| 1 | 1 | seatType (0/1/2; 0 unless seat-mounted) | seat attribute bits [orig: veh+806 & 2 / veh+786 & 8 `@0x4c0a50`] |
+| 2 | 2 | carrierHandle (`0xFFFF`=none) | op1 select: mount (`entity+0x16C`) wins, else **groundEntity (`entity+0x28`)** — a grounded-standing player echoes its floor/deck (ANY pool) with bone=0 seat=0 [orig: `@0x4c0a08`]. The client mirrors it back into its own groundEntity [orig: `@0x4c1353`] — see the D-NET-151 snap. |
+| 4 | 2 | posX *compressed* | `DecompressFixedPoint` → entity+4 (CARRIER-local when carrierHandle != none [orig: write `@0x4c0b07`], else world + anchor `C867A4`) |
 | 6 | 2 | posY | → entity+8 (+ `C867A8`) |
 | 8 | 2 | posZ | → entity+0xC (+ `C867AC`) |
-| 10 | 1 | yaw byte | high byte of a 32-bit BAM → `entity+0x10` (heading) on read [D-NET-57] |
+| 10 | 1 | yaw byte | high byte of a 32-bit BAM → `entity+0x10` (heading) on read [D-NET-57]; CARRIER-RELATIVE local heading when carrierHandle != none (`sar 24` of the pose transform's out[3] [orig: `@0x4c0b85`]) |
 | 11 | 1 | pitch byte | same shape → `entity+0x14` (pitch) on read; the write sources `(entity+0x14 + 0x800000) >> 24` [D-NET-57] |
 | 12 | 1 | anim slot low | → entity+0x12C |
 | 13 | 1 | state flags | bit `0x02` = spawning, bit `0x04` = mounted; → entity+0x24 |
@@ -1596,17 +1615,27 @@ misnomers corrected here):**
   +0x2B0 @ 0x4B1116; local switch `Player_SelectWeaponSlot @ 0x4DD727/0x4DD7F5`; net: the host
   ECHOES the extended uplink's own byte — case-4 store @ 0x4C20A3, gated `category < 11`].
 - **Local-player position echo**: never applied outside (a) the spawn edge and (b) a mount/
-  dismount snap after `Entity_TryAttachOrDetach` (`@0x4c1329-0x4c1345`); the record is parsed
-  whole but the local motor owns the live pose. off-17 health apply is remote-only; the local
-  branch only floors Health at 1 (`@0x4c11c4`).
-- **off 0-3 mount fields apply to the LOCAL player too**: a resolving vehicle handle whose
+  dismount snap after `Entity_TryAttachOrDetach @ 0x436610` (`@0x4c1329-0x4c1345`; returns 1 =
+  attach state CHANGED — a bone+carrier record that differs from the current attach, or a
+  bone-less record while `parentEntity`/`parentSlot` are set → `Entity_DetachFromVehicle
+  @ 0x4355F0`); the record is parsed whole but the local motor owns the live pose. off-17
+  health apply is remote-only; the local branch only floors Health at 1 (`@0x4c11c4`).
+- **off 0-3 carrier fields apply to the LOCAL player too**: a resolving carrier handle whose
   entity has a null itemDef ABORTS the record and queues C2S 0x0F for that handle
-  (`@0x4c10a9-0x4c10bd`); 0xFFFF while mounted force-dismounts.
+  (`@0x4c10a9-0x4c10bd`); 0xFFFF while mounted force-dismounts. And UNCONDITIONALLY —
+  local player included — the record's carrier is stored into the entity's own
+  **groundEntity (`+0x28`)**: `groundEntity = mounted ? mount->groundEntity : wireCarrier`
+  [orig: `@0x4c1353/@0x4c1358`]. The client's own platform physics re-derives the true
+  ground link every collision pass (`Flags |= 0x100000` + groundEntity = platform [orig:
+  `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b3291-0x4b3297`]), so a HOST that echoes
+  the matching carrier is steady-state — but a host that echoes `0xFFFF` at a grounded
+  client re-nulls the link every 0x0A and destabilizes the standing state (D-NET-151).
 
 **Spawn hook (load-bearing):** superseded detail above (off-13 bullet) — the hook is the wire
 bit-0x02 1→0 EDGE, local-player `Game_InitNewRound` + everyone's `Entity_ResetToSpawnState`.
 The case-1 write side is the inverse: position via `Network_CompressFixedPoint(entity+4..C −
-mapOrigin)`, vehicle-local via `Entity_TransformWorldToLocal` when a parent vehicle is attached.
+g_priority_ref)` (the recipient-eye anchor, not a map origin), CARRIER-local via
+`Entity_TransformWorldToLocal` when the mount-else-groundEntity carrier is live (D-NET-151).
 
 #### Tag 0x0C body — extended (type-10) [orig: `NetPacket_SerializePlayerState` case 3/4]
 
@@ -1616,33 +1645,35 @@ including a host-validated anti-cheat block:
 
 | off | bytes | field | landing (host receiver, case 4) |
 |---|---|---|---|
-| 0 | 2 | vehicleHandle (`0xFFFF`=none; `(h&0xF000)>=0x5000` invalid) | pool resolve via `g_pool_list` |
-| 2 | 4 | posX (i32 LE, 16.16; vehicle-local if mounted) | smooth-target entity+0x234 (ABSOLUTE world — NO map-origin add on receive; mounted = vehicle-local lift via `Entity_TransformLocalToWorld @0x43BD00`; §5.38a / D-NET-91) |
+| 0 | 2 | carrierHandle (`0xFFFF`=none; `(h&0xF000)>=0x5000` invalid) | pool resolve via `g_pool_list` (any pool 0-4). The SENDER writes its **groundEntity (`entity+0x28`)** here — the entity it STANDS ON (building floor, vehicle deck; v26: a pool-2 static `0x227e`), pool-encoded at the case-3 head. The old "vehicleHandle / mounted" reading undersold it — D-NET-151. |
+| 2 | 4 | posX (i32 LE, 16.16; CARRIER-local when carrierHandle != none) | smooth-target entity+0x234 (free = ABSOLUTE world, NO anchor add on receive; carrier = local lift via `Entity_TransformLocalToWorld @0x43BD00` `@0x4c1de1`; §5.38a / D-NET-91/151) |
 | 6 | 4 | posY | entity+0x238 |
 | 10 | 4 | posZ | entity+0x23C |
-| 14 | 2 | heading (i16 LE, sign-ext ×0x10000) | entity+0x240 / +0x10 (32-bit BAM) |
-| 16 | 2 | pitch (i16 LE, sign-ext ×0x10000) | entity+0x244 / +0x14 |
-| 18 | 1 | RESERVED — cursor advance, no read | — |
+| 14 | 2 | heading (i16 LE, sign-ext ×0x10000) | entity+0x240 / +0x10 (32-bit BAM); CARRIER-RELATIVE when grounded — the pose transform re-adds the carrier heading (`out[3] = ref[3] + local[3]` `@0x43be7e`) |
+| 16 | 2 | pitch (i16 LE, sign-ext ×0x10000) | entity+0x244 / +0x14 (pose pass-through, never localized) |
+| 18 | 1 | anti-cheat flags (sender's rotating self-check accumulator: IsDebuggerPresent / D3D9-hook / speed checks, the case-3 `dword_B5ABA8` counter switch) | cursor advance, byte DISCARDED by the host apply |
 | 19 | 1 | movement-input byte (was misnamed "anim slot low"; witness 2026-07-02) | entity+0x12C low @0x4C1E2C — the locomotion input the host echoes at 0x0A off-12 |
-| 20 | 1 | flagsXor (mask `0x1C` — bits 2-4 only) | XOR'd into entity+0x24 @0x4C1E4A |
+| 20 | 1 | state-flags byte — the sender's RAW `entity+0x24` low byte | bits 2-4 REPLACE the host entity's: `flags ^= (flags ^ wire) & 0x1C` `@0x4c1e4d`. NOT an xor-delta (the old "flagsXor" reading — an xor-apply corrupts already-set stance bits; crouch/prone family). D-NET-151. |
 | 21 | 1 | anim def 1 | entity+0x130 @0x4C1E6A |
 | 22 | 1 | anim def 2 | entity+0x131 @0x4C1E87 |
 | 23 | 1 | anim def 3 | entity+0x132 @0x4C1EA4 |
 | 24 | 1 | equipped-weapon AdmDef index (was "RESERVED/discarded" — witness 2026-07-02) | entity+0x2B0 @0x4C20A3, gated `AdmDefs[idx].category < 11`; the host echoes it at 0x0A off-16 |
 | 25 | 1 | stat byte 0 | playerSlot+0x15F78 |
 | 26 | 1 | stat byte 1 | playerSlot+0x15F79 |
-| 27 | 2 | weapon id 0 | playerSlot+0x1708A |
-| 29 | 2 | counter 0 (u16 → zero-ext u32) | playerSlot+0x17094 |
-| 31 | 2 | weapon id 1 | playerSlot+0x1708C |
-| 33 | 2 | counter 1 (u32) | playerSlot+0x17098 |
-| 35 | 2 | weapon id 2 | playerSlot+0x1708E |
-| 37 | 2 | counter 2 (u32) | playerSlot+0x1709C |
-| 39 | 2 | weapon id 3 | playerSlot+0x17090 |
-| 41 | 2 | counter 3 (u32) | playerSlot+0x170A0 |
+| 27 | 2 | priority handle 0 | playerSlot+0x1708A |
+| 29 | 2 | priority score 0 (u16 → zero-ext u32) | playerSlot+0x17094 |
+| 31 | 2 | priority handle 1 | playerSlot+0x1708C |
+| 33 | 2 | priority score 1 (u32) | playerSlot+0x17098 |
+| 35 | 2 | priority handle 2 | playerSlot+0x1708E |
+| 37 | 2 | priority score 2 (u32) | playerSlot+0x1709C |
+| 39 | 2 | priority handle 3 | playerSlot+0x17090 |
+| 41 | 2 | priority score 3 (u32) | playerSlot+0x170A0 |
 
-The 8 trailing u16s form **4 pairs of `(weapon_id, fire_counter)`** — the host's anti-cheat
-ground truth for shot/hit tallies. `playerSlot` = `packetCtx+0x20` = the joiner's
-per-connection player struct (`connectionCtx+0x160 → playerObj+0xC0`, set by
+The 8 trailing u16s are **4 `(handle, score)` ENTITY-PRIORITY pairs** — the sender's top-4
+interest list from `Server_BuildEntityPriorityListForPlayer(entity, .., 4)` [orig: case-3
+call `@0x4c1be9`] — NOT weapon/fire-counter tallies (the old decode-era guess; v26 shows the
+ridden buggy's handle scored first while standing on it). `playerSlot` = `packetCtx+0x20` =
+the joiner's per-connection player struct (`connectionCtx+0x160 → playerObj+0xC0`, set by
 `NapiNPServerMsg_0x00C`). The case-3 send path mirrors this layout from the joiner's local
 state.
 
@@ -6190,6 +6221,54 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
+**D-NET-151** [reimpl divergence, FIXED 2026-07-03; live re-verify v27 pending] **The
+grounded-on-entity player replication loop was unported on BOTH host sides — the joiner's
+carrier-local uplink was applied as world coordinates and the 0x0A echo never returned the
+carrier — snapping a retail client to ~map origin the moment it stood ON another entity
+(building floor, vehicle deck).** Wire-witnessed retail-join v26 (both cases, same shape):
+on-foot at world `(-388.8, 439.4, 11.9)` → grounded uplink `carrier=0x1004` (Dune Buggy,
+pool 1) `pos=(2.3, 0.4, 1.1)` LOCAL → next on-foot uplink at world `(2.4, 0.5, 39.3)` — the
+local coords as world, z terrain-clamped; identically `carrier=0x227e` (pool-2 STATIC —
+building s638) `pos=(8.1, 6.9, 1.0)` → world `(8.3, 6.7, 42.3)`. Golden retail↔retail runs
+the same maneuver for 106 uplinks with NO snap: the retail host echoes the carrier back in
+the player's own compact record (`vehBone=0 seat=0 carrier=0x1034` + compressed LOCAL pos)
+while the 0x0A header refs stay WORLD (the recipient-eye anchor). The witnessed contract
+(§5.10, all four ops of `NetPacket_SerializePlayerState @ 0x4C09C0`): the client uplinks
+`carrier = groundEntity (entity+0x28)` — maintained by its platform physics
+[orig: `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b3291` sets `Flags |= 0x100000` +
+groundEntity] — with `Entity_TransformWorldToLocal @ 0x43BB50` pose (local pos + relative
+heading); the host apply lifts it back via `Entity_TransformLocalToWorld @ 0x43BD00`
+(`@0x4c1de1`, heading re-add `@0x43be7e`) and REPLACES flags bits 2-4 from the raw wire
+byte (`@0x4c1e4d`); the host echo selects mount-else-groundEntity (`@0x4c0a08`) and writes
+carrier + compressed LOCAL pos (`@0x4c0b07`) + local-heading yaw byte (`sar 24 @0x4c0b85`);
+the client stores the echoed carrier into its own groundEntity UNCONDITIONALLY (`@0x4c1353`)
+and hard-applies its own record's position only on an `Entity_TryAttachOrDetach @ 0x436610`
+attach-state change (`@0x4c1329-0x4c1345`) — which our 0xFFFF/world echo provoked. FIXED
+end-to-end: `apply_player_intent` lifts the grounded uplink through the carrier pose and
+mirrors the carrier into `world::Entity::ground_target`; `snapshot_world` resolves the
+carrier pose from the registry (a pool-2 static has no 0x0A snapshot of its own);
+`build_0a_frame` emits the witnessed grounded record form; `NetClientView` lifts
+carrier-form records via the carrier's view-state pose; `Entity_TransformWorldToLocal`
+ported as `network_transform_world_to_local` (exact 22-bit transpose; the binary folds the
+inverse-rotation sign into a −2^22 sine scale, `dbl_7C57B0`). Decoder corrections ride
+along (§5.10 tables): `carrier_handle` (was vehicle_handle), `state_flags_byte`
+replace-bits apply (was flags_xor XOR-delta — the xor corrupted already-set crouch/prone
+bits), `anticheat_flags` (was reserved_18), priority `(handle,score)` pairs (were
+"weapon/fire counters"). DIVERGENCE NOTE (tracked here): retail's host re-derives
+groundEntity from its own platform physics each tick (it re-simulates remote players from
+replicated input); our read-apply peer model has no platform pass, so the owner's uplinked
+carrier is mirrored instead — wire-identical in steady state (the client reports exactly
+what it grounds on) but self-corrected a tick later by retail when they disagree. RESIDUAL:
+our HOST's own player never reports grounded (no platform physics on our motor), and
+seat-MOUNT replication (bone/seat != 0) remains deferred with mount modeling. Pinned by
+`netsim_two_peer_fanout` (grounded_uplink_apply_and_echo: carrier-pose lift, ground_target
+mirror, flags replace, carrier echo + local pos + local yaw byte, free-standing regression;
+pose_transform_roundtrip: identity-exact + arbitrary-pose round-trip) and the §5.10 codec
+tests (`nw_ingame_c2s_uplink`, `nw_ingame_encode`, `nw_ingame_compact_records`). IDB changes
+this session: struct member `GamePlayerEntity+0x157 weaponType → attachBoneId` (anchored:
+the op1 bone-byte source + the `Entity_TryAttachOrDetach` compare); witness comments at
+`0x4c0a08` / `0x4c0b07` / `0x4c1353` / `0x4c1de1` / `0x4c1e4d` / `0x4b3291` / `0x517bf5`.
+
 **D-NET-150** [reimpl divergence, FIXED 2026-07-02, **VERIFIED live 2026-07-03 (v25)**: cold
 join = arms + human shadow (user-confirmed, first cold pass ever clean), warm rejoin = arms +
 shadow good; wire (retail_join_v25.pcapng) shows every join parking after S 0x11 until the
@@ -6281,7 +6360,8 @@ is renamed `decode_team_spawn_ack` (was `decode_burst_entity_request` — the "e
 request" reading was wrong).
 
 **D-NET-147** [reimpl divergence, FIXED 2026-07-03 (fields witnessed + streamed); live
-teleport re-verify pending] **The S2C 0x10 static-entity records omitted the flag-0x20 dword,
+re-verify v26: fields stream golden-shaped, teleport NOT cured — root cause continues as
+D-NET-151] **The S2C 0x10 static-entity records omitted the flag-0x20 dword,
 subType and ammo byte — golden building records carry `field_flags 0x0A1` + `ammo_count 0xFF`;
 ours sent `0x001` with ammo 0.** Wire-witnessed on ASH_I5A (golden vs v18, building + Armory
 records); live symptom: entering a building / touching an armory SOMETIMES teleported the
@@ -6307,7 +6387,11 @@ here): the sectioned-destructible `sectionMask` rebuild (def attrib sign bit →
 state table `[orig: @0x50443f..0x5044a4]` — ASH_I5A golden has one such record, Power
 Generator Housing flags 0x0A9), the armory `weaponByte`/`attachRef` via
 `CWeaponSlotManager_GetEntitySlotInfo @0x4a2750` (golden ASH_I5A statics all carry weap 0x00),
-and the `scoreFlag` def-callback gate `[orig: @0x504554]`.
+and the `scoreFlag` def-callback gate `[orig: @0x504554]`. LIVE RE-VERIFY retail-join v26
+(2026-07-03) NEGATIVE for the symptom: the 0x10 statics now stream golden-shaped (buildings
+eflags `0x04020400`, ammo/subType 0xFF), yet the stand-on-entity snap (building floors,
+vehicle decks) persists unchanged — these record fields were not the cause. Root cause
+pursued as D-NET-151 (grounded-on-entity player replication).
 
 **D-NET-145** [reimpl divergence, FIXED 2026-07-02] **The initial-state burst's phase-8
 loadout gate had a reimpl-invented ~10 s timeout fallback that force-started the game-start

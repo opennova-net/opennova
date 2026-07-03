@@ -587,11 +587,13 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 }
 
 void print_player_compact_record(const PlayerCompactRecord &r) {
-	std::printf("            player: vehBone=%u seat=%u vehHdl=%s "
+	// carrier != none => pos is CARRIER-LOCAL compressed + yaw is carrier-relative
+	// (mount if bone/seat set, else the standing-on ground entity; D-NET-151).
+	std::printf("            player: vehBone=%u seat=%u carrier=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
 	            "input=%u state=0x%02x animState=%u animRatio=%u animDef=%u health=0x%02x\n",
 	            unsigned(r.vehicle_bone), unsigned(r.seat_type),
-	            handle_str(r.vehicle_handle).c_str(),
+	            handle_str(r.carrier_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.pitch_byte),
@@ -631,23 +633,27 @@ void print_infantry_compact_record(const InfantryCompactRecord &r) {
 }
 
 void print_player_extended_uplink(const PlayerExtendedUplink &r) {
-	std::printf("            extended: vehHdl=%s pos=(%.1f, %.1f, %.1f) "
-	            "hdg=%d pitch=%d animLow=0x%02x flagsXor=0x%02x "
+	// carrier != none => pos/hdg are CARRIER-LOCAL (ground entity — any pool; D-NET-151).
+	std::printf("            extended: carrier=%s pos=(%.1f, %.1f, %.1f) "
+	            "hdg=%d pitch=%d ac=0x%02x input=0x%02x flags=0x%02x "
 	            "animDef=(%u,%u,%u) stat=(0x%02x,0x%02x)\n",
-	            handle_str(r.vehicle_handle).c_str(),
+	            handle_str(r.carrier_handle).c_str(),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
 	            int(r.heading), int(r.pitch),
-	            unsigned(r.move_input_byte), unsigned(r.flags_xor),
+	            unsigned(r.anticheat_flags),
+	            unsigned(r.move_input_byte), unsigned(r.state_flags_byte),
 	            unsigned(r.anim_def_1), unsigned(r.anim_def_2),
 	            unsigned(r.anim_def_3),
 	            unsigned(r.stat_byte_0), unsigned(r.stat_byte_1));
-	std::printf("            weapons: "
-	            "(id=0x%04x ctr=%u) (id=0x%04x ctr=%u) "
-	            "(id=0x%04x ctr=%u) (id=0x%04x ctr=%u)\n",
-	            unsigned(r.weapon_id_0), unsigned(r.fire_counter_0),
-	            unsigned(r.weapon_id_1), unsigned(r.fire_counter_1),
-	            unsigned(r.weapon_id_2), unsigned(r.fire_counter_2),
-	            unsigned(r.weapon_id_3), unsigned(r.fire_counter_3));
+	// The client's top-4 entity-INTEREST pairs (Server_BuildEntityPriorityListForPlayer,
+	// op3 @0x4c1be9) — the old "weapons (id,ctr)" labels were a decode-era misread.
+	std::printf("            prio: "
+	            "(hdl=0x%04x score=%u) (hdl=0x%04x score=%u) "
+	            "(hdl=0x%04x score=%u) (hdl=0x%04x score=%u)\n",
+	            unsigned(r.priority_handle_0), unsigned(r.priority_score_0),
+	            unsigned(r.priority_handle_1), unsigned(r.priority_score_1),
+	            unsigned(r.priority_handle_2), unsigned(r.priority_score_2),
+	            unsigned(r.priority_handle_3), unsigned(r.priority_score_3));
 }
 
 // C2S 0x0C — joiner per-frame uplink. Parses the 5-byte sub-header and

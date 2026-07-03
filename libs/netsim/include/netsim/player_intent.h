@@ -14,16 +14,22 @@ namespace opennova::netsim {
 struct PlayerIntent {
 	uint16_t entity_handle = 0;        // owned entity (pool<<12)|slot
 	uint16_t item_type_id = 0;
-	uint16_t vehicle_handle = 0xFFFF;  // mounted vehicle, 0xFFFF = on foot
-	int32_t  pos_x = 0;                // i32 16.16 world (authoritative, uncompressed)
+	uint16_t carrier_handle = 0xFFFF;  // GROUND entity the sender stands on (building floor /
+	                                   // vehicle deck — any pool 0-4), 0xFFFF = free-standing.
+	                                   // When set, pos/heading below are CARRIER-LOCAL
+	                                   // (renamed from the vehicle_handle misnomer; witness
+	                                   // 2026-07-03, D-NET-151)
+	int32_t  pos_x = 0;                // i32 16.16 — world when free, carrier-local when grounded
 	int32_t  pos_y = 0;
 	int32_t  pos_z = 0;
-	int16_t  heading = 0;              // entity+16 yaw intent
-	int16_t  pitch = 0;               // entity+0x14 pitch intent
+	int16_t  heading = 0;              // entity+16 yaw intent (carrier-relative when grounded)
+	int16_t  pitch = 0;               // entity+0x14 pitch intent (never localized)
 	uint8_t  move_input = 0;          // entity+0x12C movement-input byte (the wire off-12 echo
 	                                  // source; renamed from the `anim` misnomer, witness 2026-07-02)
-	uint8_t  flags_xor = 0;           // uplink flags-xor byte — bits 2-4 XOR into entity+0x24
-	                                  // [orig: case-4 apply; §5.10 extended uplink field map]
+	uint8_t  state_flags = 0;         // the RAW uplinked entity+0x24 low byte; the apply REPLACES
+	                                  // bits 2-4 (crouch/prone family) with it [orig: @0x4c1e4d
+	                                  // `flags ^= (flags ^ wire) & 0x1C`; the old flags_xor
+	                                  // xor-delta reading was wrong — D-NET-151]
 	uint8_t  equipped_adm_index = 0xFF; // entity+0x2B0 equipped-weapon AdmDef index — ingested
 	                                    // from the extended uplink gated AdmDefs[idx].category
 	                                    // < 11, echoed at 0x0A off-16 [orig: @0x4C20A3]

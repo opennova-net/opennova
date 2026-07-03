@@ -105,20 +105,43 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		rec.handle = e.wire_handle;
 		rec.type_id = e.type_id;
 		rec.cls = e.entity_class;
+		// op1 carrier select: the RIDDEN vehicle (entity+0x16C) wins, else the standing-on
+		// ground entity (entity+0x28) [orig: @0x4c0a08]. With a live carrier the record's
+		// position is CARRIER-LOCAL (Entity_TransformWorldToLocal @0x4c0b07) and its yaw
+		// byte is the LOCAL heading's high byte (sar 24 @0x4c0b85); the client mirrors the
+		// carrier back into its own groundEntity (@0x4c1353) — echoing 0xFFFF at a grounded
+		// client detaches + hard-snaps it to the record position (the v26 origin teleport,
+		// D-NET-151). A carrier whose pose we could not resolve (stale handle) falls back
+		// to the free-standing form.
+		const uint16_t player_carrier =
+				(e.mount_handle != 0xFFFFu) ? e.mount_handle : e.ground_handle;
 		switch (e.entity_class) {
 		case EntityClass::Player:
 			// 18-B player compact record, field sources witnessed in the case-1 write path
 			// [orig: NetPacket_SerializePlayerState @0x4C09C0 case 1]. vehicle_bone (entity+343,
 			// mounted only @0x4c0a1a) and seat_type (mount attribute bits @0x4c0a39) stay 0 —
 			// seat-bone/attribute data is not modeled on the snapshot; 0 is the witnessed
-			// unmounted value. A MOUNTED player's position is vehicle-local
-			// (Entity_TransformWorldToLocal @0x4c0afa) — deferred with mount replication; the
-			// anchor-relative world compression below is the witnessed unmounted path.
-			rec.player.vehicle_handle = e.mount_handle; // entity+0x16C / +0x28 [orig: @0x4c0a08]
-			rec.player.pos_x_compressed = cx;
-			rec.player.pos_y_compressed = cy;
-			rec.player.pos_z_compressed = cz;
-			rec.player.yaw_byte = yaw_byte_trunc;       // truncated high byte [orig: @0x4c0c5d]
+			// unmounted AND grounded-standing value (a grounded record is bone=0 seat=0 +
+			// carrier handle).
+			if (player_carrier != 0xFFFFu && e.carrier_pose_valid) {
+				const WorldPose local = network_transform_world_to_local(
+						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
+						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam), 0u);
+				rec.player.carrier_handle = player_carrier;
+				rec.player.pos_x_compressed = network_compress_fixedpoint(local.x);
+				rec.player.pos_y_compressed = network_compress_fixedpoint(local.y);
+				rec.player.pos_z_compressed = network_compress_fixedpoint(local.z);
+				// LOCAL heading = own - carrier (the transform's out[3]); the wire byte is
+				// its arithmetic high byte [orig: sar eax,18h @0x4c0b85].
+				rec.player.yaw_byte = uint8_t(
+						(uint32_t(e.euler_z) - uint32_t(e.carrier_yaw_bam)) >> 24);
+			} else {
+				rec.player.carrier_handle = 0xFFFFu;
+				rec.player.pos_x_compressed = cx;
+				rec.player.pos_y_compressed = cy;
+				rec.player.pos_z_compressed = cz;
+				rec.player.yaw_byte = yaw_byte_trunc; // truncated high byte [orig: @0x4c0c5d]
+			}
 			rec.player.pitch_byte =
 					uint8_t((uint32_t(e.pitch_bam) + 0x00800000u) >> 24); // [orig: @0x4c0c77]
 			// Movement-input byte (entity+0x12C): remote players are MOTOR-DRIVEN from this
@@ -388,17 +411,19 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 		PlayerIntent intent;
 		intent.entity_handle = hdr.handle;
 		intent.item_type_id = hdr.item_type_id;
-		intent.vehicle_handle = up.vehicle_handle;
+		intent.carrier_handle = up.carrier_handle; // ground entity — pos/heading are
+		                                           // carrier-local when set (D-NET-151)
 		intent.pos_x = up.pos_x;
 		intent.pos_y = up.pos_y;
 		intent.pos_z = up.pos_z;
 		intent.heading = up.heading;
 		intent.pitch = up.pitch;
 		intent.move_input = up.move_input_byte; // entity+0x12C — echoed in the 0x0A off-12
-		intent.flags_xor = up.flags_xor;        // bits 2-4 -> entity+0x24 (crouch/prone family)
+		intent.state_flags = up.state_flags_byte; // raw entity+0x24 low byte; bits 2-4 replace
+		                                          // ours [orig: @0x4c1e4d] (crouch/prone family)
 		intent.equipped_adm_index = up.equipped_adm_index; // entity+0x2B0 — echoed at 0x0A off-16
 		                                                   // [orig: @0x4C20A3] (D-NET-143)
-		intent.buttons = 0; // extended uplink carries flagsXor/anim-defs, not a buttons word
+		intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
 		apply_player_intent(world, intent);
 	}
 }

@@ -36,7 +36,7 @@ RecKind frame_record_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
 	switch (r.cls) {
 	case EntityClass::Player:
 		cx = r.player.pos_x_compressed; cy = r.player.pos_y_compressed;
-		cz = r.player.pos_z_compressed; parent = r.player.vehicle_handle;
+		cz = r.player.pos_z_compressed; parent = r.player.carrier_handle;
 		yaw_deg = bam_byte_to_deg(r.player.yaw_byte);
 		flags_out = r.player.state_flags;
 		break;
@@ -411,7 +411,7 @@ ReplayTimeline build_replay_timeline(
 			e.owner_session = m.session; // this entity is the uplink-sender's own player
 			// i16 heading sign-extends << 16 into a 32-bit BAM (§5.10).
 			const double up_yaw = bam32_to_deg(uint32_t(int32_t(up.heading) << 16));
-			if (is_mounted_parent(up.vehicle_handle)) {
+			if (is_mounted_parent(up.carrier_handle)) {
 				// The own-player uplink is vehicle-LOCAL when mounted too (§5.10) —
 				// defer to the same parent transform, tagged ClientUplink so the
 				// owner's projected view keeps it.
@@ -419,7 +419,7 @@ ReplayTimeline build_replay_timeline(
 				mr.handle = hdr.handle; mr.type = hdr.item_type_id;
 				mr.frame = m.frame_index;
 				mr.lx = up.pos_x; mr.ly = up.pos_y; mr.lz = up.pos_z;
-				mr.parent = up.vehicle_handle;
+				mr.parent = up.carrier_handle;
 				mr.yaw_deg = up_yaw; mr.has_yaw = true;
 				mr.source = ReplaySampleSource::ClientUplink;
 				b.mounted.push_back(mr);

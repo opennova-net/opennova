@@ -48,7 +48,7 @@ bool run_field_mapping() {
 	src_ae.pitch = 0x01000000;
 
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(src_e, src_ae);
-	if (!expect(up.vehicle_handle == 0xFFFF, "on-foot vehicle handle")) return false;
+	if (!expect(up.carrier_handle == 0xFFFF, "on-foot vehicle handle")) return false;
 	if (!expect(up.pos_x == src_ae.pos[0] && up.pos_y == src_ae.pos[1] && up.pos_z == src_ae.pos[2],
 	            "pos = live AiEntity.pos (16.16)")) return false;
 	if (!expect(up.heading == static_cast<int16_t>(src_ae.heading >> 16),
@@ -60,7 +60,7 @@ bool run_field_mapping() {
 	if (!expect(up.equipped_adm_index == 0x08,
 	            "equipped adm index carried from Entity.equipped_adm_index (D-NET-143)"))
 		return false;
-	if (!expect(up.weapon_id_0 == 0 && up.fire_counter_0 == 0,
+	if (!expect(up.priority_handle_0 == 0 && up.priority_score_0 == 0,
 	            "anti-cheat counters 0 (host receive ignores them)")) return false;
 	return true;
 }

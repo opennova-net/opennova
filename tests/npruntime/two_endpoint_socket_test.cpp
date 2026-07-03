@@ -205,7 +205,7 @@ int main() {
 
 	// ---- Phase B: in-match per-frame play — the 0x0C -> 0x0A round-trip over UDP ----
 	PlayerExtendedUplink up;
-	up.vehicle_handle = 0xFFFF;
+	up.carrier_handle = 0xFFFF;
 	up.pos_x = w::to_fixed(100.0);
 	up.pos_y = w::to_fixed(200.0);
 	up.pos_z = w::to_fixed(-50.0);

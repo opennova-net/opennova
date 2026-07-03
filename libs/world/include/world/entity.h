@@ -211,6 +211,15 @@ struct Entity {
     int8_t mount_seat = -1;
     SeatType mount_type = SeatType::None;
     bool mounted = false;
+
+    // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
+    // building floor, a vehicle deck — any pool. Retail's platform physics maintains it
+    // every tick (Flags |= 0x100000 + groundEntity = platform
+    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b3291]); our motor has no
+    // platform pass yet, so for READ-APPLIED peers apply_player_intent mirrors the
+    // carrier the owning client uplinked (§5.10; D-NET-151) and the 0x0A echo re-emits
+    // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
+    EntityHandle ground_target;         // kInvalid = free-standing
 };
 
 } // namespace opennova::world

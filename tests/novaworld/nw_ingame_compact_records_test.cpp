@@ -23,12 +23,12 @@ namespace {
 } while (0)
 
 int test_player_compact_18_bytes() {
-	// §5.10 — 18 B fixed. Build a record on-foot (vehicle_handle 0xFFFF).
+	// §5.10 — 18 B fixed. Build a record on-foot (carrier_handle 0xFFFF).
 	// vehicleBone=0, seatType=0, vehHandle=0xFFFF, posXYZ compressed, yaw/pitch,
 	// animSlot, stateFlags, weaponId, animChannelRatio, animDef, healthClass.
 	const uint8_t body[] = {
 		0x00, 0x00,             // vehicle_bone, seat_type
-		0xFF, 0xFF,             // vehicle_handle (none)
+		0xFF, 0xFF,             // carrier_handle (none)
 		0x8F, 0xBE,             // posX compressed
 		0x04, 0xB5,             // posY
 		0xD7, 0xBC,             // posZ
@@ -47,7 +47,7 @@ int test_player_compact_18_bytes() {
 	const bool ok = decode_player_compact_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 18);
-	EXPECT(rec.vehicle_handle == 0xFFFF);
+	EXPECT(rec.carrier_handle == 0xFFFF);
 	EXPECT(rec.pos_x_compressed == 0xBE8F);
 	EXPECT(rec.pos_y_compressed == 0xB504);
 	EXPECT(rec.pos_z_compressed == 0xBCD7);

@@ -410,7 +410,7 @@ std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec
 	Writer w{out};
 	w.u8(rec.vehicle_bone);       // entity+0x157
 	w.u8(rec.seat_type);          // local seat-type byte
-	w.u16(rec.vehicle_handle);    // (pool<<12)|slot or 0xFFFF
+	w.u16(rec.carrier_handle);    // (pool<<12)|slot or 0xFFFF
 	w.u16(rec.pos_x_compressed);  // CompressFixedPoint(entity+4; vehicle-local if mounted)
 	w.u16(rec.pos_y_compressed);  // entity+8
 	w.u16(rec.pos_z_compressed);  // entity+0xC
@@ -598,33 +598,34 @@ std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader
 // [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] — the 43-B extended
 // uplink body, the exact bytes decode_player_extended_uplink consumes. The host
 // driver fills PlayerExtendedUplink from the joiner's owned entity; this writes the
-// wire bytes. Positions are i32 16.16 (vehicle-local when vehicle_handle != 0xFFFF).
+// wire bytes. Positions are i32 16.16 — CARRIER-LOCAL (and heading carrier-relative)
+// when carrier_handle != 0xFFFF, absolute world otherwise (§5.10, D-NET-151).
 std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	w.u16(r.vehicle_handle);
+	w.u16(r.carrier_handle);
 	w.u32(uint32_t(r.pos_x));
 	w.u32(uint32_t(r.pos_y));
 	w.u32(uint32_t(r.pos_z));
 	w.u16(uint16_t(r.heading));
 	w.u16(uint16_t(r.pitch));
-	w.u8(r.reserved_18);
+	w.u8(r.anticheat_flags);
 	w.u8(r.move_input_byte);
-	w.u8(r.flags_xor);
+	w.u8(r.state_flags_byte);
 	w.u8(r.anim_def_1);
 	w.u8(r.anim_def_2);
 	w.u8(r.anim_def_3);
 	w.u8(r.equipped_adm_index);
 	w.u8(r.stat_byte_0);
 	w.u8(r.stat_byte_1);
-	w.u16(r.weapon_id_0);
-	w.u16(r.fire_counter_0);
-	w.u16(r.weapon_id_1);
-	w.u16(r.fire_counter_1);
-	w.u16(r.weapon_id_2);
-	w.u16(r.fire_counter_2);
-	w.u16(r.weapon_id_3);
-	w.u16(r.fire_counter_3);
+	w.u16(r.priority_handle_0);
+	w.u16(r.priority_score_0);
+	w.u16(r.priority_handle_1);
+	w.u16(r.priority_score_1);
+	w.u16(r.priority_handle_2);
+	w.u16(r.priority_score_2);
+	w.u16(r.priority_handle_3);
+	w.u16(r.priority_score_3);
 	return out;
 }
 

@@ -54,7 +54,7 @@ behavior is summarized and cited.
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Mission | [`mission/mis-format-re.md`](mission/mis-format-re.md) | partial: writer-generated subset, full `dfx2med.exe` grill pending |
-| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record; current through §5.57/§5.58 + D-NET-144 (0x0A entity loop ported, 0x0F flood closed, weapon.def/loadout + reload round-trip witnessed; open: D-NET-141..144 — the retail-join v15 ammo/reload/anim defects, 2026-07-02) |
+| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record; current through §5.59 + D-NET-151 (retail-join fidelity: D-NET-141..150 fixed + live-verified; D-NET-151 grounded-on-entity replication fixed 2026-07-03, live re-verify v27 pending; §5.10 field maps corrected — carrier = mount-else-groundEntity, state-flags replace-bits, priority pairs, recipient-eye anchor, per-pool entity strides) |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |

@@ -41,6 +41,40 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
 	return w;
 }
 
+// [orig: Entity_TransformWorldToLocal @ 0x43BB50] — see ingame_decode.h. The exact
+// transpose of the chain above, applied in reverse order (yaw, pitch, roll). The
+// disassembly stores sines scaled by -2^22 (dbl_7C57B0) and subtracts the products
+// (@0x4c... via imul/shrd-22); writing the sines positive and flipping those signs is
+// the identical arithmetic. Position only — the original's out[3..5] pose tail is
+// heading subtraction + pitch/roll pass-through, composed by callers.
+WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           uint32_t yaw_bam, uint32_t pitch_bam,
+                                           uint32_t roll_bam) {
+	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
+	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
+		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
+		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
+		c = int32_t(std::cos(a) * 4194304.0);
+	};
+	int32_t sr, cr, sp, cp, sy, cy;
+	q(roll_bam, sr, cr); q(pitch_bam, sp, cp); q(yaw_bam, sy, cy);
+	auto m = [](int32_t a, int32_t b) -> int32_t { // (a*b) >> 22 (imul + shrd ,22)
+		return int32_t((int64_t(a) * int64_t(b)) >> 22);
+	};
+	const int32_t dx = wx - px;                // @0x43bb65-0x43bb78: delta first
+	const int32_t dy = wy - py;
+	const int32_t dz = wz - pz;
+	const int32_t tx = m(dx, cy) + m(dy, sy);  // yaw^-1 about Z (@0x43bc17-0x43bc38)
+	const int32_t ty = m(dy, cy) - m(dx, sy);  //                (@0x43bc44-0x43bc88)
+	WorldPose l;
+	l.x = m(tx, cp) + m(dz, sp);               // pitch^-1 about Y (@0x43bc6e-0x43bcb2)
+	const int32_t tz = m(dz, cp) - m(tx, sp);  //                  (@0x43bc90-0x43bcae)
+	l.y = m(ty, cr) + m(tz, sr);               // roll^-1 about X (@0x43bcb4-0x43bcd0)
+	l.z = m(tz, cr) - m(ty, sr);               //                 (@0x43bcd3-0x43bcf0)
+	return l;
+}
+
 namespace {
 
 // Bounded cursor — every read is bounds-checked vs `end`. On underflow we
@@ -501,7 +535,7 @@ bool decode_player_compact_record(const uint8_t *body, size_t len,
 	Cursor c{body, body + len, true};
 	out.vehicle_bone      = c.u8();
 	out.seat_type         = c.u8();
-	out.vehicle_handle    = c.u16();
+	out.carrier_handle    = c.u16();
 	out.pos_x_compressed  = c.u16();
 	out.pos_y_compressed  = c.u16();
 	out.pos_z_compressed  = c.u16();
@@ -593,29 +627,29 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
                                    PlayerExtendedUplink &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
-	out.vehicle_handle = c.u16();
+	out.carrier_handle = c.u16();       // ground entity (any pool); 0xFFFF = free
 	out.pos_x          = int32_t(c.u32());
 	out.pos_y          = int32_t(c.u32());
 	out.pos_z          = int32_t(c.u32());
 	out.heading        = int16_t(c.u16());
 	out.pitch          = int16_t(c.u16());
-	out.reserved_18    = c.u8();
+	out.anticheat_flags  = c.u8();      // host apply discards this byte
 	out.move_input_byte  = c.u8();
-	out.flags_xor      = c.u8();
+	out.state_flags_byte = c.u8();      // raw entity+0x24 low byte [orig: replace-bits apply @0x4c1e4d]
 	out.anim_def_1     = c.u8();
 	out.anim_def_2     = c.u8();
 	out.anim_def_3     = c.u8();
 	out.equipped_adm_index = c.u8(); // entity+0x2B0 [orig: case-4 store @0x4C20A3]
 	out.stat_byte_0    = c.u8();
 	out.stat_byte_1    = c.u8();
-	out.weapon_id_0    = c.u16();
-	out.fire_counter_0 = c.u16();
-	out.weapon_id_1    = c.u16();
-	out.fire_counter_1 = c.u16();
-	out.weapon_id_2    = c.u16();
-	out.fire_counter_2 = c.u16();
-	out.weapon_id_3    = c.u16();
-	out.fire_counter_3 = c.u16();
+	out.priority_handle_0 = c.u16();
+	out.priority_score_0  = c.u16();
+	out.priority_handle_1 = c.u16();
+	out.priority_score_1  = c.u16();
+	out.priority_handle_2 = c.u16();
+	out.priority_score_2  = c.u16();
+	out.priority_handle_3 = c.u16();
+	out.priority_score_3  = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 43;

@@ -87,9 +87,27 @@ struct GameEntitySnapshot {
 	// [orig: @0x4c0c7d — masking is read-side only: local 0xE1 / remote 0xFD]. Also the vehicle
 	// compact record's flags byte [orig: @0x460d22].
 	uint8_t state_flags = 0;
-	// The player record's off-2 anchor handle: the RIDDEN vehicle (entity+0x16C) when mounted,
-	// else the parent/ground entity (entity+0x28, unmodeled -> 0xFFFF) [orig: @0x4c0a08/@0x4c0a20].
+	// The RIDDEN vehicle (entity+0x16C) when mounted, else 0xFFFF. The player record's carrier
+	// select prefers this over ground_handle [orig: op1 @0x4c0a08 — mount wins].
 	uint16_t mount_handle = 0xFFFF;
+	// The standing-on carrier (entity+0x28 groundEntity — building floor / vehicle deck, any
+	// pool), else 0xFFFF. When either handle is live the player record's position is
+	// CARRIER-LOCAL (Entity_TransformWorldToLocal @0x43BB50) with a carrier-relative yaw byte,
+	// and the client mirrors the echoed carrier back into its own groundEntity (@0x4c1353) —
+	// echoing 0xFFFF at a grounded client detaches and hard-snaps it (D-NET-151). Filled for
+	// read-applied peers from their §5.10 uplink (retail derives it from platform physics
+	// @0x4b3291, which our motor does not model yet).
+	uint16_t ground_handle = 0xFFFF;
+	// Resolved carrier POSE for the record builder (the carrier may be a pool-2 static, which
+	// has no snapshot of its own in the 0x0A entity list — the World-aware snapshot pass
+	// resolves the pose from the registry instead). Valid only when carrier_pose_valid; the
+	// pose is the carrier's entity+4..+0x18 sextet our world models (yaw+pitch; roll
+	// unmodeled = 0). Selection mirrors op1: mount_handle wins over ground_handle
+	// [orig: @0x4c0a08].
+	bool carrier_pose_valid = false;
+	int32_t carrier_x = 0, carrier_y = 0, carrier_z = 0; // 16.16 world
+	int32_t carrier_yaw_bam = 0;
+	int32_t carrier_pitch_bam = 0;
 	// Entity Health (entity+286). The §5.10 player compact record's "health classification" byte
 	// (field 17) is quantized from this against health_max — see health_classification_byte
 	// [orig: Entity_GetHealthClassification @ 0x4AD4E0]. A living entity MUST replicate a non-zero

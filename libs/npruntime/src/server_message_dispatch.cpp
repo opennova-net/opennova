@@ -395,7 +395,7 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 			PreSpawnJoinerPose &pose = st.pre_spawn_pose;
 			pose.entity_handle = hdr.handle;
 			pose.item_type_id = hdr.item_type_id;
-			pose.vehicle_handle = uplink.vehicle_handle;
+			pose.carrier_handle = uplink.carrier_handle;
 			pose.pos_x = static_cast<uint32_t>(uplink.pos_x);
 			pose.pos_y = static_cast<uint32_t>(uplink.pos_y);
 			pose.pos_z = static_cast<uint32_t>(uplink.pos_z);

@@ -92,7 +92,7 @@ struct PreSpawnJoinerPose {
 	bool valid = false;                // a pre-spawn C2S 0x0C has been cached
 	uint16_t entity_handle = 0;
 	uint16_t item_type_id = 0;
-	uint16_t vehicle_handle = 0xFFFF;
+	uint16_t carrier_handle = 0xFFFF;
 	uint32_t pos_x = 0;
 	uint32_t pos_y = 0;
 	uint32_t pos_z = 0;

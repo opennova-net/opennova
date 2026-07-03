@@ -55,19 +55,22 @@ int32_t codec_recon(int32_t wire, int32_t anchor) {
 }
 
 // Build a 48-byte C2S 0x0C extended uplink (5-B sub-header + 43-B body) from the encoders.
+// carrier != 0xFFFF makes x/y/z + heading CARRIER-LOCAL (§5.10 grounded form, D-NET-151).
 std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32_t z,
-                                    int16_t heading, int16_t pitch) {
+                                    int16_t heading, int16_t pitch,
+                                    uint16_t carrier = 0xFFFF, uint8_t state_flags = 0) {
 	nw::EntityPacketSubHeader hdr;
 	hdr.handle = handle;
 	hdr.item_type_id = 0x14B9; // player infantry
 	hdr.sub_op = 0x0A;         // extended (type 10)
 	nw::PlayerExtendedUplink up;
-	up.vehicle_handle = 0xFFFF; // unmounted
+	up.carrier_handle = carrier;
 	up.pos_x = x;
 	up.pos_y = y;
 	up.pos_z = z;
 	up.heading = heading;
 	up.pitch = pitch;
+	up.state_flags_byte = state_flags;
 	std::vector<uint8_t> body = nw::encode_entity_packet_sub_header(hdr);
 	const std::vector<uint8_t> tail = nw::encode_player_extended_uplink(up);
 	body.insert(body.end(), tail.begin(), tail.end());
@@ -678,7 +681,7 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
 	if (!expect(rec->player.move_input_byte == 0x21, "movement-input byte echoed")) return false;
 	if (!expect((rec->player.state_flags & 0x40) != 0, "state flags carried unmasked")) return false;
-	if (!expect(rec->player.vehicle_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
+	if (!expect(rec->player.carrier_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
 	// ADM anim-def index (off-16) = the entity's equipped-weapon adm index (the uplink echo /
 	// spawn default); 0 is a VALID adm entry — the none sentinel is 0xFF [orig: echo @0x4C20A3,
 	// apply-skip @0x4c11f2] (D-NET-143).
@@ -693,6 +696,146 @@ bool run_0a_player_record_field_sources() {
 	return true;
 }
 
+// (j) D-NET-151 — the grounded-on-entity replication loop. A joiner standing ON another
+//     entity (building floor / vehicle deck) uplinks carrier_handle + CARRIER-LOCAL pos and
+//     heading [orig: op3 reads groundEntity(+0x28); the extended body's pose is
+//     Entity_TransformWorldToLocal output]. The host apply must lift local -> world through
+//     the carrier pose [orig: op4 @0x4c1de1 Entity_TransformLocalToWorld; heading add
+//     @0x43be7e], REPLACE flags bits 2-4 from the raw wire byte [orig: @0x4c1e4d], and the
+//     0x0A echo must re-emit the carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /
+//     @0x4c0b07 / sar-24 yaw @0x4c0b85] — echoing 0xFFFF at a grounded retail client
+//     detaches + hard-snaps it to local-as-world coords (the v26 origin teleport).
+bool run_grounded_uplink_apply_and_echo() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(2, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+
+	// The carrier: a pool-2 building at (100, 200, 10), mission yaw 90 -> engine BAM 0
+	// (identity rotation — every 22-bit product below is exact).
+	w::EntityHandle bld_h;
+	{
+		w::Entity bld;
+		bld.kind = w::EntityKind::Building;
+		bld.item_id = 0x044c;
+		bld.position = {100.0f, 200.0f, 10.0f};
+		bld.yaw = 90;
+		bld_h = world.registry.spawn(2, bld);
+	}
+	if (!expect(bld_h.valid() && bld_h.pool() == 2, "pool-2 carrier spawned")) return false;
+
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel self_ch, join_ch;
+	conns.push_back(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&join_ch, ns::TransportMode::Client, {}, 0});
+	const w::EntityHandle joiner_h = ns::test::admit_peer(
+			world, conns, 1, player_spawn({1.0f, 1.0f, 1.0f}, 0, 0xFFF1));
+	if (!expect(joiner_h.valid(), "joiner admitted")) return false;
+	{
+		// Pre-set a stance bit INSIDE the replace mask: the uplink below carries bit 4 only,
+		// so a faithful REPLACE clears bit 3; the old xor-delta would have kept it.
+		w::Entity *je = world.registry.get(joiner_h);
+		je->flags |= 0x08u;
+	}
+
+	// Grounded uplink: local (2.0, 0.5, 1.0) on the building, local heading 0x2000<<16
+	// (mission yaw 45 after the identity-carrier add), flags byte bit 4.
+	const int32_t lx = w::to_fixed(2.0), ly = w::to_fixed(0.5), lz = w::to_fixed(1.0);
+	join_ch.client_send(0x0C, make_0c_uplink(joiner_h.packed, lx, ly, lz, 0x2000, 0,
+	                                         bld_h.packed, /*state_flags=*/0x10));
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
+
+	// (1) HOST APPLY: world pos = carrier ⊕ local (identity rotation -> exact adds).
+	const w::Entity *je = world.registry.get(joiner_h);
+	if (!expect(je != nullptr, "joiner entity present")) return false;
+	if (!expect(je->position.x == 102.0f && je->position.y == 200.5f && je->position.z == 11.0f,
+	            "grounded uplink lifted local -> world through the carrier pose"))
+		return false;
+	if (!expect(je->yaw == 45, "grounded heading composed with the carrier heading")) return false;
+	if (!expect(je->ground_target == bld_h, "uplinked carrier mirrored into ground_target"))
+		return false;
+	if (!expect((je->flags & 0x1Cu) == 0x10u,
+	            "flags bits 2-4 REPLACED from the wire byte (bit 3 cleared, not xor-kept)"))
+		return false;
+
+	// (2) ECHO: the joiner's 0x0A record re-emits the carrier + compressed LOCAL pos +
+	// local yaw byte (single-bit locals survive the 12-bit-mantissa compressor exactly).
+	ns::test::emit_all(world, conns, nw::PlayerReplicationState{});
+	ns::Datagram dg;
+	if (!expect(join_ch.client_recv(dg), "joiner 0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "0x0A frame decodes")) return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == joiner_h.packed) rec = &r;
+	if (!expect(rec != nullptr, "joiner player record present")) return false;
+	if (!expect(rec->player.carrier_handle == bld_h.packed,
+	            "record echoes the ground carrier (echoing 0xFFFF is the v26 snap)"))
+		return false;
+	if (!expect(nw::network_decompress_fixedpoint(rec->player.pos_x_compressed) == lx &&
+	                    nw::network_decompress_fixedpoint(rec->player.pos_y_compressed) == ly &&
+	                    nw::network_decompress_fixedpoint(rec->player.pos_z_compressed) == lz,
+	            "record position is the CARRIER-LOCAL offset, not anchor-relative world"))
+		return false;
+	// Local heading hi-byte: yaw 45 -> engine BAM (90-45)*11930464 = 0x1FFFFFE0; carrier BAM 0.
+	if (!expect(rec->player.yaw_byte == 0x1F, "yaw byte is the LOCAL heading's high byte"))
+		return false;
+
+	// (3) The free-standing form is unchanged: a later 0xFFFF uplink returns to world coords.
+	join_ch.client_send(0x0C, make_0c_uplink(joiner_h.packed, w::to_fixed(50.0),
+	                                         w::to_fixed(60.0), w::to_fixed(12.0), 0x2000, 0));
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
+	je = world.registry.get(joiner_h);
+	if (!expect(je->position.x == 50.0f && je->position.y == 60.0f && je->position.z == 12.0f,
+	            "free-standing uplink applies world coords raw")) return false;
+	if (!expect(!je->ground_target.valid(), "ground_target cleared by a free-standing uplink"))
+		return false;
+	std::printf("PASS grounded_uplink_apply_and_echo\n");
+	return true;
+}
+
+// (k) The 22-bit pose-transform pair inverts: world_to_local(local_to_world(v)) recovers v
+//     exactly at identity and within fixed-point rounding for an arbitrary pose
+//     [orig: Entity_TransformLocalToWorld @0x43BD00 / Entity_TransformWorldToLocal @0x43BB50].
+bool run_pose_transform_roundtrip() {
+	// Identity pose: exact.
+	{
+		const nw::WorldPose w = nw::network_transform_local_to_world(
+				w::to_fixed(2.0), w::to_fixed(0.5), w::to_fixed(1.0), w::to_fixed(100.0),
+				w::to_fixed(200.0), w::to_fixed(10.0), 0u, 0u, 0u);
+		if (!expect(w.x == w::to_fixed(102.0) && w.y == w::to_fixed(200.5) &&
+		                    w.z == w::to_fixed(11.0),
+		            "identity-pose lift is exact")) return false;
+		const nw::WorldPose l = nw::network_transform_world_to_local(
+				w.x, w.y, w.z, w::to_fixed(100.0), w::to_fixed(200.0), w::to_fixed(10.0), 0u,
+				0u, 0u);
+		if (!expect(l.x == w::to_fixed(2.0) && l.y == w::to_fixed(0.5) && l.z == w::to_fixed(1.0),
+		            "identity-pose round-trip is exact")) return false;
+	}
+	// Arbitrary pose (yaw+pitch+roll): round-trips within 22-bit chained-mul rounding.
+	{
+		const uint32_t yaw = 0x1F340000u, pitch = 0x02ABCDEFu, roll = 0xFE000123u;
+		const int32_t px = w::to_fixed(-433.7), py = w::to_fixed(371.5), pz = w::to_fixed(12.4);
+		const int32_t lx = w::to_fixed(3.25), ly = w::to_fixed(-1.5), lz = w::to_fixed(0.75);
+		const nw::WorldPose w2 = nw::network_transform_local_to_world(lx, ly, lz, px, py, pz,
+		                                                              yaw, pitch, roll);
+		const nw::WorldPose l2 = nw::network_transform_world_to_local(w2.x, w2.y, w2.z, px, py,
+		                                                              pz, yaw, pitch, roll);
+		const auto near_eq = [](int32_t a, int32_t b) {
+			const int32_t d = a - b;
+			return d >= -4 && d <= 4; // <= 4/65536 world units of chained rounding
+		};
+		if (!expect(near_eq(l2.x, lx) && near_eq(l2.y, ly) && near_eq(l2.z, lz),
+		            "arbitrary-pose round-trip within fixed-point rounding")) return false;
+	}
+	std::printf("PASS pose_transform_roundtrip\n");
+	return true;
+}
+
 } // namespace
 
 int main() {
@@ -700,7 +843,8 @@ int main() {
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
-	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources();
+	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
+	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

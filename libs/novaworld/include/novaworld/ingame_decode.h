@@ -78,6 +78,22 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam);
 
+// Project a WORLD position into a carrier's local frame — the exact inverse of
+// network_transform_local_to_world. [orig: Entity_TransformWorldToLocal @ 0x43BB50 —
+// the op1/op3 write paths of NetPacket_SerializePlayerState @ 0x4C09C0 run it against
+// the mount (+0x16C) or ground entity (+0x28) before compressing a carrier-relative
+// record]: delta = world - carrier position, then the transposed rotation in reverse
+// order — yaw about Z, pitch about Y, roll about X — in 22-bit fixed-point sin/cos.
+// The binary folds the inverse-rotation sign into a -2^22 sine scale (dbl_7C57B0);
+// this port keeps +2^22 sines and writes the subtractions out, which is the same
+// arithmetic. The original is a 6-dword pose transform: out[3] = heading - carrier
+// heading, out[4]/out[5] pitch/roll pass through untouched (@0x43bb7b-0x43bb8d) —
+// callers compose headings with plain BAM subtraction, so this returns position only.
+WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           uint32_t yaw_bam, uint32_t pitch_bam,
+                                           uint32_t roll_bam);
+
 // One record from a S2C 0x0D pool-entity spawn batch (§5.11).
 struct PoolSpawnRecord {
 	uint16_t spawn_flags = 0;
@@ -441,13 +457,22 @@ bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
 // [orig: NetPacket_SerializePlayerState case 1/2 @ 0x4C09C0]. Used by items
 // with `ai_function plyr` — the local player.
 struct PlayerCompactRecord {
-	uint8_t  vehicle_bone = 0;        // entity+0x157
-	uint8_t  seat_type = 0;           // local seat-type byte
-	uint16_t vehicle_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
-	uint16_t pos_x_compressed = 0;    // entity+4   (vehicle-local if mounted)
+	uint8_t  vehicle_bone = 0;        // entity+0x157 attachBoneId (0 unless seat-mounted @0x4c0a1a)
+	uint8_t  seat_type = 0;           // seat-attribute byte (0 unless seat-mounted @0x4c0a50)
+	uint16_t carrier_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none. op1 select: mount (+0x16C)
+	                                  // wins, else groundEntity (+0x28) — a grounded-standing
+	                                  // player echoes its floor/deck with bone=0 seat=0
+	                                  // [orig: @0x4c0a08]. The client mirrors this back into
+	                                  // its own groundEntity (@0x4c1353). (Renamed from the
+	                                  // vehicle_handle misnomer — D-NET-151.)
+	uint16_t pos_x_compressed = 0;    // entity+4 — CARRIER-LOCAL when carrier_handle != none
+	                                  // (Entity_TransformWorldToLocal @0x4c0b07), else world
+	                                  // minus the frame anchor (g_priority_ref_*)
 	uint16_t pos_y_compressed = 0;    // entity+8
 	uint16_t pos_z_compressed = 0;    // entity+0xC
-	uint8_t  yaw_byte = 0;            // high byte of 32-bit BAM -> entity+0x10 (heading) on read [D-NET-57]
+	uint8_t  yaw_byte = 0;            // high byte of 32-bit BAM -> entity+0x10 (heading) on read
+	                                  // [D-NET-57]; CARRIER-RELATIVE (local heading, sar 24
+	                                  // @0x4c0b85) when carrier_handle != none
 	uint8_t  pitch_byte = 0;          // -> entity+0x14 (pitch) on read [D-NET-57]
 	uint8_t  move_input_byte = 0;     // the movement-INPUT bitfield, entity+0x12C low byte — remote
 	                                  // players are motor-driven from replicated input; the read
@@ -858,24 +883,45 @@ bool decode_entity_packet_sub_header(const uint8_t *body, size_t len,
 // the receiver and discarded (cursor-advance only) — stored here for the
 // re-emitter's benefit.
 //
-// Position fields are 16.16 fixed-point. Vehicle-LOCAL when `vehicle_handle !=
+// Position fields are 16.16 fixed-point. Vehicle-LOCAL when `carrier_handle !=
 // 0xFFFF` (the host's case-4 path adds map origin only on the unmounted branch).
 //
 // The 8 trailing u16 pairs are the host-validated anti-cheat block: 4 ×
 // (weapon_id, fire_counter). The host compares these against its own per-slot
 // counters to detect shot/hit tally tampering.
 struct PlayerExtendedUplink {
-	uint16_t vehicle_handle = 0xFFFF;  // pool<<12|slot; 0xFFFF=none
-	int32_t  pos_x = 0;                // entity+0x234 / +4 (vehicle-local if mounted, else world + map_origin)
-	int32_t  pos_y = 0;                // entity+0x238 / +8
-	int32_t  pos_z = 0;                // entity+0x23C / +0xC
-	int16_t  heading = 0;              // entity+0x240 (sign-ext ×0x10000 = 32-bit BAM)
-	int16_t  pitch   = 0;              // entity+0x244 (sign-ext ×0x10000)
-	uint8_t  reserved_18 = 0;          // cursor advance, no read on host
+	uint16_t carrier_handle = 0xFFFF;  // pool<<12|slot; 0xFFFF=none. The sender's GROUND
+	                                   // entity (+0x28) — building floor, vehicle deck; ANY
+	                                   // pool 0-4, pool-2 statics included [orig: op3 reads
+	                                   // entity+0x28 at its case head (the same field op1
+	                                   // reads @0x4c0a08); the op4 apply resolves it against
+	                                   // g_pool_list @0x4c1d07-0x4c1d26]. Renamed from the
+	                                   // carrier_handle misnomer (witness 2026-07-03,
+	                                   // D-NET-151).
+	int32_t  pos_x = 0;                // entity+4/+8/+0xC — ABSOLUTE world 16.16 when free
+	int32_t  pos_y = 0;                // (no map-origin add); CARRIER-LOCAL when
+	int32_t  pos_z = 0;                // carrier_handle != 0xFFFF (Entity_TransformWorldToLocal
+	                                   // @0x43BB50 on write / LocalToWorld @0x43BD00 on apply)
+	int16_t  heading = 0;              // entity+0x10 hi-word; CARRIER-RELATIVE when grounded
+	                                   // (transform out[3] = heading - carrier heading; the
+	                                   // apply re-adds the carrier heading @0x43be7e)
+	int16_t  pitch   = 0;              // entity+0x14 hi-word (pose pass-through, never local)
+	uint8_t  anticheat_flags = 0;      // the sender's rotating self-check accumulator
+	                                   // (IsDebuggerPresent / D3D9-hook / speed checks — the
+	                                   // op3 dword_B5ABA8 counter switch); the op4 apply
+	                                   // advances the cursor WITHOUT storing it (the byte
+	                                   // right after the pose block) — renamed from
+	                                   // reserved_18, same no-read behavior
 	uint8_t  move_input_byte = 0;      // entity+0x12C low byte — the movement-INPUT bitfield the
 	                                   // client reports for its own player (renamed from the
 	                                   // anim_slot_low misnomer; witness 2026-07-02)
-	uint8_t  flags_xor = 0;            // bits 2-4 XOR'd into entity+0x24
+	uint8_t  state_flags_byte = 0;     // the RAW entity+0x24 (Flags) low byte, written verbatim
+	                                   // by op3; the apply REPLACES bits 2-4 of the host
+	                                   // entity's Flags: `flags ^= (flags ^ wire) & 0x1C`
+	                                   // [orig: @0x4c1e4d]. NOT an xor-delta — the old
+	                                   // flags_xor name and the xor-apply it induced were
+	                                   // wrong (witness 2026-07-03, D-NET-151; the crouch/
+	                                   // prone stance family is bits 2-4).
 	uint8_t  anim_def_1 = 0;           // entity+0x130
 	uint8_t  anim_def_2 = 0;           // entity+0x131
 	uint8_t  anim_def_3 = 0;           // entity+0x132
@@ -887,17 +933,20 @@ struct PlayerExtendedUplink {
 	uint8_t  stat_byte_0 = 0;          // playerSlot+0x15F78
 	uint8_t  stat_byte_1 = 0;          // playerSlot+0x15F79
 
-	// Anti-cheat block: 4 × (weapon_id_u16, fire_counter_u16). On the wire
-	// every counter is a u16; the host stores it zero-extended into a u32
-	// field (playerSlot+0x17094 / +0x17098 / +0x1709C / +0x170A0).
-	uint16_t weapon_id_0 = 0;          // playerSlot+0x1708A
-	uint16_t fire_counter_0 = 0;       // playerSlot+0x17094 (zero-ext)
-	uint16_t weapon_id_1 = 0;          // playerSlot+0x1708C
-	uint16_t fire_counter_1 = 0;       // playerSlot+0x17098 (zero-ext)
-	uint16_t weapon_id_2 = 0;          // playerSlot+0x1708E
-	uint16_t fire_counter_2 = 0;       // playerSlot+0x1709C (zero-ext)
-	uint16_t weapon_id_3 = 0;          // playerSlot+0x17090
-	uint16_t fire_counter_3 = 0;       // playerSlot+0x170A0 (zero-ext)
+	// Entity-priority feedback: 4 × (handle_u16, score_u16) — the sender's top-4
+	// interest pairs from Server_BuildEntityPriorityListForPlayer(entity, .., 4)
+	// [orig: op3 call @0x4c1be9], stored by the host at playerSlot+0x1708A..+0x170A0
+	// (scores zero-extended to u32). The old weapon_id/fire_counter names were a
+	// decode-era guess — v26 shows the ridden buggy's handle scored first while
+	// standing on it (witness 2026-07-03, D-NET-151).
+	uint16_t priority_handle_0 = 0;    // playerSlot+0x1708A
+	uint16_t priority_score_0 = 0;     // playerSlot+0x17094 (zero-ext)
+	uint16_t priority_handle_1 = 0;    // playerSlot+0x1708C
+	uint16_t priority_score_1 = 0;     // playerSlot+0x17098 (zero-ext)
+	uint16_t priority_handle_2 = 0;    // playerSlot+0x1708E
+	uint16_t priority_score_2 = 0;     // playerSlot+0x1709C (zero-ext)
+	uint16_t priority_handle_3 = 0;    // playerSlot+0x17090
+	uint16_t priority_score_3 = 0;     // playerSlot+0x170A0 (zero-ext)
 };
 
 // Decode a 43-B extended uplink body (the bytes AFTER the 5-byte sub-header).

@@ -2,6 +2,7 @@
 
 #include <cmath>      // std::lround
 
+#include <novaworld/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <world/geom.h>        // to_fixed / from_fixed
 #include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)
@@ -115,6 +116,10 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.equipped_adm_index = e.equipped_adm_index;
 	s.state_flags = static_cast<uint8_t>(e.flags & 0xFF); // entity+0x24 low byte, unmasked
 	s.mount_handle = (e.mounted && e.mount_target.valid()) ? e.mount_target.packed : 0xFFFFu;
+	// entity+0x28 groundEntity — the standing-on carrier the player record echoes when not
+	// mounted [orig: op1 @0x4c0a08 reads +0x28 as the default carrier]. Mirrored from the
+	// owner's uplink for read-applied peers (apply_player_intent; D-NET-151).
+	s.ground_handle = e.ground_target.valid() ? e.ground_target.packed : 0xFFFFu;
 	return s;
 }
 
@@ -123,6 +128,28 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 	w.registry.for_each([&](const world::Entity &e) {
 		GameEntitySnapshot s = snapshot_of(e);
 		if (s.entity_class == EntityClass::Unknown) return; // no 0x0A compact form
+		// Resolve the record carrier's pose here, where the registry is in reach — the
+		// carrier is often a pool-2 STATIC (building) with no snapshot of its own in the
+		// 0x0A list. Mount wins over ground [orig: op1 @0x4c0a08]; a stale handle simply
+		// leaves the pose invalid and the record falls back to the free-standing form.
+		const uint16_t carrier =
+				s.mount_handle != 0xFFFFu ? s.mount_handle : s.ground_handle;
+		if (carrier != 0xFFFFu) {
+			if (const world::Entity *c =
+			            w.registry.get(world::EntityHandle{carrier})) {
+				constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
+				s.carrier_pose_valid = true;
+				s.carrier_x = world::to_fixed(c->position.x);
+				s.carrier_y = world::to_fixed(c->position.y);
+				s.carrier_z = world::to_fixed(c->position.z);
+				// Same engine-frame conventions as snapshot_of: yaw is (90 - mission)
+				// framed, pitch a pure widen (D-NET-86).
+				s.carrier_yaw_bam = static_cast<int32_t>(
+						static_cast<int64_t>(90 - c->yaw) * kBamPerDegree);
+				s.carrier_pitch_bam = static_cast<int32_t>(
+						static_cast<int64_t>(c->pitch) * kBamPerDegree);
+			}
+		}
 		out.push_back(s);
 	});
 	return out;
@@ -424,18 +451,57 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// and << 16 = a full 32-bit BAM — a PURE widen, NOT the (90 - yaw) mission framing the
 	// FORWARD snapshot_of applies (the joiner serialized its live entity+0x10, already
 	// engine-framed). [orig: case 4 @0x4c1da6 `movsx eax, ax; shl eax, 10h` / @0x4c1dca.]
-	const int32_t heading_bam = static_cast<int32_t>(intent.heading) << 16;
+	int32_t heading_bam = static_cast<int32_t>(intent.heading) << 16;
 	const int32_t pitch_bam = static_cast<int32_t>(intent.pitch) << 16;
+
+	// Grounded branch (D-NET-151): carrier_handle != 0xFFFF means the sender stands ON
+	// another entity (building floor / vehicle deck — any pool) and pos/heading are
+	// CARRIER-LOCAL. Resolve the carrier and lift local -> world with the carrier's pose;
+	// the heading composes by plain BAM addition (the original transform's out[3] =
+	// local[3] + carrier[3], pitch passes through) [orig: case 4 resolve @0x4c1d07-0x4c1d26,
+	// Entity_TransformLocalToWorld call @0x4c1de1, heading add @0x43be7e]. An unresolvable
+	// carrier applies the local values RAW — exactly the original's null-carrier leg (no
+	// transform, no rejection); our modeled carrier pose is yaw+pitch (roll unmodeled = 0).
+	int32_t wire_x = intent.pos_x, wire_y = intent.pos_y, wire_z = intent.pos_z;
+	const bool grounded = intent.carrier_handle != 0xFFFFu;
+	if (grounded) {
+		if (const world::Entity *carrier = world.registry.get(
+		            world::EntityHandle{static_cast<uint16_t>(intent.carrier_handle)})) {
+			const int32_t carrier_yaw_bam = engine_heading_bam(carrier->yaw);
+			const WorldPose w = network_transform_local_to_world(
+					intent.pos_x, intent.pos_y, intent.pos_z,
+					world::to_fixed(carrier->position.x),
+					world::to_fixed(carrier->position.y),
+					world::to_fixed(carrier->position.z),
+					static_cast<uint32_t>(carrier_yaw_bam),
+					static_cast<uint32_t>(static_cast<int64_t>(carrier->pitch) * 11930464),
+					0u);
+			wire_x = w.x;
+			wire_y = w.y;
+			wire_z = w.z;
+			heading_bam += carrier_yaw_bam; // [orig: out[3] = ref[3] + local[3] @0x43be7e]
+		}
+	}
+
+	// Mirror the uplinked ground link so the 0x0A echo re-emits it (the client stores its
+	// own record's carrier back into groundEntity(+0x28) @0x4c1353 and DETACH-corrects on a
+	// mismatch — echoing 0xFFFF at a grounded client is what snapped it, D-NET-151). Retail
+	// derives +0x28 from its own platform physics [orig: @0x4b3291]; our motor has no
+	// platform pass, so the owner's uplink is the authoritative source for read-applied
+	// peers (divergence note in the D-NET-151 entry).
+	ent->ground_target = grounded ? world::EntityHandle{static_cast<uint16_t>(
+	                                        intent.carrier_handle)}
+	                              : world::EntityHandle{};
 
 	// 4. SNAP the registry Entity — the store snapshot_of reads and the S2C 0x0A frame
 	//    re-broadcasts. The inverse of snapshot_of's two-store read at the wire boundary.
 	//    [orig: case 4 live-pos snap @0x4c2084-0x4c208e + live orientation mirror
-	//    @0x4c206a/@0x4c206d.] Extended-wire position is ABSOLUTE world (no map-origin add
-	//    on receive); the mounted vehicle-local transform (vehicle_handle != 0xFFFF) is a
-	//    tracked deferral [orig: Entity_TransformLocalToWorld @0x43BD00].
-	ent->position.x = static_cast<float>(world::from_fixed(intent.pos_x));
-	ent->position.y = static_cast<float>(world::from_fixed(intent.pos_y));
-	ent->position.z = static_cast<float>(world::from_fixed(intent.pos_z));
+	//    @0x4c206a/@0x4c206d.] Free-standing wire position is ABSOLUTE world (no
+	//    map-origin add on receive); the grounded branch above already lifted local ->
+	//    world.
+	ent->position.x = static_cast<float>(world::from_fixed(wire_x));
+	ent->position.y = static_cast<float>(world::from_fixed(wire_y));
+	ent->position.z = static_cast<float>(world::from_fixed(wire_z));
 	// BAM32 -> mission yaw degrees: yaw = 90 - bam / kBamPerDegree (the exact inverse of
 	// snapshot_of's `(90 - yaw) * kBamPerDegree`), normalized into [0, 360).
 	constexpr double kBamPerDegree = 11930464.0; // 2^32 / 360 (matches snapshot_of)
@@ -444,11 +510,13 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 
 	// Ingest the uplinked wire-state bytes the 0x0A echo re-broadcasts (the faithful
 	// uplink -> entity -> 0x0A loop): the +0x12C movement-input byte [orig: case-4 store; the
-	// case-2 remote apply @0x4c11ec motor-drives peers from it] and the flags-xor byte —
-	// bits 2-4 of entity+0x24 [orig: case-4 apply; §5.10 extended-uplink field map]. Without
-	// this the echo re-emits zeros and remote observers see the peer frozen at idle.
+	// case-2 remote apply @0x4c11ec motor-drives peers from it] and the state-flags byte —
+	// the RAW entity+0x24 low byte whose bits 2-4 REPLACE ours (crouch/prone family)
+	// [orig: case-4 apply @0x4c1e4d `flags ^= (flags ^ wire) & 0x1C` — the previous
+	// xor-delta apply corrupted already-set stance bits; D-NET-151]. Without this the echo
+	// re-emits zeros and remote observers see the peer frozen at idle.
 	ent->net_move_input = intent.move_input;
-	ent->flags ^= (static_cast<uint32_t>(intent.flags_xor) & 0x1Cu);
+	ent->flags ^= (ent->flags ^ static_cast<uint32_t>(intent.state_flags)) & 0x1Cu;
 
 	// Equipped-weapon adm index (entity+0x2B0), the 0x0A off-16 echo source. Retail gates the
 	// ingest by AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; a table-less world
@@ -470,14 +538,14 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	if (world.ai != nullptr) {
 		if (world::AiEntity *ae = world.ai->for_handle(ent->handle)) {
 			ae->net_is_remote_peer = true;
-			ae->pos[0] = intent.pos_x; // live +4/+8/+0xC
-			ae->pos[1] = intent.pos_y;
-			ae->pos[2] = intent.pos_z;
-			ae->heading = heading_bam; // live +0x10
+			ae->pos[0] = wire_x; // live +4/+8/+0xC (world — the grounded branch already lifted)
+			ae->pos[1] = wire_y;
+			ae->pos[2] = wire_z;
+			ae->heading = heading_bam; // live +0x10 (carrier-composed when grounded)
 			ae->pitch = pitch_bam;     // live +0x14
-			ae->net_smooth_target[0] = intent.pos_x; // +0x234
-			ae->net_smooth_target[1] = intent.pos_y; // +0x238
-			ae->net_smooth_target[2] = intent.pos_z; // +0x23C
+			ae->net_smooth_target[0] = wire_x; // +0x234
+			ae->net_smooth_target[1] = wire_y; // +0x238
+			ae->net_smooth_target[2] = wire_z; // +0x23C
 			ae->net_smooth_heading = heading_bam;    // +0x240
 			ae->net_smooth_pitch = pitch_bam;        // +0x244
 			ae->net_interp_progress = 0;             // +0x27C reset
@@ -487,8 +555,12 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 }
 
 PlayerExtendedUplink build_player_uplink(const world::Entity &e, const world::AiEntity &ae) {
-	PlayerExtendedUplink up; // wire defaults: vehicle_handle 0xFFFF, all counters 0
-	up.vehicle_handle = 0xFFFFu; // on foot (mounted vehicle-local transform deferred)
+	PlayerExtendedUplink up; // wire defaults: carrier_handle 0xFFFF, all counters 0
+	// Free-standing carrier: our motor has no platform-physics pass yet (retail sets
+	// groundEntity when standing on an entity [orig: @0x4b3291] and op3 uplinks it), so our
+	// own player always reports free-standing. World coords stay correct either way — the
+	// grounded form is a frame change, not a different position (D-NET-151 residual).
+	up.carrier_handle = 0xFFFFu;
 	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
 	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
 	// (the exact inverse of apply_player_intent's `intent.heading << 16`). [orig: case 4
