@@ -6221,7 +6221,11 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
-**D-NET-151** [reimpl divergence, FIXED 2026-07-03; live re-verify v27 pending] **The
+**D-NET-151** [reimpl divergence, FIXED 2026-07-03, **live-verified v27 (2026-07-03)**:
+user-confirmed the building/vehicle-deck run improved with no teleport reported; the v27
+dumpcap window expired before the (morning) test session, so no wire trace exists — the
+grounded exchange is pinned by the unit tests, and the next round's capture doubles as the
+wire re-verify] **The
 grounded-on-entity player replication loop was unported on BOTH host sides — the joiner's
 carrier-local uplink was applied as world coordinates and the 0x0A echo never returned the
 carrier — snapping a retail client to ~map origin the moment it stood ON another entity
@@ -6390,8 +6394,8 @@ Generator Housing flags 0x0A9), the armory `weaponByte`/`attachRef` via
 and the `scoreFlag` def-callback gate `[orig: @0x504554]`. LIVE RE-VERIFY retail-join v26
 (2026-07-03) NEGATIVE for the symptom: the 0x10 statics now stream golden-shaped (buildings
 eflags `0x04020400`, ammo/subType 0xFF), yet the stand-on-entity snap (building floors,
-vehicle decks) persists unchanged — these record fields were not the cause. Root cause
-pursued as D-NET-151 (grounded-on-entity player replication).
+vehicle decks) persisted unchanged — these record fields were not the cause. The real cause
+was D-NET-151 (grounded-on-entity player replication), fixed + live-verified v27.
 
 **D-NET-145** [reimpl divergence, FIXED 2026-07-02] **The initial-state burst's phase-8
 loadout gate had a reimpl-invented ~10 s timeout fallback that force-started the game-start

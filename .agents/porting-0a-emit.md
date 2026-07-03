@@ -47,8 +47,10 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | C2S 0x25 → S2C 0x49 reload relay | DONE (D-NET-142) | dispatch case 0x25 stages the relayed 0x49 on EVERY in-match transport incl. the requester [orig: @0x514DF0 → SendFiltered @0x4C87E0]; host-side clip bookkeeping deferred |
 | off-14/16 anim defaults (43 idle / adm index) | DONE (D-NET-143) | off-14 = 0x2B idle default; off-16 = `Entity::equipped_adm_index` (the uplink byte-24 echo — ex-`reserved_24` — category<11-gated [orig: @0x4C20A3]; spawn default = the armory's WPN_M4AUTO index [orig: @0x4B1116]) |
 | joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::player_item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
+| **grounded-on-entity carrier replication** | DONE (D-NET-151; v27 user-confirmed) | the player record's carrier = mount-else-`groundEntity` [orig: @0x4c0a08] with CARRIER-LOCAL pos + local yaw byte; the uplink apply lifts local→world via the 22-bit pose transforms [orig: @0x4c1de1/@0x43BD00] and mirrors the carrier into `Entity::ground_target`; flags bits 2-4 are a REPLACE, not an xor [orig: @0x4c1e4d]. `apply_player_intent` + `build_0a_frame` + `NetClientView`; pinned by `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo, pose_transform_roundtrip) |
 | deploy gate / eye-pos ref / budget ramp | not ported | `emit_connection_s2c` anchors to entity pos, no `state==6` gate |
 | body motor for net-snapped peers | not ported (D-NET-143 tail) | retail host SIMULATES remote players; ours net-snaps — anim STATE stays the 0x2B idle default until the motor drives peers |
+| platform physics (host-side grounding) | not ported (D-NET-151 residual) | retail sets `Flags\|=0x100000` + `groundEntity` in the collision pass [orig: @0x4b3291]; our motor has no platform pass, so OUR OWN player never reports grounded and peer ground links mirror the owner's uplink |
 
 **Round 5 (2026-07-02): D-NET-146 FIXED — the DBuggy1 shadow.** The joiner's 0x0C
 `animSlot`/`netId` are the joiner's OWN uploaded per-side character selection: 0x42 CU vars
@@ -68,12 +70,25 @@ outer 0x41/0x42/0x81/0x82 incl. the CU chunks; `NW_PP_HEXCAP_MAX` widens raw dum
 chain + deferrals (char-slot registry realloc, BMS AnimSlot promote, WAC set_ssn_anim
 target) in net-re D-NET-146.
 
-**Next (round 5 remainder):**
-- **D-NET-147** — FIXED 2026-07-03 (live teleport re-verify pending): the 0x10 flag-0x20 dword
-  is the entity FLAGS (entity+36) streamed raw — NOT a parent slot; now composed at promote
-  (BMS Indestructible/Reflective/NoShadow + Building kind) + item-traits (hp==0 → 0x4000000 +
-  subType 0xFF) and streamed with ammo (BMS byte 81) / refNum (byte 153). Deferred: sectioned
-  sectionMask rebuild, armory weaponByte/attachRef, scoreFlag gate. See net-re D-NET-147.
+**Rounds 9-10 (2026-07-03):**
+- **D-NET-147** — FIXED (0x10 statics stream golden-shaped: entity FLAGS dword raw — NOT a
+  parent slot — + ammo/refNum/subType); v26 re-verify was NEGATIVE for the teleport symptom,
+  which turned out to be D-NET-151. Deferred: sectioned sectionMask rebuild, armory
+  weaponByte/attachRef, scoreFlag gate. See net-re D-NET-147.
+- **D-NET-151** — FIXED, v27 user-confirmed (no wire trace — the capture window expired
+  before the morning test session): the building/vehicle-deck teleport was the unported
+  grounded-on-entity loop (see the table row above + net-re D-NET-151 for the full witness
+  chain). §5.10 decoder corrections rode along: `carrier_handle` (ex vehicle_handle),
+  `state_flags_byte` replace-bits (ex flags_xor xor-delta — the crouch/prone family lives in
+  those bits), `anticheat_flags` (ex reserved_18), priority `(handle,score)` pairs (ex
+  "weapon/fire counters"); the 0x0A header anchor is the recipient EYE pos [orig: @0x517bf5],
+  not a map origin; pool strides = per-pool entity struct sizes [orig: EntityPool_Allocate
+  @0x442168: 904/1360/812/988/988].
+- **NEXT = client fire (C2S 0x06)**: handler @0x513310 + `Server_ClientFiredRound @0x50baa0`
+  already decompiled, both wire codecs exist (`decode_client_fired_round`,
+  `FrameUpdate::hits` 0x0A-trailer encoder); missing = the dispatch case 0x06 + ammo model +
+  hit→damage→trailer pipeline; remaining witness = `RoundData_AddRound @0x4fdb40` + the
+  `itemDef+684` fire callback. Scope in memory `project_retail_join_0a_fidelity`.
 
 **Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
 channel ratio — remote players render idle-posed); host-side `WeaponSlot_ReloadAmmo` bookkeeping
