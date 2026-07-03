@@ -204,6 +204,26 @@ target) in net-re D-NET-146.
   leave update, remote anims move (animState varies / animRatio sweeps), standard sweep
   (0 C 0x0F, no 0xC9).
 
+- **Round 14b (2026-07-03): v32 LIVE + the same-day wire fix.** v32 verdicts: deploy
+  picker APPEARS + picks land (C 0x0E on the wire, both joiners — D-NET-156 hold chain
+  works); crouch/prone WORK (user-confirmed shadow change — the 0x1D + tail-echo fix);
+  roster contract fully wire-correct (0x04 mySlot/max=4, walk + 0xC000 removals, the
+  f=3016 join broadcast for slot 2, live 0x16 rows 1→2→3→2 with matching trailer counts)
+  — the user's "HUD only right on the final joiner" is NOT visible in the wire, re-check
+  v33; vehicle attach untestable (movement broken). **THE BUG: both joiners' C2S 0x0C
+  stopped EXACTLY at their pick frame and never resumed** (j1: trickle f=204-771 every
+  ~14f, 0x0E f=786, then zero for 3.5 min; j2 same at f=3274) — the pick sets the client's
+  dword_81474C wait-gate and the deploy-RELEASE bundle is what clears it: golden f=240018 =
+  **0x5A + 0x61 + 0x1E one datagram** (the 0x5A apply resets 81474C, §5.30). Ours sent only
+  the 0x1E → host entity pinned at the deploy spot (input=0) → rubber-band. FIXED: the 0x0E
+  success path re-sends the retained granted 0x5A + the session-seed 0x61 before the 0x1E
+  (SessionReplyState::last_loadout_reply; round_sim_test pins it). Bonus witnesses: the
+  body motor's hidden-bit skip @0x4b411b (pending player's channel frozen — golden ratio 40
+  const; our remote pass now gates on it), fresh-join deploys have NO byte13 bit-0x02 edge
+  (golden pre-deploy = 0x01 exactly), ratio 255 = retail long-idle. **NEXT = v33 live**:
+  run/strafe after deploy (0x0C resumes at ~pick+1), then the v32 checklist (buggy enter,
+  HUD 3 + leave, remote anims).
+
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
 value).** The wire has advertised AS all along; the internal "COOP" label (main_game.gd /

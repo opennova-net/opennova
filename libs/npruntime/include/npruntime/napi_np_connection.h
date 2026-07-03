@@ -140,6 +140,15 @@ struct WeaponSlotState {
 // reactive request→reply bookkeeping. [orig: per-player fields the NapiNPServerMsg_* handlers touch]
 struct SessionReplyState {
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
+	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
+	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
+	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what
+	// resumes the client's per-frame C2S 0x0C uplink [orig: Server_ProcessPlayerDeath's tail
+	// calls Server_SendWeaponSlotListToPlayer @0x502550; client NapiNPClientMsg_
+	// HandleWeaponLoadoutSync @0x4290E0 resets 81474C, §5.30; golden deploy frame 240018 =
+	// 0x5A + 0x61 + 0x1E in one datagram; v32: without it both joiners' uplinks stopped
+	// forever at the pick — the rubber-band]. (D-NET-156 tail)
+	std::vector<uint8_t> last_loadout_reply;
 	bool mission_status_received = false; // 0x0B mission-file status report seen
 	bool roster_pushed = false;           // 0x16/0x46 roster PUSHED proactively post-handshake (once) —
 	                                      // the working host pushes it before the joiner ever sends 0x0A

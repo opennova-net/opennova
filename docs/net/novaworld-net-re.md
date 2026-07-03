@@ -5612,9 +5612,16 @@ picker UI's lifetime is a per-frame SERVER signal, not a one-shot:
 3. **The pick send** `[orig: Input_HandleActionBinding case 12 @ 0x49b0c5-0x49b17b]`:
    C2S 0x0E `[i16]` = `SpawnZoneList_GetByIndex(param − 1)` converted to `pool<<12|slot`;
    param 0 → 0xFFFF, 65534 → 0xFFFE auto-pick; also clears dialogs + sets `dword_81474C = 1`.
-4. **Clear** — a successful deploy runs `Server_ProcessPlayerDeath @ 0x517740`'s deploy leg,
-   which **clears bit4 (`and 0xEF` @ 0x517791)** → the next 0x0A's flags1 bit1 drops → the
-   client closes the screen and enters the world (the hidden bit0 stops being re-ORed).
+4. **Clear + RELEASE** — a successful deploy runs `Server_ProcessPlayerDeath @ 0x517740`'s
+   deploy leg, which **clears bit4 (`and 0xEF` @ 0x517791)** → the next 0x0A's flags1 bit1
+   drops → the client closes the screen and enters the world (the hidden bit0 stops being
+   re-ORed) — **and sends the release bundle: the loadout re-send
+   (Server_SendWeaponSlotListToPlayer @ 0x502550) + the 0x61 seed (Server_SendRandomSeedToPlayer
+   @ 0x5101a0) + the 0x1E hint, one datagram (golden f=240018, after the spawn-wave countdown;
+   the pick itself drew only the 0x6E wave ack at f=238948)**. The bundle is load-bearing: the
+   pick set the client's `dword_81474C` wait-gate and the **0x5A apply is what resets it**
+   (§5.30 @ 0x4290E0) — without it the client never resumes its per-frame C2S 0x0C uplink
+   (the v32 rubber-band, D-NET-156).
 
 Reimpl: `netsim::Connection::respawn_pending` (set in `Server_BuildPlayerInfoAndAdd` iff
 `world_has_spawn_zone`, host loopback exempt; cleared by the 0x0E dispatch case) → the
@@ -7059,7 +7066,23 @@ ATTR_EWeap ctrl-seat def gates, gun-carrier traversal in the enemy-occupant scan
 record's gun seatType byte (needs carrier +0x326/+0x312 modeling) are unmodeled. Test:
 `netsim_two_peer_fanout` 0x26 attach → mounted echo → detach round-trip.
 
-**D-NET-156** [reimpl gap, FIXED 2026-07-03 (ported; verify v32)] **The deploy screen never
+**D-NET-156** [reimpl gap, FIXED 2026-07-03; **v32 LIVE: the hold/pick/release chain WORKS
+(picker appears, pick lands, C 0x0E on the wire from both joiners) but the session found the
+MISSING RELEASE BUNDLE** — the 0x0E pick sets the client's `dword_81474C` wait-gate (Input
+case 12 @ 0x49b17b) and the client STOPS its C2S 0x0C uplink at the pick frame (v32: both
+joiners' uplinks ceased exactly at their 0x0E, forever — the host-side entity pinned at the
+deploy spot with input=0 = the live rubber-band). The retail release is the deploy leg's
+bundle: **0x5A loadout re-send + 0x61 seed + 0x1E hint in ONE datagram** (golden f=240018,
+after the wave countdown; the 0x5A apply is the un-latcher — NapiNPClientMsg_
+HandleWeaponLoadoutSync @ 0x4290E0 resets 81474C on completion, §5.30). FIXED same day: the
+0x0E success path emits the retained granted 0x5A body + the session-seed 0x61 before the
+0x1E (`SessionReplyState::last_loadout_reply`; `npruntime_round_sim` pins the bundle +
+no-bundle-when-alive-deployed). Also witnessed off the v32/golden diff: the retail body
+motor skips HIDDEN entities entirely (@ 0x4b411b `test dl,1`), freezing the pending player's
+anim channel (golden ratio constant 40; ours swept to 255) — the remote anim pass now gates
+on the hidden bit. Golden also confirms fresh-join deploys produce NO byte13 bit-0x02 edge
+(pre-deploy byte13 = 0x01 exactly), and ratio 255 on long idle is retail-correct. Verify
+v33.] **The deploy screen never
 appeared on our host (v31 root cause #1: ZERO C2S 0x0E all session) — the picker is HELD
 open by the 0x0A header flags1 bit1 re-asserted EVERY frame, and ours hardcoded flags1 =
 0x00** (golden pre-0x0E flags1 histogram {0x02: 54}, post {0x00: 293, 0x02: 3}; our

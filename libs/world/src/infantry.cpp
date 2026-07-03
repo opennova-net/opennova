@@ -698,6 +698,13 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     Entity *ent = world.registry.get(e.handle);
     if (ent == nullptr) return;
 
+    // HIDDEN entities skip the whole body motor — the retail head bails on Flags bit0
+    // before any anim work, which is why a deploy-pending (hidden) player's channel is
+    // FROZEN on the wire (golden pre-deploy ratio constant at 40; ours swept to 255 in
+    // v32 until this gate). [orig: Entity_UpdateInfantryPlayerBody @0x4b411b-0x4b4127
+    // `mov edx,[esi+24h]; test dl,1; jnz return`]
+    if ((ent->flags & 1u) != 0) return;
+
     if (ent->health <= 0) {
         // Death edge — one-shot to the death pose, same policy as the motor's death edge
         // (generic torso-forward bullet death, else the 173 fire fallback; the +0x2C0

@@ -443,7 +443,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
-                                                      world::World *world) {
+                                                      world::World *world,
+                                                      uint32_t session_seed) {
 	std::vector<ProtocolMessage> replies;
 	SessionReplyState &st = conn.reply;
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
@@ -542,8 +543,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// build_tag_5a_weapon_loadout; D-NET-141).
 				const world::WeaponTable *armory =
 						(world != nullptr && !world->weapons.empty()) ? &world->weapons : nullptr;
-				replies.push_back(
-						make_protocol_message(0x5A, build_tag_5a_weapon_loadout(msg.payload, armory)));
+				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
+				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
+				st.last_loadout_reply = build_tag_5a_weapon_loadout(msg.payload, armory);
+				replies.push_back(make_protocol_message(0x5A, st.last_loadout_reply));
 				// Accepted soldier type -> entity+660 playerClass [orig: @0x515ab0] — feeds the
 				// §5.10 field-17 class nibble and the 0x0C/0x18 spawn records for this player.
 				if (world != nullptr && conn.link.owned_entity.valid()) {
@@ -669,6 +672,31 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.link.respawn_pending = false;
 				player->flags &= ~1u;
 				player->alive = true;
+				// THE DEPLOY-RELEASE BUNDLE [orig: Server_ProcessPlayerDeath's deploy tail —
+				// the loadout re-send (Server_SendWeaponSlotListToPlayer @0x502550) + the 0x61
+				// seed (Server_SendRandomSeedToPlayer @0x5101a0, mode 1) + the 0x1E hint; golden
+				// deploy frame 240018 carries 0x5A + 0x61 + 0x1E in ONE datagram]. The 0x5A is
+				// the client's deploy UN-LATCHER: the 0x0E pick set its dword_81474C wait-gate
+				// (Input case 12 @0x49b17b) and ONLY the 0x5A apply resets it (§5.30,
+				// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0) — without this bundle the
+				// client NEVER resumes its per-frame C2S 0x0C uplink (v32 live: both joiners'
+				// uplinks stopped at the pick frame forever; the host-side entity pinned at the
+				// deploy spot = the rubber-band). Re-send the retained granted body; a client
+				// that never submitted 0x2F (unit paths) gets the armory-built default shape.
+				if (!st.last_loadout_reply.empty()) {
+					replies.push_back(make_protocol_message(0x5A, st.last_loadout_reply));
+				} else {
+					const world::WeaponTable *armory =
+							(world != nullptr && !world->weapons.empty()) ? &world->weapons
+							                                              : nullptr;
+					replies.push_back(make_protocol_message(
+							0x5A, build_tag_5a_weapon_loadout({}, armory)));
+				}
+				replies.push_back(make_protocol_message(
+						0x61, {static_cast<uint8_t>(session_seed & 0xFFu),
+						       static_cast<uint8_t>((session_seed >> 8) & 0xFFu),
+						       static_cast<uint8_t>((session_seed >> 16) & 0xFFu),
+						       static_cast<uint8_t>((session_seed >> 24) & 0xFFu)}));
 				// The frontier hint, only when a frontier zone exists [orig: the @0x5179e0
 				// `if (AvailableSlot)` gate].
 				const uint8_t frontier = zone_chain_frontier_zone(*world, world->zone_chain,

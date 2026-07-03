@@ -293,6 +293,61 @@ int main() {
 			return 1;
 	}
 
+	// --- 5. The 0x0E deploy of a RESPAWN-PENDING joiner emits the DEPLOY-RELEASE bundle
+	// (0x5A + 0x61 + optional 0x1E) and clears the pending/hidden pair — the client's 0x5A
+	// apply resets its dword_81474C wait-gate (set by the pick) and resumes the C2S 0x0C
+	// uplink [orig: Server_ProcessPlayerDeath deploy tail: Server_SendWeaponSlotListToPlayer
+	// @0x502550 + Server_SendRandomSeedToPlayer @0x5101a0; client un-latch §5.30
+	// @0x4290E0; golden deploy frame 240018 = 0x5A + 0x61 + 0x1E one datagram; the v32
+	// rubber-band]. (D-NET-156 tail) ---
+	{
+		const w::EntityHandle jb = w::spawn_remote_player(world, player_spawn(0xFFF3, 5, 5, 0));
+		if (!expect(jb.valid(), "deploy-test joiner spawned")) return 1;
+		np::NapiNPConnection conn =
+				make_conn(7, 1, &udp_b, ns::TransportMode::Client, jb, /*spawned=*/true);
+		conn.link.respawn_pending = true;
+		w::Entity *je = world.registry.get(jb);
+		je->flags |= 1u; // the join-time hidden bit rides with pending
+		conn.reply.last_loadout_reply = {8, 2, 255, 0, 0, 0xFF}; // a granted 0x5A body
+
+		std::vector<ProtocolMessage> msgs;
+		msgs.push_back(make_protocol_message(0x0E, {0xFF, 0xFF})); // param-0 pick (base deploy)
+		std::vector<ProtocolMessage> replies = np::dispatch_session_replies(
+				np::GameConfig{}, conn, msgs, 100, roster, &world, 0xA1B2C3D4u);
+
+		bool saw_5a = false, saw_61 = false;
+		for (const ProtocolMessage &m : replies) {
+			if (m.tag == 0x5A) {
+				saw_5a = true;
+				if (!expect(m.payload == conn.reply.last_loadout_reply,
+				            "deploy 0x5A re-sends the GRANTED loadout body"))
+					return 1;
+			}
+			if (m.tag == 0x61) {
+				saw_61 = true;
+				if (!expect(m.payload.size() == 4 && m.payload[0] == 0xD4 &&
+				                    m.payload[3] == 0xA1,
+				            "deploy 0x61 carries the session seed"))
+					return 1;
+			}
+		}
+		if (!expect(saw_5a, "deploy release emits the 0x5A un-latcher")) return 1;
+		if (!expect(saw_61, "deploy release emits the 0x61 seed")) return 1;
+		if (!expect(!conn.link.respawn_pending, "deploy clears respawn_pending")) return 1;
+		je = world.registry.get(jb);
+		if (!expect((je->flags & 1u) == 0, "deploy clears the hidden bit")) return 1;
+		if (!expect(je->health > 0, "deploy restores health")) return 1;
+
+		// An alive DEPLOYED player's 0x0E is a no-op (the dead-or-pending gate @0x519cc7):
+		// no bundle, no reposition.
+		std::vector<ProtocolMessage> again = np::dispatch_session_replies(
+				np::GameConfig{}, conn, msgs, 101, roster, &world, 0xA1B2C3D4u);
+		for (const ProtocolMessage &m : again)
+			if (!expect(m.tag != 0x5A && m.tag != 0x61,
+			            "alive deployed 0x0E draws no release bundle"))
+				return 1;
+	}
+
 	std::printf("round_sim_test: all green\n");
 	return 0;
 }

@@ -44,12 +44,16 @@ namespace opennova::np {
 // NapiNPServer_SendFiltered @0x4C87E0 walks the connection list doing one SendToConn per node];
 // each recipient's flush frames the body with its own sequencing.
 // [orig: per-message NapiNPServerMsg_0x0NN handlers reached from the 0x43 SESSION dispatch]
+// `session_seed` is the host's session_seed_id [orig: NapiNPProtocol +0x530], re-sent as the
+// deploy-release bundle's S2C 0x61 [orig: Server_SendRandomSeedToPlayer @0x5101a0 from the
+// Server_ProcessPlayerDeath deploy leg]. Defaulted for the World-less/unit callers.
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,
                                                       const std::vector<ProtocolMessage> &messages,
                                                       uint32_t now_tick,
                                                       std::vector<NapiNPConnection> &roster,
-                                                      world::World *world);
+                                                      world::World *world,
+                                                      uint32_t session_seed = 0);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the

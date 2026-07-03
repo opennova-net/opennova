@@ -479,7 +479,8 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
-			                         ctx.np_protocol.connection_list, ctx.world);
+			                         ctx.np_protocol.connection_list, ctx.world,
+			                         ctx.np_protocol.session_seed_id);
 	if (!replies.empty()) {
 		std::vector<uint8_t> dg = frame_session_replies(conn, replies);
 		if (!dg.empty()) out.outbound.push_back(std::move(dg));
