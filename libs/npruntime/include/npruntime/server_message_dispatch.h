@@ -59,7 +59,7 @@ ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
                                           const world::World *world);
 
-// Install/refresh the per-connection player binding the roster (0x46/0x16) + spawn-confirm (0x51)
+// Install/refresh the per-connection player binding the roster (0x46/0x16)
 // replies read: stamps the bare wire `entity_handle` onto conn.link.owned_entity (the SINGLE binding,
 // D-NET-132) plus the roster name/slot. The World-path spawn (Server_BuildPlayerInfoAndAdd) binds
 // owned_entity to a LIVE registry entity; this pre-World reactive path (a World-less session-responder

@@ -5,7 +5,7 @@
 #include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <novaworld/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
-#include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_spawn / encode_player_list (§5.1)
+#include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <novaworld/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
@@ -527,16 +527,18 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
 				replies.push_back(make_protocol_message(0x19, build_tag1a_tick(now_tick)));
 				break;
-			case 0x29: // spawn-slot request -> 0x51 PLAYER-SPAWN [orig: NapiNPServerMsg_0x029 @0x514F10].
-				// Echo-loop guard: HandlePlayerSpawn @0x431BB0 re-sends 0x29 after our 0x51, so reply once.
-				if (!st.player_spawn_confirmed) {
-					// The C2S 0x29 carries the requested buffer index (u16) the 0x51 echoes back.
-					uint16_t req_idx = 0;
-					if (msg.payload.size() >= 2)
-						req_idx = static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8));
-					replies.push_back(make_protocol_message(0x51, encode_player_spawn(rep, req_idx)));
-					st.player_spawn_confirmed = true;
-				}
+			case 0x29: // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
+				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index
+				// resolves to a pending entity in g_team_change_entity_list @0xC947C8 (gated
+				// !g_net_spawn_suspended && !g_spawn_success_gate), and that reply is a REAL
+				// write_entity_packet @0x506BB0 record. The golden retail-ashi5a session's
+				// deploy-time C 0x29 draws NO 0x51 anywhere. The client FIELD-PARSES 0x51 —
+				// NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 stamps team (+354) and NetId
+				// (@0x431cad) and REBINDS CharacterEntity (@0x431cf3) — so our former
+				// unconditional zero-id 0x51 "spawn-confirm" re-bound the joiner's own player
+				// to a vehicle archetype: the retail-join DBuggy1 shadow (D-NET-148). Team
+				// change is unmodeled; when it lands, port the @0x514F10 list lookup +
+				// write_entity_packet — never an echo.
 				break;
 			case 0x0E: // respawn request -> 0x1E game-event, once spawned [orig: NapiNPServerMsg_0x00E
 				// @0x519AF0 -> Server_ProcessPlayerDeath emits 0x1E]. The INITIAL spawn is the one-shot

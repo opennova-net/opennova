@@ -130,7 +130,7 @@ bool consume_c2s(int tag, const std::vector<uint8_t> &b) {
 	case 0x22: { BurstPlayerSyncRequest o; return decode_burst_player_sync_request(p, n, o, used) && used == n; }
 	case 0x23: { return decode_burst_visible_request(p, n, used) && used == n; }
 	case 0x28: { BurstLoadoutRequest o;  return decode_burst_loadout_request(p, n, o, used) && used == n; }
-	case 0x29: { BurstEntityRequest o;   return decode_burst_entity_request(p, n, o, used) && used == n; }
+	case 0x29: { TeamSpawnAck o;         return decode_team_spawn_ack(p, n, o, used) && used == n; }
 	case 0x4C: { BurstClientQuality o;   return decode_burst_client_quality(p, n, o, used) && used == n; }
 	default: return false;
 	}

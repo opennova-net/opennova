@@ -465,15 +465,15 @@ int check_C_28_loadout_request() {
 	return 0;
 }
 
-// C2S 0x29 — entity request: [u16 bufferIndex].
-int check_C_29_entity_request() {
+// C2S 0x29 — team/spawn ack: [u16 team_change_index].
+int check_C_29_team_spawn_ack() {
 	LE w;
 	w.u16(0x0042);
-	BurstEntityRequest r;
+	TeamSpawnAck r;
 	size_t consumed = 0;
-	EXPECT(decode_burst_entity_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(decode_team_spawn_ack(w.b.data(), w.b.size(), r, consumed));
 	EXPECT(consumed == 2);
-	EXPECT(r.buffer_index == 0x0042);
+	EXPECT(r.team_change_index == 0x0042);
 	cover('C', 0x29);
 	return 0;
 }
@@ -981,7 +981,7 @@ int main() {
 	if (check_C_22_player_sync_request()) return 1;
 	if (check_C_23_visible_request()) return 1;
 	if (check_C_28_loadout_request()) return 1;
-	if (check_C_29_entity_request()) return 1;
+	if (check_C_29_team_spawn_ack()) return 1;
 	if (check_C_4C_client_quality()) return 1;
 	if (check_rtt_sample()) return 1;
 	if (check_u32_scalar_trio()) return 1;

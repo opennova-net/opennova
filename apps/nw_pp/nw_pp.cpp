@@ -1033,16 +1033,17 @@ void print_tag_28_c2s(const std::vector<uint8_t> &body) {
 	            r.loadout_filter, r.flags, unsigned(r.extra));
 }
 
-// C2S 0x29 entity-packet request.
+// C2S 0x29 team/spawn ack (client 0x51 apply @0x431c99 sends team_index+1; the server
+// reads it as a g_team_change_entity_list index @0x514f7c — D-NET-148).
 void print_tag_29_c2s(const std::vector<uint8_t> &body) {
-	BurstEntityRequest r;
+	TeamSpawnAck r;
 	size_t used = 0;
-	if (!decode_burst_entity_request(body.data(), body.size(), r, used)) {
+	if (!decode_team_spawn_ack(body.data(), body.size(), r, used)) {
 		std::printf("        [0x29 C2S] decode failed (need 2 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x29 C2S] entity-request bufferIndex=%u\n",
-	            unsigned(r.buffer_index));
+	std::printf("        [0x29 C2S] team-spawn-ack teamChangeIndex=%u\n",
+	            unsigned(r.team_change_index));
 }
 
 // C2S 0x25 weapon-reload request (§5.58) — same 4-B body as the S2C 0x49 relay.
@@ -1355,12 +1356,22 @@ void coverage_emit() {
 	            covered, partial, backlog.size());
 }
 
+bool g_hexdump_mode = false; // --hexdump: raw payload hex for EVERY message (byte-diff two captures)
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload, int session = 0) {
 	const char *label = tag_label(dir, tag);
 	std::printf("[%c f=%-4d s=%-5d tag=0x%02x%s%s%s len=%zu]\n", dir, frame, session, tag,
 	            label ? "[" : "", label ? label : "", label ? "]" : "",
 	            payload.size());
+	if (g_hexdump_mode) {
+		// One line per 32 payload bytes — decoded views can hide bytes; this never does.
+		for (size_t off = 0; off < payload.size(); off += 32) {
+			const size_t n = payload.size() - off < 32 ? payload.size() - off : 32;
+			std::printf("        raw+%04zx %s\n", off, to_hex_sample(payload.data() + off, n, 32).c_str());
+		}
+		return; // raw view replaces the structured decode (keeps diffs purely byte-level)
+	}
 	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
 	else if (dir == 'S' && tag == 0x0C) print_tag_0c(payload);
 	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
@@ -1568,6 +1579,8 @@ int main(int argc, char *argv[]) {
 			stream_mode = true;
 		} else if (std::strcmp(a, "--handshake") == 0) {
 			handshake_mode = true;
+		} else if (std::strcmp(a, "--hexdump") == 0) {
+			g_hexdump_mode = true;
 		} else if (std::strcmp(a, "--max-frames") == 0 && i + 1 < argc) {
 			max_frames = std::strtol(argv[++i], nullptr, 10);
 			stream_mode = true; // a frame budget only makes sense streaming

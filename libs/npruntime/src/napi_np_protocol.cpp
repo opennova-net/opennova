@@ -342,9 +342,17 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
-	// The 0x42 also carries the joiner's name (CO) — keep the Hello node's name when present, else
-	// adopt the auth's (covers a fresh recreate where no Hello node survived).
-	if (conn.player_name.empty() && !auth.co.empty()) conn.player_name = auth.co;
+	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
+	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
+	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). A
+	// ':'-shaped NA is a gate tag (the NOVAWORLD-connect flavor, e.g. "jop:cus2" — older
+	// opennova joiners sent it on game joins too) — fall back to CO / the Hello name there.
+	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
+	if (!auth.na.empty() && auth.na.find(':') == std::string::npos) {
+		conn.player_name = auth.na;
+	} else if (conn.player_name.empty() && !auth.co.empty()) {
+		conn.player_name = auth.co;
+	}
 	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
 	// in ServerAuth so the client can read our replies.
 	conn.client_scrk = auth.scrk;

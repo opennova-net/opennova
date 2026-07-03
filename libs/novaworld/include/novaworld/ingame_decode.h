@@ -1113,13 +1113,16 @@ struct BurstLoadoutRequest {
 bool decode_burst_loadout_request(const uint8_t *body, size_t len,
                                   BurstLoadoutRequest &out, size_t &consumed);
 
-// C2S 0x29 — entity-packet request `[u16 bufferIndex]` (2 B). Server writes that
-// entity's packet and replies S2C 0x51. [orig: NapiNPServerMsg_0x029 @ 0x514F10]
-struct BurstEntityRequest {
-	uint16_t buffer_index = 0;
+// C2S 0x29 — team/spawn ack `[u16 team_change_index]` (2 B). The client emits it with
+// team_index+1 from its 0x51 apply [orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431c99]
+// and at deploy/team pick; the server treats the value as a g_team_change_entity_list
+// index and replies S2C 0x51 ONLY for a pending team-change entry [orig:
+// NapiNPServerMsg_0x029 @ 0x514F10 @ 0x514f7c] — never on a plain join (D-NET-148).
+struct TeamSpawnAck {
+	uint16_t team_change_index = 0;
 };
-bool decode_burst_entity_request(const uint8_t *body, size_t len,
-                                 BurstEntityRequest &out, size_t &consumed);
+bool decode_team_spawn_ack(const uint8_t *body, size_t len,
+                           TeamSpawnAck &out, size_t &consumed);
 
 // C2S 0x4C — client quality/state byte `[u8 value]` (server clamps to 0..4 and
 // sets the player's connection-quality state). [orig: NapiNPServerMsg_0x04C @ 0x5111B0]

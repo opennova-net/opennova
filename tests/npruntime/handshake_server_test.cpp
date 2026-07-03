@@ -220,15 +220,16 @@ bool run_reactive_replies() {
 		            reply_has_tag(msgs, 0x19),
 		            "0x0A -> 0x19 ack")) return false;
 	}
-	// 0x29 -> 0x51 spawn-confirm, exactly once (the 0x29<->0x51 echo-loop guard). [orig: NapiNPServerMsg_0x029]
+	// 0x29 team/spawn ack -> NO 0x51 on a plain join. [orig: NapiNPServerMsg_0x029 @0x514F10]
+	// only replies 0x51 for a pending g_team_change_entity_list entry (team-change flow,
+	// unmodeled); the golden session's deploy-time C 0x29 draws no 0x51 anywhere. The old
+	// unconditional zero-id 0x51 made the client REBIND its own player's CharacterEntity
+	// (@0x431BB0 field-parses it) onto a vehicle archetype — the DBuggy1 shadow (D-NET-148).
 	{
 		std::vector<ProtocolMessage> msgs;
-		if (!expect(send_session({make_protocol_message(0x29, {0x00, 0x00})}, 150, msgs) &&
-		            reply_has_tag(msgs, 0x51), "0x29 -> 0x51 spawn-confirm")) return false;
-		std::vector<ProtocolMessage> msgs2;
-		const bool got = send_session({make_protocol_message(0x29, {0x00, 0x00})}, 160, msgs2);
-		if (!expect(!got || !reply_has_tag(msgs2, 0x51),
-		            "repeat 0x29 does NOT re-emit 0x51 (echo-loop guard)")) return false;
+		const bool got = send_session({make_protocol_message(0x29, {0x00, 0x00})}, 150, msgs);
+		if (!expect(!got || !reply_has_tag(msgs, 0x51),
+		            "0x29 draws NO 0x51 on a plain join (D-NET-148)")) return false;
 	}
 	// 0x2C RTT probe -> 0x57 pong when echo_flag != 0 (the host bounces [u32 ts][u8 0]); echo_flag == 0
 	// is the client's return leg (server-internal RTT/kick, no reply). [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
@@ -251,8 +252,11 @@ bool run_reactive_replies() {
 	return true;
 }
 
-// A bound player entity handle flows into the 0x29 -> 0x51 spawn-confirm reply's entity slot.
-bool run_bound_entity_handle_drives_tag51() {
+// A plain-join C2S 0x29 draws no S2C 0x51 even with a bound player: the original replies 0x51
+// only for a pending g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10
+// @0x514f7c], and the client field-parses 0x51 (@0x431BB0 CharacterEntity rebind) — an
+// invented zero-id confirm re-bound the joiner to a vehicle archetype (D-NET-148).
+bool run_plain_join_tag29_draws_no_tag51() {
 	np::NapiNPServerCtx ctx;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
@@ -270,19 +274,15 @@ bool run_bound_entity_handle_drives_tag51() {
 
 	auto spawn_req = craft_session(client_scrk, seq++, {make_protocol_message(0x29, {0x00, 0x00})});
 	auto spawn_r = np::handle_server_datagram(ctx, peer, spawn_req.data(), spawn_req.size(), 200);
-	if (!expect(!spawn_r.outbound.empty(), "0x29 produces a framed 0x83 reply")) return false;
-	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> msgs;
-	if (!expect(decode_s2c(spawn_r.outbound.back(), server_scrk, hdr, msgs),
-	            "0x29 reply decodes as a 0x83 SESSION packet")) return false;
-	const ProtocolMessage *tag51 = nullptr;
-	for (const ProtocolMessage &m : msgs) {
-		if (m.tag == 0x51) tag51 = &m;
+	for (const auto &dg : spawn_r.outbound) {
+		ProtocolPacketHeader hdr;
+		std::vector<ProtocolMessage> msgs;
+		if (!decode_s2c(dg, server_scrk, hdr, msgs)) continue;
+		for (const ProtocolMessage &m : msgs) {
+			if (!expect(m.tag != 0x51,
+			            "plain-join 0x29 never draws 0x51 (D-NET-148)")) return false;
+		}
 	}
-	if (!expect(tag51 != nullptr, "0x29 emits tag=0x51")) return false;
-	if (!expect(tag51->payload.size() == 8, "tag=0x51 payload is 8 bytes")) return false;
-	if (!expect(le16(tag51->payload.data() + 2) == 0x0005,
-	            "tag=0x51 entity slot uses the bound connection handle")) return false;
 	return true;
 }
 
@@ -615,7 +615,7 @@ int main() {
 	bool ok = true;
 	ok = run_reactive_replies() && ok;
 	ok = run_loadout_resolve_with_armory() && ok;
-	ok = run_bound_entity_handle_drives_tag51() && ok;
+	ok = run_plain_join_tag29_draws_no_tag51() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
 	ok = run_listen_host_lifecycle() && ok;

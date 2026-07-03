@@ -65,9 +65,13 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	return nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_AUTH,
-			client_auth_to_bytes(make_client_auth(cfg_, player_name_, server_hk_, conn_.client_scrk)));
+	ClientAuth auth = make_client_auth(cfg_, player_name_, server_hk_, conn_.client_scrk);
+	// The GAME-session 0x42's NA TLV is the player CALLSIGN — the retail host's display-name
+	// source (the golden joiner's 0x0C record name equals its NA). The "jop:cus2" gate tag is
+	// the NOVAWORLD-gate connect's NA, not the game join's. [wire: retail-ashi5a f=199140
+	// na="FooPlayer" / retail_join_v18 f=47676 na="TestPlayer"; net-re §5.0b]
+	auth.na = player_name_;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {

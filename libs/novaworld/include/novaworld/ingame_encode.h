@@ -249,13 +249,12 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool 
 // Sent for empty roster slots the client's ack-walk requests, so the walk terminates cleanly at max_players.
 std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = true);
 
-// tag=0x51 PLAYER-SPAWN — [orig: write_entity_packet @0x506bb0] 8-byte layout:
-// [u16 requested_index (echoed from the C2S 0x29)][u16 handle = pool<<12|slot][u8 team]
-// [u16 NetId if Flags&0x100 else 0][u8 animSlot if Flags&0x100 else 0]. NetId is 0 BY DESIGN — a player
-// carries net_id 0 (D-NET-112: Entity_SpawnFromAnimSlotProperty @0x43c390 leaves it zero; identity is the
-// pool handle + ownerConnectionId). animSlot defaults to 0; the client treats 0x51 as a spawn signal and
-// does not field-parse it.
-std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint16_t requested_index);
+// (tag=0x51 TEAM-CHANGE CONFIRM has no encoder: the original emits it ONLY for a pending
+// g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10], with a real
+// write_entity_packet @0x506bb0 record. The client FIELD-PARSES it — @0x431BB0 stamps team/NetId
+// and REBINDS CharacterEntity — so an invented zero-id 0x51 re-binds the joiner's player to a
+// vehicle archetype (the DBuggy1 shadow, D-NET-148). Add the faithful encoder with the
+// team-change flow.)
 
 // One 0x16 PLAYER-LIST entry (the host roster row the dispatcher extracts from the live connection list).
 struct PlayerListEntry {

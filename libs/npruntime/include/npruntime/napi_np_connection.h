@@ -114,7 +114,7 @@ struct CharacterJoinVars {
 };
 
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
-// server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner expects). Folded
+// server-info / mission-metadata / loadout replies a retail joiner expects). Folded
 // onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
 // reactive NapiNPServerMsg_0x0NN handlers actually read (P8). The spawn-gate / world-stream burst
 // state lives in `burst` above (driven by Server_SendInitialGameStateToPlayer); this carries only the
@@ -122,7 +122,6 @@ struct CharacterJoinVars {
 struct SessionReplyState {
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
 	bool mission_status_received = false; // 0x0B mission-file status report seen
-	bool player_spawn_confirmed = false;  // 0x51 PLAYER-SPAWN sent — breaks the 0x29↔0x51 echo loop
 	bool roster_pushed = false;           // 0x16/0x46 roster PUSHED proactively post-handshake (once) —
 	                                      // the working host pushes it before the joiner ever sends 0x0A
 	bool roster_repushed = false;         // 0x16 RE-PUSHED with the grown roster once this player spawned

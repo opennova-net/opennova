@@ -307,7 +307,7 @@ sweep; blank = not yet characterized.
 | 0x26 | 0x42EC30 | `_0x026` | entity kill-sync (killer/victim slots); fires on kill events |
 | 0x27 | 0x425AA0 | `_0x027` | |
 | 0x28 | 0x425B40 | `_0x028` | |
-| 0x29 | 0x427D00 | `_0x029` | |
+| 0x29 | 0x427D00 | `_CharMinimapUpdate` | per-entity character/minimap update: [u8 pool0Idx][u8 team→+354][u8 flags7→+692][u16 packedCharId→NetId+0x15C] + CharacterEntity rebind (§5.59); renamed from `handle_entity_minimap_update` |
 | 0x2A | 0x425BA0 | `_0x02A` | chat-history entry `[i32][i32][i16]` (10 B) → Chat_AddToHistory (§5.35) |
 | 0x2B | 0x427DF0 | `_0x02B` | |
 | 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
@@ -343,7 +343,7 @@ sweep; blank = not yet characterized.
 | 0x4E | 0x431870 | `_HandleBatchSpawn` (misleading) | u16 count + per-slot u16; calls `Entity_KillBySlotId` (kill, not spawn), then replies C2S 0x28 |
 | 0x4F | 0x4286C0 | `_0x04F` | |
 | 0x50 | 0x431910 | `_TeamAssign` | team assign (6 B): [u16 handle][u8 team][u16 spawnPointId][u8 squadLeader] → entity team + team loadout init |
-| 0x51 | 0x431BB0 | `_0x051` | |
+| 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
 | 0x52 | 0x428A80 | `_0x052` | |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 modeA][u8 modeB→entity+547][u16 start_s][u16 end_s][u8 rate], ×62 s→ticks; capture/takeover HUD channel. Field map §5.49 (decoded) |
 | 0x54 | 0x429040 | `_0x054` | |
@@ -437,7 +437,7 @@ This is what a reimplemented server must **handle**.
 | 0x26 | 0x502390 | VEHICLE-ATTACH request — server overwrites wire word0 with the requester's OWN handle (anti-spoof) → Entity_ProcessVehicleAttach(vehicle/seat words) |
 | 0x27 | 0x4FC980 | VEHICLE-DETACH request: [u16 handle] → Entity_DetachFromVehicle(entity, entity+364) |
 | 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
-| 0x29 | 0x514F10 | entity-packet request `[u16 bufferIndex]` → host writes that entity's packet & replies S2C 0x51 (§5.33); reply-burst member |
+| 0x29 | 0x514F10 | team/spawn ack `[u16 team_change_index]` (client 0x51-apply sends team+1 @0x431c99; also sent at deploy/team pick) → S2C 0x51 ONLY for a pending `g_team_change_entity_list @0xC947C8` entry via write_entity_packet @0x506bb0; a plain join-deploy 0x29 draws NO reply (§5.59, D-NET-148; the old "entity-packet request → always 0x51" reading was wrong) |
 | 0x2B | 0x514FE0 | |
 | 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
 | 0x2D | 0x502430 | burst-member receiver |
@@ -503,9 +503,8 @@ This is what a reimplemented server must **handle**.
   message ids. No dead client-table entries.
 - Phase B (full C2S decompile sweep): 0x47 / 0x48 / 0x06 / 0x21 / 0x0C-extended landed
   (§5.10, §5.16, §5.17, plus the 0x47/0x48 entries above) against the 3-player loopback
-  pcap. Remaining C2S candidates without field maps yet: 0x22 / 0x23 / 0x28 / 0x29 (the
-  "burst-member" replies; tiny 3 B payloads in capture), 0x0F (no samples in the 3-player
-  capture), 0x33 / 0x37 (file-chunk re-request replies; need a C2S 0x60 / 0x64 flow).
+  pcap. The then-remaining candidates have since landed: 0x22 / 0x23 / 0x28 (§5.33),
+  0x29 (§5.59 — a team/spawn ack, not a "burst member"), 0x0F (§5.46), 0x33 / 0x37 (§5.28).
 
 ## 5. Tag-level findings (audited against retail captures)
 
@@ -4978,7 +4977,49 @@ Reload ammo math: `WeaponSlot_ReloadAmmo` transfers `def[22] (clipsize) × def[5
 ignores C2S 0x25 permanently wedges the joiner's weapon (one attempt sets 0x80; no 0x49 ever
 clears it) — D-NET-142.
 
-## 8. Equivalence verdicts (grill log)
+### 5.59 The character-slot binding family — C2S 0x29, S2C 0x29/0x50/0x51, and the registry/blip structures (2026-07-02)
+
+The client binds every `Flags & 0x100` (player-flagged) entity to a CHARACTER DESCRIPTOR via
+`entity->CharacterEntity` (+0x3C). Getting any message of this family wrong re-binds a player to
+the wrong archetype — the live symptom is a wrong minimap/shadow descriptor under a correct mesh
+(D-NET-148's DBuggy1 shadow).
+
+**The two structures** (one global blob, `count_and_entries @ 0x26A7748`):
+
+- **Character-archetype registry** — `[i32 count]` + 288-byte-stride entries: `+4` type,
+  `+8` subtype, `+12` index, `+280` SIDE (0 = A, nonzero = B), `+284` avatar byte, plus three
+  88-byte sub-blocks (byte triples at +44/+132/+220, floats at +96/+184/+272 — the descriptor
+  payload). Seeded client-locally (`Game_StartMission @ 0x524360`,
+  `Entity_SpawnFromAnimSlotProperty @ 0x43c390`, `PlayerProfile_InitDefaults @ 0x54bb40`) and
+  browsed by the player-info avatar UI (`populate_avatar_combo_list @ 0x560210` et al).
+- **Blip table** — 256 × 36-byte entries inside the same blob (entity ptr at +28, active flag
+  +32, 23-byte descriptor at +0): per-LIVE-entity binding records.
+  `[orig: MinimapSlot_FindOrAllocByEntityId @ 0x57b1e0]` finds-or-allocs by ENTITY POINTER, then
+  `[orig: MinimapSlot_InitBlipFromPackedId @ 0x57b080]` (renamed this session from the kong
+  `HUD_DrawAllMinimapEntities`) resolves the packed char id via
+  `MinimapSlot_FindByPackedId @ 0x57a270` and COPIES the registry entry's descriptor into the
+  blip; a failed resolve zeroes it with avatar = 1.
+
+**The packed char id** (`lookup_entity_slot_and_pack_entry @ 0x57ad40`, pack @ 0x57ae47):
+`type(bits 0-4) | subtype(5-8) | index(9-14) | SIDE(15)`. Bit 15 is the SIDE-B bit — matched
+against registry entry+280 — **not** an "alive" bit (corrects the original D-NET-137 reading).
+The lookup's second parameter is the side (`team != 1`), and a side with no registry entry falls
+back to packing entry 0. Golden ids: host `0x0200` = side A/type 0/index 1, joiner `0x8207` =
+side B/type 7/index 1 (the CI1 u16 truncation, §5.0b/D-NET-146).
+
+**The messages** (client handlers in the 16-byte-entry dispatch table `@ 0x82AE28` —
+`{tag, name, handler, 0}` — which pins every tag↔handler pairing):
+
+| msg | handler | payload / behavior |
+|---|---|---|
+| S2C 0x29 | `[orig: NapiNPClientMsg_CharMinimapUpdate @ 0x427D00]` (renamed from `handle_entity_minimap_update`) | `[u8 pool0Idx][u8 team → entity+354][u8 flags7 → entity+692][u16 packedCharId → NetId +0x15C]`; self-heals an unresolvable id by side, then REBINDS CharacterEntity. Client-only (`is_authority` gate). |
+| S2C 0x50 | `[orig: NapiNPClientMsg_TeamAssign @ 0x431910]` | team assign (§4 row); also touches the registry. |
+| S2C 0x51 | `[orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431BB0]` | **FIELD-PARSED** (refuting the D-NET-137-era "spawn signal only" claim): `[u16 ackSeed][u16 entityHandle][u8 team → entity+354 (client only)][u16 packedCharId → NetId @ 0x431cad][u8 → entity+884]`; acks C2S 0x29 with `ackSeed+1` (`@ 0x431c99`); for `Flags & 0x100` entities REBINDS CharacterEntity (`@ 0x431cf3`). |
+| C2S 0x29 | server `[orig: NapiNPServerMsg_0x029 @ 0x514F10]` | `[u16 team_change_index]` — sent by the client's 0x51 apply (team+1) and at deploy/team pick. The server replies S2C 0x51 ONLY when the index resolves to a pending `g_team_change_entity_list @ 0xC947C8` entry (gated `!g_net_spawn_suspended && !g_spawn_success_gate`), and the reply body is a real `write_entity_packet @ 0x506bb0` record. **A plain join-deploy C 0x29 draws NO reply** — golden retail-ashi5a has zero S2C 0x51 in the whole session. |
+
+The deploy gate is unrelated: retail drops the loading screen via S2C 0x1D (§5.2), never 0x51.
+
+
 
 Per-system verdicts from grilling the reimplementation against retail
 `Jointops.exe` (Kong IDB). Each row cites the original entry point. Verdict:
@@ -5968,13 +6009,19 @@ slot array: seeded from the joining client's own JSP fields (jsp[56]/jsp[58],
 `Server_BuildPlayerInfoAndAdd @ 0x51d560`), validated by `MinimapSlot_HasEntity @ 0x57b140` and
 (re)allocated by `lookup_entity_slot_and_pack_entry @ 0x57ad40`, whose packing (@ 0x57ae47, decoder
 `MinimapSlot_FindByPackedId @ 0x57a270`) is `type(bits 0-4) | subtype(5-8) | index(9-14) |
-alive(15)` over the 288-byte-stride slot array — golden `0x0200` = index 1, `0x8207` = type 7 +
-index 1 + alive. Our `player_minimap_net_id` emits `(team==2?0x8000:0)|0x0200|(slot&0x1F)` — its
-"team bit" is actually the `alive` bit and `slot` lands in the `type` field. Interop-safe because
-`NapiNPClientMsg_0x00C @ 0x42eadb` reallocates a fresh minimap slot and OVERWRITES `entity->NetId`
-whenever `MinimapSlot_HasEntity` fails — any nonzero, per-entity-distinct id works. The 0x51
-spawn-confirm's NetId/animSlot zeros are the same family (client treats 0x51 as a spawn signal, does
-not field-parse it). Faithful fix: model the minimap slot array and allocate/pack for real.
+SIDE(15)` over the 288-byte-stride registry (bit 15 = side-B, matched against entry+280;
+CORRECTED 2026-07-02 from the earlier "alive" reading — §5.59) — golden `0x0200` = side A index 1,
+`0x8207` = side B type 7 index 1. Our `player_minimap_net_id` emits
+`(team==2?0x8000:0)|0x0200|(slot&0x1F)` — its "team bit" happens to land on the real SIDE bit, but
+`slot` lands in the `type` field. Interop-safe because `NapiNPClientMsg_0x00C @ 0x42eadb`
+reallocates a fresh minimap slot and OVERWRITES `entity->NetId` whenever `MinimapSlot_HasEntity`
+fails — any per-entity-distinct id that resolves to NOTHING self-heals; an id that resolves to the
+WRONG entry does not (that failure mode is D-NET-148). ~~The 0x51 spawn-confirm's NetId/animSlot
+zeros are the same family (client treats 0x51 as a spawn signal, does not field-parse it)~~ —
+REFUTED 2026-07-02: the client FULLY field-parses 0x51 and rebinds `CharacterEntity` from its
+packed char id (`NapiNPClientMsg_HandlePlayerSpawn @ 0x431BB0` @ 0x431cad/@ 0x431cf3; §5.59,
+D-NET-148 — retail never sends 0x51 outside the team-change flow). Faithful fix: model the minimap
+slot array and allocate/pack for real.
 Exonerated for the C2S 0x0F flood (2026-07-02 recon): in the 0x18 apply the record's net_id feeds
 ONLY the minimap path (`@ 0x433ddd`, gated on `Flags & 0x100` + person type) — it is never an input
 to the `@ 0x4307c4` itemDef/ItemTypeIndex cross-check that queues 0x0F (the flood was D-NET-138's
@@ -6133,6 +6180,30 @@ harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (t
 promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
+
+**D-NET-148** [reimpl divergence, FIXED 2026-07-02] **The host replied an invented,
+unconditional S2C 0x51 "spawn-confirm" (packed char id 0) to the joiner's deploy-time C2S
+0x29 — the retail-join DBuggy1 shadow.** The original `[orig: NapiNPServerMsg_0x029
+@ 0x514F10]` replies 0x51 ONLY when the C 0x29's `[u16 team_change_index]` resolves to a
+pending entity in `g_team_change_entity_list @ 0xC947C8` (gated `!g_net_spawn_suspended &&
+!g_spawn_success_gate`), with a real `write_entity_packet @ 0x506bb0` record — a plain
+join-deploy 0x29 draws NO reply (golden retail-ashi5a: zero S2C 0x51 in the session; the
+deploy-time C 0x29 at f=225705 is answered by nothing but the normal stream). The client
+FIELD-PARSES 0x51 — `[orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431BB0]` stamps team
+(+354) and NetId (`@ 0x431cad`) and REBINDS `entity->CharacterEntity`
+(`@ 0x431cf3`, §5.59) — so our zero-id confirm re-bound the joiner's own player to the
+registry's fallback archetype (ASH_I5A: the `d_buggy` mission archetype), drawing a
+Dune-Buggy blob shadow under a correct mesh from the moment of deploy. Live-witnessed
+retail-join v21 (2026-07-02): joiner 0x0C record already golden-identical
+(net=0x8207/animSlot=VCB echo, D-NET-146 fix verified live) yet the shadow persisted;
+wire diff isolated our `C 0x29 (f=55518) → S 0x51 (f=55519)` against golden's no-reply.
+FIXED by porting the faithful no-reply: the dispatch case consumes the ack (team change is
+unmodeled — when it lands, port the @ 0x514F10 list lookup + write_entity_packet record,
+never an echo); `encode_player_spawn` and the `player_spawn_confirmed` echo-guard flag are
+REMOVED (npruntime server_message_dispatch.cpp / novaworld ingame_encode). Pinned by
+`npruntime_handshake_server` ("0x29 draws NO 0x51 on a plain join"). The C2S 0x29 decoder
+is renamed `decode_team_spawn_ack` (was `decode_burst_entity_request` — the "entity
+request" reading was wrong).
 
 **D-NET-147** [reimpl divergence, TRACKED 2026-07-02] **The S2C 0x10 static-entity records
 omit the building/armory linkage fields — golden building records carry `field_flags 0x0A1`

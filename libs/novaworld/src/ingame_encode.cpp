@@ -665,23 +665,12 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 	return out;
 }
 
-// [orig: write_entity_packet @0x506bb0] — 8-byte spawn confirm.
-std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint16_t requested_index) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u16(requested_index);
-	w.u16(ctx.entity_handle);
-	w.u8(static_cast<uint8_t>(ctx.team & 0xFF));
-	// [orig @0x506bb0]: when entity Flags&0x100 (every player after Server_PlayerAdd) retail writes
-	// [u16 NetId (entity+348 = the per-team MINIMAP slot id, nonzero — see player_minimap_net_id in
-	// netsim/entity_wire_bridge.cpp / D-NET-137)][u8 animSlot]; only a NON-0x100 entity gets 0/0.
-	// We still send 0/0: the client treats 0x51 as a spawn signal (does not field-parse it), so this
-	// is wire-tolerable, but it is a known divergence of the same D-NET-137 family, not "faithful 0"
-	// (the old D-NET-112 SSN framing predated the minimap-id witness; corrected grill 2026-07-01).
-	w.u16(0);
-	w.u8(0);
-	return out;
-}
+// (encode_player_spawn — the invented unconditional S2C 0x51 "spawn confirm" — was REMOVED,
+// D-NET-148: the original only sends 0x51 for a pending g_team_change_entity_list entry
+// [orig: NapiNPServerMsg_0x029 @0x514F10 -> write_entity_packet @0x506bb0], and the client
+// FIELD-PARSES it (NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 rebinds CharacterEntity from
+// the packed char id) — a zeroed id re-bound the joiner to a vehicle archetype: the DBuggy1
+// shadow. Port the real record from @0x506bb0 when the team-change flow lands.)
 
 // [orig: NapiNPClientMsg_0x016 @0x42FAE0] — round-trips through decode_player_list.
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players) {

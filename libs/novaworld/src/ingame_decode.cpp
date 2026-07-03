@@ -1187,12 +1187,15 @@ bool decode_burst_loadout_request(const uint8_t *body, size_t len,
 	return consumed == 10;
 }
 
-// C2S 0x29 entity-packet request. [orig: NapiNPServerMsg_0x029 @ 0x514F10]
-bool decode_burst_entity_request(const uint8_t *body, size_t len,
-                                 BurstEntityRequest &out, size_t &consumed) {
+// C2S 0x29 team/spawn ack. [orig: emitted with team_index+1 by the client's 0x51 apply
+// @0x431c99 and at deploy/team pick; the server reads it as a g_team_change_entity_list
+// index — NapiNPServerMsg_0x029 @0x514F10 @0x514f7c — replying 0x51 only for a pending
+// team-change entry (D-NET-148)]
+bool decode_team_spawn_ack(const uint8_t *body, size_t len,
+                           TeamSpawnAck &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
-	out.buffer_index = c.u16();
+	out.team_change_index = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 2;
