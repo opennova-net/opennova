@@ -274,6 +274,15 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 			e->health_max = hp;
 			if (e->health == 100) e->health = hp; // still at the promotion default
 		}
+		// Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
+		// the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
+		// (D-NET-147; every golden ASH_I5A building carries both). Resolved defs only — a
+		// missing items.def id stays untouched. [orig: Entity_InitFromModel @0x40dc8e:
+		// !itemDef->healthMax -> Flags |= 0x4000000, Health = 1, subType = -1]
+		if (hp == 0 && p_item_db->has_item(def_id)) {
+			e->engine_flags |= 0x4000000u;
+			e->sub_type = 0xFF;
+		}
 	}
 }
 

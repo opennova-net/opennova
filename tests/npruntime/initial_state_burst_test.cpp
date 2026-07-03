@@ -45,6 +45,7 @@ int main_impl() {
 	w::AiSystem ai;
 	world.ai = &ai;
 	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
 	{
 		w::Entity start;
@@ -53,6 +54,19 @@ int main_impl() {
 		start.position = {50.0f, 60.0f, 1.0f};
 		start.yaw = 0;
 		world.registry.spawn(3, start);
+	}
+	{
+		// A pool-2 building carrying the D-NET-147 wire fields (the golden ASH_I5A values):
+		// entity Flags 0x04020400 (indestructible+Building+Reflective), ammo 0xFF, subType 0xFF.
+		w::Entity bld;
+		bld.kind = w::EntityKind::Building;
+		bld.item_id = 0x044c;
+		bld.position = {-396.6f, 360.1f, 11.2f};
+		bld.yaw = 0;
+		bld.engine_flags = 0x04020400u;
+		bld.ammo_count = 0xFF;
+		bld.sub_type = 0xFF;
+		world.registry.spawn(2, bld);
 	}
 
 	// A minimal in-memory mission for the 0x0B BMS-header body (no asset gating).
@@ -96,7 +110,8 @@ int main_impl() {
 	// full (paged ~640 B/datagram): 0x10 pool-2, 0x0D pool-1, 0x0C pool-0, 0x20 pool-3, then 0x1A. Then
 	// the GAME-START BUNDLE 0x42 / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the joiner's
 	// load-gate; matches golden frames 318-319). (0x45 terrain + 0x7E briefing remain deferred.) In THIS
-	// minimal World pool-2/pool-1 are empty, so 0x10/0x0D are single header-only pages.
+	// minimal World pool-1 is empty (header-only 0x0D page); pool-2 carries one building so the
+	// 0x10 page also pins the D-NET-147 fields.
 	const std::vector<uint8_t> want_order = {0x2C, 0x08, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A,
 	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0D, 0x0C, 0x20, 0x1A,
 	                                         0x42, 0x0F, 0x4D, 0x61, 0x3E};
@@ -161,13 +176,21 @@ int main_impl() {
 	if (!expect(body_of(0x1C)->empty() && body_of(0x11)->empty(),
 	            "0x1C / 0x11 carry empty bodies")) return 1;
 	{
+		// The pool-2 building streams with the D-NET-147 fields: entity Flags dword (0x0020),
+		// subType (0x0080), and the always-present ammo byte — the golden ASH_I5A building shape
+		// (flags 0x0A1, eflags 0x04020400, subType 0xFF, ammo 0xFF).
 		const std::vector<uint8_t> *b = body_of(0x10);
 		opennova::StaticEntityBatch batch;
 		if (!expect(b && opennova::decode_static_entity_batch(b->data(), b->size(), batch),
-		            "0x10 empty static batch decodes")) return 1;
-		if (!expect(b->size() == 4 && batch.start_index == 0 && batch.entity_count == 0 &&
-		                    batch.records.empty(),
-		            "0x10 empty static batch carries the 4-byte header")) return 1;
+		            "0x10 static batch decodes")) return 1;
+		if (!expect(batch.records.size() == 1 && !batch.records[0].is_empty_slot,
+		            "0x10 carries the pool-2 building record")) return 1;
+		const opennova::StaticEntityRecord &r = batch.records[0];
+		if (!expect(r.item_type_id == 0x044c, "0x10 building item type")) return 1;
+		if (!expect(r.field_flags == 0x0A1, "0x10 building field_flags == 0x0A1 (golden shape)")) return 1;
+		if (!expect(r.entity_flags == 0x04020400u, "0x10 building entity Flags dword (D-NET-147)")) return 1;
+		if (!expect(r.ammo_count == 0xFF && r.bone_b == 0xFF,
+		            "0x10 building ammo 0xFF + subType 0xFF (D-NET-147)")) return 1;
 	}
 
 	// (6) The §5.2a serializers ported from IDA (grilled 2026-06-27). Bodies cross-checked vs the

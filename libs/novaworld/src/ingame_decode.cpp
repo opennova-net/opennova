@@ -275,7 +275,7 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		if (rec.field_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
 		if (rec.field_flags & 0x0008) rec.section_mask = int32_t(c.u32());
 		if (rec.field_flags & 0x0010) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
-		if (rec.field_flags & 0x0020) rec.parent_slot = int32_t(c.u32());
+		if (rec.field_flags & 0x0020) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
 		if (rec.field_flags & 0x0040) rec.bone_a = c.u8();
 		if (rec.field_flags & 0x0080) rec.bone_b = c.u8();

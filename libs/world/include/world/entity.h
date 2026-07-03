@@ -178,6 +178,24 @@ struct Entity {
     bool held = false;
     bool disabled = false;
 
+    // The retail entity Flags dword (entity+36) as composed at spawn — the 0x10 static record
+    // streams it RAW as its flag-0x20 i32 (the field the early RE misread as "parentSlot",
+    // D-NET-147/150). Composed from mission attributes + item-def traits:
+    //   BMS Indestructible(1<<21) -> 0x4000000, Reflective(1<<23) -> 0x400,
+    //   NoShadow(1<<24) -> 0x1000000            [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    //   kind Building                -> 0x20000  [orig: Entity_InitFromModel @0x40e105]
+    //   items.def hp == 0            -> 0x4000000 (+ sub_type 0xFF) [orig: @0x40dc8e]
+    // Dynamic runtime bits (movement gate 0x2, mounted 0x40, ...) are NOT modeled here.
+    uint32_t engine_flags = 0;
+    // entity+290 low byte <- BMS record byte 81; always-present byte of the 0x10 static record
+    // (golden buildings carry 0xFF). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    uint8_t ammo_count = 0;
+    // entity+532 subType — 0xFF when the item def is indestructible (hp 0) [orig:
+    // Entity_InitFromModel @0x40dc85]; the 0x10 record's flag-0x80 byte.
+    uint8_t sub_type = 0;
+    // entity+533 refNum <- BMS record byte 153; the 0x10 record's flag-0x40 byte (D-NET-94).
+    uint8_t ref_num = 0;
+
     uint32_t spawn_origin = 0; // back-ref to the BMS (kind,index) it was promoted from
     std::string name;          // named markers/areas
 

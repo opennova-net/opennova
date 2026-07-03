@@ -343,6 +343,16 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		rec.pos_z = world::to_fixed(e->position.z);
 		rec.euler_z = engine_heading_bam(e->yaw); // entity+16 heading (gates 0x0001 if non-zero)
 		rec.team_byte = e->team;
+		// The D-NET-147 building/armory fields: the composed entity Flags dword (entity+36,
+		// gates 0x0020), the BMS ammo byte (entity+290, always present), refNum (entity+533,
+		// gates 0x0040) and subType (entity+532, gates 0x0080 — 0xFF on indestructible defs).
+		// Golden ASH_I5A buildings: flags 0x0A1, eflags 0x04020400, subType 0xFF, ammo 0xFF.
+		// [orig: serialize_pool2_static_to_buffer @0x5042F0 field sources @0x5044e6/@0x504502/
+		// @0x504519/@0x504535]
+		rec.entity_flags = e->engine_flags;
+		rec.ammo_count = e->ammo_count;
+		rec.bone_a = e->ref_num;
+		rec.bone_b = e->sub_type;
 		batch.records.push_back(rec);
 	}
 	batch.entity_count = static_cast<int16_t>(batch.records.size());

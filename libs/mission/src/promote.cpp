@@ -96,6 +96,20 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     s.engage_max = e.max_engagement_distance;
     s.attack_max = e.max_attack_distance;
     s.spawn_origin = origin;
+    // The retail entity Flags dword (entity+36), BMS-attribute part — the 0x10 static record
+    // streams it raw (D-NET-147/150). [orig: Entity_SpawnFromBMSRecord @0x40e9f0: attrib
+    // 0x200000 -> 0x4000000 (Indestructible), 0x800000 -> 0x400 (Reflective),
+    // 0x1000000 -> 0x1000000 (NoShadow)]. The item-def part (Building 0x20000 is kind-known
+    // here; hp==0 -> 0x4000000 + subType 0xFF needs the item db) completes in the host's
+    // item-traits sweep [orig: Entity_InitFromModel @0x40e105 / @0x40dc8e].
+    using bms::BmsiAttributeFlags;
+    const uint32_t attrib = e.bmsi_attributes;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Indestructible)) s.engine_flags |= 0x4000000u;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::Reflective)) s.engine_flags |= 0x400u;
+    if (attrib & static_cast<uint32_t>(BmsiAttributeFlags::NoShadow)) s.engine_flags |= 0x1000000u;
+    if (kind == EntityKind::Building) s.engine_flags |= 0x20000u;
+    s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
+    s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
     return s;
 }
 

@@ -368,10 +368,10 @@ bool parse_entity(Reader& r, Entity& e, std::string& error) {
     r.read_fixed_string(e.gen_string, sizeof(e.gen_string));
     e.gen_reserved0 = r.read_u8();
     e.grenades = r.read_u8();
-    e.gen_reserved1 = r.read_u8();
+    e.ref_num = r.read_u8(); // engine-consumed (entity+533), NOT reserved [orig: @0x40e9f0]
     e.mission_critical = r.read_u8();
     e.lfp_group = r.read_u8();
-    if (e.gen_reserved0 != 0 || e.gen_reserved1 != 0) {
+    if (e.gen_reserved0 != 0) {
         error = "BMS entity has nonzero gen_string reserved bytes";
         return false;
     }
@@ -443,7 +443,7 @@ void write_entity(Writer& w, const Entity& e) {
     w.write_fixed_string(e.gen_string, sizeof(e.gen_string));
     w.write_u8(0);
     w.write_u8(e.grenades);
-    w.write_u8(0);
+    w.write_u8(e.ref_num);
     w.write_u8(e.mission_critical);
     w.write_u8(e.lfp_group);
     w.write_i32(e.max_attack_distance);

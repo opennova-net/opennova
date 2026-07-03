@@ -227,10 +227,13 @@ struct StaticEntityRecord {
 	int32_t  euler_y = 0;        // 0x04    entity+24  (32-bit BAM)
 	int32_t  section_mask = 0;   // 0x08    entity+308
 	uint8_t  team_byte = 0;      // 0x10    entity+354 (BMS team 1=Blue/2=Red)
-	int32_t  parent_slot = 0;    // 0x20    entity+36
-	uint8_t  ammo_count = 0;     // always  entity+290
-	uint8_t  bone_a = 0;         // 0x40    entity+533
-	uint8_t  bone_b = 0;         // 0x80    entity+532
+	// entity+36 = the entity FLAGS dword, streamed raw (was misread as "parentSlot" — the
+	// D-NET-147 grill witnessed the serializer source @0x50435f: BMS Indestructible/Reflective/
+	// NoShadow attributes + Building/indestructible def bits; golden buildings carry 0x04020400).
+	uint32_t entity_flags = 0;   // 0x20    entity+36 [orig: serialize_pool2_static_to_buffer @0x5044e6]
+	uint8_t  ammo_count = 0;     // always  entity+290 (BMS record byte 81)
+	uint8_t  bone_a = 0;         // 0x40    entity+533 refNum (BMS byte 153; D-NET-94)
+	uint8_t  bone_b = 0;         // 0x80    entity+532 subType (0xFF on indestructible defs)
 	uint8_t  score_flag = 0;     // 0x100   entity+624
 	uint8_t  weapon_byte = 0;    // always  entity+538
 	uint16_t attach_ref = 0;     // weapon_byte != 0 || flags & 0x200; entity+350

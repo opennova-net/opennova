@@ -218,7 +218,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.euler_y)      f |= 0x0004; // entity+24
 		if (rec.section_mask) f |= 0x0008; // entity+308
 		if (rec.team_byte)    f |= 0x0010; // entity+354 (D-NET-58/62)
-		if (rec.parent_slot)  f |= 0x0020; // entity+36
+		if (rec.entity_flags) f |= 0x0020; // entity+36 Flags dword (D-NET-147)
 		if (rec.bone_a)       f |= 0x0040; // entity+533 (D-NET-94)
 		if (rec.bone_b)       f |= 0x0080; // entity+532 (D-NET-94)
 		if (rec.score_flag)   f |= 0x0100; // entity+624
@@ -237,7 +237,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (f & 0x0004) w.u32(uint32_t(rec.euler_y));
 		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
 		if (f & 0x0010) w.u8(rec.team_byte);
-		if (f & 0x0020) w.u32(uint32_t(rec.parent_slot));
+		if (f & 0x0020) w.u32(rec.entity_flags);
 		w.u8(rec.ammo_count);          // ALWAYS, entity+290
 		if (f & 0x0040) w.u8(rec.bone_a);
 		if (f & 0x0080) w.u8(rec.bone_b);

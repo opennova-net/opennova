@@ -69,10 +69,11 @@ chain + deferrals (char-slot registry realloc, BMS AnimSlot promote, WAC set_ssn
 target) in net-re D-NET-146.
 
 **Next (round 5 remainder):**
-- **D-NET-147** — the 0x10 static records omit parent_slot(0x020)/bone_b(0x080)/ammo_count:
-  golden buildings carry flags 0x0A1 + ammo 0xFF; live symptom = entering a building/armory
-  sometimes teleports the joiner to map origin (parent frame resolves null). Needs static
-  parent links plumbed from the mission promote + the 0x10 serializer witness.
+- **D-NET-147** — FIXED 2026-07-03 (live teleport re-verify pending): the 0x10 flag-0x20 dword
+  is the entity FLAGS (entity+36) streamed raw — NOT a parent slot; now composed at promote
+  (BMS Indestructible/Reflective/NoShadow + Building kind) + item-traits (hp==0 → 0x4000000 +
+  subType 0xFF) and streamed with ammo (BMS byte 81) / refNum (byte 153). Deferred: sectioned
+  sectionMask rebuild, armory weaponByte/attachRef, scoreFlag gate. See net-re D-NET-147.
 
 **Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
 channel ratio — remote players render idle-posed); host-side `WeaponSlot_ReloadAmmo` bookkeeping

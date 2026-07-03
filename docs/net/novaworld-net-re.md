@@ -1368,9 +1368,9 @@ entity:
 | eulerZ / eulerX / eulerY | i32 (32-bit BAM) | `flags & 0x01 / 0x02 / 0x04` | entity+16/+20/+24 |
 | sectionMask | i32 | `flags & 0x08` | entity+308 |
 | team | u8 | `flags & 0x10` | entity+354 |
-| parentSlot | i32 | `flags & 0x20` | entity+36 |
-| ammoCount | u8 | **always** | entity+290 (u16) |
-| refNum / subType | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 (D-NET-94; not bones) |
+| entityFlags | u32 | `flags & 0x20` | entity+36 — the entity FLAGS dword streamed raw (the old "parentSlot" reading was WRONG; witnessed at the serializer source `[orig: serialize_pool2_static_to_buffer @0x5042F0 @0x5044e6]`). Composed at spawn from BMS attributes (Indestructible 1<<21 → 0x4000000, Reflective 1<<23 → 0x400, NoShadow 1<<24 → 0x1000000 `[orig: Entity_SpawnFromBMSRecord @0x40e9f0]`) + def traits (type Building → 0x20000 `[orig: Entity_InitFromModel @0x40e105]`; healthMax 0 → 0x4000000 `[orig: @0x40dc8e]`). Golden ASH_I5A buildings: 0x04020400; bridges add NoShadow → 0x05020400. D-NET-147 |
+| ammoCount | u8 | **always** | entity+290 (u16) ← BMS record byte 81 `[orig: @0x40e9f0]` |
+| refNum / subType | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 (D-NET-94; not bones). refNum ← BMS byte 153; subType = 0xFF when the def is indestructible (healthMax 0) `[orig: @0x40dc8e]` |
 | scoreFlag | u8 | `flags & 0x100` | entity+624 (i32) |
 | weaponByte | u8 | **always** | entity+538 |
 | attachRef | u16 | `weaponByte != 0 \|\| flags & 0x200` | entity+350 |
@@ -6280,18 +6280,34 @@ REMOVED (npruntime server_message_dispatch.cpp / novaworld ingame_encode). Pinne
 is renamed `decode_team_spawn_ack` (was `decode_burst_entity_request` — the "entity
 request" reading was wrong).
 
-**D-NET-147** [reimpl divergence, TRACKED 2026-07-02] **The S2C 0x10 static-entity records
-omit the building/armory linkage fields — golden building records carry `field_flags 0x0A1`
-(euler_z 0x001 + parent_slot 0x020 + bone_b 0x080) and `ammo_count 0xFF` on enterable pier
-buildings; ours sends `0x001` with ammo_count 0.** Wire-witnessed on ASH_I5A (golden vs v18,
-slot 0x2000-0x2002 building records + Armory records). `build_pool2_static_batch`
-(entity_wire_bridge.cpp:304) never fills parent_slot/bone_b/ammo_count — the world model has
-no static parent links (the mission's placement hierarchy). The live-witnessed symptom:
-entering a building or touching an armory SOMETIMES teleports the joiner to the map origin
-(v18) — the client's interior/parenting logic reads these fields (parent frame resolves null
-→ local coords applied as world). No 0x18/0x0F traffic involved (0 of each in v18). OPEN:
-witness the 0x10 serializer's field sources (entity+0x28 parent + the bone/ammo bytes) and
-plumb static parent links from the mission promote before fixing the batch builder.
+**D-NET-147** [reimpl divergence, FIXED 2026-07-03 (fields witnessed + streamed); live
+teleport re-verify pending] **The S2C 0x10 static-entity records omitted the flag-0x20 dword,
+subType and ammo byte — golden building records carry `field_flags 0x0A1` + `ammo_count 0xFF`;
+ours sent `0x001` with ammo 0.** Wire-witnessed on ASH_I5A (golden vs v18, building + Armory
+records); live symptom: entering a building / touching an armory SOMETIMES teleported the
+joiner to the map origin (v18; no 0x18/0x0F traffic involved). The 2026-07-03 serializer
+witness (`[orig: serialize_pool2_static_to_buffer @0x5042F0]`) CORRECTED the field identity:
+the flag-0x20 i32 is **the entity FLAGS dword (entity+36) streamed raw** — the old
+"parentSlot" reading was wrong (and the old "plumb static parent links" theory with it; BMS
+`blink_parent` remains parsed-but-unconsumed, see below). Golden values decode as composed
+spawn flags: buildings `0x04020400` = Indestructible-def (healthMax 0 → 0x4000000 `[orig:
+Entity_InitFromModel @0x40dc8e]`, which ALSO sets subType = 0xFF — the flag-0x80 byte) +
+type-Building (0x20000 `[orig: @0x40e105]`) + BMS `Reflective` attribute (1<<23 → 0x400, the
+per-placement pier/water bit); bridges add BMS `NoShadow` (1<<24 → 0x1000000 → `0x05020400`);
+`ammo_count` ← BMS record byte 81 and `refNum` ← byte 153 `[orig: Entity_SpawnFromBMSRecord
+@0x40e9f0]`. FIXED: `world::Entity` gains `engine_flags`/`ammo_count`/`sub_type`/`ref_num`;
+`promote_mission` composes the BMS-attribute bits + Building bit and carries bytes 81/153
+(bms::Entity::gen_reserved1 RENAMED `ref_num`, dropped from the reserved-zero parse assert);
+the def-sourced half (hp==0 → 0x4000000 + subType 0xFF) lands in NovaSimulation::
+resolve_item_traits; `build_pool2_static_batch` streams all four;
+`StaticEntityRecord::parent_slot` RENAMED `entity_flags` (encoder/decoder/nw_pp/§5.9 map).
+Pinned by `npruntime_initial_state_burst` (building record emits field_flags 0x0A1 +
+eflags 0x04020400 + ammo/subType 0xFF) and `nw_ingame_encode` round-trip. DEFERRED (tracked
+here): the sectioned-destructible `sectionMask` rebuild (def attrib sign bit → per-section
+state table `[orig: @0x50443f..0x5044a4]` — ASH_I5A golden has one such record, Power
+Generator Housing flags 0x0A9), the armory `weaponByte`/`attachRef` via
+`CWeaponSlotManager_GetEntitySlotInfo @0x4a2750` (golden ASH_I5A statics all carry weap 0x00),
+and the `scoreFlag` def-callback gate `[orig: @0x504554]`.
 
 **D-NET-145** [reimpl divergence, FIXED 2026-07-02] **The initial-state burst's phase-8
 loadout gate had a reimpl-invented ~10 s timeout fallback that force-started the game-start

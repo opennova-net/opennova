@@ -508,7 +508,11 @@ struct Entity {
     char gen_string[31];               // .mis: gen_string is 31B @120-150
     uint8_t gen_reserved0;             // @151: reserved zero
     uint8_t grenades;                  // @152: .mis grenades
-    uint8_t gen_reserved1;             // @153: reserved zero
+    uint8_t ref_num;                   // @153: registration/group id -> entity+533 refNum (was
+                                       // "gen_reserved1" — the engine reads it [orig:
+                                       // Entity_SpawnFromBMSRecord @0x40e9f0]; streamed as the 0x10
+                                       // static record's flag-0x40 byte, §5.9/D-NET-94; zero in the
+                                       // shipped corpus)
     uint8_t mission_critical;          // @154: .mis mission_critical
     uint8_t lfp_group;                 // @155: .mis lfp_group
     int32_t max_attack_distance;

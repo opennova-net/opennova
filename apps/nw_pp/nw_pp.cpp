@@ -546,8 +546,17 @@ void print_static_entity_record(uint16_t slot, const StaticEntityRecord &r) {
 	std::printf("        slot %s type=%s flags=0x%03x pos=(%.1f, %.1f, %.1f)",
 	            handle_str(handle).c_str(), type_str(r.item_type_id).c_str(),
 	            unsigned(r.field_flags), fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
+	if (r.field_flags & 0x0008) std::printf(" sect=0x%08x", unsigned(r.section_mask));
 	if (r.field_flags & 0x0010) std::printf(" team=0x%02x", r.team_byte);
-	std::printf(" ammo=0x%02x weap=0x%02x\n", r.ammo_count, r.weapon_byte);
+	// The D-NET-147 building/armory fields (entity+36 Flags / +533 / +532 / +624 / +350).
+	if (r.field_flags & 0x0020) std::printf(" eflags=0x%08x", unsigned(r.entity_flags));
+	if (r.field_flags & 0x0040) std::printf(" refNum=0x%02x", r.bone_a);
+	if (r.field_flags & 0x0080) std::printf(" subType=0x%02x", r.bone_b);
+	if (r.field_flags & 0x0100) std::printf(" score=0x%02x", r.score_flag);
+	std::printf(" ammo=0x%02x weap=0x%02x", r.ammo_count, r.weapon_byte);
+	if (r.weapon_byte != 0 || (r.field_flags & 0x0200))
+		std::printf(" attach=%s", handle_str(r.attach_ref).c_str());
+	std::printf("\n");
 }
 
 void print_tag_10(const std::vector<uint8_t> &body) {

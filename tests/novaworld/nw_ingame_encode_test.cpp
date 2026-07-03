@@ -167,7 +167,7 @@ bool records_equal(const StaticEntityRecord &a, const StaticEntityRecord &b) {
 	       a.pos_x == b.pos_x && a.pos_y == b.pos_y && a.pos_z == b.pos_z &&
 	       a.euler_z == b.euler_z && a.euler_x == b.euler_x && a.euler_y == b.euler_y &&
 	       a.section_mask == b.section_mask && a.team_byte == b.team_byte &&
-	       a.parent_slot == b.parent_slot && a.ammo_count == b.ammo_count &&
+	       a.entity_flags == b.entity_flags && a.ammo_count == b.ammo_count &&
 	       a.bone_a == b.bone_a && a.bone_b == b.bone_b && a.score_flag == b.score_flag &&
 	       a.weapon_byte == b.weapon_byte && a.attach_ref == b.attach_ref;
 }
@@ -187,7 +187,7 @@ int test_static_batch_all_flags() {
 	r.euler_y      = int32_t(0x05060708); // 0x0004
 	r.section_mask = int32_t(0x40);       // 0x0008
 	r.team_byte    = 2;                   // 0x0010
-	r.parent_slot  = int32_t(0x2003);     // 0x0020
+	r.entity_flags = 0x04020400u;         // 0x0020 (entity+36 Flags; golden building value)
 	r.ammo_count   = 30;                  // always
 	r.bone_a       = 5;                   // 0x0040
 	r.bone_b       = 6;                   // 0x0080
