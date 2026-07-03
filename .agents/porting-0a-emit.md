@@ -148,6 +148,26 @@ target) in net-re D-NET-146.
   previously spawned in team 1's base — 6003 first-family-wins). `zone_chain_test` pins the
   ASH shape; 230/230 ctest; GDExtension rebuilt. Slice 2 = the capture loop emits
   (0x6F/0x53/0x6C + 0x1E zone events + flips), waves, seat deploys.
+  **v31 LIVE (same day): FOUR FAILED riders → the next round is an IDA ALIGNMENT PASS over
+  the v31 wire.** (1) Deploy screen still absent — ZERO C2S 0x0E all session (the picker
+  never appeared client-side; slice-1 handler unexercised). The advertising gap, ranked
+  leads: the 0x0A phase-0 mask can't reach a deploy-screen client (state==6 gate in
+  Server_SendEntityStateToPlayer @0x517BA0, D-NET-134) → the pre-deploy carrier is likely
+  the 0x0F BODY (`serialize_player_state_to_packet @0x502D10` — UNWITNESSED, reads
+  g_respawn_requires_team_dead); the 1359 zone objects' 0x0D records may lack the D-NET-70
+  team-gated `spawn_flags & 0x10` bit; the CLIENT deploy-list builder is unwitnessed.
+  (2) Vehicle attach dead: 2 C2S 0x26 on the wire (bodies `02 00 | 04 10 | 01 00` /
+  `2d 10`), NO dispatch case 0x26/0x27 exists — port HandleVehicleAttach @0x502390 /
+  Detach @0x4FC980 → Entity_AttachToVehicleSlot @0x4946D0 + the mount replication
+  (0x0A op1 mount-else-ground echo, D-NET-151). (3) HUD player count STILL wrong —
+  D-NET-155 fix #2 failed live too (only 6 S2C 0x16 all session, 2 joiners); STOP guessing
+  0x16: IDA the client HUD count SOURCE (which global the HUD draw reads, which handler
+  writes it). (4) Body anims (the tracked body-motor off-14 states / off-15 channel ratio
+  echo) — promote into the pass: witness the C2S 0x0C extended-uplink anim fields → entity
+  → 0x0A compact echo chain and port the echo. Artifacts:
+  `.scratch/retail_join_v31_game.pcapng` (8.1 MB, udp.port==32768 filter of the 664 MB
+  dual raw), host logs `host_std{out,err}_v31.log`, capture script `start_v31_capture.ps1`;
+  histogram: 11046×0x0A / 921×0x0C / 45×0x06 / 6×0x16 / 0×0x0E / 2×0x26 / 4×0x13.
 
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
@@ -155,10 +175,12 @@ value).** The wire has advertised AS all along; the internal "COOP" label (main_
 mp_menu_host.gd boot dicts) was a bring-up leftover and is renamed to "AS"; the menu-host
 path now seeds the numeric gametype 0x10010 explicitly (it previously advertised 0). The
 FULL-AS-GAME gap list, in rough order:
-  1. **Spawn selection** — DONE round 13 (witnessed §5.61 + slice-1 port: 0x0E pick path,
-     owned-zone mask advertising, per-team join markers, frontier hint; v31 live-verifies).
-     Remaining riders: spawn waves (host option), vehicle-seat deploys, 6007 scatter,
-     the D-NET-150 spawn-menu re-stream deferral.
+  1. **Spawn selection** — witnessed §5.61 + slice-1 ported round 13 (0x0E pick path,
+     owned-zone mask, per-team join markers, frontier hint) but **v31 live FAILED: the
+     picker never appears (zero C2S 0x0E)** — the missing piece is the pre-deploy
+     ADVERTISING (the 0x0F body @0x502D10 / the 0x0D spawn_flags 0x10 bit / the client
+     deploy-list builder — see the round-13 v31 bullet). Then the deferred riders: waves,
+     vehicle-seat deploys, 6007 scatter, the D-NET-150 spawn-menu re-stream.
   2. **AS zone capture loop** — WITNESSED round 13 (§5.61: the 1 Hz block — proximity
      @0x5086A0, secure pass @0x519690 w/ 0x6F + 0x1E 0x3B/0x3C, timed engine @0x53B8F0 w/
      0x53×4 + 0x6C, control formula @0x501120, flip events 43/44/50-53/56/57, team

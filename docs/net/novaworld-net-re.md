@@ -5624,6 +5624,26 @@ retail defaults), vehicle-seat deploys (seat model unported), deploy-time 0x61/0
 re-sends, the 6007 in-zone scatter + userpoint offset, and the capture loop itself
 (slice 2: the 1 Hz control delta/0x6F/0x53/0x6C/0x1E emits + zone team flips).
 
+**v31 LIVE (2026-07-03, 2 retail clients): the deploy screen still did NOT appear — and
+the wire shows ZERO C2S 0x0E all session, so the slice-1 pick handler went unexercised;
+the gap is the ADVERTISING side (what makes the client SHOW the picker), not the pick
+path.** Open leads for the alignment pass: (a) the phase-0 owned-zone mask rides the
+per-frame 0x0A, but `Server_SendEntityStateToPlayer @ 0x517BA0` has the **state==6 deploy
+gate** (D-NET-134 row) — a client sitting at the deploy screen (game state 9) receives no
+0x0A, so the mask CANNOT be its picker source; the pre-deploy carrier is likely the S2C
+0x0F body itself — `serialize_player_state_to_packet @ 0x502D10` is UNWITNESSED (it reads
+`g_respawn_requires_team_dead`, so it is the deploy-screen state block); (b) the zone
+objects reach the client as pool-1 0x0D records — D-NET-70's "Change Team & Spawn Volume"
+objects ride 0x0D **team-gated `spawn_flags & 0x10`**; whether our 0x0D encoder sets that
+bit/team for the 1359 bunkers is unverified; (c) the CLIENT deploy-map list builder is
+unwitnessed — find what populates the insertion/spawn list UI and which wire fields gate
+each row. v31 also re-confirmed: vehicle attach dead (2 C2S 0x26 on the wire, no
+dispatch case exists — silently dropped), HUD player count still wrong (only 6 S2C 0x16
+all session; the D-NET-155 generation re-push needs a third look, and the client HUD
+count SOURCE itself is unwitnessed), and the body-motor anim gap (off-14/off-15 echo)
+re-reported. Artifacts: `.scratch/retail_join_v31_game.pcapng` (udp.port==32768 filter of
+the 664 MB dual-interface raw).
+
 **IDB changes (2026-07-03 AS session).** Function renames (46): the `CWeaponSlotManager*`/
 `CWeaponSlotMask*` cluster → `ZoneSlotChain_{GetTeamMask@0x4A2350, ContainsEntity@0x4A23D0,
 IsZoneCapturableByTeam@0x4A2450, GetOwnedZoneMask@0x4A2620, RebuildOwnershipMasks@0x4A26C0,
