@@ -519,12 +519,29 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.burst.loadout_received = true;
 				break;
 			}
-			case 0x0A: // initial-sync roster ack [orig: NapiNPServerMsg_0x00A @0x513260]
+			case 0x0A: // spawn-menu request [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260]
+				// THE world-stream unlock (D-NET-150): the handler sets game state 9, advances
+				// the session's sync state to 4 and RESTARTS the world-stream phase machine —
+				// the §5.2a world stream never starts until the client asks for the spawn menu.
+				// (Golden retail-ashi5a: S 0x11 f=201572 -> C 0x0A f=201573 -> first S 0x10
+				// f=201713.) Streaming without waiting raced a COLD retail client's mission
+				// build and its 0x0C self-bind hit a half-built character registry (the DBuggy
+				// blob shadow + missing FP arms). Pre-spawn only in the reimpl: retail re-runs
+				// the full world stream on EVERY spawn-menu visit (state 5 -> 4 + phase reset);
+				// our tick loop skips spawned connections, so the mid-game re-stream stays an
+				// open divergence (see the D-NET-150 record).
+				if (!conn.burst.spawned && conn.burst.sync_state != 0) {
+					conn.burst.game_state = 9;              // [orig: @0x513295]
+					if (conn.burst.sync_state != 4)
+						conn.burst.sync_state = 4;          // [orig: @0x5132a0/@0x5132b1]
+					conn.burst.world_stream_phase = 0;      // [orig: @0x5132f6]
+				}
 				// Golden (f161-162): C 0x0A (empty) -> S 0x19 (4 B tick) ONLY. The prior
 				// emit_roster sent 0x46/0x16/0x19/0x1A — the unsolicited 0x1A re-sets
 				// dword_81474C (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
+				// [orig: NetPacket_WriteTimestampB @0x5046f0 -> S2C 0x19 @0x5132f1]
 				replies.push_back(make_protocol_message(0x19, build_tag1a_tick(now_tick)));
 				break;
 			case 0x29: // team/spawn ack [u16 team_change_index] — NO reply on a plain join.

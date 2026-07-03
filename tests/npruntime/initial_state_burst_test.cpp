@@ -292,10 +292,35 @@ int main_impl() {
 		np::NapiNPConnection &jconn = ctx3.np_protocol.connection_list.back();
 
 		// A REMOTE (type-1) joiner is PACED: each call emits only a few datagrams (kPacedMsgsPerTick),
-		// so the burst takes many calls to stream the player-sync + world-stream and then PAUSE at the
-		// phase 7→8 loadout gate. Drive it until it pauses (bounded loop).
-		bool reached_loadout_gate = false;
+		// so the burst takes many calls to stream the player-sync tail — and then PARKS at sync-state
+		// 3 until the client's C2S 0x0A spawn-menu request (D-NET-150): the world stream must never
+		// start unrequested [orig: state 3 @0x51c134; 3 -> 4 only via
+		// NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260]. Drive to the park, assert nothing
+		// world-stream leaked, then apply the 0x0A advance and drive to the phase 7→8 loadout gate.
+		bool parked_for_spawn_menu = false;
 		int paced_calls = 0;
+		for (int i = 0; i < 64 && !parked_for_spawn_menu; ++i) {
+			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			++paced_calls;
+			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
+			for (const auto &m : s.messages) {
+				if (!expect(m.tag != 0x10 && m.tag != 0x0D && m.tag != 0x0C && m.tag != 0x20,
+				            "no world-stream tag before the client's C2S 0x0A (D-NET-150)")) return 1;
+			}
+			if (jconn.burst.sync_state == 3) parked_for_spawn_menu = true;
+		}
+		if (!expect(parked_for_spawn_menu, "player-sync tail parks at sync-state 3 (awaiting C2S 0x0A)")) return 1;
+		{
+			// Park is stable: further ticks emit nothing until the 0x0A arrives.
+			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			if (!expect(s.messages.empty(), "parked burst emits nothing without the C2S 0x0A")) return 1;
+		}
+		// Simulate the client's C2S 0x0A spawn-menu request (what the dispatch case 0x0A applies)
+		// [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260].
+		jconn.burst.game_state = 9;
+		jconn.burst.sync_state = 4;
+		jconn.burst.world_stream_phase = 0;
+		bool reached_loadout_gate = false;
 		for (int i = 0; i < 256 && !reached_loadout_gate; ++i) {
 			np::InitialStateStep s = np::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;

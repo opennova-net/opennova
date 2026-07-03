@@ -440,6 +440,13 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 
+	// The header's ack_count is the peer's "last of YOUR seqs I received" — the confirm side of the
+	// initial-state backlog throttle (retail clients carry it on every 0x43, including game-message-
+	// less keepalive datagrams; the golden world-stream gap has no C2S game messages yet the stream
+	// advances). High-water only: a reordered older ack must not un-confirm. [orig: header layout
+	// @0x61edd0 field +8; consumed by the conn+0x768 outstanding gate @0x51bf1b/0x51bc04]
+	if (hdr.ack_count > conn.peer_acked_seq) conn.peer_acked_seq = hdr.ack_count;
+
 	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
 	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
 	// Player_FindLocalPlayerEntity @0x4e0090 compares entity+0x78 against, so the host MUST stamp it

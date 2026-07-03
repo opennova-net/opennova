@@ -266,6 +266,11 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// 0x10 -> 0x0D -> 0x0C -> 0x20]. The paged emits push directly; the action switch is a no-op here.
 		action = Action::SkipSilent;
 		switch (b.world_stream_phase) {
+		case 0: // phase-0 init [orig: @0x51bc1a case 0]: zero the page cursor, advance to phase 1
+		        // (one no-emit tick). The C2S 0x0A handler re-enters here on every spawn-menu
+		        // request (it writes world_stream_phase = 0 [orig: @0x5132f6]).
+			b.phase_loop_counter = 0;
+			break;
 		case 1: { // 0x10 pool-2 static structures [orig: sub_5042F0]
 			const opennova::StaticEntityBatch full = opennova::netsim::build_pool2_static_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x10, full.records.size(), [&](std::size_t off, std::size_t cnt) {
@@ -445,8 +450,15 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	// Advance the cursor and handle track transitions / the terminator.
 	if (b.sync_state == 2) {
 		if (b.player_sync_subphase >= 20) {
-			b.sync_state = 4;          // -> world-stream track
-			b.world_stream_phase = 1;
+			// Player-sync tail [orig: 0x51c113..0x51c13c]: game state 9, sync state -> 3, subphase
+			// reset. State 3 PARKS the burst — the world stream starts only when the client's C2S
+			// 0x0A spawn-menu request advances 3 -> 4 (NapiNPServerMsg_HandlePlayerSpawnRequest
+			// @0x513260; golden retail-ashi5a S 0x11 f=201572 -> C 0x0A f=201573 -> first S 0x10
+			// f=201713). Streaming without that request is what raced a cold retail client's
+			// mission build and mis-bound its own CharacterEntity (D-NET-150).
+			b.game_state = 9;          // [orig: CNetPlayer_SetGameState(.., 9) @0x51c11c]
+			b.sync_state = 3;          // [orig: @0x51c134]
+			b.player_sync_subphase = 0; // [orig: @0x51c13c]
 		} else {
 			++b.player_sync_subphase;
 		}
@@ -499,7 +511,35 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	constexpr std::size_t kPacedMsgsPerTick = 1; // ~1 datagram/host-frame; golden is ~0.4 batch/frame
 	const bool is_remote = (conn.type == 1);
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced
+
+	// Backlog throttle [orig: 0x51bf1b (player-sync track) / 0x51bc04 (world-stream track)]: the
+	// original emits NOTHING for this player while the connection's outstanding reliable-message
+	// count is >= 20 (`conn+0x768 < 20` guard on BOTH track heads). That backpressure is what
+	// stretches the retail world stream across a cold client's whole mission build (golden
+	// retail-ashi5a: the 0x10 phase alone spans f=201713..217422 — ~15,700 frames of client-paced
+	// trickle) so the 0x0C organic batch lands only once the client is done loading. Structural
+	// stand-in: unconfirmed outbound datagrams = our framed seqs minus the peer's echoed ack
+	// high-water (D-NET-150; exact retail counter maintenance pending an IDA pass).
+	if (is_remote) {
+		const uint32_t sent = conn.seq.next_outbound_seq - 1;
+		const uint32_t outstanding = sent > conn.peer_acked_seq ? sent - conn.peer_acked_seq : 0;
+		if (outstanding >= 20) return step; // stalled on the client's acks — resume when they arrive
+	}
+
 	while (b.sync_state != 5) {
+		if (b.sync_state == 3) {
+			// PARKED [orig: @0x51c134 leaves state 3; the emitter has no state-3 arm]: the world
+			// stream starts only when the client's C2S 0x0A spawn-menu request advances 3 -> 4
+			// (dispatch port of NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260). No timeout —
+			// a joiner that never asks never streams, exactly like retail (D-NET-145 pattern).
+			// The host's own loopback has no 0x0A sender — retail's host-local client sends it
+			// from the shared in-process loading loop [orig: NapiClient_WaitForGameStart
+			// @0x42cc10] — so the type-2 loopback applies the handler's advance inline.
+			if (is_remote) break;
+			b.game_state = 9;         // [orig: CNetPlayer_SetGameState(.., 9) @0x513295]
+			b.sync_state = 4;         // [orig: @0x5132b1]
+			b.world_stream_phase = 0; // [orig: @0x5132f6]
+		}
 		if (is_remote && b.sync_state == 4 && b.world_stream_phase == 8 && !b.loadout_received) {
 			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start
 			// bundle AND the per-frame 0x0A stream — with NO timeout. The golden retail host

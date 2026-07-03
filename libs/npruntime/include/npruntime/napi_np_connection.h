@@ -56,9 +56,14 @@ enum class ConnectionPhase : uint8_t {
 // entity_batch_count / spawned here, no longer the game_runtime GameSessionState).
 // [orig: the playerSlot+0x20 sync-state + playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
 struct InitialStateBurst {
-	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 4 world-stream / 5 done
+	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 3 WAIT for the
+	                                    // client's C2S 0x0A spawn-menu request / 4 world-stream / 5 done.
+	                                    // State 3 is the load gate: the player-sync tail parks here
+	                                    // [orig: @0x51c134] and ONLY NapiNPServerMsg_HandlePlayerSpawnRequest
+	                                    // @0x513260 (C2S 0x0A) advances 3 -> 4 — the world stream never
+	                                    // races a client that hasn't asked for it (D-NET-150).
 	uint16_t player_sync_subphase = 8;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
-	uint8_t  world_stream_phase = 0;    // [playerSlot+89882] 0 not-started, 1=0x10 .. 7=0x1A
+	uint8_t  world_stream_phase = 0;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
@@ -185,6 +190,15 @@ struct NapiNPConnection {
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
 	SessionSequencing seq{};       // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
+	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
+	                               // original stalls both burst tracks while the connection's
+	                               // outstanding-message count (conn+0x768) >= 20 [orig: the
+	                               // NapiNPMessageQueueState field read at 0x51bf1b / 0x51bc04] — the
+	                               // client-paced backpressure that stretches the world stream across a
+	                               // cold client's mission build (D-NET-150). Our structural stand-in
+	                               // counts unconfirmed outbound datagrams (next_outbound_seq-1 minus
+	                               // this); exact retail inc/dec sites pending an IDA pass.
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
 
 	// self_id (the joiner's own ConnectionId / dcb / unk_18, learned from its in-match 0x48

@@ -180,6 +180,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == 0x0A) {
 			// Per-frame world snapshot — surface for the caller's NetClientView.
 			out.inbound_0a.push_back(m.payload);
+		} else if (m.tag == 0x11) {
+			// S2C 0x11 ends the player-sync bundle; the retail client answers with the EMPTY C2S
+			// 0x0A spawn-menu request — the message that advances the host's session sync state
+			// to 4 and starts the §5.2a world stream [orig: NapiNPServerMsg_HandlePlayerSpawnRequest
+			// @0x513260; golden retail-ashi5a S 0x11 f=201572 -> C 0x0A f=201573]. A host (ours or
+			// retail) never streams the world to a joiner that hasn't sent it (D-NET-150).
+			out.outbound.push_back(frame_inner(0x0A, {}));
 		}
 		// Other tags (game-start bundle scalars, world-state-load 0x0F) are not entity data.
 	}

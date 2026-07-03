@@ -411,7 +411,7 @@ This is what a reimplemented server must **handle**.
 | 0x07 | 0x4FC970 | |
 | 0x08 | 0x502210 | time-sync / anti-speedhack — `[u32 sessionId][u32 gameTimestamp]`; host checks the client's reported game-time deltas stay within 3% of wall-clock (`GetTickCount`). NOT movement. [orig: `validate_time_sync @ 0x502210`] |
 | 0x09 | 0x513200 | client checksum response |
-| 0x0A | 0x513260 | SPAWN-MENU REQUEST (len 0): game state → 9 (spawning), session+32=4, replies S2C 0x19 timestamp to the requester (mask 0x20) |
+| 0x0A | 0x513260 | SPAWN-MENU REQUEST (len 0) — **THE world-stream unlock** (`NapiNPServerMsg_HandlePlayerSpawnRequest`): game state → 9, session+32 → 4, world-stream phase (+89882) RESET to 0, replies S2C 0x19 timestamp (mask 0x20). The §5.2a world stream never starts (and, retail-only, RE-runs on every later spawn-menu visit) without it — D-NET-150 |
 | 0x0B | 0x51AB10 | |
 | 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
 | 0x0D | 0x513760 | CHAT MESSAGE uplink (`NapiNPServer_HandleChatMessage`; the old "replication frame ACK" note was WRONG): [u8 channel][cstr text]; strips `<...>` tags, 1000 ms rate limit, prepends name(/squad), fans out S2C 0x14 per recipient (2=team, 4/5=side, 11/12=squad, 13=proximity ≤100 u, default=all). §5.52 |
@@ -792,6 +792,15 @@ in-process. The flow:
      weapon restrictions → `0x76` server tick16 → `0x11`.
    - world-stream track (`slot+0x20 == 4`, phases 0→7): `0x10` static batch → `0x0D` pool spawn
      → `0x0C` entity states → `0x20` bulk pool-3 → `0x45` → `0x7E` → `0x1A` timestamp.
+
+   **The tracks do NOT chain directly (2026-07-02, D-NET-150):** the player-sync tail sets
+   sync-state **3** (`@ 0x51c134`) and the emitter has no state-3 arm — the world stream starts
+   only when the client's empty C2S 0x0A spawn-menu request advances 3 → 4 + resets the phase
+   (`[orig: NapiNPServerMsg_HandlePlayerSpawnRequest @ 0x513260]`). Every send in BOTH tracks is
+   additionally gated on the connection's sent-unacked reliable count `conn+0x768 < 20`
+   (`@ 0x51bbfd/@ 0x51bf14`; ack sweep decrements it in `[orig: CNapiNPConnection_ParseMessages
+   @ 0x625bc0]`) — client-paced backpressure that stretches the stream across a cold client's
+   mission build. Full mechanism: D-NET-150.
 
    This is the emitter ordering the planned P6 host world-stream must reproduce.
 
@@ -6180,6 +6189,49 @@ harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (t
 promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
+
+**D-NET-150** [reimpl divergence, FIXED 2026-07-02 (gate + throttle ported); cold-join
+re-verify pending] **The host started the §5.2a world stream unrequested and unthrottled —
+racing a COLD client's mission build; the 0x0C organic batch then landed mid-`Game_StartMission`
+and the client's self-bind (§5.59) resolved against a HALF-BUILT character registry (the
+cold-join DBuggy blob shadow + missing first-person arms).** Live-witnessed v22–v24: 5/5 data
+points cold=broken / warm=ok; the v24 armless-vs-armed wire diff was byte-identical except the
+join-order dcb (3 vs 4) — the defect is TIMING, not bytes. The original gates the stream twice:
+(1) **the client-request gate** — the player-sync track ends at sync-state **3** (`[orig:
+Server_SendInitialGameStateToPlayer @ 0x51bba0]` tail `@ 0x51c134`, game state 9 `@ 0x51c11c`,
+subphase reset `@ 0x51c13c`) and PARKS; only the client's empty C2S 0x0A spawn-menu request
+advances 3 → 4 and resets the world-stream phase to 0 (`[orig:
+NapiNPServerMsg_HandlePlayerSpawnRequest @ 0x513260]`: game state 9 `@ 0x513295`, sync-state 4
+`@ 0x5132b1`, phase reset `@ 0x5132f6`, S2C 0x19 reply `@ 0x5132f1`; golden retail-ashi5a:
+S 0x11 f=201572 → C 0x0A f=201573 → first S 0x10 f=201713); (2) **the sent-unacked throttle** —
+BOTH burst tracks stall while the connection's sent-but-unacknowledged reliable-message count
+`conn+0x768` is >= 20 (`[orig: @ 0x51bbfd (world-stream) / @ 0x51bf14 (player-sync)]`). The
+counter is the sent-list `NapiListHead.count` (list heads at conn+0x74C queued / +0x75C sent /
++0x76C free — kong's `NapiNPMessageQueueState` carve mis-slices these; retype proposal open):
+messages enqueue via `[orig: NapiNPMessage_Create @ 0x627fc0]`, and the inbound session-packet
+parser retires every sent message with `msg_seq <= hdr.ack_seq` (`[orig:
+CNapiNPConnection_ParseMessages @ 0x625bc0, sweep @ 0x625d9b]`, header dword +4; peer-ack
+high-water kept monotonically at conn+0x7b0 `@ 0x625dbe`). That backpressure is what stretched
+the golden world stream across the cold client's whole build (0x10 phase alone f=201713..217422,
+~15,700 frames of client-paced trickle) so 0x0C arrives only once the client is nearly done
+loading. FIXED as the faithful structural translation: the burst tail parks at sync_state 3, the
+dispatch 0x0A case ports the @ 0x513260 advance, the type-2 loopback self-advances (retail's
+host-local client sends its 0x0A from the shared in-process loop `[orig:
+NapiClient_WaitForGameStart @ 0x42cc10]`), and the emitter stalls while
+`next_outbound_seq-1 − peer_acked_seq >= 20` (npruntime server_initial_state.cpp /
+server_message_dispatch.cpp / napi_np_protocol.cpp `peer_acked_seq`; JoinerConnection now sends
+the 0x0A on receiving 0x11). Pinned by `npruntime_initial_state_burst` (parks at 3, no
+world-stream tag before the 0x0A, resumes on the advance) + `npruntime_client_runtime` (full
+join round-trip through both gates). DEFERRED (tracked here): retail RE-RUNS the full world
+stream on EVERY later spawn-menu 0x0A (state 5 → 4 + phase reset — the respawn map-screen
+refresh); our tick loop skips spawned connections, so the reset is applied pre-spawn only.
+Retail counts outstanding MESSAGES; our transport frames the burst 1 message : 1 datagram, so
+counting unacked datagram seqs is the same basis. Closes the TASK-2 dcb lead: the dcb is
+SERVER-ASSIGNED join order (`[orig: CNapiNPConnection_Create @ 0x62acb0]` seeds unk_14 from the
+protocol join counter → `[orig: CNapiNPConnection_OnStateChange @ 0x626060]` stamps
+connection_id(+0x18) → shipped to the client in the 0x82 MI TLV `[orig:
+CNapiNPConnection_SendSessionInit @ 0x620ef0]`; the client-uploaded CI/CK are reconnect-dedup
+keys only `@ 0x62bee6`) — the cold/warm 3-vs-4 delta was join order, not a divergence.
 
 **D-NET-149** [reimpl divergence, FIXED 2026-07-02 (core); broadcasts partially deferred]
 **A disconnecting player's world entity leaked forever — the goodbye path erased only the
