@@ -1507,7 +1507,10 @@ past tag==2 records to keep decoding the rest of the frame. REIMPL (D-NET-152): 
 side is ported — `world::RoundRing` (round_ring.h), the per-connection watermark + the
 line-of-fire scoring in netsim `select_round_events`, and the `RoundEventRecord` codec
 rename sweep (struct/codec/nw_pp/replay/tests; old nw_pp dumps show the pre-rename
-`weapon-hit`/`target`/`dmgExtra` labels).
+`weapon-hit`/`target`/`dmgExtra` labels). Live v28: a single-observer session correctly
+carries ZERO tag-2 (the idle host is the in-process connection and own rounds are skipped
+`@0x4fff97`) — the positive fan-out witness is the `netsim_two_peer_fanout` pin until a
+second observer client joins a capture (D-NET-152).
 
 **Tag 0x0C (C2S) — entity sub-packet** `[orig: NapiNPServerMsg_0x00C @ 0x501C30 →
 dispatch_entity_packet_callback @ 0x4D6A80]`. The joiner's per-frame uplink for an entity it
@@ -6252,7 +6255,8 @@ the flush boundary (`server_message_dispatch.cpp`; npruntime_reload_relay_test).
 CLOSED 2026-07-03 (D-NET-152): the host-side `WeaponSlot_ReloadAmmo @ 0x541720` refill is
 witnessed (remote-requester-only, refund + capacity clamp — §5.58) and the dispatch 0x25
 case now refills the same per-slot clip the 0x06 fire pipeline decrements
-(npruntime_client_fire_test; the ammo-pool refund/clamp stays deferred with the pool model).
+(npruntime_client_fire_test; the ammo-pool refund/clamp stays deferred with the pool model);
+v28 holds live — fire→empty→0x25→fire across 5 reloads, params echoed, no wedge (D-NET-152).
 
 **D-NET-143** [reimpl divergence, FIXED 2026-07-02 (defaults + echo); body motor tracked]
 **The 0x0A player records sent anim_state_id 0 (the null clip — the v15 flicker/spazz) and a
@@ -6331,7 +6335,24 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
-**D-NET-152** [reimpl gap, FIXED 2026-07-03 (pipeline ported; live verify pending v28)]
+**D-NET-152** [reimpl gap, FIXED 2026-07-03, **live-verified v28 (2026-07-03)**: 95/95 C 0x06
+uplinks decoded (fixed 45 B, zero failures), shooter = the joiner's own `0x0001` throughout
+(anti-spoof-valid), `hit_part` strictly monotonic 513→607, and every fired adm resolves to a
+granted 0x5A armory slot (19/24/29 = the successive rebought primaries; 62 = the 2-round 7th
+slot, fired exactly twice, alt flag 0x10); firing continued after every mid-session reload —
+5× C 0x25 each drew the S 0x49 relay back to the requester with the param echoed (215 ×4,
+461 ×1), no clip wedge (the D-NET-142 tail holds live); ZERO tag-2 on the wire is the
+EXPECTED single-observer outcome (the only other player is the idle host on the in-process
+socketless connection, and own rounds are skipped `@0x4fff97`) — the positive fan-out stays
+pinned by `netsim_two_peer_fanout` (round_event_fanout); a second observer retail client is
+the v29+ topology for the positive wire witness. Sweep clean: 0 C 0x0F, no 0xC9, 60.7/s 0x0A
+cadence, header value-sets match golden, 0x5A byte-shape golden incl. the double-send (the
+in-game "no spare mags at spawn" report is NOT a wire defect — we grant `(10,255,0)` for the
+primary exactly like golden; only the send moment differs: golden's 0x5A pair rides the
+deploy bundle, ours rides join — noted, not chased); diff-vs-golden gaps unchanged (env
+sub-block = D-NET-134 deferred; `player.animRatio` zero = the tracked body-motor off-15
+channel-ratio item; parked-vehicle euler/flags zero = session content — nothing was driven
+in v28).]
 **The host had NO dispatch case for C2S 0x06 (client fired round) — every shot a retail
 joiner fired was silently dropped: no ammo authority, no fire echo, other observers saw
 nothing (retail-join v26: 51 C 0x06 uplinks, zero host response; client prediction hid the
@@ -6384,11 +6405,15 @@ ammo-point classes — clips only for now, refill to capacity without the pool c
 the tag-1/tag-2 INTERLEAVE order (ours groups rounds after entities under the same budget —
 the retail decode loop is tag-driven, so grouped order reads identically).
 
-**D-NET-151** [reimpl divergence, FIXED 2026-07-03, **live-verified v27 (2026-07-03)**:
-user-confirmed the building/vehicle-deck run improved with no teleport reported; the v27
-dumpcap window expired before the (morning) test session, so no wire trace exists — the
-grounded exchange is pinned by the unit tests, and the next round's capture doubles as the
-wire re-verify] **The
+**D-NET-151** [reimpl divergence, FIXED 2026-07-03, **live-verified v27, wire re-verified v28
+(2026-07-03)**: v27 was user-confirmed only (its dumpcap window expired before the session);
+the v28 trace supplies the wire evidence — 105 grounded C 0x0C uplinks across FOUR carriers
+(pool-2 statics `0x200c`/`0x2243`/`0x2012` + the pool-1 vehicle deck `0x1004`), and our 0x0A
+player records echo each carrier back with compressed CARRIER-LOCAL pos + the local yaw byte
+(1,261 grounded records, e.g. `carrier=0x1004 pos=(0x9441,0x1b01,0xd4d0) yaw=0x76`); every
+grounded→on-foot edge resumes WORLD coords within a few units of the step-off (e.g. `-406.5
+→ local 0.0…1.1 → -404.0`), incl. a direct carrier→carrier handoff (`0x2243→0x200c`) — zero
+origin-teleport signature across all 923 uplinks] **The
 grounded-on-entity player replication loop was unported on BOTH host sides — the joiner's
 carrier-local uplink was applied as world coordinates and the 0x0A echo never returned the
 carrier — snapping a retail client to ~map origin the moment it stood ON another entity

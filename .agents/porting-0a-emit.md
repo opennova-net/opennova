@@ -48,7 +48,7 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | off-14/16 anim defaults (43 idle / adm index) | DONE (D-NET-143) | off-14 = 0x2B idle default; off-16 = `Entity::equipped_adm_index` (the uplink byte-24 echo — ex-`reserved_24` — category<11-gated [orig: @0x4C20A3]; spawn default = the armory's WPN_M4AUTO index [orig: @0x4B1116]) |
 | joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::player_item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
 | **grounded-on-entity carrier replication** | DONE (D-NET-151; v27 user-confirmed) | the player record's carrier = mount-else-`groundEntity` [orig: @0x4c0a08] with CARRIER-LOCAL pos + local yaw byte; the uplink apply lifts local→world via the 22-bit pose transforms [orig: @0x4c1de1/@0x43BD00] and mirrors the carrier into `Entity::ground_target`; flags bits 2-4 are a REPLACE, not an xor [orig: @0x4c1e4d]. `apply_player_intent` + `build_0a_frame` + `NetClientView`; pinned by `netsim_two_peer_fanout` (grounded_uplink_apply_and_echo, pose_transform_roundtrip) |
-| **C2S 0x06 fire → tag-2 round-event echo** | DONE (D-NET-152; live verify pending v28) | dispatch case 0x06 (anti-spoof + armory clip authority + `world::RoundRing` append [orig: @0x513310 → Server_ClientFiredRound @0x50baa0 → the adm fire action → RoundData_AddRound @0x4fdb40]); 0x25 refills the clip [orig: WeaponSlot_ReloadAmmo @0x541720]; netsim `select_round_events` = per-connection watermark + own-shooter skip + line-of-fire scoring [orig: @0x4ffee0] feeding `build_0a_frame`'s tag-2 records [orig: NetPacket_SerializeRoundEvent @0x504820]. Pinned by `npruntime_client_fire_test` + `netsim_two_peer_fanout` (round_event_fanout). Deferred: round SPAWN + damage (RoundData_SpawnRound @0x4ec0d0), fire-rate stamp (adm[276] unparsed), ammo pools, cease-fire |
+| **C2S 0x06 fire → tag-2 round-event echo** | DONE (D-NET-152; **live-verified v28** — 95/95 0x06 armory-resolved, no reload wedge; zero tag-2 = correct single-observer, positive fan-out = the netsim pin; v29 wants a 2nd observer client) | dispatch case 0x06 (anti-spoof + armory clip authority + `world::RoundRing` append [orig: @0x513310 → Server_ClientFiredRound @0x50baa0 → the adm fire action → RoundData_AddRound @0x4fdb40]); 0x25 refills the clip [orig: WeaponSlot_ReloadAmmo @0x541720]; netsim `select_round_events` = per-connection watermark + own-shooter skip + line-of-fire scoring [orig: @0x4ffee0] feeding `build_0a_frame`'s tag-2 records [orig: NetPacket_SerializeRoundEvent @0x504820]. Pinned by `npruntime_client_fire_test` + `netsim_two_peer_fanout` (round_event_fanout). Deferred: round SPAWN + damage (RoundData_SpawnRound @0x4ec0d0), fire-rate stamp (adm[276] unparsed), ammo pools, cease-fire |
 | deploy gate / eye-pos ref / budget ramp | not ported | `emit_connection_s2c` anchors to entity pos, no `state==6` gate |
 | body motor for net-snapped peers | not ported (D-NET-143 tail) | retail host SIMULATES remote players; ours net-snaps — anim STATE stays the 0x2B idle default until the motor drives peers |
 | platform physics (host-side grounding) | not ported (D-NET-151 residual) | retail sets `Flags\|=0x100000` + `groundEntity` in the collision pass [orig: @0x4b3291]; our motor has no platform pass, so OUR OWN player never reports grounded and peer ground links mirror the owner's uplink |
@@ -85,7 +85,10 @@ target) in net-re D-NET-146.
   "weapon/fire counters"); the 0x0A header anchor is the recipient EYE pos [orig: @0x517bf5],
   not a map origin; pool strides = per-pool entity struct sizes [orig: EntityPool_Allocate
   @0x442168: 904/1360/812/988/988].
-- **Round 11 (2026-07-03): D-NET-152 client fire PORTED** (live verify pending v28). The full
+- **Round 11 (2026-07-03): D-NET-152 client fire PORTED**, **live-verified v28** (95/95 0x06
+  armory-resolved, shot_seq monotonic 513→607, no reload wedge; zero tag-2 = the correct
+  single-observer outcome; D-NET-151 wire re-verified in the same trace — 4 carriers incl. a
+  pool-1 vehicle deck, zero teleport signature across 923 uplinks). The full
   chain witnessed: the "+684 fire callback" is the adm **'fire' ACTION** (action table
   admEntry+676, suffix table 0x830B94 → `WeaponAction_Fire @0x542b10`); a net primary fire
   re-enters `Server_ClientFiredRound` in LOCAL mode via `Entity_FireWeaponAndSendPacket
@@ -101,8 +104,8 @@ target) in net-re D-NET-146.
   Scope in memory `project_retail_join_0a_fidelity`.
 
 **Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
-channel ratio — remote players render idle-posed); host-side `WeaponSlot_ReloadAmmo` bookkeeping
-for the 0x25 relay; the armory-enable restriction table (`unused6 @ 0x24D5600` / player+89688 —
+channel ratio — remote players render idle-posed; the v28 diff confirms `animRatio` still zero);
+the armory-enable restriction table (`unused6 @ 0x24D5600` / player+89688 —
 4th 0x5A byte, observed 0); the env sub-block (D-NET-134); the passenger tail; a weapon.def feed
 for table-less hosts (headless `nw_server`). NOTE the armory truth is the HOST'S RESOLVED
 weapon.def (VFS view — a live JO:CA root resolves 126 weapons; the committed fixture is a
