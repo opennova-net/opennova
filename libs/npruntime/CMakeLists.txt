@@ -9,6 +9,7 @@ add_library(opennova_npruntime STATIC
     src/client_runtime.cpp
     src/host_session.cpp
     src/weapon_table_build.cpp
+    src/ammo_table_build.cpp
 )
 
 target_include_directories(opennova_npruntime

@@ -380,12 +380,84 @@ static void parse_pos_aligned(Token *vals, int n, int *out) {
 /* Ammo Parsing                                                              */
 /* ========================================================================= */
 
+/* `flag <name>` -> bit, matched first-name-wins in TABLE ORDER (three 'internal' names
+ * exist; a data file writing "internal" hits 0x40000 first, faithfully).
+ * [orig: the 30-entry table @0x813500; AmmoDef_ParseProperty @0x40a2d0] */
+static const struct { const char *name; unsigned int bit; } k_ammo_flag_names[] = {
+    {"ignoredmg", 0x1u},        {"ignore", 0x2u},
+    {"shrapnel", 0x4u},         {"silenced", 0x8u},
+    {"water", 0x10u},           {"detonatesatchels", 0x20u},
+    {"nosmoke", 0x40u},         {"nocollide", 0x80u},
+    {"nogravity", 0x100u},      {"hasitem", 0x200u},
+    {"instantkillzone", 0x400u},{"ownerimmune", 0x800u},
+    {"useownmove", 0x2000u},    {"noage", 0x4000u},
+    {"forcetracer", 0x8000u},   {"shotgun", 0x10000u},
+    {"claymore", 0x20000u},     {"nooitems", 0x80000u},
+    {"nomitems", 0x100000u},    {"noditems", 0x200000u},
+    {"ignorfoilage", 0x4000000u},{"priority", 0x800000u},
+    {"clipwater", 0x1000000u},  {"clipwaterfx", 0x20000000u},
+    {"designatetarget", 0x2000000u}, {"lawr", 0x8000000u},
+    {"fgrenade", 0x10000000u},  {"internal", 0x40000u},
+    {"internal", 0x1000u},      {"internal", 0x400000u},
+};
+
+/* `kztype rounds_kz_<X>` -> index 1..7; 0/unknown rejected like the original's
+ * "bad kill zone type" warning path. [orig: 8-name table @0x8133E0] */
+static const char *k_ammo_kz_names[8] = {
+    "rounds_kz_null",   "rounds_kz_knife", "rounds_kz_standard", "rounds_kz_medic",
+    "rounds_kz_radiusblast", "rounds_kz_c4", "rounds_kz_bullets", "rounds_kz_slash",
+};
+
+/* Decimal string -> 16.16 fixed point (integer math; matches the values ammo.def uses:
+ * "1", "0.5", ".04"). [orig: Math_ParseFixedPoint16 @0x6131f0] */
+static int parse_fixed16_n(const char *s, size_t len) {
+    size_t i = 0;
+    int neg = 0;
+    long long ip = 0, fp = 0, scale = 1;
+    if (i < len && (s[i] == '-' || s[i] == '+')) neg = (s[i] == '-'), ++i;
+    for (; i < len && s[i] >= '0' && s[i] <= '9'; ++i) ip = ip * 10 + (s[i] - '0');
+    if (i < len && s[i] == '.') {
+        for (++i; i < len && s[i] >= '0' && s[i] <= '9' && scale < 1000000; ++i) {
+            fp = fp * 10 + (s[i] - '0');
+            scale *= 10;
+        }
+    }
+    long long v = (ip << 16) + (fp * 65536 + scale / 2) / scale;
+    return (int)(neg ? -v : v);
+}
+
+/* Parsed 16.16 seconds -> 62 Hz ticks with rounding. [orig: sub_40A0F0 @0x40a0f0 —
+ * (62 * fp16 + 0x8000) >> 16] */
+static int parse_age_ticks_n(const char *s, size_t len) {
+    return (int)(((long long)62 * parse_fixed16_n(s, len) + 0x8000) >> 16);
+}
+
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);
+
 DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
     memset(out, 0, sizeof(*out));
 
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
+    int rc = parse_ammo_buffer(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    char *buf = (char *)malloc(size + 1);
+    if (!buf) return -1;
+    memcpy(buf, data, size);
+    buf[size] = '\0';
+    int rc = parse_ammo_buffer(buf, size, out);
+    free(buf);
+    return rc;
+}
+
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
 
     size_t entries_cap = 0;
     LineIter it = {buf, file_len, 0};
@@ -476,6 +548,89 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
             parse_ints(v, vl, current.recoil, 3);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "flag", 4)) {
+            /* OR the named bit; first table match wins [orig: @0x813500 walk]. An
+               unrecognized name is skipped (the original warns). */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1) {
+                char fl[64];
+                size_t fn = tok[0].len < sizeof(fl) - 1 ? tok[0].len : sizeof(fl) - 1;
+                to_lower_buf(fl, tok[0].s, fn);
+                for (size_t fi = 0; fi < sizeof(k_ammo_flag_names) / sizeof(k_ammo_flag_names[0]); ++fi) {
+                    if (strlen(k_ammo_flag_names[fi].name) == fn &&
+                        memcmp(k_ammo_flag_names[fi].name, fl, fn) == 0) {
+                        current.flags |= k_ammo_flag_names[fi].bit;
+                        break;
+                    }
+                }
+            }
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "max_age", 7)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            current.max_age_ticks = parse_age_ticks_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "arm_age", 7)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            current.arm_age_ticks = parse_age_ticks_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "error", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.error_fp16 = parse_fixed16_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "drag", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.drag_fp16 = parse_fixed16_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "bullet_radius", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            current.bullet_radius_fp16 = parse_fixed16_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "spread_count", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.spread_count = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kztype", 6)) {
+            /* Full-name match against the 8-entry table; only 1..7 accepted
+               [orig: @0x40a2d0 rejects index 0/unknown as "bad kill zone type"]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1) {
+                char kz[48];
+                size_t kn = tok[0].len < sizeof(kz) - 1 ? tok[0].len : sizeof(kz) - 1;
+                to_lower_buf(kz, tok[0].s, kn);
+                for (int ki = 1; ki < 8; ++ki) {
+                    if (strlen(k_ammo_kz_names[ki]) == kn &&
+                        memcmp(k_ammo_kz_names[ki], kz, kn) == 0) {
+                        current.kztype = ki;
+                        break;
+                    }
+                }
+            }
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_damage", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.kz_damage = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
+            current.min_stable_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "weight_in_grains", 16)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            current.weight_in_grains = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "tracerrate", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.tracer_rate = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "notarmmedammo", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.notarmmed_ammo, sizeof(current.notarmmed_ammo), tok[0].s,
+                          tok[0].len);
+            parsed = 1;
         }
 
         if (!parsed) {
@@ -483,7 +638,6 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
         }
     }
 
-    free(buf);
     return 0;
 }
 

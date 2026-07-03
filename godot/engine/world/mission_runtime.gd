@@ -183,6 +183,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if options.get("resource_root") != null:
 		if _sim.load_weapon_table(options["resource_root"], "weapon.def") != OK:
 			push_warning("MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo")
+		# Ballistics table (ammo.def) + the round_type resolve — the authoritative round
+		# sim's data feed (fire -> flight -> damage -> death; net-re §5.60). After the
+		# armory so every adm's fired round binds to its ammo index.
+		if _sim.load_ammo_table(options["resource_root"], "ammo.def") != OK:
+			push_warning("MissionRuntime: ammo.def not loaded — client fire echoes without authoritative rounds")
 	_log_infantry_debug_mounts()
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.

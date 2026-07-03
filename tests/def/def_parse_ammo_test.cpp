@@ -80,6 +80,65 @@ int main(void) {
         return 1;
     }
 
+    /* The round-sim field set (net-re §5.60) against the real AMMO_CAR15_556MM block:
+       velocity 854, max_age 3 s -> 186 ticks, arm_age 0, error 0, drag 0.255 -> 16712
+       (16.16), weight 62, penetration 20, kztype rounds_kz_C4 = 5, tracerRate 3,
+       bullet_radius 0.00278 -> 182. */
+    const DefAmmoDef *car15 = NULL;
+    for (size_t i = 0; i < ammo.count; ++i) {
+        if (strcmp(ammo.entries[i].name, "AMMO_CAR15_556MM") == 0) {
+            car15 = &ammo.entries[i];
+            break;
+        }
+    }
+    if (!car15) {
+        fprintf(stderr, "FAIL: could not find AMMO_CAR15_556MM entry\n");
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    struct { const char *what; long got, want; } checks[] = {
+        {"velocity", car15->velocity, 854},
+        {"max_age_ticks", car15->max_age_ticks, 186},
+        {"arm_age_ticks", car15->arm_age_ticks, 0},
+        {"error_fp16", car15->error_fp16, 0},
+        {"drag_fp16", car15->drag_fp16, 16712},
+        {"weight_in_grains", car15->weight_in_grains, 62},
+        {"penetration_impact", car15->penetration_impact, 20},
+        {"kztype", car15->kztype, DEF_AMMO_KZ_C4},
+        {"tracer_rate", car15->tracer_rate, 3},
+        {"bullet_radius_fp16", car15->bullet_radius_fp16, 182},
+        {"max_damage", car15->max_damage, 0},
+    };
+    for (size_t i = 0; i < sizeof(checks) / sizeof(checks[0]); ++i) {
+        if (checks[i].got != checks[i].want) {
+            fprintf(stderr, "FAIL: AMMO_CAR15_556MM %s: got %ld want %ld\n", checks[i].what,
+                    checks[i].got, checks[i].want);
+            def_free_ammo(&ammo);
+            return 1;
+        }
+    }
+
+    /* Flag bits via a LAW-style entry (flag LAWR / NoGravity / forcetracer). */
+    const DefAmmoDef *law = NULL;
+    for (size_t i = 0; i < ammo.count; ++i) {
+        if (ammo.entries[i].flags & DEF_AMMO_FLAG_LAWR) {
+            law = &ammo.entries[i];
+            break;
+        }
+    }
+    if (!law) {
+        fprintf(stderr, "FAIL: no entry carries the LAWR flag\n");
+        def_free_ammo(&ammo);
+        return 1;
+    }
+    if ((law->flags & DEF_AMMO_FLAG_NOGRAVITY) == 0 ||
+        (law->flags & DEF_AMMO_FLAG_FORCETRACER) == 0) {
+        fprintf(stderr, "FAIL: LAWR entry %s missing NoGravity/forcetracer bits (0x%x)\n",
+                law->name, law->flags);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+
     def_free_ammo(&ammo);
     printf("PASS: ammo parsing OK\n");
     return 0;

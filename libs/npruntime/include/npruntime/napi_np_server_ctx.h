@@ -120,6 +120,16 @@ struct NapiNPServerCtx {
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
 	// NetSystem (retired P8): the drain/emit primitives live in netsim/connection_fan.h.
 	world::World *world = nullptr;
+
+	// Dead host-side players awaiting their respawn release [orig: the death queue +
+	// respawn timers Server_ProcessPlayerDeath / GameEvent_PlayerDeath set (slot +360/+364,
+	// the 620-tick recent-spawn rule); a joiner's respawn instead rides its own deploy
+	// request]. Drained by Server_TickUpdate; §5.60.
+	struct PendingRespawn {
+		world::EntityHandle victim;
+		uint32_t due_tick = 0;
+	};
+	std::vector<PendingRespawn> respawn_queue;
 	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
 	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;

@@ -480,6 +480,13 @@ public:
 	Error load_weapon_table(const Ref<class NovaResourceRoot> &p_resource_root,
 	                        const String &p_name = "weapon.def");
 
+	// Parse ammo.def and install the ballistics/damage table (world::World::ammo), then
+	// resolve every armory entry's round_type to its ammo index — the authoritative round
+	// sim's data feed (§5.60). Call after load_weapon_table.
+	// [orig: Game_StartMission @0x52548a -> AmmoDef_LoadAll @0x40b0b0]
+	Error load_ammo_table(const Ref<class NovaResourceRoot> &p_resource_root,
+	                      const String &p_name = "ammo.def");
+
 	int get_spawned_count() const { return promo_.spawned; }
 	int get_brain_count() const { return promo_.brains; }
 };

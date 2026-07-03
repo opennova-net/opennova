@@ -668,6 +668,29 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
 				ev.adm_index = fr.adm_index;
 				world->rounds.add(ev);
+				// The authoritative round spawns SYNCHRONOUSLY with the ring append
+				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
+				// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
+				// adm's load-time-resolved round_type (adm+84 pair in the original); an
+				// armory- or ammo-less host skips the sim (fire still echoes).
+				if (!world->ammo.empty()) {
+					const world::WeaponTableEntry *fire_adm =
+							world->weapons.by_index(fr.adm_index);
+					if (fire_adm != nullptr && fire_adm->ammo_index >= 0) {
+						world::RoundSpawnParams rp;
+						rp.owner = conn.link.owned_entity;
+						rp.shooter_handle = fr.shooter_handle;
+						rp.origin.x = static_cast<float>(fr.pos_x) / 65536.0f;
+						rp.origin.y = static_cast<float>(fr.pos_y) / 65536.0f;
+						rp.origin.z = static_cast<float>(fr.pos_z) / 65536.0f;
+						rp.dir_yaw_bam = ev.dir_yaw;
+						rp.dir_pitch_bam = ev.dir_pitch;
+						rp.ammo_index = fire_adm->ammo_index;
+						rp.adm_index = fr.adm_index;
+						rp.shot_seq = fr.hit_part;
+						world->round_sim.spawn(*world, rp);
+					}
+				}
 				// No reactive reply — the echo rides the per-frame 0x0A fan (netsim
 				// select_round_events), reaching every OTHER in-match recipient.
 				break;

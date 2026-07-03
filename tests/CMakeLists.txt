@@ -1401,6 +1401,16 @@ target_link_libraries(npruntime_client_fire_test
     PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
 add_test(NAME npruntime_client_fire COMMAND npruntime_client_fire_test)
 
+# §5.60: the authoritative round sim — fire -> synchronous spawn [orig: RoundData_AddRound
+# @0x4fdb40 inline RoundData_SpawnRound @0x4ec0d0], flight + hit [orig:
+# Weapon_UpdateAllProjectiles @0x4ec020 -> Projectile_UpdatePhysics @0x4e9d70], the kinetic
+# damage number [orig: Weapon_CalcImpactDamage @0x4ec920], and the death routing + respawn
+# release [orig: Entity_CheckAndProcessDeath @0x51b550 -> S2C 0x13/0x1E].
+add_executable(npruntime_round_sim_test npruntime/round_sim_test.cpp)
+target_link_libraries(npruntime_round_sim_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
+
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
 # reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
 # joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate

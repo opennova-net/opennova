@@ -31,6 +31,11 @@ struct WeaponTableEntry {
     std::string ammo_class;         // `ammoclass <name> <n>` [orig: @0x5441CB]
     int16_t ammo_class_count = 0;
     int16_t ammo_bucket = 0;        // [orig: @0x544045]
+    // The fired round: `round_type "AMMO_X"`, resolved to an AmmoTable index at load —
+    // the original stores the resolved index pair at adm+84 (RoundData_AddRound reads
+    // adm dword 21) [orig: §5.60; resolve = AmmoDef_LookupByName]. -1 = unresolved.
+    std::string round_type;
+    int16_t ammo_index = -1;
     bool valid = false;
 };
 

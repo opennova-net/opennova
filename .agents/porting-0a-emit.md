@@ -102,6 +102,21 @@ target) in net-re D-NET-146.
   **NEXT = the authoritative round spawn + damage** (`RoundData_SpawnRound` port: projectile
   entity, spread, `Projectile_Handle*Impact` → health → the death family 0x13/0x26/0x54).
   Scope in memory `project_retail_join_0a_fidelity`.
+- **Round 12 (2026-07-03): the authoritative round sim + damage + death family — witnessed
+  end-to-end (net-re §5.60) AND PORTED at the MVP altitude, same session.** Keystones:
+  AddRound INLINE-spawns (the ring is only the fan-out log); damage is AUTHORITY-ONLY
+  (three independent gates); the damage model is KINETIC — `min(62·|vel|,1219) ·
+  weight_in_grains / 875 · zone` (falloff emerges from drag, no range table); death routes
+  per-tick health<=0 → players S2C 0x13 + 0x1E kill feed (0x52/0x54/0x32 deferred), AI
+  0x13, non-players 0x26 via the single Server_SendEntityStatePacket emit. Port: libs/def
+  ammo.def parse (§5.60 token subset) → `world::AmmoTable` + round_type resolve →
+  `world::RoundSim` (spawn on 0x06, per-tick flight/terrain/organics, kinetic damage) →
+  Server_TickUpdate death routing + host respawn release → NovaSimulation::load_ammo_table.
+  Pinned by `npruntime_round_sim_test` + `def_parse_ammo` (real 5.56 fixture fields).
+  MVP deferrals in round_sim.h: bone zones, drag/gravity, spread, vehicles, explosion kill
+  zones, arm-age child, 0x52/0x54/0x32, scoring. **NEXT = v29 live verify — TWO retail
+  clients (shooter + observer: the positive tag-2 wire witness) + shoot the host player
+  (death + kill feed + respawn).**
 
 **Also open (tracked):** the body motor for net-snapped peers (live off-14 anim states + off-15
 channel ratio — remote players render idle-posed; the v28 diff confirms `animRatio` still zero);

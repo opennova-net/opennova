@@ -5180,13 +5180,18 @@ the follow-ups get byte-witnessed at port time.
 `RoundData_SpawnRound @ 0x4EC0D0` — the `g_round_ring` is ONLY the tag-2 network fan-out
 log; the simulation starts at fire time. SpawnRound (hit-params struct = the 11-dword block
 AddRound builds: origin ptr, target, fire time, adm entry, weapon id, damage type/value,
-direction/spread words): score-multiplier stamp, tracer interval (adm+226), then the
-ammo-class dispatch — flag 0x400 trail + IMMEDIATE HITSCAN when adm halfword 22 == 1
+direction/spread words): score-multiplier stamp, tracer interval (the AMMO `tracerRate`
+byte +226), then the
+ammo-class dispatch — driven by the AMMO record's flags dword and kztype word (the
+`ammo.def` field map below): flag 0x400 `instantkillzone` + the IMMEDIATE RAYCAST when the
+ammo kztype (word 22) == 1 `rounds_kz_Knife`
 (`Weapon_RaycastAndSpawnImpact @ 0x4E8460`: euler→matrix ray out to weaponDef+56 range vs
 terrain hi-res heightmap + `Projectile_RaycastProximitySlots @ 0x4E5340` + water, 5-way hit
 class, impact effect from the weapon's 16-B effect table + sound — EFFECTS ONLY, no damage
-call in the hitscan leaf), flag 0x20 streaming invalidate, 0x2000000 guided-tracker
-register, 0x10000/0x20000 pellet bursts (`Weapon_SpawnProjectileBurst*`), default =
+call in the hitscan leaf), flag 0x20 `Detonatesatchels`, 0x2000000 `DesignateTarget`
+guided-tracker register, 0x10000 `shotgun` / 0x20000 `claymore` pellet bursts
+(`Weapon_SpawnProjectileBurst*`, count = ammo `spread_count`), default (kztype 6
+`rounds_kz_Bullets`) =
 allocate a pool-3 projectile entity (`CEntityManager_AllocateSlot` +
 `Entity_InitFromItemDef`), apply `Weapon_CalcRandomSpreadOffset` to the direction, velocity
 = ammo speed/62 per tick from yaw/pitch 16.16 trig (multiply >> 22), owner/team stamp,
@@ -5219,12 +5224,14 @@ radius 0.1 u = 6553 fp16 "for networked authority" `@0x4ea263`), water
 effects `Projectile_SpawnImpactEffect @ 0x4E9B80`, tracer scar `@ 0x4E5AC0`.
 
 **Entity impact** (`Projectile_HandleEntityImpact @ 0x4E9390`): resolve through the
-vehicle parent chain (`@0x4e94e0`); penetration budget = (projectile+676 − +684) vs
-ammoDef dword 3, with child-ammo spawn on spend (name string at ammoDef+241 →
-`AmmoDef_LookupByName`, copies 692 B of the projectile) — penetrating/fragmenting rounds;
+vehicle parent chain (`@0x4e94e0`); the ARMING gate — elapsed ticks (projectile+676
+initial − +684 remaining) < the ammo `arm_age` (dword 3) means the round is NOT ARMED yet
+and spawns its `notarmmedammo` (+241) child in its place (`AmmoDef_LookupByName`, copies
+692 B of the projectile) — the inert/dud variant of a grenade inside arming distance (the
+old "penetration budget" reading was wrong);
 weapon-type-15 bone/section damage via `Entity_ComputeBoneCollisionBounds`; kinetic clamp
-(`Entity_ClampKineticEnergy`); pass-through flags 0x18000000 (`@0x4e95a0`); then
-`Projectile_ProcessDamageOnTarget @ 0x4E7FB0`.
+(`Entity_ClampKineticEnergy`); pass-through flags 0x18000000 = `lawr|fgrenade`
+(`@0x4e95a0`); then `Projectile_ProcessDamageOnTarget @ 0x4E7FB0`.
 
 **The damage model is kinetic.** `Weapon_CalcImpactDamage @ 0x4EC920`: damage scales with
 the round's REMAINING SPEED — `(62 · |vel|) >> 16`, clamped to 1219 (`@0x4ecad6`) — times
@@ -5234,13 +5241,40 @@ path when itemDef+84 has 0x200: seat types 2/3/6/7 get the special multiplier + 
 `g_OneShotKill` → flat 2000; clamp to ammoDef max (dword 48). Distance falloff EMERGES
 from drag — there is no range table. Zeroing gates in
 `Projectile_ProcessDamageOnTarget`: indestructible entity flags 0x4000000, itemDef+400
-armor class 0xFFFF or greater than ammoDef+196 (the max armor class this ammo can hurt),
-target already dead (+292 == −1), occupant scale (`Entity_ApplyOccupantDamageScale`) when
-target+92 == 1; damage clamps to remaining health, and itemDef+84 flag 0x40000000 pins
-health at 1 (unkillable-by-damage). The authority applies `health −= damage` (`@0x4e8127`);
-a kill calls `Score_ProcessKillEvent @ 0x4FD400` (authority-gated scoring ONLY — it emits
-no messages); ammo flag 0x100 stamps attacker + last-hit fields on the target and invokes
-the entity damage callback (+456, event 4).
+armor threshold 0xFFFF or greater than the ammo `penetration_impact` (dword 49, +196 — the
+round must penetrate the target's armor class), target already dead (+292 == −1), occupant
+scale (`Entity_ApplyOccupantDamageScale`) when target+92 == 1; damage clamps to remaining
+health, and itemDef+84 flag 0x40000000 pins health at 1 (unkillable-by-damage). The
+authority applies `health −= damage` (`@0x4e8127`); a kill calls `Score_ProcessKillEvent
+@ 0x4FD400` (authority-gated scoring ONLY — it emits no messages); a PLAYER target (entity
+Flags & 0x100) additionally gets the hit bookkeeping — projectile+688 multi-hit counter,
+target+442 = the shooter slot word, +376 = the owner entity, and the entity damage
+callback (+456) fires with event 4.
+
+**The `ammo.def` table** (`AmmoDef_LoadAll @ 0x40B0B0`, `Game_StartMission @0x52548a` —
+the file is literally `ammo.def`, same encrypted-ASCII `File_ParseASCIIFile` key
+0x2A5A8EAD as weapon.def §5.57; 276-B records at `g_ammoDefTable @ 0xA2ECE8`, two-pass
+count→allocate→parse, `AmmoDef_InheritDefaults` per `end`). Token → offset map
+(`AmmoDef_ParseProperty @ 0x40A2D0`; dword N = +4·N): `flag` OR-bits → +0 (30-name table
+`@0x813500`: ignoredmg 1, ignore 2, shrapnel 4, silenced 8, water 0x10, Detonatesatchels
+0x20, nosmoke 0x40, nocollide 0x80, nogravity 0x100, hasitem 0x200, instantkillzone 0x400,
+ownerimmune 0x800, useownmove 0x2000, noage 0x4000, forcetracer 0x8000, shotgun 0x10000,
+claymore 0x20000, NoOItems 0x80000, NoMItems 0x100000, NoDItems 0x200000, Priority
+0x800000, ClipWater 0x1000000, DesignateTarget 0x2000000, IgnorFoilage 0x4000000, lawr
+0x8000000, fgrenade 0x10000000, ClipWaterFx 0x20000000, + 3 `internal`); `velocity` → +4
+(int, units/s); `max_age`/`arm_age` → +8/+12 in TICKS (`sub_40A0F0` = parsed 16.16 seconds
+× 62 rounded); `frndlyTrcrID`/`foeTrcrID` → +16/+20 (item type_id → model index); `error`
+(spread) → +24 fp16; `drag` → +28 fp16; `bullet_radius` → +32 fp16; `MF_Light` → +36/+40;
+`spread_count` → +48 (pellets); `kz_minradius`/`kz_maxradius` → +52/+56 fp16;
+`kz_pieslice` → +60 (deg → BAM ×11930464); `kztype` → word 22 (+44) from the 8-name table
+`@0x8133E0` (0 null, 1 Knife, 2 Standard, 3 Medic, 4 RadiusBlast, 5 C4, 6 Bullets,
+7 Slash); `kz_damage` → word 23 (+46); `min_stable_velocity` → +176; `tumble_error` →
++180 fp16; `weight_in_grains` → +184; `min_damage`/`max_damage` → +188/+192;
+`penetration_impact`/`penetration_kz` → +196/+200; `armor_density` → +204/+208/+212;
+`secondary_anim`/`kz_physics` bytes +224/+225; `tracerRate` byte +226; `recoil` bytes
++227..229; `dopplerdiv` byte +240; `notarmmedammo` string +241; guided params
+(`turnrate_maxpit`/`maxyaw` +80/+84, `boresight_maxang` +88, `climb_angle`/`time`
++92/+96); effects_table sub-section (28 tags `@0x813420`).
 
 **Explosions.** `Projectile_ProcessExplosionQueue @ 0x4EAD80` drives AoE via
 function-pointer tables (`@0x4eadd0`, `@0x4eae44`) → `Entity_ApplyWeaponDamage @ 0x4E6820`:
@@ -5290,15 +5324,35 @@ vehicle section paths, kill credit via `Score_ProcessKillEvent`.
   arms a 30-tick timer at entity+885/886), weapon-fire/camera math for some types — NOT a
   death message. Only S2C 0x13 is the death notify.
 
+**PORTED (2026-07-03, the MVP slice — same session as the witness pass).** `libs/def`
+ammo.def parse (the §5.60 token subset incl. the flag/kztype tables; `def_parse_ammo_memory`;
+pinned by `def_parse_ammo` against the real 75-entry fixture — the 5.56 block field-for-field)
+→ `world::AmmoTable` + the weapon `round_type` → ammo-index resolve (`ammo_table_build`,
+the adm+84 pair equivalent) → `world::RoundSim` (512-slot pool; spawn SYNCHRONOUS with the
+0x06 ring append; velocity = ammo/62 per tick from the wire BAMs via the (90°−yaw) mission
+frame; per-tick segment test vs pool-0 organics + the bilinear terrain column; the kinetic
+damage number `min(62·|vel|,1219)·grains/875` floored/capped, clamped to remaining health)
+→ death routing in `Server_TickUpdate` (S2C 0x13 `[victim][killerSource]` + S2C 0x1E
+standard-kill feed event to every non-host in-match connection; a dead HOST player queues
+for the 620-tick respawn release back to its recorded spawn point at template health; a
+joiner's respawn rides its own deploy request) → engine feed `NovaSimulation::load_ammo_table`
+(mission_runtime.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
+spawn velocity/frame, 3-hit kill at 60/60/30, 0x13/0x1E bytes, no-auto-respawn for clients,
+host respawn snap). MVP deferrals tracked in round_sim.h + here: bone-zone multipliers
+(body-only 1.0), drag/gravity (no falloff yet), spread, vehicles/statics (armor threshold),
+explosion kill zones, arm-age child swap, 0x52/0x54/0x32 emits, scoring, the shooter-class
+0.9/1.1 bytes.
+
 **Port follow-ups (witness at port time):** the payload writers
 (`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
 `NetPacket_WriteEntityHandleWithByte`, `NetPacket_WriteEntityHandleAndTeam`) byte layouts;
-the zone-multiplier float constants (`flt_7C6F18` head, `flt_7C3B94` limbs, `flt_7C6F80`
-zones 13-14, `flt_7CD510` vehicle seats); the drag-table build (`@ 0x4E78D0`) and drag
-classes; the ammo-def table source (which .def feeds the 276-B `g_ammoDefTable`) and the
-consumed fields (speed, flags dword 9, max damage dword 48, armor cap +196, child ammo
-+241, tracer interval adm+226, penetration dword 3); `Weapon_UpdateAllProjectiles`
-iteration shape; the wounded/medic loop (`Player_OnDamageReceived @ 0x4DD880`,
+the drag-table build (`@ 0x4E78D0`) and how the per-tick deceleration consumes the ammo
+`drag` fp16; the exact spread math (`Weapon_CalcRandomSpreadOffset` on the ammo `error`);
+the SpawnRound default-path field flow into the 780-B round record (the array
+`@ 0xB7E1A8`, 128 groups × 4 × 780 B, active-flag bytes `@ 0xB7DFA0` — witnessed via
+`Weapon_UpdateAllProjectiles @ 0x4EC020`, zone floats RESOLVED: head 1.25 `flt_7C6F18`,
+limbs 0.5 `flt_7C3B94`, zones-13/14 3.0 `flt_7C6F80`, vehicle seats 6.0 `flt_7CD510`);
+the wounded/medic loop (`Player_OnDamageReceived @ 0x4DD880`,
 `GameEvent_RevivePlayer`, S2C 0x3A); `Entity_InitSpawnedChild` at death (corpse/drop);
 the S2C 0x13/0x52/0x54 client handler bodies (`@ 0x42EB50` §5.35, `@ 0x429040`).
 
@@ -6526,7 +6580,9 @@ intact direction BAMs + the live 0x40 target word, shooter never echoed its own 
 DEFERRED (tracked here): the authoritative round SPAWN + damage
 (`RoundData_SpawnRound @ 0x4EC0D0` — projectile-pool entity, weapon spread, tracer
 interval; impact handlers `Projectile_Handle*Impact @ 0x4e93xx` → health → the death
-family) = the next round's scope, **witnessed end-to-end 2026-07-03 → §5.60**; the cease-fire gate (`g_InCeaseFire` unmodeled); the
+family) — **witnessed end-to-end AND PORTED at the MVP altitude 2026-07-03 → §5.60**
+(`world::RoundSim` + ammo.def plumbing + the 0x13/0x1E death routing;
+`npruntime_round_sim_test`; live verify = v29); the cease-fire gate (`g_InCeaseFire` unmodeled); the
 `+96472` fire-rate stamp (the adm[276] cooldown dword is not in `WeaponTableEntry` — needs
 its weapon.def token witnessed); the savedLivePose warp compensation (our net-snapped peers
 have zero intra-tick motion, so the delta is 0 by construction until a peer motor lands);

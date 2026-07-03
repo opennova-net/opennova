@@ -18,6 +18,7 @@
 #include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
 #include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+#include <npruntime/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
 #include <npruntime/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
 
 #include <def/def.h> // def_parse_weapons_memory / def_free_weapons
@@ -176,6 +177,8 @@ void NovaSimulation::reset_world() {
 // Re-point the (possibly just-rebuilt) AI system at our owned terrain field. The field's raw
 // pointers reference terrain_heightmap_/terrain_sector_grid_, which persist across reset_world.
 void NovaSimulation::apply_terrain_to_ai() {
+	// The round sim's ground stop shares the same field (world.terrain; §5.60).
+	if (world_) world_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	if (!ai_) return;
 	ai_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	ai_->ground_clearance = opennova::world::GroundClearance{};
@@ -323,6 +326,31 @@ Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_
 				e->equipped_adm_index = static_cast<uint8_t>(m4);
 		}
 	}
+	return OK;
+}
+
+// ammo.def -> the sim world's ballistics table + the weapon round_type resolve. Mirrors the
+// retail load site (Game_StartMission parses literally "ammo.def" through AmmoDef_LoadAll
+// @0x40b0b0, the sibling of the weapon.def load [orig: @0x52548a]); the resolve binds each
+// adm's fired round to its AmmoTable index (the original's adm+84 pair; §5.60). Call AFTER
+// load_weapon_table — an empty armory leaves every round_type unresolved and the fire
+// pipeline echoes without spawning sim rounds.
+Error NovaSimulation::load_ammo_table(const Ref<NovaResourceRoot> &p_resource_root,
+                                      const String &p_name) {
+	if (!world_) return ERR_UNCONFIGURED;
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
+		return ERR_INVALID_PARAMETER;
+	const String file_name = p_name.get_file();
+	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
+	const PackedByteArray bytes = p_resource_root->read_file(file_name);
+	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
+
+	DefAmmoFile file = {};
+	if (def_parse_ammo_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
+		return ERR_CANT_OPEN;
+	world_->ammo = opennova::np::build_ammo_table(file);
+	def_free_ammo(&file);
+	opennova::np::resolve_weapon_round_types(world_->weapons, world_->ammo);
 	return OK;
 }
 
@@ -550,6 +578,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
+	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
+	                     &NovaSimulation::load_ammo_table, DEFVAL(String("ammo.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);

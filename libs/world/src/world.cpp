@@ -446,6 +446,11 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     for (ISystem *s : systems_) s->tick(*this, ctx);
+    // Live rounds step inside the world frame, authority-only — the client's visual
+    // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
+    // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
+    // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
+    if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
 }
 
