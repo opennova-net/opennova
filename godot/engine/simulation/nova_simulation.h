@@ -310,7 +310,7 @@ public:
 	// position (net-re §5.2c). Single-player resolves the type-6002 start marker. Call AFTER a
 	// mission is loaded. Returns: 1 = spawned at a real start marker; 0 = no start marker, spawned
 	// at a safe fallback origin (never an NPC); -1 = failed (no mission / pool 0 full).
-	// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
+	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;

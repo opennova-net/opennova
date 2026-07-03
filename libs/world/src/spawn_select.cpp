@@ -5,6 +5,7 @@
 
 #include "world/entity.h" // Entity, EntityKind
 #include "world/world.h"  // World, EntityRegistry registry
+#include "world/zone_chain.h"
 
 namespace opennova::world {
 
@@ -37,7 +38,7 @@ SpawnPointResult select_player_spawn(const World &world, const int32_t *types, s
     SpawnPointResult r;
     // Priority scan: the FIRST start-marker type with any marker wins (a mission is authored for one
     // mode, so typically exactly one type is present), then farthest-from-enemy within it. This
-    // unifies CMap_SetupSpawnCamera's per-game-type resolution over the whole family. [§5.2c D-NET-88]
+    // unifies Server_PositionPlayerForSpawn's per-game-type resolution over the whole family. [§5.2c D-NET-88]
     for (size_t i = 0; i < count; ++i) {
         const int32_t want = types[i];
         const Marker *best = nullptr;
@@ -67,6 +68,84 @@ SpawnPointResult select_player_spawn(const World &world, const int32_t *types, s
         }
     }
     return r; // found=false -> caller falls back, never to an NPC position
+}
+
+SpawnPointResult select_player_spawn_for_team(const World &world, uint8_t team,
+                                              uint32_t game_type) {
+    // Team gametype: the team's own marker types first — primary 6096-6099, fallback
+    // 6003/6004/6090/6091 — then the unified family scan as the safety net.
+    // [orig: Server_PositionPlayerForSpawn @0x50cf60 @0x50d266/@0x50d320]
+    if ((game_type & 0x10000u) != 0 && team >= 1 && team <= 4) {
+        const int32_t primary = 6095 + team; // 6096/6097/6098/6099 [orig: @0x50d266]
+        const int32_t fallback =             // 6003/6004/6090/6091 [orig: @0x50d320]
+                team == 1 ? 6003 : team == 2 ? 6004 : team == 3 ? 6090 : 6091;
+        SpawnPointResult r = select_player_spawn(world, &primary, 1);
+        if (r.found) return r;
+        r = select_player_spawn(world, &fallback, 1);
+        if (r.found) return r;
+    }
+    return select_player_spawn(world);
+}
+
+const Entity *resolve_spawn_target(const World &world, uint8_t requester_team,
+                                   uint16_t handle) {
+    // [orig: Server_ResolveSpawnTargetHandle @0x4fe110]
+    if (handle == 0xFFFF) return nullptr;
+    const int pool = (handle >> 12) & 0xF;
+    if (pool != 0 && pool != 1 && pool != 2) return nullptr; // [orig: @0x4fe12f]
+    EntityHandle h;
+    h.packed = handle;
+    const Entity *e = world.registry.get(h);
+    if (e == nullptr) return nullptr;
+    // def attrib 0x40000 "SpawnPoint" [orig: @0x4fe16f].
+    if (!e->is_spawn_point) return nullptr;
+    // Team gate: match, or the requester is teamless [orig: @0x4fe175..@0x4fe187].
+    if (e->team != requester_team && requester_team != 0) return nullptr;
+    return e;
+}
+
+const Entity *find_spawn_zone_for_team(const World &world, const ZoneChain &chain,
+                                       uint8_t team, uint32_t game_type) {
+    // [orig: find_spawn_entity_for_team @0x4fc810]
+    const Entity *found = nullptr;
+    if ((game_type & 0x20000u) != 0) {
+        // Co-op branch: the LAST team-matching un-numbered spawn entity [orig: @0x4fc834].
+        world.registry.for_each([&](const Entity &e) {
+            const int pool = e.handle.pool();
+            if (pool != 1 && pool != 2) return;
+            if (!e.is_spawn_point) return;
+            if (e.team == team && e.zone_number == 0) found = &e;
+        });
+        return found;
+    }
+    // Team branch: an owned zone that is enemy-capturable (the front line) or carries
+    // the team's frontier number, fully secured. [orig: @0x4fc8c3..@0x4fc963 — the
+    // walk runs over the zone registry; the frontier number comes from
+    // ZoneSlotChain_FindFrontierZone]
+    const uint8_t frontier = zone_chain_frontier_zone(world, chain, team);
+    const uint8_t enemy = (team == 1) ? 2 : (team == 2) ? 1 : 0;
+    if (enemy == 0) return nullptr; // [orig: teams other than 1/2 fall out @0x4fc8fc]
+    for (const EntityHandle h : chain.zones) {
+        const Entity *e = world.registry.get(h);
+        if (e == nullptr) continue;
+        if (e->team != team || e->zone_number == 0) continue;
+        const bool enemy_front = zone_chain_is_capturable(world, chain, enemy, *e);
+        const bool at_frontier = frontier != 0 && e->zone_number == frontier;
+        if ((enemy_front || at_frontier) && e->zone_control >= 0x10000) return e;
+    }
+    return nullptr;
+}
+
+SpawnPointResult spawn_pose_for_target(const Entity &target) {
+    // [orig: Server_PositionPlayerForSpawn @0x50cf60 pick path — pose copy @0x50cfbe,
+    //  z += 1.0 when the model has no spawn userpoint @0x50d01c. The userpoint offset
+    //  and the 6007 in-zone scatter are tracked §5.61 deferrals.]
+    SpawnPointResult r;
+    r.found = true;
+    r.position = target.position;
+    r.position.z += 1.0f;
+    r.yaw = target.yaw;
+    return r;
 }
 
 } // namespace opennova::world

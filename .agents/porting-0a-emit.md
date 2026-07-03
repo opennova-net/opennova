@@ -131,19 +131,39 @@ target) in net-re D-NET-146.
   ran on each conn's own completion tick; joiner 1 never got the 47-B list) — re-fixed:
   spawned conns evaluate the roster version every tick.**
 
+- **Round 13 (2026-07-03): AS spawn selection + the zone-capture loop — witnessed end-to-end
+  (net-re §5.61) AND slice 1 (spawn selection) PORTED, same session.** The kong
+  "CWeaponSlotManager" cluster is the AS ZONE-SLOT CHAIN (renamed `ZoneSlotChain_*`, 46 IDB
+  renames): zones = pools-1/2 entities with def attribs ChangeTeam(0x20000)/SpawnPoint(0x40000)
+  + zone number entity+538 ← BMS byte 155 `lfp_group`; frontier = assigned-slot/mask/Z±1
+  adjacency; deploy advertising = 0x0F/0x0A phase-0 owned-zone mask (golden 0x8 EXPLAINED:
+  team 2 wholly owns zone 3) + 0x40/0x6F/0x53/0x6E; the pick = C2S 0x0E [i16 handle]
+  (0xFFFE=frontier auto) gated on team + control≥1.0; placement = zone origin/6007
+  scatter/per-team markers (Server_PositionPlayerForSpawn, ex-CMap misnomer); waves =
+  g_spawn_wave_list drip (host options, default off); the whole capture loop runs in the
+  1 Hz Server_TickUpdate block (control delta formula pinned incl. the underdog catch-up).
+  ASH_I5A authors zones 1(t1)/2×2(neutral)/3(t2) as type-1359 bunkers. PORTED slice 1:
+  `world::ZoneChain` + zone fields + 0x0E handler (deploy at pick, dead-only, computed 0x1E
+  ev-0x3A hint) + per-recipient uniform mask + PER-TEAM join markers (both AS teams
+  previously spawned in team 1's base — 6003 first-family-wins). `zone_chain_test` pins the
+  ASH shape; 230/230 ctest; GDExtension rebuilt. Slice 2 = the capture loop emits
+  (0x6F/0x53/0x6C + 0x1E zone events + flips), waves, seat deploys.
+
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
 value).** The wire has advertised AS all along; the internal "COOP" label (main_game.gd /
 mp_menu_host.gd boot dicts) was a bring-up leftover and is renamed to "AS"; the menu-host
 path now seeds the numeric gametype 0x10010 explicitly (it previously advertised 0). The
 FULL-AS-GAME gap list, in rough order:
-  1. **Spawn selection** — retail AS deploys through a zone-spawn picker; our host pins one
-     spawn point (world::select_player_spawn) and sends a single 0x4D spawn tip. Needs the
-     spawn-zone advertising + the D-NET-150 deferred spawn-menu re-stream + the team-spawn
-     open item. (v30 user report: "I expected a spawn selection screen".)
-  2. **AS zone capture loop** — Server_UpdateCaptureZones @0x53b9c0 (S2C 0x53) +
-     Server_UpdateCaptureZoneEntities @0x51978x (0x6F + 0x1E zone events) +
-     Server_UpdateCaptureZoneProximity @0x508790; the flag/zone 0x1E cases 19-21/41-44/50-60.
+  1. **Spawn selection** — DONE round 13 (witnessed §5.61 + slice-1 port: 0x0E pick path,
+     owned-zone mask advertising, per-team join markers, frontier hint; v31 live-verifies).
+     Remaining riders: spawn waves (host option), vehicle-seat deploys, 6007 scatter,
+     the D-NET-150 spawn-menu re-stream deferral.
+  2. **AS zone capture loop** — WITNESSED round 13 (§5.61: the 1 Hz block — proximity
+     @0x5086A0, secure pass @0x519690 w/ 0x6F + 0x1E 0x3B/0x3C, timed engine @0x53B8F0 w/
+     0x53×4 + 0x6C, control formula @0x501120, flip events 43/44/50-53/56/57, team
+     enforcement @0x519600); PORT = slice 2 (world-side control delta + flips + the four
+     emits; the chain/latch/registries landed with slice 1).
   3. **Scores** — 0x16 scoreboard refresh cadence (Server_BuildAndBroadcastScoreboard
      @0x50de00 trigger set) + the 0x52 kill-stat pairs + kill/death tallies.
   4. **Round end** — Server_CheckWinConditions @0x51ad40 (AS = zone-hold win) →

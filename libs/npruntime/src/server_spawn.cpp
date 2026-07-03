@@ -55,9 +55,15 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world) {
-	// §5.2c spawn-pose selection from the mission's promoted start markers (never an NPC's spot).
-	const world::SpawnPointResult sel = world::select_player_spawn(world);
 	world::PlayerSpawn spawn;
+	// Team FIRST — a team gametype's start markers are per-team (6096-6099 primary,
+	// 6003/6004/6090/6091 fallback), so the AS join spawn needs the assigned team before the
+	// §5.2c marker scan; without the split both teams land in team 1's base (net-re §5.61).
+	// [orig: Server_AssignPlayerTeam @0x4fe310 runs in Server_PlayerAdd BEFORE
+	// Server_PositionPlayerForSpawn's team switch @0x50d266]
+	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
+	const world::SpawnPointResult sel =
+			world::select_player_spawn_for_team(world, spawn.team, ctx.config.game_type);
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
@@ -67,7 +73,6 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.position = {0.0f, 0.0f, 0.0f};
 		spawn.yaw = 0;
 	}
-	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	// [D-NET-112] A player carries no SSN (net_id 0) — faithful to the original, which identifies it by
 	// handle + ownerConnectionId, not an SSN (see the note above). Keeps players out of the WAC find_by_net_id space.

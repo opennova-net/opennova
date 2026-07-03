@@ -1,7 +1,7 @@
 // Player spawn-point selection (net-re §5.2c): the player-start is chosen from the mission's 60xx
 // start-marker family (first present type wins, farthest from enemy soldiers) — never an NPC's
 // position. Guards the "player spawns on top of NPC #0" + the 00TRa "spawns at origin" regressions.
-// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
+// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
 #include "world/entity.h"
 #include "world/spawn_select.h"
 #include "world/world.h"

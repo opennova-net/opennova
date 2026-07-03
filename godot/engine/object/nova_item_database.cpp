@@ -189,6 +189,14 @@ bool NovaItemDatabase::is_ai_capable(int id) const {
 	return it != items.end() && (it->second.attrib & 0x100000u) != 0;
 }
 
+// The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. The AS zone
+// traits read bits 0x20000 "ChangeTeam" (capture trigger) and 0x40000 "SpawnPoint"
+// (deploy-selectable). [docs/world/itemdef-re.md; net-re §5.61]
+uint32_t NovaItemDatabase::get_attrib(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0u : it->second.attrib;
+}
+
 String NovaItemDatabase::get_display_name(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.display_name;

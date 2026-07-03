@@ -110,6 +110,9 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     if (kind == EntityKind::Building) s.engine_flags |= 0x20000u;
     s.ammo_count = e.map_symbol; // BMS byte 81 -> entity+290 [orig: @0x40e9f0]
     s.ref_num = e.ref_num;       // BMS byte 153 -> entity+533 [orig: @0x40e9f0]
+    // BMS byte 155 (.mis "lfp_group") -> entity+538 — the AS zone number (net-re §5.61).
+    // [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    s.zone_number = e.lfp_group;
     return s;
 }
 

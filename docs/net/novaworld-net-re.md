@@ -342,10 +342,10 @@ sweep; blank = not yet characterized.
 | 0x4D | 0x4317B0 | `_HandleSpawnSlot` | reads u8 slot; local slot → tip event; otherwise client replies C2S 0x22+0x23; reads `dword_24C1928` as a skip-tip-if-already-spawned guard (never writes it) |
 | 0x4E | 0x431870 | `_HandleBatchSpawn` (misleading) | u16 count + per-slot u16; calls `Entity_KillBySlotId` (kill, not spawn), then replies C2S 0x28 |
 | 0x4F | 0x4286C0 | `_0x04F` | |
-| 0x50 | 0x431910 | `_TeamAssign` | team assign (6 B): [u16 handle][u8 team][u16 spawnPointId][u8 squadLeader] → entity team + team loadout init |
+| 0x50 | 0x431910 | `_TeamAssign` | team assign (6 B): [u16 handle][u8 team][u16 spawnPointId][u8 squadLeader] → entity team + team loadout init; also the ZONE-FLIP broadcast — `Server_ChangeEntityTeam @0x518D70` (ex-`Server_ChangePlayerTeam`; retargets ANY entity incl. capture zones/spawn objects, §5.61) |
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
 | 0x52 | 0x428A80 | `_0x052` | |
-| 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 modeA][u8 modeB→entity+547][u16 start_s][u16 end_s][u8 rate], ×62 s→ticks; capture/takeover HUD channel. Field map §5.49 (decoded) |
+| 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
 | 0x54 | 0x429040 | `_0x054` | death/wounded minimap marker `[u16 entityHandle][u8 state]` — server emits from `GameEvent_PlayerDeath @0x516dd0` ×2, `GameEvent_RevivePlayer @0x517db4`, `Server_BroadcastMedicRequest @0x515390` (D-NET-108); handler body unwitnessed (§5.60) |
 | 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
@@ -368,10 +368,10 @@ sweep; blank = not yet characterized.
 | 0x68 | 0x42DAA0 | `_0x068` | entity-index list request `[u32 startIdx]` → C2S 0x3D (§5.34) |
 | 0x6A | 0x432510 | `_0x06A` | |
 | 0x6B | 0x425520 | `_0x06B` | minimap overlay batch `[u8 count]`+count×12B (handle@+0; blip rebuilt from entity state, 10 trailing B unused) (§5.35) |
-| 0x6C | 0x428FC0 | `_0x06C` | |
+| 0x6C | 0x428FC0 | `_0x06C` | zone presence count (3 B): [u16 zoneHandle][u8 count 1..32] — players inside an active timed capture, emitted on change (`CaptureCtx_UpdateActiveCaptureRate @0x53B600` → `NetPacket_WriteZonePresenceCount @0x506DE0`). §5.61 |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
-| 0x6E | 0x429880 | `_0x06E` | team/squad roster sync: `[u8 teamCount]` + per team `{u16 entityHandle, u16 slotIdx, u8 memberCount, u16 slotHandle, u16 members[]}`. Field map **§5.31** (decoded) |
-| 0x6F | 0x428D60 | `_ZoneTimerValue` | ZONE-TIMER VALUE (15 B; NOT cinematic camera — that label was wrong): [u16 zoneHandle][u8 mode][i32 value 16.16 s][i32 limit][i16 rate][u8→+544][u8→+545], ×62 s→ticks into g_zone_timer_list; nearest-zone tracking for HUD_DrawTakeoverStatus. Field map §5.49 (decoded) |
+| 0x6E | 0x429880 | `_0x06E` | spawn-wave / deploy-screen status (§5.31's "squad roster"): `[u8 groupCount]` + per group `{u16 zoneHandle, u16 zoneIdx, u8 queuedCount, u16 waveCountdown, u16 members[]}` — sent on wave-queue join + 1 Hz to dead/deploying players (`NetPacket_WriteSpawnWaveStatus @0x507490`). Client map **§5.31**, producer §5.61 |
+| 0x6F | 0x428D60 | `_ZoneTimerValue` | ZONE-TIMER VALUE (15 B; NOT cinematic camera — that label was wrong): [u16 zoneHandle][u8 team][i32 control 16.16 (0..1.0)][i32 limit=0x10000][i16 delta][u8 friendlies→+544][u8 enemies→+545], ×62 into g_zone_timer_list; the SECURE channel — server emits every 1 Hz pass per numbered zone (`Server_UpdateCaptureZoneEntities @0x519690` → `NetPacket_WriteZoneTimerValue @0x506E70`). Client map §5.49, producer §5.61 |
 | 0x70 | 0x429A30 | `_0x070` | |
 | 0x71 | 0x425600 | `_0x071` | |
 | 0x72 | 0x425710 | `_0x072` | |
@@ -415,7 +415,7 @@ This is what a reimplemented server must **handle**.
 | 0x0B | 0x51AB10 | |
 | 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
 | 0x0D | 0x513760 | CHAT MESSAGE uplink (`NapiNPServer_HandleChatMessage`; the old "replication frame ACK" note was WRONG): [u8 channel][cstr text]; strips `<...>` tags, 1000 ms rate limit, prepends name(/squad), fans out S2C 0x14 per recipient (2=team, 4/5=side, 11/12=squad, 13=proximity ≤100 u, default=all). §5.52 |
-| 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle]; 0xFFFE = auto team spawn (gametype-keyed) — `Server_ProcessClientRequestRespawn` |
+| 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle] — the deploy-map pick. 0xFFFE = auto team spawn (frontier zone, gametype-keyed); real handle → `Server_ResolveSpawnTargetHandle @0x4FE110` (pools 0/1/2, def 0x40000, team gate) + zone control ≥ 1.0 + vehicle-seat gates; wave-queues via `g_spawn_wave_list` else deploys via `Server_ProcessPlayerDeath`. Full path §5.61 — `Server_ProcessClientRequestRespawn` |
 | 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); anti-spoof + fire-rate gate, then `Server_ClientFiredRound @0x50baa0`: net primary fire runs the adm 'fire' action (slot-latched client pose) → local re-entry → `RoundData_AddRound @0x4fdb40` → the per-recipient §5.9.1 tag-2 round-event echo; ammo clip decremented (`consume_weapon_ammo @0x540850`), cooldown stamped (slot+96472 = tick + adm[276]). D-NET-152 |
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
 | 0x13 | 0x514330 | `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action byte + nearest-sector resolve; action 6 arms a 30-tick timer); NOT a death message — only S2C 0x13 is the death notify (§5.60) |
@@ -1153,8 +1153,9 @@ these witnesses. **IDB rename applied:** the kong-misnomer `Entity_SetStateWreck
 
 §5.2a/§5.2b resolve how the host *builds and field-inits* its own player entity but leave the
 "place `Position` / `Yaw`" step's SOURCE unwitnessed. It is the map/camera spawn selector
-`[orig: CMap_SetupSpawnCamera @ 0x50cf60]` (Kong's name is a misnomer — it positions the player
-ENTITY, not just a camera), called on join `[orig: Server_OnPlayerJoin @ 0x51a680 → 0x51a786]`
+`[orig: Server_PositionPlayerForSpawn @ 0x50cf60]` (renamed 2026-07-03 from Kong's misnomer
+`CMap_SetupSpawnCamera` — it positions the player ENTITY, not just a camera), called on join
+`[orig: Server_OnPlayerJoin @ 0x51a680 → 0x51a786]`
 and respawn `[orig: Server_ProcessPlayerDeath @ 0x517740 → 0x517863]`. It maps the game type
 (`g_GameType @ 0x24D2128`) + the player's team to a marker TYPE-ID, resolves it via
 `[orig: ItemList_FindIndexByTypeId @ 0x49e100]`, finds the matching pool-3 marker entities, and
@@ -1201,7 +1202,7 @@ the raw arg]`.
 **Real-mission machinery — the SP marker chain alone is incomplete (2026-06-22b).** Grilling
 against a shipped SP mission (00TRa.bms, "Training: Basics / Armory", `attrib_flags=0x3` ⇒ no
 game-mode bit ⇒ `g_GameType=0`) found the per-game-type chain above does NOT cover real authored
-starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `CMap_SetupSpawnCamera` with spawn-param
+starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `Server_PositionPlayerForSpawn` with spawn-param
 low-word **0** (not 0xFFFF), so the engine first tries `[orig: sub_4FE110 @0x4fe110]` — which is a
 live-entity **handle** resolver (`poolType = handle>>12`, `index = handle & 0xFFF`, fetch
 `g_pool_list[poolType][index]`, gate on model flag `0x40000` + team), NOT a spawn-point lookup; at
@@ -2002,7 +2003,8 @@ rendered them all burning (v13). Reimpl name: `VehicleCompactRecord::health_word
   real healthMax-scale values here.
 - **The 0x0D record's optional 0x8000-gated u16 is NOT health** — it is the capture-zone/
   proximity radius, entity+0x15E, filled from .bms record word 14 (`@0x433206`; consumers
-  `CaptureZone_*`, `render_minimap_slot_blip`, `CMap_SetupSpawnCamera`). Reimpl renamed
+  `CaptureZone_*`, `render_minimap_slot_blip`, `Server_PositionPlayerForSpawn`
+  (then still kong-misnamed `CMap_SetupSpawnCamera`; renamed 2026-07-03)). Reimpl renamed
   `zone_radius_short` and stopped populating it from Entity::health (golden ASH_I5A vehicle
   0x0D records carry no 0x8000 flag).
 
@@ -2749,6 +2751,12 @@ full-consume via `decode_weapon_loadout`.
 
 **Witness:** probe2 — 43× `0x6E` (mostly `teams=0` early in the join); full-consume via
 `decode_roster_sync`.
+
+**Producer refinement (2026-07-03, §5.61):** the server side is the SPAWN-WAVE status
+(`NetPacket_WriteSpawnWaveStatus @ 0x507490` over `g_spawn_wave_list`) — "team" entries are
+per-zone wave groups for the receiving player's team, `teamSlotIndex` is the spawn-zone-list
+index, and `teamSlotHandle` is the wave COUNTDOWN in seconds (not a handle); members are the
+queued players. The client's roster-array landing is the deploy-screen consumer.
 
 ### 5.32 Tag 0x7B — full player/session info (probe2 + loopbacks, 2026-06-18)
 
@@ -4313,7 +4321,7 @@ additional mounted-vehicle/turret tail every 16th frame:
 
 | `phase & 3` | sub-block | 11/6/16/0-byte body |
 |---|---|---|
-| 0 | weapon/reload/uniform | `[u8 preround_timer][u8 slot360][u8 slot368][u8 slot364][u8 slot356][u8 slot460][u8 reload_seconds][u32 CWeaponSlotManager_GetUniformTeamMask @0x4a2620]` (11 B). slot+360/368 gated on entity+36 bit 1 (else 0). reload_seconds = `dword_25510F4 − (ticks since fire)/62` clamped to 0xFE, 0xFF = belt-fed special, 0 = idle (`@0x4ff8f0..0x4ff992`). The reimpl decode struct was renamed `FrameAimBlock` → **`FrameWeaponBlock`** (fields `preround_timer`/`slot_state360..460`/`reload_seconds`/`uniform_team_mask`) 2026-07-01 — nothing in this block is aim state. |
+| 0 | weapon/reload/uniform | `[u8 preround_timer][u8 slot360][u8 slot368][u8 slot364][u8 slot356][u8 slot460][u8 reload_seconds][u32 ZoneSlotChain_GetOwnedZoneMask @0x4a2620 (ex-CWeaponSlotManager_GetUniformTeamMask) — the deploy-map owned-zone mask, §5.61]` (11 B). slot+360/368 gated on entity+36 bit 1 (else 0). reload_seconds = `dword_25510F4 − (ticks since fire)/62` clamped to 0xFE, 0xFF = belt-fed special, 0 = idle (`@0x4ff8f0..0x4ff992`). The reimpl decode struct was renamed `FrameAimBlock` → **`FrameWeaponBlock`** (fields `preround_timer`/`slot_state360..460`/`reload_seconds`/`uniform_team_mask`) 2026-07-01 — nothing in this block is aim state. |
 | 1 | server-status | `[u8 C6EAE0][u8 C6EAE4 fall-dmg tol][u8 g_serverFps][u8 g_serverCpuPct][i16 dword_24C1958/62]` (6 B) |
 | 2 | environment | `[u16 word_26C6822 fog][u16 (FogDistAccelClamp+255)>>8][u16 (CurTimeFixed24+4096)>>13 tod][u8 quake][u8 cloud>>10][u8 dword_26C6880>>8][u8 OvercastBlend>>8][u8 dword_2C059D0]` (11 B) |
 | 3 | gametype | 4×`i32` scores, **only if `g_GameType & 0x20000`** (`@0x4ffc2d`) — else 0 B |
@@ -5381,6 +5389,269 @@ the S2C 0x13/0x52/0x54 client handler bodies (`@ 0x42EB50` §5.35, `@ 0x429040`)
 Per-system verdicts from grilling the reimplementation against retail
 `Jointops.exe` (Kong IDB). Each row cites the original entry point. Verdict:
 **matching** | **divergent → fixed** | **divergent (accepted)** | **unknown**.
+
+### 5.61 Advance & Secure — spawn selection, the zone chain, and the capture loop (engine-research scope, 2026-07-03)
+
+Witnessed to scope the full-AS-game port (gametype 0x10010 on ASH_I5A): how the deploy map
+gets its selectable zones, how the client's pick reaches and gates on the server, and the
+complete server-side zone-capture loop. Confirm-only from the binary (no reimpl yet except
+the §5.2c marker fallback); §5.2c (marker family + `Entity_FindBestSpawnPoint`), §5.19
+(0x40 client decode), §5.26 (0x1E client decode), §5.31 (0x6E client decode) and §5.49
+(0x6F/0x53 client decode) are the client-side halves of this witness.
+
+**The zone data model.** A capture/spawn zone is an ordinary pools-1/2 entity whose ItemDef
+carries attrib flags `0x20000` (capture trigger) and/or `0x40000` (deploy-selectable spawn
+point) — the ASH_I5A "Change Team & Spawn Volume" tent/HQ objects (0x0575/0x0576, D-NET-70
+pool routing) carry both. On the entity: `+538` (u8) = the authored ZONE NUMBER (0 = not a
+chain zone — plain flag/base), `+354` = owning team, `+540` (i32 16.16) = the SECURE/control
+fraction 0..1.0, `u16 +350` = the zone radius in world units, `+544`/`+545` = friendlies/
+enemies in radius (refreshed each pass, ride the 0x6F tail), `+546/547/548/550` = the
+client-side landing block (§5.49 0x53 / §5.31 0x6E). Pool-3 markers configure the chain:
+def-types **6003/6096 → team 1, 6004/6097 → team 2, 6090/6098 → team 3, 6091/6099 → team 4**
+(the marker's `+538` = that team's assigned/base slot number; any other numbered pool-3
+marker → the team-0 row), def-type **6006** = the radius capture zones of the non-chain zone
+modes (proximity only), def-type **6007** = sub-spawn scatter points inside a zone (below).
+`[orig: ZoneSlotChain_BuildFromMission @ 0x4A2DE0; Server_UpdateCaptureZoneProximity
+@ 0x5086A0 (6006 @ 0x5089EF)]`
+
+**The zone-slot chain (the AS frontier).** An inline manager struct `g_zone_slot_chain
+@ 0x24D1EBC` (renamed from the kong misnomer `CWeaponSlotManager` cluster — it manages
+capture-zone slots, not weapons): five per-team `[ownedMask, assignedSlot]` dword pairs
+(teams 0–4) + a `std::vector` of `{entity*, u8 rank}` wrappers. Built at mission start
+(authority only, `Game_StartMission @ 0x524360 @ 0x526117`): pool-3 markers seed the
+assigned slots, then every alive pools-1/2 entity with `+538 != 0` and def `0x20000` is
+added; `ownedMask[team] = OR(1 << zone_no)` over that team's zone entities
+`[orig: ZoneSlotChain_RebuildOwnershipMasks @ 0x4A26C0]`; `rank` = descending index within a
+shared zone number `[orig: ZoneSlotChain_AssignZoneRanks @ 0x4A27F0]`. The FRONTIER rule
+`[orig: ZoneSlotChain_IsZoneCapturableByTeam @ 0x4A2450]`: team T may capture zone Z iff
+`Z == assignedSlot[T]` and Z isn't already T's, OR `(1<<Z) & mask[T]` and not T's, OR an
+ADJACENT zone number Z±1 inside `mask[T]` is owned by T (the leapfrog chain — walk the
+vector; an enemy-held adjacent kills that direction). Gametype 0x50010 (327696) is exempt
+(every zone always capturable). `ZoneSlotChain_FindFrontierZone @ 0x4A2AC0` = the first
+vector entry capturable by T → its zone number (the "go capture zone N" hint).
+`ZoneSlotChain_GetWinningTeamIfAllOwned @ 0x4A2920` (gametypes 0x10010/0x50010 only) is the
+all-zones-one-team check that suppresses further capture events (and feeds the AS win).
+
+**How the deploy map is advertised.** There is NO dedicated zone-list message. The client
+builds the deploy screen from (a) the world stream itself — the zone entities arrive as
+ordinary 0x0D/0x10 records with team + type; (b) the per-player **S2C 0x0F variant-0 u32
+owned-zone mask** = `ZoneSlotChain_GetOwnedZoneMask(player.team)` — bit `1<<zone_no` set iff
+EVERY entity of that number belongs to the team (§5.55 already field-mapped the u32; its
+producer is now witnessed) `[orig: NetPacket_WritePlayerState @ 0x4FF6B0 @ 0x4FF9A3]`;
+(c) the 0x40 minimap color channel (§5.19); (d) the 0x6F/0x53 zone timers (§5.49); (e) the
+0x6E spawn-wave status (below). The S2C 0x4D spawn-slot tip is NOT zone data (player-slot
+index only, §4 row). A dead player also gets a private 0x1E event **0x3A (58)** carrying
+`FindFrontierZone(team)` in the attacker byte — the deploy-screen objective hint
+`[orig: Server_ProcessPlayerDeath @ 0x517740 @ 0x517A1D]`.
+
+**The pick: C2S 0x0E `[i16 spawnHandle]`** (`Server_ProcessClientRequestRespawn @ 0x519AF0`;
+§4 row refined). `0xFFFE` = auto-pick: spectators/unassigned resolve a team first
+(`& 0x20000` → 1; `& 0x10000` → `2 − (tick & 1)`), then `find_spawn_entity_for_team
+@ 0x4FC810` picks an owned zone on the frontier (enemy-capturable, or the team's own
+frontier number) with control ≥ 1.0 — i.e. AS auto-deploy = "the front line"; gametype
+0x50010 returns without spawning. A real handle resolves via `Server_ResolveSpawnTargetHandle
+@ 0x4FE110` (pools 0/1/2 only, def attrib `0x40000` required, team must match — or the
+player be teamless): pool 0 covers MOBILE spawn vehicles. Gates, in order: not already
+pending (`+89932` = the revive latch), `+364 == 0`, then for a resolved target — a VEHICLE
+target (`ItemDef.type == 1` + attrib `0x40000`) must be alive with a free seat
+(`Entity_FindBestSeatSlot @ 0x4351F0`; the deploy then latches `entity+44 |= 0x4000` and
+boards the seat after the reset), a NUMBERED zone requires `team match && control ≥ 0x10000`
+(a contested zone stops accepting spawns), and the config `g_respawn_requires_team_dead
+@ 0x24D2260` denies a target-less respawn while the team still has a live entity. The
+requester must be dead (`entity+36 & 2`) or respawn-flagged (`+89912 & 0x10`).
+
+**Spawn waves.** `g_spawn_wave_list @ 0x24E0E48` (renamed from `stru_24E0E48`): 56-byte
+entries `{player[8], count@+32, zoneEntity@+36, interval@+40, countdown@+44, preDelay@+48,
+team@+52}`, built at mission start from every `0x40000` pools-2/1 entity — numbered zones
+get `g_spawn_wave_time_zone @ 0x24D2250`, un-numbered (bases) `g_spawn_wave_time_base
+@ 0x24D224C` (both from `apply_session_settings_to_globals @ 0x551500`; entries only exist
+when the interval is configured — 0 ⇒ no wave system ⇒ instant deploys)
+`[orig: SpawnWaveList_BuildFromMission @ 0x52A920]`. A 0x0E pick lands in the zone's group
+(`SpawnWaveList_TryQueuePlayer @ 0x52A490` — dedupes, caps 8, evicts the player from other
+groups) → the player gets S2C 0x6E and WAITS; if no group exists for the zone the deploy is
+immediate. The 1 Hz `SpawnWaveList_Tick @ 0x52A550` → `SpawnWaveList_TickEntry @ 0x52A330`
+releases ONE queued player per interval (`Server_ProcessPlayerDeath(player, zoneHandle)`,
+countdown reloads from `+40`), and FLUSHES the whole group the moment the zone's control
+drops below 1.0. A zone team flip resets its group (`SpawnWaveList_ResetOnZoneTeamChange
+@ 0x52A5B0`). **S2C 0x6E** (§5.31's "squad roster" — actually the deploy-screen wave
+status; the client's `teamSlotHandle → entity+548` is the WAVE COUNTDOWN in seconds):
+`[u8 groupCount]` then per team-matching group `[u16 zoneHandle][u16 zoneIdx (spawn-zone
+list index)][u8 queuedCount][u16 countdown][queuedCount × u16 playerHandle]`, sent on queue
+join (`Server_SendSpawnWaveStatusToPlayer @ 0x50FF10`) and every second to each dead or
+deploying player (mask 0x20) `[orig: NetPacket_WriteSpawnWaveStatus @ 0x507490;
+Server_TickUpdate @ 0x51E0CF]`.
+
+**Placement.** `Server_PositionPlayerForSpawn @ 0x50CF60` (ex-`CMap_SetupSpawnCamera`,
+§5.2c) is the placement for BOTH paths. Picked target: copy the target entity's pos+angles,
+offset by a named model userpoint when present (`modelgpm_FindUserpointByName @ 0x5B2170`;
+name string is runtime-set — follow-up) else `z += 1.0`; for a NUMBERED zone, collect ≤ 32
+pool-3 **type-6007** markers within the zone radius and round-robin `g_spawn_cycle_counter
+% (count+1)` — 0 = the zone entity itself, else the (i−1)th 6007 marker (parent-transformed)
+— the authored in-zone scatter. No/invalid pick: the §5.2c game-type marker chain
+(6096-6099 primary per team, 6003/6004/6090/6091 fallback, 6094/6001 co-op, 6095/6002
+DM/SP) through `Entity_FindBestSpawnPoint @ 0x50CCC0` (farthest-from-enemy, D-NET-115);
+co-op additionally falls back to any team-matching numbered `0x40000` entity. `+89932`
+(revive) overrides everything with the saved body position. The deploy itself is
+`Server_ProcessPlayerDeath @ 0x517740` — death and deploy are ONE routine (arg2 = killer
+handle on death, spawn-target handle on deploy): detach, position, `Entity_ResetToSpawnState
+@ 0x4B9610`, respawn timer `+292 = 620` ticks, loadout + 0x1D list, seed 0x61 (mode 1), the
+0x1E 0x3A hint, optional seat board.
+
+**The 1 Hz capture block** — all of it inside `Server_TickUpdate @ 0x51D7E0`'s
+`g_periodic_second_timer = 62` block (`@ 0x51DF50..0x51DF8C`), so every capture/secure rate
+below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5.49):
+
+1. **Proximity** `[orig: Server_UpdateCaptureZoneProximity @ 0x5086A0]` — per playing slot:
+   zero the proximity bitmask `player+89868`; sync CRenderState field 0x1C (score) via a
+   4-byte S2C 0x81 on change (`@ 0x508790`); set bit 0..4 for pool-1 def-types
+   4095/4091/4093/4097/4096 within 20.0 (a carried flag counts at the carrier's position);
+   set bit `1 << zone.team` for pool-3 6006 radius zones and for frontier-active numbered
+   `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2); drive the presence counters
+   `[23593..95]` against the per-gametype config table (`sub_52D430(g_GameType, 0xC/0x24)` —
+   follow-up) into `GameEvent_ProcessScoring @ 0x52F550`.
+2. **Capture requests** ride the physics pass, not this block: a live player touching a
+   `0x20000` entity (authority, no preround, gametype & 0x30000) calls
+   `Server_OnPlayerTouchCaptureZone @ 0x500BA0` `[orig: caller
+   Entity_ProcessCollisionAndPlatformPhysics @ 0x4B2BD0 @ 0x4B3238]`: gate
+   `zone un-numbered || player.team == zone.team || control ≤ 0` (an enemy can only START
+   on an unsecured zone; the securing OWNER always marks presence), mark the active-capture
+   presence slot, and queue `{zone, player.team, player}` — numbered zones only while on
+   SOMEONE's frontier (`CaptureCtx_QueueCaptureRequest @ 0x53B7A0`; a refused numbered
+   touch arms a 10 s repeat-nag latch `+89912 |= 0xC`).
+3. **The secure pass** `[orig: Server_UpdateCaptureZoneEntities @ 0x519690]` — per numbered
+   `0x20000` entity: if the ENEMY frontier cannot reach it, latch `control = 0x10000`; else
+   run `calculate_capture_zone_control_delta @ 0x501120` (below); emit **S2C 0x6F** every
+   pass (15 B `[u16 handle][u8 team][i32 control][i32 0x10000][i16 delta][u8 friendlies]
+   [u8 enemies]`, mask 0x80 urgent — §5.49's value/limit ARE the control fraction, limit
+   fixed 1.0) `[orig: NetPacket_WriteZoneTimerValue @ 0x506E70, emit @ 0x5197D9]`; on the
+   0→1.0 edge broadcast **0x1E event 0x3B (59)** and on the →0 edge **0x3C (60)** (attacker
+   byte = the zone's spawn-zone-list INDEX, victim byte = zone team) `[orig: @ 0x519839 /
+   @ 0x51988E]`; convert every in-radius entity whose def has `+88 & 2` to the zone's team
+   (`Server_ChangeEntityTeam @ 0x518D70` → the S2C 0x50 broadcast — armories/emplacements
+   flip with the zone).
+4. **The control formula** `[orig: calculate_capture_zone_control_delta @ 0x501120]`:
+   `presence = friendlies − frontier-eligible enemies` in radius (both counts stored to
+   `+544/+545`); zero presence ⇒ no change. Else `teamSize` = capturing side's player count
+   `+ (6 − total)/2` when fewer than 6 in-session (small-server boost), soft-capped
+   `x → cap + (x − cap)/2` at 20/40/60; `speed = teamSize × base` where base =
+   `g_capture_speed_setting @ 0x24D2254`: 1 → 24, 2 → 48, else 12; when the capturing side
+   owns fewer zones AND the round clock is inside the last `30 × g_respawn_time` seconds,
+   an underdog catch-up subtracts up to half: `speed −= min(imbalance × boost, 1) × speed/2`
+   with `imbalance = |zones₁ − zones₂| / totalZones`, `boost = 1 − 2·roundRemaining/(3720 ×
+   g_respawn_time)` (3720 ticks = 60 s) `[orig: @ 0x5013AB..0x501439]`; a zone number shared
+   by N entities divides speed by N. `delta = 65536 × presence / speed` (ftol; minimum
+   magnitude 1, sign = presence), accumulated into `+540` with clamp [0, 0x10000]. At the
+   observed default (`g_capture_speed_setting = −1` ⇒ base 12): one attacker on an empty
+   3-player-team server secures ~0x10000/1820 ≈ 36 s.
+5. **The timed-capture engine** `[orig: Server_UpdateCaptureZones @ 0x53B8F0]`, ctx
+   `captureCtx @ 0xC947A8` (`+8/+12` = the request queue, 12-B `{zone, team, player}`;
+   `+24/+28` = active captures, 152-B `{zone@0, team@4, progress@8, limit@12, player@16,
+   presence[32]@20, rate@148}`): per active entry `CaptureCtx_UpdateActiveCaptureRate
+   @ 0x53B600` counts the presence slots into `rate` (clamped 1..32; broadcasts the 3-byte
+   **S2C 0x6C** `[u16 handle][u8 count]` on change `[orig: NetPacket_WriteZonePresenceCount
+   @ 0x506DE0]`) and clears them. A queued request for a DIFFERENT team restarts the entry
+   (`team = new, progress = 0, limit = g_capture_duration @ 0x24D2248`) + emits **S2C 0x53**
+   (9 B `[u16 handle][u8 curTeam][u8 capturingTeam][u16 progress][u16 limit][u8 rate]`,
+   §5.49's window fields de-mystified) `[orig: NetPacket_WriteZoneTimerWindow @ 0x506D00,
+   emits @ 0x53B9C0/0x53BA36/0x53BA68/0x53BC02]`; otherwise `progress += rate`, 0x53 each
+   pass, and on `progress ≥ limit` the zone FLIPS: `Server_ChangeEntityTeam(zone,
+   capturingTeam)`, proximity scoring (`CaptureZone_CheckProximityScoring @ 0x500C50`), wave
+   reset, `GameEvent_FlagCapture`, entry removed. Queue drain: a NUMBERED zone (or
+   `g_capture_duration ≤ 0`) flips INSTANTLY — team change (via neutral when previously
+   owned), `control = 0` (the new owner must now SECURE it — the Advance-and-Secure beat),
+   FlagCapture event; an un-numbered flag zone neutralizes first and opens a timed active
+   entry (`CaptureCtx_AddActiveCapture @ 0x53B510`).
+6. **Flip events** `[orig: GameEvent_FlagCapture @ 0x50F6F0]` (requires def `0x40000`):
+   numbered zone → to the capturer's team **0x33 (51)** / to the enemy team **0x32 (50)**
+   when the frontier masks did not change, else **0x35 (53)** / **0x34 (52)** carrying each
+   side's NEW `FindFrontierZone` number in the victim byte (team-filtered sends, mask
+   0x180); then an all-recipients **0x38/0x39 (56/57)** banner keyed by the new owning team;
+   un-numbered flag → **0x2B/0x2C (43/44)** by team (the §5.19 dvxi5 probe's
+   `STRCND_PSP_*TAKEN` pair). All suppressed once `GetWinningTeamIfAllOwned` reports the
+   match decided. The kill-feed body stays the §5.26 8-byte `GameEvent_BuildPayload
+   @ 0x5054E0` shape — for zone events the "attacker/victim" bytes are the zone-list index
+   and team/frontier numbers, NOT pool-0 indices.
+7. **Team enforcement** `[orig: Server_EnforceZoneEntityTeams @ 0x519600]` — every numbered
+   entity in the per-tick zone-numbered registry (`dword_A892D0/D4`, rebuilt by
+   `Server_BuildEntitySlotLists @ 0x4F97A0`) is forced onto the team whose OWNED mask
+   contains its zone number (team 1 precedence) — this is what flips the co-located
+   `0x40000` spawn objects when the `0x20000` trigger objects change hands.
+
+The deploy/spawn-zone REGISTRY (`g_spawn_zone_list/count @ 0xA89188/0xA89184`, rebuilt by
+`Entity_BuildSpawnZoneList @ 0x43EAE0` — ex-"BuildSortedRenderList"): every pools-2/1
+`0x40000` entity, sorted by `(class-priority, def+406, zone# & 0x1F)`, plus the deploy-map
+AABB (`g_WorldBoundsMax/Min`). Its INDICES are what ride the 0x6E `zoneIdx` and the 0x1E
+zone-event attacker bytes (`SpawnZoneList_IndexOf @ 0x43B990`).
+
+**Config globals** (all mirrored from the parsed session-settings block by
+`apply_session_settings_to_globals @ 0x551500 @ 0x551D3E..0x551DBD`): `g_capture_duration
+@ 0x24D2248` (un-numbered flag capture time, wire `limit`), `g_capture_speed_setting
+@ 0x24D2254`, `g_spawn_wave_time_base @ 0x24D224C`, `g_spawn_wave_time_zone @ 0x24D2250`,
+`g_respawn_requires_team_dead @ 0x24D2260`. Observed defaults in the live IDB snapshot:
+speed setting −1 (base 12), waves unset.
+
+**Follow-ups (open):** the per-team `dword_C87B54 + 85·team` CRenderState field-6 gate that
+can skip the primary marker chain in `Server_PositionPlayerForSpawn @ 0x50D1DB`; the
+userpoint NAME used for spawn offsets (`off_7CF9C4` is runtime-set — static bytes are code);
+the `sub_52D430 @ 0x52D430` per-gametype config table (indices 0xC = capture-score
+threshold, 0x24 = scoring interval) and its table source; which gametype 0x50010 is (the
+zone-chain-exempt sibling — KOTH family suspected); the exact session-settings VarList keys
+behind the `0x2550B7x` mirror block; `CaptureCtx_MarkPresenceSlot @ 0x53B5C0` internals
+(presence-slot indexing); the 0x1E event-string table rows for 50-60 in
+`game_event_strcnd_key` should be cross-checked against these producer semantics at HUD
+time. Win conditions (`Server_CheckWinConditions @ 0x51AD40` reads the chain masks
+`@ 0x51AD87/0x51B4A2`) are roadmap item 4, unwitnessed here.
+
+**Reimpl (slice 1 — spawn selection, same session).** Ported: `world::ZoneChain` +
+`zone_chain_*` (`libs/world/zone_chain.{h,cpp}` — build/masks/ranks, the frontier rule, the
+owned-zone mask, the control latch), `Entity::zone_number` (BMS byte 155 `lfp_group` carried
+by `mission/promote.cpp`) / `zone_control` / `is_capture_trigger` / `is_spawn_point`
+(items.def attribs `changeteam 0x20000` / `spawnpoint 0x40000`, already parsed by
+`libs/def`; stamped + chain built + latched in `NovaSimulation::resolve_item_traits`);
+`resolve_spawn_target` / `find_spawn_zone_for_team` / `spawn_pose_for_target` /
+`select_player_spawn_for_team` (`world/spawn_select`); the full C2S 0x0E handler
+(`npruntime/server_message_dispatch.cpp` — pick resolve, the zone control/team gate, the
+0xFFFE frontier auto-pick, dead-only deploy, per-team marker fallback, the computed 0x1E
+ev-0x3A frontier hint replacing the golden byte-blob); the per-recipient 0x0A phase-0
+owned-zone mask (`PlayerReplicationState::uniform_team_mask`, default the golden 0x8); and
+the per-team join placement (`Server_BuildPlayerInfoAndAdd` assigns the team BEFORE the
+§5.2c marker scan — previously both AS teams spawned at the first family type present, i.e.
+team 1's base). Pinned by `zone_chain_test` (the ASH_I5A shape: masks/frontier/latch,
+capture progression, auto-pick, pick resolve, per-team markers — golden mask 0x8
+reproduced). Slice-1 deferrals (all §5.61-cited in code): the spawn-wave system
+(`g_spawn_wave_list` + 0x6E — host wave options default 0 = immediate deploys, matching
+retail defaults), vehicle-seat deploys (seat model unported), deploy-time 0x61/0x1D
+re-sends, the 6007 in-zone scatter + userpoint offset, and the capture loop itself
+(slice 2: the 1 Hz control delta/0x6F/0x53/0x6C/0x1E emits + zone team flips).
+
+**IDB changes (2026-07-03 AS session).** Function renames (46): the `CWeaponSlotManager*`/
+`CWeaponSlotMask*` cluster → `ZoneSlotChain_{GetTeamMask@0x4A2350, ContainsEntity@0x4A23D0,
+IsZoneCapturableByTeam@0x4A2450, GetOwnedZoneMask@0x4A2620, RebuildOwnershipMasks@0x4A26C0,
+GetZoneInfo@0x4A2750, AssignZoneRanks@0x4A27F0 (ex-CNetQuality_UpdatePriorities),
+GetWinningTeamIfAllOwned@0x4A2920, FindFrontierZone@0x4A2AC0,
+RebuildMasksAndCheckUnchanged@0x4A2B60, Reset@0x4A2C30, AddZoneEntity@0x4A2D70,
+BuildFromMission@0x4A2DE0}`; `Entity_BuildSortedRenderList @ 0x43EAE0` →
+`Entity_BuildSpawnZoneList` (+ `SpawnZoneList_{GetCount@0x43B920, GetByIndex@0x43B930,
+IndexOf@0x43B990}` over `g_spawn_zone_list/count`); `CMap_SetupSpawnCamera @ 0x50CF60` →
+`Server_PositionPlayerForSpawn`; `sub_4FE110` → `Server_ResolveSpawnTargetHandle`;
+`sub_500BA0` → `Server_OnPlayerTouchCaptureZone`; `calculate_capture_zone_score_delta
+@ 0x501120` → `calculate_capture_zone_control_delta`; `Server_ChangePlayerTeam @ 0x518D70`
+→ `Server_ChangeEntityTeam` (it retargets ANY entity — zones included); `sub_519600` →
+`Server_EnforceZoneEntityTeams`; the `stru_24E0E48` helpers → `SpawnWaveList_{TickEntry
+@0x52A330 (ex-update_death_queue_node), RemovePlayer@0x52A410, TryQueuePlayer@0x52A490,
+HasEntryForZone@0x52A520, Tick@0x52A550, ResetOnZoneTeamChange@0x52A5B0,
+GetEntryInfo@0x52A700, CountEntriesForTeam@0x52A7E0, BuildFromMission@0x52A920
+(ex-collect_weapon_overlay_entities), AppendEntry@0x52AB60}`; the capture-ctx helpers →
+`CaptureCtx_{RemoveQueueEntries@0x53B340, AddActiveCapture@0x53B510,
+MarkPresenceSlot@0x53B5C0, UpdateActiveCaptureRate@0x53B600, RemoveActiveCapture@0x53B6D0,
+QueueCaptureRequest@0x53B7A0 (ex-CTerrainTile_AddOrUpdateBoneSlot),
+MarkZonePresence@0x53B880, Reset@0x53BD00 (ex-CTextureInfo_Reset)}`; payload writers →
+`NetPacket_{WriteZoneTimerWindow@0x506D00 (0x53), WriteZonePresenceCount@0x506DE0 (0x6C),
+WriteZoneTimerValue@0x506E70 (0x6F), WriteSpawnWaveStatus@0x507490 (0x6E)}`;
+`sub_50FF10` → `Server_SendSpawnWaveStatusToPlayer`. Data renames (8): `g_zone_slot_chain
+@ 0x24D1EBC`, `g_spawn_wave_list @ 0x24E0E48`, `g_spawn_zone_list/count @ 0xA89188/84`,
+`g_spawn_wave_time_base/zone @ 0x24D224C/50`, `g_capture_speed_setting @ 0x24D2254`,
+`g_respawn_requires_team_dead @ 0x24D2260`. Entry comments on the 15 core functions.
 
 ### Wave 1 — gate protocol + session envelope (2026-06-11)
 
@@ -6515,7 +6786,7 @@ team — side A when team ∈ {1,3} or the session gametype is non-team-based ((
 byte [@ 0x51d0b1] and entity+0x15C = the picked char id [slot+440]; playerClass = TR ? CTB :
 CTA (absent -> 8 in-session [@ 0x51d02b], outside [5,9] -> 8 [@ 0x51d102]) -> entity+0x294.
 `Server_InitAllPlayerEntitiesForRound @ 0x516aa0` re-stamps entity+0x374 = slot+89857 every
-round [@ 0x516b8e]; `Server_ChangePlayerTeam @ 0x518d70` re-picks on a team change
+round [@ 0x516b8e]; `Server_ChangeEntityTeam @ 0x518d70` (ex-`Server_ChangePlayerTeam`) re-picks on a team change
 [@ 0x518e8c]; the host's OWN player takes the LOCAL path instead: animSlot = g_avatarTeam1/2
 by team split {1,3}/{2,4} [orig: Player_InitPlayer @ 0x4e15f0 @ 0x4e1843], sourced from the
 profile avatar byte with a not-found default of 1 [orig: apply_session_settings_to_globals
@@ -6824,7 +7095,7 @@ eflags 0x04020400 + ammo/subType 0xFF) and `nw_ingame_encode` round-trip. DEFERR
 here): the sectioned-destructible `sectionMask` rebuild (def attrib sign bit → per-section
 state table `[orig: @0x50443f..0x5044a4]` — ASH_I5A golden has one such record, Power
 Generator Housing flags 0x0A9), the armory `weaponByte`/`attachRef` via
-`CWeaponSlotManager_GetEntitySlotInfo @0x4a2750` (golden ASH_I5A statics all carry weap 0x00),
+`ZoneSlotChain_GetZoneInfo @0x4a2750` (ex-`CWeaponSlotManager_GetEntitySlotInfo`; golden ASH_I5A statics all carry weap 0x00),
 and the `scoreFlag` def-callback gate `[orig: @0x504554]`. LIVE RE-VERIFY retail-join v26
 (2026-07-03) NEGATIVE for the symptom: the 0x10 statics now stream golden-shaped (buildings
 eflags `0x04020400`, ammo/subType 0xFF), yet the stand-on-entity snap (building floors,

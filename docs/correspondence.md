@@ -249,10 +249,34 @@ with zero unnamed tags in both directions):
 | `NapiNPClientMsg_HandleJoinResponse` | `0x42E0F0` | S2C 0x02 position-ack + padding probe (client echoes C2S 0x02 + N random bytes) | — | matching (decode side) |
 | `NapiNPServerMsg_HandlePlayerLoadout` | `0x515790` | C2S 0x2F loadout submit (soldierType → entity+660 playerClass; restriction mask; → S2C 0x5A) | — | matching (decode side) |
 | `NapiNPServerMsg_HandlePlayerSpawnRequest` | `0x513260` | C2S 0x0A spawn-menu request → S2C 0x19 timestamp ack | — | matching (read-only) |
-| `Server_ProcessClientRequestRespawn` | `0x519AF0` | C2S 0x0E respawn/deploy request ([i16 spawnHandle], 0xFFFE = auto) | — | matching (read-only) |
+| `Server_ProcessClientRequestRespawn` | `0x519AF0` | C2S 0x0E respawn/deploy request ([i16 spawnHandle], 0xFFFE = auto frontier pick; zone control/team/vehicle-seat gates; wave-queue else deploy — §5.61) | — | ported (dispatch case 0x0E — pick/gates/deploy + computed 0x1E ev-0x3A; waves/vehicle-seat deferred) |
 | `NapiNPServerMsg_HandleVehicleAttach` / `_HandleVehicleDetach` | `0x502390` / `0x4FC980` | C2S 0x26/0x27 vehicle attach (anti-spoof word0 overwrite) / detach | — | matching (read-only) |
 | `NapiNPServerMsg_HandleVehicleSpawnRequest` | `0x51C4C0` | C2S 0x40 vehicle spawn → S2C 0x18 broadcast (mask 0x90) at the source model's boat/helo userpoint | — | matching (read-only) |
 | `NapiNPClientMsg_TeamAssign` / `_ScoreDeltaSound` | `0x431910` / `0x42A0B0` | S2C 0x50 team assign / 0x81 score-delta hit-confirm sound | — | matching (read-only) |
+
+Advance & Secure — spawn selection + the zone-capture loop (engine-research 2026-07-03; net-re §5.61;
+kong misnomer cluster `CWeaponSlotManager*` renamed `ZoneSlotChain_*` — it manages capture-zone slots):
+
+| original | addr | role | D-NET | status |
+|---|---|---|---|---|
+| `ZoneSlotChain_BuildFromMission` | `0x4A2DE0` | mission-start zone registration: pool-3 6003/6004/6090/6091 + 6096-6099 markers → per-team assigned slots; pools-1/2 numbered `0x20000` entities → the chain vector | — | ported (`world::zone_chain_build_from_mission`; `zone_chain_test`) |
+| `ZoneSlotChain_IsZoneCapturableByTeam` | `0x4A2450` | the AS frontier rule (assigned slot / owned mask / Z±1 adjacency; 0x50010 exempt) | — | ported (`zone_chain_is_capturable`; `zone_chain_test`) |
+| `ZoneSlotChain_FindFrontierZone` / `_GetOwnedZoneMask` | `0x4A2AC0` / `0x4A2620` | first capturable zone number per team (0x1E ev-58 hint) / u32 wholly-owned-zone mask (the 0x0F variant-0 dword) | — | ported (`zone_chain_frontier_zone` / `zone_chain_owned_zone_mask`; golden 0x8 pinned in `zone_chain_test`) |
+| `Server_ResolveSpawnTargetHandle` | `0x4FE110` | 0x0E pick resolve: pools 0/1/2, def attrib `0x40000`, team gate (teamless passes) | — | ported (`world::resolve_spawn_target`; `zone_chain_test`) |
+| `Server_PositionPlayerForSpawn` | `0x50CF60` | spawn placement (ex-`CMap_SetupSpawnCamera`): picked entity pose + userpoint/z+1; numbered zone → round-robin over ≤32 in-radius pool-3 6007 markers; else §5.2c marker chain; revive latch +89932 | D-NET-88 | ported (pick path `spawn_pose_for_target` + per-team `select_player_spawn_for_team`; 6007 scatter/userpoint deferred §5.61) |
+| `find_spawn_entity_for_team` | `0x4FC810` | 0xFFFE auto-deploy: owned frontier zone with control ≥ 1.0 (co-op: last team zone) | — | ported (`world::find_spawn_zone_for_team`; `zone_chain_test`) |
+| `SpawnWaveList_*` (`g_spawn_wave_list @ 0x24E0E48`) | `0x52A330..0x52AB60` | spawn-wave groups (56-B entries): queue on pick, 1 Hz one-release-per-interval, flush on control<1.0, reset on flip; S2C 0x6E status | — | confirm-only |
+| `Server_OnPlayerTouchCaptureZone` | `0x500BA0` | capture request from the physics touch (def `0x20000`; gate un-numbered/owner/control≤0) → presence mark + request queue | — | confirm-only |
+| `Server_UpdateCaptureZoneProximity` | `0x5086A0` | 1 Hz proximity bits (`player+89868`), 0x81 score sync, presence counters → `GameEvent_ProcessScoring` | — | confirm-only |
+| `Server_UpdateCaptureZoneEntities` | `0x519690` | 1 Hz secure pass: control latch/delta, S2C 0x6F emit, 0x1E ev 0x3B/0x3C edges, in-radius def+88&2 team convert | — | confirm-only |
+| `calculate_capture_zone_control_delta` | `0x501120` | control delta: presence sign × 65536/(teamSize×base 12/24/48 ± underdog catch-up ÷ shared-N), clamp [0,1.0], counts → +544/+545 | — | confirm-only |
+| `Server_UpdateCaptureZones` (`captureCtx @ 0xC947A8`) | `0x53B8F0` | 1 Hz timed-capture engine: request queue + 152-B active entries, S2C 0x53 ×4 + 0x6C on presence change; numbered zones flip instantly (control→0) | — | confirm-only |
+| `GameEvent_FlagCapture` | `0x50F6F0` | 0x1E flip events: 50/51 (frontier unchanged) or 52/53 (+new frontier), 56/57 banner, 43/44 un-numbered; suppressed post-`GetWinningTeamIfAllOwned @ 0x4A2920` | — | confirm-only |
+| `Server_EnforceZoneEntityTeams` | `0x519600` | 1 Hz: numbered entities forced to the owned-mask team (flips co-located `0x40000` spawn objects) | — | confirm-only |
+| `Server_ChangeEntityTeam` | `0x518D70` | entity team retarget + S2C 0x50 broadcast (ex-`Server_ChangePlayerTeam`; zones/spawn objects included) | — | confirm-only |
+| `NetPacket_WriteZoneTimerWindow` / `_WriteZoneTimerValue` / `_WriteZonePresenceCount` / `_WriteSpawnWaveStatus` | `0x506D00` / `0x506E70` / `0x506DE0` / `0x507490` | the 0x53 (9 B) / 0x6F (15 B) / 0x6C (3 B) / 0x6E payload builders | — | confirm-only |
+| `Entity_BuildSpawnZoneList` | `0x43EAE0` | deploy/spawn registry `g_spawn_zone_list` (pools 2+1 `0x40000`), deploy-map AABB, sort (ex-`Entity_BuildSortedRenderList`) | — | confirm-only |
+| `apply_session_settings_to_globals` | `0x551500` | host options → `g_capture_duration`/`g_capture_speed_setting`/`g_spawn_wave_time_base+zone`/`g_respawn_requires_team_dead` | — | confirm-only |
 
 Server per-frame S2C 0x0A emit (§5.47; witnessed 2026-07-01; reimpl in `libs/netsim/src/connection_fan.cpp`
 + `netsim::Connection::s2c_phase`; `netsim_two_peer_fanout` `run_0a_subblock_phase_cycle` + shape harness

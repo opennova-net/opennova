@@ -9,7 +9,10 @@
 #include <novaworld/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
+#include <world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
+#include <world/spawn_select.h>  // resolve_spawn_target / find_spawn_zone_for_team / spawn_pose_for_target
 #include <world/world.h>  // world::World::registry (the authoritative roster, §6.9)
+#include <world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
 
 #include <algorithm>
 #include <cstring>
@@ -286,11 +289,17 @@ std::vector<uint8_t> build_tag_5a_weapon_loadout(const std::vector<uint8_t> &req
 	return encode_weapon_loadout(reply);
 }
 
-// tag=0x1E GAME-EVENT (post-spawn) — verbatim retail frame-82540 payload. [orig: GameEvent_BuildPayload
-// @0x5054E0 / NetPacket_HandleGameEvent @0x426270.]
+// tag=0x1E GAME-EVENT ev 0x3A (58) — the private deploy-screen frontier hint: "go capture zone N".
+// attacker byte = the requester team's frontier zone number [orig: Server_ProcessPlayerDeath
+// @0x517740 — GameEvent_BuildPayload(0x3A, ZoneSlotChain_FindFrontierZone(team), 0xFF, 0xFF, 0, 0)
+// @0x517A1D, mask 0x20; §5.26 8-B body via GameEvent_BuildPayload @0x5054E0]. The golden retail
+// frame-82540 body was {0x3a, 0x04, ...} — the retail host's live frontier at that moment; a
+// World-less host keeps that golden byte so the burst pins hold.
+std::vector<uint8_t> build_tag_1e_frontier_hint(uint8_t frontier_zone) {
+	return {0x3a, frontier_zone, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00};
+}
 std::vector<uint8_t> build_tag_1e_game_event_post_spawn() {
-	static constexpr uint8_t kRetailTag1ePayload[8] = {0x3a, 0x04, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00};
-	return std::vector<uint8_t>(std::begin(kRetailTag1ePayload), std::end(kRetailTag1ePayload));
+	return build_tag_1e_frontier_hint(0x04); // the golden frame-82540 byte (World-less fallback)
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +334,12 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		if (world != nullptr)
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) ctx.team = e->team;
 	}
+	// The recipient's deploy-map owned-zone mask (0x0F variant-0 u32) from the live chain; a
+	// chain-less world keeps the golden ASH_I5A default 0x8. [orig: ZoneSlotChain_GetOwnedZoneMask
+	// @0x4a2620 per recipient team @0x4ff9a3; net-re §5.61]
+	if (world != nullptr && !world->zone_chain.empty())
+		ctx.uniform_team_mask =
+				world::zone_chain_owned_zone_mask(*world, world->zone_chain, ctx.team);
 	return ctx;
 }
 
@@ -557,13 +572,77 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// change is unmodeled; when it lands, port the @0x514F10 list lookup +
 				// write_entity_packet — never an echo.
 				break;
-			case 0x0E: // respawn request -> 0x1E game-event, once spawned [orig: NapiNPServerMsg_0x00E
-				// @0x519AF0 -> Server_ProcessPlayerDeath emits 0x1E]. The INITIAL spawn is the one-shot
-				// world-stream burst (Server_SendInitialGameStateToPlayer), not a reactive reply here.
-				if (conn.burst.spawned) {
-					replies.push_back(make_protocol_message(0x1E, build_tag_1e_game_event_post_spawn()));
+			case 0x0E: { // RESPAWN/DEPLOY request [i16 spawnHandle] — the deploy-map pick.
+				// [orig: Server_ProcessClientRequestRespawn @0x519AF0; net-re §5.61]. 0xFFFE = the
+				// auto frontier pick; a real handle resolves through the SpawnPoint/team gates and a
+				// NUMBERED zone additionally requires team match + control >= 1.0 (a contested zone
+				// stops accepting spawns). An ALIVE in-session player's request is a no-op [orig: the
+				// @0x519cce dead-or-flagged gate; only !is_in_session falls through @0x519cd7]; a DEAD
+				// one deploys NOW: position at the pick (zone origin, §5.61 6007-scatter/userpoint
+				// deferral) else the per-team marker chain, reset-to-spawn-state, template health —
+				// Server_ProcessPlayerDeath's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
+				// @0x50cf60 -> Entity_ResetToSpawnState @0x4B9610]. Deploy-time 0x61 seed re-send and
+				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). Deferred with the wave
+				// system: g_spawn_wave_list queueing + the 0x6E status (host wave options unmodeled —
+				// retail with default options deploys immediately, which this matches). The reply is
+				// the private 0x1E ev-0x3A frontier hint [orig: @0x517A1D, mask 0x20].
+				if (!conn.burst.spawned) break;
+				if (world == nullptr || !conn.link.owned_entity.valid()) {
+					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
+					replies.push_back(
+							make_protocol_message(0x1E, build_tag_1e_game_event_post_spawn()));
+					break;
 				}
+				world::Entity *player = world->registry.get(conn.link.owned_entity);
+				if (player == nullptr) break;
+				// Body: [i16 spawnHandle]; a short/absent body reads 0 [orig: @0x519b42..48].
+				const uint16_t pick = msg.payload.size() >= 2
+						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
+						: 0;
+				const world::Entity *target = nullptr;
+				if (pick == 0xFFFE) {
+					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
+					// [orig: find_spawn_entity_for_team @0x4fc810 -> requestedHandle -1 on miss].
+					target = world::find_spawn_zone_for_team(*world, world->zone_chain,
+					                                         player->team, config.game_type);
+				} else if (pick != 0 && pick != 0xFFFF) {
+					target = world::resolve_spawn_target(*world, player->team, pick);
+					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
+					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
+					// control(+540) >= 0x10000].
+					if (target->zone_number != 0 &&
+					    (target->team != player->team || target->zone_control < 0x10000))
+						break;
+				}
+				if (player->health > 0) break; // alive in-session: no reposition [orig: @0x519cce]
+				world::SpawnPointResult pose;
+				if (target != nullptr) {
+					pose = world::spawn_pose_for_target(*target);
+				} else {
+					// No/auto pick: the per-team start-marker chain (6096-6099 -> 6003/6004/...)
+					// [orig: Server_PositionPlayerForSpawn @0x50cf60 path B; §5.2c/§5.61].
+					pose = world::select_player_spawn_for_team(*world, player->team,
+					                                           config.game_type);
+				}
+				if (pose.found) {
+					player->position = pose.position;
+					player->yaw = pose.yaw;
+				} // no marker at all: redeploy in place (never an NPC position)
+				// entity_reset_to_spawn_state re-backs spawn_position from the new pose and
+				// clears the movement gate [orig: Entity_ResetToSpawnState @0x4B9610].
+				world::entity_reset_to_spawn_state(*player);
+				if (world->player_item_hp > 0) player->health = world->player_item_hp;
+				else if (player->health_max > 0) player->health = player->health_max;
+				else player->health = 100; // [orig: Entity_InitFromItemDef @0x49e550]
+				// The frontier hint, only when a frontier zone exists [orig: the @0x5179e0
+				// `if (AvailableSlot)` gate].
+				const uint8_t frontier = zone_chain_frontier_zone(*world, world->zone_chain,
+				                                                  player->team);
+				if (frontier != 0)
+					replies.push_back(
+							make_protocol_message(0x1E, build_tag_1e_frontier_hint(frontier)));
 				break;
+			}
 			case 0x0C: // C2S player-input uplink — cache the pre-spawn pose
 				cache_client_pose(msg.payload, st);
 				break;

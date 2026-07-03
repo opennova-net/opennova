@@ -92,6 +92,9 @@ public:
 	// decoder's own gate (itemDef.attrib & 0x100000 @0x433327). [docs/world/itemdef-re.md;
 	// docs/net/novaworld-net-re.md D-NET-97]
 	bool is_ai_capable(int id) const;
+	// The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. AS zone traits
+	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
+	uint32_t get_attrib(int id) const;
 	String get_display_name(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.

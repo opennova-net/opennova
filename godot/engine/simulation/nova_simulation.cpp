@@ -286,7 +286,20 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 			e->engine_flags |= 0x4000000u;
 			e->sub_type = 0xFF;
 		}
+		// AS zone traits from the attrib dword: 0x20000 "ChangeTeam" = capture trigger,
+		// 0x40000 "SpawnPoint" = deploy-selectable (the ASH_I5A "Change Team & Spawn
+		// Volume" objects carry both). [orig: def+84 gates in ZoneSlotChain_BuildFromMission
+		// @0x4a2de0 / Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61]
+		const uint32_t attrib = p_item_db->get_attrib(def_id);
+		e->is_capture_trigger = (attrib & 0x20000u) != 0;
+		e->is_spawn_point = (attrib & 0x40000u) != 0;
 	}
+	// The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on
+	// is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
+	// [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 from Game_StartMission @0x526126;
+	// the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
+	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
+	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
 }
 
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
@@ -954,7 +967,7 @@ int NovaSimulation::spawn_local_player_at_start() {
 	// Pick the player-start marker the original would — scan the 60xx start-marker family (SP/DM,
 	// coop, team), FARTHEST from the enemy set — instead of the first NPC's position. Finds the
 	// authored start whatever the mission mode (e.g. a 6001-only SP training mission like 00TRa).
-	// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
+	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
 	const opennova::world::SpawnPointResult sel = opennova::world::select_player_spawn(*world_);
 	opennova::world::PlayerSpawn spawn;
 	if (sel.found) {

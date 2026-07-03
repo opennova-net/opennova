@@ -714,7 +714,7 @@ struct FrameEnv {
 // `FrameAimBlock` was a misnomer; server-side grill 2026-07-01). Written by
 // NetPacket_WritePlayerState @0x4ff81b: preround timer, five per-player-slot
 // weapon-overlay bytes (+360/+368 gated on entity+36 bit 1), the reload
-// countdown, and the uniform team mask (CWeaponSlotManager_GetUniformTeamMask
+// countdown, and the uniform team mask (ZoneSlotChain_GetOwnedZoneMask
 // @0x4a2620). Client landings are exact. [orig: NetPacket_WritePlayerState
 // @0x4ff81b (writer) / NapiNPClientMsg_0x00A @ 0x430054..0x430136 (reader)]
 struct FrameWeaponBlock {

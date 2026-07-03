@@ -775,7 +775,7 @@ target_include_directories(player_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(player_spawn_test PRIVATE cxx_std_17)
 add_test(NAME player_spawn COMMAND player_spawn_test)
 
-# Player spawn-point selection (CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint
+# Player spawn-point selection (Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint
 # @0x50ccc0, net-re §5.2c): SP/campaign picks the type-6002 start marker FARTHEST from enemy
 # soldiers and never an NPC's position — the faithful fix for "the player spawns on top of NPC 0".
 add_executable(spawn_select_test world/spawn_select_test.cpp)
@@ -783,6 +783,16 @@ target_link_libraries(spawn_select_test PRIVATE opennova_world)
 target_include_directories(spawn_select_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(spawn_select_test PRIVATE cxx_std_17)
 add_test(NAME spawn_select COMMAND spawn_select_test)
+
+# Advance & Secure zone-slot chain (net-re §5.61; ZoneSlotChain_* @0x4A2350..0x4A2DE0,
+# ex-"CWeaponSlotManager"): masks/frontier/adjacency, the 0x0F owned-zone mask, the control
+# latch, the 0xFFFE auto-deploy pick, and the 0x0E pick resolve — pinned on the ASH_I5A shape
+# (zone 1 team 1 / zone 2 x2 neutral / zone 3 team 2, golden uniformMask 0x8).
+add_executable(zone_chain_test world/zone_chain_test.cpp)
+target_link_libraries(zone_chain_test PRIVATE opennova_world)
+target_include_directories(zone_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(zone_chain_test PRIVATE cxx_std_17)
+add_test(NAME zone_chain COMMAND zone_chain_test)
 
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose

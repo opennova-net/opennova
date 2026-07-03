@@ -20,6 +20,7 @@
 #include "world/ammo_table.h"
 #include "world/round_sim.h"
 #include "world/weapon_table.h"
+#include "world/zone_chain.h"
 
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -262,6 +263,13 @@ public:
     // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
     // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     RoundSim round_sim;
+
+    // The Advance & Secure zone-slot chain (empty until the host builds it after the
+    // item-traits sweep — zone registration needs Entity::is_capture_trigger). Feeds
+    // the 0x0F owned-zone mask, the 0x0E deploy gates, and the 0x1E frontier hint.
+    // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
+    // from Game_StartMission; net-re §5.61]
+    ZoneChain zone_chain;
 
     // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
     // shares the same field through AiSystem). Null = no terrain impacts.

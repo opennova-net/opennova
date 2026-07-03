@@ -196,6 +196,22 @@ struct Entity {
     // entity+533 refNum <- BMS record byte 153; the 0x10 record's flag-0x40 byte (D-NET-94).
     uint8_t ref_num = 0;
 
+    // --- Advance & Secure zone fields (net-re §5.61) ---
+    // entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;
+    // 0 = not a chain zone (plain flag/base). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    uint8_t zone_number = 0;
+    // entity+540 — the 16.16 SECURE/control fraction 0..0x10000. A numbered zone accepts
+    // spawns only at >= 0x10000; flips reset it to 0 and the owner re-secures. Seeded by the
+    // chain latch (zone_chain_latch_control): 1.0 when the enemy frontier cannot reach it.
+    // [orig: Server_UpdateCaptureZoneEntities @0x519690 latch @0x519764; clamp @0x501499]
+    int32_t zone_control = 0;
+    // ItemDefAttrib & 0x20000 "ChangeTeam" — capture-trigger volume (joins the zone chain).
+    // [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 def+84 & 0x20000 gate]
+    bool is_capture_trigger = false;
+    // ItemDefAttrib & 0x40000 "SpawnPoint" — deploy-selectable spawn target (0x0E picks).
+    // [orig: Server_ResolveSpawnTargetHandle @0x4fe110 def+84 & 0x40000 gate]
+    bool is_spawn_point = false;
+
     uint32_t spawn_origin = 0; // back-ref to the BMS (kind,index) it was promoted from
     std::string name;          // named markers/areas
 
