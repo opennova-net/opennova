@@ -54,7 +54,7 @@ behavior is summarized and cited.
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |
 | Mission | [`mission/mis-format-re.md`](mission/mis-format-re.md) | partial: writer-generated subset, full `dfx2med.exe` grill pending |
-| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record; current through §5.59 + D-NET-152 (retail-join fidelity: D-NET-141..152 fixed + live-verified — 152 = client fire: C 0x06 → clip authority → tag-2 round-event echo, wire-verified v28 2026-07-03; 151 = the grounded-on-entity teleport, wire re-verified v28 across 4 carriers incl. a pool-1 deck; §5.9.1 corrected — tag-2 is a round-FIRED event, not a hit; next: authoritative round spawn + damage `RoundData_SpawnRound @ 0x4EC0D0`) |
+| Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record; current through §5.59 + D-NET-152 (retail-join fidelity: D-NET-141..152 fixed + live-verified — 152 = client fire: C 0x06 → clip authority → tag-2 round-event echo, wire-verified v28 2026-07-03; 151 = the grounded-on-entity teleport, wire re-verified v28 across 4 carriers incl. a pool-1 deck; §5.9.1 corrected — tag-2 is a round-FIRED event, not a hit; next: PORT the authoritative round sim + damage + death family, witnessed end-to-end in §5.60) |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |

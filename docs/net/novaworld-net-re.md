@@ -346,7 +346,7 @@ sweep; blank = not yet characterized.
 | 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
 | 0x52 | 0x428A80 | `_0x052` | |
 | 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 modeA][u8 modeB→entity+547][u16 start_s][u16 end_s][u8 rate], ×62 s→ticks; capture/takeover HUD channel. Field map §5.49 (decoded) |
-| 0x54 | 0x429040 | `_0x054` | |
+| 0x54 | 0x429040 | `_0x054` | death/wounded minimap marker `[u16 entityHandle][u8 state]` — server emits from `GameEvent_PlayerDeath @0x516dd0` ×2, `GameEvent_RevivePlayer @0x517db4`, `Server_BroadcastMedicRequest @0x515390` (D-NET-108); handler body unwitnessed (§5.60) |
 | 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
@@ -418,7 +418,7 @@ This is what a reimplemented server must **handle**.
 | 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle]; 0xFFFE = auto team spawn (gametype-keyed) — `Server_ProcessClientRequestRespawn` |
 | 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); anti-spoof + fire-rate gate, then `Server_ClientFiredRound @0x50baa0`: net primary fire runs the adm 'fire' action (slot-latched client pose) → local re-entry → `RoundData_AddRound @0x4fdb40` → the per-recipient §5.9.1 tag-2 round-event echo; ammo clip decremented (`consume_weapon_ammo @0x540850`), cooldown stamped (slot+96472 = tick + adm[276]). D-NET-152 |
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
-| 0x13 | 0x514330 | |
+| 0x13 | 0x514330 | `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action byte + nearest-sector resolve; action 6 arms a 30-tick timer); NOT a death message — only S2C 0x13 is the death notify (§5.60) |
 | 0x14 | 0x501E00 | |
 | 0x16 | 0x511A70 | client→server chat |
 | 0x17 | 0x514850 | |
@@ -5170,7 +5170,137 @@ side B/type 7/index 1 (the CI1 u16 truncation, §5.0b/D-NET-146).
 
 The deploy gate is unrelated: retail drops the loading screen via S2C 0x1D (§5.2), never 0x51.
 
+### 5.60 The authoritative round simulation, damage, and the death broadcast family (engine-research scope, 2026-07-03)
 
+Witnessed to scope the port of server-side rounds — the D-NET-152 deferred tail. No reimpl
+exists yet: every claim here is confirm-only from the binary; the payload writers named in
+the follow-ups get byte-witnessed at port time.
+
+**The spawn is synchronous.** `RoundData_AddRound @ 0x4FDB40` inline-calls
+`RoundData_SpawnRound @ 0x4EC0D0` — the `g_round_ring` is ONLY the tag-2 network fan-out
+log; the simulation starts at fire time. SpawnRound (hit-params struct = the 11-dword block
+AddRound builds: origin ptr, target, fire time, adm entry, weapon id, damage type/value,
+direction/spread words): score-multiplier stamp, tracer interval (adm+226), then the
+ammo-class dispatch — flag 0x400 trail + IMMEDIATE HITSCAN when adm halfword 22 == 1
+(`Weapon_RaycastAndSpawnImpact @ 0x4E8460`: euler→matrix ray out to weaponDef+56 range vs
+terrain hi-res heightmap + `Projectile_RaycastProximitySlots @ 0x4E5340` + water, 5-way hit
+class, impact effect from the weapon's 16-B effect table + sound — EFFECTS ONLY, no damage
+call in the hitscan leaf), flag 0x20 streaming invalidate, 0x2000000 guided-tracker
+register, 0x10000/0x20000 pellet bursts (`Weapon_SpawnProjectileBurst*`), default =
+allocate a pool-3 projectile entity (`CEntityManager_AllocateSlot` +
+`Entity_InitFromItemDef`), apply `Weapon_CalcRandomSpreadOffset` to the direction, velocity
+= ammo speed/62 per tick from yaw/pitch 16.16 trig (multiply >> 22), owner/team stamp,
+trail emitter + glow light. Other SpawnRound callers: the client's own-fire prediction
+(`Entity_FireWeaponAndSendPacket @ 0x42BD80`), the client tag-2 re-sim
+(`NetPacket_DeserializeRoundEvent @ 0x42F270`), death-explosion shrapnel
+(`Entity_HandleInfantryDeath @ 0x443670`, `Entity_HandleDeathExplosion`,
+`Entity_HandleVehicleDeathExplosion`), and save-load.
+
+**Authority: damage is host-only — witnessed in three independent gates.**
+`Weapon_CalcImpactDamage @ 0x4EC920` returns 0 for a non-authority session peer
+(`@0x4ec933`); `Projectile_ProcessDamageOnTarget @ 0x4E7FB0` guards the health write and
+the team attacked-by/visibility matrices on `g_napi_np_ctx.is_authority` (`@0x4e809c`,
+`@0x4e8127`); `Entity_ApplyWeaponDamage @ 0x4E6820` (the explosion applicator) early-outs
+unless authority, with buildings further gated by `g_destroy_buildings` (`@0x4e6860`). A
+client's local round sim — own-fire prediction and tag-2 re-simulation alike — is purely
+visual (effects, decals, sound).
+
+**The per-tick sim.** `Weapon_UpdateAllProjectiles` iterates live rounds →
+`Projectile_UpdatePhysics @ 0x4E9D70` (ammo def = `g_ammoDefTable[276·idx]`, idx at
+projectile+620, lifetime at +684): advance by velocity, segment ray per tick — terrain
+hi-res heightmap (`Terrain_RaycastHeightmapHiRes`), entity proximity list
+(`Entity_BuildProximityList` → `Physics_RaycastAgainstProximityList`, minimum proximity
+radius 0.1 u = 6553 fp16 "for networked authority" `@0x4ea263`), water
+(`Projectile_CheckWaterIntersection @ 0x4E59D0`) — drag
+(`Projectile_ApplyDragDeceleration @ 0x4E5CD0`, table from `Projectile_InitDragTable
+@ 0x4E78D0`), then the 5-way hit switch (`@0x4ea6a7`): 0 = terrain →
+`Projectile_HandleTerrainImpact @ 0x4E9210`, 1/2 = entity (with hit-bone data) →
+`Projectile_HandleEntityImpact @ 0x4E9390`, 3 = building → `@ 0x4E98F0`, 4 = water;
+effects `Projectile_SpawnImpactEffect @ 0x4E9B80`, tracer scar `@ 0x4E5AC0`.
+
+**Entity impact** (`Projectile_HandleEntityImpact @ 0x4E9390`): resolve through the
+vehicle parent chain (`@0x4e94e0`); penetration budget = (projectile+676 − +684) vs
+ammoDef dword 3, with child-ammo spawn on spend (name string at ammoDef+241 →
+`AmmoDef_LookupByName`, copies 692 B of the projectile) — penetrating/fragmenting rounds;
+weapon-type-15 bone/section damage via `Entity_ComputeBoneCollisionBounds`; kinetic clamp
+(`Entity_ClampKineticEnergy`); pass-through flags 0x18000000 (`@0x4e95a0`); then
+`Projectile_ProcessDamageOnTarget @ 0x4E7FB0`.
+
+**The damage model is kinetic.** `Weapon_CalcImpactDamage @ 0x4EC920`: damage scales with
+the round's REMAINING SPEED — `(62 · |vel|) >> 16`, clamped to 1219 (`@0x4ecad6`) — times
+a hit-zone multiplier (infantry zone switch `@0x4ec9bf`: zones 0-4 = HEAD, sets flag 0x100
+on target+44; 5-8 = body ×1.0; 9-12/15-18 = limbs; 13-14 = special, flag 0x800; vehicle
+path when itemDef+84 has 0x200: seat types 2/3/6/7 get the special multiplier + 0x800);
+`g_OneShotKill` → flat 2000; clamp to ammoDef max (dword 48). Distance falloff EMERGES
+from drag — there is no range table. Zeroing gates in
+`Projectile_ProcessDamageOnTarget`: indestructible entity flags 0x4000000, itemDef+400
+armor class 0xFFFF or greater than ammoDef+196 (the max armor class this ammo can hurt),
+target already dead (+292 == −1), occupant scale (`Entity_ApplyOccupantDamageScale`) when
+target+92 == 1; damage clamps to remaining health, and itemDef+84 flag 0x40000000 pins
+health at 1 (unkillable-by-damage). The authority applies `health −= damage` (`@0x4e8127`);
+a kill calls `Score_ProcessKillEvent @ 0x4FD400` (authority-gated scoring ONLY — it emits
+no messages); ammo flag 0x100 stamps attacker + last-hit fields on the target and invokes
+the entity damage callback (+456, event 4).
+
+**Explosions.** `Projectile_ProcessExplosionQueue @ 0x4EAD80` drives AoE via
+function-pointer tables (`@0x4eadd0`, `@0x4eae44`) → `Entity_ApplyWeaponDamage @ 0x4E6820`:
+authority gate, same-team protection when itemDef attrib 0x8000, base damage from
+weaponDef+46, LINEAR distance falloff (blast radius), separate infantry (type 3) and
+vehicle section paths, kill credit via `Score_ProcessKillEvent`.
+
+**Death detection + the broadcast family** (every emit goes through
+`NapiNPServer_SendFiltered @ 0x4C87E0`; mask 0x90 = alive + not-host):
+
+- Per-tick `Entity_UpdateInfantryPlayerBody` / `Entity_UpdateInfantryAI` detect health ≤ 0
+  → `Entity_CheckAndProcessDeath @ 0x51B550`: `Flags & 0x100` (player-controlled) →
+  `GameEvent_PlayerDeath @ 0x516DD0`; else (AI) → S2C 0x13 death notify
+  (`BuildDeathNotifyPayload`, mask 0x90) + scoring.
+- `GameEvent_PlayerDeath @ 0x516DD0` [authority-gated at entry]: vehicle detach, clears
+  every pool-0 entity's live-target (+92) that references the victim (the §5.9.1 0x40-word
+  source), S2C 0x13 (`@0x516e9a`), respawn timer (620-tick recent-spawn rule /
+  `g_respawn_timeout`, floor 3, slots +360/+364), random-seed resend, scoring
+  accumulators (`Score_AccumulateKillByEntityType` ×2 + weapon stats), kill-type
+  classification for the feed — suicide rand(0-2)+1, team kill rand+7, explosive weapon
+  type_id 4091/4093/4095 → 24, special 49, HEADSHOT (flag 0x100 from CalcImpactDamage) →
+  rand+32, vehicle kill (flag 0x800) → rand+10, knife (flag 0x400) → rand+13, standard
+  rand+4, drowned 22, crashed (0x200) 23, environment 26 — then S2C 0x52 ×2
+  (`NetPacket_WriteThreeInt32s`, kill stats), S2C 0x1E (`GameEvent_BuildPayload`:
+  event_type + three pool indices + position — the §5.26 kill feed), S2C 0x54 ×2
+  (`NetPacket_WriteEntityHandleWithByte` — the death/wounded minimap marker; also emitted
+  by `GameEvent_RevivePlayer @ 0x517DB4` and `Server_BroadcastMedicRequest @ 0x515390`,
+  D-NET-108).
+- `Server_KillPlayerAndNotify @ 0x519E00` [authority]: marks the slot dead (+100567;
+  entity+292 = −1 — the exact flag `Projectile_ProcessDamageOnTarget` checks), calls
+  `Server_ProcessPlayerDeath`, optional S2C 0x32 sub-type 5 carrying the player NAME.
+- `Server_ProcessPlayerDeath @ 0x517740`: killer pool-handle resolve, vehicle detach (+
+  seat-flag 0x40000 killer-vehicle re-attach), spawn camera, `Entity_ResetToSpawnState
+  @ 0x4B9610` (the D-NET-66 death teleport), per-gametype scoring, weapons re-init +
+  `Server_SendWeaponSlotListToPlayer @ 0x502943` — a death re-sends 0x5A (the
+  deploy-bundle 0x5A pairing seen in the golden), 0x1E event, KRBP death marker (§5.42).
+  Callers: respawn request, kill-notify, bot update, the death queue.
+- Non-player entity death/destruction — 16 handlers (infantry/vehicle/destructible death
+  + explosions, AI death transitions, section damage, crane/water destruction) — all stage
+  S2C 0x26 via the single emit point `Server_SendEntityStatePacket @ 0x509D70`
+  (`NetPacket_WriteEntityHandleAndTeam`, mask 0x90, tick stamp at entity+560).
+  Destructibles additionally `Server_SendDestructibleDeathPacket @ 0x50D95A` → S2C 0x2F;
+  explosion effects broadcast via `Server_BroadcastExplosionEffect @ 0x5084A1` → S2C 0x21;
+  shell-eject/fall physics sync → S2C 0x59.
+- CORRECTION (table row filled): the C2S 0x13 handler `@ 0x514330` is
+  `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action 6
+  arms a 30-tick timer at entity+885/886), weapon-fire/camera math for some types — NOT a
+  death message. Only S2C 0x13 is the death notify.
+
+**Port follow-ups (witness at port time):** the payload writers
+(`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
+`NetPacket_WriteEntityHandleWithByte`, `NetPacket_WriteEntityHandleAndTeam`) byte layouts;
+the zone-multiplier float constants (`flt_7C6F18` head, `flt_7C3B94` limbs, `flt_7C6F80`
+zones 13-14, `flt_7CD510` vehicle seats); the drag-table build (`@ 0x4E78D0`) and drag
+classes; the ammo-def table source (which .def feeds the 276-B `g_ammoDefTable`) and the
+consumed fields (speed, flags dword 9, max damage dword 48, armor cap +196, child ammo
++241, tracer interval adm+226, penetration dword 3); `Weapon_UpdateAllProjectiles`
+iteration shape; the wounded/medic loop (`Player_OnDamageReceived @ 0x4DD880`,
+`GameEvent_RevivePlayer`, S2C 0x3A); `Entity_InitSpawnedChild` at death (corpse/drop);
+the S2C 0x13/0x52/0x54 client handler bodies (`@ 0x42EB50` §5.35, `@ 0x429040`).
 
 Per-system verdicts from grilling the reimplementation against retail
 `Jointops.exe` (Kong IDB). Each row cites the original entry point. Verdict:
@@ -6396,7 +6526,7 @@ intact direction BAMs + the live 0x40 target word, shooter never echoed its own 
 DEFERRED (tracked here): the authoritative round SPAWN + damage
 (`RoundData_SpawnRound @ 0x4EC0D0` — projectile-pool entity, weapon spread, tracer
 interval; impact handlers `Projectile_Handle*Impact @ 0x4e93xx` → health → the death
-family) = the next round's scope; the cease-fire gate (`g_InCeaseFire` unmodeled); the
+family) = the next round's scope, **witnessed end-to-end 2026-07-03 → §5.60**; the cease-fire gate (`g_InCeaseFire` unmodeled); the
 `+96472` fire-rate stamp (the adm[276] cooldown dword is not in `WeaponTableEntry` — needs
 its weapon.def token witnessed); the savedLivePose warp compensation (our net-snapped peers
 have zero intra-tick motion, so the delta is 0 by construction until a peer motor lands);
