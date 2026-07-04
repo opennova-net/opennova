@@ -63,10 +63,59 @@ func get_workspace_tooltip() -> String:
 
 func activate() -> void:
 	_ensure_object_editor()
+	_connect_focus_bracket()
 
 
 func deactivate() -> void:
-	pass
+	_disconnect_focus_bracket()
+
+
+# --- Undo session coalescing (B5) ----------------------------------------------
+# While the workspace is active, viewport focus drives the document's
+# begin/commit bracket: focus entering an editable control opens an editing
+# burst, leaving it folds the burst into ONE equal-gated undo step — so typing
+# or dragging in any inspector field coalesces without per-widget wiring. The
+# shadow-step funnel (B4) skips recording while a burst is open. A color-drag
+# whose popup closes without a focus change folds on the next flush (undo and
+# push_undo_step both flush first), preserving one-step-per-gesture.
+
+var _focus_viewport: Viewport = null
+
+
+func _connect_focus_bracket() -> void:
+	var viewport: Viewport = null
+	if object_editor != null and object_editor.is_inside_tree():
+		viewport = object_editor.get_viewport()
+	if viewport == null or viewport == _focus_viewport:
+		return
+	_disconnect_focus_bracket()
+	_focus_viewport = viewport
+	viewport.gui_focus_changed.connect(_on_bracket_focus_changed)
+
+
+func _disconnect_focus_bracket() -> void:
+	if _focus_viewport != null and is_instance_valid(_focus_viewport) \
+			and _focus_viewport.gui_focus_changed.is_connected(_on_bracket_focus_changed):
+		_focus_viewport.gui_focus_changed.disconnect(_on_bracket_focus_changed)
+	_focus_viewport = null
+	if object_editor != null:
+		object_editor.flush_edit()
+
+
+func _is_bracket_control(control: Control) -> bool:
+	return control is LineEdit or control is TextEdit \
+			or control is SpinBox or control is ColorPickerButton
+
+
+func _on_bracket_focus_changed(control: Control) -> void:
+	if object_editor == null:
+		return
+	# Only the NEW focus owner arrives, so fold unconditionally first (commit
+	# is equal-gated and inert without an open burst), then open a burst when
+	# an editable control took the focus.
+	object_editor.flush_edit()
+	if control != null and _is_bracket_control(control):
+		object_editor.begin_edit()
 
 
 func _ensure_mount() -> ViewportMount:
