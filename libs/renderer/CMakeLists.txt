@@ -9,13 +9,13 @@ target_include_directories(opennova_renderer
     PUBLIC  include
 )
 
-# threedi_3di3.h + threedi_panm.h come from the threedi lib's include path.
-# We don't link opennova_threedi here for the same reason as libs/oed:
-# preserving --whole-archive de-dup at the shared lib level.
+# material_eval.h (public) includes threedi_3di3.h -> real PUBLIC dependency.
+target_link_libraries(opennova_renderer PUBLIC opennova_threedi)
+
 # oed/material_descriptor.h provides the exact OED shader descriptor table used
-# by material_classify.cpp.
+# by material_classify.cpp - a header-only use, so we take the include dir
+# rather than linking opennova_oed (which would drag ase+tdp for one header).
 target_include_directories(opennova_renderer
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../threedi/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../oed/include
 )
 

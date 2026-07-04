@@ -184,11 +184,16 @@ if(BUILD_SHARED_LIB)
                 "LINKER:-force_load,$<TARGET_FILE:${target}>")
         endforeach()
     else()
-        target_link_libraries(opennova_shared
-            PRIVATE -Wl,--whole-archive
-            PRIVATE ${OPENNOVA_CORE_TARGETS}
-            PRIVATE -Wl,--no-whole-archive
-        )
+        # GNU ld: force-load each core archive by FILE PATH (like the APPLE
+        # branch). Referencing $<TARGET_FILE:...> instead of target names keeps
+        # CMake's link-line de-duplication from pulling a dependency out of the
+        # whole-archive region, so libraries may declare their real dependencies
+        # (e.g. oed/renderer -> threedi) without losing exported symbols.
+        target_link_libraries(opennova_shared PRIVATE ${OPENNOVA_CORE_TARGETS})
+        foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
+            target_link_options(opennova_shared PRIVATE
+                "LINKER:--whole-archive,$<TARGET_FILE:${target}>,--no-whole-archive")
+        endforeach()
     endif()
 
     target_compile_definitions(opennova_shared
