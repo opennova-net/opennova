@@ -156,7 +156,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Models (`.3di`: 3DI3 + GP) | `libs/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
 | Particles (`.ptl`) | — | [particles/ptl-format-re.md](particles/ptl-format-re.md) | redesign in flight |
-| NovaWorld networking | `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
+| NovaWorld networking | `libs/npwire`, `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
 
 No dedicated RE record yet — documented by code and tests only: terrain, foliage,
 tiles, fonts, credits, the importer pipeline, and the VFS/PFF mount stack (the PFF

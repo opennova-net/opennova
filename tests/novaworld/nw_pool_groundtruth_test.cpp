@@ -18,8 +18,8 @@
 // green; the decoder regression coverage that runs without the capture lives in
 // the inline-pcap unit tests (nw_pool_decode_unit_test).
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

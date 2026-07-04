@@ -13,7 +13,7 @@
 #include <netsim/entity_wire_bridge.h>
 #include <netsim/loopback_channel.h>
 
-#include <novaworld/ingame_decode.h> // OrganicSpawnRecord / OrganicSpawnBatch
+#include <npwire/ingame_decode.h> // OrganicSpawnRecord / OrganicSpawnBatch
 
 #include <world/ai.h>
 #include <world/entity.h>

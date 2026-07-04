@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include <novaworld/protocol_message.h>
+#include <npwire/protocol_message.h>
 
 #include "npruntime/game_config.h" // np::GameConfig — the reactive reply handlers read it
 #include "npruntime/napi_np_connection.h"

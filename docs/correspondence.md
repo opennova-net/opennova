@@ -189,7 +189,7 @@ Newly-grilled originals (join key = addr):
 | `Lobby_UpdateServerInfo` | `0x4fe8c0` | host-registration blob | D-NET-40..46 | fixed |
 | `String_SanitizeForLobby` | `0x4fe750` | lobby field sanitize | D-NET-41 | tracked |
 
-`/PROFILE` `.sph` server-log recorder cluster (§5.22; decoder `libs/novaworld/serverlog_decode.cpp`):
+`/PROFILE` `.sph` server-log recorder cluster (§5.22; decoder `libs/npwire/src/replay/serverlog_decode.cpp`):
 
 | original | addr | role | D-NET | status |
 |---|---|---|---|---|
@@ -214,7 +214,7 @@ via `apps/common/pcap_reader`, `nw_pool_decode_unit_test` inline-pcap round-trip
 | `serialize_entity_pool_to_packet_0` | `0x503940` | team source = entity+354 (onhook +146/+196 ruled out) | D-NET-62 | matching |
 
 C2S 0x0F entity-info query → S2C 0x18 full-entity-spawn self-heal (§5.46; grill 2026-07-01; reimpl
-`encode_full_entity_spawn`/`decode_full_entity_spawn` in `libs/novaworld`, `build_full_entity_spawn`
+`encode_full_entity_spawn`/`decode_full_entity_spawn` in `libs/npwire`, `build_full_entity_spawn`
 in `libs/netsim`, dispatch `case 0x0F` in `libs/npruntime`; `nw_ingame_encode` +
 `netsim_world_stream_extractors` + `nw_message_coverage` pin the layout):
 
@@ -229,7 +229,7 @@ true 4-arg form (arg 4 = serialized entity; the 3-arg IDB prototype mis-rendered
 0x18's SECOND emitter witnessed (C2S 0x40 vehicle spawn, mask 0x90); wire item_type gate is !=0 only
 (pool-derived approximation provably safe). Verdicts unchanged (matching).
 
-Wire-coverage sweep (§5.48–§5.56; grill 2026-07-01; reimpl `libs/novaworld/ingame_decode` decoders +
+Wire-coverage sweep (§5.48–§5.56; grill 2026-07-01; reimpl `libs/npwire/ingame_decode` decoders +
 `nw_pp` printers + catalog rows; `nw_message_coverage` pins every layout; all three retail goldens decode
 with zero unnamed tags in both directions):
 
@@ -297,7 +297,7 @@ Server per-frame S2C 0x0A emit (§5.47; witnessed 2026-07-01; reimpl in `libs/ne
 | `serialize_entity_states_to_packet` | `0x50f070` | 0x0A entity loop — all callback entities from the priority list, `[1][handle][type][compact]`, budget-limited round-robin, `[0]` terminator | — | players only; priority/budget/all-class = step 2 |
 | `Server_BuildEntityPriorityList` | `0x50e590` | distance-sorted priority pairlist per recipient (eye-pos ref) | — | not yet ported (step 2) |
 
-Wave 8 branch-validation grill (2026-07-01; net-re §8 Wave 8; reimpl in `libs/novaworld/protocol_message.{h,cpp}`,
+Wave 8 branch-validation grill (2026-07-01; net-re §8 Wave 8; reimpl in `libs/npwire/protocol_message.{h,cpp}`,
 `libs/npruntime/{batch_chunker.h,game_config.h,server_message_dispatch.cpp}`, `libs/netsim/entity_wire_bridge.cpp`,
 `connection_fan.cpp`; full ctest 226 green incl. `npruntime_golden_lan_join`, `novaworld_protocol_message`,
 `npruntime_batch_chunker`, `netsim_two_peer_fanout`, `nw_message_coverage`):
@@ -452,7 +452,7 @@ Grounded-on-entity replication (D-NET-151, 2026-07-03; net-re §5.10):
 | `NetPacket_SerializePlayerState` (op1 carrier echo) | `0x4c0a08` | compact-record carrier select: mount (+0x16C) wins, else groundEntity (+0x28); carrier form = `Entity_TransformWorldToLocal` pos ×3 compressed (@0x4c0b07) + local-heading yaw byte (`sar 24` @0x4c0b85); free form = pos − `g_priority_ref` + raw yaw byte | disasm; §5.10 / D-NET-151 (paired to `build_0a_frame` player case, `libs/netsim/src/connection_fan.cpp`) | matching (`netsim_two_peer_fanout` grounded_uplink_apply_and_echo) |
 | `NetPacket_SerializePlayerState` (op4 carrier apply) | `0x4c1de1` | extended-uplink carrier resolve (`g_pool_list`, pools 0-4 @0x4c1d07-0x4c1d26) + `Entity_TransformLocalToWorld` lift; flags bits 2-4 REPLACED from the raw wire byte (@0x4c1e4d) | disasm; §5.10 / D-NET-151 (paired to `apply_player_intent` grounded branch, `libs/netsim/src/entity_wire_bridge.cpp`) | matching (`netsim_two_peer_fanout`) |
 | `NetPacket_SerializePlayerState` (op2 ground mirror) | `0x4c1353` | client stores the echoed carrier into its own groundEntity(+0x28) — unconditional, local player included; attach-change hard-apply via `Entity_TryAttachOrDetach` (@0x4c1329-0x4c1345) | decompile; §5.10 / D-NET-151 (paired to `NetClientView::apply_frame_update` carrier lift, `libs/netsim/src/net_client_view.cpp`) | matching (`netsim_two_peer_fanout`) |
-| `Entity_TransformWorldToLocal` | `0x43bb50` | 6-dword POSE transform world→carrier-local: delta, then yaw→pitch→roll inverse rotation in 22-bit fixed point (BAM × 2π/2³² angles; sines folded through the −2²² scale `dbl_7C57B0`); out[3] = heading − carrier heading, out[4]/out[5] pass through | disasm (full imul/shrd-22 chain) | matching — `network_transform_world_to_local` (`libs/novaworld/src/ingame_decode.cpp`; `netsim_two_peer_fanout` pose_transform_roundtrip) |
+| `Entity_TransformWorldToLocal` | `0x43bb50` | 6-dword POSE transform world→carrier-local: delta, then yaw→pitch→roll inverse rotation in 22-bit fixed point (BAM × 2π/2³² angles; sines folded through the −2²² scale `dbl_7C57B0`); out[3] = heading − carrier heading, out[4]/out[5] pass through | disasm (full imul/shrd-22 chain) | matching — `network_transform_world_to_local` (`libs/npwire/src/wire/ingame_decode.cpp`; `netsim_two_peer_fanout` pose_transform_roundtrip) |
 | `Entity_TransformLocalToWorld` | `0x43bd00` | the inverse pose transform: roll→pitch→yaw rotation + carrier position; out[3] = carrier heading + local heading (@0x43be7e) | decompile | matching — `network_transform_local_to_world` (existing D-NET-67 port; euler tail composed by callers) |
 | `EntityPool_Allocate` | `0x442168` | the five-pool descriptor table `g_pool_list @ 0xA892E0` `{base, stride, used, capacity}` ×16 B: strides = PER-POOL ENTITY STRUCT SIZES — 904 (players) / 1360 (vehicles) / 812 (statics) / 988 / 988, capacities 256/1200/1200/768/128, one malloc heap with a randomized base offset | decompile | confirm-only |
 | `Entity_TryAttachOrDetach` | `0x436610` | the 0x0A own-record attach reconciler: bone+carrier record ≠ current attach → `Entity_ProcessVehicleAttach`; bone-less record while `parentEntity`/`parentSlot` set → `Entity_DetachFromVehicle`; returns 1 = changed (gates the LOCAL hard pos apply) | decompile; §5.10 / D-NET-151 | confirm-only |

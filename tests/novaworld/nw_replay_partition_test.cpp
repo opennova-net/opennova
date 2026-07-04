@@ -17,8 +17,8 @@
 
 #include <napi/envelope.h>
 #include <novacrypto/nwu.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include "pcap_reader.h"
 

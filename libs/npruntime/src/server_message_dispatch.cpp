@@ -4,9 +4,9 @@
 
 #include <netsim/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
-#include <novaworld/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
-#include <novaworld/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
-#include <novaworld/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
+#include <npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
+#include <npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
+#include <npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
 #include <world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)

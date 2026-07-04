@@ -9,9 +9,9 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/replay_timeline.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/replay_timeline.h>
+#include <npwire/wire_capture.h>
 
 #include <cstdint>
 #include <unordered_map>

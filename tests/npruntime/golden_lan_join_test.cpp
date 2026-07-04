@@ -17,7 +17,7 @@
 //   and our host's differ. World-stream bodies are built from our own World (not the capture's
 //   mission), so those stay order-only.
 
-#include <novaworld/wire_capture.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

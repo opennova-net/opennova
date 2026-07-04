@@ -32,9 +32,9 @@
 // NW_WHITENOISE_PCAP else DEFAULT_WHITENOISE_PCAP. Skips cleanly when the capture
 // is absent (.scratch is untracked) so CI stays green.
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_message_catalog.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_message_catalog.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

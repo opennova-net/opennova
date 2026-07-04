@@ -14,8 +14,8 @@
 // capture (DEFAULT_DVXI3_PCAP). Skips cleanly when the capture is absent (it is a
 // local-only artifact — .scratch is untracked), so CI stays green.
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

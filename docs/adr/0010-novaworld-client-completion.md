@@ -19,8 +19,8 @@ session HELLO; the rest is stubbed:
 The important finding from surveying both repos: **almost all of the protocol and crypto already
 exists.** Our `libs/` carry the verified crypto (NW-C1..C4 — NWU / EPASK / PUBcrypto / url_cipher, all
 MATCHING vs retail), the envelope/TLV/container codecs (`libs/napi`), the `ServerHello` struct
-including the `hk` field (`libs/novaworld/session_hello.h`), the `0x83` decoder
-(`libs/novaworld/protocol_message.h`), and the client message builders
+including the `hk` field (`libs/npwire/session_hello.h`), the `0x83` decoder
+(`libs/npwire/protocol_message.h`), and the client message builders
 `make_client_host_request` / `make_client_host_update` / `make_client_play_request`
 (`libs/napi/session.h`). The `opennova-int` reference (`onnw`) is **purely server-side** — no client
 or packet-replay code — but it documents every leg to mirror. So "completing the client" is mostly

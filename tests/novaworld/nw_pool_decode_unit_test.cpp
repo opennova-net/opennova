@@ -11,12 +11,12 @@
 
 #include <napi/envelope.h>
 #include <novacrypto/nwu.h>
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/replay_timeline.h>
-#include <novaworld/session_keys.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/protocol_message.h>
+#include <npwire/replay_timeline.h>
+#include <npwire/session_keys.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

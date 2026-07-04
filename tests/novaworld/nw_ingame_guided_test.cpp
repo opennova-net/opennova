@@ -10,8 +10,8 @@
 // 0x0C entity-packet path and field validation against real guided traffic are
 // deferred (no capture in hand carries rocket/missile state — §5.15).
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
 
 #include <cstdint>
 #include <cstdio>

@@ -1,4 +1,4 @@
-#include <novaworld/protocol_message.h>
+#include <npwire/protocol_message.h>
 
 #include <cstdio>
 #include <string>

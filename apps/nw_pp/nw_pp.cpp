@@ -15,7 +15,7 @@
 // 65535 so we don't see it in practice; fragments are dropped with a
 // stderr warning). Anything else is read as hexcap text.
 //
-// Tag-specific decoders live in `libs/novaworld/include/novaworld/ingame_decode.h`
+// Tag-specific decoders live in `libs/npwire/include/npwire/ingame_decode.h`
 // (shared with `nw_ingame_pool_records_test` and the future real handlers).
 // As new tags get field maps in docs/net/novaworld-net-re.md, their decoders
 // land there and a printer for them lands here.
@@ -29,13 +29,13 @@
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_message_catalog.h>
-#include <novaworld/serverlog_decode.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_message_catalog.h>
+#include <npwire/serverlog_decode.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
+#include <npwire/wire_capture.h>
 #include <scr/scr.h>
 
 #include "pcap_reader.h"
@@ -102,7 +102,7 @@ bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
 
 // pcap/pcapng reading is shared with the test suite: apps/common/pcap_reader.h
 // The outer-decode pipeline (envelope -> NWU -> SCRK -> 0x43/0x83 -> reassembly)
-// is shared too: libs/novaworld/wire_capture.h decode_capture_to_messages.
+// is shared too: libs/npwire/wire_capture.h decode_capture_to_messages.
 
 std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
 	// NW_PP_HEXCAP_MAX overrides the per-dump byte cap (witness sessions need whole payloads).
@@ -160,7 +160,7 @@ std::unordered_map<int, std::string> g_item_names;
 
 // Per-item §5.10b dispatch class — selects which compact decoder runs on a
 // tag==1 record inside S2C 0x0A's trailing event loop. The EntityClass enum and
-// class_from_tag() now live in libs/novaworld/ingame_decode.h (shared with the
+// class_from_tag() now live in libs/npwire/ingame_decode.h (shared with the
 // decode_frame_update walker). This map is the wire_id → class table, populated
 // from items.def in load_items_def; an unmapped id leaves the walker unable to
 // size a record (fail closed). Keyed by wire_id (items.def id − 100000).

@@ -29,7 +29,7 @@
   at the port site: `[orig: Name @ 0xADDR]`. Engine-wide conventions: docs/engine-primer.md.
 - Parity writers are built from scratch. Never smuggle raw input bytes through a writer to
   turn a parity test green (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
-- The protocol libs (`libs/novacrypto`, `libs/napi`, `libs/novaworld`, `libs/netsim`) are
+- The protocol libs (`libs/novacrypto`, `libs/napi`, `libs/npwire`, `libs/novaworld`, `libs/netsim`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires
   encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.

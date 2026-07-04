@@ -14,9 +14,9 @@
 // echo, the 0x43/0x83 framing), this test fails.
 
 #include <novaworld/client_session.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
-#include <novaworld/protocol_message.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
+#include <npwire/protocol_message.h>
 #include <novaworld/lobby_session.h>
 
 #include <napi/envelope.h>

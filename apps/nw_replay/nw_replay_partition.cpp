@@ -1,7 +1,7 @@
 #include "nw_replay_partition.h"
 
 #include <napi/envelope.h>
-#include <novaworld/session_keys.h>
+#include <npwire/session_keys.h>
 
 #include <algorithm>
 #include <map>

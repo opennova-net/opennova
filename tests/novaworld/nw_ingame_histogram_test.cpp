@@ -19,9 +19,9 @@
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include <algorithm>
 #include <cstdint>

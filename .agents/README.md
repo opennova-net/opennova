@@ -40,7 +40,7 @@ Read these first for any networking task:
 ## Consolidated net core (ADR 0013)
 
 - **Message catalog is the single source of truth**:
-  `libs/novaworld/include/novaworld/ingame_message_catalog.h` maps `(dir, tag) → name →
+  `libs/npwire/include/npwire/ingame_message_catalog.h` maps `(dir, tag) → name →
   coverage → decoder → doc §`, shared by `nw_pp` and the `nw_message_coverage` gate. Add a
   message there first; `nw_pp --coverage <capture>` ranks the undecoded backlog by volume.
 - **Capture → validate-vs-golden loop**: host from the Godot game, `dumpcap`, then

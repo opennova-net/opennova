@@ -4,8 +4,8 @@
 #include "npruntime/server_spawn.h"   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
 #include "npruntime/server_tick.h"    // Server_TickUpdate
 
-#include <novaworld/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
-#include <novaworld/ingame_encode.h> // encode_organic_spawn_batch
+#include <npwire/ingame_decode.h> // OrganicSpawnBatch / OrganicSpawnRecord
+#include <npwire/ingame_encode.h> // encode_organic_spawn_batch
 
 #include <world/entity.h>
 #include <world/world.h>

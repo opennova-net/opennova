@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include <netsim/idatagram_socket.h> // netsim::IDatagramSocket
-#include <novaworld/peer_addr.h>     // opennova::PeerAddr
+#include <npwire/peer_addr.h>     // opennova::PeerAddr
 
 #include "net_sockets.h" // opennova::net (apps/common)
 

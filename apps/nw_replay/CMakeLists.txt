@@ -13,9 +13,7 @@ add_executable(nw_replay
 
 target_link_libraries(nw_replay
     PRIVATE
-        opennova_novaworld_wire
-        opennova_novaworld_session
-        opennova_novaworld_replay
+        opennova_npwire
         opennova_napi
         opennova_novacrypto
         opennova_def

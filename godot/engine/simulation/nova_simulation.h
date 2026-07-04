@@ -31,7 +31,7 @@
 #include "netsim/loopback_channel.h"          // host_loop_ (the host's own dcb-2 client)
 #include "netsim/udp_session_transport.h"     // PeerLink::transport (the LAN per-peer transport)
 
-#include <novaworld/peer_addr.h>    // PeerAddr / PeerAddrHash
+#include <npwire/peer_addr.h>    // PeerAddr / PeerAddrHash
 #include "network/nova_udp_pump.h"
 
 #include <mission/bms.h>                      // bms::File (persisted so ctx_.mission outlives the match)

@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <novaworld/ingame_decode.h> // EntityClass
+#include <npwire/ingame_decode.h> // EntityClass
 
 #include "netsim/client_state.h"
 #include "netsim/session_transport.h"

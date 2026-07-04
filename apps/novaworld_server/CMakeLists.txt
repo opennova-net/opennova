@@ -23,7 +23,7 @@ target_link_libraries(opennova_novaworld_server
         opennova_novaworld_gate
         opennova_novaworld_service
         opennova_novaworld_session
-        opennova_novaworld_wire
+        opennova_npwire
         opennova_npruntime
         opennova_napi
         opennova_novacrypto

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <novaworld/replication_model.h> // PlayerReplicationState, GameEntitySnapshot
+#include <npwire/replication_model.h> // PlayerReplicationState, GameEntitySnapshot
 #include <world/world.h>
 
 #include "netsim/connection.h"

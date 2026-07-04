@@ -11,7 +11,7 @@
 
 #include <mission/bms.h>                  // bms::File, bms::encode_header_blob (0x0B body)
 #include <netsim/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
-#include <novaworld/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
+#include <npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <world/geom.h>                   // world::to_fixed (0x0F spawn pose)
 #include <world/world.h>

@@ -22,9 +22,9 @@
 #include <netsim/entity_wire_bridge.h>   // class_for_type_id
 #include <netsim/udp_session_transport.h>
 
-#include <novaworld/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink / decode_frame_update
-#include <novaworld/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
-#include <novaworld/wire_capture.h>  // CaptureDatagram / InGameMessage / decode_capture_to_messages
+#include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink / decode_frame_update
+#include <npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
+#include <npwire/wire_capture.h>  // CaptureDatagram / InGameMessage / decode_capture_to_messages
 
 #include <world/ai.h>
 #include <world/entity.h>

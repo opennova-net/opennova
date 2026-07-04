@@ -2,7 +2,7 @@
 
 #include <cmath>      // std::lround
 
-#include <novaworld/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
+#include <npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
 #include <world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <world/geom.h>        // to_fixed / from_fixed
 #include <world/spawn_select.h> // kSpawnMarkerStartTypes (the 60xx spawn-point family)

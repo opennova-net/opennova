@@ -7,7 +7,7 @@
 // Godot client and the standalone server stay byte-compatible without us
 // having to launch retail every iteration.
 
-#include <novaworld/session_hello.h>
+#include <npwire/session_hello.h>
 
 #include "../common/test_expect.h"
 

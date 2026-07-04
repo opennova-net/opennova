@@ -13,7 +13,7 @@ extends Node3D
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 
-# ReplayEventKind — keep in sync with libs/novaworld/replay_timeline.h.
+# ReplayEventKind — keep in sync with libs/npwire/replay_timeline.h.
 const KIND_FIRE := 0
 const KIND_HIT := 1
 const KIND_KILL := 2

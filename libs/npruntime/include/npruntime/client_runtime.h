@@ -6,7 +6,7 @@
 #include <netsim/session_transport.h>   // ISessionTransport
 
 #include <novaworld/client_session.h>   // ClientSession::Config (shared JO identity)
-#include <novaworld/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
+#include <npwire/ingame_decode.h>     // PlayerExtendedUplink (the §5.10 0x0C body)
 
 #include <cstddef>
 #include <cstdint>

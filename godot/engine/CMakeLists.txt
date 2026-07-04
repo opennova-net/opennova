@@ -45,9 +45,11 @@ add_subdirectory(../../libs/controls opennova_controls)
 add_subdirectory(../../libs/novacrypto opennova_novacrypto)
 add_subdirectory(../../libs/napi opennova_napi)
 # sqlite is only needed to DEFINE the novaworld service-leg target; the
-# extension links the client legs (wire/session/gate/replay), so no sqlite
+# extension links the game wire lib (npwire) plus the client legs
+# (session/gate), so no sqlite
 # or service code ends up in the binary.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
+add_subdirectory(../../libs/npwire opennova_npwire)
 add_subdirectory(../../libs/novaworld opennova_novaworld)
 # netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
 add_subdirectory(../../libs/netsim opennova_netsim)
@@ -193,10 +195,9 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_controls
     opennova_novacrypto
     opennova_napi
-    opennova_novaworld_wire
+    opennova_npwire
     opennova_novaworld_session
     opennova_novaworld_gate
-    opennova_novaworld_replay
     opennova_netsim
     opennova_npruntime
 )

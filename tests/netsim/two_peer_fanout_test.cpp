@@ -23,8 +23,8 @@
 
 #include "conn_fan_test_util.h"
 
-#include <novaworld/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
-#include <novaworld/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
 #include <world/geom.h>
