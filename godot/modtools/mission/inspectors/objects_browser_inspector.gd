@@ -67,10 +67,7 @@ func _build_object_browser() -> void:
 			_inspector._controller.set_pick_debug(pressed)
 	)
 
-	_objects_search = LineEdit.new()
-	_objects_search.placeholder_text = "Search placed objects"
-	_objects_search.clear_button_enabled = true
-	_objects_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_objects_search = SearchField.new("Search placed objects")
 	_objects_box.add_child(_objects_search)
 
 	_objects_list = ItemList.new()

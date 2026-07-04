@@ -26,11 +26,8 @@ func _ready() -> void:
 	box.add_theme_constant_override("separation", 6)
 	add_child(box)
 
-	_filter_edit = LineEdit.new()
-	_filter_edit.placeholder_text = "Filter strings (key or text)..."
-	_filter_edit.clear_button_enabled = true
-	_filter_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_filter_edit.text_changed.connect(func(_t: String) -> void: _rebuild_list())
+	_filter_edit = SearchField.new("Filter strings (key or text)...")
+	_filter_edit.search_changed.connect(func(_t: String) -> void: _rebuild_list())
 	_filter_edit.text_submitted.connect(func(_t: String) -> void: _confirm_first_or_selected())
 	box.add_child(_filter_edit)
 

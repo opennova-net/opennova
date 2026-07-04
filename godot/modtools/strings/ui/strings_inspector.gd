@@ -36,12 +36,9 @@ func _ready() -> void:
 	(box.get_parent().get_parent() as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	InspectorForms.add_section_heading(box, "Find")
-	_search_edit = LineEdit.new()
+	_search_edit = SearchField.new("Search keys and text...")
 	_search_edit.name = "StringsSearchEdit"
-	_search_edit.placeholder_text = "Search keys and text..."
-	_search_edit.clear_button_enabled = true
-	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search_edit.text_changed.connect(func(text): if _ws != null: _ws.set_search(text))
+	_search_edit.search_changed.connect(func(text): if _ws != null: _ws.set_search(text))
 	box.add_child(_search_edit)
 
 	var filter_row := InspectorForms.add_detail_field(box, "Section filter")

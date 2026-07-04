@@ -38,10 +38,7 @@ func _build_place_panel() -> void:
 	_place_status = InspectorForms.add_muted_label(_place_box, "")
 	_place_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
-	_place_search = LineEdit.new()
-	_place_search.placeholder_text = "Search items"
-	_place_search.clear_button_enabled = true
-	_place_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_place_search = SearchField.new("Search items")
 	_place_box.add_child(_place_search)
 
 	_place_list = ItemList.new()
