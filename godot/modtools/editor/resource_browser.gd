@@ -220,41 +220,11 @@ func _refresh_chrome() -> void:
 		if not has_root:
 			_hint.text = "No resource directory selected."
 		elif not has_entries:
-			_hint.text = "No %s resources found in %s." % [_kind_label(), root]
+			_hint.text = "No %s resources found in %s." % [ResourceKinds.label(_kind), root]
 		else:
 			_hint.text = "No matching resources."
 	if _settings_button != null:
 		_settings_button.visible = not has_root or not has_entries
-
-
-func _kind_label() -> String:
-	match _kind:
-		"terrain":
-			return "terrain"
-		"environment":
-			return "environment"
-		"mission":
-			return "mission"
-		"strings":
-			return "strings"
-		"sound":
-			return "sound"
-		"font":
-			return "font"
-		"credits":
-			return "credits"
-		"menu":
-			return "menu"
-		"menu_style":
-			return "menu style"
-		"hudpos":
-			return "HUD layout"
-		"object", "object_project", "object_model", "object_scene":
-			return "object"
-		"music", "sbf", "music_script":
-			return "music"
-		_:
-			return "resource"
 
 
 func _on_entry_activated(entry: Dictionary) -> void:

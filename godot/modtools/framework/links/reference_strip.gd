@@ -11,15 +11,6 @@ extends VBoxContainer
 ## already built), the strip goes live and re-queries on every retarget —
 ## incremental rebuilds are memoized per file, so those stay cheap.
 
-## Same workspace-jump translation the link widgets and the browser pane apply.
-const _JUMP_KIND := {
-	"object_project": "object",
-	"object_model": "object",
-	"object_scene": "object",
-	"sbf": "music",
-	"music_script": "music",
-}
-
 var header: Label
 var find_button: Button
 var rows: VBoxContainer
@@ -210,7 +201,7 @@ func _populate() -> void:
 func _on_row_pressed(kind: String, path: String) -> void:
 	var jump := _service("jump")
 	if jump.is_valid():
-		jump.call(_JUMP_KIND.get(kind, kind), path)
+		jump.call(ResourceKinds.jump_kind(kind), path)
 
 
 ## Referrer edges carry VFS-logical source names (the graph is built from the
