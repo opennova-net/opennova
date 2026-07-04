@@ -26,6 +26,7 @@ add_subdirectory(../../libs/tdp opennova_tdp)
 add_subdirectory(../../libs/oed opennova_oed)
 add_subdirectory(../../libs/renderer opennova_renderer)
 add_subdirectory(../../libs/cbin opennova_cbin)
+add_subdirectory(../../libs/terrain_query opennova_terrain_query)
 add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/sbf opennova_sbf)
@@ -176,6 +177,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_tdp
     opennova_oed
     opennova_renderer
+    opennova_terrain_query
     opennova_terrain
     opennova_vfs
     opennova_resource_index
