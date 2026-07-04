@@ -1015,41 +1015,41 @@ func test_palette_is_hidden_without_a_mission() -> void:
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
-	assert_false(inspector._place_box.visible, "the palette hides when no mission is open")
+	assert_false(inspector._palette._place_box.visible, "the palette hides when no mission is open")
 
 
 func test_palette_populates_rows_from_the_controller() -> void:
 	var ctx := _palette_ctx()
-	assert_true(ctx.inspector._place_box.visible, "the palette shows with a mission open")
-	assert_eq(ctx.inspector._place_list.item_count, 3, "every placeable item becomes a row")
-	assert_false(ctx.inspector._place_stop.visible, "Stop is hidden until something is armed")
+	assert_true(ctx.inspector._palette._place_box.visible, "the palette shows with a mission open")
+	assert_eq(ctx.inspector._palette._place_list.item_count, 3, "every placeable item becomes a row")
+	assert_false(ctx.inspector._palette._place_stop.visible, "Stop is hidden until something is armed")
 
 
 func test_selecting_a_palette_row_arms_that_item() -> void:
 	var ctx := _palette_ctx()
-	ctx.inspector._on_place_item_selected(0)  # simulate the user picking row 0
+	ctx.inspector._palette._on_place_item_selected(0)  # simulate the user picking row 0
 	assert_eq(ctx.fake.arm_calls.size(), 1, "selecting a row arms exactly once")
-	assert_eq(int(ctx.fake.arm_calls[0]), int(ctx.inspector._place_row_ids[0]),
+	assert_eq(int(ctx.fake.arm_calls[0]), int(ctx.inspector._palette._place_row_ids[0]),
 		"the armed id is the one on the selected row")
-	assert_true(ctx.inspector._place_stop.visible, "the Stop button appears once armed")
+	assert_true(ctx.inspector._palette._place_stop.visible, "the Stop button appears once armed")
 
 
 func test_stop_button_disarms() -> void:
 	var ctx := _palette_ctx()
 	ctx.fake.armed_id = 102001
 	ctx.inspector._refresh()  # reflect the armed state
-	assert_true(ctx.inspector._place_stop.visible)
-	ctx.inspector._on_place_stop()
+	assert_true(ctx.inspector._palette._place_stop.visible)
+	ctx.inspector._palette._on_place_stop()
 	assert_eq(ctx.fake.disarm_calls, 1, "the Stop button disarms placement")
 
 
 func test_palette_search_filters_rows() -> void:
 	var ctx := _palette_ctx()
-	ctx.inspector._on_place_search_changed("buggy")
-	assert_eq(ctx.inspector._place_list.item_count, 1, "the search narrows to matching names")
-	assert_eq(int(ctx.inspector._place_row_ids[0]), 101291, "and the surviving row is the match")
-	ctx.inspector._on_place_search_changed("")
-	assert_eq(ctx.inspector._place_list.item_count, 3, "clearing the search restores every row")
+	ctx.inspector._palette._on_place_search_changed("buggy")
+	assert_eq(ctx.inspector._palette._place_list.item_count, 1, "the search narrows to matching names")
+	assert_eq(int(ctx.inspector._palette._place_row_ids[0]), 101291, "and the surviving row is the match")
+	ctx.inspector._palette._on_place_search_changed("")
+	assert_eq(ctx.inspector._palette._place_list.item_count, 3, "clearing the search restores every row")
 
 
 func test_empty_palette_repopulates_when_the_item_db_arrives_late() -> void:
@@ -1063,11 +1063,11 @@ func test_empty_palette_repopulates_when_the_item_db_arrives_late() -> void:
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
-	assert_eq(inspector._place_list.item_count, 0, "empty until the database resolves")
+	assert_eq(inspector._palette._place_list.item_count, 0, "empty until the database resolves")
 
 	fake.placeable = _palette_items()  # the database becomes resolvable (same mission)
 	inspector._refresh()
-	assert_eq(inspector._place_list.item_count, 3, "the palette fills in without reopening the mission")
+	assert_eq(inspector._palette._place_list.item_count, 3, "the palette fills in without reopening the mission")
 
 
 func test_active_search_filter_survives_a_changed_echo() -> void:
@@ -1079,16 +1079,16 @@ func test_active_search_filter_survives_a_changed_echo() -> void:
 	var ctx := _palette_ctx()
 	# Simulate the user typing a filter: the LineEdit holds the text, and the text_changed
 	# handler narrows the list (setting .text alone does not emit text_changed in Godot).
-	ctx.inspector._place_search.text = "buggy"
-	ctx.inspector._on_place_search_changed("buggy")
-	assert_eq(ctx.inspector._place_list.item_count, 1, "precondition: filtered to one row")
-	ctx.inspector._on_place_item_selected(0)  # arms the surviving item; fires `changed`
+	ctx.inspector._palette._place_search.text = "buggy"
+	ctx.inspector._palette._on_place_search_changed("buggy")
+	assert_eq(ctx.inspector._palette._place_list.item_count, 1, "precondition: filtered to one row")
+	ctx.inspector._palette._on_place_item_selected(0)  # arms the surviving item; fires `changed`
 	ctx.fake.changed.emit()  # stand in for a later edit / placement on the same mission
 
-	assert_eq(ctx.inspector._place_search.text, "buggy", "the search text survives a same-mission `changed`")
-	assert_eq(ctx.inspector._place_list.item_count, 1, "the filtered rows survive; the list is not repopulated")
-	assert_eq(int(ctx.inspector._place_row_ids[0]), 101291, "and the surviving row is still the match")
-	assert_true(ctx.inspector._place_stop.visible, "still armed after the echo")
+	assert_eq(ctx.inspector._palette._place_search.text, "buggy", "the search text survives a same-mission `changed`")
+	assert_eq(ctx.inspector._palette._place_list.item_count, 1, "the filtered rows survive; the list is not repopulated")
+	assert_eq(int(ctx.inspector._palette._place_row_ids[0]), 101291, "and the surviving row is still the match")
+	assert_true(ctx.inspector._palette._place_stop.visible, "still armed after the echo")
 
 
 # --- Placed-objects browser ---------------------------------------------------
@@ -1117,23 +1117,23 @@ func test_browser_is_hidden_without_a_mission() -> void:
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
-	assert_false(inspector._objects_box.visible, "the placed-objects list hides when no mission is open")
+	assert_false(inspector._browser._objects_box.visible, "the placed-objects list hides when no mission is open")
 
 
 func test_browser_lists_every_placed_object_with_ordinals() -> void:
 	var ctx := _browser_ctx()
-	assert_true(ctx.inspector._objects_box.visible, "the list shows with a mission open")
-	assert_eq(ctx.inspector._objects_list.item_count, 4, "every placed object becomes a row")
+	assert_true(ctx.inspector._browser._objects_box.visible, "the list shows with a mission open")
+	assert_eq(ctx.inspector._browser._objects_list.item_count, 4, "every placed object becomes a row")
 	# Duplicate base names get a "(n)" ordinal so the two Soldiers are distinguishable.
-	assert_eq(ctx.inspector._objects_list.get_item_text(0), "Soldier (1)")
-	assert_eq(ctx.inspector._objects_list.get_item_text(1), "Soldier (2)")
-	assert_eq(ctx.inspector._objects_list.get_item_text(2), "Guard Tower", "unique names carry no ordinal")
-	assert_eq(ctx.inspector._objects_list.get_item_text(3), "Item 999", "an unresolved name falls back to the item id")
+	assert_eq(ctx.inspector._browser._objects_list.get_item_text(0), "Soldier (1)")
+	assert_eq(ctx.inspector._browser._objects_list.get_item_text(1), "Soldier (2)")
+	assert_eq(ctx.inspector._browser._objects_list.get_item_text(2), "Guard Tower", "unique names carry no ordinal")
+	assert_eq(ctx.inspector._browser._objects_list.get_item_text(3), "Item 999", "an unresolved name falls back to the item id")
 
 
 func test_selecting_a_browser_row_selects_that_entity() -> void:
 	var ctx := _browser_ctx()
-	ctx.inspector._on_object_row_selected(2)  # the Guard Tower row
+	ctx.inspector._browser._on_object_row_selected(2)  # the Guard Tower row
 	assert_eq(ctx.fake.select_object_calls.size(), 1, "the row drives exactly one select")
 	assert_eq(ctx.fake.select_object_calls[0], [NovaMissionData.KIND_BUILDING, 0],
 		"with the kind + index from that row (which also frames the camera in the real controller)")
@@ -1141,15 +1141,15 @@ func test_selecting_a_browser_row_selects_that_entity() -> void:
 
 func test_browser_search_filters_rows() -> void:
 	var ctx := _browser_ctx()
-	ctx.inspector._on_object_search_changed("tower")
-	assert_eq(ctx.inspector._objects_list.item_count, 1, "the search narrows to matching names")
-	assert_eq(ctx.inspector._objects_rows[0], {"kind": NovaMissionData.KIND_BUILDING, "index": 0},
+	ctx.inspector._browser._on_object_search_changed("tower")
+	assert_eq(ctx.inspector._browser._objects_list.item_count, 1, "the search narrows to matching names")
+	assert_eq(ctx.inspector._browser._objects_rows[0], {"kind": NovaMissionData.KIND_BUILDING, "index": 0},
 		"and the surviving row maps to the matching entity")
 	# Category words are searchable too, so "person" finds both Soldiers.
-	ctx.inspector._on_object_search_changed("person")
-	assert_eq(ctx.inspector._objects_list.item_count, 2, "the category is part of the search key")
-	ctx.inspector._on_object_search_changed("")
-	assert_eq(ctx.inspector._objects_list.item_count, 4, "clearing the search restores every row")
+	ctx.inspector._browser._on_object_search_changed("person")
+	assert_eq(ctx.inspector._browser._objects_list.item_count, 2, "the category is part of the search key")
+	ctx.inspector._browser._on_object_search_changed("")
+	assert_eq(ctx.inspector._browser._objects_list.item_count, 4, "clearing the search restores every row")
 
 
 func test_browser_highlights_the_controllers_selection() -> void:
@@ -1157,7 +1157,7 @@ func test_browser_highlights_the_controllers_selection() -> void:
 	# A viewport pick selects an entity; the list must light up + scroll to the matching row.
 	ctx.fake.entity = {"kind": NovaMissionData.KIND_BUILDING, "index": 0, "position": Vector3.ZERO}
 	ctx.inspector._refresh()
-	assert_eq(ctx.inspector._objects_list.get_selected_items(), PackedInt32Array([2]),
+	assert_eq(ctx.inspector._browser._objects_list.get_selected_items(), PackedInt32Array([2]),
 		"the row for the current selection is highlighted")
 
 
@@ -1174,26 +1174,26 @@ func test_browser_repopulates_when_the_item_db_arrives_late() -> void:
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
-	assert_eq(inspector._objects_list.get_item_text(0), "Item 102001", "placeholder until the database resolves")
+	assert_eq(inspector._browser._objects_list.get_item_text(0), "Item 102001", "placeholder until the database resolves")
 
 	fake.has_item_db = true
 	fake.object_list = [
 		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
 	]
 	inspector._refresh()
-	assert_eq(inspector._objects_list.get_item_text(0), "Guard Tower", "relabelled without the object set changing")
+	assert_eq(inspector._browser._objects_list.get_item_text(0), "Guard Tower", "relabelled without the object set changing")
 
 
 func test_browser_rows_survive_a_same_mission_changed_echo() -> void:
 	# Like the palette: the list is rebuilt only when the object set (count) changes, not on the
 	# `changed` that fires on every edit / drag frame. A typed filter and its rows must survive.
 	var ctx := _browser_ctx()
-	ctx.inspector._objects_search.text = "tower"
-	ctx.inspector._on_object_search_changed("tower")
-	assert_eq(ctx.inspector._objects_list.item_count, 1, "precondition: filtered to one row")
+	ctx.inspector._browser._objects_search.text = "tower"
+	ctx.inspector._browser._on_object_search_changed("tower")
+	assert_eq(ctx.inspector._browser._objects_list.item_count, 1, "precondition: filtered to one row")
 	ctx.fake.changed.emit()  # stand in for an edit on the same mission (no count change)
-	assert_eq(ctx.inspector._objects_search.text, "tower", "the search text survives a same-mission `changed`")
-	assert_eq(ctx.inspector._objects_list.item_count, 1, "the filtered rows survive; the list is not rebuilt")
+	assert_eq(ctx.inspector._browser._objects_search.text, "tower", "the search text survives a same-mission `changed`")
+	assert_eq(ctx.inspector._browser._objects_list.item_count, 1, "the filtered rows survive; the list is not rebuilt")
 
 
 # --- P7: edit-mode tabs + waypoint panel --------------------------------------
@@ -1258,12 +1258,12 @@ func test_waypoint_panel_shows_and_lists_paths_in_waypoint_mode() -> void:
 		{"index": 5, "flags": NovaMissionData.WP_FLAG_DOES_NOT_LOOP, "marker_count": 0},
 		{"index": 7, "flags": NovaMissionData.WP_FLAG_BLUE_TEAM, "marker_count": 2},
 	], 2)
-	assert_true(ctx.inspector._wp_box.visible, "the waypoint panel shows in waypoint mode")
+	assert_true(ctx.inspector._waypoints._wp_box.visible, "the waypoint panel shows in waypoint mode")
 	assert_false(ctx.inspector._edit_box.visible, "the object edit panel is hidden in waypoint mode")
-	assert_false(ctx.inspector._place_box.visible, "the palette is hidden in waypoint mode")
+	assert_false(ctx.inspector._palette._place_box.visible, "the palette is hidden in waypoint mode")
 	# Path 5 is empty and not the active path, so it is excluded; 2 (active) and 7 are listed.
-	assert_eq(ctx.inspector._wp_list.item_count, 2, "only populated (or the active) paths are listed")
-	assert_eq(ctx.inspector._wp_row_paths, [2, 7], "the listed path indices match")
+	assert_eq(ctx.inspector._waypoints._wp_list.item_count, 2, "only populated (or the active) paths are listed")
+	assert_eq(ctx.inspector._waypoints._wp_row_paths, [2, 7], "the listed path indices match")
 
 
 func test_waypoint_panel_includes_the_active_path_even_when_empty() -> void:
@@ -1271,7 +1271,7 @@ func test_waypoint_panel_includes_the_active_path_even_when_empty() -> void:
 		{"index": 3, "flags": 0, "marker_count": 0},  # empty AND active -> shown
 		{"index": 9, "flags": 0, "marker_count": 0},  # empty, not active -> hidden
 	], 3)
-	assert_eq(ctx.inspector._wp_row_paths, [3], "the active path is listed even with no markers")
+	assert_eq(ctx.inspector._waypoints._wp_row_paths, [3], "the active path is listed even with no markers")
 
 
 func test_waypoint_panel_row_selects_that_path() -> void:
@@ -1279,22 +1279,22 @@ func test_waypoint_panel_row_selects_that_path() -> void:
 		{"index": 2, "flags": 0, "marker_count": 1},
 		{"index": 7, "flags": 0, "marker_count": 1},
 	], 2)
-	ctx.inspector._on_wp_path_selected(1)  # row 1 -> path 7
+	ctx.inspector._waypoints._on_wp_path_selected(1)  # row 1 -> path 7
 	assert_eq(ctx.fake.select_path_calls, [7], "selecting a path row focuses that path")
 
 
 func test_waypoint_panel_reports_the_selected_marker() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 1}], 2)
-	assert_string_contains(ctx.inspector._wp_marker_label.text, "No marker", "with no marker, the panel says so")
+	assert_string_contains(ctx.inspector._waypoints._wp_marker_label.text, "No marker", "with no marker, the panel says so")
 	ctx.fake.selected_marker = {"path_index": 2, "marker_index": 9, "position": Vector3(1.0, 2.0, 3.0)}
 	ctx.fake.changed.emit()
-	assert_string_contains(ctx.inspector._wp_marker_label.text, "#9", "a selected marker is reported by index")
+	assert_string_contains(ctx.inspector._waypoints._wp_marker_label.text, "#9", "a selected marker is reported by index")
 
 
 func test_waypoint_panel_hidden_in_objects_mode() -> void:
 	var ctx := _palette_ctx()  # waypoint_mode defaults to false
-	assert_false(ctx.inspector._wp_box.visible, "the waypoint panel is hidden in objects mode")
-	assert_true(ctx.inspector._place_box.visible, "and the object palette shows")
+	assert_false(ctx.inspector._waypoints._wp_box.visible, "the waypoint panel is hidden in objects mode")
+	assert_true(ctx.inspector._palette._place_box.visible, "and the object palette shows")
 
 
 func test_flag_checkboxes_reflect_the_active_path() -> void:
@@ -1304,16 +1304,16 @@ func test_flag_checkboxes_reflect_the_active_path() -> void:
 		"flags": NovaMissionData.WP_FLAG_DOES_NOT_LOOP | NovaMissionData.WP_FLAG_BLUE_TEAM,
 	}
 	ctx.fake.changed.emit()
-	assert_false(ctx.inspector._wp_loop_check.button_pressed, "DoesNotLoop set -> Loop unchecked")
-	assert_true(ctx.inspector._wp_blue_check.button_pressed, "Blue flag -> Blue checked")
-	assert_false(ctx.inspector._wp_red_check.button_pressed, "no Red flag -> Red unchecked")
+	assert_false(ctx.inspector._waypoints._wp_loop_check.button_pressed, "DoesNotLoop set -> Loop unchecked")
+	assert_true(ctx.inspector._waypoints._wp_blue_check.button_pressed, "Blue flag -> Blue checked")
+	assert_false(ctx.inspector._waypoints._wp_red_check.button_pressed, "no Red flag -> Red unchecked")
 
 
 func test_toggling_a_flag_commits_through_set_waypoint_flags() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 1}], 2)
 	ctx.fake.active_path = {"index": 2, "flags": 0, "marker_count": 1, "marker_indices": PackedInt32Array([5])}
 	ctx.fake.changed.emit()
-	ctx.inspector._wp_blue_check.button_pressed = true  # emits toggled (outside the sync guard)
+	ctx.inspector._waypoints._wp_blue_check.button_pressed = true  # emits toggled (outside the sync guard)
 	assert_eq(ctx.fake.set_flags_calls.size(), 1, "toggling a flag commits once")
 	# [loop, blue, red]: loop stays on (DoesNotLoop clear), blue now on, red off.
 	assert_eq(ctx.fake.set_flags_calls[0], [true, true, false], "the new flag set reaches the controller")
@@ -1323,9 +1323,9 @@ func test_marker_sublist_lists_active_markers_and_selects() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 2}], 2)
 	ctx.fake.active_path = {"index": 2, "flags": 0, "marker_count": 2, "marker_indices": PackedInt32Array([5, 9])}
 	ctx.fake.changed.emit()
-	assert_eq(ctx.inspector._wp_marker_list.item_count, 2, "the sub-list lists the active path's markers in order")
-	assert_eq(ctx.inspector._wp_marker_rows, [5, 9], "rows map to marker indices in route order")
-	ctx.inspector._on_wp_marker_row_selected(1)  # second marker -> index 9
+	assert_eq(ctx.inspector._waypoints._wp_marker_list.item_count, 2, "the sub-list lists the active path's markers in order")
+	assert_eq(ctx.inspector._waypoints._wp_marker_rows, [5, 9], "rows map to marker indices in route order")
+	ctx.inspector._waypoints._on_wp_marker_row_selected(1)  # second marker -> index 9
 	assert_eq(ctx.fake.select_marker_calls, [9], "selecting a marker row selects that marker")
 
 
@@ -1333,11 +1333,11 @@ func test_add_marker_button_arms_and_stops() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 1}], 2)
 	ctx.fake.active_path = {"index": 2, "flags": 0, "marker_count": 1, "marker_indices": PackedInt32Array([5])}
 	ctx.fake.changed.emit()
-	assert_eq(ctx.inspector._wp_add_button.text, "Add marker", "the button starts as Add marker")
-	ctx.inspector._wp_add_button.pressed.emit()
+	assert_eq(ctx.inspector._waypoints._wp_add_button.text, "Add marker", "the button starts as Add marker")
+	ctx.inspector._waypoints._wp_add_button.pressed.emit()
 	assert_eq(ctx.fake.arm_marker_calls, 1, "pressing Add marker arms the tool")
-	assert_eq(ctx.inspector._wp_add_button.text, "Stop adding markers", "and the button flips to Stop")
-	ctx.inspector._wp_add_button.pressed.emit()
+	assert_eq(ctx.inspector._waypoints._wp_add_button.text, "Stop adding markers", "and the button flips to Stop")
+	ctx.inspector._waypoints._wp_add_button.pressed.emit()
 	assert_eq(ctx.fake.disarm_marker_calls, 1, "pressing again disarms the tool")
 
 
@@ -1345,18 +1345,18 @@ func test_reorder_and_delete_buttons_need_a_selected_marker() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 2}], 2)
 	ctx.fake.active_path = {"index": 2, "flags": 0, "marker_count": 2, "marker_indices": PackedInt32Array([5, 9])}
 	ctx.fake.changed.emit()
-	assert_true(ctx.inspector._wp_up_button.disabled, "reorder is disabled with no marker selected")
-	assert_true(ctx.inspector._wp_delete_button.disabled, "delete is disabled with no marker selected")
-	assert_false(ctx.inspector._wp_clear_button.disabled, "clear is enabled for a non-empty path")
+	assert_true(ctx.inspector._waypoints._wp_up_button.disabled, "reorder is disabled with no marker selected")
+	assert_true(ctx.inspector._waypoints._wp_delete_button.disabled, "delete is disabled with no marker selected")
+	assert_false(ctx.inspector._waypoints._wp_clear_button.disabled, "clear is enabled for a non-empty path")
 
 	ctx.fake.selected_marker = {"path_index": 2, "marker_index": 9, "position": Vector3.ZERO}
 	ctx.fake.changed.emit()
-	assert_false(ctx.inspector._wp_up_button.disabled, "reorder enables once a marker is selected")
-	ctx.inspector._wp_up_button.pressed.emit()
+	assert_false(ctx.inspector._waypoints._wp_up_button.disabled, "reorder enables once a marker is selected")
+	ctx.inspector._waypoints._wp_up_button.pressed.emit()
 	assert_eq(ctx.fake.move_marker_calls, [-1], "Move up moves the marker one step earlier")
-	ctx.inspector._wp_down_button.pressed.emit()
+	ctx.inspector._waypoints._wp_down_button.pressed.emit()
 	assert_eq(ctx.fake.move_marker_calls, [-1, 1], "Move down moves it one step later")
-	ctx.inspector._wp_delete_button.pressed.emit()
+	ctx.inspector._waypoints._wp_delete_button.pressed.emit()
 	assert_eq(ctx.fake.delete_marker_calls, 1, "Delete marker removes it")
 
 
@@ -1364,7 +1364,7 @@ func test_clear_path_button_clears_the_active_path() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 1}], 2)
 	ctx.fake.active_path = {"index": 2, "flags": 0, "marker_count": 1, "marker_indices": PackedInt32Array([5])}
 	ctx.fake.changed.emit()
-	ctx.inspector._wp_clear_button.pressed.emit()
+	ctx.inspector._waypoints._wp_clear_button.pressed.emit()
 	assert_eq(ctx.fake.clear_path_calls, 1, "Clear path clears the active path")
 
 
@@ -1372,16 +1372,16 @@ func test_clear_path_disabled_for_an_empty_path() -> void:
 	var ctx := _waypoint_ctx([{"index": 3, "flags": 0, "marker_count": 0}], 3)
 	ctx.fake.active_path = {"index": 3, "flags": 0, "marker_count": 0, "marker_indices": PackedInt32Array()}
 	ctx.fake.changed.emit()
-	assert_true(ctx.inspector._wp_clear_button.disabled, "clear is disabled when the path has no markers")
+	assert_true(ctx.inspector._waypoints._wp_clear_button.disabled, "clear is disabled when the path has no markers")
 
 
 func test_new_path_button_is_available_when_the_list_is_empty() -> void:
 	# Regression (review): an all-empty mission lists zero paths, so the user must still have a
 	# way to start a route. The always-present New path button is that escape hatch.
 	var ctx := _waypoint_ctx([{"index": 0, "flags": 0, "marker_count": 0}], -1)  # no active path, all empty
-	assert_eq(ctx.inspector._wp_list.item_count, 0, "precondition: the path list is empty (no active, all-empty)")
-	assert_true(ctx.inspector._wp_new_path_button.is_visible_in_tree(), "the New path button is still available")
-	ctx.inspector._wp_new_path_button.pressed.emit()
+	assert_eq(ctx.inspector._waypoints._wp_list.item_count, 0, "precondition: the path list is empty (no active, all-empty)")
+	assert_true(ctx.inspector._waypoints._wp_new_path_button.is_visible_in_tree(), "the New path button is still available")
+	ctx.inspector._waypoints._wp_new_path_button.pressed.emit()
 	assert_eq(ctx.fake.new_path_calls, 1, "New path focuses a fresh path through the controller")
 
 
@@ -1458,14 +1458,14 @@ func test_editing_ai_class_commits_through_set_selected_string_property() -> voi
 
 func test_props_form_is_hidden_without_a_mission() -> void:
 	var ctx := _make({})
-	assert_false(ctx.inspector._props_toggle.visible, "the props toggle hides without a mission")
+	assert_false(ctx.inspector._properties._props_toggle.visible, "the props toggle hides without a mission")
 
 
 func test_props_form_reads_header_values() -> void:
 	var ctx := _make({})
 	ctx.fake.mission_ref = _loaded_mission_for_props()
 	ctx.inspector._refresh()
-	assert_true(ctx.inspector._props_toggle.visible, "the props toggle shows with a mission")
+	assert_true(ctx.inspector._properties._props_toggle.visible, "the props toggle shows with a mission")
 	var name_line := _line(ctx.inspector, "MissionProp_mission_name")
 	assert_not_null(name_line, "the name field is built")
 	assert_eq(name_line.text, String(ctx.fake.mission_ref.get_info()["mission_name"]),
@@ -1600,15 +1600,15 @@ func test_trigger_panel_shows_and_lists_zones_in_trigger_mode() -> void:
 		_zone(0, Vector3(-5, -6, -7), Vector3(5, 6, 7), true, false),
 		_zone(1, Vector3(0, 0, 0), Vector3(10, 10, 10), false, true),
 	], 0)
-	assert_true(ctx.inspector._at_box.visible, "the trigger panel shows in trigger mode")
+	assert_true(ctx.inspector._zones._at_box.visible, "the trigger panel shows in trigger mode")
 	assert_false(ctx.inspector._edit_box.visible, "the object edit panel is hidden in trigger mode")
-	assert_false(ctx.inspector._place_box.visible, "the palette is hidden in trigger mode")
-	assert_eq(ctx.inspector._at_list.item_count, 2, "both zones are listed")
-	assert_eq(ctx.inspector._at_rows, [0, 1], "the listed zone indices match")
+	assert_false(ctx.inspector._palette._place_box.visible, "the palette is hidden in trigger mode")
+	assert_eq(ctx.inspector._zones._at_list.item_count, 2, "both zones are listed")
+	assert_eq(ctx.inspector._zones._at_rows, [0, 1], "the listed zone indices match")
 	# The selected zone's bounds populate the spins.
-	assert_eq(ctx.inspector._at_min_spins[0].value, -5.0, "min X spin reflects the selected zone")
-	assert_eq(ctx.inspector._at_max_spins[1].value, 6.0, "max Y spin reflects the selected zone")
-	assert_true(ctx.inspector._at_active_check.button_pressed, "active toggle reflects the selected zone")
+	assert_eq(ctx.inspector._zones._at_min_spins[0].value, -5.0, "min X spin reflects the selected zone")
+	assert_eq(ctx.inspector._zones._at_max_spins[1].value, 6.0, "max Y spin reflects the selected zone")
+	assert_true(ctx.inspector._zones._at_active_check.button_pressed, "active toggle reflects the selected zone")
 
 
 func test_trigger_panel_add_button_calls_controller() -> void:
@@ -1624,7 +1624,7 @@ func test_trigger_panel_row_selects_zone() -> void:
 		_zone(0, Vector3.ZERO, Vector3.ONE, true, false),
 		_zone(1, Vector3.ZERO, Vector3.ONE, true, false),
 	], 0)
-	ctx.inspector._at_list.item_selected.emit(1)
+	ctx.inspector._zones._at_list.item_selected.emit(1)
 	assert_eq(ctx.fake.select_zone_calls, [1], "selecting a row focuses that zone")
 
 
@@ -1665,13 +1665,13 @@ func test_trigger_panel_editors_disabled_when_zones_exist_but_none_selected() ->
 		_zone(0, Vector3.ZERO, Vector3.ONE, true, false),
 		_zone(1, Vector3.ZERO, Vector3.ONE, false, true),
 	], -1)
-	assert_eq(ctx.inspector._at_list.item_count, 2, "both zones still listed with no selection")
+	assert_eq(ctx.inspector._zones._at_list.item_count, 2, "both zones still listed with no selection")
 	for axis in 3:
-		assert_false(ctx.inspector._at_min_spins[axis].editable, "min spin %d disabled with no selection" % axis)
-		assert_false(ctx.inspector._at_max_spins[axis].editable, "max spin %d disabled with no selection" % axis)
-	assert_true(ctx.inspector._at_active_check.disabled, "Active toggle disabled with no selection")
-	assert_true(ctx.inspector._at_constrain_check.disabled, "Constrain toggle disabled with no selection")
-	assert_true(ctx.inspector._at_delete_button.disabled, "Delete disabled with no selection")
+		assert_false(ctx.inspector._zones._at_min_spins[axis].editable, "min spin %d disabled with no selection" % axis)
+		assert_false(ctx.inspector._zones._at_max_spins[axis].editable, "max spin %d disabled with no selection" % axis)
+	assert_true(ctx.inspector._zones._at_active_check.disabled, "Active toggle disabled with no selection")
+	assert_true(ctx.inspector._zones._at_constrain_check.disabled, "Constrain toggle disabled with no selection")
+	assert_true(ctx.inspector._zones._at_delete_button.disabled, "Delete disabled with no selection")
 
 
 # --- Phase 3: weapon loadout + groups panels ----------------------------------
@@ -1686,8 +1686,8 @@ func _loadout_ctx(loadout: Array) -> Dictionary:
 	add_child_autofree(inspector)
 	inspector.setup(fake)
 	# Expand the (collapsed-by-default) section so the list / editors populate.
-	inspector._loadout_toggle.button_pressed = true
-	inspector._loadout_toggle.toggled.emit(true)
+	inspector._loadout_groups._loadout_toggle.button_pressed = true
+	inspector._loadout_groups._loadout_toggle.toggled.emit(true)
 	return {"fake": fake, "inspector": inspector}
 
 
@@ -1700,8 +1700,8 @@ func _groups_ctx(groups: Array) -> Dictionary:
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
-	inspector._groups_toggle.button_pressed = true
-	inspector._groups_toggle.toggled.emit(true)
+	inspector._loadout_groups._groups_toggle.button_pressed = true
+	inspector._loadout_groups._groups_toggle.toggled.emit(true)
 	return {"fake": fake, "inspector": inspector}
 
 
@@ -1711,8 +1711,8 @@ func _loadout_entry(name: String, v1: String, v2: String) -> Dictionary:
 
 func test_loadout_panel_lists_entries() -> void:
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1"), _loadout_entry("WPN_M9", "-1", "-1")])
-	assert_true(ctx.inspector._loadout_toggle.visible, "the loadout toggle shows when a mission is loaded")
-	assert_eq(ctx.inspector._loadout_list.item_count, 2, "both weapons listed")
+	assert_true(ctx.inspector._loadout_groups._loadout_toggle.visible, "the loadout toggle shows when a mission is loaded")
+	assert_eq(ctx.inspector._loadout_groups._loadout_list.item_count, 2, "both weapons listed")
 
 
 func test_loadout_panel_hidden_without_a_mission() -> void:
@@ -1721,8 +1721,8 @@ func test_loadout_panel_hidden_without_a_mission() -> void:
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
 	inspector.setup(fake)
-	assert_false(inspector._loadout_toggle.visible, "no loadout toggle without a mission")
-	assert_false(inspector._groups_toggle.visible, "no groups toggle without a mission")
+	assert_false(inspector._loadout_groups._loadout_toggle.visible, "no loadout toggle without a mission")
+	assert_false(inspector._loadout_groups._groups_toggle.visible, "no groups toggle without a mission")
 
 
 func test_loadout_add_calls_controller() -> void:
@@ -1736,18 +1736,18 @@ func test_loadout_add_calls_controller() -> void:
 
 func test_loadout_edit_commits_on_submit() -> void:
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
-	ctx.inspector._loadout_list.item_selected.emit(0)
-	ctx.inspector._loadout_name.text = "WPN_FOO"
-	ctx.inspector._loadout_name.text_submitted.emit("WPN_FOO")
+	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_groups._loadout_name.text = "WPN_FOO"
+	ctx.inspector._loadout_groups._loadout_name.text_submitted.emit("WPN_FOO")
 	var committed := ctx.fake.set_loadout_calls.back() as Array
 	assert_eq(String((committed[0] as Dictionary)["name"]), "WPN_FOO", "the edited name is committed")
 
 
 func test_loadout_unchanged_edit_does_not_commit() -> void:
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
-	ctx.inspector._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
 	# Re-submit the same text: no commit (no spurious undo step).
-	ctx.inspector._loadout_name.text_submitted.emit("WPN_KNIFE")
+	ctx.inspector._loadout_groups._loadout_name.text_submitted.emit("WPN_KNIFE")
 	assert_eq(ctx.fake.set_loadout_calls.size(), 0, "an unchanged edit commits nothing")
 
 
@@ -1757,20 +1757,20 @@ func test_loadout_blank_name_is_rejected_and_reverts_all_fields() -> void:
 	# entry (not just the name, so a simultaneous value edit can't be half-applied or left visually stale),
 	# and never reach the controller (no commit, no crash from a private call).
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
-	ctx.inspector._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
 	# Change a value AND blank the name, then submit.
-	ctx.inspector._loadout_value1.text = "5"
-	ctx.inspector._loadout_name.text = ""
-	ctx.inspector._loadout_name.text_submitted.emit("")
+	ctx.inspector._loadout_groups._loadout_value1.text = "5"
+	ctx.inspector._loadout_groups._loadout_name.text = ""
+	ctx.inspector._loadout_groups._loadout_name.text_submitted.emit("")
 	assert_eq(ctx.fake.set_loadout_calls.size(), 0, "a blank name commits nothing")
-	assert_eq(ctx.inspector._loadout_name.text, "WPN_KNIFE", "name field reverts to the stored value")
-	assert_eq(ctx.inspector._loadout_value1.text, "-1", "value1 field reverts too (no half-applied edit)")
-	assert_eq(ctx.inspector._loadout_value2.text, "-1", "value2 field stays consistent with the model")
+	assert_eq(ctx.inspector._loadout_groups._loadout_name.text, "WPN_KNIFE", "name field reverts to the stored value")
+	assert_eq(ctx.inspector._loadout_groups._loadout_value1.text, "-1", "value1 field reverts too (no half-applied edit)")
+	assert_eq(ctx.inspector._loadout_groups._loadout_value2.text, "-1", "value2 field stays consistent with the model")
 
 
 func test_loadout_delete_calls_controller() -> void:
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1"), _loadout_entry("WPN_M9", "-1", "-1")])
-	ctx.inspector._loadout_list.item_selected.emit(1)
+	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(1)
 	var del := ctx.inspector.find_child("MissionLoadoutDelete", true, false) as Button
 	del.pressed.emit()
 	assert_eq(ctx.fake.set_loadout_calls.size(), 1, "delete commits the shorter loadout")
@@ -1782,19 +1782,19 @@ func test_groups_panel_lists_and_syncs_selection() -> void:
 		{"index": 0, "field0": 0, "field8": 0, "field12": 10},
 		{"index": 1, "field0": 3, "field8": 22, "field12": 10},
 	])
-	assert_true(ctx.inspector._groups_toggle.visible, "the groups toggle shows when a mission is loaded")
-	assert_eq(ctx.inspector._groups_list.item_count, 2, "both groups listed")
-	ctx.inspector._groups_list.item_selected.emit(1)
-	assert_eq(ctx.inspector._group_spins[0].value, 3.0, "flags spin syncs to the selected group")
-	assert_eq(ctx.inspector._group_spins[1].value, 22.0, "value spin syncs")
-	assert_eq(ctx.inspector._group_spins[2].value, 10.0, "constant spin syncs")
-	assert_false(ctx.inspector._group_spins[2].editable, "constant is read-only")
+	assert_true(ctx.inspector._loadout_groups._groups_toggle.visible, "the groups toggle shows when a mission is loaded")
+	assert_eq(ctx.inspector._loadout_groups._groups_list.item_count, 2, "both groups listed")
+	ctx.inspector._loadout_groups._groups_list.item_selected.emit(1)
+	assert_eq(ctx.inspector._loadout_groups._group_spins[0].value, 3.0, "flags spin syncs to the selected group")
+	assert_eq(ctx.inspector._loadout_groups._group_spins[1].value, 22.0, "value spin syncs")
+	assert_eq(ctx.inspector._loadout_groups._group_spins[2].value, 10.0, "constant spin syncs")
+	assert_false(ctx.inspector._loadout_groups._group_spins[2].editable, "constant is read-only")
 
 
 func test_group_spin_commits_to_controller() -> void:
 	var ctx := _groups_ctx([{"index": 0, "field0": 0, "field8": 0, "field12": 10}])
-	ctx.inspector._groups_list.item_selected.emit(0)
-	ctx.inspector._group_spins[0].value = 3.0  # fires value_changed
+	ctx.inspector._loadout_groups._groups_list.item_selected.emit(0)
+	ctx.inspector._loadout_groups._group_spins[0].value = 3.0  # fires value_changed
 	assert_eq(ctx.fake.set_group_calls.size(), 1, "changing a spin commits the group")
 	var call := ctx.fake.set_group_calls.back() as Array
 	assert_eq(int(call[0]), 0, "group index 0")
@@ -1807,20 +1807,20 @@ func test_loadout_edit_survives_external_refresh_while_focused() -> void:
 	# The critical guard: an external `changed` (e.g. an undo elsewhere) fires a full refresh; an
 	# in-flight, uncommitted keystroke in a focused field must NOT be clobbered by the model sync.
 	var ctx := _loadout_ctx([_loadout_entry("WPN_KNIFE", "-1", "-1")])
-	ctx.inspector._loadout_list.item_selected.emit(0)
-	ctx.inspector._loadout_name.grab_focus()
-	if not ctx.inspector._loadout_name.has_focus():
+	ctx.inspector._loadout_groups._loadout_list.item_selected.emit(0)
+	ctx.inspector._loadout_groups._loadout_name.grab_focus()
+	if not ctx.inspector._loadout_groups._loadout_name.has_focus():
 		pass_test("headless focus unavailable; focus guard is unit-covered by the spin variant")
 		return
-	ctx.inspector._loadout_name.text = "WPN_TYPING"  # uncommitted
+	ctx.inspector._loadout_groups._loadout_name.text = "WPN_TYPING"  # uncommitted
 	ctx.fake.changed.emit()                          # external refresh
-	assert_eq(ctx.inspector._loadout_name.text, "WPN_TYPING", "focused in-flight edit survives an external refresh")
+	assert_eq(ctx.inspector._loadout_groups._loadout_name.text, "WPN_TYPING", "focused in-flight edit survives an external refresh")
 
 
 func test_group_spin_edit_survives_external_refresh_while_focused() -> void:
 	var ctx := _groups_ctx([{"index": 0, "field0": 0, "field8": 5, "field12": 10}])
-	ctx.inspector._groups_list.item_selected.emit(0)  # value spin synced to 5
-	var inner: LineEdit = ctx.inspector._group_spins[1].get_line_edit()
+	ctx.inspector._loadout_groups._groups_list.item_selected.emit(0)  # value spin synced to 5
+	var inner: LineEdit = ctx.inspector._loadout_groups._group_spins[1].get_line_edit()
 	inner.grab_focus()
 	if not inner.has_focus():
 		pass_test("headless focus unavailable")
@@ -1888,23 +1888,23 @@ func test_scripting_panel_shows_and_lists_events_in_scripting_mode() -> void:
 		[_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 3, 0, 0])],
 		[_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0])])
 	var ctx := _scripting_ctx([event, _sc_event(1, 0, 0, 0, 0, 0)], 0, chain)
-	assert_true(ctx.inspector._sc_box.visible, "the scripting panel shows in scripting mode")
+	assert_true(ctx.inspector._scripting._sc_box.visible, "the scripting panel shows in scripting mode")
 	assert_false(ctx.inspector._edit_box.visible, "the object edit panel is hidden in scripting mode")
-	assert_false(ctx.inspector._place_box.visible, "the palette is hidden in scripting mode")
-	assert_eq(ctx.inspector._sc_event_list.item_count, 2, "both events listed")
-	assert_eq(ctx.inspector._sc_event_rows, [0, 1], "the listed event indices match")
-	assert_eq(ctx.inspector._sc_trigger_list.item_count, 1, "the selected event's trigger is listed")
-	assert_eq(ctx.inspector._sc_action_list.item_count, 1, "the selected event's action is listed")
-	assert_eq(ctx.inspector._sc_reset_spin.value, 5.0, "reset_after spin reflects the event")
-	assert_eq(ctx.inspector._sc_delay_spin.value, 2.0, "delay spin reflects the event")
-	assert_true((ctx.inspector._sc_flag_checks[0]["check"] as CheckBox).button_pressed, "the Reset-after flag reflects the event")
+	assert_false(ctx.inspector._palette._place_box.visible, "the palette is hidden in scripting mode")
+	assert_eq(ctx.inspector._scripting._sc_event_list.item_count, 2, "both events listed")
+	assert_eq(ctx.inspector._scripting._sc_event_rows, [0, 1], "the listed event indices match")
+	assert_eq(ctx.inspector._scripting._sc_trigger_list.item_count, 1, "the selected event's trigger is listed")
+	assert_eq(ctx.inspector._scripting._sc_action_list.item_count, 1, "the selected event's action is listed")
+	assert_eq(ctx.inspector._scripting._sc_reset_spin.value, 5.0, "reset_after spin reflects the event")
+	assert_eq(ctx.inspector._scripting._sc_delay_spin.value, 2.0, "delay spin reflects the event")
+	assert_true((ctx.inspector._scripting._sc_flag_checks[0]["check"] as CheckBox).button_pressed, "the Reset-after flag reflects the event")
 
 
 func test_scripting_panel_hidden_in_objects_mode() -> void:
 	var ctx := _scripting_ctx([], -1, {})
 	ctx.fake.mode = 0
 	ctx.fake.changed.emit()
-	assert_false(ctx.inspector._sc_box.visible, "the scripting panel hides outside scripting mode")
+	assert_false(ctx.inspector._scripting._sc_box.visible, "the scripting panel hides outside scripting mode")
 
 
 func test_scripting_add_event_calls_controller() -> void:
@@ -1926,14 +1926,14 @@ func test_scripting_delete_event_calls_controller() -> void:
 func test_scripting_event_row_selects_event() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 0)
 	var ctx := _scripting_ctx([event, _sc_event(1, 0, 0, 0, 0, 0)], 0, _sc_chain_dict(event, [], []))
-	ctx.inspector._sc_event_list.item_selected.emit(1)
+	ctx.inspector._scripting._sc_event_list.item_selected.emit(1)
 	assert_eq(ctx.fake.select_event_calls, [1], "selecting a row focuses that event")
 
 
 func test_scripting_event_flag_toggle_commits() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 0)
 	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [], []))
-	var flag := ctx.inspector._sc_flag_checks[0]["check"] as CheckBox  # Reset after (bit 1)
+	var flag := ctx.inspector._scripting._sc_flag_checks[0]["check"] as CheckBox  # Reset after (bit 1)
 	flag.button_pressed = true  # fires toggled
 	assert_eq(ctx.fake.set_event_calls.size(), 1, "toggling a flag commits the event")
 	assert_eq(int((ctx.fake.set_event_calls[0] as Array)[0]), 1, "the Reset-after bit is set in the committed flags")
@@ -1942,7 +1942,7 @@ func test_scripting_event_flag_toggle_commits() -> void:
 func test_scripting_reset_spin_commits() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 0)
 	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [], []))
-	ctx.inspector._sc_reset_spin.value = 12.0  # fires value_changed
+	ctx.inspector._scripting._sc_reset_spin.value = 12.0  # fires value_changed
 	assert_eq(ctx.fake.set_event_calls.size(), 1, "changing reset_after commits the event")
 	assert_eq(int((ctx.fake.set_event_calls[0] as Array)[1]), 12, "the new reset_after is sent")
 
@@ -1951,16 +1951,16 @@ func test_scripting_trigger_editor_typed_pickers() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [7, 3, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	assert_eq(ctx.inspector._sc_trigger_main.get_selected_id(), 2, "the main-type dropdown shows Single")
-	assert_eq(ctx.inspector._sc_trigger_sub.get_selected_id(), 10, "the sub-type dropdown shows SingleIsWithinArea")
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	assert_eq(ctx.inspector._scripting._sc_trigger_main.get_selected_id(), 2, "the main-type dropdown shows Single")
+	assert_eq(ctx.inspector._scripting._sc_trigger_sub.get_selected_id(), 10, "the sub-type dropdown shows SingleIsWithinArea")
 	# SingleIsWithinArea: param1 = entity (unit) picker, param2 = zone picker. Both expose a dropdown and
 	# round-trip the stored raw value even when nothing in the (empty) collections matches.
-	assert_true(ctx.inspector._sc_trigger_params[0].is_picker(), "param1 renders as a typed picker (unit)")
-	assert_eq(ctx.inspector._sc_trigger_params[0].read_value(), 7, "param1 round-trips the stored unit id")
-	assert_true(ctx.inspector._sc_trigger_params[1].is_picker(), "param2 renders as a typed picker (zone)")
-	assert_eq(ctx.inspector._sc_trigger_params[1].read_value(), 3, "param2 round-trips the stored zone index")
-	assert_true(ctx.inspector._sc_trigger_desc.text.to_lower().find("zone") != -1, "the type description mentions the zone")
+	assert_true(ctx.inspector._scripting._sc_trigger_params[0].is_picker(), "param1 renders as a typed picker (unit)")
+	assert_eq(ctx.inspector._scripting._sc_trigger_params[0].read_value(), 7, "param1 round-trips the stored unit id")
+	assert_true(ctx.inspector._scripting._sc_trigger_params[1].is_picker(), "param2 renders as a typed picker (zone)")
+	assert_eq(ctx.inspector._scripting._sc_trigger_params[1].read_value(), 3, "param2 round-trips the stored zone index")
+	assert_true(ctx.inspector._scripting._sc_trigger_desc.text.to_lower().find("zone") != -1, "the type description mentions the zone")
 
 
 func test_scripting_subselection_resets_when_event_changes_without_a_click() -> void:
@@ -1976,13 +1976,13 @@ func test_scripting_subselection_resets_when_event_changes_without_a_click() -> 
 		_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 0, 0, 0]),
 	]
 	var ctx := _scripting_ctx([ev0, ev1], 0, _sc_chain_dict(ev0, trigs, []))
-	ctx.inspector._sc_trigger_list.item_selected.emit(2)  # user selects trigger row 2 of event 0
-	assert_eq(ctx.inspector._sc_trigger_selected, 2, "precondition: trigger 2 of event 0 is selected")
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(2)  # user selects trigger row 2 of event 0
+	assert_eq(ctx.inspector._scripting._sc_trigger_selected, 2, "precondition: trigger 2 of event 0 is selected")
 	# The controller switches the selected event WITHOUT a click on the event list, then emits changed.
 	ctx.fake.selected_event = 1
 	ctx.fake.chain = _sc_chain_dict(ev1, trigs, [])
 	ctx.inspector._refresh()
-	assert_eq(ctx.inspector._sc_trigger_selected, -1,
+	assert_eq(ctx.inspector._scripting._sc_trigger_selected, -1,
 		"the stale trigger sub-selection is dropped when the event changed without a click")
 
 
@@ -1990,8 +1990,8 @@ func test_scripting_trigger_type_change_commits_and_resets_sub() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 0, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	var main: OptionButton = ctx.inspector._sc_trigger_main
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	var main: OptionButton = ctx.inspector._scripting._sc_trigger_main
 	main.select(0)  # Group (id 1) is the first main-type entry
 	main.item_selected.emit(0)
 	assert_eq(ctx.fake.set_trigger_calls.size(), 1, "changing the main type commits")
@@ -2005,9 +2005,9 @@ func test_scripting_trigger_raw_param_commits() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [2, 0, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	assert_false(ctx.inspector._sc_trigger_params[1].is_picker(), "param2 is a raw count spinbox")
-	ctx.inspector._sc_trigger_params[1].get_spin().value = 42.0  # fires value_changed -> committed
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	assert_false(ctx.inspector._scripting._sc_trigger_params[1].is_picker(), "param2 is a raw count spinbox")
+	ctx.inspector._scripting._sc_trigger_params[1].get_spin().value = 42.0  # fires value_changed -> committed
 	assert_eq(ctx.fake.set_trigger_calls.size(), 1, "editing a param commits the trigger exactly once")
 	var sent := (ctx.fake.set_trigger_calls.back() as Array)[1] as Dictionary
 	assert_eq(int(sent["param2"]), 42, "the new param2 is committed")
@@ -2018,12 +2018,12 @@ func test_scripting_unmapped_type_param_roundtrips_raw() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 99, "Value 99", [11, 22, 33, 44])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
 	for i in 4:
-		assert_false(ctx.inspector._sc_trigger_params[i].is_picker(), "unmapped param %d is raw" % i)
-	assert_eq(ctx.inspector._sc_trigger_params[0].read_value(), 11, "raw param1 round-trips")
-	assert_eq(ctx.inspector._sc_trigger_params[3].read_value(), 44, "raw param4 round-trips")
-	ctx.inspector._sc_trigger_params[2].get_spin().value = 12345.0
+		assert_false(ctx.inspector._scripting._sc_trigger_params[i].is_picker(), "unmapped param %d is raw" % i)
+	assert_eq(ctx.inspector._scripting._sc_trigger_params[0].read_value(), 11, "raw param1 round-trips")
+	assert_eq(ctx.inspector._scripting._sc_trigger_params[3].read_value(), 44, "raw param4 round-trips")
+	ctx.inspector._scripting._sc_trigger_params[2].get_spin().value = 12345.0
 	var sent := (ctx.fake.set_trigger_calls.back() as Array)[1] as Dictionary
 	assert_eq(int(sent["param3"]), 12345, "an unmapped param commits its exact raw value")
 
@@ -2063,11 +2063,11 @@ func test_scripting_action_disables_unused_param_slots() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
 	var chain := _sc_chain_dict(event, [], [_sc_act(2, "KillGroup", 0, "Null", [5, 0, 0, 0])])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_action_list.item_selected.emit(0)
-	assert_true(ctx.inspector._sc_action_params[0].is_editable(), "the used param (group) stays editable")
-	assert_false(ctx.inspector._sc_action_params[1].is_editable(), "unused param 2 is disabled")
-	assert_false(ctx.inspector._sc_action_params[2].is_editable(), "unused param 3 is disabled")
-	assert_false(ctx.inspector._sc_action_params[3].is_editable(), "unused param 4 is disabled")
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._scripting._sc_action_params[0].is_editable(), "the used param (group) stays editable")
+	assert_false(ctx.inspector._scripting._sc_action_params[1].is_editable(), "unused param 2 is disabled")
+	assert_false(ctx.inspector._scripting._sc_action_params[2].is_editable(), "unused param 3 is disabled")
+	assert_false(ctx.inspector._scripting._sc_action_params[3].is_editable(), "unused param 4 is disabled")
 
 
 func test_scripting_zero_param_action_disables_all_slots() -> void:
@@ -2075,9 +2075,9 @@ func test_scripting_zero_param_action_disables_all_slots() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
 	var chain := _sc_chain_dict(event, [], [_sc_act(8, "BlueWin", 0, "Null", [0, 0, 0, 0])])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_action_list.item_selected.emit(0)
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_false(ctx.inspector._sc_action_params[i].is_editable(), "BlueWin param %d is disabled" % (i + 1))
+		assert_false(ctx.inspector._scripting._sc_action_params[i].is_editable(), "BlueWin param %d is disabled" % (i + 1))
 
 
 func test_scripting_ai_action_enables_exactly_its_sub_type_slots() -> void:
@@ -2085,23 +2085,23 @@ func test_scripting_ai_action_enables_exactly_its_sub_type_slots() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
 	var anim_chain := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1, 2, 1, 65536])])
 	var anim_ctx := _scripting_ctx([event], 0, anim_chain)
-	anim_ctx.inspector._sc_action_list.item_selected.emit(0)
+	anim_ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_true(anim_ctx.inspector._sc_action_params[i].is_editable(), "PlayPartAnim param %d is editable" % (i + 1))
+		assert_true(anim_ctx.inspector._scripting._sc_action_params[i].is_editable(), "PlayPartAnim param %d is editable" % (i + 1))
 	# A single-value sub-type (ACCURACY) enables only the target + one value; the rest grey out.
 	var acc_chain := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 8, "Accuracy", [1, 90, 0, 0])])
 	var acc_ctx := _scripting_ctx([event], 0, acc_chain)
-	acc_ctx.inspector._sc_action_list.item_selected.emit(0)
-	assert_true(acc_ctx.inspector._sc_action_params[0].is_editable(), "Accuracy target stays editable")
-	assert_true(acc_ctx.inspector._sc_action_params[1].is_editable(), "Accuracy value stays editable")
-	assert_false(acc_ctx.inspector._sc_action_params[2].is_editable(), "Accuracy param 3 greys out")
-	assert_false(acc_ctx.inspector._sc_action_params[3].is_editable(), "Accuracy param 4 greys out")
+	acc_ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_true(acc_ctx.inspector._scripting._sc_action_params[0].is_editable(), "Accuracy target stays editable")
+	assert_true(acc_ctx.inspector._scripting._sc_action_params[1].is_editable(), "Accuracy value stays editable")
+	assert_false(acc_ctx.inspector._scripting._sc_action_params[2].is_editable(), "Accuracy param 3 greys out")
+	assert_false(acc_ctx.inspector._scripting._sc_action_params[3].is_editable(), "Accuracy param 4 greys out")
 	# A genuinely unknown action type still degrades to four raw, editable slots so no param is ever blocked.
 	var raw_chain := _sc_chain_dict(event, [], [_sc_act(999, "Action 999", 0, "Null", [1, 2, 3, 4])])
 	var raw_ctx := _scripting_ctx([event], 0, raw_chain)
-	raw_ctx.inspector._sc_action_list.item_selected.emit(0)
+	raw_ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
 	for i in 4:
-		assert_true(raw_ctx.inspector._sc_action_params[i].is_editable(), "unknown action param %d stays editable" % (i + 1))
+		assert_true(raw_ctx.inspector._scripting._sc_action_params[i].is_editable(), "unknown action param %d stays editable" % (i + 1))
 
 
 # --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
@@ -2110,18 +2110,18 @@ func test_scripting_preview_row_shows_only_for_playpartanim() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
 	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
 	var ctx := _scripting_ctx([event], 0, ppa)
-	ctx.inspector._sc_action_list.item_selected.emit(0)
-	assert_true(ctx.inspector._sc_action_preview_row.visible, "the Preview row shows for a PLAYPARTANIM action")
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._scripting._sc_action_preview_row.visible, "the Preview row shows for a PLAYPARTANIM action")
 	# An AI-change action with a different sub-type hides it.
 	var acc := _sc_chain_dict(event, [], [_sc_act(3, "ChangeGroupAI", 8, "Accuracy", [1, 90, 0, 0])])
 	var ctx2 := _scripting_ctx([event], 0, acc)
-	ctx2.inspector._sc_action_list.item_selected.emit(0)
-	assert_false(ctx2.inspector._sc_action_preview_row.visible, "hidden for a non-PLAYPARTANIM AI sub-type")
+	ctx2.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_false(ctx2.inspector._scripting._sc_action_preview_row.visible, "hidden for a non-PLAYPARTANIM AI sub-type")
 	# A non-AI action hides it too.
 	var other := _sc_chain_dict(event, [], [_sc_act(34, "ResetEvent", 0, "Null", [0, 0, 0, 0])])
 	var ctx3 := _scripting_ctx([event], 0, other)
-	ctx3.inspector._sc_action_list.item_selected.emit(0)
-	assert_false(ctx3.inspector._sc_action_preview_row.visible, "hidden for a non-AI action")
+	ctx3.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_false(ctx3.inspector._scripting._sc_action_preview_row.visible, "hidden for a non-AI action")
 
 
 func test_scripting_preview_button_enabled_state_follows_target() -> void:
@@ -2130,14 +2130,14 @@ func test_scripting_preview_button_enabled_state_follows_target() -> void:
 	# No resolvable target -> the button is disabled with a hint.
 	var ctx := _scripting_ctx([event], 0, ppa)
 	ctx.fake.can_preview = false
-	ctx.inspector._sc_action_list.item_selected.emit(0)
-	assert_true(ctx.inspector._sc_action_preview.disabled, "Preview is disabled without an animated target")
-	assert_string_contains(ctx.inspector._sc_action_preview.tooltip_text, "animated")
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_true(ctx.inspector._scripting._sc_action_preview.disabled, "Preview is disabled without an animated target")
+	assert_string_contains(ctx.inspector._scripting._sc_action_preview.tooltip_text, "animated")
 	# With a target -> enabled.
 	var ctx2 := _scripting_ctx([event], 0, ppa)
 	ctx2.fake.can_preview = true
-	ctx2.inspector._sc_action_list.item_selected.emit(0)
-	assert_false(ctx2.inspector._sc_action_preview.disabled, "Preview is enabled when a target resolves")
+	ctx2.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_false(ctx2.inspector._scripting._sc_action_preview.disabled, "Preview is enabled when a target resolves")
 
 
 func test_scripting_preview_button_calls_controller_with_action() -> void:
@@ -2146,8 +2146,8 @@ func test_scripting_preview_button_calls_controller_with_action() -> void:
 	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 131072])])
 	var ctx := _scripting_ctx([event], 0, ppa)
 	ctx.fake.can_preview = true
-	ctx.inspector._sc_action_list.item_selected.emit(0)
-	ctx.inspector._sc_action_preview.pressed.emit()
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	ctx.inspector._scripting._sc_action_preview.pressed.emit()
 	assert_eq(ctx.fake.preview_calls.size(), 1, "Preview calls the controller once")
 	var called: Dictionary = ctx.fake.preview_calls[0]
 	assert_eq(int(called["param2"]), 2, "channel (param2) forwarded")
@@ -2160,9 +2160,9 @@ func test_scripting_preview_stop_button_calls_controller() -> void:
 	var ppa := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 34, "PlayPartAnim", [1001, 2, 1, 65536])])
 	var ctx := _scripting_ctx([event], 0, ppa)
 	ctx.fake.can_preview = true
-	ctx.inspector._sc_action_list.item_selected.emit(0)
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
 	var before: int = ctx.fake.stop_preview_calls
-	ctx.inspector._sc_action_preview_stop.pressed.emit()
+	ctx.inspector._scripting._sc_action_preview_stop.pressed.emit()
 	assert_eq(ctx.fake.stop_preview_calls, before + 1, "Stop calls the controller")
 
 
@@ -2174,11 +2174,11 @@ func test_scripting_switching_away_from_playpartanim_stops_preview() -> void:
 	])
 	var ctx := _scripting_ctx([event], 0, chain)
 	ctx.fake.can_preview = true
-	ctx.inspector._sc_action_list.item_selected.emit(0)  # PLAYPARTANIM -> row visible
-	assert_true(ctx.inspector._sc_action_preview_row.visible)
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)  # PLAYPARTANIM -> row visible
+	assert_true(ctx.inspector._scripting._sc_action_preview_row.visible)
 	var before: int = ctx.fake.stop_preview_calls
-	ctx.inspector._sc_action_list.item_selected.emit(1)  # ResetEvent -> row hidden, preview stopped
-	assert_false(ctx.inspector._sc_action_preview_row.visible, "the row hides on a non-PLAYPARTANIM action")
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(1)  # ResetEvent -> row hidden, preview stopped
+	assert_false(ctx.inspector._scripting._sc_action_preview_row.visible, "the row hides on a non-PLAYPARTANIM action")
 	assert_gt(ctx.fake.stop_preview_calls, before, "leaving PLAYPARTANIM stops any running preview")
 
 
@@ -2187,10 +2187,10 @@ func test_scripting_trigger_disables_unused_param_slots() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 3, "GroupAtRedAlert", [5, 0, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	assert_true(ctx.inspector._sc_trigger_params[0].is_editable(), "the used param (group) stays editable")
-	assert_false(ctx.inspector._sc_trigger_params[1].is_editable(), "unused trigger param 2 is disabled")
-	assert_false(ctx.inspector._sc_trigger_params[3].is_editable(), "unused trigger param 4 is disabled")
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	assert_true(ctx.inspector._scripting._sc_trigger_params[0].is_editable(), "the used param (group) stays editable")
+	assert_false(ctx.inspector._scripting._sc_trigger_params[1].is_editable(), "unused trigger param 2 is disabled")
+	assert_false(ctx.inspector._scripting._sc_trigger_params[3].is_editable(), "unused trigger param 4 is disabled")
 
 
 func test_scripting_picker_out_of_range_shows_raw_row() -> void:
@@ -2198,10 +2198,10 @@ func test_scripting_picker_out_of_range_shows_raw_row() -> void:
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 99, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	var opt: OptionButton = ctx.inspector._sc_trigger_params[1].get_option()
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	var opt: OptionButton = ctx.inspector._scripting._sc_trigger_params[1].get_option()
 	assert_eq(opt.get_item_text(opt.selected), "Value 99", "out-of-range zone shows as a raw Value row")
-	assert_eq(ctx.inspector._sc_trigger_params[1].read_value(), 99, "and read_value preserves the raw value")
+	assert_eq(ctx.inspector._scripting._sc_trigger_params[1].read_value(), 99, "and read_value preserves the raw value")
 
 
 func test_scripting_zone_picker_commits_selected_index() -> void:
@@ -2209,8 +2209,8 @@ func test_scripting_zone_picker_commits_selected_index() -> void:
 	var chain := _sc_chain_dict(event, [_sc_trig(2, "Single", 10, "SingleIsWithinArea", [0, 0, 0, 0])], [])
 	var ctx := _scripting_ctx([event], 0, chain)
 	ctx.fake.zones = [{"index": 0, "id": 10}, {"index": 1, "id": 20}, {"index": 2, "id": 30}]
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)
-	var opt: OptionButton = ctx.inspector._sc_trigger_params[1].get_option()
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	var opt: OptionButton = ctx.inspector._scripting._sc_trigger_params[1].get_option()
 	# Select the zone whose id is 30 (array index 2) and fire the selection.
 	for i in opt.item_count:
 		if opt.get_item_id(i) == 2:
@@ -2230,10 +2230,10 @@ func test_scripting_trigger_add_remove_move_call_controller() -> void:
 	var ctx := _scripting_ctx([event], 0, chain)
 	(ctx.inspector.find_child("MissionScTrigAdd", true, false) as Button).pressed.emit()
 	assert_eq(ctx.fake.add_trigger_calls, 1, "Add trigger calls the controller")
-	ctx.inspector._sc_trigger_list.item_selected.emit(1)
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(1)
 	(ctx.inspector.find_child("MissionScTrigRemove", true, false) as Button).pressed.emit()
 	assert_eq(ctx.fake.remove_trigger_calls, [1], "Remove sends the selected local index")
-	ctx.inspector._sc_trigger_list.item_selected.emit(1)
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(1)
 	(ctx.inspector.find_child("MissionScTrigUp", true, false) as Button).pressed.emit()
 	assert_eq(ctx.fake.move_trigger_calls, [[1, -1]], "Up moves the selected trigger toward the front")
 
@@ -2242,14 +2242,14 @@ func test_scripting_action_editor_populates_and_commits() -> void:
 	var event := _sc_event(0, 0, 0, 0, 0, 1)
 	var chain := _sc_chain_dict(event, [], [_sc_act(34, "ResetEvent", 0, "Null", [4, 0, 0, 0])])
 	var ctx := _scripting_ctx([event], 0, chain)
-	ctx.inspector._sc_action_list.item_selected.emit(0)
-	assert_eq(ctx.inspector._sc_action_type.get_selected_id(), 34, "the action-type dropdown shows ResetEvent")
+	ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_eq(ctx.inspector._scripting._sc_action_type.get_selected_id(), 34, "the action-type dropdown shows ResetEvent")
 	# ResetEvent param1 = event picker. Stored value 4 has no matching event (only event 0), so it shows raw.
-	assert_true(ctx.inspector._sc_action_params[0].is_picker(), "ResetEvent param1 renders as an event picker")
-	assert_eq(ctx.inspector._sc_action_params[0].read_value(), 4, "param1 round-trips the stored event index")
-	assert_true(ctx.inspector._sc_action_desc.text.to_lower().find("event") != -1, "the action description mentions the event")
+	assert_true(ctx.inspector._scripting._sc_action_params[0].is_picker(), "ResetEvent param1 renders as an event picker")
+	assert_eq(ctx.inspector._scripting._sc_action_params[0].read_value(), 4, "param1 round-trips the stored event index")
+	assert_true(ctx.inspector._scripting._sc_action_desc.text.to_lower().find("event") != -1, "the action description mentions the event")
 	# Pick the real event 0 and fire the selection.
-	var opt: OptionButton = ctx.inspector._sc_action_params[0].get_option()
+	var opt: OptionButton = ctx.inspector._scripting._sc_action_params[0].get_option()
 	for i in opt.item_count:
 		if opt.get_item_id(i) == 0:
 			opt.select(i)
@@ -2267,15 +2267,15 @@ func test_scripting_diagnostics_render() -> void:
 			"message": "Trigger references an area trigger index outside the mission area table.",
 			"subject_kind": "trigger", "subject_index": 0}])
 	var ctx := _scripting_ctx([event], 0, chain)
-	assert_true(ctx.inspector._sc_diagnostics.text.find("area trigger index") != -1, "the diagnostic message renders")
+	assert_true(ctx.inspector._scripting._sc_diagnostics.text.find("area trigger index") != -1, "the diagnostic message renders")
 
 
 func test_scripting_trigger_param_survives_external_refresh_while_focused() -> void:
 	# The same focus guard as the other panels: a mid-typed RAW param spin must survive an external refresh.
 	var event := _sc_event(0, 0, 0, 0, 1, 0)
 	var ctx := _scripting_ctx([event], 0, _sc_chain_dict(event, [_sc_trig(1, "Group", 6, "GroupHasLostMoreUnits", [0, 5, 0, 0])], []))
-	ctx.inspector._sc_trigger_list.item_selected.emit(0)  # param2 (raw count) synced to 5
-	var inner: LineEdit = ctx.inspector._sc_trigger_params[1].get_spin().get_line_edit()
+	ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)  # param2 (raw count) synced to 5
+	var inner: LineEdit = ctx.inspector._scripting._sc_trigger_params[1].get_spin().get_line_edit()
 	inner.grab_focus()
 	if not inner.has_focus():
 		pass_test("headless focus unavailable")
@@ -2293,7 +2293,7 @@ func test_scripting_event_summary_renders() -> void:
 		[_sc_trig(1, "Group", 5, "GroupAlive", [3, 0, 0, 0])],
 		[_sc_act(2, "KillGroup", 0, "Null", [4, 0, 0, 0])])
 	var ctx := _scripting_ctx([event], 0, chain)
-	var summary: String = ctx.inspector._sc_event_summary.text
+	var summary: String = ctx.inspector._scripting._sc_event_summary.text
 	assert_true(summary.begins_with("When "), "the summary reads as a when/then sentence")
 	assert_true(summary.find("Group 3 is alive") != -1, "the trigger phrase substitutes its param")
 	assert_true(summary.find("Kill group 4") != -1, "the action phrase substitutes its param")
@@ -2306,7 +2306,7 @@ func test_scripting_ref_integrity_flags_bad_group() -> void:
 	var ctx := _scripting_ctx([event], 0, chain)
 	ctx.fake.groups = [{"index": 0}, {"index": 1}]  # only 2 groups, ref is 7
 	ctx.fake.changed.emit()
-	assert_true(ctx.inspector._sc_diagnostics.text.find("references group 7") != -1, "an out-of-range group ref is flagged")
+	assert_true(ctx.inspector._scripting._sc_diagnostics.text.find("references group 7") != -1, "an out-of-range group ref is flagged")
 
 
 # --- Two-host split: browser left, editor in the right dock -------------------
