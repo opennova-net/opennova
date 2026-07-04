@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="OpenNova"
-config/version="0.0.8"
+config/version="0.0.9"
 run/main_scene="uid://dqiq0mn3kghyi"
 config/features=PackedStringArray("4.6", "Forward Plus")
 run/flush_stdout_on_print=true
