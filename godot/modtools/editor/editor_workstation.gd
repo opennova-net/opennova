@@ -636,7 +636,7 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 	if clean_path != String(workspace.get_current_resource_path()):
 		var err: Error = workspace.open_file(clean_path)
 		if err != OK:
-			show_status_message("Could not open %s." % clean_path.get_file(), 5.0)
+			show_status_message("Could not open %s." % clean_path.get_file(), 0.0, &"error")
 			return err
 	if _active_workspace_id != workspace_id:
 		set_active_workspace(workspace_id)
@@ -651,7 +651,7 @@ func open_in_workspace(kind: String, path: String, focus: Dictionary = {}) -> Er
 			var parts := PackedStringArray()
 			for value in focus.values():
 				parts.append(str(value))
-			show_status_message("Opened %s; not found: %s" % [clean_path.get_file(), ", ".join(parts)], 5.0)
+			show_status_message("Opened %s; not found: %s" % [clean_path.get_file(), ", ".join(parts)], 0.0, &"warn")
 			return focus_err
 	return OK
 
@@ -704,12 +704,12 @@ func open_font_workspace(font_name: String) -> Error:
 		return ERR_INVALID_PARAMETER
 	var path := String(workspace.call("resolve_font_file", clean_name))
 	if path.is_empty():
-		show_status_message("Font not found: %s" % clean_name, 5.0)
+		show_status_message("Font not found: %s" % clean_name, 0.0, &"error")
 		return ERR_DOES_NOT_EXIST
 	var err := open_in_workspace("font", path)
 	if err != OK:
 		return err
-	show_status_message("Opened font %s." % clean_name, 3.0)
+	show_status_message("Opened font %s." % clean_name, 0.0, &"success")
 	return OK
 
 
@@ -720,7 +720,7 @@ func open_strings_workspace(table_path: String, key: String) -> Error:
 	var err := open_in_workspace("strings", table_path, {"key": key})
 	if err != OK:
 		return err
-	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0)
+	show_status_message("Editing string %s." % (key if not key.is_empty() else table_path.get_file()), 3.0, &"info")
 	return OK
 
 
@@ -730,7 +730,7 @@ func open_strings_workspace(table_path: String, key: String) -> Error:
 func open_menu_workspace(file: String, screen: String = "") -> Error:
 	var path := _resolve_menu_action_path(file)
 	if path.is_empty():
-		show_status_message("Menu not found: %s" % file.strip_edges(), 5.0)
+		show_status_message("Menu not found: %s" % file.strip_edges(), 0.0, &"error")
 		return ERR_FILE_NOT_FOUND
 	var target := screen.strip_edges()
 	var err := open_in_workspace("menu", path, {"screen": target} if not target.is_empty() else {})
@@ -774,7 +774,7 @@ func go_back() -> void:
 		_nav_history.commit_back(current)
 	else:
 		_nav_history.drop_back()
-		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 5.0)
+		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 0.0, &"error")
 	_refresh_nav_buttons()
 
 
@@ -787,7 +787,7 @@ func go_forward() -> void:
 		_nav_history.commit_forward(current)
 	else:
 		_nav_history.drop_forward()
-		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 5.0)
+		show_status_message("Could not open %s." % String(entry.get("path", "")).get_file(), 0.0, &"error")
 	_refresh_nav_buttons()
 
 
@@ -1300,7 +1300,7 @@ func _show_resource_status(result: Dictionary) -> void:
 	var status := String(result["status"])
 	if status.is_empty():
 		return
-	show_status_message(status, 4.0 if int(result["err"]) == OK else 6.0)
+	show_status_message(status, 0.0, &"info" if int(result["err"]) == OK else &"error")
 
 
 func _load_resource_state() -> void:
@@ -1457,8 +1457,8 @@ func _swap_workflow_inspector(workspace: EditorWorkspace, workflow_id: int) -> v
 
 ## Transient status message in the status bar's tool cell (the shell's public
 ## notification surface for workspaces, tools, and MCP).
-func show_status_message(text: String, duration: float = 4.0) -> void:
-	_status.show_status_message(text, duration)
+func show_status_message(text: String, duration: float = 0.0, severity: StringName = &"info") -> void:
+	_status.show_status_message(text, duration, severity)
 
 
 ## Saves the workspace's current document, then runs on_done (Save As fallback

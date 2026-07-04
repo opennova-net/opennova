@@ -1451,7 +1451,7 @@ class _StubShell extends Node:
 	func open_menu_workspace(file: String, screen: String) -> int:
 		menu_calls.append([file, screen])
 		return OK
-	func show_status_message(_text: String, _duration := 4.0) -> void:
+	func show_status_message(_text: String, _duration := 4.0, _severity: StringName = &"info") -> void:
 		pass
 
 

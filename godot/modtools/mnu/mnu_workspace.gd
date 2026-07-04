@@ -518,7 +518,7 @@ func _on_string_jump(key: String) -> void:
 	var path: String = _editor.get_text_resource_path()
 	if path.is_empty():
 		if editor_shell != null and editor_shell.has_method("show_status_message"):
-			editor_shell.show_status_message("No string table is loaded for this menu.", 4.0)
+			editor_shell.show_status_message("No string table is loaded for this menu.", 0.0, &"warn")
 		return
 	if editor_shell != null and editor_shell.has_method("open_strings_workspace"):
 		editor_shell.open_strings_workspace(path, key)

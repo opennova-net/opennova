@@ -438,7 +438,7 @@ func new_current() -> Error:
 	var status: String = _controller.get_last_status()
 	if not status.is_empty():
 		if editor_shell != null and editor_shell.has_method("show_status_message"):
-			editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+			editor_shell.show_status_message(status, 0.0, &"info" if err == OK else &"error")
 		elif err != OK:
 			push_warning("New mission: " + status)
 	return err as Error
@@ -481,7 +481,7 @@ func open_file(path: String) -> Error:
 	var status: String = _controller.get_last_status()
 	if not status.is_empty():
 		if editor_shell != null and editor_shell.has_method("show_status_message"):
-			editor_shell.show_status_message(status, 5.0 if err == OK else 7.0)
+			editor_shell.show_status_message(status, 0.0, &"success" if err == OK else &"error")
 		elif err != OK:
 			push_warning("Mission open: " + status)
 	return err as Error
@@ -579,7 +579,7 @@ func _report_save_status(err: int) -> void:
 	if status.is_empty():
 		return
 	if editor_shell != null and editor_shell.has_method("show_status_message"):
-		editor_shell.show_status_message(status, 4.0 if err == OK else 6.0)
+		editor_shell.show_status_message(status, 0.0, &"info" if err == OK else &"error")
 	elif err != OK:
 		# No shell to show in (headless), but a failed save must not be silent.
 		push_warning("Mission save: " + status)
@@ -595,7 +595,7 @@ func _sync_shell_title() -> void:
 func _on_controller_status(message: String, is_error: bool) -> void:
 	if message.is_empty() or editor_shell == null or not editor_shell.has_method("show_status_message"):
 		return
-	editor_shell.show_status_message(message, 6.0 if is_error else 3.5)
+	editor_shell.show_status_message(message, 0.0, &"error" if is_error else &"success")
 
 
 # --- Undo / redo --------------------------------------------------------------
