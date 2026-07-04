@@ -133,4 +133,5 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   Pocock's engineering set (`ask-matt` routes through it): `grill-with-docs`,
   `domain-modeling`, `codebase-design`, `prototype`, `to-prd`, `to-issues`, `implement`,
   `tdd`, `two-axis-review` (his `code-review`, renamed to not shadow the built-in
-  `/code-review`), `diagnosing-bugs`, `research`, `triage`, `setup-matt-pocock-skills`.
+  `/code-review`), `diagnosing-bugs`, `improve-codebase-architecture`, `research`, `triage`,
+  `setup-matt-pocock-skills`.
