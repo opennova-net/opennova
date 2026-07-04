@@ -116,26 +116,16 @@ func _make_inspector() -> Control:
 	box.add_child(meta_label)
 
 	# "Used by" rides the shell's reference index; headless hosts get no strip.
-	if editor_shell != null and editor_shell.has_method("get_reference_index") \
-			and editor_shell.has_method("open_in_workspace"):
-		# Capture the shell into a local so the service lambdas don't hold this
-		# RefCounted workspace through a member access.
-		var shell: Object = editor_shell
+	var services := get_reference_services()
+	if not services.is_empty():
 		var strip := ReferenceStrip.new()
 		strip.name = "UsedByStrip"
 		# Kind filter: referrer buckets are name-keyed, and the bare stem the
 		# credits reference fonts by shares its namespace with every other
 		# extensionless name in the graph. Source paths are VFS-logical;
 		# disk-only workspaces (menus, credits — exactly the files that use
-		# fonts) need them resolved before the jump.
-		strip.configure("font", {
-			"referrers": func(name: String) -> Array:
-				return shell.get_reference_index().referrers_of(name),
-			"is_ready": func() -> bool:
-				return shell.get_reference_index().is_built(),
-			"jump": func(kind: String, path: String) -> void:
-				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-		}, PackedStringArray(["font"]))
+		# fonts) need them resolved before the jump (the services' jump does).
+		strip.configure("font", services, PackedStringArray(["font"]))
 		box.add_child(strip)
 
 	return margin
@@ -183,10 +173,6 @@ func _populate_inspector() -> void:
 			drawn,
 			res.get_shadow_offset(),
 		]
-
-
-func has_unsaved_changes() -> bool:
-	return _document.is_dirty
 
 
 func can_new() -> bool:

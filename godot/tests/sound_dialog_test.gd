@@ -1,23 +1,23 @@
 extends GutTest
 
 ## Guarded end-to-end probe for mission DIALOG audio (the .dbf path) on real JO data
-## (archive/JO_ASSETS_t). Loads 00TRg, confirms its .DBF dialog ids resolve to sound
+## (Desktop/JOX). Loads 00TRg, confirms its .DBF dialog ids resolve to sound
 ## sets the loaded banks contain, and reports how many PlayDialog commands fire on
 ## host-ungated ticks (pins the host-trigger-gating follow-up). Skips without the data.
 
 const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
 
-const JO_DIR := "C:/Users/taylor/Desktop/archive/JO_ASSETS_t"
+const JO_DIR := "C:/Users/taylor/Desktop/JOX"
 
 
 func test_00trg_mission_dialog_resolves() -> void:
 	if not DirAccess.dir_exists_absolute(JO_DIR):
-		pass_test("JO_ASSETS_t not present; skipping dialog probe")
+		pass_test("JOX not present; skipping dialog probe")
 		return
 	var root := NovaResourceRoot.new()
 	root.set_root_dir(JO_DIR)
 	if not root.has_file("00TRg.bms"):
-		pass_test("00TRg.bms not resolvable from JO_ASSETS_t; skipping")
+		pass_test("00TRg.bms not resolvable from JOX; skipping")
 		return
 
 	var mission := NovaMissionData.new()

@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 # --- Placed-objects browser (persistent) --------------------------------------
 # A searchable list of every object already placed in the mission (items / buildings / people).
@@ -39,8 +38,8 @@ func _build_object_browser() -> void:
 	_objects_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_inspector._root.add_child(_objects_box)
 
-	ObjectUiHelpers.add_section_heading(_objects_box, "Placed objects")
-	_objects_status = ObjectUiHelpers.add_muted_label(_objects_box, "")
+	InspectorForms.add_section_heading(_objects_box, "Placed objects")
+	_objects_status = InspectorForms.add_muted_label(_objects_box, "")
 	_objects_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	# Show the translate/rotate gizmo on the selected object (drag the arrows to move, the rings to
@@ -68,10 +67,7 @@ func _build_object_browser() -> void:
 			_inspector._controller.set_pick_debug(pressed)
 	)
 
-	_objects_search = LineEdit.new()
-	_objects_search.placeholder_text = "Search placed objects"
-	_objects_search.clear_button_enabled = true
-	_objects_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_objects_search = SearchField.new("Search placed objects")
 	_objects_box.add_child(_objects_search)
 
 	_objects_list = ItemList.new()

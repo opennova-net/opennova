@@ -4,10 +4,9 @@ extends PanelContainer
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
-# type chips so a selected card reads as its type at a glance.
-const CHIP_TEXT_COLOR := Color(0.84, 0.55, 0.29, 1.0)
+# type chips so a selected card reads as its type at a glance. TEXT rides the
+# editor accent (single-sourced in editor_theme.tres, EditorPalette/accent).
 const CHIP_IMAGE_COLOR := Color(0.45, 0.72, 0.88, 1.0)
-const SELECT_ACCENT_TEXT := CHIP_TEXT_COLOR
 const SELECT_ACCENT_IMAGE := CHIP_IMAGE_COLOR
 const SELECT_ACCENT_SPACE := Color(0.45, 0.48, 0.52, 1.0)
 const SPACER_FILL := Color(0.0863, 0.0941, 0.1098, 0.45)
@@ -45,6 +44,10 @@ signal request_select(card)
 @onready var _image_y_spin: SpinBox = %ImageYSpin
 
 var _entry: CbinEntry
+# The owning document, for undo bracketing (B2): typing/color/spin bursts use
+# begin/flush, structural singles use push_undo_step. Optional — a card bound
+# without a document edits directly.
+var _document: CreditsEditorDocument
 var _suppress := false
 var _selected := false
 var _selected_stylebox: StyleBoxFlat
@@ -73,6 +76,30 @@ func set_reference_services(services: Dictionary) -> void:
 func get_entry() -> CbinEntry:
 	return _entry
 
+
+func set_document(value: CreditsEditorDocument) -> void:
+	_document = value
+
+
+# Typing/drag bursts: open once (idempotent while a session is open), fold on
+# the control's focus/popup exit.
+func _begin_burst() -> void:
+	if _document != null:
+		_document.begin_edit()
+
+
+func _commit_burst() -> void:
+	if _document != null:
+		_document.flush_edit()
+
+
+# One equal-gated undo step around a single structural field change.
+func _push_single(mutation: Callable) -> void:
+	if _document != null:
+		_document.push_undo_step(mutation)
+	else:
+		mutation.call()
+
 func _ready() -> void:
 	_wire_button_groups()
 	_configure_affordances()
@@ -81,6 +108,7 @@ func _ready() -> void:
 	self.mouse_filter = Control.MOUSE_FILTER_PASS
 	self.gui_input.connect(_on_panel_input)
 	_text_edit.text_changed.connect(_on_text_changed)
+	_text_edit.focus_exited.connect(_commit_burst)
 	_font_ref = ResourceRefWidget.new()
 	_font_ref.name = "FontRef"
 	_font_ref.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -88,6 +116,7 @@ func _ready() -> void:
 	_font_ref_host.add_child(_font_ref)
 	_configure_font_ref()
 	_color_picker_text.color_changed.connect(_on_text_color_changed)
+	_color_picker_text.popup_closed.connect(_commit_burst)
 	_align_left.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_LEFT))
 	_align_center.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_CENTER))
 	_align_right.pressed.connect(func(): _on_align(CbinEntry.CBIN_JUSTIFY_RIGHT))
@@ -98,6 +127,10 @@ func _ready() -> void:
 	_image_mode_fixed.pressed.connect(func(): _on_image_mode(false))
 	_image_x_spin.value_changed.connect(_on_image_x_changed)
 	_image_y_spin.value_changed.connect(_on_image_y_changed)
+	# Spin bursts fold on the embedded line edit's focus exit (mirrors
+	# environment_inspector.gd); arrow-only edits fold on the next flush.
+	_image_x_spin.get_line_edit().focus_exited.connect(_commit_burst)
+	_image_y_spin.get_line_edit().focus_exited.connect(_commit_burst)
 	_wire_child_selection(self)
 
 func _wire_button_groups() -> void:
@@ -136,7 +169,7 @@ func _refresh() -> void:
 
 	if is_text:
 		_type_chip.text = "TEXT"
-		_type_chip.add_theme_color_override("font_color", CHIP_TEXT_COLOR)
+		_type_chip.add_theme_color_override("font_color", _accent())
 		var entry_text: String = _entry.get_text()
 		if not _text_edit.has_focus() and _text_edit.text != entry_text:
 			_text_edit.text = entry_text
@@ -192,6 +225,7 @@ func _refresh_image_mode_buttons(advances_y: bool) -> void:
 func _on_text_changed(value: String) -> void:
 	if _suppress or not (_entry is CbinTextEntry):
 		return
+	_begin_burst()
 	(_entry as CbinTextEntry).set_text(value)
 
 func _on_font_ref_changed(value: String) -> void:
@@ -199,22 +233,24 @@ func _on_font_ref_changed(value: String) -> void:
 		return
 	var name := value.strip_edges()
 	var text_entry := _entry as CbinTextEntry
-	text_entry.set_font_name(name)
-	if not name.is_empty():
-		var font := _resolve_font(name)
+	var font: Resource = _resolve_font(name) if not name.is_empty() else null
+	_push_single(func() -> void:
+		text_entry.set_font_name(name)
 		if font != null:
-			text_entry.set_font(font)
+			text_entry.set_font(font))
 
 
 func _on_text_color_changed(color: Color) -> void:
 	if _suppress or not (_entry is CbinTextEntry):
 		return
+	_begin_burst()
 	(_entry as CbinTextEntry).set_color(color)
 
 func _on_align(justify: int) -> void:
 	if _suppress or not (_entry is CbinTextEntry):
 		return
-	(_entry as CbinTextEntry).set_justify(justify)
+	var text_entry := _entry as CbinTextEntry
+	_push_single(func() -> void: text_entry.set_justify(justify))
 	_refresh_align_buttons(justify)
 
 var _files: FileDialogHelper
@@ -244,9 +280,10 @@ func _apply_image_path(value: String) -> void:
 	var image_name := _normalized_image_name(value)
 	if _image_path_edit.text != image_name:
 		_image_path_edit.text = image_name
-	image_entry.set_texture_name(image_name)
 	var tex := _resolve_texture(image_name)
-	image_entry.set_texture(tex)
+	_push_single(func() -> void:
+		image_entry.set_texture_name(image_name)
+		image_entry.set_texture(tex))
 	_image_thumb.texture = tex
 	_update_image_missing_cue(image_name, tex)
 
@@ -288,26 +325,34 @@ func _coerce_resource_root(value: Variant) -> NovaResourceRoot:
 func _on_image_mode(advances_y: bool) -> void:
 	if _suppress or not (_entry is CbinImageEntry):
 		return
-	(_entry as CbinImageEntry).set_advances_y(advances_y)
+	var image_entry := _entry as CbinImageEntry
+	_push_single(func() -> void: image_entry.set_advances_y(advances_y))
 	_image_offsets.visible = not advances_y
 	_refresh_image_mode_buttons(advances_y)
 
 func _on_image_x_changed(value: float) -> void:
 	if _suppress or not (_entry is CbinImageEntry):
 		return
+	_begin_burst()
 	(_entry as CbinImageEntry).set_display_x(int(value))
 
 func _on_image_y_changed(value: float) -> void:
 	if _suppress or not (_entry is CbinImageEntry):
 		return
+	_begin_burst()
 	(_entry as CbinImageEntry).set_display_y(int(value))
+
+# The editor accent, read from the theme at use time (the card sits under the
+# shell's themed tree; standalone hosts fall back to the engine default).
+func _accent() -> Color:
+	return get_theme_color(&"accent", &"EditorPalette")
 
 func _selection_accent() -> Color:
 	if _entry is CbinImageEntry:
 		return SELECT_ACCENT_IMAGE
 	elif _entry is CbinNewlineEntry:
 		return SELECT_ACCENT_SPACE
-	return SELECT_ACCENT_TEXT
+	return _accent()
 
 func _ensure_selected_stylebox() -> StyleBoxFlat:
 	if _selected_stylebox == null:

@@ -2268,8 +2268,59 @@ func test_object_lists_use_compact_list_floor() -> void:
 
 func test_inspector_box_disables_horizontal_scroll() -> void:
 	var host = add_child_autofree(Control.new())
-	var box = ObjectUiHelpers.make_inspector_box(host)
+	var box = InspectorForms.make_inspector_box(host)
 	var scroll := box.get_parent() as ScrollContainer
 	assert_not_null(scroll, "make_inspector_box should wrap content in a ScrollContainer.")
 	if scroll != null:
 		assert_eq(scroll.horizontal_scroll_mode, ScrollContainer.SCROLL_MODE_DISABLED, "Inspector content should reflow vertically, never scroll horizontally.")
+
+
+# --- B3: native edit-state snapshots ------------------------------------------
+
+func test_edit_state_snapshot_byte_roundtrip() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
+	var baseline: PackedByteArray = data.snapshot_edit_state()
+	assert_gt(baseline.size(), 0, "A loaded document snapshots to a non-empty blob.")
+
+	var original_alpha := int(data.get_material_info(0).get("alpha_test", -1))
+	assert_eq(data.set_material_alpha_threshold(0, 0.73), OK)
+	assert_ne(int(data.get_material_info(0).get("alpha_test", -1)), original_alpha,
+		"The mutation should be observable before the restore.")
+	var added := data.add_part_anim(0, 0)
+	assert_gte(added, 0, "add_part_anim should append an animation.")
+	var mutated_count := data.get_part_anim_count(0)
+
+	assert_eq(data.apply_edit_state(baseline), OK, "Applying the baseline restores it.")
+	assert_eq(int(data.get_material_info(0).get("alpha_test", -1)), original_alpha,
+		"Material scalar restored.")
+	assert_eq(data.get_part_anim_count(0), mutated_count - 1,
+		"Part-anim realloc restored the original count.")
+	assert_eq(data.snapshot_edit_state(), baseline,
+		"Snapshot after apply is byte-identical (exact roundtrip).")
+	assert_eq(data.get_last_oed_update_mask(), OED_UPDATE_ALL,
+		"apply_edit_state notifies consumers with UPDATE_ALL.")
+
+
+func test_edit_state_rejects_mismatched_geometry() -> void:
+	var bird := NovaObjectData.new()
+	assert_eq(bird.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
+	var armry := NovaObjectData.new()
+	assert_eq(armry.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
+
+	var bird_snapshot: PackedByteArray = bird.snapshot_edit_state()
+	var armry_before: PackedByteArray = armry.snapshot_edit_state()
+	assert_eq(armry.apply_edit_state(bird_snapshot), ERR_INVALID_DATA,
+		"A blob from a different model must be rejected (count validation).")
+	assert_eq(armry.snapshot_edit_state(), armry_before,
+		"A rejected apply must leave the document untouched.")
+	assert_eq(armry.apply_edit_state(PackedByteArray()), ERR_INVALID_DATA,
+		"An empty blob is invalid data.")
+
+
+func test_edit_state_without_document_is_inert() -> void:
+	var data := NovaObjectData.new()
+	assert_eq(data.snapshot_edit_state().size(), 0,
+		"No document -> empty snapshot (the undo session stays inert).")
+	assert_eq(data.apply_edit_state(PackedByteArray()), ERR_UNCONFIGURED,
+		"No document -> apply is unconfigured.")

@@ -18,6 +18,11 @@ run/flush_stdout_on_print=true
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
+; Per-product main scenes: the export presets tag their features (modtools /
+; runtime_game), so each packaged exe boots its own product. The base value
+; above is what a plain dev F5 runs. The modtools override is load-bearing:
+; without it the editor package boots the game scene its own preset excludes.
+run/main_scene.modtools="res://modtools/editor/editor_main.tscn"
 run/main_scene.runtime_game="res://game/main_game.tscn"
 
 [autoload]

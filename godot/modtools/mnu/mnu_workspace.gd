@@ -517,8 +517,7 @@ func _on_string_jump(key: String) -> void:
 		return
 	var path: String = _editor.get_text_resource_path()
 	if path.is_empty():
-		if editor_shell != null and editor_shell.has_method("show_status_message"):
-			editor_shell.show_status_message("No string table is loaded for this menu.", 4.0)
+		_notify_status("No string table is loaded for this menu.", &"warn")
 		return
 	if editor_shell != null and editor_shell.has_method("open_strings_workspace"):
 		editor_shell.open_strings_workspace(path, key)
@@ -558,14 +557,14 @@ func _on_sound_preview(trigger: String, file: String) -> void:
 	var name := file if not file.is_empty() else MENU_SOUND_PROFILE
 	var profile = _profile_for(name)
 	if profile == null:
-		_status("Sound profile '%s' not found in the resource dir." % name)
+		_notify_status("Sound profile '%s' not found in the resource dir." % name)
 		return
 	var want := trigger.to_upper()
 	for si in range(profile.get_set_count()):
 		if String(profile.get_set(si).get("name", "")).to_upper() == want:
 			_ensure_preview().preview_set(profile, _resource_root_or_settings(), si)
 			return
-	_status("Trigger '%s' is not a set in %s." % [trigger, name])
+	_notify_status("Trigger '%s' is not a set in %s." % [trigger, name])
 
 
 # Load (and cache) a .lwf profile by name through the resource root. Caches misses
@@ -590,14 +589,8 @@ func _ensure_preview():
 	if _preview == null or not is_instance_valid(_preview):
 		_preview = SoundPreviewPlayerScript.new()
 		_preview.name = "MnuSoundPreview"
-		if editor_shell != null:
-			editor_shell.add_child(_preview)
+		_host_under_shell(_preview)
 	return _preview
-
-
-func _status(message: String) -> void:
-	if editor_shell != null and editor_shell.has_method("show_status_message"):
-		editor_shell.show_status_message(message, 4.0)
 
 
 # Sever the edit channel before an inspector is freed/replaced, so a deferred
@@ -721,15 +714,9 @@ func _list_font_names() -> PackedStringArray:
 	return out
 
 
-## Any open tab with unsaved work counts, not just the active one — plus the
-## shared stylesheet document if it has unsaved edits.
+## The shared stylesheet document rides alongside the base's tab fold.
 func has_unsaved_changes() -> bool:
-	if _mns_document != null and _mns_document.is_dirty:
-		return true
-	for row in _tabs.tabs():
-		if bool((row as Dictionary).get("dirty", false)):
-			return true
-	return false
+	return (_mns_document != null and _mns_document.is_dirty) or super.has_unsaved_changes()
 
 
 func can_new() -> bool:

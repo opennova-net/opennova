@@ -476,15 +476,24 @@ func _is_same_clean_terrain(trn_path: String) -> bool:
 		return false
 	return current.replace("\\", "/").to_lower() == trn_path.replace("\\", "/").to_lower()
 
+## The mounted resource root, via the bound terrain editor — the controller's one
+## VFS seam. The controller runs headless in tests (no shell), so this reads the
+## editor, not the workspace; the duck-type guard for bare doubles lives here.
+func _resource_root() -> NovaResourceRoot:
+	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
+		return terrain_editor.get_resource_root()
+	return null
+
+
 ## Open a .bms/.mis: parse it, resolve + load its referenced terrain and environment
 ## through the terrain editor, then place its objects under the shared world root.
 ## Returns OK, or an error code; get_last_status() carries a human-facing reason.
 func open_mission(bms_path: String) -> Error:
 	_last_status = ""
-	if terrain_editor == null or not terrain_editor.has_method("get_resource_root"):
+	if terrain_editor == null:
 		_last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root()
+	var resource_root: NovaResourceRoot = _resource_root()
 	if resource_root == null:
 		_last_status = "Set a resource directory before opening a mission."
 		return ERR_UNCONFIGURED
@@ -571,10 +580,10 @@ func open_mission(bms_path: String) -> Error:
 ## first edit. Returns OK, or an error; get_last_status() carries a human-facing reason.
 func new_mission() -> Error:
 	_last_status = ""
-	if terrain_editor == null or not terrain_editor.has_method("get_resource_root"):
+	if terrain_editor == null:
 		_last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root()
+	var resource_root: NovaResourceRoot = _resource_root()
 	if resource_root == null:
 		_last_status = "Set a resource directory before creating a mission."
 		return ERR_UNCONFIGURED
@@ -1289,8 +1298,7 @@ func handle_viewport_input(event: InputEvent) -> void:
 			_reject_edit_while_simulating()
 		elif event is InputEventKey:
 			var sim_key := event as InputEventKey
-			var is_mutator := (sim_key.ctrl_pressed and sim_key.keycode in [KEY_Z, KEY_Y]) \
-				or sim_key.keycode in [KEY_DELETE, KEY_BACKSPACE]
+			var is_mutator := sim_key.keycode in [KEY_DELETE, KEY_BACKSPACE]
 			if sim_key.pressed and not sim_key.echo and is_mutator and not _gui_focus_blocks_shortcut():
 				_reject_edit_while_simulating()
 				_consume_viewport_key()
@@ -1349,19 +1357,8 @@ func handle_viewport_input(event: InputEvent) -> void:
 		# Ignore key-up and auto-repeat echoes (holding the key must not chain actions).
 		if not key.pressed or key.echo:
 			return
-		# Undo / redo: Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y. Claimed before the other shortcuts
-		# and gated by the same focus guard as Delete, so a focused SpinBox / LineEdit keeps
-		# its own text undo. Marked handled so the key does not propagate further. (Mirrors
-		# fnt_editor / terrain_editor, which also key off ctrl_pressed, not Cmd, on macOS.)
-		if key.ctrl_pressed and not _gui_focus_blocks_shortcut():
-			if key.keycode == KEY_Z and not key.shift_pressed:
-				undo()
-				_consume_viewport_key()
-				return
-			if (key.keycode == KEY_Z and key.shift_pressed) or key.keycode == KEY_Y:
-				redo()
-				_consume_viewport_key()
-				return
+		# Undo / redo keyboard shortcuts live in the shell's _shortcut_input
+		# (B6); the controller's undo() itself keeps the sim gate.
 		if key.keycode == KEY_ESCAPE:
 			# Escape drops whichever placement tool is armed (object or add-marker).
 			if is_placement_armed():
@@ -3090,7 +3087,7 @@ func has_item_database() -> bool:
 
 # Options for the inspector's "Waypoint path" picker -- which path a unit follows (the waypoint_id /
 # byte-79 field, [orig: Entity_SpawnFromBMSRecord @0x40f02f `if (record[79]) follow path record[79]`]).
-# Shaped { id, label } for ObjectUiHelpers.populate_id_option. id 0 = "None": byte 79 == 0 means the
+# Shaped { id, label } for InspectorForms.populate_id_option. id 0 = "None": byte 79 == 0 means the
 # unit follows no path, so path index 0 is unreachable as a follow target and is not offered. The
 # inspector adds the unit's current value if it is not in this set, so an odd value still round-trips.
 func get_waypoint_path_options() -> Array:
@@ -3854,8 +3851,7 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 func reload_environment() -> String:
 	if _mission == null:
 		return "no mission open"
-	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root() \
-			if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
+	var resource_root: NovaResourceRoot = _resource_root()
 	if resource_root == null:
 		return "no resource root mounted"
 	return _load_environment(_mission, resource_root)
@@ -3962,7 +3958,7 @@ func _ensure_sim_driver() -> bool:
 	# resource root so soldiers get their .adm/.bad root-motion clips (without them they stand
 	# still).
 	var terrain_data = terrain_editor.get_data() if terrain_editor != null and terrain_editor.has_method("get_data") else null
-	var sim_root = terrain_editor.get_resource_root() if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
+	var sim_root: NovaResourceRoot = _resource_root()
 	if int(_sim_driver.setup(_mission, container, {
 			"tick_mode": NovaSimulation.TICK_DIVIDED,
 			"self_tick": true,

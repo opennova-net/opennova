@@ -239,22 +239,11 @@ func set_asset_dock(dock: Control) -> void:
 		_asset_dock.set_editor(terrain_editor)
 	# "Used by" (which missions sit on this terrain) rides the shell's reference
 	# index; headless hosts get no strip. Injected here because the dock is the
-	# one terrain surface built with editor_shell in scope (the workflow
+	# one terrain surface built with the shell seam in scope (the workflow
 	# inspectors receive only the terrain editor).
-	if _asset_dock.has_method("set_reference_services") and editor_shell != null \
-			and editor_shell.has_method("get_reference_index") \
-			and editor_shell.has_method("open_in_workspace"):
-		# Capture the shell into a local so the service lambdas don't hold this
-		# RefCounted workspace through a member access.
-		var shell: Object = editor_shell
-		_asset_dock.set_reference_services({
-			"referrers": func(name: String) -> Array:
-				return shell.get_reference_index().referrers_of(name),
-			"is_ready": func() -> bool:
-				return shell.get_reference_index().is_built(),
-			"jump": func(kind: String, path: String) -> void:
-				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-		})
+	var services := get_reference_services()
+	if not services.is_empty() and _asset_dock.has_method("set_reference_services"):
+		_asset_dock.set_reference_services(services)
 
 
 func sync_asset_dock() -> void:

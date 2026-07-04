@@ -23,7 +23,8 @@ Field semantics:
   `NovaReferenceIndex` speak (`terrain`, `texture`, `font`, `object_model`,
   `strings`, `string_id`, ...). This is NOT the workspace-jump vocabulary;
   jump translation (`object_model` → `object`) happens at jump time via the
-  consumers' `_JUMP_KIND` maps, never inside a payload.
+  shared `ResourceKinds.jump_kind()` (`resource_kinds.gd`), never inside a
+  payload.
 - **name** — the identity a drop target commits: the file name (with
   extension) for file kinds, the bare name for header references, the key for
   `string_id`. Drop targets route it through their own `value_from_path`

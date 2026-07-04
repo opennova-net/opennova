@@ -187,7 +187,7 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
   `libs/world` defines the per-state clip-velocity interface; the real impl evaluates `.bad`
   root tracks via `libs/anim` and lives with the binding (NovaSimulation) + an env-gated
   real-assets ctest; unit tests inject synthetic velocities. State→clip resolution uses the
-  `off_8135F0` names through `.adm` (libs/adm) — the exact original data path.
+  `off_8135F0` names through `.adm` (libs/anim) — the exact original data path.
 - Tables (`off_8135F0` names, `g_animStateFlagsTable` flags) land as generated C++ tables (wac-style).
 
 ## 4. Open items (tracked, addressed)

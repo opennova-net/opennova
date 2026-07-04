@@ -1,6 +1,11 @@
 class_name TerrainEditorDocument
 extends RefCounted
 
+## Rejected inputs a user can act on (e.g. a wrong-format texture pick).
+## The console line stays at the source (push_error); the owning TerrainEditor
+## relays this to the shell toast. Headless holders can ignore it.
+signal error_reported(message: String)
+
 const HM_SIZE := 1024
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
@@ -705,7 +710,9 @@ func load_texture_slot(material: ShaderMaterial, slot_id: String, path: String) 
 	var slot: Dictionary = TerrainEditorSlots.get_slot(slot_id)
 	if String(slot.get("format", "")) == "pcx_paletted":
 		if path.get_extension().to_lower() != "pcx":
-			push_error("%s slot expects a .pcx file; got %s" % [slot_id, path])
+			var message := "%s slot expects a .pcx file; got %s" % [slot_id, path]
+			push_error(message)
+			error_reported.emit(message)
 			return false
 		var err: int = data.import_pcx_slot(slot_id, path)
 		if err != OK:

@@ -1295,17 +1295,6 @@ func can_redo() -> bool:
 	return _history.can_redo()
 
 
-# Back-compat aliases: callers/tests that predate the unified history. All route
-# to the one timeline so bank and script edits undo in the order they happened.
-func undo_bank() -> void: _history.undo()
-func redo_bank() -> void: _history.redo()
-func undo_script() -> void: _history.undo()
-func redo_script() -> void: _history.redo()
-func can_undo_bank() -> bool: return _history.can_undo()
-func can_redo_bank() -> bool: return _history.can_redo()
-func can_undo_script() -> bool: return _history.can_undo()
-func can_redo_script() -> bool: return _history.can_redo()
-
 
 # Lazy seed: pull the decompiler's text for the default script and cache it.
 # Used by compile_script (e.g. on transport Start / Save) when the buffer hasn't

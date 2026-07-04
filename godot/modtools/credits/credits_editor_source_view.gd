@@ -13,11 +13,18 @@ const STATUS_SUCCESS_COLOR := Color(0.55, 0.8, 0.55, 1.0)
 @onready var _apply_button: Button = $ApplyBar/ApplyButton
 
 var _resource: CbinCreditsResource
+# The owning document: a source Apply lands as ONE undo step (B2). Optional —
+# without a document the apply mutates directly.
+var _document: CreditsEditorDocument
 var _suppress := false
 var _refresh_pending := false
 var _refresh_force := false
 var _source_dirty := false
 var _last_applied_text := ""
+
+func set_document(value: CreditsEditorDocument) -> void:
+	_document = value
+
 
 func set_resource(value: CbinCreditsResource) -> void:
 	if _resource == value:
@@ -83,7 +90,15 @@ func apply_pending() -> Error:
 	if not _source_dirty and _code_edit.text == _last_applied_text:
 		return OK
 	var source_text := _code_edit.text
-	var ok := _resource.from_text(source_text)
+	# One undo step per Apply. The result rides an Array box: GDScript lambdas
+	# capture locals by value, so a plain bool would not write back.
+	var resource := _resource
+	var result := [false]
+	if _document != null:
+		_document.push_undo_step(func() -> void: result[0] = resource.from_text(source_text))
+	else:
+		result[0] = resource.from_text(source_text)
+	var ok: bool = result[0]
 	if ok:
 		_last_applied_text = source_text
 		_source_dirty = false

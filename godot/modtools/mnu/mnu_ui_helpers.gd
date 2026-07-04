@@ -2,7 +2,9 @@ class_name MnuUiHelpers
 extends RefCounted
 
 ## Stateless UI builders for the Menus workspace inspector, kept local so
-## modtools/mnu/ stays self-contained (mirrors object_ui_helpers.gd). Every
+## modtools/mnu/ stays mostly self-contained (row builders deliberately stay
+## per-domain per the recorded UiBox decision; headings/muted delegate to
+## InspectorForms). Every
 ## function returns the control(s) it adds and never reads instance state; the
 ## caller owns wiring the change signals. M7 made the inspector editable, so these
 ## return live controls (LineEdit / SpinBox / CheckBox / swatch) rather than
@@ -18,21 +20,14 @@ static func make_inspector_box(host: Control) -> VBoxContainer:
 
 
 static func add_heading(parent: Control, text: String) -> Label:
-	var label := Label.new()
-	label.theme_type_variation = &"Heading"
+	# Delegates to the shared forms library (B7); clip_text is the one local twist.
+	var label := InspectorForms.add_section_heading(parent, text)
 	label.clip_text = true
-	label.text = text
-	parent.add_child(label)
 	return label
 
 
 static func add_muted(parent: Control, text: String) -> Label:
-	var label := Label.new()
-	label.theme_type_variation = &"Muted"
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.text = text
-	parent.add_child(label)
-	return label
+	return InspectorForms.add_muted_label(parent, text)
 
 
 # A fixed-width muted key label so the editable controls line up in a column.

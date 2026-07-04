@@ -138,11 +138,9 @@ func _ensure_dialog() -> void:
 	right.add_theme_constant_override("separation", 8)
 	split.add_child(right)
 
-	_search = LineEdit.new()
+	_search = SearchField.new("Filter files")
 	_search.name = "PffToolSearch"
-	_search.placeholder_text = "Filter files"
-	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search.text_changed.connect(func(_t: String) -> void: _refresh_tree())
+	_search.search_changed.connect(func(_t: String) -> void: _refresh_tree())
 	right.add_child(_search)
 
 	_tree = Tree.new()

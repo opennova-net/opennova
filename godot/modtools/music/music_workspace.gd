@@ -278,8 +278,7 @@ func deactivate() -> void:
 			_save_state()
 			dialog.queue_free()
 		)
-		if editor_shell != null:
-			editor_shell.add_child(dialog)
+		_host_under_shell(dialog)
 		dialog.popup_centered()
 		return
 	_save_state()
@@ -322,6 +321,9 @@ func mount_viewport(host: Control) -> void:
 		return
 	if _root == null:
 		_root = RootScene.instantiate()
+		# Bank import failures relayed by the root become shell toasts (the
+		# console line stays at the source — B10's deferred reroutes).
+		_root.error_reported.connect(_on_root_error)
 	if _root.get_parent() != host:
 		if _root.get_parent() != null:
 			_root.get_parent().remove_child(_root)
@@ -331,6 +333,10 @@ func mount_viewport(host: Control) -> void:
 		if not _root.workflow_requested.is_connected(activate_workflow):
 			_root.workflow_requested.connect(activate_workflow)
 	_root.set_active_workflow(_active_workflow)
+
+
+func _on_root_error(message: String) -> void:
+	_notify_status(message, &"error")
 
 
 func unmount_viewport(_host: Control) -> void:

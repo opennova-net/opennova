@@ -18,6 +18,22 @@ var _active_workspace: Callable
 
 var _message_text: String = ""
 var _message_until: float = 0.0
+var _message_severity: StringName = &"info"
+
+# B10: per-severity defaults (duration <= 0 picks these) and the theme
+# variation each severity renders with. Unknown severities read as info.
+const _SEVERITY_DURATIONS := {
+	&"info": 4.0,
+	&"success": 3.5,
+	&"warn": 6.0,
+	&"error": 8.0,
+}
+const _SEVERITY_VARIATIONS := {
+	&"info": &"Info",
+	&"success": &"Success",
+	&"warn": &"Warn",
+	&"error": &"Error",
+}
 # Last applied context-header doc title + OS window title; each is recomputed
 # only when its text actually changes.
 var _context_ws_label_cache := ""
@@ -43,12 +59,16 @@ func setup(
 	_active_workspace = active_workspace
 
 
-func show_status_message(text: String, duration: float = 4.0) -> void:
+func show_status_message(text: String, duration: float = 0.0, severity: StringName = &"info") -> void:
 	# Mirror into the MCP log hub so connected agents see what the human sees
 	# (static no-op while no agent server is running).
 	McpLogHub.note_status(text)
 	_message_text = text
-	_message_until = Time.get_ticks_msec() / 1000.0 + duration
+	_message_severity = severity if _SEVERITY_VARIATIONS.has(severity) else &"info"
+	var effective := duration
+	if effective <= 0.0:
+		effective = float(_SEVERITY_DURATIONS.get(_message_severity, 4.0))
+	_message_until = Time.get_ticks_msec() / 1000.0 + effective
 
 
 func refresh() -> void:
@@ -63,7 +83,7 @@ func refresh() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if _message_text != "" and now < _message_until:
 		_tool_label.text = _message_text
-		_tool_label.theme_type_variation = &"Warn"
+		_tool_label.theme_type_variation = _SEVERITY_VARIATIONS.get(_message_severity, &"Info")
 	else:
 		_tool_label.text = workspace.get_status_tool()
 		_tool_label.theme_type_variation = &""

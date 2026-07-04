@@ -109,6 +109,15 @@ public:
 	void reset_empty(const String &p_name = "untitled");
 	Error set_lod_scene(int p_lod_index, const String &p_path);
 
+	// Whole-document edit-state snapshot for the editor's undo (B3): the
+	// OED-editable state (object name, materials, lights, per-LOD part
+	// animations, project LOD scalars, dirty mask) as one opaque in-process
+	// byte blob. NOT a persistence format: raw POD bytes + a version tag,
+	// valid only against the same geometry (apply validates the fixed
+	// material/light/LOD counts and rejects cross-geometry restores).
+	PackedByteArray snapshot_edit_state() const;
+	Error apply_edit_state(const PackedByteArray &p_bytes);
+
 	bool has_document() const;
 	bool can_save_project() const;
 	bool can_export_3di() const;

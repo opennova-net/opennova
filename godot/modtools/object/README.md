@@ -75,7 +75,7 @@ in the DCC plugins; see the top-level [README](../../../README.md).
 ## How it is built
 
 A multi-workflow workspace. The adapter
-[`object_workspace.gd`](object_workspace.gd) declares the five workflows and
+[`object_workspace.gd`](object_workspace.gd) declares the six workflows and
 manages the preview viewport.
 
 | File | Role |
@@ -83,8 +83,8 @@ manages the preview viewport.
 | [`object_workspace.gd`](object_workspace.gd) | workspace adapter: workflow rows, open / save / export, export-chunk mask |
 | `object_editor.gd` | document state: open / save the `.3dp` project and export the `.3di` |
 | `object_preview.gd` | 3D preview viewport: camera, animation playback, grid and axis guides |
-| `ui/inspectors/` | one inspector per workflow (`preview`, `materials`, `part_anims`, `lights`, `lods`) |
-| `ui/object_ui_helpers.gd`, `ui/generator_style_catalog.gd` | shared inspector widgets and the generator-style picker |
+| `ui/inspectors/` | one inspector per workflow (`preview`, `anims`, `materials`, `part_anims`, `lights`, `lods`) |
+| `ui/object_forms.gd`, `ui/generator_style_catalog.gd` | object-only form builders (ctrl-reg rows) and the generator-style picker; the shared forms library is `framework/inspector_forms.gd` |
 
 ## Related
 

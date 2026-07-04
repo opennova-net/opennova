@@ -1,4 +1,4 @@
-extends WorkflowInspector
+extends ObjectInspector
 
 ## LODs workflow: bind ASE scenes to LODs and edit per-LOD threshold,
 ## attributes, and render function plus the project poly-collision LOD.

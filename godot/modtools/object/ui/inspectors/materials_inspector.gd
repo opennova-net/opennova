@@ -1,4 +1,4 @@
-extends ListDetailInspector
+extends ObjectListDetailInspector
 
 ## Materials workflow: a left list of materials plus a right detail dock for
 ## the selected material's shader tag, texture slots, alpha, and UV/RGB/alpha/

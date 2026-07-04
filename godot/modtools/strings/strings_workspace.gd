@@ -140,8 +140,7 @@ func _ensure_editor() -> void:
 func _create_document() -> StringsEditor:
 	var doc: StringsEditor = StringsEditorScript.new()
 	doc.name = "StringsEditor"
-	if editor_shell != null:
-		editor_shell.add_child(doc)
+	_host_under_shell(doc)
 	doc.new_table(false)
 	doc.structure_changed.connect(_on_doc_structure_changed.bind(doc))
 	doc.edited.connect(_on_doc_edited.bind(doc))
@@ -160,7 +159,7 @@ func _bind_active_document() -> void:
 		_view.set_filter(_search, _section_filter)
 	if _inspector != null:
 		_inspector.refresh()
-	_sync_shell_title()
+	_sync_shell()
 
 
 # --- Document tabs (EditorWorkspace tier) ---
@@ -203,14 +202,6 @@ func close_document(index: int) -> Error:
 		_bind_active_document()
 	_save_state()
 	return OK
-
-
-## Any open tab with unsaved work counts, not just the active one.
-func has_unsaved_changes() -> bool:
-	for row in _tabs.tabs():
-		if bool((row as Dictionary).get("dirty", false)):
-			return true
-	return false
 
 
 # --- Center: self-contained table + detail view ---
@@ -306,22 +297,15 @@ func _on_doc_structure_changed(doc: StringsEditor) -> void:
 			_view.rebuild()
 		if _inspector != null:
 			_inspector.refresh()
-		_sync_shell_title()
+		_sync_shell()
 	# Background tabs still refresh their strip row (label after save-as, dirty).
 	_tabs.notify_changed()
 
 
 func _on_doc_edited(doc: StringsEditor) -> void:
 	if doc == strings_editor:
-		_sync_shell_title()
+		_sync_shell()
 	_tabs.notify_changed()
-
-
-func _sync_shell_title() -> void:
-	# Cheap: refreshes the project title / action-button state. It does NOT rebuild
-	# the inspector (the shell caches it) or remount the viewport.
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
-		editor_shell.sync_from_editor_state()
 
 
 # --- Document actions ---

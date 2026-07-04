@@ -194,14 +194,60 @@ function Invoke-GodotExport {
     }
 }
 
+# Boot the exported exe headless for a few frames. This is the guard the
+# packaging pipeline was missing: the export step only validates export-time
+# logs, so a package whose main scene cannot load (e.g. a missing per-product
+# run/main_scene feature override in project.godot) still shipped, crashing on
+# first launch. Requires the GDExtension DLL beside the exe, exactly like the
+# shipped zip layout.
+function Test-GodotAppBoot {
+    param([string]$PackageName, [string]$ExePath)
+
+    Write-Host "=== Boot smoke: $PackageName ==="
+    $exeDir = Split-Path $ExePath -Parent
+    $dllBeside = Join-Path $exeDir (Split-Path $RELEASE_DLL -Leaf)
+    if (-not (Test-Path $dllBeside)) {
+        Copy-Item -LiteralPath $RELEASE_DLL -Destination $dllBeside -Force
+    }
+
+    $stdoutLog = [System.IO.Path]::GetTempFileName()
+    $stderrLog = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process `
+            -FilePath $ExePath `
+            -ArgumentList "--headless --quit-after 120 --verbose" `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
+
+        $combinedOutput = "$(Get-Content $stdoutLog -Raw)`n$(Get-Content $stderrLog -Raw)"
+
+        if ($proc.ExitCode -ne 0) {
+            Write-Host $combinedOutput.TrimEnd()
+            throw "Boot smoke for '$PackageName' exited with code $($proc.ExitCode)"
+        }
+        if ($combinedOutput -match "Failed loading scene|Cannot open file 'res://|SCRIPT ERROR|GDExtension dynamic library not found|Failed to load script") {
+            Write-Host $combinedOutput.TrimEnd()
+            throw "Boot smoke for '$PackageName' logged load errors"
+        }
+    }
+    finally {
+        Remove-Item $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if ($PackageEditor) {
     Write-Host "=== Exporting opennova-modtools.exe ==="
     Invoke-GodotExport -PresetName "OpenNova Mod Tools" -OutputPath $MODTOOLS_EXE
+    Test-GodotAppBoot -PackageName "opennova-modtools" -ExePath $MODTOOLS_EXE
 }
 
 if ($PackageRuntime) {
     Write-Host "=== Exporting opennova.exe ==="
     Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+    Test-GodotAppBoot -PackageName "opennova-runtime" -ExePath $RUNTIME_EXE
 }
 
 function New-GodotAppZip {

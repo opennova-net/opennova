@@ -47,6 +47,10 @@ extends RefCounted
 #     folds is_busy() into the can_* pair). Workspaces whose dirty flag lives
 #     on a different object than their edit history (fonts/mnu) keep their own
 #     has_unsaved_changes override.
+#   Shell services (call, don't override): _notify_status, _sync_shell,
+#     _host_under_shell, get_reference_services, _resource_root — the guarded
+#     seams to the hosting shell. Workspaces call these instead of duck-typing
+#     editor_shell; every one is a safe no-op without a shell (headless tests).
 #   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
 #   Placement: set WorkspaceDef.popup=true for popup workspaces (Environment);
 #              shows_tile_gizmo() to opt into the in-world tile gizmo.
@@ -317,14 +321,22 @@ func close_document(_index: int) -> Error:
 
 func has_unsaved_changes() -> bool:
 	var doc := get_editor_document()
-	if doc == null:
-		return false
-	# Both dirty shapes exist today: a method (mission controller, music document)
-	# and a plain bool property (the EditorDocument family). Property reads on a
-	# doc with neither return null -> false.
-	if doc.has_method("is_dirty"):
-		return doc.is_dirty()
-	return bool(doc.get("is_dirty"))
+	if doc != null:
+		# Both dirty shapes exist today: a method (mission controller, music
+		# document) and a plain bool property (the EditorDocument family).
+		# Property reads on a doc with neither return null — compare, don't
+		# bool()-construct (bool(null) is a nonexistent constructor).
+		if doc.has_method("is_dirty"):
+			if doc.is_dirty():
+				return true
+		elif doc.get("is_dirty") == true:
+			return true
+	# Any open tab with unsaved work counts, not just the active one (B6: the
+	# fold every multi-document workspace used to override for).
+	for row in get_document_tabs():
+		if bool((row as Dictionary).get("dirty", false)):
+			return true
+	return false
 
 
 func can_new() -> bool:
@@ -511,6 +523,60 @@ func redo() -> void:
 	var doc := get_editor_document()
 	if doc != null and doc.has_method("redo"):
 		doc.redo()
+
+
+# --- Shell services ---------------------------------------------------------
+# The guarded seams to the hosting shell. Workspaces call these instead of
+# duck-typing editor_shell (the has_method guards live here, in one place);
+# every one is a safe no-op without a shell (headless tests).
+
+## Show a toast in the shell status bar. Severities: &"info", &"success",
+## &"warn", &"error"; duration <= 0.0 picks the per-severity default. Returns
+## true when a shell displayed it, so a caller whose failure must not vanish
+## headless can fall back to push_warning.
+func _notify_status(message: String, severity: StringName = &"info", duration: float = 0.0) -> bool:
+	if editor_shell != null and editor_shell.has_method("show_status_message"):
+		editor_shell.show_status_message(message, duration, severity)
+		return true
+	return false
+
+
+## Refresh the shell chrome from this workspace's state (project title, `*`
+## dirty marker, action-button enablement). Cheap: it does NOT rebuild the
+## inspector (the shell caches it) or remount the viewport.
+func _sync_shell() -> void:
+	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
+		editor_shell.sync_from_editor_state()
+
+
+## Parent a Node under the shell: domain editors that need _process/audio,
+## transient dialogs, preview players. RefCounted workspaces have no tree of
+## their own; without a shell the node stays parentless and the caller's
+## setup continues (headless).
+func _host_under_shell(node: Node) -> void:
+	if editor_shell != null:
+		editor_shell.add_child(node)
+
+
+## Reference-strip services riding the shell's reference index — the
+## {referrers, is_ready, jump} Callables ReferenceStrip.configure takes; {}
+## when headless or the shell lacks the index (callers then skip the strip).
+## Inspectors ask their workspace for this instead of reaching for the shell.
+func get_reference_services() -> Dictionary:
+	if editor_shell == null or not editor_shell.has_method("get_reference_index") \
+			or not editor_shell.has_method("open_in_workspace"):
+		return {}
+	# Capture the shell into a local so the service lambdas don't hold this
+	# RefCounted workspace through a member access.
+	var shell: Object = editor_shell
+	return {
+		"referrers": func(name: String) -> Array:
+			return shell.get_reference_index().referrers_of(name),
+		"is_ready": func() -> bool:
+			return shell.get_reference_index().is_built(),
+		"jump": func(kind: String, path: String) -> void:
+			shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
+	}
 
 
 # --- Resource root (the shared VFS the shell mounts) -----------------------

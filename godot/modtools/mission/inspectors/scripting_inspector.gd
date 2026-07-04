@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 # --- Scripting (events / triggers / actions) panel (Phase 4) ------------------
 # Shown in Scripting mode (4th tab). Top: the event list + Add / Delete event. Middle: the selected
@@ -108,8 +107,8 @@ func _build_scripting_panel() -> void:
 	_sc_box.visible = false
 	_inspector._root.add_child(_sc_box)
 
-	ObjectUiHelpers.add_section_heading(_sc_box, "Mission scripting (events)")
-	_sc_status = ObjectUiHelpers.add_muted_label(_sc_box, "")
+	InspectorForms.add_section_heading(_sc_box, "Mission scripting (events)")
+	_sc_status = InspectorForms.add_muted_label(_sc_box, "")
 	_sc_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	_sc_add_event_button = _make_sc_button(_sc_box, "MissionScAddEvent", "Add event", _on_sc_add_event)
@@ -132,22 +131,22 @@ func _build_scripting_panel() -> void:
 	_inspector._sc_detail_box.visible = false
 	_inspector._sel_content.add_child(_inspector._sc_detail_box)
 
-	ObjectUiHelpers.add_section_heading(_inspector._sc_detail_box, "Event")
+	InspectorForms.add_section_heading(_inspector._sc_detail_box, "Event")
 	# The flag checkboxes are generated from the engine's bit list on the first refresh (a mission must be
 	# loaded for the controller to answer), so a new EventFlags bit appears without touching the UI code.
 	_sc_flags_row = HBoxContainer.new()
 	_sc_flags_row.name = "MissionScEventFlags"
 	_sc_flags_row.add_theme_constant_override("separation", 10)
 	_inspector._sc_detail_box.add_child(_sc_flags_row)
-	_sc_reset_spin = ObjectUiHelpers.add_spin_row(_inspector._sc_detail_box, "MissionScReset", "Reset after", 0.0, SCRIPT_COUNTER_MAX, 1.0)
-	_sc_delay_spin = ObjectUiHelpers.add_spin_row(_inspector._sc_detail_box, "MissionScDelay", "Delay", 0.0, SCRIPT_COUNTER_MAX, 1.0)
+	_sc_reset_spin = InspectorForms.add_spin_row(_inspector._sc_detail_box, "MissionScReset", "Reset after", 0.0, SCRIPT_COUNTER_MAX, 1.0)
+	_sc_delay_spin = InspectorForms.add_spin_row(_inspector._sc_detail_box, "MissionScDelay", "Delay", 0.0, SCRIPT_COUNTER_MAX, 1.0)
 	_sc_reset_spin.tooltip_text = "Ticks before a Reset-after event may fire again (the engine keeps the top 10 bits)."
 	_sc_delay_spin.tooltip_text = "Ticks the event waits, after its triggers pass, before running its actions."
 	_sc_reset_spin.value_changed.connect(_on_sc_attr_changed)
 	_sc_delay_spin.value_changed.connect(_on_sc_attr_changed)
 
 	_inspector._sc_detail_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_inspector._sc_detail_box, "Triggers (conditions)")
+	InspectorForms.add_section_heading(_inspector._sc_detail_box, "Triggers (conditions)")
 	_sc_trigger_list = ItemList.new()
 	_sc_trigger_list.name = "MissionScTriggers"
 	_sc_trigger_list.select_mode = ItemList.SELECT_SINGLE
@@ -164,14 +163,14 @@ func _build_scripting_panel() -> void:
 	_sc_trigger_down = _make_sc_button(trig_buttons, "MissionScTrigDown", "Down", _on_sc_trigger_down)
 	_sc_trigger_main = _add_sc_option(_inspector._sc_detail_box, "MissionScTrigMain", "Type", _on_sc_trigger_main_selected)
 	_sc_trigger_sub = _add_sc_option(_inspector._sc_detail_box, "MissionScTrigSub", "Sub-type", _on_sc_trigger_sub_selected)
-	_sc_trigger_desc = ObjectUiHelpers.add_muted_label(_inspector._sc_detail_box, "")
+	_sc_trigger_desc = InspectorForms.add_muted_label(_inspector._sc_detail_box, "")
 	_sc_trigger_desc.name = "MissionScTrigDesc"
 	var trig_flags := HBoxContainer.new()
 	trig_flags.add_theme_constant_override("separation", 10)
 	_inspector._sc_detail_box.add_child(trig_flags)
-	_sc_trigger_negate = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigNeg", "Negate")
-	_sc_trigger_or = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigOr", "OR")
-	_sc_trigger_xor = ObjectUiHelpers.add_checkbox(trig_flags, "MissionScTrigXor", "XOR")
+	_sc_trigger_negate = InspectorForms.add_checkbox(trig_flags, "MissionScTrigNeg", "Negate")
+	_sc_trigger_or = InspectorForms.add_checkbox(trig_flags, "MissionScTrigOr", "OR")
+	_sc_trigger_xor = InspectorForms.add_checkbox(trig_flags, "MissionScTrigXor", "XOR")
 	_sc_trigger_negate.tooltip_text = "Invert this condition (condition_flags bit 0)."
 	# The engine takes the combine operator from THIS trigger's flags to join the NEXT condition in the
 	# chain (left to right). The last trigger's OR/XOR bits are unused. [orig: sub_454050 @0x454050]
@@ -183,7 +182,7 @@ func _build_scripting_panel() -> void:
 	_sc_trigger_params = _build_sc_param_slots("MissionScTrigP", _on_sc_trigger_param_changed)
 
 	_inspector._sc_detail_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_inspector._sc_detail_box, "Actions (effects)")
+	InspectorForms.add_section_heading(_inspector._sc_detail_box, "Actions (effects)")
 	_sc_action_list = ItemList.new()
 	_sc_action_list.name = "MissionScActions"
 	_sc_action_list.select_mode = ItemList.SELECT_SINGLE
@@ -200,7 +199,7 @@ func _build_scripting_panel() -> void:
 	_sc_action_down = _make_sc_button(act_buttons, "MissionScActDown", "Down", _on_sc_action_down)
 	_sc_action_type = _add_sc_option(_inspector._sc_detail_box, "MissionScActType", "Type", _on_sc_action_type_selected)
 	_sc_action_sub = _add_sc_option(_inspector._sc_detail_box, "MissionScActSub", "Sub-type", _on_sc_action_sub_selected)
-	_sc_action_desc = ObjectUiHelpers.add_muted_label(_inspector._sc_detail_box, "")
+	_sc_action_desc = InspectorForms.add_muted_label(_inspector._sc_detail_box, "")
 	_sc_action_desc.name = "MissionScActDesc"
 	_sc_action_params = _build_sc_param_slots("MissionScActP", _on_sc_action_param_changed)
 
@@ -217,12 +216,12 @@ func _build_scripting_panel() -> void:
 	_sc_action_preview_stop.tooltip_text = "Stop the preview and return the model to rest."
 
 	_inspector._sc_detail_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_inspector._sc_detail_box, "Summary")
-	_sc_event_summary = ObjectUiHelpers.add_muted_label(_inspector._sc_detail_box, "")
+	InspectorForms.add_section_heading(_inspector._sc_detail_box, "Summary")
+	_sc_event_summary = InspectorForms.add_muted_label(_inspector._sc_detail_box, "")
 	_sc_event_summary.name = "MissionScSummary"
 	_sc_event_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ObjectUiHelpers.add_section_heading(_inspector._sc_detail_box, "Diagnostics")
-	_sc_diagnostics = ObjectUiHelpers.add_muted_label(_inspector._sc_detail_box, "")
+	InspectorForms.add_section_heading(_inspector._sc_detail_box, "Diagnostics")
+	_sc_diagnostics = InspectorForms.add_muted_label(_inspector._sc_detail_box, "")
 	_sc_diagnostics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
@@ -274,7 +273,7 @@ func _refresh_scripting_panel() -> void:
 		for entry in _inspector._controller.get_event_flag_bits():
 			var entry_dict := entry as Dictionary
 			var bit := int(entry_dict.get("value", 0))
-			var check := ObjectUiHelpers.add_checkbox(_sc_flags_row, "MissionScFlag%d" % bit, String(entry_dict.get("name", "")))
+			var check := InspectorForms.add_checkbox(_sc_flags_row, "MissionScFlag%d" % bit, String(entry_dict.get("name", "")))
 			check.toggled.connect(_on_sc_flag_toggled)
 			_sc_flag_checks.append({ "bit": bit, "check": check })
 

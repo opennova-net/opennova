@@ -63,10 +63,59 @@ func get_workspace_tooltip() -> String:
 
 func activate() -> void:
 	_ensure_object_editor()
+	_connect_focus_bracket()
 
 
 func deactivate() -> void:
-	pass
+	_disconnect_focus_bracket()
+
+
+# --- Undo session coalescing (B5) ----------------------------------------------
+# While the workspace is active, viewport focus drives the document's
+# begin/commit bracket: focus entering an editable control opens an editing
+# burst, leaving it folds the burst into ONE equal-gated undo step — so typing
+# or dragging in any inspector field coalesces without per-widget wiring. The
+# shadow-step funnel (B4) skips recording while a burst is open. A color-drag
+# whose popup closes without a focus change folds on the next flush (undo and
+# push_undo_step both flush first), preserving one-step-per-gesture.
+
+var _focus_viewport: Viewport = null
+
+
+func _connect_focus_bracket() -> void:
+	var viewport: Viewport = null
+	if object_editor != null and object_editor.is_inside_tree():
+		viewport = object_editor.get_viewport()
+	if viewport == null or viewport == _focus_viewport:
+		return
+	_disconnect_focus_bracket()
+	_focus_viewport = viewport
+	viewport.gui_focus_changed.connect(_on_bracket_focus_changed)
+
+
+func _disconnect_focus_bracket() -> void:
+	if _focus_viewport != null and is_instance_valid(_focus_viewport) \
+			and _focus_viewport.gui_focus_changed.is_connected(_on_bracket_focus_changed):
+		_focus_viewport.gui_focus_changed.disconnect(_on_bracket_focus_changed)
+	_focus_viewport = null
+	if object_editor != null:
+		object_editor.flush_edit()
+
+
+func _is_bracket_control(control: Control) -> bool:
+	return control is LineEdit or control is TextEdit \
+			or control is SpinBox or control is ColorPickerButton
+
+
+func _on_bracket_focus_changed(control: Control) -> void:
+	if object_editor == null:
+		return
+	# Only the NEW focus owner arrives, so fold unconditionally first (commit
+	# is equal-gated and inert without an open burst), then open a burst when
+	# an editable control took the focus.
+	object_editor.flush_edit()
+	if control != null and _is_bracket_control(control):
+		object_editor.begin_edit()
 
 
 func _ensure_mount() -> ViewportMount:
@@ -218,7 +267,7 @@ func get_new_action_label() -> String:
 func new_current() -> Error:
 	_ensure_object_editor()
 	object_editor.create_empty_object(true)
-	_sync_shell()
+	_after_document_changed()
 	return OK
 
 
@@ -262,7 +311,7 @@ func open_file(path: String) -> Error:
 		err = object_editor.open_object_from_resource_root(vfs, path)
 	else:
 		err = object_editor.open_object(path)
-	_sync_shell()
+	_after_document_changed()
 	return err
 
 
@@ -272,10 +321,18 @@ func get_resource_root() -> NovaResourceRoot:
 	return _resource_root()
 
 
+## Open the shell's scoped file picker over an explicit file list (the object
+## inspectors' .adm / arms-.3di pickers ask the workspace, not the shell).
+## No-op without a shell (headless / tests).
+func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+	if editor_shell != null and editor_shell.has_method("open_file_picker"):
+		editor_shell.open_file_picker(title, files, on_pick)
+
+
 func add_lod_scene(path: String, lod_index: int = -1) -> Error:
 	_ensure_object_editor()
 	var err := object_editor.add_lod_scene(path, lod_index)
-	_sync_shell()
+	_after_document_changed()
 	return err
 
 
@@ -374,14 +431,15 @@ func _ensure_object_editor() -> void:
 		return
 	object_editor = ObjectEditorScript.new()
 	object_editor.name = "ObjectEditor"
-	if editor_shell != null:
-		editor_shell.add_child(object_editor)
+	_host_under_shell(object_editor)
 	object_editor.create_empty_object(false)
-	object_editor.state_changed.connect(_sync_shell)
+	object_editor.state_changed.connect(_after_document_changed)
 	_sync_export_update_mask_from_dirty()
 
 
-func _sync_shell() -> void:
+# Post-change fan-out: refresh the preview binding, the active inspector, and the
+# shell chrome after any object-document mutation (state_changed lands here too).
+func _after_document_changed() -> void:
 	_sync_export_update_mask_from_dirty()
 	if _preview != null and object_editor != null:
 		if _preview.object_data != object_editor.object_data:
@@ -392,8 +450,7 @@ func _sync_shell() -> void:
 		active_inspector.refresh()
 	else:
 		_ensure_detail_dock().rebuild()
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
-		editor_shell.sync_from_editor_state()
+	_sync_shell()
 
 
 func _on_environment_editor_changed(_env_file: EnvFile, _time_of_day: float) -> void:

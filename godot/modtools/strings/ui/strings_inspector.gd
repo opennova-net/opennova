@@ -30,21 +30,18 @@ func setup(workspace: StringsEditorWorkspace) -> void:
 
 
 func _ready() -> void:
-	var box := ObjectUiHelpers.make_inspector_box(self)
+	var box := InspectorForms.make_inspector_box(self)
 	# make_inspector_box adds a MarginContainer to this bare Control, which does not
 	# lay out its children — stretch that wrapper to fill the inspector host.
 	(box.get_parent().get_parent() as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	ObjectUiHelpers.add_section_heading(box, "Find")
-	_search_edit = LineEdit.new()
+	InspectorForms.add_section_heading(box, "Find")
+	_search_edit = SearchField.new("Search keys and text...")
 	_search_edit.name = "StringsSearchEdit"
-	_search_edit.placeholder_text = "Search keys and text..."
-	_search_edit.clear_button_enabled = true
-	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search_edit.text_changed.connect(func(text): if _ws != null: _ws.set_search(text))
+	_search_edit.search_changed.connect(func(text): if _ws != null: _ws.set_search(text))
 	box.add_child(_search_edit)
 
-	var filter_row := ObjectUiHelpers.add_detail_field(box, "Section filter")
+	var filter_row := InspectorForms.add_detail_field(box, "Section filter")
 	_section_filter = OptionButton.new()
 	_section_filter.name = "StringsSectionFilter"
 	_section_filter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -57,7 +54,7 @@ func _ready() -> void:
 	_add_button(entry_buttons, "StringsAddEntryButton", "Add String", func(): if _ws != null: _ws.add_entry_default())
 	_add_button(entry_buttons, "StringsRemoveEntryButton", "Remove String", func(): if _ws != null: _ws.remove_selected_entry())
 
-	ObjectUiHelpers.add_section_heading(box, "Sections")
+	InspectorForms.add_section_heading(box, "Sections")
 	_section_name_edit = LineEdit.new()
 	_section_name_edit.name = "StringsSectionNameEdit"
 	_section_name_edit.placeholder_text = "Section name"
@@ -71,14 +68,14 @@ func _ready() -> void:
 	_rename_section_button = _add_button(section_buttons, "StringsRenameSectionButton", "Rename", _on_rename_section)
 	_remove_section_button = _add_button(section_buttons, "StringsRemoveSectionButton", "Remove", _on_remove_section)
 
-	ObjectUiHelpers.add_section_heading(box, "Validation")
-	_validation_label = ObjectUiHelpers.add_muted_label(box, "No issues")
+	InspectorForms.add_section_heading(box, "Validation")
+	_validation_label = InspectorForms.add_muted_label(box, "No issues")
 	_validation_label.name = "StringsValidationLabel"
 	_normalize_button = _add_button(box, "StringsNormalizeButton", "Group entries by section", _on_normalize)
 	_normalize_button.tooltip_text = "Reorder entries so each section's strings sit together, the layout the game requires."
 	_normalize_button.visible = false
 
-	ObjectUiHelpers.add_section_heading(box, "Lookup tester")
+	InspectorForms.add_section_heading(box, "Lookup tester")
 	_lookup_edit = LineEdit.new()
 	_lookup_edit.name = "StringsLookupEdit"
 	_lookup_edit.placeholder_text = "section:key  (or just key)"
@@ -95,31 +92,24 @@ func _ready() -> void:
 	_lookup_result.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(_lookup_result)
 
-	ObjectUiHelpers.add_section_heading(box, "CSV")
+	InspectorForms.add_section_heading(box, "CSV")
 	var csv_buttons := HBoxContainer.new()
 	csv_buttons.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(csv_buttons)
 	_add_button(csv_buttons, "StringsImportCsvButton", "Import...", _on_import_csv)
 	_add_button(csv_buttons, "StringsExportCsvButton", "Export...", _on_export_csv)
 
-	# "Used by" rides the shell's reference index; headless hosts get no strip.
-	var shell: Object = _ws.editor_shell if _ws != null else null
-	if shell != null and shell.has_method("get_reference_index") \
-			and shell.has_method("open_in_workspace"):
+	# "Used by" rides the shell's reference index, asked of the workspace (the
+	# inspector never touches the shell); headless hosts get no strip.
+	var services: Dictionary = _ws.get_reference_services() if _ws != null else {}
+	if not services.is_empty():
 		_used_by_strip = ReferenceStrip.new()
 		_used_by_strip.name = "StringsUsedByStrip"
 		# Kind filter: referrer buckets are name-keyed, so the bare-stem query
 		# would otherwise pick up same-named targets of other kinds. Source
 		# paths are VFS-logical; the menus that use tables open from disk only,
-		# so resolve before jumping.
-		_used_by_strip.configure("text table", {
-			"referrers": func(name: String) -> Array:
-				return shell.get_reference_index().referrers_of(name),
-			"is_ready": func() -> bool:
-				return shell.get_reference_index().is_built(),
-			"jump": func(kind: String, path: String) -> void:
-				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-		}, PackedStringArray(["strings"]))
+		# so resolve before jumping (the services' jump Callable does).
+		_used_by_strip.configure("text table", services, PackedStringArray(["strings"]))
 		box.add_child(_used_by_strip)
 
 	refresh()

@@ -19,7 +19,6 @@ extends Control
 const COL_BG := Color(0.07, 0.08, 0.09)
 const COL_LETTERBOX := Color(0.12, 0.13, 0.15)
 const COL_BORDER := Color(1, 1, 1, 0.08)
-const COL_SELECT := Color(0.84, 0.55, 0.29, 0.95)
 const COL_OFFBOARD := Color(0.90, 0.30, 0.25, 0.95) # selection/ghost outline when off the board
 const COL_GHOST := Color(0.45, 0.78, 1.0, 0.95)
 const COL_HANDLE := Color(0.95, 0.95, 0.97, 1.0)
@@ -1196,13 +1195,15 @@ func _draw() -> void:
 			draw_rect(Rect2(_board_to_canvas(hr.position), hr.size * _eff_scale()), COL_HOVER, false, 1.0)
 
 	# Selection outline(s): every member is outlined; the active widget additionally
-	# gets resize handles (single-select only) and the caption.
+	# gets resize handles (single-select only) and the caption. Selection rides the
+	# editor accent (single-sourced in the theme's EditorPalette).
+	var col_select := Color(get_theme_color(&"accent", &"EditorPalette"), 0.95)
 	for id in _selection:
 		var r := _abs_rect_of(id)
 		if r.size.x <= 0.0 or r.size.y <= 0.0:
 			continue
 		draw_rect(Rect2(_board_to_canvas(r.position), r.size * _eff_scale()),
-			COL_OFFBOARD if _rect_off_board(r) else COL_SELECT, false, 2.0)
+			COL_OFFBOARD if _rect_off_board(r) else col_select, false, 2.0)
 	var sel := _abs_rect_of(_selected_id)
 	if sel.size.x > 0.0 and sel.size.y > 0.0:
 		if _selection.size() <= 1:

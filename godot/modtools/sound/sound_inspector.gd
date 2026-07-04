@@ -12,7 +12,6 @@ const SEL_SET := 1
 const SEL_LAYER := 2
 const SEL_MEMBER := 3
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 const MODE_OPTIONS := [
 	{"id": 0, "label": "First"},
@@ -57,10 +56,10 @@ func _build() -> void:
 	for c in get_children():
 		c.queue_free()
 
-	var box := ObjectUiHelpers.make_inspector_box(self)
+	var box := InspectorForms.make_inspector_box(self)
 	(box.get_parent().get_parent() as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	_empty = ObjectUiHelpers.add_empty_state(box, "Select a sound set, layer, or member.", "SoundInspectorEmpty")
+	_empty = InspectorForms.add_empty_state(box, "Select a sound set, layer, or member.", "SoundInspectorEmpty")
 
 	_build_set_panel(box)
 	_build_layer_panel(box)
@@ -74,10 +73,10 @@ func _build_set_panel(box: VBoxContainer) -> void:
 	_set_panel = VBoxContainer.new()
 	_set_panel.name = "SoundSetPanel"
 	box.add_child(_set_panel)
-	ObjectUiHelpers.add_section_heading(_set_panel, "Sound Set")
+	InspectorForms.add_section_heading(_set_panel, "Sound Set")
 	_set_binder = FieldBinder.new()
 
-	var name_field := ObjectUiHelpers.add_detail_field(_set_panel, "Name")
+	var name_field := InspectorForms.add_detail_field(_set_panel, "Name")
 	var name_edit := LineEdit.new()
 	name_edit.name = "SoundSetName"
 	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -86,7 +85,7 @@ func _build_set_panel(box: VBoxContainer) -> void:
 		func(info): return String(info.get("name", "")),
 		func(v): _apply_set("name", v))
 
-	var target := ObjectUiHelpers.add_spin_row(_set_panel, "SoundSetTargetId", "Target id", 0, 4294967295, 1)
+	var target := InspectorForms.add_spin_row(_set_panel, "SoundSetTargetId", "Target id", 0, 4294967295, 1)
 	_set_binder.bind_spin(target,
 		func(info): return float(info.get("target_id", 0)),
 		func(v): _apply_set("target_id", int(v)))
@@ -98,10 +97,10 @@ func _build_layer_panel(box: VBoxContainer) -> void:
 	_layer_panel = VBoxContainer.new()
 	_layer_panel.name = "SoundLayerPanel"
 	box.add_child(_layer_panel)
-	ObjectUiHelpers.add_section_heading(_layer_panel, "Layer")
+	InspectorForms.add_section_heading(_layer_panel, "Layer")
 	_layer_binder = FieldBinder.new()
 
-	var mode_field := ObjectUiHelpers.add_detail_field(_layer_panel, "Selection mode")
+	var mode_field := InspectorForms.add_detail_field(_layer_panel, "Selection mode")
 	var mode := OptionButton.new()
 	mode.name = "SoundLayerMode"
 	mode.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -111,19 +110,19 @@ func _build_layer_panel(box: VBoxContainer) -> void:
 		func(v): _apply_layer("selection_mode", int(v)),
 		func(): return MODE_OPTIONS)
 
-	var inner_dist := ObjectUiHelpers.add_spin_row(_layer_panel, "SoundLayerInnerDistance", "Full-volume radius", 0, 65535, 1)
+	var inner_dist := InspectorForms.add_spin_row(_layer_panel, "SoundLayerInnerDistance", "Full-volume radius", 0, 65535, 1)
 	_layer_binder.bind_spin(inner_dist,
 		func(info): return float(info.get("inner_distance", 0)),
 		func(v): _apply_layer("inner_distance", int(v)))
 
-	var max_dist := ObjectUiHelpers.add_spin_row(_layer_panel, "SoundLayerMaxDistance", "Max distance", 0, 65535, 1)
+	var max_dist := InspectorForms.add_spin_row(_layer_panel, "SoundLayerMaxDistance", "Max distance", 0, 65535, 1)
 	_layer_binder.bind_spin(max_dist,
 		func(info): return float(info.get("max_distance", 0)),
 		func(v): _apply_layer("max_distance", int(v)))
 
-	ObjectUiHelpers.add_section_heading(_layer_panel, "Flags")
+	InspectorForms.add_section_heading(_layer_panel, "Flags")
 	for flag: String in LAYER_FLAGS:
-		var cb := ObjectUiHelpers.add_checkbox(_layer_panel, "SoundLayerFlag_" + flag, flag.capitalize())
+		var cb := InspectorForms.add_checkbox(_layer_panel, "SoundLayerFlag_" + flag, flag.capitalize())
 		var key: String = flag
 		_layer_binder.bind_checkbox(cb,
 			func(info): return bool(info.get(key, false)),
@@ -136,10 +135,10 @@ func _build_member_panel(box: VBoxContainer) -> void:
 	_member_panel = VBoxContainer.new()
 	_member_panel.name = "SoundMemberPanel"
 	box.add_child(_member_panel)
-	ObjectUiHelpers.add_section_heading(_member_panel, "Member")
+	InspectorForms.add_section_heading(_member_panel, "Member")
 	_member_binder = FieldBinder.new()
 
-	var wav_field := ObjectUiHelpers.add_detail_field(_member_panel, "Wave file")
+	var wav_field := InspectorForms.add_detail_field(_member_panel, "Wave file")
 	var wav_row := HBoxContainer.new()
 	wav_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	wav_field.add_child(wav_row)
@@ -157,22 +156,22 @@ func _build_member_panel(box: VBoxContainer) -> void:
 	browse.pressed.connect(_on_browse_wav)
 	wav_row.add_child(browse)
 
-	var pitch := ObjectUiHelpers.add_spin_row(_member_panel, "SoundMemberPitch", "Base pitch", 0.0, 4.0, 0.01)
+	var pitch := InspectorForms.add_spin_row(_member_panel, "SoundMemberPitch", "Base pitch", 0.0, 4.0, 0.01)
 	_member_binder.bind_spin(pitch,
 		func(info): return float(info.get("base_pitch", 1.0)),
 		func(v): _apply_member("base_pitch", float(v)))
 
-	var rand_pitch := ObjectUiHelpers.add_spin_row(_member_panel, "SoundMemberRandPitch", "Random pitch", 0.0, 4.0, 0.01)
+	var rand_pitch := InspectorForms.add_spin_row(_member_panel, "SoundMemberRandPitch", "Random pitch", 0.0, 4.0, 0.01)
 	_member_binder.bind_spin(rand_pitch,
 		func(info): return float(info.get("rand_pitch", 0.0)),
 		func(v): _apply_member("rand_pitch", float(v)))
 
-	var volume := ObjectUiHelpers.add_spin_row(_member_panel, "SoundMemberVolume", "Volume", 0, 255, 1)
+	var volume := InspectorForms.add_spin_row(_member_panel, "SoundMemberVolume", "Volume", 0, 255, 1)
 	_member_binder.bind_spin(volume,
 		func(info): return float(info.get("volume", 255)),
 		func(v): _apply_member("volume", int(v)))
 
-	var clamp := ObjectUiHelpers.add_spin_row(_member_panel, "SoundMemberClampVolume", "Clamp volume", 0, 255, 1)
+	var clamp := InspectorForms.add_spin_row(_member_panel, "SoundMemberClampVolume", "Clamp volume", 0, 255, 1)
 	_member_binder.bind_spin(clamp,
 		func(info): return float(info.get("clamp_volume", 255)),
 		func(v): _apply_member("clamp_volume", int(v)))

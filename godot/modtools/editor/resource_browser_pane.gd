@@ -10,16 +10,6 @@ extends VBoxContainer
 
 const ResourceTableScript := preload("res://modtools/framework/resource_table.gd")
 
-## Index kinds whose owning workspace registers under a different resource
-## kind (same translation the link widgets apply).
-const _JUMP_KIND := {
-	"object_project": "object",
-	"object_model": "object",
-	"object_scene": "object",
-	"sbf": "music",
-	"music_script": "music",
-}
-
 # Label -> index filter. "object"/"music" are umbrella filters the resource
 # index expands natively.
 const _KIND_FILTERS := [
@@ -157,14 +147,14 @@ func _on_entry_activated(entry: Dictionary) -> void:
 	if path.is_empty():
 		return
 	var kind := String(entry.get("kind", ""))
-	_open_entry.call(_JUMP_KIND.get(kind, kind), path)
+	_open_entry.call(ResourceKinds.jump_kind(kind), path)
 
 
 # Rows drag as LinkPayloads. The name keeps its extension (extension-keeping
 # widgets commit the file name verbatim), so a row without a relative_path is
 # vetoed rather than falling back to the stem-stripped display_name; the kind
-# stays the index's own vocabulary - _JUMP_KIND is workspace-jump vocabulary,
-# drop targets match on reference kinds.
+# stays the index's own vocabulary - ResourceKinds.jump_kind is workspace-jump
+# vocabulary, drop targets match on reference kinds.
 func _drag_payload_for_entry(entry: Dictionary) -> Variant:
 	var file_name := String(entry.get("relative_path", "")).get_file()
 	if file_name.is_empty():

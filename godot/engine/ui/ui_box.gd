@@ -3,7 +3,7 @@ extends RefCounted
 # Lives in engine/ui (not modtools): host-neutral by contract, so runtime hosts
 # (the game's debug overlay, PIE) can use it without shipping the editor.
 # The margin + scroll + VBox column every inspector pane starts from. Extracted
-# from the ~95%-identical copies in ObjectUiHelpers and MnuUiHelpers (which now
+# from the ~95%-identical copies in InspectorForms and MnuUiHelpers (which now
 # delegate here); the only divergence was the box's node name, kept as a
 # parameter because canvas code addresses it by path. Row builders deliberately
 # stay per-domain: object's are read-only inspection rows, mnu's editable form

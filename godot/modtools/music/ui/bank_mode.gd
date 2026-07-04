@@ -6,6 +6,11 @@ extends Control
 # reorder / rename / replace / add / delete affordances. The Replace WAV
 # and Add Track flows arrive in Phase E3.
 
+## Import/replace failures surface twice on purpose: the console line stays at
+## the source (push_error) and this signal carries the same message upward for
+## the shell toast (root relays it to the workspace; standalone hosts just log).
+signal error_reported(message: String)
+
 const MusicAudioPreviewClass = preload("res://modtools/music/music_audio_preview.gd")
 const ADD_TRACK_TOOLTIP := "Import a 16-bit WAV into the loaded sound bank."
 const NO_BANK_TOOLTIP := "Open or create a music project first"
@@ -356,17 +361,23 @@ func _on_replace_wav_pressed() -> void:
 func _replace_wav(idx: int, path: String) -> void:
 	var samples := _load_wav_as_float32(path)
 	if samples.is_empty():
-		push_error("WAV load failed: %s" % path)
+		_report_error("WAV load failed: %s" % path)
 		return
 	var err: int = _document.replace_track_audio(idx, samples)
 	if err != OK:
-		push_error("replace_track_audio failed: %d" % err)
+		_report_error("replace_track_audio failed: %d" % err)
 
 
 func _on_add_pressed() -> void:
 	if _document == null:
 		return
 	_ensure_files().open("Choose a WAV", PackedStringArray(["*.wav ; WAV audio"]), _on_add_path_selected)
+
+
+# Console line + toast relay, one call (see error_reported).
+func _report_error(message: String) -> void:
+	push_error(message)
+	error_reported.emit(message)
 
 
 var _files: FileDialogHelper
@@ -381,7 +392,7 @@ func _ensure_files() -> FileDialogHelper:
 func _on_add_path_selected(path: String) -> void:
 	var samples := _load_wav_as_float32(path)
 	if samples.is_empty():
-		push_error("WAV load failed: %s" % path)
+		_report_error("WAV load failed: %s" % path)
 		return
 	# Default name from filename basename, capped at 15 chars to leave the
 	# null terminator slot in the entry's name[16] field.
@@ -427,7 +438,7 @@ func _load_wav_as_float32(path: String) -> PackedFloat32Array:
 		if sz & 1:
 			i += 1
 	if bits != 16:
-		push_error("only 16-bit PCM WAV supported in v1; got bits=%d" % bits)
+		_report_error("only 16-bit PCM WAV supported in v1; got bits=%d" % bits)
 		return PackedFloat32Array()
 	if data_offset < 0 or data_offset + data_size > bytes.size():
 		return PackedFloat32Array()

@@ -7,7 +7,7 @@ extends Control
 # set_active_tool/can_undo/undo/redo keep their original signatures (test contract).
 
 const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
-const EDITOR_THEME_PATH := "res://modtools/terrain/ui/theme/editor_theme.tres"
+const EDITOR_THEME_PATH := "res://modtools/editor/ui/theme/editor_theme.tres"
 const FIRST_CHAR := 32
 const GLYPH_COUNT := 224
 const TEX_SIZE := 256
@@ -16,8 +16,6 @@ const TOOL_PENCIL := "pencil"
 const TOOL_ERASER := "eraser"
 const TOOL_FILL := "fill"
 const TOOL_MOVE := "move"
-
-const ACCENT := Color(0.84, 0.55, 0.29, 1.0)
 
 var _document: FntEditorDocument
 var _active_tool := TOOL_PENCIL
@@ -82,6 +80,12 @@ func set_document(value: FntEditorDocument) -> void:
 		_document.resource_changed.connect(_on_resource_changed)
 	_refresh_all()
 
+
+
+# The workspace's dirty state derives from get_editor_document() (B6): this
+# editor is that document surface, so it forwards its document's flag.
+func is_dirty() -> bool:
+	return _document != null and _document.is_dirty
 
 func get_active_tool() -> String:
 	return _active_tool
@@ -910,14 +914,8 @@ func _shortcut_input(event: InputEvent) -> void:
 		return
 	var handled := true
 	if k.ctrl_pressed:
+		# Undo/redo shortcuts live in the shell's _shortcut_input (B6).
 		match k.keycode:
-			KEY_Z:
-				if k.shift_pressed:
-					redo()
-				else:
-					undo()
-			KEY_Y:
-				redo()
 			KEY_C:
 				copy_glyph_alpha()
 			KEY_V:
@@ -956,7 +954,6 @@ class FntCanvas extends Control:
 	const COL_BG := Color(0.07, 0.08, 0.09)
 	const COL_BOARD := Color(0.18, 0.20, 0.23)
 	const COL_GRID := Color(1, 1, 1, 0.07)
-	const COL_RECT := Color(0.84, 0.55, 0.29, 0.9)
 	const COL_HOVER := Color(1, 1, 1, 0.5)
 
 	var editor
@@ -1041,7 +1038,7 @@ class FntCanvas extends Control:
 				draw_line(Vector2(pan.x, y), Vector2(pan.x + TEX * zoom, y), COL_GRID)
 		if highlight.size.x > 0 and highlight.size.y > 0:
 			var hr := Rect2(pan + Vector2(highlight.position) * zoom, Vector2(highlight.size) * zoom)
-			draw_rect(hr, COL_RECT, false, 2.0)
+			draw_rect(hr, Color(get_theme_color(&"accent", &"EditorPalette"), 0.9), false, 2.0)
 		if _in_bounds(hover):
 			var hsize := 1
 			if editor != null:

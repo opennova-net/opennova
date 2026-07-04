@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 # --- Weapon loadout + groups (mission-global collapsibles) --------------------
 # Like the header form, these are shown whenever a mission is loaded, in any mode, and built
@@ -51,7 +50,7 @@ func _build_loadout_panel() -> void:
 		if on:
 			_refresh_loadout_panel())
 
-	_loadout_status = ObjectUiHelpers.add_muted_label(_loadout_box, "")
+	_loadout_status = InspectorForms.add_muted_label(_loadout_box, "")
 	_loadout_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	var add_button := Button.new()
@@ -244,13 +243,13 @@ func _build_groups_panel() -> void:
 	_groups_list.item_selected.connect(_on_group_row_selected)
 
 	_groups_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_groups_box, "Fields")
+	InspectorForms.add_section_heading(_groups_box, "Fields")
 	const INT32_MIN := -2147483648.0
 	const INT32_MAX := 2147483647.0
 	_group_spins = [
-		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupFlags", "Flags", 0.0, 3.0, 1.0),
-		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupValue", "Value", INT32_MIN, INT32_MAX, 1.0),
-		ObjectUiHelpers.add_spin_row(_groups_box, "MissionGroupConstant", "Constant", 10.0, 10.0, 1.0),
+		InspectorForms.add_spin_row(_groups_box, "MissionGroupFlags", "Flags", 0.0, 3.0, 1.0),
+		InspectorForms.add_spin_row(_groups_box, "MissionGroupValue", "Value", INT32_MIN, INT32_MAX, 1.0),
+		InspectorForms.add_spin_row(_groups_box, "MissionGroupConstant", "Constant", 10.0, 10.0, 1.0),
 	]
 	for spin in [_group_spins[0], _group_spins[1]]:
 		spin.value_changed.connect(_on_group_spin_changed)

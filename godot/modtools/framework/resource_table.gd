@@ -41,12 +41,9 @@ func _init() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 
-	search = LineEdit.new()
+	search = SearchField.new("Search resources")
 	search.name = "ResourceBrowserSearch"
-	search.placeholder_text = "Search resources"
-	search.clear_button_enabled = true
-	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	search.text_changed.connect(func(_text: String) -> void: refresh())
+	search.search_changed.connect(func(_text: String) -> void: refresh())
 	# Enter activates the selected row; Down arrow drops focus into the list.
 	search.text_submitted.connect(_on_search_submitted)
 	search.gui_input.connect(_on_search_gui_input)

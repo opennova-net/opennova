@@ -12,11 +12,6 @@ extends HBoxContainer
 
 signal value_changed(value: String)
 
-## Maps reference kinds whose owning workspace registers under a different
-## resource kind. The reference index speaks "object_model"; the Object
-## workspace answers open_in_workspace as "object".
-const _JUMP_KIND := {"object_model": "object", "object_scene": "object", "object_project": "object"}
-
 ## Drop-accept equivalences beyond an exact kind match: the extractors emit
 ## both spellings for picture files, so a row configured either way accepts
 ## either payload.
@@ -178,7 +173,7 @@ static func services_from_shell(shell: Object) -> Dictionary:
 		"pick": func(kind: String, title: String, on_pick: Callable) -> void:
 			shell.open_kind_picker(kind, title, on_pick),
 		"jump": func(kind: String, path: String) -> void:
-			shell.open_in_workspace(_JUMP_KIND.get(kind, kind), path),
+			shell.open_in_workspace(ResourceKinds.jump_kind(kind), path),
 	}
 
 

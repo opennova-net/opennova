@@ -49,6 +49,7 @@ const STRINGS_NAME := "GAMETEXT.bin"
 const OBJECT_NAME := "MH53.3di"
 const MISSION_NAME := "00TRa.bms"
 const MENU_NAME := "main.mnu"
+const HUDPOS_NAME := "hudpos.def"
 const MUSIC_NAME := "jo_gamemus.bin"
 const SOUND_NAME := "00TRa.LWF"
 const FALLBACK_ASSETS := {
@@ -66,6 +67,7 @@ var _shots: Array = [
 	[EditorWorkstation.Workspace.CREDITS, CREDITS_NAME, "credits.png"],
 	[EditorWorkstation.Workspace.STRINGS, STRINGS_NAME, "strings.png"],
 	[EditorWorkstation.Workspace.MNU, MENU_NAME, "menus.png"],
+	[EditorWorkstation.Workspace.HUD, HUDPOS_NAME, "hud.png"],
 	[EditorWorkstation.Workspace.MUSIC, MUSIC_NAME, "music.png"],
 	[EditorWorkstation.Workspace.SOUND, SOUND_NAME, "sound.png"],
 	[EditorWorkstation.Workspace.ENVIRONMENT, ENV_NAME, "environment.png"],
@@ -197,6 +199,16 @@ func _run_all() -> bool:
 			if ferr != OK:
 				_fail("[capture] open_font_name failed (%d): %s" % [ferr, asset_name])
 				return false
+		elif ws_id == EditorWorkstation.Workspace.HUD:
+			# hudpos.def can be absent from a partial extract; the HUD workspace
+			# previews its document-less hint state then, which is still a
+			# truthful shot — open only when the file resolves.
+			var hud_path := _resolve_asset(asset_name)
+			if not hud_path.is_empty():
+				var herr: int = ws.open_file(hud_path)
+				if herr != OK:
+					_fail("[capture] open_file failed (%d): %s" % [herr, hud_path])
+					return false
 		elif ws_id == EditorWorkstation.Workspace.ENVIRONMENT:
 			# Environment is a popup workspace; keep Terrain mounted behind it so
 			# the screenshot shows both the full app chrome and the live scene.

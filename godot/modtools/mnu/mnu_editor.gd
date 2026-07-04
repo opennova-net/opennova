@@ -978,31 +978,8 @@ func _write_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, sl
 		"table_spacing": doc.set_table_column_spacing(id, int(value))
 
 
-# Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, but never while a text field or spinner has
-# focus (those own their native edit-undo), mirroring fnt_editor.gd. Arrow-key
-# nudge lives in the canvas (MnuCanvas._unhandled_key_input).
-func _shortcut_input(event: InputEvent) -> void:
-	if not (event is InputEventKey):
-		return
-	var key := event as InputEventKey
-	if not key.pressed or key.echo or not key.ctrl_pressed:
-		return
-	var focus := get_viewport().gui_get_focus_owner()
-	if focus is LineEdit or focus is TextEdit or focus is SpinBox:
-		return
-	var handled := true
-	match key.keycode:
-		KEY_Z:
-			if key.shift_pressed:
-				redo()
-			else:
-				undo()
-		KEY_Y:
-			redo()
-		_:
-			handled = false
-	if handled:
-		get_viewport().set_input_as_handled()
+# Undo/redo keyboard shortcuts live in the shell's _shortcut_input (B6).
+# Arrow-key nudge lives in the canvas (MnuCanvas._unhandled_key_input).
 
 
 # --- Toolbar handlers + state ---------------------------------------------------

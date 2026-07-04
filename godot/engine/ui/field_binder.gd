@@ -112,7 +112,7 @@ func bind_option(option: OptionButton, getter: Callable, setter: Callable, optio
 			# not enumerate, or a valid-but-empty waypoint slot). Surface it as a raw row so the control
 			# shows the real value instead of rendering blank. fallback_label lets a caller name the value
 			# in domain terms ("Path 125 (no markers)") instead of the generic "Value 125"; mirrors
-			# ObjectUiHelpers.populate_id_option's fallback otherwise.
+			# InspectorForms.populate_id_option's fallback otherwise.
 			var idx := option.item_count
 			var fb_text := String(fallback_label.call(want)) if fallback_label.is_valid() else "Value %d" % want
 			option.add_item(fb_text)

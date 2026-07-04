@@ -57,7 +57,7 @@ func test_ctrl_p_opens_quick_open_browser() -> void:
 	var host: Control = shell.get_node("%ResourceBrowserPaneHost")
 	# A prior session may have persisted the pane open (shared user:// state), so
 	# establish the hidden precondition rather than assuming it.
-	shell._set_browser_pane_visible(false)
+	shell._layout.set_browser_pane_visible(false)
 	assert_false(host.visible, "precondition: the browser pane is hidden")
 	var ev := InputEventKey.new()
 	ev.keycode = KEY_P
@@ -65,11 +65,11 @@ func test_ctrl_p_opens_quick_open_browser() -> void:
 	ev.pressed = true
 	shell._unhandled_input(ev)
 	assert_true(host.visible, "Ctrl+P reveals the resource browser pane")
-	assert_not_null(shell._browser_pane, "Ctrl+P instantiates the browser pane")
+	assert_not_null(shell._layout.browser_pane(), "Ctrl+P instantiates the browser pane")
 	# Headless has no display, so the deferred search-focus grab is not asserted.
 	# Restore the hidden default: save_browser_state() writes user:// unconditionally,
 	# so a left-open pane would leak into other suites that assert it defaults hidden.
-	shell._set_browser_pane_visible(false)
+	shell._layout.set_browser_pane_visible(false)
 
 
 # --- Unsaved-changes close guard ---------------------------------------------
@@ -126,3 +126,43 @@ func test_empty_state_panel_offers_new_open_and_browse() -> void:
 		"offers Open for an Open-capable active workspace")
 	assert_not_null(host.find_child("EmptyStateBrowseButton", true, false),
 		"offers a quick-open browse button")
+
+
+# --- B10: toast severity ---------------------------------------------------
+
+func test_status_severity_maps_variation_and_default_duration() -> void:
+	var shell := _shell()
+	var bar = shell._status
+
+	bar.show_status_message("saved", 0.0, &"success")
+	shell._process(0.0)
+	var tool_label := shell.get_node("%StatusToolLabel") as Label
+	assert_eq(tool_label.theme_type_variation, &"Success", "success renders green")
+
+	bar.show_status_message("broke", 0.0, &"error")
+	shell._process(0.0)
+	assert_eq(tool_label.theme_type_variation, &"Error", "error renders red")
+
+	bar.show_status_message("hm", 0.0, &"made-up")
+	shell._process(0.0)
+	assert_eq(tool_label.theme_type_variation, &"Info", "unknown severity reads as info")
+
+	# Per-severity default durations apply when duration <= 0.
+	var now := Time.get_ticks_msec() / 1000.0
+	bar.show_status_message("e", 0.0, &"error")
+	assert_almost_eq(bar._message_until - now, 8.0, 0.25, "error default 8s")
+	bar.show_status_message("s", 0.0, &"success")
+	now = Time.get_ticks_msec() / 1000.0
+	assert_almost_eq(bar._message_until - now, 3.5, 0.25, "success default 3.5s")
+	bar.show_status_message("i", 2.0, &"error")
+	now = Time.get_ticks_msec() / 1000.0
+	assert_almost_eq(bar._message_until - now, 2.0, 0.25, "explicit duration wins")
+
+
+func test_theme_carries_all_four_severity_variations() -> void:
+	var shell := _shell()
+	var theme: Theme = shell.theme
+	assert_not_null(theme)
+	for variation in [&"Info", &"Success", &"Warn", &"Error"]:
+		assert_true(theme.has_color(&"font_color", variation),
+			"%s label variation exists in the editor theme" % variation)

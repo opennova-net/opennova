@@ -56,16 +56,16 @@ func build_main(host: Control) -> void:
 	box.add_child(_board)
 	_board.cell_painted.connect(_on_board_cell_painted)
 
-	_sector_overlay_toggle = _add_checkbox(box, "SectorOverlayToggle", "Show sector overlay", _on_sector_overlay_toggled)
+	_sector_overlay_toggle = _add_layout_toggle(box, "SectorOverlayToggle", "Show sector overlay", _on_sector_overlay_toggled)
 	_grid_size_spin = _add_connected_spin(box, "GridSizeSpin", "Sectors", 1, 16, 1, _on_grid_size_changed)
 	_origin_x_spin = _add_connected_spin(box, "OriginXSpin", "Origin X", -64, 64, 1, _on_origin_x_changed)
 	_origin_y_spin = _add_connected_spin(box, "OriginYSpin", "Origin Y", -64, 64, 1, _on_origin_y_changed)
 
 	_add_section_heading(box, "Water")
 	_water_spin = _add_connected_spin(box, "WaterSpin", "Water height", 0, 32767, 1, _on_water_changed)
-	_water_visible_toggle = _add_checkbox(box, "WaterVisibleToggle", "Show water plane", _on_water_visible_toggled)
-	_wrap_x_toggle = _add_checkbox(box, "WrapXToggle", "Wrap X", _on_wrap_x_toggled)
-	_wrap_y_toggle = _add_checkbox(box, "WrapYToggle", "Wrap Y", _on_wrap_y_toggled)
+	_water_visible_toggle = _add_layout_toggle(box, "WaterVisibleToggle", "Show water plane", _on_water_visible_toggled)
+	_wrap_x_toggle = _add_layout_toggle(box, "WrapXToggle", "Wrap X", _on_wrap_x_toggled)
+	_wrap_y_toggle = _add_layout_toggle(box, "WrapYToggle", "Wrap Y", _on_wrap_y_toggled)
 
 	refresh()
 
@@ -89,7 +89,7 @@ func refresh() -> void:
 	_syncing = false
 
 
-func _add_checkbox(parent: Control, node_name: String, text: String, handler: Callable) -> CheckBox:
+func _add_layout_toggle(parent: Control, node_name: String, text: String, handler: Callable) -> CheckBox:
 	var check := CheckBox.new()
 	check.name = node_name
 	check.text = text

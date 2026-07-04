@@ -1,4 +1,4 @@
-extends WorkflowInspector
+extends ObjectInspector
 
 ## Preview workflow: object summary, playback controls, the export-chunk mask,
 ## and per-control-register sliders. The export mask itself is coordinator

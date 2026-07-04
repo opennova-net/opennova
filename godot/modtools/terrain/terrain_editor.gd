@@ -224,6 +224,8 @@ func _ready() -> void:
 	_init_axes_gizmo()
 	if camera.has_signal("escape_pressed"):
 		camera.connect("escape_pressed", Callable(self, "_on_camera_escape"))
+	# One document for the editor's life (field-initialized, never reassigned).
+	_document.error_reported.connect(_on_document_error)
 	_load_editor_state()
 
 
@@ -232,9 +234,15 @@ func set_workstation(value: Node) -> void:
 
 
 ## Forward a short status message to the workstation UI.
-func _notify_status(message: String) -> void:
+func _notify_status(message: String, severity: StringName = &"info") -> void:
 	if workstation and workstation.has_method("show_status_message"):
-		workstation.show_status_message(message)
+		workstation.show_status_message(message, 0.0, severity)
+
+
+## The document's rejected-input reports (wrong-format texture picks) become
+## shell toasts; the console line stays at the source.
+func _on_document_error(message: String) -> void:
+	_notify_status(message, &"error")
 
 
 func _init_clone_marker() -> void:
@@ -462,16 +470,7 @@ func _handle_viewport_input(event: InputEvent) -> void:
 					if flip_selected_tileinfo_y():
 						get_viewport().set_input_as_handled()
 					return
-		if key.ctrl_pressed:
-			if key.keycode == KEY_Z:
-				if key.shift_pressed:
-					redo()
-				else:
-					undo()
-				return
-			if key.keycode == KEY_Y:
-				redo()
-				return
+		# Undo/redo shortcuts live in the shell's _shortcut_input (B6).
 		match key.keycode:
 			KEY_1: set_tool(Tool.RAISE)
 			KEY_2: set_tool(Tool.LOWER)

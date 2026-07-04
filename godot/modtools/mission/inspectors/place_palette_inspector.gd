@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 # --- Place-object palette (persistent) ----------------------------------------
 var _place_box: VBoxContainer
@@ -35,14 +34,11 @@ func _build_place_panel() -> void:
 	_place_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_inspector._root.add_child(_place_box)
 
-	ObjectUiHelpers.add_section_heading(_place_box, "Place object")
-	_place_status = ObjectUiHelpers.add_muted_label(_place_box, "")
+	InspectorForms.add_section_heading(_place_box, "Place object")
+	_place_status = InspectorForms.add_muted_label(_place_box, "")
 	_place_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
-	_place_search = LineEdit.new()
-	_place_search.placeholder_text = "Search items"
-	_place_search.clear_button_enabled = true
-	_place_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_place_search = SearchField.new("Search items")
 	_place_box.add_child(_place_search)
 
 	_place_list = ItemList.new()

@@ -60,8 +60,8 @@ int main(int argc, char **argv) {
         for (int i = 1; i < argc; ++i) cases.push_back({argv[i], 0.1, 10.0});
     } else {
         cases = {
-            {"C:/Users/taylor/Desktop/archive/JO_ASSETS_t/I_walkf.bad", 0.5, 3.0},
-            {"C:/Users/taylor/Desktop/archive/JO_ASSETS_t/E_RUNF.bad", 2.0, 8.0},
+            {"C:/Users/taylor/Desktop/JOX/I_walkf.bad", 0.5, 3.0},
+            {"C:/Users/taylor/Desktop/JOX/E_RUNF.bad", 2.0, 8.0},
         };
     }
 

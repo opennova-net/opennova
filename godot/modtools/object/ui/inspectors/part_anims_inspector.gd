@@ -1,4 +1,4 @@
-extends ListDetailInspector
+extends ObjectListDetailInspector
 
 ## Part Anims (PANM) workflow: a left list of part-animation entries for the
 ## selected LOD plus a right detail dock with rotation / scale / translation
