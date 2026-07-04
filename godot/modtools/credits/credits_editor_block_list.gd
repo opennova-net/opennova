@@ -8,6 +8,9 @@ signal entries_reordered
 signal selection_changed(entry)
 
 var _resource: CbinCreditsResource
+# The owning document, for undo-step bracketing (B2). Optional: a list bound
+# with set_resource alone still edits, just without history.
+var _document: CreditsEditorDocument
 var _vbox: VBoxContainer
 var _entry_to_card: Dictionary = {}  # CbinEntry -> CreditsEditorBlockCard
 var _reconcile_pending: bool = false
@@ -36,6 +39,23 @@ func set_reference_services(services: Dictionary) -> void:
 		var card: CreditsEditorBlockCard = _entry_to_card[entry]
 		if is_instance_valid(card):
 			card.set_reference_services(services)
+
+func set_document(value: CreditsEditorDocument) -> void:
+	_document = value
+	for entry in _entry_to_card.keys():
+		var card: CreditsEditorBlockCard = _entry_to_card[entry]
+		if is_instance_valid(card):
+			card.set_document(_document)
+
+
+# One equal-gated undo step around a structural mutation; direct when no
+# document is bound.
+func _push_step(mutation: Callable) -> void:
+	if _document != null:
+		_document.push_undo_step(mutation)
+	else:
+		mutation.call()
+
 
 func set_resource(value: CbinCreditsResource) -> void:
 	if _resource == value:
@@ -105,6 +125,7 @@ func _reconcile() -> void:
 			_vbox.add_child(card)
 			card.request_delete.connect(_on_card_delete)
 			card.request_select.connect(_on_card_select)
+			card.set_document(_document)
 			_entry_to_card[entry] = card
 		card.bind(entry, _resource_root, _ref_services)
 		if _vbox.get_child(i) != card:
@@ -129,10 +150,12 @@ func _insert_with_selection(entry: CbinEntry) -> void:
 	if _resource == null:
 		return
 	var sel_idx := _index_of(_selected_entry) if _selected_entry != null else -1
-	if sel_idx < 0:
-		_resource.add_entry(entry)
-	else:
-		_resource.insert_entry(sel_idx + 1, entry)
+	var resource := _resource
+	_push_step(func() -> void:
+		if sel_idx < 0:
+			resource.add_entry(entry)
+		else:
+			resource.insert_entry(sel_idx + 1, entry))
 	_set_selected_entry(entry, false)  # chain successive adds naturally
 	_schedule_selection_emit()
 
@@ -175,8 +198,10 @@ func move_selected(delta: int) -> bool:
 	if target_index == src_index:
 		return false
 	var entry := _selected_entry
-	_resource.remove_entry(src_index)
-	_resource.insert_entry(target_index, entry)
+	var resource := _resource
+	_push_step(func() -> void:
+		resource.remove_entry(src_index)
+		resource.insert_entry(target_index, entry))
 	_schedule_selection_emit()
 	entries_reordered.emit()
 	return true
@@ -203,7 +228,9 @@ func _on_card_delete(card: CreditsEditorBlockCard) -> void:
 					next_selection = _resource.get_entry(i + 1)
 				elif i - 1 >= 0:
 					next_selection = _resource.get_entry(i - 1)
-			_resource.remove_entry(i)
+			var resource := _resource
+			var index := i
+			_push_step(func() -> void: resource.remove_entry(index))
 			if entry == _selected_entry:
 				_set_selected_entry(next_selection, true)
 			break
@@ -224,10 +251,13 @@ func _drop_data(pos: Vector2, data: Variant) -> void:
 			break
 	if src_index < 0 or src_index == target_index:
 		return
-	_resource.remove_entry(src_index)
 	if target_index > src_index:
 		target_index -= 1
-	_resource.insert_entry(target_index, dragged_entry)
+	var resource := _resource
+	var final_target := target_index
+	_push_step(func() -> void:
+		resource.remove_entry(src_index)
+		resource.insert_entry(final_target, dragged_entry))
 	if dragged_entry == _selected_entry:
 		_schedule_selection_emit()
 	entries_reordered.emit()

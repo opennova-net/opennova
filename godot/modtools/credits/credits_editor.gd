@@ -41,6 +41,10 @@ func set_document(value: CreditsEditorDocument) -> void:
 		_document.resource_loaded.disconnect(_on_resource_loaded)
 		_document.resource_changed.disconnect(_on_resource_changed)
 	_document = value
+	if _block_list != null and _block_list.has_method("set_document"):
+		_block_list.set_document(_document)
+	if _source_view_host != null and _source_view_host.has_method("set_document"):
+		_source_view_host.set_document(_document)
 	if _document != null:
 		_document.resource_loaded.connect(_on_resource_loaded)
 		_document.resource_changed.connect(_on_resource_changed)
@@ -120,6 +124,16 @@ func _ready() -> void:
 	_player.started.connect(_refresh_preview_toolbar_state)
 	_player.finished.connect(_on_player_finished)
 	_block_list.selection_changed.connect(_on_block_list_selection_changed)
+	# Document may have arrived before _ready (mount order): re-apply now that
+	# the nodes exist.
+	if _block_list.has_method("set_document"):
+		_block_list.set_document(_document)
+	if _source_view_host.has_method("set_document"):
+		_source_view_host.set_document(_document)
+	# The env-bar spin bursts fold on their line edits' focus exit (mirrors the
+	# card spins); arrow-only edits fold on the next flush.
+	for env_spin: SpinBox in [_scroll_rate_spin, _vertical_space_spin, _center_x_spin]:
+		env_spin.get_line_edit().focus_exited.connect(_flush_document_edit)
 	if _block_list.has_method("set_resource_root"):
 		_block_list.set_resource_root(_resource_root)
 	if not _ref_services.is_empty() and _block_list.has_method("set_reference_services"):
@@ -225,19 +239,26 @@ func _refresh_env_bar(resource: CbinCreditsResource) -> void:
 	_center_x_spin.value = resource.get_center_x()
 	_suppress_env_signals = false
 
+func _flush_document_edit() -> void:
+	if _document != null:
+		_document.flush_edit()
+
 func _on_scroll_rate_changed(value: float) -> void:
 	if _suppress_env_signals or _document == null or _document.resource == null:
 		return
+	_document.begin_edit()
 	_document.resource.set_scroll_rate(value)
 
 func _on_vertical_space_changed(value: float) -> void:
 	if _suppress_env_signals or _document == null or _document.resource == null:
 		return
+	_document.begin_edit()
 	_document.resource.set_vertical_space(int(value))
 
 func _on_center_x_changed(value: float) -> void:
 	if _suppress_env_signals or _document == null or _document.resource == null:
 		return
+	_document.begin_edit()
 	_document.resource.set_center_x(int(value))
 
 func _on_source_pending_edits_changed(has_pending_edits: bool) -> void:
