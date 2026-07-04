@@ -144,7 +144,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 
 | Subsystem | Our code | Record | Verdict |
 |---|---|---|---|
-| Menus (MNU/MNS UI) | `libs/mnu`, `libs/mnu_xml`, `libs/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | matching (D-MNU-1..3) |
+| Menus (MNU/MNS UI) | `libs/mnu` (incl. the mnu_xml reader), `libs/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | matching (D-MNU-1..3) |
 | Sound banks + dialog | `libs/lwf`, `libs/dbf`, `libs/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | matching (D-SND-1..3) |
 | Music (MUS/SBF/SCR) | `libs/mus`, `libs/sbf`, `libs/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
 | Environment / time-of-day | `libs/env`, `env_render`, the `NovaEnvironment` family | [env/env-tod-re.md](env/env-tod-re.md) | mixed per subsystem (see record) |

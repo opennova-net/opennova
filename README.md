@@ -121,7 +121,6 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
 | **tdp** | `.3dp` | Object projects: material definitions, LOD settings, part-animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
-| **adm** | `.adm` | Animation definitions: key/value metadata mapping actions to BAD files. |
 | **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |
 | **pff** | `.pff` | Archive containers: PFF3, PFF4, and BHD variants. |
 | **pcx** | `.pcx` | PCX (ZSoft Paintbrush) indexed images. |
@@ -133,9 +132,8 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **cpt** | `.cpt` | Compiled terrain mesh, collision and render (DPTH and CDEP flavors). |
 | **tpj** | `.tpj` | Editable terrain project: a terrain config plus editor lock coordinates and project metadata. |
 | **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
-| **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. |
+| **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. Includes the NovaLogic-flavored XML reader. |
 | **mns** | `.mns` | Menu stylesheets: named style variables the menu screens reference. |
-| **mnu_xml** | | NovaLogic-flavored XML reader shared by the menu formats. |
 | **lwf** | `.lwf` | Sound profiles (LWF1): trigger sets of layered member sounds. |
 | **dbf** | `.dbf` | Dialog banks (DLG0): grouped dialog and voice entries. |
 | **sbf** | `.sbf` | Sound-buffer banks: the sample banks behind interactive music. |
@@ -152,19 +150,39 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
 | **world** | World substrate: entity registry and pools, variable store, AI with the infantry motor, and the logic tick. |
 | **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
-| **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. |
-| **anim** | Skeletal animation evaluator: samples `.bad` clips into per-bone transforms. |
+| **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. Two targets: `opennova_mission_format` (parse/write/schema) and `opennova_mission` (event runtime + promotion). |
+| **anim** | Skeletal animation: `.adm` definition parsing plus the evaluator that samples `.bad` clips into per-bone transforms. |
 | **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |
 | **vfs** | Virtual file system: loose directories and PFF archives behind one lookup, with SCR/BFC1 decode. |
 | **gameprofile** | Per-game profiles: one source of truth for game identity, archive keys, and SCR codec policy. |
+
+### Networking
+
+Wire-compatible with the original protocols: our encoders produce bytes a stock client or server accepts, and our decoders read what stock endpoints emit. The witness record is [`docs/net/novaworld-net-re.md`](docs/net/novaworld-net-re.md).
+
+| Library | Description |
+|---------|-------------|
+| **novacrypto** | CRC-32/MPEG-2 and the NWU/EPASK/URL ciphers behind every NovaWorld exchange. |
+| **napi** | NAPI envelope and TLV containers: the checksummed message envelope of the lobby protocol. |
+| **novaworld** | The NovaWorld service and in-match wire protocol, built as five leg targets: wire (in-game codec), session (NWU session + framing), gate (first contact, login, server-browser data), service (lobby and persistence; the only leg linking sqlite), and replay (capture decode + timelines). |
+| **netsim** | The in-match net seam: the World-to-wire bridge, transports, and the in-process loopback behind single-player-as-listen-server. |
+| **npruntime** | The in-match NP server and client state machines and frame loop, ported from the original engine over the netsim seam. |
 
 ### Editor and tooling support
 
 | Library | Description |
 |---------|-------------|
 | **resource_index** | Indexes asset files under a root directory by kind, for the editor's Open dialogs. |
+| **refs** | Cross-asset reference graph: which files reference which, with per-format extractors (env, cbin, def, 3di, mission, menus). |
+| **controls** | The input-binding catalog behind the Options controls table. |
 | **oed** | OED export session: parse an ASE scene once, then export and re-export to `.3di`. |
 | **oned_edit** | Shared undo/redo edit-history core for the ONED workspaces. |
+
+### Shared infrastructure
+
+| Library | Description |
+|---------|-------------|
+| **io** | Header-only shared infrastructure: bounds-checked byte cursors, bit streams, little-endian primitives, fixed-point conversions, and ASCII string helpers the format libraries build on. |
 
 ## Building
 

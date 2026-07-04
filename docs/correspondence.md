@@ -18,7 +18,7 @@ the row links to the authoritative record.
 
 | System (reimpl) | Grilled | Verdict | Authoritative record |
 |---|---|---|---|
-| MNU/MNS menu UI (`libs/mnu`, `libs/mnu_xml`, `libs/mns`, `godot/engine/mnu`) | 2026-06-01 format + 2026-06-09 menu slice + 2026-06-12 mns spec pass | **matching** (D-MNU-1..3 accepted; D-MNS-1..4 lenient-with-diagnostic, loader grill pending) | [menu-re.md](mnu/menu-re.md) |
+| MNU/MNS menu UI (`libs/mnu` (incl. the mnu_xml reader), `libs/mns`, `godot/engine/mnu`) | 2026-06-01 format + 2026-06-09 menu slice + 2026-06-12 mns spec pass | **matching** (D-MNU-1..3 accepted; D-MNS-1..4 lenient-with-diagnostic, loader grill pending) | [menu-re.md](mnu/menu-re.md) |
 | LWF banks / DBF dialogs / member selection (`libs/lwf`, `libs/dbf`, `libs/audio`) | 2026-06-09 | **matching** (D-SND-1..3) | [lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
 | MUS VM + compiler / SBF codec / SCR container (`libs/mus`, `libs/sbf`, `libs/scr`) | 2026-06-09 | **MATCHING** per component (D-SCR-1/2; host audio glue not grillable) | [mus-sbf-re.md](audio/mus-sbf-re.md) |
 | Environment / time-of-day (`libs/env` + `env_render`; `nova_environment`/`nova_sky`/`nova_weather`/`nova_celestial`) | 2026-06-09/11 | per subsystem: parse/TOD/sun-moon/fog/load-order **matching**; weather **divergent → ported**; sky dome combine **divergent — recovered (C6), port = C7**; celestial + glare new-from-witness; iris (auto-exposure) + terrain_rgb (terrain tint stack) **consumers recovered, unimplemented — tracked** | [env-tod-re.md](env/env-tod-re.md) |

@@ -61,7 +61,7 @@ menus shadows a PFF-archived one at runtime - the standard modding flow.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.mnu` | [`libs/mnu`](../../../libs/mnu) | menu screens: window tree, widgets, Actions; parsed through the forgiving XML reader [`libs/mnu_xml`](../../../libs/mnu_xml); round-trip preserves the format superset |
+| `.mnu` | [`libs/mnu`](../../../libs/mnu) | menu screens: window tree, widgets, Actions; parsed through the forgiving XML reader bundled in `libs/mnu` (`mnu_xml.cpp`); round-trip preserves the format superset |
 | `.mns` | [`libs/mns`](../../../libs/mns) | menu stylesheets: named style variables the screens reference as `%NAME%`; lossless document model (comments, grouping, alignment survive saves - [ADR 0014](../../../docs/adr/0014-mns-lossless-document-model.md)) |
 
 ## How it is built
