@@ -49,10 +49,10 @@ func test_insert_then_undo_redo_round_trips():
 	var doc = _doc()
 	assert_true(doc.insert_play(&"Win000", 0))
 	assert_eq(_win000_plays(doc), 7)
-	assert_true(doc.can_undo_bank(), "edit is undoable through the shared history")
-	doc.undo_bank()
+	assert_true(doc.can_undo(), "edit is undoable through the shared history")
+	doc.undo()
 	assert_eq(_win000_plays(doc), 6, "undo reverts the play")
-	doc.redo_bank()
+	doc.redo()
 	assert_eq(_win000_plays(doc), 7, "redo re-applies it")
 
 
@@ -93,8 +93,8 @@ func test_remove_play_drops_one_and_undoes():
 	assert_eq(_win000_plays(doc), 6)
 	assert_true(doc.remove_play(&"Win000", 2), "remove track 2 (present in Win000)")
 	assert_eq(_win000_plays(doc), 5, "exactly one play removed")
-	assert_true(doc.can_undo_bank(), "remove is undoable")
-	doc.undo_bank()
+	assert_true(doc.can_undo(), "remove is undoable")
+	doc.undo()
 	assert_eq(_win000_plays(doc), 6, "undo restores the removed play")
 
 

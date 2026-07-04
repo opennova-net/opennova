@@ -462,16 +462,7 @@ func _handle_viewport_input(event: InputEvent) -> void:
 					if flip_selected_tileinfo_y():
 						get_viewport().set_input_as_handled()
 					return
-		if key.ctrl_pressed:
-			if key.keycode == KEY_Z:
-				if key.shift_pressed:
-					redo()
-				else:
-					undo()
-				return
-			if key.keycode == KEY_Y:
-				redo()
-				return
+		# Undo/redo shortcuts live in the shell's _shortcut_input (B6).
 		match key.keycode:
 			KEY_1: set_tool(Tool.RAISE)
 			KEY_2: set_tool(Tool.LOWER)

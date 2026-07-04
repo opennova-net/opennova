@@ -374,27 +374,4 @@ func _on_remove_pressed() -> void:
 		apply_edit({"op": "remove", "name": selected})
 
 
-# Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, but never while a text field has focus
-# (those own their native edit-undo), mirroring mnu_editor.gd.
-func _shortcut_input(event: InputEvent) -> void:
-	if not (event is InputEventKey):
-		return
-	var key := event as InputEventKey
-	if not key.pressed or key.echo or not key.ctrl_pressed:
-		return
-	var focus := get_viewport().gui_get_focus_owner()
-	if focus is LineEdit or focus is TextEdit or focus is SpinBox:
-		return
-	var handled := true
-	match key.keycode:
-		KEY_Z:
-			if key.shift_pressed:
-				redo()
-			else:
-				undo()
-		KEY_Y:
-			redo()
-		_:
-			handled = false
-	if handled:
-		get_viewport().set_input_as_handled()
+# Undo/redo keyboard shortcuts live in the shell's _shortcut_input (B6).

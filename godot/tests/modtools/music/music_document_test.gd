@@ -160,12 +160,12 @@ func test_undo_redo_reorder():
 	doc.reorder_track(0, 1)
 	var first_after: String = doc.bank.get_entries()[0]["name"]
 	assert_ne(first_after, first_name_before)
-	assert_true(doc.can_undo_bank())
-	doc.undo_bank()
+	assert_true(doc.can_undo())
+	doc.undo()
 	var first_undone: String = doc.bank.get_entries()[0]["name"]
 	assert_eq(first_undone, first_name_before)
-	assert_true(doc.can_redo_bank())
-	doc.redo_bank()
+	assert_true(doc.can_redo())
+	doc.redo()
 	assert_eq(doc.bank.get_entries()[0]["name"], first_after)
 
 
@@ -175,9 +175,9 @@ func test_undo_redo_rename():
 	var original: String = doc.bank.get_entries()[0]["name"]
 	doc.rename_track(0, &"RENAMED01")
 	assert_eq(doc.bank.get_entries()[0]["name"], "RENAMED01")
-	doc.undo_bank()
+	doc.undo()
 	assert_eq(doc.bank.get_entries()[0]["name"], original)
-	doc.redo_bank()
+	doc.redo()
 	assert_eq(doc.bank.get_entries()[0]["name"], "RENAMED01")
 
 

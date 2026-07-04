@@ -317,14 +317,22 @@ func close_document(_index: int) -> Error:
 
 func has_unsaved_changes() -> bool:
 	var doc := get_editor_document()
-	if doc == null:
-		return false
-	# Both dirty shapes exist today: a method (mission controller, music document)
-	# and a plain bool property (the EditorDocument family). Property reads on a
-	# doc with neither return null -> false.
-	if doc.has_method("is_dirty"):
-		return doc.is_dirty()
-	return bool(doc.get("is_dirty"))
+	if doc != null:
+		# Both dirty shapes exist today: a method (mission controller, music
+		# document) and a plain bool property (the EditorDocument family).
+		# Property reads on a doc with neither return null — compare, don't
+		# bool()-construct (bool(null) is a nonexistent constructor).
+		if doc.has_method("is_dirty"):
+			if doc.is_dirty():
+				return true
+		elif doc.get("is_dirty") == true:
+			return true
+	# Any open tab with unsaved work counts, not just the active one (B6: the
+	# fold every multi-document workspace used to override for).
+	for row in get_document_tabs():
+		if bool((row as Dictionary).get("dirty", false)):
+			return true
+	return false
 
 
 func can_new() -> bool:

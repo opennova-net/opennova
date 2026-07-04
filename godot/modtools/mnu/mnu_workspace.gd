@@ -721,15 +721,9 @@ func _list_font_names() -> PackedStringArray:
 	return out
 
 
-## Any open tab with unsaved work counts, not just the active one — plus the
-## shared stylesheet document if it has unsaved edits.
+## The shared stylesheet document rides alongside the base's tab fold.
 func has_unsaved_changes() -> bool:
-	if _mns_document != null and _mns_document.is_dirty:
-		return true
-	for row in _tabs.tabs():
-		if bool((row as Dictionary).get("dirty", false)):
-			return true
-	return false
+	return (_mns_document != null and _mns_document.is_dirty) or super.has_unsaved_changes()
 
 
 func can_new() -> bool:

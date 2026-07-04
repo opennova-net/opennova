@@ -83,6 +83,12 @@ func set_document(value: FntEditorDocument) -> void:
 	_refresh_all()
 
 
+
+# The workspace's dirty state derives from get_editor_document() (B6): this
+# editor is that document surface, so it forwards its document's flag.
+func is_dirty() -> bool:
+	return _document != null and _document.is_dirty
+
 func get_active_tool() -> String:
 	return _active_tool
 
@@ -910,14 +916,8 @@ func _shortcut_input(event: InputEvent) -> void:
 		return
 	var handled := true
 	if k.ctrl_pressed:
+		# Undo/redo shortcuts live in the shell's _shortcut_input (B6).
 		match k.keycode:
-			KEY_Z:
-				if k.shift_pressed:
-					redo()
-				else:
-					undo()
-			KEY_Y:
-				redo()
 			KEY_C:
 				copy_glyph_alpha()
 			KEY_V:

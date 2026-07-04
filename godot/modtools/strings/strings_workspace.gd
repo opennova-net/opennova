@@ -205,14 +205,6 @@ func close_document(index: int) -> Error:
 	return OK
 
 
-## Any open tab with unsaved work counts, not just the active one.
-func has_unsaved_changes() -> bool:
-	for row in _tabs.tabs():
-		if bool((row as Dictionary).get("dirty", false)):
-			return true
-	return false
-
-
 # --- Center: self-contained table + detail view ---
 
 func _ensure_mount() -> ViewportMount:

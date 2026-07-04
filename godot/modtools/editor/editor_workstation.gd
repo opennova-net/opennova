@@ -1138,6 +1138,47 @@ func _on_pff_extracted(dir: String) -> void:
 	_scan_resource_root(false)
 
 
+# Global document shortcuts (B6). _shortcut_input fires after _gui_input — a
+# focused text field keeps its native Ctrl+Z — and before _unhandled_input,
+# so viewport routers never see claimed keys. ONE focus guard, for undo/redo
+# only: Ctrl+S is deliberately unguarded (the save flow flushes pending
+# edits, which covers half-typed buffers). Mission's sim gate lives inside
+# its own undo() (_reject_edit_while_simulating), so no sim awareness here.
+func _shortcut_input(event: InputEvent) -> void:
+	if not (event is InputEventKey):
+		return
+	var key := event as InputEventKey
+	if not key.pressed or key.is_echo() or not key.ctrl_pressed or key.alt_pressed:
+		return
+	var workspace := _get_active_workspace()
+	match key.keycode:
+		KEY_S:
+			if workspace == null:
+				return
+			if key.shift_pressed:
+				if _save_export.flush_workspace_or_status(workspace):
+					_save_export.open_save_as_dialog(workspace)
+			else:
+				_save_export.on_save_pressed(workspace)
+			sync_from_editor_state()
+			get_viewport().set_input_as_handled()
+		KEY_Z, KEY_Y:
+			if workspace == null or _shortcut_focus_blocks_undo():
+				return
+			if key.keycode == KEY_Y or key.shift_pressed:
+				if workspace.can_redo():
+					workspace.redo()
+			elif workspace.can_undo():
+				workspace.undo()
+			sync_from_editor_state()
+			get_viewport().set_input_as_handled()
+
+
+func _shortcut_focus_blocks_undo() -> bool:
+	var focus := get_viewport().gui_get_focus_owner()
+	return focus is LineEdit or focus is TextEdit or focus is SpinBox
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key := event as InputEventKey

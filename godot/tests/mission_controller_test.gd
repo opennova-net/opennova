@@ -1651,23 +1651,25 @@ func test_undo_unwinds_edits_in_reverse_order_across_kinds() -> void:
 	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), b0, "second undo removes the building")
 
 
-func test_ctrl_z_and_ctrl_y_drive_undo_redo_via_the_viewport() -> void:
+func test_undo_redo_ride_the_document_api_not_the_viewport() -> void:
+	# B6 moved Ctrl+Z/Y routing into the shell's _shortcut_input
+	# (editor_shortcuts_test.gd pins the guard matrix); the controller keeps
+	# the document API the shell drives, and its viewport router no longer
+	# claims the keys. The sim gate stays inside undo() itself
+	# (test_sim_locks_out_document_edits_until_stop).
 	var controller := _loaded_with_item_db()
 	var m := controller.get_mission()
 	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
 	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
 
 	controller.handle_viewport_input(_ctrl_key(KEY_Z))
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Ctrl+Z undid the placement")
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1,
+		"a viewport Ctrl+Z no longer undoes (the shell owns the shortcut)")
 
-	controller.handle_viewport_input(_ctrl_key(KEY_Y))
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "Ctrl+Y redid the placement")
-
-	# Ctrl+Shift+Z is the other redo binding.
-	controller.handle_viewport_input(_ctrl_key(KEY_Z))
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Ctrl+Z undid again")
-	controller.handle_viewport_input(_ctrl_key(KEY_Z, true))
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "Ctrl+Shift+Z redid the placement")
+	controller.undo()
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo() removes the placement")
+	controller.redo()
+	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "redo() restores the placement")
 
 
 func test_ctrl_z_is_suppressed_while_a_text_field_has_focus() -> void:

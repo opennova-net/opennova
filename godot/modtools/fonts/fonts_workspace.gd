@@ -185,10 +185,6 @@ func _populate_inspector() -> void:
 		]
 
 
-func has_unsaved_changes() -> bool:
-	return _document.is_dirty
-
-
 func can_new() -> bool:
 	return true
 

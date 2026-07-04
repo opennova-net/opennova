@@ -1289,8 +1289,7 @@ func handle_viewport_input(event: InputEvent) -> void:
 			_reject_edit_while_simulating()
 		elif event is InputEventKey:
 			var sim_key := event as InputEventKey
-			var is_mutator := (sim_key.ctrl_pressed and sim_key.keycode in [KEY_Z, KEY_Y]) \
-				or sim_key.keycode in [KEY_DELETE, KEY_BACKSPACE]
+			var is_mutator := sim_key.keycode in [KEY_DELETE, KEY_BACKSPACE]
 			if sim_key.pressed and not sim_key.echo and is_mutator and not _gui_focus_blocks_shortcut():
 				_reject_edit_while_simulating()
 				_consume_viewport_key()
@@ -1349,19 +1348,8 @@ func handle_viewport_input(event: InputEvent) -> void:
 		# Ignore key-up and auto-repeat echoes (holding the key must not chain actions).
 		if not key.pressed or key.echo:
 			return
-		# Undo / redo: Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y. Claimed before the other shortcuts
-		# and gated by the same focus guard as Delete, so a focused SpinBox / LineEdit keeps
-		# its own text undo. Marked handled so the key does not propagate further. (Mirrors
-		# fnt_editor / terrain_editor, which also key off ctrl_pressed, not Cmd, on macOS.)
-		if key.ctrl_pressed and not _gui_focus_blocks_shortcut():
-			if key.keycode == KEY_Z and not key.shift_pressed:
-				undo()
-				_consume_viewport_key()
-				return
-			if (key.keycode == KEY_Z and key.shift_pressed) or key.keycode == KEY_Y:
-				redo()
-				_consume_viewport_key()
-				return
+		# Undo / redo keyboard shortcuts live in the shell's _shortcut_input
+		# (B6); the controller's undo() itself keeps the sim gate.
 		if key.keycode == KEY_ESCAPE:
 			# Escape drops whichever placement tool is armed (object or add-marker).
 			if is_placement_armed():
