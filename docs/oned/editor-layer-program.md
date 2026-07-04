@@ -13,6 +13,30 @@ Line references below were re-verified 2026-07-04 against post-#179 master
 (the #176 adapter moves and #178 mission-inspector decomposition shifted the
 originals); anything marked *re-grep at execution* drifts too easily to pin.
 
+## Status 2026-07-04 (end of the first execution session)
+
+LANDED on `oned-editor-layer-b`, one green slice commit each: A8 (full),
+B1–B8, B10. B10's five push_error→toast reroutes were deferred INTO B9 —
+the UI layers involved (music `bank_mode.gd`, `terrain_editor_document.gd`)
+have no shell seam until B9 exists; wire them signal→owner→workspace.
+
+REMAINING: **B9** (in progress; current site map — sync ×4:
+`strings_workspace.gd:322` / `sound_workspace.gd:176` /
+`mission_workspace.gd:588` `_sync_shell_title` + `object_workspace.gd:433`
+`_sync_shell` [rename to `_after_document_changed`, callers :270/:314/:327];
+status ×2 left: `mnu_workspace.gd:520,599` — mission's four adopted
+severities in B10; hosting `editor_shell.add_child` sites:
+`mission_workspace.gd:182,360`, `mnu_workspace.gd:594`,
+`music_workspace.gd:282`, `object_workspace.gd:427`,
+`sound_workspace.gd:76,88`, `strings_workspace.gd:144`; mission VFS:
+`mission_workspace.gd:288/297` → base `_resource_root()` [exists,
+`editor_workspace.gd:527`], `mission_controller.gd:484/487, 574/577,
+3845-3846, 3953` → one private controller `_resource_root()` wrapper),
+**B11** (unchanged below), **B12** (unchanged below), then the program-end
+FULL GUT + the deferred oned-run visual pass (B6+B10+B11 checks in one
+sweep: eleven workspaces, shortcut matrix, toast colors, theme, screenshot
+driver).
+
 Design provenance: three parallel code sweeps plus two verification passes
 against the code (2026-07-01). Where a design claim conflicted with the code,
 the code won; corrections are folded in below.
