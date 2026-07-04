@@ -57,15 +57,12 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - A stale `build/Debug/opennova.dll` can shadow the Release DLL — delete it if the editor
   loads stale native code.
-- Asset-gated tests skip unless these env vars point at local retail installs (machine
-  paths — set them in `.claude/settings.local.json` `env`, never in tracked files):
-  `OPENNOVA_JO_DIR` (ctest install sweeps), `OPENNOVA_MISSION_CORPUS` (.bms corpus),
-  `OPENNOVA_JO_ASSETS` (pytest DCC parity), `NOVA_RESOURCE_DIR` (screenshot capture),
-  `JO_ASSETS_DIR` (perf probes), `NW_PROFILE_SPH_DIR` (folder with `host.sph`/`client.sph`
-  `/profile` recordings for the `nw_serverlog_decode` net witness), and packet-capture
-  witnesses such as `NW_INGAME_HEXCAP`, `NW_DVXI5_PCAP`, `NW_DVXI3_PCAP`,
-  `NW_DVXC1_PCAP`, `NW_PROBE3AGAIN_PCAP`, `NW_PROBE3AGAIN_HOST_SPH`, and
-  `NW_WHITENOISE_PCAP`.
+- Asset-gated tests SKIP-AS-PASS unless env vars point at local retail installs or
+  captures — a green run does not mean they exercised data. The full var→test→data
+  matrix, local setup, and the never-commit-captures policy live in
+  [docs/asset-gated-tests.md](docs/asset-gated-tests.md). Machine paths go in
+  `.claude/settings.local.json` `env` (never tracked); capture files default to the
+  gitignored `.scratch/` under the repo root (goldens in `.scratch/golden/`).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/python, not PowerShell.
 
