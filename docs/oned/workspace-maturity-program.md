@@ -1,16 +1,21 @@
-# ONED workspace maturity program
+# ONED workspace maturity program (the maturity program's ONED track)
 
-Successor program to [editor-layer-program.md](editor-layer-program.md)
-(complete 2026-07-04: app root, shell decomposition, undo everywhere, global
-shortcuts, shared widgets/theme/vocabulary). That program made the eleven
-workspaces *uniform*; this one makes them *equally deep*: every workspace
-reaches the same capability bar on top of that foundation, so the editor can
-keep growing without a weakest-link workspace.
+**This document is the ONED track detail of the
+[maturity program](../maturity-program.md)** — the umbrella owns waves,
+freeze policy, cross-track ordering, and enforcement; this doc owns the
+editor-side phases. Standing rules this track builds under: ADR 0015 (two
+products, serve mode), ADR 0016 (editor over public engine APIs — no
+bypasses), ADR 0017 (typed records, named constants), ADR 0018 (public-API
+testability).
 
-Authored 2026-07-04 against the post-program tree (`hygiene-2026-07` head
-`f17be565`). Facts below (which preview hosts which engine node, which
-writers exist) were re-verified against that tree — anything marked
-*re-grep at execution* drifts too easily to pin.
+Successor to [editor-layer-program.md](editor-layer-program.md) (complete
+2026-07-04: app root, shell decomposition, undo everywhere, global
+shortcuts, shared widgets/theme/vocabulary). That program made the
+workspaces *uniform*; this one makes them *equally deep* — and grows them to
+**twelve** (Avatars joins in phase AVA).
+
+Facts below were re-verified 2026-07-04 against the post-program tree;
+anything marked *re-grep at execution* drifts too easily to pin.
 
 ## The bar (what "up to snuff" means, per workspace)
 
@@ -24,9 +29,9 @@ decision (ADR / RE-record entry) saying why not:
   roundtrip tests and, where retail corpora exist, byte-parity sweeps. No
   read-only workspaces without a recorded decision.
 - **E — Engine preview.** The preview IS the ported engine path — the same
-  nodes/code the game runs, not an editor-drawn approximation. (The terrain
-  viewport and the credits `NovaCreditsPlayer` are the exemplars; the HUD's
-  hand-drawn `_draw()` canvas is the anti-pattern.)
+  nodes/code the game runs, not an editor-drawn approximation (ADR 0016).
+  (The terrain viewport and the credits `NovaCreditsPlayer` are the
+  exemplars; the HUD's hand-drawn `_draw()` canvas is the anti-pattern.)
 - **G — Game loop.** One gesture takes the authored data into the real game:
   play-in-editor where the workspace has a world (mission), and the
   override launcher (F3) everywhere else. Authoring that cannot be seen in
@@ -44,19 +49,37 @@ decision (ADR / RE-record entry) saying why not:
 | Fonts | ✓ | ✓ | partial (glyph canvas is editor-drawn; fine for painting, no engine text sample) | — | E |
 | Strings | ✓ | ✓ | partial (no in-context render) | — | E (minor by format) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
-| Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G |
+| Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
 | Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `NovaMnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
 | HUD | ✓ (`NovaHudPos`, read-only getters) | — | — (hand-drawn `HudLayoutPreview._draw()`) | — | everything but R |
+| Avatars (joins at AVA) | branch-only | branch-only | branch-only | — | not yet on master |
 
-Two corrections to earlier working assumptions, now verified: environment/
-water unification is DONE (editor-runtime-parity.md: "water is fully unified
+Two corrections to earlier working assumptions, verified: environment/water
+unification is DONE (editor-runtime-parity.md: "water is fully unified
 (parameterized, not forked)"), and credits' preview already hosts the real
-`NovaCreditsPlayer` (credits_editor.tscn) — both were previously believed
-gaps. The headerless MUS cipher stays out of scope by the recorded decision
-in docs/audio/mus-sbf-re.md (`vfs_mus_decode_test` pins the pass-through);
-it is a bar-satisfying exclusion, not a gap.
+`NovaCreditsPlayer`. The headerless MUS cipher stays out of scope by the
+recorded decision in docs/audio/mus-sbf-re.md (`vfs_mus_decode_test` pins
+the pass-through); it is a bar-satisfying exclusion, not a gap.
 
-## Foundation phases (Wave 0)
+## AVA — the Avatars workspace merge (twelfth workspace; first ONED train)
+
+A complete Avatars workspace exists only on the `playerinfo-runtime` branch:
+editor (`modtools/avatar/` — workspace, document, preview, three
+inspectors), engine (`nova_avatar_database` native Avatars.def support),
+fixtures, five test files, and an RE doc. Merge it FIRST in this track
+(every later shell/standards/responsiveness change raises the rebase cost):
+
+- AVA-1: merge train from `playerinfo-runtime`, rebased onto current master;
+  the branch's ADR renumbers to the next free number (it collides with
+  master's 0013) with a repo-wide reference sweep.
+- AVA-2: the eleven→twelve sweep — CONTEXT.md (ONED/Workspace entries),
+  `modtools/README.md` table, the screenshot driver (twelfth workspace
+  shot), this doc's matrix row filled in honestly, `resource_kinds` rows if
+  the branch adds kinds.
+- Gate: the branch's five avatar test files + FULL GUT + the boot probe +
+  the screenshot driver run.
+
+## Foundation phases (F1–F5; umbrella Wave 1)
 
 ### F1 — WorldContextPreview service
 
@@ -97,7 +120,7 @@ Record in this file + libs/CLAUDE.md pointers: every W phase ships (a) writer
 from scratch, (b) roundtrip test, (c) retail-corpus byte sweep where a corpus
 exists, (d) a D-entry when output legitimately differs. This is already
 practiced (terrain, 3di, lwf, mnu, mission); writing it down makes it the
-stated gate for the new writers (hudpos).
+stated gate for the new writers (hudpos, avatars).
 
 ### F5 — MissionController decomposition
 
@@ -105,9 +128,65 @@ stated gate for the new writers (hudpos).
 workspace; backlogged since #179). Decompose along its existing seams
 (placement/grounding, sim driver, environment, selection/edit ops, IO) the
 way #178 split the inspector — mechanical moves, tests remapped, no behavior
-change. This is a foundation item because Mission's Wave-2 work (heading,
-scripting depth) must land in reviewable files. Gate: mission suites (30
-files) + canary + full GUT keystone.
+change. Sequenced before any MIS phase. Gate: mission suites (30 files) +
+canary + full GUT keystone.
+
+## TST — public-seam test refits (umbrella Wave 2; ADR 0018)
+
+The suite pokes `_private` members of other objects on ~1,300 lines; the
+top offenders get refit slices, by ADR 0018's categories: (A) child-control
+reach-ins → public accessors (the `get_workspace_adapter` precedent), (B)
+private methods as entry points → public verbs, (C) internal state reads →
+public getters for contract state. Order: `mission_inspector_test` (301
+lines), `terrain_editor_workstation_test` (152 — the canary, handled with
+extra care), `mission_controller_test` (100, after F5), `mnu_canvas_test`
+(92), the music suite (rides MUS-I's rebuild). Refit slices are
+refactor-only: identical assert counts prove it. The long tail converts
+adopt-on-touch under the ratchet.
+
+## RSP — responsive shell (umbrella Wave 2)
+
+Today: no content scaling anywhere, TWO conflicting window floors (1366×768
+in editor_app.gd vs 1024×640 in layout_persistence.gd), split offsets
+persisted as raw pixels, 21 `custom_minimum_size` sites in the workstation
+scene alone. The bones exist (full-rect anchors, expand flags, draggable
+splits, and `HudLayout.scale_rect` as scaler prior art).
+
+- RSP-1: the responsive-shell policy ADR — the scale model (content scale
+  vs chrome scaler), ONE window floor, ratio-based split persistence with a
+  versioned migration for existing user state, and the fixed-size audit
+  policy.
+- RSP-2: implementation — floors unified, persistence migrated, the
+  workstation chrome adapted, per-workspace fixed-size hotspots worked
+  through the audit list.
+- RSP-3: exactly one visual re-baseline slice (screenshot driver re-run;
+  all shots change once, reviewed once).
+- Gate: persistence-migration test; FULL GUT; the canary's deliberate edits
+  called out in review; the re-baseline pass.
+
+## MUS-D / MUS-I — the Music workspace redesign (Waves 2 → 3)
+
+The maintainer's verdict: very hard to use. The structural causes are
+verified: a 1,951-line single screen owning eight concerns (transport,
+breadcrumbs, section map, program view, variables, volume meter, event log,
+follow-live); a modal map↔section canvas swap (you never see both);
+breadcrumbs implying a hierarchy the flat state machine doesn't have;
+nested block widgets edited through popovers; the workspace opting out of
+the shell left lane (the only one); and a separate Bank mode.
+
+- MUS-D (Wave 2): a bounded design spike — UX model first (what an artist
+  does, in what order), a prototype of the screen layout, and a design
+  section landing in this doc. Signed constraints: the document/VM layer is
+  untouched and its 46 tests stay green UNMODIFIED; shell left-lane
+  conformance (workflow picker + inspector like every other workspace); no
+  modal map/section swap (both visible or explicitly split); navigation
+  honest about the flat machine; Live/Bank mode resolution; responsive-first
+  (post-RSP policy). Ends at a maintainer gate.
+- MUS-I (Wave 3): implementation in shippable slices — decompose the screen
+  along its eight concerns, unify the canvas, rework block/expr editing per
+  the accepted design. Every slice leaves the workspace usable.
+- Gate: the 46 doc/VM tests unmodified-green throughout; new screen tests;
+  FULL GUT; visual pass.
 
 ## Per-workspace phases
 
@@ -172,7 +251,8 @@ files) + canary + full GUT keystone.
   surface, not a preview claim). Gate: fnt suite + widget test.
 - FNT-2: format completeness audit — every `.fnt` field the runtime consumes
   is visible/editable or pinned as intentionally fixed. Gate: roundtrip test
-  extended to audited fields.
+  extended to audited fields. (The rasterizer's format facts move engine-side
+  under the umbrella's ENG-4.)
 - FNT-3: wire F3.
 
 ### Strings
@@ -196,11 +276,9 @@ files) + canary + full GUT keystone.
 
 ### Music
 
-- MUS-1: bar audit — R exclusion already pinned (headerless), E already the
-  exemplar (live director = the VM). Verify play/edit parity gates still
-  cover the full authoring surface post-editor-layer program. Gate: the 46
-  music tests.
-- MUS-2: wire F3 (authored gamemus/menumus override → menu/game music).
+The redesign (MUS-D/MUS-I above) IS this workspace's maturity work; its
+R/W/E axes are already at bar. MUS-G: wire F3 (authored gamemus/menumus
+override → menu/game music) rides MUS-I's tail.
 
 ### Menus
 
@@ -237,6 +315,36 @@ files) + canary + full GUT keystone.
   goes live-rendered + hud suite.
 - HUD-4: wire F3 (authored hudpos.def → real game HUD).
 
+### Avatars (post-AVA phases)
+
+- AVT-1: bar audit against this doc's definitions once merged (the branch
+  work predates the bar); fill the matrix row honestly and file gaps as
+  phases. Expected early items: writer parity per F4, F3 wiring, preview
+  truthfulness vs the runtime player.mnu flow.
+
+## REF — reference/link infrastructure gaps (umbrella Wave 3)
+
+The index and jump surfaces are solid (RefGraph + extractors for
+.env/.kda/.3di/.bms/.mis/.mnu/items.def/cbin; ReferenceStrip + link
+widgets). Close the extractor gaps via the documented plug-in point
+(refs.cpp `extract()`/`can_extract()`, the `extract_items_def` pattern):
+
+- REF-1: `weapon.def` extractor (graphic/husk/sound edges like items.def).
+- REF-2: `Avatars.def` extractor (post-AVA).
+- REF-3: `.wac` extractor (script → referenced resources).
+- REF-4: source coverage — `.trn`, `.sbf`/`.lwf`, strings tables as edge
+  SOURCES so "Used by" answers are complete.
+- Gate per slice: refs ctests + the reference_index GUT suite; no editor
+  changes needed (the strips consume whatever edges exist).
+
+## REQ — required-resources conveniences (umbrella Wave 3)
+
+Over the umbrella's ENG-6 manifest (the witnessed boot-required resource
+set): ONED surfaces missing-required diagnostics (browser/status), and the
+"new game" scaffold seed — create-from-minimal-set wiring the per-workspace
+`new_current()` hooks. Defines the editor half of "what a person starts
+with to make a new game"; the Game workspace itself stays out of scope.
+
 ## RE ledger (all engine-research/grill-ida routed, landing via re-doc)
 
 - R1 mission placed-object heading semantics (blocks MIS-1)
@@ -247,40 +355,37 @@ files) + canary + full GUT keystone.
 - R5 credits roll cadence citations (only if CRE-1 finds them uncited)
 - R6 menu action verbs beyond current witness (only if MNU-2 finds gaps)
 - R7 sound attenuation/falloff model (blocks SND-2 if unwitnessed)
+- R8 boot-required resource enumeration — owned by the umbrella's ENG-6;
+  listed here because REQ consumes it.
 
 Rule: UI is never built ahead of the witness — a grill that invalidates an
 assumption re-scopes the phase before code lands (the faithful-port rule).
 
-## Sequencing
+## Sequencing (keyed to the umbrella's waves)
 
-- **Wave 0 — foundation:** F1, F2, F3, F4, F5. (F3's packaged-product boot
-  smoke already landed with the `run/main_scene.modtools` fix.)
-- **Wave 1 — no-RE adoptions:** OBJ-1/3/4, FNT-1/2, STR-1/2, CRE-1, MNU-1,
-  SND-1, MUS-1, TER-1, ENV-1, and every F3 wiring (TER through MUS).
-- **Wave 2 — RE-gated bring-ups:** HUD-1..4, MIS-1..3, OBJ-2, SND-2, MNU-2 —
-  each preceded by its R-item; grills can start during Wave 1.
-- **Wave 3 — equalize + end gate:** matrix re-audit (every cell ✓ or a
-  tracked decision), FULL GUT, the screenshot driver grows the new truth
-  shots (object-in-world, HUD live, menu flow run), consolidated oned-run
-  pass, program status recorded here.
+- **Umbrella Wave 1:** AVA first, then F1–F5 (F5 before any MIS phase).
+- **Umbrella Wave 2:** the no-RE adoptions — OBJ-1/3/4, FNT-1/2, STR-1/2,
+  CRE-1, MNU-1, SND-1, TER-1, ENV-1, every F3 wiring — plus TST refits,
+  RSP-1..3, and MUS-D (maintainer gate at its end). R1–R7 grills run
+  throughout (freeze-exempt).
+- **Umbrella Wave 3:** the RE-gated bring-ups — HUD-1..4, MIS-1..3, OBJ-2,
+  SND-2, MNU-2 — plus MUS-I, REF-1..4, REQ, AVT-1.
+- **Umbrella Wave 4:** the matrix re-audit over twelve workspaces (every
+  cell ✓ or a tracked decision), the driver's new truth shots
+  (object-in-world, HUD live, menu flow run, avatars), consolidated
+  oned-run pass, status recorded here.
 
 ## Execution conventions
 
-Unchanged from the editor-layer program, plus the new guards:
-
-- One slice = one commit, independently green and revertable; scoped suites
-  per slice; FULL GUT at F5, after the HUD block, and program end. Canary:
-  `terrain_editor_workstation_test.gd`. GUT silent-drop protocol on every
-  class_name/path move.
-- Native work (HUD-1 writer, any binding): `scripts/build_godot.sh`,
-  stale-DLL check, `--import`, scoped ctest, dumpbin export-identity where
-  the C ABI is touched.
-- Every packaged product must pass the boot smoke (now in
-  `scripts/package_godot_windows.ps1`); artifact testing happens on CI
-  packages, not dev trees.
-- UI copy stays artist-facing; engine terms stay in code/docs.
-- Parity rules: ADR 0003 (no raw passthrough), [orig] citations inline,
-  divergences as D-entries via re-doc.
+The umbrella's conventions apply (one green slice = one commit; FULL GUT at
+F5, post-HUD, post-MUS-I, and wave boundaries; canary
+`terrain_editor_workstation_test.gd`; GUT silent-drop protocol on every
+class_name/path move; native work rebuilds the GDExtension with the
+stale-DLL check + scoped ctest + dumpbin on C-ABI touches; packaged boot
+smokes; UI copy artist-facing; ADR 0003 writers; [orig] citations;
+divergences as D-entries via re-doc). New work is built to ADRs 0016/0017/
+0018 from the start — engine facts via public APIs, typed records, no
+private-poking tests.
 
 ## Top risks
 
@@ -289,10 +394,15 @@ Unchanged from the editor-layer program, plus the new guards:
    the witness disagrees.
 2. **F1 extraction entangles mission seams** the way A8's popover block did:
    extract with seams intact, mechanical first, redesign never mid-move.
-3. **F5 churn**: 4k lines moving while Wave-1 work proceeds elsewhere — land
+3. **F5 churn**: 4k lines moving while Wave-2 work proceeds elsewhere — land
    F5 before any MIS phase, and keep it purely mechanical.
 4. **Flow-run sandbox escape** (MNU-1): the interceptor must catch every
    host-policy verb (quit/launch/cross-file) or a menu action closes the
    editor; the flow-run test enumerates the verbs.
 5. **Scope creep toward a game-launcher IDE** (F3): the launcher is one
    gesture + docs, not a session manager; anything more is a new program.
+6. **Avatars drift** (AVA): the branch predates the editor-layer program AND
+   this program's standards — expect adapter-contract and framework deltas;
+   the merge train budgets a conformance pass, not a blind rebase.
+7. **Music redesign creep** (MUS-D/I): bounded spike, signed constraints,
+   maintainer gate, shippable slices (also tracked at the umbrella level).
