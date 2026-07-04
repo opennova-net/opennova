@@ -14,7 +14,6 @@ add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
 add_subdirectory(../../libs/bad opennova_bad)
-add_subdirectory(../../libs/adm opennova_adm)
 add_subdirectory(../../libs/anim opennova_anim)
 add_subdirectory(../../libs/pff opennova_pff)
 add_subdirectory(../../libs/gameprofile opennova_gameprofile)
@@ -31,7 +30,6 @@ add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/sbf opennova_sbf)
 add_subdirectory(../../libs/mus opennova_mus)
-add_subdirectory(../../libs/mnu_xml opennova_mnu_xml)
 add_subdirectory(../../libs/mnu opennova_mnu)
 add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
@@ -168,7 +166,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_env
     opennova_threedi
     opennova_bad
-    opennova_adm
     opennova_anim
     opennova_pff
     opennova_gameprofile
@@ -183,7 +180,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_sbf
     opennova_scr
     opennova_mus
-    opennova_mnu_xml
     opennova_mnu
     opennova_mns
     opennova_def

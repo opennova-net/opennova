@@ -49,8 +49,8 @@ add_test(NAME threedi_userpoint_ir COMMAND threedi_userpoint_ir_test)
 
 # ADM tests
 foreach(test comment trim_value parse write)
-    add_executable(adm_${test}_test adm/adm_${test}_test.cpp)
-    target_link_libraries(adm_${test}_test PRIVATE opennova_adm)
+    add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
+    target_link_libraries(adm_${test}_test PRIVATE opennova_anim)
     target_include_directories(adm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME adm_${test} COMMAND adm_${test}_test)
 endforeach()
@@ -673,8 +673,8 @@ target_compile_definitions(cbin_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CM
 add_test(NAME cbin_roundtrip COMMAND cbin_roundtrip_test)
 
 # MNU menu UI tests (forgiving XML parser, MNU AST + serialize roundtrip, MNS stylesheet)
-add_executable(mnu_xml_unit_test mnu_xml/mnu_xml_unit_test.cpp)
-target_link_libraries(mnu_xml_unit_test PRIVATE opennova_mnu_xml)
+add_executable(mnu_xml_unit_test mnu/mnu_xml_unit_test.cpp)
+target_link_libraries(mnu_xml_unit_test PRIVATE opennova_mnu)
 target_include_directories(mnu_xml_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mnu_xml_unit COMMAND mnu_xml_unit_test)
 

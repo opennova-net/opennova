@@ -14,7 +14,6 @@ add_subdirectory(libs/cpt)
 add_subdirectory(libs/env)
 add_subdirectory(libs/threedi)
 add_subdirectory(libs/bad)
-add_subdirectory(libs/adm)
 add_subdirectory(libs/anim)
 add_subdirectory(libs/pff)
 add_subdirectory(libs/gameprofile)
@@ -34,7 +33,6 @@ add_subdirectory(libs/world)
 add_subdirectory(libs/wac)
 add_subdirectory(libs/sbf)
 add_subdirectory(libs/mus)
-add_subdirectory(libs/mnu_xml)
 add_subdirectory(libs/mnu)
 add_subdirectory(libs/mns)
 add_subdirectory(libs/mission)
@@ -134,7 +132,6 @@ set(OPENNOVA_CORE_TARGETS
     opennova_bfc1
     opennova_cbin
     opennova_bad
-    opennova_adm
     opennova_anim
     opennova_def
     opennova_scr
@@ -149,7 +146,6 @@ set(OPENNOVA_CORE_TARGETS
     opennova_wac
     opennova_sbf
     opennova_mus
-    opennova_mnu_xml
     opennova_mnu
     opennova_mns
     opennova_mission
