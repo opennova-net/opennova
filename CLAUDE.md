@@ -129,4 +129,4 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - Directory-scoped agent rules: `libs/CLAUDE.md`, `godot/engine/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
-  `extract-pr`, `grill-ida`, `engine-research`.
+  `extract-pr`, `grill-ida`, `engine-research`, `blender-object`, `tdd`.
