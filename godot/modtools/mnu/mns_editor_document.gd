@@ -3,7 +3,7 @@ extends EditorResourceDocument
 
 # Menu stylesheet (.mns) document: the shared EditorResourceDocument lifecycle
 # over an MnsStyleSheet. All format behavior lives in the engine wrapper
-# (document-backed, lossless save; ADR 0009); only the seeded template, the
+# (document-backed, lossless save; ADR 0014); only the seeded template, the
 # byte loader, and the self-writing save are domain code.
 
 # A fresh stylesheet's header, in the artist's language (the real

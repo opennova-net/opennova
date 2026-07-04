@@ -1,8 +1,14 @@
-# Status
+# Status (historical record — NovaWorld integration, completed)
 
-Integration trunk: `web-nw-for-real-master`. All 20 PRs below are **MERGED** to the trunk; the
-single integration PR **#136** (`web-nw-for-real-master` → `master`) is **OPEN**.
-Updated: 2026-06-12.
+> **This file is a completed-effort record, not live status.** The integration PR #136
+> landed on master, and master has since moved well past it (the consolidated in-match
+> net core, ADR 0013, and the retail-join fidelity rounds in
+> `docs/net/novaworld-net-re.md`). For current truth read the source and
+> `docs/net/novaworld-net-re.md`; the tables below are kept as history.
+
+Integration trunk: `web-nw-for-real-master`. All 20 PRs below were **MERGED** to the trunk,
+and the single integration PR **#136** (`web-nw-for-real-master` → `master`) followed.
+Last updated as live status: 2026-06-12.
 
 **Remaining: PR 21 (operator-run cutover).** Runbook: [`pr21-cutover-runbook.md`](pr21-cutover-runbook.md).
 

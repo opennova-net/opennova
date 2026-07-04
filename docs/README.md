@@ -20,6 +20,8 @@ behavior is summarized and cited.
 | [`runtime-architecture.md`](runtime-architecture.md) | How a mission runs: the consolidated logic tick, present pass, and audio pass, mapped onto the original main loop |
 | [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
+| [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
+| [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
 | [`oned/editor-runtime-parity.md`](oned/editor-runtime-parity.md) | How ONED and the game runtime share rendering and simulation (the `edit_mode` runtime-node pattern, sampler seams, the one mission runtime) |
 | [`oned/editor-layer-program.md`](oned/editor-layer-program.md) | The editor-layer refactor program: landed architecture phases (EditorApp root, shell decomposition) and the remaining undo/shortcuts/widgets/theme phases with per-slice gates |
 
@@ -40,6 +42,7 @@ behavior is summarized and cited.
 | [0011](adr/0011-single-player-in-process-listen-server.md) | Single-player is the in-process listen server (network-shaped); supersedes ADR 0009's "SP pays nothing" |
 | [0012](adr/0012-player-is-host-side-server-entity.md) | The player is a host-side server entity driven by a wire-shaped (C2S 0x0C) intent |
 | [0013](adr/0013-consolidated-net-core.md) | Consolidated in-match net core: one message registry + capture→golden-diff harness, EntityRegistry as the one server-state authority, one host bring-up helper |
+| [0014](adr/0014-mns-lossless-document-model.md) | MNS: stylesheets parse into a lossless document; the flat table is its flatten() view |
 
 ## RE records by domain
 

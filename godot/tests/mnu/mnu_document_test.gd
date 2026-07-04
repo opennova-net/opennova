@@ -312,7 +312,7 @@ func test_mns_stylesheet() -> void:
 	assert_eq(sheet.substitute("%UNKNOWN%"), "%UNKNOWN%", "unknown var left as-is")
 
 
-# --- MNS document surface (lossless model behind MnsStyleSheet, ADR 0009) -------
+# --- MNS document surface (lossless model behind MnsStyleSheet, ADR 0014) -------
 
 func _real_mns_bytes() -> PackedByteArray:
 	return FileAccess.get_file_as_bytes("res://../fixtures/mns/menu_style.mns")

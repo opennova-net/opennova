@@ -4,7 +4,7 @@ extends RefCounted
 ## Runtime mission audio orchestrator. Loads the mission's co-named .LWF + the
 ## global banks into a NovaSoundBank, resolves each placed sound marker to a
 ## sound set BY NAME (items.def soundloop_1..7 -> Multi.name; the engine is
-## name-keyed, not target_id — see notes/grill.md), and spawns a looping
+## name-keyed, not target_id — see docs/audio/lwf-dbf-sound-re.md), and spawns a looping
 ## AudioStreamPlayer3D voice at the marker. Also exposes the PlayWavList action
 ## seam and the music/reverb bed. Voice culling runs from tick(camera_pos).
 ##
@@ -32,7 +32,7 @@ const CULL_RADIUS := 240.0  # mission units (== Godot units); pause beyond this
 # Marker -> sound set resolution strategy. The faithful default is the marker
 # item's items.def soundloop_1..7 set names (e.g. id 106178 "snd: Lp Flourescent
 # Light" -> soundloop_1 LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4];
-# the engine is name-keyed (notes/grill.md). The others stay as seams.
+# the engine is name-keyed (docs/audio/lwf-dbf-sound-re.md). The others stay as seams.
 const STRATEGY_ITEM_SOUNDLOOP := 0
 const STRATEGY_MARKER_NAME := 1
 const STRATEGY_TARGET_ID := 2
@@ -123,7 +123,7 @@ func get_bank() -> NovaSoundBank:
 
 ## PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 ## position. The .bms action param -> set-name decode is left to the caller (the
-## engine resolves a pre-loaded sound_id handle; see notes/grill.md
+## engine resolves a pre-loaded sound_id handle; see docs/audio/lwf-dbf-sound-re.md
 ## ActionSlot_PlaySound @0x4010c0).
 func fire_soundset(name: String, world_pos: Vector3) -> bool:
 	if _bank == null or _audio_root == null:

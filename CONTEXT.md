@@ -89,3 +89,26 @@ single-player runs this way — the sim serializes real entity state through the
 and the present pass renders the locally-decoded result, so SP, co-op, and multiplayer
 share one replication path (only the transport differs). See ADR 0011.
 _Avoid_: standalone server, dedicated server (those have no local player)
+
+## Editor & Runtime
+
+**ONED**:
+The OpenNova Editor (`godot/modtools/`): the authoring application, eleven workspaces over
+one code-first framework. "ONED" or "the editor" in prose.
+_Avoid_: terrain editor, modtools (as a name)
+
+**Workspace**:
+One asset-domain authoring surface inside ONED (Terrain, Object, Mission, Fonts, Credits,
+Strings, Menus, HUD, Music, Sound, Environment). A workspace declares itself as a typed
+registry row and exposes capability hooks; the shell never switches on its type.
+_Avoid_: tab, tool, mode
+
+**HUD**:
+The in-game heads-up display, laid out by `hudpos.def`; also the read-only ONED workspace
+that previews that layout. RE record: `docs/interface/hud-re.md`.
+_Avoid_: overlay (that is the debug overlay), UI (too broad)
+
+**Present pass**:
+The per-frame apply step that projects simulation state onto scene nodes
+(`MissionPresentPass`), one pass shared by the game host and play-in-editor (ADR 0006).
+_Avoid_: render pass, sync pass

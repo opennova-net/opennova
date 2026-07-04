@@ -16,7 +16,7 @@ std::string compose_render_mode(ObjectShaderKey key) {
 	const bool alpha_test = has_flag(key, OSCAP_ALPHA_TEST);
 	const uint32_t blend = static_cast<uint32_t>(decode_object_shader_blend(key));
 
-	// Mirrors canonical at opennova-godot-new/src/model/nova_shader_cache.cpp:99-127.
+	// Ported from the pre-repo prototype nova_shader_cache.cpp:99-127.
 	// Always emits a blend mode (default `blend_mix` for Opaque + AlphaBlend);
 	// without one Godot may push the surface into a different render pass
 	// from the one our depth-draw / cull settings expect.

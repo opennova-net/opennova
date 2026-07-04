@@ -9,8 +9,8 @@ extends RefCounted
 # SCR0 files) the var roles are pinned by the HOST side in Jointops.exe: the
 # game writes each slot via AudioVM_SetVariable @ 0x671FA0, so the (index ->
 # meaning) map is read straight off the call sites (see the per-script comments
-# below). This is corroborated by on-godot-oscarmike's hand-annotated
-# .scratch/menumus_commented.mus and our golden decompile (the script side).
+# below). This is corroborated by a hand-annotated menumus decompile from the
+# original RE pass and our golden decompile (the script side).
 # For any other script (user-authored, third-party) we fall back to the
 # raw VarXX label.
 #
@@ -29,7 +29,7 @@ const KNOWN := {
 	#        Witnessed: Jointops.exe!UI_DispatchScreenEvent @ 0x54E6A0 (store at
 	#        0x54EFF4) -> AudioVM_SetVariable(2, ...) @ 0x671FA0.
 	# Var14: "Intro played" flag (0=not yet, 1=played); guards JOMENU601
-	# Source: on-godot-oscarmike .scratch/menumus_commented.mus lines 77-87
+	# Source: the hand-annotated menumus decompile from the original RE pass (lines 77-87)
 	"menuscript": {
 		0: "Entry",
 		2: "MenuScreen",

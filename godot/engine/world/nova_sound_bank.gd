@@ -13,7 +13,7 @@ extends RefCounted
 ## Resolution is NAME-keyed and case-insensitive, matching the engine
 ## (SoundBank_FindTriggerByName @ 0x75be90 stricmp's set names;
 ## SoundProfile_FindLoadedByName @ 0x5274f0 for the profile layer); the .lwf
-## Multi.target_id is NOT used. See notes/grill.md.
+## Multi.target_id is NOT used. See docs/audio/lwf-dbf-sound-re.md.
 
 # Mirrors NovaLwfData / opennova::audio::SelectionMode selection-mode constants.
 const SELECTION_FIRST := 0

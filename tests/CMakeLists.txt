@@ -513,8 +513,7 @@ add_test(NAME foliage_map_remap_indices COMMAND foliage_map_remap_indices_test)
 
 # Foliage placement + dispatcher parity tests — exercise sub_5C0240 / sub_5C1940
 # invariants (deterministic PRNG, 21-cap, 4-quadrant walk, 128-LRU, 8-frame
-# stagger, 38.0 near-Z reject). See libs/foliage/include/foliage/placement.h,
-# docs/engine_spec_foliage.md §4–§5, RE/kong/kong_output_jodemo/terrain.c:15026+.
+# stagger, 38.0 near-Z reject). See libs/foliage/include/foliage/placement.h.
 foreach(name placement_determinism placement_cap placement_midpoints dispatcher_quadrants dispatcher_lru dispatcher_stagger dispatcher_near_z dispatcher_frame_progression)
     add_executable(foliage_${name}_test foliage/foliage_${name}_test.cpp)
     target_link_libraries(foliage_${name}_test PRIVATE opennova_foliage)

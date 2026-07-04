@@ -1,6 +1,6 @@
 """
 Common definitions parsing logic for Novalogic files.
-Adapted from .scratch/opennova/definitions.py with imports updated to use
+Adapted from the pre-repo import prototype with imports updated to use
 the local opennova package (FFI + pure-Python parsers).
 """
 

@@ -1,7 +1,7 @@
 /* MUS bytecode -> .mus source decompiler.
 
-   Reference implementation:
-       on-godot-oscarmike/.scratch/mus_decompiler.py (1726 lines).
+   Reference implementation: the pre-repo Python MUS decompiler (1726 lines)
+   that this port structurally mirrors.
 
    The Python decompiler is a high-level source decompiler: it parses the
    editor debug-export table for section names and source path, performs

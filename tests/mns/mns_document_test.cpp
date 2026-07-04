@@ -1,4 +1,4 @@
-/* MNS lossless document model tests (mns::Document, ADR 0009).
+/* MNS lossless document model tests (mns::Document, ADR 0014).
 
    The committed fixture fixtures/mns/menu_style.mns is the real shipped JO
    stylesheet, sourced byte-exact from the revx02 menu set (the same provenance
@@ -11,7 +11,7 @@
      and synthetic edge cases);
    - flatten() reproduces the legacy mns::parse view exactly;
    - edits are minimal-delta (an edited value changes only its own line) and
-     the collapse/append/escaping policies match ADR 0009;
+     the collapse/append/escaping policies match ADR 0014;
    - diagnostics report the spec's error conditions without failing the parse.
 
    Runs from the repo root (ctest WORKING_DIRECTORY), like mnu_compat. */
@@ -366,7 +366,7 @@ static int test_edit_preserves_inline_comment() {
 
 static int test_edit_multiline_collapse() {
 	// Collapsing keeps the first line's layout and coalesces every spanned
-	// inline comment (content preserved, position approximated; ADR 0009).
+	// inline comment (content preserved, position approximated; ADR 0014).
 	mns::Document doc = mns::Document::parse(std::string("FOO bar \\ // c1\n  baz // c2\n"));
 	std::string error;
 	TEST_EXPECT(doc.set_value("FOO", "new", &error));

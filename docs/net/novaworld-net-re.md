@@ -6290,8 +6290,8 @@ Status: `libs/novaworld/http_login.{h,cpp}` now carries the Godot-free pieces of
 (`build_credentials_post_body`, `parse_set_cookie_values`, `CookieJar`), proven against the
 server's own decode path by `tests/novaworld/http_login_test` (ctest `http_login`). The remaining
 Phase-3 work is host-side: the binding's HTTP login chain (prepare GET → login POST → relay GET,
-cookie capture) and the panel's credential fields. Rename proposals from this grill:
-`notes/grill-nws5-ida-renames.md`.
+cookie capture) and the panel's credential fields. Rename proposals from this grill were applied in the Wave-5 IDA rename pass;
+the IDB is the live record.
 
 > **SUPERSEDED by Wave 5 (below).** Wave 4's "the verify leg needs the HTTP login first" /
 > "the verify `Cookie` var-list is lifted from the login cookie jar" conclusion was an

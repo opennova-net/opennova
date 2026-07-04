@@ -48,7 +48,7 @@ static uint32_t smallest_after(uint32_t lo, const uint32_t *cands, size_t n,
    decompiler care.
 
    The IDA witness puts this region at MU01 + `string_section_offset`. The
-   on-godot-oscarmike Python decompiler reads the same data via the chunk's
+   pre-repo Python decompiler reads the same data via the chunk's
    +0x38 field; we follow that lead because it round-trips with the Python
    golden. */
 static void parse_debug_export(const uint8_t *data, size_t size,

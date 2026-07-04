@@ -8,14 +8,21 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `libs/` — portable C++ core (39 format/runtime libraries: terrain, threedi, mission,
-  wac, world, audio, pff, vfs, ...). Godot-agnostic — no Godot types ever. Consumed via
-  flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
-- `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes),
-  `modtools/` (the OpenNova Editor "ONED" — eleven authoring workspaces), `game/` (runtime),
-  `tests/` (GUT suite).
-- `apps/importer/` — Python + native FFI importer behind `onimport.exe`; `blender/` and
-  `opennova_max/` are the DCC export plugins; `pyopennova/` is the Python FFI layer.
+- `libs/` — portable C++ core (format/runtime libraries: terrain, threedi, mission,
+  wac, world, novaworld, audio, pff, vfs, ...). Godot-agnostic — no Godot types ever.
+  Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
+- `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes,
+  plus the shared host-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
+  `modtools/` (the OpenNova Editor "ONED" — eleven authoring workspaces), `game/` (the
+  game shell), `tests/` (GUT suite).
+- `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
+  `novaworld_server/` (the NovaWorld service), `nw_server/` (headless in-match host),
+  `nw_pp/` (packet pretty-printer), `nw_replay/` (replay streamer), `common/` (shared
+  socket/pcap helpers, deliberately app-layer). `blender/` and `opennova_max/` are the
+  DCC export plugins; `pyopennova/` is the Python FFI layer.
+- `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
+  stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and
+  deployment stack (DEPLOY.md).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
