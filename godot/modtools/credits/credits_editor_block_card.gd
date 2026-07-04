@@ -4,10 +4,9 @@ extends PanelContainer
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
-# type chips so a selected card reads as its type at a glance.
-const CHIP_TEXT_COLOR := Color(0.84, 0.55, 0.29, 1.0)
+# type chips so a selected card reads as its type at a glance. TEXT rides the
+# editor accent (single-sourced in editor_theme.tres, EditorPalette/accent).
 const CHIP_IMAGE_COLOR := Color(0.45, 0.72, 0.88, 1.0)
-const SELECT_ACCENT_TEXT := CHIP_TEXT_COLOR
 const SELECT_ACCENT_IMAGE := CHIP_IMAGE_COLOR
 const SELECT_ACCENT_SPACE := Color(0.45, 0.48, 0.52, 1.0)
 const SPACER_FILL := Color(0.0863, 0.0941, 0.1098, 0.45)
@@ -170,7 +169,7 @@ func _refresh() -> void:
 
 	if is_text:
 		_type_chip.text = "TEXT"
-		_type_chip.add_theme_color_override("font_color", CHIP_TEXT_COLOR)
+		_type_chip.add_theme_color_override("font_color", _accent())
 		var entry_text: String = _entry.get_text()
 		if not _text_edit.has_focus() and _text_edit.text != entry_text:
 			_text_edit.text = entry_text
@@ -343,12 +342,17 @@ func _on_image_y_changed(value: float) -> void:
 	_begin_burst()
 	(_entry as CbinImageEntry).set_display_y(int(value))
 
+# The editor accent, read from the theme at use time (the card sits under the
+# shell's themed tree; standalone hosts fall back to the engine default).
+func _accent() -> Color:
+	return get_theme_color(&"accent", &"EditorPalette")
+
 func _selection_accent() -> Color:
 	if _entry is CbinImageEntry:
 		return SELECT_ACCENT_IMAGE
 	elif _entry is CbinNewlineEntry:
 		return SELECT_ACCENT_SPACE
-	return SELECT_ACCENT_TEXT
+	return _accent()
 
 func _ensure_selected_stylebox() -> StyleBoxFlat:
 	if _selected_stylebox == null:

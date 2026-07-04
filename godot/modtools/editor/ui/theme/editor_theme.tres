@@ -1,9 +1,9 @@
 [gd_resource type="Theme" format=3 uid="uid://brsq3gfp1bk2a"]
 
-[ext_resource type="Texture2D" uid="uid://cpvagxqi47w7g" path="res://modtools/terrain/ui/theme/icons/checkbox_unchecked.svg" id="1_checkbox_unchecked"]
-[ext_resource type="Texture2D" uid="uid://dme8iqgexfna5" path="res://modtools/terrain/ui/theme/icons/checkbox_checked.svg" id="2_checkbox_checked"]
-[ext_resource type="Texture2D" uid="uid://c0y5ehqlr1g5e" path="res://modtools/terrain/ui/theme/icons/checkbox_unchecked_disabled.svg" id="3_checkbox_unchecked_disabled"]
-[ext_resource type="Texture2D" uid="uid://c4cst33r5u08u" path="res://modtools/terrain/ui/theme/icons/checkbox_checked_disabled.svg" id="4_checkbox_checked_disabled"]
+[ext_resource type="Texture2D" uid="uid://cpvagxqi47w7g" path="res://modtools/editor/ui/theme/icons/checkbox_unchecked.svg" id="1_checkbox_unchecked"]
+[ext_resource type="Texture2D" uid="uid://dme8iqgexfna5" path="res://modtools/editor/ui/theme/icons/checkbox_checked.svg" id="2_checkbox_checked"]
+[ext_resource type="Texture2D" uid="uid://c0y5ehqlr1g5e" path="res://modtools/editor/ui/theme/icons/checkbox_unchecked_disabled.svg" id="3_checkbox_unchecked_disabled"]
+[ext_resource type="Texture2D" uid="uid://c4cst33r5u08u" path="res://modtools/editor/ui/theme/icons/checkbox_checked_disabled.svg" id="4_checkbox_checked_disabled"]
 
 [sub_resource type="StyleBoxFlat" id="sbx_panel_flat"]
 content_margin_left = 0.0
@@ -477,6 +477,7 @@ CheckButton/styles/hover = SubResource("sbx_check_hover")
 CheckButton/styles/normal = SubResource("sbx_check_normal")
 CheckButton/styles/pressed = SubResource("sbx_check_pressed")
 ConfirmationDialog/styles/panel = SubResource("sbx_dialog_panel")
+EditorPalette/colors/accent = Color(0.8392, 0.5529, 0.2902, 1)
 Error/base_type = &"Label"
 Error/colors/font_color = Color(0.9373, 0.2667, 0.2667, 1)
 FileDialog/colors/file_disabled_color = Color(0.6118, 0.6392, 0.6863, 0.55)

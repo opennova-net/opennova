@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://modtools/editor/editor_workstation.gd" id="1_workstation"]
-[ext_resource type="Theme" uid="uid://brsq3gfp1bk2a" path="res://modtools/terrain/ui/theme/editor_theme.tres" id="2_theme"]
+[ext_resource type="Theme" uid="uid://brsq3gfp1bk2a" path="res://modtools/editor/ui/theme/editor_theme.tres" id="2_theme"]
 [ext_resource type="Script" path="res://modtools/framework/popover_panel.gd" id="3_popover"]
 
 [node name="EditorWorkstation" type="Control"]

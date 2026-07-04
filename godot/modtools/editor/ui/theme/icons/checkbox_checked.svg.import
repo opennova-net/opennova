@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cpvagxqi47w7g"
-path="res://.godot/imported/checkbox_unchecked.svg-78f781205afd9c76b11b0e1ab46fb4eb.ctex"
+uid="uid://dme8iqgexfna5"
+path="res://.godot/imported/checkbox_checked.svg-ae89d1e17a87b37f9ad0d3a44db50e3f.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://modtools/terrain/ui/theme/icons/checkbox_unchecked.svg"
-dest_files=["res://.godot/imported/checkbox_unchecked.svg-78f781205afd9c76b11b0e1ab46fb4eb.ctex"]
+source_file="res://modtools/editor/ui/theme/icons/checkbox_checked.svg"
+dest_files=["res://.godot/imported/checkbox_checked.svg-ae89d1e17a87b37f9ad0d3a44db50e3f.ctex"]
 
 [params]
 

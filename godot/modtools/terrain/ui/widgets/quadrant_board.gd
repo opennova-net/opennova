@@ -19,7 +19,6 @@ const SECTOR_COLORS := [
 
 const GRID_LINE_COLOR := Color(0.08, 0.09, 0.10, 1.0)
 const HOVER_COLOR := Color(1.0, 1.0, 1.0, 0.12)
-const ACTIVE_BORDER := Color(0.84, 0.55, 0.29, 0.95)
 
 var cols: int = 8
 var rows: int = 8
@@ -84,7 +83,8 @@ func _draw() -> void:
 
 	if active_cell.x >= 0 and active_cell.y >= 0:
 		var active_pos := rect.position + Vector2(active_cell.y * cell_w, active_cell.x * cell_h)
-		draw_rect(Rect2(active_pos + Vector2(1, 1), Vector2(cell_w - 2, cell_h - 2)), ACTIVE_BORDER, false, 2.0)
+		var active_border := Color(get_theme_color(&"accent", &"EditorPalette"), 0.95)
+		draw_rect(Rect2(active_pos + Vector2(1, 1), Vector2(cell_w - 2, cell_h - 2)), active_border, false, 2.0)
 
 
 func _gui_input(event: InputEvent) -> void:

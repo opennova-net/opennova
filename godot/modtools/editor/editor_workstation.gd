@@ -549,13 +549,14 @@ func _wire_nav_buttons() -> void:
 	_refresh_nav_buttons()
 
 
-# Local-only active-row emphasis (no editor_theme.tres change). The themed pressed
-# background is darker than normal, so in a tall uniform list a hovered inactive
-# row can read heavier than the active one; a faint accent fill fixes that.
+# Local-only active-row emphasis (a stylebox no themed control carries). The themed
+# pressed background is darker than normal, so in a tall uniform list a hovered
+# inactive row can read heavier than the active one; a faint accent fill fixes that.
 func _make_workspace_active_stylebox() -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.8392, 0.5529, 0.2902, 0.22)
-	sb.border_color = Color(0.8392, 0.5529, 0.2902, 0.9)
+	var accent := get_theme_color(&"accent", &"EditorPalette")
+	sb.bg_color = Color(accent, 0.22)
+	sb.border_color = Color(accent, 0.9)
 	sb.set_border_width_all(1)
 	sb.set_corner_radius_all(3)
 	sb.content_margin_left = 10.0
