@@ -125,5 +125,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   with one README per workspace.
 - Directory-scoped agent rules: `libs/CLAUDE.md`, `godot/engine/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
-- Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
-  `extract-pr`, `grill-ida`, `engine-research`.
+- Project skills in `.claude/skills/`: repo-specific — `gut`, `oned-run`, `new-format-lib`,
+  `re-doc`, `extract-pr`, `grill-ida`, `engine-research`, `blender-object` — plus Matt
+  Pocock's engineering set (`ask-matt` routes through it): `grill-with-docs`,
+  `domain-modeling`, `codebase-design`, `prototype`, `to-prd`, `to-issues`, `implement`,
+  `tdd`, `two-axis-review` (his `code-review`, renamed to not shadow the built-in
+  `/code-review`), `diagnosing-bugs`, `improve-codebase-architecture`, `research`, `triage`,
+  `setup-matt-pocock-skills`.
