@@ -86,6 +86,46 @@ func test_combo_popup_suppressed_in_edit_mode() -> void:
 	assert_false(combo.is_popup_open(), "popup never opens in edit_mode")
 
 
+func test_combo_popup_uses_authored_listbox_rect() -> void:
+	# The dropdown opens at the authored <LIST_BOX> POSITION (combo-relative, design
+	# space), like the original's embedded CListWnd rect -- not a recomputed below-combo
+	# box that would drop the semi-transparent list over sibling widgets (D-MNU-7).
+	var menu := _build_menu()
+	var combo := _combo(menu)
+	combo.open_popup()
+	var popup := combo.find_child("Popup", true, false) as Control
+	assert_not_null(popup, "popup built")
+	# ServerList authors LIST_BOX POSITION 230,290 -> 410,360.
+	assert_eq(popup.position, Vector2(230, 290), "popup at the authored LIST_BOX position")
+	assert_eq(popup.size, Vector2(180, 70), "popup uses the authored LIST_BOX size")
+	# MIN_ITEM_HEIGHT=14 drives the row height (D-MNU-8).
+	var row0 := combo.find_child("Item0", true, false) as Control
+	assert_eq(row0.custom_minimum_size.y, 14.0, "row height follows MIN_ITEM_HEIGHT")
+	combo.close_popup()
+
+
+func test_combo_popup_fallback_when_no_listbox_rect() -> void:
+	# A host-built combo with no authored LIST_BOX rect (server browsers, option lists)
+	# keeps the below-combo fallback: dropped below, clamped to the window, scrolling.
+	var combo := NovaMnuCombo.new()
+	add_child_autofree(combo)
+	combo.set_size(Vector2(120, 20))
+	var many: Array = []
+	for i in range(200):
+		many.append("Opt %d" % i)
+	combo.set_items(many)
+	combo.open_popup()
+	var popup := combo.find_child("Popup", true, false) as Control
+	assert_not_null(popup, "fallback popup built")
+	assert_eq(popup.position, Vector2(0, 20), "fallback popup drops below the combo")
+	assert_eq(popup.size.x, 120.0, "fallback popup matches the combo width")
+	var row0 := combo.find_child("Item0", true, false) as Control
+	var natural := 200.0 * row0.custom_minimum_size.y
+	assert_lt(popup.size.y, natural, "fallback clamps below the natural list height")
+	assert_gt(popup.size.y, 0.0, "fallback keeps a positive height")
+	combo.close_popup()
+
+
 func test_combo_popup_clamps_and_scrolls_long_list() -> void:
 	var menu := _build_menu()
 	var combo := _combo(menu)

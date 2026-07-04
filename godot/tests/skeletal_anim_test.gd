@@ -101,6 +101,43 @@ func test_skeletal_anim_resource_basics() -> void:
 	assert_eq(sk.slot_to_key(2), "", "slot_to_key on an unloaded set is empty.")
 
 
+func test_load_from_bad_files_binds_raw_bads() -> void:
+	# The PLAYER_INFO preview path [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]: build a
+	# skeletal set from explicit raw .bad files with no .adm. Uses the committed idle.bad as
+	# both the rest/skeleton source and the clip, registered under the canonical idle key.
+	var sk := NovaSkeletalAnim.new()
+	if not sk.has_method("load_from_bad_files"):
+		fail_test("NovaSkeletalAnim exposes load_from_bad_files(root, skeleton_bad, key_to_bad)")
+		return
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	assert_true(sk.load_from_bad_files(root, "idle.bad", {"anim_idle": "idle.bad"}),
+		"raw .bad bind loads: %s" % sk.get_last_error())
+	assert_true(sk.is_loaded(), "loaded after a successful raw-.bad bind")
+	assert_true(sk.has_clip("anim_idle"), "the idle clip is registered under anim_idle")
+	assert_gt(sk.get_bone_count(), 0, "the skeleton bones came from the rest .bad")
+	assert_eq(sk.slot_to_key(1), "anim_idle", "kBodyAnimIdle resolves to the registered idle clip")
+	assert_eq(sk.eval_pose("anim_idle", 0.0).size(), sk.get_bone_count(),
+		"eval_pose returns one transform per skeleton bone")
+
+
+func test_load_from_bad_files_fails_gracefully() -> void:
+	var sk := NovaSkeletalAnim.new()
+	if not sk.has_method("load_from_bad_files"):
+		fail_test("NovaSkeletalAnim exposes load_from_bad_files")
+		return
+	var root := NovaResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	# Missing skeleton .bad -> false + error, not loaded.
+	assert_false(sk.load_from_bad_files(root, "does_not_exist.bad", {"anim_idle": "idle.bad"}),
+		"a missing skeleton .bad fails")
+	assert_false(sk.is_loaded())
+	assert_ne(sk.get_last_error(), "", "an error message is reported")
+	# Null resource root also fails without crashing.
+	assert_false(sk.load_from_bad_files(null, "idle.bad", {"anim_idle": "idle.bad"}),
+		"a null resource root fails")
+
+
 func test_model_skeletal_methods_no_op_without_set() -> void:
 	var model = NovaObjectModelScript.new()
 	add_child_autofree(model)
@@ -221,6 +258,20 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 		"IDA half-frame phase ticks map to skeleton pose seconds")
 	assert_true(model.get_skeleton().get_bone_pose_position(0).is_equal_approx(pinned_pose),
 		"externally phased playback does not free-run between sim snapshots")
+
+
+func test_skinned_model_reports_nonzero_bounds() -> void:
+	# Skinned (and rigid-fake-skinned) submeshes hang under the Skeleton3D, not the Robj part
+	# nodes. get_model_bounds() must still report real bounds for a fully-skinned model, or any
+	# bounds consumer (e.g. the avatar menu-portrait framing) sees an empty AABB and never frames.
+	var model = NovaObjectModelScript.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(_loaded_skeletal())
+	model.set_object_data(_open(SHED))
+	assert_true(model.has_skeleton(), "the rigid model fake-skins into a Skeleton3D")
+	await get_tree().process_frame
+	var bounds: AABB = model.get_model_bounds()
+	assert_gt(bounds.size.length(), 0.0, "a fully-skinned model still reports non-zero bounds")
 
 
 func test_scrub_no_ops_without_skeletal_or_clip() -> void:

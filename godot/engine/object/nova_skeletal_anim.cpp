@@ -168,16 +168,89 @@ bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 		}
 	}
 
-	// Pass 1: parse the reset .bad -> canonical bones, shared rest origins, and the bind pose.
+	// Read the reset/skeleton .bad + each listed clip .bad, then build via the shared core.
+	const PackedByteArray reset_bytes = reset_value.is_empty()
+			? PackedByteArray()
+			: p_resource_root->read_file(resolve_bad(reset_value));
+	if (reset_bytes.is_empty()) {
+		adm_free(&adm);
+		last_error_ = "Reset animation not found for: " + p_adm_name;
+		return false;
+	}
+	std::vector<std::pair<String, PackedByteArray>> clip_bads;
+	for (size_t i = 0; i < adm.count; ++i) {
+		const String key = String(adm.entries[i].key);
+		const String value = String(adm.entries[i].value);
+		if (value.is_empty()) {
+			continue;
+		}
+		const PackedByteArray bad_bytes = p_resource_root->read_file(resolve_bad(value));
+		if (bad_bytes.is_empty()) {
+			continue;  // continue-on-failure (matches the DCC importer's behaviour)
+		}
+		clip_bads.emplace_back(key, bad_bytes);
+	}
+	adm_free(&adm);
+
+	if (!build_from_bad_bytes(reset_bytes, clip_bads)) {
+		// Carry the .adm name into the core's generic error for context.
+		if (!last_error_.is_empty() && last_error_.find(p_adm_name) < 0) {
+			last_error_ += " for: " + p_adm_name;
+		}
+		return false;
+	}
+	return true;
+}
+
+bool NovaSkeletalAnim::load_from_bad_files(const Ref<NovaResourceRoot> &p_resource_root,
+		const String &p_skeleton_bad, const Dictionary &p_key_to_bad) {
+	bones_.clear();
+	bind_local_.clear();
+	clips_.clear();
+	loaded_ = false;
+	last_error_ = String();
+	adm_name_ = p_skeleton_bad;  // diagnostic label (there is no .adm on this path)
+
+	if (p_resource_root.is_null()) {
+		last_error_ = "Resource root is null";
+		return false;
+	}
+
+	const PackedByteArray reset_bytes = p_resource_root->read_file(p_skeleton_bad);
+	if (reset_bytes.is_empty()) {
+		last_error_ = "Skeleton .bad not found: " + p_skeleton_bad;
+		return false;
+	}
+
+	std::vector<std::pair<String, PackedByteArray>> clip_bads;
+	const Array keys = p_key_to_bad.keys();
+	for (int i = 0; i < keys.size(); ++i) {
+		const String key = keys[i];
+		const String bad_name = p_key_to_bad[keys[i]];
+		if (key.is_empty() || bad_name.is_empty()) {
+			continue;
+		}
+		const PackedByteArray bytes = p_resource_root->read_file(bad_name);
+		if (bytes.is_empty()) {
+			continue;  // continue-on-missing-clip (matches the .adm path)
+		}
+		clip_bads.emplace_back(key, bytes);
+	}
+
+	return build_from_bad_bytes(reset_bytes, clip_bads);
+}
+
+bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
+		const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads) {
+	// Pass 1: parse the reset/skeleton .bad -> canonical bones, shared rest origins, bind pose.
+	// ALL clips share this ONE skeleton's bone offsets + bind pose; each clip's own .bad may carry
+	// different/zero bone positions, so sampling must use the shared origins.
 	std::vector<opennova::anim::Vec3> shared_rest;
 	{
-		const PackedByteArray bytes = reset_value.is_empty()
-				? PackedByteArray()
-				: p_resource_root->read_file(resolve_bad(reset_value));
 		BadFile bf;
-		if (bytes.is_empty() || bad_parse_buffer(bytes.ptr(), static_cast<size_t>(bytes.size()), &bf) != 0) {
-			adm_free(&adm);
-			last_error_ = "Reset animation not found/parseable for: " + p_adm_name;
+		if (p_reset_bytes.is_empty() ||
+				bad_parse_buffer(p_reset_bytes.ptr(), static_cast<size_t>(p_reset_bytes.size()), &bf) != 0) {
+			last_error_ = "Reset/skeleton animation not parseable";
 			return false;
 		}
 		const opennova::anim::Clip reset_clip = opennova::anim::sample_clip(bf);
@@ -195,31 +268,22 @@ bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 	}
 
 	// Pass 2: sample every clip against the SHARED skeleton rest origins (not each clip's own).
-	for (size_t i = 0; i < adm.count; ++i) {
-		const String key = String(adm.entries[i].key);
-		const String value = String(adm.entries[i].value);
-		if (value.is_empty()) {
-			continue;
-		}
-		const PackedByteArray bad_bytes = p_resource_root->read_file(resolve_bad(value));
-		if (bad_bytes.is_empty()) {
-			continue;  // continue-on-failure (matches the DCC importer's behaviour)
-		}
+	for (const std::pair<String, PackedByteArray> &kv : p_clip_bads) {
+		const PackedByteArray &bad_bytes = kv.second;
 		BadFile bf;
-		if (bad_parse_buffer(bad_bytes.ptr(), static_cast<size_t>(bad_bytes.size()), &bf) != 0) {
+		if (bad_bytes.is_empty() ||
+				bad_parse_buffer(bad_bytes.ptr(), static_cast<size_t>(bad_bytes.size()), &bf) != 0) {
 			continue;
 		}
 		LoadedClip lc;
-		lc.key = key;
+		lc.key = kv.first;
 		lc.clip = opennova::anim::sample_clip(bf, shared_rest);
 		bad_free(&bf);
 		clips_.push_back(std::move(lc));
 	}
 
-	adm_free(&adm);
-
 	if (clips_.empty()) {
-		last_error_ = "No animation clips could be loaded for: " + p_adm_name;
+		last_error_ = "No animation clips could be loaded";
 		return false;
 	}
 
@@ -344,6 +408,7 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 
 void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name"), &NovaSkeletalAnim::load_from_resource_root);
+	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad"), &NovaSkeletalAnim::load_from_bad_files);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaSkeletalAnim::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaSkeletalAnim::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_adm_name"), &NovaSkeletalAnim::get_adm_name);

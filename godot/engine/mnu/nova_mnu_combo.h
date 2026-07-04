@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/texture_button.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 
 #include <vector>
 
@@ -50,6 +51,12 @@ private:
 	Color popup_outline_color_ = Color(0.2f, 0.25f, 0.35f, 1.0f);
 	Color selection_color_ = Color(0.2f, 0.4f, 0.8f, 1.0f);
 	int min_item_height_ = 16;
+	bool has_explicit_item_height_ = false; // MIN_ITEM_HEIGHT authored on the LIST_BOX
+	// The authored <LIST_BOX> POSITION rect, combo-relative in 800x600 design space.
+	// When set, the dropdown opens at exactly this rect (the embedded CListWnd's own
+	// window rect in the original); otherwise it falls back to a below-combo box.
+	bool has_popup_rect_ = false;
+	Rect2 popup_rect_;
 	Ref<Font> item_font_;
 	int item_font_size_ = 0;
 	bool has_item_font_color_ = false;
@@ -61,6 +68,9 @@ private:
 	void on_sound_mouse_exited();
 	void on_row_pressed(int p_index);
 	void update_selected_label();
+	// Per-row height: the authored MIN_ITEM_HEIGHT when present, else the item
+	// font's line height (the original measures a "W" glyph), else the 16px default.
+	int effective_item_height() const;
 
 protected:
 	static void _bind_methods();
@@ -85,7 +95,13 @@ public:
 	void set_min_item_height(int p_h) {
 		if (p_h > 0) {
 			min_item_height_ = p_h;
+			has_explicit_item_height_ = true;
 		}
+	}
+	// The authored <LIST_BOX> POSITION rect (combo-relative, design space).
+	void set_popup_rect(const Rect2 &p_rect) {
+		popup_rect_ = p_rect;
+		has_popup_rect_ = true;
 	}
 	void set_item_font(const Ref<Font> &p_font, int p_size) {
 		item_font_ = p_font;

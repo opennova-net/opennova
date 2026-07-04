@@ -1311,6 +1311,15 @@ Control *build_combo(MnuBuildContext &ctx, const mnu::Window &w, const mnu::Font
 	if (w.list_box.min_item_height > 0) {
 		combo->set_min_item_height(w.list_box.min_item_height);
 	}
+	// The authored <LIST_BOX> POSITION is the dropdown's combo-relative rect (design
+	// space). The original opens the embedded CListWnd at exactly this rect; passing
+	// it through lets below/beside/upward dropdowns land where authored instead of a
+	// recomputed below-combo box. [orig: CComboWnd @ 0x65be40; CListWnd rect this+13
+	// from LIST_BOX POSITION] (docs/mnu/menu-re.md D-MNU-7).
+	const mnu::Position &lbp = w.list_box.position;
+	if (lbp.width() > 0 && lbp.height() > 0) {
+		combo->set_popup_rect(Rect2(lbp.left, lbp.top, lbp.width(), lbp.height()));
+	}
 
 	// Popup item font.
 	if (!font.name.empty()) {

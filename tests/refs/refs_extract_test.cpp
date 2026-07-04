@@ -182,6 +182,54 @@ static void test_items_def_field_edges() {
     EXPECT_TRUE(find_edge(edges, "item 7 anim_def") == nullptr);
 }
 
+static void test_avatars_def_edges() {
+    const std::string avatars_def =
+        "define head HEAD_A\n"
+        "{\n"
+        "  name AV_HEAD_A\n"
+        "  graphic HeadA.3di\n"
+        "  graphic_j HeadA_J.3di\n"
+        "  graphic_s HeadA_S.3di\n"
+        "}\n"
+        "define body BODY_A\n"
+        "{\n"
+        "  name AV_BODY_A\n"
+        "  graphic BodyA.3di\n"
+        "}\n"
+        "nationality N00 AV_NAT_TEST\n"
+        "{\n"
+        "  division D00 AV_DIV_TEST\n"
+        "  {\n"
+        "    combo 001 HEAD_A BODY_A\n"
+        "  }\n"
+        "}\n";
+
+    const std::vector<Reference> edges = extract_ok("Avatars.def", avatars_def);
+
+    const Reference* graphic = find_edge(edges, "part[HEAD_A].graphic");
+    EXPECT_TRUE(graphic != nullptr);
+    if (graphic != nullptr) {
+        EXPECT_EQ_STR(graphic->source_kind, "avatar");
+        EXPECT_EQ_STR(graphic->target_name, "HeadA.3di");
+        EXPECT_EQ_STR(graphic->target_kind, "object_model");
+    }
+    const Reference* graphic_j = find_edge(edges, "part[HEAD_A].graphic_j");
+    EXPECT_TRUE(graphic_j != nullptr && graphic_j->target_name == "HeadA_J.3di");
+    const Reference* graphic_s = find_edge(edges, "part[HEAD_A].graphic_s");
+    EXPECT_TRUE(graphic_s != nullptr && graphic_s->target_name == "HeadA_S.3di");
+    const Reference* head_name = find_edge(edges, "part[HEAD_A].name");
+    EXPECT_TRUE(head_name != nullptr);
+    if (head_name != nullptr) {
+        EXPECT_EQ_STR(head_name->target_name, "AV_HEAD_A");
+        EXPECT_EQ_STR(head_name->target_kind, "string_id");
+    }
+    const Reference* nat_name = find_edge(edges, "nationality[N00].name");
+    EXPECT_TRUE(nat_name != nullptr && nat_name->target_name == "AV_NAT_TEST");
+    const Reference* div_name = find_edge(edges, "nationality[N00].division[D00].name");
+    EXPECT_TRUE(div_name != nullptr && div_name->target_name == "AV_DIV_TEST");
+    EXPECT_TRUE(find_edge(edges, "combo[001].head") == nullptr);
+}
+
 static void test_unrecognized_is_success_with_no_edges() {
     std::vector<Reference> out;
     std::string error;
@@ -202,6 +250,7 @@ static void test_can_extract_dispatch() {
     EXPECT_TRUE(opennova::refs::can_extract("ash_i5b.bms"));
     EXPECT_TRUE(opennova::refs::can_extract("ash_i5b.MIS"));
     EXPECT_TRUE(opennova::refs::can_extract("jo_main.MNU"));
+    EXPECT_TRUE(opennova::refs::can_extract("Avatars.def"));
     EXPECT_TRUE(!opennova::refs::can_extract("weapon.def"));
     EXPECT_TRUE(!opennova::refs::can_extract("texture.tga"));
     EXPECT_TRUE(!opennova::refs::can_extract("noext"));
@@ -226,6 +275,7 @@ int main() {
     test_env_defaults_alone_still_reference();
     test_credits_fonts_and_images_dedupe();
     test_items_def_field_edges();
+    test_avatars_def_edges();
     test_unrecognized_is_success_with_no_edges();
     test_can_extract_dispatch();
     test_malformed_kda_fails_soft();

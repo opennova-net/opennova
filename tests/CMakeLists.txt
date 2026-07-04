@@ -87,6 +87,16 @@ foreach(test items weapons ammo hudpos item_attrib)
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
 
+# AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
+# writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0009).
+foreach(test parse roundtrip)
+    add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
+    target_link_libraries(avatars_${test}_test PRIVATE opennova_avatars)
+    target_include_directories(avatars_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(avatars_${test}_test PRIVATE cxx_std_17)
+    add_test(NAME avatars_${test} COMMAND avatars_${test}_test)
+endforeach()
+
 # Mission (BMS) tests
 add_executable(mission_authoring_test mission/mission_authoring_test.cpp)
 target_link_libraries(mission_authoring_test PRIVATE opennova_mission_format)

@@ -373,3 +373,35 @@ func _write_pff(path: String, entries: Array) -> void:
 
 func _entry_bytes(entry: Dictionary) -> PackedByteArray:
 	return entry.bytes if entry.bytes is PackedByteArray else String(entry.bytes).to_utf8_buffer()
+
+
+# A throwaway companion: claims the menu (or not) and records whether it was driven.
+class _FakeCompanion extends RefCounted:
+	var owns: bool
+	var built := false
+	func _init(p_owns: bool) -> void:
+		owns = p_owns
+	func owns_menu(_menu) -> bool:
+		return owns
+	func on_menu_built(_menu, _file, _screen, _root) -> void:
+		built = true
+
+
+# The shell can hold several companions (mp.mnu + player.mnu); the first whose
+# owns_menu() claims a built menu drives it, and a non-owning companion is skipped.
+func test_multiple_companions_first_owner_drives_menu() -> void:
+	var dir := _make_dir()
+	var host = _make_host(dir)
+	if host == null:
+		pass_test("temp resource root unavailable in this environment")
+		_cleanup(dir)
+		return
+	assert_true(host.has_method("add_companion"), "the shell exposes the multi-companion hook")
+	var skipped := _FakeCompanion.new(false)
+	var owner := _FakeCompanion.new(true)
+	host.add_companion(skipped)
+	host.add_companion(owner)
+	host.open_menu("main.mnu", "")  # re-wire with the companions installed
+	assert_false(skipped.built, "a non-owning companion is skipped")
+	assert_true(owner.built, "the first owning companion drives the menu")
+	_cleanup(dir)

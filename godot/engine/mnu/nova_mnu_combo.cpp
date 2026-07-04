@@ -120,6 +120,28 @@ void NovaMnuCombo::on_row_pressed(int p_index) {
 	close_popup();
 }
 
+// Per-row height. [orig: CListWnd_DrawItems @ 0x643f30: row_height = height("W")
+// in the list font (sub_653680 @ 0x653680), overridden by this+201 (the <MI> /
+// <MIN_ITEM_HEIGHT> value) only when >= 0]. The reimpl mirrors that: the authored
+// MIN_ITEM_HEIGHT wins; otherwise the item font's line height; the 16px default is
+// the last resort (headless / no font). docs/mnu/menu-re.md D-MNU-8.
+int NovaMnuCombo::effective_item_height() const {
+	if (has_explicit_item_height_) {
+		return min_item_height_;
+	}
+	if (item_font_.is_valid()) {
+		const int fs = item_font_size_ > 0 ? item_font_size_ : 16;
+		const int h = static_cast<int>(item_font_->get_height(fs) + 0.5f);
+		if (h > 0) {
+			return h;
+		}
+	}
+	return min_item_height_;
+}
+
+// [orig: CComboWnd @ 0x65be40 (embedded CListWnd at this+1536); CComboWnd_Render
+// @ 0x65bfd0; the popup is the CListWnd's own window rect (this+13) set from the
+// authored <LIST_BOX> POSITION, drawn over whatever sits beneath it.]
 void NovaMnuCombo::open_popup() {
 	if (behavior_.edit_mode) {
 		return;
@@ -130,18 +152,38 @@ void NovaMnuCombo::open_popup() {
 	popup_->set_name("Popup");
 	popup_->set_z_as_relative(false);
 	popup_->set_z_index(4096); // lift above sibling widgets in the same CanvasLayer
-	const float width = get_size().x;
-	// Clamp the popup to the space below the combo so a long list does not run off
-	// the menu canvas; the rows scroll inside the clamped box. The popup only opens
-	// at runtime (edit_mode suppresses it above), so get_viewport_rect() is the game
-	// window extent -- the correct bound here.
-	const float natural = static_cast<float>(items_.size() * min_item_height_);
-	float avail = get_viewport_rect().size.y - (get_global_position().y + get_size().y);
-	if (avail < static_cast<float>(min_item_height_)) {
-		avail = static_cast<float>(min_item_height_); // never collapse to nothing
+	const int item_height = effective_item_height();
+	float pos_x;
+	float pos_y;
+	float width;
+	float height;
+	if (has_popup_rect_) {
+		// Faithful path: the authored <LIST_BOX> POSITION rect (combo-relative, design
+		// space). This is the engine's behavior -- the dropdown is a fixed rect that can
+		// sit below, beside, or above the combo (e.g. PLAYERVOICE opens upward with a
+		// negative TOP), drawn over whatever is beneath. Recomputing it below the combo
+		// dropped the semi-transparent list onto sibling combos, whose text bled through
+		// (docs/mnu/menu-re.md D-MNU-7).
+		pos_x = popup_rect_.position.x;
+		pos_y = popup_rect_.position.y;
+		width = popup_rect_.size.x;
+		height = popup_rect_.size.y;
+	} else {
+		// Fallback for combos with no authored LIST_BOX rect (e.g. host-built browsers):
+		// drop below the combo, clamped to the window so a long list scrolls instead of
+		// running off-canvas. The popup only opens at runtime (edit_mode suppresses it),
+		// so get_viewport_rect() is the game window extent.
+		width = get_size().x;
+		const float natural = static_cast<float>(items_.size() * item_height);
+		float avail = get_viewport_rect().size.y - (get_global_position().y + get_size().y);
+		if (avail < static_cast<float>(item_height)) {
+			avail = static_cast<float>(item_height); // never collapse to nothing
+		}
+		pos_x = 0.0f;
+		pos_y = get_size().y;
+		height = natural < avail ? natural : avail;
 	}
-	const float height = natural < avail ? natural : avail;
-	popup_->set_position(Vector2(0, get_size().y));
+	popup_->set_position(Vector2(pos_x, pos_y));
 	popup_->set_size(Vector2(width, height));
 
 	if (popup_bg_tex_.is_valid()) {
@@ -186,7 +228,7 @@ void NovaMnuCombo::open_popup() {
 		row->set_name(String("Item") + String::num_int64(i));
 		row->set_text(items_[i].text);
 		row->set_flat(true);
-		row->set_custom_minimum_size(Vector2(0, min_item_height_));
+		row->set_custom_minimum_size(Vector2(0, item_height));
 		row->set_text_alignment(static_cast<HorizontalAlignment>(item_align_));
 		if (item_font_.is_valid()) {
 			row->add_theme_font_override("font", item_font_);

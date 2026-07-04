@@ -170,6 +170,38 @@ int main(void) {
     }
     printf("Action parsing OK\n");
 
+    /* Loadout fields (D-PLAYERINFO-11). WPN_M4AUTO: selectable PRIMARY, blue team,
+       rifleman|medic|engineer. */
+    if (m4->weapon_class_slot != 1) { /* primary */
+        fprintf(stderr, "FAIL: M4AUTO weapon_class_slot mismatch: %d\n", m4->weapon_class_slot);
+        def_free_weapons(&wf); return 1;
+    }
+    if (m4->loadout_selectable != 1) {
+        fprintf(stderr, "FAIL: M4AUTO loadout_selectable mismatch: %d\n", m4->loadout_selectable);
+        def_free_weapons(&wf); return 1;
+    }
+    if (m4->teamfilter_mask != 2) { /* blue */
+        fprintf(stderr, "FAIL: M4AUTO teamfilter_mask mismatch: %d\n", m4->teamfilter_mask);
+        def_free_weapons(&wf); return 1;
+    }
+    if (m4->charfilter_mask != (1 | 8 | 16)) { /* medic|rifleman|engineer */
+        fprintf(stderr, "FAIL: M4AUTO charfilter_mask mismatch: %d\n", m4->charfilter_mask);
+        def_free_weapons(&wf); return 1;
+    }
+    if (m4->maxclips != 10) {
+        fprintf(stderr, "FAIL: M4AUTO maxclips mismatch: %d\n", m4->maxclips);
+        def_free_weapons(&wf); return 1;
+    }
+    if (fabsf(m4->weaponweight - 5.5f) > FEPS || fabsf(m4->clipweight - 1.5f) > FEPS) {
+        fprintf(stderr, "FAIL: M4AUTO weight mismatch: %.3f / %.3f\n", m4->weaponweight, m4->clipweight);
+        def_free_weapons(&wf); return 1;
+    }
+    if (strcmp(m4->loadout_menu_textid, "WEAP_SHORT_M4") != 0) {
+        fprintf(stderr, "FAIL: M4AUTO loadout_menu_textid mismatch: '%s'\n", m4->loadout_menu_textid);
+        def_free_weapons(&wf); return 1;
+    }
+    printf("Loadout fields OK\n");
+
     /* Also find WPN_KNIFE to verify first entry */
     const DefWeaponDef *knife = NULL;
     for (size_t i = 0; i < wf.count; ++i) {
@@ -267,7 +299,8 @@ int main(void) {
     }
     printf("M4AUTO/M4 armory fields OK\n");
 
-    /* def_parse_weapons_memory parity: same bytes, same result */
+    /* def_parse_weapons_memory parity: same bytes, same result (covers both the
+       string armory fields and the D-PLAYERINFO-11 loadout slot/masks). */
     {
         FILE *fp = fopen(path, "rb");
         if (!fp) {
@@ -305,7 +338,8 @@ int main(void) {
                 if (strcmp(wm.entries[i].weapon_name, "WPN_M4AUTO") == 0) { mm = &wm.entries[i]; break; }
             }
             parity_ok = mm && mm->maxclips == 10 && mm->clipsize == 30 &&
-                        strcmp(mm->weapon_class, "primary") == 0;
+                        strcmp(mm->weapon_class, "primary") == 0 &&
+                        mm->weapon_class_slot == 1 && mm->loadout_selectable == 1;
         }
         def_free_weapons(&wm);
         if (!parity_ok) {

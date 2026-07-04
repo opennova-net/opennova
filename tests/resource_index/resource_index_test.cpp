@@ -109,7 +109,11 @@ int main() {
 	write_file(root / "Serpen24.fnt", "fnt");
 	write_file(root / "main.mnu", "mnu");
 	write_file(root / "menu_style.mns", "DEF_TEXT_FG FFFFFFFF");
+	// Avatars.def classifies by name -> "avatar" (browsable); hudpos.def classifies
+	// to "hudpos" (HUD layout). A co-extension .def (weapon/items/ammo) stays
+	// unclassified and unbrowsable.
 	write_file(root / "hudpos.def", "hudpos");
+	write_file(root / "Avatars.def", "define head X\n{\n}\n");
 	write_file(root / "weapon.def", "weapon");  // sibling .def that must NOT classify (name-keyed)
 	write_file(root / "missions" / "first.bms", "bms");
 	write_file(root / "models" / "tree.glb", "glb");
@@ -126,13 +130,14 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 15);  // base 13 +1 hudpos.def (HUD) +1 briefing.MIS (mission)
+	TEST_EXPECT(all_files.size() == 16);  // base 13 +1 hudpos.def (HUD) +1 briefing.MIS (mission) +1 Avatars.def (avatar)
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
+	TEST_EXPECT(has_relative_path(all_files, "Avatars.def"));
+	TEST_EXPECT(!has_relative_path(all_files, "weapon.def"));  // co-extension .def stays unbrowsable
 	TEST_EXPECT(has_relative_path(all_files, "Menus.BIN"));
 	TEST_EXPECT(has_relative_path(all_files, "main.mnu"));
 	TEST_EXPECT(has_relative_path(all_files, "menu_style.mns"));
 	TEST_EXPECT(has_relative_path(all_files, "hudpos.def"));
-	TEST_EXPECT(!has_relative_path(all_files, "weapon.def"));  // .def is name-keyed; only hudpos.def classifies
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.sbf"));
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.bin"));
 	TEST_EXPECT(has_relative_path(all_files, "first.bms"));
@@ -173,6 +178,8 @@ int main() {
 	TEST_EXPECT(index.resource_files("menu_style")[0].display_name == "menu_style");
 	TEST_EXPECT(index.resource_files("hudpos").size() == 1);
 	TEST_EXPECT(index.resource_files("hudpos")[0].display_name == "hudpos");
+	TEST_EXPECT(index.resource_files("avatar").size() == 1);
+	TEST_EXPECT(index.resource_files("avatar")[0].display_name == "Avatars");
 	TEST_EXPECT(index.resource_files("glb").empty());
 	TEST_EXPECT(index.resource_files("bms").size() == 2);
 	TEST_EXPECT(index.resource_files("mis").size() == 2);
@@ -221,7 +228,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 18);  // +1 hudpos.def (HUD layout) +1 briefing.MIS (mission metafile)
+	TEST_EXPECT(mounted_files.size() == 19);  // the 16 loose (incl. hudpos.def + briefing.MIS + Avatars.def) +3 archive-only logical names
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));
