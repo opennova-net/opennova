@@ -16,6 +16,10 @@ extends RefCounted
 var _host_ref: WeakRef
 var _limit: int = 100
 var _history: NovaEditHistory = null
+# Mirrors the native session's begin/commit state so shadow-step recorders
+# (B4's object funnel) can tell "a coalescing burst is open" without a native
+# query.
+var _burst_open := false
 
 
 func _init(host: Object, limit: int = 100) -> void:
@@ -43,6 +47,7 @@ func begin_edit() -> void:
 	var snap: Variant = host._snapshot()
 	if snap != null:
 		_ensure_history().begin_edit(snap)
+		_burst_open = true
 
 
 ## Close the burst; records one step iff the document actually changed
@@ -54,9 +59,34 @@ func commit_edit() -> void:
 	var snap: Variant = host._snapshot()
 	if snap == null:
 		return
+	_burst_open = false
 	if _ensure_history().commit_edit(snap):
 		host.mark_dirty()
 		host._history_applied("commit")
+
+
+func is_burst_open() -> bool:
+	return _burst_open
+
+
+## Record a caller-provided PRE-mutation snapshot as one equal-gated step —
+## the shadow-step funnel (B4): the mutation already happened by the time its
+## deferred change signal arrives, so the caller hands in the baseline it
+## cached beforehand. Inert while a coalescing burst is open (the burst's
+## commit owns that step). Returns whether a step was recorded.
+func record_shadow_step(before: Variant) -> bool:
+	if before == null or _burst_open:
+		return false
+	var host := _host()
+	if host == null:
+		return false
+	var live: Variant = host._snapshot()
+	if live == null or live == before:
+		return false
+	_ensure_history().push_step(before)
+	host.mark_dirty()
+	host._history_applied("step")
+	return true
 
 
 func flush_edit() -> void:
@@ -116,6 +146,7 @@ func undo() -> void:
 	var snap: Variant = _history.undo_swap(live)
 	if snap == null:
 		return
+	_burst_open = false
 	host._apply_snapshot(snap)
 	host.mark_dirty()
 	host._history_applied("undo")
@@ -134,6 +165,7 @@ func redo() -> void:
 	var snap: Variant = _history.redo_swap(live)
 	if snap == null:
 		return
+	_burst_open = false
 	host._apply_snapshot(snap)
 	host.mark_dirty()
 	host._history_applied("redo")
@@ -142,5 +174,6 @@ func redo() -> void:
 ## Drop the whole history (open / new / save-as flows). The host's dirty flag
 ## is untouched; the host calls mark_clean() separately when the baseline moves.
 func clear() -> void:
+	_burst_open = false
 	if _history != null:
 		_history.clear()
