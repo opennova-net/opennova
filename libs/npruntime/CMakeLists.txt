@@ -21,7 +21,7 @@ target_include_directories(opennova_npruntime
 # loop). Builds on the netsim seam (world <-> wire bridge + transport) and the wire codecs.
 # Strictly Godot-free and socket-free: the owner (apps/nw_server or the Godot binding) pumps
 # bytes through netsim::ISessionTransport.
-# opennova_novaworld is already transitive via opennova_netsim; name it explicitly because the server
+# The novaworld wire leg is transitive via opennova_netsim; the legs are named explicitly because the server
 # legs + the reactive reply dispatcher use its codecs (protocol_message, ingame_decode, replication_model
 # POD structs) directly (direct-dependency hygiene). No cycle: novaworld does not depend on npruntime.
 # opennova_world is transitive via opennova_netsim; it and mission_format are named explicitly because
@@ -30,7 +30,7 @@ target_include_directories(opennova_npruntime
 # opennova_def: weapon_table_build parses DefWeaponsFile into the world armory table
 # (D-NET-141); def is a leaf C library — no cycle.
 target_link_libraries(opennova_npruntime PUBLIC
-    opennova_netsim opennova_novaworld opennova_world opennova_mission_format opennova_def)
+    opennova_netsim opennova_novaworld_wire opennova_novaworld_session opennova_world opennova_mission_format opennova_def)
 
 target_compile_features(opennova_npruntime PUBLIC cxx_std_17)
 

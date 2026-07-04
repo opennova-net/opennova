@@ -15,7 +15,7 @@ target_include_directories(opennova_netsim
 # The single deliberate bridge between the runtime world and the wire codec
 # (ADR 0009/0011): the only library that depends on BOTH opennova_world and
 # opennova_novaworld. Keeps libs/world net-agnostic and libs/novaworld sim-agnostic.
-target_link_libraries(opennova_netsim PUBLIC opennova_world opennova_novaworld)
+target_link_libraries(opennova_netsim PUBLIC opennova_world opennova_novaworld_wire)
 
 target_compile_features(opennova_netsim PUBLIC cxx_std_17)
 
