@@ -22,7 +22,7 @@ namespace fs = std::filesystem;
 int main() {
     const fs::path repo_root = test_paths_repo_root(__FILE__);
     const fs::path dep_path =
-        repo_root / "fixtures" / "trngen" / "sample" / "Output.dep";
+        repo_root / "fixtures" / "terrain" / "sample" / "Output.dep";
     if (!fs::exists(dep_path)) {
         std::fprintf(stderr, "FAIL: missing fixture %s\n",
                      dep_path.string().c_str());

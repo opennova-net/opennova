@@ -3,8 +3,8 @@
 // keeps the test-binary count from ballooning while giving per-case
 // status in ctest output.
 //
-// Cases share the convention `fixtures/trngen/<name>/<Capitalised>.tpj`
-// with the golden CPT at `fixtures/trngen/<name>/<lowercase>.cpt`.
+// Cases share the convention `fixtures/terrain/<name>/<Capitalised>.tpj`
+// with the golden CPT at `fixtures/terrain/<name>/<lowercase>.cpt`.
 
 #include "terrain/builder.h"
 #include "common/test_paths.h"
@@ -36,7 +36,7 @@ static std::vector<uint8_t> read_file(const fs::path &p) {
 }
 
 static bool run_case(const fs::path &repo_root, const Case &tc) {
-    const fs::path fixture_dir = repo_root / "fixtures" / "trngen" / tc.name;
+    const fs::path fixture_dir = repo_root / "fixtures" / "terrain" / tc.name;
     const fs::path tpj_path = fixture_dir / (std::string(tc.tpj_basename) + ".tpj");
     const fs::path golden_path = fixture_dir / (std::string(tc.name) + ".cpt");
 

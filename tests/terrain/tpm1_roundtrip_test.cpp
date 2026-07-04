@@ -28,7 +28,7 @@ static std::vector<uint8_t> read_file(const fs::path &p) {
 int main() {
     const fs::path repo_root = test_paths_repo_root(__FILE__);
     const fs::path tml_path =
-        repo_root / "fixtures" / "trngen" / "sample" / "S0_00_00.tml";
+        repo_root / "fixtures" / "terrain" / "sample" / "S0_00_00.tml";
     if (!fs::exists(tml_path)) {
         std::fprintf(stderr, "FAIL: missing fixture %s\n",
                      tml_path.string().c_str());

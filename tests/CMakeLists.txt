@@ -573,13 +573,13 @@ add_test(NAME env_jo_install COMMAND jo_env_sweep_test)
 #   cdep_read          — CDEP header parity against a known Dvxi5.cpt capture
 #   cdep_roundtrip     — CDEP encode/decode round-trip independent of the bake
 foreach(name parametric_parity depthmap_smooth tpm1_roundtrip)
-    add_executable(${name}_test trngen/${name}_test.cpp)
+    add_executable(${name}_test terrain/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_terrain)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME ${name} COMMAND ${name}_test)
 endforeach()
 
-add_executable(terrain_lighting_test trngen/terrain_lighting_test.cpp)
+add_executable(terrain_lighting_test terrain/terrain_lighting_test.cpp)
 target_link_libraries(terrain_lighting_test PRIVATE opennova_terrain)
 target_include_directories(terrain_lighting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_lighting COMMAND terrain_lighting_test)
@@ -589,13 +589,13 @@ add_test(NAME terrain_lighting COMMAND terrain_lighting_test)
 set_tests_properties(parametric_parity PROPERTIES DISABLED TRUE)
 
 foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
-    add_executable(${name}_test trngen/${name}_test.cpp)
+    add_executable(${name}_test terrain/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_cpt)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME ${name} COMMAND ${name}_test)
 endforeach()
 
-add_executable(trn_config_roundtrip_test trngen/trn_config_roundtrip_test.cpp)
+add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_trn)
 target_include_directories(trn_config_roundtrip_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -606,21 +606,21 @@ add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 # DVD4 parity test: drives opennova::build_terrain() on the captured BHD-era heightmap.
 # Regression test for the LoadSectionDedup crash that hit older terrains where
 # the root merge ingests face indices past level.vertex_count.
-add_executable(dvd4_parity_test trngen/dvd4_parity_test.cpp)
+add_executable(dvd4_parity_test terrain/dvd4_parity_test.cpp)
 target_link_libraries(dvd4_parity_test PRIVATE opennova_terrain)
 target_include_directories(dvd4_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME dvd4_parity COMMAND dvd4_parity_test)
 
 # CDEP overflow guard: bake must clamp rather than silently corrupt the .cpt
 # when a 256-pixel block exceeds the 4-bit bits_per_delta field's 15-bit limit.
-add_executable(cdep_overflow_guard_test trngen/cdep_overflow_guard_test.cpp)
+add_executable(cdep_overflow_guard_test terrain/cdep_overflow_guard_test.cpp)
 target_link_libraries(cdep_overflow_guard_test PRIVATE opennova_terrain opennova_cpt)
 target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
 
 # CDEP per-block range constraint: the editor-side raw16 clamp/count kernel,
 # ported from terrain_editor_cdep_constraint.gd into libs/terrain.
-add_executable(cdep_constraint_test trngen/cdep_constraint_test.cpp)
+add_executable(cdep_constraint_test terrain/cdep_constraint_test.cpp)
 target_link_libraries(cdep_constraint_test PRIVATE opennova_terrain)
 target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
@@ -629,28 +629,28 @@ add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
 # Characterizes the runtime resolve_world_sample formula plus the editor-mode
 # guard divergences (bounds-reject, id-clamp, local-clamp) ported from
 # EditorTerrainMesh.world_to_source_coords / world_to_cell_source_coords.
-add_executable(coords_test trngen/coords_test.cpp)
+add_executable(coords_test terrain/coords_test.cpp)
 target_link_libraries(coords_test PRIVATE opennova_terrain)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME coords COMMAND coords_test)
 
 # Height brush kernels (libs/terrain/brush): raise/lower, smooth (two-pass),
 # flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
-add_executable(brush_height_test trngen/brush_height_test.cpp)
+add_executable(brush_height_test terrain/brush_height_test.cpp)
 target_link_libraries(brush_height_test PRIVATE opennova_terrain)
 target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME brush_height COMMAND brush_height_test)
 
 # Colour/blend brush kernels (libs/terrain/brush) on RGBA8 buffers. Byte-parity
 # critical: pins Godot's FORMAT_RGBA8 quantization + the blend/lerp/clone math.
-add_executable(brush_color_test trngen/brush_color_test.cpp)
+add_executable(brush_color_test terrain/brush_color_test.cpp)
 target_link_libraries(brush_color_test PRIVATE opennova_terrain)
 target_include_directories(brush_color_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME brush_color COMMAND brush_color_test)
 
 # Dvxi5 repro: exercises a post-clamp heightmap with block ranges at the
 # CDEP ceiling. Kept as a regression anchor for the fixed bake pipeline.
-add_executable(dvxi5_repro_test trngen/dvxi5_repro_test.cpp)
+add_executable(dvxi5_repro_test terrain/dvxi5_repro_test.cpp)
 target_link_libraries(dvxi5_repro_test PRIVATE opennova_terrain)
 target_include_directories(dvxi5_repro_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)
@@ -999,12 +999,6 @@ add_test(NAME session_protocol COMMAND session_protocol_test)
 # NOTE (P8): the old joiner_session_test (the legacy novaworld::JoinerSession driven against the
 # retired HostSessionAccept) was deleted — np::JoinerConnection is the promoted in-match client and is
 # covered by tests/npruntime/joiner_connection_test.cpp against the real np server legs.
-
-# bms (mission-file) parser tests
-add_executable(bms_spawn_points_test bms/spawn_points_test.cpp)
-target_link_libraries(bms_spawn_points_test PRIVATE opennova_bms)
-target_include_directories(bms_spawn_points_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME bms_spawn_points COMMAND bms_spawn_points_test)
 
 # Connection registry / manager tests
 add_executable(connection_registry_test novaworld/connection_registry_test.cpp)

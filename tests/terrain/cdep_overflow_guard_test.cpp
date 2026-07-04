@@ -37,7 +37,7 @@ int main() {
 
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path output_dir =
-        fs::path(test_paths_temp_dir()) / ("opennova_trngen_cdep_overflow_" + std::to_string(suffix));
+        fs::path(test_paths_temp_dir()) / ("opennova_terrain_cdep_overflow_" + std::to_string(suffix));
     fs::remove_all(output_dir);
     fs::create_directories(output_dir);
 

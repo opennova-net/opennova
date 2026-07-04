@@ -1,5 +1,5 @@
 // Dvxi5 bake repro. The Dvxi5 heightmap (committed as
-// fixtures/trngen/dvxi5/Dvxi5_depth.raw) crashes the current bake with a
+// fixtures/terrain/dvxi5/Dvxi5_depth.raw) crashes the current bake with a
 // non-std-exception after the editor's CDEP constraint passes it through.
 // This test reproduces the crash in-tree so we can iterate on the fix
 // without round-tripping through the Godot editor.
@@ -48,7 +48,7 @@ int main() {
 #endif
 
     const fs::path repo_root = test_paths_repo_root(__FILE__);
-    const fs::path fixture_dir = repo_root / "fixtures" / "trngen" / "dvxi5";
+    const fs::path fixture_dir = repo_root / "fixtures" / "terrain" / "dvxi5";
     const fs::path raw_path = fixture_dir / "Dvxi5_depth.raw";
 
     if (!fs::exists(raw_path)) {
@@ -70,7 +70,7 @@ int main() {
 
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path output_dir =
-        fs::path(test_paths_temp_dir()) / ("opennova_trngen_dvxi5_" + std::to_string(suffix));
+        fs::path(test_paths_temp_dir()) / ("opennova_terrain_dvxi5_" + std::to_string(suffix));
     fs::remove_all(output_dir);
     fs::create_directories(output_dir);
 

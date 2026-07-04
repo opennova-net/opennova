@@ -189,7 +189,7 @@ Order of operations when you need an engine truth:
      `apps/modsuperoed.py`, fixture pack in `third_party/modsuperoed`, gated on
      `OPENNOVA_MODSUPEROED_DIR`.
    - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
-     (98/98 retail bins), `tests/trngen/dvd4_parity_test.cpp`, the `.bad`/3DI
+     (98/98 retail bins), `tests/terrain/dvd4_parity_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
    - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
      `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see the root CLAUDE.md).

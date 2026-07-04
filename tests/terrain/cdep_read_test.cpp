@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 int main() {
     const fs::path repo_root = test_paths_repo_root(__FILE__);
     const fs::path cpt_path =
-        repo_root / "fixtures" / "trngen" / "dvxi5" / "Dvxi5.cpt";
+        repo_root / "fixtures" / "terrain" / "dvxi5" / "Dvxi5.cpt";
     if (!fs::exists(cpt_path)) {
         std::fprintf(stderr, "FAIL: missing fixture %s\n",
                      cpt_path.string().c_str());

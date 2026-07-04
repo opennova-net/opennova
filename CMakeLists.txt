@@ -85,7 +85,6 @@ endif()
 add_subdirectory(libs/novacrypto)
 add_subdirectory(libs/napi)
 add_subdirectory(libs/novaworld)
-add_subdirectory(libs/bms)
 
 # netsim — the in-match net seam (ADR 0009/0011): NetSystem + the World<->wire
 # bridge + the in-process loopback. The single lib depending on BOTH the runtime

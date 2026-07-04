@@ -39,7 +39,7 @@ static std::vector<uint8_t> read_file(const fs::path &p) {
 
 int main() {
     const fs::path repo_root = test_paths_repo_root(__FILE__);
-    const fs::path fixture_dir = repo_root / "fixtures" / "trngen" / "dvd4";
+    const fs::path fixture_dir = repo_root / "fixtures" / "terrain" / "dvd4";
     const fs::path raw_path    = fixture_dir / "dvd4_d.raw";
     const fs::path golden_path = fixture_dir / "dvd4.cpt";
 
@@ -59,7 +59,7 @@ int main() {
 
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const fs::path output_dir =
-        fs::path(test_paths_temp_dir()) / ("opennova_trngen_dvd4_" + std::to_string(suffix));
+        fs::path(test_paths_temp_dir()) / ("opennova_terrain_dvd4_" + std::to_string(suffix));
     fs::remove_all(output_dir);
     fs::create_directories(output_dir);
 

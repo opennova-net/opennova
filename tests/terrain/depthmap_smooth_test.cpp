@@ -26,7 +26,7 @@ static int check(bool cond, const char *msg) {
 int main() {
     const fs::path repo_root = test_paths_repo_root(__FILE__);
     const fs::path raw_path =
-        repo_root / "fixtures" / "trngen" / "sample" / "Sample_d.raw";
+        repo_root / "fixtures" / "terrain" / "sample" / "Sample_d.raw";
     if (!fs::exists(raw_path)) {
         std::fprintf(stderr, "FAIL: missing fixture %s\n",
                      raw_path.string().c_str());
