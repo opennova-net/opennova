@@ -24,13 +24,13 @@ target_include_directories(opennova_npruntime
 # opennova_novaworld is already transitive via opennova_netsim; name it explicitly because the server
 # legs + the reactive reply dispatcher use its codecs (protocol_message, ingame_decode, replication_model
 # POD structs) directly (direct-dependency hygiene). No cycle: novaworld does not depend on npruntime.
-# opennova_world / opennova_mission are transitive via opennova_netsim; name them explicitly because
+# opennova_world is transitive via opennova_netsim; it and mission_format are named explicitly because
 # P3's spawn pipeline + initial-state burst use world::spawn_player / select_player_spawn and
 # bms::encode_header_blob directly (direct-dependency hygiene). No cycle: neither depends on npruntime.
 # opennova_def: weapon_table_build parses DefWeaponsFile into the world armory table
 # (D-NET-141); def is a leaf C library — no cycle.
 target_link_libraries(opennova_npruntime PUBLIC
-    opennova_netsim opennova_novaworld opennova_world opennova_mission opennova_def)
+    opennova_netsim opennova_novaworld opennova_world opennova_mission_format opennova_def)
 
 target_compile_features(opennova_npruntime PUBLIC cxx_std_17)
 

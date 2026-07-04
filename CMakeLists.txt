@@ -148,6 +148,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_mus
     opennova_mnu
     opennova_mns
+    opennova_mission_format
     opennova_mission
     opennova_audio
     opennova_refs

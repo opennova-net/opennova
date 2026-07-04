@@ -89,35 +89,35 @@ endforeach()
 
 # Mission (BMS) tests
 add_executable(mission_authoring_test mission/mission_authoring_test.cpp)
-target_link_libraries(mission_authoring_test PRIVATE opennova_mission)
+target_link_libraries(mission_authoring_test PRIVATE opennova_mission_format)
 target_include_directories(mission_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_authoring COMMAND mission_authoring_test)
 
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
-target_link_libraries(mission_bms_test PRIVATE opennova_mission)
+target_link_libraries(mission_bms_test PRIVATE opennova_mission_format)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_bms COMMAND mission_bms_test)
 
 add_executable(mission_mis_test mission/mission_mis_test.cpp)
-target_link_libraries(mission_mis_test PRIVATE opennova_mission)
+target_link_libraries(mission_mis_test PRIVATE opennova_mission_format)
 target_include_directories(mission_mis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_mis_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis COMMAND mission_mis_test)
 
 add_executable(mission_c_abi_test mission/mission_c_abi_test.cpp)
-target_link_libraries(mission_c_abi_test PRIVATE opennova_mission)
+target_link_libraries(mission_c_abi_test PRIVATE opennova_mission_format)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_c_abi COMMAND mission_c_abi_test)
 
 add_executable(mission_schema_test mission/mission_schema_test.cpp)
-target_link_libraries(mission_schema_test PRIVATE opennova_mission)
+target_link_libraries(mission_schema_test PRIVATE opennova_mission_format)
 target_include_directories(mission_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_schema COMMAND mission_schema_test)
 
 # Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
 # Gated on OPENNOVA_MISSION_CORPUS (copyrighted assets, not committed); skips + passes when unset.
 add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
-target_link_libraries(mission_corpus_test PRIVATE opennova_mission)
+target_link_libraries(mission_corpus_test PRIVATE opennova_mission_format)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
 add_test(NAME mission_corpus COMMAND mission_corpus_test)
@@ -870,7 +870,7 @@ add_test(NAME refs_extract COMMAND refs_extract_test)
 # parser).
 foreach(test threedi mission mnu)
     add_executable(refs_${test}_test refs/refs_${test}_test.cpp)
-    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission opennova_mnu)
+    target_link_libraries(refs_${test}_test PRIVATE opennova_refs opennova_threedi opennova_mission_format opennova_mnu)
     target_include_directories(refs_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(refs_${test}_test PRIVATE cxx_std_17)
     add_test(NAME refs_${test} COMMAND refs_${test}_test)
