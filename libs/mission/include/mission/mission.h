@@ -9,19 +9,8 @@
 
 #include "mission/bms.h"
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define MISSION_EXPORT __declspec(dllexport)
-#  else
-#    define MISSION_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define MISSION_EXPORT __attribute__((visibility("default")))
-#  else
-#    define MISSION_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define MISSION_EXPORT OPENNOVA_API
 
 namespace opennova::mission {
 

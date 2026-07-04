@@ -6,19 +6,8 @@
 
 #include <stddef.h>
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define ADM_EXPORT __declspec(dllexport)
-#  else
-#    define ADM_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define ADM_EXPORT __attribute__((visibility("default")))
-#  else
-#    define ADM_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define ADM_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

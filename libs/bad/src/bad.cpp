@@ -3,6 +3,8 @@
 
 #include "bad/bad.h"
 
+#include <io/le.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,24 +19,19 @@ static int in_range(size_t offset, size_t size_needed, size_t buffer_size) {
 }
 
 static uint32_t read_u32(const uint8_t *buf, size_t off) {
-    return (uint32_t)buf[off]
-         | ((uint32_t)buf[off + 1] << 8)
-         | ((uint32_t)buf[off + 2] << 16)
-         | ((uint32_t)buf[off + 3] << 24);
+    return opennova::io::read_u32_le(buf + off);
 }
 
 static int32_t read_s32(const uint8_t *buf, size_t off) {
-    return (int32_t)read_u32(buf, off);
+    return opennova::io::read_s32_le(buf + off);
 }
 
 static uint16_t read_u16(const uint8_t *buf, size_t off) {
-    return (uint16_t)((uint16_t)buf[off] | ((uint16_t)buf[off + 1] << 8));
+    return opennova::io::read_u16_le(buf + off);
 }
 
 static float read_f32(const uint8_t *buf, size_t off) {
-    float v;
-    memcpy(&v, &buf[off], sizeof(float));
-    return v;
+    return opennova::io::read_f32_le(buf + off);
 }
 
 // --------------------------------------------------------------------------

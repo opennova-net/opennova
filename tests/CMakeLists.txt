@@ -1,3 +1,10 @@
+# Shared io infrastructure unit tests
+add_executable(io_test io/io_test.cpp)
+target_link_libraries(io_test PRIVATE opennova_io)
+target_compile_features(io_test PRIVATE cxx_std_17)
+target_include_directories(io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME io COMMAND io_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_threedi)

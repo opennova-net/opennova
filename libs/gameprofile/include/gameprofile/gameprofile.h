@@ -3,19 +3,8 @@
 
 #include <stdint.h>
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define GAMEPROFILE_EXPORT __declspec(dllexport)
-#  else
-#    define GAMEPROFILE_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define GAMEPROFILE_EXPORT __attribute__((visibility("default")))
-#  else
-#    define GAMEPROFILE_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define GAMEPROFILE_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

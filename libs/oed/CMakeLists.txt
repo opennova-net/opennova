@@ -22,3 +22,6 @@ target_link_libraries(opennova_oed
 )
 
 target_compile_features(opennova_oed PRIVATE cxx_std_17)
+
+# io/export.h (and for some libs io/le.h) is used from public headers.
+target_link_libraries(opennova_oed PUBLIC opennova_io)

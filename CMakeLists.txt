@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(opennova LANGUAGES C CXX)
 
 # Add libraries
+# io first: header-only shared infrastructure (byte/bit IO, fixed-point, strutil)
+add_subdirectory(libs/io)
 add_subdirectory(libs/pcx)
 add_subdirectory(libs/fnt)
 add_subdirectory(libs/foliage)

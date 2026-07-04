@@ -7,19 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define TDP_EXPORT __declspec(dllexport)
-#  else
-#    define TDP_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define TDP_EXPORT __attribute__((visibility("default")))
-#  else
-#    define TDP_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define TDP_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

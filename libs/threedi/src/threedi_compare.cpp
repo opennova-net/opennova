@@ -1,5 +1,7 @@
 #include "threedi/threedi_compare.h"
 
+#include <io/le.h>
+
 #include "threedi/threedi.h"
 
 #include <ctype.h>
@@ -40,20 +42,8 @@ static std::string chunk_id_string(const ThreediChunk *chunk)
     return chunk ? std::string(chunk->id, chunk->id + 4) : std::string();
 }
 
-static uint32_t read_u32_le(const uint8_t *p)
-{
-    return (uint32_t)p[0]
-         | ((uint32_t)p[1] << 8)
-         | ((uint32_t)p[2] << 16)
-         | ((uint32_t)p[3] << 24);
-}
-
-static float read_f32_le(const uint8_t *p)
-{
-    float value = 0.0f;
-    memcpy(&value, p, sizeof(value));
-    return value;
-}
+using opennova::io::read_u32_le;
+using opennova::io::read_f32_le;
 
 static bool parse_chunk_ids(const char *chunk_ids_csv,
                             std::vector<std::string> *out_ids,

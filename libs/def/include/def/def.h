@@ -9,19 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define DEF_EXPORT __declspec(dllexport)
-#  else
-#    define DEF_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define DEF_EXPORT __attribute__((visibility("default")))
-#  else
-#    define DEF_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define DEF_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

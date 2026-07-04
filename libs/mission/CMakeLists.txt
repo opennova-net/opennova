@@ -20,3 +20,6 @@ target_compile_features(opennova_mission PUBLIC cxx_std_17)
 set_target_properties(opennova_mission PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
+
+# io/export.h (and for some libs io/le.h) is used from public headers.
+target_link_libraries(opennova_mission PUBLIC opennova_io)

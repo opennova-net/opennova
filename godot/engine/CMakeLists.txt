@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
+add_subdirectory(../../libs/io opennova_io)
 add_subdirectory(../../libs/pcx opennova_pcx)
 add_subdirectory(../../libs/fnt opennova_fnt)
 add_subdirectory(../../libs/foliage opennova_foliage)
