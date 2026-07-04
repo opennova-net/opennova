@@ -32,6 +32,7 @@
 #include <world/vehicle_attach.h> // entity_process_vehicle_attach / detach (0x26/0x27)
 #include <world/world.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -1152,6 +1153,121 @@ bool run_round_event_fanout() {
 	return true;
 }
 
+// (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire
+//      uplink — the HOST simulates the ridden vehicle from the driver's replicated
+//      MoveOrder/heading (the vehicle motor pass in AiSystem::tick), and the S2C 0x0A
+//      vehicle record streams the LIVE (moving) pose. [orig: Client_ProcessNetworkFrame
+//      @0x42c482 single-entity uplink; Entity_UpdateVehiclePhysics @0x48af00 drive gate
+//      @0x48b0ff; Entity_SerializeVehicleState @0x460560 modes 3/4 return -1]
+bool run_vehicle_drive_authority() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	// The driver is a REMOTE joiner (the v33 rider topology): its MoveOrder/heading are
+	// wire-owned — the motor consumes what the 0x0C apply landed, and mirror_wire_anim's
+	// local-input export must NOT overwrite them (a local host player's input comes from
+	// the input system instead).
+	const w::EntityHandle ph =
+			w::spawn_remote_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *player = world.registry.get(ph);
+	if (!expect(player != nullptr, "player entity resolvable")) return false;
+
+	w::EntityHandle vh;
+	{
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x1004;
+		veh.position = {12.0f, 20.0f, 3.0f};
+		veh.yaw = 0;
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		w::Seat drv;
+		drv.type = w::SeatType::Driver;
+		drv.bone_index = 1;
+		veh.seats.push_back(drv);
+		vh = world.registry.spawn_from(1, 0, veh);
+	}
+	if (!expect(vh.valid(), "vehicle spawned")) return false;
+	// The JOX dune buggy's pre-scaled physics block (vehicle_motor_test pins the parse).
+	{
+		w::VehicleTraits t;
+		t.physics = 1;
+		t.player_speed = 94 * 293;
+		t.acceleration = 15 * 4;
+		t.deceleration = 70 * 4;
+		t.turn_rate = 65 * 192426;
+		t.turn_rate2 = 41 * 192426;
+		t.player_control = true;
+		world.vehicle_traits.set(0x1004, t);
+	}
+
+	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+		return false;
+	// The driver's replicated input (landed by the 0x0C apply): forward + moving, heading
+	// = the vehicle's own (drive straight).
+	player->net_move_input = 0x08;
+	player->yaw = 0;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
+	nw::PlayerReplicationState fallback;
+
+	// Frame A: parked pose.
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "frame A dequeued")) return false;
+	nw::FrameUpdate fa;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fa),
+	            "frame A decodes")) return false;
+	const nw::FrameUpdateRecord *ra = nullptr;
+	for (const auto &r : fa.records)
+		if (r.handle == vh.packed) ra = &r;
+	if (!expect(ra != nullptr, "vehicle record present in frame A")) return false;
+
+	// 62 authority ticks: the vehicle motor consumes the driver's input.
+	w::TickContext ctx;
+	ctx.world = &world;
+	ctx.is_authority = true;
+	for (int i = 0; i < 62; ++i) {
+		ctx.logic_tick = static_cast<uint32_t>(i);
+		ai.tick(world, ctx);
+	}
+	w::Entity *veh = world.registry.get(vh);
+	if (!expect(veh != nullptr && veh->veh.speed > 0, "host vehicle motor spun up"))
+		return false;
+	// 62 ticks from standstill: the unclamped launch step (861) + 61 accel-clamped ticks
+	// (+60) — deterministic [orig: the @0x48bb46 branch tree + ±itemDef->acceleration].
+	if (!expect(veh->veh.speed == 861 + 60 * 61, "speed ramp matches the clamp math"))
+		return false;
+	const float moved = std::fabs(veh->position.x - 12.0f) + std::fabs(veh->position.y - 20.0f);
+	if (!expect(moved > 0.5f, "vehicle moved under the driver's replicated input"))
+		return false;
+
+	// Frame B: the streamed record carries the LIVE pose (compressed coords changed while
+	// the recipient anchor held still).
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "frame B dequeued")) return false;
+	nw::FrameUpdate fb;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fb),
+	            "frame B decodes")) return false;
+	const nw::FrameUpdateRecord *rb = nullptr;
+	for (const auto &r : fb.records)
+		if (r.handle == vh.packed) rb = &r;
+	if (!expect(rb != nullptr, "vehicle record present in frame B")) return false;
+	if (!expect(ra->vehicle.pos_x_compressed != rb->vehicle.pos_x_compressed ||
+	                    ra->vehicle.pos_y_compressed != rb->vehicle.pos_y_compressed,
+	            "vehicle record pose is LIVE (host-simulated)"))
+		return false;
+	if (!expect(rb->vehicle.health_word == 3000, "live record keeps the health word"))
+		return false;
+	std::printf("PASS vehicle_drive_authority\n");
+	return true;
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
@@ -1159,6 +1275,7 @@ int main() {
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
 	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
+	                run_vehicle_drive_authority() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
 	                run_round_event_fanout();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");

@@ -214,12 +214,16 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 					health_classification_byte(e.health, e.health_max, e.player_class);
 			break;
 		case EntityClass::Vehicle:
-			// 15/21-B vehicle compact record [orig: Entity_SerializeMountedVehicleState @0x460560
-			// op 1]. parent (entity+0x28 @0x460ba1) unmodeled -> 0xFFFF = world-frame position;
-			// flags = entity+36 low byte verbatim [orig: @0x460d22] — its bit 0x04 selects the
-			// 4-B rider-Euler tail over the 10-B weapon tail (which encode_vehicle_compact_record
-			// mirrors), and bit 0x02 is the DESTROYED state whose wire transitions drive
-			// Entity_KillBySlotId / Entity_RespawnVehicle on the client [orig: @0x460a25/@0x460918].
+			// 15/21-B vehicle compact record [orig: Entity_SerializeVehicleState @0x460560
+			// op 1]. parent (entity+40 @0x460b4d) unmodeled -> 0xFFFF = world-frame position;
+			// flags = entity+36 low byte verbatim [orig: @0x460d22]. Bit 0x04 selects the 4-B
+			// DEAD-POSE euler tail over the 10-B weapon tail (encode_vehicle_compact_record
+			// mirrors the split): the death family sets Flags |= 6, so the short form is the
+			// WRECK pose (drive-authority witness 2026-07-04 — a LIVE driven vehicle stays
+			// full-form; the old "mounted form" reading was the D-NET-63-era misnomer). Bit
+			// 0x02's wire transitions drive Entity_KillBySlotId / Entity_RespawnVehicle on the
+			// client [orig: @0x460a25/@0x460918] — our route_round_deaths does not yet kill
+			// vehicles, so live emission always takes the full form (correct for ridden ones).
 			rec.vehicle.parent_slot_handle = 0xFFFF;
 			rec.vehicle.flags_byte = e.state_flags;
 			rec.vehicle.pos_x_compressed = cx;
@@ -589,6 +593,9 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 		                                          // ours [orig: @0x4c1e4d] (crouch/prone family)
 		intent.equipped_adm_index = up.equipped_adm_index; // entity+0x2B0 — echoed at 0x0A off-16
 		                                                   // [orig: @0x4C20A3] (D-NET-143)
+		intent.analog_x = static_cast<int8_t>(up.analog_x); // entity+0x130.. control axes —
+		intent.analog_y = static_cast<int8_t>(up.analog_y); // the vehicle motor reads the
+		intent.analog_z = static_cast<int8_t>(up.analog_z); // controller's axes [orig: @0x48b783]
 		intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
 		apply_player_intent(world, intent);
 	}

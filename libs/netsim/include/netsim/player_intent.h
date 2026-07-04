@@ -34,6 +34,9 @@ struct PlayerIntent {
 	                                    // from the extended uplink gated AdmDefs[idx].category
 	                                    // < 11, echoed at 0x0A off-16 [orig: @0x4C20A3]
 	                                    // (D-NET-143). 0xFF = none.
+	int8_t   analog_x = 0;            // entity+0x130..+0x132 analog control axes (uplink
+	int8_t   analog_y = 0;            // off-21..23) — the vehicle motor consumes the
+	int8_t   analog_z = 0;            // controlling occupant's axes [orig: @0x48b783]
 	uint32_t buttons = 0;             // fire / action bitmask
 };
 

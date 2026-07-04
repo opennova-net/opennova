@@ -52,7 +52,8 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | deploy gate / eye-pos ref / budget ramp | partial | the deploy-screen HOLD + release are DONE (D-NET-156: `Connection::respawn_pending` → flags1 bit1 + hidden bit; 0x0E dead-or-pending gate; the 0x5A+0x61+0x1E release bundle — D-NET-156 tail); eye-pos anchor + budget ramp still not ported |
 | victim death cycle (tail health + dead bit) | DONE (D-NET-160; verify v34) | the 0x0A tail carries the recipient's LIVE health (`FrameHeaderState::tail_health` [orig: @0x4305df]); `route_round_deaths` sets the entity dead bit (flags\|=2 → record byte13 0x02 [orig: @0x4c1005]; the 1→0 edge = the client spawn hook [orig: @0x4c1109]), lifted by the deploy/respawn reset |
 | vehicle attach/detach (C2S 0x26/0x27) | DONE (D-NET-157; emplacements live-verified v33) | dispatch → `world::entity_process_vehicle_attach/_detach` [orig: @0x502390/@0x4FC980 → @0x435AA0/@0x4946D0]; the 0x0A mounted branch echoes bone byte0 + carrier + the tail mount handle |
-| **vehicle DRIVE authority (ridden record mounted form + ownerSession + the driver's vehicle-state uplink)** | **NOT PORTED — the v33 duplicate-model/can't-drive defect; NEXT WITNESS TARGET** | the ridden vehicle's record must switch to the mounted form (flags bit 0x04 + rider euler, §5.13); ctrl/drvr attach grants `ownerSession(+0x1CC)`; the driver uplinks the VEHICLE's state (Entity_SerializeMountedVehicleState modes 3/4) and `drain_connection_c2s`'s owner gate must accept it — witness the whole chain first |
+| **vehicle DRIVE (host motor off the driver's replicated input)** | DONE — ground family (D-NET-161; verify v35). The round-15 witness REFUTED the prior model: NO vehicle uplink exists (modes 3/4 return −1; the client serializes only g_local_player_entity @0x42c482; golden 344/344), the §5.13 flags&4 short form is the DEAD-pose (wreck) form, and vehicle +0x1CC is an effect-emitter handle, not a session grant | `world::tick_vehicle_motor` [orig: @0x48af00] per pool-1 traits entity in the AiSystem tick; items.def physics parse [orig: @0x49d870] -> `world::VehicleTraits`; `drain_connection_c2s` stays player-only (CORRECT). Deferred: air/helo family (Super Pumas parked), skid, vehicle collision, water, autopilot, engine states, wheel-contact pitch/roll |
+| **AS capture loop (slice 2: control/flips/0x6F/0x53/0x1E/0x40)** | DONE (D-NET-162; verify v35) | `world::zone_capture_tick` + the npruntime 1 Hz wire block; map colors + LFP capture; deferrals in the D-NET row (timed engine/0x6C, waves, catch-up, scoring) |
 | body motor for net-snapped peers | DONE (D-NET-159; live: death anims seen by others in v33) | `AiSystem::remote_player_body_anim` runs the anim selection for wire-snapped peers on the authority (position stays wire-owned); hidden entities skip [orig: @0x4b411b] |
 | platform physics (host-side grounding) | not ported (D-NET-151 residual) | retail sets `Flags\|=0x100000` + `groundEntity` in the collision pass [orig: @0x4b3291]; our motor has no platform pass, so OUR OWN player never reports grounded and peer ground links mirror the owner's uplink |
 
@@ -236,7 +237,7 @@ target) in net-re D-NET-146.
   only), so the whole **vehicle drive-authority chain is unwitnessed/unported**: the ridden
   vehicle's record mounted form (flags bit 0x04 + rider-euler tail, §5.13 — ours stays
   unmounted-form with weap zeros), the vehicle ownerSession (+0x1CC) grant at ctrl/drvr
-  attach, and the driver's vehicle-state uplink (Entity_SerializeMountedVehicleState modes
+  attach, and the driver's vehicle-state uplink (Entity_SerializeVehicleState modes
   3/4) + the host's owner-gate extension for it (drain_connection_c2s only accepts the
   connection's own PLAYER handle) → NEXT ROUND'S WITNESS TARGET. Killee-never-knows FIXED
   same-day = **D-NET-160** (tail health was hardcoded 150 + no server-side dead bit; now
@@ -250,6 +251,36 @@ target) in net-re D-NET-146.
   ammoPrimary lands vs what the HUD mag counter reads) before touching anything.
   Artifacts: `.scratch/retail_join_v33{,_game}.pcapng` (28 MB filtered), host logs
   host_std{out,err}_v33.log.
+
+- **Round 15 (2026-07-04): the VEHICLE DRIVE round — the task's assumed chain REFUTED, the
+  real chain witnessed AND ported, + slice 2 landed the same session (D-NET-161/162).**
+  Witness keystones: `Client_ProcessNetworkFrame @0x42c180` uplinks exactly ONE entity
+  (g_local_player_entity, @0x42c482) — vehicles NEVER ride a C2S 0x0C (modes 3/4 return −1
+  @0x460578; golden 344/344 player-handle uplinks); the §5.13 `flags&4` short form is the
+  DEAD-pose form (death sets `Flags |= 6`; golden f=237868 = 16 buggies dying in one frame;
+  the golden's RIDDEN vehicle streams the 21-B full form its whole drive) — serializer
+  renamed `Entity_SerializeVehicleState`, decoder `is_mounted` -> `is_dead_pose`, nw_pp
+  labels `DEAD-POSE`/`live`; vehicle `+0x1CC` is the smoke/burn EFFECT-EMITTER slot
+  (`CEffectEmitter_ReleaseSafe @0x5f69f0`, renamed from the CNapiSession kong misname) —
+  no ownership grant exists; DRIVE = the host runs `Entity_UpdateVehiclePhysics @0x48af00`
+  off the CONTROLLING occupant's (+0x170) replicated MoveOrder/Yaw/analog (gate
+  `(Flags&0x100) && (local || authority)` @0x48b0ff — the driver's client is prediction).
+  v33's "second model + can't drive" = our missing host motor (prediction-vs-pinned-wire
+  fight). PORTED: libs/def physics block (scaled per @0x49d870), `world::VehicleTraits` +
+  the resolve_item_traits stamp, `world::tick_vehicle_motor` (the ground-family authority
+  core; buggy drives, helos = tracked deferral), `Entity::net_analog_*` through
+  PlayerIntent, the AiSystem vehicle pass. SLICE 2 (D-NET-162): `world::zone_capture_tick`
+  (secure latch + the @0x501120 delta formula + instant flips via neutral + enforcement) +
+  the npruntime 1 Hz block (0x6F change-gated + deploy refresh, 0x1E zone family, 0x53,
+  0x40 zone+vehicle overlay — `Entity_ClassifyForMinimap @0x50FA70` witnessed with the
+  whole producer chain, §5.19). Tests: vehicle_motor_test (def-scaling + launch/clamp/
+  reverse/turn-in-place/steer/coast/dead/selector pins), netsim_two_peer_fanout
+  vehicle_drive_authority (remote-driver input spins the host vehicle; the streamed record
+  pose goes live), zone_chain_test (delta pins + flip/secure/contest/neutralize/retake).
+  IDB: 2 renames + 7 witness comments, saved. **NEXT = v35 live**: buggy drives under a
+  retail driver (no second model), map/LFP colors on the deploy map + minimap, an LFP
+  neutralize->take->secure cycle end-to-end, plus the v34 leftovers (death cycle) and the
+  standard sweep.
 
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail

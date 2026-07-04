@@ -568,7 +568,7 @@ public:
     // this AiEntity (what the present snapshot reads), then return true so the tick SKIPS the state
     // machine + locomotion (a manned gunner never path-follows). Auto-dismounts + returns false if
     // the mount target is gone. Returns false (run AI normally) when not mounted.
-    // [orig: Entity_SerializeMountedVehicleState @0x460560 runs per tick for mounted entities.]
+    // [orig: Entity_SerializeVehicleState @0x460560 runs per tick for mounted entities.]
     bool pose_if_mounted(AiEntity &e, World &world);
 
     // Integrate the part-anim channel phases: phase[slot] += rate[slot] * dir[slot], clamped to
@@ -614,6 +614,8 @@ private:
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     std::vector<int> handle_to_ai_index_;
+    std::vector<EntityHandle> vehicle_pass_handles_; // per-tick scratch for the vehicle
+                                                     // motor pass (reused, no realloc)
     bool baseline_captured_ = false;
 };
 

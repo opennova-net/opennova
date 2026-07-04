@@ -609,8 +609,8 @@ void print_vehicle_compact_record(const VehicleCompactRecord &r) {
 	            handle_str(r.parent_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed), int(r.euler_z),
-	            unsigned(r.flags_byte), r.is_mounted ? "MOUNTED" : "unmounted");
-	if (r.is_mounted) {
+	            unsigned(r.flags_byte), r.is_dead_pose ? "DEAD-POSE" : "live");
+	if (r.is_dead_pose) {
 		std::printf(" euler=(x=%d y=%d)\n", int(r.euler_x), int(r.euler_y));
 	} else {
 		std::printf(" health=%u weap=(x=0x%04x aimY=0x%04x aimZ=0x%04x hdgBAM=%d)\n",

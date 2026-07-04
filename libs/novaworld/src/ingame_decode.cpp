@@ -553,7 +553,7 @@ bool decode_player_compact_record(const uint8_t *body, size_t len,
 }
 
 // §5.13 vehicle compact record (mode 2, format 11). 15 B mounted / 21 B not.
-// [orig: Entity_SerializeMountedVehicleState @ 0x460560]
+// [orig: Entity_SerializeVehicleState @ 0x460560]
 bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
                                    VehicleCompactRecord &out, size_t &consumed) {
 	consumed = 0;
@@ -564,8 +564,8 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 	out.pos_z_compressed   = c.u16();
 	out.euler_z            = int16_t(c.u16());
 	out.flags_byte         = c.u8();
-	out.is_mounted         = (out.flags_byte & 0x04) != 0;
-	if (out.is_mounted) {
+	out.is_dead_pose         = (out.flags_byte & 0x04) != 0;
+	if (out.is_dead_pose) {
 		// Mounted: the remaining two Euler components (entity+584/+580).
 		out.euler_y = int16_t(c.u16());
 		out.euler_x = int16_t(c.u16());
@@ -579,7 +579,7 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 	}
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
-	return consumed == (out.is_mounted ? size_t(15) : size_t(21));
+	return consumed == (out.is_dead_pose ? size_t(15) : size_t(21));
 }
 
 // §5.14 infantry / AI compact record (mode 2, format 11). 14 B fixed.

@@ -1125,6 +1125,66 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "disk_function", 13)) {
             consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
             parsed = 1;
+        /* Vehicle physics-property block, scaled at parse exactly like the original loader
+           [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
+           turn_rate only for clarity — lower_match_key requires a separator after the key. */
+        } else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.turn_rate2 = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d8dc] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "turn_rate", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.turn_rate = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d89a] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "max_slope", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "slip_slope", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.slip_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d960] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "player_speed", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.player_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9a2] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "water_speed", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.water_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9e4] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "acceleration", 12)) {
+            /* token*4; a still-unset deceleration defaults to 2*acceleration (8*token) at
+               THIS parse site, mirroring the original's ordering semantics [orig: @0x49da32,
+               decel default @0x49da4b]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            int a4 = parse_int_n(v, vl) * 4;
+            current.acceleration = a4;
+            if (current.deceleration == 0) current.deceleration = a4 * 2;
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "deceleration", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.deceleration = parse_int_n(v, vl) * 4; /* [orig: @0x49da84] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "slip_speed", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.slip_speed = parse_int_n(v, vl) * 4; /* [orig: @0x49dafd] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "physics", 7)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            current.physics = parse_int_n(v, vl); /* raw selector [orig: @0x49dac8] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "criticalhp", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.critical_hp = parse_int_n(v, vl); /* i16 raw at +0x180 */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "criticaldrain", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "unit_type", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70] */
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "attrib:", 7)) {
             /* Space-separated capability tokens -> ItemDefAttrib/Attrib2 bits. Unknown tokens
                (exp1, pilotonly, forceasset, neutral, ...) are not in the witnessed map and stay

@@ -794,6 +794,16 @@ target_include_directories(zone_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(zone_chain_test PRIVATE cxx_std_17)
 add_test(NAME zone_chain COMMAND zone_chain_test)
 
+# Host-authoritative ground-vehicle motor (net-re §5.13 drive-authority witness): the
+# items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive
+# input mapping, steering chase, and speed pipeline of Entity_UpdateVehiclePhysics
+# @0x48af00 — a mounted ctrl/drvr player's replicated input moves the vehicle.
+add_executable(vehicle_motor_test world/vehicle_motor_test.cpp)
+target_link_libraries(vehicle_motor_test PRIVATE opennova_world opennova_def)
+target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
+add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
+
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
 # 16.16 delta drives the infantry motor. Asset-gated: absent files skip (CI-safe).

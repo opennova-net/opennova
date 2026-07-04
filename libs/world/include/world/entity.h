@@ -187,6 +187,14 @@ struct Entity {
     uint8_t net_anim_state = 44;
     uint8_t net_anim_pending = 0;
     uint8_t net_anim_phase = 0;
+    // Analog control axes (entity+0x130..+0x132, the extended-uplink off-21..23 bytes):
+    // joystick steering/throttle. The vehicle motor consumes the CONTROLLING occupant's
+    // axes — analogX scales throttle, max(|analogY|,|analogZ|) steers [orig: the analog
+    // branch of Entity_UpdateVehiclePhysics @0x48b783-0x48b7c6; pack site
+    // Player_PackInputStateToEntity @0x4df450 pad7[16..19]]. Signed byte semantics.
+    int8_t net_analog_x = 0;
+    int8_t net_analog_y = 0;
+    int8_t net_analog_z = 0;
     // Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
     // (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
     // index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
@@ -274,6 +282,32 @@ struct Entity {
     // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +
     // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
     EntityHandle last_fire_target;      // kInvalid = no target claimed
+
+    // --- vehicle motor state (pool-1 PlayerControl vehicles; world/vehicle_motor.h) ---
+    // The original keeps this state across the entity struct and the 812-B per-entity
+    // AI/physics component (`vehicleData` = *(entity+100)); the slot comments name the
+    // original homes. [orig: Entity_UpdateVehiclePhysics @0x48af00]
+    struct VehicleMotorState {
+        int32_t yaw_bam = 0;          // 32-bit engine-frame heading (entity+0x10). Entity::yaw
+                                      // (mission deg) mirrors (90 - bam/deg) each motor tick —
+                                      // steering accumulates sub-degree BAM deltas.
+        bool yaw_seeded = false;      // yaw_bam initialized from Entity::yaw on first tick
+        int32_t speed = 0;            // currentSpeed, 16.16 u/tick [orig: entity+0x29C]
+        int32_t speed_accel = 0;      // per-tick speed delta [orig: entity+0x2A0 speedAccel]
+        int32_t cmd_speed = 0;        // commanded/target speed [orig: vehicleData+544]
+        int32_t steer_target_bam = 0; // steering target heading [orig: vehicleData+528]
+        int32_t steer_ramp_bam = 0;   // key-steer ramp offset [orig: vehicleData+548]
+        int32_t steer_state = 0;      // smoothed wheel deflection [orig: entity->aiState reuse]
+        int32_t wheel_rate_bam = 0;   // grounded yaw rate [orig: entity->modelPtr0 reuse]
+        int32_t vel_x = 0;            // world velocity, 16.16 u/tick — persists airborne
+        int32_t vel_y = 0;            // (ballistic) [orig: entity velocityX/Y +0x98/+0x9C]
+        int32_t slide_z = 0;          // vertical velocity, 16.16 [orig: slideDecay +0xA0]
+        bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
+                                      // vehicles spawn RESTING (contact resolved at init),
+                                      // so the default is grounded — the first motor tick
+                                      // re-derives it from the terrain clamp
+    };
+    VehicleMotorState veh;
 };
 
 } // namespace opennova::world

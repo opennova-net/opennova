@@ -19,6 +19,7 @@
 #include "world/var_store.h"
 #include "world/ammo_table.h"
 #include "world/round_sim.h"
+#include "world/vehicle_motor.h"
 #include "world/weapon_table.h"
 #include "world/zone_chain.h"
 
@@ -106,7 +107,7 @@ class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer s
 // rotate(seat.seat_local, -vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
 // others face vehicle.yaw + seat.yaw_offset. Pure geometry (no AI), shared by
 // EntityCommands::mount (the attach-time pose) and the AI tick (the per-tick seat-follow).
-// [orig: stand-in for Entity_SerializeMountedVehicleState @0x460560's seat follow; true
+// [orig: stand-in for Entity_SerializeVehicleState @0x460560's seat follow; true
 // bone-transform follow is Entity_GetBoneTransformAndOrientation @0x4b0c50.]
 void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
 
@@ -270,6 +271,13 @@ public:
     // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
     // from Game_StartMission; net-re §5.61]
     ZoneChain zone_chain;
+
+    // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
+    // it — NovaSimulation::resolve_item_traits). The AI tick's vehicle pass runs the
+    // ground-vehicle motor for pool-1 entities whose traits carry a non-zero `physics`
+    // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
+    // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
+    VehicleTraitsTable vehicle_traits;
 
     // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
     // shares the same field through AiSystem). Null = no terrain impacts.

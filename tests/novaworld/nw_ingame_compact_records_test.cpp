@@ -88,7 +88,7 @@ int test_vehicle_mounted_15_bytes() {
 	const bool ok = decode_vehicle_compact_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 15);
-	EXPECT(rec.is_mounted == true);
+	EXPECT(rec.is_dead_pose == true);
 	EXPECT(rec.parent_slot_handle == 0x108B);
 	EXPECT(rec.flags_byte == 0x04);
 	EXPECT(rec.euler_y == int16_t(0x2211));
@@ -118,7 +118,7 @@ int test_vehicle_unmounted_21_bytes() {
 	const bool ok = decode_vehicle_compact_record(body, sizeof(body), rec, consumed);
 	EXPECT(ok);
 	EXPECT(consumed == 21);
-	EXPECT(rec.is_mounted == false);
+	EXPECT(rec.is_dead_pose == false);
 	EXPECT(rec.parent_slot_handle == 0xFFFF);
 	EXPECT(rec.weapon_x == 0x2211);
 	EXPECT(rec.health_word == 0x4433);

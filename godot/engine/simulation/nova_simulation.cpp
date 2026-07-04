@@ -293,6 +293,27 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 		const uint32_t attrib = p_item_db->get_attrib(def_id);
 		e->is_capture_trigger = (attrib & 0x20000u) != 0;
 		e->is_spawn_point = (attrib & 0x40000u) != 0;
+		// Vehicle motor traits: the pre-scaled items.def physics block + the PlayerControl
+		// attrib (0x40) gate, keyed by item id in the world table. Fills once per distinct
+		// id; the AI tick's vehicle pass drives pool-1 entities whose traits carry a
+		// non-zero `physics` selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870;
+		// Entity_UpdateVehiclePhysics @0x48af00 attrib & 0x40 gate @0x48b0e6]
+		if (e->handle.pool() == 1 &&
+		    world_->vehicle_traits.get(e->item_id) == nullptr) {
+			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
+			if (vp.size() == 7 && vp[0] != 0) {
+				opennova::world::VehicleTraits vt;
+				vt.physics = vp[0];
+				vt.player_speed = vp[1];
+				vt.acceleration = vp[2];
+				vt.deceleration = vp[3];
+				vt.turn_rate = vp[4];
+				vt.turn_rate2 = vp[5];
+				vt.unit_type = vp[6];
+				vt.player_control = (attrib & 0x40u) != 0;
+				world_->vehicle_traits.set(e->item_id, vt);
+			}
+		}
 	}
 	// The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on
 	// is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.

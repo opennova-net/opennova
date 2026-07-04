@@ -372,7 +372,7 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 	return out; // 14 B
 }
 
-// [orig: Entity_SerializeMountedVehicleState case 1 (write, type 11) @ 0x460560]
+// [orig: Entity_SerializeVehicleState case 1 (write, type 11) @ 0x460560]
 // 15 B mounted / 21 B unmounted; positions are already-compressed u16s.
 std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &rec) {
 	std::vector<uint8_t> out;

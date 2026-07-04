@@ -37,6 +37,16 @@ private:
 		String ai_function;
 		String move_function;
 		int hp = 0; // items.def hp = itemDef+0x17C healthMax (0 = none declared)
+		// Vehicle physics-property block, PRE-SCALED by the libs/def parser exactly like
+		// the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Consumed by
+		// the sim's item-traits sweep (world::VehicleTraits). All 0 when absent.
+		int physics = 0;      // +0x8DC selector — non-zero = ground-vehicle motor
+		int acceleration = 0; // +0x8E0
+		int deceleration = 0; // +0x8E4
+		int player_speed = 0; // +0x8E8 (16.16 u/tick)
+		int turn_rate = 0;    // +0x924 (BAM/tick)
+		int turn_rate2 = 0;   // +0x928
+		int unit_type = 0;    // minimap icon class [orig: Entity_ClassifyForMinimap @0x50FA70]
 		// items.def soundloop_1..7 — the looping ambient sound-set names for a
 		// "snd:"-prefixed `type marker` item (e.g. soundloop_1 LPNV_LIGHT). Time-of-day
 		// slots; the runtime plays the first non-empty one resolvable in the .lwf bank.
@@ -95,6 +105,11 @@ public:
 	// The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. AS zone traits
 	// read 0x20000 "ChangeTeam" / 0x40000 "SpawnPoint". [net-re §5.61]
 	uint32_t get_attrib(int id) const;
+	// The pre-scaled vehicle physics block as [physics, player_speed, acceleration,
+	// deceleration, turn_rate, turn_rate2, unit_type]; empty for unknown ids. Feeds the sim's
+	// world::VehicleTraits table (resolve_item_traits). [orig: ItemDef_ParsePhysicsProperty
+	// @0x49d870; consumer Entity_UpdateVehiclePhysics @0x48af00]
+	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
 	// items.def sound_profile (a sound-set name resolved against the loaded .lwf
 	// banks at runtime); empty if the item declares none.

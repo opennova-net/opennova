@@ -4,6 +4,7 @@
 #include "world/ai.h"
 
 #include "world/body_anim.h"
+#include "world/vehicle_motor.h"
 #include "world/world.h"
 
 #include <algorithm>
@@ -611,6 +612,28 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             }
         }
         advance_part_anim(e); // part-anim channels integrate independent of the AI budget gate
+    }
+    // Ground-vehicle motor pass: every pool-1 entity with vehicle traits (items.def
+    // `physics` selector non-zero) runs the drive core — consuming a mounted ctrl/drvr
+    // player's replicated input on the authority. AUTHORITY-ONLY here: a joiner's local
+    // copies are wire-posed (the vehicle compact record read side), and the driver's
+    // client-side prediction leg is the retail client's concern, not this host loop's.
+    // [orig: the per-class tick from Entity_UpdateAllEntities -> Entity_DispatchPhysics_cveh
+    // @0x48efc0 -> Entity_UpdateVehiclePhysics @0x48af00; authority drive gate @0x48b0ff]
+    if (is_authority && !world.vehicle_traits.empty()) {
+        vehicle_pass_handles_.clear();
+        world.registry.for_each([&](const Entity &e) {
+            if (e.handle.pool() != 1) return;
+            if (world.vehicle_traits.get(e.item_id) == nullptr) return;
+            vehicle_pass_handles_.push_back(e.handle);
+        });
+        for (const EntityHandle h : vehicle_pass_handles_) {
+            Entity *veh = world.registry.get(h);
+            if (veh == nullptr) continue;
+            const VehicleTraits *traits = world.vehicle_traits.get(veh->item_id);
+            if (traits == nullptr) continue;
+            tick_vehicle_motor(world, *veh, *traits);
+        }
     }
     events.process_timed(*this, world);
 }

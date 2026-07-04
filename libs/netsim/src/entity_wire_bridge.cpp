@@ -539,6 +539,12 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	// re-emits zeros and remote observers see the peer frozen at idle.
 	ent->net_move_input = intent.move_input;
 	ent->flags ^= (ent->flags ^ static_cast<uint32_t>(intent.state_flags)) & 0x1Cu;
+	// Analog control axes (entity+0x130..) — consumed by the vehicle motor when this
+	// player holds a ctrl/drvr seat [orig: case-4 stores beside the move-order byte;
+	// reader Entity_UpdateVehiclePhysics @0x48b783].
+	ent->net_analog_x = intent.analog_x;
+	ent->net_analog_y = intent.analog_y;
+	ent->net_analog_z = intent.analog_z;
 
 	// Equipped-weapon adm index (entity+0x2B0), the 0x0A off-16 echo source. Retail gates the
 	// ingest by AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; a table-less world

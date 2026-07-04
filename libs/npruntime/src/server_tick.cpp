@@ -7,7 +7,11 @@
 #include <netsim/entity_wire_bridge.h> // snapshot_world / GameEntitySnapshot
 #include <netsim/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
 #include <world/entity_spawn.h>        // entity_reset_to_spawn_state (respawn release)
+#include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
 #include <world/world.h>               // World::run_logic_tick
+#include <world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
+
+#include <algorithm>
 
 namespace opennova::np {
 
@@ -174,6 +178,180 @@ void Server_TickUpdate(NapiNPServerCtx &ctx, const PlayerReplicationState &fallb
 	// health byte carries the same-frame damage regardless).
 	route_round_deaths(ctx, world);
 	release_due_respawns(ctx, world);
+
+	// (2d) The AS capture loop at 1 Hz — slice 2 of the §5.61 witness [orig: the
+	// Server_TickUpdate g_periodic_second_timer block @0x51DF50..0x51DF8C: proximity ->
+	// Server_UpdateCaptureZoneEntities (0x6F + 0x1E 0x3B/0x3C) -> Server_EnforceZoneEntityTeams
+	// -> Server_UpdateCaptureZones (instant numbered flips + 0x53 + GameEvent_FlagCapture)].
+	// The world side runs in zone_capture_tick; this block encodes its events:
+	//   0x6F 15 B [u16 handle][u8 team][i32 control][i32 0x10000][i16 delta][u8 f][u8 e]
+	//     [orig: NetPacket_WriteZoneTimerValue @0x506E70] — CHANGE-GATED to all in-match
+	//     conns + the full set at 1 Hz to deploy-pending/dead ones (the golden carries
+	//     0x6F in deploy-window bursts, not a steady per-second stream; D-NET-162);
+	//   0x1E 8 B zone events [orig: GameEvent_BuildPayload @0x5054E0]: 0x3B/0x3C secure
+	//     edges (attacker = zone-list index — ours is the chain index, a tracked
+	//     divergence; victim = zone team); flips 50/51 (frontier held) or 52/53 (victim =
+	//     the recipient side's NEW frontier), team-filtered; then the 56/57 banner to all
+	//     [orig: GameEvent_FlagCapture @0x50F6F0];
+	//   0x53 9 B on flips [u16 handle][u8 curTeam][u8 capTeam][u16 progress=0][u16 limit=0]
+	//     [u8 rate=0] [orig: NetPacket_WriteZoneTimerWindow @0x506D00, the drain legs
+	//     @0x53BA36/0x53BA68];
+	//   0x40 minimap-overlay state per conn at 1 Hz [orig: Server_BuildOverlayStateForPlayer
+	//     @0x517FC0 -> Entity_ClassifyForMinimap @0x50FA70 -> the 16-entry flush
+	//     @0x50FE20]: persistent zone entries (icon 0, flags 0x10) + transient vehicle
+	//     blips (icon by unit_type, flags 0x00); player/emplacement/CTF entries deferred
+	//     (D-NET-162).
+	if (ctx.is_in_session && world.logic_tick % 62u == 0 && !world.zone_chain.empty()) {
+		static world::ZoneCaptureEvents ev; // scratch (single-threaded host tick)
+		world::zone_capture_tick(world, world.zone_chain, ev);
+
+		auto zone_team_color = [](uint8_t team) -> uint8_t {
+			// [orig: Entity_ClassifyForMinimap @0x50FA70 — team 1 -> 0x0a (blue),
+			// team 2 -> 0x09 (red), else 0x0c (neutral/green); §5.19 color table]
+			if (team == 1) return 0x0a;
+			return team == 2 ? 0x09 : 0x0c;
+		};
+
+		// 0x6F bodies + the change gate.
+		std::vector<std::pair<uint16_t, std::vector<uint8_t>>> zone_6f; // (handle, body)
+		std::vector<uint16_t> changed_6f;
+		for (const auto &c : ev.control) {
+			std::vector<uint8_t> b;
+			put_u16le(b, c.zone.packed);
+			b.push_back(c.team);
+			const uint32_t ctrl = static_cast<uint32_t>(c.control);
+			b.push_back(static_cast<uint8_t>(ctrl & 0xFF));
+			b.push_back(static_cast<uint8_t>((ctrl >> 8) & 0xFF));
+			b.push_back(static_cast<uint8_t>((ctrl >> 16) & 0xFF));
+			b.push_back(static_cast<uint8_t>((ctrl >> 24) & 0xFF));
+			b.push_back(0x00); // limit = 0x10000 fixed [orig: @0x506e9d]
+			b.push_back(0x00);
+			b.push_back(0x01);
+			b.push_back(0x00);
+			put_u16le(b, static_cast<uint16_t>(c.delta));
+			b.push_back(c.friendlies);
+			b.push_back(c.enemies);
+			auto it = ctx.zone_6f_cache.find(c.zone.packed);
+			if (it == ctx.zone_6f_cache.end() || it->second != b) {
+				changed_6f.push_back(c.zone.packed);
+				ctx.zone_6f_cache[c.zone.packed] = b;
+			}
+			zone_6f.emplace_back(c.zone.packed, std::move(b));
+		}
+
+		// Zone-list index approximation for the 0x1E attacker byte: the chain vector index
+		// (retail uses SpawnZoneList_IndexOf @0x43B990 over the client-sorted registry —
+		// tracked divergence, D-NET-162).
+		auto chain_index_of = [&](world::EntityHandle h) -> uint8_t {
+			for (size_t i = 0; i < world.zone_chain.zones.size(); ++i)
+				if (world.zone_chain.zones[i] == h) return static_cast<uint8_t>(i);
+			return 0xFF;
+		};
+		auto event_body = [](uint8_t ev_type, uint8_t attacker, uint8_t victim) {
+			return std::vector<uint8_t>{ev_type, attacker, victim, 0xFF, 0, 0, 0, 0};
+		};
+
+		// 0x53 flip windows.
+		std::vector<std::vector<uint8_t>> flip_53;
+		for (const auto &f : ev.flips) {
+			std::vector<uint8_t> b;
+			put_u16le(b, f.zone.packed);
+			b.push_back(f.new_team);
+			b.push_back(f.capturer_team);
+			put_u16le(b, 0); // progress [orig: the drain restart writes 0]
+			put_u16le(b, 0); // limit
+			b.push_back(0);  // rate
+			flip_53.push_back(std::move(b));
+		}
+
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr) continue;
+			if (conn.link.mode == netsim::TransportMode::Loopback) continue;
+			bool dead = false;
+			uint8_t conn_team = 0;
+			if (conn.link.owned_entity.valid()) {
+				if (const world::Entity *e = world.registry.get(conn.link.owned_entity)) {
+					dead = e->health <= 0;
+					conn_team = e->team;
+				}
+			}
+			const bool deploy_screen = conn.link.respawn_pending || dead;
+
+			// 0x6F: changed zones to everyone; the full set to deploy-screen recipients.
+			for (const auto &zb : zone_6f) {
+				const bool changed = std::find(changed_6f.begin(), changed_6f.end(),
+				                               zb.first) != changed_6f.end();
+				if (changed || deploy_screen) conn.link.transport->host_send(0x6F, zb.second);
+			}
+
+			// 0x1E secure edges (to all in-match) [orig: @0x519839/@0x51988E].
+			for (const auto &se : ev.secure_edges) {
+				conn.link.transport->host_send(
+						0x1E, event_body(se.secured ? 0x3B : 0x3C,
+				                         chain_index_of(se.zone), se.zone_team));
+			}
+
+			// Flip events + 0x53 windows.
+			for (size_t fi = 0; fi < ev.flips.size(); ++fi) {
+				const auto &f = ev.flips[fi];
+				conn.link.transport->host_send(0x53, flip_53[fi]);
+				if (f.suppressed) continue; // match decided [orig: @0x4A2920 gate]
+				const uint8_t zone_idx = chain_index_of(f.zone);
+				if (conn_team == f.capturer_team) {
+					conn.link.transport->host_send(
+							0x1E, f.frontier_changed
+							              ? event_body(53, zone_idx, f.capturer_frontier)
+							              : event_body(51, zone_idx, f.new_team));
+				} else {
+					conn.link.transport->host_send(
+							0x1E, f.frontier_changed
+							              ? event_body(52, zone_idx, f.loser_frontier)
+							              : event_body(50, zone_idx, f.new_team));
+				}
+				// The banner pair keyed by the new owning team [orig: 0x38/0x39 @0x50F991].
+				conn.link.transport->host_send(
+						0x1E, event_body(f.new_team == conn_team ? 56 : 57, zone_idx,
+				                         f.new_team));
+			}
+
+			// 0x40 minimap overlay: persistent zone entries + transient vehicle blips,
+			// chunked 16 per datagram [orig: the 16-slot staging flush @0x50FE20].
+			std::vector<uint8_t> entries;
+			int count = 0;
+			auto flush_40 = [&]() {
+				if (count == 0) return;
+				std::vector<uint8_t> body;
+				body.push_back(static_cast<uint8_t>(count));
+				body.insert(body.end(), entries.begin(), entries.end());
+				conn.link.transport->host_send(0x40, body);
+				entries.clear();
+				count = 0;
+			};
+			auto push_40 = [&](uint16_t handle, uint8_t icon, uint8_t color, uint8_t flags) {
+				put_u16le(entries, handle);
+				entries.push_back(icon);
+				entries.push_back(color);
+				entries.push_back(flags);
+				entries.push_back(0); // source byte [orig: entity weaponByte]
+				if (++count == 16) flush_40();
+			};
+			for (const world::EntityHandle zh : world.zone_chain.zones) {
+				if (const world::Entity *z = world.registry.get(zh))
+					push_40(zh.packed, 0, zone_team_color(z->team), 0x10);
+			}
+			world.registry.for_each([&](const world::Entity &e) {
+				if (e.handle.pool() != 1 || !e.alive || e.health <= 0) return;
+				const world::VehicleTraits *vt = world.vehicle_traits.get(e.item_id);
+				if (vt == nullptr) return; // vehicle-class blips only (D-NET-162)
+				uint8_t icon = 10; // ground [orig: @0x50FA70 unitType switch]
+				if (vt->unit_type >= 5 && vt->unit_type <= 8) icon = 15;
+				else if (vt->unit_type == 3 || vt->unit_type == 4) icon = 11;
+				else if (vt->unit_type == 12) icon = 25;
+				push_40(e.handle.packed, icon, zone_team_color(e.team), 0x00);
+			});
+			flush_40();
+		}
+	}
 
 	// (2c) Spawn-wave status: S2C 0x6E at 1 Hz to every PENDING or DEAD in-match player —
 	// the deploy/death screen's team-roster + wave panel feed. With no host wave options

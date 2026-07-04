@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 #include "npruntime/game_config.h"       // np::GameConfig — the ONE consolidated server-state config
@@ -20,6 +21,7 @@ class World;
 namespace opennova::bms {
 struct File;
 }
+
 namespace opennova::np {
 
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
@@ -137,6 +139,11 @@ struct NapiNPServerCtx {
 		uint32_t due_tick = 0;
 	};
 	std::vector<PendingRespawn> respawn_queue;
+	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
+	// per-second stream (268 across a whole session): unchanged bodies are withheld and
+	// pending/dead (deploy-screen) recipients get the full set at 1 Hz instead
+	// (change-gated broadcast; D-NET-162 note). Keyed by the zone's packed handle.
+	std::unordered_map<uint16_t, std::vector<uint8_t>> zone_6f_cache;
 	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
 	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;

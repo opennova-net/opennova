@@ -159,13 +159,13 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 
 // Encode a §5.13 vehicle compact record (15 B mounted / 21 B unmounted) — the
 // bytes `decode_vehicle_compact_record` consumes, and the byte order produced by
-// [orig: Entity_SerializeMountedVehicleState case 1 (write, type 11) @ 0x460560].
+// [orig: Entity_SerializeVehicleState case 1 (write, type 11) @ 0x460560].
 // Used by CHel/cveh/cbot/cpln/ctrn-class entities (controllable vehicles + AI
 // ground/air units) in the S2C 0x0A trailing event-loop.
 //
 // The mounted/unmounted split is gated on `flags_byte & 0x04` — the original
 // branches on `entity+36 & 4`, so this encoder branches on the flag bit (not the
-// cached `is_mounted`). Positions/headings are the already-compressed u16s
+// cached `is_dead_pose`). Positions/headings are the already-compressed u16s
 // (`health_word` is the raw entity+286 vehicle health u16 — a 0 kills the vehicle
 // on the receiving client, @0x460aff); `Network_CompressFixedPoint` /
 // `Entity_TransformWorldToLocal` run at the World->record layer upstream.

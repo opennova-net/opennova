@@ -1,0 +1,82 @@
+// The host-authoritative ground-vehicle motor — the drive response behind a mounted
+// ctrl/drvr player (the retail-join v33 "can't drive" gap).
+//
+// WITNESS (net-re §5.13 drive-authority chain, 2026-07-04): vehicles have NO wire
+// uplink — the client's per-frame C2S 0x0C serializes exactly ONE entity,
+// g_local_player_entity [orig: Client_ProcessNetworkFrame @0x42c180 call @0x42c482],
+// and the vehicle serialize callback rejects the extended modes 3/4 with -1
+// [orig: Entity_SerializeVehicleState @0x460560 mode switch @0x460578/0x460580;
+// golden ASH_I5A: 344/344 C2S 0x0C bodies carry the player handle]. Drive is therefore
+// HOST-SIDE: the vehicle motor consumes the CONTROLLING occupant's replicated input
+// (MoveOrder / heading / analog axes — all landed by the 0x0C apply) when
+// `itemDef->attrib & 0x40` (PlayerControl) and this machine is the authority (the
+// driver's own client runs the same block as local prediction)
+// [orig: Entity_UpdateVehiclePhysics @0x48af00 gate @0x48b0ff:
+//  `(occupant->Flags & 0x100) && (occupant == g_local_player_entity || is_authority)`].
+//
+// This port is the AUTHORITY drive core for the ground family (items.def `physics`
+// selector non-zero routes here [orig: Entity_DispatchPhysics_cveh @0x48efc0]):
+// input mapping, steering chase, speed pipeline, velocity integration, gravity and a
+// terrain ground clamp. Tracked deferrals (D-NET-161): the air/helicopter family
+// (`move_function chel` — Super Pumas stay parked), the skid/tire-slip model
+// (`tireSlip`/`slip_speed`; the ASH buggy authors slip_speed 0), the pool-1
+// vehicle-vs-vehicle collision loop + collision-avoid damping, water
+// drag/drowning drain (no world water height), the husk/section damage model, the
+// AI autopilot/waypoint drive (states 16/18), the engine sound state machine, the
+// wheel-contact pitch/roll solver (Entity_ProcessTrackedVehiclePhysics — substituted
+// by the bilinear terrain clamp), and the vehicle AI state machine's non-drive states
+// [orig: EntityAI_ProcessVehicleStateMachine @0x4583c0].
+#ifndef OPENNOVA_WORLD_VEHICLE_MOTOR_H
+#define OPENNOVA_WORLD_VEHICLE_MOTOR_H
+
+#include <cstdint>
+#include <unordered_map>
+
+#include "world/entity.h"
+
+namespace opennova::world {
+
+class World;
+
+// Per-item vehicle physics parameters, PRE-SCALED by the items.def parser exactly like
+// the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]:
+// player_speed km/h*293 (16.16 u/tick), turn rates deg/s*192426 (BAM/tick),
+// accel/decel token*4. The host's item-traits sweep fills the table from the item db
+// (NovaSimulation::resolve_item_traits); tests stamp it directly.
+struct VehicleTraits {
+    int32_t physics = 0;       // itemDef+0x8DC selector; 0 = never runs the vehicle motor
+    int32_t player_speed = 0;  // itemDef+0x8E8
+    int32_t acceleration = 0;  // itemDef+0x8E0
+    int32_t deceleration = 0;  // itemDef+0x8E4
+    int32_t turn_rate = 0;     // itemDef+0x924
+    int32_t turn_rate2 = 0;    // itemDef+0x928 (low-speed minimum rate override)
+    int32_t unit_type = 0;     // minimap icon class (5..8 helo, 3/4 boat, 12 special,
+                               // else ground) [orig: Entity_ClassifyForMinimap @0x50FA70]
+    bool player_control = false; // ItemDefAttrib & 0x40 — gates the occupant input block
+};
+
+// items.def type-id -> traits. World-level like the weapon/ammo tables.
+class VehicleTraitsTable {
+public:
+    void set(int32_t item_id, const VehicleTraits &t) { by_item_[item_id] = t; }
+    const VehicleTraits *get(int32_t item_id) const {
+        auto it = by_item_.find(item_id);
+        return it == by_item_.end() ? nullptr : &it->second;
+    }
+    bool empty() const { return by_item_.empty(); }
+    void clear() { by_item_.clear(); }
+
+private:
+    std::unordered_map<int32_t, VehicleTraits> by_item_;
+};
+
+// One authority tick of the ground-vehicle motor for `veh` (a pool-1 entity whose
+// traits carry a non-zero `physics` selector). Consumes the controlling occupant's
+// replicated input, advances Entity::position / Entity::yaw and the persistent
+// Entity::veh motor state. [orig: Entity_UpdateVehiclePhysics @0x48af00 — the
+// authority drive core; block-level cites inline]
+void tick_vehicle_motor(World &world, Entity &veh, const VehicleTraits &traits);
+
+} // namespace opennova::world
+
+#endif // OPENNOVA_WORLD_VEHICLE_MOTOR_H

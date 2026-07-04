@@ -19,7 +19,7 @@ double bam_byte_to_deg(uint8_t hi) { return bam32_to_deg(uint32_t(hi) << 24); }
 // True when a compact record's parent/vehicle handle denotes a real mount (so
 // the decompressed position is vehicle-LOCAL and we can't place it yet). 0xFFFF
 // and the high-nibble sentinel both mean "unmounted" (the engine adds the anchor).
-bool is_mounted_parent(uint16_t parent) {
+bool is_dead_pose_parent(uint16_t parent) {
 	return parent != 0xFFFF && (parent & 0xF000) < 0x5000;
 }
 
@@ -63,7 +63,7 @@ RecKind frame_record_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
 	const int32_t dx = network_decompress_fixedpoint(cx);
 	const int32_t dy = network_decompress_fixedpoint(cy);
 	const int32_t dz = network_decompress_fixedpoint(cz);
-	if (is_mounted_parent(parent)) {
+	if (is_dead_pose_parent(parent)) {
 		s.x = dx; s.y = dy; s.z = dz; // vehicle-local; world via the parent transform
 		return RecKind::Mounted;
 	}
@@ -411,7 +411,7 @@ ReplayTimeline build_replay_timeline(
 			e.owner_session = m.session; // this entity is the uplink-sender's own player
 			// i16 heading sign-extends << 16 into a 32-bit BAM (§5.10).
 			const double up_yaw = bam32_to_deg(uint32_t(int32_t(up.heading) << 16));
-			if (is_mounted_parent(up.carrier_handle)) {
+			if (is_dead_pose_parent(up.carrier_handle)) {
 				// The own-player uplink is vehicle-LOCAL when mounted too (§5.10) —
 				// defer to the same parent transform, tagged ClientUplink so the
 				// owner's projected view keeps it.

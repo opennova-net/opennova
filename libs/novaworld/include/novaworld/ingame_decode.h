@@ -505,27 +505,38 @@ struct PlayerCompactRecord {
 	uint8_t  health_class_byte = 0;   // → Entity_SetHealthFromDifficultyByte
 };
 
-// One §5.13 compact record (15 B mounted / 21 B unmounted). Decoded by
-// [orig: Entity_SerializeMountedVehicleState @ 0x460560]. Used by items with
+// One §5.13 compact record (15 B dead-pose / 21 B live). Decoded by
+// [orig: Entity_SerializeVehicleState @ 0x460560]. Used by items with
 // `ai_function` in {CHel, cveh, cbot, cpln, ctrn} — controllable vehicles
 // and AI ground/air units sharing the vehicle network callback.
+//
+// FORM SEMANTICS (drive-authority witness 2026-07-04, supersedes the "mounted"
+// reading): the flags bit 0x04 short form is the DEAD/WRECK pose-only form — the
+// death family sets `Flags |= 6` (bits 1+2 together [orig: Entity_HandleDeathEvent
+// @0x407118 / Entity_ProcessVehicleDestruction @0x466b7c / Entity_InitDeathState
+// @0x48f96b et al.]), and the euler tail is the frozen wreck ORIENTATION (golden
+// ASH_I5A: 16 parked buggies flip to flags=0x06 short-form in one mass-death frame
+// f=237868). A LIVE vehicle — including one being DRIVEN — always streams the 21-B
+// full form; drive replication is host-side simulation, not a form switch.
 struct VehicleCompactRecord {
 	uint16_t parent_slot_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
 	uint16_t pos_x_compressed = 0;        // entity+4   (vehicle-local if parent != none)
 	uint16_t pos_y_compressed = 0;        // entity+8
 	uint16_t pos_z_compressed = 0;        // entity+12
-	// Orientation / rider Euler triple (BAM-high i16 (v+0x8000)>>16). euler_z is
-	// read pre-branch (always present); euler_x/euler_y follow only in the mounted
-	// branch. Together they feed Math_BuildFixedPointMatrixFromEulerAngles.
+	// Orientation Euler triple (BAM-high i16 (v+0x8000)>>16). euler_z is read
+	// pre-branch (always present); euler_x/euler_y follow only in the dead-pose
+	// branch (the wreck's frozen full orientation). Together they feed
+	// Math_BuildFixedPointMatrixFromEulerAngles.
 	int16_t  euler_z = 0;                 // src entity+16 -> read-dest entity+576
 	uint8_t  flags_byte = 0;              // entity+36 low byte
-	bool     is_mounted = false;          // (flags_byte & 4) != 0
+	bool     is_dead_pose = false;        // (flags_byte & 4) != 0 — the short/wreck
+	                                      // form (renamed from the `is_mounted` misnomer)
 
-	// Mounted branch (is_mounted = true) — the other two Euler components:
+	// Dead-pose branch (is_dead_pose = true) — the other two Euler components:
 	int16_t  euler_y = 0;                 // src entity+24 -> read-dest entity+584
 	int16_t  euler_x = 0;                 // src entity+20 -> read-dest entity+580
 
-	// Unmounted branch (is_mounted = false) — vehicle health + weapon-aim block:
+	// Live branch (is_dead_pose = false) — vehicle health + weapon-aim block:
 	uint16_t weapon_x = 0;                // entity+160 (compressed)
 	uint16_t health_word = 0;             // entity+286 (raw u16) = the vehicle HEALTH word: the
 	                                      // read stores it back to entity+286 [orig: @0x460aff]

@@ -487,7 +487,7 @@ int test_vehicle_compact_roundtrip_mounted() {
 	size_t consumed = 0;
 	EXPECT(decode_vehicle_compact_record(wire.data(), wire.size(), d, consumed));
 	EXPECT(consumed == 15);
-	EXPECT(d.is_mounted);
+	EXPECT(d.is_dead_pose);
 	EXPECT(d.parent_slot_handle == 0x1033);
 	EXPECT(d.pos_y_compressed == 0x2222);
 	EXPECT(d.euler_z == int16_t(0x4444));
@@ -519,7 +519,7 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	size_t consumed = 0;
 	EXPECT(decode_vehicle_compact_record(wire.data(), wire.size(), d, consumed));
 	EXPECT(consumed == 21);
-	EXPECT(!d.is_mounted);
+	EXPECT(!d.is_dead_pose);
 	EXPECT(d.parent_slot_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xAAAA);
 	EXPECT(d.weapon_x == 0x0101);

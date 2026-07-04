@@ -508,7 +508,7 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
 - True occupant pose comes from the seat bone transform (`Entity_GetBoneTransformAndOrientation @
-  0x4b0c50`, `Entity_SerializeMountedVehicleState @ 0x460560`); mounted-pose anim states (emplaced
+  0x4b0c50`, `Entity_SerializeVehicleState @ 0x460560`); mounted-pose anim states (emplaced
   67–75, sit_N, driver lean) are §4.15.
 
 ### 9.2 Port (libs/world + libs/mission) and tracked deviations

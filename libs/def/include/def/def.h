@@ -222,6 +222,27 @@ typedef struct DefItemDef {
     char disk_function[16];
     unsigned int attrib;   /* ItemDefAttrib (+0x54) bitmask; attrib: tokens -> bits. AIData 0x100000 = AI class. [orig: ItemDef_ParseProperty; docs/world/itemdef-re.md] */
     unsigned int attrib2;  /* ItemDefAttrib2 (+0x58) bitmask. */
+    /* Vehicle physics-property block, scaled AT PARSE exactly like the original loader
+       [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Scale constants: deg/s -> BAM/tick =
+       192426 (2^32/360/62 tps), km/h -> 16.16 world-units/tick = 293 ((1000/3600)*65536/62),
+       deg -> BAM = 11930464 (2^32/360), accel/decel raw*4. All 0 when the block is absent. */
+    int physics;        /* +0x8DC raw selector; non-zero routes the entity to the vehicle
+                           motor [orig: Entity_DispatchPhysics_cveh @0x48efc0] */
+    int acceleration;   /* +0x8E0 = token*4 (16.16 u/tick per tick) [orig: @0x49da32] */
+    int deceleration;   /* +0x8E4 = token*4; absent -> 2*acceleration [orig: @0x49da4b] */
+    int player_speed;   /* +0x8E8 = km/h token * 293 [orig: @0x49d9a2] */
+    int water_speed;    /* +0x8EC = km/h token * 293 [orig: @0x49d9e4] */
+    int slip_speed;     /* +0x8F0 = token*4 [orig: @0x49dafd] */
+    int max_slope;      /* +0x8F4 = deg token * 11930464 [orig: @0x49d91e] */
+    int slip_slope;     /* +0x8F8 = deg token * 11930464 [orig: @0x49d960] */
+    int turn_rate;      /* +0x924 = deg/s token * 192426 [orig: @0x49d89a] */
+    int turn_rate2;     /* +0x928 = deg/s token * 192426 [orig: @0x49d8dc] */
+    int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
+                           health state machine reads [docs/world/itemdef-re.md +0x180] */
+    int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */
+    int unit_type;      /* "unit_type" raw — the minimap icon class selector on vehicles
+                           (5..8 helo, 3/4 boat, 12 special, else ground)
+                           [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */
     char (*raw_lines)[512];
     size_t raw_lines_count;
 } DefItemDef;
