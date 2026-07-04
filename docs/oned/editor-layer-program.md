@@ -1,11 +1,17 @@
 # ONED editor-layer improvement program
 
-Status doc for the editor-layer refactor program running on branch
-`oned-editor-layer` (started 2026-07-01). Workstream A realigns the
-architecture (app root, shell decomposition); Workstream B closes UX gaps
-(undo everywhere, global shortcuts) and unifies widgets/theme. Each phase is
-an independently-green, commit-sized slice; the program can stop at any slice
+Status doc for the editor-layer refactor program (started 2026-07-01 on
+`oned-editor-layer`, A1–A7 merged to master; **resumed 2026-07-04 on
+`oned-editor-layer-b`** for A8 + B1–B12, landing as one trunk PR with
+independently-green slice commits). Workstream A realigns the architecture
+(app root, shell decomposition); Workstream B closes UX gaps (undo everywhere,
+global shortcuts) and unifies widgets/theme. Each phase is an
+independently-green, commit-sized slice; the program can stop at any slice
 boundary and still have paid down real debt.
+
+Line references below were re-verified 2026-07-04 against post-#179 master
+(the #176 adapter moves and #178 mission-inspector decomposition shifted the
+originals); anything marked *re-grep at execution* drifts too easily to pin.
 
 Design provenance: three parallel code sweeps plus two verification passes
 against the code (2026-07-01). Where a design claim conflicted with the code,
@@ -55,20 +61,17 @@ standalone green.
 
 ## Remaining phases
 
-### A8 — shell decomposition 3/3 (SCOPE DECISION PENDING)
+### A8 — shell decomposition 3/3 (DECIDED 2026-07-04: FULL extraction)
 
-Planned: `editor/shell/popover_dock.gd` (camera/env/settings popover
-exclusivity + detachable-panel restore), `settings_panel.gd` (settings popup
-content + handlers), `layout_persistence.gd` (splits, browser pane,
-min-size).
-
-Exploration found ~30 test reach-in sites poking exactly the internals this
-would move (`_set_browser_pane_visible`, `_browser_pane`,
-`_set_*_popup_visible`, `_camera/_environment_panel_host`,
-`_panel_restore_for`), and the popover block is entangled with the editor
-binding, view guides, and the env action bar. Options: full extraction
-(update the ~30 sites), reduced (layout persistence only), or skip (the shell
-at ~2,010 lines is already reasonable). **Held for the maintainer's call.**
+The maintainer chose the full extraction: `editor/shell/popover_dock.gd`
+(camera/env/settings popover exclusivity + detachable-panel restore),
+`settings_panel.gd` (settings popup content + handlers), and
+`layout_persistence.gd` (splits, browser pane, min-size), updating the ~30
+test reach-in sites that poke the moved internals
+(`_set_browser_pane_visible`, `_browser_pane`, `_set_*_popup_visible`,
+`_camera/_environment_panel_host`, `_panel_restore_for`). The popover block
+is entangled with the editor binding, view guides, and the env action bar —
+extract it with its seams intact rather than redesigning them.
 
 ### B1 — SnapshotEditSession extraction
 
@@ -143,24 +146,25 @@ unguarded — flush covers buffers). Mission's sim gate survives inside
 `undo()` itself (`_reject_edit_while_simulating`), so the shell needs no sim
 awareness.
 
-Delete the per-workspace key handlers: `mission_controller.gd:1352-1364`
+Delete the per-workspace key handlers: `mission_controller.gd:1357-1361`
 (+ drop KEY_Z/KEY_Y from `is_mutator` at :1292, keep Delete/Backspace),
-`terrain_editor.gd` viewport Ctrl+Z arm, `mnu_editor.gd:981-1005`,
-`mns_editor.gd:377-401`, `fnt_editor.gd` Z/Y arms only (keep Ctrl+C/V + tool
-keys). Music has no handler today (gains keyboard undo through the global
-path).
+`terrain_editor.gd:466` viewport Ctrl+Z arm, `mnu_editor.gd:995-1000`,
+`mnu/mns_editor.gd:390-395` (moved into `mnu/` by the #176 adapter moves),
+`fonts/fnt_editor.gd:914-919` Z/Y arms only (keep Ctrl+C/V + tool keys).
+Music has no handler today (gains keyboard undo through the global path).
 
 Dirty contract: KEEP the dual shape (`is_dirty()` method vs `is_dirty`
 property — renaming would churn 176 accesses across 39 files and
 name-collides with the var in GDScript); instead the base
 `has_unsaved_changes()` gains a tab fold (any `get_document_tabs()` row
 dirty) and the three overrides collapse: delete
-`strings_workspace.gd:208-213`, delete `fonts_workspace.gd:188-189` (add
-`FntEditor.is_dirty()` forwarder), slim `mnu_workspace.gd:724` to
+`strings_workspace.gd:209-214`, delete `fonts_workspace.gd:188-189` (add
+`FntEditor.is_dirty()` forwarder), slim `mnu_workspace.gd:726` to
 `mns_document.is_dirty or super()`. Also delete music's unused undo aliases
-(`music_editor_document.gd:1298-1307`; 11 call sites across two test files).
+(`music_editor_document.gd:1300-1303` — `undo_bank`/`redo_bank`/
+`undo_script`/`redo_script`; 11 call sites across two test files).
 
-Rewrite `mission_controller_test.gd:1660-1663` (drove undo via a viewport
+Rewrite `mission_controller_test.gd:1660-1669` (drove undo via a viewport
 key event) keeping a sim-gate rejection case on `controller.undo()`; new
 `editor_shortcuts_test.gd` pins the guard matrix. Behavior deltas to flag:
 ItemList-focused Ctrl+Z now undoes (was blocked in mission); music gains
@@ -169,10 +173,13 @@ keyboard undo. Gate: mission/mnu/music/fnt suites, editor_shell_redesign.
 ### B7 — Forms unification (one mechanical commit)
 
 Move `object/ui/object_ui_helpers.gd` → `framework/inspector_forms.gd`,
-class_name `InspectorForms` — the rename propagates everywhere (143
-occurrences / 12 files: mission_inspector 76, framework/inspector.gd 20,
-sound_inspector 18, strings_inspector 8, strings_detail_dock 8,
-terrain_inspector 7, plus singles). The two ctrl-reg builders (depend on
+class_name `InspectorForms` — the rename propagates everywhere (147
+occurrences / 16 files re-counted post-#178: mission_inspector 23 + its seven
+section components under `mission/inspectors/` (scripting 18, zones 13,
+waypoints 10, properties 7, loadout_groups 6, place_palette 3,
+objects_browser 3) + `param_slot.gd` 1 + `mission_controller.gd` 1,
+framework/inspector.gd 20, sound_inspector 18, strings_inspector 8,
+strings_detail_dock 8, terrain_inspector 7, plus the definition site). The two ctrl-reg builders (depend on
 `object/ui/widgets/ctrl_reg_picker.gd`) split into new
 `object/ui/object_forms.gd` (`ObjectForms`); `build_channel_card` moves
 (generic).
@@ -198,22 +205,27 @@ protocol (class_name moves are the known silent-test-drop hazard).
 `framework/search_field.gd` (`class_name SearchField extends LineEdit`;
 `signal search_changed(text)`; `_init(placeholder)` sets placeholder +
 clear_button_enabled + expand flags + text_changed relay). Adopt at six sites
-preserving node names: `strings/ui/strings_inspector.gd:39-45`,
-`mission/mission_inspector.gd:1023-1027` and `:1189-1193`,
-`mnu/mnu_string_picker.gd:29-35`, `editor/editor_pff_tool.gd:141-146`,
-`framework/resource_table.gd:44-53`. New `search_field_test.gd`.
+preserving node names (mission's two moved into the #178 section components):
+`strings/ui/strings_inspector.gd:41`,
+`mission/inspectors/objects_browser_inspector.gd:72`,
+`mission/inspectors/place_palette_inspector.gd:43`,
+`mnu/mnu_string_picker.gd:29-30`, `editor/editor_pff_tool.gd:143`,
+`framework/resource_table.gd:46`. New `search_field_test.gd`.
 
 ### B9 — Shell services formalization
 
 Protected helpers on `EditorWorkspace` (guards inside, documented in the
 contract header): `_notify_status(message, severity := &"info", duration :=
 0.0)`, `_sync_shell()`, `_host_under_shell(node)`. Replace the duck-typed
-blocks: sync ×4 (`strings:320`, `sound:176`, `mission:584`, `object:395` —
-COLLISION: object's richer private `_sync_shell` renames to
-`_after_document_changed()`), status ×6+ (`mnu:518,598`;
-`mission:436,479,573,591`), hosting ×7. Mission VFS:
-`mission_workspace.gd:284/293` → the base `_resource_root()`;
-`mission_controller.gd:487,577,3857,3965` → one private controller
+blocks: sync ×4 — the `_sync_shell_title()` guards on `sync_from_editor_state`
+(`strings:322`, `sound:176`, `mission:588`, and `object:384` — COLLISION:
+object's richer private `_sync_shell` renames to `_after_document_changed()`);
+status ×7 (`mnu_workspace:520,599`; `mission_workspace:440,483,581,596`;
+`terrain_editor.gd:236`) — the two `modtools/mcp/` guards stay as-is (the MCP
+service is not a workspace; it keeps its own shell seam); hosting sites
+*re-grep at execution*. Mission VFS: `mission_workspace.gd:288/297` → the
+base `_resource_root()`; the controller's four `get_resource_root` reach-ins
+(≈:484,:577 + two later, *re-grep at execution*) → one private controller
 `_resource_root()` wrapper (the controller runs headless — don't reroute
 through the workspace). Inspector reach-throughs
 (`strings_inspector.gd:106`, `anims_inspector.gd:347`) get
@@ -259,13 +271,12 @@ New `framework/resource_kinds.gd` (`ResourceKinds.JUMP_KIND`, `jump_kind()`,
 `label()` lifted from `resource_browser.gd:230-257`); adopt at
 reference_strip, resource_browser_pane, resource_ref_widget (fixes its copy's
 missing `sbf`/`music_script → music` rows — a latent music-jump bug),
-resource_browser; the pane's `_KIND_FILTERS` stays local. Docs:
-`hud/README.md:31-33` (HUD IS registered), `terrain/README.md:42` (all five
-inspectors are code-first now), `modtools/README.md` workspace table (add
-HUD), `object/README.md` + `framework/README.md` ride-alongs.
-`tools/screenshot_capture.gd` adds the HUD shot (nil-asset branch if HUD
-opens document-less → eleven shots). Gate: editor_open_in_workspace_test,
-full GUT.
+resource_browser; the pane's `_KIND_FILTERS` stays local. Docs (trimmed
+2026-07-04 — the hud/terrain README fixes landed in PR #180 and #169 already
+added HUD to the `modtools/README.md` table): `object/README.md` +
+`framework/README.md` ride-alongs only. `tools/screenshot_capture.gd` adds
+the HUD shot (nil-asset branch if HUD opens document-less → eleven shots).
+Gate: editor_open_in_workspace_test, full GUT.
 
 ## Execution conventions
 
