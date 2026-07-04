@@ -12,8 +12,8 @@
 
 #include "conn_fan_test_util.h"
 
-#include <novaworld/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
-#include <novaworld/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
+#include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
+#include <npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
 #include <world/ai.h>
 #include <world/entity.h>
 #include <world/geom.h>

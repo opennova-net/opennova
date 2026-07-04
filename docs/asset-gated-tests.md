@@ -94,9 +94,16 @@ maturity program (docs/maturity-program.md) closes that with two tiers:
   SYMMETRIC codec change — both sides edited together stay field-identical while
   the wire moves. Updating a vector is a wire-format change: it requires the
   [orig] witness or a D-NET entry in the same commit, never a bare regeneration
-  (`NW_CODEC_DUMP=1` prints the replacement table). A committed
-  opennova↔opennova loopback self-capture driven through `nw_golden_diff`'s
-  self mode is the planned second tier-1 leg (NET-0b).
+  (`NW_CODEC_DUMP=1` prints the replacement table). The second tier-1 leg
+  (NET-0b) is `nw_self_capture` — `nw_golden_diff`'s self mode: a deterministic
+  in-process opennova↔opennova join + play session is captured live and
+  coverage-diffed per (direction, tag) against the committed opennova-produced
+  fixture `fixtures/novaworld/self-capture-session.pcap` (LFS; zero retail
+  bytes, so committable). Because both sides are ours the comparison is EXACT
+  set equality in both directions — no noise floor, no allowlists — and a
+  missing fixture FAILS rather than skips. Regenerating the fixture
+  (`OPENNOVA_WRITE_SELF_FIXTURE=1`, which re-reads and re-verifies the file) is
+  a wire-coverage change: justify the tag delta in the same commit.
 - **Tier 2 — local, mandatory protocol for net-touching PRs.** Run the retail
   golden diff (`NW_GOLDEN_OURS` + the `.scratch/golden/` gameplay capture) and
   the npruntime golden joins against local retail data, and **attest the run in

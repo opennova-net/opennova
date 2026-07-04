@@ -1,9 +1,9 @@
 #include "npruntime/joiner_connection.h"
 
-#include <novaworld/ingame_encode.h>
-#include <novaworld/nw_session_framing.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/nw_session_framing.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include <utility>
 

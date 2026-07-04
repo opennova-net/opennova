@@ -82,6 +82,7 @@ endif()
 # GDExtension (godot/engine/network).
 add_subdirectory(libs/novacrypto)
 add_subdirectory(libs/napi)
+add_subdirectory(libs/npwire)
 add_subdirectory(libs/novaworld)
 
 # netsim — the in-match net seam (ADR 0009/0011): NetSystem + the World<->wire

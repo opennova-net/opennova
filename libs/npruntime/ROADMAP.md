@@ -418,7 +418,7 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
 ## Test harness (built up across phases)
 
 - **GoldenSession loader** (`tests/npruntime/`): load a golden via
-  `apps/common/pcap_reader::stream_pcap_udp_file` → `libs/novaworld/wire_capture`
+  `apps/common/pcap_reader::stream_pcap_udp_file` → `libs/npwire/wire_capture`
   (`CaptureDecoder::push`) → ordered `(direction, tag, decoded-fields, raw-payload, ts, port)`
   events, partitioned host vs joiner by port. Env-gate on the golden path with a `DEFAULT_*_PCAP`
   fallback; skip if absent. New env vars: `NW_GOLDEN_LAN_JOIN`, `NW_GOLDEN_LAN_JOIN_SESSION`,

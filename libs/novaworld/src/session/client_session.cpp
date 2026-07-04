@@ -3,7 +3,7 @@
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
-#include <novaworld/session_keys.h>
+#include <npwire/session_keys.h>
 
 #include <array>
 #include <cstdlib>

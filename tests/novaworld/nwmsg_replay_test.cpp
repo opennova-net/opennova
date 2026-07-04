@@ -16,7 +16,7 @@
 //   §5.5 — retail ships 0x11 only inside the [0x1C, 0x0B, 0x66, 0x76, 0x11]
 //          bundle, 0x11 last with an empty payload.
 
-#include <novaworld/protocol_message.h>
+#include <npwire/protocol_message.h>
 
 #include <cctype>
 #include <cstdint>

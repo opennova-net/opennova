@@ -9,13 +9,13 @@
 #include <novaworld/connection/manager.h>
 #include <novaworld/db/sqlite.h>
 #include <novaworld/host_repository.h>
-#include <novaworld/ingame_decode.h> // OrganicSpawnBatch/Record
-#include <novaworld/ingame_encode.h> // encode_organic_spawn_batch
+#include <npwire/ingame_decode.h> // OrganicSpawnBatch/Record
+#include <npwire/ingame_encode.h> // encode_organic_spawn_batch
 #include <novaworld/lobby_session.h>
-#include <novaworld/nw_session_framing.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/nw_session_framing.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 #include <novaworld/session_protocol.h>
 #include <novaworld/unknown_tracker.h>
 

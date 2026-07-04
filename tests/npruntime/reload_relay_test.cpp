@@ -19,9 +19,9 @@
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
-#include <novaworld/protocol_message.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/protocol_message.h>
 
 #include <world/ai.h>
 #include <world/player_spawn.h>

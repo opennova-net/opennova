@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include <novaworld/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
-#include <novaworld/replication_model.h> // GameEntitySnapshot
+#include <npwire/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
+#include <npwire/replication_model.h> // GameEntitySnapshot
 #include <world/ai.h>                  // AiEntity (engine-frame live pose)
 #include <world/entity.h>
 #include <world/world.h>

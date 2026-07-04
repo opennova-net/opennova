@@ -2,8 +2,8 @@
 
 #include "npruntime/napi_np_server_ctx.h"
 
-#include <novaworld/peer_addr.h> // opennova::PeerAddr
-#include <novaworld/protocol_message.h>     // opennova::ProtocolMessage
+#include <npwire/peer_addr.h> // opennova::PeerAddr
+#include <npwire/protocol_message.h>     // opennova::ProtocolMessage
 // np::GameConfig (the consolidated server-state config) arrives via napi_np_server_ctx.h (ADR 0013).
 
 #include <cstddef>

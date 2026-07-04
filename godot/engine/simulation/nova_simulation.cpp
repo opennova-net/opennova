@@ -12,8 +12,8 @@
 #include "netsim/connection.h"
 #include "netsim/entity_wire_bridge.h" // build_player_uplink (joiner-side C2S 0x0C body)
 
-#include <novaworld/ingame_decode.h> // class_from_tag (§5.10b *_function -> wire class)
-#include <novaworld/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
+#include <npwire/ingame_decode.h> // class_from_tag (§5.10b *_function -> wire class)
+#include <npwire/ingame_encode.h> // encode_organic_spawn_batch (+ OrganicSpawnBatch)
 
 #include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)

@@ -27,8 +27,8 @@
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
 
-#include <novaworld/protocol_message.h>
-#include <novaworld/replication_model.h>
+#include <npwire/protocol_message.h>
+#include <npwire/replication_model.h>
 
 #include <world/ai.h>
 #include <world/player_spawn.h>

@@ -32,8 +32,8 @@
 #include <netsim/loopback_channel.h>
 #include <netsim/udp_session_transport.h>
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/wire_capture.h>
 
 #include <mission/bms.h>
 

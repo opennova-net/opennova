@@ -1,6 +1,6 @@
-#include "novaworld/replay_timeline.h"
+#include "npwire/replay_timeline.h"
 
-#include "novaworld/ingame_decode.h"
+#include "npwire/ingame_decode.h"
 
 #include <algorithm>
 #include <cmath>

@@ -9,7 +9,7 @@
 
 #include <novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <novaworld/lobby_session.h>
-#include <novaworld/protocol_message.h>
+#include <npwire/protocol_message.h>
 #include <npruntime/napi_np_protocol.h>     // np::handle_server_datagram / frame_in_match_s2c (P8)
 #include <npruntime/server_session.h>       // np::set_connection_mode / create_session (host bring-up)
 
@@ -29,7 +29,7 @@ struct LobbyConnState {
 	uint32_t last_inbound_seq = 0;
 	// Client's ClientAuth.ck — this is retail's "local_key" per the
 	// session_id validation in NapiNPProtocol_HandleSessionPacket
-	// (libs/novaworld/include/novaworld/protocol_message.h notes). We
+	// (libs/npwire/include/npwire/protocol_message.h notes). We
 	// must echo it as the session_id field in S→C SESSION packets so
 	// retail's validator accepts them.
 	uint32_t client_ck = 0;

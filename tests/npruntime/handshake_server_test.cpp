@@ -25,11 +25,11 @@
 
 #include <netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
 
-#include <novaworld/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
-#include <novaworld/nw_session_framing.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
+#include <npwire/nw_session_framing.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include <cstdint>
 #include <cstdio>

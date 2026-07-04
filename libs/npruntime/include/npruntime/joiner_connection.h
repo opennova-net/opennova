@@ -3,8 +3,8 @@
 #include "npruntime/napi_np_connection.h"
 
 #include <novaworld/client_session.h>   // ClientSession::Config (shared JO identity)
-#include <novaworld/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
-#include <novaworld/protocol_message.h>  // ProtocolMessage
+#include <npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
+#include <npwire/protocol_message.h>  // ProtocolMessage
 
 #include <cstddef>
 #include <cstdint>

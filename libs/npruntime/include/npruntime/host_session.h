@@ -22,7 +22,7 @@
 #include <netsim/session_transport.h>     // netsim::ISessionTransport / Datagram
 #include <netsim/udp_session_transport.h> // netsim::UdpSessionTransport
 
-#include <novaworld/peer_addr.h> // opennova::PeerAddr
+#include <npwire/peer_addr.h> // opennova::PeerAddr
 
 #include "npruntime/napi_np_connection.h"
 #include "npruntime/napi_np_protocol.h"  // HostAcceptEvent + the server protocol entry points

@@ -30,10 +30,10 @@
 
 #include "host_test_setup.h"
 
-#include <novaworld/peer_addr.h>
-#include <novaworld/nw_session_framing.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/peer_addr.h>
+#include <npwire/nw_session_framing.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include "pcap_reader.h"
 

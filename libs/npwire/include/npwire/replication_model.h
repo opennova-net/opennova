@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include <novaworld/ingame_decode.h> // EntityClass (the §5.10b replication class)
+#include <npwire/ingame_decode.h> // EntityClass (the §5.10b replication class)
 
 namespace opennova {
 

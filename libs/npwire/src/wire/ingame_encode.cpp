@@ -1,4 +1,4 @@
-#include "novaworld/ingame_encode.h"
+#include "npwire/ingame_encode.h"
 
 // Encoders for the in-match S2C replication tags — the symmetric partners to
 // ingame_decode.cpp. Faithful structural ports of the original server-side

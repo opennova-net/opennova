@@ -7,12 +7,13 @@ name: NovaWorld images
 
 on:
   push:
-    branches: [master, web-nw-for-real-master]
+    branches: [master]
     paths:
       - 'apps/novaworld_server/**'
       - 'libs/novacrypto/**'
       - 'libs/napi/**'
       - 'libs/novaworld/**'
+      - 'libs/npwire/**'
       - 'apps/common/**'
       - 'backend/**'
       - 'third_party/sqlite/**'
@@ -24,10 +25,11 @@ on:
       - 'tests/bms/**'
       - '.github/workflows/novaworld-images.yml'
   pull_request:
-    branches: [master, web-nw-for-real-master]
+    branches: [master]
     paths:
       - 'apps/novaworld_server/**'
       - 'libs/novaworld/**'
+      - 'libs/npwire/**'
       - 'libs/napi/**'
       - 'libs/novacrypto/**'
       - 'backend/**'
@@ -51,9 +53,10 @@ jobs:
           submodules: recursive
           lfs: false
 
-      # nwmsg_replay_test reads the captured .nwmsg parity fixtures, which are
-      # LFS-tracked (fixtures/** in .gitattributes). The rest of the net stack
-      # consumes no LFS assets, so pull only this subtree to keep checkout fast.
+      # nwmsg_replay_test reads the captured .nwmsg parity fixtures and
+      # nw_self_capture_test the committed self-capture pcap, both LFS-tracked
+      # (fixtures/** in .gitattributes). The rest of the net stack consumes no
+      # LFS assets, so pull only this subtree to keep checkout fast.
       - name: Materialize net parity fixtures (LFS)
         run: |
           git lfs install --local
@@ -73,13 +76,13 @@ jobs:
             gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
             connection_registry_test connection_manager_test \
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
-            backend_schema_test unknown_tracker_test nwmsg_replay_test \
-            expansion_publish_test
+            backend_schema_test nw_codec_identity_test nw_self_capture_test unknown_tracker_test \
+            nwmsg_replay_test expansion_publish_test
 
       - name: Run net ctests
         run: |
           ctest --test-dir build-server --output-on-failure -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|unknown_tracker|nwmsg_replay|expansion_publish)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|expansion_publish)$"
 
   images:
     needs: http-tests

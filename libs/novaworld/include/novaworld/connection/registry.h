@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <novaworld/peer_addr.h> // opennova::PeerAddr / PeerAddrHash (moved out of this header)
+#include <npwire/peer_addr.h> // opennova::PeerAddr / PeerAddrHash (moved out of this header)
 
 namespace opennova {
 
@@ -23,7 +23,7 @@ enum class ConnectionState {
 
 // One tracked connection. The id is the session_id from the Layer-3
 // ProtocolPacketHeader (witnessed at offset +1 of opcode 0x43 / 0x83
-// packets — see libs/novaworld/include/novaworld/protocol_message.h).
+// packets — see libs/npwire/include/npwire/protocol_message.h).
 struct Connection {
 	uint32_t id = 0;
 	PeerAddr addr;

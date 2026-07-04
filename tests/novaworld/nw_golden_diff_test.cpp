@@ -25,8 +25,8 @@
 // The allowlists are the explicit, reviewable record of what is knowingly
 // deferred — they are NOT a way to paper over a real regression.
 
-#include <novaworld/wire_capture.h> // CaptureDatagram / InGameMessage / decode_capture_to_messages
-#include <novaworld/ingame_message_catalog.h> // ingame_message_name
+#include <npwire/wire_capture.h> // CaptureDatagram / InGameMessage / decode_capture_to_messages
+#include <npwire/ingame_message_catalog.h> // ingame_message_name
 
 #include "pcap_reader.h"
 

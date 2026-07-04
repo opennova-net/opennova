@@ -1,4 +1,4 @@
-#include "novaworld/ingame_decode.h"
+#include "npwire/ingame_decode.h"
 
 #include <cmath>
 #include <cstring>

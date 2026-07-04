@@ -32,8 +32,8 @@
 #include <string>
 #include <vector>
 
-#include "novaworld/ingame_decode.h"
-#include "novaworld/wire_capture.h"
+#include "npwire/ingame_decode.h"
+#include "npwire/wire_capture.h"
 
 namespace opennova {
 

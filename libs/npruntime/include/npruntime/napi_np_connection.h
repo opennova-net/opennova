@@ -5,8 +5,8 @@
 #include <string>
 
 #include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
-#include <novaworld/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
-#include <novaworld/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
+#include <npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
+#include <npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 
 namespace opennova::np {
 

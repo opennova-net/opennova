@@ -19,9 +19,9 @@
 // the capture is absent (.scratch is untracked) so CI stays green; the .sph
 // cross-check is skipped independently if its file is absent.
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/serverlog_decode.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/serverlog_decode.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

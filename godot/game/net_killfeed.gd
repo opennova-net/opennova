@@ -24,7 +24,7 @@ const REFRESH_INTERVAL := 0.25
 const MAX_LINES := 8
 const NONE_HANDLE := 65535
 
-# ReplayEventKind — keep in sync with libs/novaworld/replay_timeline.h.
+# ReplayEventKind — keep in sync with libs/npwire/replay_timeline.h.
 const KIND_KILL := 2
 const KIND_GAMEEVENT := 3
 

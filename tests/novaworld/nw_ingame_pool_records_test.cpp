@@ -5,7 +5,7 @@
 // envelope CRC -> outer NWU -> per-session SCRK -> 0x43/0x83 -> protocol
 // dispatch / reassembly — then hands each completed S2C 0x0D / 0x20 payload
 // to the shared `decode_pool_spawn_batch` / `decode_pool3_sync_batch`
-// decoders in `libs/novaworld/include/novaworld/ingame_decode.h`. Asserts:
+// decoders in `libs/npwire/include/npwire/ingame_decode.h`. Asserts:
 //
 //   - 37 × S2C 0x0D payloads + 29 × S2C 0x20 payloads in the capture (matches
 //     the 2026-06-16b loopback; user-confirmed counts driving Stage C).
@@ -20,10 +20,10 @@
 #include <napi/envelope.h>
 #include <napi/tlv.h>
 #include <novacrypto/nwu.h>
-#include <novaworld/ingame_decode.h>
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include <cstdint>
 #include <cstdio>

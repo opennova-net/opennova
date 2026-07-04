@@ -27,9 +27,9 @@
 #include "pcap_reader.h"
 
 #include <def/def.h>
-#include <novaworld/ingame_decode.h>
-#include <novaworld/replay_timeline.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/replay_timeline.h>
+#include <npwire/wire_capture.h>
 #include <scr/scr.h>
 
 #include <chrono>

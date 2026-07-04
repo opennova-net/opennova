@@ -3,7 +3,7 @@
 // Hand-built input vectors mirror the wire layout from docs/net/novaworld-net-re.md;
 // no capture dependency, so the test runs unconditionally in CI.
 
-#include <novaworld/ingame_decode.h>
+#include <npwire/ingame_decode.h>
 
 #include <cassert>
 #include <cstdint>

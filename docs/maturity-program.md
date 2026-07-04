@@ -25,7 +25,7 @@ of the game (ADR 0015).
 
 | Field | Value |
 |---|---|
-| State | Wave 0 in flight |
+| State | Wave 1 in flight (Wave 0 merged 2026-07-04) |
 | Current wave | 0 — bootstrap |
 | Freeze | ON: new reimplementation features wait for their foundation phase; IDA research/grills are exempt and continue |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
@@ -35,7 +35,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| GOV-1/2/3 bootstrap docs | (this train) | umbrella + vocabulary + ADRs 0015–0018 |
+| NET-2 npwire extraction | (this train) | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
+| GOV-1/2/3 bootstrap docs | 4274cfdf | umbrella + vocabulary + ADRs 0015–0018 |
 
 ## Tracks
 

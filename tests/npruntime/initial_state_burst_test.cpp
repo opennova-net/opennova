@@ -17,7 +17,7 @@
 
 #include <mission/bms.h>
 
-#include <novaworld/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
+#include <npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
 
 #include <world/ai.h>
 #include <world/entity.h>

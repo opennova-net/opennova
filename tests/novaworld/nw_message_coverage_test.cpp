@@ -18,9 +18,9 @@
 // Self-contained (no env/capture gate) — inputs are encoder round-trips or crafted
 // bodies, mirroring nw_pool_decode_unit_test's inline idiom.
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
-#include <novaworld/ingame_message_catalog.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_catalog.h>
 
 #include <cstdint>
 #include <cstdio>

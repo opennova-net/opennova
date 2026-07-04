@@ -35,7 +35,7 @@ output identical, proven by the golden harness and the byte-parity ctests.
 
 ### 1. One message registry + a capture→golden-diff harness (the "identify / validate" seam)
 
-`libs/novaworld/ingame_message_catalog.h` is the **single source of truth** tying
+`libs/npwire/ingame_message_catalog.h` is the **single source of truth** tying
 `(dir, tag) → name → coverage class → decoder → doc §`, shared by `nw_pp`'s labels and
 the `nw_message_coverage` CI gate so a tag cannot be handled in one place and forgotten
 in the other. `nw_pp --histogram` emits a stable per-`(dir,tag)` machine-readable line;

@@ -6,8 +6,8 @@
 #include <utility>
 #include <vector>
 
-#include <novaworld/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
-#include <novaworld/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
+#include <npwire/ingame_decode.h> // decode_entity_packet_sub_header / decode_player_extended_uplink
+#include <npwire/ingame_encode.h> // FrameUpdate / network_compress_fixedpoint / encode_frame_update
 #include <world/geom.h>              // to_fixed
 
 #include "netsim/entity_wire_bridge.h" // health_classification_byte (the field-17 pack)

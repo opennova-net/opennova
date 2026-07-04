@@ -4,11 +4,11 @@
 #include "npruntime/server_message_dispatch.h" // dispatch_session_replies (the reactive §5.1 replies)
 #include "npruntime/server_spawn.h"            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
-#include <novaworld/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
-#include <novaworld/nw_session_framing.h>
-#include <novaworld/protocol_message.h> // make_protocol_message (frame the burst messages)
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
+#include <npwire/nw_session_framing.h>
+#include <npwire/protocol_message.h> // make_protocol_message (frame the burst messages)
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 #include <novaworld/session_protocol.h> // classify_session_protocol
 
 #include <netsim/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)

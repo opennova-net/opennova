@@ -1,4 +1,4 @@
-#include "novaworld/serverlog_decode.h"
+#include "npwire/serverlog_decode.h"
 
 #include <cstring>
 

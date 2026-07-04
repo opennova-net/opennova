@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <novaworld/ingame_decode.h> // EntityClass
+#include <npwire/ingame_decode.h> // EntityClass
 
 namespace opennova::netsim {
 

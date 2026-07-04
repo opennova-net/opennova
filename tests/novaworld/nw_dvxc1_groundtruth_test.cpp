@@ -18,8 +18,8 @@
 // pcap reader; path from NW_DVXC1_PCAP else DEFAULT_DVXC1_PCAP. Skips cleanly when
 // the capture is absent (.scratch is untracked) so CI stays green.
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/wire_capture.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/wire_capture.h>
 
 #include "pcap_reader.h"
 

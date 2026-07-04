@@ -15,8 +15,8 @@
 // apps/novaworld_server makes). No sockets.
 
 #include <novaworld/client_session.h>
-#include <novaworld/session_hello.h>
-#include <novaworld/session_keys.h>
+#include <npwire/session_hello.h>
+#include <npwire/session_keys.h>
 
 #include <napi/envelope.h>
 #include <novacrypto/nwu.h>

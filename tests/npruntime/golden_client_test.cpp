@@ -31,12 +31,12 @@
 #include <netsim/entity_wire_bridge.h> // class_for_type_id
 #include <netsim/net_client_view.h>
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
-#include <novaworld/nw_session_framing.h>  // nw_decode_inbound
-#include <novaworld/protocol_message.h>    // decode_protocol_packet_plaintext
-#include <novaworld/session_hello.h>       // parse_client_auth / parse_server_auth
-#include <novaworld/wire_capture.h>        // decode_capture_to_messages
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
+#include <npwire/nw_session_framing.h>  // nw_decode_inbound
+#include <npwire/protocol_message.h>    // decode_protocol_packet_plaintext
+#include <npwire/session_hello.h>       // parse_client_auth / parse_server_auth
+#include <npwire/wire_capture.h>        // decode_capture_to_messages
 
 #include <world/geom.h> // from_fixed
 

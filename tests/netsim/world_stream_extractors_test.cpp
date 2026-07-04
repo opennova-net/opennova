@@ -6,8 +6,8 @@
 
 #include "netsim/entity_wire_bridge.h"
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/world.h>

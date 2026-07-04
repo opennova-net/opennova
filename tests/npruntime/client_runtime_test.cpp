@@ -32,8 +32,8 @@
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
 
-#include <novaworld/ingame_decode.h>
-#include <novaworld/ingame_encode.h>
+#include <npwire/ingame_decode.h>
+#include <npwire/ingame_encode.h>
 
 #include <world/ai.h>
 #include <world/entity.h>

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <napi/tlv.h>  // NapiMessage (lobby container shape)
-#include <novaworld/protocol_message.h>
-#include <novaworld/session_hello.h>
+#include <npwire/protocol_message.h>
+#include <npwire/session_hello.h>
 
 #include <array>
 #include <cstdint>
