@@ -1276,6 +1276,15 @@ target_link_libraries(nw_ingame_encode_test PRIVATE opennova_novaworld)
 target_include_directories(nw_ingame_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_encode COMMAND nw_ingame_encode_test)
 
+# NET-0 tier-1 byte-stability gate (docs/maturity-program.md): FNV-1a64 vectors
+# over a deterministic synthetic corpus through every in-match encoder. Catches
+# SYMMETRIC codec changes the encode<->decode round-trip cannot see; vectors
+# update only with a wire witness. Always-run, no capture dep.
+add_executable(nw_codec_identity_test novaworld/nw_codec_identity_test.cpp)
+target_link_libraries(nw_codec_identity_test PRIVATE opennova_novaworld)
+target_include_directories(nw_codec_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_codec_identity COMMAND nw_codec_identity_test)
+
 # In-game message catalog coverage gate — asserts every Decoded tag's decoder
 # consumes a representative body to the byte and the catalog stays consistent
 # (the net analog of ADR 0002's MNU key-coverage). Self-contained, always-run.
