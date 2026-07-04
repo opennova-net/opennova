@@ -75,9 +75,22 @@ what confuses.
   - *Tier 2, local, mandatory protocol:* the retail pcap golden diff
     (`NW_GOLDEN_OURS` + `.scratch/golden/`) and the npruntime golden joins,
     run locally for every net-touching PR and attested in its description.
-- **NET-1** (S) quiesce: per-branch disposition (land / park / rebase-after)
-  for `worktree-net-final`, `worktree-game-server`, the shared nw-merge
-  worktree, and `web-nw-for-real-master`; recorded here.
+- **NET-1** (S) quiesce — **done 2026-07-04**, dispositions (maintainer calls):
+  - `worktree-net-final` — **dropped after bundle**: tip `b28cbe8f` verified
+    identical in the 2026-07-04 archive bundle and on the still-live
+    `origin/worktree-net-final`; local branch deleted. Its five Apr-26/27
+    commits (RE/nethook capture tooling, codec_validation.py, novaworld_shim
+    spawn/movement) are superseded by wire_capture, nw_replay, and npruntime.
+  - `worktree-game-server` — **kept live** (rebase-after): branch content fully
+    merged; the worktree carries the active v34 vehicle-drive/EWeap WIP
+    (uncommitted, IDA-cited); fast-forward onto master when that work lands.
+  - shared nw-merge worktree + `web-nw-for-real-master` — **retired**: branch
+    fully merged and deleted (remote already pruned); worktree removed. Its
+    untracked `.scratch` (retail_join_v2–v15, `ov-*`, host logs) was destroyed
+    with the removal; the three NW goldens survive in the main checkout's
+    `.scratch/golden/` and the v16–v35 series in game-server's `.scratch`
+    (see docs/asset-gated-tests.md), and the lost captures are re-derivable
+    from the `start_v*_capture.ps1` recipes.
 - **NET-2** (L) extract the wire + replay legs out of `libs/novaworld` into
   **`libs/npwire`** (final name settled by its ADR): ingame_decode/encode,
   ingame_message_catalog.h, replication_model.h, peer_addr.h,
