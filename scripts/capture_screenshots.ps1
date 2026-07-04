@@ -49,11 +49,13 @@ function Find-GodotBinary {
 $EditorScreenshots = @(
     "overview.png",
     "object.png",
+    "avatars.png",
     "mission.png",
     "fonts.png",
     "credits.png",
     "strings.png",
     "menus.png",
+    "hud.png",
     "music.png",
     "sound.png",
     "environment.png"

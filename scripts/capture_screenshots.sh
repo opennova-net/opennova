@@ -58,6 +58,7 @@ fi
 editor_screenshots=(
   overview.png
   object.png
+  avatars.png
   mission.png
   fonts.png
   credits.png
