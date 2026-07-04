@@ -1,6 +1,6 @@
 // Round-trip + from-scratch writer test for opennova libs/avatars.
 //
-// The writer creates Avatars.def from scratch (docs/adr/0003, docs/adr/0009);
+// The writer creates Avatars.def from scratch (docs/adr/0003, docs/adr/0021);
 // it does NOT reproduce the hand-authored retail file byte-for-byte (that file
 // carries comment banners and tab-alignment art the editor intentionally
 // normalizes). The contract proven here is: (1) the writer is lossless over the

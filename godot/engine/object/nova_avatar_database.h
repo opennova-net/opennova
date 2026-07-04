@@ -100,7 +100,7 @@ public:
 	// mounted resource root (VFS/PFF). Both emit "changed".
 	Error load(const String &path);
 	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
-	// Serialize the current model from scratch (docs/adr/0009) to path. The editor
+	// Serialize the current model from scratch (docs/adr/0021) to path. The editor
 	// save path.
 	Error save_to_path(const String &path);
 	// Reset to an empty model (the "New" document case). Emits "changed".

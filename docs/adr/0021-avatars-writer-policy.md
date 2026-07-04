@@ -1,4 +1,4 @@
-# ADR 0013 - Avatars.def writer policy
+# ADR 0021 - Avatars.def writer policy
 
 Status: accepted. Gates the `Avatars.def` save path (`libs/avatars` writer +
 the planned `NovaAvatarDatabase.save_to_path` / ONED Avatars workspace).

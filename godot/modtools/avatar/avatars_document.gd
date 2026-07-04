@@ -22,7 +22,7 @@ func _file_extension() -> String:
 	return "def"
 
 
-# NovaAvatarDatabase writes itself from scratch (docs/adr/0009), not ResourceSaver.
+# NovaAvatarDatabase writes itself from scratch (docs/adr/0021), not ResourceSaver.
 func _save_resource(path: String) -> Error:
 	return resource.save_to_path(path)
 

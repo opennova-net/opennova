@@ -88,7 +88,7 @@ foreach(test items weapons ammo hudpos item_attrib)
 endforeach()
 
 # AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
-# writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0009).
+# writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0021).
 foreach(test parse roundtrip)
     add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
     target_link_libraries(avatars_${test}_test PRIVATE opennova_avatars)

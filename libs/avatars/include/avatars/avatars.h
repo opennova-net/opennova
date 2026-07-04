@@ -174,7 +174,7 @@ AVATARS_EXPORT int avatars_parse_memory(const void *data, size_t size, AvatarsFi
 AVATARS_EXPORT void avatars_free(AvatarsFile *file);
 
 /* Serialize `file` to a canonical Avatars.def from scratch (never raw
- * passthrough — docs/adr/0003, policy docs/adr/0013). On success returns 0 and
+ * passthrough — docs/adr/0003, policy docs/adr/0021). On success returns 0 and
  * sets *out_data (malloc'd, NUL-terminated) and *out_size (length excluding the
  * NUL). Free with avatars_free_buffer(). The write is deterministic: a
  * parse->write->parse->write round-trip is byte-identical on the second write. */

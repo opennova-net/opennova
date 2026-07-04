@@ -5,7 +5,7 @@
  * in-memory model (see avatars.h and docs/playerinfo/avatars-re.md). The lexer
  * helpers are copied from libs/def/src/def.cpp per the libs/ convention (no
  * shared private header). The writer creates output from scratch
- * (docs/adr/0003, policy docs/adr/0013): a parse->write->parse->write round-trip
+ * (docs/adr/0003, policy docs/adr/0021): a parse->write->parse->write round-trip
  * is byte-identical on the second write and model-equal across the parse.
  */
 
@@ -523,7 +523,7 @@ extern "C" void avatars_free(AvatarsFile *file) {
 }
 
 /* ========================================================================= */
-/* Writer (from scratch — docs/adr/0003, docs/adr/0013)                      */
+/* Writer (from scratch — docs/adr/0003, docs/adr/0021)                      */
 /* ========================================================================= */
 
 static const char *kKindKeyword[3] = { "head", "body", "arms" };
