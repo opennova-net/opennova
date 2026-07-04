@@ -45,8 +45,8 @@ Add to `.claude/settings.local.json` (adjust to this machine's paths):
 {
   "env": {
     "OPENNOVA_JO_DIR": "C:/Users/<you>/Desktop/Games/Joint Operations Combined Arms",
-    "OPENNOVA_MISSION_CORPUS": "C:/Users/<you>/Desktop/JO_ASSETS_t",
-    "OPENNOVA_JO_ASSETS": "C:/Users/<you>/Desktop/JO_ASSETS_t"
+    "OPENNOVA_MISSION_CORPUS": "C:/Users/<you>/Desktop/JOX",
+    "OPENNOVA_JO_ASSETS": "C:/Users/<you>/Desktop/JOX"
   }
 }
 ```

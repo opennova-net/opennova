@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
     if (dirs.empty()) {
         dirs = {
-            "C:/Users/taylor/Desktop/archive/JO_ASSETS_t",
+            "C:/Users/taylor/Desktop/JOX",
             "C:/Users/taylor/Desktop/archive/BHD_STock2",
             "C:/Users/taylor/Desktop/archive/revx02",
         };
