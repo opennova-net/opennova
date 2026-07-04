@@ -26,6 +26,14 @@
 
 ## Cleanup & verification backlog
 
+- [ ] `npruntime_golden_gameplay` FAILS when actually run against the golden capture
+      (found 2026-07-04 by re-arming the asset-gated tests; it skip-passed before):
+      the test pins the pre-round-14 `0x2B idle default` at record off-14
+      (`tests/npruntime/golden_gameplay_test.cpp:230`) while the server now recomputes
+      anim state from replicated input (D-NET-159). Decide test-stale vs regression
+      against the wire witness and re-pin. All other gated tests pass with data
+      (117/117 corpus, JO sweeps, LAN-join goldens, golden client).
+
 - [ ] Terrain native `[orig]` citation pass: `godot/engine/terrain/` + `libs/terrain` carry no inline citations; grill-ida the mesh build / sampler / lighting chain and land a `docs/terrain/*-re.md` record (docs/README.md lists terrain as record-less)
 - [ ] Present-pass / entity-reconcile citation pass: `engine/world/mission_present_pass.gd`, `mission_entity_registry.gd`, `wire_present_pass.gd` document design but carry no `[orig]` anchors; engine-research the original present/tick chain and cite into `docs/runtime-architecture.md` + `docs/correspondence.md`
 - [ ] Two-net-stack convergence: the NovaNetClient replay/spectate path vs the NovaWorldClient/NovaSimulation listen-server path (see godot/engine/CLAUDE.md); decide convergence once the net workstream stabilizes
