@@ -12,7 +12,6 @@ const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
 const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
 const HudWorkspaceAdapter = preload("res://modtools/hud/hud_workspace.gd")
 const MusicWorkspaceAdapter = preload("res://modtools/music/music_workspace.gd")
-const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
 enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, HUD }
 
@@ -21,10 +20,6 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 # constants those rows (and tests/tools via get_workspace_adapter) key on — the
 # shell itself never branches on a specific workspace. Document-action ids are
 # ShellActionBar.Action.
-
-# Item metadata sentinel for the "Clear list" entry in the recent-directories
-# dropdown; real entries carry their path, the disabled placeholder carries "".
-const _RECENT_CLEAR_META := "::clear::"
 
 @onready var _nav_back_button: Button = %NavBackButton
 @onready var _nav_forward_button: Button = %NavForwardButton
@@ -113,12 +108,7 @@ var _document_tabs := ShellDocumentTabs.new()
 var _status := ShellStatusBar.new()
 var _tile_gizmo_overlay := TileGizmoOverlay.new()
 var _asset_dock_workspace_id: int = -1
-var _camera_settings_panel: Control
 var _resource_library := EditorResourceLibrary.new()
-# 3D-preview guide visibility, shared across guide-capable workspaces and pushed
-# to the active one. Loaded from / saved to the editor-state config.
-var _view_grid_visible: bool = true
-var _view_axes_visible: bool = true
 var _mounted_workspace_id: int = -1
 var _current_workflow_id: int = -1
 var _workflow_buttons: Dictionary = {}
@@ -129,16 +119,12 @@ var _export_progress := ShellExportProgress.new()
 # separate from the flow module's per-action UnsavedChangesDialog.
 var _close_guard_dialog: ConfirmationDialog
 var _resource_browser := EditorResourceBrowser.new()
-# The persistent Resource Browser pane (lazy: built on first show).
-var _browser_pane: ResourceBrowserPane
 var _pff_tool := EditorPffTool.new()
-# Detachable panels (B6): the camera/environment popovers can pop their
-# content into floating windows. State machines live in the hosts; the cached
-# restore dicts make persisted "open floating" decisions without re-reading
-# the config per toggle (the save handlers keep them current).
-var _camera_panel_host: DetachablePanelHost
-var _environment_panel_host: DetachablePanelHost
-var _panel_restore: Dictionary = {}
+# A8 shell modules: persisted layout + browser dock, the popover trio with the
+# detachable panels, and the settings popover content (editor/shell/).
+var _layout := ShellLayoutPersistence.new()
+var _popovers := ShellPopoverDock.new()
+var _settings_panel := ShellSettingsPanel.new()
 # Browser-style Back/Forward over departure snapshots (see EditorNavHistory).
 # History records only at the user navigation entry points
 # (_on_workspace_pressed, open_in_workspace); direct set_active_workspace /
@@ -154,7 +140,7 @@ func _ready() -> void:
 		self,
 		_resource_library,
 		_save_export.open_file_dialog,
-		func() -> void: _set_settings_popup_visible(true),
+		func() -> void: _popovers.set_settings_visible(true),
 		_current_resource_path_for_browser,
 		func() -> void: _scan_resource_root(false)
 	)
@@ -224,12 +210,64 @@ func _ready() -> void:
 		_tile_gizmo_done, _tile_gizmo_rotate, _tile_gizmo_flip_x, _tile_gizmo_flip_y, _tile_gizmo_delete)
 	_build_workspace_rail()
 	_wire_nav_buttons()
-	_wire_camera_popup()
-	_wire_environment_popup()
-	_wire_settings_popup()
-	_wire_splits()
-	_wire_browser_pane()
-	_apply_window_min_size()
+	_popovers.setup(
+		self,
+		_resource_library,
+		_environment_action_bar,
+		_get_editor_camera,
+		_popup_workspace,
+		# Cross-module seams route through shell lambdas (Callables that capture
+		# this Node) - a module-method Callable would refcount-cycle the two
+		# RefCounted modules together.
+		func() -> void: _settings_panel.sync_popup_state()
+	)
+	_popovers.bind_camera_nodes(
+		_camera_toggle_button, _camera_popup, _camera_popup_close,
+		_camera_popup_detach, _camera_popup_content, _camera_settings_host)
+	_popovers.bind_environment_nodes(
+		_environment_toggle_button, _environment_popup, _environment_popup_title,
+		_environment_popup_close, _environment_popup_detach,
+		_environment_popup_content, _environment_actions_host,
+		_environment_inspector_host)
+	_popovers.bind_settings_nodes(_settings_toggle_button, _settings_popup, _settings_popup_close)
+	_settings_panel.setup(
+		_resource_library,
+		_get_active_workspace,
+		_set_resource_root_dir,
+		show_status_message,
+		_save_export.open_dir_dialog,
+		_preferred_resource_root_dir,
+		_pff_tool.open,
+		_mcp_service,
+		func(active: bool) -> void: _popovers.set_settings_visible(active)
+	)
+	_settings_panel.bind_nodes(
+		_settings_resource_dir_edit, _settings_browse_resource_dir_button,
+		_settings_apply_resource_dir_button, _settings_recent_row,
+		_settings_recent_option, _settings_expansion_row, _settings_view_section,
+		_settings_grid_toggle, _settings_axes_toggle, _settings_mcp_toggle,
+		_settings_mcp_port_edit, _settings_mcp_status_label, _settings_pff_tool_button)
+	_settings_panel.load_view_state()
+	_layout.setup(
+		self,
+		_resource_library,
+		_body_row,
+		_center_right_split,
+		_right_split,
+		_browser_toggle_button,
+		_browser_pane_host,
+		_asset_dock,
+		func() -> void: _scan_resource_root(false),
+		_current_resource_path_for_browser,
+		func(kind: String, path: String) -> void: open_in_workspace(kind, path)
+	)
+	_popovers.wire_camera()
+	_popovers.wire_environment()
+	_popovers.wire_settings()
+	_settings_panel.wire()
+	_layout.wire_splits()
+	_layout.wire_browser_pane()
+	_layout.apply_window_min_size()
 	get_tree().set_auto_accept_quit(false)
 	_context_doc_label.clip_text = true
 	_status_context_label.clip_text = true
@@ -239,19 +277,15 @@ func _ready() -> void:
 	if not _resource_library.get_root_dir().is_empty():
 		_scan_resource_root(false)
 	_mount_active_workspace_viewport()
-	_apply_view_guides_to_active_workspace()
+	_settings_panel.apply_view_guides_to_active()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
 	# Split offsets land after the first container sort so clamp sees real sizes.
-	_apply_split_layout.call_deferred()
+	_layout.apply_split_layout.call_deferred()
 
 
 func _exit_tree() -> void:
-	# Quit-while-floating remembers the preference + rect for the next session.
-	if _camera_panel_host != null:
-		_camera_panel_host.save_now()
-	if _environment_panel_host != null:
-		_environment_panel_host.save_now()
+	_popovers.save_floating_states()
 	for workspace in _workspaces.values():
 		(workspace as EditorWorkspace).release_viewport()
 	_clear_viewport_host()
@@ -315,11 +349,12 @@ func set_editor(value: Node) -> void:
 		(workspace as EditorWorkspace).bind_to_editor(value)
 	for workspace in _popup_workspaces.values():
 		(workspace as EditorWorkspace).bind_to_editor(value)
-	_reset_environment_popup_content()
+	_popovers.reset_environment_content()
 	# A floating environment window must not sit empty until its next toggle.
-	if _environment_panel_host != null and _environment_panel_host.is_floating():
-		_ensure_environment_popup_content()
-	_sync_camera_popup_editor()
+	var env_host := _popovers.environment_panel_host()
+	if env_host != null and env_host.is_floating():
+		_popovers.ensure_environment_content()
+	_popovers.sync_camera_editor()
 	_remount_active_workspace_viewport()
 	_refresh_workspace_surface()
 	for child in _inspector_host.get_children():
@@ -336,14 +371,14 @@ func sync_from_editor_state() -> void:
 	_status.refresh()
 	_tile_gizmo_overlay.refresh()
 	_export_progress.sync()
-	_refresh_camera_popup_state()
-	_refresh_environment_popup_state()
+	_popovers.refresh_camera_state()
+	_popovers.refresh_environment_state()
 	var workspace := _get_active_workspace()
 	if workspace != null:
 		workspace.sync_asset_dock()
 	# Re-apply the persisted dock widths so re-showing the right dock on a
 	# workspace switch restores its dragged size instead of the scene default.
-	_apply_split_layout()
+	_layout.apply_split_layout()
 
 
 func _process(_delta: float) -> void:
@@ -557,7 +592,7 @@ func set_active_workspace(workspace_id: int) -> void:
 		# Popup workspaces overlay the active view instead of replacing it. One
 		# popover surface exists today; a second popup workspace would need the
 		# surface generalized alongside this routing.
-		_set_environment_popup_visible(true)
+		_popovers.set_environment_visible(true)
 		_refresh_workspace_buttons()
 		return
 	if not _workspaces.has(workspace_id) or workspace_id == _active_workspace_id:
@@ -573,7 +608,7 @@ func set_active_workspace(workspace_id: int) -> void:
 	_mount_active_workspace_viewport()
 	if next_workspace != null:
 		next_workspace.activate()
-	_apply_view_guides_to_active_workspace()
+	_settings_panel.apply_view_guides_to_active()
 	_refresh_workspace_surface()
 	sync_from_editor_state()
 
@@ -975,12 +1010,12 @@ func _sync_asset_dock_for_workspace(workspace: EditorWorkspace) -> void:
 		_clear_asset_dock_children()
 		_asset_dock.visible = false
 		_asset_dock_workspace_id = -1
-		_sync_right_split_visibility()
+		_layout.sync_right_split_visibility()
 		return
 	_asset_dock.visible = true
 	workspace.set_asset_dock(_asset_dock)
 	_asset_dock_workspace_id = _active_workspace_id
-	_sync_right_split_visibility()
+	_layout.sync_right_split_visibility()
 
 
 func _clear_asset_dock_children() -> void:
@@ -1083,270 +1118,11 @@ func _def_for_id(workspace_id: int) -> WorkspaceDef:
 	return null
 
 
-func _wire_splits() -> void:
-	if _body_row != null and not _body_row.drag_ended.is_connected(_save_split_layout):
-		_body_row.drag_ended.connect(_save_split_layout)
-	if _center_right_split != null and not _center_right_split.drag_ended.is_connected(_save_split_layout):
-		_center_right_split.drag_ended.connect(_save_split_layout)
-
-
-func _apply_window_min_size() -> void:
-	# The editor needs a usable floor; Godot has no project setting for this, so
-	# the window minimum is set at runtime. Only the editor shell does this, so
-	# the runtime game window is unaffected.
-	var window := get_window()
-	if window != null:
-		window.min_size = Vector2i(1024, 640)
-
-
-# Read-only: applies the persisted split offsets without ever writing the config,
-# so test instantiations never persist a layout. A side is only applied when it
-# was actually stored (has_left/has_right), leaving the scene default otherwise.
-# We set split_offset directly and let the container's resort keep children
-# within their minimum sizes; calling clamp_split_offset() explicitly throws
-# before the first sort (and when the dock is hidden), so it is avoided.
-func _apply_split_layout() -> void:
-	if _body_row == null or _center_right_split == null:
-		return
-	var state := _resource_library.load_layout_state()
-	if bool(state["has_left"]):
-		_body_row.split_offset = int(state["left"])
-	if bool(state["has_right"]):
-		_center_right_split.split_offset = int(state["right"])
-
-
-func _save_split_layout() -> void:
-	if _body_row == null or _center_right_split == null:
-		return
-	_resource_library.save_layout_state(_body_row.split_offset, _center_right_split.split_offset)
-
-
-# The Resource Browser pane is a DOCK, not a popover: it never joins the
-# camera/environment/settings mutual exclusion or the Escape handler, and its
-# visibility + split width persist across sessions.
-func _wire_browser_pane() -> void:
-	if _browser_toggle_button != null:
-		_browser_toggle_button.icon = EditorIconLibrary.resolve(&"browser")
-		_browser_toggle_button.toggled.connect(_set_browser_pane_visible)
-	if _right_split != null and not _right_split.drag_ended.is_connected(_save_browser_state):
-		_right_split.drag_ended.connect(_save_browser_state)
-	# Startup restore is a read-only apply (mirrors _apply_split_layout): test
-	# instantiations must never persist a layout they did not change.
-	var state := _resource_library.load_browser_state()
-	if _right_split != null and bool(state["has_split"]):
-		_right_split.split_offset = int(state["split"])
-	if bool(state["visible"]) and _browser_pane_host != null:
-		_ensure_browser_pane()
-		_browser_pane_host.visible = true
-		if _browser_toggle_button != null:
-			_browser_toggle_button.set_pressed_no_signal(true)
-		# Refresh now only when no root is configured (nothing will scan later);
-		# with a root, _ready's scan fills the pane through _refresh_browser_pane
-		# - an eager refresh here would lazy-scan and double the startup index walk.
-		if _resource_library.get_root_dir().is_empty():
-			_browser_pane.refresh()
-	_sync_right_split_visibility()
-
-
-func _ensure_browser_pane() -> void:
-	if _browser_pane != null and is_instance_valid(_browser_pane):
-		return
-	_browser_pane = ResourceBrowserPane.new()
-	_browser_pane.name = "ResourceBrowserPane"
-	# Capabilities only - the pane's double-click rides the same cross-jump
-	# spine as the link widgets (open_in_workspace), never a private open path.
-	_browser_pane.setup(
-		func() -> RefCounted: return _resource_library.get_index(),
-		func() -> String: return _resource_library.get_root_dir(),
-		func() -> void: _scan_resource_root(false),
-		_current_resource_path_for_browser,
-		func(kind: String, path: String) -> void: open_in_workspace(kind, path)
-	)
-	_browser_pane_host.add_child(_browser_pane)
-
-
-func _set_browser_pane_visible(active: bool) -> void:
-	if _browser_pane_host == null:
-		return
-	if active:
-		_ensure_browser_pane()
-	_browser_pane_host.visible = active
-	if _browser_toggle_button != null:
-		_browser_toggle_button.set_pressed_no_signal(active)
-	_sync_right_split_visibility()
-	if active and _browser_pane != null:
-		_browser_pane.refresh()
-	_save_browser_state()
-
-
 # Quick-open: reveal the resource browser pane and focus its search box (Ctrl+P,
-# and the empty-state "Browse resources" button). The table's focus_search()
-# defers the grab, so calling it right after the pane is shown is safe.
+# the empty-state "Browse resources" button, and external callers). The pane
+# itself lives in ShellLayoutPersistence.
 func focus_browser_pane() -> void:
-	_set_browser_pane_visible(true)
-	if _browser_pane != null and is_instance_valid(_browser_pane):
-		_browser_pane.table.focus_search()
-
-
-# With both children hidden, RightSplit itself hides so dockless workspaces
-# keep the pre-pane behavior: no live divider, and the persisted right offset
-# stays inert (CenterRightSplit sees one visible child).
-func _sync_right_split_visibility() -> void:
-	if _right_split == null:
-		return
-	_right_split.visible = (_asset_dock != null and _asset_dock.visible) \
-			or (_browser_pane_host != null and _browser_pane_host.visible)
-
-
-func _save_browser_state() -> void:
-	if _browser_pane_host == null or _right_split == null:
-		return
-	_resource_library.save_browser_state(_browser_pane_host.visible, _right_split.split_offset)
-
-
-# Keep a visible pane truthful after the root changes or a rescan.
-func _refresh_browser_pane() -> void:
-	if _browser_pane != null and is_instance_valid(_browser_pane) \
-			and _browser_pane_host != null and _browser_pane_host.visible:
-		_browser_pane.refresh()
-
-
-func _wire_camera_popup() -> void:
-	if _camera_popup != null:
-		_camera_popup.visible = false
-		_camera_popup.apply_anchor(320.0)
-		_camera_popup.bind_close(_camera_popup_close)
-		_camera_popup.bind_detach(_camera_popup_detach)
-		if not _camera_popup.close_requested.is_connected(_on_camera_popup_close_pressed):
-			_camera_popup.close_requested.connect(_on_camera_popup_close_pressed)
-		if not _camera_popup.detach_requested.is_connected(_detach_camera_panel):
-			_camera_popup.detach_requested.connect(_detach_camera_panel)
-	if _camera_panel_host == null and _camera_popup_content != null:
-		_camera_panel_host = DetachablePanelHost.new(&"camera", "Camera", Vector2i(344, 320))
-		_camera_panel_host.setup(_camera_popup_content, self, _save_camera_panel_state)
-		_camera_panel_host.floating_changed.connect(_on_camera_floating_changed)
-		# Read-only startup apply: remember the preference, never spawn windows
-		# at launch (the floating preference applies on the next open).
-		_panel_restore["camera"] = _resource_library.load_panel_state("camera")
-	if _camera_toggle_button != null and not _camera_toggle_button.toggled.is_connected(_on_camera_toggle_toggled):
-		_camera_toggle_button.icon = EditorIconLibrary.resolve(&"camera")
-		_camera_toggle_button.toggled.connect(_on_camera_toggle_toggled)
-	_refresh_camera_popup_state()
-
-
-func _wire_environment_popup() -> void:
-	if _environment_popup != null:
-		_environment_popup.visible = false
-		_environment_popup.apply_anchor(400.0)
-		_environment_popup.bind_close(_environment_popup_close)
-		_environment_popup.bind_detach(_environment_popup_detach)
-		if not _environment_popup.close_requested.is_connected(_on_environment_popup_close_pressed):
-			_environment_popup.close_requested.connect(_on_environment_popup_close_pressed)
-		if not _environment_popup.detach_requested.is_connected(_detach_environment_panel):
-			_environment_popup.detach_requested.connect(_detach_environment_panel)
-	if _environment_panel_host == null and _environment_popup_content != null:
-		_environment_panel_host = DetachablePanelHost.new(&"environment", "Environment", Vector2i(424, 480))
-		_environment_panel_host.setup(_environment_popup_content, self, _save_environment_panel_state)
-		_environment_panel_host.floating_changed.connect(_on_environment_floating_changed)
-		_panel_restore["environment"] = _resource_library.load_panel_state("environment")
-	if _environment_toggle_button != null and not _environment_toggle_button.toggled.is_connected(_on_environment_toggle_toggled):
-		_environment_toggle_button.icon = EditorIconLibrary.resolve(&"environment")
-		_environment_toggle_button.toggled.connect(_on_environment_toggle_toggled)
-	_refresh_environment_popup_state()
-
-
-# --- Detachable panels (B6) ---
-
-func _save_camera_panel_state(docked: bool, rect: Rect2i) -> void:
-	_panel_restore["camera"] = {"docked": docked, "has_rect": true, "rect": rect}
-	_resource_library.save_panel_state("camera", docked, rect)
-
-
-func _save_environment_panel_state(docked: bool, rect: Rect2i) -> void:
-	_panel_restore["environment"] = {"docked": docked, "has_rect": true, "rect": rect}
-	_resource_library.save_panel_state("environment", docked, rect)
-
-
-func _panel_restore_for(panel_id: String) -> Dictionary:
-	return _panel_restore.get(panel_id, {"docked": true, "has_rect": false, "rect": Rect2i()})
-
-
-# The window opens where it was last seen (clamped to a visible screen at
-# apply time); first detach derives a rect from where the popover sits.
-func _panel_detach_rect(panel_id: String, popover: PopoverPanel) -> Rect2i:
-	var restore := _panel_restore_for(panel_id)
-	if bool(restore.get("has_rect", false)):
-		return restore.get("rect", Rect2i()) as Rect2i
-	return DetachablePanelHost.screen_rect_for(popover)
-
-
-func _detach_camera_panel() -> void:
-	if _camera_panel_host == null or _camera_panel_host.is_floating():
-		return
-	# Content must exist before it floats (the popover may never have opened).
-	_ensure_camera_popup_content()
-	_camera_panel_host.detach(_panel_detach_rect("camera", _camera_popup))
-	if _camera_popup != null:
-		_camera_popup.close()
-	_refresh_camera_popup_state()
-
-
-func _detach_environment_panel() -> void:
-	if _environment_panel_host == null or _environment_panel_host.is_floating():
-		return
-	_ensure_environment_popup_content()
-	_environment_panel_host.detach(_panel_detach_rect("environment", _environment_popup))
-	if _environment_popup != null:
-		_environment_popup.close()
-	_refresh_environment_popup_state()
-
-
-func _on_camera_floating_changed(floating: bool) -> void:
-	if _camera_toggle_button != null:
-		_camera_toggle_button.set_pressed_no_signal(floating)
-
-
-func _on_environment_floating_changed(floating: bool) -> void:
-	if _environment_toggle_button != null:
-		_environment_toggle_button.set_pressed_no_signal(floating)
-
-
-func _wire_settings_popup() -> void:
-	if _settings_popup != null:
-		_settings_popup.visible = false
-		_settings_popup.apply_anchor(420.0)
-		_settings_popup.bind_close(_settings_popup_close)
-		if not _settings_popup.close_requested.is_connected(_on_settings_popup_close_pressed):
-			_settings_popup.close_requested.connect(_on_settings_popup_close_pressed)
-	if _settings_toggle_button != null and not _settings_toggle_button.toggled.is_connected(_on_settings_toggle_toggled):
-		_settings_toggle_button.icon = EditorIconLibrary.resolve(&"settings")
-		_settings_toggle_button.toggled.connect(_on_settings_toggle_toggled)
-	if _settings_browse_resource_dir_button != null and not _settings_browse_resource_dir_button.pressed.is_connected(_on_settings_browse_resource_dir_pressed):
-		_settings_browse_resource_dir_button.pressed.connect(_on_settings_browse_resource_dir_pressed)
-	if _settings_apply_resource_dir_button != null and not _settings_apply_resource_dir_button.pressed.is_connected(_on_settings_apply_resource_dir_pressed):
-		_settings_apply_resource_dir_button.pressed.connect(_on_settings_apply_resource_dir_pressed)
-	if _settings_resource_dir_edit != null and not _settings_resource_dir_edit.text_submitted.is_connected(_on_settings_resource_dir_submitted):
-		_settings_resource_dir_edit.text_submitted.connect(_on_settings_resource_dir_submitted)
-	if _settings_recent_option != null and not _settings_recent_option.item_selected.is_connected(_on_settings_recent_selected):
-		_settings_recent_option.item_selected.connect(_on_settings_recent_selected)
-	if _settings_grid_toggle != null and not _settings_grid_toggle.toggled.is_connected(_on_settings_grid_toggled):
-		_settings_grid_toggle.toggled.connect(_on_settings_grid_toggled)
-	if _settings_axes_toggle != null and not _settings_axes_toggle.toggled.is_connected(_on_settings_axes_toggled):
-		_settings_axes_toggle.toggled.connect(_on_settings_axes_toggled)
-	if _settings_pff_tool_button != null and not _settings_pff_tool_button.pressed.is_connected(_on_settings_pff_tool_pressed):
-		_settings_pff_tool_button.pressed.connect(_on_settings_pff_tool_pressed)
-	if _settings_mcp_toggle != null and not _settings_mcp_toggle.toggled.is_connected(_on_settings_mcp_toggled):
-		_settings_mcp_toggle.toggled.connect(_on_settings_mcp_toggled)
-	if _settings_mcp_port_edit != null and not _settings_mcp_port_edit.text_submitted.is_connected(_on_settings_mcp_port_submitted):
-		_settings_mcp_port_edit.text_submitted.connect(_on_settings_mcp_port_submitted)
-	_sync_settings_popup_state()
-
-
-func _on_settings_pff_tool_pressed() -> void:
-	# Close the settings popover so the modal archive tool isn't competing with it,
-	# then open the tool seeded at the configured resource directory.
-	_set_settings_popup_visible(false)
-	_pff_tool.open(_preferred_resource_root_dir())
+	_layout.focus_browser_pane()
 
 
 func _on_pff_extracted(dir: String) -> void:
@@ -1369,16 +1145,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			# The native confirm/export dialogs own their own Escape handling
 			# (they emit canceled and hide), so only the corner popovers need it
 			# routed here.
-			if _camera_popup != null and _camera_popup.visible:
-				_set_camera_popup_visible(false)
-				get_viewport().set_input_as_handled()
-				return
-			if _environment_popup != null and _environment_popup.visible:
-				_set_environment_popup_visible(false)
-				get_viewport().set_input_as_handled()
-				return
-			if _settings_popup != null and _settings_popup.visible:
-				_set_settings_popup_visible(false)
+			if _popovers.handle_escape():
 				get_viewport().set_input_as_handled()
 		# Ctrl+1..9 jump to the Nth workspace dock button; Ctrl+P opens quick-open.
 		# Routed through _on_workspace_pressed so the jump records Back/Forward
@@ -1415,83 +1182,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 
 
-func _on_camera_toggle_toggled(pressed: bool) -> void:
-	_set_camera_popup_visible(pressed)
-
-
-func _on_camera_popup_close_pressed() -> void:
-	_set_camera_popup_visible(false)
-
-
-func _set_camera_popup_visible(active: bool) -> void:
-	if _camera_popup == null:
-		return
-	# A floating panel is not a popover: the toggle raises its window, and the
-	# siblings' mutual-exclusion calls (active=false) must leave it alone.
-	if _camera_panel_host != null and _camera_panel_host.is_floating():
-		if active:
-			_ensure_camera_popup_content()
-			_camera_panel_host.focus_window()
-		if _camera_toggle_button != null:
-			_camera_toggle_button.set_pressed_no_signal(true)
-		return
-	if active and _get_editor_camera() == null:
-		active = false
-	# The remembered floating preference applies on open, never at launch.
-	if active and _camera_panel_host != null \
-			and not bool(_panel_restore_for("camera").get("docked", true)):
-		_detach_camera_panel()
-		return
-	if active:
-		_set_environment_popup_visible(false)
-		_set_settings_popup_visible(false)
-	_camera_popup.visible = active
-	if _camera_toggle_button != null:
-		_camera_toggle_button.set_pressed_no_signal(active)
-	if active:
-		_ensure_camera_popup_content()
-	_refresh_camera_popup_state()
-
-
-func _ensure_camera_popup_content() -> void:
-	if _camera_settings_host == null:
-		return
-	if _camera_settings_panel == null:
-		_camera_settings_panel = CameraSettingsPanelScene.instantiate() as Control
-		_camera_settings_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_camera_settings_host.add_child(_camera_settings_panel)
-	_sync_camera_popup_editor()
-
-
-func _sync_camera_popup_editor() -> void:
-	if _camera_settings_panel != null and _camera_settings_panel.has_method("set_editor"):
-		_camera_settings_panel.set_editor(self)
-
-
-func _refresh_camera_popup_state() -> void:
-	var has_camera := _get_editor_camera() != null
-	var floating := _camera_panel_host != null and _camera_panel_host.is_floating()
-	# A floating camera panel whose camera disappeared re-docks (mirrors the
-	# docked popover's force-close below). persist=false: a transient
-	# camera-null (editor rebind) must not overwrite the user's floating
-	# preference - the next open with a camera floats again.
-	if floating and not has_camera:
-		_camera_panel_host.redock(false)
-		floating = false
-	if _camera_toggle_button != null:
-		_camera_toggle_button.disabled = not has_camera
-		if not has_camera:
-			_camera_toggle_button.set_pressed_no_signal(false)
-		elif floating:
-			_camera_toggle_button.set_pressed_no_signal(true)
-	if _camera_popup != null and _camera_popup.visible and not has_camera:
-		_camera_popup.visible = false
-	if (_camera_popup != null and _camera_popup.visible) or floating:
-		_ensure_camera_popup_content()
-		if _camera_settings_panel != null and _camera_settings_panel.has_method("sync_from_editor_state"):
-			_camera_settings_panel.sync_from_editor_state()
-
-
 # The active workspace's camera via its capability hook; null in workspaces
 # without a 3D view (the camera popup then reports no camera instead of
 # silently editing a hidden terrain camera).
@@ -1506,56 +1196,8 @@ func _get_editor_camera() -> Camera3D:
 	return get_editor_camera()
 
 
-func _on_environment_toggle_toggled(pressed: bool) -> void:
-	_set_environment_popup_visible(pressed)
-
-
-func _on_environment_popup_close_pressed() -> void:
-	_set_environment_popup_visible(false)
-
-
 func show_environment_dialog() -> void:
-	_set_environment_popup_visible(true)
-
-
-func _set_environment_popup_visible(active: bool) -> void:
-	if _environment_popup == null:
-		return
-	# A floating panel is not a popover: the toggle raises its window, and the
-	# siblings' mutual-exclusion calls (active=false) must leave it alone.
-	if _environment_panel_host != null and _environment_panel_host.is_floating():
-		if active:
-			_ensure_environment_popup_content()
-			_environment_panel_host.focus_window()
-		if _environment_toggle_button != null:
-			_environment_toggle_button.set_pressed_no_signal(true)
-		return
-	# The remembered floating preference applies on open, never at launch.
-	if active and _environment_panel_host != null \
-			and not bool(_panel_restore_for("environment").get("docked", true)):
-		_detach_environment_panel()
-		return
-	if active:
-		_set_camera_popup_visible(false)
-		_set_settings_popup_visible(false)
-	_environment_popup.visible = active
-	if _environment_toggle_button != null:
-		_environment_toggle_button.set_pressed_no_signal(active)
-	if active:
-		_ensure_environment_popup_content()
-	_refresh_environment_popup_state()
-
-
-func _reset_environment_popup_content() -> void:
-	_environment_action_bar.rebuild(null)
-	if _environment_actions_host != null:
-		for child in _environment_actions_host.get_children():
-			_environment_actions_host.remove_child(child)
-			child.free()
-	if _environment_inspector_host != null:
-		for child in _environment_inspector_host.get_children():
-			_environment_inspector_host.remove_child(child)
-			child.free()
+	_popovers.set_environment_visible(true)
 
 
 # The workspace behind the single popup surface (%EnvironmentPopup). One popup
@@ -1566,212 +1208,8 @@ func _popup_workspace() -> EditorWorkspace:
 	return null
 
 
-func _ensure_environment_popup_content() -> void:
-	var popup_workspace := _popup_workspace()
-	if popup_workspace == null:
-		return
-	if _environment_actions_host != null and _environment_action_bar.buttons().is_empty():
-		_environment_action_bar.rebuild(popup_workspace)
-	if _environment_inspector_host != null and _environment_inspector_host.get_child_count() == 0:
-		popup_workspace.build_inspector(_environment_inspector_host)
-
-
-func _refresh_environment_popup_state() -> void:
-	var popup_workspace := _popup_workspace()
-	var title := popup_workspace.get_project_title() if popup_workspace != null else "Environment"
-	if _environment_popup_title != null:
-		_environment_popup_title.text = title
-	if _environment_panel_host != null and _environment_panel_host.is_floating():
-		# The dirty "*" reaches the floating window through its OS title.
-		_environment_panel_host.set_window_title("Environment — %s" % title)
-	_environment_action_bar.refresh_state(_popup_workspace())
-
-
-func _on_settings_toggle_toggled(pressed: bool) -> void:
-	_set_settings_popup_visible(pressed)
-
-
-func _on_settings_popup_close_pressed() -> void:
-	_set_settings_popup_visible(false)
-
-
-func _set_settings_popup_visible(active: bool) -> void:
-	if _settings_popup == null:
-		return
-	if active:
-		_set_camera_popup_visible(false)
-		_set_environment_popup_visible(false)
-	_sync_settings_popup_state()
-	_settings_popup.visible = active
-	if _settings_toggle_button != null:
-		_settings_toggle_button.set_pressed_no_signal(active)
-
-
-func _sync_settings_popup_state() -> void:
-	if _settings_resource_dir_edit != null:
-		_settings_resource_dir_edit.text = _resource_library.get_root_dir()
-	_populate_expansion_options()
-	_populate_recent_dirs()
-	if _settings_grid_toggle != null:
-		_settings_grid_toggle.set_pressed_no_signal(_view_grid_visible)
-	if _settings_axes_toggle != null:
-		_settings_axes_toggle.set_pressed_no_signal(_view_axes_visible)
-	# The View section only applies to workspaces with a 3D guide overlay; hide it
-	# for the rest so the popup stays relevant to the active workspace.
-	if _settings_view_section != null:
-		var workspace := _get_active_workspace()
-		_settings_view_section.visible = workspace != null and workspace.shows_view_guides()
-	_sync_settings_mcp_state()
-
-
-# Reflect the MCP service's live state into the Settings popup (toggle, port,
-# status line). The service lives on the TerrainEditor root; runtime builds
-# have none and the controls simply show Stopped/disabled.
-func _sync_settings_mcp_state() -> void:
-	var service := _mcp_service()
-	if _settings_mcp_toggle != null:
-		_settings_mcp_toggle.set_pressed_no_signal(service != null and service.is_running())
-		_settings_mcp_toggle.disabled = service == null
-	if _settings_mcp_port_edit != null and not _settings_mcp_port_edit.has_focus():
-		_settings_mcp_port_edit.text = str(McpSettings.get_port())
-	if _settings_mcp_status_label != null:
-		_settings_mcp_status_label.text = service.get_status_text() if service != null else "Unavailable in this build"
-
-
 func _mcp_service() -> Node:
 	return editor.get("mcp_service") if editor != null else null
-
-
-func _on_settings_mcp_toggled(pressed: bool) -> void:
-	var service := _mcp_service()
-	if service != null:
-		service.set_enabled(pressed)
-	_sync_settings_mcp_state()
-
-
-func _on_settings_mcp_port_submitted(text: String) -> void:
-	var service := _mcp_service()
-	if not text.is_valid_int():
-		show_status_message("MCP port must be a number (1024-65535).", 5.0)
-		_sync_settings_mcp_state()
-		return
-	var port := clampi(text.to_int(), 1024, 65535)
-	if service != null:
-		service.apply_port(port)
-	else:
-		McpSettings.set_port(port)
-	_sync_settings_mcp_state()
-
-
-func _on_settings_browse_resource_dir_pressed() -> void:
-	var on_pick := func(path: String) -> void:
-		if _settings_resource_dir_edit != null:
-			_settings_resource_dir_edit.text = path
-		_apply_resource_settings(true)
-	_save_export.open_dir_dialog("Select resource directory", on_pick, _preferred_resource_root_dir())
-
-
-func _on_settings_apply_resource_dir_pressed() -> void:
-	_apply_resource_settings(true)
-
-
-func _on_settings_resource_dir_submitted(_text: String) -> void:
-	_apply_resource_settings(true)
-
-
-# The editor authors loose files only; PFF expansions are a runtime concern (mounted
-# via the `/exp` launch flag), so the settings popup no longer offers an expansion picker.
-# The row is hidden here in case the scene still carries it.
-func _populate_expansion_options() -> void:
-	if _settings_expansion_row != null:
-		_settings_expansion_row.visible = false
-
-
-# Fill the "Recent directories…" dropdown from the shared recent-dirs list. Index 0
-# is a disabled placeholder so the control reads as an action menu (its face never
-# shows a picked path); the currently active root is excluded; a "Clear list" item
-# trails the entries. The whole row hides when there is nothing else to switch to.
-func _populate_recent_dirs() -> void:
-	if _settings_recent_option == null:
-		return
-	_settings_recent_option.clear()
-	_settings_recent_option.add_item("Recent directories…")
-	_settings_recent_option.set_item_disabled(0, true)
-	_settings_recent_option.set_item_metadata(0, "")
-	var current_key := _resource_library.canonical_key(_resource_library.get_root_dir())
-	var count := 0
-	for path in _resource_library.get_recent_dirs():
-		if _resource_library.canonical_key(path) == current_key:
-			continue
-		var display := path.replace("\\", "/").rstrip("/").get_file()
-		if display.is_empty():
-			display = path
-		var idx := _settings_recent_option.item_count
-		_settings_recent_option.add_item(display)
-		_settings_recent_option.set_item_metadata(idx, path)
-		_settings_recent_option.set_item_tooltip(idx, path)
-		count += 1
-	if count > 0:
-		_settings_recent_option.add_separator()
-		var clear_idx := _settings_recent_option.item_count
-		_settings_recent_option.add_item("Clear list")
-		_settings_recent_option.set_item_metadata(clear_idx, _RECENT_CLEAR_META)
-	_settings_recent_option.select(0)
-	if _settings_recent_row != null:
-		_settings_recent_row.visible = count > 0
-
-
-# Apply a directory chosen from the recent-directories dropdown (mirrors the Browse
-# on_pick: fill the path field, then apply + refresh). The control is reset to its
-# placeholder so it never displays a selection and the same entry can be re-picked.
-func _on_settings_recent_selected(index: int) -> void:
-	if _settings_recent_option == null:
-		return
-	var path := String(_settings_recent_option.get_item_metadata(index))
-	_settings_recent_option.select(0)
-	if path.is_empty():
-		return
-	if path == _RECENT_CLEAR_META:
-		_resource_library.clear_recent_dirs()
-		_populate_recent_dirs()
-		return
-	if _settings_resource_dir_edit != null:
-		_settings_resource_dir_edit.text = path
-	_apply_resource_settings(true)
-
-
-func _on_settings_grid_toggled(pressed: bool) -> void:
-	if _view_grid_visible == pressed:
-		return
-	_view_grid_visible = pressed
-	_resource_library.save_view_state(_view_grid_visible, _view_axes_visible)
-	_apply_view_guides_to_active_workspace()
-
-
-func _on_settings_axes_toggled(pressed: bool) -> void:
-	if _view_axes_visible == pressed:
-		return
-	_view_axes_visible = pressed
-	_resource_library.save_view_state(_view_grid_visible, _view_axes_visible)
-	_apply_view_guides_to_active_workspace()
-
-
-# Push the persisted guide visibility onto the active workspace (no-op for ones
-# without a 3D guide overlay). Called when the choice changes and when a
-# guide-capable workspace becomes active.
-func _apply_view_guides_to_active_workspace() -> void:
-	var workspace := _get_active_workspace()
-	if workspace == null or not workspace.shows_view_guides():
-		return
-	workspace.set_grid_visible(_view_grid_visible)
-	workspace.set_axes_visible(_view_axes_visible)
-
-
-func _apply_resource_settings(scan: bool, persist: bool = true) -> Error:
-	var path := _resource_library.get_root_dir()
-	if _settings_resource_dir_edit != null:
-		path = _settings_resource_dir_edit.text
-	return _set_resource_root_dir(path, persist, scan)
 
 
 func _ensure_resource_index() -> void:
@@ -1800,8 +1238,8 @@ func set_resource_root_dir(path: String) -> void:
 func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
 	var result := _resource_library.set_root_dir(path, persist, scan)
 	_show_resource_status(result)
-	_sync_settings_popup_state()
-	_refresh_browser_pane()
+	_settings_panel.sync_popup_state()
+	_layout.refresh_browser_pane()
 	return int(result["err"])
 
 
@@ -1812,8 +1250,8 @@ func _scan_resource_root(show_message: bool) -> Error:
 	var result := _resource_library.scan_root()
 	if show_message:
 		_show_resource_status(result)
-	_sync_settings_popup_state()
-	_refresh_browser_pane()
+	_settings_panel.sync_popup_state()
+	_layout.refresh_browser_pane()
 	return int(result["err"])
 
 
@@ -1825,10 +1263,8 @@ func _show_resource_status(result: Dictionary) -> void:
 
 
 func _load_resource_state() -> void:
+	# View-guide state loads in _ready once the settings module is bound.
 	var state := _resource_library.load_state()
-	var view := _resource_library.load_view_state()
-	_view_grid_visible = bool(view["grid"])
-	_view_axes_visible = bool(view["axes"])
 	_resource_library.set_root_dir(String(state["root_dir"]), false, false)
 
 
@@ -1846,7 +1282,7 @@ func _on_workspace_action_pressed(action_id: int) -> void:
 
 func _on_environment_action_pressed(action_id: int) -> void:
 	_save_export.run_workspace_action(_popup_workspace(), action_id)
-	_refresh_environment_popup_state()
+	_popovers.refresh_environment_state()
 
 
 func _open_resource_browser(workspace: EditorWorkspace, on_pick: Callable) -> void:
@@ -1882,8 +1318,7 @@ func _current_resource_path_for_browser(kind: String) -> String:
 	# The popup panel counts as open whether docked OR floating - the popover
 	# hides while the content floats, but its document is still the one the
 	# "(open)" marker should follow.
-	var popup_open := (_environment_popup != null and _environment_popup.visible) \
-			or (_environment_panel_host != null and _environment_panel_host.is_floating())
+	var popup_open := _popovers.environment_open()
 	var popup_workspace := _popup_workspace()
 	if popup_open and popup_workspace != null \
 			and kind in popup_workspace.get_open_resource_kinds():
@@ -1896,7 +1331,7 @@ func _current_resource_path_for_browser(kind: String) -> String:
 func _refresh_shell_state() -> void:
 	var busy := _any_workspace_busy()
 	_refresh_workspace_actions_state()
-	_refresh_environment_popup_state()
+	_popovers.refresh_environment_state()
 	for button in _workflow_buttons.values():
 		var workflow_button := button as Button
 		if workflow_button:

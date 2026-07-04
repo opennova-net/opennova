@@ -408,7 +408,7 @@ func test_settings_viewport_popup_edits_resource_directory() -> void:
 	assert_null(workstation.get_node_or_null("%SettingsRecursiveToggle"), "The resource root settings should not expose a recursive scan toggle.")
 
 	edit.text = root
-	workstation._apply_resource_settings(true, false)
+	workstation._settings_panel.apply_resource_settings(true, false)
 
 	assert_eq(workstation.get_resource_root_dir(), root, "Settings should apply the resource directory.")
 	assert_eq(workstation.get_resource_index().get_resource_files("terrain").size(), 1, "Flat scans should include top-level terrain files.")
@@ -455,7 +455,7 @@ func test_settings_recent_dropdown_lists_other_dirs_and_switches() -> void:
 
 	var recent: OptionButton = workstation.get_node("%SettingsRecentOption")
 	var row: HBoxContainer = workstation.get_node("%SettingsRecentRow")
-	workstation._populate_recent_dirs()
+	workstation._settings_panel._populate_recent_dirs()
 
 	assert_true(row.visible, "Recent row shows when there is another directory to switch to.")
 	var a_index := _recent_option_index_for_path(recent, a)
@@ -472,7 +472,7 @@ func test_settings_recent_dropdown_hidden_without_history() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Start with no configured resource directory.")
 	workstation._resource_library.clear_recent_dirs()
-	workstation._populate_recent_dirs()
+	workstation._settings_panel._populate_recent_dirs()
 	var row: HBoxContainer = workstation.get_node("%SettingsRecentRow")
 	assert_false(row.visible, "Recent row stays hidden when there is no history to offer.")
 
@@ -485,7 +485,7 @@ func test_settings_recent_dropdown_clear_list_empties_history() -> void:
 	assert_eq(workstation._set_resource_root_dir(b, true, false), OK, "Apply dir B.")
 
 	var recent: OptionButton = workstation.get_node("%SettingsRecentOption")
-	workstation._populate_recent_dirs()
+	workstation._settings_panel._populate_recent_dirs()
 	var clear_index := _recent_option_index_for_text(recent, "Clear list")
 	assert_gt(clear_index, 0, "A Clear list entry should be present when there are recents.")
 
@@ -1764,7 +1764,7 @@ func test_split_layout_applies_persisted_offsets_on_load() -> void:
 	first_right.clamp_split_offset()
 	var target_left: int = first_body.split_offset
 	var target_right: int = first_right.split_offset
-	first._save_split_layout()
+	first._layout.save_split_layout()
 
 	# A fresh shell at the same size should restore those dragged widths.
 	var second = add_child_autofree(EditorWorkstationScene.instantiate())
@@ -1786,12 +1786,12 @@ func test_browser_pane_defaults_hidden_and_toggles_without_closing_popovers() ->
 	assert_false(host.visible, "the pane defaults hidden (protects the 1024x640 window floor)")
 	assert_false(toggle.button_pressed, "the toggle starts unpressed")
 
-	workstation._set_settings_popup_visible(true)
+	workstation._popovers.set_settings_visible(true)
 	toggle.button_pressed = true
 	assert_true(host.visible, "the toggle shows the pane")
 	assert_true(workstation.get_node("%SettingsPopup").visible,
 		"a dock toggle must not close popovers (it is not in the mutual-exclusion chain)")
-	workstation._set_settings_popup_visible(false)
+	workstation._popovers.set_settings_visible(false)
 
 	toggle.button_pressed = false
 	assert_false(host.visible, "the toggle hides the pane again")
@@ -1802,8 +1802,8 @@ func test_browser_pane_lists_and_filters_by_kind() -> void:
 	await get_tree().process_frame
 	var root := _make_resource_fixture("pane_filter")
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
-	workstation._set_browser_pane_visible(true)
-	var pane = workstation._browser_pane
+	workstation._layout.set_browser_pane_visible(true)
+	var pane = workstation._layout.browser_pane()
 	assert_not_null(pane, "showing the pane builds it lazily")
 	assert_eq(pane.table.get_visible_count(), 8,
 		"the All filter lists every recognized fixture resource")
@@ -1823,8 +1823,8 @@ func test_browser_pane_double_click_jumps_through_open_in_workspace() -> void:
 	await get_tree().process_frame
 	var root := ProjectSettings.globalize_path("res://../fixtures/fnt")
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
-	workstation._set_browser_pane_visible(true)
-	var pane = workstation._browser_pane
+	workstation._layout.set_browser_pane_visible(true)
+	var pane = workstation._layout.browser_pane()
 
 	var fonts_index := -1
 	for i in pane.kind_option.item_count:
@@ -1845,9 +1845,9 @@ func test_browser_pane_double_click_jumps_through_open_in_workspace() -> void:
 func test_browser_pane_visibility_and_split_persist() -> void:
 	var first = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
-	first._set_browser_pane_visible(true)
+	first._layout.set_browser_pane_visible(true)
 	first._right_split.split_offset = -123
-	first._save_browser_state()
+	first._layout._save_browser_state()
 	first.queue_free()
 	await get_tree().process_frame
 
@@ -1866,7 +1866,7 @@ func test_browser_pane_never_impersonates_the_modal_dialog() -> void:
 	await get_tree().process_frame
 	assert_null(workstation.find_child("ResourceBrowserDialog", true, false),
 		"no modal dialog exists until a picker opens")
-	workstation._set_browser_pane_visible(true)
+	workstation._layout.set_browser_pane_visible(true)
 	assert_null(workstation.find_child("ResourceBrowserDialog", true, false),
 		"showing the pane never builds the modal")
 	assert_null(workstation.find_child("ResourceBrowserList", true, false),
@@ -1896,8 +1896,8 @@ func test_browser_pane_rows_drag_as_link_payloads() -> void:
 	await get_tree().process_frame
 	var root := _make_resource_fixture("pane_drag")
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
-	workstation._set_browser_pane_visible(true)
-	var pane = workstation._browser_pane
+	workstation._layout.set_browser_pane_visible(true)
+	var pane = workstation._layout.browser_pane()
 
 	var fonts_index := -1
 	for i in pane.kind_option.item_count:
@@ -1953,9 +1953,9 @@ func test_right_split_hides_when_dock_and_pane_are_both_hidden() -> void:
 	assert_false(right_split.visible,
 		"a dockless workspace with the pane hidden hides the right split entirely")
 
-	workstation._set_browser_pane_visible(true)
+	workstation._layout.set_browser_pane_visible(true)
 	assert_true(right_split.visible, "showing the pane brings the split back")
-	workstation._set_browser_pane_visible(false)
+	workstation._layout.set_browser_pane_visible(false)
 	assert_false(right_split.visible, "hiding it again re-hides the split")
 
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
@@ -1988,7 +1988,7 @@ func test_environment_detach_button_pops_content_into_window() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	_attach_environment_document(workstation)
-	workstation._set_environment_popup_visible(true)
+	workstation._popovers.set_environment_visible(true)
 	assert_true(workstation.get_node("%EnvironmentPopup").visible, "popover opens docked first")
 
 	_detach_environment(workstation)
@@ -2010,13 +2010,13 @@ func test_detached_panel_is_exempt_from_popover_mutual_exclusion() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	_detach_environment(workstation)
-	assert_true(workstation._environment_panel_host.is_floating())
+	assert_true(workstation._popovers.environment_panel_host().is_floating())
 
-	workstation._set_settings_popup_visible(true)
+	workstation._popovers.set_settings_visible(true)
 	assert_true(workstation.get_node("%SettingsPopup").visible, "the settings popover opens")
-	assert_true(workstation._environment_panel_host.is_floating(),
+	assert_true(workstation._popovers.environment_panel_host().is_floating(),
 		"opening a sibling popover must not re-dock or hide the floating panel")
-	workstation._set_settings_popup_visible(false)
+	workstation._popovers.set_settings_visible(false)
 	await _teardown(workstation)
 
 
@@ -2027,10 +2027,10 @@ func test_toggle_focuses_detached_window_instead_of_closing() -> void:
 
 	# The rail toggle while floating raises the window; it never closes or
 	# re-docks (re-docking has its own gesture: the window close button).
-	workstation._set_environment_popup_visible(true)
-	assert_true(workstation._environment_panel_host.is_floating(), "still floating after toggle-on")
-	workstation._set_environment_popup_visible(false)
-	assert_true(workstation._environment_panel_host.is_floating(), "still floating after toggle-off")
+	workstation._popovers.set_environment_visible(true)
+	assert_true(workstation._popovers.environment_panel_host().is_floating(), "still floating after toggle-on")
+	workstation._popovers.set_environment_visible(false)
+	assert_true(workstation._popovers.environment_panel_host().is_floating(), "still floating after toggle-off")
 	assert_true((workstation.get_node("%EnvironmentToggleButton") as Button).button_pressed,
 		"the toggle re-presses to mirror the floating state")
 	await _teardown(workstation)
@@ -2040,14 +2040,14 @@ func test_window_close_redocks_environment_content() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	_attach_environment_document(workstation)
-	workstation._set_environment_popup_visible(true)
+	workstation._popovers.set_environment_visible(true)
 	var actions_before: int = workstation.get_node("%EnvironmentActionsHost").get_child_count()
 	assert_gt(actions_before, 0, "the docked popover carries document actions")
 	_detach_environment(workstation)
-	var window: Window = workstation._environment_panel_host.get_window()
+	var window: Window = workstation._popovers.environment_panel_host().get_window()
 
 	window.close_requested.emit()
-	assert_false(workstation._environment_panel_host.is_floating(), "the window close re-docks")
+	assert_false(workstation._popovers.environment_panel_host().is_floating(), "the window close re-docks")
 	var content: Control = workstation.get_node("%EnvironmentPopupContent")
 	assert_eq(content.get_parent().name, "EnvironmentPopupBox",
 		"the content returns to the popover box")
@@ -2056,7 +2056,7 @@ func test_window_close_redocks_environment_content() -> void:
 	assert_false((workstation.get_node("%EnvironmentToggleButton") as Button).button_pressed,
 		"the toggle releases")
 
-	workstation._set_environment_popup_visible(true)
+	workstation._popovers.set_environment_visible(true)
 	assert_true(workstation.get_node("%EnvironmentPopup").visible, "the toggle reopens it docked")
 	assert_eq(workstation.get_node("%EnvironmentActionsHost").get_child_count(), actions_before,
 		"reopening must not duplicate the action buttons")
@@ -2067,8 +2067,8 @@ func test_detached_environment_window_title_tracks_project_title() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	_detach_environment(workstation)
-	workstation._refresh_environment_popup_state()
-	var window: Window = workstation._environment_panel_host.get_window()
+	workstation._popovers.refresh_environment_state()
+	var window: Window = workstation._popovers.environment_panel_host().get_window()
 	assert_string_contains(window.title, "Environment — ",
 		"the floating window titles itself with the document name")
 	await _teardown(workstation)
@@ -2103,24 +2103,24 @@ func test_persisted_floating_preference_applies_on_next_open() -> void:
 	var first = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	_detach_environment(first)
-	assert_true(first._environment_panel_host.is_floating())
+	assert_true(first._popovers.environment_panel_host().is_floating())
 	# Move the window after the detach-time save: only the EXIT-time save_now
 	# can carry this rect forward, which is what pins it.
-	var moved_window: Window = first._environment_panel_host.get_window()
+	var moved_window: Window = first._popovers.environment_panel_host().get_window()
 	moved_window.size = Vector2i(515, 537)
 	first.queue_free()
 	await get_tree().process_frame
 
 	var second = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
-	assert_false(second._environment_panel_host.is_floating(),
+	assert_false(second._popovers.environment_panel_host().is_floating(),
 		"a fresh shell always starts docked - no windows at launch")
-	second._set_environment_popup_visible(true)
-	assert_true(second._environment_panel_host.is_floating(),
+	second._popovers.set_environment_visible(true)
+	assert_true(second._popovers.environment_panel_host().is_floating(),
 		"the remembered floating preference applies on the next open")
 	assert_false(second.get_node("%EnvironmentPopup").visible,
 		"the popover never flashes on a floating open")
-	assert_eq(second._environment_panel_host.get_window().size, Vector2i(515, 537),
+	assert_eq(second._popovers.environment_panel_host().get_window().size, Vector2i(515, 537),
 		"the window reopens at its quit-time size (exit-time save_now + rect reapply)")
 	await _teardown(second)
 
@@ -2129,18 +2129,18 @@ func test_escape_ignores_detached_panels() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	_detach_environment(workstation)
-	workstation._set_settings_popup_visible(true)
+	workstation._popovers.set_settings_visible(true)
 
 	var escape := InputEventKey.new()
 	escape.keycode = KEY_ESCAPE
 	escape.pressed = true
 	workstation._unhandled_input(escape)
 	assert_false(workstation.get_node("%SettingsPopup").visible, "Escape closes the docked popover")
-	assert_true(workstation._environment_panel_host.is_floating(),
+	assert_true(workstation._popovers.environment_panel_host().is_floating(),
 		"...but never touches a floating panel")
 
 	workstation._unhandled_input(escape)
-	assert_true(workstation._environment_panel_host.is_floating(),
+	assert_true(workstation._popovers.environment_panel_host().is_floating(),
 		"a second Escape still leaves the floating panel alone")
 	await _teardown(workstation)
 
@@ -2157,7 +2157,7 @@ func test_set_editor_rebuilds_content_inside_detached_window() -> void:
 	var editor = autofree(TerrainEditorScript.new())
 	editor.environment_editor = environment_editor
 	workstation.set_editor(editor)
-	assert_true(workstation._environment_panel_host.is_floating(), "the panel keeps floating")
+	assert_true(workstation._popovers.environment_panel_host().is_floating(), "the panel keeps floating")
 	assert_gt(workstation.get_node("%EnvironmentActionsHost").get_child_count(), 0,
 		"the rebuilt actions land inside the floating window")
 	assert_gt((workstation.get_node("%EnvironmentInspectorHost") as Control).get_child_count(), 0,
@@ -2187,22 +2187,22 @@ func test_camera_panel_detaches_and_force_redocks_keeping_the_preference() -> vo
 	var editor: TerrainEditor = app.get_terrain_editor()
 	var workstation: EditorWorkstation = app.workstation
 
-	workstation._set_camera_popup_visible(true)
+	workstation._popovers.set_camera_visible(true)
 	assert_true((workstation.get_node("%CameraPopup") as Control).visible,
 		"the camera popover opens docked (the editor scene has a camera)")
 	workstation.get_node("%CameraPopupDetach").pressed.emit()
-	assert_true(workstation._camera_panel_host.is_floating(), "the camera panel floats")
+	assert_true(workstation._popovers.camera_panel_host().is_floating(), "the camera panel floats")
 	assert_false((workstation.get_node("%CameraPopup") as Control).visible)
-	assert_false(bool(workstation._panel_restore_for("camera").get("docked", true)),
+	assert_false(bool(workstation._popovers.panel_restore_for("camera").get("docked", true)),
 		"detach remembers the floating preference")
 
 	# The camera disappears (editor rebind): force-redock, preference intact.
 	var saved_camera = editor.camera
 	editor.camera = null
-	workstation._refresh_camera_popup_state()
+	workstation._popovers.refresh_camera_state()
 	editor.camera = saved_camera
-	assert_false(workstation._camera_panel_host.is_floating(),
+	assert_false(workstation._popovers.camera_panel_host().is_floating(),
 		"losing the camera re-docks the floating panel")
-	assert_false(bool(workstation._panel_restore_for("camera").get("docked", true)),
+	assert_false(bool(workstation._popovers.panel_restore_for("camera").get("docked", true)),
 		"...without overwriting the remembered floating preference")
 	await _teardown(editor)

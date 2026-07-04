@@ -57,7 +57,7 @@ func test_ctrl_p_opens_quick_open_browser() -> void:
 	var host: Control = shell.get_node("%ResourceBrowserPaneHost")
 	# A prior session may have persisted the pane open (shared user:// state), so
 	# establish the hidden precondition rather than assuming it.
-	shell._set_browser_pane_visible(false)
+	shell._layout.set_browser_pane_visible(false)
 	assert_false(host.visible, "precondition: the browser pane is hidden")
 	var ev := InputEventKey.new()
 	ev.keycode = KEY_P
@@ -65,11 +65,11 @@ func test_ctrl_p_opens_quick_open_browser() -> void:
 	ev.pressed = true
 	shell._unhandled_input(ev)
 	assert_true(host.visible, "Ctrl+P reveals the resource browser pane")
-	assert_not_null(shell._browser_pane, "Ctrl+P instantiates the browser pane")
+	assert_not_null(shell._layout.browser_pane(), "Ctrl+P instantiates the browser pane")
 	# Headless has no display, so the deferred search-focus grab is not asserted.
 	# Restore the hidden default: save_browser_state() writes user:// unconditionally,
 	# so a left-open pane would leak into other suites that assert it defaults hidden.
-	shell._set_browser_pane_visible(false)
+	shell._layout.set_browser_pane_visible(false)
 
 
 # --- Unsaved-changes close guard ---------------------------------------------
