@@ -4,7 +4,7 @@ extends GutTest
 ## open filters, the save-needs-a-path gate, and undo/redo delegation. Mirrors
 ## sound_workspace_test / credits_workspace_test.
 
-const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
+const EnvironmentWorkspaceAdapter = preload("res://modtools/environment/environment_workspace.gd")
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 
 

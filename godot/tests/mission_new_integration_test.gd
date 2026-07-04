@@ -7,7 +7,7 @@ extends GutTest
 # real-terrain setup in terrain_editor_import_export_test.gd.
 
 const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
-const MissionWorkspace := preload("res://modtools/editor/mission_workspace.gd")
+const MissionWorkspace := preload("res://modtools/mission/mission_workspace.gd")
 
 const DVXI5_TRN := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 const ITEMS_PATH := "res://../fixtures/def/items.def"

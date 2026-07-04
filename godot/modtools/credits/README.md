@@ -29,12 +29,12 @@ and image files.
 ## How it is built
 
 A single-pane workspace; the adapter
-[`../editor/credits_workspace.gd`](../editor/credits_workspace.gd) builds the
+[`credits_workspace.gd`](credits_workspace.gd) builds the
 inspector and the Visual / Source toggle.
 
 | File | Role |
 |---|---|
-| [`../editor/credits_workspace.gd`](../editor/credits_workspace.gd) | adapter: single-pane inspector, file actions |
+| [`credits_workspace.gd`](credits_workspace.gd) | adapter: single-pane inspector, file actions |
 | `credits_editor.gd` | editor controller: Visual / Source modes, scroll / spacing / center bar, preview playback |
 | `credits_editor_document.gd` | document model: load / save KDA, dirty state, asset checks |
 | `credits_editor_block_list.gd` | the block list: selection, drag-reorder, add / delete |

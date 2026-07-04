@@ -65,7 +65,7 @@ inspectors are declared as typed registry rows:
 
 ### Add a workspace
 1. Write an `EditorWorkspace` subclass implementing the hook tiers you need (see
-   the contract in `framework/editor_workspace.gd`; `editor/fonts_workspace.gd`
+   the contract in `framework/editor_workspace.gd`; `fonts/fonts_workspace.gd`
    is a minimal single-pane example).
 2. Add a `Workspace` enum entry in `editor/editor_workstation.gd`.
 3. Append one `WorkspaceDef.make(Workspace.X, XWorkspaceAdapter, is_popup, &"Category", &"icon-id")`
@@ -84,9 +84,9 @@ Environment) skip the workflow rail and override `build_inspector(host)` instead
 
 | Path | Contents |
 |---|---|
-| `editor/` | the app root (`editor_app.gd` — boot wiring, window sizing, MCP service), the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog, plus the Terrain, Environment, Fonts, Credits, Mission, and Music adapters |
+| `editor/` | the app root (`editor_app.gd` — boot wiring, window sizing, MCP service), the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog |
 | `framework/` | base classes and typed registries (`EditorWorkspace`, `WorkspaceDef`, `InspectorDef`) |
-| `terrain/`, `object/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `sound/`, `environment/` | one workspace module each (editor model, UI, inspectors) |
+| `terrain/`, `object/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `sound/`, `environment/` | one workspace module each (adapter, editor model, UI, inspectors) |
 | `mcp/` | the embedded agent server's ONED side: built-in tool catalog, asset describe serializers, and the service that boots `godot/engine/mcp/` |
 | `tools/` | `screenshot_capture` automation helper (not a workspace) |
 

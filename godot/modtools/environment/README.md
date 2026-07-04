@@ -25,12 +25,12 @@ Save are in the panel.
 
 A *popup* workspace: its `WorkspaceDef` is registered with `popup = true`, so the
 shell toggles a panel instead of swapping the viewport. The adapter
-[`../editor/environment_workspace.gd`](../editor/environment_workspace.gd) applies
+[`environment_workspace.gd`](environment_workspace.gd) applies
 edits to whichever Terrain or Object viewport is active.
 
 | File | Role |
 |---|---|
-| [`../editor/environment_workspace.gd`](../editor/environment_workspace.gd) | popup adapter: builds the inspector, applies to the active viewport |
+| [`environment_workspace.gd`](environment_workspace.gd) | popup adapter: builds the inspector, applies to the active viewport |
 | `environment_editor.gd` | document model: load / save `.env`, time-of-day state, live preview |
 | `environment_inspector.gd` | the fog / sky / water / tint / time-of-day keyframe controls |
 

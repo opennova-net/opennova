@@ -29,12 +29,12 @@ The Credits workspace can jump straight here for a referenced font through the
 ## How it is built
 
 A single-pane workspace: the adapter
-[`../editor/fonts_workspace.gd`](../editor/fonts_workspace.gd) overrides
+[`fonts_workspace.gd`](fonts_workspace.gd) overrides
 `build_inspector(host)` and has no workflow rail.
 
 | File | Role |
 |---|---|
-| [`../editor/fonts_workspace.gd`](../editor/fonts_workspace.gd) | adapter: single-pane inspector, file actions, `open_font_name` |
+| [`fonts_workspace.gd`](fonts_workspace.gd) | adapter: single-pane inspector, file actions, `open_font_name` |
 | `fnt_editor.gd` | the editing UI: glyph grid, page view, pixel canvas, per-glyph metrics, shadow offset |
 | `fnt_editor_document.gd` | document model: load / save `.fnt`, dirty state |
 | `fnt_rasterizer.gd` | rasterize glyphs from a TTF/OTF or system font |

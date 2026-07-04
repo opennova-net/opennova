@@ -1,6 +1,6 @@
 extends GutTest
 
-const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
+const MusicWorkspaceAdapter = preload("res://modtools/music/music_workspace.gd")
 const RootScene = preload("res://modtools/music/ui/music_workspace_root.tscn")
 const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 

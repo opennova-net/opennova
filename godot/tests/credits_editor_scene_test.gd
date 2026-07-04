@@ -3,7 +3,7 @@ extends GutTest
 const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorBlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
-const CreditsWorkspaceScript = preload("res://modtools/editor/credits_workspace.gd")
+const CreditsWorkspaceScript = preload("res://modtools/credits/credits_workspace.gd")
 const ResourceDirSettings = preload("res://engine/resource_index/resource_dir_settings.gd")
 const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const CREDITS_FIXTURE_DIR := "res://../fixtures/cbin"
