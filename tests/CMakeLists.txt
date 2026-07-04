@@ -1285,6 +1285,21 @@ target_link_libraries(nw_codec_identity_test PRIVATE opennova_novaworld)
 target_include_directories(nw_codec_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_codec_identity COMMAND nw_codec_identity_test)
 
+# NET-0 tier-1 self-capture gate — nw_golden_diff's SELF mode: a deterministic
+# in-process opennova host + opennova joiner session (the host_session owner loop
+# + ClientRuntime over an in-memory IDatagramSocket) coverage-diffed per (dir,tag)
+# against the COMMITTED opennova-produced fixture (LFS, zero retail bytes) with
+# EXACT set equality — no noise floor, both sides are ours. Cannot skip; a missing
+# fixture fails. Regen: OPENNOVA_WRITE_SELF_FIXTURE=1 (justify the delta in-commit).
+add_executable(nw_self_capture_test novaworld/nw_self_capture_test.cpp)
+target_link_libraries(nw_self_capture_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld
+            opennova_mission opennova_app_common)
+target_include_directories(nw_self_capture_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nw_self_capture_test PRIVATE
+    SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap")
+add_test(NAME nw_self_capture COMMAND nw_self_capture_test)
+
 # In-game message catalog coverage gate — asserts every Decoded tag's decoder
 # consumes a representative body to the byte and the catalog stays consistent
 # (the net analog of ADR 0002's MNU key-coverage). Self-contained, always-run.

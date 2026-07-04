@@ -75,7 +75,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          lfs: false   # net stack consumes no LFS game assets
+          lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
+
+      # nw_self_capture_test compares against the committed opennova-produced
+      # self-capture pcap, which is LFS-tracked (fixtures/** in .gitattributes).
+      # Pull only this subtree to keep checkout fast.
+      - name: Materialize net parity fixtures (LFS)
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/novaworld/**"
 
       - name: Install libcurl (server links it when HTTP is ON)
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
@@ -92,12 +100,12 @@ jobs:
             gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
             connection_registry_test connection_manager_test \
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
-            backend_schema_test nw_codec_identity_test
+            backend_schema_test nw_codec_identity_test nw_self_capture_test
 
       - name: Run net ctests
         run: |
           ctest --test-dir build-server --output-on-failure -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture)$"
 
   modsuperoed-smoke:
     runs-on: windows-latest
