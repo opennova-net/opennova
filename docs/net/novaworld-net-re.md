@@ -2928,6 +2928,27 @@ decoder keeps every slot (a deliberate non-divergence). Resets `dword_81474C = 0
 heartbeat/input gate) on completion. **Witness:** probe2 — 8× `0x5A`, e.g. `avatarClass=8 slots=8`;
 full-consume via `decode_weapon_loadout`.
 
+**The full apply chain (witnessed 2026-07-04 — the "no spare magazines" round):** the ammo
+bytes are **SIGNED clip counts**: clamp to `adm[83]` (maxClips); a NEGATIVE value (wire
+`0xFF`) falls back to `adm[23]` (the def default); the surviving count multiplies by
+`adm[22]` (clip size) into TOTAL ROUNDS handed to `WeaponSlot_SetAmmoCount(total,
+adm_byte216 ammo bucket)` `[orig: @ 0x4295c4..0x429613]`. Around the ammo loop the handler
+REBUILDS the local player's weapon slots from the granted set (`WeaponSlotPool_ResetAllEntries`
+→ `WeaponSlotTable_LoadAllFromDefs` → `WeaponSlots_RecalculateAmmoFromCapacity`, re-run
+after the loop), re-resolves the body model from `avatarClass` (`AnimMap_GetSlotPropertyInt`
+props 10/11/12 by graphics detail), and re-selects/mounts the equipped slot — all gated on
+the client game-state dword (mislabeled `lod_level`) being 1/2. **The in-game magazine
+counter therefore reads the ENTITY weapon slots, which byte-equal grants fill identically;
+the §5.47 phase-0 weapon sub-block instead lands in HUD MIRROR GLOBALS** — `dword_A85B64` =
+the preround timer (`HUD_DrawTimerOverlay`), `dword_A85B5C` = death/deploy-screen content
+(`UI_UpdateDeathScreenContent` / `draw_death_screen_overlay`), `word_A85B7C` =
+`HUD_DrawCaptureProgressBar` — so a host emitting ZEROED phase-0 fields (ours, D-NET-134's
+weapon-block gap) blanks the DEATH/DEPLOY-SCREEN loadout panel + preround timer + capture
+bar, while the live mag counter stays pool-driven. The v33 "no spare magazines" report needs
+one discriminating observation (v35): missing on the death/deploy screen ⇒ author the
+phase-0 fields from the recipient's granted loadout; missing on the in-game counter ⇒ an
+entity-pool leak still unwitnessed.
+
 ### 5.31 Tag 0x6E — team/squad roster sync (probe2, 2026-06-18)
 
 [orig: `NapiNPClientMsg_HandleSquadRosterSync @ 0x429880`]. `[u8 teamCount]` then per team:
