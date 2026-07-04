@@ -32,6 +32,11 @@ struct FrameHeaderState {
 	uint8_t tail_state_byte = 0;
 	// Tail mount handle = the recipient's OWN carrier (its ridden vehicle), 0xFFFF free.
 	uint16_t tail_mount_handle = 0xFFFF;
+	// Tail health = the recipient's LIVE Health — the client STORES it as its own
+	// (g_local_player_entity->Health @0x4305df); 0 is the victim's death signal (with the
+	// record byte13 dead bit). The pre-v34 hardcoded 150 meant a killed client never
+	// learned it died. A decrease also fires the brief damage flash [orig: @0x43059a].
+	int16_t tail_health = 150;
 };
 
 // The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor, the phase-selected header
@@ -97,16 +102,14 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// re-latches from it every frame) + its own carrier handle. See FrameHeaderState.
 	fu.state_flag_byte = hdr.tail_state_byte;
 	fu.mount_handle = hdr.tail_mount_handle;
-	// TAIL health (v121) -> g_local_player_entity->Health [orig: @0x4305df]. Send the player's healthMax
-	// so the HUD reads 100% and the tail decrease-detector (`if v121 < Health` -> a brief damage flash
-	// [orig: @0x43059a]) cannot self-trigger from an under-max tail. NOTE: this is only the minor health
-	// flash — the CONSTANT screen-red/shake/minimap-red was the fall-damage tolerance C6EAE4 (the
-	// flags2=1 sub-block above), NOT the tail. The per-entity record health byte is a DON'T-CARE for the
-	// LOCAL player (NetPacket_SerializePlayerState skips the health-byte apply for g_local_player_entity
-	// [orig: @0x4c11ac]). class-8 healthMax=150; real damage-driven health is a follow-up (thread the
-	// connection's live health here).
-	constexpr int kPlayerHealthMax = 150;
-	fu.health = kPlayerHealthMax;
+	// TAIL health (v121) -> g_local_player_entity->Health [orig: @0x4305df] — the recipient's
+	// LIVE health (FrameHeaderState.tail_health): the client STORES it as its own, so damage
+	// reads red (the decrease-detector flash [orig: @0x43059a]) and 0 is the authoritative
+	// death signal (paired with the record byte13 dead bit — the v33 "killee never knows"
+	// fix). The per-entity record health byte stays a DON'T-CARE for the LOCAL player
+	// (NetPacket_SerializePlayerState skips that apply [orig: @0x4c11ac]); the tail is the
+	// one channel its own health rides.
+	fu.health = hdr.tail_health;
 	fu.state_word = 0;
 
 	for (const GameEntitySnapshot &e : entities) {
@@ -650,6 +653,9 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
 			if (own->mounted && own->mount_target.valid())
 				hs.tail_mount_handle = own->mount_target.packed;
+			// Live health; the i16 wire field clamps the (never-seen) overflow.
+			hs.tail_health = static_cast<int16_t>(
+					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
 		}
 	}
 	conn.transport->host_send(kTag0aFrameUpdate,

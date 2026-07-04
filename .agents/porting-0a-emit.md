@@ -224,6 +224,30 @@ target) in net-re D-NET-146.
   run/strafe after deploy (0x0C resumes at ~pick+1), then the v32 checklist (buggy enter,
   HUD 3 + leave, remote anims).
 
+- **Round 14c (2026-07-03): v33 LIVE — the release bundle VERIFIED (3260 C 0x0C vs v32's 51;
+  movement works, users ran to vehicles/emplacements) + the next defect wave triaged off the
+  wire.** v33 verdicts: emplacement attach WORKS (0x26 bone-3 UseGun accepted, mounted echo
+  clean); vehicle MOUNT replicates correctly (the other client saw `state=0x40
+  carrier=0x1030`) but a SECOND vehicle model appears for the rider and helos/buggies can't
+  be driven — no client ever uplinked a VEHICLE handle (0x0C handles were 0x0001/0x0002
+  only), so the whole **vehicle drive-authority chain is unwitnessed/unported**: the ridden
+  vehicle's record mounted form (flags bit 0x04 + rider-euler tail, §5.13 — ours stays
+  unmounted-form with weap zeros), the vehicle ownerSession (+0x1CC) grant at ctrl/drvr
+  attach, and the driver's vehicle-state uplink (Entity_SerializeMountedVehicleState modes
+  3/4) + the host's owner-gate extension for it (drain_connection_c2s only accepts the
+  connection's own PLAYER handle) → NEXT ROUND'S WITNESS TARGET. Killee-never-knows FIXED
+  same-day = **D-NET-160** (tail health was hardcoded 150 + no server-side dead bit; now
+  live tail + `flags|=2` on death, lifted by the deploy reset → the wire 1→0 edge is the
+  client spawn hook — death screen + redeploy through the dead-or-pending 0x0E gate).
+  Map icons/waypoints/LFP colors + LFP capture = **slice 2** (the 1 Hz capture block:
+  0x40 ×305-golden minimap colors, 0x6F ×268 control values, 0x53/0x6C, proximity, flips) —
+  the declared next big port. "No spare magazines": the wire grants are golden-equivalent
+  (M4=10 clips etc.; jox01 126-weapon indices consistent with what the clients fired) and
+  identical at join AND deploy — needs the CLIENT-side 0x5A apply witness (@0x4290E0: where
+  ammoPrimary lands vs what the HUD mag counter reads) before touching anything.
+  Artifacts: `.scratch/retail_join_v33{,_game}.pcapng` (28 MB filtered), host logs
+  host_std{out,err}_v33.log.
+
 **THE GAME-TYPE DECISION (2026-07-03, user-locked): ONE game type until it plays end-to-end —
 ADVANCE AND SECURE on ASH_I5A, gametype 0x10010 (65552 = AS + team flag, the golden retail
 value).** The wire has advertised AS all along; the internal "COOP" label (main_game.gd /

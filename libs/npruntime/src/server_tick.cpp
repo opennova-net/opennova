@@ -40,6 +40,18 @@ void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
+		// victim's OWN client learns of its death from its record byte13 bit 0x02
+		// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death
+		// screen + the redeploy flow), and everyone else's dead-state masks read it too.
+		// Cleared by entity_reset_to_spawn_state at the deploy — the wire 1->0 edge IS
+		// the client spawn hook (pose snap + reset). Without this bit the victim never
+		// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
+		// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
+		if (world::Entity *victim = world.registry.get(d.victim)) {
+			victim->flags |= 2u;
+			victim->alive = false;
+		}
 		// Who controls the victim? Player-controlled == some connection owns it — the
 		// semantic behind the original's Flags & 0x100 check [orig: @0x51b55d].
 		bool victim_is_player = false;
@@ -103,10 +115,11 @@ void release_due_respawns(NapiNPServerCtx &ctx, world::World &world) {
 		if (e != nullptr) {
 			// Respawn placement = the recorded spawn point (the D-NET-66 death/respawn
 			// TELEPORT — a snap, never motion); entity_reset_to_spawn_state then re-backs
-			// it up and clears the movement gate [orig: the deploy flow places the
-			// entity, then Entity_ResetToSpawnState @0x4B9610 records Position].
+			// it up and clears the movement gate + the dead bit [orig: the deploy flow
+			// places the entity, then Entity_ResetToSpawnState @0x4B9610 records Position].
 			e->position = e->spawn_position;
 			world::entity_reset_to_spawn_state(*e);
+			e->alive = true; // the route_round_deaths dead mark lifts with the respawn
 			// Spawn health = the item template's healthMax [orig: Entity_InitFromItemDef
 			// @0x49e550; the player_item_hp mirror, D-NET-144].
 			if (world.player_item_hp > 0)

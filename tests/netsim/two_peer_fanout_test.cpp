@@ -107,6 +107,9 @@ bool run_fanout_and_per_connection_anchor() {
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({5.0f, 10.0f, -3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
+	// The 0x0A tail carries the RECIPIENT's live health; the byte-identity sub-case below
+	// needs the owned-entity tail (host, live) to equal the no-entity default (150).
+	world.registry.get(host_h)->health = 150;
 
 	std::vector<ns::Connection> conns; // the host's connection table
 	ns::LoopbackChannel self_ch;
@@ -761,6 +764,25 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	            "post-deploy 0x0A decodes")) return false;
 	if (!expect(fu.flags1 == 0x00, "flags1 drops after the deploy clears pending")) return false;
 	if (!expect(fu.state_flag_byte == 0x00, "tail stance echo cleared")) return false;
+	if (!expect(fu.health > 0, "tail carries the live (alive) health")) return false;
+
+	// The victim's own death signal (v33 "killee never knows"): a dead recipient's frame
+	// carries tail health 0 [orig: stored as the client's own Health @0x4305df] and its
+	// record byte13 dead bit 0x02 [orig: the local apply's dead path @0x4c1005 — anim
+	// stores + Health = 0; the 1->0 edge is the spawn hook @0x4c1109].
+	e->health = 0;
+	e->flags |= 2u;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "dead-state 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "dead-state 0x0A decodes")) return false;
+	if (!expect(fu.health == 0, "tail health 0 tells the victim it died")) return false;
+	rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == h.packed) rec = &r;
+	if (!expect(rec != nullptr, "dead player record present")) return false;
+	if (!expect((rec->player.state_flags & 0x02) != 0,
+	            "record byte13 carries the dead bit")) return false;
 	std::printf("PASS 0a_deploy_hold_and_tail_stance\n");
 	return true;
 }

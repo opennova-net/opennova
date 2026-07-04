@@ -7001,6 +7001,23 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
+**D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
+learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire
+to everyone, death anims visible to OTHERS via the D-NET-159 motor, but the VICTIM kept
+playing).** The victim's own death rides two per-recipient channels we hardcoded: (1) the
+0x0A TAIL health — the client STORES it as its own Health [orig: @ 0x4305df], and ours sent a
+constant 150 (the D-NET-144-era stopgap), so the victim's Health never hit 0; (2) the record
+byte13 dead bit 0x02 — the LOCAL apply's dead path stores the death anim + zeroes Health
+[orig: @ 0x4c1005-0x4c1027] and its 1→0 edge is the client SPAWN HOOK (pose snap +
+Entity_ResetToSpawnState [orig: @ 0x4c1109]) — and nothing server-side ever set entity+36
+bit1 on death. FIXED: route_round_deaths marks the victim entity dead (`flags |= 2`,
+`alive = false`; lifted by entity_reset_to_spawn_state at the deploy/respawn — the wire edge
+then fires the client spawn hook, closing the death→redeploy cycle through the existing
+dead-or-pending 0x0E gate + the D-NET-156 release bundle), and the 0x0A tail now carries the
+recipient's LIVE health (`FrameHeaderState::tail_health`; damage also reads as the retail
+red-flash via the decrease detector @ 0x43059a). Pinned by `netsim_two_peer_fanout`
+(dead-state frame: tail 0 + byte13 bit 0x02) and the byte-identity sub-case's aligned tails.
+
 **D-NET-159** [reimpl divergence, FIXED 2026-07-03 (ported; verify v32) + tracked stand-ins]
 **The 0x0A player record's anim bytes were hardcoded (off-14 = 43, off-15 = 0) and the
 move-input echo idled at 0 for the host's own player — retail RECOMPUTES the body anim on
