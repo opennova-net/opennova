@@ -37,14 +37,14 @@ config plus its binary assets; Export bakes the runtime terrain.
 ## How it is built
 
 A multi-workflow workspace (see the framework in [`../README.md`](../README.md)).
-The adapter [`../editor/terrain_workspace.gd`](../editor/terrain_workspace.gd)
+The adapter [`terrain_workspace.gd`](terrain_workspace.gd)
 declares the five workflows in `_build_inspector_defs()` and opts into a 3D
 viewport, the asset dock, and the in-world tile gizmo. (The Sculpt inspector is
 code-first; the others are scene-backed while the terrain port is in progress.)
 
 | File | Role |
 |---|---|
-| [`../editor/terrain_workspace.gd`](../editor/terrain_workspace.gd) | workspace adapter: workflow rows, file actions, export |
+| [`terrain_workspace.gd`](terrain_workspace.gd) | workspace adapter: workflow rows, file actions, export |
 | `terrain_editor.gd` | editor state: active tool, brush, document, viewport |
 | `terrain_editor_document.gd` | document model: heightmap, colormap, blend, foliage and tile data |
 | `terrain_edit_history.gd` | undo / redo history |

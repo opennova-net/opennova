@@ -2,7 +2,7 @@ extends GutTest
 
 const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
 const FntEditorScript = preload("res://modtools/fonts/fnt_editor.gd")
-const FontsWorkspaceScript = preload("res://modtools/editor/fonts_workspace.gd")
+const FontsWorkspaceScript = preload("res://modtools/fonts/fonts_workspace.gd")
 const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
 const TEMP_DIR := "user://test_fnt_workspace"
 

@@ -1,6 +1,6 @@
 # OpenNova Agent Guide
 
-This branch is focused on retail-compatible OpenNova networking. The goal is not
+These runbooks cover retail-compatible OpenNova networking. The goal is not
 to invent a new multiplayer architecture. The goal is to make retail clients,
 retail hosts, OpenNova clients, OpenNova listen hosts, and future dedicated
 hosts speak the same in-match protocol.
@@ -34,8 +34,8 @@ Read these first for any networking task:
   process, sockets, UI, and presentation.
 - Do not use raw passthrough blobs to make a writer or encoder pass parity.
   Model the fields structurally unless a tracked ADR explicitly says otherwise.
-- Treat `plan/status.md` and source as newer than old phase notes when they
-  disagree.
+- Treat the source and `docs/net/novaworld-net-re.md` as live truth; `plan/` holds
+  completed-effort records (the NovaWorld-integration status tables), not current state.
 
 ## Consolidated net core (ADR 0013)
 

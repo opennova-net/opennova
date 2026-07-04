@@ -7,19 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define VFS_EXPORT __declspec(dllexport)
-#  else
-#    define VFS_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define VFS_EXPORT __attribute__((visibility("default")))
-#  else
-#    define VFS_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define VFS_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

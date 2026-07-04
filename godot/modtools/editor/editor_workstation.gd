@@ -1,17 +1,17 @@
 class_name EditorWorkstation
 extends Control
 
-const TerrainWorkspaceAdapter = preload("res://modtools/editor/terrain_workspace.gd")
-const EnvironmentWorkspaceAdapter = preload("res://modtools/editor/environment_workspace.gd")
+const TerrainWorkspaceAdapter = preload("res://modtools/terrain/terrain_workspace.gd")
+const EnvironmentWorkspaceAdapter = preload("res://modtools/environment/environment_workspace.gd")
 const ObjectWorkspaceAdapter = preload("res://modtools/object/object_workspace.gd")
-const MissionWorkspaceAdapter = preload("res://modtools/editor/mission_workspace.gd")
-const FontsWorkspaceAdapter = preload("res://modtools/editor/fonts_workspace.gd")
-const CreditsWorkspaceAdapter = preload("res://modtools/editor/credits_workspace.gd")
+const MissionWorkspaceAdapter = preload("res://modtools/mission/mission_workspace.gd")
+const FontsWorkspaceAdapter = preload("res://modtools/fonts/fonts_workspace.gd")
+const CreditsWorkspaceAdapter = preload("res://modtools/credits/credits_workspace.gd")
 const StringsWorkspaceAdapter = preload("res://modtools/strings/strings_workspace.gd")
 const SoundWorkspaceAdapter = preload("res://modtools/sound/sound_workspace.gd")
 const MnuWorkspaceAdapter = preload("res://modtools/mnu/mnu_workspace.gd")
 const HudWorkspaceAdapter = preload("res://modtools/hud/hud_workspace.gd")
-const MusicWorkspaceAdapter = preload("res://modtools/editor/music_workspace.gd")
+const MusicWorkspaceAdapter = preload("res://modtools/music/music_workspace.gd")
 const CameraSettingsPanelScene = preload("res://modtools/terrain/ui/camera_settings_panel.tscn")
 
 enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS, MUSIC, SOUND, MNU, HUD }
@@ -355,7 +355,7 @@ func _process(_delta: float) -> void:
 
 func _workspace_defs() -> Array:
 	# Categories group the nav list; array order is the within-category order and
-	# the order categories first appear (World, Interface, Atmosphere).
+	# the order categories first appear (World, Interface, Audio, Atmosphere).
 	return [
 		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
 		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World", &"terrain"),

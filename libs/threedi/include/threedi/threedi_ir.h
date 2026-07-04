@@ -9,19 +9,8 @@
 #include <stdint.h>
 
 // Visibility macro for shared library exports
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define THREEDI_EXPORT __declspec(dllexport)
-#  else
-#    define THREEDI_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define THREEDI_EXPORT __attribute__((visibility("default")))
-#  else
-#    define THREEDI_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define THREEDI_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

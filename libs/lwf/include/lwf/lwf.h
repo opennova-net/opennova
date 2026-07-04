@@ -1,7 +1,7 @@
 // LWF sound-profile container reader/writer (magic 'LWF1').
 //
 // Reverse-engineered from lwfbuilder.exe / lwf2sdf.exe / SoundTool.exe; ported
-// byte-for-byte from the on-godot-oscarmike prototype's libs/lwf, then grilled
+// byte-for-byte from the pre-repo prototype's libs/lwf, then grilled
 // against the engine reader in Jointops.exe (2026-06-09): every stride/offset
 // below is witnessed by SoundBank_OpenFile @ 0x75caa0 + SoundBank_LoadTriggerSets
 // @ 0x75c370, and the field semantics by SoundBank_PlayTriggerEntries @ 0x75ccd0.
@@ -12,7 +12,7 @@
 //
 // Round-trip is byte-exact on the *unmodified* parse->encode path: garbage in
 // unused/reserved slots and the original string pool are preserved verbatim.
-// See RE notes lwfbuilder.md / lwf2sdf.md / soundtool.md + notes/grill.md.
+// See docs/audio/lwf-dbf-sound-re.md.
 #pragma once
 
 #include <array>

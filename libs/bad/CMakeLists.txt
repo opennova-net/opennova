@@ -9,3 +9,6 @@ target_include_directories(opennova_bad
 )
 
 target_compile_features(opennova_bad PUBLIC cxx_std_11)
+
+# io/export.h (and for some libs io/le.h) is used from public headers.
+target_link_libraries(opennova_bad PUBLIC opennova_io)

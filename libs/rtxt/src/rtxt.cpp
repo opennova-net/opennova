@@ -1,5 +1,7 @@
 #include "rtxt/rtxt.h"
 
+#include <io/le.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -21,24 +23,17 @@ inline bool in_range(size_t offset, size_t size_needed, size_t buffer_size) {
 }
 
 inline uint32_t read_u32(const uint8_t *data, size_t off) {
-  return static_cast<uint32_t>(data[off]) |
-         (static_cast<uint32_t>(data[off + 1]) << 8) |
-         (static_cast<uint32_t>(data[off + 2]) << 16) |
-         (static_cast<uint32_t>(data[off + 3]) << 24);
+  return opennova::io::read_u32_le(data + off);
 }
 
 inline void write_u32(std::vector<uint8_t> &buf, uint32_t val) {
-  buf.push_back(static_cast<uint8_t>(val & 0xFF));
-  buf.push_back(static_cast<uint8_t>((val >> 8) & 0xFF));
-  buf.push_back(static_cast<uint8_t>((val >> 16) & 0xFF));
-  buf.push_back(static_cast<uint8_t>((val >> 24) & 0xFF));
+  uint8_t tmp[4];
+  opennova::io::write_u32_le(tmp, val);
+  buf.insert(buf.end(), tmp, tmp + 4);
 }
 
 inline void write_u32_at(std::vector<uint8_t> &buf, size_t off, uint32_t val) {
-  buf[off] = static_cast<uint8_t>(val & 0xFF);
-  buf[off + 1] = static_cast<uint8_t>((val >> 8) & 0xFF);
-  buf[off + 2] = static_cast<uint8_t>((val >> 16) & 0xFF);
-  buf[off + 3] = static_cast<uint8_t>((val >> 24) & 0xFF);
+  opennova::io::write_u32_le(&buf[off], val);
 }
 
 // Read null-terminated string from buffer starting at offset.

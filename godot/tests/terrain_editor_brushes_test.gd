@@ -4,7 +4,7 @@ extends GutTest
 ## (terrain_editor_brushes.gd was removed in A4). NovaTerrainData owns the editable
 ## buffers; set_*_image hands it the SAME Image the test asserts on, so the in-place
 ## set_data round-trip is observed here. Byte-parity vs the old GDScript is locked by
-## tests/trngen/brush_color_test.cpp (and was gated against real Godot during A4).
+## tests/terrain/brush_color_test.cpp (and was gated against real Godot during A4).
 
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
 

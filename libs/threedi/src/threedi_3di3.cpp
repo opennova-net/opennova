@@ -6,46 +6,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <io/fixed.h>
+
 #define LENGTH_MASK 0x00FFFFFFu
 #define PARENT_FLAG 0x80000000u
 #define THREEDI_DEFAULT_VERSION 259u
 
 typedef struct ChunkBuilder ChunkBuilder;
 
-static uint32_t read_u32_le(const uint8_t *p)
-{
-    return (uint32_t)p[0]
-         | ((uint32_t)p[1] << 8)
-         | ((uint32_t)p[2] << 16)
-         | ((uint32_t)p[3] << 24);
-}
-
-static int32_t read_s32_le(const uint8_t *p)
-{
-    return (int32_t)read_u32_le(p);
-}
-
-static uint16_t read_u16_le(const uint8_t *p)
-{
-    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
-}
-
-static int16_t read_s16_le(const uint8_t *p)
-{
-    return (int16_t)read_u16_le(p);
-}
-
-static uint8_t read_u8(const uint8_t *p)
-{
-    return p[0];
-}
-
-static float read_f32_le(const uint8_t *p)
-{
-    float v;
-    memcpy(&v, p, sizeof(float));
-    return v;
-}
+using opennova::io::read_u32_le;
+using opennova::io::read_s32_le;
+using opennova::io::read_u16_le;
+using opennova::io::read_s16_le;
+using opennova::io::read_u8;
+using opennova::io::read_f32_le;
+using opennova::io::read_fp_16_16;
+using opennova::io::read_fp_14;
 
 static const ThreediChunk *find_first_chunk(const ThreediChunk *chunk, const char id[4])
 {
@@ -499,18 +475,6 @@ static int parse_rlod(const ThreediChunk *rlod_chunk, ThreediLod *out_lod)
     }
 
     return 0;
-}
-
-static float read_fp_16_16(const uint8_t *p)
-{
-    int32_t raw = read_s32_le(p);
-    return (float)raw / 65536.0f;
-}
-
-static float read_fp_14(const uint8_t *p)
-{
-    int16_t raw = read_s16_le(p);
-    return (float)raw / 16384.0f;
 }
 
 static int parse_cmdl(const ThreediChunk *chunk, ThreediCollisionModelData *out)

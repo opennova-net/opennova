@@ -33,12 +33,12 @@ authored scene (one runtime, see
 ## How it is built
 
 The adapter lives with the other multi-pane adapters in
-[`../editor/mission_workspace.gd`](../editor/mission_workspace.gd); the heavy
+[`mission_workspace.gd`](mission_workspace.gd); the heavy
 lifting is in this folder.
 
 | File | Role |
 |---|---|
-| [`../editor/mission_workspace.gd`](../editor/mission_workspace.gd) | adapter: shell binding (viewport mount, inspector, action bar) |
+| [`mission_workspace.gd`](mission_workspace.gd) | adapter: shell binding (viewport mount, inspector, action bar) |
 | `mission_controller.gd` | document model: create / load / resolve / place / edit / save, selection, undo |
 | `mission_inspector.gd` | left browser + right dock: per-selection editors and the Mission form |
 | `mission_entity_fields.gd` | reflected entity parameter schema |

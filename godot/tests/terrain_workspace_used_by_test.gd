@@ -9,7 +9,7 @@ extends GutTest
 # ask), the key spellings, the mission jump, and the shell-less fallback.
 
 const EditorMainScene = preload("res://modtools/editor/editor_main.tscn")
-const TerrainWorkspaceScript = preload("res://modtools/editor/terrain_workspace.gd")
+const TerrainWorkspaceScript = preload("res://modtools/terrain/terrain_workspace.gd")
 
 
 class UsedByShell:

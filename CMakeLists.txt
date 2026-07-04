@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(opennova LANGUAGES C CXX)
 
 # Add libraries
+# io first: header-only shared infrastructure (byte/bit IO, fixed-point, strutil)
+add_subdirectory(libs/io)
 add_subdirectory(libs/pcx)
 add_subdirectory(libs/fnt)
 add_subdirectory(libs/foliage)
@@ -12,7 +14,6 @@ add_subdirectory(libs/cpt)
 add_subdirectory(libs/env)
 add_subdirectory(libs/threedi)
 add_subdirectory(libs/bad)
-add_subdirectory(libs/adm)
 add_subdirectory(libs/anim)
 add_subdirectory(libs/pff)
 add_subdirectory(libs/gameprofile)
@@ -32,7 +33,6 @@ add_subdirectory(libs/world)
 add_subdirectory(libs/wac)
 add_subdirectory(libs/sbf)
 add_subdirectory(libs/mus)
-add_subdirectory(libs/mnu_xml)
 add_subdirectory(libs/mnu)
 add_subdirectory(libs/mns)
 add_subdirectory(libs/mission)
@@ -83,7 +83,6 @@ endif()
 add_subdirectory(libs/novacrypto)
 add_subdirectory(libs/napi)
 add_subdirectory(libs/novaworld)
-add_subdirectory(libs/bms)
 
 # netsim — the in-match net seam (ADR 0009/0011): NetSystem + the World<->wire
 # bridge + the in-process loopback. The single lib depending on BOTH the runtime
@@ -133,7 +132,6 @@ set(OPENNOVA_CORE_TARGETS
     opennova_bfc1
     opennova_cbin
     opennova_bad
-    opennova_adm
     opennova_anim
     opennova_def
     opennova_scr
@@ -148,9 +146,9 @@ set(OPENNOVA_CORE_TARGETS
     opennova_wac
     opennova_sbf
     opennova_mus
-    opennova_mnu_xml
     opennova_mnu
     opennova_mns
+    opennova_mission_format
     opennova_mission
     opennova_audio
     opennova_refs
@@ -187,11 +185,16 @@ if(BUILD_SHARED_LIB)
                 "LINKER:-force_load,$<TARGET_FILE:${target}>")
         endforeach()
     else()
-        target_link_libraries(opennova_shared
-            PRIVATE -Wl,--whole-archive
-            PRIVATE ${OPENNOVA_CORE_TARGETS}
-            PRIVATE -Wl,--no-whole-archive
-        )
+        # GNU ld: force-load each core archive by FILE PATH (like the APPLE
+        # branch). Referencing $<TARGET_FILE:...> instead of target names keeps
+        # CMake's link-line de-duplication from pulling a dependency out of the
+        # whole-archive region, so libraries may declare their real dependencies
+        # (e.g. oed/renderer -> threedi) without losing exported symbols.
+        target_link_libraries(opennova_shared PRIVATE ${OPENNOVA_CORE_TARGETS})
+        foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
+            target_link_options(opennova_shared PRIVATE
+                "LINKER:--whole-archive,$<TARGET_FILE:${target}>,--no-whole-archive")
+        endforeach()
     endif()
 
     target_compile_definitions(opennova_shared

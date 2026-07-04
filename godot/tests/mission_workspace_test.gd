@@ -6,7 +6,7 @@ extends GutTest
 # (-> mission resources in the resource index) and the mission dialog filters are what make the
 # Open flow reach a mission at all.
 
-const MissionWorkspace := preload("res://modtools/editor/mission_workspace.gd")
+const MissionWorkspace := preload("res://modtools/mission/mission_workspace.gd")
 
 
 func test_open_resource_kind_is_mission() -> void:

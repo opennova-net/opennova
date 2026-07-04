@@ -8,7 +8,7 @@ Two related on-disk model formats:
 - **3DI3** — the chunked tooling/export format (`'3DI3'` magic, version `0x103`)
   written and read by the NovaLogic mod tools. Addresses in §1 and §3 are
   `ModSuperOed.exe` (OED, 32-bit PE, imagebase `0x400000`,
-  IDB `opennova-godot-new/.scratch/opennova-model-focussed/RE/ModSuperOed.exe.i64`).
+  IDB `ModSuperOed.exe.i64`).
 - **GP** (GPM/GPS/GPP) — the BHD-era runtime `.3di` format. Addresses in §2 are
   `dfvas.exe` (Delta Force: Black Hawk Down affiliate build). One early note
   attributed `0x50bd0b` to `jodemo.exe`; every later probe cites the same range in

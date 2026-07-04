@@ -7,6 +7,21 @@
   target `opennova_<domain>`; namespace `opennova`. C ABI exports stay flat and
   domain-prefixed — Python and Godot load the same `opennova_shared` library, so ABI
   stability matters.
+- C ABI conventions for NEW exports: annotate with the lib's `<DOMAIN>_EXPORT` macro
+  (a per-lib alias of `OPENNOVA_API` from `io/export.h` — never copy the raw
+  `__declspec` block again), return `int` status with `0 = success`, out-params last,
+  ownership released by a matching `<domain>_free`/`_destroy`. Existing exports keep
+  their historical semantics (some predate this — `opennova_vfs_*` returns 1=success,
+  `oed` uses a status enum); changing a shipped export's return semantics is an FFI
+  behavior change and needs a deliberate, versioned decision.
+- Shared infrastructure lives in `libs/io` (`opennova::io` / `opennova::strutil`,
+  header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
+  `BitWriter`, `io/le.h` primitives, `io/fixed.h` (16.16 / 2.14), `io/strutil.h`
+  ASCII case-insensitive helpers. Do not hand-roll a new byte reader or export-macro
+  block; migrate existing per-lib copies on-touch (delegate the body, keep the local
+  signature, gated on that lib's byte-exact roundtrip tests). Excluded from migration:
+  the `mus`/`wac` VM program-counter cursors (witnessed faithful-port surface with
+  their own clamp semantics).
 - Ports are faithful structural translations of the original engine — implementing "our
   own version" of engine behavior is never allowed unless a tracked decision (ADR or an
   RE-record divergence entry) says otherwise. CRT/OS/platform primitives (strcpy/sprintf/

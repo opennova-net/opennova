@@ -80,14 +80,14 @@ jobs:
             envelope_test tlv_test session_test \
             registration_url_test gate_response_test gate_probe_test lobby_update_test \
             gate_server_loopback_test gsb_roundtrip_test protocol_message_test \
-            bms_spawn_points_test connection_registry_test connection_manager_test \
+            connection_registry_test connection_manager_test \
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
             backend_schema_test
 
       - name: Run net ctests
         run: |
           ctest --test-dir build-server --output-on-failure -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|bms_spawn_points|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema)$"
 
   modsuperoed-smoke:
     runs-on: windows-latest

@@ -144,7 +144,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 
 | Subsystem | Our code | Record | Verdict |
 |---|---|---|---|
-| Menus (MNU/MNS UI) | `libs/mnu`, `libs/mnu_xml`, `libs/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | matching (D-MNU-1..3) |
+| Menus (MNU/MNS UI) | `libs/mnu` (incl. the mnu_xml reader), `libs/mns`, `godot/engine/mnu` | [mnu/menu-re.md](mnu/menu-re.md) + [menu-wiring.md](mnu/menu-wiring.md) | matching (D-MNU-1..3) |
 | Sound banks + dialog | `libs/lwf`, `libs/dbf`, `libs/audio` | [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) | matching (D-SND-1..3) |
 | Music (MUS/SBF/SCR) | `libs/mus`, `libs/sbf`, `libs/scr` | [audio/mus-sbf-re.md](audio/mus-sbf-re.md) | matching per component |
 | Environment / time-of-day | `libs/env`, `env_render`, the `NovaEnvironment` family | [env/env-tod-re.md](env/env-tod-re.md) | mixed per subsystem (see record) |
@@ -189,7 +189,7 @@ Order of operations when you need an engine truth:
      `apps/modsuperoed.py`, fixture pack in `third_party/modsuperoed`, gated on
      `OPENNOVA_MODSUPEROED_DIR`.
    - Byte-exact fixture roundtrips in ctest — e.g. `tests/rtxt/real_parity_test.cpp`
-     (98/98 retail bins), `tests/trngen/dvd4_parity_test.cpp`, the `.bad`/3DI
+     (98/98 retail bins), `tests/terrain/dvd4_parity_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
    - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
      `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see the root CLAUDE.md).

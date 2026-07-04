@@ -20,7 +20,7 @@ target_link_libraries(opennova_refs
         opennova_cbin
         opennova_def
         opennova_threedi
-        opennova_mission
+        opennova_mission_format
         opennova_mnu
 )
 

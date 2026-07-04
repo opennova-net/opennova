@@ -14,7 +14,9 @@ add_executable(nw_pp nw_pp.cpp)
 
 target_link_libraries(nw_pp
     PRIVATE
-        opennova_novaworld
+        opennova_novaworld_wire
+        opennova_novaworld_session
+        opennova_novaworld_replay
         opennova_napi
         opennova_novacrypto
         opennova_def

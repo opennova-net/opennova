@@ -145,8 +145,8 @@ const MusSection *mus_find_section(const MusScript *s, const char *name);
 /* Two-pass decompile to MUS source text. Pass `out=NULL, out_capacity=0` to
    query required size (excluding trailing NUL); call again with a buffer at
    least that large to write. Returns bytes written on success, negative on
-   error. The output is line-for-line compatible with the on-godot-oscarmike
-   Python decompiler at .scratch/mus_decompiler.py.
+   error. The output is line-for-line compatible with the reference Python
+   decompiler this port was built from (see mus_decompile.cpp).
 
    The C++ port preserves the Python decompiler's quirks: section bodies are
    bracketed by entry-point labels and `done` opcodes (so a section that ends

@@ -61,8 +61,8 @@ menus shadows a PFF-archived one at runtime - the standard modding flow.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.mnu` | [`libs/mnu`](../../../libs/mnu) | menu screens: window tree, widgets, Actions; parsed through the forgiving XML reader [`libs/mnu_xml`](../../../libs/mnu_xml); round-trip preserves the format superset |
-| `.mns` | [`libs/mns`](../../../libs/mns) | menu stylesheets: named style variables the screens reference as `%NAME%`; lossless document model (comments, grouping, alignment survive saves - [ADR 0009](../../../docs/adr/0009-mns-lossless-document-model.md)) |
+| `.mnu` | [`libs/mnu`](../../../libs/mnu) | menu screens: window tree, widgets, Actions; parsed through the forgiving XML reader bundled in `libs/mnu` (`mnu_xml.cpp`); round-trip preserves the format superset |
+| `.mns` | [`libs/mns`](../../../libs/mns) | menu stylesheets: named style variables the screens reference as `%NAME%`; lossless document model (comments, grouping, alignment survive saves - [ADR 0014](../../../docs/adr/0014-mns-lossless-document-model.md)) |
 
 ## How it is built
 
@@ -91,4 +91,4 @@ the per-variable inspector.
 - Editor framework: [`../README.md`](../README.md).
 - Project overview: [top-level README](../../../README.md).
 - Format and engine-behaviour record: [`docs/mnu/menu-re.md`](../../../docs/mnu/menu-re.md); host wiring: [`docs/mnu/menu-wiring.md`](../../../docs/mnu/menu-wiring.md).
-- Decisions: [ADR 0001](../../../docs/adr/0001-mnu-action-command-boundary.md), [ADR 0002](../../../docs/adr/0002-mnu-round-trip-preserves-superset.md), [ADR 0003](../../../docs/adr/0003-no-raw-passthrough-create-from-scratch.md), [ADR 0005](../../../docs/adr/0005-mnu-var-expansion-policy.md), [ADR 0009](../../../docs/adr/0009-mns-lossless-document-model.md).
+- Decisions: [ADR 0001](../../../docs/adr/0001-mnu-action-command-boundary.md), [ADR 0002](../../../docs/adr/0002-mnu-round-trip-preserves-superset.md), [ADR 0003](../../../docs/adr/0003-no-raw-passthrough-create-from-scratch.md), [ADR 0005](../../../docs/adr/0005-mnu-var-expansion-policy.md), [ADR 0014](../../../docs/adr/0014-mns-lossless-document-model.md).

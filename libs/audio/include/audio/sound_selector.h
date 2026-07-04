@@ -7,7 +7,7 @@
 // resolve the same member without Godot. The host keeps the lwf data access and the
 // AudioStreamPlayer spawning; this only decides WHICH member index plays.
 //
-// Grilled vs Jointops.exe 2026-06-09 (see notes/grill.md):
+// Grilled vs Jointops.exe 2026-06-09 (see docs/audio/lwf-dbf-sound-re.md):
 // [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0 / SoundBank_SelectTriggerEntryFromBank @ 0x75bf20]
 // - flags & 0x10 -> sequential cursor with wrap;
 // - flags & 0x80 -> random anchor, then one full in-order cycle back to the anchor;

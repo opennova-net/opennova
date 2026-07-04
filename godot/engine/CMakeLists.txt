@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
+add_subdirectory(../../libs/io opennova_io)
 add_subdirectory(../../libs/pcx opennova_pcx)
 add_subdirectory(../../libs/fnt opennova_fnt)
 add_subdirectory(../../libs/foliage opennova_foliage)
@@ -13,7 +14,6 @@ add_subdirectory(../../libs/cpt opennova_cpt)
 add_subdirectory(../../libs/env opennova_env)
 add_subdirectory(../../libs/threedi opennova_threedi)
 add_subdirectory(../../libs/bad opennova_bad)
-add_subdirectory(../../libs/adm opennova_adm)
 add_subdirectory(../../libs/anim opennova_anim)
 add_subdirectory(../../libs/pff opennova_pff)
 add_subdirectory(../../libs/gameprofile opennova_gameprofile)
@@ -30,7 +30,6 @@ add_subdirectory(../../libs/terrain opennova_terrain)
 add_subdirectory(../../libs/resource_index opennova_resource_index)
 add_subdirectory(../../libs/sbf opennova_sbf)
 add_subdirectory(../../libs/mus opennova_mus)
-add_subdirectory(../../libs/mnu_xml opennova_mnu_xml)
 add_subdirectory(../../libs/mnu opennova_mnu)
 add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
@@ -45,9 +44,9 @@ add_subdirectory(../../libs/oned_edit opennova_oned_edit)
 add_subdirectory(../../libs/controls opennova_controls)
 add_subdirectory(../../libs/novacrypto opennova_novacrypto)
 add_subdirectory(../../libs/napi opennova_napi)
-# novaworld depends on sqlite (db/), so pull sqlite in too. The Godot
-# extension only uses the protocol bits, but linking the whole library is
-# fine — the .a is small.
+# sqlite is only needed to DEFINE the novaworld service-leg target; the
+# extension links the client legs (wire/session/gate/replay), so no sqlite
+# or service code ends up in the binary.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 add_subdirectory(../../libs/novaworld opennova_novaworld)
 # netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
@@ -167,7 +166,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_env
     opennova_threedi
     opennova_bad
-    opennova_adm
     opennova_anim
     opennova_pff
     opennova_gameprofile
@@ -182,7 +180,6 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_sbf
     opennova_scr
     opennova_mus
-    opennova_mnu_xml
     opennova_mnu
     opennova_mns
     opennova_def
@@ -196,7 +193,10 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_controls
     opennova_novacrypto
     opennova_napi
-    opennova_novaworld
+    opennova_novaworld_wire
+    opennova_novaworld_session
+    opennova_novaworld_gate
+    opennova_novaworld_replay
     opennova_netsim
     opennova_npruntime
 )

@@ -58,9 +58,8 @@ namespace opennova {
 //
 // Flag-byte bits per `NapiNPConnection_ParseMessages` body branches and
 // `NapiNPConnection_DispatchMessage` fragment handling. Cross-checked
-// against onnet's reference implementation at
-// `opennova-godot-new/.scratch/onnet/onnw/nwu_protocol.py` (FRAG_CONT/
-// FRAG_END enum) and `nw_udp_server.py` (process_protocol_message dispatch).
+// against the onnet reference implementation (`nwu_protocol.py` FRAG_CONT/
+// FRAG_END enum; `nw_udp_server.py` process_protocol_message dispatch).
 //   0x80 SETTINGS_UPDATE  — selects msginfo_high_* table in dispatcher
 //   0x40 LEN16            — 16-bit length field follows
 //   0x20 LEN8             — 8-bit length field follows

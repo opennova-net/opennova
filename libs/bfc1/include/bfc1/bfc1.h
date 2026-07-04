@@ -4,19 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define BFC1_EXPORT __declspec(dllexport)
-#  else
-#    define BFC1_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define BFC1_EXPORT __attribute__((visibility("default")))
-#  else
-#    define BFC1_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define BFC1_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

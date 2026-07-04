@@ -1,7 +1,7 @@
 # MNU/MNS menu UI: engine correspondence and equivalence
 
 How Joint Operations parses, lays out, sounds, and draws its `.mnu` menus, as
-witnessed in the original engine, and how `libs/mnu`, `libs/mnu_xml`, `libs/mns`,
+witnessed in the original engine, and how `libs/mnu` (incl. the mnu_xml reader), `libs/mns`,
 and `godot/engine/mnu` correspond to it.
 
 Reverse-engineered from `Jointops.exe` (Joint Operations: Combined Arms, imagebase
@@ -332,7 +332,7 @@ may follow the backslash; a name alone followed by `\` starts its value on the n
 line); `\\` escapes a literal backslash in values; names exclude whitespace and the
 six `% < > # \ /`; nestable `#if 0|1` / `#else` / `#endif`.
 
-The model is lossless (ADR 0009): typed node fields exactly partition the file's
+The model is lossless (ADR 0014): typed node fields exactly partition the file's
 bytes, so an untouched parse -> serialize is byte-identical and an edited value
 changes only its own line. `Document::flatten()` is the runtime view the existing
 `mns::StyleSheet` API serves (last duplicate wins, evaluated conditionals).
@@ -434,9 +434,9 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | Original | OpenNova |
 |---|---|
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `NovaMnuDocument` + `godot/game/menu_shell.gd` |
-| `sub_552500` (.mns stylesheet load, ref'd from `0x63c830`) | `mns::Document::parse` — `libs/mns/src/mns_document.cpp` (lossless model, ADR 0009; loader unwitnessed, built from the in-file spec — D-MNS-1..4) |
-| `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `libs/mnu_xml/src/mnu_xml.cpp` |
-| `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `libs/mnu_xml/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
+| `sub_552500` (.mns stylesheet load, ref'd from `0x63c830`) | `mns::Document::parse` — `libs/mns/src/mns_document.cpp` (lossless model, ADR 0014; loader unwitnessed, built from the in-file spec — D-MNS-1..4) |
+| `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `libs/mnu/src/mnu_xml.cpp` |
+| `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `libs/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
 | `NapiXML_ExpandVariablesInText @ 0x63a000` | `MnsStyleSheet::substitute` — `godot/engine/mnu/mns_stylesheet.cpp` (per-field post-parse, not whole-buffer; D-MNU-1 / ADR 0005) |
 | `parse_scene_node_attributes @ 0x639630` | `mnu::parse_screen` — `libs/mnu/src/mnu.cpp` |
 | `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `libs/mnu/src/mnu.cpp`; layout in `apply_position` — `godot/engine/mnu/nova_mnu_builder.cpp` |

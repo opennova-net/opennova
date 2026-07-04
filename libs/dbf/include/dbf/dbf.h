@@ -1,7 +1,7 @@
 // DBF (DLG0) dialog-bank parser for NovaLogic games.
 //
 // Reverse-engineered from sndc.exe (Sound Script Compiler); ported from the
-// on-godot-oscarmike prototype's libs/dbf, then grilled against the engine reader
+// pre-repo prototype's libs/dbf, then grilled against the engine reader
 // in Jointops.exe (2026-06-09): header/record layout witnessed by
 // DialogManager_LoadFromFile @ 0x44e650 (28-byte header, 52-byte group records
 // each followed by its 68-byte line records). The engine loads the mission's
@@ -11,7 +11,7 @@
 // to one or more lines, each naming a sound definition (def_id_name, e.g.
 // "Z00gR100") that resolves to a set in that bank. Mission PlayWavList actions
 // reference a dialog id; this bank turns it into the LWF set name(s) to play.
-// See RE/DLG0_FORMAT.md (archive) + notes/grill.md.
+// See docs/audio/lwf-dbf-sound-re.md.
 #pragma once
 
 #include <cstdint>

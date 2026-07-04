@@ -71,6 +71,6 @@ original binaries. Where our code and that record disagree, IDA is the source of
 - **NovaWorld** now refers exclusively to the service and its reimplementation
   (`apps/novaworld_server`, `libs/novaworld`). It is our NovaWorld server, not an
   emulator.
-- The runtime world-sim host scene formerly named `NovaWorld`
-  (`godot/engine/world/nova_world.gd`) is renamed **GameWorld** as part of this effort.
+- The runtime world-sim host scene formerly named `NovaWorld` was renamed **GameWorld**
+  (`godot/engine/world/game_world.gd`) as part of this effort.
 - The gate is `novaworld_gate`; the in-game server list is the `novaworld_browser`.

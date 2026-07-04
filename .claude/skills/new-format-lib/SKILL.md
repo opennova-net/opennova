@@ -5,7 +5,7 @@ description: Scaffolds a new NovaLogic format library under libs/ end to end —
 
 # Add a format library under libs/
 
-Done ~39 times; the conventions are strict. Copy a living exemplar, don't
+Done dozens of times; the conventions are strict. Copy a living exemplar, don't
 invent: `libs/dbf` (small binary format), `libs/lwf` + `tests/lwf/` (byte-exact
 roundtrip), `libs/refs` (most recent conventions).
 

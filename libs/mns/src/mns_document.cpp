@@ -321,7 +321,7 @@ Document Document::parse(const char *data, size_t size) {
 
 		// Inside an evaluated-false region: preserve the line verbatim. The
 		// runtime skips these line-by-line, so no define structure is imposed
-		// (see ADR 0009 on why this is not "raw passthrough").
+		// (see ADR 0014 on why this is not "raw passthrough").
 		if (skip_depth > 0) {
 			node.kind = NodeKind::InactiveText;
 			node.leading_ws = leading_ws;

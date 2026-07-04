@@ -10,15 +10,16 @@ target_include_directories(opennova_oed
     PUBLIC  include
     PRIVATE
         src   # for threedi_model.h (private)
-        ${CMAKE_CURRENT_SOURCE_DIR}/../threedi/include
 )
 
-# Dependencies: ASE parser, TDP project structs
-# Note: threedi write/free symbols resolve at final link time (via --whole-archive
-# in the shared lib, or direct linking in executables). Adding opennova_threedi here
-# would cause CMake to de-duplicate it out of the --whole-archive block.
+# Dependencies: ASE parser, TDP project structs, 3DI writer (oed.h includes
+# threedi_3di3.h). The shared lib force-loads core archives by file path, so
+# declaring the real dependency no longer drops threedi from whole-archive.
 target_link_libraries(opennova_oed
-    PUBLIC opennova_ase opennova_tdp
+    PUBLIC opennova_ase opennova_tdp opennova_threedi
 )
 
 target_compile_features(opennova_oed PRIVATE cxx_std_17)
+
+# io/export.h (and for some libs io/le.h) is used from public headers.
+target_link_libraries(opennova_oed PUBLIC opennova_io)

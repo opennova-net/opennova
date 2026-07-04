@@ -16,7 +16,7 @@ namespace godot {
 // All format behavior lives in libs/mns. Keys are case-insensitive (stored
 // uppercase in the flattened view).
 //
-// Document-backed (ADR 0009): the source of truth is a lossless mns::Document
+// Document-backed (ADR 0014): the source of truth is a lossless mns::Document
 // (comments, grouping, alignment, conditionals, authored case all survive a
 // load -> save), and the flat StyleSheet the runtime substitutes through is
 // its flatten() cache. Lookup/substitution serve the flat view; mutations and

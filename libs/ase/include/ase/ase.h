@@ -4,19 +4,8 @@
 
 #include "ase/types.h"
 
-#ifdef _WIN32
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define ASE_EXPORT __declspec(dllexport)
-#  else
-#    define ASE_EXPORT
-#  endif
-#else
-#  ifdef OPENNOVA_SHARED_EXPORTS
-#    define ASE_EXPORT __attribute__((visibility("default")))
-#  else
-#    define ASE_EXPORT
-#  endif
-#endif
+#include <io/export.h>
+#define ASE_EXPORT OPENNOVA_API
 
 #ifdef __cplusplus
 extern "C" {

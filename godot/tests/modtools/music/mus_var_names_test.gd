@@ -17,7 +17,7 @@ func test_unknown_script_falls_back_to_raw_var():
 
 
 func test_menuscript_known_vars_get_friendly_names():
-	# Per on-godot-oscarmike .scratch/menumus_commented.mus
+	# Per the hand-annotated menumus decompile (original RE pass)
 	assert_eq(MusVarNames.label_for("menuscript", 0), "Entry (Var00)")
 	assert_eq(MusVarNames.label_for("menuscript", 2), "MenuScreen (Var02)")
 	assert_eq(MusVarNames.label_for("menuscript", 14), "IntroPlayed (Var14)")

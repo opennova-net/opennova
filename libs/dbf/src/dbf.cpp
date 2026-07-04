@@ -1,4 +1,4 @@
-// DBF (DLG0) dialog-bank parser. Ported from the on-godot-oscarmike prototype.
+// DBF (DLG0) dialog-bank parser. Ported from the pre-repo prototype.
 // [orig: DialogManager_LoadFromFile @ 0x44e650 — header 0x1C, groups 0x34 each
 //  followed by 68-byte lines (re-read as one 68*n+52 blob @ 0x44e79d)]
 #include "dbf/dbf.h"

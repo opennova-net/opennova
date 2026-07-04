@@ -8,7 +8,7 @@
 // The Godot side (godot/engine/object/nova_object_shader_cache.cpp) wraps
 // these strings into Godot Shader resources and caches them per key.
 //
-// Mirrors opennova-godot-new/src/model/nova_shader_cache.cpp's compose_*
+// Ported from the pre-repo prototype's nova_shader_cache compose_* helpers
 // helpers, simplified to a single Normal-pass (no per-light passes - that
 // belongs to the runtime layer and gets a separate composer when added).
 

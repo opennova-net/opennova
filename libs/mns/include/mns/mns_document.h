@@ -14,7 +14,7 @@ namespace mns {
 // referenced from [orig: UIScene_LoadAndParseContent @ 0x63c830 via sub_552500].
 //
 // Every node stores typed fields that exactly partition the line's bytes
-// (no opaque raw-span replay; see ADR 0009), so parse() -> serialize() is
+// (no opaque raw-span replay; see ADR 0014), so parse() -> serialize() is
 // byte-identical for an untouched document: comments, blank lines, alignment
 // whitespace, authored name case, conditional blocks, per-line EOL style,
 // BOM, and a missing final newline all survive. flatten() produces the

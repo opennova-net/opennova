@@ -1,6 +1,6 @@
 """
 Shared data classes used by the Novalogic import pipeline.
-Adapted from .scratch/opennova/model.py (pymxs references removed).
+Adapted from the pre-repo import prototype (pymxs references removed).
 """
 
 from __future__ import annotations
