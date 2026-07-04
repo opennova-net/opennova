@@ -49,6 +49,8 @@ AI, 62-frame cadence, `TickContext.is_authority` as the authority seam).
    witnesses. New gameplay-net code must not grow on top of them in the meantime.
    `libs/bms` additionally duplicates a slice of `libs/mission`'s BMS support;
    convergence on one parser is part of the real implementation.
+   *(Update 2026-07-04: that convergence landed — `libs/bms` was deleted in the
+   2026-07 restructure (#179) and `libs/mission` is the one BMS parser.)*
 
 ## Consequences
 

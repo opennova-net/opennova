@@ -6,7 +6,7 @@ Status: accepted (branch `unified-edit-history`). Supersedes the "main-body skel
 ## Context
 
 ADR 0006 unified the mission runtime + present pass but left the largest seam open: the main-body
-skeletal runtime did not exist. `libs/bad` + `libs/adm` were parse-only, `NovaObjectData` dropped the
+skeletal runtime did not exist. `libs/bad` + `libs/adm` (since folded into `libs/anim`) were parse-only, `NovaObjectData` dropped the
 `.3di` skin weights, no `Skeleton3D`/`Skin` was ever built, and `mission_present_pass.gd::apply_body_anim`
 was a stub, so skinned organics (infantry) rendered frozen at their `.3di` rest pose. This ADR records
 building that runtime and the IDA fidelity grill against `Jointops.exe`.
@@ -19,7 +19,8 @@ chain is `BoneFile_Load @0x40fff0` â†’ `BoneAnim_FindKeyframeAtTime @0x410220` â
 
 ## Decision
 
-**Libs-first split.** Portable `libs/anim` (`opennova_anim`, depends on `opennova_bad` + `opennova_adm`)
+**Libs-first split.** Portable `libs/anim` (`opennova_anim`, depends on `opennova_bad` + `opennova_io`; the
+separate `opennova_adm` target was folded into `libs/anim` in the 2026-07 restructure)
 samples `.bad` clips into per-bone local transforms in engine-native (Y-up) space. `NovaSkeletalAnim`
 (godot-cpp `Resource`) loads `.adm` + `.bad` over the VFS, builds the bind-pose bones, resolves AI body-anim
 slots to clip keys, and exposes `eval_pose(key, seconds)`. `NovaObjectModel` builds the `Skeleton3D` + a

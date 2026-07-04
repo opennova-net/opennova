@@ -28,6 +28,7 @@ compass (D-HUD-1); the design space is a fixed 1024x768
 bitmap fonts via `NovaFntResource`. The weapon-coupled elements (ammo, weapon
 name, dynamic crosshair spread) and the top-down radar are follow-ups.
 
-To register it the shell needs one row in `editor_workstation.gd`
-(`_workspace_defs()`), a `Workspace` enum entry, a `preload`, and the `hud` icon
-in `editor/ui/icons/` — see [the framework README](../README.md).
+The workspace is registered in the shell — a `WorkspaceDef` row in
+`editor_workstation.gd` (`_workspace_defs()`), the `Workspace.HUD` enum entry, and
+the `hud` icon in `editor/ui/icons/` — making it the eleventh workspace; see
+[the framework README](../README.md) for how registration works.

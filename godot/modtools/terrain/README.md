@@ -39,8 +39,8 @@ config plus its binary assets; Export bakes the runtime terrain.
 A multi-workflow workspace (see the framework in [`../README.md`](../README.md)).
 The adapter [`terrain_workspace.gd`](terrain_workspace.gd)
 declares the five workflows in `_build_inspector_defs()` and opts into a 3D
-viewport, the asset dock, and the in-world tile gizmo. (The Sculpt inspector is
-code-first; the others are scene-backed while the terrain port is in progress.)
+viewport, the asset dock, and the in-world tile gizmo. (All five inspectors are
+code-first under `ui/inspectors/`.)
 
 | File | Role |
 |---|---|
