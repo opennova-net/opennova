@@ -47,6 +47,16 @@ jobs:
         shell: bash
         run: python -m pip install --upgrade uv
 
+      # Maturity-program guards (docs/maturity-program.md, STD-1). Soft mode:
+      # the ratchet reports drift against scripts/lint/maturity_baseline.json
+      # without failing; the Wave-1/Wave-2 flips add --enforce here. The
+      # diff-scoped lint self-skips on this shallow clone and runs locally.
+      - name: Maturity ratchet (soft mode)
+        shell: bash
+        run: |
+          python scripts/lint/ratchet_counts.py
+          python scripts/lint/maturity_lint.py
+
       - name: Build and test
         shell: bash
         env:

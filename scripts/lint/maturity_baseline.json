@@ -1,0 +1,20 @@
+{
+  "citation_allowlist_libs": [
+    "bfc1",
+    "gameprofile",
+    "io",
+    "oned_edit",
+    "refs",
+    "resource_index",
+    "scr",
+    "vfs"
+  ],
+  "counters": {
+    "libs_uncited_src_files": 88,
+    "test_private_pokes": 1319
+  },
+  "dict_contract_allowlist": [
+    "to_drag_data",
+    "from_drag_data"
+  ]
+}
