@@ -51,11 +51,15 @@ jobs:
       # the ratchet reports drift against scripts/lint/maturity_baseline.json
       # without failing; the Wave-1/Wave-2 flips add --enforce here. The
       # diff-scoped lint self-skips on this shallow clone and runs locally.
+      # The link-graph check (LIBS-1, ADR 0020) has no configured build tree
+      # at this point in the job, so it walks the CMake files transitively;
+      # local runs against build/ use `cmake --graphviz` ground truth.
       - name: Maturity ratchet (soft mode)
         shell: bash
         run: |
           python scripts/lint/ratchet_counts.py
           python scripts/lint/maturity_lint.py
+          python scripts/lint/link_graph_check.py
 
       - name: Build and test
         shell: bash

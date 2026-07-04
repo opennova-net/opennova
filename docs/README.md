@@ -51,6 +51,7 @@ behavior is summarized and cited.
 | [0017](adr/0017-typed-records-named-constants.md) | Contracts are typed records, not dictionaries; constants are named, not magic |
 | [0018](adr/0018-public-api-testability.md) | Tests exercise public seams; a test that needs a private is an API bug report |
 | [0019](adr/0019-npwire-game-wire-lib.md) | libs/npwire is the game wire protocol lib; matchmaking (novaworld) sits on it, direction npwire → napi/novacrypto |
+| [0020](adr/0020-world-terrain-query-seam.md) | libs/terrain_query is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
 
 ## RE records by domain
 

@@ -1,0 +1,36 @@
+{
+  "forbidden": [
+    {
+      "reason": "world->terrain seam (ADR 0020): script/mission/net libs consume terrain through the opennova_terrain_query leaf only, never the terrain-format stack",
+      "from": [
+        "opennova_wac",
+        "opennova_mission",
+        "opennova_mission_format",
+        "opennova_netsim",
+        "opennova_npruntime",
+        "opennova_npwire",
+        "opennova_novaworld",
+        "opennova_novaworld_session",
+        "opennova_novaworld_gate",
+        "opennova_novaworld_service"
+      ],
+      "to": [
+        "opennova_terrain",
+        "opennova_cpt",
+        "opennova_til",
+        "opennova_trn",
+        "opennova_tpj",
+        "opennova_foliage"
+      ]
+    },
+    {
+      "reason": "the game wire lib never links persistence (ADR 0019: sqlite belongs to the novaworld service leg alone)",
+      "from": [
+        "opennova_npwire"
+      ],
+      "to": [
+        "opennova_sqlite"
+      ]
+    }
+  ]
+}

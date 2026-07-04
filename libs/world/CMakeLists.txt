@@ -20,9 +20,11 @@ target_include_directories(opennova_world
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# The seam (ADR 0020): world consumes only the terrain_query leaf — the
+# TerrainHeightField POD + height_field_* samplers — never the format stack.
 target_link_libraries(opennova_world
     PUBLIC
-        opennova_terrain
+        opennova_terrain_query
 )
 
 target_compile_features(opennova_world PUBLIC cxx_std_17)

@@ -225,7 +225,7 @@ public:
 	// Shared by runtime NovaFoliageDispatcher wiring and editor paint previews
 	// so the world->sector->source mapping lives in exactly one place.
 	int get_foliage_index_world(float world_x, float world_z) const;
-	// Editor world->atlas coordinate transforms (libs/terrain/coords.h). The
+	// Editor world->atlas coordinate transforms (libs/terrain_query/coords.h). The
 	// editor-mode guards (bounds-reject, sector-id clamp to [0,4], local clamp to
 	// [0, 512-0.001]) reproduce EditorTerrainMesh's GDScript originals so the
 	// editor brush/eyedropper paths share the runtime sampler's implementation.

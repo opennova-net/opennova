@@ -5,7 +5,6 @@ add_library(opennova_terrain STATIC
     src/cdep_constraint.cpp
     src/cpt_export.cpp
     src/depthmap.cpp
-    src/height_field.cpp
     src/lod.cpp
     src/lighting.cpp
     src/mesh_data.cpp
@@ -23,10 +22,13 @@ target_include_directories(opennova_terrain
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# height_field/coords live in the terrain_query leaf (ADR 0020); the PUBLIC
+# link keeps this lib's consumers compiling unchanged (<terrain/...> includes).
 target_link_libraries(opennova_terrain
     PUBLIC
         opennova_cpt
         opennova_pcx
+        opennova_terrain_query
         opennova_tpj
         opennova_trn
 )

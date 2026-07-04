@@ -35,7 +35,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| NET-2 npwire extraction | (this train) | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
+| LIBS-1 world→terrain seam | (this train) | libs/terrain_query query leaf + the permanent forbidden-edge check (link_graph_check.py); ADR 0020 |
+| NET-2 npwire extraction | 46cd0ac4 | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
 | GOV-1/2/3 bootstrap docs | 4274cfdf | umbrella + vocabulary + ADRs 0015–0018 |
 
 ## Tracks
@@ -116,12 +117,13 @@ what confuses.
 Background finding: 44 libs is fine — one-lib-per-format is the tracked
 rule. The real issues are one heavy edge and two families.
 
-- **LIBS-1** (M/L) the **world→terrain seam**: `libs/world` consumes a
-  height/collision interface; `libs/terrain` provides the implementation;
-  `wac`/`mission`/net libs stop dragging the terrain-format stack
-  (cpt/til/trn/tpj/foliage) through their link closure. A permanent
-  link-graph assertion script (forbidden-edge check) makes the cut stick.
-  Runs AFTER NET-2 so link topology churns once.
+- **LIBS-1** (M/L) the **world→terrain seam** — DONE (ADR 0020):
+  `libs/terrain_query` (height_field + coords, zero deps) is the query
+  leaf `libs/world` links; `libs/terrain` sits on it; `wac`/`mission`/net
+  closures dropped the terrain-format stack (cpt/til/trn/tpj/foliage);
+  `scripts/lint/link_graph_check.py` (transitive-closure forbidden-edge
+  check, soft mode in CI) makes the cut permanent. Ran AFTER NET-2 so
+  link topology churned once.
 - **LIBS-2** (S+M) family topology ADR + execution: affirm
   one-lib-per-format; the terrain and audio families become CMake
   link-interface groups (`opennova_terrain_family`, `opennova_audio_family`)

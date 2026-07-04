@@ -3,6 +3,7 @@
 // per-state behaviors route to not_yet_ported until their phase lands.
 #include "world/ai.h"
 
+#include "terrain/height_field.h"
 #include "world/body_anim.h"
 #include "world/vehicle_motor.h"
 #include "world/world.h"

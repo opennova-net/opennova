@@ -29,10 +29,13 @@
 #include <cstring>
 #include <vector>
 
-#include "terrain/height_field.h"
 #include "world/entity.h"
 #include "world/infantry.h"
 #include "world/world.h"
+
+namespace opennova::terrain {
+struct TerrainHeightField;
+}
 
 namespace opennova::world {
 
