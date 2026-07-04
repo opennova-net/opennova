@@ -55,6 +55,7 @@ func _save_resource(path: String) -> Error:
 func create_new() -> Error:
 	_replace_resource(_make_new_resource())
 	set_current_path("")
+	clear_history()
 	mark_clean()
 	state_changed.emit()
 	resource_loaded.emit(resource)
@@ -67,6 +68,7 @@ func adopt_loaded(loaded, display_path: String) -> void:
 	_replace_resource(loaded)
 	set_current_path(display_path)
 	remember_open_path(display_path)
+	clear_history()
 	mark_clean()
 	state_changed.emit()
 	resource_loaded.emit(resource)
@@ -165,3 +167,93 @@ func get_last_open_dir() -> String:
 
 func get_last_save_dir() -> String:
 	return _last_save_dir
+
+
+# --- Snapshot edit history (opt-in) --------------------------------------------
+# The EditorDocument tier, verbatim, over the shared SnapshotEditSession
+# (framework/snapshot_edit_session.gd): a subclass opts in by overriding
+# _snapshot()/_apply_snapshot() (e.g. text snapshots via to_text/from_text) and
+# emits its domain signals from _history_applied(kind). Documents that don't
+# opt in (fonts, mnu) leave _snapshot() null and every method stays inert.
+# create_new()/adopt_loaded() drop the history with the old document.
+
+var _edit_session: SnapshotEditSession = null
+
+
+# The document snapshot, or null when no document is loaded / the subclass does
+# not opt in (every history method is then inert).
+func _snapshot() -> Variant:
+	return null
+
+
+func _apply_snapshot(_snap: Variant) -> void:
+	pass
+
+
+# Post-change notification: "commit" (a session recorded a step), "step" (a
+# bracketed structural mutation recorded), "undo" / "redo" (the document was
+# swapped). Subclasses emit their edited/structure_changed/state signals here.
+func _history_applied(_kind: String) -> void:
+	pass
+
+
+func _history_limit() -> int:
+	return 100
+
+
+func _session() -> SnapshotEditSession:
+	if _edit_session == null:
+		_edit_session = SnapshotEditSession.new(self, _history_limit())
+	return _edit_session
+
+
+## Open an editing burst: the next commit_edit() folds every change in between
+## into a single undo step. Idempotent while a session is open.
+func begin_edit() -> void:
+	_session().begin_edit()
+
+
+## Close the burst; records one step iff the document actually changed
+## (equal-gated in the core), marking dirty and notifying on a real change.
+func commit_edit() -> void:
+	_session().commit_edit()
+
+
+func flush_edit() -> void:
+	_session().flush_edit()
+
+
+## Record the CURRENT document as one undo step before a structural mutation
+## the caller applies itself (silent: the caller emits its own signals after
+## mutating). Clears redo.
+func record_undo_step() -> void:
+	_session().record_undo_step()
+
+
+## Bracket a single structural mutation as one equal-gated undo step, marking
+## dirty and notifying ("step") only when it really changed the document.
+func push_undo_step(mutation: Callable) -> void:
+	_session().push_undo_step(mutation)
+
+
+func can_undo() -> bool:
+	return _edit_session != null and _edit_session.can_undo()
+
+
+func can_redo() -> bool:
+	return _edit_session != null and _edit_session.can_redo()
+
+
+func undo() -> void:
+	_session().undo()
+
+
+func redo() -> void:
+	_session().redo()
+
+
+## Drop the whole history (open / new / save-as flows). The dirty flag is
+## untouched; mark_clean() runs separately when the baseline moves.
+func clear_history() -> void:
+	if _edit_session != null:
+		_edit_session.clear()
