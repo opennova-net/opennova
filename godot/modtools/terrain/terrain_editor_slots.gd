@@ -88,7 +88,7 @@ const SLOT_DEFS := {
 	"detailmapdist": {
 		"label": "Shading 1 / far",
 		"dialog_title": "Load Bump Layer 1 (far)",
-		"tooltip": "Layer-1 per-material bump response at far distance. Crossfaded with the near map by camera distance (original game bakes this as deep-mipmap content).",
+		"tooltip": "Layer-1 per-material bump response at far distance. Crossfaded with the near map by camera distance (the original game bakes this into the far-distance texture detail).",
 		"trn_key": "detailmapdist",
 		"uniform": "u_detailmapdist",
 		"suffix": "_dmd.tga",

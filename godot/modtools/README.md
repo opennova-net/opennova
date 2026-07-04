@@ -14,20 +14,20 @@ per workspace.
 
 ## Workspaces
 
-The left nav groups workspaces into three categories. The order and grouping come
+The left nav groups workspaces into four categories. The order and grouping come
 from `EditorWorkstation._workspace_defs()` in
 [`editor/editor_workstation.gd`](editor/editor_workstation.gd).
 
 | Category | Workspace | Edits | Docs |
 |---|---|---|---|
+| World | Mission | missions: entities, waypoints, zones, BMS events, play in-editor (`.bms`) | [mission/](mission/README.md) |
 | World | Terrain | heightmaps, surface paint, foliage, tiles, layout (`.trn` / `.cpt` / `.til`) | [terrain/](terrain/README.md) |
 | World | Object | 3D object projects (`.3di` / `.3dp`) | [object/](object/README.md) |
-| World | Mission | missions: entities, waypoints, zones, BMS events, play in-editor (`.bms`) | [mission/](mission/README.md) |
 | Interface | Fonts | bitmap fonts (`.fnt`) | [fonts/](fonts/README.md) |
 | Interface | Credits | rolling credits (`.kda`) | [credits/](credits/README.md) |
 | Interface | Strings | localized string tables (RTXT) | [strings/](strings/README.md) |
-| Interface | Menu | menu screens (`.mnu`) | [mnu/](mnu/README.md) |
-| Interface | Menu Styles | the shared menu stylesheet (`.mns`): named colors, fonts, pictures | [mnu/](mnu/README.md) |
+| Interface | Menu | menu screens (`.mnu`) and the shared menu stylesheet (`.mns`): named colors, fonts, pictures | [mnu/](mnu/README.md) |
+| Interface | HUD | in-game HUD layout preview (`hudpos.def`, read-only) | [hud/](hud/README.md) |
 | Audio | Music | interactive music (`.sbf` + `.bin` script) | [music/](music/README.md) |
 | Atmosphere | Sound | sound profiles (`.lwf`) | [sound/](sound/README.md) |
 | Atmosphere | Environment | weather, lighting, time of day, sky/celestial (`.env`) | [environment/](environment/README.md) |
@@ -68,7 +68,7 @@ inspectors are declared as typed registry rows:
    the contract in `framework/editor_workspace.gd`; `editor/fonts_workspace.gd`
    is a minimal single-pane example).
 2. Add a `Workspace` enum entry in `editor/editor_workstation.gd`.
-3. Append one `WorkspaceDef.make(Workspace.X, XWorkspaceAdapter, is_popup, &"Category")`
+3. Append one `WorkspaceDef.make(Workspace.X, XWorkspaceAdapter, is_popup, &"Category", &"icon-id")`
    row to `_workspace_defs()`.
 
 ### Add a workflow inspector
@@ -77,7 +77,7 @@ inspectors are declared as typed registry rows:
 2. Append one `InspectorDef.make(id, "Label", "Tooltip", Script)` row to the
    workspace's `_build_inspector_defs()`.
 
-Single-pane workspaces (Fonts, Credits, Strings, Sound, Menus, Menu Styles,
+Single-pane workspaces (Fonts, Credits, Strings, Sound, Menu, HUD,
 Environment) skip the workflow rail and override `build_inspector(host)` instead.
 
 ## Folder map
@@ -86,7 +86,7 @@ Environment) skip the workflow rail and override `build_inspector(host)` instead
 |---|---|
 | `editor/` | the app root (`editor_app.gd` — boot wiring, window sizing, MCP service), the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog, plus the Terrain, Environment, Fonts, Credits, Mission, and Music adapters |
 | `framework/` | base classes and typed registries (`EditorWorkspace`, `WorkspaceDef`, `InspectorDef`) |
-| `terrain/`, `object/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `music/`, `sound/`, `environment/` | one workspace module each (editor model, UI, inspectors) |
+| `terrain/`, `object/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `sound/`, `environment/` | one workspace module each (editor model, UI, inspectors) |
 | `mcp/` | the embedded agent server's ONED side: built-in tool catalog, asset describe serializers, and the service that boots `godot/engine/mcp/` |
 | `tools/` | `screenshot_capture` automation helper (not a workspace) |
 

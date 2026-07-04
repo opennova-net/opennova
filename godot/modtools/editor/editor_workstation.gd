@@ -355,7 +355,7 @@ func _process(_delta: float) -> void:
 
 func _workspace_defs() -> Array:
 	# Categories group the nav list; array order is the within-category order and
-	# the order categories first appear (World, Interface, Atmosphere).
+	# the order categories first appear (World, Interface, Audio, Atmosphere).
 	return [
 		WorkspaceDef.make(Workspace.MISSION, MissionWorkspaceAdapter, false, &"World", &"mission"),
 		WorkspaceDef.make(Workspace.TERRAIN, TerrainWorkspaceAdapter, false, &"World", &"terrain"),
