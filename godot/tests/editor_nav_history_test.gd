@@ -183,7 +183,7 @@ func test_back_to_a_dead_entry_drops_it_and_stays_put() -> void:
 	assert_eq(shell.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION,
 		"a dead destination must not move the user")
 	assert_false(shell._nav_history.can_go_back(), "the dead entry should be dropped")
-	assert_string_contains(shell._message_text, "Could not open")
+	assert_string_contains(shell._status._message_text, "Could not open")
 
 
 func test_alt_arrows_and_mouse_thumb_buttons_navigate() -> void:
