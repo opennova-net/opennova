@@ -23,7 +23,8 @@ behavior is summarized and cited.
 | [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
 | [`env/env-honored-matrix.md`](env/env-honored-matrix.md) | Which `.env` fields each renderer consumer actually honors: live control vs parsed-but-deferred, per field |
 | [`oned/editor-runtime-parity.md`](oned/editor-runtime-parity.md) | How ONED and the game runtime share rendering and simulation (the `edit_mode` runtime-node pattern, sampler seams, the one mission runtime) |
-| [`oned/editor-layer-program.md`](oned/editor-layer-program.md) | The editor-layer refactor program: landed architecture phases (EditorApp root, shell decomposition) and the remaining undo/shortcuts/widgets/theme phases with per-slice gates |
+| [`oned/editor-layer-program.md`](oned/editor-layer-program.md) | The editor-layer refactor program (complete 2026-07-04): EditorApp root, shell decomposition, undo everywhere, global shortcuts, shared widgets/theme/vocabulary, with per-slice gates |
+| [`oned/workspace-maturity-program.md`](oned/workspace-maturity-program.md) | The workspace maturity program: the R/W/E/G capability bar, the verified per-workspace matrix, foundation services (world-context preview, engine text, override launcher), per-workspace phases, and the RE ledger gating them |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
 
 ## Decision records
