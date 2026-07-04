@@ -80,3 +80,26 @@ in gitignored `.scratch/`, full stop.
 - The one improvement worth considering later: commit a trimmed, sanitized
   `.hexcap` so `nw_ingame_histogram`/`nw_ingame_pool_records` exercise data in CI.
   User-gated; sanitization review required.
+
+## The two-tier wire-compat gate (maturity program NET-0)
+
+The retail golden diff is env-gated and therefore skip-passes-as-green in CI — a
+net-touching change can look green while silently altering wire bytes. The
+maturity program (docs/maturity-program.md) closes that with two tiers:
+
+- **Tier 1 — default CI, cannot skip.** `nw_codec_identity` pins the EXACT bytes
+  of every in-match encoder against committed FNV-1a64 vectors over a synthetic
+  corpus (our bytes only, so it is committable and unconditional; it also runs in
+  the Linux net job). It exists because encode↔decode round-trips cannot see a
+  SYMMETRIC codec change — both sides edited together stay field-identical while
+  the wire moves. Updating a vector is a wire-format change: it requires the
+  [orig] witness or a D-NET entry in the same commit, never a bare regeneration
+  (`NW_CODEC_DUMP=1` prints the replacement table). A committed
+  opennova↔opennova loopback self-capture driven through `nw_golden_diff`'s
+  self mode is the planned second tier-1 leg (NET-0b).
+- **Tier 2 — local, mandatory protocol for net-touching PRs.** Run the retail
+  golden diff (`NW_GOLDEN_OURS` + the `.scratch/golden/` gameplay capture) and
+  the npruntime golden joins against local retail data, and **attest the run in
+  the PR description** (the commands + PASS lines). A net-touching PR without
+  the attestation is not reviewable. This is the standing substitute for the
+  un-CI-able retail gates above.
