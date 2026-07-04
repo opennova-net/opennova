@@ -90,6 +90,57 @@ and the present pass renders the locally-decoded result, so SP, co-op, and multi
 share one replication path (only the transport differs). See ADR 0011.
 _Avoid_: standalone server, dedicated server (those have no local player)
 
+**In-match / Matchmaking**:
+The two network protocol domains. **In-match** is the 62 Hz game session between a host
+and its clients (the wire codec + replication runtime). **Matchmaking** is everything that
+gets players INTO a match: gate, browser, accounts, NAT rendezvous — the NovaWorld
+service's domain. Code and libs are named by their domain, never bare "net".
+_Avoid_: unqualified "net code", lobby (for either)
+
+**Wire codec / Net runtime / Net seam**:
+The three in-match layers: the **wire codec** encodes/decodes the byte stream (the message
+catalog is its single source of truth, ADR 0013); the **net runtime** (`libs/npruntime`)
+runs the 62 Hz host/client session over it; the **net seam** (`libs/netsim`) is where the
+world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
+_Avoid_: "the netcode" (say which layer)
+
+## Products & modes
+
+**Product**:
+A shipped executable. There are exactly two: **`opennova.exe`** (the game) and
+**`opennova-modtools.exe`** (ONED). Everything else that builds from this repo is a tool
+or a service, not a product (ADR 0015).
+_Avoid_: app (ambiguous), the runtime (as a product name)
+
+**Serve mode**:
+`opennova.exe` hosting a match without being a player: the server-options menu path,
+runnable windowed or `--headless`. A mode of the game product, never a separate binary,
+riding the one in-match seam (ADR 0015).
+_Avoid_: dedicated server product, server exe, opennova-server
+
+**Title**:
+A NovaLogic game identity (JO, DFX2, BHD...) — near-identical engine skins over different
+data and configuration. OpenNova currently ships title-agnostic; per-title products are a
+recorded future option, so new code must not hardcode title identity where a named
+constant or config read is equally easy (ADR 0015).
+_Avoid_: game (when you mean the identity, not the running program)
+
+**Required resources**:
+The resource set the engine hard-requires by name at boot (menu set, game strings, music
+banks, HUD layout, defs, default world files...). The witnessed enumeration is
+`docs/required-resources.md` (in progress); the engine manifest derived from it is what
+boot validation and ONED diagnostics consume, and it defines what a person starts with to
+make a new game.
+_Avoid_: core assets, base game files
+
+**Promote**:
+Reserved for `mission::promote_mission` — spawning a parsed mission into the live world
+(entities, AI brains, nav), the IDA-cited spawn path shared by the game, play-in-editor,
+and the dev host. Other historical uses of the word (old-title format upliftment, 3DI→IR
+normalization, fixture curation, code relocation) should be phrased as *migrate*,
+*normalize*, *whitelist*, and *move* respectively.
+_Avoid_: promote (for anything but the mission→world spawn)
+
 ## Editor & Runtime
 
 **ONED**:

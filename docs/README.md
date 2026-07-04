@@ -25,6 +25,7 @@ behavior is summarized and cited.
 | [`oned/editor-runtime-parity.md`](oned/editor-runtime-parity.md) | How ONED and the game runtime share rendering and simulation (the `edit_mode` runtime-node pattern, sampler seams, the one mission runtime) |
 | [`oned/editor-layer-program.md`](oned/editor-layer-program.md) | The editor-layer refactor program: landed architecture phases (EditorApp root, shell decomposition) and the remaining undo/shortcuts/widgets/theme phases with per-slice gates |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
+| [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard |
 
 ## Decision records
 
@@ -44,6 +45,10 @@ behavior is summarized and cited.
 | [0012](adr/0012-player-is-host-side-server-entity.md) | The player is a host-side server entity driven by a wire-shaped (C2S 0x0C) intent |
 | [0013](adr/0013-consolidated-net-core.md) | Consolidated in-match net core: one message registry + capture→golden-diff harness, EntityRegistry as the one server-state authority, one host bring-up helper |
 | [0014](adr/0014-mns-lossless-document-model.md) | MNS: stylesheets parse into a lossless document; the flat table is its flatten() view |
+| [0015](adr/0015-two-products-serve-mode.md) | Two shipped products; the server is a serve MODE of the game exe, not a product |
+| [0016](adr/0016-engine-editor-boundary.md) | The editor is a detachable layer over public engine APIs; engine behavior does not live in GDScript |
+| [0017](adr/0017-typed-records-named-constants.md) | Contracts are typed records, not dictionaries; constants are named, not magic |
+| [0018](adr/0018-public-api-testability.md) | Tests exercise public seams; a test that needs a private is an API bug report |
 
 ## RE records by domain
 

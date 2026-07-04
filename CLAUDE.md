@@ -111,6 +111,11 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Deeper docs
 
+- [docs/maturity-program.md](docs/maturity-program.md) — the ACTIVE maturity program
+  (pre-reimplementation rearchitecture): tracks, waves, freeze policy, gates. Check the
+  freeze status before starting new reimplementation work; ADRs 0015–0018 carry its
+  standing rules (two products/serve mode, engine/editor boundary, typed records,
+  public-API testability).
 - [.agents/README.md](.agents/README.md) — agent runbooks for networking work:
   architecture guardrails, retail interop, IDA witness rules, debugging, and task templates.
 - [docs/README.md](docs/README.md) — documentation index: ADRs, RE records by domain.
