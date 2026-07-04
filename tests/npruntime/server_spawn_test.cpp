@@ -163,6 +163,92 @@ int main() {
 		if (!expect(dcbs.size() == 20, "twenty distinct ownerConnectionId(dcb) — the player identity")) return 1;
 	}
 
+	// --- D-NET-146: the character stamp — per-side CU vars picked by ASSIGNED team. ---
+	// A team-based session (golden ASH_I5A gameType 0x10010): the host's own player takes the
+	// local-path default animSlot 1 [orig: Player_InitPlayer @0x4e15f0 <- sub_57AE60 default 1];
+	// the team-2 joiner takes its uploaded SIDE-B values (VCB/CI1) and its playerClass from the
+	// TR pick [orig: Server_PlayerAdd @0x51cbc0 @0x51cff7/@0x51d0b1]. The 0x0C organic batch
+	// echoes entity+0x374 / entity+0x15C raw [orig: serialize_entity_states_to_buffer @0x5030a0].
+	{
+		w::World cw;
+		w::AiSystem cai;
+		make_world(cw, cai);
+
+		ns::LoopbackChannel cloop;
+		np::NapiNPServerCtx cctx;
+		np::GameConfig settings;
+		settings.max_players = 8;
+		settings.game_type = 0x10010; // golden ASH_I5A session gameType (bit 0x10000 = team-based)
+		np::test::bring_up_host(cctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
+		                        /*host_key=*/0, &cloop, settings);
+		cctx.world = &cw;
+
+		// Host own player first (team 1 by autobalance).
+		np::Server_InitNewRoundState(cctx);
+		if (!expect(np::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: host spawned")) return 1;
+
+		// The joiner: golden CU var set (side A 1/0x0200 class 8, side B 4/0x8207 class 5, TR auto).
+		{
+			np::NapiNPConnection joiner;
+			joiner.type = 1;
+			joiner.connection_id = np::kFirstJoinerDcb;
+			joiner.self_id_seen = true;
+			joiner.phase = np::ConnectionPhase::Joined;
+			joiner.char_vars.char_id[0] = 0x0200;
+			joiner.char_vars.char_id[1] = 0x8207;
+			joiner.char_vars.team_request = 0xFF; // auto -> the class pick takes side B (CTB)
+			joiner.char_vars.char_class[0] = 8;
+			joiner.char_vars.char_class[1] = 5;
+			joiner.char_vars.avatar[0] = 1;
+			joiner.char_vars.avatar[1] = 4;
+			cctx.np_protocol.connection_list.push_back(joiner);
+		}
+		if (!expect(np::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: joiner spawned")) return 1;
+
+		const w::Entity *chost = pool0_player(cw, np::kHostPlayerDcb);
+		const w::Entity *cjoin = pool0_player(cw, np::kFirstJoinerDcb);
+		if (!expect(chost != nullptr && cjoin != nullptr, "char-stamp: both players resolvable")) return 1;
+		if (!expect(chost->team == 1 && cjoin->team == 2, "char-stamp: host team 1, joiner team 2")) return 1;
+		if (!expect(chost->anim_slot == 1, "host animSlot = 1 (the local-path profile default)")) return 1;
+		if (!expect(cjoin->anim_slot == 4, "team-2 joiner animSlot = side-B avatar (VCB=4, golden)")) return 1;
+		if (!expect(cjoin->minimap_net_id == 0x8207, "team-2 joiner NetId = side-B char id (CI1=0x8207)")) return 1;
+		if (!expect(cjoin->player_class == 5, "joiner playerClass = TR-picked CTB (in [5,9], kept)")) return 1;
+		if (!expect(cjoin->net_id == 0, "the SSN stays 0 (D-NET-112) — minimap_net_id is a separate field")) return 1;
+
+		const opennova::OrganicSpawnBatch cbatch = ns::build_pool0_organic_batch(cw);
+		bool host_rec_ok = false, join_rec_ok = false;
+		for (const opennova::OrganicSpawnRecord &r : cbatch.records) {
+			if (r.entity_flags == np::kHostPlayerDcb)
+				host_rec_ok = (r.anim_slot == 1 && r.net_id == 0x0200); // shim fallback == golden host id
+			if (r.entity_flags == np::kFirstJoinerDcb)
+				join_rec_ok = (r.anim_slot == 4 && r.net_id == 0x8207 && r.player_class == 5);
+		}
+		if (!expect(host_rec_ok, "0x0C host record: animSlot 1 + netId 0x0200 (golden)")) return 1;
+		if (!expect(join_rec_ok, "0x0C joiner record: animSlot 4 + netId 0x8207 + class 5 (golden shape)")) return 1;
+
+		// A var-less joiner (no CU tags): animSlot stays the retail raw 0, class defaults to 8,
+		// and the netId falls back to the D-NET-137 encoding shim (nonzero).
+		{
+			np::NapiNPConnection bare;
+			bare.type = 1;
+			bare.connection_id = np::kFirstJoinerDcb + 1;
+			bare.self_id_seen = true;
+			bare.phase = np::ConnectionPhase::Joined;
+			cctx.np_protocol.connection_list.push_back(bare);
+		}
+		if (!expect(np::Server_ProcessPendingPlayerSpawns(cctx, cw) == 1, "char-stamp: bare joiner spawned")) return 1;
+		const w::Entity *cbare = pool0_player(cw, np::kFirstJoinerDcb + 1);
+		if (!expect(cbare != nullptr && cbare->anim_slot == 0 && cbare->minimap_net_id == 0,
+		            "var-less joiner: animSlot 0 (tag absent), no char id")) return 1;
+		if (!expect(cbare->player_class == 8, "var-less joiner: playerClass defaults 8 in-session")) return 1;
+		const opennova::OrganicSpawnBatch bbatch = ns::build_pool0_organic_batch(cw);
+		for (const opennova::OrganicSpawnRecord &r : bbatch.records) {
+			if (r.entity_flags == np::kFirstJoinerDcb + 1) {
+				if (!expect(r.net_id != 0, "var-less joiner netId falls back to the encoder shim")) return 1;
+			}
+		}
+	}
+
 	std::printf("OK\n");
 	return 0;
 }

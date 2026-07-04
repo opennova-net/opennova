@@ -19,7 +19,7 @@ double bam_byte_to_deg(uint8_t hi) { return bam32_to_deg(uint32_t(hi) << 24); }
 // True when a compact record's parent/vehicle handle denotes a real mount (so
 // the decompressed position is vehicle-LOCAL and we can't place it yet). 0xFFFF
 // and the high-nibble sentinel both mean "unmounted" (the engine adds the anchor).
-bool is_mounted_parent(uint16_t parent) {
+bool is_dead_pose_parent(uint16_t parent) {
 	return parent != 0xFFFF && (parent & 0xF000) < 0x5000;
 }
 
@@ -36,7 +36,7 @@ RecKind frame_record_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
 	switch (r.cls) {
 	case EntityClass::Player:
 		cx = r.player.pos_x_compressed; cy = r.player.pos_y_compressed;
-		cz = r.player.pos_z_compressed; parent = r.player.vehicle_handle;
+		cz = r.player.pos_z_compressed; parent = r.player.carrier_handle;
 		yaw_deg = bam_byte_to_deg(r.player.yaw_byte);
 		flags_out = r.player.state_flags;
 		break;
@@ -63,7 +63,7 @@ RecKind frame_record_sample(const FrameUpdateRecord &r, int32_t ax, int32_t ay,
 	const int32_t dx = network_decompress_fixedpoint(cx);
 	const int32_t dy = network_decompress_fixedpoint(cy);
 	const int32_t dz = network_decompress_fixedpoint(cz);
-	if (is_mounted_parent(parent)) {
+	if (is_dead_pose_parent(parent)) {
 		s.x = dx; s.y = dy; s.z = dz; // vehicle-local; world via the parent transform
 		return RecKind::Mounted;
 	}
@@ -411,7 +411,7 @@ ReplayTimeline build_replay_timeline(
 			e.owner_session = m.session; // this entity is the uplink-sender's own player
 			// i16 heading sign-extends << 16 into a 32-bit BAM (§5.10).
 			const double up_yaw = bam32_to_deg(uint32_t(int32_t(up.heading) << 16));
-			if (is_mounted_parent(up.vehicle_handle)) {
+			if (is_dead_pose_parent(up.carrier_handle)) {
 				// The own-player uplink is vehicle-LOCAL when mounted too (§5.10) —
 				// defer to the same parent transform, tagged ClientUplink so the
 				// owner's projected view keeps it.
@@ -419,7 +419,7 @@ ReplayTimeline build_replay_timeline(
 				mr.handle = hdr.handle; mr.type = hdr.item_type_id;
 				mr.frame = m.frame_index;
 				mr.lx = up.pos_x; mr.ly = up.pos_y; mr.lz = up.pos_z;
-				mr.parent = up.vehicle_handle;
+				mr.parent = up.carrier_handle;
 				mr.yaw_deg = up_yaw; mr.has_yaw = true;
 				mr.source = ReplaySampleSource::ClientUplink;
 				b.mounted.push_back(mr);
@@ -477,18 +477,19 @@ ReplayTimeline build_replay_timeline(
 				es.overcast = fu.env.overcast;
 				b.tl.environment.push_back(es);
 			}
-			// Weapon-hit events (0x0A tag==2): impact world pos = decompress + anchor.
-			for (const auto &h : fu.hits) {
+			// Round events (0x0A tag==2): fire ORIGIN world pos = decompress + anchor
+			// (the record is a round-fired event, not an impact — §5.9.1/D-NET-152).
+			for (const auto &re : fu.round_events) {
 				ReplayEvent ev;
 				ev.frame_index = m.frame_index;
 				ev.kind = ReplayEventKind::Hit;
 				ev.has_pos = true;
-				ev.x = network_decompress_fixedpoint(h.pos_x_compressed) + fu.anchor_x;
-				ev.y = network_decompress_fixedpoint(h.pos_y_compressed) + fu.anchor_y;
-				ev.z = network_decompress_fixedpoint(h.pos_z_compressed) + fu.anchor_z;
-				ev.target = h.target_handle;
-				ev.aux = h.weapon_handle;
-				ev.adm_index = h.adm_index;
+				ev.x = network_decompress_fixedpoint(re.pos_x_compressed) + fu.anchor_x;
+				ev.y = network_decompress_fixedpoint(re.pos_y_compressed) + fu.anchor_y;
+				ev.z = network_decompress_fixedpoint(re.pos_z_compressed) + fu.anchor_z;
+				ev.target = re.shooter_handle; // the round's owner (ex "target" — misdecoded)
+				ev.aux = re.target_handle;     // the shooter's claimed target, iff flags&0x40
+				ev.adm_index = re.adm_index;
 				ev.sound = true;
 				b.tl.events.push_back(std::move(ev));
 			}

@@ -105,6 +105,11 @@ bool is_sph_path(const std::string &p) { return ends_with_icase(p, ".sph"); }
 // is shared too: libs/novaworld/wire_capture.h decode_capture_to_messages.
 
 std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
+	// NW_PP_HEXCAP_MAX overrides the per-dump byte cap (witness sessions need whole payloads).
+	if (const char *env = std::getenv("NW_PP_HEXCAP_MAX"); env != nullptr && env[0] != '\0') {
+		const long v = std::strtol(env, nullptr, 10);
+		if (v > 0) cap = static_cast<size_t>(v);
+	}
 	std::string s;
 	char buf[4];
 	for (size_t i = 0; i < n && i < cap; ++i) {
@@ -295,9 +300,10 @@ void print_pool_spawn_record(int index, const PoolSpawnRecord &r) {
 	if (r.spawn_flags & 0x1000)
 		std::printf(" weapType=0x%02x", r.weapon_type_byte);
 	if (r.spawn_flags & 0x2000)
-		std::printf(" health=0x%02x/0x%04x", r.health_byte, r.zone_radius_short);
+		std::printf(" zone=%u rank=%u radius=%u", r.zone_number_rank & 0x1F,
+		            r.zone_number_rank >> 5, r.zone_radius);
 	else if (r.spawn_flags & 0x8000)
-		std::printf(" zoneRadius=0x%04x", r.zone_radius_short);
+		std::printf(" zoneRadius=%u", r.zone_radius);
 	if (r.spawn_flags & 0x4000) std::printf(" diff=0x%02x", r.difficulty_byte);
 	std::printf("\n");
 }
@@ -483,9 +489,9 @@ void print_tag_0f_c2s(const std::vector<uint8_t> &body) {
 void print_tag_04(const std::vector<uint8_t> &body) {
 	SessionSlotConfig s;
 	const bool clean = decode_session_slot_config(body.data(), body.size(), s);
-	std::printf("        [0x04] cfg=%u teamMode=%u maxPlayers=%u trailing=%u "
+	std::printf("        [0x04] cfg=%u mySlot=%u maxPlayers=%u trailing=%u "
 	            "skipped=(0x%08x,0x%08x,0x%08x,0x%08x,0x%08x)%s\n",
-	            s.session_config, s.team_mode, s.max_players, s.trailing,
+	            s.session_config, s.local_player_slot, s.max_players, s.trailing,
 	            s.skipped[0], s.skipped[1], s.skipped[2], s.skipped[3], s.skipped4,
 	            clean ? "" : " DECODE INCOMPLETE");
 }
@@ -541,8 +547,17 @@ void print_static_entity_record(uint16_t slot, const StaticEntityRecord &r) {
 	std::printf("        slot %s type=%s flags=0x%03x pos=(%.1f, %.1f, %.1f)",
 	            handle_str(handle).c_str(), type_str(r.item_type_id).c_str(),
 	            unsigned(r.field_flags), fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z));
+	if (r.field_flags & 0x0008) std::printf(" sect=0x%08x", unsigned(r.section_mask));
 	if (r.field_flags & 0x0010) std::printf(" team=0x%02x", r.team_byte);
-	std::printf(" ammo=0x%02x weap=0x%02x\n", r.ammo_count, r.weapon_byte);
+	// The D-NET-147 building/armory fields (entity+36 Flags / +533 / +532 / +624 / +350).
+	if (r.field_flags & 0x0020) std::printf(" eflags=0x%08x", unsigned(r.entity_flags));
+	if (r.field_flags & 0x0040) std::printf(" refNum=0x%02x", r.bone_a);
+	if (r.field_flags & 0x0080) std::printf(" subType=0x%02x", r.bone_b);
+	if (r.field_flags & 0x0100) std::printf(" score=0x%02x", r.score_flag);
+	std::printf(" ammo=0x%02x weap=0x%02x", r.ammo_count, r.weapon_byte);
+	if (r.weapon_byte != 0 || (r.field_flags & 0x0200))
+		std::printf(" attach=%s", handle_str(r.attach_ref).c_str());
+	std::printf("\n");
 }
 
 void print_tag_10(const std::vector<uint8_t> &body) {
@@ -573,11 +588,13 @@ void print_tag_40(const std::vector<uint8_t> &body) {
 }
 
 void print_player_compact_record(const PlayerCompactRecord &r) {
-	std::printf("            player: vehBone=%u seat=%u vehHdl=%s "
+	// carrier != none => pos is CARRIER-LOCAL compressed + yaw is carrier-relative
+	// (mount if bone/seat set, else the standing-on ground entity; D-NET-151).
+	std::printf("            player: vehBone=%u seat=%u carrier=%s "
 	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%02x pitch=0x%02x "
 	            "input=%u state=0x%02x animState=%u animRatio=%u animDef=%u health=0x%02x\n",
 	            unsigned(r.vehicle_bone), unsigned(r.seat_type),
-	            handle_str(r.vehicle_handle).c_str(),
+	            handle_str(r.carrier_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_byte), unsigned(r.pitch_byte),
@@ -592,8 +609,8 @@ void print_vehicle_compact_record(const VehicleCompactRecord &r) {
 	            handle_str(r.parent_slot_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed), int(r.euler_z),
-	            unsigned(r.flags_byte), r.is_mounted ? "MOUNTED" : "unmounted");
-	if (r.is_mounted) {
+	            unsigned(r.flags_byte), r.is_dead_pose ? "DEAD-POSE" : "live");
+	if (r.is_dead_pose) {
 		std::printf(" euler=(x=%d y=%d)\n", int(r.euler_x), int(r.euler_y));
 	} else {
 		std::printf(" health=%u weap=(x=0x%04x aimY=0x%04x aimZ=0x%04x hdgBAM=%d)\n",
@@ -617,23 +634,28 @@ void print_infantry_compact_record(const InfantryCompactRecord &r) {
 }
 
 void print_player_extended_uplink(const PlayerExtendedUplink &r) {
-	std::printf("            extended: vehHdl=%s pos=(%.1f, %.1f, %.1f) "
-	            "hdg=%d pitch=%d animLow=0x%02x flagsXor=0x%02x "
-	            "animDef=(%u,%u,%u) stat=(0x%02x,0x%02x)\n",
-	            handle_str(r.vehicle_handle).c_str(),
+	// carrier != none => pos/hdg are CARRIER-LOCAL (ground entity — any pool; D-NET-151).
+	std::printf("            extended: carrier=%s pos=(%.1f, %.1f, %.1f) "
+	            "hdg=%d pitch=%d ac=0x%02x input=0x%02x flags=0x%02x "
+	            "analog=(%u,%u,%u) adm=0x%02x fps=(%u,%u)\n",
+	            handle_str(r.carrier_handle).c_str(),
 	            fp16(r.pos_x), fp16(r.pos_y), fp16(r.pos_z),
 	            int(r.heading), int(r.pitch),
-	            unsigned(r.move_input_byte), unsigned(r.flags_xor),
-	            unsigned(r.anim_def_1), unsigned(r.anim_def_2),
-	            unsigned(r.anim_def_3),
+	            unsigned(r.anticheat_flags),
+	            unsigned(r.move_input_byte), unsigned(r.state_flags_byte),
+	            unsigned(r.analog_x), unsigned(r.analog_y),
+	            unsigned(r.analog_z),
+	            unsigned(r.equipped_adm_index),
 	            unsigned(r.stat_byte_0), unsigned(r.stat_byte_1));
-	std::printf("            weapons: "
-	            "(id=0x%04x ctr=%u) (id=0x%04x ctr=%u) "
-	            "(id=0x%04x ctr=%u) (id=0x%04x ctr=%u)\n",
-	            unsigned(r.weapon_id_0), unsigned(r.fire_counter_0),
-	            unsigned(r.weapon_id_1), unsigned(r.fire_counter_1),
-	            unsigned(r.weapon_id_2), unsigned(r.fire_counter_2),
-	            unsigned(r.weapon_id_3), unsigned(r.fire_counter_3));
+	// The client's top-4 entity-INTEREST pairs (Server_BuildEntityPriorityListForPlayer,
+	// op3 @0x4c1be9) — the old "weapons (id,ctr)" labels were a decode-era misread.
+	std::printf("            prio: "
+	            "(hdl=0x%04x score=%u) (hdl=0x%04x score=%u) "
+	            "(hdl=0x%04x score=%u) (hdl=0x%04x score=%u)\n",
+	            unsigned(r.priority_handle_0), unsigned(r.priority_score_0),
+	            unsigned(r.priority_handle_1), unsigned(r.priority_score_1),
+	            unsigned(r.priority_handle_2), unsigned(r.priority_score_2),
+	            unsigned(r.priority_handle_3), unsigned(r.priority_score_3));
 }
 
 // C2S 0x0C — joiner per-frame uplink. Parses the 5-byte sub-header and
@@ -731,17 +753,17 @@ void print_tag_21_c2s(const std::vector<uint8_t> &body) {
 	std::printf("\n");
 }
 
-void print_weapon_hit_record(const WeaponHitRecord &r) {
-	std::printf("            weapon-hit: flags=0x%02x adm=%u sub=%u target=%s "
-	            "pos=(0x%04x,0x%04x,0x%04x) yaw=0x%04x pitch=0x%04x dmgExtra=0x%04x",
+void print_round_event_record(const RoundEventRecord &r) {
+	std::printf("            round-event: flags=0x%02x adm=%u sub=%u shooter=%s "
+	            "origin=(0x%04x,0x%04x,0x%04x) yaw=0x%04x pitch=0x%04x shotSeq=0x%04x",
 	            unsigned(r.flags), unsigned(r.adm_index),
-	            unsigned(r.hit_subtype), handle_str(r.target_handle).c_str(),
+	            unsigned(r.subtype), handle_str(r.shooter_handle).c_str(),
 	            unsigned(r.pos_x_compressed), unsigned(r.pos_y_compressed),
 	            unsigned(r.pos_z_compressed),
 	            unsigned(r.yaw_bam_high), unsigned(r.pitch_bam_high),
-	            unsigned(r.damage_extra_raw));
-	if (r.has_parent_byte())   std::printf(" parent=0x%02x", unsigned(r.parent_byte));
-	if (r.has_weapon_handle()) std::printf(" weap=%s", handle_str(r.weapon_handle).c_str());
+	            unsigned(r.shot_seq));
+	if (r.has_slot_byte())     std::printf(" slot=0x%02x", unsigned(r.slot_byte));
+	if (r.has_target_handle()) std::printf(" target=%s", handle_str(r.target_handle).c_str());
 	std::printf("\n");
 }
 
@@ -823,9 +845,9 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 			default: break;
 		}
 	}
-	for (const WeaponHitRecord &h : fu.hits) {
-		std::printf("            tag=0x02 weapon-hit\n");
-		print_weapon_hit_record(h);
+	for (const RoundEventRecord &re : fu.round_events) {
+		std::printf("            tag=0x02 round-event\n");
+		print_round_event_record(re);
 	}
 	if (!ok)
 		std::printf("            (decode halted after %zu B of %zu%s)\n",
@@ -882,11 +904,11 @@ void print_tag_4e(const std::vector<uint8_t> &body) {
 void print_tag_16(const std::vector<uint8_t> &body) {
 	PlayerList pl;
 	const bool clean = decode_player_list(body.data(), body.size(), pl);
-	std::printf("        [0x16] max=%u players=%u teams=%u%s\n",
-	            pl.max_players, pl.player_count, pl.team_count,
-	            clean ? "" : " DECODE INCOMPLETE");
+	std::printf("        [0x16] flags=0x%02x rows=%u teams=%u inGame=%u spect=%u%s\n",
+	            pl.flags, pl.player_count, pl.team_count, pl.in_game_count,
+	            pl.spectator_count, clean ? "" : " DECODE INCOMPLETE");
 	for (const auto &r : pl.players)
-		std::printf("        player slot=0x%02x ping=%u score=%u/%u flags=0x%02x (team=%u alive=%u)\n",
+		std::printf("        player slot=0x%02x ping=%u score=%u/%u flags=0x%02x (team=%u spect=%u)\n",
 		            r.slot_id, r.ping, r.score1, r.score2, r.flags,
 		            r.flags >> 1, r.flags & 1);
 }
@@ -1028,16 +1050,30 @@ void print_tag_28_c2s(const std::vector<uint8_t> &body) {
 	            r.loadout_filter, r.flags, unsigned(r.extra));
 }
 
-// C2S 0x29 entity-packet request.
+// C2S 0x29 team/spawn ack (client 0x51 apply @0x431c99 sends team_index+1; the server
+// reads it as a g_team_change_entity_list index @0x514f7c — D-NET-148).
 void print_tag_29_c2s(const std::vector<uint8_t> &body) {
-	BurstEntityRequest r;
+	TeamSpawnAck r;
 	size_t used = 0;
-	if (!decode_burst_entity_request(body.data(), body.size(), r, used)) {
+	if (!decode_team_spawn_ack(body.data(), body.size(), r, used)) {
 		std::printf("        [0x29 C2S] decode failed (need 2 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x29 C2S] entity-request bufferIndex=%u\n",
-	            unsigned(r.buffer_index));
+	std::printf("        [0x29 C2S] team-spawn-ack teamChangeIndex=%u\n",
+	            unsigned(r.team_change_index));
+}
+
+// C2S 0x25 weapon-reload request (§5.58) — same 4-B body as the S2C 0x49 relay.
+void print_tag_25_c2s(const std::vector<uint8_t> &body) {
+	WeaponReload r;
+	size_t used = 0;
+	if (!decode_weapon_reload(body.data(), body.size(), r, used)) {
+		std::printf("        [0x25 C2S] weapon-reload decode failed (need 4 B got %zu)\n",
+		            body.size());
+		return;
+	}
+	std::printf("        [0x25 C2S] weapon-reload-request handle=%s slotCombo=%u\n",
+	            handle_str(r.entity_handle).c_str(), unsigned(r.reload_param));
 }
 
 // C2S 0x4C client quality/state byte.
@@ -1337,12 +1373,22 @@ void coverage_emit() {
 	            covered, partial, backlog.size());
 }
 
+bool g_hexdump_mode = false; // --hexdump: raw payload hex for EVERY message (byte-diff two captures)
+
 void print_payload(char dir, int frame, int tag,
                    const std::vector<uint8_t> &payload, int session = 0) {
 	const char *label = tag_label(dir, tag);
 	std::printf("[%c f=%-4d s=%-5d tag=0x%02x%s%s%s len=%zu]\n", dir, frame, session, tag,
 	            label ? "[" : "", label ? label : "", label ? "]" : "",
 	            payload.size());
+	if (g_hexdump_mode) {
+		// One line per 32 payload bytes — decoded views can hide bytes; this never does.
+		for (size_t off = 0; off < payload.size(); off += 32) {
+			const size_t n = payload.size() - off < 32 ? payload.size() - off : 32;
+			std::printf("        raw+%04zx %s\n", off, to_hex_sample(payload.data() + off, n, 32).c_str());
+		}
+		return; // raw view replaces the structured decode (keeps diffs purely byte-level)
+	}
 	if (dir == 'S' && tag == 0x0A) print_tag_0a(payload);
 	else if (dir == 'S' && tag == 0x0C) print_tag_0c(payload);
 	else if (dir == 'S' && tag == 0x0D) print_tag_0d(payload);
@@ -1395,6 +1441,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'C' && tag == 0x23) print_tag_23_c2s(payload);
 	else if (dir == 'C' && tag == 0x28) print_tag_28_c2s(payload);
 	else if (dir == 'C' && tag == 0x29) print_tag_29_c2s(payload);
+	else if (dir == 'C' && tag == 0x25) print_tag_25_c2s(payload);
 	else if (dir == 'C' && tag == 0x4C) print_tag_4c_c2s(payload);
 	else if (tag == 0x00 && print_tag_00_kv(payload)) { /* NWU KV rendered */ }
 	else if (!payload.empty()) std::printf("        %s\n",
@@ -1458,6 +1505,72 @@ int run_server_log(const char *path) {
 	return clean ? 0 : 2;
 }
 
+// --handshake: print the OUTER session handshake datagrams (0x41 ClientHello /
+// 0x42 ClientAuth / 0x81 ServerHello / 0x82 ServerAuth) that the in-game stream
+// pipeline consumes silently (wire_capture recovers SCRK from them and moves
+// on). The 0x42 dump expands the CU chunks — the joiner's character/profile
+// vars (CI0/CI1/TR/CTA/CTB/VCA/VCB ...) the host feeds into the player add
+// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 <- NapiNPProtocol_HandleClientJoin
+// @0x62b750 CU loop; client builder CNapiServerInfo_SerializeToSession @0x4c3650].
+int run_handshake(const char *path) {
+	long seen = 0, shown = 0;
+	auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
+		++seen;
+		std::vector<uint8_t> stripped(pk.payload.size());
+		size_t out_len = 0;
+		if (napi_envelope_decode(pk.payload.data(), pk.payload.size(), stripped.data(),
+		                         stripped.size(), &out_len) != 0)
+			return true;
+		stripped.resize(out_len);
+		if (stripped.empty()) return true;
+		const uint8_t opcode = stripped[0];
+		if (opcode != 0x41 && opcode != 0x42 && opcode != 0x81 && opcode != 0x82) return true;
+		std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
+		// Outer NWU transform: decrypt-on-receive is nwu_encrypt (names swapped).
+		if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
+		++shown;
+		std::printf("[f=%d %d->%d op=0x%02x len=%zu]\n", pk.frame_index, pk.srcport,
+		            pk.dstport, unsigned(opcode), body.size());
+		if (opcode == 0x42) {
+			ClientAuth auth;
+			if (!parse_client_auth(body.data(), body.size(), auth)) {
+				std::printf("        ClientAuth: PARSE FAILED  raw=%s\n",
+				            to_hex_sample(body.data(), body.size()).c_str());
+				return true;
+			}
+			std::printf("        ClientAuth co=\"%s\" na=\"%s\" ci=%u hk=0x%08x ck=0x%08x "
+			            "cu_chunks=%zu\n",
+			            auth.co.c_str(), auth.na.c_str(), auth.ci, auth.hk, auth.ck,
+			            auth.cu.size());
+			// Each CU chunk: [type:1B][name + NUL][LE16 data_len][value + NUL] — the
+			// wire shape of NapiNPChunk_Create @0x624720 (parse_client_cu_chunk).
+			for (const auto &cu : auth.cu) {
+				uint8_t ctype = 0;
+				std::string name, value;
+				if (parse_client_cu_chunk(cu.data(), cu.size(), ctype, name, value)) {
+					std::printf("          CU type=%u %s = \"%s\"\n", unsigned(ctype),
+					            name.c_str(), value.c_str());
+				} else {
+					std::printf("          CU (undecoded) raw=%s\n",
+					            to_hex_sample(cu.data(), cu.size()).c_str());
+				}
+			}
+		} else if (opcode == 0x41) {
+			ClientHello hello;
+			if (parse_client_hello(body.data(), body.size(), hello))
+				std::printf("        ClientHello co=\"%s\" pn=\"%s\"\n", hello.co.c_str(),
+				            hello.pn.c_str());
+		}
+		return true;
+	};
+	if (!net::stream_pcap_udp_file(path, on_dg)) {
+		std::fprintf(stderr, "FAILED to stream pcap %s\n", path);
+		return 1;
+	}
+	std::fprintf(stderr, "scanned %ld datagrams, %ld handshake datagrams shown\n", seen, shown);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -1465,6 +1578,7 @@ int main(int argc, char *argv[]) {
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
 	bool stream_mode = false;
+	bool handshake_mode = false;
 	bool histogram_mode = false;
 	bool coverage_mode = false;
 	long max_frames = 0; // 0 = unlimited
@@ -1480,6 +1594,10 @@ int main(int argc, char *argv[]) {
 			histogram_mode = true; // coverage joins the histogram tally with the catalog
 		} else if (std::strcmp(a, "--stream") == 0) {
 			stream_mode = true;
+		} else if (std::strcmp(a, "--handshake") == 0) {
+			handshake_mode = true;
+		} else if (std::strcmp(a, "--hexdump") == 0) {
+			g_hexdump_mode = true;
 		} else if (std::strcmp(a, "--max-frames") == 0 && i + 1 < argc) {
 			max_frames = std::strtol(argv[++i], nullptr, 10);
 			stream_mode = true; // a frame budget only makes sense streaming
@@ -1516,6 +1634,13 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 	if (is_sph_path(path)) return run_server_log(path);
+	if (handshake_mode) {
+		if (!is_pcap_path(path)) {
+			std::fprintf(stderr, "--handshake needs a pcap/pcapng input\n");
+			return 1;
+		}
+		return run_handshake(path);
+	}
 
 	if (items_path && *items_path) {
 		const size_t n = load_items_def(items_path);

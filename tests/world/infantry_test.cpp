@@ -135,6 +135,66 @@ void run_ticks(AiSystem &ai, World &w, uint32_t from, uint32_t to_excl) {
     }
 }
 
+// D-NET-159 — AUTHORITY body-anim selection for a net-snapped REMOTE player. Runs in
+// its own function: main's frame already unions a dozen scoped World locals and MSVC
+// probes the whole frame at entry, so one more inline block overflowed the stack.
+// The movement motor skips a wire-snapped peer, but the anim selection still runs from
+// the REPLICATED MoveOrder byte (bits 0-2 dir, bit 3 moving) + the C2S 0x1D stance bits,
+// and the selected state/phase mirror onto the world Entity the 0x0A record reads.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — authority gate @0x4b70a3-0x4b70b2,
+//  4th-tick @0x4b70ce, bases @0x4b7183-0x4b7226, idles @0x4b7228-0x4b7293]
+void test_remote_player_body_anim() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 0x14B9;
+    seed.health = 100;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    Entity *ent = w.registry.get(h);
+    CHECK(ent != nullptr);
+
+    AiSystem ai;
+    TestSource src;
+    for (int s = 1; s <= 8; ++s) src.clips.insert(s);          // stand walk block
+    for (int s = 11; s <= 18; ++s) src.clips.insert(s);        // crouch walk block
+    for (int s = 19; s <= 26; ++s) src.clips.insert(s);        // prone walk block
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    src.clips.insert(anim_state::kIdleCrouch);
+    src.clips.insert(anim_state::kIdleProne);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai); // attaches at handle (0,0) == h
+    e->net_is_remote_peer = true;
+    e->health = 100;
+
+    // Walking forward: input bit3 (moving) + dir 0 -> stand-walk base 1.
+    ent->net_move_input = 0x08;
+    run_ticks(ai, w, 0, 8);
+    CHECK(ent->net_anim_state == anim_state::kWalkForward);
+    CHECK(ent->net_anim_phase > 0);            // the channel ratio sweeps
+    CHECK(ent->net_move_input == 0x08);        // the uplinked byte is NOT overwritten
+    // Crouch (the 0x1D stance-change model) lifts the walk to base 11.
+    ent->net_stance_bits = 2;
+    run_ticks(ai, w, 8, 16);
+    CHECK(ent->net_anim_state == anim_state::kWalkCrouchForward);
+    // Prone walking, diagonal dir 1 -> base 19 + the (8-d) offset 7 = 26.
+    ent->net_stance_bits = 1;
+    ent->net_move_input = 0x08 | 0x01;
+    run_ticks(ai, w, 16, 24);
+    CHECK(ent->net_anim_state == anim_state::kWalkProneForward + 7);
+    // Stop prone -> prone idle 48; stand -> idle 43.
+    ent->net_move_input = 0;
+    run_ticks(ai, w, 24, 32);
+    CHECK(ent->net_anim_state == anim_state::kIdleProne);
+    ent->net_stance_bits = 0;
+    run_ticks(ai, w, 32, 40);
+    CHECK(ent->net_anim_state == anim_state::kIdle);
+    // 62 idle selection passes (4-tick cadence) promote 43 -> 44 [orig: @0x4b727b].
+    run_ticks(ai, w, 40, 40 + 62 * 4 + 4);
+    CHECK(ent->net_anim_state == anim_state::kIdle2);
+}
+
 } // namespace
 
 int main() {
@@ -824,7 +884,7 @@ int main() {
     // ---- idle root output is still entity root motion: the movement flag gates state commits,
     //      not position integration. [orig: AnimMap_UpdateEntity @0x40b82f produces root output;
     //      Entity_UpdateInfantryAI @0x4BF684 integrates it on the authoritative path without a
-    //      dword_8139E8 movement-bit gate.] ----
+    //      g_animStateFlagsTable movement-bit gate.] ----
     {
         World w;
         AiSystem ai;

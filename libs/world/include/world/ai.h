@@ -568,7 +568,7 @@ public:
     // this AiEntity (what the present snapshot reads), then return true so the tick SKIPS the state
     // machine + locomotion (a manned gunner never path-follows). Auto-dismounts + returns false if
     // the mount target is gone. Returns false (run AI normally) when not mounted.
-    // [orig: Entity_SerializeMountedVehicleState @0x460560 runs per tick for mounted entities.]
+    // [orig: Entity_SerializeVehicleState @0x460560 runs per tick for mounted entities.]
     bool pose_if_mounted(AiEntity &e, World &world);
 
     // Integrate the part-anim channel phases: phase[slot] += rate[slot] * dir[slot], clamped to
@@ -582,6 +582,18 @@ public:
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
     void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
+    // AUTHORITY body-anim selection for a net-snapped REMOTE player. The movement motor must
+    // not re-simulate a wire-snapped peer (tick_infantry skips it), but the retail authority
+    // still runs the player-body ANIM selection for every player, consuming the REPLICATED
+    // MoveOrder byte (bits 0-2 dir, bit 3 moving) + stance bits (C2S 0x1D -> MoveOrder bits
+    // 8-9) every 4th tick, and the selected state/ratio feed that player's 0x0A record bytes
+    // 14/15. Also mirrors the wire-anim fields onto the world Entity. [orig:
+    // Entity_UpdateInfantryPlayerBody @0x4b40e0 — local-or-authority gate @0x4b70a3-0x4b70b2,
+    // 4th-tick gate @0x4b70ce, selection @0x4b7183-0x4b729d, commit @0x4b7356-96]
+    void remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick);
+    // Mirror the selected body-anim state + channel phase (and, for the local player, the
+    // packed MoveOrder low byte) onto the world Entity the 0x0A snapshot reads.
+    void mirror_wire_anim(AiEntity &e, World &world);
     // The 16-tick navigation think: waypoint channel walk (arrival, relmat marks, marker
     // wait + facing, one-shot end), commands 123..127. Writes inf.move_* + target_heading.
     void infantry_think(AiEntity &e, World &world);
@@ -602,6 +614,8 @@ private:
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     std::vector<AiEntity> spawn_baseline_; // on_load restore target (editor Play->Stop)
     std::vector<int> handle_to_ai_index_;
+    std::vector<EntityHandle> vehicle_pass_handles_; // per-tick scratch for the vehicle
+                                                     // motor pass (reused, no realloc)
     bool baseline_captured_ = false;
 };
 

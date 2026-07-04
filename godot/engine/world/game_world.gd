@@ -637,8 +637,8 @@ func local_player_yaw_deg() -> float:
 func local_player_pitch_deg() -> float:
 	return _runtime.local_player_pitch_deg() if _runtime != null else 0.0
 
-func local_player_anim_slot() -> int:
-	return _runtime.local_player_anim_slot() if _runtime != null else -1
+func local_player_body_anim_slot() -> int:
+	return _runtime.local_player_body_anim_slot() if _runtime != null else -1
 
 func local_player_anim_key() -> String:
 	return _runtime.local_player_anim_key() if _runtime != null else ""
@@ -798,7 +798,7 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> void:
 	if not _host_config.is_empty():
 		if String(_host_config.get("net_transport", "")) != "lan-join":
 			opts["listen_server"] = true
-		for k in ["server_name", "max_players", "game_type", "net_transport", "bind_port",
+		for k in ["server_name", "max_players", "game_type", "gametype", "net_transport", "bind_port",
 				"advertise", "host_ip", "port", "player_name",
 				"nw_gate_host", "nw_gate_port", "region", "dedicated", "channel"]:
 			if _host_config.has(k):

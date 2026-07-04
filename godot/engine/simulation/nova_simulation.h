@@ -93,7 +93,7 @@ public:
 		PF_ACTIVE1,    // 1 when channel 1 has a live part-anim to render, else 0
 		PF_PHASE2,     // PANM channel 2 phase
 		PF_ACTIVE2,
-		PF_ANIM_SLOT,  // Entity.anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
+		PF_BODY_ANIM_SLOT, // Entity.body_anim_slot (main-body .bad/.adm clip; consumed only by the deferred seam)
 		PF_ANIM_STATE, // InfantryState.anim_state (full off_8135F0 state id; -1 when unavailable)
 		PF_ANIM_PHASE_TICKS, // InfantryState.clip_phase, in IDA half-frame ticks
 		PF_HIDDEN,     // 1 when the entity is hidden
@@ -310,7 +310,7 @@ public:
 	// position (net-re §5.2c). Single-player resolves the type-6002 start marker. Call AFTER a
 	// mission is loaded. Returns: 1 = spawned at a real start marker; 0 = no start marker, spawned
 	// at a safe fallback origin (never an NPC); -1 = failed (no mission / pool 0 full).
-	// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
+	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
 	int spawn_local_player_at_start();
 	// True once a local player has been spawned (World::cached.local_player valid).
 	bool has_local_player() const;
@@ -339,7 +339,7 @@ public:
 	int get_local_player_team() const;
 	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
 	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
-	int get_local_player_anim_slot() const;
+	int get_local_player_body_anim_slot() const;
 	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
 	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
 	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
@@ -424,10 +424,11 @@ public:
 	// True when channel has a live part-anim to render (rate set or phase moved off rest), so the
 	// host only poses commanded channels and leaves untouched parts at their default.
 	bool get_entity_part_anim_active(int p_index, int channel) const;
-	// Entity.anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written by
-	// EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam today
-	// (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 = none.
-	int get_entity_anim_slot(int p_index) const;
+	// Entity.body_anim_slot: the main-body skeletal clip (.bad via .adm) the AI requested. Written
+	// by EntityCommands::set_ssn_anim; consumed only by the host's deferred apply_body_anim seam
+	// today (skeletal runtime not yet built — AnimMap_PlayAnimBySlot @0x40bda0 / off_8135F0). -1 =
+	// none. (Distinct from world Entity.anim_slot = the retail +0x374 character-model selector.)
+	int get_entity_body_anim_slot(int p_index) const;
 	// True when the entity is flagged hidden (HideSingle / held). The present pass maps
 	// (not hidden and alive) -> Node3D.visible.
 	bool get_entity_hidden(int p_index) const;
@@ -470,6 +471,21 @@ public:
 	// [orig: Entity_InitFromItemDef @0x49e550]). Idempotent; call after load (and again after
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
+
+	// Parse weapon.def from the resource root and install the armory table on the sim world
+	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the
+	// extended-uplink equipped-weapon gate, and the player-spawn WPN_M4AUTO default
+	// (D-NET-141/143). [orig: Game_StartMission @0x5254bd -> WeaponDefs_LoadFile @0x5450A0,
+	// right after AnimDef_InitAll @0x5254b3]. Idempotent; call after load.
+	Error load_weapon_table(const Ref<class NovaResourceRoot> &p_resource_root,
+	                        const String &p_name = "weapon.def");
+
+	// Parse ammo.def and install the ballistics/damage table (world::World::ammo), then
+	// resolve every armory entry's round_type to its ammo index — the authoritative round
+	// sim's data feed (§5.60). Call after load_weapon_table.
+	// [orig: Game_StartMission @0x52548a -> AmmoDef_LoadAll @0x40b0b0]
+	Error load_ammo_table(const Ref<class NovaResourceRoot> &p_resource_root,
+	                      const String &p_name = "ammo.def");
 
 	int get_spawned_count() const { return promo_.spawned; }
 	int get_brain_count() const { return promo_.brains; }

@@ -117,11 +117,18 @@ func _ready() -> void:
 	# Two instances on localhost = the bidirectional co-op demo. Mirrors NW_SP_MISSION above.
 	var lan_host := OS.get_environment("NW_LAN_HOST")
 	if not lan_host.is_empty():
+		# "gametype" = the numeric session g_GameType the host CONFIG chooses at host start
+		# [orig: g_GameType = session gametype setting @0x4a6657; ServerConfig_ApplyHostSetting
+		# @0x4a6000]. Bit 0x10000 = team-based: it drives the per-side character pick at player
+		# add (D-NET-146) and the S2C 0x08 gameType dword. Default 0x10010 = the golden retail
+		# ASH_I5A session's value (its 0x08 advertises gameType=65552); NW_LAN_GAMETYPE overrides.
+		var lan_gametype := OS.get_environment("NW_LAN_GAMETYPE")
 		_on_lan_host_start_requested({
 			"mission": lan_host,
 			"net_transport": "lan",
 			"bind_port": int(OS.get_environment("NW_LAN_PORT")) if not OS.get_environment("NW_LAN_PORT").is_empty() else 32768,
-			"game_type": "COOP",
+			"game_type": "AS",  # the bring-up target: Advance and Secure on ASH_I5A (gametype 0x10010)
+			"gametype": int(lan_gametype) if not lan_gametype.is_empty() else 0x10010,
 			"server_name": "DEMOHOST",
 			"max_players": 4,
 		})
@@ -683,9 +690,9 @@ func _update_player_camera() -> void:
 		elif not anim_key.is_empty() and _player_avatar.has_method("play_body_clip"):
 			_player_avatar.play_body_clip(anim_key)
 		elif _player_avatar.has_method("play_body_anim_at"):
-			_player_avatar.play_body_anim_at(_world.local_player_anim_slot(), anim_phase)
+			_player_avatar.play_body_anim_at(_world.local_player_body_anim_slot(), anim_phase)
 		elif _player_avatar.has_method("play_body_anim"):
-			_player_avatar.play_body_anim(_world.local_player_anim_slot())
+			_player_avatar.play_body_anim(_world.local_player_body_anim_slot())
 	# First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1, shown in
 	# first person only (hidden in 3P, where the body avatar shows instead). The original biases the
 	# CAMERA by the weapon's `pos`/`tpos` view offset and draws the model at the view root

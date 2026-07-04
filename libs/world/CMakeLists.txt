@@ -7,7 +7,12 @@ add_library(opennova_world STATIC
     src/entity_spawn.cpp
     src/player_input.cpp
     src/player_spawn.cpp
+    src/round_sim.cpp
     src/spawn_select.cpp
+    src/vehicle_attach.cpp
+    src/vehicle_motor.cpp
+    src/zone_capture.cpp
+    src/zone_chain.cpp
 )
 
 target_include_directories(opennova_world

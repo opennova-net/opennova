@@ -1,12 +1,13 @@
 // Canonical AI body-animation slots.
 //
-// The infantry AI writes one of these into Entity.anim_slot each tick (a minimal port of
-// Entity_UpdateInfantryAI @0x4b9910's anim selection); the host resolves the slot to a
+// The infantry AI writes one of these into Entity.body_anim_slot each tick (a minimal port
+// of Entity_UpdateInfantryAI @0x4b9910's anim selection); the host resolves the slot to a
 // clip via the entity's .adm. These map to the AI .adm KEY namespace (anim_idle,
 // anim_walk_forward, ...), which is what 3rd-person NPC .adm files use (see REVX02
 // 1REG_AK1.adm etc.). This is DISTINCT from the player avatar's 252-entry off_8135F0 slot
 // table (walk_forward/knife/pistol/...), which is driven by player input + weapon and is a
-// separate, later concern. anim_slot == -1 means "no clip / hold rest".
+// separate, later concern — and from Entity.anim_slot (the retail entity+0x374
+// character-model selector; entity.h). body_anim_slot == -1 means "no clip / hold rest".
 
 #ifndef OPENNOVA_WORLD_BODY_ANIM_H
 #define OPENNOVA_WORLD_BODY_ANIM_H

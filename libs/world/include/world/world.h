@@ -15,7 +15,17 @@
 
 #include "world/entity.h"
 #include "world/entity_registry.h"
+#include "world/round_ring.h"
 #include "world/var_store.h"
+#include "world/ammo_table.h"
+#include "world/round_sim.h"
+#include "world/vehicle_motor.h"
+#include "world/weapon_table.h"
+#include "world/zone_chain.h"
+
+namespace opennova::terrain {
+struct TerrainHeightField;
+}
 
 namespace opennova::world {
 
@@ -97,7 +107,7 @@ class AiSystem;  // fwd (lives in world/ai.h; World holds a non-owning pointer s
 // rotate(seat.seat_local, -vehicle.yaw); a Gunner faces vehicle.yaw - seat.yaw_offset,
 // others face vehicle.yaw + seat.yaw_offset. Pure geometry (no AI), shared by
 // EntityCommands::mount (the attach-time pose) and the AI tick (the per-tick seat-follow).
-// [orig: stand-in for Entity_SerializeMountedVehicleState @0x460560's seat follow; true
+// [orig: stand-in for Entity_SerializeVehicleState @0x460560's seat follow; true
 // bone-transform follow is Entity_GetBoneTransformAndOrientation @0x4b0c50.]
 void pose_mounted_occupant(Entity &occ, const Entity &vehicle, const Seat &seat);
 
@@ -163,7 +173,7 @@ public:
                SeatSelectionMode mode = SeatSelectionMode::Any);
     // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail
     // symbol. Retail path: Entity_UpdateInfantryAI @0x4ba9ad -> Entity_FindBestSeatSlot
-    // @0x4351f0 -> Entity_AttachToVehicleSeat @0x4364a0. FindBestSeatSlot applies the rules:
+    // @0x4351f0 -> Entity_RequestVehicleAttach @0x4364a0. FindBestSeatSlot applies the rules:
     // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
     bool mount_boarding_command(uint16_t occupant_ssn, uint16_t target_ssn, uint8_t command_id);
     // [orig: EventAction_Dispatch case 0x25 @0x4542e0] The BMS AttachToEmplaced entry: the action
@@ -173,7 +183,7 @@ public:
     bool mount_best(uint16_t occupant_ssn);
     // [orig: Entity_DetachFromVehicle @0x4355f0] Free the occupant's seat + clear its mount ref.
     bool dismount(uint16_t occupant_ssn);
-    // [orig: find_entity_mounted_on_vehicle @0x4359f0] SSN of an entity riding target_ssn, else 0.
+    // [orig: Vehicle_HasEnemyOccupant @0x4359f0] SSN of an entity riding target_ssn, else 0.
     uint16_t find_mounted_on(uint16_t target_ssn) const;
 
     // --- AI command (the AI-change action family) ---
@@ -227,6 +237,51 @@ public:
     EntityCommands commands;
     AiSystem *ai = nullptr;    // non-owning; the host wires this to the AI system driving
                                // this world, so the AI-change command family can reach brains.
+
+    // items.def Player-template hp (class-8 Player = 150), stamped by the host's item-traits
+    // sweep so LATE-JOINER spawns (which happen after the sweep) seed full health without an
+    // item-db reach-back from libs/ [orig: Entity_InitFromItemDef @0x49e550 — spawn Health =
+    // itemDef->healthMax]. 0 = unresolved: player_spawn falls back to the spawn seed. (D-NET-144)
+    int32_t player_item_hp = 0;
+
+    // The weapon.def armory table (empty until the host feeds it — NovaSimulation::
+    // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
+    // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
+    WeaponTable weapons;
+
+    // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
+    // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
+    // netsim emit. [orig: g_round_ring @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
+    RoundRing rounds;
+
+    // The ammo.def ballistics/damage table (empty until the host feeds it —
+    // NovaSimulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable
+    // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
+    AmmoTable ammo;
+
+    // The live authoritative rounds — spawned synchronously by the accepted C2S 0x06
+    // (the same fire that appends `rounds`), stepped inside run_logic_tick, deaths
+    // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
+    // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
+    RoundSim round_sim;
+
+    // The Advance & Secure zone-slot chain (empty until the host builds it after the
+    // item-traits sweep — zone registration needs Entity::is_capture_trigger). Feeds
+    // the 0x0F owned-zone mask, the 0x0E deploy gates, and the 0x1E frontier hint.
+    // [orig: the inline manager @0x24D1EBC, ZoneSlotChain_BuildFromMission @0x4a2de0
+    // from Game_StartMission; net-re §5.61]
+    ZoneChain zone_chain;
+
+    // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
+    // it — NovaSimulation::resolve_item_traits). The AI tick's vehicle pass runs the
+    // ground-vehicle motor for pool-1 entities whose traits carry a non-zero `physics`
+    // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
+    // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
+    VehicleTraitsTable vehicle_traits;
+
+    // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
+    // shares the same field through AiSystem). Null = no terrain impacts.
+    const terrain::TerrainHeightField *terrain = nullptr;
 
     // The engine tick counter: one logic tick per host frame at 62 Hz.
     // [orig: current_tick @0x24c1968, ++ once per Game_ProcessMainFrame @0x5263f0.

@@ -1,6 +1,6 @@
 // Infantry anim-state tables, extracted from Jointops.exe (IDB 2026-06-10).
 // Names: [orig: off_8135F0] (the .adm clip keys, "anim_<name>").
-// Flags: [orig: dword_8139E8]; bit semantics in infantry.h. All 200 entries
+// Flags: [orig: g_animStateFlagsTable]; bit semantics in infantry.h. All 200 entries
 // dumped index-by-index from the IDB (the tail 173..199 is the uniform
 // death-family value 0x82).
 

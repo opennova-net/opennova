@@ -219,6 +219,18 @@ int main() {
 		return 1;
 	if (!expect(!fu.records.empty(), "emitted 0x0A carries the world's compact records")) return 1;
 
+	// D-NET-143: the peer record's off-16 anim_def_index echoes the CAPTURED uplink's
+	// equipped-weapon adm index (entity+0x2B0 ingest -> 0x0A echo [orig: @0x4C20A3]; this
+	// table-less world accepts the byte verbatim), and off-14 carries the 0x2B idle default.
+	for (const auto &frec : fu.records) {
+		if (frec.handle != H.packed) continue;
+		if (!expect(frec.player.anim_def_index == up.equipped_adm_index,
+		            "emitted anim_def_index == the captured uplink's equipped adm index"))
+			return 1;
+		if (!expect(frec.player.anim_state_id == 0x2B, "emitted anim state = 0x2B idle default"))
+			return 1;
+	}
+
 	// The host's own player was NOT touched by the peer's uplink (the apply was entity-scoped).
 	const w::Entity *ho = world.registry.get(host_h);
 	if (!expect(ho != nullptr && ho->position.x == 0.0f && ho->position.y == 0.0f &&

@@ -18,6 +18,7 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaItemDatabase::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_count"), &NovaItemDatabase::get_count);
 	ClassDB::bind_method(D_METHOD("has_item", "id"), &NovaItemDatabase::has_item);
+	ClassDB::bind_method(D_METHOD("get_vehicle_physics", "id"), &NovaItemDatabase::get_vehicle_physics);
 	ClassDB::bind_method(D_METHOD("get_graphic", "id"), &NovaItemDatabase::get_graphic);
 	ClassDB::bind_method(D_METHOD("get_anim_def", "id"), &NovaItemDatabase::get_anim_def);
 	ClassDB::bind_method(D_METHOD("get_ai_function", "id"), &NovaItemDatabase::get_ai_function);
@@ -73,6 +74,13 @@ Error NovaItemDatabase::load(const String &path) {
 		item.ai_function = String(entry.ai_function);
 		item.move_function = String(entry.move_function);
 		item.hp = entry.hp;
+		item.physics = entry.physics;
+		item.acceleration = entry.acceleration;
+		item.deceleration = entry.deceleration;
+		item.player_speed = entry.player_speed;
+		item.turn_rate = entry.turn_rate;
+		item.turn_rate2 = entry.turn_rate2;
+		item.unit_type = entry.unit_type;
 		for (int s = 0; s < 7; ++s) {
 			item.soundloops[s] = String(entry.soundloops[s]);
 		}
@@ -120,6 +128,13 @@ Error NovaItemDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p_r
 		item.ai_function = String(entry.ai_function);
 		item.move_function = String(entry.move_function);
 		item.hp = entry.hp;
+		item.physics = entry.physics;
+		item.acceleration = entry.acceleration;
+		item.deceleration = entry.deceleration;
+		item.player_speed = entry.player_speed;
+		item.turn_rate = entry.turn_rate;
+		item.turn_rate2 = entry.turn_rate2;
+		item.unit_type = entry.unit_type;
 		for (int s = 0; s < 7; ++s) {
 			item.soundloops[s] = String(entry.soundloops[s]);
 		}
@@ -187,6 +202,29 @@ int NovaItemDatabase::get_item_type(int id) const {
 bool NovaItemDatabase::is_ai_capable(int id) const {
 	const auto it = items.find(id);
 	return it != items.end() && (it->second.attrib & 0x100000u) != 0;
+}
+
+// The raw items.def ItemDefAttrib dword (itemDef+0x54); 0 for unknown ids. The AS zone
+// traits read bits 0x20000 "ChangeTeam" (capture trigger) and 0x40000 "SpawnPoint"
+// (deploy-selectable). [docs/world/itemdef-re.md; net-re §5.61]
+uint32_t NovaItemDatabase::get_attrib(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? 0u : it->second.attrib;
+}
+
+PackedInt32Array NovaItemDatabase::get_vehicle_physics(int id) const {
+	PackedInt32Array out;
+	const auto it = items.find(id);
+	if (it == items.end()) return out;
+	const Item &item = it->second;
+	out.push_back(item.physics);
+	out.push_back(item.player_speed);
+	out.push_back(item.acceleration);
+	out.push_back(item.deceleration);
+	out.push_back(item.turn_rate);
+	out.push_back(item.turn_rate2);
+	out.push_back(item.unit_type);
+	return out;
 }
 
 String NovaItemDatabase::get_display_name(int id) const {

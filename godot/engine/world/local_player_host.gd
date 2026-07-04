@@ -226,9 +226,9 @@ func _update_avatar(pos: Vector3) -> void:
 	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip"):
 		_avatar.play_body_clip(anim_key)
 	elif _avatar.has_method("play_body_anim_at"):
-		_avatar.play_body_anim_at(_world.local_player_anim_slot(), anim_phase)
+		_avatar.play_body_anim_at(_world.local_player_body_anim_slot(), anim_phase)
 	elif _avatar.has_method("play_body_anim"):
-		_avatar.play_body_anim(_world.local_player_anim_slot())
+		_avatar.play_body_anim(_world.local_player_body_anim_slot())
 
 
 func _update_viewmodel() -> void:

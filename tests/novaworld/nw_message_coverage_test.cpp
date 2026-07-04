@@ -249,7 +249,7 @@ int check_S_10_static_entity() {
 // S2C 0x16 — player-list: header + 1 player row + team_count=1 (2 team rows) + trailer.
 int check_S_16_player_list() {
 	LE w;
-	w.u8(8);            // max_players
+	w.u8(1);            // flags (bit0 team-mode)
 	w.u8(1);            // player_count
 	w.u8(0x00);         // row: slot_id
 	w.u16(0);           //      ping
@@ -465,15 +465,15 @@ int check_C_28_loadout_request() {
 	return 0;
 }
 
-// C2S 0x29 — entity request: [u16 bufferIndex].
-int check_C_29_entity_request() {
+// C2S 0x29 — team/spawn ack: [u16 team_change_index].
+int check_C_29_team_spawn_ack() {
 	LE w;
 	w.u16(0x0042);
-	BurstEntityRequest r;
+	TeamSpawnAck r;
 	size_t consumed = 0;
-	EXPECT(decode_burst_entity_request(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(decode_team_spawn_ack(w.b.data(), w.b.size(), r, consumed));
 	EXPECT(consumed == 2);
-	EXPECT(r.buffer_index == 0x0042);
+	EXPECT(r.team_change_index == 0x0042);
 	cover('C', 0x29);
 	return 0;
 }
@@ -555,6 +555,24 @@ int check_S_49_weapon_reload() {
 	EXPECT(r.entity_handle == 0x0006);
 	EXPECT(r.reload_param == 0x00C3);
 	cover('S', 0x49);
+	return 0;
+}
+
+// C2S 0x25 — weapon-reload request: same 4-B [u16 handle][u16 weaponSlotCombo] body the host
+// relays back as S2C 0x49 (§5.58). Round-trip via the real encoder.
+int check_C_25_reload_request() {
+	WeaponReload out;
+	out.entity_handle = 0x0006;
+	out.reload_param  = 0x00C3; // weaponSlotCombo = category*65 + rank
+	const std::vector<uint8_t> wire = encode_weapon_reload(out);
+	EXPECT(wire.size() == 4);
+	WeaponReload r;
+	size_t consumed = 0;
+	EXPECT(decode_weapon_reload(wire.data(), wire.size(), r, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(r.entity_handle == 0x0006);
+	EXPECT(r.reload_param == 0x00C3);
+	cover('C', 0x25);
 	return 0;
 }
 
@@ -854,14 +872,14 @@ int check_S_04_session_slot_config() {
 	LE w;
 	for (int i = 0; i < 4; ++i) w.u32(0x11111111u * unsigned(i + 1));
 	w.u8(5);                 // session config
-	w.u8(1);                 // team mode
-	w.u8(32);                // max players
+	w.u8(1);                 // the recipient's own roster slot (g_local_player_slot_id)
+	w.u8(32);                // max players (g_max_player_slots — the roster-walk terminator)
 	w.u32(0xAABBCCDD);
 	w.u8(9);
 	EXPECT(w.b.size() == 24);
 	SessionSlotConfig out;
 	EXPECT(decode_session_slot_config(w.b.data(), w.b.size(), out));
-	EXPECT(out.session_config == 5 && out.team_mode == 1 && out.max_players == 32);
+	EXPECT(out.session_config == 5 && out.local_player_slot == 1 && out.max_players == 32);
 	EXPECT(out.trailing == 9);
 	cover('S', 0x04);
 	return 0;
@@ -963,12 +981,13 @@ int main() {
 	if (check_C_22_player_sync_request()) return 1;
 	if (check_C_23_visible_request()) return 1;
 	if (check_C_28_loadout_request()) return 1;
-	if (check_C_29_entity_request()) return 1;
+	if (check_C_29_team_spawn_ack()) return 1;
 	if (check_C_4C_client_quality()) return 1;
 	if (check_rtt_sample()) return 1;
 	if (check_u32_scalar_trio()) return 1;
 	if (check_S_6B_minimap()) return 1;
 	if (check_S_49_weapon_reload()) return 1;
+	if (check_C_25_reload_request()) return 1;
 	if (check_S_13_entity_death()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_42_input_flags()) return 1;

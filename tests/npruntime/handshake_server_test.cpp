@@ -15,7 +15,12 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <npruntime/napi_np_protocol.h>
+#include <npruntime/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
+#include <def/def.h>
+#include <world/world.h>
+
+#include "common/test_paths.h"
 #include "host_test_setup.h"
 
 #include <netsim/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
@@ -215,15 +220,16 @@ bool run_reactive_replies() {
 		            reply_has_tag(msgs, 0x19),
 		            "0x0A -> 0x19 ack")) return false;
 	}
-	// 0x29 -> 0x51 spawn-confirm, exactly once (the 0x29<->0x51 echo-loop guard). [orig: NapiNPServerMsg_0x029]
+	// 0x29 team/spawn ack -> NO 0x51 on a plain join. [orig: NapiNPServerMsg_0x029 @0x514F10]
+	// only replies 0x51 for a pending g_team_change_entity_list entry (team-change flow,
+	// unmodeled); the golden session's deploy-time C 0x29 draws no 0x51 anywhere. The old
+	// unconditional zero-id 0x51 made the client REBIND its own player's CharacterEntity
+	// (@0x431BB0 field-parses it) onto a vehicle archetype — the DBuggy1 shadow (D-NET-148).
 	{
 		std::vector<ProtocolMessage> msgs;
-		if (!expect(send_session({make_protocol_message(0x29, {0x00, 0x00})}, 150, msgs) &&
-		            reply_has_tag(msgs, 0x51), "0x29 -> 0x51 spawn-confirm")) return false;
-		std::vector<ProtocolMessage> msgs2;
-		const bool got = send_session({make_protocol_message(0x29, {0x00, 0x00})}, 160, msgs2);
-		if (!expect(!got || !reply_has_tag(msgs2, 0x51),
-		            "repeat 0x29 does NOT re-emit 0x51 (echo-loop guard)")) return false;
+		const bool got = send_session({make_protocol_message(0x29, {0x00, 0x00})}, 150, msgs);
+		if (!expect(!got || !reply_has_tag(msgs, 0x51),
+		            "0x29 draws NO 0x51 on a plain join (D-NET-148)")) return false;
 	}
 	// 0x2C RTT probe -> 0x57 pong when echo_flag != 0 (the host bounces [u32 ts][u8 0]); echo_flag == 0
 	// is the client's return leg (server-internal RTT/kick, no reply). [orig: NapiNPServerMsg_HandlePingResponse @0x515070]
@@ -246,8 +252,11 @@ bool run_reactive_replies() {
 	return true;
 }
 
-// A bound player entity handle flows into the 0x29 -> 0x51 spawn-confirm reply's entity slot.
-bool run_bound_entity_handle_drives_tag51() {
+// A plain-join C2S 0x29 draws no S2C 0x51 even with a bound player: the original replies 0x51
+// only for a pending g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10
+// @0x514f7c], and the client field-parses 0x51 (@0x431BB0 CharacterEntity rebind) — an
+// invented zero-id confirm re-bound the joiner to a vehicle archetype (D-NET-148).
+bool run_plain_join_tag29_draws_no_tag51() {
 	np::NapiNPServerCtx ctx;
 	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
 
@@ -265,19 +274,50 @@ bool run_bound_entity_handle_drives_tag51() {
 
 	auto spawn_req = craft_session(client_scrk, seq++, {make_protocol_message(0x29, {0x00, 0x00})});
 	auto spawn_r = np::handle_server_datagram(ctx, peer, spawn_req.data(), spawn_req.size(), 200);
-	if (!expect(!spawn_r.outbound.empty(), "0x29 produces a framed 0x83 reply")) return false;
-	ProtocolPacketHeader hdr;
-	std::vector<ProtocolMessage> msgs;
-	if (!expect(decode_s2c(spawn_r.outbound.back(), server_scrk, hdr, msgs),
-	            "0x29 reply decodes as a 0x83 SESSION packet")) return false;
-	const ProtocolMessage *tag51 = nullptr;
-	for (const ProtocolMessage &m : msgs) {
-		if (m.tag == 0x51) tag51 = &m;
+	for (const auto &dg : spawn_r.outbound) {
+		ProtocolPacketHeader hdr;
+		std::vector<ProtocolMessage> msgs;
+		if (!decode_s2c(dg, server_scrk, hdr, msgs)) continue;
+		for (const ProtocolMessage &m : msgs) {
+			if (!expect(m.tag != 0x51,
+			            "plain-join 0x29 never draws 0x51 (D-NET-148)")) return false;
+		}
 	}
-	if (!expect(tag51 != nullptr, "0x29 emits tag=0x51")) return false;
-	if (!expect(tag51->payload.size() == 8, "tag=0x51 payload is 8 bytes")) return false;
-	if (!expect(le16(tag51->payload.data() + 2) == 0x0005,
-	            "tag=0x51 entity slot uses the bound connection handle")) return false;
+	return true;
+}
+
+// ClientGoodbye tears the player down [orig: Server_HandlePlayerDisconnect @0x51B5C0]: the owned
+// world entity despawns — a leaked body kept streaming and re-entered every future joiner's 0x0C
+// batch (the retail-join v23 ghost players, D-NET-149) — and the node erases so the roster slot
+// frees. (The 0x46 removal fan to remaining in-match peers rides their transports; covered by the
+// staging call, no in-match second peer modeled here.)
+bool run_goodbye_despawns_player_entity() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+
+	world::World w;
+	w.registry.configure_pool(0, 8);
+	const world::EntityHandle h = w.registry.spawn(0, world::Entity{});
+	if (!expect(h.valid() && w.registry.get(h) != nullptr, "test entity spawns")) return false;
+	ctx.world = &w;
+
+	const PeerAddr peer{0x0100007Fu, 30700};
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	std::string server_scrk;
+	if (!handshake(ctx, peer, client_scrk, 0xC0FFEE01u, server_scrk)) return false;
+	if (!expect(np::bind_connection_player(ctx, peer, 1, h.packed),
+	            "connection binds the live world entity")) return false;
+
+	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, {});
+	np::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 400);
+
+	if (!expect(w.registry.get(h) == nullptr,
+	            "goodbye despawns the owned world entity (D-NET-149)")) return false;
+	bool node_gone = true;
+	for (const auto &c : ctx.np_protocol.connection_list) {
+		if (c.peer == peer) node_gone = false;
+	}
+	if (!expect(node_gone, "goodbye erases the connection node")) return false;
 	return true;
 }
 
@@ -433,16 +473,190 @@ bool run_capacity_rejects_when_full() {
 	return true;
 }
 
+// Armory-fed loadout resolve (D-NET-141): with world.weapons built from the committed fixture,
+// the 0x5A reply resolves REAL ammo counts through the witnessed rules instead of echoing —
+// filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
+// (min(req,maxclips) on an explicit request), the alt byte carries the first different-ammoclass
+// sub-variant, and the reply sorts by weapon-slot combo (category*65+rank).
+// [orig: Server_SendWeaponSlotListToPlayer @0x502550 / WeaponSlot_GetTotalClips @0x5425F0]
+// NOTE fixture truth ≠ live-install truth: a real JO:CA root resolves a larger weapon.def whose
+// indices reproduce the golden bytes end-to-end — that equality is the live v16 wire gate.
+bool run_loadout_resolve_with_armory() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+
+	// The armory: fixtures/def/weapon.def -> the witnessed table (null@0 + file order).
+	const char *repo_root = test_paths_repo_root(__FILE__);
+	char def_path[4096];
+	std::snprintf(def_path, sizeof(def_path), "%s/fixtures/def/weapon.def", repo_root);
+	DefWeaponsFile wf{};
+	if (!expect(def_parse_weapons(def_path, &wf) == 0, "fixture weapon.def parses")) return false;
+	world::World world;
+	world.weapons = np::build_weapon_table(wf);
+	def_free_weapons(&wf);
+	ctx.world = &world;
+
+	const PeerAddr peer{0x0100007Fu, 30100};
+	const std::string client_scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	std::string server_scrk;
+	if (!handshake(ctx, peer, client_scrk, 0xDEADBEE2u, server_scrk)) return false;
+
+	uint32_t seq = 1;
+	auto send_session = [&](std::vector<ProtocolMessage> msgs, uint32_t now,
+	                        std::vector<ProtocolMessage> &out) -> bool {
+		auto dg = craft_session(client_scrk, seq++, msgs);
+		auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), now);
+		if (r.outbound.empty()) return false;
+		ProtocolPacketHeader hdr;
+		return decode_s2c(r.outbound.back(), server_scrk, hdr, out);
+	};
+
+	auto loadout_reply = [&](const std::vector<uint8_t> &req, uint32_t now,
+	                         WeaponLoadout &lo) -> bool {
+		std::vector<ProtocolMessage> msgs;
+		if (!expect(send_session({make_protocol_message(0x2F, req)}, now, msgs) &&
+		            reply_has_tag(msgs, 0x5A), "0x2F -> 0x5A loadout"))
+			return false;
+		for (const ProtocolMessage &m : msgs) {
+			if (m.tag != 0x5A) continue;
+			return expect(decode_weapon_loadout(m.payload.data(), m.payload.size(), lo),
+			              "0x5A reply decodes");
+		}
+		return false;
+	};
+
+	// The live retail v14 request (class 2 red / soldier 8 rifleman, default 0xFF ammo). Fixture
+	// truth: {2 KNIFE2, 3 colt45, 21 AK47M203AUTO} pass the masks; {76,77,78,83} land on
+	// unfiltered emplaced/vehicle entries in the 94-weapon fixture and are dropped.
+	{
+		std::vector<uint8_t> req = {0x02, 0x08, 0xC3, 0x00, 0x00, 0x00};
+		for (uint8_t adm : {uint8_t(21), uint8_t(3), uint8_t(83), uint8_t(76), uint8_t(77),
+		                    uint8_t(78), uint8_t(2)}) {
+			req.push_back(adm); req.push_back(0xFF); req.push_back(0xFF); req.push_back(0xFF);
+		}
+		req.push_back(0xFF);
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 130, lo)) return false;
+		if (!expect(lo.avatar_class == 8, "avatarClass = accepted soldier type")) return false;
+		if (!expect(lo.slots.size() == 3, "mask filter drops the unfiltered emplaced entries"))
+			return false;
+		// Sorted by slot combo: KNIFE2 (1*65+1=66), colt45 (2*65+0=130), AK47M203AUTO (3*65+12=207).
+		if (!expect(lo.slots[0].type_id == 2 && lo.slots[0].ammo_primary == 0xFF &&
+		                    lo.slots[0].ammo_secondary == 0xFF,
+		            "KNIFE2: clipsize -1 -> the 0xFF no-clip sentinel")) return false;
+		if (!expect(lo.slots[1].type_id == 3 && lo.slots[1].ammo_primary == 5 &&
+		                    lo.slots[1].ammo_secondary == 0xFF,
+		            "colt45: startrounds 35 / clipsize 7 -> 5 clips")) return false;
+		if (!expect(lo.slots[2].type_id == 21 && lo.slots[2].ammo_primary == 10 &&
+		                    lo.slots[2].ammo_secondary == 6,
+		            "AK47M203AUTO: 300/30 -> 10; alt = the different-class M203HE 6/1 -> 6"))
+			return false;
+		for (const WeaponLoadoutSlot &s : lo.slots)
+			if (!expect(s.ammo_alt == 0, "restriction byte 0")) return false;
+	}
+
+	// Soldier-type mask in isolation: a BLUE sniper (class 1 / soldier 6) requests M4AUTO + the
+	// blue KNIFE — the team mask passes both, the charfilter drops only the M4AUTO
+	// (rifleman|medic|engineer band). The all-class KNIFE (idx 1) survives alone.
+	{
+		std::vector<uint8_t> req = {0x01, 0x06, 0xC3, 0x00, 0x00, 0x00,
+		                            9, 0xFF, 0xFF, 0xFF, 1, 0xFF, 0xFF, 0xFF, 0xFF};
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 140, lo)) return false;
+		if (!expect(lo.avatar_class == 6, "soldier 6 accepted verbatim")) return false;
+		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 1,
+		            "charfilter drops the rifleman-band M4AUTO for a sniper")) return false;
+	}
+
+	// Explicit requested count: blue rifleman asks 4 mags of M4AUTO -> min(4, maxclips 10) = 4.
+	{
+		std::vector<uint8_t> req = {0x01, 0x08, 0xC3, 0x00, 0x00, 0x00,
+		                            9, 4, 0xFF, 0xFF, 0xFF};
+		WeaponLoadout lo;
+		if (!loadout_reply(req, 150, lo)) return false;
+		if (!expect(lo.slots.size() == 1 && lo.slots[0].type_id == 9 &&
+		                    lo.slots[0].ammo_primary == 4 && lo.slots[0].ammo_secondary == 0xFF,
+		            "explicit request -> min(requested, maxclips) clips")) return false;
+	}
+	return true;
+}
+
+// The 0x42 CU chunks carry the joiner's character/profile vars — the per-side character selection
+// (CI0/CI1 per-side char ids, TR requested side, CTA/CTB classes, VCA/VCB avatars). Parsed with the
+// witnessed LoadFromConnTags semantics: type-2 chunks only, case-insensitive names, atol values
+// (u16 truncation for CI, TR clamped to {0,1,0xFF}). [orig: NapiNPProtocol_HandleClientJoin
+// @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260; wire: retail-ashi5a f=199140;
+// D-NET-146]
+bool run_character_join_vars_parsed() {
+	np::NapiNPServerCtx ctx;
+	np::test::bring_up_host(ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	const PeerAddr peer{0x0100007Fu, 30900};
+
+	ClientAuth auth;
+	auth.pn = "JointOperations";
+	auth.ci = 1;
+	auth.ck = 0x0BADF00Du;
+	auth.hk = kHostKey;
+	auth.na = "jop:cus2";
+	auth.scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+	// The golden retail set, with wrinkles the parser must honor: CI0 as the full profile u32
+	// ("8126976" = 0x7C0200 — only the low u16 lands, the LoadFromConnTags WORD store), a
+	// lower-case tag name (Napi_StrCaseEqual is case-insensitive), TR=-1 (valid "auto"), and a
+	// type-1 chunk that must be IGNORED (only type-2 chunks are tag-list vars).
+	auth.cu.push_back(make_client_cu_chunk(2, "CI0", "8126976"));  // -> 0x0200
+	auth.cu.push_back(make_client_cu_chunk(2, "CI1", "33287"));    // -> 0x8207
+	auth.cu.push_back(make_client_cu_chunk(2, "TR", "-1"));        // -> 0xFF (auto)
+	auth.cu.push_back(make_client_cu_chunk(2, "cta", "8"));        // case-insensitive
+	auth.cu.push_back(make_client_cu_chunk(2, "CTB", "5"));
+	auth.cu.push_back(make_client_cu_chunk(2, "VCA", "1"));
+	auth.cu.push_back(make_client_cu_chunk(2, "VCB", "4"));
+	auth.cu.push_back(make_client_cu_chunk(1, "CI0", "9999"));     // type 1: NOT a tag var
+	auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+	auto r = np::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	if (!expect(r.outbound.size() >= 1, "0x42 with CU vars admitted")) return false;
+
+	const np::NapiNPConnection *conn = nullptr;
+	for (const auto &c : ctx.np_protocol.connection_list) {
+		if (c.peer == peer) conn = &c;
+	}
+	if (!expect(conn != nullptr, "joiner node exists")) return false;
+	if (!expect(conn->char_vars.char_id[0] == 0x0200, "CI0 u16-truncated (8126976 -> 0x0200)")) return false;
+	if (!expect(conn->char_vars.char_id[1] == 0x8207, "CI1 parsed (33287 = 0x8207)")) return false;
+	if (!expect(conn->char_vars.team_request == 0xFF, "TR=-1 kept as 0xFF (auto)")) return false;
+	if (!expect(conn->char_vars.char_class[0] == 8, "lower-case 'cta' matched (case-insensitive)")) return false;
+	if (!expect(conn->char_vars.char_class[1] == 5, "CTB parsed")) return false;
+	if (!expect(conn->char_vars.avatar[0] == 1 && conn->char_vars.avatar[1] == 4,
+	            "VCA/VCB avatar bytes parsed (golden 1/4)")) return false;
+
+	// TR out-of-range clamps to 0xFF [orig: @0x4c752f tr != -1 && (u8)tr >= 2 -> -1].
+	np::NapiNPServerCtx ctx2;
+	np::test::bring_up_host(ctx2, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+	const PeerAddr peer2{0x0100007Fu, 30901};
+	ClientAuth auth2 = auth;
+	auth2.cu.clear();
+	auth2.cu.push_back(make_client_cu_chunk(2, "TR", "7"));
+	auto dg2 = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth2));
+	np::handle_server_datagram(ctx2, peer2, dg2.data(), dg2.size(), 1);
+	for (const auto &c : ctx2.np_protocol.connection_list) {
+		if (c.peer == peer2 &&
+		    !expect(c.char_vars.team_request == 0xFF, "TR=7 clamps to 0xFF")) return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok = run_reactive_replies() && ok;
-	ok = run_bound_entity_handle_drives_tag51() && ok;
+	ok = run_loadout_resolve_with_armory() && ok;
+	ok = run_plain_join_tag29_draws_no_tag51() && ok;
+	ok = run_goodbye_despawns_player_entity() && ok;
 	ok = run_non_jo_peer_is_ignored() && ok;
 	ok = run_handshake_rejected_when_host_down() && ok;
 	ok = run_listen_host_lifecycle() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_character_join_vars_parsed() && ok;
 	return ok ? 0 : 1;
 }

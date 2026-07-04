@@ -134,7 +134,7 @@ bool EntityCommands::set_ssn_attack_max(uint16_t ssn, int32_t v) {
 bool EntityCommands::set_ssn_anim(uint16_t ssn, int32_t anim_slot) {
     Entity *e = world_.registry.get(world_.registry.find_by_net_id(ssn));
     if (!e) return false;
-    e->anim_slot = anim_slot;
+    e->body_anim_slot = anim_slot; // the present-pass clip channel (not the +0x374 selector)
     return true;
 }
 
@@ -362,7 +362,7 @@ bool EntityCommands::dismount(uint16_t occupant_ssn) {
 }
 
 uint16_t EntityCommands::find_mounted_on(uint16_t target_ssn) const {
-    // [orig: find_entity_mounted_on_vehicle @0x4359f0] first occupant riding target_ssn, else 0.
+    // [orig: Vehicle_HasEnemyOccupant @0x4359f0] first occupant riding target_ssn, else 0.
     EntityHandle th = world_.registry.find_by_net_id(target_ssn);
     if (!th.valid()) return 0;
     uint16_t result = 0;
@@ -446,6 +446,11 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // entity to the replicated wire state. [orig: the client tick still steps the
     // local player's infantry motor; Server_TickUpdate / Game_ProcessMainFrame.]
     for (ISystem *s : systems_) s->tick(*this, ctx);
+    // Live rounds step inside the world frame, authority-only — the client's visual
+    // round re-sim is not modeled here [orig: Entity_UpdateAllEntities ->
+    // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
+    // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
+    if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
 }
 

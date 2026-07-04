@@ -775,7 +775,7 @@ target_include_directories(player_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(player_spawn_test PRIVATE cxx_std_17)
 add_test(NAME player_spawn COMMAND player_spawn_test)
 
-# Player spawn-point selection (CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint
+# Player spawn-point selection (Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint
 # @0x50ccc0, net-re §5.2c): SP/campaign picks the type-6002 start marker FARTHEST from enemy
 # soldiers and never an NPC's position — the faithful fix for "the player spawns on top of NPC 0".
 add_executable(spawn_select_test world/spawn_select_test.cpp)
@@ -783,6 +783,26 @@ target_link_libraries(spawn_select_test PRIVATE opennova_world)
 target_include_directories(spawn_select_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(spawn_select_test PRIVATE cxx_std_17)
 add_test(NAME spawn_select COMMAND spawn_select_test)
+
+# Advance & Secure zone-slot chain (net-re §5.61; ZoneSlotChain_* @0x4A2350..0x4A2DE0,
+# ex-"CWeaponSlotManager"): masks/frontier/adjacency, the 0x0F owned-zone mask, the control
+# latch, the 0xFFFE auto-deploy pick, and the 0x0E pick resolve — pinned on the ASH_I5A shape
+# (zone 1 team 1 / zone 2 x2 neutral / zone 3 team 2, golden uniformMask 0x8).
+add_executable(zone_chain_test world/zone_chain_test.cpp)
+target_link_libraries(zone_chain_test PRIVATE opennova_world)
+target_include_directories(zone_chain_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(zone_chain_test PRIVATE cxx_std_17)
+add_test(NAME zone_chain COMMAND zone_chain_test)
+
+# Host-authoritative ground-vehicle motor (net-re §5.13 drive-authority witness): the
+# items.def physics-block scaling (ItemDef_ParsePhysicsProperty @0x49d870), the drive
+# input mapping, steering chase, and speed pipeline of Entity_UpdateVehiclePhysics
+# @0x48af00 — a mounted ctrl/drvr player's replicated input moves the vehicle.
+add_executable(vehicle_motor_test world/vehicle_motor_test.cpp)
+target_link_libraries(vehicle_motor_test PRIVATE opennova_world opennova_def)
+target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vehicle_motor_test PRIVATE cxx_std_17)
+add_test(NAME vehicle_motor COMMAND vehicle_motor_test)
 
 # Root-motion track grill vs real JO clips (AnimMap_UpdateEntity @0x40b5f0): the .bad
 # events array is the per-frame root record; rec[3] = cumulative forward distance whose
@@ -1378,6 +1398,39 @@ add_executable(npruntime_batch_chunker_test npruntime/batch_chunker_test.cpp)
 target_link_libraries(npruntime_batch_chunker_test PRIVATE opennova_npruntime)
 add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 
+# D-NET-141: the weapon.def armory table — witnessed index allocation (null@0 + file order),
+# ammo-clip resolution, and charfilter/teamfilter masks, against the committed fixture; §5.57.
+add_executable(npruntime_weapon_table_test npruntime/weapon_table_test.cpp)
+target_link_libraries(npruntime_weapon_table_test
+    PRIVATE opennova_npruntime opennova_world opennova_def)
+target_include_directories(npruntime_weapon_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_weapon_table COMMAND npruntime_weapon_table_test)
+
+# D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
+# connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.
+add_executable(npruntime_reload_relay_test npruntime/reload_relay_test.cpp)
+target_link_libraries(npruntime_reload_relay_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_reload_relay COMMAND npruntime_reload_relay_test)
+
+# D-NET-152: the C2S 0x06 client-fired-round pipeline — anti-spoof, clip authority (+ the 0x25
+# refill), and the g_round_ring append behind the §5.9.1 tag-2 echo
+# [orig: @0x513310 -> Server_ClientFiredRound @0x50baa0 -> RoundData_AddRound @0x4fdb40].
+add_executable(npruntime_client_fire_test npruntime/client_fire_test.cpp)
+target_link_libraries(npruntime_client_fire_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_client_fire COMMAND npruntime_client_fire_test)
+
+# §5.60: the authoritative round sim — fire -> synchronous spawn [orig: RoundData_AddRound
+# @0x4fdb40 inline RoundData_SpawnRound @0x4ec0d0], flight + hit [orig:
+# Weapon_UpdateAllProjectiles @0x4ec020 -> Projectile_UpdatePhysics @0x4e9d70], the kinetic
+# damage number [orig: Weapon_CalcImpactDamage @0x4ec920], and the death routing + respawn
+# release [orig: Entity_CheckAndProcessDeath @0x51b550 -> S2C 0x13/0x1E].
+add_executable(npruntime_round_sim_test npruntime/round_sim_test.cpp)
+target_link_libraries(npruntime_round_sim_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
+add_test(NAME npruntime_round_sim COMMAND npruntime_round_sim_test)
+
 # P2: the per-connection handshake — the server legs over the np free functions + the reactive §5.1
 # reply path (handshake_server), and the golden 0x81/0x82 byte-parity. (The old World-less
 # joiner_connection_test, which drove the client mirror through the retired game_runtime spawn-gate
@@ -1385,7 +1438,8 @@ add_test(NAME npruntime_batch_chunker COMMAND npruntime_batch_chunker_test)
 # World path by npruntime_client_runtime + npruntime_two_endpoint_socket.)
 add_executable(npruntime_handshake_server_test npruntime/handshake_server_test.cpp)
 target_link_libraries(npruntime_handshake_server_test
-    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld)
+    PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world opennova_def)
+target_include_directories(npruntime_handshake_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_handshake_server COMMAND npruntime_handshake_server_test)
 
 # Golden 0x81/0x82 byte-parity vs the local LAN host/join session capture. Env-gated + skip-if-absent

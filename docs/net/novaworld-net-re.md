@@ -278,7 +278,7 @@ sweep; blank = not yet characterized.
 | 0x06 | 0x432BC0 | `_HandleChatCommand` | server→client chat |
 | 0x07 | 0x422730 | `_0x007` | per-frame keep-alive stub |
 | 0x08 | 0x4281D0 | `_HandleSessionConfig` | SESSION CONFIG, fixed 51 B (the old "~2 KB snapshot" note was wrong): [10×i32 (f3=gameType→g_GameType)][7×u8][u32 bitflags, bits 13/15/16 latched]. Field map §5.54 (decoded) |
-| 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + weapon-hit loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
+| 0x0A | 0x42FEC0 | `NapiNPClientMsg_0x00A` | **per-frame local-player + world-state update** (multiplexed player/timer/env/gametype + health + round-event loop); full field map §5.9. Defined 2026-06-16 (was undefined — data blob mis-marked at 0x430000) |
 | 0x0B | 0x422660 | `_0x00B` | copies the 616-byte BMS header into `byte_A761D0` (field map §5.4) |
 | 0x0C | 0x42E730 | `_0x00C` | pool-0 organic spawn batch (AI infantry + players); `[u16 count]` header + per-record FLAT layout (slotId-first, no flag-gated optionals) per the §5.23 field map; parses name inline (crash-safe on `0x14B9` where 0x0D is not, §5.6); team → entity+354 |
 | 0x0D | 0x432C40 | `_0x00D` | pool-entity spawn batch; sets `dword_A82370=3`; `[u16 count]` header + per-entity record per the §5.11 field map (always: 2×u16 flags+slot, u16 type, cstr name, 3×i32 pos, u8 team byte → entity+354 (gate 0x10) + u8 bone byte → entity+290 always; D-NET-58; conditional fields gated by every flag bit 0x01-0x8000); AI-flagged item defs (`ItemDef[+84] & 0x100000`) require the `flags & 0x800` trailer = **`[u32][u32][cstring ai_name]`** (§5.6/§5.11) |
@@ -307,7 +307,7 @@ sweep; blank = not yet characterized.
 | 0x26 | 0x42EC30 | `_0x026` | entity kill-sync (killer/victim slots); fires on kill events |
 | 0x27 | 0x425AA0 | `_0x027` | |
 | 0x28 | 0x425B40 | `_0x028` | |
-| 0x29 | 0x427D00 | `_0x029` | |
+| 0x29 | 0x427D00 | `_CharMinimapUpdate` | per-entity character/minimap update: [u8 pool0Idx][u8 team→+354][u8 flags7→+692][u16 packedCharId→NetId+0x15C] + CharacterEntity rebind (§5.59); renamed from `handle_entity_minimap_update` |
 | 0x2A | 0x425BA0 | `_0x02A` | chat-history entry `[i32][i32][i16]` (10 B) → Chat_AddToHistory (§5.35) |
 | 0x2B | 0x427DF0 | `_0x02B` | |
 | 0x2C | 0x427E10 | `_MissionMapNames` | session + mission-file names (NOT chat — that note was wrong): [cstr sessionName → byte_A82378][cstr bmsFile → g_map_file_name]; bumps g_loading_progress ≥ 1. Field map §5.51 (decoded) |
@@ -342,11 +342,11 @@ sweep; blank = not yet characterized.
 | 0x4D | 0x4317B0 | `_HandleSpawnSlot` | reads u8 slot; local slot → tip event; otherwise client replies C2S 0x22+0x23; reads `dword_24C1928` as a skip-tip-if-already-spawned guard (never writes it) |
 | 0x4E | 0x431870 | `_HandleBatchSpawn` (misleading) | u16 count + per-slot u16; calls `Entity_KillBySlotId` (kill, not spawn), then replies C2S 0x28 |
 | 0x4F | 0x4286C0 | `_0x04F` | |
-| 0x50 | 0x431910 | `_TeamAssign` | team assign (6 B): [u16 handle][u8 team][u16 spawnPointId][u8 squadLeader] → entity team + team loadout init |
-| 0x51 | 0x431BB0 | `_0x051` | |
+| 0x50 | 0x431910 | `_TeamAssign` | team assign (6 B): [u16 handle][u8 team][u16 spawnPointId][u8 squadLeader] → entity team + team loadout init; also the ZONE-FLIP broadcast — `Server_ChangeEntityTeam @0x518D70` (ex-`Server_ChangePlayerTeam`; retargets ANY entity incl. capture zones/spawn objects, §5.61) |
+| 0x51 | 0x431BB0 | `_HandlePlayerSpawn` | TEAM-CHANGE confirm — FIELD-PARSED (8 B): [u16 ackSeed][u16 handle][u8 team→+354][u16 packedCharId→NetId @0x431cad][u8→+884]; acks C2S 0x29 (ackSeed+1 @0x431c99) + REBINDS CharacterEntity @0x431cf3 (§5.59, D-NET-148); retail sends it only for pending team changes |
 | 0x52 | 0x428A80 | `_0x052` | |
-| 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 modeA][u8 modeB→entity+547][u16 start_s][u16 end_s][u8 rate], ×62 s→ticks; capture/takeover HUD channel. Field map §5.49 (decoded) |
-| 0x54 | 0x429040 | `_0x054` | |
+| 0x53 | 0x428AE0 | `_ZoneTimerWindow` | ZONE-TIMER WINDOW (9 B): [u16 zoneHandle][u8 curTeam][u8 capturingTeam→entity+547][u16 progress][u16 limit][u8 rate], ×62 s→ticks; the timed-capture channel — server emits from `Server_UpdateCaptureZones @0x53B8F0` ×4 (`NetPacket_WriteZoneTimerWindow @0x506D00`). Client map §5.49, producer §5.61 |
+| 0x54 | 0x429040 | `_0x054` | death/wounded minimap marker `[u16 entityHandle][u8 state]` — server emits from `GameEvent_PlayerDeath @0x516dd0` ×2, `GameEvent_RevivePlayer @0x517db4`, `Server_BroadcastMedicRequest @0x515390` (D-NET-108); handler body unwitnessed (§5.60) |
 | 0x56 | 0x431D10 | `_0x056` | touches `dword_24C1928` (write unconfirmed; decomp on demand) |
 | 0x57 | 0x432210 | `_0x057_RTT` | RTT ping/pong `[u32 ts][u8 echoFlag]` (§5.34); ⇄ C2S 0x2C |
 | 0x58 | 0x4228C0 | `_SessionStatus` | SESSION-STATUS block (NOT a texture loader — kong `TerrainTexDef_ParseFromBuffer` renamed `SessionStatus_ParseFromBuffer @0x530ED0`): server/mission names + up-time sync + the 39 STROVER_STATVAR scoring rules + kv pairs → g_session_status (end-game stats/loading screen/admin UP-TIME). Field map §5.48 (decoded) |
@@ -368,16 +368,16 @@ sweep; blank = not yet characterized.
 | 0x68 | 0x42DAA0 | `_0x068` | entity-index list request `[u32 startIdx]` → C2S 0x3D (§5.34) |
 | 0x6A | 0x432510 | `_0x06A` | |
 | 0x6B | 0x425520 | `_0x06B` | minimap overlay batch `[u8 count]`+count×12B (handle@+0; blip rebuilt from entity state, 10 trailing B unused) (§5.35) |
-| 0x6C | 0x428FC0 | `_0x06C` | |
+| 0x6C | 0x428FC0 | `_0x06C` | zone presence count (3 B): [u16 zoneHandle][u8 count 1..32] — players inside an active timed capture, emitted on change (`CaptureCtx_UpdateActiveCaptureRate @0x53B600` → `NetPacket_WriteZonePresenceCount @0x506DE0`). §5.61 |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
-| 0x6E | 0x429880 | `_0x06E` | team/squad roster sync: `[u8 teamCount]` + per team `{u16 entityHandle, u16 slotIdx, u8 memberCount, u16 slotHandle, u16 members[]}`. Field map **§5.31** (decoded) |
-| 0x6F | 0x428D60 | `_ZoneTimerValue` | ZONE-TIMER VALUE (15 B; NOT cinematic camera — that label was wrong): [u16 zoneHandle][u8 mode][i32 value 16.16 s][i32 limit][i16 rate][u8→+544][u8→+545], ×62 s→ticks into g_zone_timer_list; nearest-zone tracking for HUD_DrawTakeoverStatus. Field map §5.49 (decoded) |
+| 0x6E | 0x429880 | `_0x06E` | spawn-wave / deploy-screen status (§5.31's "squad roster"): `[u8 groupCount]` + per group `{u16 zoneHandle, u16 zoneIdx, u8 queuedCount, u16 waveCountdown, u16 members[]}` — sent on wave-queue join + 1 Hz to dead/deploying players (`NetPacket_WriteSpawnWaveStatus @0x507490`). Client map **§5.31**, producer §5.61 |
+| 0x6F | 0x428D60 | `_ZoneTimerValue` | ZONE-TIMER VALUE (15 B; NOT cinematic camera — that label was wrong): [u16 zoneHandle][u8 team][i32 control 16.16 (0..1.0)][i32 limit=0x10000][i16 delta][u8 friendlies→+544][u8 enemies→+545], ×62 into g_zone_timer_list; the SECURE channel — server emits every 1 Hz pass per numbered zone (`Server_UpdateCaptureZoneEntities @0x519690` → `NetPacket_WriteZoneTimerValue @0x506E70`). Client map §5.49, producer §5.61 |
 | 0x70 | 0x429A30 | `_0x070` | |
 | 0x71 | 0x425600 | `_0x071` | |
 | 0x72 | 0x425710 | `_0x072` | |
 | 0x73 | 0x425770 | `_0x073` | |
 | 0x74 | 0x4258B0 | `_0x074` | |
-| 0x75 | 0x4259E0 | `_0x075` | spectator-mode flags (2 B); sets `byte_A860EC`, `dword_24D1DF4` |
+| 0x75 | 0x4259E0 | `_0x075` | spectator-mode flags (2 B); sets `g_death_screen_active`, `dword_24D1DF4` |
 | 0x76 | 0x42D540 | `_0x076` | u16 → `dword_24D59FC` |
 | 0x78 | 0x425970 | `_0x078` | (address verified from the dispatch table @0x82B4F4 — the prior 7-digit `0x4259070` was a typo) |
 | 0x79 | 0x429B00 | `_0x079` | spectator-mode flag (1 B → `dword_82BEE4`) (§5.35) |
@@ -411,14 +411,14 @@ This is what a reimplemented server must **handle**.
 | 0x07 | 0x4FC970 | |
 | 0x08 | 0x502210 | time-sync / anti-speedhack — `[u32 sessionId][u32 gameTimestamp]`; host checks the client's reported game-time deltas stay within 3% of wall-clock (`GetTickCount`). NOT movement. [orig: `validate_time_sync @ 0x502210`] |
 | 0x09 | 0x513200 | client checksum response |
-| 0x0A | 0x513260 | SPAWN-MENU REQUEST (len 0): game state → 9 (spawning), session+32=4, replies S2C 0x19 timestamp to the requester (mask 0x20) |
+| 0x0A | 0x513260 | SPAWN-MENU REQUEST (len 0) — **THE world-stream unlock** (`NapiNPServerMsg_HandlePlayerSpawnRequest`): game state → 9, session+32 → 4, world-stream phase (+89882) RESET to 0, replies S2C 0x19 timestamp (mask 0x20). The §5.2a world stream never starts (and, retail-only, RE-runs on every later spawn-menu visit) without it — D-NET-150 |
 | 0x0B | 0x51AB10 | |
 | 0x0C | 0x501C30 | entity sub-packet: `[u16 handle][u16 itemTypeId][u8 sub_op][payload]` → per-type callback at `entity_def+356`; §5.9 |
 | 0x0D | 0x513760 | CHAT MESSAGE uplink (`NapiNPServer_HandleChatMessage`; the old "replication frame ACK" note was WRONG): [u8 channel][cstr text]; strips `<...>` tags, 1000 ms rate limit, prepends name(/squad), fans out S2C 0x14 per recipient (2=team, 4/5=side, 11/12=squad, 13=proximity ≤100 u, default=all). §5.52 |
-| 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle]; 0xFFFE = auto team spawn (gametype-keyed) — `Server_ProcessClientRequestRespawn` |
-| 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); host validates shooter authority + ammo via Server_ValidateAndFireRound and may emit S2C 0x0A trailing weapon-hit (§5.9.1) |
+| 0x0E | 0x519AF0 | RESPAWN/DEPLOY request: [i16 spawnHandle] — the deploy-map pick. 0xFFFE = auto team spawn (frontier zone, gametype-keyed); real handle → `Server_ResolveSpawnTargetHandle @0x4FE110` (pools 0/1/2, def 0x40000, team gate) + zone control ≥ 1.0 + vehicle-seat gates; wave-queues via `g_spawn_wave_list` else deploys via `Server_ProcessPlayerDeath`. Full path §5.61 — `Server_ProcessClientRequestRespawn` |
+| 0x06 | 0x513310 | client-fired-round — fixed 45 B (§5.16); anti-spoof + fire-rate gate, then `Server_ClientFiredRound @0x50baa0`: net primary fire runs the adm 'fire' action (slot-latched client pose) → local re-entry → `RoundData_AddRound @0x4fdb40` → the per-recipient §5.9.1 tag-2 round-event echo; ammo clip decremented (`consume_weapon_ammo @0x540850`), cooldown stamped (slot+96472 = tick + adm[276]). D-NET-152 |
 | 0x0F | 0x514180 | player/entity-info request — `[u16 pool-0/1 handle]`; host serializes that entity's info + broadcasts it as S2C 0x18. The fallback spawn-menu "query loop" (pool-1 slots `0x10NN`) is this — NOT an input/movement frame (JO has no raw-input channel; see D-NET-68). [orig: `NapiNPServerMsg_HandlePlayerInfoRequest @ 0x514180`] |
-| 0x13 | 0x514330 | |
+| 0x13 | 0x514330 | `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action byte + nearest-sector resolve; action 6 arms a 30-tick timer); NOT a death message — only S2C 0x13 is the death notify (§5.60) |
 | 0x14 | 0x501E00 | |
 | 0x16 | 0x511A70 | client→server chat |
 | 0x17 | 0x514850 | |
@@ -427,7 +427,7 @@ This is what a reimplemented server must **handle**.
 | 0x1A | 0x514B20 | |
 | 0x1B | 0x501D90 | |
 | 0x1C | 0x501D40 | anim-map CRC reply (to S2C 0x39, §5.34) |
-| 0x1D | 0x501C60 | |
+| 0x1D | 0x501C60 | STANCE CHANGE `[i16 stanceCode]` — the crouch/prone replication leg (witness 2026-07-03). Authority-gated; subject = the SENDER connection's player (conn+352 → +192 → entity). Codes are the stance-TRANSITION anim ids: 169 → `MoveOrder = (MoveOrder & ~0x300) \| 0x200` (crouch), 170 → `\| 0x100` (prone), 172 → `& ~0x300` (stand); subject == local player additionally re-latches `dword_B76484/dword_B76480`. Feeds the body-anim stance bases (§5.10 off-14) + the recipient's own 0x0A tail echo (§5.9). [orig: `NapiNPServerMsg_HandleStanceChange @ 0x501C60`] |
 | 0x20 | 0x501F70 | entity-checksum reply (to S2C 0x30, §5.35) |
 | 0x21 | 0x502050 | anti-cheat CRC reply (§5.17) — reads u8 player_index + u32 expected_crc; host XORs computed CRC against per-connection salt at `playerCtx+89924`, mismatch logs "ACRC" + sends "PUNT ACRC" |
 | 0x22 | 0x514C90 | player-sync request `[u8 slot][u16 fieldFlags]` → host serializes & replies S2C 0x46 (§5.33); the client queues it on a 0x46 `0x4000`-ack and as a 0x0F/0x4D reply-burst member |
@@ -437,7 +437,7 @@ This is what a reimplemented server must **handle**.
 | 0x26 | 0x502390 | VEHICLE-ATTACH request — server overwrites wire word0 with the requester's OWN handle (anti-spoof) → Entity_ProcessVehicleAttach(vehicle/seat words) |
 | 0x27 | 0x4FC980 | VEHICLE-DETACH request: [u16 handle] → Entity_DetachFromVehicle(entity, entity+364) |
 | 0x28 | 0x51A550 | weapon-loadout request `[u32 loadoutFilter][u32 flags][u16 extra]` → host replies S2C 0x4E (§5.33); 0x0F reply-burst member |
-| 0x29 | 0x514F10 | entity-packet request `[u16 bufferIndex]` → host writes that entity's packet & replies S2C 0x51 (§5.33); reply-burst member |
+| 0x29 | 0x514F10 | team/spawn ack `[u16 team_change_index]` (client 0x51-apply sends team+1 @0x431c99; also sent at deploy/team pick) → S2C 0x51 ONLY for a pending `g_team_change_entity_list @0xC947C8` entry via write_entity_packet @0x506bb0; a plain join-deploy 0x29 draws NO reply (§5.59, D-NET-148; the old "entity-packet request → always 0x51" reading was wrong) |
 | 0x2B | 0x514FE0 | |
 | 0x2C | 0x515070 | RTT ping/pong consumed `[u32 ts][u8 echoFlag]` (§5.34); ⇄ S2C 0x57 [HandlePingResponse, enforces min/max ping] |
 | 0x2D | 0x502430 | burst-member receiver |
@@ -503,9 +503,8 @@ This is what a reimplemented server must **handle**.
   message ids. No dead client-table entries.
 - Phase B (full C2S decompile sweep): 0x47 / 0x48 / 0x06 / 0x21 / 0x0C-extended landed
   (§5.10, §5.16, §5.17, plus the 0x47/0x48 entries above) against the 3-player loopback
-  pcap. Remaining C2S candidates without field maps yet: 0x22 / 0x23 / 0x28 / 0x29 (the
-  "burst-member" replies; tiny 3 B payloads in capture), 0x0F (no samples in the 3-player
-  capture), 0x33 / 0x37 (file-chunk re-request replies; need a C2S 0x60 / 0x64 flow).
+  pcap. The then-remaining candidates have since landed: 0x22 / 0x23 / 0x28 (§5.33),
+  0x29 (§5.59 — a team/spawn ack, not a "burst member"), 0x0F (§5.46), 0x33 / 0x37 (§5.28).
 
 ## 5. Tag-level findings (audited against retail captures)
 
@@ -663,6 +662,38 @@ against `Jointops.exe` and ported; the in-match flow is `0x41 → 0x81`, `0x42 �
   `max_players` model) and does NOT enforce capacity — it retires at ROADMAP P8 when npruntime takes
   over. D-NET-104/105 *are* mirrored in both copies.
 
+### 5.0b — The game-session 0x42 CU var set (the joiner's character/profile upload; D-NET-146)
+
+The game-session ClientAuth carries a CU chunk set DISTINCT from the NovaWorld-gate connect set
+(§8 NW-S3's Application/BuildDateAndTime/.../UdpCode1/UdpCode2): the joiner's client/profile
+environment plus its per-SIDE character selection. Emitter: `[orig:
+CNapiServerInfo_SerializeToSession @ 0x4c3650]` — one `NapiNPChunk_Create(conn, 2, name, value)`
+per field, each omitted when the value is 0/empty, values printed as decimal strings. Host parse:
+`[orig: NapiNPProtocol_HandleClientJoin @ 0x62b750]`'s CU loop stores type-1/2 chunks on the
+connection tag list; `[orig: NapiNetConfig_LoadFromConnTags @ 0x4c7260]` folds type-2 tags into
+the per-player `NapiNetConfig` (case-insensitive names via `Napi_StrCaseEqual @ 0x616e70`, `atol`
+values). Wire witness: the golden retail-ashi5a f=199140 (retail joiner → retail host) and
+retail_join_v18 f=47676 (retail joiner → opennova host) carry the identical 18-tag set.
+
+| tag | NapiNetConfig landing | meaning | fresh-profile wire value |
+|---|---|---|---|
+| `BT`/`VN`/`BN`/`DB`/`MBN`/`SOPD` | +0x00..+0x14 | build/version/debug stamps | 0/2/1/0/20042002/180 |
+| `VERSIONSTRING` | +0x58 | client version | "V1.7.5.7" |
+| `COUNTRYCODE` | +0x98 | locale | "us" |
+| `APPID` | (+0x40 slot) | application id | 9360 (host-varies) |
+| `CI0` / `CI1` | jsp[56] / jsp[58] (u16 of atol) | per-SIDE minimap/character-slot id | 512 (0x0200) / 33287 (0x8207) |
+| `TR` | jsp[60] (≠0xFF && ≥2 → 0xFF @ 0x4c752f) | requested side (0=A, 1=B, 0xFF auto) | -1 |
+| `CTA` / `CTB` | jsp[61] / jsp[62] | per-SIDE soldier class (5..9) | 8 / 8 |
+| `VCA` / `VCB` | jsp[63] / ci0 low byte | per-SIDE avatar byte (→ entity+0x374) | 1 / 4 |
+| `TZB` | +0x1A8 | timezone bias | 300 |
+| `MPS` | +0x1AC | max packet size | 1300 |
+
+"Side" is the team pairing {1,3} = A, {2,4} = B — the player add picks the side by the ASSIGNED
+team and the session gametype's team-based bit (see D-NET-146 for the full consume chain
+`Server_BuildPlayerInfoAndAdd @ 0x51d560 → Server_PlayerAdd @ 0x51cbc0`). Note the IDB's
+`NapiNetConfig` field names are first-seen-tag artifacts shifted by one from these landings
+(e.g. the struct's `bt` field holds APPID); the table above is the witnessed tag→offset truth.
+
 ### 5.1 Loading-progress counter — `dword_A82370`
 
 The server walks the client's loading progress up via specific S2C tags. Each handler
@@ -762,6 +793,15 @@ in-process. The flow:
    - world-stream track (`slot+0x20 == 4`, phases 0→7): `0x10` static batch → `0x0D` pool spawn
      → `0x0C` entity states → `0x20` bulk pool-3 → `0x45` → `0x7E` → `0x1A` timestamp.
 
+   **The tracks do NOT chain directly (2026-07-02, D-NET-150):** the player-sync tail sets
+   sync-state **3** (`@ 0x51c134`) and the emitter has no state-3 arm — the world stream starts
+   only when the client's empty C2S 0x0A spawn-menu request advances 3 → 4 + resets the phase
+   (`[orig: NapiNPServerMsg_HandlePlayerSpawnRequest @ 0x513260]`). Every send in BOTH tracks is
+   additionally gated on the connection's sent-unacked reliable count `conn+0x768 < 20`
+   (`@ 0x51bbfd/@ 0x51bf14`; ack sweep decrements it in `[orig: CNapiNPConnection_ParseMessages
+   @ 0x625bc0]`) — client-paced backpressure that stretches the stream across a cold client's
+   mission build. Full mechanism: D-NET-150.
+
    This is the emitter ordering the planned P6 host world-stream must reproduce.
 
    **Server-side S2C serializer map (witnessed 2026-06-16, `[orig: Server_SendInitialGameStateToPlayer
@@ -809,7 +849,7 @@ in-process. The flow:
    = write extended; §5.10 gives both directions, write side = `Network_CompressFixedPoint` instead of
    decompress, `Entity_TransformWorldToLocal` for the vehicle-mounted branch), AI infantry via
    `NetPacket_SerializeInfantryEntityState @ 0x4C0320` (§5.14), vehicles via
-   `Entity_SerializeMountedVehicleState @ 0x460560` (§5.13).
+   `Entity_SerializeVehicleState @ 0x460560` (§5.13; renamed 2026-07-04 from Entity_SerializeMountedVehicleState — the short form is the DEAD-pose form, not a mounted one).
 
 4. **The host waits in-process** — `[orig: NapiClient_WaitForGameStart @ 0x42cc10]` (the shared
    host+client loading-screen loop, §5.2) sends the client-ready `0x0A`, then pumps the network
@@ -1038,7 +1078,7 @@ is backed by a witnessed access (consumer in parens) and most are already mapped
 is now named for its INFANTRY/AI interpretation (`GamePlayerEntity` → 135 members, 96 named; size still
 904). Witnessed via `Entity_UpdateInfantryAI @0x4b9910` + `Entity_BuildBoneTransformMatrices @0x4b1290`
 + `Entity_ResetToSpawnState @0x4b9610`, corroborated by `world-wac-ai-re.md §3` (entity[N]·4 = offset):
-- **Anim state** — `animStateId` +0x2bc (entity[175]; indexes the state→name table `dword_8139E8` /
+- **Anim state** — `animStateId` +0x2bc (entity[175]; indexes the state→name table `g_animStateFlagsTable` /
   `off_8135F0`), `animSlotIndex` +0x2c0 (`Entity_ComputeAnimSlotIndex`), `prevAnimStateId` +0x2c8
   (entity[178]).
 - **Aim / torso / head** (incremental `+= chase` writes; reset to body yaw on spawn) — `aimPitch`
@@ -1113,8 +1153,9 @@ these witnesses. **IDB rename applied:** the kong-misnomer `Entity_SetStateWreck
 
 §5.2a/§5.2b resolve how the host *builds and field-inits* its own player entity but leave the
 "place `Position` / `Yaw`" step's SOURCE unwitnessed. It is the map/camera spawn selector
-`[orig: CMap_SetupSpawnCamera @ 0x50cf60]` (Kong's name is a misnomer — it positions the player
-ENTITY, not just a camera), called on join `[orig: Server_OnPlayerJoin @ 0x51a680 → 0x51a786]`
+`[orig: Server_PositionPlayerForSpawn @ 0x50cf60]` (renamed 2026-07-03 from Kong's misnomer
+`CMap_SetupSpawnCamera` — it positions the player ENTITY, not just a camera), called on join
+`[orig: Server_OnPlayerJoin @ 0x51a680 → 0x51a786]`
 and respawn `[orig: Server_ProcessPlayerDeath @ 0x517740 → 0x517863]`. It maps the game type
 (`g_GameType @ 0x24D2128`) + the player's team to a marker TYPE-ID, resolves it via
 `[orig: ItemList_FindIndexByTypeId @ 0x49e100]`, finds the matching pool-3 marker entities, and
@@ -1161,7 +1202,7 @@ the raw arg]`.
 **Real-mission machinery — the SP marker chain alone is incomplete (2026-06-22b).** Grilling
 against a shipped SP mission (00TRa.bms, "Training: Basics / Armory", `attrib_flags=0x3` ⇒ no
 game-mode bit ⇒ `g_GameType=0`) found the per-game-type chain above does NOT cover real authored
-starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `CMap_SetupSpawnCamera` with spawn-param
+starts. `[orig: Server_OnPlayerJoin @0x51a680]` calls `Server_PositionPlayerForSpawn` with spawn-param
 low-word **0** (not 0xFFFF), so the engine first tries `[orig: sub_4FE110 @0x4fe110]` — which is a
 live-entity **handle** resolver (`poolType = handle>>12`, `index = handle & 0xFFF`, fetch
 `g_pool_list[poolType][index]`, gate on model flag `0x40000` + team), NOT a spawn-point lookup; at
@@ -1328,9 +1369,9 @@ entity:
 | eulerZ / eulerX / eulerY | i32 (32-bit BAM) | `flags & 0x01 / 0x02 / 0x04` | entity+16/+20/+24 |
 | sectionMask | i32 | `flags & 0x08` | entity+308 |
 | team | u8 | `flags & 0x10` | entity+354 |
-| parentSlot | i32 | `flags & 0x20` | entity+36 |
-| ammoCount | u8 | **always** | entity+290 (u16) |
-| refNum / subType | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 (D-NET-94; not bones) |
+| entityFlags | u32 | `flags & 0x20` | entity+36 — the entity FLAGS dword streamed raw (the old "parentSlot" reading was WRONG; witnessed at the serializer source `[orig: serialize_pool2_static_to_buffer @0x5042F0 @0x5044e6]`). Composed at spawn from BMS attributes (Indestructible 1<<21 → 0x4000000, Reflective 1<<23 → 0x400, NoShadow 1<<24 → 0x1000000 `[orig: Entity_SpawnFromBMSRecord @0x40e9f0]`) + def traits (type Building → 0x20000 `[orig: Entity_InitFromModel @0x40e105]`; healthMax 0 → 0x4000000 `[orig: @0x40dc8e]`). Golden ASH_I5A buildings: 0x04020400; bridges add NoShadow → 0x05020400. D-NET-147 |
+| ammoCount | u8 | **always** | entity+290 (u16) ← BMS record byte 81 `[orig: @0x40e9f0]` |
+| refNum / subType | u8 | `flags & 0x40 / 0x80` | entity+533 / +532 (D-NET-94; not bones). refNum ← BMS byte 153; subType = 0xFF when the def is indestructible (healthMax 0) `[orig: @0x40dc8e]` |
 | scoreFlag | u8 | `flags & 0x100` | entity+624 (i32) |
 | weaponByte | u8 | **always** | entity+538 |
 | attachRef | u16 | `weaponByte != 0 \|\| flags & 0x200` | entity+350 |
@@ -1347,13 +1388,13 @@ header; the rest is client-side.
 | Field | Type | Notes |
 |---|---|---|
 | ref0/ref1/ref2 | 3× i32 | tick/reference header → dword_A822E4/E8/EC |
-| flags1 | u8 | `0x04`→loadprog `dword_A8235C=10`; `0x02`→`byte_A860DC`; `0x01`→death/spectator (camera reset, `CameraOffset.Z=0xD000`, spawn-gate `dword_24C1928`) |
+| flags1 | u8 | Write side `[orig: NetPacket_WritePlayerState @ 0x4ff793-0x4ff7dd]`: bit0 = spectator (slot+100567; also ORs entity+36 bit0), **bit1 = RESPAWN-PENDING (slot+89912 & 0x10)** — re-asserted EVERY frame while the recipient is undeployed (also ORs entity+36 bit0 → the record byte13 `0x01`), bit2 = one-shot load hint (entity+44 & 0x1000 && dword_2550850, clears the entity bit). Read side: `0x04`→loadprog `dword_A8235C=10`; **`0x02`→`g_deploy_screen_active @ 0xA860DC` = `(flags1 & 2) != 0` EVERY frame — the deploy screen is HELD open by bit1; one bit1=0 frame closes it** (@ 0x42ff82; D-NET-156); `0x01` EDGES drive `g_death_screen_active @ 0xA860EC` (0→1 opens the death/spectator screen — camera `CameraOffset.Z=0xD000`, tip 22, spawn-gate `dword_24C1928`; 1→0 closes + latches `byte_A85B48 = player.Team`) |
 | flags2 | u8 | low 2 bits select the sub-block AND its ROLE: **0** = aim/player-view (client-authoritative — the working golden does NOT send it in gameplay), **1** = server-status/timer, **2** = ENV, **3** = objective (gametype-gated). The golden CYCLES 1/2/3. bit 3 (`0x08`) gates a 6 B vehicle-passenger record after the fixed tail (joiner-as-passenger; only the `(flags2 & 0xF) == 8` exact value triggers it — i.e. sub-block 0 + passenger bit) [orig: 0x430459] |
 | sub-block 0 | `==0`: 6× u8 + u8 (`0xFF` sentinel) + i32, 11 B | player aim/state → dword_A85B5C… [orig: 0x430054..0x43012E] |
 | sub-block 1 (server-status/timer) | `==1`: 4× u8 + i16, 6 B | `[u8→dword_C6EAE0][u8→dword_C6EAE4][u8→g_serverFps (0xC8FC64)][u8→g_serverCpuPct (0xC8FC68)][i16 timer]`; each u8 is `movzx`-widened from one wire byte; `dword_24C1958 = 62 × i16` (62 Hz timer; `-1` if negative) [orig: C6EAE0@0x4301a1, C6EAE4@0x4301bc, g_serverFps@0x4301e0, g_serverCpuPct@0x430200, timer@0x430210]. Init defaults [orig: 0x4f638b C6EAE0=20, **C6EAE4=13**, C6EAE8=10]. **`dword_C6EAE4` is the fall-damage tolerance (§5.38d)** — a server that only ever sends sub-block 0 leaves the client's C6EAE4 at 0 → per-frame fall damage [orig: read @0x4b7d0d] |
 | sub-block 2 (ENV) | `==2`: u16,u16,u16,u8,u8,u8,u8,u8, 11 B | `Env_FogDistTarget=u16<<16`, `Env_FogDistAccelClamp=u16<<8`, `Env_CurTimeFixed24=u16<<13` (TOD), `Env_QuakeTicks`, `Env_CloudScrollRateTarget=u8<<10`, u8<<8, `Env_OvercastBlendTarget=u8<<8`, u8 [orig: 0x430253..0x430341] |
 | sub-block 3 | `==3 && g_GameType & 0x20000`: 4× i32, 16 B (else 0 B) | dword_AC86E8… — gate is wire-invisible, so `decode_frame_update` reads the body only when its `is_objective_gametype` hint is set. **First witnessed in probe3** (Co-op, `g_GameType 0x30020`; 771 frames, body all-zero); the `flags2 & 0xF0` high bits don't change sub-block selection (D-NET-75) [orig: 0x430361..0x4303C8] |
-| state_flag_byte | u8 | bit 0→`dword_B76484`, bit 1→`dword_B76480`, bits 0/1→`g_local_player_entity.pad7[12]` bits 8/9 (the `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
+| state_flag_byte | u8 | **The recipient's OWN stance echo**: bit 0 (prone)→`dword_B76484`, bit 1 (crouch)→`dword_B76480`, bits 0/1→`g_local_player_entity` MoveOrder (+0x12C) bits 8/9 — re-latched EVERY frame (@ 0x430562/@ 0x430570), so a host that hardcodes 0 force-STANDS a crouched client each frame (witness 2026-07-03; the pre-v32 crouch/prone bug). The authoritative source is the server's per-player stance from C2S 0x1D (dispatch table) — vehicle attach/detach clears it (@ 0x435c54/@ 0x43561e). (The `<<8` of older notes was the receiver's internal shift, not a wire-format detail) [orig: 0x4303E5] |
 | mountHandle | u16 | vehicle-mount handle (`pool<<12\|slot`; `0xFFFF`=none) [orig: 0x430408] |
 | health | i16 | read @0x430428; applied late in the handler — compares the new value to the stored `Health` (`cmp dx,[entity+0x11E]` @0x43059a, `jge` skip @0x4305a1) and, ONLY when it DROPPED, fires INLINE COSMETIC feedback (red flash `dword_B764B4+=0x78` @0x4305a3, camera-shake `dword_B764B0+=0x0A` @0x4305c1; both capped 0xFF; **no `Radar_AddBlip`** — distinct from the body motor's `Player_OnDamageReceived`, §5.38d) — then stores `Health` @0x4305df. ⇒ stream this at full health (`healthMax`) or any below-stored tail self-triggers the flash [orig: 0x430428 / 0x43059a / 0x4305df] |
 | state_word | i16 | → `*(WORD*)g_local_player_entity->pad7` (packed state) — bytes 6/7 of the 7 B tail; previously misread as two separate `hdr_trail_a/b` bytes [orig: 0x430442] |
@@ -1361,7 +1402,7 @@ header; the rest is client-side.
 | passenger_handle | u16 | passenger entity handle; `0xFFFF` early-skips the next 4 B [orig: 0x430474] |
 | seat_yaw | u16 | rider body yaw [orig: 0x4304C3] |
 | seat_pitch | u16 | rider body pitch [orig: 0x4304DC] |
-| event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 weapon-hit; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
+| event loop | trailing `[u8 tag]…` | tags exactly `{0,1,2}` — `cmp eax,2 / jg` at `0x4306DA` treats any tag ≥3 as silent terminator (same exit as `tag==0`); `tag==1`→`[u16 handle][u16 typeId]` then per-class callback (§5.10b); `tag==2`→§5.9.1 round event; ends at `tag==0`/EOB/tag≥3 [orig: 0x4306A1, handle@0x43070C, typeId@0x43076B] |
 
 (The handler was undefined in the IDB — a data blob mis-marked at the `0x430000` page boundary;
 defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
@@ -1369,30 +1410,38 @@ defined 2026-06-16. Sub-block + tail field maps fully witnessed 2026-06-16c via
 — it's the high half of the `state_word i16`. The `(flags2 & 0xF) == 8` vehicle-passenger record
 appears 4× in the 2026-06-16b loopback capture, all on sub-block 0 frames.)
 
-#### 5.9.1 Weapon-hit record (event-loop `tag==2`) — wire decoded 2026-06-16d
+#### 5.9.1 Round-event record (event-loop `tag==2`) — wire decoded 2026-06-16d; server side witnessed 2026-07-03 (D-NET-152)
 
-The trailing event loop's `tag==2` branch is the projectile/melee impact record. Decoded by
-`NetPacket_DeserializeWeaponHit @ 0x42F270` — sole receiver, called from `0x4306EF` inside
-`NapiNPClientMsg_0x00A`. The record is 17-20 B, variable by `flags` gate bits `0x80` / `0x40`:
+The trailing event loop's `tag==2` branch is a **fired-round EVENT — the fire origin +
+direction of a round shot by another player — not an impact record** (the 2026-06-16 "weapon
+hit / impact" reading was a decode-era guess; every "impact" label below was really the
+muzzle). The receiving client re-simulates the round locally from origin + direction
+(`RoundData_SpawnRound @ 0x4EC0D0` — spread, velocity, tracer/projectile spawn), which is why
+no impact ever needs to be on the wire. Client read side:
+`NetPacket_DeserializeRoundEvent @ 0x42F270` (renamed from `…DeserializeWeaponHit`) — sole
+receiver, called from `0x4306EF` inside `NapiNPClientMsg_0x00A`. Host write side (witnessed
+2026-07-03): `NetPacket_SerializeRoundEvent @ 0x504820` (renamed from
+`serialize_projectile_to_packet`) serializes one `g_round_ring @ 0xC8D848` record. The record
+is 17-20 B, variable by `flags` gate bits `0x80` / `0x40`:
 
-| Field | Bytes | Gate | Landing |
+| Field | Bytes | Gate | Source (host write @0x504820) → landing (client read @0x42F270) |
 |---|---|---|---|
-| `flags` | u8 | always | local; bits 0x80 → `parent_byte` present, 0x40 → `weapon_handle` present, low bits 0x01/0x02 gate downstream damage-processing branches (not wire reads) [orig: 0x42f2a8] |
-| `adm_index` | u8 | always | → `AdmDef_GetEntryByIndex(adm_index)` resolves the action-descriptor entry [orig: 0x42f2ca] |
-| `hit_subtype` | u8 | always | → `dword_A822E0` (last-hit subtype global; categorises the hit) [orig: 0x42f2e2] |
-| `parent_byte` | u8 | `flags & 0x80` | `pos_z_decompressed` local → `hitDataPtr[5]` low byte; bone/seat index for the parent of the hit [orig: 0x42f30a] |
-| `target_handle` | u16 | always | `(pool<<12)\|slot` of the hit entity; `0xFFFF` = no target (early `return result`); validated against `g_pool_list` capacity [orig: 0x42f337] |
-| `weapon_handle` | u16 | `flags & 0x40` | parent-weapon sub-handle stored at `entity_link+12` for AI damage attribution; `0xFFFF` = sentinel (no parent weapon) [orig: 0x42f359] |
-| `damage_extra_raw` | u16 | always | raw u16 → `word_B7C670` global (weapon-extra slot; observed as a monotonic per-shot counter in the 2026-06-16d capture) [orig: 0x42f37e] |
-| `pos_x_compressed` | u16 | always | `Network_DecompressFixedPoint(.) + dword_A822E4` → `position[0]` (impact world X) [orig: 0x42f39c] |
-| `pos_y_compressed` | u16 | always | `+ dword_A822E8` → `position[1]` [orig: 0x42f3c7] |
-| `pos_z_compressed` | u16 | always | `+ dword_A822EC` → `position[2]` [orig: 0x42f3f2] |
-| `yaw_bam_high` | u16 | always | raw u16 reinterpreted as the high 16 bits of a 32-bit BAM (`raw << 16`); impact heading [orig: 0x42f41f] |
-| `pitch_bam_high` | u16 | always | raw u16 reinterpreted as BAM high word; impact pitch [orig: 0x42f43c] |
+| `flags` | u8 | always | ring+30 = the C2S 0x06 fire-mode byte (bit0 alt-fire, bit1 adm-indexed, bits 4-5 weapon-slot combo) `\| 0x40` iff the shooter's live fire target is set [orig: 0x5048c1] `\| 0x80` iff ring+32 non-zero [orig: 0x5048c8]; client: low bits 0x01/0x02 select the projectile vs direct spawn branches [orig: 0x42f2a8] |
+| `adm_index` | u8 | always | ring+33 → `AdmDef_GetEntryByIndex(adm_index)` resolves the weapon [orig: 0x42f2ca] |
+| `subtype` | u8 | always | ring+31 = the shooter fire-context composite `(extra_byte2 & 0x3F) \| ((extra_byte2>>7)<<7)` [orig: @0x50bd83 / roundParams[4] @0x50c7bd] → `dword_A822E0` (ex `hit_subtype`) [orig: 0x42f2e2] |
+| `slot_byte` | u8 | `flags & 0x80` | ring+32 = weapon-slot id / the uplink `misc_byte` (ex `parent_byte`) [orig: 0x4fdcfc] → `hitDataPtr[5]` low byte [orig: 0x42f30a] |
+| `shooter_handle` | u16 | always | ring+4 — **the SHOOTER** `(pool<<12)\|slot` (`RoundData_AddRound @ 0x4fdca8` resolves the shooter entity, NOT the hit target — the ex-`target_handle` reading was wrong); the client resolves it as the round's owner (team tracer color, attribution) [orig: 0x42f337] |
+| `target_handle` | u16 | `flags & 0x40` | the shooter's claimed fire target, read LIVE off `shooter+104→+12` at serialize time [orig: 0x50485a] (stamped per accepted 0x06 [orig: @0x50c2ad]; ex `weapon_handle`) → `entity_link+12` [orig: 0x42f359] |
+| `shot_seq` | u16 | always | ring+28 — per-shot sequence; the C2S 0x06 `hit_part` fire counter round-trips here via `word_B7C670` → the spawned round's +120 word (ex `damage_extra_raw`; the monotonic per-shot counter observed 2026-06-16d) [orig: @0x50c2ba → 0x4fdcf5 → 0x42f37e] |
+| `pos_x_compressed` | u16 | always | `Network_CompressFixedPoint(origin_x − g_priority_ref_x)` — the FIRE ORIGIN vs the recipient-eye anchor (the same refs the 0x0A header carries) [orig: 0x504994] → decompress + `dword_A822E4` [orig: 0x42f39c] |
+| `pos_y_compressed` | u16 | always | origin_y − ref_y [orig: 0x5049be / 0x42f3c7] |
+| `pos_z_compressed` | u16 | always | origin_z − ref_z [orig: 0x5049e8 / 0x42f3f2] |
+| `yaw_bam_high` | u16 | always | `(ring+20 + 0x8000) >> 16` — the FIRE DIRECTION yaw BAM32 high word (ring stores the C2S 0x06 raw `dir_x << 16`) [orig: 0x504a18] → `<< 16` on apply [orig: 0x42f41f] |
+| `pitch_bam_high` | u16 | always | `(ring+24 + 0x8000) >> 16` — fire direction pitch [orig: 0x504a3c / 0x42f43c] |
 
 **Closed byte-sum table by flags combination:**
 
-| flags & 0xC0 | parent_byte? | weapon_handle? | total |
+| flags & 0xC0 | slot_byte? | target_handle? | total |
 |---|---|---|---|
 | `0x00` | no | no | **17 B** |
 | `0x80` | yes (+1) | no | **18 B** |
@@ -1400,28 +1449,69 @@ The trailing event loop's `tag==2` branch is the projectile/melee impact record.
 | `0xC0` | yes (+1) | yes (+2) | **20 B** |
 
 After deserialization the receiver dispatches into the action-descriptor execution path:
-`flags & 1` enters projectile-impact, `flags & 2` enters direct-damage; both ultimately call
-`RoundData_ProcessHit` with the (`position`, `entity_ptr`, `adm_index`, `flags`, `hit_subtype`,
-`parent_byte`) tuple. The yaw/pitch BAM words feed FOV-cone sound playback at the impact site.
+`flags & 1` enters the alt/projectile branch, `flags & 2` the standard round branch; both
+ultimately call `RoundData_SpawnRound` (renamed from `…ProcessHit` — it spawns the round;
+no hit is processed at fire time) with the (`origin`, `shooter`, `adm_index`, `flags`,
+`subtype`, `slot_byte`) tuple. The yaw/pitch BAM words feed the round's trajectory and the
+FOV-cone fire sound.
+
+**The server-side staging chain (witnessed 2026-07-03, D-NET-152).** Per recipient, per
+frame, inside the §5.47 emit:
+
+1. **`RoundData_AddRound @ 0x4FDB40`** — the ONLY ring writer — appends a 36-B record to
+   the 256-entry ring `g_round_ring @ 0xC8D848` (cursor `g_round_ring_cursor @ 0xC8FC4C`,
+   saturating count `g_round_ring_count @ 0xC8FC48`, reset by `Game_StartMission
+   @ 0x525b7a`) and spawns the authoritative round via `RoundData_SpawnRound` inline. The
+   ring stores the PRE-SPREAD origin/direction (read from the fire request before the
+   spawn applies weapon spread [orig: @0x4fdbce]) and stamps ring+0 = `stat_id @ 0xC86FB0`.
+2. **`Server_BuildRoundEventListForPlayer @ 0x4FFEE0`** (renamed from the
+   `compute_entity_angular_priority` misnomer; called from `Server_BuildEntityPriorityList
+   @ 0x50e59c`) — walks ring records with `stat >` the recipient's watermark
+   (`playerSlot+97544`; its non-zero gate arms a fresh player at the current stat so the
+   pre-join backlog never replays), **skips rounds whose SHOOTER == the recipient**
+   [orig: @0x4fff97] (your own rounds are never echoed back — the firing client already
+   simulated them, see §5.16), scores each by the recipient's perpendicular distance from
+   the round's LINE OF FIRE (x87 double trig scaled 2^22; projection clamped to
+   [0, 1000u]; z half-weighted; `score = 0x4000 − lateral>>12`, floor 0 [orig: @0x500115]),
+   shell-sorts descending, writes up to 255 record ptrs to `g_round_event_refs @ 0xC863A0`,
+   and stamps the watermark = `stat_id` [orig: @0x5001ae].
+3. **`serialize_entity_states_to_packet @ 0x50F070`** — the event loop interleaves ONE
+   tag-1 entity record and ONE tag-2 round event per iteration under the shared
+   `g_entity_send_budget` [orig: tag-2 write @0x50f326 → NetPacket_SerializeRoundEvent
+   @0x50f331], `[0]` terminator.
+
+The whole-path consequence: a round fired by client A reaches client B (origin + direction,
+compressed vs B's own eye anchor) and B's engine re-fires it locally — tracer, sound,
+impact, and cosmetic damage all client-computed; the HOST's authoritative damage runs in
+its own `RoundData_SpawnRound` projectile (impact handlers `Projectile_Handle*Impact
+@ 0x4e93xx` — next-round scope).
 
 **Cross-witness (capture `host_and_join_game_on_opennovaworld_loopback_threeplayers_more_gameplay.pcapng`,
-2026-06-16d).** 20 weapon-hit records across 672 0x0A frames, all decoded byte-exact, zero
-walker halts. Observed flag bytes: `{0x02, 0x12, 0x22, 0x32}` (none with 0x80/0x40 set — all
-17 B minimum). Two distinct (`adm_index`, `hit_subtype`) tuples: `(68, 12)` × 13 hits, target
-`p0/s1`; `(7, 12)` × 7 hits, target `p0/s0`. `damage_extra_raw` increments monotonically per
-shot in each weapon's sequence (`0x020b…0x0217`, `0x0005…0x0006`), suggesting a per-weapon
-shot-id counter rather than damage value. Sample wire bytes — first record (17 B):
+2026-06-16d), relabeled 2026-07-03.** 20 round events across 672 0x0A frames, all decoded
+byte-exact, zero walker halts. Observed flag bytes: `{0x02, 0x12, 0x22, 0x32}` — exactly the
+fire-mode byte shape `((slotCombo & 3) << 4) | 2` the fire action builds [orig:
+WeaponAction_Fire @0x542c11], none with 0x80/0x40. Two distinct (`adm_index`, `subtype`)
+tuples now read correctly as the two SHOOTERS and their weapons: `(68, 12)` × 13 rounds by
+`p0/s1`; `(7, 12)` × 7 rounds by `p0/s0`. `shot_seq` increments monotonically per shooter
+(`0x020b…0x0217`, `0x0005…0x0006`) — the per-shot fire counter (= the C2S 0x06 `hit_part`
+field, §5.16). Sample wire bytes — first record (17 B):
 
 ```
 02 44 0c 01 00 0b 02 9a 44 38 6d d6 ea bc 73 02 f9
-flags=02 adm=44(=68) sub=0c(=12) target=0x0001 dmgExtra=0x020b
-pos=(0x449a,0x6d38,0xead6) yaw_BAM=0x73bc pitch_BAM=0xf902
+flags=02 adm=44(=68) sub=0c(=12) shooter=0x0001 shotSeq=0x020b
+origin=(0x449a,0x6d38,0xead6) yaw_BAM=0x73bc pitch_BAM=0xf902
 ```
 
 The decoder is bounds-checked end-to-end (libs/novaworld §5.9.1
-`decode_weapon_hit_record`) and the nw_pp walker advances past tag==2 records to keep decoding
-the rest of the frame — previously the walker halted on the first hit per frame, masking
-subsequent records.
+`decode_round_event_record`, ex `decode_weapon_hit_record`) and the nw_pp walker advances
+past tag==2 records to keep decoding the rest of the frame. REIMPL (D-NET-152): the host
+side is ported — `world::RoundRing` (round_ring.h), the per-connection watermark + the
+line-of-fire scoring in netsim `select_round_events`, and the `RoundEventRecord` codec
+rename sweep (struct/codec/nw_pp/replay/tests; old nw_pp dumps show the pre-rename
+`weapon-hit`/`target`/`dmgExtra` labels). Live v28: a single-observer session correctly
+carries ZERO tag-2 (the idle host is the in-process connection and own rounds are skipped
+`@0x4fff97`) — the positive fan-out witness is the `netsim_two_peer_fanout` pin until a
+second observer client joins a capture (D-NET-152).
 
 **Tag 0x0C (C2S) — entity sub-packet** `[orig: NapiNPServerMsg_0x00C @ 0x501C30 →
 dispatch_entity_packet_callback @ 0x4D6A80]`. The joiner's per-frame uplink for an entity it
@@ -1475,9 +1565,28 @@ Callback context struct (built by `dispatch_entity_packet_callback` and `Pool_Se
 `Network_DecompressFixedPoint @ 0x4C27E0` / `Entity_TransformWorldToLocal @ 0x43BB50` /
 `Entity_TransformLocalToWorld @ 0x43BD00`]. The compressor packs an i32 16.16 into a `u16`:
 sign=bit0, exponent=bits1-3, mantissa=bits4-15. World→wire is delta from
-`dword_C867A4 / C867A8 / C867AC` (map origin); when mounted, position is vehicle-LOCAL
-instead (the case-3/4 vehicle branch transforms via `Entity_TransformWorldToLocal` before
-the cursor write).
+`g_priority_ref_x/y/z @ 0xC867A4/A8/AC` — NOT a map origin (the early reading): the
+per-recipient send sets them to the RECIPIENT'S EYE position (`entity+4..+0xC` +
+`CameraOffset entity+0x6C..`) right before serializing its frame [orig:
+`Server_SendEntityStateToPlayer @ 0x517ba0`, stores `@0x517bf5-0x517c13`], and the 0x0A
+header refs carry the same three dwords to the client (→ `dword_A822E4/E8/EC`). When a
+CARRIER is live — the mount (`entity+0x16C`), else the standing-on **groundEntity
+(`entity+0x28`)**, any pool 0-4 (buildings included) — position is CARRIER-LOCAL instead
+(`Entity_TransformWorldToLocal` before the cursor write) and the heading field goes
+carrier-relative (the transforms are 6-dword POSE transforms: `out[3] = heading ∓ carrier
+heading`, pitch/roll pass through — `@0x43bb7b-0x43bb8d` / `@0x43be7e`). D-NET-151.
+
+**The pool table behind every handle resolve** [orig: `EntityPool_Allocate @ 0x442168`]:
+`g_pool_list @ 0xA892E0` is five 16-B descriptors `{base, stride, used, capacity}` over one
+malloc'd heap (randomized base offset, anti-tamper). The strides ARE the per-pool entity
+struct sizes — the pools hold DIFFERENT structures: pool 0 players **904 B** (`0x388`,
+`GamePlayerEntity`) × 256, pool 1 vehicles/items **1360 B** (`0x550`) × 1200, pool 2
+statics/destructibles **812 B** (`0x32C`) × 1200, pool 3 projectiles **988 B** × 768,
+pool 4 effects **988 B** × 128. Handle encode/decode is a base+stride walk
+(`(pool<<12)|((ptr-base)/stride)` and back), so field offsets witnessed on one pool's
+struct (e.g. GamePlayerEntity's `+0x28 groundEntity`, `+0x157 attachBoneId`, `+0x16C
+parentEntity`) do NOT transfer to another pool's — only the low pose block (+4 pos,
++0x10..0x18 euler, +0x1C/+0x20 item, +0x24 flags) is layout-shared across pools.
 
 **Decompressor (the read-side inverse, solved 2026-06-17)** [orig: `Network_DecompressFixedPoint
 @ 0x4C27E0`] is a pure one-liner: `sign = (bit0 of c) sign-extended; world_delta = sign ^
@@ -1506,18 +1615,18 @@ Inside §5.9 tag-0x0A's event loop (`tag==1` branch): the lookup
 
 | off | bytes | field | landing |
 |---|---|---|---|
-| 0 | 1 | vehicleBone | entity+0x157 |
-| 1 | 1 | seatType (0/1/2) | local seat-type byte |
-| 2 | 2 | vehicleHandle (`0xFFFF`=none) | pool resolve |
-| 4 | 2 | posX *compressed* | `DecompressFixedPoint` → entity+4 (vehicle-local if mounted, else world + `C867A4`) |
+| 0 | 1 | attachBone (0 unless seat-mounted) | entity+0x157 (`attachBoneId` — renamed from the `weaponType` IDB misnomer, D-NET-151). Write reads +0x157 only when mounted [orig: `@0x4c0a1a`]; the receiving client resolves ITS seat from this raw bone via `Entity_TryAttachOrDetach @ 0x436610` (bone 0 / no carrier = detach) — the 0x26 attach has NO confirm tag, this echo IS the confirmation (D-NET-157) |
+| 1 | 1 | seatType (0/1/2; 0 unless seat-mounted) | 0 for a plain vehicle seat; 1 iff the carrier is a mountable GUN (`itemDef.type != 1 && attrib & 0x20 ATTR_EWeap` with `carrier+0x326 & 2`), 2 if additionally `carrier+0x312 & 8` [orig: `@0x4c0a39-0x4c0a50`]; the client apply equips the gun slot |
+| 2 | 2 | carrierHandle (`0xFFFF`=none) | op1 select: mount (`entity+0x16C`) wins, else **groundEntity (`entity+0x28`)** — a grounded-standing player echoes its floor/deck (ANY pool) with bone=0 seat=0 [orig: `@0x4c0a08`]. The client mirrors it back into its own groundEntity [orig: `@0x4c1353`] — see the D-NET-151 snap. An unknown-but-valid carrier handle aborts the record + queues C2S 0x0F for it (@ 0x430814 apply path). |
+| 4 | 2 | posX *compressed* | `DecompressFixedPoint` → entity+4 (CARRIER-local via `Entity_TransformWorldToLocal` when carrierHandle != none [orig: write `@0x4c0b07`], else world + anchor `C867A4`) |
 | 6 | 2 | posY | → entity+8 (+ `C867A8`) |
 | 8 | 2 | posZ | → entity+0xC (+ `C867AC`) |
-| 10 | 1 | yaw byte | high byte of a 32-bit BAM → `entity+0x10` (heading) on read [D-NET-57] |
+| 10 | 1 | yaw byte | high byte of a 32-bit BAM → `entity+0x10` (heading) on read [D-NET-57]; CARRIER-RELATIVE local heading when carrierHandle != none (`(Yaw − carrierYaw) >> 24`, the `sar 24` of the pose transform's out[3] [orig: `@0x4c0b85`]) |
 | 11 | 1 | pitch byte | same shape → `entity+0x14` (pitch) on read; the write sources `(entity+0x14 + 0x800000) >> 24` [D-NET-57] |
-| 12 | 1 | anim slot low | → entity+0x12C |
-| 13 | 1 | state flags | bit `0x02` = spawning, bit `0x04` = mounted; → entity+0x24 |
-| 14 | 1 | weapon-anim state | → entity+0x2B8 / 0x2BC |
-| 15 | 1 | priority | → entity+0x377 |
+| 12 | 1 | moveOrder (movement-INPUT byte) | entity+0x12C low [orig: write `@0x4c0c9c`] — bits 0-2 = 8-way dir, bit 3 = moving, bits 6/7 = lean L/R (the packing `Player_PackInputStateToEntity @ 0x4df68f`); remote players are MOTOR-driven from it (see the apply bullets below) |
+| 13 | 1 | state flags | entity+0x24 low, UNMASKED on write [orig: `@0x4c0c7d`]: **bit 0x01 = hidden (respawn-pending — the flags1-bit1 writer ORs it while undeployed, the golden pre-deploy byte)**, bit `0x02` = dead/undeployed, bits 2-4 = the local-UI modifier family (0x4 `dword_B7654C`, 0x8 walk-toggle `byte_B7653A`, 0x10 scope `g_weaponScopeActive` [orig: local-only writer `@0x4b5d7f-0x4b5da9`; 0x10 suppresses the run promotion `@0x4b72e2`]), bit `0x40` = mounted |
+| 14 | 1 | body-anim STATE id | write = pendingAnimStateId (+0x2B8) if nonzero else animStateId (+0x2BC) [orig: `@0x4c0cc7`]; **the server RECOMPUTES this with its own body motor from the replicated input — it is never echoed from an uplink** (the uplink carries no anim state; D-NET-159) |
+| 15 | 1 | anim-channel ratio | write = the anim channel's (entity+0x188) elapsed-ticks-in-current-loop, trunc + clamp 255 [orig: `@0x4c0cf2`; `AnimChannel_AdvancePlayback @ 0x40B140` advances normalized time, wraps at 1.0] |
 | 16 | 1 | anim def index | → entity+0x2B0 |
 | 17 | 1 | health classification | Write side (server): `Entity_GetHealthClassification @ 0x4AD4E0` (called @0x4c0d71, stored @0x4c0d89 as the record's last byte): `byte = (tier<<4) \| (playerClass@+0x294 & 0xF)`, tier from `ratio = (Health@+0x11E << 16) / max(healthMax@itemDef+0x17C, 1)` — tier 2 if `> 49152`, tier 1 if `> 28671`, else 0 (D-NET-138). Read side: `Entity_SetHealthFromDifficultyByte @ 0x4AD580`: `tier=(byte>>4)&3` @0x4ad596 → `Health = {tier2 ≈0.875×, tier1 ≈0.594×, tier0/3 ≈0.219×} × ItemDef.healthMax` (@0x4ad5f4 / 0x4ad65b / 0x4ad68c — the tier midpoints of the write-side boundaries), low nibble → `playerClass` +0x294 @0x4ad5a2, then the item is RE-RESOLVED from playerClass (@0x4c1248 — see §5.46). **Don't-care for the LOCAL player**: `NetPacket_SerializePlayerState` SKIPS this apply for `g_local_player_entity` (`cmp edi,g_local_player_entity; jz` @0x4c11ac → local branch only floors `Health` at 1 @0x4c11c4); the local player's health comes from the §5.9 0x0A tail, not this byte |
 
@@ -1536,17 +1645,37 @@ misnomers corrected here):**
   the local player's own Flags every record — the byte must mirror the host's copy of that
   client's flags (kept fresh by the uplink), never synthesized constants.
 - **off 14 is a body/weapon anim-STATE id** (entity+0x2BC, vs the per-state flags table
-  `dword_8139E8 @ 0x8139E8`; transition-arbitrated: 0x20-flagged states uninterruptible except by
-  1-flagged, defer bits 0x4/0x20 route to the pending slot +0x2B8 `@0x4c1174/@0x4c118a`). LOCAL
-  player skips (`@0x4c1167`) except the wire-bit2 dead path. Spawn default = **0x2B (43, idle)**
-  [orig: PlayerClass_InitEntity @ 0x4B1116 sets +0x2BC = +0x2C8 = 0x2B]. Write side emits the
+  `g_animStateFlagsTable @ 0x8139E8` — renamed 2026-07-03 from the bare dword label, 254 entries: bit1
+  idle-class, bit4 uninterruptible → queue to pending, 0x20 exit-needs-bit0, 0x100/0x200 stance
+  rebits, 0x400 long blend; transition-arbitrated: 0x20-flagged states uninterruptible except by
+  1-flagged, defer bits 0x4/0x20 route to the pending slot +0x2B8 `@0x4c1174/@0x4c118a`; the
+  remote apply then re-derives MoveOrder stance bits 8-9 from the table `@0x4c11fd-0x4c1242`). LOCAL
+  player skips (`@0x4c1167`) except the wire-bit2 dead path. Init default **0x2B (43, idle)**
+  [orig: PlayerClass_InitEntity @ 0x4B1116 sets +0x2BC = +0x2C8 = 0x2B]; **spawn/deploy resets to
+  44** (idle2; 153 when the class table maps it) [orig: Entity_ResetToSpawnState @ 0x4b9714].
+  State ids (witness 2026-07-03): 1-8 stand-walk + dir, 11-18 crouch, 19-26 prone, 27/28 water,
+  37-40 parachute, 41/42 lean, 43 idle-collapse, 44 spawn/long-idle, 45/46/48 jump/land/
+  prone-trans, 169-172 stance transitions, 175 falling-death. Write side emits the
   pending state when non-zero, else the current (`@0x4c0cd6/@0x4c0cde`). State 0 has no table
-  flags (`dword_8139E8[0] = 0`) and pins the body to clip 0 — the "null" clip.
+  flags and pins the body to clip 0 — the "null" clip.
 - **off 15** (anim-channel ratio) applies REMOTE-only and only inside the anim-state-accept
-  branch (`@0x4c11a6` → entity+0x377, consumed by `AnimMap_UpdateEntity @ 0x40B74B`). OPEN: the
-  case-1 write side's source of this byte is the +0x188 channel ratio (`@0x4c0cf2`), but the
-  read stores it to +0x377 whose host-side writer is unlocated (6 code refs, none a plain host
-  store — likely a computed/aliased address in the action layer).
+  branch (`@0x4c11a6` → entity+0x377 — the remote entity's net anim-phase seed, consumed by
+  `AnimMap_UpdateEntity @ 0x40B74B`; client-side only, which is why no plain host-side writer
+  exists — resolves the 2026-07-02 OPEN). The case-1 write side's source is the +0x188 anim
+  channel's elapsed-ticks-in-loop (`@0x4c0cf2`, trunc clamp 255).
+- **The SERVER-side source of off 12/14/15 for a remote player (witness 2026-07-03, D-NET-159):**
+  the authority runs the player-body anim selection for EVERY player — `Entity_UpdateInfantryPlayerBody
+  @ 0x4B40E0` gates on `g_local_player_entity == e || g_napi_np_ctx.is_authority` (@ 0x4b70a3-0x4b70b2)
+  and skips mounted/dead/swimming entities (`Flags & 0x2000 / 0x42` @ 0x4b70b8-0x4b70c8), every 4th
+  tick (@ 0x4b70ce). Inputs, all REPLICATED: MoveOrder bits 0-2 (8-way dir; state offset table
+  {0,7,6,5,4,3,2,1} @ the 0x4b71c7 switch), bit 3 (moving), bits 8/9 (prone/crouch — fed by C2S
+  0x1D since the uplink's low byte cannot carry them; prone suppressed by `Flags & 0x10A000`
+  @ 0x4b416c). Selection: moving → base 1/11/19 (stand/crouch/prone) + dir offset
+  (@ 0x4b7183-0x4b7226); idle → 45 (crouch) / 48 (prone) / 43-then-44 after 62 selection passes
+  (`state = 0x2B + (++entity[0x148] >= 0x3E)` @ 0x4b727b-0x4b7293); forward-walk promotes to
+  run/jog 9/10 by the equipped ADM's gait class (`dword_24E808C[adm*0x460]`) + look pitch, unless
+  Flags & 0x10 (scope) (@ 0x4b729d-0x4b731b); prone lean 41/42 from MoveOrder bits 6/7
+  (@ 0x4b731b-0x4b7354); commit via the flag-table arbitration (@ 0x4b7356-96).
 - **off 16 (ADM anim-def index): 0 is a VALID index — 0xFF is the null sentinel** (entries
   stride 1120): the client stores it to +0x2B0 AND resolves `entity+0x298 =
   AdmDef_GetEntryByIndex(byte)` UNGATED for remote players (`@0x4c11f2-0x4c120d`) — 0xFF nulls
@@ -1556,17 +1685,27 @@ misnomers corrected here):**
   +0x2B0 @ 0x4B1116; local switch `Player_SelectWeaponSlot @ 0x4DD727/0x4DD7F5`; net: the host
   ECHOES the extended uplink's own byte — case-4 store @ 0x4C20A3, gated `category < 11`].
 - **Local-player position echo**: never applied outside (a) the spawn edge and (b) a mount/
-  dismount snap after `Entity_TryAttachOrDetach` (`@0x4c1329-0x4c1345`); the record is parsed
-  whole but the local motor owns the live pose. off-17 health apply is remote-only; the local
-  branch only floors Health at 1 (`@0x4c11c4`).
-- **off 0-3 mount fields apply to the LOCAL player too**: a resolving vehicle handle whose
+  dismount snap after `Entity_TryAttachOrDetach @ 0x436610` (`@0x4c1329-0x4c1345`; returns 1 =
+  attach state CHANGED — a bone+carrier record that differs from the current attach, or a
+  bone-less record while `parentEntity`/`parentSlot` are set → `Entity_DetachFromVehicle
+  @ 0x4355F0`); the record is parsed whole but the local motor owns the live pose. off-17
+  health apply is remote-only; the local branch only floors Health at 1 (`@0x4c11c4`).
+- **off 0-3 carrier fields apply to the LOCAL player too**: a resolving carrier handle whose
   entity has a null itemDef ABORTS the record and queues C2S 0x0F for that handle
-  (`@0x4c10a9-0x4c10bd`); 0xFFFF while mounted force-dismounts.
+  (`@0x4c10a9-0x4c10bd`); 0xFFFF while mounted force-dismounts. And UNCONDITIONALLY —
+  local player included — the record's carrier is stored into the entity's own
+  **groundEntity (`+0x28`)**: `groundEntity = mounted ? mount->groundEntity : wireCarrier`
+  [orig: `@0x4c1353/@0x4c1358`]. The client's own platform physics re-derives the true
+  ground link every collision pass (`Flags |= 0x100000` + groundEntity = platform [orig:
+  `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b3291-0x4b3297`]), so a HOST that echoes
+  the matching carrier is steady-state — but a host that echoes `0xFFFF` at a grounded
+  client re-nulls the link every 0x0A and destabilizes the standing state (D-NET-151).
 
 **Spawn hook (load-bearing):** superseded detail above (off-13 bullet) — the hook is the wire
 bit-0x02 1→0 EDGE, local-player `Game_InitNewRound` + everyone's `Entity_ResetToSpawnState`.
 The case-1 write side is the inverse: position via `Network_CompressFixedPoint(entity+4..C −
-mapOrigin)`, vehicle-local via `Entity_TransformWorldToLocal` when a parent vehicle is attached.
+g_priority_ref)` (the recipient-eye anchor, not a map origin), CARRIER-local via
+`Entity_TransformWorldToLocal` when the mount-else-groundEntity carrier is live (D-NET-151).
 
 #### Tag 0x0C body — extended (type-10) [orig: `NetPacket_SerializePlayerState` case 3/4]
 
@@ -1576,35 +1715,105 @@ including a host-validated anti-cheat block:
 
 | off | bytes | field | landing (host receiver, case 4) |
 |---|---|---|---|
-| 0 | 2 | vehicleHandle (`0xFFFF`=none; `(h&0xF000)>=0x5000` invalid) | pool resolve via `g_pool_list` |
-| 2 | 4 | posX (i32 LE, 16.16; vehicle-local if mounted) | smooth-target entity+0x234 (ABSOLUTE world — NO map-origin add on receive; mounted = vehicle-local lift via `Entity_TransformLocalToWorld @0x43BD00`; §5.38a / D-NET-91) |
+| 0 | 2 | carrierHandle (`0xFFFF`=none; `(h&0xF000)>=0x5000` invalid) | pool resolve via `g_pool_list` (any pool 0-4). The SENDER writes its **groundEntity (`entity+0x28`)** here — the entity it STANDS ON (building floor, vehicle deck; v26: a pool-2 static `0x227e`), pool-encoded at the case-3 head. The old "vehicleHandle / mounted" reading undersold it — D-NET-151. |
+| 2 | 4 | posX (i32 LE, 16.16; CARRIER-local when carrierHandle != none) | smooth-target entity+0x234 (free = ABSOLUTE world, NO anchor add on receive; carrier = local lift via `Entity_TransformLocalToWorld @0x43BD00` `@0x4c1de1`; §5.38a / D-NET-91/151) |
 | 6 | 4 | posY | entity+0x238 |
 | 10 | 4 | posZ | entity+0x23C |
-| 14 | 2 | heading (i16 LE, sign-ext ×0x10000) | entity+0x240 / +0x10 (32-bit BAM) |
-| 16 | 2 | pitch (i16 LE, sign-ext ×0x10000) | entity+0x244 / +0x14 |
-| 18 | 1 | RESERVED — cursor advance, no read | — |
+| 14 | 2 | heading (i16 LE, sign-ext ×0x10000) | entity+0x240 / +0x10 (32-bit BAM); CARRIER-RELATIVE when grounded — the pose transform re-adds the carrier heading (`out[3] = ref[3] + local[3]` `@0x43be7e`) |
+| 16 | 2 | pitch (i16 LE, sign-ext ×0x10000) | entity+0x244 / +0x14 (pose pass-through, never localized) |
+| 18 | 1 | anti-cheat flags (sender's rotating self-check accumulator: IsDebuggerPresent / D3D9-hook / speed checks, the case-3 `dword_B5ABA8` counter switch) | cursor advance, byte DISCARDED by the host apply |
 | 19 | 1 | movement-input byte (was misnamed "anim slot low"; witness 2026-07-02) | entity+0x12C low @0x4C1E2C — the locomotion input the host echoes at 0x0A off-12 |
-| 20 | 1 | flagsXor (mask `0x1C` — bits 2-4 only) | XOR'd into entity+0x24 @0x4C1E4A |
-| 21 | 1 | anim def 1 | entity+0x130 @0x4C1E6A |
-| 22 | 1 | anim def 2 | entity+0x131 @0x4C1E87 |
-| 23 | 1 | anim def 3 | entity+0x132 @0x4C1EA4 |
+| 20 | 1 | state-flags byte — the sender's RAW `entity+0x24` low byte | bits 2-4 REPLACE the host entity's: `flags ^= (flags ^ wire) & 0x1C` `@0x4c1e4d`. NOT an xor-delta (the old "flagsXor" reading — an xor-apply corrupts already-set stance bits; crouch/prone family). D-NET-151. |
+| 21 | 1 | analog X (was "anim def 1" — a decode-era misnomer; witness 2026-07-03) | entity+0x130 @0x4C1E6A, verbatim — the joystick/analog movement axes the packer deposits after the input bits |
+| 22 | 1 | analog Y | entity+0x131 @0x4C1E87 |
+| 23 | 1 | analog Z | entity+0x132 @0x4C1EA4 |
 | 24 | 1 | equipped-weapon AdmDef index (was "RESERVED/discarded" — witness 2026-07-02) | entity+0x2B0 @0x4C20A3, gated `AdmDefs[idx].category < 11`; the host echoes it at 0x0A off-16 |
 | 25 | 1 | stat byte 0 | playerSlot+0x15F78 |
 | 26 | 1 | stat byte 1 | playerSlot+0x15F79 |
-| 27 | 2 | weapon id 0 | playerSlot+0x1708A |
-| 29 | 2 | counter 0 (u16 → zero-ext u32) | playerSlot+0x17094 |
-| 31 | 2 | weapon id 1 | playerSlot+0x1708C |
-| 33 | 2 | counter 1 (u32) | playerSlot+0x17098 |
-| 35 | 2 | weapon id 2 | playerSlot+0x1708E |
-| 37 | 2 | counter 2 (u32) | playerSlot+0x1709C |
-| 39 | 2 | weapon id 3 | playerSlot+0x17090 |
-| 41 | 2 | counter 3 (u32) | playerSlot+0x170A0 |
+| 27 | 2 | priority handle 0 | playerSlot+0x1708A |
+| 29 | 2 | priority score 0 (u16 → zero-ext u32) | playerSlot+0x17094 |
+| 31 | 2 | priority handle 1 | playerSlot+0x1708C |
+| 33 | 2 | priority score 1 (u32) | playerSlot+0x17098 |
+| 35 | 2 | priority handle 2 | playerSlot+0x1708E |
+| 37 | 2 | priority score 2 (u32) | playerSlot+0x1709C |
+| 39 | 2 | priority handle 3 | playerSlot+0x17090 |
+| 41 | 2 | priority score 3 (u32) | playerSlot+0x170A0 |
 
-The 8 trailing u16s form **4 pairs of `(weapon_id, fire_counter)`** — the host's anti-cheat
-ground truth for shot/hit tallies. `playerSlot` = `packetCtx+0x20` = the joiner's
-per-connection player struct (`connectionCtx+0x160 → playerObj+0xC0`, set by
+The 8 trailing u16s are **4 `(handle, score)` ENTITY-PRIORITY pairs** — the sender's top-4
+interest list from `Server_BuildEntityPriorityListForPlayer(entity, .., 4)` [orig: case-3
+call `@0x4c1be9`] — NOT weapon/fire-counter tallies (the old decode-era guess; v26 shows the
+ridden buggy's handle scored first while standing on it). `playerSlot` = `packetCtx+0x20` =
+the joiner's per-connection player struct (`connectionCtx+0x160 → playerObj+0xC0`, set by
 `NapiNPServerMsg_0x00C`). The case-3 send path mirrors this layout from the joiner's local
-state.
+state. Pos/orientation/ADM stores are deploy-gated: `!(Flags & 2) && !g_spawn_success_gate &&
+connState == 6 && !preround` (@ 0x4c2028); wire flags bit0 forces a hard pos snap; the
+staleness counter entity+0x27C resets to 0 on apply.
+
+**The uplink carries NO anim state and NO stance** (witness 2026-07-03): byte 19 is only the
+MoveOrder LOW byte (dir/moving/lean — bits 8/9 crouch/prone are above it), and byte 20's bits
+2-4 are the local-UI modifier family (walk-toggle/scope/`B7654C`), NOT crouch/prone. Stance
+replicates via the dedicated **C2S 0x1D stance-change** (dispatch table), and the server
+recomputes the body anim itself (D-NET-159 / the §5.10 off-14 bullet).
+
+#### C2S 0x26/0x27 — vehicle attach/detach flow (witnessed 2026-07-03, D-NET-157)
+
+Client senders: **0x26** = `[u16 senderEntityHandle][u16 vehicleHandle][u8 modelBoneIndex]
+[u8 stack-pad]` `[orig: Entity_RequestVehicleAttach @ 0x4364A0 — renamed from
+Entity_RequestVehicleAttach; pre-snaps yaw from the seat bone, then authority ?
+Entity_ProcessVehicleAttach : queue 0x26 @ 0x436602]`. **0x27** = `[u16 selfHandle]
+[u16 vehicleHandle][u16 junk]` `[orig: Entity_SendDetachPacket @ 0x435510; the use-key
+dismount SENDS ONLY and waits for the 0x0A echo @ 0x4369c7]`. **There is NO confirm tag** —
+the 0x0A compact record's mounted branch (byte0 bone + carrier, §5.10) is the confirmation
+for everyone including the requester.
+
+Server 0x26 (`NapiNPServerMsg_HandleVehicleAttach @ 0x502390`): authority-gated; sender conn
+→ player block (+0x160) → entity cell (+0xC0); **word0 is OVERWRITTEN with the sender's
+authoritative handle** (@ 0x502415 — anti-spoof; the client value is never read); then
+`Entity_ProcessVehicleAttach @ 0x435AA0` (thunk @ 0x435cf0), validation order:
+
+1. resolve via `g_pool_list`; reject null vehicle/itemDef/player or either `Flags & 2`
+   (dead) @ 0x435b01;
+2. `slotType = Entity_GetBoneSlotType(vehicle, bone)` @ 0x434ED0 — the model BONE table
+   (count model[47], names model[48], 48-B stride, name +32, **boneIndex 1-based**),
+   case-insensitive prefix `sitex→1, ctrlx→2, drvrx→5, UseGun→3`, else 0 → reject;
+3. the requester's EquippedSlot (0x118) MountSlot currentAction (+0x2C) must be 0/1/11
+   (weapon busy rejects) @ 0x435b29;
+4. `Vehicle_HasEnemyOccupant @ 0x4359F0` (renamed 2026-07-03 from find_entity_mounted_on_vehicle —
+   returns BOOL, 2 args): a live ENEMY occupying the vehicle or one of its ATTR_EWeap guns
+   rejects — pool-0 scan, skips dead/self/same-team (+0x162 compare @ 0x435a5f), hit iff
+   `e->parentEntity(0x16C) == root`; same-team occupants never block (co-boarding);
+5. seat occupancy: the bone's index in the ItemDef 10-byte seat block
+   `[seatBoneIndex[0..7] @ +0x25D, controlBone @ +0x265, useGunBone @ +0x266]`; found +
+   `vehicle->mountHandles[idx](0x190) != 0xFFFF` rejects @ 0x435ba9 (NOT found → proceed
+   without the occupancy check);
+6. already mounted → detach first @ 0x435bce;
+7. slotType 1/2/5 → `Entity_AttachToVehicleSlot @ 0x4946D0`; 3 →
+   `Entity_AttachToUseGunSlot @ 0x546B80` (renamed 2026-07-03 from the _0 suffix clone;
+   server passes forceAttach = 0); success → `player->MoveOrder(0x12C) &= ~0x300`
+   @ 0x435c42 (stance clear; the local latches too @ 0x435c54).
+
+`Entity_AttachToVehicleSlot @ 0x4946D0` writes — type 1 (sitex): bone must be in
+`seatBoneIndex[0..7]`, occupied → 0, else `mountHandles[idx] = playerHandle` @ 0x494746;
+type 2 (ctrlx): `vehicle+0x170` occupant null-or-self AND `attrib & 0x40 ATTR_PlayerControl`,
+`vehicle+0x170 = player`, `mountHandles[8](+0x1A0) = handle`, and iff `attrib & 0x20
+ATTR_EWeap` save the prev slot to `player+0x308`, `player->EquippedSlot = vehicle+1140`,
+`*(vehicle+1176) = player` @ 0x494875; type 5 (drvrx): same gates as 2 @ 0x49492f. Common
+tail @ 0x494752-75: `player->Flags = (Flags & 0xFFFF5FBF) | 0x40` (clear 0x8000|0x2000, set
+mounted), `parentEntity(0x16C) = vehicle`, `attachBoneId(0x157) = bone`,
+`parentSlot(0x168) = slotType`, return 1.
+
+Server 0x27 (`NapiNPServerMsg_HandleVehicleDetach @ 0x4FC980` → tail @ 0x435D00): sender
+conn must have a player block+cell; `h = wire word0` — **TRUSTED (no anti-spoof, no range
+guard)** in retail; then `Entity_DetachFromVehicle(e, *(e+0x16C))` @ 0x435d40.
+`Entity_DetachFromVehicle @ 0x4355F0`: `MoveOrder &= ~0x300`; parentSlot ∈ {2,3} non-local →
+`EquippedSlot = *(entity+0x308)` restore; `!(Flags & 0x100)` → EquippedSlot = 0;
+`vehicle+0x170 == entity` → clear it (ATTR_PlayerControl → engine-state 7, flush vehicle
+ownerSession (0x1CC)); clear every matching `mountHandles[i] == handle → 0xFFFF` (10 slots,
+BOTH the passed vehicle and `entity->parentEntity` when different); finally `Flags &= ~0x40;
+0x16C = 0; 0x157 = 0; 0x168 = 0`. Reimpl: `world::entity_process_vehicle_attach /
+entity_detach_from_vehicle` (libs/world/vehicle_attach.cpp) behind the dispatch cases; the
+0x27 subject is clamped to the sender's own entity and the seat classification falls back to
+the model-userpoint seat table (divergences tracked in D-NET-157).
 
 **Cross-witnessed against the 2026-06-16b capture** (joiner=`32769`, host=`32768`):
 - Frame, joiner stationary: vehHdl `ff ff` (none); posX `8f be b0 05` = `0x05b0be8f` / 65536
@@ -1660,7 +1869,7 @@ Network-serialize callbacks observed in the table (14 networked entries with
 |---|---|---|---|
 | `plyr` | `NetPacket_SerializePlayerState @ 0x4C09C0` | player infantry | both compact (type 11) and extended (type 10) — §5.10 |
 | `org0` / `org1` | `NetPacket_SerializeInfantryEntityState @ 0x4C0320` | AI infantry / organic | compact only — §5.14 |
-| `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` | `Entity_SerializeMountedVehicleState @ 0x460560` | vehicles + AI ground/air units | compact only — §5.13 |
+| `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` | `Entity_SerializeVehicleState @ 0x460560` | vehicles + AI ground/air units | compact only — §5.13 |
 | `rokt` / `stng` / `hlfr` / `jvln` / `arty` | `Entity_SerializeGuidedMissileState @ 0x447C50` | guided weapons (rockets, missiles, artillery) | 4 modes × 6 field-groups; selector = sub_op byte; ported, wire-deferred — §5.15 |
 
 **Non-networked entries (27 with `fn[3] == 0`)**, kept in the table for the
@@ -1713,10 +1922,10 @@ consumed exactly on every payload).
 | — | 1 | refNum | `spawnFlags & 0x0040` | entity+533 (D-NET-94; not an alert level) |
 | — | 1 | subType | `spawnFlags & 0x0080` | entity+532 |
 | — | 1 | weaponTypeByte | `spawnFlags & 0x1000` | entity+176 |
-| — | 1 | healthByte | `spawnFlags & 0x2000` | entity+538 |
-| — | 2 | healthShort | `spawnFlags & 0x2000` (extra read) | entity+350 |
-| — | 2 | healthShort (alt) | `(spawnFlags & 0x8000) && !(0x2000)` | entity+350 |
-| — | 1 | difficultyByte | `spawnFlags & 0x4000` | entity+624 |
+| — | 1 | zoneNumberRank (was "healthByte" — zone-object semantics, 2026-07-03) | `spawnFlags & 0x2000` | entity+538 — the packed **AS zone byte** `zoneNumber + 32·rank`, server source `ZoneSlotChain_GetZoneInfo @ 0x503eeb`; write gate = `entity+538 != 0` @ 0x503ecc. Golden ASH_I5A bunkers (type 0x054F): flags 0x20a1/0x20b1, byte 0x22 = zone 2 rank 1 |
+| — | 2 | zoneRadius (was "healthShort") | `spawnFlags & 0x2000` (extra read) | entity+350 — the capture-zone/proximity radius (BMS record word 14; golden bunkers 70 = 0x46) |
+| — | 2 | zoneRadius (alt) | `(spawnFlags & 0x8000) && !(0x2000)` | entity+350 — the un-numbered SpawnPoint-def path: write gate `ItemDef+84 & 0x40000` @ 0x503f29 |
+| — | 1 | difficultyByte | `spawnFlags & 0x4000` | entity+624 — write gate = the def has a physics/damage handler @ 0x503f4c |
 
 **Weapon block precise shape (corrected — D-NET-56):** the `0x400` branch reads the u8 mask;
 when the mask is non-zero it walks bits 0..7 reading one u16 per set bit (`0xFFFF` on a set bit
@@ -1817,7 +2026,8 @@ teams confirms the `flags & 0x08` byte at entitySlot+354 is the **raw BMS team i
 
 ### 5.13 Vehicle compact record (S2C 0x0A trailing event)
 
-`[orig: Entity_SerializeMountedVehicleState @ 0x460560]`. Used by every item
+`[orig: Entity_SerializeVehicleState @ 0x460560 — renamed 2026-07-04 from
+Entity_SerializeMountedVehicleState]`. Used by every item
 whose entity class tag is `CHel` / `cveh` / `cbot` / `cpln` / `ctrn` (per
 §5.10b dispatch table). Both write (mode 1) and read (mode 2) paths handle
 format type 11 only — the callback rejects modes 3/4 (extended), so vehicles
@@ -1826,9 +2036,28 @@ trailing event-loop `tag==1` record.
 
 The write side branches first on whether the entity has an attached parent
 (`entity+40`) — if so, position is vehicle-LOCAL (via
-`Entity_TransformWorldToLocal`), otherwise world-relative to the map origin
-`dword_C867A4..AC`. Then on `flagsByte & 4` (mounted bit): if set, only a
-small heading block follows; if clear, the full weapon/turret block follows.
+`Entity_TransformWorldToLocal`), otherwise anchored to the recipient eye
+(`g_priority_ref_*`, the §5.9 header refs `[orig: @ 0x460c7d]`; the read adds
+back the header-mirrored anchor `dword_A822E4..EC`). Then on `flagsByte & 4`:
+if set, only a small orientation block follows; if clear, the full
+weapon/turret block follows.
+
+**THE FORM SEMANTICS (2026-07-04 — supersedes the "mounted form" reading):**
+the `flags & 4` short form is the **DEAD/WRECK pose-only form**. The death
+family sets `Flags |= 6` — bits 1+2 together — at every vehicle death site
+`[orig: Entity_HandleDeathEvent @ 0x407118; Entity_ProcessVehicleDestruction
+@ 0x466b7c; Entity_ProcessDestructibleDeath @ 0x43fbf6; Entity_InitDeathState
+@ 0x48f96b; WeaponOverlay_HandleDamage @ 0x53c4f6]`, and the euler_y/euler_x
+tail is the wreck's frozen full ORIENTATION (dead vehicles tumble; live ones
+derive attitude from their own physics). Golden ASH_I5A proof: 16 parked dune
+buggies flip to `flags=0x06` short-form records in ONE frame (f=237868 — a
+mass-death event), while the joiner's RIDDEN vehicle (carrier 0x1034, boarded
+at the deploy release f=240019 and driven for minutes) **streams the 21-B full
+form the entire drive**. Riding/driving is not a wire form — see the
+drive-authority subsection below. The serializer was renamed
+`Entity_SerializeVehicleState` accordingly; the reimpl decoder's `is_mounted`
+became `is_dead_pose` (nw_pp now prints `DEAD-POSE`/`live`; dumps predating
+2026-07-04 show `MOUNTED`/`unmounted`).
 
 | off | bytes | field (new name) | gate | write-source | read-dest |
 |---|---|---|---|---|---|
@@ -1838,15 +2067,15 @@ small heading block follows; if clear, the full weapon/turret block follows.
 | 6 | 2 | posZ compressed | always | entity+12 | entity+12 |
 | 8 | 2 | eulerZ (i16 BAM `(v+0x8000)>>16`) | always | entity+16 | entity+576 |
 | 10 | 1 | flagsByte | always | entity+36 (low byte) | entity+36 |
-| 11 | 2 | eulerY (i16 BAM) | `flagsByte & 4` | entity+24 | entity+584 |
-| 13 | 2 | eulerX (i16 BAM) | `flagsByte & 4` | entity+20 | entity+580 (mounted case ends here) |
+| 11 | 2 | eulerY (i16 BAM) | `flagsByte & 4` (dead-pose) | entity+24 | entity+584 |
+| 13 | 2 | eulerX (i16 BAM) | `flagsByte & 4` (dead-pose) | entity+20 | entity+580 (dead-pose form ends here) |
 | 11 | 2 | weaponX compressed | NOT `flagsByte & 4` | entity+160 | entity+160 |
 | 13 | 2 | **healthWord raw u16** | NOT `flagsByte & 4` | entity+286 (the vehicle HEALTH word) | entity+286 (stored verbatim `@0x460aff`) |
 | 15 | 2 | weaponAimY compressed | NOT `flagsByte & 4` | vehicleData[136] | vehicleData[177] |
 | 17 | 2 | weaponAimZ compressed | NOT `flagsByte & 4` | vehicleData[135] | vehicleData[178] |
 | 19 | 2 | weaponHeading (i16 BAM high) | NOT `flagsByte & 4` | vehicleData[132] | vehicleData[179] |
 
-Total: **15 B** when mounted (`flagsByte & 4`), **21 B** when not.
+Total: **15 B** dead-pose (`flagsByte & 4`), **21 B** live.
 
 `vehicleData` is `*(_DWORD **)(entity + 100)` — an auxiliary state buffer
 attached to mounted vehicles for weapon-aim tracking. Note the write side reads
@@ -1882,9 +2111,50 @@ rendered them all burning (v13). Reimpl name: `VehicleCompactRecord::health_word
   real healthMax-scale values here.
 - **The 0x0D record's optional 0x8000-gated u16 is NOT health** — it is the capture-zone/
   proximity radius, entity+0x15E, filled from .bms record word 14 (`@0x433206`; consumers
-  `CaptureZone_*`, `render_minimap_slot_blip`, `CMap_SetupSpawnCamera`). Reimpl renamed
+  `CaptureZone_*`, `render_minimap_slot_blip`, `Server_PositionPlayerForSpawn`
+  (then still kong-misnamed `CMap_SetupSpawnCamera`; renamed 2026-07-03)). Reimpl renamed
   `zone_radius_short` and stopped populating it from Entity::health (golden ASH_I5A vehicle
   0x0D records carry no 0x8000 flag).
+
+#### The vehicle DRIVE-AUTHORITY chain (witnessed 2026-07-04 — the v33 duplicate-model/can't-drive round)
+
+**Vehicles have NO wire uplink.** The client's per-frame C2S 0x0C serializes
+exactly ONE entity — `g_local_player_entity` `[orig: Client_ProcessNetworkFrame
+@ 0x42c180, the single Player_BuildTag0CInputBody call @ 0x42c482]` — and this
+callback returns −1 for the extended modes 3/4 `[orig: the mode switch
+@ 0x460578/0x460580]`. Golden ASH_I5A: 344/344 C2S 0x0C bodies carry the
+player's own handle, zero C2S 0x26 needed for the host player's own drive.
+
+**Drive is host-side simulation off the driver's replicated input.** The
+vehicle motor's input block gates on `itemDef->attrib & 0x40` (PlayerControl)
+and the CONTROLLING occupant (`vehicle+0x170`, written by
+`Entity_AttachToVehicleSlot @ 0x4946D0` types 2/5):
+`(occupant->Flags & 0x100) && (occupant == g_local_player_entity ||
+g_napi_np_ctx.is_authority)` `[orig: Entity_UpdateVehiclePhysics @ 0x48af00
+gate @ 0x48b0ff]`. On the HOST that consumes the driver's REPLICATED
+MoveOrder/heading/analog axes (all landed by the §5.10 0x0C apply): commanded
+speed = `itemDef->playerSpeed` through the 8-way direction switch (turn-in-place
+zeroes it, back halves and negates it), the steer target is the DRIVER's live
+`Yaw` (mouse steer) or `yaw ± ramp` under key-steer (+2°/tick, cap 50°), stance
+bits 0x100/0x200 shift the speed down, and the vehicle yaw turns by
+`-speed × wheel-deflection` while grounded `[orig: the LABEL_123 modifier block
+@ 0x48b490; the steer chase @ 0x48b9e9; yaw += modelPtr0 @ 0x48ef60]`. The
+DRIVER's own client runs the same block as prediction (`occupant ==
+g_local_player_entity`), corrected by the interp staging of the incoming full-form
+records. There is no drive-ownership grant anywhere: **vehicle `+0x1CC`
+("ownerSession") is the smoke/burn EFFECT-EMITTER handle** — spawned by the
+physics when smoking (`submit_effect_descriptor` result store `@ 0x48b0f6`),
+released at detach/respawn via `CEffectEmitter_ReleaseSafe @ 0x5f69f0` (renamed
+2026-07-04 from the CNapiSession_FlushSendSafe kong misname; it guards on the
+`CEffectSystem_Init` singleton).
+
+The v33 defects reduce to the missing host motor: our host streamed the ridden
+Super Puma pinned at its pad while the rider's client predicted motion — the
+"second vehicle model" was the prediction-vs-wire fight, and "can't drive" was
+the vehicle never responding server-side. Reimpl: `libs/world/vehicle_motor.{h,cpp}`
+(the ground-family authority core) + the AiSystem vehicle pass + the items.def
+physics-property parse (`libs/def`, scaled per `ItemDef_ParsePhysicsProperty
+@ 0x49d870`) — D-NET-161.
 
 ### 5.14 Infantry / AI compact record (S2C 0x0A trailing event)
 
@@ -1913,7 +2183,7 @@ parent exists, world-relative otherwise.
 Total: **14 B** per record (fixed).
 
 The read side runs an animation-state machine through a lookup table
-`dword_8139E8[]` indexed by animState — non-zero bits 4 / 0x20 in the table
+`g_animStateFlagsTable[]` indexed by animState — non-zero bits 4 / 0x20 in the table
 entry select whether to write +696 vs +700 — and handles a special path
 through `Entity_TryAttachOrDetach` when `flagsByte & 2` flips. None of that
 affects the wire layout.
@@ -1988,8 +2258,8 @@ ammo-tick counter at `playerSlot+0x178D8` by `AdmDef_GetEntryByIndex(adm_index)[
 | 8 | 4 | `pos_x` (i32 LE, 16.16) | shooter world position at fire moment (entity+4 + map origin); → `dest[4]` |
 | 12 | 4 | `pos_y` | → `dest[5]` |
 | 16 | 4 | `pos_z` | → `dest[6]` |
-| 20 | 4 | `dir_x` (i32 LE) | fire direction — host applies `<< 16` (`dir_x_shifted`); wire is raw i32 LE; → `dest[7]` |
-| 24 | 4 | `dir_y` | same `<< 16` shift; → `dest[8]` |
+| 20 | 4 | `dir_x` (i32 LE) | fire YAW as a 16.16 TURN FRACTION — the MISSION BEARING directly, NOT the 0x0A euler_z heading frame (which is 90° − yaw): v29 wire-proof, two duel baselines within 1.4° (D-NET-153). Host applies `<< 16` (= BAM32, `dir_x_shifted`); → `dest[7]` |
+| 24 | 4 | `dir_y` | fire PITCH, same encoding + `<< 16` shift; → `dest[8]` |
 | 28 | 2 | `target_handle` (u16 LE) | hit entity; `0xFFFF` = no specific target; → `dest[16]` |
 | 30 | 2 | `hit_part` (u16 LE) | body-part / collision sub-section index; → `dest[17]` |
 | 32 | 1 | `extra_byte1` (u8) | → `dest[18]` |
@@ -2023,9 +2293,52 @@ per entry, populated when the engine loads the `.adm` action-descriptor data —
 game-data library), not a wire decoder; `nw_pp` therefore prints `adm` raw. Scoped as a future item —
 this is the same AdmDef index space shared by §5.9.1 (weapon-hit) and §5.30 (0x5A loadout).
 
-**Open follow-up:** `Server_ValidateAndFireRound` (sub_50BAA0) decompile would resolve how
-`current_tick` gates the ammo-cooldown check and what `dest[2]` / `dest[9]` are seeded for.
-Not pursued in this round.
+**The full host pipeline (witnessed 2026-07-03, D-NET-152 — closes the old follow-up).**
+`NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310` gates on authority, `!g_InCeaseFire`,
+the connection's player slot (+352→+192), `!slot+100567`, and `CServerTick` phase == 3;
+anti-spoofs the claimed shooter against the slot's OWN entity [orig: @0x51358d] and runs the
+fire-rate/freshness gate `PlayerSlot_IsActive @ 0x4FC760` (with `slot+96480` armed, fire is
+rejected until the uplink tick passes `slot+96472` — stamped on success as
+`tick + AdmDef[276]` cooldown ticks [orig: @0x513740]; `dest[9]` = the zeroed third direction
+component, `dest[2]` = the shooter entity ptr). Then `Server_ClientFiredRound @ 0x50BAA0`:
+
+- **Guards**: grounded+moving reject (`Flags & 0x100 && Flags & 2` → −10); adm lookup
+  (−3 "Tried to fire NULL wpn"); NULL dcb (−8); dcb ≠ shooter (−9 "bad addround owner");
+  mounted-only weapon unmounted (`admFlags & 0x80` → −12/−18); the parachute-weapon anim
+  gate (−14); the ammo check `WeaponSlot_CanFire @ 0x541BA0` (ex
+  `should_send_entity_update` misnomer: busy weapon child, underwater-fire ban vs
+  `Env_WaterHeightFixed`, **clip u16 slot+16** or the adm+220 pool, the adm+224 score-lock)
+  → −15 `"server_ClientFiredRound: … (NO AMMO!)"`.
+- **Warp compensation**: `savedLivePose − Position` for the shooter AND its `groundEntity`
+  carrier [orig: @0x50bbac] — `savedLivePose (+0x80)` is Position saved at the TOP of every
+  entity physics frame (all `Entity_*Physics/Movement` updates, e.g. @0x46e12d/@0x484054),
+  so the delta is the current tick's not-yet-reported motion. A carrier that moved > 0xF
+  units re-anchors the fire to the live pose (rounddef flags 0x400, or a camera raycast
+  that hits the shooter's own carrier) [orig: @0x50bc41].
+- **Side stamps**: `entity+352` = the wire extra_byte1 word; `entity+688` = adm on PRIMARY
+  fire (the §5.10 `equipped_adm_index` mirror [orig: @0x50bd56]); `shooter+104→+12` = the
+  claimed target (read LIVE by the §5.9.1 tag-2 serializer [orig: @0x50c2ad]);
+  `word_B7C670` = `hit_part` (the per-shot sequence the tag-2 `shot_seq` echoes).
+- **NET PRIMARY fire** does NOT call `RoundData_AddRound` directly: the validator resolves
+  the per-player weapon slot (the 100-B array at `playerSlot+464`, index
+  `adm[4] + 65*adm[0]` = rank + 65*category [orig: @0x50c0d7]; vehicle modes take the
+  vehicle's slot), stamps the slot's +64..84 pose = the CLIENT's claimed origin/direction,
+  latches slot+94 bit0, and invokes the adm **'fire' ACTION** — `*(admEntry+684)`, action
+  slot 3 of the 12-action table at admEntry+676 (suffix/default table @0x830B94), default
+  handler `WeaponAction_Fire @ 0x542B10`. The fire action re-checks can-fire, reads the
+  latched pose (`Entity_CalcWeaponFirePosition @ 0x4DC750` returns slot+64..84 when the
+  bit0 latch is set), calls `Entity_FireWeaponAndSendPacket @ 0x42BD80` — which on the
+  authority builds a LOCAL-mode fire request and **re-enters `Server_ClientFiredRound`**
+  (local path: ~2u origin-distance clamp vs the entity, scoring, then
+  `RoundData_AddRound @ 0x4FDB40` → the §5.9.1 ring + `RoundData_SpawnRound`) — then
+  decrements ammo (`consume_weapon_ammo @ 0x540850`: clip u16 slot+16 when adm+220 == 0,
+  else the per-player pool `playerSlot+89176 + 4*adm220` / the global `data @ 0xB761E8`
+  for AI), runs the 3-round-burst counter (`Flags & 0x20`), chains action 3 RECOIL, and
+  plays the fire sound. **ALT fire** (bit 0) and the HOST'S OWN local fire call
+  `RoundData_AddRound` directly; a 0x06 whose dcb is the host's local player returns 0
+  untouched [orig: @0x50c18d] — the client-side of the same function is where a CLIENT
+  calls `RoundData_SpawnRound` itself for its own fire and queues the C2S 0x06 (client
+  prediction; why a shooter's own rounds are never tag-2-echoed back, §5.9.1).
 
 ### 5.17 C2S 0x21 — anti-cheat CRC reply (3-player loopback 2026-06-16d)
 
@@ -2112,6 +2425,21 @@ no coordinates. The textual Under-Attack / Ready-for-Takeover HUD (`draw_capture
 @ 0x5A2480`) derives contest state locally from per-team proximity counts; tag 0x40 is the
 authoritative minimap **color** channel.
 
+**The server producer (witnessed 2026-07-04):** `Server_BuildOverlayStateForPlayer
+@ 0x517FC0` (called per active slot from `Server_UpdateAllActivePlayerSlots @ 0x5188d6`)
+walks pools 2 → 1 → 0 with per-slot RESUME indices (a budgeted walk spread across frames),
+classifies each entity through `Entity_ClassifyForMinimap @ 0x50FA70` — team 1 → color
+0x0a, team 2 → 0x09, else 0x0c; `attrib & 0x20000` capture triggers and `attrib & 0x40000`
+spawn points → icon 0; vehicles by `itemDef->unitType` (5..8 → 15, 3/4 → 11, 12 → 25, else
+10, alive only); persons 3 alive / 8 dead (14 medic-revivable); armories 13; emplacements
+4/12 color 8; supply crates 16/17/29 color 15; `attrib & 0x20000000` nohud skips — and
+stages 6-byte entries into a 16-slot buffer flushed per-recipient as one 0x40
+(`sub_50FEA0` stage → `Server_SendPendingOverlayState @ 0x50FE20`, send-mask 32 targeted
+at that slot; the golden's `count=16` chunks). Reimpl (D-NET-162): the npruntime 1 Hz
+block emits per-recipient zone entries (icon 0, flags 0x10) + vehicle blips (flags 0x00,
+icon by the items.def `unit_type` now parsed into `world::VehicleTraits`); the
+player/emplacement/crate entries and the resumable budget walk are deferred.
+
 **Witness:** the A&S probe "ON RE Probe AS dvxi5" (two human players, 699 0x40 records) has two
 capture points — Rebel HQ (handle 0x1000, bms(0,0)) and JO Tent (handle 0x1001, bms(0,-40)), both
 authored neutral. Rebel HQ's iconColor evolves `0x0c→0x09→0x0c→0x0a` (neutral → Red captures →
@@ -2120,24 +2448,41 @@ neutral / 217 Red (0x09) / 172 Blue (0x0a), 0x1001 = 699 neutral. Six `count==3`
 flags `0x00` ≠ 0x10 — distinguishes a blip from a zone). Decoded by `decode_capture_zone_overlay`
 in `libs/novaworld/include/novaworld/ingame_decode.h`.
 
-### 5.20 Tag 0x16 — PLAYER-LIST (controlled capture 2026-06-17)
+### 5.20 Tag 0x16 — PLAYER-LIST / SCOREBOARD (controlled capture 2026-06-17; header/trailer + HUD-count semantics witnessed 2026-07-03)
 
-`[orig: NapiNPClientMsg_PlayerList @ 0x42FAE0]`. All 33 records in the probe capture decode to a
-2-byte trailer remainder.
+`[orig: server NetPacket_SerializeScoreboard0x16 @ 0x504B80 (renamed from
+NetPacket_SerializeScoreboard0x16); client NapiNPClientMsg_PlayerList @ 0x42FAE0]`. All 33 records in
+the probe capture decode to a 2-byte trailer remainder.
 
 ```
-[u8 max_players][u8 player_count (clamp 252)]
-player_count × { [u8 slot_id][u16 ping LE][u16 score1 LE][u16 score2 LE][u8 flags] }   // 8 B/row
+[u8 flags][u8 row_count (clamp 252)]
+row_count × { [u8 slot_id][u16 ping LE][u16 score LE][u16 deaths LE][u8 rowFlags] }     // 8 B/row
 [u8 team_count]
-(team_count+1) × { [u16 score1 LE][u16 score2 LE][u8 player_count][u8 alive_count] }    // 6 B/row
-[u8 extra1][u8 extra2]                                                                   // trailer
+(team_count+1) × { [u16 score LE][u16 deaths LE][u8 kothHold][u8 ctfFlag] }             // 6 B/row
+[u8 inGameCount][u8 spectatorCount]                                                      // trailer
 ```
 
-- Row flags: `alive = flags & 1` (scoreboard `is_alive` → score_entry+52; observed 0 in the probe —
-  not a per-row liveness), `team = flags >> 1`. Probe: host slot0 flags=0x02 (team1/Blue), joiner
-  slot1 flags=0x04 (team2/Red).
-- Team table: `team_count`=2 ⇒ **3 rows** (T0 neutral / T1 Blue / T2 Red); per-player score2 mirrors
-  into T1/T2, T0 stays 0. Probe score2 accrues with A&S play (T1 0→47, T2 0→57); ping=0 (loopback).
+- **Byte 0 is a FLAGS byte, not max_players** (2026-07-03 correction): bit0 = team-mode, bit1 =
+  timed-scores → `g_scoreboard_flags @ 0xA823B8` (renamed 2026-07-03 from the bare dword label).
+- Row flags: **bit0 = SPECTATOR** (from slot+100567; the old "alive" reading was a decode-era
+  guess), `team = flags >> 1`. Probe: host slot0 flags=0x02 (team1/Blue), joiner slot1 flags=0x04
+  (team2/Red).
+- **A row is ACCEPTED only when `PlayerSlotTable_GetActiveSlot(slot_id)` knows the slot** (slot
+  byte+13 active — populated by the S2C 0x46 player-sync, §5.21/§5.33); an unknown slot's row is
+  DROPPED and the client retries **C2S 0x22 `[slotId, 0x1CF7]`** — the repeated-0x22 churn a host
+  that never join-broadcasts 0x46 provokes (D-NET-158). Rows exclude not-yet-in-game slots
+  (byte+100579) server-side, so the list grows only when a joiner completes its load (the golden
+  31 B → 39 B grow right before the joiner deploys).
+- Trailer: `inGameCount → g_scoreboard_ingame_count @ 0xA85B3C`, `spectatorCount →
+  g_scoreboard_spectator_count @ 0xA85B40` (renames 2026-07-03). **The HUD "Number of players" =
+  accepted-row count (`g_scoreboard_row_count @ 0xA823C4`) − spectatorCount** `[orig:
+  draw_hud_score_overlay @ 0x593E50; TAB header HUD_DrawGameScoreOverlay @ 0x423060; rows
+  HUD_DrawKillList @ 0x423A30 over the 56-B score table @ 0xA823C8]` — a hardcoded trailer pins
+  every client's count (the v31 HUD defect).
+- Cadence: the server broadcast runs every **311 ticks (~5 s)**
+  `[orig: Server_BuildAndBroadcastScoreboard @ 0x50D960]`.
+- Team table: `team_count`=2 ⇒ **3 rows** (T0 neutral / T1 Blue / T2 Red); per-player deaths mirror
+  into T1/T2, T0 stays 0. Probe deaths accrue with A&S play (T1 0→47, T2 0→57); ping=0 (loopback).
 - The server may **re-sort the player rows between frames** — `slot_id` is authoritative, not row
   position.
 
@@ -2535,23 +2880,34 @@ the `0x60` handler imposes — the handler only `memcpy`s raw bytes into a strea
 Both consume to the byte; this matches the host emit order in §5.2a
 (`Server_SendInitialGameStateToPlayer @ 0x51bba0`).
 
-### 5.29 Tag 0x0F — world-state-load (joiner spawn + scores + waypoints; probe2, 2026-06-18)
+### 5.29 Tag 0x0F — world-state-load (joiner spawn + scores + location names; probe2, 2026-06-18; server writer + field roles witnessed 2026-07-03)
 
 After the mission transfer (§5.28) the host sends the joiner its spawn pose, the game flags, the
-team-score table, and the waypoint / team-name lists. ~624 B.
-[orig: `NapiNPClientMsg_0x00F @ 0x42E200`]:
+per-slot-type score table, and the waypoint / location-name lists. ~624 B.
+[orig: client `NapiNPClientMsg_0x00F @ 0x42E200`; server writer
+`NetPacket_WriteWorldStateLoad0x0F @ 0x502D10` — renamed 2026-07-03 from
+NetPacket_WriteWorldStateLoad0x0F (it serializes THIS body, not generic player state). Server
+layout: `[u32 GetTickCount][3×i32 spawn pos][3×i16 yaw/pitch/roll][u8 flags][128×i32 from
+player+88664][u16 pool3Count + {u16 id, u16 val, u8}× when player+354 == 1][u16 nameCount]
+[cstring × count]`]:
 
 | off | type | field | notes |
 |---|---|---|---|
 | 0 | i32 | sessionTick | → `dword_A82368` |
 | 4 | i32 ×3 | posX/Y/Z | local-player spawn (16.16); → entity+4/8/12 when `!is_authority` |
 | 16 | i16 ×3 | yaw/pitch/roll | each `<< 16` to 16.16 → entity Yaw/Pitch/Roll |
-| 22 | u8 | gameFlags | bit0 → `byte_A860DC` (gated on `byte_A860EC==0`); bit1 → `A860DD`; bit2 → `A860DE`; bit3 → ceasefire |
-| 23 | i32 ×128 | teamScores | **FIXED 128-entry block** — the loop fills `[outTable, data)` @ 0x42e324 (512 B; the bulk of the body) |
+| 22 | u8 | gameFlags | bit0 = spawn zones exist (server: `SpawnZoneList_GetCount() != 0` @ 0x502da7) → sets `g_deploy_screen_active @ 0xA860DC` ONCE (gated on `g_death_screen_active @ 0xA860EC == 0`) — momentary without the 0x0A flags1-bit1 hold (§5.9/D-NET-156); bit1 = `g_respawn_requires_team_dead && in_session` → `A860DD`; bit2 → `A860DE`; bit3 = ceasefire |
+| 23 | i32 ×128 | slotTypeScores | **FIXED 128-entry block** — the **per-slot-type SCORE table** (client outTable @ 0xB75FE8; readers `Entity_GetScoreValueBySlotType` / `WeaponSlot_*`; server source player+88664), NOT zone data — zeros are benign for the deploy picker (2026-07-03 correction of the "teamScores" reading). Fills `[outTable, data)` @ 0x42e324 (512 B; the bulk of the body) |
 | 535 | u16 | waypointCount | |
 | 537 | … | waypointRecords | `{ u16 slotId, u16 nameId, u8 pad }` × waypointCount — **present ONLY for a waypoint gametype** `(g_GameType & 0xFFFDFFFF) == 0x10020`; that gate is **not on the wire** (off-wire, like the §5.9 0x0A objective block), so the decoder takes the `is_waypoint_gametype` hint. **First witnessed in probe3** (Co-op `g_GameType 0x30020`): `waypointCount=4` (slots p3/6-9), `teamNameCount=0`; byte-exact once the hint is supplied (D-NET-75). TDM/A&S send count 0 |
-| … | u16 | teamNameCount | |
-| … | cstring × teamNameCount | teamNames | each copied 3-bytes-at-a-time into a 64-byte slot; wire advance = `strlen+1` |
+| … | u16 | nameCount | |
+| … | cstring × nameCount | locationNames | **the deploy-map "Location" labels, NOT team names** (2026-07-03 correction): registered at BMS spawn of **def-type 2044 markers**, in spawn order, from the mission text `Locations/LOCATION%03i` (fallback = the key string), appended at `g_location_names @ 0xA2ED10` `[64 * g_location_name_count @ 0xA77644 ++]` [orig: `Entity_SpawnFromBMSRecord @ 0x40E9F0 @ 0x40f182-0x40f221`]. The client handler OVERWRITES its local copies (each copied 3-bytes-at-a-time into a 64-byte slot; wire advance = `strlen+1`). Golden ASH_I5A: 6 names ("North Sea Village", "Southside Jungle", "Rocky Point", "Point Doom", "Ash Village", "Katulus' Mound") |
+
+**The deploy PICKER rows are CLIENT-LOCAL** (witness 2026-07-03): `Entity_BuildSpawnZoneList
+@ 0x43EAE0` (called only from `Game_StartMission @ 0x525e01`) scans pools 2+1 for
+`ItemDef(+84) & 0x40000`, sorted by `(entity+538 & 0x1F) + (def+406 << 8) + (typePrio << 16)`
+(typePrio: def type 1 → 2, 32 → 1) — the client builds zones/names/radii from its LOCAL BMS,
+so the 0x0F body re-binds/refreshes labels but never gates the picker's existence.
 
 Because the waypoint gate is off-wire, an off-wire decoder takes an `is_waypoint_gametype` hint
 (default false); for TDM/DM the host sends `waypointCount = 0` / no records, so the default is
@@ -2572,6 +2928,27 @@ decoder keeps every slot (a deliberate non-divergence). Resets `dword_81474C = 0
 heartbeat/input gate) on completion. **Witness:** probe2 — 8× `0x5A`, e.g. `avatarClass=8 slots=8`;
 full-consume via `decode_weapon_loadout`.
 
+**The full apply chain (witnessed 2026-07-04 — the "no spare magazines" round):** the ammo
+bytes are **SIGNED clip counts**: clamp to `adm[83]` (maxClips); a NEGATIVE value (wire
+`0xFF`) falls back to `adm[23]` (the def default); the surviving count multiplies by
+`adm[22]` (clip size) into TOTAL ROUNDS handed to `WeaponSlot_SetAmmoCount(total,
+adm_byte216 ammo bucket)` `[orig: @ 0x4295c4..0x429613]`. Around the ammo loop the handler
+REBUILDS the local player's weapon slots from the granted set (`WeaponSlotPool_ResetAllEntries`
+→ `WeaponSlotTable_LoadAllFromDefs` → `WeaponSlots_RecalculateAmmoFromCapacity`, re-run
+after the loop), re-resolves the body model from `avatarClass` (`AnimMap_GetSlotPropertyInt`
+props 10/11/12 by graphics detail), and re-selects/mounts the equipped slot — all gated on
+the client game-state dword (mislabeled `lod_level`) being 1/2. **The in-game magazine
+counter therefore reads the ENTITY weapon slots, which byte-equal grants fill identically;
+the §5.47 phase-0 weapon sub-block instead lands in HUD MIRROR GLOBALS** — `dword_A85B64` =
+the preround timer (`HUD_DrawTimerOverlay`), `dword_A85B5C` = death/deploy-screen content
+(`UI_UpdateDeathScreenContent` / `draw_death_screen_overlay`), `word_A85B7C` =
+`HUD_DrawCaptureProgressBar` — so a host emitting ZEROED phase-0 fields (ours, D-NET-134's
+weapon-block gap) blanks the DEATH/DEPLOY-SCREEN loadout panel + preround timer + capture
+bar, while the live mag counter stays pool-driven. The v33 "no spare magazines" report needs
+one discriminating observation (v35): missing on the death/deploy screen ⇒ author the
+phase-0 fields from the recipient's granted loadout; missing on the in-game counter ⇒ an
+entity-pool leak still unwitnessed.
+
 ### 5.31 Tag 0x6E — team/squad roster sync (probe2, 2026-06-18)
 
 [orig: `NapiNPClientMsg_HandleSquadRosterSync @ 0x429880`]. `[u8 teamCount]` then per team:
@@ -2586,6 +2963,12 @@ full-consume via `decode_weapon_loadout`.
 
 **Witness:** probe2 — 43× `0x6E` (mostly `teams=0` early in the join); full-consume via
 `decode_roster_sync`.
+
+**Producer refinement (2026-07-03, §5.61):** the server side is the SPAWN-WAVE status
+(`NetPacket_WriteSpawnWaveStatus @ 0x507490` over `g_spawn_wave_list`) — "team" entries are
+per-zone wave groups for the receiving player's team, `teamSlotIndex` is the spawn-zone-list
+index, and `teamSlotHandle` is the wave COUNTDOWN in seconds (not a handle); members are the
+queued players. The client's roster-array landing is the deploy-screen consumer.
 
 ### 5.32 Tag 0x7B — full player/session info (probe2 + loopbacks, 2026-06-18)
 
@@ -2645,16 +3028,32 @@ exact bodies. **Witness:** probe2 — `0x22` ×11 (`slot=0x00/0x01 fieldFlags=0x
 
 **0x22→0x46 ack-walk mechanics (grill 2026-07-01) — the walk is CLIENT-driven.** The server handler
 passes the request's `fieldFlags` straight into the 0x46 serializer; the serializer ECHOES bit `0x4000`
-(`NetPacket_SerializeWeaponOverlaySlotState @ 0x505e80`: `adjusted |= 0x4000` iff the request had it,
+(`NetPacket_SerializePlayerSync0x46 @ 0x505e80` — renamed 2026-07-03 from
+NetPacket_SerializePlayerSync0x46: `adjusted |= 0x4000` iff the request had it,
 @ 0x505f05) and passes the low field-selection bits through (`adjusted = fieldFlags & 0x7FFF` when the
-slot is live). An inactive slot / NULL entity forces `adjusted = 0x8000` (a 3-byte removal reply — the
-early return @ 0x505f37 writes only `[u8 slot][u16 flags]`). The CLIENT terminates the walk: its 0x46
-handler tail (`NapiNPClientMsg_PlayerSync @ 0x431370`) re-requests `[u8 slot+1][u16 0x5CF7]` only while
-`slot+1 < byte_A860D1` (its max-player count, fed by the 0x08 ServerConfig block) — the server never
-decides when to stop. probe2's `0x5cf7` = `0x4000 | 0x1cf7`, the same `0x1CF7` field set
-`Server_PlayerAdd @ 0x51cbc0` uses for its unsolicited 0x46 broadcast (`push 7415` @ 0x51d2bf). The
-reimpl (`dispatch_session_replies case 0x22`) previously computed the ack bit from `max_players`
-server-side; FIXED 2026-07-01 to echo the request bit. 0x46 body field semantics witnessed the same
+slot is live) — **the reply answers EXACTLY the requested fieldFlags**. An inactive slot / NULL entity
+forces `adjusted = 0x8000` (a 3-byte removal reply — the early return @ 0x505f37 writes only
+`[u8 slot][u16 flags]`, `|0x4000` when the request asked for the ack) — walk termination depends on
+this answer. The CLIENT terminates the walk: its 0x46 handler tail (`NapiNPClientMsg_PlayerSync
+@ 0x431370`) re-requests `[u8 slot+1][u16 0x5CF7]` only while `slot+1 < g_max_player_slots`
+(`g_max_player_slots` — fed by **the S2C 0x04 SESSION-SLOT-CONFIG byte 18**, §5.53, NOT the 0x08
+block as previously noted; a hardcoded small capacity there caps every client's walk, D-NET-158) —
+the server never decides when to stop. Walk kickoff: the client's 0x0F handler sends 0x22
+`[0, 0x5CF7]` (@ 0x42E659). probe2's `0x5cf7` = `0x4000 | 0x1cf7`, the same `0x1CF7` field set
+`Server_PlayerAdd @ 0x51cbc0` uses for its unsolicited 0x46 broadcast (`push 7415` @ 0x51d2bf).
+
+**Roster lifecycle contract (witness 2026-07-03, D-NET-158):** JOIN — `Server_PlayerAdd` broadcasts
+the 0x32 name record then a 0x46 (fieldFlags `0x1CF7`, no ack) to every in-game connection
+(@ 0x51D296), so existing clients bind the new slot and ACCEPT its 0x16 row without the unknown-slot
+0x22 retry churn. LEAVE — `Server_HandlePlayerDisconnect @ 0x51B5C0` memsets the slot then broadcasts
+the 0x46 `0x8000` removal (@ 0x51B882 → the client's `PlayerSlot_ClearAndUnlink @ 0x431420`). Deltas —
+`Server_TickUpdate` re-sends 0x46 with masks `0x400`/`0x8` on dirty quality/state.
+
+The reimpl (`dispatch_session_replies case 0x22`) previously computed the ack bit from `max_players`
+server-side (FIXED 2026-07-01 to echo the request bit) and answered a fixed field set (FIXED
+2026-07-03 to serialize the requested mask verbatim, `encode_player_sync(rep, field_flags)`); the
+join broadcast is `broadcast_player_sync_on_join` and the live 0x04 capacity byte is threaded from
+`GameConfig.max_players` (both 2026-07-03). 0x46 body field semantics witnessed the same
 session: bit 1 = name (VARIABLE-length strlen+1 string — all three strings are, never fixed-width),
 2 = team-string (retail always writes ""), 0x10 = vehicle name, 4 = team byte (slot+416),
 8 = damage|alert<<7, 0x20 = vehicle score byte (vehicle+156), 0x1000 = late-join flag
@@ -2828,7 +3227,7 @@ cmp entity, g_local_player_entity ; jz loc_4B9C3E ; jump if entity IS the local 
   `is_authority || entity == g_local_player_entity`. Runs the anim-driven ground locomotion that
   integrates the live `Position` (entity+4/+8/+0xC): heading→velocity (speed scale `0x5800`),
   restriction/avoidance probes (`[orig: sub_4142C0 @ 0x4142C0]`), the anim flag table
-  `dword_8139E8` gating velocity application. This is the SAME mover the AI uses (OpenNova
+  `g_animStateFlagsTable` gating velocity application. This is the SAME mover the AI uses (OpenNova
   `AiSystem::tick_infantry`, `libs/world/src/infantry.cpp`, verdict MATCHING) — the only
   difference is the move-order source.
 - **Fall-through (0x4b9a8c) = network INTERPOLATION (remote entities on a client only).** Reads
@@ -3200,10 +3599,10 @@ deploy uplinks, floods the host with ~378 C2S `0x0F` (2 B each), then auto-kicks
   entity has empty/default weapon slots, so every incoming `0x0A` keeps mismatching → the flood; it stops the
   instant a real deploy populates the slots. (Corrects the prior "0x0F = capture-zone/spawn query" guess in
   `project_dcb_join_mechanism`.) It is a SYMPTOM of being undeployed, not a cause.
-- **The spawn-select↔deploy VISUAL toggle is `byte_A860EC`, driven per-frame by `0x0A` flags1 bit0 — not by
-  the `0x0F` handler.** `NapiNPClientMsg_0x00A` sets `byte_A860EC=1` (enter spawn-select) when flags1 bit0 = 1
+- **The spawn-select↔deploy VISUAL toggle is `g_death_screen_active`, driven per-frame by `0x0A` flags1 bit0 — not by
+  the `0x0F` handler.** `NapiNPClientMsg_0x00A` sets `g_death_screen_active=1` (enter spawn-select) when flags1 bit0 = 1
   `[orig: @0x42ffa0]` and clears it to 0 the first frame flags1 bit0 = 0 `[orig: @0x43001e]`. The `0x0F`
-  handler only READS `byte_A860EC`. (Corrects the prior note pinning the gate to the `0x0F` handler.) Note
+  handler only READS `g_death_screen_active`. (Corrects the prior note pinning the gate to the `0x0F` handler.) Note
   this is the camera/UI toggle; the deploy UPLINK is separately gated on `g_spawn_success_gate` above.
 - **In-match S2C `0x1A` is a secondary liability.** `NapiNPClientMsg_0x01A @0x425EB0` feeds
   `NapiClient_WaitForGameStart @0x42cc10`, which re-sets `dword_81474C = 1` `[orig: @0x42cc14]`. Retail does
@@ -3239,9 +3638,9 @@ damage; cross-checked against `.scratch/golden/retail-lan-host-join.pcapng`. All
 imagebase `0x400000`); read-only.
 
 **Early gates (in entry order):**
-- **Spectator / spawn-select divert.** `cmp byte_A860EC, 0` @0x4b40f8: while `byte_A860EC` is SET, if
+- **Spectator / spawn-select divert.** `cmp g_death_screen_active, 0` @0x4b40f8: while `g_death_screen_active` is SET, if
   `entity == g_local_player_entity` the motor calls `Camera_UpdateFreeFly @ 0x4b2980` and RETURNS @0x4b410d-
-  0x4b411a — look-only, no body simulation. `byte_A860EC` is the spawn-select / spectator flag, set by S2C
+  0x4b411a — look-only, no body simulation. `g_death_screen_active` is the spawn-select / spectator flag, set by S2C
   `0x075` `[orig: NapiNPClientMsg_SetSpectatorMode @ 0x4259e0]` and per-frame by `0x0A` flags1 bit0 (set
   @0x42ffa0 / clear @0x43001e, §5.38c). Our build sends flags1 bit0 = 0, so this is NOT a blocker for us —
   it is the witnessed look-only path, confirming the spawn-select camera is this divert.
@@ -3534,6 +3933,11 @@ functions renamed up: `server_handle_entity_sync`→`Server_HandleEntitySync`,
 | `0x5008b0` | `Server_ProcessTeamChanges` | `Server_FindPlayerSlotByNetKeys` | body is a pure slot lookup matching `slot[7]→+184→+48/+52 == (k1,k2)`; changes/sends nothing; old name + a stale disasm comment both wrong (D-NET-107) |
 | `0x515390` | `server_broadcast_entity_kill` | `Server_BroadcastMedicRequest` | fetches `GameText("Server","STRSRV_MEDREQ")` (medic request), broadcasts msg 0x54+0x14, sets a once-only "notified" flag; no kill (D-NET-108) |
 | `0x50baa0` | `Server_ValidateAndFireRound` | `Server_ClientFiredRound` | own string `"server_ClientFiredRound: Player:%s Type:%d Ammo left:%d (NO AMMO!)"` (D-NET-109) |
+| `0x541ba0` | `should_send_entity_update` | `WeaponSlot_CanFire` | the "NO AMMO!" gate: reads the slot's weapon child, the underwater-fire ban, the clip u16 slot+16 / adm+220 pool, and the adm+224 score-lock; no entity update anywhere (D-NET-152) |
+| `0x4ffee0` | `compute_entity_angular_priority` | `Server_BuildRoundEventListForPlayer` | walks `g_round_ring` since the recipient's `playerSlot+97544` watermark, skips own rounds, scores by line-of-fire proximity into `g_round_event_refs` — round events, not entity priorities (D-NET-152) |
+| `0x504820` | `serialize_projectile_to_packet` | `NetPacket_SerializeRoundEvent` | writes one §5.9.1 tag-2 ROUND-EVENT record (fire origin + direction) from a ring record; no projectile entity involved (D-NET-152) |
+| `0x42f270` | `NetPacket_DeserializeWeaponHit` | `NetPacket_DeserializeRoundEvent` | the same record's client read side — a round FIRED event the client re-simulates; nothing about it is a hit (D-NET-152) |
+| `0x4ec0d0` | `RoundData_ProcessHit` | `RoundData_SpawnRound` | SPAWNS the round from a fire request (projectile-pool entity, spread, velocity, tracer/guided/burst dispatch); no hit is processed at fire time (D-NET-152) |
 
 **Signature corrections — the wrong-prototype cascade (D-NET-110).** Many callees carried IDA-inferred
 prototypes with phantom params; their garbage flowed up as uninitialised `v*` args in
@@ -3607,8 +4011,11 @@ mode / target conn / target slot / target team); not a bug, an artifact of the c
   `[orig: Server_BroadcastMedicRequest @0x515390]`
 - **D-NET-109** [naming, FIXED] `Server_ValidateAndFireRound @0x50baa0` → **`Server_ClientFiredRound`**: own
   log string `"server_ClientFiredRound: …"` is the original name; the function validates a client fired-round
-  request (ammo, distance, ownership, weapon CRC) and queues it via `RoundData_AddRound`. Signature `()` →
+  request (ammo, distance, ownership, weapon CRC). Signature `()` →
   `(int fireRequest)` (the body's `teamIndex` local was a misnamed pointer to the fire-request descriptor).
+  (2026-07-03 correction: only the ALT-fire / AI / local-host paths queue via `RoundData_AddRound`
+  directly — a NET primary fire goes through the adm 'fire' action and re-enters this function in
+  LOCAL mode before reaching the ring; the full pipeline is §5.16 / D-NET-152.)
   `[orig: Server_ClientFiredRound @0x50baa0]`
 - **D-NET-110** [signature, FIXED] **Wrong-prototype cascade across `Server_*`.** ~15 functions carried
   IDA-inferred prototypes (extra phantom params, dropped params, or a bogus `__stdcall`+WndProc/display
@@ -3984,7 +4391,7 @@ captured-from-observation fixtures verbatim through P8, a tracked divergence —
 | recv | handler | reply | witnessed serializer(s) | reimpl fixture (`game_session.cpp`) |
 |---|---|---|---|---|
 | 0x02 | `NapiNPServerMsg_0x002 @0x512FD0` | 0x01, 0x7A, 0x7B, 0x03 | `0x01`=dword `1`; `0x7A`=`NetPacket_WritePCID @0x5076e0` (player+0x250 PCID); `0x7B`=`NapiNPMsg_0x7B_BuildPayload @0x507740` (name, PCID, serverName, title, mapFile, gametype u32, "", expansion); `0x03`=`NetPacket_WriteWeaponRestrictionFlag @0x502ac0` (sets game-state 7) | **0x7A/0x7B now FAITHFUL ports (D-NET Wave 1.5, 2026-06-27)** — `build_tag7a_pcid`/`build_tag7b_session_summary` source the PCID field (was: 0x7A wrote player_name; 0x7B's PCID slot held an invented `"DEV-A02-0001"` literal). reimpl still emits extra `0x00`×2 + `0x05` + `0x04` not from THIS handler (owner-attribution TODO) |
-| 0x22 | `NapiNPServerMsg_0x022 @0x514C90` | 0x46 | `NetPacket_SerializeWeaponOverlaySlotState @0x505e80` (reads `[u8 slot][u16 fieldFlags]`, `slotPtr[25146*slot]`) | `build_tag_46_player_sync` |
+| 0x22 | `NapiNPServerMsg_0x022 @0x514C90` | 0x46 | `NetPacket_SerializePlayerSync0x46 @0x505e80` (reads `[u8 slot][u16 fieldFlags]`, `slotPtr[25146*slot]`) | `build_tag_46_player_sync` |
 | 0x29 | `NapiNPServerMsg_0x029 @0x514F10` | 0x51 | `write_entity_packet @0x506bb0` (`CBufferList_GetAtIndex(g_team_change_entity_list, idx)`; gated `is_authority && !g_net_spawn_suspended && !g_spawn_success_gate`) | `build_tag_51_player_spawn` (8 B) |
 
 **D-NET-127** [reimpl divergence, DOCUMENTED] **The reactive §5.1/spawn-confirm reply bodies are
@@ -3995,7 +4402,7 @@ fixtures, plus the `0x0E`→`add_game_start_bundle` (`0x5A×2/0x42/0x0A/0x0F/0x4
 0x6E/0x57/0x4E/0x58/0x5D/0x4C`), reproduce the *expected reply tags in the witnessed order* but with
 captured bytes. The witnessed join burst is **leaner** — `Server_OnPlayerJoin @0x51a680` (§5.43,
 D-NET-114) emits only `0x42`(`NetPacket_WriteInputStateFlags @0x505ba0`) → world-stream
-(`Server_SendEntityStateToPlayer @0x517ba0`) → `0x0F`(`serialize_player_state_to_packet @0x502d10`) →
+(`Server_SendEntityStateToPlayer @0x517ba0`) → `0x0F`(`NetPacket_WriteWorldStateLoad0x0F @0x502d10`) →
 `0x4D`(player index byte) → seed (`Server_SendRandomSeedToPlayer @0x5101a0`, `0x61`) → `[0x14`
 cease-fire `NetPacket_WriteTwoBytesAndCString @0x5047a0]` → `[0x1D` weapon overlay
 `WeaponOverlay_SerializeToBuffer @0x505280` + game-state 11, when in-progress`]` → `0x3E`(empty
@@ -4005,7 +4412,7 @@ grill wave** (mirrors the §5.2a serializer wave that P3–P6 left deferred). `[
 @0x51a680; NapiNPServerMsg_0x002 @0x512FD0; NapiNPServerMsg_0x022 @0x514C90; NapiNPServerMsg_0x029
 @0x514F10]`
 
-**D-NET-127 UPDATE (2026-06-27, D-NET Wave 2 partial).** The §5.2a serializer wave this entry cross-references is CLOSED (Wave 1 / §5.2a serializer-grill, MATCHING). For the reactive-reply bodies: the `0x7A` PCID and `0x7B` session-info bodies are now FAITHFUL ports (the invented `"DEV-A02-0001"` literal removed; `0x7A` was wrongly writing the player name instead of the PCID — golden frame 134 proves len 1 / empty). The witnessed field maps for `0x46` (`NetPacket_SerializeWeaponOverlaySlotState @0x505e80` — `[u8 type][u16 fieldFlags]` then per-bit fields: 0x1=name, 0x2=team-string, 0x4=score@slot+416, 0x8=damage/alert, 0x10=vehicle-name, 0x20=score2, 0x40=squad, 0x80=side, 0x400=weaponType, 0x800=timer-dword, 0x1000=alert2) and `0x51` (`write_entity_packet @0x506bb0` — `[u16 header][u16 handle=pool<<12|slot][u8 team][u16 NetId-if-Flags&0x100-else-0][u8 animSlot-if-Flags&0x100-else-0]`) are now landed (no longer "unwitnessed"); they carry approximations pending slot-state / entity-handle modeling (the `0x46` flag-driven body reads ~10 slot/entity fields the headless host does not yet model; tracked, not invented). **0x51 layout FIXED (2026-06-27):** `build_reply_tag_51` now emits the witnessed `[u16 requested_index (echoed from C2S 0x29)][u16 handle][u8 team][u16 NetId][u8 animSlot]` (was wrongly `[team][handle][team][0][0]`); the index is sourced from the 0x29 payload. NetId/animSlot still default 0 pending the spawned entity's net_id/anim threaded into the reply binding. **0x46 confirmed structurally FAITHFUL (2026-06-27):** `build_reply_tag_46` already emits the witnessed flag-driven format — `[u8 slot][u16 fieldFlags][u8 entitySlot]` then the bit-gated fields in source order — and **round-trips through `decode_player_sync` (@0x431370, the client inverse)**. The invented `"A-A02-000000"` literal in field 0x10 (vehicle-name) is removed (empty for an on-foot player). The remaining gap is only per-field slot-state VALUES (score/squad/side/timer) for fields the headless host doesn't model — defaults, the wire SHAPE is faithful. Remaining D-NET-127 work (all LOW/cosmetic): the `0x46` per-field slot-state values, the `0x51` NetId/anim binding plumbing, and the `0x02`-handler extra `0x00`/`0x05`/`0x04` owner attribution.
+**D-NET-127 UPDATE (2026-06-27, D-NET Wave 2 partial).** The §5.2a serializer wave this entry cross-references is CLOSED (Wave 1 / §5.2a serializer-grill, MATCHING). For the reactive-reply bodies: the `0x7A` PCID and `0x7B` session-info bodies are now FAITHFUL ports (the invented `"DEV-A02-0001"` literal removed; `0x7A` was wrongly writing the player name instead of the PCID — golden frame 134 proves len 1 / empty). The witnessed field maps for `0x46` (`NetPacket_SerializePlayerSync0x46 @0x505e80` — `[u8 type][u16 fieldFlags]` then per-bit fields: 0x1=name, 0x2=team-string, 0x4=score@slot+416, 0x8=damage/alert, 0x10=vehicle-name, 0x20=score2, 0x40=squad, 0x80=side, 0x400=weaponType, 0x800=timer-dword, 0x1000=alert2) and `0x51` (`write_entity_packet @0x506bb0` — `[u16 header][u16 handle=pool<<12|slot][u8 team][u16 NetId-if-Flags&0x100-else-0][u8 animSlot-if-Flags&0x100-else-0]`) are now landed (no longer "unwitnessed"); they carry approximations pending slot-state / entity-handle modeling (the `0x46` flag-driven body reads ~10 slot/entity fields the headless host does not yet model; tracked, not invented). **0x51 layout FIXED (2026-06-27):** `build_reply_tag_51` now emits the witnessed `[u16 requested_index (echoed from C2S 0x29)][u16 handle][u8 team][u16 NetId][u8 animSlot]` (was wrongly `[team][handle][team][0][0]`); the index is sourced from the 0x29 payload. NetId/animSlot still default 0 pending the spawned entity's net_id/anim threaded into the reply binding. **0x46 confirmed structurally FAITHFUL (2026-06-27):** `build_reply_tag_46` already emits the witnessed flag-driven format — `[u8 slot][u16 fieldFlags][u8 entitySlot]` then the bit-gated fields in source order — and **round-trips through `decode_player_sync` (@0x431370, the client inverse)**. The invented `"A-A02-000000"` literal in field 0x10 (vehicle-name) is removed (empty for an on-foot player). The remaining gap is only per-field slot-state VALUES (score/squad/side/timer) for fields the headless host doesn't model — defaults, the wire SHAPE is faithful. Remaining D-NET-127 work (all LOW/cosmetic): the `0x46` per-field slot-state values, the `0x51` NetId/anim binding plumbing, and the `0x02`-handler extra `0x00`/`0x05`/`0x04` owner attribution.
 
 **D-NET-127 UPDATE (2026-07-01) — the post-handshake `0x00`/`0x03`/`0x05`/`0x04` bodies and owner
 attribution are now FULLY WITNESSED; the observation-carry for this burst is closed.** Owners: the
@@ -4142,7 +4549,7 @@ additional mounted-vehicle/turret tail every 16th frame:
 
 | `phase & 3` | sub-block | 11/6/16/0-byte body |
 |---|---|---|
-| 0 | weapon/reload/uniform | `[u8 preround_timer][u8 slot360][u8 slot368][u8 slot364][u8 slot356][u8 slot460][u8 reload_seconds][u32 CWeaponSlotManager_GetUniformTeamMask @0x4a2620]` (11 B). slot+360/368 gated on entity+36 bit 1 (else 0). reload_seconds = `dword_25510F4 − (ticks since fire)/62` clamped to 0xFE, 0xFF = belt-fed special, 0 = idle (`@0x4ff8f0..0x4ff992`). The reimpl decode struct was renamed `FrameAimBlock` → **`FrameWeaponBlock`** (fields `preround_timer`/`slot_state360..460`/`reload_seconds`/`uniform_team_mask`) 2026-07-01 — nothing in this block is aim state. |
+| 0 | weapon/reload/uniform | `[u8 preround_timer][u8 slot360][u8 slot368][u8 slot364][u8 slot356][u8 slot460][u8 reload_seconds][u32 ZoneSlotChain_GetOwnedZoneMask @0x4a2620 (ex-CWeaponSlotManager_GetUniformTeamMask) — the deploy-map owned-zone mask, §5.61]` (11 B). slot+360/368 gated on entity+36 bit 1 (else 0). reload_seconds = `dword_25510F4 − (ticks since fire)/62` clamped to 0xFE, 0xFF = belt-fed special, 0 = idle (`@0x4ff8f0..0x4ff992`). The reimpl decode struct was renamed `FrameAimBlock` → **`FrameWeaponBlock`** (fields `preround_timer`/`slot_state360..460`/`reload_seconds`/`uniform_team_mask`) 2026-07-01 — nothing in this block is aim state. |
 | 1 | server-status | `[u8 C6EAE0][u8 C6EAE4 fall-dmg tol][u8 g_serverFps][u8 g_serverCpuPct][i16 dword_24C1958/62]` (6 B) |
 | 2 | environment | `[u16 word_26C6822 fog][u16 (FogDistAccelClamp+255)>>8][u16 (CurTimeFixed24+4096)>>13 tod][u8 quake][u8 cloud>>10][u8 dword_26C6880>>8][u8 OvercastBlend>>8][u8 dword_2C059D0]` (11 B) |
 | 3 | gametype | 4×`i32` scores, **only if `g_GameType & 0x20000`** (`@0x4ffc2d`) — else 0 B |
@@ -4256,8 +4663,8 @@ default = all. Client receive: `[orig: NapiNPClientMsg_ChatMessage @ 0x42F240]` 
 0x0F world-state-load and batch-spawn handlers).
 
 **§5.53 S2C 0x04 SESSION SLOT CONFIG** (24 B) `[orig: NapiNPClientMsg_SessionSlotConfig @ 0x425410]`:
-`[4×i32 skipped][u8 sessionConfig → dword_24D2110][u8 teamMode → byte_A860D0][u8 maxPlayers →
-byte_A860D1 + PlayerSlotTable_Reallocate @ 0x434B90][i32 skipped][u8 → byte_A85B48]`.
+`[4×i32 skipped][u8 sessionConfig → dword_24D2110][u8 teamMode → g_local_player_slot_id][u8 maxPlayers →
+g_max_player_slots + PlayerSlotTable_Reallocate @ 0x434B90][i32 skipped][u8 → byte_A85B48]`.
 
 **§5.54 S2C 0x08 SESSION CONFIG** (fixed 51 B) `[orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]`
 — the old "game-state snapshot / delta entity updates (~2 KB)" table note was wrong. Wire:
@@ -4835,11 +5242,14 @@ all operate on it; the real avatars.def system is separate — `CAvatarDefs_Pars
 walks for the first free slot).
 
 **Load chain (per mission start):** `Game_StartMission @ 0x524360` → `AnimDef_InitAll @ 0x5435C0`
-(memset + per-entry defaults via `sub_53FEF0 @ 0x53FEF0`, creates the `"null"` entry) → parse
-**`weapon.def`** (string @ 0x7D0448, call @ 0x5254B8) via `sub_5450A0 @ 0x5450A0` →
-`File_ParseASCIIFile @ 0x53D810` (optionally SCR-encrypted, sniffed by header; CRLF lines; tokens
-split on space/comma/tab, `"..."` quotes, `//`/`;` comments, ≤30 tokens/line) with line callback
-`loc_543680` → post-pass `sub_53FEA0 @ 0x53FEA0`; loaded flag `dword_252DB80`.
+(memset + per-entry defaults via `AdmDef_InitEntryDefaults @ 0x53FEF0`, creates the `"null"`
+entry @ index 0) → parse **`weapon.def`** (string @ 0x7D0448, call @ 0x5254B8) via
+`WeaponDefs_LoadFile @ 0x5450A0` → `File_ParseASCIIFile @ 0x53D810` (optionally SCR-encrypted,
+sniffed by header; CRLF lines; tokens split on space/comma/tab, `"..."` quotes, `//`/`;`
+comments, ≤30 tokens/line) with line callback `WeaponDefs_ParseLineCallback @ 0x543680` →
+post-pass `AdmDefs_PostParseRecompute @ 0x53FEA0`; loaded flag `dword_252DB80`. (Functions
+renamed from `sub_*` in the 2026-07-02 grill; `WeaponDefs_ResetParseState @ 0x53FF90` is the
+shared block-close/parse-state reset.)
 
 **Block grammar:** `weapon "name"` … `end` (name → entry+0x14, strncpy 32 @ 0x543737); nested
 `action <name>` … `end` (12 actions in `g_weaponActionTable @ 0x830B90`: idle, emptyidle, fire,
@@ -4871,25 +5281,52 @@ allowed-class mask `dword_24D59FC`); stamp `entity+660 = soldierType` (@0x515ab0
 the player model; load accepted entries into the 780-slot weapon table
 (`WeaponSlotPool_ResetAllEntries @ 0x53F240` + `WeaponSlotTable_LoadAllFromDefs @ 0x5414E0`);
 ammo per entry: `req >= 0 ? min(req, entry[83]) * entry[22] : entry[23]` →
-`WeaponSlot_SetAmmoCount @ 0x540B50` (@0x515e58-0x515e86). The reply
-(`Server_SendWeaponSlotListToPlayer`) walks the slot table (= ascending AdmDef-index order),
-filtering by team/type masks, emitting `[u8 admIdx][u8 ammo (sub_5425F0 live count)][u8 alt]
-[u8 restriction (player+89688[admIdx], observed 0)]` + 0xFF terminator after the leading
-`[u8 avatarClass]`. The CLIENT apply (`NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0`)
-re-runs the same clamp/fallback on its own table — so the SET is what matters; the golden's
-resolved counts and a request-echo differ on the wire but converge on apply EXCEPT when the
-fallback `entry[23]` is negative (the shipped default), where the count degenerates. Reimpl
-status: the 0x5A set/order/avatarClass are derived from the request
-(`build_tag_5a_weapon_loadout`, libs/npruntime/server_message_dispatch.cpp) — ammo resolution +
-mask validation need the parsed weapon.def table (D-NET-141).
+`WeaponSlot_SetAmmoCount @ 0x540B50` (@0x515e58-0x515e86).
 
-**Index numbering (OPEN):** entry 0 = the engine-created `"null"`; weapons allocate via
-`AdmDef_FindFreeSlot` in parse order. Live 0x2F/0x5A indices (host default animDef 9 =
-`WPN_M4AUTO` — matches naive file order with null=0) conflict with the high indices
-(76/77/78/83 land on emplaced weapons under naive numbering; a `loadout_subclasses`-reserves-
-slots model lands AT4/MORTAR/STINGER there but breaks index 21). The allocation rule — what, if
-anything, `loadout_subclasses`/`sameas`/`switchrank` blocks allocate — must be witnessed in the
-`loc_543680` weapon-open/close handlers before the reimpl parser can map indices byte-exactly.
+**The reply walk (grilled 2026-07-02):** `Server_SendWeaponSlotListToPlayer` walks the player's
+780-slot table **ascending by weapon-slot combo `category*65 + rank`** (@0x5026e5..@0x5028a0 —
+NOT AdmDef-index order; the two coincide for the golden kit), filters each populated slot by
+`team_side_mask & def+0x80` and `slot_category_mask & def+0x7C` (@0x502716; team mask from
+entity+416: 1/3 → blue 2, 2/4 → red 1, else 3 @0x502666; char mask from playerType: 5..9 →
+`1<<(t-5)`, 1..3 → all @0x502693), and emits per slot: `[u8 admIdx =
+AvatarDef_FindIndexByName(def name) @0x50273b]` `[u8 ammoPrimary = WeaponSlot_GetTotalClips
+@0x502794]` `[u8 ammoSecondary = the same count for the FIRST different-ammoclass sub-variant
+in parent+1..parent+LSC (@0x5027c8, class-byte compare @0x5027f8), else 0xFF]`
+`[u8 restriction (player+89688[admIdx], observed 0 @0x50288a)]`, then skips the LSC slots
+(@0x50284e); 0xFF terminator after the leading `[u8 avatarClass]`.
+**`WeaponSlot_GetTotalClips @ 0x5425F0`** (ex-`sub_5425F0`; the auto "kill score" comment was a
+misnomer) = the slot's TOTAL AMMO IN CLIPS: (entity ammo pool for the def's ammoclass [+ the
+bucket value @0x542651 / loaded rounds slot+16 @0x54265b]) ÷ clipsize (@0x542673); clipsize −1
+→ returns −1 = wire 255, the knife/no-clip sentinel (@0x542669); clamp 127 (@0x542678). At
+loadout time the pool is the §5.57 fill, so a default-request (0xFF) byte ==
+`startrounds/clipsize` and an explicit request == `min(req, maxclips)` — verified against the
+golden ASH_I5A reply `{2:255, 3:10, 21:10, 76:1, 77:2, 78:3, 83:3}` field-for-field. The CLIENT
+apply (`NapiNPClientMsg_HandleWeaponLoadoutSync @ 0x4290E0`) re-runs the same clamp/fallback on
+its own table — echoed bytes converge on apply EXCEPT when the fallback `entry[23]` is negative
+(the shipped default), where the count degenerates (the v15 "ammo issues"). Reimpl:
+`build_tag_5a_weapon_loadout` (libs/npruntime/server_message_dispatch.cpp) + the witnessed
+rules in libs/npruntime/weapon_table_build.cpp over `world::WeaponTable` (D-NET-141).
+
+**Index numbering (CLOSED 2026-07-02):** `AnimDef_InitAll @ 0x5435C0` wipes the table and
+creates exactly ONE built-in — `"null"` @ index 0 (strcpy @0x543615) — immediately before
+`weapon.def` parses (`Game_StartMission @0x5254b3/@0x5254bd`). The `weapon "NAME"` open handler
+resolves an EXISTING same-name entry first (`AvatarDef_FindIndexByName @0x5436e1`, the re-parse
+override) else takes the LOWEST free slot (`AdmDef_FindFreeSlot @0x53FC50`), inits defaults
+(`AdmDef_InitEntryDefaults @0x53FEF0`: clipsize 1 @0x53ff13, startrounds −1 @0x53ff19) and
+copies the name (@0x543737). `loadout_subclasses` (@0x544E43 → +0x3AC) and `loadout_selectable`
+(@0x544e11 → +0x3A8) are plain scalar stores — **nothing reserves slots**; a parent's
+sub-variant blocks directly follow it in the file and allocate their own consecutive indices
+(the 0x5A alt-ammo walk depends on parent+1..parent+LSC being the variants @0x5027c8).
+`AdmDef_FindFreeSlot` has exactly ONE caller (the weapon.def callback), so one parse into a
+fresh table is **pure file order, 1-based**. The prior 94-weapon anchor contradiction was the
+FIXTURE, not the rule: a live install's VFS-resolved weapon.def differs from the
+fixtures/def/weapon.def extract (the JO:CA host root resolves 126 weapons — loose files shadow
+archives, patch PFFs override), and under file order every golden anchor lands (KNIFE2@2,
+M4AUTO@9, AK47AUTO@21, GRENADEFB/HE/SM@76/77/78 with startrounds 1/2/3, SATCHEL_CHARGE@83; the
+gunner kit's PKM@41 + DESIGNATOR@89). The parse callback (ex-`loc_543680`) is now the defined
+function `WeaponDefs_ParseLineCallback @ 0x543680` (0x543680–0x545098; two fallthrough
+artifacts sub_544148/sub_544D5F deleted, the shared warning helper `WeaponDefs_ParseWarning
+@ 0x53FFC0` defined after a data-in-instruction repair @0x540047).
 
 ### 5.58 The reload round-trip — C2S 0x25 → S2C 0x49 (2026-07-02)
 
@@ -4916,11 +5353,598 @@ Reload ammo math: `WeaponSlot_ReloadAmmo` transfers `def[22] (clipsize) × def[5
 ignores C2S 0x25 permanently wedges the joiner's weapon (one attempt sets 0x80; no 0x49 ever
 clears it) — D-NET-142.
 
-## 8. Equivalence verdicts (grill log)
+Host-side bookkeeping (witnessed in full 2026-07-03): after the two relayed sends, the host
+calls `WeaponSlot_ReloadAmmo @ 0x541720` on its OWN copy iff the requester is REMOTE
+[orig: @0x514f03 `g_local_player_entity != *player`], keyed by the wire slot combo
+(`slot = playerSlot+464 + 100*combo` @0x54176d): clears the slot+90 0x80 flag, REFUNDS the
+remaining clip into the adm+216-typed ammo pool, and refills `clip u16 slot+16` to
+`capacity(adm+88)` clamped by what the pool affords [orig: @0x541811/@0x541850]. This is the
+same clip the C2S 0x06 fire pipeline decrements (§5.16) — a host that tracks fire without
+tracking reload wedges its OWN ammo authority one clip in. REIMPL (D-NET-152): the dispatch
+0x25 case refills the tracked clip to capacity (pool refund/clamp deferred with the pool
+model).
+
+### 5.59 The character-slot binding family — C2S 0x29, S2C 0x29/0x50/0x51, and the registry/blip structures (2026-07-02)
+
+The client binds every `Flags & 0x100` (player-flagged) entity to a CHARACTER DESCRIPTOR via
+`entity->CharacterEntity` (+0x3C). Getting any message of this family wrong re-binds a player to
+the wrong archetype — the live symptom is a wrong minimap/shadow descriptor under a correct mesh
+(D-NET-148's DBuggy1 shadow).
+
+**The two structures** (one global blob, `count_and_entries @ 0x26A7748`):
+
+- **Character-archetype registry** — `[i32 count]` + 288-byte-stride entries: `+4` type,
+  `+8` subtype, `+12` index, `+280` SIDE (0 = A, nonzero = B), `+284` avatar byte, plus three
+  88-byte sub-blocks (byte triples at +44/+132/+220, floats at +96/+184/+272 — the descriptor
+  payload). Seeded client-locally (`Game_StartMission @ 0x524360`,
+  `Entity_SpawnFromAnimSlotProperty @ 0x43c390`, `PlayerProfile_InitDefaults @ 0x54bb40`) and
+  browsed by the player-info avatar UI (`populate_avatar_combo_list @ 0x560210` et al).
+- **Blip table** — 256 × 36-byte entries inside the same blob (entity ptr at +28, active flag
+  +32, 23-byte descriptor at +0): per-LIVE-entity binding records.
+  `[orig: MinimapSlot_FindOrAllocByEntityId @ 0x57b1e0]` finds-or-allocs by ENTITY POINTER, then
+  `[orig: MinimapSlot_InitBlipFromPackedId @ 0x57b080]` (renamed this session from the kong
+  `HUD_DrawAllMinimapEntities`) resolves the packed char id via
+  `MinimapSlot_FindByPackedId @ 0x57a270` and COPIES the registry entry's descriptor into the
+  blip; a failed resolve zeroes it with avatar = 1.
+
+**The packed char id** (`lookup_entity_slot_and_pack_entry @ 0x57ad40`, pack @ 0x57ae47):
+`type(bits 0-4) | subtype(5-8) | index(9-14) | SIDE(15)`. Bit 15 is the SIDE-B bit — matched
+against registry entry+280 — **not** an "alive" bit (corrects the original D-NET-137 reading).
+The lookup's second parameter is the side (`team != 1`), and a side with no registry entry falls
+back to packing entry 0. Golden ids: host `0x0200` = side A/type 0/index 1, joiner `0x8207` =
+side B/type 7/index 1 (the CI1 u16 truncation, §5.0b/D-NET-146).
+
+**The messages** (client handlers in the 16-byte-entry dispatch table `@ 0x82AE28` —
+`{tag, name, handler, 0}` — which pins every tag↔handler pairing):
+
+| msg | handler | payload / behavior |
+|---|---|---|
+| S2C 0x29 | `[orig: NapiNPClientMsg_CharMinimapUpdate @ 0x427D00]` (renamed from `handle_entity_minimap_update`) | `[u8 pool0Idx][u8 team → entity+354][u8 flags7 → entity+692][u16 packedCharId → NetId +0x15C]`; self-heals an unresolvable id by side, then REBINDS CharacterEntity. Client-only (`is_authority` gate). |
+| S2C 0x50 | `[orig: NapiNPClientMsg_TeamAssign @ 0x431910]` | team assign (§4 row); also touches the registry. |
+| S2C 0x51 | `[orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431BB0]` | **FIELD-PARSED** (refuting the D-NET-137-era "spawn signal only" claim): `[u16 ackSeed][u16 entityHandle][u8 team → entity+354 (client only)][u16 packedCharId → NetId @ 0x431cad][u8 → entity+884]`; acks C2S 0x29 with `ackSeed+1` (`@ 0x431c99`); for `Flags & 0x100` entities REBINDS CharacterEntity (`@ 0x431cf3`). |
+| C2S 0x29 | server `[orig: NapiNPServerMsg_0x029 @ 0x514F10]` | `[u16 team_change_index]` — sent by the client's 0x51 apply (team+1) and at deploy/team pick. The server replies S2C 0x51 ONLY when the index resolves to a pending `g_team_change_entity_list @ 0xC947C8` entry (gated `!g_net_spawn_suspended && !g_spawn_success_gate`), and the reply body is a real `write_entity_packet @ 0x506bb0` record. **A plain join-deploy C 0x29 draws NO reply** — golden retail-ashi5a has zero S2C 0x51 in the whole session. |
+
+The deploy gate is unrelated: retail drops the loading screen via S2C 0x1D (§5.2), never 0x51.
+
+### 5.60 The authoritative round simulation, damage, and the death broadcast family (engine-research scope, 2026-07-03)
+
+Witnessed to scope the port of server-side rounds — the D-NET-152 deferred tail. No reimpl
+exists yet: every claim here is confirm-only from the binary; the payload writers named in
+the follow-ups get byte-witnessed at port time.
+
+**The spawn is synchronous.** `RoundData_AddRound @ 0x4FDB40` inline-calls
+`RoundData_SpawnRound @ 0x4EC0D0` — the `g_round_ring` is ONLY the tag-2 network fan-out
+log; the simulation starts at fire time. SpawnRound (hit-params struct = the 11-dword block
+AddRound builds: origin ptr, target, fire time, adm entry, weapon id, damage type/value,
+direction/spread words): score-multiplier stamp, tracer interval (the AMMO `tracerRate`
+byte +226), then the
+ammo-class dispatch — driven by the AMMO record's flags dword and kztype word (the
+`ammo.def` field map below): flag 0x400 `instantkillzone` + the IMMEDIATE RAYCAST when the
+ammo kztype (word 22) == 1 `rounds_kz_Knife`
+(`Weapon_RaycastAndSpawnImpact @ 0x4E8460`: euler→matrix ray out to weaponDef+56 range vs
+terrain hi-res heightmap + `Projectile_RaycastProximitySlots @ 0x4E5340` + water, 5-way hit
+class, impact effect from the weapon's 16-B effect table + sound — EFFECTS ONLY, no damage
+call in the hitscan leaf), flag 0x20 `Detonatesatchels`, 0x2000000 `DesignateTarget`
+guided-tracker register, 0x10000 `shotgun` / 0x20000 `claymore` pellet bursts
+(`Weapon_SpawnProjectileBurst*`, count = ammo `spread_count`), default (kztype 6
+`rounds_kz_Bullets`) =
+allocate a pool-3 projectile entity (`CEntityManager_AllocateSlot` +
+`Entity_InitFromItemDef`), apply `Weapon_CalcRandomSpreadOffset` to the direction, velocity
+= ammo speed/62 per tick from yaw/pitch 16.16 trig (multiply >> 22), owner/team stamp,
+trail emitter + glow light. Other SpawnRound callers: the client's own-fire prediction
+(`Entity_FireWeaponAndSendPacket @ 0x42BD80`), the client tag-2 re-sim
+(`NetPacket_DeserializeRoundEvent @ 0x42F270`), death-explosion shrapnel
+(`Entity_HandleInfantryDeath @ 0x443670`, `Entity_HandleDeathExplosion`,
+`Entity_HandleVehicleDeathExplosion`), and save-load.
+
+**Authority: damage is host-only — witnessed in three independent gates.**
+`Weapon_CalcImpactDamage @ 0x4EC920` returns 0 for a non-authority session peer
+(`@0x4ec933`); `Projectile_ProcessDamageOnTarget @ 0x4E7FB0` guards the health write and
+the team attacked-by/visibility matrices on `g_napi_np_ctx.is_authority` (`@0x4e809c`,
+`@0x4e8127`); `Entity_ApplyWeaponDamage @ 0x4E6820` (the explosion applicator) early-outs
+unless authority, with buildings further gated by `g_destroy_buildings` (`@0x4e6860`). A
+client's local round sim — own-fire prediction and tag-2 re-simulation alike — is purely
+visual (effects, decals, sound).
+
+**The per-tick sim.** `Weapon_UpdateAllProjectiles` iterates live rounds →
+`Projectile_UpdatePhysics @ 0x4E9D70` (ammo def = `g_ammoDefTable[276·idx]`, idx at
+projectile+620, lifetime at +684): advance by velocity, segment ray per tick — terrain
+hi-res heightmap (`Terrain_RaycastHeightmapHiRes`), entity proximity list
+(`Entity_BuildProximityList` → `Physics_RaycastAgainstProximityList`, minimum proximity
+radius 0.1 u = 6553 fp16 "for networked authority" `@0x4ea263`), water
+(`Projectile_CheckWaterIntersection @ 0x4E59D0`) — drag
+(`Projectile_ApplyDragDeceleration @ 0x4E5CD0`, table from `Projectile_InitDragTable
+@ 0x4E78D0`), then the 5-way hit switch (`@0x4ea6a7`): 0 = terrain →
+`Projectile_HandleTerrainImpact @ 0x4E9210`, 1/2 = entity (with hit-bone data) →
+`Projectile_HandleEntityImpact @ 0x4E9390`, 3 = building → `@ 0x4E98F0`, 4 = water;
+effects `Projectile_SpawnImpactEffect @ 0x4E9B80`, tracer scar `@ 0x4E5AC0`.
+
+**Entity impact** (`Projectile_HandleEntityImpact @ 0x4E9390`): resolve through the
+vehicle parent chain (`@0x4e94e0`); the ARMING gate — elapsed ticks (projectile+676
+initial − +684 remaining) < the ammo `arm_age` (dword 3) means the round is NOT ARMED yet
+and spawns its `notarmmedammo` (+241) child in its place (`AmmoDef_LookupByName`, copies
+692 B of the projectile) — the inert/dud variant of a grenade inside arming distance (the
+old "penetration budget" reading was wrong);
+weapon-type-15 bone/section damage via `Entity_ComputeBoneCollisionBounds`; kinetic clamp
+(`Entity_ClampKineticEnergy`); pass-through flags 0x18000000 = `lawr|fgrenade`
+(`@0x4e95a0`); then `Projectile_ProcessDamageOnTarget @ 0x4E7FB0`.
+
+**The damage model is kinetic.** `Weapon_CalcImpactDamage @ 0x4EC920`: damage scales with
+the round's REMAINING SPEED — `(62 · |vel|) >> 16`, clamped to 1219 (`@0x4ecad6`) — times
+a hit-zone multiplier (infantry zone switch `@0x4ec9bf`: zones 0-4 = HEAD, sets flag 0x100
+on target+44; 5-8 = body ×1.0; 9-12/15-18 = limbs; 13-14 = special, flag 0x800; vehicle
+path when itemDef+84 has 0x200: seat types 2/3/6/7 get the special multiplier + 0x800);
+`g_OneShotKill` → flat 2000; clamp to ammoDef max (dword 48). Distance falloff EMERGES
+from drag — there is no range table. Zeroing gates in
+`Projectile_ProcessDamageOnTarget`: indestructible entity flags 0x4000000, itemDef+400
+armor threshold 0xFFFF or greater than the ammo `penetration_impact` (dword 49, +196 — the
+round must penetrate the target's armor class), target already dead (+292 == −1), occupant
+scale (`Entity_ApplyOccupantDamageScale`) when target+92 == 1; damage clamps to remaining
+health, and itemDef+84 flag 0x40000000 pins health at 1 (unkillable-by-damage). The
+authority applies `health −= damage` (`@0x4e8127`); a kill calls `Score_ProcessKillEvent
+@ 0x4FD400` (authority-gated scoring ONLY — it emits no messages); a PLAYER target (entity
+Flags & 0x100) additionally gets the hit bookkeeping — projectile+688 multi-hit counter,
+target+442 = the shooter slot word, +376 = the owner entity, and the entity damage
+callback (+456) fires with event 4.
+
+**The `ammo.def` table** (`AmmoDef_LoadAll @ 0x40B0B0`, `Game_StartMission @0x52548a` —
+the file is literally `ammo.def`, same encrypted-ASCII `File_ParseASCIIFile` key
+0x2A5A8EAD as weapon.def §5.57; 276-B records at `g_ammoDefTable @ 0xA2ECE8`, two-pass
+count→allocate→parse, `AmmoDef_InheritDefaults` per `end`). Token → offset map
+(`AmmoDef_ParseProperty @ 0x40A2D0`; dword N = +4·N): `flag` OR-bits → +0 (30-name table
+`@0x813500`: ignoredmg 1, ignore 2, shrapnel 4, silenced 8, water 0x10, Detonatesatchels
+0x20, nosmoke 0x40, nocollide 0x80, nogravity 0x100, hasitem 0x200, instantkillzone 0x400,
+ownerimmune 0x800, useownmove 0x2000, noage 0x4000, forcetracer 0x8000, shotgun 0x10000,
+claymore 0x20000, NoOItems 0x80000, NoMItems 0x100000, NoDItems 0x200000, Priority
+0x800000, ClipWater 0x1000000, DesignateTarget 0x2000000, IgnorFoilage 0x4000000, lawr
+0x8000000, fgrenade 0x10000000, ClipWaterFx 0x20000000, + 3 `internal`); `velocity` → +4
+(int, units/s); `max_age`/`arm_age` → +8/+12 in TICKS (`sub_40A0F0` = parsed 16.16 seconds
+× 62 rounded); `frndlyTrcrID`/`foeTrcrID` → +16/+20 (item type_id → model index); `error`
+(spread) → +24 fp16; `drag` → +28 fp16; `bullet_radius` → +32 fp16; `MF_Light` → +36/+40;
+`spread_count` → +48 (pellets); `kz_minradius`/`kz_maxradius` → +52/+56 fp16;
+`kz_pieslice` → +60 (deg → BAM ×11930464); `kztype` → word 22 (+44) from the 8-name table
+`@0x8133E0` (0 null, 1 Knife, 2 Standard, 3 Medic, 4 RadiusBlast, 5 C4, 6 Bullets,
+7 Slash); `kz_damage` → word 23 (+46); `min_stable_velocity` → +176; `tumble_error` →
++180 fp16; `weight_in_grains` → +184; `min_damage`/`max_damage` → +188/+192;
+`penetration_impact`/`penetration_kz` → +196/+200; `armor_density` → +204/+208/+212;
+`secondary_anim`/`kz_physics` bytes +224/+225; `tracerRate` byte +226; `recoil` bytes
++227..229; `dopplerdiv` byte +240; `notarmmedammo` string +241; guided params
+(`turnrate_maxpit`/`maxyaw` +80/+84, `boresight_maxang` +88, `climb_angle`/`time`
++92/+96); effects_table sub-section (28 tags `@0x813420`).
+
+**Explosions.** `Projectile_ProcessExplosionQueue @ 0x4EAD80` drives AoE via
+function-pointer tables (`@0x4eadd0`, `@0x4eae44`) → `Entity_ApplyWeaponDamage @ 0x4E6820`:
+authority gate, same-team protection when itemDef attrib 0x8000, base damage from
+weaponDef+46, LINEAR distance falloff (blast radius), separate infantry (type 3) and
+vehicle section paths, kill credit via `Score_ProcessKillEvent`.
+
+**Death detection + the broadcast family** (every emit goes through
+`NapiNPServer_SendFiltered @ 0x4C87E0`; mask 0x90 = alive + not-host):
+
+- Per-tick `Entity_UpdateInfantryPlayerBody` / `Entity_UpdateInfantryAI` detect health ≤ 0
+  → `Entity_CheckAndProcessDeath @ 0x51B550`: `Flags & 0x100` (player-controlled) →
+  `GameEvent_PlayerDeath @ 0x516DD0`; else (AI) → S2C 0x13 death notify
+  (`BuildDeathNotifyPayload`, mask 0x90) + scoring.
+- `GameEvent_PlayerDeath @ 0x516DD0` [authority-gated at entry]: vehicle detach, clears
+  every pool-0 entity's live-target (+92) that references the victim (the §5.9.1 0x40-word
+  source), S2C 0x13 (`@0x516e9a`), respawn timer (620-tick recent-spawn rule /
+  `g_respawn_timeout`, floor 3, slots +360/+364), random-seed resend, scoring
+  accumulators (`Score_AccumulateKillByEntityType` ×2 + weapon stats), kill-type
+  classification for the feed — suicide rand(0-2)+1, team kill rand+7, explosive weapon
+  type_id 4091/4093/4095 → 24, special 49, HEADSHOT (flag 0x100 from CalcImpactDamage) →
+  rand+32, vehicle kill (flag 0x800) → rand+10, knife (flag 0x400) → rand+13, standard
+  rand+4, drowned 22, crashed (0x200) 23, environment 26 — then S2C 0x52 ×2
+  (`NetPacket_WriteThreeInt32s`, kill stats), S2C 0x1E (`GameEvent_BuildPayload`:
+  event_type + three pool indices + position — the §5.26 kill feed), S2C 0x54 ×2
+  (`NetPacket_WriteEntityHandleWithByte` — the death/wounded minimap marker; also emitted
+  by `GameEvent_RevivePlayer @ 0x517DB4` and `Server_BroadcastMedicRequest @ 0x515390`,
+  D-NET-108).
+- `Server_KillPlayerAndNotify @ 0x519E00` [authority]: marks the slot dead (+100567;
+  entity+292 = −1 — the exact flag `Projectile_ProcessDamageOnTarget` checks), calls
+  `Server_ProcessPlayerDeath`, optional S2C 0x32 sub-type 5 carrying the player NAME.
+- `Server_ProcessPlayerDeath @ 0x517740`: killer pool-handle resolve, vehicle detach (+
+  seat-flag 0x40000 killer-vehicle re-attach), spawn camera, `Entity_ResetToSpawnState
+  @ 0x4B9610` (the D-NET-66 death teleport), per-gametype scoring, weapons re-init +
+  `Server_SendWeaponSlotListToPlayer @ 0x502943` — a death re-sends 0x5A (the
+  deploy-bundle 0x5A pairing seen in the golden), 0x1E event, KRBP death marker (§5.42).
+  Callers: respawn request, kill-notify, bot update, the death queue.
+- Non-player entity death/destruction — 16 handlers (infantry/vehicle/destructible death
+  + explosions, AI death transitions, section damage, crane/water destruction) — all stage
+  S2C 0x26 via the single emit point `Server_SendEntityStatePacket @ 0x509D70`
+  (`NetPacket_WriteEntityHandleAndTeam`, mask 0x90, tick stamp at entity+560).
+  Destructibles additionally `Server_SendDestructibleDeathPacket @ 0x50D95A` → S2C 0x2F;
+  explosion effects broadcast via `Server_BroadcastExplosionEffect @ 0x5084A1` → S2C 0x21;
+  shell-eject/fall physics sync → S2C 0x59.
+- CORRECTION (table row filled): the C2S 0x13 handler `@ 0x514330` is
+  `NapiNPServerMsg_HandleSectorAction` — pool-3 def-type-2044 sector actions (action 6
+  arms a 30-tick timer at entity+885/886), weapon-fire/camera math for some types — NOT a
+  death message. Only S2C 0x13 is the death notify.
+
+**PORTED (2026-07-03, the MVP slice — same session as the witness pass).** `libs/def`
+ammo.def parse (the §5.60 token subset incl. the flag/kztype tables; `def_parse_ammo_memory`;
+pinned by `def_parse_ammo` against the real 75-entry fixture — the 5.56 block field-for-field)
+→ `world::AmmoTable` + the weapon `round_type` → ammo-index resolve (`ammo_table_build`,
+the adm+84 pair equivalent) → `world::RoundSim` (512-slot pool; spawn SYNCHRONOUS with the
+0x06 ring append; velocity = ammo/62 per tick from the wire BAMs via the (90°−yaw) mission
+frame; per-tick segment test vs pool-0 organics + the bilinear terrain column; the kinetic
+damage number `min(62·|vel|,1219)·grains/875` floored/capped, clamped to remaining health)
+→ death routing in `Server_TickUpdate` (S2C 0x13 `[victim][killerSource]` + S2C 0x1E
+standard-kill feed event to every non-host in-match connection; a dead HOST player queues
+for the 620-tick respawn release back to its recorded spawn point at template health; a
+joiner's respawn rides its own deploy request) → engine feed `NovaSimulation::load_ammo_table`
+(mission_runtime.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
+spawn velocity/frame, 3-hit kill at 60/60/30, 0x13/0x1E bytes, no-auto-respawn for clients,
+host respawn snap). MVP deferrals tracked in round_sim.h + here: bone-zone multipliers
+(body-only 1.0), drag/gravity (no falloff yet), spread, vehicles/statics (armor threshold),
+explosion kill zones, arm-age child swap, 0x52/0x54/0x32 emits, scoring, the shooter-class
+0.9/1.1 bytes.
+
+**v29 LIVE (2026-07-03, two retail clients + the host player,
+`.scratch/retail_join_v29_game.pcapng`):** the pipeline worked end-to-end — 35 C 0x06
+across both joiners, one kill applied host-side, and the death broadcast REACHED THE WIRE
+(one S2C 0x13 + 0x1E pair delivered to BOTH clients; the killed joiner redeployed through
+its own deploy request). Three defects surfaced and were fixed same-day: the fire-direction
+frame (D-NET-153 — the kill asymmetry the user reported), tag-2 budget starvation
+(D-NET-154 — zero round events despite live observers), and the stale 0x16 roster
+(D-NET-155 — HUD player count stuck). The "anims not quite correct" report is the tracked
+body-motor item (off-14 states / off-15 channel ratio), not a new defect.
+
+**v30 LIVE (2026-07-03, same stack): D-NET-153 and D-NET-154 VERIFIED on the wire.** Kill
+symmetry both ways — the 0x13 bodies read victim 0x0001 killerSource 2 (the direction v29
+could not produce), victim 0x0002 killerSource 1, and victim 0x0000 killerSource 1 (the
+HOST player killed by a joiner); **25 tag-2 round-events on the wire = the §5.9.1 positive
+observer witness at last** (every one of the 25 fires echoed exactly once to the other
+client; sample: `shooter=0x0002 origin+yaw/pitch+shotSeq` intact). Exactly three player
+entities all session (0x0000/0x0001/0x0002) — a killed joiner's redeploy REUSES its entity,
+no ghost bodies; the body holding its death spot until respawn is the retail-correct
+D-NET-66 behavior (the standing-idle LOOK is the body-motor anim gap — the death anim
+state is not streamed yet). D-NET-155's first cut was found half-broken (see its entry) and
+re-fixed; HUD count re-verifies v31.
+
+**Port follow-ups (witness at port time):** the payload writers
+(`BuildDeathNotifyPayload`, `GameEvent_BuildPayload`, `NetPacket_WriteThreeInt32s`,
+`NetPacket_WriteEntityHandleWithByte`, `NetPacket_WriteEntityHandleAndTeam`) byte layouts;
+the drag-table build (`@ 0x4E78D0`) and how the per-tick deceleration consumes the ammo
+`drag` fp16; the exact spread math (`Weapon_CalcRandomSpreadOffset` on the ammo `error`);
+the SpawnRound default-path field flow into the 780-B round record (the array
+`@ 0xB7E1A8`, 128 groups × 4 × 780 B, active-flag bytes `@ 0xB7DFA0` — witnessed via
+`Weapon_UpdateAllProjectiles @ 0x4EC020`, zone floats RESOLVED: head 1.25 `flt_7C6F18`,
+limbs 0.5 `flt_7C3B94`, zones-13/14 3.0 `flt_7C6F80`, vehicle seats 6.0 `flt_7CD510`);
+the wounded/medic loop (`Player_OnDamageReceived @ 0x4DD880`,
+`GameEvent_RevivePlayer`, S2C 0x3A); `Entity_InitSpawnedChild` at death (corpse/drop);
+the S2C 0x13/0x52/0x54 client handler bodies (`@ 0x42EB50` §5.35, `@ 0x429040`).
 
 Per-system verdicts from grilling the reimplementation against retail
 `Jointops.exe` (Kong IDB). Each row cites the original entry point. Verdict:
 **matching** | **divergent → fixed** | **divergent (accepted)** | **unknown**.
+
+### 5.61 Advance & Secure — spawn selection, the zone chain, and the capture loop (engine-research scope, 2026-07-03)
+
+Witnessed to scope the full-AS-game port (gametype 0x10010 on ASH_I5A): how the deploy map
+gets its selectable zones, how the client's pick reaches and gates on the server, and the
+complete server-side zone-capture loop. Confirm-only from the binary (no reimpl yet except
+the §5.2c marker fallback); §5.2c (marker family + `Entity_FindBestSpawnPoint`), §5.19
+(0x40 client decode), §5.26 (0x1E client decode), §5.31 (0x6E client decode) and §5.49
+(0x6F/0x53 client decode) are the client-side halves of this witness.
+
+**The zone data model.** A capture/spawn zone is an ordinary pools-1/2 entity whose ItemDef
+carries attrib flags `0x20000` (capture trigger) and/or `0x40000` (deploy-selectable spawn
+point) — the ASH_I5A "Change Team & Spawn Volume" tent/HQ objects (0x0575/0x0576, D-NET-70
+pool routing) carry both. On the entity: `+538` (u8) = the authored ZONE NUMBER (0 = not a
+chain zone — plain flag/base), `+354` = owning team, `+540` (i32 16.16) = the SECURE/control
+fraction 0..1.0, `u16 +350` = the zone radius in world units, `+544`/`+545` = friendlies/
+enemies in radius (refreshed each pass, ride the 0x6F tail), `+546/547/548/550` = the
+client-side landing block (§5.49 0x53 / §5.31 0x6E). Pool-3 markers configure the chain:
+def-types **6003/6096 → team 1, 6004/6097 → team 2, 6090/6098 → team 3, 6091/6099 → team 4**
+(the marker's `+538` = that team's assigned/base slot number; any other numbered pool-3
+marker → the team-0 row), def-type **6006** = the radius capture zones of the non-chain zone
+modes (proximity only), def-type **6007** = sub-spawn scatter points inside a zone (below).
+`[orig: ZoneSlotChain_BuildFromMission @ 0x4A2DE0; Server_UpdateCaptureZoneProximity
+@ 0x5086A0 (6006 @ 0x5089EF)]`
+
+**The zone-slot chain (the AS frontier).** An inline manager struct `g_zone_slot_chain
+@ 0x24D1EBC` (renamed from the kong misnomer `CWeaponSlotManager` cluster — it manages
+capture-zone slots, not weapons): five per-team `[ownedMask, assignedSlot]` dword pairs
+(teams 0–4) + a `std::vector` of `{entity*, u8 rank}` wrappers. Built at mission start
+(authority only, `Game_StartMission @ 0x524360 @ 0x526117`): pool-3 markers seed the
+assigned slots, then every alive pools-1/2 entity with `+538 != 0` and def `0x20000` is
+added; `ownedMask[team] = OR(1 << zone_no)` over that team's zone entities
+`[orig: ZoneSlotChain_RebuildOwnershipMasks @ 0x4A26C0]`; `rank` = descending index within a
+shared zone number `[orig: ZoneSlotChain_AssignZoneRanks @ 0x4A27F0]`. The FRONTIER rule
+`[orig: ZoneSlotChain_IsZoneCapturableByTeam @ 0x4A2450]`: team T may capture zone Z iff
+`Z == assignedSlot[T]` and Z isn't already T's, OR `(1<<Z) & mask[T]` and not T's, OR an
+ADJACENT zone number Z±1 inside `mask[T]` is owned by T (the leapfrog chain — walk the
+vector; an enemy-held adjacent kills that direction). Gametype 0x50010 (327696) is exempt
+(every zone always capturable). `ZoneSlotChain_FindFrontierZone @ 0x4A2AC0` = the first
+vector entry capturable by T → its zone number (the "go capture zone N" hint).
+`ZoneSlotChain_GetWinningTeamIfAllOwned @ 0x4A2920` (gametypes 0x10010/0x50010 only) is the
+all-zones-one-team check that suppresses further capture events (and feeds the AS win).
+
+**How the deploy map is advertised.** There is NO dedicated zone-list message. The client
+builds the deploy screen from (a) the world stream itself — the zone entities arrive as
+ordinary 0x0D/0x10 records with team + type; (b) the per-player **S2C 0x0F variant-0 u32
+owned-zone mask** = `ZoneSlotChain_GetOwnedZoneMask(player.team)` — bit `1<<zone_no` set iff
+EVERY entity of that number belongs to the team (§5.55 already field-mapped the u32; its
+producer is now witnessed) `[orig: NetPacket_WritePlayerState @ 0x4FF6B0 @ 0x4FF9A3]`;
+(c) the 0x40 minimap color channel (§5.19); (d) the 0x6F/0x53 zone timers (§5.49); (e) the
+0x6E spawn-wave status (below). The S2C 0x4D spawn-slot tip is NOT zone data (player-slot
+index only, §4 row). A dead player also gets a private 0x1E event **0x3A (58)** carrying
+`FindFrontierZone(team)` in the attacker byte — the deploy-screen objective hint
+`[orig: Server_ProcessPlayerDeath @ 0x517740 @ 0x517A1D]`.
+
+**The pick: C2S 0x0E `[i16 spawnHandle]`** (`Server_ProcessClientRequestRespawn @ 0x519AF0`;
+§4 row refined). `0xFFFE` = auto-pick: spectators/unassigned resolve a team first
+(`& 0x20000` → 1; `& 0x10000` → `2 − (tick & 1)`), then `find_spawn_entity_for_team
+@ 0x4FC810` picks an owned zone on the frontier (enemy-capturable, or the team's own
+frontier number) with control ≥ 1.0 — i.e. AS auto-deploy = "the front line"; gametype
+0x50010 returns without spawning. A real handle resolves via `Server_ResolveSpawnTargetHandle
+@ 0x4FE110` (pools 0/1/2 only, def attrib `0x40000` required, team must match — or the
+player be teamless): pool 0 covers MOBILE spawn vehicles. Gates, in order: not already
+pending (`+89932` = the revive latch), `+364 == 0`, then for a resolved target — a VEHICLE
+target (`ItemDef.type == 1` + attrib `0x40000`) must be alive with a free seat
+(`Entity_FindBestSeatSlot @ 0x4351F0`; the deploy then latches `entity+44 |= 0x4000` and
+boards the seat after the reset), a NUMBERED zone requires `team match && control ≥ 0x10000`
+(a contested zone stops accepting spawns), and the config `g_respawn_requires_team_dead
+@ 0x24D2260` denies a target-less respawn while the team still has a live entity. The
+requester must be dead (`entity+36 & 2`) or respawn-flagged (`+89912 & 0x10`)
+(@ 0x519cc7 — the dead-or-pending gate).
+
+**The deploy-screen HOLD chain (witness 2026-07-03, D-NET-156 — the v31 root cause).** The
+picker UI's lifetime is a per-frame SERVER signal, not a one-shot:
+
+1. **Join** `[orig: Server_OnPlayerJoin @ 0x51A690]`: slot stateByte (+89912) = 1 (3 when
+   `g_preround_delay_timer`) @ 0x51a6d3/0x51a6e2, then `|= 0x10` **iff
+   `SpawnZoneList_GetCount() > 0`** @ 0x51a6f2 — **bit4 = RESPAWN-PENDING/undeployed, the
+   JOIN-time marker only** (death does NOT set it; the death screen is client-local from the
+   entity-dead flags). Slot state (+32) goes 6 (in-game) immediately — 0x0A flows to a
+   deploy-screen client; **deploy is a PLAYER flag, not slot-state 9** (resolves the
+   D-NET-134 confusion). `Server_PositionPlayerForSpawn` pre-places the entity (the deploy
+   camera anchor), respawn timer +292 = 620 ticks; then 0x42 → first 0x0A → 0x0F → 0x4D
+   `[u8 playerIndex]` → the random seed.
+2. **Hold** — every 0x0A's `flags1` bit1 = `slot+89912 & 0x10` (§5.9 flags1 row; the writer
+   also ORs the entity's hidden bit0 each frame → the golden pre-deploy record byte13
+   `0x01`); the client sets `g_deploy_screen_active` from the bit EVERY frame, so one
+   bit1=0 frame closes the screen — the 0x0F gameFlags-bit0 flash alone dies < 16 ms later.
+3. **The pick send** `[orig: Input_HandleActionBinding case 12 @ 0x49b0c5-0x49b17b]`:
+   C2S 0x0E `[i16]` = `SpawnZoneList_GetByIndex(param − 1)` converted to `pool<<12|slot`;
+   param 0 → 0xFFFF, 65534 → 0xFFFE auto-pick; also clears dialogs + sets `dword_81474C = 1`.
+4. **Clear + RELEASE** — a successful deploy runs `Server_ProcessPlayerDeath @ 0x517740`'s
+   deploy leg, which **clears bit4 (`and 0xEF` @ 0x517791)** → the next 0x0A's flags1 bit1
+   drops → the client closes the screen and enters the world (the hidden bit0 stops being
+   re-ORed) — **and sends the release bundle: the loadout re-send
+   (Server_SendWeaponSlotListToPlayer @ 0x502550) + the 0x61 seed (Server_SendRandomSeedToPlayer
+   @ 0x5101a0) + the 0x1E hint, one datagram (golden f=240018, after the spawn-wave countdown;
+   the pick itself drew only the 0x6E wave ack at f=238948)**. The bundle is load-bearing: the
+   pick set the client's `dword_81474C` wait-gate and the **0x5A apply is what resets it**
+   (§5.30 @ 0x4290E0) — without it the client never resumes its per-frame C2S 0x0C uplink
+   (the v32 rubber-band, D-NET-156).
+
+Reimpl: `netsim::Connection::respawn_pending` (set in `Server_BuildPlayerInfoAndAdd` iff
+`world_has_spawn_zone`, host loopback exempt; cleared by the 0x0E dispatch case) → the
+per-connection flags1 in `emit_connection_s2c`; the 0x0E case gates dead-or-pending. The
+S2C 0x6E empty-group form (`[u8 0]`) goes 1 Hz to pending/dead players (`Server_TickUpdate`;
+the recipient mask includes bit4 `[orig: NetPacket_WriteSpawnWaveStatus @ 0x5074c2]`).
+
+**Spawn waves.** `g_spawn_wave_list @ 0x24E0E48` (renamed from `stru_24E0E48`): 56-byte
+entries `{player[8], count@+32, zoneEntity@+36, interval@+40, countdown@+44, preDelay@+48,
+team@+52}`, built at mission start from every `0x40000` pools-2/1 entity — numbered zones
+get `g_spawn_wave_time_zone @ 0x24D2250`, un-numbered (bases) `g_spawn_wave_time_base
+@ 0x24D224C` (both from `apply_session_settings_to_globals @ 0x551500`; entries only exist
+when the interval is configured — 0 ⇒ no wave system ⇒ instant deploys)
+`[orig: SpawnWaveList_BuildFromMission @ 0x52A920]`. A 0x0E pick lands in the zone's group
+(`SpawnWaveList_TryQueuePlayer @ 0x52A490` — dedupes, caps 8, evicts the player from other
+groups) → the player gets S2C 0x6E and WAITS; if no group exists for the zone the deploy is
+immediate. The 1 Hz `SpawnWaveList_Tick @ 0x52A550` → `SpawnWaveList_TickEntry @ 0x52A330`
+releases ONE queued player per interval (`Server_ProcessPlayerDeath(player, zoneHandle)`,
+countdown reloads from `+40`), and FLUSHES the whole group the moment the zone's control
+drops below 1.0. A zone team flip resets its group (`SpawnWaveList_ResetOnZoneTeamChange
+@ 0x52A5B0`). **S2C 0x6E** (§5.31's "squad roster" — actually the deploy-screen wave
+status; the client's `teamSlotHandle → entity+548` is the WAVE COUNTDOWN in seconds):
+`[u8 groupCount]` then per team-matching group `[u16 zoneHandle][u16 zoneIdx (spawn-zone
+list index)][u8 queuedCount][u16 countdown][queuedCount × u16 playerHandle]`, sent on queue
+join (`Server_SendSpawnWaveStatusToPlayer @ 0x50FF10`) and every second to each dead or
+deploying player (mask 0x20) `[orig: NetPacket_WriteSpawnWaveStatus @ 0x507490;
+Server_TickUpdate @ 0x51E0CF]`.
+
+**Placement.** `Server_PositionPlayerForSpawn @ 0x50CF60` (ex-`CMap_SetupSpawnCamera`,
+§5.2c) is the placement for BOTH paths. Picked target: copy the target entity's pos+angles,
+offset by a named model userpoint when present (`modelgpm_FindUserpointByName @ 0x5B2170`;
+name string is runtime-set — follow-up) else `z += 1.0`; for a NUMBERED zone, collect ≤ 32
+pool-3 **type-6007** markers within the zone radius and round-robin `g_spawn_cycle_counter
+% (count+1)` — 0 = the zone entity itself, else the (i−1)th 6007 marker (parent-transformed)
+— the authored in-zone scatter. No/invalid pick: the §5.2c game-type marker chain
+(6096-6099 primary per team, 6003/6004/6090/6091 fallback, 6094/6001 co-op, 6095/6002
+DM/SP) through `Entity_FindBestSpawnPoint @ 0x50CCC0` (farthest-from-enemy, D-NET-115);
+co-op additionally falls back to any team-matching numbered `0x40000` entity. `+89932`
+(revive) overrides everything with the saved body position. The deploy itself is
+`Server_ProcessPlayerDeath @ 0x517740` — death and deploy are ONE routine (arg2 = killer
+handle on death, spawn-target handle on deploy): detach, position, `Entity_ResetToSpawnState
+@ 0x4B9610`, respawn timer `+292 = 620` ticks, loadout + 0x1D list, seed 0x61 (mode 1), the
+0x1E 0x3A hint, optional seat board.
+
+**The 1 Hz capture block** — all of it inside `Server_TickUpdate @ 0x51D7E0`'s
+`g_periodic_second_timer = 62` block (`@ 0x51DF50..0x51DF8C`), so every capture/secure rate
+below is per-SECOND, while the client rescales wire seconds ×62 into ticks (§5.49):
+
+1. **Proximity** `[orig: Server_UpdateCaptureZoneProximity @ 0x5086A0]` — per playing slot:
+   zero the proximity bitmask `player+89868`; sync CRenderState field 0x1C (score) via a
+   4-byte S2C 0x81 on change (`@ 0x508790`); set bit 0..4 for pool-1 def-types
+   4095/4091/4093/4097/4096 within 20.0 (a carried flag counts at the carrier's position);
+   set bit `1 << zone.team` for pool-3 6006 radius zones and for frontier-active numbered
+   `0x40000` entities (3D: 2D dist ≤ radius, |dz| ≤ radius/2); drive the presence counters
+   `[23593..95]` against the per-gametype config table (`sub_52D430(g_GameType, 0xC/0x24)` —
+   follow-up) into `GameEvent_ProcessScoring @ 0x52F550`.
+2. **Capture requests** ride the physics pass, not this block: a live player touching a
+   `0x20000` entity (authority, no preround, gametype & 0x30000) calls
+   `Server_OnPlayerTouchCaptureZone @ 0x500BA0` `[orig: caller
+   Entity_ProcessCollisionAndPlatformPhysics @ 0x4B2BD0 @ 0x4B3238]`: gate
+   `zone un-numbered || player.team == zone.team || control ≤ 0` (an enemy can only START
+   on an unsecured zone; the securing OWNER always marks presence), mark the active-capture
+   presence slot, and queue `{zone, player.team, player}` — numbered zones only while on
+   SOMEONE's frontier (`CaptureCtx_QueueCaptureRequest @ 0x53B7A0`; a refused numbered
+   touch arms a 10 s repeat-nag latch `+89912 |= 0xC`).
+3. **The secure pass** `[orig: Server_UpdateCaptureZoneEntities @ 0x519690]` — per numbered
+   `0x20000` entity: if the ENEMY frontier cannot reach it, latch `control = 0x10000`; else
+   run `calculate_capture_zone_control_delta @ 0x501120` (below); emit **S2C 0x6F** every
+   pass (15 B `[u16 handle][u8 team][i32 control][i32 0x10000][i16 delta][u8 friendlies]
+   [u8 enemies]`, mask 0x80 urgent — §5.49's value/limit ARE the control fraction, limit
+   fixed 1.0) `[orig: NetPacket_WriteZoneTimerValue @ 0x506E70, emit @ 0x5197D9]`; on the
+   0→1.0 edge broadcast **0x1E event 0x3B (59)** and on the →0 edge **0x3C (60)** (attacker
+   byte = the zone's spawn-zone-list INDEX, victim byte = zone team) `[orig: @ 0x519839 /
+   @ 0x51988E]`; convert every in-radius entity whose def has `+88 & 2` to the zone's team
+   (`Server_ChangeEntityTeam @ 0x518D70` → the S2C 0x50 broadcast — armories/emplacements
+   flip with the zone).
+4. **The control formula** `[orig: calculate_capture_zone_control_delta @ 0x501120]`:
+   `presence = friendlies − frontier-eligible enemies` in radius (both counts stored to
+   `+544/+545`); zero presence ⇒ no change. Else `teamSize` = capturing side's player count
+   `+ (6 − total)/2` when fewer than 6 in-session (small-server boost), soft-capped
+   `x → cap + (x − cap)/2` at 20/40/60; `speed = teamSize × base` where base =
+   `g_capture_speed_setting @ 0x24D2254`: 1 → 24, 2 → 48, else 12; when the capturing side
+   owns fewer zones AND the round clock is inside the last `30 × g_respawn_time` seconds,
+   an underdog catch-up subtracts up to half: `speed −= min(imbalance × boost, 1) × speed/2`
+   with `imbalance = |zones₁ − zones₂| / totalZones`, `boost = 1 − 2·roundRemaining/(3720 ×
+   g_respawn_time)` (3720 ticks = 60 s) `[orig: @ 0x5013AB..0x501439]`; a zone number shared
+   by N entities divides speed by N. `delta = 65536 × presence / speed` (ftol; minimum
+   magnitude 1, sign = presence), accumulated into `+540` with clamp [0, 0x10000]. At the
+   observed default (`g_capture_speed_setting = −1` ⇒ base 12): one attacker on an empty
+   3-player-team server secures ~0x10000/1820 ≈ 36 s.
+5. **The timed-capture engine** `[orig: Server_UpdateCaptureZones @ 0x53B8F0]`, ctx
+   `captureCtx @ 0xC947A8` (`+8/+12` = the request queue, 12-B `{zone, team, player}`;
+   `+24/+28` = active captures, 152-B `{zone@0, team@4, progress@8, limit@12, player@16,
+   presence[32]@20, rate@148}`): per active entry `CaptureCtx_UpdateActiveCaptureRate
+   @ 0x53B600` counts the presence slots into `rate` (clamped 1..32; broadcasts the 3-byte
+   **S2C 0x6C** `[u16 handle][u8 count]` on change `[orig: NetPacket_WriteZonePresenceCount
+   @ 0x506DE0]`) and clears them. A queued request for a DIFFERENT team restarts the entry
+   (`team = new, progress = 0, limit = g_capture_duration @ 0x24D2248`) + emits **S2C 0x53**
+   (9 B `[u16 handle][u8 curTeam][u8 capturingTeam][u16 progress][u16 limit][u8 rate]`,
+   §5.49's window fields de-mystified) `[orig: NetPacket_WriteZoneTimerWindow @ 0x506D00,
+   emits @ 0x53B9C0/0x53BA36/0x53BA68/0x53BC02]`; otherwise `progress += rate`, 0x53 each
+   pass, and on `progress ≥ limit` the zone FLIPS: `Server_ChangeEntityTeam(zone,
+   capturingTeam)`, proximity scoring (`CaptureZone_CheckProximityScoring @ 0x500C50`), wave
+   reset, `GameEvent_FlagCapture`, entry removed. Queue drain: a NUMBERED zone (or
+   `g_capture_duration ≤ 0`) flips INSTANTLY — team change (via neutral when previously
+   owned), `control = 0` (the new owner must now SECURE it — the Advance-and-Secure beat),
+   FlagCapture event; an un-numbered flag zone neutralizes first and opens a timed active
+   entry (`CaptureCtx_AddActiveCapture @ 0x53B510`).
+6. **Flip events** `[orig: GameEvent_FlagCapture @ 0x50F6F0]` (requires def `0x40000`):
+   numbered zone → to the capturer's team **0x33 (51)** / to the enemy team **0x32 (50)**
+   when the frontier masks did not change, else **0x35 (53)** / **0x34 (52)** carrying each
+   side's NEW `FindFrontierZone` number in the victim byte (team-filtered sends, mask
+   0x180); then an all-recipients **0x38/0x39 (56/57)** banner keyed by the new owning team;
+   un-numbered flag → **0x2B/0x2C (43/44)** by team (the §5.19 dvxi5 probe's
+   `STRCND_PSP_*TAKEN` pair). All suppressed once `GetWinningTeamIfAllOwned` reports the
+   match decided. The kill-feed body stays the §5.26 8-byte `GameEvent_BuildPayload
+   @ 0x5054E0` shape — for zone events the "attacker/victim" bytes are the zone-list index
+   and team/frontier numbers, NOT pool-0 indices.
+7. **Team enforcement** `[orig: Server_EnforceZoneEntityTeams @ 0x519600]` — every numbered
+   entity in the per-tick zone-numbered registry (`dword_A892D0/D4`, rebuilt by
+   `Server_BuildEntitySlotLists @ 0x4F97A0`) is forced onto the team whose OWNED mask
+   contains its zone number (team 1 precedence) — this is what flips the co-located
+   `0x40000` spawn objects when the `0x20000` trigger objects change hands.
+
+The deploy/spawn-zone REGISTRY (`g_spawn_zone_list/count @ 0xA89188/0xA89184`, rebuilt by
+`Entity_BuildSpawnZoneList @ 0x43EAE0` — ex-"BuildSortedRenderList"): every pools-2/1
+`0x40000` entity, sorted by `(class-priority, def+406, zone# & 0x1F)`, plus the deploy-map
+AABB (`g_WorldBoundsMax/Min`). Its INDICES are what ride the 0x6E `zoneIdx` and the 0x1E
+zone-event attacker bytes (`SpawnZoneList_IndexOf @ 0x43B990`).
+
+**Config globals** (all mirrored from the parsed session-settings block by
+`apply_session_settings_to_globals @ 0x551500 @ 0x551D3E..0x551DBD`): `g_capture_duration
+@ 0x24D2248` (un-numbered flag capture time, wire `limit`), `g_capture_speed_setting
+@ 0x24D2254`, `g_spawn_wave_time_base @ 0x24D224C`, `g_spawn_wave_time_zone @ 0x24D2250`,
+`g_respawn_requires_team_dead @ 0x24D2260`. Observed defaults in the live IDB snapshot:
+speed setting −1 (base 12), waves unset.
+
+**Follow-ups (open):** the per-team `dword_C87B54 + 85·team` CRenderState field-6 gate that
+can skip the primary marker chain in `Server_PositionPlayerForSpawn @ 0x50D1DB`; the
+userpoint NAME used for spawn offsets (`off_7CF9C4` is runtime-set — static bytes are code);
+the `sub_52D430 @ 0x52D430` per-gametype config table (indices 0xC = capture-score
+threshold, 0x24 = scoring interval) and its table source; which gametype 0x50010 is (the
+zone-chain-exempt sibling — KOTH family suspected); the exact session-settings VarList keys
+behind the `0x2550B7x` mirror block; `CaptureCtx_MarkPresenceSlot @ 0x53B5C0` internals
+(presence-slot indexing); the 0x1E event-string table rows for 50-60 in
+`game_event_strcnd_key` should be cross-checked against these producer semantics at HUD
+time. Win conditions (`Server_CheckWinConditions @ 0x51AD40` reads the chain masks
+`@ 0x51AD87/0x51B4A2`) are roadmap item 4, unwitnessed here.
+
+**Reimpl (slice 1 — spawn selection, same session).** Ported: `world::ZoneChain` +
+`zone_chain_*` (`libs/world/zone_chain.{h,cpp}` — build/masks/ranks, the frontier rule, the
+owned-zone mask, the control latch), `Entity::zone_number` (BMS byte 155 `lfp_group` carried
+by `mission/promote.cpp`) / `zone_control` / `is_capture_trigger` / `is_spawn_point`
+(items.def attribs `changeteam 0x20000` / `spawnpoint 0x40000`, already parsed by
+`libs/def`; stamped + chain built + latched in `NovaSimulation::resolve_item_traits`);
+`resolve_spawn_target` / `find_spawn_zone_for_team` / `spawn_pose_for_target` /
+`select_player_spawn_for_team` (`world/spawn_select`); the full C2S 0x0E handler
+(`npruntime/server_message_dispatch.cpp` — pick resolve, the zone control/team gate, the
+0xFFFE frontier auto-pick, dead-only deploy, per-team marker fallback, the computed 0x1E
+ev-0x3A frontier hint replacing the golden byte-blob); the per-recipient 0x0A phase-0
+owned-zone mask (`PlayerReplicationState::uniform_team_mask`, default the golden 0x8); and
+the per-team join placement (`Server_BuildPlayerInfoAndAdd` assigns the team BEFORE the
+§5.2c marker scan — previously both AS teams spawned at the first family type present, i.e.
+team 1's base). Pinned by `zone_chain_test` (the ASH_I5A shape: masks/frontier/latch,
+capture progression, auto-pick, pick resolve, per-team markers — golden mask 0x8
+reproduced). Slice-1 deferrals (all §5.61-cited in code): the spawn-wave system
+(`g_spawn_wave_list` + 0x6E — host wave options default 0 = immediate deploys, matching
+retail defaults), vehicle-seat deploys (seat model unported), deploy-time 0x61/0x1D
+re-sends, and the 6007 in-zone scatter + userpoint offset.
+
+**Reimpl (slice 2 — the capture loop, 2026-07-04, D-NET-162).** Ported:
+`world::zone_capture_tick` (libs/world/zone_capture.{h,cpp} — the 1 Hz secure/control
+pass with the enemy-frontier latch, the control-delta formula verbatim, secure edges,
+instant numbered flips via neutral, mask rebuilds, non-trigger zone-object team
+enforcement) + the npruntime 1 Hz wire block (0x6F change-gated + deploy-screen refresh,
+the 0x1E zone-event family 0x3B/0x3C/50-53/56/57 team-filtered, 0x53 on flips, and the
+0x40 zone + vehicle-blip overlay feed). `zone_chain_test` pins the delta formula and the
+full flip→secure→contest→neutralize→retake cycle. Deferrals in the D-NET-162 row.
+
+**v31 LIVE (2026-07-03, 2 retail clients): the deploy screen still did NOT appear — and
+the wire shows ZERO C2S 0x0E all session, so the slice-1 pick handler went unexercised;
+the gap is the ADVERTISING side (what makes the client SHOW the picker), not the pick
+path.** Open leads for the alignment pass: (a) the phase-0 owned-zone mask rides the
+per-frame 0x0A, but `Server_SendEntityStateToPlayer @ 0x517BA0` has the **state==6 deploy
+gate** (D-NET-134 row) — a client sitting at the deploy screen (game state 9) receives no
+0x0A, so the mask CANNOT be its picker source; the pre-deploy carrier is likely the S2C
+0x0F body itself — `NetPacket_WriteWorldStateLoad0x0F @ 0x502D10` is UNWITNESSED (it reads
+`g_respawn_requires_team_dead`, so it is the deploy-screen state block); (b) the zone
+objects reach the client as pool-1 0x0D records — D-NET-70's "Change Team & Spawn Volume"
+objects ride 0x0D **team-gated `spawn_flags & 0x10`**; whether our 0x0D encoder sets that
+bit/team for the 1359 bunkers is unverified; (c) the CLIENT deploy-map list builder is
+unwitnessed — find what populates the insertion/spawn list UI and which wire fields gate
+each row. v31 also re-confirmed: vehicle attach dead (2 C2S 0x26 on the wire, no
+dispatch case exists — silently dropped), HUD player count still wrong (only 6 S2C 0x16
+all session; the D-NET-155 generation re-push needs a third look, and the client HUD
+count SOURCE itself is unwitnessed), and the body-motor anim gap (off-14/off-15 echo)
+re-reported. Artifacts: `.scratch/retail_join_v31_game.pcapng` (udp.port==32768 filter of
+the 664 MB dual-interface raw).
+
+**IDB changes (2026-07-03 AS session).** Function renames (46): the `CWeaponSlotManager*`/
+`CWeaponSlotMask*` cluster → `ZoneSlotChain_{GetTeamMask@0x4A2350, ContainsEntity@0x4A23D0,
+IsZoneCapturableByTeam@0x4A2450, GetOwnedZoneMask@0x4A2620, RebuildOwnershipMasks@0x4A26C0,
+GetZoneInfo@0x4A2750, AssignZoneRanks@0x4A27F0 (ex-CNetQuality_UpdatePriorities),
+GetWinningTeamIfAllOwned@0x4A2920, FindFrontierZone@0x4A2AC0,
+RebuildMasksAndCheckUnchanged@0x4A2B60, Reset@0x4A2C30, AddZoneEntity@0x4A2D70,
+BuildFromMission@0x4A2DE0}`; `Entity_BuildSortedRenderList @ 0x43EAE0` →
+`Entity_BuildSpawnZoneList` (+ `SpawnZoneList_{GetCount@0x43B920, GetByIndex@0x43B930,
+IndexOf@0x43B990}` over `g_spawn_zone_list/count`); `CMap_SetupSpawnCamera @ 0x50CF60` →
+`Server_PositionPlayerForSpawn`; `sub_4FE110` → `Server_ResolveSpawnTargetHandle`;
+`sub_500BA0` → `Server_OnPlayerTouchCaptureZone`; `calculate_capture_zone_score_delta
+@ 0x501120` → `calculate_capture_zone_control_delta`; `Server_ChangePlayerTeam @ 0x518D70`
+→ `Server_ChangeEntityTeam` (it retargets ANY entity — zones included); `sub_519600` →
+`Server_EnforceZoneEntityTeams`; the `stru_24E0E48` helpers → `SpawnWaveList_{TickEntry
+@0x52A330 (ex-update_death_queue_node), RemovePlayer@0x52A410, TryQueuePlayer@0x52A490,
+HasEntryForZone@0x52A520, Tick@0x52A550, ResetOnZoneTeamChange@0x52A5B0,
+GetEntryInfo@0x52A700, CountEntriesForTeam@0x52A7E0, BuildFromMission@0x52A920
+(ex-collect_weapon_overlay_entities), AppendEntry@0x52AB60}`; the capture-ctx helpers →
+`CaptureCtx_{RemoveQueueEntries@0x53B340, AddActiveCapture@0x53B510,
+MarkPresenceSlot@0x53B5C0, UpdateActiveCaptureRate@0x53B600, RemoveActiveCapture@0x53B6D0,
+QueueCaptureRequest@0x53B7A0 (ex-CTerrainTile_AddOrUpdateBoneSlot),
+MarkZonePresence@0x53B880, Reset@0x53BD00 (ex-CTextureInfo_Reset)}`; payload writers →
+`NetPacket_{WriteZoneTimerWindow@0x506D00 (0x53), WriteZonePresenceCount@0x506DE0 (0x6C),
+WriteZoneTimerValue@0x506E70 (0x6F), WriteSpawnWaveStatus@0x507490 (0x6E)}`;
+`sub_50FF10` → `Server_SendSpawnWaveStatusToPlayer`. Data renames (8): `g_zone_slot_chain
+@ 0x24D1EBC`, `g_spawn_wave_list @ 0x24E0E48`, `g_spawn_zone_list/count @ 0xA89188/84`,
+`g_spawn_wave_time_base/zone @ 0x24D224C/50`, `g_capture_speed_setting @ 0x24D2254`,
+`g_respawn_requires_team_dead @ 0x24D2260`. Entry comments on the 15 core functions.
 
 ### Wave 1 — gate protocol + session envelope (2026-06-11)
 
@@ -5458,7 +6482,7 @@ subset) function-by-function against the kong IDB. Scope and verdicts:
 | SessionSequencing/SessionCrypto framing | `frame_session_packet`/`deframe_session_packet` (`libs/novaworld/protocol_message.{h,cpp}`) | **MATCHING** | `CNapiNPConnection_SendSessionPacket @ 0x61edd0` (header `[remote_key 0x150][seq 0x7ac][ack 0x7b8][u8 0]`, inner SCRK = TX key @ conn+0xCC, outer static NWU key) / `CNapiNPConnection_ParseMessages @ 0x625bc0` (RX key @ conn+0x10c, `recv_ack_seq` latch) / `CNapiNPConnection_BuildOutgoingPackets @ 0x628430` (`++out_packet_seq` per packet ⇒ identical wire seq 1,2,3…). Original is resend-capable (messages pre-assigned to a seq, node+52); ours frames at send time — wire-identical for first sends. TX/RX key split = `GenerateTxKey @ 0x61dfe0` self key vs peer key. |
 | `np::slice_batch_pages` chunker | `libs/npruntime/batch_chunker.h` | **MATCHING (model)** — boundary divergence D-NET-135 | budget 650 with per-pool margin, guard AFTER each record: 0x0C `+100 > 650` (`serialize_entity_states_to_buffer @ 0x5030a0` @0x50340d), 0x20 `+30 > 650` (`@ 0x503460` @0x503694), 0x10 `+40 > 650` (`serialize_pool2_static_to_buffer @ 0x5042F0` — function defined + named this session, was `loc_5042F0` code-island). Phase order 0x10→0x0D→0x0C→0x20→0x45 confirmed (`Server_SendInitialGameStateToPlayer @ 0x51bba0` state-4 cases 1..5). |
 | Retail-join player record (minimap flags / net_id / playerClass) | `build_pool0_organic_batch` (`libs/netsim/entity_wire_bridge.cpp`) | flags bit 0x100 + playerClass clamp **matching**; bit 0x01 model **divergent** (D-NET-136); net_id encoding **divergent-tolerable** (D-NET-137) | `Server_PlayerAdd @ 0x51cbc0` (`entity+36 \|= 1` @0x51d0da per-entity, remote adds only; class [5,9]-else-8 clamp @0x51d102; entity+120 = event+76 = connection_id @0x51d068); packer `lookup_entity_slot_and_pack_entry @ 0x57ad40` (@0x57ae47); decoder `MinimapSlot_FindByPackedId @ 0x57a270` (renamed from `sub_57A270`); client self-heal `NapiNPClientMsg_0x00C @ 0x42eadb`. |
-| 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < byte_A860D1`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
+| 0x22→0x46 ack-walk | `dispatch_session_replies case 0x22` + `encode_player_sync`/`_removal` | **FIXED to echo** (was server-computed) | §5.33 update: echo @ 0x505f05, client walk-terminator @ `NapiNPClientMsg_PlayerSync @ 0x431370` tail (`slot+1 < g_max_player_slots`, re-request `0x5CF7`); removal = 3-B early return @ 0x505f37; `Server_PlayerAdd` broadcast fieldFlags 0x1CF7 (`push 7415` @0x51d2bf). `cstr_fixed` misnomer → `cstr_capped` (strings are strlen+1 on the wire). |
 | 0x0A ported subset | `build_0a_frame`/`emit_connection_s2c` (`libs/netsim/connection_fan.cpp`) | ported subset **matching**; deferrals correctly characterized (D-NET-134 stands); health byte **divergent (D-NET-138 — FIXED 2026-07-02**, pack ported from `Entity_GetHealthClassification @ 0x4AD4E0`; live v11: 0 C 0x0F**)** | `Server_SendEntityStateToPlayer @ 0x517ba0` (deploy gate `+32==6`, `++phase` before first write, eye ref, budget halving `+89876`/uptime>2000, unreliable send flags (0,1)); sub-block 0 = weapon/reload/uniform (`@ 0x4ff81b`; `FrameAimBlock` → `FrameWeaponBlock` rename everywhere); sub-block 1 values confirmed (C6EAE0=20/C6EAE4=13/fps/cpu/round-secs). |
 | GameConfig unwitnessed fields | `libs/npruntime/game_config.h` | **all 7 named** (§6.9 update) | `Config_ParseSettingsLine @ 0x54f740` + `apply_session_settings_to_globals @ 0x551500` + `ServerConfig_ApplyHostSetting @ 0x4a6000`: `replay`/`max_team_lives`/`timeout`/`destroybuild`/`deathmes`/`TeamChoose`(bit 0x4 of the mpattrib store `dword_2550A04`)/`mp_allowsniperscopezoom`. |
 | D-NET-127 post-handshake bodies | `emit_post_handshake_burst` (`server_message_dispatch.cpp`) | **fully witnessed; observation-carry closed** (§5.45 update) | trio owner = `CNapiServer_ProcessPendingPlayerSpawns @ 0x4c8dc0`; `0x03` = `NetPacket_WriteWeaponRestrictionFlag @ 0x502ac0`; `0x05` = `NetPacket_WriteBoolTrue @ 0x502c00`; `0x04` = `NetPacket_WriteSlotAssignment @ 0x502b30` (24-B field map); `0x00` pair = `CNapiNPConnection_SendConfigUpdate @ 0x6286e0`. |
@@ -5577,7 +6601,7 @@ Controlled-capture validation (probe mission "ON RE Probe AS dvxi5", dvxi5 / A&S
 - **D-NET-60** [LOW, DOC] §5.4 0x0B icon-key offset: "full_00" observed at off **220-226**, not the documented 246-253. Signature(0-3)/name(4-35)/designer(36-67)/basename(68) all matched their documented offsets, so only the icon row is suspect — re-diff against more retail maps or annotate as header-variant-dependent. Note: the synthesized header title-cases the basename to "Dvxi5" at +68 (client terrain lookup is case-insensitive). [orig: byte_A761D0 @ §5.5]
 - **D-NET-61** [INFO, VALIDATED] The `/PROFILE` `.sph` server-log (§5.22) — the engine's own decoded per-frame view of the SAME probe session — was decoded (`libs/novaworld/serverlog_decode.{h,cpp}`, `nw_pp` `.sph` mode, `nw_serverlog_decode_test`) and cross-validated against the `.pcapng`: FooPlayer (Red, pool-0 handle 0x0005) spawn state `(70.0, 25.0, 56.306)/0xc0000000` matches **byte-for-byte** across `.sph` `PDAT`, C2S 0x0C extended uplink (§5.10), and the S2C 0x0A header `refs` triple — independently confirming the 0x0C decoder, the 16.16/-Z + 32-bit-BAM conventions, pool-0=players (the recorder iterates `g_pool_list[0]`), and team@entity+354 (re-confirms D-NET-58 via the `FEDP` roster: TestPlayer=Blue/1, FooPlayer=Red/2). No code divergence — a validation pass + new oracle tooling. Two IDB-fidelity fixes were required to read the recorder: `sub_522350`→`Game_TeardownMission` decompilation was blocked by phantom-arg prototypes on 0-arg callees (`Database_GetFieldValue` is actually `void __thiscall Database_FreeFieldEntries`; `File_Seek`/`Terrain_RenderSectorsWithWhiteFog`/`CEffectWorld_IsNameAvailable` retyped to 0 args — each 1 xref, 0 stack-arg reads). [orig: Game_ProcessMainFrame @ 0x5263f0 / CServerLog_WritePositionRecord @ 0x4e1b00 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
 - **D-NET-62** [INFO, VALIDATED] Authored-mission cross-validation of pools 1/2/3 (§5.24) — the dvxi5 probe's *known* `mission.bms`, serialized by the retail host, decoded field-for-field on the wire (the sibling of D-NET-61 for the pools the `.sph` can't see). Lands the **S2C 0x0C organic-spawn field map + decoder** (`decode_organic_spawn_batch` / `OrganicSpawnRecord`, §5.23) — byte-exact consume on the probe's 6-organic batch (4 AI `0x0816` + 2 players `0x14B9`); the shared pcap reader (`apps/common/pcap_reader`, nw_pp factored onto it); and two tests (`nw_pool_groundtruth_test` reads the real `.scratch` pcap directly; `nw_pool_decode_unit_test` inline-pcap round-trips 0x0D/0x20 through the full S2C stack). Confirms: type_id/position/team reproduce (posX/posY lossless i32 16.16; posZ re-grounds ≤1u for vehicles/AI, markers keep authored z); the heading convention **`wire_BAM = 90 - facing`** (pinned by AI authored at facing {0,90,180,270} → wire {90°,0°,270°,180°}; the 0x20 markers at facing {0,180} alone could not distinguish it from `facing+90`); and team @ **entity+354** — the onhook PoC's `+146`/`+196` reads are inside `GamePlayerEntity.pad5`, a runtime/display mirror, NOT the BMS team (same mislabel class as the PDAT `+42` STAT byte, §5.22). No divergence in the pool decoders — a new field map + validation oracle. [orig: NapiNPClientMsg_0x00C @ 0x42E730 / serialize_entity_pool_to_packet_0 @ 0x503940 / CServerLog_WritePlayerNameRecord @ 0x4e1cc0]
-- **D-NET-63** [MED, DOC+CODE] §5.13 vehicle compact record field labels corrected (the rename the 2026-06-16d footnote deferred). Re-grilled the mode-2 (read) path of `Entity_SerializeMountedVehicleState @ 0x460560`: the pre-branch i16 (`yaw_high`) and the two mounted-branch i16s are the **orientation / rider Euler triple Z/Y/X** landing at **entity+576/584/580** (fed to `Math_BuildFixedPointMatrixFromEulerAngles`), and the unmounted block is **turret-pitch raw i16 (entity+286) + weapon-aim Y/Z (read-dest `vehicleData[177/178]`) + weapon-heading BAM (`vehicleData[179]`)** — distinct from the genuine weapon-X compressed u16 (entity+160). The write side has NO shared trailing field, so the reimpl's formerly-shared `final_heading` is split per branch into `euler_x` (mounted) / `weapon_heading_bam` (unmounted). Renamed `ingame_decode.h VehicleCompactRecord` (`yaw_high→euler_z`, `secondary_heading→euler_y`, `final_heading→euler_x|weapon_heading_bam`, `weapon_x_compressed→weapon_x`, `weapon_y_raw→turret_pitch_raw`, `weapon_z_compressed→weapon_aim_y`, `weapon_heading_compressed→weapon_aim_z`) with matching `ingame_encode.cpp` / `nw_pp.cpp` / `replay_timeline.cpp` / `nw_ingame_compact_records_test` / `nw_ingame_encode_test`. Also split the §5.13 table's "landing" column into write-source vs read-dest (it had conflated write `vehicleData[136]` with read-dest `vehicleData[177]`). **Wire bytes, read order, and sizes (15 B mounted / 21 B not) are unchanged** — label-only; round-trip + byte-witness tests stay green. [orig: Entity_SerializeMountedVehicleState @ 0x460560 (read path @ 0x4605a3..0x460aff; Euler matrix build @ 0x460a0f → Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40)]
+- **D-NET-63** [MED, DOC+CODE] §5.13 vehicle compact record field labels corrected (the rename the 2026-06-16d footnote deferred). Re-grilled the mode-2 (read) path of `Entity_SerializeMountedVehicleState @ 0x460560`: the pre-branch i16 (`yaw_high`) and the two mounted-branch i16s are the **orientation / rider Euler triple Z/Y/X** landing at **entity+576/584/580** (fed to `Math_BuildFixedPointMatrixFromEulerAngles`), and the unmounted block is **turret-pitch raw i16 (entity+286) + weapon-aim Y/Z (read-dest `vehicleData[177/178]`) + weapon-heading BAM (`vehicleData[179]`)** — distinct from the genuine weapon-X compressed u16 (entity+160). The write side has NO shared trailing field, so the reimpl's formerly-shared `final_heading` is split per branch into `euler_x` (mounted) / `weapon_heading_bam` (unmounted). Renamed `ingame_decode.h VehicleCompactRecord` (`yaw_high→euler_z`, `secondary_heading→euler_y`, `final_heading→euler_x|weapon_heading_bam`, `weapon_x_compressed→weapon_x`, `weapon_y_raw→turret_pitch_raw`, `weapon_z_compressed→weapon_aim_y`, `weapon_heading_compressed→weapon_aim_z`) with matching `ingame_encode.cpp` / `nw_pp.cpp` / `replay_timeline.cpp` / `nw_ingame_compact_records_test` / `nw_ingame_encode_test`. Also split the §5.13 table's "landing" column into write-source vs read-dest (it had conflated write `vehicleData[136]` with read-dest `vehicleData[177]`). **Wire bytes, read order, and sizes (15 B mounted / 21 B not) are unchanged** — label-only; round-trip + byte-witness tests stay green. [orig: Entity_SerializeVehicleState @ 0x460560 (read path @ 0x4605a3..0x460aff; Euler matrix build @ 0x460a0f → Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40)] (Function renamed again 2026-07-04: the "mounted/rider" reading itself was the misnomer — see the §5.13 dead-pose correction + D-NET-161.)
 - **D-NET-64** [PARTIAL, DOC+CODE] §5.15 guided weapon record upgraded from "TBD" to a documented per-(mode, field-group) matrix + structural port. `Entity_SerializeGuidedMissileState @ 0x447C50` is a `mode (packetCtx[6] ∈ {1..4}) × field-group (packetCtx[7] ∈ {1..6})` codec (write-full/read-full/write-delta/read-apply across status / clear-target / target+pos / type+pos / pos / attach-offsets), NOT a fixed compact. **Framing resolved:** `dispatch_entity_packet_callback @ 0x4D6A80` copies the 5-byte entity sub-header's `sub_op` byte into `packetCtx[7]`, so the field-group selector rides the wire as `sub_op` (1..6 for guided; 10/11 = extended/compact for the §5.10b classes), and hardwires `packetCtx[6]=4` (read-apply) on the host C2S-receive path. The serializer rejects format 11, confirming guided never legitimately appears as a 0x0A compact — `decode_frame_update`'s fail-closed on `EntityClass::Guided` is correct. Landed `GuidedRecord` + `encode_guided_field_group`/`decode_guided_field_group` (`ingame_encode.cpp`/`ingame_decode.cpp`) + `nw_ingame_guided_test` (per-(mode,group) round-trip; the write-side 1-B `0x00` status/clear marker is the dispatcher's framing, read side reads 0 B). **DEFERRED:** wiring into the 0x0C entity-packet dispatch + per-group field validation — no capture carries guided traffic (the 2026-06-16b loopback fired no rockets). Verdict partial (IDA-structural, round-trip-pinned, wire-unvalidated). [orig: Entity_SerializeGuidedMissileState @ 0x447C50 / dispatch_entity_packet_callback @ 0x4D6A80]
 - **D-NET-65** [HIGH, DOC] High-bit protocol-message packets are a separate NAPI high-table control namespace, not low-table gameplay tags and not generic "unknown settings." Retail registers only `H:0x00..H:0x03` in `g_np_msginfo_highbit @ 0x849E80`: `H:0x00` is CS config update, `H:0x01` is connection name/tag update, `H:0x02` is data-transfer control, and `H:0x03` is description packet. `H:0x00` is the sparse runtime update form of the opcode-`0x82` `CS` TLVs: payload `[direction:u8][mask:u32le][u32 per set field]`, with the same 15 `NapiCSConfig` field indexes documented under §6.5. Observed masks match IDA callers: `0x2000` -> field 13 `max_packet_bytes=1300` from `NapiNPServer_HandleNewConnection`, and `0x0008` -> field 3 `send_holdoff_ticks=12` from `NapiNPServer_UpdateHoldoffTicks`. Also corrected the terminology trap: `NA=jop:cus2` is connection/game/gate tag state in the NOVAWORLDUDP path, not the player display name (`NWHANDLE`/`CHAR`). No source change in this commit; this records the finding and implementation implication. [orig: NapiNPProtocol_InitMsgInfoIndex @ 0x61E400 / NapiNPProtocol_FindMsgInfo @ 0x61E380 / CNapiNPConnection_DispatchMessage @ 0x622570 / CNapiNPConnection_HandleCSConfigUpdate @ 0x621940 / CNapiNPConnection_SendSessionInit @ 0x620EF0 / NapiNP_HandleServerJoinResponse @ 0x629840 / CNapiNPConnection_SendConfigUpdate @ 0x6286E0 / NapiNPServer_HandleNewConnection @ 0x4C8040 / NapiNPServer_UpdateHoldoffTicks @ 0x4C5F40 / NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0]
 - **D-NET-66** [HIGH, FIXED] The replay timeline (§5.25) had **no death/respawn lifecycle** — an entity was one monotonically-accumulating track, so a kill followed by a respawn-elsewhere read as two consecutive samples and `interp_pos` / the viewer's `posAt` **linearly interpolated a glide** from the death spot to the spawn point (the reported "players drift when they die"). This is unfaithful: the engine never interpolates across a death — `Entity_KillBySlotId @ 0x42BCE0` sets the dead flag `Flags & 2`, and the dead→alive transition relocates the entity and calls `Entity_ResetToSpawnState @ 0x4B9610` (a SNAP). The read path gates on this exact bit: `NetPacket_SerializeInfantryEntityState @ 0x4C0320` branches on `flagsByte & 2` (the wire dead/spectator bit), and `NetPacket_SerializePlayerState @ 0x4C09C0` does `test [entity+0x24], 2` → set position directly + `Entity_ResetToSpawnState`. Modeled from BOTH wire signals: the per-record dead bit (S2C `0x0A` compact `flags & 0x02`, set while the ragdoll is broadcast and cleared at the respawn record — empirically brackets victim `0x4`: dead f=1998→2142, respawn snap f=2216) AND the kill stream (S2C `0x26`/`0x4E` — the only signal when a victim drops out of the `0x0A` set, e.g. victim `0x5`: records stop f=1934, killed f=2344, reappears at spawn f=3651). Added `ReplaySample.dead/respawn` + `mark_lifecycle` (flags the dead→alive transition `respawn`, run on the full timeline AND each projected per-participant view); `interp_pos`, the viewer `posAt`, and the trail polyline never bridge a `respawn` sample (hold at the death spot, styled dead, then teleport); `nw_pp` emits `dead`/`respawn`; the previously-missing S2C `0x4E` batch-despawn fold (`decode_batch_kill`) now emits a Kill per slot. CI: `nw_replay_timeline_test::test_death_respawn` (ragdoll path + records-stop path). Non-death disconnect/cull gaps (no kill, no flag — e.g. the `0x46` `0x8000` player-leave / `0x5D` destroy list) remain a separate despawn-channel grill. [orig: NetPacket_SerializeInfantryEntityState @ 0x4C0320 / NetPacket_SerializePlayerState @ 0x4C09C0 / Entity_KillBySlotId @ 0x42BCE0 / Entity_ResetToSpawnState @ 0x4B9610 / NapiNPClientMsg_HandleBatchSpawn @ 0x431870]
@@ -5906,17 +6930,28 @@ slot array: seeded from the joining client's own JSP fields (jsp[56]/jsp[58],
 `Server_BuildPlayerInfoAndAdd @ 0x51d560`), validated by `MinimapSlot_HasEntity @ 0x57b140` and
 (re)allocated by `lookup_entity_slot_and_pack_entry @ 0x57ad40`, whose packing (@ 0x57ae47, decoder
 `MinimapSlot_FindByPackedId @ 0x57a270`) is `type(bits 0-4) | subtype(5-8) | index(9-14) |
-alive(15)` over the 288-byte-stride slot array — golden `0x0200` = index 1, `0x8207` = type 7 +
-index 1 + alive. Our `player_minimap_net_id` emits `(team==2?0x8000:0)|0x0200|(slot&0x1F)` — its
-"team bit" is actually the `alive` bit and `slot` lands in the `type` field. Interop-safe because
-`NapiNPClientMsg_0x00C @ 0x42eadb` reallocates a fresh minimap slot and OVERWRITES `entity->NetId`
-whenever `MinimapSlot_HasEntity` fails — any nonzero, per-entity-distinct id works. The 0x51
-spawn-confirm's NetId/animSlot zeros are the same family (client treats 0x51 as a spawn signal, does
-not field-parse it). Faithful fix: model the minimap slot array and allocate/pack for real.
+SIDE(15)` over the 288-byte-stride registry (bit 15 = side-B, matched against entry+280;
+CORRECTED 2026-07-02 from the earlier "alive" reading — §5.59) — golden `0x0200` = side A index 1,
+`0x8207` = side B type 7 index 1. Our `player_minimap_net_id` emits
+`(team==2?0x8000:0)|0x0200|(slot&0x1F)` — its "team bit" happens to land on the real SIDE bit, but
+`slot` lands in the `type` field. Interop-safe because `NapiNPClientMsg_0x00C @ 0x42eadb`
+reallocates a fresh minimap slot and OVERWRITES `entity->NetId` whenever `MinimapSlot_HasEntity`
+fails — any per-entity-distinct id that resolves to NOTHING self-heals; an id that resolves to the
+WRONG entry does not (that failure mode is D-NET-148). ~~The 0x51 spawn-confirm's NetId/animSlot
+zeros are the same family (client treats 0x51 as a spawn signal, does not field-parse it)~~ —
+REFUTED 2026-07-02: the client FULLY field-parses 0x51 and rebinds `CharacterEntity` from its
+packed char id (`NapiNPClientMsg_HandlePlayerSpawn @ 0x431BB0` @ 0x431cad/@ 0x431cf3; §5.59,
+D-NET-148 — retail never sends 0x51 outside the team-change flow). Faithful fix: model the minimap
+slot array and allocate/pack for real.
 Exonerated for the C2S 0x0F flood (2026-07-02 recon): in the 0x18 apply the record's net_id feeds
 ONLY the minimap path (`@ 0x433ddd`, gated on `Flags & 0x100` + person type) — it is never an input
 to the `@ 0x4307c4` itemDef/ItemTypeIndex cross-check that queues 0x0F (the flood was D-NET-138's
-field-17 byte). Stays DOCUMENTED-TOLERABLE: divergence risk is minimap-cosmetic only.
+field-17 byte). UPDATE 2026-07-02 (D-NET-146): the joiner path is now retail-faithful — the id is
+SEEDED from the joiner's own uploaded CI0/CI1 join vars, picked per assigned team and echoed via
+`Entity::minimap_net_id` (golden 0x8207 reproduced exactly), so the shim only backstops var-less
+players (the host's own player emits its golden 0x0200 through it). Residual gap = the
+character-slot REGISTRY itself (HasEntity/realloc on collision, and the deploy-time allocation for
+the host player) — still DOCUMENTED-TOLERABLE at that reduced scope.
 
 **D-NET-138** [reimpl divergence, FIXED 2026-07-02] **The 0x0A player compact-record field-17
 byte was sent as raw clamped health; retail packs `[bits 4-5 health tier | bits 0-3 playerClass]`.**
@@ -5958,45 +6993,615 @@ frames.** Retail: the priority build is skipped for the local player (@0x517c1b)
 process memory. Our serve-and-play local view RENDERS FROM the loopback 0x0A fold (ADR 0011), so
 the loopback gets full records. That frame never leaves the process — retail interop unaffected.
 
-**D-NET-141** [reimpl divergence, TRACKED 2026-07-02] **The S2C 0x5A ammo bytes echo the
+**D-NET-141** [reimpl divergence, FIXED 2026-07-02] **The S2C 0x5A ammo bytes echoed the
 request's 255 ("default") instead of resolved counts — degenerate when the weapon's
 `startrounds` is the shipped −1 default.** Witnessed resolve semantics in §5.57; the client
 apply clamps a non-negative byte identically, but 255 → signed −1 → `entry[23] (startrounds)`
-fallback, and weapon.def leaves startrounds −1 for most entries → the count degenerates (part
-of the live-witnessed retail-join v15 "ammo issues"). Fix = parse weapon.def (the same source
-the engine loads, §5.57) and resolve real counts server-side like
-`Server_SendWeaponSlotListToPlayer @ 0x502550` (per-slot `sub_5425F0` off the loaded slot
-table); blocked on the adm INDEX-allocation rule (§5.57 OPEN — file-order vs
-loadout_subclasses slot reservation must be witnessed in the `weapon` block-open handler
-before the parser's numbering can be trusted).
+fallback, and weapon.def leaves startrounds −1 for most entries → the count degenerated (part
+of the live-witnessed retail-join v15 "ammo issues"). FIXED by the witnessed pipeline: the
+index-allocation rule closed (§5.57 "Index numbering" — null@0 + by-name-reuse-else-lowest-free
+= file order; the anchor contradiction was the fixture-vs-live weapon.def, not the rule), the
+host parses ITS OWN resolved weapon.def (`NovaSimulation::load_weapon_table` →
+`np::build_weapon_table` → `world::WeaponTable`), and `build_tag_5a_weapon_loadout` resolves
+per accepted entry like `Server_SendWeaponSlotListToPlayer @ 0x502550`: mask filter
+(@0x502716), ammoPrimary/ammoSecondary via the `WeaponSlot_GetTotalClips @ 0x5425F0` port
+(`resolve_loadout_ammo`, libs/npruntime/weapon_table_build.cpp), slot-combo reply order.
+Table-less hosts (no resource root) keep the echo — tracked for that configuration only.
+Pinned by npruntime_weapon_table + the handshake armory cases. LIVE-VERIFIED retail-join v18
+(2026-07-02): the 0x5A reply is byte-for-byte golden — slots {2,3,21,76,77,78,83}, primaries
+{255,10,10,1,2,3,3}, secondaries 255, restriction 0, slot-combo order — resolved from the
+host's own 126-weapon VFS view.
 
-**D-NET-142** [reimpl gap, TRACKED 2026-07-02] **The host ignores C2S 0x25 (reload request) —
-one reload attempt permanently wedges a retail joiner's weapon.** The reload FSM sends 0x25 and
+**D-NET-142** [reimpl gap, FIXED 2026-07-02] **The host ignored C2S 0x25 (reload request) —
+one reload attempt permanently wedged a retail joiner's weapon.** The reload FSM sends 0x25 and
 sets the slot's 0x80 reload-pending flag; only the server's S2C 0x49 broadcast clears it and
 refills the clip (§5.58, `NapiNPServerMsg_HandleReloadRequest @ 0x514DF0` →
 `NapiNPClientMsg_WeaponReload_0x049 @ 0x42C0A0`). Live-witnessed as retail-join v15 "cannot
-reload". Fix = dispatch case 0x25 → broadcast 0x49 `[u16 handle][u16 weaponSlotCombo]` to ALL
-connections (the original's two filtered sends include the requester); the host-side
-`WeaponSlot_ReloadAmmo` bookkeeping needs the weapon-slot/pool model and stays deferred.
+reload". FIXED: dispatch case 0x25 decodes + re-encodes the `[u16 handle][u16 weaponSlotCombo]`
+body (ADR 0003) and stages S2C 0x49 on EVERY in-match connection's transport INCLUDING the
+requester (the original's two filtered sends @0x4C87E0), each framed with its own sequencing at
+the flush boundary (`server_message_dispatch.cpp`; npruntime_reload_relay_test). LIVE-VERIFIED retail-join v17
+(2026-07-02): the joiner reloads normally (user-confirmed; the v15 wedge is gone). TAIL
+CLOSED 2026-07-03 (D-NET-152): the host-side `WeaponSlot_ReloadAmmo @ 0x541720` refill is
+witnessed (remote-requester-only, refund + capacity clamp — §5.58) and the dispatch 0x25
+case now refills the same per-slot clip the 0x06 fire pipeline decrements
+(npruntime_client_fire_test; the ammo-pool refund/clamp stays deferred with the pool model);
+v28 holds live — fire→empty→0x25→fire across 5 reloads, params echoed, no wedge (D-NET-152).
 
-**D-NET-143** [reimpl divergence, TRACKED 2026-07-02] **Remote players' body-anim wire fields
-(off-14 anim state, off-15 channel ratio) are static defaults — the retail host produces them
-by RUNNING THE BODY MOTOR for every remote player.** Witnessed (§5.10 apply map): the extended
-uplink carries only the input byte (+0x12C), stance-xor, anim-def triple (+0x130..132) and the
-equipped-weapon adm index (+0x2B0, case-4 store @ 0x4C20A3); +0x2BC (anim state) and +0x377
-(channel ratio) come from the host's own `Entity_UpdateInfantryPlayerBody @ 0x4B40E0` run over
-the replicated input. Our host net-snaps remote peers (no body sim), so the echo can only carry
-the witnessed spawn defaults: anim state 0x2B (43, idle — NOT 0, whose table entry pins the
-body to the null clip) and adm index from the uplink echo / the `WPN_M4AUTO` spawn default
-[orig: PlayerClass_InitEntity @ 0x4B1116]. Remote players therefore render idle-posed while
-moving until the body motor runs for peers — the residual after the v15 null-animDef flicker
-fix. Faithful fix: run the infantry body FSM for net-snapped peers off the replicated input.
+**D-NET-143** [reimpl divergence, FIXED 2026-07-02 (defaults + echo); body motor tracked]
+**The 0x0A player records sent anim_state_id 0 (the null clip — the v15 flicker/spazz) and a
+permanent anim_def_index 0xFF (starving the client's weapon-action layer); the retail host
+produces live values by RUNNING THE BODY MOTOR for every remote player.** Witnessed (§5.10
+apply map): the extended uplink carries the input byte (+0x12C), stance-xor, anim-def triple
+(+0x130..132) and the equipped-weapon adm index (+0x2B0, case-4 store @ 0x4C20A3 gated
+`AdmDefs[idx].category < 11` — the ex-`reserved_24` byte 24, renamed `equipped_adm_index`
+across codec/intent/entity/snapshot); +0x2BC (anim state) and +0x377 (channel ratio) come from
+the host's own `Entity_UpdateInfantryPlayerBody @ 0x4B40E0` run over the replicated input.
+FIXED to the witnessed defaults + echo: off-14 = 0x2B (43, idle — the spawn default [orig:
+PlayerClass_InitEntity @ 0x4B1116]), off-16 = the entity's equipped adm index (uplink ingest
+with the category gate against the armory table; host-spawned players default to the armory's
+WPN_M4AUTO index resolved by name, the engine re-stamping the pre-feed host player). RESIDUAL
+(tracked): remote players render idle-posed while moving until the infantry body FSM runs for
+net-snapped peers off the replicated input — the faithful completion. LIVE-VERIFIED
+retail-join v17/v18 (2026-07-02): the host-player flicker/spazz is gone (user-confirmed);
+wire shows animState=43 / animDef=9 / the joiner's uplinked equipped index echoed; diff_0a
+reports player.animDef + animState populated exactly like the golden.
 
-**D-NET-144** [reimpl divergence, TRACKED 2026-07-02] **A late-spawned (joining) player's
-field-17 health byte reads tier 1 (0x18) instead of the golden tier 2 (0x28).** The items.def
-health stamp (`resolve_item_traits`) runs at mission load; joiners spawn later and keep the
-spawn-seed default health 100 with no health_max, so the tier ratio lands at 100/150. Retail
+**D-NET-146** [reimpl divergence, FIXED 2026-07-02] **The joiner's S2C 0x0C organic-spawn
+record carried the wrong `animSlot` byte and a mis-packed `netId` — ours echoed the
+body-anim CLIP slot (`Entity::anim_slot`, 1 for every standing player) and the D-NET-137
+netId shim (0x8201, pool slot leaking into the TYPE bits); the golden retail host sends the
+joiner's own uploaded per-side character selection (animSlot 4, netId 0x8207).** The
+live-witnessed symptom was a DBuggy1 SHADOW blob (mesh correct) under the joiner's own
+player (v17/v18): the client's 0x0C apply binds every minimap-registered entity to a
+character-slot registry entry keyed by the packed NetId (`entity->CharacterEntity =
+MinimapSlot_FindOrAllocByEntityId(&count_and_entries, entity, NetId)` [orig:
+NapiNPClientMsg_0x00C @ 0x42E730, alloc @ 0x42eb1d, re-alloc-on-miss @ 0x42eafb]), so a
+type-1-packed id + a wrong avatar byte resolve a vehicle-archetype entry's shadow decal
+while the mesh (resolved from playerClass) stays correct.
+
+The witnessed chain, end to end: (1) the retail joiner uploads its per-SIDE character
+selection as CU chunks in the game-session 0x42 ClientAuth — `CI0`/`CI1` = per-side
+minimap/character-slot ids (u16 of atol), `TR` = requested side (0/1, else clamps 0xFF
+auto @ 0x4c752f), `CTA`/`CTB` = per-side soldier class, `VCA`/`VCB` = per-side avatar byte
+[orig: client emit CNapiServerInfo_SerializeToSession @ 0x4c3650 (each tag omitted when 0);
+wire: golden retail-ashi5a f=199140 and retail_join_v18 f=47676 both carry CI0=512(0x0200)
+CI1=33287(0x8207) TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the fresh-profile defaults]. (2) The host
+parses them into the connection's NapiNetConfig [orig: NapiNPProtocol_HandleClientJoin
+@ 0x62b750 CU loop (type-2 gate) -> NapiNetConfig_LoadFromConnTags @ 0x4c7260 ->
+jsp[56..63] + ci0.lo, Napi_StrCaseEqual names, atol values]. (3) `Server_BuildPlayerInfoAndAdd
+@ 0x51d560` copies jsp[56..64] into the add-event (validating the ids via MinimapSlot_HasEntity
+@ 0x57b140 / lookup_entity_slot_and_pack_entry @ 0x57ad40 against the character-slot
+registry `count_and_entries` — the 288-byte-stride table whose entry+284 is the avatar byte,
+see sub_57AE60). (4) `Server_PlayerAdd @ 0x51cbc0` assigns the team, then picks per ASSIGNED
+team — side A when team ∈ {1,3} or the session gametype is non-team-based ((g_GameType &
+0x10000) == 0), side B otherwise [@ 0x51cff7] — stamping entity+0x374 = the picked avatar
+byte [@ 0x51d0b1] and entity+0x15C = the picked char id [slot+440]; playerClass = TR ? CTB :
+CTA (absent -> 8 in-session [@ 0x51d02b], outside [5,9] -> 8 [@ 0x51d102]) -> entity+0x294.
+`Server_InitAllPlayerEntitiesForRound @ 0x516aa0` re-stamps entity+0x374 = slot+89857 every
+round [@ 0x516b8e]; `Server_ChangeEntityTeam @ 0x518d70` (ex-`Server_ChangePlayerTeam`) re-picks on a team change
+[@ 0x518e8c]; the host's OWN player takes the LOCAL path instead: animSlot = g_avatarTeam1/2
+by team split {1,3}/{2,4} [orig: Player_InitPlayer @ 0x4e15f0 @ 0x4e1843], sourced from the
+profile avatar byte with a not-found default of 1 [orig: apply_session_settings_to_globals
+@ 0x551500 -> sub_57AE60 default-return 1] — the golden host record's animSlot 1. (5) The
+0x0C/0x18 serializers read entity+0x374/+0x15C raw [orig: serialize_entity_states_to_buffer
+@ 0x5030a0 (+0x374 read @ 0x5032b8) / serialize_object_to_buffer @ 0x504d10]. g_GameType
+itself is the HOST's chosen session setting, seeded at host start [orig: g_GameType =
+session gametype setting @ 0x4a6657 / ServerConfig_ApplyHostSetting @ 0x4a6000 @ 0x4a6587;
+golden ASH_I5A 0x08 advertises gameType=0x10010 — team-based bit 0x10000 set].
+
+REIMPL: `Entity::anim_slot` was a semantic conflation and is SPLIT — the body-anim clip is
+now `Entity::body_anim_slot` (present-pass state, never wire), and `Entity::anim_slot` is
+the retail +0x374 character selector, plus `Entity::minimap_net_id` = the +0x15C wire id
+(players; 0 -> the D-NET-137 shim fallback). handle_client_join parses the CU character
+vars onto the connection (npruntime napi_np_protocol.cpp), Server_BuildPlayerInfoAndAdd
+stamps the spawn per assigned team (server_spawn.cpp), the 0x0C/0x18 builders echo the new
+fields (entity_wire_bridge.cpp), our joiner uploads the fresh-profile default set
+(joiner_connection.cpp), and the NW_LAN_HOST dev boot seeds gametype 0x10010 (golden parity;
+NW_LAN_GAMETYPE overrides). DEFERRED (tracked here): the host-side character-slot REGISTRY
+validation/realloc (two joiners uploading the same CI collide — retail reallocs, we echo;
+harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (the mission
+promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
+clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
++0x374 vs the clip channel — is unwitnessed).
+
+**D-NET-162** [reimpl gap, PORTED 2026-07-04 (slice 2; verify v35)] **The AS capture loop
+now runs on our host** — the §5.61 1 Hz block was witnessed round 13 but unported (v33: no
+map colors, no LFP capture). Ported: `world::zone_capture_tick`
+(libs/world/zone_capture.{h,cpp}) — the per-second secure/control pass (the enemy-frontier
+latch + `calculate_capture_zone_control_delta @ 0x501120` verbatim incl. the small-server
+boost, the 20/40/60 soft caps, the 12/24/48 base table, the shared-zone-number divide, and
+the ±1 minimum), secure edges, the instant numbered-zone flips (owned → neutral → capturer,
+control zeroed — the Advance-and-Secure beat), mask rebuilds, and non-trigger zone-object
+team enforcement `[orig: Server_UpdateCaptureZoneEntities @ 0x519690;
+Server_UpdateCaptureZones @ 0x53B8F0 drain; GameEvent_FlagCapture @ 0x50F6F0;
+Server_EnforceZoneEntityTeams @ 0x519600]` — plus the npruntime 1 Hz wire block
+(server_tick.cpp): 0x6F (15 B, change-gated to all + the full set to deploy-pending/dead
+recipients), the 0x1E zone events (0x3B/0x3C edges; flips 50/51/52/53 team-filtered + the
+56/57 banner), 0x53 on flips, and the 0x40 minimap-overlay feed (persistent zone entries
+icon 0 + transient vehicle blips by items.def `unit_type`, chunked ×16
+`[orig: Server_BuildOverlayStateForPlayer @ 0x517FC0 → Entity_ClassifyForMinimap
+@ 0x50FA70 → the staging flush @ 0x50FE20]`). Pinned by `zone_chain_test`
+(control-delta formula pins; the full flip→secure→contest→neutralize→retake cycle).
+Tracked divergences: our flip-request source is the same 1 Hz proximity sample the drain
+consumes (retail queues per-touch through the physics pass); the 0x1E attacker byte uses
+the chain-vector index (retail: `SpawnZoneList_IndexOf @ 0x43B990` over the client-sorted
+registry); 0x6F is change-gated (the golden's 268 non-periodic emits refute a steady
+per-second stream; the exact retail emit filter is unwitnessed); the 0x40 walk covers
+zones + vehicle blips only (players/emplacements/CTF-flag entries + the resumable
+per-slot budget walk deferred); the timed-capture engine's ACTIVE entries + 0x6C presence
+counts (un-numbered flag zones — none authored on ASH_I5A), spawn-wave resets, the
+underdog catch-up term (needs the round clock), proximity scoring/0x81, and the
+`def+88 & 2` in-radius team conversion are all deferred.
+
+**D-NET-161** [reimpl gap, PORTED 2026-07-04 (ground-family core; verify v35)] **The host
+never simulated vehicles** — the whole v33 "second model + can't drive" defect (see the
+§5.13 drive-authority subsection for the witness). Ported: the items.def physics-property
+block (libs/def, scaled at parse per `ItemDef_ParsePhysicsProperty @ 0x49d870` — turn rates
+deg/s×192426 BAM/tick, player_speed km/h×293 16.16-u/tick, slopes deg×11930464, accel/decel
+×4 with the 2×accel decel default) → `world::VehicleTraits` (stamped per item by
+`NovaSimulation::resolve_item_traits`, `attrib & 0x40` PlayerControl gate) →
+`world::tick_vehicle_motor` (libs/world/vehicle_motor.cpp — the authority drive core of
+`Entity_UpdateVehiclePhysics @ 0x48af00`: the occupant resolve/stale-clear, the input block
+with the 8-way dir switch + modifier bits + key-steer ramp (+0x16C16C0/tick cap 0x238E38C0)
++ the analog leg (±192426·axis>>1 steer, playerSpeed·axisX>>7 throttle), the speed-scaled
+steering chase (min rate turn_rate2 else turn_rate/4; wheel state `aiState += (4 − 32·Δ −
+aiState) >> 3`; yaw rate = −speed·(wheel>>2)>>16 applied while grounded), the cos²(pitch)
+slope factor, the accel branch tree (±accel same-direction, ±decel zero-target, the
+UNCLAMPED 1/32 launch step on direction changes, ±decel/2 airborne coast, the airborne
+command inversion), gravity −324/tick, the |speed|<48 zero-target deadzone) run per pool-1
+traits entity in the AiSystem tick. The driver's input arrives via the already-ported 0x0C
+apply; `Entity::net_analog_x/y/z` (entity+0x130..) now ride `PlayerIntent`. Pinned by
+`vehicle_motor_test` (the def-scaling pins incl. the JOX buggy block; launch 861 = the
+unclamped (27542+16)>>5 first step; the +60/tick clamp; reverse −playerSpeed/2;
+turn-in-place holds a standing buggy; the steer chase toward the driver yaw; coast-to-stop;
+the dead gate; the `physics` selector gate) + `netsim_two_peer_fanout`
+(vehicle_drive_authority: a remote driver's 0x08 move input spins the host vehicle to
+speed 861+60·61 in 62 ticks and the streamed 0x0A vehicle record pose goes LIVE).
+Tracked deferrals: the air/helicopter family (`move_function chel` — Super Pumas stay
+parked; the buggy-family ground core is what landed), the skid/tire-slip model, pool-1
+vehicle-vs-vehicle collision + the collision-avoid damping, water drag/drowning drain, the
+AI autopilot/waypoint drive (states 16/18) + `EntityAI_ProcessVehicleStateMachine
+@ 0x4583c0`'s non-drive states, the engine sound state machine, husk/section damage, the
+wheel-contact pitch/roll solver (`Entity_ProcessTrackedVehiclePhysics` — substituted by the
+shared 5-tap bilinear terrain clamp), the above-water drive gate, the platform-follow
+grounded-on-entity block, and the driver-yaw analog write-back for remote drivers (their
+yaw is wire-owned on our host).
+
+**D-NET-160** [reimpl gap, FIXED 2026-07-03 (ported; verify v34)] **A killed client never
+learned it died — no death screen, no redeploy (v33: 2 kills routed, 0x13 + 0x1E on the wire
+to everyone, death anims visible to OTHERS via the D-NET-159 motor, but the VICTIM kept
+playing).** The victim's own death rides two per-recipient channels we hardcoded: (1) the
+0x0A TAIL health — the client STORES it as its own Health [orig: @ 0x4305df], and ours sent a
+constant 150 (the D-NET-144-era stopgap), so the victim's Health never hit 0; (2) the record
+byte13 dead bit 0x02 — the LOCAL apply's dead path stores the death anim + zeroes Health
+[orig: @ 0x4c1005-0x4c1027] and its 1→0 edge is the client SPAWN HOOK (pose snap +
+Entity_ResetToSpawnState [orig: @ 0x4c1109]) — and nothing server-side ever set entity+36
+bit1 on death. FIXED: route_round_deaths marks the victim entity dead (`flags |= 2`,
+`alive = false`; lifted by entity_reset_to_spawn_state at the deploy/respawn — the wire edge
+then fires the client spawn hook, closing the death→redeploy cycle through the existing
+dead-or-pending 0x0E gate + the D-NET-156 release bundle), and the 0x0A tail now carries the
+recipient's LIVE health (`FrameHeaderState::tail_health`; damage also reads as the retail
+red-flash via the decrease detector @ 0x43059a). Pinned by `netsim_two_peer_fanout`
+(dead-state frame: tail 0 + byte13 bit 0x02) and the byte-identity sub-case's aligned tails.
+
+**D-NET-159** [reimpl divergence, FIXED 2026-07-03 (ported; verify v32) + tracked stand-ins]
+**The 0x0A player record's anim bytes were hardcoded (off-14 = 43, off-15 = 0) and the
+move-input echo idled at 0 for the host's own player — retail RECOMPUTES the body anim on
+the authority for EVERY player from the replicated input** (v31: remote bodies frozen at
+idle; the "off-14/15 are echoed from the uplink" premise was WRONG — the extended uplink
+carries NO anim state and NO stance, §5.10). Witnessed: `Entity_UpdateInfantryPlayerBody
+@ 0x4B40E0` runs the selection under `g_local == e || is_authority` (@ 0x4b70a3-0x4b70b2)
+every 4th tick, consuming MoveOrder bits 0-3 (dir + moving) + bits 8/9 (stance — fed by the
+**C2S 0x1D stance-change**, dispatch table) + Flags bits (0x10 scope suppresses the run
+promotion); bases 1/11/19 + the {0,7,6,5,4,3,2,1} dir offsets, idles 43→44 (62 passes) /
+45 / 48, run/jog 9/10 by the ADM gait class, prone lean 41/42, commit via
+`g_animStateFlagsTable @ 0x8139E8`; ratio = the +0x188 channel's elapsed-ticks-in-loop
+(`AnimChannel_AdvancePlayback @ 0x40B140`), clamp 255. PORTED: `AiSystem::
+remote_player_body_anim` (the selection subset: bases + 8-dir + stance idles + the 43/44
+idle counter + arbitration commit) + `mirror_wire_anim` (Entity::net_anim_state/pending/
+phase → the record bytes; the local player also exports its packed MoveOrder low byte);
+the 0x1D dispatch case writes `Entity::net_stance_bits`; the 0x0A header TAIL state byte
+now echoes the recipient's own stance bits 0-1 (a hardcoded 0 force-STOOD a crouched
+retail client every frame — the long-standing crouch/prone bug, §5.9 tail row). Tracked
+stand-ins (this entry): run/jog promotion deferred (the ADM gait class
+`dword_24E808C[adm*0x460]` is not in our weapon table), prone lean 41/42 deferred (lean
+bits uplink fine but the selection leg is unported), the no-anim-data channel phase
+self-advances on a 62-tick loop (faithful source = the .adm loop rate; the Godot host
+feeds real data via IRootMotionSource), and the death leg reuses the motor's generic
+torso-forward pick (deathAnim +0x2C0 variants unmodeled). Tests:
+`infantry_test` (remote selection walk/crouch/prone/idle-promote),
+`netsim_two_peer_fanout` (pending-wins byte 14, ratio byte 15).
+
+**D-NET-158** [reimpl gap, FIXED 2026-07-03 (ported; verify v32)] **The HUD "Number of
+players" broke on three fronts, all in the 0x46/0x22/0x16/0x04 roster contract** (v31: 14
+repeated C 0x22s = the unknown-slot retry churn; D-NET-155 had aimed at the wrong tag —
+the 0x16 re-push was necessary but not sufficient): (1) the 0x04 slot-config hardcoded
+`(slot 1, capacity 2, team 2)` — byte 18 feeds `g_max_player_slots @ 0xA860D1`, the
+client's 0x46/0x22 walk TERMINATOR, so slot 2+ never got walked (fixed: live slot/
+capacity/team from the connection + `GameConfig.max_players`); (2) no join-time 0x46
+broadcast — existing clients DROPPED the new player's 0x16 row (rows are accepted only for
+0x46-known slots) and churned 0x22 retries (fixed: `broadcast_player_sync_on_join`,
+fieldFlags 0x1CF7 [orig: Server_PlayerAdd @ 0x51D296]); (3) the 0x16 trailer
+`[inGameCount][spectatorCount]` was hardcoded `{2, 0}` — the HUD count = accepted rows −
+spectatorCount (fixed: live counts; §5.20 rewritten — byte 0 is a FLAGS byte, row bit0 =
+spectator). Also: the 0x46 reply now serializes the REQUESTED fieldFlags verbatim
+(encode_player_sync(rep, flags)), and 0x16 rows carry only in-match players (the golden
+31→39 grow timing). The 0x32 name broadcast stays deferred with D-NET-149.
+
+**D-NET-157** [reimpl gap, FIXED 2026-07-03 (ported; verify v32) + tracked divergences]
+**C2S 0x26/0x27 (vehicle attach/detach) were undispatched — the two v31 buggy-enter
+attempts (`02 00 04 10 01 00`, bone 1) fell on the floor and no player could ever mount.**
+The full retail flow is §5.10's "C2S 0x26/0x27" subsection (HandleVehicleAttach @ 0x502390
+word0 anti-spoof → Entity_ProcessVehicleAttach @ 0x435AA0 validation order →
+Entity_AttachToVehicleSlot @ 0x4946D0 writes; detach @ 0x4FC980/@ 0x4355F0; NO confirm tag
+— the 0x0A mounted branch is the confirmation). PORTED: dispatch cases 0x26/0x27 →
+`world::entity_process_vehicle_attach / entity_detach_from_vehicle`
+(libs/world/vehicle_attach.cpp) + `Entity::mount_bone` (+0x157) + the record byte0 echo +
+the header-tail mount handle. Tracked divergences (ours vs retail): (a) seat
+classification falls back to the model-USERPOINT seat table — our `Seat::bone_index` is
+the userpoint enumeration index, which can diverge from the retail full-bone-table index,
+so an unmatched wire bone takes the best free seat with the wire bone kept as the
+occupancy/echo key (retail classifies by bone NAME prefix in the model bone table and
+rejects unknowns); (b) the 0x27 detach subject is CLAMPED to the sender's own entity
+(retail trusts wire word0 with no range guard — a hardening divergence); (c) the
+weapon-busy gate (EquippedSlot currentAction 0/1/11 @ 0x435b29), the ATTR_PlayerControl/
+ATTR_EWeap ctrl-seat def gates, gun-carrier traversal in the enemy-occupant scan, and the
+record's gun seatType byte (needs carrier +0x326/+0x312 modeling) are unmodeled. Test:
+`netsim_two_peer_fanout` 0x26 attach → mounted echo → detach round-trip.
+
+**D-NET-156** [reimpl gap, FIXED 2026-07-03; **v32 LIVE: the hold/pick/release chain WORKS
+(picker appears, pick lands, C 0x0E on the wire from both joiners) but the session found the
+MISSING RELEASE BUNDLE** — the 0x0E pick sets the client's `dword_81474C` wait-gate (Input
+case 12 @ 0x49b17b) and the client STOPS its C2S 0x0C uplink at the pick frame (v32: both
+joiners' uplinks ceased exactly at their 0x0E, forever — the host-side entity pinned at the
+deploy spot with input=0 = the live rubber-band). The retail release is the deploy leg's
+bundle: **0x5A loadout re-send + 0x61 seed + 0x1E hint in ONE datagram** (golden f=240018,
+after the wave countdown; the 0x5A apply is the un-latcher — NapiNPClientMsg_
+HandleWeaponLoadoutSync @ 0x4290E0 resets 81474C on completion, §5.30). FIXED same day: the
+0x0E success path emits the retained granted 0x5A body + the session-seed 0x61 before the
+0x1E (`SessionReplyState::last_loadout_reply`; `npruntime_round_sim` pins the bundle +
+no-bundle-when-alive-deployed). Also witnessed off the v32/golden diff: the retail body
+motor skips HIDDEN entities entirely (@ 0x4b411b `test dl,1`), freezing the pending player's
+anim channel (golden ratio constant 40; ours swept to 255) — the remote anim pass now gates
+on the hidden bit. Golden also confirms fresh-join deploys produce NO byte13 bit-0x02 edge
+(pre-deploy byte13 = 0x01 exactly), and ratio 255 on long idle is retail-correct. Verify
+v33.] **The deploy screen never
+appeared on our host (v31 root cause #1: ZERO C2S 0x0E all session) — the picker is HELD
+open by the 0x0A header flags1 bit1 re-asserted EVERY frame, and ours hardcoded flags1 =
+0x00** (golden pre-0x0E flags1 histogram {0x02: 54}, post {0x00: 293, 0x02: 3}; our
+0x0F-driven flash died < 16 ms later). The full chain is §5.61's "deploy-screen HOLD
+chain" + the §5.9 flags1 row: join sets slot bit4 iff `SpawnZoneList_GetCount() > 0`
+[orig: Server_OnPlayerJoin @ 0x51a6f2], the header writer emits bit1 + ORs the entity
+hidden bit0 while pending [orig: NetPacket_WritePlayerState @ 0x4ff7bd/@ 0x4ff7dd — the
+golden pre-deploy record byte13 = 0x01], the 0x0E gate accepts dead-OR-pending
+[orig: @ 0x519cc7], and the deploy leg clears bit4 [orig: @ 0x517791]. PORTED:
+`netsim::Connection::respawn_pending` (join-set via `world_has_spawn_zone`, host loopback
+exempt; 0x0E-cleared with the hidden bit) → per-connection flags1; the 0x0E dispatch gate;
+S2C 0x6E empty-group form at 1 Hz to pending/dead players; optional parity landed with it:
+the 0x0F location-name block (def-2044 markers, §5.29) + the 0x0D zone byte/radius fields
+(§5.11) + the 0x04 live slot bytes. Tests: `netsim_two_peer_fanout` (flags1 hold +
+byte13 + tail clear on deploy), `zone_chain_test` (spawn-zone presence + the packed zone
+byte). Death does NOT set the flag — the death screen is client-local (flags1 bit0 edges
+drive it; §5.9).
+
+**D-NET-155** [reimpl gap, FIXED 2026-07-03 (v29)] **The 0x16 player-list re-push was
+one-shot-per-connection to the JOINING client only — every existing client's roster (and
+its HUD player count) went stale when a later joiner arrived** (v29: three players in, the
+count stuck at 2). FIXED: a roster generation on `NapiNPProtocol` (bumped on every
+observed spawn and on the disconnect teardown) + a per-connection `roster_seen_gen`; every
+spawned type-1 connection re-receives the framed 0x16 whenever its generation is stale.
+The golden single-joiner 31→39 grow is preserved byte-for-byte (one push, same tick;
+golden ctests green). [orig: the retail broadcast is `Server_BuildAndBroadcastScoreboard
+@ 0x50DE00` — its exact trigger set is a tracked follow-up.] **v30 wire caught the first
+cut incomplete**: the version check lived below tick_connections' spawned-peer skip, so it
+only ever ran on each connection's OWN burst-completion tick — joiner 1 got its 39-B list
+twice and never the grown 47-B list when joiner 2 spawned (HUD still 2). Fixed: spawned
+type-1 connections evaluate the roster version every tick before the skip; re-verify v31
+(v31 outcome folded into D-NET-158 — the re-push alone was not sufficient).
+
+**D-NET-154** [reimpl divergence, FIXED 2026-07-03 (v29)] **Tag-2 round events starved to
+ZERO on the wire: the grouped-order port gave `select_round_events` only the budget
+LEFTOVER after the tag-1 entity walk.** A real-world entity set (players + ~21 vehicles)
+fills the 600-B frame budget alone, so the round budget was 0 every frame — and the sweep
+still advanced the per-connection watermark, permanently discarding every round echo
+(v29: 35 C 0x06 with two live observers, 0 tag-2 anywhere). FIXED: rounds select FIRST
+under the shared budget (each ≤ 20 B, 255-cap), entities absorb the remainder — the
+`@0x50f312` interleave's OUTCOME without the interleave [orig: the one-budget loop
+`@0x50f070`]. The positive tag-2 wire witness therefore remains pending → v30.
+
+**D-NET-153** [reimpl divergence, FIXED 2026-07-03 (v29)] **The round sim's fire
+direction used the 0x0A euler_z heading frame (90° − yaw); the C2S 0x06 dir yaw is the
+MISSION BEARING directly** (a 16.16 turn fraction; `<<16` = BAM32, §5.16). Wire-proof from
+the v29 duel: joiner 2 at `(-396.6, 413.1)` firing wire yaw −122.0° at joiner 1 standing
+at `(-402.7, 403.5)` = true shooter→victim bearing −122.4° (0.4° residual); joiner 1's
+kill line 45.6° vs true 44.2°. The 90°−yaw mapping missed by ~26° everywhere EXCEPT the
+45° diagonal where the two frames coincide — joiner 1's duel line sat exactly there, so
+"the first joiner could kill the second but the second could not kill the first". FIXED in
+`world::RoundSim::spawn`: bearing = the wire yaw; consistent with the spawner component
+form X=sinYaw·cosPitch, Y=cosYaw·cosPitch, Z=sinPitch in engine axes [orig:
+`RoundData_SpawnRound @0x4ec5e9` / `Weapon_SpawnSingleProjectile @0x4ebf51`]. Pinned:
+`npruntime_round_sim_test` (wire yaw 0 → +X). The pitch SIGN is still unverified by wire
+(v29 shots were level) — tracked.
+
+**D-NET-152** [reimpl gap, FIXED 2026-07-03, **live-verified v28 (2026-07-03)**: 95/95 C 0x06
+uplinks decoded (fixed 45 B, zero failures), shooter = the joiner's own `0x0001` throughout
+(anti-spoof-valid), `hit_part` strictly monotonic 513→607, and every fired adm resolves to a
+granted 0x5A armory slot (19/24/29 = the successive rebought primaries; 62 = the 2-round 7th
+slot, fired exactly twice, alt flag 0x10); firing continued after every mid-session reload —
+5× C 0x25 each drew the S 0x49 relay back to the requester with the param echoed (215 ×4,
+461 ×1), no clip wedge (the D-NET-142 tail holds live); ZERO tag-2 on the wire is the
+EXPECTED single-observer outcome (the only other player is the idle host on the in-process
+socketless connection, and own rounds are skipped `@0x4fff97`) — the positive fan-out stays
+pinned by `netsim_two_peer_fanout` (round_event_fanout); a second observer retail client is
+the v29+ topology for the positive wire witness. Sweep clean: 0 C 0x0F, no 0xC9, 60.7/s 0x0A
+cadence, header value-sets match golden, 0x5A byte-shape golden incl. the double-send (the
+in-game "no spare mags at spawn" report is NOT a wire defect — we grant `(10,255,0)` for the
+primary exactly like golden; only the send moment differs: golden's 0x5A pair rides the
+deploy bundle, ours rides join — noted, not chased); diff-vs-golden gaps unchanged (env
+sub-block = D-NET-134 deferred; `player.animRatio` zero = the tracked body-motor off-15
+channel-ratio item; parked-vehicle euler/flags zero = session content — nothing was driven
+in v28).]
+**The host had NO dispatch case for C2S 0x06 (client fired round) — every shot a retail
+joiner fired was silently dropped: no ammo authority, no fire echo, other observers saw
+nothing (retail-join v26: 51 C 0x06 uplinks, zero host response; client prediction hid the
+shooter's own view).** The full original pipeline is now witnessed end-to-end (§5.16 the
+validate/fire chain, §5.9.1 the per-recipient tag-2 round-event echo): handler
+`@ 0x513310` (anti-spoof: claimed shooter == the connection slot's own entity `@0x51358d`;
+`PlayerSlot_IsActive @ 0x4FC760` fire-rate gate on `slot+96472/96480`, stamped
+`tick + AdmDef[276]` on success `@0x513740`) → `Server_ClientFiredRound @ 0x50BAA0` (guards
+−3/−8/−9/−10/−12/−14/−15; ammo via `WeaponSlot_CanFire @ 0x541BA0` — clip u16 slot+16 /
+pools; warp compensation `savedLivePose − Position` for shooter + carrier; equipped-adm +
+fire-target stamps) → net primary latches the client's origin/direction into the weapon
+slot (+64..84, +94 bit0) and runs the adm 'fire' ACTION (`admEntry+684` →
+`WeaponAction_Fire @ 0x542B10` → `Entity_FireWeaponAndSendPacket @ 0x42BD80` → LOCAL
+re-entry → `RoundData_AddRound @ 0x4FDB40`; `consume_weapon_ammo @ 0x540850` decrements) →
+the 256-record ring `g_round_ring @ 0xC8D848` fans per recipient
+(`Server_BuildRoundEventListForPlayer @ 0x4FFEE0`: watermark `playerSlot+97544`, own-rounds
+skip `@0x4fff97`, line-of-fire proximity score; `NetPacket_SerializeRoundEvent @ 0x504820`
+interleaved `@0x50f312`). PORTED at the reimpl altitude: dispatch case 0x06
+(`server_message_dispatch.cpp` — decode, anti-spoof, armory adm lookup, per-combo clip
+seed/decrement on `world::WeaponTable.clipsize` (−1 = no-clip weapons free), equipped-adm +
+`Entity::last_fire_target` stamps, `world::RoundRing` append of the PRE-SPREAD claimed
+pose); the 0x25 case refills the same clip (the D-NET-142 tail, `WeaponSlot_ReloadAmmo
+@ 0x541720` remote-only `@0x514f03`); netsim `select_round_events` ports the per-connection
+watermark + arm gate + own-shooter skip + the x87 line-of-fire scoring (2π/2^32 BAM,
+2^22 trig scale, 1000u projection clamp, z half-weight, `0x4000 − lateral>>12`) and
+compresses origins against the recipient anchor; `build_0a_frame` emits the tag-2 records.
+Codec rename sweep rides along (§5.9.1): `RoundEventRecord` /
+`decode_round_event_record` / `encode_round_event_record` / `FrameUpdate::round_events` with
+the corrected field semantics (`shooter_handle` mandatory — ex "target"; optional 0x40 word
+= the shooter's live TARGET — ex "weapon_handle"; `shot_seq` — ex "damage_extra"; origin +
+direction — ex "impact"); IDB renames `NetPacket_DeserializeWeaponHit →
+NetPacket_DeserializeRoundEvent`, `serialize_projectile_to_packet →
+NetPacket_SerializeRoundEvent`, `compute_entity_angular_priority →
+Server_BuildRoundEventListForPlayer`, `should_send_entity_update → WeaponSlot_CanFire`,
+`RoundData_ProcessHit → RoundData_SpawnRound`, globals `g_round_ring{,_cursor,_count}` +
+`g_round_event_refs`. Pinned by `npruntime_client_fire_test` (anti-spoof, NULL-wpn, clip
+seed/decrement/exhaustion/0x25-refill, alt-fire no-decrement, loopback no-op, table-less
+accept, ring field sources) and `netsim_two_peer_fanout` (round_event_fanout: arm gate
+swallows the pre-join backlog, observer gets exactly-once with anchor-correct origin +
+intact direction BAMs + the live 0x40 target word, shooter never echoed its own round).
+DEFERRED (tracked here): the authoritative round SPAWN + damage
+(`RoundData_SpawnRound @ 0x4EC0D0` — projectile-pool entity, weapon spread, tracer
+interval; impact handlers `Projectile_Handle*Impact @ 0x4e93xx` → health → the death
+family) — **witnessed end-to-end AND PORTED at the MVP altitude 2026-07-03 → §5.60**
+(`world::RoundSim` + ammo.def plumbing + the 0x13/0x1E death routing;
+`npruntime_round_sim_test`; live verify = v29); the cease-fire gate (`g_InCeaseFire` unmodeled); the
+`+96472` fire-rate stamp (the adm[276] cooldown dword is not in `WeaponTableEntry` — needs
+its weapon.def token witnessed); the savedLivePose warp compensation (our net-snapped peers
+have zero intra-tick motion, so the delta is 0 by construction until a peer motor lands);
+the moving-carrier re-anchor (`@0x50bc41`); the shared ammo POOLS (adm+220 belt / adm+216
+ammo-point classes — clips only for now, refill to capacity without the pool clamp); and
+the tag-1/tag-2 INTERLEAVE order (ours groups rounds after entities under the same budget —
+the retail decode loop is tag-driven, so grouped order reads identically).
+
+**D-NET-151** [reimpl divergence, FIXED 2026-07-03, **live-verified v27, wire re-verified v28
+(2026-07-03)**: v27 was user-confirmed only (its dumpcap window expired before the session);
+the v28 trace supplies the wire evidence — 105 grounded C 0x0C uplinks across FOUR carriers
+(pool-2 statics `0x200c`/`0x2243`/`0x2012` + the pool-1 vehicle deck `0x1004`), and our 0x0A
+player records echo each carrier back with compressed CARRIER-LOCAL pos + the local yaw byte
+(1,261 grounded records, e.g. `carrier=0x1004 pos=(0x9441,0x1b01,0xd4d0) yaw=0x76`); every
+grounded→on-foot edge resumes WORLD coords within a few units of the step-off (e.g. `-406.5
+→ local 0.0…1.1 → -404.0`), incl. a direct carrier→carrier handoff (`0x2243→0x200c`) — zero
+origin-teleport signature across all 923 uplinks] **The
+grounded-on-entity player replication loop was unported on BOTH host sides — the joiner's
+carrier-local uplink was applied as world coordinates and the 0x0A echo never returned the
+carrier — snapping a retail client to ~map origin the moment it stood ON another entity
+(building floor, vehicle deck).** Wire-witnessed retail-join v26 (both cases, same shape):
+on-foot at world `(-388.8, 439.4, 11.9)` → grounded uplink `carrier=0x1004` (Dune Buggy,
+pool 1) `pos=(2.3, 0.4, 1.1)` LOCAL → next on-foot uplink at world `(2.4, 0.5, 39.3)` — the
+local coords as world, z terrain-clamped; identically `carrier=0x227e` (pool-2 STATIC —
+building s638) `pos=(8.1, 6.9, 1.0)` → world `(8.3, 6.7, 42.3)`. Golden retail↔retail runs
+the same maneuver for 106 uplinks with NO snap: the retail host echoes the carrier back in
+the player's own compact record (`vehBone=0 seat=0 carrier=0x1034` + compressed LOCAL pos)
+while the 0x0A header refs stay WORLD (the recipient-eye anchor). The witnessed contract
+(§5.10, all four ops of `NetPacket_SerializePlayerState @ 0x4C09C0`): the client uplinks
+`carrier = groundEntity (entity+0x28)` — maintained by its platform physics
+[orig: `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b3291` sets `Flags |= 0x100000` +
+groundEntity] — with `Entity_TransformWorldToLocal @ 0x43BB50` pose (local pos + relative
+heading); the host apply lifts it back via `Entity_TransformLocalToWorld @ 0x43BD00`
+(`@0x4c1de1`, heading re-add `@0x43be7e`) and REPLACES flags bits 2-4 from the raw wire
+byte (`@0x4c1e4d`); the host echo selects mount-else-groundEntity (`@0x4c0a08`) and writes
+carrier + compressed LOCAL pos (`@0x4c0b07`) + local-heading yaw byte (`sar 24 @0x4c0b85`);
+the client stores the echoed carrier into its own groundEntity UNCONDITIONALLY (`@0x4c1353`)
+and hard-applies its own record's position only on an `Entity_TryAttachOrDetach @ 0x436610`
+attach-state change (`@0x4c1329-0x4c1345`) — which our 0xFFFF/world echo provoked. FIXED
+end-to-end: `apply_player_intent` lifts the grounded uplink through the carrier pose and
+mirrors the carrier into `world::Entity::ground_target`; `snapshot_world` resolves the
+carrier pose from the registry (a pool-2 static has no 0x0A snapshot of its own);
+`build_0a_frame` emits the witnessed grounded record form; `NetClientView` lifts
+carrier-form records via the carrier's view-state pose; `Entity_TransformWorldToLocal`
+ported as `network_transform_world_to_local` (exact 22-bit transpose; the binary folds the
+inverse-rotation sign into a −2^22 sine scale, `dbl_7C57B0`). Decoder corrections ride
+along (§5.10 tables): `carrier_handle` (was vehicle_handle), `state_flags_byte`
+replace-bits apply (was flags_xor XOR-delta — the xor corrupted already-set crouch/prone
+bits), `anticheat_flags` (was reserved_18), priority `(handle,score)` pairs (were
+"weapon/fire counters"). DIVERGENCE NOTE (tracked here): retail's host re-derives
+groundEntity from its own platform physics each tick (it re-simulates remote players from
+replicated input); our read-apply peer model has no platform pass, so the owner's uplinked
+carrier is mirrored instead — wire-identical in steady state (the client reports exactly
+what it grounds on) but self-corrected a tick later by retail when they disagree. RESIDUAL:
+our HOST's own player never reports grounded (no platform physics on our motor), and
+seat-MOUNT replication (bone/seat != 0) remains deferred with mount modeling. Pinned by
+`netsim_two_peer_fanout` (grounded_uplink_apply_and_echo: carrier-pose lift, ground_target
+mirror, flags replace, carrier echo + local pos + local yaw byte, free-standing regression;
+pose_transform_roundtrip: identity-exact + arbitrary-pose round-trip) and the §5.10 codec
+tests (`nw_ingame_c2s_uplink`, `nw_ingame_encode`, `nw_ingame_compact_records`). IDB changes
+this session: struct member `GamePlayerEntity+0x157 weaponType → attachBoneId` (anchored:
+the op1 bone-byte source + the `Entity_TryAttachOrDetach` compare); witness comments at
+`0x4c0a08` / `0x4c0b07` / `0x4c1353` / `0x4c1de1` / `0x4c1e4d` / `0x4b3291` / `0x517bf5`.
+
+**D-NET-150** [reimpl divergence, FIXED 2026-07-02, **VERIFIED live 2026-07-03 (v25)**: cold
+join = arms + human shadow (user-confirmed, first cold pass ever clean), warm rejoin = arms +
+shadow good; wire (retail_join_v25.pcapng) shows every join parking after S 0x11 until the
+client's C 0x0A (cold: 0x11 f=172064 → 828-frame park → C 0x0A f=172892 → S 0x19 +1 → first
+0x10 +2, batches in ack-window clumps; rejoins f=394137/583879 park 701/597 frames the same
+way)] **The host started the §5.2a world stream unrequested and unthrottled —
+racing a COLD client's mission build; the 0x0C organic batch then landed mid-`Game_StartMission`
+and the client's self-bind (§5.59) resolved against a HALF-BUILT character registry (the
+cold-join DBuggy blob shadow + missing first-person arms).** Live-witnessed v22–v24: 5/5 data
+points cold=broken / warm=ok; the v24 armless-vs-armed wire diff was byte-identical except the
+join-order dcb (3 vs 4) — the defect is TIMING, not bytes. The original gates the stream twice:
+(1) **the client-request gate** — the player-sync track ends at sync-state **3** (`[orig:
+Server_SendInitialGameStateToPlayer @ 0x51bba0]` tail `@ 0x51c134`, game state 9 `@ 0x51c11c`,
+subphase reset `@ 0x51c13c`) and PARKS; only the client's empty C2S 0x0A spawn-menu request
+advances 3 → 4 and resets the world-stream phase to 0 (`[orig:
+NapiNPServerMsg_HandlePlayerSpawnRequest @ 0x513260]`: game state 9 `@ 0x513295`, sync-state 4
+`@ 0x5132b1`, phase reset `@ 0x5132f6`, S2C 0x19 reply `@ 0x5132f1`; golden retail-ashi5a:
+S 0x11 f=201572 → C 0x0A f=201573 → first S 0x10 f=201713); (2) **the sent-unacked throttle** —
+BOTH burst tracks stall while the connection's sent-but-unacknowledged reliable-message count
+`conn+0x768` is >= 20 (`[orig: @ 0x51bbfd (world-stream) / @ 0x51bf14 (player-sync)]`). The
+counter is the sent-list `NapiListHead.count` (list heads at conn+0x74C queued / +0x75C sent /
++0x76C free — kong's `NapiNPMessageQueueState` carve mis-slices these; retype proposal open):
+messages enqueue via `[orig: NapiNPMessage_Create @ 0x627fc0]`, and the inbound session-packet
+parser retires every sent message with `msg_seq <= hdr.ack_seq` (`[orig:
+CNapiNPConnection_ParseMessages @ 0x625bc0, sweep @ 0x625d9b]`, header dword +4; peer-ack
+high-water kept monotonically at conn+0x7b0 `@ 0x625dbe`). That backpressure is what stretched
+the golden world stream across the cold client's whole build (0x10 phase alone f=201713..217422,
+~15,700 frames of client-paced trickle) so 0x0C arrives only once the client is nearly done
+loading. FIXED as the faithful structural translation: the burst tail parks at sync_state 3, the
+dispatch 0x0A case ports the @ 0x513260 advance, the type-2 loopback self-advances (retail's
+host-local client sends its 0x0A from the shared in-process loop `[orig:
+NapiClient_WaitForGameStart @ 0x42cc10]`), and the emitter stalls while
+`next_outbound_seq-1 − peer_acked_seq >= 20` (npruntime server_initial_state.cpp /
+server_message_dispatch.cpp / napi_np_protocol.cpp `peer_acked_seq`; JoinerConnection now sends
+the 0x0A on receiving 0x11). Pinned by `npruntime_initial_state_burst` (parks at 3, no
+world-stream tag before the 0x0A, resumes on the advance) + `npruntime_client_runtime` (full
+join round-trip through both gates). DEFERRED (tracked here): retail RE-RUNS the full world
+stream on EVERY later spawn-menu 0x0A (state 5 → 4 + phase reset — the respawn map-screen
+refresh); our tick loop skips spawned connections, so the reset is applied pre-spawn only.
+Retail counts outstanding MESSAGES; our transport frames the burst 1 message : 1 datagram, so
+counting unacked datagram seqs is the same basis. Closes the TASK-2 dcb lead: the dcb is
+SERVER-ASSIGNED join order (`[orig: CNapiNPConnection_Create @ 0x62acb0]` seeds unk_14 from the
+protocol join counter → `[orig: CNapiNPConnection_OnStateChange @ 0x626060]` stamps
+connection_id(+0x18) → shipped to the client in the 0x82 MI TLV `[orig:
+CNapiNPConnection_SendSessionInit @ 0x620ef0]`; the client-uploaded CI/CK are reconnect-dedup
+keys only `@ 0x62bee6`) — the cold/warm 3-vs-4 delta was join order, not a divergence.
+
+**D-NET-149** [reimpl divergence, FIXED 2026-07-02 (core); broadcasts partially deferred]
+**A disconnecting player's world entity leaked forever — the goodbye path erased only the
+connection node, so the body kept streaming (0x0A/0x20) and re-entered every future joiner's
+0x0C batch as a ghost player.** Live-witnessed retail-join v23: after two leave/rejoin cycles
+the 0x0C batch carried FOUR TestPlayer organics (slots 1-3 = the previous sessions' corpses,
+pool slots and eFlags/dcb accumulating 3→4→5) and the user saw the older bodies standing at
+their previous positions. The original tears the player down on disconnect [orig:
+Server_HandlePlayerDisconnect @ 0x51B5C0]: team spawn-token return (@ 0x51b661..0x51b67a),
+S2C 0x32 minimap-slot removal (`serialize_minimap_slot @ 0x505a60` mode 2, mask 128), squad
+S2C 0x6A, per-player slot struct memset, and a 0x46 broadcast re-serialized over the now-empty
+slot (fieldFlags 0x1CF7 @ 0x51b8ad → the 0x8000 REMOVAL record @ 0x505ecb..0x505ee0, mask 128
+@ 0x51b8bc; client apply = `PlayerSlot_ClearAndUnlink @ 0x431420`). FIXED: handle_client_goodbye
+(npruntime napi_np_protocol.cpp) now despawns `conn.link.owned_entity` from the world registry
+and stages the 0x46 removal on every remaining in-match peer's transport before the node erase;
+pinned by `npruntime_handshake_server` ("goodbye despawns the owned world entity"). DEFERRED
+(tracked here): the 0x32/0x6A broadcasts, the team spawn-token return, and a dead-peer TIMEOUT
+reap (only the 0x46-opcode goodbye tears down today — a hard-killed client still leaks until
+session timeout modeling lands).
+
+**D-NET-148** [reimpl divergence, FIXED 2026-07-02] **The host replied an invented,
+unconditional S2C 0x51 "spawn-confirm" (packed char id 0) to the joiner's deploy-time C2S
+0x29 — the retail-join DBuggy1 shadow.** The original `[orig: NapiNPServerMsg_0x029
+@ 0x514F10]` replies 0x51 ONLY when the C 0x29's `[u16 team_change_index]` resolves to a
+pending entity in `g_team_change_entity_list @ 0xC947C8` (gated `!g_net_spawn_suspended &&
+!g_spawn_success_gate`), with a real `write_entity_packet @ 0x506bb0` record — a plain
+join-deploy 0x29 draws NO reply (golden retail-ashi5a: zero S2C 0x51 in the session; the
+deploy-time C 0x29 at f=225705 is answered by nothing but the normal stream). The client
+FIELD-PARSES 0x51 — `[orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431BB0]` stamps team
+(+354) and NetId (`@ 0x431cad`) and REBINDS `entity->CharacterEntity`
+(`@ 0x431cf3`, §5.59) — so our zero-id confirm re-bound the joiner's own player to the
+registry's fallback archetype (ASH_I5A: the `d_buggy` mission archetype), drawing a
+Dune-Buggy blob shadow under a correct mesh from the moment of deploy. Live-witnessed
+retail-join v21 (2026-07-02): joiner 0x0C record already golden-identical
+(net=0x8207/animSlot=VCB echo, D-NET-146 fix verified live) yet the shadow persisted;
+wire diff isolated our `C 0x29 (f=55518) → S 0x51 (f=55519)` against golden's no-reply.
+FIXED by porting the faithful no-reply: the dispatch case consumes the ack (team change is
+unmodeled — when it lands, port the @ 0x514F10 list lookup + write_entity_packet record,
+never an echo); `encode_player_spawn` and the `player_spawn_confirmed` echo-guard flag are
+REMOVED (npruntime server_message_dispatch.cpp / novaworld ingame_encode). Pinned by
+`npruntime_handshake_server` ("0x29 draws NO 0x51 on a plain join"). The C2S 0x29 decoder
+is renamed `decode_team_spawn_ack` (was `decode_burst_entity_request` — the "entity
+request" reading was wrong).
+
+**D-NET-147** [reimpl divergence, FIXED 2026-07-03 (fields witnessed + streamed); live
+re-verify v26: fields stream golden-shaped, teleport NOT cured — root cause continues as
+D-NET-151] **The S2C 0x10 static-entity records omitted the flag-0x20 dword,
+subType and ammo byte — golden building records carry `field_flags 0x0A1` + `ammo_count 0xFF`;
+ours sent `0x001` with ammo 0.** Wire-witnessed on ASH_I5A (golden vs v18, building + Armory
+records); live symptom: entering a building / touching an armory SOMETIMES teleported the
+joiner to the map origin (v18; no 0x18/0x0F traffic involved). The 2026-07-03 serializer
+witness (`[orig: serialize_pool2_static_to_buffer @0x5042F0]`) CORRECTED the field identity:
+the flag-0x20 i32 is **the entity FLAGS dword (entity+36) streamed raw** — the old
+"parentSlot" reading was wrong (and the old "plumb static parent links" theory with it; BMS
+`blink_parent` remains parsed-but-unconsumed, see below). Golden values decode as composed
+spawn flags: buildings `0x04020400` = Indestructible-def (healthMax 0 → 0x4000000 `[orig:
+Entity_InitFromModel @0x40dc8e]`, which ALSO sets subType = 0xFF — the flag-0x80 byte) +
+type-Building (0x20000 `[orig: @0x40e105]`) + BMS `Reflective` attribute (1<<23 → 0x400, the
+per-placement pier/water bit); bridges add BMS `NoShadow` (1<<24 → 0x1000000 → `0x05020400`);
+`ammo_count` ← BMS record byte 81 and `refNum` ← byte 153 `[orig: Entity_SpawnFromBMSRecord
+@0x40e9f0]`. FIXED: `world::Entity` gains `engine_flags`/`ammo_count`/`sub_type`/`ref_num`;
+`promote_mission` composes the BMS-attribute bits + Building bit and carries bytes 81/153
+(bms::Entity::gen_reserved1 RENAMED `ref_num`, dropped from the reserved-zero parse assert);
+the def-sourced half (hp==0 → 0x4000000 + subType 0xFF) lands in NovaSimulation::
+resolve_item_traits; `build_pool2_static_batch` streams all four;
+`StaticEntityRecord::parent_slot` RENAMED `entity_flags` (encoder/decoder/nw_pp/§5.9 map).
+Pinned by `npruntime_initial_state_burst` (building record emits field_flags 0x0A1 +
+eflags 0x04020400 + ammo/subType 0xFF) and `nw_ingame_encode` round-trip. DEFERRED (tracked
+here): the sectioned-destructible `sectionMask` rebuild (def attrib sign bit → per-section
+state table `[orig: @0x50443f..0x5044a4]` — ASH_I5A golden has one such record, Power
+Generator Housing flags 0x0A9), the armory `weaponByte`/`attachRef` via
+`ZoneSlotChain_GetZoneInfo @0x4a2750` (ex-`CWeaponSlotManager_GetEntitySlotInfo`; golden ASH_I5A statics all carry weap 0x00),
+and the `scoreFlag` def-callback gate `[orig: @0x504554]`. LIVE RE-VERIFY retail-join v26
+(2026-07-03) NEGATIVE for the symptom: the 0x10 statics now stream golden-shaped (buildings
+eflags `0x04020400`, ammo/subType 0xFF), yet the stand-on-entity snap (building floors,
+vehicle decks) persisted unchanged — these record fields were not the cause. The real cause
+was D-NET-151 (grounded-on-entity player replication), fixed + live-verified v27.
+
+**D-NET-145** [reimpl divergence, FIXED 2026-07-02] **The initial-state burst's phase-8
+loadout gate had a reimpl-invented ~10 s timeout fallback that force-started the game-start
+bundle + the per-frame 0x0A stream at a client that had not sent its C2S 0x2F — i.e. was
+still LOADING.** The golden retail host emits NOTHING in-match until the joiner's 0x2F: its
+first S2C 0x0A directly follows the 0x5A reply (retail-ashi5a f223117–f223118), because the
+0x2F is the client's load-complete signal (a client cannot build a loadout submit before its
+own weapon.def/AdmDef table exists; deploy — C 0x0E — comes much later, f238947). Harmless
+through v15 while the stream's anim fields were inert (off-16 = 0xFF, the apply-skip
+sentinel), the fallback became a hard wedge once D-NET-143 landed real anim-def bytes: the
+client's UNGATED off-16 apply (§5.10) resolved AdmDef entries against its MID-BUILD table and
+its loader died at ~25% (live-witnessed retail-join v16 "stuck loading"; the slow load that
+exposed the race was host-machine contention). FIXED: the phase-8 wait has no timeout
+(`server_initial_state.cpp`); a joiner that never selects never deploys, exactly like retail
+(the session-level timeout reaps true zombies). LIVE-VERIFIED retail-join v17/v18
+(2026-07-02): slow loads complete cleanly; the v18 wire shows the game-start bundle strictly
+following the joiner's 0x2F.
+
+**D-NET-144** [reimpl divergence, FIXED 2026-07-02] **A late-spawned (joining) player's
+field-17 health byte read tier 1 (0x18) instead of the golden tier 2 (0x28).** The items.def
+health stamp (`resolve_item_traits`) runs at mission load; joiners spawned later and kept the
+spawn-seed default health 100 with no health_max, so the tier ratio landed at 100/150. Retail
 spawns every entity at `Health = itemDef->healthMax` [orig: Entity_InitFromItemDef @ 0x49e550].
 Cosmetic for the joiner's own client (local apply skipped @0x4c11ac) but a wire divergence any
-other observer decodes. Fix = seed player spawns at full class-8 health (150/150) or re-stamp
-item traits when a player spawns.
+other observer decodes. FIXED: `resolve_item_traits` caches the Player-template hp on the world
+(`World::player_item_hp`, class-8 = 150) and `spawn_player_entity` seeds
+`health = health_max = hp` (item-less worlds fall back to the seed and still spawn at full) —
+the structural port of the retail spawn init. Pinned by player_spawn + two_peer_fanout (spawn
+byte 0x28). LIVE-VERIFIED retail-join v16/v18 (2026-07-02): the joiner's field-17 reads the
+golden 0x28 on the wire; diff_0a header health = 150 matches golden.

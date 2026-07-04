@@ -78,6 +78,22 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam);
 
+// Project a WORLD position into a carrier's local frame — the exact inverse of
+// network_transform_local_to_world. [orig: Entity_TransformWorldToLocal @ 0x43BB50 —
+// the op1/op3 write paths of NetPacket_SerializePlayerState @ 0x4C09C0 run it against
+// the mount (+0x16C) or ground entity (+0x28) before compressing a carrier-relative
+// record]: delta = world - carrier position, then the transposed rotation in reverse
+// order — yaw about Z, pitch about Y, roll about X — in 22-bit fixed-point sin/cos.
+// The binary folds the inverse-rotation sign into a -2^22 sine scale (dbl_7C57B0);
+// this port keeps +2^22 sines and writes the subtractions out, which is the same
+// arithmetic. The original is a 6-dword pose transform: out[3] = heading - carrier
+// heading, out[4]/out[5] pitch/roll pass through untouched (@0x43bb7b-0x43bb8d) —
+// callers compose headings with plain BAM subtraction, so this returns position only.
+WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           uint32_t yaw_bam, uint32_t pitch_bam,
+                                           uint32_t roll_bam);
+
 // One record from a S2C 0x0D pool-entity spawn batch (§5.11).
 struct PoolSpawnRecord {
 	uint16_t spawn_flags = 0;
@@ -137,11 +153,14 @@ struct PoolSpawnRecord {
 	uint8_t action_byte = 0;         // 0x0080   entity+532
 	uint8_t weapon_type_byte = 0;    // 0x1000   entity+176
 
-	// Health block: `0x2000` reads (u8 health_byte → entity+538, u16
-	// zone_radius_short → entity+350); `0x8000` without `0x2000` reads u16
-	// zone_radius_short alone.
-	uint8_t  health_byte = 0;        // 0x2000   entity+538
-	uint16_t zone_radius_short = 0;       // 0x2000 OR 0x8000   entity+350
+	// Zone block (the old "health" reading was a decode-era misnomer — these are
+	// zone-object fields, witness 2026-07-03): `0x2000` reads (u8 zone_number_rank =
+	// zoneNumber + 32*rank → entity+538 [orig: ZoneSlotChain_GetZoneInfo @0x503eeb],
+	// u16 zone_radius → entity+350); a def-attrib-0x40000 SpawnPoint without a zone
+	// number instead gates `0x8000` = u16 zone_radius alone [orig: @0x503f29]. Golden
+	// ASH_I5A bunkers: 0x22/0x0046 = zone 2 rank 1, radius 70.
+	uint8_t  zone_number_rank = 0;  // 0x2000   entity+538 (+ the chain rank in bits 5-7)
+	uint16_t zone_radius = 0;       // 0x2000 OR 0x8000   entity+350
 
 	uint8_t  difficulty_byte = 0;    // 0x4000   entity+624
 };
@@ -227,10 +246,13 @@ struct StaticEntityRecord {
 	int32_t  euler_y = 0;        // 0x04    entity+24  (32-bit BAM)
 	int32_t  section_mask = 0;   // 0x08    entity+308
 	uint8_t  team_byte = 0;      // 0x10    entity+354 (BMS team 1=Blue/2=Red)
-	int32_t  parent_slot = 0;    // 0x20    entity+36
-	uint8_t  ammo_count = 0;     // always  entity+290
-	uint8_t  bone_a = 0;         // 0x40    entity+533
-	uint8_t  bone_b = 0;         // 0x80    entity+532
+	// entity+36 = the entity FLAGS dword, streamed raw (was misread as "parentSlot" — the
+	// D-NET-147 grill witnessed the serializer source @0x50435f: BMS Indestructible/Reflective/
+	// NoShadow attributes + Building/indestructible def bits; golden buildings carry 0x04020400).
+	uint32_t entity_flags = 0;   // 0x20    entity+36 [orig: serialize_pool2_static_to_buffer @0x5044e6]
+	uint8_t  ammo_count = 0;     // always  entity+290 (BMS record byte 81)
+	uint8_t  bone_a = 0;         // 0x40    entity+533 refNum (BMS byte 153; D-NET-94)
+	uint8_t  bone_b = 0;         // 0x80    entity+532 subType (0xFF on indestructible defs)
 	uint8_t  score_flag = 0;     // 0x100   entity+624
 	uint8_t  weapon_byte = 0;    // always  entity+538
 	uint16_t attach_ref = 0;     // weapon_byte != 0 || flags & 0x200; entity+350
@@ -354,9 +376,10 @@ bool decode_full_entity_spawn(const uint8_t *body, size_t len,
 struct PlayerListRow {
 	uint8_t  slot_id = 0;
 	uint16_t ping = 0;
-	uint16_t score1 = 0;
-	uint16_t score2 = 0;
-	uint8_t  flags = 0;       // alive = flags & 1; team = flags >> 1
+	uint16_t score1 = 0;      // score
+	uint16_t score2 = 0;      // deaths
+	uint8_t  flags = 0;       // bit0 = SPECTATOR (subtracted from the HUD count), team = flags >> 1
+	                          // [orig: NapiNPClientMsg_PlayerList @0x42FAE0 row apply]
 };
 struct PlayerListTeamRow {
 	uint16_t score1 = 0;
@@ -365,13 +388,16 @@ struct PlayerListTeamRow {
 	uint8_t  alive_count = 0;
 };
 struct PlayerList {
-	uint8_t  max_players = 0;
-	uint8_t  player_count = 0;
-	std::vector<PlayerListRow> players;
+	uint8_t  flags = 0;        // byte 0 -> g_scoreboard_flags: bit0 team-mode, bit1 timed-scores
+	                           // (the old `max_players` reading was a misnomer, witness 2026-07-03)
+	uint8_t  player_count = 0; // row count -> g_scoreboard_row_count (HUD count minuend, D-NET-158)
+	std::vector<PlayerListRow> players; // rows accepted ONLY for 0x46-known slots; a row for an
+	                                    // unknown slot is dropped + retried via C2S 0x22 [slot, 0x1CF7]
 	uint8_t  team_count = 0;
 	std::vector<PlayerListTeamRow> teams;  // team_count + 1 rows (T0 neutral + per team)
-	uint8_t  extra1 = 0;                    // trailer
-	uint8_t  extra2 = 0;
+	uint8_t  in_game_count = 0;   // trailer -> g_scoreboard_ingame_count (g_scoreboard_ingame_count)
+	uint8_t  spectator_count = 0; // trailer -> g_scoreboard_spectator_count (g_scoreboard_spectator_count);
+	                              // HUD "Number of players" = accepted rows − this
 };
 bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out);
 
@@ -438,13 +464,22 @@ bool decode_capture_zone_overlay(const uint8_t *body, size_t len,
 // [orig: NetPacket_SerializePlayerState case 1/2 @ 0x4C09C0]. Used by items
 // with `ai_function plyr` — the local player.
 struct PlayerCompactRecord {
-	uint8_t  vehicle_bone = 0;        // entity+0x157
-	uint8_t  seat_type = 0;           // local seat-type byte
-	uint16_t vehicle_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
-	uint16_t pos_x_compressed = 0;    // entity+4   (vehicle-local if mounted)
+	uint8_t  vehicle_bone = 0;        // entity+0x157 attachBoneId (0 unless seat-mounted @0x4c0a1a)
+	uint8_t  seat_type = 0;           // seat-attribute byte (0 unless seat-mounted @0x4c0a50)
+	uint16_t carrier_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none. op1 select: mount (+0x16C)
+	                                  // wins, else groundEntity (+0x28) — a grounded-standing
+	                                  // player echoes its floor/deck with bone=0 seat=0
+	                                  // [orig: @0x4c0a08]. The client mirrors this back into
+	                                  // its own groundEntity (@0x4c1353). (Renamed from the
+	                                  // vehicle_handle misnomer — D-NET-151.)
+	uint16_t pos_x_compressed = 0;    // entity+4 — CARRIER-LOCAL when carrier_handle != none
+	                                  // (Entity_TransformWorldToLocal @0x4c0b07), else world
+	                                  // minus the frame anchor (g_priority_ref_*)
 	uint16_t pos_y_compressed = 0;    // entity+8
 	uint16_t pos_z_compressed = 0;    // entity+0xC
-	uint8_t  yaw_byte = 0;            // high byte of 32-bit BAM -> entity+0x10 (heading) on read [D-NET-57]
+	uint8_t  yaw_byte = 0;            // high byte of 32-bit BAM -> entity+0x10 (heading) on read
+	                                  // [D-NET-57]; CARRIER-RELATIVE (local heading, sar 24
+	                                  // @0x4c0b85) when carrier_handle != none
 	uint8_t  pitch_byte = 0;          // -> entity+0x14 (pitch) on read [D-NET-57]
 	uint8_t  move_input_byte = 0;     // the movement-INPUT bitfield, entity+0x12C low byte — remote
 	                                  // players are motor-driven from replicated input; the read
@@ -455,7 +490,7 @@ struct PlayerCompactRecord {
 	                                  // fires on its 1->0 edge @0x4c1109; the XOR masks exclude it:
 	                                  // local 0xE1 / remote 0xFD @0x4c12ff)
 	uint8_t  anim_state_id = 0;       // body/weapon anim-STATE id -> entity+0x2BC (vs the per-state
-	                                  // flags table dword_8139E8; transition-arbitrated, remote-only
+	                                  // flags table g_animStateFlagsTable; transition-arbitrated, remote-only
 	                                  // apply except the wire-bit2 dead path) [orig: @0x4c1153;
 	                                  // renamed from weapon_anim_state/weapon_id — witness 2026-07-02]
 	uint8_t  anim_channel_ratio = 0;  // 0..255 float ratio off the entity+0x188 anim-channel object
@@ -470,27 +505,38 @@ struct PlayerCompactRecord {
 	uint8_t  health_class_byte = 0;   // → Entity_SetHealthFromDifficultyByte
 };
 
-// One §5.13 compact record (15 B mounted / 21 B unmounted). Decoded by
-// [orig: Entity_SerializeMountedVehicleState @ 0x460560]. Used by items with
+// One §5.13 compact record (15 B dead-pose / 21 B live). Decoded by
+// [orig: Entity_SerializeVehicleState @ 0x460560]. Used by items with
 // `ai_function` in {CHel, cveh, cbot, cpln, ctrn} — controllable vehicles
 // and AI ground/air units sharing the vehicle network callback.
+//
+// FORM SEMANTICS (drive-authority witness 2026-07-04, supersedes the "mounted"
+// reading): the flags bit 0x04 short form is the DEAD/WRECK pose-only form — the
+// death family sets `Flags |= 6` (bits 1+2 together [orig: Entity_HandleDeathEvent
+// @0x407118 / Entity_ProcessVehicleDestruction @0x466b7c / Entity_InitDeathState
+// @0x48f96b et al.]), and the euler tail is the frozen wreck ORIENTATION (golden
+// ASH_I5A: 16 parked buggies flip to flags=0x06 short-form in one mass-death frame
+// f=237868). A LIVE vehicle — including one being DRIVEN — always streams the 21-B
+// full form; drive replication is host-side simulation, not a form switch.
 struct VehicleCompactRecord {
 	uint16_t parent_slot_handle = 0xFFFF; // pool<<12|slot, 0xFFFF=none
 	uint16_t pos_x_compressed = 0;        // entity+4   (vehicle-local if parent != none)
 	uint16_t pos_y_compressed = 0;        // entity+8
 	uint16_t pos_z_compressed = 0;        // entity+12
-	// Orientation / rider Euler triple (BAM-high i16 (v+0x8000)>>16). euler_z is
-	// read pre-branch (always present); euler_x/euler_y follow only in the mounted
-	// branch. Together they feed Math_BuildFixedPointMatrixFromEulerAngles.
+	// Orientation Euler triple (BAM-high i16 (v+0x8000)>>16). euler_z is read
+	// pre-branch (always present); euler_x/euler_y follow only in the dead-pose
+	// branch (the wreck's frozen full orientation). Together they feed
+	// Math_BuildFixedPointMatrixFromEulerAngles.
 	int16_t  euler_z = 0;                 // src entity+16 -> read-dest entity+576
 	uint8_t  flags_byte = 0;              // entity+36 low byte
-	bool     is_mounted = false;          // (flags_byte & 4) != 0
+	bool     is_dead_pose = false;        // (flags_byte & 4) != 0 — the short/wreck
+	                                      // form (renamed from the `is_mounted` misnomer)
 
-	// Mounted branch (is_mounted = true) — the other two Euler components:
+	// Dead-pose branch (is_dead_pose = true) — the other two Euler components:
 	int16_t  euler_y = 0;                 // src entity+24 -> read-dest entity+584
 	int16_t  euler_x = 0;                 // src entity+20 -> read-dest entity+580
 
-	// Unmounted branch (is_mounted = false) — vehicle health + weapon-aim block:
+	// Live branch (is_dead_pose = false) — vehicle health + weapon-aim block:
 	uint16_t weapon_x = 0;                // entity+160 (compressed)
 	uint16_t health_word = 0;             // entity+286 (raw u16) = the vehicle HEALTH word: the
 	                                      // read stores it back to entity+286 [orig: @0x460aff]
@@ -523,30 +569,40 @@ struct InfantryCompactRecord {
 	uint8_t  anim_byte = 0;                // entity+696 if non-zero else entity+700
 };
 
-// One §5.9.1 weapon-hit record. Decoded by
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. Sole sender is the tag==2
+// One §5.9.1 ROUND-EVENT record (ex "weapon-hit" — a decode-era misnomer): a round
+// FIRED by another player, carried as the fire origin + direction the receiving
+// client re-simulates the round from (RoundData_SpawnRound); no impact is on the
+// wire. Host write side: NetPacket_SerializeRoundEvent @0x504820 serializes one
+// g_round_ring record per event; client read side:
+// [orig: NetPacket_DeserializeRoundEvent @ 0x42F270], sole sender is the tag==2
 // branch of the S2C 0x0A event loop [0x4306EF]. Variable length 17-20 B by
-// `flags` gate bits:
+// `flags` gate bits (witness 2026-07-03, D-NET-152):
 //   17 B if flags == 0
-//   18 B if (flags & 0x80) — adds parent_byte
-//   19 B if (flags & 0x40) — adds weapon_handle
+//   18 B if (flags & 0x80) — adds slot_byte
+//   19 B if (flags & 0x40) — adds target_handle
 //   20 B if (flags & 0xC0) — adds both
-struct WeaponHitRecord {
-	uint8_t  flags = 0;              // gate byte; 0x80 → parent_byte, 0x40 → weapon_handle
-	uint8_t  adm_index = 0;          // → AdmDef_GetEntryByIndex (action descriptor index)
-	uint8_t  hit_subtype = 0;        // → dword_A822E0 (last-hit subtype global)
-	uint8_t  parent_byte = 0;        // present iff (flags & 0x80)
-	uint16_t target_handle = 0xFFFF; // (pool<<12)|slot of the hit entity; 0xFFFF=no target
-	uint16_t weapon_handle = 0xFFFF; // present iff (flags & 0x40); 0xFFFF=sentinel
-	uint16_t damage_extra_raw = 0;   // raw u16 → word_B7C670 (damage/radius/weapon-extra)
-	uint16_t pos_x_compressed = 0;   // Network_DecompressFixedPoint → position[0] + dword_A822E4
-	uint16_t pos_y_compressed = 0;   // → position[1] + dword_A822E8
-	uint16_t pos_z_compressed = 0;   // → position[2] + dword_A822EC
-	uint16_t yaw_bam_high = 0;       // raw u16 (interpreted as BAM high half via << 16)
-	uint16_t pitch_bam_high = 0;     // raw u16 (interpreted as BAM high half via << 16)
+struct RoundEventRecord {
+	uint8_t  flags = 0;               // fire-mode byte (ring+30: bit0 alt-fire, bit1 adm-indexed,
+	                                  // bits 4-5 weapon-slot combo) | 0x80 → slot_byte present
+	                                  // [ring+32 != 0 @0x5048bb] | 0x40 → target_handle present
+	                                  // [shooter's live fire target set @0x50485a]
+	uint8_t  adm_index = 0;           // → AdmDef_GetEntryByIndex (action descriptor index)
+	uint8_t  subtype = 0;             // shooter fire-context composite (ring+31) → dword_A822E0
+	uint8_t  slot_byte = 0;           // weapon-slot id / uplink misc_byte (ring+32); iff flags&0x80
+	uint16_t shooter_handle = 0xFFFF; // (pool<<12)|slot of the SHOOTER (ring+4) — the client
+	                                  // resolves it as the round's owner entity [0x42f337]
+	uint16_t target_handle = 0xFFFF;  // iff (flags & 0x40): the shooter's claimed target
+	                                  // (shooter+104→+12, stamped by @0x50c2ad); 0xFFFF=sentinel
+	uint16_t shot_seq = 0;            // per-shot sequence word (ring+28; the C2S 0x06 hit_part
+	                                  // fire counter round-trips here) → word_B7C670
+	uint16_t pos_x_compressed = 0;    // fire ORIGIN: Network_DecompressFixedPoint → + dword_A822E4
+	uint16_t pos_y_compressed = 0;    // → + dword_A822E8
+	uint16_t pos_z_compressed = 0;    // → + dword_A822EC
+	uint16_t yaw_bam_high = 0;        // fire DIRECTION yaw, BAM high half (<< 16 on apply)
+	uint16_t pitch_bam_high = 0;      // fire DIRECTION pitch, BAM high half
 
-	bool has_parent_byte() const { return (flags & 0x80) != 0; }
-	bool has_weapon_handle() const { return (flags & 0x40) != 0; }
+	bool has_slot_byte() const { return (flags & 0x80) != 0; }
+	bool has_target_handle() const { return (flags & 0x40) != 0; }
 };
 
 bool decode_player_compact_record(const uint8_t *body, size_t len,
@@ -558,8 +614,8 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 bool decode_infantry_compact_record(const uint8_t *body, size_t len,
                                     InfantryCompactRecord &out, size_t &consumed);
 
-bool decode_weapon_hit_record(const uint8_t *body, size_t len,
-                              WeaponHitRecord &out, size_t &consumed);
+bool decode_round_event_record(const uint8_t *body, size_t len,
+                               RoundEventRecord &out, size_t &consumed);
 
 // ===========================================================================
 // §5.15 Guided weapon record — per-(mode, field-group) projectile-state codec.
@@ -676,7 +732,7 @@ struct FrameEnv {
 // `FrameAimBlock` was a misnomer; server-side grill 2026-07-01). Written by
 // NetPacket_WritePlayerState @0x4ff81b: preround timer, five per-player-slot
 // weapon-overlay bytes (+360/+368 gated on entity+36 bit 1), the reload
-// countdown, and the uniform team mask (CWeaponSlotManager_GetUniformTeamMask
+// countdown, and the uniform team mask (ZoneSlotChain_GetOwnedZoneMask
 // @0x4a2620). Client landings are exact. [orig: NetPacket_WritePlayerState
 // @0x4ff81b (writer) / NapiNPClientMsg_0x00A @ 0x430054..0x430136 (reader)]
 struct FrameWeaponBlock {
@@ -742,8 +798,8 @@ struct FrameUpdate {
 	FrameEnv            env;        // valid iff sub_block == 2
 	FrameObjectiveBlock objective;  // valid iff sub_block == 3 (+ objective gate)
 	FramePassenger      passenger;  // valid iff (flags2 & 0xF) == 8
-	std::vector<FrameUpdateRecord> records;  // tag==1 per-entity motion
-	std::vector<WeaponHitRecord>   hits;     // tag==2 weapon-hit events (§5.9.1)
+	std::vector<FrameUpdateRecord> records;      // tag==1 per-entity motion
+	std::vector<RoundEventRecord>  round_events; // tag==2 fired-round events (§5.9.1)
 	// Walk status: `complete` is true iff the event loop hit its terminator (tag
 	// 0 / end) cleanly. `consumed` is the byte count walked (for diagnostics).
 	bool   complete = false;
@@ -855,42 +911,70 @@ bool decode_entity_packet_sub_header(const uint8_t *body, size_t len,
 // the receiver and discarded (cursor-advance only) — stored here for the
 // re-emitter's benefit.
 //
-// Position fields are 16.16 fixed-point. Vehicle-LOCAL when `vehicle_handle !=
+// Position fields are 16.16 fixed-point. Vehicle-LOCAL when `carrier_handle !=
 // 0xFFFF` (the host's case-4 path adds map origin only on the unmounted branch).
 //
 // The 8 trailing u16 pairs are the host-validated anti-cheat block: 4 ×
 // (weapon_id, fire_counter). The host compares these against its own per-slot
 // counters to detect shot/hit tally tampering.
 struct PlayerExtendedUplink {
-	uint16_t vehicle_handle = 0xFFFF;  // pool<<12|slot; 0xFFFF=none
-	int32_t  pos_x = 0;                // entity+0x234 / +4 (vehicle-local if mounted, else world + map_origin)
-	int32_t  pos_y = 0;                // entity+0x238 / +8
-	int32_t  pos_z = 0;                // entity+0x23C / +0xC
-	int16_t  heading = 0;              // entity+0x240 (sign-ext ×0x10000 = 32-bit BAM)
-	int16_t  pitch   = 0;              // entity+0x244 (sign-ext ×0x10000)
-	uint8_t  reserved_18 = 0;          // cursor advance, no read on host
+	uint16_t carrier_handle = 0xFFFF;  // pool<<12|slot; 0xFFFF=none. The sender's GROUND
+	                                   // entity (+0x28) — building floor, vehicle deck; ANY
+	                                   // pool 0-4, pool-2 statics included [orig: op3 reads
+	                                   // entity+0x28 at its case head (the same field op1
+	                                   // reads @0x4c0a08); the op4 apply resolves it against
+	                                   // g_pool_list @0x4c1d07-0x4c1d26]. Renamed from the
+	                                   // carrier_handle misnomer (witness 2026-07-03,
+	                                   // D-NET-151).
+	int32_t  pos_x = 0;                // entity+4/+8/+0xC — ABSOLUTE world 16.16 when free
+	int32_t  pos_y = 0;                // (no map-origin add); CARRIER-LOCAL when
+	int32_t  pos_z = 0;                // carrier_handle != 0xFFFF (Entity_TransformWorldToLocal
+	                                   // @0x43BB50 on write / LocalToWorld @0x43BD00 on apply)
+	int16_t  heading = 0;              // entity+0x10 hi-word; CARRIER-RELATIVE when grounded
+	                                   // (transform out[3] = heading - carrier heading; the
+	                                   // apply re-adds the carrier heading @0x43be7e)
+	int16_t  pitch   = 0;              // entity+0x14 hi-word (pose pass-through, never local)
+	uint8_t  anticheat_flags = 0;      // the sender's rotating self-check accumulator
+	                                   // (IsDebuggerPresent / D3D9-hook / speed checks — the
+	                                   // op3 dword_B5ABA8 counter switch); the op4 apply
+	                                   // advances the cursor WITHOUT storing it (the byte
+	                                   // right after the pose block) — renamed from
+	                                   // reserved_18, same no-read behavior
 	uint8_t  move_input_byte = 0;      // entity+0x12C low byte — the movement-INPUT bitfield the
 	                                   // client reports for its own player (renamed from the
 	                                   // anim_slot_low misnomer; witness 2026-07-02)
-	uint8_t  flags_xor = 0;            // bits 2-4 XOR'd into entity+0x24
-	uint8_t  anim_def_1 = 0;           // entity+0x130
-	uint8_t  anim_def_2 = 0;           // entity+0x131
-	uint8_t  anim_def_3 = 0;           // entity+0x132
-	uint8_t  reserved_24 = 0;          // read into AL, discarded
+	uint8_t  state_flags_byte = 0;     // the RAW entity+0x24 (Flags) low byte, written verbatim
+	                                   // by op3; the apply REPLACES bits 2-4 of the host
+	                                   // entity's Flags: `flags ^= (flags ^ wire) & 0x1C`
+	                                   // [orig: @0x4c1e4d]. NOT an xor-delta — the old
+	                                   // flags_xor name and the xor-apply it induced were
+	                                   // wrong (witness 2026-07-03, D-NET-151; the crouch/
+	                                   // prone stance family is bits 2-4).
+	uint8_t  analog_x = 0;           // entity+0x130
+	uint8_t  analog_y = 0;           // entity+0x131
+	uint8_t  analog_z = 0;           // entity+0x132
+	uint8_t  equipped_adm_index = 0;   // entity+0x2B0 equipped-weapon AdmDef index — case-4 store
+	                                   // @0x4C20A3 gated AdmDefs[idx].category < 11; the host
+	                                   // ECHOES it at 0x0A off-16 (renamed from the reserved_24
+	                                   // "read into AL, discarded" misnomer; witness 2026-07-02,
+	                                   // D-NET-143)
 	uint8_t  stat_byte_0 = 0;          // playerSlot+0x15F78
 	uint8_t  stat_byte_1 = 0;          // playerSlot+0x15F79
 
-	// Anti-cheat block: 4 × (weapon_id_u16, fire_counter_u16). On the wire
-	// every counter is a u16; the host stores it zero-extended into a u32
-	// field (playerSlot+0x17094 / +0x17098 / +0x1709C / +0x170A0).
-	uint16_t weapon_id_0 = 0;          // playerSlot+0x1708A
-	uint16_t fire_counter_0 = 0;       // playerSlot+0x17094 (zero-ext)
-	uint16_t weapon_id_1 = 0;          // playerSlot+0x1708C
-	uint16_t fire_counter_1 = 0;       // playerSlot+0x17098 (zero-ext)
-	uint16_t weapon_id_2 = 0;          // playerSlot+0x1708E
-	uint16_t fire_counter_2 = 0;       // playerSlot+0x1709C (zero-ext)
-	uint16_t weapon_id_3 = 0;          // playerSlot+0x17090
-	uint16_t fire_counter_3 = 0;       // playerSlot+0x170A0 (zero-ext)
+	// Entity-priority feedback: 4 × (handle_u16, score_u16) — the sender's top-4
+	// interest pairs from Server_BuildEntityPriorityListForPlayer(entity, .., 4)
+	// [orig: op3 call @0x4c1be9], stored by the host at playerSlot+0x1708A..+0x170A0
+	// (scores zero-extended to u32). The old weapon_id/fire_counter names were a
+	// decode-era guess — v26 shows the ridden buggy's handle scored first while
+	// standing on it (witness 2026-07-03, D-NET-151).
+	uint16_t priority_handle_0 = 0;    // playerSlot+0x1708A
+	uint16_t priority_score_0 = 0;     // playerSlot+0x17094 (zero-ext)
+	uint16_t priority_handle_1 = 0;    // playerSlot+0x1708C
+	uint16_t priority_score_1 = 0;     // playerSlot+0x17098 (zero-ext)
+	uint16_t priority_handle_2 = 0;    // playerSlot+0x1708E
+	uint16_t priority_score_2 = 0;     // playerSlot+0x1709C (zero-ext)
+	uint16_t priority_handle_3 = 0;    // playerSlot+0x17090
+	uint16_t priority_score_3 = 0;     // playerSlot+0x170A0 (zero-ext)
 };
 
 // Decode a 43-B extended uplink body (the bytes AFTER the 5-byte sub-header).
@@ -900,10 +984,13 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
 
 // ===========================================================================
 // C2S 0x06 — "client fired round". Fixed 45 B. Joiner reports a single
-// weapon-fire event (origin + direction + target + body part hit + muzzle
-// offset block). Server validates against the shooter's authority + ammo
-// state and runs Server_ValidateAndFireRound (which may emit S2C 0x0A trailing
-// weapon-hit records, §5.9.1, when validation succeeds).
+// weapon-fire event (origin + direction + target + shot counter + muzzle
+// offset block). The host validates it in Server_ClientFiredRound @0x50baa0
+// (anti-spoof, cease-fire, adm lookup, warp compensation, mounted-fire, ammo)
+// and an accepted PRIMARY fire runs the adm 'fire' action → re-enters the
+// validator locally → RoundData_AddRound appends a g_round_ring event that
+// fans to every OTHER in-match recipient as an S2C 0x0A tag-2 round event
+// (§5.9.1); alt fire appends directly. (D-NET-152)
 // [orig: NapiNPServerMsg_0x006_ClientFiredRound @ 0x513310]
 // ===========================================================================
 
@@ -1109,13 +1196,16 @@ struct BurstLoadoutRequest {
 bool decode_burst_loadout_request(const uint8_t *body, size_t len,
                                   BurstLoadoutRequest &out, size_t &consumed);
 
-// C2S 0x29 — entity-packet request `[u16 bufferIndex]` (2 B). Server writes that
-// entity's packet and replies S2C 0x51. [orig: NapiNPServerMsg_0x029 @ 0x514F10]
-struct BurstEntityRequest {
-	uint16_t buffer_index = 0;
+// C2S 0x29 — team/spawn ack `[u16 team_change_index]` (2 B). The client emits it with
+// team_index+1 from its 0x51 apply [orig: NapiNPClientMsg_HandlePlayerSpawn @ 0x431c99]
+// and at deploy/team pick; the server treats the value as a g_team_change_entity_list
+// index and replies S2C 0x51 ONLY for a pending team-change entry [orig:
+// NapiNPServerMsg_0x029 @ 0x514F10 @ 0x514f7c] — never on a plain join (D-NET-148).
+struct TeamSpawnAck {
+	uint16_t team_change_index = 0;
 };
-bool decode_burst_entity_request(const uint8_t *body, size_t len,
-                                 BurstEntityRequest &out, size_t &consumed);
+bool decode_team_spawn_ack(const uint8_t *body, size_t len,
+                           TeamSpawnAck &out, size_t &consumed);
 
 // C2S 0x4C — client quality/state byte `[u8 value]` (server clamps to 0..4 and
 // sets the player's connection-quality state). [orig: NapiNPServerMsg_0x04C @ 0x5111B0]
@@ -1448,8 +1538,12 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 struct SessionSlotConfig {
 	uint32_t skipped[4] = {};   // on the wire, not read by the handler
 	uint8_t  session_config = 0; // → dword_24D2110
-	uint8_t  team_mode = 0;      // → byte_A860D0
-	uint8_t  max_players = 0;    // → byte_A860D1 + PlayerSlotTable_Reallocate
+	uint8_t  local_player_slot = 0; // → g_local_player_slot_id = g_local_player_slot_id, the recipient's
+	                                // OWN roster slot [orig: the write side is slot+20,
+	                                // NetPacket_WriteSlotAssignment @0x502b30; the old
+	                                // `team_mode` reading was a misnomer, witness 2026-07-03]
+	uint8_t  max_players = 0;    // → g_max_player_slots = g_max_player_slots + PlayerSlotTable_Reallocate;
+	                             // the 0x46/0x22 roster walk terminates at this count
 	uint32_t skipped4 = 0;       // on the wire, not read
 	uint8_t  trailing = 0;       // → byte_A85B48
 };

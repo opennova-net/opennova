@@ -106,6 +106,36 @@ int main() {
         CHECK(ae->inf.is_local_player);
     }
 
+    // --- D-NET-144: spawns seed FULL health from the items.def Player hp when the traits sweep
+    //     resolved it (late joiners spawn after the sweep), stamping health_max so the §5.10
+    //     field-17 tier denominator reads full (tier 2 / golden 0x28).
+    {
+        World w;
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+        w.player_item_hp = 150; // the class-8 Player items.def hp, stamped by resolve_item_traits
+        const EntityHandle h = spawn_remote_player(w, PlayerSpawn{});
+        const Entity *e = w.registry.get(h);
+        CHECK(e != nullptr);
+        CHECK(e->health == 150);
+        CHECK(e->health_max == 150);
+        const AiEntity *ae = ai.at(0);
+        CHECK(ae->health == 150);
+        CHECK(ae->inf.max_health == 150);
+    }
+    {
+        World w; // item-less world: the spawn-seed fallback still spawns AT FULL (100/100)
+        AiSystem ai;
+        w.ai = &ai;
+        w.registry.configure_pool(0, 8);
+        const EntityHandle h = spawn_player(w, PlayerSpawn{});
+        const Entity *e = w.registry.get(h);
+        CHECK(e != nullptr);
+        CHECK(e->health == 100);
+        CHECK(e->health_max == 100);
+    }
+
     // --- retail listen-server player allocation starts after .bms-resident pool-0 organics.
     {
         World w;

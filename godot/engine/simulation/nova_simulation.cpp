@@ -18,6 +18,10 @@
 #include <npruntime/server_session.h> // set_connection_mode / set_transport_mode / create_session / mark_host_client_in_match
 #include <npruntime/server_spawn.h>   // Server_ProcessPendingPlayerSpawns (faithful host-player auto-spawn)
 #include <npruntime/server_tick.h>    // Server_TickUpdate (the single C2S drain + logic tick + 0x0A fan)
+#include <npruntime/ammo_table_build.h>   // build_ammo_table + round_type resolve (§5.60)
+#include <npruntime/weapon_table_build.h> // build_weapon_table (weapon.def -> world armory, D-NET-141)
+
+#include <def/def.h> // def_parse_weapons_memory / def_free_weapons
 
 #include <mission/bms.h>
 #include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
@@ -173,6 +177,8 @@ void NovaSimulation::reset_world() {
 // Re-point the (possibly just-rebuilt) AI system at our owned terrain field. The field's raw
 // pointers reference terrain_heightmap_/terrain_sector_grid_, which persist across reset_world.
 void NovaSimulation::apply_terrain_to_ai() {
+	// The round sim's ground stop shares the same field (world.terrain; §5.60).
+	if (world_) world_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	if (!ai_) return;
 	ai_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	ai_->ground_clearance = opennova::world::GroundClearance{};
@@ -247,6 +253,12 @@ void NovaSimulation::resolve_infantry_adm_ids(const Ref<NovaResourceRoot> &p_res
 // [orig: NapiNPClientMsg_0x00D @0x432c40; docs/net/novaworld-net-re.md D-NET-97]
 void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db) {
 	if (!world_ || p_item_db.is_null()) return;
+	// Cache the Player template's items.def hp at world level so LATE-JOINER spawns (which happen
+	// after this sweep) seed full health without an item-db reach-back from libs/ [orig:
+	// Entity_InitFromItemDef @0x49e550 — spawn Health = itemDef->healthMax]. (D-NET-144)
+	world_->player_item_hp = p_item_db->get_hp(
+			static_cast<int>(opennova::world::kPlayerInfantryTypeId) +
+			opennova::mission::kItemIdOffset);
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each([&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
 	for (const opennova::world::EntityHandle h : handles) {
@@ -265,7 +277,115 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 			e->health_max = hp;
 			if (e->health == 100) e->health = hp; // still at the promotion default
 		}
+		// Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
+		// the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
+		// (D-NET-147; every golden ASH_I5A building carries both). Resolved defs only — a
+		// missing items.def id stays untouched. [orig: Entity_InitFromModel @0x40dc8e:
+		// !itemDef->healthMax -> Flags |= 0x4000000, Health = 1, subType = -1]
+		if (hp == 0 && p_item_db->has_item(def_id)) {
+			e->engine_flags |= 0x4000000u;
+			e->sub_type = 0xFF;
+		}
+		// AS zone traits from the attrib dword: 0x20000 "ChangeTeam" = capture trigger,
+		// 0x40000 "SpawnPoint" = deploy-selectable (the ASH_I5A "Change Team & Spawn
+		// Volume" objects carry both). [orig: def+84 gates in ZoneSlotChain_BuildFromMission
+		// @0x4a2de0 / Server_ResolveSpawnTargetHandle @0x4fe110; net-re §5.61]
+		const uint32_t attrib = p_item_db->get_attrib(def_id);
+		e->is_capture_trigger = (attrib & 0x20000u) != 0;
+		e->is_spawn_point = (attrib & 0x40000u) != 0;
+		// Vehicle motor traits: the pre-scaled items.def physics block + the PlayerControl
+		// attrib (0x40) gate, keyed by item id in the world table. Fills once per distinct
+		// id; the AI tick's vehicle pass drives pool-1 entities whose traits carry a
+		// non-zero `physics` selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870;
+		// Entity_UpdateVehiclePhysics @0x48af00 attrib & 0x40 gate @0x48b0e6]
+		if (e->handle.pool() == 1 &&
+		    world_->vehicle_traits.get(e->item_id) == nullptr) {
+			const PackedInt32Array vp = p_item_db->get_vehicle_physics(def_id);
+			if (vp.size() == 7 && vp[0] != 0) {
+				opennova::world::VehicleTraits vt;
+				vt.physics = vp[0];
+				vt.player_speed = vp[1];
+				vt.acceleration = vp[2];
+				vt.deceleration = vp[3];
+				vt.turn_rate = vp[4];
+				vt.turn_rate2 = vp[5];
+				vt.unit_type = vp[6];
+				vt.player_control = (attrib & 0x40u) != 0;
+				world_->vehicle_traits.set(e->item_id, vt);
+			}
+		}
 	}
+	// The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on
+	// is_capture_trigger), then the secure latch seeds each rear zone's control to 1.0.
+	// [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 from Game_StartMission @0x526126;
+	// the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
+	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
+	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
+}
+
+// weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
+// parses literally "weapon.def" through WeaponDefs_LoadFile right after AnimDef_InitAll wipes
+// the AdmDef table [orig: @0x5254b3/@0x5254bd]); build_weapon_table ports the witnessed
+// allocation rule (null@0 + by-name-reuse-else-lowest-free = file order; §5.57, D-NET-141).
+Error NovaSimulation::load_weapon_table(const Ref<NovaResourceRoot> &p_resource_root,
+                                        const String &p_name) {
+	if (!world_) return ERR_UNCONFIGURED;
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
+		return ERR_INVALID_PARAMETER;
+	const String file_name = p_name.get_file();
+	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
+	const PackedByteArray bytes = p_resource_root->read_file(file_name);
+	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
+
+	DefWeaponsFile file = {};
+	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
+		return ERR_CANT_OPEN;
+	world_->weapons = opennova::np::build_weapon_table(file);
+	def_free_weapons(&file);
+
+	// The host's own player spawns in finish_load, BEFORE this feed — re-stamp its equipped
+	// default now that WPN_M4AUTO resolves by name [orig: PlayerClass_InitEntity @0x4B1116].
+	// Joiners spawn after the feed and get the default in Server_BuildPlayerInfoAndAdd.
+	// (D-NET-143)
+	const int m4 = world_->weapons.index_of("WPN_M4AUTO");
+	if (m4 >= 0) {
+		std::vector<opennova::world::EntityHandle> handles;
+		world_->registry.for_each([&](const opennova::world::Entity &e) {
+			if (e.item_id == opennova::world::kPlayerInfantryTypeId &&
+			    e.equipped_adm_index == 0xFF)
+				handles.push_back(e.handle);
+		});
+		for (const opennova::world::EntityHandle h : handles) {
+			if (opennova::world::Entity *e = world_->registry.get(h))
+				e->equipped_adm_index = static_cast<uint8_t>(m4);
+		}
+	}
+	return OK;
+}
+
+// ammo.def -> the sim world's ballistics table + the weapon round_type resolve. Mirrors the
+// retail load site (Game_StartMission parses literally "ammo.def" through AmmoDef_LoadAll
+// @0x40b0b0, the sibling of the weapon.def load [orig: @0x52548a]); the resolve binds each
+// adm's fired round to its AmmoTable index (the original's adm+84 pair; §5.60). Call AFTER
+// load_weapon_table — an empty armory leaves every round_type unresolved and the fire
+// pipeline echoes without spawning sim rounds.
+Error NovaSimulation::load_ammo_table(const Ref<NovaResourceRoot> &p_resource_root,
+                                      const String &p_name) {
+	if (!world_) return ERR_UNCONFIGURED;
+	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty())
+		return ERR_INVALID_PARAMETER;
+	const String file_name = p_name.get_file();
+	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
+	const PackedByteArray bytes = p_resource_root->read_file(file_name);
+	if (bytes.is_empty()) return ERR_FILE_NOT_FOUND;
+
+	DefAmmoFile file = {};
+	if (def_parse_ammo_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
+		return ERR_CANT_OPEN;
+	world_->ammo = opennova::np::build_ammo_table(file);
+	def_free_ammo(&file);
+	opennova::np::resolve_weapon_round_types(world_->weapons, world_->ammo);
+	return OK;
 }
 
 opennova::mission::PromoteOptions NovaSimulation::promote_options() const {
@@ -438,7 +558,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &NovaSimulation::get_local_player_position);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &NovaSimulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
-	ClassDB::bind_method(D_METHOD("get_local_player_anim_slot"), &NovaSimulation::get_local_player_anim_slot);
+	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
@@ -481,7 +601,7 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::get_entity_wire_handle);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &NovaSimulation::get_entity_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &NovaSimulation::get_entity_part_anim_active);
-	ClassDB::bind_method(D_METHOD("get_entity_anim_slot", "index"), &NovaSimulation::get_entity_anim_slot);
+	ClassDB::bind_method(D_METHOD("get_entity_body_anim_slot", "index"), &NovaSimulation::get_entity_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_entity_hidden", "index"), &NovaSimulation::get_entity_hidden);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &NovaSimulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
@@ -490,6 +610,10 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
+	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
+	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
+	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),
+	                     &NovaSimulation::load_ammo_table, DEFVAL(String("ammo.def")));
 	ClassDB::bind_method(D_METHOD("get_infantry_clip_count"), &NovaSimulation::get_infantry_clip_count);
 	ClassDB::bind_method(D_METHOD("set_loco_scale", "scale"), &NovaSimulation::set_loco_scale);
 	ClassDB::bind_method(D_METHOD("get_loco_scale"), &NovaSimulation::get_loco_scale);
@@ -514,7 +638,7 @@ void NovaSimulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_ACTIVE1);
 	BIND_ENUM_CONSTANT(PF_PHASE2);
 	BIND_ENUM_CONSTANT(PF_ACTIVE2);
-	BIND_ENUM_CONSTANT(PF_ANIM_SLOT);
+	BIND_ENUM_CONSTANT(PF_BODY_ANIM_SLOT);
 	BIND_ENUM_CONSTANT(PF_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_ANIM_PHASE_TICKS);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
@@ -864,7 +988,7 @@ int NovaSimulation::spawn_local_player_at_start() {
 	// Pick the player-start marker the original would — scan the 60xx start-marker family (SP/DM,
 	// coop, team), FARTHEST from the enemy set — instead of the first NPC's position. Finds the
 	// authored start whatever the mission mode (e.g. a 6001-only SP training mission like 00TRa).
-	// [orig: CMap_SetupSpawnCamera @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
+	// [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c]
 	const opennova::world::SpawnPointResult sel = opennova::world::select_player_spawn(*world_);
 	opennova::world::PlayerSpawn spawn;
 	if (sel.found) {
@@ -946,18 +1070,18 @@ float NovaSimulation::get_local_player_pitch_deg() const {
 	return static_cast<float>(static_cast<double>(p->pitch) * opennova::world::kDegreesPerBam);
 }
 
-int NovaSimulation::get_local_player_anim_slot() const {
+int NovaSimulation::get_local_player_body_anim_slot() const {
 	if (!world_ || !world_->cached.local_player.valid()) return -1;
-	// The same Entity.anim_slot the present pass reads for NPC models (written by the infantry
-	// motor mirror, infantry.cpp). The avatar is host-managed and not in the present registry,
-	// so main_game drives its body clip from this getter.
+	// The same Entity.body_anim_slot the present pass reads for NPC models (written by the
+	// infantry motor mirror, infantry.cpp). The avatar is host-managed and not in the present
+	// registry, so main_game drives its body clip from this getter.
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	return e ? e->anim_slot : -1;
+	return e ? e->body_anim_slot : -1;
 }
 
 String NovaSimulation::get_local_player_anim_key() const {
 	// The local player's full anim-state clip key ("anim_<name>"), straight from the motor's
-	// selected state. Unlike the 8-slot BodyAnim enum (get_local_player_anim_slot), this carries
+	// selected state. Unlike the 8-slot BodyAnim enum (get_local_player_body_anim_slot), this carries
 	// stance + jump (anim_idle_crouch / anim_walk_prone_forward / anim_jump_loop / ...), so
 	// main_game drives the 3rd-person avatar via play_body_clip(key) for full stance fidelity.
 	// [orig: off_8135F0 names ARE the .adm keys without the "anim_" prefix]
@@ -1183,7 +1307,7 @@ Dictionary NovaSimulation::get_entity_debug(int p_index) const {
 	out["hidden"] = ent ? ent->hidden : false;
 	out["held"] = ent ? ent->held : false;
 	out["disabled"] = ent ? ent->disabled : false;
-	out["anim_slot"] = ent ? ent->anim_slot : -1;
+	out["body_anim_slot"] = ent ? ent->body_anim_slot : -1;
 	out["mounted"] = ent ? ent->mounted : false;
 	out["mount_target_net_id"] = 0;
 	out["mount_seat"] = ent ? static_cast<int>(ent->mount_seat) : -1;
@@ -1370,12 +1494,12 @@ bool NovaSimulation::get_entity_part_anim_active(int p_index, int channel) const
 	       e->brain.f[AiBrain::kPartAnimPhase0 + slot] != 0;
 }
 
-int NovaSimulation::get_entity_anim_slot(int p_index) const {
+int NovaSimulation::get_entity_body_anim_slot(int p_index) const {
 	if (!ai_ || !world_) return -1;
 	AiEntity *e = ai_->at(p_index);
 	if (!e) return -1;
 	const opennova::world::Entity *ent = world_->registry.get(e->handle);
-	return ent ? ent->anim_slot : -1;
+	return ent ? ent->body_anim_slot : -1;
 }
 
 bool NovaSimulation::get_entity_hidden(int p_index) const {
@@ -1615,7 +1739,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 		r[PF_POS_X] = 0.0f; r[PF_POS_Y] = 0.0f; r[PF_POS_Z] = 0.0f;
 		r[PF_PITCH_DEG] = 0.0f; r[PF_YAW_DEG] = 0.0f; r[PF_ROLL_DEG] = 0.0f;
 		r[PF_PHASE1] = 0.0f; r[PF_ACTIVE1] = 0.0f; r[PF_PHASE2] = 0.0f; r[PF_ACTIVE2] = 0.0f;
-		r[PF_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
+		r[PF_BODY_ANIM_SLOT] = -1.0f; r[PF_ANIM_STATE] = -1.0f; r[PF_ANIM_PHASE_TICKS] = 0.0f;
 		r[PF_HIDDEN] = 0.0f; r[PF_ALIVE] = 1.0f;
 		r[PF_TYPE_ID] = 0.0f; r[PF_WIRE_HANDLE] = 0.0f;
 
@@ -1643,7 +1767,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_view() const {
 			r[PF_INDEX] = static_cast<float>(ent->spawn_origin & 0xFFFFFF);
 			r[PF_BMS_ID] = static_cast<float>(ent->bms_id);
 			r[PF_NET_ID] = static_cast<float>(ent->net_id);
-			r[PF_ANIM_SLOT] = static_cast<float>(ent->anim_slot);
+			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent->body_anim_slot);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
 		}

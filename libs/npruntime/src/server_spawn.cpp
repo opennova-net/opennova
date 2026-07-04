@@ -1,7 +1,7 @@
 #include "npruntime/server_spawn.h"
 
 #include <world/player_spawn.h> // PlayerSpawn, spawn_player / spawn_remote_player
-#include <world/spawn_select.h> // select_player_spawn (§5.2c start-marker scan)
+#include <world/spawn_select.h> // select_player_spawn (§5.2c) / world_has_spawn_zone (§5.61)
 #include <world/world.h>        // World, registry, cached
 
 namespace opennova::np {
@@ -55,9 +55,15 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 // [orig: Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
 world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPConnection &conn,
                                                  world::World &world) {
-	// §5.2c spawn-pose selection from the mission's promoted start markers (never an NPC's spot).
-	const world::SpawnPointResult sel = world::select_player_spawn(world);
 	world::PlayerSpawn spawn;
+	// Team FIRST — a team gametype's start markers are per-team (6096-6099 primary,
+	// 6003/6004/6090/6091 fallback), so the AS join spawn needs the assigned team before the
+	// §5.2c marker scan; without the split both teams land in team 1's base (net-re §5.61).
+	// [orig: Server_AssignPlayerTeam @0x4fe310 runs in Server_PlayerAdd BEFORE
+	// Server_PositionPlayerForSpawn's team switch @0x50d266]
+	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
+	const world::SpawnPointResult sel =
+			world::select_player_spawn_for_team(world, spawn.team, ctx.config.game_type);
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
@@ -67,7 +73,6 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 		spawn.position = {0.0f, 0.0f, 0.0f};
 		spawn.yaw = 0;
 	}
-	spawn.team = assign_player_team(ctx, world); // [orig: Server_AssignPlayerTeam @0x4fe310]
 	spawn.min_entity_slot = kRetailPlayerMinEntitySlot;
 	// [D-NET-112] A player carries no SSN (net_id 0) — faithful to the original, which identifies it by
 	// handle + ownerConnectionId, not an SSN (see the note above). Keeps players out of the WAC find_by_net_id space.
@@ -75,15 +80,71 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// entity+0x78 = the owning connection's dcb (host loopback dcb / a joiner's ack dcb).
 	// [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
 	spawn.owner_connection_id = conn.connection_id;
+	// Equipped-weapon spawn default = the WPN_M4AUTO armory index, resolved BY NAME like retail
+	// [orig: PlayerClass_InitEntity @0x4B1116 -> AvatarDef_FindIndexByName("WPN_M4AUTO")];
+	// 0xFF (none) when no armory table is fed (unit-test hosts). A joiner's own extended uplink
+	// overwrites it on the first drained 0x0C. (D-NET-143)
+	const int m4 = world.weapons.index_of("WPN_M4AUTO");
+	spawn.equipped_adm_index = m4 >= 0 ? static_cast<uint8_t>(m4) : 0xFF;
 
 	// The type-2 loopback is the host's OWN client (input-ordered, publishes cached.local_player); a
 	// type-1 node is a remote joiner the host snaps from the wire (never the local player). [ADR 0012]
 	const bool is_host_own = (conn.type == 2);
+
+	// Character stamp from the joiner's 0x42 CU vars, picked per ASSIGNED team — side A for teams
+	// 1/3 or any non-team-based game type, side B otherwise [orig: Server_PlayerAdd @0x51cbc0
+	// @0x51cff7]. The picked avatar byte is the entity+0x374 animSlot [@0x51d0b1] and the picked
+	// char id the entity+0x15C wire NetId [slot+440] — the joiner's own 0x0C record must echo the
+	// values it uploaded (golden ASH_I5A: VCB=4/CI1=0x8207 -> record 4/0x8207) or its client binds
+	// a wrong-type character slot: the D-NET-146 DBuggy1-shadow bug. Retail additionally validates
+	// the char id against the character-slot registry (MinimapSlot_HasEntity @0x57b140 -> realloc
+	// @0x57ad40); the reimpl has no registry yet, so the id is echoed unvalidated and 0 falls back
+	// to the encoder's D-NET-137 shim (two default-profile joiners colliding on 0x8207 is a
+	// tracked deferral, harmless at 2-player scope).
+	const int side = (spawn.team == 1 || spawn.team == 3 ||
+	                  (ctx.config.game_type & 0x10000u) == 0)
+	        ? 0
+	        : 1;
+	if (is_host_own) {
+		// The host's own player never uploads CU vars — retail stamps its animSlot on the LOCAL
+		// path from the profile avatar byte, default-resolved to 1 when the profile carries none
+		// (the golden host record). Its NetId comes from local deploy, not this record -> keep 0
+		// (the encoder shim emits the golden 0x0200). [orig: Player_InitPlayer @0x4e15f0
+		// (@0x4e1843) <- g_avatarTeam1/2 <- apply_session_settings_to_globals @0x551500 with the
+		// sub_57AE60 not-found default 1]
+		spawn.anim_slot = 1;
+	} else {
+		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
+		spawn.minimap_net_id = conn.char_vars.char_id[side]; // 0 -> encoder shim
+		// playerClass = TR ? CTB : CTA [orig: Server_BuildPlayerInfoAndAdd @0x51d711 buf[52]];
+		// absent (0) -> 8 in-session [@0x51d02b]; outside [5,9] -> 8 [@0x51d102]. The joiner's
+		// later C2S 0x2F loadout re-stamps it (server_message_dispatch case 0x2F), same as retail.
+		const uint8_t cls = conn.char_vars.team_request != 0 ? conn.char_vars.char_class[1]
+		                                                     : conn.char_vars.char_class[0];
+		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
+	}
+
 	const world::EntityHandle h =
 			is_host_own ? world::spawn_player(world, spawn) : world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
+
+	// RESPAWN-PENDING at join, iff the mission offers deploy-selectable spawn zones — the
+	// joiner enters UNDEPLOYED and its per-frame 0x0A flags1 bit1 holds the deploy screen
+	// open until a successful C2S 0x0E pick clears it [orig: Server_OnPlayerJoin @0x51a6f2
+	// stateByte |= 0x10 iff SpawnZoneList_GetCount() > 0; the pre-placed entity is the
+	// deploy-camera anchor]. The pending entity is HIDDEN (state_flags bit0 — the golden
+	// pre-deploy record byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs
+	// entity+36 bit0 each frame while pending]. The host's OWN loopback player skips the
+	// hold — it deploys through the local flow, not the wire. (D-NET-156)
+	if (!is_host_own && world::world_has_spawn_zone(world)) {
+		conn.link.respawn_pending = true;
+		if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
+		// The join-time respawn countdown (entity+292 = 620 ticks) is display/wave state the
+		// 0x6E status reports; with default host wave options the deploy is pick-driven, so
+		// only the pending flag is modeled (tracked, §5.61).
+	}
 
 	// Bind the per-connection reply state so the §5.1 roster (0x16) / player-sync (0x46) / player-index
 	// (0x4D) all point at THIS player's REAL slot + entity handle. Without it the joiner is told

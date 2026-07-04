@@ -76,7 +76,7 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w);
 // pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: serialize_entity_pool_to_packet @0x503460].
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 // pool-3 SPAWN-POINT markers only (item_id in the kSpawnMarkerStartTypes 60xx family) -> S2C 0x20.
-// The small networked subset the client's spawn-select reads via Entity_BuildSpawnPointList @0x42de40 —
+// The small networked subset the client's spawn-select reads via Entity_BuildMapPoiLists @0x42de40 —
 // streaming the full pool-3 (incl. every nav waypoint) floods the client (D-NET-98), but the spawn-select
 // screen STILL needs the spawn points or the joiner spams C2S 0x0f and never deploys (§5.38c).
 Pool3SyncBatch build_pool3_spawn_marker_batch(const world::World &w);
@@ -117,7 +117,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent);
 // live local-player state, sent each frame so the HOST SNAPs it via apply_player_intent.
 // Position is the live engine-frame AiEntity.pos[] (i32 16.16 — the exact store the host
 // writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
-// `intent.heading << 16`). On-foot only (vehicle_handle = 0xFFFF; the mounted vehicle-local
+// `intent.heading << 16`). On-foot only (carrier_handle = 0xFFFF; the mounted vehicle-local
 // transform is deferred). The anti-cheat weapon/fire counters are left 0 — the §5.38a
 // receive path has NO counter gate, so the host read-apply ignores them. The 5-byte
 // sub-header (handle = the host-assigned wire handle H, item_type_id = e.item_id, sub_op =

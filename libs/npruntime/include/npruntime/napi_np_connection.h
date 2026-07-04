@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 
 #include <netsim/connection.h>             // netsim::Connection, netsim::TransportMode
@@ -56,9 +57,14 @@ enum class ConnectionPhase : uint8_t {
 // entity_batch_count / spawned here, no longer the game_runtime GameSessionState).
 // [orig: the playerSlot+0x20 sync-state + playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
 struct InitialStateBurst {
-	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 4 world-stream / 5 done
+	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 3 WAIT for the
+	                                    // client's C2S 0x0A spawn-menu request / 4 world-stream / 5 done.
+	                                    // State 3 is the load gate: the player-sync tail parks here
+	                                    // [orig: @0x51c134] and ONLY NapiNPServerMsg_HandlePlayerSpawnRequest
+	                                    // @0x513260 (C2S 0x0A) advances 3 -> 4 — the world stream never
+	                                    // races a client that hasn't asked for it (D-NET-150).
 	uint16_t player_sync_subphase = 8;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
-	uint8_t  world_stream_phase = 0;    // [playerSlot+89882] 0 not-started, 1=0x10 .. 7=0x1A
+	uint8_t  world_stream_phase = 0;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
@@ -67,13 +73,8 @@ struct InitialStateBurst {
 	                                    // client sends 0x2F (f317) -> server replies 0x5A + game-start
 	                                    // (f318). Without this gate, 0x1A and game-start land in the
 	                                    // same datagram batch and the client never gets to send 0x2F.
-	uint16_t loadout_wait_ticks = 0;    // ticks spent waiting at phase 8 for the client's C2S 0x2F
-	                                    // (loadout select). The golden delivers S2C 0x5A (loadout)
-	                                    // BEFORE the game-start; the host must WAIT for 0x2F so the
-	                                    // player deploys WITH a loadout (else it spawns weaponless and
-	                                    // cannot move). Both the retail client (selects) and the
-	                                    // opennova joiner (pump stage 3) send 0x2F; the long fallback
-	                                    // is only a safety net against a client that never selects.
+	// (the prior loadout_wait_ticks fallback counter was removed — the phase-8 wait has NO
+	//  timeout: the golden host emits nothing in-match until the joiner's 0x2F, D-NET-145)
 	uint16_t roster_wait_ticks = 0;     // ticks waited for the post-handshake round-trip (roster_pushed)
 	                                    // before starting the world-stream — auto-proceeds after a
 	                                    // generous window so the opennova client (which doesn't send
@@ -92,7 +93,7 @@ struct PreSpawnJoinerPose {
 	bool valid = false;                // a pre-spawn C2S 0x0C has been cached
 	uint16_t entity_handle = 0;
 	uint16_t item_type_id = 0;
-	uint16_t vehicle_handle = 0xFFFF;
+	uint16_t carrier_handle = 0xFFFF;
 	uint32_t pos_x = 0;
 	uint32_t pos_y = 0;
 	uint32_t pos_z = 0;
@@ -100,20 +101,65 @@ struct PreSpawnJoinerPose {
 	int16_t pitch = 0;
 };
 
+// The joiner's character/profile join vars, uploaded as CU chunks in its game-session 0x42
+// ClientAuth: the per-SIDE character selection (side A = teams 1/3, side B = teams 2/4).
+//   CI0/CI1 = per-side minimap/character-slot ids (u16 truncation of retail's atol),
+//   TR      = requested side (0 = A, 1 = B; anything else clamps to 0xFF = auto),
+//   CTA/CTB = per-side soldier class, VCA/VCB = per-side avatar byte (-> entity+0x374 animSlot).
+// 0 everywhere = "tag absent" (retail's zero-initialized NapiNetConfig). The player add picks the
+// side by the ASSIGNED team and stamps the entity. [orig: client emit
+// CNapiServerInfo_SerializeToSession @0x4c3650; host parse NapiNPProtocol_HandleClientJoin
+// @0x62b750 CU loop -> NapiNetConfig_LoadFromConnTags @0x4c7260 (jsp[56..63] + ci0.lo); consume
+// Server_PlayerAdd @0x51cbc0. Wire: golden retail-ashi5a 0x42 f=199140 carries CI0=512 CI1=33287
+// TR=-1 CTA=CTB=8 VCA=1 VCB=4 — the joiner's 0x0C record echoes 0x8207/4. net-re D-NET-146]
+struct CharacterJoinVars {
+	uint16_t char_id[2] = {0, 0};   // CI0 / CI1 -> jsp[56] / jsp[58]
+	uint8_t team_request = 0;       // TR -> jsp[60] (retail clamp: != 0xFF && >= 2 -> 0xFF)
+	uint8_t char_class[2] = {0, 0}; // CTA / CTB -> jsp[61] / jsp[62]
+	uint8_t avatar[2] = {0, 0};     // VCA / VCB -> jsp[63] / ci0 low byte
+};
+
+// Host-side fire state for ONE of this player's weapon slots — the clip the C2S 0x06 fire
+// pipeline checks + decrements and the C2S 0x25 reload relay refills. Keyed (in the map
+// below) by the weapon-slot combo = category*65 + rank [orig: the per-player 100-B
+// weapon-slot array playerSlot+464, index roundSlotIndex = adm[4] + 65*adm[0]
+// (Server_ClientFiredRound @0x50c0d7); the u16 clip = slot+16 (WeaponSlot_CanFire
+// @0x541ba0 reads it, consume_weapon_ammo @0x540850 decrements it, WeaponSlot_ReloadAmmo
+// @0x541720 refills it)]. The shared ammo pools (adm+220 belt / adm+216 ammo-point
+// classes) and the +96472 fire-rate stamp are deferred — D-NET-152 tails.
+struct WeaponSlotState {
+	uint8_t adm_index = 0; // the weapon bound to this combo [orig: slot+32 adm ptr]
+	int16_t clip = 0;      // rounds left in the magazine [orig: slot+16]
+};
+
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
-// server-info / mission-metadata / loadout / spawn-confirm replies a retail joiner expects). Folded
+// server-info / mission-metadata / loadout replies a retail joiner expects). Folded
 // onto the connection node like InitialStateBurst — the slice of the retired GameSessionState the
 // reactive NapiNPServerMsg_0x0NN handlers actually read (P8). The spawn-gate / world-stream burst
 // state lives in `burst` above (driven by Server_SendInitialGameStateToPlayer); this carries only the
 // reactive request→reply bookkeeping. [orig: per-player fields the NapiNPServerMsg_* handlers touch]
 struct SessionReplyState {
 	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
+	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
+	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
+	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what
+	// resumes the client's per-frame C2S 0x0C uplink [orig: Server_ProcessPlayerDeath's tail
+	// calls Server_SendWeaponSlotListToPlayer @0x502550; client NapiNPClientMsg_
+	// HandleWeaponLoadoutSync @0x4290E0 resets 81474C, §5.30; golden deploy frame 240018 =
+	// 0x5A + 0x61 + 0x1E in one datagram; v32: without it both joiners' uplinks stopped
+	// forever at the pick — the rubber-band]. (D-NET-156 tail)
+	std::vector<uint8_t> last_loadout_reply;
 	bool mission_status_received = false; // 0x0B mission-file status report seen
-	bool player_spawn_confirmed = false;  // 0x51 PLAYER-SPAWN sent — breaks the 0x29↔0x51 echo loop
 	bool roster_pushed = false;           // 0x16/0x46 roster PUSHED proactively post-handshake (once) —
 	                                      // the working host pushes it before the joiner ever sends 0x0A
-	bool roster_repushed = false;         // 0x16 RE-PUSHED with the grown roster once this player spawned
-	                                      // (golden: 0x16 31→39 when the joiner is added, just before deploy)
+	// Roster versioning (D-NET-155): roster_counted marks this connection's spawn as
+	// tallied into NapiNPProtocol.roster_generation; roster_seen_gen is the last roster
+	// version 0x16-pushed to this client — stale => re-push (covers the own-spawn grow,
+	// golden 0x16 31→39 just before deploy, AND every later join/leave; the old
+	// one-shot-per-connection re-push left existing clients' player lists stale when a
+	// later joiner arrived — the v29 stuck HUD count).
+	bool roster_counted = false;
+	uint32_t roster_seen_gen = 0;
 
 	// Joiner pose cached from the pre-spawn C2S 0x0C — the host's pose fallback when no World entity
 	// is bound yet (pose_for_conn prefers the live registry Entity once owned_entity binds).
@@ -173,6 +219,15 @@ struct NapiNPConnection {
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
 	SessionSequencing seq{};       // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
+	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
+	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
+	                               // original stalls both burst tracks while the connection's
+	                               // outstanding-message count (conn+0x768) >= 20 [orig: the
+	                               // NapiNPMessageQueueState field read at 0x51bf1b / 0x51bc04] — the
+	                               // client-paced backpressure that stretches the world stream across a
+	                               // cold client's mission build (D-NET-150). Our structural stand-in
+	                               // counts unconfirmed outbound datagrams (next_outbound_seq-1 minus
+	                               // this); exact retail inc/dec sites pending an IDA pass.
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
 
 	// self_id (the joiner's own ConnectionId / dcb / unk_18, learned from its in-match 0x48
@@ -187,6 +242,13 @@ struct NapiNPConnection {
 
 	// --- P8: the reactive gameplay-message reply state (the retired GameSessionState slice) ---
 	SessionReplyState reply{};
+
+	// The joiner's 0x42 CU character vars (above) — parsed at the join, consumed by the player add.
+	CharacterJoinVars char_vars{};
+
+	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
+	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
+	std::map<uint16_t, WeaponSlotState> weapon_slots;
 };
 
 // [D-NET-122] The single in-match predicate shared by Server_TickUpdate's C2S drain AND its S2C 0x0A

@@ -91,7 +91,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch);
 //   0x0010 team_byte!=0 (entity+354; D-NET-58) · 0x0100 parent_handle!=0xFFFF · 0x0200 target_handle!=0xFFFF
 //   0x0400 weapon_mask!=0 · 0x0800 (ai_name non-empty || ai_profile_* != 0)
 //   0x0040 alert_byte!=0 · 0x0080 action_byte!=0 · 0x1000 weapon_type_byte!=0
-//   0x2000 health_byte!=0 (writes health_byte+zone_radius_short) ELSE 0x8000 zone_radius_short!=0
+//   0x2000 zone_number_rank!=0 (writes zone_number_rank+zone_radius) ELSE 0x8000 zone_radius!=0
 //   0x4000 difficulty_byte!=0.
 // Weapon block (D-NET-56): when 0x0400 is set, `extra_handle_0/1` are ALWAYS
 // written after the per-set-bit handles. The original only sets 0x0400 when the
@@ -159,13 +159,13 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 
 // Encode a §5.13 vehicle compact record (15 B mounted / 21 B unmounted) — the
 // bytes `decode_vehicle_compact_record` consumes, and the byte order produced by
-// [orig: Entity_SerializeMountedVehicleState case 1 (write, type 11) @ 0x460560].
+// [orig: Entity_SerializeVehicleState case 1 (write, type 11) @ 0x460560].
 // Used by CHel/cveh/cbot/cpln/ctrn-class entities (controllable vehicles + AI
 // ground/air units) in the S2C 0x0A trailing event-loop.
 //
 // The mounted/unmounted split is gated on `flags_byte & 0x04` — the original
 // branches on `entity+36 & 4`, so this encoder branches on the flag bit (not the
-// cached `is_mounted`). Positions/headings are the already-compressed u16s
+// cached `is_dead_pose`). Positions/headings are the already-compressed u16s
 // (`health_word` is the raw entity+286 vehicle health u16 — a 0 kills the vehicle
 // on the receiving client, @0x460aff); `Network_CompressFixedPoint` /
 // `Entity_TransformWorldToLocal` run at the World->record layer upstream.
@@ -195,9 +195,10 @@ std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
                                                GuidedFieldGroup group,
                                                const GuidedRecord &rec);
 
-// Encode a §5.9.1 weapon-hit record — the inverse of decode_weapon_hit_record.
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. 17-20 B by the flags gate.
-std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec);
+// Encode a §5.9.1 round-event record — the host write side of the tag-2 stream.
+// [orig: NetPacket_SerializeRoundEvent @ 0x504820; client read
+// NetPacket_DeserializeRoundEvent @ 0x42F270]. 17-20 B by the flags gate.
+std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec);
 
 // Build a complete S2C 0x0A frame from a FrameUpdate — the inverse of the §5.9
 // decode_frame_update walk. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]. The host
@@ -231,17 +232,21 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // ===========================================================================
 
 // tag=0x46 PLAYER-SYNC — the inverse of decode_player_sync (PlayerSync). Flag-driven slot-state record:
-// [u8 slot][u16 fieldFlags=0x1CF7][u8 entitySlot] then the bit-gated fields (name/clan/vehicle-name/
-// team/...). [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80; client NapiNPClientMsg_PlayerSync
-// @0x431370]. Per-field slot-state modeling (score/squad/side/timer) is the remaining D-NET-127 nicety;
-// the wire SHAPE is faithful and round-trips through decode_player_sync.
+// [u8 slot][u16 fieldFlags][u8 entitySlot] then the bit-gated fields in the witnessed order (name 0x1 /
+// clan 0x2 / vehicle-name 0x10 / team 0x4 / class 0x8 / vehicle-score 0x20 / late-join 0x1000 / squad
+// 0x40 / side 0x80 / quality 0x400 / vehicle-timer 0x800). [orig: NetPacket_SerializePlayerSync0x46
+// @0x505e80; client NapiNPClientMsg_PlayerSync @0x431370]. Per-field slot-state modeling
+// (score/squad/side/timer) is the remaining D-NET-127 nicety; the wire SHAPE is faithful and
+// round-trips through decode_player_sync.
 //
-// `with_ack` sets fieldFlags bit 0x4000 — the ROSTER-WALK ack. On receipt the client re-requests the NEXT
-// slot (C2S 0x22 for slot+1) until slot >= max_players [orig: NapiNPClientMsg_PlayerSync @0x431370 tail:
-// `if (slot < byte_A860D1) QueueReliableMessage(0x22, slot+1)`]. The golden host ack-walks the whole
-// roster (0x5CF7 = 0x1CF7|0x4000) so EVERY player slot binds on the joiner; without it the joiner never
-// walks past its own slot and a remote player is left unbound (D-NET — residual 0x0F flood grill 2026-07-01).
-std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool with_ack = false);
+// `field_flags` is the REPLY mask, serialized verbatim and gating each field — the server answers
+// EXACTLY the fieldFlags the C2S 0x22 requested, ack bit included [orig: @0x505f05 echoes 0x4000].
+// Bit 0x4000 = the ROSTER-WALK ack: on receipt the client re-requests the NEXT slot (C2S 0x22 for
+// slot+1, fieldFlags 0x5CF7) until slot >= max_players [orig: @0x431370 tail `if (slot < g_max_player_slots)
+// QueueReliableMessage(0x22, slot+1)`; g_max_player_slots = the 0x04 slot-config maxPlayers byte]. Default
+// 0x1CF7 = the join-broadcast field set [orig: Server_PlayerAdd @0x51d2bf `push 7415`].
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx,
+                                        uint16_t field_flags = 0x1CF7);
 
 // tag=0x46 PLAYER-SYNC REMOVAL — a 3-byte record [u8 slot][u16 flags] with the 0x8000 removal bit set
 // (and 0x4000 ack to keep the walk going, matching golden's 0xC000). The client clears/unlinks that slot
@@ -249,13 +254,12 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool 
 // Sent for empty roster slots the client's ack-walk requests, so the walk terminates cleanly at max_players.
 std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = true);
 
-// tag=0x51 PLAYER-SPAWN — [orig: write_entity_packet @0x506bb0] 8-byte layout:
-// [u16 requested_index (echoed from the C2S 0x29)][u16 handle = pool<<12|slot][u8 team]
-// [u16 NetId if Flags&0x100 else 0][u8 animSlot if Flags&0x100 else 0]. NetId is 0 BY DESIGN — a player
-// carries net_id 0 (D-NET-112: Entity_SpawnFromAnimSlotProperty @0x43c390 leaves it zero; identity is the
-// pool handle + ownerConnectionId). animSlot defaults to 0; the client treats 0x51 as a spawn signal and
-// does not field-parse it.
-std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint16_t requested_index);
+// (tag=0x51 TEAM-CHANGE CONFIRM has no encoder: the original emits it ONLY for a pending
+// g_team_change_entity_list entry [orig: NapiNPServerMsg_0x029 @0x514F10], with a real
+// write_entity_packet @0x506bb0 record. The client FIELD-PARSES it — @0x431BB0 stamps team/NetId
+// and REBINDS CharacterEntity — so an invented zero-id 0x51 re-binds the joiner's player to a
+// vehicle archetype (the DBuggy1 shadow, D-NET-148). Add the faithful encoder with the
+// team-change flow.)
 
 // One 0x16 PLAYER-LIST entry (the host roster row the dispatcher extracts from the live connection list).
 struct PlayerListEntry {
@@ -263,11 +267,14 @@ struct PlayerListEntry {
 	uint8_t team = 0;
 };
 
-// tag=0x16 PLAYER-LIST — the inverse of decode_player_list. [orig: NapiNPClientMsg_0x016 @0x42FAE0].
-// The dispatcher builds `players` from the roster (the npruntime-side walk that can see NapiNPConnection);
-// this serializes the witnessed wire shape: [u8 fmt=1][u8 count] then per-player
-// [u8 slot][u16 ping][u16 score][u16 score2][u8 (team<<1)], then [u8 team_count=2] + a 3-iteration team
-// trailer + [0x02][0x00].
+// tag=0x16 PLAYER-LIST/SCOREBOARD — the inverse of decode_player_list. [orig:
+// NetPacket_SerializeScoreboard0x16 @0x504b80 / client NapiNPClientMsg_PlayerList @0x42FAE0].
+// The dispatcher builds `players` from the roster (the npruntime-side walk that can see
+// NapiNPConnection); this serializes the witnessed wire shape: [u8 flags (bit0 team-mode, bit1
+// timed-scores)][u8 rowCount] then per-player [u8 slot][u16 ping][u16 score][u16 deaths]
+// [u8 (team<<1)|spectator], then [u8 team_count=2] + (team_count+1) × {u16 score, u16 deaths,
+// u8 kothHold, u8 ctfFlag}, then [u8 inGameCount][u8 spectatorCount] — the HUD player count is
+// acceptedRows − spectatorCount (D-NET-158).
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players);
 
 // tag=0x5A WEAPON-LOADOUT — the inverse of decode_weapon_loadout:
@@ -276,5 +283,12 @@ std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &play
 // weapon-slot table (loaded from the accepted C2S 0x2F entries, AdmDef-index order) emitting one
 // 4-byte group per slot; terminator @0x5028b5.]
 std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
+
+// S2C 0x49 WEAPON-RELOAD — [u16 entityHandle][u16 weaponSlotCombo] (4 B): the host's broadcast
+// relay of a C2S 0x25 reload request (same payload, rebuilt per ADR 0003). The client-side apply
+// (NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 -> WeaponSlot_ReloadAmmo @0x541720) is the ONLY
+// place a client's clip refills / the slot's 0x80 reload-pending flag clears (§5.58, D-NET-142).
+// [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
+std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
 
 } // namespace opennova

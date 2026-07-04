@@ -59,7 +59,7 @@ enum class SeatType : uint8_t {
 // One seat a vehicle/emplacement offers. Mirrors the original split: the slot's
 // seat-bone type lives at model[605+slot] and its occupant handle at
 // vehicle[400+2*slot] (0xFFFF = empty). [orig: Entity_FindBestSeatSlot @0x4351f0 /
-// Entity_AttachToVehicleSeat @0x4364a0.]
+// Entity_RequestVehicleAttach @0x4364a0.]
 struct Seat {
     SeatType type = SeatType::None;
     uint8_t bone_index = 0;     // [orig: model[605+slot] seat-bone index]
@@ -142,17 +142,109 @@ struct Entity {
     int32_t engage_min = 0;
     int32_t engage_max = 0;
     int32_t attack_max = 0;
-    int32_t anim_slot = -1;
+    // The body-anim CLIP the present pass plays (kBodyAnim*, body_anim.h), selected by the
+    // infantry motor / AI brain each tick; -1 = no clip / hold rest. RENAMED from `anim_slot`:
+    // this is presentation state, NOT the retail entity+0x374 `animSlot` below — echoing it
+    // onto the wire was the D-NET-146 DBuggy-shadow bug.
+    int32_t body_anim_slot = -1;
+    // GamePlayerEntity.animSlot (entity+0x374) — the character-model/anim-set selector: the
+    // BMS AnimSlot spawn property, or a player's per-side avatar (the joiner's VCA/VCB 0x42
+    // join vars picked by ASSIGNED team, host default 1). Serialized raw as field 13 of the
+    // 0x0C organic / 0x18 full-entity spawn records. [orig: Entity_SpawnFromAnimSlotProperty
+    // @0x43c390 (+0x374 write @0x43c522); Server_PlayerAdd @0x51cbc0 (@0x51d0b1);
+    // Server_InitAllPlayerEntitiesForRound @0x516aa0 (@0x516b8e); net-re §5.23 D-NET-146]
+    uint8_t anim_slot = 0;
+    // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per
+    // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol). 0 = unassigned
+    // (the encoder falls back to its D-NET-137 shim). Non-players serialize Entity::net_id
+    // (the WAC SSN space) there instead. [orig: Server_PlayerAdd @0x51cbc0 slot+440 ->
+    // entity+0x15C; NapiNetConfig_LoadFromConnTags @0x4c7260 jsp[56]/jsp[58]]
+    uint16_t minimap_net_id = 0;
     // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
     // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
     // apply @0x4c11ec; consumers Entity_UpdatePlayerInfantryMovement @0x48496d,
     // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
-    // remote peers; stays 0 (no input / idle) for entities without an uplink source.
+    // remote peers; mirrored from the packed local input for the host's own player (bits 0-2 =
+    // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).
     uint8_t net_move_input = 0;
+    // MoveOrder bits 8-9 (entity+0x12C >> 8): bit0 = prone (0x100), bit1 = crouch (0x200). The
+    // stance the server-side body-anim selection consumes for THIS player [orig:
+    // Entity_UpdateInfantryPlayerBody @0x4b4165-0x4b4181 reads MoveOrder&0x300]. A remote player's
+    // stance arrives as the C2S 0x1D STANCE-CHANGE code (169 crouch / 170 prone / 172 stand)
+    // [orig: NapiNPServerMsg_HandleStanceChange @0x501C60 rewrites MoveOrder bits 8-9]; vehicle
+    // attach/detach clears it [orig: @0x435c54 / @0x43561e]. Echoed to the OWNING client in its
+    // 0x0A header-tail state byte bits 0-1 (the client re-latches its own stance from that byte
+    // EVERY frame [orig: NapiNPClientMsg_0x00A tail read @0x4303e5 -> latch @0x430562/@0x430570]
+    // — a hardcoded 0 tail force-stands a crouched retail client, the pre-v32 crouch/prone bug).
+    uint8_t net_stance_bits = 0;
+    // Wire body-anim state (entity+0x2BC animStateId) + the queued arbitration target
+    // (entity+0x2B8 pendingAnimStateId) + the anim-channel elapsed-ticks-in-loop, mirrored from
+    // the infantry motor each tick for the 0x0A player record bytes 14/15 (emit reads
+    // pending ?: current [orig: @0x4c0cc7]; ratio = trunc ticks clamp 255 [orig:
+    // AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). Spawn default 44 (idle2)
+    // [orig: Entity_ResetToSpawnState @0x4b9714]; 43 = idle collapse.
+    uint8_t net_anim_state = 44;
+    uint8_t net_anim_pending = 0;
+    uint8_t net_anim_phase = 0;
+    // Analog control axes (entity+0x130..+0x132, the extended-uplink off-21..23 bytes):
+    // joystick steering/throttle. The vehicle motor consumes the CONTROLLING occupant's
+    // axes — analogX scales throttle, max(|analogY|,|analogZ|) steers [orig: the analog
+    // branch of Entity_UpdateVehiclePhysics @0x48b783-0x48b7c6; pack site
+    // Player_PackInputStateToEntity @0x4df450 pad7[16..19]]. Signed byte semantics.
+    int8_t net_analog_x = 0;
+    int8_t net_analog_y = 0;
+    int8_t net_analog_z = 0;
+    // Equipped-weapon AdmDef index (entity+0x2B0), echoed at this player's 0x0A off-16
+    // (anim_def_index). 0xFF = none — the apply-skip sentinel the client honors (0 is a VALID
+    // index: the "null" def). Ingested from the owner's extended C2S 0x0C uplink gated
+    // AdmDefs[idx].category < 11 [orig: case-4 store @0x4C20A3]; host-spawned players default
+    // to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
+    // (D-NET-143)
+    uint8_t equipped_adm_index = 0xFF;
     bool hidden = false;
     bool held = false;
     bool disabled = false;
+
+    // The retail entity Flags dword (entity+36) as composed at spawn — the 0x10 static record
+    // streams it RAW as its flag-0x20 i32 (the field the early RE misread as "parentSlot",
+    // D-NET-147/150). Composed from mission attributes + item-def traits:
+    //   BMS Indestructible(1<<21) -> 0x4000000, Reflective(1<<23) -> 0x400,
+    //   NoShadow(1<<24) -> 0x1000000            [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    //   kind Building                -> 0x20000  [orig: Entity_InitFromModel @0x40e105]
+    //   items.def hp == 0            -> 0x4000000 (+ sub_type 0xFF) [orig: @0x40dc8e]
+    // Dynamic runtime bits (movement gate 0x2, mounted 0x40, ...) are NOT modeled here.
+    uint32_t engine_flags = 0;
+    // entity+290 low byte <- BMS record byte 81; always-present byte of the 0x10 static record
+    // (golden buildings carry 0xFF). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    uint8_t ammo_count = 0;
+    // entity+532 subType — 0xFF when the item def is indestructible (hp 0) [orig:
+    // Entity_InitFromModel @0x40dc85]; the 0x10 record's flag-0x80 byte.
+    uint8_t sub_type = 0;
+    // entity+533 refNum <- BMS record byte 153; the 0x10 record's flag-0x40 byte (D-NET-94).
+    uint8_t ref_num = 0;
+
+    // --- Advance & Secure zone fields (net-re §5.61) ---
+    // entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;
+    // 0 = not a chain zone (plain flag/base). [orig: Entity_SpawnFromBMSRecord @0x40e9f0]
+    uint8_t zone_number = 0;
+    // entity+350 (0x15E) <- BMS record word 14 (wp_distance low u16) — the capture-zone /
+    // proximity radius. Streamed as the 0x0D record's 0x2000/0x8000-gated u16 (golden ASH_I5A
+    // bunkers: 70) and read by the client's zone-radius consumers (CaptureZone_* /
+    // render_minimap_slot_blip). [orig: Entity_SpawnFromBMSRecord @0x40e9f0; 0x0D writer
+    // serialize_entity_pool_to_packet_0 @0x503ecc/@0x503f29; net-re §5.11/§5.61]
+    uint16_t zone_radius = 0;
+    // entity+540 — the 16.16 SECURE/control fraction 0..0x10000. A numbered zone accepts
+    // spawns only at >= 0x10000; flips reset it to 0 and the owner re-secures. Seeded by the
+    // chain latch (zone_chain_latch_control): 1.0 when the enemy frontier cannot reach it.
+    // [orig: Server_UpdateCaptureZoneEntities @0x519690 latch @0x519764; clamp @0x501499]
+    int32_t zone_control = 0;
+    // ItemDefAttrib & 0x20000 "ChangeTeam" — capture-trigger volume (joins the zone chain).
+    // [orig: ZoneSlotChain_BuildFromMission @0x4a2de0 def+84 & 0x20000 gate]
+    bool is_capture_trigger = false;
+    // ItemDefAttrib & 0x40000 "SpawnPoint" — deploy-selectable spawn target (0x0E picks).
+    // [orig: Server_ResolveSpawnTargetHandle @0x4fe110 def+84 & 0x40000 gate]
+    bool is_spawn_point = false;
 
     uint32_t spawn_origin = 0; // back-ref to the BMS (kind,index) it was promoted from
     std::string name;          // named markers/areas
@@ -169,6 +261,53 @@ struct Entity {
     int8_t mount_seat = -1;
     SeatType mount_type = SeatType::None;
     bool mounted = false;
+    // The RAW wire seat-bone index this occupant attached by (entity+0x157 attachBoneId,
+    // 1-based into the vehicle MODEL's bone table) — the value the C2S 0x26 carried and the
+    // 0x0A mounted player record echoes as byte 0 (clients resolve their own seat from it).
+    // [orig: Entity_AttachToVehicleSlot @0x4946d0 common tail @0x494752-75 writes 0x157;
+    // record write @0x4c0a1a]
+    uint8_t mount_bone = 0;
+
+    // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
+    // building floor, a vehicle deck — any pool. Retail's platform physics maintains it
+    // every tick (Flags |= 0x100000 + groundEntity = platform
+    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b3291]); our motor has no
+    // platform pass yet, so for READ-APPLIED peers apply_player_intent mirrors the
+    // carrier the owning client uplinked (§5.10; D-NET-151) and the 0x0A echo re-emits
+    // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
+    EntityHandle ground_target;         // kInvalid = free-standing
+
+    // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
+    // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],
+    // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +
+    // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
+    EntityHandle last_fire_target;      // kInvalid = no target claimed
+
+    // --- vehicle motor state (pool-1 PlayerControl vehicles; world/vehicle_motor.h) ---
+    // The original keeps this state across the entity struct and the 812-B per-entity
+    // AI/physics component (`vehicleData` = *(entity+100)); the slot comments name the
+    // original homes. [orig: Entity_UpdateVehiclePhysics @0x48af00]
+    struct VehicleMotorState {
+        int32_t yaw_bam = 0;          // 32-bit engine-frame heading (entity+0x10). Entity::yaw
+                                      // (mission deg) mirrors (90 - bam/deg) each motor tick —
+                                      // steering accumulates sub-degree BAM deltas.
+        bool yaw_seeded = false;      // yaw_bam initialized from Entity::yaw on first tick
+        int32_t speed = 0;            // currentSpeed, 16.16 u/tick [orig: entity+0x29C]
+        int32_t speed_accel = 0;      // per-tick speed delta [orig: entity+0x2A0 speedAccel]
+        int32_t cmd_speed = 0;        // commanded/target speed [orig: vehicleData+544]
+        int32_t steer_target_bam = 0; // steering target heading [orig: vehicleData+528]
+        int32_t steer_ramp_bam = 0;   // key-steer ramp offset [orig: vehicleData+548]
+        int32_t steer_state = 0;      // smoothed wheel deflection [orig: entity->aiState reuse]
+        int32_t wheel_rate_bam = 0;   // grounded yaw rate [orig: entity->modelPtr0 reuse]
+        int32_t vel_x = 0;            // world velocity, 16.16 u/tick — persists airborne
+        int32_t vel_y = 0;            // (ballistic) [orig: entity velocityX/Y +0x98/+0x9C]
+        int32_t slide_z = 0;          // vertical velocity, 16.16 [orig: slideDecay +0xA0]
+        bool grounded = true;         // wheel contact [orig: BYTE2(entity->aiRef0) reuse];
+                                      // vehicles spawn RESTING (contact resolved at init),
+                                      // so the default is grounded — the first motor tick
+                                      // re-derives it from the terrain clamp
+    };
+    VehicleMotorState veh;
 };
 
 } // namespace opennova::world

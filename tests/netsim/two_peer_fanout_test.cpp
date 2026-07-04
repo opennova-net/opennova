@@ -29,8 +29,10 @@
 #include <world/entity.h>
 #include <world/geom.h>
 #include <world/player_spawn.h> // spawn_player / spawn_remote_player
+#include <world/vehicle_attach.h> // entity_process_vehicle_attach / detach (0x26/0x27)
 #include <world/world.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -55,19 +57,22 @@ int32_t codec_recon(int32_t wire, int32_t anchor) {
 }
 
 // Build a 48-byte C2S 0x0C extended uplink (5-B sub-header + 43-B body) from the encoders.
+// carrier != 0xFFFF makes x/y/z + heading CARRIER-LOCAL (§5.10 grounded form, D-NET-151).
 std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32_t z,
-                                    int16_t heading, int16_t pitch) {
+                                    int16_t heading, int16_t pitch,
+                                    uint16_t carrier = 0xFFFF, uint8_t state_flags = 0) {
 	nw::EntityPacketSubHeader hdr;
 	hdr.handle = handle;
 	hdr.item_type_id = 0x14B9; // player infantry
 	hdr.sub_op = 0x0A;         // extended (type 10)
 	nw::PlayerExtendedUplink up;
-	up.vehicle_handle = 0xFFFF; // unmounted
+	up.carrier_handle = carrier;
 	up.pos_x = x;
 	up.pos_y = y;
 	up.pos_z = z;
 	up.heading = heading;
 	up.pitch = pitch;
+	up.state_flags_byte = state_flags;
 	std::vector<uint8_t> body = nw::encode_entity_packet_sub_header(hdr);
 	const std::vector<uint8_t> tail = nw::encode_player_extended_uplink(up);
 	body.insert(body.end(), tail.begin(), tail.end());
@@ -103,6 +108,9 @@ bool run_fanout_and_per_connection_anchor() {
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({5.0f, 10.0f, -3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
+	// The 0x0A tail carries the RECIPIENT's live health; the byte-identity sub-case below
+	// needs the owned-entity tail (host, live) to equal the no-entity default (150).
+	world.registry.get(host_h)->health = 150;
 
 	std::vector<ns::Connection> conns; // the host's connection table
 	ns::LoopbackChannel self_ch;
@@ -452,12 +460,14 @@ bool run_0a_health_class_byte_packed() {
 	if (!expect(ns::health_classification_byte(100, 150, 0x18) == 0x18,
 	            "class nibble masked & 0xF")) return false;
 
-	// End-to-end: the emitted 0x0A player record carries the packed byte. spawn_player defaults:
-	// class 8, health 100, snapshot healthMax 150 -> ratio 43690 -> tier 1 -> 0x18.
+	// End-to-end: the emitted 0x0A player record carries the packed byte. With the traits sweep
+	// resolved (player_item_hp = 150), the spawn seeds FULL health 150/150 [orig:
+	// Entity_InitFromItemDef @0x49e550] -> tier 2 -> 0x28, the golden joiner byte (D-NET-144).
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	w::AiSystem ai;
 	world.ai = &ai;
+	world.player_item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
 	const w::EntityHandle host_h =
 			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "host player spawned")) return false;
@@ -484,12 +494,14 @@ bool run_0a_health_class_byte_packed() {
 
 	uint8_t byte = 0;
 	if (!emitted_health_byte(byte)) return false;
-	if (!expect(byte == 0x18, "health 100/150 emits packed 0x18 (tier 1 | class 8), not raw 0x64"))
+	if (!expect(byte == 0x28, "spawn-at-full 150/150 emits packed 0x28 (tier 2 | class 8) — the "
+	                          "golden joiner byte (D-NET-144)"))
 		return false;
 
-	world.registry.get(host_h)->health = 150; // full health -> tier 2
+	world.registry.get(host_h)->health = 100; // damaged below the 0.75 boundary -> tier 1
 	if (!emitted_health_byte(byte)) return false;
-	if (!expect(byte == 0x28, "health 150/150 emits packed 0x28 (tier 2 | class 8)")) return false;
+	if (!expect(byte == 0x18, "health 100/150 emits packed 0x18 (tier 1 | class 8), not raw 0x64"))
+		return false;
 	std::printf("PASS 0a_health_class_byte_packed\n");
 	return true;
 }
@@ -649,6 +661,7 @@ bool run_0a_player_record_field_sources() {
 	e->net_move_input = 0x21; // the uplink-ingested +0x12C movement-input byte the record echoes
 	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
 	e->pitch = 45;
+	e->equipped_adm_index = 0x09; // the equipped-weapon adm index the record's off-16 echoes
 
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
@@ -673,22 +686,598 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(rec->player.pitch_byte == 0x20, "pitch byte is the ROUNDED high byte")) return false;
 	if (!expect(rec->player.move_input_byte == 0x21, "movement-input byte echoed")) return false;
 	if (!expect((rec->player.state_flags & 0x40) != 0, "state flags carried unmasked")) return false;
-	if (!expect(rec->player.vehicle_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
-	// ADM anim-def index: 0 is a VALID adm entry — the null sentinel is 0xFF [orig: @0x4c11f2].
-	if (!expect(rec->player.anim_def_index == 0xFF, "anim-def null sentinel is 0xFF, not 0"))
+	if (!expect(rec->player.carrier_handle == 0xFFFF, "unmounted anchor handle 0xFFFF")) return false;
+	// ADM anim-def index (off-16) = the entity's equipped-weapon adm index (the uplink echo /
+	// spawn default); 0 is a VALID adm entry — the none sentinel is 0xFF [orig: echo @0x4C20A3,
+	// apply-skip @0x4c11f2] (D-NET-143).
+	if (!expect(rec->player.anim_def_index == 0x09, "anim-def index echoes equipped_adm_index"))
+		return false;
+	// Anim-STATE id (off-14): the wire carries the entity's live body-anim state (the motor
+	// mirror; pending-wins [orig: @0x4c0cc7]) — a fresh spawn reads the Entity_ResetToSpawnState
+	// default 44, never 0 (the null clip; the v15 flicker) [orig: @0x4b9714] (D-NET-159).
+	if (!expect(rec->player.anim_state_id == 44, "anim-state id is the spawn default 44"))
+		return false;
+	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte.
+	e->net_anim_pending = 11; // a queued crouch-walk commit
+	e->net_anim_phase = 37;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "second 0x0A frame dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "second 0x0A frame decodes")) return false;
+	rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == host_h.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present (frame 2)")) return false;
+	if (!expect(rec->player.anim_state_id == 11, "pending anim state wins the off-14 byte"))
+		return false;
+	if (!expect(rec->player.anim_channel_ratio == 37, "anim channel ratio rides off-15"))
 		return false;
 	std::printf("PASS 0a_player_record_field_sources\n");
 	return true;
 }
 
+// (i2) D-NET-156 — the deploy-screen hold: a respawn-pending connection's 0x0A header carries
+//      flags1 bit1 EVERY frame (the client's deploy screen is g_deploy_screen_active = (flags1 & 2) each
+//      frame [orig: NetPacket_WritePlayerState @0x4ff7bd / NapiNPClientMsg_0x00A @0x42ff82]),
+//      and dropping the flag closes it. The recipient's own stance echoes in the tail state
+//      byte bits 0-1 [orig: tail read @0x4303e5 -> latches @0x430562/@0x430570].
+bool run_0a_deploy_hold_and_tail_stance() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "player entity resolvable")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	conns[0].respawn_pending = true;
+	e->flags |= 1u; // the hidden bit the join sets with the pending flag [orig: @0x4ff7dd]
+	e->net_stance_bits = 2; // crouched — the tail must echo it (bit1)
+
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "0x0A frame decodes")) return false;
+	if (!expect(fu.flags1 == 0x02, "flags1 bit1 held while respawn-pending")) return false;
+	if (!expect(fu.state_flag_byte == 0x02, "tail state byte echoes the crouch bit")) return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == h.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present")) return false;
+	if (!expect((rec->player.state_flags & 0x01) != 0,
+	            "record byte13 carries the pending hidden bit (golden 0x01)")) return false;
+
+	// Deploy clears the hold: flags1 drops to 0 on the very next frame (one bit1=0 frame
+	// closes the retail deploy screen).
+	conns[0].respawn_pending = false;
+	e->flags &= ~1u;
+	e->net_stance_bits = 0;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "post-deploy 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "post-deploy 0x0A decodes")) return false;
+	if (!expect(fu.flags1 == 0x00, "flags1 drops after the deploy clears pending")) return false;
+	if (!expect(fu.state_flag_byte == 0x00, "tail stance echo cleared")) return false;
+	if (!expect(fu.health > 0, "tail carries the live (alive) health")) return false;
+
+	// The victim's own death signal (v33 "killee never knows"): a dead recipient's frame
+	// carries tail health 0 [orig: stored as the client's own Health @0x4305df] and its
+	// record byte13 dead bit 0x02 [orig: the local apply's dead path @0x4c1005 — anim
+	// stores + Health = 0; the 1->0 edge is the spawn hook @0x4c1109].
+	e->health = 0;
+	e->flags |= 2u;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "dead-state 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "dead-state 0x0A decodes")) return false;
+	if (!expect(fu.health == 0, "tail health 0 tells the victim it died")) return false;
+	rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == h.packed) rec = &r;
+	if (!expect(rec != nullptr, "dead player record present")) return false;
+	if (!expect((rec->player.state_flags & 0x02) != 0,
+	            "record byte13 carries the dead bit")) return false;
+	std::printf("PASS 0a_deploy_hold_and_tail_stance\n");
+	return true;
+}
+
+// (i3) D-NET-157 — the 0x26 attach acceptance + the 0x0A mounted-branch echo: the accepted
+//      occupant's record carries the RAW wire bone at byte 0, the vehicle as its carrier, and
+//      CARRIER-LOCAL position; the recipient's own tail mount handle names its carrier. The
+//      detach drops it all back to the free-standing form. [orig: Entity_ProcessVehicleAttach
+//      @0x435AA0 / Entity_AttachToVehicleSlot @0x4946D0 tail @0x494752-75; record op1 @0x4c0a08]
+// Type resolver for the attach test's mixed frame: the player type decodes as Player,
+// the 0x1004 buggy as Vehicle (the default phase-1 resolver knows only the player type).
+nw::EntityClass attach_test_class(uint16_t type_id) {
+	if (type_id == 0x14B9) return nw::EntityClass::Player;
+	if (type_id == 0x1004) return nw::EntityClass::Vehicle;
+	return nw::EntityClass::Infantry;
+}
+
+bool run_0x26_attach_mounted_echo() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle ph =
+			w::spawn_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *player = world.registry.get(ph);
+	if (!expect(player != nullptr, "player entity resolvable")) return false;
+
+	// A pool-1 vehicle with one driver seat at bone 1 (the v31 wire bone).
+	w::EntityHandle vh;
+	{
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x1004;
+		veh.position = {12.0f, 20.0f, 3.0f};
+		veh.yaw = 0;
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		w::Seat drv;
+		drv.type = w::SeatType::Driver;
+		drv.bone_index = 1;
+		veh.seats.push_back(drv);
+		vh = world.registry.spawn_from(1, 0, veh);
+	}
+	if (!expect(vh.valid(), "vehicle spawned")) return false;
+
+	// The 0x26 acceptance path (dispatch calls this after the word0 anti-spoof overwrite).
+	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+		return false;
+	if (!expect(player->mounted && player->mount_target == vh, "mount fields written"))
+		return false;
+	if (!expect(player->mount_bone == 1, "raw wire bone recorded (entity+0x157)")) return false;
+	if (!expect((player->flags & 0x40u) != 0, "mounted flag 0x40 set")) return false;
+	// A second occupant cannot take the held seat [orig: @0x435ba9].
+	const w::EntityHandle ph2 =
+			w::spawn_player(world, player_spawn({11.0f, 20.0f, 3.0f}, 1, 0xFFF1));
+	if (!expect(!w::entity_process_vehicle_attach(world, ph2, vh, 1), "occupied seat rejects"))
+		return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
+	nw::PlayerReplicationState fallback;
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
+	            "0x0A frame decodes")) return false;
+	if (!expect(fu.mount_handle == vh.packed, "tail mount handle names the recipient's carrier"))
+		return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == ph.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present")) return false;
+	if (!expect(rec->player.vehicle_bone == 1, "mounted record byte0 = the wire bone"))
+		return false;
+	if (!expect(rec->player.carrier_handle == vh.packed, "mounted record carrier = the vehicle"))
+		return false;
+	if (!expect((rec->player.state_flags & 0x40u) != 0, "record byte13 carries mounted 0x40"))
+		return false;
+
+	// Detach: seat freed, mount fields cleared, record back to free-standing.
+	if (!expect(w::entity_detach_from_vehicle(world, ph), "detach applies")) return false;
+	if (!expect(!player->mounted && player->mount_bone == 0, "mount fields cleared"))
+		return false;
+	w::Entity *veh = world.registry.get(vh);
+	if (!expect(veh != nullptr && !veh->seats[0].occupant.valid(), "seat occupant freed"))
+		return false;
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "post-detach 0x0A dequeued")) return false;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
+	            "post-detach 0x0A decodes")) return false;
+	rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == ph.packed) rec = &r;
+	if (!expect(rec != nullptr, "player record present post-detach")) return false;
+	if (!expect(rec->player.vehicle_bone == 0 && rec->player.carrier_handle == 0xFFFF,
+	            "post-detach record is free-standing")) return false;
+	std::printf("PASS 0x26_attach_mounted_echo\n");
+	return true;
+}
+
+// (j) D-NET-151 — the grounded-on-entity replication loop. A joiner standing ON another
+//     entity (building floor / vehicle deck) uplinks carrier_handle + CARRIER-LOCAL pos and
+//     heading [orig: op3 reads groundEntity(+0x28); the extended body's pose is
+//     Entity_TransformWorldToLocal output]. The host apply must lift local -> world through
+//     the carrier pose [orig: op4 @0x4c1de1 Entity_TransformLocalToWorld; heading add
+//     @0x43be7e], REPLACE flags bits 2-4 from the raw wire byte [orig: @0x4c1e4d], and the
+//     0x0A echo must re-emit the carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /
+//     @0x4c0b07 / sar-24 yaw @0x4c0b85] — echoing 0xFFFF at a grounded retail client
+//     detaches + hard-snaps it to local-as-world coords (the v26 origin teleport).
+bool run_grounded_uplink_apply_and_echo() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(2, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+
+	// The carrier: a pool-2 building at (100, 200, 10), mission yaw 90 -> engine BAM 0
+	// (identity rotation — every 22-bit product below is exact).
+	w::EntityHandle bld_h;
+	{
+		w::Entity bld;
+		bld.kind = w::EntityKind::Building;
+		bld.item_id = 0x044c;
+		bld.position = {100.0f, 200.0f, 10.0f};
+		bld.yaw = 90;
+		bld_h = world.registry.spawn(2, bld);
+	}
+	if (!expect(bld_h.valid() && bld_h.pool() == 2, "pool-2 carrier spawned")) return false;
+
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({0.0f, 0.0f, 0.0f}, 0, 0xFFF0));
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel self_ch, join_ch;
+	conns.push_back(ns::Connection{&self_ch, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&join_ch, ns::TransportMode::Client, {}, 0});
+	const w::EntityHandle joiner_h = ns::test::admit_peer(
+			world, conns, 1, player_spawn({1.0f, 1.0f, 1.0f}, 0, 0xFFF1));
+	if (!expect(joiner_h.valid(), "joiner admitted")) return false;
+	{
+		// Pre-set a stance bit INSIDE the replace mask: the uplink below carries bit 4 only,
+		// so a faithful REPLACE clears bit 3; the old xor-delta would have kept it.
+		w::Entity *je = world.registry.get(joiner_h);
+		je->flags |= 0x08u;
+	}
+
+	// Grounded uplink: local (2.0, 0.5, 1.0) on the building, local heading 0x2000<<16
+	// (mission yaw 45 after the identity-carrier add), flags byte bit 4.
+	const int32_t lx = w::to_fixed(2.0), ly = w::to_fixed(0.5), lz = w::to_fixed(1.0);
+	join_ch.client_send(0x0C, make_0c_uplink(joiner_h.packed, lx, ly, lz, 0x2000, 0,
+	                                         bld_h.packed, /*state_flags=*/0x10));
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
+
+	// (1) HOST APPLY: world pos = carrier ⊕ local (identity rotation -> exact adds).
+	const w::Entity *je = world.registry.get(joiner_h);
+	if (!expect(je != nullptr, "joiner entity present")) return false;
+	if (!expect(je->position.x == 102.0f && je->position.y == 200.5f && je->position.z == 11.0f,
+	            "grounded uplink lifted local -> world through the carrier pose"))
+		return false;
+	if (!expect(je->yaw == 45, "grounded heading composed with the carrier heading")) return false;
+	if (!expect(je->ground_target == bld_h, "uplinked carrier mirrored into ground_target"))
+		return false;
+	if (!expect((je->flags & 0x1Cu) == 0x10u,
+	            "flags bits 2-4 REPLACED from the wire byte (bit 3 cleared, not xor-kept)"))
+		return false;
+
+	// (2) ECHO: the joiner's 0x0A record re-emits the carrier + compressed LOCAL pos +
+	// local yaw byte (single-bit locals survive the 12-bit-mantissa compressor exactly).
+	ns::test::emit_all(world, conns, nw::PlayerReplicationState{});
+	ns::Datagram dg;
+	if (!expect(join_ch.client_recv(dg), "joiner 0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "0x0A frame decodes")) return false;
+	const nw::FrameUpdateRecord *rec = nullptr;
+	for (const auto &r : fu.records)
+		if (r.handle == joiner_h.packed) rec = &r;
+	if (!expect(rec != nullptr, "joiner player record present")) return false;
+	if (!expect(rec->player.carrier_handle == bld_h.packed,
+	            "record echoes the ground carrier (echoing 0xFFFF is the v26 snap)"))
+		return false;
+	if (!expect(nw::network_decompress_fixedpoint(rec->player.pos_x_compressed) == lx &&
+	                    nw::network_decompress_fixedpoint(rec->player.pos_y_compressed) == ly &&
+	                    nw::network_decompress_fixedpoint(rec->player.pos_z_compressed) == lz,
+	            "record position is the CARRIER-LOCAL offset, not anchor-relative world"))
+		return false;
+	// Local heading hi-byte: yaw 45 -> engine BAM (90-45)*11930464 = 0x1FFFFFE0; carrier BAM 0.
+	if (!expect(rec->player.yaw_byte == 0x1F, "yaw byte is the LOCAL heading's high byte"))
+		return false;
+
+	// (3) The free-standing form is unchanged: a later 0xFFFF uplink returns to world coords.
+	join_ch.client_send(0x0C, make_0c_uplink(joiner_h.packed, w::to_fixed(50.0),
+	                                         w::to_fixed(60.0), w::to_fixed(12.0), 0x2000, 0));
+	ns::test::drain_all(world, conns, /*is_authority=*/true);
+	je = world.registry.get(joiner_h);
+	if (!expect(je->position.x == 50.0f && je->position.y == 60.0f && je->position.z == 12.0f,
+	            "free-standing uplink applies world coords raw")) return false;
+	if (!expect(!je->ground_target.valid(), "ground_target cleared by a free-standing uplink"))
+		return false;
+	std::printf("PASS grounded_uplink_apply_and_echo\n");
+	return true;
+}
+
+// (k) The 22-bit pose-transform pair inverts: world_to_local(local_to_world(v)) recovers v
+//     exactly at identity and within fixed-point rounding for an arbitrary pose
+//     [orig: Entity_TransformLocalToWorld @0x43BD00 / Entity_TransformWorldToLocal @0x43BB50].
+bool run_pose_transform_roundtrip() {
+	// Identity pose: exact.
+	{
+		const nw::WorldPose w = nw::network_transform_local_to_world(
+				w::to_fixed(2.0), w::to_fixed(0.5), w::to_fixed(1.0), w::to_fixed(100.0),
+				w::to_fixed(200.0), w::to_fixed(10.0), 0u, 0u, 0u);
+		if (!expect(w.x == w::to_fixed(102.0) && w.y == w::to_fixed(200.5) &&
+		                    w.z == w::to_fixed(11.0),
+		            "identity-pose lift is exact")) return false;
+		const nw::WorldPose l = nw::network_transform_world_to_local(
+				w.x, w.y, w.z, w::to_fixed(100.0), w::to_fixed(200.0), w::to_fixed(10.0), 0u,
+				0u, 0u);
+		if (!expect(l.x == w::to_fixed(2.0) && l.y == w::to_fixed(0.5) && l.z == w::to_fixed(1.0),
+		            "identity-pose round-trip is exact")) return false;
+	}
+	// Arbitrary pose (yaw+pitch+roll): round-trips within 22-bit chained-mul rounding.
+	{
+		const uint32_t yaw = 0x1F340000u, pitch = 0x02ABCDEFu, roll = 0xFE000123u;
+		const int32_t px = w::to_fixed(-433.7), py = w::to_fixed(371.5), pz = w::to_fixed(12.4);
+		const int32_t lx = w::to_fixed(3.25), ly = w::to_fixed(-1.5), lz = w::to_fixed(0.75);
+		const nw::WorldPose w2 = nw::network_transform_local_to_world(lx, ly, lz, px, py, pz,
+		                                                              yaw, pitch, roll);
+		const nw::WorldPose l2 = nw::network_transform_world_to_local(w2.x, w2.y, w2.z, px, py,
+		                                                              pz, yaw, pitch, roll);
+		const auto near_eq = [](int32_t a, int32_t b) {
+			const int32_t d = a - b;
+			return d >= -4 && d <= 4; // <= 4/65536 world units of chained rounding
+		};
+		if (!expect(near_eq(l2.x, lx) && near_eq(l2.y, ly) && near_eq(l2.z, lz),
+		            "arbitrary-pose round-trip within fixed-point rounding")) return false;
+	}
+	std::printf("PASS pose_transform_roundtrip\n");
+	return true;
+}
+
 } // namespace
+
+// (l) [D-NET-152] The §5.9.1 tag-2 ROUND-EVENT fan: an accepted fire appends a world
+//     round-ring event; the per-recipient sweep serves it to every OTHER in-match
+//     connection exactly once (watermark), skipping the shooter's own rounds (its client
+//     already simulated them [orig: @0x4fff97]) and never replaying the pre-join backlog
+//     (the arm gate [orig: the playerSlot+97544 non-zero gate]). The origin compresses
+//     against the RECIPIENT's anchor and the direction BAM high words survive rounded
+//     [orig: Server_BuildRoundEventListForPlayer @0x4ffee0 ->
+//     NetPacket_SerializeRoundEvent @0x504820].
+bool run_round_event_fanout() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	const w::EntityHandle host_h =
+			w::spawn_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	const w::EntityHandle peer_h =
+			w::spawn_remote_player(world, player_spawn({4.0f, 5.0f, 6.0f}, 0, 0xFFF1));
+	if (!expect(host_h.valid() && peer_h.valid(), "host + peer spawned")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch_host;
+	ns::LoopbackChannel ch_peer; // loopback transports keep the harness socket-free
+	conns.push_back(ns::Connection{&ch_host, ns::TransportMode::Loopback, host_h, 0});
+	conns.push_back(ns::Connection{&ch_peer, ns::TransportMode::Client, peer_h, 0});
+
+	nw::PlayerReplicationState fallback;
+	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(1.0));
+	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(2.0));
+	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(3.0));
+
+	auto next_frame = [&](ns::LoopbackChannel &ch, nw::FrameUpdate &fu) {
+		ns::Datagram dg;
+		if (!ch.client_recv(dg) || dg.tag != ns::kTag0aFrameUpdate) return false;
+		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
+		                               fu);
+	};
+
+	// A round fired BEFORE either connection's first emit = the pre-join backlog; the
+	// arm gate must swallow it for both.
+	{
+		w::RoundEvent backlog;
+		backlog.shooter_handle = peer_h.packed;
+		backlog.adm_index = 9;
+		world.rounds.add(backlog);
+	}
+	ns::test::emit_all(world, conns, fallback);
+	{
+		nw::FrameUpdate fh, fp;
+		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "arm frames decode"))
+			return false;
+		if (!expect(fh.round_events.empty() && fp.round_events.empty(),
+		            "pre-arm backlog never replays to a joiner"))
+			return false;
+	}
+
+	// The PEER fires: origin near its own pos, direction words as the C2S 0x06 carries
+	// them (<< 16), a claimed target stamped on the shooter entity.
+	const int32_t ox = w::to_fixed(4.5), oy = w::to_fixed(5.5), oz = w::to_fixed(6.5);
+	{
+		w::Entity *shooter = world.registry.get(peer_h);
+		if (!expect(shooter != nullptr, "shooter entity live")) return false;
+		shooter->last_fire_target = host_h; // [orig: @0x50c2ad]
+		w::RoundEvent ev;
+		ev.shooter_handle = peer_h.packed;
+		ev.origin_x = ox;
+		ev.origin_y = oy;
+		ev.origin_z = oz;
+		ev.dir_yaw = int32_t(0x1234u << 16);
+		ev.dir_pitch = int32_t(0xFEDCu << 16);
+		ev.shot_seq = 77;
+		ev.mode_flags = 0x22;
+		ev.subtype = 12;
+		ev.slot_byte = 0;
+		ev.adm_index = 11;
+		world.rounds.add(ev);
+	}
+	ns::test::emit_all(world, conns, fallback);
+	{
+		nw::FrameUpdate fh;
+		if (!expect(next_frame(ch_host, fh), "host frame decodes")) return false;
+		if (!expect(fh.round_events.size() == 1, "host (observer) gets ONE round event"))
+			return false;
+		const nw::RoundEventRecord &re = fh.round_events[0];
+		if (!expect(re.shooter_handle == peer_h.packed, "round shooter = the firing peer"))
+			return false;
+		if (!expect((re.flags & 0x40) != 0 && re.target_handle == host_h.packed,
+		            "live fire target rides the 0x40 word"))
+			return false;
+		if (!expect((re.flags & 0x80) == 0, "zero slot byte stays un-gated")) return false;
+		if (!expect((re.flags & 0x3F) == 0x22 && re.adm_index == 11 && re.subtype == 12 &&
+		                    re.shot_seq == 77,
+		            "mode/adm/subtype/shot_seq round-trip"))
+			return false;
+		// Origin reconstructs against the RECIPIENT's own anchor.
+		const int32_t hax = int32_t(w::to_fixed(1.0));
+		if (!expect(nw::network_decompress_fixedpoint(re.pos_x_compressed) + fh.anchor_x ==
+		                    codec_recon(ox, hax),
+		            "fire origin decompresses against the recipient anchor"))
+			return false;
+		if (!expect(re.yaw_bam_high == 0x1234 && re.pitch_bam_high == 0xFEDC,
+		            "direction BAM high words intact"))
+			return false;
+		nw::FrameUpdate fp;
+		if (!expect(next_frame(ch_peer, fp), "peer frame decodes")) return false;
+		if (!expect(fp.round_events.empty(), "the shooter's OWN round is never echoed back"))
+			return false;
+	}
+
+	// Watermark: the same round never repeats on the next frame.
+	ns::test::emit_all(world, conns, fallback);
+	{
+		nw::FrameUpdate fh, fp;
+		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp),
+		            "watermark frames decode"))
+			return false;
+		if (!expect(fh.round_events.empty() && fp.round_events.empty(),
+		            "a swept round never repeats (per-connection watermark)"))
+			return false;
+	}
+	std::printf("PASS round_event_fanout\n");
+	return true;
+}
+
+// (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire
+//      uplink — the HOST simulates the ridden vehicle from the driver's replicated
+//      MoveOrder/heading (the vehicle motor pass in AiSystem::tick), and the S2C 0x0A
+//      vehicle record streams the LIVE (moving) pose. [orig: Client_ProcessNetworkFrame
+//      @0x42c482 single-entity uplink; Entity_UpdateVehiclePhysics @0x48af00 drive gate
+//      @0x48b0ff; Entity_SerializeVehicleState @0x460560 modes 3/4 return -1]
+bool run_vehicle_drive_authority() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 8);
+	w::AiSystem ai;
+	world.ai = &ai;
+	// The driver is a REMOTE joiner (the v33 rider topology): its MoveOrder/heading are
+	// wire-owned — the motor consumes what the 0x0C apply landed, and mirror_wire_anim's
+	// local-input export must NOT overwrite them (a local host player's input comes from
+	// the input system instead).
+	const w::EntityHandle ph =
+			w::spawn_remote_player(world, player_spawn({10.0f, 20.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *player = world.registry.get(ph);
+	if (!expect(player != nullptr, "player entity resolvable")) return false;
+
+	w::EntityHandle vh;
+	{
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x1004;
+		veh.position = {12.0f, 20.0f, 3.0f};
+		veh.yaw = 0;
+		veh.health = 3000;
+		veh.health_max = 3000;
+		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		w::Seat drv;
+		drv.type = w::SeatType::Driver;
+		drv.bone_index = 1;
+		veh.seats.push_back(drv);
+		vh = world.registry.spawn_from(1, 0, veh);
+	}
+	if (!expect(vh.valid(), "vehicle spawned")) return false;
+	// The JOX dune buggy's pre-scaled physics block (vehicle_motor_test pins the parse).
+	{
+		w::VehicleTraits t;
+		t.physics = 1;
+		t.player_speed = 94 * 293;
+		t.acceleration = 15 * 4;
+		t.deceleration = 70 * 4;
+		t.turn_rate = 65 * 192426;
+		t.turn_rate2 = 41 * 192426;
+		t.player_control = true;
+		world.vehicle_traits.set(0x1004, t);
+	}
+
+	if (!expect(w::entity_process_vehicle_attach(world, ph, vh, 1), "attach accepted"))
+		return false;
+	// The driver's replicated input (landed by the 0x0C apply): forward + moving, heading
+	// = the vehicle's own (drive straight).
+	player->net_move_input = 0x08;
+	player->yaw = 0;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
+	nw::PlayerReplicationState fallback;
+
+	// Frame A: parked pose.
+	ns::test::emit_all(world, conns, fallback);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "frame A dequeued")) return false;
+	nw::FrameUpdate fa;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fa),
+	            "frame A decodes")) return false;
+	const nw::FrameUpdateRecord *ra = nullptr;
+	for (const auto &r : fa.records)
+		if (r.handle == vh.packed) ra = &r;
+	if (!expect(ra != nullptr, "vehicle record present in frame A")) return false;
+
+	// 62 authority ticks: the vehicle motor consumes the driver's input.
+	w::TickContext ctx;
+	ctx.world = &world;
+	ctx.is_authority = true;
+	for (int i = 0; i < 62; ++i) {
+		ctx.logic_tick = static_cast<uint32_t>(i);
+		ai.tick(world, ctx);
+	}
+	w::Entity *veh = world.registry.get(vh);
+	if (!expect(veh != nullptr && veh->veh.speed > 0, "host vehicle motor spun up"))
+		return false;
+	// 62 ticks from standstill: the unclamped launch step (861) + 61 accel-clamped ticks
+	// (+60) — deterministic [orig: the @0x48bb46 branch tree + ±itemDef->acceleration].
+	if (!expect(veh->veh.speed == 861 + 60 * 61, "speed ramp matches the clamp math"))
+		return false;
+	const float moved = std::fabs(veh->position.x - 12.0f) + std::fabs(veh->position.y - 20.0f);
+	if (!expect(moved > 0.5f, "vehicle moved under the driver's replicated input"))
+		return false;
+
+	// Frame B: the streamed record carries the LIVE pose (compressed coords changed while
+	// the recipient anchor held still).
+	ns::test::emit_all(world, conns, fallback);
+	if (!expect(ch.client_recv(dg), "frame B dequeued")) return false;
+	nw::FrameUpdate fb;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fb),
+	            "frame B decodes")) return false;
+	const nw::FrameUpdateRecord *rb = nullptr;
+	for (const auto &r : fb.records)
+		if (r.handle == vh.packed) rb = &r;
+	if (!expect(rb != nullptr, "vehicle record present in frame B")) return false;
+	if (!expect(ra->vehicle.pos_x_compressed != rb->vehicle.pos_x_compressed ||
+	                    ra->vehicle.pos_y_compressed != rb->vehicle.pos_y_compressed,
+	            "vehicle record pose is LIVE (host-simulated)"))
+		return false;
+	if (!expect(rb->vehicle.health_word == 3000, "live record keeps the health word"))
+		return false;
+	std::printf("PASS vehicle_drive_authority\n");
+	return true;
+}
 
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
-	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources();
+	                run_0a_vehicle_budget_round_robin() && run_0a_player_record_field_sources() &&
+	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
+	                run_vehicle_drive_authority() &&
+	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&
+	                run_round_event_fanout();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

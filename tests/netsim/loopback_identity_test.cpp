@@ -174,7 +174,7 @@ std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32
 	hdr.item_type_id = 0x14B9; // player infantry
 	hdr.sub_op = 0x0A;         // extended (type 10)
 	nw::PlayerExtendedUplink up;
-	up.vehicle_handle = 0xFFFF; // unmounted
+	up.carrier_handle = 0xFFFF; // unmounted
 	up.pos_x = x;
 	up.pos_y = y;
 	up.pos_z = z;

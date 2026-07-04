@@ -62,7 +62,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); HELO/vehicle physics remain visible `not_yet_ported` stubs | tracked model (vehicle slice) |
 | organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; `AiSystem::tick` branches before the SM | **matching** |
 | `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
-| `kInfantryAnimNames/Flags` | `off_8135F0` / `dword_8139E8` | 0x8135F0/0x8139E8 | all 200 entries index-verified vs IDB | **matching** |
+| `kInfantryAnimNames/Flags` | `off_8135F0` / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | all 200 entries index-verified vs IDB | **matching** |
 | promote `init_infantry` + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer | **matching** |
 | `InfantryRootMotion` (engine host) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
 | `AiSystem::apply_ground_clamp` | per-motor ground sampling | 0x457230 + motors | 5-tap port matches; the infantry motor resamples on the faithful every-8 cadence (cache `inf.ground_cache`); the vehicle path still clamps per tick | matching-core (infantry aligned; vehicle cadence with its slice) |
@@ -125,7 +125,7 @@ Everything below was decompiled and read this session (pseudocode dumps:
   hip/torso/head/Rshoulder/Lshoulder × F/R/B/L) — picked by
   `Entity_ComputeAnimSlotIndex(entity, boneSection, relativeDirection, 4)` with
   `relativeDirection = (heading − atan2(attackerVel) BAM − 0x60000000) >> 30` (2-bit quadrant).
-- **Per-state flag table `dword_8139E8`** (≥190 dwords; extracted, embed in port as generated table):
+- **Per-state flag table `g_animStateFlagsTable`** (≥190 dwords; extracted, embed in port as generated table):
   observed semantics — bit0 = movement state (client re-derives from velocity; auto-rebase to idle 43),
   bit1 = low-to-ground → slope-slide/drift participates (prone 0x603, dragger), bit2 = scripted/locked,
   bit10 (0x400) = slow blend (15 ticks vs 10), 0x80 weapon-pose, 0x10 sit/scripted-idle, 0x20 emote;
@@ -188,7 +188,7 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
   root tracks via `libs/anim` and lives with the binding (NovaSimulation) + an env-gated
   real-assets ctest; unit tests inject synthetic velocities. State→clip resolution uses the
   `off_8135F0` names through `.adm` (libs/adm) — the exact original data path.
-- Tables (`off_8135F0` names, `dword_8139E8` flags) land as generated C++ tables (wac-style).
+- Tables (`off_8135F0` names, `g_animStateFlagsTable` flags) land as generated C++ tables (wac-style).
 
 ## 4. Open items (tracked, addressed)
 1. ~~Anim-state **selection thresholds** per moveMode (dump lines 3000–3700)~~ CLOSED 2026-06-10:
@@ -222,7 +222,7 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     staged bone walk (count free `E1..E8` entry bones, claim a slot via entity+866 cross-checked
     against other soldiers' claims, then approach `E`→`S`/`G`→`H` stages via entity+865 with stop
     147 / guard 140 alignment and eighth-step position pulls) ending in `Entity_FindBestSeatSlot`
-    + `Entity_AttachToVehicleSeat`; `UseGun` bone = emplacement manning (radius 1u/3u); net-ids
+    + `Entity_RequestVehicleAttach`; `UseGun` bone = emplacement manning (radius 1u/3u); net-ids
     11000/12000/12001 get hardcoded escort/approach offsets (heading ±90° at 2–4u). The board path is
     gated by the waypoint_id command sentinel — `slot[148] ∈ {123,124,125}` (Goto SSN; MED names in
     §11) with target SSN = `wp_number` (`slot[152]`) [orig: `Entity_UpdateInfantryAI @ 0x4ba9ad` tests
@@ -495,7 +495,7 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   gate alive/model present; require `occupant-model+144` (a pre-established hierarchy link to the
   vehicle) and not-already-mounted (`entity->pad8[8] == 0`). Then
   `seatBone = Entity_FindBestSeatSlot(entity, *(model+144), &outEntity)` (outEntity = the chosen
-  seat-owner, possibly a child) → `Entity_AttachToVehicleSeat`. The attach-failure path clears
+  seat-owner, possibly a child) → `Entity_RequestVehicleAttach`. The attach-failure path clears
   `Flags & ~0x40` (the mounted bit).
 - `Entity_FindBestSeatSlot @ 0x4351f0` (CONFIRMED EXACT): sentinel `bestWeight = 65536000`; iterates
   the vehicle + its child entities (vehicle+444/+448), 10 slots each; `boneIdx = model[605+slot]`
@@ -508,7 +508,7 @@ preserves unknown bits verbatim (merge-on-write), like event flags.
   **Weights (LOWER wins):** ctrl/drvr `0x2000` < gunner `0x20000` < on-vehicle passenger `0x200000` <
   child-entity passenger `0x2000000`.
 - True occupant pose comes from the seat bone transform (`Entity_GetBoneTransformAndOrientation @
-  0x4b0c50`, `Entity_SerializeMountedVehicleState @ 0x460560`); mounted-pose anim states (emplaced
+  0x4b0c50`, `Entity_SerializeVehicleState @ 0x460560`); mounted-pose anim states (emplaced
   67–75, sit_N, driver lean) are §4.15.
 
 ### 9.2 Port (libs/world + libs/mission) and tracked deviations
@@ -603,7 +603,7 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
   Note the infantry think reserves channel ids **123–127 as commands** (§3.2), so usable mission path
   ids are 1..122 even though the editor lists 1..127.
 - **Attachment is RUNTIME state, not a BMS byte**: mount/attach is `entity+364` set at runtime
-  (`Entity_ToggleVehicleMount @ 0x436950`, `find_entity_mounted_on_vehicle @ 0x4359f0`). "Attached To
+  (`Entity_ToggleVehicleMount @ 0x436950`, `Vehicle_HasEnemyOccupant @ 0x4359f0`). "Attached To
   SSN" / "ATTACH_TO_EMPLACED" are trigger/action name-table entries (PlayerAttachedToSsn = trigger 38,
   AttachToEmplaced = action 37), not entity-dialog fields.
 - **`waypoint_id` 123–127 are AI COMMAND channels, not path numbers** (the MED "Waypoints > List"
@@ -616,7 +616,7 @@ in the binding (water_height units vs the 16.16 worldY unverified; sampler + cal
   `ctrlx`/controller while keeping `drvrx` eligible, 125 accepts any classified seat. Engine witness:
   the server-authority infantry think tests `slot[148]==125` [orig: `Entity_UpdateInfantryAI
   @0x4ba9ad`] — `==125` preserves the carrier vehicle pointer in `slot[144]`, else clears it; when set
-  it runs `Entity_FindBestSeatSlot @ 0x4351f0` (seat-type filter) → `Entity_AttachToVehicleSeat
+  it runs `Entity_FindBestSeatSlot @ 0x4351f0` (seat-type filter) → `Entity_RequestVehicleAttach
   @ 0x4364a0`.
   **CORRECTION (overturns the prior revision of this note):** an earlier version called 125 "valid
   leftover data … the game ignores it (the 'Value 125' inspector mystery)" — that was WRONG; 125 is an
@@ -673,7 +673,7 @@ org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
    (`entity == dword_A890CC` = the camera target, unless `dword_A890C8` third-person — see
    §5.39 / correspondence.md `Camera_SetTrackedEntity @ 0x4391d0`),
 3. **muzzle flash** — gated on `Flags & 4` (`entity+0x24`), drawn at the flare bone,
-4. **weapon sight/scope** — gated on `dword_8139E8[animStateId] & 0x40 && (Flags & 8)`
+4. **weapon sight/scope** — gated on `g_animStateFlagsTable[animStateId] & 0x40 && (Flags & 8)`
    (the per-anim-state flag table of §3.4),
 5. **held weapon** — see §13.2,
 6. **mounted-child overlay** — gated on `mountedChild` (`entity+0x268`), draws the carried
@@ -716,8 +716,8 @@ Returns 0 (→ weapon hidden) by the rider's **seat type in `parentSlot` (`entit
 `parentSlot` is the seat-type code, classified from the vehicle/emplacement model's
 **user-point name prefix** [orig: `Entity_GetBoneSlotType @ 0x434ed0`] and stored on the rider
 at attach time [orig: `Entity_ProcessVehicleAttach @ 0x435aa0`; plumbing
-`Entity_AttachToVehicleSeat @ 0x4364a0` → `Entity_AttachToVehicleSlot @ 0x4946d0` /
-`Entity_AttachToVehicleSeat_0 @ 0x546b80`]. Same classifier as §9.1/§11:
+`Entity_RequestVehicleAttach @ 0x4364a0` → `Entity_AttachToVehicleSlot @ 0x4946d0` /
+`Entity_AttachToUseGunSlot @ 0x546b80`]. Same classifier as §9.1/§11:
 
 | user-point prefix | `parentSlot` | role | held weapon |
 |---|---|---|---|

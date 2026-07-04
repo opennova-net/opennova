@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 #include "npruntime/game_config.h"       // np::GameConfig — the ONE consolidated server-state config
@@ -20,6 +21,7 @@ class World;
 namespace opennova::bms {
 struct File;
 }
+
 namespace opennova::np {
 
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
@@ -84,6 +86,13 @@ struct NapiNPProtocol {
 	// [orig +0xEBC] connection_list — the NapiListHead SendFiltered / timeouts walk. Modeled as a
 	// vector of nodes (faithful structural translation of the intrusive list).
 	std::vector<NapiNPConnection> connection_list;
+
+	// Reimpl-owned roster version: bumped when any player spawns or disconnects; each
+	// connection's roster_seen_gen drives its 0x16 player-list (re)push so every client's
+	// HUD count tracks the LIVE roster (D-NET-155) [orig: the retail host re-broadcasts
+	// the list via Server_BuildAndBroadcastScoreboard @0x50de00 — its exact trigger set
+	// is a tracked follow-up; the golden single-joiner 31→39 grow is preserved].
+	uint32_t roster_generation = 1;
 };
 
 // [orig: g_napi_np_ctx @0xB5CBC8] NapiNPServerCtx (§6.3) — the game-level singleton, the full
@@ -120,6 +129,21 @@ struct NapiNPServerCtx {
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
 	// NetSystem (retired P8): the drain/emit primitives live in netsim/connection_fan.h.
 	world::World *world = nullptr;
+
+	// Dead host-side players awaiting their respawn release [orig: the death queue +
+	// respawn timers Server_ProcessPlayerDeath / GameEvent_PlayerDeath set (slot +360/+364,
+	// the 620-tick recent-spawn rule); a joiner's respawn instead rides its own deploy
+	// request]. Drained by Server_TickUpdate; §5.60.
+	struct PendingRespawn {
+		world::EntityHandle victim;
+		uint32_t due_tick = 0;
+	};
+	std::vector<PendingRespawn> respawn_queue;
+	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
+	// per-second stream (268 across a whole session): unchanged bodies are withheld and
+	// pending/dead (deploy-screen) recipients get the full set at 1 Hz instead
+	// (change-gated broadcast; D-NET-162 note). Keyed by the zone's packed handle.
+	std::unordered_map<uint16_t, std::vector<uint8_t>> zone_6f_cache;
 	// The loaded mission, read by the initial-state burst for the S2C 0x0B BMS-header body
 	// (bms::encode_header_blob). Non-owning; null on the P2 unit-test path (0x0B skipped + logged).
 	const bms::File *mission = nullptr;

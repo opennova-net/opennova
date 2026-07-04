@@ -198,25 +198,25 @@ int main() {
         e.brain.f[AiBrain::kOutSpeed] = 10;
         e.brain.f[AiBrain::kAlert] = 0;
         sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->anim_slot == kBodyAnimWalkForward);
+        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimWalkForward);
 
         // Moving + alert -> run_forward.
         e.brain.f[AiBrain::kOutSpeed] = 10;
         e.brain.f[AiBrain::kAlert] = 2;
         sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->anim_slot == kBodyAnimRunForward);
+        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimRunForward);
 
         // Stopped -> idle.
         e.brain.f[AiBrain::kOutSpeed] = 0;
         sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->anim_slot == kBodyAnimIdle);
+        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimIdle);
 
         // Dead -> slot left as-is (present pass hides it); not overwritten to idle.
-        w.registry.get(h)->anim_slot = kBodyAnimWalkForward;
+        w.registry.get(h)->body_anim_slot = kBodyAnimWalkForward;
         w.registry.get(h)->alive = false;
         w.registry.get(h)->health = 0;
         sys.process_infantry_state_machine(e, w, 0);
-        CHECK(w.registry.get(h)->anim_slot == kBodyAnimWalkForward);
+        CHECK(w.registry.get(h)->body_anim_slot == kBodyAnimWalkForward);
     }
 
     // ======================= P1: GROUND_FOLLOWWP movement =======================

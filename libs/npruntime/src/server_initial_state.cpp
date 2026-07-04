@@ -159,7 +159,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 		}
 	}
 	std::vector<uint8_t> b;
-	b.reserve(539);
+	b.reserve(640);
 	put_u32(b, now_tick);                        // sessionTick
 	put_u32(b, static_cast<uint32_t>(px));        // spawn pos (16.16)
 	put_u32(b, static_cast<uint32_t>(py));
@@ -167,11 +167,34 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	put_u16(b, static_cast<uint16_t>(yaw));       // yaw  (i16, client <<16)
 	put_u16(b, 0);                                // pitch
 	put_u16(b, 0);                                // roll
-	b.push_back(0x01);                            // gameFlags bit0 (matches the golden 0x0F)
-	for (int i = 0; i < 128; ++i) put_u32(b, 0);  // fixed 128-entry team-score block (zeroed)
-	put_u16(b, 0);                                // waypointCount = 0 (TDM/DM default)
-	put_u16(b, 0);                                // teamNameCount = 0
-	return b;                                     // 4 + 12 + 6 + 1 + 512 + 2 + 2 = 539 B
+	b.push_back(0x01);                            // gameFlags bit0 = spawn zones exist
+	                                              // [orig: SpawnZoneList_GetCount()!=0 @0x502da7]
+	// The fixed 128-i32 block is the per-slot-type SCORE table (client outTable @0xB75FE8;
+	// readers Entity_GetScoreValueBySlotType / WeaponSlot_*), NOT zone data — zeros are the
+	// fresh-round values and benign for the deploy picker (§5.29 correction, witness 2026-07-03).
+	for (int i = 0; i < 128; ++i) put_u32(b, 0);
+	put_u16(b, 0);                                // pool3Count = 0 (player+354 != 1 path)
+	// LOCATION NAMES [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 tail — u16 count +
+	// cstrings from g_location_names (64-B stride), registered at BMS spawn of def-type 2044
+	// markers in spawn order (Entity_SpawnFromBMSRecord @0x40f182-0x40f221; the text is the
+	// mission's Locations/LOCATION%03i string, fallback = the key string)]. The client's 0x0F
+	// handler overwrites its LOCAL copies — the deploy-map name labels (golden ASH_I5A: 6
+	// names, "North Sea Village".."Katulus' Mound"). Our registry carries the 2044 markers'
+	// key strings in promotion (= spawn) order; the mission-text resolution is the client's
+	// own local lookup, so key strings are what a retail host with no text table would send.
+	std::vector<std::string> location_names;
+	if (ctx.world != nullptr) {
+		ctx.world->registry.for_each([&](const world::Entity &e) {
+			if (e.handle.pool() != 3 || e.item_id != 2044) return;
+			location_names.push_back(e.name);
+		});
+	}
+	put_u16(b, static_cast<uint16_t>(location_names.size()));
+	for (const std::string &n : location_names) {
+		for (char ch : n) b.push_back(static_cast<uint8_t>(ch));
+		b.push_back(0);
+	}
+	return b; // 539 B + the location-name block (golden 624 B with the 6 ASH names)
 }
 
 // [orig: NetPacket_CopyTenBytes @0x503900 over the table @0x82F1D8] S2C 0x2A: one 10-byte record.
@@ -266,6 +289,11 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		// 0x10 -> 0x0D -> 0x0C -> 0x20]. The paged emits push directly; the action switch is a no-op here.
 		action = Action::SkipSilent;
 		switch (b.world_stream_phase) {
+		case 0: // phase-0 init [orig: @0x51bc1a case 0]: zero the page cursor, advance to phase 1
+		        // (one no-emit tick). The C2S 0x0A handler re-enters here on every spawn-menu
+		        // request (it writes world_stream_phase = 0 [orig: @0x5132f6]).
+			b.phase_loop_counter = 0;
+			break;
 		case 1: { // 0x10 pool-2 static structures [orig: sub_5042F0]
 			const opennova::StaticEntityBatch full = opennova::netsim::build_pool2_static_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x10, full.records.size(), [&](std::size_t off, std::size_t cnt) {
@@ -445,8 +473,15 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 	// Advance the cursor and handle track transitions / the terminator.
 	if (b.sync_state == 2) {
 		if (b.player_sync_subphase >= 20) {
-			b.sync_state = 4;          // -> world-stream track
-			b.world_stream_phase = 1;
+			// Player-sync tail [orig: 0x51c113..0x51c13c]: game state 9, sync state -> 3, subphase
+			// reset. State 3 PARKS the burst — the world stream starts only when the client's C2S
+			// 0x0A spawn-menu request advances 3 -> 4 (NapiNPServerMsg_HandlePlayerSpawnRequest
+			// @0x513260; golden retail-ashi5a S 0x11 f=201572 -> C 0x0A f=201573 -> first S 0x10
+			// f=201713). Streaming without that request is what raced a cold retail client's
+			// mission build and mis-bound its own CharacterEntity (D-NET-150).
+			b.game_state = 9;          // [orig: CNetPlayer_SetGameState(.., 9) @0x51c11c]
+			b.sync_state = 3;          // [orig: @0x51c134]
+			b.player_sync_subphase = 0; // [orig: @0x51c13c]
 		} else {
 			++b.player_sync_subphase;
 		}
@@ -499,15 +534,47 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 	constexpr std::size_t kPacedMsgsPerTick = 1; // ~1 datagram/host-frame; golden is ~0.4 batch/frame
 	const bool is_remote = (conn.type == 1);
 	const std::size_t budget = is_remote ? kPacedMsgsPerTick : 0xFFFFu; // loopback: effectively unpaced
+
+	// Backlog throttle [orig: 0x51bf1b (player-sync track) / 0x51bc04 (world-stream track)]: the
+	// original emits NOTHING for this player while the connection's outstanding reliable-message
+	// count is >= 20 (`conn+0x768 < 20` guard on BOTH track heads). That backpressure is what
+	// stretches the retail world stream across a cold client's whole mission build (golden
+	// retail-ashi5a: the 0x10 phase alone spans f=201713..217422 — ~15,700 frames of client-paced
+	// trickle) so the 0x0C organic batch lands only once the client is done loading. Structural
+	// stand-in: unconfirmed outbound datagrams = our framed seqs minus the peer's echoed ack
+	// high-water (D-NET-150; exact retail counter maintenance pending an IDA pass).
+	if (is_remote) {
+		const uint32_t sent = conn.seq.next_outbound_seq - 1;
+		const uint32_t outstanding = sent > conn.peer_acked_seq ? sent - conn.peer_acked_seq : 0;
+		if (outstanding >= 20) return step; // stalled on the client's acks — resume when they arrive
+	}
+
 	while (b.sync_state != 5) {
+		if (b.sync_state == 3) {
+			// PARKED [orig: @0x51c134 leaves state 3; the emitter has no state-3 arm]: the world
+			// stream starts only when the client's C2S 0x0A spawn-menu request advances 3 -> 4
+			// (dispatch port of NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260). No timeout —
+			// a joiner that never asks never streams, exactly like retail (D-NET-145 pattern).
+			// The host's own loopback has no 0x0A sender — retail's host-local client sends it
+			// from the shared in-process loading loop [orig: NapiClient_WaitForGameStart
+			// @0x42cc10] — so the type-2 loopback applies the handler's advance inline.
+			if (is_remote) break;
+			b.game_state = 9;         // [orig: CNetPlayer_SetGameState(.., 9) @0x513295]
+			b.sync_state = 4;         // [orig: @0x5132b1]
+			b.world_stream_phase = 0; // [orig: @0x5132f6]
+		}
 		if (is_remote && b.sync_state == 4 && b.world_stream_phase == 8 && !b.loadout_received) {
-			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start, so
-			// the player deploys WITH a loadout (golden order: 0x5A precedes the game-start). The
-			// retail client + the opennova joiner both send 0x2F; this long fallback only guards
-			// against a client that never selects (avoids an infinite stall). ~10 s @ 62 Hz.
-			constexpr uint16_t kLoadoutWaitFallbackTicks = 600;
-			if (++b.loadout_wait_ticks < kLoadoutWaitFallbackTicks) break;
-			b.loadout_received = true;
+			// WAIT for the client's C2S 0x2F (loadout select) -> S2C 0x5A before the game-start
+			// bundle AND the per-frame 0x0A stream — with NO timeout. The golden retail host
+			// emits NOTHING in-match until the joiner's 0x2F: its first S2C 0x0A directly follows
+			// the 0x5A reply (retail-ashi5a f223117-f223118), and the 0x2F is the client's
+			// load-complete signal (it cannot build a loadout before its own weapon.def/AdmDef
+			// table exists). The prior reimpl-invented ~10 s fallback force-opened this gate and
+			// blasted 0x0A at a still-LOADING client; once the records carried real anim-def
+			// bytes, the client's UNGATED off-16 apply (§5.10) touched its mid-build AdmDef table
+			// — the live-witnessed v16 loading wedge (D-NET-145). A joiner that never selects
+			// never deploys, exactly like retail (the session-level timeout reaps true zombies).
+			break;
 		}
 		if (step.messages.size() >= budget) break; // per-tick pacing cap — resume next tick
 		advance_burst_one_phase(ctx, conn, step, now_tick, budget);

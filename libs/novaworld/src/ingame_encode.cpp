@@ -36,7 +36,7 @@ struct Writer {
 	}
 	// Capped VARIABLE-length NUL-terminated string: strlen+1 bytes on the wire, truncated to
 	// (max_chars-1) chars. The retail slot-state writer emits strlen+1
-	// (NetPacket_SerializeWeaponOverlaySlotState @0x505f9b) and the client reads strlen+1 with the
+	// (NetPacket_SerializePlayerSync0x46 @0x505f9b) and the client reads strlen+1 with the
 	// same char cap (NapiNPClientMsg_PlayerSync @0x431370) — never a fixed-width field. (Renamed
 	// from the misnomer `cstr_fixed`.)
 	void cstr_capped(const std::string &s, size_t max_chars) {
@@ -127,8 +127,8 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (rec.alert_byte)                f |= 0x0040; // entity+533  [orig: 0x503e3c]
 		if (rec.action_byte)               f |= 0x0080; // entity+532  [orig: 0x503e60]
 		if (rec.weapon_type_byte)          f |= 0x1000; // entity+100  [orig: 0x503e7f]
-		if (rec.health_byte)               f |= 0x2000; // entity+538  [orig: 0x503ecc]
-		else if (rec.zone_radius_short)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
+		if (rec.zone_number_rank)               f |= 0x2000; // entity+538  [orig: 0x503ecc]
+		else if (rec.zone_radius)         f |= 0x8000; // itemDef+0x40000 path [orig: 0x503f29]
 		if (rec.difficulty_byte)           f |= 0x4000; // entity+624  [orig: 0x503f4c]
 
 		w.u16(f);                       // spawn_flags  [orig: *flags_write_pos @ 0x503f90]
@@ -173,10 +173,10 @@ std::vector<uint8_t> encode_pool_spawn_batch(const PoolSpawnBatch &batch) {
 		if (f & 0x1000) w.u8(rec.weapon_type_byte);  // [orig: 0x503ec0]
 
 		if (f & 0x2000) {               // [orig: 0x503ee5 health block]
-			w.u8(rec.health_byte);      // entity+538 (the break-out byte)
-			w.u16(rec.zone_radius_short);    // entity+350
+			w.u8(rec.zone_number_rank);      // entity+538 (the break-out byte)
+			w.u16(rec.zone_radius);    // entity+350
 		} else if (f & 0x8000) {
-			w.u16(rec.zone_radius_short);    // entity+350 [orig: 0x503f43]
+			w.u16(rec.zone_radius);    // entity+350 [orig: 0x503f43]
 		}
 		if (f & 0x4000) w.u8(rec.difficulty_byte);   // entity+624 [orig: 0x503f7e]
 	}
@@ -218,7 +218,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.euler_y)      f |= 0x0004; // entity+24
 		if (rec.section_mask) f |= 0x0008; // entity+308
 		if (rec.team_byte)    f |= 0x0010; // entity+354 (D-NET-58/62)
-		if (rec.parent_slot)  f |= 0x0020; // entity+36
+		if (rec.entity_flags) f |= 0x0020; // entity+36 Flags dword (D-NET-147)
 		if (rec.bone_a)       f |= 0x0040; // entity+533 (D-NET-94)
 		if (rec.bone_b)       f |= 0x0080; // entity+532 (D-NET-94)
 		if (rec.score_flag)   f |= 0x0100; // entity+624
@@ -237,7 +237,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (f & 0x0004) w.u32(uint32_t(rec.euler_y));
 		if (f & 0x0008) w.u32(uint32_t(rec.section_mask));
 		if (f & 0x0010) w.u8(rec.team_byte);
-		if (f & 0x0020) w.u32(uint32_t(rec.parent_slot));
+		if (f & 0x0020) w.u32(rec.entity_flags);
 		w.u8(rec.ammo_count);          // ALWAYS, entity+290
 		if (f & 0x0040) w.u8(rec.bone_a);
 		if (f & 0x0080) w.u8(rec.bone_b);
@@ -372,7 +372,7 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 	return out; // 14 B
 }
 
-// [orig: Entity_SerializeMountedVehicleState case 1 (write, type 11) @ 0x460560]
+// [orig: Entity_SerializeVehicleState case 1 (write, type 11) @ 0x460560]
 // 15 B mounted / 21 B unmounted; positions are already-compressed u16s.
 std::vector<uint8_t> encode_vehicle_compact_record(const VehicleCompactRecord &rec) {
 	std::vector<uint8_t> out;
@@ -410,7 +410,7 @@ std::vector<uint8_t> encode_player_compact_record(const PlayerCompactRecord &rec
 	Writer w{out};
 	w.u8(rec.vehicle_bone);       // entity+0x157
 	w.u8(rec.seat_type);          // local seat-type byte
-	w.u16(rec.vehicle_handle);    // (pool<<12)|slot or 0xFFFF
+	w.u16(rec.carrier_handle);    // (pool<<12)|slot or 0xFFFF
 	w.u16(rec.pos_x_compressed);  // CompressFixedPoint(entity+4; vehicle-local if mounted)
 	w.u16(rec.pos_y_compressed);  // entity+8
 	w.u16(rec.pos_z_compressed);  // entity+0xC
@@ -469,19 +469,19 @@ std::vector<uint8_t> encode_guided_field_group(GuidedMode mode,
 	return out;
 }
 
-// §5.9.1 weapon-hit record — the inverse of decode_weapon_hit_record.
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]. 17-20 B by the flags gate
-// (0x80 adds parent_byte, 0x40 adds weapon_handle).
-std::vector<uint8_t> encode_weapon_hit_record(const WeaponHitRecord &rec) {
+// §5.9.1 round-event record — the host write side of the tag-2 stream.
+// [orig: NetPacket_SerializeRoundEvent @ 0x504820]. 17-20 B by the flags gate
+// (0x80 adds slot_byte @0x504919, 0x40 adds target_handle @0x504953).
+std::vector<uint8_t> encode_round_event_record(const RoundEventRecord &rec) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u8(rec.flags);
 	w.u8(rec.adm_index);
-	w.u8(rec.hit_subtype);
-	if (rec.flags & 0x80) w.u8(rec.parent_byte);
-	w.u16(rec.target_handle);
-	if (rec.flags & 0x40) w.u16(rec.weapon_handle);
-	w.u16(rec.damage_extra_raw);
+	w.u8(rec.subtype);
+	if (rec.flags & 0x80) w.u8(rec.slot_byte);
+	w.u16(rec.shooter_handle);
+	if (rec.flags & 0x40) w.u16(rec.target_handle);
+	w.u16(rec.shot_seq);
 	w.u16(rec.pos_x_compressed);
 	w.u16(rec.pos_y_compressed);
 	w.u16(rec.pos_z_compressed);
@@ -547,7 +547,10 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 		}
 	}
 
-	// Event loop: tag=1 per-entity compacts, then tag=2 weapon-hits, then tag=0.
+	// Event loop: tag=1 per-entity compacts, then tag=2 round events, then tag=0.
+	// (The original interleaves 1/2 pairs under the send budget
+	// [orig: serialize_entity_states_to_packet @0x50f070]; the retail decode loop
+	// is tag-driven, so grouped order is read identically.)
 	for (const FrameUpdateRecord &rec : fu.records) {
 		switch (rec.cls) {
 		case EntityClass::Player:
@@ -577,9 +580,9 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu) {
 			break;
 		}
 	}
-	for (const WeaponHitRecord &hit : fu.hits) {
+	for (const RoundEventRecord &ev : fu.round_events) {
 		w.u8(2);
-		append(encode_weapon_hit_record(hit));
+		append(encode_round_event_record(ev));
 	}
 	w.u8(0); // event-loop terminator
 	return out;
@@ -598,33 +601,34 @@ std::vector<uint8_t> encode_entity_packet_sub_header(const EntityPacketSubHeader
 // [orig: NetPacket_SerializePlayerState case 3/4 @ 0x4C09C0] — the 43-B extended
 // uplink body, the exact bytes decode_player_extended_uplink consumes. The host
 // driver fills PlayerExtendedUplink from the joiner's owned entity; this writes the
-// wire bytes. Positions are i32 16.16 (vehicle-local when vehicle_handle != 0xFFFF).
+// wire bytes. Positions are i32 16.16 — CARRIER-LOCAL (and heading carrier-relative)
+// when carrier_handle != 0xFFFF, absolute world otherwise (§5.10, D-NET-151).
 std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	w.u16(r.vehicle_handle);
+	w.u16(r.carrier_handle);
 	w.u32(uint32_t(r.pos_x));
 	w.u32(uint32_t(r.pos_y));
 	w.u32(uint32_t(r.pos_z));
 	w.u16(uint16_t(r.heading));
 	w.u16(uint16_t(r.pitch));
-	w.u8(r.reserved_18);
+	w.u8(r.anticheat_flags);
 	w.u8(r.move_input_byte);
-	w.u8(r.flags_xor);
-	w.u8(r.anim_def_1);
-	w.u8(r.anim_def_2);
-	w.u8(r.anim_def_3);
-	w.u8(r.reserved_24);
+	w.u8(r.state_flags_byte);
+	w.u8(r.analog_x);
+	w.u8(r.analog_y);
+	w.u8(r.analog_z);
+	w.u8(r.equipped_adm_index);
 	w.u8(r.stat_byte_0);
 	w.u8(r.stat_byte_1);
-	w.u16(r.weapon_id_0);
-	w.u16(r.fire_counter_0);
-	w.u16(r.weapon_id_1);
-	w.u16(r.fire_counter_1);
-	w.u16(r.weapon_id_2);
-	w.u16(r.fire_counter_2);
-	w.u16(r.weapon_id_3);
-	w.u16(r.fire_counter_3);
+	w.u16(r.priority_handle_0);
+	w.u16(r.priority_score_0);
+	w.u16(r.priority_handle_1);
+	w.u16(r.priority_score_1);
+	w.u16(r.priority_handle_2);
+	w.u16(r.priority_score_2);
+	w.u16(r.priority_handle_3);
+	w.u16(r.priority_score_3);
 	return out;
 }
 
@@ -633,24 +637,39 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 // share the lib). The host-side input is the PlayerReplicationState reply POD.
 // ---------------------------------------------------------------------------
 
-// [orig: NetPacket_SerializeWeaponOverlaySlotState @0x505e80] — round-trips through decode_player_sync.
-std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, bool with_ack) {
+// [orig: NetPacket_SerializePlayerSync0x46 @0x505e80] — round-trips through decode_player_sync.
+// The reply mask is serialized VERBATIM and gates each field, so the server answers exactly the
+// requested fieldFlags (ack bit 0x4000 included) [orig: the per-bit field writes; ack echo
+// @0x505f05]. Field order matches the witnessed write sites (ascending @0x505f9b..@0x506230)
+// and the decode_player_sync read order.
+std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint16_t field_flags) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u8(ctx.player_slot);
-	// field flags — the roster-sync field set; 0x4000 = ack (drives the client's roster walk to slot+1).
-	w.u16(static_cast<uint16_t>(0x1CF7u | (with_ack ? 0x4000u : 0u)));
+	w.u16(field_flags);
 	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // pool-0 entity index [orig: Pool_GetIndexFromPtr @0x505f40]
-	w.cstr_capped(ctx.player_name, 32); // 0x0001 name (variable-length, [orig: slot+40 @0x505f9b])
-	w.cstr_capped(ctx.clan_tag, 16);    // 0x0002 team-string — retail ALWAYS writes "" here (@0x505ff7)
-	w.cstr_capped(std::string(), 16);   // 0x0010 vehicle-name — "" for an on-foot player (@0x50601f)
-	w.u8(ctx.team); // 0x0004 team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
-	w.u8(0);        // 0x0020 vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
-	w.u8(0);        // 0x1000 late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
-	w.u8(0xFF);     // 0x0040 squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
-	w.u8(0);        // 0x0080 side [orig: slot+100577]
-	w.u8(1);        // 0x0400 quality [orig: slot+418; client clamps <=4 @0x431370]
-	w.u32(0);       // 0x0800 vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
+	if (field_flags & 0x0001u)
+		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
+	if (field_flags & 0x0002u)
+		w.cstr_capped(ctx.clan_tag, 16);    // team-string — retail ALWAYS writes "" here (@0x505ff7)
+	if (field_flags & 0x0010u)
+		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
+	if (field_flags & 0x0004u)
+		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
+	if (field_flags & 0x0008u)
+		w.u8(0);        // class/subtype byte (outside the 0x1CF7 set; slot-state default 0)
+	if (field_flags & 0x0020u)
+		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
+	if (field_flags & 0x1000u)
+		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
+	if (field_flags & 0x0040u)
+		w.u8(0xFF);     // squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
+	if (field_flags & 0x0080u)
+		w.u8(0);        // side [orig: slot+100577]
+	if (field_flags & 0x0400u)
+		w.u8(1);        // quality [orig: slot+418; client clamps <=4 @0x431370]
+	if (field_flags & 0x0800u)
+		w.u32(0);       // vehicle timer dword [orig: vehicle_data+420 when mounted, else 0 @0x506230]
 	return out;
 }
 
@@ -665,44 +684,39 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 	return out;
 }
 
-// [orig: write_entity_packet @0x506bb0] — 8-byte spawn confirm.
-std::vector<uint8_t> encode_player_spawn(const PlayerReplicationState &ctx, uint16_t requested_index) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u16(requested_index);
-	w.u16(ctx.entity_handle);
-	w.u8(static_cast<uint8_t>(ctx.team & 0xFF));
-	// [orig @0x506bb0]: when entity Flags&0x100 (every player after Server_PlayerAdd) retail writes
-	// [u16 NetId (entity+348 = the per-team MINIMAP slot id, nonzero — see player_minimap_net_id in
-	// netsim/entity_wire_bridge.cpp / D-NET-137)][u8 animSlot]; only a NON-0x100 entity gets 0/0.
-	// We still send 0/0: the client treats 0x51 as a spawn signal (does not field-parse it), so this
-	// is wire-tolerable, but it is a known divergence of the same D-NET-137 family, not "faithful 0"
-	// (the old D-NET-112 SSN framing predated the minimap-id witness; corrected grill 2026-07-01).
-	w.u16(0);
-	w.u8(0);
-	return out;
-}
+// (encode_player_spawn — the invented unconditional S2C 0x51 "spawn confirm" — was REMOVED,
+// D-NET-148: the original only sends 0x51 for a pending g_team_change_entity_list entry
+// [orig: NapiNPServerMsg_0x029 @0x514F10 -> write_entity_packet @0x506bb0], and the client
+// FIELD-PARSES it (NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 rebinds CharacterEntity from
+// the packed char id) — a zeroed id re-bound the joiner to a vehicle archetype: the DBuggy1
+// shadow. Port the real record from @0x506bb0 when the team-change flow lands.)
 
-// [orig: NapiNPClientMsg_0x016 @0x42FAE0] — round-trips through decode_player_list.
+// [orig: NetPacket_SerializeScoreboard0x16 @0x504b80 (write) / NapiNPClientMsg_PlayerList
+// @0x42FAE0 (read)] — round-trips through decode_player_list. Byte 0 is a FLAGS byte (bit0
+// team-mode, bit1 timed-scores — the old `max` reading was a misnomer); the trailer carries
+// the LIVE [inGameCount][spectatorCount] pair. The HUD "Number of players" = accepted rows −
+// spectatorCount (g_scoreboard_row_count − g_scoreboard_spectator_count) — a hardcoded trailer pinned
+// every client's count at 2 (the v31 HUD-count defect, D-NET-158). Rows are accepted only for
+// 0x46-known slots; spectators are unmodeled (0).
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	w.u8(0x01);                                  // HUD time-vs-score format flag (dword_A823B8)
-	w.u8(static_cast<uint8_t>(players.size()));  // player_count
+	w.u8(0x01);                                  // flags: bit0 team-mode [orig: -> g_scoreboard_flags]
+	w.u8(static_cast<uint8_t>(players.size()));  // row count
 	for (const PlayerListEntry &e : players) {
 		w.u8(e.slot);
 		w.u16(0); // ping
 		w.u16(0); // score
-		w.u16(0); // score2
-		w.u8(static_cast<uint8_t>(e.team << 1)); // (team<<1)|spectator; team=1 -> 0x02, team=2 -> 0x04
+		w.u16(0); // deaths
+		w.u8(static_cast<uint8_t>(e.team << 1)); // bits1+ team, bit0 SPECTATOR (unmodeled 0)
 	}
 	w.u8(0x02); // team_count = 2 (matches retail)
-	for (int i = 0; i < 3; ++i) { // (team_count + 1) iterations
+	for (int i = 0; i < 3; ++i) { // (team_count + 1) blocks {score, deaths, kothHold, ctfFlag}
 		w.u16(0); w.u16(0);
 		w.u8(0); w.u8(0);
 	}
-	w.u8(0x02); // dword_A85B3C
-	w.u8(0x00); // dword_A85B40
+	w.u8(static_cast<uint8_t>(players.size())); // inGameCount  [orig: -> g_scoreboard_ingame_count]
+	w.u8(0x00);                                 // spectatorCount [orig: -> g_scoreboard_spectator_count]
 	return out;
 }
 
@@ -720,6 +734,16 @@ std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout) {
 		w.u8(s.ammo_alt);
 	}
 	w.u8(0xFF);
+	return out;
+}
+
+// [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0 — S2C 0x49 carries the same
+// [u16 handle][u16 weaponSlotCombo] payload as the C2S 0x25 request it relays (§5.58)]
+std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(reload.entity_handle);
+	w.u16(reload.reload_param);
 	return out;
 }
 

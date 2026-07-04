@@ -186,6 +186,136 @@ int main(void) {
     }
     printf("WPN_KNIFE found OK\n");
 
+    /* Loadout/armory fields (§5.57) — KNIFE: no-ammo weapon, all-class blue kit item */
+    if (knife->statid != 100 || knife->clipsize != -1 || knife->startrounds != -1 ||
+        knife->maxclips != 0 || knife->loadout_selectable != 0 || knife->loadout_subclasses != 0) {
+        fprintf(stderr, "FAIL: KNIFE armory scalars: statid=%d clipsize=%d startrounds=%d "
+                        "maxclips=%d sel=%d sub=%d\n",
+                knife->statid, knife->clipsize, knife->startrounds, knife->maxclips,
+                knife->loadout_selectable, knife->loadout_subclasses);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    if (knife->teamfilter_count != 1 || strcmp(knife->teamfilter[0], "blue") != 0 ||
+        knife->charfilter_count != 5 || strcmp(knife->charfilter[0], "medic") != 0 ||
+        strcmp(knife->charfilter[4], "engineer") != 0) {
+        fprintf(stderr, "FAIL: KNIFE filters: team n=%zu '%s', char n=%zu '%s'..'%s'\n",
+                knife->teamfilter_count, knife->teamfilter[0],
+                knife->charfilter_count, knife->charfilter[0], knife->charfilter[4]);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    if (knife->ammo_class[0] != '\0' || knife->weapon_class[0] != '\0') {
+        fprintf(stderr, "FAIL: KNIFE unexpected ammo_class '%s' / weapon_class '%s'\n",
+                knife->ammo_class, knife->weapon_class);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    printf("KNIFE armory fields OK\n");
+
+    /* colt45: two-team secondary with ammoclass */
+    const DefWeaponDef *colt = NULL;
+    for (size_t i = 0; i < wf.count; ++i) {
+        if (strcmp(wf.entries[i].weapon_name, "WPN_colt45") == 0) { colt = &wf.entries[i]; break; }
+    }
+    if (!colt) {
+        fprintf(stderr, "FAIL: could not find WPN_colt45 entry\n");
+        def_free_weapons(&wf);
+        return 1;
+    }
+    if (colt->statid != 200 || colt->maxclips != 5 || colt->clipsize != 7 ||
+        colt->startrounds != 35 || colt->loadout_selectable != 1 ||
+        colt->loadout_subclasses != 0 || colt->ammo_class_count != 1 ||
+        strcmp(colt->ammo_class, "CLASS_45cal") != 0 ||
+        strcmp(colt->weapon_class, "secondary") != 0 ||
+        colt->teamfilter_count != 2 || strcmp(colt->teamfilter[0], "red") != 0 ||
+        strcmp(colt->teamfilter[1], "blue") != 0 || colt->charfilter_count != 4) {
+        fprintf(stderr, "FAIL: colt45 armory fields: statid=%d mc=%d cs=%d sr=%d sel=%d sub=%d "
+                        "ammo='%s'x%d wclass='%s' team n=%zu char n=%zu\n",
+                colt->statid, colt->maxclips, colt->clipsize, colt->startrounds,
+                colt->loadout_selectable, colt->loadout_subclasses, colt->ammo_class,
+                colt->ammo_class_count, colt->weapon_class, colt->teamfilter_count,
+                colt->charfilter_count);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    printf("colt45 armory fields OK\n");
+
+    /* M4AUTO: selectable primary with one subclass + ammobucket; M4: bucket-only variant */
+    if (m4->statid != 300 || m4->maxclips != 10 || m4->loadout_selectable != 1 ||
+        m4->loadout_subclasses != 1 || m4->ammobucket != 1 ||
+        strcmp(m4->ammo_class, "CLASS_556MM") != 0 || m4->ammo_class_count != 1 ||
+        strcmp(m4->weapon_class, "primary") != 0 ||
+        m4->teamfilter_count != 1 || strcmp(m4->teamfilter[0], "blue") != 0 ||
+        m4->charfilter_count != 3 || strcmp(m4->charfilter[0], "rifleman") != 0) {
+        fprintf(stderr, "FAIL: M4AUTO armory fields: statid=%d mc=%d sel=%d sub=%d bucket=%d "
+                        "ammo='%s'x%d wclass='%s' team n=%zu char n=%zu\n",
+                m4->statid, m4->maxclips, m4->loadout_selectable, m4->loadout_subclasses,
+                m4->ammobucket, m4->ammo_class, m4->ammo_class_count, m4->weapon_class,
+                m4->teamfilter_count, m4->charfilter_count);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    const DefWeaponDef *m4plain = NULL;
+    for (size_t i = 0; i < wf.count; ++i) {
+        if (strcmp(wf.entries[i].weapon_name, "WPN_M4") == 0) { m4plain = &wf.entries[i]; break; }
+    }
+    if (!m4plain || m4plain->statid != 301 || m4plain->ammobucket != 1) {
+        fprintf(stderr, "FAIL: WPN_M4 armory fields (found=%d)\n", m4plain != NULL);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    printf("M4AUTO/M4 armory fields OK\n");
+
+    /* def_parse_weapons_memory parity: same bytes, same result */
+    {
+        FILE *fp = fopen(path, "rb");
+        if (!fp) {
+            fprintf(stderr, "FAIL: could not reopen fixture for memory parity\n");
+            def_free_weapons(&wf);
+            return 1;
+        }
+        fseek(fp, 0, SEEK_END);
+        long fsz = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        unsigned char *bytes = (unsigned char *)malloc((size_t)fsz);
+        if (!bytes || fread(bytes, 1, (size_t)fsz, fp) != (size_t)fsz) {
+            fprintf(stderr, "FAIL: could not read fixture bytes\n");
+            fclose(fp);
+            free(bytes);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        fclose(fp);
+
+        DefWeaponsFile wm;
+        memset(&wm, 0, sizeof(wm));
+        if (def_parse_weapons_memory(bytes, (size_t)fsz, &wm) != 0) {
+            fprintf(stderr, "FAIL: def_parse_weapons_memory failed\n");
+            free(bytes);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        free(bytes);
+
+        int parity_ok = wm.count == wf.count;
+        if (parity_ok) {
+            const DefWeaponDef *mm = NULL;
+            for (size_t i = 0; i < wm.count; ++i) {
+                if (strcmp(wm.entries[i].weapon_name, "WPN_M4AUTO") == 0) { mm = &wm.entries[i]; break; }
+            }
+            parity_ok = mm && mm->maxclips == 10 && mm->clipsize == 30 &&
+                        strcmp(mm->weapon_class, "primary") == 0;
+        }
+        def_free_weapons(&wm);
+        if (!parity_ok) {
+            fprintf(stderr, "FAIL: memory-parse parity mismatch\n");
+            def_free_weapons(&wf);
+            return 1;
+        }
+        printf("memory-parse parity OK\n");
+    }
+
     def_free_weapons(&wf);
     printf("PASS: weapon parsing OK\n");
     return 0;

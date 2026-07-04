@@ -39,6 +39,7 @@ bool expect(bool cond, const char *msg) {
 bool run_field_mapping() {
 	w::Entity src_e{};
 	src_e.net_move_input = 3; // the +0x12C movement-input byte (NOT the visual anim slot)
+	src_e.equipped_adm_index = 0x08; // entity+0x2B0 — the wire byte-24 source (D-NET-143)
 	w::AiEntity src_ae{};
 	src_ae.pos[0] = w::to_fixed(12.5);
 	src_ae.pos[1] = w::to_fixed(-34.0);
@@ -47,7 +48,7 @@ bool run_field_mapping() {
 	src_ae.pitch = 0x01000000;
 
 	const nw::PlayerExtendedUplink up = ns::build_player_uplink(src_e, src_ae);
-	if (!expect(up.vehicle_handle == 0xFFFF, "on-foot vehicle handle")) return false;
+	if (!expect(up.carrier_handle == 0xFFFF, "on-foot vehicle handle")) return false;
 	if (!expect(up.pos_x == src_ae.pos[0] && up.pos_y == src_ae.pos[1] && up.pos_z == src_ae.pos[2],
 	            "pos = live AiEntity.pos (16.16)")) return false;
 	if (!expect(up.heading == static_cast<int16_t>(src_ae.heading >> 16),
@@ -56,7 +57,10 @@ bool run_field_mapping() {
 	            "pitch = BAM32 high half")) return false;
 	if (!expect(up.move_input_byte == 3, "movement-input byte carried from Entity.net_move_input"))
 		return false;
-	if (!expect(up.weapon_id_0 == 0 && up.fire_counter_0 == 0,
+	if (!expect(up.equipped_adm_index == 0x08,
+	            "equipped adm index carried from Entity.equipped_adm_index (D-NET-143)"))
+		return false;
+	if (!expect(up.priority_handle_0 == 0 && up.priority_score_0 == 0,
 	            "anti-cheat counters 0 (host receive ignores them)")) return false;
 	return true;
 }
@@ -65,7 +69,7 @@ bool run_field_mapping() {
 bool run_roundtrip_to_host_snap() {
 	// Source: the joiner's live local-player pose (zero low-16 heading/pitch for exact round-trip).
 	w::Entity src_e{};
-	src_e.anim_slot = -1;
+	src_e.body_anim_slot = -1;
 	w::AiEntity src_ae{};
 	const int32_t sx = w::to_fixed(100.0), sy = w::to_fixed(200.0), sz = w::to_fixed(-50.0);
 	src_ae.pos[0] = sx;
@@ -124,11 +128,60 @@ bool run_roundtrip_to_host_snap() {
 	return true;
 }
 
+// The equipped-adm ingest gate (D-NET-143): a table-less world accepts the uplinked byte
+// verbatim; with the armory fed, only an existing entry with category < 11 is stored
+// [orig: case-4 store @0x4C20A3 gated AdmDefs[idx].category < 11; a missing entry
+// (including the 0xFF none sentinel) mirrors the failed AdmDef_GetEntryByIndex leg].
+bool run_equipped_adm_ingest_gate() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	w::Entity peer;
+	peer.kind = w::EntityKind::Organic;
+	peer.item_id = 0x14B9;
+	const w::EntityHandle ph = world.registry.spawn(0, peer);
+	if (!expect(ph.valid(), "peer spawned")) return false;
+	world.cached.local_player = w::EntityHandle::make(0, 7); // not the peer
+
+	ns::PlayerIntent intent;
+	intent.entity_handle = ph.packed;
+	intent.item_type_id = 0x14B9;
+
+	// Table-less world: accepted verbatim (unit path — a live host always feeds weapon.def).
+	intent.equipped_adm_index = 0x30;
+	ns::apply_player_intent(world, intent);
+	if (!expect(world.registry.get(ph)->equipped_adm_index == 0x30,
+	            "table-less world stores the uplinked byte verbatim")) return false;
+
+	// Armory fed: category < 11 passes, the emplaced band (>= 11) and missing entries do not.
+	world.weapons.entries.resize(12);
+	world.weapons.entries[8].valid = true;
+	world.weapons.entries[8].name = "WPN_T";
+	world.weapons.entries[8].category = 3;
+	world.weapons.entries[11].valid = true;
+	world.weapons.entries[11].name = "WPN_EMPL";
+	world.weapons.entries[11].category = 11;
+
+	intent.equipped_adm_index = 8;
+	ns::apply_player_intent(world, intent);
+	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
+	            "category 3 entry passes the < 11 gate")) return false;
+	intent.equipped_adm_index = 11;
+	ns::apply_player_intent(world, intent);
+	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
+	            "category 11 (emplaced band) is NOT stored")) return false;
+	intent.equipped_adm_index = 0xFF;
+	ns::apply_player_intent(world, intent);
+	if (!expect(world.registry.get(ph)->equipped_adm_index == 8,
+	            "the 0xFF none sentinel / missing entry is NOT stored")) return false;
+	return true;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok = run_field_mapping() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
+	ok = run_equipped_adm_ingest_gate() && ok;
 	return ok ? 0 : 1;
 }

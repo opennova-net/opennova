@@ -41,6 +41,40 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
 	return w;
 }
 
+// [orig: Entity_TransformWorldToLocal @ 0x43BB50] — see ingame_decode.h. The exact
+// transpose of the chain above, applied in reverse order (yaw, pitch, roll). The
+// disassembly stores sines scaled by -2^22 (dbl_7C57B0) and subtracts the products
+// (@0x4c... via imul/shrd-22); writing the sines positive and flipping those signs is
+// the identical arithmetic. Position only — the original's out[3..5] pose tail is
+// heading subtraction + pitch/roll pass-through, composed by callers.
+WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
+                                           int32_t px, int32_t py, int32_t pz,
+                                           uint32_t yaw_bam, uint32_t pitch_bam,
+                                           uint32_t roll_bam) {
+	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
+	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
+		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
+		s = int32_t(std::sin(a) * 4194304.0);      // *2^22, ftol truncates
+		c = int32_t(std::cos(a) * 4194304.0);
+	};
+	int32_t sr, cr, sp, cp, sy, cy;
+	q(roll_bam, sr, cr); q(pitch_bam, sp, cp); q(yaw_bam, sy, cy);
+	auto m = [](int32_t a, int32_t b) -> int32_t { // (a*b) >> 22 (imul + shrd ,22)
+		return int32_t((int64_t(a) * int64_t(b)) >> 22);
+	};
+	const int32_t dx = wx - px;                // @0x43bb65-0x43bb78: delta first
+	const int32_t dy = wy - py;
+	const int32_t dz = wz - pz;
+	const int32_t tx = m(dx, cy) + m(dy, sy);  // yaw^-1 about Z (@0x43bc17-0x43bc38)
+	const int32_t ty = m(dy, cy) - m(dx, sy);  //                (@0x43bc44-0x43bc88)
+	WorldPose l;
+	l.x = m(tx, cp) + m(dz, sp);               // pitch^-1 about Y (@0x43bc6e-0x43bcb2)
+	const int32_t tz = m(dz, cp) - m(tx, sp);  //                  (@0x43bc90-0x43bcae)
+	l.y = m(ty, cr) + m(tz, sr);               // roll^-1 about X (@0x43bcb4-0x43bcd0)
+	l.z = m(tz, cr) - m(ty, sr);               //                 (@0x43bcd3-0x43bcf0)
+	return l;
+}
+
 namespace {
 
 // Bounded cursor — every read is bounds-checked vs `end`. On underflow we
@@ -172,10 +206,10 @@ bool decode_pool_spawn_batch(const uint8_t *body, size_t len,
 		if (rec.spawn_flags & 0x1000) rec.weapon_type_byte = c.u8();
 
 		if (rec.spawn_flags & 0x2000) {
-			rec.health_byte = c.u8();
-			rec.zone_radius_short = c.u16();
+			rec.zone_number_rank = c.u8();
+			rec.zone_radius = c.u16();
 		} else if (rec.spawn_flags & 0x8000) {
-			rec.zone_radius_short = c.u16();
+			rec.zone_radius = c.u16();
 		}
 		if (rec.spawn_flags & 0x4000) rec.difficulty_byte = c.u8();
 
@@ -275,7 +309,7 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		if (rec.field_flags & 0x0004) rec.euler_y = int32_t(c.u32()); // entity+24
 		if (rec.field_flags & 0x0008) rec.section_mask = int32_t(c.u32());
 		if (rec.field_flags & 0x0010) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
-		if (rec.field_flags & 0x0020) rec.parent_slot = int32_t(c.u32());
+		if (rec.field_flags & 0x0020) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
 		if (rec.field_flags & 0x0040) rec.bone_a = c.u8();
 		if (rec.field_flags & 0x0080) rec.bone_b = c.u8();
@@ -297,7 +331,7 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 	out = PlayerList{};
 	Cursor c{body, body + len, true};
-	out.max_players = c.u8();
+	out.flags = c.u8();
 	out.player_count = c.u8();
 	if (!c.ok) return false;
 	out.players.reserve(out.player_count);
@@ -324,8 +358,8 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 		out.teams.push_back(t);
 		if (!c.ok) return false;
 	}
-	out.extra1 = c.u8();
-	out.extra2 = c.u8();
+	out.in_game_count = c.u8();
+	out.spectator_count = c.u8();
 	return (c.p == c.end);
 }
 
@@ -501,7 +535,7 @@ bool decode_player_compact_record(const uint8_t *body, size_t len,
 	Cursor c{body, body + len, true};
 	out.vehicle_bone      = c.u8();
 	out.seat_type         = c.u8();
-	out.vehicle_handle    = c.u16();
+	out.carrier_handle    = c.u16();
 	out.pos_x_compressed  = c.u16();
 	out.pos_y_compressed  = c.u16();
 	out.pos_z_compressed  = c.u16();
@@ -519,7 +553,7 @@ bool decode_player_compact_record(const uint8_t *body, size_t len,
 }
 
 // §5.13 vehicle compact record (mode 2, format 11). 15 B mounted / 21 B not.
-// [orig: Entity_SerializeMountedVehicleState @ 0x460560]
+// [orig: Entity_SerializeVehicleState @ 0x460560]
 bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
                                    VehicleCompactRecord &out, size_t &consumed) {
 	consumed = 0;
@@ -530,8 +564,8 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 	out.pos_z_compressed   = c.u16();
 	out.euler_z            = int16_t(c.u16());
 	out.flags_byte         = c.u8();
-	out.is_mounted         = (out.flags_byte & 0x04) != 0;
-	if (out.is_mounted) {
+	out.is_dead_pose         = (out.flags_byte & 0x04) != 0;
+	if (out.is_dead_pose) {
 		// Mounted: the remaining two Euler components (entity+584/+580).
 		out.euler_y = int16_t(c.u16());
 		out.euler_x = int16_t(c.u16());
@@ -545,7 +579,7 @@ bool decode_vehicle_compact_record(const uint8_t *body, size_t len,
 	}
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
-	return consumed == (out.is_mounted ? size_t(15) : size_t(21));
+	return consumed == (out.is_dead_pose ? size_t(15) : size_t(21));
 }
 
 // §5.14 infantry / AI compact record (mode 2, format 11). 14 B fixed.
@@ -593,29 +627,29 @@ bool decode_player_extended_uplink(const uint8_t *body, size_t len,
                                    PlayerExtendedUplink &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
-	out.vehicle_handle = c.u16();
+	out.carrier_handle = c.u16();       // ground entity (any pool); 0xFFFF = free
 	out.pos_x          = int32_t(c.u32());
 	out.pos_y          = int32_t(c.u32());
 	out.pos_z          = int32_t(c.u32());
 	out.heading        = int16_t(c.u16());
 	out.pitch          = int16_t(c.u16());
-	out.reserved_18    = c.u8();
+	out.anticheat_flags  = c.u8();      // host apply discards this byte
 	out.move_input_byte  = c.u8();
-	out.flags_xor      = c.u8();
-	out.anim_def_1     = c.u8();
-	out.anim_def_2     = c.u8();
-	out.anim_def_3     = c.u8();
-	out.reserved_24    = c.u8();
+	out.state_flags_byte = c.u8();      // raw entity+0x24 low byte [orig: replace-bits apply @0x4c1e4d]
+	out.analog_x     = c.u8();
+	out.analog_y     = c.u8();
+	out.analog_z     = c.u8();
+	out.equipped_adm_index = c.u8(); // entity+0x2B0 [orig: case-4 store @0x4C20A3]
 	out.stat_byte_0    = c.u8();
 	out.stat_byte_1    = c.u8();
-	out.weapon_id_0    = c.u16();
-	out.fire_counter_0 = c.u16();
-	out.weapon_id_1    = c.u16();
-	out.fire_counter_1 = c.u16();
-	out.weapon_id_2    = c.u16();
-	out.fire_counter_2 = c.u16();
-	out.weapon_id_3    = c.u16();
-	out.fire_counter_3 = c.u16();
+	out.priority_handle_0 = c.u16();
+	out.priority_score_0  = c.u16();
+	out.priority_handle_1 = c.u16();
+	out.priority_score_1  = c.u16();
+	out.priority_handle_2 = c.u16();
+	out.priority_score_2  = c.u16();
+	out.priority_handle_3 = c.u16();
+	out.priority_score_3  = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 43;
@@ -666,23 +700,24 @@ bool decode_client_checksum_reply(const uint8_t *body, size_t len,
 	return consumed == 5;
 }
 
-// §5.9.1 weapon-hit record. 17-20 B variable by flags gate (0x80, 0x40).
-// [orig: NetPacket_DeserializeWeaponHit @ 0x42F270]
-bool decode_weapon_hit_record(const uint8_t *body, size_t len,
-                              WeaponHitRecord &out, size_t &consumed) {
+// §5.9.1 round-event record. 17-20 B variable by flags gate (0x80, 0x40).
+// [orig: NetPacket_DeserializeRoundEvent @ 0x42F270 (client read); host write side
+// NetPacket_SerializeRoundEvent @ 0x504820]
+bool decode_round_event_record(const uint8_t *body, size_t len,
+                               RoundEventRecord &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
 	out.flags        = c.u8();
 	out.adm_index    = c.u8();
-	out.hit_subtype  = c.u8();
+	out.subtype      = c.u8();
 	if (out.flags & 0x80) {
-		out.parent_byte = c.u8();
+		out.slot_byte = c.u8();
 	}
-	out.target_handle = c.u16();
+	out.shooter_handle = c.u16();
 	if (out.flags & 0x40) {
-		out.weapon_handle = c.u16();
+		out.target_handle = c.u16();
 	}
-	out.damage_extra_raw = c.u16();
+	out.shot_seq         = c.u16();
 	out.pos_x_compressed = c.u16();
 	out.pos_y_compressed = c.u16();
 	out.pos_z_compressed = c.u16();
@@ -691,8 +726,8 @@ bool decode_weapon_hit_record(const uint8_t *body, size_t len,
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	const size_t expected = 17
-		+ (out.has_parent_byte() ? 1u : 0u)
-		+ (out.has_weapon_handle() ? 2u : 0u);
+		+ (out.has_slot_byte() ? 1u : 0u)
+		+ (out.has_target_handle() ? 2u : 0u);
 	return consumed == expected;
 }
 
@@ -883,17 +918,17 @@ bool decode_frame_update(const uint8_t *body, size_t len,
 		}
 	}
 
-	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = weapon-hit.
+	// Event loop: tag 0 = EOB, 1 = per-entity compact, 2 = round event.
 	while (c.ok && c.p < c.end) {
 		const uint8_t tag = c.u8();
 		if (tag == 0) return finish(true);
 		if (tag == 2) {
-			WeaponHitRecord wh;
+			RoundEventRecord re;
 			size_t consumed = 0;
-			if (!decode_weapon_hit_record(c.p, size_t(c.end - c.p), wh, consumed))
+			if (!decode_round_event_record(c.p, size_t(c.end - c.p), re, consumed))
 				return finish(false);
 			c.p += consumed;
-			out.hits.push_back(wh);
+			out.round_events.push_back(re);
 			continue;
 		}
 		if (tag == 1) {
@@ -1187,12 +1222,15 @@ bool decode_burst_loadout_request(const uint8_t *body, size_t len,
 	return consumed == 10;
 }
 
-// C2S 0x29 entity-packet request. [orig: NapiNPServerMsg_0x029 @ 0x514F10]
-bool decode_burst_entity_request(const uint8_t *body, size_t len,
-                                 BurstEntityRequest &out, size_t &consumed) {
+// C2S 0x29 team/spawn ack. [orig: emitted with team_index+1 by the client's 0x51 apply
+// @0x431c99 and at deploy/team pick; the server reads it as a g_team_change_entity_list
+// index — NapiNPServerMsg_0x029 @0x514F10 @0x514f7c — replying 0x51 only for a pending
+// team-change entry (D-NET-148)]
+bool decode_team_spawn_ack(const uint8_t *body, size_t len,
+                           TeamSpawnAck &out, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};
-	out.buffer_index = c.u16();
+	out.team_change_index = c.u16();
 	if (!c.ok) return false;
 	consumed = size_t(c.p - body);
 	return consumed == 2;
@@ -1541,7 +1579,7 @@ bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConf
 	Cursor c{body, body + len, true};
 	for (int i = 0; i < 4; ++i) out.skipped[i] = c.u32();
 	out.session_config = c.u8();
-	out.team_mode = c.u8();
+	out.local_player_slot = c.u8();
 	out.max_players = c.u8();
 	out.skipped4 = c.u32();
 	out.trailing = c.u8();

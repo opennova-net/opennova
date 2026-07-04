@@ -15,6 +15,30 @@ JoinerConnection::JoinerConnection(ClientSession::Config config, std::string pla
 		: cfg_(std::move(config)), player_name_(std::move(player_name)) {
 	conn_.type = 2;                  // client-side connection (the joiner's view of the host)
 	conn_.player_name = player_name_;
+	// Game-session 0x42 character vars — the per-side character selection the HOST folds into
+	// our player record (per-side minimap/char ids, requested side, soldier classes, avatar
+	// bytes). Without them the host stamps animSlot/NetId defaults and OTHER retail clients bind
+	// our player to a wrong-type character slot (the mirror of D-NET-146). Values = a fresh
+	// retail profile's defaults, wire-witnessed on both LAN captures (retail-ashi5a f=199140 /
+	// retail_join_v18 f=47676): CI0=512 (0x0200) CI1=33287 (0x8207) TR=-1 CTA=CTB=8 (rifleman)
+	// VCA=1 VCB=4. Only append when the caller hasn't provided its own set. [orig: client emit
+	// CNapiServerInfo_SerializeToSession @0x4c3650, type-2 chunks; host consume
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 -> Server_PlayerAdd @0x51cbc0]
+	const bool has_char_vars = [&] {
+		for (const auto &v : cfg_.cu_vars) {
+			if (v.name == "CI0" || v.name == "VCA") return true;
+		}
+		return false;
+	}();
+	if (!has_char_vars) {
+		const std::pair<const char *, const char *> kCharVars[] = {
+				{"CI0", "512"}, {"CI1", "33287"}, {"TR", "-1"},  {"CTA", "8"},
+				{"CTB", "8"},   {"VCA", "1"},     {"VCB", "4"},
+		};
+		for (const auto &[name, value] : kCharVars) {
+			cfg_.cu_vars.push_back(ClientSession::Config::CuVar{name, value, /*type=*/2});
+		}
+	}
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
@@ -41,9 +65,13 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	return nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_AUTH,
-			client_auth_to_bytes(make_client_auth(cfg_, player_name_, server_hk_, conn_.client_scrk)));
+	ClientAuth auth = make_client_auth(cfg_, player_name_, server_hk_, conn_.client_scrk);
+	// The GAME-session 0x42's NA TLV is the player CALLSIGN — the retail host's display-name
+	// source (the golden joiner's 0x0C record name equals its NA). The "jop:cus2" gate tag is
+	// the NOVAWORLD-gate connect's NA, not the game join's. [wire: retail-ashi5a f=199140
+	// na="FooPlayer" / retail_join_v18 f=47676 na="TestPlayer"; net-re §5.0b]
+	auth.na = player_name_;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
@@ -152,6 +180,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == 0x0A) {
 			// Per-frame world snapshot — surface for the caller's NetClientView.
 			out.inbound_0a.push_back(m.payload);
+		} else if (m.tag == 0x11) {
+			// S2C 0x11 ends the player-sync bundle; the retail client answers with the EMPTY C2S
+			// 0x0A spawn-menu request — the message that advances the host's session sync state
+			// to 4 and starts the §5.2a world stream [orig: NapiNPServerMsg_HandlePlayerSpawnRequest
+			// @0x513260; golden retail-ashi5a S 0x11 f=201572 -> C 0x0A f=201573]. A host (ours or
+			// retail) never streams the world to a joiner that hasn't sent it (D-NET-150).
+			out.outbound.push_back(frame_inner(0x0A, {}));
 		}
 		// Other tags (game-start bundle scalars, world-state-load 0x0F) are not entity data.
 	}

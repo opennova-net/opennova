@@ -184,7 +184,7 @@ bool run_roundtrip() {
 
 	// --- 3) In-match per-frame loop: client 0x0C -> apply_in_match_c2s -> Server_TickUpdate -> 0x0A fold ---
 	PlayerExtendedUplink up;
-	up.vehicle_handle = 0xFFFF;
+	up.carrier_handle = 0xFFFF;
 	up.pos_x = w::to_fixed(100.0);
 	up.pos_y = w::to_fixed(200.0);
 	up.pos_z = w::to_fixed(-50.0);

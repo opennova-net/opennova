@@ -117,7 +117,7 @@ bool check_pool1_common(const nw::PoolSpawnRecord &r) {
 	// so it must stay ABSENT (golden ASH_I5A vehicle records carry no 0x8000 flag). The old
 	// build planted Entity::health here (witness 2026-07-02).
 	if (!expect((r.spawn_flags & 0x8000) == 0, "zone-radius word absent")) return false;
-	if (!expect(r.zone_radius_short == 0, "zone radius not populated")) return false;
+	if (!expect(r.zone_radius == 0, "zone radius not populated")) return false;
 	return true;
 }
 

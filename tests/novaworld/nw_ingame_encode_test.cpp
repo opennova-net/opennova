@@ -167,7 +167,7 @@ bool records_equal(const StaticEntityRecord &a, const StaticEntityRecord &b) {
 	       a.pos_x == b.pos_x && a.pos_y == b.pos_y && a.pos_z == b.pos_z &&
 	       a.euler_z == b.euler_z && a.euler_x == b.euler_x && a.euler_y == b.euler_y &&
 	       a.section_mask == b.section_mask && a.team_byte == b.team_byte &&
-	       a.parent_slot == b.parent_slot && a.ammo_count == b.ammo_count &&
+	       a.entity_flags == b.entity_flags && a.ammo_count == b.ammo_count &&
 	       a.bone_a == b.bone_a && a.bone_b == b.bone_b && a.score_flag == b.score_flag &&
 	       a.weapon_byte == b.weapon_byte && a.attach_ref == b.attach_ref;
 }
@@ -187,7 +187,7 @@ int test_static_batch_all_flags() {
 	r.euler_y      = int32_t(0x05060708); // 0x0004
 	r.section_mask = int32_t(0x40);       // 0x0008
 	r.team_byte    = 2;                   // 0x0010
-	r.parent_slot  = int32_t(0x2003);     // 0x0020
+	r.entity_flags = 0x04020400u;         // 0x0020 (entity+36 Flags; golden building value)
 	r.ammo_count   = 30;                  // always
 	r.bone_a       = 5;                   // 0x0040
 	r.bone_b       = 6;                   // 0x0080
@@ -314,8 +314,8 @@ int test_pool_spawn_roundtrip_full() {
 	r.alert_byte = 7;                // -> 0x0040
 	r.action_byte = 9;               // -> 0x0080
 	r.weapon_type_byte = 3;          // -> 0x1000
-	r.health_byte = 80;              // -> 0x2000 (+ zone_radius_short)
-	r.zone_radius_short = 1000;
+	r.zone_number_rank = 80;              // -> 0x2000 (+ zone_radius)
+	r.zone_radius = 1000;
 	r.difficulty_byte = 4;           // -> 0x4000
 	in.records.push_back(r);
 
@@ -349,8 +349,8 @@ int test_pool_spawn_roundtrip_full() {
 	EXPECT(d.alert_byte == 7);
 	EXPECT(d.action_byte == 9);
 	EXPECT(d.weapon_type_byte == 3);
-	EXPECT(d.health_byte == 80);
-	EXPECT(d.zone_radius_short == 1000);
+	EXPECT(d.zone_number_rank == 80);
+	EXPECT(d.zone_radius == 1000);
 	EXPECT(d.difficulty_byte == 4);
 	std::printf("PASS pool_spawn_roundtrip_full\n");
 	return 0;
@@ -381,11 +381,11 @@ int test_pool_spawn_minimal() {
 }
 
 int test_pool_spawn_health_alt_8000() {
-	// health_byte 0 but zone_radius_short non-zero -> 0x8000 path (zone_radius_short only).
+	// zone_number_rank 0 but zone_radius non-zero -> 0x8000 path (zone_radius only).
 	PoolSpawnBatch in;
 	PoolSpawnRecord r;
 	r.slot_id = 0x1003; r.item_type_id = 0x0100;
-	r.health_byte = 0; r.zone_radius_short = 250;
+	r.zone_number_rank = 0; r.zone_radius = 250;
 	r.bone_byte = 2;
 	in.records.push_back(r);
 
@@ -393,8 +393,8 @@ int test_pool_spawn_health_alt_8000() {
 	PoolSpawnBatch out;
 	EXPECT(decode_pool_spawn_batch(wire.data(), wire.size(), out));
 	EXPECT(out.records.size() == 1);
-	EXPECT(out.records[0].health_byte == 0);
-	EXPECT(out.records[0].zone_radius_short == 250);
+	EXPECT(out.records[0].zone_number_rank == 0);
+	EXPECT(out.records[0].zone_radius == 250);
 	std::printf("PASS pool_spawn_health_alt_8000\n");
 	return 0;
 }
@@ -487,7 +487,7 @@ int test_vehicle_compact_roundtrip_mounted() {
 	size_t consumed = 0;
 	EXPECT(decode_vehicle_compact_record(wire.data(), wire.size(), d, consumed));
 	EXPECT(consumed == 15);
-	EXPECT(d.is_mounted);
+	EXPECT(d.is_dead_pose);
 	EXPECT(d.parent_slot_handle == 0x1033);
 	EXPECT(d.pos_y_compressed == 0x2222);
 	EXPECT(d.euler_z == int16_t(0x4444));
@@ -519,7 +519,7 @@ int test_vehicle_compact_roundtrip_unmounted() {
 	size_t consumed = 0;
 	EXPECT(decode_vehicle_compact_record(wire.data(), wire.size(), d, consumed));
 	EXPECT(consumed == 21);
-	EXPECT(!d.is_mounted);
+	EXPECT(!d.is_dead_pose);
 	EXPECT(d.parent_slot_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xAAAA);
 	EXPECT(d.weapon_x == 0x0101);
@@ -536,7 +536,7 @@ int test_player_compact_roundtrip() {
 	PlayerCompactRecord r;
 	r.vehicle_bone      = 1;
 	r.seat_type         = 2;
-	r.vehicle_handle    = 0xFFFF;     // on foot
+	r.carrier_handle    = 0xFFFF;     // on foot
 	r.pos_x_compressed  = 0xBE8F;
 	r.pos_y_compressed  = 0xB504;
 	r.pos_z_compressed  = 0xBCD7;
@@ -556,7 +556,7 @@ int test_player_compact_roundtrip() {
 	EXPECT(decode_player_compact_record(wire.data(), wire.size(), d, consumed));
 	EXPECT(consumed == 18);
 	EXPECT(d.vehicle_bone == 1 && d.seat_type == 2);
-	EXPECT(d.vehicle_handle == 0xFFFF);
+	EXPECT(d.carrier_handle == 0xFFFF);
 	EXPECT(d.pos_x_compressed == 0xBE8F);
 	EXPECT(d.pos_z_compressed == 0xBCD7);
 	EXPECT(d.yaw_byte == 0x40 && d.pitch_byte == 0x10);
@@ -564,6 +564,23 @@ int test_player_compact_roundtrip() {
 	EXPECT(d.anim_state_id == 0x05 && d.anim_channel_ratio == 0x10);
 	EXPECT(d.anim_def_index == 0x07 && d.health_class_byte == 0x80);
 	std::printf("PASS player_compact_roundtrip\n");
+	return 0;
+}
+
+int test_weapon_reload_roundtrip() {
+	// §5.58 S2C 0x49 (the C2S 0x25 relay) -> 4 B fixed.
+	WeaponReload r;
+	r.entity_handle = 0x1005; // pool 1, slot 5
+	r.reload_param  = 0x00C3; // weaponSlotCombo = category*65 + rank
+	std::vector<uint8_t> wire = encode_weapon_reload(r);
+	EXPECT(wire.size() == 4);
+	WeaponReload d;
+	size_t consumed = 0;
+	EXPECT(decode_weapon_reload(wire.data(), wire.size(), d, consumed));
+	EXPECT(consumed == 4);
+	EXPECT(d.entity_handle == 0x1005);
+	EXPECT(d.reload_param == 0x00C3);
+	std::printf("PASS weapon_reload_roundtrip\n");
 	return 0;
 }
 
@@ -622,7 +639,7 @@ int test_frame_update_roundtrip() {
 		in.state_flag_byte = 0x07; in.mount_handle = 0xFFFF; in.health = 96; in.state_word = -3;
 
 		FrameUpdateRecord p; p.handle = 0x0001; p.type_id = 100; p.cls = EntityClass::Player;
-		p.player.vehicle_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
+		p.player.carrier_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
 		in.records.push_back(p);
 		FrameUpdateRecord v; v.handle = 0x1002; v.type_id = 200; v.cls = EntityClass::Vehicle;
 		v.vehicle.parent_slot_handle = 0xFFFF; v.vehicle.flags_byte = 0x00;
@@ -632,8 +649,8 @@ int test_frame_update_roundtrip() {
 		inf.infantry.vehicle_slot_handle = 0xFFFF; inf.infantry.pos_x_compressed = 0xABCD;
 		in.records.push_back(inf);
 
-		WeaponHitRecord hit; hit.flags = 0x00; hit.adm_index = 9; hit.target_handle = 0x100A;
-		hit.pos_x_compressed = 0x0011; in.hits.push_back(hit);
+		RoundEventRecord hit; hit.flags = 0x00; hit.adm_index = 9; hit.shooter_handle = 0x100A;
+		hit.pos_x_compressed = 0x0011; in.round_events.push_back(hit);
 
 		std::vector<uint8_t> wire = encode_frame_update(in);
 		FrameUpdate out;
@@ -650,7 +667,8 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.records[1].cls == EntityClass::Vehicle && out.records[1].vehicle.weapon_x == 0x0101);
 		EXPECT(out.records[1].vehicle.weapon_aim_y == 0x0303);
 		EXPECT(out.records[2].cls == EntityClass::Infantry && out.records[2].infantry.pos_x_compressed == 0xABCD);
-		EXPECT(out.hits.size() == 1 && out.hits[0].adm_index == 9 && out.hits[0].target_handle == 0x100A);
+		EXPECT(out.round_events.size() == 1 && out.round_events[0].adm_index == 9 &&
+		       out.round_events[0].shooter_handle == 0x100A);
 	}
 
 	// (b) env sub-block (flags2=0x02), no records.
@@ -787,6 +805,10 @@ int test_player_list_roundtrip() {
 		EXPECT(static_cast<uint8_t>(out.players[i].flags >> 1) == players[i].team); // team = flags >> 1
 	}
 	EXPECT(out.team_count == 2);
+	// Live trailer counts (D-NET-158): inGame = row count, spectators unmodeled 0 — the HUD
+	// player count is acceptedRows − spectatorCount, so a hardcoded trailer pinned it at 2.
+	EXPECT(out.in_game_count == players.size());
+	EXPECT(out.spectator_count == 0);
 	std::printf("PASS player_list_roundtrip\n");
 	return 0;
 }
@@ -983,6 +1005,7 @@ int main() {
 	rc |= test_vehicle_compact_roundtrip_mounted();
 	rc |= test_vehicle_compact_roundtrip_unmounted();
 	rc |= test_player_compact_roundtrip();
+	rc |= test_weapon_reload_roundtrip();
 	rc |= test_player_sync_roundtrip();
 	rc |= test_player_list_roundtrip();
 	rc |= test_terrain_load_header_chunk_roundtrip();

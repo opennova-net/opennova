@@ -177,6 +177,17 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# the vehicle record), and hp -> health/health_max (vehicles spawn at full health on the wire).
 	if options.get("item_db") != null:
 		_sim.resolve_item_traits(options["item_db"])
+	# Armory table (weapon.def) onto the sim world — the 0x5A ammo resolve + 0x2F filter source
+	# and the uplink equipped-weapon gate (D-NET-141/143). Missing root/file leaves the table
+	# empty; the loadout reply then degrades to the tracked request-echo fallback.
+	if options.get("resource_root") != null:
+		if _sim.load_weapon_table(options["resource_root"], "weapon.def") != OK:
+			push_warning("MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo")
+		# Ballistics table (ammo.def) + the round_type resolve — the authoritative round
+		# sim's data feed (fire -> flight -> damage -> death; net-re §5.60). After the
+		# armory so every adm's fired round binds to its ammo index.
+		if _sim.load_ammo_table(options["resource_root"], "ammo.def") != OK:
+			push_warning("MissionRuntime: ammo.def not loaded — client fire echoes without authoritative rounds")
 	_log_infantry_debug_mounts()
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
@@ -197,8 +208,8 @@ func local_player_yaw_deg() -> float:
 func local_player_pitch_deg() -> float:
 	return _sim.get_local_player_pitch_deg() if _sim != null else 0.0
 
-func local_player_anim_slot() -> int:
-	return _sim.get_local_player_anim_slot() if _sim != null else -1
+func local_player_body_anim_slot() -> int:
+	return _sim.get_local_player_body_anim_slot() if _sim != null else -1
 
 func local_player_anim_key() -> String:
 	return String(_sim.get_local_player_anim_key()) if _sim != null else ""

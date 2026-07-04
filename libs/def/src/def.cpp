@@ -380,12 +380,84 @@ static void parse_pos_aligned(Token *vals, int n, int *out) {
 /* Ammo Parsing                                                              */
 /* ========================================================================= */
 
+/* `flag <name>` -> bit, matched first-name-wins in TABLE ORDER (three 'internal' names
+ * exist; a data file writing "internal" hits 0x40000 first, faithfully).
+ * [orig: the 30-entry table @0x813500; AmmoDef_ParseProperty @0x40a2d0] */
+static const struct { const char *name; unsigned int bit; } k_ammo_flag_names[] = {
+    {"ignoredmg", 0x1u},        {"ignore", 0x2u},
+    {"shrapnel", 0x4u},         {"silenced", 0x8u},
+    {"water", 0x10u},           {"detonatesatchels", 0x20u},
+    {"nosmoke", 0x40u},         {"nocollide", 0x80u},
+    {"nogravity", 0x100u},      {"hasitem", 0x200u},
+    {"instantkillzone", 0x400u},{"ownerimmune", 0x800u},
+    {"useownmove", 0x2000u},    {"noage", 0x4000u},
+    {"forcetracer", 0x8000u},   {"shotgun", 0x10000u},
+    {"claymore", 0x20000u},     {"nooitems", 0x80000u},
+    {"nomitems", 0x100000u},    {"noditems", 0x200000u},
+    {"ignorfoilage", 0x4000000u},{"priority", 0x800000u},
+    {"clipwater", 0x1000000u},  {"clipwaterfx", 0x20000000u},
+    {"designatetarget", 0x2000000u}, {"lawr", 0x8000000u},
+    {"fgrenade", 0x10000000u},  {"internal", 0x40000u},
+    {"internal", 0x1000u},      {"internal", 0x400000u},
+};
+
+/* `kztype rounds_kz_<X>` -> index 1..7; 0/unknown rejected like the original's
+ * "bad kill zone type" warning path. [orig: 8-name table @0x8133E0] */
+static const char *k_ammo_kz_names[8] = {
+    "rounds_kz_null",   "rounds_kz_knife", "rounds_kz_standard", "rounds_kz_medic",
+    "rounds_kz_radiusblast", "rounds_kz_c4", "rounds_kz_bullets", "rounds_kz_slash",
+};
+
+/* Decimal string -> 16.16 fixed point (integer math; matches the values ammo.def uses:
+ * "1", "0.5", ".04"). [orig: Math_ParseFixedPoint16 @0x6131f0] */
+static int parse_fixed16_n(const char *s, size_t len) {
+    size_t i = 0;
+    int neg = 0;
+    long long ip = 0, fp = 0, scale = 1;
+    if (i < len && (s[i] == '-' || s[i] == '+')) neg = (s[i] == '-'), ++i;
+    for (; i < len && s[i] >= '0' && s[i] <= '9'; ++i) ip = ip * 10 + (s[i] - '0');
+    if (i < len && s[i] == '.') {
+        for (++i; i < len && s[i] >= '0' && s[i] <= '9' && scale < 1000000; ++i) {
+            fp = fp * 10 + (s[i] - '0');
+            scale *= 10;
+        }
+    }
+    long long v = (ip << 16) + (fp * 65536 + scale / 2) / scale;
+    return (int)(neg ? -v : v);
+}
+
+/* Parsed 16.16 seconds -> 62 Hz ticks with rounding. [orig: sub_40A0F0 @0x40a0f0 —
+ * (62 * fp16 + 0x8000) >> 16] */
+static int parse_age_ticks_n(const char *s, size_t len) {
+    return (int)(((long long)62 * parse_fixed16_n(s, len) + 0x8000) >> 16);
+}
+
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);
+
 DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
     memset(out, 0, sizeof(*out));
 
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
+    int rc = parse_ammo_buffer(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    char *buf = (char *)malloc(size + 1);
+    if (!buf) return -1;
+    memcpy(buf, data, size);
+    buf[size] = '\0';
+    int rc = parse_ammo_buffer(buf, size, out);
+    free(buf);
+    return rc;
+}
+
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
 
     size_t entries_cap = 0;
     LineIter it = {buf, file_len, 0};
@@ -476,6 +548,89 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
             parse_ints(v, vl, current.recoil, 3);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "flag", 4)) {
+            /* OR the named bit; first table match wins [orig: @0x813500 walk]. An
+               unrecognized name is skipped (the original warns). */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1) {
+                char fl[64];
+                size_t fn = tok[0].len < sizeof(fl) - 1 ? tok[0].len : sizeof(fl) - 1;
+                to_lower_buf(fl, tok[0].s, fn);
+                for (size_t fi = 0; fi < sizeof(k_ammo_flag_names) / sizeof(k_ammo_flag_names[0]); ++fi) {
+                    if (strlen(k_ammo_flag_names[fi].name) == fn &&
+                        memcmp(k_ammo_flag_names[fi].name, fl, fn) == 0) {
+                        current.flags |= k_ammo_flag_names[fi].bit;
+                        break;
+                    }
+                }
+            }
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "max_age", 7)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            current.max_age_ticks = parse_age_ticks_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "arm_age", 7)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            current.arm_age_ticks = parse_age_ticks_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "error", 5)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            current.error_fp16 = parse_fixed16_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "drag", 4)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            current.drag_fp16 = parse_fixed16_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "bullet_radius", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            current.bullet_radius_fp16 = parse_fixed16_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "spread_count", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.spread_count = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kztype", 6)) {
+            /* Full-name match against the 8-entry table; only 1..7 accepted
+               [orig: @0x40a2d0 rejects index 0/unknown as "bad kill zone type"]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1) {
+                char kz[48];
+                size_t kn = tok[0].len < sizeof(kz) - 1 ? tok[0].len : sizeof(kz) - 1;
+                to_lower_buf(kz, tok[0].s, kn);
+                for (int ki = 1; ki < 8; ++ki) {
+                    if (strlen(k_ammo_kz_names[ki]) == kn &&
+                        memcmp(k_ammo_kz_names[ki], kz, kn) == 0) {
+                        current.kztype = ki;
+                        break;
+                    }
+                }
+            }
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_damage", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.kz_damage = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "min_stable_velocity", 19)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 19, &vl);
+            current.min_stable_velocity = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "weight_in_grains", 16)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
+            current.weight_in_grains = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "tracerrate", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.tracer_rate = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "notarmmedammo", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            Token tok[1];
+            if (tokenize(v, vl, tok, 1) >= 1)
+                safe_copy(current.notarmmed_ammo, sizeof(current.notarmmed_ammo), tok[0].s,
+                          tok[0].len);
+            parsed = 1;
         }
 
         if (!parsed) {
@@ -483,7 +638,6 @@ DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out) {
         }
     }
 
-    free(buf);
     return 0;
 }
 
@@ -501,13 +655,8 @@ DEF_EXPORT void def_free_ammo(DefAmmoFile *f) {
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
 
-DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
-    memset(out, 0, sizeof(*out));
-
-    size_t file_len;
-    char *buf = read_file(path, &file_len);
-    if (!buf) return -1;
-
+/* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
+static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
 
@@ -578,6 +727,66 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
             } else if (lower_match_key(lower, ll, "startrounds", 11)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 cw.startrounds = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "statid", 6)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+                cw.statid = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "maxclips", 8)) {
+                /* [orig: parse @0x5440A9 -> AdmDef[83]+0x14C] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                cw.maxclips = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "ammobucket", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                cw.ammobucket = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "ammoclass", 9)) {
+                /* ammoclass <CLASS_NAME> <pool-units-per-round> [orig: parse @0x5441CB] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                if (n >= 1) safe_copy(cw.ammo_class, sizeof(cw.ammo_class), tok[0].s, tok[0].len);
+                if (n >= 2) cw.ammo_class_count = parse_int_n(tok[1].s, tok[1].len);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_selectable", 18)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+                cw.loadout_selectable = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_subclasses", 18)) {
+                /* [orig: parse @0x544E43 -> AdmDef[235]+0x3AC] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+                cw.loadout_subclasses = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "weapon_class", 12)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                if (n >= 1) safe_copy(cw.weapon_class, sizeof(cw.weapon_class), tok[0].s, tok[0].len);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "charfilter", 10)) {
+                /* Repeatable, one soldier-type token per line [orig: parse @0x543F6E] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                for (int ti = 0; ti < n; ++ti) {
+                    if (cw.charfilter_count >= 8) break;
+                    safe_copy(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
+                              tok[ti].s, tok[ti].len);
+                    ++cw.charfilter_count;
+                }
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "teamfilter", 10)) {
+                /* Repeatable, one team token per line [orig: parse @0x543FE3] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                Token tok[MAX_TOKENS];
+                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                for (int ti = 0; ti < n; ++ti) {
+                    if (cw.teamfilter_count >= 4) break;
+                    safe_copy(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
+                              tok[ti].s, tok[ti].len);
+                    ++cw.teamfilter_count;
+                }
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "round_type", 10)) {
                 consume_value_str(trimmed, tlen, 10, cw.round_type, sizeof(cw.round_type));
@@ -748,8 +957,23 @@ DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
         }
     }
 
-    free(buf);
     return 0;
+}
+
+DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out) {
+    memset(out, 0, sizeof(*out));
+    size_t file_len;
+    char *buf = read_file(path, &file_len);
+    if (!buf) return -1;
+    int rc = parse_weapons_buf(buf, file_len, out);
+    free(buf);
+    return rc;
+}
+
+DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out) {
+    memset(out, 0, sizeof(*out));
+    if (!data) return -1;
+    return parse_weapons_buf((const char *)data, size, out);
 }
 
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f) {
@@ -900,6 +1124,66 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             parsed = 1;
         } else if (lower_match_key(lower, ll, "disk_function", 13)) {
             consume_value_str(trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
+            parsed = 1;
+        /* Vehicle physics-property block, scaled at parse exactly like the original loader
+           [orig: ItemDef_ParsePhysicsProperty @0x49d870]. turn_rate2 is matched before
+           turn_rate only for clarity — lower_match_key requires a separator after the key. */
+        } else if (lower_match_key(lower, ll, "turn_rate2", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.turn_rate2 = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d8dc] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "turn_rate", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.turn_rate = parse_int_n(v, vl) * 192426; /* deg/s -> BAM/tick [orig: @0x49d89a] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "max_slope", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.max_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d91e] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "slip_slope", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.slip_slope = parse_int_n(v, vl) * 11930464; /* deg -> BAM [orig: @0x49d960] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "player_speed", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.player_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9a2] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "water_speed", 11)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            current.water_speed = parse_int_n(v, vl) * 293; /* km/h -> 16.16 u/tick [orig: @0x49d9e4] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "acceleration", 12)) {
+            /* token*4; a still-unset deceleration defaults to 2*acceleration (8*token) at
+               THIS parse site, mirroring the original's ordering semantics [orig: @0x49da32,
+               decel default @0x49da4b]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            int a4 = parse_int_n(v, vl) * 4;
+            current.acceleration = a4;
+            if (current.deceleration == 0) current.deceleration = a4 * 2;
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "deceleration", 12)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            current.deceleration = parse_int_n(v, vl) * 4; /* [orig: @0x49da84] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "slip_speed", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.slip_speed = parse_int_n(v, vl) * 4; /* [orig: @0x49dafd] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "physics", 7)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 7, &vl);
+            current.physics = parse_int_n(v, vl); /* raw selector [orig: @0x49dac8] */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "criticalhp", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.critical_hp = parse_int_n(v, vl); /* i16 raw at +0x180 */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "criticaldrain", 13)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            current.critical_drain = parse_int_n(v, vl); /* i16 raw at +0x182 */
+            parsed = 1;
+        } else if (lower_match_key(lower, ll, "unit_type", 9)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70] */
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "attrib:", 7)) {
             /* Space-separated capability tokens -> ItemDefAttrib/Attrib2 bits. Unknown tokens

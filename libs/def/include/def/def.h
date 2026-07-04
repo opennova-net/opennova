@@ -38,14 +38,71 @@ typedef struct DefEffectTableEntry {
     int value;
 } DefEffectTableEntry;
 
+/* DefAmmoDef.flags bits — the ammo.def `flag <name>` OR-mask, record dword +0.
+ * [orig: the 30-entry name/bit table @0x813500 walked first-match by
+ * AmmoDef_ParseProperty @0x40a2d0; docs/net/novaworld-net-re.md §5.60] */
+#define DEF_AMMO_FLAG_IGNOREDMG 0x00000001u
+#define DEF_AMMO_FLAG_IGNORE 0x00000002u
+#define DEF_AMMO_FLAG_SHRAPNEL 0x00000004u
+#define DEF_AMMO_FLAG_SILENCED 0x00000008u
+#define DEF_AMMO_FLAG_WATER 0x00000010u
+#define DEF_AMMO_FLAG_DETONATESATCHELS 0x00000020u
+#define DEF_AMMO_FLAG_NOSMOKE 0x00000040u
+#define DEF_AMMO_FLAG_NOCOLLIDE 0x00000080u
+#define DEF_AMMO_FLAG_NOGRAVITY 0x00000100u
+#define DEF_AMMO_FLAG_HASITEM 0x00000200u
+#define DEF_AMMO_FLAG_INSTANTKILLZONE 0x00000400u
+#define DEF_AMMO_FLAG_OWNERIMMUNE 0x00000800u
+#define DEF_AMMO_FLAG_USEOWNMOVE 0x00002000u
+#define DEF_AMMO_FLAG_NOAGE 0x00004000u
+#define DEF_AMMO_FLAG_FORCETRACER 0x00008000u
+#define DEF_AMMO_FLAG_SHOTGUN 0x00010000u
+#define DEF_AMMO_FLAG_CLAYMORE 0x00020000u
+#define DEF_AMMO_FLAG_NOOITEMS 0x00080000u
+#define DEF_AMMO_FLAG_NOMITEMS 0x00100000u
+#define DEF_AMMO_FLAG_NODITEMS 0x00200000u
+#define DEF_AMMO_FLAG_PRIORITY 0x00800000u
+#define DEF_AMMO_FLAG_CLIPWATER 0x01000000u
+#define DEF_AMMO_FLAG_DESIGNATETARGET 0x02000000u
+#define DEF_AMMO_FLAG_IGNORFOILAGE 0x04000000u
+#define DEF_AMMO_FLAG_LAWR 0x08000000u
+#define DEF_AMMO_FLAG_FGRENADE 0x10000000u
+#define DEF_AMMO_FLAG_CLIPWATERFX 0x20000000u
+
+/* Ammo kill-zone types, record word +44 — drives the RoundData_SpawnRound ammo-class
+ * dispatch (1 Knife = the immediate raycast, 6 Bullets = the standard projectile).
+ * [orig: 8-name table @0x8133E0 rounds_kz_*; §5.60] */
+#define DEF_AMMO_KZ_NULL 0
+#define DEF_AMMO_KZ_KNIFE 1
+#define DEF_AMMO_KZ_STANDARD 2
+#define DEF_AMMO_KZ_MEDIC 3
+#define DEF_AMMO_KZ_RADIUSBLAST 4
+#define DEF_AMMO_KZ_C4 5
+#define DEF_AMMO_KZ_BULLETS 6
+#define DEF_AMMO_KZ_SLASH 7
+
 typedef struct DefAmmoDef {
     char name[64];
-    int velocity;
-    int min_damage;
-    int max_damage;
-    int penetration_impact;
-    int penetration_kz;
-    int recoil[3];
+    int velocity;            /* +4, integer units/s [orig: 'velocity' branch @0x40a2d0] */
+    int min_damage;          /* +188 */
+    int max_damage;          /* +192 */
+    int penetration_impact;  /* +196 — must reach the target itemDef+400 armor threshold */
+    int penetration_kz;      /* +200 */
+    int recoil[3];           /* bytes +227..229 */
+    /* Authoritative round-sim fields (docs/net/novaworld-net-re.md §5.60). */
+    unsigned int flags;      /* +0, DEF_AMMO_FLAG_* OR-mask */
+    int max_age_ticks;       /* +8: 'max_age' seconds -> 62 Hz ticks [orig: sub_40A0F0 @0x40a0f0] */
+    int arm_age_ticks;       /* +12: 'arm_age' — a hit before arming spawns notarmmed_ammo */
+    int error_fp16;          /* +24: ballistic dispersion, 16.16 */
+    int drag_fp16;           /* +28: drag, 16.16 */
+    int bullet_radius_fp16;  /* +32: hit-test radius, 16.16 */
+    int spread_count;        /* +48: shotgun/claymore pellet count */
+    int kztype;              /* word +44, DEF_AMMO_KZ_* */
+    int kz_damage;           /* word +46 */
+    int weight_in_grains;    /* +184 — the kinetic damage mass term [orig: @0x4ecb1a] */
+    int min_stable_velocity; /* +176 */
+    int tracer_rate;         /* byte +226 ('tracerRate') */
+    char notarmmed_ammo[64]; /* +241: the not-armed child ammo name ('notarmmedammo') */
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
     char (*raw_lines)[512];
@@ -90,6 +147,20 @@ typedef struct DefWeaponDef {
     int rank;
     int clipsize;
     int startrounds;
+    /* Loadout/armory keys (docs/net/novaworld-net-re.md §5.57); absent key = 0/empty.
+       charfilter/teamfilter hold the raw file tokens — bit packing is a consumer concern. */
+    int statid;
+    int maxclips;
+    int ammobucket;
+    char ammo_class[64];
+    int ammo_class_count;
+    char charfilter[8][16];
+    size_t charfilter_count;
+    char teamfilter[4][16];
+    size_t teamfilter_count;
+    int loadout_selectable;
+    int loadout_subclasses;
+    char weapon_class[32];
     char round_type[64];
     char animadm[128];
     char launch_user_point[64];
@@ -151,6 +222,27 @@ typedef struct DefItemDef {
     char disk_function[16];
     unsigned int attrib;   /* ItemDefAttrib (+0x54) bitmask; attrib: tokens -> bits. AIData 0x100000 = AI class. [orig: ItemDef_ParseProperty; docs/world/itemdef-re.md] */
     unsigned int attrib2;  /* ItemDefAttrib2 (+0x58) bitmask. */
+    /* Vehicle physics-property block, scaled AT PARSE exactly like the original loader
+       [orig: ItemDef_ParsePhysicsProperty @0x49d870]. Scale constants: deg/s -> BAM/tick =
+       192426 (2^32/360/62 tps), km/h -> 16.16 world-units/tick = 293 ((1000/3600)*65536/62),
+       deg -> BAM = 11930464 (2^32/360), accel/decel raw*4. All 0 when the block is absent. */
+    int physics;        /* +0x8DC raw selector; non-zero routes the entity to the vehicle
+                           motor [orig: Entity_DispatchPhysics_cveh @0x48efc0] */
+    int acceleration;   /* +0x8E0 = token*4 (16.16 u/tick per tick) [orig: @0x49da32] */
+    int deceleration;   /* +0x8E4 = token*4; absent -> 2*acceleration [orig: @0x49da4b] */
+    int player_speed;   /* +0x8E8 = km/h token * 293 [orig: @0x49d9a2] */
+    int water_speed;    /* +0x8EC = km/h token * 293 [orig: @0x49d9e4] */
+    int slip_speed;     /* +0x8F0 = token*4 [orig: @0x49dafd] */
+    int max_slope;      /* +0x8F4 = deg token * 11930464 [orig: @0x49d91e] */
+    int slip_slope;     /* +0x8F8 = deg token * 11930464 [orig: @0x49d960] */
+    int turn_rate;      /* +0x924 = deg/s token * 192426 [orig: @0x49d89a] */
+    int turn_rate2;     /* +0x928 = deg/s token * 192426 [orig: @0x49d8dc] */
+    int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
+                           health state machine reads [docs/world/itemdef-re.md +0x180] */
+    int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */
+    int unit_type;      /* "unit_type" raw — the minimap icon class selector on vehicles
+                           (5..8 helo, 3/4 boat, 12 special, else ground)
+                           [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */
     char (*raw_lines)[512];
     size_t raw_lines_count;
 } DefItemDef;
@@ -323,9 +415,15 @@ typedef struct DefFile {
 /* ========================================================================= */
 
 DEF_EXPORT int def_parse_ammo(const char *path, DefAmmoFile *out);
+/* Parse ammo.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_ammo as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out);
 DEF_EXPORT void def_free_ammo(DefAmmoFile *f);
 
 DEF_EXPORT int def_parse_weapons(const char *path, DefWeaponsFile *out);
+/* Parse weapon.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the
+   call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
+DEF_EXPORT int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out);
 DEF_EXPORT void def_free_weapons(DefWeaponsFile *f);
 
 DEF_EXPORT int def_parse_items(const char *path, DefItemsFile *out);

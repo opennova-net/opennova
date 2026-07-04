@@ -162,16 +162,40 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		es.seen_this_frame = true;
 
 		// Reconstruct world position: decompress the compact (per-axis) and add the
-		// frame anchor. Phase 1 handles the unmounted case (vehicle/parent handle ==
-		// 0xFFFF); mounted records ride a parent-local frame and are resolved in a
-		// later phase.
+		// frame anchor — or, for a CARRIER-LOCAL player record (vehicle/ground handle !=
+		// 0xFFFF, D-NET-151), lift the local offset through the carrier's pose from this
+		// view's own state [orig: op2 resolves the carrier from g_pool_list and runs
+		// Entity_TransformLocalToWorld @0x4c10d4; a carrier with no itemDef DROPS the
+		// record and queues a C2S 0x0F entity request — request plumbing an in-process
+		// view does not need, so an unknown carrier just skips the position sample].
+		// Mounted vehicle-parent records stay a later phase.
 		uint16_t cx = 0, cy = 0, cz = 0;
+		bool skip_pos = false;
 		switch (rec.cls) {
 		case EntityClass::Player:
 			cx = rec.player.pos_x_compressed;
 			cy = rec.player.pos_y_compressed;
 			cz = rec.player.pos_z_compressed;
 			es.yaw_byte = rec.player.yaw_byte;
+			if (rec.player.carrier_handle != 0xFFFFu) {
+				if (const ClientEntityState *carrier =
+				            state_.find(rec.player.carrier_handle)) {
+					const int32_t carrier_yaw_bam =
+							static_cast<int32_t>(uint32_t(carrier->yaw_byte) << 24);
+					const WorldPose w = network_transform_local_to_world(
+							network_decompress_fixedpoint(cx),
+							network_decompress_fixedpoint(cy),
+							network_decompress_fixedpoint(cz), carrier->x, carrier->y,
+							carrier->z, uint32_t(carrier_yaw_bam), 0u, 0u);
+					es.x = w.x;
+					es.y = w.y;
+					es.z = w.z;
+					// world yaw byte = carrier yaw + local yaw (BAM addition holds in
+					// the 8-bit ring).
+					es.yaw_byte = uint8_t(carrier->yaw_byte + rec.player.yaw_byte);
+				}
+				skip_pos = true; // carrier form: either applied above or dropped
+			}
 			break;
 		case EntityClass::Vehicle:
 			cx = rec.vehicle.pos_x_compressed;
@@ -189,9 +213,11 @@ void NetClientView::apply_frame_update(const std::vector<uint8_t> &body) {
 		default:
 			break; // unresolved/guided records are not compact motion samples
 		}
-		es.x = fu.anchor_x + network_decompress_fixedpoint(cx);
-		es.y = fu.anchor_y + network_decompress_fixedpoint(cy);
-		es.z = fu.anchor_z + network_decompress_fixedpoint(cz);
+		if (!skip_pos) {
+			es.x = fu.anchor_x + network_decompress_fixedpoint(cx);
+			es.y = fu.anchor_y + network_decompress_fixedpoint(cy);
+			es.z = fu.anchor_z + network_decompress_fixedpoint(cz);
+		}
 	}
 
 	++state_.frames_applied;

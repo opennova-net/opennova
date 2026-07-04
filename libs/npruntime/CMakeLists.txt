@@ -8,6 +8,8 @@ add_library(opennova_npruntime STATIC
     src/server_tick.cpp
     src/client_runtime.cpp
     src/host_session.cpp
+    src/weapon_table_build.cpp
+    src/ammo_table_build.cpp
 )
 
 target_include_directories(opennova_npruntime
@@ -25,8 +27,10 @@ target_include_directories(opennova_npruntime
 # opennova_world / opennova_mission are transitive via opennova_netsim; name them explicitly because
 # P3's spawn pipeline + initial-state burst use world::spawn_player / select_player_spawn and
 # bms::encode_header_blob directly (direct-dependency hygiene). No cycle: neither depends on npruntime.
+# opennova_def: weapon_table_build parses DefWeaponsFile into the world armory table
+# (D-NET-141); def is a leaf C library — no cycle.
 target_link_libraries(opennova_npruntime PUBLIC
-    opennova_netsim opennova_novaworld opennova_world opennova_mission)
+    opennova_netsim opennova_novaworld opennova_world opennova_mission opennova_def)
 
 target_compile_features(opennova_npruntime PUBLIC cxx_std_17)
 

@@ -4,6 +4,7 @@
 #include "npruntime/server_message_dispatch.h" // dispatch_session_replies (the reactive §5.1 replies)
 #include "npruntime/server_spawn.h"            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
+#include <novaworld/ingame_encode.h>    // encode_player_sync_removal (the disconnect 0x46 removal)
 #include <novaworld/nw_session_framing.h>
 #include <novaworld/protocol_message.h> // make_protocol_message (frame the burst messages)
 #include <novaworld/session_hello.h>
@@ -16,12 +17,26 @@
 #include <world/geom.h> // to_fixed
 #include <world/world.h>
 
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <utility>
 
 namespace opennova::np {
 
 namespace {
+
+// ASCII case-insensitive tag-name compare [orig: Napi_StrCaseEqual @0x616e70 — the
+// NapiNetConfig_LoadFromConnTags match].
+bool str_case_equal(const std::string &a, const char *b) {
+	size_t i = 0;
+	for (; i < a.size() && b[i] != '\0'; ++i) {
+		if (std::tolower(static_cast<unsigned char>(a[i])) !=
+		    std::tolower(static_cast<unsigned char>(b[i])))
+			return false;
+	}
+	return i == a.size() && b[i] == '\0';
+}
 
 // Stable "a.b.c.d:port" label — the connection's session_id (NapiNPConnection.session_id). PeerAddr.ip
 // is LE octet packing (a | b<<8 | c<<16 | d<<24); print low->high so the label reads a.b.c.d (matches
@@ -328,14 +343,57 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 	NapiNPConnection &conn = find_or_create_connection(ctx, peer);
 	if (conn.session_id.empty()) conn.session_id = peer_session_id(peer);
-	// The 0x42 also carries the joiner's name (CO) — keep the Hello node's name when present, else
-	// adopt the auth's (covers a fresh recreate where no Hello node survived).
-	if (conn.player_name.empty() && !auth.co.empty()) conn.player_name = auth.co;
+	// The joiner's display name: the GAME join's NA TLV is the player CALLSIGN — the retail
+	// client puts its company string in CO ("NovaLogic Inc, Calabasas CA U.S.A.") and the
+	// callsign in NA, and the golden host's 0x0C record name equals NA ("FooPlayer"). A
+	// ':'-shaped NA is a gate tag (the NOVAWORLD-connect flavor, e.g. "jop:cus2" — older
+	// opennova joiners sent it on game joins too) — fall back to CO / the Hello name there.
+	// [wire: retail-ashi5a f=199140 / retail_join_v18 f=47676; net-re §5.0b]
+	if (!auth.na.empty() && auth.na.find(':') == std::string::npos) {
+		conn.player_name = auth.na;
+	} else if (conn.player_name.empty() && !auth.co.empty()) {
+		conn.player_name = auth.co;
+	}
 	// auth.scrk decrypts inbound SESSION; our server_scrk encrypts outbound SESSION and is echoed
 	// in ServerAuth so the client can read our replies.
 	conn.client_scrk = auth.scrk;
 	conn.client_ck = auth.ck;
 	conn.client_ci = auth.ci;
+	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character
+	// selection Server_PlayerAdd folds into the player record (CharacterJoinVars). Values are
+	// decimal strings converted with atol semantics: CI0/CI1 keep the low u16, TR clamps to
+	// {0, 1, 0xFF}, the rest keep the low u8. Only type-2 chunks are tag-list vars. [orig:
+	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
+	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
+	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
+	for (const auto &blob : auth.cu) {
+		uint8_t cu_type = 0;
+		std::string cu_name, cu_value;
+		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
+		if (cu_type != 2) continue;
+		const long v = std::strtol(cu_value.c_str(), nullptr, 10); // retail atol
+		if (str_case_equal(cu_name, "CI0")) {
+			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
+		} else if (str_case_equal(cu_name, "CI1")) {
+			conn.char_vars.char_id[1] = static_cast<uint16_t>(v);
+		} else if (str_case_equal(cu_name, "TR")) {
+			// [@0x4c752f] tr != -1 && (u8)tr >= 2 -> -1: only 0 (side A) and 1 (side B) pass.
+			uint8_t tr = static_cast<uint8_t>(v);
+			if (tr != 0xFF && tr >= 2) tr = 0xFF;
+			conn.char_vars.team_request = tr;
+		} else if (str_case_equal(cu_name, "CTA")) {
+			conn.char_vars.char_class[0] = static_cast<uint8_t>(v);
+		} else if (str_case_equal(cu_name, "CTB")) {
+			conn.char_vars.char_class[1] = static_cast<uint8_t>(v);
+		} else if (str_case_equal(cu_name, "VCA")) {
+			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
+		} else if (str_case_equal(cu_name, "VCB")) {
+			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
+		}
+		// The remaining game-join tags (BT/VN/BN/DB/MBN/SOPD/VERSIONSTRING/COUNTRYCODE/APPID/
+		// TZB/MPS...) land in retail's NapiNetConfig too but nothing downstream of the player
+		// add consumes them yet — ignored here like the parser ignores unknown TLVs.
+	}
 	// [orig: NapiNPConnection_Create @0x62acb0 — conn.connection_id (the dcb) = ++protocol[947],
 	// wrapping 0 -> 1]. On a LAN listen host the host ASSIGNS the dcb (it does not learn it from the
 	// client), so latch self_id_seen now: the F3 streaming-entered gate no longer waits for the
@@ -382,6 +440,13 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 
+	// The header's ack_count is the peer's "last of YOUR seqs I received" — the confirm side of the
+	// initial-state backlog throttle (retail clients carry it on every 0x43, including game-message-
+	// less keepalive datagrams; the golden world-stream gap has no C2S game messages yet the stream
+	// advances). High-water only: a reordered older ack must not un-confirm. [orig: header layout
+	// @0x61edd0 field +8; consumed by the conn+0x768 outstanding gate @0x51bf1b/0x51bc04]
+	if (hdr.ack_count > conn.peer_acked_seq) conn.peer_acked_seq = hdr.ack_count;
+
 	// Learn the joiner's own ConnectionId (NapiNPConnection.unk_18 = its dcb, our connection_id)
 	// from its in-match 0x48 client-ack (a 4-byte LE u32). This is the value the client's
 	// Player_FindLocalPlayerEntity @0x4e0090 compares entity+0x78 against, so the host MUST stamp it
@@ -414,7 +479,8 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// dispatch routes each gameplay message to its NapiNPServerMsg_0x0NN reply handler]
 	std::vector<ProtocolMessage> replies =
 			dispatch_session_replies(ctx.config, conn, messages, now_tick,
-			                         ctx.np_protocol.connection_list, ctx.world);
+			                         ctx.np_protocol.connection_list, ctx.world,
+			                         ctx.np_protocol.session_seed_id);
 	if (!replies.empty()) {
 		std::vector<uint8_t> dg = frame_session_replies(conn, replies);
 		if (!dg.empty()) out.outbound.push_back(std::move(dg));
@@ -445,6 +511,30 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // 0x46 ClientGoodbye. [orig: Nwu_HandleClientGoodbye @0x624250]
 void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer, HandleResult &out) {
+	// The player teardown, BEFORE the node erase [orig: Server_HandlePlayerDisconnect @0x51B5C0]:
+	// despawn the owned world entity — a leaked body keeps streaming forever and re-enters every
+	// future joiner's 0x0C batch (the retail-join v23 ghost players, D-NET-149) — and broadcast
+	// the roster slot's 0x46 REMOVAL to the remaining in-match peers (@0x51b8ad re-serializes
+	// fieldFlags 0x1CF7 over the memset player slot -> the 0x8000 removal record
+	// @0x505ecb..0x505ee0; send_mask 128 @0x51b8bc; the client's apply is
+	// PlayerSlot_ClearAndUnlink @0x431420). Deferred, tracked in D-NET-149: the 0x32
+	// minimap-slot + 0x6A squad broadcasts, the team spawn-token return (@0x51b661..0x51b67a),
+	// and a dead-peer timeout reap (today only the goodbye opcode tears down).
+	if (NapiNPConnection *conn = find_connection(ctx, peer)) {
+		if (conn->type == 1 && conn->link.owned_entity.valid()) {
+			if (ctx.world != nullptr) ctx.world->registry.despawn(conn->link.owned_entity);
+			const uint8_t slot = conn->reply.player_slot;
+			for (NapiNPConnection &other : ctx.np_protocol.connection_list) {
+				if (&other == conn || !is_in_match(other) || other.link.transport == nullptr)
+					continue;
+				other.link.transport->host_send(
+						0x46, encode_player_sync_removal(slot, /*with_ack=*/false));
+			}
+			// Roster shrank — stale every survivor's 0x16 so HUD player counts follow
+			// the leave too (D-NET-155).
+			++ctx.np_protocol.roster_generation;
+		}
+	}
 	erase_connection(ctx, peer);
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerGoodbye;
@@ -508,7 +598,26 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 	if (ctx.world != nullptr) Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.burst.spawned) continue; // spawned peers: Server_TickUpdate owns their per-frame 0x0A
+		if (conn.burst.spawned) {
+			// Spawned peers: Server_TickUpdate owns their per-frame 0x0A — but the roster
+			// version check must keep running here so EXISTING clients learn about LATER
+			// joins/leaves (D-NET-155). The first cut only evaluated it below this skip,
+			// i.e. once, on each connection's own burst-completion tick — the v30 wire
+			// showed the first joiner never received the grown 47-B 0x16 when the second
+			// spawned (its HUD count stayed at 2).
+			if (conn.type == 1 &&
+			    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
+				TickOut to;
+				to.peer = conn.peer;
+				std::vector<ProtocolMessage> roster_reply{build_player_list_message(
+						ctx.config, ctx.np_protocol.connection_list, ctx.world)};
+				std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
+				if (!dg.empty()) to.outbound.push_back(std::move(dg));
+				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
+				if (!to.outbound.empty()) out.push_back(std::move(to));
+			}
+			continue;
+		}
 
 		TickOut to;
 		to.peer = conn.peer;
@@ -532,16 +641,32 @@ std::vector<TickOut> tick_connections(NapiNPServerCtx &ctx, int elapsed_ms, uint
 			ship_burst_messages(conn, step.messages, to.outbound);
 		}
 
-		// Once this joiner has spawned, RE-PUSH the 0x16 player-list with the grown roster (now
-		// including this joiner's own slot). The post-handshake 0x16 went out BEFORE the spawn (host
-		// only); the client needs to see its OWN slot to bind its local player and deploy (golden:
-		// 0x16 31→39 just before the joiner's first C2S 0x0C). One-shot per connection.
-		if (conn.type == 1 && conn.burst.spawned && !conn.reply.roster_repushed) {
+		// Roster versioning (D-NET-155): the first time we observe ANY connection spawned,
+		// the roster grew — bump the generation so EVERY in-match client refreshes its 0x16
+		// player list (the HUD player count follows it). The old one-shot-per-connection
+		// re-push only reached the JOINING client, so existing clients' lists went stale
+		// when a later joiner arrived (v29: HUD stuck at 2 with 3 players in).
+		if (conn.burst.spawned && !conn.reply.roster_counted) {
+			conn.reply.roster_counted = true;
+			++ctx.np_protocol.roster_generation;
+			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
+			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
+			// unknown-slot churn behind the stale HUD count (D-NET-158). [orig:
+			// Server_PlayerAdd @0x51D296]
+			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
+			                              ctx.world);
+		}
+		// (Re)push the list to a spawned joiner whenever its seen generation is stale.
+		// Covers the joiner's OWN spawn — the client needs its own slot to bind its local
+		// player and deploy (golden: 0x16 31→39 just before the first C2S 0x0C) — and every
+		// later roster change (join/leave). One framed push per generation per connection.
+		if (conn.type == 1 && conn.burst.spawned &&
+		    conn.reply.roster_seen_gen != ctx.np_protocol.roster_generation) {
 			std::vector<ProtocolMessage> roster_reply{
 					build_player_list_message(ctx.config, ctx.np_protocol.connection_list, ctx.world)};
 			std::vector<uint8_t> dg = frame_session_replies(conn, roster_reply);
 			if (!dg.empty()) to.outbound.push_back(std::move(dg));
-			conn.reply.roster_repushed = true;
+			conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 		}
 
 		// Surface the F3 / PeerSpawned events from conn.burst (verbatim predicates). Same latch as the

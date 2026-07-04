@@ -63,7 +63,7 @@ each frame); the draw code reads both.
   | `dword_2723CD0` | weapon reload bar |
   | `dword_2723CD8` | weapon slot bar |
 
-  A spectator path (`byte_A860EC`) rebuilds the info for the *spectated* entity
+  A spectator path (`g_death_screen_active`) rebuilds the info for the *spectated* entity
   and restores: `qmemcpy(tmp, &dword_2723388, 0x240)` → `HUD_BuildEntityInfo` →
   `qmemcpy(&dword_2723388, tmp, 0x240)` `[orig: @0x5a7bf1]` — pinning the 576-byte
   size.
