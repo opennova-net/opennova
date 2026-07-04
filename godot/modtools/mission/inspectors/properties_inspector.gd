@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 # --- Mission properties (header) editable form --------------------------------
 # A collapsible form for the mission-level header fields. Built ONCE and synced in
@@ -44,7 +43,7 @@ func _build_props_panel() -> void:
 	_add_props_line("mission_name", "Name", "Mission title.")
 	_add_props_line("designer", "Designer", "Mission author.")
 	_add_props_line("briefing", "Briefing", "Mission briefing text.")
-	ObjectUiHelpers.add_section_heading(_props_box, "World")
+	InspectorForms.add_section_heading(_props_box, "World")
 	_terrain_ref_widget = _add_props_ref("terrain", "terrain", "Terrain",
 		"The ground this mission is built on. The world reloads onto the new terrain the next time the mission is opened.")
 	_env_ref_widget = _add_props_ref("environment", "environment", "Environment",
@@ -52,17 +51,17 @@ func _build_props_panel() -> void:
 	_add_props_option("climate", "Climate", [[0, "Desert"], [1, "Jungle"], [2, "Snow"]])
 	_add_props_option("weather", "Weather", [[0, "Nice day"], [1, "Rainy"], [2, "Snow"]])
 	_add_props_option("mission_type", "Type", [[1, "Normal"], [2, "Combat vehicle"], [3, "Tenth Mountain"]])
-	ObjectUiHelpers.add_section_heading(_props_box, "Gameplay")
+	InspectorForms.add_section_heading(_props_box, "Gameplay")
 	_add_props_spin("player_health", "Player health", 0.0, 1000000.0)
 	_add_props_spin("minutes_per_day", "Minutes / day", 0.0, 65535.0)
 	_add_props_spin("max_saves", "Max saves", 0.0, 255.0)
 	_add_props_spin("start_time", "Start time", 0.0, 65535.0)
-	ObjectUiHelpers.add_section_heading(_props_box, "Game mode")
+	InspectorForms.add_section_heading(_props_box, "Game mode")
 	_add_props_game_mode()
-	ObjectUiHelpers.add_section_heading(_props_box, "Options")
+	InspectorForms.add_section_heading(_props_box, "Options")
 	_add_props_flag(NovaMissionData.ATTRIB_ENABLE_NVG, "Night vision")
 	_add_props_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
-	ObjectUiHelpers.add_section_heading(_props_box, "Audio")
+	InspectorForms.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)
 	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
 
@@ -168,7 +167,7 @@ func _add_props_option(field: String, label: String, choices: Array) -> OptionBu
 
 
 func _add_props_spin(field: String, label: String, min_value: float, max_value: float) -> SpinBox:
-	var spin := ObjectUiHelpers.add_spin_row(_props_box, "MissionProp_" + field, label, min_value, max_value, 1.0)
+	var spin := InspectorForms.add_spin_row(_props_box, "MissionProp_" + field, label, min_value, max_value, 1.0)
 	_props_binder.bind_spin(spin,
 		func(info) -> float: return float(int(info.get(field, 0))),
 		func(value: float) -> void: _set_header_int(field, int(value)))

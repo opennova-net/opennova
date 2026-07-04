@@ -41,19 +41,19 @@ func set_document(doc: StringsEditor) -> void:
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
-	var box := ObjectUiHelpers.make_inspector_box(self)
+	var box := InspectorForms.make_inspector_box(self)
 	# make_inspector_box adds a MarginContainer to this bare Control, which does not
 	# lay out its children — stretch that wrapper to fill the panel.
 	(box.get_parent().get_parent() as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	_empty_label = ObjectUiHelpers.add_empty_state(box, "Select a string to edit its key, text, section, and position.", "StringsEmptyState")
+	_empty_label = InspectorForms.add_empty_state(box, "Select a string to edit its key, text, section, and position.", "StringsEmptyState")
 
 	_fields_box = VBoxContainer.new()
 	_fields_box.add_theme_constant_override("separation", 8)
 	_fields_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(_fields_box)
 
-	ObjectUiHelpers.add_section_heading(_fields_box, "Key")
+	InspectorForms.add_section_heading(_fields_box, "Key")
 	_key_edit = LineEdit.new()
 	_key_edit.name = "StringsKeyEdit"
 	_key_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -62,7 +62,7 @@ func _ready() -> void:
 	_key_edit.text_changed.connect(_on_key_changed)
 	_fields_box.add_child(_key_edit)
 
-	ObjectUiHelpers.add_section_heading(_fields_box, "Text")
+	InspectorForms.add_section_heading(_fields_box, "Text")
 	_text_edit = TextEdit.new()
 	_text_edit.name = "StringsTextEdit"
 	_text_edit.custom_minimum_size = Vector2(0, 110)
@@ -91,16 +91,16 @@ func _ready() -> void:
 	_hotkey_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_fields_box.add_child(_hotkey_preview)
 
-	ObjectUiHelpers.add_section_heading(_fields_box, "Section")
+	InspectorForms.add_section_heading(_fields_box, "Section")
 	_section_option = OptionButton.new()
 	_section_option.name = "StringsSectionOption"
 	_section_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_section_option.item_selected.connect(_on_section_selected)
 	_fields_box.add_child(_section_option)
 
-	ObjectUiHelpers.add_section_heading(_fields_box, "Position")
-	_pos_x = ObjectUiHelpers.add_spin_row(_fields_box, "StringsPosX", "X", POS_MIN, POS_MAX, 1)
-	_pos_y = ObjectUiHelpers.add_spin_row(_fields_box, "StringsPosY", "Y", POS_MIN, POS_MAX, 1)
+	InspectorForms.add_section_heading(_fields_box, "Position")
+	_pos_x = InspectorForms.add_spin_row(_fields_box, "StringsPosX", "X", POS_MIN, POS_MAX, 1)
+	_pos_y = InspectorForms.add_spin_row(_fields_box, "StringsPosY", "Y", POS_MIN, POS_MAX, 1)
 	_wire_spin(_pos_x)
 	_wire_spin(_pos_y)
 

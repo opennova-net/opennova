@@ -14,7 +14,6 @@ extends MarginContainer
 # moves the in-world object and writes the record. Referenced via preload (no
 # class_name), the same convention as the controller and placer.
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 # Preloaded only for its Mode enum (the tab <-> mode map); the live controller is injected via
 # setup() and used untyped, the same no-class_name convention as the rest of the workspace.
 const MissionController = preload("res://modtools/mission/mission_controller.gd")
@@ -352,7 +351,7 @@ func _refresh() -> void:
 # mission, or Objects mode with nothing selected — the other modes always show their editor with
 # disabled fields). Each per-mode editor box has already set its own visibility by this point.
 func _build_selection_empty() -> void:
-	_sel_empty = ObjectUiHelpers.add_muted_label(_sel_content, "")
+	_sel_empty = InspectorForms.add_muted_label(_sel_content, "")
 	_sel_empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 
@@ -387,8 +386,8 @@ func _build_edit_panel() -> void:
 	# The identity line is the section heading: it reads the selected model's name (resolved
 	# from items.def) prominently, with a muted kind + index subline beneath, so the user
 	# sees "Humvee" rather than just "Item #42".
-	_identity_label = ObjectUiHelpers.add_section_heading(_edit_box, "Selected entity")
-	_identity_sub = ObjectUiHelpers.add_muted_label(_edit_box, "")
+	_identity_label = InspectorForms.add_section_heading(_edit_box, "Selected entity")
+	_identity_sub = InspectorForms.add_muted_label(_edit_box, "")
 	_identity_graphic_row = HBoxContainer.new()
 	_identity_graphic_row.name = "MissionSelectedGraphicRow"
 	_identity_graphic_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -397,7 +396,7 @@ func _build_edit_panel() -> void:
 	graphic_label.text = "Graphic"
 	graphic_label.tooltip_text = "Graphic declared by this entity's items.def row."
 	graphic_label.clip_text = true
-	graphic_label.custom_minimum_size = Vector2(ObjectUiHelpers.LABEL_COL_WIDTH, 0)
+	graphic_label.custom_minimum_size = Vector2(InspectorForms.LABEL_COL_WIDTH, 0)
 	_identity_graphic_row.add_child(graphic_label)
 	_identity_graphic = ResourceRefWidget.new()
 	_identity_graphic.name = "MissionSelectedGraphic"
@@ -410,24 +409,24 @@ func _build_edit_panel() -> void:
 	_user_points_check.tooltip_text = "Show this model's named userpoints in the viewport."
 	_edit_box.add_child(_user_points_check)
 
-	ObjectUiHelpers.add_section_heading(_edit_box, "Position")
+	InspectorForms.add_section_heading(_edit_box, "Position")
 	_pos_spins = [
-		ObjectUiHelpers.add_spin_row(_edit_box, "MissionPosX", "X", -1000000.0, 1000000.0, 0.001),
-		ObjectUiHelpers.add_spin_row(_edit_box, "MissionPosY", "Y", -1000000.0, 1000000.0, 0.001),
-		ObjectUiHelpers.add_spin_row(_edit_box, "MissionPosZ", "Z", -1000000.0, 1000000.0, 0.001),
+		InspectorForms.add_spin_row(_edit_box, "MissionPosX", "X", -1000000.0, 1000000.0, 0.001),
+		InspectorForms.add_spin_row(_edit_box, "MissionPosY", "Y", -1000000.0, 1000000.0, 0.001),
+		InspectorForms.add_spin_row(_edit_box, "MissionPosZ", "Z", -1000000.0, 1000000.0, 0.001),
 	]
 
-	ObjectUiHelpers.add_section_heading(_edit_box, "Rotation")
+	InspectorForms.add_section_heading(_edit_box, "Rotation")
 	_rot_spins = [
-		ObjectUiHelpers.add_spin_row(_edit_box, "MissionRotPitch", "Pitch", -360.0, 360.0, 1.0),
-		ObjectUiHelpers.add_spin_row(_edit_box, "MissionRotYaw", "Yaw", -360.0, 360.0, 1.0),
-		ObjectUiHelpers.add_spin_row(_edit_box, "MissionRotRoll", "Roll", -360.0, 360.0, 1.0),
+		InspectorForms.add_spin_row(_edit_box, "MissionRotPitch", "Pitch", -360.0, 360.0, 1.0),
+		InspectorForms.add_spin_row(_edit_box, "MissionRotYaw", "Yaw", -360.0, 360.0, 1.0),
+		InspectorForms.add_spin_row(_edit_box, "MissionRotRoll", "Roll", -360.0, 360.0, 1.0),
 	]
 
 	# team / group are stored on every entity kind by the format, so they are shown for
 	# all selectable objects; in practice they drive organics (units) at runtime.
-	ObjectUiHelpers.add_section_heading(_edit_box, "Faction")
-	_team_option = ObjectUiHelpers.add_id_option_row(_edit_box, "MissionTeam", "Team", [])
+	InspectorForms.add_section_heading(_edit_box, "Faction")
+	_team_option = InspectorForms.add_id_option_row(_edit_box, "MissionTeam", "Team", [])
 	_team_option.tooltip_text = "Faction for this entity."
 	_behavior_binder.bind_option(_team_option,
 		func(info): return int(info.get("team", 0)),
@@ -442,7 +441,7 @@ func _build_edit_panel() -> void:
 
 	_build_behavior_section()
 
-	_animated_note = ObjectUiHelpers.add_muted_label(_edit_box, "Animated object.")
+	_animated_note = InspectorForms.add_muted_label(_edit_box, "Animated object.")
 
 	# Delete sits at the bottom of the edit panel as the one destructive action; the whole
 	# panel is hidden when nothing is selected, so the button only shows with a selection.
@@ -513,7 +512,7 @@ func _build_behavior_section() -> void:
 	# text / flag rows below are not plain spins, so they stay explicit.
 	for entry in MissionEntityFields.SPIN_FIELDS:
 		if entry.has("section"):
-			ObjectUiHelpers.add_section_heading(_behavior_box, String(entry["section"]))
+			InspectorForms.add_section_heading(_behavior_box, String(entry["section"]))
 			continue
 		var spin := _add_behavior_spin(String(entry["property"]), String(entry["label"]),
 			float(entry["min"]), float(entry["max"]))
@@ -527,7 +526,7 @@ func _build_behavior_section() -> void:
 		func(info) -> String: return String(info.get("name2", "")),
 		func(text: String) -> void: _behavior_set_string("name2", text),
 		"AI script file (ai_textfile), max 7 chars. Press Enter to apply.")
-	ObjectUiHelpers.add_section_heading(_behavior_box, "Flags")
+	InspectorForms.add_section_heading(_behavior_box, "Flags")
 	# The named AI-attribute bits are authored as checkboxes, generated lazily from the engine's bit list
 	# (a mission must be loaded for the controller to answer). The hex field below stays as an advanced
 	# editor + escape hatch: it shows the full 32-bit value, so bits the editor does not name (preserved
@@ -543,7 +542,7 @@ func _build_behavior_section() -> void:
 
 
 func _add_behavior_spin(property: String, label: String, min_value: float, max_value: float) -> SpinBox:
-	var spin := ObjectUiHelpers.add_spin_row(_behavior_box, "MissionBeh_" + property, label, min_value, max_value, 1.0)
+	var spin := InspectorForms.add_spin_row(_behavior_box, "MissionBeh_" + property, label, min_value, max_value, 1.0)
 	_behavior_binder.bind_spin(spin,
 		func(info): return float(int(info.get(property, 0))),
 		func(value: float) -> void: _behavior_set(property, value))
@@ -558,7 +557,7 @@ func _add_behavior_spin(property: String, label: String, min_value: float, max_v
 # commits through set_selected_property(property, id). One populator only -- do not also call
 # populate_id_option on these (that double-population left a duplicate/untagged fallback row).
 func _add_entity_option_row(parent: Control, property: String, label: String, tooltip: String = "", options_getter := Callable(), fallback_label := Callable()) -> OptionButton:
-	var option := ObjectUiHelpers.add_id_option_row(parent, "MissionOpt_" + property, label, [])
+	var option := InspectorForms.add_id_option_row(parent, "MissionOpt_" + property, label, [])
 	if not tooltip.is_empty():
 		option.tooltip_text = tooltip
 	# The binder OWNS the list (refills it from options_getter each sync) as well as the selection +
@@ -581,7 +580,7 @@ func _add_behavior_line(property: String, label: String, getter: Callable, sette
 	lbl.text = label
 	lbl.tooltip_text = tooltip if not tooltip.is_empty() else label
 	lbl.clip_text = true
-	lbl.custom_minimum_size = Vector2(ObjectUiHelpers.LABEL_COL_WIDTH, 0)
+	lbl.custom_minimum_size = Vector2(InspectorForms.LABEL_COL_WIDTH, 0)
 	row.add_child(lbl)
 	var line := LineEdit.new()
 	line.name = "MissionBeh_" + property
@@ -644,7 +643,7 @@ func _sync_behavior_flags(flags: int) -> void:
 		for entry in _controller.get_ai_flag_bits():
 			var entry_dict := entry as Dictionary
 			var bit := int(entry_dict.get("value", 0))
-			var check := ObjectUiHelpers.add_checkbox(_behavior_flags_box, "MissionBehFlag%d" % bit, String(entry_dict.get("name", "")))
+			var check := InspectorForms.add_checkbox(_behavior_flags_box, "MissionBehFlag%d" % bit, String(entry_dict.get("name", "")))
 			check.toggled.connect(_on_behavior_flag_toggled)
 			_behavior_flag_checks.append({ "bit": bit, "check": check })
 	_behavior_flag_syncing = true
@@ -852,7 +851,7 @@ func _build_sim_bar() -> void:
 	_sim_bar.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_root.add_child(_sim_bar)
 
-	var label := ObjectUiHelpers.add_muted_label(_sim_bar, "Simulate:")
+	var label := InspectorForms.add_muted_label(_sim_bar, "Simulate:")
 	label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	label.clip_text = true
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

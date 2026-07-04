@@ -2268,7 +2268,7 @@ func test_object_lists_use_compact_list_floor() -> void:
 
 func test_inspector_box_disables_horizontal_scroll() -> void:
 	var host = add_child_autofree(Control.new())
-	var box = ObjectUiHelpers.make_inspector_box(host)
+	var box = InspectorForms.make_inspector_box(host)
 	var scroll := box.get_parent() as ScrollContainer
 	assert_not_null(scroll, "make_inspector_box should wrap content in a ScrollContainer.")
 	if scroll != null:

@@ -3078,7 +3078,7 @@ func has_item_database() -> bool:
 
 # Options for the inspector's "Waypoint path" picker -- which path a unit follows (the waypoint_id /
 # byte-79 field, [orig: Entity_SpawnFromBMSRecord @0x40f02f `if (record[79]) follow path record[79]`]).
-# Shaped { id, label } for ObjectUiHelpers.populate_id_option. id 0 = "None": byte 79 == 0 means the
+# Shaped { id, label } for InspectorForms.populate_id_option. id 0 = "None": byte 79 == 0 means the
 # unit follows no path, so path index 0 is unreachable as a follow target and is not offered. The
 # inspector adds the unit's current value if it is not in this set, so an odd value still round-trips.
 func get_waypoint_path_options() -> Array:

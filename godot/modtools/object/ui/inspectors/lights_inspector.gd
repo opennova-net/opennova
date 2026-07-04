@@ -1,4 +1,4 @@
-extends ListDetailInspector
+extends ObjectListDetailInspector
 
 ## Lights workflow: a left list of object lights plus a right detail dock for
 ## the selected light's color, falloff, animation, and output flags.

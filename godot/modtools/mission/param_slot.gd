@@ -33,7 +33,7 @@ func setup(node_name: String, default_label: String, spin_min: float, spin_max: 
 
 	_label = Label.new()
 	_label.clip_text = true
-	_label.custom_minimum_size = Vector2(ObjectUiHelpers.LABEL_COL_WIDTH, 0)
+	_label.custom_minimum_size = Vector2(InspectorForms.LABEL_COL_WIDTH, 0)
 	add_child(_label)
 
 	_spin = SpinBox.new()

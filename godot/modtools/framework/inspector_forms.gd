@@ -1,12 +1,10 @@
-class_name ObjectUiHelpers
+class_name InspectorForms
 extends RefCounted
 
-## Stateless UI builders shared by the object workspace and its workflow
-## inspectors. Every function returns the control(s) it adds and never reads
-## instance state, so callers own the data (e.g. pass control_registers in
-## rather than reaching back into the editor).
-
-const CtrlRegPickerScript = preload("res://modtools/object/ui/widgets/ctrl_reg_picker.gd")
+## Stateless UI builders shared by the workflow inspectors across workspaces
+## (B7: the de-facto shared forms library, promoted out of object/ui/). Every
+## function returns the control(s) it adds and never reads instance state, so
+## callers own the data. The object-only ctrl-reg builders live in ObjectForms.
 
 # Panel/detail container margin and inner card margin, in pixels.
 const PANEL_MARGIN := 10
@@ -81,24 +79,6 @@ static func add_id_option_row(parent: Control, node_name: String, label_text: St
 	return option
 
 
-static func add_ctrl_reg_row(parent: Control, node_name: String, label_text: String, control_registers: Array):
-	var row := HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(row)
-	var label := Label.new()
-	label.text = label_text
-	label.tooltip_text = label_text
-	label.clip_text = true
-	label.custom_minimum_size = Vector2(LABEL_COL_WIDTH, 0)
-	row.add_child(label)
-	var picker = CtrlRegPickerScript.new()
-	picker.name = node_name
-	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(picker)
-	picker.setup(control_registers, -1)
-	return picker
-
-
 static func add_detail_field(parent: Control, label_text: String) -> VBoxContainer:
 	var row := VBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -136,18 +116,6 @@ static func add_detail_id_option_row(parent: Control, node_name: String, label_t
 	row.add_child(option)
 	populate_id_option(option, options, 0)
 	return option
-
-
-static func add_detail_ctrl_reg_row(parent: Control, node_name: String, label_text: String, control_registers: Array):
-	var row := add_detail_field(parent, label_text)
-	var picker = CtrlRegPickerScript.new()
-	picker.name = node_name
-	picker.fit_to_longest_item = false
-	picker.custom_minimum_size = Vector2(0, 32)
-	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(picker)
-	picker.setup(control_registers, -1)
-	return picker
 
 
 static func populate_id_option(option: OptionButton, options: Array, current_id: int) -> void:

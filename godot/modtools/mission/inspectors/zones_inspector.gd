@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 # --- Area-trigger (zone) panel (Phase 2) --------------------------------------
 # Shown in Triggers mode: the zone list, the selected zone's six min/max spins, the two known
@@ -35,8 +34,8 @@ func _build_area_trigger_panel() -> void:
 	_at_box.visible = false
 	_inspector._root.add_child(_at_box)
 
-	ObjectUiHelpers.add_section_heading(_at_box, "Area triggers / zones")
-	_at_status = ObjectUiHelpers.add_muted_label(_at_box, "")
+	InspectorForms.add_section_heading(_at_box, "Area triggers / zones")
+	_at_status = InspectorForms.add_muted_label(_at_box, "")
 	_at_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	_at_add_button = Button.new()
@@ -62,31 +61,31 @@ func _build_area_trigger_panel() -> void:
 	_inspector._at_detail_box.visible = false
 	_inspector._sel_content.add_child(_inspector._at_detail_box)
 
-	ObjectUiHelpers.add_section_heading(_inspector._at_detail_box, "Bounds (mission units)")
+	InspectorForms.add_section_heading(_inspector._at_detail_box, "Bounds (mission units)")
 	# The format stores bounds as signed 16.16 fixed-point, so the representable range is
 	# ~±32768 mission units; the spins are bounded to that (the lib also clamps on write).
 	const ZONE_MIN := -32767.0
 	const ZONE_MAX := 32767.0
 	_at_min_spins = [
-		ObjectUiHelpers.add_spin_row(_inspector._at_detail_box, "MissionAtMinX", "Min X", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_inspector._at_detail_box, "MissionAtMinY", "Min Y", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_inspector._at_detail_box, "MissionAtMinZ", "Min Z", ZONE_MIN, ZONE_MAX, 0.001),
+		InspectorForms.add_spin_row(_inspector._at_detail_box, "MissionAtMinX", "Min X", ZONE_MIN, ZONE_MAX, 0.001),
+		InspectorForms.add_spin_row(_inspector._at_detail_box, "MissionAtMinY", "Min Y", ZONE_MIN, ZONE_MAX, 0.001),
+		InspectorForms.add_spin_row(_inspector._at_detail_box, "MissionAtMinZ", "Min Z", ZONE_MIN, ZONE_MAX, 0.001),
 	]
 	_at_max_spins = [
-		ObjectUiHelpers.add_spin_row(_inspector._at_detail_box, "MissionAtMaxX", "Max X", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_inspector._at_detail_box, "MissionAtMaxY", "Max Y", ZONE_MIN, ZONE_MAX, 0.001),
-		ObjectUiHelpers.add_spin_row(_inspector._at_detail_box, "MissionAtMaxZ", "Max Z", ZONE_MIN, ZONE_MAX, 0.001),
+		InspectorForms.add_spin_row(_inspector._at_detail_box, "MissionAtMaxX", "Max X", ZONE_MIN, ZONE_MAX, 0.001),
+		InspectorForms.add_spin_row(_inspector._at_detail_box, "MissionAtMaxY", "Max Y", ZONE_MIN, ZONE_MAX, 0.001),
+		InspectorForms.add_spin_row(_inspector._at_detail_box, "MissionAtMaxZ", "Max Z", ZONE_MIN, ZONE_MAX, 0.001),
 	]
 	for axis in 3:
 		_at_min_spins[axis].value_changed.connect(_on_at_bounds_changed)
 		_at_max_spins[axis].value_changed.connect(_on_at_bounds_changed)
 
-	ObjectUiHelpers.add_section_heading(_inspector._at_detail_box, "Flags")
+	InspectorForms.add_section_heading(_inspector._at_detail_box, "Flags")
 	var flags_row := HBoxContainer.new()
 	flags_row.add_theme_constant_override("separation", 10)
 	_inspector._at_detail_box.add_child(flags_row)
-	_at_active_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionAtActive", "Active")
-	_at_constrain_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionAtConstrainZ", "Constrain height")
+	_at_active_check = InspectorForms.add_checkbox(flags_row, "MissionAtActive", "Active")
+	_at_constrain_check = InspectorForms.add_checkbox(flags_row, "MissionAtConstrainZ", "Constrain height")
 	_at_active_check.tooltip_text = "Flags bit 0x01. NOTE: the in-zone trigger condition (*IsWithinArea) does NOT read this bit; only the mission-boundary out-of-bounds check does. Shipped missions leave it clear."
 	_at_constrain_check.tooltip_text = "Limit the zone to its Z (height) range (bit 0x02). When clear, the zone is unbounded vertically (+/-16384)."
 	_at_active_check.toggled.connect(_on_at_flag_toggled)

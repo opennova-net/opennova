@@ -1,6 +1,5 @@
 extends "res://modtools/mission/inspectors/inspector_section.gd"
 
-const ObjectUiHelpers = preload("res://modtools/object/ui/object_ui_helpers.gd")
 
 var _wp_box: VBoxContainer
 var _wp_status: Label
@@ -39,8 +38,8 @@ func _build_waypoint_panel() -> void:
 	_wp_box.visible = false
 	_inspector._root.add_child(_wp_box)
 
-	ObjectUiHelpers.add_section_heading(_wp_box, "Waypoint paths")
-	_wp_status = ObjectUiHelpers.add_muted_label(_wp_box, "")
+	InspectorForms.add_section_heading(_wp_box, "Waypoint paths")
+	_wp_status = InspectorForms.add_muted_label(_wp_box, "")
 	_wp_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	# Always-available entry point: focus the first empty path so authoring works even when
@@ -61,7 +60,7 @@ func _build_waypoint_panel() -> void:
 	_wp_list.item_selected.connect(_on_wp_path_selected)
 
 	# The active path's markers in route order. Selecting a row selects that marker.
-	ObjectUiHelpers.add_section_heading(_wp_box, "Markers")
+	InspectorForms.add_section_heading(_wp_box, "Markers")
 	_wp_marker_list = ItemList.new()
 	_wp_marker_list.name = "MissionWaypointMarkers"
 	_wp_marker_list.select_mode = ItemList.SELECT_SINGLE
@@ -106,20 +105,20 @@ func _build_waypoint_panel() -> void:
 	_inspector._wp_detail_box.visible = false
 	_inspector._sel_content.add_child(_inspector._wp_detail_box)
 
-	ObjectUiHelpers.add_section_heading(_inspector._wp_detail_box, "Path")
+	InspectorForms.add_section_heading(_inspector._wp_detail_box, "Path")
 	var flags_row := HBoxContainer.new()
 	flags_row.add_theme_constant_override("separation", 10)
 	_inspector._wp_detail_box.add_child(flags_row)
-	_wp_loop_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpLoop", "Loop")
-	_wp_blue_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpBlue", "Blue")
-	_wp_red_check = ObjectUiHelpers.add_checkbox(flags_row, "MissionWpRed", "Red")
+	_wp_loop_check = InspectorForms.add_checkbox(flags_row, "MissionWpLoop", "Loop")
+	_wp_blue_check = InspectorForms.add_checkbox(flags_row, "MissionWpBlue", "Blue")
+	_wp_red_check = InspectorForms.add_checkbox(flags_row, "MissionWpRed", "Red")
 	_wp_loop_check.toggled.connect(_on_wp_flag_toggled)
 	_wp_blue_check.toggled.connect(_on_wp_flag_toggled)
 	_wp_red_check.toggled.connect(_on_wp_flag_toggled)
 
 	_inspector._wp_detail_box.add_child(HSeparator.new())
-	ObjectUiHelpers.add_section_heading(_inspector._wp_detail_box, "Selected marker")
-	_wp_marker_label = ObjectUiHelpers.add_muted_label(_inspector._wp_detail_box, "")
+	InspectorForms.add_section_heading(_inspector._wp_detail_box, "Selected marker")
+	_wp_marker_label = InspectorForms.add_muted_label(_inspector._wp_detail_box, "")
 	_wp_marker_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 

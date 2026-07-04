@@ -1,4 +1,4 @@
-extends ListDetailInspector
+extends ObjectListDetailInspector
 
 ## Anims workflow: load a model's .adm body-animation set, browse its clips with
 ## their metadata, and play or scrub the selected clip in the preview; the arms
