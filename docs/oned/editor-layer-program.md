@@ -13,29 +13,35 @@ Line references below were re-verified 2026-07-04 against post-#179 master
 (the #176 adapter moves and #178 mission-inspector decomposition shifted the
 originals); anything marked *re-grep at execution* drifts too easily to pin.
 
-## Status 2026-07-04 (end of the first execution session)
+## Status 2026-07-04 (end of the second execution session — PROGRAM COMPLETE)
 
-LANDED on `oned-editor-layer-b`, one green slice commit each: A8 (full),
-B1–B8, B10. B10's five push_error→toast reroutes were deferred INTO B9 —
-the UI layers involved (music `bank_mode.gd`, `terrain_editor_document.gd`)
-have no shell seam until B9 exists; wire them signal→owner→workspace.
+ALL PHASES LANDED on `oned-editor-layer-b` (rebased onto the post-#181
+`hygiene-2026-07` base), one green slice commit each: A8 (full), B1–B8, B10,
+then this session **B9** (`3121fe71` — shell services formalization, with
+B10's five deferred push_error→toast reroutes riding the new seam:
+music `bank_mode.gd` ×4 and `terrain_editor_document.gd` ×1, wired
+signal→owner→workspace), **B11** (`5dd1e4f5` — theme move + accent
+single-source, guarded by `editor_theme_accent_test`), **B12** (`d109ed76` —
+`ResourceKinds` vocab dedup, pinned by `resource_kinds_test`; the ref
+widget's private 3-row jump map was missing sbf/music_script→music, a
+latent music-jump bug now fixed).
 
-REMAINING: **B9** (in progress; current site map — sync ×4:
-`strings_workspace.gd:322` / `sound_workspace.gd:176` /
-`mission_workspace.gd:588` `_sync_shell_title` + `object_workspace.gd:433`
-`_sync_shell` [rename to `_after_document_changed`, callers :270/:314/:327];
-status ×2 left: `mnu_workspace.gd:520,599` — mission's four adopted
-severities in B10; hosting `editor_shell.add_child` sites:
-`mission_workspace.gd:182,360`, `mnu_workspace.gd:594`,
-`music_workspace.gd:282`, `object_workspace.gd:427`,
-`sound_workspace.gd:76,88`, `strings_workspace.gd:144`; mission VFS:
-`mission_workspace.gd:288/297` → base `_resource_root()` [exists,
-`editor_workspace.gd:527`], `mission_controller.gd:484/487, 574/577,
-3845-3846, 3953` → one private controller `_resource_root()` wrapper),
-**B11** (unchanged below), **B12** (unchanged below), then the program-end
-FULL GUT + the deferred oned-run visual pass (B6+B10+B11 checks in one
-sweep: eleven workspaces, shortcut matrix, toast colors, theme, screenshot
-driver).
+END GATE: FULL GUT green — 189 scripts / 1927 tests / 27,281 asserts, no
+parse drops. Visual pass via the screenshot driver over ALL ELEVEN
+workspaces with real assets (`hud.png` is new; `scripts/
+capture_screenshots.sh` validates eleven editor shots now): theme + accent
+render correctly post-move (active-row emphasis reads the palette live),
+the mission open captured the GREEN success toast in-frame (B9 notify →
+B10 severity path), object/hud/menus/music/sound all present. The
+JOX flat extract was missing the driver's MH53 hero set (REVX02 carried it
+and was consolidated away 2026-07-04); MH53.3di + its nine textures were
+re-extracted from retail `resource.pff` into `~/Desktop/JOX`.
+
+Residual manual spot-checks (headless-pinned, not hand-verified this
+session): error/warn toast colors (severity mapping tested;
+info/success seen live), the Ctrl+S/Z/Y hand matrix incl. text-field focus
+(pinned by `editor_shortcuts_test`), popover exclusivity + detach (pinned
+by the A8 shell tests).
 
 Design provenance: three parallel code sweeps plus two verification passes
 against the code (2026-07-01). Where a design claim conflicted with the code,
