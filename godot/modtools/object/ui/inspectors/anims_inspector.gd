@@ -340,13 +340,12 @@ func _build_arms_rows(detail_box: VBoxContainer) -> void:
 
 # --- Pickers / helpers (moved from the PREVIEW smoke block) -------------------------
 
-# Open the in-app resource picker (via the editor shell) over an explicit, scoped
-# file list — used for .adm (which the resource index does not register) and the
-# arms .3di. No-op if the shell lacks the picker (keeps headless / tests safe).
+# Open the in-app resource picker (via the workspace's shell seam) over an
+# explicit, scoped file list — used for .adm (which the resource index does not
+# register) and the arms .3di. No-op headless (keeps tests safe).
 func _open_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
-	var shell: Variant = _ws.editor_shell if _ws != null else null
-	if shell != null and shell.has_method("open_file_picker"):
-		shell.open_file_picker(title, files, on_pick)
+	if _ws != null:
+		_ws.open_file_picker(title, files, on_pick)
 
 
 # Flat (top-level) basenames under the mounted resource root with the given

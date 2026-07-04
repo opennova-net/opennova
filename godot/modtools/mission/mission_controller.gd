@@ -476,15 +476,24 @@ func _is_same_clean_terrain(trn_path: String) -> bool:
 		return false
 	return current.replace("\\", "/").to_lower() == trn_path.replace("\\", "/").to_lower()
 
+## The mounted resource root, via the bound terrain editor — the controller's one
+## VFS seam. The controller runs headless in tests (no shell), so this reads the
+## editor, not the workspace; the duck-type guard for bare doubles lives here.
+func _resource_root() -> NovaResourceRoot:
+	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
+		return terrain_editor.get_resource_root()
+	return null
+
+
 ## Open a .bms/.mis: parse it, resolve + load its referenced terrain and environment
 ## through the terrain editor, then place its objects under the shared world root.
 ## Returns OK, or an error code; get_last_status() carries a human-facing reason.
 func open_mission(bms_path: String) -> Error:
 	_last_status = ""
-	if terrain_editor == null or not terrain_editor.has_method("get_resource_root"):
+	if terrain_editor == null:
 		_last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root()
+	var resource_root: NovaResourceRoot = _resource_root()
 	if resource_root == null:
 		_last_status = "Set a resource directory before opening a mission."
 		return ERR_UNCONFIGURED
@@ -571,10 +580,10 @@ func open_mission(bms_path: String) -> Error:
 ## first edit. Returns OK, or an error; get_last_status() carries a human-facing reason.
 func new_mission() -> Error:
 	_last_status = ""
-	if terrain_editor == null or not terrain_editor.has_method("get_resource_root"):
+	if terrain_editor == null:
 		_last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root()
+	var resource_root: NovaResourceRoot = _resource_root()
 	if resource_root == null:
 		_last_status = "Set a resource directory before creating a mission."
 		return ERR_UNCONFIGURED
@@ -3842,8 +3851,7 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 func reload_environment() -> String:
 	if _mission == null:
 		return "no mission open"
-	var resource_root: NovaResourceRoot = terrain_editor.get_resource_root() \
-			if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
+	var resource_root: NovaResourceRoot = _resource_root()
 	if resource_root == null:
 		return "no resource root mounted"
 	return _load_environment(_mission, resource_root)
@@ -3950,7 +3958,7 @@ func _ensure_sim_driver() -> bool:
 	# resource root so soldiers get their .adm/.bad root-motion clips (without them they stand
 	# still).
 	var terrain_data = terrain_editor.get_data() if terrain_editor != null and terrain_editor.has_method("get_data") else null
-	var sim_root = terrain_editor.get_resource_root() if terrain_editor != null and terrain_editor.has_method("get_resource_root") else null
+	var sim_root: NovaResourceRoot = _resource_root()
 	if int(_sim_driver.setup(_mission, container, {
 			"tick_mode": NovaSimulation.TICK_DIVIDED,
 			"self_tick": true,

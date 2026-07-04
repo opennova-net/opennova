@@ -72,8 +72,7 @@ func _ensure_editor() -> void:
 		return
 	controller = SoundControllerScript.new()
 	controller.name = "SoundController"
-	if editor_shell != null:
-		editor_shell.add_child(controller)
+	_host_under_shell(controller)
 	controller.new_profile(false)
 	controller.structure_changed.connect(_on_structure_changed)
 	controller.selection_changed.connect(_on_selection_changed)
@@ -84,8 +83,7 @@ func _ensure_preview() -> SoundPreviewPlayer:
 	if _preview == null:
 		_preview = SoundPreviewPlayerScript.new()
 		_preview.name = "SoundPreviewPlayer"
-		if editor_shell != null:
-			editor_shell.add_child(_preview)
+		_host_under_shell(_preview)
 	return _preview
 
 
@@ -158,7 +156,7 @@ func _on_structure_changed() -> void:
 		_view.rebuild()
 	if _inspector != null:
 		_inspector.refresh()
-	_sync_shell_title()
+	_sync_shell()
 
 
 func _on_selection_changed() -> void:
@@ -169,12 +167,7 @@ func _on_selection_changed() -> void:
 
 
 func _on_edited() -> void:
-	_sync_shell_title()
-
-
-func _sync_shell_title() -> void:
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
-		editor_shell.sync_from_editor_state()
+	_sync_shell()
 
 
 # --- Document actions ---

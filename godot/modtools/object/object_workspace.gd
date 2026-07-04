@@ -267,7 +267,7 @@ func get_new_action_label() -> String:
 func new_current() -> Error:
 	_ensure_object_editor()
 	object_editor.create_empty_object(true)
-	_sync_shell()
+	_after_document_changed()
 	return OK
 
 
@@ -311,7 +311,7 @@ func open_file(path: String) -> Error:
 		err = object_editor.open_object_from_resource_root(vfs, path)
 	else:
 		err = object_editor.open_object(path)
-	_sync_shell()
+	_after_document_changed()
 	return err
 
 
@@ -321,10 +321,18 @@ func get_resource_root() -> NovaResourceRoot:
 	return _resource_root()
 
 
+## Open the shell's scoped file picker over an explicit file list (the object
+## inspectors' .adm / arms-.3di pickers ask the workspace, not the shell).
+## No-op without a shell (headless / tests).
+func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
+	if editor_shell != null and editor_shell.has_method("open_file_picker"):
+		editor_shell.open_file_picker(title, files, on_pick)
+
+
 func add_lod_scene(path: String, lod_index: int = -1) -> Error:
 	_ensure_object_editor()
 	var err := object_editor.add_lod_scene(path, lod_index)
-	_sync_shell()
+	_after_document_changed()
 	return err
 
 
@@ -423,14 +431,15 @@ func _ensure_object_editor() -> void:
 		return
 	object_editor = ObjectEditorScript.new()
 	object_editor.name = "ObjectEditor"
-	if editor_shell != null:
-		editor_shell.add_child(object_editor)
+	_host_under_shell(object_editor)
 	object_editor.create_empty_object(false)
-	object_editor.state_changed.connect(_sync_shell)
+	object_editor.state_changed.connect(_after_document_changed)
 	_sync_export_update_mask_from_dirty()
 
 
-func _sync_shell() -> void:
+# Post-change fan-out: refresh the preview binding, the active inspector, and the
+# shell chrome after any object-document mutation (state_changed lands here too).
+func _after_document_changed() -> void:
 	_sync_export_update_mask_from_dirty()
 	if _preview != null and object_editor != null:
 		if _preview.object_data != object_editor.object_data:
@@ -441,8 +450,7 @@ func _sync_shell() -> void:
 		active_inspector.refresh()
 	else:
 		_ensure_detail_dock().rebuild()
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
-		editor_shell.sync_from_editor_state()
+	_sync_shell()
 
 
 func _on_environment_editor_changed(_env_file: EnvFile, _time_of_day: float) -> void:

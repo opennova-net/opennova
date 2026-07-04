@@ -46,7 +46,7 @@ func _init(value: Node = null) -> void:
 	_controller = MissionControllerScript.new(value)
 	# The controller fires `changed` on load / clear / select / dirty / save; refresh
 	# the shell title + action-button state (Save enables, `*` appears) on each.
-	_controller.changed.connect(_sync_shell_title)
+	_controller.changed.connect(_sync_shell)
 	# Transient action feedback (undo / delete / place / rejected edits) flows through
 	# status_reported; relay it to the shell status bar. Open / save keep their own poll.
 	_controller.status_reported.connect(_on_controller_status)
@@ -179,7 +179,7 @@ func _prompt_reground(count: int) -> void:
 		_reground_dialog = null
 		dialog.queue_free())
 	_reground_dialog = dialog
-	editor_shell.add_child(dialog)
+	_host_under_shell(dialog)
 	dialog.popup_centered()
 
 
@@ -285,7 +285,7 @@ func is_playing_mission() -> bool:
 
 
 func can_play_mission() -> bool:
-	return _controller != null and _controller.is_loaded() and _viewport_host != null 		and editor_shell != null and editor_shell.has_method("get_resource_root")
+	return _controller != null and _controller.is_loaded() and _viewport_host != null and editor_shell != null
 
 
 func play_mission() -> Error:
@@ -294,7 +294,7 @@ func play_mission() -> Error:
 	if not can_play_mission():
 		_on_controller_status("Open a mission (with the editor docked) before playing.", true)
 		return ERR_UNAVAILABLE
-	var root: NovaResourceRoot = editor_shell.get_resource_root()
+	var root: NovaResourceRoot = _resource_root()
 	if root == null:
 		_on_controller_status("No resource directory mounted to play from.", true)
 		return ERR_UNCONFIGURED
@@ -316,7 +316,7 @@ func play_mission() -> Error:
 		# Failed boot: swap straight back so the editor never strands viewport-less.
 		stop_play_mission()
 		return err
-	_sync_shell_title()
+	_sync_shell()
 	return OK
 
 
@@ -334,7 +334,7 @@ func stop_play_mission() -> void:
 			viewport.set_edit_input_enabled(false)
 			viewport.set_input_target(_controller)
 		terrain_editor.set_viewport_active(true, false)
-	_sync_shell_title()
+	_sync_shell()
 
 
 # --- Mission debug overlay (C12) -------------------------------------------
@@ -357,7 +357,7 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
 		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
 		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
-		editor_shell.add_child(_debug_overlay)
+		_host_under_shell(_debug_overlay)
 	_debug_overlay.toggle()
 
 
@@ -437,9 +437,7 @@ func new_current() -> Error:
 	var err := int(_controller.new_mission())
 	var status: String = _controller.get_last_status()
 	if not status.is_empty():
-		if editor_shell != null and editor_shell.has_method("show_status_message"):
-			editor_shell.show_status_message(status, 0.0, &"info" if err == OK else &"error")
-		elif err != OK:
+		if not _notify_status(status, &"info" if err == OK else &"error") and err != OK:
 			push_warning("New mission: " + status)
 	return err as Error
 
@@ -480,9 +478,7 @@ func open_file(path: String) -> Error:
 	# a failure still goes to the log rather than vanishing.
 	var status: String = _controller.get_last_status()
 	if not status.is_empty():
-		if editor_shell != null and editor_shell.has_method("show_status_message"):
-			editor_shell.show_status_message(status, 0.0, &"success" if err == OK else &"error")
-		elif err != OK:
+		if not _notify_status(status, &"success" if err == OK else &"error") and err != OK:
 			push_warning("Mission open: " + status)
 	return err as Error
 
@@ -578,24 +574,17 @@ func _report_save_status(err: int) -> void:
 	var status: String = _controller.get_last_status() if _controller != null else ""
 	if status.is_empty():
 		return
-	if editor_shell != null and editor_shell.has_method("show_status_message"):
-		editor_shell.show_status_message(status, 0.0, &"info" if err == OK else &"error")
-	elif err != OK:
+	if not _notify_status(status, &"info" if err == OK else &"error") and err != OK:
 		# No shell to show in (headless), but a failed save must not be silent.
 		push_warning("Mission save: " + status)
-
-
-func _sync_shell_title() -> void:
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
-		editor_shell.sync_from_editor_state()
 
 
 # Surface a controller action's transient status in the shell status bar. Errors linger
 # a little longer. No-op without a shell (headless tests read get_last_status instead).
 func _on_controller_status(message: String, is_error: bool) -> void:
-	if message.is_empty() or editor_shell == null or not editor_shell.has_method("show_status_message"):
+	if message.is_empty():
 		return
-	editor_shell.show_status_message(message, 0.0, &"error" if is_error else &"success")
+	_notify_status(message, &"error" if is_error else &"success")
 
 
 # --- Undo / redo --------------------------------------------------------------

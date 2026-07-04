@@ -224,6 +224,8 @@ func _ready() -> void:
 	_init_axes_gizmo()
 	if camera.has_signal("escape_pressed"):
 		camera.connect("escape_pressed", Callable(self, "_on_camera_escape"))
+	# One document for the editor's life (field-initialized, never reassigned).
+	_document.error_reported.connect(_on_document_error)
 	_load_editor_state()
 
 
@@ -232,9 +234,15 @@ func set_workstation(value: Node) -> void:
 
 
 ## Forward a short status message to the workstation UI.
-func _notify_status(message: String) -> void:
+func _notify_status(message: String, severity: StringName = &"info") -> void:
 	if workstation and workstation.has_method("show_status_message"):
-		workstation.show_status_message(message)
+		workstation.show_status_message(message, 0.0, severity)
+
+
+## The document's rejected-input reports (wrong-format texture picks) become
+## shell toasts; the console line stays at the source.
+func _on_document_error(message: String) -> void:
+	_notify_status(message, &"error")
 
 
 func _init_clone_marker() -> void:

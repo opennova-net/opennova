@@ -99,24 +99,17 @@ func _ready() -> void:
 	_add_button(csv_buttons, "StringsImportCsvButton", "Import...", _on_import_csv)
 	_add_button(csv_buttons, "StringsExportCsvButton", "Export...", _on_export_csv)
 
-	# "Used by" rides the shell's reference index; headless hosts get no strip.
-	var shell: Object = _ws.editor_shell if _ws != null else null
-	if shell != null and shell.has_method("get_reference_index") \
-			and shell.has_method("open_in_workspace"):
+	# "Used by" rides the shell's reference index, asked of the workspace (the
+	# inspector never touches the shell); headless hosts get no strip.
+	var services: Dictionary = _ws.get_reference_services() if _ws != null else {}
+	if not services.is_empty():
 		_used_by_strip = ReferenceStrip.new()
 		_used_by_strip.name = "StringsUsedByStrip"
 		# Kind filter: referrer buckets are name-keyed, so the bare-stem query
 		# would otherwise pick up same-named targets of other kinds. Source
 		# paths are VFS-logical; the menus that use tables open from disk only,
-		# so resolve before jumping.
-		_used_by_strip.configure("text table", {
-			"referrers": func(name: String) -> Array:
-				return shell.get_reference_index().referrers_of(name),
-			"is_ready": func() -> bool:
-				return shell.get_reference_index().is_built(),
-			"jump": func(kind: String, path: String) -> void:
-				shell.open_in_workspace(kind, ReferenceStrip.resolve_source_path(shell, path)),
-		}, PackedStringArray(["strings"]))
+		# so resolve before jumping (the services' jump Callable does).
+		_used_by_strip.configure("text table", services, PackedStringArray(["strings"]))
 		box.add_child(_used_by_strip)
 
 	refresh()
