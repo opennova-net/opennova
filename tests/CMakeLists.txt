@@ -423,6 +423,13 @@ target_compile_definitions(minimal_def_validate_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_def_validate COMMAND minimal_def_validate_test)
 
+# Minimal set's menus parse (main Startup node + mp host/join screen).
+add_executable(minimal_mnu_validate_test fixtures/minimal_mnu_validate.cpp)
+target_link_libraries(minimal_mnu_validate_test PRIVATE opennova_mnu)
+target_compile_definitions(minimal_mnu_validate_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
+
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
 target_link_libraries(rtxt_real_parity_test PRIVATE opennova_rtxt)
