@@ -118,7 +118,10 @@ what confuses.
   `mission::promote_mission` is optional — if picked, full propagation per
   the rename-everywhere rule).
 - **NET-4** (S, rides NET-2's ADR) net libs are formally OUTSIDE the C ABI
-  (C++-linked only); the dumpbin export-identity check guards it.
+  (C++-linked only) — **guard landed 2026-07-05**: the `abi_export_identity`
+  ctest (`scripts/lint/abi_exports_check.py`, 104-export committed baseline,
+  never-bypassable forbidden-family check) runs wherever `BUILD_SHARED_LIB=ON`
+  builds run ctest (scripts/build.sh + the CI build-and-test job).
 
 ### LIBS — topology and seams
 
@@ -369,7 +372,8 @@ hatch (a baseline bump, logged in this doc).
 | [orig] citation coverage | ratchet: libs/*/src files with zero citations (infra libs allowlisted), fail-on-increase | Wave 1 | hard on increase; semantic coverage stays a review concern |
 | Magic numbers | diff-scoped advisory in the CI summary | Wave 2 | advisory permanently |
 | Link-graph edges | forbidden-edge script (npwire !→ sqlite; wac/mission/net !→ terrain-format libs post-seam) | Wave 1 | hard-fail forever |
-| GUT silent-drop greps / C-ABI identity | existing | exists | unchanged |
+| GUT silent-drop greps | existing | exists | unchanged |
+| C-ABI export identity + net-family ban | `abi_export_identity` ctest (`abi_exports_check.py` vs the committed baseline; a baseline bump is same-commit and logged here; the net-family check is never bypassable) | Wave 1 (NET-4) | hard-fail forever |
 
 Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 (no new workflow).

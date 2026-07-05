@@ -1542,3 +1542,17 @@ if(WIN32)
     target_link_libraries(npruntime_two_endpoint_socket_test PRIVATE ws2_32)
 endif()
 add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
+
+# NET-4 (ADR 0019 §5): the C-ABI export-identity guard. The shared library's
+# flat export list must match scripts/lint/abi_exports_baseline.txt, and no
+# net-lib symbol family may appear at all. Runs wherever BUILD_SHARED_LIB=ON
+# builds run ctest (scripts/build.sh, the CI build-and-test job).
+if(BUILD_SHARED_LIB)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME abi_export_identity
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_SOURCE_DIR}/scripts/lint/abi_exports_check.py"
+                    --lib "$<TARGET_FILE:opennova_shared>")
+    endif()
+endif()
