@@ -453,6 +453,14 @@ target_compile_definitions(minimal_art_gen_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_art_gen COMMAND minimal_art_gen_test)
 
+# Minimal set's packaging tool: build_terrain + PFF-bundle the whole set. Skips
+# clean unless OPENNOVA_BUILD_MINIMAL_PFF=1 (generate-at-package: ~35 s, ~10 MB).
+add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
+target_link_libraries(minimal_pff_package_test PRIVATE opennova_terrain opennova_pff)
+target_compile_definitions(minimal_pff_package_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
+
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
 target_link_libraries(rtxt_real_parity_test PRIVATE opennova_rtxt)

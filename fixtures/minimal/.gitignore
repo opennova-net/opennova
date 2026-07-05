@@ -1,0 +1,4 @@
+# Generate-at-package artifacts — produced by minimal_pff_package
+# (OPENNOVA_BUILD_MINIMAL_PFF=1), never committed (~10 MB, 685 terrain files).
+mnml.pff
+_pff_build/
