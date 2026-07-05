@@ -89,9 +89,17 @@ Remaining slices:
   config + the flat-depthmap recipe (a generator, not the 1 MB raw); a light
   ctest guards the `.trn` config round-trips. Pipeline: a flat depthmap →
   `libs/terrain` `build_terrain` (a `TpjProject`, output prefix `mnml`) →
-  `.cpt`/`Output.dep`/`.tms` tiles; the `.trn` config (`libs/trn` `save_trn`)
-  references them. Getting the build-output → `.trn`-field mapping exactly
-  right is what makes the terrain load in retail — the care in this leg.
+  `.cpt` polydata (+ `Output.dep`, `.tms`/`.tml` tiles). But the `.trn` config
+  (`libs/trn` `save_trn`) references the `.cpt` **and** source art files that
+  `build_terrain` does NOT emit and must also be authored small:
+  `polytrn_colormap` (`.tga`), the `polytrn_detailmap*` set (`.tga`),
+  `polytrn_tilestrip` (`.tga`), `polytrn_charmap` (surface map, `.pcx`),
+  `polytrn_foliagemap` (foliage placement, `.pcx`) — see
+  `fixtures/godot/dvxi5/Dvxi5.trn`. So the terrain leg = author minimal source
+  images + generate the polydata + author the `.trn` referencing both. Which
+  art files retail tolerates missing vs requires, and the exact build-output →
+  `.trn`-field mapping, are validated at the retail launch — this leg is best
+  built while iterating against a retail install.
 - the PFF packaging (`libs/pff` write side) — a tool that runs the terrain
   build, then bundles the whole set (the committed files + the generated
   terrain) into ONE archive, so the fatal not-all-archives-missing gate clears
