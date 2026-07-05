@@ -53,6 +53,7 @@ signal mission_effects(effects: Array)
 @onready var _terrain: NovaTerrain = $NovaTerrain
 @onready var _env: Node = get_node_or_null("NovaEnvironment")
 @onready var _water: Node = get_node_or_null("NovaWater")
+@onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: NovaFoliageDispatcher
 var _tile_overlay: NovaTerrainTileOverlay
@@ -64,6 +65,10 @@ var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pa
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _mission_audio: NovaMissionAudio
+# Frame-clear cache (divergence #21): recompute only when the env generation
+# moves or the camera crosses the water plane.
+var _clear_env_generation: int = -1
+var _clear_above_water := true
 var _net_client     # NovaNetClient: the in-match wire client (replay or live)
 var _net_view       # NetWorldView: spawns + drives models from the decoded world
 var _net_event_view # NetEventView: draws the decoded event stream over the world
@@ -898,3 +903,46 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 
 func get_mission_audio() -> NovaMissionAudio:
 	return _mission_audio
+
+
+# --- Frame clear color (env divergence #21, closed) ----------------------------
+
+func _process(_delta: float) -> void:
+	_update_frame_clear_color()
+
+
+# The witnessed frame clear: the horizon-blended skyfog above water, the lit
+# water color underwater [orig: Render_ProcessMainSceneFrame @ 0x5ca776..
+# 0x5ca792 - clear color = alternate_fog ? 0x808080 : cam above water ?
+# skyfog[0] : Env_WaterColorLit; the vehicle alternate-fog view is not modeled
+# yet]. Colors stay undoubled - the 1x host matches the non-modulate2x device
+# Clear, which halves the doubled color [orig: @ 0x67715d].
+func _update_frame_clear_color() -> void:
+	if _clear_color == null or _clear_color.environment == null or _env == null:
+		return
+	if not _env.has_method("get_frame_clear_color"):
+		return
+	var above := true
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null and _water != null:
+		above = cam.global_position.y > float(_water.water_height)
+	var gen := int(_env.get_env_generation())
+	if gen == _clear_env_generation and above == _clear_above_water:
+		return
+	_clear_env_generation = gen
+	_clear_above_water = above
+	var rgb: Vector3
+	if above:
+		rgb = _env.get_frame_clear_color()
+	else:
+		# Underwater clear = the lit water color [orig: @ 0x5ca78b], the same
+		# derived chain the water surface renders with.
+		var combined := EnvFile.combine_terrain_light(
+			_vec3_color(_env.get_sun_light()), _vec3_color(_env.get_sky_ambient()))
+		var lit := EnvFile.lit_water_color(_vec3_color(_env.get_water_color()), combined)
+		rgb = Vector3(lit.r, lit.g, lit.b)
+	_clear_color.environment.background_color = Color(rgb.x, rgb.y, rgb.z)
+
+
+static func _vec3_color(v: Vector3) -> Color:
+	return Color(v.x, v.y, v.z)

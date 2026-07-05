@@ -99,8 +99,10 @@ in `client_session_loopback_test`).
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
 
 Implemented **libs/env-first** so the ENG-2 port inherits the closures. The
-honored-matrix PARTIAL rows (terrain_tint, iris, ceiling/floor, lightning, glare_3di,
-skyfog) map onto these `#` entries.
+honored-matrix PARTIAL rows (terrain_tint, iris, ceiling/floor, lightning, glare_3di)
+map onto these `#` entries. Closed 2026-07-05: **env #21** -> `FIXED` (the frame-clear
+horizon blend ported libs/env-first + consumed by the GameWorld clear; witness in
+[env/env-tod-re.md](env/env-tod-re.md) #21).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
@@ -110,7 +112,6 @@ skyfog) map onto these `#` entries.
 | env #17 | Iris auto-exposure modulator gain — curve + consumer chain recovered, no modulator chain built (`get_terrain_lighting_attenuation` returns identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #19 | `terrain_rgb` terrain-stack consumers (texture bake ×v≫12, water-quad half-tint, foliage lightmap ×/128) render none — attenuation hard-returns identity | A | OPEN (PARTIAL) | PAR-ENV |
-| env #21 | `skyfog` frame-clear color (cross-faded skyfog↔fog at low fog distance) not wired; host scenes choose their own background | A | OPEN | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -209,7 +210,7 @@ Open counts by domain (the target is zero in every cell):
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
 | Net | 9 | 0 | 12 (2 also NEEDS-RE) | 21 |
-| Environment | 2 | 0 | 5 | 7 |
+| Environment | 1 | 0 | 5 | 6 |
 | World / AI + events | 3 | 0 | 4 | 7 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 10 | 1 (+1 dual) | 5 | 16 |
@@ -217,7 +218,7 @@ Open counts by domain (the target is zero in every cell):
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
-| **Total OPEN** | | | | **62** |
+| **Total OPEN** | | | | **61** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

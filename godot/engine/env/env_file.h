@@ -169,6 +169,12 @@ public:
 	static Color double_saturate_color(const Color &p_color);
 	static Color combine_terrain_light(const Color &p_light, const Color &p_sky);
 	static Color lit_water_color(const Color &p_water, const Color &p_light);
+	// The frame-clear horizon blend: skyfog cross-faded toward fog when the
+	// smoothed fog distance drops below half the reference (distances in world
+	// units; converted to 16.16 internally). Operates on UNDOUBLED colors.
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1]
+	static Color horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
+			float p_fog_distance, float p_fog_distance_reference);
 
 	// Sun glare intensity from view-sun alignment and occlusion brightness
 	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]; returns

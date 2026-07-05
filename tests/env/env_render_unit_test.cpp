@@ -194,6 +194,47 @@ int main() {
 		            "empty override set leaves the config alone")) return 1;
 	}
 
-	std::printf("OK: env_render fog/day-phase/smoothing/lightning/glare/overrides\n");
+	// Horizon blend — the frame-clear cross-fade, byte-exact vs the witnessed
+	// MMX sequence [orig: Environment_UpdateWeatherTick @ 0x57f037..0x57f0a1].
+	{
+		const Rgb fog{1.0f, 0.0f, 128.0f / 255.0f};
+		const Rgb sky{0.0f, 1.0f, 64.0f / 255.0f};
+		const uint32_t ref = kFogDistReferenceDefault; // 1024.0 in 16.16
+
+		// At or above ref/2 the skyfog is untouched.
+		Rgb out = horizon_blend_skyfog(fog, sky, 512u << 16, ref);
+		if (!expect(byte_of(out.r) == 0 && byte_of(out.g) == 255 && byte_of(out.b) == 64,
+		            "horizon blend leaves skyfog untouched at ref/2")) return 1;
+
+		// At or below ref/4: pure fog color through the byte pipeline —
+		// 255 -> 255 and 128 -> 128 exactly; the witnessed low-byte loss maps
+		// a 1/255 channel to 0 (replicated, not "fixed").
+		out = horizon_blend_skyfog(fog, sky, 256u << 16, ref);
+		if (!expect(byte_of(out.r) == 255 && byte_of(out.g) == 0 && byte_of(out.b) == 128,
+		            "horizon blend is pure fog at ref/4")) return 1;
+		out = horizon_blend_skyfog(Rgb{1.0f / 255.0f, 0.0f, 0.0f}, sky, 100u << 16, ref);
+		if (!expect(byte_of(out.r) == 0, "the witnessed low-byte loss at t=0 (1 -> 0)")) return 1;
+
+		// Midpoint of the band (dist = 3*ref/8 -> t = 0x8000): both pmulhw legs
+		// land on 8191 >> 6 = 127 for a 255 input.
+		out = horizon_blend_skyfog(fog, sky, 384u << 16, ref);
+		if (!expect(byte_of(out.r) == 127 && byte_of(out.g) == 127,
+		            "mid-band blends 255/0 and 0/255 to 127")) return 1;
+
+		// Three-quarters through the band (dist = 448 -> t = 0xC000): the fog
+		// leg lands (32767*8191)>>16 = 4095 >> 6 = 63, the skyfog leg
+		// (32767*24576)>>16 = 12287 >> 6 = 191.
+		out = horizon_blend_skyfog(fog, sky, 448u << 16, ref);
+		if (!expect(byte_of(out.r) == 63 && byte_of(out.g) == 191,
+		            "t=0xC000 blends 255-legs to 63/191")) return 1;
+
+		// The band's top edge (one fixed-point step below ref/2, t = 0xFFFF)
+		// reproduces skyfog exactly through the byte pipeline.
+		out = horizon_blend_skyfog(fog, sky, (512u << 16) - 1, ref);
+		if (!expect(byte_of(out.r) == 0 && byte_of(out.g) == 255,
+		            "the band's top edge reproduces skyfog")) return 1;
+	}
+
+	std::printf("OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon\n");
 	return 0;
 }

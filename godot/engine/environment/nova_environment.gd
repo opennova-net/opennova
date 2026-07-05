@@ -264,11 +264,33 @@ func get_cloud_edge() -> Vector3:
 
 
 func get_skyfog_color() -> Vector3:
-	# The clear/horizon color, doubled like fog [orig: Environment_UpdateWeatherTick
-	# @ 0x57f190]. Its witnessed consumer is the FRAME CLEAR color (cross-faded
-	# skyfog<->fog at low fog distance), which no host wires yet - tracked as
-	# divergence #21 in docs/env/env-tod-re.md; this getter is the API for it.
+	# The skyfog render color, doubled like fog [orig: Environment_UpdateWeatherTick
+	# @ 0x57f190]. Hosts wanting the frame CLEAR color use get_frame_clear_color()
+	# (the horizon-blended form; divergence #21, closed).
 	return _double_vec3(_tod.get("skyfog", Vector3.ZERO))
+
+
+func get_frame_clear_color() -> Vector3:
+	# The frame CLEAR color (divergence #21, closed): skyfog horizon-blended
+	# toward fog when the fog distance drops below half the reference distance -
+	# pure fog at <= ref/4, a linear fade across [ref/4, ref/2], untouched
+	# skyfog above. The blend runs on the UNDOUBLED keyframe colors (retail
+	# doubles after), and the result stays undoubled: a 1x-intensity host
+	# matches the witnessed non-modulate2x device path, whose Clear halves the
+	# doubled color back. Reference distance: the retail default 1024 (the
+	# session authority forces it; 768 is an adapter-caps fallback with no
+	# host analog).
+	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1;
+	#  consumer Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; device Clear
+	#  halving @ 0x67715d; defaults Environment_InitDefaults @ 0x57c0b0 /
+	#  Terrain_Init @ 0x60fca3]
+	var fog_raw: Vector3 = _tod.get("fog", Vector3.ZERO)
+	var sky_raw: Vector3 = _tod.get("skyfog", Vector3.ZERO)
+	var blended := EnvFile.horizon_blend_skyfog(
+		Color(fog_raw.x, fog_raw.y, fog_raw.z),
+		Color(sky_raw.x, sky_raw.y, sky_raw.z),
+		_fog_distance, 1024.0)
+	return Vector3(blended.r, blended.g, blended.b)
 
 
 func set_fill_light(value: Vector3) -> void:

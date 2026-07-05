@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://engine/world/game_world.gd" id="1_world"]
 [ext_resource type="Script" uid="uid://dnr7qwrpuk7j1" path="res://engine/environment/nova_environment.gd" id="2_env"]
@@ -7,8 +7,14 @@
 [ext_resource type="Script" uid="uid://dabwlp4s5mh65" path="res://engine/environment/nova_water.gd" id="5_water"]
 [ext_resource type="Script" path="res://engine/environment/nova_celestial.gd" id="6_celestial"]
 
+[sub_resource type="Environment" id="Environment_clear"]
+background_mode = 2
+
 [node name="GameWorld" type="Node3D"]
 script = ExtResource("1_world")
+
+[node name="ClearColor" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_clear")
 
 [node name="NovaTerrain" type="NovaTerrain" parent="."]
 environment_path = NodePath("../NovaEnvironment")

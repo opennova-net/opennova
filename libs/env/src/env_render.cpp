@@ -266,6 +266,34 @@ Rgb double_saturate(const Rgb &color) {
 	return out;
 }
 
+Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
+                         uint32_t fog_dist_fixed, uint32_t fog_dist_reference_fixed) {
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0 — half shr @ 0x57f03d,
+	//  quarter shr @ 0x57f04c, unsigned strict compare @ 0x57f04e, borrow clamp
+	//  @ 0x57f058, t = div/shr16 @ 0x57f061..0x57f063, per-byte MMX
+	//  @ 0x57f066..0x57f0a1 written IN PLACE over skyfog[0].]
+	const uint32_t half = fog_dist_reference_fixed >> 1;
+	const uint32_t quarter = half >> 1;
+	if (fog_dist_fixed >= half || half == quarter) return skyfog;
+	const uint32_t num = (fog_dist_fixed > quarter) ? fog_dist_fixed - quarter : 0;
+	const uint32_t t = static_cast<uint32_t>(
+		((static_cast<uint64_t>(num) << 32) / (half - quarter)) >> 16); // 0.16 fraction
+	const int tw = static_cast<int>(t >> 1);              // pmulhw operand (skyfog side)
+	const int tiw = static_cast<int>((t ^ 0xFFFFu) >> 1); // pmulhw operand (fog side)
+	const auto channel = [&](float fog_c, float sky_c) {
+		const int fogw = (rgb_byte(fog_c) * 0x101) >> 1; // punpcklbw x,x ; psrlw 1
+		const int skyw = (rgb_byte(sky_c) * 0x101) >> 1;
+		int res = ((fogw * tiw) >> 16) + ((skyw * tw) >> 16); // pmulhw pair
+		if (res > 0x7FFF) res = 0x7FFF;                       // paddsw saturation
+		return byte_to_float(res >> 6);                       // psrlw 6 ; packuswb
+	};
+	Rgb out;
+	out.r = channel(fog.r, skyfog.r);
+	out.g = channel(fog.g, skyfog.g);
+	out.b = channel(fog.b, skyfog.b);
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // BMS overrides
 

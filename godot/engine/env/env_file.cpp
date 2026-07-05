@@ -75,6 +75,7 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("combine_terrain_light", "light", "sky"), &EnvFile::combine_terrain_light);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("horizon_blend_skyfog", "fog", "skyfog", "fog_distance", "fog_distance_reference"), &EnvFile::horizon_blend_skyfog);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("get_field_consumption"), &EnvFile::get_field_consumption);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
@@ -515,6 +516,17 @@ Color EnvFile::combine_terrain_light(const Color &p_light, const Color &p_sky) {
 
 Color EnvFile::lit_water_color(const Color &p_water, const Color &p_light) {
 	return to_color(opennova::env::lit_water_color(to_rgb(p_water), to_rgb(p_light)));
+}
+
+Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
+		float p_fog_distance, float p_fog_distance_reference) {
+	const auto to_fixed = [](float units) {
+		if (units <= 0.0f) return 0u;
+		return static_cast<uint32_t>(units * 65536.0f);
+	};
+	return to_color(opennova::env::horizon_blend_skyfog(
+			to_rgb(p_fog), to_rgb(p_skyfog),
+			to_fixed(p_fog_distance), to_fixed(p_fog_distance_reference)));
 }
 
 Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {

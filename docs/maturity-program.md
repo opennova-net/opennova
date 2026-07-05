@@ -285,7 +285,9 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
 - **PAR-NET** (L) the open D-NET set (the ledger's Net table) + populate
   `nw_golden_diff` `kDeferredGaps` with the D-NET refs from the attested 21-gap baseline,
   so the golden diff names each deferral by ID.
-- **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 (and #21) implemented **libs/env-first**.
+- **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 implemented **libs/env-first**
+  (#21 closed 2026-07-05: the frame-clear horizon blend, libs/env-first with the
+  GameWorld consumer).
 - **PAR-WORLD** (M) the D-INF opens and the D-EVT set (D-ITEMDEF-1 closed
   faec4b3e — the first ledger row to zero; the 2026-07-05 D-EVT grill + slice
   closed D-EVT-2/-4, cats 5/6 of D-EVT-3, and minted-closed D-EVT-5, leaving

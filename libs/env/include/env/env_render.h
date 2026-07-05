@@ -140,6 +140,27 @@ Rgb lit_water_color(const Rgb &water, const Rgb &combined_light);
 // are authored at half intensity.
 Rgb double_saturate(const Rgb &color);
 
+// Horizon blend (the frame-clear color): when the smoothed fog distance sits
+// (unsigned 16.16) strictly below fog_dist_reference/2, the skyfog render
+// color is overwritten with fog*(1-t) + skyfog*t, where
+// t = ((dist - ref/4) << 16) / (ref/4) clamped at 0 — pure fog color at
+// <= ref/4, a linear fade across [ref/4, ref/2], untouched skyfog above.
+// Operates on UNDOUBLED colors (retail doubles AFTER the blend), replicating
+// the original's per-byte MMX sequence exactly (bytes x0x101 >> 1, pmulhw
+// against t/~t >> 1, paddsw, >> 6, packuswb) — including its low-byte loss
+// (a 1/255 channel blends to 0 at t=0).
+// [orig: Environment_UpdateWeatherTick @ 0x57e9b0, blend @ 0x57f037..0x57f0a1;
+//  frame-clear consumer Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf,
+//  device Clear @ 0x677100; dome-fog consumer sub_579CB0 @ 0x579cb0]
+Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
+                         uint32_t fog_dist_fixed, uint32_t fog_dist_reference_fixed);
+
+// The reference distance's retail default, 1024.0 in 16.16. Terrain init may
+// lower it to 768.0 by adapter caps, but the session authority is forced back
+// to the default — the host analog for a modern renderer is the default.
+// [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init @ 0x60fc9a/0x60fca3]
+inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;
+
 // ---------------------------------------------------------------------------
 // Celestial + sky constants
 // [orig: render_skybox @ 0x57960e] sun/moon dome position = camera + dir * 2000

@@ -214,8 +214,31 @@ are the same mechanism; the full curve is in §Iris auto-exposure below.
   a `0x5A` (0.35) variant, `Env_CeilingFloorBlend = ceiling*0.707 + floor*0.707`,
   `Env_WaterColorLit = water * combined >> 7` (×2 gain), and **fog + skyfog render colors are
   doubled with saturation** — `.env` fog colors are authored at half intensity.
-- Horizon blend: when fog distance < half of `Env_FogDistReference` (default 1024), the clear
-  color cross-fades from skyfog toward fog color.
+- **Horizon blend (witnessed 2026-07-05, closes the previously uncited one-liner):** after
+  the 16 channel smoothers and **before** the fog/skyfog doubling, when the smoothed
+  `Env_FogDistCurrent @ 0x26c681c` is (unsigned) strictly below `Env_FogDistReference/2`
+  the skyfog render color is overwritten **in place** with `fog*(1-t) + skyfog*t`,
+  `t = ((dist - ref/4) << 16)/(ref/4)` clamped to 0 below `ref/4` — pure fog at <= ref/4,
+  a linear fade across [ref/4, ref/2], untouched skyfog above (MMX: bytes x0x101 >> 1,
+  pmulhw against t/~t >> 1, paddsw, >> 6, packuswb)
+  `[orig: Environment_UpdateWeatherTick @ 0x57e9b0, blend @ 0x57f037-0x57f0a1]`; the
+  doubling then applies to the post-blend value `[@ 0x57f1b1]`. `Env_FogDistReference
+  @ 0x26c68a8` (16.16): default 1024.0 `[orig: Environment_InitDefaults @ 0x57c0b0]`,
+  re-set at terrain init to 768.0/1024.0 by adapter-caps bit 0x40 and forced to 1024.0
+  on the session authority `[orig: Terrain_Init @ 0x60fc9a/0x60fca3]`. The witnessed
+  consumer is the **frame clear**: every scene entry clears with `is_alternate_fog ?
+  0x808080 : camera above water ? skyfog[0] : Env_WaterColorLit` via CD3DDevice
+  SetClearColor/SetClearDepth(1-2^-15) -> `IDirect3DDevice9::Clear(TARGET|ZBUFFER)`
+  `[orig: Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; terrain_scene_render
+  @ 0x5d065a-0x5d0699; device Clear @ 0x677100 (IDB-misnamed CGfxTextOverlay_Draw)]`,
+  the Clear halving the color `(c>>1)&0x7F7F7F7F` on non-modulate2x devices
+  `[@ 0x67715d; cap dword_32656AC, cf. decode_blend_state_extended @ 0x681080]`; the
+  sky-dome pass additionally sets the device FOG color to skyfog while drawing the dome
+  and restores fog for the world `[orig: sub_579CB0 @ 0x579cb0]`. Reimpl: blend in
+  undoubled space, feed the smoothed (pre-overcast) fog distance, expose via
+  `NovaEnvironment.get_frame_clear_color()` (undoubled = the non-modulate2x path a 1x
+  host is), consume in the GameWorld clear (`ClearColor` WorldEnvironment); the dome-fog
+  consumer rides the sky-dome fog work.
 - Cloud scroll: four accumulators advance by the smoothed rate × (1, 1, 2/3, 4/3).
 
 `Environment_SnapStateToTargets @ 0x57d1e0` (mission start) copies every parsed target [10]
@@ -474,7 +497,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
 | 19 | `terrain_rgb` terrain-stack consumers (texture bake ×v>>12, water quad half-tint, foliage lightmap ×/128) | **New from C6 (G3)** — reimpl renders none of them (`get_terrain_lighting_attenuation` returns identity); refutes the earlier "terrain-inert" hypothesis. C7+ decides which consumers to port alongside the PolyTrn-equivalent paths |
 | 20 | Sky dome combine | **Fixed by C7**: `sky.gdshader` + `nova_sky.gd` rewritten as a structural port of the recovered two-pass spec (§Sky dome) — gradient/cloud lerp chains, dp3 clip-space proximity, builder-formula dome normals computed in the vertex stage, Y-only height scale, half-camera-height anchor, textureless `advanced_clouds 0` flat pass, VS dome fog against the shared scene fog color. The fabricated keyframed-path `u_cloud_tint` is deleted; the dead c25 upload is not replicated. Residual cosmetic caveat: the clip-space prox dot is computed in Godot's clip conventions (reverse-Z), not D3D's — same construction, slightly different z scale; tracked for visual A/B |
-| 21 | skyfog frame clear color | **New with C7**: the old dome shader abused skyfog as an invented sub-horizon fragment mix, which C7 deleted. The witnessed consumer — the frame CLEAR color, cross-faded skyfog↔fog at low fog distance (§Fog policy) — is not wired; host scenes choose their own background. `NovaEnvironment.get_skyfog_color()` stays the doubled-color API for the future consumer |
+| 21 | skyfog frame clear color | **FIXED 2026-07-05**: the horizon blend is ported libs/env-first (`horizon_blend_skyfog`, byte-exact vs the MMX sequence, ctest-pinned + parity-vector cell) and consumed - `NovaEnvironment.get_frame_clear_color()` drives the GameWorld `ClearColor` WorldEnvironment (above-water skyfog blend / underwater lit-water, the witnessed choice); the vehicle alternate-fog view and the dome-fog application ride their subsystems. Editor preview adoption rides ENV-1. |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 

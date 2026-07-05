@@ -68,7 +68,7 @@ original's 63356 snap quirk) are HONORED — [orig: Environment_SortAndSnapshotK
 | `ground` | fill/ambient light → shader globals | HONORED | |
 | `fog` | doubled (`double_saturate`) → fog uniforms | HONORED | [orig: Environment_ApplyFogAndAmbient @ 0x57f17c]. |
 | `sky` | sky ambient → shader globals | HONORED | |
-| `skyfog` | doubled via `get_skyfog_color()`; consumer pending | PARTIAL | **Flipped by C7**: the old dome shader abused skyfog as an invented sub-horizon mix, which C7 deleted; the *witnessed* consumer is the frame CLEAR color (cross-faded skyfog↔fog at low fog distance, env-tod-re.md §Fog policy) and is not wired yet — host scenes choose their own background (divergence #21). Sentinel-mirror (0xC0C0FF leftover-slot bleed) deliberately not replicated. |
+| `skyfog` | `get_frame_clear_color()` (horizon-blended, undoubled) -> the GameWorld `ClearColor` clear; `get_skyfog_color()` stays the doubled render color | HONORED (runtime) | [orig: Environment_UpdateWeatherTick blend @ 0x57f037-0x57f0a1; Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; Clear halving @ 0x67715d] | **Closed 2026-07-05** (env-tod-re.md #21): blend ported libs/env-first, byte-exact; GameWorld clears with it (above/below-water choice witnessed). Editor preview adoption rides ENV-1; sentinel-mirror bleed still deliberately not replicated. |
 | `skybase` | `NovaSky` → `u_sky_base` | HONORED | Dome combine ported by C7 — see below. |
 | `skybright` | `NovaSky` → `u_sky_bright` | HONORED | |
 | `skyhighlight` | `NovaSky` → `u_sky_highlight` | HONORED | |
