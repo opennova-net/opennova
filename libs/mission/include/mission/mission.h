@@ -10,6 +10,12 @@
 #include "mission/bms.h"
 
 #include <io/export.h>
+// MISSION_EXPORT marks the flat C ABI (the 8 document-lifecycle functions,
+// annotated at declaration AND definition; scripts/lint/abi_exports_baseline.txt
+// pins the set on every platform). The unannotated extern "C" authoring
+// functions below are C++-static-link surface only (Model B) — annotating a
+// declaration whose definition is plain exports it on ELF/Mach-O but not PE,
+// which is exactly the drift abi_export_identity exists to catch.
 #define MISSION_EXPORT OPENNOVA_API
 
 namespace opennova::mission {
@@ -547,102 +553,102 @@ typedef struct OpenNovaMissionBytes {
 
 MISSION_EXPORT OpenNovaMissionDocument *opennova_mission_create(void);
 MISSION_EXPORT void opennova_mission_destroy(OpenNovaMissionDocument *document);
-MISSION_EXPORT void opennova_mission_clear(OpenNovaMissionDocument *document);
+void opennova_mission_clear(OpenNovaMissionDocument *document);
 MISSION_EXPORT void opennova_mission_create_default(OpenNovaMissionDocument *document);
 MISSION_EXPORT int opennova_mission_load_path(OpenNovaMissionDocument *document, const char *path);
-MISSION_EXPORT int opennova_mission_load_bytes(OpenNovaMissionDocument *document, const uint8_t *data, size_t size);
-MISSION_EXPORT int opennova_mission_save_path(OpenNovaMissionDocument *document, const char *path);
-MISSION_EXPORT int opennova_mission_write_bytes(OpenNovaMissionDocument *document, OpenNovaMissionBytes *out_bytes);
+int opennova_mission_load_bytes(OpenNovaMissionDocument *document, const uint8_t *data, size_t size);
+int opennova_mission_save_path(OpenNovaMissionDocument *document, const char *path);
+int opennova_mission_write_bytes(OpenNovaMissionDocument *document, OpenNovaMissionBytes *out_bytes);
 MISSION_EXPORT int opennova_mission_save_mis_path(OpenNovaMissionDocument *document, const char *path);
 MISSION_EXPORT int opennova_mission_write_mis_text(OpenNovaMissionDocument *document, OpenNovaMissionBytes *out_bytes);
 MISSION_EXPORT void opennova_mission_free_bytes(OpenNovaMissionBytes *bytes);
-MISSION_EXPORT int opennova_mission_is_loaded(const OpenNovaMissionDocument *document);
-MISSION_EXPORT const char *opennova_mission_source_path(const OpenNovaMissionDocument *document);
+int opennova_mission_is_loaded(const OpenNovaMissionDocument *document);
+const char *opennova_mission_source_path(const OpenNovaMissionDocument *document);
 MISSION_EXPORT const char *opennova_mission_last_error(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_info(const OpenNovaMissionDocument *document, OpenNovaMissionInfo *out_info);
-MISSION_EXPORT size_t opennova_mission_entity_count(const OpenNovaMissionDocument *document, int kind);
-MISSION_EXPORT int opennova_mission_get_entity(const OpenNovaMissionDocument *document,
+int opennova_mission_get_info(const OpenNovaMissionDocument *document, OpenNovaMissionInfo *out_info);
+size_t opennova_mission_entity_count(const OpenNovaMissionDocument *document, int kind);
+int opennova_mission_get_entity(const OpenNovaMissionDocument *document,
                                                int kind,
                                                size_t index,
                                                OpenNovaMissionEntityRecord *out_record);
-MISSION_EXPORT int opennova_mission_set_entity_transform(OpenNovaMissionDocument *document,
+int opennova_mission_set_entity_transform(OpenNovaMissionDocument *document,
                                                          int kind,
                                                          size_t index,
                                                          const OpenNovaMissionEntityTransform *transform);
-MISSION_EXPORT int opennova_mission_set_entity_properties(OpenNovaMissionDocument *document,
+int opennova_mission_set_entity_properties(OpenNovaMissionDocument *document,
                                                           int kind,
                                                           size_t index,
                                                           const OpenNovaMissionEntityProperties *properties,
                                                           OpenNovaMissionEntityRecord *out_record);
-MISSION_EXPORT int opennova_mission_add_entity(OpenNovaMissionDocument *document,
+int opennova_mission_add_entity(OpenNovaMissionDocument *document,
                                                int kind,
                                                int item_id,
                                                const OpenNovaMissionEntityTransform *transform,
                                                OpenNovaMissionEntityRecord *out_record);
-MISSION_EXPORT int opennova_mission_remove_entity(OpenNovaMissionDocument *document, int kind, size_t index);
-MISSION_EXPORT size_t opennova_mission_waypoint_summary_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_waypoint_summary(const OpenNovaMissionDocument *document,
+int opennova_mission_remove_entity(OpenNovaMissionDocument *document, int kind, size_t index);
+size_t opennova_mission_waypoint_summary_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_waypoint_summary(const OpenNovaMissionDocument *document,
                                                          size_t index,
                                                          OpenNovaMissionWaypointSummary *out_summary);
-MISSION_EXPORT size_t opennova_mission_waypoint_path_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_waypoint_path(const OpenNovaMissionDocument *document,
+size_t opennova_mission_waypoint_path_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_waypoint_path(const OpenNovaMissionDocument *document,
                                                       size_t index,
                                                       OpenNovaMissionWaypointPath *out_path);
-MISSION_EXPORT int opennova_mission_set_waypoint_path(OpenNovaMissionDocument *document,
+int opennova_mission_set_waypoint_path(OpenNovaMissionDocument *document,
                                                       size_t index,
                                                       const uint32_t *marker_indices,
                                                       size_t marker_count,
                                                       int flags,
                                                       OpenNovaMissionWaypointPath *out_path);
-MISSION_EXPORT int opennova_mission_clear_waypoint_path(OpenNovaMissionDocument *document,
+int opennova_mission_clear_waypoint_path(OpenNovaMissionDocument *document,
                                                         size_t index,
                                                         OpenNovaMissionWaypointPath *out_path);
-MISSION_EXPORT int opennova_mission_add_waypoint_marker(OpenNovaMissionDocument *document,
+int opennova_mission_add_waypoint_marker(OpenNovaMissionDocument *document,
                                                         size_t path_index,
                                                         int marker_item_id,
                                                         const OpenNovaMissionEntityTransform *transform,
                                                         int insert_index,
                                                         OpenNovaMissionEntityRecord *out_marker,
                                                         OpenNovaMissionWaypointPath *out_path);
-MISSION_EXPORT size_t opennova_mission_area_trigger_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_area_trigger(const OpenNovaMissionDocument *document,
+size_t opennova_mission_area_trigger_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_area_trigger(const OpenNovaMissionDocument *document,
                                                      size_t index,
                                                      OpenNovaMissionAreaTriggerRecord *out_record);
-MISSION_EXPORT int opennova_mission_add_area_trigger(OpenNovaMissionDocument *document,
+int opennova_mission_add_area_trigger(OpenNovaMissionDocument *document,
                                                      const OpenNovaMissionAreaTriggerRecord *record,
                                                      OpenNovaMissionAreaTriggerRecord *out_record);
-MISSION_EXPORT int opennova_mission_set_area_trigger(OpenNovaMissionDocument *document,
+int opennova_mission_set_area_trigger(OpenNovaMissionDocument *document,
                                                      size_t index,
                                                      const OpenNovaMissionAreaTriggerRecord *record,
                                                      OpenNovaMissionAreaTriggerRecord *out_record);
-MISSION_EXPORT int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size_t index);
-MISSION_EXPORT size_t opennova_mission_weapon_loadout_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *document,
+int opennova_mission_remove_area_trigger(OpenNovaMissionDocument *document, size_t index);
+size_t opennova_mission_weapon_loadout_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_weapon_loadout_entry(const OpenNovaMissionDocument *document,
                                                              size_t index,
                                                              OpenNovaMissionWeaponLoadoutEntry *out_entry);
-MISSION_EXPORT int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
+int opennova_mission_set_weapon_loadout(OpenNovaMissionDocument *document,
                                                        const OpenNovaMissionWeaponLoadoutEntry *entries,
                                                        size_t count);
-MISSION_EXPORT size_t opennova_mission_group_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_group(const OpenNovaMissionDocument *document,
+size_t opennova_mission_group_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_group(const OpenNovaMissionDocument *document,
                                               size_t index,
                                               OpenNovaMissionGroupRecord *out_record);
-MISSION_EXPORT int opennova_mission_set_group(OpenNovaMissionDocument *document,
+int opennova_mission_set_group(OpenNovaMissionDocument *document,
                                               size_t index,
                                               int field0, int field8, int field12);
-MISSION_EXPORT size_t opennova_mission_event_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_event(const OpenNovaMissionDocument *document,
+size_t opennova_mission_event_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_event(const OpenNovaMissionDocument *document,
                                               size_t index,
                                               OpenNovaMissionEventRecord *out_record);
-MISSION_EXPORT size_t opennova_mission_trigger_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_trigger(const OpenNovaMissionDocument *document,
+size_t opennova_mission_trigger_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_trigger(const OpenNovaMissionDocument *document,
                                                 size_t index,
                                                 OpenNovaMissionTriggerRecord *out_record);
-MISSION_EXPORT size_t opennova_mission_action_count(const OpenNovaMissionDocument *document);
-MISSION_EXPORT int opennova_mission_get_action(const OpenNovaMissionDocument *document,
+size_t opennova_mission_action_count(const OpenNovaMissionDocument *document);
+int opennova_mission_get_action(const OpenNovaMissionDocument *document,
                                                size_t index,
                                                OpenNovaMissionActionRecord *out_record);
-MISSION_EXPORT int opennova_mission_get_logic_summary(const OpenNovaMissionDocument *document,
+int opennova_mission_get_logic_summary(const OpenNovaMissionDocument *document,
                                                       OpenNovaMissionLogicSummary *out_summary);
 
 } // extern "C"
