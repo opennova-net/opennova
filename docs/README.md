@@ -62,6 +62,7 @@ behavior is summarized and cited.
 | Domain | Doc | Status |
 |---|---|---|
 | Audio | [`audio/lwf-dbf-sound-re.md`](audio/lwf-dbf-sound-re.md) | landed |
+| Credits (CBIN) | [`credits/cbin-re.md`](credits/cbin-re.md) | partial (PAR-R5: codec magic/header/ROL32-XOR cipher MATCHING vs retail `@0x75e348`; markup + read-path NEEDS-RE) |
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
 | Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..3) |
@@ -84,8 +85,7 @@ behavior is summarized and cited.
 | World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed |
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide, engine-research) |
 
-Systems documented mainly by code and tests so far (no dedicated RE record
-yet): credits and the
-VFS/PFF mount stack (the PFF write side is ADR 0008). The project glossary
+Every subsystem now has a dedicated RE record (full or partial) or a
+tracked-by-composition audit — the UNAUDITED set is empty. The project glossary
 lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the project vision is
 [`GOALS.md`](../GOALS.md).

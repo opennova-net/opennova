@@ -27,10 +27,9 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
 3. **The seven systems with no RE record get research audits.** Terrain, foliage, tiles,
    fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
-   unknowns into tracked rows — **VFS/PFF (R7), Fonts (R4), Foliage (R2), Tiles (R3)
-   landed, Terrain (R1) is tracked-partial, and the Importer (R6) is
-   tracked-by-composition; only Credits (R5) has no record yet** — and its codec is
-   witnessed-but-IDB-write-gated (see the UNAUDITED table).
+   unknowns into tracked rows — **all seven landed this cycle**: VFS/PFF (R7),
+   Fonts (R4), Foliage (R2), Tiles (R3) full; Terrain (R1) + Credits (R5) partial;
+   Importer (R6) tracked-by-composition. `UNAUDITED` is now **0**.
 
 ## Canonical disposition vocabulary (normative)
 
@@ -235,6 +234,16 @@ slot order, extra archives never mount, pinned by
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 
+### Credits (CBIN) — [credits/cbin-re.md](credits/cbin-re.md) (D-CBIN catalog; PAR-R5, PARTIAL)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-CBIN-1 | Credits `~C`/`~F`/`~J`/`<CR>` markup consumers (the retail scroller) not yet witnessed; D-MNU-6 custom-font/image resolution rides here | B | NEEDS-RE | PAR (credits) |
+| D-CBIN-2 | Read path: only a CBIN writer found in retail (`~0x75e250`), no magic-immediate reader — confirm whether retail decodes CBIN for credits | B | NEEDS-RE | PAR (credits) |
+
+CBIN codec (magic 0x4E494243 + 20-B header + ROL32/XOR cipher `@0x75e348`) is
+**MATCHING** vs `libs/cbin`, witnessed read-only via raw disasm (no IDB write).
+
 ### Terrain — [terrain/terrain-re.md](terrain/terrain-re.md) (D-TERRAIN catalog; PAR-R1, PARTIAL)
 
 | ID | One-liner | Class | Disposition | Slice |
@@ -293,19 +302,20 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
+| Credits (new domain, PAR-R5 partial) | 0 | 2 | 0 | 2 |
 | Terrain (new domain, PAR-R1 partial) | 0 | 0 | 0 (1 candidate-PERMANENT) | 0 |
 | Tiles (new domain, PAR-R3 audit) | 0 | 1 | 0 | 1 |
 | Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
 | Fonts (new domain, PAR-R4 audit) | 2 | 1 | 0 | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **66** |
+| **Total OPEN** | | | | **68** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **1** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **0** — every system now has an RE record (full or partial) or a tracked-by-composition audit.
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -352,48 +362,32 @@ the follow-up path.
 
 ---
 
-## UNAUDITED systems (no RE record yet)
+## Audit track — COMPLETE (`UNAUDITED` = 0)
 
-One system has no RE record yet — **Credits** (its CBIN codec is witnessed
-against the retail writer but a clean decompile is IDB-write-gated). The other six
-are landed or tracked-partial (VFS/PFF via PAR-R7;
-**Fonts** R4; **Foliage** R2; **Tiles** R3; the **Importer** R6 is
-tracked-by-composition — [importer/importer-audit.md](importer/importer-audit.md),
-it owns no independent parity surface)
-([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
-that lands an RE record **with a D-catalog**, converting untracked divergences into
-tracked rows.
+All seven systems that started with no RE record now have one (full or partial) or
+a tracked-by-composition audit. The `UNAUDITED` set is empty; every subsystem's
+divergences are tracked rows, not unknown unknowns.
 
-**Which binary each audit needs (finding, 2026-07-05, revised):** the code was
-originally RE'd from **`jodemo.exe`** (the demo's more-accessible renderer, cited
-addresses like `sub_5C0240`/`Terrain_DrawTileOverlays2D @ 0x5C79C0`), but the
-same systems ARE in retail — **Foliage (R2) audited cleanly against retail**
-(`generate_foliage_instances_0 @ 0x600197`, placement MATCHING) and **Tiles (R3)
-is retail-auditable** too (`PolyTrn_RenderTile @ 0x60df0d`, `serialize_terrain_tiles
-@ 0x6080F0` witnessed), just multi-part (overlay + atlas + tilestrip). **Terrain
-(R1)** is the large renderer/mesh pipeline; the jodemo IDB is the accessible
-route but retail equivalents exist. Fonts (R4) audited cleanly (retail
-`sub_580400`/`sub_674740`). **The CBIN codec IS in retail JO** (correcting an
-earlier note): the magic is a binary constant, not a string, so the string search
-missed it — `find_bytes 43 42 49 4E` finds the writer at **`~0x75e250–0x75e350`**
-(`mov dword ptr [esp+68h], 4E494243h` → `fwrite(20)`), which emits the 20-byte
-CBIN header + a counted string table exactly like `libs/cbin`'s `Header`
-(magic/string_offset/blob_length/string_count/xor_key). So R5 is retail-auditable;
-the header + string-table structure is confirmed. The remaining witness (the
-ROL32/XOR cipher constants + the `~C`/`~F`/`~J` markup consumers) is gated on the
-writer being **undefined** in the IDB: a clean decompile needs `add_func`, which
-writes the **shared read-only IDB** and is correctly denied - so that step wants a
-user-run IDA session (or a raw-disasm reconstruction). No separate CBIN *reader*
-with a magic-immediate was found (only the writer), leaving open whether retail JO
-READS CBIN for credits or only writes it. The
-importer (R6) is a Python + native-FFI pipeline, tracked-by-composition
-([importer/importer-audit.md](importer/importer-audit.md)).
+| System | Slice | Result |
+|---|---|---|
+| VFS / PFF | PAR-R7 | full record — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS-1..9) |
+| Fonts | PAR-R4 | full record — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT-1..3) |
+| Foliage | PAR-R2 | full record — [foliage/foliage-re.md](foliage/foliage-re.md), placement MATCHING vs retail `@0x600197` |
+| Tiles | PAR-R3 | full record — [tiles/til-re.md](tiles/til-re.md), overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700` |
+| Credits (CBIN) | PAR-R5 | partial — [credits/cbin-re.md](credits/cbin-re.md); codec (magic + header + ROL32/XOR cipher `@0x75e348`) MATCHING vs `libs/cbin`, witnessed read-only via raw disasm; markup + read-path NEEDS-RE |
+| Terrain | PAR-R1 | partial — [terrain/terrain-re.md](terrain/terrain-re.md); surface + witness basis mapped, D-TERRAIN-1 shader split; mesh_simp/CDEP deep grill pending |
+| Importer | PAR-R6 | tracked-by-composition — [importer/importer-audit.md](importer/importer-audit.md); composes RE'd libs, no independent parity surface |
 
-| System | Audit slice | Partial coverage today | IDB / route |
-|---|---|---|---|
-| Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. The CBIN header + string-table structure is witnessed against the retail writer `~0x75e250` (matches `libs/cbin`); the ROL32/XOR cipher + markup consumers are the remaining witness. | retail (writer needs defining in the IDB) |
-
----
+**Notes from the sweep (2026-07-05):** two "which binary" assumptions were
+corrected by testing them — **Foliage and Tiles audit cleanly against retail**
+(the code cites jodemo but the same functions ship in retail: foliage
+`generate_foliage_instances_0 @ 0x600197`, tiles `PolyTrn_RenderTile @ 0x60df0d`).
+**The CBIN codec IS in retail JO** — the magic is a binary constant a string search
+misses; `find_bytes 43 42 49 4E` finds the writer at `~0x75e250` and the cipher
+loop at `0x75e348` (`rol ebx,7` + `xor [blob],key&0xFF`, 4-byte groups), byte-exact
+to `libs/cbin`. The two partials (Terrain, Credits) have their remaining grills
+scoped in their records; the six code-cited-jodemo systems are retail-anchored
+where they ship.
 
 ## Standing rules
 
