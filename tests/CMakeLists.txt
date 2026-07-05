@@ -430,6 +430,13 @@ target_compile_definitions(minimal_mnu_validate_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
 
+# Minimal set's custom map — the .env + .bms legs (the .trn rides its own slice).
+add_executable(minimal_map_gen_test fixtures/minimal_map_gen.cpp)
+target_link_libraries(minimal_map_gen_test PRIVATE opennova_env opennova_mission_format)
+target_compile_definitions(minimal_map_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_map_gen COMMAND minimal_map_gen_test)
+
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
 target_link_libraries(rtxt_real_parity_test PRIVATE opennova_rtxt)
