@@ -25,6 +25,7 @@
 #include "env/nova_env_keyframe.h"
 #include "env/env_file.h"
 #include "env/nova_color_smoother.h"
+#include "env/nova_weather_core.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
@@ -148,6 +149,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvFileLoader);
 	GDREGISTER_CLASS(EnvFileSaver);
 	GDREGISTER_CLASS(NovaColorSmoother);
+	GDREGISTER_CLASS(NovaWeatherCore);
 	GDREGISTER_CLASS(NovaObjectData);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
 	GDREGISTER_CLASS(NovaItemDatabase);

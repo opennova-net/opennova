@@ -147,6 +147,30 @@ func get_fog_color() -> Vector3:
 	return _fog_color_rt
 
 
+## The TOD keyframe targets the weather smoothers chase — read straight from
+## the interpolated keyframe state, never from the smoothed values written
+## back by NovaWeather [orig: Environment_ComputeTimeOfDayColors @ 0x57de40
+## refreshes every color block's target slot each frame; the smoothers chase
+## keyframe colors, not their own output].
+func get_fill_light_target() -> Vector3:
+	return _tod.get("ground", _fill_light)
+
+
+func get_sun_light_target() -> Vector3:
+	var light_key := "moon" if _is_night else "sun"
+	return _tod.get(light_key, _sun_light)
+
+
+func get_fog_color_target() -> Vector3:
+	# The render fog target is the keyframe color doubled, saturating
+	# [orig: Environment_UpdateWeatherTick @ 0x57f17c].
+	return _double_vec3(_tod.get("fog", _fog_color_rt * 0.5))
+
+
+func get_sky_ambient_target() -> Vector3:
+	return _tod.get("sky", Vector3(0.3, 0.4, 0.6))
+
+
 func get_terrain_tint() -> Vector3:
 	if environment_data == null:
 		return Vector3.ONE

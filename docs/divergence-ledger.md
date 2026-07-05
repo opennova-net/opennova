@@ -118,6 +118,15 @@ texture-bake consumer proved DEAD CODE, readers zero-xref, so the untinted terra
 surface is ratified faithful; witness in [env/env-tod-re.md](env/env-tod-re.md) #19,
 honored-matrix terrain_tint -> HONORED; residual emitter facets ride PAR-R2).
 
+Minted-and-closed 2026-07-05 at the ENG-2 weather-core port (grill of
+`Environment_UpdateWeatherTick @ 0x57e9b0` + cluster): **env #22** (the weather-PRNG
+signed-carry transcription bug), **env #23** (lightning SET-per-epoch vs the GDScript
+maxf plateau + integer additives), **env #24** (the wind model: the 0..8192 strength
+scale drove the oscillator past its stability envelope; retail runs the constant
+`Env_WindScale = 256`, now the default; smoothers chase keyframe targets). All three
+were discovered, witnessed, and fixed in the same slice — catalog rows in
+[env/env-tod-re.md](env/env-tod-re.md) #22–#24.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | env #14 | Sun-glare terrain-raycast occlusion held at full brightness (8-jittered-ray + ±16/frame hysteresis unmodeled) | A | OPEN (PARTIAL) | PAR-ENV |

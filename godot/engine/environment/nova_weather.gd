@@ -2,62 +2,36 @@
 class_name NovaWeather
 extends Node3D
 
-# Weather/light smoothing adapter: the wind PRNG, lightning timers, and the
-# integer color smoothing of [orig: Environment_UpdateWeatherTick @ 0x57e9b0]
-# and [orig: interpolate_weather_color @ 0x57d9e0]; see docs/env/env-tod-re.md.
-# Lightning injects additives into the sky/fog/ground channels (not the sun)
-# [orig: Environment_SetLightningFlash @ 0x57d320].
+# Weather/light smoothing host. NovaWeatherCore (godot/engine/env, math in
+# libs/env) owns the witnessed state cluster of
+# [orig: Environment_UpdateWeatherTick @ 0x57e9b0]: the wind PRNG/sway
+# oscillator, both lightning flash sequencers
+# ([orig: Environment_SetLightningFlash @ 0x57d320] SET-per-epoch additives),
+# rain fade, and the four color-block pipelines
+# ([orig: interpolate_weather_color @ 0x57d9e0]). This node is scene
+# plumbing only: it feeds the env node's TOD targets into the core each
+# 62 Hz tick, writes the smoothed colors back, and publishes the shader
+# globals. See docs/env/env-tod-re.md.
 
 @export var environment_path: NodePath
-@export_range(0, 100, 1) var wind_strength: float = 0.0:
-	set(value):
-		_weather_intensity = int(value / 100.0 * 8192.0)
-	get:
-		return float(_weather_intensity) / 8192.0 * 100.0
 
+# Declared before wind_strength: the export's default assignment runs the
+# setter during init, which needs the core.
+var _core := NovaWeatherCore.new()
 var _cached_env: Node = null
-var _prng: int = 0x12345633
-var _sway_buffer: Array[int] = []
-var _sway_smoothed_buffer: Array[int] = []
-var _sway_index: int = 0
-var _sway_pos: int = 0
-var _sway_smoothed: int = 0
-var _sway_velocity: int = 0
-var _sway_prev_noise: int = 0
-var _weather_intensity: int = 0
-var _wind_duration: int = 0
-var _lightning_short_timer: int = 0
-var _lightning_long_timer: int = 0
-var _lightning_intensity: float = 0.0
-var _color_fade_timer: int = 0
-var _color_fade_rate: int = 0
-var _smooth_fill := Vector3.ZERO
-var _smooth_sun := Vector3.ZERO
-var _smooth_fog := Vector3.ZERO
-var _smooth_sky := Vector3.ZERO
-# Integer-faithful 12.20 channel smoothers [orig: interpolate_weather_color @ 0x57d9e0].
-var _fill_smoother := NovaColorSmoother.new()
-var _sun_smoother := NovaColorSmoother.new()
-var _fog_smoother := NovaColorSmoother.new()
-var _sky_smoother := NovaColorSmoother.new()
 var _colors_synced := false
-var _outdoor_color := Vector3.ZERO
-var _indoor_color := Vector3.ZERO
 
-
-static func _clamp_vec3(value: Vector3, min_value: float = 0.0, max_value: float = 1.0) -> Vector3:
-	return Vector3(
-		clampf(value.x, min_value, max_value),
-		clampf(value.y, min_value, max_value),
-		clampf(value.z, min_value, max_value)
-	)
-
-
-func _init() -> void:
-	_sway_buffer.resize(256)
-	_sway_buffer.fill(0)
-	_sway_smoothed_buffer.resize(256)
-	_sway_smoothed_buffer.fill(0)
+# 100 = the witnessed retail constant (Env_WindScale 256, always on — the
+# ambient foliage sway every retail map has), which is also the default.
+@export_range(0, 100, 1) var wind_strength: float = 100.0:
+	set(value):
+		# Env_WindScale units: 100% maps to 256 [orig: Environment_InitDefaults
+		# @ 0x57c1d1, its only writer]. The oscillator's 15*prev feedback term
+		# is stable only for intensity <= 273 — the previous 0..8192 mapping
+		# drove the 32-bit state divergent (docs/env/env-tod-re.md).
+		_core.set_wind_intensity(int(value / 100.0 * 256.0))
+	get:
+		return float(_core.get_wind_intensity()) / 256.0 * 100.0
 
 
 func _ready() -> void:
@@ -68,14 +42,31 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if not _cached_env or not _cached_env.has_method("is_loaded") or not _cached_env.is_loaded():
 		return
+	var env := _cached_env
 	if not _colors_synced:
-		_smooth_fill = _snap(_fill_smoother, _cached_env.get_fill_light())
-		_smooth_sun = _snap(_sun_smoother, _cached_env.get_sun_light())
-		_smooth_fog = _snap(_fog_smoother, _cached_env.get_fog_color())
-		_smooth_sky = _snap(_sky_smoother, _cached_env.get_sky_ambient())
+		_core.snap_colors(
+			_vec3_color(env.get_fill_light()),
+			_vec3_color(env.get_sun_light()),
+			_vec3_color(env.get_fog_color()),
+			_vec3_color(env.get_sky_ambient()))
 		_colors_synced = true
-	_weather_tick(_cached_env)
-	_write_shader_globals(_cached_env)
+	var env_data: EnvFile = env.get_environment_data()
+	var lightning := Color.WHITE
+	if env_data:
+		lightning = env_data.get_lightning_color()
+	# The smoothers chase the TOD keyframe targets, never their own written-
+	# back output [orig: Environment_ComputeTimeOfDayColors @ 0x57de40
+	# refreshes every block's target slot ahead of the weather tick].
+	_core.tick(
+		_vec3_color(env.get_fill_light_target()),
+		_vec3_color(env.get_sun_light_target()),
+		_vec3_color(env.get_fog_color_target()),
+		_vec3_color(env.get_sky_ambient_target()),
+		lightning)
+	env.set_fill_light(get_smooth_fill())
+	env.set_sun_light(get_smooth_sun())
+	env.set_fog_color_rt(get_smooth_fog())
+	_write_shader_globals(env)
 
 
 ## Snap the smoothing state to the env's current colors on the next tick —
@@ -84,177 +75,65 @@ func resync_colors() -> void:
 	_colors_synced = false
 
 
-static func _snap(smoother: NovaColorSmoother, value: Vector3) -> Vector3:
-	smoother.snap(Color(value.x, value.y, value.z))
-	return value
+static func _vec3_color(value: Vector3) -> Color:
+	return Color(value.x, value.y, value.z)
 
 
-static func _step(smoother: NovaColorSmoother, target: Vector3) -> Vector3:
-	var stepped := smoother.step(Color(target.x, target.y, target.z))
-	return Vector3(stepped.r, stepped.g, stepped.b)
-
-
-static func _rol32(value: int, shift: int) -> int:
-	value = value & 0xFFFFFFFF
-	return ((value << shift) | (value >> (32 - shift))) & 0xFFFFFFFF
-
-
-static func _lightning_additive(lightning: Vector3, level: int, shift: int) -> Vector3:
-	# (byte(channel) * level) >> shift, in normalized space.
-	var divisor := float(1 << shift) * 255.0
-	return Vector3(
-		float(int(lightning.x * 255.0 + 0.5) * level) / divisor,
-		float(int(lightning.y * 255.0 + 0.5) * level) / divisor,
-		float(int(lightning.z * 255.0 + 0.5) * level) / divisor
-	)
-
-
-func _weather_tick(env: Node) -> void:
-	# sub_540B90 PRNG/wind oscillator: rotate-left seed, square-weight noise,
-	# 256-entry cyclic buffers, then smooth toward the target sway.
-	var next := _rol32(_prng, 9)
-	_prng = (next + ((next >> 31) & 0x1ABB09)) & 0xFFFFFFFF
-	var noise := _prng & 0xFFF
-	var scaled := (_weather_intensity * (15 * _sway_prev_noise + ((noise * noise) >> 8))) >> 12
-	_sway_index = (_sway_index + 1) & 0xFF
-	_sway_buffer[_sway_index] = maxi(0, 0xFFFF - 2 * scaled)
-	_sway_pos += _sway_velocity + scaled
-	_sway_smoothed = (_sway_pos + 31 * _sway_smoothed) >> 5
-	_sway_velocity = (63 * (_sway_velocity + ((0x8000 - _sway_pos) >> 4))) >> 6
-	_sway_smoothed = clampi(_sway_smoothed, 0, 0xFFFF)
-	_sway_smoothed_buffer[_sway_index] = _sway_smoothed
-	_sway_prev_noise = scaled
-
-	if _wind_duration > 0:
-		_wind_duration -= 1
-	if _wind_duration == 0 and _weather_intensity > 0:
-		_weather_intensity = (_weather_intensity * 31) >> 5
-
-	if _lightning_short_timer > 0:
-		_lightning_short_timer -= 1
-		match _lightning_short_timer:
-			10, 4:
-				_lightning_intensity = 0xC8 / 255.0
-			6, 2:
-				_lightning_intensity = 1.0
-			0:
-				_lightning_intensity = 0.0
-
-	if _lightning_long_timer > 0:
-		_lightning_long_timer -= 1
-		match _lightning_long_timer:
-			31, 26:
-				_lightning_intensity = maxf(_lightning_intensity, 0xC8 / 255.0)
-			28, 24:
-				_lightning_intensity = maxf(_lightning_intensity, 0x96 / 255.0)
-			23:
-				_lightning_intensity = maxf(_lightning_intensity, 0x64 / 255.0)
-			22:
-				_lightning_intensity = maxf(_lightning_intensity, 0x32 / 255.0)
-			20:
-				_lightning_intensity = 0.0
-
-	_color_fade_timer = maxi(0, _color_fade_timer - _color_fade_rate)
-	_smooth_fill = _step(_fill_smoother, env.get_fill_light())
-	_smooth_sun = _step(_sun_smoother, env.get_sun_light())
-	_smooth_fog = _step(_fog_smoother, env.get_fog_color())
-	_smooth_sky = _step(_sky_smoother, env.get_sky_ambient())
-
-	if _lightning_intensity > 0.0:
-		var env_data: EnvFile = env.get_environment_data()
-		if env_data:
-			# Flash additives go to sky (>>8), fog (>>9), and ground (>>10);
-			# the directional light is untouched
-			# [orig: Environment_SetLightningFlash @ 0x57d320].
-			var color := env_data.get_lightning_color()
-			var lightning := Vector3(color.r, color.g, color.b)
-			var level := int(_lightning_intensity * 255.0)
-			_smooth_sky = _clamp_vec3(_smooth_sky + _lightning_additive(lightning, level, 8))
-			_smooth_fog = _clamp_vec3(_smooth_fog + _lightning_additive(lightning, level, 9))
-			_smooth_fill = _clamp_vec3(_smooth_fill + _lightning_additive(lightning, level, 10))
-
-	if _color_fade_timer > 0:
-		var raw := maxi(0, 0x8000 - _color_fade_timer)
-		var rain_atten := float(raw) / float(0x8000)
-		_smooth_fill *= rain_atten
-		_smooth_sun *= rain_atten
-		_smooth_fog *= rain_atten
-		_smooth_sky *= rain_atten
-
-	env.set_fill_light(_smooth_fill)
-	env.set_sun_light(_smooth_sun)
-	env.set_fog_color_rt(_smooth_fog)
-
-	var env_data: EnvFile = env.get_environment_data()
-	if env_data:
-		var max_fog := env_data.get_fog_level()
-		var half_fog := max_fog * 0.5
-		var quarter_fog := max_fog * 0.25
-		var current_fog: float = env.get_fog_distance()
-		var ceiling := env_data.get_ceiling_color()
-		var ceiling_vec := Vector3(ceiling.r, ceiling.g, ceiling.b)
-		if current_fog < half_fog and quarter_fog > 0.0:
-			var floor_color := env_data.get_floor_color()
-			var floor_vec := Vector3(floor_color.r, floor_color.g, floor_color.b)
-			var t := clampf((current_fog - quarter_fog) / quarter_fog, 0.0, 1.0)
-			_outdoor_color = _smooth_fog * t + ceiling_vec * (1.0 - t)
-			_indoor_color = ceiling_vec * (181.0 / 256.0) + floor_vec * (181.0 / 256.0)
-		else:
-			_outdoor_color = _smooth_fog
-			_indoor_color = ceiling_vec
+static func _color_vec3(value: Color) -> Vector3:
+	return Vector3(value.r, value.g, value.b)
 
 
 func trigger_lightning_short() -> void:
-	_lightning_short_timer = 16
+	_core.trigger_lightning_short()
 
 
 func trigger_lightning_long() -> void:
-	_lightning_long_timer = 32
+	_core.trigger_lightning_long()
 
 
 func set_wind_duration(seconds: int) -> void:
-	_wind_duration = 6 * seconds
-	if seconds > 0 and _weather_intensity == 0:
-		_weather_intensity = 2048
+	_core.set_wind_duration_ticks(6 * seconds)
+	if seconds > 0 and _core.get_wind_intensity() == 0:
+		_core.set_wind_intensity(256)
 
 
 func get_wind_duration() -> int:
-	return _wind_duration / 6
+	return _core.get_wind_duration_ticks() / 6
 
 
 func get_sway_amount() -> float:
-	return float(_sway_smoothed - 0x8000) / float(0x8000) * 2.0
+	return _core.get_sway_amount()
 
 
 func get_sway_phase() -> float:
-	return float(_sway_index) * (PI * 2.0 / 256.0)
+	return _core.get_sway_phase()
 
 
 func get_smooth_fill() -> Vector3:
-	return _smooth_fill
+	return _color_vec3(_core.get_fill())
 
 
 func get_smooth_sun() -> Vector3:
-	return _smooth_sun
+	return _color_vec3(_core.get_sun())
 
 
 func get_smooth_fog() -> Vector3:
-	return _smooth_fog
+	return _color_vec3(_core.get_fog())
 
 
 func get_smooth_sky() -> Vector3:
-	return _smooth_sky
+	return _color_vec3(_core.get_sky())
 
 
 func get_lightning_intensity() -> float:
-	return _lightning_intensity
+	return _core.get_lightning_intensity()
 
 
 func _write_shader_globals(env: Node) -> void:
-	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", _smooth_fill)
-	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", _smooth_sun)
-	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", _smooth_sky)
-	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", _smooth_fog)
+	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", get_smooth_fill())
+	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", get_smooth_sun())
+	RenderingServer.global_shader_parameter_set(&"opennova_sky_ambient", get_smooth_sky())
+	RenderingServer.global_shader_parameter_set(&"opennova_fog_color", get_smooth_fog())
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_direction", env.get_sun_direction())
 	var fog_end: float = float(env.get_fog_level())
 	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
