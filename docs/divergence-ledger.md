@@ -141,6 +141,12 @@ whose grammar is editor-side surface gated on D-MIS-3.
 
 ### UI — menus/controls, sound, player-info, HUD
 
+Closed 2026-07-05: **D-PLAYERINFO-2** -> `FIXED` — verified already enforced:
+the parser errors at the 512-part cap (`libs/avatars/src/avatars.cpp` guard,
+`[orig: CAvatarDefs_ParseConfigLine @ 0x57a456]`), `NovaAvatarDatabase`
+propagates the failure, and `tests/avatars/avatars_parse_test.cpp` pins the
+512-part parse failure. The row predated the guard's landing (AVA train).
+
 Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md),
 [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [interface/hud-re.md](interface/hud-re.md).
 
@@ -153,7 +159,6 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-CTRL-3 | Live double-click rebinding / DEFAULTS / CLEAR_KEY / profile persistence deferred — gated on a real input-action layer | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-SND-2 | Expansion banks (`<exp>L.lwf` / `<exp>.lwf`) not loaded (no expansion slot yet) | A | OPEN | PAR-UI |
 | D-PLAYERINFO-1 | In-world (spawned-player) combo→3D-model binding untraced (the preview is witnessed + fully ported) | B | NEEDS-RE | PAR-UI / research starter |
-| D-PLAYERINFO-2 | The 512-part pool cap should be enforced as an error (not silent truncation) | A | OPEN | PAR-UI |
 | D-PLAYERINFO-7 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-9 | ACCEPT/commit + profile persistence host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-10 | Voice preview (`VOICE_%d` via `menu.lwf`) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
@@ -206,12 +211,12 @@ Open counts by domain (the target is zero in every cell):
 | Environment | 2 | 0 | 5 | 7 |
 | World / AI + events | 3 | 0 | 4 | 7 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 11 | 1 (+1 dual) | 5 | 17 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 10 | 1 (+1 dual) | 5 | 16 |
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
-| **Total OPEN** | | | | **64** |
+| **Total OPEN** | | | | **63** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
