@@ -35,7 +35,7 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| ONED-A avatars merge train | (this train) | the twelfth workspace (Avatars) merged from `playerinfo-runtime`; avatars ADR renumbered 0013→0021; eleven→twelve sweep; ratchet `test_private_pokes` baseline 1319→1371 — maintainer-approved bump for the branch's two pre-ratchet white-box files (`player_info_menu_seam_test.gd` 26, `avatar_preview_test.gd` 26); ONED-TST claws it back |
+| ONED-A avatars merge train | 18791098 | the twelfth workspace (Avatars) merged from `playerinfo-runtime`; avatars ADR renumbered 0013→0021; eleven→twelve sweep; ratchet `test_private_pokes` baseline 1319→1371 — maintainer-approved bump for the branch's two pre-ratchet white-box files (`player_info_menu_seam_test.gd` 26, `avatar_preview_test.gd` 26); ONED-TST claws it back |
 | LIBS-1 world→terrain seam | bc8c920a | libs/terrain_query query leaf + the permanent forbidden-edge check (link_graph_check.py); ADR 0020 |
 | NET-2 npwire extraction | 46cd0ac4 | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
 | GOV-1/2/3 bootstrap docs | 4274cfdf | umbrella + vocabulary + ADRs 0015–0018 |
@@ -219,7 +219,7 @@ The detail doc is [docs/oned/workspace-maturity-program.md](oned/workspace-matur
 (PR #184, rewritten in place as this track). Its R/W/E/G bar, foundation
 phases F1–F5, per-workspace phases, and RE ledger stand; this program adds:
 
-- **ONED-A** (M) the avatars merge train — DONE (this train): the twelfth
+- **ONED-A** (M) the avatars merge train — DONE (18791098): the twelfth
   workspace (Avatars) merged from `playerinfo-runtime` across the #180 shell
   decomposition and Wave 0 — editor + engine `nova_avatar_database` +
   fixtures + five test files + RE doc; the branch's ADR renumbered
