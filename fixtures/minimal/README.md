@@ -62,10 +62,31 @@ minimal, not a requirement.
 
 ## Build
 
-A generator (script/ctest, TBD) drives the writers from the authored sources in
-`src/` (this dir) to the emitted set. The build is hermetic — no retail input —
-so it runs in CI and produces a byte-stable set (a roundtrip/identity ctest
-guards it, like the other `fixtures/` sets).
+Each writer-emitted file is generated *and guarded* by a ctest — the committed
+bytes are provably reproducible from the writer, no retail input, so it runs in
+CI. Regenerate the writer-emitted files with `OPENNOVA_WRITE_MINIMAL_FIXTURES=1`.
+
+## Status
+
+Authored so far (each guarded by a ctest):
+
+| File(s) | Writer | Guard | State |
+|---|---|---|---|
+| `gametext.bin`, `vmacros.bin`, `keyhelp.bin` | `libs/rtxt` | `minimal_rtxt_gen` (emit + byte-stable + round-trip) | **done** — the fatal string tables |
+| `items.def`, `weapon.def`, `ammo.def` | authored text | `minimal_def_validate` (parse through `libs/def`) | **done** — a spawnable person, a rifle, its round |
+
+Remaining (each its own slice; menu + map involve design choices):
+
+- `main.mnu` (the `"Startup"` node) + `mp.mnu` (host/join) — a small authored
+  menu, or a trimmed reuse of `fixtures/mnu/jo_main.mnu`/`jo_mp.mnu` (which
+  already carry a `STARTUP` node + the MP flow but reference resources beyond
+  minimal). Validate through `libs/mnu`.
+- the custom map: `<map>.bms` (`libs/mission`) + `<map>.trn` (`libs/trn`, a
+  small heightfield) + `<map>.env` (`libs/env`). The map's layout / size /
+  spawn placement is a design choice.
+- the PFF packaging (`libs/pff` write side) — bundle the loose set into one
+  archive so the fatal not-all-archives-missing gate clears (witnessed above).
+- asset-gated retail validation (§ Validation) — needs a retail install.
 
 ## Validation (asset-gated — needs a retail JO install)
 
