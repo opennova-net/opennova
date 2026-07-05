@@ -28,8 +28,9 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
    fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
    unknowns into tracked rows — **VFS/PFF (R7), Fonts (R4), Foliage (R2), Tiles (R3)
-   landed, and the Importer (R6) is tracked-by-composition; two remain** (terrain,
-   credits — see the UNAUDITED table).
+   landed, Terrain (R1) is tracked-partial, and the Importer (R6) is
+   tracked-by-composition; only Credits (R5) has no record yet** — and its codec is
+   witnessed-but-IDB-write-gated (see the UNAUDITED table).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -234,6 +235,16 @@ slot order, extra archives never mount, pinned by
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 
+### Terrain — [terrain/terrain-re.md](terrain/terrain-re.md) (D-TERRAIN catalog; PAR-R1, PARTIAL)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-TERRAIN-1 | Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include — a tracked deliberate divergence justified by the editing need | C | PERMANENT (candidate) | PAR (terrain) |
+
+Record is PARTIAL: module surface + witness basis mapped, the one known
+divergence cataloged; the mesh_simp byte-parity + CDEP/LOD bitstream grill is the
+pending deep audit. Data path = the byte-identical TrnGen port.
+
 ### Tiles — [tiles/til-re.md](tiles/til-re.md) (D-TIL catalog; PAR-R3)
 
 | ID | One-liner | Class | Disposition | Slice |
@@ -282,6 +293,7 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
+| Terrain (new domain, PAR-R1 partial) | 0 | 0 | 0 (1 candidate-PERMANENT) | 0 |
 | Tiles (new domain, PAR-R3 audit) | 0 | 1 | 0 | 1 |
 | Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
 | Fonts (new domain, PAR-R4 audit) | 2 | 1 | 0 | 3 |
@@ -293,7 +305,7 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **2** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **1** (below).
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -342,7 +354,9 @@ the follow-up path.
 
 ## UNAUDITED systems (no RE record yet)
 
-Two systems remain documented mainly by code and tests (VFS/PFF via PAR-R7;
+One system has no RE record yet — **Credits** (its CBIN codec is witnessed
+against the retail writer but a clean decompile is IDB-write-gated). The other six
+are landed or tracked-partial (VFS/PFF via PAR-R7;
 **Fonts** R4; **Foliage** R2; **Tiles** R3; the **Importer** R6 is
 tracked-by-composition — [importer/importer-audit.md](importer/importer-audit.md),
 it owns no independent parity surface)
@@ -377,7 +391,6 @@ importer (R6) is a Python + native-FFI pipeline, tracked-by-composition
 
 | System | Audit slice | Partial coverage today | IDB / route |
 |---|---|---|---|
-| Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include); the TrnGen byte-identical port is the reference terrain data path. | retail (large; jodemo also accessible) |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. The CBIN header + string-table structure is witnessed against the retail writer `~0x75e250` (matches `libs/cbin`); the ROL32/XOR cipher + markup consumers are the remaining witness. | retail (writer needs defining in the IDB) |
 
 ---
