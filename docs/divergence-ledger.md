@@ -365,8 +365,13 @@ missed it — `find_bytes 43 42 49 4E` finds the writer at **`~0x75e250–0x75e3
 (`mov dword ptr [esp+68h], 4E494243h` → `fwrite(20)`), which emits the 20-byte
 CBIN header + a counted string table exactly like `libs/cbin`'s `Header`
 (magic/string_offset/blob_length/string_count/xor_key). So R5 is retail-auditable;
-the remaining witness is defining that writer function (undefined in the IDB) to
-pin the ROL32/XOR cipher, plus the credits `~C`/`~F`/`~J` markup consumers. The
+the header + string-table structure is confirmed. The remaining witness (the
+ROL32/XOR cipher constants + the `~C`/`~F`/`~J` markup consumers) is gated on the
+writer being **undefined** in the IDB: a clean decompile needs `add_func`, which
+writes the **shared read-only IDB** and is correctly denied - so that step wants a
+user-run IDA session (or a raw-disasm reconstruction). No separate CBIN *reader*
+with a magic-immediate was found (only the writer), leaving open whether retail JO
+READS CBIN for credits or only writes it. The
 importer (R6) is a Python + native-FFI pipeline, tracked-by-composition
 ([importer/importer-audit.md](importer/importer-audit.md)).
 
