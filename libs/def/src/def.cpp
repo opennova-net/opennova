@@ -759,13 +759,23 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.loadout_subclasses = parse_int_n(v, vl);
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "weapon_class", 12)) {
+                /* Dual representation: the raw file token, plus the loadout slot the
+                   original producer routes by (0=accessory 1=primary 2=secondary
+                   3=grenade) [orig: WeaponDef_ParseProperty @ 0x54d730]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
                 if (n >= 1) safe_copy(cw.weapon_class, sizeof(cw.weapon_class), tok[0].s, tok[0].len);
+                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
+                if (vbl == 9 && memcmp(vb, "accessory", 9) == 0) cw.weapon_class_slot = 0;
+                else if (vbl == 7 && memcmp(vb, "primary", 7) == 0) cw.weapon_class_slot = 1;
+                else if (vbl == 9 && memcmp(vb, "secondary", 9) == 0) cw.weapon_class_slot = 2;
+                else if (vbl == 7 && memcmp(vb, "grenade", 7) == 0) cw.weapon_class_slot = 3;
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "charfilter", 10)) {
-                /* Repeatable, one soldier-type token per line [orig: parse @0x543F6E] */
+                /* Repeatable, one soldier-type token per line [orig: parse @0x543F6E].
+                   Also packs the original producer's class-mask bit
+                   [orig: WeaponDef_ParseProperty @ 0x54d730]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
@@ -775,9 +785,17 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                               tok[ti].s, tok[ti].len);
                     ++cw.charfilter_count;
                 }
+                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
+                if (vbl == 5 && memcmp(vb, "medic", 5) == 0) cw.charfilter_mask |= 1;
+                else if (vbl == 6 && memcmp(vb, "sniper", 6) == 0) cw.charfilter_mask |= 2;
+                else if (vbl == 6 && memcmp(vb, "gunner", 6) == 0) cw.charfilter_mask |= 4;
+                else if (vbl == 8 && memcmp(vb, "rifleman", 8) == 0) cw.charfilter_mask |= 8;
+                else if (vbl == 8 && memcmp(vb, "engineer", 8) == 0) cw.charfilter_mask |= 16;
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "teamfilter", 10)) {
-                /* Repeatable, one team token per line [orig: parse @0x543FE3] */
+                /* Repeatable, one team token per line [orig: parse @0x543FE3].
+                   Also packs the original producer's team-mask bit
+                   [orig: WeaponDef_ParseProperty @ 0x54d730]. */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 Token tok[MAX_TOKENS];
                 int n = tokenize(v, vl, tok, MAX_TOKENS);
@@ -787,9 +805,32 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                               tok[ti].s, tok[ti].len);
                     ++cw.teamfilter_count;
                 }
+                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
+                if ((vbl == 4 && memcmp(vb, "blue", 4) == 0) || (vbl == 6 && memcmp(vb, "yellow", 6) == 0))
+                    cw.teamfilter_mask |= 2;
+                else if ((vbl == 3 && memcmp(vb, "red", 3) == 0) || (vbl == 6 && memcmp(vb, "violet", 6) == 0))
+                    cw.teamfilter_mask |= 1;
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "round_type", 10)) {
                 consume_value_str(trimmed, tlen, 10, cw.round_type, sizeof(cw.round_type));
+                parsed = 1;
+            /* PLAYER_INFO loadout tokens [orig: WeaponDef_ParseProperty @ 0x54d730]. */
+            } else if (lower_match_key(lower, ll, "weaponweight", 12)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                cw.weaponweight = parse_float_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "clipweight", 10)) {
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+                cw.clipweight = parse_float_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_menu_textid", 19)) {
+                consume_value_str(trimmed, tlen, 19, cw.loadout_menu_textid, sizeof(cw.loadout_menu_textid));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_menu_ttdesc", 19)) {
+                consume_value_str(trimmed, tlen, 19, cw.loadout_menu_ttdesc, sizeof(cw.loadout_menu_ttdesc));
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "loadout_menu_icon", 17)) {
+                consume_value_str(trimmed, tlen, 17, cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon));
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "animadm", 7)) {
                 consume_value_str(trimmed, tlen, 7, cw.animadm, sizeof(cw.animadm));

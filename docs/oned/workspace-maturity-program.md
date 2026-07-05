@@ -52,7 +52,7 @@ decision (ADR / RE-record entry) saying why not:
 | Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
 | Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `NovaMnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
 | HUD | ✓ (`NovaHudPos`, read-only getters) | — | — (hand-drawn `HudLayoutPreview._draw()`) | — | everything but R |
-| Avatars (joins at AVA) | branch-only | branch-only | branch-only | — | not yet on master |
+| Avatars | ✓ | ✓ (from-scratch writer, ADR 0021) | ✓ (workspace + 3D preview) | partial (runtime `player.mnu` population; in-world appearance open, D-PLAYERINFO-1) | G |
 
 Two corrections to earlier working assumptions, verified: environment/water
 unification is DONE (editor-runtime-parity.md: "water is fully unified

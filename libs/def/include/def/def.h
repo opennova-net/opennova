@@ -137,7 +137,8 @@ typedef struct DefWeaponDef {
     int clipsize;
     int startrounds;
     /* Loadout/armory keys (docs/net/novaworld-net-re.md §5.57); absent key = 0/empty.
-       charfilter/teamfilter hold the raw file tokens — bit packing is a consumer concern. */
+       charfilter/teamfilter hold the raw file tokens; the packed masks the original
+       producer builds land in charfilter_mask/teamfilter_mask below. */
     int statid;
     int maxclips;
     int ammobucket;
@@ -174,6 +175,19 @@ typedef struct DefWeaponDef {
     size_t sights_count;
     char (*raw_lines)[512];
     size_t raw_lines_count;
+    /* PLAYER_INFO loadout fields. [orig: WeaponDef_ParseProperty @ 0x54d730;
+       consumer populate_weapon_slot_lists @ 0x560430]. Appended to keep the leading
+       struct offsets (and the FFI mirrors) stable. loadout_selectable (+32: a row
+       appears only when non-zero), loadout_subclasses (+36: sub-entry expansion
+       count), and maxclips (+136) live above with the §5.57 loadout keys. */
+    char loadout_menu_textid[64];  /* +40: GameText "WepDes" key -> display name */
+    char loadout_menu_ttdesc[128]; /* +44: tooltip text id */
+    char loadout_menu_icon[64];    /* +144: icon texture */
+    int weapon_class_slot;         /* +108: slot 0=accessory 1=primary 2=secondary 3=grenade */
+    int teamfilter_mask;           /* +112: mask blue/yellow=2, red/violet=1 */
+    int charfilter_mask;           /* +116: mask medic1 sniper2 gunner4 rifleman8 engineer16 */
+    float weaponweight;            /* +120 */
+    float clipweight;              /* +140 */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

@@ -13,7 +13,7 @@ easier to relay than to rediscover.
   Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
 - `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes,
   plus the shared host-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
-  `modtools/` (the OpenNova Editor "ONED" — eleven authoring workspaces), `game/` (the
+  `modtools/` (the OpenNova Editor "ONED" — twelve authoring workspaces), `game/` (the
   game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (headless in-match host),

@@ -73,6 +73,16 @@ class DefWeaponDef(ctypes.Structure):
         ("sights_count", ctypes.c_size_t),
         ("raw_lines", ctypes.c_void_p),
         ("raw_lines_count", ctypes.c_size_t),
+        # PLAYER_INFO loadout fields (appended; mirror libs/def/include/def/def.h).
+        # loadout_selectable/loadout_subclasses/maxclips live above with the armory keys.
+        ("loadout_menu_textid", ctypes.c_char * 64),
+        ("loadout_menu_ttdesc", ctypes.c_char * 128),
+        ("loadout_menu_icon", ctypes.c_char * 64),
+        ("weapon_class_slot", ctypes.c_int),
+        ("teamfilter_mask", ctypes.c_int),
+        ("charfilter_mask", ctypes.c_int),
+        ("weaponweight", ctypes.c_float),
+        ("clipweight", ctypes.c_float),
     ]
 
 

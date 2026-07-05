@@ -30,7 +30,8 @@ func test_strings_workspace_in_rail() -> void:
 			var bar_label := child.find_child("BarButtonLabel", true, false) as Label
 			row_texts.append(bar_label.text if bar_label != null else "")
 	assert_true(row_texts.has("Strings"), "Strings should join the workspace nav.")
-	assert_eq(row_texts[5], "Strings", "Strings should be the last switchable workspace row.")
+	# Rail order: Mission, Terrain, Object, Avatars (World), Fonts, Credits, Strings (Interface)...
+	assert_eq(row_texts[6], "Strings", "Strings sits after the World group + Fonts/Credits in the rail.")
 
 
 func test_strings_workspace_mounts_self_contained_view() -> void:

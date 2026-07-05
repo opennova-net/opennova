@@ -34,6 +34,7 @@ add_subdirectory(../../libs/mus opennova_mus)
 add_subdirectory(../../libs/mnu opennova_mnu)
 add_subdirectory(../../libs/mns opennova_mns)
 add_subdirectory(../../libs/def opennova_def)
+add_subdirectory(../../libs/avatars opennova_avatars)
 add_subdirectory(../../libs/refs opennova_refs)
 add_subdirectory(../../libs/world opennova_world)
 add_subdirectory(../../libs/wac opennova_wac)
@@ -90,6 +91,8 @@ add_library(${TARGET_NAME} SHARED
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp
+    object/nova_weapon_database.cpp
+    object/nova_avatar_database.cpp
     object/nova_skeletal_anim.cpp
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
@@ -187,6 +190,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     opennova_mnu
     opennova_mns
     opennova_def
+    opennova_avatars
     opennova_world
     opennova_wac
     opennova_mission

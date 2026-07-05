@@ -50,6 +50,7 @@ const OBJECT_NAME := "MH53.3di"
 const MISSION_NAME := "00TRa.bms"
 const MENU_NAME := "main.mnu"
 const HUDPOS_NAME := "hudpos.def"
+const AVATARS_NAME := "Avatars.def"
 const MUSIC_NAME := "jo_gamemus.bin"
 const SOUND_NAME := "00TRa.LWF"
 const FALLBACK_ASSETS := {
@@ -62,6 +63,7 @@ const FALLBACK_ASSETS := {
 var _shots: Array = [
 	[EditorWorkstation.Workspace.TERRAIN, TERRAIN_NAME, "overview.png"],
 	[EditorWorkstation.Workspace.OBJECT, OBJECT_NAME, "object.png"],
+	[EditorWorkstation.Workspace.AVATARS, AVATARS_NAME, "avatars.png"],
 	[EditorWorkstation.Workspace.MISSION, MISSION_NAME, "mission.png"],
 	[EditorWorkstation.Workspace.FONTS, FONT_NAME, "fonts.png"],
 	[EditorWorkstation.Workspace.CREDITS, CREDITS_NAME, "credits.png"],
@@ -183,6 +185,7 @@ func _run_all() -> bool:
 		var out_name: String = shot[2]
 		var is_3d: bool = ws_id == EditorWorkstation.Workspace.TERRAIN \
 			or ws_id == EditorWorkstation.Workspace.OBJECT \
+			or ws_id == EditorWorkstation.Workspace.AVATARS \
 			or ws_id == EditorWorkstation.Workspace.MISSION \
 			or ws_id == EditorWorkstation.Workspace.ENVIRONMENT
 

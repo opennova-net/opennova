@@ -51,6 +51,8 @@ static func label(kind: String) -> String:
 			return "menu style"
 		"hudpos":
 			return "HUD layout"
+		"avatar":
+			return "character"
 		"object", "object_project", "object_model", "object_scene":
 			return "object"
 		"music", "sbf", "music_script":

@@ -23,6 +23,7 @@ from `EditorWorkstation._workspace_defs()` in
 | World | Mission | missions: entities, waypoints, zones, BMS events, play in-editor (`.bms`) | [mission/](mission/README.md) |
 | World | Terrain | heightmaps, surface paint, foliage, tiles, layout (`.trn` / `.cpt` / `.til`) | [terrain/](terrain/README.md) |
 | World | Object | 3D object projects (`.3di` / `.3dp`) | [object/](object/README.md) |
+| World | Avatars | playable characters: head/body/arms combos by nationality and division, with a 3D preview (`Avatars.def`) | [avatar/](avatar/README.md) |
 | Interface | Fonts | bitmap fonts (`.fnt`) | [fonts/](fonts/README.md) |
 | Interface | Credits | rolling credits (`.kda`) | [credits/](credits/README.md) |
 | Interface | Strings | localized string tables (RTXT) | [strings/](strings/README.md) |
@@ -86,7 +87,7 @@ Environment) skip the workflow rail and override `build_inspector(host)` instead
 |---|---|
 | `editor/` | the app root (`editor_app.gd` — boot wiring, window sizing, MCP service), the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog |
 | `framework/` | base classes and typed registries (`EditorWorkspace`, `WorkspaceDef`, `InspectorDef`) |
-| `terrain/`, `object/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `sound/`, `environment/` | one workspace module each (adapter, editor model, UI, inspectors) |
+| `terrain/`, `object/`, `avatar/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `sound/`, `environment/` | one workspace module each (adapter, editor model, UI, inspectors) |
 | `mcp/` | the embedded agent server's ONED side: built-in tool catalog, asset describe serializers, and the service that boots `godot/engine/mcp/` |
 | `tools/` | `screenshot_capture` automation helper (not a workspace) |
 

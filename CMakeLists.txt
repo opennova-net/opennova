@@ -20,6 +20,7 @@ add_subdirectory(libs/gameprofile)
 add_subdirectory(libs/bfc1)
 add_subdirectory(libs/cbin)
 add_subdirectory(libs/def)
+add_subdirectory(libs/avatars)
 add_subdirectory(libs/scr)
 add_subdirectory(libs/rtxt)
 add_subdirectory(libs/ase)
@@ -136,6 +137,7 @@ set(OPENNOVA_CORE_TARGETS
     opennova_bad
     opennova_anim
     opennova_def
+    opennova_avatars
     opennova_scr
     opennova_rtxt
     opennova_ase

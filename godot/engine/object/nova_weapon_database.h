@@ -1,0 +1,75 @@
+#pragma once
+
+#include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/string.hpp>
+
+#include <vector>
+
+namespace godot {
+
+class NovaResourceRoot;
+
+// Thin GDExtension wrapper over libs/def weapon.def parsing (def_parse_weapons), surfacing
+// the PLAYER_INFO loadout slice: per-slot weapon lists filtered by the selected class + team,
+// with the fields the loadout combos + weight readout consume.
+// [orig: WeaponDef_LoadAll @ 0x54dd10 / WeaponDef_ParseProperty @ 0x54d730; consumer
+//  populate_weapon_slot_lists @ 0x560430] (docs/playerinfo/avatars-re.md D-PLAYERINFO-11).
+class NovaWeaponDatabase : public RefCounted {
+	GDCLASS(NovaWeaponDatabase, RefCounted)
+
+private:
+	struct Weapon {
+		String name;           // weapon "<id>" — raw id, the display fallback
+		String display_textid; // loadout_menu_textid — GameText "WepDes" key
+		String round_type;     // ammo key (GameText "WepDes")
+		String icon;           // loadout_menu_icon
+		int selectable = 0;    // loadout_selectable (gate)
+		int slot = 0;          // weapon_class: 0=accessory 1=primary 2=secondary 3=grenade
+		int team_mask = 0;     // teamfilter: blue/yellow=2, red/violet=1
+		int class_mask = 0;    // charfilter: medic1 sniper2 gunner4 rifleman8 engineer16
+		float weight = 0.0f;   // weaponweight
+		float clip_weight = 0.0f;
+		int clipsize = 0;
+		int startrounds = 0;
+		int maxclips = 0;
+	};
+	std::vector<Weapon> weapons; // file order (mirrors the engine's table order)
+	String source_path;
+	String last_error;
+
+	Dictionary weapon_dict(int index) const;
+
+protected:
+	static void _bind_methods();
+
+public:
+	// weapon_class slot values [orig: WeaponDef_ParseProperty @ 0x54d730 +108].
+	enum {
+		SLOT_ACCESSORY = 0,
+		SLOT_PRIMARY = 1,
+		SLOT_SECONDARY = 2,
+		SLOT_GRENADE = 3,
+	};
+
+	Error load(const String &path);
+	// Load weapon.def by flat name through the mounted resource root (VFS / PFF).
+	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
+	bool is_loaded() const;
+	String get_source_path() const;
+	String get_last_error() const;
+	int get_count() const;
+
+	// The weapons that belong in `slot` for the given class + team masks, in table order.
+	// Faithful filter [orig: populate_weapon_slot_lists @ 0x560430]: a row is included only
+	// when selectable != 0 AND (class_mask & player_class_mask) AND (team_mask & player_team_mask).
+	// Each entry is a weapon_dict(); the caller prepends the "NONE" row.
+	Array get_slot_weapons(int slot, int class_mask, int team_mask) const;
+	// All weapons, unfiltered, in table order.
+	Array get_weapons() const;
+	Dictionary get_weapon(int index) const;
+};
+
+} // namespace godot

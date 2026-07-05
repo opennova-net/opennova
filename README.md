@@ -122,6 +122,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **tdp** | `.3dp` | Object projects: material definitions, LOD settings, part-animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
 | **def** | `.def` | Game definitions: weapons, items, ammo, HUD configuration. |
+| **avatars** | `Avatars.def` | Player-character definitions: head/body/arms parts composed into combos under a nationality/division tree, with a from-scratch round-trip writer. |
 | **pff** | `.pff` | Archive containers: PFF3, PFF4, and BHD variants. |
 | **pcx** | `.pcx` | PCX (ZSoft Paintbrush) indexed images. |
 | **fnt** | `.fnt` | Bitmap fonts (FNT0): glyph pages, per-glyph metrics, shadow offset. |

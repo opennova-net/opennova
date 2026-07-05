@@ -21,12 +21,12 @@ func test_ctrl_digit_switches_workspace_and_records_back() -> void:
 	assert_eq(shell.get_active_workspace_id(), EditorWorkstationScript.Workspace.MISSION,
 		"Mission is the default workspace.")
 	var ev := InputEventKey.new()
-	ev.keycode = KEY_5  # 1-based: Mission, Terrain, Object, Fonts, Credits
+	ev.keycode = KEY_4  # 1-based: Mission, Terrain, Object, Avatars, Fonts, Credits
 	ev.ctrl_pressed = true
 	ev.pressed = true
 	shell._unhandled_input(ev)
-	assert_eq(shell.get_active_workspace_id(), EditorWorkstationScript.Workspace.CREDITS,
-		"Ctrl+5 jumps to the fifth dock entry (Credits).")
+	assert_eq(shell.get_active_workspace_id(), EditorWorkstationScript.Workspace.AVATARS,
+		"Ctrl+4 jumps to the fourth dock entry (Avatars).")
 	var back_btn: Button = shell.get_node("%NavBackButton")
 	assert_false(back_btn.disabled,
 		"A hotkey jump records a Back entry exactly like a click on the dock button.")
