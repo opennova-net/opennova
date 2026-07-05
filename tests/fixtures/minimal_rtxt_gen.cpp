@@ -60,6 +60,17 @@ File keyhelp_table() { return File{}; }
 // Error strings: valid-but-empty — every error dialog falls back to its
 // literal, and the ShowEarlyError(4) boot noise goes away.
 File gameerr_table() { return File{}; }
+// Menu labels: the string ids the authored main.mnu / mp.mnu reference via
+// TEXT_RSRC menutxt.BIN (retail ships menutxt.bin in language.pff).
+File menutxt_table() {
+	return make_table("Menu", {
+	                              {"MM_LANMultiplayer", "LAN Multiplayer"},
+	                              {"MM_Exit", "Exit"},
+	                              {"MP_Host", "Host"},
+	                              {"MP_Join", "Join"},
+	                              {"MP_Back", "Back"},
+	                          });
+}
 
 bool read_file(const std::string &path, std::vector<uint8_t> &out) {
 	std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -83,6 +94,7 @@ int run(const std::string &dir, bool write_mode) {
 	    {"gametext.bin", gametext_table},
 	    {"vmacros.bin", vmacros_table},
 	    {"keyhelp.bin", keyhelp_table},
+	    {"menutxt.bin", menutxt_table},
 	};
 	int failures = 0;
 	for (const Target &t : targets) {

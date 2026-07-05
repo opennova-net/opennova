@@ -10,6 +10,9 @@
 // (build_terrain is ~35 s and emits ~10 MB / 685 files) — NOT committed, NOT
 // run per build: it SKIPS clean unless OPENNOVA_BUILD_MINIMAL_PFF=1. See
 // fixtures/minimal/README.md.
+#include "minimal_fnt_builder.h"
+
+#include <fnt/fnt.h>
 #include <pff/pff.h>
 #include <terrain/builder.h>
 
@@ -44,8 +47,19 @@ bool read_bytes(const fs::path &p, std::vector<uint8_t> &b) {
 // mirroring retail's placement: gameerr/gametext/vmacros/keyhelp ship in
 // retail language.pff; every .mnu/.def/.bms in retail localres.pff;
 // .env/.trn/terrain art in retail resource.pff.
-const char *kLanguage[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin"};
-const char *kLocalres[] = {"items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu", "mnml.bms"};
+const char *kLanguage[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
+                           "menutxt.bin"};
+const char *kLocalres[] = {"items.def", "weapon.def", "ammo.def",
+                           "main.mnu",  "mp.mnu",     "mnml.bms",
+                           "menu_style.mns"};
+
+// The boot font set is HARDCODED by name [orig: HUD_InitAllFonts @ 0x51ee20:
+// width breakpoints 640/800/1024 pick Arial12b/14n, 14b/14n, or 16b/16n;
+// Impac22b/38b always] plus the menu_style.mns DEF_FONTNAME_* names. Every
+// name gets the same generated glyph set (minimal_fnt_builder.h); retail
+// ships its .fnt files in localres.pff.
+const char *kFonts[] = {"Arial12b.fnt", "Arial14n.fnt", "Arial14b.fnt", "Arial16n.fnt",
+                        "Arial16b.fnt", "Impac22b.fnt", "Impac38b.fnt"};
 const char *kResource[] = {"mnml.env",   "mnml.trn",   "mnml_c.tga", "mnml_dm.tga",
                            "mnml_dc1.tga", "mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx"};
 
@@ -128,13 +142,43 @@ int main() {
 		return 1;
 	}
 
-	// 2) Per-archive file lists: committed sources (resources/) by retail
-	//    placement; the generated terrain rides resource.pff (excluding the
-	//    depthmap build input).
+	// 2) Generate the boot font set: one authored glyph page written under every
+	//    hardcoded font name (minimal_fnt_builder.h). Generated, never committed.
+	const fs::path fonts_dir = work / "fonts";
+	fs::create_directories(fonts_dir);
+	{
+		fnt_font_t font{};
+		if (minimal_fnt::build_font(&font) != FNT_OK) {
+			std::fprintf(stderr, "FAIL: minimal_fnt build_font\n");
+			return 1;
+		}
+		const size_t font_size = fnt_calculate_file_size(font.num_pages);
+		std::vector<uint8_t> font_bytes(font_size);
+		size_t written = 0;
+		if (fnt_write(&font, font_bytes.data(), font_bytes.size(), &written) != FNT_OK ||
+		    written != font_size) {
+			std::fprintf(stderr, "FAIL: fnt_write\n");
+			fnt_free(&font);
+			return 1;
+		}
+		fnt_free(&font);
+		for (const char *n : kFonts) {
+			std::ofstream f(fonts_dir / n, std::ios::binary);
+			f.write(reinterpret_cast<const char *>(font_bytes.data()),
+			        static_cast<std::streamsize>(font_bytes.size()));
+		}
+		std::printf("generated %zu-byte font x%zu names\n", font_size,
+		            sizeof(kFonts) / sizeof(kFonts[0]));
+	}
+
+	// 3) Per-archive file lists: committed sources (resources/) by retail
+	//    placement; the generated fonts ride localres.pff and the generated
+	//    terrain rides resource.pff (excluding the depthmap build input).
 	const fs::path sources = root / "resources";
 	std::vector<std::pair<std::string, fs::path>> language, localres, resource;
 	for (const char *n : kLanguage) language.emplace_back(n, sources / n);
 	for (const char *n : kLocalres) localres.emplace_back(n, sources / n);
+	for (const char *n : kFonts) localres.emplace_back(n, fonts_dir / n);
 	for (const char *n : kResource) resource.emplace_back(n, sources / n);
 	for (const fs::directory_entry &de : fs::directory_iterator(work)) {
 		if (!de.is_regular_file()) continue;
@@ -143,12 +187,15 @@ int main() {
 		resource.emplace_back(fn, de.path());
 	}
 
-	// 3) Write + verify each boot-table archive: the fatal bins in language, the
-	//    mission set in localres, the map polydata in resource.
+	// 4) Write + verify each boot-table archive: the boot bins in language, the
+	//    mission/menu/font set in localres, the map polydata in resource.
 	if (!write_and_verify(root, "language.pff", language,
-	                      {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin"}))
+	                      {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
+	                       "menutxt.bin"}))
 		return 1;
-	if (!write_and_verify(root, "localres.pff", localres, {"items.def", "main.mnu", "mp.mnu", "mnml.bms"}))
+	if (!write_and_verify(root, "localres.pff", localres,
+	                      {"items.def", "main.mnu", "mp.mnu", "mnml.bms", "menu_style.mns",
+	                       "Arial16n.fnt", "Impac38b.fnt"}))
 		return 1;
 	if (!write_and_verify(root, "resource.pff", resource, {"mnml.env", "mnml.trn", "mnml.cpt"}))
 		return 1;

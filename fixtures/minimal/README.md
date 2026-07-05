@@ -62,25 +62,36 @@ deliberately omitted to keep "minimal" honest.
 | `game.wac` / `server.wac` | `libs/wac` | optional (silent skip) — add only if the join needs mission logic to progress. |
 | mission-list registration | — | how the MP menu finds `<map>` (`.npj`/`.npz` scan `[orig: MissionList_ScanAndBuildFromFiles @ 0x563170]` vs a direct MP host pick — resolve in § Validation). |
 
+### The visible-menu set (added after the black-screen finding)
+
+Boot-clean was not menu-visible: the Startup screen drew text-only buttons on
+a **null font slot** — a black screen (validated on retail 2026-07-05; the
+`/FRISK` log showed every set file loading and the profile saves proved the
+shell was running). The menu shell's own load list is witnessed at
+`sub_552500 @ 0x552500`: `menu_style.mns` → `brand.mns` (append; not even
+retail ships one) → the three menu Bink slots (`main.bik`/`header.bik`/
+`footer.bik`) → `nw_cdata.coo` → `main.mnu` → `Startup` →
+`HUD_InitAllFonts @ 0x51ee20` with **hardcoded font names** (width breakpoints
+640/800/1024 pick `Arial12b`/`14n`, `14b`/`14n`, or `16b`/`16n`;
+`Impac22b`/`Impac38b` always). So the set now authors:
+
+| File | Our writer | Notes |
+|---|---|---|
+| the seven boot `.fnt`s | `libs/fnt` `fnt_write` + `tests/fixtures/minimal_fnt_builder.h` | ONE authored 5×7 stroke glyph set (2× on a single 256×256 page) emitted under every hardcoded name; generated at package time, never committed; guarded by `minimal_fnt_gen`. Retail ships fonts in `localres.pff`. |
+| `menu_style.mns` | authored text | the stylesheet the shell loads by canonical name `[orig: @ 0x552604]`; carries the retail key set (key NAMES witnessed vs the JOTAC install — `DEF_FONTNAME`/`DEF_FONTNAME_LG`/`IMPACT_FONTNAME` + colors); values are ours, fonts point at the generated set. |
+| `menutxt.bin` | `libs/rtxt` | the `TEXT_RSRC` string ids the authored menus reference (`MM_*`/`MP_*`). Retail ships it in `language.pff`. |
+
+Videos (`BIK`) stay omitted **by design**: they load loose via Win32
+`OpenFile` (`[orig: Game_PlayIntroVideos @ 0x5637a0 → 0x5636d0]`), never from
+the PFFs, and a miss skips playback — the menu background just stays black
+(cosmetic). `nw_cdata.coo` misses gracefully.
+
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
 
-**Known consequence (validated on retail 2026-07-05): the main menu comes up
-BLACK.** The boot chain is clean (the `/FRISK` log shows every set file
-loading from the PFFs and the profile saves prove the shell is running), but
-the Startup screen draws text-only buttons on a **null font slot** — nothing
-is visible. The visible-menu legs, in dependency order: a minimal `.fnt`
-(**needs a writer — the one missing piece**; the format is documented in
-[../../docs/fonts/fnt-re.md](../../docs/fonts/fnt-re.md)), `menu_style.mns`
-naming it (`DEF_FONTNAME_*` — plain text, trivial), and optionally
-`menutxt.bin` for the button labels (RTXT; falls back to literals). Videos
-(`BIK`) are NOT the cause: they load loose via Win32 `OpenFile`
-(`[orig: Game_PlayIntroVideos @ 0x5637a0 → 0x5636d0]`), never from the PFFs,
-and a miss skips playback.
-
-Fonts (null slot, no crash — see above), all music (`SBF`/`BIN`), videos (`BIK`),
+All music (`SBF`/`BIN`), videos (`BIK` — see above),
 `Avatars.def`, `SndProf.def`, `charattr.def` (soft error, continues),
-`powerup.def` (soft), `hudfx/hudpos.def` (default positions), menu styling
-(`.mns`), `game.bin`/`menutxt.bin` (fallback literals). Each is listed in the
+`powerup.def` (soft), `hudfx/hudpos.def` (default positions), `game.bin`
+(fallback literals), `nw_cdata.coo`. Each is listed in the
 R8 manifest with its graceful failure; adding any is a deliberate step up from
 minimal, not a requirement.
 
@@ -96,7 +107,9 @@ Authored so far (each guarded by a ctest):
 
 | File(s) | Writer | Guard | State |
 |---|---|---|---|
-| `gameerr.bin`, `gametext.bin`, `vmacros.bin`, `keyhelp.bin` | `libs/rtxt` | `minimal_rtxt_gen` (emit + byte-stable + round-trip) | **done** — the boot string tables |
+| `gameerr.bin`, `gametext.bin`, `vmacros.bin`, `keyhelp.bin`, `menutxt.bin` | `libs/rtxt` | `minimal_rtxt_gen` (emit + byte-stable + round-trip) | **done** — the boot string tables + menu labels |
+| the seven boot `.fnt`s | `libs/fnt` + `minimal_fnt_builder.h` | `minimal_fnt_gen` (validity + byte-stable + label glyphs drawable) | **done** — generated at package time, never committed |
+| `menu_style.mns` | authored text | packaged + entry-verified by `minimal_pff_package` | **done** — retail key set, our values |
 | `items.def`, `weapon.def`, `ammo.def` | authored text | `minimal_def_validate` (parse through `libs/def`) | **done** — a spawnable person, a rifle, its round |
 | `main.mnu`, `mp.mnu` | `libs/mnu` | `minimal_mnu_validate` (parse + screen present) | **done** — Startup node + LAN host/join, small authored |
 | `mnml.env`, `mnml.bms` | `libs/env`, `libs/mission` | `minimal_map_gen` (round-trip + content) | **done** — one TOD + a named mission with two team spawns |

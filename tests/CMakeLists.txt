@@ -458,10 +458,18 @@ target_compile_definitions(minimal_art_gen_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_art_gen COMMAND minimal_art_gen_test)
 
-# Minimal set's packaging tool: build_terrain + PFF-bundle the whole set. Skips
-# clean unless OPENNOVA_BUILD_MINIMAL_PFF=1 (generate-at-package: ~35 s, ~10 MB).
+# Minimal set's generated boot font (minimal_fnt_builder.h): validity +
+# byte-stable roundtrip + label glyphs drawable. Always-on; the font itself is
+# emitted at package time, never committed.
+add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
+target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_fnt)
+add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
+
+# Minimal set's packaging tool: build_terrain + generate the boot fonts +
+# PFF-bundle the whole set. Skips clean unless OPENNOVA_BUILD_MINIMAL_PFF=1
+# (generate-at-package: ~35 s, ~10 MB).
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
-target_link_libraries(minimal_pff_package_test PRIVATE opennova_terrain opennova_pff)
+target_link_libraries(minimal_pff_package_test PRIVATE opennova_terrain opennova_pff opennova_fnt)
 target_compile_definitions(minimal_pff_package_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
