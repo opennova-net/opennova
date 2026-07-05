@@ -62,5 +62,7 @@ surface gate, and proximity spacing are byte-exact against retail.
   `godot/engine/terrain/nova_foliage_dispatcher.cpp` (the `MultiMesh` host).
 - The terrain tint the color path consumes is [env/env-tod-re.md](../env/env-tod-re.md)
   #19 (`env::foliage_lightmap_tint`).
-- Tiles (`libs/til`) and terrain rendering remain jodemo-cited; their audits
-  (PAR-R3/R1) want the jodemo IDB (divergence-ledger.md UNAUDITED table).
+- Tiles (`libs/til`, PAR-R3) is jodemo-cited in code but retail-auditable
+  (`PolyTrn_RenderTile @ 0x60df0d`, `serialize_terrain_tiles @ 0x6080F0`), just
+  multi-part; terrain (PAR-R1) is the larger renderer/mesh pipeline. See the
+  divergence-ledger.md UNAUDITED table for the per-audit binary scoping.
