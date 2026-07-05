@@ -26,7 +26,7 @@ of the game (ADR 0015).
 | Field | Value |
 |---|---|
 | State | Wave 1 in flight (Wave 0 merged 2026-07-04) |
-| Current wave | 0 — bootstrap |
+| Current wave | 1 — boundary moves + ONED foundations |
 | Freeze | ON for non-PAR work: new reimplementation features wait for their foundation phase; IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)). |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
@@ -35,6 +35,12 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| ONED F4 writer-parity convention | 29b5ded8 | the four-part W gate recorded in the track doc; libs/CLAUDE.md points at it; binds hudpos (HUD-1) and avatars (AVT-1) forward |
+| PAR-0 ledger train | 4948c540 | divergence-ledger.md + ADR 0022 + dashboard wiring; stable D-catalogs minted in the four prose-only records (97f64a97) |
+| PAR: D-ITEMDEF-1 closed | faec4b3e | `item_type_from_string` witnessed mapping [orig: ItemDef_ParseProperty @ 0x49eb00]; itemdef-re verdict → MATCHING; first ledger row to zero |
+| NET-3 reclassifications + doc sweep | d47932dc | `.agents/network.md` → npruntime ROADMAP redirect, nw_server README (dev/golden-harness), repo-map one-liners; stale-doc sweep 40504652; no-internal-back-compat convention 98f924af |
+| ENG-1 env parity vectors | 27cff422 | 137 vectors dumped once from the cited GDScript port (`env_parity_vectors_test.gd`, env-gated dump mode); the ENG-2 port's pre/post harness |
+| ONED F1 WorldContextPreview | 9c666c7a | in-world context service extracted from TerrainEditor with seams intact; consumers OBJ-1/SND-2 |
 | ONED-A avatars merge train | 18791098 | the twelfth workspace (Avatars) merged from `playerinfo-runtime`; avatars ADR renumbered 0013→0021; eleven→twelve sweep; ratchet `test_private_pokes` baseline 1319→1371 — maintainer-approved bump for the branch's two pre-ratchet white-box files (`player_info_menu_seam_test.gd` 26, `avatar_preview_test.gd` 26); ONED-TST claws it back |
 | LIBS-1 world→terrain seam | bc8c920a | libs/terrain_query query leaf + the permanent forbidden-edge check (link_graph_check.py); ADR 0020 |
 | NET-2 npwire extraction | 46cd0ac4 | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
@@ -278,7 +284,8 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
   `nw_golden_diff` `kDeferredGaps` with the D-NET refs from the attested 21-gap baseline,
   so the golden diff names each deferral by ID.
 - **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 (and #21) implemented **libs/env-first**.
-- **PAR-WORLD** (M) the D-INF opens, D-EVT-1/-3, and D-ITEMDEF-1 (closure in flight).
+- **PAR-WORLD** (M) the D-INF opens and D-EVT-1/-3 (D-ITEMDEF-1 closed faec4b3e —
+  the first ledger row to zero).
 - **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11, D-SND-2, and D-HUD after its RE
   port lands.
 - **PAR-R1..R7** (S/M each) the seven UNAUDITED-system audits (engine-research /

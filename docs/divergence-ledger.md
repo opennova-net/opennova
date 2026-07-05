@@ -124,7 +124,11 @@ skyfog) map onto these `#` entries.
 | D-EVT-2 | Quarter-pass piggyback (`@0x454d50`) skipped | A | OPEN | PAR-WORLD |
 | D-EVT-3 | Condition categories 1 (team/zone matrix), 5 (load-toggle), 6 (net) unmodeled (return false) | A | OPEN | PAR-WORLD |
 | D-EVT-4 | Pre/post-pass call frequency unwitnessed | B | NEEDS-RE | PAR-WORLD |
-| D-ITEMDEF-1 | `type` enum uses invented sequential values, not engine semantics (effect=8, person=3, …) | A | OPEN — **closure in flight (PAR slice, 2026-07-05)** | in flight |
+
+Closed 2026-07-05: **D-ITEMDEF-1** → `FIXED` (faec4b3e — `item_type_from_string`
+witnessed mapping `[orig: ItemDef_ParseProperty @ 0x49eb00]`;
+[world/itemdef-re.md](world/itemdef-re.md) verdict flipped to MATCHING). The first
+ledger row driven to zero.
 
 Unnumbered latent divergence (needs a `D-EVT-5` mint the next time
 [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) is touched): the BMS second
@@ -191,12 +195,12 @@ Open counts by domain (the target is zero in every cell):
 | Net | 10 | 0 | 12 (2 also NEEDS-RE) | 22 |
 | Environment | 2 | 0 | 5 | 7 |
 | World / AI + events | 6 | 1 | 2 | 9 |
-| Item def | 1 (in flight) | 0 | 0 | 1 |
+| Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 11 | 1 (+1 dual) | 5 | 17 |
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
-| **Total OPEN** | | | | **66** |
+| **Total OPEN** | | | | **65** |
 
 Plus one unnumbered latent divergence (BMS second chunk) awaiting a `D-EVT-5` mint.
 Permanent register size: **13** (below). `UNAUDITED` systems: **7** (below).
