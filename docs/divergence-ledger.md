@@ -359,14 +359,21 @@ is retail-auditable** too (`PolyTrn_RenderTile @ 0x60df0d`, `serialize_terrain_t
 @ 0x6080F0` witnessed), just multi-part (overlay + atlas + tilestrip). **Terrain
 (R1)** is the large renderer/mesh pipeline; the jodemo IDB is the accessible
 route but retail equivalents exist. Fonts (R4) audited cleanly (retail
-`sub_580400`/`sub_674740`). The **CBIN credits** format (`.kda`, R5) is NOT in
-retail JO (no `CBIN`/`.kda` string), so it needs the source binary. The importer
-(R6) is a Python + native-FFI pipeline, not a binary-format audit.
+`sub_580400`/`sub_674740`). **The CBIN codec IS in retail JO** (correcting an
+earlier note): the magic is a binary constant, not a string, so the string search
+missed it — `find_bytes 43 42 49 4E` finds the writer at **`~0x75e250–0x75e350`**
+(`mov dword ptr [esp+68h], 4E494243h` → `fwrite(20)`), which emits the 20-byte
+CBIN header + a counted string table exactly like `libs/cbin`'s `Header`
+(magic/string_offset/blob_length/string_count/xor_key). So R5 is retail-auditable;
+the remaining witness is defining that writer function (undefined in the IDB) to
+pin the ROL32/XOR cipher, plus the credits `~C`/`~F`/`~J` markup consumers. The
+importer (R6) is a Python + native-FFI pipeline, tracked-by-composition
+([importer/importer-audit.md](importer/importer-audit.md)).
 
-| System | Audit slice | Partial coverage today | IDB needed |
+| System | Audit slice | Partial coverage today | IDB / route |
 |---|---|---|---|
-| Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). | jodemo |
-| Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. | source binary (CBIN not in retail JO) |
+| Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include); the TrnGen byte-identical port is the reference terrain data path. | retail (large; jodemo also accessible) |
+| Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. The CBIN header + string-table structure is witnessed against the retail writer `~0x75e250` (matches `libs/cbin`); the ROL32/XOR cipher + markup consumers are the remaining witness. | retail (writer needs defining in the IDB) |
 
 ---
 
