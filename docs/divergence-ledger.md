@@ -69,7 +69,6 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 |---|---|---|---|---|
 | D-NET-9 | Gate literal parse is decimal-only; the 4-radix (char/hex/octal/binary) port is witnessed-and-ready | A | WITNESSED-READY-DEFERRED | PAR-NET |
 | D-NET-17 | ClientHello `DE`/`PV3`/`PM`/`ET` parser fields unmodeled (server side witnessed) | A | OPEN | PAR-NET |
-| D-NET-20 | Verify request must emit the `ClientVarList(Cookie)` parent unconditionally (`includeAll=1`) | A | OPEN | PAR-NET |
 | D-NET-21 | `ClientConnected` emitted synchronously; retail waits one periodic tick (state 5/2) | A | OPEN | PAR-NET |
 | D-NET-22 | Verify Cookie var-list is data-driven from client env; the registry/Win32 glue belongs in the Godot binding | A | OPEN | PAR-NET |
 | D-NET-29 | Envelope variable-header (`first-dword==0`) decode mode unsupported — documented scope | A | WITNESSED-READY-DEFERRED | PAR-NET |
@@ -93,7 +92,9 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-147 | Residual 0x10 tail: sectioned-destructible `sectionMask` rebuild + armory `weaponByte`/`attachRef` + `scoreFlag` gate deferred (the four base fields fixed + streamed) | A | WITNESSED-READY-DEFERRED | PAR-NET |
 
 Closed net entries with a permanent facet are listed in the permanent register below
-(D-NET-131, D-NET-133 empty-slot facet, D-NET-140).
+(D-NET-131, D-NET-133 empty-slot facet, D-NET-140). Closed 2026-07-05: **D-NET-20**
+-> `FIXED` (the Cookie var-list parent emitted unconditionally; empty-cfg flow pinned
+in `client_session_loopback_test`).
 
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
 
@@ -207,7 +208,7 @@ Open counts by domain (the target is zero in every cell):
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
-| Net | 10 | 0 | 12 (2 also NEEDS-RE) | 22 |
+| Net | 9 | 0 | 12 (2 also NEEDS-RE) | 21 |
 | Environment | 2 | 0 | 5 | 7 |
 | World / AI + events | 3 | 0 | 4 | 7 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
@@ -216,7 +217,7 @@ Open counts by domain (the target is zero in every cell):
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
-| **Total OPEN** | | | | **63** |
+| **Total OPEN** | | | | **62** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

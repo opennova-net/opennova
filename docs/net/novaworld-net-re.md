@@ -6535,7 +6535,7 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 
 `client_session.cpp` (A5/A7):
 - **D-NET-19** [MED, FIXED] `Success` compared as exact "1"; retail uses `atol(Success) != 0`. [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800]
-- **D-NET-20** [MED, TRACKED] `build_verify_request` must emit the `ClientVarList(VarList="Cookie")` parent unconditionally (retail SerializeVarList includeAll=1). [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 / NapiStatement_SerializeVarList @ 0x4d0660]
+- **D-NET-20** [MED, **FIXED 2026-07-05**] `build_verify_request` now emits the `ClientVarList(VarList="Cookie")` parent unconditionally (empty when no cookie vars are configured), matching retail's SerializeVarList includeAll=1; pinned by the empty-cfg flow in `client_session_loopback_test`. [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 / NapiStatement_SerializeVarList @ 0x4d0660]
 - **D-NET-21** [LOW, TRACKED] ClientConnected emitted synchronously; retail waits one periodic tick (conn_state==5 && session_state==2). [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
 - **D-NET-22** [LOW, BINDING] the verify Cookie var-list is data-driven (locale + NW* identity) from client env — registry/Win32 glue belongs in the Godot binding, not `libs/`. Also fix the `client_session.h:99-110` comment. [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 / CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0]
 
