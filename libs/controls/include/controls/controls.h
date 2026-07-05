@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -60,15 +61,24 @@ struct ActionDef {
   ActionClass cls;    // category / Class column
   int default_key;    // default primary keyboard VK code (0 = unbound)
   int default_key2;   // default secondary keyboard VK code (0 = none)
+  // The witnessed per-entry flag word (the static catalog's flags dword,
+  // read at 0x8159AC + 108*id; it reaches the profile record at +1816 and
+  // the UI table's gate word): bit 0x800 = player-visible in the remap
+  // table, bit 0x20 = force-hidden, bit 0x4000000 = included in the
+  // default.key filtered table [orig: UI_PopulateControlMappingList
+  // @ 0x55c0c0; KeyBinding_BuildFilteredTable @ 0x54c2b0;
+  // UI_BuildKeyBindingLoadoutTable @ 0x559e50].
+  uint32_t flags;
 };
 
 // The full static catalog (pointer + element count).
 const ActionDef *catalog(std::size_t *out_count);
 
-// Whether an action's class is shown in the player-facing remap table. Approximates
-// the engine's per-entry 0x800/0x20 visibility flag by category (D-CTRL-3): the
-// admin/internal classes (Null, Server, NovaLogic, Cheat, Debug) are hidden.
-bool is_player_visible(ActionClass cls);
+// Whether an action is shown in the player-facing remap table — the witnessed
+// per-entry gate (*entry & 0x20) == 0 && (*entry & 0x800) != 0, applied to the
+// catalog flag word (D-CTRL-2 closed: the class-category approximation is
+// replaced) [orig: UI_PopulateControlMappingList @ 0x55c0c0].
+bool is_player_visible(const ActionDef &action);
 
 // Windows VK code -> display key name ("Mouse 1", "Up", "Space", "F1", "W", ...).
 // [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60]

@@ -103,6 +103,9 @@ bool test_build_rows_keyboard() {
 
   bool found_forward = false;
   bool saw_server = false;
+  bool saw_abs_turn = false;
+  bool saw_last_move = false;
+  bool found_spectator = false;
   for (const ControlRow &r : rows) {
     CHECK(!r.cls.empty() && !r.action.empty(), "class+action non-empty");
     if (r.action == "Forward") {
@@ -113,13 +116,29 @@ bool test_build_rows_keyboard() {
     if (r.cls == "Server" || r.cls == "Null" || r.cls == "Cheat") {
       saw_server = true;
     }
+    if (r.action == "Absolute Turn Left" || r.action == "Look Pitch") {
+      saw_abs_turn = true;
+    }
+    if (r.action == "Last_move") {
+      saw_last_move = true;
+    }
+    if (r.action == "Cycle Spectator Mode") {
+      found_spectator = true;
+    }
   }
   CHECK(found_forward, "forward row present");
   CHECK(!saw_server, "admin/internal classes are hidden");
+  // The witnessed per-entry gate, not the class approximation: retail hides
+  // the analog-only movement entries (0xC100425/0xC200425 — bit 0x800 clear,
+  // bit 0x20 set) and Last_move (0xC000405 — bit 0x800 clear), while the
+  // spectator entries (0x4000800) show [orig: catalog flags @ 0x8159AC + 108*id].
+  CHECK(!saw_abs_turn, "analog-only movement entries hidden (witnessed flags)");
+  CHECK(!saw_last_move, "Last_move hidden (witnessed flags)");
+  CHECK(found_spectator, "spectator entries shown (witnessed flags)");
   return true;
 }
 
-// Mouse/joystick share the action list but have no static default bindings (D-CTRL-2).
+// Mouse/joystick share the action list but have no static default bindings (D-CTRL-1).
 bool test_build_rows_other_devices() {
   const std::vector<ControlRow> kb = build_rows(Device::Keyboard);
   const std::vector<ControlRow> mouse = build_rows(Device::Mouse);
