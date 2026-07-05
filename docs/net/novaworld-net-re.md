@@ -6920,6 +6920,17 @@ record-per-datagram boundary can differ from retail by one record. Every page is
 count-prefixed sub-batch a stock client reassembles into the identical world — interop-equivalent,
 not byte-identical batching. Faithful fix (if ever needed for capture-diff parity): per-pool margins
 with the post-write guard.
+**Complete witness (2026-07-05), scoping the fix precisely:** all four world-stream pool margins are
+now pinned — 0x0C = **100** (`@ 0x5030a0`), 0x20 = **30** (`@ 0x503460`), 0x10 = **40** (`@ 0x5042F0`),
+and 0x0D = **110** (`serialize_entity_pool_to_packet_0 @ 0x503940`, guard `write_ptr - buffer_start +
+110 > 650`) — all against the common **650** budget, checked AFTER each record (the crossing record IS
+included). **The 0x45 tiles are NOT part of this divergence:** `serialize_terrain_tiles @ 0x6080F0`
+uses a different model — fill a caller `buf_size` while `remaining >= 12` (a PRE-check that EXCLUDES the
+crossing tile), which is exactly what our `slice_batch_pages` already does. So the faithful port applies
+to the four world pools only: add a per-tag `margin` post-write-guard mode (budget 650, include the
+crossing record) to `emit_paged_pool`, leaving the tile path on the existing pre-check. Deferred here
+because changing the world-pool page boundaries would alter byte-exact golden captures whose re-capture
+is asset-gated — this belongs on the golden-harness (tier-2) loop, not a blind edit.
 
 **D-NET-136** [reimpl divergence, DOCUMENTED 2026-07-01] **The 0x0C player-record `entity+36` bit
 0x01 is computed PER-RECIPIENT ("this is your own entity"); retail sets it ONCE per entity at add
