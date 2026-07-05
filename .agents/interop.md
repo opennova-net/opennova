@@ -115,3 +115,34 @@ Failure signatures to report:
 - GOODBYE/kick follows deploy gate.
 - Terrain/map missing while dynamic actors still appear.
 
+## Initial-Load Failure Triage
+
+For a retail client that joins an OpenNova host but floats or sees no map
+entities, do not start with a broad refactor. First capture the full handshake
+and inspect exact S2C order around:
+
+`0x10`, live `0x0C`, live `0x20`, `0x45`, `0x7E`, `0x1A`, and `0x0F`.
+
+Then verify in order:
+
+- Mission identity and local `.bms` availability.
+- Terrain/load `0x45` pages for the chosen mission.
+- Spawn position in `0x0F` against the mission start marker and terrain height.
+- Spawn-marker `0x20` records, preserving original pool indices.
+- Joiner self-ID/DCB: the self `0x0C` is sent before deploy with the retail
+  ack value and local-player flags.
+
+Do not reintroduce full static pool streaming as a blanket fix. Retail clients
+load static mission data locally; the host stream should be the required dynamic
+state and spawn markers.
+
+## Paths Not To Confuse
+
+- `NovaNetClient` / `NetWorldView` is replay/spectator receive plumbing, not the
+  canonical co-op gameplay client.
+- `ClientSession` is the NOVAWORLDUDP lobby verifier/proto-switch client, not
+  in-match replication.
+- `UdpSessionTransport` is an internal identity-frame conduit. NWU session
+  framing, SCRK, and ProtocolMessage live in `libs/npwire` (ADR 0019); the PN
+  classifier (`classify_session_protocol`) stays in `libs/novaworld`.
+

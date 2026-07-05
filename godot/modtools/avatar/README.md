@@ -17,7 +17,8 @@ GDExtension class.
 through `set_model()` on the database, whose `changed` signal the base turns into
 the dirty flag and `state_changed` — so the shell derives Save / undo state from
 one document. New documents start as an empty database; save writes the `.def`
-from scratch (`save_to_path`, ADR 0009 — never raw passthrough).
+from scratch (`save_to_path`, ADR 0003 — never raw passthrough; writer policy
+ADR 0021).
 
 ## Workspace
 

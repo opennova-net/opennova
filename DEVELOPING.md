@@ -6,8 +6,7 @@ against both retail Joint Operations and our own Godot client.
 
 For the asset pipeline and packaging (Blender addon, 3ds Max plugin, standalone
 importer, Godot exports) see the [Building](README.md#building) section of the
-README. For deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md)
-and [`plan/pr21-cutover-runbook.md`](plan/pr21-cutover-runbook.md).
+README. For deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 
 ## Prerequisites
 
@@ -223,5 +222,5 @@ red, re-run that single test file in isolation to confirm before treating it as 
 ## Where to go next
 
 - [README.md](README.md): the asset pipeline and packaging.
-- [DEPLOY.md](DEPLOY.md) and [`plan/pr21-cutover-runbook.md`](plan/pr21-cutover-runbook.md): deploying your own instance.
+- [DEPLOY.md](DEPLOY.md): deploying your own instance.
 - [docs/README.md](docs/README.md): architecture and the reverse-engineering records.

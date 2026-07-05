@@ -34,7 +34,8 @@ Gotchas:
 - The C ABI consumed here is shared with Python — keep exports flat and domain-prefixed
   (see `libs/CLAUDE.md`).
 - Net bindings (`network/nova_net_client`, `network/nova_world_client`) are thin pumps
-  over the wire-compatible `libs/novaworld` codecs — sockets and signals here, protocol and
+  over the wire-compatible codecs — `libs/npwire` for the in-game codec/replay (ADR 0019),
+  `libs/novaworld` for matchmaking — sockets and signals here, protocol and
   crypto in `libs/` (ADR 0010). Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
 - Two net render paths coexist by design: the NovaNetClient replay/spectate path

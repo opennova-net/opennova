@@ -8,15 +8,17 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `libs/` — portable C++ core (format/runtime libraries: terrain, threedi, mission,
-  wac, world, novaworld, audio, pff, vfs, ...). Godot-agnostic — no Godot types ever.
+- `libs/` — portable C++ core (format/runtime libraries: terrain, terrain_query,
+  threedi, mission, wac, world, novaworld, npwire, audio, pff, vfs, ...).
+  Godot-agnostic — no Godot types ever.
   Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
 - `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes,
   plus the shared host-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
   `modtools/` (the OpenNova Editor "ONED" — twelve authoring workspaces), `game/` (the
   game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
-  `novaworld_server/` (the NovaWorld service), `nw_server/` (headless in-match host),
+  `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
+  in-match host; never shipped),
   `nw_pp/` (packet pretty-printer), `nw_replay/` (replay streamer), `common/` (shared
   socket/pcap helpers, deliberately app-layer). `blender/` and `opennova_max/` are the
   DCC export plugins; `pyopennova/` is the Python FFI layer.
@@ -83,6 +85,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
+- Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
+  code in the same change — no deprecation shims, migration paths, or compat readers for
+  files our tools write. Retail interop (wire/format parity) is the product, not
+  back-compat, and is never relaxed.
 - Rendering targets the original fixed-function look, not PBR.
 - Networking is wire-compatible by design — the parity rule applied to the byte stream.
   We write code such that our clients can join original (retail) servers, our servers can

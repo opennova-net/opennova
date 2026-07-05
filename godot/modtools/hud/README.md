@@ -30,5 +30,5 @@ name, dynamic crosshair spread) and the top-down radar are follow-ups.
 
 The workspace is registered in the shell — a `WorkspaceDef` row in
 `editor_workstation.gd` (`_workspace_defs()`), the `Workspace.HUD` enum entry, and
-the `hud` icon in `editor/ui/icons/` — making it the eleventh workspace; see
+the `hud` icon in `editor/ui/icons/` — making it one of the twelve workspaces; see
 [the framework README](../README.md) for how registration works.

@@ -11,8 +11,8 @@ testability).
 Successor to [editor-layer-program.md](editor-layer-program.md) (complete
 2026-07-04: app root, shell decomposition, undo everywhere, global
 shortcuts, shared widgets/theme/vocabulary). That program made the
-workspaces *uniform*; this one makes them *equally deep* — and grows them to
-**twelve** (Avatars joins in phase AVA).
+workspaces *uniform*; this one makes them *equally deep* — and grew them to
+**twelve** (Avatars joined in phase AVA, merged 2026-07-04).
 
 Facts below were re-verified 2026-07-04 against the post-program tree;
 anything marked *re-grep at execution* drifts too easily to pin.
@@ -61,23 +61,17 @@ unification is DONE (editor-runtime-parity.md: "water is fully unified
 recorded decision in docs/audio/mus-sbf-re.md (`vfs_mus_decode_test` pins
 the pass-through); it is a bar-satisfying exclusion, not a gap.
 
-## AVA — the Avatars workspace merge (twelfth workspace; first ONED train)
+## AVA — the Avatars workspace merge (twelfth workspace; first ONED train) — LANDED 2026-07-04
 
-A complete Avatars workspace exists only on the `playerinfo-runtime` branch:
-editor (`modtools/avatar/` — workspace, document, preview, three
-inspectors), engine (`nova_avatar_database` native Avatars.def support),
-fixtures, five test files, and an RE doc. Merge it FIRST in this track
-(every later shell/standards/responsiveness change raises the rebase cost):
-
-- AVA-1: merge train from `playerinfo-runtime`, rebased onto current master;
-  the branch's ADR renumbers to the next free number (it collides with
-  master's 0013) with a repo-wide reference sweep.
-- AVA-2: the eleven→twelve sweep — CONTEXT.md (ONED/Workspace entries),
-  `modtools/README.md` table, the screenshot driver (twelfth workspace
-  shot), this doc's matrix row filled in honestly, `resource_kinds` rows if
-  the branch adds kinds.
-- Gate: the branch's five avatar test files + FULL GUT + the boot probe +
-  the screenshot driver run.
+Merged from `playerinfo-runtime` as the twelfth workspace (the umbrella's
+ONED-A train): editor (`modtools/avatar/` — workspace, document, preview,
+three inspectors), engine (`nova_avatar_database` native Avatars.def
+support), fixtures, five test files, and the RE doc. The branch's ADR
+renumbered 0013 → 0021 (it collided with master's consolidated-net-core
+0013) with a repo-wide reference sweep, and the eleven→twelve sweep is done
+(CONTEXT.md, the `modtools/README.md` table, the screenshot driver's
+twelfth shot, this doc's matrix row). Gate ran: the branch's five avatar
+test files + FULL GUT + the boot probe + the screenshot driver.
 
 ## Foundation phases (F1–F5; umbrella Wave 1)
 
@@ -363,7 +357,8 @@ assumption re-scopes the phase before code lands (the faithful-port rule).
 
 ## Sequencing (keyed to the umbrella's waves)
 
-- **Umbrella Wave 1:** AVA first, then F1–F5 (F5 before any MIS phase).
+- **Umbrella Wave 1:** AVA (landed 2026-07-04), then F1–F5 (F5 before any
+  MIS phase).
 - **Umbrella Wave 2:** the no-RE adoptions — OBJ-1/3/4, FNT-1/2, STR-1/2,
   CRE-1, MNU-1, SND-1, TER-1, ENV-1, every F3 wiring — plus TST refits,
   RSP-1..3, and MUS-D (maintainer gate at its end). R1–R7 grills run

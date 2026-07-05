@@ -13,7 +13,7 @@
 # .godot-bin/ if one isn't set.
 #
 # Assets are opened by name from $NOVA_RESOURCE_DIR (the external resource dir
-# that also feeds the runtime/editor). Defaults to ~/Desktop/revx02; override by
+# that also feeds the runtime/editor). Defaults to ~/Desktop/JOX; override by
 # exporting NOVA_RESOURCE_DIR. The dir must hold Dvxi5.trn (+ textures),
 # full_00.env, the font, credits, the strings table, and the object .3di.
 set -euo pipefail
@@ -39,7 +39,7 @@ find_godot_bin() {
   return 1
 }
 
-: "${NOVA_RESOURCE_DIR:=$HOME/Desktop/revx02}"
+: "${NOVA_RESOURCE_DIR:=$HOME/Desktop/JOX}"
 if [[ ! -d "$NOVA_RESOURCE_DIR" ]]; then
   echo "error: NOVA_RESOURCE_DIR '$NOVA_RESOURCE_DIR' is not a directory" >&2
   exit 1

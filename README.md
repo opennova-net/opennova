@@ -24,7 +24,7 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 
 Three layers:
 
-- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, fonts, credits, strings, menus, HUD preview, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, avatars, fonts, credits, strings, menus, HUD preview, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `Avatars.def`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
 - **Core engine (`libs/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
@@ -78,7 +78,7 @@ Exports the current scene to NovaLogic's ASCII Scene Export format. Supports mul
 
 The authoring layer for JO assets, organized into workspaces grouped by purpose:
 
-- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime).
+- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime), and Avatars (`Avatars.def` player characters: head/body/arms parts and combos under the nationality/division tree, with a 3D preview).
 - **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), Strings (RTXT string tables), Menus (`.mnu` / `.mns` menu screens with a WYSIWYG canvas and interactive preview), and HUD (a read-only preview of the in-game HUD layout).
 - **Audio**: Music (interactive music: `.sbf` banks plus `.bin` music scripts).
 - **Atmosphere**: Sound (`.lwf` sound profiles) and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
@@ -91,14 +91,14 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 |------|----------|
 | `libs/` | C/C++ engine libraries: format parsers, runtime systems, networking, and editor support (see [C/C++ Libraries](#cc-libraries)). |
 | `docs/` | Tracked architecture and reverse-engineering records; start at [`docs/README.md`](docs/README.md). |
-| `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a headless in-match host (`nw_server`), the packet pretty-printer (`nw_pp`), the replay streamer (`nw_replay`), and shared socket/pcap helpers (`common/`). |
+| `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a dev/golden-harness in-match host (`nw_server`, never shipped), the packet pretty-printer (`nw_pp`), the replay streamer (`nw_replay`), and shared socket/pcap helpers (`common/`). |
 | `pyopennova/` | Python ctypes FFI layer over the shared `opennova` library, used by the importer and the Python tests. |
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
 | `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
-| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/` plus the shared GDScript engine layer both hosts run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (placeholder for a headless server host), `tests/` (GUT suite). |
+| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/` plus the shared GDScript engine layer both hosts run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (vestigial; dedicated hosting will be a serve mode of the game runtime, see [ADR 0015](docs/adr/0015-two-products-serve-mode.md)), `tests/` (GUT suite). |
 | `web/` | NovaWorld web portal (Vue 3 + TypeScript): landing, lobbies, admin, downloads. Built in CI and deployed with the service stack. |
 | `launcher/` | Windows tray app that points a stock game install at OpenNova's NovaWorld servers via one managed hosts-file entry. |
 | `backend/` | NovaWorld service data: migrations and seed data. |
@@ -147,6 +147,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | Library | Description |
 |---------|-------------|
 | **terrain** | Terrain core: heightmap sampling, normals, sector mesh geometry, LOD. |
+| **terrain_query** | The world-to-terrain query seam: the zero-dependency height and coordinate query leaf that `world` links and `terrain` builds on (ADR 0020). |
 | **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
 | **world** | World substrate: entity registry and pools, variable store, AI with the infantry motor, and the logic tick. |
@@ -165,7 +166,8 @@ Wire-compatible with the original protocols: our encoders produce bytes a stock 
 |---------|-------------|
 | **novacrypto** | CRC-32/MPEG-2 and the NWU/EPASK/URL ciphers behind every NovaWorld exchange. |
 | **napi** | NAPI envelope and TLV containers: the checksummed message envelope of the lobby protocol. |
-| **novaworld** | The NovaWorld service and in-match wire protocol, built as five leg targets: wire (in-game codec), session (NWU session + framing), gate (first contact, login, server-browser data), service (lobby and persistence; the only leg linking sqlite), and replay (capture decode + timelines). |
+| **npwire** | The in-game wire protocol: the in-match message codec and catalog, NWU session framing, and the capture/replay chain (ADR 0019). |
+| **novaworld** | The NovaWorld matchmaking and service lib: session state above the framing, gate (first contact, login, server-browser data), and lobby persistence (the only sqlite link). |
 | **netsim** | The in-match net seam: the World-to-wire bridge, transports, and the in-process loopback behind single-player-as-listen-server. |
 | **npruntime** | The in-match NP server and client state machines and frame loop, ported from the original engine over the netsim seam. |
 

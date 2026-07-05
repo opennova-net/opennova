@@ -60,8 +60,9 @@ Track codes prefix slice IDs and PR titles. Sizes are S/M/L feel, not time.
 Background finding: the in-match *runtime* already lives outside the
 NovaWorld lib (`libs/netsim` seam glue, `libs/npruntime` 62 Hz runtime), but
 the in-match *codec* (wire leg: `ingame_decode/encode`,
-`ingame_message_catalog.h`, `replication_model.h`) and the replay leg still
-sit under `libs/novaworld` — a matchmaking name for game-protocol code.
+`ingame_message_catalog.h`, `replication_model.h`) and the replay leg sat
+under `libs/novaworld` — a matchmaking name for game-protocol code — until
+NET-2 moved them to `libs/npwire` (ADR 0019).
 `.agents/network.md` is stale (names classes deleted by the npruntime
 rebuild). `apps/nw_server` vs `apps/novaworld_server` is the deliberate
 ADR-0013 matchmaking/in-match split, not duplication — the `nw_*` naming is
