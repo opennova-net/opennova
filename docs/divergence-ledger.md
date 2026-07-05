@@ -121,7 +121,7 @@ honored-matrix terrain_tint -> HONORED; residual emitter facets ride PAR-R2).
 | env #14 | Sun-glare terrain-raycast occlusion held at full brightness (8-jittered-ray + ±16/frame hysteresis unmodeled) | A | OPEN (PARTIAL) | PAR-ENV |
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #17 | Iris auto-exposure modulator gain — curve + consumer chain recovered, no modulator chain built (`get_terrain_lighting_attenuation` returns identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)

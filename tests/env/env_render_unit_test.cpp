@@ -275,6 +275,40 @@ int main() {
 		            "even-channel tile-overlay factor recovers the packed color")) return 1;
 	}
 
-	std::printf("OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint\n");
+	// Iris auto-exposure — the witnessed curve [orig: terrain_sector_compute_lighting
+	// @ 0x5c7550]. lum = 0.25*(r+b) + 0.5*g; gain = 0.01*(pct*base/(2m) + (100-pct)*base).
+	{
+		// Luminance is exact.
+		if (!expect(near(iris_luminance(Rgb{1.0f, 0.0f, 1.0f}), 0.5f), "iris lum of (1,0,1) = 0.5"))
+			return 1;
+		if (!expect(near(iris_luminance(Rgb{0.0f, 1.0f, 0.0f}), 0.5f), "iris lum of (0,1,0) = 0.5"))
+			return 1;
+		if (!expect(near(iris_luminance(Rgb{1.0f, 1.0f, 1.0f}), 1.0f), "iris lum of white = 1.0")) return 1;
+
+		// Defaults iris_center 1.25 / iris_percent 50: base = 80, gain = 40 + 20/m.
+		// A pure white sky (dir/ground 0) gives m = 1 -> gain = 60 (the record's
+		// "~60 in bright sun"). int-truncated; allow ±1 for float truncation.
+		{
+			const int g = iris_gain(Rgb{0, 0, 0}, Rgb{1, 1, 1}, Rgb{0, 0, 0}, 0, 1, 0, 1.25f, 50.0f);
+			if (!expect(g >= 59 && g <= 60, "iris gain at m=1 defaults is 60")) return 1;
+		}
+		// Darkness (all blocks zero) drives the base/(2m) term to the 255 clamp.
+		if (!expect(iris_gain(Rgb{0, 0, 0}, Rgb{0, 0, 0}, Rgb{0, 0, 0}, 0, 1, 0, 1.25f, 50.0f) == 255,
+		            "iris gain clamps to 255 in full darkness")) return 1;
+		// A dimmer scene (m = 0.5, sky {0.5,0.5,0.5} -> lum 0.5) -> 40 + 20/0.5 = 80.
+		{
+			const int g = iris_gain(Rgb{0, 0, 0}, Rgb{0.5f, 0.5f, 0.5f}, Rgb{0, 0, 0}, 0, 1, 0, 1.25f, 50.0f);
+			if (!expect(g >= 79 && g <= 80, "iris gain at m=0.5 defaults is 80")) return 1;
+		}
+		// iris_percent 0 removes the exposure-boost term: gain = 0.01*100*base = base.
+		// base = 1.25*64 = 80 -> gain 80, independent of m.
+		{
+			const int g = iris_gain(Rgb{0, 0, 0}, Rgb{1, 1, 1}, Rgb{0, 0, 0}, 0, 1, 0, 1.25f, 0.0f);
+			if (!expect(g >= 79 && g <= 80, "iris_percent 0 gives base = 80")) return 1;
+		}
+	}
+
+	std::printf(
+	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris\n");
 	return 0;
 }

@@ -162,6 +162,28 @@ Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
 inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;
 
 // ---------------------------------------------------------------------------
+// Iris auto-exposure [orig: terrain_sector_compute_lighting @ 0x5c7550]
+// The engine's global auto-exposure gain (0..255; 64 = identity, 6.6 fixed /
+// modulator units). A pure function of the outdoor light blocks + the .env
+// iris_center / iris_percent. The modulator CHAIN that applies this gain to the
+// color blocks is the runtime consumer (env #17, WITNESSED-READY-DEFERRED);
+// this is only the witnessed curve, ready for that chain. Constants:
+// lum = 0.25*(r+b) + 0.5*g; base = iris_center*64; sqrt(dx^2+dz^2) horiz weight;
+// 0.707 sky+ground horiz term; gain = 0.01*(iris_percent*base/(2m) +
+// (100-iris_percent)*base), clamped [0,255].
+
+// Luminance of a color the iris way: 0.25*(r+b) + 0.5*g.
+float iris_luminance(const Rgb &c);
+
+// The iris auto-exposure gain. `directional`/`sky`/`ground` are the outdoor
+// light blocks (0..1 per channel; indoors substitutes ceiling/floor for
+// sky/ground and zeroes directional). `dir_x/y/z` is the normalized light
+// direction. Returns the modulator gain, int-truncated and clamped [0,255].
+int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
+              float dir_x, float dir_y, float dir_z,
+              float iris_center, float iris_percent);
+
+// ---------------------------------------------------------------------------
 // Terrain tint (terrain_rgb)
 // [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; sole caller Terrain_Init
 //  @ 0x60fc42, source Env_TerrainColorPacked @ 0x26c67f4]

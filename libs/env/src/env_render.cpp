@@ -326,6 +326,42 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 	}
 }
 
+float iris_luminance(const Rgb &c) {
+    // [orig: @ 0x5c7550] lum = 0.25*(r+b) + 0.5*g.
+    return 0.25f * (c.r + c.b) + 0.5f * c.g;
+}
+
+int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
+              float dir_x, float dir_y, float dir_z,
+              float iris_center, float iris_percent) {
+    // [orig: terrain_sector_compute_lighting @ 0x5c7550] exact curve.
+    const float dir_lum = iris_luminance(directional);
+    const float sky_lum = iris_luminance(sky);
+    const float gnd_lum = iris_luminance(ground);
+    const float vert_lum = dir_y * dir_lum + sky_lum;
+    const float horiz_lum =
+            std::sqrt(dir_x * dir_x + dir_z * dir_z) * dir_lum + 0.707f * (sky_lum + gnd_lum);
+    float m = dir_lum;
+    if (sky_lum > m) m = sky_lum;
+    if (gnd_lum > m) m = gnd_lum;
+    if (vert_lum > m) m = vert_lum;
+    if (horiz_lum > m) m = horiz_lum;
+    const float base = iris_center * 64.0f;
+    // gain = 0.01 * (iris_percent * base/(2m) + (100 - iris_percent) * base).
+    // m can be 0 (fully dark) — the base/(2m) term then diverges toward the
+    // 255 clamp, matching the witnessed "rises toward 255 in darkness".
+    float gain;
+    if (m > 0.0f) {
+        gain = 0.01f * (iris_percent * base / (2.0f * m) + (100.0f - iris_percent) * base);
+    } else {
+        gain = 255.0f; // the base/(2*0) limit is the clamp
+    }
+    const int g = static_cast<int>(gain);
+    if (g < 0) return 0;
+    if (g > 255) return 255;
+    return g;
+}
+
 TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed) {
 	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20] full @ 0x31a1824,
 	// half @ 0x31a1828.
