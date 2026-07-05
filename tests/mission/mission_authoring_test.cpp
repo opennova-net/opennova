@@ -8,6 +8,7 @@
 #include <cstddef>
 
 #include "common/test_expect.h"
+#include "def/def.h"
 #include "mission/authoring.h"
 #include "mission/mission.h"
 
@@ -28,17 +29,24 @@ bool near(float a, double b, double eps = 1e-3) {
 
 int main() {
 	// --- entity_kind_for_item_type: the full items.def type range ---------
+	// Types are the witnessed engine values at ItemDef+0x5C [orig:
+	// ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]:
+	// vehicle=1, decoration/foliage=2, person=3, marker=4, building=5,
+	// powerup/object=6, effect=8; 0=unset, 7 unused. Decoration and Foliage
+	// (value 2) land in Building alongside Building (5); every other type is Item.
 	{
-		TEST_EXPECT(authoring::entity_kind_for_item_type(3) == EntityKind::Organic);  // Person
-		TEST_EXPECT(authoring::entity_kind_for_item_type(4) == EntityKind::Building); // Building
-		TEST_EXPECT(authoring::entity_kind_for_item_type(5) == EntityKind::Building); // Decoration
-		TEST_EXPECT(authoring::entity_kind_for_item_type(6) == EntityKind::Building); // Foliage
-		TEST_EXPECT(authoring::entity_kind_for_item_type(1) == EntityKind::Marker);   // Marker
-		TEST_EXPECT(authoring::entity_kind_for_item_type(0) == EntityKind::Item);     // Unknown
-		TEST_EXPECT(authoring::entity_kind_for_item_type(2) == EntityKind::Item);     // Vehicle
-		TEST_EXPECT(authoring::entity_kind_for_item_type(7) == EntityKind::Item);     // Object
-		TEST_EXPECT(authoring::entity_kind_for_item_type(8) == EntityKind::Item);     // Powerup
-		TEST_EXPECT(authoring::entity_kind_for_item_type(-1) == EntityKind::Item);    // no db loaded
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_PERSON) == EntityKind::Organic);      // 3
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_BUILDING) == EntityKind::Building);   // 5
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_DECORATION) == EntityKind::Building); // 2
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_FOLIAGE) == EntityKind::Building);    // 2 (= decoration)
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_MARKER) == EntityKind::Marker);       // 4
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_UNSET) == EntityKind::Item);          // 0
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_VEHICLE) == EntityKind::Item);        // 1
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_POWERUP) == EntityKind::Item);        // 6
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_OBJECT) == EntityKind::Item);         // 6 (= powerup)
+		TEST_EXPECT(authoring::entity_kind_for_item_type(DEF_ITEM_TYPE_EFFECT) == EntityKind::Item);         // 8
+		TEST_EXPECT(authoring::entity_kind_for_item_type(7) == EntityKind::Item);                            // unused engine value
+		TEST_EXPECT(authoring::entity_kind_for_item_type(-1) == EntityKind::Item);                           // no db loaded
 	}
 
 	// --- bake_ground_transform: zero rotation = plain anchor subtraction
@@ -95,7 +103,9 @@ int main() {
 		const float anchor[3] = {0.5f, 0.25f, 1.5f};
 
 		EntityRecord rec;
-		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, 4, hit, anchor, &rec)); // Building
+		// id 102001 is retail cblock02 "Pile of cinder blocks #2", type decoration (2);
+		// decoration shares the Building list with building (the non-obvious case).
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, DEF_ITEM_TYPE_DECORATION, hit, anchor, &rec)); // 2 = Decoration -> Building list
 		TEST_EXPECT(rec.kind == EntityKind::Building);
 		TEST_EXPECT(rec.item_id == 102001);
 		// Place-time bake is the UNROTATED subtraction (new records are
@@ -107,7 +117,7 @@ int main() {
 
 		// Markers ignore the anchor entirely.
 		EntityRecord marker;
-		TEST_EXPECT(authoring::place_entity_grounded(doc, 106005, 1, hit, anchor, &marker));
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 106005, DEF_ITEM_TYPE_MARKER, hit, anchor, &marker)); // 4 = Marker
 		TEST_EXPECT(marker.kind == EntityKind::Marker);
 		TEST_EXPECT(near(marker.transform.x, 64.0));
 		TEST_EXPECT(near(marker.transform.y, -32.0));
@@ -121,7 +131,8 @@ int main() {
 		const float hit[3] = {0.0f, 0.0f, 0.0f};
 		const float anchor[3] = {1.0f, 2.0f, 3.0f};
 		EntityRecord rec;
-		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, 4, hit, anchor, &rec));
+		// id 102001 = retail cblock02, type decoration (2) -> Building list.
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, DEF_ITEM_TYPE_DECORATION, hit, anchor, &rec)); // 2 = Decoration -> Building list
 		// Give it a yaw, then re-ground: the bake must rotate the anchor.
 		EntityTransform with_yaw = rec.transform;
 		with_yaw.yaw = 90;
@@ -179,14 +190,15 @@ int main() {
 		doc.create_default();
 		const float anchor[3] = {1.0f, 2.0f, 3.0f};
 		const float hit_old[3] = {100.0f, 50.0f, 10.0f};
-		// Two buildings on the old ground (one yawed after placement) + a marker.
+		// Two Building-list decorations on the old ground (one yawed after placement) + a marker.
+		// id 102001 = retail cblock02, type decoration (2) -> Building list.
 		EntityRecord a, b, m;
-		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, 4, hit_old, anchor, &a));
-		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, 4, hit_old, anchor, &b));
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, DEF_ITEM_TYPE_DECORATION, hit_old, anchor, &a)); // 2 = Decoration -> Building list
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 102001, DEF_ITEM_TYPE_DECORATION, hit_old, anchor, &b)); // 2 = Decoration -> Building list
 		EntityTransform with_yaw = b.transform;
 		with_yaw.yaw = 90;
 		TEST_EXPECT(doc.set_entity_transform(EntityKind::Building, b.index, with_yaw));
-		TEST_EXPECT(authoring::place_entity_grounded(doc, 106005, 1, hit_old, anchor, &m));
+		TEST_EXPECT(authoring::place_entity_grounded(doc, 106005, DEF_ITEM_TYPE_MARKER, hit_old, anchor, &m)); // 4 = Marker
 
 		// The terrain rose under everything: ground z 10 -> 14.
 		authoring::RegroundRequest reqs[3];

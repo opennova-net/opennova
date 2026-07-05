@@ -64,17 +64,22 @@ protected:
 	static void _bind_methods();
 
 public:
-	// DefItemDef.type values (see libs/def/include/def/def.h).
+	// DefItemDef.type values — the witnessed engine ItemDefType at ItemDef+0x5C,
+	// mirroring DefItemType in libs/def/include/def/def.h (static_asserts in the
+	// .cpp pin the mirror). Non-injective by engine design: DECORATION==FOLIAGE
+	// and POWERUP==OBJECT share values; 7 is unused, 0 = unset/unknown.
+	// [orig: ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]
 	enum {
 		TYPE_UNKNOWN = 0,
-		TYPE_MARKER = 1,
-		TYPE_VEHICLE = 2,
+		TYPE_VEHICLE = 1,
+		TYPE_DECORATION = 2,
+		TYPE_FOLIAGE = 2,
 		TYPE_PERSON = 3,
-		TYPE_BUILDING = 4,
-		TYPE_DECORATION = 5,
-		TYPE_FOLIAGE = 6,
-		TYPE_OBJECT = 7,
-		TYPE_POWERUP = 8,
+		TYPE_MARKER = 4,
+		TYPE_BUILDING = 5,
+		TYPE_POWERUP = 6,
+		TYPE_OBJECT = 6,
+		TYPE_EFFECT = 8,
 	};
 
 	Error load(const String &path);
