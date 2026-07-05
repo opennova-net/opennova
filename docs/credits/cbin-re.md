@@ -9,11 +9,12 @@ string table, and ROL32/XOR cipher. The reimplementation surface is `libs/cbin`
 catalog. Produced 2026-07-05 (PAR-R5), **read-only** — witnessed from raw
 disassembly without defining functions in the shared IDB.
 
-**Status: PARTIAL.** The CODEC (magic + header + cipher) is now witnessed against
-retail and MATCHES `libs/cbin`. The remaining piece is the credits `~C`/`~F`/`~J`
-markup consumers and the open question of whether retail JO *reads* CBIN for
-credits or only writes it (below). Converts credits from `UNAUDITED` to
-*tracked (partial)*.
+**Status: PARTIAL.** The CODEC is now witnessed against retail and MATCHES
+`libs/cbin` in **both directions**: magic + 20-byte header + the ROL32/XOR cipher,
+and — resolving D-CBIN-2 — the READ path (retail has 8 cipher sites incl. decode
+loops, so it deciphers CBIN, not just writes it; our symmetric cipher matches).
+The one remaining piece is the credits `~C`/`~F`/`~J` markup interpreter (D-CBIN-1).
+Converts credits from `UNAUDITED` to *tracked (partial)*.
 
 ## How it was witnessed
 
