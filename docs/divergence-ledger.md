@@ -321,19 +321,30 @@ the follow-up path.
 
 ## UNAUDITED systems (no RE record yet)
 
-Six systems remain documented mainly by code and tests (the VFS/PFF mount
-stack graduated via PAR-R7)
+Five systems remain documented mainly by code and tests (the VFS/PFF mount
+stack graduated via PAR-R7; **Fonts graduated via PAR-R4**, D-FNT catalog)
 ([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
 that lands an RE record **with a D-catalog**, converting untracked divergences into
 tracked rows.
 
-| System | Audit slice | Partial coverage today |
-|---|---|---|
-| Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). |
-| Foliage | PAR-R2 | none (placement port witnessed in code; no RE record). |
-| Tiles | PAR-R3 | none. |
-| Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. |
-| Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). |
+**Which binary each audit needs (finding, 2026-07-05):** the terrain-family
+systems were reverse-engineered from **`jodemo.exe`** (the demo's accessible
+renderer) — the code cites jodemo addresses (`sub_5C0240`/`5C1940` foliage seed
+`0xA55B1EED`; `Terrain_DrawTileOverlays2D @ 0x5C79C0` tiles) — so R1/R2/R3 need
+the **jodemo IDB**, not the retail `Jointops.exe.kong.i64`, to audit without a
+jodemo↔retail citation mismatch. The **CBIN credits** format (`.kda`) is not
+present in retail JO (no `CBIN`/`.kda` string in the retail IDB), so R5 also
+needs the source binary the format was RE'd from. Fonts (R4) audited cleanly
+because it IS retail-witnessed (`sub_580400`/`sub_674740`). The importer (R6)
+is a Python + native-FFI pipeline, not a binary-format audit.
+
+| System | Audit slice | Partial coverage today | IDB needed |
+|---|---|---|---|
+| Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). | jodemo |
+| Foliage | PAR-R2 | none (placement port witnessed in code; no RE record). | jodemo |
+| Tiles | PAR-R3 | none (`libs/til` cites jodemo `Terrain_DrawTileOverlays2D @ 0x5C79C0`). | jodemo |
+| Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. | source binary (CBIN not in retail JO) |
+| Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). | n/a (Python + FFI) |
 
 ---
 
