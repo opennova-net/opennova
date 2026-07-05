@@ -182,12 +182,14 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   session (R8) enumerates the boot-required, hardcoded-by-name resource set
   from the binary (menumus/gamemus banks, the game strings table, the
   main.mnu set, hudpos.def, default world files, items/weapon defs,
-  controls, ...). Lands as `docs/required-resources.md` (+ engine-primer
-  cross-ref) AND an engine-side manifest table (in `libs/`, near
-  gameprofile) that BOTH the game (boot validation, honest
-  missing-resource errors) and ONED (diagnostics, the future "new game"
-  scaffold) consume. This defines "what a person starts with to make a new
-  game"; the Game workspace itself stays out of scope.
+  controls, ...). **R8 landed 2026-07-05**:
+  [docs/required-resources.md](required-resources.md) (+ engine-primer
+  cross-ref; D-BOOT catalog minted, D-BOOT-1 ledgered). The Wave-2 leg is
+  the engine-side manifest table (in `libs/`, near gameprofile) that BOTH
+  the game (boot validation, honest missing-resource errors) and ONED
+  (diagnostics, the future "new game" scaffold) consume. This defines
+  "what a person starts with to make a new game"; the Game workspace
+  itself stays out of scope.
 
 #### Boundary conformance checklist (ENG-5 instrument; seeded 2026-07-04)
 

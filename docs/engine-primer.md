@@ -157,6 +157,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
 | Particles (`.ptl`) | — | [particles/ptl-format-re.md](particles/ptl-format-re.md) | redesign in flight |
 | NovaWorld networking | `libs/npwire`, `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
+| Boot-required resources | boot literals scattered in `godot/game/` today; ENG-6 manifest pending | [required-resources.md](required-resources.md) | witnessed (R8): the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
 
 No dedicated RE record yet — documented by code and tests only: terrain, foliage,
 tiles, fonts, credits, the importer pipeline, and the VFS/PFF mount stack (the PFF

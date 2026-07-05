@@ -184,6 +184,12 @@ The LW `.3di` record is unlanded overall (PR #45 closed); its rows ride whenever
 import is revived. Note D-3DILW-1's v8 branch overlaps the 3DI/GP audit surface only at
 the container-detection seam.
 
+### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion); `menu_shell.gd` scans by name heuristic instead | A | OPEN | rides the ENG-6 manifest (Wave 2) |
+
 ---
 
 ## Count-to-zero scoreboard
@@ -200,7 +206,12 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
-| **Total OPEN** | | | | **65** |
+| Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
+| **Total OPEN** | | | | **66** |
+
+The Boot-resources row is the R8 audit doing its job: an audit that converts
+unknown unknowns into tracked rows RAISES the count before the burn-down
+lowers it (the same will happen at PAR-R1..R7).
 
 Plus one unnumbered latent divergence (BMS second chunk) awaiting a `D-EVT-5` mint.
 Permanent register size: **13** (below). `UNAUDITED` systems: **7** (below).

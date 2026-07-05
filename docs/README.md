@@ -28,6 +28,7 @@ behavior is summarized and cited.
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
 | [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard |
 | [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
+| [`required-resources.md`](required-resources.md) | The witnessed boot-required, hardcoded-by-name resource set (R8/ENG-6): the fatal set, per-resource failure behavior, the ordered boot sequence, and the D-BOOT catalog — the source for the ENG-6 manifest and ONED's new-game scaffold |
 
 ## Decision records
 
