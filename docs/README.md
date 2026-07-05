@@ -27,6 +27,7 @@ behavior is summarized and cited.
 | [`oned/workspace-maturity-program.md`](oned/workspace-maturity-program.md) | The maturity program's ONED track: the R/W/E/G capability bar, the twelve-workspace matrix (Avatars joined at AVA), foundation services, the music redesign, responsiveness, test-seam refits, per-workspace phases, and the RE ledger gating them |
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
 | [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard |
+| [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
 
 ## Decision records
 
@@ -53,6 +54,7 @@ behavior is summarized and cited.
 | [0019](adr/0019-npwire-game-wire-lib.md) | libs/npwire is the game wire protocol lib; matchmaking (novaworld) sits on it, direction npwire → napi/novacrypto |
 | [0020](adr/0020-world-terrain-query-seam.md) | libs/terrain_query is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
 | [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
+| [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
 
 ## RE records by domain
 

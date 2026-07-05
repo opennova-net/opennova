@@ -27,9 +27,9 @@ of the game (ADR 0015).
 |---|---|
 | State | Wave 1 in flight (Wave 0 merged 2026-07-04) |
 | Current wave | 0 — bootstrap |
-| Freeze | ON: new reimplementation features wait for their foundation phase; IDA research/grills are exempt and continue |
+| Freeze | ON for non-PAR work: new reimplementation features wait for their foundation phase; IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)). |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
-| Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
+| Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
 
 Landed slices (hash per slice, newest first):
 
@@ -262,6 +262,31 @@ phases F1–F5, per-workspace phases, and RE ledger stand; this program adds:
   title-identity fragmentation note recorded as future work.
 - **PROD-3** (S/M) program-end release dry run: package both exes, all
   smokes, tier-2 retail-join attestation on the runtime build.
+
+### PAR — parity burn-down (divergence ledger)
+
+Target: **zero OPEN divergences** — every tracked divergence ported-and-closed or
+ratified permanent. The living dashboard is
+[docs/divergence-ledger.md](divergence-ledger.md); the policy (zero-OPEN target,
+canonical vocabulary, the freeze exemption, and the permanent register) is
+[ADR 0022](adr/0022-divergence-burn-down.md). Freeze-exempt (maintainer 2026-07-05);
+env closures land **libs/env-first** so ENG-2 does not pay twice.
+
+- **PAR-0** (M) this train: the ledger + ADR 0022 + this wiring; the prose-only records
+  (3di-gp, 3di-lw, ptl, mis) gain stable `D-` catalogs.
+- **PAR-NET** (L) the open D-NET set (the ledger's Net table) + populate
+  `nw_golden_diff` `kDeferredGaps` with the D-NET refs from the attested 21-gap baseline,
+  so the golden diff names each deferral by ID.
+- **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 (and #21) implemented **libs/env-first**.
+- **PAR-WORLD** (M) the D-INF opens, D-EVT-1/-3, and D-ITEMDEF-1 (closure in flight).
+- **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11, D-SND-2, and D-HUD after its RE
+  port lands.
+- **PAR-R1..R7** (S/M each) the seven UNAUDITED-system audits (engine-research /
+  grill-ida): terrain, foliage, tiles, fonts, credits, importer pipeline, VFS/PFF mount
+  stack — each lands an RE record **with a D-catalog**.
+- **Class-B research starters** (freeze-exempt engine-research): the HUD radar/crosshair,
+  D-NET-49 (in-match PG), the in-world avatar binding (D-PLAYERINFO-1), and the full `.mis`
+  grammar grill (`dfx2med.exe`, D-MIS-1/-3).
 
 ## Out of scope (tracked here so nobody re-litigates silently)
 
