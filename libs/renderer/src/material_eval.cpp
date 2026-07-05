@@ -1,3 +1,4 @@
+// [orig: EvaluateAnimParam @ 0x4769D0 (OED material anim-param eval)]
 #include "renderer/material_eval.h"
 #include "threedi/threedi_panm.h"
 
