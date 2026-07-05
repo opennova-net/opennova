@@ -1,0 +1,62 @@
+# FNT bitmap fonts — reverse-engineering record
+
+Structure-mapping record for the original engine's **`.fnt`** bitmap-font format
+(the menu/HUD fonts `Arial12b`/`14n`/`14b`/`16n`/`16b`, `Impac22b`, `Impac38b`,
+`Arials18`, `Arial22`, `couri20b`) and its runtime `CGameFont`. The
+reimplementation surface is `libs/fnt` (`fnt_font_t` / `fnt_parse`) and the Godot
+wrapper `NovaFntResource` (`godot/engine/fnt`); rasterization is host-side (Godot
+`TextServer`, ENG-4). Binary: retail **Jointops.exe** (IDB
+`Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
+the committed home for the `D-FNT-…` divergence catalog. Produced by a read-only
+IDA session (PAR-R4, 2026-07-05); no IDB renames were made. It converts the
+**Fonts** system from `UNAUDITED` to tracked (divergence-ledger.md).
+
+## Verdict table
+
+| Component | Verdict | Evidence |
+| --- | --- | --- |
+| `.fnt` on-disk format (header + glyph table + pages) | **MATCHING** | `libs/fnt` (`FNT_MAGIC` "FNT0", 224 glyphs × 20 B, 256×256×4 RGBA pages, 32-B header) maps field-for-field onto the parser `sub_674740 @ 0x674740` |
+| Font load path | **witnessed** | `sub_580400 @ 0x580400` (alloc `CGameFont` 0x1318 B → `CGameFont_Init @ 0x673a60` → `File_LoadResource @ 0x75b540` → `sub_674740` parse → free the file buffer) |
+| Boot font set + slot scales | **witnessed** | `HUD_InitAllFonts @ 0x51ee20 → sub_580400(path, slot, scaleFP)`; the slot scale is `scaleFP × 0.000015258789` = **scaleFP / 65536** (16.16 fixed) written to slot+4 / slot+8; a null font slot leaves scale 1.0 (graceful, no crash — required-resources.md) |
+| Version/design-width handling | **DIVERGENT (strictness)** | D-FNT-1 |
+
+## The witnessed format (`sub_674740 @ 0x674740`)
+
+The parser validates `fontData[0] == 0x30544E46` ("FNT0"; `-1` on mismatch), then:
+
+| Off | Field | Engine use |
+|---|---|---|
+| `+0` | magic `"FNT0"` | validated == `0x30544E46` |
+| `+4` | **design width** | `this+4844 = 800.0 / fontData[1]` — a per-font design-space SCALE reference, **never validated** (D-FNT-1) |
+| `+8` | `pageCount` | `this+352`; the number of 256×256×4 texture pages |
+| `+12` | `hdr3` | copied to `this+356` (stored; not consumed by the loader — our model names it `shadow_offset`, D-FNT-3) |
+| `+32` | glyph table | **224 glyphs × 5 DWORDs (20 B)** copied verbatim to `this+364` (`srcGlyph = fontData+8` dword-index; `dstGlyph += 5` × 224). The 5 DWORDs are `[page, u0, v0, u1, v1]` (our `fnt_glyph_t`: `uint32 page` + `fnt_uv_t{u0,v0,u1,v1}`) |
+| `+4512` | pixel pages | `pageCount` × **0x40000 B** each (256×256×4 RGBA; `pixelDataPtr += 0x10000` DWORDs/page, backup `memcpy 0x40000`). First-char = glyph 0 = ASCII 32 (space); glyphs 32..255 |
+
+Each page becomes a GPU texture named `GFONT<this>:<NN>` (`GTexture_FindOrCreateFromData
+@ 0x676c40`); a CPU backup copy (`operator_new(0x40000)` + memcpy) is retained iff
+`this+4848` is set. Glyph pixel size = UV × 256 (our `fnt_uv_to_pixels`).
+
+## Consumers
+
+- `HUD_InitAllFonts @ 0x51ee20` loads the boot set into font slots with per-slot
+  16.16 scales (width breakpoints 640/800/1024 select the slot — required-resources.md).
+- `CGameFont_DrawText @ 0x6752c0` (the F2 `EngineTextPreview` cites it) draws glyphs
+  from the pages using the glyph UV rects; the half-bright right-aligned HUD path is
+  `HUD_DrawTextRightAligned_HalfBright @ 0x580850`.
+
+## D-FNT divergence catalog
+
+| ID | Class | Disposition | One-liner |
+|---|---|---|---|
+| D-FNT-1 | A | OPEN (strictness) | Offset `+4` is the **design-width scale reference** (`this+4844 = 800.0 / it`), NOT a version — the engine never validates it. Our reader (`libs/fnt` `fnt.c:52`) treats it as a version and **rejects `!= 800`** (`FNT_ERR_INVALID_VERSION`). Identical for every shipped JO font (all design-width 800 → scale 1.0); a non-800 font works in retail (scaled by 800/dw) and is rejected by us. Faithful fix: read it as the design width, apply the 800/dw scale, drop the equality gate. |
+| D-FNT-2 | A | OPEN (minor) | The per-font design scale `800.0 / designWidth` (`this+4844`) is not retained by our reader — moot while every font is 800 (scale 1.0). Text render scaling is host-side (`TextServer`, ENG-4); if a non-800 font is ever authored, the scale must ride the reader. |
+| D-FNT-3 | B | NEEDS-RE | Offset `+12` (`hdr3`, `this+356`) is named `shadow_offset` in our model but the loader only STORES it — the "shadow offset" semantics are not confirmed here. Witness a `this+356` reader (a draw-time shadow pass) to confirm or rename. |
+
+## Cross-references
+
+- Reimpl: `libs/fnt` (`fnt.h`/`fnt.c`), `godot/engine/fnt/nova_fnt_resource`,
+  `godot/modtools/fonts/` (the editor workspace), `fnt_rasterizer.gd` (the
+  host shelf packer / TextServer rasterization, ENG-4's `libs/fnt` consumer).
+- The FNT shelf-packer + host rasterization stay host-side (ENG-4); this record
+  covers the format + load contract.

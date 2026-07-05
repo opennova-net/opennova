@@ -25,9 +25,10 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
    are implemented **libs/env-first** so the ENG-2 port (env GDScript → `libs/env`) does
    not pay for the same math twice.
 3. **The seven systems with no RE record get research audits.** Terrain, foliage, tiles,
-   fonts, credits, the importer pipeline, and the VFS/PFF mount stack are `UNAUDITED`:
-   their divergences, if any, are untracked. Audit slices (PAR-R1..R7) turn unknown
-   unknowns into tracked rows.
+   fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
+   their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
+   unknowns into tracked rows — **VFS/PFF landed (R7, D-VFS catalog) and Fonts landed
+   (R4, D-FNT catalog); five remain** (see the UNAUDITED table).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -232,6 +233,14 @@ slot order, extra archives never mount, pinned by
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 
+### Fonts — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT catalog; PAR-R4)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-FNT-1 | Offset +4 is the design-width scale reference (`800/it`), not a version; our reader rejects `!= 800` (strictness) — identical for shipped JO fonts (all 800), stricter than retail otherwise | A | OPEN | PAR (fonts) |
+| D-FNT-2 | The per-font design scale `800/designWidth` is not retained by our reader (moot at 800; render scaling is host-side, ENG-4) | A | OPEN (minor) | PAR (fonts) |
+| D-FNT-3 | Offset +12 (`hdr3`) named `shadow_offset` but only STORED by the loader — the shadow semantics are unconfirmed | B | NEEDS-RE | PAR (fonts) |
+
 ### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
 
 | ID | One-liner | Class | Disposition | Slice |
@@ -254,15 +263,16 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
+| Fonts (new domain, PAR-R4 audit) | 2 | 1 | 0 | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **61** |
+| **Total OPEN** | | | | **64** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **6** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **5** (below).
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -322,7 +332,6 @@ tracked rows.
 | Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). |
 | Foliage | PAR-R2 | none (placement port witnessed in code; no RE record). |
 | Tiles | PAR-R3 | none. |
-| Fonts | PAR-R4 | the FNT shelf packer + format facts live in `fnt_rasterizer.gd`; ENG-4 plans the `libs/fnt` extraction. |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. |
 | Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). |
 
