@@ -76,35 +76,25 @@ Authored so far (each guarded by a ctest):
 | `items.def`, `weapon.def`, `ammo.def` | authored text | `minimal_def_validate` (parse through `libs/def`) | **done** — a spawnable person, a rifle, its round |
 | `main.mnu`, `mp.mnu` | `libs/mnu` | `minimal_mnu_validate` (parse + screen present) | **done** — Startup node + LAN host/join, small authored |
 | `mnml.env`, `mnml.bms` | `libs/env`, `libs/mission` | `minimal_map_gen` (round-trip + content) | **done** — one TOD + a named mission with two team spawns |
+| `mnml.trn` | `libs/trn` `save_trn` | `minimal_trn_gen` (round-trip + refs) | **done** — the terrain config, names the `.cpt` + source art |
+| `mnml_c/dm/dc1/t.tga`, `mnml_m/f.pcx` | hand-rolled TGA + `libs/pcx` | `minimal_art_gen` (byte-stable + PCX decode) | **done** — solid source art for the flat map |
+| **the packaging tool** | `libs/terrain` + `libs/pff` | `minimal_pff_package` (build + bundle + open) | **done** — see below |
 
-Remaining slices:
+**The build chain is complete.** `minimal_pff_package` (opt-in via
+`OPENNOVA_BUILD_MINIMAL_PFF=1`, since `build_terrain` is ~35 s / ~10 MB) is the
+**generate-at-package step**: it runs `build_terrain` on a flat 1024×1024
+depthmap (→ `mnml.cpt` + ~680 `.tms`/`.tml` LOD tiles into a gitignored
+`_pff_build/`), then `pff_write_archive` bundles the whole set — the 17
+committed source files + the generated terrain, 701 entries — into ONE
+`mnml.pff`, satisfying the fatal one-PFF-must-open gate. The `.pff` and
+`_pff_build/` are gitignored (never committed). Committed is only the small
+config surface (bins/defs/mnus/env/bms/trn + the tiny source-art images);
+everything heavy is regenerated.
 
-- `mnml.trn` — the terrain, generated **at package time, not committed**. A
-  feasibility probe settled the approach: `build_terrain` on a flat 1024×1024
-  depthmap (`MAP_SIZE²`) takes **~35 s and emits 685 files / ~10 MB** (the
-  `.cpt` ≈3 MB, `Output.dep` ≈2 MB, and ~680 `.tml`/`.tms` quadtree LOD
-  tiles) — the full retail terrain set. That is far too heavy to commit and
-  too slow for a per-build ctest, so the terrain is produced by the packaging
-  step (below) into the PFF. What this repo commits is only the tiny `.trn`
-  config + the flat-depthmap recipe (a generator, not the 1 MB raw); a light
-  ctest guards the `.trn` config round-trips. Pipeline: a flat depthmap →
-  `libs/terrain` `build_terrain` (a `TpjProject`, output prefix `mnml`) →
-  `.cpt` polydata (+ `Output.dep`, `.tms`/`.tml` tiles). But the `.trn` config
-  (`libs/trn` `save_trn`) references the `.cpt` **and** source art files that
-  `build_terrain` does NOT emit and must also be authored small:
-  `polytrn_colormap` (`.tga`), the `polytrn_detailmap*` set (`.tga`),
-  `polytrn_tilestrip` (`.tga`), `polytrn_charmap` (surface map, `.pcx`),
-  `polytrn_foliagemap` (foliage placement, `.pcx`) — see
-  `fixtures/godot/dvxi5/Dvxi5.trn`. So the terrain leg = author minimal source
-  images + generate the polydata + author the `.trn` referencing both. Which
-  art files retail tolerates missing vs requires, and the exact build-output →
-  `.trn`-field mapping, are validated at the retail launch — this leg is best
-  built while iterating against a retail install.
-- the PFF packaging (`libs/pff` write side) — a tool that runs the terrain
-  build, then bundles the whole set (the committed files + the generated
-  terrain) into ONE archive, so the fatal not-all-archives-missing gate clears
-  (witnessed above). This is where the heavy terrain lives.
-- asset-gated retail validation (§ Validation) — needs a retail install.
+Remaining: **asset-gated retail validation** (§ Validation) — run the
+packaging tool, then launch retail on `mnml.pff` to host + join. This is where
+the `.trn`/art dimensions and the build-output→`.trn` mapping get their final
+confirmation; it needs a retail install.
 
 ## Validation (asset-gated — needs a retail JO install)
 
