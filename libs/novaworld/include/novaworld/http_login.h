@@ -97,12 +97,20 @@ struct JoiConnection {
 // is taken from decoded NK; NI/NP are preserved but are not the dial authority.
 JoiConnection parse_joi_connection_string(const std::string &body);
 
+// Truncate an HTTP host to the retail cookie-jar subnet key: a dotted-decimal
+// IPv4 keeps its first two octets ("192.168.1.1" -> "192.168"); any other host
+// (a DNS name, or a malformed address) is returned unchanged.
+// [orig: Network_TruncateIPToSubnet @ 0x62dfe0 — reverse, strip past the 2nd
+// dot from the end, reverse back; only when Network_ParseIPv4AddressOctets
+// accepts the string as IPv4.]
+std::string subnet_key(const std::string &host);
+
 // The cookie store the engine carries across the NovaWorld endpoint family.
 // Retail keys cookies by subnet-truncated host and attaches all of them to
 // every request to that subnet; the NovaWorld gate, login, host, join, and GSB
 // endpoints share a host, so we model the whole family as one jar. Insertion
-// order is preserved for a stable Cookie header; re-setting a name updates the
-// value in place.
+// order is preserved for a stable Cookie sequence; re-setting a name updates
+// the value in place.
 class CookieJar {
 public:
 	void set(const std::string &name, const std::string &value);
@@ -110,9 +118,10 @@ public:
 	void merge_set_cookie_values(const std::vector<std::string> &set_cookie_values);
 	// nullptr when absent.
 	const std::string *find(const std::string &name) const;
-	// "name1=value1; name2=value2" in insertion order, for a Cookie request
-	// header. Empty string when the jar is empty.
-	std::string cookie_header() const;
+	// One "name=value;" entry per cookie, in insertion order — the value part
+	// of retail's per-cookie "Cookie: %s=%s;" header line
+	// [orig: CUIBrowser_SendHTTPRequest @ 0x658840]. Empty when the jar is empty.
+	std::vector<std::string> cookie_header_lines() const;
 	bool empty() const { return order_.empty(); }
 	const std::vector<std::string> &names() const { return order_; }
 

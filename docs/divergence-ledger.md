@@ -72,7 +72,6 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-21 | `ClientConnected` emitted synchronously; retail waits one periodic tick (state 5/2) | A | OPEN | PAR-NET |
 | D-NET-22 | Verify Cookie var-list is data-driven from client env; the registry/Win32 glue belongs in the Godot binding | A | OPEN | PAR-NET |
 | D-NET-29 | Envelope variable-header (`first-dword==0`) decode mode unsupported — documented scope | A | WITNESSED-READY-DEFERRED | PAR-NET |
-| D-NET-30 | Emit one `Cookie:` header per cookie; jar keyed by subnet-truncated host | A | OPEN | PAR-NET |
 | D-NET-49 | `jointoperations_pg()` is a placeholder; the in-match PG (16 B @ proto+284) is unwitnessed | B | NEEDS-RE | PAR-NET / research starter |
 | D-NET-64 | Guided-weapon record: structural port done, 0x0C-dispatch wiring deferred, wire-unvalidated (no capture carries guided traffic) | B | WITNESSED-READY-DEFERRED + NEEDS-RE (capture) | PAR-NET |
 | D-NET-97 | Pool routing by BMS `EntityKind`, not item-def capability flags (crash fixed; the static-vs-destructible simplification is residual) | A | OPEN | PAR-NET |
@@ -90,6 +89,13 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-137 | Player wire net_id is an invented encoding shim, not the minimap-slot packing — tolerable because the client self-heals unmatched ids | A | WITNESSED-READY-DEFERRED (tolerable) | PAR-NET |
 | D-NET-139 | 0x0A priority score ports distance/age/own-boost; the view-interest / LOS / enemy-team-bonus terms contribute 0 | A | OPEN (approximation) | PAR-NET |
 | D-NET-147 | Residual 0x10 tail: sectioned-destructible `sectionMask` rebuild + armory `weaponByte`/`attachRef` + `scoreFlag` gate deferred (the four base fields fixed + streamed) | A | WITNESSED-READY-DEFERRED | PAR-NET |
+
+Closed 2026-07-05: **D-NET-30** -> `FIXED` — one `Cookie: name=value;` header
+per cookie (`CookieJar::cookie_header_lines()`; our own server already merged
+multiple `Cookie:` headers, so the merged-line client was the sole
+inconsistency) + the subnet key ported (`subnet_key()`, IPv4 /16)
+`[orig: CUIBrowser_SendHTTPRequest @ 0x658840; Network_TruncateIPToSubnet
+@ 0x62dfe0]`; C2 summary row flips to matching.
 
 Closed net entries with a permanent facet are listed in the permanent register below
 (D-NET-131, D-NET-133 empty-slot facet, D-NET-140). Closed 2026-07-05: **D-NET-20**
@@ -239,7 +245,7 @@ Open counts by domain (the target is zero in every cell):
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
-| Net | 9 | 0 | 12 (2 also NEEDS-RE) | 21 |
+| Net | 8 | 0 | 12 (2 also NEEDS-RE) | 20 |
 | Environment | 1 | 0 | 4 | 5 |
 | World / AI + events | 2 | 0 | 4 | 6 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
@@ -249,7 +255,7 @@ Open counts by domain (the target is zero in every cell):
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **61** |
+| **Total OPEN** | | | | **60** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

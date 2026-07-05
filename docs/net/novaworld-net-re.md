@@ -6462,7 +6462,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | B6 napi-tlv | **matching** | statement-param length guard added (D-NET-28 FIXED) |
 | B7 napi-envelope | **matching** | 4-byte mode exact; var-header mode out of scope (D-NET-29) |
 | C1 http-login-build | partial | all 3 reported claims refuted; POST/all-encrypted model correct |
-| C2 cookie-jar | partial | one-`Cookie:`-header-per-cookie (D-NET-30) |
+| C2 cookie-jar | **matching** | per-cookie `Cookie:` headers + subnet key ported (D-NET-30 FIXED) |
 | C3 login-orchestration | partial | markup-derived URLs (D-NET-31) + shared cookie fix |
 | C4 gsb-parse | **matching** | format fixed + byte-verified vs genuine `.204` (D-NET-32..36) |
 | C5 joi-regurl | partial | documentation only; ':' separator + HOSTKEY trim confirmed |
@@ -6553,7 +6553,7 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-29** [LOW, SCOPE] envelope variable-header (first-dword==0) decode mode unsupported — documented scope decision. [orig: NapiNP_UnpackPacket @ 0x62ca20]
 
 `http_login.cpp` + binding (C2/C3):
-- **D-NET-30** [MED, TRACKED] emit one `Cookie:` header per cookie (retail `Cookie: name=value;` per entry); jar keyed by subnet-truncated host. [orig: CUIBrowser_SendHTTPRequest @ 0x658840 / Network_TruncateIPToSubnet @ 0x62dfe0]
+- **D-NET-30** [MED, **FIXED 2026-07-05**] `LobbyHttpFlow::request_headers` now emits one `Cookie: name=value;` header PER cookie (trailing `;`, insertion order) via `CookieJar::cookie_header_lines()`, matching retail's per-entry `sprintf("Cookie: %s=%s;")` loop — not a single merged line. Our own server already expected this (`request_cookie_header` merges multiple `Cookie:` headers; the merged-line client was the inconsistency). The subnet key is ported as the free `subnet_key()` (valid dotted IPv4 -> first two octets, else unchanged); the gate/login/host/join/GSB family shares one host, so the single-jar model still holds and the key is applied when a caller keys per host. [orig: CUIBrowser_SendHTTPRequest @ 0x658840 (per-cookie `Cookie: %s=%s;`); Network_TruncateIPToSubnet @ 0x62dfe0 (IPv4 /16)]
 - **D-NET-31** [LOW, DOC] login URLs/params are markup-derived (`nw_startup.mnx`), not C literals; `[CC]`/`[GT]` tokens and the `[domainname]` lower-casing are non-retail. [orig: gate STARTUPURL via 0x4ced20]
 
 `gsb.cpp` (C4) — FIXED, **byte-verified against the genuine `.204` blob**
