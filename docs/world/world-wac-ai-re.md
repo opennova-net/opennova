@@ -211,8 +211,11 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
    same-team platform underfoot, −1 decay; dump 3711–3733).
 6. ~~Marker wait/facing **BMS field mapping**~~ CLOSED (spawn map ported into promote; see §3.2).
 7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `sub_53B130`.
-8. `dword_C6EAE4` (fall-damage gravity scale) value/source; 1024-entry sin (`outMillis` local-misname)
-   and cos (`off_849934`) table extraction for exactness.
+8. `dword_C6EAE4` (fall-damage gravity scale) value/source. ~~1024-entry sin/cos table
+   extraction~~ CLOSED 2026-07-05: the table is 1281 entries built by
+   `Math_BuildSinTable @ 0x613050` (accumulating step `dbl_7DF578`, scale `dbl_7C3600` =
+   4194304.0, `_ftol2_sse` truncation); `off_849934` = `outMillis + 0x400` — cos is a
+   +256-entry alias into the SAME table, not a second table (see D-INF-4).
 9. Death move-step movers `0x461c30`/`0x461cb0` (ids 0/2) — define + decode.
 10. Vehicle-SM per-tick invocation site (event-callback path is confirmed; the tick-mode caller for
     vehicles not yet pinned — likely inside `Entity_UpdateVehiclePhysics`).
@@ -270,7 +273,15 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     horizontal capsule pending; the vertical capsule-bottom settle now landed — see **D-INF-6** —
     `Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0`); horizontal slide velocity
     zeroes on contact; the airborne anim overlay waits on the entity+36 flags.
-  - **D-INF-4** computed sin/cos tables (trunc(f(idx)·2^22)) for the runtime-built originals.
+  - **D-INF-4** — **CLOSED 2026-07-05**: the generator is witnessed and ported —
+    `Math_BuildSinTable @ 0x613050` builds ONE 1281-entry sin table at 2^22 by an
+    ACCUMULATING x87 loop (`angle += dbl_7DF578 = 0.006135923151542565` per entry,
+    `_ftol2_sse` truncation, end bound `0x31C0FC4`); the cos consumer reads the same
+    table +256 entries (`off_849934 = outMillis + 0x400`). Ported structurally in
+    `infantry.cpp quantized_dir` (double accumulation is integer-identical to the
+    prior closed form for every entry — pinned in `infantry` ctest with landmark
+    values 0 / 4194304 / 0 / −4194304; any residual x87-extended vs SSE2-double
+    low-bit difference is the D-3DI-1 substrate class).
   - **D-INF-5** idle look-at system + its spotting side effects (§4.13) — rides the combat pass.
   - **D-INF-6** infantry/player grounding settles `pos[2]` (the model origin) to **`ground +
     capsule_bottom`**, so the entity's collision-capsule bottom (the origin→feet offset) rests on

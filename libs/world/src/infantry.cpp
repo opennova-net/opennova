@@ -22,9 +22,11 @@
 //            clear -> parachute 47 else jump_loop 31; dump 3679) waits on those flags.
 //            NOTE: patrol walking has NO peer/obstacle avoidance in the original — entity
 //            separation is the resolver's push-out, not a steering behavior (dump survey).
-//   D-INF-4  the 1024-entry direction tables are runtime-built in the original (pointer
-//            globals); we compute trunc(sin/cos(idx*2pi/1024)*2^22) for the same quantized
-//            index — assumed generator, see RE doc open item 8.
+//   D-INF-4  CLOSED: the direction table generator is witnessed and ported —
+//            Math_BuildSinTable @ 0x613050 builds ONE 1281-entry sin table at 2^22
+//            by an accumulating x87 loop (angle += 2pi/1024 per entry, ftol2_sse
+//            truncation); the cos read aliases table+256 entries (off_849934 =
+//            outMillis + 0x400). See quantized_dir below.
 //   D-INF-5  the idle look-at system (every-256-tick interest scan -> head-look + the
 //            43->125 / 44->126 look-idle swaps + greeting voice cues; dump 4089-4429) and
 //            its spotting side effects (enemy -> combat focus + alert 10, corpse -> alert
@@ -88,13 +90,40 @@ int player_directional_state(int base, int move_dir_index) {
     return base + kOffsetFromInputIndex[move_dir_index & 7];
 }
 
+// The runtime-built direction table [orig: Math_BuildSinTable @ 0x613050]:
+// 1281 entries (end bound 0x31C0FC4), value = trunc(sin(angle) * 2^22) with the
+// angle ACCUMULATED per entry (angle += dbl_7DF578 = 0.006135923151542565, the
+// double nearest 2pi/1024) and truncated toward zero (_ftol2_sse). The cos
+// consumer reads the same table +256 entries (off_849934 = outMillis + 0x400);
+// the 1281st entry covers idx 1023 + 256 + wrap. Double accumulation is
+// integer-identical to the closed form for every entry (pinned in
+// world_dir_table ctest); any residual x87-extended vs SSE2-double low-bit
+// difference is the D-3DI-1 substrate class, not an algorithm divergence.
+struct DirTable {
+    int32_t sin22[1281];
+    DirTable() {
+        double angle = 0.0;
+        constexpr double kStep = 0.006135923151542565; // [orig: dbl_7DF578]
+        for (int i = 0; i < 1281; ++i) {
+            sin22[i] = static_cast<int32_t>(std::sin(angle) * 4194304.0); // [orig: dbl_7C3600]
+            angle += kStep;
+        }
+    }
+};
+
+const DirTable &dir_table() {
+    static const DirTable t;
+    return t;
+}
+
 // Quantized heading -> direction vector, 22-bit scale. [orig: idx = (h + 0x200000) >> 22
-// into the runtime-built 1024-entry sin/cos tables; dump 934-940, 4783-4797] (D-INF-4)
+// into Math_BuildSinTable's table; sin = outMillis[idx], cos = (outMillis+0x400)[idx];
+// dump 934-940, 4783-4797] (D-INF-4)
 void quantized_dir(int32_t heading, int32_t &cos22, int32_t &sin22) {
     uint32_t idx = (static_cast<uint32_t>(heading) + 0x200000u) >> 22;
-    double a = static_cast<double>(idx) * (6.283185307179586476925 / 1024.0);
-    cos22 = static_cast<int32_t>(std::cos(a) * 4194304.0);
-    sin22 = static_cast<int32_t>(std::sin(a) * 4194304.0);
+    const DirTable &t = dir_table();
+    sin22 = t.sin22[idx];
+    cos22 = t.sin22[idx + 256u];
 }
 
 int32_t bearing_to(int32_t dx, int32_t dy) {

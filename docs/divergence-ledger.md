@@ -124,12 +124,15 @@ honored-matrix terrain_tint -> HONORED; residual emitter facets ride PAR-R2).
 | D-INF-1 | No blend windows on clip switches (the original blends 10/15 ticks, root motion included) | A | WITNESSED-READY-DEFERRED (rides the skeletal/blend pass) | PAR-WORLD |
 | D-INF-2 | Command channels 123–127 (mount/waypoint) partially driven; walk-to-seat staging, 126/127, child-seat traversal, seat-bone follow, driver-lean pending | A | OPEN (partial) | PAR-WORLD |
 | D-INF-3 | Ground/water resolver: horizontal capsule + platforms/water + airborne anim overlay pending (the vertical capsule-bottom settle landed as D-INF-6) | A | OPEN (partial) | PAR-WORLD |
-| D-INF-4 | Computed sin/cos tables vs the runtime-built originals (`trunc(f(idx)·2^22)`) | A | OPEN | PAR-WORLD |
 | D-INF-5 | Idle look-at system + its spotting side effects — rides the combat pass | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-EVT-3 | Residual after the TriggerRelations port (state + evaluators + recounts + alert stamps + damage-site SHOT writes landed): the acquisition/fire-time write quads ride the combat pass, motor visited marks ride D-INF-2, sub 11 needs the held-object link; cat-2 alert/count + 42-45 subs unwitnessed | A | WITNESSED-READY-DEFERRED (write-sites) + NEEDS-RE (cat-2 subs) | PAR-WORLD |
 
-Closed 2026-07-05: **D-ITEMDEF-1** → `FIXED` (faec4b3e — `item_type_from_string`
+Closed 2026-07-05: **D-INF-4** → `FIXED` (the direction-table generator witnessed —
+`[orig: Math_BuildSinTable @ 0x613050]`, an accumulating 1281-entry sin table at 2^22
+with the cos read aliasing +256 entries; ported structurally in `quantized_dir`,
+integer-equivalence + landmarks pinned in the `infantry` ctest). Also closed:
+**D-ITEMDEF-1** → `FIXED` (faec4b3e — `item_type_from_string`
 witnessed mapping `[orig: ItemDef_ParseProperty @ 0x49eb00]`;
 [world/itemdef-re.md](world/itemdef-re.md) verdict flipped to MATCHING). The first
 ledger row driven to zero. Same day, the D-EVT grill closed three more:
@@ -236,7 +239,7 @@ Open counts by domain (the target is zero in every cell):
 |---|---|---|---|---|
 | Net | 9 | 0 | 12 (2 also NEEDS-RE) | 21 |
 | Environment | 1 | 0 | 4 | 5 |
-| World / AI + events | 3 | 0 | 4 | 7 |
+| World / AI + events | 2 | 0 | 4 | 6 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 9 | 1 (+1 dual) | 5 | 15 |
 | Mission `.mis` | 0 | 2 | 1 | 3 |
@@ -244,7 +247,7 @@ Open counts by domain (the target is zero in every cell):
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **63** |
+| **Total OPEN** | | | | **62** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
