@@ -60,6 +60,28 @@ int main() {
 	if (!parse_fixture("Serpen36.fnt", 2)) return 1;
 	if (!parse_fixture("Impact50.fnt", 3)) return 1;
 
+	// D-FNT-1/2: the +4 word is the DESIGN WIDTH, not a validated version. The
+	// engine reads it as the 800/dw glyph scale and never rejects a non-800 font
+	// [orig: sub_674740 @ 0x674740]. Our reader must match: accept + carry it.
+	{
+		std::vector<uint8_t> bytes =
+		    read_file(std::string(OPENNOVA_SOURCE_DIR) + "/fixtures/fnt/Serpen24.fnt");
+		if (!expect(!bytes.empty() && bytes.size() >= 8, "fixture readable for D-FNT-1")) return 1;
+		fnt_font_t f0;
+		if (!expect(fnt_parse(bytes.data(), bytes.size(), &f0) == FNT_OK, "800-design font parses")) return 1;
+		if (!expect(fnt_design_scale(f0.design_width) == 1.0f, "shipped 800 font -> scale 1.0")) return 1;
+		fnt_free(&f0);
+
+		// Rewrite +4 as a non-800 design width; retail would scale it, so must we.
+		bytes[4] = 0x00; bytes[5] = 0x04; bytes[6] = 0x00; bytes[7] = 0x00; // 1024 LE
+		fnt_font_t f1;
+		fnt_error_t err1024 = fnt_parse(bytes.data(), bytes.size(), &f1);
+		if (!expect(err1024 == FNT_OK, "non-800 design width must NOT be rejected (D-FNT-1)")) return 1;
+		if (!expect(f1.design_width == 1024u, "reader carries the file's design width (D-FNT-2)")) return 1;
+		if (!expect(fnt_design_scale(f1.design_width) == 800.0f / 1024.0f, "design scale = 800/dw")) return 1;
+		fnt_free(&f1);
+	}
+
 	fnt_font_t font;
 	fnt_error_t err = fnt_init_blank(&font, 1, -3);
 	if (!expect(err == FNT_OK, "blank font should initialize")) return 1;

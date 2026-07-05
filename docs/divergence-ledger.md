@@ -279,8 +279,8 @@ Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-FNT-1 | Offset +4 is the design-width scale reference (`800/it`), not a version; our reader rejects `!= 800` (strictness) — identical for shipped JO fonts (all 800), stricter than retail otherwise | A | OPEN | PAR (fonts) |
-| D-FNT-2 | The per-font design scale `800/designWidth` is not retained by our reader (moot at 800; render scaling is host-side, ENG-4) | A | OPEN (minor) | PAR (fonts) |
+| D-FNT-1 | Offset +4 is the design-width scale reference, not a version; our reader rejected `!= 800` | A | **FIXED** (no equality gate; non-800 parses, `fnt_roundtrip`) | PAR (fonts) |
+| D-FNT-2 | The per-font design scale `800/designWidth` was not retained | A | **FIXED** (`design_width` carried; `fnt_design_scale`) | PAR (fonts) |
 | D-FNT-3 | Offset +12 (`hdr3`) named `shadow_offset` but only STORED by the loader — the shadow semantics are unconfirmed | B | NEEDS-RE | PAR (fonts) |
 
 ### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
@@ -309,10 +309,10 @@ Open counts by domain (the target is zero in every cell):
 | Terrain (new domain, PAR-R1 partial) | 0 | 0 | 0 (1 candidate-PERMANENT) | 0 |
 | Tiles (new domain, PAR-R3 audit) | 0 | 1 | 0 | 1 |
 | Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
-| Fonts (new domain, PAR-R4 audit) | 2 | 1 | 0 | 3 |
+| Fonts (new domain, PAR-R4 audit) | 0 | 1 | 2 FIXED | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **68** |
+| **Total OPEN** | | | | **66** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
