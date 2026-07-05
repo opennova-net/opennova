@@ -1,3 +1,88 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:b70d4cc95a9620ba01c62ff49bf005cf3e8c10f82b1dcee5fbc6505b685531da
-size 5641
+# `fixtures/minimal/` — the smallest authored game that hosts + joins
+
+Goal: the **minimal resource set that runs retail `Jointops.exe` as a host and
+lets a second instance join**, over a **custom minimal map**, with every file
+**authored from scratch by our own writers** — no retail asset committed. Once
+retail↔retail works on this set, the *same* set is the seed for our engine's
+MVP (host + join our own runtime on the identical inputs).
+
+This is the concrete instantiation of the R8 required-resources manifest
+([../../docs/required-resources.md](../../docs/required-resources.md)) — that
+record answers "what a person starts with to make a new game"; this directory
+*is* that starting set, built and validated. It also seeds ONED-REQ's "new
+game scaffold" and is an end-to-end proof that our parity writers emit bytes a
+stock client loads.
+
+## Why this can be committed (asset policy)
+
+[../../docs/asset-gated-tests.md](../../docs/asset-gated-tests.md) forbids
+committing retail assets. Nothing here is a retail asset: every byte is
+produced by an OpenNova writer from an authored source, MIT-licensed, exactly
+like the existing per-format `fixtures/<fmt>/` sets. The retail install is
+needed only to *validate* the set (launch JO), which is the asset-gated
+acceptance step, never a committed input.
+
+## The set (grounded in required-resources.md)
+
+Categories from the R8 manifest. **Only the fatal set + the host/join mission
+set are authored here**; everything the engine skips gracefully on miss is
+deliberately omitted to keep "minimal" honest.
+
+### Fatal — boot refuses without these
+
+| File | Our writer | Notes |
+|---|---|---|
+| **one PFF archive (required — see below)** | `libs/pff` write side (ADR 0008) | at least one PFF **must open** or boot exits. `PFF_OpenAllArchives @ 0x4a4310` returns `!opened_count`; the caller `test eax,eax; jz` at `@ 0x4a6f4c` falls through to `Game_ShowEarlyError(3)` + `Exit(-1)` when zero opened. `/d` (loose-first) does **NOT** clear this — the loose flag only reorders *lookup*, not the boot archive-open count (witnessed 2026-07-05). So the minimal set authors one PFF holding the fatal + mission files; loose-alongside is optional. |
+| `gametext.bin` | `libs/rtxt` `write()` | game strings RTXT `[orig: @ 0x4a6fed]` — minimal table (the menu/HUD keys the set references). |
+| `vmacros.bin` | `libs/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
+| `keyhelp.bin` | `libs/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
+| `items.def` | text (author) | `[orig: @ 0x4a71a3 → ItemDef_ParseProperty @ 0x49eb00]` — minimal: only the item types the map spawns (witnessed mapping, D-ITEMDEF-1). |
+| `main.mnu` (`"Startup"` node) | `libs/mnu` writer | the entry screen `[orig: sub_552500 @ 0x552651]`. Reuse the shape of `fixtures/mnu/jo_main.mnu`, trimmed to Startup → MP. |
+
+### Host + join — mission start + MP menu
+
+| File | Our writer | Notes |
+|---|---|---|
+| `<map>.bms` | `libs/mission` `write_bms_bytes` | the custom map's mission: spawn points (both teams), one objective, minimal item set. |
+| `<map>.trn` (+ tiles/env refs) | `libs/trn` (TrnGen, byte-identical) | a small flat/simple heightfield — the smallest valid terrain. |
+| `<map>.env` | `libs/env` writer | one time-of-day; defaults elsewhere. |
+| `mp.mnu` | `libs/mnu` | the host/join menu `[orig: @ 0x5588fa]` (co-op LAN bring-up used this). |
+| `weapon.def`, `ammo.def` | text (author) | minimal: one spawn weapon + its ammo `[orig: WeaponDef_LoadAll @ 0x54dd10; AmmoDef_LoadAll @ 0x40b0b0]`. |
+| `game.wac` / `server.wac` | `libs/wac` | optional (silent skip) — add only if the join needs mission logic to progress. |
+| mission-list registration | — | how the MP menu finds `<map>` (`.npj`/`.npz` scan `[orig: MissionList_ScanAndBuildFromFiles @ 0x563170]` vs a direct MP host pick — resolve in § Validation). |
+
+### Deliberately omitted (graceful-on-miss — keeps the set minimal)
+
+Fonts (null slot, no crash), all music (`SBF`/`BIN`), videos (`BIK`),
+`Avatars.def`, `SndProf.def`, `charattr.def` (soft error, continues),
+`powerup.def` (soft), `hudfx/hudpos.def` (default positions), menu styling
+(`.mns`), `game.bin`/`menutxt.bin` (fallback literals). Each is listed in the
+R8 manifest with its graceful failure; adding any is a deliberate step up from
+minimal, not a requirement.
+
+## Build
+
+A generator (script/ctest, TBD) drives the writers from the authored sources in
+`src/` (this dir) to the emitted set. The build is hermetic — no retail input —
+so it runs in CI and produces a byte-stable set (a roundtrip/identity ctest
+guards it, like the other `fixtures/` sets).
+
+## Validation (asset-gated — needs a retail JO install)
+
+1. Launch `Jointops.exe` with the authored PFF present in the game root (and
+   optionally `/d <loose dir>`) — confirm boot to the main menu (the fatal set
+   is sufficient). One PFF must open (witnessed above); `/d` alone is not
+   enough.
+2. Host the custom map from the MP menu on instance A.
+3. Join from instance B (LAN). Confirm both spawn on `<map>` and can move.
+
+Records the run under the asset-gated protocol (never commit the capture); the
+recipe is the acceptance test for "the minimal set hosts + joins."
+
+## MVP convergence
+
+When retail↔retail works on this set, it is simultaneously (a) the **MVP asset
+target** — the exact inputs our runtime must load to host + join our own
+engine — and (b) a **parity proof** that every writer in the chain
+(rtxt/mission/trn/env/mnu/def/pff) emits retail-loadable output end to end.
+The GOALS.md "export a game" path starts here.
