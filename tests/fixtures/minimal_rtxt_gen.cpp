@@ -60,6 +60,9 @@ File keyhelp_table() { return File{}; }
 // Error strings: valid-but-empty — every error dialog falls back to its
 // literal, and the ShowEarlyError(4) boot noise goes away.
 File gameerr_table() { return File{}; }
+// The mission's briefing text (<stem>.bin, retail family member in
+// language.pff): valid-but-empty until the briefing screen names its keys.
+File mnmlbin_table() { return File{}; }
 // Menu labels: the string ids the authored main.mnu / mp.mnu reference via
 // TEXT_RSRC menutxt.BIN (retail ships menutxt.bin in language.pff).
 File menutxt_table() {
@@ -95,6 +98,7 @@ int run(const std::string &dir, bool write_mode) {
 	    {"vmacros.bin", vmacros_table},
 	    {"keyhelp.bin", keyhelp_table},
 	    {"menutxt.bin", menutxt_table},
+	    {"mnml.bin", mnmlbin_table},
 	};
 	int failures = 0;
 	for (const Target &t : targets) {

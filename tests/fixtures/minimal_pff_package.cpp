@@ -48,11 +48,15 @@ bool read_bytes(const fs::path &p, std::vector<uint8_t> &b) {
 // mirroring retail's placement: gameerr/gametext/vmacros/keyhelp ship in
 // retail language.pff; every .mnu/.def/.bms in retail localres.pff;
 // .env/.trn/terrain art in retail resource.pff.
+// The mission-family companions follow the witnessed retail placement:
+// <stem>.bin/.pcx/.lwf in language.pff; <stem>.dbf (like .bms) in
+// localres.pff. (.til/.wac stay unauthored: the .til loader runs in the
+// render loop only and .wac is a witnessed silent skip.)
 const char *kLanguage[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
-                           "menutxt.bin"};
+                           "menutxt.bin", "mnml.bin",     "mnml.pcx",    "mnml.lwf"};
 const char *kLocalres[] = {"items.def", "weapon.def", "ammo.def",
                            "main.mnu",  "mp.mnu",     "mnml.bms",
-                           "menu_style.mns", "newarow1.tga"};
+                           "menu_style.mns", "newarow1.tga", "mnml.dbf"};
 
 // The boot font set is HARDCODED by name [orig: HUD_InitAllFonts @ 0x51ee20:
 // width breakpoints 640/800/1024 pick Arial12b/14n, 14b/14n, or 16b/16n;
@@ -225,11 +229,12 @@ int main() {
 	//    mission/menu/font/music set in localres, the map polydata in resource.
 	if (!write_and_verify(root, "language.pff", language,
 	                      {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
-	                       "menutxt.bin"}))
+	                       "menutxt.bin", "mnml.bin", "mnml.pcx", "mnml.lwf"}))
 		return 1;
 	if (!write_and_verify(root, "localres.pff", localres,
 	                      {"items.def", "main.mnu", "mp.mnu", "mnml.bms", "menu_style.mns",
-	                       "Arial16n.fnt", "Impac38b.fnt", "menumus.bin", "gamemus.bin"}))
+	                       "Arial16n.fnt", "Impac38b.fnt", "menumus.bin", "gamemus.bin",
+	                       "newarow1.tga", "mnml.dbf"}))
 		return 1;
 	if (!write_and_verify(root, "resource.pff", resource, {"mnml.env", "mnml.trn", "mnml.cpt"}))
 		return 1;

@@ -62,6 +62,21 @@ deliberately omitted to keep "minimal" honest.
 | `game.wac` / `server.wac` | `libs/wac` | optional (silent skip) — add only if the join needs mission logic to progress. |
 | mission-list registration | — | how the MP menu finds `<map>` (`.npj`/`.npz` scan `[orig: MissionList_ScanAndBuildFromFiles @ 0x563170]` vs a direct MP host pick — resolve in § Validation). |
 
+### The mission file family (witnessed against retail)
+
+Every retail mission ships as `<stem>.bms` + `.til` + `.pcx` + `.dbf` +
+`.lwf` + `.wac` + `.bin` (sampled across the JOTAC archives). Placement:
+`.bin`/`.pcx`/`.lwf` in `language.pff`; `.bms`/`.til`/`.dbf`/`.wac` in
+`localres.pff`. The minimal set authors:
+
+| File | Our writer | Notes |
+|---|---|---|
+| `mnml.dbf` + `mnml.lwf` | `libs/dbf` + `libs/lwf` (`minimal_companion_gen`) | the per-mission dialog chain — `DialogSystem_Init @ 0x5275e0` loads `<base>.dbf`, which co-loads `<base>.lwf` `[orig: @ 0x44e7d4]`. Empty-but-valid (the minimal mission speaks no dialog). |
+| `mnml.bin` | `libs/rtxt` (`minimal_rtxt_gen`) | the briefing text table — valid-but-empty until the briefing screen names its keys. |
+| `mnml.pcx` | `libs/pcx` (`minimal_art_gen`) | the map overview — retail's are 800×600 8-bit indexed; a solid placeholder for now. |
+| `mnml.til` | — deferred | the tile overlay; its loader is called ONLY from the render loop (`[orig: @ 0x5ca730, sole caller Render_ProcessMainSceneFrame @ 0x5ca0f0]`), so a miss cannot block boot/host — the terrain just renders untiled. Needs a `libs/til` writer when the overlay matters. |
+| `mnml.wac` | — deferred | witnessed silent skip (see above). |
+
 ### The visible-menu set (added after the black-screen finding)
 
 Boot-clean was not menu-visible: the Startup screen drew text-only buttons on

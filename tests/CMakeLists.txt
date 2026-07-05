@@ -465,6 +465,14 @@ add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
 target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_fnt)
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
+# Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
+# via the libs/dbf + libs/lwf writers, byte-stable vs the committed files.
+add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
+target_link_libraries(minimal_companion_gen_test PRIVATE opennova_dbf opennova_lwf)
+target_compile_definitions(minimal_companion_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_companion_gen COMMAND minimal_companion_gen_test)
+
 # Minimal set's generated boot music (minimal_mus_builder.h): the silent SBF
 # bank + the minimal MENUMUS/GAMEMUS scripts parse back valid. Always-on; the
 # files are emitted at package time, never committed.

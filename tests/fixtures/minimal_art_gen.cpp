@@ -148,6 +148,7 @@ struct Art {
 	const char *name;
 	std::vector<uint8_t> bytes;
 	bool is_pcx; // else TGA
+	int w = 0, h = 0; // PCX decode-check dims (0 = skip)
 };
 
 } // namespace
@@ -163,9 +164,12 @@ int main() {
 	art.push_back({"mnml_dm.tga", make_tga(64, 64, 128, 128, 128), false}); // detailmap
 	art.push_back({"mnml_dc1.tga", make_tga(64, 64, 128, 128, 128), false}); // detailmap_c1
 	art.push_back({"mnml_t.tga", make_tga(64, 64, 110, 90, 64), false});    // tilestrip
-	art.push_back({"mnml_m.pcx", make_pcx(256, 256, 0), true});             // charmap (surface 0)
-	art.push_back({"mnml_f.pcx", make_pcx(256, 256, 0), true});             // foliagemap (none)
+	art.push_back({"mnml_m.pcx", make_pcx(256, 256, 0), true, 256, 256});   // charmap (surface 0)
+	art.push_back({"mnml_f.pcx", make_pcx(256, 256, 0), true, 256, 256});   // foliagemap (none)
 	art.push_back({"newarow1.tga", make_cursor_tga(), false});              // menu cursor
+	// The mission-family map overview (retail: 800x600 8-bit indexed PCX in
+	// language.pff) — a solid placeholder until the map render leg.
+	art.push_back({"mnml.pcx", make_pcx(800, 600, 96), true, 800, 600});
 
 	for (Art &a : art) {
 		const std::string p = path(a.name);
@@ -192,8 +196,8 @@ int main() {
 			IndexedImage8 decoded;
 			std::string err;
 			CHECK(decode_pcx_indexed(committed.data(), committed.size(), decoded, err), err.c_str());
-			CHECK(decoded.width == 256 && decoded.height == 256,
-			      (std::string(a.name) + " decodes to 256x256").c_str());
+			CHECK(decoded.width == a.w && decoded.height == a.h,
+			      (std::string(a.name) + " decodes to its authored dimensions").c_str());
 		}
 	}
 
