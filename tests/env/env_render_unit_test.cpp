@@ -308,7 +308,205 @@ int main() {
 		}
 	}
 
+	// --- Weather oscillator [orig: Environment_UpdateWeatherTick @ 0x57e9b0] --
+	{
+		// The witnessed PRNG sequence from the mission-start seed
+		// [orig: seed 0x12345633 @ Environment_SnapStateToTargets @ 0x57d1e0;
+		//  step rol9 + ((int32)x >> 31) & 0x1ABB09 @ 0x57e9fc..0x57ea16].
+		const uint32_t expected_words[8] = {
+			0x68AC6624u, 0x58CC48D1u, 0x98AC5DBAu, 0x58BB7531u,
+			0x76EA62B1u, 0xD4E01DF6u, 0xC056A8B2u, 0xAD6C2089u,
+		};
+		WeatherOscillator prng_probe;
+		for (int i = 0; i < 8; ++i) {
+			const uint32_t word = prng_probe.reroll();
+			if (word != expected_words[i]) {
+				std::fprintf(stderr, "FAIL: PRNG word %d = %08X, want %08X\n", i, word, expected_words[i]);
+				return 1;
+			}
+		}
+		// The signed-carry idiom is load-bearing: a logical-shift port (adds
+		// 0/1 instead of 0/0x1ABB09) forks at the first negative rotate —
+		// word 2 becomes 0x9891A2B2. Guard the divergence explicitly.
+		if (!expect(expected_words[2] != 0x9891A2B2u && expected_words[2] == 0x98AC5DBAu,
+		            "PRNG carry is the signed 0x1ABB09 idiom, not bit-31")) return 1;
+
+		// Still air (intensity 0): the spring settle toward 0x8000 is
+		// PRNG-independent and matches the committed GUT wa/* vectors.
+		WeatherOscillator still;
+		still.intensity = 0;
+		const struct { int tick; int smoothed; int index; } still_landmarks[] = {
+			{1, 0x0000, 0x01}, {4, 0x0250, 0x04}, {16, 0x3F01, 0x10},
+			{64, 0x726E, 0x40}, {256, 0x7DDF, 0x00},
+		};
+		int ticks_done = 0;
+		for (const auto &lm : still_landmarks) {
+			for (; ticks_done < lm.tick; ++ticks_done) {
+				still.tick();
+			}
+			if (still.smoothed != lm.smoothed || still.ring_index != lm.index) {
+				std::fprintf(stderr, "FAIL: still-air k%03d = %04X/%02X, want %04X/%02X\n",
+				             lm.tick, still.smoothed, still.ring_index, lm.smoothed, lm.index);
+				return 1;
+			}
+		}
+
+		// Wind at the WITNESSED intensity (Env_WindScale = 256, its only
+		// retail value [orig: Environment_InitDefaults @ 0x57c1d1; sole other
+		// xref is the tick read]): a stable ambient sway around the 0x8000
+		// rest. The noise feedback term 15*prev has gain 15*intensity/4096 —
+		// stable only for intensity <= 273. The old GDScript node scaled
+		// wind_strength onto 0..8192, driving the 32-bit state divergent and
+		// "surviving" via 64-bit wrap + clamps; that mapping was unwitnessed
+		// (divergence noted in docs/env/env-tod-re.md).
+		WeatherOscillator wind;
+		wind.intensity = 256;
+		const struct { int tick; int smoothed; } wind_landmarks[] = {
+			{1, 0x0012}, {16, 0x62CD}, {64, 0x9A26}, {256, 0xAD33},
+		};
+		ticks_done = 0;
+		for (const auto &lm : wind_landmarks) {
+			for (; ticks_done < lm.tick; ++ticks_done) {
+				wind.tick();
+			}
+			if (wind.smoothed != lm.smoothed) {
+				std::fprintf(stderr, "FAIL: wind k%03d = %04X, want %04X\n",
+				             lm.tick, wind.smoothed, lm.smoothed);
+				return 1;
+			}
+		}
+		if (!expect(wind.amp_ring[wind.ring_index] >= 0, "amp ring floors at 0")) return 1;
+	}
+
+	// --- Lightning sequencers [orig: @ 0x57ec6f (A) / @ 0x57ed0a (B)] --------
+	{
+		// Short (timer A = 16): epoch table {10:C8, 6:FF, 4:C8, 2:FF, 0:0};
+		// per-tick levels match the committed GUT wc/short_seq bytes.
+		LightningSequencers seq_short;
+		seq_short.trigger_short();
+		const int expected_short[16] = {
+			0, 0, 0, 0, 0, 200, 200, 200, 200, 255, 255, 200, 200, 255, 255, 0,
+		};
+		for (int i = 0; i < 16; ++i) {
+			seq_short.tick();
+			if (seq_short.level != expected_short[i]) {
+				std::fprintf(stderr, "FAIL: short seq tick %d = %d, want %d\n",
+				             i + 1, seq_short.level, expected_short[i]);
+				return 1;
+			}
+		}
+
+		// Long (timer B = 32): SET semantics per epoch — the witnessed
+		// staircase C8 C8 C8 96 96 C8 C8 96 64 32 32 00 (the GDScript port's
+		// max-combining plateau C8 x11 was unwitnessed embellishment;
+		// Environment_SetLightningFlash overwrites @ 0x57d320).
+		LightningSequencers seq_long;
+		seq_long.trigger_long();
+		const int expected_long[12] = {
+			200, 200, 200, 150, 150, 200, 200, 150, 100, 50, 50, 0,
+		};
+		for (int i = 0; i < 12; ++i) {
+			seq_long.tick();
+			if (seq_long.level != expected_long[i]) {
+				std::fprintf(stderr, "FAIL: long seq tick %d = %d, want %d\n",
+				             i + 1, seq_long.level, expected_long[i]);
+				return 1;
+			}
+		}
+
+		// Packed additives at lightning 0x383B27, level 200
+		// [orig: Environment_SetLightningFlash @ 0x57d320]: truncating
+		// per-byte (c*level) >> {8,9,10}.
+		const LightningAdditivesPacked add = lightning_additives_packed(0x383B27u, 200);
+		if (!expect(add.sky == 0x2B2E1Eu, "packed sky additive >> 8")) return 1;
+		if (!expect(add.fog == 0x15170Fu && add.skyfog == add.fog, "packed fog/skyfog additive >> 9")) return 1;
+		if (!expect(add.ground == 0x0A0B07u, "packed ground additive >> 10")) return 1;
+	}
+
+	// --- Rain factor + weather color block [orig: interpolate_weather_color
+	//     @ 0x57d9e0] --------------------------------------------------------
+	{
+		if (!expect(rain_blend_factor(0) == 0x8000, "rain factor at 0")) return 1;
+		if (!expect(rain_blend_factor(0x4000) == 0x4000, "rain factor at half")) return 1;
+		if (!expect(rain_blend_factor(0x8001) == 0, "rain factor over-range zeroes")) return 1;
+
+		// With identity modulator (byte 64), zero rain, zero additive, the
+		// block pipeline reduces EXACTLY to the ColorChannelState step.
+		WeatherColorBlock block;
+		block.snap(0x000000u);
+		ColorChannelState plain;
+		plain.snap_to(0x000000u);
+		block.target = 0x00FFC080u;
+		for (int i = 0; i < 8; ++i) {
+			block.tick(kModulatorIdentityPacked, 0);
+			const uint32_t expected = plain.step(0x00FFC080u, 255 << 20);
+			if (block.render_color != expected || block.pre_mod_color != expected) {
+				std::fprintf(stderr, "FAIL: block/step equivalence tick %d: %08X vs %08X\n",
+				             i, block.render_color, expected);
+				return 1;
+			}
+		}
+
+		// Additive saturates per byte (paddusb): stepped 0x545859 + fog slot
+		// 0x15170F = 0x696F68; near-white + additive pins the 0xFF ceiling.
+		WeatherColorBlock add_block;
+		add_block.snap(0x545859u);
+		add_block.target = 0x545859u;
+		add_block.additive = 0x15170Fu;
+		add_block.tick(kModulatorIdentityPacked, 0);
+		if (!expect(add_block.pre_mod_color == 0x696F68u, "block additive paddusb")) return 1;
+		add_block.snap(0x00FFF0F8u);
+		add_block.target = 0x00FFF0F8u;
+		add_block.additive = 0x00202020u;
+		add_block.tick(kModulatorIdentityPacked, 0);
+		if (!expect(add_block.pre_mod_color == 0x00FFFFFFu, "block additive saturates")) return 1;
+
+		// Rain at 0x4000 halves every channel (truncating): the witnessed
+		// ((c*m)>>1 * (factor>>4)) >> 16 chain on 0x80FF40C8 -> 0x407F2064.
+		WeatherColorBlock rain_block;
+		rain_block.snap(0x80FF40C8u);
+		rain_block.target = 0x80FF40C8u;
+		rain_block.tick(kModulatorIdentityPacked, 0x4000);
+		if (!expect(rain_block.render_color == 0x407F2064u, "block rain-half modulation")) return 1;
+		if (!expect(rain_block.pre_mod_color == 0x80FF40C8u, "pre-mod color unaffected by rain")) return 1;
+	}
+
+	// --- Cloud scroll [orig: rate ramp @ 0x57eecc; accumulators
+	//     @ 0x57f1a5..0x57f1d1] ----------------------------------------------
+	{
+		// Rate ramps by smooth_eighth toward sky_speed << 10 (15 << 10 =
+		// 15360); the accumulators advance {1, 1, 2/3, 4/3} with truncating /3.
+		CloudScrollState scroll;
+		const struct { int tick; int rate; int32_t l1; int32_t l2v; int32_t l2u; } landmarks[] = {
+			{1, 1920, 1920, 1280, 2560},
+			{2, 3600, 5520, 3680, 7360},
+			{3, 5070, 10590, 7060, 14120},
+			{8, 10084, 52312, 34876, 69748},
+			{64, 15360, 875722, 583835, 1167609},
+		};
+		int ticks_done = 0;
+		for (const auto &lm : landmarks) {
+			for (; ticks_done < lm.tick; ++ticks_done) {
+				scroll.tick(15 << 10);
+			}
+			if (scroll.rate != lm.rate || scroll.acc_l1_u != lm.l1 || scroll.acc_l1_v != lm.l1 ||
+			    scroll.acc_l2_v != lm.l2v || scroll.acc_l2_u != lm.l2u) {
+				std::fprintf(stderr, "FAIL: scroll tick %d = rate %d accs %d/%d/%d/%d\n",
+				             lm.tick, scroll.rate, scroll.acc_l1_u, scroll.acc_l1_v,
+				             scroll.acc_l2_v, scroll.acc_l2_u);
+				return 1;
+			}
+		}
+		// The truncating /3 (rate 1025: 1025/3 = 341, not 342).
+		CloudScrollState trunc;
+		trunc.rate = 1025;
+		trunc.tick(1025);
+		if (!expect(trunc.acc_l2_v == 1025 - 341 && trunc.acc_l2_u == 1025 + 341,
+		            "accumulator /3 truncates toward zero")) return 1;
+	}
+
 	std::printf(
-	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris\n");
+	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
+	    "/oscillator/sequencers/blocks/scroll\n");
 	return 0;
 }

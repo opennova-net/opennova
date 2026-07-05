@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace opennova::env {
 
@@ -183,6 +184,164 @@ LightningAdditives lightning_additives(const Rgb &lightning_rgb, int level) {
 	out.skyfog = out.fog;
 	out.ground = {scaled(lightning_rgb.r, 10), scaled(lightning_rgb.g, 10), scaled(lightning_rgb.b, 10)};
 	return out;
+}
+
+LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, int level) {
+	// [orig: Environment_SetLightningFlash @ 0x57d320] — pmullw(bytes, level)
+	// then psrlw per slot; exact byte truncation (no rounding).
+	LightningAdditivesPacked out;
+	const int lvl = clamp_int(level, 0, 255);
+	const auto slot = [&](int shift) -> uint32_t {
+		uint32_t packed = 0;
+		for (int byte_shift = 0; byte_shift < 32; byte_shift += 8) {
+			const uint32_t channel = (lightning_packed >> byte_shift) & 0xFF;
+			packed |= ((channel * static_cast<uint32_t>(lvl)) >> shift & 0xFF) << byte_shift;
+		}
+		return packed;
+	};
+	out.sky = slot(8);
+	out.fog = slot(9);
+	out.skyfog = out.fog;
+	out.ground = slot(10);
+	return out;
+}
+
+bool LightningSequencers::tick() {
+	// [orig: Environment_UpdateWeatherTick @ 0x57ec6f / @ 0x57ed0a] — each
+	// active timer decrements, then the remaining value is matched against
+	// the epoch table; a hit SETS the flash level (Environment_SetLightningFlash
+	// overwrites, never maxes). A processes before B, so a same-tick collision
+	// resolves to B's level, as in the original's statement order.
+	bool set = false;
+	if (timer_a) {
+		--timer_a;
+		const int lvl = lightning_flash_level(
+				kLightningSequenceA, static_cast<int>(std::size(kLightningSequenceA)), timer_a);
+		if (lvl >= 0) {
+			level = lvl;
+			set = true;
+		}
+	}
+	if (timer_b) {
+		--timer_b;
+		const int lvl = lightning_flash_level(
+				kLightningSequenceB, static_cast<int>(std::size(kLightningSequenceB)), timer_b);
+		if (lvl >= 0) {
+			level = lvl;
+			set = true;
+		}
+	}
+	return set;
+}
+
+// ---------------------------------------------------------------------------
+// Weather oscillator
+
+uint32_t WeatherOscillator::reroll() {
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9fc..0x57ea16] — rol 9, then
+	// the SIGNED carry: ((int32)rotated >> 31) & 0x1ABB09 (x86 cdq/and/add).
+	const uint32_t rotated = (prng << 9) | (prng >> 23);
+	prng = rotated + (static_cast<uint32_t>(static_cast<int32_t>(rotated) >> 31) & 0x1ABB09u);
+	return prng;
+}
+
+int WeatherOscillator::tick() {
+	// [orig: Environment_UpdateWeatherTick @ 0x57ea16..0x57eaed] — square-
+	// weighted noise, 256-entry rings, then the 1/32 + 63/64 spring pair.
+	const int noise = static_cast<int>(reroll() & 0xFFFu);
+	const int scaled = (intensity * (15 * prev_noise + ((noise * noise) >> 8))) >> 12;
+	ring_index = static_cast<uint8_t>(ring_index + 1);
+	amp_ring[ring_index] = std::max(0, 0xFFFF - 2 * scaled);
+	prev_noise = scaled;
+	pos += velocity + scaled;
+	smoothed = (pos + 31 * smoothed) >> 5;
+	velocity = (63 * (velocity + ((0x8000 - pos) >> 4))) >> 6;
+	smoothed = clamp_int(smoothed, 0, 0xFFFF);
+	osc_ring[ring_index] = smoothed;
+	return scaled;
+}
+
+// ---------------------------------------------------------------------------
+// Rain + weather color blocks
+
+int rain_blend_factor(int rain_intensity) {
+	// [orig: interpolate_weather_color @ 0x57d9e0] — the unsigned over-range
+	// check zeroes the factor, otherwise 0x8000 - intensity.
+	if (static_cast<uint32_t>(rain_intensity) > 0x8000u) {
+		return 0;
+	}
+	return 0x8000 - rain_intensity;
+}
+
+namespace {
+
+uint32_t paddusb(uint32_t a, uint32_t b) {
+	uint32_t out = 0;
+	for (int shift = 0; shift < 32; shift += 8) {
+		const uint32_t sum = ((a >> shift) & 0xFF) + ((b >> shift) & 0xFF);
+		out |= (sum > 0xFF ? 0xFFu : sum) << shift;
+	}
+	return out;
+}
+
+} // namespace
+
+void WeatherColorBlock::snap(uint32_t packed) {
+	channels.snap_to(packed);
+	render_color = packed;
+	pre_mod_color = packed;
+	target = packed;
+}
+
+void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
+	// [orig: interpolate_weather_color @ 0x57d9e0] — the full block pipeline.
+	// Step: per-channel (delta >> 3) clamped to that channel's max rate,
+	// accumulate in 12.20, repack with +0x80000 rounding.
+	const auto step_channel = [](int32_t &channel_fp, int target_byte, int32_t rate) {
+		int32_t delta = ((target_byte << 20) - channel_fp) >> 3;
+		delta = clamp_int(delta, -rate, rate);
+		channel_fp += delta;
+	};
+	step_channel(channels.b_fp, static_cast<int>(target & 0xFF), max_rate[0]);
+	step_channel(channels.g_fp, static_cast<int>((target >> 8) & 0xFF), max_rate[1]);
+	step_channel(channels.r_fp, static_cast<int>((target >> 16) & 0xFF), max_rate[2]);
+	step_channel(channels.a_fp, static_cast<int>((target >> 24) & 0xFF), max_rate[3]);
+	const auto repack = [](int32_t channel_fp) -> uint32_t {
+		return static_cast<uint32_t>(clamp_int((channel_fp + 0x80000) >> 20, 0, 255));
+	};
+	const uint32_t stepped = repack(channels.b_fp) | (repack(channels.g_fp) << 8) |
+			(repack(channels.r_fp) << 16) | (repack(channels.a_fp) << 24);
+
+	// Additive: the lightning slot saturate-adds onto the stepped color
+	// (paddusb into state[1]).
+	pre_mod_color = paddusb(stepped, additive);
+
+	// Modulator x rain: out_c = ((c * m) >> 1) * (factor >> 4) >> 16, packed
+	// with unsigned saturation (pmullw / psrlw 1 / pmulhw / packuswb). The
+	// identity modulator byte is 64 (with rain 0 the chain is exact identity).
+	const uint32_t factor = static_cast<uint32_t>(rain_blend_factor(rain_intensity)) >> 4;
+	uint32_t modulated = 0;
+	for (int shift = 0; shift < 32; shift += 8) {
+		const uint32_t c = (pre_mod_color >> shift) & 0xFF;
+		const uint32_t m = (modulator_packed >> shift) & 0xFF;
+		const uint32_t value = (((c * m) >> 1) * factor) >> 16;
+		modulated |= (value > 0xFF ? 0xFFu : value) << shift;
+	}
+	render_color = modulated;
+}
+
+// ---------------------------------------------------------------------------
+// Cloud scroll
+
+void CloudScrollState::tick(int rate_target) {
+	// [orig: Environment_UpdateWeatherTick — rate ramp @ 0x57eecc,
+	//  accumulators @ 0x57f1a5..0x57f1d1]. rate/3 is the original's idiv:
+	//  truncation toward zero.
+	rate = smooth_eighth(rate, rate_target);
+	acc_l1_u += rate;
+	acc_l1_v += rate;
+	acc_l2_v += rate - rate / 3;
+	acc_l2_u += rate + rate / 3;
 }
 
 // ---------------------------------------------------------------------------

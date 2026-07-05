@@ -110,6 +110,140 @@ struct LightningAdditives {
 };
 LightningAdditives lightning_additives(const Rgb &lightning_rgb, int level);
 
+// Packed-byte form of the same computation, exact to the MMX sequence
+// (pmullw then psrlw per slot; the directional-light slot is explicitly
+// ZEROED — lightning never brightens the sun) [orig: Environment_SetLightningFlash
+// @ 0x57d320]. lightning_packed is 0x00RRGGBB.
+struct LightningAdditivesPacked {
+	uint32_t sky = 0;    // >> 8
+	uint32_t fog = 0;    // >> 9
+	uint32_t skyfog = 0; // >> 9
+	uint32_t ground = 0; // >> 10
+};
+LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, int level);
+
+// The two flash sequencer timers. tick() decrements active timers and looks
+// the remaining value up in the epoch tables; when an epoch fires, the level
+// is SET (never max-combined — each Environment_SetLightningFlash call
+// overwrites the additive slots). Epoch 0 also fires thunder SoundBank
+// triggers in retail (id 0 / id 0x80 via @ 0x527b90) — deferred to WAC
+// weather (env #15). Trigger writes: the short sequence arms timer A at 16,
+// the long arms timer B at 32 (both sequences' largest epoch + 1 tick).
+// [orig: Environment_UpdateWeatherTick @ 0x57ec6f (A) / @ 0x57ed0a (B);
+//  reset Environment_SnapStateToTargets @ 0x57d1e0]
+struct LightningSequencers {
+	int timer_a = 0; // Env_LightningTimerA
+	int timer_b = 0; // Env_LightningTimerB
+	int level = 0;   // last SET flash level, 0..255
+
+	void trigger_short() { timer_a = 16; }
+	void trigger_long() { timer_b = 32; }
+	// One 62 Hz tick; returns true when an epoch (re)set the level this tick.
+	bool tick();
+};
+
+// ---------------------------------------------------------------------------
+// Weather oscillator — the wind-sway / wave PRNG state
+// [orig: Environment_UpdateWeatherTick @ 0x57e9b0: PRNG rol-9 + signed-carry
+//  step @ 0x57e9fc..0x57ea16, amplitude + 256-entry rings + spring smoothing
+//  @ 0x57ea42..0x57eaed; seed 0x12345633 at mission start
+//  Environment_SnapStateToTargets @ 0x57d1e0; Env_WindScale default 256
+//  Environment_InitDefaults @ 0x57c1d1. The quake path re-rolls the PRNG per
+//  displaced entity (@ 0x57eb8e) — reroll() is that step.]
+//
+// The carry idiom is SIGNED: ((int32)rotated >> 31) & 0x1ABB09 adds 0x1ABB09
+// when bit 31 is set (x86 cdq/and/add). A logical-shift port adds 0 or 1 and
+// silently forks the sequence from the first negative rotate — the GDScript
+// port carried exactly that bug until this port (docs/env/env-tod-re.md).
+struct WeatherOscillator {
+	uint32_t prng = 0x12345633u; // Env_WeatherPrng [orig: seed @ 0x57d1e0]
+	int intensity = 256;         // Env_WindScale [orig: default @ 0x57c1d1]
+	int prev_noise = 0;          // dword_26C7764
+	int pos = 0;                 // dword_26C7758 (spring position, 0x8000 rest)
+	int smoothed = 0;            // dword_26C775C (clamped 0..0xFFFF)
+	int velocity = 0;            // dword_26C7760
+	uint8_t ring_index = 0;      // Env_WaveRingIndex
+	int32_t amp_ring[256] = {};  // Env_WaveAmpRing (0xFFFF - 2*amp, floor 0)
+	int32_t osc_ring[256] = {};  // Env_WaveOscRing (smoothed history)
+
+	// Advances the PRNG one step and returns the new word.
+	uint32_t reroll();
+	// One 62 Hz oscillator tick; returns the tick's scaled amplitude.
+	int tick();
+};
+
+// ---------------------------------------------------------------------------
+// Rain fade [orig: Environment_UpdateWeatherTick @ 0x57eaf9 (decay);
+//            factor consumed per color block in interpolate_weather_color
+//            @ 0x57d9e0; reset @ 0x57d1e0]
+
+struct RainState {
+	int intensity = 0; // Env_RainIntensity (0..0x8000 attenuates fully)
+	int fade_rate = 0; // Env_RainFadeRate
+
+	void tick() {
+		intensity -= fade_rate;
+		if (intensity < 0) {
+			intensity = 0;
+		}
+	}
+};
+
+// (0x8000 - intensity), zeroed when intensity exceeds 0x8000 unsigned —
+// the per-block modulator blend factor [orig: interpolate_weather_color
+// @ 0x57d9e0].
+int rain_blend_factor(int rain_intensity);
+
+// ---------------------------------------------------------------------------
+// Weather color block — the full per-block pipeline of
+// [orig: interpolate_weather_color @ 0x57d9e0] (16 such blocks tick per
+// frame @ 0x57ef9c..0x57f032): 12.20 step toward the packed target under
+// PER-CHANNEL max rates, saturating add of the lightning additive slot
+// (paddusb), then the modulator x rain blend
+//   out_c = min(255, ((c * m) >> 1) * (rain_factor >> 4) >> 16)
+// (pmullw / psrlw 1 / pmulhw / packuswb). The modulator chain is the iris
+// auto-exposure consumer (env #17): most blocks modulate against the
+// modulator block, the modulator against modulator-2, modulator-2 against
+// the constant identity bytes. Identity modulator byte = 64.
+
+inline constexpr uint32_t kModulatorIdentityPacked = 0x40404040u;
+
+struct WeatherColorBlock {
+	uint32_t render_color = 0;  // [0] post-modulation packed (the render read)
+	uint32_t pre_mod_color = 0; // [1] step + additive, pre modulation
+	ColorChannelState channels; // [2..5] the 12.20 accumulators
+	// [6..9] per-channel max step rates (b, g, r, a) in 12.20; the parse-time
+	// default is effectively unclamped (255 << 20).
+	int32_t max_rate[4] = {0x0FF00000, 0x0FF00000, 0x0FF00000, 0x0FF00000};
+	uint32_t target = 0;   // [11] packed target the step chases
+	uint32_t additive = 0; // [12] the lightning flash slot
+
+	// Snaps the accumulators and both packed colors to `packed`.
+	void snap(uint32_t packed);
+	// One 62 Hz tick [orig: interpolate_weather_color @ 0x57d9e0].
+	void tick(uint32_t modulator_packed, int rain_intensity);
+};
+
+// ---------------------------------------------------------------------------
+// Cloud scroll accumulators
+// [orig: Environment_UpdateWeatherTick — rate smoothing toward
+//  Env_SkySpeedFixed (sky_speed << 10) @ 0x57eecc; the four accumulators
+//  advance {1, 1, 2/3, 4/3} x rate with TRUNCATING integer /3
+//  @ 0x57f1a5..0x57f1d1. render_skybox consumes (camera + acc) / 2^28 for
+//  layer 1 and / 2^29 for layer 2 (@ 0x5791de..0x579260) — the layer-2 pair
+//  is anisotropic: U rides the +1/3 accumulator, V the -1/3.]
+
+struct CloudScrollState {
+	int rate = 0;         // Env_CloudScrollRate (ramps toward the target)
+	int32_t acc_l1_u = 0; // dword_26C680C
+	int32_t acc_l1_v = 0; // dword_26C6810
+	int32_t acc_l2_v = 0; // dword_26C6814 (rate - rate/3)
+	int32_t acc_l2_u = 0; // dword_26C6818 (rate + rate/3)
+
+	// One 62 Hz tick; rate_target = sky_speed << 10.
+	void tick(int rate_target);
+};
+
 // ---------------------------------------------------------------------------
 // Sun glare [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]
 //           [orig: render_skybox_sun_glow @ 0x5acd00]
