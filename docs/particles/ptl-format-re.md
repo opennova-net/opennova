@@ -667,3 +667,23 @@ carried here.
 - `CParticleEmitter_BuildOrientationMatrix @ 0x5f3970` port for full ORBIT frame fidelity.
 - Collision sounds (20 `collide_sound` slots) and `elastic` bounce behavior — resolve pass
   witnessed, runtime unported.
+
+## 9. Divergence catalog (D-PTL)
+
+Stable IDs for the behavior gaps described above (the §1 intentional parse divergence and the
+§6 bounded deviations); dispositions in the canonical vocabulary of
+[divergence-ledger.md](../divergence-ledger.md). Pure "not yet researched" items with no
+witnessed behavior gap stay in §8.
+
+| ID | Divergence | Disposition |
+|---|---|---|
+| D-PTL-1 | `g{N}_color{M}` dispatch (§1): the engine's outer dispatcher remaps `g2_color1`/`g3_color1`/`g3_color2`/`g4_color1`/`g4_color2` into higher color slots; the reimpl maps `g{N}_color{M}` → `graphics[N-1].color[M]` correctly | **PERMANENT** — a recorded intentional divergence from an original parse bug. [orig: CParticleDef_ParseProperties @ 0x5ea320] |
+| D-PTL-2 | Batching (§6): one mesh batch per graphic layer instead of the engine's shared vertex/index buffer pooling | **PERMANENT** — a host renderer architecture choice, visually equivalent. [orig: CParticleManager_RenderBatch @ 0x5e9890] |
+| D-PTL-3 | `mod2x` (§6): approximates `SrcBlend=DESTCOLOR + DestBlend=SRCCOLOR` by pre-multiplying source RGB ×2 over Godot `blend_mul`; the 0.5 midpoint is preserved, the gamma curve is not byte-exact | **OPEN** (approximation) |
+| D-PTL-4 | `bump`/`bumpadd` lit-color axis (§5.3, §6): rotation about view-Z instead of the engine's composite-matrix X (combiner topology confirmed matching) | **OPEN** — pending the 4×4 matrix port + a side-by-side reference capture (§8). |
+| D-PTL-5 | `distort` (§5.4, §6): fixed-strength screen-tex UV offset; the engine stage-1 combiner bytes are undecoded | **NEEDS-RE** — decode the index-8 combiner layout (§8). |
+| D-PTL-6 | Atlas pack (§6): the engine layout strategy (shelf vs row vs binary tree) is undecoded; our shelf packer matches the UV-rect data shape; `inset` bleed padding defaults to 0 | **NEEDS-RE** [orig: BuildTextureAtlases @ 0x5e8db0] |
+
+WANDER/BUBBLE (engine-vestigial, zero xrefs), the emitter AABB accumulators, the ORBIT
+orientation-matrix port, collision sounds, and the pending parser decompiles remain §8 research
+items — no witnessed behavior gap in the shipped render/format port.

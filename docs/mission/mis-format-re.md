@@ -29,6 +29,16 @@ The reader accepts the same shape. Unknown keys in known sections are skipped so
 - Weapon availability is emitted as an empty section and skipped on read; the loadout semantics are still tracked separately for mission editor work.
 - No correspondence row is added to `docs/correspondence.md` yet because the editor-side function anchors were not available in this MCP session.
 
+## Divergence catalog (D-MIS)
+
+Stable IDs for the writer-subset gaps in "Known limitations" (dispositions in the canonical vocabulary of [divergence-ledger.md](../divergence-ledger.md)).
+
+| ID | Divergence | Disposition |
+|---|---|---|
+| D-MIS-1 | All parsed `begin item` records land in the generic item pool; the `.mis` text does not carry the BMS pool kind, and the `dfx2med.exe` classifier behavior (against `items.def`/type flags) is not witnessed | **NEEDS-RE** — needs a `dfx2med.exe` grill (no MCP-connected IDA had that DB open this pass). |
+| D-MIS-2 | `weapon_availability` is emitted as an empty section and skipped on read; loadout semantics are tracked separately for mission-editor work | **WITNESSED-READY-DEFERRED** — the writer subset intentionally omits it for now. |
+| D-MIS-3 | The parser supports the OpenNova writer subset only; hand-authored / legacy `.mis` variants and unknown top-level section semantics are not inferred | **NEEDS-RE** — the full `dfx2med.exe` `.mis` grammar grill (the current verdict's stated prerequisite). |
+
 ## Verification coverage
 
 - `tests/mission/mission_mis_test.cpp`: author a mission, save `.mis`, reload `.mis`, verify header/entity/event fields, then save/reload as `.bms`.

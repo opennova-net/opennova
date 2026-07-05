@@ -439,3 +439,19 @@ Convention (verified against Armry01.ase / Armry01.3dp): geometry for part index
 get allocated and `ExportSubobjectTempBuild` is never called — the export
 silently drops all part data. Decoders must synthesize `"%02d Mesh0"` style
 names (`robj_index + 1`).
+
+---
+
+## 4. Divergence catalog (D-3DI)
+
+Stable IDs for the divergences described in prose above (dispositions in the
+canonical vocabulary of [divergence-ledger.md](../divergence-ledger.md)). The
+ledger's permanent register carries D-3DI-1.
+
+| ID | Divergence | Disposition |
+|---|---|---|
+| D-3DI-1 | Byte-exact `MTRX` output requires OED's x87 `_PC_24` (24-bit single) precision (§1 "Derived chunks" MTRX derivation + §1 "OED x87 control word"); a 64-bit SSE2 build diverges in low FP bits. A parity sub-build restores byte-exactness via `_controlfp(_PC_24, _MCW_PC)` early in `main()`. | **PERMANENT** — a host FP-precision constraint, not a math error; the parity sub-build is the documented path when byte-exactness is needed. [orig: ComputeMTRX @ 0x452990 / WriteMTRX @ 0x452FA0 / _setdefaultprecision @ 0x52A27C] |
+
+The §2.14 "Open items" are unresearched questions (no witnessed behavior gap yet)
+and stay there; the §2 verdict tables are `MATCHING`/true-padding facts, not
+divergences.
