@@ -1,6 +1,7 @@
 #include "foliage/dispatcher.h"
 
 // Engine: jodemo.exe sub_5C1940@0x5C1940
+// [orig: sub_5C1940 @ 0x5C1940 (jodemo); the retail foliage dispatch is the sibling of generate_foliage_instances_0 @ 0x600197, see docs/foliage/foliage-re.md]
 // docs/engine_spec_foliage.md 4.3
 
 namespace opennova::foliage {

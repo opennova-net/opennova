@@ -5,6 +5,7 @@
    pre-repo Python reference), parses the top-level declarations,
    and emits SCR0/MU01-shaped bytecode that the engine VM (witnessed at
    `Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20`) accepts.
+   [orig: AudioVM_LoadScriptFile @ 0x672D20 (the compile path is the write-inverse); docs/audio/mus-sbf-re.md]
 
    Phase D scope: produce bytecode that round-trips through
    `decompile(compile(decompile(x))) == decompile(x)` against the
