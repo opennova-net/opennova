@@ -201,15 +201,15 @@ func test_ray_aabb_entry_hits_and_misses() -> void:
 	var cube := AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))  # 2-unit cube at the origin
 
 	# Straight-on hit: enters the near face at z = -1, starting 10 units back.
-	var t_hit: float = controller._ray_aabb_entry(cube, Vector3(0, 0, -10), Vector3(0, 0, 1))
+	var t_hit: float = controller._viewport._ray_aabb_entry(cube, Vector3(0, 0, -10), Vector3(0, 0, 1))
 	assert_almost_eq(t_hit, 9.0, 0.001, "ray entering the near face reports the entry distance")
 
 	# Off to the side in X: never crosses the cube.
-	assert_eq(controller._ray_aabb_entry(cube, Vector3(5, 5, -10), Vector3(0, 0, 1)), -1.0,
+	assert_eq(controller._viewport._ray_aabb_entry(cube, Vector3(5, 5, -10), Vector3(0, 0, 1)), -1.0,
 		"a ray that misses returns -1")
 
 	# Pointing away from the box: behind the camera, not a hit.
-	assert_eq(controller._ray_aabb_entry(cube, Vector3(0, 0, -10), Vector3(0, 0, -1)), -1.0,
+	assert_eq(controller._viewport._ray_aabb_entry(cube, Vector3(0, 0, -10), Vector3(0, 0, -1)), -1.0,
 		"a box entirely behind the ray is not a hit")
 
 
@@ -231,7 +231,7 @@ func _loaded_with_selection() -> MissionController:
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
 	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 0, "the fixture places buildings to select")
-	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
 	return controller
 
 
@@ -273,12 +273,12 @@ func test_selected_userpoint_overlay_uses_shared_script_and_tracks_transform() -
 	assert_eq((overlay as Node3D).transform.origin, Vector3(1.0, 2.0, 3.0),
 		"Static mission overlays start at the selected entity transform.")
 
-	controller._apply_selected_xform(Transform3D(Basis(), Vector3(5.0, 6.0, 7.0)))
+	controller._viewport._apply_selected_xform(Transform3D(Basis(), Vector3(5.0, 6.0, 7.0)))
 
 	assert_eq((overlay as Node3D).transform.origin, Vector3(5.0, 6.0, 7.0),
 		"Moving the selected entity should move the userpoint overlay.")
 
-	controller._deselect()
+	controller._viewport._deselect()
 	await get_tree().process_frame
 
 	assert_false(is_instance_valid(overlay), "Deselecting should clear the selected userpoint overlay.")
@@ -448,7 +448,7 @@ func test_set_selected_position_round_trips_under_an_offset_container() -> void:
 	var controller := MissionController.new(stub)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
 	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
-	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
 
 	var target := Vector3(321.0, 12.0, -654.0)
 	controller.set_selected_position(target)
@@ -665,7 +665,7 @@ func test_drag_bakes_rotated_ground_anchor_under_cursor() -> void:
 	var anchor: Vector3 = controller._placer.ground_anchor_godot(graphic)
 	var hit := Vector3(80.0, 12.0, -40.0)
 
-	controller._move_selected_to_world(hit)
+	controller._viewport._move_selected_to_world(hit)
 
 	var ground_point: Vector3 = controller._selected_xform.origin + controller._selected_xform.basis * anchor
 	assert_lt((ground_point - hit).length(), 0.02,
@@ -758,7 +758,7 @@ func test_waypoint_marker_reuses_the_active_paths_existing_type() -> void:
 	controller.select_waypoint_path(path)
 	# Seed the path with a specific waypoint variant (106026 = "waypoint, mp, alpha", BMS type 6026).
 	mission.add_waypoint_marker(path, 106026, Vector3(1, 0, -1), Vector3.ZERO, -1)
-	controller._refresh_waypoint_overlay()
+	controller._waypoints._refresh_waypoint_overlay()
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(5, 0, -5)),
 		"a second marker is added to the path")
 	var idx := int(controller.get_selected_marker()["marker_index"])
@@ -971,7 +971,7 @@ func test_delete_selected_removes_clears_and_dirties() -> void:
 
 func test_delete_selected_without_a_selection_is_inert() -> void:
 	var controller := _loaded_with_selection()
-	controller._deselect()
+	controller._viewport._deselect()
 	var mission := controller.get_mission()
 	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
 	assert_false(controller.delete_selected(), "delete with nothing selected is a no-op")
@@ -1010,7 +1010,7 @@ func test_delete_key_deletes_via_the_viewport_path() -> void:
 
 func test_delete_key_with_no_selection_is_inert() -> void:
 	var controller := _loaded_with_selection()
-	controller._deselect()
+	controller._viewport._deselect()
 	var mission := controller.get_mission()
 	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
 	var key := InputEventKey.new()
@@ -1028,7 +1028,7 @@ func test_delete_key_while_armed_is_inert() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
 	var buildings := mission.get_entities(NovaMissionData.KIND_BUILDING)
-	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
 	assert_false(controller.get_selection_summary().is_empty(), "precondition: a building is selected")
 
 	controller.arm_placement(102001)  # Guard Tower (building)
@@ -1145,7 +1145,7 @@ func test_delete_rebakes_pickable_index_and_frees_the_selection_box() -> void:
 	assert_eq(controller._pickable.size(), 2, "both rendered placements are in the pickable index")
 
 	# Reselect the first, capture its (container-child) selection box, then delete it.
-	controller._select(kind, first_index)
+	controller._viewport._select(kind, first_index)
 	var box = controller._selection_box
 	assert_true(is_instance_valid(box), "selecting a rendered entity builds a selection box")
 	var count_before := mission.get_entity_count(kind)
@@ -1292,7 +1292,7 @@ func test_reground_count_matches_engine_bake_for_rotated_anchor() -> void:
 	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
 	var kind := NovaMissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
-	controller._select(kind, index)
+	controller._viewport._select(kind, index)
 	controller.set_selected_rotation(Vector3(0, 37, 0))
 	controller._flush_edit()
 
@@ -1362,10 +1362,10 @@ func test_reground_only_touches_entities_whose_ground_moved() -> void:
 
 	# Raise B 20 over its (unchanged) ground on purpose, then adopt the layout as
 	# the known-grounded reference (the load-time baseline predates both entities).
-	controller._select(kind, index_b)
+	controller._viewport._select(kind, index_b)
 	controller.set_selected_position(Vector3(100.0, 50.0, 30.0))
 	controller._flush_edit()
-	controller._record_ground_state()
+	controller._reground._record_ground_state()
 
 	# Tilt the surface: height(x) = 5 + 0.05x — the ground drops 5 under A (x=0)
 	# and stays exactly 10 under B (x=100).
@@ -1552,7 +1552,7 @@ func test_undo_restores_a_deleted_entity() -> void:
 	var before := buildings.size()
 	var deleted_item := int(buildings[0]["item_id"])
 	var deleted_pos: Vector3 = buildings[0]["position"]
-	controller._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
 
 	assert_true(controller.delete_selected())
 	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "precondition: deleted")
@@ -1571,7 +1571,7 @@ func test_undo_restores_a_moved_position() -> void:
 	var mission := controller.get_mission()
 	var kind := NovaMissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
-	controller._select(kind, index)
+	controller._viewport._select(kind, index)
 	var original: Vector3 = mission.get_entity(kind, index)["position"]
 
 	controller.set_selected_position(original + Vector3(10, 0, -5))
@@ -1590,7 +1590,7 @@ func test_multi_axis_edit_coalesces_to_one_step() -> void:
 	var mission := controller.get_mission()
 	var kind := NovaMissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
-	controller._select(kind, index)
+	controller._viewport._select(kind, index)
 	var p := controller.get_selected_position()
 
 	# A run of axis edits + a rotation on the same entity is one editing session.
@@ -1798,7 +1798,7 @@ func test_waypoint_overlay_harvests_a_pickable_per_active_marker() -> void:
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(4, 0, -4), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
-	controller._refresh_waypoint_overlay()  # reflect the just-added markers
+	controller._waypoints._refresh_waypoint_overlay()  # reflect the just-added markers
 	assert_eq(controller.get_selected_waypoint_path_index(), path)
 	assert_eq(controller._marker_pickable.size(), 2, "the overlay harvested one pickable per active-path marker")
 
@@ -1811,11 +1811,11 @@ func test_select_marker_reports_position_and_deselect_clears() -> void:
 	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(7, 1, -7), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
 	var marker_index := int((r["marker"] as Dictionary)["index"])
-	controller._select_marker(path, marker_index)
+	controller._waypoints._select_marker(path, marker_index)
 	var sel := controller.get_selected_marker()
 	assert_eq(int(sel["marker_index"]), marker_index, "the selected marker is reported")
 	assert_almost_eq((sel["position"] as Vector3).x, 7.0, 0.05, "with its position")
-	controller._deselect_marker()
+	controller._waypoints._deselect_marker()
 	assert_eq(controller.get_selected_marker(), {}, "deselect clears the marker")
 
 
@@ -2038,8 +2038,8 @@ func test_marker_drag_commits_the_new_position() -> void:
 	controller._drag_active = true
 	controller._drag_moved = false
 	controller.begin_edit()
-	controller._on_marker_drag(Vector2(10, 10))  # stub raycast -> terrain_hit
-	controller._on_marker_left_release()
+	controller._waypoints._on_marker_drag(Vector2(10, 10))  # stub raycast -> terrain_hit
+	controller._waypoints._on_marker_left_release()
 
 	var expected: Vector3 = Placer.godot_to_bms_position(controller.terrain_editor.terrain_hit)
 	var stored: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)["position"]
@@ -2085,8 +2085,8 @@ func test_switching_paths_clears_a_shared_marker_highlight() -> void:
 	var path_a := controller.get_selected_waypoint_path_index()
 	var r := mission.add_waypoint_marker(path_a, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
 	var m := int((r["marker"] as Dictionary)["index"])
-	controller._refresh_waypoint_overlay()  # reflect the new marker on A (A is already active)
-	var path_b := controller._first_empty_path()
+	controller._waypoints._refresh_waypoint_overlay()  # reflect the new marker on A (A is already active)
+	var path_b: int = controller._waypoints._first_empty_path()
 	assert_true(path_b >= 0 and path_b != path_a, "need a distinct empty path for B")
 	# Loaded data can reference one marker from two paths (the editor never authors that).
 	mission.set_waypoint_path(path_b, PackedInt32Array([m]), 0)
@@ -2115,7 +2115,7 @@ func _seed_crate_batch(controller) -> void:
 func test_place_and_delete_report_status_and_resolve_names() -> void:
 	var controller := _loaded_with_item_db()
 	_seed_crate_batch(controller)
-	var crate_name: String = controller._item_db().get_display_name(105004)
+	var crate_name: String = controller._placement._item_db().get_display_name(105004)
 	assert_false(crate_name.is_empty(), "precondition: the items.def fixture names item 105004")
 
 	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
@@ -2196,8 +2196,8 @@ func test_off_terrain_drag_reports_and_moves_nothing() -> void:
 	controller._drag_off_terrain = false
 	controller.begin_edit()
 	controller.terrain_editor.terrain_hit_valid = false  # every raycast now misses
-	controller._on_drag(Vector2(5, 5))
-	controller._on_left_release()
+	controller._viewport._on_drag(Vector2(5, 5))
+	controller._viewport._on_left_release()
 	assert_string_contains(controller.get_last_status(), "off the terrain", "the miss is explained")
 	assert_false(controller.is_dirty(), "an all-off-terrain drag changes nothing")
 
@@ -2355,10 +2355,10 @@ func test_zone_drag_translates_the_box_and_commits() -> void:
 	# First drag sample anchors; a second moves it. Use two samples with the same hit so the
 	# delta is zero only if the anchor logic is wrong; here we move the second hit.
 	controller.terrain_editor.terrain_hit = Vector3(0, 10, 0)
-	controller._on_zone_drag(Vector2(5, 5))         # anchor
+	controller._zones._on_zone_drag(Vector2(5, 5))         # anchor
 	controller.terrain_editor.terrain_hit = Vector3(32, 10, -16)
-	controller._on_zone_drag(Vector2(9, 9))         # move
-	controller._on_zone_left_release()
+	controller._zones._on_zone_drag(Vector2(9, 9))         # move
+	controller._zones._on_zone_left_release()
 	var moved := controller.get_selected_zone()
 	# godot delta (32,0,-16) -> mission delta (32, 16, 0); the box min shifts by that.
 	assert_almost_eq((moved["min"] as Vector3).x, start_min.x + 32.0, 0.5, "the box translated in mission X")
@@ -2603,7 +2603,7 @@ func test_deselect_stops_preview() -> void:
 	var model: FakeModel = ctx.model
 	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
 	var cleared_before := model.cleared
-	ctx.controller._deselect()
+	ctx.controller._viewport._deselect()
 	assert_gt(model.cleared, cleared_before, "a selection change stops any running preview")
 
 
