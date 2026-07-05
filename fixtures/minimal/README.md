@@ -74,16 +74,15 @@ Authored so far (each guarded by a ctest):
 |---|---|---|---|
 | `gametext.bin`, `vmacros.bin`, `keyhelp.bin` | `libs/rtxt` | `minimal_rtxt_gen` (emit + byte-stable + round-trip) | **done** — the fatal string tables |
 | `items.def`, `weapon.def`, `ammo.def` | authored text | `minimal_def_validate` (parse through `libs/def`) | **done** — a spawnable person, a rifle, its round |
+| `main.mnu`, `mp.mnu` | `libs/mnu` | `minimal_mnu_validate` (parse + screen present) | **done** — Startup node + LAN host/join, small authored |
+| `mnml.env`, `mnml.bms` | `libs/env`, `libs/mission` | `minimal_map_gen` (round-trip + content) | **done** — one TOD + a named mission with two team spawns |
 
-Remaining (each its own slice; menu + map involve design choices):
+Remaining slices:
 
-- `main.mnu` (the `"Startup"` node) + `mp.mnu` (host/join) — a small authored
-  menu, or a trimmed reuse of `fixtures/mnu/jo_main.mnu`/`jo_mp.mnu` (which
-  already carry a `STARTUP` node + the MP flow but reference resources beyond
-  minimal). Validate through `libs/mnu`.
-- the custom map: `<map>.bms` (`libs/mission`) + `<map>.trn` (`libs/trn`, a
-  small heightfield) + `<map>.env` (`libs/env`). The map's layout / size /
-  spawn placement is a design choice.
+- `mnml.trn` — the terrain. The largest leg: a small heightfield → CDEP
+  polydata + colormap + the `.trn` config, via `libs/terrain` `build_terrain`
+  (a `TpjProject`) + `libs/trn` `save_trn`. The map's size / flat-vs-featured
+  shape is a design choice — smallest useful is a flat N×N plane.
 - the PFF packaging (`libs/pff` write side) — bundle the loose set into one
   archive so the fatal not-all-archives-missing gate clears (witnessed above).
 - asset-gated retail validation (§ Validation) — needs a retail install.
