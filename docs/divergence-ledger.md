@@ -27,8 +27,8 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
 3. **The seven systems with no RE record get research audits.** Terrain, foliage, tiles,
    fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
-   unknowns into tracked rows — **VFS/PFF landed (R7, D-VFS catalog) and Fonts landed
-   (R4, D-FNT catalog); five remain** (see the UNAUDITED table).
+   unknowns into tracked rows — **VFS/PFF (R7, D-VFS), Fonts (R4, D-FNT), and Foliage
+   (R2, D-FOLIAGE) landed; four remain** (see the UNAUDITED table).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -233,6 +233,15 @@ slot order, extra archives never mount, pinned by
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 
+### Foliage — [foliage/foliage-re.md](foliage/foliage-re.md) (D-FOLIAGE catalog; PAR-R2)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance (2×2 lightmap avg) vs the engine's per-vertex quad color `0xFF000000 | (0x404040 + avg>>1)` under a 2× draw + alpha-premultiplied colormap — visually close, the per-vertex gradient is the residual | A | OPEN (approximation) | PAR (foliage) |
+
+Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
+0x20000 proximity) is **MATCHING** — byte-exact vs retail `generate_foliage_instances_0 @ 0x600197`.
+
 ### Fonts — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT catalog; PAR-R4)
 
 | ID | One-liner | Class | Disposition | Slice |
@@ -263,16 +272,17 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
+| Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
 | Fonts (new domain, PAR-R4 audit) | 2 | 1 | 0 | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **64** |
+| **Total OPEN** | | | | **65** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **5** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **4** (below).
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -321,8 +331,10 @@ the follow-up path.
 
 ## UNAUDITED systems (no RE record yet)
 
-Five systems remain documented mainly by code and tests (the VFS/PFF mount
-stack graduated via PAR-R7; **Fonts graduated via PAR-R4**, D-FNT catalog)
+Four systems remain documented mainly by code and tests (VFS/PFF graduated via
+PAR-R7; **Fonts** via PAR-R4, D-FNT; **Foliage** via PAR-R2, D-FOLIAGE — its
+placement audits cleanly against RETAIL `generate_foliage_instances_0 @ 0x600197`
+even though the port was made from jodemo)
 ([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
 that lands an RE record **with a D-catalog**, converting untracked divergences into
 tracked rows.
@@ -341,7 +353,6 @@ is a Python + native-FFI pipeline, not a binary-format audit.
 | System | Audit slice | Partial coverage today | IDB needed |
 |---|---|---|---|
 | Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). | jodemo |
-| Foliage | PAR-R2 | none (placement port witnessed in code; no RE record). | jodemo |
 | Tiles | PAR-R3 | none (`libs/til` cites jodemo `Terrain_DrawTileOverlays2D @ 0x5C79C0`). | jodemo |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. | source binary (CBIN not in retail JO) |
 | Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). | n/a (Python + FFI) |
