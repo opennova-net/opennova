@@ -3516,6 +3516,15 @@ routing slice must: (a) find the spawn-time entity→pool assignment that keys o
 (AI) / `& 0x40000` (destructible) → pool-1 vs purely-static → pool-2, and (b) port it into
 `pool_for_kind` (`promote.cpp`), which today keys on `EntityKind` at promotion — noting the ordering
 gap that item traits are resolved post-load (`NovaSimulation::resolve_item_traits`), after promotion.
+**Router-hunt narrowing (2026-07-05):** `Pool_GetEntryUnchecked @ 0x441fc0` is a bare
+`g_pool_list[poolIndex].base + idx*stride` accessor, and each wire serializer reads ONE
+`g_pool_list` pool (pool-1 = `Pool_GetEntryUnchecked(1,…)` @ 0x503940, no flag filter in the
+serializer) — so **an entity's wire pool IS its `g_pool_list` membership**, set at allocation, not a
+serialize-time re-classification. `Entity_InitFromItemDef @ 0x49e550` is only the item-def→entity
+field copy (callbacks/models/health), NOT the pool selection. The router is therefore the entity
+ALLOCATION's `g_pool_list` pool pick (the `Pool_Alloc(poolIndex)` caller that reads `itemDef+0x54`);
+that is the remaining hunt. NB the PORT is golden-gated regardless: changing pool membership changes an
+entity's wire TAG (0x0D↔0x10), which alters byte-exact golden captures — a tier-2 golden-harness slice.
 
 **D-NET-98 [SCOPE — the load-time world-stream is the DYNAMIC set, not the full static mission].** The
 golden retail capture `.scratch/host_and_join_lan.pcapng` (a real host+join, mission dvxi5) shows the host's
