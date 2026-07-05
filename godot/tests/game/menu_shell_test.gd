@@ -260,14 +260,14 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	DirAccess.make_dir_recursive_absolute(dir)
 	var mns := "// test stylesheet\nDEF_FONTNAME_LG Gunpl27b.fnt\nDEF_TEXT_FG FFFFFFFF\n" \
 		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\nDEF_TEXT_SELECTED_FG FFFF0000\nDEF_TEXT_DISABLED_FG FF545252\n"
-	_write_pff(dir.path_join("aa_base.pff"), [
+	_write_pff(dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
 		{"name": "menu_style.mns", "bytes": mns},
 	])
 	var root := NovaResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		pass_test("runtime resource root unavailable in this environment")
-		DirAccess.remove_absolute(dir.path_join("aa_base.pff"))
+		DirAccess.remove_absolute(dir.path_join("resource.pff"))
 		DirAccess.remove_absolute(dir)
 		return
 	var listed := root.list_files(".mns")
@@ -284,7 +284,7 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 		assert_eq(style.substitute("%DEF_TEXT_MOUSEOVER_FG%"), "FFFF0000",
 			"hover colour macro resolves, so button mouse-over highlights")
 	root.clear()  # release the PFF handle before deleting
-	DirAccess.remove_absolute(dir.path_join("aa_base.pff"))
+	DirAccess.remove_absolute(dir.path_join("resource.pff"))
 	DirAccess.remove_absolute(dir)
 
 
@@ -310,10 +310,12 @@ func test_missing_assets_degrade_without_crashing() -> void:
 
 # A base dir with options.mnu packed in a base archive (so it loads under a runtime
 # mount) plus one discoverable expansion (expansion/jox01/jox01.pff carrying an asset).
+# The archive must use a boot-table name (resource.pff): the runtime mounts only the
+# witnessed fixed table [orig: PFF_OpenAllArchives @ 0x4a4310] (D-VFS-2).
 func _make_runtime_dir() -> String:
 	var dir := OS.get_temp_dir().path_join("menu_shell_mods_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
-	_write_pff(dir.path_join("aa_base.pff"), [
+	_write_pff(dir.path_join("resource.pff"), [
 		{"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(OPTIONS_FIXTURE)},
 	])
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
@@ -335,7 +337,7 @@ func _make_runtime_host(dir: String):
 
 
 func _rm_runtime_dir(dir: String) -> void:
-	for sub in ["aa_base.pff", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
+	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
 

@@ -51,9 +51,15 @@ func test_editor_set_root_dir_is_loose_only() -> void:
 func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	var root := _make_flat_root("packed_runtime")
 	_write_file(root.path_join("Alpha.TRN"), "loose trn")
-	_write_pff(root.path_join("aa_base.pff"), [
+	# The runtime mounts only the witnessed boot archive table (language/localres/
+	# resource.pff) [orig: PFF_OpenAllArchives @ 0x4a4310]; an arbitrary-named .pff
+	# never mounts at runtime (D-VFS-2).
+	_write_pff(root.path_join("resource.pff"), [
 		{"name": "Alpha.TRN", "bytes": "archived trn"},
 		{"name": "Bravo.env", "bytes": "archived env"},
+	])
+	_write_pff(root.path_join("zz_extra.pff"), [
+		{"name": "Extra.env", "bytes": "never mounts"},
 	])
 
 	var resources := NovaResourceRoot.new()
@@ -62,12 +68,13 @@ func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	assert_true(resources.has_file("bravo.env"), "PFF entries mount at runtime.")
 	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "archived trn", "Without /d the runtime ignores loose overrides.")
 	assert_eq(resources.read_file("Bravo.env").get_string_from_utf8(), "archived env")
+	assert_false(resources.has_file("extra.env"), "An archive outside the boot table never mounts at runtime.")
 
 	var entries := resources.list_file_entries(".env")
 	assert_eq(entries.size(), 1)
 	assert_eq(String(entries[0].logical_name), "Bravo.env")
 	assert_eq(String(entries[0].source_type), "pff")
-	assert_eq(String(entries[0].archive_path).get_file(), "aa_base.pff")
+	assert_eq(String(entries[0].archive_path).get_file(), "resource.pff")
 
 	# Packed + loose override (/d): loose files shadow the archives.
 	assert_eq(resources.mount_runtime(root, "", true), OK)
@@ -137,7 +144,8 @@ func test_resource_root_loads_dds_from_pff() -> void:
 	assert_gt(dds.size(), 4, "save_dds_to_buffer should produce DDS bytes.")
 
 	var root := _make_flat_root("dds_pff")
-	_write_pff(root.path_join("textures.pff"), [{"name": "swatch.dds", "bytes": dds}])
+	# resource.pff: only the witnessed boot-table archives mount at runtime (D-VFS-2).
+	_write_pff(root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": dds}])
 
 	var resources := NovaResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
@@ -177,7 +185,7 @@ func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
 	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.6, 0.3, 0.1, 1.0))
 	var root := _make_flat_root("dds_pff_cache")
-	_write_pff(root.path_join("textures.pff"), [{"name": "swatch.dds", "bytes": image.save_dds_to_buffer()}])
+	_write_pff(root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": image.save_dds_to_buffer()}])
 
 	var resources := NovaResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
