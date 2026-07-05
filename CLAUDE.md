@@ -16,7 +16,8 @@ easier to relay than to rediscover.
   `modtools/` (the OpenNova Editor "ONED" — twelve authoring workspaces), `game/` (the
   game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
-  `novaworld_server/` (the NovaWorld service), `nw_server/` (headless in-match host),
+  `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
+  in-match host; never shipped),
   `nw_pp/` (packet pretty-printer), `nw_replay/` (replay streamer), `common/` (shared
   socket/pcap helpers, deliberately app-layer). `blender/` and `opennova_max/` are the
   DCC export plugins; `pyopennova/` is the Python FFI layer.

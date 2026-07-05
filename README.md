@@ -91,14 +91,14 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 |------|----------|
 | `libs/` | C/C++ engine libraries: format parsers, runtime systems, networking, and editor support (see [C/C++ Libraries](#cc-libraries)). |
 | `docs/` | Tracked architecture and reverse-engineering records; start at [`docs/README.md`](docs/README.md). |
-| `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a headless in-match host (`nw_server`), the packet pretty-printer (`nw_pp`), the replay streamer (`nw_replay`), and shared socket/pcap helpers (`common/`). |
+| `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a dev/golden-harness in-match host (`nw_server`, never shipped), the packet pretty-printer (`nw_pp`), the replay streamer (`nw_replay`), and shared socket/pcap helpers (`common/`). |
 | `pyopennova/` | Python ctypes FFI layer over the shared `opennova` library, used by the importer and the Python tests. |
 | `opennova_jobs/` | Host-neutral import request/result/job models and validation. |
 | `opennova_qt_ui/` | Host-agnostic PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
 | `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
-| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/` plus the shared GDScript engine layer both hosts run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (placeholder for a headless server host), `tests/` (GUT suite). |
+| `godot/` | Godot 4.6.1 host. `engine/` (GDExtension bindings to `libs/` plus the shared GDScript engine layer both hosts run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (vestigial; dedicated hosting will be a serve mode of the game runtime, see [ADR 0015](docs/adr/0015-two-products-serve-mode.md)), `tests/` (GUT suite). |
 | `web/` | NovaWorld web portal (Vue 3 + TypeScript): landing, lobbies, admin, downloads. Built in CI and deployed with the service stack. |
 | `launcher/` | Windows tray app that points a stock game install at OpenNova's NovaWorld servers via one managed hosts-file entry. |
 | `backend/` | NovaWorld service data: migrations and seed data. |
