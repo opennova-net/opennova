@@ -1,8 +1,9 @@
 // Generator + guard for the minimal set's RTXT string tables
-// (fixtures/minimal/gametext.bin, vmacros.bin, keyhelp.bin) — the fatal-set
-// strings the engine loads at boot [orig: Game_InitSubsystems @ 0x4A6CD0:
-// gametext @ 0x4a6fed, vmacros @ 0x4a702f, keyhelp @ 0x4a7072]. Each fatal
-// file needs only to LOAD as a valid RTXT (missing keys fall back to literals
+// (fixtures/minimal/resources/gameerr.bin, gametext.bin, vmacros.bin,
+// keyhelp.bin) — the boot string tables [orig: Game_InitSubsystems @ 0x4A6CD0:
+// gameerr @ 0x4a6fc8 (miss is ShowEarlyError(4), non-fatal, but boots dirty),
+// gametext @ 0x4a6fed, vmacros @ 0x4a702f, keyhelp @ 0x4a7072]. Each file
+// needs only to LOAD as a valid RTXT (missing keys fall back to literals
 // in the engine), so these are minimal-but-valid tables authored from scratch
 // by our own writer — no retail asset. See fixtures/minimal/README.md.
 //
@@ -56,6 +57,9 @@ File gametext_table() {
 }
 File vmacros_table() { return File{}; }
 File keyhelp_table() { return File{}; }
+// Error strings: valid-but-empty — every error dialog falls back to its
+// literal, and the ShowEarlyError(4) boot noise goes away.
+File gameerr_table() { return File{}; }
 
 bool read_file(const std::string &path, std::vector<uint8_t> &out) {
 	std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -75,6 +79,7 @@ struct Target {
 
 int run(const std::string &dir, bool write_mode) {
 	const Target targets[] = {
+	    {"gameerr.bin", gameerr_table},
 	    {"gametext.bin", gametext_table},
 	    {"vmacros.bin", vmacros_table},
 	    {"keyhelp.bin", keyhelp_table},
@@ -140,7 +145,7 @@ int main() {
 #define MINIMAL_FIXTURE_DIR "."
 #endif
 	const bool write_mode = std::getenv("OPENNOVA_WRITE_MINIMAL_FIXTURES") != nullptr;
-	const int failures = run(MINIMAL_FIXTURE_DIR, write_mode);
+	const int failures = run(MINIMAL_FIXTURE_DIR "/resources", write_mode);
 	if (failures == 0) std::printf("OK: minimal RTXT fatal-set tables valid + byte-reproducible\n");
 	return failures == 0 ? 0 : 1;
 }

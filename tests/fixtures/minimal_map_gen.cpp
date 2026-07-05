@@ -28,7 +28,7 @@ int fail = 0;
 
 const char kMapBase[] = "mnml"; // the minimal map's base name (mnml.bms/.trn/.env)
 
-std::string path(const std::string &name) { return std::string(MINIMAL_FIXTURE_DIR) + "/" + name; }
+std::string path(const std::string &name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
 
 bool read_file(const std::string &p, std::vector<uint8_t> &out) {
 	std::ifstream f(p, std::ios::binary | std::ios::ate);

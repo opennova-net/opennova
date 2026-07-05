@@ -22,6 +22,16 @@ like the existing per-format `fixtures/<fmt>/` sets. The retail install is
 needed only to *validate* the set (launch JO), which is the asset-gated
 acceptance step, never a committed input.
 
+## Layout
+
+- **`resources/`** — the committed authored sources (every file our writers
+  emit, guarded by the `minimal_*` ctests). Nothing here is retail.
+- **this root** — the "game dir": the packaging tool writes the three
+  boot-table `.pff`s here, and the asset-gated validation step drops the
+  retail `Jointops.exe` (+ `binkw32.dll`, the Bink redistributable the exe
+  links) here to run them. Everything at the root is gitignored — only
+  `resources/`, this README, and `.gitignore` are tracked.
+
 ## The set (grounded in required-resources.md)
 
 Categories from the R8 manifest. **Only the fatal set + the host/join mission
@@ -33,6 +43,7 @@ deliberately omitted to keep "minimal" honest.
 | File | Our writer | Notes |
 |---|---|---|
 | **PFF archives under the boot-table names (required — see below)** | `libs/pff` write side (ADR 0008) | at least one PFF **must open** or boot exits, and the boot probes **only the fixed name table** — `language.pff` / `localres.pff` / `resource.pff` `[orig: PFF_OpenAllArchives @ 0x4a4310, name table @ 0x829f90]` (D-VFS-2). An arbitrary-named archive (the first `mnml.pff` attempt) is never probed: `opened_count` stays 0, the caller `test eax,eax; jz` at `@ 0x4a6f4c` falls through to `Game_ShowEarlyError(3)` ("missing CD?") + `Exit(-1)` — **validated on retail 2026-07-05**. `/d` (loose-first) does **NOT** clear this — the loose flag only reorders *lookup*, not the boot archive-open count (witnessed 2026-07-05). So the minimal set packages into the three boot-table names, mirroring retail's placement per kind; loose-alongside is optional. |
+| `gameerr.bin` | `libs/rtxt` | error strings `[orig: @ 0x4a6fc8]` — a miss is `ShowEarlyError(4)`, non-fatal, but the boot is dirty without it (validated on retail); authored empty-but-valid. Retail ships it in `language.pff`. |
 | `gametext.bin` | `libs/rtxt` `write()` | game strings RTXT `[orig: @ 0x4a6fed]` — minimal table (the menu/HUD keys the set references). |
 | `vmacros.bin` | `libs/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `libs/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
@@ -53,7 +64,20 @@ deliberately omitted to keep "minimal" honest.
 
 ### Deliberately omitted (graceful-on-miss — keeps the set minimal)
 
-Fonts (null slot, no crash), all music (`SBF`/`BIN`), videos (`BIK`),
+**Known consequence (validated on retail 2026-07-05): the main menu comes up
+BLACK.** The boot chain is clean (the `/FRISK` log shows every set file
+loading from the PFFs and the profile saves prove the shell is running), but
+the Startup screen draws text-only buttons on a **null font slot** — nothing
+is visible. The visible-menu legs, in dependency order: a minimal `.fnt`
+(**needs a writer — the one missing piece**; the format is documented in
+[../../docs/fonts/fnt-re.md](../../docs/fonts/fnt-re.md)), `menu_style.mns`
+naming it (`DEF_FONTNAME_*` — plain text, trivial), and optionally
+`menutxt.bin` for the button labels (RTXT; falls back to literals). Videos
+(`BIK`) are NOT the cause: they load loose via Win32 `OpenFile`
+(`[orig: Game_PlayIntroVideos @ 0x5637a0 → 0x5636d0]`), never from the PFFs,
+and a miss skips playback.
+
+Fonts (null slot, no crash — see above), all music (`SBF`/`BIN`), videos (`BIK`),
 `Avatars.def`, `SndProf.def`, `charattr.def` (soft error, continues),
 `powerup.def` (soft), `hudfx/hudpos.def` (default positions), menu styling
 (`.mns`), `game.bin`/`menutxt.bin` (fallback literals). Each is listed in the
@@ -72,7 +96,7 @@ Authored so far (each guarded by a ctest):
 
 | File(s) | Writer | Guard | State |
 |---|---|---|---|
-| `gametext.bin`, `vmacros.bin`, `keyhelp.bin` | `libs/rtxt` | `minimal_rtxt_gen` (emit + byte-stable + round-trip) | **done** — the fatal string tables |
+| `gameerr.bin`, `gametext.bin`, `vmacros.bin`, `keyhelp.bin` | `libs/rtxt` | `minimal_rtxt_gen` (emit + byte-stable + round-trip) | **done** — the boot string tables |
 | `items.def`, `weapon.def`, `ammo.def` | authored text | `minimal_def_validate` (parse through `libs/def`) | **done** — a spawnable person, a rifle, its round |
 | `main.mnu`, `mp.mnu` | `libs/mnu` | `minimal_mnu_validate` (parse + screen present) | **done** — Startup node + LAN host/join, small authored |
 | `mnml.env`, `mnml.bms` | `libs/env`, `libs/mission` | `minimal_map_gen` (round-trip + content) | **done** — one TOD + a named mission with two team spawns |
@@ -86,22 +110,25 @@ Authored so far (each guarded by a ctest):
 depthmap (→ `mnml.cpt` + ~680 `.tms`/`.tml` LOD tiles into a gitignored
 `_pff_build/`), then `pff_write_archive` bundles the set into the **three
 boot-table archives**, each file in the archive retail uses for its kind
-(witnessed against the JOTAC JO install): `language.pff` = the fatal text bins
-(`gametext`/`vmacros`/`keyhelp.bin`), `localres.pff` = the menus, defs, and
-mission (`.mnu`/`.def`/`.bms`), `resource.pff` = the map and terrain
+(witnessed against the JOTAC JO install): `language.pff` = the boot text bins
+(`gameerr`/`gametext`/`vmacros`/`keyhelp.bin`), `localres.pff` = the menus,
+defs, and mission (`.mnu`/`.def`/`.bms`), `resource.pff` = the map and terrain
 (`.env`/`.trn`/source art + the generated `mnml.cpt` and tiles). The `.pff`s
 and `_pff_build/` are gitignored (never committed). Committed is only the
-small config surface (bins/defs/mnus/env/bms/trn + the tiny source-art
-images); everything heavy is regenerated.
+small config surface in `resources/` (bins/defs/mnus/env/bms/trn + the tiny
+source-art images); everything heavy is regenerated.
 
 **Retail boot is validated (2026-07-05):** a single arbitrary-named `mnml.pff`
 dies at the boot gate exactly as witnessed (`ShowEarlyError(3)` "missing
 CD?" — the fixed name table never probes it); with the set under the
-boot-table names, retail `Jointops.exe` boots and runs (writes `game.cfg`,
-saves). Remaining: **asset-gated host + join acceptance** (§ Validation) on
-the three-way split — this is where the `.trn`/art dimensions and the
-build-output→`.trn` mapping get their final confirmation; it needs a retail
-install.
+boot-table names, retail `Jointops.exe` boots **fully clean** — the `/FRISK`
+log shows every set file loading from the PFFs (`gameerr` → `gametext` →
+`vmacros` → `keyhelp` → `weapon.def` → `items.def` → `MNML.BMS` → `main.mnu`)
+and the shell runs (profile saves written). The Startup screen is black until
+the font leg lands (§ omitted). Remaining: the visible-menu legs, then
+**asset-gated host + join acceptance** (§ Validation) — this is where the
+`.trn`/art dimensions and the build-output→`.trn` mapping get their final
+confirmation; it needs a retail install.
 
 ## Validation (asset-gated — needs a retail JO install)
 
@@ -109,8 +136,12 @@ install.
    `resource.pff` present in the game root (and optionally `/d <loose dir>`) —
    confirm boot to the main menu (the fatal set is sufficient). The archives
    must bear the boot-table names (witnessed above; an arbitrary name never
-   mounts) and `/d` alone is not enough. **Done 2026-07-05** (via the renamed
-   bundle; re-confirm on the three-way split).
+   mounts) and `/d` alone is not enough. **Done 2026-07-05 on the three-way
+   split**: full clean boot to the (black — see § omitted) Startup screen.
+   Debug with **`/FRISK`** — the retail file-access log
+   (`[orig: File_SetLoggingEnabled @ 0x75a470 → File_LogFileAccess @
+   0x75a480]`): every *successful* load is appended to `_filelog.txt` in the
+   game dir as `PFF LOADED FILE:` / `LOADED FILE:` (misses are not logged).
 2. Host the custom map from the MP menu on instance A.
 3. Join from instance B (LAN). Confirm both spawn on `<map>` and can move.
 

@@ -29,7 +29,7 @@ int fail = 0;
 		}                                                                                           \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/" + name; }
+std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
 
 bool write_bytes(const std::string &p, const std::vector<uint8_t> &b) {
 	std::ofstream o(p, std::ios::binary);

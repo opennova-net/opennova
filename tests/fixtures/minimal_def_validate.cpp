@@ -23,7 +23,7 @@ int fail = 0;
 		if (!expect((c), (m))) ++fail;                                                              \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/" + name; }
+std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
 
 bool has_ammo(const DefAmmoFile &f, const char *name) {
 	for (size_t i = 0; i < f.count; ++i)

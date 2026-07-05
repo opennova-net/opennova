@@ -30,7 +30,7 @@ int fail = 0;
 		}                                                                                           \
 	} while (0)
 
-std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/" + name; }
+std::string path(const char *name) { return std::string(MINIMAL_FIXTURE_DIR) + "/resources/" + name; }
 
 // The minimal flat map's terrain config. Names mirror the packaging step's
 // output prefix (mnml) so the .cpt build output and the authored art line up.

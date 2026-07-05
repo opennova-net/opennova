@@ -40,10 +40,11 @@ bool read_bytes(const fs::path &p, std::vector<uint8_t> &b) {
 	return true;
 }
 
-// Committed sources per boot-table archive, mirroring retail's placement:
-// gametext/vmacros/keyhelp ship in retail language.pff; every .mnu/.def/.bms in
-// retail localres.pff; .env/.trn/terrain art in retail resource.pff.
-const char *kLanguage[] = {"gametext.bin", "vmacros.bin", "keyhelp.bin"};
+// Committed sources (fixtures/minimal/resources/) per boot-table archive,
+// mirroring retail's placement: gameerr/gametext/vmacros/keyhelp ship in
+// retail language.pff; every .mnu/.def/.bms in retail localres.pff;
+// .env/.trn/terrain art in retail resource.pff.
+const char *kLanguage[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin"};
 const char *kLocalres[] = {"items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu", "mnml.bms"};
 const char *kResource[] = {"mnml.env",   "mnml.trn",   "mnml_c.tga", "mnml_dm.tga",
                            "mnml_dc1.tga", "mnml_t.tga", "mnml_m.pcx", "mnml_f.pcx"};
@@ -127,12 +128,14 @@ int main() {
 		return 1;
 	}
 
-	// 2) Per-archive file lists: committed sources by retail placement; the
-	//    generated terrain rides resource.pff (excluding the depthmap build input).
+	// 2) Per-archive file lists: committed sources (resources/) by retail
+	//    placement; the generated terrain rides resource.pff (excluding the
+	//    depthmap build input).
+	const fs::path sources = root / "resources";
 	std::vector<std::pair<std::string, fs::path>> language, localres, resource;
-	for (const char *n : kLanguage) language.emplace_back(n, root / n);
-	for (const char *n : kLocalres) localres.emplace_back(n, root / n);
-	for (const char *n : kResource) resource.emplace_back(n, root / n);
+	for (const char *n : kLanguage) language.emplace_back(n, sources / n);
+	for (const char *n : kLocalres) localres.emplace_back(n, sources / n);
+	for (const char *n : kResource) resource.emplace_back(n, sources / n);
 	for (const fs::directory_entry &de : fs::directory_iterator(work)) {
 		if (!de.is_regular_file()) continue;
 		const std::string fn = de.path().filename().string();
@@ -142,7 +145,8 @@ int main() {
 
 	// 3) Write + verify each boot-table archive: the fatal bins in language, the
 	//    mission set in localres, the map polydata in resource.
-	if (!write_and_verify(root, "language.pff", language, {"gametext.bin", "vmacros.bin", "keyhelp.bin"}))
+	if (!write_and_verify(root, "language.pff", language,
+	                      {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin"}))
 		return 1;
 	if (!write_and_verify(root, "localres.pff", localres, {"items.def", "main.mnu", "mp.mnu", "mnml.bms"}))
 		return 1;

@@ -1,21 +1,29 @@
 # Generate-at-package artifacts — produced by minimal_pff_package
 # (OPENNOVA_BUILD_MINIMAL_PFF=1), never committed (~10 MB, 685 terrain files).
-# The three boot-table archives [orig: name table @ 0x829f90]:
-language.pff
-localres.pff
-resource.pff
-_pff_build/
+# The three boot-table archives [orig: name table @ 0x829f90] land at this
+# root (the "game dir"); the committed authored sources live in resources/.
+/language.pff
+/localres.pff
+/resource.pff
+/_pff_build/
 
 # Retail-validation residue (the asset-gated launch step runs retail
 # Jointops.exe INSIDE this dir) — never committable, per the asset policy.
-Jointops.exe
+# Anchored to this root so nothing in resources/ can ever be shadowed.
+/Jointops.exe
+/binkw32.dll
+/Gameerr.bin
+/PRE.MNU
 *.lnk
-binkw32.dll
-EARLYERR.TXT
-game.cfg
-ghw.txt
-admin_log.txt
-hiscore.txt
-score.ini
+*.sbf
+*.bik
 *.sav
-cache/
+_*.txt
+/EARLYERR.TXT
+/SYSDUMP.TXT
+/game.cfg
+/ghw.txt
+/admin_log.txt
+/hiscore.txt
+/score.ini
+/cache/
