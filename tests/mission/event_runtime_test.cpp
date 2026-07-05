@@ -403,6 +403,154 @@ static void test_playpartanim_zero_time_saturates() {
     CHECK(tmp.brain.f[world::AiBrain::kPartAnimPhase0] == 0);
 }
 
+// A trigger record with just a main/sub type and params.
+static bms::Trigger make_trigger(bms::TriggerMainType main, int sub, int p1 = 0, int p2 = 0) {
+    bms::Trigger t{};
+    t.main_type = main;
+    t.sub_type = sub;
+    t.param1 = p1;
+    t.param2 = p2;
+    return t;
+}
+
+// One-trigger event whose action sets V9=1 (the fired probe).
+static void load_probe(mission::BmsEventSystem &sys, const bms::Trigger &t) {
+    bms::Event e{};
+    e.flags = bms::EventFlags::None;
+    e.trigger_index = 0;
+    e.trigger_count = 1;
+    e.action_index = 0;
+    e.action_count = 1;
+    sys.load({e}, {t}, {misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+}
+
+// The session load-parity toggle: static image value 1, one XOR per BMS load
+// [orig: dword_815174 ^= 1 at EventTrigger_LoadAllData @0x454029; read raw
+// @0x453b24]. Assertions are RELATIVE to the current process state (every
+// load() in this binary flips it), which is exactly the retail contract.
+static void test_second_time_through_parity() {
+    const bool before = mission::BmsEventSystem::second_time_through();
+    for (int round = 0; round < 2; ++round) {
+        World w;
+        w.registry.configure_pool(0, 4);
+        mission::BmsEventSystem sys;
+        load_probe(sys, make_trigger(bms::TriggerMainType::SecondTimeThrough, 0));
+        const bool expected = (round == 0) ? !before : before;
+        CHECK(mission::BmsEventSystem::second_time_through() == expected);
+        w.add_system(&sys);
+        w.load_systems();
+        tick_n(w, kPass);
+        CHECK((w.vars.get_mission(9) == 1) == expected);
+    }
+}
+
+// Teammate category [orig: EventTrigger_EvaluateCondition cat 6 @0x453b3c..0x453b67]:
+// TeammateIsEnabled = !in-session && !(option bit); MedicAssisting/Evacuating both
+// read the heli-lift active count.
+static void test_teammate_triggers() {
+    const int kEnabled = static_cast<int>(bms::TeammateTriggerType::TeammateIsEnabled);
+    const int kMedic = static_cast<int>(bms::TeammateTriggerType::TeammateMedicAssisting);
+    const int kEvac = static_cast<int>(bms::TeammateTriggerType::TeammateEvacuating);
+    struct Case { int sub; bool mp; bool disabled; int lifts; bool fires; };
+    const Case cases[] = {
+        {kEnabled, false, false, 0, true},   // SP, option on -> enabled
+        {kEnabled, false, true, 0, false},   // SP, teammates disabled
+        {kEnabled, true, false, 0, false},   // MP session always disables
+        {kMedic, false, false, 0, false},    // no lift op in flight
+        {kMedic, false, false, 1, true},     // a lift op in flight
+        {kEvac, false, false, 2, true},      // Evacuating reads the same count
+    };
+    for (const Case &c : cases) {
+        World w;
+        w.registry.configure_pool(0, 4);
+        w.mp_session = c.mp;
+        w.teammates_disabled = c.disabled;
+        w.heli_lift_active_count = c.lifts;
+        mission::BmsEventSystem sys;
+        load_probe(sys, make_trigger(bms::TriggerMainType::Teammate, c.sub));
+        w.add_system(&sys);
+        w.load_systems();
+        tick_n(w, kPass);
+        CHECK((w.vars.get_mission(9) == 1) == c.fires);
+    }
+}
+
+// The AWOL counter: +1 per full quarter cycle (64 ticks) while the local player
+// is outside every ACTIVE zone (X/Y only), reset when back inside; PlayerAwol
+// compares it to the authored threshold. [orig: @0x454d50 cursor==0 ->
+// Entity_UpdateStuckCounter @0x439dc0 / probe @0x439d40; trigger @0x453d40]
+static void test_player_awol_counter_and_trigger() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    world::Aabb zone;
+    zone.min = {0.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    w.registry.register_area("", zone, /*active=*/true);
+    world::Entity seed{};
+    seed.alive = true;
+    seed.position = {50.0f, 50.0f, 500.0f}; // inside in X/Y; Z is ignored
+    world::EntityHandle player = w.registry.spawn(0, seed);
+    w.cached.local_player = player;
+
+    mission::BmsEventSystem sys;
+    load_probe(sys, make_trigger(bms::TriggerMainType::Player,
+                                 static_cast<int>(bms::PlayerTriggerType::PlayerAwol),
+                                 /*threshold=*/2));
+    w.add_system(&sys);
+    w.load_systems();
+
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 0); // inside the active zone
+
+    w.registry.get(player)->position = {500.0f, 500.0f, 0.0f}; // out of every zone
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 1);
+    CHECK(w.vars.get_mission(9) == 0); // threshold 2 not reached
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 2);
+    CHECK(w.vars.get_mission(9) == 1); // PlayerAwol fires at >= threshold
+
+    w.registry.get(player)->position = {50.0f, 50.0f, 0.0f};
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 0); // back in bounds resets
+
+    // An inactive-only zone world never counts as out of bounds.
+    World w2;
+    w2.registry.configure_pool(0, 4);
+    w2.registry.register_area("", zone, /*active=*/false);
+    world::EntityHandle p2 = w2.registry.spawn(0, seed);
+    w2.registry.get(p2)->position = {500.0f, 500.0f, 0.0f};
+    w2.cached.local_player = p2;
+    mission::BmsEventSystem sys2;
+    load_probe(sys2, make_trigger(bms::TriggerMainType::Player,
+                                  static_cast<int>(bms::PlayerTriggerType::PlayerAwol), 1));
+    w2.add_system(&sys2);
+    w2.load_systems();
+    tick_n(w2, kCycle);
+    CHECK(sys2.awol_count() == 0);
+}
+
+// The post pass is a host-called one-shot sweep, never periodic (D-EVT-4)
+// [orig: UpdateAllWithFlag4 @0x454e00, one call per teardown/restart]. Normal
+// ticks must never touch a PostMission-flag entry.
+static void test_post_pass_is_a_one_shot() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    mission::BmsEventSystem sys;
+    sys.load({simple_event(bms::EventFlags::PostMission, 0)}, {},
+             {misvar(bms::MissionVariableActionSubType::Increment, 9, 0)});
+    w.add_system(&sys);
+    w.load_systems();
+
+    tick_n(w, kCycle * 2);
+    CHECK(w.vars.get_mission(9) == 0); // normal ticking never runs post entries
+
+    sys.run_post_mission_pass(w);
+    CHECK(w.vars.get_mission(9) == 1); // exactly one sweep per transition call
+    sys.run_post_mission_pass(w);
+    CHECK(w.vars.get_mission(9) == 1); // fire-once latch holds across transitions
+}
+
 int main() {
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
@@ -417,6 +565,10 @@ int main() {
     test_output_text_and_reset_event();
     test_event_trigger_reads_window();
     test_playpartanim_zero_time_saturates();
+    test_second_time_through_parity();
+    test_teammate_triggers();
+    test_player_awol_counter_and_trigger();
+    test_post_pass_is_a_one_shot();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);
     return failures ? 1 : 0;
 }

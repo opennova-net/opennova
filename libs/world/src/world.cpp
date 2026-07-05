@@ -180,6 +180,26 @@ bool EntityCommands::ssn_in_area(uint16_t ssn, int area_id) const {
     return a->bounds.contains(e->position);
 }
 
+bool EntityCommands::local_player_out_of_bounds() const {
+    // [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40] At least one area-trigger
+    // record with the Active flag (bit0), and the local player's X/Y inside NONE
+    // of the active zones' X/Y AABBs — the Z axis is ignored. No local player
+    // (a serve-only host) reads as in-bounds.
+    const Entity *p = world_.registry.get(world_.cached.local_player);
+    if (!p) return false;
+    bool any_active = false;
+    for (int id = 0;; ++id) {
+        const Area *a = world_.registry.area(id);
+        if (!a) break;
+        if (!a->active) continue;
+        any_active = true;
+        if (p->position.x >= a->bounds.min.x && p->position.x <= a->bounds.max.x &&
+            p->position.y >= a->bounds.min.y && p->position.y <= a->bounds.max.y)
+            return false;
+    }
+    return any_active;
+}
+
 int EntityCommands::kill_group(int group) {
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);

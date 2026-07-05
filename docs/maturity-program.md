@@ -286,8 +286,11 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
   `nw_golden_diff` `kDeferredGaps` with the D-NET refs from the attested 21-gap baseline,
   so the golden diff names each deferral by ID.
 - **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 (and #21) implemented **libs/env-first**.
-- **PAR-WORLD** (M) the D-INF opens and D-EVT-1/-3 (D-ITEMDEF-1 closed faec4b3e —
-  the first ledger row to zero).
+- **PAR-WORLD** (M) the D-INF opens and the D-EVT set (D-ITEMDEF-1 closed
+  faec4b3e — the first ledger row to zero; the 2026-07-05 D-EVT grill + slice
+  closed D-EVT-2/-4, cats 5/6 of D-EVT-3, and minted-closed D-EVT-5, leaving
+  D-EVT-1 and the cat-1/2 matrix family witnessed-ready-deferred on the
+  TriggerRelations / deploy-POI ports).
 - **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11, D-SND-2, and D-HUD after its RE
   port lands.
 - **PAR-R1..R7** (S/M each) the seven UNAUDITED-system audits (engine-research /

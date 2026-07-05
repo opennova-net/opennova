@@ -120,20 +120,24 @@ skyfog) map onto these `#` entries.
 | D-INF-3 | Ground/water resolver: horizontal capsule + platforms/water + airborne anim overlay pending (the vertical capsule-bottom settle landed as D-INF-6) | A | OPEN (partial) | PAR-WORLD |
 | D-INF-4 | Computed sin/cos tables vs the runtime-built originals (`trunc(f(idx)·2^22)`) | A | OPEN | PAR-WORLD |
 | D-INF-5 | Idle look-at system + its spotting side effects — rides the combat pass | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
-| D-EVT-1 | Spawn-point activation on fire is unported (linked spawn points not marked) | A | OPEN | PAR-WORLD |
-| D-EVT-2 | Quarter-pass piggyback (`@0x454d50`) skipped | A | OPEN | PAR-WORLD |
-| D-EVT-3 | Condition categories 1 (team/zone matrix), 5 (load-toggle), 6 (net) unmodeled (return false) | A | OPEN | PAR-WORLD |
-| D-EVT-4 | Pre/post-pass call frequency unwitnessed | B | NEEDS-RE | PAR-WORLD |
+| D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
+| D-EVT-3 | The cat-1/2 relation-matrix + group alert/count family (12 sticky bitmatrices, 48-B group records, 62-tick recount) — full port spec in the record §3a; cats 5/6 closed this train | A | WITNESSED-READY-DEFERRED | PAR-WORLD (TriggerRelations port) |
 
 Closed 2026-07-05: **D-ITEMDEF-1** → `FIXED` (faec4b3e — `item_type_from_string`
 witnessed mapping `[orig: ItemDef_ParseProperty @ 0x49eb00]`;
 [world/itemdef-re.md](world/itemdef-re.md) verdict flipped to MATCHING). The first
-ledger row driven to zero.
-
-Unnumbered latent divergence (needs a `D-EVT-5` mint the next time
-[bms-event-runtime-re.md](mission/bms-event-runtime-re.md) is touched): the BMS second
-chunk (header +0x246 bytes) is always `fseek`'d past and never consumed — round-trips
-only while that value is 0 (`OPEN`, class A).
+ledger row driven to zero. Same day, the D-EVT grill closed three more:
+**D-EVT-2** → `FIXED` (the quarter-pass piggyback IS the player-AWOL counter
+`[orig: @0x454d50 → Entity_UpdateStuckCounter @0x439dc0]`, ported with the
+PlayerAwol evaluator), **D-EVT-3 cats 5/6** → `FIXED` (load-parity toggle
+`[orig: dword_815174]`; Teammate category `[orig: @0x453b3c..0x453b67]`), and
+**D-EVT-4** → `FIXED` (pre/post passes are one-shot per transition, never
+periodic `[orig: @0x525b86; @0x52266c/@0x5263a0]` — our per-phase-tick post
+evaluation was itself the divergence, replaced by `run_post_mission_pass`).
+**D-EVT-5** minted and closed at birth: the BMS second chunk (header +0x246)
+is runtime-opaque — both retail paths `fseek` past it (@0x40f6da/@0x40f756,
+its only xrefs); our reader's parse-and-round-trip is a faithful superset
+whose grammar is editor-side surface gated on D-MIS-3.
 
 ### UI — menus/controls, sound, player-info, HUD
 
@@ -200,21 +204,22 @@ Open counts by domain (the target is zero in every cell):
 |---|---|---|---|---|
 | Net | 10 | 0 | 12 (2 also NEEDS-RE) | 22 |
 | Environment | 2 | 0 | 5 | 7 |
-| World / AI + events | 6 | 1 | 2 | 9 |
+| World / AI + events | 3 | 0 | 4 | 7 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 11 | 1 (+1 dual) | 5 | 17 |
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
-| **Total OPEN** | | | | **66** |
+| **Total OPEN** | | | | **64** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Plus one unnumbered latent divergence (BMS second chunk) awaiting a `D-EVT-5` mint.
 Permanent register size: **13** (below). `UNAUDITED` systems: **7** (below).
+(The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
+in the World table above.)
 
 ---
 

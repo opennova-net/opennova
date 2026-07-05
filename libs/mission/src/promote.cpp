@@ -279,7 +279,9 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
         b.min.y = at.get_y_min(); b.max.y = at.get_y_max();
         if (at.constrains_z()) { b.min.z = at.get_z_min(); b.max.z = at.get_z_max(); }
         else { b.min.z = bms::AreaTrigger::kUnboundedZMin; b.max.z = bms::AreaTrigger::kUnboundedZMax; }
-        world.registry.register_area(std::string(), b);
+        // The Active flag rides along for the player-AWOL probe, which walks only
+        // active zones [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40].
+        world.registry.register_area(std::string(), b, at.is_active());
     }
 
     // Spawn actors + AI brains (organics are AI-driven; vehicles get brains in the vehicle

@@ -4,9 +4,25 @@ namespace opennova::mission {
 
 using world::World;
 
+namespace {
+// Session-scoped load-parity flag, process-global like the original's BSS word.
+// Static image value 1; the ONLY writer is the XOR at the end of each BMS load.
+// [orig: dword_815174; EventTrigger_LoadAllData @0x454029] (D-EVT-3 cat 5)
+int g_second_time_through = 1;
+} // namespace
+
+bool BmsEventSystem::second_time_through() {
+    // Raw read, no normalization [orig: EventTrigger_EvaluateCondition @0x453b24].
+    return g_second_time_through != 0;
+}
+
 void BmsEventSystem::load(const std::vector<bms::Event> &events,
                           const std::vector<bms::Trigger> &triggers,
                           const std::vector<bms::Action> &actions) {
+    // One parity flip per BMS load: first load of a session -> reads 0,
+    // restart -> 1, alternating. [orig: dword_815174 ^= 1 at the end of
+    // EventTrigger_LoadAllData @0x454029, sole caller Mission_LoadBMSFile @0x40fc85]
+    g_second_time_through ^= 1;
     events_.clear();
     events_.reserve(events.size());
     for (const bms::Event &e : events) {
@@ -34,7 +50,11 @@ void BmsEventSystem::on_load(World &) {
     }
     normal_gate_ = 0;
     quarter_cursor_ = 0;
-    post_mission_ = false;
+    // The retail AWOL counter is a persistent global; zeroing here is a
+    // load-time convenience with the same observable behavior (the counter is
+    // re-derived within one quarter cycle either way, and it only grows while
+    // the player is out of bounds). [orig: dword_A89160]
+    awol_64tick_count_ = 0;
 }
 
 bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
@@ -62,6 +82,9 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 case bms::SingleTriggerType::SingleIsWithinArea:
                     return cmds.ssn_in_area(static_cast<uint16_t>(t.param1), t.param2);
                 default:
+                    // The sees/targeted/shot matrix + alert/count subs land with
+                    // the TriggerRelations port (D-EVT-3 cat 2, the S-family
+                    // matrices keyed by raw authored SSN); false until then.
                     return false;
             }
         }
@@ -72,6 +95,9 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 case bms::GroupTriggerType::GroupAlive:
                     return cmds.group_alive(t.param1);
                 default:
+                    // The sees/targeted/shot matrix + alert/count/waypoint subs
+                    // land with the TriggerRelations port (D-EVT-3 cat 1);
+                    // false until then.
                     return false;
             }
         }
@@ -84,9 +110,42 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             if (t.param1 >= 0) return event_fired(static_cast<size_t>(t.param1));
             return false;
         }
+        case bms::TriggerMainType::SecondTimeThrough:
+            // Raw read of the session load-parity toggle. [orig: @0x453b24 ->
+            // dword_815174] (D-EVT-3 cat 5)
+            return second_time_through();
+        case bms::TriggerMainType::Teammate: {
+            switch (static_cast<bms::TeammateTriggerType>(t.sub_type)) {
+                case bms::TeammateTriggerType::TeammateIsEnabled:
+                    // In an MP session teammates are never "enabled" for this
+                    // trigger; otherwise it is the game option's inverse.
+                    // [orig: @0x453b53 is_in_session -> false; @0x453b67
+                    //  !(dword_24D1E34 & 0x20)]
+                    if (w.mp_session) return false;
+                    return !w.teammates_disabled;
+                case bms::TeammateTriggerType::TeammateMedicAssisting:
+                case bms::TeammateTriggerType::TeammateEvacuating:
+                    // Both subs read the same "any teammate heli-lift op in
+                    // flight" state — indistinguishable in retail JO.
+                    // [orig: @0x453b42 -> getter @0x451720 -> dword_AC4F40]
+                    return w.heli_lift_active_count != 0;
+            }
+            return false; // [orig: sub-type range check @0x453b3c]
+        }
+        case bms::TriggerMainType::Player: {
+            if (static_cast<bms::PlayerTriggerType>(t.sub_type) ==
+                bms::PlayerTriggerType::PlayerAwol) {
+                // AWOL quanta (once per 64 ticks, ~1.02 s each) vs the authored
+                // threshold. [orig: @0x453d40 — getter @0x439de0 >= param1] (D-EVT-2)
+                return awol_64tick_count_ >= t.param1;
+            }
+            // The remaining Player subs (view modes, dialog, satchel, mounts)
+            // ride their host subsystems' ports; false until witnessed-wired.
+            return false;
+        }
         default:
-            // Team/zone, net/session, input/player categories not modeled in this
-            // foundational core; treated as false.
+            // Out-of-range main types read false, matching the dispatcher's
+            // bounds behavior. [orig: EventTrigger_EvaluateCondition @0x453620]
             return false;
     }
 }
@@ -254,6 +313,17 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
     }
 }
 
+void BmsEventSystem::run_post_mission_pass(World &w) {
+    // ONE whole-list sweep over the PostMission-flag entries, called by the host
+    // exactly once per transition — never periodically, so an authored post
+    // delay of 1 fires at the transition and larger delays effectively never do
+    // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; one-shot
+    // callers Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]
+    const uint32_t post_bit = static_cast<uint32_t>(bms::EventFlags::PostMission);
+    for (ScriptedEvent &se : events_)
+        if ((static_cast<uint32_t>(se.event.flags) & post_bit) != 0) update_entry(w, se);
+}
+
 void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     if (!ctx.is_authority) return; // BMS events run only on the authoritative host
 
@@ -261,17 +331,14 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     const uint32_t post_bit = static_cast<uint32_t>(bms::EventFlags::PostMission);
 
     if (ctx.pre_mission) {
-        // Pre-mission pass: every PreMission-flag entry, whole list per call.
-        // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0, mission-start context]
+        // Pre-mission pass: every PreMission-flag entry, one whole-list sweep.
+        // The host contract is ONE pre_mission tick per mission start, before
+        // the clock runs (NovaSimulation delivers exactly one) — retail's pre
+        // pass is a single call, never periodic (D-EVT-4).
+        // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0; sole caller
+        //  Game_StartMission @0x525b86, before current_tick = 0 @0x525b9f]
         for (ScriptedEvent &se : events_)
             if ((static_cast<uint32_t>(se.event.flags) & pre_bit) != 0) update_entry(w, se);
-        return;
-    }
-    if (post_mission_) {
-        // Post-mission pass: every PostMission-flag entry, whole list per call.
-        // [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00, debrief/video contexts]
-        for (ScriptedEvent &se : events_)
-            if ((static_cast<uint32_t>(se.event.flags) & post_bit) != 0) update_entry(w, se);
         return;
     }
     // Normal events (neither flag): every 16th tick process ONE QUARTER of the
@@ -280,6 +347,15 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     // (++dword_C8D808 > 15) -> quarter pass @0x454d50 (cursor & 3, (flags & 6) == 0)]
     if (++normal_gate_ <= 15) return;
     normal_gate_ = 0;
+    if (quarter_cursor_ == 0) {
+        // Quarter-cycle piggyback, once per full cycle (64 ticks): the player-
+        // AWOL counter the PlayerAwol trigger reads — increments while the local
+        // player sits outside every active zone, resets otherwise (D-EVT-2).
+        // [orig: quarter pass @0x454d50 cursor==0 -> Entity_UpdateStuckCounter
+        //  @0x439dc0 -> Entity_IsLocalPlayerOutOfBounds @0x439d40; dword_A89160]
+        if (w.commands.local_player_out_of_bounds()) ++awol_64tick_count_;
+        else awol_64tick_count_ = 0;
+    }
     const size_t quarter = (events_.size() + 3) / 4;
     const size_t start = quarter * static_cast<size_t>(quarter_cursor_);
     const size_t end = (start + quarter < events_.size()) ? start + quarter : events_.size();
