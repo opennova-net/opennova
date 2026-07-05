@@ -35,7 +35,7 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| ONED-A avatars merge train | (this train) | the twelfth workspace (Avatars) merged from `playerinfo-runtime`; avatars ADR renumbered 0013→0021; eleven→twelve sweep |
+| ONED-A avatars merge train | (this train) | the twelfth workspace (Avatars) merged from `playerinfo-runtime`; avatars ADR renumbered 0013→0021; eleven→twelve sweep; ratchet `test_private_pokes` baseline 1319→1371 — maintainer-approved bump for the branch's two pre-ratchet white-box files (`player_info_menu_seam_test.gd` 26, `avatar_preview_test.gd` 26); ONED-TST claws it back |
 | LIBS-1 world→terrain seam | bc8c920a | libs/terrain_query query leaf + the permanent forbidden-edge check (link_graph_check.py); ADR 0020 |
 | NET-2 npwire extraction | 46cd0ac4 | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
 | GOV-1/2/3 bootstrap docs | 4274cfdf | umbrella + vocabulary + ADRs 0015–0018 |
