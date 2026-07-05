@@ -66,6 +66,7 @@ behavior is summarized and cited.
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
 | Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..3) |
 | Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (PAR-R2 audit: placement MATCHING vs retail `@0x600197`, D-FOLIAGE-1 color) |
+| Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`, D-TIL-1 outline) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
 | Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (engine-research; HUD port in flight) |
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown geometry/row-height grill, D-MNU-7/8 fixed) |
@@ -82,7 +83,7 @@ behavior is summarized and cited.
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide, engine-research) |
 
 Systems documented mainly by code and tests so far (no dedicated RE record
-yet): terrain, tiles, credits, the importer pipeline, and the
+yet): terrain, credits, the importer pipeline, and the
 VFS/PFF mount stack (the PFF write side is ADR 0008). The project glossary
 lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the project vision is
 [`GOALS.md`](../GOALS.md).

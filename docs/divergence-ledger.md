@@ -27,8 +27,8 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
 3. **The seven systems with no RE record get research audits.** Terrain, foliage, tiles,
    fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
-   unknowns into tracked rows — **VFS/PFF (R7, D-VFS), Fonts (R4, D-FNT), and Foliage
-   (R2, D-FOLIAGE) landed; four remain** (see the UNAUDITED table).
+   unknowns into tracked rows — **VFS/PFF (R7), Fonts (R4), Foliage (R2), and Tiles
+   (R3) landed; three remain** (terrain, credits, importer — see the UNAUDITED table).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -233,6 +233,15 @@ slot order, extra archives never mount, pinned by
 (recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
 modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 
+### Tiles — [tiles/til-re.md](tiles/til-re.md) (D-TIL catalog; PAR-R3)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-TIL-1 | `TIL_FLAG_OUTLINE` (0x08): `libs/til` models a jodemo LINELIST outline pass; retail's overlay render (`render_water_quad @ 0x604700`) handles only flip/rotate (bits 0/1/2) — outline may be jodemo-only (→ PERMANENT) or a separate retail path | B | NEEDS-RE | PAR (tiles) |
+
+Overlay entry (12 B), atlas UV, flip/rotate flags, half-texel shift, Z negation,
+and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`.
+
 ### Foliage — [foliage/foliage-re.md](foliage/foliage-re.md) (D-FOLIAGE catalog; PAR-R2)
 
 | ID | One-liner | Class | Disposition | Slice |
@@ -272,17 +281,18 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
+| Tiles (new domain, PAR-R3 audit) | 0 | 1 | 0 | 1 |
 | Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
 | Fonts (new domain, PAR-R4 audit) | 2 | 1 | 0 | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **65** |
+| **Total OPEN** | | | | **66** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **4** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **3** (below).
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -331,10 +341,10 @@ the follow-up path.
 
 ## UNAUDITED systems (no RE record yet)
 
-Four systems remain documented mainly by code and tests (VFS/PFF graduated via
-PAR-R7; **Fonts** via PAR-R4, D-FNT; **Foliage** via PAR-R2, D-FOLIAGE — its
-placement audits cleanly against RETAIL `generate_foliage_instances_0 @ 0x600197`
-even though the port was made from jodemo)
+Three systems remain documented mainly by code and tests (VFS/PFF via PAR-R7;
+**Fonts** via PAR-R4; **Foliage** via PAR-R2; **Tiles** via PAR-R3 — foliage and
+tiles both audited cleanly against RETAIL even though the ports were made from
+jodemo)
 ([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
 that lands an RE record **with a D-catalog**, converting untracked divergences into
 tracked rows.
@@ -355,7 +365,6 @@ retail JO (no `CBIN`/`.kda` string), so it needs the source binary. The importer
 | System | Audit slice | Partial coverage today | IDB needed |
 |---|---|---|---|
 | Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). | jodemo |
-| Tiles | PAR-R3 | `libs/til` cites jodemo, but tiles ARE in retail — anchors witnessed: `PolyTrn_RenderTile @ 0x60df0d` (overlay quad render, env #19), `serialize_terrain_tiles @ 0x6080F0` (wire tile format, D-NET-135). | retail (multi-part: overlay + atlas + tilestrip) or jodemo |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. | source binary (CBIN not in retail JO) |
 | Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). | n/a (Python + FFI) |
 
