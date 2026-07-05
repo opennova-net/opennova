@@ -51,7 +51,12 @@ Each page becomes a GPU texture named `GFONT<this>:<NN>` (`GTexture_FindOrCreate
 |---|---|---|---|
 | D-FNT-1 | A | **FIXED 2026-07-05** | Offset `+4` is the design-width scale reference (`this+4844 = 800.0 / it`), NOT a version — the engine never validates it. Our reader treated it as a version and rejected `!= 800`. **Fixed:** `fnt_parse_header` drops the equality gate; a non-800 font parses (pinned in `fnt_roundtrip_test`). `libs/fnt` `fnt_font_t.version` renamed to `design_width`. |
 | D-FNT-2 | A | **FIXED 2026-07-05** | The per-font design scale `800.0 / designWidth` is now retained: `fnt_parse` stores the file's `+4` word into `design_width`, `fnt_design_scale()` computes `800/dw` `[orig: @ 0x674740]`, and the from-scratch writer emits the font's own design width. The host applies the scale at render (ENG-4). |
-| D-FNT-3 | B | NEEDS-RE | Offset `+12` (`hdr3`, `this+356`) is named `shadow_offset` in our model but the loader only STORES it — the "shadow offset" semantics are not confirmed here. Witness a `this+356` reader (a draw-time shadow pass) to confirm or rename. |
+| D-FNT-3 | B | NEEDS-RE (narrowed) | Offset `+12` (`hdr3`, `this+356`) is named `shadow_offset` but the loader only STORES it. **Narrowed 2026-07-05:** the text drawer `CGameFont_DrawText @ 0x6752c0` renders its shadow from a FORMAT FLAG (`BYTE1(textBuffer)`) + fixed sub-pixel offsets (`cursorX-0.5`, `y-1.5`), NOT from `this+356` — so "shadow_offset" is unsupported by the draw path. Its real consumer (if any) is elsewhere; leave the name until a positive `this+356` reader is found rather than rename speculatively. |
+
+**D-FNT-2 render-scale confirmed:** the same drawer reads `this+4844` (our
+`fnt_design_scale` = `800/dw`) and multiplies it into every glyph's width/height
+(`v161 = this+4844 * scaleX`, `v163 = this+4844 * scaleY`) — the design scale we
+now retain is exactly the engine's glyph render scale `[orig: @ 0x6752c0]`.
 
 ## Cross-references
 
