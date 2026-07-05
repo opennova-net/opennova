@@ -1,5 +1,9 @@
 // CBIN encoding/decoding implementation.
 // Uses ROL32 + XOR cipher to encode/decode obfuscated text data.
+// [orig: the retail CBIN writer @ 0x75e250 — magic 0x4E494243 @ 0x75e311, the
+//  20-byte header + fwrite, and the per-4-byte cipher loop @ 0x75e348
+//  (rol key,7; byte ^= key&0xFF). Witnessed read-only; see docs/credits/cbin-re.md
+//  (PAR-R5, D-CBIN), MATCHING.]
 #include "cbin/cbin.h"
 
 #include <algorithm>
@@ -26,7 +30,8 @@ uint32_t read_le_u32(const uint8_t* data) {
            (static_cast<uint32_t>(data[3]) << 24);
 }
 
-// Encode a buffer using ROL32 + XOR cipher
+// Encode a buffer using ROL32 + XOR cipher [orig: cipher loop @ 0x75e348 —
+// `mov ebx,[key]; rol ebx,7; mov [key],ebx; mov al,[key]; xor [blob],al`].
 void encode_buffer(std::vector<uint8_t>& data, uint32_t key) {
     for (size_t i = 0; i < data.size(); i++) {
         key = rol32(key, 7);

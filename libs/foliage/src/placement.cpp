@@ -1,3 +1,9 @@
+// Procedural per-cell foliage placement — a faithful port of the deterministic
+// grass/bush instancer. [orig: generate_foliage_instances_0 @ 0x600197 (retail
+// Jointops) — seed 0xA55B1EED, the ROL-hash PRNG, 36 candidates/cell, the
+// surface-type gate (Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0), and the
+// 0x20000 proximity spacing; byte-identical, see docs/foliage/foliage-re.md
+// (PAR-R2). Originally ported from jodemo sub_5C0240/5C6450/5C65E0.]
 #include "foliage/placement.h"
 
 #include <cmath>
