@@ -30,7 +30,7 @@ stack — UNAUDITED); this record pins only the *names* and the boot contract.
 
 | Resource | Failure behavior [orig] |
 |---|---|
-| `resource.pff` / `localres.pff` / `language.pff` (+ expansion `<n>.pff`/`<n>L.pff` slots) | **zero archives opened → `earlyerr.txt` line-3 dialog + exit** [orig: PFF_OpenAllArchives @ 0x4a4310 over the name table @ 0x829f90; fatal check Game_InitSubsystems @ 0x4a6f44]. Any individual archive missing is tolerated; only all-missing is fatal. Loose files are always searched first. |
+| `resource.pff` / `localres.pff` / `language.pff` (+ expansion `<n>.pff`/`<n>L.pff` slots) | **zero archives opened → `earlyerr.txt` line-3 dialog + exit** [orig: PFF_OpenAllArchives @ 0x4a4310 over the name table @ 0x829f90; fatal check Game_InitSubsystems @ 0x4a6f44]. Any individual archive missing is tolerated; only all-missing is fatal. Loose-first only under `/d` or a consumer-forced override; the default is archive-only (corrected by PAR-R7, [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md)). |
 | `gametext.bin` | "Unable to load game strings" MessageBox + **exit** [orig: Game_InitSubsystems @ 0x4a6fed] |
 | `vmacros.bin` | "Unable to load voice macro strings" MessageBox + **exit** [orig: @ 0x4a702f] |
 | `keyhelp.bin` | "Unable to load keyboard map strings" MessageBox + **exit** [orig: @ 0x4a7072] |

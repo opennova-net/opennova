@@ -295,7 +295,7 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
   TriggerRelations / deploy-POI ports).
 - **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11, D-SND-2, and D-HUD after its RE
   port lands.
-- **PAR-R1..R7** (S/M each) the seven UNAUDITED-system audits (engine-research /
+- **PAR-R1..R7** (S/M each; **R7 landed 2026-07-05** — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md), D-VFS-1..9) the UNAUDITED-system audits (engine-research /
   grill-ida): terrain, foliage, tiles, fonts, credits, importer pipeline, VFS/PFF mount
   stack — each lands an RE record **with a D-catalog**.
 - **Class-B research starters** (freeze-exempt engine-research): the HUD radar/crosshair,

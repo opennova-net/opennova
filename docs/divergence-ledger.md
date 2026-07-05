@@ -195,6 +195,18 @@ The LW `.3di` record is unlanded overall (PR #45 closed); its rows ride whenever
 import is revived. Note D-3DILW-1's v8 branch overlaps the 3DI/GP audit surface only at
 the container-detection seam.
 
+### VFS / PFF mount stack — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS catalog; PAR-R7)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-VFS-1 | Loose gating session-global vs retail's per-call forces (saves/foliage/gt.ssc/UI force loose-first sans /d; BMS-from-PFF forces archive-only under /d) | A | OPEN | PAR (vfs) |
+| D-VFS-2 | Fixed 6-slot archive name table vs our scan-all-*.pff (extra archives mount in ours, never in retail) | A | OPEN | PAR (vfs) |
+| D-VFS-3 | Path-qualified names passed verbatim in retail (loose subdir probes; flat archive names); our flat_key strips everywhere | A | OPEN | PAR (vfs) |
+| D-VFS-5 | Encrypted-entry streaming: retail decrypts whole-file reads only; ours always — corpus check needed | B | NEEDS-RE | PAR (vfs) |
+| D-VFS-7 | Query-only normalization (31-char truncation, trailing-space trim) vs our both-sides — pathological names only | A | OPEN (minor) | PAR (vfs) |
+
+D-VFS-4/6/8/9 are permanent candidates (register below).
+
 ### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
 
 | ID | One-liner | Class | Disposition | Slice |
@@ -218,13 +230,14 @@ Open counts by domain (the target is zero in every cell):
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
-| **Total OPEN** | | | | **61** |
+| VFS/PFF (new domain, PAR-R7 audit) | 4 | 1 | 0 | 5 |
+| **Total OPEN** | | | | **66** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **13** (below). `UNAUDITED` systems: **7** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **6** (below).
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -247,6 +260,9 @@ one-line rationale for why porting it would be *wrong*.
 | D-MNU-4 | The original truncates each scaled quad rect to int per element; the reimpl applies one float `CanvasItem` scale | A sub-pixel cosmetic difference; reproducing per-element int truncation would fight Godot's scene-graph scale model for no visible gain. |
 | D-PTL-2 | One mesh batch per graphic layer vs the engine's shared vertex/index buffer pooling | A host renderer architecture choice; visually equivalent, and pooling is a performance strategy, not observable behavior. |
 | D-NET-131 | A dedicated ("serve only") host runs as a mode-3 in-process listen server (`serve_and_play=false`), not the original's mode-1 host-only | Wire-equivalent from a joiner's view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); the difference is host-internal bookkeeping that never reaches a connected client. |
+| D-VFS-4 | Snapshot resource index vs retail's live per-call resolution | A host cache; our hosts remount on change — re-resolving every open would fight the indexed host model for no observable gain (mid-session loose drops are a dev workflow, not gameplay). |
+| D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
+| D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is host-internal. |
 | D-NET-140 | The listen host's own loopback connection receives the full 0x0A record set; retail sends its local player header-only frames | The full-record loopback is how serve-and-play renders its local view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); that frame never leaves the process, so retail interop is unaffected. |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
@@ -258,6 +274,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-MUS-7 | `op_callvl` (`0x0A` call form) resolves against an uninitialised-BSS name table in Jointops, so the opcode is dead; the reimpl mirrors the dead stub (push 0) | The original behavior *is* "do nothing" (the table is never populated); porting a "working" call would invent behavior the engine never had. |
 | D-MUS-5 | `inc_g`/`dec_g` (`0x11`/`0x12`) operate on 1 byte and raise no globals-dirty notify | An intentional mirror of the original's silence; adding the notify would diverge from the witnessed behavior. |
 | D-PTL-1 | The engine's outer dispatcher remaps `g2_color1`/`g3_color1`/… into higher color slots (a parse bug); the reimpl maps `g{N}_color{M}` correctly | A recorded intentional divergence: the correct mapping is what an author means; reproducing the dispatch remap would carry the engine's parse bug forward. |
+| D-VFS-6 | Retail's PFF open trusts the header blindly (no magic/entry_size/count checks; entry_size>36 overflows; two write-after-free bugs @ 0x768348/0x7685ba) — ours validates and is UAF-free | Reproducing unvalidated reads and UAFs would manufacture garbage against ADR 0003. |
 | D-SCR-1 / D-SCR-2 | The SCR container codec accepts version bytes 0–2 and selects the key from the version byte + policy, where each original call site fixes the key | A deliberate multi-title superset so one codec serves JO-demo-era and shader containers; load-bearing equivalence holds for everything retail JO ships. |
 
 `PERMANENT` is not a resting place for hard work: each entry above is a decision that the
@@ -269,7 +286,8 @@ the follow-up path.
 
 ## UNAUDITED systems (no RE record yet)
 
-Seven systems are documented mainly by code and tests
+Six systems remain documented mainly by code and tests (the VFS/PFF mount
+stack graduated via PAR-R7)
 ([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
 that lands an RE record **with a D-catalog**, converting untracked divergences into
 tracked rows.
@@ -282,7 +300,6 @@ tracked rows.
 | Fonts | PAR-R4 | the FNT shelf packer + format facts live in `fnt_rasterizer.gd`; ENG-4 plans the `libs/fnt` extraction. |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. |
 | Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). |
-| VFS / PFF mount stack | PAR-R7 | the PFF write side is [ADR 0008](adr/0008-pff-writer-policy.md); the mount stack itself is unaudited. |
 
 ---
 

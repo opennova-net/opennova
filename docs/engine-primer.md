@@ -158,10 +158,12 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Particles (`.ptl`) | — | [particles/ptl-format-re.md](particles/ptl-format-re.md) | redesign in flight |
 | NovaWorld networking | `libs/npwire`, `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
 | Boot-required resources | boot literals scattered in `godot/game/` today; ENG-6 manifest pending | [required-resources.md](required-resources.md) | witnessed (R8): the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
+| VFS / PFF mount stack | `libs/vfs`, `libs/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..9 |
 
 No dedicated RE record yet — documented by code and tests only: terrain, foliage,
-tiles, fonts, credits, the importer pipeline, and the VFS/PFF mount stack (the PFF
-write side is [ADR 0008](adr/0008-pff-writer-policy.md)). See [docs/README.md](README.md).
+tiles, fonts, credits, and the importer pipeline (the PFF write side is
+[ADR 0008](adr/0008-pff-writer-policy.md); the mount stack landed as
+[vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md), PAR-R7). See [docs/README.md](README.md).
 
 ## 5. Researching the engine
 
