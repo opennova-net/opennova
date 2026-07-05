@@ -7107,6 +7107,28 @@ promote does not carry it yet — AI now sends the retail memset default 0 inste
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
 
+**D-NET-163** [reimpl gap, WITNESSED-READY-DEFERRED — the golden-diff baseline, minted
+2026-07-05] **The dev golden-harness host does not emit retail's full S2C tag set.** The
+tier-1 `nw_golden_diff` self-test, run against the attested v35 baseline (game-server
+`retail_join_v35_game` vs the retail gameplay golden), enumerates 21 tags a retail↔retail
+session carries that our host↔retail-client join capture does not. They share one root
+cause: `nw_server` is a minimal in-match *golden-harness* host (ADR 0013, never shipped),
+and a join-scope capture never exercises the traffic these tags belong to. Three families:
+(1) **periodic integrity / anti-cheat challenge-response** the harness drives none of —
+time-sync (S2C `0x43` ping / C2S `0x08` reply), anim-CRC (`0x39`/`0x1c`), entity-checksum
+(`0x30`/`0x20`), loadout-CRC (`0x31`/`0x21`), entity-index (`0x68`/`0x3d`); (2)
+**gameplay-event traffic** a join-only capture never produces — kill-sync `0x26`,
+kill-by-slot `0x4e`, play-sound `0x34`, score-delta-sound `0x81`; (3) **low-frequency
+session / roster / control tags** the harness does not model — target-assignment `0x4c`,
+team-assign `0x50` (the emit path; `Server_AssignPlayerTeam @ 0x4fe310` itself is MATCHING,
+D-NET-113), session-status `0x58`, deployed-item `0x59`, destroy-list `0x5d`
+(`_DestroyEntityList @ 0x429730`), spectator-flag `0x79`, server-config-strings `0x7e`.
+Each is a documented message shape whose emit is deferred; `nw_golden_diff_test.cpp`'s
+`kDeferredGaps` now maps every tag to this ID, so the diff PASSES with each deferral named
+and a NEW gap (any tag not on this baseline) still fails. The lone allowed spurious
+(S2C `0x18` full-entity-spawn, which our host emits and the retail reference session did
+not) is the tracked D-NET-133 spawn approximation.
+
 **D-NET-162** [reimpl gap, PORTED 2026-07-04 (slice 2; verify v35)] **The AS capture loop
 now runs on our host** — the §5.61 1 Hz block was witnessed round 13 but unported (v33: no
 map colors, no LFP capture). Ported: `world::zone_capture_tick`

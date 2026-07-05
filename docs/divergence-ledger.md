@@ -89,6 +89,7 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-137 | Player wire net_id is an invented encoding shim, not the minimap-slot packing — tolerable because the client self-heals unmatched ids | A | WITNESSED-READY-DEFERRED (tolerable) | PAR-NET |
 | D-NET-139 | 0x0A priority score ports distance/age/own-boost; the view-interest / LOS / enemy-team-bonus terms contribute 0 | A | OPEN (approximation) | PAR-NET |
 | D-NET-147 | Residual 0x10 tail: sectioned-destructible `sectionMask` rebuild + armory `weaponByte`/`attachRef` + `scoreFlag` gate deferred (the four base fields fixed + streamed) | A | WITNESSED-READY-DEFERRED | PAR-NET |
+| D-NET-163 | The dev golden-harness host (`nw_server`, ADR 0013) does not emit retail's full S2C tag set — 21 tags across the anti-cheat/CRC challenge, gameplay-event, and low-frequency session/roster families; the `nw_golden_diff` baseline now names each deferral by ID | A | WITNESSED-READY-DEFERRED | PAR-NET |
 
 Closed 2026-07-05: **D-NET-30** -> `FIXED` — one `Cookie: name=value;` header
 per cookie (`CookieJar::cookie_header_lines()`; our own server already merged
@@ -245,7 +246,7 @@ Open counts by domain (the target is zero in every cell):
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
-| Net | 8 | 0 | 12 (2 also NEEDS-RE) | 20 |
+| Net | 8 | 0 | 13 (2 also NEEDS-RE) | 21 |
 | Environment | 1 | 0 | 4 | 5 |
 | World / AI + events | 2 | 0 | 4 | 6 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
@@ -255,7 +256,7 @@ Open counts by domain (the target is zero in every cell):
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **60** |
+| **Total OPEN** | | | | **61** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
