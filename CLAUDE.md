@@ -85,6 +85,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
+- Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
+  code in the same change — no deprecation shims, migration paths, or compat readers for
+  files our tools write. Retail interop (wire/format parity) is the product, not
+  back-compat, and is never relaxed.
 - Rendering targets the original fixed-function look, not PBR.
 - Networking is wire-compatible by design — the parity rule applied to the byte stream.
   We write code such that our clients can join original (retail) servers, our servers can
