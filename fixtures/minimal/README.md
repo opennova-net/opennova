@@ -32,7 +32,7 @@ deliberately omitted to keep "minimal" honest.
 
 | File | Our writer | Notes |
 |---|---|---|
-| **one PFF archive (required — see below)** | `libs/pff` write side (ADR 0008) | at least one PFF **must open** or boot exits. `PFF_OpenAllArchives @ 0x4a4310` returns `!opened_count`; the caller `test eax,eax; jz` at `@ 0x4a6f4c` falls through to `Game_ShowEarlyError(3)` + `Exit(-1)` when zero opened. `/d` (loose-first) does **NOT** clear this — the loose flag only reorders *lookup*, not the boot archive-open count (witnessed 2026-07-05). So the minimal set authors one PFF holding the fatal + mission files; loose-alongside is optional. |
+| **PFF archives under the boot-table names (required — see below)** | `libs/pff` write side (ADR 0008) | at least one PFF **must open** or boot exits, and the boot probes **only the fixed name table** — `language.pff` / `localres.pff` / `resource.pff` `[orig: PFF_OpenAllArchives @ 0x4a4310, name table @ 0x829f90]` (D-VFS-2). An arbitrary-named archive (the first `mnml.pff` attempt) is never probed: `opened_count` stays 0, the caller `test eax,eax; jz` at `@ 0x4a6f4c` falls through to `Game_ShowEarlyError(3)` ("missing CD?") + `Exit(-1)` — **validated on retail 2026-07-05**. `/d` (loose-first) does **NOT** clear this — the loose flag only reorders *lookup*, not the boot archive-open count (witnessed 2026-07-05). So the minimal set packages into the three boot-table names, mirroring retail's placement per kind; loose-alongside is optional. |
 | `gametext.bin` | `libs/rtxt` `write()` | game strings RTXT `[orig: @ 0x4a6fed]` — minimal table (the menu/HUD keys the set references). |
 | `vmacros.bin` | `libs/rtxt` | voice-macro strings `[orig: @ 0x4a702f]` — may be empty-but-valid. |
 | `keyhelp.bin` | `libs/rtxt` | keyboard-map strings `[orig: @ 0x4a7072]` — may be empty-but-valid. |
@@ -84,24 +84,33 @@ Authored so far (each guarded by a ctest):
 `OPENNOVA_BUILD_MINIMAL_PFF=1`, since `build_terrain` is ~35 s / ~10 MB) is the
 **generate-at-package step**: it runs `build_terrain` on a flat 1024×1024
 depthmap (→ `mnml.cpt` + ~680 `.tms`/`.tml` LOD tiles into a gitignored
-`_pff_build/`), then `pff_write_archive` bundles the whole set — the 17
-committed source files + the generated terrain, 701 entries — into ONE
-`mnml.pff`, satisfying the fatal one-PFF-must-open gate. The `.pff` and
-`_pff_build/` are gitignored (never committed). Committed is only the small
-config surface (bins/defs/mnus/env/bms/trn + the tiny source-art images);
-everything heavy is regenerated.
+`_pff_build/`), then `pff_write_archive` bundles the set into the **three
+boot-table archives**, each file in the archive retail uses for its kind
+(witnessed against the JOTAC JO install): `language.pff` = the fatal text bins
+(`gametext`/`vmacros`/`keyhelp.bin`), `localres.pff` = the menus, defs, and
+mission (`.mnu`/`.def`/`.bms`), `resource.pff` = the map and terrain
+(`.env`/`.trn`/source art + the generated `mnml.cpt` and tiles). The `.pff`s
+and `_pff_build/` are gitignored (never committed). Committed is only the
+small config surface (bins/defs/mnus/env/bms/trn + the tiny source-art
+images); everything heavy is regenerated.
 
-Remaining: **asset-gated retail validation** (§ Validation) — run the
-packaging tool, then launch retail on `mnml.pff` to host + join. This is where
-the `.trn`/art dimensions and the build-output→`.trn` mapping get their final
-confirmation; it needs a retail install.
+**Retail boot is validated (2026-07-05):** a single arbitrary-named `mnml.pff`
+dies at the boot gate exactly as witnessed (`ShowEarlyError(3)` "missing
+CD?" — the fixed name table never probes it); with the set under the
+boot-table names, retail `Jointops.exe` boots and runs (writes `game.cfg`,
+saves). Remaining: **asset-gated host + join acceptance** (§ Validation) on
+the three-way split — this is where the `.trn`/art dimensions and the
+build-output→`.trn` mapping get their final confirmation; it needs a retail
+install.
 
 ## Validation (asset-gated — needs a retail JO install)
 
-1. Launch `Jointops.exe` with the authored PFF present in the game root (and
-   optionally `/d <loose dir>`) — confirm boot to the main menu (the fatal set
-   is sufficient). One PFF must open (witnessed above); `/d` alone is not
-   enough.
+1. Launch `Jointops.exe` with the authored `language.pff` / `localres.pff` /
+   `resource.pff` present in the game root (and optionally `/d <loose dir>`) —
+   confirm boot to the main menu (the fatal set is sufficient). The archives
+   must bear the boot-table names (witnessed above; an arbitrary name never
+   mounts) and `/d` alone is not enough. **Done 2026-07-05** (via the renamed
+   bundle; re-confirm on the three-way split).
 2. Host the custom map from the MP menu on instance A.
 3. Join from instance B (LAN). Confirm both spawn on `<map>` and can move.
 
