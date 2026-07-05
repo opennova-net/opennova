@@ -27,8 +27,9 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
 3. **The seven systems with no RE record get research audits.** Terrain, foliage, tiles,
    fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
-   unknowns into tracked rows — **VFS/PFF (R7), Fonts (R4), Foliage (R2), and Tiles
-   (R3) landed; three remain** (terrain, credits, importer — see the UNAUDITED table).
+   unknowns into tracked rows — **VFS/PFF (R7), Fonts (R4), Foliage (R2), Tiles (R3)
+   landed, and the Importer (R6) is tracked-by-composition; two remain** (terrain,
+   credits — see the UNAUDITED table).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -292,7 +293,7 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (the same will happen at PAR-R1..R7).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **3** (below).
+Permanent register size: **17** (below). `UNAUDITED` systems: **2** (below).
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -341,10 +342,10 @@ the follow-up path.
 
 ## UNAUDITED systems (no RE record yet)
 
-Three systems remain documented mainly by code and tests (VFS/PFF via PAR-R7;
-**Fonts** via PAR-R4; **Foliage** via PAR-R2; **Tiles** via PAR-R3 — foliage and
-tiles both audited cleanly against RETAIL even though the ports were made from
-jodemo)
+Two systems remain documented mainly by code and tests (VFS/PFF via PAR-R7;
+**Fonts** R4; **Foliage** R2; **Tiles** R3; the **Importer** R6 is
+tracked-by-composition — [importer/importer-audit.md](importer/importer-audit.md),
+it owns no independent parity surface)
 ([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
 that lands an RE record **with a D-catalog**, converting untracked divergences into
 tracked rows.
@@ -366,7 +367,6 @@ retail JO (no `CBIN`/`.kda` string), so it needs the source binary. The importer
 |---|---|---|---|
 | Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). | jodemo |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. | source binary (CBIN not in retail JO) |
-| Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). | n/a (Python + FFI) |
 
 ---
 
