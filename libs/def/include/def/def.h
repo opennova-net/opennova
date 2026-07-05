@@ -465,6 +465,25 @@ DEF_EXPORT void def_free_hudpos(DefHudPosFile *f);
 DEF_EXPORT int def_parse_def(const char *path, DefFile *out);
 DEF_EXPORT void def_free_def(DefFile *f);
 
+/* PLAYER_INFO loadout weight + encumbrance [orig: calculate_loadout_weight
+   @ 0x55f1f0; update_player_info_weight_and_weapon_icons @ 0x55f480]. */
+typedef enum DefEncumbrance {
+    DEF_ENCUMBRANCE_LIGHT = 0,
+    DEF_ENCUMBRANCE_NORMAL = 1,
+    DEF_ENCUMBRANCE_HEAVY = 2,
+} DefEncumbrance;
+
+/* Total loadout weight over a set of equipped weapons [orig: calculate_loadout_weight
+   @ 0x55f1f0]. Per weapon: weaponweight (+120) plus its ammo weight —
+   (ammo_count > 0 ? ammo_count : maxclips) * clipweight (maxclips +136, clipweight
+   +140). `ammo_counts[i] <= 0` selects the weapon's default clip count (maxclips),
+   matching the engine's `<=0 -> maxclips` branch. Returns the summed weight. */
+DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n);
+
+/* Encumbrance class for a loadout weight [orig: @ 0x55f480]: >= 66.6 HEAVY,
+   >= 33.3 NORMAL, else LIGHT (the witnessed thresholds, exact). */
+DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight);
+
 #ifdef __cplusplus
 }
 #endif

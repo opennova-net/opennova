@@ -87,6 +87,11 @@ foreach(test items weapons ammo hudpos item_attrib item_type)
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
 
+# PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
+add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
+target_link_libraries(def_loadout_weight_test PRIVATE opennova_def)
+add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
+
 # AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
 # writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0021).
 foreach(test parse roundtrip)

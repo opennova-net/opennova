@@ -385,6 +385,13 @@ hatch (a baseline bump, logged in this doc).
 Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 (no new workflow).
 
+**Logged C-ABI baseline bumps** (the same-commit escape hatch):
+
+- 2026-07-05, 104 → 106: added `def_loadout_weight` + `def_encumbrance_class`
+  (the PLAYER_INFO loadout-weight math ported to `libs/def`, D-PLAYERINFO-11
+  weight readout). Additive, `[orig: calculate_loadout_weight @ 0x55f1f0;
+  @ 0x55f480]`; no existing export changed semantics.
+
 ## Risks
 
 1. **Wire-leg move breaks retail parity invisibly** (the retail gate is

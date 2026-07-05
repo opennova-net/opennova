@@ -26,11 +26,13 @@ bad_write_options_default
 bfc1_decompress
 bfc1_is_bfc1
 bfc1_uncompressed_size
+def_encumbrance_class
 def_free_ammo
 def_free_def
 def_free_hudpos
 def_free_items
 def_free_weapons
+def_loadout_weight
 def_parse_ammo
 def_parse_ammo_memory
 def_parse_def

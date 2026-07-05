@@ -1834,3 +1834,24 @@ DEF_EXPORT void def_free_def(DefFile *f) {
     free(f->weapon.actions);
     memset(f, 0, sizeof(*f));
 }
+
+DEF_EXPORT double def_loadout_weight(const DefWeaponDef *weapons, const int *ammo_counts, size_t n) {
+    /* [orig: calculate_loadout_weight @ 0x55f1f0] per weapon:
+       weaponweight + (ammo_count > 0 ? ammo_count : maxclips) * clipweight. */
+    if (!weapons) return 0.0;
+    double total = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        total += (double)weapons[i].weaponweight;
+        const int ammo = (ammo_counts && ammo_counts[i] > 0) ? ammo_counts[i] : weapons[i].maxclips;
+        total += (double)ammo * (double)weapons[i].clipweight;
+    }
+    return total;
+}
+
+DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight) {
+    /* [orig: update_player_info_weight_and_weapon_icons @ 0x55f480] the exact
+       witnessed thresholds: >= 66.6 HEAVY, >= 33.3 NORMAL, else LIGHT. */
+    if (weight >= 66.6) return DEF_ENCUMBRANCE_HEAVY;
+    if (weight >= 33.3) return DEF_ENCUMBRANCE_NORMAL;
+    return DEF_ENCUMBRANCE_LIGHT;
+}
