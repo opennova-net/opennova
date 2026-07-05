@@ -38,6 +38,7 @@ void NovaResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
 			&NovaResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &NovaResourceRoot::list_expansions);
+	ClassDB::bind_method(D_METHOD("get_expansion"), &NovaResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &NovaResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaResourceRoot::get_last_error);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaResourceRoot::clear);
@@ -72,6 +73,10 @@ String NovaResourceRoot::lookup_name(const String &name) {
 	return name.strip_edges().replace("\\", "/").get_file();
 }
 
+String NovaResourceRoot::get_expansion() const {
+	return expansion_;
+}
+
 Dictionary NovaResourceRoot::file_entry_to_dictionary(const opennova::ResourceFileEntry &entry) {
 	Dictionary out;
 	out["kind"] = String(entry.kind.c_str());
@@ -102,6 +107,7 @@ bool NovaResourceRoot::is_valid_root(const String &path) {
 Error NovaResourceRoot::set_root_dir(const String &path) {
 	// Editor / authoring: loose files only, never the PFF archives. Loose files aren't SCR-wrapped,
 	// so the JO default (version-detect) is correct here.
+	expansion_ = String();
 	return mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
 			opennova::VfsArchiveDiscovery::ScanAll);
 }
@@ -114,8 +120,10 @@ Error NovaResourceRoot::mount_runtime(const String &path, const String &expansio
 			: opennova::VfsMountMode::Packed;
 	// The game mounts the witnessed fixed boot table - extra .pff files in the
 	// root never mount in retail (docs/vfs/vfs-pff-mount-re.md D-VFS-2).
-	return mount_with_mode(path, expansion, mode, game_code,
+	const Error err = mount_with_mode(path, expansion, mode, game_code,
 			opennova::VfsArchiveDiscovery::RetailTable);
+	expansion_ = (err == OK) ? expansion : String();
+	return err;
 }
 
 Error NovaResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
@@ -173,6 +181,7 @@ String NovaResourceRoot::get_last_error() const {
 void NovaResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
+	expansion_ = String();
 	opennova::clear_texture_resolver_caches();
 	opennova::bump_cache_epoch();
 	index_.clear();

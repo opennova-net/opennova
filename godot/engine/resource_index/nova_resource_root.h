@@ -56,6 +56,8 @@ class NovaResourceRoot : public RefCounted {
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
 	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
 
+	String expansion_;
+
 protected:
 	static void _bind_methods();
 
@@ -78,6 +80,11 @@ public:
 	// editing files on disk without remounting.
 	static int64_t cache_epoch();
 	static void bump_cache_epoch();
+	// The expansion name this root was runtime-mounted with ("" for base game or
+	// editor/loose mounts). Feeds the expansion bank slots and the M<exp>/G<exp>
+	// music forms [orig: Expansion_LoadAssets @ 0x4a4730].
+	String get_expansion() const;
+
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;
