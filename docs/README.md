@@ -28,6 +28,7 @@ behavior is summarized and cited.
 | [`asset-gated-tests.md`](asset-gated-tests.md) | Every env-var-gated test: the var→data matrix, the skip-passes-as-green caveat, local setup, why captures are never committed, and the CI stance |
 | [`maturity-program.md`](maturity-program.md) | The maturity program (the pre-reimplementation rearchitecture push): seven tracks, five waves, the boundary-conformance checklist, enforcement ratchets, and gates — the program dashboard |
 | [`divergence-ledger.md`](divergence-ledger.md) | The divergence burn-down: every tracked divergence in one place under one vocabulary, the per-domain OPEN tables, the count-to-zero scoreboard, the permanent register, and the UNAUDITED systems — the parity dashboard (ADR 0022) |
+| [`required-resources.md`](required-resources.md) | The witnessed boot-required, hardcoded-by-name resource set (R8/ENG-6): the fatal set, per-resource failure behavior, the ordered boot sequence, and the D-BOOT catalog — the source for the ENG-6 manifest and ONED's new-game scaffold |
 
 ## Decision records
 
@@ -61,9 +62,15 @@ behavior is summarized and cited.
 | Domain | Doc | Status |
 |---|---|---|
 | Audio | [`audio/lwf-dbf-sound-re.md`](audio/lwf-dbf-sound-re.md) | landed |
+| Credits (CBIN) | [`credits/cbin-re.md`](credits/cbin-re.md) | partial (PAR-R5: codec magic/header/ROL32-XOR cipher MATCHING vs retail `@0x75e348`; markup + read-path NEEDS-RE) |
 | Audio | [`audio/mus-sbf-re.md`](audio/mus-sbf-re.md) | landed |
 | Environment | [`env/env-tod-re.md`](env/env-tod-re.md) | landed |
+| Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..3) |
+| Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (PAR-R2 audit: placement MATCHING vs retail `@0x600197`, D-FOLIAGE-1 color) |
+| Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`, D-TIL-1 outline) |
+| Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes RE'd `libs` via `pyopennova`) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
+| Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (PAR-R1: module surface + witness basis + D-TERRAIN-1 shader split; mesh_simp/CDEP deep grill pending) |
 | Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (engine-research; HUD port in flight) |
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown geometry/row-height grill, D-MNU-7/8 fixed) |
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
@@ -74,11 +81,11 @@ behavior is summarized and cited.
 | Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + full `PLAYER_INFO` screen orchestration grilled, D-PLAYERINFO-1..12; runtime `player.mnu` host wiring + spawned-player binding open) |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
+| VFS/PFF | [`vfs/vfs-pff-mount-re.md`](vfs/vfs-pff-mount-re.md) | landed (PAR-R7 audit: the mount stack, resolution order, /d gate, D-VFS-1..9) |
 | World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed |
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide, engine-research) |
 
-Systems documented mainly by code and tests so far (no dedicated RE record
-yet): terrain, foliage, tiles, fonts, credits, the importer pipeline, and the
-VFS/PFF mount stack (the PFF write side is ADR 0008). The project glossary
+Every subsystem now has a dedicated RE record (full or partial) or a
+tracked-by-composition audit — the UNAUDITED set is empty. The project glossary
 lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the project vision is
 [`GOALS.md`](../GOALS.md).

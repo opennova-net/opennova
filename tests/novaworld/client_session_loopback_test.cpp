@@ -491,6 +491,46 @@ int main() {
 		expect(server.lobby.server_name == "OpenNova Host 2", "gate update refreshed ServerName");
 	}
 
+	// D-NET-20 pin: a client with NO cookie vars configured still emits the
+	// ClientVarList(VarList="Cookie") parent — EMPTY, not absent (retail
+	// serializes the var list with includeAll=1).
+	// [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 ->
+	//  NapiStatement_SerializeVarList @ 0x4d0660]
+	{
+		MiniServer server2;
+		ClientSession::Config cfg2;
+		cfg2.client_index = 0x00000002u;
+		cfg2.client_key   = 0x0BADF00Du;
+		ClientSession client2(cfg2);
+		std::vector<std::vector<uint8_t>> o2;
+		auto h2 = client2.start();
+		auto sh2 = server2.respond(h2);
+		expect(client2.handle_datagram(sh2.data(), sh2.size(), o2),
+		       "D-NET-20 flow: ServerHello handled");
+		auto sa2 = server2.respond(o2[0]);
+		o2.clear();
+		expect(client2.handle_datagram(sa2.data(), sa2.size(), o2),
+		       "D-NET-20 flow: ServerAuth handled");
+		auto sv2 = server2.respond(o2[0]);
+		o2.clear();
+		expect(client2.handle_datagram(sv2.data(), sv2.size(), o2),
+		       "D-NET-20 flow: ServerStartVerify handled");
+		if (expect(o2.size() == 1, "D-NET-20 flow: one verify request emitted")) {
+			std::vector<NapiMessage> vcs;
+			expect(decode_client_containers(o2[0], server2.client_scrk, vcs),
+			       "D-NET-20: empty-cfg verify request decodes");
+			if (expect(vcs.size() == 1 && vcs[0].name == "ClientRequestVerifyResult",
+			           "D-NET-20: verify container name")) {
+				if (expect(vcs[0].children.size() == 1 &&
+				               vcs[0].children[0].name == "ClientVarList",
+				           "D-NET-20: the Cookie parent is emitted unconditionally")) {
+					expect(vcs[0].children[0].children.empty(),
+					       "D-NET-20: no vars configured -> the parent is EMPTY");
+				}
+			}
+		}
+	}
+
 	if (g_failures == 0) {
 		std::printf("OK: ClientSession handshake reached Verified (hk echo + 0x83 verify)\n");
 		return 0;

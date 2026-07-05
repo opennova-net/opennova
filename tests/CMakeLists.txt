@@ -87,6 +87,11 @@ foreach(test items weapons ammo hudpos item_attrib item_type)
     add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
 endforeach()
 
+# PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
+add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
+target_link_libraries(def_loadout_weight_test PRIVATE opennova_def)
+add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
+
 # AVATARS (Avatars.def) tests: parse against the retail fixture + from-scratch
 # writer round-trip (docs/playerinfo/avatars-re.md, docs/adr/0021).
 foreach(test parse roundtrip)
@@ -406,6 +411,84 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
     target_include_directories(rtxt_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
     add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
 endforeach()
+
+# Minimal authored fixture set — the fatal-set RTXT string tables
+# (fixtures/minimal/). Regenerates each in memory and guards it byte-matches
+# the committed file + round-trips. See fixtures/minimal/README.md.
+add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
+target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_rtxt)
+target_compile_definitions(minimal_rtxt_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
+
+# Minimal set's text .def files parse through our loaders (items/weapon/ammo).
+add_executable(minimal_def_validate_test fixtures/minimal_def_validate.cpp)
+target_link_libraries(minimal_def_validate_test PRIVATE opennova_def)
+target_compile_definitions(minimal_def_validate_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_def_validate COMMAND minimal_def_validate_test)
+
+# Minimal set's menus parse (main Startup node + mp host/join screen).
+add_executable(minimal_mnu_validate_test fixtures/minimal_mnu_validate.cpp)
+target_link_libraries(minimal_mnu_validate_test PRIVATE opennova_mnu)
+target_compile_definitions(minimal_mnu_validate_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_mnu_validate COMMAND minimal_mnu_validate_test)
+
+# Minimal set's custom map — the .env + .bms legs (the .trn rides its own slice).
+add_executable(minimal_map_gen_test fixtures/minimal_map_gen.cpp)
+target_link_libraries(minimal_map_gen_test PRIVATE opennova_env opennova_mission_format)
+target_compile_definitions(minimal_map_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_map_gen COMMAND minimal_map_gen_test)
+
+# Minimal map's terrain config (.trn) — round-trip guarded; the heavy .cpt/tiles
+# are generate-at-package (not committed).
+add_executable(minimal_trn_gen_test fixtures/minimal_trn_gen.cpp)
+target_link_libraries(minimal_trn_gen_test PRIVATE opennova_trn)
+target_compile_definitions(minimal_trn_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_trn_gen COMMAND minimal_trn_gen_test)
+
+# Minimal map's source-art images (colormap/detail/tilestrip TGAs, charmap/
+# foliagemap PCX) the .trn references — authored + validated.
+add_executable(minimal_art_gen_test fixtures/minimal_art_gen.cpp)
+target_link_libraries(minimal_art_gen_test PRIVATE opennova_pcx)
+target_compile_definitions(minimal_art_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_art_gen COMMAND minimal_art_gen_test)
+
+# Minimal set's generated boot font (minimal_fnt_builder.h): validity +
+# byte-stable roundtrip + label glyphs drawable. Always-on; the font itself is
+# emitted at package time, never committed.
+add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
+target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_fnt)
+add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
+
+# Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
+# via the libs/dbf + libs/lwf writers, byte-stable vs the committed files.
+add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
+target_link_libraries(minimal_companion_gen_test PRIVATE opennova_dbf opennova_lwf)
+target_compile_definitions(minimal_companion_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_companion_gen COMMAND minimal_companion_gen_test)
+
+# Minimal set's generated boot music (minimal_mus_builder.h): the silent SBF
+# bank + the minimal MENUMUS/GAMEMUS scripts parse back valid. Always-on; the
+# files are emitted at package time, never committed.
+add_executable(minimal_mus_gen_test fixtures/minimal_mus_gen.cpp)
+target_link_libraries(minimal_mus_gen_test PRIVATE opennova_mus opennova_sbf)
+add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
+
+# Minimal set's packaging tool: build_terrain + generate the boot fonts +
+# boot music + PFF-bundle the whole set. Skips clean unless
+# OPENNOVA_BUILD_MINIMAL_PFF=1 (generate-at-package: ~35 s, ~10 MB).
+add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
+target_link_libraries(minimal_pff_package_test PRIVATE opennova_terrain opennova_pff opennova_fnt
+                                                       opennova_mus opennova_sbf)
+target_compile_definitions(minimal_pff_package_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
 
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
@@ -1542,3 +1625,17 @@ if(WIN32)
     target_link_libraries(npruntime_two_endpoint_socket_test PRIVATE ws2_32)
 endif()
 add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
+
+# NET-4 (ADR 0019 §5): the C-ABI export-identity guard. The shared library's
+# flat export list must match scripts/lint/abi_exports_baseline.txt, and no
+# net-lib symbol family may appear at all. Runs wherever BUILD_SHARED_LIB=ON
+# builds run ctest (scripts/build.sh, the CI build-and-test job).
+if(BUILD_SHARED_LIB)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME abi_export_identity
+            COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_SOURCE_DIR}/scripts/lint/abi_exports_check.py"
+                    --lib "$<TARGET_FILE:opennova_shared>")
+    endif()
+endif()

@@ -112,8 +112,11 @@ Divergences from the original, accepted and documented:
 - **D-SND-1 (bank scope):** the engine scopes the co-named bank to dialog playback; we keep it
   in the single search chain (a superset — dialog set names do not collide with ambient sets in
   JO assets).
-- **D-SND-2 (expansion banks):** `<exp>L.lwf` / `<exp>.lwf` are not loaded yet (no expansion
-  name is plumbed into the world); host follow-up.
+- **D-SND-2 (expansion banks) — FIXED 2026-07-05:** `NovaMissionAudio` loads
+  `<exp>L.lwf` / `<exp>.lwf` ahead of the static banks in the engine's slot order
+  [orig: Expansion_LoadAssets @ 0x4a4989 / @ 0x4a495e; slot table @ 0x82A5B0] when the
+  root was runtime-mounted with an expansion (`NovaResourceRoot.get_expansion()`, the
+  `/exp` launch flag's mount). Missing files skip exactly like `SoundBank_LoadIfExists`.
 - **D-SND-3 (strictness):** parser rejects what the engine silently tolerates (see above).
 
 ## DBF dialog banks ('DLG0')
@@ -142,7 +145,7 @@ the loaded banks. Entity-attached sounds use a separate composite-name path
 semantics, and the global bank-slot order are all engine-witnessed and implemented faithfully.
 
 - divergence (bank scope / D-SND-1): merged chain vs dialog-scoped co-named bank — accepted.
-- divergence (coverage / D-SND-2): expansion bank slots not loaded — host follow-up.
+- divergence (coverage / D-SND-2): CLOSED 2026-07-05 — expansion bank slots load in slot order off the runtime mount's expansion.
 - divergence (strictness / D-SND-3): parser rejects out-of-range single_index, >8 counts, bad
   magic, nonzero trigger/id-def tables that the engine tolerates or ignores — deliberate
   authoring-side strictness.

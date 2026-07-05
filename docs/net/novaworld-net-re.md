@@ -3506,8 +3506,25 @@ in-packet NUL-terminated name → byte-faithful (retail emits the trailer iff AI
 earlier dc90f64f stopgap (force `0x0800` on EVERY pool-1 record) is removed — no remaining divergence on the
 trailer. The pool-0 (`0x0C`), pool-2 (`0x10`) and pool-3 (`0x20`) handlers are crash-safe (`0x0C` reads its
 name inline/always-present; `0x10`/`0x20` have no name/AI branch). Byte-matching a specific retail mission
-also wants the item-def flag gate from `serialize_entity_pool_to_packet_0 @0x503940` (the pool ROUTING split,
-still by `EntityKind` here — the residual D-NET-97 simplification).
+also wants the item-def flag routing (the residual D-NET-97 simplification, still by `EntityKind` here).
+**Routing-fn clarification (witnessed 2026-07-05):** `serialize_entity_pool_to_packet_0 @0x503940` is the
+pool-1 SERIALIZER (`Pool_GetEntryUnchecked(1, …)`), not the routing decision — it READS the flag gates
+during emission (`itemDef+84 & 0x100000` → the name + `0x0800` AI-trailer; `& 0x40000` → the `0x8000`
+zone-slot branch; `itemDef+604` → the `0x400` weapon-seat block), but pool MEMBERSHIP is assigned at
+spawn-time registration into `g_pool_list` (a separate fn, still to hunt for the port). So the D-NET-97
+routing slice must: (a) find the spawn-time entity→pool assignment that keys on `itemDef+84 & 0x100000`
+(AI) / `& 0x40000` (destructible) → pool-1 vs purely-static → pool-2, and (b) port it into
+`pool_for_kind` (`promote.cpp`), which today keys on `EntityKind` at promotion — noting the ordering
+gap that item traits are resolved post-load (`NovaSimulation::resolve_item_traits`), after promotion.
+**Router-hunt narrowing (2026-07-05):** `Pool_GetEntryUnchecked @ 0x441fc0` is a bare
+`g_pool_list[poolIndex].base + idx*stride` accessor, and each wire serializer reads ONE
+`g_pool_list` pool (pool-1 = `Pool_GetEntryUnchecked(1,…)` @ 0x503940, no flag filter in the
+serializer) — so **an entity's wire pool IS its `g_pool_list` membership**, set at allocation, not a
+serialize-time re-classification. `Entity_InitFromItemDef @ 0x49e550` is only the item-def→entity
+field copy (callbacks/models/health), NOT the pool selection. The router is therefore the entity
+ALLOCATION's `g_pool_list` pool pick (the `Pool_Alloc(poolIndex)` caller that reads `itemDef+0x54`);
+that is the remaining hunt. NB the PORT is golden-gated regardless: changing pool membership changes an
+entity's wire TAG (0x0D↔0x10), which alters byte-exact golden captures — a tier-2 golden-harness slice.
 
 **D-NET-98 [SCOPE — the load-time world-stream is the DYNAMIC set, not the full static mission].** The
 golden retail capture `.scratch/host_and_join_lan.pcapng` (a real host+join, mission dvxi5) shows the host's
@@ -6462,7 +6479,7 @@ confirmed in passes 1–2 plus the C4/C5/D1 set in pass 3; 11 claims refuted.
 | B6 napi-tlv | **matching** | statement-param length guard added (D-NET-28 FIXED) |
 | B7 napi-envelope | **matching** | 4-byte mode exact; var-header mode out of scope (D-NET-29) |
 | C1 http-login-build | partial | all 3 reported claims refuted; POST/all-encrypted model correct |
-| C2 cookie-jar | partial | one-`Cookie:`-header-per-cookie (D-NET-30) |
+| C2 cookie-jar | **matching** | per-cookie `Cookie:` headers + subnet key ported (D-NET-30 FIXED) |
 | C3 login-orchestration | partial | markup-derived URLs (D-NET-31) + shared cookie fix |
 | C4 gsb-parse | **matching** | format fixed + byte-verified vs genuine `.204` (D-NET-32..36) |
 | C5 joi-regurl | partial | documentation only; ':' separator + HOSTKEY trim confirmed |
@@ -6521,6 +6538,14 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 
 `gate_response.cpp` (A2):
 - **D-NET-9** [LOW, WITNESSED — deferred low-value] `NapiScript_ParseLiteralValue @0x62db00` tries, in order: char-literal `'x'` → `NapiScript_ParseHexValue @0x62d610` → `parse_octal_integer @0x62d7b0` → `parse_binary_literal @0x62d900` → `NapiScript_ParseDecimalIntegerB @0x62da20`. The reimpl parses gate port/literal fields as DECIMAL only. Real gate responses are decimal, so the other four radixes are unexercised robustness — re-prioritized MED→LOW; the 4-radix port is witnessed-and-ready but deferred (poor value/risk). [orig: NapiScript_ParseLiteralValue @ 0x62db00]
+  - **Complete parser semantics (2026-07-05, so the future port is a clean lift):**
+    - **char** `'x'`: `input[0]=='\''` && `input[1]!=0` && `input[2]=='\''` → value = `(int)input[1]`, consumed = 3.
+    - **hex** (`@0x62d610`): prefix `$` (Pascal) | `0x`/`0X` (C) | bare digits + `h`/`H` suffix (asm). Digits `0-9A-Fa-f`; a `.` after a digit → fail (it's a float); bare form REQUIRES the `h`/`H` suffix; prefixed form rejects a trailing alpha other than `h`/`H`. value = `16·v + digit`.
+    - **octal** (`@0x62d7b0`): prefix leading `0` | bare digits + `o`/`O` suffix. Digits `0-7`; a `.` → fail; leading-`0` form fails if the terminator isdigit (`08`, `09`) — so `017` parses as octal 15; bare form REQUIRES `o`/`O`. value = `8·v + digit`.
+    - **binary** (`@0x62d900`): prefix `%` | bare digits + `b`/`B` suffix. Digits `0/1`; a `.` → fail; bare form REQUIRES `b`/`B`. value = `2·v + digit`.
+    - **decimal** (`@0x62da20`): digits `0-9` + optional `d`/`D` suffix; a `.` → fail; value = `atol`. **No sign** — the literal parser is UNSIGNED (`-`/`+` is not handled here; a signed field is a separate atoi path).
+    - **Decimal-safety of the try-order:** plain `"80"`/`"16"` fail hex/octal/binary (no prefix/suffix; `8`,`9` aren't octal, non-`0/1` aren't binary) and fall to decimal — so routing decimal gate values through the full dispatcher is safe. The ONE behavior change vs our decimal-only path is leading-zero numbers (`"017"` → octal 15, retail-faithful) and the `d`/`h`/`o`/`b` suffixes.
+  - **Integration finding:** the obvious reimpl call site `gate_response.cpp` `parse_int` (a strict SIGNED full-string decimal validator) is **dead code — zero callers**; the live gate-value paths are `atoi_loose` (METPING) and gsb `parse_int_or_zero`, both decimal. So the port is not a drop-in swap: it needs (a) a faithful unsigned `napi_parse_literal_value` in `libs/npwire` with the 5-radix + consumed-count contract above, and (b) identifying WHICH retail gate fields route through `NapiScript_ParseLiteralValue` (vs a plain atoi) before wiring — a small NEEDS-RE refinement gating the otherwise-mechanical port.
 - **D-NET-10** [MED, FIXED] store full 32-bit port; drop the [0,65535] reject (retail stores verbatim, presence = non-zero). [orig: CNapiGateManager_ProcessResponse @ 0x4ced20 (@ 0x4cf1ae)]
 - **D-NET-11** [MED, FIXED] IPv4 octets >255 accepted (mask to uint8), not rejected. [orig: Network_ParseIPv4AddressOctets @ 0x62dc10]
 - **D-NET-12** [LOW, FIXED] IPv4 parse stops after the 4th octet, ignores trailing chars. [orig: 0x62dc10]
@@ -6531,11 +6556,12 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 `session_hello.cpp` (A3 ClientHello/ServerHello):
 - **D-NET-16** [MED, FIXED 2026-06-27] `server_hello_to_bytes` (`session_hello.cpp`) is now the witnessed FLAT builder: SF emitted UNCONDITIONALLY, P1/P2/NP/MP each only when nonzero, NO PL tag, SUS1/SUS2 gated on non-empty — the `is_game_server`/PL two-branch is removed from the encoder (the parser stays lenient so decoders still read a stray PL). Grilled vs the full decompile @0x6204b0 (CI/CO/AP/BDAT/DE/UT/PN/PG/PV1/PV2/PV3/HK/SN/SF/P1/P2/P3-P8/NP/MP/NPW/NC/RIP/RPN/SUS1-4/RIPE/EPN/ET, each individually gated). Tests: `session`/`client_session_loopback`/`golden_lan_join_session` green. [orig: NapiNPProtocol_SendServerInfoPacket @ 0x6204b0]
 - **D-NET-17** [LOW, TRACKED] ClientHello DE/PV3/PM/ET fields unmodeled (gated off for the stock client, so byte-correct for the common case). The SERVER side of these (DE/PV3/ET) is now witnessed @0x6204b0; the ClientHello PARSER modeling them is the remaining work. [orig: NapiNPSession_SendAnnouncePacket @ 0x61fa00]
+  **Full announce-TLV field map (witnessed 2026-07-05 @ 0x61fa00, in emit order):** `NVS` (version string, always) → `CO` company / `AP` app-name / `BDAT` bin-data (each if its string is non-empty) → **`DE`** = `session_info[54]` u32, iff nonzero → `PN` host-name → `PG` session GUID 16 B iff `!NapiGUID_IsNull` → `PV1`/`PV2`/**`PV3`** version strings (each if non-empty; `PV3` = `session_info+428`) → `CI` = `session_param[5]` u32 iff set → **`PM`** = `transport_info[36]` u8-as-u32 player count, iff `!transport_info[37]` → `EIP` = `target_addr` / `EPN` = `target_port` (each iff nonzero) → **`ET`** = `extra_param` u32 iff nonzero. So the four D-NET-17 fields are all CONDITIONAL — absent in the stock host announce (their gates false: DE/ET zero, PV3 empty, PM only when transport_info[37]==0). Modeling them faithfully needs the session-state sources (`session_info[54]`=DE, the PV3 version string, `extra_param`=ET) which the reimpl does not yet track — the reason this stays LOW/deferred, not a quick port.
 - **D-NET-18** [LOW, FIXED 2026-06-27] `server_hello_to_bytes` field order/gating now matches @0x6204b0 for the modeled field set (SF unconditional, never PL, count fields nonzero-gated, SUS non-empty-gated). Remaining nicety: UT could also be nonzero-gated (currently unconditional; cosmetic, low value).
 
 `client_session.cpp` (A5/A7):
 - **D-NET-19** [MED, FIXED] `Success` compared as exact "1"; retail uses `atol(Success) != 0`. [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800]
-- **D-NET-20** [MED, TRACKED] `build_verify_request` must emit the `ClientVarList(VarList="Cookie")` parent unconditionally (retail SerializeVarList includeAll=1). [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 / NapiStatement_SerializeVarList @ 0x4d0660]
+- **D-NET-20** [MED, **FIXED 2026-07-05**] `build_verify_request` now emits the `ClientVarList(VarList="Cookie")` parent unconditionally (empty when no cookie vars are configured), matching retail's SerializeVarList includeAll=1; pinned by the empty-cfg flow in `client_session_loopback_test`. [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 / NapiStatement_SerializeVarList @ 0x4d0660]
 - **D-NET-21** [LOW, TRACKED] ClientConnected emitted synchronously; retail waits one periodic tick (conn_state==5 && session_state==2). [orig: CNapiGameSession_ProcessPeriodicUpdate @ 0x4d4400]
 - **D-NET-22** [LOW, BINDING] the verify Cookie var-list is data-driven (locale + NW* identity) from client env — registry/Win32 glue belongs in the Godot binding, not `libs/`. Also fix the `client_session.h:99-110` comment. [orig: CNapiSession_ReadLocaleInfo @ 0x4ce390 / CNapiGameSession_SendLocaleAndVerify @ 0x4d57e0]
 
@@ -6553,7 +6579,7 @@ session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
 - **D-NET-29** [LOW, SCOPE] envelope variable-header (first-dword==0) decode mode unsupported — documented scope decision. [orig: NapiNP_UnpackPacket @ 0x62ca20]
 
 `http_login.cpp` + binding (C2/C3):
-- **D-NET-30** [MED, TRACKED] emit one `Cookie:` header per cookie (retail `Cookie: name=value;` per entry); jar keyed by subnet-truncated host. [orig: CUIBrowser_SendHTTPRequest @ 0x658840 / Network_TruncateIPToSubnet @ 0x62dfe0]
+- **D-NET-30** [MED, **FIXED 2026-07-05**] `LobbyHttpFlow::request_headers` now emits one `Cookie: name=value;` header PER cookie (trailing `;`, insertion order) via `CookieJar::cookie_header_lines()`, matching retail's per-entry `sprintf("Cookie: %s=%s;")` loop — not a single merged line. Our own server already expected this (`request_cookie_header` merges multiple `Cookie:` headers; the merged-line client was the inconsistency). The subnet key is ported as the free `subnet_key()` (valid dotted IPv4 -> first two octets, else unchanged); the gate/login/host/join/GSB family shares one host, so the single-jar model still holds and the key is applied when a caller keys per host. [orig: CUIBrowser_SendHTTPRequest @ 0x658840 (per-cookie `Cookie: %s=%s;`); Network_TruncateIPToSubnet @ 0x62dfe0 (IPv4 /16)]
 - **D-NET-31** [LOW, DOC] login URLs/params are markup-derived (`nw_startup.mnx`), not C literals; `[CC]`/`[GT]` tokens and the `[domainname]` lower-casing are non-retail. [orig: gate STARTUPURL via 0x4ced20]
 
 `gsb.cpp` (C4) — FIXED, **byte-verified against the genuine `.204` blob**
@@ -6911,6 +6937,17 @@ record-per-datagram boundary can differ from retail by one record. Every page is
 count-prefixed sub-batch a stock client reassembles into the identical world — interop-equivalent,
 not byte-identical batching. Faithful fix (if ever needed for capture-diff parity): per-pool margins
 with the post-write guard.
+**Complete witness (2026-07-05), scoping the fix precisely:** all four world-stream pool margins are
+now pinned — 0x0C = **100** (`@ 0x5030a0`), 0x20 = **30** (`@ 0x503460`), 0x10 = **40** (`@ 0x5042F0`),
+and 0x0D = **110** (`serialize_entity_pool_to_packet_0 @ 0x503940`, guard `write_ptr - buffer_start +
+110 > 650`) — all against the common **650** budget, checked AFTER each record (the crossing record IS
+included). **The 0x45 tiles are NOT part of this divergence:** `serialize_terrain_tiles @ 0x6080F0`
+uses a different model — fill a caller `buf_size` while `remaining >= 12` (a PRE-check that EXCLUDES the
+crossing tile), which is exactly what our `slice_batch_pages` already does. So the faithful port applies
+to the four world pools only: add a per-tag `margin` post-write-guard mode (budget 650, include the
+crossing record) to `emit_paged_pool`, leaving the tile path on the existing pre-check. Deferred here
+because changing the world-pool page boundaries would alter byte-exact golden captures whose re-capture
+is asset-gated — this belongs on the golden-harness (tier-2) loop, not a blind edit.
 
 **D-NET-136** [reimpl divergence, DOCUMENTED 2026-07-01] **The 0x0C player-record `entity+36` bit
 0x01 is computed PER-RECIPIENT ("this is your own entity"); retail sets it ONCE per entity at add
@@ -7106,6 +7143,28 @@ harmless at 2-player scope), the BMS `AnimSlot` spawn property for mission AI (t
 promote does not carry it yet — AI now sends the retail memset default 0 instead of a body
 clip), and the WAC `set_ssn_anim` command still drives the body clip (its retail target —
 +0x374 vs the clip channel — is unwitnessed).
+
+**D-NET-163** [reimpl gap, WITNESSED-READY-DEFERRED — the golden-diff baseline, minted
+2026-07-05] **The dev golden-harness host does not emit retail's full S2C tag set.** The
+tier-1 `nw_golden_diff` self-test, run against the attested v35 baseline (game-server
+`retail_join_v35_game` vs the retail gameplay golden), enumerates 21 tags a retail↔retail
+session carries that our host↔retail-client join capture does not. They share one root
+cause: `nw_server` is a minimal in-match *golden-harness* host (ADR 0013, never shipped),
+and a join-scope capture never exercises the traffic these tags belong to. Three families:
+(1) **periodic integrity / anti-cheat challenge-response** the harness drives none of —
+time-sync (S2C `0x43` ping / C2S `0x08` reply), anim-CRC (`0x39`/`0x1c`), entity-checksum
+(`0x30`/`0x20`), loadout-CRC (`0x31`/`0x21`), entity-index (`0x68`/`0x3d`); (2)
+**gameplay-event traffic** a join-only capture never produces — kill-sync `0x26`,
+kill-by-slot `0x4e`, play-sound `0x34`, score-delta-sound `0x81`; (3) **low-frequency
+session / roster / control tags** the harness does not model — target-assignment `0x4c`,
+team-assign `0x50` (the emit path; `Server_AssignPlayerTeam @ 0x4fe310` itself is MATCHING,
+D-NET-113), session-status `0x58`, deployed-item `0x59`, destroy-list `0x5d`
+(`_DestroyEntityList @ 0x429730`), spectator-flag `0x79`, server-config-strings `0x7e`.
+Each is a documented message shape whose emit is deferred; `nw_golden_diff_test.cpp`'s
+`kDeferredGaps` now maps every tag to this ID, so the diff PASSES with each deferral named
+and a NEW gap (any tag not on this baseline) still fails. The lone allowed spurious
+(S2C `0x18` full-entity-spawn, which our host emits and the retail reference session did
+not) is the tracked D-NET-133 spawn approximation.
 
 **D-NET-162** [reimpl gap, PORTED 2026-07-04 (slice 2; verify v35)] **The AS capture loop
 now runs on our host** — the §5.61 1 Hz block was witnessed round 13 but unported (v33: no

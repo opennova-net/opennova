@@ -20,7 +20,10 @@ func _items_abs() -> String:
 func test_reground_entities_counts_and_applies_with_one_policy() -> void:
 	var m := NovaMissionData.new()
 	assert_eq(m.create_default(), OK)
-	var placed: Dictionary = m.place_entity_grounded(102001, 4, Vector3(100, 50, 10), Vector3(1, 2, 3))
+	# 5 = building in the witnessed type mapping [orig: ItemDef_ParseProperty @ 0x49eb00]
+	# (the pre-D-ITEMDEF-1 invented enum said 4; witnessed 4 = marker, which is
+	# mesh-less and skips the anchor bake this test asserts).
+	var placed: Dictionary = m.place_entity_grounded(102001, 5, Vector3(100, 50, 10), Vector3(1, 2, 3))
 	assert_false(placed.is_empty(), "the fixture entity places")
 	var request := {
 		"kind": int(placed["kind"]),

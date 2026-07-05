@@ -108,13 +108,29 @@ Packaged-product side is already guarded: the packaging boot smoke landed
 2026-07-04 with the `run/main_scene.modtools` fix (every exported exe must
 boot headless before it ships).
 
-### F4 — Writer-parity convention (doc-only)
+### F4 — Writer-parity convention (doc-only) — RECORDED (this section is the record)
 
-Record in this file + libs/CLAUDE.md pointers: every W phase ships (a) writer
-from scratch, (b) roundtrip test, (c) retail-corpus byte sweep where a corpus
-exists, (d) a D-entry when output legitimately differs. This is already
-practiced (terrain, 3di, lwf, mnu, mission); writing it down makes it the
-stated gate for the new writers (hudpos, avatars).
+**The standing W gate.** A workspace's Write axis counts as met only when all
+four ship together:
+
+- **(a) Writer from scratch** — output produced entirely from the in-memory
+  model; never raw input bytes smuggled through
+  ([ADR 0003](../adr/0003-no-raw-passthrough-create-from-scratch.md)).
+- **(b) Roundtrip test** — write → read → semantic equality, in the format
+  lib's ctest suite.
+- **(c) Retail-corpus byte sweep** — where a retail corpus exists, a
+  byte-parity sweep over it (asset-gated per
+  [docs/asset-gated-tests.md](../asset-gated-tests.md); skip-as-pass never
+  substitutes for a local attested run).
+- **(d) A `D-<DOMAIN>-n` entry when output legitimately differs** — minted in
+  the format's RE record via re-doc and ledgered in
+  [docs/divergence-ledger.md](../divergence-ledger.md) at birth, per
+  [ADR 0022](../adr/0022-divergence-burn-down.md).
+
+Already practiced by the terrain, 3di, lwf, mnu, and mission writers; recorded
+here it is the stated gate for the new writers (hudpos in HUD-1, avatars in
+AVT-1) and every W phase after them. `libs/CLAUDE.md` points here from its
+parity-writer rule.
 
 ### F5 — MissionController decomposition
 

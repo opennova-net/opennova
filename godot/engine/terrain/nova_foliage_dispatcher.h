@@ -85,6 +85,11 @@ public:
 	// placement keeps using the live-sculpt Callable samplers (terrain_data left
 	// unset). Runtime ignores it because terrain_data already supplies the colormap.
 	void set_colormap_source(const Ref<NovaTerrainData> &p_data);
+	// The env terrain_rgb tint applied per lightmap sample
+	// [orig: sample_terrain_lightmap @ 0x606030]; default white (FULL 0xFF,
+	// a ~2x saturating brighten — the retail default).
+	void set_terrain_tint(const Color &p_tint);
+	Color get_terrain_tint() const;
 	Ref<NovaTerrainData> get_colormap_source() const;
 
 	// Configuration ---------------------------------------------------------
@@ -199,6 +204,8 @@ private:
 	Callable foliage_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
 	Ref<NovaTerrainData> colormap_source_;
+	Color terrain_tint_ = Color(1.0f, 1.0f, 1.0f, 1.0f);
+	uint32_t terrain_tint_full_ = 0xFFFFFFFFu; // FULL from set_terrain_tint
 	int dispatch_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
 	int render_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
 	int cell_grid_radius_ = 8;

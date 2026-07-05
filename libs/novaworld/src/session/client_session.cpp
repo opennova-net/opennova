@@ -299,23 +299,26 @@ std::vector<uint8_t> ClientSession::build_verify_request() {
 	req.name = "ClientRequestVerifyResult";
 	req.fields.push_back(str_field("SessIdString", sess_id_string_));
 
-	if (!cfg_.verify_cookie_vars.empty()) {
-		NapiMessage var_list;
-		var_list.name = "ClientVarList";
-		var_list.fields.push_back(str_field("VarList", "Cookie"));
-		for (const auto &kv : cfg_.verify_cookie_vars) {
-			const std::string &value =
-			    (kv.first == "NWUID" && kv.second.empty()) ? server_nwuid_
-			                                               : kv.second;
-			NapiMessage var;
-			var.name = "ClientVar";
-			var.fields.push_back(str_field("VarFNum", "0"));
-			var.fields.push_back(str_field("VarName", kv.first));
-			var.fields.push_back(str_field("VarValue", value));
-			var_list.children.push_back(std::move(var));
-		}
-		req.children.push_back(std::move(var_list));
+	// The ClientVarList(VarList="Cookie") parent is emitted UNCONDITIONALLY —
+	// retail serializes the var list with includeAll=1, so a client with no
+	// cookie vars configured sends an EMPTY parent, not an absent one (closes
+	// D-NET-20). [orig: CNapiGameSession_SendVerifyRequest @ 0x4d3620 ->
+	// NapiStatement_SerializeVarList @ 0x4d0660]
+	NapiMessage var_list;
+	var_list.name = "ClientVarList";
+	var_list.fields.push_back(str_field("VarList", "Cookie"));
+	for (const auto &kv : cfg_.verify_cookie_vars) {
+		const std::string &value =
+		    (kv.first == "NWUID" && kv.second.empty()) ? server_nwuid_
+		                                               : kv.second;
+		NapiMessage var;
+		var.name = "ClientVar";
+		var.fields.push_back(str_field("VarFNum", "0"));
+		var.fields.push_back(str_field("VarName", kv.first));
+		var.fields.push_back(str_field("VarValue", value));
+		var_list.children.push_back(std::move(var));
 	}
+	req.children.push_back(std::move(var_list));
 
 	return build_lobby_packet(req);
 }

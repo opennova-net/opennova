@@ -32,6 +32,7 @@ static void _guard_alloc_size(const char *site, int64_t element_count, size_t el
 // Internal data structures matching IDA structures
 // ============================================================================
 
+// [orig: sub_406760 @ 0x406760, sub_406860 @ 0x406860]
 // Ported from sub_406760 initialization.
 // Per-face adjacency: 6 ints per face =
 //   [adj_face_e0, adj_face_e1, adj_face_e2,  (at +0, +1, +2)

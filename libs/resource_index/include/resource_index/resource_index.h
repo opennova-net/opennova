@@ -41,8 +41,13 @@ public:
 	// <root>/expansion/<name>/<name>.pff exists, the expansion's loose files + archives
 	// override the base game (see opennova::Vfs::mount_game). Empty expansion = base game.
 	// `mode` selects which layers are mounted (loose, archives, or both) — see VfsMountMode.
+	// `discovery` selects base-archive discovery: the index defaults to ScanAll (the
+	// editor's browse index must see arbitrary modder archives — a deliberate divergence,
+	// docs/vfs/vfs-pff-mount-re.md D-VFS-2); the game runtime passes RetailTable (the
+	// witnessed fixed boot table [orig: PFF_OpenAllArchives @ 0x4a4310]).
 	bool scan(const std::string &root_dir, const std::string &expansion = std::string(),
-	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride);
+	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
+	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
 	void clear();
 
 	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a

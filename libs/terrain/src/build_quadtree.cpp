@@ -11,6 +11,7 @@ namespace opennova {
 static int s_node_id = 0;
 
 // Float constants from IDA (QuadtreeNode_Process at 0x403470)
+// [orig: QuadtreeNode_Process @ 0x403470; docs/terrain/terrain-re.md]
 static constexpr float COST_SCALE_A  = 0.0005f;   // flt_4244D0
 static constexpr float COST_OFFSET_LEAF  = 0.06f;  // flt_4244CC
 static constexpr float COST_OFFSET_BRANCH = 0.15f; // flt_4244C8 (0x3e19999a)

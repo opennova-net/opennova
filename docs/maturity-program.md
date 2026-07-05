@@ -25,8 +25,8 @@ of the game (ADR 0015).
 
 | Field | Value |
 |---|---|
-| State | Wave 1 in flight (Wave 0 merged 2026-07-04) |
-| Current wave | 0 — bootstrap |
+| State | Wave-1 code COMPLETE in the trunk PR #204 (in review; Wave 0 merged 2026-07-04) |
+| Current wave | 1 — boundary moves + ONED foundations; every exit-gate item is aboard #204 (F1–F5 done, FULL GUT keystone attested; env vectors committed; twelve workspaces merged; npwire + seam landed earlier). Wave 2 opens at merge |
 | Freeze | ON for non-PAR work: new reimplementation features wait for their foundation phase; IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)). |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
@@ -35,6 +35,19 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| GOV-4 Wave-1 close-out | (this train) | ratchets +0 all train (`test_private_pokes` 1371, `libs_uncited_src_files` 88); ledger synced continuously (66 → 62 open across the train); stale-doc touches ride each slice (vfs record, menu-re, world-wac-ai-re, env records) |
+| NET-4 C-ABI guard | ae221e7d + 729f01c7 + 17f06457 | `abi_export_identity` ctest (104-export baseline, forbidden net families); its macOS leg immediately caught + fixed the dylib leak (hidden visibility + 38 phantom MISSION_EXPORTs stripped) — the flat C ABI is now provably identical on every platform |
+| PAR burn-down (trunk train) | 8778a0b4 … 2ed9a4fb | eight rows closed: D-EVT-2/-4 + cats 5/6 + D-EVT-5 mint, D-PLAYERINFO-2, D-NET-20, env #21, env #19 (tint consumers; dead-bake correction), D-VFS-2 (fixed boot table + the editor-index decision), D-CTRL-2 (witnessed visibility flags), D-INF-4 (witnessed direction-table generator); PAR-R7 VFS/PFF audit landed (D-VFS-1..9) |
+| ENG-6 R8 boot-resource research | 1139190e | docs/required-resources.md (fatal set, ordered boot sequence, D-BOOT catalog); the Wave-2 manifest leg stays open |
+| ONED F5 mission_controller decomposition | 9c4a1ea3 | 4,033 → 1,646-line composer + seven `_ops` sections; weakref `_c` leak fix (65e9e33d); the master-red `nova_mission_data_test` literal repaired (7055d0d5) |
+| ONED F2 EngineTextPreview + F3 See-in-game | ba467137 + a68e271f | the game-seam text preview widget; the `/d` loose-override launcher with typed LaunchPlan |
+| ADR-0016 packaging repair | 0836edc2 | AvatarPreview moved to the shared engine layer — the runtime package excluded `modtools/*`, master's boot smoke was red since #194 |
+| ONED F4 writer-parity convention | 29b5ded8 | the four-part W gate recorded in the track doc; libs/CLAUDE.md points at it; binds hudpos (HUD-1) and avatars (AVT-1) forward |
+| PAR-0 ledger train | 4948c540 | divergence-ledger.md + ADR 0022 + dashboard wiring; stable D-catalogs minted in the four prose-only records (97f64a97) |
+| PAR: D-ITEMDEF-1 closed | faec4b3e | `item_type_from_string` witnessed mapping [orig: ItemDef_ParseProperty @ 0x49eb00]; itemdef-re verdict → MATCHING; first ledger row to zero |
+| NET-3 reclassifications + doc sweep | d47932dc | `.agents/network.md` → npruntime ROADMAP redirect, nw_server README (dev/golden-harness), repo-map one-liners; stale-doc sweep 40504652; no-internal-back-compat convention 98f924af |
+| ENG-1 env parity vectors | 27cff422 | 137 vectors dumped once from the cited GDScript port (`env_parity_vectors_test.gd`, env-gated dump mode); the ENG-2 port's pre/post harness |
+| ONED F1 WorldContextPreview | 9c666c7a | in-world context service extracted from TerrainEditor with seams intact; consumers OBJ-1/SND-2 |
 | ONED-A avatars merge train | 18791098 | the twelfth workspace (Avatars) merged from `playerinfo-runtime`; avatars ADR renumbered 0013→0021; eleven→twelve sweep; ratchet `test_private_pokes` baseline 1319→1371 — maintainer-approved bump for the branch's two pre-ratchet white-box files (`player_info_menu_seam_test.gd` 26, `avatar_preview_test.gd` 26); ONED-TST claws it back |
 | LIBS-1 world→terrain seam | bc8c920a | libs/terrain_query query leaf + the permanent forbidden-edge check (link_graph_check.py); ADR 0020 |
 | NET-2 npwire extraction | 46cd0ac4 | wire+replay+framing legs → libs/npwire; ADR 0019; NET-0/STD-1 rode Wave 0 |
@@ -112,7 +125,10 @@ what confuses.
   `mission::promote_mission` is optional — if picked, full propagation per
   the rename-everywhere rule).
 - **NET-4** (S, rides NET-2's ADR) net libs are formally OUTSIDE the C ABI
-  (C++-linked only); the dumpbin export-identity check guards it.
+  (C++-linked only) — **guard landed 2026-07-05**: the `abi_export_identity`
+  ctest (`scripts/lint/abi_exports_check.py`, 104-export committed baseline,
+  never-bypassable forbidden-family check) runs wherever `BUILD_SHARED_LIB=ON`
+  builds run ctest (scripts/build.sh + the CI build-and-test job).
 
 ### LIBS — topology and seams
 
@@ -176,12 +192,14 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   session (R8) enumerates the boot-required, hardcoded-by-name resource set
   from the binary (menumus/gamemus banks, the game strings table, the
   main.mnu set, hudpos.def, default world files, items/weapon defs,
-  controls, ...). Lands as `docs/required-resources.md` (+ engine-primer
-  cross-ref) AND an engine-side manifest table (in `libs/`, near
-  gameprofile) that BOTH the game (boot validation, honest
-  missing-resource errors) and ONED (diagnostics, the future "new game"
-  scaffold) consume. This defines "what a person starts with to make a new
-  game"; the Game workspace itself stays out of scope.
+  controls, ...). **R8 landed 2026-07-05**:
+  [docs/required-resources.md](required-resources.md) (+ engine-primer
+  cross-ref; D-BOOT catalog minted, D-BOOT-1 ledgered). The Wave-2 leg is
+  the engine-side manifest table (in `libs/`, near gameprofile) that BOTH
+  the game (boot validation, honest missing-resource errors) and ONED
+  (diagnostics, the future "new game" scaffold) consume. This defines
+  "what a person starts with to make a new game"; the Game workspace
+  itself stays out of scope.
 
 #### Boundary conformance checklist (ENG-5 instrument; seeded 2026-07-04)
 
@@ -277,11 +295,17 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
 - **PAR-NET** (L) the open D-NET set (the ledger's Net table) + populate
   `nw_golden_diff` `kDeferredGaps` with the D-NET refs from the attested 21-gap baseline,
   so the golden diff names each deferral by ID.
-- **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 (and #21) implemented **libs/env-first**.
-- **PAR-WORLD** (M) the D-INF opens, D-EVT-1/-3, and D-ITEMDEF-1 (closure in flight).
+- **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 implemented **libs/env-first**
+  (#21 closed 2026-07-05: the frame-clear horizon blend, libs/env-first with the
+  GameWorld consumer).
+- **PAR-WORLD** (M) the D-INF opens and the D-EVT set (D-ITEMDEF-1 closed
+  faec4b3e — the first ledger row to zero; the 2026-07-05 D-EVT grill + slice
+  closed D-EVT-2/-4, cats 5/6 of D-EVT-3, and minted-closed D-EVT-5, leaving
+  D-EVT-1 and the cat-1/2 matrix family witnessed-ready-deferred on the
+  TriggerRelations / deploy-POI ports).
 - **PAR-UI** (M) D-MNU-5/6, D-CTRL-3, D-PLAYERINFO-11, D-SND-2, and D-HUD after its RE
   port lands.
-- **PAR-R1..R7** (S/M each) the seven UNAUDITED-system audits (engine-research /
+- **PAR-R1..R7** (S/M each; **R7 landed 2026-07-05** — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md), D-VFS-1..9) the UNAUDITED-system audits (engine-research /
   grill-ida): terrain, foliage, tiles, fonts, credits, importer pipeline, VFS/PFF mount
   stack — each lands an RE record **with a D-catalog**.
 - **Class-B research starters** (freeze-exempt engine-research): the HUD radar/crosshair,
@@ -355,10 +379,18 @@ hatch (a baseline bump, logged in this doc).
 | [orig] citation coverage | ratchet: libs/*/src files with zero citations (infra libs allowlisted), fail-on-increase | Wave 1 | hard on increase; semantic coverage stays a review concern |
 | Magic numbers | diff-scoped advisory in the CI summary | Wave 2 | advisory permanently |
 | Link-graph edges | forbidden-edge script (npwire !→ sqlite; wac/mission/net !→ terrain-format libs post-seam) | Wave 1 | hard-fail forever |
-| GUT silent-drop greps / C-ABI identity | existing | exists | unchanged |
+| GUT silent-drop greps | existing | exists | unchanged |
+| C-ABI export identity + net-family ban | `abi_export_identity` ctest (`abi_exports_check.py` vs the committed baseline; a baseline bump is same-commit and logged here; the net-family check is never bypassable) | Wave 1 (NET-4) | hard-fail forever |
 
 Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 (no new workflow).
+
+**Logged C-ABI baseline bumps** (the same-commit escape hatch):
+
+- 2026-07-05, 104 → 106: added `def_loadout_weight` + `def_encumbrance_class`
+  (the PLAYER_INFO loadout-weight math ported to `libs/def`, D-PLAYERINFO-11
+  weight readout). Additive, `[orig: calculate_loadout_weight @ 0x55f1f0;
+  @ 0x55f480]`; no existing export changed semantics.
 
 ## Risks
 

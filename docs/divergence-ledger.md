@@ -25,9 +25,11 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
    are implemented **libs/env-first** so the ENG-2 port (env GDScript → `libs/env`) does
    not pay for the same math twice.
 3. **The seven systems with no RE record get research audits.** Terrain, foliage, tiles,
-   fonts, credits, the importer pipeline, and the VFS/PFF mount stack are `UNAUDITED`:
-   their divergences, if any, are untracked. Audit slices (PAR-R1..R7) turn unknown
-   unknowns into tracked rows.
+   fonts, credits, the importer pipeline, and the VFS/PFF mount stack started `UNAUDITED`:
+   their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
+   unknowns into tracked rows — **all seven landed this cycle**: VFS/PFF (R7),
+   Fonts (R4), Foliage (R2), Tiles (R3) full; Terrain (R1) + Credits (R5) partial;
+   Importer (R6) tracked-by-composition. `UNAUDITED` is now **0**.
 
 ## Canonical disposition vocabulary (normative)
 
@@ -69,11 +71,9 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 |---|---|---|---|---|
 | D-NET-9 | Gate literal parse is decimal-only; the 4-radix (char/hex/octal/binary) port is witnessed-and-ready | A | WITNESSED-READY-DEFERRED | PAR-NET |
 | D-NET-17 | ClientHello `DE`/`PV3`/`PM`/`ET` parser fields unmodeled (server side witnessed) | A | OPEN | PAR-NET |
-| D-NET-20 | Verify request must emit the `ClientVarList(Cookie)` parent unconditionally (`includeAll=1`) | A | OPEN | PAR-NET |
 | D-NET-21 | `ClientConnected` emitted synchronously; retail waits one periodic tick (state 5/2) | A | OPEN | PAR-NET |
 | D-NET-22 | Verify Cookie var-list is data-driven from client env; the registry/Win32 glue belongs in the Godot binding | A | OPEN | PAR-NET |
 | D-NET-29 | Envelope variable-header (`first-dword==0`) decode mode unsupported — documented scope | A | WITNESSED-READY-DEFERRED | PAR-NET |
-| D-NET-30 | Emit one `Cookie:` header per cookie; jar keyed by subnet-truncated host | A | OPEN | PAR-NET |
 | D-NET-49 | `jointoperations_pg()` is a placeholder; the in-match PG (16 B @ proto+284) is unwitnessed | B | NEEDS-RE | PAR-NET / research starter |
 | D-NET-64 | Guided-weapon record: structural port done, 0x0C-dispatch wiring deferred, wire-unvalidated (no capture carries guided traffic) | B | WITNESSED-READY-DEFERRED + NEEDS-RE (capture) | PAR-NET |
 | D-NET-97 | Pool routing by BMS `EntityKind`, not item-def capability flags (crash fixed; the static-vs-destructible simplification is residual) | A | OPEN | PAR-NET |
@@ -91,25 +91,40 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-137 | Player wire net_id is an invented encoding shim, not the minimap-slot packing — tolerable because the client self-heals unmatched ids | A | WITNESSED-READY-DEFERRED (tolerable) | PAR-NET |
 | D-NET-139 | 0x0A priority score ports distance/age/own-boost; the view-interest / LOS / enemy-team-bonus terms contribute 0 | A | OPEN (approximation) | PAR-NET |
 | D-NET-147 | Residual 0x10 tail: sectioned-destructible `sectionMask` rebuild + armory `weaponByte`/`attachRef` + `scoreFlag` gate deferred (the four base fields fixed + streamed) | A | WITNESSED-READY-DEFERRED | PAR-NET |
+| D-NET-163 | The dev golden-harness host (`nw_server`, ADR 0013) does not emit retail's full S2C tag set — 21 tags across the anti-cheat/CRC challenge, gameplay-event, and low-frequency session/roster families; the `nw_golden_diff` baseline now names each deferral by ID | A | WITNESSED-READY-DEFERRED | PAR-NET |
+
+Closed 2026-07-05: **D-NET-30** -> `FIXED` — one `Cookie: name=value;` header
+per cookie (`CookieJar::cookie_header_lines()`; our own server already merged
+multiple `Cookie:` headers, so the merged-line client was the sole
+inconsistency) + the subnet key ported (`subnet_key()`, IPv4 /16)
+`[orig: CUIBrowser_SendHTTPRequest @ 0x658840; Network_TruncateIPToSubnet
+@ 0x62dfe0]`; C2 summary row flips to matching.
 
 Closed net entries with a permanent facet are listed in the permanent register below
-(D-NET-131, D-NET-133 empty-slot facet, D-NET-140).
+(D-NET-131, D-NET-133 empty-slot facet, D-NET-140). Closed 2026-07-05: **D-NET-20**
+-> `FIXED` (the Cookie var-list parent emitted unconditionally; empty-cfg flow pinned
+in `client_session_loopback_test`).
 
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
 
 Implemented **libs/env-first** so the ENG-2 port inherits the closures. The
-honored-matrix PARTIAL rows (terrain_tint, iris, ceiling/floor, lightning, glare_3di,
-skyfog) map onto these `#` entries.
+honored-matrix PARTIAL rows (iris, ceiling/floor, lightning, glare_3di)
+map onto these `#` entries. Closed 2026-07-05: **env #21** -> `FIXED` (the frame-clear
+horizon blend ported libs/env-first + consumed by the GameWorld clear; witness in
+[env/env-tod-re.md](env/env-tod-re.md) #21), and **env #19** -> `FIXED` (the terrain
+tint grill re-shaped it: the FULL/HALF split + both LIVE consumers ported —
+tile-overlay HALF×MODULATE2X, foliage `min((texel×FULL)>>7,255)` — while the
+texture-bake consumer proved DEAD CODE, readers zero-xref, so the untinted terrain
+surface is ratified faithful; witness in [env/env-tod-re.md](env/env-tod-re.md) #19,
+honored-matrix terrain_tint -> HONORED; residual emitter facets ride PAR-R2).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | env #14 | Sun-glare terrain-raycast occlusion held at full brightness (8-jittered-ray + ±16/frame hysteresis unmodeled) | A | OPEN (PARTIAL) | PAR-ENV |
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #17 | Iris auto-exposure modulator gain — curve + consumer chain recovered, no modulator chain built (`get_terrain_lighting_attenuation` returns identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #19 | `terrain_rgb` terrain-stack consumers (texture bake ×v≫12, water-quad half-tint, foliage lightmap ×/128) render none — attenuation hard-returns identity | A | OPEN (PARTIAL) | PAR-ENV |
-| env #21 | `skyfog` frame-clear color (cross-faded skyfog↔fog at low fog distance) not wired; host scenes choose their own background | A | OPEN | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -118,20 +133,44 @@ skyfog) map onto these `#` entries.
 | D-INF-1 | No blend windows on clip switches (the original blends 10/15 ticks, root motion included) | A | WITNESSED-READY-DEFERRED (rides the skeletal/blend pass) | PAR-WORLD |
 | D-INF-2 | Command channels 123–127 (mount/waypoint) partially driven; walk-to-seat staging, 126/127, child-seat traversal, seat-bone follow, driver-lean pending | A | OPEN (partial) | PAR-WORLD |
 | D-INF-3 | Ground/water resolver: horizontal capsule + platforms/water + airborne anim overlay pending (the vertical capsule-bottom settle landed as D-INF-6) | A | OPEN (partial) | PAR-WORLD |
-| D-INF-4 | Computed sin/cos tables vs the runtime-built originals (`trunc(f(idx)·2^22)`) | A | OPEN | PAR-WORLD |
 | D-INF-5 | Idle look-at system + its spotting side effects — rides the combat pass | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
-| D-EVT-1 | Spawn-point activation on fire is unported (linked spawn points not marked) | A | OPEN | PAR-WORLD |
-| D-EVT-2 | Quarter-pass piggyback (`@0x454d50`) skipped | A | OPEN | PAR-WORLD |
-| D-EVT-3 | Condition categories 1 (team/zone matrix), 5 (load-toggle), 6 (net) unmodeled (return false) | A | OPEN | PAR-WORLD |
-| D-EVT-4 | Pre/post-pass call frequency unwitnessed | B | NEEDS-RE | PAR-WORLD |
-| D-ITEMDEF-1 | `type` enum uses invented sequential values, not engine semantics (effect=8, person=3, …) | A | OPEN — **closure in flight (PAR slice, 2026-07-05)** | in flight |
+| D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
+| D-EVT-3 | Residual after the TriggerRelations port (state + evaluators + recounts + alert stamps + damage-site SHOT writes landed): the acquisition/fire-time write quads ride the combat pass, motor visited marks ride D-INF-2, sub 11 needs the held-object link; cat-2 alert/count + 42-45 subs unwitnessed | A | WITNESSED-READY-DEFERRED (write-sites) + NEEDS-RE (cat-2 subs) | PAR-WORLD |
 
-Unnumbered latent divergence (needs a `D-EVT-5` mint the next time
-[bms-event-runtime-re.md](mission/bms-event-runtime-re.md) is touched): the BMS second
-chunk (header +0x246 bytes) is always `fseek`'d past and never consumed — round-trips
-only while that value is 0 (`OPEN`, class A).
+Closed 2026-07-05: **D-INF-4** → `FIXED` (the direction-table generator witnessed —
+`[orig: Math_BuildSinTable @ 0x613050]`, an accumulating 1281-entry sin table at 2^22
+with the cos read aliasing +256 entries; ported structurally in `quantized_dir`,
+integer-equivalence + landmarks pinned in the `infantry` ctest). Also closed:
+**D-ITEMDEF-1** → `FIXED` (faec4b3e — `item_type_from_string`
+witnessed mapping `[orig: ItemDef_ParseProperty @ 0x49eb00]`;
+[world/itemdef-re.md](world/itemdef-re.md) verdict flipped to MATCHING). The first
+ledger row driven to zero. Same day, the D-EVT grill closed three more:
+**D-EVT-2** → `FIXED` (the quarter-pass piggyback IS the player-AWOL counter
+`[orig: @0x454d50 → Entity_UpdateStuckCounter @0x439dc0]`, ported with the
+PlayerAwol evaluator), **D-EVT-3 cats 5/6** → `FIXED` (load-parity toggle
+`[orig: dword_815174]`; Teammate category `[orig: @0x453b3c..0x453b67]`), and
+**D-EVT-4** → `FIXED` (pre/post passes are one-shot per transition, never
+periodic `[orig: @0x525b86; @0x52266c/@0x5263a0]` — our per-phase-tick post
+evaluation was itself the divergence, replaced by `run_post_mission_pass`).
+**D-EVT-5** minted and closed at birth: the BMS second chunk (header +0x246)
+is runtime-opaque — both retail paths `fseek` past it (@0x40f6da/@0x40f756,
+its only xrefs); our reader's parse-and-round-trip is a faithful superset
+whose grammar is editor-side surface gated on D-MIS-3.
 
 ### UI — menus/controls, sound, player-info, HUD
+
+Closed 2026-07-05: **D-SND-2** -> `FIXED` (expansion bank slots 0/1 load ahead of
+the static banks in slot order `[orig: Expansion_LoadAssets @ 0x4a4989/@ 0x4a495e]`,
+fed by `NovaResourceRoot.get_expansion()` off the runtime mount; missing files skip
+like `SoundBank_LoadIfExists`). **D-CTRL-2** -> `FIXED` — the witnessed per-entry show-flag
+gate ported with every catalog row's flag word minted from the binary
+(`[orig: UI_PopulateControlMappingList @ 0x55c0c0; catalog flags @ 0x8159AC
++ 108*id]`; the class-category approximation deleted; observable corrections
+pinned in `controls_test`). Also closed: **D-PLAYERINFO-2** -> `FIXED` — verified already enforced:
+the parser errors at the 512-part cap (`libs/avatars/src/avatars.cpp` guard,
+`[orig: CAvatarDefs_ParseConfigLine @ 0x57a456]`), `NovaAvatarDatabase`
+propagates the failure, and `tests/avatars/avatars_parse_test.cpp` pins the
+512-part parse failure. The row predated the guard's landing (AVA train).
 
 Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md),
 [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [interface/hud-re.md](interface/hud-re.md).
@@ -140,16 +179,13 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 |---|---|---|---|---|
 | D-MNU-5 | Text-item rendering scope: combo/list image/color items not backed (shipped menus are text-only there) | A | OPEN | PAR-UI |
 | D-MNU-6 | CBIN credits custom `~F` fonts / `~I` images not resolved from the resource root (default font only) | A | OPEN | PAR-UI (see credits audit PAR-R5) |
-| D-CTRL-1 | Mouse/joystick binding arrays (profile-built at runtime) not ported; those rows show a blank Control column | A | OPEN | PAR-UI |
-| D-CTRL-2 | Control-list visibility filter approximated (hide admin classes) vs the per-entry show-flag `(*entry & 0x20)==0 && (*entry & 0x800)!=0` | A | OPEN (approximation) | PAR-UI |
+| D-CTRL-1 | Mouse/joystick binding arrays (profile-built at runtime) not ported; those rows show a blank Control column. **Scoping (2026-07-05):** NOT in `PlayerProfile_InitDefaults @ 0x54bb40` (that sets settings/macros/default weapon loadouts only) — the mouse/joystick default bindings are built by a separate input-binding init (an RE hunt), and the consumer is the Godot input-action layer (same gate as D-CTRL-3) | A | OPEN | PAR-UI |
 | D-CTRL-3 | Live double-click rebinding / DEFAULTS / CLEAR_KEY / profile persistence deferred — gated on a real input-action layer | A | WITNESSED-READY-DEFERRED | PAR-UI |
-| D-SND-2 | Expansion banks (`<exp>L.lwf` / `<exp>.lwf`) not loaded (no expansion slot yet) | A | OPEN | PAR-UI |
 | D-PLAYERINFO-1 | In-world (spawned-player) combo→3D-model binding untraced (the preview is witnessed + fully ported) | B | NEEDS-RE | PAR-UI / research starter |
-| D-PLAYERINFO-2 | The 512-part pool cap should be enforced as an error (not silent truncation) | A | OPEN | PAR-UI |
 | D-PLAYERINFO-7 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-9 | ACCEPT/commit + profile persistence host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-10 | Voice preview (`VOICE_%d` via `menu.lwf`) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
-| D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented) | A | OPEN (partial) | PAR-UI |
+| D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB `draw_minimap_compass_overlay` + oscarmike model it as a compass) | A | OPEN (HUD port in flight) | PAR-UI |
 | D-HUD-2 | Stance widget = frame-swap + fade; heading/north is a *separate* top-down radar (do not port a rotating ring) | A | OPEN (port in flight) + NEEDS-RE (radar) | PAR-UI / research starter |
@@ -180,6 +216,79 @@ The LW `.3di` record is unlanded overall (PR #45 closed); its rows ride whenever
 import is revived. Note D-3DILW-1's v8 branch overlaps the 3DI/GP audit surface only at
 the container-detection seam.
 
+### VFS / PFF mount stack — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS catalog; PAR-R7)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-VFS-1 | Loose gating session-global vs retail's per-call forces (saves/foliage/gt.ssc/UI force loose-first sans /d; BMS-from-PFF forces archive-only under /d) | A | OPEN | PAR (vfs) |
+| D-VFS-3 | Path-qualified names passed verbatim in retail (loose subdir probes; flat archive names); our flat_key strips everywhere | A | OPEN | PAR (vfs) |
+| D-VFS-5 | Encrypted-entry streaming: retail decrypts whole-file reads only; ours always — corpus check needed | B | NEEDS-RE | PAR (vfs) |
+| D-VFS-7 | Query-only normalization (31-char truncation, trailing-space trim) vs our both-sides — pathological names only | A | OPEN (minor) | PAR (vfs) |
+
+D-VFS-4/6/8/9 are permanent candidates (register below). Closed 2026-07-05:
+**D-VFS-2** -> `FIXED` — `Vfs::mount_game` defaults to the witnessed fixed boot
+table (`VfsArchiveDiscovery::RetailTable`: language/localres/resource.pff in
+slot order, extra archives never mount, pinned by
+`test_mount_game_retail_table` `[orig: PFF_OpenAllArchives @ 0x4a4310, table
+@ 0x829f90]`); the editor's browse index deliberately keeps `ScanAll`
+(recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
+modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
+
+### Credits (CBIN) — [credits/cbin-re.md](credits/cbin-re.md) (D-CBIN catalog; PAR-R5, PARTIAL)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-CBIN-1 | Credits `~C`/`~F`/`~J`/`<CR>` markup consumers (the retail scroller) not yet witnessed; D-MNU-6 custom-font/image resolution rides here | B | NEEDS-RE | PAR (credits) |
+| D-CBIN-2 | Read path CONFIRMED: 8 rol-7 cipher sites in the CBIN codec region (0x75e158-0x75e914) incl. decode loops (`@0x75e473` read+decipher) — retail READS CBIN, not just writes; our symmetric decode matches | B | **RESOLVED (MATCHING)** | PAR (credits) |
+
+CBIN codec (magic 0x4E494243 + 20-B header + ROL32/XOR cipher `@0x75e348`) is
+**MATCHING** vs `libs/cbin`, witnessed read-only via raw disasm (no IDB write).
+
+### Terrain — [terrain/terrain-re.md](terrain/terrain-re.md) (D-TERRAIN catalog; PAR-R1, PARTIAL)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-TERRAIN-1 | Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include — a tracked deliberate divergence justified by the editing need | C | PERMANENT (candidate) | PAR (terrain) |
+
+Record is PARTIAL by documentation depth, NOT by open divergences: the data path
+(build → mesh-simplify → CPT) is proven **byte-identical** across 5 fixtures
+(`dvd4_parity` + `parametric_parity` Sample/Gradient/Checker64/Perlin). The only
+tracked terrain divergence is D-TERRAIN-1 (deliberate shader split); the remaining
+work is documenting the CDEP/LOD bitstream + retail-anchoring the render pass, not
+closing a parity gap.
+
+### Tiles — [tiles/til-re.md](tiles/til-re.md) (D-TIL catalog; PAR-R3)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-TIL-1 | `TIL_FLAG_OUTLINE` (0x08): the LINELIST outline is jodemo-only; retail JO's render (`render_water_quad @ 0x604700`) omits it and so do we (flag preserved for round-trip, no outline drawn) — faithful to retail JO | B | **FIXED (faithful)** | PAR (tiles) |
+
+Overlay entry (12 B), atlas UV, flip/rotate flags, half-texel shift, Z negation,
+and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`.
+
+### Foliage — [foliage/foliage-re.md](foliage/foliage-re.md) (D-FOLIAGE catalog; PAR-R2)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance (2×2 lightmap avg) vs the engine's per-vertex quad color `0xFF000000 | (0x404040 + avg>>1)` under a 2× draw + alpha-premultiplied colormap — visually close, the per-vertex gradient is the residual | A | OPEN (approximation) | PAR (foliage) |
+
+Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
+0x20000 proximity) is **MATCHING** — byte-exact vs retail `generate_foliage_instances_0 @ 0x600197`.
+
+### Fonts — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT catalog; PAR-R4)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-FNT-1 | Offset +4 is the design-width scale reference, not a version; our reader rejected `!= 800` | A | **FIXED** (no equality gate; non-800 parses, `fnt_roundtrip`) | PAR (fonts) |
+| D-FNT-2 | The per-font design scale `800/designWidth` was not retained | A | **FIXED** (`design_width` carried; `fnt_design_scale`) | PAR (fonts) |
+| D-FNT-3 | Offset +12 (`hdr3`) named `shadow_offset` but only STORED by the loader — the shadow semantics are unconfirmed | B | NEEDS-RE | PAR (fonts) |
+
+### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion); `menu_shell.gd` scans by name heuristic instead | A | OPEN | rides the ENG-6 manifest (Wave 2) |
+
 ---
 
 ## Count-to-zero scoreboard
@@ -188,18 +297,30 @@ Open counts by domain (the target is zero in every cell):
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
-| Net | 10 | 0 | 12 (2 also NEEDS-RE) | 22 |
-| Environment | 2 | 0 | 5 | 7 |
-| World / AI + events | 6 | 1 | 2 | 9 |
-| Item def | 1 (in flight) | 0 | 0 | 1 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 11 | 1 (+1 dual) | 5 | 17 |
+| Net | 8 | 0 | 13 (2 also NEEDS-RE) | 21 |
+| Environment | 1 | 0 | 4 | 5 |
+| World / AI + events | 2 | 0 | 4 | 6 |
+| Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 (+1 dual) | 5 | 14 |
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
-| **Total OPEN** | | | | **66** |
+| Credits (new domain, PAR-R5 partial) | 0 | 1 | 1 resolved | 2 |
+| Terrain (new domain, PAR-R1 partial) | 0 | 0 | 0 (1 candidate-PERMANENT) | 0 |
+| Tiles (new domain, PAR-R3 audit) | 0 | 0 | 1 FIXED | 1 |
+| Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
+| Fonts (new domain, PAR-R4 audit) | 0 | 1 | 2 FIXED | 3 |
+| Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
+| VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
+| **Total OPEN** | | | | **64** |
 
-Plus one unnumbered latent divergence (BMS second chunk) awaiting a `D-EVT-5` mint.
-Permanent register size: **13** (below). `UNAUDITED` systems: **7** (below).
+The Boot-resources row is the R8 audit doing its job: an audit that converts
+unknown unknowns into tracked rows RAISES the count before the burn-down
+lowers it (the same will happen at PAR-R1..R7).
+
+Permanent register size: **17** (below). `UNAUDITED` systems: **0** — every system now has an RE record (full or partial) or a tracked-by-composition audit.
+(The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
+in the World table above.)
 
 ---
 
@@ -220,6 +341,9 @@ one-line rationale for why porting it would be *wrong*.
 | D-MNU-4 | The original truncates each scaled quad rect to int per element; the reimpl applies one float `CanvasItem` scale | A sub-pixel cosmetic difference; reproducing per-element int truncation would fight Godot's scene-graph scale model for no visible gain. |
 | D-PTL-2 | One mesh batch per graphic layer vs the engine's shared vertex/index buffer pooling | A host renderer architecture choice; visually equivalent, and pooling is a performance strategy, not observable behavior. |
 | D-NET-131 | A dedicated ("serve only") host runs as a mode-3 in-process listen server (`serve_and_play=false`), not the original's mode-1 host-only | Wire-equivalent from a joiner's view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); the difference is host-internal bookkeeping that never reaches a connected client. |
+| D-VFS-4 | Snapshot resource index vs retail's live per-call resolution | A host cache; our hosts remount on change — re-resolving every open would fight the indexed host model for no observable gain (mid-session loose drops are a dev workflow, not gameplay). |
+| D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
+| D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is host-internal. |
 | D-NET-140 | The listen host's own loopback connection receives the full 0x0A record set; retail sends its local player header-only frames | The full-record loopback is how serve-and-play renders its local view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); that frame never leaves the process, so retail interop is unaffected. |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
@@ -231,6 +355,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-MUS-7 | `op_callvl` (`0x0A` call form) resolves against an uninitialised-BSS name table in Jointops, so the opcode is dead; the reimpl mirrors the dead stub (push 0) | The original behavior *is* "do nothing" (the table is never populated); porting a "working" call would invent behavior the engine never had. |
 | D-MUS-5 | `inc_g`/`dec_g` (`0x11`/`0x12`) operate on 1 byte and raise no globals-dirty notify | An intentional mirror of the original's silence; adding the notify would diverge from the witnessed behavior. |
 | D-PTL-1 | The engine's outer dispatcher remaps `g2_color1`/`g3_color1`/… into higher color slots (a parse bug); the reimpl maps `g{N}_color{M}` correctly | A recorded intentional divergence: the correct mapping is what an author means; reproducing the dispatch remap would carry the engine's parse bug forward. |
+| D-VFS-6 | Retail's PFF open trusts the header blindly (no magic/entry_size/count checks; entry_size>36 overflows; two write-after-free bugs @ 0x768348/0x7685ba) — ours validates and is UAF-free | Reproducing unvalidated reads and UAFs would manufacture garbage against ADR 0003. |
 | D-SCR-1 / D-SCR-2 | The SCR container codec accepts version bytes 0–2 and selects the key from the version byte + policy, where each original call site fixes the key | A deliberate multi-title superset so one codec serves JO-demo-era and shader containers; load-bearing equivalence holds for everything retail JO ships. |
 
 `PERMANENT` is not a resting place for hard work: each entry above is a decision that the
@@ -240,24 +365,32 @@ the follow-up path.
 
 ---
 
-## UNAUDITED systems (no RE record yet)
+## Audit track — COMPLETE (`UNAUDITED` = 0)
 
-Seven systems are documented mainly by code and tests
-([docs/README.md](README.md)). Each gets a research audit (engine-research / grill-ida)
-that lands an RE record **with a D-catalog**, converting untracked divergences into
-tracked rows.
+All seven systems that started with no RE record now have one (full or partial) or
+a tracked-by-composition audit. The `UNAUDITED` set is empty; every subsystem's
+divergences are tracked rows, not unknown unknowns.
 
-| System | Audit slice | Partial coverage today |
+| System | Slice | Result |
 |---|---|---|
-| Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). |
-| Foliage | PAR-R2 | none (placement port witnessed in code; no RE record). |
-| Tiles | PAR-R3 | none. |
-| Fonts | PAR-R4 | the FNT shelf packer + format facts live in `fnt_rasterizer.gd`; ENG-4 plans the `libs/fnt` extraction. |
-| Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. |
-| Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). |
-| VFS / PFF mount stack | PAR-R7 | the PFF write side is [ADR 0008](adr/0008-pff-writer-policy.md); the mount stack itself is unaudited. |
+| VFS / PFF | PAR-R7 | full record — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) (D-VFS-1..9) |
+| Fonts | PAR-R4 | full record — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT-1..3) |
+| Foliage | PAR-R2 | full record — [foliage/foliage-re.md](foliage/foliage-re.md), placement MATCHING vs retail `@0x600197` |
+| Tiles | PAR-R3 | full record — [tiles/til-re.md](tiles/til-re.md), overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700` |
+| Credits (CBIN) | PAR-R5 | partial — [credits/cbin-re.md](credits/cbin-re.md); codec (magic + header + ROL32/XOR cipher `@0x75e348`) MATCHING vs `libs/cbin`, witnessed read-only via raw disasm; markup + read-path NEEDS-RE |
+| Terrain | PAR-R1 | partial — [terrain/terrain-re.md](terrain/terrain-re.md); surface + witness basis mapped, D-TERRAIN-1 shader split; mesh_simp/CDEP deep grill pending |
+| Importer | PAR-R6 | tracked-by-composition — [importer/importer-audit.md](importer/importer-audit.md); composes RE'd libs, no independent parity surface |
 
----
+**Notes from the sweep (2026-07-05):** two "which binary" assumptions were
+corrected by testing them — **Foliage and Tiles audit cleanly against retail**
+(the code cites jodemo but the same functions ship in retail: foliage
+`generate_foliage_instances_0 @ 0x600197`, tiles `PolyTrn_RenderTile @ 0x60df0d`).
+**The CBIN codec IS in retail JO** — the magic is a binary constant a string search
+misses; `find_bytes 43 42 49 4E` finds the writer at `~0x75e250` and the cipher
+loop at `0x75e348` (`rol ebx,7` + `xor [blob],key&0xFF`, 4-byte groups), byte-exact
+to `libs/cbin`. The two partials (Terrain, Credits) have their remaining grills
+scoped in their records; the six code-cited-jodemo systems are retail-anchored
+where they ship.
 
 ## Standing rules
 

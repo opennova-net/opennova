@@ -80,7 +80,14 @@ int opennova_vfs_mount_game(OpennovaVfs *vfs, const char *game_root, const char 
         case OPENNOVA_VFS_MODE_PACKED: m = opennova::VfsMountMode::Packed; break;
         default: m = opennova::VfsMountMode::PackedWithLooseOverride; break;
     }
-    return vfs->vfs.mount_game(game_root, expansion ? std::string(expansion) : std::string(), m) ? 1 : 0;
+    // The C ABI is the authoring/importer entry (Python asset_resolver, extract
+    // tooling) — it must see EVERY base-root archive, arbitrary names included,
+    // like the editor's browse index. RetailTable is the game runtime's faithful
+    // boot mount only (NovaResourceRoot::mount_runtime); D-VFS-2.
+    return vfs->vfs.mount_game(game_root, expansion ? std::string(expansion) : std::string(), m,
+                               opennova::VfsArchiveDiscovery::ScanAll)
+             ? 1
+             : 0;
 }
 
 void opennova_vfs_clear(OpennovaVfs *vfs) {

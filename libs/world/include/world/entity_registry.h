@@ -18,6 +18,10 @@ namespace opennova::world {
 struct Area {
     std::string name;
     Aabb bounds;
+    // The area trigger's Active flag (bms flags bit0). The player-AWOL probe
+    // counts only active zones [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40
+    // walks records with flags bit0 set].
+    bool active = true;
 };
 
 struct Route {
@@ -50,7 +54,7 @@ public:
     void in_area(const Aabb &zone, std::vector<EntityHandle> &out) const;
 
     // Named, first-class non-entity addressables.
-    int register_area(std::string name, const Aabb &bounds); // returns area id
+    int register_area(std::string name, const Aabb &bounds, bool active = true); // returns area id
     int find_area(std::string_view name) const;              // -1 if absent
     const Area *area(int id) const;
 

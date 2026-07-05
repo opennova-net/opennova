@@ -1,4 +1,6 @@
-/* PFF archive writer (production). Serializes an explicit, caller-provided set of stored entries
+/* PFF archive writer (production). [orig: PFF_SortEntries @ 0x768280; the writer is a from-scratch
+   inverse of the retail loader, docs/vfs/vfs-pff-mount-re.md, ADR 0008]
+   Serializes an explicit, caller-provided set of stored entries
    into a modern PFF3/PFF4/BHD archive: header(20) | payloads | directory(36 each). Payloads are
    NEVER transformed — the supplied bytes are the exact stored bytes (container-XOR-encrypted iff
    flags & PFF_FLAG_ENCRYPTED). The directory is emitted sorted by normalized name (matching the

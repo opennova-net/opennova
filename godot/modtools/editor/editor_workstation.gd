@@ -74,6 +74,7 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _asset_dock: Control = %AssetDock
 @onready var _right_split: SplitContainer = %RightSplit
 @onready var _browser_toggle_button: Button = %BrowserToggleButton
+@onready var _play_in_game_button: Button = %PlayInGameButton
 @onready var _browser_pane_host: PanelContainer = %ResourceBrowserPaneHost
 @onready var _status_bar: PanelContainer = %StatusBar
 @onready var _status_tool_label: Label = %StatusToolLabel
@@ -116,6 +117,8 @@ var _workflow_buttons: Dictionary = {}
 var _inspector_workspace_id: int = -1
 var _save_export := ShellSaveExportFlow.new()
 var _export_progress := ShellExportProgress.new()
+# F3: the "See in game" launcher (game runtime + /d loose-override).
+var _game_launch := ShellGameLaunch.new()
 # App-close guard: one prompt covering every workspace with unsaved work,
 # separate from the flow module's per-action UnsavedChangesDialog.
 var _close_guard_dialog: ConfirmationDialog
@@ -205,6 +208,15 @@ func _ready() -> void:
 		_context_workspace_label,
 		_context_doc_label,
 		active_workspace_supplier
+	)
+	_game_launch.setup(
+		_play_in_game_button,
+		func() -> String: return _resource_library.get_root_dir(),
+		func() -> String: return NovaResourceDirSettings.get_expansion(),
+		func() -> String: return NovaResourceDirSettings.get_game(),
+		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
+		func(path: String) -> bool: return FileAccess.file_exists(path),
+		show_status_message
 	)
 	_tile_gizmo_overlay.setup(_tile_gizmo, _tile_gizmo_label, _viewport_lane, active_workspace_supplier)
 	_tile_gizmo_overlay.wire_buttons(
@@ -1284,6 +1296,7 @@ func _set_resource_root_dir(path: String, persist: bool, scan: bool) -> Error:
 	_show_resource_status(result)
 	_settings_panel.sync_popup_state()
 	_layout.refresh_browser_pane()
+	_game_launch.refresh()
 	return int(result["err"])
 
 
@@ -1296,6 +1309,7 @@ func _scan_resource_root(show_message: bool) -> Error:
 		_show_resource_status(result)
 	_settings_panel.sync_popup_state()
 	_layout.refresh_browser_pane()
+	_game_launch.refresh()
 	return int(result["err"])
 
 

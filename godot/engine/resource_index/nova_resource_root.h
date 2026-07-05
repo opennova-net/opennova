@@ -51,8 +51,12 @@ class NovaResourceRoot : public RefCounted {
 
 	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
 	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
+	// `discovery` splits the two products: the runtime mounts the witnessed retail boot table,
+	// the editor's browse index scans every archive (D-VFS-2's recorded decision).
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-	                      const String &game_code);
+	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
+
+	String expansion_;
 
 protected:
 	static void _bind_methods();
@@ -76,6 +80,11 @@ public:
 	// editing files on disk without remounting.
 	static int64_t cache_epoch();
 	static void bump_cache_epoch();
+	// The expansion name this root was runtime-mounted with ("" for base game or
+	// editor/loose mounts). Feeds the expansion bank slots and the M<exp>/G<exp>
+	// music forms [orig: Expansion_LoadAssets @ 0x4a4730].
+	String get_expansion() const;
+
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;

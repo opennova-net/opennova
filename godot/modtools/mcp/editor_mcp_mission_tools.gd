@@ -768,7 +768,7 @@ func _item_db_for_mount_analysis(ctx: McpToolContext, controller: Variant) -> Va
 		if db.load_from_resource_root(ctx.root(), "items.def") == OK:
 			return db
 	if controller != null and controller.has_method("_item_db"):
-		return controller._item_db()
+		return controller._placement._item_db()
 	return null
 
 

@@ -155,14 +155,27 @@ func get_terrain_tint() -> Vector3:
 
 
 func get_terrain_lighting_attenuation() -> Vector3:
-	# terrain_rgb IS a direct live tint with three witnessed consumers (C6/G3):
-	# the terrain texture bake (channel*v >> 12 [orig: PolyTrn_InitTextures
-	# @ 0x60b8cb]), the water-quad half tint [orig: PolyTrn_RenderTile @ 0x60df0d],
-	# and the foliage lightmap */128 [orig: sample_terrain_lightmap @ 0x606030].
-	# Those per-consumer ports ride the terrain/foliage work, not the env slice -
-	# returning identity here is tracked divergence #19 (docs/env/env-tod-re.md),
-	# kept neutral rather than faked through the wrong (uniform-tint) path.
+	# Identity is FAITHFUL for the terrain surface: the terrain texture bake
+	# consumer of terrain_rgb is DEAD CODE in retail — the bake buffer is
+	# written and freed but its three readers (0x606ce0, 0x606c30,
+	# Terrain_GetColorMapBilinear @ 0x606d80) have zero xrefs (full .text
+	# E8/E9 scan), so the GPU terrain textures ship untinted
+	# (docs/env/env-tod-re.md #19). The two LIVE terrain_rgb consumers render
+	# elsewhere: the .til tile overlay (get_tile_overlay_tint below) and the
+	# foliage lightmap sample (NovaFoliageDispatcher.terrain_tint).
 	return Vector3.ONE
+
+
+## The .til tile-overlay tint: DIFFUSE = HALF(terrain_rgb) on the quad under a
+## TEXTURE x DIFFUSE MODULATE2X combine, folded to one shader multiply —
+## 254/255 at the default tint (witnessed near-identity, one LSB dark).
+## [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d]
+func get_tile_overlay_tint() -> Vector3:
+	var tint := Color.WHITE
+	if environment_data != null:
+		tint = environment_data.get_terrain_tint()
+	var factor := EnvFile.tile_overlay_tint_factor(tint)
+	return Vector3(factor.r, factor.g, factor.b)
 
 
 ## Push the env-derived terrain lighting + fog uniforms onto a terrain
@@ -264,11 +277,33 @@ func get_cloud_edge() -> Vector3:
 
 
 func get_skyfog_color() -> Vector3:
-	# The clear/horizon color, doubled like fog [orig: Environment_UpdateWeatherTick
-	# @ 0x57f190]. Its witnessed consumer is the FRAME CLEAR color (cross-faded
-	# skyfog<->fog at low fog distance), which no host wires yet - tracked as
-	# divergence #21 in docs/env/env-tod-re.md; this getter is the API for it.
+	# The skyfog render color, doubled like fog [orig: Environment_UpdateWeatherTick
+	# @ 0x57f190]. Hosts wanting the frame CLEAR color use get_frame_clear_color()
+	# (the horizon-blended form; divergence #21, closed).
 	return _double_vec3(_tod.get("skyfog", Vector3.ZERO))
+
+
+func get_frame_clear_color() -> Vector3:
+	# The frame CLEAR color (divergence #21, closed): skyfog horizon-blended
+	# toward fog when the fog distance drops below half the reference distance -
+	# pure fog at <= ref/4, a linear fade across [ref/4, ref/2], untouched
+	# skyfog above. The blend runs on the UNDOUBLED keyframe colors (retail
+	# doubles after), and the result stays undoubled: a 1x-intensity host
+	# matches the witnessed non-modulate2x device path, whose Clear halves the
+	# doubled color back. Reference distance: the retail default 1024 (the
+	# session authority forces it; 768 is an adapter-caps fallback with no
+	# host analog).
+	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1;
+	#  consumer Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; device Clear
+	#  halving @ 0x67715d; defaults Environment_InitDefaults @ 0x57c0b0 /
+	#  Terrain_Init @ 0x60fca3]
+	var fog_raw: Vector3 = _tod.get("fog", Vector3.ZERO)
+	var sky_raw: Vector3 = _tod.get("skyfog", Vector3.ZERO)
+	var blended := EnvFile.horizon_blend_skyfog(
+		Color(fog_raw.x, fog_raw.y, fog_raw.z),
+		Color(sky_raw.x, sky_raw.y, sky_raw.z),
+		_fog_distance, 1024.0)
+	return Vector3(blended.r, blended.g, blended.b)
 
 
 func set_fill_light(value: Vector3) -> void:

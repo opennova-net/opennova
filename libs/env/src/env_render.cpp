@@ -266,6 +266,34 @@ Rgb double_saturate(const Rgb &color) {
 	return out;
 }
 
+Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
+                         uint32_t fog_dist_fixed, uint32_t fog_dist_reference_fixed) {
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0 — half shr @ 0x57f03d,
+	//  quarter shr @ 0x57f04c, unsigned strict compare @ 0x57f04e, borrow clamp
+	//  @ 0x57f058, t = div/shr16 @ 0x57f061..0x57f063, per-byte MMX
+	//  @ 0x57f066..0x57f0a1 written IN PLACE over skyfog[0].]
+	const uint32_t half = fog_dist_reference_fixed >> 1;
+	const uint32_t quarter = half >> 1;
+	if (fog_dist_fixed >= half || half == quarter) return skyfog;
+	const uint32_t num = (fog_dist_fixed > quarter) ? fog_dist_fixed - quarter : 0;
+	const uint32_t t = static_cast<uint32_t>(
+		((static_cast<uint64_t>(num) << 32) / (half - quarter)) >> 16); // 0.16 fraction
+	const int tw = static_cast<int>(t >> 1);              // pmulhw operand (skyfog side)
+	const int tiw = static_cast<int>((t ^ 0xFFFFu) >> 1); // pmulhw operand (fog side)
+	const auto channel = [&](float fog_c, float sky_c) {
+		const int fogw = (rgb_byte(fog_c) * 0x101) >> 1; // punpcklbw x,x ; psrlw 1
+		const int skyw = (rgb_byte(sky_c) * 0x101) >> 1;
+		int res = ((fogw * tiw) >> 16) + ((skyw * tw) >> 16); // pmulhw pair
+		if (res > 0x7FFF) res = 0x7FFF;                       // paddsw saturation
+		return byte_to_float(res >> 6);                       // psrlw 6 ; packuswb
+	};
+	Rgb out;
+	out.r = channel(fog.r, skyfog.r);
+	out.g = channel(fog.g, skyfog.g);
+	out.b = channel(fog.b, skyfog.b);
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // BMS overrides
 
@@ -296,6 +324,81 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 	if (overrides.has_start_time) {
 		config.curtime = overrides.start_time;
 	}
+}
+
+float iris_luminance(const Rgb &c) {
+    // [orig: @ 0x5c7550] lum = 0.25*(r+b) + 0.5*g.
+    return 0.25f * (c.r + c.b) + 0.5f * c.g;
+}
+
+int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
+              float dir_x, float dir_y, float dir_z,
+              float iris_center, float iris_percent) {
+    // [orig: terrain_sector_compute_lighting @ 0x5c7550] exact curve.
+    const float dir_lum = iris_luminance(directional);
+    const float sky_lum = iris_luminance(sky);
+    const float gnd_lum = iris_luminance(ground);
+    const float vert_lum = dir_y * dir_lum + sky_lum;
+    const float horiz_lum =
+            std::sqrt(dir_x * dir_x + dir_z * dir_z) * dir_lum + 0.707f * (sky_lum + gnd_lum);
+    float m = dir_lum;
+    if (sky_lum > m) m = sky_lum;
+    if (gnd_lum > m) m = gnd_lum;
+    if (vert_lum > m) m = vert_lum;
+    if (horiz_lum > m) m = horiz_lum;
+    const float base = iris_center * 64.0f;
+    // gain = 0.01 * (iris_percent * base/(2m) + (100 - iris_percent) * base).
+    // m can be 0 (fully dark) — the base/(2m) term then diverges toward the
+    // 255 clamp, matching the witnessed "rises toward 255 in darkness".
+    float gain;
+    if (m > 0.0f) {
+        gain = 0.01f * (iris_percent * base / (2.0f * m) + (100.0f - iris_percent) * base);
+    } else {
+        gain = 255.0f; // the base/(2*0) limit is the clamp
+    }
+    const int g = static_cast<int>(gain);
+    if (g < 0) return 0;
+    if (g > 255) return 255;
+    return g;
+}
+
+TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed) {
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20] full @ 0x31a1824,
+	// half @ 0x31a1828.
+	TerrainTint tint;
+	tint.full = terrain_color_packed | 0xFF000000u;
+	tint.half = ((terrain_color_packed >> 1) & 0x007F7F7Fu) | 0xFF000000u;
+	return tint;
+}
+
+TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb) {
+	const uint32_t packed = (static_cast<uint32_t>(rgb_byte(terrain_rgb.r)) << 16) |
+			(static_cast<uint32_t>(rgb_byte(terrain_rgb.g)) << 8) |
+			static_cast<uint32_t>(rgb_byte(terrain_rgb.b));
+	return terrain_tint_from_packed(packed);
+}
+
+uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
+	// [orig: sample_terrain_lightmap @ 0x606030] per channel
+	// min((texel * FULL) >> 7, 255); alpha passthrough.
+	uint32_t out = texel_argb & 0xFF000000u;
+	for (int shift = 0; shift <= 16; shift += 8) {
+		const uint32_t texel_c = (texel_argb >> shift) & 0xFFu;
+		const uint32_t tint_c = (full_tint >> shift) & 0xFFu;
+		const uint32_t tinted = std::min<uint32_t>((texel_c * tint_c) >> 7, 255u);
+		out |= tinted << shift;
+	}
+	return out;
+}
+
+Rgb tile_overlay_tint_factor(const TerrainTint &tint) {
+	// TEXTURE x DIFFUSE(HALF) under MODULATE2X -> single-multiply factor
+	// 2*HALF/255 per channel [orig: PolyTrn_RenderTile @ 0x60df0d].
+	Rgb factor;
+	factor.r = static_cast<float>(2u * ((tint.half >> 16) & 0xFFu)) / 255.0f;
+	factor.g = static_cast<float>(2u * ((tint.half >> 8) & 0xFFu)) / 255.0f;
+	factor.b = static_cast<float>(2u * (tint.half & 0xFFu)) / 255.0f;
+	return factor;
 }
 
 } // namespace opennova::env

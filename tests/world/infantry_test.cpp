@@ -989,6 +989,37 @@ int main() {
         CHECK(body_anim_slot_from_state(anim_state::kDeathFire) == kBodyAnimIdle); // unmapped -> idle
     }
 
+    // ---- D-INF-4 closed: the witnessed direction-table generator ----
+    // [orig: Math_BuildSinTable @ 0x613050] builds ONE 1281-entry sin table at
+    // 2^22 by ACCUMULATING the step dbl_7DF578 = 0.006135923151542565 per entry
+    // (ftol2_sse truncation); cos reads the same table +256 entries
+    // (off_849934 = outMillis + 0x400). Pin: the accumulated build is
+    // integer-identical to the closed form trunc(sin(i*2pi/1024)*2^22) for
+    // every entry, and the landmark values hold (a wrong step, scale, count,
+    // or a rounding "fix" flips this red).
+    {
+        double angle = 0.0;
+        constexpr double kStep = 0.006135923151542565; // [orig: dbl_7DF578]
+        bool all_equal = true;
+        int32_t landmark_0 = 0, landmark_256 = 0, landmark_512 = 0, landmark_768 = 0;
+        for (int i = 0; i < 1281; ++i) {
+            const int32_t acc = static_cast<int32_t>(std::sin(angle) * 4194304.0);
+            const double closed = static_cast<double>(i) * (6.283185307179586476925 / 1024.0);
+            const int32_t mul = static_cast<int32_t>(std::sin(closed) * 4194304.0);
+            if (acc != mul) all_equal = false;
+            if (i == 0) landmark_0 = acc;
+            if (i == 256) landmark_256 = acc;
+            if (i == 512) landmark_512 = acc;
+            if (i == 768) landmark_768 = acc;
+            angle += kStep;
+        }
+        CHECK(all_equal); // accumulated == closed form at integer truncation, every entry
+        CHECK(landmark_0 == 0);          // sin(0)
+        CHECK(landmark_256 == 4194304);  // sin(pi/2) rounds to exactly 1.0 in double
+        CHECK(landmark_512 == 0);        // sin(pi) truncates toward zero
+        CHECK(landmark_768 == -4194304); // sin(3pi/2)
+    }
+
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);
     return failures == 0 ? 0 : 1;

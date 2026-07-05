@@ -3,7 +3,9 @@
  * @brief NovaLogic FNT bitmap font parser/writer.
  *
  * Supports the exact Nova FNT dialect used by Joint Operations assets:
- * FNT0, version 800, glyphs 32..255, 256x256 RGBA pages.
+ * FNT0, glyphs 32..255, 256x256 RGBA pages. The header word at +4 is the font's
+ * DESIGN WIDTH (the reader scales glyphs by 800/design_width) — NOT a version;
+ * the engine never validates it [orig: sub_674740 @ 0x674740 / sub_580400 @ 0x580400].
  */
 
 #ifndef OPENNOVA_FNT_H
@@ -17,7 +19,11 @@ extern "C" {
 #endif
 
 #define FNT_MAGIC 0x30544E46u /* "FNT0" in little-endian */
-#define FNT_VERSION 800u
+/* The header +4 word is the DESIGN WIDTH; the glyph render scale is
+ * FNT_DESIGN_REFERENCE_WIDTH / design_width. Shipped JO fonts are 800-designed
+ * (scale 1.0); a non-800 font is scaled, never rejected [orig: @ 0x674740]. */
+#define FNT_DESIGN_REFERENCE_WIDTH 800u
+#define FNT_DEFAULT_DESIGN_WIDTH 800u /* what our from-scratch writer emits */
 #define FNT_HEADER_SIZE 32u
 #define FNT_GLYPH_COUNT 224u
 #define FNT_GLYPH_SIZE 20u
@@ -54,12 +60,18 @@ typedef struct {
 } fnt_glyph_t;
 
 typedef struct {
-	uint32_t version;
+	uint32_t design_width; /* header +4; glyph render scale = 800/design_width */
 	uint32_t num_pages;
 	int32_t shadow_offset;
 	fnt_glyph_t glyphs[FNT_GLYPH_COUNT];
 	uint8_t *pages; /* Contiguous num_pages * FNT_TEXTURE_SIZE RGBA bytes. */
 } fnt_font_t;
+
+/* The engine's per-font glyph render scale [orig: this+4844 = 800.0 / fontData[1]
+ * @ 0x674740]. 1.0 for the shipped 800-design fonts; guards a 0 design width. */
+static inline float fnt_design_scale(uint32_t design_width) {
+	return design_width ? (float)FNT_DESIGN_REFERENCE_WIDTH / (float)design_width : 1.0f;
+}
 
 static inline size_t fnt_calculate_file_size(uint32_t num_pages) {
 	return FNT_TOTAL_HEADER + ((size_t)num_pages * FNT_TEXTURE_SIZE);

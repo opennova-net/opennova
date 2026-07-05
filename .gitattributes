@@ -21,3 +21,9 @@ apps/novaworld_server/static/** -text -eol
 # Deploy env files are read inside Linux containers — keep them LF, not the
 # CRLF the *.env rule above would impose. Last-match precedence wins.
 deploy/env/*.env text eol=lf
+
+# Tracked Markdown docs + .gitignore under fixtures/ are plain text, not LFS
+# binaries — last-match precedence pulls them back out of the fixtures/** LFS
+# rule above (git must read .gitignore as text).
+fixtures/**/*.md text eol=lf filter= diff= merge=
+fixtures/**/.gitignore text eol=lf filter= diff= merge=

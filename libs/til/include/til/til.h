@@ -16,10 +16,13 @@ constexpr uint32_t TIL_MAGIC = 0x74696C30u;
 constexpr uint8_t TIL_FLAG_FLIP_X = 0x01u;
 constexpr uint8_t TIL_FLAG_FLIP_Y = 0x02u;
 constexpr uint8_t TIL_FLAG_ROTATE_90 = 0x04u;
-// Bit 0x08 - the original game renderer emits a secondary LINELIST pass when this
-// is set (4 edges / 8 vertices, interpreted as a perimeter outline).
-// Engine: jodemo.exe Terrain_DrawTileOverlays2D@0x5C79C0
-// docs/engine_spec_tiles.md 4.5
+// Bit 0x08 - a perimeter-outline flag. jodemo.exe emits a secondary LINELIST pass
+// for it (Terrain_DrawTileOverlays2D@0x5C79C0), but RETAIL JO does NOT: its tile
+// overlay render (render_water_quad@0x604700, via PolyTrn_RenderTile@0x60df0d)
+// handles only flip/rotate (bits 0/1/2) and draws a single TRIANGLESTRIP - no
+// outline pass. We preserve the flag for round-trip fidelity but, like retail JO,
+// render no outline (faithful; the LINELIST outline is jodemo-only). See
+// docs/tiles/til-re.md (D-TIL-1).
 constexpr uint8_t TIL_FLAG_OUTLINE = 0x08u;
 constexpr uint8_t TIL_FLAG_AUTHORED_MASK = TIL_FLAG_FLIP_X | TIL_FLAG_FLIP_Y | TIL_FLAG_ROTATE_90 | TIL_FLAG_OUTLINE;
 

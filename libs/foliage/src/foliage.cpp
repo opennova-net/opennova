@@ -2,6 +2,7 @@
 
 // Engine: jodemo.exe foliage-def normalization and world->foliagemap helpers
 // consumed by sub_5C0240@0x5C0240 / sub_5C65E0@0x5C65E0
+// [orig: sub_5C0240 @ 0x5C0240 / sub_5C65E0 @ 0x5C65E0 (jodemo); docs/foliage/foliage-re.md]
 // docs/engine_spec_foliage.md 2.3, 4.4.4, 8
 
 #include <algorithm>

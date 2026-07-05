@@ -1,5 +1,6 @@
 /* SBF audio bank reader implementation.
 
+   [orig: Sbf_OpenFile_Gamemus @ 0x4ED6C0, AudioVM_OpenContextFile @ 0x672160, Sbf_StartEntry @ 0x4ED910, Audio_StreamNextChunk @ 0x4ED7D0]
    Header parser: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0
                   jointops!AudioVM_OpenContextFile @ 0x00672160
    Per-entry stream init: jointops!Sbf_StartEntry @ 0x004ED910

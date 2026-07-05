@@ -140,6 +140,89 @@ Rgb lit_water_color(const Rgb &water, const Rgb &combined_light);
 // are authored at half intensity.
 Rgb double_saturate(const Rgb &color);
 
+// Horizon blend (the frame-clear color): when the smoothed fog distance sits
+// (unsigned 16.16) strictly below fog_dist_reference/2, the skyfog render
+// color is overwritten with fog*(1-t) + skyfog*t, where
+// t = ((dist - ref/4) << 16) / (ref/4) clamped at 0 — pure fog color at
+// <= ref/4, a linear fade across [ref/4, ref/2], untouched skyfog above.
+// Operates on UNDOUBLED colors (retail doubles AFTER the blend), replicating
+// the original's per-byte MMX sequence exactly (bytes x0x101 >> 1, pmulhw
+// against t/~t >> 1, paddsw, >> 6, packuswb) — including its low-byte loss
+// (a 1/255 channel blends to 0 at t=0).
+// [orig: Environment_UpdateWeatherTick @ 0x57e9b0, blend @ 0x57f037..0x57f0a1;
+//  frame-clear consumer Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf,
+//  device Clear @ 0x677100; dome-fog consumer sub_579CB0 @ 0x579cb0]
+Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
+                         uint32_t fog_dist_fixed, uint32_t fog_dist_reference_fixed);
+
+// The reference distance's retail default, 1024.0 in 16.16. Terrain init may
+// lower it to 768.0 by adapter caps, but the session authority is forced back
+// to the default — the host analog for a modern renderer is the default.
+// [orig: Environment_InitDefaults @ 0x57c0b0; Terrain_Init @ 0x60fc9a/0x60fca3]
+inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;
+
+// ---------------------------------------------------------------------------
+// Iris auto-exposure [orig: terrain_sector_compute_lighting @ 0x5c7550]
+// The engine's global auto-exposure gain (0..255; 64 = identity, 6.6 fixed /
+// modulator units). A pure function of the outdoor light blocks + the .env
+// iris_center / iris_percent. The modulator CHAIN that applies this gain to the
+// color blocks is the runtime consumer (env #17, WITNESSED-READY-DEFERRED);
+// this is only the witnessed curve, ready for that chain. Constants:
+// lum = 0.25*(r+b) + 0.5*g; base = iris_center*64; sqrt(dx^2+dz^2) horiz weight;
+// 0.707 sky+ground horiz term; gain = 0.01*(iris_percent*base/(2m) +
+// (100-iris_percent)*base), clamped [0,255].
+
+// Luminance of a color the iris way: 0.25*(r+b) + 0.5*g.
+float iris_luminance(const Rgb &c);
+
+// The iris auto-exposure gain. `directional`/`sky`/`ground` are the outdoor
+// light blocks (0..1 per channel; indoors substitutes ceiling/floor for
+// sky/ground and zeroes directional). `dir_x/y/z` is the normalized light
+// direction. Returns the modulator gain, int-truncated and clamped [0,255].
+int iris_gain(const Rgb &directional, const Rgb &sky, const Rgb &ground,
+              float dir_x, float dir_y, float dir_z,
+              float iris_center, float iris_percent);
+
+// ---------------------------------------------------------------------------
+// Terrain tint (terrain_rgb)
+// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; sole caller Terrain_Init
+//  @ 0x60fc42, source Env_TerrainColorPacked @ 0x26c67f4]
+// Two globals derived once from the packed terrain color: FULL = c|FF000000
+// (@ 0x31a1824), HALF = ((c>>1)&0x7F7F7F)|FF000000 (@ 0x31a1828). Retail has
+// three consumers, one of them dead: the 256x256 quarter-res texture-bake
+// buffer is written and freed but its three readers (0x606ce0, 0x606c30,
+// Terrain_GetColorMapBilinear @ 0x606d80) have ZERO xrefs (full .text E8/E9
+// scan) — the GPU terrain textures ship untinted, so an untinted terrain
+// surface is the faithful behavior, not a divergence. The two LIVE consumers:
+// the .til tile-overlay quad (DIFFUSE = HALF on all four vertices under a
+// TEXTURE x DIFFUSE MODULATE2X combine — caps toggle dword_32656AC defaults
+// true [orig: PolyTrn_RenderTile @ 0x60df0d -> render_water_quad @ 0x604700])
+// and the foliage lightmap sample below.
+
+struct TerrainTint {
+	uint32_t full = 0xFFFFFFFFu; // c | 0xFF000000
+	uint32_t half = 0xFF7F7F7Fu; // ((c >> 1) & 0x7F7F7F) | 0xFF000000
+};
+
+// Splits the two tint globals from a packed 0x00RRGGBB terrain color.
+TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed);
+
+// Packs a parsed terrain_rgb (bytes/255 floats) back to the engine's byte
+// color, then splits. The retail default 255,255,255 yields FULL 0xFFFFFFFF /
+// HALF 0xFF7F7F7F.
+TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb);
+
+// Foliage lightmap tint [orig: sample_terrain_lightmap @ 0x606030]: per
+// channel min((texel_c * FULL_c) >> 7, 255), alpha passthrough. 128 is
+// identity; the default 0xFF tint is a ~2x saturating brighten.
+uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
+
+// The tile-overlay combine runs TEXTURE x DIFFUSE(HALF) under MODULATE2X, so
+// a single-multiply host shader consumes 2*HALF/255 per channel — 254/255 at
+// the default tint (one LSB dark; the witnessed combine is near-identity,
+// NOT exact) [orig: PolyTrn_RenderTile @ 0x60df0d, combine pass 0x631].
+Rgb tile_overlay_tint_factor(const TerrainTint &tint);
+
 // ---------------------------------------------------------------------------
 // Celestial + sky constants
 // [orig: render_skybox @ 0x57960e] sun/moon dome position = camera + dir * 2000

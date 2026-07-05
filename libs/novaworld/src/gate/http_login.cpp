@@ -3,7 +3,24 @@
 #include <novacrypto/epask.h>
 #include <novacrypto/url_cipher.h>
 
+#include <cstdio>
+
 namespace opennova {
+
+std::string subnet_key(const std::string &host) {
+	// [orig: Network_TruncateIPToSubnet @ 0x62dfe0] truncate only when the host
+	// is a valid dotted-decimal IPv4 (the retail parse gate); then keep the
+	// first two octets. Anything else (a DNS name) is returned unchanged.
+	int a = 0, b = 0, c = 0, d = 0;
+	char extra = 0;
+	// Reject embedded whitespace/garbage: require exactly four octets and no
+	// trailing characters. Each octet must be 0..255.
+	if (std::sscanf(host.c_str(), "%d.%d.%d.%d%c", &a, &b, &c, &d, &extra) == 4 &&
+	    a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255) {
+		return std::to_string(a) + "." + std::to_string(b);
+	}
+	return host;
+}
 
 std::string build_login_post_body(const EpaskParams &pub,
                                   const std::vector<LoginFormField> &fields) {
@@ -138,15 +155,16 @@ const std::string *CookieJar::find(const std::string &name) const {
 	return it == values_.end() ? nullptr : &it->second;
 }
 
-std::string CookieJar::cookie_header() const {
-	std::string out;
+std::vector<std::string> CookieJar::cookie_header_lines() const {
+	// Retail emits one "Cookie: name=value;" header per cookie (trailing ';'),
+	// not a single merged line [orig: CUIBrowser_SendHTTPRequest @ 0x658840,
+	// per-entry sprintf "Cookie: %s=%s;"].
+	std::vector<std::string> lines;
+	lines.reserve(order_.size());
 	for (const auto &name : order_) {
-		if (!out.empty()) out += "; ";
-		out += name;
-		out.push_back('=');
-		out += values_.at(name);
+		lines.push_back(name + "=" + values_.at(name) + ";");
 	}
-	return out;
+	return lines;
 }
 
 } // namespace opennova

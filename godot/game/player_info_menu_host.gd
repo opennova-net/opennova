@@ -30,7 +30,7 @@ const ATBL_SECTION := "Avatars"
 # The 3D character preview (head/body/arms .3di composited), reused from the ONED
 # Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the resolved
 # combo; static at rest (no .adm bound) behind the D-PLAYERINFO-1 seam.
-const AvatarPreviewScript := preload("res://modtools/avatar/avatar_preview.gd")
+const AvatarPreviewScript := preload("res://engine/avatar/avatar_preview.gd")
 
 var _menu: Node                         # the built NovaMnuMenu (typed Node: only its tree is used)
 var _root: NovaResourceRoot

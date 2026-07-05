@@ -19,6 +19,18 @@ enum class VfsSource { LooseDir, Archive };
 //                            dev flag, where loose files override the packed data.
 enum class VfsMountMode { LooseOnly, Packed, PackedWithLooseOverride };
 
+// How mount_game discovers base-root archives.
+//   RetailTable - the witnessed fixed boot table: language.pff, localres.pff,
+//                 resource.pff probed by name (case-insensitive), slot order =
+//                 precedence; extra .pff files in the root NEVER mount
+//                 [orig: PFF_OpenAllArchives @ 0x4a4310, name table @ 0x829f90].
+//                 The game-shaped default (runtime, importer, C ABI).
+//   ScanAll     - every base-root *.pff, alphabetical. A deliberate authoring
+//                 divergence: the editor's browse index must see arbitrary
+//                 archives a modder drops in (docs/vfs/vfs-pff-mount-re.md
+//                 D-VFS-2 records the decision).
+enum class VfsArchiveDiscovery { RetailTable, ScanAll };
+
 struct VfsFileLocation {
     std::string logical_name;                 // entry name, original case
     VfsSource source = VfsSource::LooseDir;
@@ -50,12 +62,14 @@ public:
     // `expansion` is non-empty and <root>/expansion/<name>/<name>.pff exists, this adds
     // <root>/expansion/<name> as the top search path, the game root as the next search path
     // (the engine's CWD probe), <name>L.pff as the primary archive and <name>.pff as a
-    // secondary, then every base-root *.pff as further secondaries. Mirrors
-    // Expansion_LoadAssets @ 0x4a4730 + base mounting. Returns false only on a bad root; a
+    // secondary, then the base-root archives per `discovery` (the witnessed fixed boot
+    // table by default). Mirrors Expansion_LoadAssets @ 0x4a4730 +
+    // PFF_OpenAllArchives @ 0x4a4310. Returns false only on a bad root; a
     // missing/unknown expansion gracefully falls back to base-game mounting. `mode` selects
     // which layers are mounted (loose, archives, or both) — see VfsMountMode.
     bool mount_game(const std::string &game_root, const std::string &expansion = std::string(),
-                    VfsMountMode mode = VfsMountMode::PackedWithLooseOverride);
+                    VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
+                    VfsArchiveDiscovery discovery = VfsArchiveDiscovery::RetailTable);
 
     void clear();
 

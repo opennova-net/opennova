@@ -218,10 +218,17 @@ if(BUILD_SHARED_LIB)
     endif()
 
     # Static libs need OPENNOVA_SHARED_EXPORTS so their functions get dllexport
-    # when their object files are linked into the shared library
+    # when their object files are linked into the shared library.
+    # Hidden default visibility makes ELF/Mach-O match the PE surface: only
+    # OPENNOVA_API-annotated symbols export, so the flat C ABI is identical on
+    # every platform (abi_export_identity pins it to the committed baseline).
     foreach(target IN LISTS OPENNOVA_CORE_TARGETS)
         target_compile_definitions(${target} PRIVATE OPENNOVA_SHARED_EXPORTS)
-        set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        set_target_properties(${target} PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            C_VISIBILITY_PRESET hidden
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON)
     endforeach()
 
     # Stage the built shared lib at the path blender/opennova/_native.py loads

@@ -227,6 +227,20 @@ int main() {
 	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
 	if (!expect(world.registry.get(hc)->health == 90, "150 - 60 kinetic damage = 90")) return 1;
 
+	// The processed hit also writes the sticky SHOT relations (players carry
+	// group 0, so only the single rows land; rows outside the retail < 0x80
+	// guard are no-ops) [orig: Projectile_ProcessDamageOnTarget
+	// @ 0x4e80ae..0x4e80ef; guard e.g. EntityMatrix_SetProximityBit @ 0x452b60].
+	{
+		const w::Entity *sh = world.registry.get(hb);
+		const w::Entity *vic = world.registry.get(hc);
+		const bool in_range = sh->net_id < 128 && vic->net_id < 128;
+		if (!expect(world.relations.single_single(w::TriggerRelations::kShot,
+		            sh->net_id, vic->net_id) == in_range,
+		            "shot S->S written on processed damage iff rows pass the <0x80 guard"))
+			return 1;
+	}
+
 	// --- 3. Two more hits kill: 90 -> 30 -> 0 (the last clamped to remaining health
 	// [orig: @0x4e8064]); the death routes 0x13 + 0x1E to both clients, not the host. ---
 	drain_all(udp_b); // clear the 0x0A noise so the death drain reads clean

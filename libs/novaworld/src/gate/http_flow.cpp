@@ -111,12 +111,16 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 	return su;
 }
 
-// [orig: request_headers()] — optional form Content-Type, then the single Cookie line.
+// [orig: request_headers()] — optional form Content-Type, then ONE "Cookie:"
+// header per cookie (retail's IB3 client emits each cookie as its own
+// "Cookie: name=value;" line, not a merged header)
+// [orig: CUIBrowser_SendHTTPRequest @ 0x658840].
 std::vector<std::string> LobbyHttpFlow::request_headers(bool form_content_type) const {
 	std::vector<std::string> h;
 	if (form_content_type) h.push_back("Content-Type: application/x-www-form-urlencoded");
-	const std::string ch = jar_.cookie_header();
-	if (!ch.empty()) h.push_back("Cookie: " + ch);
+	for (const std::string &line : jar_.cookie_header_lines()) {
+		h.push_back("Cookie: " + line);
+	}
 	return h;
 }
 

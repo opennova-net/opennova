@@ -1,5 +1,6 @@
 /* MUS container parser implementation.
 
+   [orig: AudioVM_LoadScriptFile @ 0x672D20, AudioVM_FixupPointers @ 0x672470; docs/audio/mus-sbf-re.md]
    SCR0 file header parser at Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
    MU01 chunk pointer fixup at Jointops.exe!AudioVM_FixupPointers @ 0x00672470. */
 

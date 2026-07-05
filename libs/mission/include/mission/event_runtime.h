@@ -52,11 +52,29 @@ public:
     void on_load(opennova::world::World &) override;
     void tick(opennova::world::World &world, const opennova::world::TickContext &ctx) override;
 
-    // Post-mission phase: when set, the tick runs the PostMission-flag pass
-    // [orig: UpdateAllWithFlag4 @0x454e00, called from the debrief/video contexts]
-    // instead of the normal quarter pass. The host flips this at mission end.
-    void set_post_mission(bool v) { post_mission_ = v; }
-    bool post_mission() const { return post_mission_; }
+    // The post-mission pass: ONE whole-list sweep over the PostMission-flag
+    // entries, called by the host exactly once per transition — retail invokes
+    // it from mission teardown and the SP round restart, never periodically
+    // (D-EVT-4). [orig: EventTrigger_UpdateAllWithFlag4 @0x454e00; callers
+    // Game_TeardownMission @0x52266c and the SP round-restart @0x5263a0]
+    // (The pre pass is the tick()'s ctx.pre_mission path under the same
+    // one-call-per-transition contract [orig: Game_StartMission @0x525b86].)
+    void run_post_mission_pass(opennova::world::World &w);
+
+    // The session-scoped load-parity toggle the SecondTimeThrough trigger
+    // category reads raw: the static image value is 1 and the ONLY writer is
+    // one XOR per BMS load, so the first load of a session reads 0 (false) and
+    // a restart reads 1 — alternating. Save-game persistence is unported (no
+    // save system yet). [orig: dword_815174; toggle at the end of
+    // EventTrigger_LoadAllData @0x454029; read raw @0x453b24] (D-EVT-3 cat 5)
+    static bool second_time_through();
+
+    // Player-AWOL 64-tick quanta: incremented once per full quarter cycle while
+    // the local player sits outside every active zone, reset otherwise; the
+    // PlayerAwol trigger compares it against the authored threshold.
+    // [orig: counter dword_A89160, updated by Entity_UpdateStuckCounter
+    // @0x439dc0 from the quarter pass @0x454d50 when the cursor is 0] (D-EVT-2)
+    int32_t awol_count() const { return awol_64tick_count_; }
 
     // "Event N has fired": the active latch is set and the activation delay has
     // elapsed. This is exactly what the Event trigger category reads.
@@ -69,11 +87,20 @@ public:
 
     const std::vector<ScriptedEvent> &events() const { return events_; }
 
+    // Test seams over the private evaluator/dispatcher (public API for the
+    // ctest suite; no behavior of their own).
+    bool evaluate_trigger_for_test(opennova::world::World &w, const bms::Trigger &t) {
+        return evaluate_trigger(w, t);
+    }
+    void dispatch_action_for_test(opennova::world::World &w, const bms::Action &a) {
+        dispatch_action(w, a);
+    }
+
 private:
     std::vector<ScriptedEvent> events_;
     int normal_gate_ = 0;    // every-16th-tick gate [orig: dword_C8D808 in Server_TickUpdate]
     int quarter_cursor_ = 0; // round-robin quarter index 0..3 [orig: dword_AE06FC]
-    bool post_mission_ = false;
+    int32_t awol_64tick_count_ = 0; // [orig: dword_A89160] (D-EVT-2)
 
     void update_entry(opennova::world::World &w, ScriptedEvent &se);
     void fire(opennova::world::World &w, ScriptedEvent &se);

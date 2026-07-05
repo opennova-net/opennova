@@ -65,6 +65,15 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 
 	_bank = NovaSoundBank.new(_resource_root)
 	_load_bank(mission_name.get_file().get_basename() + ".LWF")
+	# Expansion bank slots 0/1 ahead of the static banks, engine slot order
+	# [orig: Expansion_LoadAssets @ 0x4a4989 (<exp>L.lwf) / @ 0x4a495e
+	# (<exp>.lwf); slot table @ 0x82A5B0]. Missing files skip like retail's
+	# SoundBank_LoadIfExists (D-SND-2 closed).
+	if _resource_root.has_method("get_expansion"):
+		var exp_name: String = _resource_root.get_expansion()
+		if exp_name != "":
+			_load_bank(exp_name + "L.lwf")
+			_load_bank(exp_name + ".lwf")
 	for global_name in GLOBAL_LWFS:
 		_load_bank(global_name)
 

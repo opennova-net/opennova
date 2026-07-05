@@ -194,7 +194,8 @@ bool Vfs::add_secondary_archive(const std::string &pff_path) {
     return true;
 }
 
-bool Vfs::mount_game(const std::string &game_root, const std::string &expansion, VfsMountMode mode) {
+bool Vfs::mount_game(const std::string &game_root, const std::string &expansion, VfsMountMode mode,
+                     VfsArchiveDiscovery discovery) {
     clear();
 
     std::error_code ec;
@@ -236,21 +237,53 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         return true;
     }
 
-    // Base-root archives (resource.pff / localres.pff / language.pff / ...), appended after
-    // any expansion archives so the expansion overrides the base. Sorted for determinism.
-    // NOTE: the engine's exact base-archive slot assignment was not fully traced; these three
-    // hold largely disjoint content (models / animations / audio), so their relative order
-    // rarely affects resolution. See notes/vfs/phase0_ida_verification.md (open question).
-    std::vector<fs::path> base_pffs;
-    for (const fs::directory_entry &de :
-         fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
-        if (ec) break;
-        if (de.is_regular_file(ec) && has_pff_ext(de.path())) base_pffs.push_back(de.path());
+    if (discovery == VfsArchiveDiscovery::ScanAll) {
+        // Authoring discovery (the editor's browse index): every base-root
+        // *.pff, alphabetical for determinism. A deliberate divergence from
+        // the retail table so modders' arbitrary archives are indexable
+        // (docs/vfs/vfs-pff-mount-re.md D-VFS-2 records the decision).
+        std::vector<fs::path> base_pffs;
+        for (const fs::directory_entry &de :
+             fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
+            if (ec) break;
+            if (de.is_regular_file(ec) && has_pff_ext(de.path())) base_pffs.push_back(de.path());
+        }
+        std::sort(base_pffs.begin(), base_pffs.end(), [](const fs::path &a, const fs::path &b) {
+            return to_lower(a.filename().string()) < to_lower(b.filename().string());
+        });
+        for (const fs::path &p : base_pffs) add_secondary_archive(p.string());
+        return true;
     }
-    std::sort(base_pffs.begin(), base_pffs.end(), [](const fs::path &a, const fs::path &b) {
-        return to_lower(a.filename().string()) < to_lower(b.filename().string());
-    });
-    for (const fs::path &p : base_pffs) add_secondary_archive(p.string());
+
+    // The witnessed fixed boot table [orig: PFF_OpenAllArchives @ 0x4a4310,
+    // name table @ 0x829f90 stride 260]: after the expansion pair (slots 0/1,
+    // mounted above), slot 2 = language.pff, 3 = localres.pff,
+    // 4 = resource.pff (slot 5 has no writer). Slot order IS lookup
+    // precedence; extra .pff files in the root never mount in retail. Names
+    // probe case-insensitively (retail opens via _lopen on a case-insensitive
+    // filesystem); a missing archive just leaves its slot empty — only the
+    // all-missing case is fatal at the caller (required-resources.md).
+    static constexpr const char *kBootArchiveTable[] = {
+        "language.pff",
+        "localres.pff",
+        "resource.pff",
+    };
+    for (const char *slot_name : kBootArchiveTable) {
+        fs::path direct = root / slot_name;
+        if (fs::exists(direct, ec)) {
+            add_secondary_archive(direct.string());
+            continue;
+        }
+        // Case-insensitive probe for case-sensitive filesystems.
+        for (const fs::directory_entry &de :
+             fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
+            if (ec) break;
+            if (de.is_regular_file(ec) && to_lower(de.path().filename().string()) == slot_name) {
+                add_secondary_archive(de.path().string());
+                break;
+            }
+        }
+    }
 
     return true;
 }

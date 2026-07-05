@@ -42,6 +42,33 @@ Environment is a *popup* workspace: instead of swapping the main viewport it
 overlays a panel on the active Terrain or Object view, so lighting changes are
 visible on the scene you are editing.
 
+## See it in game
+
+The top bar's **See in game** button launches the game runtime over the same
+resource directory the editor has mounted, with the engine's own dev override:
+loose files next to the packed archives win (the retail `/d` flag). The gesture
+is always the same — **save, launch, see it**. The runtime still boots from the
+packed game data, so your resource directory needs to be a real game install
+(PFFs present); your saved files sit on top of it exactly as they did for the
+original tools.
+
+What to look at, per workspace:
+
+| Workspace | After launching |
+|---|---|
+| Mission | start your mission from the game's mission list |
+| Terrain | load a mission on your terrain and walk the surface, tiles, and foliage |
+| Object | place the object in a mission first, then find it in the world |
+| Avatars | the player screen lists your characters |
+| Fonts | any menu or HUD text using your font draws with it |
+| Credits | the credits screen plays your roll |
+| Strings | menu and HUD copy pulls from your table |
+| Menu | the menu set boots your screens |
+| HUD | spawn into any mission; the HUD reads your layout |
+| Music | menu music plays on boot, mission music in game |
+| Sound | trigger the sound in game (the weapon or action that uses it) |
+| Environment | time of day, sky, and fog follow your settings in missions that use them |
+
 ## How it is built (code-first)
 
 ONED has no `.tres` workspace resources, and the shell never switches on workspace

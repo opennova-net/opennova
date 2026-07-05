@@ -158,23 +158,47 @@ int main() {
 		check(jar.find("PCID") != nullptr && *jar.find("PCID") == "00000002",
 		      "jar stores PCID");
 
-		// The Cookie header the engine would attach to the subsequent GSB fetch
-		// must carry the post-login identity (resolves ADR 0010's open question).
-		const std::string header = jar.cookie_header();
-		check(header.find("NWHANDLE=TestPlayer") != std::string::npos,
-		      "GSB-fetch Cookie header carries NWHANDLE");
-		check(header.find("PCID=00000002") != std::string::npos,
-		      "GSB-fetch Cookie header carries PCID");
+		// The per-cookie Cookie header lines the engine attaches to the
+		// subsequent GSB fetch must carry the post-login identity (resolves
+		// ADR 0010's open question). Retail emits one "name=value;" per cookie
+		// [orig: CUIBrowser_SendHTTPRequest @ 0x658840].
+		auto join_lines = [](const std::vector<std::string> &v) {
+			std::string j;
+			for (const auto &s : v) { j += s; j += "\n"; }
+			return j;
+		};
+		const std::vector<std::string> lines = jar.cookie_header_lines();
+		const std::string joined = join_lines(lines);
+		check(joined.find("NWHANDLE=TestPlayer;") != std::string::npos,
+		      "GSB-fetch cookie lines carry NWHANDLE with the trailing ';'");
+		check(joined.find("PCID=00000002;") != std::string::npos,
+		      "GSB-fetch cookie lines carry PCID with the trailing ';'");
+		// Each cookie is its own line, not a merged header.
+		for (const std::string &line : lines) {
+			check(line.find("; ") == std::string::npos && line.back() == ';',
+			      "each line is a single trailing-';' cookie, never merged");
+		}
 
 		// Re-setting a cookie updates in place without duplicating it.
 		jar.set("NWHANDLE", "OtherPlayer");
 		check(*jar.find("NWHANDLE") == "OtherPlayer", "jar updates a cookie in place");
-		size_t count = 0, at = 0;
-		while ((at = jar.cookie_header().find("NWHANDLE=", at)) != std::string::npos) {
-			++count;
-			at += 1;
+		size_t count = 0;
+		for (const std::string &line : jar.cookie_header_lines()) {
+			if (line.rfind("NWHANDLE=", 0) == 0) ++count;
 		}
 		check(count == 1, "no duplicate NWHANDLE after update");
+
+		// Subnet key [orig: Network_TruncateIPToSubnet @ 0x62dfe0]: a valid
+		// dotted-decimal IPv4 keeps its first two octets; anything else passes
+		// through unchanged.
+		check(subnet_key("192.168.1.1") == "192.168", "IPv4 truncates to /16");
+		check(subnet_key("10.0.5.200") == "10.0", "IPv4 keeps first two octets");
+		check(subnet_key("nw.novalogic.com") == "nw.novalogic.com",
+		      "a DNS host is unchanged");
+		check(subnet_key("256.1.1.1") == "256.1.1.1",
+		      "an out-of-range octet is not IPv4, unchanged");
+		check(subnet_key("192.168.1") == "192.168.1",
+		      "a 3-octet string is not IPv4, unchanged");
 	}
 
 	// ---- 3. Real-NW login body: EVERY field EPASK-encrypted except EPASK ----

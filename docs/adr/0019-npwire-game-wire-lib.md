@@ -47,8 +47,12 @@ so the physical cut follows existing seams.
    `client_session.h`). Revisit only if a future slice makes npruntime
    novaworld-free.
 5. **C ABI**: npwire is C++-linked only — it is NOT part of the flat
-   C ABI (`opennova_shared`), same stance as every net lib (NET-4
-   formalizes the export-identity guard).
+   C ABI (`opennova_shared`), same stance as every net lib. NET-4 landed
+   the guard (2026-07-05): the `abi_export_identity` ctest
+   (`scripts/lint/abi_exports_check.py` + the committed
+   `abi_exports_baseline.txt`) pins the flat export list and hard-fails
+   on any net-family symbol, mangled or flat — the forbidden check is
+   not bypassable by a baseline bump.
 6. **Wire compatibility** (the standing invariant) transfers with the
    code: npwire joins the protocol-lib list held to it
    (libs/CLAUDE.md); the witness record remains

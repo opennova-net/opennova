@@ -169,11 +169,23 @@ public:
 	static Color double_saturate_color(const Color &p_color);
 	static Color combine_terrain_light(const Color &p_light, const Color &p_sky);
 	static Color lit_water_color(const Color &p_water, const Color &p_light);
+	// The frame-clear horizon blend: skyfog cross-faded toward fog when the
+	// smoothed fog distance drops below half the reference (distances in world
+	// units; converted to 16.16 internally). Operates on UNDOUBLED colors.
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1]
+	static Color horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
+			float p_fog_distance, float p_fog_distance_reference);
 
 	// Sun glare intensity from view-sun alignment and occlusion brightness
 	// [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]; returns
 	// {"glare": 0..255, "fog_whiten": 0..40}.
 	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
+
+	// The .til tile-overlay tint factor for a single-multiply shader:
+	// 2*HALF(terrain_rgb)/255 per channel — 254/255 at the default tint (the
+	// witnessed MODULATE2X-over-half combine is near-identity, not exact).
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d]
+	static Color tile_overlay_tint_factor(const Color &p_terrain_tint);
 
 	// Field name -> renderer-consumption status for editor badging:
 	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,

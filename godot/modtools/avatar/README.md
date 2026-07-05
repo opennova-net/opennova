@@ -44,9 +44,11 @@ and calling the workspace's `apply_model()`.
 
 ## Preview
 
-`avatar_preview.gd` (`AvatarPreview extends Control`) composes the resolved
-combo's head / body / arms part `.3di` models into one `SubViewport` scene under a
-shared environment, framed by a fly camera with the editor grid and axis gizmo.
+`engine/avatar/avatar_preview.gd` (`AvatarPreview extends Control`, in the
+shared engine layer because the game's PLAYER_INFO menu host mounts the same
+preview) composes the resolved combo's head / body / arms part `.3di` models
+into one `SubViewport` scene under a shared environment, framed by a fly
+camera with the editor grid and axis gizmo.
 Missing or unknown graphics are shown in an overlay instead of being silently
 ignored.
 

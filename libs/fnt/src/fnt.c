@@ -49,9 +49,9 @@ fnt_error_t fnt_parse_header(const uint8_t *data, size_t size,
 	if (read_u32_le(data) != FNT_MAGIC) {
 		return FNT_ERR_INVALID_MAGIC;
 	}
-	if (read_u32_le(data + 4) != FNT_VERSION) {
-		return FNT_ERR_INVALID_VERSION;
-	}
+	/* +4 is the DESIGN WIDTH, not a version — the engine reads it as the 800/dw
+	 * scale and never validates it [orig: sub_674740 @ 0x674740]. We match: no
+	 * equality gate here (a non-800 font is scaled by fnt_design_scale, D-FNT-1). */
 
 	uint32_t pages = read_u32_le(data + 8);
 	if (pages == 0 || pages > FNT_MAX_PAGES) {
@@ -84,7 +84,7 @@ fnt_error_t fnt_init_blank(fnt_font_t *font, uint32_t num_pages, int32_t shadow_
 	}
 
 	memset(font, 0, sizeof(*font));
-	font->version = FNT_VERSION;
+	font->design_width = FNT_DEFAULT_DESIGN_WIDTH; /* fnt_parse overrides from the file */
 	font->num_pages = num_pages;
 	font->shadow_offset = shadow_offset;
 
@@ -108,8 +108,8 @@ fnt_error_t fnt_validate(const fnt_font_t *font) {
 	if (!font) {
 		return FNT_ERR_NULL_POINTER;
 	}
-	if (font->version != FNT_VERSION) {
-		return FNT_ERR_INVALID_VERSION;
+	if (font->design_width == 0) {
+		return FNT_ERR_INVALID_VERSION; /* a 0 design width has no valid render scale */
 	}
 	if (font->num_pages == 0 || font->num_pages > FNT_MAX_PAGES) {
 		return FNT_ERR_INVALID_PAGE_COUNT;
@@ -146,6 +146,7 @@ fnt_error_t fnt_parse(const uint8_t *data, size_t size, fnt_font_t *font) {
 	if (err != FNT_OK) {
 		return err;
 	}
+	font->design_width = read_u32_le(data + 4); /* the file's own +4 word (D-FNT-2) */
 
 	const uint8_t *glyph_data = data + FNT_HEADER_SIZE;
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
@@ -184,7 +185,7 @@ fnt_error_t fnt_write(const fnt_font_t *font, uint8_t *out, size_t out_size, siz
 
 	memset(out, 0, required_size);
 	write_u32_le(out, FNT_MAGIC);
-	write_u32_le(out + 4, FNT_VERSION);
+	write_u32_le(out + 4, font->design_width); /* emit the font's design width, not a fixed version */
 	write_u32_le(out + 8, font->num_pages);
 	write_i32_le(out + 12, font->shadow_offset);
 

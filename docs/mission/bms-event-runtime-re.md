@@ -181,19 +181,127 @@ tick **cadence** was wrong. Pinned by `mission_runtime_test.gd`
 
 ## 3. Tracked deviations
 
-- **D-EVT-1 — spawn-point activation on fire is unported.** The original marks linked
-  spawn-point records pending on every event dispatch (@0x452ce0 → @0x4de310). No spawn
-  point subsystem exists in libs/world yet; revisit when respawn logic is ported.
-- **D-EVT-2 — quarter-pass piggyback skipped.** `@0x454d50` also calls
-  `Entity_UpdateStuckCounter @0x439dc0` once per 4-pass cycle; unrelated entity
-  bookkeeping, not an event concern.
-- **D-EVT-3 — condition categories 1 (team/zone matrix), 5 (load-toggle), 6 (net),
-  7 (input, incl. the B3B738/AE06F8 transactional bit consumption) return false.**
-  Unmodeled subsystems; the matrix family (cat 1/2 bit tests) needs the relation/
-  event-matrix port first.
-- **D-EVT-4 — pre/post pass call frequency unwitnessed.** Our port runs them once per
-  pre-/post-phase tick; the original's mission-start and debrief loops haven't been
-  traced for their call rate. Delays on pre/post events depend on it.
+Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
+
+- **D-EVT-1 — spawn-point activation on fire: WITNESSED-READY-DEFERRED** (was
+  OPEN-unwitnessed). The marker is `EventTrigger_NotifyEntityDeath @0x452ce0`
+  (misnomer — the arg is the fired EVENT entry), called from both dispatch
+  paths of UpdateEntry (@0x454cbd delay-expiry, @0x454d25 immediate),
+  authority-gated. The "spawn-point table" is the map POI / deploy-and-spectate
+  list (`0xB76570` ptrs / `0xB76568` count / `0xB7656C` selection, rebuilt by
+  `Entity_BuildSpawnPointList @0x42de40`); marking walks entries whose
+  `word[e+0x210] == eventIndex` (strict `> 0` — event 0 can never be
+  referenced), sets `byte[e+0x218] = 1`, then back-chains while
+  `byte[prev+0x217] == 0`; `SpawnPoint_SkipBlocked @0x4de310` then cycles the
+  current selection off blocked entries. Authoring: entity+0x210 ← BMS record
+  u16 @+68 (type 6005 only, @0x40f0b7); the chain flag +0x217 ←
+  bmsi_attributes bit 0x400000 (@0x40f129). Port rides the deploy/POI
+  subsystem (not yet in libs/world).
+- **D-EVT-2 — quarter-pass piggyback: FIXED 2026-07-05.** The earlier
+  "unrelated entity bookkeeping" dismissal was wrong: when the quarter cursor
+  is 0 (once per 64 ticks) the pass calls `Entity_UpdateStuckCounter @0x439dc0`
+  — the player-AWOL counter `dword_A89160` (`++` while
+  `Entity_IsLocalPlayerOutOfBounds @0x439d40`, else reset) whose ONLY consumer
+  is trigger cat-7 sub 36 PlayerAwol (`getter @0x439de0 >= param1`, @0x453d40),
+  so "seconds AWOL" is really 64-tick (~1.02 s) quanta. Ported: the piggyback
+  in `BmsEventSystem::tick`, `EntityCommands::local_player_out_of_bounds`
+  (≥1 ACTIVE-flag zone, player X/Y inside none — Z ignored), and the PlayerAwol
+  evaluator.
+- **D-EVT-3 — condition categories:** cat 5 and cat 6 **FIXED 2026-07-05**;
+  the cat-1/2 **relation-matrix + group alert/count family PORTED the same day
+  (slice B)**: `world::TriggerRelations` (the twelve matrices, the 48-byte
+  group records, the visited matrices with the 32-list clear quirk), the full
+  cat-1 evaluator map + the cat-2 matrix/visited mirror, the 62-tick live
+  recount inside the logic tick + the initial recount after the pre pass, the
+  ChangeGroupAI alert stamps, load-time zeroing, and the damage-site SHOT
+  writes in round_sim. **Residuals (WITNESSED-READY-DEFERRED):** the remaining
+  write-sites — AI target-acquisition SEES quads and fire-time SEES+TARGETED
+  (our fire path carries no aim-target yet) ride the combat pass, the motor's
+  visited marks ride the D-INF-2 channel work; cat-1 sub 11 needs the
+  held-object link (entity +616); the cat-2 alert/count subs (3/6/9/12/14) and
+  the 42-45 distance/LOS family stay unwitnessed. Cat 7's input/view family
+  rides its host subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word
+  (`dword_815174`: static image value 1, XOR'd once per BMS load at the end of
+  `EventTrigger_LoadAllData @0x454029`, read raw @0x453b24 — first session
+  load reads 0, restart 1; save-persisted @0x4acee1/@0x4ad1ab, unported: no
+  save system). Cat 6 "net" is really the Teammate category: sub 1
+  TeammatesEnabled = in-session → false (@0x453b53) else `!(dword_24D1E34 &
+  0x20)` (@0x453b67, the same option bit that suppresses type-5305 teammate
+  spawns @0x40ea5a); subs 2/3 (MedicAssisting/Evacuating) are
+  indistinguishable in retail — both read `dword_AC4F40 != 0` (the heli-lift
+  active count, @0x453b42 → getter @0x451720, a FLIRT false-positive named
+  `__uncaught_exception`).
+- **D-EVT-4 — pre/post pass cadence: FIXED 2026-07-05 (witness settled).**
+  One-shot per transition, never periodic: pre has exactly one call site
+  (`Game_StartMission @0x525b86`, authority-gated, before `current_tick = 0`
+  @0x525b9f); post is called once from `Game_TeardownMission @0x52266c` and
+  the SP round-restart routine @0x5263a0 (kong-misnamed "Game_PlayVideoFile";
+  a third xref @0x51ea89 sits in an unreachable dead blob). Our earlier
+  per-phase-tick evaluation was itself a divergence; the port now exposes
+  `run_post_mission_pass()` as the host one-shot and documents the
+  one-pre-call contract (NovaSimulation delivers exactly one).
+- **D-EVT-5 — the BMS second chunk (header +0x246) is runtime-opaque.**
+  Witnessed: `Mission_LoadBMSFile` fseeks past it on BOTH paths (in-session
+  @0x40f6da–0x40f6ef, SP @0x40f756–0x40f76b); its only two data xrefs are
+  those seeks — never read, validated, or written by the runtime. Our reader
+  models it as the item-availability list and round-trips it; that grammar is
+  editor-side (dfx2med) surface, gated on the D-MIS-3 grill. Contrast the
+  +0x242 loadout chunk, which SP does consume (fread →
+  `AIProfile_SanitizeConfigData @0x40f739` → weapon-restriction filter,
+  fallback `WPN_KNIFE/-1/-1/-1`).
+
+## 3a. 2026-07-05 grill — the cat-1/2 relation-matrix family (port spec)
+
+Dispatch is a flat sub-type switch (`EventTrigger_EvaluateCondition @0x453620`,
+cat-1 sub-switch @0x45364a). Two data stores back it, both zeroed per mission
+load by `EventSystem_FreeAll @0x453210` and save-persisted
+(`SaveFile_WriteTeamRelationBlocks @0x4aa320` / read @0x4a97e0):
+
+**Per-group state — 48 B × 64 groups** (key = entity commandGroup +0x11C;
+group 0 forced to count 0):
+
+| field | base addr | maintained by |
+|---|---|---|
+| alert dword (0=green 1=yellow 2=red) | `0xA33FA4` | setters @0x40d5f0/=0, @0x40d610/=1, @0x40d630/=2 (all three kong names are misnomers); ChangeGroupAI subs 5→red 6→green 22→yellow (`Entity_HandleAlertCommand @0x43cff7`); AI death/damage → red (@0x465f9e, @0x4073ea, @0x465984) |
+| initial count | `0xA33FA8` | `EntityPool_RecountByType @0x40e7e0` — pools 2,0,1 by entity+284; called ONCE from `Game_StartMission @0x525b8b` right after the pre pass |
+| live count | `0xA33FAC` | `sub_40E8D0` full rescan (`!(flags&2) && health>0`), once per **62 ticks** in Server_TickUpdate (timer @0x51db6d, reload 0x3E @0x51db93, call @0x51dc02) and after the two group-reassign actions (@0x43c671, @0x43d75f) |
+
+**Twelve sticky relation bitmatrices** (single key = DcbId +0x7C, the authored
+SSN; group key = commandGroup):
+
+| relation | G→G 64×64 `[2a+(b>>5)]` | S→G 128×64 | G→S transposed `[2b+(a>>5)]` | S→S 128×128 `[4a+(b>>5)]` |
+|---|---|---|---|---|
+| sees (sub 1/16) | `0xAC84E8` | `0xAC7CE8` | `0xAC70E8` | `0xAC60E8` |
+| targeted (sub 2/15) | `0xAC82E8` | `0xAC78E8` | `0xAC6CE8` | `0xAC58E8` |
+| shot (sub 13/17) | `0xAC80E8` | `0xAC74E8` | `0xAC68E8` | `0xAC50E8` |
+
+Write events (authority-gated): **sees** at AI target acquisition
+(`Entity_UpdateInfantryAI @0x4be41a..0x4be45b`; vehicle @0x466460, helicopter
+@0x467730); **sees + targeted** at weapon fire (`Entity_SpawnProjectile
+@0x4b0a6f..0x4b0ae2`; @0x471710, @0x472e00); **shot** when damage is actually
+processed (`Projectile_ProcessDamageOnTarget @0x4e80ae..0x4e80ef` — skipped
+when the friendly-fire gate @0x4e74f0 discards the damage). Setters
+bound-check rows (<0x80; e.g. @0x452b60, @0x452bf0); the trigger-side tests
+are unguarded reads (@0x452e50) — the port sanitizes reads to false out of
+range (reproducing an OOB read would be manufacturing garbage, ADR 0003
+class). Save quirk: the S→S matrices are 0x800 B but only 0x400 is persisted.
+
+**Waypoint has-visited matrices** (sub 7): A `0xAC86F8` (row = single DcbId,
+<128) and B `0xAD86F8` (row = group); cell `dword[row*128 + waypointList]`,
+bit = waypointNumber (<32). Set when the AI advances past a waypoint
+(@0x457c77/88, @0x460ec8/d9, @0x4bacfd/@0x4bad14, zone path @0x407c13..49).
+Actions 32/33 clear via @0x4535e0/@0x453600 = `memset(row, 0, 0x80)` — only
+lists 0..31 of the row (quirk, replicate). Vindicates dfx2med's
+`[unit, WAYPOINT_LIST, WAYPOINT_NUMBER]` slot layout.
+
+**Cat-1 evaluator map** (p1..p3 = params; cat 2 mirrors with the S-family
+matrices keyed by raw authored SSN, no FindByNetId resolution):
+sub 1/2/13 = `sees/targeted/shot` G→G bit [p1][p2]; sub 15/16/17 = the
+transposed G→S rows; sub 3/14 = alert == red/yellow; sub 4 `live <= 0`;
+sub 5 `live > 0`; sub 6 `init - live >= p2`; sub 9 `init == live`;
+sub 12 `live >= p2`; sub 7 = visited-B bit [p1][p2] bit p3; sub 10 = the live
+zone AABB test (@0x453763, already ported); sub 11 = exists pool-0 entity of
+group p1 holding an object with type word p2 (`sub_43C870 @0x43c870`).
 
 ## 4. Correspondence map
 

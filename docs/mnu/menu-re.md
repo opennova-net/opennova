@@ -410,9 +410,16 @@ Accepted/divergent (each a documented decision, not a defect):
 - **D-CTRL-1 (mouse/joystick defaults):** the keyboard defaults are byte-exact from the catalog;
   the per-device mouse/joystick binding arrays are profile-built at runtime, not static, and are
   not ported — mouse/joystick rows show the action list with a blank Control column.
-- **D-CTRL-2 (visibility filter):** the engine gates each row on a per-entry show flag
-  (`(*entry & 0x20)==0 && (*entry & 0x800)!=0` in `UI_PopulateControlMappingList`); the reimpl
-  approximates it by hiding the admin/internal classes (Null/Server/NovaLogic/Cheat/Debug).
+- **D-CTRL-2 (visibility filter) — FIXED 2026-07-05:** the witnessed per-entry gate
+  (`(*entry & 0x20)==0 && (*entry & 0x800)!=0` in `UI_PopulateControlMappingList @ 0x55c0c0`)
+  is ported: every catalog row carries its witnessed flag word (the static catalog's flags
+  dword at `0x8159AC + 108*id`, reaching the UI through the profile record at +1816 via
+  `UI_BuildKeyBindingLoadoutTable @ 0x559e50`), and `is_player_visible` applies the exact
+  bit test — replacing the class-category approximation. Observable corrections vs the
+  approximation: the analog-only movement entries (`turn_left_abs`, `lookpitch`), `Last_move`,
+  `showhud`, `ScopeZero±`, `escape`, and `tod`/`todrate` are hidden like retail; the
+  spectator/commander entries show. Bit 0x4000000 (the `default.key` filtered-table
+  membership, `KeyBinding_BuildFilteredTable @ 0x54c2b0`) rides the flag word for future use.
 - **D-CTRL-3 (read-only):** live double-click rebinding, DEFAULTS/CLEAR_KEY mutation, and profile
   persistence are deferred (no game input-action layer consumes the bindings yet).
 

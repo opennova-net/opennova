@@ -1,3 +1,4 @@
+// [orig: EntityPool_FindByNetId @ 0x4f0a20 (the pool-0-first net-id resolve); docs/net/novaworld-net-re.md]
 #include "world/entity_registry.h"
 
 #include <algorithm>
@@ -146,8 +147,8 @@ void EntityRegistry::in_area(const Aabb &zone, std::vector<EntityHandle> &out) c
     }
 }
 
-int EntityRegistry::register_area(std::string name, const Aabb &bounds) {
-    areas_.push_back(Area{std::move(name), bounds});
+int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active) {
+    areas_.push_back(Area{std::move(name), bounds, active});
     return static_cast<int>(areas_.size() - 1);
 }
 
