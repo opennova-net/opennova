@@ -239,7 +239,7 @@ modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-CBIN-1 | Credits `~C`/`~F`/`~J`/`<CR>` markup consumers (the retail scroller) not yet witnessed; D-MNU-6 custom-font/image resolution rides here | B | NEEDS-RE | PAR (credits) |
-| D-CBIN-2 | Read path: only a CBIN writer found in retail (`~0x75e250`), no magic-immediate reader — confirm whether retail decodes CBIN for credits | B | NEEDS-RE | PAR (credits) |
+| D-CBIN-2 | Read path CONFIRMED: 8 rol-7 cipher sites in the CBIN codec region (0x75e158-0x75e914) incl. decode loops (`@0x75e473` read+decipher) — retail READS CBIN, not just writes; our symmetric decode matches | B | **RESOLVED (MATCHING)** | PAR (credits) |
 
 CBIN codec (magic 0x4E494243 + 20-B header + ROL32/XOR cipher `@0x75e348`) is
 **MATCHING** vs `libs/cbin`, witnessed read-only via raw disasm (no IDB write).
@@ -305,14 +305,14 @@ Open counts by domain (the target is zero in every cell):
 | Mission `.mis` | 0 | 2 | 1 | 3 |
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
-| Credits (new domain, PAR-R5 partial) | 0 | 2 | 0 | 2 |
+| Credits (new domain, PAR-R5 partial) | 0 | 1 | 1 resolved | 2 |
 | Terrain (new domain, PAR-R1 partial) | 0 | 0 | 0 (1 candidate-PERMANENT) | 0 |
 | Tiles (new domain, PAR-R3 audit) | 0 | 0 | 1 FIXED | 1 |
 | Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
 | Fonts (new domain, PAR-R4 audit) | 0 | 1 | 2 FIXED | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **65** |
+| **Total OPEN** | | | | **64** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

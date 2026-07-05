@@ -30,7 +30,7 @@ read-only IDB and is correctly denied, so this is disassembly-only).
 | ROL32/XOR cipher | **MATCHING** | cipher loop `@ 0x75e348` (below) is byte-for-byte `libs/cbin` `encode_buffer` |
 | Counted string table | **MATCHING (structure)** | the writer scans/counts NUL-terminated strings (`@ 0x75e250`: strlen-style scan + `++count`) into the blob, as `libs/cbin` models |
 | Credits `~C`/`~F`/`~J` markup | **NEEDS-RE** | D-CBIN-1 |
-| CBIN read path (does retail read it?) | **NEEDS-RE** | D-CBIN-2 |
+| CBIN read path (does retail read it?) | **RESOLVED 2026-07-05** | D-CBIN-2 — retail decodes CBIN (8 cipher sites); our symmetric cipher matches |
 
 ## The cipher (`@ 0x75e348`, per 4-byte group)
 
@@ -65,7 +65,7 @@ so `decode_buffer` == `encode_buffer` (as `libs/cbin` has it). MATCHING.
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
 | D-CBIN-1 | B | NEEDS-RE | Credits markup consumers: `libs/cbin` models `~Crrggbb` (color), `~F x|y|path` / `~Ipath` (image), `~JL/~JC/~JR` (justify), `<CR>` (newline). The retail markup interpreter (the credits scroller that consumes the decoded string table) is not yet witnessed — pin it to confirm the tag set + the D-MNU-6 custom-font/image resolution. |
-| D-CBIN-2 | B | NEEDS-RE | Read path: only a CBIN *writer* was found in retail JO (`~0x75e250`), with no separate reader carrying a magic-immediate. Confirm whether retail JO decodes CBIN for the credits screen (a reader that trusts the magic, or a generic resource-loader path) — resolve before asserting credits==CBIN in the retail read direction. |
+| D-CBIN-2 | B | **RESOLVED (MATCHING) 2026-07-05** | Read path CONFIRMED present: `find_bytes C1 C3 07` (`rol ebx,7`) finds **8** cipher sites in the CBIN codec region `0x75e158–0x75e914`, not just the one writer — the DECODE loops (e.g. `@ 0x75e473`: `rol ebx,7` then read+`xor` source bytes) prove retail READS/deciphers CBIN, disproving the write-only hypothesis. The magic isn't re-checked as an immediate in the reader (it trusts the header). Our `decode_buffer` == `encode_buffer` (XOR is symmetric, rol-7) so the read direction MATCHES. Which specific caller invokes the read for the credits scroller rides D-CBIN-1. |
 
 The related `D-MNU-6` (credits custom `~F` fonts / `~I` images not resolved from
 the resource root) is the one previously-tracked credits divergence; it rides
