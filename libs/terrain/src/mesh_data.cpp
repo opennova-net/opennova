@@ -11,6 +11,7 @@
 
 namespace opennova {
 
+// [orig: MeshData_LoadFromFile @ 0x404100, MeshData_WriteToFile @ 0x403FE0]
 // Ported from MeshData_LoadFromFile (0x404100).
 // Reads 8 LOD sections from disk into every-other entry (0,2,4,...,14).
 MeshData MeshData::read(const std::string& path) {

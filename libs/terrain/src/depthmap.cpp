@@ -41,6 +41,7 @@ std::vector<uint16_t> load_depthmap_raw16(const std::string& filepath) {
     return data;
 }
 
+// [orig: build_terrain_thread @ 0x4013A0]
 // Ported from build_terrain_thread (0x4013A0) lines 52-66.
 // For each pixel (row, col):
 //   smoothed[row][col] = 32 * (raw[(row+1)&0x3FF][(col+1)&0x3FF]

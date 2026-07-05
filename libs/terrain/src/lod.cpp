@@ -30,6 +30,7 @@ static void _guard_realloc_bytes(const char *site, int64_t bytes) {
 // Global linked list head — matches dword_42E830
 static LODMeshData* g_lodmesh_list_head = nullptr;
 
+// [orig: sub_4091D0 @ 0x4091D0, sub_4092A0 @ 0x4092A0]
 // Ported from sub_4091D0
 void LODMeshData_Init(LODMeshData* mesh) {
     *mesh = LODMeshData{};

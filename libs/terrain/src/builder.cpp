@@ -110,6 +110,7 @@ struct TraceGuard {
 // Global trace file pointer (declared in trace.h)
 FILE* g_trace = nullptr;
 
+// [orig: build_terrain_thread @ 0x4013A0; docs/terrain/terrain-re.md]
 // Ported from build_terrain_thread (0x4013A0).
 // Pipeline: load depth map -> smooth -> quadtree -> LOD -> tile files -> CPT export
 void build_terrain(const TpjProject& project,

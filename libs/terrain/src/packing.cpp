@@ -2,6 +2,7 @@
 
 namespace opennova {
 
+// [orig: pack_words_to_bytes @ 0x403CD0, pack_words_to_10bit @ 0x403DD0]
 // Ported from pack_words_to_bytes (0x403CD0).
 // Reads low byte of each 16-bit value, packs 3 bytes per group.
 std::vector<uint8_t> pack_words_to_bytes(const uint16_t* src, int count) {

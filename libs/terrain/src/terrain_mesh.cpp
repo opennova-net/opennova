@@ -28,6 +28,7 @@ void set_mesh_corner_locks(int tl_x, int tl_y, int tr_x, int tr_y,
     g_corner_locks[3] = {br_x, br_y};
 }
 
+// [orig: sub_402D20 @ 0x402D20]
 // Ported from sub_402D20
 void generate_base_terrain_meshes() {
     LODMeshData lodmesh;
