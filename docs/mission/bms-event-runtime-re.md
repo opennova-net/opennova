@@ -208,10 +208,19 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   (≥1 ACTIVE-flag zone, player X/Y inside none — Z ignored), and the PlayerAwol
   evaluator.
 - **D-EVT-3 — condition categories:** cat 5 and cat 6 **FIXED 2026-07-05**;
-  cat 1/2's plain subs were already modeled and the **relation-matrix + group
-  alert/count family is now WITNESSED-READY-DEFERRED** (full port spec in §3a;
-  lands with the TriggerRelations port), as is cat 7's remaining input/view
-  family. Cat 5 "SecondTimeThrough" = the raw session load-parity word
+  the cat-1/2 **relation-matrix + group alert/count family PORTED the same day
+  (slice B)**: `world::TriggerRelations` (the twelve matrices, the 48-byte
+  group records, the visited matrices with the 32-list clear quirk), the full
+  cat-1 evaluator map + the cat-2 matrix/visited mirror, the 62-tick live
+  recount inside the logic tick + the initial recount after the pre pass, the
+  ChangeGroupAI alert stamps, load-time zeroing, and the damage-site SHOT
+  writes in round_sim. **Residuals (WITNESSED-READY-DEFERRED):** the remaining
+  write-sites — AI target-acquisition SEES quads and fire-time SEES+TARGETED
+  (our fire path carries no aim-target yet) ride the combat pass, the motor's
+  visited marks ride the D-INF-2 channel work; cat-1 sub 11 needs the
+  held-object link (entity +616); the cat-2 alert/count subs (3/6/9/12/14) and
+  the 42-45 distance/LOS family stay unwitnessed. Cat 7's input/view family
+  rides its host subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word
   (`dword_815174`: static image value 1, XOR'd once per BMS load at the end of
   `EventTrigger_LoadAllData @0x454029`, read raw @0x453b24 — first session
   load reads 0, restart 1; save-persisted @0x4acee1/@0x4ad1ab, unported: no

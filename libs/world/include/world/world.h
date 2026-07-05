@@ -15,6 +15,7 @@
 
 #include "world/entity.h"
 #include "world/entity_registry.h"
+#include "world/trigger_relations.h"
 #include "world/round_ring.h"
 #include "world/var_store.h"
 #include "world/ammo_table.h"
@@ -250,6 +251,14 @@ public:
     // type-5305 teammate spawns in Entity_SpawnFromBMSRecord @0x40ea5a]
     bool mp_session = false;
     bool teammates_disabled = false;
+    // Sticky trigger-relation state (BMS cats 1/2): matrices + group alert/
+    // count records + waypoint has-visited. Cleared per mission load by the
+    // BMS system's on_load [orig: EventSystem_FreeAll @ 0x453210].
+    TriggerRelations relations;
+    // 62-tick live-recount divider [orig: the Server_TickUpdate timer word,
+    // reload 0x3E @ 0x51db93]. Public like the other tick state; hosts never
+    // touch it.
+    int group_recount_timer_ = 0;
     // Active teammate heli-lift operations [orig: dword_AC4F40, slots @0xAC4F48,
     // incremented by HeliLift_SpawnPickup @0x45263a]. The heli-lift subsystem is
     // not ported yet; this counter is its seam so TeammateMedicAssisting /
@@ -314,6 +323,16 @@ public:
     // One authoritative logic tick: cache transient state, tick all systems,
     // advance the tick counter (post-execution, faithful to sub_4F81A0 @0x4f81d3).
     void run_logic_tick(bool is_authority = true, bool pre_mission = false);
+
+    // Group population counts for the trigger records. Initial: once per
+    // mission start, right after the pre pass, live copied from it and group 0
+    // forced to zero [orig: EntityPool_RecountByType @ 0x40e7e0, sole call
+    // Game_StartMission @ 0x525b8b]. Live: a full alive-member rescan, run on
+    // a 62-tick cadence inside the logic tick and after group reassignment
+    // [orig: EntityPool_RecountLiveByGroup @ 0x40e8d0; timer @ 0x51db6d,
+    // reload 0x3E @ 0x51db93, call @ 0x51dc02].
+    void recount_group_initials();
+    void recount_group_live();
 
     // Editor "play" support: snapshot/restore of mutable world state so a
     // simulate/stop cycle doesn't dirty the authored mission. Value copies of the

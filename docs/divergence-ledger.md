@@ -121,7 +121,7 @@ skyfog) map onto these `#` entries.
 | D-INF-4 | Computed sin/cos tables vs the runtime-built originals (`trunc(f(idx)·2^22)`) | A | OPEN | PAR-WORLD |
 | D-INF-5 | Idle look-at system + its spotting side effects — rides the combat pass | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
-| D-EVT-3 | The cat-1/2 relation-matrix + group alert/count family (12 sticky bitmatrices, 48-B group records, 62-tick recount) — full port spec in the record §3a; cats 5/6 closed this train | A | WITNESSED-READY-DEFERRED | PAR-WORLD (TriggerRelations port) |
+| D-EVT-3 | Residual after the TriggerRelations port (state + evaluators + recounts + alert stamps + damage-site SHOT writes landed): the acquisition/fire-time write quads ride the combat pass, motor visited marks ride D-INF-2, sub 11 needs the held-object link; cat-2 alert/count + 42-45 subs unwitnessed | A | WITNESSED-READY-DEFERRED (write-sites) + NEEDS-RE (cat-2 subs) | PAR-WORLD |
 
 Closed 2026-07-05: **D-ITEMDEF-1** → `FIXED` (faec4b3e — `item_type_from_string`
 witnessed mapping `[orig: ItemDef_ParseProperty @ 0x49eb00]`;

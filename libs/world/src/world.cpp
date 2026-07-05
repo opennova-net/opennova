@@ -405,6 +405,15 @@ bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, in
 }
 
 int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
+    // The alert-change subs also stamp the per-group alert record the cat-1
+    // triggers read, independent of any AI brains [orig: Entity_HandleAlertCommand
+    // @ 0x43cff7 maps sub 5 -> red, 6 -> green, 22 -> yellow via
+    // TriggerGroup_SetAlertRed/Green/Yellow @ 0x40d630/0x40d5f0/0x40d610].
+    if (group > 0 && group < TriggerRelations::kGroups) {
+        if (sub_type == 5) world_.relations.group(group).alert = TriggerRelations::kAlertRed;
+        else if (sub_type == 6) world_.relations.group(group).alert = TriggerRelations::kAlertGreen;
+        else if (sub_type == 22) world_.relations.group(group).alert = TriggerRelations::kAlertYellow;
+    }
     if (!world_.ai) return 0;
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
@@ -471,7 +480,55 @@ void World::run_logic_tick(bool is_authority, bool pre_mission) {
     // Weapon_UpdateAllProjectiles @0x4ec020; damage is authority-gated end-to-end,
     // §5.60]. Terrain is the host-wired sampler (AI grounding shares it).
     if (is_authority && !pre_mission) round_sim.tick(*this, terrain);
+    if (is_authority) {
+        if (pre_mission) {
+            // The one-shot initial group recount, ordered right after the pre
+            // pass [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b].
+            recount_group_initials();
+        } else if (--group_recount_timer_ <= 0) {
+            // The 62-tick live rescan [orig: Server_TickUpdate timer
+            // @ 0x51db6d, reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup
+            // @ 0x51dc02].
+            group_recount_timer_ = 0x3E;
+            recount_group_live();
+        }
+    }
     ++logic_tick; // [orig: current_tick @0x24c1968 advances once per frame tick]
+}
+
+// Count alive members per commandGroup over the actor pools; group 0 is
+// forced to zero [orig: EntityPool_RecountByType @ 0x40e7e0 /
+// EntityPool_RecountLiveByGroup @ 0x40e8d0 — !(flags & 2) && health > 0].
+static void count_groups(const EntityRegistry &registry,
+                         int32_t (&counts)[TriggerRelations::kGroups]) {
+    std::vector<EntityHandle> members;
+    for (int g = 1; g < TriggerRelations::kGroups; ++g) {
+        members.clear();
+        registry.by_group(static_cast<uint8_t>(g), members);
+        int32_t alive = 0;
+        for (EntityHandle h : members) {
+            const Entity *e = registry.get(h);
+            if (e && e->alive && e->health > 0) ++alive;
+        }
+        counts[g] = alive;
+    }
+    counts[0] = 0;
+}
+
+void World::recount_group_initials() {
+    int32_t counts[TriggerRelations::kGroups] = {};
+    count_groups(registry, counts);
+    for (int g = 0; g < TriggerRelations::kGroups; ++g) {
+        relations.group(g).initial_count = counts[g];
+        relations.group(g).live_count = counts[g];
+    }
+}
+
+void World::recount_group_live() {
+    int32_t counts[TriggerRelations::kGroups] = {};
+    count_groups(registry, counts);
+    for (int g = 0; g < TriggerRelations::kGroups; ++g)
+        relations.group(g).live_count = counts[g];
 }
 
 World::Snapshot World::snapshot() const {

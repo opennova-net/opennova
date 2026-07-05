@@ -42,7 +42,10 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
     }
 }
 
-void BmsEventSystem::on_load(World &) {
+void BmsEventSystem::on_load(World &w) {
+    // The sticky relation/visited/group state zeroes once per mission load
+    // [orig: EventSystem_FreeAll @ 0x453210].
+    w.relations.clear();
     for (ScriptedEvent &se : events_) {
         se.active = false;
         se.activate_countdown = 0;
@@ -74,7 +77,28 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
             return false;
         }
         case bms::TriggerMainType::Single: {
+            // Matrix rows are keyed by the RAW authored SSN — no FindByNetId
+            // resolution for the matrix sub-types [orig: the cat-2 mirror of
+            // the @ 0x45364a sub-switch over the S-family matrices, record §3a].
+            auto &rel = w.relations;
+            using R = opennova::world::TriggerRelations;
             switch (static_cast<bms::SingleTriggerType>(t.sub_type)) {
+                case bms::SingleTriggerType::SingleSeesGroup:
+                    return rel.single_group(R::kSees, t.param1, t.param2);
+                case bms::SingleTriggerType::SingleHasTargetedGroup:
+                    return rel.single_group(R::kTargeted, t.param1, t.param2);
+                case bms::SingleTriggerType::SingleHasShotGroup:
+                    return rel.single_group(R::kShot, t.param1, t.param2);
+                case bms::SingleTriggerType::SingleSeesSingle:
+                    return rel.single_single(R::kSees, t.param1, t.param2);
+                case bms::SingleTriggerType::SingleHasTargetedSingle:
+                    return rel.single_single(R::kTargeted, t.param1, t.param2);
+                case bms::SingleTriggerType::SingleHasShotSingle:
+                    return rel.single_single(R::kShot, t.param1, t.param2);
+                case bms::SingleTriggerType::SingleAtWaypoint:
+                    // Visited matrix A: row = the single's SSN, cell = list p2,
+                    // bit = number p3 [orig: 0xAC86F8; record §3a sub 7].
+                    return rel.single_visited(t.param1, t.param2, t.param3);
                 case bms::SingleTriggerType::SingleDestroyed:
                     return cmds.ssn_dead(static_cast<uint16_t>(t.param1));
                 case bms::SingleTriggerType::SingleAlive:
@@ -82,22 +106,73 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 case bms::SingleTriggerType::SingleIsWithinArea:
                     return cmds.ssn_in_area(static_cast<uint16_t>(t.param1), t.param2);
                 default:
-                    // The sees/targeted/shot matrix + alert/count subs land with
-                    // the TriggerRelations port (D-EVT-3 cat 2, the S-family
-                    // matrices keyed by raw authored SSN); false until then.
+                    // Cat-2 alert/count subs (3/6/9/11/12/14) and the distance/
+                    // LOS family (42-45) stay unwitnessed for singles — false
+                    // until a grill pins them (record §3a residuals).
                     return false;
             }
         }
         case bms::TriggerMainType::Group: {
+            // The cat-1 sub-switch over the relation matrices + the 48-byte
+            // group records [orig: @ 0x45364a; expressions record §3a / §7.4].
+            auto &rel = w.relations;
+            using R = opennova::world::TriggerRelations;
+            const R::GroupState *grp = rel.group_or_null(t.param1);
             switch (static_cast<bms::GroupTriggerType>(t.sub_type)) {
+                case bms::GroupTriggerType::GroupSeesGroup:
+                    return rel.group_group(R::kSees, t.param1, t.param2);
+                case bms::GroupTriggerType::GroupHasTargetedGroup:
+                    return rel.group_group(R::kTargeted, t.param1, t.param2);
+                case bms::GroupTriggerType::GroupHasShotGroup:
+                    return rel.group_group(R::kShot, t.param1, t.param2);
+                case bms::GroupTriggerType::GroupSeesSingle:
+                    return rel.group_single(R::kSees, t.param1, t.param2);
+                case bms::GroupTriggerType::GroupHasTargetedSingle:
+                    return rel.group_single(R::kTargeted, t.param1, t.param2);
+                case bms::GroupTriggerType::GroupHasShotSingle:
+                    return rel.group_single(R::kShot, t.param1, t.param2);
+                case bms::GroupTriggerType::GroupAtRedAlert:
+                    return grp != nullptr && grp->alert == R::kAlertRed;
+                case bms::GroupTriggerType::GroupAtYellowAlert:
+                    return grp != nullptr && grp->alert == R::kAlertYellow;
                 case bms::GroupTriggerType::GroupDestroyed:
-                    return cmds.group_dead(t.param1);
+                    // The count-based read, NOT a live member scan: the live
+                    // count refreshes on the 62-tick cadence, so a kill reads
+                    // stale for up to one cadence — retail behavior [orig:
+                    // record §3a sub 4, group[p1].live <= 0].
+                    return grp != nullptr && grp->live_count <= 0;
                 case bms::GroupTriggerType::GroupAlive:
-                    return cmds.group_alive(t.param1);
+                    return grp != nullptr && grp->live_count > 0; // [orig: sub 5]
+                case bms::GroupTriggerType::GroupHasLostMoreUnits:
+                    return grp != nullptr && grp->initial_count - grp->live_count >= t.param2;
+                case bms::GroupTriggerType::GroupIntact:
+                    return grp != nullptr && grp->initial_count == grp->live_count;
+                case bms::GroupTriggerType::GroupHasMoreUnits:
+                    return grp != nullptr && grp->live_count >= t.param2;
+                case bms::GroupTriggerType::GroupAtWaypoint:
+                    // Visited matrix B: row = group, cell = list p2, bit = p3
+                    // [orig: 0xAD86F8; record §3a sub 7].
+                    return rel.group_visited(t.param1, t.param2, t.param3);
+                case bms::GroupTriggerType::GroupIsWithinArea: {
+                    // Any live member inside zone p2 [orig: @ 0x453763 ->
+                    // Entity_IsTeamInTriggerBounds @ 0x43c730].
+                    const opennova::world::Area *a = w.registry.area(t.param2);
+                    if (a == nullptr) return false;
+                    std::vector<opennova::world::EntityHandle> members;
+                    w.registry.by_group(static_cast<uint8_t>(t.param1), members);
+                    for (opennova::world::EntityHandle h : members) {
+                        const opennova::world::Entity *e = w.registry.get(h);
+                        if (e != nullptr && e->alive && a->bounds.contains(e->position))
+                            return true;
+                    }
+                    return false;
+                }
+                case bms::GroupTriggerType::GroupHoldingGroup:
+                    // Needs the held-object link (entity +616) our model does
+                    // not carry yet [orig: sub_43C870 @ 0x43c870] — record §3a
+                    // residual; false until that link lands.
+                    return false;
                 default:
-                    // The sees/targeted/shot matrix + alert/count/waypoint subs
-                    // land with the TriggerRelations port (D-EVT-3 cat 1);
-                    // false until then.
                     return false;
             }
         }
@@ -229,6 +304,16 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a) {
         case bms::ActionType::GreenWin: w.effects.push({"win", 0, 0, 0, 0, std::string()}); break;
         case bms::ActionType::SubGoalWon: w.effects.push({"subgoal_won", a.param1, 0, 0, 0, std::string()}); break;
         case bms::ActionType::SubGoalLost: w.effects.push({"subgoal_lost", a.param1, 0, 0, 0, std::string()}); break;
+        case bms::ActionType::GroupResetHasVisited:
+            // Clears ONE group row of the visited matrix — only lists 0..31,
+            // the witnessed 0x80-byte memset quirk
+            // [orig: EventTrigger_ClearSlotB @ 0x4535e0].
+            w.relations.clear_group_visited_row(a.param1);
+            break;
+        case bms::ActionType::SingleResetHasVisited:
+            // [orig: EventTrigger_ClearSlotA @ 0x453600] — the same 32-list quirk.
+            w.relations.clear_single_visited_row(a.param1);
+            break;
         case bms::ActionType::ResetEvent:
             // Clears ONLY the active latch; live countdowns keep ticking.
             // [orig: EventAction_Dispatch case 0x22 @0x454974 — event[+20] = 0]

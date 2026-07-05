@@ -194,6 +194,19 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain) {
                 int32_t damage = calc_impact_damage(r.vel, *ammo);
                 if (damage > best_target->health) damage = best_target->health;
                 if (damage > 0) {
+                    // Sticky SHOT relations, written only when damage is actually
+                    // processed (a discarded friendly-fire hit writes nothing)
+                    // [orig: Projectile_ProcessDamageOnTarget @ 0x4e80ae..0x4e80ef;
+                    //  FF gate Server_IsEntityValidForUpdate @ 0x4e74f0].
+                    if (const Entity *shooter = world.registry.get(r.owner)) {
+                        auto &rel = world.relations;
+                        const int sg = shooter->group_id, ss = shooter->net_id;
+                        const int vg = best_target->group_id, vs = best_target->net_id;
+                        rel.set_group_group(TriggerRelations::kShot, sg, vg);
+                        rel.set_single_group(TriggerRelations::kShot, ss, vg);
+                        rel.set_group_single(TriggerRelations::kShot, sg, vs);
+                        rel.set_single_single(TriggerRelations::kShot, ss, vs);
+                    }
                     best_target->health -= damage;
                     if (best_target->health <= 0) {
                         RoundDeath d;

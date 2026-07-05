@@ -87,6 +87,15 @@ public:
 
     const std::vector<ScriptedEvent> &events() const { return events_; }
 
+    // Test seams over the private evaluator/dispatcher (public API for the
+    // ctest suite; no behavior of their own).
+    bool evaluate_trigger_for_test(opennova::world::World &w, const bms::Trigger &t) {
+        return evaluate_trigger(w, t);
+    }
+    void dispatch_action_for_test(opennova::world::World &w, const bms::Action &a) {
+        dispatch_action(w, a);
+    }
+
 private:
     std::vector<ScriptedEvent> events_;
     int normal_gate_ = 0;    // every-16th-tick gate [orig: dword_C8D808 in Server_TickUpdate]

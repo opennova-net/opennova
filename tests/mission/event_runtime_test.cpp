@@ -551,6 +551,117 @@ static void test_post_pass_is_a_one_shot() {
     CHECK(w.vars.get_mission(9) == 1); // fire-once latch holds across transitions
 }
 
+
+// Slice B (TriggerRelations): the cat-1 group records + relation matrices +
+// visited matrices behind the Group/Single trigger categories (record §3a).
+static bms::Trigger group_trigger(bms::GroupTriggerType sub, int p1, int p2 = 0, int p3 = 0) {
+    bms::Trigger t{};
+    t.main_type = bms::TriggerMainType::Group;
+    t.sub_type = static_cast<int32_t>(sub);
+    t.param1 = p1;
+    t.param2 = p2;
+    t.param3 = p3;
+    return t;
+}
+
+static void test_trigger_relations_group_records() {
+    World w;
+    w.registry.configure_pool(0, 16);
+    world::Entity seed{};
+    seed.alive = true;
+    seed.group_id = 3;
+    for (int i = 0; i < 3; ++i) {
+        seed.net_id = static_cast<uint16_t>(10 + i);
+        w.registry.spawn(0, seed);
+    }
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+
+    // Initial counts land on the pre-mission pass, ordered after the pre
+    // sweep [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b].
+    w.run_logic_tick(true, /*pre_mission=*/true);
+    CHECK(w.relations.group(3).initial_count == 3);
+    CHECK(w.relations.group(3).live_count == 3);
+
+    // A kill reads STALE until the 62-tick live rescan — retail cadence
+    // [orig: timer reload 0x3E @ 0x51db93 -> EntityPool_RecountLiveByGroup].
+    bms::Trigger lost = group_trigger(bms::GroupTriggerType::GroupHasLostMoreUnits, 3, 1);
+    w.commands.kill_ssn(10);
+    CHECK(!sys.evaluate_trigger_for_test(w, lost));
+    tick_n(w, 62);
+    CHECK(w.relations.group(3).live_count == 2);
+    CHECK(sys.evaluate_trigger_for_test(w, lost));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupIntact, 3)));
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasMoreUnits, 3, 2)));
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAlive, 3)));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupDestroyed, 3)));
+
+    // Alert stamps via the ChangeGroupAI alert subs, brains or not
+    // [orig: Entity_HandleAlertCommand @ 0x43cff7 — 5 red, 6 green, 22 yellow].
+    w.commands.apply_group_ai_command(3, 5, 0, 0, 0);
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtRedAlert, 3)));
+    w.commands.apply_group_ai_command(3, 22, 0, 0, 0);
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtYellowAlert, 3)));
+    w.commands.apply_group_ai_command(3, 6, 0, 0, 0);
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtRedAlert, 3)));
+}
+
+static void test_trigger_relations_matrices_and_visited() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    using R = world::TriggerRelations;
+
+    w.relations.set_group_group(R::kSees, 2, 5);
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 2, 5)));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 5, 2)));
+
+    // The G->S table is transposed storage; the trigger still reads
+    // (group, single) [orig: index [2b + (a >> 5)] at the GS bases].
+    w.relations.set_group_single(R::kShot, 7, 40);
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupHasShotSingle, 7, 40)));
+
+    bms::Trigger sss{};
+    sss.main_type = bms::TriggerMainType::Single;
+    sss.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleSeesSingle);
+    sss.param1 = 100;
+    sss.param2 = 101;
+    w.relations.set_single_single(R::kSees, 100, 101);
+    CHECK(sys.evaluate_trigger_for_test(w, sss));
+
+    // Out-of-range rows: retail writes are guarded (< 0x80) and our reads are
+    // sanitized to false instead of reproducing the unguarded OOB read
+    // (record §3a, ADR 0003 class).
+    w.relations.set_single_single(R::kSees, 200, 5); // no-op
+    sss.param1 = 200;
+    sss.param2 = 5;
+    CHECK(!sys.evaluate_trigger_for_test(w, sss));
+
+    // Visited matrices + the 32-list clear quirk: actions 32/33 memset only
+    // 0x80 bytes = lists 0..31 of the row [orig: EventTrigger_ClearSlotB
+    // @ 0x4535e0 / ClearSlotA @ 0x453600].
+    w.relations.mark_waypoint_visited(9, 4, /*list=*/5, /*number=*/3);
+    w.relations.mark_waypoint_visited(9, 4, /*list=*/40, /*number=*/3);
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 5, 3)));
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 40, 3)));
+    bms::Action clear_group{};
+    clear_group.action_type = bms::ActionType::GroupResetHasVisited;
+    clear_group.param1 = 4;
+    sys.dispatch_action_for_test(w, clear_group);
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 5, 3)));
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 40, 3)));
+
+    // Mission reload zeroes everything [orig: EventSystem_FreeAll @ 0x453210].
+    sys.on_load(w);
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupAtWaypoint, 4, 40, 3)));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 2, 5)));
+}
+
 int main() {
     test_bms_to_wac_shared_var();
     test_wac_to_bms_shared_var();
@@ -569,6 +680,8 @@ int main() {
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();
     test_post_pass_is_a_one_shot();
+    test_trigger_relations_group_records();
+    test_trigger_relations_matrices_and_visited();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);
     return failures ? 1 : 0;
 }
