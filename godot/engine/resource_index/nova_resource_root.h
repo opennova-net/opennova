@@ -51,8 +51,10 @@ class NovaResourceRoot : public RefCounted {
 
 	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
 	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
+	// `discovery` splits the two products: the runtime mounts the witnessed retail boot table,
+	// the editor's browse index scans every archive (D-VFS-2's recorded decision).
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-	                      const String &game_code);
+	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
 
 protected:
 	static void _bind_methods();

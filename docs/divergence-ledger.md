@@ -204,12 +204,18 @@ the container-detection seam.
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-VFS-1 | Loose gating session-global vs retail's per-call forces (saves/foliage/gt.ssc/UI force loose-first sans /d; BMS-from-PFF forces archive-only under /d) | A | OPEN | PAR (vfs) |
-| D-VFS-2 | Fixed 6-slot archive name table vs our scan-all-*.pff (extra archives mount in ours, never in retail) | A | OPEN | PAR (vfs) |
 | D-VFS-3 | Path-qualified names passed verbatim in retail (loose subdir probes; flat archive names); our flat_key strips everywhere | A | OPEN | PAR (vfs) |
 | D-VFS-5 | Encrypted-entry streaming: retail decrypts whole-file reads only; ours always — corpus check needed | B | NEEDS-RE | PAR (vfs) |
 | D-VFS-7 | Query-only normalization (31-char truncation, trailing-space trim) vs our both-sides — pathological names only | A | OPEN (minor) | PAR (vfs) |
 
-D-VFS-4/6/8/9 are permanent candidates (register below).
+D-VFS-4/6/8/9 are permanent candidates (register below). Closed 2026-07-05:
+**D-VFS-2** -> `FIXED` — `Vfs::mount_game` defaults to the witnessed fixed boot
+table (`VfsArchiveDiscovery::RetailTable`: language/localres/resource.pff in
+slot order, extra archives never mount, pinned by
+`test_mount_game_retail_table` `[orig: PFF_OpenAllArchives @ 0x4a4310, table
+@ 0x829f90]`); the editor's browse index deliberately keeps `ScanAll`
+(recorded in the record's D-VFS-2 row — an authoring tool indexes arbitrary
+modder archives), and `NovaResourceRoot::mount_runtime` passes `RetailTable`.
 
 ### Boot-required resources — [required-resources.md](required-resources.md) (D-BOOT catalog; R8/ENG-6)
 
@@ -234,8 +240,8 @@ Open counts by domain (the target is zero in every cell):
 | LW `.3di` | 0 | 2 | 1 | 3 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
-| VFS/PFF (new domain, PAR-R7 audit) | 4 | 1 | 0 | 5 |
-| **Total OPEN** | | | | **65** |
+| VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
+| **Total OPEN** | | | | **64** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

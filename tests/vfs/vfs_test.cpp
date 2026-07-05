@@ -213,6 +213,39 @@ static int test_mount_game_modes() {
     return 1;
 }
 
+// D-VFS-2 pin: the witnessed fixed boot table [orig: PFF_OpenAllArchives
+// @ 0x4a4310, name table @ 0x829f90]. RetailTable (the default) mounts
+// language.pff / localres.pff / resource.pff in slot order — slot order IS
+// precedence — and NEVER an extra archive; ScanAll (the editor's browse
+// index, a recorded deliberate divergence) sees everything.
+static int test_mount_game_retail_table() {
+    using opennova::VfsArchiveDiscovery;
+    using opennova::VfsMountMode;
+    fs::path root = fresh_dir("game_boot_table");
+    // The same entry in two table slots pins slot order as precedence.
+    write_pff1(root / "language.pff", "order.txt", "LANGUAGE");
+    write_pff1(root / "localres.pff", "order.txt", "LOCALRES");
+    write_pff1(root / "resource.pff", "res_only.txt", "RES");
+    // Sorts first alphabetically — the old scan-all would have mounted it.
+    write_pff1(root / "aa_extra.pff", "extra.txt", "EXTRA");
+
+    {
+        Vfs v;
+        CHECK(v.mount_game(root.string()), "mount RetailTable default");
+        CHECK(read_vfs(v, "order.txt") == "LANGUAGE", "slot order is precedence (language over localres)");
+        CHECK(read_vfs(v, "res_only.txt") == "RES", "resource.pff mounted from its slot");
+        CHECK(!v.has_file("extra.txt"), "an extra .pff never mounts in retail");
+    }
+    {
+        Vfs v;
+        CHECK(v.mount_game(root.string(), "", VfsMountMode::PackedWithLooseOverride,
+                           VfsArchiveDiscovery::ScanAll), "mount ScanAll");
+        CHECK(v.has_file("extra.txt"), "the editor's browse discovery sees the extra archive");
+        CHECK(read_vfs(v, "order.txt") == "LANGUAGE", "table names still resolve under ScanAll");
+    }
+    return 1;
+}
+
 // read_file applies SCR payload decoding; read_file_raw does not (header stays).
 static int test_scr_decode_on_read() {
     fs::path d = fresh_dir("scr_decode");
@@ -334,6 +367,7 @@ int main() {
     RUN_TEST(test_mount_game_expansion);
     RUN_TEST(test_mount_game_no_expansion);
     RUN_TEST(test_mount_game_modes);
+    RUN_TEST(test_mount_game_retail_table);
     RUN_TEST(test_scr_decode_on_read);
     RUN_TEST(test_scr_decode_policy);
     RUN_TEST(test_vfs_scr_policy);
