@@ -24,7 +24,7 @@ This repo is the full toolchain: extract and edit assets with the importer, the 
 
 Three layers:
 
-- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, fonts, credits, strings, menus, HUD preview, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
+- **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, avatars, fonts, credits, strings, menus, HUD preview, music, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `Avatars.def`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.lwf`, `.env`, …) directly.
 - **Core engine (`libs/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
 - **Godot (`godot/engine/` + `godot/game/`).** GDExtension wrappers in `engine/` bind the core into Godot; `game/` is the runtime scene.
 
@@ -78,7 +78,7 @@ Exports the current scene to NovaLogic's ASCII Scene Export format. Supports mul
 
 The authoring layer for JO assets, organized into workspaces grouped by purpose:
 
-- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), and Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime).
+- **World**: Terrain (sculpt, paint, foliage, tiles, layout), Object (`.3di` model projects), Mission (`.bms`/`.mis` missions: entities, waypoints, zones, BMS event scripting, with play-in-editor on the engine's mission runtime), and Avatars (`Avatars.def` player characters: head/body/arms parts and combos under the nationality/division tree, with a 3D preview).
 - **Interface**: Fonts (`.fnt` bitmap fonts), Credits (`.kda` rolling credits), Strings (RTXT string tables), Menus (`.mnu` / `.mns` menu screens with a WYSIWYG canvas and interactive preview), and HUD (a read-only preview of the in-game HUD layout).
 - **Audio**: Music (interactive music: `.sbf` banks plus `.bin` music scripts).
 - **Atmosphere**: Sound (`.lwf` sound profiles) and Environment (`.env` weather, lighting, and time of day), a popup that overlays the active 3D view.
@@ -147,6 +147,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | Library | Description |
 |---------|-------------|
 | **terrain** | Terrain core: heightmap sampling, normals, sector mesh geometry, LOD. |
+| **terrain_query** | The world-to-terrain query seam: the zero-dependency height and coordinate query leaf that `world` links and `terrain` builds on (ADR 0020). |
 | **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
 | **world** | World substrate: entity registry and pools, variable store, AI with the infantry motor, and the logic tick. |
@@ -165,7 +166,8 @@ Wire-compatible with the original protocols: our encoders produce bytes a stock 
 |---------|-------------|
 | **novacrypto** | CRC-32/MPEG-2 and the NWU/EPASK/URL ciphers behind every NovaWorld exchange. |
 | **napi** | NAPI envelope and TLV containers: the checksummed message envelope of the lobby protocol. |
-| **novaworld** | The NovaWorld service and in-match wire protocol, built as five leg targets: wire (in-game codec), session (NWU session + framing), gate (first contact, login, server-browser data), service (lobby and persistence; the only leg linking sqlite), and replay (capture decode + timelines). |
+| **npwire** | The in-game wire protocol: the in-match message codec and catalog, NWU session framing, and the capture/replay chain (ADR 0019). |
+| **novaworld** | The NovaWorld matchmaking and service lib: session state above the framing, gate (first contact, login, server-browser data), and lobby persistence (the only sqlite link). |
 | **netsim** | The in-match net seam: the World-to-wire bridge, transports, and the in-process loopback behind single-player-as-listen-server. |
 | **npruntime** | The in-match NP server and client state machines and frame loop, ported from the original engine over the netsim seam. |
 

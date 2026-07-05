@@ -12,8 +12,8 @@
 # .godot-bin\.
 #
 # Assets are opened by name from $env:NOVA_RESOURCE_DIR (the external resource
-# dir that also feeds the runtime/editor). Defaults to C:\Users\taylor\Desktop\
-# revx02; override by setting NOVA_RESOURCE_DIR. The dir must hold Dvxi5.trn (+
+# dir that also feeds the runtime/editor). Defaults to
+# $env:USERPROFILE\Desktop\JOX; override by setting NOVA_RESOURCE_DIR. The dir must hold Dvxi5.trn (+
 # textures), full_00.env, the font, credits, the strings table, and the object.
 #
 # Usage:
@@ -85,7 +85,7 @@ if (-not (Test-Path $GODOT_BIN)) {
 }
 
 if (-not $env:NOVA_RESOURCE_DIR) {
-    $env:NOVA_RESOURCE_DIR = "C:\Users\taylor\Desktop\revx02"
+    $env:NOVA_RESOURCE_DIR = "$env:USERPROFILE\Desktop\JOX"
 }
 if (-not (Test-Path $env:NOVA_RESOURCE_DIR)) {
     Write-Error "NOVA_RESOURCE_DIR '$($env:NOVA_RESOURCE_DIR)' does not exist"

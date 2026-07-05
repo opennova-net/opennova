@@ -2,8 +2,7 @@
 
 > **Status**: the NovaWorld web/UDP stack (libs/novacrypto, libs/napi, libs/npwire, libs/novaworld, the
 > standalone server app, and the web portal) landed in PR #37, was reverted in PR #50 while
-> it matured, and is now **relanded on the `web-nw-for-real-master` integration branch**
-> (see `plan/`). This protocol RE remains the durable wire record; §8 will accumulate
+> it matured, and is now **landed on master**. This protocol RE remains the durable wire record; §8 will accumulate
 > per-system equivalence verdicts as the IDA grill proceeds.
 
 Consolidated 2026-06-10 from `notes/novaworld_protocol_matrix.md`, `notes/dispatcher_table.md`,
@@ -30,6 +29,8 @@ per-game message sets:
 | 3 — session + framing | Per-(ip,port) session state (`CK`, `SK`, `SCRK`, fragment buffers); the opcode `0x43`/`0x83` protocol-message envelope (flags/len/seq/frag). | `libs/napi` |
 | 2 — NWU wire framing | 4-byte LSB CRC32 header; 1-byte opcode `0x41` HELLO / `0x42` JOIN / `0x43` SESSION / `0x46` GOODBYE (server replies `0x81`/`0x82`/`0x83`/`0x86`); NWU stream-cipher payload encryption. | `libs/novacrypto` + `libs/napi` |
 | 1 — UDP sockets | Owned by the app, not a lib. | server app / Godot client |
+
+*(The "Reimpl home" column records the pre-NET-2 homes; the in-game wire codec, NWU session framing, and capture/replay chain now live in `libs/npwire` — ADR 0019.)*
 
 The **gate probe** (`novaworld_gate`, UDP 7597) is a separate, simpler protocol: plain
 `GATEPROTOCOL` text encrypted with a static `"GATEAPI"` key, no NWU framing. It bootstraps the
@@ -5173,9 +5174,8 @@ config-file concern modeled only if we add cfg persistence.
 
 ## 7. Landed architecture
 
-The design that shipped in PR #37, was reverted in PR #50, and is relanded on the
-`web-nw-for-real-master` integration branch. `web/` and `apps/novaworld_server/` exist
-there (not yet on master).
+The design that shipped in PR #37, was reverted in PR #50, and is now landed on master.
+`web/` and `apps/novaworld_server/` are on master.
 
 - **One standalone C++ server binary, three listeners**: gate UDP :7597, HTTP :8080 (the
   `/api/*` routes plus the bundled Vue web portal from `web/dist/`), NW UDP :64206. Shared
@@ -5183,11 +5183,13 @@ there (not yet on master).
   enough to swap libpq later). HTTP framework was decided as Drogon but implemented with Crow
   + standalone Asio.
 - **Protocol code lives once** in Godot-free libs: `libs/novacrypto` (Layer 2 cipher),
-  `libs/napi` (Layer 2-3 framing/session/TLV), `libs/novaworld` (all Layer-4 PN message sets —
-  browser/session services and the in-match GameSession runtime — plus connection registry and
-  db wrapper). PN dispatch happens inside `libs/novaworld`; the NovaWorld server routes
-  `NOVAWORLDUDP` to lobby containers and `JointOperations`/`JOINTOPERATIONS` to the experimental
-  in-match `GameServerRuntime`.
+  `libs/napi` (Layer 2-3 framing/session/TLV), `libs/npwire` (the in-game wire codec, NWU
+  session framing, and capture/replay chain — extracted post-landing, ADR 0019), and
+  `libs/novaworld` (the matchmaking/service lib: Layer-4 PN browser/session message sets,
+  connection registry, and db wrapper). PN dispatch happens inside `libs/novaworld`; the
+  NovaWorld server routes `NOVAWORLDUDP` to lobby containers and
+  `JointOperations`/`JOINTOPERATIONS` to a World-less `libs/npruntime` session-responder ctx
+  (the experimental in-match `GameSession`/`GameServerRuntime` were retired at npruntime P8).
 - **Godot is the client only**: GDExtension binding under `godot/engine/network/`; servers are
   pure C++ with no Godot dependency. A future Godot admin/stats viewer would talk to the
   standalone server over HTTP, never be the server.

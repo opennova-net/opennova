@@ -8,8 +8,9 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `libs/` — portable C++ core (format/runtime libraries: terrain, threedi, mission,
-  wac, world, novaworld, audio, pff, vfs, ...). Godot-agnostic — no Godot types ever.
+- `libs/` — portable C++ core (format/runtime libraries: terrain, terrain_query,
+  threedi, mission, wac, world, novaworld, npwire, audio, pff, vfs, ...).
+  Godot-agnostic — no Godot types ever.
   Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
 - `godot/` — Godot 4.6.1 host project: `engine/` (GDExtension C++ glue, `Nova*` classes,
   plus the shared host-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),

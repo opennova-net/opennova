@@ -151,7 +151,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | String tables (RTXT) | `libs/rtxt`, NovaStrings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
 | Mission loader (`.bms`) | `libs/mission` | [correspondence.md §3](correspondence.md) | per function |
 | BMS event runtime + promotion | `libs/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..4) |
-| World / WAC VM / AI | `libs/world`, `libs/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching (D-INF-1..5; vehicle/HELO physics not yet ported) |
+| World / WAC VM / AI | `libs/world`, `libs/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching (D-INF-1..5; ground-vehicle drive ported net-side, D-NET-161; AI-driven + HELO physics not yet ported) |
 | Skeletal animation (`.bad`/`.adm`) | `libs/anim`, NovaSkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
 | Models (`.3di`: 3DI3 + GP) | `libs/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |

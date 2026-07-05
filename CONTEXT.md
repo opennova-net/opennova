@@ -98,8 +98,9 @@ service's domain. Code and libs are named by their domain, never bare "net".
 _Avoid_: unqualified "net code", lobby (for either)
 
 **Wire codec / Net runtime / Net seam**:
-The three in-match layers: the **wire codec** encodes/decodes the byte stream (the message
-catalog is its single source of truth, ADR 0013); the **net runtime** (`libs/npruntime`)
+The three in-match layers: the **wire codec** (`libs/npwire`, ADR 0019) encodes/decodes the
+byte stream (the message catalog is its single source of truth, ADR 0013); the **net
+runtime** (`libs/npruntime`)
 runs the 62 Hz host/client session over it; the **net seam** (`libs/netsim`) is where the
 world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
 _Avoid_: "the netcode" (say which layer)
@@ -127,8 +128,8 @@ _Avoid_: game (when you mean the identity, not the running program)
 
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
-banks, HUD layout, defs, default world files...). The witnessed enumeration is
-`docs/required-resources.md` (in progress); the engine manifest derived from it is what
+banks, HUD layout, defs, default world files...). The witnessed enumeration will land as
+`docs/required-resources.md` (planned, ENG-6); the engine manifest derived from it is what
 boot validation and ONED diagnostics consume, and it defines what a person starts with to
 make a new game.
 _Avoid_: core assets, base game files
