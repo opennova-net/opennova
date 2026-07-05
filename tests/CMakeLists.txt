@@ -407,6 +407,15 @@ foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
     add_test(NAME rtxt_${test} COMMAND rtxt_${test}_test)
 endforeach()
 
+# Minimal authored fixture set — the fatal-set RTXT string tables
+# (fixtures/minimal/). Regenerates each in memory and guards it byte-matches
+# the committed file + round-trips. See fixtures/minimal/README.md.
+add_executable(minimal_rtxt_gen_test fixtures/minimal_rtxt_gen.cpp)
+target_link_libraries(minimal_rtxt_gen_test PRIVATE opennova_rtxt)
+target_compile_definitions(minimal_rtxt_gen_test PRIVATE
+    MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
+add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
+
 # RTXT parity against committed retail string tables (format invariants + byte roundtrip)
 add_executable(rtxt_real_parity_test rtxt/real_parity_test.cpp)
 target_link_libraries(rtxt_real_parity_test PRIVATE opennova_rtxt)
