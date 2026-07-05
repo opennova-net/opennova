@@ -3506,8 +3506,16 @@ in-packet NUL-terminated name → byte-faithful (retail emits the trailer iff AI
 earlier dc90f64f stopgap (force `0x0800` on EVERY pool-1 record) is removed — no remaining divergence on the
 trailer. The pool-0 (`0x0C`), pool-2 (`0x10`) and pool-3 (`0x20`) handlers are crash-safe (`0x0C` reads its
 name inline/always-present; `0x10`/`0x20` have no name/AI branch). Byte-matching a specific retail mission
-also wants the item-def flag gate from `serialize_entity_pool_to_packet_0 @0x503940` (the pool ROUTING split,
-still by `EntityKind` here — the residual D-NET-97 simplification).
+also wants the item-def flag routing (the residual D-NET-97 simplification, still by `EntityKind` here).
+**Routing-fn clarification (witnessed 2026-07-05):** `serialize_entity_pool_to_packet_0 @0x503940` is the
+pool-1 SERIALIZER (`Pool_GetEntryUnchecked(1, …)`), not the routing decision — it READS the flag gates
+during emission (`itemDef+84 & 0x100000` → the name + `0x0800` AI-trailer; `& 0x40000` → the `0x8000`
+zone-slot branch; `itemDef+604` → the `0x400` weapon-seat block), but pool MEMBERSHIP is assigned at
+spawn-time registration into `g_pool_list` (a separate fn, still to hunt for the port). So the D-NET-97
+routing slice must: (a) find the spawn-time entity→pool assignment that keys on `itemDef+84 & 0x100000`
+(AI) / `& 0x40000` (destructible) → pool-1 vs purely-static → pool-2, and (b) port it into
+`pool_for_kind` (`promote.cpp`), which today keys on `EntityKind` at promotion — noting the ordering
+gap that item traits are resolved post-load (`NovaSimulation::resolve_item_traits`), after promotion.
 
 **D-NET-98 [SCOPE — the load-time world-stream is the DYNAMIC set, not the full static mission].** The
 golden retail capture `.scratch/host_and_join_lan.pcapng` (a real host+join, mission dvxi5) shows the host's
