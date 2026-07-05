@@ -20,8 +20,10 @@ namespace opennova::mission::authoring {
 
 // items.def item type -> the BMS entity list a new placement lands in.
 // Empirically 1:1 and deterministic across 185k entities in 114 shipping JO
-// missions (types per libs/def: 0=Unknown, 1=Marker, 2=Vehicle, 3=Person,
-// 4=Building, 5=Decoration, 6=Foliage, 7=Object, 8=Powerup):
+// missions (types per libs/def DefItemType — the witnessed engine values
+// [orig: ItemDef_ParseProperty @ 0x49eb00]: 0=unset, 1=vehicle,
+// 2=decoration/foliage, 3=person, 4=marker, 5=building, 6=powerup/object,
+// 8=effect; 7 unused):
 //   Person                          -> Organic
 //   Building / Decoration / Foliage -> Building (all three share the list)
 //   Marker                          -> Marker   (mesh-less)

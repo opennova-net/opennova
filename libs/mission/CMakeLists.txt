@@ -17,6 +17,9 @@ target_include_directories(opennova_mission_format
 
 # io/export.h is used from public headers (mission.h).
 target_link_libraries(opennova_mission_format PUBLIC opennova_io)
+# DefItemType (items.def `type` values) — authoring derives the entity list
+# from them (entity_kind_for_item_type); .cpp-only use, so PRIVATE.
+target_link_libraries(opennova_mission_format PRIVATE opennova_def)
 
 target_compile_features(opennova_mission_format PUBLIC cxx_std_17)
 

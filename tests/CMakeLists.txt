@@ -80,7 +80,7 @@ target_link_libraries(def_comment_strip_test PRIVATE opennova_def)
 target_include_directories(def_comment_strip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME def_comment_strip COMMAND def_comment_strip_test)
 
-foreach(test items weapons ammo hudpos item_attrib)
+foreach(test items weapons ammo hudpos item_attrib item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_def)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -99,7 +99,7 @@ endforeach()
 
 # Mission (BMS) tests
 add_executable(mission_authoring_test mission/mission_authoring_test.cpp)
-target_link_libraries(mission_authoring_test PRIVATE opennova_mission_format)
+target_link_libraries(mission_authoring_test PRIVATE opennova_mission_format opennova_def)
 target_include_directories(mission_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_authoring COMMAND mission_authoring_test)
 

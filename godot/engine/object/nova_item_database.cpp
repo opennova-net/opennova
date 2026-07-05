@@ -10,6 +10,19 @@
 
 using namespace godot;
 
+// Pin the GDScript-facing TYPE_* mirror to the libs/def source of truth so the
+// two mappings can never drift again (docs/world/itemdef-re.md D-ITEMDEF-1).
+static_assert(NovaItemDatabase::TYPE_UNKNOWN == DEF_ITEM_TYPE_UNSET, "TYPE_UNKNOWN drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_VEHICLE == DEF_ITEM_TYPE_VEHICLE, "TYPE_VEHICLE drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_DECORATION == DEF_ITEM_TYPE_DECORATION, "TYPE_DECORATION drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_FOLIAGE == DEF_ITEM_TYPE_FOLIAGE, "TYPE_FOLIAGE drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_PERSON == DEF_ITEM_TYPE_PERSON, "TYPE_PERSON drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_MARKER == DEF_ITEM_TYPE_MARKER, "TYPE_MARKER drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_BUILDING == DEF_ITEM_TYPE_BUILDING, "TYPE_BUILDING drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_POWERUP == DEF_ITEM_TYPE_POWERUP, "TYPE_POWERUP drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_OBJECT == DEF_ITEM_TYPE_OBJECT, "TYPE_OBJECT drifted from DefItemType");
+static_assert(NovaItemDatabase::TYPE_EFFECT == DEF_ITEM_TYPE_EFFECT, "TYPE_EFFECT drifted from DefItemType");
+
 void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &NovaItemDatabase::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &NovaItemDatabase::load_from_resource_root);
@@ -34,14 +47,15 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_items"), &NovaItemDatabase::get_items);
 
 	BIND_CONSTANT(TYPE_UNKNOWN);
-	BIND_CONSTANT(TYPE_MARKER);
 	BIND_CONSTANT(TYPE_VEHICLE);
-	BIND_CONSTANT(TYPE_PERSON);
-	BIND_CONSTANT(TYPE_BUILDING);
 	BIND_CONSTANT(TYPE_DECORATION);
 	BIND_CONSTANT(TYPE_FOLIAGE);
-	BIND_CONSTANT(TYPE_OBJECT);
+	BIND_CONSTANT(TYPE_PERSON);
+	BIND_CONSTANT(TYPE_MARKER);
+	BIND_CONSTANT(TYPE_BUILDING);
 	BIND_CONSTANT(TYPE_POWERUP);
+	BIND_CONSTANT(TYPE_OBJECT);
+	BIND_CONSTANT(TYPE_EFFECT);
 }
 
 Error NovaItemDatabase::load(const String &path) {

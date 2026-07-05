@@ -201,11 +201,32 @@ typedef struct DefWeaponsFile {
 /* Item Definitions                                                          */
 /* ========================================================================= */
 
+/* items.def `type` token -> the engine's ItemDefType value stored at
+   ItemDef+0x5C [orig: ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md
+   D-ITEMDEF-1]. The witnessed values are non-sequential and NON-INJECTIVE:
+   decoration/foliage share 2 and powerup/object share 6 (duplicate enumerator
+   values are deliberate); 0 = unset (unknown token), 7 is unused. */
+typedef enum DefItemType {
+    DEF_ITEM_TYPE_UNSET      = 0,
+    DEF_ITEM_TYPE_VEHICLE    = 1,
+    DEF_ITEM_TYPE_DECORATION = 2,
+    DEF_ITEM_TYPE_FOLIAGE    = 2,
+    DEF_ITEM_TYPE_PERSON     = 3,
+    DEF_ITEM_TYPE_MARKER     = 4,
+    DEF_ITEM_TYPE_BUILDING   = 5,
+    DEF_ITEM_TYPE_POWERUP    = 6,
+    DEF_ITEM_TYPE_OBJECT     = 6,
+    DEF_ITEM_TYPE_EFFECT     = 8
+} DefItemType;
+
 typedef struct DefItemDef {
     char display_name[128];
     int id;
     char sid[64];
-    int type;  /* 0=Unknown,1=Marker,2=Vehicle,3=Person,4=Building,5=Decoration,6=Foliage,7=Object,8=Powerup */
+    int type;  /* DefItemType — engine values at ItemDef+0x5C: 1=vehicle,
+                  2=decoration/foliage, 3=person, 4=marker, 5=building,
+                  6=powerup/object, 8=effect; 0=unset, 7 unused
+                  [orig: ItemDef_ParseProperty @ 0x49eb00] */
     char graphic[128];
     char anim_def[128];
     char husk[128];

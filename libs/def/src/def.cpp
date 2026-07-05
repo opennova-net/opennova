@@ -1036,19 +1036,25 @@ DEF_EXPORT void def_free_weapons(DefWeaponsFile *f) {
 /* Items Parsing                                                             */
 /* ========================================================================= */
 
+/* The engine's `type` token -> ItemDef+0x5C values, case-insensitive like the
+   original's _stricmp chain. Non-injective by engine design: decoration and
+   foliage share 2, powerup and object share 6; an unknown token leaves 0
+   (unset), and 7 is unused. [orig: ItemDef_ParseProperty @ 0x49eb00;
+   docs/world/itemdef-re.md D-ITEMDEF-1] */
 static int item_type_from_string(const char *s, size_t len) {
     char low[16];
     size_t ll = len < 15 ? len : 15;
     to_lower_buf(low, s, ll);
-    if (ll == 6 && memcmp(low, "marker", 6) == 0) return 1;
-    if (ll == 7 && memcmp(low, "vehicle", 7) == 0) return 2;
-    if (ll == 6 && memcmp(low, "person", 6) == 0) return 3;
-    if (ll == 8 && memcmp(low, "building", 8) == 0) return 4;
-    if (ll == 10 && memcmp(low, "decoration", 10) == 0) return 5;
-    if (ll == 7 && memcmp(low, "foliage", 7) == 0) return 6;
-    if (ll == 6 && memcmp(low, "object", 6) == 0) return 7;
-    if (ll == 7 && memcmp(low, "powerup", 7) == 0) return 8;
-    return 0;
+    if (ll == 7 && memcmp(low, "vehicle", 7) == 0) return DEF_ITEM_TYPE_VEHICLE;
+    if (ll == 10 && memcmp(low, "decoration", 10) == 0) return DEF_ITEM_TYPE_DECORATION;
+    if (ll == 7 && memcmp(low, "foliage", 7) == 0) return DEF_ITEM_TYPE_FOLIAGE;
+    if (ll == 6 && memcmp(low, "person", 6) == 0) return DEF_ITEM_TYPE_PERSON;
+    if (ll == 6 && memcmp(low, "marker", 6) == 0) return DEF_ITEM_TYPE_MARKER;
+    if (ll == 8 && memcmp(low, "building", 8) == 0) return DEF_ITEM_TYPE_BUILDING;
+    if (ll == 7 && memcmp(low, "powerup", 7) == 0) return DEF_ITEM_TYPE_POWERUP;
+    if (ll == 6 && memcmp(low, "object", 6) == 0) return DEF_ITEM_TYPE_OBJECT;
+    if (ll == 6 && memcmp(low, "effect", 6) == 0) return DEF_ITEM_TYPE_EFFECT;
+    return DEF_ITEM_TYPE_UNSET;
 }
 
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have

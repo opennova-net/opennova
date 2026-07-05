@@ -47,9 +47,10 @@ int main(void) {
         return 1;
     }
 
-    /* type 2 = Vehicle */
-    if (buggy->type != 2) {
-        fprintf(stderr, "FAIL: buggy type mismatch: expected 2 (Vehicle), got %d\n", buggy->type);
+    /* vehicle = 1, the witnessed engine value [orig: ItemDef_ParseProperty
+       @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1] */
+    if (buggy->type != DEF_ITEM_TYPE_VEHICLE) {
+        fprintf(stderr, "FAIL: buggy type mismatch: expected 1 (vehicle), got %d\n", buggy->type);
         def_free_items(&items);
         return 1;
     }
@@ -127,9 +128,9 @@ int main(void) {
         return 1;
     }
 
-    /* type 3 = Person */
-    if (player1->type != 3) {
-        fprintf(stderr, "FAIL: player1 type mismatch: expected 3 (Person), got %d\n", player1->type);
+    /* person = 3 [orig: ItemDef_ParseProperty @ 0x49eb00] */
+    if (player1->type != DEF_ITEM_TYPE_PERSON) {
+        fprintf(stderr, "FAIL: player1 type mismatch: expected 3 (person), got %d\n", player1->type);
         def_free_items(&items);
         return 1;
     }

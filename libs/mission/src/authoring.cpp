@@ -1,5 +1,7 @@
 #include "mission/authoring.h"
 
+#include "def/def.h"
+
 #include <cmath>
 
 namespace opennova::mission::authoring {
@@ -65,16 +67,18 @@ Mat3 entity_rotation_bms(int pitch_deg, int yaw_deg, int roll_deg) {
 } // namespace
 
 EntityKind entity_kind_for_item_type(int def_item_type) {
+	// DefItemType carries the witnessed engine values [orig: ItemDef_ParseProperty
+	// @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]; foliage shares 2 with
+	// decoration and object shares 6 with powerup, so one case label covers each pair.
 	switch (def_item_type) {
-		case 3: // Person
+		case DEF_ITEM_TYPE_PERSON: // 3
 			return EntityKind::Organic;
-		case 4: // Building
-		case 5: // Decoration
-		case 6: // Foliage
+		case DEF_ITEM_TYPE_BUILDING:   // 5
+		case DEF_ITEM_TYPE_DECORATION: // 2 (= DEF_ITEM_TYPE_FOLIAGE)
 			return EntityKind::Building;
-		case 1: // Marker
+		case DEF_ITEM_TYPE_MARKER: // 4
 			return EntityKind::Marker;
-		default: // Vehicle / Object / Powerup / Unknown
+		default: // vehicle / powerup=object / effect / unset
 			return EntityKind::Item;
 	}
 }
