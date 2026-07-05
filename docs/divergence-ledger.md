@@ -339,21 +339,23 @@ even though the port was made from jodemo)
 that lands an RE record **with a D-catalog**, converting untracked divergences into
 tracked rows.
 
-**Which binary each audit needs (finding, 2026-07-05):** the terrain-family
-systems were reverse-engineered from **`jodemo.exe`** (the demo's accessible
-renderer) — the code cites jodemo addresses (`sub_5C0240`/`5C1940` foliage seed
-`0xA55B1EED`; `Terrain_DrawTileOverlays2D @ 0x5C79C0` tiles) — so R1/R2/R3 need
-the **jodemo IDB**, not the retail `Jointops.exe.kong.i64`, to audit without a
-jodemo↔retail citation mismatch. The **CBIN credits** format (`.kda`) is not
-present in retail JO (no `CBIN`/`.kda` string in the retail IDB), so R5 also
-needs the source binary the format was RE'd from. Fonts (R4) audited cleanly
-because it IS retail-witnessed (`sub_580400`/`sub_674740`). The importer (R6)
-is a Python + native-FFI pipeline, not a binary-format audit.
+**Which binary each audit needs (finding, 2026-07-05, revised):** the code was
+originally RE'd from **`jodemo.exe`** (the demo's more-accessible renderer, cited
+addresses like `sub_5C0240`/`Terrain_DrawTileOverlays2D @ 0x5C79C0`), but the
+same systems ARE in retail — **Foliage (R2) audited cleanly against retail**
+(`generate_foliage_instances_0 @ 0x600197`, placement MATCHING) and **Tiles (R3)
+is retail-auditable** too (`PolyTrn_RenderTile @ 0x60df0d`, `serialize_terrain_tiles
+@ 0x6080F0` witnessed), just multi-part (overlay + atlas + tilestrip). **Terrain
+(R1)** is the large renderer/mesh pipeline; the jodemo IDB is the accessible
+route but retail equivalents exist. Fonts (R4) audited cleanly (retail
+`sub_580400`/`sub_674740`). The **CBIN credits** format (`.kda`, R5) is NOT in
+retail JO (no `CBIN`/`.kda` string), so it needs the source binary. The importer
+(R6) is a Python + native-FFI pipeline, not a binary-format audit.
 
 | System | Audit slice | Partial coverage today | IDB needed |
 |---|---|---|---|
 | Terrain | PAR-R1 | [oned/editor-runtime-parity.md](oned/editor-runtime-parity.md) records the intentional terrain-shader edit/runtime split (shared surface-shading include). | jodemo |
-| Tiles | PAR-R3 | none (`libs/til` cites jodemo `Terrain_DrawTileOverlays2D @ 0x5C79C0`). | jodemo |
+| Tiles | PAR-R3 | `libs/til` cites jodemo, but tiles ARE in retail — anchors witnessed: `PolyTrn_RenderTile @ 0x60df0d` (overlay quad render, env #19), `serialize_terrain_tiles @ 0x6080F0` (wire tile format, D-NET-135). | retail (multi-part: overlay + atlas + tilestrip) or jodemo |
 | Credits | PAR-R5 | D-MNU-6 (CBIN credits custom fonts/images) is the one tracked credits divergence. | source binary (CBIN not in retail JO) |
 | Importer pipeline | PAR-R6 | none (behavior in `apps/importer/` + tests). | n/a (Python + FFI) |
 
