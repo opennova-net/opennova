@@ -25,7 +25,7 @@ the format and transforms against the **retail** render path
 | Half-texel UV shift | **MATCHING** | retail `u += ±0.5·flt_319F7C8`, `v += ±0.5·flt_319F7CC` (sign by corner min/max), like `til_build_entry_render_uv_quad`'s half-texel |
 | Z world-convention negation | **MATCHING** | retail stores `z` and reads `-z` (`waterOverlayCount = -*(v20-1)`); our `til_world_z_from_fixed` returns `-z_fixed/…` |
 | 128-entry tile cache (LRU) | **MATCHING** | `dword_319A2E4` 128-slot cache, LRU eviction by `dword_319FC04 - age`, matching the reference note (128-LRU) |
-| OUTLINE flag (0x08) | **NEEDS-RE** | D-TIL-1 |
+| OUTLINE flag (0x08) | **FIXED (faithful) 2026-07-05** | D-TIL-1 — retail JO renders no outline; neither do we |
 
 ## The witnessed overlay + render (`PolyTrn_RenderTile @ 0x60df0d`)
 
@@ -50,7 +50,7 @@ applies the flip/rotate flags to the UV corners.
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
-| D-TIL-1 | B | NEEDS-RE | `TIL_FLAG_OUTLINE` (0x08): `libs/til` models a secondary LINELIST perimeter-outline pass (witnessed in jodemo `Terrain_DrawTileOverlays2D @ 0x5C79C0`), but the **retail** overlay path `render_water_quad @ 0x604700` handles only bits 0/1/2 and draws a single TRIANGLESTRIP — no outline pass in this path. Either the outline is a jodemo-only debug feature absent from retail play, or retail emits it from a different call site. Witness whether any retail path consumes `flags & 8` before treating the flag as authored; if none, it is a `PERMANENT` (retail does not render it) rather than a live divergence. |
+| D-TIL-1 | B | **FIXED (faithful) 2026-07-05** | `TIL_FLAG_OUTLINE` (0x08): the LINELIST perimeter-outline pass is **jodemo-only** (`Terrain_DrawTileOverlays2D @ 0x5C79C0`). Retail JO's tile-overlay render `render_water_quad @ 0x604700` (via `PolyTrn_RenderTile @ 0x60df0d`) handles only bits 0/1/2 and draws a single TRIANGLESTRIP — no outline. Our code likewise **parses/preserves** the flag (in `TIL_FLAG_AUTHORED_MASK`, for round-trip) but renders no outline — so we already match retail JO (both omit it). Faithful, not a divergence; the flag is unconsumed-in-retail-JO (legitimately closed per the faithful-vs-open axis). |
 
 Everything else (entry layout, atlas UV, flip/rotate, half-texel, Z negation,
 the 128-LRU cache) is byte/behaviour-exact against retail.

@@ -261,7 +261,7 @@ closing a parity gap.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-TIL-1 | `TIL_FLAG_OUTLINE` (0x08): `libs/til` models a jodemo LINELIST outline pass; retail's overlay render (`render_water_quad @ 0x604700`) handles only flip/rotate (bits 0/1/2) — outline may be jodemo-only (→ PERMANENT) or a separate retail path | B | NEEDS-RE | PAR (tiles) |
+| D-TIL-1 | `TIL_FLAG_OUTLINE` (0x08): the LINELIST outline is jodemo-only; retail JO's render (`render_water_quad @ 0x604700`) omits it and so do we (flag preserved for round-trip, no outline drawn) — faithful to retail JO | B | **FIXED (faithful)** | PAR (tiles) |
 
 Overlay entry (12 B), atlas UV, flip/rotate flags, half-texel shift, Z negation,
 and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`.
@@ -307,12 +307,12 @@ Open counts by domain (the target is zero in every cell):
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Credits (new domain, PAR-R5 partial) | 0 | 2 | 0 | 2 |
 | Terrain (new domain, PAR-R1 partial) | 0 | 0 | 0 (1 candidate-PERMANENT) | 0 |
-| Tiles (new domain, PAR-R3 audit) | 0 | 1 | 0 | 1 |
+| Tiles (new domain, PAR-R3 audit) | 0 | 0 | 1 FIXED | 1 |
 | Foliage (new domain, PAR-R2 audit) | 1 | 0 | 0 | 1 |
 | Fonts (new domain, PAR-R4 audit) | 0 | 1 | 2 FIXED | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **66** |
+| **Total OPEN** | | | | **65** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
