@@ -11,6 +11,7 @@
 // run per build: it SKIPS clean unless OPENNOVA_BUILD_MINIMAL_PFF=1. See
 // fixtures/minimal/README.md.
 #include "minimal_fnt_builder.h"
+#include "minimal_mus_builder.h"
 
 #include <fnt/fnt.h>
 #include <pff/pff.h>
@@ -51,7 +52,7 @@ const char *kLanguage[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhel
                            "menutxt.bin"};
 const char *kLocalres[] = {"items.def", "weapon.def", "ammo.def",
                            "main.mnu",  "mp.mnu",     "mnml.bms",
-                           "menu_style.mns"};
+                           "menu_style.mns", "newarow1.tga"};
 
 // The boot font set is HARDCODED by name [orig: HUD_InitAllFonts @ 0x51ee20:
 // width breakpoints 640/800/1024 pick Arial12b/14n, 14b/14n, or 16b/16n;
@@ -171,14 +172,47 @@ int main() {
 		            sizeof(kFonts) / sizeof(kFonts[0]));
 	}
 
-	// 3) Per-archive file lists: committed sources (resources/) by retail
-	//    placement; the generated fonts ride localres.pff and the generated
-	//    terrain rides resource.pff (excluding the depthmap build input).
+	// 3) Generate the boot music set: the silent bank under both hardcoded
+	//    .sbf names LOOSE at the root (retail ships the banks loose in the
+	//    game dir) and the minimal scripts for localres.pff
+	//    [orig: Expansion_LoadAssets @ 0x4a4730: MENUMUS.* / GAMEMUS.*].
+	const fs::path mus_dir = work / "mus";
+	fs::create_directories(mus_dir);
+	{
+		std::vector<uint8_t> bank;
+		if (minimal_mus::build_silent_sbf(&bank) != 0) {
+			std::fprintf(stderr, "FAIL: build_silent_sbf\n");
+			return 1;
+		}
+		for (const char *n : {"menumus.sbf", "gamemus.sbf"}) {
+			std::ofstream f(root / n, std::ios::binary);
+			f.write(reinterpret_cast<const char *>(bank.data()),
+			        static_cast<std::streamsize>(bank.size()));
+		}
+		for (const char *n : {"menumus", "gamemus"}) {
+			std::vector<uint8_t> bin;
+			if (minimal_mus::build_minimal_mus(n, &bin) != 0) {
+				std::fprintf(stderr, "FAIL: build_minimal_mus(%s)\n", n);
+				return 1;
+			}
+			std::ofstream f(mus_dir / (std::string(n) + ".bin"), std::ios::binary);
+			f.write(reinterpret_cast<const char *>(bin.data()),
+			        static_cast<std::streamsize>(bin.size()));
+		}
+		std::printf("generated menumus/gamemus .sbf (loose, %zu bytes) + .bin scripts\n",
+		            bank.size());
+	}
+
+	// 4) Per-archive file lists: committed sources (resources/) by retail
+	//    placement; the generated fonts + music scripts ride localres.pff and
+	//    the generated terrain rides resource.pff (excluding the depthmap
+	//    build input).
 	const fs::path sources = root / "resources";
 	std::vector<std::pair<std::string, fs::path>> language, localres, resource;
 	for (const char *n : kLanguage) language.emplace_back(n, sources / n);
 	for (const char *n : kLocalres) localres.emplace_back(n, sources / n);
 	for (const char *n : kFonts) localres.emplace_back(n, fonts_dir / n);
+	for (const char *n : {"menumus.bin", "gamemus.bin"}) localres.emplace_back(n, mus_dir / n);
 	for (const char *n : kResource) resource.emplace_back(n, sources / n);
 	for (const fs::directory_entry &de : fs::directory_iterator(work)) {
 		if (!de.is_regular_file()) continue;
@@ -187,15 +221,15 @@ int main() {
 		resource.emplace_back(fn, de.path());
 	}
 
-	// 4) Write + verify each boot-table archive: the boot bins in language, the
-	//    mission/menu/font set in localres, the map polydata in resource.
+	// 5) Write + verify each boot-table archive: the boot bins in language, the
+	//    mission/menu/font/music set in localres, the map polydata in resource.
 	if (!write_and_verify(root, "language.pff", language,
 	                      {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
 	                       "menutxt.bin"}))
 		return 1;
 	if (!write_and_verify(root, "localres.pff", localres,
 	                      {"items.def", "main.mnu", "mp.mnu", "mnml.bms", "menu_style.mns",
-	                       "Arial16n.fnt", "Impac38b.fnt"}))
+	                       "Arial16n.fnt", "Impac38b.fnt", "menumus.bin", "gamemus.bin"}))
 		return 1;
 	if (!write_and_verify(root, "resource.pff", resource, {"mnml.env", "mnml.trn", "mnml.cpt"}))
 		return 1;

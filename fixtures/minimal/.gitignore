@@ -1,29 +1,12 @@
-# Generate-at-package artifacts — produced by minimal_pff_package
-# (OPENNOVA_BUILD_MINIMAL_PFF=1), never committed (~10 MB, 685 terrain files).
-# The three boot-table archives [orig: name table @ 0x829f90] land at this
-# root (the "game dir"); the committed authored sources live in resources/.
-/language.pff
-/localres.pff
-/resource.pff
-/_pff_build/
-
-# Retail-validation residue (the asset-gated launch step runs retail
-# Jointops.exe INSIDE this dir) — never committable, per the asset policy.
-# Anchored to this root so nothing in resources/ can ever be shadowed.
-/Jointops.exe
-/binkw32.dll
-/Gameerr.bin
-/PRE.MNU
-*.lnk
-*.sbf
-*.bik
-*.sav
-_*.txt
-/EARLYERR.TXT
-/SYSDUMP.TXT
-/game.cfg
-/ghw.txt
-/admin_log.txt
-/hiscore.txt
-/score.ini
-/cache/
+# This root is the GAME DIR sandbox: the packaging tool writes the boot-table
+# archives + loose .sbf banks here, and the asset-gated validation step runs
+# retail Jointops.exe here (dropping loose retail files while iterating).
+# EVERYTHING at this root is untracked — only the authored sources in
+# resources/, this .gitignore, and README.md are committed. This blanket rule
+# exists because a specific-name list once let loose retail copies slip into
+# a commit; never narrow it back to a name list.
+/*
+!/.gitignore
+!/README.md
+!/resources
+!/resources/**

@@ -73,6 +73,57 @@ std::vector<uint8_t> make_tga(int w, int h, uint8_t r, uint8_t g, uint8_t b) {
 	return out;
 }
 
+// The menu cursor the .mnu <CURSOR> block names (newarow1.tga — retail
+// FILENAME, our bytes). Retail's is a 32x32 uncompressed type-2 BGRA TGA
+// (bpp=32, desc=0x08: 8 alpha bits, bottom-up rows); STANDARD_TRANSPARENT
+// keys off alpha. A classic pointer: white fill, black outline, hotspot at
+// the visual top-left.
+std::vector<uint8_t> make_cursor_tga() {
+	static const char *kArrow[19] = {
+	    "#          ",
+	    "##         ",
+	    "#.#        ",
+	    "#..#       ",
+	    "#...#      ",
+	    "#....#     ",
+	    "#.....#    ",
+	    "#......#   ",
+	    "#.......#  ",
+	    "#........# ",
+	    "#.....#####",
+	    "#..#..#    ",
+	    "#.# #..#   ",
+	    "##  #..#   ",
+	    "#    #..#  ",
+	    "     #..#  ",
+	    "      #..# ",
+	    "      #..# ",
+	    "       ##  ",
+	};
+	const int w = 32, h = 32;
+	std::vector<uint8_t> out;
+	const uint8_t header[18] = {
+	    0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	    static_cast<uint8_t>(w & 0xFF), static_cast<uint8_t>((w >> 8) & 0xFF),
+	    static_cast<uint8_t>(h & 0xFF), static_cast<uint8_t>((h >> 8) & 0xFF),
+	    32, 0x08};
+	out.insert(out.end(), header, header + 18);
+	out.resize(out.size() + static_cast<size_t>(w) * h * 4, 0); // all transparent
+	uint8_t *px = out.data() + 18;
+	for (int y = 0; y < 19; ++y) {
+		const char *row = kArrow[y];
+		for (int x = 0; row[x]; ++x) {
+			if (row[x] == ' ') continue;
+			const bool outline = row[x] == '#';
+			// Bottom-up row order (desc bit 5 clear, matching retail).
+			uint8_t *p = px + ((static_cast<size_t>(h - 1 - y)) * w + x) * 4;
+			p[0] = p[1] = p[2] = outline ? 0 : 0xFF; // BGR
+			p[3] = 0xFF;                             // opaque
+		}
+	}
+	return out;
+}
+
 // A solid indexed PCX with a grayscale palette — for the surface/foliage maps.
 std::vector<uint8_t> make_pcx(int w, int h, uint8_t index) {
 	IndexedImage8 img;
@@ -114,6 +165,7 @@ int main() {
 	art.push_back({"mnml_t.tga", make_tga(64, 64, 110, 90, 64), false});    // tilestrip
 	art.push_back({"mnml_m.pcx", make_pcx(256, 256, 0), true});             // charmap (surface 0)
 	art.push_back({"mnml_f.pcx", make_pcx(256, 256, 0), true});             // foliagemap (none)
+	art.push_back({"newarow1.tga", make_cursor_tga(), false});              // menu cursor
 
 	for (Art &a : art) {
 		const std::string p = path(a.name);

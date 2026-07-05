@@ -80,6 +80,8 @@ retail ships one) → the three menu Bink slots (`main.bik`/`header.bik`/
 | the seven boot `.fnt`s | `libs/fnt` `fnt_write` + `tests/fixtures/minimal_fnt_builder.h` | ONE authored 5×7 stroke glyph set (2× on a single 256×256 page) emitted under every hardcoded name; generated at package time, never committed; guarded by `minimal_fnt_gen`. Retail ships fonts in `localres.pff`. |
 | `menu_style.mns` | authored text | the stylesheet the shell loads by canonical name `[orig: @ 0x552604]`; carries the retail key set (key NAMES witnessed vs the JOTAC install — `DEF_FONTNAME`/`DEF_FONTNAME_LG`/`IMPACT_FONTNAME` + colors); values are ours, fonts point at the generated set. |
 | `menutxt.bin` | `libs/rtxt` | the `TEXT_RSRC` string ids the authored menus reference (`MM_*`/`MP_*`). Retail ships it in `language.pff`. |
+| `newarow1.tga` | authored TGA (`minimal_art_gen`) | **the menu cursor** — declared per screen in the `.mnu` `<CURSOR>` block (retail FILENAME, our arrow art; 32×32 type-2 BGRA, alpha-keyed `STANDARD_TRANSPARENT`, bottom-up rows matching retail's format). Without it there is no cursor and nothing is clickable. |
+| `menumus.sbf`/`gamemus.sbf` + `menumus.bin`/`gamemus.bin` | `libs/sbf` encoder + `libs/mus` compiler (`minimal_mus_builder.h`) | the hardcoded base-game music pairs `[orig: Expansion_LoadAssets @ 0x4a4730]`: a silent one-entry bank written loose at the root (retail ships the `.sbf` banks loose) + a minimal `play/done` script per name in `localres.pff`. Generated at package time; guarded by `minimal_mus_gen`. |
 
 Videos (`BIK`) stay omitted **by design**: they load loose via Win32
 `OpenFile` (`[orig: Game_PlayIntroVideos @ 0x5637a0 → 0x5636d0]`), never from

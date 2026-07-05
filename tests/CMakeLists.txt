@@ -465,11 +465,19 @@ add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
 target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_fnt)
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
+# Minimal set's generated boot music (minimal_mus_builder.h): the silent SBF
+# bank + the minimal MENUMUS/GAMEMUS scripts parse back valid. Always-on; the
+# files are emitted at package time, never committed.
+add_executable(minimal_mus_gen_test fixtures/minimal_mus_gen.cpp)
+target_link_libraries(minimal_mus_gen_test PRIVATE opennova_mus opennova_sbf)
+add_test(NAME minimal_mus_gen COMMAND minimal_mus_gen_test)
+
 # Minimal set's packaging tool: build_terrain + generate the boot fonts +
-# PFF-bundle the whole set. Skips clean unless OPENNOVA_BUILD_MINIMAL_PFF=1
-# (generate-at-package: ~35 s, ~10 MB).
+# boot music + PFF-bundle the whole set. Skips clean unless
+# OPENNOVA_BUILD_MINIMAL_PFF=1 (generate-at-package: ~35 s, ~10 MB).
 add_executable(minimal_pff_package_test fixtures/minimal_pff_package.cpp)
-target_link_libraries(minimal_pff_package_test PRIVATE opennova_terrain opennova_pff opennova_fnt)
+target_link_libraries(minimal_pff_package_test PRIVATE opennova_terrain opennova_pff opennova_fnt
+                                                       opennova_mus opennova_sbf)
 target_compile_definitions(minimal_pff_package_test PRIVATE
     MINIMAL_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/minimal")
 add_test(NAME minimal_pff_package COMMAND minimal_pff_package_test)
