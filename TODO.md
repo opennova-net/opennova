@@ -34,6 +34,23 @@
       against the wire witness and re-pin. All other gated tests pass with data
       (117/117 corpus, JO sweeps, LAN-join goldens, golden client).
 
+- [ ] `opennova_python_pytest` FAILS 15 tests on any machine with a working `bpy`
+      (diagnosed 2026-07-05 at the Wave-2 boundary; CI stays green because
+      `importorskip("bpy")` skips there — same skip-as-green trap as the gated tests).
+      Two roots, both in the DCC parity tests (`tests/test_anim_dcc_parity.py`,
+      `test_ase_dcc_parity.py`, landed #59): (1) they build an animations-only request
+      (`write_blend/ase/3dp=False`) that `validate_import_request` rejects
+      ("Select at least one file to write." — `writes_any_output_file()` predates
+      animation export and does not count it; `_request_for_blender` in
+      `opennova_blender/backend.py` likewise returns None for it); (2) their in-process
+      `import bpy` poisons the pytest parent, and the spawn-context worker pool inherits
+      the corrupted `sys.path`, so the 13 `test_importer_integration` tests die with
+      `No module named '_bpy'` — all 13 pass in isolation. `bpy_session.py`'s docstring
+      forbids exactly this parent-process import. Fix shape: decide whether
+      animations-only is a valid import request (count animation exports in
+      `writes_any_output_file()` + give the blender leg the work) or fix the tests to
+      request a scene output — and either way run the parity exports in a subprocess.
+
 - [ ] Terrain native `[orig]` citation pass: `godot/engine/terrain/` + `libs/terrain` carry no inline citations; grill-ida the mesh build / sampler / lighting chain and land a `docs/terrain/*-re.md` record (docs/README.md lists terrain as record-less)
 - [ ] Present-pass / entity-reconcile citation pass: `engine/world/mission_present_pass.gd`, `mission_entity_registry.gd`, `wire_present_pass.gd` document design but carry no `[orig]` anchors; engine-research the original present/tick chain and cite into `docs/runtime-architecture.md` + `docs/correspondence.md`
 - [ ] Two-net-stack convergence: the NovaNetClient replay/spectate path vs the NovaWorldClient/NovaSimulation listen-server path (see godot/engine/CLAUDE.md); decide convergence once the net workstream stabilizes

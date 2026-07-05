@@ -96,7 +96,7 @@ def main() -> int:
         config["counters"] = current
         BASELINE_PATH.write_text(
             json.dumps(config, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8")
+            encoding="utf-8", newline="\n")
         print(f"[ratchet] baseline rewritten: {current}")
         return 0
 
