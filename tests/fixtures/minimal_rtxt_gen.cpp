@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -112,6 +113,14 @@ int run(const std::string &dir, bool write_mode) {
 			                                                  "OPENNOVA_WRITE_MINIMAL_FIXTURES=1")
 			                .c_str())) {
 				++failures;
+				continue;
+			}
+			// A checkout without LFS pulled leaves a pointer file — skip clean
+			// rather than fail a byte compare against the pointer text.
+			static const char kLfsSentinel[] = "version https://git-lfs";
+			if (committed.size() >= sizeof(kLfsSentinel) - 1 &&
+			    std::memcmp(committed.data(), kLfsSentinel, sizeof(kLfsSentinel) - 1) == 0) {
+				std::printf("[skip] %s is an unpulled LFS pointer\n", t.name);
 				continue;
 			}
 			if (!expect(committed == bytes,
