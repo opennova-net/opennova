@@ -21,10 +21,7 @@ const TerrainEditorDocument = preload("res://modtools/terrain/terrain_editor_doc
 const TerrainEditorBrushSession = preload("res://modtools/terrain/terrain_editor_brush_session.gd")
 const TerrainFoliagePreview = preload("res://modtools/terrain/terrain_foliage_preview.gd")
 const TerrainTileOverlayPreview = preload("res://modtools/terrain/terrain_tile_overlay_preview.gd")
-const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
-const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
-const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
+const WorldContextPreview = preload("res://modtools/framework/world_context_preview.gd")
 const DEFAULT_SECTOR_PATTERN := [
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -158,8 +155,10 @@ var _clone_source_marker: MeshInstance3D
 # state on every workspace activation.
 var _axes_gizmo: MeshInstance3D
 
-var _water_node: Node3D
-var _weather_node: Node3D
+# The in-world preview furniture (environment/sky/weather/water under the
+# world root) lives in the shared WorldContextPreview service; built in _ready
+# with this editor's seam lambdas.
+var _world_preview: WorldContextPreview
 var water_visible: bool = true
 var sector_overlay_visible: bool = false
 # The shell's View > Show grid guide: thin neutral sector-boundary lines
@@ -168,9 +167,10 @@ var sector_overlay_visible: bool = false
 # never share state.
 var grid_guide_visible: bool = false
 
+# The app-owned environment DOCUMENT handle. Host-owned on purpose — the shell,
+# boot probe, and tests read or assign it directly; set_environment_editor
+# routes the world-preview binding through _world_preview.
 var environment_editor
-var _environment_node: Node
-var _sky_node: Node3D
 
 var _foliage_preview: TerrainFoliagePreview
 var _tile_overlay_preview: TerrainTileOverlayPreview
@@ -216,8 +216,18 @@ func _ready() -> void:
 	# binds the shell, boots MCP, and seeds the initial terrain.
 	camera.position = Vector3(512, 80, 600)
 	camera.rotation_degrees = Vector3(-30, 0, 0)
-	_init_environment_preview()
-	_init_water_plane()
+	# World furniture: the shared WorldContextPreview service owns the
+	# environment/sky/weather/water nodes. The lambdas capture this editor's
+	# document/mesh reads so the service never reaches back into the host.
+	_world_preview = WorldContextPreview.new(
+		terrain_world_root,
+		func() -> ShaderMaterial: return _get_material(),
+		func() -> float: return float(get_water_height()),
+		func(world_x: float, world_z: float) -> float: return sample_height_world(world_x, world_z),
+		func() -> void: _on_environment_state_changed()
+	)
+	_world_preview.init_environment_preview()
+	_world_preview.init_water_plane()
 	_init_foliage_preview()
 	_init_tile_overlay_preview()
 	_init_clone_marker()
@@ -317,53 +327,13 @@ func _init_foliage_preview() -> void:
 	terrain_world_root.add_child(_foliage_preview)
 
 
-func _init_water_plane() -> void:
-	# Runtime parity (deferred from PR #24): the editor preview renders the same
-	# NovaWater (water.gdshader, env-derived lit color) the runtime uses, instead
-	# of a bespoke plane with a hardcoded color. Height stays document-driven via
-	# the override hook.
-	_water_node = Node3D.new()
-	_water_node.name = "WaterPlane"
-	_water_node.set_script(NovaWaterScript)
-	_water_node.environment_path = NodePath("../EditorEnvironment")
-	terrain_world_root.add_child(_water_node)
-	_water_node.set_height_override(float(get_water_height()))
-
-
-# World-side preview nodes only. The environment DOCUMENT (EnvironmentEditor)
-# is app-owned and arrives later via set_environment_editor.
-func _init_environment_preview() -> void:
-	_environment_node = Node.new()
-	_environment_node.name = "EditorEnvironment"
-	_environment_node.set_script(NovaEnvironmentScript)
-	terrain_world_root.add_child(_environment_node)
-
-	_sky_node = Node3D.new()
-	_sky_node.name = "EditorSky"
-	_sky_node.set_script(NovaSkyScript)
-	_sky_node.environment_path = NodePath("../EditorEnvironment")
-	terrain_world_root.add_child(_sky_node)
-
-	# Runtime parity: the same weather smoothing that runs in-game also runs in
-	# the preview, so scrubbing/playing TOD matches play. The tick is O(1) so it
-	# does not affect brush perf; discrete scrubs call resync_colors() to snap.
-	_weather_node = Node3D.new()
-	_weather_node.name = "EditorWeather"
-	_weather_node.set_script(NovaWeatherScript)
-	_weather_node.environment_path = NodePath("../EditorEnvironment")
-	terrain_world_root.add_child(_weather_node)
-
-
-## Wire the app-owned environment document into the world preview.
+## Wire the app-owned environment document into the world preview. The document
+## var stays on the host (duck-typed consumers and tests assign it directly);
+## the service owns the signal binding and the node fan-out.
 func set_environment_editor(value) -> void:
 	environment_editor = value
-	if environment_editor == null:
-		return
-	if not environment_editor.environment_changed.is_connected(_on_environment_editor_changed):
-		environment_editor.environment_changed.connect(_on_environment_editor_changed)
-	if not environment_editor.state_changed.is_connected(_on_environment_state_changed):
-		environment_editor.state_changed.connect(_on_environment_state_changed)
-	_on_environment_editor_changed(environment_editor.env_file, environment_editor.time_of_day)
+	if _world_preview != null:
+		_world_preview.bind_environment_editor(value)
 
 
 func _on_environment_state_changed() -> void:
@@ -371,32 +341,14 @@ func _on_environment_state_changed() -> void:
 		workstation.sync_from_editor_state()
 
 
-func _on_environment_editor_changed(env_file: EnvFile, preview_time: float) -> void:
-	if _environment_node:
-		_environment_node.environment_data = env_file
-		_environment_node.time_of_day = preview_time
-	# A discrete TOD scrub or document edit must snap the weather smoother,
-	# otherwise the preview lags behind the slider.
-	if _weather_node and _weather_node.has_method("resync_colors"):
-		_weather_node.resync_colors()
-	_apply_environment_to_preview()
-	if workstation and workstation.has_method("sync_from_editor_state"):
-		workstation.sync_from_editor_state()
-
-
 func _apply_environment_to_preview() -> void:
-	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.is_loaded():
-		return
-	var material := _get_material()
-	if material:
-		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
-		_environment_node.apply_terrain_uniforms(material)
-	# Water color/height/murk now come from the NovaWater node (env-driven),
-	# matching the runtime; nothing hardcoded here.
+	if _world_preview != null:
+		_world_preview.apply_environment_to_preview()
 
 
 func _update_water_plane() -> void:
-	if _water_node == null:
+	var water: Node3D = _world_preview.get_water_node() if _world_preview != null else null
+	if water == null:
 		return
 	var has_bounds := false
 	if terrain_mesh:
@@ -404,8 +356,8 @@ func _update_water_plane() -> void:
 		has_bounds = bounds.size.x > 0.0 and bounds.size.z > 0.0
 	# Document drives height; NovaWater follows the camera and renders the
 	# env-derived lit water color + murk alpha.
-	_water_node.set_height_override(float(get_water_height()))
-	_water_node.visible = water_visible and has_bounds
+	water.set_height_override(float(get_water_height()))
+	water.visible = water_visible and has_bounds
 	_apply_environment_to_preview()
 
 
@@ -706,7 +658,7 @@ func get_environment_editor():
 # mission workspace hands it to placed objects so their lighting matches the
 # terrain preview, the same way the runtime passes its NovaEnvironment node.
 func get_environment_node() -> Node:
-	return _environment_node
+	return _world_preview.get_environment_node() if _world_preview != null else null
 
 
 func get_terrain_world_root() -> Node3D:
