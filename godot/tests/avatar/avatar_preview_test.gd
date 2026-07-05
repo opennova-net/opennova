@@ -5,7 +5,7 @@ extends GutTest
 # files cannot be resolved, so load_combo composes zero models but must not error
 # (a missing graphic skips its slot). With no resource root we still verify the
 # clear()/load_combo lifecycle is exercised cleanly on the SubViewport scaffold.
-const AvatarPreviewScript = preload("res://modtools/avatar/avatar_preview.gd")
+const AvatarPreviewScript = preload("res://engine/avatar/avatar_preview.gd")
 const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
 
 var _preview

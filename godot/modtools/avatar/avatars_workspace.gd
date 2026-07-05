@@ -13,7 +13,7 @@ extends EditorWorkspace
 # ([orig: CAvatarDefs_Init @ 0x57b180], [orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]).
 
 const AvatarsDocumentScript = preload("res://modtools/avatar/avatars_document.gd")
-const AvatarPreviewScript = preload("res://modtools/avatar/avatar_preview.gd")
+const AvatarPreviewScript = preload("res://engine/avatar/avatar_preview.gd")
 const TreeInspectorScript = preload("res://modtools/avatar/ui/inspectors/tree_inspector.gd")
 const PartsInspectorScript = preload("res://modtools/avatar/ui/inspectors/parts_inspector.gd")
 const CombosInspectorScript = preload("res://modtools/avatar/ui/inspectors/combos_inspector.gd")
