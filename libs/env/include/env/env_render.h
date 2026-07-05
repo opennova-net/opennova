@@ -162,6 +162,46 @@ Rgb horizon_blend_skyfog(const Rgb &fog, const Rgb &skyfog,
 inline constexpr uint32_t kFogDistReferenceDefault = 1024u << 16;
 
 // ---------------------------------------------------------------------------
+// Terrain tint (terrain_rgb)
+// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; sole caller Terrain_Init
+//  @ 0x60fc42, source Env_TerrainColorPacked @ 0x26c67f4]
+// Two globals derived once from the packed terrain color: FULL = c|FF000000
+// (@ 0x31a1824), HALF = ((c>>1)&0x7F7F7F)|FF000000 (@ 0x31a1828). Retail has
+// three consumers, one of them dead: the 256x256 quarter-res texture-bake
+// buffer is written and freed but its three readers (0x606ce0, 0x606c30,
+// Terrain_GetColorMapBilinear @ 0x606d80) have ZERO xrefs (full .text E8/E9
+// scan) — the GPU terrain textures ship untinted, so an untinted terrain
+// surface is the faithful behavior, not a divergence. The two LIVE consumers:
+// the .til tile-overlay quad (DIFFUSE = HALF on all four vertices under a
+// TEXTURE x DIFFUSE MODULATE2X combine — caps toggle dword_32656AC defaults
+// true [orig: PolyTrn_RenderTile @ 0x60df0d -> render_water_quad @ 0x604700])
+// and the foliage lightmap sample below.
+
+struct TerrainTint {
+	uint32_t full = 0xFFFFFFFFu; // c | 0xFF000000
+	uint32_t half = 0xFF7F7F7Fu; // ((c >> 1) & 0x7F7F7F) | 0xFF000000
+};
+
+// Splits the two tint globals from a packed 0x00RRGGBB terrain color.
+TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed);
+
+// Packs a parsed terrain_rgb (bytes/255 floats) back to the engine's byte
+// color, then splits. The retail default 255,255,255 yields FULL 0xFFFFFFFF /
+// HALF 0xFF7F7F7F.
+TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb);
+
+// Foliage lightmap tint [orig: sample_terrain_lightmap @ 0x606030]: per
+// channel min((texel_c * FULL_c) >> 7, 255), alpha passthrough. 128 is
+// identity; the default 0xFF tint is a ~2x saturating brighten.
+uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);
+
+// The tile-overlay combine runs TEXTURE x DIFFUSE(HALF) under MODULATE2X, so
+// a single-multiply host shader consumes 2*HALF/255 per channel — 254/255 at
+// the default tint (one LSB dark; the witnessed combine is near-identity,
+// NOT exact) [orig: PolyTrn_RenderTile @ 0x60df0d, combine pass 0x631].
+Rgb tile_overlay_tint_factor(const TerrainTint &tint);
+
+// ---------------------------------------------------------------------------
 // Celestial + sky constants
 // [orig: render_skybox @ 0x57960e] sun/moon dome position = camera + dir * 2000
 // [orig: render_skybox_layers @ 0x5ac230] layer offsets +64/+16, alpha 0x2000,

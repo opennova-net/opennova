@@ -235,6 +235,46 @@ int main() {
 		            "the band's top edge reproduces skyfog")) return 1;
 	}
 
-	std::printf("OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon\n");
+	// Terrain tint — the FULL/HALF split and the two live consumers
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20].
+	{
+		// Retail default 255,255,255.
+		TerrainTint tint = terrain_tint_from_packed(0x00FFFFFFu);
+		if (!expect(tint.full == 0xFFFFFFFFu && tint.half == 0xFF7F7F7Fu,
+		            "default tint splits to FULL FFFFFFFF / HALF FF7F7F7F")) return 1;
+
+		// A mid color: 0x8040C0 -> half = 0x40 0x20 0x60.
+		tint = terrain_tint_from_packed(0x008040C0u);
+		if (!expect(tint.full == 0xFF8040C0u && tint.half == 0xFF402060u,
+		            "mid tint halves per channel with the 0x7F mask")) return 1;
+
+		// The parsed-Rgb path packs bytes/255 floats back to the same split.
+		tint = terrain_tint_from_rgb(Rgb{128.0f / 255.0f, 64.0f / 255.0f, 192.0f / 255.0f});
+		if (!expect(tint.full == 0xFF8040C0u && tint.half == 0xFF402060u,
+		            "Rgb path packs to the same tint split")) return 1;
+
+		// Foliage lightmap tint [orig: sample_terrain_lightmap @ 0x606030]:
+		// 128 is identity, 255 saturates ~2x, alpha passes through.
+		const uint32_t full_identity = 0xFF808080u;
+		uint32_t out = foliage_lightmap_tint(0x40C08020u, full_identity);
+		if (!expect(out == 0x40C08020u, "foliage tint 128 is identity")) return 1;
+		out = foliage_lightmap_tint(0x20FF8001u, 0xFFFFFFFFu);
+		// 255*255>>7 = 508 -> 255; 128*255>>7 = 255; 1*255>>7 = 1.
+		if (!expect(out == 0x20FFFF01u, "foliage tint 255 saturates, alpha passes")) return 1;
+		out = foliage_lightmap_tint(0xFF804020u, 0xFF402060u);
+		// 128*64>>7 = 64; 64*32>>7 = 16; 32*96>>7 = 24.
+		if (!expect(out == 0xFF401018u, "foliage tint modulates per channel >> 7")) return 1;
+
+		// Tile overlay factor: MODULATE2X over HALF -> 254/255 at the default
+		// (the witnessed one-LSB-dark near-identity).
+		const Rgb factor = tile_overlay_tint_factor(terrain_tint_from_packed(0x00FFFFFFu));
+		if (!expect(byte_of(factor.r) == 254 && byte_of(factor.g) == 254 && byte_of(factor.b) == 254,
+		            "default tile-overlay factor is 254/255, not exact identity")) return 1;
+		const Rgb mid = tile_overlay_tint_factor(terrain_tint_from_packed(0x008040C0u));
+		if (!expect(byte_of(mid.r) == 128 && byte_of(mid.g) == 64 && byte_of(mid.b) == 192,
+		            "even-channel tile-overlay factor recovers the packed color")) return 1;
+	}
+
+	std::printf("OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint\n");
 	return 0;
 }

@@ -422,9 +422,11 @@ void NovaTerrain::_notification(int p_what) {
 					terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->call("get_smooth_sky"));
 					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
 				}
-				// Tile overlay shares the terrain tint (editor shader has no tile overlay).
+				// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
+				// one multiply (the editor shader has no tile overlay)
+				// [orig: PolyTrn_RenderTile @ 0x60df0d].
 				terrain_material->set_shader_parameter("u_tile_overlay_tint",
-					cached_env_node->call("get_terrain_lighting_attenuation"));
+					cached_env_node->call("get_tile_overlay_tint"));
 			}
 		}
 

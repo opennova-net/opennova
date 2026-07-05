@@ -501,10 +501,21 @@ func _load_environment(env_path: String) -> bool:
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
+	_apply_foliage_tint()
 	var celestial := get_node_or_null("NovaCelestial")
 	if celestial != null and celestial.has_method("set_resource_root"):
 		celestial.set_resource_root(_resource_root)
 	return true
+
+
+## Push the env terrain_rgb onto the foliage dispatcher — the retail analog
+## derives the tint globals once at terrain init from the loaded env
+## [orig: Terrain_Init @ 0x60fc42 -> PolyTrn_SetTerrainTintColors @ 0x605e20].
+## Called from both orders (env-then-terrain and env reload after foliage).
+func _apply_foliage_tint() -> void:
+	if _dispatcher == null or _env == null or _env.environment_data == null:
+		return
+	_dispatcher.terrain_tint = _env.environment_data.get_terrain_tint()
 
 
 ## Apply the mission's attrib-gated water/fog overrides onto the loaded env via
@@ -548,6 +559,7 @@ func _configure_foliage() -> void:
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.foliage_defs = defs
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
+	_apply_foliage_tint()
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
 		# TileOverlay node is only an authoring override provider here.

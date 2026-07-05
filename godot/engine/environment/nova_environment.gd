@@ -155,14 +155,27 @@ func get_terrain_tint() -> Vector3:
 
 
 func get_terrain_lighting_attenuation() -> Vector3:
-	# terrain_rgb IS a direct live tint with three witnessed consumers (C6/G3):
-	# the terrain texture bake (channel*v >> 12 [orig: PolyTrn_InitTextures
-	# @ 0x60b8cb]), the water-quad half tint [orig: PolyTrn_RenderTile @ 0x60df0d],
-	# and the foliage lightmap */128 [orig: sample_terrain_lightmap @ 0x606030].
-	# Those per-consumer ports ride the terrain/foliage work, not the env slice -
-	# returning identity here is tracked divergence #19 (docs/env/env-tod-re.md),
-	# kept neutral rather than faked through the wrong (uniform-tint) path.
+	# Identity is FAITHFUL for the terrain surface: the terrain texture bake
+	# consumer of terrain_rgb is DEAD CODE in retail — the bake buffer is
+	# written and freed but its three readers (0x606ce0, 0x606c30,
+	# Terrain_GetColorMapBilinear @ 0x606d80) have zero xrefs (full .text
+	# E8/E9 scan), so the GPU terrain textures ship untinted
+	# (docs/env/env-tod-re.md #19). The two LIVE terrain_rgb consumers render
+	# elsewhere: the .til tile overlay (get_tile_overlay_tint below) and the
+	# foliage lightmap sample (NovaFoliageDispatcher.terrain_tint).
 	return Vector3.ONE
+
+
+## The .til tile-overlay tint: DIFFUSE = HALF(terrain_rgb) on the quad under a
+## TEXTURE x DIFFUSE MODULATE2X combine, folded to one shader multiply —
+## 254/255 at the default tint (witnessed near-identity, one LSB dark).
+## [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d]
+func get_tile_overlay_tint() -> Vector3:
+	var tint := Color.WHITE
+	if environment_data != null:
+		tint = environment_data.get_terrain_tint()
+	var factor := EnvFile.tile_overlay_tint_factor(tint)
+	return Vector3(factor.r, factor.g, factor.b)
 
 
 ## Push the env-derived terrain lighting + fog uniforms onto a terrain

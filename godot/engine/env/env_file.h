@@ -181,6 +181,12 @@ public:
 	// {"glare": 0..255, "fog_whiten": 0..40}.
 	static Dictionary compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness);
 
+	// The .til tile-overlay tint factor for a single-multiply shader:
+	// 2*HALF(terrain_rgb)/255 per channel — 254/255 at the default tint (the
+	// witnessed MODULATE2X-over-half combine is near-identity, not exact).
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d]
+	static Color tile_overlay_tint_factor(const Color &p_terrain_tint);
+
 	// Field name -> renderer-consumption status for editor badging:
 	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,
 	//  "anchor": String, "note": String}. Statuses mirror

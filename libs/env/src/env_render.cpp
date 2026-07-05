@@ -326,4 +326,43 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 	}
 }
 
+TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed) {
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20] full @ 0x31a1824,
+	// half @ 0x31a1828.
+	TerrainTint tint;
+	tint.full = terrain_color_packed | 0xFF000000u;
+	tint.half = ((terrain_color_packed >> 1) & 0x007F7F7Fu) | 0xFF000000u;
+	return tint;
+}
+
+TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb) {
+	const uint32_t packed = (static_cast<uint32_t>(rgb_byte(terrain_rgb.r)) << 16) |
+			(static_cast<uint32_t>(rgb_byte(terrain_rgb.g)) << 8) |
+			static_cast<uint32_t>(rgb_byte(terrain_rgb.b));
+	return terrain_tint_from_packed(packed);
+}
+
+uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
+	// [orig: sample_terrain_lightmap @ 0x606030] per channel
+	// min((texel * FULL) >> 7, 255); alpha passthrough.
+	uint32_t out = texel_argb & 0xFF000000u;
+	for (int shift = 0; shift <= 16; shift += 8) {
+		const uint32_t texel_c = (texel_argb >> shift) & 0xFFu;
+		const uint32_t tint_c = (full_tint >> shift) & 0xFFu;
+		const uint32_t tinted = std::min<uint32_t>((texel_c * tint_c) >> 7, 255u);
+		out |= tinted << shift;
+	}
+	return out;
+}
+
+Rgb tile_overlay_tint_factor(const TerrainTint &tint) {
+	// TEXTURE x DIFFUSE(HALF) under MODULATE2X -> single-multiply factor
+	// 2*HALF/255 per channel [orig: PolyTrn_RenderTile @ 0x60df0d].
+	Rgb factor;
+	factor.r = static_cast<float>(2u * ((tint.half >> 16) & 0xFFu)) / 255.0f;
+	factor.g = static_cast<float>(2u * ((tint.half >> 8) & 0xFFu)) / 255.0f;
+	factor.b = static_cast<float>(2u * (tint.half & 0xFFu)) / 255.0f;
+	return factor;
+}
+
 } // namespace opennova::env

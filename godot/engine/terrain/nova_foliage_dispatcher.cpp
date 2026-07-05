@@ -2,6 +2,7 @@
 
 #include "nova_terrain_data.h"
 
+#include <env/env_render.h>
 #include <terrain/lighting.h>
 
 #include <godot_cpp/classes/box_mesh.hpp>
@@ -29,9 +30,11 @@ namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
 
-// Foliage color remains a MultiMesh tint approximation. The old
-// Foliage_BuildGeometry@0x005BF5F0 citation is stale; keep this path tied to the
-// verified placement/sampler functions until the retail render emitter is anchored.
+// Foliage instance color: the witnessed sampler chain (per-sample terrain_rgb
+// tint + 2x2 average [orig: sample_terrain_lightmap @ 0x606030;
+// generate_foliage_instances_0 @ 0x600197..0x6001eb]) baked into MultiMesh
+// instance colors. The emitter's half-plus-bias vertex color and the retail
+// colormap alpha-premultiply ride the foliage render-emitter parity (PAR-R2).
 
 uint32_t color_to_argb(const Color &color) {
 	auto to_byte = [](float value) -> uint32_t {
@@ -66,6 +69,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &NovaFoliageDispatcher::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("set_colormap_source", "data"), &NovaFoliageDispatcher::set_colormap_source);
 	ClassDB::bind_method(D_METHOD("get_colormap_source"), &NovaFoliageDispatcher::get_colormap_source);
+	ClassDB::bind_method(D_METHOD("set_terrain_tint", "tint"), &NovaFoliageDispatcher::set_terrain_tint);
+	ClassDB::bind_method(D_METHOD("get_terrain_tint"), &NovaFoliageDispatcher::get_terrain_tint);
 	ClassDB::bind_method(D_METHOD("set_dispatch_algorithm", "algorithm"), &NovaFoliageDispatcher::set_dispatch_algorithm);
 	ClassDB::bind_method(D_METHOD("get_dispatch_algorithm"), &NovaFoliageDispatcher::get_dispatch_algorithm);
 	ClassDB::bind_method(D_METHOD("set_cell_grid_radius", "radius"), &NovaFoliageDispatcher::set_cell_grid_radius);
@@ -98,6 +103,7 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "foliage_sampler"), "set_foliage_sampler", "get_foliage_sampler");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_terrain_data", "get_terrain_data");
+	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "terrain_tint"), "set_terrain_tint", "get_terrain_tint");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_colormap_source", "get_colormap_source");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "dispatch_algorithm", PROPERTY_HINT_ENUM,
@@ -162,6 +168,23 @@ void NovaFoliageDispatcher::set_colormap_source(const Ref<NovaTerrainData> &p_da
 	colormap_source_ = p_data;
 	// Tints are baked into the cached instance colors at scatter time, so refresh.
 	reset();
+}
+
+void NovaFoliageDispatcher::set_terrain_tint(const Color &p_tint) {
+	if (terrain_tint_ == p_tint) {
+		return;
+	}
+	terrain_tint_ = p_tint;
+	// FULL = c | FF000000, derived once like the terrain-init global
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20 <- Terrain_Init @ 0x60fc42].
+	terrain_tint_full_ = opennova::env::terrain_tint_from_rgb(
+			opennova::env::Rgb{ terrain_tint_.r, terrain_tint_.g, terrain_tint_.b }).full;
+	// The tint is baked into the cached instance colors at scatter time.
+	reset();
+}
+
+Color NovaFoliageDispatcher::get_terrain_tint() const {
+	return terrain_tint_;
 }
 
 Ref<NovaTerrainData> NovaFoliageDispatcher::get_colormap_source() const { return colormap_source_; }
@@ -462,12 +485,23 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
 	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
 
-	// Verified render-emitter parity is still pending; MultiMesh has one color
-	// per instance, so use the instance center as the proxy source vertex.
-	const uint32_t c0 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz - 0.5f));
-	const uint32_t c1 = color_to_argb(td->get_colormap_color_world(wx + 0.5f, wz - 0.5f));
-	const uint32_t c2 = color_to_argb(td->get_colormap_color_world(wx - 0.5f, wz + 0.5f));
-	const uint32_t c3 = color_to_argb(td->get_colormap_color_world(wx + 0.5f, wz + 0.5f));
+	// Four lightmap samples at the instance center +-0.5 world units
+	// (+-0x8000 fixed) with the env terrain_rgb FULL tint applied per sample
+	// (min((texel * FULL) >> 7, 255), alpha passthrough), then the 2x2 SWAR
+	// average [orig: sample_terrain_lightmap @ 0x606030; sample fan
+	// generate_foliage_instances_0 @ 0x600197..0x6001eb]. MultiMesh has one
+	// color per instance, so the average IS the instance color; the emitter's
+	// half-plus-bias vertex color (0x404040 + avg>>1 under the 2X draw) rides
+	// the foliage render-emitter parity (PAR-R2), not the tint slice.
+	const uint32_t full_tint = terrain_tint_full_;
+	const auto tinted = [full_tint, td](float sx, float sz) -> uint32_t {
+		return opennova::env::foliage_lightmap_tint(
+				color_to_argb(td->get_colormap_color_world(sx, sz)), full_tint);
+	};
+	const uint32_t c0 = tinted(wx - 0.5f, wz - 0.5f);
+	const uint32_t c1 = tinted(wx + 0.5f, wz - 0.5f);
+	const uint32_t c2 = tinted(wx - 0.5f, wz + 0.5f);
+	const uint32_t c3 = tinted(wx + 0.5f, wz + 0.5f);
 	const uint32_t packed = opennova::terrain::terrain_average_four_argb(c0, c1, c2, c3);
 	return argb_to_color(packed);
 }

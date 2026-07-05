@@ -99,10 +99,15 @@ in `client_session_loopback_test`).
 ### Environment — [env/env-tod-re.md](env/env-tod-re.md) (#-catalog) + [env/env-honored-matrix.md](env/env-honored-matrix.md)
 
 Implemented **libs/env-first** so the ENG-2 port inherits the closures. The
-honored-matrix PARTIAL rows (terrain_tint, iris, ceiling/floor, lightning, glare_3di)
+honored-matrix PARTIAL rows (iris, ceiling/floor, lightning, glare_3di)
 map onto these `#` entries. Closed 2026-07-05: **env #21** -> `FIXED` (the frame-clear
 horizon blend ported libs/env-first + consumed by the GameWorld clear; witness in
-[env/env-tod-re.md](env/env-tod-re.md) #21).
+[env/env-tod-re.md](env/env-tod-re.md) #21), and **env #19** -> `FIXED` (the terrain
+tint grill re-shaped it: the FULL/HALF split + both LIVE consumers ported —
+tile-overlay HALF×MODULATE2X, foliage `min((texel×FULL)>>7,255)` — while the
+texture-bake consumer proved DEAD CODE, readers zero-xref, so the untinted terrain
+surface is ratified faithful; witness in [env/env-tod-re.md](env/env-tod-re.md) #19,
+honored-matrix terrain_tint -> HONORED; residual emitter facets ride PAR-R2).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
@@ -111,7 +116,6 @@ horizon blend ported libs/env-first + consumed by the GameWorld clear; witness i
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — curve + consumer chain recovered, no modulator chain built (`get_terrain_lighting_attenuation` returns identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #19 | `terrain_rgb` terrain-stack consumers (texture bake ×v≫12, water-quad half-tint, foliage lightmap ×/128) render none — attenuation hard-returns identity | A | OPEN (PARTIAL) | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -222,7 +226,7 @@ Open counts by domain (the target is zero in every cell):
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
 | Net | 9 | 0 | 12 (2 also NEEDS-RE) | 21 |
-| Environment | 1 | 0 | 5 | 6 |
+| Environment | 1 | 0 | 4 | 5 |
 | World / AI + events | 3 | 0 | 4 | 7 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 10 | 1 (+1 dual) | 5 | 16 |
@@ -231,7 +235,7 @@ Open counts by domain (the target is zero in every cell):
 | Particles `.ptl` | 2 | 2 | 0 | 4 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 4 | 1 | 0 | 5 |
-| **Total OPEN** | | | | **66** |
+| **Total OPEN** | | | | **65** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

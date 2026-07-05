@@ -77,6 +77,7 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("horizon_blend_skyfog", "fog", "skyfog", "fog_distance", "fog_distance_reference"), &EnvFile::horizon_blend_skyfog);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("tile_overlay_tint_factor", "terrain_tint"), &EnvFile::tile_overlay_tint_factor);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("get_field_consumption"), &EnvFile::get_field_consumption);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
 	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
@@ -527,6 +528,14 @@ Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 	return to_color(opennova::env::horizon_blend_skyfog(
 			to_rgb(p_fog), to_rgb(p_skyfog),
 			to_fixed(p_fog_distance), to_fixed(p_fog_distance_reference)));
+}
+
+Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
+	// [orig: PolyTrn_RenderTile @ 0x60df0d] — DIFFUSE(HALF) x TEXTURE under
+	// MODULATE2X, folded to one multiply for the shader.
+	const opennova::env::TerrainTint tint =
+			opennova::env::terrain_tint_from_rgb(to_rgb(p_terrain_tint));
+	return to_color(opennova::env::tile_overlay_tint_factor(tint));
 }
 
 Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {

@@ -454,14 +454,31 @@ In a network session the server-synced time + TOD rate replace the local start T
   file's value is live (`Game_LoadTerrainDuringConnect` orders `Terrain_LoadEnvironmentConfig
   @ 0x52073b` before `Terrain_Init @ 0x52076f`) — via `PolyTrn_SetTerrainTintColors
   @ 0x605e20` into two renderer globals: full tint `0x31a1824` and half tint `0x31a1828`
-  (`(c>>1)&0x7f7f7f`). Witnessed consumers:
-  - `PolyTrn_InitTextures @ 0x60b8cb` (from `Game_StartMission`): **bakes the tint into
-    the generated terrain textures** per texel (`channel × value >> 12`).
+  (`(c>>1)&0x7f7f7f`). Witnessed consumers (dispositions re-graded by the 2026-07-05
+  #19 grill):
+  - `PolyTrn_InitTextures @ 0x60b8cb` (from `Game_StartMission`): writes the 256×256
+    quarter-res bake buffer `dword_319F798` per texel (`channel × value >> 12`, 16-tap
+    4×4 sum; underwater +32/+32/+48 blue-shift behind a scale-mismatched height test) —
+    **DEAD CODE**: the buffer is written and freed but its three readers (`0x606ce0`,
+    `0x606c30`, `Terrain_GetColorMapBilinear @ 0x606d80`) have **zero xrefs** (full
+    `.text` E8/E9 scan). The GPU terrain textures ship **untinted**; an untinted
+    terrain surface is the faithful behavior. (The pre-grill claim that the bake
+    reaches the textures was wrong.)
   - `PolyTrn_RenderTile @ 0x60df0d` (every frame via `PolyTrn_RenderFrame @ 0x60eac0` ←
-    `render_main_scene`): half tint = the **terrain water quad vertex color**.
-  - `sample_terrain_lightmap @ 0x606030` (from `generate_foliage_instances_0`): lightmap
-    texel × `channel/128` (128 = identity; the default `0xFFFFFF` ≈ ×2 saturating gain —
-    lightmaps are authored ≤128 nominal) — **foliage instance tinting**.
+    `render_main_scene` → `render_water_quad @ 0x604700`): **LIVE** — half tint is the
+    DIFFUSE on all four vertices of the `.til` tile-overlay quad (tri-strip FVF
+    `0x2C4`, SPECULAR `0xFF000000`, composited into the 128-slot tile texture RT with
+    `COLORWRITEENABLE=RGB`); combine pass `0x631` runs stage0 TEXTURE × DIFFUSE with
+    MODULATE2X when caps `dword_32656AC` (default true) else MODULATE. The default
+    tint renders 254/255 per channel — near-identity, one LSB dark, NOT exact.
+  - `sample_terrain_lightmap @ 0x606030` (from `generate_foliage_instances_0`
+    @ 0x600197..0x6001eb, 4 samples at instance ±0x8000 both axes): **LIVE** — lightmap
+    texel × `full/128` saturating (`min((texel×FULL)>>7, 255)`, alpha passthrough;
+    128 = identity; the default `0xFFFFFF` ≈ ×2 saturating gain — lightmaps are
+    authored ≤128 nominal) — **foliage instance tinting**. The colormap source is
+    alpha-premultiplied (`A<<24 | (A*c>>8)`, untinted) and the emitter's main-path
+    vertex color is `0xFF000000 | (0x404040 + (avg>>1))` under a 2X draw — those two
+    facets ride the foliage render-emitter parity (PAR-R2), not the tint.
   - Vestigial: a runtime getter/setter pair (`Env_GetTerrainColorPacked @ 0x57d4b0`,
     setter @ 0x57d4c0) with **zero callers**, and a `(color & 0xC0C0C0) != 0xC0C0C0` mode
     flag write in `Terrain_Init @ 0x60fc66` whose target (`0x31beae8`) is never read.
@@ -495,7 +512,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; **C6 corrected the precedence**: overcast.def is additive-after-success (and the sole table for NULL map), never a fallback; a missing/failed `.trn` aborts the whole TOD load. Runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
 | 17 | Iris auto-exposure (modulator gain) | Deferred; **curve + consumer chain fully recovered by C6** (§Iris auto-exposure) — reimpl has no modulator chain; building it is the prerequisite |
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
-| 19 | `terrain_rgb` terrain-stack consumers (texture bake ×v>>12, water quad half-tint, foliage lightmap ×/128) | **New from C6 (G3)** — reimpl renders none of them (`get_terrain_lighting_attenuation` returns identity); refutes the earlier "terrain-inert" hypothesis. C7+ decides which consumers to port alongside the PolyTrn-equivalent paths |
+| 19 | `terrain_rgb` terrain-stack consumers | **FIXED 2026-07-05** (the tint grill re-shaped it): the FULL/HALF split is ported libs/env-first (`terrain_tint_from_packed`/`_from_rgb` `[orig: PolyTrn_SetTerrainTintColors @ 0x605e20]`, ctest-pinned) and both LIVE consumers render — the `.til` tile overlay (`EnvFile.tile_overlay_tint_factor` → `u_tile_overlay_tint`, the MODULATE2X-over-HALF combine folded to one multiply, 254/255 at default `[orig: PolyTrn_RenderTile @ 0x60df0d]`) and the foliage lightmap sample (`env::foliage_lightmap_tint` per sample in `NovaFoliageDispatcher`, `min((texel×FULL)>>7,255)` `[orig: sample_terrain_lightmap @ 0x606030]`), fed from the loaded env by GameWorld at terrain init like retail. The texture-bake consumer is **DEAD CODE** (readers zero-xref; untinted terrain surface IS faithful — `get_terrain_lighting_attenuation` identity ratified, §C6). Residual facets ride PAR-R2 (colormap alpha-premultiply, emitter half-plus-bias vertex color) and the editor foliage preview keeps the default (=retail default) tint |
 | 20 | Sky dome combine | **Fixed by C7**: `sky.gdshader` + `nova_sky.gd` rewritten as a structural port of the recovered two-pass spec (§Sky dome) — gradient/cloud lerp chains, dp3 clip-space proximity, builder-formula dome normals computed in the vertex stage, Y-only height scale, half-camera-height anchor, textureless `advanced_clouds 0` flat pass, VS dome fog against the shared scene fog color. The fabricated keyframed-path `u_cloud_tint` is deleted; the dead c25 upload is not replicated. Residual cosmetic caveat: the clip-space prox dot is computed in Godot's clip conventions (reverse-Z), not D3D's — same construction, slightly different z scale; tracked for visual A/B |
 | 21 | skyfog frame clear color | **FIXED 2026-07-05**: the horizon blend is ported libs/env-first (`horizon_blend_skyfog`, byte-exact vs the MMX sequence, ctest-pinned + parity-vector cell) and consumed - `NovaEnvironment.get_frame_clear_color()` drives the GameWorld `ClearColor` WorldEnvironment (above-water skyfog blend / underwater lit-water, the witnessed choice); the vehicle alternate-fog view and the dome-fog application ride their subsystems. Editor preview adoption rides ENV-1. |
 
@@ -539,7 +556,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) folded into one Godot pass; clip-convention prox caveat tracked under divergence #20 |
 | Celestial + glare | **new implementation** from witnessed model (`nova_celestial.gd`: sun/moon/star/glare 3DI at the sky, glare additive; occlusion held at full brightness, tracked) |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
-| iris / terrain_rgb | **divergent — consumers recovered (C6)**: iris = global auto-exposure (curve spec-complete), terrain_rgb = live terrain-stack tint (bake/water/foliage); both unimplemented in the reimpl, tracked as divergences #17/#19 |
+| iris / terrain_rgb | iris **divergent** — global auto-exposure (curve spec-complete), no modulator chain yet, divergence #17. terrain_rgb **matching** after the 2026-07-05 tint port (#19 FIXED): both live consumers render (tile overlay HALF×2X, foliage FULL×/128); the bake consumer is dead code, untinted terrain surface ratified faithful |
 | Load pipeline overcast precedence | **matching** after C6 correction (additive-after-success; reimpl two-table model documented, overcast blend at 0 pending weather work) |
 
 ## What this effort shipped (2026-06-09, branch `environment-workspace`)
