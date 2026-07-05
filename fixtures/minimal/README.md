@@ -79,12 +79,23 @@ Authored so far (each guarded by a ctest):
 
 Remaining slices:
 
-- `mnml.trn` — the terrain. The largest leg: a small heightfield → CDEP
-  polydata + colormap + the `.trn` config, via `libs/terrain` `build_terrain`
-  (a `TpjProject`) + `libs/trn` `save_trn`. The map's size / flat-vs-featured
-  shape is a design choice — smallest useful is a flat N×N plane.
-- the PFF packaging (`libs/pff` write side) — bundle the loose set into one
-  archive so the fatal not-all-archives-missing gate clears (witnessed above).
+- `mnml.trn` — the terrain, generated **at package time, not committed**. A
+  feasibility probe settled the approach: `build_terrain` on a flat 1024×1024
+  depthmap (`MAP_SIZE²`) takes **~35 s and emits 685 files / ~10 MB** (the
+  `.cpt` ≈3 MB, `Output.dep` ≈2 MB, and ~680 `.tml`/`.tms` quadtree LOD
+  tiles) — the full retail terrain set. That is far too heavy to commit and
+  too slow for a per-build ctest, so the terrain is produced by the packaging
+  step (below) into the PFF. What this repo commits is only the tiny `.trn`
+  config + the flat-depthmap recipe (a generator, not the 1 MB raw); a light
+  ctest guards the `.trn` config round-trips. Pipeline: a flat depthmap →
+  `libs/terrain` `build_terrain` (a `TpjProject`, output prefix `mnml`) →
+  `.cpt`/`Output.dep`/`.tms` tiles; the `.trn` config (`libs/trn` `save_trn`)
+  references them. Getting the build-output → `.trn`-field mapping exactly
+  right is what makes the terrain load in retail — the care in this leg.
+- the PFF packaging (`libs/pff` write side) — a tool that runs the terrain
+  build, then bundles the whole set (the committed files + the generated
+  terrain) into ONE archive, so the fatal not-all-archives-missing gate clears
+  (witnessed above). This is where the heavy terrain lives.
 - asset-gated retail validation (§ Validation) — needs a retail install.
 
 ## Validation (asset-gated — needs a retail JO install)
