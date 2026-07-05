@@ -355,3 +355,18 @@ Float math is fine; only axis order, angle unit, and absolute-vs-local rotation 
    `85.333336`/`1365.3334` scalars.
 6. Purpose of the 20-B `pre_count` block (0 in all 971 samples; needs a non-zero sample).
 7. v8: validate the NovalogicTools layout against the 3 local v8 files before trusting it.
+
+## 4. Divergence catalog (D-3DILW)
+
+Stable IDs for the deferrals stated in §3.2/§3.3 (dispositions in the canonical vocabulary of
+[divergence-ledger.md](../divergence-ledger.md)). The whole record is unlanded (PR #45 closed);
+these rows ride whenever an LW import is revived.
+
+| ID | Divergence | Disposition |
+|---|---|---|
+| D-3DILW-1 | v8 branch deferred: the `threedi_lw` parser handles v10 only; the NovalogicTools v8 layout is unvalidated against the 3 local v8 files (§3.2, §3.3 item 7) | **NEEDS-RE** — validate before adding the v8 branch. |
+| D-3DILW-2 | Textures deferred: v10 geometry + one-weight skinning land in `libs/threedi`, but material textures are not ported (§3.2) | **WITNESSED-READY-DEFERRED** — material parity (§3.3 item 2) is the prerequisite grill. |
+| D-3DILW-3 | SAF/KSA playback intentionally not applied (`lw_animation_status=parsed_not_applied_pending_re`); the §2 pose recipe is pinned but end-to-end validation against in-game playback is pending (§3.2, §3.3 item 1) | **NEEDS-RE** — prove the recipe against rendered playback. |
+
+The remaining §3.3 items (collision blobs, UV/render-state semantics, geometry-scale labels, the
+`pre_count` block) are unresearched RE targets with no witnessed behavior gap yet and stay in §3.3.
