@@ -250,9 +250,12 @@ CBIN codec (magic 0x4E494243 + 20-B header + ROL32/XOR cipher `@0x75e348`) is
 |---|---|---|---|---|
 | D-TERRAIN-1 | Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include — a tracked deliberate divergence justified by the editing need | C | PERMANENT (candidate) | PAR (terrain) |
 
-Record is PARTIAL: module surface + witness basis mapped, the one known
-divergence cataloged; the mesh_simp byte-parity + CDEP/LOD bitstream grill is the
-pending deep audit. Data path = the byte-identical TrnGen port.
+Record is PARTIAL by documentation depth, NOT by open divergences: the data path
+(build → mesh-simplify → CPT) is proven **byte-identical** across 5 fixtures
+(`dvd4_parity` + `parametric_parity` Sample/Gradient/Checker64/Perlin). The only
+tracked terrain divergence is D-TERRAIN-1 (deliberate shader split); the remaining
+work is documenting the CDEP/LOD bitstream + retail-anchoring the render pass, not
+closing a parity gap.
 
 ### Tiles — [tiles/til-re.md](tiles/til-re.md) (D-TIL catalog; PAR-R3)
 

@@ -23,7 +23,7 @@ is a partial. It converts terrain from `UNAUDITED` to *tracked (partial)*.
 | `quadtree` / `build_quadtree` / `lod` | quadtree LOD traversal, frustum culling, height mipchain | **jodemo** `Terrain_TraverseQuadTreeNode @ 0x5C89C0`, `Terrain_CollectVisibleSectors @ 0x5C9120`, `Terrain_BuildHeightMipChain @ 0x5C5310` |
 | `cdep_constraint` | quantized [min,max] of the 256 pixels of a block (CDEP depth constraint) | documented in-code; full CDEP bitstream grill pending |
 | `lighting` | terrain lighting colors + per-position modulation | **retail** `Terrain_SetLightingColors @ 0x5C4B10`, `Terrain_GetModulatedColorAtPos @ 0x5C5FE0`; fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
-| `mesh_simp` | mesh simplification (edge-collapse), targeting **byte-identical** output vs the canonical path | in-code "byte-identical output" + divergence-detection scaffolding — the parity is actively pinned, not yet witnessed clean end-to-end |
+| `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified**: `dvd4_parity` (canonical `.cpt`) + `parametric_parity` (Sample/Gradient/Checker64/Perlin, 4.6–6.8 MB CPTs each) all produce byte-identical output. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert. `parametric_parity` is ctest-`DISABLED` only for CI runtime cost (~5 min), not for any correctness gap |
 | `packing` | word→byte packing | **retail** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) |
 | `depthmap` | depth/height map storage | in-code |
 
@@ -43,15 +43,22 @@ TrnGen port. The pending grill (below) may surface facets in mesh_simp / CDEP.
 
 ## Pending (the deep grill, to complete R1)
 
-- **Mesh simplification byte-parity** — the `mesh_simp` divergence-detection
-  scaffolding implies the edge-collapse ordering is being pinned to the canonical
-  output; witness the collapse cost/order against the source and record any
-  residual as `D-TERRAIN-n`.
+The **data path is proven byte-identical** — the build → mesh-simplify → CPT
+export chain reproduces the canonical output exactly across 5 fixtures (above),
+so `mesh_simp` needs no further witness (it was the concern; it is closed). What
+remains for a *full* (vs partial) R1 record:
+
 - **CDEP / LOD bitstream** — `cdep_constraint` + the quadtree mip chain: witness
-  the on-disk CDEP block encoding and the LOD selection thresholds.
-- **Binary split** — the LOD/quadtree/mip witnesses are **jodemo**; confirm the
-  retail equivalents (retail renders terrain too) so the record is retail-anchored
-  where it ships, like the foliage (R2) re-confirmation.
+  the on-disk CDEP block encoding and the LOD selection thresholds against the
+  binary. (`cdep_read`/`cdep_roundtrip` ctests already pin the CDEP header against
+  a `Dvxi5.cpt` capture + the encode/decode round-trip — so this is documenting the
+  witnessed encoding, not discovering it.)
+- **Runtime render pass** — the quadtree traversal + surface shading witnessed
+  against retail (the reimpl LOD/mip cites **jodemo**; retail renders terrain too),
+  like the foliage (R2) / tiles (R3) retail re-confirmation.
+
+Neither is an open *divergence* — they are documentation depth. The one tracked
+terrain divergence remains D-TERRAIN-1 (the deliberate shader split).
 
 ## Cross-references
 
