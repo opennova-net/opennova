@@ -25,11 +25,16 @@
 //    in the source tree and then FAILS the test, so a dump run can never be
 //    mistaken for green.
 //
-// Later REN slices extend the vector set (sort-key/pass classification at
-// REN-3, lighting scalars at REN-5) as their producers land in libs/renderer.
+// REN-3 extended the set with section 3: draw-order vectors (sort keys,
+// technique-class selection, the water bracket + priority ladder) pinning
+// libs/renderer/render_order against docs/render/render-order-re.md
+// [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
+// @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0]. Lighting
+// scalars join at REN-5 as their producers land in libs/renderer.
 
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
+#include "renderer/render_order.h"
 #include "oed/material_descriptor.h"
 #include "threedi/threedi_3di3.h"
 
@@ -158,6 +163,77 @@ std::string generate() {
 		              glsl.size());
 		out << line;
 	}
+
+	// Section 3 (REN-3): draw-order vectors over libs/renderer/render_order —
+	// docs/render/render-order-re.md.
+	out << "# render-order v1 (REN-3: sort keys, technique classes, water bracket, ladder)\n";
+
+	// Technique-class selection: every stack-default state x a submit-flag
+	// sweep including the multi-flag precedence cases
+	// [orig: collect_render_objects_for_batch @ 0x5d90d7..0x5d9145].
+	const uint32_t stack_states[] = { 0, kStackDefaultClip, kStackDefaultProjShadow,
+	                                  kStackDefaultDepthMask };
+	const uint32_t submit_states[] = {
+		0, kSubmitClipPass, kSubmitProjShadowPass, kSubmitDepthMaskPass,
+		kSubmitMatchTerrainPass, kSubmitClipPass | kSubmitMatchTerrainPass,
+		kSubmitDepthMaskPass | kSubmitProjShadowPass,
+		kSubmitFirstPassOnly | kSubmitAltStream | kSubmitNoGlowCopy,
+	};
+	for (uint32_t stack : stack_states) {
+		for (uint32_t submit : submit_states) {
+			std::snprintf(line, sizeof(line), "tclass stack=%x submit=%03x cls=%u\n",
+			              stack, submit,
+			              static_cast<unsigned>(technique_class_for_submit(stack, submit)));
+			out << line;
+		}
+	}
+
+	// Opaque sort keys: depth grid x effect indexes x alpha-test
+	// [orig: @ 0x5d928e..0x5d92c8].
+	const float depths[] = { -8.0f, 0.0f, 15.0f, 16.0f, 255.0f, 256.0f,
+	                         341.0f, 767.5f, 1023.0f, 4096.0f };
+	const uint32_t effects[] = { 0, 1, 42, 63, 127 };
+	for (float d : depths) {
+		for (uint32_t e : effects) {
+			for (int at = 0; at <= 1; ++at) {
+				std::snprintf(line, sizeof(line), "okey d=%.1f e=%u at=%d key=%08x\n",
+				              static_cast<double>(d), e, at,
+				              opaque_sort_key(d, e, at != 0));
+				out << line;
+			}
+		}
+	}
+
+	// Transparent sort keys: exact ~float-bits [orig: @ 0x5d931c..0x5d9326].
+	const float tdepths[] = { 0.0f, 0.5f, 1.0f, 10.0f, 10.25f, 100.0f,
+	                          500.0f, 8192.0f };
+	for (float d : tdepths) {
+		std::snprintf(line, sizeof(line), "tkey d=%.2f key=%08x\n",
+		              static_cast<double>(d), transparent_sort_key(d));
+		out << line;
+	}
+
+	// Water bracket: queue pick + rung, both camera sides
+	// [orig: @ 0x5d934e..0x5d9359; @ 0x5c9596; @ 0x5c967a].
+	const float heights[] = { -4.0f, 4.99f, 5.0f, 5.01f, 64.0f };
+	for (float h : heights) {
+		const TransparentQueue q = transparent_queue_for(h, 5.0f);
+		std::snprintf(line, sizeof(line),
+		              "side h=%.2f w=5.00 q=%s rungAbove=%d rungBelow=%d\n",
+		              static_cast<double>(h),
+		              q == TransparentQueue::AboveWater ? "above" : "below",
+		              transparent_rung_for(q, true),
+		              transparent_rung_for(q, false));
+		out << line;
+	}
+
+	// The ladder itself.
+	std::snprintf(line, sizeof(line),
+	              "ladder stars=%d body=%d far=%d water=%d cam=%d fx=%d glow=%d\n",
+	              kRungSkyStars, kRungSkyBody, kRungAlphaFarSide, kRungWater,
+	              kRungAlphaCameraSide, kRungOverlayFx, kRungSunGlow);
+	out << line;
+
 	return out.str();
 }
 

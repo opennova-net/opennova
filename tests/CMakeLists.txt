@@ -532,7 +532,7 @@ target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME oed_error COMMAND oed_error_test)
 
 # Object renderer/shader tests
-foreach(test light_runtime material_classify material_eval state_vectors)
+foreach(test light_runtime material_classify material_eval render_order state_vectors)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_renderer opennova_threedi)
     target_include_directories(renderer_${test}_test PRIVATE

@@ -36,7 +36,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| REN-2 materials grill + converge | (this slice) | the runtime material path witnessed end to end (HLSLEffect registry built from `_FFP.fx` ×24 + the localres `.fx` set + `#UV` twins; probe-derived capability flags; six technique-class pass blocks; state application at FlushBatches) — [render/render-material-re.md](render/render-material-re.md), D-RMAT-1..6. Fixed in-slice with cited T1 re-dumps: the alpha-test compare shape (invert flips the COMPARE `[orig: @ 0x6770a0]`), case-insensitive tag lookup `[orig: @ 0x5ade70]`, the VS_TRACER registry row; flag-enum misnomers renamed everywhere (BLENDING/SKINNED/TANGENT/UVGEN); `MATERIAL_FLAG_*` single-sourced onto `NovaObjectShaderCache` (the ENG-4 leg); 3 kong misnomers renamed in the IDB; materials leave UNAUDITED (3→2); ratchet `libs_uncited_src_files` tightened 65 → **64** (the composer earned its citation) |
+| REN-3 draw order | (this slice) | the batching/draw-order system witnessed end to end (four queues + the unsigned-ascending sort `[orig: RenderBatch_QuickSort @ 0x5d8b40]`; the opaque state-sort key + the transparent `~float_bits` back-to-front key; the water-plane queue split + frame bracket `[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`; technique-class selection; the render-state stack; the viewmodel near-Z 0.05 + viewport-depth [0,0.1] pass; the Q3 glow/envmap copy flushed by the bloom pass) — [render/render-order-re.md](render/render-order-re.md), D-RORD-1..6. Ordering semantics ported to `libs/renderer/render_order` and applied as the generalized Godot priority ladder (celestial rungs re-derived, water rung, object-model water-side rungs via the new `NovaObjectShaderCache` seam); T1 extended with the draw-order vector section (cited re-dump, pure append); T2 gained the depth-adversarial composite ordering scenes (fresh baseline; swatch A/B bitwise-identical vs post-ren2); 11 function + 15 data renames landed in the IDB (EffectWorld particle pass ex-`CNapiSession_*`, the render-state stack push ex-`CNetPlayer_*`, the viewmodel viewport/near-Z pair ex-`Scar_*`); draw order leaves UNAUDITED (2→1); D-RORD-2/-6 ratified into the permanent register; env #30 gained its pass-structure rider; world §13's `0x10000000` identified as the repeat-draw marker |
+| REN-2 materials grill + converge | 005efae0 | the runtime material path witnessed end to end (HLSLEffect registry built from `_FFP.fx` ×24 + the localres `.fx` set + `#UV` twins; probe-derived capability flags; six technique-class pass blocks; state application at FlushBatches) — [render/render-material-re.md](render/render-material-re.md), D-RMAT-1..6. Fixed in-slice with cited T1 re-dumps: the alpha-test compare shape (invert flips the COMPARE `[orig: @ 0x6770a0]`), case-insensitive tag lookup `[orig: @ 0x5ade70]`, the VS_TRACER registry row; flag-enum misnomers renamed everywhere (BLENDING/SKINNED/TANGENT/UVGEN); `MATERIAL_FLAG_*` single-sourced onto `NovaObjectShaderCache` (the ENG-4 leg); 3 kong misnomers renamed in the IDB; materials leave UNAUDITED (3→2); ratchet `libs_uncited_src_files` tightened 65 → **64** (the composer earned its citation) |
 | REN-1 instrument (rode this trunk, d158e3e3) + REN-0 mint (ce2b0978) | d158e3e3 / ce2b0978 | the three-tier parity instrument + pre-change baselines; the track mint + [ADR 0023](adr/0023-render-visual-parity.md); ledger audit track reopened (UNAUDITED = 3); env #17 → REN-5 and #27/#29/#30/#33 → REN-6 transfers; `ledger_check.py` DOMAIN_ORDER + the LIBS-2 `libs/renderer`-fold reversal |
 | ENG-2 env port (PR #206 train) | 28cc9474 … (7 slices) | the five environment GDScript files are scene plumbing over `libs/env`: weather core (slices 1-2), sky dome + cloud scroll (3-4), water surface (5-6, full witnessed render: per-frame noise textures + UV + lit-color pipeline), celestial placement + glare occlusion (7). Re-grills caught the shared RNG-seed transcription (env #25, fixed in libs/env + libs/wac), the scroll model (#26), the water look/precedence (#28/#31), celestial placement inventions (#32), and CLOSED env #14; minted #27/#29/#30/#33 as tracked deferrals. Honored-matrix re-attested; vectors 204/204 with per-slice witnessed re-dumps |
 | Wave-2 boundary: STD-3 flip + GOV-4 sync | (this slice) | CI lint step now `--enforce` ×3 (ratchet, dict-contract, link-graph) + `fetch-depth: 0` so the diff lint stops self-skipping on PRs; dict-contract lint repaired to class-level declarations only (its Wave-1 soft run flagged 36 function-locals — a lint bug, not code debt; the 4 surviving range hits are pre-existing contracts moved by F5); ledger scoreboard now GENERATED (`scripts/lint/ledger_check.py`, hard-fail like the ratchet) — mechanical recount corrected the hand-kept total 64 → **66 open** (Net rows were undercounted 21→23, Credits 2→1, Tiles 1→0, Fonts 3→1); ratchet baseline tightened `libs_uncited_src_files` 87 → **65** (earned by the PAR-train citations); D-FOLIAGE-1's raw `\|` escaped (it broke GFM rendering + parsers) |
@@ -389,19 +390,21 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   converge classifier + composer; T1 pinned→witnessed with cited re-dumps;
   engine-side `MATERIAL_FLAG_*` single-sourcing (the ENG-4 leg). Lands
   `render-material-re.md` + D-RMAT; likely settles D-PTL-3/-4.
-- **REN-3** (M/L) **draw order** (engine-research — greenfield): sort keys +
-  pass structure from the batch family (`collect_render_batches_for_entity
-  @ 0x5d94b0`, `collect_render_objects_for_batch @ 0x5d8f20`,
-  `RenderBatch_QuickSort @ 0x5d8b40`, `CRenderBatchQueue_FlushBatches
-  @ 0x5d9f50`, `CRenderBatchQueue_SortAndFlush @ 0x5dae40`,
-  `Render_SubmitEntity @ 0x5dad80`, the `Render_SubmitAlpha16 @ 0x83fde8`
-  global) and the LIVE frame orchestrators (`render_main_scene @ 0x5c1240`,
-  `Render_ProcessMainSceneFrame @ 0x5ca0f0`, `Terrain_RenderSceneWithReflection
-  @ 0x5c93a0` — the 10-flush frame, `Player_RenderFirstPersonViewModel
-  @ 0x4ded60`); port the ORDERING SEMANTICS as a cited pass/priority map in
-  `libs/renderer`, applied as a global Godot priority/pass ladder
+- **REN-3** (M/L) **draw order** — **DONE 2026-07-06** (engine-research —
+  was greenfield): sort keys + pass structure witnessed from the batch family
+  (`collect_render_batches_for_entity @ 0x5d94b0`,
+  `collect_render_objects_for_batch @ 0x5d8f20`, `RenderBatch_QuickSort
+  @ 0x5d8b40`, `CRenderBatchQueue_SortAndFlush @ 0x5dae40`,
+  `Render_SubmitEntity @ 0x5dad80`) and the LIVE frame orchestrators
+  (`Render_ProcessMainSceneFrame @ 0x5ca0f0`,
+  `Terrain_RenderSceneWithReflection @ 0x5c93a0` — the 10-flush frame,
+  `Player_RenderFirstPersonViewModel @ 0x4ded60`; `render_main_scene
+  @ 0x5c1240` identified as the reflection/cinematic offscreen variant, and
+  `Render_SubmitAlpha16 @ 0x83fde8` as a 16.16 submit-alpha global, not a
+  queue); the ORDERING SEMANTICS ported as the cited pass/priority map in
+  `libs/renderer/render_order`, applied as the global Godot priority ladder
   generalizing the celestial one — the queue itself is not reproduced.
-  Lands `render-order-re.md` + D-RORD.
+  Landed [`render-order-re.md`](render/render-order-re.md) + D-RORD-1..6.
 - **REN-4** (M/L) **shaders/TSS**: the terrain stage tables
   (`Terrain_InitShaders @ 0x5c19b0`, `terrain_init_rendering_resources
   @ 0x5789e0`) decoded against `RenderState_ApplyToDevice`; the water

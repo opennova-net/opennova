@@ -7,8 +7,8 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 
 | Record | Lands at | Catalog | Covers |
 |---|---|---|---|
-| `render-material-re.md` | REN-2 | D-RMAT | the runtime flag/tag→state path (Entity_UpdateRenderState @ 0x5d6a30 and the chain down to the device boundary) |
-| `render-order-re.md` | REN-3 | D-RORD | batching, sort keys, pass structure (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Render_SubmitAlpha16 @ 0x83fde8) |
+| [`render-material-re.md`](render-material-re.md) | **landed at REN-2** | D-RMAT | the runtime flag/tag→state path (Entity_UpdateRenderState @ 0x5d6a30 and the chain down to the device boundary) |
+| [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0) |
 | `render-lighting-re.md` | REN-5 | D-RLIT | the modulator chain, entity light application, terrain lightmaps |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
@@ -36,14 +36,18 @@ pins the GDScript→native binding.
 key (sphere + quad, code-generated textures, orthogonal camera — asset-free,
 deterministic) and diffs captures exactly (`compare` mode,
 `Image.compute_image_metrics`, max-delta 0). World-level baselines ride the
-asset-gated `godot/tests/env_visual_baseline_probe.gd` (ENG-2's driver);
-draw-order composite scenes join it at REN-3.
+asset-gated `godot/tests/env_visual_baseline_probe.gd` (ENG-2's driver).
+The `composite` mode (REN-3) renders the draw-order scenes — overlapping
+translucent layers with depths arranged AGAINST the witnessed order, so only
+the ported priority ladder composes them correctly (the water bracket and the
+sky ladder; [render-order-re.md](render-order-re.md)).
 
 ```
 # capture (windowed, never --headless):
 "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- capture .scratch/golden/render/<label>
+"$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- composite .scratch/golden/render/<label>
 "$GODOT_BIN" --path godot -s res://tests/env_visual_baseline_probe.gd -- <JOX_dir> .scratch/golden/render/<label> world
-# compare two swatch captures:
+# compare two captures (swatch or composite):
 "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- compare a_grid.png b_grid.png
 ```
 

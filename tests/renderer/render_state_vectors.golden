@@ -2758,3 +2758,150 @@ key=00006d68 fnv64=eaa2f32c2b9856b5 len=4447
 key=00006d88 fnv64=f9c3c8d247384745 len=4193
 key=00006dc8 fnv64=64aa8489281bd3f6 len=4443
 key=00006de8 fnv64=eaa2f32c2b9856b5 len=4447
+# render-order v1 (REN-3: sort keys, technique classes, water bracket, ladder)
+tclass stack=0 submit=000 cls=0
+tclass stack=0 submit=001 cls=3
+tclass stack=0 submit=002 cls=1
+tclass stack=0 submit=004 cls=2
+tclass stack=0 submit=200 cls=5
+tclass stack=0 submit=201 cls=3
+tclass stack=0 submit=006 cls=2
+tclass stack=0 submit=188 cls=0
+tclass stack=1 submit=000 cls=3
+tclass stack=1 submit=001 cls=3
+tclass stack=1 submit=002 cls=3
+tclass stack=1 submit=004 cls=3
+tclass stack=1 submit=200 cls=3
+tclass stack=1 submit=201 cls=3
+tclass stack=1 submit=006 cls=3
+tclass stack=1 submit=188 cls=3
+tclass stack=2 submit=000 cls=1
+tclass stack=2 submit=001 cls=1
+tclass stack=2 submit=002 cls=1
+tclass stack=2 submit=004 cls=1
+tclass stack=2 submit=200 cls=1
+tclass stack=2 submit=201 cls=1
+tclass stack=2 submit=006 cls=1
+tclass stack=2 submit=188 cls=1
+tclass stack=4 submit=000 cls=2
+tclass stack=4 submit=001 cls=2
+tclass stack=4 submit=002 cls=2
+tclass stack=4 submit=004 cls=2
+tclass stack=4 submit=200 cls=2
+tclass stack=4 submit=201 cls=2
+tclass stack=4 submit=006 cls=2
+tclass stack=4 submit=188 cls=2
+okey d=-8.0 e=0 at=0 key=00000000
+okey d=-8.0 e=0 at=1 key=00004000
+okey d=-8.0 e=1 at=0 key=00000040
+okey d=-8.0 e=1 at=1 key=00004040
+okey d=-8.0 e=42 at=0 key=00000a80
+okey d=-8.0 e=42 at=1 key=00004a80
+okey d=-8.0 e=63 at=0 key=00000fc0
+okey d=-8.0 e=63 at=1 key=00004fc0
+okey d=-8.0 e=127 at=0 key=00000fc0
+okey d=-8.0 e=127 at=1 key=00004fc0
+okey d=0.0 e=0 at=0 key=00000000
+okey d=0.0 e=0 at=1 key=00004000
+okey d=0.0 e=1 at=0 key=00000040
+okey d=0.0 e=1 at=1 key=00004040
+okey d=0.0 e=42 at=0 key=00000a80
+okey d=0.0 e=42 at=1 key=00004a80
+okey d=0.0 e=63 at=0 key=00000fc0
+okey d=0.0 e=63 at=1 key=00004fc0
+okey d=0.0 e=127 at=0 key=00000fc0
+okey d=0.0 e=127 at=1 key=00004fc0
+okey d=15.0 e=0 at=0 key=00000000
+okey d=15.0 e=0 at=1 key=00004000
+okey d=15.0 e=1 at=0 key=00000040
+okey d=15.0 e=1 at=1 key=00004040
+okey d=15.0 e=42 at=0 key=00000a80
+okey d=15.0 e=42 at=1 key=00004a80
+okey d=15.0 e=63 at=0 key=00000fc0
+okey d=15.0 e=63 at=1 key=00004fc0
+okey d=15.0 e=127 at=0 key=00000fc0
+okey d=15.0 e=127 at=1 key=00004fc0
+okey d=16.0 e=0 at=0 key=00000001
+okey d=16.0 e=0 at=1 key=00004001
+okey d=16.0 e=1 at=0 key=00000041
+okey d=16.0 e=1 at=1 key=00004041
+okey d=16.0 e=42 at=0 key=00000a81
+okey d=16.0 e=42 at=1 key=00004a81
+okey d=16.0 e=63 at=0 key=00000fc1
+okey d=16.0 e=63 at=1 key=00004fc1
+okey d=16.0 e=127 at=0 key=00000fc1
+okey d=16.0 e=127 at=1 key=00004fc1
+okey d=255.0 e=0 at=0 key=0000000f
+okey d=255.0 e=0 at=1 key=0000400f
+okey d=255.0 e=1 at=0 key=0000004f
+okey d=255.0 e=1 at=1 key=0000404f
+okey d=255.0 e=42 at=0 key=00000a8f
+okey d=255.0 e=42 at=1 key=00004a8f
+okey d=255.0 e=63 at=0 key=00000fcf
+okey d=255.0 e=63 at=1 key=00004fcf
+okey d=255.0 e=127 at=0 key=00000fcf
+okey d=255.0 e=127 at=1 key=00004fcf
+okey d=256.0 e=0 at=0 key=00001010
+okey d=256.0 e=0 at=1 key=00005010
+okey d=256.0 e=1 at=0 key=00001050
+okey d=256.0 e=1 at=1 key=00005050
+okey d=256.0 e=42 at=0 key=00001a90
+okey d=256.0 e=42 at=1 key=00005a90
+okey d=256.0 e=63 at=0 key=00001fd0
+okey d=256.0 e=63 at=1 key=00005fd0
+okey d=256.0 e=127 at=0 key=00001fd0
+okey d=256.0 e=127 at=1 key=00005fd0
+okey d=341.0 e=0 at=0 key=00001015
+okey d=341.0 e=0 at=1 key=00005015
+okey d=341.0 e=1 at=0 key=00001055
+okey d=341.0 e=1 at=1 key=00005055
+okey d=341.0 e=42 at=0 key=00001a95
+okey d=341.0 e=42 at=1 key=00005a95
+okey d=341.0 e=63 at=0 key=00001fd5
+okey d=341.0 e=63 at=1 key=00005fd5
+okey d=341.0 e=127 at=0 key=00001fd5
+okey d=341.0 e=127 at=1 key=00005fd5
+okey d=767.5 e=0 at=0 key=0000202f
+okey d=767.5 e=0 at=1 key=0000602f
+okey d=767.5 e=1 at=0 key=0000206f
+okey d=767.5 e=1 at=1 key=0000606f
+okey d=767.5 e=42 at=0 key=00002aaf
+okey d=767.5 e=42 at=1 key=00006aaf
+okey d=767.5 e=63 at=0 key=00002fef
+okey d=767.5 e=63 at=1 key=00006fef
+okey d=767.5 e=127 at=0 key=00002fef
+okey d=767.5 e=127 at=1 key=00006fef
+okey d=1023.0 e=0 at=0 key=0000303f
+okey d=1023.0 e=0 at=1 key=0000703f
+okey d=1023.0 e=1 at=0 key=0000307f
+okey d=1023.0 e=1 at=1 key=0000707f
+okey d=1023.0 e=42 at=0 key=00003abf
+okey d=1023.0 e=42 at=1 key=00007abf
+okey d=1023.0 e=63 at=0 key=00003fff
+okey d=1023.0 e=63 at=1 key=00007fff
+okey d=1023.0 e=127 at=0 key=00003fff
+okey d=1023.0 e=127 at=1 key=00007fff
+okey d=4096.0 e=0 at=0 key=0000303f
+okey d=4096.0 e=0 at=1 key=0000703f
+okey d=4096.0 e=1 at=0 key=0000307f
+okey d=4096.0 e=1 at=1 key=0000707f
+okey d=4096.0 e=42 at=0 key=00003abf
+okey d=4096.0 e=42 at=1 key=00007abf
+okey d=4096.0 e=63 at=0 key=00003fff
+okey d=4096.0 e=63 at=1 key=00007fff
+okey d=4096.0 e=127 at=0 key=00003fff
+okey d=4096.0 e=127 at=1 key=00007fff
+tkey d=0.00 key=ffffffff
+tkey d=0.50 key=c0ffffff
+tkey d=1.00 key=c07fffff
+tkey d=10.00 key=bedfffff
+tkey d=10.25 key=bedbffff
+tkey d=100.00 key=bd37ffff
+tkey d=500.00 key=bc05ffff
+tkey d=8192.00 key=b9ffffff
+side h=-4.00 w=5.00 q=below rungAbove=-2 rungBelow=0
+side h=4.99 w=5.00 q=below rungAbove=-2 rungBelow=0
+side h=5.00 w=5.00 q=above rungAbove=0 rungBelow=-2
+side h=5.01 w=5.00 q=above rungAbove=0 rungBelow=-2
+side h=64.00 w=5.00 q=above rungAbove=0 rungBelow=-2
+ladder stars=-6 body=-5 far=-2 water=-1 cam=0 fx=1 glow=2

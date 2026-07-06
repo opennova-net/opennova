@@ -16,8 +16,20 @@ extends SceneTree
 # either carries its witness citation or is a regression.
 #
 # Use (windowed — screenshots need a real rasterizer, NOT --headless):
-#   capture: "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- capture <out_dir> [prefix]
-#   compare: "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- compare <a.png> <b.png>
+#   capture:   "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- capture <out_dir> [prefix]
+#   composite: "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- composite <out_dir> [prefix]
+#   compare:   "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- compare <a.png> <b.png>
+#
+# The composite mode (REN-3) renders the DRAW-ORDER scenes: overlapping
+# translucent quads whose depths are arranged AGAINST the witnessed order, so
+# only the ported priority ladder (libs/renderer/render_order via
+# NovaObjectShaderCache) produces the correct stack — Godot's per-object
+# depth sort alone would compose them backwards. Scene 1 is the water bracket
+# (below-water alpha under the water surface under above-water alpha
+# [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]); scene 2 is the sky
+# ladder (star field under bodies, the sun glow on top of world alpha
+# [orig: Terrain_RenderSkyboxPass @ 0x610ac0; render_skybox_sun_glow
+# @ 0x5c9714]). docs/render/render-order-re.md.
 
 const WINDOW_SIZE := Vector2i(1280, 1024)
 const SETTLE_FRAMES := 24
@@ -42,10 +54,12 @@ func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.size() >= 2 and args[0] == "capture":
 		await _capture_mode(args[1], args[2] if args.size() >= 3 else "swatch")
+	elif args.size() >= 2 and args[0] == "composite":
+		await _composite_mode(args[1], args[2] if args.size() >= 3 else "composite")
 	elif args.size() >= 3 and args[0] == "compare":
 		_compare_mode(args[1], args[2])
 	else:
-		push_error("render_swatch_probe: usage -- capture <out_dir> [prefix] | compare <a.png> <b.png>")
+		push_error("render_swatch_probe: usage -- capture <out_dir> [prefix] | composite <out_dir> [prefix] | compare <a.png> <b.png>")
 		quit(1)
 
 
@@ -146,6 +160,115 @@ func _capture_mode(out_dir: String, prefix: String) -> void:
 
 	print("render_swatch_probe: cells=", cells.size(), " png=", png_path, " ok=", err == OK)
 	quit(0 if err == OK else 1)
+
+
+func _composite_mode(out_dir: String, prefix: String) -> void:
+	DirAccess.make_dir_recursive_absolute(out_dir)
+	get_root().get_window().size = WINDOW_SIZE
+
+	var cache := NovaObjectShaderCache.get_singleton()
+	# Exercise the real session seam: water plane at world height 0.
+	cache.set_water_split_height(0.0)
+
+	var scene := Node3D.new()
+	root.add_child(scene)
+	var world_env := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.12, 0.12, 0.14)
+	world_env.environment = env
+	scene.add_child(world_env)
+
+	# Each layer: [label, color(rgba), rung, z]. Z runs TOWARD the camera
+	# (+z nearer): every scene places its ladder-EARLIEST layer NEAREST, so
+	# plain per-object depth sorting would compose the stack in exactly the
+	# opposite order — the capture is green only through the rungs.
+	var scenes: Array = [
+		{
+			"name": "water_bracket",
+			"layers": [
+				["alpha_below", Color(0.9, 0.15, 0.1, 0.75), cache.alpha_rung_for_height(-8.0), 2.0],
+				["water", Color(0.1, 0.25, 0.9, 0.75), NovaObjectShaderCache.RENDER_RUNG_WATER, 0.0],
+				["alpha_above", Color(0.1, 0.85, 0.2, 0.75), cache.alpha_rung_for_height(8.0), -2.0],
+			],
+		},
+		{
+			"name": "sky_ladder",
+			"layers": [
+				["stars", Color(0.95, 0.95, 0.95, 0.75), NovaObjectShaderCache.RENDER_RUNG_SKY_STARS, 2.0],
+				["body", Color(0.95, 0.75, 0.1, 0.75), NovaObjectShaderCache.RENDER_RUNG_SKY_BODY, 0.0],
+				["glow", Color(0.95, 0.4, 0.7, 0.75), NovaObjectShaderCache.RENDER_RUNG_SUN_GLOW, -2.0],
+			],
+		},
+	]
+
+	var manifest_scenes: Array = []
+	const SCENE_SPACING := 4.0
+	for s in range(scenes.size()):
+		var spec: Dictionary = scenes[s]
+		var base_x := s * SCENE_SPACING
+		var recorded: Array = []
+		for li in range(spec["layers"].size()):
+			var layer: Array = spec["layers"][li]
+			var quad := MeshInstance3D.new()
+			var quad_mesh := QuadMesh.new()
+			quad_mesh.size = Vector2(2.6, 2.6)
+			quad.mesh = quad_mesh
+			quad.material_override = _make_layer_material(layer[1], int(layer[2]))
+			# Stagger so every pairwise overlap region is visible.
+			quad.position = Vector3(base_x + li * 0.55, -li * 0.55, float(layer[3]))
+			scene.add_child(quad)
+			recorded.append({"label": layer[0], "rung": int(layer[2]), "z": float(layer[3])})
+		manifest_scenes.append({"name": spec["name"], "layers": recorded})
+
+	var grid_w := scenes.size() * SCENE_SPACING
+	var camera := Camera3D.new()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.size = 6.0
+	camera.position = Vector3(grid_w * 0.5 - SCENE_SPACING * 0.5 + 0.55, -0.55, 20.0)
+	camera.current = true
+	scene.add_child(camera)
+
+	for _i in range(SETTLE_FRAMES):
+		await process_frame
+
+	var image := root.get_viewport().get_texture().get_image()
+	var png_path := out_dir.path_join("%s_grid.png" % prefix)
+	var err := ERR_UNAVAILABLE
+	if image != null:
+		err = image.save_png(png_path)
+
+	var manifest := {
+		"version": 1,
+		"window": [WINDOW_SIZE.x, WINDOW_SIZE.y],
+		"scenes": manifest_scenes,
+	}
+	var mf := FileAccess.open(out_dir.path_join("%s_manifest.json" % prefix), FileAccess.WRITE)
+	if mf != null:
+		mf.store_string(JSON.stringify(manifest, "\t"))
+		mf.close()
+	cache.clear_water_split_height()
+
+	print("render_swatch_probe composite: scenes=", scenes.size(), " png=", png_path, " ok=", err == OK)
+	quit(0 if err == OK else 1)
+
+
+func _make_layer_material(color: Color, rung: int) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	var shader := Shader.new()
+	shader.set_code("""
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
+uniform vec4 u_color;
+void fragment() {
+	ALBEDO = u_color.rgb;
+	ALPHA = u_color.a;
+}
+""")
+	material.shader = shader
+	material.set_shader_parameter("u_color", color)
+	material.render_priority = rung
+	return material
 
 
 func _compare_mode(path_a: String, path_b: String) -> void:

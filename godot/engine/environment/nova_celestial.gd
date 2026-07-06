@@ -19,12 +19,16 @@ const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd"
 const CelestialShader = preload("res://shaders/celestial.gdshader")
 const CelestialAdditiveShader = preload("res://shaders/celestial_additive.gdshader")
 
-# Render-priority ladder so the transparent sky pass composites dome < bodies <
-# glare regardless of distance (all unshaded + depth disabled).
-const PRIORITY_SUN := 1
-const PRIORITY_MOON := 1
-const PRIORITY_STAR := 0
-const PRIORITY_GLARE := 2
+# Render-priority rungs from the witnessed frame ladder, single-sourced from
+# libs/renderer/render_order via NovaObjectShaderCache (maturity REN-3,
+# docs/render/render-order-re.md): the sky pass draws star field then bodies
+# BEFORE all world alpha [orig: Terrain_RenderSkyboxPass @ 0x610ac0 before
+# Terrain_RenderSceneWithReflection @ 0x5c93a0]; the glare is the frame's
+# final draw [orig: render_skybox_sun_glow @ 0x5c9714].
+const PRIORITY_SUN := NovaObjectShaderCache.RENDER_RUNG_SKY_BODY
+const PRIORITY_MOON := NovaObjectShaderCache.RENDER_RUNG_SKY_BODY
+const PRIORITY_STAR := NovaObjectShaderCache.RENDER_RUNG_SKY_STARS
+const PRIORITY_GLARE := NovaObjectShaderCache.RENDER_RUNG_SUN_GLOW
 
 @export var environment_path: NodePath
 # The loaded terrain for the glare occlusion rays; no terrain = unobstructed.

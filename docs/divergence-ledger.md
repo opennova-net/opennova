@@ -171,7 +171,7 @@ REN-6. Dispositions unchanged — the transfer moves ownership, not status.
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | REN-6 (from PAR-ENV) |
 | env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | REN-6 (from PAR-ENV) |
-| env #30 | Water reflection passes (init @ Terrain_Init 0x60fcc5, Terrain_RenderSceneWithReflection @ 0x5c93a0, mirrored strip verts) — none rendered by the reimpl | A | NEEDS-RE (existence witnessed, spec deferred) | REN-6 (from PAR-ENV) |
+| env #30 | Water reflection passes — none rendered by the reimpl. REN-3's frame decode landed the pass STRUCTURE (per-wave mirrored sub-passes into the same batch queues under mirrored lighting; the `g_WaterMirrorMatrix`/`g_ActiveMirrorClipMatrix` + CLIP-class straddle machinery + mirror-winding byte — [render/render-order-re.md](render/render-order-re.md)); the offscreen prerender internals (`render_main_scene @ 0x5c1240`, `sub_5C8510`) + strip mirroring + the port decision remain | A | NEEDS-RE (structure witnessed at REN-3; internals + port decision deferred) | REN-6 (from PAR-ENV) |
 | env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | REN-6 (from PAR-ENV) |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
@@ -350,7 +350,25 @@ render-state golden re-dumped under citation.
 | D-RMAT-2 | VS_TRACER: the registry row landed (runtime tag, unlit additive diffuse), but Tracer.fx's soft-edge `vsTracer` vertex displacement is unported — tracers render hard-edged | A | WITNESSED-READY-DEFERRED | REN-4 |
 | D-RMAT-4 | File-effect capability/sort flag words carried verbatim from the OED dump; the runtime derives them by a per-technique usage probe `[orig: HLSLEffect_LoadFromFile @ 0x5ae690]` — per-tag equality unverified (note the 0x10000000 LUM-vs-TexCubeRotSpecular dialect) | B | NEEDS-RE | REN-4 |
 | D-RMAT-5 | Composer lighting gains are prototype values (hemi fill + ×1.5/×1.6/spec 0.8) vs the witnessed uniform surface (HemiSky/HemiGround/DirLight/Ambient/ColorSrcGlobalGain) | A | OPEN | REN-5 |
-| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state | A | WITNESSED-READY-DEFERRED | REN-3/REN-4 |
+| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — the class SELECTION semantics ported + T1-pinned at REN-3 (`renderer::technique_class_for_submit`); the class BEHAVIORS remain | A | WITNESSED-READY-DEFERRED (selection ported) | REN-4 |
+
+### Render — draw order — [render/render-order-re.md](render/render-order-re.md) (D-RORD catalog; REN-3)
+
+Minted at the REN-3 engine-research session (2026-07-06). D-RORD-1 (the
+transparent ordering ladder — sky → far-water-side alpha → water →
+camera-side alpha → overlays, from the witnessed frame bracket
+`[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`) was ported and
+FIXED in the same slice: the ladder lives in `libs/renderer/render_order`
+and is applied as the generalized Godot priority ladder (celestial, water,
+object-model rungs), with the sort-key/pass-class semantics T1-pinned.
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-RORD-2 | Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced — the host's internal opaque ordering serves the same intent; key semantics preserved as T1-pinned functions | C | PERMANENT (register, this slice) | — |
+| D-RORD-3 | Water-side transparent binning is per OBJECT (model origin at rebuild / `refresh_render_order()`) vs retail's per STRIP per frame (`[orig: @ 0x5d932e..0x5d9354]`) — straddling or water-crossing models can mis-bin strips | A | OPEN (partial) | REN-6/T3 attestation decides |
+| D-RORD-4 | Viewmodel has no depth treatment (clips into near walls); retail draws it FIRST under near-Z 0.05 + viewport depth range [0, 0.1] with its own flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | A | WITNESSED-READY-DEFERRED | runtime slice; T3 scene 6 |
+| D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED | REN-4 (GLOW class); FrameFX out of REN scope |
+| D-RORD-6 | The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced — reproducing them manufactures garbage | C | PERMANENT (register, this slice) | — |
 
 ---
 
@@ -383,7 +401,8 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
 | Render — materials/state | 1 | 1 | 2 | 4 | 0 |
-| **Total** | **30** | **13** | **30** | **73** | 5 |
+| Render — draw order | 1 | 0 | 2 | 3 | 2 |
+| **Total** | **31** | **13** | **32** | **76** | 7 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 
@@ -393,10 +412,11 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **2** — the
+Permanent register size: **19** (below). `UNAUDITED` systems: **1** — the
 runtime-render systems reopened the set on 2026-07-05 (the REN audit track
 below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
-materials/state system on 2026-07-06; every other system has an RE record
+materials/state system and REN-3 the draw-order system (both 2026-07-06),
+leaving lighting (REN-5); every other system has an RE record
 (full or partial) or a tracked-by-composition audit.
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
@@ -424,6 +444,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
 | D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is host-internal. |
 | D-NET-140 | The listen host's own loopback connection receives the full 0x0A record set; retail sends its local player header-only frames | The full-record loopback is how serve-and-play renders its local view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); that frame never leaves the process, so retail interop is unaffected. |
+| D-RORD-2 | Retail's per-frame CPU quicksort of opaque batch entries (alpha-test bit → 256-unit depth slabs → effect index → fine depth) vs the host renderer's internal opaque ordering | The sort is a device-era draw-call-batching strategy, not observable behavior for z-buffered opaques; reproducing it would fight the host pipeline for zero visual difference. The key semantics survive as T1-pinned functions (`renderer::opaque_sort_key`) so any future host that CAN consume them has the witnessed spec ([render/render-order-re.md](render/render-order-re.md)). |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
 
@@ -436,6 +457,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-PTL-1 | The engine's outer dispatcher remaps `g2_color1`/`g3_color1`/… into higher color slots (a parse bug); the reimpl maps `g{N}_color{M}` correctly | A recorded intentional divergence: the correct mapping is what an author means; reproducing the dispatch remap would carry the engine's parse bug forward. |
 | D-VFS-6 | Retail's PFF open trusts the header blindly (no magic/entry_size/count checks; entry_size>36 overflows; two write-after-free bugs @ 0x768348/0x7685ba) — ours validates and is UAF-free | Reproducing unvalidated reads and UAFs would manufacture garbage against ADR 0003. |
 | D-SCR-1 / D-SCR-2 | The SCR container codec accepts version bytes 0–2 and selects the key from the version byte + policy, where each original call site fixes the key | A deliberate multi-title superset so one codec serves JO-demo-era and shader containers; load-bearing equivalence holds for everything retail JO ships. |
+| D-RORD-6 | The original's two sort-key defects: opaque key bits 15+ OR in an uninitialized stack slot (`@ 0x5d92b9`), and a transparent strip's key reads the depth slot BEFORE its own store, lagging one strip within a render object (`@ 0x5d9326`) | Both are stale/uninitialized-memory reads whose effect is accidental (constant-per-call garbage; a one-strip-stale depth); reproducing them would manufacture the bugs rather than the intent (back-to-front by depth), against ADR 0003. |
 
 `PERMANENT` is not a resting place for hard work: each entry above is a decision that the
 *faithful* behavior is to diverge. If a future need arises (e.g. exact host-internal-state
@@ -489,7 +511,7 @@ lowers them, as the R-audits did):
 | System | Slice | Record |
 |---|---|---|
 | Object materials / render state (the runtime flag/tag→state path) | REN-2 | **landed 2026-07-06** — [render/render-material-re.md](render/render-material-re.md) (D-RMAT, tabled above) |
-| Batching / draw order / pass structure | REN-3 | `render/render-order-re.md` (D-RORD) on landing |
+| Batching / draw order / pass structure | REN-3 | **landed 2026-07-06** — [render/render-order-re.md](render/render-order-re.md) (D-RORD, tabled above) |
 | Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | `render/render-lighting-re.md` (D-RLIT) on landing |
 
 Terrain-TSS and sky/water shader findings grow the existing

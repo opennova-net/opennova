@@ -23,6 +23,8 @@ const DEFAULT_FOG_TYPE := 0
 var object_data: NovaObjectData
 
 var _material_cache: Dictionary = {}
+# Blended (non-opaque) materials, for the water-side render-order rung (REN-3).
+var _alpha_materials: Array[ShaderMaterial] = []
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
@@ -452,6 +454,7 @@ func rebuild() -> void:
 	_skeleton_skin = null
 	_surface_material_indices.clear()
 	_surface_materials.clear()
+	_alpha_materials.clear()
 	_anim_frames_by_mat.clear()
 	_material_cache.clear()
 	_material_defs.clear()
@@ -507,6 +510,24 @@ func rebuild() -> void:
 	_has_lights = object_data.has_method("get_light_count") and int(object_data.get_light_count()) > 0
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
+	refresh_render_order()
+
+
+# Blended materials take their water-side transparency rung from the witnessed
+# frame ladder (maturity REN-3, docs/render/render-order-re.md): below-water
+# alpha draws before the water surface, above-water after [orig: the Q1/Q2
+# split @ 0x5d932e..0x5d9354 + the flush bracket @ 0x5c9596 / @ 0x5c967a].
+# Retail bins per STRIP per frame; we bin per MODEL from its placed height
+# (D-RORD-3). With no water in the session this is the default rung (0).
+# Hosts that move a model across the water plane re-call this.
+func refresh_render_order() -> void:
+	if _alpha_materials.is_empty() or not is_inside_tree():
+		return
+	var shader_cache := NovaObjectShaderCache.get_singleton()
+	var rung := shader_cache.alpha_rung_for_height(global_position.y)
+	for material in _alpha_materials:
+		if material != null:
+			material.render_priority = rung
 
 
 # Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
@@ -766,6 +787,9 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	var shader_cache := NovaObjectShaderCache.get_singleton()
 	var key := shader_cache.classify(shader_tag, material_flags, emissive_type, is_glass_flag, alpha_test_byte)
 	material.shader = shader_cache.get_shader_for_key(key)
+	if shader_cache.blend_for_key(key) != NovaObjectShaderCache.BLEND_OPAQUE:
+		# Water-side rung applied by refresh_render_order() once placed.
+		_alpha_materials.append(material)
 
 	var diffuse := _load_texture_for_slot(material_def, 1)
 	var detail := _load_texture_for_slot(material_def, 2)

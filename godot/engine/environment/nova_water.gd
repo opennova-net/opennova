@@ -27,6 +27,7 @@ extends Node3D
 		water_height = value
 		if mesh_instance:
 			mesh_instance.position.y = water_height
+		_push_water_split_height()
 @export_range(0, 1, 0.01) var water_alpha: float = 0.6
 
 # When set (not NaN), the host drives water height directly and the env/terrain
@@ -38,6 +39,19 @@ func set_height_override(value: float) -> void:
 	_height_override = value
 	if not is_nan(value):
 		water_height = value
+
+
+# Publish this water plane's height as the session's transparent water-split
+# (the g_WaterSplitHeightFloat equivalent [orig: @ 0x5c93e2..0x5c93f0]) so
+# blended world materials can take their far/camera-side rung; cleared when
+# the water node leaves the tree.
+func _push_water_split_height() -> void:
+	if built and is_inside_tree():
+		NovaObjectShaderCache.get_singleton().set_water_split_height(water_height)
+
+
+func _exit_tree() -> void:
+	NovaObjectShaderCache.get_singleton().clear_water_split_height()
 
 var mesh_instance: MeshInstance3D
 var water_material: ShaderMaterial
@@ -88,6 +102,10 @@ func build() -> void:
 	built = false
 	water_material = ShaderMaterial.new()
 	water_material.shader = load("res://shaders/water.gdshader") as Shader
+	# The water surface draws between the two water-side transparent brackets
+	# [orig: Terrain_RenderWaterPass @ 0x610640 between the SortAndFlush pair
+	# @ 0x5c9596 / @ 0x5c967a; ladder in libs/renderer/render_order, REN-3].
+	water_material.render_priority = NovaObjectShaderCache.RENDER_RUNG_WATER
 
 	# The 65x65 camera-snapped plane is the TRACKED stand-in for the witnessed
 	# screen-marched strips (env #29 - spec complete in env-tod-re.md); the
@@ -133,6 +151,7 @@ func build() -> void:
 	mesh_instance.position = Vector3(0.0, water_height, 0.0)
 	add_child(mesh_instance)
 	built = true
+	_push_water_split_height()
 
 	# The witnessed per-frame noise texture pair (created once, updated per
 	# frame) [orig: Water_GenerateNoiseTextures @ 0x5c0360].
