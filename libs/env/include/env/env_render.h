@@ -284,7 +284,62 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness);
 
 // Occlusion hysteresis: target = 32 * visible_rays (0..8 rays), brightness
 // moves +-16 per frame toward it, clamped 0..255.
-int glare_brightness_step(int current, int visible_rays);
+int glare_brightness_step(int current, int target);
+
+// ---------------------------------------------------------------------------
+// Celestial bodies + glare occlusion — witnessed at the ENG-2 celestial leg
+// [orig: render_celestial_bodies @ 0x5acaa0 (the LIVE sun/moon renderer,
+//  was misnamed render_skybox_fog_layers); render_skybox_sun_glow @ 0x5acd00;
+//  render_star_field @ 0x5ad9c0]. The old render_skybox_layers @ 0x5ac230 is
+//  a caller-less dead variant (its +64/+16 fixed offsets never run).
+
+// Sun/moon bodies place at camera + direction * 64 world units, identity
+// rotation, FULL camera height [orig: @ 0x5acaa0, constant flt_7C3DD0].
+inline constexpr float kCelestialBodyDistance = 64.0f;
+
+// Body alphas, 16.16 in/out like the originals:
+// sun = clamp((1 - overcast) * ((0x640000 - sun_dim + 1) / 100)), where
+// sun_dim is the 0..100 (16.16) Env_SunDimPct channel (default 0, no .env
+// parser writes it) [orig: @ 0x5acbc1..0x5acbfa].
+int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed);
+// moon = clamp01((fogDistInt - 400) / 600) * (1 - overcast)  (the no-fog-
+// shader path; the fog-shader path scales fogDistInt * 0.0002)
+// [orig: @ 0x5acc40..0x5acccd].
+int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixed,
+                               bool fog_shader_path);
+
+// Glare occlusion (env #14) [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]:
+// TWO jittered rays per frame feed an 8-bit SLIDING window (>>1 per sample,
+// bit 0x80 = sample visible), so the window spans the last 4 frames. The ray
+// is camera -> camera + sun_dir * 1024 world units, jittered per sample from
+// the frame index bits: engine-Y +-16 (bit 0) and +-8 (bit 2), height +-16
+// (bit 1). Brightness steps +-16 (dead-band hold) toward
+// popcount(window) * 32 * (fog_distance / 1000)  (flt_7DA0C4 = 1/65536000).
+struct GlareOcclusionState {
+	uint8_t window = 0;        // Glare_OcclusionWindow @ 0x27E2E34
+	int brightness = 0;        // Glare_OcclusionBrightness @ 0x27E2E30
+	uint32_t jitter_index = 0; // Glare_JitterFrameIndex @ 0x27E5690
+};
+
+struct GlareRayJitter {
+	float offset_eng_y = 0.0f; // engine Y axis (render/Godot -x)
+	float offset_eng_z = 0.0f; // engine Z (height, render/Godot +y)
+};
+
+// The jitter offsets for one sample index [orig: @ 0x5ace3b..0x5ace61].
+GlareRayJitter glare_ray_jitter(uint32_t jitter_index);
+
+// One frame: advances the window with the two samples' visibility and steps
+// the brightness. The host casts the two rays (sample indices jitter_index+1
+// and jitter_index+2 BEFORE the call).
+void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visible_b,
+                          float fog_distance_world);
+
+// The glow submit alpha, 16.16: dot_view^4 / 2 scaled by the occlusion
+// brightness (>> 8), the overcast blend and the SunDim fold
+// [orig: @ 0x5acfb8..0x5ad0a9].
+int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
+                           int sun_dim_fixed);
 
 // ---------------------------------------------------------------------------
 // Derived render colors [orig: Environment_UpdateWeatherTick @ 0x57f0b3..0x57f1b1]
@@ -387,10 +442,14 @@ Rgb tile_overlay_tint_factor(const TerrainTint &tint);
 // [orig: render_skybox @ 0x57960e] sun/moon dome position = camera + dir * 2000
 // [orig: render_skybox_layers @ 0x5ac230] layer offsets +64/+16, alpha 0x2000,
 // additive submit flag 0x110; glare/star models load under mode 0x300000.
+// NOTE (celestial-leg re-grill 2026-07-06): 2000 is the DOME VS clip-space
+// proximity reference distance ONLY [orig: c14 upload @ 0x57960e] — the
+// bodies place at kCelestialBodyDistance (64). The +16/+64 offsets and the
+// 0x2000 alpha belong to the caller-less dead variant @ 0x5ac230.
 inline constexpr float kCelestialDomeDistance = 2000.0f;
-inline constexpr float kCelestialLayerOffsetNear = 16.0f;
-inline constexpr float kCelestialLayerOffsetFar = 64.0f;
-inline constexpr float kCelestialLayerAlpha = float(0x2000) / 65536.0f;
+inline constexpr float kCelestialLayerOffsetNear = 16.0f;  // dead variant
+inline constexpr float kCelestialLayerOffsetFar = 64.0f;   // dead variant
+inline constexpr float kCelestialLayerAlpha = float(0x2000) / 65536.0f; // dead variant
 
 // Cloud UV scroll [orig: render_skybox @ 0x5791de..0x579260 + weather tick]:
 // four accumulators advance per tick by rate * {1, 1, 2/3, 4/3}; layer 1 UV =

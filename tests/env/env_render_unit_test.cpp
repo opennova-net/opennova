@@ -136,9 +136,10 @@ int main() {
 
 		if (!expect(compute_sun_glare(-0.5f, 255).glare == 0, "looking away yields no glare")) return 1;
 
-		if (!expect(glare_brightness_step(0, 8) == 16, "brightness rises 16/frame")) return 1;
-		if (!expect(glare_brightness_step(248, 8) == 255, "brightness clamps at 255")) return 1;
+		if (!expect(glare_brightness_step(0, 256) == 16, "brightness rises 16/frame")) return 1;
+		if (!expect(glare_brightness_step(248, 256) == 248, "dead-band holds within +-16 (no snap)")) return 1;
 		if (!expect(glare_brightness_step(100, 0) == 84, "brightness falls 16/frame")) return 1;
+		if (!expect(glare_brightness_step(272, 256) == 256, "steps down onto the band edge")) return 1;
 	}
 
 	// --- Derived render colors [orig: Environment_UpdateWeatherTick tail] ---
@@ -644,8 +645,70 @@ int main() {
 		if (!expect(near(uv.offset_v, 0.7814789f, 1e-6f), "uv offset v = cam_x/128 + acc*2^-28")) return 1;
 	}
 
+	// --- Celestial bodies + glare occlusion [orig: render_celestial_bodies
+	// @ 0x5acaa0; render_skybox_sun_glow @ 0x5acd00] ------------------------
+	{
+		if (!expect(kCelestialBodyDistance == 64.0f, "bodies place at camera + dir * 64")) return 1;
+
+		// Sun alpha: (1 - overcast) x (100 - dim)/100 fold, 16.16.
+		if (!expect(celestial_sun_alpha_fixed(0, 0) == 0x10000, "sun alpha full at clear defaults")) return 1;
+		if (!expect(celestial_sun_alpha_fixed(0x8000, 0) == 0x8000, "half overcast halves the sun")) return 1;
+		const int sun_dim_half = celestial_sun_alpha_fixed(0, 50 << 16);
+		if (!expect(sun_dim_half >= 0x8000 && sun_dim_half <= 0x8001,
+		            "SunDim 50 halves the sun (+1 fold rounding)")) return 1;
+		if (!expect(celestial_sun_alpha_fixed(0x10000, 0) == 0, "full overcast hides the sun")) return 1;
+
+		// Moon alpha: (fogInt - 400)/600 x (1 - overcast), clamped.
+		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0, false) == 0x10000, "moon full at fog 1024")) return 1;
+		if (!expect(celestial_moon_alpha_fixed(400.0f, 0, false) == 0, "moon hidden at fog <= 400")) return 1;
+		const int moon_700 = celestial_moon_alpha_fixed(700.0f, 0, false);
+		if (!expect(moon_700 >= 0x7FFE && moon_700 <= 0x8001, "moon half at fog 700")) return 1;
+		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0x10000, false) == 0, "overcast hides the moon")) return 1;
+
+		// Jitter pattern from the frame-index bits.
+		const GlareRayJitter j0 = glare_ray_jitter(0);
+		if (!expect(j0.offset_eng_y == -24.0f && j0.offset_eng_z == -16.0f,
+		            "jitter 0 = (-16-8, -16)")) return 1;
+		const GlareRayJitter j7 = glare_ray_jitter(7);
+		if (!expect(j7.offset_eng_y == 24.0f && j7.offset_eng_z == 16.0f,
+		            "jitter 7 = (+16+8, +16)")) return 1;
+		const GlareRayJitter j5 = glare_ray_jitter(5);
+		if (!expect(j5.offset_eng_y == 24.0f && j5.offset_eng_z == -16.0f,
+		            "jitter 5 = (+16+8, -16)")) return 1;
+
+		// The occlusion window + hysteresis: all-visible at fog 1000 ramps
+		// toward 256 by 16/frame; going dark decays.
+		GlareOcclusionState occ;
+		for (int frame = 0; frame < 8; ++frame) {
+			glare_occlusion_tick(occ, true, true, 1000.0f);
+		}
+		if (!expect(occ.window == 0xFF, "window fills after 4 frames of visible pairs")) return 1;
+		if (!expect(occ.brightness == 128, "brightness ramped 16 x 8 frames")) return 1;
+		for (int frame = 0; frame < 16; ++frame) {
+			glare_occlusion_tick(occ, true, true, 1000.0f);
+		}
+		if (!expect(occ.brightness >= 240 && occ.brightness <= 256,
+		            "brightness settles in the 256 dead-band")) return 1;
+		for (int frame = 0; frame < 4; ++frame) {
+			glare_occlusion_tick(occ, false, false, 1000.0f);
+		}
+		if (!expect(occ.window == 0x00, "window empties after 4 dark frames")) return 1;
+		if (!expect(occ.brightness < 240, "brightness decays toward 0")) return 1;
+
+		// Glow alpha: dot^4/2 x brightness x folds. Full-on = 0x8000 (the /2).
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0, 0) == 0x8000,
+		            "glow alpha caps at dot^4/2 full brightness")) return 1;
+		if (!expect(glare_glow_alpha_fixed(0, 256, 0, 0) == 0, "glow off looking away")) return 1;
+		const int glow_half_dot = glare_glow_alpha_fixed(0x8000, 256, 0, 0);
+		if (!expect(glow_half_dot == 0x800, "glow at dot 0.5 = 0.5^4/2 = 1/32")) return 1;
+		if (!expect(glare_glow_alpha_fixed(0x10000, 128, 0, 0) == 0x4000,
+		            "brightness halves the glow")) return 1;
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0x8000, 0) == 0x4000,
+		            "overcast halves the glow")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
-	    "/oscillator/sequencers/blocks/scroll/dome/waternoise\n");
+	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial\n");
 	return 0;
 }

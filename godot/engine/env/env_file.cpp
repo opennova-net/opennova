@@ -82,6 +82,10 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("build_sky_dome_arrays", "sky_height"), &EnvFile::build_sky_dome_arrays);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_moon_alpha", "fog_distance", "overcast_blend"), &EnvFile::celestial_moon_alpha);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("glare_glow_alpha", "view_dot_sun", "brightness", "overcast_blend", "sun_dim_pct"), &EnvFile::glare_glow_alpha);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("get_field_consumption"), &EnvFile::get_field_consumption);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
 	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
@@ -580,6 +584,35 @@ Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
 
 float EnvFile::dome_reference_height() {
 	return static_cast<float>(opennova::env::kSkyDomeReferenceHeight);
+}
+
+float EnvFile::celestial_body_distance() {
+	return opennova::env::kCelestialBodyDistance;
+}
+
+namespace {
+
+int to_fixed_16_16(float value) {
+	return static_cast<int>(value * 65536.0f);
+}
+
+} // namespace
+
+float EnvFile::celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct) {
+	return static_cast<float>(opennova::env::celestial_sun_alpha_fixed(
+			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
+}
+
+float EnvFile::celestial_moon_alpha(float p_fog_distance, float p_overcast_blend) {
+	return static_cast<float>(opennova::env::celestial_moon_alpha_fixed(
+			p_fog_distance, to_fixed_16_16(p_overcast_blend), false)) / 65536.0f;
+}
+
+float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
+		float p_overcast_blend, float p_sun_dim_pct) {
+	return static_cast<float>(opennova::env::glare_glow_alpha_fixed(
+			to_fixed_16_16(p_view_dot_sun), p_brightness,
+			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
 }
 
 float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {

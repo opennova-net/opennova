@@ -145,11 +145,17 @@ water look — sin/cos waves + fresnel — replaced by the witnessed per-frame
 noise color + DuDv textures over the lit-color pipeline, libs/env-first,
 ctest + vector pinned), **env #29** minted OPEN (the screen-marched adaptive
 strip tessellation, spec complete — the plane is the tracked stand-in), and
-**env #30** minted NEEDS-RE (the reflection passes exist; spec deferred).
+**env #30** minted NEEDS-RE (the reflection passes exist; spec deferred). The
+celestial leg (2026-07-06) CLOSED **env #14** (the glare occlusion — the witnessed
+model is 2 jittered rays/frame into an 8-sample sliding window + dead-band
+hysteresis, ported libs/env-first with the NovaCelestial terrain ray march) and
+minted-and-closed **env #32** (placement inventions: dir×2000×height_scale, zeroed
+camera height, the dir.y gate — the live renderer places at camera + dir × 64 with
+witnessed alpha folds), plus **env #33** (the 256-instance star field with per-star
+twinkle — specced, table generator unfound; WRD).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| env #14 | Sun-glare terrain-raycast occlusion held at full brightness (8-jittered-ray + ±16/frame hysteresis unmodeled) | A | OPEN (PARTIAL) | PAR-ENV |
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
@@ -157,6 +163,7 @@ strip tessellation, spec complete — the plane is the tracked stand-in), and
 | env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | PAR-ENV |
 | env #30 | Water reflection passes (init @ Terrain_Init 0x60fcc5, Terrain_RenderSceneWithReflection @ 0x5c93a0, mirrored strip verts) — none rendered by the reimpl | A | NEEDS-RE (existence witnessed, spec deferred) | PAR-ENV |
+| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -330,7 +337,7 @@ Open counts by domain (the target is zero in every cell):
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
 | Net | 8 | 0 | 13 (2 also NEEDS-RE) | 21 |
-| Environment | 2 | 1 | 5 | 8 |
+| Environment | 1 | 1 | 6 | 8 |
 | World / AI + events | 2 | 0 | 4 | 6 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 (+1 dual) | 5 | 14 |

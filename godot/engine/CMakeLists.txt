@@ -90,6 +90,7 @@ add_library(${TARGET_NAME} SHARED
     env/nova_color_smoother.cpp
     env/nova_weather_core.cpp
     env/nova_water_core.cpp
+    env/nova_glare_occlusion.cpp
     object/nova_object_data.cpp
     object/nova_object_shader_cache.cpp
     object/nova_item_database.cpp

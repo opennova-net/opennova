@@ -543,6 +543,10 @@ func _load_terrain(trn_path: String) -> bool:
 	_terrain.build()
 	if _water != null:
 		_water.set("terrain_data", data)
+	var celestial_node := get_node_or_null("NovaCelestial")
+	if celestial_node != null:
+		# The glare occlusion rays march this terrain (env #14).
+		celestial_node.set("terrain_data", data)
 	_configure_foliage()
 	return true
 

@@ -607,17 +607,94 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
 	return result;
 }
 
-int glare_brightness_step(int current, int visible_rays) {
-	// [orig: render_skybox_sun_glow @ 0x5acd00]: target = 32 * visible rays,
-	// +-16 per frame, clamped 0..255.
-	const int target = clamp_int(visible_rays, 0, 8) * 32;
-	int next = current;
-	if (current < target) {
-		next = std::min(current + 16, target);
-	} else if (current > target) {
-		next = std::max(current - 16, target);
+int glare_brightness_step(int current, int target) {
+	// [orig: render_skybox_sun_glow @ 0x5acf5d..0x5acf7f] — +-16 per frame
+	// with a +-16 DEAD-BAND HOLD (the original never snaps onto the target;
+	// the earlier port's snap+255-clamp was unwitnessed).
+	if (current > target - 16) {
+		if (current >= target + 16) {
+			return current - 16;
+		}
+		return current;
 	}
-	return clamp_int(next, 0, 255);
+	return current + 16;
+}
+
+int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed) {
+	// [orig: render_celestial_bodies @ 0x5acbc1..0x5acbfa].
+	const int64_t fold = static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
+			((0x640000 - sun_dim_fixed + 1) / 100);
+	const int alpha = static_cast<int>((fold + 0x8000) >> 16);
+	return clamp_int(alpha, 0, 0x10000);
+}
+
+int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixed,
+                               bool fog_shader_path) {
+	// [orig: render_celestial_bodies @ 0x5acc40..0x5acccd] — float chain off
+	// the fog-distance INT word; result clamped 0..1 then scaled 0x10000.
+	const double fog_int = static_cast<double>(static_cast<int16_t>(fog_distance_world));
+	const double base = fog_shader_path
+			? fog_int * static_cast<double>(0.0002f)
+			: (fog_int - 400.0) * static_cast<double>(0.0016666667f);
+	const double value = base * static_cast<double>(0x10000 - overcast_blend_fixed) *
+			static_cast<double>(1.5258789e-05f);
+	if (value <= 0.0) {
+		return 0;
+	}
+	if (value >= 1.0) {
+		return 0x10000;
+	}
+	return static_cast<int>(value * 65536.0);
+}
+
+GlareRayJitter glare_ray_jitter(uint32_t jitter_index) {
+	// [orig: render_skybox_sun_glow @ 0x5ace3b..0x5ace61].
+	GlareRayJitter jitter;
+	jitter.offset_eng_y = ((jitter_index & 1u) ? 16.0f : -16.0f) +
+			((jitter_index & 4u) ? 8.0f : -8.0f);
+	jitter.offset_eng_z = (jitter_index & 2u) ? 16.0f : -16.0f;
+	return jitter;
+}
+
+void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visible_b,
+                          float fog_distance_world) {
+	// [orig: render_skybox_sun_glow @ 0x5acdfb..0x5acf7f] — two samples per
+	// frame into the sliding window, then the dead-band brightness step
+	// toward popcount * 32 * fog/1000 (truncating like the original ftol).
+	state.jitter_index += 1;
+	state.window = static_cast<uint8_t>((state.window >> 1) | (visible_a ? 0x80u : 0u));
+	state.jitter_index += 1;
+	state.window = static_cast<uint8_t>((state.window >> 1) | (visible_b ? 0x80u : 0u));
+
+	int target32 = 0;
+	for (int bit = 0; bit < 8; ++bit) {
+		if (state.window & (1u << bit)) {
+			target32 += 32;
+		}
+	}
+	const double fog_factor = static_cast<double>(fog_distance_world) * 65536.0 *
+			static_cast<double>(1.525878978725359e-08f); // flt_7DA0C4 = 1/65536000
+	const int target = static_cast<int>(target32 * fog_factor);
+	state.brightness = glare_brightness_step(state.brightness, target);
+}
+
+int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
+                           int sun_dim_fixed) {
+	// [orig: render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9] — dot^4 / 2 in
+	// 16.16, scaled by brightness >> 8, then the overcast x SunDim fold.
+	int dot_factor = 0;
+	if (view_dot_fixed > 0) {
+		const int squared = static_cast<int>(
+				(static_cast<int64_t>(view_dot_fixed) * view_dot_fixed + 0x8000) >> 16);
+		dot_factor = static_cast<int>(
+				(static_cast<int64_t>(squared) * squared + 0x8000) >> 16) >> 1;
+	}
+	const int scaled = (brightness * dot_factor) >> 8;
+	const int64_t dim_fold = static_cast<int64_t>(scaled) *
+			((0x640000 - sun_dim_fixed + 1) >> 8) / 25600;
+	const int alpha = static_cast<int>(
+			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) * dim_fold + 0x8000) >> 16);
+	return clamp_int(alpha, 0, 0x10000);
 }
 
 // ---------------------------------------------------------------------------

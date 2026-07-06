@@ -446,7 +446,53 @@ shared scene `D3DRS_FOGCOLOR`, whose value is the **active fog block dword verba
 `CD3DDevice_SetFogAndBlendMode @ 0x677740` pushes it untransformed. The dome therefore
 fogs with exactly the same color as terrain.
 
-## Celestial bodies (`EffectWorld_LoadCelestialModels @ 0x5adc50`)
+## Celestial bodies (`EffectWorld_LoadCelestialModels @ 0x5adc50`) — placement re-witnessed 2026-07-06
+
+**The live renderers** (celestial-leg grill; three functions were misnamed, three dead):
+
+- `render_celestial_bodies @ 0x5acaa0` (was "render_skybox_fog_layers"; called from
+  `render_skybox @ 0x5798e0/0x579c7a`): sun and moon place at **camera + direction ×
+  64.0** — full camera height, identity rotation, submit flag 0x100. Sun alpha =
+  `clamp((1 − Env_OvercastBlend) × (0x640000 − Env_SunDimPctCurrent + 1)/100)`
+  (`@ 0x5acbc1..0x5acbfa`; the SunDim channel is one of the #27 spring family, default
+  0, no `.env` parser writes it). Moon alpha = `clamp01((fogDistInt − 400)/600) ×
+  (1 − overcast)` without the fog shader (`× fogDistInt × 0.0002` with)
+  (`@ 0x5acc40..0x5acccd`). There is NO `dir.y` visibility gate and NO
+  `sky_height/175.69` distance scaling — the world overdraws the bodies (draw order:
+  dome → bodies → world), which depth-tested no-write materials reproduce in the host.
+- `render_skybox_sun_glow @ 0x5acd00` (live: `render_main_scene @ 0x5c1904` +
+  `Terrain_RenderSceneWithReflection @ 0x5c9714`): the glare pass — see the env #14
+  closure below.
+- `render_star_field @ 0x5ad9c0` (was "render_foliage_billboards_0"): 256 star
+  instances (`Star_Instances @ 0x27E2E38`, 40-byte entries: camera-relative offset,
+  billboard param, twinkle add/mask, brightness accumulator, direction). Per star:
+  hidden when `dot(star_dir, light_dir) > ~0.98` (masked near the bright body),
+  position = camera + offset, twinkle = `(accum + add + (prng16 & mask)) >> 1` with
+  the rol4/rol11 PRNG (`Star_TwinklePrng @ 0x840B38` — the PRNG_Next16 algorithm on a
+  separate state). A second part renders `Celestial_UplModel`. The INSTANCE-TABLE
+  GENERATOR is unfound (#33).
+- **Dead variants** (zero callers): `render_skybox_layers @ 0x5ac230` (the +64/+16
+  fixed offsets + 0x2000 alpha the earlier notes described),
+  `render_sun_lens_flare`, `render_foliage_at_camera`.
+
+**env #14 closure — the glare occlusion** (`@ 0x5acd9e..0x5acf7f`): TWO jittered rays
+per frame feed an 8-bit SLIDING window (`Glare_OcclusionWindow >>= 1` per sample, bit
+0x80 = visible) — the window spans the last 4 frames (not 8 rays at once, correcting
+the earlier summary). Ray = camera → camera + sunDir × 1024, jittered per sample from
+`Glare_JitterFrameIndex` bits (engine-Y ±16 / ±8, height ±16); the coarse test is
+`Terrain_RaycastLoResNoNormal @ 0x610860` → `Terrain_RaycastHeightmapLoRes @ 0x60cb80`
+(the lo-res DDA — the ENG-3 raycast seed), refined by `Physics_RaycastIntContext` +
+player-occlusion checks. Brightness (`Glare_OcclusionBrightness`) steps ±16 with a
+±16 DEAD-BAND HOLD (never snapping) toward `popcount(window) × 32 ×
+(Env_FogDistCurrent / 1000)` (flt_7DA0C4 = 1/65536000). Glow submit alpha =
+`dot_view⁴/2 × brightness >> 8 × (1 − overcast) × SunDim fold` (`@ 0x5acfb8..0x5ad0a9`);
+a scope check (`sub_581F60`) quarters it. Ported: `env::GlareOcclusionState`/
+`glare_ray_jitter`/`glare_occlusion_tick`/`glare_glow_alpha_fixed` +
+`celestial_sun/moon_alpha_fixed` + `kCelestialBodyDistance` (ctest landmark-pinned;
+`glare_brightness_step` corrected to the witnessed dead-band form). The dot³² curve
+(`compute_sun_glare_and_fog_blend @ 0x5ad610`) stays live via `sub_5AD8B0`.
+
+### Original notes (pre-2026-07-06, kept for provenance)
 
 Lazy-loaded by name into handles: sun (`Celestial_SunModel @ 0x27e5648`), moon (`0x27e5644`),
 glare (`0x27e5640`), star (`0x27e563c`), plus hardcoded `upl.3di` (`0x27e5638`). Glare, star,
@@ -612,7 +658,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 11 | Negative color components: original packs garbage (no lower clamp) | **Tracked decision**: clamp to 0 (no UB replication) |
 | 12 | Default sky_height raw-200 quirk (≈0.003 units) | Documented; reimpl default mirrors the quirk via comment, authoring template sets 175 |
 | 13 | `vertex_rgb` parsed by reimpl, ignored by retail JO | Keep parsing for round-trip; engine view ignores (modulator identity) |
-| 14 | Sun glare occlusion 8 jittered rays + ±16/frame hysteresis | **Partial**: `nova_celestial.gd` renders glare_3di additively at the sun with the `dot^32` intensity from `env_render::compute_sun_glare`; terrain-raycast occlusion held at full brightness (tracked) |
+| 14 | Sun glare occlusion — the witnessed model (re-grilled 2026-07-06) is TWO jittered rays per frame into an 8-bit sliding window + dead-band hysteresis, not 8 rays at once; the glow alpha is the `dot⁴/2` chain, not `dot³²` | **FIXED 2026-07-06 (the celestial leg)**: `env::glare_occlusion_tick` + `NovaGlareOcclusion` + the NovaCelestial terrain ray march (32-unit-step bilinear stand-in for the lo-res DDA `@ 0x60cb80`, flagged for ENG-3); ctest + `celestial/occlusion`/`celestial/glow` vectors pin it |
 | 15 | Thunder sounds on lightning timer epochs | Deferred; **fully specced by C6** (SoundBank trigger 0 / 0x80 on bank `dword_24E0914`, `SETFLASH1` net-command start; sequencer B unreachable in retail) — wiring lands with WAC weather |
 | 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; **C6 corrected the precedence**: overcast.def is additive-after-success (and the sole table for NULL map), never a fallback; a missing/failed `.trn` aborts the whole TOD load. Runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
 | 17 | Iris auto-exposure (modulator gain) | Deferred; curve + consumer chain fully recovered (§Iris auto-exposure). **The curve is now PORTED to `libs/env`** (`iris_gain`/`iris_luminance`, `[orig: terrain_sector_compute_lighting @ 0x5c7550]`, unit-tested in `env_render_unit_test`: m=1→60, darkness→255-clamp, iris_percent-0→base). Row stays WITNESSED-READY-DEFERRED: the reimpl still has no modulator CHAIN to apply the gain to the color blocks — that runtime consumer is the residual |
@@ -625,11 +671,13 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 24 | The NovaWeather wind model vs the witnessed engine: (a) `wind_strength` mapped 0..100 onto 0..8192, but the oscillator's `15*prev` feedback term is stable only for intensity <= 273 — the old mapping drove the 32-bit state divergent and "survived" via GDScript's 64-bit wrap + clamps; (b) the default was still air, where retail runs `Env_WindScale = 256` constantly (`[orig: Environment_InitDefaults @ 0x57c1d1]`, its ONLY writer — the ambient foliage sway every retail map has); (c) the smoothers chased their own written-back output instead of the TOD keyframe targets (`[orig: Environment_ComputeTimeOfDayColors @ 0x57de40]` refreshes every block's target slot each frame) | **FIXED 2026-07-05 (minted-and-closed)**: strength now maps 0..100 → 0..256 with default 100 (= the retail constant); the duration/decay gust remains an OpenNova authoring extension, now armed-only (unarmed wind never decays, matching the constant-WindScale witness); NovaWeather feeds `get_*_target()` keyframe targets into NovaWeatherCore. Parity vectors `wa/*`, `wb/*`, `we/*` re-dumped under these witnesses (`wa` now IS the witnessed ambient-256 series, cross-pinned byte-equal in `env_render_unit_test`) |
 | 25 | Weather-PRNG seed transcription: the reimpl carried `0x12345633` (libs/env slice 1, inherited from libs/wac); the binary's immediate is `0x12333333` — the SAME constant seeds the WAC RNG (`mov dword_C6EA40` `[orig: WacScript_InitAndLoad @ 0x4f966b]`), where the mistranscription originated | **FIXED 2026-07-06 (minted-and-closed at the ENG-2 sky-leg re-grill)**: `WeatherOscillator.prng = 0x12333333` `[orig: seed imm32 @ 0x57d2ff]`; the WAC VM's `next_rand` ALSO carried #22's unsigned bit-31 carry — both libs/wac bugs fixed in the same commit `[orig: rol9 + sar/and/add @ 0x4f5a83..0x4f5a91]` (no committed test pinned the wrong WAC stream). env ctest word/wind pins regenerated; the sway-bearing GUT keys (`wa/k004..k256`, `wb/k016..k096`, `wc/long_k*`, `we/k*`) re-dumped under the witness — `wa/k001` is seed-invariant (both seeds share low-12 bits at tick 1); every level-only, color, float, and non-weather key unchanged |
 | 26 | Cloud-scroll consumption model: the float GDScript (a) skipped the rate RAMP — the snap refreshes only the TARGET (`@ 0x57d2da`) and the live rate smooth-eighths toward it (`@ 0x57eecc`), so a fresh scene ran full-rate from tick 1; (b) added the accumulator term POSITIVELY on both UV axes where the witnessed texture transform NEGATES it on U (`@ 0x5791de..0x579260`); (c) the libs field labels had the layer-1 u/v pair inverted (value-equal — both advance at rate) | **FIXED 2026-07-06 (minted-and-closed at the sky binding slice)**: `NovaWeatherCore` owns `CloudScrollState` ticked at the witnessed tick tail; `NovaSky`/`NovaWater` consume through the weather seam (`get_cloud_uv_offset1/2`, `get_cloud_uv_rate_per_second`; standalone hosts fall back to a private core — one math home); the UV translation is `env::cloud_scroll_uv_offsets` (U-negative). `sky/k001`/`sky/k064` re-dumped under the witness; `nova_sky_test` pins the seam + the U sign |
-| 27 | Smoothed scalar spring channels unwired: the tick smooth/spring-steps fog distance (`Env_FogDistCurrent @ 0x57ede2`, consumed by the dome fog c9 `@ 0x5792c2` and `Environment_GetFogEndDistance`), sky height (`Env_SkyHeightCurrent @ 0x57ee97`, gating the dome rebuild `@ 0x57e4f4`), camera FOV (`@ 0x57ee78`), one unidentified pair (`0x26c6830`/`0x26c6880` current/target families), and the overcast blend (#16's runtime facet, `@ 0x57ef62`); the reimpl's consumers read PARSED `.env` values — a TOD/env scrub snaps instantly where retail ramps in | **WITNESSED-READY-DEFERRED (minted 2026-07-06)**: transient-cosmetic; the primitives (`smooth_eighth`/`spring_step`) are ported and ctest-pinned — the residual is the state wiring + consumer switch (dome `u_sky_height`/`u_fog_end`, terrain/water fog uniforms, the #21 frame clear). Rides a dedicated PAR-ENV slice |
+| 27 | Smoothed scalar spring channels unwired: the tick smooth/spring-steps fog distance (`Env_FogDistCurrent @ 0x57ede2`, consumed by the dome fog c9 `@ 0x5792c2` and `Environment_GetFogEndDistance`), sky height (`Env_SkyHeightCurrent @ 0x57ee97`, gating the dome rebuild `@ 0x57e4f4`), camera FOV (`@ 0x57ee78`), the now-identified `Env_SunDimPct` channel (`0x26c6830` family — dims the sun body + glare, default 0, no parser writes it), one still-unidentified pair (`0x26c6880` family), and the overcast blend (#16's runtime facet, `@ 0x57ef62`); the reimpl's consumers read PARSED `.env` values — a TOD/env scrub snaps instantly where retail ramps in | **WITNESSED-READY-DEFERRED (minted 2026-07-06)**: transient-cosmetic; the primitives (`smooth_eighth`/`spring_step`) are ported and ctest-pinned — the residual is the state wiring + consumer switch (dome `u_sky_height`/`u_fog_end`, terrain/water fog uniforms, the #21 frame clear). Rides a dedicated PAR-ENV slice |
 | 28 | Water-height precedence: the reimpl ladder ran override → `.env` → terrain-fallback (env wins over terrain); witnessed retail order is BMS > TRN (bit-31-flagged store at `Terrain_Init @ 0x60fcb5`, AFTER the env parse) > ENV | **FIXED 2026-07-06 (minted at the water grill, closed at the water binding slice)**: the NovaWater ladder reordered — a flagged terrain height beats the `.env` one; the host override rung stays on top as the authoring seam |
 | 29 | Water surface tessellation: witnessed = screen-marched adaptive strips from the camera (~120-unit rows, 2..9 columns by distance, 1024-row cap, ≤5-row strip batches; the low-detail path adds sin-table Y displacement from the shared D-INF-4 table) `[orig: render_water_strip @ 0x5c1d60; render_water_strip_detailed @ 0x5c27d0]`; the reimpl draws a static camera-snapped 65×65 plane | **OPEN (minted 2026-07-06, spec complete)**: the witnessed LOOK (noise textures + UV + color pipeline) is ported; the tessellation architecture rides a dedicated slice. The plane is the tracked host stand-in |
 | 30 | Water reflection passes exist in retail (`sub_5D6150` init `[orig: Terrain_Init @ 0x60fcc5]`, `Terrain_RenderSceneWithReflection @ 0x5c93a0`, `render_scene_with_water_reflection`, per-strip mirrored verts + 229.5 alpha scale) — the reimpl renders none | **NEEDS-RE (minted 2026-07-06)**: pass structure witnessed to exist; full spec + port decision deferred |
 | 31 | The water render LOOK was invented: sin/cos shader waves + Fresnel-style alpha with no witness; retail = per-frame animated 128×128 noise color + DuDv textures over `Env_WaterColorLit` per-vertex color, distance-alpha, murk term | **FIXED 2026-07-06 (minted-and-closed at the water binding slice)**: `water.gdshader` rewritten as a structural port of the witnessed detailed-path model over the libs/env textures (`water_noise_color_pixels`/`water_noise_normal_pixels`/`water_uv_state`, ctest-pinned); the invented waves/fresnel are deleted |
+| 32 | Celestial placement inventions: the reimpl placed bodies at `camera.xz + dir × 2000 × (sky_height/175.69)` with ZEROED camera height and a `dir.y > -0.1` visibility gate — none witnessed. The live renderer places at camera + dir × 64 (full height, identity rotation) with alpha folds; the 2000 belongs only to the dome VS proximity ref, the +64/+16 offsets to a dead variant | **FIXED 2026-07-06 (minted-and-closed at the celestial leg)**: placement + witnessed sun/moon alphas ported (`kCelestialBodyDistance`, `celestial_sun/moon_alpha_fixed`, EnvFile statics, vector-pinned); the depth-test flip replaces the invented gate (the world overdraws bodies like retail's draw order) |
+| 33 | Star field: retail renders 256 camera-anchored billboard instances with per-star twinkle (rol4/rol11 PRNG) and a hide-near-the-light dot cull `[orig: render_star_field @ 0x5ad9c0]`; the reimpl renders the star 3DI as ONE body. The instance-table generator is unfound | **WITNESSED-READY-DEFERRED (minted 2026-07-06)**: render loop fully specced; the table writer needs a hunt (NEEDS-RE facet) — the port rides a dedicated slice with it |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 
@@ -669,7 +717,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | Weather tick / smoothing / lightning | **matching for the ported scope (ENG-2, 2026-07-05)**: the oscillator (PRNG/sway/rings), both flash sequencers, rain fade, and the FULL per-block pipeline of `interpolate_weather_color @ 0x57d9e0` (per-channel-rate 12.20 step + paddusb additive + the modulator x rain blend, identity modulator byte 64) live in `libs/env` (`WeatherOscillator`/`LightningSequencers`/`RainState`/`WeatherColorBlock`), driven by `NovaWeatherCore` with `nova_weather.gd` as scene plumbing; divergences #22-#24 minted-and-closed at the port; #25 (seed) + #26 (scroll model) minted-and-closed at the sky leg 2026-07-06, which also minted #27 (smoothed scalar channels, deferred). Thunder (#15) + quake/WAC wind rings (#18) wiring stays deferred; the modulator CHAIN consumer is #17's residual (its per-block application math is now ported and unit-tested) |
 | Sky dome render: scroll / VS constants / mesh / advanced_clouds=0 | **matching** (verified against `build_sky_dome_mesh @ 0x578db0` + the C6 constant map) |
 | Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) folded into one Godot pass; clip-convention prox caveat tracked under divergence #20 |
-| Celestial + glare | **new implementation** from witnessed model (`nova_celestial.gd`: sun/moon/star/glare 3DI at the sky, glare additive; occlusion held at full brightness, tracked) |
+| Celestial + glare | **matching for the ported scope (ENG-2 celestial leg, 2026-07-06)**: body placement (camera + dir × 64) + witnessed alphas + the #14 occlusion window/hysteresis/glow chain live in `libs/env` behind EnvFile statics + `NovaGlareOcclusion`; residuals tracked as #33 (star-field instancing) and the ENG-3 lo-res-DDA ray port |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
 | iris / terrain_rgb | iris **divergent** — global auto-exposure (curve spec-complete), no modulator chain yet, divergence #17. terrain_rgb **matching** after the 2026-07-05 tint port (#19 FIXED): both live consumers render (tile overlay HALF×2X, foliage FULL×/128); the bake consumer is dead code, untinted terrain surface ratified faithful |
 | Load pipeline overcast precedence | **matching** after C6 correction (additive-after-success; reimpl two-table model documented, overcast blend at 0 pending weather work) |

@@ -69,6 +69,16 @@ extends GutTest
 #   other water key (mesh, override ladder, snap, per-cell lit colors) stayed
 #   byte-identical; the ladder REORDER (#28, terrain-over-env) has no asset-
 #   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
+#   Celestial leg 2026-07-06 (env #14 CLOSED, #32 minted-and-closed, #33
+#   minted): NEW celestial/body_distance (camera + dir * 64 [orig:
+#   render_celestial_bodies @ 0x5acaa0] - the retired dome_distance key pinned
+#   the invented dir*2000*height_scale model), celestial/body_alpha (the
+#   witnessed sun overcast/SunDim and moon fog-distance folds), celestial/glow
+#   (the dot^4/2 glare chain) and celestial/occlusion (the #14 window +
+#   dead-band hysteresis + jitter pattern through NovaGlareOcclusion,
+#   asset-free [orig: render_skybox_sun_glow @ 0x5acd00]).
+#   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
+#   still live via its sub_5AD8B0 caller) stayed byte-identical.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -83,13 +93,12 @@ extends GutTest
 #   blends. Encoded as float arrays in EXPECTED_FLOATS.
 #
 # NOT PINNED (honest gaps, no fake greens):
-# - NovaCelestial node-level placement/visibility/glare application: needs a
-#   NovaResourceRoot with retail 3DI models (asset-gated; with no bodies the
-#   process path returns before the math). The separable math is pinned via
-#   public surface instead: EnvFile.compute_sun_glare sweeps and the
-#   EnvRenderConstants.DOME_DISTANCE constant. height_scale
-#   (sky_height / 175.69) and the dir.y > -0.1 visibility threshold live only
-#   inside that gated path — header-noted, not vectored.
+# - NovaCelestial node-level MODEL application (materials/tints on loaded
+#   3DIs): needs a NovaResourceRoot with retail models (asset-gated; with no
+#   bodies the process path returns before the pushes). The MATH is fully
+#   vectored through the statics + NovaGlareOcclusion (celestial/body_*,
+#   celestial/glow, celestial/occlusion); the terrain ray march itself needs
+#   a loaded terrain (the no-terrain path = unobstructed is the pinned case).
 # - NovaWater terrain-fallback height rung: needs a loaded NovaTerrainData
 #   (asset). The env-driven and override rungs ARE pinned.
 # - NovaWeather internal state (PRNG word, sway rings, fade timers) is
@@ -246,7 +255,10 @@ const EXPECTED_FLOATS := {
 	"c2/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 0.500000000, 300.000000000],
 	"c2/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 0.500000000, 300.000000000],
 	"c2/water_params": [1.000000000, 1.000636578, 0.200127319, 0.000234902, 0.000234902],
-	"celestial/dome_distance": [2000.000000000],
+	"celestial/body_alpha": [1.000000000, 0.500000000, 0.500000000, 1.000000000, 0.500000000, 0.000000000, 0.000000000],
+	"celestial/body_distance": [64.000000000],
+	"celestial/glow": [0.500000000, 0.031250000, 0.250000000, 0.250000000, 0.000000000],
+	"celestial/occlusion": [1024.000000000, -8.000000000, -16.000000000, 0.000000000, 24.000000000, 16.000000000, 0.000000000, 128.000000000, 96.000000000],
 	"dir/t0000": [-0.342015058, -0.939694524, 0.000000000, -0.500005603, 0.866022229, -0.000000076],
 	"dir/t0550": [-0.342015058, -0.040990192, 0.938800037, -0.500005543, 0.037776366, -0.865197897],
 	"dir/t0600": [-0.342015058, 0.000000041, 0.939694524, -0.500005603, -0.000000010, -0.866022229],
@@ -680,7 +692,47 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 		occlusion.append("%02X%02X" % [int(glare.get("glare", 0)), int(glare.get("fog_whiten", 0))])
 	bytes["celestial/glare_occlusion"] = " ".join(occlusion)
 
-	floats["celestial/dome_distance"] = [NovaCelestialScript.EnvRenderConstants.DOME_DISTANCE]
+	# Bodies place at camera + direction * 64 [orig: render_celestial_bodies
+	# @ 0x5acaa0] — the old dome_distance key pinned the invented dir*2000
+	# model (env #32).
+	floats["celestial/body_distance"] = [EnvFile.celestial_body_distance()]
+
+	# The witnessed body alphas [orig: @ 0x5acbc1..0x5acccd].
+	floats["celestial/body_alpha"] = [
+		EnvFile.celestial_sun_alpha(0.0, 0.0),
+		EnvFile.celestial_sun_alpha(0.5, 0.0),
+		EnvFile.celestial_sun_alpha(0.0, 50.0),
+		EnvFile.celestial_moon_alpha(1024.0, 0.0),
+		EnvFile.celestial_moon_alpha(700.0, 0.0),
+		EnvFile.celestial_moon_alpha(400.0, 0.0),
+		EnvFile.celestial_moon_alpha(1024.0, 1.0),
+	]
+
+	# The glow alpha chain (dot^4/2 x brightness x folds) [orig:
+	# render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9].
+	floats["celestial/glow"] = [
+		EnvFile.glare_glow_alpha(1.0, 256, 0.0, 0.0),
+		EnvFile.glare_glow_alpha(0.5, 256, 0.0, 0.0),
+		EnvFile.glare_glow_alpha(1.0, 128, 0.0, 0.0),
+		EnvFile.glare_glow_alpha(1.0, 256, 0.5, 0.0),
+		EnvFile.glare_glow_alpha(-0.5, 256, 0.0, 0.0),
+	]
+
+	# The env #14 occlusion state machine, asset-free: window fill/decay and
+	# the dead-band hysteresis at fog 1000, plus this frame's jitter offsets
+	# [orig: @ 0x5acd9e..0x5acf7f].
+	var occ := NovaGlareOcclusion.new()
+	var jitter_a: Vector3 = occ.get_ray_jitter_a()
+	var jitter_b: Vector3 = occ.get_ray_jitter_b()
+	var occ_floats: Array = [occ.get_ray_length(),
+		jitter_a.x, jitter_a.y, jitter_a.z, jitter_b.x, jitter_b.y, jitter_b.z]
+	for _i in 8:
+		occ.tick(true, true, 1000.0)
+	occ_floats.append(float(occ.get_brightness()))
+	for _i in 4:
+		occ.tick(false, false, 1000.0)
+	occ_floats.append(float(occ.get_brightness()))
+	floats["celestial/occlusion"] = occ_floats
 
 
 func _collect_statics(bytes: Dictionary, floats: Dictionary) -> void:
