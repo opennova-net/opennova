@@ -230,22 +230,44 @@ struct WeatherColorBlock {
 // ---------------------------------------------------------------------------
 // Cloud scroll accumulators
 // [orig: Environment_UpdateWeatherTick — rate smoothing toward
-//  Env_SkySpeedFixed (sky_speed << 10) @ 0x57eecc; the four accumulators
-//  advance {1, 1, 2/3, 4/3} x rate with TRUNCATING integer /3
-//  @ 0x57f1a5..0x57f1d1. render_skybox consumes (camera + acc) / 2^28 for
-//  layer 1 and / 2^29 for layer 2 (@ 0x5791de..0x579260) — the layer-2 pair
-//  is anisotropic: U rides the +1/3 accumulator, V the -1/3.]
+//  Env_SkySpeedFixed (sky_speed << 10) @ 0x57eecc (the mission-start SNAP
+//  @ 0x57d2da refreshes only the TARGET — the rate always ramps); the four
+//  accumulators advance {1, 1, 2/3, 4/3} x rate with TRUNCATING integer /3
+//  @ 0x57f1a5..0x57f1d1. render_skybox consumes them as texture-transform
+//  translations (@ 0x5791de..0x579260): layer 1
+//  U = -(camY_eng + acc_26C6810) * 2^-28, V = +(camX_eng + acc_26C680C) * 2^-28;
+//  layer 2 U = -(camY + acc_26C6818[4/3]) * 2^-29, V = +(camX + acc_26C6814[2/3])
+//  * 2^-29. In the render basis (Math_FixedPointToFloat3_YNegated @ 0x611210:
+//  d3d = (-engY, engZ, engX)/65536) that is U = +camX_render/4096 - acc*2^-28
+//  and V = +camZ_render/4096 + acc*2^-28 — the accumulator term is NEGATIVE
+//  on U.]
 
 struct CloudScrollState {
 	int rate = 0;         // Env_CloudScrollRate (ramps toward the target)
-	int32_t acc_l1_u = 0; // dword_26C680C
-	int32_t acc_l1_v = 0; // dword_26C6810
-	int32_t acc_l2_v = 0; // dword_26C6814 (rate - rate/3)
-	int32_t acc_l2_u = 0; // dword_26C6818 (rate + rate/3)
+	int32_t acc_l1_v = 0; // dword_26C680C (render V axis, layer 1)
+	int32_t acc_l1_u = 0; // dword_26C6810 (render U axis, layer 1, negated)
+	int32_t acc_l2_v = 0; // dword_26C6814 (rate - rate/3, render V axis)
+	int32_t acc_l2_u = 0; // dword_26C6818 (rate + rate/3, render U axis, negated)
 
 	// One 62 Hz tick; rate_target = sky_speed << 10.
 	void tick(int rate_target);
 };
+
+// The final per-layer UV translations for a camera at (cam_x, cam_z) render/
+// world units [orig: render_skybox @ 0x5791de..0x579260 — see the axis map
+// above; 2^-12 = the 16.16 camera fixed value / 2^28].
+struct CloudUvOffsets {
+	float u1 = 0.0f, v1 = 0.0f; // layer 1 (UV1, 1/320 world scale)
+	float u2 = 0.0f, v2 = 0.0f; // layer 2 (UV2, 3/2048 world scale)
+};
+
+CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
+                                       float cam_x, float cam_z);
+
+// The layer-1 UV drift per second at the current rate — 62 ticks of `rate`
+// through the 2^-28 UV scale. The single home of the "sky_speed * 1024 * 62 /
+// 2^28" factor the water surface derives its scroll speed from.
+float cloud_uv_rate_per_second(const CloudScrollState &scroll);
 
 // ---------------------------------------------------------------------------
 // Sun glare [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]

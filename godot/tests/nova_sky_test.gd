@@ -70,3 +70,51 @@ func test_dome_rides_at_half_camera_height() -> void:
 	ctx.sky._process(0.016)
 	assert_eq(ctx.sky.mesh_instance.global_position, Vector3(10.0, 4.0, 6.0),
 		"dome anchor = camera xz at HALF the camera height [orig: render_skybox @ 0x5790d0]")
+
+
+func test_dome_mesh_comes_from_the_libs_builder() -> void:
+	var ctx := _make()
+	var mesh: ArrayMesh = ctx.sky.mesh_instance.mesh
+	var arrays := mesh.surface_get_arrays(0)
+	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	assert_eq(positions.size(), 441, "441 dome vertices [orig: build_sky_dome_mesh @ 0x578db0]")
+	assert_eq(indices.size(), 2400, "800 triangles")
+	assert_eq(normals.size(), 441, "the witnessed FVF 0x212 normals ride along")
+	# The witnessed winding head (i, i+22, i+21), (i, i+1, i+22).
+	assert_eq(Array(indices.slice(0, 6)), [0, 22, 21, 0, 1, 22], "witnessed quad winding")
+	assert_almost_eq(positions[0].y, EnvFile.dome_reference_height(), 0.001,
+		"built at the reference height - the Y scale lives in the vertex shader (env #20)")
+
+
+func test_scroll_offsets_come_from_the_weather_core() -> void:
+	var ctx := _make()
+	var weather: Node3D = NovaWeather.new()
+	weather.environment_path = ctx.env_node.get_path()
+	add_child_autofree(weather)
+	ctx.sky.weather_path = weather.get_path()
+	simulate(weather, 8, 0.016)
+	simulate(ctx.sky, 1, 0.016)
+	var off1: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset1")
+	var off2: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset2")
+	assert_eq(off1, weather.get_cloud_uv_offset1(0.0, 0.0),
+		"sky reads layer 1 from the weather core [orig: @ 0x57f1a5]")
+	assert_eq(off2, weather.get_cloud_uv_offset2(0.0, 0.0),
+		"sky reads layer 2 from the weather core")
+	# The accumulator rides U NEGATIVELY, V positively (no camera here, so the
+	# offsets are the pure accumulator terms) [orig: render_skybox @ 0x5791de].
+	assert_lt(off1.x, 0.0, "layer-1 U accumulator term is negative (env #26)")
+	assert_gt(off1.y, 0.0, "layer-1 V accumulator term is positive")
+
+
+func test_scroll_falls_back_to_a_private_core_without_weather() -> void:
+	var ctx := _make()
+	simulate(ctx.sky, 1, 0.016)
+	var first: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset1")
+	simulate(ctx.sky, 1, 0.016)
+	var second: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset2")
+	var off1: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset1")
+	assert_ne(off1, first, "the fallback core keeps ticking the accumulators")
+	assert_lt(off1.x, 0.0, "fallback layer-1 U is negative too")
+	assert_ne(second, Vector2.ZERO, "layer 2 advances as well")

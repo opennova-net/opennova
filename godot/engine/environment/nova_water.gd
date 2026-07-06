@@ -8,6 +8,9 @@ extends Node3D
 # [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] (docs/env/env-tod-re.md).
 
 @export var environment_path: NodePath
+# The weather node owning the cloud-scroll core: the water scroll speed rides
+# the same RAMPING rate the sky layers consume (duck-typed, lazy resolve).
+@export var weather_path: NodePath
 @export var terrain_data: NovaTerrainData:
 	set(value):
 		terrain_data = value
@@ -41,6 +44,7 @@ var water_material: ShaderMaterial
 var elapsed_time: float = 0.0
 var built: bool = false
 var _cached_env: Node = null
+var _cached_weather: Node = null
 var _cached_cam: Camera3D = null
 var _terrain_fallback_water_height: float = 0.0
 
@@ -144,7 +148,15 @@ func _process(delta: float) -> void:
 				Color(light.x, light.y, light.z), Color(sky.x, sky.y, sky.z))
 		var lit := EnvFile.lit_water_color(Color(water.x, water.y, water.z), combined)
 		water_material.set_shader_parameter("u_water_color", Vector3(lit.r, lit.g, lit.b))
-		water_material.set_shader_parameter("u_scroll_speed", env.get_sky_speed() * (1024.0 * 62.0 / 268435456.0))
+		# Scroll speed rides the weather core's RAMPING cloud-scroll rate when
+		# wired, else the steady-state rate for the parsed sky_speed — one
+		# libs/env home for the old magic factor [orig: @ 0x57eecc; @ 0x57f1a5].
+		if not _cached_weather or not _cached_weather.is_inside_tree():
+			_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
+		if _cached_weather and _cached_weather.has_method("get_cloud_uv_rate_per_second"):
+			water_material.set_shader_parameter("u_scroll_speed", _cached_weather.get_cloud_uv_rate_per_second())
+		else:
+			water_material.set_shader_parameter("u_scroll_speed", EnvFile.cloud_uv_rate_per_second(env.get_sky_speed()))
 		var fog_end: float = env.get_fog_level()
 		var fog_start: float = env.get_fog_start() if env.has_method("get_fog_start") else 0.5
 		water_material.set_shader_parameter("u_fog_color", env.get_fog_color())

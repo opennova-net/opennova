@@ -46,8 +46,8 @@ runtime nodes (`NovaEnvironment` / `NovaSky` / `NovaWater` / `NovaWeather` /
 
 | Field | Chain | Status | Original anchor | Notes |
 |---|---|---|---|---|
-| `sky_speed` | `NovaSky` scroll accumulators (+ water) | HONORED | [orig: render_skybox @ 0x5791de; Environment_UpdateWeatherTick @ 0x57f1a5] | ×{1, 1, 2/3, 4/3} layer factors. |
-| `sky_height` | `NovaSky` dome scale → `u_sky_height`; celestial dome distance | HONORED | [orig: build_sky_dome_mesh @ 0x578db0; Environment_ApplyFogAndAmbient @ 0x57e4f7] | Default carries the original raw-200 quirk. |
+| `sky_speed` | `NovaWeatherCore` cloud-scroll core (rate ramp + integer accumulators) → `NovaSky` UV offsets + `NovaWater` scroll rate | HONORED | [orig: rate ramp @ 0x57eecc; accumulators Environment_UpdateWeatherTick @ 0x57f1a5..0x57f1d1; consumption render_skybox @ 0x5791de..0x579260] | ×{1, 1, 2/3, 4/3} layer factors; accumulator NEGATIVE on U (env #26). |
+| `sky_height` | `NovaSky` dome scale → `u_sky_height` (mesh from `libs/env build_sky_dome_mesh`, Y scale in the vertex shader — env #20); celestial dome distance | HONORED | [orig: build_sky_dome_mesh @ 0x578db0; rebuild gate Environment_ApplyFogAndAmbient @ 0x57e4f4] | Default carries the original raw-200 quirk; retail smooths the height (env #27), reimpl applies it instantly. |
 | `sky_map1` / `sky_map2` | `NovaSky` → `u_cloud_tex1/2` | HONORED | [orig: Path_ReplaceOrAppendExtension @ 0x57cc4b (.pcx coercion)] | Coercion handled by the texture resolver, not at parse. |
 | `advanced_clouds` | `NovaSky` mode switch | HONORED | [orig: render_skybox fixed-function pass @ 0x579b42] | 0 forces the dome to `cloud_tint`; ≠0 takes the keyframed-color path. |
 | `cloud_tint` (`cloud_rgb`) | `NovaSky` → `u_flat_color` (flat pass only) | HONORED | [orig: dome material AMBIENT vs D3DRS_AMBIENT=white @ 0x579b42..0x579bb6; xref sweep of Env_CloudBlock @ 0x26c64a4] | **Flipped by C7**: `cloud_rgb` now colors the dome *only* in the `advanced_clouds 0` flat pass (textureless, per the C7 pre-port read), exactly the witnessed scope. The fabricated keyframed-path `u_cloud_tint * 2.0` is deleted. |

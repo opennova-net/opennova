@@ -56,13 +56,16 @@ func _process(_delta: float) -> void:
 		lightning = env_data.get_lightning_color()
 	# The smoothers chase the TOD keyframe targets, never their own written-
 	# back output [orig: Environment_ComputeTimeOfDayColors @ 0x57de40
-	# refreshes every block's target slot ahead of the weather tick].
+	# refreshes every block's target slot ahead of the weather tick]. The
+	# cloud-scroll rate ramps toward sky_speed << 10 at the tick's tail
+	# [orig: @ 0x57eecc; accumulators @ 0x57f1a5..0x57f1d1].
 	_core.tick(
 		_vec3_color(env.get_fill_light_target()),
 		_vec3_color(env.get_sun_light_target()),
 		_vec3_color(env.get_fog_color_target()),
 		_vec3_color(env.get_sky_ambient_target()),
-		lightning)
+		lightning,
+		env.get_sky_speed())
 	env.set_fill_light(get_smooth_fill())
 	env.set_sun_light(get_smooth_sun())
 	env.set_fog_color_rt(get_smooth_fog())
@@ -127,6 +130,23 @@ func get_smooth_sky() -> Vector3:
 
 func get_lightning_intensity() -> float:
 	return _core.get_lightning_intensity()
+
+
+# The witnessed cloud-scroll UV translations for a camera at (cam_x, cam_z)
+# world units — U carries the accumulator NEGATIVELY, V positively
+# [orig: render_skybox @ 0x5791de..0x579260]. The sky dome (and the water
+# scroll rate below) consume these through this seam, like the terrain
+# consumes get_smooth_sun.
+func get_cloud_uv_offset1(cam_x: float, cam_z: float) -> Vector2:
+	return _core.get_cloud_uv_offset1(cam_x, cam_z)
+
+
+func get_cloud_uv_offset2(cam_x: float, cam_z: float) -> Vector2:
+	return _core.get_cloud_uv_offset2(cam_x, cam_z)
+
+
+func get_cloud_uv_rate_per_second() -> float:
+	return _core.get_cloud_uv_rate_per_second()
 
 
 func _write_shader_globals(env: Node) -> void:

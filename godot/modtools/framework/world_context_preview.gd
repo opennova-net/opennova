@@ -72,6 +72,9 @@ func init_environment_preview() -> void:
 	_sky_node.name = "EditorSky"
 	_sky_node.set_script(NovaSkyScript)
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
+	# The weather node owns the cloud-scroll core; created just below —
+	# NovaSky resolves the path lazily in _process, so order is safe.
+	_sky_node.weather_path = NodePath("../EditorWeather")
 	_world_root.add_child(_sky_node)
 
 	# Runtime parity: the same weather smoothing that runs in-game also runs in
@@ -95,6 +98,7 @@ func init_water_plane() -> void:
 	_water_node.name = "WaterPlane"
 	_water_node.set_script(NovaWaterScript)
 	_water_node.environment_path = NodePath("../EditorEnvironment")
+	_water_node.weather_path = NodePath("../EditorWeather")
 	_world_root.add_child(_water_node)
 	_water_node.set_height_override(float(_get_water_height.call()))
 

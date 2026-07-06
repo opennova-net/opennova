@@ -131,7 +131,12 @@ sky-leg re-grill: **env #25** — the weather-PRNG seed is `0x12333333`
 with the WAC RNG seed `[orig: @ 0x4f966b]`). The libs/wac VM carried BOTH bugs
 (wrong seed + env #22's unsigned bit-31 carry `[orig: signed rol9+sar+add
 @ 0x4f5a83..0x4f5a91]`) — fixed in the same commit; no committed test pinned
-the wrong WAC stream.
+the wrong WAC stream. The sky binding slice minted-and-closed **env #26**
+(the cloud-scroll consumption model: rate ramp skipped + the accumulator term's
+U sign; NovaWeatherCore now owns the witnessed CloudScrollState) and minted
+**env #27** (the smoothed scalar spring channels — fog distance, sky height,
+FOV, one unidentified pair — remain unwired; consumers read parsed values;
+witnessed-ready-deferred).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
@@ -140,6 +145,7 @@ the wrong WAC stream.
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -313,7 +319,7 @@ Open counts by domain (the target is zero in every cell):
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total |
 |---|---|---|---|---|
 | Net | 8 | 0 | 13 (2 also NEEDS-RE) | 21 |
-| Environment | 1 | 0 | 4 | 5 |
+| Environment | 1 | 0 | 5 | 6 |
 | World / AI + events | 2 | 0 | 4 | 6 |
 | Item def | 0 (D-ITEMDEF-1 `FIXED` 2026-07-05) | 0 | 0 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 (+1 dual) | 5 | 14 |
@@ -327,7 +333,7 @@ Open counts by domain (the target is zero in every cell):
 | Fonts (new domain, PAR-R4 audit) | 0 | 1 | 2 FIXED | 3 |
 | Boot resources (new domain, R8 audit) | 1 | 0 | 0 | 1 |
 | VFS/PFF (new domain, PAR-R7 audit) | 3 | 1 | 0 | 4 |
-| **Total OPEN** | | | | **64** |
+| **Total OPEN** | | | | **65** |
 
 The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down

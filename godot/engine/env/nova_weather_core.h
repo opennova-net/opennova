@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 #include <env/env_render.h>
 
@@ -26,6 +27,11 @@ private:
 	opennova::env::WeatherColorBlock sun_block;  // directional light (never flashed)
 	opennova::env::WeatherColorBlock fog_block;
 	opennova::env::WeatherColorBlock sky_block;
+	// The cloud-scroll rate + accumulators [orig: rate ramp @ 0x57eecc,
+	// accumulators @ 0x57f1a5..0x57f1d1] — the tick's tail. The rate always
+	// RAMPS toward sky_speed << 10 (the snap refreshes only the target), so a
+	// fresh core ramps in from 0 exactly like retail from boot.
+	opennova::env::CloudScrollState cloud_scroll;
 	// OpenNova authoring extension: an ARMED wind timer whose expiry decays
 	// the oscillator intensity (x31 >> 5 per tick) back to zero. Unarmed
 	// wind never decays — retail's Env_WindScale is a constant
@@ -45,10 +51,16 @@ public:
 
 	// One 62 Hz weather tick in the witnessed order: oscillator, wind-decay
 	// extension, rain fade, lightning sequencers (additive slot rewrites on
-	// epoch), then the four block pipelines.
+	// epoch), the four block pipelines, then the cloud-scroll ramp +
+	// accumulators (the tick's tail).
 	void tick(const Color &p_fill_target, const Color &p_sun_target,
 			const Color &p_fog_target, const Color &p_sky_target,
-			const Color &p_lightning_color);
+			const Color &p_lightning_color, float p_sky_speed);
+
+	// The cloud-scroll sub-tick alone (rate ramp toward sky_speed << 10 +
+	// the four accumulators) — for hosts that own no weather colors (the
+	// standalone-sky fallback path). tick() calls this itself.
+	void tick_cloud_scroll(float p_sky_speed);
 
 	// Raw Env_WindScale units. The witnessed retail value is 256; the
 	// oscillator's 15*prev feedback is stable only for intensity <= 273.
@@ -71,6 +83,16 @@ public:
 	float get_sway_phase() const;
 	// Last SET flash level / 255.
 	float get_lightning_intensity() const;
+
+	// The witnessed per-layer cloud UV translations for a camera at
+	// (cam_x, cam_z) world units: U = +cam/4096 - acc*2^-28|29,
+	// V = +cam/4096|8192 + acc*2^-28|29 [orig: render_skybox
+	// @ 0x5791de..0x579260].
+	Vector2 get_cloud_uv_offset1(float p_cam_x, float p_cam_z) const;
+	Vector2 get_cloud_uv_offset2(float p_cam_x, float p_cam_z) const;
+	// Layer-1 UV drift per second at the current smoothed rate — the water
+	// surface's scroll-speed source.
+	float get_cloud_uv_rate_per_second() const;
 };
 
 } // namespace godot

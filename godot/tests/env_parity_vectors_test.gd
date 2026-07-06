@@ -49,6 +49,16 @@ extends GutTest
 #   wc/long_k01/k09/k12, we/k008..k064 (the sway token only; wa/k001 is
 #   seed-invariant - both seeds share low-12 bits at tick 1). Every level-only
 #   (wc/*_seq), color, float, and non-weather key was UNCHANGED.
+#   #26 CLOSED 2026-07-06 (the ENG-2 sky binding slice): sky/k001 + sky/k064
+#   re-dumped under the witnessed scroll model - the RAMPING rate (snap
+#   refreshes only the target @ 0x57d2da; smooth-eighth @ 0x57eecc), integer
+#   accumulators [orig: @ 0x57f1a5..0x57f1d1], and the render-side UV
+#   translation with the accumulator NEGATIVE on U
+#   [orig: render_skybox @ 0x5791de..0x579260] (the old float port added it
+#   positively on both axes and skipped the ramp). Key shape is now the four
+#   pushed offsets. sky/verts re-dumped: the mesh comes from
+#   libs/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
+#   sky/mesh (counts + witnessed winding) byte-identical.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -238,9 +248,9 @@ const EXPECTED_FLOATS := {
 	"envfile/fog_type0": [0.000000000, 0.004158883, 1000.000000000],
 	"sky/anchor": [512.000000000, 32.000000000, -256.000000000, 175.000000000, 64.000000000],
 	"sky/flat": [250.000000000],
-	"sky/k001": [0.000057220, 0.000038147, 0.000019073, 0.125057220, -0.062442780, 0.062538147, -0.031230927],
-	"sky/k064": [0.003662109, 0.002441406, 0.001220703, 0.128662109, -0.058837891, 0.064941406, -0.030029297],
-	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694091797, -0.000023762, 132.723480225, -512.000000000, 0.000095048, 0.000000000, 1024.000000000],
+	"sky/k001": [0.124992847, -0.062492847, 0.062495232, -0.031247616],
+	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
+	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/override": [42.500000000, 7.000000000],
 	"water/snap": [96.000000000, 7.000000000, -64.000000000],
 	"we/k008": [1751.612903226],
@@ -555,18 +565,20 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 		vertex_floats.append_array([v.x, v.y, v.z])
 	floats["sky/verts"] = vertex_floats
 
-	# Scroll accumulators + UV offsets after fixed ticks at sky_speed 15
-	# [orig: render_skybox @ 0x5791de + Environment_UpdateWeatherTick @ 0x57f1a5].
+	# Scroll UV offsets after fixed ticks at sky_speed 15: the weather core's
+	# RAMPING rate (the snap refreshes only the target — the rate climbs by
+	# smooth-eighth from 0) + integer accumulators through the witnessed UV
+	# translation, accumulator NEGATIVE on U — here via the standalone
+	# fallback core (no weather node in this group)
+	# [orig: rate ramp @ 0x57eecc; accumulators @ 0x57f1a5..0x57f1d1;
+	#  consumption @ 0x5791de..0x579260].
 	var ticks_done := 0
 	for checkpoint in [1, 64]:
 		simulate(sky, checkpoint - ticks_done, TICK)
 		ticks_done = checkpoint
 		var off1: Vector2 = sky.sky_material.get_shader_parameter("u_scroll_offset1")
 		var off2: Vector2 = sky.sky_material.get_shader_parameter("u_scroll_offset2")
-		floats["sky/k%03d" % checkpoint] = [
-			sky.sky_scroll1, sky.sky_scroll2_x, sky.sky_scroll2_y,
-			off1.x, off1.y, off2.x, off2.y,
-		]
+		floats["sky/k%03d" % checkpoint] = [off1.x, off1.y, off2.x, off2.y]
 	# Dome anchor rides at half camera height [orig: render_skybox @ 0x5790d0].
 	var dome_pos: Vector3 = sky.mesh_instance.global_position
 	var sky_height: float = sky.sky_material.get_shader_parameter("u_sky_height")

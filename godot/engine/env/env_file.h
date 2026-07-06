@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/resource_format_saver.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -186,6 +187,25 @@ public:
 	// witnessed MODULATE2X-over-half combine is near-identity, not exact).
 	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d]
 	static Color tile_overlay_tint_factor(const Color &p_terrain_tint);
+
+	// The witnessed 21x21 sky dome mesh in Mesh.ARRAY_* layout (VERTEX /
+	// NORMAL / TEX_UV / TEX_UV2 / INDEX populated), built at p_sky_height
+	// [orig: build_sky_dome_mesh @ 0x578db0]. The reimpl builds ONCE at
+	// dome_reference_height() and folds the Y-only height scale into the
+	// vertex shader (env #20's ratified structure; retail re-bakes on
+	// smoothed-height change via SkyDome_SetHeightAndRebuild @ 0x579070).
+	static Array build_sky_dome_arrays(float p_sky_height);
+
+	// 3072 - sqrt(2^23) ~= 175.6906 — the exact apex reference height behind
+	// the shaders' rounded "175.69" divisor [orig: @ 0x578ed4].
+	static float dome_reference_height();
+
+	// The steady-state layer-1 cloud UV drift per second for a parsed
+	// sky_speed (rate = sky_speed << 10 through 62 Hz x 2^-28) — the single
+	// home of the old "sky_speed * 1024 * 62 / 2^28" magic; hosts with a live
+	// weather node read the RAMPING rate off it instead
+	// [orig: rate ramp @ 0x57eecc; accumulators @ 0x57f1a5].
+	static float cloud_uv_rate_per_second(float p_sky_speed);
 
 	// Field name -> renderer-consumption status for editor badging:
 	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,

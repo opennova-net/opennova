@@ -338,10 +338,33 @@ void CloudScrollState::tick(int rate_target) {
 	//  accumulators @ 0x57f1a5..0x57f1d1]. rate/3 is the original's idiv:
 	//  truncation toward zero.
 	rate = smooth_eighth(rate, rate_target);
-	acc_l1_u += rate;
 	acc_l1_v += rate;
+	acc_l1_u += rate;
 	acc_l2_v += rate - rate / 3;
 	acc_l2_u += rate + rate / 3;
+}
+
+CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
+                                       float cam_x, float cam_z) {
+	// [orig: render_skybox @ 0x5791de..0x579260] — the witnessed texture-
+	// transform translations in the render basis: the camera term is
+	// +cam/4096 on both axes (16.16 camera / 2^28|29), the accumulator term
+	// is NEGATIVE on U and positive on V.
+	CloudUvOffsets out;
+	out.u1 = static_cast<float>(cam_x * (1.0 / 4096.0) -
+	                            scroll.acc_l1_u * kCloudUvScaleLayer1);
+	out.v1 = static_cast<float>(cam_z * (1.0 / 4096.0) +
+	                            scroll.acc_l1_v * kCloudUvScaleLayer1);
+	out.u2 = static_cast<float>(cam_x * (1.0 / 8192.0) -
+	                            scroll.acc_l2_u * kCloudUvScaleLayer2);
+	out.v2 = static_cast<float>(cam_z * (1.0 / 8192.0) +
+	                            scroll.acc_l2_v * kCloudUvScaleLayer2);
+	return out;
+}
+
+float cloud_uv_rate_per_second(const CloudScrollState &scroll) {
+	// 62 ticks of the current rate through the layer-1 2^-28 UV scale.
+	return static_cast<float>(scroll.rate * 62.0 * kCloudUvScaleLayer1);
 }
 
 // ---------------------------------------------------------------------------
