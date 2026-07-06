@@ -177,10 +177,10 @@ surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — **FIXED 2026-07-06 (REN-5)**: the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ 0x57ef97..0x57f03c]`; 62-tick exposure chase `[orig: @ 0x57e512; @ 0x57d940]`; ÷64 gain to `ColorSrcGlobalGain`/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`); env vectors re-dumped surgically (8 weather rows). Sampling-geometry + unhosted-block residuals tracked as D-RLIT-1/-2 ([render/render-lighting-re.md](render/render-lighting-re.md)) | A | FIXED | REN-5 (from PAR-ENV) |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | REN-6 (from PAR-ENV) |
-| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | REN-6 (from PAR-ENV) |
-| env #30 | Water reflection passes — none rendered by the reimpl. REN-3's frame decode landed the pass STRUCTURE (per-wave mirrored sub-passes into the same batch queues under mirrored lighting; the `g_WaterMirrorMatrix`/`g_ActiveMirrorClipMatrix` + CLIP-class straddle machinery + mirror-winding byte — [render/render-order-re.md](render/render-order-re.md)); the offscreen prerender internals (`render_main_scene @ 0x5c1240`, `sub_5C8510`) + strip mirroring + the port decision remain | A | NEEDS-RE (structure witnessed at REN-3; internals + port decision deferred) | REN-6 (from PAR-ENV) |
-| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | REN-6 (from PAR-ENV) |
+| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, sun-dim, the rain percent — the ex-unidentified `0x26c6880` pair, identified at the REN-6 witness leg: `Env_RainPctCurrent`, net-synced, `"Rain: %i%%"` debug label) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED (full channel set pinned) | REN-6 (from PAR-ENV) |
+| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (3 verts/row, adaptive ROW stride clamp(int(1/w×500), 2, 9) — the "2..9 columns" reading corrected at the REN-6 witness leg — 1024-row cap, ≤5-row batches, sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete + constants pinned in env-tod-re.md Water surface) | REN-6 (from PAR-ENV) |
+| env #30 | Water reflection passes — none rendered by the reimpl. REN-3 landed the pass STRUCTURE; the REN-6 witness leg closed the internals: `Water_ReflectionPrerender @ 0x5c2780` → `render_main_scene @ 0x5c1240` (RTT begin/end on `Water_ReflectionTexture`, skyfog clear, clip plane at waterHeight−0.1, mirrored sky/terrain/world/celestial/glare) with `Water_RenderReflectedWorldScene @ 0x5c8510` (the ex three-flush decompile-fail; the water CLIP-plane texture matrix u = y−wh+0.5 + `g_WaterMirrorActive`), strip far-edge mirroring decoded ([env-tod-re.md](env/env-tod-re.md) §Reflection pipeline) | A | WITNESSED-READY-DEFERRED (internals closed; the camera-mirror transform pins at port; the port decision rides the REN-6 port leg) | REN-6 (from PAR-ENV) |
+| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced AND the generator witnessed at the REN-6 witness leg (`Star_GenerateInstanceTable @ 0x5ac850`, ex `init_weather_particles`; per-star math + dome shaping + twinkle add/mask; sole caller `EffectWorld_LoadCelestialModels`) | A | WITNESSED-READY-DEFERRED (fully specced; the NEEDS-RE facet resolved) | REN-6 (from PAR-ENV) |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -461,7 +461,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
-| Environment | 1 | 1 | 5 | 7 | 1 |
+| Environment | 1 | 0 | 6 | 7 | 1 |
 | World / AI + events | 2 | 0 | 4 | 6 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
@@ -477,7 +477,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **34** | **12** | **32** | **78** | 9 |
+| **Total** | **34** | **11** | **33** | **78** | 9 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 

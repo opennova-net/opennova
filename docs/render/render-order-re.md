@@ -286,9 +286,17 @@ logged in [render-material-re.md](render-material-re.md).
   clip-plane state); the MATCHTERRAIN class MECHANISM (binds the terrain tile
   texture under the object — [render-material-re.md](render-material-re.md)
   §Pass execution).
-- `sub_5C8510 @ 0x5c8510` (three flushes, called from `render_main_scene`)
-  fails to decompile — the offscreen scene's internal order; witness with
-  env #30's reflection spec (REN-6).
+- **Closed at REN-6 (2026-07-06)** — `sub_5C8510` was a 5-byte header
+  (`call sub_58AA80`) falling through into an unclaimed body (the same split
+  shape as `render_water_surface`; a stale NORET flag on `sub_58AA80`
+  truncated the analysis). Renamed `Water_RenderReflectedWorldScene`: the
+  offscreen reflection's world subscene — fog/ambient push, NORMAL lighting
+  constants (arg 0), builds `g_WaterMirrorMatrix` as the water CLIP-plane
+  TEXTURE matrix (`u = y − waterHeight + 0.5`; TexClip1D ref-128 cuts at the
+  plane) and arms `g_WaterMirrorActive`, then sector models → entity wave →
+  flush(1) → below-side/above-side waves → flush(0) → foliage-tile/LOD
+  updates → flush(0) → particles → trails. Full pipeline:
+  [env-tod-re.md](../env/env-tod-re.md) §Reflection pipeline.
 - `Terrain_RenderSectorEntities` (list `0x2999518`) vs the BySide wave's list
   (`0x2984890`) — which world-object populations feed which list (sector
   models vs placed entities) rides the world-record's population map.
