@@ -114,7 +114,9 @@ func _make_celestial_material(additive: bool, priority: int) -> ShaderMaterial:
 	material.shader = CelestialAdditiveShader if additive else CelestialShader
 	material.render_priority = priority
 	if additive:
-		# Engine layer alpha 0x2000/0x10000; glare overrides this per-frame.
+		# Star default opacity - a stand-in until the witnessed per-star
+		# twinkle lands (env #33; the 0x2000/0x10000 value stems from the dead
+		# variant @ 0x5ac230). The glare overwrites its opacity per frame.
 		material.set_shader_parameter("u_opacity", float(0x2000) / 65536.0)
 	return material
 

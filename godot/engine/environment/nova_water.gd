@@ -89,14 +89,16 @@ func build() -> void:
 	water_material = ShaderMaterial.new()
 	water_material.shader = load("res://shaders/water.gdshader") as Shader
 
+	# The 65x65 camera-snapped plane is the TRACKED stand-in for the witnessed
+	# screen-marched strips (env #29 - spec complete in env-tod-re.md); the
+	# shader computes the witnessed camera-relative UVs itself, so the mesh
+	# carries none.
 	const GRID := 65
 	const CELL := 32.0
 	var half := (GRID - 1) * CELL * 0.5
 	var positions := PackedVector3Array()
-	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	positions.resize(GRID * GRID)
-	uvs.resize(GRID * GRID)
 
 	for z in GRID:
 		for x in GRID:
@@ -104,7 +106,6 @@ func build() -> void:
 			var px := x * CELL - half
 			var pz := z * CELL - half
 			positions[idx] = Vector3(px, 0.0, pz)
-			uvs[idx] = Vector2(px / 2048.0, pz / 2048.0)
 
 	for z in GRID - 1:
 		for x in GRID - 1:
@@ -122,7 +123,6 @@ func build() -> void:
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = positions
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 
 	var mesh := ArrayMesh.new()

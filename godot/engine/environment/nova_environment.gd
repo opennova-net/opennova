@@ -56,6 +56,12 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# day_speed is an OpenNova AUTHORING knob (HHMM units/second, default off)
+	# for scrubbing previews — host plumbing, not the witnessed day advance.
+	# Retail advances Env_CurTimeFixed24 by 0x18000000/(3720 x minutes) per
+	# 62 Hz tick [orig: Environment_SetTodAdvanceRate @ 0x57d170 (BMS day
+	# length) / Environment_SetTodRate @ 0x57c4f0 (options)]; that wiring
+	# rides the mission-runtime TOD work, not this preview knob.
 	if not is_loaded():
 		return
 	if day_speed <= 0.0:
@@ -364,17 +370,11 @@ func get_fog_level() -> float:
 
 func get_fog_start() -> float:
 	# Policy lives in libs/env env_render [orig: Render_SetFogState @ 0x58a950];
-	# overcast stays 0 until a weather system drives it.
+	# overcast stays 0 until a weather system drives it. The bare-host fallback
+	# runs the SAME libs table (no duplicated policy).
 	if environment_data:
 		return environment_data.get_fog_start(0.0)
-	var fog_end := get_fog_level()
-	match get_fog_type():
-		2:
-			return fog_end * 0.5
-		3:
-			return fog_end * 0.25
-		_:
-			return 0.5
+	return EnvFile.fog_start_for(get_fog_type(), get_fog_level(), 0.0)
 
 
 func get_fog_type() -> int:

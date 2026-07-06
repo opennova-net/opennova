@@ -35,6 +35,7 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| ENG-2 env port (PR #206 train) | 28cc9474 … (7 slices) | the five environment GDScript files are scene plumbing over `libs/env`: weather core (slices 1-2), sky dome + cloud scroll (3-4), water surface (5-6, full witnessed render: per-frame noise textures + UV + lit-color pipeline), celestial placement + glare occlusion (7). Re-grills caught the shared RNG-seed transcription (env #25, fixed in libs/env + libs/wac), the scroll model (#26), the water look/precedence (#28/#31), celestial placement inventions (#32), and CLOSED env #14; minted #27/#29/#30/#33 as tracked deferrals. Honored-matrix re-attested; vectors 204/204 with per-slice witnessed re-dumps |
 | GOV-4 Wave-1 close-out | (this train) | ratchets +0 all train (`test_private_pokes` 1371, `libs_uncited_src_files` 88); ledger synced continuously (66 → 62 open across the train); stale-doc touches ride each slice (vfs record, menu-re, world-wac-ai-re, env records) |
 | NET-4 C-ABI guard | ae221e7d + 729f01c7 + 17f06457 | `abi_export_identity` ctest (104-export baseline, forbidden net families); its macOS leg immediately caught + fixed the dylib leak (hidden visibility + 38 phantom MISSION_EXPORTs stripped) — the flat C ABI is now provably identical on every platform |
 | PAR burn-down (trunk train) | 8778a0b4 … 2ed9a4fb | eight rows closed: D-EVT-2/-4 + cats 5/6 + D-EVT-5 mint, D-PLAYERINFO-2, D-NET-20, env #21, env #19 (tint consumers; dead-bake correction), D-VFS-2 (fixed boot table + the editor-index decision), D-CTRL-2 (witnessed visibility flags), D-INF-4 (witnessed direction-table generator); PAR-R7 VFS/PFF audit landed (D-VFS-1..9) |
@@ -168,7 +169,7 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   cited port) and committed with an explicit tolerance policy. A vector
   divergence during the port triggers a re-grill against the binary — never
   tolerance widening.
-- **ENG-2** (L) the env port: the five environment GDScript files →
+- **ENG-2** (L) — **DONE 2026-07-06 (PR #206)** — the env port: the five environment GDScript files →
   `libs/env`; Godot nodes become thin hosts; citations move and are
   re-verified; docs/env/env-honored-matrix.md updated; vectors green
   pre/post; the GDScript math is deleted.
@@ -210,7 +211,7 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
 | Sector/atlas constants + coord math duplicated | terrain editor mesh | open (ENG-3) |
 | FNT format facts + shelf packer in editor | fonts rasterizer | open (ENG-4) |
 | MATERIAL_FLAG_* / OED_UPDATE_* duplicated | engine object model GDScript | open (ENG-4) |
-| Env/TOD/celestial/weather math in GDScript | godot/engine/environment | open (ENG-1/2) |
+| Env/TOD/celestial/weather math in GDScript | godot/engine/environment | **closed (ENG-2, 2026-07-06)** — nodes are plumbing over libs/env; the tracked stand-ins are divergence rows (env #29 strip tessellation, #33 star instancing, #27 smoothed scalars) |
 | Menu absolute-rect math in canvas | mnu canvas | review (minor; canvas hosts the live engine node) |
 
 ### STD — records, constants, testability standards + enforcement

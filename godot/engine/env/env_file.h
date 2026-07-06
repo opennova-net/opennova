@@ -216,6 +216,11 @@ public:
 	static float glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 			float p_overcast_blend, float p_sun_dim_pct);
 
+	// Fog-start policy for a bare (no EnvFile) host: the same
+	// compute_fog_params table the instance getters use — fog-start policy
+	// has ONE home [orig: Render_SetFogState @ 0x58a950].
+	static float fog_start_for(int p_fog_type, float p_fog_end, float p_overcast = 0.0f);
+
 	// The steady-state layer-1 cloud UV drift per second for a parsed
 	// sky_speed (rate = sky_speed << 10 through 62 Hz x 2^-28) — the single
 	// home of the old "sky_speed * 1024 * 62 / 2^28" magic; hosts with a live

@@ -82,6 +82,7 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("build_sky_dome_arrays", "sky_height"), &EnvFile::build_sky_dome_arrays);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("fog_start_for", "fog_type", "fog_end", "overcast"), &EnvFile::fog_start_for, DEFVAL(0.0f));
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_moon_alpha", "fog_distance", "overcast_blend"), &EnvFile::celestial_moon_alpha);
@@ -584,6 +585,12 @@ Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
 
 float EnvFile::dome_reference_height() {
 	return static_cast<float>(opennova::env::kSkyDomeReferenceHeight);
+}
+
+float EnvFile::fog_start_for(int p_fog_type, float p_fog_end, float p_overcast) {
+	const opennova::env::FogParams params =
+			opennova::env::compute_fog_params(p_fog_type, p_fog_end, p_overcast);
+	return params.start;
 }
 
 float EnvFile::celestial_body_distance() {
