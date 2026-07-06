@@ -293,6 +293,24 @@ void WeatherColorBlock::snap(uint32_t packed) {
 	target = packed;
 }
 
+void WeatherColorBlock::set_step_deltas(int frames) {
+	// [orig: ColorBlock_SetStepDeltas @ 0x57d940] — per channel:
+	// |target_byte << 20 + frames/2 - current| / frames (the +frames/2 rounds
+	// the numerator before the truncating divide).
+	if (frames == 0) {
+		frames = 1;
+	}
+	const auto rate_for = [frames](int target_byte, int32_t channel_fp) -> int32_t {
+		const int32_t delta = (target_byte << 20) + (frames >> 1) - channel_fp;
+		const int32_t magnitude = delta < 0 ? -delta : delta;
+		return magnitude / frames;
+	};
+	max_rate[0] = rate_for(static_cast<int>(target & 0xFF), channels.b_fp);
+	max_rate[1] = rate_for(static_cast<int>((target >> 8) & 0xFF), channels.g_fp);
+	max_rate[2] = rate_for(static_cast<int>((target >> 16) & 0xFF), channels.r_fp);
+	max_rate[3] = rate_for(static_cast<int>((target >> 24) & 0xFF), channels.a_fp);
+}
+
 void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
 	// [orig: interpolate_weather_color @ 0x57d9e0] — the full block pipeline.
 	// Step: per-channel (delta >> 3) clamped to that channel's max rate,
@@ -855,7 +873,7 @@ TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb) {
 }
 
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
-	// [orig: sample_terrain_lightmap @ 0x606030] per channel
+	// [orig: sample_terrain_colormap_tinted @ 0x606030] per channel
 	// min((texel * FULL) >> 7, 255); alpha passthrough.
 	uint32_t out = texel_argb & 0xFF000000u;
 	for (int shift = 0; shift <= 16; shift += 8) {

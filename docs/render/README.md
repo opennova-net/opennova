@@ -7,9 +7,9 @@ land here as the grill slices convert the three `UNAUDITED` render systems
 
 | Record | Lands at | Catalog | Covers |
 |---|---|---|---|
-| [`render-material-re.md`](render-material-re.md) | **landed at REN-2** | D-RMAT | the runtime flag/tag→state path (Entity_UpdateRenderState @ 0x5d6a30 and the chain down to the device boundary) |
+| [`render-material-re.md`](render-material-re.md) | **landed at REN-2** | D-RMAT | the runtime flag/tag→state path down to the device boundary (registry @ 0x5af790/0x5ae690, resolution @ 0x5b03c0, state application @ 0x5d9f50; the planning anchor "Entity_UpdateRenderState @ 0x5d6a30" resolved at REN-5 to the render-slot light updater, renamed `RenderSlot_UpdateEntityLight`) |
 | [`render-order-re.md`](render-order-re.md) | **landed at REN-3** | D-RORD | batching, sort keys, technique-class selection, the render-state stack, and the frame pass sequence (Render_SubmitEntity @ 0x5dad80, CRenderBatchQueue_SortAndFlush @ 0x5dae40, Terrain_RenderSceneWithReflection @ 0x5c93a0) |
-| `render-lighting-re.md` | REN-5 | D-RLIT | the modulator chain, entity light application, terrain lightmaps |
+| [`render-lighting-re.md`](render-lighting-re.md) | **landed at REN-5** | D-RLIT | the iris/modulator chain (env #17), the world lighting block + per-entity uniforms and hemisphere D3D lights, dynamic point lights + group culling, terrain/foliage c0/c1, lighting textures, the cubemap sources (CubeRotSpecular = D-RORD-5's answer), the render-slot shadow lighting |
 
 Terrain TSS findings grow [terrain/terrain-re.md](../terrain/terrain-re.md);
 sky/water shader gaps grow [env/env-tod-re.md](../env/env-tod-re.md) — in

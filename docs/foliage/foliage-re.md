@@ -42,7 +42,7 @@ so the port is faithful to the shipped product, not just the demo.
 - **Quad geometry**: each accepted instance emits a quad sampled at its 4 corners
   (`sub_606000` at `±0x10000`) for tangent/normal; our port mirrors the corner
   geometry.
-- **Color**: `sample_terrain_lightmap @ 0x606030` at the instance ±0x8000 on both
+- **Color**: `sample_terrain_colormap_tinted @ 0x606030` at the instance ±0x8000 on both
   axes (4 samples), 2×2 SWAR average of RGB + alpha (the tint ported for env #19,
   D-ENV #19); the emitter's per-vertex color is `0xFF000000 | (0x404040 +
   (avg>>1))` under a 2× draw.
@@ -51,7 +51,7 @@ so the port is faithful to the shipped product, not just the demo.
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
-| D-FOLIAGE-1 | A | OPEN (approximation) | Foliage instance color: the host bakes ONE color per `MultiMesh` instance (the 2×2 lightmap average `[orig: sample_terrain_lightmap @ 0x606030]`), where the engine emits a per-VERTEX quad color `0xFF000000 | (0x404040 + (avg>>1))` under a 2× draw (half-plus-bias) and reads an alpha-premultiplied colormap. Visually close (same average tone); the per-vertex gradient + the exact 2× half-plus-bias are the residual. Rides the foliage render-emitter parity. |
+| D-FOLIAGE-1 | A | OPEN (approximation) | Foliage instance color: the host bakes ONE color per `MultiMesh` instance (the 2×2 lightmap average `[orig: sample_terrain_colormap_tinted @ 0x606030]`), where the engine emits a per-VERTEX quad color `0xFF000000 | (0x404040 + (avg>>1))` under a 2× draw (half-plus-bias) and reads an alpha-premultiplied colormap. Visually close (same average tone); the per-vertex gradient + the exact 2× half-plus-bias are the residual. Rides the foliage render-emitter parity. |
 
 Placement itself carries **no divergence** — the seed, PRNG, candidate count,
 surface gate, and proximity spacing are byte-exact against retail.

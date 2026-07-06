@@ -82,8 +82,20 @@ sampled at t1 by samplers 1/4/5, blended by the t2 blendmap's RGB — the
 `PolyTrn_PS14SplatNormalMap` (splat + dp3), `PolyTrn_PSShadowBasic` /
 `PolyTrn_PSShadowNormalMap` (t3 = shadow map: light scale `4·t3²·t0.a`),
 `PolyTrn_PSDepthAlpha` (alpha = t0.b via `dp3 c5=(0,0,1)`, rgb = 0 — the
-depth/alpha extract pass). The c0/c1 lighting constants are REN-5's
-lightmap-chain scope.
+depth/alpha extract pass). The c0/c1 lighting constants are CLOSED (REN-5):
+**c0 = the SKY block, c1 = the LIGHT block** (both `[0]` render colors ÷255)
+pushed per draw `[orig: terrain_setup_lighting_and_shader @ 0x604420 —
+SetPixelShaderConstantF(0, PolyTrn_PSConstC0_Sky @ 0x31a183c) / (1,
+PolyTrn_PSConstC1_Light @ 0x31a182c); values init_terrain_lighting_color_ramps
+@ 0x604ee0 ← Render_TerrainScene @ 0x610c80 (Env_LightBlock/Env_SkyBlock;
+NVG blends the sky arg toward the modulator, the vehicle scope forces
+0x101010/0xF0F0F0)]` — so the shared shape is **terrain light =
+colormapAlpha × light + sky** (colormap alpha = the baked sun mask; the ÷2
+and MODULATE2X cancel). The foliage/sector-model blend PS inherits the same
+device constants. Ported: `terrain_lighting.gdshaderinc` (the prior
+combined/fill pairing was a gobj-era stand-in) +
+`renderer::terrain_surface_light` (T1 section 5). Full chain:
+[render/render-lighting-re.md](../render/render-lighting-re.md).
 
 **Surface materials** (same function): the `"depthspin"` shore material
 (`dword_319f904`, alpha-tested: stage 0 alpha `ADDSIGNED(COMPLEMENT
@@ -168,10 +180,14 @@ remains for a *full* (vs partial) R1 record:
   witnessed encoding, not discovering it.)
 - **Runtime render pass** — the SURFACE-SHADING half landed at REN-4 (the
   witness map above: tiers, textures, the eight pixel shaders, the stage
-  tables, the foliage-model shader set); the remaining half is the retail
-  QUADTREE TRAVERSAL re-confirmation (the reimpl LOD/mip cites **jodemo**)
-  plus the draw-time binding walk (`render_terrain_sector_batch @ 0x6092a0`
-  internals) and the c0/c1 lighting constants (REN-5's lightmap chain).
+  tables, the foliage-model shader set) and the LIGHTING half at REN-5 (the
+  c0/c1 constants closed above; the sector-model lightmap-tile pass +
+  mission lightmap TGA chain witnessed in
+  [render/render-lighting-re.md](../render/render-lighting-re.md) — the
+  baked-shadow PS variants + TGA draping stay untracked-hosted, D-RLIT-6);
+  the remaining half is the retail QUADTREE TRAVERSAL re-confirmation (the
+  reimpl LOD/mip cites **jodemo**) plus the draw-time binding walk
+  (`render_terrain_sector_batch @ 0x6092a0` internals).
 
 Neither is an open *divergence* — they are documentation depth. The one tracked
 terrain divergence remains D-TERRAIN-1 (the deliberate shader split).

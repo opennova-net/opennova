@@ -175,7 +175,7 @@ surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
 |---|---|---|---|---|
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | REN-5 (from PAR-ENV) |
+| env #17 | Iris auto-exposure modulator gain — **FIXED 2026-07-06 (REN-5)**: the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ 0x57ef97..0x57f03c]`; 62-tick exposure chase `[orig: @ 0x57e512; @ 0x57d940]`; ÷64 gain to `ColorSrcGlobalGain`/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`); env vectors re-dumped surgically (8 weather rows). Sampling-geometry + unhosted-block residuals tracked as D-RLIT-1/-2 ([render/render-lighting-re.md](render/render-lighting-re.md)) | A | FIXED | REN-5 (from PAR-ENV) |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | REN-6 (from PAR-ENV) |
 | env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | REN-6 (from PAR-ENV) |
@@ -362,10 +362,18 @@ tags match the OED dump, 5 drift rows corrected on the renderer descriptor
 table (FFP_GLASS, VS_SKBUMPDIFFT/PHONGT/DIFFT2, VS_SKGLASS), the 0x10000000
 dialect resolved as the glow-copy capability (`MATERIAL_FLAG_GLOW`).
 
+Closed 2026-07-06 (REN-5): **D-RMAT-5** -> `FIXED` — the composer emits the
+witnessed FF model (`tex × min(hemi + dir·ndotl, 1) × 2`, SELFLUM ×
+`ColorSrcGlobalGain`) on the witnessed uniform surface with engine-fed env
+block values; the ×1.5/×1.6/spec-0.8 prototype constants deleted; T1
+re-dumped (key set identical, 630 hashes re-hashed under citation), T2
+swatch 116/120 cells moved with the 4 unlit VS_TRACER cells byte-identical
+([render/render-lighting-re.md](render/render-lighting-re.md); reflection/
+phong stand-in residuals = D-RLIT-5).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-RMAT-5 | Composer lighting gains are prototype values (hemi fill + ×1.5/×1.6/spec 0.8) vs the witnessed uniform surface (HemiSky/HemiGround/DirLight/Ambient/ColorSrcGlobalGain) | A | OPEN | REN-5 |
-| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — selection ported + T1-pinned at REN-3; the class CONTENT witnessed at REN-4 (FF technique tables, the pass-execution model, the GLOW capability landed as `is_glow_capable`) | A | WITNESSED-READY-DEFERRED (selection + GLOW flag ported) | remaining host mappings ride D-RORD-4/-5 residuals + REN-5 |
+| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — selection ported + T1-pinned at REN-3; the class CONTENT witnessed at REN-4 (FF technique tables, the pass-execution model, the GLOW capability landed as `is_glow_capable`) | A | WITNESSED-READY-DEFERRED (selection + GLOW flag ported) | remaining host mappings ride D-RORD-4/-5 residuals |
 
 ### Render — draw order — [render/render-order-re.md](render/render-order-re.md) (D-RORD catalog; REN-3)
 
@@ -382,8 +390,26 @@ object-model rungs), with the sort-key/pass-class semantics T1-pinned.
 | D-RORD-2 | Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced — the host's internal opaque ordering serves the same intent; key semantics preserved as T1-pinned functions | C | PERMANENT (register, this slice) | — |
 | D-RORD-3 | Water-side transparent binning is per OBJECT (model origin at rebuild / `refresh_render_order()`) vs retail's per STRIP per frame (`[orig: @ 0x5d932e..0x5d9354]`) — straddling or water-crossing models can mis-bin strips | A | OPEN (partial) | REN-6/T3 attestation decides |
 | D-RORD-4 | Viewmodel has no depth treatment (clips into near walls); retail draws it FIRST under near-Z 0.05 + viewport depth range [0, 0.1] with its own flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | A | WITNESSED-READY-DEFERRED | runtime slice; T3 scene 6 |
-| D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED (capability semantics landed at REN-4: `is_glow_capable` + the corrected glow set incl. FFP_GLASS; GLOW content witnessed) | residual = host bloom wiring + the specular cube (REN-5); FrameFX out of REN scope |
+| D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED (capability semantics landed at REN-4; the specular-cube SOURCE witnessed at REN-5 — the static sun-glint cube `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`, rotated by MatRotSpecular; [render/render-lighting-re.md](render/render-lighting-re.md)) | residual = host bloom wiring (the cube content is now specced, D-RLIT-5 carries the hosting); FrameFX out of REN scope |
 | D-RORD-6 | The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced — reproducing them manufactures garbage | C | PERMANENT (register, this slice) | — |
+
+### Render — lighting — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT catalog; REN-5)
+
+Minted at the REN-5 session (2026-07-06), which also closed env #17 (the
+modulator chain went live) and D-RMAT-5 (the composed FF lighting model) in
+the same slice, converted the last `UNAUDITED` render system, and answered
+D-RORD-5's specular-cube question (the static sun-glint cube). The chain is
+ported libs-first (`libs/renderer/light_runtime`, `libs/env::ModulatorChain`)
+and T1-pinned (`renderer_state_vectors` section 5).
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-RLIT-1 | Hosted weather runs 4 color blocks through the modulator; retail modulates 16 (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` | A | OPEN (partial — the hosted subset is the rendered set) | joins as consumers are hosted (skyfog rides frame-clear/horizon) |
+| D-RLIT-2 | Iris exposure targets the OUTDOOR sample each tick; retail averages 3 samples marched back from the camera-ray hit with interior detection + sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00]` | A | OPEN (partial — curve/chase/chain exact) | rides the interior system + host raycast wiring |
+| D-RLIT-3 | Object materials light at full sun visibility; retail dims DirLightColor per entity (3-ray occlusion, 1.0..0.25) and lerps interior-parented entities to floor/ceiling ambience by the interior's daylight openness `[orig: @ 0x5c6800; @ 0x5d98a0]` | A | WITNESSED-READY-DEFERRED (math ported + T1-pinned) | runtime/interior slices |
+| D-RLIT-4 | Dynamic point lights (≤4 D3D lights, owner/interior group culling, modulator-scaled colors, {1,0,15/r²,1}) unhosted beyond the editor LGHT preview `[orig: @ 0x5a9180; @ 0x5abc50]` | A | WITNESSED-READY-DEFERRED (color/attenuation math ported) | EffectWorld/particle track |
+| D-RLIT-5 | Glass/env reflection = hemisphere-along-reflection stand-in; phong specular = pow-16 stand-in; retail samples the LIVE scene cube / the static sun-glint cube (contents witnessed) / the PhongMap texture `[orig: @ 0x6106a0; @ 0x58f290; Glass.fx]` | A | OPEN (approximation) | the D-RORD-5 bloom-wiring substrate |
+| D-RLIT-6 | No terrain shadow-map PS variants or baked lightmap TGA draping (`PSShadow*` light scale `4·t3²·t0.a`; the 64-px-tile mission lightmap) `[orig: @ 0x604420; @ 0x604a90]` | A | OPEN | terrain lightmap hosting (terrain-record scope) |
 
 ---
 
@@ -402,7 +428,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
-| Environment | 1 | 1 | 6 | 8 | 0 |
+| Environment | 1 | 1 | 5 | 7 | 1 |
 | World / AI + events | 2 | 0 | 4 | 6 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
@@ -415,9 +441,10 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Foliage | 1 | 0 | 0 | 1 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
-| Render — materials/state | 1 | 0 | 1 | 2 | 0 |
+| Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
-| **Total** | **31** | **12** | **31** | **74** | 7 |
+| Render — lighting | 4 | 0 | 2 | 6 | 0 |
+| **Total** | **34** | **12** | **32** | **78** | 8 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 
@@ -427,12 +454,12 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **19** (below). `UNAUDITED` systems: **1** — the
+Permanent register size: **19** (below). `UNAUDITED` systems: **0** — the
 runtime-render systems reopened the set on 2026-07-05 (the REN audit track
 below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
-materials/state system and REN-3 the draw-order system (both 2026-07-06),
-leaving lighting (REN-5); every other system has an RE record
-(full or partial) or a tracked-by-composition audit.
+materials/state system, REN-3 the draw-order system, and REN-5 the lighting
+system (all 2026-07-06) — **the audit track is burned back to zero**; every
+system has an RE record (full or partial) or a tracked-by-composition audit.
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -510,7 +537,7 @@ to `libs/cbin`. The two partials (Terrain, Credits) have their remaining grills
 scoped in their records; the six code-cited-jodemo systems are retail-anchored
 where they ship.
 
-### Render (REN) — reopened 2026-07-05, `UNAUDITED` = 2
+### Render (REN) — reopened 2026-07-05, burned back to `UNAUDITED` = 0 on 2026-07-06
 
 The REN planning grill ([ADR 0023](adr/0023-render-visual-parity.md),
 [maturity-program.md](maturity-program.md) REN track) found the runtime render
@@ -527,7 +554,7 @@ lowers them, as the R-audits did):
 |---|---|---|
 | Object materials / render state (the runtime flag/tag→state path) | REN-2 | **landed 2026-07-06** — [render/render-material-re.md](render/render-material-re.md) (D-RMAT, tabled above) |
 | Batching / draw order / pass structure | REN-3 | **landed 2026-07-06** — [render/render-order-re.md](render/render-order-re.md) (D-RORD, tabled above) |
-| Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | `render/render-lighting-re.md` (D-RLIT) on landing |
+| Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | **landed 2026-07-06** — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT, tabled above) |
 
 Terrain-TSS and sky/water shader findings grow the existing
 [terrain/terrain-re.md](terrain/terrain-re.md) and

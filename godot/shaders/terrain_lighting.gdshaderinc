@@ -20,7 +20,6 @@ uniform sampler2D u_detailmap2 : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_detailmapdist2 : filter_linear_mipmap, repeat_enable;
 uniform float u_detail_near_dist = 40.0;
 uniform float u_detail_far_dist = 80.0;
-uniform vec3 u_fill_light = vec3(0.3, 0.3, 0.35);
 uniform vec3 u_sun_light = vec3(0.8, 0.75, 0.65);
 uniform vec3 u_sky_ambient = vec3(0.4, 0.45, 0.55);
 uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
@@ -57,11 +56,15 @@ vec3 terrain_surface_color(vec2 colormap_uv, vec2 detail_uv, vec3 world_pos, vec
 	// dp3: dot(normalmap, blendweights) -> per-material normal response
 	float normal_factor = dot(nmap, blend) * 2.0;
 
-	// mad_d2: ambient = (alpha * combinedSun + fillLight) / 2
-	// combinedSun = sunLight * 0.707 + skyAmbient
-	// NovaLogic ps.1.4 dual-normal path reads colormap.alpha directly.
-	vec3 combined_sun = u_sun_light * 0.707 + u_sky_ambient;
-	vec3 ambient = (cm.a * combined_sun + u_fill_light) * 0.5;
+	// mad_d2: lit = (alpha * c1 + c0) / 2 with the WITNESSED retail constants
+	// c1 = the LIGHT block, c0 = the SKY block (both /255): colormap alpha is
+	// the baked per-texel sun mask blending the sun over the sky ambience —
+	// the earlier combinedSun/fillLight pairing was a gobj-era stand-in.
+	// [orig: terrain_setup_lighting_and_shader @ 0x604420 pushes
+	//  c0 <- PolyTrn_PSConstC0_Sky @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
+	//  @ 0x31a182c; values from init_terrain_lighting_color_ramps @ 0x604ee0
+	//  <- Render_TerrainScene @ 0x610c80 (Env_LightBlock / Env_SkyBlock)]
+	vec3 ambient = (cm.a * u_sun_light + u_sky_ambient) * 0.5;
 
 	// mul_x2: lit = ambient * colormap * 2
 	vec3 lit = ambient * cm.rgb * 2.0;

@@ -22,7 +22,7 @@ this record.
 | Blend classification per tag (Opaque/AlphaBlend/Additive) | MATCHING | `RSAlphaMode` pass states per shipped `.fx` (`_FFP.fx` `BLEND_NONE/ALPHA/ADD` = FALSE,ONE,ZERO / SRCALPHA,INVSRCALPHA / ONE,ONE; Glass/SkGlass/Tracer = ONE,ONE only); Multiplicative (DESTCOLOR,SRCCOLOR) appears only in non-NORMAL techniques and no registry row claims it |
 | Depth policy for blended materials | MATCHING | blended FF variants force ZMODE_NOWRITE across technique slots `[orig: @ 0x5afc92..0x5afcaa]`; applied as `D3DRS_ZWRITEENABLE=0` `[orig: @ 0x5da320]` — mirrored by the composer's `depth_draw_never` for non-opaque, non-alpha-test |
 | Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
-| Composed lighting math | divergent (tracked) | the uniform surface is witnessed (HemiSky/HemiGround/DirLight/Ambient/ColorSrcGlobalGain `[orig: @ 0x5af453..0x5af49e]`); the composer's gains are prototype values — burns down at REN-5 (D-RMAT-5) |
+| Composed lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | the composer emits the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` section 5 + the 630-hash cited re-dump pin it |
 | Technique-class pass system (6 classes) | witnessed / host-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the host bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
 | UV animation (MatTexCoord1) | MATCHING (math ported) | `renderer::uv_anim` is the structural port of `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]` over the shared PANM wave table; `renderer_state_vectors` section 4 pins it; the MTRL-field feed is the residual open question |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
@@ -135,7 +135,11 @@ DepthGradWrite, DepthGradTest, AngleMap, CurProj, Cookie), 207-217 matrices
 (WVP, World, WorldView, ViewProj, WorldInvTrans, CamToWorldRot, RotSpecular,
 MatTexClipPlane, VecTexClipPlane, **MatTexCoord1 = 216**, VecDepthMaskPlane),
 218/219 FogStart/FogRangeRecip, 221 ReflectColor, 222 SelfLumColor,
-**223 AlphaGenValue**, 225-240 camera/lighting/point-light family, 241-244
+**223 AlphaGenValue**, 225-240 camera/lighting/point-light family (pinned at
+REN-5: **225 CameraPos, 226 DirLightVector, 227 DirLightColor,
+228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor, 232
+ColorSrcGlobalGain** `[orig: handle stores @ 0x5af3fe..0x5af485; gain bind
+@ 0x58e050]`), 241-244
 shadow/spot projection, 245 ReflectBumpDepth, 246/247 the skin arrays,
 248 DisplaceAmount, **249 FloatTicks**, **250 AlphaTestFlag**; the tail loop
 zeroes handles unused by every technique unless D3DX-shared. Replicating the
@@ -197,10 +201,15 @@ TERRAIN TILE TEXTURE under the object (`floor` of strip world x/z →
 `setup_entity_lighting_and_shader_constants @ 0x5d98a0` pushes
 **AlphaTestFlag (slot 250) ← matdef+514 bit 0x1** (the shader-path alpha
 test; the invert bit does not reach the shader path), DirLightColor ←
-ctx+116..128 **x the state-stack effectScale** (entry[9] — the effect-scale
-consumer), the Hemi/Ambient blocks from the ctx lighting slots (lerped by
-entry[10] under entry flag bit 1 — the dual-LOD cross-fade), and under
-ctx+841 the mirror-clip constants (MatTexClipPlane ← base x ctx+756).
+ctx+116..128 **x the state-stack effectScale** (entry[9] = the per-entity
+SUN-VISIBILITY factor `[orig: Entity_ComputeSunVisibility @ 0x5c6800]`), the
+Hemi/Ambient blocks from the ctx lighting slots — lerped by entry[10] under
+entry flag bit 1, where **entry[10] = the parent INTERIOR's daylight-openness
+float** (interior model +536; floor/ceiling ↔ ground/sky — the REN-4
+"dual-LOD cross-fade" reading was an erratum, corrected at REN-5; dual-LOD
+is the separate 0x10000000 repeat-draw) — and under ctx+841 the mirror-clip
+constants (MatTexClipPlane ← base x ctx+756). Full writer/reader decode:
+[render-lighting-re.md](render-lighting-re.md).
 
 **UV animation (REN-4).** `apply_shader_parameters` binds MatTexCoord1 (slot
 216) from `compute_uv_transform_matrix((tick_ms << 8)/1000, matdef+524)`
@@ -249,7 +258,7 @@ shipped corpus never uses fogmode 4..7 — LITE is dormant in JO (the
 | D-RMAT-2 | VS_TRACER unknown (absent from the OED-derived table); soft-edge `vsTracer` look unported | runtime registry carries VS_TRACER; the "soft edge" is the `vsTracer` facing falloff `Diff = \|dot(eye, normal)\|²` over unlit additive `MODULATE(Texture, Diffuse)` — NOT a displacement | **FIXED (REN-4)**: `MATERIAL_DESCRIPTOR_VIEW_FADE` → `OSCAP_VIEW_FADE` composes the per-fragment `\|dot(eye, normal)\|²` fade (`[orig: vsTracer, Tracer.fx]`; per-vertex→per-fragment is the host form of the same formula); vectors re-dumped with this witness |
 | D-RMAT-3 | Tag lookup case-SENSITIVE | `stricmp` (`[orig: HLSLEffect_FindByName @ 0x5ade70]`) | FIXED (case-insensitive exact-tag) |
 | D-RMAT-4 | File-effect capability/sort words carried verbatim from the OED dump | derived at load by the technique-usage probe, UNIONED over all techniques (`[orig: @ 0x5ae690]`) | **FIXED (REN-4)**: the probe replicated statically over the shipped localres text — 14/19 tags match; 5 drift rows corrected on `kMaterialDescriptorTable` (the OED dump in `oed/types.h` stays byte-faithful): FFP_GLASS `0xb000 → 0x10003000` (no VS ⇒ no TANGENT; GLOW technique uses TexCubeRotSpecular ⇒ GLOW), VS_SKBUMPDIFFT/PHONGT `0x6014 → 0xc014` and VS_SKBUMPDIFFT2 `0x601c → 0xc01c` (read `In.Tangent`, never ReflectColor ⇒ TANGENT not GLASS), VS_SKGLASS `0x7004 → 0x7000` (untextured ⇒ no DIFFUSE). The 0x10000000 dialect resolved = the glow-copy capability (flag renamed `MATERIAL_FLAG_GLOW`); `is_luminance` re-keyed on EMISSIVE. Cited re-dump + `renderer_material_classify` pins |
-| D-RMAT-5 | Composer lighting gains are prototype values (hemi fill + ×1.5/×1.6/spec 0.8) | witnessed uniform surface `HemiGroundColor/HemiSkyColor/DirLightVector/DirLightColor/AmbientColor/ColorSrcGlobalGain` with engine-fed values | OPEN — burns down at REN-5 (the lighting-chain grill feeds the real values) |
+| D-RMAT-5 | Composer lighting gains were prototype values (hemi fill + ×1.5/×1.6/spec 0.8) | witnessed uniform surface `HemiGroundColor/HemiSkyColor/DirLightVector/DirLightColor/AmbientColor/ColorSrcGlobalGain` with engine-fed values under the FF MODULATE2X model | **FIXED (REN-5)** — the composer emits the witnessed model (saturated hemi+dir ×2; SELFLUM × ColorSrcGlobalGain ×2; the ×1.5/×1.6/spec-0.8 constants deleted); uniforms renamed `u_hemi_sky_color`/`u_hemi_ground_color`/`u_color_src_global_gain` and engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); T1 re-dump: key set + classification rows identical, all 630 composed hashes re-hashed under this citation, sections 3/4 untouched; T2: 116/120 swatch cells moved, the 4 VS_TRACER cells (unlit MODULATE 1×) byte-identical. Residual reflection/phong stand-ins tracked as D-RLIT-5 |
 | D-RMAT-6 | Single-pass host materials; no CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN technique classes | six pass classes selected per batch entry (`@ 0x5d9ff3`), CLIP falls back to NORMAL, LUM populates GLOW; the class CONTENT witnessed at REN-4 (§FF technique tables, §Pass execution) | WITNESSED-READY-DEFERRED — selection + NORMAL state ported (REN-3); the GLOW flag/classification landed at REN-4 (`is_glow_capable`); the remaining host mappings (CLIP plane, PROJSHAD/DEPTHMASK passes, the glow BLOOM wiring with the specular cube) ride D-RORD-4/-5's residuals + REN-5 |
 
 ## IDB changes made during the session
@@ -306,3 +315,8 @@ REN-4 session (the shader/TSS grill):
 - `PolyTrn_UsePixelShaderPath` is force-cleared unless `dword_32655B4` is 80
   or 73 (`[orig: PolyTrn_LoadTerrainConfig @ 0x60e578]`) — what that
   device/format code is ('P'/'I'?); terrain-record scope.
+- DirLightVector (slot 226) is pushed only under the mirror gate (ctx+841,
+  re-negated with w = 0.8 `[orig: @ 0x5d9967..0x5d99a6]`) — no normal-path
+  push was found (the FF path lights via D3D light 0; VS effects that
+  resolve the parameter would read the last mirror push). Note-only unless a
+  VS-lit artifact surfaces in T3.

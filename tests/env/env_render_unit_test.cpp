@@ -254,7 +254,7 @@ int main() {
 		if (!expect(tint.full == 0xFF8040C0u && tint.half == 0xFF402060u,
 		            "Rgb path packs to the same tint split")) return 1;
 
-		// Foliage lightmap tint [orig: sample_terrain_lightmap @ 0x606030]:
+		// Foliage lightmap tint [orig: sample_terrain_colormap_tinted @ 0x606030]:
 		// 128 is identity, 255 saturates ~2x, alpha passes through.
 		const uint32_t full_identity = 0xFF808080u;
 		uint32_t out = foliage_lightmap_tint(0x40C08020u, full_identity);

@@ -92,3 +92,7 @@ opennova_wind_sway_phase={
 "type": "float",
 "value": 0.0
 }
+opennova_color_src_gain={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}

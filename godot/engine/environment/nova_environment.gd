@@ -38,6 +38,8 @@ var _day_phase_blend := 1.0
 var _fill_light := Vector3(0.4, 0.45, 0.55)
 var _sun_light := Vector3(0.9, 0.85, 0.75)
 var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
+# ColorSrcGlobalGain — the modulator /64 (iris exposure), NovaWeather-written.
+var _color_src_gain := Vector3.ONE
 var _fog_distance: float = 1000.0
 
 # Monotonic counter bumped only when a value object materials consume (lighting/fog) actually
@@ -216,8 +218,11 @@ func get_tile_overlay_tint() -> Vector3:
 func apply_terrain_uniforms(material: ShaderMaterial) -> void:
 	if material == null:
 		return
+	# c1 <- the light block, c0 <- the sky block — the witnessed terrain PS
+	# constants (fill/ground does not reach the terrain surface)
+	# [orig: terrain_setup_lighting_and_shader @ 0x604420;
+	#  init_terrain_lighting_color_ramps @ 0x604ee0].
 	material.set_shader_parameter("u_sun_light", get_sun_light())
-	material.set_shader_parameter("u_fill_light", get_fill_light())
 	material.set_shader_parameter("u_sky_ambient", get_sky_ambient())
 	material.set_shader_parameter("u_sun_direction", get_light_direction())
 	material.set_shader_parameter("u_terrain_tint", get_terrain_lighting_attenuation())
@@ -352,6 +357,19 @@ func set_fog_color_rt(value: Vector3) -> void:
 	if value != _fog_color_rt:
 		_fog_color_rt = value
 		_env_generation += 1
+
+
+## The modulator /64 gain (the iris auto-exposure reaching shaders), written
+## back per tick by NovaWeather like the smoothed colors — ColorSrcGlobalGain
+## [orig: Render_UnpackModulatorToLightScale @ 0x58db30; bind @ 0x58e05d].
+func set_color_src_gain(value: Vector3) -> void:
+	if value != _color_src_gain:
+		_color_src_gain = value
+		_env_generation += 1
+
+
+func get_color_src_gain() -> Vector3:
+	return _color_src_gain
 
 
 ## Monotonic generation, bumped only when a lighting/fog value object materials read actually

@@ -10,7 +10,14 @@ render_mode unshaded, cull_disabled, depth_prepass_alpha;
 //   foliage/sector models: rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8,
 //   a = t0.a x v0.a, where t1 is the terrain lightmap sampled by a planar
 //   world-position projection (VS oT1 = dp4(world, c7/c8)) and c0/c1 are the
-//   lighting constants (values pinned at REN-5).
+//   lighting constants — PINNED at REN-5: c0 = the SKY block, c1 = the LIGHT
+//   block (both [0] render colors /255), inherited from the terrain surface
+//   push (no foliage-side write) [orig: terrain_setup_lighting_and_shader
+//   @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 <-
+//   Render_TerrainScene @ 0x610c80]. The lightmap-tile pass draws the sector
+//   models back-to-front with a pure-ambient D3D light 4 (ambient =
+//   detail-avg x (light*0.707 + sky) x 2, diffuse 0)
+//   [orig: render_terrain_lightmaps @ 0x609de0].
 // - Terrain_CreateFoliageVertexShaders @ 0x5ff630 — the wind-sway VS
 //   (polynomial sine of world-X phase, weight = vertex RED, Z displacement)
 //   and the per-patch grid-placement VS.

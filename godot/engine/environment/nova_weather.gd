@@ -54,6 +54,15 @@ func _process(_delta: float) -> void:
 	var lightning := Color.WHITE
 	if env_data:
 		lightning = env_data.get_lightning_color()
+		# The iris auto-exposure target (env #17): the outdoor gain from the
+		# current smoothed colors, chased by the modulator over 62 ticks —
+		# retail re-targets every render pass, i.e. every tick
+		# [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
+		#  curve terrain_sector_compute_lighting @ 0x5c7550].
+		_core.set_exposure_from_iris(
+			env.get_sun_direction(),
+			env_data.get_iris_percent(),
+			env_data.get_iris_center())
 	# The smoothers chase the TOD keyframe targets, never their own written-
 	# back output [orig: Environment_ComputeTimeOfDayColors @ 0x57de40
 	# refreshes every block's target slot ahead of the weather tick]. The
@@ -69,6 +78,8 @@ func _process(_delta: float) -> void:
 	env.set_fill_light(get_smooth_fill())
 	env.set_sun_light(get_smooth_sun())
 	env.set_fog_color_rt(get_smooth_fog())
+	if env.has_method("set_color_src_gain"):
+		env.set_color_src_gain(_core.get_color_src_gain())
 	_write_shader_globals(env)
 
 
@@ -169,3 +180,6 @@ func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", env.get_fog_type())
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_amount", maxf(0.25, absf(get_sway_amount())))
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_phase", get_sway_phase())
+	# The modulator /64 gain (iris exposure) for self-lit/effect shaders
+	# [orig: Render_UnpackModulatorToLightScale @ 0x58db30].
+	RenderingServer.global_shader_parameter_set(&"opennova_color_src_gain", _core.get_color_src_gain())

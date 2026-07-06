@@ -225,6 +225,56 @@ struct WeatherColorBlock {
 	void snap(uint32_t packed);
 	// One 62 Hz tick [orig: interpolate_weather_color @ 0x57d9e0].
 	void tick(uint32_t modulator_packed, int rain_intensity);
+	// Sets the per-channel max step rates so the current accumulators reach
+	// `target` in `frames` ticks (rounded division; frames 0 clamps to 1)
+	// [orig: ColorBlock_SetStepDeltas @ 0x57d940].
+	void set_step_deltas(int frames);
+};
+
+// ---------------------------------------------------------------------------
+// The modulator chain (env #17 — the iris auto-exposure consumer, ported at
+// REN-5). Two dedicated blocks head the weather tick: modulator-2 modulates
+// against the constant identity bytes, the modulator against modulator-2, and
+// every color block against the modulator — the witnessed call order is
+// modulator2, modulator, then the color blocks (same-tick propagation)
+// [orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..0x57f03c —
+//  0x26c6678 modulator2, 0x26c6644 modulator, then light/sky/ground/fog/...].
+//
+// The modulator's target is the player's iris auto-exposure sample replicated
+// to gray (0x10101 * gain) and chased over 62 ticks (1 s)
+// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538 —
+//  compute_ambient_light_along_direction @ 0x5c7a00 averages the iris gain at
+//  3 points marched from the camera-ray hit back toward the camera; the pure
+//  outdoor sample is iris_gain() below]. Consumers: every block's [0] render
+//  color (the multiply in WeatherColorBlock::tick), and the /64 render scales
+//  (ColorSrcGlobalGain + the effects/foliage/point-light ambient scale —
+//  renderer::unpack_modulator_scale, [orig: @ 0x58db30; @ 0x5aaef0]).
+
+struct ModulatorChain {
+	WeatherColorBlock modulator;  // 0x26c6644
+	WeatherColorBlock modulator2; // 0x26c6678
+
+	ModulatorChain() {
+		modulator.snap(kModulatorIdentityPacked);
+		modulator2.snap(kModulatorIdentityPacked);
+	}
+
+	// Set the exposure target from an iris gain (0..255, 64 = identity):
+	// target = 0x10101 * gain, chased over 62 ticks
+	// [orig: @ 0x57e512..0x57e538].
+	void set_exposure_target(int gain) {
+		modulator.target = 0x10101u * static_cast<uint32_t>(gain < 0 ? 0 : (gain > 255 ? 255 : gain));
+		modulator.set_step_deltas(62);
+	}
+
+	// One 62 Hz tick, ahead of the color blocks; the color blocks then tick
+	// with `render_color()` [orig: block order @ 0x57ef97..].
+	void tick(int rain_intensity) {
+		modulator2.tick(kModulatorIdentityPacked, rain_intensity);
+		modulator.tick(modulator2.render_color, rain_intensity);
+	}
+
+	uint32_t render_color() const { return modulator.render_color; }
 };
 
 // ---------------------------------------------------------------------------
@@ -426,7 +476,7 @@ TerrainTint terrain_tint_from_packed(uint32_t terrain_color_packed);
 // HALF 0xFF7F7F7F.
 TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb);
 
-// Foliage lightmap tint [orig: sample_terrain_lightmap @ 0x606030]: per
+// Foliage lightmap tint [orig: sample_terrain_colormap_tinted @ 0x606030]: per
 // channel min((texel_c * FULL_c) >> 7, 255), alpha passthrough. 128 is
 // identity; the default 0xFF tint is a ~2x saturating brighten.
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint);

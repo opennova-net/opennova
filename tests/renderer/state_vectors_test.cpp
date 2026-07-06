@@ -29,8 +29,16 @@
 // technique-class selection, the water bracket + priority ladder) pinning
 // libs/renderer/render_order against docs/render/render-order-re.md
 // [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
-// @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0]. Lighting
-// scalars join at REN-5 as their producers land in libs/renderer.
+// @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0].
+//
+// REN-5 added section 5: lighting scalars over libs/renderer/light_runtime
+// (docs/render/render-lighting-re.md) — the modulator /64 scale, the world
+// lighting block + overrides, the entity uniforms incl. the interior
+// daylight lerp, the FF vertex light + MODULATE2X, sun visibility,
+// point-light color/attenuation, and the terrain c0/c1 surface light. The
+// same slice re-composed the object shaders onto the witnessed uniform
+// surface (HemiSky/HemiGround/DirLight/ColorSrcGlobalGain, the x2 combine —
+// D-RMAT-5), re-hashing every section-2 row under that citation.
 //
 // REN-4 extended the classification rows with glow= (the 0x10000000 Q3
 // bloom-copy capability [orig: probe @ 0x5ae690; Q3 gate @ 0x5d93b5]) and
@@ -38,6 +46,7 @@
 // uv-anim vectors over libs/renderer/uv_anim
 // [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0].
 
+#include "renderer/light_runtime.h"
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
 #include "renderer/render_order.h"
@@ -308,6 +317,154 @@ std::string generate() {
 			              static_cast<double>(tv.m20), static_cast<double>(tv.m21));
 			out << line;
 		}
+	}
+
+	// Section 5 (REN-5): lighting scalars over libs/renderer/light_runtime —
+	// the witnessed world-lighting chain (docs/render/render-lighting-re.md):
+	// the modulator /64 unpack [orig: @ 0x58db30; @ 0x5aaef0], the world block
+	// build + store derivations [orig: @ 0x5c8090; @ 0x5d89e0], the per-entity
+	// uniforms incl. the interior daylight lerp [orig: @ 0x5d98a0], the FF
+	// vertex-light evaluation (hemisphere delta lights [orig: @ 0x5d8cb0]),
+	// the sun-visibility factor [orig: @ 0x5c6800], point-light color/
+	// attenuation [orig: @ 0x5a9180; @ 0x5aa450], and the terrain c0/c1
+	// surface light [orig: @ 0x604420; @ 0x604ee0].
+	out << "# lighting v1 (REN-5: modulator scale, world block, entity uniforms, terrain c0/c1)\n";
+
+	const uint32_t mod_packeds[] = { 0x404040u, 0x000000u, 0xFFFFFFu, 0x203040u };
+	for (uint32_t m : mod_packeds) {
+		const auto s = renderer::unpack_modulator_scale(m);
+		std::snprintf(line, sizeof(line), "modscale m=%06x s=[%.6f %.6f %.6f]\n",
+		              m, static_cast<double>(s[0]), static_cast<double>(s[1]),
+		              static_cast<double>(s[2]));
+		out << line;
+	}
+
+	const auto print_block = [&](const char *label, const renderer::WorldLightingBlock &b) {
+		std::snprintf(line, sizeof(line),
+		              "wblock %-6s en=%d dir=[%.6f %.6f %.6f] dc=[%.6f %.6f %.6f] "
+		              "sky=[%.6f %.6f %.6f] gnd=[%.6f %.6f %.6f] flr=[%.6f %.6f %.6f] "
+		              "ceil=[%.6f %.6f %.6f] iamb=[%.6f %.6f %.6f] oamb=[%.6f %.6f %.6f]\n",
+		              label, b.dir_enabled ? 1 : 0,
+		              static_cast<double>(b.dir[0]), static_cast<double>(b.dir[1]),
+		              static_cast<double>(b.dir[2]),
+		              static_cast<double>(b.dir_color[0]), static_cast<double>(b.dir_color[1]),
+		              static_cast<double>(b.dir_color[2]),
+		              static_cast<double>(b.hemi_sky[0]), static_cast<double>(b.hemi_sky[1]),
+		              static_cast<double>(b.hemi_sky[2]),
+		              static_cast<double>(b.hemi_ground[0]), static_cast<double>(b.hemi_ground[1]),
+		              static_cast<double>(b.hemi_ground[2]),
+		              static_cast<double>(b.floor_color[0]), static_cast<double>(b.floor_color[1]),
+		              static_cast<double>(b.floor_color[2]),
+		              static_cast<double>(b.ceiling_color[0]), static_cast<double>(b.ceiling_color[1]),
+		              static_cast<double>(b.ceiling_color[2]),
+		              static_cast<double>(b.indoor_ambient[0]), static_cast<double>(b.indoor_ambient[1]),
+		              static_cast<double>(b.indoor_ambient[2]),
+		              static_cast<double>(b.outdoor_ambient[0]), static_cast<double>(b.outdoor_ambient[1]),
+		              static_cast<double>(b.outdoor_ambient[2]));
+		out << line;
+	};
+
+	renderer::WorldLightingInputs win;
+	win.light_packed = 0xFFF0E0u;
+	win.sky_packed = 0x8090A0u;
+	win.ground_packed = 0x605040u;
+	win.ceiling_packed = 0x404850u;
+	win.floor_packed = 0x302820u;
+	win.light_dir = { 0.3f, -0.8f, 0.5f };
+	const renderer::WorldLightingBlock day = renderer::build_world_lighting(win);
+	print_block("day", day);
+
+	renderer::WorldLightingInputs win_nvg = win;
+	win_nvg.nvg_hemi_rewrite = true;
+	win_nvg.nvg_level = 3;
+	win_nvg.modulator_packed = 0x404040u;
+	print_block("nvg", renderer::build_world_lighting(win_nvg));
+
+	renderer::WorldLightingInputs win_scope = win;
+	win_scope.vehicle_scope_grey = true;
+	print_block("scope", renderer::build_world_lighting(win_scope));
+
+	renderer::WorldLightingInputs win_dim = win;
+	win_dim.nvg_world_dim = true;
+	print_block("nvgdim", renderer::build_world_lighting(win_dim));
+
+	const auto print_uniforms = [&](const char *label, const renderer::EntityLightingUniforms &u) {
+		std::snprintf(line, sizeof(line),
+		              "euni %-10s dc=[%.6f %.6f %.6f] gnd=[%.6f %.6f %.6f] "
+		              "sky=[%.6f %.6f %.6f] amb=[%.6f %.6f %.6f]\n",
+		              label,
+		              static_cast<double>(u.dir_color[0]), static_cast<double>(u.dir_color[1]),
+		              static_cast<double>(u.dir_color[2]),
+		              static_cast<double>(u.hemi_ground[0]), static_cast<double>(u.hemi_ground[1]),
+		              static_cast<double>(u.hemi_ground[2]),
+		              static_cast<double>(u.hemi_sky[0]), static_cast<double>(u.hemi_sky[1]),
+		              static_cast<double>(u.hemi_sky[2]),
+		              static_cast<double>(u.ambient[0]), static_cast<double>(u.ambient[1]),
+		              static_cast<double>(u.ambient[2]));
+		out << line;
+	};
+	const renderer::EntityLightingUniforms outdoor_full =
+		renderer::compute_entity_lighting(day, 1.0f, false, 0.0f);
+	print_uniforms("out-1.0", outdoor_full);
+	print_uniforms("out-0.5", renderer::compute_entity_lighting(day, 0.5f, false, 0.0f));
+	print_uniforms("int-0.0", renderer::compute_entity_lighting(day, 1.0f, true, 0.0f));
+	print_uniforms("int-0.25", renderer::compute_entity_lighting(day, 1.0f, true, 0.25f));
+	print_uniforms("int-1.0", renderer::compute_entity_lighting(day, 1.0f, true, 1.0f));
+
+	const std::array<float, 3> normals[] = {
+		{ 0.0f, 1.0f, 0.0f }, { 0.0f, -1.0f, 0.0f }, { 0.70710678f, 0.0f, 0.70710678f },
+		{ 0.0f, 0.0f, 1.0f },
+	};
+	const std::array<float, 3> to_light = { -day.dir[0], -day.dir[1], -day.dir[2] };
+	for (const auto &n : normals) {
+		const auto lit = renderer::ff_vertex_light(outdoor_full, n, to_light);
+		std::snprintf(line, sizeof(line),
+		              "fflit n=[%.4f %.4f %.4f] lit=[%.6f %.6f %.6f] x2=[%.6f %.6f %.6f]\n",
+		              static_cast<double>(n[0]), static_cast<double>(n[1]),
+		              static_cast<double>(n[2]),
+		              static_cast<double>(lit[0]), static_cast<double>(lit[1]),
+		              static_cast<double>(lit[2]),
+		              static_cast<double>(lit[0] * renderer::kFFModulate2x),
+		              static_cast<double>(lit[1] * renderer::kFFModulate2x),
+		              static_cast<double>(lit[2] * renderer::kFFModulate2x));
+		out << line;
+	}
+
+	for (int blocked = 0; blocked <= 4; ++blocked) {
+		std::snprintf(line, sizeof(line), "sunvis blocked=%d f=%.6f\n",
+		              blocked, static_cast<double>(renderer::sun_visibility_factor(blocked)));
+		out << line;
+	}
+
+	const std::array<float, 3> pl_rgb = { 1.0f, 0.5f, 0.25f };
+	const std::array<float, 3> pl_mod = renderer::unpack_modulator_scale(0x203040u);
+	for (int d3d = 0; d3d <= 1; ++d3d) {
+		const auto c = renderer::point_light_color(pl_rgb, 2.0f, pl_mod, d3d != 0);
+		std::snprintf(line, sizeof(line), "plcolor d3d=%d c=[%.6f %.6f %.6f]\n",
+		              d3d, static_cast<double>(c[0]), static_cast<double>(c[1]),
+		              static_cast<double>(c[2]));
+		out << line;
+	}
+	const int32_t pl_ranges[] = { 0x10000, 0xA0000, 0x400000 };
+	for (int32_t r : pl_ranges) {
+		const auto a4 = renderer::point_light_attenuation(r);
+		std::snprintf(line, sizeof(line), "platten r=%08x a=[%.6f %.6f %.6f %.6f]\n",
+		              static_cast<unsigned>(r),
+		              static_cast<double>(a4[0]), static_cast<double>(a4[1]),
+		              static_cast<double>(a4[2]), static_cast<double>(a4[3]));
+		out << line;
+	}
+
+	const std::array<float, 3> trn_light = { 0.9f, 0.8f, 0.7f };
+	const std::array<float, 3> trn_sky = { 0.2f, 0.25f, 0.3f };
+	const float masks[] = { 0.0f, 0.5f, 1.0f };
+	for (float m : masks) {
+		const auto lit = renderer::terrain_surface_light(m, trn_light, trn_sky);
+		std::snprintf(line, sizeof(line), "trnlit mask=%.2f lit=[%.6f %.6f %.6f]\n",
+		              static_cast<double>(m),
+		              static_cast<double>(lit[0]), static_cast<double>(lit[1]),
+		              static_cast<double>(lit[2]));
+		out << line;
 	}
 
 	return out.str();

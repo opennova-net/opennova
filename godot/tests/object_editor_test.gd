@@ -592,7 +592,10 @@ func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void
 		return
 	var tod := env.interpolate_time_of_day(1200.0)
 	_assert_vector3_close(material.get_shader_parameter("u_dir_light_color"), tod.get("sun", Vector3.ZERO), 0.01, "Preview should use environment sun lighting.")
-	_assert_vector3_close(material.get_shader_parameter("u_fill_light_color"), tod.get("ground", Vector3.ZERO), 0.01, "Preview should use environment fill lighting.")
+	# The witnessed hemisphere pair: ground -> HemiGroundColor, sky ->
+	# HemiSkyColor (docs/render/render-lighting-re.md, REN-5).
+	_assert_vector3_close(material.get_shader_parameter("u_hemi_ground_color"), tod.get("ground", Vector3.ZERO), 0.01, "Preview should use environment ground lighting.")
+	_assert_vector3_close(material.get_shader_parameter("u_hemi_sky_color"), tod.get("sky", Vector3.ZERO), 0.01, "Preview should use environment sky lighting.")
 	# Fog render color is the keyframe color doubled-and-saturated, matching the
 	# engine [orig: Environment_UpdateWeatherTick @ 0x57f17c] — .env fog is
 	# authored at half intensity. See docs/env/env-tod-re.md.

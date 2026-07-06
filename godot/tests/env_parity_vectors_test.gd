@@ -79,6 +79,17 @@ extends GutTest
 #   asset-free [orig: render_skybox_sun_glow @ 0x5acd00]).
 #   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
+#   #17 CLOSED 2026-07-06 (REN-5, the modulator chain going LIVE): the
+#   weather core now ticks modulator-2 -> modulator -> the color blocks in
+#   the witnessed order [orig: Environment_UpdateWeatherTick block sequence
+#   @ 0x57ef97..0x57f03c] with the modulator chasing the outdoor iris gain
+#   over 62 ticks [orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas
+#   @ 0x57d940; curve terrain_sector_compute_lighting @ 0x5c7550]. Exactly
+#   the 8 weather checkpoint rows re-dumped under that witness (wa/k016,
+#   wa/k064, wa/k256, wb/k016..k096, we/k016, we/k032 - the smoothed colors
+#   now carry the exposure; hand-check: wb/k064 0x31*61/64 = 0x2E); every
+#   float, sky, water, celestial, and level-only key UNCHANGED.
+#   docs/render/render-lighting-re.md.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -201,23 +212,23 @@ const EXPECTED_BYTES := {
 	"smoother/snap_get": "336699",
 	"wa/k001": "0012 01 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wa/k004": "035F 04 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k016": "56E5 10 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k064": "7CDE 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k256": "9787 00 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wa/k016": "56E5 10 00 00 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
+	"wa/k064": "7CDE 40 00 00 2E342B A2A29F 92ADF3 505354 2E342B A2A29F 92ADF3",
+	"wa/k256": "9787 00 00 00 2D322A 9C9C99 8DA7EB 4D5152 2D322A 9C9C99 8DA7EB",
 	"water/mesh": "4225 24576 0 65 1 1 65 66 1 66 2 2 66 67",
 	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
 	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k016": "429E 10 00 07 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k064": "71F1 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k096": "833D 60 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wb/k016": "429E 10 00 07 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
+	"wb/k064": "71F1 40 00 00 2E342B A2A29F 92ADF3 505354 2E342B A2A29F 92ADF3",
+	"wb/k096": "833D 60 00 00 2D332B 9F9F9C 90AAEF 4E5253 2D332B 9F9F9C 90AAEF",
 	"wc/long_k01": "007B 02 C8 00 24313D 273748 3D435B 6D6F86 24313D 273748 3D435B",
 	"wc/long_k09": "23AB 0A 64 00 1C2934 273748 2C3249 4C4E63 1C2934 273748 2C3249",
 	"wc/long_k12": "3E47 0D 00 00 14212C 273748 1C2238 2B2D40 14212C 273748 1C2238",
 	"wc/long_seq": "C8 C8 C8 96 96 C8 C8 96 64 32 32 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
 	"wc/short_seq": "00 00 00 00 00 C8 C8 C8 C8 FF FF C8 C8 FF FF 00",
 	"we/k008": "14B3 08 00 00 212B2D 5D5D5C 56659D 3E414B 212B2D 5D5D5C 56659D",
-	"we/k016": "56E5 10 00 00 202A2D 585857 516094 3C3F4A 202A2D 585857 516094",
-	"we/k032": "6404 20 00 00 1D282D 2A323A 44517F 383B48 1D282D 2A323A 44517F",
+	"we/k016": "56E5 10 00 00 1F292C 565655 4F5E91 3B3E48 1F292C 565655 4F5E91",
+	"we/k032": "6404 20 00 00 1C272C 293139 424F7D 373A46 1C272C 293139 424F7D",
 	"we/k064": "7CDE 40 00 00 17242D 23313F 2A3351 303243 17242D 23313F 2A3351",
 }
 

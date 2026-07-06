@@ -36,7 +36,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| REN-4 shaders/TSS | (this slice) | the fixed-function shader/TSS layer decoded end to end: the engine render-mode word (blend/alpha/color combiner tables `[orig: decode_blend_mode_to_d3d_states @ 0x680f00; decode_mode_alpha_stage @ 0x680b00; decode_mode_color_stage @ 0x681080]`) + the state permutation cache (`[orig: @ 0x681d00; RenderState_CacheFindOrAdd @ 0x683420]`); the water surface material set (`Water_InitSurfaceShaders @ 0x5c19b0` — the "Terrain_InitShaders" misnomer resolved) ported into `water.gdshader` (witnessed ONE+dst·SRCALPHA blend via premul-alpha + ref-32 discard; env #34 minted-and-closed); the terrain surface shading witnessed into terrain-re.md §Runtime surface shading (8 embedded pixel shaders incl. the ps.1.4 splat, tier gates, foliage-model VS/PS set, alpha refs 180/8); D-RMAT-2 FIXED (`OSCAP_VIEW_FADE` tracer fade) + D-RMAT-4 FIXED (the IsParameterUsed probe replicated over the shipped corpus — 5 OED-dump drift rows corrected on the descriptor table, `MATERIAL_FLAG_GLOW` minted, `is_glow_capable` classification); `renderer::uv_anim` ported (T1 section 4); the FlushBatches pass loop witnessed (per-light passrules multiplication, submit-0x10/+841/MATCHTERRAIN questions closed); ptl §5.2 stage-stride + §5.5 VS/PS errata; 17+4 IDB renames; T2: composite IDENTICAL, swatch key-set delta fully T1-hash-attributed, world set re-captured (post-ren4 = the rolling baseline) |
+| REN-5 lighting | (this slice) | the world lighting chain witnessed end to end and ported: **env #17 CLOSED** — the iris/modulator chain is LIVE (`libs/env::ModulatorChain`, the witnessed modulator2→modulator→blocks tick order `[orig: @ 0x57ef97..0x57f03c]`, the 62-tick exposure chase `[orig: @ 0x57e512; ColorBlock_SetStepDeltas @ 0x57d940]`, ÷64 gain to ColorSrcGlobalGain/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`; env vectors re-dumped surgically — exactly 8 weather rows, hand-verified `0x31·61/64 = 0x2E`); **D-RMAT-5 CLOSED** — the composer emits the witnessed FF MODULATE2X model on the pinned uniform surface (slots 225-230 + 232; the ×1.5/×1.6/spec-0.8 prototypes deleted; T1: key set identical, all 630 hashes cited-re-dumped, +30 lighting vectors in NEW section 5; T2: composite IDENTICAL, swatch 116/120 cells moved with the 4 unlit VS_TRACER cells byte-identical); the entity chain decoded (writer `@ 0x5c8090`/store `@ 0x5d89e0`, reader `@ 0x5d98a0`, hemisphere delta lights `@ 0x5d8cb0`, the REN-4 "dual-LOD lerp" erratum corrected to the INTERIOR DAYLIGHT lerp, effectScale = 3-ray sun visibility `@ 0x5c6800`) and ported to `libs/renderer/light_runtime`; terrain/foliage **c0/c1 = sky/light** closed (`terrain_lighting.gdshaderinc` corrected from the gobj-era pairing); point-light math + group culling witnessed (= the OED attenuation); `Lighting_InitTextures` + the cubemap sources witnessed (CubeRotSpecular = the static sun-glint cube — D-RORD-5's substrate answered); [`render-lighting-re.md`](render/render-lighting-re.md) + D-RLIT-1..6 minted (audit track **1 → 0**); 15 fn + 49 data IDB renames; GUT keystones green (handoff 3/3, object model 10/10, object_editor 73/73, canary 89/89, env vectors 204/204) |
+| REN-4 shaders/TSS | fb1c8e7c | the fixed-function shader/TSS layer decoded end to end: the engine render-mode word (blend/alpha/color combiner tables `[orig: decode_blend_mode_to_d3d_states @ 0x680f00; decode_mode_alpha_stage @ 0x680b00; decode_mode_color_stage @ 0x681080]`) + the state permutation cache (`[orig: @ 0x681d00; RenderState_CacheFindOrAdd @ 0x683420]`); the water surface material set (`Water_InitSurfaceShaders @ 0x5c19b0` — the "Terrain_InitShaders" misnomer resolved) ported into `water.gdshader` (witnessed ONE+dst·SRCALPHA blend via premul-alpha + ref-32 discard; env #34 minted-and-closed); the terrain surface shading witnessed into terrain-re.md §Runtime surface shading (8 embedded pixel shaders incl. the ps.1.4 splat, tier gates, foliage-model VS/PS set, alpha refs 180/8); D-RMAT-2 FIXED (`OSCAP_VIEW_FADE` tracer fade) + D-RMAT-4 FIXED (the IsParameterUsed probe replicated over the shipped corpus — 5 OED-dump drift rows corrected on the descriptor table, `MATERIAL_FLAG_GLOW` minted, `is_glow_capable` classification); `renderer::uv_anim` ported (T1 section 4); the FlushBatches pass loop witnessed (per-light passrules multiplication, submit-0x10/+841/MATCHTERRAIN questions closed); ptl §5.2 stage-stride + §5.5 VS/PS errata; 17+4 IDB renames; T2: composite IDENTICAL, swatch key-set delta fully T1-hash-attributed, world set re-captured (post-ren4 = the rolling baseline) |
 | REN-3 draw order | 885d8702 | the batching/draw-order system witnessed end to end (four queues + the unsigned-ascending sort `[orig: RenderBatch_QuickSort @ 0x5d8b40]`; the opaque state-sort key + the transparent `~float_bits` back-to-front key; the water-plane queue split + frame bracket `[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`; technique-class selection; the render-state stack; the viewmodel near-Z 0.05 + viewport-depth [0,0.1] pass; the Q3 glow/envmap copy flushed by the bloom pass) — [render/render-order-re.md](render/render-order-re.md), D-RORD-1..6. Ordering semantics ported to `libs/renderer/render_order` and applied as the generalized Godot priority ladder (celestial rungs re-derived, water rung, object-model water-side rungs via the new `NovaObjectShaderCache` seam); T1 extended with the draw-order vector section (cited re-dump, pure append); T2 gained the depth-adversarial composite ordering scenes (fresh baseline; swatch A/B bitwise-identical vs post-ren2); 11 function + 15 data renames landed in the IDB (EffectWorld particle pass ex-`CNapiSession_*`, the render-state stack push ex-`CNetPlayer_*`, the viewmodel viewport/near-Z pair ex-`Scar_*`); draw order leaves UNAUDITED (2→1); D-RORD-2/-6 ratified into the permanent register; env #30 gained its pass-structure rider; world §13's `0x10000000` identified as the repeat-draw marker |
 | REN-2 materials grill + converge | 005efae0 | the runtime material path witnessed end to end (HLSLEffect registry built from `_FFP.fx` ×24 + the localres `.fx` set + `#UV` twins; probe-derived capability flags; six technique-class pass blocks; state application at FlushBatches) — [render/render-material-re.md](render/render-material-re.md), D-RMAT-1..6. Fixed in-slice with cited T1 re-dumps: the alpha-test compare shape (invert flips the COMPARE `[orig: @ 0x6770a0]`), case-insensitive tag lookup `[orig: @ 0x5ade70]`, the VS_TRACER registry row; flag-enum misnomers renamed everywhere (BLENDING/SKINNED/TANGENT/UVGEN); `MATERIAL_FLAG_*` single-sourced onto `NovaObjectShaderCache` (the ENG-4 leg); 3 kong misnomers renamed in the IDB; materials leave UNAUDITED (3→2); ratchet `libs_uncited_src_files` tightened 65 → **64** (the composer earned its citation) |
 | REN-1 instrument (rode this trunk, d158e3e3) + REN-0 mint (ce2b0978) | d158e3e3 / ce2b0978 | the three-tier parity instrument + pre-change baselines; the track mint + [ADR 0023](adr/0023-render-visual-parity.md); ledger audit track reopened (UNAUDITED = 3); env #17 → REN-5 and #27/#29/#30/#33 → REN-6 transfers; `ledger_check.py` DOMAIN_ORDER + the LIBS-2 `libs/renderer`-fold reversal |
@@ -383,7 +384,9 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   TOD grid, alpha-test foliage, glass/env-map, transparents composite, night
   lightmap terrain, first-person viewmodel) — the headline gate at REN-7.
 - **REN-2** (L) **materials** (grill-ida — reimpl exists): decode the
-  runtime flag/tag→state semantics (`Entity_UpdateRenderState @ 0x5d6a30`,
+  runtime flag/tag→state semantics (the `0x5d6a30` planning anchor resolved
+  at REN-5 to the render-slot light updater, renamed
+  `RenderSlot_UpdateEntityLight`;
   `apply_shader_parameters @ 0x58db80`, `HLSLEffect_InitFixedFunctionShaders
   @ 0x5af790`, `build_shader_pass_name @ 0x5bf5d0`) at the device boundary
   (`@ 0x681920` / `@ 0x681d00` / `@ 0x6817d0` — witness keys only); confirm
@@ -430,19 +433,31 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   multiplication, submit 0x10 = z-read-off, MATCHTERRAIN = terrain-tile
   texture bind, ctx+841 = the mirror-clip constants gate); ptl §5.2/§5.5
   errata corrected. The embedded-shader census is complete.
-- **REN-5** (M/L) **lighting**: the modulator chain
-  (`Render_UnpackModulatorToLightScale @ 0x58db30` →
-  `Render_LightScaleRGB @ 0x8409f4`; `EffectWorld_UnpackModulatorToAmbientScale
-  @ 0x5aaef0` → `@ 0x840b24`), `compute_ambient_light_along_direction
-  @ 0x5c7a00`, entity application (`setup_entity_render_lighting @ 0x5d7250`,
-  `setup_entity_lighting_and_shader_constants @ 0x5d98a0`), the terrain
-  lightmap chain (`Terrain_LoadLightmapTexture @ 0x604a90`,
-  `sample_terrain_lightmap @ 0x606030`, `init_terrain_lighting_color_ramps
-  @ 0x604ee0`, `render_terrain_lightmaps @ 0x609de0`), `Lighting_InitTextures
-  @ 0x5a94f0`, `generate_cubemap_lighting @ 0x685bb0` (the env-map source).
-  Ports libs-first; **closes env #17** (the iris modulator-chain consumer,
-  transferred from PAR-ENV); D-FOLIAGE-1 is a candidate at the lightmap leg.
-  Lands `render-lighting-re.md` + D-RLIT.
+- **REN-5** (M/L) **lighting** — **DONE 2026-07-06**: the modulator chain
+  witnessed end to end and PORTED LIVE (the ÷64 unpacks
+  `@ 0x58db30/0x5aaef0`, the witnessed modulator2 → modulator → color-block
+  tick order `@ 0x57ef97..`, the 62-tick iris chase `@ 0x57e512/0x57d940` —
+  `libs/env::ModulatorChain` + `NovaWeatherCore`, **env #17 CLOSED**, env
+  vectors re-dumped surgically); the world lighting block + per-entity
+  uniforms decoded (writer `CTerrainRenderer_BuildLightingShaderConstants
+  @ 0x5c8090` → store `@ 0x5d89e0`; reader `@ 0x5d98a0` — slots 225-230
+  pinned, the hemisphere DELTA lights `@ 0x5d8cb0`, the "dual-LOD lerp"
+  erratum corrected to the INTERIOR DAYLIGHT lerp, effectScale = the 3-ray
+  sun-visibility factor `@ 0x5c6800`) and ported (`light_runtime`,
+  **D-RMAT-5 CLOSED** — the composer emits the witnessed MODULATE2X model);
+  the terrain/foliage **c0/c1 = sky/light blocks** closed
+  (`@ 0x604420/0x604ee0/0x610c80`; `terrain_lighting.gdshaderinc` corrected;
+  the planning anchors resolved: `sample_terrain_lightmap` = the tinted
+  colormap sampler feeding D-FOLIAGE-1, `sub_604CE0` = scorch textures,
+  `render_terrain_lightmaps` = the sector-model lightmap-tile pass);
+  point lights (modulator-scaled, {1,0,15/r²,1} = the OED math,
+  owner/interior group culling, ≤4 D3D lights) witnessed;
+  `Lighting_InitTextures` (the last embedded shader — the DOT3 dynamic
+  light) and the cubemap sources witnessed (CubeEnvironment = live scene per
+  128 frames; **CubeRotSpecular = the static sun-glint cube** — D-RORD-5's
+  answer); the render-slot (character shadow) lighting witnessed as
+  out-of-scope. Landed [`render-lighting-re.md`](render/render-lighting-re.md)
+  + D-RLIT-1..6; T1 section 5; audit track **1 → 0**.
 - **REN-6** (M) **the ENG-2 render leftovers**, libs/env-first: env #29
   (water strip tessellation — spec complete in env-tod-re.md "Water
   surface"), #30 (water reflection passes — spec lands at REN-3's frame

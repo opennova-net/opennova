@@ -49,7 +49,7 @@ remain parsed-but-deferred — is tracked per field in
 | `Game_LoadTerrainDuringConnect @ 0x520710` | BMS override application (`EnvFile.apply_mission_overrides`) |
 | `Game_StartMission @ 0x524360` (0x525371..0x525399) | BMS fog overrides + start TOD |
 | `Environment_SetCurrentTime @ 0x57c4b0` / `Environment_SetTodRate @ 0x57c4f0` | runtime TOD state setters |
-| `terrain_sector_compute_lighting @ 0x5c7550` | entity lighting + iris consumer (documented, deferred) |
+| `terrain_sector_compute_lighting @ 0x5c7550` | iris sampler (`env::iris_gain` + the live `ModulatorChain`, REN-5 #17); the entity-lighting writer side is [render/render-lighting-re.md](../render/render-lighting-re.md) |
 | `EffectWorld_TickInstancesAndLightScale @ 0x5aa170` | terrain_rgb reciprocal consumer (documented, deferred) |
 
 Misnames fixed during the grill: `Render_SetFogParams @ 0x54b4b0` was an entity-pool sweeper
@@ -176,7 +176,11 @@ cloudbase `0x26c674c`, cloudhighlight `0x26c6780`, cloudedge `0x26c67b4`, plus s
 `+0x80000` rounding; then `[0] = ([0] + additive) × ModulatorBlock × rainFactor` where
 `rainFactor = max(0, 0x8000 - Env_RainIntensity)`. Modulator chain: every block multiplies by
 the modulator block; the modulator multiplies by modulator2; modulator2 by constant `0x404040`
-(identity in 6.6). The modulator's target is the player's **iris auto-exposure sample**
+(identity in 6.6). The witnessed call ORDER (REN-5, decoded from the 16 `mov ecx, imm32`
+call sites `@ 0x57ef97..0x57f03c`) is **modulator2 → modulator → light → sky → ground →
+fog → skyfog → ceiling → cloud → floor → skybase/bright/highlight →
+cloudbase/highlight/edge** — same-tick propagation (ported: `env::ModulatorChain`,
+divergence #17). The modulator's target is the player's **iris auto-exposure sample**
 (`compute_ambient_light_along_direction @ 0x5c7a00`, replicated to gray via ×0x10101 in
 `Environment_ApplyFogAndAmbient @ 0x57e533`, chased over 62 ticks via
 `ColorBlock_SetStepDeltas @ 0x57d940`) — indoor/under-cover dimming and night-brightening
@@ -637,8 +641,13 @@ In a network session the server-synced time + TOD rate replace the local start T
   was **wrong on both counts** — the recovered curve (§Iris auto-exposure above) is the
   engine's global auto-exposure, fed by scene luminance, applied through the modulator
   chain to every color block and to the `Render_LightScaleRGB` shader constant.
-  Implementation still deferred (reimpl has no modulator chain yet); the curve is now
-  spec-complete with unit-testable constants.
+  **Implemented at REN-5 (2026-07-06)**: the chain is live (`env::ModulatorChain` +
+  `NovaWeatherCore`, divergence #17 FIXED below); the witnessed tick order is
+  modulator2 → modulator → the color blocks, same tick
+  `[orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f03c]`. The hosted
+  exposure target is the OUTDOOR iris sample; the 3-point camera-ray march +
+  interior sampling ride [render/render-lighting-re.md](../render/render-lighting-re.md)
+  D-RLIT-2.
 - **`terrain_rgb` is NOT terrain-inert** (pre-C6 hypothesis refuted by the @ 0x26c67f4
   xref sweep). The packed color is pushed at terrain init — *after* the env parse, so the
   file's value is live (`Game_LoadTerrainDuringConnect` orders `Terrain_LoadEnvironmentConfig
@@ -661,7 +670,7 @@ In a network session the server-synced time + TOD rate replace the local start T
     `COLORWRITEENABLE=RGB`); combine pass `0x631` runs stage0 TEXTURE × DIFFUSE with
     MODULATE2X when caps `dword_32656AC` (default true) else MODULATE. The default
     tint renders 254/255 per channel — near-identity, one LSB dark, NOT exact.
-  - `sample_terrain_lightmap @ 0x606030` (from `generate_foliage_instances_0`
+  - `sample_terrain_colormap_tinted @ 0x606030` (from `generate_foliage_instances_0`
     @ 0x600197..0x6001eb, 4 samples at instance ±0x8000 both axes): **LIVE** — lightmap
     texel × `full/128` saturating (`min((texel×FULL)>>7, 255)`, alpha passthrough;
     128 = identity; the default `0xFFFFFF` ≈ ×2 saturating gain — lightmaps are
@@ -700,9 +709,9 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 14 | Sun glare occlusion — the witnessed model (re-grilled 2026-07-06) is TWO jittered rays per frame into an 8-bit sliding window + dead-band hysteresis, not 8 rays at once; the glow alpha is the `dot⁴/2` chain, not `dot³²` | **FIXED 2026-07-06 (the celestial leg)**: `env::glare_occlusion_tick` + `NovaGlareOcclusion` + the NovaCelestial terrain ray march (32-unit-step bilinear stand-in for the lo-res DDA `@ 0x60cb80`, flagged for ENG-3); ctest + `celestial/occlusion`/`celestial/glow` vectors pin it |
 | 15 | Thunder sounds on lightning timer epochs | Deferred; **fully specced by C6** (SoundBank trigger 0 / 0x80 on bank `dword_24E0914`, `SETFLASH1` net-command start; sequencer B unreachable in retail) — wiring lands with WAC weather |
 | 16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade | Documented; **C6 corrected the precedence**: overcast.def is additive-after-success (and the sole table for NULL map), never a fallback; a missing/failed `.trn` aborts the whole TOD load. Runtime port carries .env table only until weather/WAC work lands (overcast blend defaults 0 = pure .env, matching clear weather) |
-| 17 | Iris auto-exposure (modulator gain) | Deferred; curve + consumer chain fully recovered (§Iris auto-exposure). **The curve is now PORTED to `libs/env`** (`iris_gain`/`iris_luminance`, `[orig: terrain_sector_compute_lighting @ 0x5c7550]`, unit-tested in `env_render_unit_test`: m=1→60, darkness→255-clamp, iris_percent-0→base). Row stays WITNESSED-READY-DEFERRED: the reimpl still has no modulator CHAIN to apply the gain to the color blocks — that runtime consumer is the residual |
+| 17 | Iris auto-exposure (modulator gain) | **FIXED 2026-07-06 (REN-5 — the modulator chain went LIVE)**: `env::ModulatorChain` ticks modulator-2 → modulator → every hosted color block in the witnessed same-tick order `[orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..0x57f03c]`; the modulator chases the outdoor iris target over 62 ticks (`WeatherColorBlock::set_step_deltas` `[orig: ColorBlock_SetStepDeltas @ 0x57d940]`, target `0x10101×gain` `[orig: @ 0x57e512..0x57e538]`); the ÷64 render scales reach consumers (`renderer::unpack_modulator_scale` → `ColorSrcGlobalGain`/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`, the object-shader `u_color_src_global_gain` + `opennova_color_src_gain` global). Env vectors re-dumped surgically (exactly the 8 weather checkpoint rows; hand-check wb/k064 `0x31·61/64 = 0x2E`). Residuals tracked in [render/render-lighting-re.md](../render/render-lighting-re.md): D-RLIT-1 (12 unhosted blocks) + D-RLIT-2 (the 3-point interior/occlusion sampling geometry — the hosted target is the outdoor sample) |
 | 18 | Earthquake / rain / wind oscillator rings | Weather-system scope; ported constants documented, wiring deferred with WAC weather |
-| 19 | `terrain_rgb` terrain-stack consumers | **FIXED 2026-07-05** (the tint grill re-shaped it): the FULL/HALF split is ported libs/env-first (`terrain_tint_from_packed`/`_from_rgb` `[orig: PolyTrn_SetTerrainTintColors @ 0x605e20]`, ctest-pinned) and both LIVE consumers render — the `.til` tile overlay (`EnvFile.tile_overlay_tint_factor` → `u_tile_overlay_tint`, the MODULATE2X-over-HALF combine folded to one multiply, 254/255 at default `[orig: PolyTrn_RenderTile @ 0x60df0d]`) and the foliage lightmap sample (`env::foliage_lightmap_tint` per sample in `NovaFoliageDispatcher`, `min((texel×FULL)>>7,255)` `[orig: sample_terrain_lightmap @ 0x606030]`), fed from the loaded env by GameWorld at terrain init like retail. The texture-bake consumer is **DEAD CODE** (readers zero-xref; untinted terrain surface IS faithful — `get_terrain_lighting_attenuation` identity ratified, §C6). Residual facets ride PAR-R2 (colormap alpha-premultiply, emitter half-plus-bias vertex color) and the editor foliage preview keeps the default (=retail default) tint |
+| 19 | `terrain_rgb` terrain-stack consumers | **FIXED 2026-07-05** (the tint grill re-shaped it): the FULL/HALF split is ported libs/env-first (`terrain_tint_from_packed`/`_from_rgb` `[orig: PolyTrn_SetTerrainTintColors @ 0x605e20]`, ctest-pinned) and both LIVE consumers render — the `.til` tile overlay (`EnvFile.tile_overlay_tint_factor` → `u_tile_overlay_tint`, the MODULATE2X-over-HALF combine folded to one multiply, 254/255 at default `[orig: PolyTrn_RenderTile @ 0x60df0d]`) and the foliage lightmap sample (`env::foliage_lightmap_tint` per sample in `NovaFoliageDispatcher`, `min((texel×FULL)>>7,255)` `[orig: sample_terrain_colormap_tinted @ 0x606030]`), fed from the loaded env by GameWorld at terrain init like retail. The texture-bake consumer is **DEAD CODE** (readers zero-xref; untinted terrain surface IS faithful — `get_terrain_lighting_attenuation` identity ratified, §C6). Residual facets ride PAR-R2 (colormap alpha-premultiply, emitter half-plus-bias vertex color) and the editor foliage preview keeps the default (=retail default) tint |
 | 20 | Sky dome combine | **Fixed by C7**: `sky.gdshader` + `nova_sky.gd` rewritten as a structural port of the recovered two-pass spec (§Sky dome) — gradient/cloud lerp chains, dp3 clip-space proximity, builder-formula dome normals computed in the vertex stage, Y-only height scale, half-camera-height anchor, textureless `advanced_clouds 0` flat pass, VS dome fog against the shared scene fog color. The fabricated keyframed-path `u_cloud_tint` is deleted; the dead c25 upload is not replicated. Residual cosmetic caveat: the clip-space prox dot is computed in Godot's clip conventions (reverse-Z), not D3D's — same construction, slightly different z scale; tracked for visual A/B |
 | 21 | skyfog frame clear color | **FIXED 2026-07-05**: the horizon blend is ported libs/env-first (`horizon_blend_skyfog`, byte-exact vs the MMX sequence, ctest-pinned + parity-vector cell) and consumed - `NovaEnvironment.get_frame_clear_color()` drives the GameWorld `ClearColor` WorldEnvironment (above-water skyfog blend / underwater lit-water, the witnessed choice); the vehicle alternate-fog view and the dome-fog application ride their subsystems. Editor preview adoption rides ENV-1. |
 | 22 | Weather PRNG carry: the GDScript port added bit-31 (0/1) where the original's cdq/and/add idiom adds `0x1ABB09` on a negative rotate — a Hex-Rays transcription bug (signed `(next >> 31) & 0x1ABB09` re-typed unsigned) that silently forked the sequence from the first negative rotate | **FIXED 2026-07-05 (minted-and-closed at the ENG-2 port)**: `env::WeatherOscillator::reroll` implements the signed idiom `[orig: Environment_UpdateWeatherTick @ 0x57e9fc..0x57ea16]`; seed `0x12333333` — the mov imm32 `[orig: @ 0x57d2ff in Environment_SnapStateToTargets @ 0x57d1e0]` (the port initially transcribed it `0x12345633`; corrected as #25); the ctest pins the witnessed word sequence and explicitly guards against the bit-31 variant. Invisible to the sampled sway vectors (the spring saturates), so no wa/wb key moved for THIS fix alone |
@@ -763,7 +772,7 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 | Sky dome per-fragment combine | **matching** (C7): structural port of the recovered two-pass spec (§Sky dome) folded into one Godot pass; clip-convention prox caveat tracked under divergence #20 |
 | Celestial + glare | **matching for the ported scope (ENG-2 celestial leg, 2026-07-06)**: body placement (camera + dir × 64) + witnessed alphas + the #14 occlusion window/hysteresis/glow chain live in `libs/env` behind EnvFile statics + `NovaGlareOcclusion`; residuals tracked as #33 (star-field instancing) and the ENG-3 lo-res-DDA ray port |
 | BMS overrides | **matching** application semantics via EnvFile's non-persistent override layer (runtime apply on load / clear on unload; base file never mutated) |
-| iris / terrain_rgb | iris **divergent** — global auto-exposure (curve spec-complete), no modulator chain yet, divergence #17. terrain_rgb **matching** after the 2026-07-05 tint port (#19 FIXED): both live consumers render (tile overlay HALF×2X, foliage FULL×/128); the bake consumer is dead code, untinted terrain surface ratified faithful |
+| iris / terrain_rgb | iris **matching (outdoor)** after REN-5 (#17 FIXED): the modulator chain is live, the smoothed colors carry the exposure, the ÷64 gain reaches shaders; the interior/occlusion sampling geometry rides D-RLIT-2. terrain_rgb **matching** after the 2026-07-05 tint port (#19 FIXED): both live consumers render (tile overlay HALF×2X, foliage FULL×/128); the bake consumer is dead code, untinted terrain surface ratified faithful |
 | Load pipeline overcast precedence | **matching** after C6 correction (additive-after-success; reimpl two-table model documented, overcast blend at 0 pending weather work) |
 
 ## What this effort shipped (2026-06-09, branch `environment-workspace`)
@@ -880,7 +889,7 @@ roadmap slice C7).
 | Target | Question | Verdict | Evidence | C7 action |
 |---|---|---|---|---|
 | G1 sky combine | how c11/c12/c15/c24-c27 combine per fragment; cloud_rgb scope | **recovered** — embedded vs_1_1 sources + TSS tables decoded; two-pass spec | §Sky dome | rewrite `sky.gdshader` fragment + `nova_sky.gd` uniforms from the spec; delete keyframed-path `u_cloud_tint`; skip dead c25 |
-| G2 iris curve | exact x87 tail shaping | **recovered** — closed-form auto-exposure gain, 64 = identity | §Iris auto-exposure | spec ready for a future `env_render::iris_exposure_gain` with pinned constants; needs the modulator chain first (divergence #17) |
+| G2 iris curve | exact x87 tail shaping | **recovered** — closed-form auto-exposure gain, 64 = identity | §Iris auto-exposure | shipped: `env::iris_gain` + the live `ModulatorChain` (REN-5; divergence #17 FIXED) |
 | G3 terrain_rgb consumers | any consumer beyond the effects reciprocal? | **refuted "terrain-inert"** — texture bake, water quads, foliage tint, all live | §iris/terrain_rgb | matrix row stays PARTIAL with the bigger gap; port decision per consumer (divergence #19); recip sole-consumer claim now *confirmed* |
 | G4 ApplyFogAndAmbient | full state walk; ceiling/floor points; 0x5c7a00 wiring | **complete** — 8-row walk table; exposure application point = `Render_LightScaleRGB` shader constant | §Environment_ApplyFogAndAmbient walk | informs C7 fog/exposure plumbing; ceiling/floor wire-or-delete now decidable (keep: they are live exposure inputs + effect ambient) |
 | G5 overcast precedence | fallback or always-after? | **corrected** — never a fallback; additive after `.trn` success (no count reset); missing/failed `.trn` aborts all | §Load pipeline | comment-level in `libs/env`; future overcast cross-fade uses the corrected order |

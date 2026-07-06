@@ -80,8 +80,9 @@ behavior is summarized and cited.
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record — layering, matchmaking, and the in-match protocol — current through §5.61 and D-NET-162; per-entry fix/live-verify state and the ranked open items live in the doc's own D-NET divergence catalog |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
 | Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + full `PLAYER_INFO` screen orchestration grilled, D-PLAYERINFO-1..12; runtime `player.mnu` host wiring + spawned-player binding open) |
-| Render | [`render/render-material-re.md`](render/render-material-re.md) | landed (REN-2: the runtime material path — HLSLEffect registry, tag resolution, flag-byte state, blend/depth policy — D-RMAT-1..6; the lighting record follows at REN-5) |
+| Render | [`render/render-material-re.md`](render/render-material-re.md) | landed (REN-2: the runtime material path — HLSLEffect registry, tag resolution, flag-byte state, blend/depth policy — D-RMAT-1..6) |
 | Render | [`render/render-order-re.md`](render/render-order-re.md) | landed (REN-3: the batch queues, sort keys, technique-class selection, render-state stack, and the frame pass sequence — D-RORD-1..6; the ordering ladder ported to `libs/renderer/render_order`) |
+| Render | [`render/render-lighting-re.md`](render/render-lighting-re.md) | landed (REN-5: the iris/modulator chain, the world lighting block + entity uniforms + hemisphere lights, dynamic point lights, terrain/foliage c0/c1, lighting textures + the cubemap sources — D-RLIT-1..6; ported to `libs/renderer/light_runtime` + `libs/env::ModulatorChain`) |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
 | VFS/PFF | [`vfs/vfs-pff-mount-re.md`](vfs/vfs-pff-mount-re.md) | landed (PAR-R7 audit: the mount stack, resolution order, /d gate, D-VFS-1..9) |

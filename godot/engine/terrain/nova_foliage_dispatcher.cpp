@@ -31,7 +31,7 @@ namespace {
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
 
 // Foliage instance color: the witnessed sampler chain (per-sample terrain_rgb
-// tint + 2x2 average [orig: sample_terrain_lightmap @ 0x606030;
+// tint + 2x2 average [orig: sample_terrain_colormap_tinted @ 0x606030;
 // generate_foliage_instances_0 @ 0x600197..0x6001eb]) baked into MultiMesh
 // instance colors. The emitter's half-plus-bias vertex color and the retail
 // colormap alpha-premultiply ride the foliage render-emitter parity (PAR-R2).
@@ -488,7 +488,7 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	// Four lightmap samples at the instance center +-0.5 world units
 	// (+-0x8000 fixed) with the env terrain_rgb FULL tint applied per sample
 	// (min((texel * FULL) >> 7, 255), alpha passthrough), then the 2x2 SWAR
-	// average [orig: sample_terrain_lightmap @ 0x606030; sample fan
+	// average [orig: sample_terrain_colormap_tinted @ 0x606030; sample fan
 	// generate_foliage_instances_0 @ 0x600197..0x6001eb]. MultiMesh has one
 	// color per instance, so the average IS the instance color; the emitter's
 	// half-plus-bias vertex color (0x404040 + avg>>1 under the 2X draw) rides

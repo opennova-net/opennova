@@ -28,6 +28,12 @@ private:
 	opennova::env::WeatherColorBlock sun_block;  // directional light (never flashed)
 	opennova::env::WeatherColorBlock fog_block;
 	opennova::env::WeatherColorBlock sky_block;
+	// The iris auto-exposure chain (env #17): modulator-2 -> modulator ->
+	// every block, ticked ahead of the color blocks in the witnessed order
+	// [orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..;
+	//  target wiring @ 0x57e512..0x57e538]. The target defaults to identity
+	// until set_exposure_from_iris runs.
+	opennova::env::ModulatorChain modulator_chain;
 	// The cloud-scroll rate + accumulators [orig: rate ramp @ 0x57eecc,
 	// accumulators @ 0x57f1a5..0x57f1d1] — the tick's tail. The rate always
 	// RAMPS toward sky_speed << 10 (the snap refreshes only the target), so a
@@ -72,6 +78,23 @@ public:
 
 	void trigger_lightning_short();
 	void trigger_lightning_long();
+
+	// Set the modulator's exposure target from the OUTDOOR iris sample at the
+	// current smoothed colors: gain = iris_gain(light[1], sky[1], ground[1],
+	// light_dir, iris params), target = 0x10101 * gain chased over 62 ticks.
+	// The outdoor sample assumes full sun visibility (8/8 rays) and no cover —
+	// the interior/occlusion sampling of the original's 3-point camera-ray
+	// march rides the unhosted interior system (docs/render/
+	// render-lighting-re.md D-RLIT-2).
+	// [orig: Environment_ApplyFogAndAmbient @ 0x57e512..0x57e538;
+	//  compute_ambient_light_along_direction @ 0x5c7a00;
+	//  terrain_sector_compute_lighting @ 0x5c7550]
+	void set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center);
+
+	// The modulator's render color / 64 — ColorSrcGlobalGain and the
+	// effects/foliage ambient scale [orig: Render_UnpackModulatorToLightScale
+	// @ 0x58db30; EffectWorld_UnpackModulatorToAmbientScale @ 0x5aaef0].
+	Vector3 get_color_src_gain() const;
 
 	Color get_fill() const;
 	Color get_sun() const;

@@ -63,10 +63,19 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	}
 	u += "uniform float u_emissive = 0.0;\n";
 
-	u += "uniform vec3 u_ambient_color = vec3(0.35, 0.36, 0.40);\n";
+	// The witnessed lighting uniform surface (.fx parameter slots 227-230 +
+	// 232, resolved at load [orig: HLSLEffect_LoadFromFile @ 0x5af417..
+	// 0x5af49e]): DirLightVector/DirLightColor/HemiGroundColor/HemiSkyColor
+	// (AmbientColor derives as their average) and ColorSrcGlobalGain. Engine-
+	// fed values are the env blocks' post-modulator colors (docs/render/
+	// render-lighting-re.md); the defaults below are host-preview values only
+	// (un-enved swatch/editor scenes), scaled so the witnessed x2 modulate
+	// lands near the retail mid-day register.
+	u += "uniform vec3 u_hemi_sky_color = vec3(0.20, 0.21, 0.23);\n";
+	u += "uniform vec3 u_hemi_ground_color = vec3(0.10, 0.11, 0.13);\n";
 	u += "uniform vec3 u_dir_light_dir = vec3(-0.4082, -0.8165, -0.4082);\n";
-	u += "uniform vec3 u_dir_light_color = vec3(0.85, 0.82, 0.75);\n";
-	u += "uniform vec3 u_fill_light_color = vec3(0.18, 0.20, 0.25);\n";
+	u += "uniform vec3 u_dir_light_color = vec3(0.42, 0.41, 0.38);\n";
+	u += "uniform vec3 u_color_src_global_gain = vec3(1.0);\n";
 	u += "uniform bool u_fog_enabled = false;\n";
 	u += "uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);\n";
 	u += "uniform float u_fog_start = 0.0;\n";
@@ -105,16 +114,27 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\treturn out_uv + vec2(0.5) + u_uv_offset;\n";
 	u += "}\n\n";
 
-	u += "vec3 obj_hemi_fill(vec3 n) {\n";
+	// The FF hemisphere: AmbientColor = (sky + ground)/2 applied as the
+	// material emissive, plus two opposing directional lights carrying the
+	// DELTA colors (sky - ambient downward, ground - ambient upward) — which
+	// is exactly mix(ground, sky, n.y * 0.5 + 0.5)
+	// [orig: RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 (the averages);
+	//  Lighting_SetHemisphereD3DLights @ 0x5d8cb0 (the delta lights)].
+	u += "vec3 obj_hemi(vec3 n) {\n";
 	u += "\tfloat up = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);\n";
-	u += "\treturn mix(u_fill_light_color, u_ambient_color, up);\n";
+	u += "\treturn mix(u_hemi_ground_color, u_hemi_sky_color, up);\n";
 	u += "}\n\n";
 
+	// The fixed-function lit combine: the D3D vertex diffuse saturates
+	// (hemi + directional clamped to 1), then the output stage is
+	// MODULATE2X(Texture, Diffuse) — texture x diffuse x 2
+	// [orig: _FFP.fx TBoringFFP TSSColor(0, Modulate2x, Texture, Diffuse);
+	//  D3D light 0 setup @ 0x5d9ce2..0x5d9d76].
 	u += "vec3 obj_ff_lighting(vec3 base_rgb, vec3 normal_ws) {\n";
 	u += "\tvec3 N = normalize(normal_ws);\n";
 	u += "\tvec3 L = normalize(-u_dir_light_dir);\n";
 	u += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-	u += "\treturn base_rgb * (obj_hemi_fill(N) + u_dir_light_color * ndotl);\n";
+	u += "\treturn base_rgb * min(obj_hemi(N) + u_dir_light_color * ndotl, vec3(1.0)) * 2.0;\n";
 	u += "}\n\n";
 
 	// Local-light contribution: returns the additive RGB from u_local_light_*.
@@ -236,51 +256,63 @@ std::string compose_fragment(ObjectShaderKey key) {
 		// falloff that fades a well-tessellated tube toward its silhouette
 		// edges ("soft edges"); no lighting includes, Spec = 0. Evaluated
 		// per-fragment here (the original computes lum per-vertex in vs_1_1
-		// and interpolates — same formula).
-		// [orig: Tracer.fx vsTracer; TSSColor MODULATE(Texture, Diffuse)]
+		// and interpolates — same formula). Tracer modulates 1x, not 2x
+		// [orig: Tracer.fx vsTracer; TSSColor MODULATE(Texture, Diffuse)].
 		f += "\tfloat vf = abs(dot(geom_normal, view_dir));\n";
 		f += "\tlit = base.rgb * (vf * vf);\n";
 	} else if (emissive || luminance) {
-		f += "\tlit = base.rgb;\n";
+		// SELFLUM: the material emissive becomes SelfLumColor x
+		// ColorSrcGlobalGain (the modulator /64 — the iris exposure reaching
+		// self-lit surfaces) with black diffuse/ambient, still under the
+		// MODULATE2X output stage. The vertex color saturates before the x2
+		// [orig: _FFP.fx SELFLUM variant; gain bind @ 0x58e05d ->
+		//  Render_LightScaleRGB @ 0x8409f4].
+		f += "\tlit = base.rgb * min(u_color_src_global_gain, vec3(1.0)) * 2.0;\n";
 	} else if (family == ObjectShaderFamily::Flag) {
+		// Two-sided cloth: light the camera-facing side (the host form of the
+		// cull-none FF draw); the lighting model is the standard FF combine.
 		f += "\tvec3 nfacing = surface_normal;\n";
 		f += "\tif (dot(view_dir, geom_normal) < 0.0) nfacing = -nfacing;\n";
-		f += "\tvec3 N = normalize(nfacing);\n";
-		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
-		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = base.rgb * (obj_hemi_fill(N) + u_dir_light_color * ndotl) * 1.5;\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, nfacing);\n";
 	} else if (family == ObjectShaderFamily::Glass) {
+		// Glass NORMAL technique: the FF lit base plus the environment-cube
+		// reflection scaled by ReflectColor. The live scene cube
+		// (Render_CubeEnvironmentTexture, re-rendered every 128 frames
+		// [orig: update_environment_cubemap @ 0x6106a0]) is not hosted; its
+		// dominant content — sky above, ground below — stands in via the
+		// hemisphere sampled along the reflected view (tracked, D-RLIT-5).
 		f += "\tvec3 N = surface_normal;\n";
-		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
-		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tvec3 ff_lit = base.rgb * (max(obj_hemi_fill(N), vec3(0.2)) + u_dir_light_color * ndotl);\n";
+		f += "\tvec3 ff_lit = obj_ff_lighting(base.rgb, N);\n";
+		f += "\tvec3 refl_dir = reflect(-view_dir, N);\n";
+		f += "\tvec3 env = obj_hemi(refl_dir) * 2.0;\n";
 		f += "\tfloat fresnel = pow(1.0 - max(dot(N, view_dir), 0.0), 2.0);\n";
-		f += "\tvec3 env = mix(u_ambient_color, u_dir_light_color, 0.4);\n";
-		f += "\tlit = mix(ff_lit, env * u_reflect_color.rgb, clamp(0.4 + fresnel * 0.6, 0.0, 1.0));\n";
+		f += "\tlit = mix(ff_lit, env * u_reflect_color.rgb, clamp(u_reflect_color.a + fresnel * (1.0 - u_reflect_color.a), 0.0, 1.0));\n";
 		f += "\talpha = clamp(max(base.a, 0.35), 0.0, 1.0);\n";
 	} else if (family == ObjectShaderFamily::Phong ||
 	           family == ObjectShaderFamily::Environment) {
 		f += "\tvec3 N = surface_normal;\n";
 		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
 		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = base.rgb * obj_hemi_fill(N);\n";
-		f += "\tlit += base.rgb * u_dir_light_color * ndotl * 1.6;\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, N);\n";
 		if (has_flag(key, OSCAP_SPECULAR)) {
+			// The VS_PHONG* specular is a PhongMap texture lookup along the
+			// reflection vector; the lobe content is unwitnessed — a pow-16
+			// half-vector lobe in the witnessed light color stands in
+			// (tracked, D-RLIT-5).
 			f += "\tif (ndotl > 0.0) {\n";
 			f += "\t\tvec3 H = normalize(L + view_dir);\n";
 			f += "\t\tfloat spec = pow(max(dot(N, H), 0.0), 16.0);\n";
-			f += "\t\tlit += u_dir_light_color * spec * 0.8;\n";
+			f += "\t\tlit += u_dir_light_color * spec;\n";
 			f += "\t}\n";
 		}
 		if (family == ObjectShaderFamily::Environment) {
+			// Env-mapped surfaces sample the scene cube; the hemisphere along
+			// the reflected view stands in for the unhosted cube (D-RLIT-5).
 			f += "\tfloat fresnel = pow(1.0 - max(dot(N, view_dir), 0.0), 3.0);\n";
-			f += "\tlit = mix(lit, u_dir_light_color * 1.2, fresnel * 0.35);\n";
+			f += "\tlit = mix(lit, obj_hemi(reflect(-view_dir, N)) * 2.0, fresnel * 0.35);\n";
 		}
 	} else if (family == ObjectShaderFamily::Dot3) {
-		f += "\tvec3 N = surface_normal;\n";
-		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
-		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = base.rgb * (obj_hemi_fill(N) + u_dir_light_color * ndotl);\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
 	} else {
 		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
 	}
@@ -289,7 +321,7 @@ std::string compose_fragment(ObjectShaderKey key) {
 	// emissive variants intentionally bypass lighting and shouldn't be
 	// brightened by local point lights).
 	f += "\tif (u_emissive < 0.5) lit += obj_local_light_contrib(base.rgb, surface_normal, v_world_pos);\n";
-	f += "\tif (u_emissive > 0.5) lit = base.rgb;\n";
+	f += "\tif (u_emissive > 0.5) lit = base.rgb * min(u_color_src_global_gain, vec3(1.0)) * 2.0;\n";
 	f += "\tif (u_fog_enabled) {\n";
 	f += "\t\tfloat fog_visibility = obj_fog_visibility(distance(CAMERA_POSITION_WORLD, v_world_pos), u_fog_start, u_fog_end, u_fog_type);\n";
 	f += "\t\tlit = mix(u_fog_color, lit, fog_visibility);\n";
