@@ -616,7 +616,20 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   the camera; REN-6 full decode 2026-07-06 — the earlier "2..9 columns" reading was
   wrong: **2..9 is the adaptive ROW-march stride**, `steps = clamp(int(row_1/w ×
   500.0), 2, 9)` `[orig: @ 0x5c265a low / @ 0x5c30d0 detailed; flt_7D6FB4 = 500.0]`,
-  re-derived per row so near rows pack dense and far rows stride wide). Each stored
+  re-derived per row so near rows pack dense and far rows stride wide). The march
+  substrate (both helpers fully decoded at the witness addendum): the 40-byte
+  screen block from `terrain_project_sector_to_screen @ 0x5c0bf0` — the water
+  plane (at the strip's height) projected at camera + horizontal-forward × 2000
+  → screen origin `[0..1]`, the per-1000-units-along-view screen delta `[2..3]`
+  (dy forced 1e-6 when 0), a 1000-unit reference point `[4..5]`, the normalized
+  screen march direction `[6..7]`, and visibility `[8..9]` (in-viewport or
+  halfplane tests); then per row `clip_line_to_viewport @ 0x5c0a30` intersects
+  the row's screen line (point + 1/slope form) with the viewport rect,
+  returning the row's LEFT and RIGHT screen endpoints (`out[0..3]`) + a
+  crossing flag (`out[4]`) — the three row vertices are the clipped left
+  endpoint, the midpoint, and the right endpoint, unprojected to world through
+  the inverted view matrix (`Math_InvertMatrix4x4_Float_ToStatic @ 0x611960`
+  cached per pass) with the per-vertex 1/w chain. Each stored
   row = **3 vertices (left edge / midpoint / right edge)** of the projected row
   span; rows cap at **1024** (low: byte counter `/120` `[@ 0x5c26cb]`; detailed:
   `/192` `[@ 0x5c3135]`); rows submit as **≤5-row triangle-strip batches stepping 4
