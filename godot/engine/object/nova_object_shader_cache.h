@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstdint>
@@ -29,6 +30,12 @@ public:
 			int32_t alpha_test_byte);
 
 	int32_t family_for_key(int32_t key) const;
+
+	// Every shader tag in the canonical descriptor table (libs/oed), in table
+	// order. Lets tooling (the render swatch probe, material pickers) iterate
+	// the real table instead of duplicating the tag list.
+	PackedStringArray get_known_shader_tags() const;
+
 	void clear();
 
 protected:

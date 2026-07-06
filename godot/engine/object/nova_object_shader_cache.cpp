@@ -1,5 +1,6 @@
 #include "object/nova_object_shader_cache.h"
 
+#include "oed/material_descriptor.h"
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
 
@@ -37,6 +38,7 @@ void NovaObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_shader_for_key", "key"), &NovaObjectShaderCache::get_shader_for_key);
 	ClassDB::bind_method(D_METHOD("classify", "shader_tag", "material_flags", "emissive_type", "is_glass_flag", "alpha_test_byte"), &NovaObjectShaderCache::classify);
 	ClassDB::bind_method(D_METHOD("family_for_key", "key"), &NovaObjectShaderCache::family_for_key);
+	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &NovaObjectShaderCache::get_known_shader_tags);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaObjectShaderCache::clear);
 }
 
@@ -71,6 +73,15 @@ int32_t NovaObjectShaderCache::classify(const String &shader_tag,
 
 int32_t NovaObjectShaderCache::family_for_key(int32_t key) const {
 	return static_cast<int32_t>(renderer::decode_object_shader_family(static_cast<uint32_t>(key)));
+}
+
+PackedStringArray NovaObjectShaderCache::get_known_shader_tags() const {
+	PackedStringArray tags;
+	tags.resize(static_cast<int64_t>(oed::kMaterialInfoTableCount));
+	for (size_t i = 0; i < oed::kMaterialInfoTableCount; ++i) {
+		tags[static_cast<int64_t>(i)] = String(oed::kMaterialInfoTable[i].name);
+	}
+	return tags;
 }
 
 } // namespace godot

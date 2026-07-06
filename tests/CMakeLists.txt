@@ -532,7 +532,7 @@ target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME oed_error COMMAND oed_error_test)
 
 # Object renderer/shader tests
-foreach(test light_runtime material_classify material_eval)
+foreach(test light_runtime material_classify material_eval state_vectors)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_renderer opennova_threedi)
     target_include_directories(renderer_${test}_test PRIVATE
@@ -541,6 +541,11 @@ foreach(test light_runtime material_classify material_eval)
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
+
+# The REN-1 T1 parity instrument reads its committed golden from the source
+# tree (dump mode rewrites it there — ADR 0023).
+target_compile_definitions(renderer_state_vectors_test PRIVATE
+    RENDER_STATE_VECTORS_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_state_vectors.golden")
 
 # ASE tests
 add_executable(ase_smoke_test ase/ase_smoke_test.cpp)
