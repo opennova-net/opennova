@@ -25,9 +25,10 @@ of the game (ADR 0015).
 
 | Field | Value |
 |---|---|
-| State | Wave-1 code COMPLETE in the trunk PR #204 (in review; Wave 0 merged 2026-07-04) |
-| Current wave | 1 — boundary moves + ONED foundations; every exit-gate item is aboard #204 (F1–F5 done, FULL GUT keystone attested; env vectors committed; twelve workspaces merged; npwire + seam landed earlier). Wave 2 opens at merge |
-| Freeze | ON for non-PAR work: new reimplementation features wait for their foundation phase; IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)). |
+| State | **Wave 2 OPEN** — Wave-1 trunk #204 merged 2026-07-05 as `50fce423`; the Wave-2 boundary slice (this row's train) executed the STD-3 enforce flip + GOV-4 sync |
+| Current wave | 2 — portability + standards adoption (WIP cap: two trains). Contents: ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2 (STD-3 flip done at the boundary); ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D. First train: ENG-2 env port (ENG-1 vectors stand ready) |
+| Boundary gates (Wave 1→2) | full ctest: 246/248 green; the two reds are pre-existing, tracked, and not Wave-1 regressions — `npruntime_golden_gameplay` (TODO.md, D-NET-159 wire adjudication, asset-gated so CI never sees it) and `opennova_python_pytest` (diagnosed at this boundary, TODO.md: the two DCC-parity tests build a zero-write request the jobs validation rejects, then their in-parent `import bpy` poisons the 13 spawn-context worker tests — all 13 pass in isolation). FULL GUT attested in the boundary PR |
+| Freeze | ON for non-PAR work: new reimplementation features wait for their foundation phase (ONED-W2 releases at Wave 3); IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)). |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
 
@@ -35,7 +36,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| GOV-4 Wave-1 close-out | (this train) | ratchets +0 all train (`test_private_pokes` 1371, `libs_uncited_src_files` 88); ledger synced continuously (66 → 62 open across the train); stale-doc touches ride each slice (vfs record, menu-re, world-wac-ai-re, env records) |
+| Wave-2 boundary: STD-3 flip + GOV-4 sync | (this slice) | CI lint step now `--enforce` ×3 (ratchet, dict-contract, link-graph) + `fetch-depth: 0` so the diff lint stops self-skipping on PRs; dict-contract lint repaired to class-level declarations only (its Wave-1 soft run flagged 36 function-locals — a lint bug, not code debt; the 4 surviving range hits are pre-existing contracts moved by F5); ledger scoreboard now GENERATED (`scripts/lint/ledger_check.py`, hard-fail like the ratchet) — mechanical recount corrected the hand-kept total 64 → **66 open** (Net rows were undercounted 21→23, Credits 2→1, Tiles 1→0, Fonts 3→1); ratchet baseline tightened `libs_uncited_src_files` 87 → **65** (earned by the PAR-train citations); D-FOLIAGE-1's raw `\|` escaped (it broke GFM rendering + parsers) |
+| GOV-4 Wave-1 close-out | 50fce423 (rode the trunk) | ratchets +0 all train (`test_private_pokes` 1371, `libs_uncited_src_files` 88 at close — see the boundary slice's recount); ledger synced continuously (the trunk-era hand count said 66 → 62; the mechanical recount at the boundary says 66 — the drift is why the scoreboard is now generated); stale-doc touches rode each slice (vfs record, menu-re, world-wac-ai-re, env records) |
 | NET-4 C-ABI guard | ae221e7d + 729f01c7 + 17f06457 | `abi_export_identity` ctest (104-export baseline, forbidden net families); its macOS leg immediately caught + fixed the dylib leak (hidden visibility + 38 phantom MISSION_EXPORTs stripped) — the flat C ABI is now provably identical on every platform |
 | PAR burn-down (trunk train) | 8778a0b4 … 2ed9a4fb | eight rows closed: D-EVT-2/-4 + cats 5/6 + D-EVT-5 mint, D-PLAYERINFO-2, D-NET-20, env #21, env #19 (tint consumers; dead-bake correction), D-VFS-2 (fixed boot table + the editor-index decision), D-CTRL-2 (witnessed visibility flags), D-INF-4 (witnessed direction-table generator); PAR-R7 VFS/PFF audit landed (D-VFS-1..9) |
 | ENG-6 R8 boot-resource research | 1139190e | docs/required-resources.md (fatal set, ordered boot sequence, D-BOOT catalog); the Wave-2 manifest leg stays open |
@@ -230,7 +232,13 @@ conversions.
   LinkPayload, WorkspaceDef/InspectorDef.
 - **STD-3** (S) hard-fail flip at the Wave-2 boundary for lints that ran a
   wave without false positives. Ratchets are hard from day one (they are
-  noise-free by construction).
+  noise-free by construction). **Executed at the boundary (2026-07-05)**:
+  all three checks now run `--enforce` in CI, with two repairs the flip
+  surfaced — the dict-contract lint matched indented function-locals
+  (fixed: class-level column-0 declarations only, per its own spec), and
+  the CI shallow clone made the diff lint self-skip on every PR (fixed:
+  `fetch-depth: 0`). The ledger scoreboard check joined the gate set
+  (generated block, ratchet-class noise-free).
 
 ### ONED — editor maturity
 
@@ -379,6 +387,7 @@ hatch (a baseline bump, logged in this doc).
 | [orig] citation coverage | ratchet: libs/*/src files with zero citations (infra libs allowlisted), fail-on-increase | Wave 1 | hard on increase; semantic coverage stays a review concern |
 | Magic numbers | diff-scoped advisory in the CI summary | Wave 2 | advisory permanently |
 | Link-graph edges | forbidden-edge script (npwire !→ sqlite; wac/mission/net !→ terrain-format libs post-seam) | Wave 1 | hard-fail forever |
+| Ledger scoreboard sync | `scripts/lint/ledger_check.py` — the count-to-zero block is generated from the per-domain tables (`--write`), CI checks the equality | Wave 2 | hard-fail forever (ratchet-class: a mismatch is never a false positive, `--write` IS the fix) |
 | GUT silent-drop greps | existing | exists | unchanged |
 | C-ABI export identity + net-family ban | `abi_export_identity` ctest (`abi_exports_check.py` vs the committed baseline; a baseline bump is same-commit and logged here; the net-family check is never bypassable) | Wave 1 (NET-4) | hard-fail forever |
 

@@ -7,9 +7,16 @@ flagged (the ratchet in ratchet_counts.py covers the stock):
   dict-contract (ADR 0017): new Dictionary-shaped public contracts in
       godot/modtools/ or godot/engine/ GDScript — a public `-> Dictionary`
       return, a public `var x: Dictionary`, or a `const NAME := {` map
-      table. New contracts are typed records (RefCounted/Resource);
-      Dictionaries belong only at transport/serialization edges, which go
-      in the allowlist (substring match on "path|line").
+      table, all at CLASS level (column 0). Indented declarations are
+      function-locals — annotating a local as Dictionary is not a new
+      contract (the Wave-1 soft run flagged 36 such locals; that was the
+      lint's bug, fixed at the Wave-2 flip). Inner-class members are the
+      accepted blind spot of the column-0 heuristic. New contracts are
+      typed records (RefCounted/Resource); Dictionaries belong only at
+      transport/serialization edges, which go in the allowlist (substring
+      match on "path|line"). Moved legacy declarations re-flag under a
+      diff-scoped lint (a move reads as an add) — allowlist them or take
+      the maintainer escape hatch in the PR that moves them.
   magic-number (advisory, never fails): added lines carrying bare numeric
       literals outside const/enum/citation contexts. Heuristic by design —
       it informs review, it does not gate.
@@ -35,9 +42,11 @@ BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 
 LINT_SCOPES = ("godot/modtools/", "godot/engine/")
 
-DICT_RETURN = re.compile(r"^\s*(?:static\s+)?func\s+([a-z][a-z0-9_]*)\s*\(.*->\s*Dictionary\b")
-DICT_PUBVAR = re.compile(r"^\s*(?:@export\s+)?var\s+([a-z][a-z0-9_]*)\s*:\s*Dictionary\b")
-DICT_CONST_TABLE = re.compile(r"^\s*const\s+(_?[A-Z][A-Z0-9_]*)\s*:?=\s*\{")
+# Column 0 only: class-level declarations. GDScript function bodies are
+# indented, so an indented match is a local, not a contract.
+DICT_RETURN = re.compile(r"^(?:static\s+)?func\s+([a-z][a-z0-9_]*)\s*\(.*->\s*Dictionary\b")
+DICT_PUBVAR = re.compile(r"^(?:@export\s+)?var\s+([a-z][a-z0-9_]*)\s*:\s*Dictionary\b")
+DICT_CONST_TABLE = re.compile(r"^const\s+(_?[A-Z][A-Z0-9_]*)\s*:?=\s*\{")
 
 # 2+ digit bare literals (ints or floats), skipping obvious non-magic lines.
 MAGIC_NUMBER = re.compile(r"(?<![\w.])\d{2,}(?:\.\d+)?(?![\w.])")
