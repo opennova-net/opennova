@@ -345,6 +345,84 @@ void CloudScrollState::tick(int rate_target) {
 }
 
 // ---------------------------------------------------------------------------
+// Sky dome mesh
+
+SkyDomeMesh build_sky_dome_mesh(float sky_height) {
+	// [orig: build_sky_dome_mesh @ 0x578db0] — structural translation; see the
+	// header block for the full witness map. Doubles seeded from the binary's
+	// float32 literals (.rdata @ 0x7d75c4..0x7d75e0), outputs stored float32
+	// like the D3D vertex buffer.
+	constexpr int kRows = 21;
+	constexpr int kCols = 21;
+	const double kRowStep = static_cast<double>(51.2f);       // @ 0x7d75d4
+	const double kThetaStep = static_cast<double>(0.31415927f); // pi/10 @ 0x7d75c4
+	const double kUv1Scale = static_cast<double>(0.003125f);  // 1/320 @ 0x7d75d0
+	const double kUv2Scale = 0.00146484375;                   // 3/2048 @ 0x7d75cc
+	const double kSphereRadiusSq = static_cast<double>(9437184.0f); // 3072^2 @ 0x7d75c8
+	const double sqrt_base = std::sqrt(8388608.0);            // sqrt(2^23) @ 0x7d75e0
+
+	SkyDomeMesh mesh;
+	mesh.positions.reserve(kSkyDomeVertices * 3);
+	mesh.normals.reserve(kSkyDomeVertices * 3);
+	mesh.uv1.reserve(kSkyDomeVertices * 2);
+	mesh.uv2.reserve(kSkyDomeVertices * 2);
+	mesh.indices.reserve(kSkyDomeTriangles * 3);
+
+	// Index buffer first, like the original: per quad (i, i+22, i+21) then
+	// (i, i+1, i+22) [orig: @ 0x578e00..0x578e86].
+	for (int row = 0; row < kRows - 1; ++row) {
+		const int base = row * kCols;
+		for (int col = 0; col < kCols - 1; ++col) {
+			const int i = base + col;
+			mesh.indices.push_back(i);
+			mesh.indices.push_back(i + kCols + 1);
+			mesh.indices.push_back(i + kCols);
+			mesh.indices.push_back(i);
+			mesh.indices.push_back(i + 1);
+			mesh.indices.push_back(i + kCols + 1);
+		}
+	}
+
+	// v14 = skyHeight / (3072 - sqrt(2^23)) [orig: @ 0x578ed4]; the Y scale is
+	// baked, x/z stay at the 1024-unit rim.
+	const double v14 = static_cast<double>(sky_height) / (3072.0 - sqrt_base);
+	const double inv_y_scale_sq = 1.0 / (v14 * v14);
+	for (int row = 0; row < kRows; ++row) {
+		const double radius = row * kRowStep;
+		const double y_unscaled = std::sqrt(kSphereRadiusSq - radius * radius) - sqrt_base;
+		const double y_scaled = v14 * y_unscaled;
+		for (int col = 0; col < kCols; ++col) {
+			const double theta = col * kThetaStep;
+			const double x = std::sin(theta) * row * kRowStep;
+			const double z = std::cos(theta) * row * kRowStep;
+			mesh.positions.push_back(static_cast<float>(x));
+			mesh.positions.push_back(static_cast<float>(y_scaled));
+			mesh.positions.push_back(static_cast<float>(z));
+			mesh.uv1.push_back(static_cast<float>(x * kUv1Scale));
+			mesh.uv1.push_back(static_cast<float>(z * kUv1Scale));
+			mesh.uv2.push_back(static_cast<float>(x * kUv2Scale));
+			mesh.uv2.push_back(static_cast<float>(z * kUv2Scale));
+
+			// normalize(x, y_scaled / v14^2, z) [orig: @ 0x578fbb..0x579023];
+			// zero length degenerates to (0,0,0) [orig: @ 0x578fd8].
+			const double ny_in = y_scaled * inv_y_scale_sq;
+			const double length = std::sqrt(z * z + ny_in * ny_in + x * x);
+			if (length == 0.0) {
+				mesh.normals.push_back(0.0f);
+				mesh.normals.push_back(0.0f);
+				mesh.normals.push_back(0.0f);
+			} else {
+				const double inv_length = 1.0 / length;
+				mesh.normals.push_back(static_cast<float>(x * inv_length));
+				mesh.normals.push_back(static_cast<float>(ny_in * inv_length));
+				mesh.normals.push_back(static_cast<float>(z * inv_length));
+			}
+		}
+	}
+	return mesh;
+}
+
+// ---------------------------------------------------------------------------
 // Sun glare
 
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {

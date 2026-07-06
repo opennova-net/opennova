@@ -342,6 +342,43 @@ one multi-stage pass**, alpha-blended over it. Both vertex shaders are embedded 
 and assembled at runtime with the statically-linked `D3DXAssembleShader` in
 `terrain_init_rendering_resources @ 0x5789e0` (handles → sky+116 / sky+120).
 
+**Builder internals (ENG-2 sky-leg re-grill, 2026-07-06 — the libs/env port's witness
+set):** the dome profile is a sphere cap of radius 3072 lowered so the rim (radius
+1024 = 20 rows × 51.2) sits at y = 0 — `3072² − 1024² = 2²³`, so
+`y(r) = sqrt(3072² − r²) − sqrt(2²³)` and the apex reference height is
+`3072 − sqrt(2²³) ≈ 175.6906` (the exact value behind the shaders' rounded "175.69"
+divisor). The x87 math is seeded from float32 literals (`.rdata`): `51.2f @ 0x7d75d4`,
+`0.31415927f` (π/10) `@ 0x7d75c4`, `9437184.0f @ 0x7d75c8`, `3072.0f @ 0x7d75d8`,
+UV scales `0.003125f @ 0x7d75d0` + `3/2048 @ 0x7d75cc`; `8388608.0 @ 0x7d75e0` is a
+double. Index winding per quad: `(i, i+22, i+21), (i, i+1, i+22)` (`@ 0x578e00..0x578e86`)
+— exactly the committed `sky/mesh` vector's order. Normal degenerate guard: zero length
+→ `(0,0,0)` (`@ 0x578fd8`). Rebuild trigger: `Environment_ApplyFogAndAmbient` rebuilds
+only when the SMOOTHED height changes (`Env_SkyHeightCurrent != Env_SkyHeightApplied
+@ 0x57e4f4` → `Terrain_PushSkyDomeHeightFloat @ 0x610920` →
+`SkyDome_SetHeightAndRebuild @ 0x579070`, which stores `this+0x48` and re-bakes;
+buffer creation is `SkyDome_CreateBuffersAndBuild @ 0x579d10`, 441×40-byte VB +
+2400-index IB). Ported: `env::build_sky_dome_mesh` + `kSkyDomeReferenceHeight`
+(`libs/env/src/env_render.cpp`, dome section in `env_render_unit_test`).
+
+**Scroll-rate state (back-filled citations):** the live rate `Env_CloudScrollRate
+@ 0x26c686c` smooth-eighths toward `Env_CloudScrollRateTarget @ 0x26c6870` each tick
+(`@ 0x57eecc`); the target — not the rate — is refreshed from the parsed
+`Env_SkySpeedFixed` (= `sky_speed << 10`) at mission-start snap (`@ 0x57d2da` in
+`Environment_SnapStateToTargets`) and by the net apply (`NapiNPClientMsg_0x00A
+@ 0x4302ec`; the server serializes the live rate at `NetPacket_WritePlayerState
+@ 0x4ffae2`). The snap never sets the rate itself: after a mission (re)start the rate
+RAMPS from its previous value (0 at boot) toward the new target. The four accumulators
+(`@ 0x57f1a5..0x57f1d1`: `0x26c680C/0x26c6810` += rate, `0x26c6814` += rate−rate/3,
+`0x26c6818` += rate+rate/3) feed the render-side texture-transform translation
+(`@ 0x5791de..0x579260`): layer 1 **U** = `−(camY_eng + acc_0x6810)·2⁻²⁸`,
+**V** = `+(camX_eng + acc_0x680C)·2⁻²⁸`; layer 2 **U** = `−(camY + acc_0x6818[4/3])·2⁻²⁹`,
+**V** = `+(camX + acc_0x6814[2/3])·2⁻²⁹`. In the render/Godot basis
+(`Math_FixedPointToFloat3_YNegated @ 0x611210`: `d3d = (−engY, engZ, engX)/65536`)
+that is `U = +camX_render·2⁻¹² − acc·2⁻²⁸`, `V = +camZ_render·2⁻¹² + acc·2⁻²⁸` — the
+accumulator term is **negative on U**, and the u/v accumulator pairing is
+(U ← 0x6810/0x6818, V ← 0x680C/0x6814). The pre-port GDScript added the accumulator
+positively on both axes (divergence minted at the sky binding slice).
+
 **VS constants** (uploads @ 0x579709..0x579868, both passes): c0-3 WVP, c4-7 world,
 **c8 = eye world position** (fog reference — the pre-C6 "sky highlight float mirror" label
 was wrong; @ 0x27219f0), c9 `[fogDist×0.9/65536, 0, 1, 0]`, c10 `[0, 0.5, 1, 0.25]`,

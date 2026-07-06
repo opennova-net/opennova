@@ -507,8 +507,80 @@ int main() {
 		            "accumulator /3 truncates toward zero")) return 1;
 	}
 
+	// --- Sky dome mesh [orig: build_sky_dome_mesh @ 0x578db0] ----------------
+	{
+		// Reference-height build (v14 ~= 1): the dome the reimpl renders, with
+		// the Y scale folded into the shader (env #20's ratified structure).
+		const SkyDomeMesh ref = build_sky_dome_mesh(static_cast<float>(kSkyDomeReferenceHeight));
+		if (!expect(static_cast<int>(ref.positions.size()) == kSkyDomeVertices * 3, "441 dome vertices")) return 1;
+		if (!expect(static_cast<int>(ref.normals.size()) == kSkyDomeVertices * 3, "441 dome normals")) return 1;
+		if (!expect(static_cast<int>(ref.uv1.size()) == kSkyDomeVertices * 2 &&
+		            static_cast<int>(ref.uv2.size()) == kSkyDomeVertices * 2, "441 dome uv pairs x2")) return 1;
+		if (!expect(static_cast<int>(ref.indices.size()) == kSkyDomeTriangles * 3, "2400 dome indices")) return 1;
+
+		// Witnessed winding [orig: @ 0x578e00..0x578e86]: quads emit
+		// (i, i+22, i+21), (i, i+1, i+22) — matches the committed sky/mesh
+		// GUT vector "0 22 21 0 1 22 1 23 22 1 2 23".
+		const int32_t head[12] = {0, 22, 21, 0, 1, 22, 1, 23, 22, 1, 2, 23};
+		for (int i = 0; i < 12; ++i) {
+			if (!expect(ref.indices[i] == head[i], "witnessed index winding (head)")) return 1;
+		}
+		// Last quad (row 19, col 19, base 418).
+		const int32_t tail[6] = {418, 440, 439, 418, 419, 440};
+		for (int i = 0; i < 6; ++i) {
+			if (!expect(ref.indices[2394 + i] == tail[i], "witnessed index winding (tail)")) return 1;
+		}
+
+		// Apex v0: exact zeros, y == the input height within rounding
+		// (v14 * y_unscaled(0) algebraically returns the height), normal
+		// exactly +Y after normalize(0, y, 0).
+		if (!expect(ref.positions[0] == 0.0f && ref.positions[2] == 0.0f, "apex x/z exactly 0")) return 1;
+		if (!expect(near(ref.positions[1], 175.6906281f, 1e-4f), "dome pin: ref.positions[1], 175.6906281f, 1e-4f")) return 1;
+		if (!expect(ref.normals[0] == 0.0f && ref.normals[1] == 1.0f && ref.normals[2] == 0.0f,
+		            "apex normal is exactly +Y")) return 1;
+		if (!expect(ref.uv1[0] == 0.0f && ref.uv2[1] == 0.0f, "apex uvs are 0")) return 1;
+
+		// v22 (row 1, col 1): radius 51.2, theta pi/10.
+		if (!expect(near(ref.positions[22 * 3 + 0], 15.8216705f, 1e-3f), "dome pin: ref.positions[22 * 3 + 0], 15.8216705f, 1e-3f")) return 1;
+		if (!expect(near(ref.positions[22 * 3 + 1], 175.2639313f, 1e-4f), "dome pin: ref.positions[22 * 3 + 1], 175.2639313f, 1e-4f")) return 1;
+		if (!expect(near(ref.positions[22 * 3 + 2], 48.6940956f, 1e-3f), "dome pin: ref.positions[22 * 3 + 2], 48.6940956f, 1e-3f")) return 1;
+		if (!expect(near(ref.uv1[22 * 2 + 0], 0.0494427f, 1e-5f), "dome pin: ref.uv1[22 * 2 + 0], 0.0494427f, 1e-5f")) return 1;
+		if (!expect(near(ref.uv1[22 * 2 + 1], 0.1521690f, 1e-5f), "dome pin: ref.uv1[22 * 2 + 1], 0.1521690f, 1e-5f")) return 1;
+		if (!expect(near(ref.uv2[22 * 2 + 0], 0.0231763f, 1e-5f), "dome pin: ref.uv2[22 * 2 + 0], 0.0231763f, 1e-5f")) return 1;
+		if (!expect(near(ref.uv2[22 * 2 + 1], 0.0713292f, 1e-5f), "dome pin: ref.uv2[22 * 2 + 1], 0.0713292f, 1e-5f")) return 1;
+		// The anisotropic dome normal [orig: @ 0x578fbb], NOT the vertex dir.
+		if (!expect(near(ref.normals[22 * 3 + 0], 0.0866516f, 1e-5f), "dome pin: ref.normals[22 * 3 + 0], 0.0866516f, 1e-5f")) return 1;
+		if (!expect(near(ref.normals[22 * 3 + 1], 0.9598801f, 1e-5f), "dome pin: ref.normals[22 * 3 + 1], 0.9598801f, 1e-5f")) return 1;
+		if (!expect(near(ref.normals[22 * 3 + 2], 0.2666864f, 1e-5f), "dome pin: ref.normals[22 * 3 + 2], 0.2666864f, 1e-5f")) return 1;
+
+		// v220 (row 10, col 10): theta ~= pi — x collapses to ~0 (the float32
+		// pi/10 seed keeps it sub-1e-3), z = -512.
+		if (!expect(std::fabs(ref.positions[220 * 3 + 0]) < 1e-3f, "v220 x ~ 0 at theta ~ pi")) return 1;
+		if (!expect(near(ref.positions[220 * 3 + 1], 132.7234802f, 1e-4f), "dome pin: ref.positions[220 * 3 + 1], 132.7234802f, 1e-4f")) return 1;
+		if (!expect(near(ref.positions[220 * 3 + 2], -512.0f, 1e-3f), "dome pin: ref.positions[220 * 3 + 2], -512.0f, 1e-3f")) return 1;
+
+		// Rim v440 (row 20, col 20): radius 1024 sits at y ~= 0 (exactly 0 in
+		// pure reals; the float32 51.2 seed leaves ~-5e-6), z back at +1024,
+		// uv2.z = 1024 * 3/2048 = 1.5.
+		if (!expect(std::fabs(ref.positions[440 * 3 + 1]) < 1e-4f, "rim y ~ 0")) return 1;
+		if (!expect(near(ref.positions[440 * 3 + 2], 1024.0f, 1e-3f), "dome pin: ref.positions[440 * 3 + 2], 1024.0f, 1e-3f")) return 1;
+		if (!expect(near(ref.uv2[440 * 2 + 1], 1.5f, 1e-5f), "dome pin: ref.uv2[440 * 2 + 1], 1.5f, 1e-5f")) return 1;
+
+		// Height scale is Y-ONLY [orig: @ 0x578ed4]: x/z bitwise identical
+		// across heights, y scales by v14, normals tilt via y_scaled/v14^2.
+		const SkyDomeMesh tall = build_sky_dome_mesh(250.0f);
+		if (!expect(tall.positions[22 * 3 + 0] == ref.positions[22 * 3 + 0] &&
+		            tall.positions[22 * 3 + 2] == ref.positions[22 * 3 + 2],
+		            "height scale leaves x/z bitwise unchanged")) return 1;
+		if (!expect(near(tall.positions[22 * 3 + 1], 249.3928375f, 1e-3f), "dome pin: tall.positions[22 * 3 + 1], 249.3928375f, 1e-3f")) return 1;
+		if (!expect(near(tall.normals[22 * 3 + 0], 0.1186150f, 1e-5f), "dome pin: tall.normals[22 * 3 + 0], 0.1186150f, 1e-5f")) return 1;
+		if (!expect(near(tall.normals[22 * 3 + 1], 0.9233970f, 1e-5f), "dome pin: tall.normals[22 * 3 + 1], 0.9233970f, 1e-5f")) return 1;
+		if (!expect(near(tall.normals[22 * 3 + 2], 0.3650595f, 1e-5f), "dome pin: tall.normals[22 * 3 + 2], 0.3650595f, 1e-5f")) return 1;
+		if (!expect(tall.indices == ref.indices, "indices are height-independent")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
-	    "/oscillator/sequencers/blocks/scroll\n");
+	    "/oscillator/sequencers/blocks/scroll/dome\n");
 	return 0;
 }

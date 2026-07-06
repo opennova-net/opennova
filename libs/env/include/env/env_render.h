@@ -2,7 +2,9 @@
 
 #include "env/env.h"
 
+#include <cmath>
 #include <cstdint>
+#include <vector>
 
 // Engine-faithful runtime math for the environment/atmosphere stack, ported
 // from Jointops.exe (retail JO:CA). RE record: docs/env/env-tod-re.md.
@@ -378,6 +380,40 @@ inline constexpr double kCloudUvScaleLayer2 = 1.0 / 536870912.0; // 2^-29
 // [orig: render_skybox draw @ 0x5798dc].
 inline constexpr int kSkyDomeVertices = 441;
 inline constexpr int kSkyDomeTriangles = 800;
+
+// The dome profile is a sphere cap of radius 3072 lowered so the rim
+// (radius 1024 = 20 rows x 51.2) sits at y = 0: 3072^2 - 1024^2 = 2^23, so
+// y(r) = sqrt(3072^2 - r^2) - sqrt(2^23) and the apex reference height is
+// 3072 - sqrt(2^23) ~= 175.6906 — the "175.69" the height scale divides by
+// [orig: build_sky_dome_mesh @ 0x578ed4 — v14 = skyHeight / (3072.0 - sqrt(8388608.0))].
+inline const double kSkyDomeReferenceHeight = 3072.0 - std::sqrt(8388608.0);
+
+// The sky dome mesh [orig: build_sky_dome_mesh @ 0x578db0] — 21 rings x 21
+// columns, FVF 0x212 (XYZ|NORMAL|TEX2, stride 40). Per vertex: radius =
+// row * 51.2, theta = col * pi/10, x = sin(theta)*radius, z = cos(theta)*radius,
+// y = v14 * (sqrt(3072^2 - radius^2) - sqrt(2^23)) — the Y-only height scale is
+// BAKED into the mesh (retail rebuilds on smoothed-height change, gated at
+// [orig: Environment_ApplyFogAndAmbient @ 0x57e4f4] -> Terrain_PushSkyDomeHeightFloat
+// @ 0x610920 -> SkyDome_SetHeightAndRebuild @ 0x579070; the reimpl folds the
+// scale into the vertex shader instead — env #20's ratified structure, so it
+// builds once at the reference height). UV1 = (x, z) * 0.003125, UV2 =
+// (x, z) * 3/2048. Normal = normalize(x, y_scaled / v14^2, z) — the builder's
+// anisotropic normal, NOT the vertex direction [orig: @ 0x578fbb..0x579023];
+// zero-length input degenerates to (0,0,0) [orig: @ 0x578fd8]. All math runs
+// in double off the binary's float32 literal seeds (51.2f, 0.31415927f,
+// 9437184.0f, 0.003125f, 3/2048; 8388608.0 is a double literal — x87
+// intermediates approximated as double, stored float32 like the D3D vertex
+// buffer). Index winding per quad: (i, i+22, i+21), (i, i+1, i+22)
+// [orig: @ 0x578e00..0x578e86].
+struct SkyDomeMesh {
+	std::vector<float> positions; // xyz triples, kSkyDomeVertices
+	std::vector<float> normals;   // xyz triples (anisotropic dome normals)
+	std::vector<float> uv1;       // uv pairs, layer 1 (1/320 world scale)
+	std::vector<float> uv2;       // uv pairs, layer 2 (3/2048 world scale)
+	std::vector<int32_t> indices; // 3 * kSkyDomeTriangles, witnessed winding
+};
+
+SkyDomeMesh build_sky_dome_mesh(float sky_height);
 
 // ---------------------------------------------------------------------------
 // BMS mission overrides [orig: Game_LoadTerrainDuringConnect @ 0x520710]
