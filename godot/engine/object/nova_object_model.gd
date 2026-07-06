@@ -70,7 +70,7 @@ var _has_lights := false
 var _material_needs_eval: Array[bool] = []          # parallel to _surface_materials
 var _dynamic_material_slots: PackedInt32Array = PackedInt32Array()
 var _last_env_gen := -1
-var _last_env_values: Dictionary = {}
+var _last_env_values: EnvLightValues = null
 
 
 func _ready() -> void:
@@ -97,7 +97,7 @@ func get_object_data() -> NovaObjectData:
 func set_environment_node(value: Node) -> void:
 	_environment_node = value
 	_last_env_gen = -1
-	_last_env_values = {}
+	_last_env_values = null
 	_apply_environment_to_materials()
 
 
@@ -474,7 +474,7 @@ func rebuild() -> void:
 	_material_needs_eval.clear()
 	_dynamic_material_slots = PackedInt32Array()
 	_last_env_gen = -1
-	_last_env_values = {}
+	_last_env_values = null
 	if object_data == null or not object_data.has_document():
 		_set_model_bounds(AABB())
 		return
@@ -898,7 +898,7 @@ func _solid_colour_texture(color: Color) -> ImageTexture:
 
 
 func _apply_default_environment_to_material(material: ShaderMaterial) -> void:
-	apply_environment_values(material, {})
+	apply_environment_values(material, environment_values_from(null))
 
 
 # A surface material needs per-frame UV/RGB/alpha evaluation only if one of its generators
@@ -943,58 +943,91 @@ func _classify_materials() -> void:
 			_dynamic_material_slots.append(i)
 
 
-# Static forms of the environment stamping, shared with the mission placer's
-# static-batch path (mission_object_placer.update_environment) so batched
-# world objects relight from the SAME values/skip logic as live models —
-# retail relights every entity from the current lighting block each frame
-# [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0].
-static func environment_values_from(env_node: Node) -> Dictionary:
+# ADR 0017 typed record: the env-derived lighting/fog values the object
+# shaders consume — computed once per env change and stamped onto many
+# materials (live model surfaces AND the mission placer's static batches, so
+# batched world objects relight from the SAME values/skip logic as live
+# models; retail relights every entity from the current lighting block each
+# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
+# Fields are always assigned by environment_values_from().
+class EnvLightValues:
+	extends RefCounted
+	var hemi_sky: Vector3
+	var dir: Vector3
+	var dir_color: Vector3
+	var hemi_ground: Vector3
+	var gain: Vector3
+	var fog_enabled: bool
+	var fog_color: Vector3
+	var fog_start: float
+	var fog_end: float
+	var fog_type: int
+
+	# True when `other` carries the same lighting/fog the shaders consume.
+	# Colours compare with is_equal_approx (the weather smoother quantises to
+	# 8-bit, so real changes are >= 1/255, far above epsilon); a null other
+	# (first push after rebuild) is never equal, forcing the initial push.
+	func equals(other: EnvLightValues) -> bool:
+		if other == null:
+			return false
+		return hemi_sky.is_equal_approx(other.hemi_sky) \
+			and dir.is_equal_approx(other.dir) \
+			and dir_color.is_equal_approx(other.dir_color) \
+			and hemi_ground.is_equal_approx(other.hemi_ground) \
+			and gain.is_equal_approx(other.gain) \
+			and fog_enabled == other.fog_enabled \
+			and fog_color.is_equal_approx(other.fog_color) \
+			and is_equal_approx(fog_start, other.fog_start) \
+			and is_equal_approx(fog_end, other.fog_end) \
+			and fog_type == other.fog_type
+
+
+static func environment_values_from(env_node: Node) -> EnvLightValues:
+	var v := EnvLightValues.new()
 	if env_node == null or not env_node.has_method("is_loaded") or not env_node.call("is_loaded"):
-		return {
-			"hemi_sky": DEFAULT_HEMI_SKY_COLOR,
-			"dir": DEFAULT_DIR_LIGHT_DIR,
-			"dir_color": DEFAULT_DIR_LIGHT_COLOR,
-			"hemi_ground": DEFAULT_HEMI_GROUND_COLOR,
-			"gain": DEFAULT_COLOR_SRC_GAIN,
-			"fog_enabled": false,
-			"fog_color": DEFAULT_FOG_COLOR,
-			"fog_start": DEFAULT_FOG_START,
-			"fog_end": DEFAULT_FOG_END,
-			"fog_type": DEFAULT_FOG_TYPE,
-		}
+		v.hemi_sky = DEFAULT_HEMI_SKY_COLOR
+		v.dir = DEFAULT_DIR_LIGHT_DIR
+		v.dir_color = DEFAULT_DIR_LIGHT_COLOR
+		v.hemi_ground = DEFAULT_HEMI_GROUND_COLOR
+		v.gain = DEFAULT_COLOR_SRC_GAIN
+		v.fog_enabled = false
+		v.fog_color = DEFAULT_FOG_COLOR
+		v.fog_start = DEFAULT_FOG_START
+		v.fog_end = DEFAULT_FOG_END
+		v.fog_type = DEFAULT_FOG_TYPE
+		return v
 	var sun_dir: Vector3 = env_node.call("get_sun_direction")
 	if sun_dir.length() <= 0.001:
 		sun_dir = -DEFAULT_DIR_LIGHT_DIR
 	var gain: Vector3 = DEFAULT_COLOR_SRC_GAIN
 	if env_node.has_method("get_color_src_gain"):
 		gain = env_node.call("get_color_src_gain")
-	return {
-		"hemi_sky": env_node.call("get_sky_ambient"),
-		"dir": -sun_dir.normalized(),
-		"dir_color": env_node.call("get_sun_light"),
-		"hemi_ground": env_node.call("get_fill_light"),
-		"gain": gain,
-		"fog_enabled": true,
-		"fog_color": env_node.call("get_fog_color"),
-		"fog_start": env_node.call("get_fog_start"),
-		"fog_end": env_node.call("get_fog_level"),
-		"fog_type": env_node.call("get_fog_type"),
-	}
+	v.hemi_sky = env_node.call("get_sky_ambient")
+	v.dir = -sun_dir.normalized()
+	v.dir_color = env_node.call("get_sun_light")
+	v.hemi_ground = env_node.call("get_fill_light")
+	v.gain = gain
+	v.fog_enabled = true
+	v.fog_color = env_node.call("get_fog_color")
+	v.fog_start = env_node.call("get_fog_start")
+	v.fog_end = env_node.call("get_fog_level")
+	v.fog_type = env_node.call("get_fog_type")
+	return v
 
 
-static func apply_environment_values(material: ShaderMaterial, values: Dictionary) -> void:
-	if material == null:
+static func apply_environment_values(material: ShaderMaterial, values: EnvLightValues) -> void:
+	if material == null or values == null:
 		return
-	material.set_shader_parameter("u_hemi_sky_color", values.get("hemi_sky", DEFAULT_HEMI_SKY_COLOR))
-	material.set_shader_parameter("u_dir_light_dir", values.get("dir", DEFAULT_DIR_LIGHT_DIR))
-	material.set_shader_parameter("u_dir_light_color", values.get("dir_color", DEFAULT_DIR_LIGHT_COLOR))
-	material.set_shader_parameter("u_hemi_ground_color", values.get("hemi_ground", DEFAULT_HEMI_GROUND_COLOR))
-	material.set_shader_parameter("u_color_src_global_gain", values.get("gain", DEFAULT_COLOR_SRC_GAIN))
-	material.set_shader_parameter("u_fog_enabled", bool(values.get("fog_enabled", false)))
-	material.set_shader_parameter("u_fog_color", values.get("fog_color", DEFAULT_FOG_COLOR))
-	material.set_shader_parameter("u_fog_start", float(values.get("fog_start", DEFAULT_FOG_START)))
-	material.set_shader_parameter("u_fog_end", float(values.get("fog_end", DEFAULT_FOG_END)))
-	material.set_shader_parameter("u_fog_type", int(values.get("fog_type", DEFAULT_FOG_TYPE)))
+	material.set_shader_parameter("u_hemi_sky_color", values.hemi_sky)
+	material.set_shader_parameter("u_dir_light_dir", values.dir)
+	material.set_shader_parameter("u_dir_light_color", values.dir_color)
+	material.set_shader_parameter("u_hemi_ground_color", values.hemi_ground)
+	material.set_shader_parameter("u_color_src_global_gain", values.gain)
+	material.set_shader_parameter("u_fog_enabled", values.fog_enabled)
+	material.set_shader_parameter("u_fog_color", values.fog_color)
+	material.set_shader_parameter("u_fog_start", values.fog_start)
+	material.set_shader_parameter("u_fog_end", values.fog_end)
+	material.set_shader_parameter("u_fog_type", values.fog_type)
 
 
 func _apply_environment_to_materials() -> void:
@@ -1010,10 +1043,10 @@ func _apply_environment_to_materials() -> void:
 	var has_gen: bool = _environment_node != null and _environment_node.has_method("get_env_generation")
 	if has_gen:
 		gen = int(_environment_node.get_env_generation())
-		if gen == _last_env_gen and not _last_env_values.is_empty():
+		if gen == _last_env_gen and _last_env_values != null:
 			return
 	var values := _environment_values()
-	if _env_values_equal(values, _last_env_values):
+	if values.equals(_last_env_values):
 		_last_env_gen = gen
 		return
 	_last_env_values = values
@@ -1029,7 +1062,7 @@ func _apply_environment_to_materials() -> void:
 # modulator /64 (the iris exposure reaching self-lit surfaces)
 # [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
 #  ColorSrcGlobalGain bind @ 0x58e05d].
-func _environment_values() -> Dictionary:
+func _environment_values() -> EnvLightValues:
 	return environment_values_from(_environment_node)
 
 
@@ -1044,20 +1077,3 @@ func _aabb_equal_approx(a: AABB, b: AABB) -> bool:
 	return a.position.is_equal_approx(b.position) and a.size.is_equal_approx(b.size)
 
 
-# True when two _environment_values() dicts carry the same lighting/fog the shaders consume.
-# Colours are compared with is_equal_approx (the weather smoother quantises to 8-bit, so real
-# changes are >= 1/255, far above epsilon); an empty cache (first push after rebuild) is never
-# equal, forcing the initial push.
-func _env_values_equal(a: Dictionary, b: Dictionary) -> bool:
-	if a.is_empty() or b.is_empty():
-		return false
-	return (a.get("hemi_sky", Vector3.ZERO) as Vector3).is_equal_approx(b.get("hemi_sky", Vector3.ONE)) \
-		and (a.get("dir", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir", Vector3.ONE)) \
-		and (a.get("dir_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir_color", Vector3.ONE)) \
-		and (a.get("hemi_ground", Vector3.ZERO) as Vector3).is_equal_approx(b.get("hemi_ground", Vector3.ONE)) \
-		and (a.get("gain", Vector3.ZERO) as Vector3).is_equal_approx(b.get("gain", Vector3.ONE)) \
-		and bool(a.get("fog_enabled", false)) == bool(b.get("fog_enabled", true)) \
-		and (a.get("fog_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fog_color", Vector3.ONE)) \
-		and is_equal_approx(float(a.get("fog_start", 0.0)), float(b.get("fog_start", -1.0))) \
-		and is_equal_approx(float(a.get("fog_end", 0.0)), float(b.get("fog_end", -1.0))) \
-		and int(a.get("fog_type", 0)) == int(b.get("fog_type", -1))

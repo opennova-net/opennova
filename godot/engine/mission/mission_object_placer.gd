@@ -65,7 +65,7 @@ var _static_batch_cache: Dictionary = {}
 # re-stamps these from the live env so static objects relight with TOD.
 var _batch_materials: Array = []
 var _last_batch_env_gen: int = -1
-var _last_batch_env_values: Dictionary = {}
+var _last_batch_env_values: NovaObjectModelScript.EnvLightValues = null
 # graphic -> Vector3 ground anchor (model-space point that sits at the entity
 # position). Computed once per graphic; see _ground_anchor_for.
 var _anchor_cache: Dictionary = {}
@@ -97,7 +97,7 @@ func _check_epoch() -> void:
 	_static_batch_cache.clear()
 	_batch_materials.clear()
 	_last_batch_env_gen = -1
-	_last_batch_env_values = {}
+	_last_batch_env_values = null
 	_anchor_cache.clear()
 	_collision_shapes_cache.clear()
 
@@ -115,10 +115,10 @@ func update_environment(env_node: Node) -> void:
 	var gen := -1
 	if env_node != null and env_node.has_method("get_env_generation"):
 		gen = int(env_node.get_env_generation())
-		if gen == _last_batch_env_gen and not _last_batch_env_values.is_empty():
+		if gen == _last_batch_env_gen and _last_batch_env_values != null:
 			return
-	var values: Dictionary = NovaObjectModelScript.environment_values_from(env_node)
-	if not _last_batch_env_values.is_empty() and values.hash() == _last_batch_env_values.hash():
+	var values: NovaObjectModelScript.EnvLightValues = NovaObjectModelScript.environment_values_from(env_node)
+	if values.equals(_last_batch_env_values):
 		_last_batch_env_gen = gen
 		return
 	_last_batch_env_values = values
@@ -282,7 +282,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# the throwaway-template harvest sees mid-load values (e.g. the modulator
 	# before its first iris tick) — and drop the per-frame stamper into the
 	# container so the batches keep tracking TOD/weather/iris afterwards.
-	_last_batch_env_values = {}
+	_last_batch_env_values = null
 	update_environment(env_node)
 	_ensure_env_stamper(container, env_node)
 
@@ -506,7 +506,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 	# A first-seen graphic just harvested fresh materials mid-load; align them
 	# with the live env like place() does, and make sure the container carries
 	# the per-frame stamper (a place_single onto a fresh container).
-	_last_batch_env_values = {}
+	_last_batch_env_values = null
 	update_environment(env_node)
 	_ensure_env_stamper(container, env_node)
 	var refs := [{ "kind": kind, "index": index }]
