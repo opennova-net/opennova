@@ -28,9 +28,13 @@ render_mode unshaded, cull_disabled, depth_prepass_alpha;
 //   TEMP-routed MODULATE4X / 2-stage MODULATE2X) + the 9-tap alpha smoothing
 //   and gray-mip fill preprocessing of foliage textures.
 
-uniform sampler2D u_albedo_texture : source_color, filter_linear_mipmap, repeat_enable;
+// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+#include "res://shaders/nova_color.gdshaderinc"
+
+// Raw sampling per the gamma-space convention (nova_color.gdshaderinc).
+uniform sampler2D u_albedo_texture : filter_linear_mipmap, repeat_enable;
 uniform bool u_has_albedo_texture = false;
-uniform sampler2D u_colormap : source_color, filter_linear, repeat_enable;
+uniform sampler2D u_colormap : filter_linear, repeat_enable;
 uniform float u_alpha_cutoff = 0.33;
 
 global uniform vec3 opennova_fill_light;
@@ -93,6 +97,8 @@ void fragment() {
 	float fog_factor = fog_factor_for_distance(length(v_world_pos - CAMERA_POSITION_WORLD));
 	result = mix(opennova_fog_color, result, fog_factor);
 
-	ALBEDO = clamp(result, vec3(0.0), vec3(1.0));
+	// Gamma-space output (D-RMAT-7): the combine above ran on raw bytes like
+	// the witnessed FF stages; encode once at the write.
+	ALBEDO = nova_gamma_to_linear(result);
 	ALPHA = alpha;
 }

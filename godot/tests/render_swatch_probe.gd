@@ -19,6 +19,14 @@ extends SceneTree
 #   capture:   "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- capture <out_dir> [prefix]
 #   composite: "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- composite <out_dir> [prefix]
 #   compare:   "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- compare <a.png> <b.png>
+#   calibrate: "$GODOT_BIN" --path godot -s res://tests/render_swatch_probe.gd -- calibrate
+#
+# The calibrate mode (the D-RMAT-7 identity proof) renders the full 0..255
+# byte gradient through nova_gamma_to_linear() and asserts the captured bytes
+# equal the input — proving the shader-side gamma encode is the exact inverse
+# of THIS engine build's output blit on THIS driver (the gamma-space
+# convention, godot/shaders/nova_color.gdshaderinc). Run it after any Godot
+# version or renderer change.
 #
 # The composite mode (REN-3) renders the DRAW-ORDER scenes: overlapping
 # translucent quads whose depths are arranged AGAINST the witnessed order, so
@@ -58,8 +66,10 @@ func _run() -> void:
 		await _composite_mode(args[1], args[2] if args.size() >= 3 else "composite")
 	elif args.size() >= 3 and args[0] == "compare":
 		_compare_mode(args[1], args[2])
+	elif args.size() >= 1 and args[0] == "calibrate":
+		await _calibrate_mode()
 	else:
-		push_error("render_swatch_probe: usage -- capture <out_dir> [prefix] | composite <out_dir> [prefix] | compare <a.png> <b.png>")
+		push_error("render_swatch_probe: usage -- capture <out_dir> [prefix] | composite <out_dir> [prefix] | compare <a.png> <b.png> | calibrate")
 		quit(1)
 
 
@@ -251,6 +261,88 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 
 	print("render_swatch_probe composite: scenes=", scenes.size(), " png=", png_path, " ok=", err == OK)
 	quit(0 if err == OK else 1)
+
+
+# D-RMAT-7 identity proof (see the header). Renders 256 byte columns through
+# nova_gamma_to_linear() into the default (LINEAR-tonemap) 3D pipeline and
+# reads the framebuffer back: displayed byte must equal computed byte for
+# every input. Zero tolerance — a deviation means the include's curve is not
+# the exact inverse of this engine build's blit and must be re-derived.
+func _calibrate_mode() -> void:
+	get_root().get_window().size = WINDOW_SIZE
+
+	var scene := Node3D.new()
+	root.add_child(scene)
+	var world_env := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.0, 0.0, 0.0)
+	world_env.environment = env
+	scene.add_child(world_env)
+
+	var quad := MeshInstance3D.new()
+	var quad_mesh := QuadMesh.new()
+	quad_mesh.size = Vector2(1.0, 1.0)
+	quad.mesh = quad_mesh
+	var material := ShaderMaterial.new()
+	var shader := Shader.new()
+	shader.set_code("""
+shader_type spatial;
+render_mode unshaded;
+#include "res://shaders/nova_color.gdshaderinc"
+void fragment() {
+	float b = floor(clamp(UV.x, 0.0, 0.999999) * 256.0) / 255.0;
+	ALBEDO = nova_gamma_to_linear(vec3(b));
+}
+""")
+	material.shader = shader
+	quad.material_override = material
+	scene.add_child(quad)
+
+	var camera := Camera3D.new()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.size = 1.0
+	camera.position = Vector3(0.0, 0.0, 10.0)
+	camera.current = true
+	scene.add_child(camera)
+
+	for _i in range(SETTLE_FRAMES):
+		await process_frame
+
+	var image := root.get_viewport().get_texture().get_image()
+	if image == null:
+		push_error("render_swatch_probe calibrate: no viewport image (run windowed, not --headless)")
+		quit(1)
+		return
+	image.convert(Image.FORMAT_RGBA8)
+
+	# Ortho size is the VERTICAL extent; the 1x1 quad spans world x [-0.5, 0.5]
+	# inside a horizontal extent of size * aspect.
+	var w := image.get_width()
+	var h := image.get_height()
+	var aspect := float(w) / float(h)
+	var half_extent_x := 0.5 * aspect
+	var mid_y := h / 2
+	var worst := 0
+	var mismatches := 0
+	var first_rows: Array[String] = []
+	for b in range(256):
+		var u := (float(b) + 0.5) / 256.0
+		var world_x := -0.5 + u
+		var px := int(round((world_x + half_extent_x) / (2.0 * half_extent_x) * float(w) - 0.5))
+		var got := int(round(image.get_pixel(px, mid_y).r * 255.0))
+		var dev := absi(got - b)
+		if dev > 0:
+			mismatches += 1
+			if first_rows.size() < 16:
+				first_rows.append("byte %d -> %d (dev %d)" % [b, got, dev])
+			worst = maxi(worst, dev)
+	if mismatches == 0:
+		print("render_swatch_probe calibrate: PASS - 256/256 bytes identity through nova_gamma_to_linear + output blit")
+		quit(0)
+	else:
+		push_error("render_swatch_probe calibrate: FAIL - %d/256 bytes deviate (worst %d): %s" % [mismatches, worst, ", ".join(first_rows)])
+		quit(1)
 
 
 func _make_layer_material(color: Color, rung: int) -> ShaderMaterial:

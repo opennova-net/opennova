@@ -36,6 +36,9 @@ render_mode unshaded, blend_premul_alpha, cull_disabled;
 //   until it lands the noise MOD2X chain below is the reflection-free subset
 //   (flat-gray reflection folds MOD2X(refl, diffuse) to diffuse).
 
+// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+#include "res://shaders/nova_color.gdshaderinc"
+
 uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224); // Env_WaterColorLit
 // water_murk [orig: SetWaterMurk @ 0x57d4f0]. Under the witnessed blend
 // (out = src + dst * a) the alpha term is the BACKGROUND share, and retail's
@@ -131,6 +134,9 @@ void fragment() {
 	// Godot's premul pass (out = src.rgb + dst * (1 - ALPHA)) that is
 	// src.rgb = color * 1 with ALPHA = 1 - a. The source term itself is NOT
 	// multiplied by a — retail's SrcBlend is ONE.
-	ALBEDO = color;
+	// Gamma-space output (D-RMAT-7): the src term encodes so the surface-
+	// dominant (near) result displays the computed bytes; the dst*a term still
+	// blends in the linear buffer — that residual is D-RMAT-8.
+	ALBEDO = nova_gamma_to_linear(color);
 	ALPHA = 1.0 - alpha;
 }

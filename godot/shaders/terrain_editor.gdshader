@@ -4,12 +4,16 @@ render_mode unshaded, cull_disabled;
 // Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
 // u_detailmap*/lighting/fog all live here): terrain_surface_color(), apply_terrain_fog().
 #include "res://shaders/terrain_lighting.gdshaderinc"
+// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+#include "res://shaders/nova_color.gdshaderinc"
 
 // Editor-only extras: a live heightmap (the editor sculpts geometry the runtime
 // bakes into CPT), a surface/sector inspection overlay, and the paint brush ring.
 uniform sampler2D u_heightmap : filter_nearest, repeat_disable;
 uniform float u_heightmap_size = 1024.0;
-uniform sampler2D u_charmap : source_color, filter_nearest, repeat_disable;
+// Raw sampling (editor diagnostic view rides the same convention so the
+// painted surface matches the runtime look).
+uniform sampler2D u_charmap : filter_nearest, repeat_disable;
 uniform bool u_show_surface_overlay = false;
 uniform bool u_show_sector_overlay = false;
 // The shell's View > Show grid guide: thin NEUTRAL sector-boundary lines that
@@ -149,5 +153,7 @@ void fragment() {
 		}
 	}
 
-	ALBEDO = clamp(result, vec3(0.0), vec3(1.0));
+	// Gamma-space output (D-RMAT-7): the surface math above ran on raw bytes;
+	// encode once. Editor overlays/brush tints ride the same transform.
+	ALBEDO = nova_gamma_to_linear(result);
 }

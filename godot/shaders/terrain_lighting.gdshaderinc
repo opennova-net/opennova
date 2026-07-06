@@ -9,10 +9,14 @@
 // Keep it byte-for-byte authoritative.
 
 // --- Shared uniforms: terrain surface inputs + lighting + fog -----------------
-uniform sampler2D u_colormap : source_color, filter_linear, repeat_disable;
-uniform sampler2D u_detail_c1 : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail_c2 : source_color, filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_detail_c3 : source_color, filter_linear_mipmap, repeat_enable;
+// Textures sample RAW (no source_color): retail never enables sRGB sampling -
+// texel bytes enter the ps.1.4 math as-is. The gamma-space convention
+// (D-RMAT-7) lives in nova_color.gdshaderinc; consumers encode the final
+// color once at their ALBEDO write.
+uniform sampler2D u_colormap : filter_linear, repeat_disable;
+uniform sampler2D u_detail_c1 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_detail_c2 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_detail_c3 : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_blendmap : filter_linear, repeat_disable;
 uniform sampler2D u_detailmap : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_detailmapdist : filter_linear_mipmap, repeat_enable;

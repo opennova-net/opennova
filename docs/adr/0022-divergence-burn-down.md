@@ -87,9 +87,24 @@ substrate; the divergence is wire/visually equivalent or host-internal.
 - **D-NET-140** — the listen host's own loopback gets the full 0x0A record set (retail
   sends its local player header-only frames); the frame never leaves the process
   ([ADR 0011](0011-single-player-in-process-listen-server.md)).
+- **D-RORD-2** — retail's per-frame CPU opaque quicksort (alpha-test bit → depth slabs →
+  effect index → fine depth) is a device-era mechanism; the host's internal opaque
+  ordering serves the same intent, with the key semantics preserved as T1-pinned pure
+  functions. (Ratified at REN-3; entry back-filled here 2026-07-06.)
+- **D-RMAT-8** — framebuffer blending runs on the host's blit-encoded (linear) values;
+  retail blends gamma bytes. Under D-RMAT-7's gamma-space convention, opaque and
+  alpha-tested surfaces display byte-exact; translucent composites diverge boundedly
+  (alpha midtone shift, additive accumulates dimmer). Blending in gamma space would
+  require a gamma framebuffer the host does not expose; reopen only if a T3 scene shows
+  an objectionable composite.
 
 **Original-bug / garbage class** (basis:
 [ADR 0003](0003-no-raw-passthrough-create-from-scratch.md)).
+
+- **D-RORD-6** — the two original sort-key quirks (opaque key bits 15+ carry residual
+  stack garbage; the transparent key lags one strip within a render object) are not
+  reproduced — reproducing either manufactures garbage. (Ratified at REN-3; entry
+  back-filled here 2026-07-06.)
 
 - **env #11** — the original packs negative color components as garbage (no lower clamp);
   the reimpl clamps to 0 (no UB replication).

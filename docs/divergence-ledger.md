@@ -371,9 +371,29 @@ swatch 116/120 cells moved with the 4 unlit VS_TRACER cells byte-identical
 ([render/render-lighting-re.md](render/render-lighting-re.md); reflection/
 phong stand-in residuals = D-RLIT-5).
 
+Minted-and-closed 2026-07-06 (the model-parity slice, between REN-5 and
+REN-6): **D-RMAT-7** -> `FIXED` — the retail color pipeline witnessed
+**gamma-space end to end** (no `D3DSAMP_SRGBTEXTURE` at any device
+sampler-state site, no `D3DRS_SRGBWRITEENABLE` at any render-state site, no
+sRGB `.fx` pass states, identity display ramp at default gamma 1.0
+`[orig: GLib_SetGammaRamp @ 0x677be0; default @ 0x84f354]`); the host was
+decoding textures sRGB→linear and re-encoding at the blit around the
+witnessed math. Fixed across the composer + the full shader set: raw
+sampling + gamma-space math + the exact-inverse `nova_gamma_to_linear`
+output (`godot/shaders/nova_color.gdshaderinc`), with a new swatch-probe
+**calibrate mode** proving byte identity 256/256 on the live build; T1
+re-dumped (key set identical, 630 hashes), T2 swatch 120/120 cells moved
+(the expected global response change), composite IDENTICAL, world set
+re-captured. **D-RMAT-9** -> `FIXED` — the object composer's fog was an
+invented linear ramp + `smoothstep`; now the witnessed device fog table
+(`[orig: @ 0x58a950 → @ 0x677960]`, one text with the terrain/water
+shaders). Full witness: [render/render-material-re.md](render/render-material-re.md)
+§Color pipeline.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — selection ported + T1-pinned at REN-3; the class CONTENT witnessed at REN-4 (FF technique tables, the pass-execution model, the GLOW capability landed as `is_glow_capable`) | A | WITNESSED-READY-DEFERRED (selection + GLOW flag ported) | remaining host mappings ride D-RORD-4/-5 residuals |
+| D-RMAT-8 | Framebuffer blending runs on blit-encoded (linear) values; retail blends gamma bytes (`[orig: decode_blend_mode_to_d3d_states @ 0x680f00]`) — opaque + alpha-tested surfaces byte-exact under D-RMAT-7, translucent composites diverge boundedly (alpha midtone shift; additive accumulates dimmer) | C | PERMANENT (register, this slice) | revisit only on an objectionable T3 composite |
 
 ### Render — draw order — [render/render-order-re.md](render/render-order-re.md) (D-RORD catalog; REN-3)
 
@@ -441,10 +461,10 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Foliage | 1 | 0 | 0 | 1 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
-| Render — materials/state | 0 | 0 | 1 | 1 | 0 |
+| Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **34** | **12** | **32** | **78** | 8 |
+| **Total** | **34** | **12** | **32** | **78** | 9 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 

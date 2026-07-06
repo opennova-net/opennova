@@ -42,9 +42,13 @@ std::string compose_render_mode(ObjectShaderKey key) {
 
 std::string compose_uniforms(ObjectShaderKey key) {
 	std::string u;
-	u += "uniform sampler2D u_diffuse : source_color, filter_linear_mipmap, repeat_enable;\n";
+	// Textures sample RAW (no source_color): the retail pipeline never enables
+	// D3DSAMP_SRGBTEXTURE - texel bytes enter the TSS math as-is (the gamma-
+	// space convention, D-RMAT-7; witness map in render-material-re.md and
+	// godot/shaders/nova_color.gdshaderinc).
+	u += "uniform sampler2D u_diffuse : filter_linear_mipmap, repeat_enable;\n";
 	if (has_flag(key, OSCAP_DETAIL))
-		u += "uniform sampler2D u_detail : source_color, filter_linear_mipmap, repeat_enable;\n";
+		u += "uniform sampler2D u_detail : filter_linear_mipmap, repeat_enable;\n";
 	if (has_flag(key, OSCAP_NORMAL_MAP))
 		u += "uniform sampler2D u_normal_map : hint_normal, filter_linear_mipmap, repeat_enable;\n";
 
@@ -154,11 +158,40 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\treturn base_rgb * u_local_light_color * (u_local_light_intensity * ndotl * atten);\n";
 	u += "}\n\n";
 
+	// The witnessed device fog table (one text with terrain_lighting.gdshaderinc
+	// / water.gdshader): type 0 = exponential density ln(64)/end; types 1/2/3 =
+	// linear with start = caller 0.5 / (1-density)*end*0.5 / (1-density)*end*0.25
+	// (density = overcast, 0 in the ported scope - the ends fold to end/2, end/4)
+	// [orig: Render_SetFogState @ 0x58a950 -> CD3DDevice_SetFogParameters
+	// @ 0x677960; env-tod-re.md "Fog policy"]. Replaces the pre-witness linear
+	// ramp + smoothstep (D-RMAT-9).
 	u += "float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_type) {\n";
-	u += "\tfloat span = max(fog_end - fog_start, 0.001);\n";
-	u += "\tfloat t = clamp((dist - fog_start) / span, 0.0, 1.0);\n";
-	u += "\tif (fog_type == 3) t = smoothstep(0.0, 1.0, t);\n";
-	u += "\treturn 1.0 - t;\n";
+	u += "\tfloat safe_end = max(fog_end, 1.0);\n";
+	u += "\tif (fog_type == 0) {\n";
+	u += "\t\treturn clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);\n";
+	u += "\t}\n";
+	u += "\tfloat start = fog_start;\n";
+	u += "\tif (fog_type == 2) {\n";
+	u += "\t\tstart = safe_end * 0.5;\n";
+	u += "\t} else if (fog_type == 3) {\n";
+	u += "\t\tstart = safe_end * 0.25;\n";
+	u += "\t}\n";
+	u += "\tfloat fog_range = max(safe_end - start, 1.0);\n";
+	u += "\treturn clamp((safe_end - dist) / fog_range, 0.0, 1.0);\n";
+	u += "}\n\n";
+
+	// The gamma-space output convention (D-RMAT-7): the witnessed math above
+	// runs on raw gamma-encoded values like the original device; this exact
+	// inverse of the host's sRGB-encoding blit makes the displayed byte equal
+	// the computed gamma-space byte. Body identical to
+	// godot/shaders/nova_color.gdshaderinc (the witness lives there and in
+	// render-material-re.md; the composer embeds it so generated shaders stay
+	// self-contained). Retail saturates at the byte framebuffer, so the clamp
+	// to [0,1] is itself witnessed behavior.
+	u += "vec3 nova_gamma_to_linear(vec3 gamma_rgb) {\n";
+	u += "\tvec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));\n";
+	u += "\treturn mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),\n";
+	u += "\t\t\tc * (1.0 / 12.92), lessThan(c, vec3(0.04045)));\n";
 	u += "}\n\n";
 
 	return u;
@@ -326,7 +359,9 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "\t\tfloat fog_visibility = obj_fog_visibility(distance(CAMERA_POSITION_WORLD, v_world_pos), u_fog_start, u_fog_end, u_fog_type);\n";
 	f += "\t\tlit = mix(u_fog_color, lit, fog_visibility);\n";
 	f += "\t}\n";
-	f += "\tALBEDO = max(lit, vec3(0.0));\n";
+	// Gamma-space output (D-RMAT-7): `lit` is the witnessed gamma-space result;
+	// encode it so the host blit displays exactly those bytes.
+	f += "\tALBEDO = nova_gamma_to_linear(lit);\n";
 	if (needs_alpha) {
 		f += "\tALPHA = clamp(alpha, 0.0, 1.0);\n";
 	}

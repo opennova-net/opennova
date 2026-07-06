@@ -26,6 +26,7 @@ this record.
 | Technique-class pass system (6 classes) | witnessed / host-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the host bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
 | UV animation (MatTexCoord1) | MATCHING (math ported) | `renderer::uv_anim` is the structural port of `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]` over the shared PANM wave table; `renderer_state_vectors` section 4 pins it; the MTRL-field feed is the residual open question |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
+| Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-9 fixes; D-RMAT-8 blend-space residual permanent) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); host mapping = raw sampling + gamma math + exact-inverse encode, calibrate-mode byte-identity proof 256/256; the composer fog table re-witnessed `[orig: @ 0x58a950 → @ 0x677960]` |
 
 ## Witness map
 
@@ -250,6 +251,55 @@ shipped corpus never uses fogmode 4..7 — LITE is dormant in JO (the
 "underwater set" hypothesis is refuted; underwater fog color is the separate
 `CD3DDevice_SetActiveFogColor` path).
 
+**The color pipeline (gamma space; witnessed 2026-07-06, the model-parity
+slice).** The retail pipeline is **gamma-space end to end** — texture bytes
+enter the TSS/shader math raw, every combine runs on gamma-encoded values,
+and the framebuffer byte is the displayed value:
+
+- **No sRGB texture sampling.** The full device-layer SetSamplerState
+  enumeration (the `mov reg, [vtbl+0x114]` idiom over `.text`, device region)
+  sets only ADDRESSU/V/W (1/2/3), MAG/MIN/MIPFILTER (5/6/7), MIPMAPLODBIAS
+  (8), MAXMIPLEVEL (9), MAXANISOTROPY (10) — `D3DSAMP_SRGBTEXTURE` (15) is
+  never set `[orig: CD3DDevice_InitializeDisplay @ 0x679c1b..0x679d29;
+  CD3DDevice_UpdateWindow @ 0x676716..0x6767f5; GfxDevice_ResetDisplayMode
+  @ 0x677f91..0x678070; GfxDevice_HandleLostDevice @ 0x678374..0x678453;
+  CGfxDevice_ApplyRenderStates @ 0x67e3ec..0x67e4f3]`. Device defaults:
+  MAG/MIN LINEAR + **MIP POINT** (bilinear with sharp mip cuts), aniso 2,
+  a variable MIPMAPLODBIAS; per-stage filters re-applied from settings by
+  `CGfxDevice_ApplyRenderStates` (trilinear/aniso are the high-settings
+  look, cf. `HLSLEffect_TextureFilterMode @ 0x27e5698`).
+- **No sRGB framebuffer writes.** The SetRenderState immediate sweep (state
+  ids at every `[vtbl+0xE4]`-load site) covers the standard FF set (7, 14,
+  15, 19/20, 22-29, 34-38, 48, 53-60, 136-148, 168, 171) —
+  `D3DRS_SRGBWRITEENABLE` (194) never appears.
+- **No sRGB effect states.** The 44-file shipped `.fx` corpus contains no
+  `SRGBTexture`/sRGB pass state (grep over the decrypted localres set).
+- **The display transform is the identity at defaults.** The only gamma is
+  the user slider: `GLib_SetGammaRamp @ 0x677be0` builds
+  `ramp[i] = (i/255)^gamma` (normalized, 16-bit, RGB-identical) and the
+  default is **1.0** (static initializer `flt_84F354 @ 0x84f354`; config
+  keyword `gamma` `[orig: Config_ParseSettingsLine @ 0x54feb7]`, options
+  slider `UI_OnGammaSliderChanged @ 0x55a3d0`, re-applied on display
+  reset/lost-device).
+
+**Host mapping (D-RMAT-7).** The host renders linear HDR with an
+sRGB-encoding output blit, so the witnessed-FF shaders (the object composer,
+terrain/foliage/sky/water/celestial) sample textures RAW (no `source_color`
+hint), run the witnessed math on gamma-space values exactly as written in
+this record, and write `ALBEDO = nova_gamma_to_linear(result)` — the exact
+piecewise-sRGB inverse of the blit — so the displayed byte equals the
+computed gamma-space byte (`godot/shaders/nova_color.gdshaderinc`; the
+composer embeds the same body). The final [0,1] clamp is itself witnessed
+(the byte framebuffer saturates). Proof instrument: the swatch probe's
+**calibrate mode** renders the 0..255 gradient through the convention and
+asserts byte identity on the live engine build + driver (256/256 on Godot
+4.6.1 Forward+/D3D12 at land time); run it after any Godot or renderer
+change. Framebuffer BLENDING still occurs on the blit-encoded (linear)
+values — alpha/additive composites of translucent layers diverge boundedly
+from retail's gamma-byte blends while opaque and alpha-tested surfaces are
+byte-exact; that residual is **D-RMAT-8** (permanent, host-structural,
+ADR 0022 register).
+
 ## Divergence catalog
 
 | ID | Ours | Original | Disposition |
@@ -260,6 +310,9 @@ shipped corpus never uses fogmode 4..7 — LITE is dormant in JO (the
 | D-RMAT-4 | File-effect capability/sort words carried verbatim from the OED dump | derived at load by the technique-usage probe, UNIONED over all techniques (`[orig: @ 0x5ae690]`) | **FIXED (REN-4)**: the probe replicated statically over the shipped localres text — 14/19 tags match; 5 drift rows corrected on `kMaterialDescriptorTable` (the OED dump in `oed/types.h` stays byte-faithful): FFP_GLASS `0xb000 → 0x10003000` (no VS ⇒ no TANGENT; GLOW technique uses TexCubeRotSpecular ⇒ GLOW), VS_SKBUMPDIFFT/PHONGT `0x6014 → 0xc014` and VS_SKBUMPDIFFT2 `0x601c → 0xc01c` (read `In.Tangent`, never ReflectColor ⇒ TANGENT not GLASS), VS_SKGLASS `0x7004 → 0x7000` (untextured ⇒ no DIFFUSE). The 0x10000000 dialect resolved = the glow-copy capability (flag renamed `MATERIAL_FLAG_GLOW`); `is_luminance` re-keyed on EMISSIVE. Cited re-dump + `renderer_material_classify` pins |
 | D-RMAT-5 | Composer lighting gains were prototype values (hemi fill + ×1.5/×1.6/spec 0.8) | witnessed uniform surface `HemiGroundColor/HemiSkyColor/DirLightVector/DirLightColor/AmbientColor/ColorSrcGlobalGain` with engine-fed values under the FF MODULATE2X model | **FIXED (REN-5)** — the composer emits the witnessed model (saturated hemi+dir ×2; SELFLUM × ColorSrcGlobalGain ×2; the ×1.5/×1.6/spec-0.8 constants deleted); uniforms renamed `u_hemi_sky_color`/`u_hemi_ground_color`/`u_color_src_global_gain` and engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); T1 re-dump: key set + classification rows identical, all 630 composed hashes re-hashed under this citation, sections 3/4 untouched; T2: 116/120 swatch cells moved, the 4 VS_TRACER cells (unlit MODULATE 1×) byte-identical. Residual reflection/phong stand-ins tracked as D-RLIT-5 |
 | D-RMAT-6 | Single-pass host materials; no CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN technique classes | six pass classes selected per batch entry (`@ 0x5d9ff3`), CLIP falls back to NORMAL, LUM populates GLOW; the class CONTENT witnessed at REN-4 (§FF technique tables, §Pass execution) | WITNESSED-READY-DEFERRED — selection + NORMAL state ported (REN-3); the GLOW flag/classification landed at REN-4 (`is_glow_capable`); the remaining host mappings (CLIP plane, PROJSHAD/DEPTHMASK passes, the glow BLOOM wiring with the specular cube) ride D-RORD-4/-5's residuals + REN-5 |
+| D-RMAT-7 | Textures decoded sRGB→linear (`source_color`), witnessed gamma-space formulas evaluated on mixed-space values, result re-encoded by the host blit — an unwitnessed transform stack around every FF shader (compressed lighting contrast, washed color response) | gamma-space end to end: raw texel sampling, gamma-space combines, framebuffer byte = displayed byte, identity display ramp at default gamma 1.0 (§Color pipeline witness above) | **FIXED (2026-07-06, the model-parity slice)**: raw sampling + gamma-space math + the exact-inverse `nova_gamma_to_linear` output across the composer and the shader set; calibrate-mode identity proof 256/256; T1 re-dumped (key set identical, 630 hashes), T2 swatch 120/120 cells moved as the expected global response change, composite IDENTICAL (ordering untouched) |
+| D-RMAT-8 | Framebuffer blending happens on blit-encoded (linear) values | blending on gamma bytes (`out = src_g op dst_g` per the blend mode tables `@ 0x680f00`) | PERMANENT (host-structural, ADR 0022 register): the host cannot blend in gamma space without a gamma framebuffer; opaque + alpha-tested surfaces are byte-exact under D-RMAT-7, translucent composites diverge boundedly (alpha mixes shift midtones, additive accumulation runs dimmer); revisit only if a T3 scene shows an objectionable composite |
+| D-RMAT-9 | Object composer fog was a linear ramp with an invented `smoothstep` for type 3 | the device fog table: type 0 exponential `ln(64)/end`, types 1/2/3 linear with start = 0.5 / `(1−density)·end·0.5` / `(1−density)·end·0.25` (`[orig: Render_SetFogState @ 0x58a950 → CD3DDevice_SetFogParameters @ 0x677960]`; env-tod-re.md §Fog policy) | **FIXED (2026-07-06, the model-parity slice)**: the composer emits the witnessed table (one text with `terrain_lighting.gdshaderinc`/`water.gdshader`); covered by the same T1 re-dump |
 
 ## IDB changes made during the session
 
