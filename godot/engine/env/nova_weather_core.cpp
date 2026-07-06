@@ -34,6 +34,8 @@ void NovaWeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset1);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"), &NovaWeatherCore::get_cloud_uv_rate_per_second);
+	ClassDB::bind_method(D_METHOD("get_water_uv_state", "cam_x", "cam_z", "fog_distance"),
+			&NovaWeatherCore::get_water_uv_state);
 	ClassDB::bind_method(D_METHOD("set_wind_intensity", "value"), &NovaWeatherCore::set_wind_intensity);
 	ClassDB::bind_method(D_METHOD("get_wind_intensity"), &NovaWeatherCore::get_wind_intensity);
 	ClassDB::bind_method(D_METHOD("set_wind_duration_ticks", "ticks"), &NovaWeatherCore::set_wind_duration_ticks);
@@ -175,4 +177,10 @@ Vector2 NovaWeatherCore::get_cloud_uv_offset2(float p_cam_x, float p_cam_z) cons
 
 float NovaWeatherCore::get_cloud_uv_rate_per_second() const {
 	return opennova::env::cloud_uv_rate_per_second(cloud_scroll);
+}
+
+Vector4 NovaWeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float p_fog_distance) const {
+	const opennova::env::WaterUvState state =
+			opennova::env::water_uv_state(cloud_scroll, p_cam_x, p_cam_z, p_fog_distance);
+	return Vector4(state.scale, state.bias, state.offset_u, state.offset_v);
 }

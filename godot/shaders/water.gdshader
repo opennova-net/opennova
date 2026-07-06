@@ -1,14 +1,27 @@
 shader_type spatial;
 render_mode unshaded, blend_mix, cull_disabled;
 
-// Water pass consuming .env water_rgb/water_murk plus TOD fog output.
-// Engine equivalents: [orig: TimeOfDay_ParseProperty @ 0x57c590] parses the static water fields,
-// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] supplies per-frame fog color (docs/env/env-tod-re.md).
+// Water surface: structural port of the witnessed render_water_surface pass
+// [orig: @ 0x5c32c0, docs/env/env-tod-re.md "Water surface"]. The look is the
+// HIGH-DETAIL strip model [orig: render_water_strip_detailed @ 0x5c27d0]:
+// flat geometry, the animated 128x128 noise ridge texture + its DuDv map
+// (regenerated per frame in libs/env - Water_GenerateNoiseTextures
+// @ 0x5c0360), per-vertex Env_WaterColorLit modulation, distance-based alpha
+// falloff, and the shared scene fog. The screen-marched strip TESSELLATION
+// itself is a tracked divergence (env #29 - this plane is the host stand-in),
+// and the fixed-function stage-combine table for the water effects is
+// undecoded (same class as the sky pass-1 gap): the noise color MODULATES the
+// lit water color here; the DuDv map is bound for the future reflection/EMBM
+// consumer (env #30) and sampled only for a witnessed-map preview of surface
+// derivative shading.
 
-uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
-uniform float u_water_alpha = 0.6;
-uniform float u_time = 0.0;
-uniform float u_scroll_speed = 0.00343;
+uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224); // Env_WaterColorLit
+uniform float u_water_alpha = 0.6; // water_murk [orig: SetWaterMurk @ 0x57d4f0]
+// (scale, bias, offset_u, offset_v) [orig: @ 0x5c3348..0x5c33db]: scale/bias
+// from the fog-distance INT part, offsets = cam/128 + cloud accumulators.
+uniform vec4 u_water_uv = vec4(1.0, 0.2, 0.0, 0.0);
+uniform sampler2D u_noise_color : filter_linear, repeat_enable;
+uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
 uniform float u_fog_start = 300.0;
 uniform float u_fog_end = 1000.0;
@@ -37,20 +50,40 @@ void vertex() {
 }
 
 void fragment() {
-	vec2 uv = v_world_pos.xz * 0.015625;
-	uv += vec2(u_time * u_scroll_speed, u_time * u_scroll_speed);
-	float wave1 = sin(uv.x * 6.28 + u_time * 0.25) * 0.015;
-	float wave2 = cos(uv.y * 6.28 + u_time * 0.18) * 0.015;
-	uv += vec2(wave1, wave2);
+	// The witnessed UV model: strip vertices are camera-relative, so the base
+	// term is (world - camera)/128 through the fog-derived scale - bias, and
+	// the offset carries camera/128 + the scroll accumulators
+	// [orig: per-vertex u = t * flt_8412B0 - flt_8412B4 in both strips;
+	//  offsets @ 0x5c33b9..0x5c33db]. u rides world z, v rides world x.
+	vec2 rel = vec2(v_world_pos.z - CAMERA_POSITION_WORLD.z,
+			v_world_pos.x - CAMERA_POSITION_WORLD.x) / 128.0;
+	vec2 uv = rel * u_water_uv.x - vec2(u_water_uv.y) + vec2(u_water_uv.z, u_water_uv.w);
 
-	float wave_bright = 0.95 + 0.05 * sin(uv.x * 12.56 + uv.y * 9.42 + u_time * 0.3);
-	vec3 color = u_water_color * wave_bright;
-	vec3 view_dir = normalize(CAMERA_POSITION_WORLD - v_world_pos);
-	float cos_angle = max(dot(view_dir, vec3(0.0, 1.0, 0.0)), 0.0);
-	float fresnel = pow(1.0 - cos_angle, 2.0);
-	float alpha = mix(u_water_alpha, 0.95, fresnel);
+	// Ridge intensity + its alpha mask (A = 255 - i*i/512, more opaque where
+	// dark) [orig: Water_GenerateNoiseTextures pass 2 @ 0x5c04b7..0x5c0552].
+	// u_noise_normal (the DuDv map, pass 3) stays bound for the env #30
+	// reflection consumer; its stage combine is undecoded, so it is not
+	// sampled here.
+	vec4 noise = texture(u_noise_color, uv);
 
+	// Diffuse = lit water color modulated by the noise ridge (texture x
+	// diffuse; the effect's stage table is undecoded — MODULATE2X is used as
+	// the interim reading since the ridge averages ~128/255, making 2x
+	// average-identity over the per-vertex color chain
+	// [orig: (v * Env_WaterColorLit bytes) >> 8 @ 0x5c2430..0x5c2436]).
+	vec3 color = u_water_color * noise.rgb * 2.0;
+
+	// Distance alpha: the witnessed falloff direction — opaque near, fading
+	// with distance^2 into the fog (v40 = 255 - fog_alpha^2/255
+	// [orig: @ 0x5c2465 / the detailed-path v40 chain]), times the texture
+	// alpha. u_water_alpha (murk) stays as the host translucency knob — the
+	// witnessed murk term sits in the brightness/angle chain whose constants
+	// are recorded (docs/env/env-tod-re.md Water surface) pending the exact
+	// per-vertex port (env #29).
 	float dist = length(v_world_pos - CAMERA_POSITION_WORLD);
+	float dist_a = clamp(dist / max(u_fog_end, 1.0), 0.0, 1.0);
+	float alpha = clamp(1.0 - dist_a * dist_a, 0.0, 1.0) * noise.a * u_water_alpha;
+
 	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
 	color = mix(u_fog_color, color, fog_factor);
 

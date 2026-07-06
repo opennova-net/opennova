@@ -59,6 +59,16 @@ extends GutTest
 #   pushed offsets. sky/verts re-dumped: the mesh comes from
 #   libs/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
 #   sky/mesh (counts + witnessed winding) byte-identical.
+#   Water leg 2026-07-06 (env #28 fixed / #31 minted-and-closed / #29-#30
+#   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
+#   through NovaWaterCore [orig: Water_GenerateNoiseTextures @ 0x5c0360],
+#   cross-pinned byte-equal to the env_render_unit ctest landmarks) and NEW
+#   water/uv_state [orig: render_water_surface @ 0x5c3348..0x5c33db];
+#   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
+#   the invented waves - the pinned tail is now the u_water_uv Vector4. Every
+#   other water key (mesh, override ladder, snap, per-cell lit colors) stayed
+#   byte-identical; the ladder REORDER (#28, terrain-over-env) has no asset-
+#   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -186,6 +196,7 @@ const EXPECTED_BYTES := {
 	"wa/k064": "7CDE 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wa/k256": "9787 00 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"water/mesh": "4225 24576 0 65 1 1 65 66 1 66 2 2 66 67",
+	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
 	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wb/k016": "429E 10 00 07 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wb/k064": "71F1 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
@@ -212,7 +223,7 @@ const EXPECTED_FLOATS := {
 	"c0/t1845": [-0.500005603, 0.168952495, 0.849381864, 0.000549451, 500.000000000, 1000.000000000],
 	"c0/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 500.000000000, 1000.000000000],
 	"c0/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 500.000000000, 1000.000000000],
-	"c0/water_params": [0.000000000, 0.003547668],
+	"c0/water_params": [0.000000000, 1.000169516, 0.200033903, 0.000234902, 0.000234902],
 	"c1/consts": [400.000000000, 3.000000000, 30.000000000, 250.000000000, 0.500000000, 0.500000000, 1830.000000000, 3.000000000, 15.000000000, 1.000000000, 76.000000000, 0.000000000],
 	"c1/t0000": [-0.500005603, 0.866022229, -0.000000076, 1.000000000, 100.000000000, 400.000000000],
 	"c1/t0550": [-0.500005543, 0.037776366, -0.865197897, 0.500137389, 100.000000000, 400.000000000],
@@ -223,7 +234,7 @@ const EXPECTED_FLOATS := {
 	"c1/t1845": [-0.500005603, 0.168952495, 0.849381864, 0.000549451, 100.000000000, 400.000000000],
 	"c1/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 100.000000000, 400.000000000],
 	"c1/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 100.000000000, 400.000000000],
-	"c1/water_params": [1.500000000, 0.007095337],
+	"c1/water_params": [1.500000000, 1.000469685, 0.200093940, 0.000469763, 0.000469763],
 	"c2/consts": [300.000000000, 1.000000000, 15.000000000, 175.000000000, 0.349999994, 1.000000000, 630.000000000, 2.000000000, 15.000000000, 1.000000000, 107.992004395, 0.000000000],
 	"c2/t0000": [-0.500005603, 0.866022229, -0.000000076, 1.000000000, 0.500000000, 300.000000000],
 	"c2/t0550": [-0.500005543, 0.037776366, -0.865197897, 0.500137389, 0.500000000, 300.000000000],
@@ -234,7 +245,7 @@ const EXPECTED_FLOATS := {
 	"c2/t1845": [-0.500005603, 0.168952495, 0.849381864, 0.000549451, 0.500000000, 300.000000000],
 	"c2/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 0.500000000, 300.000000000],
 	"c2/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 0.500000000, 300.000000000],
-	"c2/water_params": [1.000000000, 0.003547668],
+	"c2/water_params": [1.000000000, 1.000636578, 0.200127319, 0.000234902, 0.000234902],
 	"celestial/dome_distance": [2000.000000000],
 	"dir/t0000": [-0.342015058, -0.939694524, 0.000000000, -0.500005603, 0.866022229, -0.000000076],
 	"dir/t0550": [-0.342015058, -0.040990192, 0.938800037, -0.500005543, 0.037776366, -0.865197897],
@@ -253,6 +264,7 @@ const EXPECTED_FLOATS := {
 	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/override": [42.500000000, 7.000000000],
 	"water/snap": [96.000000000, 7.000000000, -64.000000000],
+	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
 	"we/k008": [1751.612903226],
 	"we/k016": [1803.225806452],
 	"we/k032": [1906.451612903],
@@ -452,9 +464,13 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			var alpha: float = water.water_material.get_shader_parameter("u_water_alpha")
 			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
 
+		# u_water_uv = (scale, bias, offset_u, offset_v) [orig:
+		# render_water_surface @ 0x5c3348..0x5c33db] — the standalone node's
+		# fallback core after the cell loop's fixed tick count.
+		var water_uv: Vector4 = water.water_material.get_shader_parameter("u_water_uv")
 		floats["c%d/water_params" % cfg_index] = [
 			water.water_height,
-			water.water_material.get_shader_parameter("u_scroll_speed"),
+			water_uv.x, water_uv.y, water_uv.z, water_uv.w,
 		]
 
 
@@ -626,6 +642,27 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	simulate(water, 1, TICK)
 	var snap: Vector3 = water.mesh_instance.global_position
 	floats["water/snap"] = [snap.x, snap.y, snap.z]
+
+	# The witnessed noise texture pair, asset-free through NovaWaterCore
+	# [orig: Water_GenerateNoiseTextures @ 0x5c0360; init tables from the boot
+	# PRNG state @ 0x5c01a0]: first 8 RGBA bytes of each at counters 0 and 7.
+	var core := NovaWaterCore.new()
+	core.update(0)
+	var color_head := core.get_color_rgba8().slice(0, 8)
+	var normal_head := core.get_normal_rgba8().slice(0, 8)
+	core.update(7)
+	var color_head_7 := core.get_color_rgba8().slice(0, 8)
+	bytes["water/noise"] = "%s %s %s" % [
+		color_head.hex_encode(), normal_head.hex_encode(), color_head_7.hex_encode()]
+
+	# The witnessed UV transform (scale, bias, offset_u, offset_v) after 8
+	# ticks at sky_speed 15 [orig: render_water_surface @ 0x5c3348..0x5c33db]
+	# via the weather core's shared accumulators.
+	var scroll := NovaWeatherCore.new()
+	for _i in 8:
+		scroll.tick_cloud_scroll(15.0)
+	var uv_state: Vector4 = scroll.get_water_uv_state(100.0, 200.0, 1024.0)
+	floats["water/uv_state"] = [uv_state.x, uv_state.y, uv_state.z, uv_state.w]
 
 
 func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:

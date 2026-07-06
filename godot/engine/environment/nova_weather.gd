@@ -149,6 +149,13 @@ func get_cloud_uv_rate_per_second() -> float:
 	return _core.get_cloud_uv_rate_per_second()
 
 
+# The witnessed water UV transform (scale, bias, offset_u, offset_v) - the
+# water surface shares the layer-1 cloud accumulators with a 32x camera term
+# [orig: render_water_surface @ 0x5c3348..0x5c33db].
+func get_water_uv_state(cam_x: float, cam_z: float, fog_distance: float) -> Vector4:
+	return _core.get_water_uv_state(cam_x, cam_z, fog_distance)
+
+
 func _write_shader_globals(env: Node) -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", get_smooth_fill())
 	RenderingServer.global_shader_parameter_set(&"opennova_sun_light", get_smooth_sun())

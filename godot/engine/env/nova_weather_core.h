@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector4.hpp>
 
 #include <env/env_render.h>
 
@@ -93,6 +94,12 @@ public:
 	// Layer-1 UV drift per second at the current smoothed rate — the water
 	// surface's scroll-speed source.
 	float get_cloud_uv_rate_per_second() const;
+
+	// The witnessed water UV transform (scale, bias, offset_u, offset_v):
+	// scale/bias from the fog-distance INT part, offsets from the layer-1
+	// cloud accumulators + 32x camera [orig: render_water_surface
+	// @ 0x5c3348..0x5c33db].
+	Vector4 get_water_uv_state(float p_cam_x, float p_cam_z, float p_fog_distance) const;
 };
 
 } // namespace godot
