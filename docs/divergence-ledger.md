@@ -422,6 +422,19 @@ D-RORD-5's specular-cube question (the static sun-glint cube). The chain is
 ported libs-first (`libs/renderer/light_runtime`, `libs/env::ModulatorChain`)
 and T1-pinned (`renderer_state_vectors` section 5).
 
+Minted-and-closed 2026-07-06 (the model-parity slice): **D-RLIT-7** ->
+`FIXED` — the placer's static MultiMesh batches froze the env lighting
+harvested at load (no live owner for the template-harvested materials;
+even the pre-first-iris-tick modulator was baked in), while retail relights
+every entity from the current lighting block each frame
+`[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`. The placer
+now registers every harvested batch material and re-stamps from the live env
+per frame (generation-gated; single-sourced stamping shared with
+NovaObjectModel). The same slice re-derived the un-enved preview defaults to
+the retail noon register (full_00.env tod 1200 bytes — composer +
+nova_object_model + shader-global + terrain-include defaults, one cited
+register).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-RLIT-1 | Hosted weather runs 4 color blocks through the modulator; retail modulates 16 (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` | A | OPEN (partial — the hosted subset is the rendered set) | joins as consumers are hosted (skyfog rides frame-clear/horizon) |

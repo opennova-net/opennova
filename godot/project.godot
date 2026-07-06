@@ -18,10 +18,6 @@ run/flush_stdout_on_print=true
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
-; Per-product main scenes: the export presets tag their features (modtools /
-; runtime_game), so each packaged exe boots its own product. The base value
-; above is what a plain dev F5 runs. The modtools override is load-bearing:
-; without it the editor package boots the game scene its own preset excludes.
 run/main_scene.modtools="res://modtools/editor/editor_main.tscn"
 run/main_scene.runtime_game="res://game/main_game.tscn"
 
@@ -54,15 +50,15 @@ environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
 opennova_fill_light={
 "type": "vec3",
-"value": Vector3(0.3, 0.3, 0.35)
+"value": Vector3(0.192157, 0.215686, 0.180392)
 }
 opennova_sun_light={
 "type": "vec3",
-"value": Vector3(0.8, 0.75, 0.65)
+"value": Vector3(0.666667, 0.666667, 0.654902)
 }
 opennova_sky_ambient={
 "type": "vec3",
-"value": Vector3(0.4, 0.45, 0.55)
+"value": Vector3(0.329412, 0.345098, 0.34902)
 }
 opennova_sun_direction={
 "type": "vec3",

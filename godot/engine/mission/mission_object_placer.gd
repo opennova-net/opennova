@@ -30,6 +30,7 @@ extends RefCounted
 # editor re-import (same convention as veg_assets.gd).
 
 const NovaObjectModelScript := preload("res://engine/object/nova_object_model.gd")
+const EnvStamperScript := preload("res://engine/mission/mission_batch_env_stamper.gd")
 const CollisionHull := preload("res://engine/object/collision_hull.gd")
 
 const CONTAINER_NAME := "MissionObjects"
@@ -59,6 +60,12 @@ var _object_data_cache: Dictionary = {}
 var _skeletal_cache: Dictionary = {}
 # graphic -> Array[{ mesh, material, offset, submesh }] harvested from a template.
 var _static_batch_cache: Dictionary = {}
+# Every unique harvested batch ShaderMaterial (the throwaway template model's
+# materials outlive it on the MultiMesh batches) — update_environment()
+# re-stamps these from the live env so static objects relight with TOD.
+var _batch_materials: Array = []
+var _last_batch_env_gen: int = -1
+var _last_batch_env_values: Dictionary = {}
 # graphic -> Vector3 ground anchor (model-space point that sits at the entity
 # position). Computed once per graphic; see _ground_anchor_for.
 var _anchor_cache: Dictionary = {}
@@ -88,8 +95,36 @@ func _check_epoch() -> void:
 	_object_data_cache.clear()
 	_skeletal_cache.clear()
 	_static_batch_cache.clear()
+	_batch_materials.clear()
+	_last_batch_env_gen = -1
+	_last_batch_env_values = {}
 	_anchor_cache.clear()
 	_collision_shapes_cache.clear()
+
+
+# Re-stamp every harvested static-batch material from the live environment.
+# The batch materials are snapshots harvested from a throwaway model at build
+# time; without this the static world would keep its load-time lighting while
+# TOD advances — retail relights every entity from the current lighting block
+# each frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0].
+# Cheap when nothing changed: the env generation (or value-equality) gates the
+# push exactly like NovaObjectModel's per-model stamp.
+func update_environment(env_node: Node) -> void:
+	if _batch_materials.is_empty():
+		return
+	var gen := -1
+	if env_node != null and env_node.has_method("get_env_generation"):
+		gen = int(env_node.get_env_generation())
+		if gen == _last_batch_env_gen and not _last_batch_env_values.is_empty():
+			return
+	var values: Dictionary = NovaObjectModelScript.environment_values_from(env_node)
+	if not _last_batch_env_values.is_empty() and values.hash() == _last_batch_env_values.hash():
+		_last_batch_env_gen = gen
+		return
+	_last_batch_env_values = values
+	_last_batch_env_gen = gen
+	for material in _batch_materials:
+		NovaObjectModelScript.apply_environment_values(material, values)
 
 
 # --- Coordinate conversion (BMS is Z-up; Godot is Y-up) -----------------------
@@ -242,6 +277,14 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		stats.batched += xforms.size()
 		stats.placed += xforms.size()
 	PerfTimeline.end_on(timeline)
+
+	# Align every harvested batch material with the env AS OF placement end —
+	# the throwaway-template harvest sees mid-load values (e.g. the modulator
+	# before its first iris tick) — and drop the per-frame stamper into the
+	# container so the batches keep tracking TOD/weather/iris afterwards.
+	_last_batch_env_values = {}
+	update_environment(env_node)
+	_ensure_env_stamper(container, env_node)
 
 	# One pick collider per static entity (not per submesh): collision is
 	# whole-model. A separate pass (rather than inline with each graphic's
@@ -460,6 +503,12 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 	if batches.is_empty():
 		delta.unresolved = 1
 		return delta
+	# A first-seen graphic just harvested fresh materials mid-load; align them
+	# with the live env like place() does, and make sure the container carries
+	# the per-frame stamper (a place_single onto a fresh container).
+	_last_batch_env_values = {}
+	update_environment(env_node)
+	_ensure_env_stamper(container, env_node)
 	var refs := [{ "kind": kind, "index": index }]
 	for batch in batches:
 		var mm := MultiMesh.new()
@@ -731,11 +780,31 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 						"offset": part_node.transform * mi.transform,
 						"submesh": submesh,
 					})
+					if mi.material_override is ShaderMaterial and not _batch_materials.has(mi.material_override):
+						_batch_materials.append(mi.material_override)
 					submesh += 1
 		tree_parent.remove_child(model)
 		model.free()
 	_static_batch_cache[graphic] = batches
 	return batches
+
+
+# Keep exactly one per-frame batch-relight driver alive inside the container
+# (see mission_batch_env_stamper.gd; the container is rebuilt on re-bake, so
+# the stamper's lifetime follows the placed set). No-op without an env node.
+func _ensure_env_stamper(container: Node3D, env_node: Node) -> void:
+	if container == null or env_node == null:
+		return
+	var existing := container.get_node_or_null(NodePath("EnvRestamp"))
+	if existing != null:
+		existing.set("placer", self)
+		existing.set("environment_node", env_node)
+		return
+	var stamper: Node = EnvStamperScript.new()
+	stamper.name = "EnvRestamp"
+	stamper.placer = self
+	stamper.environment_node = env_node
+	container.add_child(stamper)
 
 
 func _ensure_container(parent: Node3D) -> Node3D:

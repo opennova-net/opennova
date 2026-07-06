@@ -24,8 +24,11 @@ uniform sampler2D u_detailmap2 : filter_linear_mipmap, repeat_enable;
 uniform sampler2D u_detailmapdist2 : filter_linear_mipmap, repeat_enable;
 uniform float u_detail_near_dist = 40.0;
 uniform float u_detail_far_dist = 80.0;
-uniform vec3 u_sun_light = vec3(0.8, 0.75, 0.65);
-uniform vec3 u_sky_ambient = vec3(0.4, 0.45, 0.55);
+// Un-enved defaults = the retail noon register (full_00.env tod 1200:
+// sun_rgb 170,170,167; sky_rgb 84,88,89 — bytes /255), one register with the
+// object-model/global defaults.
+uniform vec3 u_sun_light = vec3(0.666667, 0.666667, 0.654902);
+uniform vec3 u_sky_ambient = vec3(0.329412, 0.345098, 0.349020);
 uniform vec3 u_sun_direction = vec3(0.0, 0.70710678, 0.70710678);
 uniform vec3 u_terrain_tint = vec3(1.0, 1.0, 1.0);
 uniform float u_detail_density = 128.0;

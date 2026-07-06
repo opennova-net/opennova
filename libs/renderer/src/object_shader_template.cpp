@@ -72,13 +72,15 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	// 0x5af49e]): DirLightVector/DirLightColor/HemiGroundColor/HemiSkyColor
 	// (AmbientColor derives as their average) and ColorSrcGlobalGain. Engine-
 	// fed values are the env blocks' post-modulator colors (docs/render/
-	// render-lighting-re.md); the defaults below are host-preview values only
-	// (un-enved swatch/editor scenes), scaled so the witnessed x2 modulate
-	// lands near the retail mid-day register.
-	u += "uniform vec3 u_hemi_sky_color = vec3(0.20, 0.21, 0.23);\n";
-	u += "uniform vec3 u_hemi_ground_color = vec3(0.10, 0.11, 0.13);\n";
+	// render-lighting-re.md); the defaults below (un-enved swatch/editor
+	// scenes) are the RETAIL NOON register — the shipped full_00.env tod 1200
+	// block bytes /255 (sun_rgb 170,170,167; sky_rgb 84,88,89; ground_rgb
+	// 49,55,46) — so un-enved previews light like a JO noon world. Mirrored
+	// by nova_object_model.gd's DEFAULT_* constants.
+	u += "uniform vec3 u_hemi_sky_color = vec3(0.32941, 0.34510, 0.34902);\n";
+	u += "uniform vec3 u_hemi_ground_color = vec3(0.19216, 0.21569, 0.18039);\n";
 	u += "uniform vec3 u_dir_light_dir = vec3(-0.4082, -0.8165, -0.4082);\n";
-	u += "uniform vec3 u_dir_light_color = vec3(0.42, 0.41, 0.38);\n";
+	u += "uniform vec3 u_dir_light_color = vec3(0.66667, 0.66667, 0.65490);\n";
 	u += "uniform vec3 u_color_src_global_gain = vec3(1.0);\n";
 	u += "uniform bool u_fog_enabled = false;\n";
 	u += "uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);\n";
