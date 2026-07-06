@@ -314,9 +314,30 @@ CBIN codec (magic 0x4E494243 + 20-B header + ROL32/XOR cipher `@0x75e348`) is
 
 ### Terrain — [terrain/terrain-re.md](terrain/terrain-re.md) (D-TERRAIN catalog; PAR-R1, PARTIAL)
 
+Minted-and-closed 2026-07-06 (the model-parity follow-up): **D-TERRAIN-2** ->
+`FIXED` — the shared surface include stacked TWO ×2 detail-normal factors on
+top of the 3-way splat (the gobj-era "v23 dual-normal" chimera); the
+witnessed top-tier ps.1.4 shader applies EXACTLY ONE normal term —
+`out = (cm.a·c1 + c0)/2 ×2 cm ×2 dp3(normalmap, blendmap) ×4 splat`
+`[orig: PolyTrn_PS14SplatNormalMap source @ 0x7dece0; PolyTrn_PS14Splat
+@ 0x7dee18; assembled by compile_terrain_pixel_shaders @ 0x605260]` (the
+dual-normal product belongs to the separate non-splat ps.1.1 tier,
+PolyTrn_PSDualNormalMap, never combined with the splat). Under the
+gamma-faithful pipeline (D-RMAT-7) the squared bump factor clipped whole
+terrain regions to white (retail-texture measurements: colormap ≤128
+nominal, normal pairs 127.5-128 avg — the extra factor was the only >1
+multiplier). The include now matches the witnessed instruction stream;
+`terrain_surface_light` T1 pins are unaffected (the c0/c1 lighting shape is
+unchanged). Residual note-only: the witnessed t3 is the heightmap-derived
+generated normal map (`Texture_GenerateNormalMap`, scale 1/32) — the host
+samples the .trn near/far detail-normal pair as the texture-source stand-in
+until that generator ports; the detailmap2/dist2 pair stays authored (the
+.trn owns the slots; the ps.1.1 tier consumes them).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-TERRAIN-1 | Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include — a tracked deliberate divergence justified by the editing need | C | PERMANENT (candidate) | PAR (terrain) |
+| D-TERRAIN-3 | Aerial/editor cameras see past the sky dome's 1024-unit rim to the viewport clear color (the black ring behind far terrain in editor screenshots); retail cameras are ground-level and the fog/dome geometry always covers the rim | C | OPEN (cosmetic; editor-view only) | a dome-rim skirt or editor far-env treatment rides ONED polish |
 
 Record is PARTIAL by documentation depth, NOT by open divergences: the data path
 (build → mesh-simplify → CPT) is proven **byte-identical** across 5 fixtures
@@ -481,7 +502,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Particles `.ptl` | 2 | 2 | 0 | 4 | 0 |
 | VFS / PFF mount stack | 3 | 1 | 0 | 4 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
-| Terrain | 0 | 0 | 0 | 0 | 1 |
+| Terrain | 1 | 0 | 0 | 1 | 1 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
 | Foliage | 1 | 0 | 0 | 1 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
@@ -489,7 +510,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **34** | **11** | **31** | **76** | 9 |
+| **Total** | **35** | **11** | **31** | **77** | 9 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 

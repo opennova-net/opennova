@@ -96,6 +96,16 @@ device constants. Ported: `terrain_lighting.gdshaderinc` (the prior
 combined/fill pairing was a gobj-era stand-in) +
 `renderer::terrain_surface_light` (T1 section 5). Full chain:
 [render/render-lighting-re.md](../render/render-lighting-re.md).
+**Include correction (2026-07-06, D-TERRAIN-2)**: `terrain_lighting.gdshaderinc`
+had stacked TWO ×2 detail-normal factors on the splat (the gobj-era "v23
+dual-normal" chimera; under the gamma-faithful pipeline it clipped regions
+to white) — rewritten to the witnessed top-tier instruction stream, source
+text pinned: `PolyTrn_PS14SplatNormalMap @ 0x7dece0` = `mul/mad ×2 splat`,
+`dp3 r3, r3(normalmap), r2(blendmap)`, `mad_d2 (r0.a·c1 + c0)`, `mul_x2 ×
+colormap`, `mul_x2 × dp3`, `mul_x4 × splat`; `PolyTrn_PS14Splat @ 0x7dee18`
+is the same without the dp3 pair. The witnessed t3 = the heightmap-derived
+generated normal map (scale 1/32); the host's near/far .trn detail-normal
+crossfade is the texture-source stand-in (note-only residual).
 
 **Surface materials** (same function): the `"depthspin"` shore material
 (`dword_319f904`, alpha-tested: stage 0 alpha `ADDSIGNED(COMPLEMENT
