@@ -3,6 +3,7 @@
 #include "oed/material_descriptor.h"
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
+#include "threedi/threedi_3di3.h"
 
 #include <godot_cpp/core/class_db.hpp>
 
@@ -40,6 +41,12 @@ void NovaObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("family_for_key", "key"), &NovaObjectShaderCache::family_for_key);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &NovaObjectShaderCache::get_known_shader_tags);
 	ClassDB::bind_method(D_METHOD("clear"), &NovaObjectShaderCache::clear);
+
+	// The per-material 3DI flag byte, single-sourced from libs/threedi so
+	// GDScript stops re-declaring the values (maturity REN-2 / ENG-4 leg).
+	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_ALPHA_TEST", THREEDI_MATERIAL_FLAG_ALPHA_TEST);
+	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_ALPHA_INVERT", THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
+	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_TWO_SIDED", THREEDI_MATERIAL_FLAG_TWO_SIDED);
 }
 
 Ref<Shader> NovaObjectShaderCache::get_shader_for_key(int32_t key) {

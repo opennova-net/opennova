@@ -337,6 +337,21 @@ Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
 |---|---|---|---|---|
 | D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion); `menu_shell.gd` scans by name heuristic instead | A | OPEN | rides the ENG-6 manifest (Wave 2) |
 
+### Render — materials/state — [render/render-material-re.md](render/render-material-re.md) (D-RMAT catalog; REN-2)
+
+Minted at the REN-2 grill (2026-07-06). D-RMAT-1 (alpha-test compare shape —
+the invert flag flips the COMPARE `a <= ref`, never the value; normal is
+strict `a > ref`) and D-RMAT-3 (tag lookup is case-insensitive `stricmp`)
+were discovered, witnessed, and FIXED in the same slice, with the T1
+render-state golden re-dumped under citation.
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-RMAT-2 | VS_TRACER: the registry row landed (runtime tag, unlit additive diffuse), but Tracer.fx's soft-edge `vsTracer` vertex displacement is unported — tracers render hard-edged | A | WITNESSED-READY-DEFERRED | REN-4 |
+| D-RMAT-4 | File-effect capability/sort flag words carried verbatim from the OED dump; the runtime derives them by a per-technique usage probe `[orig: HLSLEffect_LoadFromFile @ 0x5ae690]` — per-tag equality unverified (note the 0x10000000 LUM-vs-TexCubeRotSpecular dialect) | B | NEEDS-RE | REN-4 |
+| D-RMAT-5 | Composer lighting gains are prototype values (hemi fill + ×1.5/×1.6/spec 0.8) vs the witnessed uniform surface (HemiSky/HemiGround/DirLight/Ambient/ColorSrcGlobalGain) | A | OPEN | REN-5 |
+| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state | A | WITNESSED-READY-DEFERRED | REN-3/REN-4 |
+
 ---
 
 ## Count-to-zero scoreboard
@@ -367,7 +382,8 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Foliage | 1 | 0 | 0 | 1 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **29** | **12** | **28** | **69** | 5 |
+| Render — materials/state | 1 | 1 | 2 | 4 | 0 |
+| **Total** | **30** | **13** | **30** | **73** | 5 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 
@@ -377,10 +393,11 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **3** — the
+Permanent register size: **17** (below). `UNAUDITED` systems: **2** — the
 runtime-render systems reopened the set on 2026-07-05 (the REN audit track
-below, [ADR 0023](adr/0023-render-visual-parity.md)); every other system has
-an RE record (full or partial) or a tracked-by-composition audit.
+below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
+materials/state system on 2026-07-06; every other system has an RE record
+(full or partial) or a tracked-by-composition audit.
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -456,7 +473,7 @@ to `libs/cbin`. The two partials (Terrain, Credits) have their remaining grills
 scoped in their records; the six code-cited-jodemo systems are retail-anchored
 where they ship.
 
-### Render (REN) — reopened 2026-07-05, `UNAUDITED` = 3
+### Render (REN) — reopened 2026-07-05, `UNAUDITED` = 2
 
 The REN planning grill ([ADR 0023](adr/0023-render-visual-parity.md),
 [maturity-program.md](maturity-program.md) REN track) found the runtime render
@@ -469,11 +486,11 @@ application. Three systems enter `UNAUDITED`; the REN grill slices convert
 them into records with catalogs (raising open counts before the burn-down
 lowers them, as the R-audits did):
 
-| System | Slice | Record on landing |
+| System | Slice | Record |
 |---|---|---|
-| Object materials / render state (the runtime flag/tag→state path) | REN-2 | `render/render-material-re.md` (D-RMAT) |
-| Batching / draw order / pass structure | REN-3 | `render/render-order-re.md` (D-RORD) |
-| Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | `render/render-lighting-re.md` (D-RLIT) |
+| Object materials / render state (the runtime flag/tag→state path) | REN-2 | **landed 2026-07-06** — [render/render-material-re.md](render/render-material-re.md) (D-RMAT, tabled above) |
+| Batching / draw order / pass structure | REN-3 | `render/render-order-re.md` (D-RORD) on landing |
+| Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | `render/render-lighting-re.md` (D-RLIT) on landing |
 
 Terrain-TSS and sky/water shader findings grow the existing
 [terrain/terrain-re.md](terrain/terrain-re.md) and

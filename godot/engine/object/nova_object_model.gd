@@ -3,9 +3,8 @@ extends Node3D
 
 signal bounds_changed(bounds: AABB)
 
-const MATERIAL_FLAG_ALPHA_TEST := 0x01
-const MATERIAL_FLAG_ALPHA_INVERT := 0x02
-const MATERIAL_FLAG_TWO_SIDED := 0x04
+# The per-material 3DI flag byte constants live on NovaObjectShaderCache,
+# single-sourced from libs/threedi (THREEDI_MATERIAL_FLAG_*) — REN-2.
 const OED_UPDATE_NONE := 0
 const OED_UPDATE_MTRL := 1
 const OED_UPDATE_LGHT := 2
@@ -755,12 +754,12 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	if shader_tag.is_empty():
 		shader_tag = "FF_ST_OP"
 	var material_flags := 0
-	if bool(info.get("alpha_test_enabled", (int(material_def.get("flags", 0)) & MATERIAL_FLAG_ALPHA_TEST) != 0)):
-		material_flags |= MATERIAL_FLAG_ALPHA_TEST
-	if bool(info.get("alpha_invert", (int(material_def.get("flags", 0)) & MATERIAL_FLAG_ALPHA_INVERT) != 0)):
-		material_flags |= MATERIAL_FLAG_ALPHA_INVERT
-	if bool(info.get("two_sided", (int(material_def.get("flags", 0)) & MATERIAL_FLAG_TWO_SIDED) != 0)):
-		material_flags |= MATERIAL_FLAG_TWO_SIDED
+	if bool(info.get("alpha_test_enabled", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0)):
+		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST
+	if bool(info.get("alpha_invert", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0)):
+		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT
+	if bool(info.get("two_sided", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED) != 0)):
+		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED
 	var emissive_type := 2 if bool(info.get("emissive", false)) else int(material_def.get("emissive_type", 0))
 	var is_glass_flag := 1 if bool(info.get("is_glass", material_def.get("is_glass", false))) else 0
 	var alpha_test_byte := int(info.get("alpha_test", roundi(float(material_def.get("alpha_threshold", 0.0)) * 255.0)))
@@ -788,9 +787,12 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 		material.set_shader_parameter("u_normal_map", normal)
 	else:
 		material.set_shader_parameter("u_normal_map", _solid_colour_texture(Color(0.5, 0.5, 1.0, 1.0)))
-	if (material_flags & MATERIAL_FLAG_ALPHA_TEST) != 0:
-		material.set_shader_parameter("u_alpha_test_threshold", maxf(0.001, float(alpha_test_byte) / 255.0))
-		material.set_shader_parameter("u_alpha_test_invert", 1.0 if (material_flags & MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
+	if (material_flags & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0:
+		## The ref byte feeds the compare exactly; the shader keeps a > ref
+		## (invert: a <= ref), so no epsilon fudge is needed for ref 0.
+		## [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0]
+		material.set_shader_parameter("u_alpha_test_threshold", float(alpha_test_byte) / 255.0)
+		material.set_shader_parameter("u_alpha_test_invert", 1.0 if (material_flags & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
 	else:
 		material.set_shader_parameter("u_alpha_test_threshold", 0.0)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)

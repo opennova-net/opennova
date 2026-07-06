@@ -40,10 +40,13 @@ func test_classify_binding_matches_golden_keys() -> void:
 func test_known_shader_tag_table_reaches_gdscript() -> void:
 	var cache = NovaObjectShaderCache.get_singleton()
 	var tags: PackedStringArray = cache.get_known_shader_tags()
-	assert_eq(tags.size(), 45, "canonical table is 45 tags")
+	# 46 = OED's 45-entry gMaterialInfoTable + VS_TRACER, matching the runtime
+	# registry retail builds at boot (REN-2; docs/render/render-material-re.md).
+	assert_eq(tags.size(), 46, "table mirrors the runtime registry (45 OED + VS_TRACER)")
 	assert_true("FF_ST_OP" in tags, "table carries FF_ST_OP")
 	assert_true("FFP_GLASS" in tags, "table carries FFP_GLASS")
-	assert_false("VS_LEAVESWIND" in tags, "non-OED tags stay out of the table")
+	assert_true("VS_TRACER" in tags, "table carries the runtime-only VS_TRACER row")
+	assert_false("VS_LEAVESWIND" in tags, "unshipped tags stay out of the table")
 
 
 func test_shader_for_key_composes_real_shaders() -> void:

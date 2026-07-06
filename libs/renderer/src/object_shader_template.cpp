@@ -195,8 +195,15 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "\tbase.a *= u_alpha_mod;\n";
 
 	if (has_flag(key, OSCAP_ALPHA_TEST)) {
-		f += "\tfloat aval = (u_alpha_test_invert > 0.5) ? (1.0 - base.a) : base.a;\n";
-		f += "\tif (aval < u_alpha_test_threshold) discard;\n";
+		// The original keeps a > ref (D3DCMP_GREATER); the invert flag flips
+		// the COMPARE to a <= ref, not the sampled value.
+		// [orig: CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401 ->
+		//  CGfxDevice_SetAlphaTestRef @ 0x6770a0]
+		f += "\tif (u_alpha_test_invert > 0.5) {\n";
+		f += "\t\tif (base.a > u_alpha_test_threshold) discard;\n";
+		f += "\t} else {\n";
+		f += "\t\tif (base.a <= u_alpha_test_threshold) discard;\n";
+		f += "\t}\n";
 	}
 
 	f += "\tvec3 view_dir = normalize(CAMERA_POSITION_WORLD - v_world_pos);\n";

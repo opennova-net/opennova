@@ -252,10 +252,10 @@ func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: 
 	material.set_shader_parameter("u_diffuse", diffuse)
 	material.set_shader_parameter("u_detail", detail)
 	material.set_shader_parameter("u_normal_map", normal)
-	if (cell["flags"] & NovaObjectModel.MATERIAL_FLAG_ALPHA_TEST) != 0:
-		material.set_shader_parameter("u_alpha_test_threshold", maxf(0.001, float(cell["atb"]) / 255.0))
+	if (cell["flags"] & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0:
+		material.set_shader_parameter("u_alpha_test_threshold", float(cell["atb"]) / 255.0)
 		material.set_shader_parameter("u_alpha_test_invert",
-				1.0 if (cell["flags"] & NovaObjectModel.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
+				1.0 if (cell["flags"] & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
 	else:
 		material.set_shader_parameter("u_alpha_test_threshold", 0.0)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)

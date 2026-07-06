@@ -406,7 +406,7 @@ void add_shader_flag_fields(Dictionary &item, const char *shader_name, uint32_t 
 	item["is_luminance"] = (flags & oed::MATERIAL_FLAG_LUMINANCE) != 0;
 	item["is_glass_shader"] = (flags & oed::MATERIAL_FLAG_GLASS) != 0;
 	item["is_skinned_shader"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SKINNED) != 0;
-	item["is_special_shader"] = (flags & oed::MATERIAL_FLAG_SPECIAL) != 0;
+	item["is_blending_shader"] = (flags & oed::MATERIAL_FLAG_BLENDING) != 0;
 	item["uses_uv_generators"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
 	item["uses_environment"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
 	item["uses_specular"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SPECULAR) != 0;

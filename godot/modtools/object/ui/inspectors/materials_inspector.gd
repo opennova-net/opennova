@@ -630,7 +630,7 @@ func _shader_info_for_material(material: Dictionary, shader_catalog: Array) -> D
 		if String(shader.get("name", "")) == shader_name:
 			return shader
 	var info := {}
-	for key in ["shader_flags", "has_diffuse", "has_secondary", "has_normal_a", "has_normal_b", "is_alpha", "is_luminance", "is_glass_shader", "is_skinned_shader", "is_special_shader", "uses_uv_generators", "uses_environment", "uses_specular", "uses_flag_animation", "shader_family", "shader_blend", "normal_space"]:
+	for key in ["shader_flags", "has_diffuse", "has_secondary", "has_normal_a", "has_normal_b", "is_alpha", "is_luminance", "is_glass_shader", "is_skinned_shader", "is_blending_shader", "uses_uv_generators", "uses_environment", "uses_specular", "uses_flag_animation", "shader_family", "shader_blend", "normal_space"]:
 		if material.has(key):
 			info[key] = material[key]
 	info["name"] = shader_name

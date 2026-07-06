@@ -956,7 +956,7 @@ bool build_render_geometry_skinned(const LodHeader &lod,
     const auto flags =
         lookup_material_info_flags(material_name(m));
     material_alpha[static_cast<size_t>(m)] =
-        (flags & MATERIAL_FLAG_SPECIAL) != 0;
+        (flags & MATERIAL_FLAG_BLENDING) != 0;
   }
 
   std::vector<std::vector<SmoothedFace>> smoothed_per_sub;
@@ -1539,7 +1539,7 @@ bool build_render_geometry(const LodHeader &lod,
   for (int m = 0; m < material_count; ++m) {
     const auto flags = lookup_material_info_flags(material_name(m));
     material_alpha[static_cast<size_t>(m)] =
-        (flags & MATERIAL_FLAG_SPECIAL) != 0;
+        (flags & MATERIAL_FLAG_BLENDING) != 0;
   }
   auto for_materials = [&](auto &&fn) {
     for (int pass = 0; pass < 2; ++pass) {
