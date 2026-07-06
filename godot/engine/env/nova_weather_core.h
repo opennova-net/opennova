@@ -39,6 +39,11 @@ private:
 	// RAMPS toward sky_speed << 10 (the snap refreshes only the target), so a
 	// fresh core ramps in from 0 exactly like retail from boot.
 	opennova::env::CloudScrollState cloud_scroll;
+	// The smoothed scalar channels (env #27): fog distance + sky height (+
+	// sun-dim/rain/overcast state, consumers pending) — targets refreshed by
+	// the host per tick, currents always ramping [orig: the weather tick's
+	// scalar tail @ 0x57edd7..0x57ef92; targets-only snap @ 0x57d1e0].
+	opennova::env::EnvScalarChannels scalar_channels;
 	// OpenNova authoring extension: an ARMED wind timer whose expiry decays
 	// the oscillator intensity (x31 >> 5 per tick) back to zero. Unarmed
 	// wind never decays — retail's Env_WindScale is a constant
@@ -117,6 +122,14 @@ public:
 	// Layer-1 UV drift per second at the current smoothed rate — the water
 	// surface's scroll-speed source.
 	float get_cloud_uv_rate_per_second() const;
+
+	// env #27: refresh the scalar spring targets (world units); currents ramp.
+	void set_scalar_targets(float p_fog_distance, float p_sky_height);
+	// The smoothed scalar currents (world units / percent).
+	float get_fog_distance() const;
+	float get_sky_height() const;
+	float get_sun_dim_pct() const;
+	float get_rain_pct() const;
 
 	// The witnessed water UV transform (scale, bias, offset_u, offset_v):
 	// scale/bias from the fog-distance INT part, offsets from the layer-1

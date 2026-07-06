@@ -40,6 +40,11 @@ var _cached_env: Node = null
 var _cached_cam: Camera3D = null
 var _bodies: Dictionary = {} # name -> { model, material, additive, priority, tint_key }
 var _loaded_names: Dictionary = {}
+# env #33: the 256-instance star field (generation + twinkle in libs/env via
+# NovaStarField; regenerated per celestial load like retail
+# [orig: Star_GenerateInstanceTable @ 0x5ac850 <- EffectWorld_LoadCelestialModels]).
+var _star_core := NovaStarField.new()
+var _star_mmi: MultiMeshInstance3D = null
 
 
 func _ready() -> void:
@@ -66,13 +71,13 @@ func _rebuild_if_needed() -> void:
 	var wanted := {
 		"sun": { "name": env_data.get_sun_3di(), "additive": false, "priority": PRIORITY_SUN, "tint": "sun" },
 		"moon": { "name": env_data.get_moon_3di(), "additive": false, "priority": PRIORITY_MOON, "tint": "moon" },
-		"star": { "name": env_data.get_star_3di(), "additive": true, "priority": PRIORITY_STAR, "tint": "sky" },
 		"glare": { "name": env_data.get_glare_3di(), "additive": true, "priority": PRIORITY_GLARE, "tint": "sun" },
 	}
 	# Rebuild only when the set of names actually changed (undo/scrub safe).
 	var signature := {}
 	for key in wanted:
 		signature[key] = wanted[key]["name"]
+	signature["star"] = env_data.get_star_3di()
 	if signature == _loaded_names:
 		return
 	_loaded_names = signature
@@ -81,6 +86,8 @@ func _rebuild_if_needed() -> void:
 		remove_child(child)
 		child.queue_free()
 	_bodies.clear()
+	_star_mmi = null
+	_build_star_field(env_data.get_star_3di())
 
 	for key in wanted:
 		var spec: Dictionary = wanted[key]
@@ -169,6 +176,15 @@ func _process(_delta: float) -> void:
 	if _cached_cam:
 		cam_forward = -_cached_cam.global_transform.basis.z
 
+	var star_tint: Vector3 = env.get_sky_ambient()
+	if _star_mmi != null and _star_mmi.material_override is ShaderMaterial:
+		(_star_mmi.material_override as ShaderMaterial).set_shader_parameter("u_tint", star_tint)
+	var cam_basis := _cached_cam.global_transform.basis if _cached_cam else Basis()
+	# The active light (sun by day, moon at night) drives the near-light cull
+	# [orig: Environment_GetLightDirectionFixed @ 0x57d8e0 at the field loop].
+	var light_dir: Vector3 = env.get_light_direction() if env.has_method("get_light_direction") else sun_dir
+	_update_star_field(cam_pos, cam_basis, light_dir)
+
 	for key in _bodies:
 		var body: Dictionary = _bodies[key]
 		var model: Node3D = body["model"]
@@ -180,8 +196,11 @@ func _process(_delta: float) -> void:
 		var tint: Vector3 = _tint_for(env, body["tint"])
 		body["material"].set_shader_parameter("u_tint", tint)
 		if key == "sun":
-			# Overcast (#16) and SunDim (no .env parser writes it) are 0 today.
-			body["material"].set_shader_parameter("u_opacity", EnvFile.celestial_sun_alpha(0.0, 0.0))
+			# Overcast (#16) stays 0 until the overcast systems land; the
+			# SunDim channel is live end-to-end (env #27 — spring-smoothed in
+			# the weather core; target 0 in stock data).
+			var sun_dim: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
+			body["material"].set_shader_parameter("u_opacity", EnvFile.celestial_sun_alpha(0.0, sun_dim))
 		elif key == "moon":
 			# The moon fades with the fog distance [orig: @ 0x5acc40].
 			body["material"].set_shader_parameter("u_opacity",
@@ -196,9 +215,65 @@ func _process(_delta: float) -> void:
 			var visible_b := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_b())
 			_glare_occlusion.tick(visible_a, visible_b, env.get_fog_level())
 			var dot := cam_forward.dot(sun_dir)
-			var glow := EnvFile.glare_glow_alpha(dot, _glare_occlusion.get_brightness(), 0.0, 0.0)
+			var sun_dim_glow: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
+			var glow := EnvFile.glare_glow_alpha(dot, _glare_occlusion.get_brightness(), 0.0, sun_dim_glow)
 			model.visible = glow > 0.0
 			body["material"].set_shader_parameter("u_opacity", glow)
+
+
+# env #33: the star field host — one MultiMesh of camera-facing quads under
+# the additive celestial shader, textured with the star 3DI's diffuse. The
+# witnessed placement is camera + offset per star with per-star twinkle
+# brightness [orig: render_star_field @ 0x5ad9c0]; the near-light cull and
+# the twinkle accumulator run in libs/env.
+func _build_star_field(star_name: String) -> void:
+	if star_name.strip_edges().is_empty() or _resource_root == null:
+		return
+	var data := _load_object_data(star_name)
+	if data == null:
+		return
+	var diffuse: Texture2D = data.load_material_texture(0, 0)
+	var material := _make_celestial_material(true, PRIORITY_STAR)
+	if diffuse:
+		material.set_shader_parameter("u_diffuse", diffuse)
+	material.set_shader_parameter("u_opacity", 1.0)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	mm.mesh = quad
+	mm.instance_count = _star_core.get_count()
+	_star_mmi = MultiMeshInstance3D.new()
+	_star_mmi.name = "StarField"
+	_star_mmi.multimesh = mm
+	_star_mmi.material_override = material
+	# The field spans the whole sky around the camera; cull as one unit.
+	_star_mmi.custom_aabb = AABB(Vector3(-600, -600, -600), Vector3(1200, 1200, 1200))
+	add_child(_star_mmi)
+	_star_core.regenerate(1)
+
+
+func _update_star_field(cam_pos: Vector3, cam_basis: Basis, light_dir: Vector3) -> void:
+	if _star_mmi == null:
+		return
+	var mm := _star_mmi.multimesh
+	var buf := _star_core.tick_frame(light_dir)
+	if buf.is_empty():
+		return
+	var count := _star_core.get_count()
+	for i in count:
+		var o := i * 6
+		var visible := buf[o + 5] > 0.5
+		if not visible:
+			mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ZERO), cam_pos))
+			continue
+		var offset := Vector3(buf[o], buf[o + 1], buf[o + 2])
+		var scale := buf[o + 3]
+		var brightness := buf[o + 4]
+		var xform := Transform3D(cam_basis.scaled(Vector3(scale, scale, scale)), cam_pos + offset)
+		mm.set_instance_transform(i, xform)
+		mm.set_instance_color(i, Color(brightness, brightness, brightness))
 
 
 func _tint_for(env: Node, tint_key: String) -> Vector3:

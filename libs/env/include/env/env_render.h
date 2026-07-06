@@ -65,6 +65,55 @@ int smooth_eighth(int current, int target);
 // +-max_abs (fog distance, overcast blend).
 int spring_step(int current, int target, int step_clamp, int max_abs);
 
+// The weather tick's smoothed scalar channels — the scalar tail that runs
+// between the lightning sequencers and the 16 color-block smoothers
+// [orig: Environment_UpdateWeatherTick @ 0x57edd7..0x57ef92]: fog distance
+// (spring, {cur, target, parsed, step, max} @ 0x26c681c..), sun-dim percent
+// (spring @ 0x26c6830.. — dims the sun body + glare; default 0, no .env
+// keyword), sky height (eighth-snap @ 0x26c6858/5c), rain percent (spring
+// @ 0x26c6880.. Env_RainPct*, REN-6-identified; >48 drives weather-particle
+// fall decay), overcast blend (spring @ 0x26c6894..). The camera FOV
+// eighth-snap (@ 0x26c6844) rides the camera system, not this struct. All
+// values are 16.16 fixed (percent channels are 16.16 percent: 0x640000 =
+// 100). The per-channel step/max clamps are COMMAND-driven (the weather
+// command setter @ 0x57f1e0 computes |target-cur|/ticks; net apply 0x00A) —
+// they default effectively-unclamped here and tighten when the weather
+// command wiring lands. The mission-start snap refreshes TARGETS ONLY
+// [orig: Environment_SnapStateToTargets @ 0x57d1e0] — the smoothed currents
+// always RAMP in from their previous values, exactly like the cloud-scroll
+// rate.
+struct EnvScalarChannels {
+	static constexpr int32_t kUnclamped = 0x40000000;
+
+	int32_t fog_dist_fp = 1024 << 16; // [orig defaults: Environment_InitDefaults @ 0x57c010]
+	int32_t fog_dist_target_fp = 1024 << 16;
+	int32_t fog_step_fp = kUnclamped;
+	int32_t fog_max_fp = kUnclamped;
+
+	int32_t sun_dim_fp = 0;
+	int32_t sun_dim_target_fp = 0;
+	int32_t sun_dim_step_fp = kUnclamped;
+	int32_t sun_dim_max_fp = kUnclamped;
+
+	int32_t sky_height_fp = 175 << 16; // the authoring default (the raw-200 boot quirk is divergence #12)
+	int32_t sky_height_target_fp = 175 << 16;
+
+	int32_t rain_pct_fp = 0;
+	int32_t rain_pct_target_fp = 0;
+	int32_t rain_step_fp = kUnclamped;
+	int32_t rain_max_fp = kUnclamped;
+
+	int32_t overcast_fp = 0;
+	int32_t overcast_target_fp = 0;
+	int32_t overcast_step_fp = kUnclamped;
+	int32_t overcast_max_fp = kUnclamped;
+
+	// One 62 Hz step of every channel, in the witnessed in-tick order
+	// (fog -> sun-dim -> [FOV: camera-side] -> sky height -> [cloud scroll:
+	// CloudScrollState] -> rain -> overcast).
+	void tick();
+};
+
 // Per-channel 12.20 color smoothing toward a packed 0x00RRGGBB target with
 // per-channel max step and +0x80000 rounding on repack
 // [orig: interpolate_weather_color @ 0x57d9e0].
@@ -352,6 +401,48 @@ inline constexpr float kCelestialBodyDistance = 64.0f;
 // sun_dim is the 0..100 (16.16) Env_SunDimPct channel (default 0, no .env
 // parser writes it) [orig: @ 0x5acbc1..0x5acbfa].
 int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed);
+
+// ---------------------------------------------------------------------------
+// Star field (env #33) [orig: Star_GenerateInstanceTable @ 0x5ac850 (ex kong
+// misnomer init_weather_particles); render_star_field @ 0x5ad9c0]. 256
+// camera-anchored billboard instances regenerated per celestial load; per
+// render tick each visible star's brightness accumulator EMA-chases its
+// twinkle band. Engine axes throughout (x, y ground plane, z up), 16.16.
+
+inline constexpr int kStarInstanceCount = 256;
+
+// The star/weather PRNG: state = rol4(state + rol11(state), 4) ^ 1, low 16
+// bits returned [orig: inlined at both sites; the dead standalone step is
+// Star_TwinklePrngNext_unused @ 0x5ac010, state Star_TwinklePrng @ 0x840B38].
+// Like the water noise field, the retail table content depends on the shared
+// state's call history at load — a deterministic reimpl documents its seed.
+uint32_t star_prng_next(uint32_t &state);
+
+struct StarInstance {
+	int32_t offset_fp[3] = { 0, 0, 0 };  // camera-relative offset, 16.16
+	int32_t billboard_param = 12288;     // 12288..13311 (4096-fixed scale)
+	int32_t twinkle_add = 1;             // 1..255, clamped to 255 - mask
+	int32_t twinkle_mask = 31;           // 31 >> (r & 3): {31, 15, 7, 3}
+	int32_t brightness = 0;              // runtime accumulator (BSS-zero at generate)
+	int32_t dir_fp[3] = { 0, 0, 0 };     // normalize(offset >> 8), 16.16
+};
+
+// Fills out[0..255] with the witnessed per-star generation [orig: @ 0x5ac850]:
+// offX/offY = (r - 0x8000) << 9; offZ = ((r + 0x20000) << 6) -
+// ((|offX| + |offY|) >> 3) (the dome shaping); billboard = (r & 0x3FF) +
+// 12288; add = r & 0xFF (0 -> 1, <= 255 - mask); mask = 31 >> (r & 3);
+// brightness untouched; dir = normalize(off >> 8) via the 2^32/len + 0x8000
+// rounding divide.
+void generate_star_instances(StarInstance *out, uint32_t &prng_state);
+
+// One render-tick twinkle update: brightness = (brightness + add +
+// (r16 & mask)) >> 1; returns the new brightness [orig: @ 0x5adb45].
+int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state);
+
+// The near-light cull: HIDDEN when dot(light_dir_norm, star_dir) > 64225
+// (16.16 ~0.98) [orig: @ 0x5adac4]. light_dir is the normalized active
+// light direction in engine axes.
+bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]);
 // moon = clamp01((fogDistInt - 400) / 600) * (1 - overcast)  (the no-fog-
 // shader path; the fog-shader path scales fogDistInt * 0.0002)
 // [orig: @ 0x5acc40..0x5acccd].

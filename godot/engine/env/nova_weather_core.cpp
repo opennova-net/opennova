@@ -33,6 +33,11 @@ void NovaWeatherCore::_bind_methods() {
 								  "sky_speed"),
 			&NovaWeatherCore::tick);
 	ClassDB::bind_method(D_METHOD("tick_cloud_scroll", "sky_speed"), &NovaWeatherCore::tick_cloud_scroll);
+	ClassDB::bind_method(D_METHOD("set_scalar_targets", "fog_distance", "sky_height"), &NovaWeatherCore::set_scalar_targets);
+	ClassDB::bind_method(D_METHOD("get_fog_distance"), &NovaWeatherCore::get_fog_distance);
+	ClassDB::bind_method(D_METHOD("get_sky_height"), &NovaWeatherCore::get_sky_height);
+	ClassDB::bind_method(D_METHOD("get_sun_dim_pct"), &NovaWeatherCore::get_sun_dim_pct);
+	ClassDB::bind_method(D_METHOD("get_rain_pct"), &NovaWeatherCore::get_rain_pct);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset1);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"), &NovaWeatherCore::get_cloud_uv_rate_per_second);
@@ -89,6 +94,11 @@ void NovaWeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target
 		}
 	}
 	rain.tick();
+	// The scalar spring channels step between the sequencers and the color
+	// blocks — the witnessed in-tick position [orig: the scalar tail
+	// @ 0x57edd7..0x57ef92 runs before the 16 interpolate_weather_color
+	// calls @ 0x57ef97..] (env #27).
+	scalar_channels.tick();
 	if (lightning.tick()) {
 		const opennova::env::LightningAdditivesPacked additives =
 				opennova::env::lightning_additives_packed(
@@ -223,4 +233,28 @@ Vector4 NovaWeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float 
 	const opennova::env::WaterUvState state =
 			opennova::env::water_uv_state(cloud_scroll, p_cam_x, p_cam_z, p_fog_distance);
 	return Vector4(state.scale, state.bias, state.offset_u, state.offset_v);
+}
+
+void NovaWeatherCore::set_scalar_targets(float p_fog_distance, float p_sky_height) {
+	// Targets only — the currents always ramp, exactly like the witnessed
+	// mission-start snap [orig: Environment_SnapStateToTargets @ 0x57d1e0:
+	// Env_FogDistTarget <- Env_FogLevelFixed, sky target <- Env_SkyHeightFixed].
+	scalar_channels.fog_dist_target_fp = static_cast<int32_t>(p_fog_distance * 65536.0f);
+	scalar_channels.sky_height_target_fp = static_cast<int32_t>(p_sky_height * 65536.0f);
+}
+
+float NovaWeatherCore::get_fog_distance() const {
+	return static_cast<float>(scalar_channels.fog_dist_fp) / 65536.0f;
+}
+
+float NovaWeatherCore::get_sky_height() const {
+	return static_cast<float>(scalar_channels.sky_height_fp) / 65536.0f;
+}
+
+float NovaWeatherCore::get_sun_dim_pct() const {
+	return static_cast<float>(scalar_channels.sun_dim_fp) / 65536.0f;
+}
+
+float NovaWeatherCore::get_rain_pct() const {
+	return static_cast<float>(scalar_channels.rain_pct_fp) / 65536.0f;
 }

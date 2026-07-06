@@ -378,11 +378,30 @@ func get_env_generation() -> int:
 	return _env_generation
 
 
+# env #27 smoothed scalar currents (negative = not driven; parsed fallback).
+var _fog_dist_smoothed: float = -1.0
+var _sky_height_smoothed: float = -1.0
+var _sun_dim_smoothed: float = 0.0
+
+
 func get_fog_distance() -> float:
 	return _fog_distance
 
 
 func get_fog_level() -> float:
+	# The SMOOTHED fog distance when the weather tick drives it (env #27): the
+	# scrub/keyframe value is the spring TARGET, the served value ramps
+	# [orig: Env_FogDistCurrent @ 0x26c681c <- the (d+31)>>5 spring
+	# @ 0x57edd7; targets-only snap @ 0x57d1e0]. Every consumer (dome c9,
+	# water UV state, object/terrain fog ends, the frame clear) reads through
+	# here, so the ramp reaches them all.
+	if _fog_dist_smoothed >= 0.0:
+		return _fog_dist_smoothed
+	return environment_data.get_fog_level() if environment_data else 1000.0
+
+
+func get_fog_level_target() -> float:
+	# The parsed .env value — the spring target the weather tick chases.
 	return environment_data.get_fog_level() if environment_data else 1000.0
 
 
@@ -404,7 +423,34 @@ func get_sky_speed() -> float:
 
 
 func get_sky_height() -> float:
+	# The SMOOTHED sky height when the weather tick drives it (env #27):
+	# retail eighth-snaps toward the parsed value and rebuilds the dome only
+	# as the SMOOTHED height moves [orig: Env_SkyHeightCurrent @ 0x26c6858
+	# eighth-snap @ 0x57ee97; the dome rebuild gate @ 0x57e4f4].
+	if _sky_height_smoothed >= 0.0:
+		return _sky_height_smoothed
 	return environment_data.get_sky_height() if environment_data else 175.0
+
+
+func get_sky_height_target() -> float:
+	# The parsed .env value — the eighth-snap target.
+	return environment_data.get_sky_height() if environment_data else 175.0
+
+
+## env #27: the weather tick pushes the smoothed scalar currents back here
+## (the same writeback seam as the smoothed colors), so every scalar
+## consumer serves the ramped values.
+func set_smoothed_scalars(fog_distance: float, sky_height: float, sun_dim_pct: float = 0.0) -> void:
+	_fog_dist_smoothed = fog_distance
+	_sky_height_smoothed = sky_height
+	_sun_dim_smoothed = sun_dim_pct
+
+
+## The smoothed Env_SunDimPct channel (0..100; default 0 — nothing writes the
+## target in stock data) — dims the sun body + glare
+## [orig: @ 0x26c6830 spring @ 0x57ee17; consumers @ 0x5acbc1/0x5acfb8].
+func get_sun_dim_pct() -> float:
+	return _sun_dim_smoothed
 
 
 func get_sky_map1_tex() -> Texture2D:

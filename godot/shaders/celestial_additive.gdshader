@@ -19,6 +19,8 @@ void fragment() {
 	vec4 tex = texture(u_diffuse, UV);
 	// Gamma-space modulate + encoded output (D-RMAT-7); additive accumulation
 	// happens in the linear buffer — the bounded residual is D-RMAT-8.
-	ALBEDO = nova_gamma_to_linear(tex.rgb * u_tint * tex.a * u_opacity);
+	// COLOR = per-instance brightness for the star field's twinkle (env #33;
+	// plain meshes default to white).
+	ALBEDO = nova_gamma_to_linear(tex.rgb * u_tint * COLOR.rgb * tex.a * u_opacity);
 	ALPHA = 1.0;
 }

@@ -93,6 +93,78 @@ int main() {
 		if (!expect(spring_step(998, 4000, 64, 1000) == 1000, "spring result clamps to max_abs")) return 1;
 	}
 
+	// --- Scalar spring channels (env #27 wiring) [orig: the weather tick's
+	// scalar tail @ 0x57edd7..0x57ef92; targets-only snap @ 0x57d1e0] --------
+	{
+		EnvScalarChannels ch;
+		if (!expect(ch.fog_dist_fp == (1024 << 16), "fog dist boots at the 1024 default")) return 1;
+		if (!expect(ch.sky_height_fp == (175 << 16), "sky height boots at the 175 authoring default")) return 1;
+		ch.fog_dist_target_fp = 500 << 16;
+		ch.sky_height_target_fp = 200 << 16;
+		ch.tick();
+		// fog spring: ((500-1024)<<16 + 31) >> 5 = -1073152 (arithmetic shift).
+		if (!expect(ch.fog_dist_fp == (1024 << 16) - 1073152, "fog dist takes the witnessed 1/32 spring step")) return 1;
+		// sky eighth-snap: ((200-175)<<16 + 7) >> 3 = 204800.
+		if (!expect(ch.sky_height_fp == (175 << 16) + 204800, "sky height takes the witnessed 1/8 step")) return 1;
+		for (int i = 0; i < 2048; ++i) {
+			ch.tick();
+		}
+		if (!expect(ch.fog_dist_fp >= (500 << 16) && ch.fog_dist_fp <= (500 << 16) + 31,
+					"fog dist converges from above into the [target, target+31] parking window")) return 1;
+		if (!expect(ch.sky_height_fp == (200 << 16), "sky height overshoot-snaps onto the target")) return 1;
+		if (!expect(ch.rain_pct_fp == 0 && ch.sun_dim_fp == 0 && ch.overcast_fp == 0,
+					"untargeted channels hold their defaults")) return 1;
+	}
+
+	// --- Star field (env #33) [orig: Star_GenerateInstanceTable @ 0x5ac850;
+	// render_star_field @ 0x5ad9c0] ------------------------------------------
+	{
+		uint32_t prng = 1u;
+		// The PRNG's first draws from state 1 (hand-derived from the witnessed
+		// rol4(s + rol11(s)) ^ 1): 0x8011, 0x8111.
+		uint32_t check_state = 1u;
+		if (!expect(star_prng_next(check_state) == 0x8011u, "star PRNG first draw from seed 1")) return 1;
+		if (!expect(star_prng_next(check_state) == 0x8111u, "star PRNG second draw")) return 1;
+
+		static StarInstance stars[kStarInstanceCount];
+		generate_star_instances(stars, prng);
+		// star[0] from seed 1: offX = (0x8011-0x8000)<<9, offY = (0x8111-0x8000)<<9.
+		if (!expect(stars[0].offset_fp[0] == (0x11 << 9), "star0 offX")) return 1;
+		if (!expect(stars[0].offset_fp[1] == (0x111 << 9), "star0 offY")) return 1;
+		bool invariants = true;
+		for (int i = 0; i < kStarInstanceCount; ++i) {
+			const StarInstance &st = stars[i];
+			if (st.billboard_param < 12288 || st.billboard_param > 12288 + 0x3FF) invariants = false;
+			if (st.twinkle_mask != 31 && st.twinkle_mask != 15 && st.twinkle_mask != 7 && st.twinkle_mask != 3) invariants = false;
+			if (st.twinkle_add < 1 || st.twinkle_add > 255 - st.twinkle_mask) invariants = false;
+			if (st.brightness != 0) invariants = false;
+			const long long len2 = 1LL * st.dir_fp[0] * st.dir_fp[0] +
+					1LL * st.dir_fp[1] * st.dir_fp[1] + 1LL * st.dir_fp[2] * st.dir_fp[2];
+			// |dir| within ~1% of 1.0 in 16.16 (integer divide + rounding slack).
+			const long long unit2 = 1LL << 32;
+			if (len2 < unit2 * 98 / 100 || len2 > unit2 * 102 / 100) invariants = false;
+		}
+		if (!expect(invariants, "all 256 stars satisfy the witnessed field invariants")) return 1;
+
+		// Twinkle: brightness EMA-chases add + (r & mask); bounded by 255.
+		StarInstance tw = stars[0];
+		uint32_t tw_prng = 99u;
+		int32_t last = 0;
+		for (int i = 0; i < 64; ++i) {
+			last = star_twinkle_tick(tw, tw_prng);
+			if (last < 0 || last > 255) { invariants = false; break; }
+		}
+		if (!expect(invariants && last >= tw.twinkle_add / 2, "twinkle accumulator stays bounded and lit")) return 1;
+
+		// The near-light cull: a star straight at the light hides; opposite shows.
+		StarInstance aligned;
+		aligned.dir_fp[0] = 0; aligned.dir_fp[1] = 0; aligned.dir_fp[2] = 65536;
+		const int32_t light_up[3] = { 0, 0, 65536 };
+		const int32_t light_down[3] = { 0, 0, -65536 };
+		if (!expect(!star_visible_fixed(aligned, light_up), "star inside the 0.98 cone hides")) return 1;
+		if (!expect(star_visible_fixed(aligned, light_down), "star opposite the light shows")) return 1;
+	}
+
 	// --- Channel smoothing [orig: interpolate_weather_color @ 0x57d9e0] -----
 	{
 		ColorChannelState state;

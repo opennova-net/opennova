@@ -68,6 +68,11 @@ func _process(_delta: float) -> void:
 	# refreshes every block's target slot ahead of the weather tick]. The
 	# cloud-scroll rate ramps toward sky_speed << 10 at the tick's tail
 	# [orig: @ 0x57eecc; accumulators @ 0x57f1a5..0x57f1d1].
+	# env #27: refresh the scalar spring targets from the PARSED values before
+	# the tick (retail refreshes targets ahead of the smoothers; the snap
+	# touches targets only — currents always ramp [orig: @ 0x57d1e0]).
+	if env.has_method("get_fog_level_target"):
+		_core.set_scalar_targets(env.get_fog_level_target(), env.get_sky_height_target())
 	_core.tick(
 		_vec3_color(env.get_fill_light_target()),
 		_vec3_color(env.get_sun_light_target()),
@@ -80,6 +85,11 @@ func _process(_delta: float) -> void:
 	env.set_fog_color_rt(get_smooth_fog())
 	if env.has_method("set_color_src_gain"):
 		env.set_color_src_gain(_core.get_color_src_gain())
+	# env #27 writeback: the smoothed scalar currents flow back through the
+	# env seam so every consumer (dome, water, object/terrain fog, the frame
+	# clear) serves the ramp.
+	if env.has_method("set_smoothed_scalars"):
+		env.set_smoothed_scalars(_core.get_fog_distance(), _core.get_sky_height(), _core.get_sun_dim_pct())
 	_write_shader_globals(env)
 
 

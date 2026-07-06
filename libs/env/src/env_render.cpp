@@ -134,6 +134,18 @@ int spring_step(int current, int target, int step_clamp, int max_abs) {
 	return next;
 }
 
+void EnvScalarChannels::tick() {
+	// The witnessed in-tick order [orig: Environment_UpdateWeatherTick scalar
+	// tail @ 0x57edd7..0x57ef92]; the FOV eighth-snap (@ 0x57ee62) and the
+	// cloud-scroll eighth-snap (@ 0x57eecc, CloudScrollState) interleave here
+	// in the original and live with their owners.
+	fog_dist_fp = spring_step(fog_dist_fp, fog_dist_target_fp, fog_step_fp, fog_max_fp);
+	sun_dim_fp = spring_step(sun_dim_fp, sun_dim_target_fp, sun_dim_step_fp, sun_dim_max_fp);
+	sky_height_fp = smooth_eighth(sky_height_fp, sky_height_target_fp);
+	rain_pct_fp = spring_step(rain_pct_fp, rain_pct_target_fp, rain_step_fp, rain_max_fp);
+	overcast_fp = spring_step(overcast_fp, overcast_target_fp, overcast_step_fp, overcast_max_fp);
+}
+
 void ColorChannelState::snap_to(uint32_t packed) {
 	b_fp = static_cast<int32_t>(packed & 0xFF) << 20;
 	g_fp = static_cast<int32_t>((packed >> 8) & 0xFF) << 20;
@@ -893,6 +905,97 @@ Rgb tile_overlay_tint_factor(const TerrainTint &tint) {
 	factor.g = static_cast<float>(2u * ((tint.half >> 8) & 0xFFu)) / 255.0f;
 	factor.b = static_cast<float>(2u * (tint.half & 0xFFu)) / 255.0f;
 	return factor;
+}
+
+// ---------------------------------------------------------------------------
+// Star field (env #33)
+
+namespace {
+
+inline uint32_t star_rotl32(uint32_t value, int count) {
+	return (value << count) | (value >> (32 - count));
+}
+
+} // namespace
+
+uint32_t star_prng_next(uint32_t &state) {
+	// [orig: inlined at Star_GenerateInstanceTable @ 0x5ac850 and
+	// render_star_field @ 0x5adb1a; standalone dead stub @ 0x5ac010]
+	const uint32_t rolled = star_rotl32(state + star_rotl32(state, 11), 4) ^ 1u;
+	state = rolled;
+	return rolled & 0xFFFFu;
+}
+
+namespace {
+
+// int(min(len, 2147418112.0f)) — the generator's ftol overflow guard
+// [orig: flt_7C19E0 = 0x7FFF8000 as float].
+int32_t star_length_int(double len) {
+	const double kCeil = 2147418112.0;
+	return static_cast<int32_t>(len < kCeil ? len : kCeil);
+}
+
+} // namespace
+
+void generate_star_instances(StarInstance *out, uint32_t &prng_state) {
+	// [orig: Star_GenerateInstanceTable @ 0x5ac850] — draw order per star:
+	// offX, offY, offZ, billboard, mask, add; brightness untouched.
+	for (int i = 0; i < kStarInstanceCount; ++i) {
+		StarInstance &star = out[i];
+		const int32_t rx = static_cast<int32_t>(star_prng_next(prng_state));
+		star.offset_fp[0] = (rx - 0x8000) << 9;
+		const int32_t ry = static_cast<int32_t>(star_prng_next(prng_state));
+		star.offset_fp[1] = (ry - 0x8000) << 9;
+		const int32_t abs_x = star.offset_fp[0] < 0 ? -star.offset_fp[0] : star.offset_fp[0];
+		const int32_t abs_y = star.offset_fp[1] < 0 ? -star.offset_fp[1] : star.offset_fp[1];
+		const int32_t rz = static_cast<int32_t>(star_prng_next(prng_state));
+		star.offset_fp[2] = ((rz + 0x20000) << 6) - ((abs_x + abs_y) >> 3);
+		const int32_t rb = static_cast<int32_t>(star_prng_next(prng_state));
+		star.billboard_param = (rb & 0x3FF) + 12288;
+		const int32_t rm = static_cast<int32_t>(star_prng_next(prng_state));
+		star.twinkle_mask = 31 >> (rm & 3);
+		const int32_t ra = static_cast<int32_t>(star_prng_next(prng_state)) & 0xFF;
+		star.twinkle_add = ra == 0 ? 1 : ra;
+		const int32_t max_add = 255 - star.twinkle_mask;
+		if (star.twinkle_add > max_add) {
+			star.twinkle_add = max_add;
+		}
+		// dir = normalize(off >> 8) via 2^32/len with +0x8000 rounding; a
+		// zero integer length leaves the >>8 values unnormalized (the
+		// original stores them first and guards the divide).
+		int32_t scaled[3];
+		double sum_sq = 0.0;
+		for (int c = 0; c < 3; ++c) {
+			scaled[c] = star.offset_fp[c] >> 8;
+			star.dir_fp[c] = scaled[c];
+			sum_sq += static_cast<double>(scaled[c]) * static_cast<double>(scaled[c]);
+		}
+		const int32_t len = star_length_int(std::sqrt(sum_sq));
+		if (len != 0) {
+			const int64_t inv = static_cast<int64_t>(0x100000000LL / len);
+			for (int c = 0; c < 3; ++c) {
+				star.dir_fp[c] = static_cast<int32_t>(
+						static_cast<uint64_t>(inv * static_cast<int64_t>(scaled[c]) + 0x8000) >> 16);
+			}
+		}
+	}
+}
+
+int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state) {
+	// [orig: render_star_field @ 0x5adb45]
+	const int32_t r = static_cast<int32_t>(star_prng_next(prng_state));
+	star.brightness = (star.brightness + star.twinkle_add + (r & star.twinkle_mask)) >> 1;
+	return star.brightness;
+}
+
+bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]) {
+	// [orig: render_star_field @ 0x5adac4] — hidden when the 16.16 dot
+	// exceeds 64225 (~0.98).
+	const int64_t dot = (static_cast<int64_t>(light_dir_fp[0]) * star.dir_fp[0] +
+								static_cast<int64_t>(light_dir_fp[1]) * star.dir_fp[1] +
+								static_cast<int64_t>(light_dir_fp[2]) * star.dir_fp[2]) >>
+			16;
+	return dot <= 64225;
 }
 
 } // namespace opennova::env
