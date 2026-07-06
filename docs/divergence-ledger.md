@@ -118,13 +118,52 @@ texture-bake consumer proved DEAD CODE, readers zero-xref, so the untinted terra
 surface is ratified faithful; witness in [env/env-tod-re.md](env/env-tod-re.md) #19,
 honored-matrix terrain_tint -> HONORED; residual emitter facets ride PAR-R2).
 
+Minted-and-closed 2026-07-05 at the ENG-2 weather-core port (grill of
+`Environment_UpdateWeatherTick @ 0x57e9b0` + cluster): **env #22** (the weather-PRNG
+signed-carry transcription bug), **env #23** (lightning SET-per-epoch vs the GDScript
+maxf plateau + integer additives), **env #24** (the wind model: the 0..8192 strength
+scale drove the oscillator past its stability envelope; retail runs the constant
+`Env_WindScale = 256`, now the default; smoothers chase keyframe targets). All three
+were discovered, witnessed, and fixed in the same slice — catalog rows in
+[env/env-tod-re.md](env/env-tod-re.md) #22–#24. Minted-and-closed 2026-07-06 at the
+sky-leg re-grill: **env #25** — the weather-PRNG seed is `0x12333333`
+(`[orig: mov imm32 @ 0x57d2ff]`; `0x12345633` was a transcription error shared
+with the WAC RNG seed `[orig: @ 0x4f966b]`). The libs/wac VM carried BOTH bugs
+(wrong seed + env #22's unsigned bit-31 carry `[orig: signed rol9+sar+add
+@ 0x4f5a83..0x4f5a91]`) — fixed in the same commit; no committed test pinned
+the wrong WAC stream. The sky binding slice minted-and-closed **env #26**
+(the cloud-scroll consumption model: rate ramp skipped + the accumulator term's
+U sign; NovaWeatherCore now owns the witnessed CloudScrollState) and minted
+**env #27** (the smoothed scalar spring channels — fog distance, sky height,
+FOV, one unidentified pair — remain unwired; consumers read parsed values;
+witnessed-ready-deferred). The water leg (2026-07-06) grilled the previously
+unwitnessed surface pipeline (render_water_surface @ 0x5c32c0 — a split
+function two misnomers deep): **env #28** minted-and-closed (water-height
+precedence — witnessed BMS > TRN(bit-31-flagged) > ENV; the reimpl ladder ran
+env-over-terrain, now reordered), **env #31** minted-and-closed (the invented
+water look — sin/cos waves + fresnel — replaced by the witnessed per-frame
+noise color + DuDv textures over the lit-color pipeline, libs/env-first,
+ctest + vector pinned), **env #29** minted OPEN (the screen-marched adaptive
+strip tessellation, spec complete — the plane is the tracked stand-in), and
+**env #30** minted NEEDS-RE (the reflection passes exist; spec deferred). The
+celestial leg (2026-07-06) CLOSED **env #14** (the glare occlusion — the witnessed
+model is 2 jittered rays/frame into an 8-sample sliding window + dead-band
+hysteresis, ported libs/env-first with the NovaCelestial terrain ray march) and
+minted-and-closed **env #32** (placement inventions: dir×2000×height_scale, zeroed
+camera height, the dir.y gate — the live renderer places at camera + dir × 64 with
+witnessed alpha folds), plus **env #33** (the 256-instance star field with per-star
+twinkle — specced, table generator unfound; WRD).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| env #14 | Sun-glare terrain-raycast occlusion held at full brightness (8-jittered-ray + ±16/frame hysteresis unmodeled) | A | OPEN (PARTIAL) | PAR-ENV |
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | PAR-ENV |
+| env #30 | Water reflection passes (init @ Terrain_Init 0x60fcc5, Terrain_RenderSceneWithReflection @ 0x5c93a0, mirrored strip verts) — none rendered by the reimpl | A | NEEDS-RE (existence witnessed, spec deferred) | PAR-ENV |
+| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | PAR-ENV |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -306,7 +345,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
-| Environment | 1 | 0 | 4 | 5 | 0 |
+| Environment | 1 | 1 | 6 | 8 | 0 |
 | World / AI + events | 2 | 0 | 4 | 6 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
@@ -319,9 +358,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Foliage | 1 | 0 | 0 | 1 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **29** | **11** | **26** | **66** | 5 |
+| **Total** | **29** | **12** | **28** | **69** | 5 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 
 <!-- scoreboard:generated:end -->
 

@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/resource_format_saver.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -186,6 +187,46 @@ public:
 	// witnessed MODULATE2X-over-half combine is near-identity, not exact).
 	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20; PolyTrn_RenderTile @ 0x60df0d]
 	static Color tile_overlay_tint_factor(const Color &p_terrain_tint);
+
+	// The witnessed 21x21 sky dome mesh in Mesh.ARRAY_* layout (VERTEX /
+	// NORMAL / TEX_UV / TEX_UV2 / INDEX populated), built at p_sky_height
+	// [orig: build_sky_dome_mesh @ 0x578db0]. The reimpl builds ONCE at
+	// dome_reference_height() and folds the Y-only height scale into the
+	// vertex shader (env #20's ratified structure; retail re-bakes on
+	// smoothed-height change via SkyDome_SetHeightAndRebuild @ 0x579070).
+	static Array build_sky_dome_arrays(float p_sky_height);
+
+	// 3072 - sqrt(2^23) ~= 175.6906 — the exact apex reference height behind
+	// the shaders' rounded "175.69" divisor [orig: @ 0x578ed4].
+	static float dome_reference_height();
+
+	// Celestial bodies place at camera + direction * this distance (world
+	// units, full camera height, identity rotation)
+	// [orig: render_celestial_bodies @ 0x5acaa0, constant 64.0].
+	static float celestial_body_distance();
+
+	// Witnessed body alphas (0..1 out): sun = (1 - overcast) x (100 - dim)/100;
+	// moon = clamp01((fogDistInt - 400)/600) x (1 - overcast)
+	// [orig: @ 0x5acbc1..0x5acccd]. overcast/dim in 0..1 / 0..100.
+	static float celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct);
+	static float celestial_moon_alpha(float p_fog_distance, float p_overcast_blend);
+
+	// The glare glow alpha (0..1): dot_view^4/2 x brightness(0..256)/256 x the
+	// overcast and SunDim folds [orig: render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9].
+	static float glare_glow_alpha(float p_view_dot_sun, int p_brightness,
+			float p_overcast_blend, float p_sun_dim_pct);
+
+	// Fog-start policy for a bare (no EnvFile) host: the same
+	// compute_fog_params table the instance getters use — fog-start policy
+	// has ONE home [orig: Render_SetFogState @ 0x58a950].
+	static float fog_start_for(int p_fog_type, float p_fog_end, float p_overcast = 0.0f);
+
+	// The steady-state layer-1 cloud UV drift per second for a parsed
+	// sky_speed (rate = sky_speed << 10 through 62 Hz x 2^-28) — the single
+	// home of the old "sky_speed * 1024 * 62 / 2^28" magic; hosts with a live
+	// weather node read the RAMPING rate off it instead
+	// [orig: rate ramp @ 0x57eecc; accumulators @ 0x57f1a5].
+	static float cloud_uv_rate_per_second(float p_sky_speed);
 
 	// Field name -> renderer-consumption status for editor badging:
 	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,

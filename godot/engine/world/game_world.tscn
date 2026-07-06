@@ -31,6 +31,7 @@ script = ExtResource("2_env")
 [node name="NovaSky" type="Node3D" parent="."]
 script = ExtResource("3_sky")
 environment_path = NodePath("../NovaEnvironment")
+weather_path = NodePath("../NovaWeather")
 
 [node name="NovaWeather" type="Node3D" parent="."]
 process_priority = -10
@@ -40,6 +41,7 @@ environment_path = NodePath("../NovaEnvironment")
 [node name="NovaWater" type="Node3D" parent="."]
 script = ExtResource("5_water")
 environment_path = NodePath("../NovaEnvironment")
+weather_path = NodePath("../NovaWeather")
 water_height = 10.5
 
 [node name="NovaCelestial" type="Node3D" parent="."]

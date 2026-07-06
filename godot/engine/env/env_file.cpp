@@ -1,6 +1,7 @@
 #include "env/env_file.h"
 
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "util/nova_data_format.h"
@@ -78,6 +79,14 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("horizon_blend_skyfog", "fog", "skyfog", "fog_distance", "fog_distance_reference"), &EnvFile::horizon_blend_skyfog);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("tile_overlay_tint_factor", "terrain_tint"), &EnvFile::tile_overlay_tint_factor);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("build_sky_dome_arrays", "sky_height"), &EnvFile::build_sky_dome_arrays);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("fog_start_for", "fog_type", "fog_end", "overcast"), &EnvFile::fog_start_for, DEFVAL(0.0f));
+	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_moon_alpha", "fog_distance", "overcast_blend"), &EnvFile::celestial_moon_alpha);
+	ClassDB::bind_static_method("EnvFile", D_METHOD("glare_glow_alpha", "view_dot_sun", "brightness", "overcast_blend", "sun_dim_pct"), &EnvFile::glare_glow_alpha);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("get_field_consumption"), &EnvFile::get_field_consumption);
 	ClassDB::bind_method(D_METHOD("apply_mission_overrides", "overrides"), &EnvFile::apply_mission_overrides);
 	ClassDB::bind_method(D_METHOD("clear_mission_overrides"), &EnvFile::clear_mission_overrides);
@@ -536,6 +545,89 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 	const opennova::env::TerrainTint tint =
 			opennova::env::terrain_tint_from_rgb(to_rgb(p_terrain_tint));
 	return to_color(opennova::env::tile_overlay_tint_factor(tint));
+}
+
+Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
+	// [orig: build_sky_dome_mesh @ 0x578db0] — libs/env owns the math; this
+	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
+	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
+	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);
+
+	PackedVector3Array vertices;
+	PackedVector3Array normals;
+	PackedVector2Array uv1;
+	PackedVector2Array uv2;
+	vertices.resize(vertex_count);
+	normals.resize(vertex_count);
+	uv1.resize(vertex_count);
+	uv2.resize(vertex_count);
+	for (int i = 0; i < vertex_count; ++i) {
+		vertices[i] = Vector3(mesh.positions[i * 3], mesh.positions[i * 3 + 1], mesh.positions[i * 3 + 2]);
+		normals[i] = Vector3(mesh.normals[i * 3], mesh.normals[i * 3 + 1], mesh.normals[i * 3 + 2]);
+		uv1[i] = Vector2(mesh.uv1[i * 2], mesh.uv1[i * 2 + 1]);
+		uv2[i] = Vector2(mesh.uv2[i * 2], mesh.uv2[i * 2 + 1]);
+	}
+	PackedInt32Array indices;
+	indices.resize(static_cast<int>(mesh.indices.size()));
+	for (int i = 0; i < static_cast<int>(mesh.indices.size()); ++i) {
+		indices[i] = mesh.indices[i];
+	}
+
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	arrays[Mesh::ARRAY_TEX_UV] = uv1;
+	arrays[Mesh::ARRAY_TEX_UV2] = uv2;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	return arrays;
+}
+
+float EnvFile::dome_reference_height() {
+	return static_cast<float>(opennova::env::kSkyDomeReferenceHeight);
+}
+
+float EnvFile::fog_start_for(int p_fog_type, float p_fog_end, float p_overcast) {
+	const opennova::env::FogParams params =
+			opennova::env::compute_fog_params(p_fog_type, p_fog_end, p_overcast);
+	return params.start;
+}
+
+float EnvFile::celestial_body_distance() {
+	return opennova::env::kCelestialBodyDistance;
+}
+
+namespace {
+
+int to_fixed_16_16(float value) {
+	return static_cast<int>(value * 65536.0f);
+}
+
+} // namespace
+
+float EnvFile::celestial_sun_alpha(float p_overcast_blend, float p_sun_dim_pct) {
+	return static_cast<float>(opennova::env::celestial_sun_alpha_fixed(
+			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
+}
+
+float EnvFile::celestial_moon_alpha(float p_fog_distance, float p_overcast_blend) {
+	return static_cast<float>(opennova::env::celestial_moon_alpha_fixed(
+			p_fog_distance, to_fixed_16_16(p_overcast_blend), false)) / 65536.0f;
+}
+
+float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
+		float p_overcast_blend, float p_sun_dim_pct) {
+	return static_cast<float>(opennova::env::glare_glow_alpha_fixed(
+			to_fixed_16_16(p_view_dot_sun), p_brightness,
+			to_fixed_16_16(p_overcast_blend), to_fixed_16_16(p_sun_dim_pct))) / 65536.0f;
+}
+
+float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {
+	// Steady state: the ramp's target rate (sky_speed << 10) through the
+	// per-second layer-1 UV scale [orig: @ 0x57eecc; @ 0x57f1a5].
+	opennova::env::CloudScrollState steady;
+	steady.rate = static_cast<int>(p_sky_speed) << 10;
+	return opennova::env::cloud_uv_rate_per_second(steady);
 }
 
 Dictionary EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {

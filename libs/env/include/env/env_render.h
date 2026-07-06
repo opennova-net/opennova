@@ -2,7 +2,9 @@
 
 #include "env/env.h"
 
+#include <cmath>
 #include <cstdint>
+#include <vector>
 
 // Engine-faithful runtime math for the environment/atmosphere stack, ported
 // from Jointops.exe (retail JO:CA). RE record: docs/env/env-tod-re.md.
@@ -110,6 +112,163 @@ struct LightningAdditives {
 };
 LightningAdditives lightning_additives(const Rgb &lightning_rgb, int level);
 
+// Packed-byte form of the same computation, exact to the MMX sequence
+// (pmullw then psrlw per slot; the directional-light slot is explicitly
+// ZEROED — lightning never brightens the sun) [orig: Environment_SetLightningFlash
+// @ 0x57d320]. lightning_packed is 0x00RRGGBB.
+struct LightningAdditivesPacked {
+	uint32_t sky = 0;    // >> 8
+	uint32_t fog = 0;    // >> 9
+	uint32_t skyfog = 0; // >> 9
+	uint32_t ground = 0; // >> 10
+};
+LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, int level);
+
+// The two flash sequencer timers. tick() decrements active timers and looks
+// the remaining value up in the epoch tables; when an epoch fires, the level
+// is SET (never max-combined — each Environment_SetLightningFlash call
+// overwrites the additive slots). Epoch 0 also fires thunder SoundBank
+// triggers in retail (id 0 / id 0x80 via @ 0x527b90) — deferred to WAC
+// weather (env #15). Trigger writes: the short sequence arms timer A at 16,
+// the long arms timer B at 32 (both sequences' largest epoch + 1 tick).
+// [orig: Environment_UpdateWeatherTick @ 0x57ec6f (A) / @ 0x57ed0a (B);
+//  reset Environment_SnapStateToTargets @ 0x57d1e0]
+struct LightningSequencers {
+	int timer_a = 0; // Env_LightningTimerA
+	int timer_b = 0; // Env_LightningTimerB
+	int level = 0;   // last SET flash level, 0..255
+
+	void trigger_short() { timer_a = 16; }
+	void trigger_long() { timer_b = 32; }
+	// One 62 Hz tick; returns true when an epoch (re)set the level this tick.
+	bool tick();
+};
+
+// ---------------------------------------------------------------------------
+// Weather oscillator — the wind-sway / wave PRNG state
+// [orig: Environment_UpdateWeatherTick @ 0x57e9b0: PRNG rol-9 + signed-carry
+//  step @ 0x57e9fc..0x57ea16, amplitude + 256-entry rings + spring smoothing
+//  @ 0x57ea42..0x57eaed; seed 0x12333333 at mission start (the mov imm32 at
+//  @ 0x57d2ff — 0x12345633 was a reimpl transcription error, env #25)
+//  Environment_SnapStateToTargets @ 0x57d1e0; Env_WindScale default 256
+//  Environment_InitDefaults @ 0x57c1d1. The quake path re-rolls the PRNG per
+//  displaced entity (@ 0x57eb8e) — reroll() is that step.]
+//
+// The carry idiom is SIGNED: ((int32)rotated >> 31) & 0x1ABB09 adds 0x1ABB09
+// when bit 31 is set (x86 cdq/and/add). A logical-shift port adds 0 or 1 and
+// silently forks the sequence from the first negative rotate — the GDScript
+// port carried exactly that bug until this port (docs/env/env-tod-re.md).
+struct WeatherOscillator {
+	uint32_t prng = 0x12333333u; // Env_WeatherPrng [orig: seed imm32 @ 0x57d2ff]
+	int intensity = 256;         // Env_WindScale [orig: default @ 0x57c1d1]
+	int prev_noise = 0;          // dword_26C7764
+	int pos = 0;                 // dword_26C7758 (spring position, 0x8000 rest)
+	int smoothed = 0;            // dword_26C775C (clamped 0..0xFFFF)
+	int velocity = 0;            // dword_26C7760
+	uint8_t ring_index = 0;      // Env_WaveRingIndex
+	int32_t amp_ring[256] = {};  // Env_WaveAmpRing (0xFFFF - 2*amp, floor 0)
+	int32_t osc_ring[256] = {};  // Env_WaveOscRing (smoothed history)
+
+	// Advances the PRNG one step and returns the new word.
+	uint32_t reroll();
+	// One 62 Hz oscillator tick; returns the tick's scaled amplitude.
+	int tick();
+};
+
+// ---------------------------------------------------------------------------
+// Rain fade [orig: Environment_UpdateWeatherTick @ 0x57eaf9 (decay);
+//            factor consumed per color block in interpolate_weather_color
+//            @ 0x57d9e0; reset @ 0x57d1e0]
+
+struct RainState {
+	int intensity = 0; // Env_RainIntensity (0..0x8000 attenuates fully)
+	int fade_rate = 0; // Env_RainFadeRate
+
+	void tick() {
+		intensity -= fade_rate;
+		if (intensity < 0) {
+			intensity = 0;
+		}
+	}
+};
+
+// (0x8000 - intensity), zeroed when intensity exceeds 0x8000 unsigned —
+// the per-block modulator blend factor [orig: interpolate_weather_color
+// @ 0x57d9e0].
+int rain_blend_factor(int rain_intensity);
+
+// ---------------------------------------------------------------------------
+// Weather color block — the full per-block pipeline of
+// [orig: interpolate_weather_color @ 0x57d9e0] (16 such blocks tick per
+// frame @ 0x57ef9c..0x57f032): 12.20 step toward the packed target under
+// PER-CHANNEL max rates, saturating add of the lightning additive slot
+// (paddusb), then the modulator x rain blend
+//   out_c = min(255, ((c * m) >> 1) * (rain_factor >> 4) >> 16)
+// (pmullw / psrlw 1 / pmulhw / packuswb). The modulator chain is the iris
+// auto-exposure consumer (env #17): most blocks modulate against the
+// modulator block, the modulator against modulator-2, modulator-2 against
+// the constant identity bytes. Identity modulator byte = 64.
+
+inline constexpr uint32_t kModulatorIdentityPacked = 0x40404040u;
+
+struct WeatherColorBlock {
+	uint32_t render_color = 0;  // [0] post-modulation packed (the render read)
+	uint32_t pre_mod_color = 0; // [1] step + additive, pre modulation
+	ColorChannelState channels; // [2..5] the 12.20 accumulators
+	// [6..9] per-channel max step rates (b, g, r, a) in 12.20; the parse-time
+	// default is effectively unclamped (255 << 20).
+	int32_t max_rate[4] = {0x0FF00000, 0x0FF00000, 0x0FF00000, 0x0FF00000};
+	uint32_t target = 0;   // [11] packed target the step chases
+	uint32_t additive = 0; // [12] the lightning flash slot
+
+	// Snaps the accumulators and both packed colors to `packed`.
+	void snap(uint32_t packed);
+	// One 62 Hz tick [orig: interpolate_weather_color @ 0x57d9e0].
+	void tick(uint32_t modulator_packed, int rain_intensity);
+};
+
+// ---------------------------------------------------------------------------
+// Cloud scroll accumulators
+// [orig: Environment_UpdateWeatherTick — rate smoothing toward
+//  Env_SkySpeedFixed (sky_speed << 10) @ 0x57eecc (the mission-start SNAP
+//  @ 0x57d2da refreshes only the TARGET — the rate always ramps); the four
+//  accumulators advance {1, 1, 2/3, 4/3} x rate with TRUNCATING integer /3
+//  @ 0x57f1a5..0x57f1d1. render_skybox consumes them as texture-transform
+//  translations (@ 0x5791de..0x579260): layer 1
+//  U = -(camY_eng + acc_26C6810) * 2^-28, V = +(camX_eng + acc_26C680C) * 2^-28;
+//  layer 2 U = -(camY + acc_26C6818[4/3]) * 2^-29, V = +(camX + acc_26C6814[2/3])
+//  * 2^-29. In the render basis (Math_FixedPointToFloat3_YNegated @ 0x611210:
+//  d3d = (-engY, engZ, engX)/65536) that is U = +camX_render/4096 - acc*2^-28
+//  and V = +camZ_render/4096 + acc*2^-28 — the accumulator term is NEGATIVE
+//  on U.]
+
+struct CloudScrollState {
+	int rate = 0;         // Env_CloudScrollRate (ramps toward the target)
+	int32_t acc_l1_v = 0; // dword_26C680C (render V axis, layer 1)
+	int32_t acc_l1_u = 0; // dword_26C6810 (render U axis, layer 1, negated)
+	int32_t acc_l2_v = 0; // dword_26C6814 (rate - rate/3, render V axis)
+	int32_t acc_l2_u = 0; // dword_26C6818 (rate + rate/3, render U axis, negated)
+
+	// One 62 Hz tick; rate_target = sky_speed << 10.
+	void tick(int rate_target);
+};
+
+// The final per-layer UV translations for a camera at (cam_x, cam_z) render/
+// world units [orig: render_skybox @ 0x5791de..0x579260 — see the axis map
+// above; 2^-12 = the 16.16 camera fixed value / 2^28].
+struct CloudUvOffsets {
+	float u1 = 0.0f, v1 = 0.0f; // layer 1 (UV1, 1/320 world scale)
+	float u2 = 0.0f, v2 = 0.0f; // layer 2 (UV2, 3/2048 world scale)
+};
+
+CloudUvOffsets cloud_scroll_uv_offsets(const CloudScrollState &scroll,
+                                       float cam_x, float cam_z);
+
+// The layer-1 UV drift per second at the current rate — 62 ticks of `rate`
+// through the 2^-28 UV scale. The single home of the "sky_speed * 1024 * 62 /
+// 2^28" factor the water surface derives its scroll speed from.
+float cloud_uv_rate_per_second(const CloudScrollState &scroll);
+
 // ---------------------------------------------------------------------------
 // Sun glare [orig: compute_sun_glare_and_fog_blend @ 0x5ad610]
 //           [orig: render_skybox_sun_glow @ 0x5acd00]
@@ -125,7 +284,62 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness);
 
 // Occlusion hysteresis: target = 32 * visible_rays (0..8 rays), brightness
 // moves +-16 per frame toward it, clamped 0..255.
-int glare_brightness_step(int current, int visible_rays);
+int glare_brightness_step(int current, int target);
+
+// ---------------------------------------------------------------------------
+// Celestial bodies + glare occlusion — witnessed at the ENG-2 celestial leg
+// [orig: render_celestial_bodies @ 0x5acaa0 (the LIVE sun/moon renderer,
+//  was misnamed render_skybox_fog_layers); render_skybox_sun_glow @ 0x5acd00;
+//  render_star_field @ 0x5ad9c0]. The old render_skybox_layers @ 0x5ac230 is
+//  a caller-less dead variant (its +64/+16 fixed offsets never run).
+
+// Sun/moon bodies place at camera + direction * 64 world units, identity
+// rotation, FULL camera height [orig: @ 0x5acaa0, constant flt_7C3DD0].
+inline constexpr float kCelestialBodyDistance = 64.0f;
+
+// Body alphas, 16.16 in/out like the originals:
+// sun = clamp((1 - overcast) * ((0x640000 - sun_dim + 1) / 100)), where
+// sun_dim is the 0..100 (16.16) Env_SunDimPct channel (default 0, no .env
+// parser writes it) [orig: @ 0x5acbc1..0x5acbfa].
+int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed);
+// moon = clamp01((fogDistInt - 400) / 600) * (1 - overcast)  (the no-fog-
+// shader path; the fog-shader path scales fogDistInt * 0.0002)
+// [orig: @ 0x5acc40..0x5acccd].
+int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixed,
+                               bool fog_shader_path);
+
+// Glare occlusion (env #14) [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]:
+// TWO jittered rays per frame feed an 8-bit SLIDING window (>>1 per sample,
+// bit 0x80 = sample visible), so the window spans the last 4 frames. The ray
+// is camera -> camera + sun_dir * 1024 world units, jittered per sample from
+// the frame index bits: engine-Y +-16 (bit 0) and +-8 (bit 2), height +-16
+// (bit 1). Brightness steps +-16 (dead-band hold) toward
+// popcount(window) * 32 * (fog_distance / 1000)  (flt_7DA0C4 = 1/65536000).
+struct GlareOcclusionState {
+	uint8_t window = 0;        // Glare_OcclusionWindow @ 0x27E2E34
+	int brightness = 0;        // Glare_OcclusionBrightness @ 0x27E2E30
+	uint32_t jitter_index = 0; // Glare_JitterFrameIndex @ 0x27E5690
+};
+
+struct GlareRayJitter {
+	float offset_eng_y = 0.0f; // engine Y axis (render/Godot -x)
+	float offset_eng_z = 0.0f; // engine Z (height, render/Godot +y)
+};
+
+// The jitter offsets for one sample index [orig: @ 0x5ace3b..0x5ace61].
+GlareRayJitter glare_ray_jitter(uint32_t jitter_index);
+
+// One frame: advances the window with the two samples' visibility and steps
+// the brightness. The host casts the two rays (sample indices jitter_index+1
+// and jitter_index+2 BEFORE the call).
+void glare_occlusion_tick(GlareOcclusionState &state, bool visible_a, bool visible_b,
+                          float fog_distance_world);
+
+// The glow submit alpha, 16.16: dot_view^4 / 2 scaled by the occlusion
+// brightness (>> 8), the overcast blend and the SunDim fold
+// [orig: @ 0x5acfb8..0x5ad0a9].
+int glare_glow_alpha_fixed(int view_dot_fixed, int brightness, int overcast_blend_fixed,
+                           int sun_dim_fixed);
 
 // ---------------------------------------------------------------------------
 // Derived render colors [orig: Environment_UpdateWeatherTick @ 0x57f0b3..0x57f1b1]
@@ -228,10 +442,14 @@ Rgb tile_overlay_tint_factor(const TerrainTint &tint);
 // [orig: render_skybox @ 0x57960e] sun/moon dome position = camera + dir * 2000
 // [orig: render_skybox_layers @ 0x5ac230] layer offsets +64/+16, alpha 0x2000,
 // additive submit flag 0x110; glare/star models load under mode 0x300000.
+// NOTE (celestial-leg re-grill 2026-07-06): 2000 is the DOME VS clip-space
+// proximity reference distance ONLY [orig: c14 upload @ 0x57960e] — the
+// bodies place at kCelestialBodyDistance (64). The +16/+64 offsets and the
+// 0x2000 alpha belong to the caller-less dead variant @ 0x5ac230.
 inline constexpr float kCelestialDomeDistance = 2000.0f;
-inline constexpr float kCelestialLayerOffsetNear = 16.0f;
-inline constexpr float kCelestialLayerOffsetFar = 64.0f;
-inline constexpr float kCelestialLayerAlpha = float(0x2000) / 65536.0f;
+inline constexpr float kCelestialLayerOffsetNear = 16.0f;  // dead variant
+inline constexpr float kCelestialLayerOffsetFar = 64.0f;   // dead variant
+inline constexpr float kCelestialLayerAlpha = float(0x2000) / 65536.0f; // dead variant
 
 // Cloud UV scroll [orig: render_skybox @ 0x5791de..0x579260 + weather tick]:
 // four accumulators advance per tick by rate * {1, 1, 2/3, 4/3}; layer 1 UV =
@@ -243,6 +461,112 @@ inline constexpr double kCloudUvScaleLayer2 = 1.0 / 536870912.0; // 2^-29
 // [orig: render_skybox draw @ 0x5798dc].
 inline constexpr int kSkyDomeVertices = 441;
 inline constexpr int kSkyDomeTriangles = 800;
+
+// The dome profile is a sphere cap of radius 3072 lowered so the rim
+// (radius 1024 = 20 rows x 51.2) sits at y = 0: 3072^2 - 1024^2 = 2^23, so
+// y(r) = sqrt(3072^2 - r^2) - sqrt(2^23) and the apex reference height is
+// 3072 - sqrt(2^23) ~= 175.6906 — the "175.69" the height scale divides by
+// [orig: build_sky_dome_mesh @ 0x578ed4 — v14 = skyHeight / (3072.0 - sqrt(8388608.0))].
+inline const double kSkyDomeReferenceHeight = 3072.0 - std::sqrt(8388608.0);
+
+// The sky dome mesh [orig: build_sky_dome_mesh @ 0x578db0] — 21 rings x 21
+// columns, FVF 0x212 (XYZ|NORMAL|TEX2, stride 40). Per vertex: radius =
+// row * 51.2, theta = col * pi/10, x = sin(theta)*radius, z = cos(theta)*radius,
+// y = v14 * (sqrt(3072^2 - radius^2) - sqrt(2^23)) — the Y-only height scale is
+// BAKED into the mesh (retail rebuilds on smoothed-height change, gated at
+// [orig: Environment_ApplyFogAndAmbient @ 0x57e4f4] -> Terrain_PushSkyDomeHeightFloat
+// @ 0x610920 -> SkyDome_SetHeightAndRebuild @ 0x579070; the reimpl folds the
+// scale into the vertex shader instead — env #20's ratified structure, so it
+// builds once at the reference height). UV1 = (x, z) * 0.003125, UV2 =
+// (x, z) * 3/2048. Normal = normalize(x, y_scaled / v14^2, z) — the builder's
+// anisotropic normal, NOT the vertex direction [orig: @ 0x578fbb..0x579023];
+// zero-length input degenerates to (0,0,0) [orig: @ 0x578fd8]. All math runs
+// in double off the binary's float32 literal seeds (51.2f, 0.31415927f,
+// 9437184.0f, 0.003125f, 3/2048; 8388608.0 is a double literal — x87
+// intermediates approximated as double, stored float32 like the D3D vertex
+// buffer). Index winding per quad: (i, i+22, i+21), (i, i+1, i+22)
+// [orig: @ 0x578e00..0x578e86].
+struct SkyDomeMesh {
+	std::vector<float> positions; // xyz triples, kSkyDomeVertices
+	std::vector<float> normals;   // xyz triples (anisotropic dome normals)
+	std::vector<float> uv1;       // uv pairs, layer 1 (1/320 world scale)
+	std::vector<float> uv2;       // uv pairs, layer 2 (3/2048 world scale)
+	std::vector<int32_t> indices; // 3 * kSkyDomeTriangles, witnessed winding
+};
+
+SkyDomeMesh build_sky_dome_mesh(float sky_height);
+
+// ---------------------------------------------------------------------------
+// Water surface — the witnessed pipeline of render_water_surface @ 0x5c32c0
+// (the frame pass: FrameFX_RenderBloomPass @ 0x582a5d / @ 0x610650 call it per
+// side; camera-side gate against Env_WaterHeightFixed). Per frame it
+// regenerates the animated noise texture pair [orig: Water_GenerateNoiseTextures
+// @ 0x5c0360], derives the UV scale/bias from the SMOOTHED fog distance and
+// the UV offsets from the CLOUD-SCROLL accumulators [orig: @ 0x5c3348..0x5c33db],
+// then draws the screen-marched water strips (render_water_strip @ 0x5c1d60
+// low detail with sin-table Y displacement; render_water_strip_detailed
+// @ 0x5c27d0 high detail, FLAT strips — the animated textures carry the look).
+// The strip tessellation itself is a tracked divergence (env #29); this
+// section owns the texture + UV math both paths share.
+
+inline constexpr int kWaterNoiseSize = 128; // 128x128 field and textures
+
+// The static tables built once at renderer init [orig:
+// Water_InitNoiseFieldAndSineLut @ 0x5c01a0, called from Terrain_InitShaders
+// @ 0x5c19f8]: a normalized random field and the 128 + 64*sin(2*pi*i/256)
+// byte LUT (truncating float->int like the original ftol).
+struct WaterNoiseTables {
+	uint8_t field[kWaterNoiseSize * kWaterNoiseSize]; // Water_NoiseField
+	uint8_t sine_lut[256];                            // Water_SineLut
+};
+
+// One step of the init PRNG [orig: PRNG_Next16 @ 0x6130a0]:
+// state = rol4(state + rol11(state)) ^ 1; the caller consumes state & 0xFFFF.
+uint32_t water_noise_prng_step(uint32_t state);
+
+// Builds the tables with the witnessed algorithm. Retail's field CONTENT
+// depends on the shared PRNG's state at Terrain_InitShaders time (a
+// value-history quirk, recorded in env-tod-re.md); the reimpl seeds from the
+// boot state 0 for a deterministic, witnessed-faithful instance.
+WaterNoiseTables water_init_noise_tables();
+
+// The per-frame wave phase [orig: Water_WavePhase = counter * 0x3000000
+// @ 0x5c0374; render_water_strip consumes phase + 0x200000, += 0x55555555
+// per row, sin table index = value >> 22].
+inline constexpr uint32_t kWaterWavePhasePerFrame = 0x3000000u;
+
+// Passes 1+2 of Water_GenerateNoiseTextures: animate the field through the
+// LUT (per byte: lut[(uint8)(field + (counter << (field & 1)))] — two speed
+// classes), then the toroidal 9-tap kernel (3x corners + 4x cross, >> 5),
+// folded to a ridge intensity i = max(0, 128 - |k - 128|) and packed as
+// A = 255 - max(0, i*i >> 9), R = G = B = i. out_pixels holds 128*128 ARGB.
+void water_noise_color_pixels(uint32_t *out_pixels, const WaterNoiseTables &tables,
+                              uint32_t frame_counter);
+
+// Pass 3: the DuDv/normal map [orig: @ 0x5c07c2..0x5c087d, MMX]: per pixel,
+// from the color texture's intensity byte c (blue channel):
+// R = sat8(2 * satsub8(c - c_up)) + 0x80 (wrapping), G = same against c_left,
+// B = 0xFF, A = 0; rows and columns wrap toroidally.
+void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixels);
+
+// The shared UV transform state [orig: render_water_surface @ 0x5c3348..0x5c33db]:
+// scale = 0.99996948 * w / (w - 0.2) with w = the INTEGER part of the smoothed
+// fog distance (the word read at Env_FogDistCurrent+2); bias = 0.2 * scale.
+// Offsets ride the LAYER-1 CLOUD accumulators with a 32x camera term:
+// u = (uint32)(acc_26C680C + 32 * camX_eng_fixed) * 2^-28,
+// v = (uint32)(acc_26C6810 - 32 * camY_eng_fixed) * 2^-28. In the render basis
+// (d3d = (-engY, engZ, engX)) that is u = cam_z/128 + acc_l1_v * 2^-28 and
+// v = cam_x/128 + acc_l1_u * 2^-28 — both accumulator terms POSITIVE here
+// (the water pass's own sign structure, unlike the sky layers).
+struct WaterUvState {
+	float scale = 1.0f;
+	float bias = 0.0f;
+	float offset_u = 0.0f;
+	float offset_v = 0.0f;
+};
+
+WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float cam_z,
+                            float fog_distance_world);
 
 // ---------------------------------------------------------------------------
 // BMS mission overrides [orig: Game_LoadTerrainDuringConnect @ 0x520710]

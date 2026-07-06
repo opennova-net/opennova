@@ -136,9 +136,10 @@ int main() {
 
 		if (!expect(compute_sun_glare(-0.5f, 255).glare == 0, "looking away yields no glare")) return 1;
 
-		if (!expect(glare_brightness_step(0, 8) == 16, "brightness rises 16/frame")) return 1;
-		if (!expect(glare_brightness_step(248, 8) == 255, "brightness clamps at 255")) return 1;
+		if (!expect(glare_brightness_step(0, 256) == 16, "brightness rises 16/frame")) return 1;
+		if (!expect(glare_brightness_step(248, 256) == 248, "dead-band holds within +-16 (no snap)")) return 1;
 		if (!expect(glare_brightness_step(100, 0) == 84, "brightness falls 16/frame")) return 1;
+		if (!expect(glare_brightness_step(272, 256) == 256, "steps down onto the band edge")) return 1;
 	}
 
 	// --- Derived render colors [orig: Environment_UpdateWeatherTick tail] ---
@@ -308,7 +309,406 @@ int main() {
 		}
 	}
 
+	// --- Weather oscillator [orig: Environment_UpdateWeatherTick @ 0x57e9b0] --
+	{
+		// The witnessed PRNG sequence from the mission-start seed
+		// [orig: seed 0x12333333 — the mov imm32 @ 0x57d2ff in
+		//  Environment_SnapStateToTargets @ 0x57d1e0 (0x12345633 was a reimpl
+		//  transcription error, env #25; the WAC RNG @ 0x4f966b shares the
+		//  constant); step rol9 + ((int32)x >> 31) & 0x1ABB09 @ 0x57e9fc..0x57ea16].
+		const uint32_t expected_words[8] = {
+			0x66666624u, 0xCCE703D5u, 0xCE2266A2u, 0x44CD459Cu,
+			0x9AA5F392u, 0x4BE72535u, 0xCE6525A0u, 0xCA65FCA5u,
+		};
+		WeatherOscillator prng_probe;
+		for (int i = 0; i < 8; ++i) {
+			const uint32_t word = prng_probe.reroll();
+			if (word != expected_words[i]) {
+				std::fprintf(stderr, "FAIL: PRNG word %d = %08X, want %08X\n", i, word, expected_words[i]);
+				return 1;
+			}
+		}
+		// The signed-carry idiom is load-bearing: a logical-shift port (adds
+		// 0/1 instead of 0/0x1ABB09) forks at the first negative rotate —
+		// word 1 becomes 0xCCCC48CD. Guard the divergence explicitly.
+		if (!expect(expected_words[1] != 0xCCCC48CDu && expected_words[1] == 0xCCE703D5u,
+		            "PRNG carry is the signed 0x1ABB09 idiom, not bit-31")) return 1;
+
+		// Still air (intensity 0): the spring settle toward 0x8000 is
+		// PRNG-independent and matches the committed GUT wa/* vectors.
+		WeatherOscillator still;
+		still.intensity = 0;
+		const struct { int tick; int smoothed; int index; } still_landmarks[] = {
+			{1, 0x0000, 0x01}, {4, 0x0250, 0x04}, {16, 0x3F01, 0x10},
+			{64, 0x726E, 0x40}, {256, 0x7DDF, 0x00},
+		};
+		int ticks_done = 0;
+		for (const auto &lm : still_landmarks) {
+			for (; ticks_done < lm.tick; ++ticks_done) {
+				still.tick();
+			}
+			if (still.smoothed != lm.smoothed || still.ring_index != lm.index) {
+				std::fprintf(stderr, "FAIL: still-air k%03d = %04X/%02X, want %04X/%02X\n",
+				             lm.tick, still.smoothed, still.ring_index, lm.smoothed, lm.index);
+				return 1;
+			}
+		}
+
+		// Wind at the WITNESSED intensity (Env_WindScale = 256, its only
+		// retail value [orig: Environment_InitDefaults @ 0x57c1d1; sole other
+		// xref is the tick read]): a stable ambient sway around the 0x8000
+		// rest. The noise feedback term 15*prev has gain 15*intensity/4096 —
+		// stable only for intensity <= 273. The old GDScript node scaled
+		// wind_strength onto 0..8192, driving the 32-bit state divergent and
+		// "surviving" via 64-bit wrap + clamps; that mapping was unwitnessed
+		// (divergence noted in docs/env/env-tod-re.md).
+		WeatherOscillator wind;
+		wind.intensity = 256;
+		const struct { int tick; int smoothed; } wind_landmarks[] = {
+			{1, 0x0012}, {16, 0x56E5}, {64, 0x7CDE}, {256, 0x9787},
+		};
+		ticks_done = 0;
+		for (const auto &lm : wind_landmarks) {
+			for (; ticks_done < lm.tick; ++ticks_done) {
+				wind.tick();
+			}
+			if (wind.smoothed != lm.smoothed) {
+				std::fprintf(stderr, "FAIL: wind k%03d = %04X, want %04X\n",
+				             lm.tick, wind.smoothed, lm.smoothed);
+				return 1;
+			}
+		}
+		if (!expect(wind.amp_ring[wind.ring_index] >= 0, "amp ring floors at 0")) return 1;
+	}
+
+	// --- Lightning sequencers [orig: @ 0x57ec6f (A) / @ 0x57ed0a (B)] --------
+	{
+		// Short (timer A = 16): epoch table {10:C8, 6:FF, 4:C8, 2:FF, 0:0};
+		// per-tick levels match the committed GUT wc/short_seq bytes.
+		LightningSequencers seq_short;
+		seq_short.trigger_short();
+		const int expected_short[16] = {
+			0, 0, 0, 0, 0, 200, 200, 200, 200, 255, 255, 200, 200, 255, 255, 0,
+		};
+		for (int i = 0; i < 16; ++i) {
+			seq_short.tick();
+			if (seq_short.level != expected_short[i]) {
+				std::fprintf(stderr, "FAIL: short seq tick %d = %d, want %d\n",
+				             i + 1, seq_short.level, expected_short[i]);
+				return 1;
+			}
+		}
+
+		// Long (timer B = 32): SET semantics per epoch — the witnessed
+		// staircase C8 C8 C8 96 96 C8 C8 96 64 32 32 00 (the GDScript port's
+		// max-combining plateau C8 x11 was unwitnessed embellishment;
+		// Environment_SetLightningFlash overwrites @ 0x57d320).
+		LightningSequencers seq_long;
+		seq_long.trigger_long();
+		const int expected_long[12] = {
+			200, 200, 200, 150, 150, 200, 200, 150, 100, 50, 50, 0,
+		};
+		for (int i = 0; i < 12; ++i) {
+			seq_long.tick();
+			if (seq_long.level != expected_long[i]) {
+				std::fprintf(stderr, "FAIL: long seq tick %d = %d, want %d\n",
+				             i + 1, seq_long.level, expected_long[i]);
+				return 1;
+			}
+		}
+
+		// Packed additives at lightning 0x383B27, level 200
+		// [orig: Environment_SetLightningFlash @ 0x57d320]: truncating
+		// per-byte (c*level) >> {8,9,10}.
+		const LightningAdditivesPacked add = lightning_additives_packed(0x383B27u, 200);
+		if (!expect(add.sky == 0x2B2E1Eu, "packed sky additive >> 8")) return 1;
+		if (!expect(add.fog == 0x15170Fu && add.skyfog == add.fog, "packed fog/skyfog additive >> 9")) return 1;
+		if (!expect(add.ground == 0x0A0B07u, "packed ground additive >> 10")) return 1;
+	}
+
+	// --- Rain factor + weather color block [orig: interpolate_weather_color
+	//     @ 0x57d9e0] --------------------------------------------------------
+	{
+		if (!expect(rain_blend_factor(0) == 0x8000, "rain factor at 0")) return 1;
+		if (!expect(rain_blend_factor(0x4000) == 0x4000, "rain factor at half")) return 1;
+		if (!expect(rain_blend_factor(0x8001) == 0, "rain factor over-range zeroes")) return 1;
+
+		// With identity modulator (byte 64), zero rain, zero additive, the
+		// block pipeline reduces EXACTLY to the ColorChannelState step.
+		WeatherColorBlock block;
+		block.snap(0x000000u);
+		ColorChannelState plain;
+		plain.snap_to(0x000000u);
+		block.target = 0x00FFC080u;
+		for (int i = 0; i < 8; ++i) {
+			block.tick(kModulatorIdentityPacked, 0);
+			const uint32_t expected = plain.step(0x00FFC080u, 255 << 20);
+			if (block.render_color != expected || block.pre_mod_color != expected) {
+				std::fprintf(stderr, "FAIL: block/step equivalence tick %d: %08X vs %08X\n",
+				             i, block.render_color, expected);
+				return 1;
+			}
+		}
+
+		// Additive saturates per byte (paddusb): stepped 0x545859 + fog slot
+		// 0x15170F = 0x696F68; near-white + additive pins the 0xFF ceiling.
+		WeatherColorBlock add_block;
+		add_block.snap(0x545859u);
+		add_block.target = 0x545859u;
+		add_block.additive = 0x15170Fu;
+		add_block.tick(kModulatorIdentityPacked, 0);
+		if (!expect(add_block.pre_mod_color == 0x696F68u, "block additive paddusb")) return 1;
+		add_block.snap(0x00FFF0F8u);
+		add_block.target = 0x00FFF0F8u;
+		add_block.additive = 0x00202020u;
+		add_block.tick(kModulatorIdentityPacked, 0);
+		if (!expect(add_block.pre_mod_color == 0x00FFFFFFu, "block additive saturates")) return 1;
+
+		// Rain at 0x4000 halves every channel (truncating): the witnessed
+		// ((c*m)>>1 * (factor>>4)) >> 16 chain on 0x80FF40C8 -> 0x407F2064.
+		WeatherColorBlock rain_block;
+		rain_block.snap(0x80FF40C8u);
+		rain_block.target = 0x80FF40C8u;
+		rain_block.tick(kModulatorIdentityPacked, 0x4000);
+		if (!expect(rain_block.render_color == 0x407F2064u, "block rain-half modulation")) return 1;
+		if (!expect(rain_block.pre_mod_color == 0x80FF40C8u, "pre-mod color unaffected by rain")) return 1;
+	}
+
+	// --- Cloud scroll [orig: rate ramp @ 0x57eecc; accumulators
+	//     @ 0x57f1a5..0x57f1d1] ----------------------------------------------
+	{
+		// Rate ramps by smooth_eighth toward sky_speed << 10 (15 << 10 =
+		// 15360); the accumulators advance {1, 1, 2/3, 4/3} with truncating /3.
+		CloudScrollState scroll;
+		const struct { int tick; int rate; int32_t l1; int32_t l2v; int32_t l2u; } landmarks[] = {
+			{1, 1920, 1920, 1280, 2560},
+			{2, 3600, 5520, 3680, 7360},
+			{3, 5070, 10590, 7060, 14120},
+			{8, 10084, 52312, 34876, 69748},
+			{64, 15360, 875722, 583835, 1167609},
+		};
+		int ticks_done = 0;
+		for (const auto &lm : landmarks) {
+			for (; ticks_done < lm.tick; ++ticks_done) {
+				scroll.tick(15 << 10);
+			}
+			if (scroll.rate != lm.rate || scroll.acc_l1_u != lm.l1 || scroll.acc_l1_v != lm.l1 ||
+			    scroll.acc_l2_v != lm.l2v || scroll.acc_l2_u != lm.l2u) {
+				std::fprintf(stderr, "FAIL: scroll tick %d = rate %d accs %d/%d/%d/%d\n",
+				             lm.tick, scroll.rate, scroll.acc_l1_u, scroll.acc_l1_v,
+				             scroll.acc_l2_v, scroll.acc_l2_u);
+				return 1;
+			}
+		}
+		// The truncating /3 (rate 1025: 1025/3 = 341, not 342).
+		CloudScrollState trunc;
+		trunc.rate = 1025;
+		trunc.tick(1025);
+		if (!expect(trunc.acc_l2_v == 1025 - 341 && trunc.acc_l2_u == 1025 + 341,
+		            "accumulator /3 truncates toward zero")) return 1;
+	}
+
+	// --- Sky dome mesh [orig: build_sky_dome_mesh @ 0x578db0] ----------------
+	{
+		// Reference-height build (v14 ~= 1): the dome the reimpl renders, with
+		// the Y scale folded into the shader (env #20's ratified structure).
+		const SkyDomeMesh ref = build_sky_dome_mesh(static_cast<float>(kSkyDomeReferenceHeight));
+		if (!expect(static_cast<int>(ref.positions.size()) == kSkyDomeVertices * 3, "441 dome vertices")) return 1;
+		if (!expect(static_cast<int>(ref.normals.size()) == kSkyDomeVertices * 3, "441 dome normals")) return 1;
+		if (!expect(static_cast<int>(ref.uv1.size()) == kSkyDomeVertices * 2 &&
+		            static_cast<int>(ref.uv2.size()) == kSkyDomeVertices * 2, "441 dome uv pairs x2")) return 1;
+		if (!expect(static_cast<int>(ref.indices.size()) == kSkyDomeTriangles * 3, "2400 dome indices")) return 1;
+
+		// Witnessed winding [orig: @ 0x578e00..0x578e86]: quads emit
+		// (i, i+22, i+21), (i, i+1, i+22) — matches the committed sky/mesh
+		// GUT vector "0 22 21 0 1 22 1 23 22 1 2 23".
+		const int32_t head[12] = {0, 22, 21, 0, 1, 22, 1, 23, 22, 1, 2, 23};
+		for (int i = 0; i < 12; ++i) {
+			if (!expect(ref.indices[i] == head[i], "witnessed index winding (head)")) return 1;
+		}
+		// Last quad (row 19, col 19, base 418).
+		const int32_t tail[6] = {418, 440, 439, 418, 419, 440};
+		for (int i = 0; i < 6; ++i) {
+			if (!expect(ref.indices[2394 + i] == tail[i], "witnessed index winding (tail)")) return 1;
+		}
+
+		// Apex v0: exact zeros, y == the input height within rounding
+		// (v14 * y_unscaled(0) algebraically returns the height), normal
+		// exactly +Y after normalize(0, y, 0).
+		if (!expect(ref.positions[0] == 0.0f && ref.positions[2] == 0.0f, "apex x/z exactly 0")) return 1;
+		if (!expect(near(ref.positions[1], 175.6906281f, 1e-4f), "dome pin: ref.positions[1], 175.6906281f, 1e-4f")) return 1;
+		if (!expect(ref.normals[0] == 0.0f && ref.normals[1] == 1.0f && ref.normals[2] == 0.0f,
+		            "apex normal is exactly +Y")) return 1;
+		if (!expect(ref.uv1[0] == 0.0f && ref.uv2[1] == 0.0f, "apex uvs are 0")) return 1;
+
+		// v22 (row 1, col 1): radius 51.2, theta pi/10.
+		if (!expect(near(ref.positions[22 * 3 + 0], 15.8216705f, 1e-3f), "dome pin: ref.positions[22 * 3 + 0], 15.8216705f, 1e-3f")) return 1;
+		if (!expect(near(ref.positions[22 * 3 + 1], 175.2639313f, 1e-4f), "dome pin: ref.positions[22 * 3 + 1], 175.2639313f, 1e-4f")) return 1;
+		if (!expect(near(ref.positions[22 * 3 + 2], 48.6940956f, 1e-3f), "dome pin: ref.positions[22 * 3 + 2], 48.6940956f, 1e-3f")) return 1;
+		if (!expect(near(ref.uv1[22 * 2 + 0], 0.0494427f, 1e-5f), "dome pin: ref.uv1[22 * 2 + 0], 0.0494427f, 1e-5f")) return 1;
+		if (!expect(near(ref.uv1[22 * 2 + 1], 0.1521690f, 1e-5f), "dome pin: ref.uv1[22 * 2 + 1], 0.1521690f, 1e-5f")) return 1;
+		if (!expect(near(ref.uv2[22 * 2 + 0], 0.0231763f, 1e-5f), "dome pin: ref.uv2[22 * 2 + 0], 0.0231763f, 1e-5f")) return 1;
+		if (!expect(near(ref.uv2[22 * 2 + 1], 0.0713292f, 1e-5f), "dome pin: ref.uv2[22 * 2 + 1], 0.0713292f, 1e-5f")) return 1;
+		// The anisotropic dome normal [orig: @ 0x578fbb], NOT the vertex dir.
+		if (!expect(near(ref.normals[22 * 3 + 0], 0.0866516f, 1e-5f), "dome pin: ref.normals[22 * 3 + 0], 0.0866516f, 1e-5f")) return 1;
+		if (!expect(near(ref.normals[22 * 3 + 1], 0.9598801f, 1e-5f), "dome pin: ref.normals[22 * 3 + 1], 0.9598801f, 1e-5f")) return 1;
+		if (!expect(near(ref.normals[22 * 3 + 2], 0.2666864f, 1e-5f), "dome pin: ref.normals[22 * 3 + 2], 0.2666864f, 1e-5f")) return 1;
+
+		// v220 (row 10, col 10): theta ~= pi — x collapses to ~0 (the float32
+		// pi/10 seed keeps it sub-1e-3), z = -512.
+		if (!expect(std::fabs(ref.positions[220 * 3 + 0]) < 1e-3f, "v220 x ~ 0 at theta ~ pi")) return 1;
+		if (!expect(near(ref.positions[220 * 3 + 1], 132.7234802f, 1e-4f), "dome pin: ref.positions[220 * 3 + 1], 132.7234802f, 1e-4f")) return 1;
+		if (!expect(near(ref.positions[220 * 3 + 2], -512.0f, 1e-3f), "dome pin: ref.positions[220 * 3 + 2], -512.0f, 1e-3f")) return 1;
+
+		// Rim v440 (row 20, col 20): radius 1024 sits at y ~= 0 (exactly 0 in
+		// pure reals; the float32 51.2 seed leaves ~-5e-6), z back at +1024,
+		// uv2.z = 1024 * 3/2048 = 1.5.
+		if (!expect(std::fabs(ref.positions[440 * 3 + 1]) < 1e-4f, "rim y ~ 0")) return 1;
+		if (!expect(near(ref.positions[440 * 3 + 2], 1024.0f, 1e-3f), "dome pin: ref.positions[440 * 3 + 2], 1024.0f, 1e-3f")) return 1;
+		if (!expect(near(ref.uv2[440 * 2 + 1], 1.5f, 1e-5f), "dome pin: ref.uv2[440 * 2 + 1], 1.5f, 1e-5f")) return 1;
+
+		// Height scale is Y-ONLY [orig: @ 0x578ed4]: x/z bitwise identical
+		// across heights, y scales by v14, normals tilt via y_scaled/v14^2.
+		const SkyDomeMesh tall = build_sky_dome_mesh(250.0f);
+		if (!expect(tall.positions[22 * 3 + 0] == ref.positions[22 * 3 + 0] &&
+		            tall.positions[22 * 3 + 2] == ref.positions[22 * 3 + 2],
+		            "height scale leaves x/z bitwise unchanged")) return 1;
+		if (!expect(near(tall.positions[22 * 3 + 1], 249.3928375f, 1e-3f), "dome pin: tall.positions[22 * 3 + 1], 249.3928375f, 1e-3f")) return 1;
+		if (!expect(near(tall.normals[22 * 3 + 0], 0.1186150f, 1e-5f), "dome pin: tall.normals[22 * 3 + 0], 0.1186150f, 1e-5f")) return 1;
+		if (!expect(near(tall.normals[22 * 3 + 1], 0.9233970f, 1e-5f), "dome pin: tall.normals[22 * 3 + 1], 0.9233970f, 1e-5f")) return 1;
+		if (!expect(near(tall.normals[22 * 3 + 2], 0.3650595f, 1e-5f), "dome pin: tall.normals[22 * 3 + 2], 0.3650595f, 1e-5f")) return 1;
+		if (!expect(tall.indices == ref.indices, "indices are height-independent")) return 1;
+	}
+
+	// --- Water noise textures + UV state [orig: Water_GenerateNoiseTextures
+	// @ 0x5c0360; Water_InitNoiseFieldAndSineLut @ 0x5c01a0;
+	// render_water_surface @ 0x5c32c0] ------------------------------------
+	{
+		// PRNG_Next16 chain from the boot state 0 [orig: @ 0x6130a0].
+		uint32_t s = water_noise_prng_step(0);
+		if (!expect(s == 0x1u, "prng step 1")) return 1;
+		s = water_noise_prng_step(s);
+		if (!expect(s == 0x8011u, "prng step 2")) return 1;
+		s = water_noise_prng_step(s);
+		if (!expect(s == 0x40108111u, "prng step 3")) return 1;
+		s = water_noise_prng_step(s);
+		if (!expect(s == 0x4190B11Du, "prng step 4")) return 1;
+
+		const WaterNoiseTables tables = water_init_noise_tables();
+		// Sine LUT: 128 + 64*sin(2pi*i/256), truncating like the original ftol.
+		if (!expect(tables.sine_lut[0] == 128 && tables.sine_lut[32] == 173 &&
+		            tables.sine_lut[64] == 191 && tables.sine_lut[128] == 128 &&
+		            tables.sine_lut[192] == 65, "sine LUT landmarks")) return 1;
+		uint32_t lut_sum = 0;
+		for (int i = 0; i < 256; ++i) lut_sum += tables.sine_lut[i];
+		if (!expect(lut_sum == 32768u, "sine LUT sum (symmetry)")) return 1;
+		// Field: deterministic from state 0.
+		const uint8_t field_head[8] = {0, 127, 128, 176, 177, 225, 161, 184};
+		for (int i = 0; i < 8; ++i) {
+			if (!expect(tables.field[i] == field_head[i], "noise field head bytes")) return 1;
+		}
+		uint32_t field_sum = 0;
+		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) field_sum += tables.field[i];
+		if (!expect(field_sum == 2080878u, "noise field checksum")) return 1;
+
+		// Color pass at counters 0 and 7: landmarks + wrapping checksums.
+		static uint32_t color0[kWaterNoiseSize * kWaterNoiseSize];
+		static uint32_t color7[kWaterNoiseSize * kWaterNoiseSize];
+		water_noise_color_pixels(color0, tables, 0);
+		water_noise_color_pixels(color7, tables, 7);
+		if (!expect(color0[0] == 0xE17D7D7Du && color0[1] == 0xE7707070u &&
+		            color0[64 * 128 + 64] == 0xE17C7C7Cu, "color pixels landmarks (t=0)")) return 1;
+		if (!expect(color7[0] == 0xE17C7C7Cu, "color pixel [0] (t=7)")) return 1;
+		uint32_t sum0 = 0, sum7 = 0;
+		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) { sum0 += color0[i]; sum7 += color7[i]; }
+		if (!expect(sum0 == 0x45E0C3DCu, "color checksum (t=0)")) return 1;
+		if (!expect(sum7 == 0x14D0B3D2u, "color checksum (t=7)")) return 1;
+
+		// Normal/DuDv pass: B=0xFF, G/R = 2x saturated derivative + 0x80.
+		static uint32_t normal0[kWaterNoiseSize * kWaterNoiseSize];
+		water_noise_normal_pixels(normal0, color0);
+		if (!expect(normal0[0] == 0x849CFFu && normal0[1] == 0x6666FFu,
+		            "normal pixels landmarks")) return 1;
+		uint32_t nsum = 0;
+		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) nsum += normal0[i];
+		if (!expect(nsum == 0x203FC000u, "normal checksum")) return 1;
+
+		// UV state: scale/bias from the fog-distance INT part, offsets from
+		// the layer-1 cloud accumulators + 32x camera (positive on both).
+		CloudScrollState scroll;
+		scroll.acc_l1_v = 61440;
+		scroll.acc_l1_u = 61440;
+		const WaterUvState uv = water_uv_state(scroll, 100.0f, 200.0f, 1024.0f);
+		if (!expect(near(uv.scale, 1.0001649f, 1e-6f), "uv scale = 0.99996948*w/(w-0.2)")) return 1;
+		if (!expect(near(uv.bias, 0.2000330f, 1e-6f), "uv bias = 0.2*scale")) return 1;
+		if (!expect(near(uv.offset_u, 1.5627289f, 1e-6f), "uv offset u = cam_z/128 + acc*2^-28")) return 1;
+		if (!expect(near(uv.offset_v, 0.7814789f, 1e-6f), "uv offset v = cam_x/128 + acc*2^-28")) return 1;
+	}
+
+	// --- Celestial bodies + glare occlusion [orig: render_celestial_bodies
+	// @ 0x5acaa0; render_skybox_sun_glow @ 0x5acd00] ------------------------
+	{
+		if (!expect(kCelestialBodyDistance == 64.0f, "bodies place at camera + dir * 64")) return 1;
+
+		// Sun alpha: (1 - overcast) x (100 - dim)/100 fold, 16.16.
+		if (!expect(celestial_sun_alpha_fixed(0, 0) == 0x10000, "sun alpha full at clear defaults")) return 1;
+		if (!expect(celestial_sun_alpha_fixed(0x8000, 0) == 0x8000, "half overcast halves the sun")) return 1;
+		const int sun_dim_half = celestial_sun_alpha_fixed(0, 50 << 16);
+		if (!expect(sun_dim_half >= 0x8000 && sun_dim_half <= 0x8001,
+		            "SunDim 50 halves the sun (+1 fold rounding)")) return 1;
+		if (!expect(celestial_sun_alpha_fixed(0x10000, 0) == 0, "full overcast hides the sun")) return 1;
+
+		// Moon alpha: (fogInt - 400)/600 x (1 - overcast), clamped.
+		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0, false) == 0x10000, "moon full at fog 1024")) return 1;
+		if (!expect(celestial_moon_alpha_fixed(400.0f, 0, false) == 0, "moon hidden at fog <= 400")) return 1;
+		const int moon_700 = celestial_moon_alpha_fixed(700.0f, 0, false);
+		if (!expect(moon_700 >= 0x7FFE && moon_700 <= 0x8001, "moon half at fog 700")) return 1;
+		if (!expect(celestial_moon_alpha_fixed(1024.0f, 0x10000, false) == 0, "overcast hides the moon")) return 1;
+
+		// Jitter pattern from the frame-index bits.
+		const GlareRayJitter j0 = glare_ray_jitter(0);
+		if (!expect(j0.offset_eng_y == -24.0f && j0.offset_eng_z == -16.0f,
+		            "jitter 0 = (-16-8, -16)")) return 1;
+		const GlareRayJitter j7 = glare_ray_jitter(7);
+		if (!expect(j7.offset_eng_y == 24.0f && j7.offset_eng_z == 16.0f,
+		            "jitter 7 = (+16+8, +16)")) return 1;
+		const GlareRayJitter j5 = glare_ray_jitter(5);
+		if (!expect(j5.offset_eng_y == 24.0f && j5.offset_eng_z == -16.0f,
+		            "jitter 5 = (+16+8, -16)")) return 1;
+
+		// The occlusion window + hysteresis: all-visible at fog 1000 ramps
+		// toward 256 by 16/frame; going dark decays.
+		GlareOcclusionState occ;
+		for (int frame = 0; frame < 8; ++frame) {
+			glare_occlusion_tick(occ, true, true, 1000.0f);
+		}
+		if (!expect(occ.window == 0xFF, "window fills after 4 frames of visible pairs")) return 1;
+		if (!expect(occ.brightness == 128, "brightness ramped 16 x 8 frames")) return 1;
+		for (int frame = 0; frame < 16; ++frame) {
+			glare_occlusion_tick(occ, true, true, 1000.0f);
+		}
+		if (!expect(occ.brightness >= 240 && occ.brightness <= 256,
+		            "brightness settles in the 256 dead-band")) return 1;
+		for (int frame = 0; frame < 4; ++frame) {
+			glare_occlusion_tick(occ, false, false, 1000.0f);
+		}
+		if (!expect(occ.window == 0x00, "window empties after 4 dark frames")) return 1;
+		if (!expect(occ.brightness < 240, "brightness decays toward 0")) return 1;
+
+		// Glow alpha: dot^4/2 x brightness x folds. Full-on = 0x8000 (the /2).
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0, 0) == 0x8000,
+		            "glow alpha caps at dot^4/2 full brightness")) return 1;
+		if (!expect(glare_glow_alpha_fixed(0, 256, 0, 0) == 0, "glow off looking away")) return 1;
+		const int glow_half_dot = glare_glow_alpha_fixed(0x8000, 256, 0, 0);
+		if (!expect(glow_half_dot == 0x800, "glow at dot 0.5 = 0.5^4/2 = 1/32")) return 1;
+		if (!expect(glare_glow_alpha_fixed(0x10000, 128, 0, 0) == 0x4000,
+		            "brightness halves the glow")) return 1;
+		if (!expect(glare_glow_alpha_fixed(0x10000, 256, 0x8000, 0) == 0x4000,
+		            "overcast halves the glow")) return 1;
+	}
+
 	std::printf(
-	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris\n");
+	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
+	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial\n");
 	return 0;
 }

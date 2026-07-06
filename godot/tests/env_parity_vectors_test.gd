@@ -29,6 +29,56 @@ extends GutTest
 #   pinned (get_frame_clear_color; [orig: Environment_UpdateWeatherTick
 #   @ 0x57e9b0 blend @ 0x57f037..0x57f0a1]) - the re-dump in the same
 #   commit carries that witness, per the policy above.
+#   #22-#24 CLOSED 2026-07-05 (the ENG-2 weather-core port): the wa/wb/we
+#   sway states and wc/long_* keys were re-dumped under fresh witnesses -
+#   the PRNG signed carry [orig: Environment_UpdateWeatherTick
+#   @ 0x57e9fc..0x57ea16; seed @ Environment_SnapStateToTargets @ 0x57d1e0],
+#   lightning SET-per-epoch + integer additives [orig: @ 0x57ec6f/@ 0x57ed0a;
+#   Environment_SetLightningFlash @ 0x57d320], the witnessed ambient
+#   Env_WindScale 256 + stable-envelope strength scale
+#   [orig: Environment_InitDefaults @ 0x57c1d1], and keyframe-target chasing
+#   [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]. wa/* is now the
+#   witnessed ambient-256 series, byte-equal to the env_render_unit ctest
+#   landmarks; wc/short_seq and every color-grid/sky/water/celestial/
+#   smoother key were UNCHANGED by the port. Details: env-tod-re.md #22-#24.
+#   #25 CLOSED 2026-07-06 (the ENG-2 sky-leg re-grill): the PRNG seed is
+#   0x12333333 [orig: the mov imm32 @ 0x57d2ff in Environment_SnapStateToTargets
+#   @ 0x57d1e0] - 0x12345633 was a transcription error shared with the WAC RNG
+#   (same constant @ 0x4f966b, libs/wac fixed in the same commit). The
+#   sway-bearing keys re-dumped under that witness: wa/k004..k256, wb/k016..k096,
+#   wc/long_k01/k09/k12, we/k008..k064 (the sway token only; wa/k001 is
+#   seed-invariant - both seeds share low-12 bits at tick 1). Every level-only
+#   (wc/*_seq), color, float, and non-weather key was UNCHANGED.
+#   #26 CLOSED 2026-07-06 (the ENG-2 sky binding slice): sky/k001 + sky/k064
+#   re-dumped under the witnessed scroll model - the RAMPING rate (snap
+#   refreshes only the target @ 0x57d2da; smooth-eighth @ 0x57eecc), integer
+#   accumulators [orig: @ 0x57f1a5..0x57f1d1], and the render-side UV
+#   translation with the accumulator NEGATIVE on U
+#   [orig: render_skybox @ 0x5791de..0x579260] (the old float port added it
+#   positively on both axes and skipped the ramp). Key shape is now the four
+#   pushed offsets. sky/verts re-dumped: the mesh comes from
+#   libs/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
+#   sky/mesh (counts + witnessed winding) byte-identical.
+#   Water leg 2026-07-06 (env #28 fixed / #31 minted-and-closed / #29-#30
+#   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
+#   through NovaWaterCore [orig: Water_GenerateNoiseTextures @ 0x5c0360],
+#   cross-pinned byte-equal to the env_render_unit ctest landmarks) and NEW
+#   water/uv_state [orig: render_water_surface @ 0x5c3348..0x5c33db];
+#   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
+#   the invented waves - the pinned tail is now the u_water_uv Vector4. Every
+#   other water key (mesh, override ladder, snap, per-cell lit colors) stayed
+#   byte-identical; the ladder REORDER (#28, terrain-over-env) has no asset-
+#   free cell (the terrain rung needs a loaded .trn - see NOT PINNED).
+#   Celestial leg 2026-07-06 (env #14 CLOSED, #32 minted-and-closed, #33
+#   minted): NEW celestial/body_distance (camera + dir * 64 [orig:
+#   render_celestial_bodies @ 0x5acaa0] - the retired dome_distance key pinned
+#   the invented dir*2000*height_scale model), celestial/body_alpha (the
+#   witnessed sun overcast/SunDim and moon fog-distance folds), celestial/glow
+#   (the dot^4/2 glare chain) and celestial/occlusion (the #14 window +
+#   dead-band hysteresis + jitter pattern through NovaGlareOcclusion,
+#   asset-free [orig: render_skybox_sun_glow @ 0x5acd00]).
+#   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
+#   still live via its sub_5AD8B0 caller) stayed byte-identical.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -43,13 +93,12 @@ extends GutTest
 #   blends. Encoded as float arrays in EXPECTED_FLOATS.
 #
 # NOT PINNED (honest gaps, no fake greens):
-# - NovaCelestial node-level placement/visibility/glare application: needs a
-#   NovaResourceRoot with retail 3DI models (asset-gated; with no bodies the
-#   process path returns before the math). The separable math is pinned via
-#   public surface instead: EnvFile.compute_sun_glare sweeps and the
-#   EnvRenderConstants.DOME_DISTANCE constant. height_scale
-#   (sky_height / 175.69) and the dir.y > -0.1 visibility threshold live only
-#   inside that gated path — header-noted, not vectored.
+# - NovaCelestial node-level MODEL application (materials/tints on loaded
+#   3DIs): needs a NovaResourceRoot with retail models (asset-gated; with no
+#   bodies the process path returns before the pushes). The MATH is fully
+#   vectored through the statics + NovaGlareOcclusion (celestial/body_*,
+#   celestial/glow, celestial/occlusion); the terrain ray march itself needs
+#   a loaded terrain (the no-terrain path = unobstructed is the pinned case).
 # - NovaWater terrain-fallback height rung: needs a loaded NovaTerrainData
 #   (asset). The env-driven and override rungs ARE pinned.
 # - NovaWeather internal state (PRNG word, sway rings, fade timers) is
@@ -150,25 +199,26 @@ const EXPECTED_BYTES := {
 	"smoother/decay": "DF7038 C36231 AB562B 954B26 834221 72391D 643219 582C16",
 	"smoother/rise": "201810 3C2D1E 543F2A 6A4F35 7C5D3E 8D6947 9B744E A77D54",
 	"smoother/snap_get": "336699",
-	"wa/k001": "0000 01 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k004": "0250 04 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k016": "3F01 10 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k064": "726E 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k256": "7DDF 00 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wa/k001": "0012 01 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wa/k004": "035F 04 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wa/k016": "56E5 10 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wa/k064": "7CDE 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wa/k256": "9787 00 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"water/mesh": "4225 24576 0 65 1 1 65 66 1 66 2 2 66 67",
-	"wb/k001": "012D 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k016": "FFFF 10 00 07 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k064": "FFFF 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k096": "0000 60 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wc/long_k01": "003F 02 C8 00 25323E 273748 3D435B 6D6F86 25323E 273748 3D435B",
-	"wc/long_k09": "1B37 0A C8 00 364350 273748 5E647E 6D6F86 364350 273748 5E647E",
-	"wc/long_k12": "2E61 0D 00 00 2B3845 273748 494F68 2B2D40 2B3845 273748 494F68",
-	"wc/long_seq": "C8 C8 C8 C8 C8 C8 C8 C8 C8 C8 C8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
+	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wb/k016": "429E 10 00 07 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wb/k064": "71F1 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wb/k096": "833D 60 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wc/long_k01": "007B 02 C8 00 24313D 273748 3D435B 6D6F86 24313D 273748 3D435B",
+	"wc/long_k09": "23AB 0A 64 00 1C2934 273748 2C3249 4C4E63 1C2934 273748 2C3249",
+	"wc/long_k12": "3E47 0D 00 00 14212C 273748 1C2238 2B2D40 14212C 273748 1C2238",
+	"wc/long_seq": "C8 C8 C8 96 96 C8 C8 96 64 32 32 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
 	"wc/short_seq": "00 00 00 00 00 C8 C8 C8 C8 FF FF C8 C8 FF FF 00",
-	"we/k008": "0FEB 08 00 00 212B2D 5D5D5C 56659D 3E414B 212B2D 5D5D5C 56659D",
-	"we/k016": "3F01 10 00 00 202A2D 585857 516094 3C3F4A 202A2D 585857 516094",
-	"we/k032": "4577 20 00 00 1D282D 2A323A 44517F 383B48 1D282D 2A323A 44517F",
-	"we/k064": "726E 40 00 00 17242D 23313F 2A3351 303243 17242D 23313F 2A3351",
+	"we/k008": "14B3 08 00 00 212B2D 5D5D5C 56659D 3E414B 212B2D 5D5D5C 56659D",
+	"we/k016": "56E5 10 00 00 202A2D 585857 516094 3C3F4A 202A2D 585857 516094",
+	"we/k032": "6404 20 00 00 1D282D 2A323A 44517F 383B48 1D282D 2A323A 44517F",
+	"we/k064": "7CDE 40 00 00 17242D 23313F 2A3351 303243 17242D 23313F 2A3351",
 }
 
 const EXPECTED_FLOATS := {
@@ -182,7 +232,7 @@ const EXPECTED_FLOATS := {
 	"c0/t1845": [-0.500005603, 0.168952495, 0.849381864, 0.000549451, 500.000000000, 1000.000000000],
 	"c0/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 500.000000000, 1000.000000000],
 	"c0/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 500.000000000, 1000.000000000],
-	"c0/water_params": [0.000000000, 0.003547668],
+	"c0/water_params": [0.000000000, 1.000169516, 0.200033903, 0.000234902, 0.000234902],
 	"c1/consts": [400.000000000, 3.000000000, 30.000000000, 250.000000000, 0.500000000, 0.500000000, 1830.000000000, 3.000000000, 15.000000000, 1.000000000, 76.000000000, 0.000000000],
 	"c1/t0000": [-0.500005603, 0.866022229, -0.000000076, 1.000000000, 100.000000000, 400.000000000],
 	"c1/t0550": [-0.500005543, 0.037776366, -0.865197897, 0.500137389, 100.000000000, 400.000000000],
@@ -193,7 +243,7 @@ const EXPECTED_FLOATS := {
 	"c1/t1845": [-0.500005603, 0.168952495, 0.849381864, 0.000549451, 100.000000000, 400.000000000],
 	"c1/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 100.000000000, 400.000000000],
 	"c1/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 100.000000000, 400.000000000],
-	"c1/water_params": [1.500000000, 0.007095337],
+	"c1/water_params": [1.500000000, 1.000469685, 0.200093940, 0.000469763, 0.000469763],
 	"c2/consts": [300.000000000, 1.000000000, 15.000000000, 175.000000000, 0.349999994, 1.000000000, 630.000000000, 2.000000000, 15.000000000, 1.000000000, 107.992004395, 0.000000000],
 	"c2/t0000": [-0.500005603, 0.866022229, -0.000000076, 1.000000000, 0.500000000, 300.000000000],
 	"c2/t0550": [-0.500005543, 0.037776366, -0.865197897, 0.500137389, 0.500000000, 300.000000000],
@@ -204,8 +254,11 @@ const EXPECTED_FLOATS := {
 	"c2/t1845": [-0.500005603, 0.168952495, 0.849381864, 0.000549451, 0.500000000, 300.000000000],
 	"c2/t1900": [-0.500005603, 0.224142894, 0.836513221, 0.750732601, 0.500000000, 300.000000000],
 	"c2/t2200": [-0.500005603, 0.749997258, 0.433011025, 1.000000000, 0.500000000, 300.000000000],
-	"c2/water_params": [1.000000000, 0.003547668],
-	"celestial/dome_distance": [2000.000000000],
+	"c2/water_params": [1.000000000, 1.000636578, 0.200127319, 0.000234902, 0.000234902],
+	"celestial/body_alpha": [1.000000000, 0.500000000, 0.500000000, 1.000000000, 0.500000000, 0.000000000, 0.000000000],
+	"celestial/body_distance": [64.000000000],
+	"celestial/glow": [0.500000000, 0.031250000, 0.250000000, 0.250000000, 0.000000000],
+	"celestial/occlusion": [1024.000000000, -8.000000000, -16.000000000, 0.000000000, 24.000000000, 16.000000000, 0.000000000, 128.000000000, 96.000000000],
 	"dir/t0000": [-0.342015058, -0.939694524, 0.000000000, -0.500005603, 0.866022229, -0.000000076],
 	"dir/t0550": [-0.342015058, -0.040990192, 0.938800037, -0.500005543, 0.037776366, -0.865197897],
 	"dir/t0600": [-0.342015058, 0.000000041, 0.939694524, -0.500005603, -0.000000010, -0.866022229],
@@ -218,11 +271,12 @@ const EXPECTED_FLOATS := {
 	"envfile/fog_type0": [0.000000000, 0.004158883, 1000.000000000],
 	"sky/anchor": [512.000000000, 32.000000000, -256.000000000, 175.000000000, 64.000000000],
 	"sky/flat": [250.000000000],
-	"sky/k001": [0.000057220, 0.000038147, 0.000019073, 0.125057220, -0.062442780, 0.062538147, -0.031230927],
-	"sky/k064": [0.003662109, 0.002441406, 0.001220703, 0.128662109, -0.058837891, 0.064941406, -0.030029297],
-	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694091797, -0.000023762, 132.723480225, -512.000000000, 0.000095048, 0.000000000, 1024.000000000],
+	"sky/k001": [0.124992847, -0.062492847, 0.062495232, -0.031247616],
+	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
+	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/override": [42.500000000, 7.000000000],
 	"water/snap": [96.000000000, 7.000000000, -64.000000000],
+	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
 	"we/k008": [1751.612903226],
 	"we/k016": [1803.225806452],
 	"we/k032": [1906.451612903],
@@ -422,9 +476,13 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			var alpha: float = water.water_material.get_shader_parameter("u_water_alpha")
 			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
 
+		# u_water_uv = (scale, bias, offset_u, offset_v) [orig:
+		# render_water_surface @ 0x5c3348..0x5c33db] — the standalone node's
+		# fallback core after the cell loop's fixed tick count.
+		var water_uv: Vector4 = water.water_material.get_shader_parameter("u_water_uv")
 		floats["c%d/water_params" % cfg_index] = [
 			water.water_height,
-			water.water_material.get_shader_parameter("u_scroll_speed"),
+			water_uv.x, water_uv.y, water_uv.z, water_uv.w,
 		]
 
 
@@ -535,18 +593,20 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 		vertex_floats.append_array([v.x, v.y, v.z])
 	floats["sky/verts"] = vertex_floats
 
-	# Scroll accumulators + UV offsets after fixed ticks at sky_speed 15
-	# [orig: render_skybox @ 0x5791de + Environment_UpdateWeatherTick @ 0x57f1a5].
+	# Scroll UV offsets after fixed ticks at sky_speed 15: the weather core's
+	# RAMPING rate (the snap refreshes only the target — the rate climbs by
+	# smooth-eighth from 0) + integer accumulators through the witnessed UV
+	# translation, accumulator NEGATIVE on U — here via the standalone
+	# fallback core (no weather node in this group)
+	# [orig: rate ramp @ 0x57eecc; accumulators @ 0x57f1a5..0x57f1d1;
+	#  consumption @ 0x5791de..0x579260].
 	var ticks_done := 0
 	for checkpoint in [1, 64]:
 		simulate(sky, checkpoint - ticks_done, TICK)
 		ticks_done = checkpoint
 		var off1: Vector2 = sky.sky_material.get_shader_parameter("u_scroll_offset1")
 		var off2: Vector2 = sky.sky_material.get_shader_parameter("u_scroll_offset2")
-		floats["sky/k%03d" % checkpoint] = [
-			sky.sky_scroll1, sky.sky_scroll2_x, sky.sky_scroll2_y,
-			off1.x, off1.y, off2.x, off2.y,
-		]
+		floats["sky/k%03d" % checkpoint] = [off1.x, off1.y, off2.x, off2.y]
 	# Dome anchor rides at half camera height [orig: render_skybox @ 0x5790d0].
 	var dome_pos: Vector3 = sky.mesh_instance.global_position
 	var sky_height: float = sky.sky_material.get_shader_parameter("u_sky_height")
@@ -595,6 +655,27 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	var snap: Vector3 = water.mesh_instance.global_position
 	floats["water/snap"] = [snap.x, snap.y, snap.z]
 
+	# The witnessed noise texture pair, asset-free through NovaWaterCore
+	# [orig: Water_GenerateNoiseTextures @ 0x5c0360; init tables from the boot
+	# PRNG state @ 0x5c01a0]: first 8 RGBA bytes of each at counters 0 and 7.
+	var core := NovaWaterCore.new()
+	core.update(0)
+	var color_head := core.get_color_rgba8().slice(0, 8)
+	var normal_head := core.get_normal_rgba8().slice(0, 8)
+	core.update(7)
+	var color_head_7 := core.get_color_rgba8().slice(0, 8)
+	bytes["water/noise"] = "%s %s %s" % [
+		color_head.hex_encode(), normal_head.hex_encode(), color_head_7.hex_encode()]
+
+	# The witnessed UV transform (scale, bias, offset_u, offset_v) after 8
+	# ticks at sky_speed 15 [orig: render_water_surface @ 0x5c3348..0x5c33db]
+	# via the weather core's shared accumulators.
+	var scroll := NovaWeatherCore.new()
+	for _i in 8:
+		scroll.tick_cloud_scroll(15.0)
+	var uv_state: Vector4 = scroll.get_water_uv_state(100.0, 200.0, 1024.0)
+	floats["water/uv_state"] = [uv_state.x, uv_state.y, uv_state.z, uv_state.w]
+
 
 func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 	# Node-level celestial placement is asset-gated (see header). The
@@ -611,7 +692,47 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 		occlusion.append("%02X%02X" % [int(glare.get("glare", 0)), int(glare.get("fog_whiten", 0))])
 	bytes["celestial/glare_occlusion"] = " ".join(occlusion)
 
-	floats["celestial/dome_distance"] = [NovaCelestialScript.EnvRenderConstants.DOME_DISTANCE]
+	# Bodies place at camera + direction * 64 [orig: render_celestial_bodies
+	# @ 0x5acaa0] — the old dome_distance key pinned the invented dir*2000
+	# model (env #32).
+	floats["celestial/body_distance"] = [EnvFile.celestial_body_distance()]
+
+	# The witnessed body alphas [orig: @ 0x5acbc1..0x5acccd].
+	floats["celestial/body_alpha"] = [
+		EnvFile.celestial_sun_alpha(0.0, 0.0),
+		EnvFile.celestial_sun_alpha(0.5, 0.0),
+		EnvFile.celestial_sun_alpha(0.0, 50.0),
+		EnvFile.celestial_moon_alpha(1024.0, 0.0),
+		EnvFile.celestial_moon_alpha(700.0, 0.0),
+		EnvFile.celestial_moon_alpha(400.0, 0.0),
+		EnvFile.celestial_moon_alpha(1024.0, 1.0),
+	]
+
+	# The glow alpha chain (dot^4/2 x brightness x folds) [orig:
+	# render_skybox_sun_glow @ 0x5acfb8..0x5ad0a9].
+	floats["celestial/glow"] = [
+		EnvFile.glare_glow_alpha(1.0, 256, 0.0, 0.0),
+		EnvFile.glare_glow_alpha(0.5, 256, 0.0, 0.0),
+		EnvFile.glare_glow_alpha(1.0, 128, 0.0, 0.0),
+		EnvFile.glare_glow_alpha(1.0, 256, 0.5, 0.0),
+		EnvFile.glare_glow_alpha(-0.5, 256, 0.0, 0.0),
+	]
+
+	# The env #14 occlusion state machine, asset-free: window fill/decay and
+	# the dead-band hysteresis at fog 1000, plus this frame's jitter offsets
+	# [orig: @ 0x5acd9e..0x5acf7f].
+	var occ := NovaGlareOcclusion.new()
+	var jitter_a: Vector3 = occ.get_ray_jitter_a()
+	var jitter_b: Vector3 = occ.get_ray_jitter_b()
+	var occ_floats: Array = [occ.get_ray_length(),
+		jitter_a.x, jitter_a.y, jitter_a.z, jitter_b.x, jitter_b.y, jitter_b.z]
+	for _i in 8:
+		occ.tick(true, true, 1000.0)
+	occ_floats.append(float(occ.get_brightness()))
+	for _i in 4:
+		occ.tick(false, false, 1000.0)
+	occ_floats.append(float(occ.get_brightness()))
+	floats["celestial/occlusion"] = occ_floats
 
 
 func _collect_statics(bytes: Dictionary, floats: Dictionary) -> void:

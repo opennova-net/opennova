@@ -3,11 +3,16 @@ class_name NovaCelestial
 extends Node3D
 
 # Renders the sun/moon/star 3DI bodies named in the .env, attached to the sky.
-# Engine equivalents (docs/env/env-tod-re.md):
+# Engine equivalents (docs/env/env-tod-re.md "Celestial bodies"):
 # - [orig: EffectWorld_LoadCelestialModels @ 0x5adc50] resolves sun_3di/moon_3di/
 #   star_3di/glare_3di to models (glare/star under additive mode 0x300000).
-# - [orig: render_skybox_layers @ 0x5ac230] places them at camera + dir*2000 with
-#   no depth test, drawn after the dome and before the world.
+# - [orig: render_celestial_bodies @ 0x5acaa0] places sun/moon at
+#   camera + direction * 64 (full camera height, identity rotation) with the
+#   witnessed overcast/SunDim (sun) and fog-distance (moon) alphas; the world
+#   overdraws them, so depth-tested materials are the structural equivalent.
+# - [orig: render_skybox_sun_glow @ 0x5acd00] drives the glare: two jittered
+#   terrain rays per frame into an 8-sample window + hysteresis brightness,
+#   glow alpha = dot_view^4/2 x brightness x folds (env #14, closed).
 # The 3DI diffuse stays; bodies are tinted and dimmed by the TOD sun/moon color.
 
 const NovaObjectModelScript = preload("res://engine/object/nova_object_model.gd")
@@ -22,7 +27,10 @@ const PRIORITY_STAR := 0
 const PRIORITY_GLARE := 2
 
 @export var environment_path: NodePath
+# The loaded terrain for the glare occlusion rays; no terrain = unobstructed.
+var terrain_data: NovaTerrainData = null
 
+var _glare_occlusion := NovaGlareOcclusion.new()
 var _resource_root: NovaResourceRoot
 var _cached_env: Node = null
 var _cached_cam: Camera3D = null
@@ -106,7 +114,9 @@ func _make_celestial_material(additive: bool, priority: int) -> ShaderMaterial:
 	material.shader = CelestialAdditiveShader if additive else CelestialShader
 	material.render_priority = priority
 	if additive:
-		# Engine layer alpha 0x2000/0x10000; glare overrides this per-frame.
+		# Star default opacity - a stand-in until the witnessed per-star
+		# twinkle lands (env #33; the 0x2000/0x10000 value stems from the dead
+		# variant @ 0x5ac230). The glare overwrites its opacity per frame.
 		material.set_shader_parameter("u_opacity", float(0x2000) / 65536.0)
 	return material
 
@@ -150,10 +160,6 @@ func _process(_delta: float) -> void:
 
 	var sun_dir: Vector3 = env.get_sun_direction()
 	var moon_dir: Vector3 = env.get_moon_direction()
-	var height_scale := 1.0
-	var env_data := _env_data()
-	if env_data:
-		height_scale = max(0.1, env_data.get_sky_height() / 175.69)
 
 	var cam_forward := Vector3.FORWARD
 	if _cached_cam:
@@ -163,24 +169,32 @@ func _process(_delta: float) -> void:
 		var body: Dictionary = _bodies[key]
 		var model: Node3D = body["model"]
 		var dir := moon_dir if key == "moon" else sun_dir
-		var dist := EnvRenderConstants.DOME_DISTANCE * height_scale
-		model.global_position = Vector3(cam_pos.x, 0.0, cam_pos.z) + dir * dist
+		# camera + direction * 64, FULL camera height, identity rotation
+		# [orig: render_celestial_bodies @ 0x5acaa0]. Below the horizon the
+		# terrain depth-occludes the body, like retail's draw order.
+		model.global_position = cam_pos + dir * EnvFile.celestial_body_distance()
 		var tint: Vector3 = _tint_for(env, body["tint"])
 		body["material"].set_shader_parameter("u_tint", tint)
 		if key == "sun":
-			model.visible = sun_dir.y > -0.1
+			# Overcast (#16) and SunDim (no .env parser writes it) are 0 today.
+			body["material"].set_shader_parameter("u_opacity", EnvFile.celestial_sun_alpha(0.0, 0.0))
 		elif key == "moon":
-			model.visible = moon_dir.y > -0.1
+			# The moon fades with the fog distance [orig: @ 0x5acc40].
+			body["material"].set_shader_parameter("u_opacity",
+					EnvFile.celestial_moon_alpha(env.get_fog_level(), 0.0))
 		elif key == "glare":
-			# Glare brightness follows the view-sun alignment (dot^32). Occlusion
-			# is held at full brightness here; the engine's 8-ray terrain
-			# occlusion + ±16/frame hysteresis is a tracked deferral
-			# [orig: render_skybox_sun_glow @ 0x5acd00], see docs/env/env-tod-re.md.
+			# env #14 (closed): two jittered terrain rays per frame feed the
+			# witnessed 8-sample window + dead-band hysteresis; glow alpha =
+			# dot_view^4/2 x brightness x folds
+			# [orig: render_skybox_sun_glow @ 0x5acd00].
+			var ray_length: float = _glare_occlusion.get_ray_length()
+			var visible_a := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_a())
+			var visible_b := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_b())
+			_glare_occlusion.tick(visible_a, visible_b, env.get_fog_level())
 			var dot := cam_forward.dot(sun_dir)
-			var glare: Dictionary = EnvFile.compute_sun_glare(dot, 255)
-			var intensity := float(glare.get("glare", 0)) / 255.0
-			model.visible = sun_dir.y > -0.1 and intensity > 0.004
-			body["material"].set_shader_parameter("u_opacity", intensity)
+			var glow := EnvFile.glare_glow_alpha(dot, _glare_occlusion.get_brightness(), 0.0, 0.0)
+			model.visible = glow > 0.0
+			body["material"].set_shader_parameter("u_opacity", glow)
 
 
 func _tint_for(env: Node, tint_key: String) -> Vector3:
@@ -204,6 +218,17 @@ func _find_camera() -> Camera3D:
 	return viewport.get_camera_3d() if viewport else null
 
 
-# Mirror of the env_render celestial placement constants for GDScript callers.
-class EnvRenderConstants:
-	const DOME_DISTANCE := 2000.0
+# Terrain line-of-sight stand-in for [orig: Terrain_RaycastHeightmapLoRes
+# @ 0x60cb80] until ENG-3 ports the witnessed lo-res DDA: sample the jittered
+# segment (camera -> camera + sun_dir * 1024 + jitter) against the bilinear
+# height field at 32-unit steps. No terrain loaded = clear (nothing occludes).
+func _glare_ray_clear(from_pos: Vector3, sun_dir: Vector3, ray_length: float, jitter: Vector3) -> bool:
+	if terrain_data == null or not terrain_data.is_loaded():
+		return true
+	var to_pos := from_pos + sun_dir * ray_length + jitter
+	const STEPS := 32
+	for i in range(1, STEPS + 1):
+		var point := from_pos.lerp(to_pos, float(i) / float(STEPS))
+		if terrain_data.get_height_world_bilinear(point) > point.y:
+			return false
+	return true

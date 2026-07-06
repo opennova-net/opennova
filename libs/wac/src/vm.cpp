@@ -26,16 +26,18 @@ void WacVm::load(const Program &program) {
     prog_ = &program;
     events_.assign(static_cast<size_t>(program.event_count > 0 ? program.event_count : 1),
                    EventState{});
-    rng_seed_ = 0x12345633u;
+    rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b]
     acc_ = 0;
     cur_event_ = 0;
     time_ = 0;
 }
 
 uint32_t WacVm::next_rand() {
-    // [orig: WacScript_ExecuteBytecode DORND LCG, dword_C6EA40.]
+    // [orig: WacScript_ExecuteBytecode DORND @ 0x4f5a83..0x4f5a91 — rol 9,
+    //  then the SIGNED carry: sar edx,1Fh; and edx,1ABB09h; add. Same idiom
+    //  (and same seed) as the weather PRNG @ 0x57e9fc (env #22/#25).]
     uint32_t v = rol32(rng_seed_, 9);
-    v += (v >> 31) & 0x1ABB09u;
+    v += static_cast<uint32_t>(static_cast<int32_t>(v) >> 31) & 0x1ABB09u;
     rng_seed_ = v;
     return v;
 }

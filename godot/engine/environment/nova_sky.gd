@@ -8,16 +8,20 @@ extends Node3D
 # interpolated TOD colors; see docs/env/env-tod-re.md.
 
 @export var environment_path: NodePath
+# The weather node owning the cloud-scroll rate + accumulators (duck-typed
+# like NovaTerrain's weather_path; resolved lazily in _process).
+@export var weather_path: NodePath
 
 var mesh_instance: MeshInstance3D
 var sky_material: ShaderMaterial
-var sky_scroll1: float = 0.0
-var sky_scroll2_x: float = 0.0
-var sky_scroll2_y: float = 0.0
 var built: bool = false
 var clouds_set: bool = false
 var _cached_env: Node = null
+var _cached_weather: Node = null
 var _cached_cam: Camera3D = null
+# Standalone fallback (hosts with no weather node): a private core ticked for
+# its cloud scroll only — the integer math has ONE home either way.
+var _fallback_scroll: NovaWeatherCore = null
 
 
 func _ready() -> void:
@@ -36,47 +40,12 @@ func build() -> void:
 	sky_material = ShaderMaterial.new()
 	sky_material.shader = sky_shader
 
-	const ROWS := 21
-	const COLS := 21
-	var sqrt_base := sqrt(8388608.0)
-	var positions := PackedVector3Array()
-	var uv1_arr := PackedVector2Array()
-	var uv2_arr := PackedVector2Array()
-	positions.resize(ROWS * COLS)
-	uv1_arr.resize(ROWS * COLS)
-	uv2_arr.resize(ROWS * COLS)
-
-	# Port of the 21x21 sky dome generation described for the original sky path.
-	for row in ROWS:
-		var radius := row * 51.2
-		var y := sqrt(9437184.0 - radius * radius) - sqrt_base
-		for col in COLS:
-			var theta := col * 0.31415927
-			var x := sin(theta) * radius
-			var z := cos(theta) * radius
-			var idx := row * COLS + col
-			positions[idx] = Vector3(x, y, z)
-			uv1_arr[idx] = Vector2(x * 0.003125, z * 0.003125)
-			uv2_arr[idx] = Vector2(x * 0.0014648438, z * 0.0014648438)
-
-	var indices := PackedInt32Array()
-	for row in ROWS - 1:
-		var base := row * COLS
-		for col in COLS - 1:
-			indices.push_back(base + col)
-			indices.push_back(base + col + COLS + 1)
-			indices.push_back(base + col + COLS)
-			indices.push_back(base + col)
-			indices.push_back(base + col + 1)
-			indices.push_back(base + col + COLS + 1)
-
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = positions
-	arrays[Mesh.ARRAY_TEX_UV] = uv1_arr
-	arrays[Mesh.ARRAY_TEX_UV2] = uv2_arr
-	arrays[Mesh.ARRAY_INDEX] = indices
-
+	# The witnessed 21x21 dome (441 verts / 800 tris, libs/env math), built
+	# ONCE at the reference height: the Y-only height scale + anisotropic
+	# normals are applied in the vertex shader, so height changes never
+	# rebuild (env #20's ratified fold; retail re-bakes per smoothed-height
+	# change) [orig: build_sky_dome_mesh @ 0x578db0].
+	var arrays: Array = EnvFile.build_sky_dome_arrays(EnvFile.dome_reference_height())
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	mesh.surface_set_material(0, sky_material)
@@ -87,7 +56,7 @@ func build() -> void:
 	built = true
 
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if not built or sky_material == null:
 		return
 	if not _cached_cam or not _cached_cam.is_inside_tree():
@@ -142,21 +111,34 @@ func _process(delta: float) -> void:
 				sky_material.set_shader_parameter("u_has_clouds", true)
 				clouds_set = true
 
-	# Cloud scroll [orig: render_skybox @ 0x5791de + Environment_UpdateWeatherTick
-	# @ 0x57f1a5]: accumulators advance at rate x {1, 1, 2/3, 4/3} per 62 Hz tick
-	# (rate = sky_speed << 10), and UVs are (camera + acc) / 2^28 for layer 1 and
-	# / 2^29 for layer 2 (half UV scale, anisotropic 4/3 U / 2/3 V drift).
-	var factor := sky_speed * (1024.0 * 62.0 / 268435456.0)
-	sky_scroll1 += delta * factor
-	sky_scroll2_x += delta * factor * (4.0 / 3.0) * 0.5
-	sky_scroll2_y += delta * factor * (2.0 / 3.0) * 0.5
-	var cam_anchor := Vector2.ZERO
+	# Cloud scroll [orig: Environment_UpdateWeatherTick rate ramp @ 0x57eecc +
+	# accumulators @ 0x57f1a5..0x57f1d1; consumed render_skybox
+	# @ 0x5791de..0x579260]: the weather core owns the ramping rate and the
+	# four integer accumulators; the UV translation is U = +cam/4096 - acc*2^-28,
+	# V = +cam/4096 + acc*2^-28 (layer 2: /8192 and 2^-29) - the accumulator
+	# rides U NEGATIVELY (env #26).
+	var scroll_source: Object = _scroll_source(sky_speed)
+	var cam_x := 0.0
+	var cam_z := 0.0
 	if _cached_cam:
-		cam_anchor = Vector2(_cached_cam.global_position.x, _cached_cam.global_position.z)
-	const UV_PER_UNIT_L1 := 0.000244140625 # 2^-28 on 16.16 world coords
-	const UV_PER_UNIT_L2 := 0.0001220703125 # 2^-29
-	sky_material.set_shader_parameter("u_scroll_offset1", cam_anchor * UV_PER_UNIT_L1 + Vector2(sky_scroll1, sky_scroll1))
-	sky_material.set_shader_parameter("u_scroll_offset2", cam_anchor * UV_PER_UNIT_L2 + Vector2(sky_scroll2_x, sky_scroll2_y))
+		cam_x = _cached_cam.global_position.x
+		cam_z = _cached_cam.global_position.z
+	sky_material.set_shader_parameter("u_scroll_offset1", scroll_source.get_cloud_uv_offset1(cam_x, cam_z))
+	sky_material.set_shader_parameter("u_scroll_offset2", scroll_source.get_cloud_uv_offset2(cam_x, cam_z))
+
+
+# The weather node when wired (it ticks the shared core at process priority
+# -10, before us), else a private fallback core this node ticks itself —
+# one-tick-per-frame, the NovaWeather convention.
+func _scroll_source(sky_speed: float) -> Object:
+	if not _cached_weather or not _cached_weather.is_inside_tree():
+		_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
+	if _cached_weather and _cached_weather.has_method("get_cloud_uv_offset1"):
+		return _cached_weather
+	if _fallback_scroll == null:
+		_fallback_scroll = NovaWeatherCore.new()
+	_fallback_scroll.tick_cloud_scroll(sky_speed)
+	return _fallback_scroll
 
 
 func _find_camera() -> Camera3D:
