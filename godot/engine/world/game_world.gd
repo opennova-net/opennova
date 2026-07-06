@@ -686,7 +686,10 @@ func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, 
 func build_local_player_avatar() -> Node3D:
 	if _placer == null:
 		return null
-	return _placer.build_player_animated_model(0x14B9, self)
+	# _env wires the TOD-reactive lighting/fog stamp — without it the avatar
+	# freezes at the noon preview defaults (retail relights every entity per
+	# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
+	return _placer.build_player_animated_model(0x14B9, self, _env)
 
 ## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
@@ -708,8 +711,11 @@ func build_local_player_viewmodel() -> Node3D:
 	# the player's equipped weapon. The gun shares the arms' skeleton plus gun-part bones, so both
 	# pose from the one animadm. (Swapped from mp5sd to confirm the pos/tpos placement generalizes.)
 	# anim_wpn_idle = the FP holding pose; without it the arms sit in their bind/T-pose.
-	var arms = _placer.build_model_from_graphic("armsG", "AKM_1st", container, "anim_wpn_idle")  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic("AKM_1st", "AKM_1st", container, "anim_wpn_idle")
+	# _env: the viewmodel lights/fogs with the live TOD like every entity
+	# (retail draws the FP model through the same lighting constants
+	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
+	var arms = _placer.build_model_from_graphic("armsG", "AKM_1st", container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic("AKM_1st", "AKM_1st", container, "anim_wpn_idle", _env)
 	if arms == null and gun == null:
 		container.queue_free()
 		return null
