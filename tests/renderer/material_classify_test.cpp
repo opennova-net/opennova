@@ -31,7 +31,29 @@ int main() {
 	using namespace renderer;
 
 	// 0. The renderer descriptor table is exact and complete for OED's table.
+	// The shader_flags column matches the OED dump EXCEPT the five rows where
+	// the runtime derivation is witnessed to differ (D-RMAT-4,
+	// docs/render/render-material-re.md): retail probes every technique at
+	// .fx load [orig: HLSLEffect_LoadFromFile @ 0x5ae690], and the descriptor
+	// table carries those runtime words.
 	{
+		struct RuntimeFlagFix { const char *tag; uint32_t flags; };
+		const RuntimeFlagFix runtime_fixes[] = {
+			// no VS => no TANGENT; the GLOW technique uses TexCubeRotSpecular
+			{ "FFP_GLASS", oed::MATERIAL_FLAG_GLASS | oed::MATERIAL_FLAG_BLENDING |
+			               oed::MATERIAL_FLAG_GLOW },
+			// tangent-space skinned bump: In.Tangent read, ReflectColor absent
+			{ "VS_SKBUMPDIFFT", oed::MATERIAL_FLAG_TANGENT | oed::MATERIAL_FLAG_SKINNED |
+			                    oed::MATERIAL_FLAG_NORMAL_A | oed::MATERIAL_FLAG_DIFFUSE },
+			{ "VS_SKBUMPPHONGT", oed::MATERIAL_FLAG_TANGENT | oed::MATERIAL_FLAG_SKINNED |
+			                     oed::MATERIAL_FLAG_NORMAL_A | oed::MATERIAL_FLAG_DIFFUSE },
+			{ "VS_SKBUMPDIFFT2", oed::MATERIAL_FLAG_TANGENT | oed::MATERIAL_FLAG_SKINNED |
+			                     oed::MATERIAL_FLAG_NORMAL_A | oed::MATERIAL_FLAG_DIFFUSE |
+			                     oed::MATERIAL_FLAG_SECONDARY },
+			// untextured glass: no TexDiffuse1 reference
+			{ "VS_SKGLASS", oed::MATERIAL_FLAG_GLASS | oed::MATERIAL_FLAG_SKINNED |
+			                oed::MATERIAL_FLAG_BLENDING },
+		};
 		expect(oed::kMaterialDescriptorTableCount == oed::kMaterialInfoTableCount,
 		       "descriptor table count matches OED material table count");
 		for (size_t i = 0; i < oed::kMaterialInfoTableCount; ++i) {
@@ -40,8 +62,15 @@ int main() {
 			expect(descriptor != nullptr, std::string("descriptor exists for ") + info.name);
 			expect(std::string(descriptor->name) == info.name,
 			       std::string("descriptor exact-name lookup for ") + info.name);
-			expect(static_cast<uint32_t>(descriptor->shader_flags) == static_cast<uint32_t>(info.flags),
-			       std::string("descriptor flags match gMaterialInfoTable for ") + info.name);
+			uint32_t expected_flags = static_cast<uint32_t>(info.flags);
+			for (const RuntimeFlagFix &fix : runtime_fixes) {
+				if (std::string(info.name) == fix.tag) {
+					expected_flags = fix.flags;
+					break;
+				}
+			}
+			expect(static_cast<uint32_t>(descriptor->shader_flags) == expected_flags,
+			       std::string("descriptor flags match the runtime derivation for ") + info.name);
 			const auto cls = classify_object_material(info.name, 0, 0, 0, 128);
 			expect(cls.known_shader, std::string("classifier recognizes descriptor tag ") + info.name);
 		}
@@ -126,20 +155,47 @@ int main() {
 		expect(cls.normal_space == ObjectNormalSpace::Tangent, "VS_DOT3DIFF2 tangent space");
 	}
 
-	// 8. Skinned tangent-bump shaders are opaque despite the legacy GLASS table flag.
+	// 8. Skinned tangent-bump shaders are opaque, and — per the runtime
+	// capability probe (D-RMAT-4) — NOT glass by tag: their effects read
+	// In.Tangent and never reference ReflectColor [orig: probe @ 0x5ae690
+	// over SkBDiffT/SkBPhongT/SkBDiffT2 + _vsSkDfT.fx]. The OED dump's GLASS
+	// bit on these rows was table drift. The 3DI per-material glass override
+	// still applies.
 	{
-		const uint8_t glass_flags[] = { 0, 1 };
 		for (const char *tag : { "VS_SKBUMPDIFFT", "VS_SKBUMPPHONGT", "VS_SKBUMPDIFFT2" }) {
-			for (uint8_t is_glass_flag : glass_flags) {
-				const auto cls = classify_object_material(tag, 0, 0, is_glass_flag, 128);
-				expect(cls.blend == ObjectBlendMode::Opaque, "skinned tangent-bump shader stays opaque");
-				expect(cls.is_glass, "skinned tangent-bump shader preserves the OED glass capability bit");
-				expect(cls.needs_normal_map, "skinned tangent-bump shader has normal map");
-				expect(cls.is_skinned, "skinned tangent-bump shader is skinned");
-			}
+			const auto cls = classify_object_material(tag, 0, 0, 0, 128);
+			expect(cls.blend == ObjectBlendMode::Opaque, "skinned tangent-bump shader stays opaque");
+			expect(!cls.is_glass, "skinned tangent-bump shader is not glass by tag (runtime probe)");
+			expect(cls.needs_normal_map, "skinned tangent-bump shader has normal map");
+			expect(cls.is_skinned, "skinned tangent-bump shader is skinned");
+			const auto with_override = classify_object_material(tag, 0, 0, 1, 128);
+			expect(with_override.is_glass, "the per-material glass override still applies");
 		}
 		const auto with_detail = classify_object_material("VS_SKBUMPDIFFT2", 0, 0, 0, 128);
 		expect(with_detail.has_detail, "VS_SKBUMPDIFFT2 has detail map");
+	}
+
+	// 8b. The glow-copy capability and the tracer view fade (REN-4):
+	// 0x10000000 = "renders a Q3 glow/bloom duplicate" [orig: Q3 gate
+	// @ 0x5d93b5], carried by the FF _LUM rows AND FFP_GLASS at runtime
+	// (union probe over its GLOW technique); the self-lum LOOK keys on
+	// EMISSIVE. VS_TRACER carries the vsTracer view-angle fade (D-RMAT-2).
+	{
+		expect(classify_object_material("FF_ST_OP_LUM", 0, 0, 0, 128).is_glow_capable,
+		       "FF_ST_OP_LUM is glow-capable");
+		expect(classify_object_material("FFP_GLASS", 0, 0, 0, 128).is_glow_capable,
+		       "FFP_GLASS is glow-capable (runtime probe over the GLOW technique)");
+		expect(!classify_object_material("FFP_GLASS", 0, 0, 0, 128).is_luminance,
+		       "FFP_GLASS is not self-lum (glow capability != the LUM look)");
+		expect(!classify_object_material("FF_ST_OP", 0, 0, 0, 128).is_glow_capable,
+		       "plain FF_ST_OP is not glow-capable");
+		const auto tracer = classify_object_material("VS_TRACER", 0, 0, 0, 128);
+		expect(tracer.view_angle_fade, "VS_TRACER carries the view-angle fade");
+		const auto tracer_key = build_object_shader_key(tracer);
+		expect((tracer_key & OSCAP_VIEW_FADE) != 0, "tracer key carries OSCAP_VIEW_FADE");
+		const std::string tracer_glsl = compose_object_shader_glsl(tracer_key);
+		expect(tracer_glsl.find("vf * vf") != std::string::npos,
+		       "tracer GLSL contains the |dot(eye,normal)|^2 fade [orig: vsTracer]");
 	}
 
 	// 9. Environment mirror effects are reflective but their normal pass is opaque.

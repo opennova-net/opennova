@@ -93,7 +93,14 @@ ObjectMaterialClassification classify_object_material(const std::string &shader_
 	c.known_shader = true;
 	c.family = map_family(descriptor->family);
 	c.blend = map_blend(descriptor->blend);
-	c.is_luminance = (info_flags & ::oed::MATERIAL_FLAG_LUMINANCE) != 0;
+	// The self-lum LOOK is the EMISSIVE bit (SELFLUM material colors, authored
+	// 0x1 on the FF _LUM rows [orig: HLSLEffect_InitFixedFunctionShaders
+	// @ 0x5af790; _FFP.fx SELFLUM block]); 0x10000000 is the separate
+	// glow-copy CAPABILITY (is_glow_capable below) — the two ride together on
+	// LUM rows but FFP_GLASS carries only the capability (D-RMAT-4).
+	c.is_luminance = (info_flags & ::oed::MATERIAL_FLAG_EMISSIVE) != 0;
+	c.is_glow_capable = (info_flags & ::oed::MATERIAL_FLAG_GLOW) != 0;
+	c.view_angle_fade = (descriptor_flags & ::oed::MATERIAL_DESCRIPTOR_VIEW_FADE) != 0;
 	c.needs_normal_map = (info_flags & (::oed::MATERIAL_FLAG_NORMAL_A |
 	                                     ::oed::MATERIAL_FLAG_NORMAL_B)) != 0;
 	c.is_glass = c.is_glass || (info_flags & ::oed::MATERIAL_FLAG_GLASS) != 0;

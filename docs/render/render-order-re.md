@@ -79,7 +79,7 @@ ctx+843) or the object-path collector (`collect_render_objects_for_batch
 | `0x2` | PROJSHAD class |
 | `0x4` | DEPTHMASK class; object path renders opaque strips only (`@ 0x5d948b` breaks before the alpha pass) |
 | `0x8` | entry flag bit 2 = run only the technique's FIRST pass (`@ 0x5da23d`) |
-| `0x10` | entry flag bit 3 (consumer not yet witnessed — REN-4) |
+| `0x10` | entry flag bit 3 = force `ZFUNC = ALWAYS` for the entry — a per-entry z-read-off override (witnessed at REN-4 in the FlushBatches pass loop; else the pass zmode bit 0x80 picks ALWAYS/LESSEQUAL) |
 | `0x20` | bone path: transparents to Q2 instead of Q1 (the caller picks the water side) |
 | `0x40` | object path: alt-vertex-stream request for sub-objects (`robjIndex > 0`) |
 | `0x80` | alt-vertex-stream request (entry bit 1); used by parented sector entities (`entity+464`) and the armed viewmodel |
@@ -102,9 +102,16 @@ switches to GLOW (0x40) when the material carries a GLOW pass block
 cached pass block in the material def: NORMAL +600, PROJSHAD +680, DEPTHMASK
 +760, CLIP +840, GLOW +920, MATCHTERRAIN +1000 (80-byte blocks; REN-2's
 registry slots cached by `resolve_effect_subobjects_and_shader @ 0x5b1870`),
-and runs the block's passes 0..n-1 in order, gating each on its
-light-availability rules (pass flags & 0x3C vs the entry's positional/shadow
-light counts) — the per-light pass multiplication rides REN-4.
+and runs the block's passes 0..n-1 in order (block +4 = pass count,
++16+8i = rules/z/a flags, +20+8i = the pass FOGMODE), gating each on its
+light rules (flags & 0x3C vs the entry's ≤3 light handles, spot/point split
+by `Light_IsSpotlight @ 0x5a9040`: 0x10 run-if-no-spots, 0x20 run-if-spots,
+0x04 run-if-pointlights, 0x08 run-if-spots) — witnessed at REN-4: rules 4/8
+multiply into ONE DRAW PER LIGHT (point params / spot projection set per
+iteration + CommitChanges), rule 2 fills the PointLight*Array set for the
+per-count VS variants, and MATCHTERRAIN-class entries bind the terrain tile
+texture under the object (`terrain_tile_cache_lookup @ 0x604140`). Full pass
+detail: [render-material-re.md](render-material-re.md) §Pass execution.
 
 **Sort keys.** `RenderBatch_QuickSort @ 0x5d8b40`: in-place Hoare quicksort
 of the 68-byte entries comparing the DWORD at entry+4 **unsigned, ascending**
@@ -237,7 +244,7 @@ pure functions in `libs/renderer/render_order.{h,cpp}`:
 | D-RORD-2 | Host-internal opaque ordering (Godot front-to-back + its own state batching) | per-frame CPU quicksort by the composite key (alpha-test bit → 256-unit depth slabs → effect index → fine depth) (`[orig: @ 0x5d8b40; @ 0x5d928e]`) | PERMANENT-candidate (class C): same intent, device-era mechanism; key semantics preserved as T1-pinned functions |
 | D-RORD-3 | Water-side rung assigned per OBJECT (model origin vs water height, at rebuild / `refresh_render_order()`) | per STRIP, per frame (strip center height `[orig: @ 0x5d932e..0x5d9354]`) | OPEN (partial) — straddling or water-crossing models can mis-bin strips; revisit if a T2/T3 scene shows it |
 | D-RORD-4 | Viewmodel is a camera-tracked node with no depth treatment (clips into near walls) | drawn FIRST with near-Z 0.05 + viewport depth range [0, 0.1], own mode-0 flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | WITNESSED-READY-DEFERRED — host mapping (compressed-depth pass) rides a runtime slice; T3 scene 6 attests |
-| D-RORD-5 | No glow/envmap duplicate pass | strips with effect capability 0x10000000 get a back-to-front Q3 copy (GLOW class when a GLOW block exists), flushed in the bloom pass (`[orig: @ 0x5d93b5; @ 0x582a54]`) | WITNESSED-READY-DEFERRED — the GLOW class rides REN-4; FrameFX bloom itself is out of REN scope |
+| D-RORD-5 | No glow/envmap duplicate pass | strips with effect capability 0x10000000 get a back-to-front Q3 copy (GLOW class when a GLOW block exists), flushed in the bloom pass (`[orig: @ 0x5d93b5; @ 0x582a54]`) | WITNESSED-READY-DEFERRED — REN-4 landed the capability semantics (the 0x10000000 dialects resolved = glow-capable; `is_glow_capable` classification + the corrected FFP_GLASS row; the GLOW technique CONTENT witnessed — LUM copies the NORMAL pass, glass swaps to the TexCubeRotSpecular sun-glint cube). Residual = the host bloom wiring (selective glow over the glow-capable set) + the specular cube source (`generate_cubemap_lighting @ 0x685bb0`, REN-5); FrameFX bloom itself stays out of REN scope |
 | D-RORD-6 | Not reproduced | two original key quirks: opaque key bits 15+ carry residual stack garbage (`@ 0x5d92b9`), and the transparent key lags one strip within a render object (`@ 0x5d9326` vs the `fst @ 0x5d9347` overwrite) | PERMANENT-candidates (original-bug/garbage class): reproducing either manufactures garbage (ADR 0022) |
 
 ## IDB changes made during the session
@@ -264,17 +271,26 @@ pure functions in `libs/renderer/render_order.{h,cpp}`:
 | 0x31BC918 | dword_31BC918 | g_WaterActive | gates water render + reflection prerender |
 | 0x2721A08..38 | flt_2721A08.. | g_BatchSortDepthPlane{X,Y,Z,W} | the camera-forward plane the sort distance dots against |
 
+REN-4 additions (the pass-execution grill): `Light_IsSpotlight @ 0x5a9040`,
+`Light_GetPointLightParams @ 0x5a9180`, `Light_ApplyAsD3DLight @ 0x5abd50`
+(ex-`sub_*`) — the pass-rules light machinery; the full REN-4 rename set is
+logged in [render-material-re.md](render-material-re.md).
+
 ## Open questions
 
-- Entry flag bit 3 (submit flag 0x10) — its FlushBatches consumer was not
-  isolated in the register soup; witness at REN-4's pass grill.
+- **Closed at REN-4**: entry flag bit 3 (= force ZFUNC ALWAYS, the submit-0x10
+  override — witnessed in the pass loop); the `+841` byte (its reader is
+  `setup_entity_lighting_and_shader_constants @ 0x5d98a0` — it gates the
+  mirror-clip constants: MatTexClipPlane ← base × the active mirror matrix
+  ctx+756, VecDepthMaskPlane ← ctx+824, with ctx+842 tracking applied
+  clip-plane state); the MATCHTERRAIN class MECHANISM (binds the terrain tile
+  texture under the object — [render-material-re.md](render-material-re.md)
+  §Pass execution).
 - `sub_5C8510 @ 0x5c8510` (three flushes, called from `render_main_scene`)
   fails to decompile — the offscreen scene's internal order; witness with
   env #30's reflection spec (REN-6).
-- The `+841` byte (set at frame begin and every flush) — no reader found;
-  likely a dirty/clean flag. Low value; note only.
 - `Terrain_RenderSectorEntities` (list `0x2999518`) vs the BySide wave's list
   (`0x2984890`) — which world-object populations feed which list (sector
   models vs placed entities) rides the world-record's population map.
-- The MATCHTERRAIN sub-pass entity gate (`entity+300 & 0x300`) — which item
-  flags those bits are; REN-4's MATCHTERRAIN class grill.
+- The MATCHTERRAIN sub-pass ENTITY gate (`entity+300 & 0x300`) — which item
+  flags those bits are (the consumer side is closed); world-record scope.

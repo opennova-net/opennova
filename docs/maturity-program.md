@@ -36,7 +36,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
-| REN-3 draw order | (this slice) | the batching/draw-order system witnessed end to end (four queues + the unsigned-ascending sort `[orig: RenderBatch_QuickSort @ 0x5d8b40]`; the opaque state-sort key + the transparent `~float_bits` back-to-front key; the water-plane queue split + frame bracket `[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`; technique-class selection; the render-state stack; the viewmodel near-Z 0.05 + viewport-depth [0,0.1] pass; the Q3 glow/envmap copy flushed by the bloom pass) — [render/render-order-re.md](render/render-order-re.md), D-RORD-1..6. Ordering semantics ported to `libs/renderer/render_order` and applied as the generalized Godot priority ladder (celestial rungs re-derived, water rung, object-model water-side rungs via the new `NovaObjectShaderCache` seam); T1 extended with the draw-order vector section (cited re-dump, pure append); T2 gained the depth-adversarial composite ordering scenes (fresh baseline; swatch A/B bitwise-identical vs post-ren2); 11 function + 15 data renames landed in the IDB (EffectWorld particle pass ex-`CNapiSession_*`, the render-state stack push ex-`CNetPlayer_*`, the viewmodel viewport/near-Z pair ex-`Scar_*`); draw order leaves UNAUDITED (2→1); D-RORD-2/-6 ratified into the permanent register; env #30 gained its pass-structure rider; world §13's `0x10000000` identified as the repeat-draw marker |
+| REN-4 shaders/TSS | (this slice) | the fixed-function shader/TSS layer decoded end to end: the engine render-mode word (blend/alpha/color combiner tables `[orig: decode_blend_mode_to_d3d_states @ 0x680f00; decode_mode_alpha_stage @ 0x680b00; decode_mode_color_stage @ 0x681080]`) + the state permutation cache (`[orig: @ 0x681d00; RenderState_CacheFindOrAdd @ 0x683420]`); the water surface material set (`Water_InitSurfaceShaders @ 0x5c19b0` — the "Terrain_InitShaders" misnomer resolved) ported into `water.gdshader` (witnessed ONE+dst·SRCALPHA blend via premul-alpha + ref-32 discard; env #34 minted-and-closed); the terrain surface shading witnessed into terrain-re.md §Runtime surface shading (8 embedded pixel shaders incl. the ps.1.4 splat, tier gates, foliage-model VS/PS set, alpha refs 180/8); D-RMAT-2 FIXED (`OSCAP_VIEW_FADE` tracer fade) + D-RMAT-4 FIXED (the IsParameterUsed probe replicated over the shipped corpus — 5 OED-dump drift rows corrected on the descriptor table, `MATERIAL_FLAG_GLOW` minted, `is_glow_capable` classification); `renderer::uv_anim` ported (T1 section 4); the FlushBatches pass loop witnessed (per-light passrules multiplication, submit-0x10/+841/MATCHTERRAIN questions closed); ptl §5.2 stage-stride + §5.5 VS/PS errata; 17+4 IDB renames; T2: composite IDENTICAL, swatch key-set delta fully T1-hash-attributed, world set re-captured (post-ren4 = the rolling baseline) |
+| REN-3 draw order | 885d8702 | the batching/draw-order system witnessed end to end (four queues + the unsigned-ascending sort `[orig: RenderBatch_QuickSort @ 0x5d8b40]`; the opaque state-sort key + the transparent `~float_bits` back-to-front key; the water-plane queue split + frame bracket `[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`; technique-class selection; the render-state stack; the viewmodel near-Z 0.05 + viewport-depth [0,0.1] pass; the Q3 glow/envmap copy flushed by the bloom pass) — [render/render-order-re.md](render/render-order-re.md), D-RORD-1..6. Ordering semantics ported to `libs/renderer/render_order` and applied as the generalized Godot priority ladder (celestial rungs re-derived, water rung, object-model water-side rungs via the new `NovaObjectShaderCache` seam); T1 extended with the draw-order vector section (cited re-dump, pure append); T2 gained the depth-adversarial composite ordering scenes (fresh baseline; swatch A/B bitwise-identical vs post-ren2); 11 function + 15 data renames landed in the IDB (EffectWorld particle pass ex-`CNapiSession_*`, the render-state stack push ex-`CNetPlayer_*`, the viewmodel viewport/near-Z pair ex-`Scar_*`); draw order leaves UNAUDITED (2→1); D-RORD-2/-6 ratified into the permanent register; env #30 gained its pass-structure rider; world §13's `0x10000000` identified as the repeat-draw marker |
 | REN-2 materials grill + converge | 005efae0 | the runtime material path witnessed end to end (HLSLEffect registry built from `_FFP.fx` ×24 + the localres `.fx` set + `#UV` twins; probe-derived capability flags; six technique-class pass blocks; state application at FlushBatches) — [render/render-material-re.md](render/render-material-re.md), D-RMAT-1..6. Fixed in-slice with cited T1 re-dumps: the alpha-test compare shape (invert flips the COMPARE `[orig: @ 0x6770a0]`), case-insensitive tag lookup `[orig: @ 0x5ade70]`, the VS_TRACER registry row; flag-enum misnomers renamed everywhere (BLENDING/SKINNED/TANGENT/UVGEN); `MATERIAL_FLAG_*` single-sourced onto `NovaObjectShaderCache` (the ENG-4 leg); 3 kong misnomers renamed in the IDB; materials leave UNAUDITED (3→2); ratchet `libs_uncited_src_files` tightened 65 → **64** (the composer earned its citation) |
 | REN-1 instrument (rode this trunk, d158e3e3) + REN-0 mint (ce2b0978) | d158e3e3 / ce2b0978 | the three-tier parity instrument + pre-change baselines; the track mint + [ADR 0023](adr/0023-render-visual-parity.md); ledger audit track reopened (UNAUDITED = 3); env #17 → REN-5 and #27/#29/#30/#33 → REN-6 transfers; `ledger_check.py` DOMAIN_ORDER + the LIBS-2 `libs/renderer`-fold reversal |
 | ENG-2 env port (PR #206 train) | 28cc9474 … (7 slices) | the five environment GDScript files are scene plumbing over `libs/env`: weather core (slices 1-2), sky dome + cloud scroll (3-4), water surface (5-6, full witnessed render: per-frame noise textures + UV + lit-color pipeline), celestial placement + glare occlusion (7). Re-grills caught the shared RNG-seed transcription (env #25, fixed in libs/env + libs/wac), the scroll model (#26), the water look/precedence (#28/#31), celestial placement inventions (#32), and CLOSED env #14; minted #27/#29/#30/#33 as tracked deferrals. Honored-matrix re-attested; vectors 204/204 with per-slice witnessed re-dumps |
@@ -405,14 +406,30 @@ One trunk PR, slice-per-commit, per-slice attestations in the description.
   `libs/renderer/render_order`, applied as the global Godot priority ladder
   generalizing the celestial one — the queue itself is not reproduced.
   Landed [`render-order-re.md`](render/render-order-re.md) + D-RORD-1..6.
-- **REN-4** (M/L) **shaders/TSS**: the terrain stage tables
-  (`Terrain_InitShaders @ 0x5c19b0`, `terrain_init_rendering_resources
-  @ 0x5789e0`) decoded against `RenderState_ApplyToDevice`; the water
-  shader-handle set (`create_water_shaders @ 0x5dfc30`); the remaining
-  embedded vs_1_1 sources extracted; the sky pass-1 gradient TSS open
-  question closed; the unverified `foliage.gdshader` anchor (`0x5BF064`)
-  resolved; ports as cited `.gdshader`s / composer extensions (the sky C7
-  pattern). Grows `terrain-re.md` + `env-tod-re.md`.
+- **REN-4** (M/L) **shaders/TSS** — **DONE 2026-07-06** (engine-research +
+  grill): the two named anchors resolved to their true subsystems —
+  `Terrain_InitShaders @ 0x5c19b0` is the WATER surface shader/material set
+  (renamed `Water_InitSurfaceShaders`; blend ONE+dst·SRCALPHA, alpha-test 32,
+  NV variants, FF fallback tables — ported into `water.gdshader`, env #34
+  minted-and-closed) and `create_water_shaders @ 0x5dfc30` is the EffectWorld
+  PARTICLE water/distort trio; the ACTUAL terrain surface shading witnessed
+  (`PolyTrn_InitTextures @ 0x60aaa0`, `compile_terrain_pixel_shaders
+  @ 0x605260` — 8 embedded PS incl. the ps.1.4 3-way splat; tiers; the
+  foliage-model shader set `@ 0x5ff630/0x5ff7a0/0x6007c0/0x601260`) growing
+  `terrain-re.md` §Runtime surface shading; the engine render-mode word +
+  state permutation cache fully decoded (`@ 0x680f00/0x680b00/0x681080/
+  0x681d00` — blend/alpha/color mode tables + pass-flag bits); the sky
+  pass-1 gradient TSS closed (mode 0x200 = flat diffuse — the C7 port was
+  already faithful); the bogus `foliage.gdshader` anchors corrected
+  (0x5BF064 = a death-screen overlay; the real set is the foliage VS/PS
+  family); D-RMAT-2 (tracer `|dot(eye,normal)|²` fade → `OSCAP_VIEW_FADE`)
+  and D-RMAT-4 (the capability probe replicated — 5 OED-dump drift rows
+  corrected; `MATERIAL_FLAG_GLOW` minted) FIXED; the UV-anim path ported
+  (`renderer::uv_anim` over the shared PANM wave table, T1 section 4); the
+  FlushBatches pass-execution model witnessed (per-light pass
+  multiplication, submit 0x10 = z-read-off, MATCHTERRAIN = terrain-tile
+  texture bind, ctx+841 = the mirror-clip constants gate); ptl §5.2/§5.5
+  errata corrected. The embedded-shader census is complete.
 - **REN-5** (M/L) **lighting**: the modulator chain
   (`Render_UnpackModulatorToLightScale @ 0x58db30` →
   `Render_LightScaleRGB @ 0x8409f4`; `EffectWorld_UnpackModulatorToAmbientScale

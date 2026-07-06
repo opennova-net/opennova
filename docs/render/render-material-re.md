@@ -21,9 +21,11 @@ this record.
 | Material flag byte → device state (alpha test / invert / two-sided) | MATCHING (after D-RMAT-1/-3 fixes) | `[orig: CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401; CGfxDevice_SetAlphaTestRef @ 0x6770a0]`; `renderer_state_vectors` golden |
 | Blend classification per tag (Opaque/AlphaBlend/Additive) | MATCHING | `RSAlphaMode` pass states per shipped `.fx` (`_FFP.fx` `BLEND_NONE/ALPHA/ADD` = FALSE,ONE,ZERO / SRCALPHA,INVSRCALPHA / ONE,ONE; Glass/SkGlass/Tracer = ONE,ONE only); Multiplicative (DESTCOLOR,SRCCOLOR) appears only in non-NORMAL techniques and no registry row claims it |
 | Depth policy for blended materials | MATCHING | blended FF variants force ZMODE_NOWRITE across technique slots `[orig: @ 0x5afc92..0x5afcaa]`; applied as `D3DRS_ZWRITEENABLE=0` `[orig: @ 0x5da320]` — mirrored by the composer's `depth_draw_never` for non-opaque, non-alpha-test |
-| Per-effect capability/sort flag words (file effects) | unknown | derivation witnessed (`@ 0x5ae690` probe, `@ 0x5af790` authored) but per-file equality vs the OED dump needs a runtime registry dump (D-RMAT-4) |
+| Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
 | Composed lighting math | divergent (tracked) | the uniform surface is witnessed (HemiSky/HemiGround/DirLight/Ambient/ColorSrcGlobalGain `[orig: @ 0x5af453..0x5af49e]`); the composer's gains are prototype values — burns down at REN-5 (D-RMAT-5) |
-| Technique-class pass system (6 classes) | witnessed / host-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN classes ride REN-3/REN-4 (D-RMAT-6) |
+| Technique-class pass system (6 classes) | witnessed / host-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the host bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
+| UV animation (MatTexCoord1) | MATCHING (math ported) | `renderer::uv_anim` is the structural port of `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]` over the shared PANM wave table; `renderer_state_vectors` section 4 pins it; the MTRL-field feed is the residual open question |
+| Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
 
 ## Witness map
 
@@ -116,19 +118,139 @@ env #17 modulator triple's shader-path consumer — REN-5).
 VS_SKBASIC). 24 FF + 18 table file-tags + 3 twins = OED's 45; the runtime
 registry additionally carries VS_TRACER (Tracer.fx: `EffectSpecial=true`,
 TECHNIQUE_NORMAL, `usevs`/no ps, TexDiffuse1, `RSAlphaMode(TRUE, ONE, ONE)`,
-ZMODE_NOWRITE, unlit). Never committed — retail data; re-derive via
-`libs/scr` + `libs/pff` from a retail install.
+ZMODE_NOWRITE, unlit, `vsTracer` Diff = `|dot(eye, normal)|²` — the soft-edge
+facing falloff). Never committed — retail data; re-derive via `libs/scr` +
+`libs/pff` from a retail install.
+
+**The capability probe (REN-4, D-RMAT-4 closure).** The flag word
+(entry+160) booleans are UNIONS OVER ALL TECHNIQUES — the loader iterates
+every technique calling `IsParameterUsed` per probe parameter, reads the
+`blending` annotation per technique, and scans every pass's VS bytecode for
+the TANGENT input semantic (`D3DXGetShaderInputSemantics`, usage 6)
+`[orig: technique loop @ 0x5ae690]`. The 87 named handles live at entry+656
+(dword slots 164..250): 165/166 TexDiffuse1/2, 172-176
+TexNormal1/2/Horizon/Occlusion/SpecularCtrl, 196-206 the shared texture set
+(CubeNormalize, CubeEnvironment, CubeRotSpecular, PhongMap, Clip1D, Spot2D,
+DepthGradWrite, DepthGradTest, AngleMap, CurProj, Cookie), 207-217 matrices
+(WVP, World, WorldView, ViewProj, WorldInvTrans, CamToWorldRot, RotSpecular,
+MatTexClipPlane, VecTexClipPlane, **MatTexCoord1 = 216**, VecDepthMaskPlane),
+218/219 FogStart/FogRangeRecip, 221 ReflectColor, 222 SelfLumColor,
+**223 AlphaGenValue**, 225-240 camera/lighting/point-light family, 241-244
+shadow/spot projection, 245 ReflectBumpDepth, 246/247 the skin arrays,
+248 DisplaceAmount, **249 FloatTicks**, **250 AlphaTestFlag**; the tail loop
+zeroes handles unused by every technique unless D3DX-shared. Replicating the
+probe over the shipped text (a static `IsParameterUsed`: identifier
+reachability through the technique's pass states + referenced compiled
+functions): **14/19 file tags match the OED dump exactly; 5 rows drift** —
+the D-RMAT-4 table below. The `0x10000000` dialect is RESOLVED: both the
+LUM authorship and the TexCubeRotSpecular probe mean "renders a Q3
+glow/bloom copy" (the Q3 gate `[orig: @ 0x5d93b5]`), so at runtime FFP_GLASS
+carries it (its GLOW technique samples the specular cube); the self-lum LOOK
+is the EMISSIVE bit (0x1). `MATERIAL_FLAG_LUMINANCE` was renamed
+`MATERIAL_FLAG_GLOW` accordingly (oed/types.h keeps the byte-faithful OED
+dump values; the runtime-corrected words live on
+`oed::kMaterialDescriptorTable`).
+
+**The FF technique tables (from `_FFP.fx` text, REN-4).** TECHNIQUE_NORMAL
+`TBoringFFP` P0: `TSSColor(0, Modulate2x, Texture, Diffuse)`,
+`TSSAlpha(0, Modulate, Texture, Diffuse)` (+ the same on stage 1 vs Current
+for `_MT`), FFP `Lighting = TRUE` with MaterialDiffuse `(1,1,1, AlphaGenValue)`
++ MaterialEmissive `AmbientColor` — SELFLUM swaps to Emissive
+`SelfLumColor x ColorSrcGlobalGain` with black diffuse/ambient. Blend per
+variant: `_OP` FALSE/ONE/ZERO + FOGMODE_NORMAL + usevs (the spotlight
+ladder); `_AB` SRCALPHA/INVSRCALPHA; `_AD` ONE/ONE + FOGMODE_NORMALADD
+(black fog fades additive out). Opaque-only spotlight decomposition
+(passrules): P1a hemi base (`vscFlatBaseHemiArray[CurNumPointLights]`,
+color = SelectArg2(Diffuse) — textureless), P2a ONCE_PER_SPOTLIGHT beam
+(TexDepthGradTest + projected TexCurProj, ONE/ONE, AMODE_DEPTHTEST,
+alpha = Subtract(Texture, Current)), P3a texture post-multiply
+(DESTCOLOR/SRCCOLOR — mod2x onto the lit base). TECHNIQUE_CLIP: stage 1 =
+`TexClip1D` sampled by CAMERASPACEPOSITION through `MatTexClipPlane`
+(COUNT2), `TSSAlpha(1, Modulate, Texture, Current)` — the water-plane clip
+multiplies alpha and AMODE_CLIP's ref-128 test cuts it. TECHNIQUE_PROJSHAD:
+black lighting (all material colors 0), color = SelectArg2(Diffuse) — the
+shadow silhouette. TECHNIQUE_DEPTHMASK (`_tDepth.fx`, opaque only):
+`vscDepth` + `TexDepthGradWrite` clamped, color/alpha = SelectArg1(Texture),
+fog off — writes the depth gradient into dest alpha for later
+AMODE_DEPTHTEST passes (the beam/soft-depth mechanism). Glass.fx
+TECHNIQUE_GLOW swaps `TexCubeEnvironment x MatCamToWorldRot` for
+`TexCubeRotSpecular x MatRotSpecular` (the sun-aligned specular cube) —
+the Q3 copy renders the sun glint for bloom.
+
+**Pass execution (FlushBatches pass loop, REN-4).** Pass blocks: +4 = pass
+count, +16+8i = rules/z/a flags, +20+8i = FOGMODE
+`[orig: @ 0x5d9f50 pass loop]`. Entry flag bit 2 stops after pass 0; entry
+bit 3 forces `ZFUNC = ALWAYS` for the entry (submit 0x10 — the z-read-off
+override); else pass zmode bit 0x80 picks ALWAYS/LESSEQUAL. Pass gating
+(flags & 0x3C vs the entry's ≤3 light handles, spot/point split by
+`Light_IsSpotlight @ 0x5a9040`): 0x10 run-if-no-spots, 0x20 run-if-spots,
+0x04 run-if-pointlights, 0x08 run-if-spots; then flags & 4 = ONE DRAW PER
+POINTLIGHT (`Light_GetPointLightParams @ 0x5a9180` →
+PointLightCoord/Color/Atten + CommitChanges per light), flags & 8 = ONE DRAW
+PER SPOTLIGHT (`get_light_projection_info @ 0x5aa5c0` →
+SpotLightProjMatrix/TexCurProj; the spot plane cached at ctx+824), flags & 2
+= POINTLIGHT_VARIATIONS (fills the PointLight*Array set +
+CurNumPointLights); tech flag bit 3 `useffplights` enables real D3D lights
+(`Light_ApplyAsD3DLight @ 0x5abd50`). MATCHTERRAIN-class entries bind THE
+TERRAIN TILE TEXTURE under the object (`floor` of strip world x/z →
+`terrain_tile_cache_lookup @ 0x604140`; fallback texture at effect+164).
+`setup_entity_lighting_and_shader_constants @ 0x5d98a0` pushes
+**AlphaTestFlag (slot 250) ← matdef+514 bit 0x1** (the shader-path alpha
+test; the invert bit does not reach the shader path), DirLightColor ←
+ctx+116..128 **x the state-stack effectScale** (entry[9] — the effect-scale
+consumer), the Hemi/Ambient blocks from the ctx lighting slots (lerped by
+entry[10] under entry flag bit 1 — the dual-LOD cross-fade), and under
+ctx+841 the mirror-clip constants (MatTexClipPlane ← base x ctx+756).
+
+**UV animation (REN-4).** `apply_shader_parameters` binds MatTexCoord1 (slot
+216) from `compute_uv_transform_matrix((tick_ms << 8)/1000, matdef+524)`
+`[orig: @ 0x58dd49]` when the effect resolves it (the #UV twins / TEX_UVXFORM
+— FFP applies it as TextureTransform COUNT2, VS effects via
+`CalcAnimatedUV`). Channel blocks (8 B: `{u8 type, u8 phase, i16 speed,
+i16 base, i16 range}`, U at matdef+524, V at +532): phase16 = `(phase<<8) +
+time*speed` (wrapping u16); type high nibble = mode — 0x10 time-scroll
+(16 +, 17 −; translate = phase16/65536), 0x20 rotation about UV center
+(angle = phase16 x 2π/65536; 32 +, 33 −), 0x30/0x40/0x50/0x60 with
+type ≤ 0x70 = WAVEFORM set/scroll/shear/scale (value =
+`wave_lookup(type, phase16)/65535 x range + base`, base/range signed 8.8),
+types 'q'..'u' (113..117) = CONTROLLED-ANIM set/scroll/shear/scale/rotation
+(value = base + range x `dword_83FCE8[2*phase]`/65536). `wave_lookup
+@ 0x5de6b0` indexes the SAME 2816-byte waveform table PANM uses
+(`WaveformTable @ 0x2bf8ed0` = libs/threedi `threedi_panm_wave_table()`);
+bands per type {1→0, 2→256, 3→768, 4→1024, 5→1280, 6→rand, 7→1536 lerped,
+8→1792, 9→2048, 0xA→2304 lerped, 0xF→2560}. Ported as `renderer::uv_anim`
+(vectors section 4).
+
+**RgbGen / AlphaGen (REN-4 — closes the channel-remap question).** The
+`convert_material_definition` remaps (`src[16]`: file 3..7 → runtime 8..12,
+`src[17]` identity) are the RGBGEN/ALPHAGEN TYPE bytes — the file's wave-type
+ids shifted to the runtime `wave_lookup` band ids. `RgbGen_EvaluateColor
+@ 0x5b23d0` evaluates a 12-byte gen block per channel: type 24 = constant
+color; 113/114 = controlled-anim value; else `color = base + (delta x
+wave_lookup(type, phase16 + speed x (tick<<8)/1000)) >> 16` per RGB;
+`AlphaGen_EvaluateValue @ 0x5b2320` (matdef+564) feeds the AlphaGenValue
+param (slot 223) — the FF techniques consume it as MaterialDiffuse alpha.
+
+**Fog parameter sets (REN-4 — closes the secondary-set question).**
+`CD3DDevice_SetFogParameters @ 0x677960` writes TWO blocks: the NORMAL set
+@ 0x3262248..5C and the **LITE set @ 0x3262230..44 = the same fog at
+one-third density** (linear: end x3; exp: density/3). FOGMODE bit 2
+(`_BaseInc.fx` FOGMODE_LITE 4..7) selects the LITE block; bit 3
+(FOGMODE_SHADER 8..11) zeroes table/vertex fog so the VS `oFog` drives. The
+shipped corpus never uses fogmode 4..7 — LITE is dormant in JO (the
+"underwater set" hypothesis is refuted; underwater fog color is the separate
+`CD3DDevice_SetActiveFogColor` path).
 
 ## Divergence catalog
 
 | ID | Ours | Original | Disposition |
 |---|---|---|---|
 | D-RMAT-1 | Alpha test kept `a >= t` and INVERTED THE VALUE (`1-a >= t`); threshold fudged `maxf(0.001, byte/255)` | keep `a > ref`; invert flips the COMPARE to `a <= ref` (`[orig: @ 0x5da3a9..0x5da401; @ 0x6770a0]`) | FIXED (this slice: composer + model threshold; T1 re-dump cited) |
-| D-RMAT-2 | VS_TRACER unknown (absent from the OED-derived table); soft-edge `vsTracer` vertex displacement unported | runtime registry carries VS_TRACER (Tracer.fx, unlit additive diffuse) | row FIXED; the soft-edge look WITNESSED-READY-DEFERRED (REN-4) |
+| D-RMAT-2 | VS_TRACER unknown (absent from the OED-derived table); soft-edge `vsTracer` look unported | runtime registry carries VS_TRACER; the "soft edge" is the `vsTracer` facing falloff `Diff = \|dot(eye, normal)\|²` over unlit additive `MODULATE(Texture, Diffuse)` — NOT a displacement | **FIXED (REN-4)**: `MATERIAL_DESCRIPTOR_VIEW_FADE` → `OSCAP_VIEW_FADE` composes the per-fragment `\|dot(eye, normal)\|²` fade (`[orig: vsTracer, Tracer.fx]`; per-vertex→per-fragment is the host form of the same formula); vectors re-dumped with this witness |
 | D-RMAT-3 | Tag lookup case-SENSITIVE | `stricmp` (`[orig: HLSLEffect_FindByName @ 0x5ade70]`) | FIXED (case-insensitive exact-tag) |
-| D-RMAT-4 | File-effect capability/sort words carried verbatim from the OED dump | derived at load by the technique-usage probe (`@ 0x5ae690`) | NEEDS-RE — dump the live registry (or replicate the D3DX usage probe) and diff per tag; note the 0x10000000 dialect (LUM on FF rows vs TexCubeRotSpecular on probed rows) |
+| D-RMAT-4 | File-effect capability/sort words carried verbatim from the OED dump | derived at load by the technique-usage probe, UNIONED over all techniques (`[orig: @ 0x5ae690]`) | **FIXED (REN-4)**: the probe replicated statically over the shipped localres text — 14/19 tags match; 5 drift rows corrected on `kMaterialDescriptorTable` (the OED dump in `oed/types.h` stays byte-faithful): FFP_GLASS `0xb000 → 0x10003000` (no VS ⇒ no TANGENT; GLOW technique uses TexCubeRotSpecular ⇒ GLOW), VS_SKBUMPDIFFT/PHONGT `0x6014 → 0xc014` and VS_SKBUMPDIFFT2 `0x601c → 0xc01c` (read `In.Tangent`, never ReflectColor ⇒ TANGENT not GLASS), VS_SKGLASS `0x7004 → 0x7000` (untextured ⇒ no DIFFUSE). The 0x10000000 dialect resolved = the glow-copy capability (flag renamed `MATERIAL_FLAG_GLOW`); `is_luminance` re-keyed on EMISSIVE. Cited re-dump + `renderer_material_classify` pins |
 | D-RMAT-5 | Composer lighting gains are prototype values (hemi fill + ×1.5/×1.6/spec 0.8) | witnessed uniform surface `HemiGroundColor/HemiSkyColor/DirLightVector/DirLightColor/AmbientColor/ColorSrcGlobalGain` with engine-fed values | OPEN — burns down at REN-5 (the lighting-chain grill feeds the real values) |
-| D-RMAT-6 | Single-pass host materials; no CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN technique classes | six pass classes selected per batch entry (`@ 0x5d9ff3`), CLIP falls back to NORMAL, LUM populates GLOW | WITNESSED-READY-DEFERRED — the pass structure rides REN-3; GLOW/MATCHTERRAIN ride REN-4 |
+| D-RMAT-6 | Single-pass host materials; no CLIP/PROJSHAD/DEPTHMASK/GLOW/MATCHTERRAIN technique classes | six pass classes selected per batch entry (`@ 0x5d9ff3`), CLIP falls back to NORMAL, LUM populates GLOW; the class CONTENT witnessed at REN-4 (§FF technique tables, §Pass execution) | WITNESSED-READY-DEFERRED — selection + NORMAL state ported (REN-3); the GLOW flag/classification landed at REN-4 (`is_glow_capable`); the remaining host mappings (CLIP plane, PROJSHAD/DEPTHMASK passes, the glow BLOOM wiring with the specular cube) ride D-RORD-4/-5's residuals + REN-5 |
 
 ## IDB changes made during the session
 
@@ -143,15 +265,44 @@ ZMODE_NOWRITE, unlit). Never committed — retail data; re-derive via
 | 0x75ad60 | AudioChannel_GetVolumeByIndex | FS_GetSecondaryArchiveByIndex | indexes g_FS_SecondaryArchives; consumed as archive handle |
 | 0x6770a0 | CGfxDevice_SetBrightness | CGfxDevice_SetAlphaTestRef | sets ALPHAFUNC/ALPHAREF; sign encodes invert |
 
+REN-4 session (the shader/TSS grill):
+
+| Address | Old | New | Basis |
+|---|---|---|---|
+| 0x683420 | sub_683420 | RenderState_CacheFindOrAdd | the 1024×252-B state cache; memcmp 0xF4 payload; applies via RenderState_ApplyToDevice |
+| 0x6832F0 | sub_6832F0 | RenderState_CacheFindOrAddByModeId | mode-id (0x3FFF) lookup; builds via the permutation cache |
+| 0x680b00 | decode_blend_state | decode_mode_alpha_stage | writes stage ALPHAOP/ARG1/ARG2 from the 0xF0 nibble |
+| 0x681080 | decode_blend_state_extended | decode_mode_color_stage | writes stage COLOROP/ARG1/ARG2 from bits 8-13 |
+| 0x683650 | sub_683650 | CGfxShader_SetRenderStateDesc | stores the flags word (+60), resolves the 0xF4 desc through the cache into +68 |
+| 0x6835C0 | sub_6835C0 | CGfxShader_SetRenderStateByModeId | same via the mode-id path |
+| 0x679030 | sub_679030 | GfxShader_Create1TexModeId | factory: 1 texture slot + mode id |
+| 0x6793C0 | sub_6793C0 | GfxShader_Create2TexDesc | factory: 2 texture slots + 0xF4 desc |
+| 0x679550 | sub_679550 | GfxShader_Create4TexDesc | factory: 4 texture slots + desc |
+| 0x677020 | sub_677020 | GfxShader_ApplyPassChecked | null-guarded CGfxShader_ApplyPass (the old "free-all-by-id" auto comment was wrong) |
+| 0x5b2320 | sub_5B2320 | AlphaGen_EvaluateValue | evaluates matdef+564 → the AlphaGenValue param |
+| 0x5a9040 | sub_5A9040 | Light_IsSpotlight | the spot/point split in the pass-rules gate |
+| 0x5a9180 | sub_5A9180 | Light_GetPointLightParams | fills coord/color/atten for the per-light passes |
+| 0x5abd50 | sub_5ABD50 | Light_ApplyAsD3DLight | useffplights path — enables real D3D lights |
+| 0x28e0990 | flt_28E0990 | g_MatTexCoord1 | the composed UV matrix block |
+| 0x2bf8ed0 | table | WaveformTable | the shared 2816-B wave table (PANM + UV anim + RgbGen) |
+| 0x2721a40 | dword_2721A40 | Render_ShaderTickMs | the shader clock (ms); (tick<<8)/1000 feeds the anim paths |
+
 ## Open questions
 
-- The per-material channel enum remaps in `convert_material_definition`
-  (`src[16]`: 1,2,3..7 → 1,2,8..12; `src[17]` identity over {0..18}) against
-  `libs/renderer/material_eval` — verify at the REN-4 channel/eval grill.
-- The UV-scroll animation path (`compute_uv_transform_matrix`, time-driven
-  `MatTexCoord1`) vs our static `u_uv_*` uniforms — which 3DI channel fields
-  drive it, and does PANM cover it host-side?
-- `AlphaTestFlag` (effect param 250) — pushed where? (Shader-path alpha test;
-  the FFP path uses the render states above.) Check at REN-4.
-- The secondary fog parameter set (`@ 0x3262230..44`, fogmode bits 2-3 = 4) —
-  underwater? Witness at REN-4's fog table decode.
+- **Closed at REN-4**: the channel enum remaps (= the RgbGen/AlphaGen wave-type
+  ids, §RgbGen/AlphaGen); the UV-scroll path (§UV animation — ported as
+  `renderer::uv_anim`); `AlphaTestFlag` (slot 250 ← matdef+514 bit 0x1,
+  pushed in `setup_entity_lighting_and_shader_constants @ 0x5d98a0`); the
+  secondary fog parameter set (= the dormant LITE 1/3-density block,
+  §Fog parameter sets).
+- Which MTRL file fields feed the runtime UV-anim channel blocks
+  (matdef+524/+532, copied by `convert_material_definition @ 0x5b03c0`) — the
+  threedi-side mapping that would let the host drive `renderer::uv_anim`
+  from parsed materials.
+- The sort word (entry+164) consumer — authored at load
+  (`[orig: @ 0x5af14b..0x5af1a4]`) but no runtime reader was found; the batch
+  sort uses the registry INDEX, not this word. Likely tooling/dev-sort
+  residue; note-only.
+- `PolyTrn_UsePixelShaderPath` is force-cleared unless `dword_32655B4` is 80
+  or 73 (`[orig: PolyTrn_LoadTerrainConfig @ 0x60e578]`) — what that
+  device/format code is ('P'/'I'?); terrain-record scope.

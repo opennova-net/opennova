@@ -168,7 +168,7 @@ func build() -> void:
 func _process(_delta: float) -> void:
 	if not built or water_material == null:
 		return
-	water_material.set_shader_parameter("u_water_alpha", water_alpha)
+	water_material.set_shader_parameter("u_water_murk", water_alpha)
 
 	if not _cached_cam or not _cached_cam.is_inside_tree():
 		_cached_cam = _find_camera()
@@ -222,7 +222,7 @@ func _process(_delta: float) -> void:
 		water_material.set_shader_parameter("u_fog_type", env.get_fog_type())
 		var env_data: EnvFile = env.get_environment_data()
 		if env_data:
-			water_material.set_shader_parameter("u_water_alpha", env_data.get_water_murk())
+			water_material.set_shader_parameter("u_water_murk", env_data.get_water_murk())
 
 
 func _apply_environment_water_height() -> void:

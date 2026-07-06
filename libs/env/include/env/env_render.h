@@ -512,8 +512,10 @@ SkyDomeMesh build_sky_dome_mesh(float sky_height);
 inline constexpr int kWaterNoiseSize = 128; // 128x128 field and textures
 
 // The static tables built once at renderer init [orig:
-// Water_InitNoiseFieldAndSineLut @ 0x5c01a0, called from Terrain_InitShaders
-// @ 0x5c19f8]: a normalized random field and the 128 + 64*sin(2*pi*i/256)
+// Water_InitNoiseFieldAndSineLut @ 0x5c01a0, called from
+// Water_InitSurfaceShaders @ 0x5c19b0 (call site @ 0x5c19f8; renamed from the
+// kong misnomer Terrain_InitShaders at REN-4 - it builds the WATER surface
+// shader/material set)]: a normalized random field and the 128 + 64*sin(2*pi*i/256)
 // byte LUT (truncating float->int like the original ftol).
 struct WaterNoiseTables {
 	uint8_t field[kWaterNoiseSize * kWaterNoiseSize]; // Water_NoiseField
@@ -525,7 +527,7 @@ struct WaterNoiseTables {
 uint32_t water_noise_prng_step(uint32_t state);
 
 // Builds the tables with the witnessed algorithm. Retail's field CONTENT
-// depends on the shared PRNG's state at Terrain_InitShaders time (a
+// depends on the shared PRNG's state at Water_InitSurfaceShaders time (a
 // value-history quirk, recorded in env-tod-re.md); the reimpl seeds from the
 // boot state 0 for a deterministic, witnessed-faithful instance.
 WaterNoiseTables water_init_noise_tables();

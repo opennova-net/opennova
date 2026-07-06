@@ -10,7 +10,7 @@
     "vfs"
   ],
   "counters": {
-    "libs_uncited_src_files": 64,
+    "libs_uncited_src_files": 63,
     "test_private_pokes": 1371
   },
   "dict_contract_allowlist": [

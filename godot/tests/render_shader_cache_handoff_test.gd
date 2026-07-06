@@ -19,7 +19,10 @@ const EXPECTED_KEYS := {
 	"VS_PHONGT/base": [["VS_PHONGT", 0x00, 0, 0, 128], 0x00002408],
 	"VS_DOT3DIFFOBJ/base": [["VS_DOT3DIFFOBJ", 0x00, 0, 0, 128], 0x00000c08],
 	"VS_DOT3DIFF2/base": [["VS_DOT3DIFF2", 0x00, 0, 0, 128], 0x00001410],
-	"VS_SKBUMPDIFFT2/base": [["VS_SKBUMPDIFFT2", 0x00, 0, 0, 128], 0x00005410],
+	# 0x5410 -> 0x1410 at REN-4: the OED dump's GLASS bit on the SkB*T rows was
+	# table drift — the runtime capability probe never sets it (no ReflectColor
+	# reference) [orig: HLSLEffect_LoadFromFile probe @ 0x5ae690; D-RMAT-4].
+	"VS_SKBUMPDIFFT2/base": [["VS_SKBUMPDIFFT2", 0x00, 0, 0, 128], 0x00001410],
 	"VS_FLAG/base": [["VS_FLAG", 0x00, 0, 0, 128], 0x0000000c],
 	"FF_ST_OP_LUM/em2": [["FF_ST_OP_LUM", 0x00, 2, 0, 128], 0x00000304],
 	"FF_ST_OP/all-flags": [["FF_ST_OP", 0x07, 0, 0, 200], 0x000000e4],

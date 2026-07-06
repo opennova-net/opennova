@@ -525,13 +525,52 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
   Both textures upload every frame. Wave phase `Water_WavePhase = frame_counter ×
   0x3000000` (`@ 0x5c0374`).
 - **Init tables** (`Water_InitNoiseFieldAndSineLut @ 0x5c01a0`, once from
-  `Terrain_InitShaders @ 0x5c19f8`): field = 128×128 samples `2·PRNG_Next16() −
+  `Water_InitSurfaceShaders @ 0x5c19b0` — renamed at REN-4 from the kong misnomer
+  `Terrain_InitShaders`; call site `@ 0x5c19f8`): field = 128×128 samples
+  `2·PRNG_Next16() −
   0x10000` min/max-normalized as `((v−min)<<8)/(range + range>>8)`; LUT =
   `128 + 64·sin(2πi/256)` (truncating ftol). `PRNG_Next16 @ 0x6130a0` =
   `state = rol4(state + rol11(state)) ^ 1` (state `@ 0x31BFBB0`) — the ALGORITHM is
   deterministic but the field CONTENT depends on the shared PRNG's call history before
   terrain init (value-history quirk; the reimpl builds from the boot state 0 for a
   deterministic witnessed-faithful instance — `libs/env water_init_noise_tables`).
+- **The water surface material set** (REN-4, `Water_InitSurfaceShaders
+  @ 0x5c19b0`): builds the two 128×128 GTextures `"w2a"` (color+ridge-alpha) /
+  `"w2b"` (DuDv) over `Water_NoiseColorPixels`, then — gated on
+  `Water_DetailLevel @ 0x24d2050` ≥ 2 (downgraded to 1 without caps bit 0x100
+  = ps1.1) — assembles the **bump-reflection ps.1.1** (`t0` = DuDv,
+  `texm3x2pad/texm3x2tex` → `t2` = the reflection RTT
+  (`Water_ReflectionTexture @ 0x28ee8d8`, written by `sub_5C08B0`), `mul_x2`
+  by `v0` vertex color, `mul_x4` by `t3` = the noise color, `add v1`
+  specular) plus a **nightvision variant** (luminance `dp3 (0.25, 0.60,
+  0.15)` + `mad_sat` squash + remodulate), and creates four materials
+  (`GfxShader_Create4TexDesc`, slots {w2b, 0, reflection RTT, w2a}):
+  `Water_ShaderBlend @ 0x28ee8c4` — **SrcBlend ONE, DestBlend SRCALPHA**
+  (out = src + dst·α; blend mode 11 of `decode_blend_mode_to_d3d_states
+  @ 0x680f00`), pass flags 0x30000 (specular+fog); `Water_ShaderOpaque
+  @ 0x28ee8c8` — blend off, 0x20000; and the NV pair (`@ 0x28ee8cc/d0`).
+  `Water_DetailLevel < 2` falls back to fixed-function TSS: the blend
+  material = 2 stages {s0 `MODULATE2X(reflectionTex, DIFFUSE)`,
+  α `SELECTARG1(tex)`; s1 `MODULATE2X(noiseTex, CURRENT)`,
+  α `MODULATE(tex, DIFFUSE)`} with the same ONE+dst·SRCALPHA blend (flags
+  0x1030000 add stage-0 clamp); the opaque one = mode 0x1020600 over
+  {reflection, w2a}. Also `Water_ShaderReflectSimple @ 0x28ee8c0` (mode
+  0x600 over the reflection RTT) and `Water_ShaderAdditiveFlat @ 0x28ee8d4`
+  (textureless additive-diffuse mode 0x222; consumed by
+  `render_main_scene @ 0x5c1913`). **Selection in `render_water_surface`
+  (`@ 0x5c33e6..0x5c34ea`)**: camera-above view → the BLEND material;
+  underwater view → the OPAQUE one; the second caller arg = the NIGHTVISION
+  post-redraw (FrameFX re-renders water through the NV shaders and skips
+  decals); every path applies pass flags 0x400000 (cull NONE — two-sided)
+  via `GfxShader_ApplyPassChecked @ 0x677020` and **alpha-test ref 32
+  GREATER** (`CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419/@ 0x5c3484`) — the
+  far-fade cutoff (the skyfog clear covers the discarded region). Ported at
+  REN-4: `water.gdshader` re-expresses the witnessed blend exactly
+  (`blend_premul_alpha` with `ALPHA = 1 − a`), the ref-32 discard on the
+  witnessed TSS alpha (noise.a × distance alpha), cull_disabled; the
+  reflection RTT consumer stays env #30, the underwater OPAQUE swap rides
+  the underwater slice with D-RORD-3's residual, and the murk knob is the
+  interim `(1 − murk)` factor pending env #29's angle chain (env #34).
 - **UV state** (`@ 0x5c3348..0x5c33db`): texture scale `= 0.99996948 · w/(w − 0.2)`
   with `w` = the INTEGER part of the SMOOTHED fog distance (the word at
   `Env_FogDistCurrent+2`); bias `= 0.2 · scale` (→ `flt_8412B0/B4`). UV offsets ride
@@ -678,6 +717,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 31 | The water render LOOK was invented: sin/cos shader waves + Fresnel-style alpha with no witness; retail = per-frame animated 128×128 noise color + DuDv textures over `Env_WaterColorLit` per-vertex color, distance-alpha, murk term | **FIXED 2026-07-06 (minted-and-closed at the water binding slice)**: `water.gdshader` rewritten as a structural port of the witnessed detailed-path model over the libs/env textures (`water_noise_color_pixels`/`water_noise_normal_pixels`/`water_uv_state`, ctest-pinned); the invented waves/fresnel are deleted |
 | 32 | Celestial placement inventions: the reimpl placed bodies at `camera.xz + dir × 2000 × (sky_height/175.69)` with ZEROED camera height and a `dir.y > -0.1` visibility gate — none witnessed. The live renderer places at camera + dir × 64 (full height, identity rotation) with alpha folds; the 2000 belongs only to the dome VS proximity ref, the +64/+16 offsets to a dead variant | **FIXED 2026-07-06 (minted-and-closed at the celestial leg)**: placement + witnessed sun/moon alphas ported (`kCelestialBodyDistance`, `celestial_sun/moon_alpha_fixed`, EnvFile statics, vector-pinned); the depth-test flip replaces the invented gate (the world overdraws bodies like retail's draw order) |
 | 33 | Star field: retail renders 256 camera-anchored billboard instances with per-star twinkle (rol4/rol11 PRNG) and a hide-near-the-light dot cull `[orig: render_star_field @ 0x5ad9c0]`; the reimpl renders the star 3DI as ONE body. The instance-table generator is unfound | **WITNESSED-READY-DEFERRED (minted 2026-07-06)**: render loop fully specced; the table writer needs a hunt (NEEDS-RE facet) — the port rides a dedicated slice with it |
+| 34 | Water surface framebuffer blend + far cutoff: the reimpl used standard alpha blending (`blend_mix` — src·α + dst·(1−α), water opaque near / transparent far) and no alpha test; witnessed retail draws the above-water surface with **SrcBlend ONE + DestBlend SRCALPHA** (out = src + dst·α — transparent near, surface-dominant far) and **alpha-test ref 32 GREATER** as the far-fade cutoff `[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_water_surface @ 0x5c33f0..0x5c3419; decode_blend_mode_to_d3d_states @ 0x680f00 mode 11]` | **FIXED (minted-and-closed at REN-4)**: `water.gdshader` re-expresses the blend exactly via `blend_premul_alpha` with `ALPHA = 1 − a`, discards at ref 32 on the witnessed TSS alpha, and stays two-sided (pass flags 0x400000). Residuals live in their own rows: tessellation/murk-angle chain #29, reflection RTT #30, the underwater OPAQUE material swap with D-RORD-3 |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 
@@ -694,9 +734,13 @@ dispositions: 0 files set `envscale` after a color line (#8 holds), 0 tod blocks
 - Day/night `timeofday` enum mapping order (dawn/day/dusk/night → 1/2/3/4-or-0) — classification
   only, no gradient impact.
 - `dword_26C6450` "TOD minutes elapsed" consumer.
-- Pass-1 sky-gradient effect's exact stage table (`sub_679030` looks the effect up by name;
-  with no texture bound the dome flat-shades oD0 — the sensible diffuse passthrough — but
-  the named effect's TSS rows were not dumped). Cosmetic-only for C7.
+- **Closed at REN-4** — the pass-1 sky-gradient stage table: the effect is built
+  by `GfxShader_Create1TexModeId(0, 0x20200)` (`[orig: terrain_init_rendering_resources
+  @ 0x578aa8]`) — no texture, mode word 0x200 + fog bit — and the mode decoder
+  (`decode_mode_color_stage @ 0x681080` case 0x200) emits stage 0
+  `COLOROP = SELECTARG2(DIFFUSE)` with alpha `SELECTARG2(TFACTOR)` and blend
+  OFF: the dome pass 1 IS the flat oD0 diffuse passthrough the C7 port
+  assumed. `sky.gdshader` needs no change.
 - Closed by C6: iris curve (§Iris auto-exposure), overcast precedence (§Load pipeline),
   terrain_rgb consumers (§iris/terrain_rgb), sky combine (§Sky dome), thunder wiring
   (§weather tick).

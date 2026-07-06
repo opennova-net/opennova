@@ -56,6 +56,14 @@ struct ObjectMaterialClassification {
 	bool is_skinned = false;
 	bool uses_specular = false;
 	bool normal_uses_uv2 = false;
+	// The 0x10000000 capability: this material renders a duplicate into the
+	// glow/bloom queue (Q3), flushed by the bloom pass — the FF _LUM rows and
+	// FFP_GLASS carry it at runtime [orig: Q3 copy gate on effect caps
+	// @ 0x5d93b5; FrameFX_RenderBloomPass flush mode 4 @ 0x582a54].
+	bool is_glow_capable = false;
+	// vsTracer soft edge: color x |dot(eye, normal)|^2, unlit
+	// [orig: Tracer.fx vsTracer — D-RMAT-2].
+	bool view_angle_fade = false;
 	ObjectNormalSpace normal_space = ObjectNormalSpace::None;
 };
 

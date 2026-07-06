@@ -163,6 +163,14 @@ The render-consumer rows transferred to the REN track on 2026-07-05
 REN-5 (the modulator chain is a render-lighting consumer); #27/#29/#30/#33 →
 REN-6. Dispositions unchanged — the transfer moves ownership, not status.
 
+The REN-4 shader/TSS decode (2026-07-06) minted-and-closed **env #34** — the
+water surface framebuffer blend + far cutoff: retail draws the above-water
+surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
+`[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_water_surface
+@ 0x5c33f0..0x5c3419]`; the reimpl used standard alpha blending —
+`water.gdshader` now expresses the witnessed blend exactly
+(`blend_premul_alpha` + inverted alpha) with the ref-32 discard.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
@@ -345,12 +353,19 @@ strict `a > ref`) and D-RMAT-3 (tag lookup is case-insensitive `stricmp`)
 were discovered, witnessed, and FIXED in the same slice, with the T1
 render-state golden re-dumped under citation.
 
+Closed 2026-07-06 (REN-4): **D-RMAT-2** -> `FIXED` — the "soft edge" is the
+`vsTracer` facing falloff `Diff = |dot(eye, normal)|^2` (not a displacement),
+ported as `MATERIAL_DESCRIPTOR_VIEW_FADE`/`OSCAP_VIEW_FADE` `[orig: Tracer.fx
+vsTracer]`; **D-RMAT-4** -> `FIXED` — the capability probe replicated over the
+shipped localres text (unions over ALL techniques `[orig: @ 0x5ae690]`): 14/19
+tags match the OED dump, 5 drift rows corrected on the renderer descriptor
+table (FFP_GLASS, VS_SKBUMPDIFFT/PHONGT/DIFFT2, VS_SKGLASS), the 0x10000000
+dialect resolved as the glow-copy capability (`MATERIAL_FLAG_GLOW`).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-RMAT-2 | VS_TRACER: the registry row landed (runtime tag, unlit additive diffuse), but Tracer.fx's soft-edge `vsTracer` vertex displacement is unported — tracers render hard-edged | A | WITNESSED-READY-DEFERRED | REN-4 |
-| D-RMAT-4 | File-effect capability/sort flag words carried verbatim from the OED dump; the runtime derives them by a per-technique usage probe `[orig: HLSLEffect_LoadFromFile @ 0x5ae690]` — per-tag equality unverified (note the 0x10000000 LUM-vs-TexCubeRotSpecular dialect) | B | NEEDS-RE | REN-4 |
 | D-RMAT-5 | Composer lighting gains are prototype values (hemi fill + ×1.5/×1.6/spec 0.8) vs the witnessed uniform surface (HemiSky/HemiGround/DirLight/Ambient/ColorSrcGlobalGain) | A | OPEN | REN-5 |
-| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — the class SELECTION semantics ported + T1-pinned at REN-3 (`renderer::technique_class_for_submit`); the class BEHAVIORS remain | A | WITNESSED-READY-DEFERRED (selection ported) | REN-4 |
+| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — selection ported + T1-pinned at REN-3; the class CONTENT witnessed at REN-4 (FF technique tables, the pass-execution model, the GLOW capability landed as `is_glow_capable`) | A | WITNESSED-READY-DEFERRED (selection + GLOW flag ported) | remaining host mappings ride D-RORD-4/-5 residuals + REN-5 |
 
 ### Render — draw order — [render/render-order-re.md](render/render-order-re.md) (D-RORD catalog; REN-3)
 
@@ -367,7 +382,7 @@ object-model rungs), with the sort-key/pass-class semantics T1-pinned.
 | D-RORD-2 | Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced — the host's internal opaque ordering serves the same intent; key semantics preserved as T1-pinned functions | C | PERMANENT (register, this slice) | — |
 | D-RORD-3 | Water-side transparent binning is per OBJECT (model origin at rebuild / `refresh_render_order()`) vs retail's per STRIP per frame (`[orig: @ 0x5d932e..0x5d9354]`) — straddling or water-crossing models can mis-bin strips | A | OPEN (partial) | REN-6/T3 attestation decides |
 | D-RORD-4 | Viewmodel has no depth treatment (clips into near walls); retail draws it FIRST under near-Z 0.05 + viewport depth range [0, 0.1] with its own flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | A | WITNESSED-READY-DEFERRED | runtime slice; T3 scene 6 |
-| D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED | REN-4 (GLOW class); FrameFX out of REN scope |
+| D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED (capability semantics landed at REN-4: `is_glow_capable` + the corrected glow set incl. FFP_GLASS; GLOW content witnessed) | residual = host bloom wiring + the specular cube (REN-5); FrameFX out of REN scope |
 | D-RORD-6 | The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced — reproducing them manufactures garbage | C | PERMANENT (register, this slice) | — |
 
 ---
@@ -400,9 +415,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Foliage | 1 | 0 | 0 | 1 | 0 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
-| Render — materials/state | 1 | 1 | 2 | 4 | 0 |
+| Render — materials/state | 1 | 0 | 1 | 2 | 0 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
-| **Total** | **31** | **13** | **32** | **76** | 7 |
+| **Total** | **31** | **12** | **31** | **74** | 7 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
 

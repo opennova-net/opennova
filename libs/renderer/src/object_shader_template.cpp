@@ -231,7 +231,16 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "\tvec3 lit = base.rgb;\n";
 	f += "\tfloat alpha = base.a;\n";
 
-	if (emissive || luminance) {
+	if (has_flag(key, OSCAP_VIEW_FADE)) {
+		// vsTracer: unlit, color x |dot(eye, normal)|^2 — the facing-angle
+		// falloff that fades a well-tessellated tube toward its silhouette
+		// edges ("soft edges"); no lighting includes, Spec = 0. Evaluated
+		// per-fragment here (the original computes lum per-vertex in vs_1_1
+		// and interpolates — same formula).
+		// [orig: Tracer.fx vsTracer; TSSColor MODULATE(Texture, Diffuse)]
+		f += "\tfloat vf = abs(dot(geom_normal, view_dir));\n";
+		f += "\tlit = base.rgb * (vf * vf);\n";
+	} else if (emissive || luminance) {
 		f += "\tlit = base.rgb;\n";
 	} else if (family == ObjectShaderFamily::Flag) {
 		f += "\tvec3 nfacing = surface_normal;\n";
@@ -317,6 +326,7 @@ ObjectShaderKey build_object_shader_key(const ObjectMaterialClassification &cls)
 	if (cls.has_detail) key |= OSCAP_DETAIL;
 	if (cls.uses_specular) key |= OSCAP_SPECULAR;
 	if (cls.is_glass) key |= OSCAP_GLASS;
+	if (cls.view_angle_fade) key |= OSCAP_VIEW_FADE;
 	return key;
 }
 

@@ -34,6 +34,11 @@ enum ObjectShaderCapBits : uint32_t {
 	OSCAP_SPECULAR     = 0x00002000u,
 	OSCAP_GLASS        = 0x00004000u,
 	OSCAP_NORMAL_UV2   = 0x00008000u,
+	// vsTracer soft edge: unlit color x |dot(eye, normal)|^2
+	// [orig: Tracer.fx vsTracer — D-RMAT-2, ported at REN-4].
+	// (The glow-copy capability — is_glow_capable — is deliberately NOT a key
+	// bit: it selects the Q3/bloom duplicate, not the composed look.)
+	OSCAP_VIEW_FADE    = 0x00010000u,
 };
 
 using ObjectShaderKey = uint32_t;

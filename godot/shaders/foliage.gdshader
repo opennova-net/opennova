@@ -1,12 +1,25 @@
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_prepass_alpha;
 
-// RE anchors:
-// - Retail foliage render-emitter bindings still need a verified anchor.
-// - Terrain_GetModulatedColorAtPos@0x005C5FE0: base.rgb * light.rgb >> 7.
-// - Pixel shader at dword_1549E3C / 0x005BF064 multiplies foliage texture t0
-//   by a terrain/light texture stream and constant diffuse color.
-// - sub_5C1790@0x005C1790 still needs IDA recovery for final texture bindings.
+// RE anchors (corrected at REN-4 — the old "0x005BF064" pixel-shader anchor
+// was bogus: that address is inside draw_death_screen_overlay, and
+// "sub_5C1790" is not a function in the retail image; both came from a stale
+// note. The witnessed foliage shader set, docs/terrain/terrain-re.md):
+// - Terrain_GetModulatedColorAtPos @ 0x5C5FE0: base.rgb * light.rgb >> 7.
+// - Foliage_CreateLightmapBlendPS @ 0x5ff7a0 — the hw fragment combine for
+//   foliage/sector models: rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8,
+//   a = t0.a x v0.a, where t1 is the terrain lightmap sampled by a planar
+//   world-position projection (VS oT1 = dp4(world, c7/c8)) and c0/c1 are the
+//   lighting constants (values pinned at REN-5).
+// - Terrain_CreateFoliageVertexShaders @ 0x5ff630 — the wind-sway VS
+//   (polynomial sine of world-X phase, weight = vertex RED, Z displacement)
+//   and the per-patch grid-placement VS.
+// - Terrain_SetupSectorModelDraw @ 0x6007c0 — sector-model draw setup:
+//   ALPHA-TEST REF 180 (high quality) / 8 (low); our u_alpha_cutoff 0.33 is a
+//   tracked stand-in until the foliage draw paths are split by quality.
+// - Terrain_InitSectors @ 0x601260 — the FF fallback stage tables (3-stage
+//   TEMP-routed MODULATE4X / 2-stage MODULATE2X) + the 9-tap alpha smoothing
+//   and gray-mip fill preprocessing of foliage textures.
 
 uniform sampler2D u_albedo_texture : source_color, filter_linear_mipmap, repeat_enable;
 uniform bool u_has_albedo_texture = false;

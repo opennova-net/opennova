@@ -31,10 +31,17 @@
 // [orig: RenderBatch_QuickSort @ 0x5d8b40; collect_render_objects_for_batch
 // @ 0x5d8f20; Terrain_RenderSceneWithReflection @ 0x5c93a0]. Lighting
 // scalars join at REN-5 as their producers land in libs/renderer.
+//
+// REN-4 extended the classification rows with glow= (the 0x10000000 Q3
+// bloom-copy capability [orig: probe @ 0x5ae690; Q3 gate @ 0x5d93b5]) and
+// vfade= (the vsTracer view-angle fade, D-RMAT-2), and added section 4:
+// uv-anim vectors over libs/renderer/uv_anim
+// [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0].
 
 #include "renderer/material_classify.h"
 #include "renderer/object_shader_template.h"
 #include "renderer/render_order.h"
+#include "renderer/uv_anim.h"
 #include "oed/material_descriptor.h"
 #include "threedi/threedi_3di3.h"
 
@@ -123,7 +130,8 @@ std::string generate() {
 						              "tag=%s flags=%02x em=%u gl=%u atb=%u | "
 						              "known=%d fam=%s blend=%s lum=%d emis=%d two=%d "
 						              "nmap=%d glass=%d env=%d atest=%d atinv=%d atval=%.6f "
-						              "det=%d skin=%d spec=%d nuv2=%d nspace=%s key=%08x\n",
+						              "det=%d skin=%d spec=%d nuv2=%d nspace=%s "
+						              "glow=%d vfade=%d key=%08x\n",
 						              tag.empty() ? "<empty>" : tag.c_str(),
 						              flags, em, gl, atb,
 						              cls.known_shader ? 1 : 0,
@@ -143,6 +151,8 @@ std::string generate() {
 						              cls.uses_specular ? 1 : 0,
 						              cls.normal_uses_uv2 ? 1 : 0,
 						              normal_space_name(cls.normal_space),
+						              cls.is_glow_capable ? 1 : 0,
+						              cls.view_angle_fade ? 1 : 0,
 						              key);
 						out << line;
 					}
@@ -233,6 +243,72 @@ std::string generate() {
 	              kRungSkyStars, kRungSkyBody, kRungAlphaFarSide, kRungWater,
 	              kRungAlphaCameraSide, kRungOverlayFx, kRungSunGlow);
 	out << line;
+
+	// Section 4 (REN-4): uv-anim vectors over libs/renderer/uv_anim — the
+	// time-driven MatTexCoord1 transform
+	// [orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0;
+	//  bound in apply_shader_parameters @ 0x58db80 with
+	//  time = (tick_ms << 8)/1000]. docs/render/render-material-re.md.
+	out << "# uv-anim v1 (REN-4: scroll/rotate/waveform/controlled channels)\n";
+
+	// Wave lookup bands: every type over a phase sweep (type 6 uses the
+	// caller-supplied rand — pinned constant here).
+	const uint8_t wave_types[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xF };
+	const uint16_t wave_phases[] = { 0x0000, 0x0180, 0x4000, 0x7FC0, 0x8000,
+	                                 0xC132, 0xFF80 };
+	for (uint8_t wt : wave_types) {
+		for (uint16_t ph : wave_phases) {
+			std::snprintf(line, sizeof(line), "wave t=%02x ph=%04x v=%d\n",
+			              wt, ph, renderer::uv_anim_wave_lookup(wt, ph, 0x1234));
+			out << line;
+		}
+	}
+
+	// Channel transforms: one channel active per row (the other identity),
+	// covering every mode family at two times.
+	struct UvCase {
+		const char *label;
+		renderer::UvAnimChannel ch;
+	};
+	const UvCase uv_cases[] = {
+		{ "scroll+", { 16, 0x20, 3, 0, 0 } },
+		{ "scroll-", { 17, 0x00, 5, 0, 0 } },
+		{ "rot+", { 32, 0x40, 2, 0, 0 } },
+		{ "rot-", { 33, 0x00, 7, 0, 0 } },
+		{ "wave-set", { 0x32, 0x10, 4, 64, 320 } },     // mode 0x30, sine band
+		{ "wave-scroll", { 0x44, 0x00, 6, -128, 128 } },// mode 0x40, band 4
+		{ "wave-shear", { 0x57, 0x08, 2, 0, 256 } },    // mode 0x50, lerped band 7
+		{ "wave-scale", { 0x61, 0x00, 3, 128, 512 } },  // mode 0x60, band 1
+		{ "ctrl-set", { 'q', 2, 0, 0, 256 } },
+		{ "ctrl-scroll", { 'r', 1, 0, -64, 192 } },
+		{ "ctrl-shear", { 's', 0, 0, 0, 128 } },
+		{ "ctrl-scale", { 't', 3, 0, 128, 384 } },
+		{ "ctrl-rot", { 'u', 0, 0, 0, 64 } },
+	};
+	const uint16_t uv_times[] = { 0x0000, 0x2B67 };
+	const renderer::UvAnimChannel identity{};
+	for (const UvCase &c : uv_cases) {
+		for (uint16_t tm : uv_times) {
+			const renderer::UvAnimTransform tu =
+				renderer::uv_anim_transform(c.ch, identity, tm, 0x8000, 0, 0x0741);
+			const renderer::UvAnimTransform tv =
+				renderer::uv_anim_transform(identity, c.ch, tm, 0, 0x8000, 0x0741);
+			std::snprintf(line, sizeof(line),
+			              "uvU %-11s t=%04x m=[%.6f %.6f %.6f %.6f %.6f %.6f]\n",
+			              c.label, tm,
+			              static_cast<double>(tu.m00), static_cast<double>(tu.m01),
+			              static_cast<double>(tu.m10), static_cast<double>(tu.m11),
+			              static_cast<double>(tu.m20), static_cast<double>(tu.m21));
+			out << line;
+			std::snprintf(line, sizeof(line),
+			              "uvV %-11s t=%04x m=[%.6f %.6f %.6f %.6f %.6f %.6f]\n",
+			              c.label, tm,
+			              static_cast<double>(tv.m00), static_cast<double>(tv.m01),
+			              static_cast<double>(tv.m10), static_cast<double>(tv.m11),
+			              static_cast<double>(tv.m20), static_cast<double>(tv.m21));
+			out << line;
+		}
+	}
 
 	return out.str();
 }

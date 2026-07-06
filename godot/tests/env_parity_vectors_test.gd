@@ -473,7 +473,9 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			# statics; pinned at the NovaWater output).
 			simulate(water, 1, TICK)
 			var lit: Vector3 = water.water_material.get_shader_parameter("u_water_color")
-			var alpha: float = water.water_material.get_shader_parameter("u_water_alpha")
+			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
+			# value flows through, so the pinned byte is unchanged).
+			var alpha: float = water.water_material.get_shader_parameter("u_water_murk")
 			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
 
 		# u_water_uv = (scale, bias, offset_u, offset_v) [orig:
