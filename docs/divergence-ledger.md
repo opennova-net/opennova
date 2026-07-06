@@ -29,7 +29,11 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
    unknowns into tracked rows — **all seven landed this cycle**: VFS/PFF (R7),
    Fonts (R4), Foliage (R2), Tiles (R3) full; Terrain (R1) + Credits (R5) partial;
-   Importer (R6) tracked-by-composition. `UNAUDITED` is now **0**.
+   Importer (R6) tracked-by-composition. `UNAUDITED` reached **0** on 2026-07-05;
+   the REN planning grill reopened the set the same day with the **three
+   runtime-render systems** (materials/state, draw order, lighting — the audit
+   track below), audited by REN-2/3/5
+   ([ADR 0023](adr/0023-render-visual-parity.md)).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -154,16 +158,21 @@ camera height, the dir.y gate — the live renderer places at camera + dir × 64
 witnessed alpha folds), plus **env #33** (the 256-instance star field with per-star
 twinkle — specced, table generator unfound; WRD).
 
+The render-consumer rows transferred to the REN track on 2026-07-05
+([ADR 0023](adr/0023-render-visual-parity.md), Slice column updated): #17 →
+REN-5 (the modulator chain is a render-lighting consumer); #27/#29/#30/#33 →
+REN-6. Dispositions unchanged — the transfer moves ownership, not status.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | REN-5 (from PAR-ENV) |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | PAR-ENV |
-| env #30 | Water reflection passes (init @ Terrain_Init 0x60fcc5, Terrain_RenderSceneWithReflection @ 0x5c93a0, mirrored strip verts) — none rendered by the reimpl | A | NEEDS-RE (existence witnessed, spec deferred) | PAR-ENV |
-| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | PAR-ENV |
+| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | REN-6 (from PAR-ENV) |
+| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | REN-6 (from PAR-ENV) |
+| env #30 | Water reflection passes (init @ Terrain_Init 0x60fcc5, Terrain_RenderSceneWithReflection @ 0x5c93a0, mirrored strip verts) — none rendered by the reimpl | A | NEEDS-RE (existence witnessed, spec deferred) | REN-6 (from PAR-ENV) |
+| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | REN-6 (from PAR-ENV) |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -368,7 +377,10 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **0** — every system now has an RE record (full or partial) or a tracked-by-composition audit.
+Permanent register size: **17** (below). `UNAUDITED` systems: **3** — the
+runtime-render systems reopened the set on 2026-07-05 (the REN audit track
+below, [ADR 0023](adr/0023-render-visual-parity.md)); every other system has
+an RE record (full or partial) or a tracked-by-composition audit.
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -415,11 +427,13 @@ the follow-up path.
 
 ---
 
-## Audit track — COMPLETE (`UNAUDITED` = 0)
+## Audit track
+
+### The 2026-07-05 sweep — COMPLETE
 
 All seven systems that started with no RE record now have one (full or partial) or
-a tracked-by-composition audit. The `UNAUDITED` set is empty; every subsystem's
-divergences are tracked rows, not unknown unknowns.
+a tracked-by-composition audit; their divergences are tracked rows, not unknown
+unknowns.
 
 | System | Slice | Result |
 |---|---|---|
@@ -441,6 +455,30 @@ loop at `0x75e348` (`rol ebx,7` + `xor [blob],key&0xFF`, 4-byte groups), byte-ex
 to `libs/cbin`. The two partials (Terrain, Credits) have their remaining grills
 scoped in their records; the six code-cited-jodemo systems are retail-anchored
 where they ship.
+
+### Render (REN) — reopened 2026-07-05, `UNAUDITED` = 3
+
+The REN planning grill ([ADR 0023](adr/0023-render-visual-parity.md),
+[maturity-program.md](maturity-program.md) REN track) found the runtime render
+path silently uncovered — the one substantially **reimplemented but
+unwitnessed** surface: the object-material chain (the `libs/oed` 45-entry
+shader-tag table + the `libs/renderer` classifier/composer +
+`NovaObjectShaderCache`) carries only ModSuperOed-side citations, and no
+record covers batching/draw order, the runtime TSS stage tables, or lighting
+application. Three systems enter `UNAUDITED`; the REN grill slices convert
+them into records with catalogs (raising open counts before the burn-down
+lowers them, as the R-audits did):
+
+| System | Slice | Record on landing |
+|---|---|---|
+| Object materials / render state (the runtime flag/tag→state path) | REN-2 | `render/render-material-re.md` (D-RMAT) |
+| Batching / draw order / pass structure | REN-3 | `render/render-order-re.md` (D-RORD) |
+| Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | `render/render-lighting-re.md` (D-RLIT) |
+
+Terrain-TSS and sky/water shader findings grow the existing
+[terrain/terrain-re.md](terrain/terrain-re.md) and
+[env/env-tod-re.md](env/env-tod-re.md) records in place rather than forking
+new ones.
 
 ## Standing rules
 

@@ -56,6 +56,7 @@ behavior is summarized and cited.
 | [0020](adr/0020-world-terrain-query-seam.md) | libs/terrain_query is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
 | [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
 | [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
+| [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |
 
 ## RE records by domain
 
@@ -85,7 +86,12 @@ behavior is summarized and cited.
 | World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed |
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide, engine-research) |
 
-Every subsystem now has a dedicated RE record (full or partial) or a
-tracked-by-composition audit — the UNAUDITED set is empty. The project glossary
-lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the project vision is
-[`GOALS.md`](../GOALS.md).
+The UNAUDITED set was emptied by the PAR-R1..R7 sweep (2026-07-05), then
+reopened the same day with the three runtime-render systems the REN track
+audits — materials/state, draw order, lighting (the records land under
+`docs/render/` at REN-2/3/5; see the
+[divergence ledger](divergence-ledger.md)'s audit track and
+[ADR 0023](adr/0023-render-visual-parity.md)). Every other subsystem has a
+dedicated RE record (full or partial) or a tracked-by-composition audit. The
+project glossary lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the
+project vision is [`GOALS.md`](../GOALS.md).

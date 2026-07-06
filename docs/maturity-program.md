@@ -26,9 +26,9 @@ of the game (ADR 0015).
 | Field | Value |
 |---|---|
 | State | **Wave 2 OPEN** — Wave-1 trunk #204 merged 2026-07-05 as `50fce423`; the Wave-2 boundary slice (this row's train) executed the STD-3 enforce flip + GOV-4 sync |
-| Current wave | 2 — portability + standards adoption (WIP cap: two trains). Contents: ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2 (STD-3 flip done at the boundary); ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D. First train: ENG-2 env port (ENG-1 vectors stand ready) |
+| Current wave | 2 — portability + standards adoption (WIP cap: two trains). Contents: ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2 (STD-3 flip done at the boundary); ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D; REN-0..2 (second train, opened 2026-07-05 — the REN trunk; its tail rides into Wave 3 under the stop-anywhere property). First train: ENG-2 env port — merged #206 |
 | Boundary gates (Wave 1→2) | full ctest: 246/248 green; the two reds are pre-existing, tracked, and not Wave-1 regressions — `npruntime_golden_gameplay` (TODO.md, D-NET-159 wire adjudication, asset-gated so CI never sees it) and `opennova_python_pytest` (diagnosed at this boundary, TODO.md: the two DCC-parity tests build a zero-write request the jobs validation rejects, then their in-parent `import bpy` poisons the 13 spawn-context worker tests — all 13 pass in isolation). FULL GUT attested in the boundary PR |
-| Freeze | ON for non-PAR work: new reimplementation features wait for their foundation phase (ONED-W2 releases at Wave 3); IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)). |
+| Freeze | ON for non-PAR/non-REN work: new reimplementation features wait for their foundation phase (ONED-W2 releases at Wave 3); IDA research/grills are exempt and continue. **PAR burn-down slices are exempt** (maintainer 2026-07-05, [ADR 0022](adr/0022-divergence-burn-down.md)) **and REN slices are exempt on the same model** (maintainer 2026-07-05, [ADR 0023](adr/0023-render-visual-parity.md) — ports are ledger closures landed libs-first). |
 | Detail docs | ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md) (all other tracks live here) |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down; boundary ADRs (npwire, world seam, lib topology, responsive shell) minted in their tracks at decision time |
 
@@ -36,6 +36,7 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| REN-0 track mint | (this slice) | the REN track (render visual parity) + [ADR 0023](adr/0023-render-visual-parity.md); ledger audit track reopened with the three runtime-render systems; env #17 → REN-5 and #27/#29/#30/#33 → REN-6 slice transfers; `ledger_check.py` DOMAIN_ORDER + the LIBS-2 `libs/renderer`-fold reversal; behavior-neutral |
 | ENG-2 env port (PR #206 train) | 28cc9474 … (7 slices) | the five environment GDScript files are scene plumbing over `libs/env`: weather core (slices 1-2), sky dome + cloud scroll (3-4), water surface (5-6, full witnessed render: per-frame noise textures + UV + lit-color pipeline), celestial placement + glare occlusion (7). Re-grills caught the shared RNG-seed transcription (env #25, fixed in libs/env + libs/wac), the scroll model (#26), the water look/precedence (#28/#31), celestial placement inventions (#32), and CLOSED env #14; minted #27/#29/#30/#33 as tracked deferrals. Honored-matrix re-attested; vectors 204/204 with per-slice witnessed re-dumps |
 | Wave-2 boundary: STD-3 flip + GOV-4 sync | (this slice) | CI lint step now `--enforce` ×3 (ratchet, dict-contract, link-graph) + `fetch-depth: 0` so the diff lint stops self-skipping on PRs; dict-contract lint repaired to class-level declarations only (its Wave-1 soft run flagged 36 function-locals — a lint bug, not code debt; the 4 surviving range hits are pre-existing contracts moved by F5); ledger scoreboard now GENERATED (`scripts/lint/ledger_check.py`, hard-fail like the ratchet) — mechanical recount corrected the hand-kept total 64 → **66 open** (Net rows were undercounted 21→23, Credits 2→1, Tiles 1→0, Fonts 3→1); ratchet baseline tightened `libs_uncited_src_files` 87 → **65** (earned by the PAR-train citations); D-FOLIAGE-1's raw `\|` escaped (it broke GFM rendering + parsers) |
 | GOV-4 Wave-1 close-out | 50fce423 (rode the trunk) | ratchets +0 all train (`test_private_pokes` 1371, `libs_uncited_src_files` 88 at close — see the boundary slice's recount); ledger synced continuously (the trunk-era hand count said 66 → 62; the mechanical recount at the boundary says 66 — the drift is why the scoreboard is now generated); stale-doc touches rode each slice (vfs record, menu-re, world-wac-ai-re, env records) |
@@ -148,8 +149,10 @@ rule. The real issues are one heavy edge and two families.
 - **LIBS-2** (S+M) family topology ADR + execution: affirm
   one-lib-per-format; the terrain and audio families become CMake
   link-interface groups (`opennova_terrain_family`, `opennova_audio_family`)
-  rather than physical merges — except `libs/renderer` (4 files that exist
-  to dodge one oed header), which folds.
+  rather than physical merges. The original "fold `libs/renderer`" clause
+  (4 files that existed to dodge one oed header) is **reversed** (maintainer
+  2026-07-05, [ADR 0023](adr/0023-render-visual-parity.md)): REN grows
+  `libs/renderer` into the witnessed render library instead.
 - **LIBS-3** (S) document the two consumption models in libs/CLAUDE.md:
   Model A = the flat C ABI (`opennova_shared`, importer/Python/DCC),
   Model B = C++ static link (engine, apps, net). They already exist de
@@ -183,7 +186,9 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
   transforms exposed once and consumed everywhere.
 - **ENG-4** (S/M) FNT packing port (shelf packer + format facts into
   `libs/fnt`; the Godot TextServer rasterization stays host-side) and
-  object-flag single-sourcing.
+  object-flag single-sourcing — the `MATERIAL_FLAG_*` leg is **subsumed by
+  REN-2** (which single-sources the engine-side flag spaces during the
+  materials grill); `OED_UPDATE_*` and the Python/DCC mirrors stay here.
 - **ENG-5** (S per wave) **the generalized bypass sweep** — a standing
   audit instrument, run at every wave boundary: per-domain review of
   modtools/engine GDScript for math and constants that exist in `libs/`,
@@ -212,7 +217,7 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
 | Hand-rolled terrain ray-march + slab test | terrain editor → mission picking | open (ENG-3) |
 | Sector/atlas constants + coord math duplicated | terrain editor mesh | open (ENG-3) |
 | FNT format facts + shelf packer in editor | fonts rasterizer | open (ENG-4) |
-| MATERIAL_FLAG_* / OED_UPDATE_* duplicated | engine object model GDScript | open (ENG-4) |
+| MATERIAL_FLAG_* / OED_UPDATE_* duplicated | engine object model GDScript | open (flags → REN-2; OED_UPDATE_* → ENG-4) |
 | Env/TOD/celestial/weather math in GDScript | godot/engine/environment | **closed (ENG-2, 2026-07-06)** — nodes are plumbing over libs/env; the tracked stand-ins are divergence rows (env #29 strip tessellation, #33 star instancing, #27 smoothed scalars) |
 | Menu absolute-rect math in canvas | mnu canvas | review (minor; canvas hosts the live engine node) |
 
@@ -304,9 +309,10 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
 - **PAR-NET** (L) the open D-NET set (the ledger's Net table) + populate
   `nw_golden_diff` `kDeferredGaps` with the D-NET refs from the attested 21-gap baseline,
   so the golden diff names each deferral by ID.
-- **PAR-ENV** (M) env #14/#15/#16/#17/#18/#19 implemented **libs/env-first**
-  (#21 closed 2026-07-05: the frame-clear horizon blend, libs/env-first with the
-  GameWorld consumer).
+- **PAR-ENV** (M) env #15/#16/#18 implemented **libs/env-first** (#14 closed
+  at ENG-2's celestial leg; #19/#21 closed 2026-07-05; **#17 transferred to
+  REN-5** — the modulator chain is a render-lighting consumer — and the
+  ENG-2-minted render rows #27/#29/#30/#33 fold into **REN-6**).
 - **PAR-WORLD** (M) the D-INF opens and the D-EVT set (D-ITEMDEF-1 closed
   faec4b3e — the first ledger row to zero; the 2026-07-05 D-EVT grill + slice
   closed D-EVT-2/-4, cats 5/6 of D-EVT-3, and minted-closed D-EVT-5, leaving
@@ -321,6 +327,118 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
   D-NET-49 (in-match PG), the in-world avatar binding (D-PLAYERINFO-1), and the full `.mis`
   grammar grill (`dfx2med.exe`, D-MIS-1/-3).
 
+### REN — render visual parity (materials, draw order, shaders, lighting)
+
+Grill and reimplement the original renderer so our output looks identical to
+retail. Standing rules are [ADR 0023](adr/0023-render-visual-parity.md): the
+original fixed-function look is the target (no PBR reinterpretation); the D3D
+device layer is the WITNESS SOURCE for state semantics and never a port target;
+REN runs on the PAR model (grills exempt as research, ports are ledger
+closures landed libs-first); instrument tolerances never widen — a divergence
+triggers a re-grill.
+
+Background finding (the 2026-07-05 planning grill): the runtime render path is
+the one **reimplemented-but-unwitnessed** subsystem. The 45-entry shader-tag
+table (`libs/oed/include/oed/material_descriptor.h`, static_assert-locked to
+the raw `gMaterialInfoTable` dump) and its chain — `libs/renderer`
+`classify_object_material()` → generated GLSL (`object_shader_template.cpp`)
+→ `NovaObjectShaderCache` → `nova_object_model.gd` ShaderMaterials — carry
+only ModSuperOed-side citations; no Jointops runtime render address is cited
+in `libs/` outside `libs/env`, and no record covers the runtime material
+path, batching/draw order, the runtime TSS tables, or lighting application.
+Draw order is greenfield (the celestial priority ladder is the only ordering
+machinery; world objects all render at priority 0). Three witnessed islands
+are reused, never re-grilled: env's sky TSS tables + vs_1_1 sources +
+dome→bodies→world order; ptl §5.2's `RenderState_ApplyToDevice @ 0x681920`
+struct decode; world §13's org-callback 6-draw order + `0x10000000` pass
+flag. Anchors were verified against the kong IDB at planning; two
+brief-stage corrections already caught (`Terrain_InitShaders @ 0x5c19b0`,
+`render_terrain_lightmaps @ 0x609de0` — mid-function addresses circulate)
+plus three dead render variants — expect ENG-2-grade misnomer density and
+verify every IDB name before citing it.
+
+RE records land under `docs/render/` (re-doc format): `render-material-re.md`
+(D-RMAT), `render-order-re.md` (D-RORD), `render-lighting-re.md` (D-RLIT);
+terrain TSS findings grow `terrain/terrain-re.md` (its pending "runtime
+render pass" item) and sky/water gaps grow `env/env-tod-re.md` in place.
+One trunk PR, slice-per-commit, per-slice attestations in the description.
+
+- **REN-0** (S) this mint: the track + ADR 0023 + the ledger audit-track
+  reopen + `ledger_check.py` domain map + the LIBS-2 reversal + the env
+  slice transfers. Behavior-neutral.
+- **REN-1** (M) **the parity instrument + baselines, before any behavior
+  change** (three tiers, NET-0's shape): *T1* render-state vectors — a ctest
+  walks the material input matrix (shader tags × 3DI flag bytes ×
+  emissive/glass × alpha refs) through the classification/composition chain
+  (later: sort-key/pass class + lighting scalars) against committed goldens,
+  dumped once from the current implementation, dump mode fails loudly, with
+  a forced one-bit sensitivity proof; *T2* the swatch A/B probe
+  (generalizing `env_visual_baseline_probe.gd`): a deterministic synthetic
+  swatch grid + asset-gated world composites, baselines captured pre-change
+  to `.scratch/golden/render/` (never committed), re-captured and attested
+  per slice; *T3* the named retail side-by-side scene list (water horizon ×
+  TOD grid, alpha-test foliage, glass/env-map, transparents composite, night
+  lightmap terrain, first-person viewmodel) — the headline gate at REN-7.
+- **REN-2** (L) **materials** (grill-ida — reimpl exists): decode the
+  runtime flag/tag→state semantics (`Entity_UpdateRenderState @ 0x5d6a30`,
+  `apply_shader_parameters @ 0x58db80`, `HLSLEffect_InitFixedFunctionShaders
+  @ 0x5af790`, `build_shader_pass_name @ 0x5bf5d0`) at the device boundary
+  (`@ 0x681920` / `@ 0x681d00` / `@ 0x6817d0` — witness keys only); confirm
+  Jointops' own material table against the OED-derived `kMaterialInfoTable`;
+  converge classifier + composer; T1 pinned→witnessed with cited re-dumps;
+  engine-side `MATERIAL_FLAG_*` single-sourcing (the ENG-4 leg). Lands
+  `render-material-re.md` + D-RMAT; likely settles D-PTL-3/-4.
+- **REN-3** (M/L) **draw order** (engine-research — greenfield): sort keys +
+  pass structure from the batch family (`collect_render_batches_for_entity
+  @ 0x5d94b0`, `collect_render_objects_for_batch @ 0x5d8f20`,
+  `RenderBatch_QuickSort @ 0x5d8b40`, `CRenderBatchQueue_FlushBatches
+  @ 0x5d9f50`, `CRenderBatchQueue_SortAndFlush @ 0x5dae40`,
+  `Render_SubmitEntity @ 0x5dad80`, the `Render_SubmitAlpha16 @ 0x83fde8`
+  global) and the LIVE frame orchestrators (`render_main_scene @ 0x5c1240`,
+  `Render_ProcessMainSceneFrame @ 0x5ca0f0`, `Terrain_RenderSceneWithReflection
+  @ 0x5c93a0` — the 10-flush frame, `Player_RenderFirstPersonViewModel
+  @ 0x4ded60`); port the ORDERING SEMANTICS as a cited pass/priority map in
+  `libs/renderer`, applied as a global Godot priority/pass ladder
+  generalizing the celestial one — the queue itself is not reproduced.
+  Lands `render-order-re.md` + D-RORD.
+- **REN-4** (M/L) **shaders/TSS**: the terrain stage tables
+  (`Terrain_InitShaders @ 0x5c19b0`, `terrain_init_rendering_resources
+  @ 0x5789e0`) decoded against `RenderState_ApplyToDevice`; the water
+  shader-handle set (`create_water_shaders @ 0x5dfc30`); the remaining
+  embedded vs_1_1 sources extracted; the sky pass-1 gradient TSS open
+  question closed; the unverified `foliage.gdshader` anchor (`0x5BF064`)
+  resolved; ports as cited `.gdshader`s / composer extensions (the sky C7
+  pattern). Grows `terrain-re.md` + `env-tod-re.md`.
+- **REN-5** (M/L) **lighting**: the modulator chain
+  (`Render_UnpackModulatorToLightScale @ 0x58db30` →
+  `Render_LightScaleRGB @ 0x8409f4`; `EffectWorld_UnpackModulatorToAmbientScale
+  @ 0x5aaef0` → `@ 0x840b24`), `compute_ambient_light_along_direction
+  @ 0x5c7a00`, entity application (`setup_entity_render_lighting @ 0x5d7250`,
+  `setup_entity_lighting_and_shader_constants @ 0x5d98a0`), the terrain
+  lightmap chain (`Terrain_LoadLightmapTexture @ 0x604a90`,
+  `sample_terrain_lightmap @ 0x606030`, `init_terrain_lighting_color_ramps
+  @ 0x604ee0`, `render_terrain_lightmaps @ 0x609de0`), `Lighting_InitTextures
+  @ 0x5a94f0`, `generate_cubemap_lighting @ 0x685bb0` (the env-map source).
+  Ports libs-first; **closes env #17** (the iris modulator-chain consumer,
+  transferred from PAR-ENV); D-FOLIAGE-1 is a candidate at the lightmap leg.
+  Lands `render-lighting-re.md` + D-RLIT.
+- **REN-6** (M) **the ENG-2 render leftovers**, libs/env-first: env #29
+  (water strip tessellation — spec complete in env-tod-re.md "Water
+  surface"), #30 (water reflection passes — spec lands at REN-3's frame
+  decode), #33 (star-field instancing + the unfound generator), #27
+  (smoothed scalar springs). Sequenced after REN-3/REN-4.
+- **REN-7** (S/M) close-out: T3 attested scene-by-scene; T1/T2 full re-run;
+  ledger sync; the IDB-edits + dead-variant catalogs complete in the
+  records; FULL GUT + full ctest; correspondence.md + README rows.
+
+Out of REN's scope (mint rows, never port): device/driver plumbing
+(swapchain, caps, device-reset, buffer management, the state/texture-format
+permutation caches); FrameFX post-processing beyond acknowledging its frame
+slots; shadows/scars/decals (the `Shadow_`/`Scar_` families — a future track
+candidate); particle LOOK (PTL's domain — REN provides the state substrate);
+2D/HUD/text/menu/loading draw; performance work beyond parity; runtime `.fx`
+parsing (the descriptor table stays canonical).
+
 ## Out of scope (tracked here so nobody re-litigates silently)
 
 DFX2 / any title split (cheap later; no new hardcoded title identity
@@ -329,8 +447,10 @@ service/backend/web/launcher feature work; the music document/VM layer;
 a netsim/npruntime merger (ADR 0013 already consolidated); physical family
 merges unless LIBS-2's ADR chooses one; GOALS.md's Game workspace and
 export-a-game (this program builds their base); expanding the C ABI to net
-libs; new reimplementation outside ONED-W2's gated items (the freeze — IDA
-research continues freely).
+libs; the D3D device layer as a port target (REN witnesses it, never ports
+it — ADR 0023); new reimplementation outside ONED-W2's gated items and the
+PAR/REN ledger-closure exemptions (the freeze — IDA research continues
+freely).
 
 ## Waves
 
@@ -338,8 +458,8 @@ research continues freely).
 |---|---|---|
 | **0 — bootstrap** (M) | GOV-1/2/3, STD-1 soft, NET-0 | umbrella merged; tier-1 goldens green on all CI legs; lints reporting (not failing) |
 | **1 — boundary moves + ONED foundations** (L) | NET-1 → NET-2 → NET-3; LIBS-1 (after NET-2); ENG-1; ENG-6 research start; ONED-A then ONED-F | npwire landed goldens-green + tier-2 attested; seam landed with the link-graph check permanent; env vectors committed; twelve workspaces merged; F1–F5 done (FULL GUT at F5) |
-| **2 — portability + standards adoption** (L, widest; WIP cap: two trains) | ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2, STD-3 flip; ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D (gate at end) | env GDScript deleted, vectors green; conformance checklist closed-or-tracked; ratchets hard and trending down; responsiveness landed + one re-baseline; music design accepted |
-| **3 — feature-bearing maturity** (L) | ONED-W2 (freeze releases here), ONED-MUS-I, ONED-REF, ONED-REQ; PROD-1/2; ENG-5 sweep #2 | targeted R/W/E/G cells at bar; music shipped (46 tests untouched-green); serve mode boot-smoked in the packaged exe |
+| **2 — portability + standards adoption** (L, widest; WIP cap: two trains) | ENG-2/3/4, ENG-5 sweep #1, ENG-6 manifest; LIBS-2/3; STD-2, STD-3 flip; ONED-W1, ONED-TST, ONED-RSP, ONED-MUS-D (gate at end); REN-0..2 (the REN trunk opens) | env GDScript deleted, vectors green; conformance checklist closed-or-tracked; ratchets hard and trending down; responsiveness landed + one re-baseline; music design accepted; REN instrument landed + materials converged (or the trunk merged at its last green slice — stop-anywhere) |
+| **3 — feature-bearing maturity** (L) | ONED-W2 (freeze releases here), ONED-MUS-I, ONED-REF, ONED-REQ; PROD-1/2; ENG-5 sweep #2; REN-3..7 | targeted R/W/E/G cells at bar; music shipped (46 tests untouched-green); serve mode boot-smoked in the packaged exe; REN closed out (T3 retail A/B attested, folded env rows closed) |
 | **4 — equalize + close** (M) | ONED-W3; PROD-3; GOV-4 close-out; ENG-5 final sweep | matrix re-audit over twelve workspaces; release dry run green; **freeze lifted** |
 
 Cross-track ordering: NET-0 before NET-2 (protection precedes the move);
@@ -348,7 +468,10 @@ link-topology churn) and before PROD-1 (stable homes); ENG-1 before ENG-2;
 GOV-3 + STD-1 before all Wave-1+ slices (adopt-on-touch needs minted
 rules); ONED-A first in the ONED train (drift control); F5 before MIS
 phases; ONED-RSP and ONED-MUS-D before ONED-MUS-I; R-items before their
-ONED-W2 phases (UI never ahead of the witness).
+ONED-W2 phases (UI never ahead of the witness); REN-1 before any REN port
+slice (baselines precede the first behavior change); REN-3/REN-4 before
+REN-6 (the leftovers consume the frame/shader decodes); REN-2 before
+ENG-4's remainder (the flag leg is subsumed).
 
 ## Gates
 
@@ -371,6 +494,8 @@ canary test (`terrain_editor_workstation_test.gd`).
 | ONED-MUS-I | the 46 music doc/VM tests unmodified-green; new screen tests; FULL GUT; visual pass |
 | PROD-1 | boot smokes incl. `--headless --server`; tier-1 green; tier-2 retail-join attestation |
 | PROD-3 | validate-deliverables; all smokes |
+| REN (per slice) | T1 state vectors green (changed rows carry cited re-dumps); T2 swatch A/B attested in the PR; focused ctest (`-R "renderer\|material\|env\|terrain"`) + GUT keystones; ledger synced in-commit |
+| REN-7 (train end) | FULL GUT + full ctest; T3 retail scene list attested scene-by-scene; REN + folded env rows closed-or-ratified; the conformance checklist's flag row closed |
 
 ## Enforcement (STD-1 design)
 
@@ -424,3 +549,9 @@ Home: `scripts/lint/` + baseline JSON; one small step in existing CI jobs
 8. **Program sprawl vs review bandwidth** → hard wave boundaries; WIP cap
    of two concurrent PR trains; this doc is the only dashboard; ONED is
    the only track with a detail doc.
+9. **Render host expressibility** (TSS combiner corner cases, fog
+   interactions, reverse-Z — env #20 is the precedent) → the T1 vector
+   layer separates semantic parity from host mapping; inexpressible states
+   become tracked class-C rows via ADR 0022's register, never silent
+   tolerance bumps; CI hard-gates on T1 only (visual tiers are local
+   attestations, immune to GPU nondeterminism).
