@@ -146,7 +146,8 @@ struct LightningSequencers {
 // Weather oscillator — the wind-sway / wave PRNG state
 // [orig: Environment_UpdateWeatherTick @ 0x57e9b0: PRNG rol-9 + signed-carry
 //  step @ 0x57e9fc..0x57ea16, amplitude + 256-entry rings + spring smoothing
-//  @ 0x57ea42..0x57eaed; seed 0x12345633 at mission start
+//  @ 0x57ea42..0x57eaed; seed 0x12333333 at mission start (the mov imm32 at
+//  @ 0x57d2ff — 0x12345633 was a reimpl transcription error, env #25)
 //  Environment_SnapStateToTargets @ 0x57d1e0; Env_WindScale default 256
 //  Environment_InitDefaults @ 0x57c1d1. The quake path re-rolls the PRNG per
 //  displaced entity (@ 0x57eb8e) — reroll() is that step.]
@@ -156,7 +157,7 @@ struct LightningSequencers {
 // silently forks the sequence from the first negative rotate — the GDScript
 // port carried exactly that bug until this port (docs/env/env-tod-re.md).
 struct WeatherOscillator {
-	uint32_t prng = 0x12345633u; // Env_WeatherPrng [orig: seed @ 0x57d1e0]
+	uint32_t prng = 0x12333333u; // Env_WeatherPrng [orig: seed imm32 @ 0x57d2ff]
 	int intensity = 256;         // Env_WindScale [orig: default @ 0x57c1d1]
 	int prev_noise = 0;          // dword_26C7764
 	int pos = 0;                 // dword_26C7758 (spring position, 0x8000 rest)

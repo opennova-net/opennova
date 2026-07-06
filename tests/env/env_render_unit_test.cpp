@@ -311,11 +311,13 @@ int main() {
 	// --- Weather oscillator [orig: Environment_UpdateWeatherTick @ 0x57e9b0] --
 	{
 		// The witnessed PRNG sequence from the mission-start seed
-		// [orig: seed 0x12345633 @ Environment_SnapStateToTargets @ 0x57d1e0;
-		//  step rol9 + ((int32)x >> 31) & 0x1ABB09 @ 0x57e9fc..0x57ea16].
+		// [orig: seed 0x12333333 — the mov imm32 @ 0x57d2ff in
+		//  Environment_SnapStateToTargets @ 0x57d1e0 (0x12345633 was a reimpl
+		//  transcription error, env #25; the WAC RNG @ 0x4f966b shares the
+		//  constant); step rol9 + ((int32)x >> 31) & 0x1ABB09 @ 0x57e9fc..0x57ea16].
 		const uint32_t expected_words[8] = {
-			0x68AC6624u, 0x58CC48D1u, 0x98AC5DBAu, 0x58BB7531u,
-			0x76EA62B1u, 0xD4E01DF6u, 0xC056A8B2u, 0xAD6C2089u,
+			0x66666624u, 0xCCE703D5u, 0xCE2266A2u, 0x44CD459Cu,
+			0x9AA5F392u, 0x4BE72535u, 0xCE6525A0u, 0xCA65FCA5u,
 		};
 		WeatherOscillator prng_probe;
 		for (int i = 0; i < 8; ++i) {
@@ -327,8 +329,8 @@ int main() {
 		}
 		// The signed-carry idiom is load-bearing: a logical-shift port (adds
 		// 0/1 instead of 0/0x1ABB09) forks at the first negative rotate —
-		// word 2 becomes 0x9891A2B2. Guard the divergence explicitly.
-		if (!expect(expected_words[2] != 0x9891A2B2u && expected_words[2] == 0x98AC5DBAu,
+		// word 1 becomes 0xCCCC48CD. Guard the divergence explicitly.
+		if (!expect(expected_words[1] != 0xCCCC48CDu && expected_words[1] == 0xCCE703D5u,
 		            "PRNG carry is the signed 0x1ABB09 idiom, not bit-31")) return 1;
 
 		// Still air (intensity 0): the spring settle toward 0x8000 is
@@ -362,7 +364,7 @@ int main() {
 		WeatherOscillator wind;
 		wind.intensity = 256;
 		const struct { int tick; int smoothed; } wind_landmarks[] = {
-			{1, 0x0012}, {16, 0x62CD}, {64, 0x9A26}, {256, 0xAD33},
+			{1, 0x0012}, {16, 0x56E5}, {64, 0x7CDE}, {256, 0x9787},
 		};
 		ticks_done = 0;
 		for (const auto &lm : wind_landmarks) {

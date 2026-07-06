@@ -125,7 +125,13 @@ maxf plateau + integer additives), **env #24** (the wind model: the 0..8192 stre
 scale drove the oscillator past its stability envelope; retail runs the constant
 `Env_WindScale = 256`, now the default; smoothers chase keyframe targets). All three
 were discovered, witnessed, and fixed in the same slice — catalog rows in
-[env/env-tod-re.md](env/env-tod-re.md) #22–#24.
+[env/env-tod-re.md](env/env-tod-re.md) #22–#24. Minted-and-closed 2026-07-06 at the
+sky-leg re-grill: **env #25** — the weather-PRNG seed is `0x12333333`
+(`[orig: mov imm32 @ 0x57d2ff]`; `0x12345633` was a transcription error shared
+with the WAC RNG seed `[orig: @ 0x4f966b]`). The libs/wac VM carried BOTH bugs
+(wrong seed + env #22's unsigned bit-31 carry `[orig: signed rol9+sar+add
+@ 0x4f5a83..0x4f5a91]`) — fixed in the same commit; no committed test pinned
+the wrong WAC stream.
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|

@@ -50,7 +50,7 @@ public:
 private:
     const Program *prog_ = nullptr;
     std::vector<EventState> events_;
-    uint32_t rng_seed_ = 0x12345633u; // [orig: dword_C6EA40 init]
+    uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov dword_C6EA40, 0x12333333]
     int32_t acc_ = 0;
     int cur_event_ = 0;
     uint32_t time_ = 0; // [orig: dword_C6EAD8]
