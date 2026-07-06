@@ -438,6 +438,78 @@ struct SkyDomeMesh {
 SkyDomeMesh build_sky_dome_mesh(float sky_height);
 
 // ---------------------------------------------------------------------------
+// Water surface — the witnessed pipeline of render_water_surface @ 0x5c32c0
+// (the frame pass: FrameFX_RenderBloomPass @ 0x582a5d / @ 0x610650 call it per
+// side; camera-side gate against Env_WaterHeightFixed). Per frame it
+// regenerates the animated noise texture pair [orig: Water_GenerateNoiseTextures
+// @ 0x5c0360], derives the UV scale/bias from the SMOOTHED fog distance and
+// the UV offsets from the CLOUD-SCROLL accumulators [orig: @ 0x5c3348..0x5c33db],
+// then draws the screen-marched water strips (render_water_strip @ 0x5c1d60
+// low detail with sin-table Y displacement; render_water_strip_detailed
+// @ 0x5c27d0 high detail, FLAT strips — the animated textures carry the look).
+// The strip tessellation itself is a tracked divergence (env #29); this
+// section owns the texture + UV math both paths share.
+
+inline constexpr int kWaterNoiseSize = 128; // 128x128 field and textures
+
+// The static tables built once at renderer init [orig:
+// Water_InitNoiseFieldAndSineLut @ 0x5c01a0, called from Terrain_InitShaders
+// @ 0x5c19f8]: a normalized random field and the 128 + 64*sin(2*pi*i/256)
+// byte LUT (truncating float->int like the original ftol).
+struct WaterNoiseTables {
+	uint8_t field[kWaterNoiseSize * kWaterNoiseSize]; // Water_NoiseField
+	uint8_t sine_lut[256];                            // Water_SineLut
+};
+
+// One step of the init PRNG [orig: PRNG_Next16 @ 0x6130a0]:
+// state = rol4(state + rol11(state)) ^ 1; the caller consumes state & 0xFFFF.
+uint32_t water_noise_prng_step(uint32_t state);
+
+// Builds the tables with the witnessed algorithm. Retail's field CONTENT
+// depends on the shared PRNG's state at Terrain_InitShaders time (a
+// value-history quirk, recorded in env-tod-re.md); the reimpl seeds from the
+// boot state 0 for a deterministic, witnessed-faithful instance.
+WaterNoiseTables water_init_noise_tables();
+
+// The per-frame wave phase [orig: Water_WavePhase = counter * 0x3000000
+// @ 0x5c0374; render_water_strip consumes phase + 0x200000, += 0x55555555
+// per row, sin table index = value >> 22].
+inline constexpr uint32_t kWaterWavePhasePerFrame = 0x3000000u;
+
+// Passes 1+2 of Water_GenerateNoiseTextures: animate the field through the
+// LUT (per byte: lut[(uint8)(field + (counter << (field & 1)))] — two speed
+// classes), then the toroidal 9-tap kernel (3x corners + 4x cross, >> 5),
+// folded to a ridge intensity i = max(0, 128 - |k - 128|) and packed as
+// A = 255 - max(0, i*i >> 9), R = G = B = i. out_pixels holds 128*128 ARGB.
+void water_noise_color_pixels(uint32_t *out_pixels, const WaterNoiseTables &tables,
+                              uint32_t frame_counter);
+
+// Pass 3: the DuDv/normal map [orig: @ 0x5c07c2..0x5c087d, MMX]: per pixel,
+// from the color texture's intensity byte c (blue channel):
+// R = sat8(2 * satsub8(c - c_up)) + 0x80 (wrapping), G = same against c_left,
+// B = 0xFF, A = 0; rows and columns wrap toroidally.
+void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixels);
+
+// The shared UV transform state [orig: render_water_surface @ 0x5c3348..0x5c33db]:
+// scale = 0.99996948 * w / (w - 0.2) with w = the INTEGER part of the smoothed
+// fog distance (the word read at Env_FogDistCurrent+2); bias = 0.2 * scale.
+// Offsets ride the LAYER-1 CLOUD accumulators with a 32x camera term:
+// u = (uint32)(acc_26C680C + 32 * camX_eng_fixed) * 2^-28,
+// v = (uint32)(acc_26C6810 - 32 * camY_eng_fixed) * 2^-28. In the render basis
+// (d3d = (-engY, engZ, engX)) that is u = cam_z/128 + acc_l1_v * 2^-28 and
+// v = cam_x/128 + acc_l1_u * 2^-28 — both accumulator terms POSITIVE here
+// (the water pass's own sign structure, unlike the sky layers).
+struct WaterUvState {
+	float scale = 1.0f;
+	float bias = 0.0f;
+	float offset_u = 0.0f;
+	float offset_v = 0.0f;
+};
+
+WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float cam_z,
+                            float fog_distance_world);
+
+// ---------------------------------------------------------------------------
 // BMS mission overrides [orig: Game_LoadTerrainDuringConnect @ 0x520710]
 //                       [orig: Game_StartMission @ 0x525371..0x525399]
 

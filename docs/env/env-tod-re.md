@@ -457,6 +457,74 @@ glare with 8 jittered terrain raycasts feeding a ±16/frame brightness hysteresi
 (target = 32 × visible rays) and `compute_sun_glare_and_fog_blend @ 0x5ad610` computes
 `dot(view,sun)^32 → glare (×192, clamp 255)` and `dot^128 → fog whitening (×40, clamp 40)`.
 
+## Water surface (`render_water_surface @ 0x5c32c0`) — witnessed at the ENG-2 water leg (2026-07-06)
+
+The pass was hiding as a SPLIT function: an 8-byte header (`sub esp, 68h` + a call to
+the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged and named
+`render_water_surface(is_underwater_view, is_reflection_subpass)`. Callers:
+`FrameFX_RenderBloomPass @ 0x582a5d` and the terrain pass wrapper `@ 0x610650`. Flow:
+
+- **Side gate**: bail when `Env_WaterHeightFixed == 0`, or when the camera is on the
+  wrong side for the requested view (`is_underwater_view` ? camera must be below :
+  above — the surface renders from either side with its own blend mode + texture set).
+- **Per-frame noise textures** (`Water_GenerateNoiseTextures @ 0x5c0360`, was misnamed
+  `generate_terrain_noise_textures`): pass 1 animates the static 128×128 field through
+  the sine LUT — per byte `lut[(uint8)(field + (counter << (field & 1)))]`, two speed
+  classes (odd bytes advance twice as fast). Pass 2: toroidal 9-tap kernel
+  (3× the four corners + 4× the center cross, `>> 5`), folded to a ridge intensity
+  `i = max(0, 128 − |k − 128|)`, packed `R=G=B=i`, `A = 255 − max(0, i²>>9)`. Pass 3:
+  the DuDv/normal map — per pixel from the intensity byte,
+  `R = wrap8(2·satsub8(c − c_up) + 0x80)`, `G` the same against `c_left`, `B = 0xFF`,
+  `A = 0` (the MMX `psubsb/paddsb/paddb 0x008080FF` chain `@ 0x5c07c2..0x5c087d`).
+  Both textures upload every frame. Wave phase `Water_WavePhase = frame_counter ×
+  0x3000000` (`@ 0x5c0374`).
+- **Init tables** (`Water_InitNoiseFieldAndSineLut @ 0x5c01a0`, once from
+  `Terrain_InitShaders @ 0x5c19f8`): field = 128×128 samples `2·PRNG_Next16() −
+  0x10000` min/max-normalized as `((v−min)<<8)/(range + range>>8)`; LUT =
+  `128 + 64·sin(2πi/256)` (truncating ftol). `PRNG_Next16 @ 0x6130a0` =
+  `state = rol4(state + rol11(state)) ^ 1` (state `@ 0x31BFBB0`) — the ALGORITHM is
+  deterministic but the field CONTENT depends on the shared PRNG's call history before
+  terrain init (value-history quirk; the reimpl builds from the boot state 0 for a
+  deterministic witnessed-faithful instance — `libs/env water_init_noise_tables`).
+- **UV state** (`@ 0x5c3348..0x5c33db`): texture scale `= 0.99996948 · w/(w − 0.2)`
+  with `w` = the INTEGER part of the SMOOTHED fog distance (the word at
+  `Env_FogDistCurrent+2`); bias `= 0.2 · scale` (→ `flt_8412B0/B4`). UV offsets ride
+  the **layer-1 CLOUD-SCROLL accumulators** with a 32× camera term:
+  `u = (uint32)(acc_26C680C + 32·camX_eng)·2⁻²⁸`, `v = (uint32)(acc_26C6810 −
+  32·camY_eng)·2⁻²⁸` — in the render basis `u = cam_z/128 + acc·2⁻²⁸`,
+  `v = cam_x/128 + acc·2⁻²⁸`, both accumulator terms POSITIVE (unlike the sky
+  layers' negative-U). Ported: `env::water_uv_state`, `water_noise_color_pixels`,
+  `water_noise_normal_pixels`, `water_init_noise_tables` (ctest-pinned landmarks +
+  checksums).
+- **The strips** (both marched in projected space rows away from the camera, ~120-unit
+  row step, up to 1024 rows, adaptive 2..9 columns per row from a 500-unit distance
+  divisor, submitted as ≤5-row triangle-strip batches):
+  - `render_water_strip @ 0x5c1d60` (water detail ≤ 1): 40-byte FVF verts; **sin-table
+    Y displacement** — noiseIndex = `Water_WavePhase + 0x200000`, `+= 0x55555555` per
+    row, table index `>> 22` into the SHARED 1281-entry sin table + `off_849934` cos
+    alias (the D-INF-4 table); per-vertex color = `Env_WaterColorLit` bytes × a
+    brightness term `>> 8`, distance alpha `255 − dist_scaled/(fogEnd>>16)` clamped,
+    murk angle term (`− Env_WaterMurk`, constants 0.8/0.2/0.15/19.2/128/255/300/400),
+    per-vertex fog W clamped to [4e-5, 0.99997].
+  - `render_water_strip_detailed @ 0x5c27d0` (detail > 1; was MISNAMED
+    `render_foliage_sprite_billboards`): 64-byte verts, binds the noise texture set,
+    **NO vertex displacement** — flat strips; the animated color+DuDv textures carry
+    the wave look; richer per-vertex color (`WaterColorLit` modulation, fog-alpha²
+    falloff `255 − a²/255`, reflection-mode alpha scale 229.5 vs 255).
+  - The reflection variant mirrors the far-edge vertices below the plane and skips the
+    murk term (`isReflection` branches in both strips).
+- **Reflection scene passes** witnessed to EXIST (`sub_5D6150` init at `Terrain_Init
+  @ 0x60fcc5`; `Terrain_RenderSceneWithReflection @ 0x5c93a0`;
+  `render_scene_with_water_reflection`) — full spec deferred (#30).
+- **Water height precedence** (witnessed): the `.env` parse writes
+  `Env_WaterHeightFixed` first (`Game_LoadTerrainDuringConnect @ 0x52073b`), then
+  `Terrain_Init @ 0x60fcb1..0x60fcba` OVERRIDES it — but only when the terrain value
+  carries bit 31 (`jns` skips; the store masks `& 0x7FFFFFFF`); BMS overrides apply
+  later still (`@ 0x525371`, attrib bit 0x1). Retail precedence: **BMS >
+  TRN(flagged) > ENV**. The global is 16.16 world-Z (the file value is in half-units,
+  `<< 15` = ×0.5×65536) — settles the units question flagged in
+  world-wac-ai-re.md.
+
 ## BMS per-mission overrides
 
 Applied at mission load, from the in-memory BMS header:
@@ -469,7 +537,7 @@ Applied at mission load, from the in-memory BMS header:
 | water color bytes `Bms_WaterColorOverride @ 0xa762c6..c8` | any byte nonzero | `Environment_SetWaterColor @ 0x57d510` |
 | murk byte `Bms_WaterMurkOverride @ 0xa762c9` | nonzero | × 0.01 → `Environment_SetWaterMurk @ 0x57d4f0` |
 | start TOD s16 (8.8 h) `Bms_StartTimeOfDay @ 0xa76418` | local play | `<< 16` → `Environment_SetCurrentTime @ 0x57c4b0` |
-| wave amp `Bms_WaveAmplitude @ 0xa7641a` | local play | `Terrain_GenerateWaterNoiseTextures @ 0x57d170` |
+| day length s16 (minutes, min 60) `Bms_TodRateMinutes @ 0xa7641a` (was misnamed `Bms_WaveAmplitude`) | local play | `Environment_SetTodAdvanceRate @ 0x57d170` (was misnamed `Terrain_GenerateWaterNoiseTextures` — it never touched textures): `Env_TodAdvancePerTick = 0x18000000 / (3720 × max(v, 60))` |
 | attrib bit 0x100000 | — | water-related `Terrain_Init` flag (unidentified) |
 
 In a network session the server-synced time + TOD rate replace the local start TOD
@@ -558,6 +626,10 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 25 | Weather-PRNG seed transcription: the reimpl carried `0x12345633` (libs/env slice 1, inherited from libs/wac); the binary's immediate is `0x12333333` — the SAME constant seeds the WAC RNG (`mov dword_C6EA40` `[orig: WacScript_InitAndLoad @ 0x4f966b]`), where the mistranscription originated | **FIXED 2026-07-06 (minted-and-closed at the ENG-2 sky-leg re-grill)**: `WeatherOscillator.prng = 0x12333333` `[orig: seed imm32 @ 0x57d2ff]`; the WAC VM's `next_rand` ALSO carried #22's unsigned bit-31 carry — both libs/wac bugs fixed in the same commit `[orig: rol9 + sar/and/add @ 0x4f5a83..0x4f5a91]` (no committed test pinned the wrong WAC stream). env ctest word/wind pins regenerated; the sway-bearing GUT keys (`wa/k004..k256`, `wb/k016..k096`, `wc/long_k*`, `we/k*`) re-dumped under the witness — `wa/k001` is seed-invariant (both seeds share low-12 bits at tick 1); every level-only, color, float, and non-weather key unchanged |
 | 26 | Cloud-scroll consumption model: the float GDScript (a) skipped the rate RAMP — the snap refreshes only the TARGET (`@ 0x57d2da`) and the live rate smooth-eighths toward it (`@ 0x57eecc`), so a fresh scene ran full-rate from tick 1; (b) added the accumulator term POSITIVELY on both UV axes where the witnessed texture transform NEGATES it on U (`@ 0x5791de..0x579260`); (c) the libs field labels had the layer-1 u/v pair inverted (value-equal — both advance at rate) | **FIXED 2026-07-06 (minted-and-closed at the sky binding slice)**: `NovaWeatherCore` owns `CloudScrollState` ticked at the witnessed tick tail; `NovaSky`/`NovaWater` consume through the weather seam (`get_cloud_uv_offset1/2`, `get_cloud_uv_rate_per_second`; standalone hosts fall back to a private core — one math home); the UV translation is `env::cloud_scroll_uv_offsets` (U-negative). `sky/k001`/`sky/k064` re-dumped under the witness; `nova_sky_test` pins the seam + the U sign |
 | 27 | Smoothed scalar spring channels unwired: the tick smooth/spring-steps fog distance (`Env_FogDistCurrent @ 0x57ede2`, consumed by the dome fog c9 `@ 0x5792c2` and `Environment_GetFogEndDistance`), sky height (`Env_SkyHeightCurrent @ 0x57ee97`, gating the dome rebuild `@ 0x57e4f4`), camera FOV (`@ 0x57ee78`), one unidentified pair (`0x26c6830`/`0x26c6880` current/target families), and the overcast blend (#16's runtime facet, `@ 0x57ef62`); the reimpl's consumers read PARSED `.env` values — a TOD/env scrub snaps instantly where retail ramps in | **WITNESSED-READY-DEFERRED (minted 2026-07-06)**: transient-cosmetic; the primitives (`smooth_eighth`/`spring_step`) are ported and ctest-pinned — the residual is the state wiring + consumer switch (dome `u_sky_height`/`u_fog_end`, terrain/water fog uniforms, the #21 frame clear). Rides a dedicated PAR-ENV slice |
+| 28 | Water-height precedence: the reimpl ladder ran override → `.env` → terrain-fallback (env wins over terrain); witnessed retail order is BMS > TRN (bit-31-flagged store at `Terrain_Init @ 0x60fcb5`, AFTER the env parse) > ENV | **FIXED 2026-07-06 (minted at the water grill, closed at the water binding slice)**: the NovaWater ladder reordered — a flagged terrain height beats the `.env` one; the host override rung stays on top as the authoring seam |
+| 29 | Water surface tessellation: witnessed = screen-marched adaptive strips from the camera (~120-unit rows, 2..9 columns by distance, 1024-row cap, ≤5-row strip batches; the low-detail path adds sin-table Y displacement from the shared D-INF-4 table) `[orig: render_water_strip @ 0x5c1d60; render_water_strip_detailed @ 0x5c27d0]`; the reimpl draws a static camera-snapped 65×65 plane | **OPEN (minted 2026-07-06, spec complete)**: the witnessed LOOK (noise textures + UV + color pipeline) is ported; the tessellation architecture rides a dedicated slice. The plane is the tracked host stand-in |
+| 30 | Water reflection passes exist in retail (`sub_5D6150` init `[orig: Terrain_Init @ 0x60fcc5]`, `Terrain_RenderSceneWithReflection @ 0x5c93a0`, `render_scene_with_water_reflection`, per-strip mirrored verts + 229.5 alpha scale) — the reimpl renders none | **NEEDS-RE (minted 2026-07-06)**: pass structure witnessed to exist; full spec + port decision deferred |
+| 31 | The water render LOOK was invented: sin/cos shader waves + Fresnel-style alpha with no witness; retail = per-frame animated 128×128 noise color + DuDv textures over `Env_WaterColorLit` per-vertex color, distance-alpha, murk term | **FIXED 2026-07-06 (minted-and-closed at the water binding slice)**: `water.gdshader` rewritten as a structural port of the witnessed detailed-path model over the libs/env textures (`water_noise_color_pixels`/`water_noise_normal_pixels`/`water_uv_state`, ctest-pinned); the invented waves/fresnel are deleted |
 
 ## Corpus sweep (retail JO:CA install, 2026-06-09)
 

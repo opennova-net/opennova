@@ -579,8 +579,73 @@ int main() {
 		if (!expect(tall.indices == ref.indices, "indices are height-independent")) return 1;
 	}
 
+	// --- Water noise textures + UV state [orig: Water_GenerateNoiseTextures
+	// @ 0x5c0360; Water_InitNoiseFieldAndSineLut @ 0x5c01a0;
+	// render_water_surface @ 0x5c32c0] ------------------------------------
+	{
+		// PRNG_Next16 chain from the boot state 0 [orig: @ 0x6130a0].
+		uint32_t s = water_noise_prng_step(0);
+		if (!expect(s == 0x1u, "prng step 1")) return 1;
+		s = water_noise_prng_step(s);
+		if (!expect(s == 0x8011u, "prng step 2")) return 1;
+		s = water_noise_prng_step(s);
+		if (!expect(s == 0x40108111u, "prng step 3")) return 1;
+		s = water_noise_prng_step(s);
+		if (!expect(s == 0x4190B11Du, "prng step 4")) return 1;
+
+		const WaterNoiseTables tables = water_init_noise_tables();
+		// Sine LUT: 128 + 64*sin(2pi*i/256), truncating like the original ftol.
+		if (!expect(tables.sine_lut[0] == 128 && tables.sine_lut[32] == 173 &&
+		            tables.sine_lut[64] == 191 && tables.sine_lut[128] == 128 &&
+		            tables.sine_lut[192] == 65, "sine LUT landmarks")) return 1;
+		uint32_t lut_sum = 0;
+		for (int i = 0; i < 256; ++i) lut_sum += tables.sine_lut[i];
+		if (!expect(lut_sum == 32768u, "sine LUT sum (symmetry)")) return 1;
+		// Field: deterministic from state 0.
+		const uint8_t field_head[8] = {0, 127, 128, 176, 177, 225, 161, 184};
+		for (int i = 0; i < 8; ++i) {
+			if (!expect(tables.field[i] == field_head[i], "noise field head bytes")) return 1;
+		}
+		uint32_t field_sum = 0;
+		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) field_sum += tables.field[i];
+		if (!expect(field_sum == 2080878u, "noise field checksum")) return 1;
+
+		// Color pass at counters 0 and 7: landmarks + wrapping checksums.
+		static uint32_t color0[kWaterNoiseSize * kWaterNoiseSize];
+		static uint32_t color7[kWaterNoiseSize * kWaterNoiseSize];
+		water_noise_color_pixels(color0, tables, 0);
+		water_noise_color_pixels(color7, tables, 7);
+		if (!expect(color0[0] == 0xE17D7D7Du && color0[1] == 0xE7707070u &&
+		            color0[64 * 128 + 64] == 0xE17C7C7Cu, "color pixels landmarks (t=0)")) return 1;
+		if (!expect(color7[0] == 0xE17C7C7Cu, "color pixel [0] (t=7)")) return 1;
+		uint32_t sum0 = 0, sum7 = 0;
+		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) { sum0 += color0[i]; sum7 += color7[i]; }
+		if (!expect(sum0 == 0x45E0C3DCu, "color checksum (t=0)")) return 1;
+		if (!expect(sum7 == 0x14D0B3D2u, "color checksum (t=7)")) return 1;
+
+		// Normal/DuDv pass: B=0xFF, G/R = 2x saturated derivative + 0x80.
+		static uint32_t normal0[kWaterNoiseSize * kWaterNoiseSize];
+		water_noise_normal_pixels(normal0, color0);
+		if (!expect(normal0[0] == 0x849CFFu && normal0[1] == 0x6666FFu,
+		            "normal pixels landmarks")) return 1;
+		uint32_t nsum = 0;
+		for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) nsum += normal0[i];
+		if (!expect(nsum == 0x203FC000u, "normal checksum")) return 1;
+
+		// UV state: scale/bias from the fog-distance INT part, offsets from
+		// the layer-1 cloud accumulators + 32x camera (positive on both).
+		CloudScrollState scroll;
+		scroll.acc_l1_v = 61440;
+		scroll.acc_l1_u = 61440;
+		const WaterUvState uv = water_uv_state(scroll, 100.0f, 200.0f, 1024.0f);
+		if (!expect(near(uv.scale, 1.0001649f, 1e-6f), "uv scale = 0.99996948*w/(w-0.2)")) return 1;
+		if (!expect(near(uv.bias, 0.2000330f, 1e-6f), "uv bias = 0.2*scale")) return 1;
+		if (!expect(near(uv.offset_u, 1.5627289f, 1e-6f), "uv offset u = cam_z/128 + acc*2^-28")) return 1;
+		if (!expect(near(uv.offset_v, 0.7814789f, 1e-6f), "uv offset v = cam_x/128 + acc*2^-28")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
-	    "/oscillator/sequencers/blocks/scroll/dome\n");
+	    "/oscillator/sequencers/blocks/scroll/dome/waternoise\n");
 	return 0;
 }

@@ -446,6 +446,145 @@ SkyDomeMesh build_sky_dome_mesh(float sky_height) {
 }
 
 // ---------------------------------------------------------------------------
+// Water surface
+
+uint32_t water_noise_prng_step(uint32_t state) {
+	// [orig: PRNG_Next16 @ 0x6130a0] — rol4(state + rol11(state)) ^ 1.
+	const uint32_t rolled11 = (state << 11) | (state >> 21);
+	const uint32_t sum = state + rolled11;
+	return (((sum << 4) | (sum >> 28)) ^ 1u);
+}
+
+WaterNoiseTables water_init_noise_tables() {
+	// [orig: Water_InitNoiseFieldAndSineLut @ 0x5c01a0] — structural
+	// translation; the reimpl seeds the PRNG from the boot state 0.
+	WaterNoiseTables tables{};
+
+	int32_t grid[kWaterNoiseSize * kWaterNoiseSize];
+	uint32_t prng_state = 0;
+	for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) {
+		prng_state = water_noise_prng_step(prng_state);
+		grid[i] = 2 * static_cast<int32_t>(prng_state & 0xFFFFu) - 0x10000;
+	}
+
+	int32_t min_value = 0x40000000;
+	int32_t max_value = -0x40000000;
+	for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) {
+		min_value = std::min(min_value, grid[i]);
+		max_value = std::max(max_value, grid[i]);
+	}
+	// range + range >> 8 keeps the normalized bytes strictly below 256
+	// [orig: @ 0x5c0297].
+	const int32_t range = max_value - min_value;
+	const int32_t range_scaled = range + (range >> 8);
+	for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) {
+		tables.field[i] = static_cast<uint8_t>(
+				((grid[i] - min_value) << 8) / range_scaled);
+	}
+
+	// 128 + 64*sin: the original computes trunc(sin(i * 2pi/256) * -64) and
+	// stores 0x80 - value [orig: @ 0x5c0308..0x5c0334; step float 2pi/256,
+	// amplitude float -64].
+	const double step = static_cast<double>(0.02454369328916073f);
+	for (int i = 0; i < 256; ++i) {
+		const int value = static_cast<int>(std::sin(i * step) * -64.0);
+		tables.sine_lut[i] = static_cast<uint8_t>(0x80 - value);
+	}
+	return tables;
+}
+
+void water_noise_color_pixels(uint32_t *out_pixels, const WaterNoiseTables &tables,
+                              uint32_t frame_counter) {
+	// [orig: Water_GenerateNoiseTextures @ 0x5c0360, passes 1+2].
+	uint8_t animated[kWaterNoiseSize * kWaterNoiseSize];
+	for (int i = 0; i < kWaterNoiseSize * kWaterNoiseSize; ++i) {
+		const uint8_t source = tables.field[i];
+		// Two speed classes: odd bytes advance at twice the counter rate.
+		const uint8_t index = static_cast<uint8_t>(
+				source + (frame_counter << (source & 1)));
+		animated[i] = tables.sine_lut[index];
+	}
+
+	const auto at = [&animated](int row, int col) -> int {
+		return animated[((row & 0x7F) << 7) + (col & 0x7F)];
+	};
+	for (int row = 0; row < kWaterNoiseSize; ++row) {
+		for (int col = 0; col < kWaterNoiseSize; ++col) {
+			// Toroidal 9-tap kernel: 3x the four corners + 4x the cross
+			// (center + 4-neighborhood), >> 5 [orig: @ 0x5c04b7..0x5c0552].
+			const int kernel =
+					(3 * (at(row - 1, col - 1) + at(row - 1, col + 1) +
+					      at(row + 1, col - 1) + at(row + 1, col + 1)) +
+					 4 * (at(row, col) + at(row - 1, col) + at(row + 1, col) +
+					      at(row, col - 1) + at(row, col + 1))) >> 5;
+			int intensity = 128 - std::abs(kernel - 128);
+			if (intensity < 0) {
+				intensity = 0;
+			}
+			int alpha_inv = (intensity * intensity) >> 9;
+			if (alpha_inv < 0) {
+				alpha_inv = 0;
+			}
+			out_pixels[(row << 7) + col] =
+					(0x10101u * static_cast<uint32_t>(intensity)) |
+					(static_cast<uint32_t>(255 - alpha_inv) << 24);
+		}
+	}
+}
+
+void water_noise_normal_pixels(uint32_t *out_pixels, const uint32_t *color_pixels) {
+	// [orig: Water_GenerateNoiseTextures @ 0x5c07c2..0x5c087d] — the MMX
+	// psubsb/paddsb/paddb chain on the intensity (blue) bytes, rows and
+	// columns wrapping toroidally.
+	const auto intensity = [color_pixels](int row, int col) -> int {
+		return static_cast<int>(color_pixels[((row & 0x7F) << 7) + (col & 0x7F)] & 0xFFu);
+	};
+	const auto sat8 = [](int value) -> int {
+		return std::max(-128, std::min(127, value));
+	};
+	for (int row = 0; row < kWaterNoiseSize; ++row) {
+		for (int col = 0; col < kWaterNoiseSize; ++col) {
+			const int center = intensity(row, col);
+			// psubsb on the +0x80-biased bytes == signed-saturated byte
+			// subtraction of the raw intensities.
+			const int diff_row = sat8(sat8(center - intensity(row - 1, col)) * 2);
+			const int diff_col = sat8(sat8(center - intensity(row, col - 1)) * 2);
+			// paddb (wrapping) with the bias 0x008080FF: B=0xFF, G/R biased
+			// +0x80, A=0.
+			const uint32_t red = static_cast<uint32_t>((diff_row + 0x80) & 0xFF);
+			const uint32_t green = static_cast<uint32_t>((diff_col + 0x80) & 0xFF);
+			out_pixels[(row << 7) + col] = 0xFFu | (green << 8) | (red << 16);
+		}
+	}
+}
+
+WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float cam_z,
+                            float fog_distance_world) {
+	// [orig: render_water_surface @ 0x5c3348..0x5c33db].
+	WaterUvState state;
+	// w = the INTEGER part of the (smoothed) fog distance — the original
+	// reads the 16-bit word above the 16.16 fraction.
+	const double w = static_cast<double>(static_cast<int16_t>(fog_distance_world));
+	const double v = w / (w - 0.2);
+	state.scale = static_cast<float>(v * static_cast<double>(0.99996948f));
+	state.bias = static_cast<float>(0.2 * v * static_cast<double>(0.99996948f));
+	// Layer-1 cloud accumulators + the 32x camera term; engine axes
+	// (camX_eng = render z, camY_eng = -render x), sums wrap as uint32 like
+	// the original.
+	const uint32_t cam_x_eng = static_cast<uint32_t>(static_cast<int64_t>(
+			static_cast<double>(cam_z) * 65536.0));
+	const uint32_t cam_y_eng = static_cast<uint32_t>(-static_cast<int64_t>(
+			static_cast<double>(cam_x) * 65536.0));
+	state.offset_u = static_cast<float>(
+			static_cast<double>(static_cast<uint32_t>(scroll.acc_l1_v + 32u * cam_x_eng)) *
+			kCloudUvScaleLayer1);
+	state.offset_v = static_cast<float>(
+			static_cast<double>(static_cast<uint32_t>(scroll.acc_l1_u - 32u * cam_y_eng)) *
+			kCloudUvScaleLayer1);
+	return state;
+}
+
+// ---------------------------------------------------------------------------
 // Sun glare
 
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
