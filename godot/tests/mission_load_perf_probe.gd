@@ -39,7 +39,7 @@ func _init() -> void:
 		push_error("Editor main scene exposes no open_in_workspace shell.")
 		quit(1)
 		return
-	ws._set_resource_root_dir(asset_dir, false, true)
+	ws.set_resource_root_dir(asset_dir, false, true)
 	for m in missions:
 		var path: String = asset_dir + "/" + String(m)
 		ws.open_in_workspace("mission", path)

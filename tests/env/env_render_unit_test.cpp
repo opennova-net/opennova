@@ -779,8 +779,270 @@ int main() {
 		            "overcast halves the glow")) return 1;
 	}
 
+	// --- Water strip tessellation (env #29) [orig: render_water_strip_detailed
+	// @ 0x5c27d0; terrain_project_sector_to_screen @ 0x5c0bf0;
+	// clip_line_to_viewport @ 0x5c0a30] --------------------------------------
+	{
+		// Stride pins: clamp(int(rhw * 500), 2, 9) [orig: @ 0x5c30c7..0x5c30eb].
+		if (!expect(water_strip_stride(0.004f) == 2, "stride lands the low edge (0.004*500 = 2)")) return 1;
+		if (!expect(water_strip_stride(0.001f) == 2, "stride clamps up to 2 (int(0.5) = 0)")) return 1;
+		if (!expect(water_strip_stride(0.008f) == 4, "stride interior int(0.008*500) = 4")) return 1;
+		// 0.018f is 0.0179999992...: ftol truncates 8.9999996 to 8 - the
+		// witnessed truncation, not rounding.
+		if (!expect(water_strip_stride(0.018f) == 8, "stride ftol truncates below the edge")) return 1;
+		if (!expect(water_strip_stride(0.0181f) == 9, "stride lands the high edge (int(9.05) = 9)")) return 1;
+		if (!expect(water_strip_stride(0.1f) == 9, "stride clamps down to 9")) return 1;
+
+		// Depth ("fog W") clamps [orig: flt_7DBF7C / flt_7C4658 @ 0x5c2c1f..0x5c2c4a].
+		if (!expect(water_strip_depth(0.1f, 1.0f, 0.2f) == kWaterStripDepthMin,
+		            "depth clamps at the 8.042e-5 lower bound")) return 1;
+		if (!expect(water_strip_depth(1.0e9f, 1.0001649f, 0.2f) == kWaterStripDepthMax,
+		            "depth clamps at the 1 - 2^-14 upper bound")) return 1;
+		if (!expect(near(water_strip_depth(100.0f, 1.0f, 0.2f), 0.998f, 1e-5f),
+		            "interior depth follows (t*scale - bias)/t")) return 1;
+
+		// The murk-angle chain at sin = 0.6 (a 3-4-5 right-edge ray), murk 0.5,
+		// t 512 against fog end 1024 — hand-computed from the witnessed
+		// constants: base 0.5, k = 0.2 + 0.8*0.5 = 0.6;
+		// brightness = int(38.4k + (192k - 38.4k)*(1 - 0.6)) = int(59.904) = 59;
+		// alpha_term = int(229.5*0.5*0.6) = int(68.85) = 68;
+		// a = int(512 * 2^24 / (1024<<16)) = 128; dist = 255 - 128*128/255 = 191;
+		// alpha = 68*191/255 = 50 -> diffuse 0x32 | 0x10101*0x3B.
+		const float ray345[3] = {0.0f, -3.0f, 4.0f};
+		const WaterRowColors murky = water_strip_row_colors(
+				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, false, false);
+		if (!expect(murky.diffuse == 0x323B3B3Bu, "murk-chain diffuse bytes")) return 1;
+		// spec term = int(128*0.5 + 127*0.5*(1 - 0.6)) = int(89.4) = 89:
+		// R 128*89>>8 = 44, G 64*89>>8 = 22, B 32*89>>8 = 11, alpha = 191.
+		if (!expect(murky.specular == 0xBF2C160Bu,
+		            "specular = WaterColorLit x angle term >> 8 under the dist alpha")) return 1;
+
+		// Underwater view: murk skipped (solid white diffuse) and the LINEAR
+		// distance alpha (255 - a, no square) [orig: @ 0x5c2df3..0x5c2e20];
+		// base 1 zeroes the specular RGB.
+		const WaterRowColors under = water_strip_row_colors(
+				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, true, false);
+		if (!expect(under.diffuse == 0xFFFFFFFFu, "underwater diffuse is solid white")) return 1;
+		if (!expect(under.specular == 0x7F000000u,
+		            "underwater specular carries only the linear 255 - a")) return 1;
+
+		// Nightvision redraw: the flat 0.1 base [orig: flt_7C69F4 @ 0x5c2d5a]
+		// and no specular RGB [orig: @ 0x5c2ef8]: k = 0.28,
+		// brightness = int(0.28*(38.4 + 153.6*0.4)) = 27;
+		// alpha = int(229.5*0.1*0.6) = 13 -> 13*191/255 = 9.
+		const WaterRowColors nv = water_strip_row_colors(
+				512.0f, ray345, 1024 << 16, 0.5f, 0x00804020u, false, true);
+		if (!expect(nv.diffuse == 0x091B1B1Bu, "nightvision diffuse (0.1 base chain)")) return 1;
+		if (!expect(nv.specular == 0xBF000000u, "nightvision drops the specular RGB")) return 1;
+
+		// Screen block: identity-rotation view 100 units above the plane,
+		// 640x480 viewport, proj m00 = m11 = 1 with w = view z.
+		WaterStripView v{};
+		v.view[0] = v.view[5] = v.view[10] = v.view[15] = 1.0f;
+		v.view[13] = -100.0f; // camera at (0, 100, 0)
+		v.view_inv[0] = v.view_inv[5] = v.view_inv[10] = v.view_inv[15] = 1.0f;
+		v.view_inv[13] = 100.0f;
+		v.proj[0] = 1.0f;
+		v.proj[5] = 1.0f;
+		v.proj[11] = 1.0f;
+		v.cam_x_fp = 0;
+		v.cam_y_fp = 100 << 16;
+		v.cam_z_fp = 0;
+		v.vp_min_x = 0;
+		v.vp_min_y = 0;
+		v.vp_max_x = 640;
+		v.vp_max_y = 480;
+		v.vp_center_x = 320;
+		v.vp_center_y = 240;
+		v.fog_end_fp = 1024 << 16;
+
+		WaterScreenBlock block;
+		water_project_plane_to_screen(v, 0, block);
+		// Origin: (0, 0, 2000) -> view (0, -100, 2000), w 2000 ->
+		// (320, 240 + (100/4000)*480) = (320, 252).
+		if (!expect(near(block.origin[0], 320.0f) && near(block.origin[1], 252.0f),
+		            "block origin at the 2000-unit plane point")) return 1;
+		// Row delta: the 1000-unit RIGHT step -> +160 px; dy 0 forces the
+		// witnessed literal 1e-6 [orig: @ 0x5c0deb].
+		if (!expect(near(block.row_delta[0], 160.0f), "block row delta x")) return 1;
+		if (!expect(block.row_delta[1] == 0.000001f, "block dy guard is the literal 1e-6")) return 1;
+		// Reference point (0, 0, 1000) -> (320, 264); march = (0, 1).
+		if (!expect(near(block.ref_point[0], 320.0f) && near(block.ref_point[1], 264.0f),
+		            "block 1000-unit reference point")) return 1;
+		if (!expect(near(block.march_dir[0], 0.0f) && near(block.march_dir[1], 1.0f),
+		            "block march direction")) return 1;
+		if (!expect(block.visible == 1 && block.origin_row_visible == 1,
+		            "block visible with the origin in-viewport")) return 1;
+
+		// Pitch the camera down (fwd = (0, -0.8, 0.6), a 3-4-5 pitch): the
+		// origin projects above the screen (sy = -48.75), its row line
+		// misses, but the march heads toward the viewport center - the
+		// halfplane rescues it and the origin clamps onto the entry edges
+		// [orig: @ 0x5c0f7b..0x5c1023].
+		WaterStripView pitched = v;
+		const float pitched_view[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.6f, -0.8f, 0.0f,
+			0.0f, 0.8f, 0.6f, 0.0f,
+			0.0f, -60.0f, 80.0f, 1.0f,
+		};
+		for (int i = 0; i < 16; ++i) pitched.view[i] = pitched_view[i];
+		WaterScreenBlock rescued;
+		water_project_plane_to_screen(pitched, 0, rescued);
+		if (!expect(rescued.origin_row_visible == 0 && rescued.visible == 1,
+		            "halfplane rescues the off-screen origin")) return 1;
+		if (!expect(rescued.origin[0] == 641.0f && rescued.origin[1] == 0.0f,
+		            "origin clamps onto the entry edges (maxX+1, minY)")) return 1;
+		if (!expect(near(rescued.march_dir[0], 0.0f) && near(rescued.march_dir[1], 1.0f),
+		            "pitched march still heads down-screen")) return 1;
+
+		// Looking up (fwd = (0, 0.8, 0.6)): the origin sits below the screen
+		// and the march heads away from the center - invisible.
+		WaterStripView skyward = v;
+		const float skyward_view[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.6f, 0.8f, 0.0f,
+			0.0f, -0.8f, 0.6f, 0.0f,
+			0.0f, -60.0f, -80.0f, 1.0f,
+		};
+		for (int i = 0; i < 16; ++i) skyward.view[i] = skyward_view[i];
+		WaterScreenBlock away;
+		water_project_plane_to_screen(skyward, 0, away);
+		if (!expect(away.visible == 0, "halfplane rejects a strip marching away")) return 1;
+
+		// Clip: a diagonal through the center (dx/dy = 1) pins the two-stage
+		// clamp arithmetic exactly; seeds (0, -80)/(641, 561) clamp onto the
+		// top and bottom edges.
+		WaterRowClip rc;
+		water_clip_row_to_viewport(v, 320.0f, 240.0f, 1.0f, rc);
+		if (!expect(rc.crossed, "diagonal row line crosses")) return 1;
+		if (!expect(rc.left[0] == 80.0f && rc.left[1] == 0.0f,
+		            "clip left endpoint clamps to the top edge")) return 1;
+		if (!expect(rc.right[0] == 561.0f && rc.right[1] == 481.0f,
+		            "clip right endpoint clamps to the bottom edge")) return 1;
+		// A near-horizontal line through the center spans edge to edge.
+		water_clip_row_to_viewport(v, 320.0f, 240.0f, 2.5e8f, rc);
+		if (!expect(rc.crossed && rc.left[0] == 0.0f && rc.right[0] == 641.0f &&
+		            near(rc.left[1], 240.0f) && near(rc.right[1], 240.0f),
+		            "horizontal row line spans the viewport")) return 1;
+		// A line fully below the viewport clamps out of x-range: no crossing.
+		water_clip_row_to_viewport(v, 320.0f, 1000.0f, 2.5e8f, rc);
+		if (!expect(!rc.crossed, "row line below the viewport does not cross")) return 1;
+
+		// The march loop: row 0 spans the viewport at y ~252 and unprojects
+		// to the plane at view depth ~2000 (ray (-1, -0.05, 1)); the next row
+		// advances by the stride floor (rhw*500 = 0.25 -> 2).
+		WaterStripParams sp;
+		sp.plane_height_fp = 0;
+		sp.water_murk = 0.5f;
+		sp.water_color_lit = 0x00804020u;
+		sp.uv_scale = 1.0f;
+		sp.uv_bias = 0.2f;
+		WaterStripRows rows;
+		const int count = water_build_strip_rows(v, sp, rows);
+		if (!expect(count >= 2, "level view emits rows")) return 1;
+		if (!expect(static_cast<int>(rows.screen_pos.size()) == count * 6 &&
+		            static_cast<int>(rows.depth.size()) == count * 3 &&
+		            static_cast<int>(rows.rhw.size()) == count * 3 &&
+		            static_cast<int>(rows.diffuse.size()) == count * 3 &&
+		            static_cast<int>(rows.specular.size()) == count * 3 &&
+		            static_cast<int>(rows.uv0.size()) == count * 6 &&
+		            static_cast<int>(rows.t1.size()) == count * 9 &&
+		            static_cast<int>(rows.t2.size()) == count * 9,
+		            "row vectors hold 3 vertices per row")) return 1;
+		if (!expect(rows.screen_pos[0] == 0.0f && near(rows.screen_pos[1], 252.0f),
+		            "row0 left vertex screen position")) return 1;
+		if (!expect(near(rows.rhw[0], 0.0005f, 1e-7f), "row0 left rhw = 1/2000")) return 1;
+		// World (-2000, 0, 2000) -> uv0 = world/32 [orig: flt_7DBFAC].
+		if (!expect(near(rows.uv0[0], -62.5f, 1e-3f) && near(rows.uv0[1], 62.5f, 1e-3f),
+		            "row0 left uv0 = world / 32")) return 1;
+		// depth = (2000*1 - 0.2)/2000 = 0.9999.
+		if (!expect(near(rows.depth[0], 0.9999f, 1e-6f), "row0 depth curve")) return 1;
+		// Diffuse/specular are row-constant [orig: @ 0x5c2f0a..0x5c2f2b].
+		if (!expect(rows.diffuse[0] == rows.diffuse[1] && rows.diffuse[1] == rows.diffuse[2],
+		            "diffuse is row-constant")) return 1;
+		if (!expect(rows.specular[0] == rows.specular[1] && rows.specular[1] == rows.specular[2],
+		            "specular is row-constant")) return 1;
+		if (!expect(near(rows.screen_pos[7], 254.0f, 1e-3f),
+		            "row1 marches 2 px (the stride floor)")) return 1;
+
+		// The underwater pass: white diffuse, the boot stride 4 (never
+		// re-derived [orig: @ 0x5c30c5]) and the flipped t2 V
+		// [orig: @ 0x5c306f..0x5c3085].
+		WaterStripParams under_params = sp;
+		under_params.underwater_view = true;
+		WaterStripRows under_rows;
+		if (!expect(water_build_strip_rows(v, under_params, under_rows) >= 2,
+		            "underwater build emits rows")) return 1;
+		if (!expect(under_rows.diffuse[0] == 0xFFFFFFFFu, "underwater diffuse white")) return 1;
+		if (!expect(near(under_rows.screen_pos[7], 256.0f, 1e-3f),
+		            "underwater keeps the boot stride 4")) return 1;
+		if (!expect(near(under_rows.t2[2], 1.0f - rows.t2[2], 1e-6f),
+		            "underwater flips t2's V to 1 - V")) return 1;
+
+		// The 1024-row cap [orig: cmp 0x400 @ 0x5c312d]: a tall viewport
+		// keeps the march crossing for thousands of rows.
+		WaterStripView tall = v;
+		tall.vp_min_x = 0;
+		tall.vp_min_y = 0;
+		tall.vp_max_x = 1024;
+		tall.vp_max_y = 65536;
+		tall.vp_center_x = 512;
+		tall.vp_center_y = 32768;
+		WaterStripRows capped;
+		if (!expect(water_build_strip_rows(tall, sp, capped) == kWaterStripMaxRows,
+		            "the march stops at the 1024-row cap")) return 1;
+		if (!expect(static_cast<int>(capped.depth.size()) == kWaterStripMaxRows * 3,
+		            "capped vectors sized to the cap")) return 1;
+
+		// Batch table [orig: @ 0x5c313f..0x5c329e]: <=5-row windows stepping
+		// 4 with 8n-10 vertices and 8n-12 strip primitives (DrawPrimitive
+		// passes vertex_count - 2 @ 0x5c3209).
+		if (!expect(water_strip_batches(0).empty() && water_strip_batches(1).empty(),
+		            "no batches under 2 rows")) return 1;
+		std::vector<WaterStripBatch> batches = water_strip_batches(2);
+		if (!expect(batches.size() == 1 && batches[0].first_row == 0 && batches[0].rows == 2 &&
+		            batches[0].vertex_count == 6 && batches[0].primitive_count == 4,
+		            "2 rows -> one 6-vertex window")) return 1;
+		batches = water_strip_batches(5);
+		if (!expect(batches.size() == 1 && batches[0].rows == 5 &&
+		            batches[0].vertex_count == 30 && batches[0].primitive_count == 28,
+		            "5 rows -> one 30-vertex strip")) return 1;
+		batches = water_strip_batches(6);
+		if (!expect(batches.size() == 2 && batches[1].first_row == 4 && batches[1].rows == 2,
+		            "6 rows overlap 1 row into a trailing window")) return 1;
+		batches = water_strip_batches(9);
+		if (!expect(batches.size() == 2 && batches[0].first_row == 0 && batches[0].rows == 5 &&
+		            batches[1].first_row == 4 && batches[1].rows == 5,
+		            "9 rows -> windows [0..4] and [4..8]")) return 1;
+		batches = water_strip_batches(12);
+		if (!expect(batches.size() == 3 && batches[2].first_row == 8 && batches[2].rows == 4 &&
+		            batches[2].vertex_count == 22 && batches[2].primitive_count == 20,
+		            "12 rows -> three windows ending in a 4-row one")) return 1;
+		for (int n = 1; n <= 12; ++n) {
+			for (const WaterStripBatch &batch : water_strip_batches(n)) {
+				if (batch.rows < 2 || batch.rows > 5 || batch.first_row % 4 != 0 ||
+				    batch.vertex_count != 8 * batch.rows - 10 ||
+				    batch.primitive_count != batch.vertex_count - 2 ||
+				    batch.first_row + batch.rows > n) {
+					std::fprintf(stderr, "FAIL: batch window shape at n=%d\n", n);
+					return 1;
+				}
+			}
+		}
+		// The static strip index table [orig: word_841328]: row-pair blocks
+		// joined by degenerate stitches; a batch of n rows reads 8n-10 entries.
+		const uint16_t index_head[8] = {3, 0, 4, 1, 5, 2, 2, 6};
+		for (int i = 0; i < 8; ++i) {
+			if (!expect(kWaterStripIndexTable[i] == index_head[i],
+			            "witnessed strip index head")) return 1;
+		}
+		if (!expect(kWaterStripIndexTable[28] == 14 && kWaterStripIndexTable[29] == 11,
+		            "witnessed strip index tail")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
-	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial\n");
+	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip\n");
 	return 0;
 }

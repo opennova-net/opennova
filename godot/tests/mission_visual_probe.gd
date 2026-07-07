@@ -57,7 +57,7 @@ func _run() -> void:
 		quit(1)
 		return
 
-	ws._set_resource_root_dir(asset_dir, false, true)
+	ws.set_resource_root_dir(asset_dir, false, true)
 	ws.open_in_workspace("mission", asset_dir + "/" + mission_file)
 	print("mission_visual_probe: opened %s — waiting %d frames for the mission load" % [mission_file, MISSION_LOAD_WAIT_FRAMES])
 	for i in range(MISSION_LOAD_WAIT_FRAMES):

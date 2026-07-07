@@ -653,16 +653,39 @@ the scar/decal setup `@ 0x58aa80`) fell through into unclaimed code — merged a
     **[4e-5, 1 − 2⁻¹⁵ (0.99996948)]**; UV = `t × fogScale − fogBias`
     (`flt_8412B0/B4` — the render_water_surface UV state).
   - `render_water_strip_detailed @ 0x5c27d0` (detail > 1; was MISNAMED
-    `render_foliage_sprite_billboards`): 64-byte verts (pos + fog W + diffuse +
-    specular + **two UV sets** — w2b DuDv + w2a color); **NO vertex displacement**
-    — flat rows; the animated color+DuDv textures carry the wave look; diffuse =
-    (alpha<<24) | 0x10101 × brightness (the same murk-angle chain), specular =
-    `WaterColorLit` RGB × a second angle term `>> 8`; distance alpha is the
-    fog-alpha² falloff `255 − a²/255` with `a = dist×255/(fogEnd>>16)` clamped.
-  - The reflection variant (`isReflection` arg) mirrors the far-edge vertex Y
-    below the plane (`y' = 1 − y` screen-space flips at the +34h/+74h/+B4h writes
-    `[@ 0x5c306d..0x5c3085]`), skips the murk term, and swaps the alpha scale
-    (×255 ↔ ×229.5 doubles `[@ 0x5c2df8; dbl_7DBF98/dbl_7DBF70]`).
+    `render_foliage_sprite_billboards`): 64-byte verts (FVF 0x1404C4 —
+    XYZRHW + diffuse + specular + TEX4 sizes 2/3/3/2 `[@ 0x5c28e1]`; t1/t2 =
+    the texm3x2 reflection-bump rows, t3 duplicates t0); **NO vertex
+    displacement** — flat rows; the animated color+DuDv textures carry the
+    wave look. **Chain re-graded at the 2026-07-07 port leg (IDB re-read;
+    ported as `env::water_build_strip_rows` + ctest pins)**: colors are
+    ROW-CONSTANT `[@ 0x5c2f0a..0x5c2f2b]` — `base = 1 − murk` (underwater 1,
+    nightvision flat 0.1), `k = 0.2 + 0.8·base`, `sin = |Δy|/|Δ|` of the
+    right-edge camera ray; brightness = `int(lerp(192k, 38.4k, sin))`
+    `[flt_7DBFA4/A8]`, alpha_term = `int(lerp(0, 229.5·base, sin))`
+    `[flt_7DBFA0 — a FLOAT, distinct from the low tier's dbl_7DBF70]`,
+    `a = clamp(int(t·2²⁴/fogEnd_fp), 0, 255)` `[dbl_7DBF98 = 2²⁴ on BOTH
+    paths]`, dist_alpha = `255 − a²/255`, diffuse =
+    `(alpha_term·dist_alpha/255) << 24 | 0x10101·brightness`; specular =
+    `(dist_alpha << 24) | WaterColorLit RGB × int(lerp(255(1−base),
+    128(1−base), sin)) >> 8` (nightvision drops the RGB `[@ 0x5c2ef8]`);
+    per-vertex depth ("fog W") = `(t·uvScale − uvBias)·(1/t)` clamped to
+    **[8.0422355e-05 (0x38A8A8AC), 1 − 2⁻¹⁴ (0x3F7FFC00)]**
+    `[flt_7DBF7C/flt_7C4658 @ 0x5c2c1f..0x5c2c4a]` — the earlier
+    "[4e-5, 1 − 2⁻¹⁵]" reading was the low-tier approximation. Batches lock
+    `8·rows − 10` VERTICES and draw `8·rows − 12` primitives
+    (`DrawPrimitive @ 0x5c3209` passes count − 2; the earlier "8·rows − 10
+    primitives" was the vertex count).
+  - The third-arg variants (call sites `[@ 0x5c3489..97 above-water:
+    (height, 0, nv); @ 0x5c3539..47 underwater: (height, underwater, nv)]` —
+    the earlier "isReflection" reading was the UNDERWATER-VIEW pass): the
+    underwater view skips the murk term (base = 1), renders solid-white
+    diffuse with LINEAR dist_alpha `255 − a` (no square), keeps the boot
+    stride 4 (never re-derives), and flips t2's V to `1 − V` on all three
+    row vertices (the +34h/+74h/+B4h writes `[@ 0x5c306d..0x5c3085]` — a
+    texcoord flip, not a vertex-Y mirror); the ×255 ↔ ×229.5 double swap
+    belongs to the LOW tier alone (`dbl_7DBF70`'s single xref @ 0x5c244b).
+    The nightvision arg is the flat-0.1 redraw.
 - **Reflection pipeline (#30 internals witnessed at REN-6, 2026-07-06).** The
   reflection prerender runs BEFORE the main frame (`Render_TerrainScene @ 0x610c80`
   → `Water_ReflectionPrerender @ 0x5c2780`, ex `sub_5C2780`, gated on
@@ -812,7 +835,7 @@ In a network session the server-synced time + TOD rate replace the local start T
 | 27 | Smoothed scalar spring channels unwired: the tick smooth/spring-steps fog distance (`Env_FogDistCurrent @ 0x57ede2`, consumed by the dome fog c9 `@ 0x5792c2` and `Environment_GetFogEndDistance`), sky height (`Env_SkyHeightCurrent @ 0x57ee97`, gating the dome rebuild `@ 0x57e4f4`), camera FOV (`@ 0x57ee78`), the now-identified `Env_SunDimPct` channel (`0x26c6830` family — dims the sun body + glare, default 0, no parser writes it), the rain percent (`Env_RainPctCurrent @ 0x26c6880` family — identified at REN-6, see the weather-tick smoother list), and the overcast blend (#16's runtime facet, `@ 0x57ef62`); the reimpl's consumers read PARSED `.env` values — a TOD/env scrub snaps instantly where retail ramps in | **FIXED (2026-07-06, the REN-6 port leg)**: `env::EnvScalarChannels` ticks the witnessed springs in-order between the sequencers and the color blocks (`NovaWeatherCore.scalar_channels`, ctest-pinned steps `((d+31)>>5` / eighth-snap); targets refresh from the PARSED values each tick and the mission snap touches targets only — currents always ramp `[orig: @ 0x57d1e0]`; the smoothed currents write back through the env seam (`NovaEnvironment.set_smoothed_scalars`) so EVERY consumer (dome c9/u_sky_height, water UV state, object/terrain fog ends, the #21 frame clear) serves the ramp; the SunDim channel is live end-to-end (celestial sun alpha + glare fold). Residuals: the rain%/overcast channels are state-live awaiting their consumers (weather particles / the overcast cross-fade), FOV rides the camera system, and the per-channel step/max clamps arrive with the weather-command wiring (`@ 0x57f1e0`) |
 | 28 | Water-height precedence: the reimpl ladder ran override → `.env` → terrain-fallback (env wins over terrain); witnessed retail order is BMS > TRN (bit-31-flagged store at `Terrain_Init @ 0x60fcb5`, AFTER the env parse) > ENV | **FIXED 2026-07-06 (minted at the water grill, closed at the water binding slice)**: the NovaWater ladder reordered — a flagged terrain height beats the `.env` one; the host override rung stays on top as the authoring seam |
 | 29 | Water surface tessellation: witnessed = screen-marched adaptive strips from the camera (3 vertices per row — left/mid/right of the projected span; adaptive ROW stride `clamp(int(row_1/w × 500), 2, 9)` — the earlier "2..9 columns" reading corrected at REN-6; 1024-row cap; ≤5-row strip batches stepping 4 through static index tables; the low-detail path adds sin-table Y displacement from the shared D-INF-4 table) `[orig: render_water_strip @ 0x5c1d60; render_water_strip_detailed @ 0x5c27d0]`; the reimpl draws a static camera-snapped 65×65 plane | **OPEN (minted 2026-07-06, spec complete)**: the witnessed LOOK (noise textures + UV + color pipeline) is ported; the tessellation architecture rides a dedicated slice. The plane is the tracked host stand-in |
-| 30 | Water reflection passes exist in retail (`sub_5D6150` init `[orig: Terrain_Init @ 0x60fcc5]`, `Terrain_RenderSceneWithReflection @ 0x5c93a0`, per-strip mirrored verts + 229.5 alpha scale) — the reimpl renders none | **WITNESSED-READY-DEFERRED (internals closed at REN-6, 2026-07-06)**: the offscreen pipeline is fully witnessed — `Water_ReflectionPrerender @ 0x5c2780` → `render_main_scene @ 0x5c1240` (RTT begin/end on `Water_ReflectionTexture`, skyfog clear, the clip plane at `waterHeight − 0.1`, mirrored sky/terrain/world/celestial/glare) with `Water_RenderReflectedWorldScene @ 0x5c8510` (the ex three-flush decompile-fail; builds `g_WaterMirrorMatrix` as the water CLIP-plane texture matrix `u = y − wh + 0.5` and arms `g_WaterMirrorActive`) — see §Reflection pipeline; the strip far-edge mirroring decoded (`y' = 1 − y`, murk skipped, alpha ×229.5); the camera-mirror transform sits in the Hex-Rays-elided view-matrix section (pin at port). The PORT DECISION (host planar reflection vs ratify) rides the REN-6 port leg |
+| 30 | Water reflection passes exist in retail (`sub_5D6150` init `[orig: Terrain_Init @ 0x60fcc5]`, `Terrain_RenderSceneWithReflection @ 0x5c93a0`, per-strip mirrored verts + 229.5 alpha scale) — the reimpl renders none | **WITNESSED-READY-DEFERRED (internals closed at REN-6, 2026-07-06)**: the offscreen pipeline is fully witnessed — `Water_ReflectionPrerender @ 0x5c2780` → `render_main_scene @ 0x5c1240` (RTT begin/end on `Water_ReflectionTexture`, skyfog clear, the clip plane at `waterHeight − 0.1`, mirrored sky/terrain/world/celestial/glare) with `Water_RenderReflectedWorldScene @ 0x5c8510` (the ex three-flush decompile-fail; builds `g_WaterMirrorMatrix` as the water CLIP-plane texture matrix `u = y − wh + 0.5` and arms `g_WaterMirrorActive`) — see §Reflection pipeline; the earlier "strip far-edge mirroring" reading was RE-GRADED at the 2026-07-07 port leg: the `y' = 1 − y` flip / murk skip belong to the strip renderers' UNDERWATER-VIEW arg (§The strips — a t2 texcoord flip on all three row vertices, not a reflection mirror; the ×229.5 double is the low tier's), so the reflection's strip geometry rides the RTT scene itself; the camera-mirror transform sits in the Hex-Rays-elided view-matrix section (pin at port). The PORT DECISION (host planar reflection vs ratify) rides the REN-6 port leg |
 | 31 | The water render LOOK was invented: sin/cos shader waves + Fresnel-style alpha with no witness; retail = per-frame animated 128×128 noise color + DuDv textures over `Env_WaterColorLit` per-vertex color, distance-alpha, murk term | **FIXED 2026-07-06 (minted-and-closed at the water binding slice)**: `water.gdshader` rewritten as a structural port of the witnessed detailed-path model over the libs/env textures (`water_noise_color_pixels`/`water_noise_normal_pixels`/`water_uv_state`, ctest-pinned); the invented waves/fresnel are deleted |
 | 32 | Celestial placement inventions: the reimpl placed bodies at `camera.xz + dir × 2000 × (sky_height/175.69)` with ZEROED camera height and a `dir.y > -0.1` visibility gate — none witnessed. The live renderer places at camera + dir × 64 (full height, identity rotation) with alpha folds; the 2000 belongs only to the dome VS proximity ref, the +64/+16 offsets to a dead variant | **FIXED 2026-07-06 (minted-and-closed at the celestial leg)**: placement + witnessed sun/moon alphas ported (`kCelestialBodyDistance`, `celestial_sun/moon_alpha_fixed`, EnvFile statics, vector-pinned); the depth-test flip replaces the invented gate (the world overdraws bodies like retail's draw order) |
 | 33 | Star field: retail renders 256 camera-anchored billboard instances with per-star twinkle (rol4/rol11 PRNG) and a hide-near-the-light dot cull `[orig: render_star_field @ 0x5ad9c0]`; the reimpl renders the star 3DI as ONE body. The instance-table generator is unfound | **FIXED (2026-07-06, the REN-6 port leg)**: the generator witnessed (`Star_GenerateInstanceTable @ 0x5ac850`, ex `init_weather_particles` — per-star math in §Celestial bodies; sole caller `EffectWorld_LoadCelestialModels @ 0x5add40`) and PORTED — `env::generate_star_instances`/`star_twinkle_tick`/`star_visible_fixed` (ctest-pinned: the PRNG draws from seed 1, star[0] offsets, the 256-star invariants) hosted by `NovaStarField` + a 256-instance camera-anchored billboard MultiMesh in `nova_celestial.gd` (per-star twinkle via instance color, the 0.98 near-light cull against the active light, regenerate-per-celestial-load, the sky-stars ladder rung). The single-body stand-in and its `0x2000` dead-variant opacity are deleted. Note: the brightness accumulator's exact scale/color application inside `Matrix_BuildTransformFromParts` is Hex-Rays-mangled (x87 handoff) — brightness-as-color-modulation is the structural reading |
