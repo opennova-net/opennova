@@ -795,12 +795,9 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	var is_glass_flag := 1 if bool(info.get("is_glass", material_def.get("is_glass", false))) else 0
 	var alpha_test_byte := int(info.get("alpha_test", roundi(float(material_def.get("alpha_threshold", 0.0)) * 255.0)))
 	var shader_cache := NovaObjectShaderCache.get_singleton()
-	var key := shader_cache.classify(shader_tag, material_flags, emissive_type, is_glass_flag, alpha_test_byte)
-	material.shader = shader_cache.get_shader_for_key(key)
-	if shader_cache.blend_for_key(key) != NovaObjectShaderCache.BLEND_OPAQUE:
-		# Water-side rung applied by refresh_render_order() once placed.
-		_alpha_materials.append(material)
 
+	# Textures resolve before the shader key: the detail stage only survives
+	# classification when the secondary texture actually resolved (below).
 	var diffuse := _load_texture_for_slot(material_def, 1)
 	var detail := _load_texture_for_slot(material_def, 2)
 	var normal := _load_texture_for_slot(material_def, 3)
@@ -809,14 +806,28 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	if diffuse == null and detail != null:
 		diffuse = detail
 		detail = null
+
+	var key := shader_cache.classify(shader_tag, material_flags, emissive_type, is_glass_flag, alpha_test_byte)
+	if detail == null:
+		# Retail runs the _MT second stage only with its texture bound — a
+		# NULL-texture stage is dropped. An unresolved secondary therefore
+		# composes the no-detail shader: identical output to no stage at all,
+		# never the Modulate2x stage over a placeholder
+		# (render-material-re.md §FF technique tables).
+		key &= ~NovaObjectShaderCache.CAP_DETAIL
+	material.shader = shader_cache.get_shader_for_key(key)
+	if shader_cache.blend_for_key(key) != NovaObjectShaderCache.BLEND_OPAQUE:
+		# Water-side rung applied by refresh_render_order() once placed.
+		_alpha_materials.append(material)
+
 	if diffuse != null:
 		material.set_shader_parameter("u_diffuse", diffuse)
 	else:
 		material.set_shader_parameter("u_diffuse", _solid_colour_texture(_hash_color_for_index(index)))
 	if detail != null:
+		# The _MT secondary map, same resolver path as the diffuse (slot 2 =
+		# the material record's second texture — OED's SECONDARY slot).
 		material.set_shader_parameter("u_detail", detail)
-	else:
-		material.set_shader_parameter("u_detail", _solid_colour_texture(Color.WHITE))
 	if normal != null:
 		material.set_shader_parameter("u_normal_map", normal)
 	else:

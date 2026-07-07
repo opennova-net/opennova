@@ -54,6 +54,14 @@ void NovaObjectShaderCache::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_ALPHA_INVERT", THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
 	ClassDB::bind_integer_constant(get_class_static(), "", "MATERIAL_FLAG_TWO_SIDED", THREEDI_MATERIAL_FLAG_TWO_SIDED);
 
+	// The composed-key DETAIL capability bit, single-sourced from
+	// libs/renderer: the host material path masks it off when a material's
+	// secondary texture fails to resolve, so the _MT Modulate2x stage is
+	// dropped exactly like retail drops a NULL-texture stage instead of
+	// running x2 over a placeholder (render-material-re.md §FF technique
+	// tables).
+	ClassDB::bind_integer_constant(get_class_static(), "", "CAP_DETAIL", renderer::OSCAP_DETAIL);
+
 	// ObjectBlendMode (renderer::ObjectBlendMode) for blend_for_key callers.
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_OPAQUE", static_cast<int64_t>(renderer::ObjectBlendMode::Opaque));
 	ClassDB::bind_integer_constant(get_class_static(), "", "BLEND_ALPHA", static_cast<int64_t>(renderer::ObjectBlendMode::AlphaBlend));

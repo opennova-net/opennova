@@ -426,6 +426,21 @@ invented linear ramp + `smoothstep`; now the witnessed device fog table
 shaders). Full witness: [render/render-material-re.md](render/render-material-re.md)
 §Color pipeline.
 
+Minted-and-closed 2026-07-07 (REN-7, the T3 "W_RCK1_O watch item"):
+**D-RMAT-10** -> `FIXED` — the `_MT` secondary (detail) stage ran HALF the
+witnessed combine (composer `×1`, no alpha touch) vs the witnessed stage 1
+`TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate,
+Texture, Current)` — resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg
+93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in
+detail regions). Fixed: the composer emits the witnessed ×2 + alpha
+modulate; the host masks `OSCAP_DETAIL` off the key when the secondary
+fails to resolve (retail's NULL-texture stage drop, exactly; the white ×1
+fallback deleted). UV evidence: the .3di v8 vertex carries TWO authored UV
+sets — `v_uv2` was always right. T1: exactly the 224 detail-keyed hashes
+moved, 0 classification rows. Full witness:
+[render/render-material-re.md](render/render-material-re.md) §Divergence
+catalog.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — selection ported + T1-pinned at REN-3; the class CONTENT witnessed at REN-4 (FF technique tables, the pass-execution model, the GLOW capability landed as `is_glow_capable`) | A | WITNESSED-READY-DEFERRED (selection + GLOW flag ported) | remaining host mappings ride D-RORD-4/-5 residuals |

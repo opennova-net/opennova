@@ -243,8 +243,18 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "void fragment() {\n";
 	f += "\tvec4 base = texture(u_diffuse, v_uv);\n";
 	if (has_flag(key, OSCAP_DETAIL)) {
+		// The _MT second texture stage: Modulate2x on color (an avg-128 gray
+		// detail map is neutral through the x2), plain Modulate on alpha —
+		// gamma-space bytes per D-RMAT-7, saturation at the output clamp.
+		// Samples the second UV set: the .3di vertex carries two, and MT
+		// models author a distinct uv1 for the detail map (v_uv2 <- UV2).
+		// [orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1 -
+		//  TSSColor(1, Modulate2x, Texture, Current),
+		//  TSSAlpha(1, Modulate, Texture, Current);
+		//  render-material-re.md §FF technique tables]
 		f += "\tvec4 detail = texture(u_detail, v_uv2);\n";
-		f += "\tbase.rgb *= detail.rgb;\n";
+		f += "\tbase.rgb *= detail.rgb * 2.0;\n";
+		f += "\tbase.a *= detail.a;\n";
 	}
 	f += "\tbase.rgb *= u_rgb_mod;\n";
 	f += "\tbase.a *= u_alpha_mod;\n";
