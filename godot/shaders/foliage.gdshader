@@ -35,9 +35,10 @@ render_mode unshaded, cull_disabled, depth_prepass_alpha;
 uniform sampler2D u_albedo_texture : filter_linear_mipmap, repeat_enable;
 uniform bool u_has_albedo_texture = false;
 uniform sampler2D u_colormap : filter_linear, repeat_enable;
+uniform bool u_has_colormap = false;
 uniform float u_alpha_cutoff = 0.33;
 
-global uniform vec3 opennova_fill_light;
+global uniform vec3 opennova_sky_ambient;
 global uniform vec3 opennova_sun_light;
 global uniform vec3 opennova_fog_color;
 global uniform float opennova_fog_start;
@@ -48,13 +49,6 @@ global uniform float opennova_wind_sway_phase;
 
 varying vec4 v_ground_color;
 varying vec3 v_world_pos;
-
-vec3 terrain_light_modulation() {
-	vec3 ambient = max(opennova_fill_light, vec3(0.0));
-	vec3 diffuse = max(opennova_sun_light, vec3(0.0));
-	vec3 combined = max(ambient * 0.70700002 + diffuse, vec3(1.0 / 255.0));
-	return clamp((diffuse / combined) * (255.0 / 128.0), vec3(0.0), vec3(2.0));
-}
 
 float fog_factor_for_distance(float dist) {
 	float safe_end = max(opennova_fog_end, 1.0);
@@ -90,9 +84,23 @@ void fragment() {
 		discard;
 	}
 
-	vec3 ground = clamp(v_ground_color.rgb, vec3(0.0), vec3(1.0));
-	vec3 lit_ground = clamp(ground * terrain_light_modulation(), vec3(0.0), vec3(1.0));
-	vec3 result = leaf.rgb * lit_ground;
+	// The witnessed blend PS: rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8 —
+	// t1 = the terrain colormap planar-projected at the blade's world position
+	// (1 world unit per texel, texel = (x, -z), wrap; the host CPU sampler
+	// NovaTerrainData::get_colormap_color_world indexes identically), c0 = the
+	// SKY block, c1 = the LIGHT block — the same constants the terrain surface
+	// serves [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants
+	// terrain_setup_lighting_and_shader @ 0x604420]. v0 carries the emitter's
+	// half-plus-bias instance color (the dispatcher applies 0x404040 + avg>>1).
+	// No-terrain hosts (u_has_colormap false) get a neutral mid-gray stand-in —
+	// retail never draws foliage without a terrain colormap.
+	vec4 cm = vec4(0.5);
+	if (u_has_colormap) {
+		vec2 cm_uv = vec2(v_world_pos.x, -v_world_pos.z) / vec2(textureSize(u_colormap, 0));
+		cm = texture(u_colormap, cm_uv);
+	}
+	vec3 lit = cm.rgb * (cm.a * opennova_sun_light + opennova_sky_ambient);
+	vec3 result = clamp(leaf.rgb * lit * v_ground_color.rgb * 8.0, vec3(0.0), vec3(1.0));
 
 	float fog_factor = fog_factor_for_distance(length(v_world_pos - CAMERA_POSITION_WORLD));
 	result = mix(opennova_fog_color, result, fog_factor);

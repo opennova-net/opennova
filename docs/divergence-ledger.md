@@ -359,7 +359,9 @@ and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance (2×2 lightmap avg) vs the engine's per-vertex quad color `0xFF000000 \| (0x404040 + avg>>1)` under a 2× draw + alpha-premultiplied colormap — visually close, the per-vertex gradient is the residual | A | OPEN (approximation) | PAR (foliage) |
+| D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance vs the engine's per-VERTEX quad color + alpha-premultiplied colormap read — the half-plus-bias emitter form `0xFF000000 \| (0x404040 + avg>>1)` IS applied since 2026-07-07 (the foliage-combine slice); the per-vertex gradient is the residual | A | OPEN (approximation — narrowed 2026-07-07) | PAR (foliage) |
+| D-FOLIAGE-2 | The fragment combine ran an unwitnessed ratio stand-in (`(sun/(ground·0.707+sun))×255/128`, no terrain-colormap sample, no SKY term — the shader's own header carried the correct witness) where retail runs `rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` with t1 = the planar-projected terrain colormap and c0/c1 = the SKY/LIGHT blocks `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants @ 0x604420]` | A | **FIXED (2026-07-07)** — the witnessed chain ported (planar uv = (x,−z)/texsize wrap ≡ the CPU sampler; the dispatcher binds the colormap from the CPU-color source chain) | REN-6 rider |
+| D-FOLIAGE-3 | Wind sway: the host displaces X weighted by height (`VERTEX.y/8`, sin of `phase + 0.11x + 0.07z`) where the witnessed VS displaces Z weighted by vertex RED via a polynomial sine of `world.x·c24.y + time` `[orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630; Foliage_WindSwayVS @ 0x2c25e5c]`; the sway amount/phase globals are live (NovaWeather) | A | OPEN (stand-in — minted 2026-07-07) | rides the foliage render-emitter parity |
 
 Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
 0x20000 proximity) is **MATCHING** — byte-exact vs retail `generate_foliage_instances_0 @ 0x600197`.
@@ -514,13 +516,13 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 1 | 0 | 0 | 1 | 1 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
-| Foliage | 1 | 0 | 0 | 1 | 0 |
+| Foliage | 2 | 0 | 0 | 2 | 1 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **35** | **11** | **31** | **77** | 9 |
+| **Total** | **36** | **11** | **31** | **78** | 10 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 

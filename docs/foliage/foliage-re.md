@@ -21,7 +21,9 @@ so the port is faithful to the shipped product, not just the demo.
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Per-cell placement (seed + PRNG + gates) | **MATCHING** | `libs/foliage/placement.cpp` = retail `generate_foliage_instances_0 @ 0x600197` field-for-field (below) |
-| Foliage instance color | **DIVERGENT (approximation)** | D-FOLIAGE-1 |
+| Foliage instance color | **DIVERGENT (approximation, narrowed 2026-07-07)** | D-FOLIAGE-1 — the half-plus-bias emitter form is applied; the per-vertex gradient is the residual |
+| Fragment combine (the blend PS) | **MATCHING (ported 2026-07-07)** | D-FOLIAGE-2 FIXED — `foliage.gdshader` runs the witnessed `t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` chain (t1 = planar-projected colormap; c0/c1 = the SKY/LIGHT blocks) `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0]`; witness text in [terrain/terrain-re.md](../terrain/terrain-re.md) §Foliage / sector models |
+| Wind-sway vertex path | **DIVERGENT (stand-in)** | D-FOLIAGE-3 — axis/weight/waveform diverge from `Foliage_WindSwayVS`; the sway state globals are live |
 
 ## The witnessed placement (`generate_foliage_instances_0 @ 0x600197`)
 
@@ -45,13 +47,31 @@ so the port is faithful to the shipped product, not just the demo.
 - **Color**: `sample_terrain_colormap_tinted @ 0x606030` at the instance ±0x8000 on both
   axes (4 samples), 2×2 SWAR average of RGB + alpha (the tint ported for env #19,
   D-ENV #19); the emitter's per-vertex color is `0xFF000000 | (0x404040 +
-  (avg>>1))` under a 2× draw.
+  (avg>>1))` under a 2× draw — the half-plus-bias form is applied by the host
+  dispatcher since 2026-07-07 (alpha forced opaque; per-channel `0x40 + avg/2`
+  cannot carry).
+
+## The witnessed fragment combine (ported 2026-07-07)
+
+The blend PS `Foliage_LightmapBlendPS @ 0x5ff7a0` (witness text in
+[terrain/terrain-re.md](../terrain/terrain-re.md) §Foliage / sector models):
+`rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8`, `a = t0.a × v0.a` — t1 is the
+terrain colormap sampled by a planar world-position projection (VS oT1 =
+dp4(world, c7/c8); host: uv = `(x, −z) / texsize`, wrap — identical to the CPU
+sampler `NovaTerrainData::get_colormap_color_world`), c0 = the SKY block and
+c1 = the LIGHT block — the same post-modulator constants the terrain surface
+serves (hosted as the `opennova_sky_ambient` / `opennova_sun_light` globals).
+`foliage.gdshader` previously ran an unwitnessed ratio stand-in
+(`(sun/(ground·0.707+sun))×255/128`, no colormap sample, no SKY term) — the
+gobj-era family the gamma-faithful pipeline (D-RMAT-7) exposed; D-FOLIAGE-2.
 
 ## D-FOLIAGE divergence catalog
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
-| D-FOLIAGE-1 | A | OPEN (approximation) | Foliage instance color: the host bakes ONE color per `MultiMesh` instance (the 2×2 lightmap average `[orig: sample_terrain_colormap_tinted @ 0x606030]`), where the engine emits a per-VERTEX quad color `0xFF000000 | (0x404040 + (avg>>1))` under a 2× draw (half-plus-bias) and reads an alpha-premultiplied colormap. Visually close (same average tone); the per-vertex gradient + the exact 2× half-plus-bias are the residual. Rides the foliage render-emitter parity. |
+| D-FOLIAGE-1 | A | OPEN (approximation — narrowed 2026-07-07) | Foliage instance color: the host bakes ONE color per `MultiMesh` instance where the engine emits a per-VERTEX quad color (four corner samples) and reads an alpha-premultiplied colormap. The half-plus-bias emitter form (`0xFF000000 | (0x404040 + (avg>>1))`) IS applied since the combine slice; the per-vertex gradient + the premultiplied read are the residual. Rides the foliage render-emitter parity. |
+| D-FOLIAGE-2 | A | **FIXED (2026-07-07, REN-6 rider)** | The fragment combine was an unwitnessed ratio stand-in (`(sun/(ground·0.707+sun))×255/128` — no terrain-colormap sample, no SKY term; the shader header already carried the correct witness) vs the witnessed `rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8, a = t0.a × v0.a` `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants terrain_setup_lighting_and_shader @ 0x604420]`. Ported 1:1: planar uv `(x,−z)/texsize` wrap ≡ the CPU sampler; the dispatcher binds the colormap from the CPU-color source chain (runtime terrain → editor colormap source) with a neutral no-terrain fallback (retail never draws foliage without a colormap). |
+| D-FOLIAGE-3 | A | OPEN (stand-in — minted 2026-07-07) | Wind sway: the host displaces X weighted by height (`VERTEX.y/8`, `sin(phase + 0.11x + 0.07z)`) where the witnessed VS displaces Z weighted by vertex RED via a polynomial sine of `world.x·c24.y + time` `[orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630; Foliage_WindSwayVS @ 0x2c25e5c]`. The sway amount/phase state is live (NovaWeather globals); the axis/weight/waveform ride the foliage render-emitter parity. |
 
 Placement itself carries **no divergence** — the seed, PRNG, candidate count,
 surface gate, and proximity spacing are byte-exact against retail.

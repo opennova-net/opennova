@@ -490,9 +490,10 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	// (min((texel * FULL) >> 7, 255), alpha passthrough), then the 2x2 SWAR
 	// average [orig: sample_terrain_colormap_tinted @ 0x606030; sample fan
 	// generate_foliage_instances_0 @ 0x600197..0x6001eb]. MultiMesh has one
-	// color per instance, so the average IS the instance color; the emitter's
-	// half-plus-bias vertex color (0x404040 + avg>>1 under the 2X draw) rides
-	// the foliage render-emitter parity (PAR-R2), not the tint slice.
+	// color per instance, so the average IS the instance color. The
+	// half-plus-bias emitter form is applied below (2026-07-07); the
+	// per-VERTEX gradient (four distinct corner colors vs one instance color)
+	// remains the PAR-R2 residual.
 	const uint32_t full_tint = terrain_tint_full_;
 	const auto tinted = [full_tint, td](float sx, float sz) -> uint32_t {
 		return opennova::env::foliage_lightmap_tint(
@@ -503,7 +504,12 @@ Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::Place
 	const uint32_t c2 = tinted(wx - 0.5f, wz + 0.5f);
 	const uint32_t c3 = tinted(wx + 0.5f, wz + 0.5f);
 	const uint32_t packed = opennova::terrain::terrain_average_four_argb(c0, c1, c2, c3);
-	return argb_to_color(packed);
+	// The emitter's half-plus-bias vertex color over the tinted average —
+	// alpha forced opaque; per-channel 0x40 + avg/2 cannot carry (max 0xBF)
+	// [orig: generate_foliage_instances_0 @ 0x600197..0x6001eb emits
+	// 0xFF000000 | (0x404040 + (avg >> 1))].
+	const uint32_t biased = 0xFF000000u | (0x00404040u + ((packed >> 1) & 0x007F7F7Fu));
+	return argb_to_color(biased);
 }
 
 void NovaFoliageDispatcher::_append_render_instance(const opennova::foliage::PlacementInstance &inst,
@@ -821,9 +827,15 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index, const Ref<Mesh
 
 	material->set_shader_parameter("u_albedo_texture", albedo_tex);
 	material->set_shader_parameter("u_has_albedo_texture", albedo_tex.is_valid());
-	if (terrain_data_.is_valid()) {
-		material->set_shader_parameter("u_colormap", terrain_data_->get_colormap());
+	// Bind the colormap from the same source chain as the CPU instance color
+	// (runtime terrain first, editor colormap-only source second) so the
+	// witnessed blend PS sees the identical texels the emitter averaged.
+	Ref<NovaTerrainData> cm_src = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
+	const bool has_cm = cm_src.is_valid() && cm_src->get_colormap().is_valid();
+	if (has_cm) {
+		material->set_shader_parameter("u_colormap", cm_src->get_colormap());
 	}
+	material->set_shader_parameter("u_has_colormap", has_cm);
 
 	if (mm_by_slot_[slot_index] != nullptr) {
 		mm_by_slot_[slot_index]->set_material_override(material);
