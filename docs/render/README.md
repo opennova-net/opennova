@@ -70,3 +70,10 @@ same viewpoint/TOD, judged by eye and attested scene-by-scene in the trunk PR:
 Retail captures come from the retail JO:CA install (the runtime launch recipe
 is `docs/asset-gated-tests.md` + the `oned-run` skill); our side from the
 same worldspace via the runtime. Neither side's pixels are committed.
+
+REN-7 state (2026-07-07): the scene-by-scene attestation table lives in the
+trunk PR (#207) — our side captured via `env_visual_baseline_probe` (the
+water-horizon TOD set, scene 1) and `mission_visual_probe` (CP15 ground POV,
+scenes 2/5); scenes 3/4/6 are enumerated there against their tracked rows
+(D-RLIT-5, D-RMAT-8, D-RORD-4). The by-eye retail pass is the maintainer's
+attestation.
