@@ -162,5 +162,94 @@ int main() {
 	TEST_EXPECT(bms_reload.entity_count(EntityKind::Item) == 1);
 	TEST_EXPECT(bms_reload.event_count() == 1);
 
+	// --- .mis height declaration (D-MIS-4): height_lock + extra_bheight round-trip -----------
+	// [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
+	//  MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 : 0));
+	//  both misldr.dll]
+	TEST_EXPECT(text.find("  height_lock 1\r\n") != std::string::npos);
+	TEST_EXPECT(text.find("  extra_bheight 0\r\n") != std::string::npos);
+	TEST_EXPECT(parsed.bms_file().items.size() == 1);
+	TEST_EXPECT(parsed.bms_file().items[0].mis_height_lock == 1);
+	TEST_EXPECT(parsed.bms_file().items[0].mis_extra_bheight == 0);
+
+	// Host-provided base heights (flat, in write order) bake into the emitted extra_bheight; the
+	// absolute z is untouched and the source document's entity is not mutated by the writer.
+	{
+		const std::string baked_path = temp_path("mission_mis_baked_heights.mis");
+		const std::vector<int32_t> base_heights = {25 * 65536};
+		TEST_EXPECT(authored.save_mis_file(baked_path, &base_heights));
+		const std::string baked_text = read_text(baked_path);
+		TEST_EXPECT(baked_text.find("  extra_bheight 1638400\r\n") != std::string::npos);
+		TEST_EXPECT(baked_text.find("  height_lock 1\r\n") != std::string::npos);
+		TEST_EXPECT(authored.bms_file().items[0].mis_extra_bheight == 0);
+
+		MissionDocument baked;
+		TEST_EXPECT(baked.load_mis_file(baked_path));
+		TEST_EXPECT(baked.bms_file().items.size() == 1);
+		TEST_EXPECT(baked.bms_file().items[0].mis_extra_bheight == 25 * 65536);
+		TEST_EXPECT(baked.bms_file().items[0].mis_height_lock == 1);
+		TEST_EXPECT(baked.bms_file().items[0].z == authored.bms_file().items[0].z);
+		// The parsed document re-exports its own baked value without a provider.
+		std::string rewritten;
+		TEST_EXPECT(baked.write_mis_text(rewritten));
+		TEST_EXPECT(rewritten.find("  extra_bheight 1638400\r\n") != std::string::npos);
+	}
+
+	// --- Base-10 numeric parsing (D-MIS-5): the octal regression ------------------------------
+	// minutes_per_day emits UNPADDED (the old four_digit padding produced "0120", which a base-0
+	// strtol reader corrupted to octal 80, degrading to 0 by the third generation); a
+	// hand-authored zero-padded value still parses base-10, matching the original importer's
+	// plain atol [orig: j__atol callers throughout MisLdr_ParseMisLine @ 0x100017b0, misldr.dll].
+	{
+		MissionDocument octal;
+		octal.create_default();
+		TEST_EXPECT(octal.set_header_int("minutes_per_day", 120));
+		std::string octal_text;
+		TEST_EXPECT(octal.write_mis_text(octal_text));
+		TEST_EXPECT(octal_text.find("  minutes_per_day 120\r\n") != std::string::npos);
+		TEST_EXPECT(octal_text.find("  minutes_per_day 0120") == std::string::npos);
+
+		MissionDocument hand;
+		TEST_EXPECT(hand.load_mis_text(
+				"begin general_information\r\n"
+				"  minutes_per_day 0120\r\n"
+				"end general_information\r\n"));
+		TEST_EXPECT(hand.info().minutes_per_day == 120);
+	}
+
+	// --- Header write/read symmetry (D-MIS-5): fog_level / water_level / gen_def_val1..4 ------
+	// fog_level / water_level are the RAW u32s at header offsets 156/152 (straddling the u16
+	// override fields — the old parse truncated 45875200 to 0); gen_def_val1..4 are the u32s at
+	// 264..276 (Header health/mana/music/reverb), previously write-only.
+	{
+		MissionDocument sym;
+		sym.create_default();
+		bms::Header &header = sym.bms_file().header;
+		header.water_override = 21;  // water_level u32 @152 reads 21 while unknown1 stays 0
+		header.fog_override = 700;   // fog_level u32 @156 reads 700 << 16 == 45875200
+		header.health = 11;
+		header.mana = 22;
+		header.music = 33;
+		header.reverb = 44;
+		std::string sym_text;
+		TEST_EXPECT(sym.write_mis_text(sym_text));
+		TEST_EXPECT(sym_text.find("  water_level 21\r\n") != std::string::npos);
+		TEST_EXPECT(sym_text.find("  fog_level 45875200\r\n") != std::string::npos);
+		TEST_EXPECT(sym_text.find("  gen_def_val1 11\r\n") != std::string::npos);
+		TEST_EXPECT(sym_text.find("  gen_def_val2 22\r\n") != std::string::npos);
+		TEST_EXPECT(sym_text.find("  gen_def_val3 33\r\n") != std::string::npos);
+		TEST_EXPECT(sym_text.find("  gen_def_val4 44\r\n") != std::string::npos);
+
+		MissionDocument sym_back;
+		TEST_EXPECT(sym_back.load_mis_text(sym_text));
+		const bms::Header &back = sym_back.bms_file().header;
+		TEST_EXPECT(back.water_override == 21);
+		TEST_EXPECT(back.fog_override == 700);
+		TEST_EXPECT(back.health == 11);
+		TEST_EXPECT(back.mana == 22);
+		TEST_EXPECT(back.music == 33);
+		TEST_EXPECT(back.reverb == 44);
+	}
+
 	return 0;
 }

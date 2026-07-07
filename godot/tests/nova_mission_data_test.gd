@@ -794,6 +794,31 @@ func test_create_default_save_as_mis_and_reopen() -> void:
 	DirAccess.remove_absolute(path)
 
 
+func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
+	# A .mis export declares every entity's z ABSOLUTE (height_lock 1) and bakes the
+	# host-sampled terrain height under it as extra_bheight, so the original editor
+	# recovers the terrain-relative offset as z - extra_bheight
+	# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. See D-MIS-4.
+	var m := NovaMissionData.new()
+	assert_eq(m.create_default(), OK)
+	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
+	var path := _temp_mis_path()
+	# One 16.16 base height (25.0), flat in write order (items, buildings, markers, organics).
+	m.set_mis_base_heights(PackedInt32Array([25 * 65536]))
+	assert_eq(m.save_as(path), OK, "save_as consumes the staged heights")
+	var text := FileAccess.get_file_as_string(path)
+	assert_string_contains(text, "height_lock 1", "the item z is declared absolute")
+	assert_string_contains(text, "extra_bheight 1638400", "the staged base height is baked")
+
+	# Staged heights are consumed by the save: a second save without re-staging falls back
+	# to the entity's own interchange value (0 for an editor-authored entity).
+	assert_eq(m.save_as(path), OK, "a re-save without staging succeeds")
+	text = FileAccess.get_file_as_string(path)
+	assert_string_contains(text, "extra_bheight 0", "no stale heights leak into the next save")
+	assert_string_contains(text, "height_lock 1", "the absolute declaration is unconditional")
+	DirAccess.remove_absolute(path)
+
+
 # --- Undo / redo + dirty (in-memory document history) -------------------------
 # The history holds in-memory document snapshots (no serialized bytes). begin_edit/commit_edit
 # bracket a gesture into one step (commit pushes only on a real change); undo/redo swap the

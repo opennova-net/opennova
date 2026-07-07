@@ -119,6 +119,13 @@ target_include_directories(mission_mis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_mis_test PRIVATE cxx_std_17)
 add_test(NAME mission_mis COMMAND mission_mis_test)
 
+# Retail-fixture .mis idempotency: .bms -> .mis (gen1) -> parse -> .mis (gen2), byte-equal.
+add_executable(mission_mis_idempotency_test mission/mission_mis_idempotency_test.cpp)
+target_link_libraries(mission_mis_idempotency_test PRIVATE opennova_mission_format)
+target_include_directories(mission_mis_idempotency_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
+add_test(NAME mission_mis_idempotency COMMAND mission_mis_idempotency_test)
+
 add_executable(mission_c_abi_test mission/mission_c_abi_test.cpp)
 target_link_libraries(mission_c_abi_test PRIVATE opennova_mission_format)
 target_include_directories(mission_c_abi_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

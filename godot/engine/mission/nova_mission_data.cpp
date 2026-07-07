@@ -147,6 +147,7 @@ void NovaMissionData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("save_file"), &NovaMissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &NovaMissionData::save_as);
+	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &NovaMissionData::set_mis_base_heights);
 	ClassDB::bind_method(D_METHOD("is_modified"), &NovaMissionData::is_modified);
 	ClassDB::bind_method(D_METHOD("begin_edit"), &NovaMissionData::begin_edit);
 	ClassDB::bind_method(D_METHOD("commit_edit"), &NovaMissionData::commit_edit);
@@ -187,6 +188,7 @@ void NovaMissionData::_bind_methods() {
 Error NovaMissionData::open_file(const String &path) {
 	source_path = path;
 	last_error = String();
+	mis_base_heights = PackedInt32Array(); // staged heights never apply to a different document
 	const String ext = path.get_extension().to_lower();
 	const bool ok = ext == "mis"
 			? document.load_mis_file(path.utf8().get_data())
@@ -207,6 +209,7 @@ Error NovaMissionData::open_file(const String &path) {
 Error NovaMissionData::create_default() {
 	source_path = String();
 	last_error = String();
+	mis_base_heights = PackedInt32Array(); // staged heights never apply to a different document
 	document.create_default();
 	modified = false;
 	clear_history();
@@ -1353,10 +1356,26 @@ Error NovaMissionData::save_as(const String &path) {
 	if (path.is_empty()) {
 		return ERR_INVALID_PARAMETER;
 	}
+	// Consume (and always clear) any staged base heights: they describe THIS save's entity
+	// write order, so they must not survive onto a later save after the document changed.
+	const PackedInt32Array staged_heights = mis_base_heights;
+	mis_base_heights = PackedInt32Array();
 	const String ext = path.get_extension().to_lower();
-	const bool ok = ext == "mis"
-			? document.save_mis_file(path.utf8().get_data())
-			: document.save_bms_file(path.utf8().get_data());
+	bool ok = false;
+	if (ext == "mis") {
+		// The .mis writer takes the host-sampled terrain heights (flat, write order) and emits
+		// them as each entity's extra_bheight next to the height_lock declaration; see
+		// MissionDocument::save_mis_file and docs/mission/mis-format-re.md (D-MIS-4).
+		std::vector<int32_t> base_heights;
+		base_heights.reserve(static_cast<size_t>(staged_heights.size()));
+		for (int i = 0; i < staged_heights.size(); ++i) {
+			base_heights.push_back(staged_heights[i]);
+		}
+		ok = document.save_mis_file(path.utf8().get_data(),
+				base_heights.empty() ? nullptr : &base_heights);
+	} else {
+		ok = document.save_bms_file(path.utf8().get_data());
+	}
 	if (!ok) {
 		last_error = String(document.last_error().c_str());
 		return ERR_FILE_CANT_WRITE;
@@ -1364,6 +1383,10 @@ Error NovaMissionData::save_as(const String &path) {
 	source_path = path;
 	modified = false;
 	return OK;
+}
+
+void NovaMissionData::set_mis_base_heights(const PackedInt32Array &flat_write_order) {
+	mis_base_heights = flat_write_order;
 }
 
 bool NovaMissionData::is_modified() const {

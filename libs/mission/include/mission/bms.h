@@ -522,6 +522,23 @@ struct Entity {
     int16_t unk42b;                    // @166: not written by the editor (reserved/pad)
     int32_t unk43;                     // @168: not written by the editor (reserved/pad)
 
+    // --- .mis-interchange-only TRANSIENT fields (NOT serialized into .bms bytes) -----------
+    // The 172-byte BMS entity record (kEntitySize) has no such fields; they are MED/Nile
+    // text-authoring concepts that exist only in the .mis metafile. parse_entity/write_entity
+    // (bms.cpp) serialize the record field-by-field and never touch these; equal() compares
+    // them (they change write_mis_text output, so a difference is a real document change).
+    // Semantics: a plain .mis item z is the editor-frame (terrain-relative) height;
+    // height_lock nonzero declares z ABSOLUTE with extra_bheight carrying the baked base
+    // height under the item, so the original editor recovers the relative offset as
+    //   scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)
+    // [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
+    //  MisLdr_WriteNileProjectXml @ 0x10004930 (<ABSOLUTE>TRUE</ABSOLUTE> iff height_lock);
+    //  both misldr.dll]. BMS entity z is always absolute (bms-event-runtime-re.md §6.6), so
+    // the .bms parse path and freshly authored entities mark height_lock = 1; .mis-parsed
+    // entities round-trip their own values. See docs/mission/mis-format-re.md (D-MIS-4).
+    int32_t mis_extra_bheight = 0;     // .mis extra_bheight: baked base height, 16.16 fixed
+    uint8_t mis_height_lock = 0;       // .mis height_lock: nonzero => z ABSOLUTE + bheight baked
+
     // Accessors for float positions (fixed-point 16.16 conversion)
     float get_x() const { return x / 65536.0f; }
     float get_y() const { return y / 65536.0f; }
@@ -756,6 +773,9 @@ bool is_bms(const uint8_t* data, size_t size);
 // without round-tripping through the byte serializer. The fixed record structs are trivially
 // copyable and always value-initialized, so they compare byte-wise; WaypointRecord (inner vectors)
 // compares field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
+// The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
+// mis_height_lock): they never reach .bms bytes, but they do change write_mis_text output, so a
+// difference between them is a real document change for undo/dirty purposes.
 bool equal(const File& a, const File& b);
 
 } // namespace opennova::bms

@@ -265,8 +265,13 @@ public:
 	bool load_mis_text(const std::string &text);
 	bool save_bms_file(const std::string &path);
 	bool write_bms_bytes(std::vector<uint8_t> &out);
-	bool save_mis_file(const std::string &path);
-	bool write_mis_text(std::string &out);
+	// The .mis writer. `base_heights` (optional): host-sampled terrain heights under each entity,
+	// 16.16 fixed-point, FLAT in WRITE ORDER (items, buildings, markers, organics). When provided,
+	// each in-range entry is emitted as that entity's `extra_bheight` (the baked base height the
+	// original editor subtracts from the height-locked absolute z); out-of-range / absent entries
+	// fall back to the entity's own mis_extra_bheight. See docs/mission/mis-format-re.md (D-MIS-4).
+	bool save_mis_file(const std::string &path, const std::vector<int32_t> *base_heights = nullptr);
+	bool write_mis_text(std::string &out, const std::vector<int32_t> *base_heights = nullptr);
 	void clear();
 	// Build a minimal, valid, empty mission in memory (no file). Resets to the loaded state
 	// with a correct magic + version and the fixed waypoint/group/layer tables backfilled via
