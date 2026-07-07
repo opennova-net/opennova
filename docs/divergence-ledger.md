@@ -191,7 +191,7 @@ surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — **FIXED 2026-07-06 (REN-5)**: the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ 0x57ef97..0x57f03c]`; 62-tick exposure chase `[orig: @ 0x57e512; @ 0x57d940]`; ÷64 gain to `ColorSrcGlobalGain`/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`); env vectors re-dumped surgically (8 weather rows). Sampling-geometry + unhosted-block residuals tracked as D-RLIT-1/-2 ([render/render-lighting-re.md](render/render-lighting-re.md)) | A | FIXED | REN-5 (from PAR-ENV) |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (3 verts/row, adaptive ROW stride clamp(int(1/w×500), 2, 9) — the "2..9 columns" reading corrected at the REN-6 witness leg — 1024-row cap, ≤5-row batches, sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete + constants pinned in env-tod-re.md Water surface) | REN-6 (from PAR-ENV) |
+| env #29 | Water surface tessellation — **FIXED 2026-07-07 (the REN-6 tail)**: the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `NovaWaterCore.strip_*` packed arrays → the per-frame strip ArrayMesh → the witnessed ps.1.1 chain in water.gdshader, found at the port's debug: alpha = noiseA×diffuseA×2, reflection ×2 diffuse ×4 noise + specular `[orig: Water_InitSurfaceShaders @ 0x5c19b0]`); goldens re-pinned. Residuals in-row (env-tod-re.md #29): the LOW tier unported (host runs detail > 1), the underwater opaque-material swap unhosted, the grazing fade exposes the below-horizon dome band (rides #30's skyfog work) | A | FIXED | REN-6 tail |
 | env #30 | Water reflection passes — none rendered by the reimpl. REN-3 landed the pass STRUCTURE; the REN-6 witness leg closed the internals: `Water_ReflectionPrerender @ 0x5c2780` → `render_main_scene @ 0x5c1240` (RTT begin/end on `Water_ReflectionTexture`, skyfog clear, clip plane at waterHeight−0.1, mirrored sky/terrain/world/celestial/glare) with `Water_RenderReflectedWorldScene @ 0x5c8510` (the ex three-flush decompile-fail; the water CLIP-plane texture matrix u = y−wh+0.5 + `g_WaterMirrorActive`), strip far-edge mirroring decoded ([env-tod-re.md](env/env-tod-re.md) §Reflection pipeline) | A | WITNESSED-READY-DEFERRED (internals closed; the camera-mirror transform pins at port; the port decision rides the REN-6 port leg) | REN-6 (from PAR-ENV) |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
@@ -506,7 +506,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
-| Environment | 1 | 0 | 4 | 5 | 1 |
+| Environment | 0 | 0 | 4 | 4 | 2 |
 | World / AI + events | 2 | 0 | 4 | 6 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
@@ -522,7 +522,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **36** | **11** | **31** | **78** | 10 |
+| **Total** | **35** | **11** | **31** | **77** | 11 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 

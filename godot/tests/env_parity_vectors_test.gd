@@ -215,7 +215,7 @@ const EXPECTED_BYTES := {
 	"wa/k016": "56E5 10 00 00 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
 	"wa/k064": "7CDE 40 00 00 2E342B A2A29F 92ADF3 505354 2E342B A2A29F 92ADF3",
 	"wa/k256": "9787 00 00 00 2D322A 9C9C99 8DA7EB 4D5152 2D322A 9C9C99 8DA7EB",
-	"water/mesh": "4225 24576 0 65 1 1 65 66 1 66 2 2 66 67",
+	"water/mesh": "0 24 84 3 0 4 4 0 1 4 1 5 5 1 2",
 	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
 	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wb/k016": "429E 10 00 07 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
@@ -286,7 +286,7 @@ const EXPECTED_FLOATS := {
 	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
 	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/override": [42.500000000, 7.000000000],
-	"water/snap": [96.000000000, 7.000000000, -64.000000000],
+	"water/strip": [-1458.718017578, 7.000000000, -2033.705444336, 120.675346375, 7.000000000, -59.838756561],
 	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
 	"we/k008": [1751.612903226],
 	"we/k016": [1803.225806452],
@@ -642,31 +642,67 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 
 
 func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
-	# Mesh invariants: 65x65 grid = 4225 vertices, 64*64*6 = 24576 indices.
+	# Strip-mesh semantics (env #29 LIVE): the surface rebuilds per frame from
+	# the witnessed screen march [orig: render_water_strip_detailed @ 0x5c27d0
+	# under render_water_surface @ 0x5c32c0; <=5-row batches through the static
+	# strip table word_841328, walk @ 0x5c3164..0x5c329e] — the 65x65 grid
+	# stand-in and its camera-snap positioning died with it, so the pins here
+	# are the no-camera rung, the batch-unroll index head, and the first/last
+	# marched world positions.
+	#
+	# The sky collection's camera is still current in the shared tree — drop
+	# it so the no-camera rung below is real.
+	var stray_cam := get_viewport().get_camera_3d()
+	if stray_cam:
+		stray_cam.clear_current(false)
 	var water: Node = add_child_autofree(NovaWaterScript.new())
-	var mesh: ArrayMesh = water.mesh_instance.mesh
-	var arrays := mesh.surface_get_arrays(0)
-	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	var index_head := PackedStringArray()
-	for i in 12:
-		index_head.append(str(indices[i]))
-	bytes["water/mesh"] = "%d %d %s" % [positions.size(), indices.size(), " ".join(index_head)]
+	water.water_height = 7.0
+	simulate(water, 1, TICK)
+	# No camera -> no strip surface: the march needs the projected screen
+	# block, and retail only runs it inside the camera pass
+	# [orig: render_water_strip_detailed @ 0x5c27d0 projects via
+	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
+	var pre_surfaces: int = (water.mesh_instance.mesh as ArrayMesh).get_surface_count()
 
 	# Height ladder, override rung: host-driven height wins; clearing (NAN)
 	# hands control back (terrain_environment_preview_test.gd precedent).
+	# (Still no camera here — same order as before the strip port.)
 	water.set_height_override(42.5)
 	var override_height: float = water.water_height
 	water.set_height_override(NAN)
 	water.water_height = 7.0
 	floats["water/override"] = [override_height, water.water_height]
 
-	# Camera-following snap: the plane snaps to a 32-unit grid under the camera.
-	var cam := _add_camera(Vector3(100.3, 7.0, -33.7))
+	# Camera 20 units above the 7.0 plane, default orientation (the old
+	# fixture's y = 7.0 sat exactly ON the plane — a grazing edge case for the
+	# march). The old water/snap row is REMOVED: strip vertices are ABSOLUTE
+	# world positions and the mesh node stays pinned at the origin, so the
+	# camera-snap positioning died with the grid.
+	var cam := _add_camera(Vector3(100.3, 27.0, -33.7))
 	assert_not_null(cam, "headless camera injection must succeed")
 	simulate(water, 1, TICK)
-	var snap: Vector3 = water.mesh_instance.global_position
-	floats["water/snap"] = [snap.x, snap.y, snap.z]
+
+	var mesh: ArrayMesh = water.mesh_instance.mesh
+	var arrays := mesh.surface_get_arrays(0)
+	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	# positions.size() / 3 = the marched row count (3 vertices per row); the
+	# first 12 unrolled TRIANGLES indices are a pure function of the witnessed
+	# strip-table walk — entries {3,0,4,1,5,2,...} with the {2,6}-style
+	# degenerate stitches dropped by the unroll [orig: word_841328; batch walk
+	# @ 0x5c3164..0x5c329e].
+	var index_head := PackedStringArray()
+	for i in 12:
+		index_head.append(str(indices[i]))
+	bytes["water/mesh"] = "%d %d %d %s" % [
+		pre_surfaces, positions.size(), indices.size(), " ".join(index_head)]
+	# First and last vertex world positions — pins the Godot<->render basis
+	# mapping (godot == render componentwise) and the march extent end to end
+	# through NovaWaterCore; the y components pin the plane height riding the
+	# rows (7.0), not the node transform.
+	var p0 := positions[0]
+	var p_last := positions[positions.size() - 1]
+	floats["water/strip"] = [p0.x, p0.y, p0.z, p_last.x, p_last.y, p_last.z]
 
 	# The witnessed noise texture pair, asset-free through NovaWaterCore
 	# [orig: Water_GenerateNoiseTextures @ 0x5c0360; init tables from the boot
