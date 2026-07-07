@@ -180,7 +180,12 @@ the modulator block; the modulator multiplies by modulator2; modulator2 by const
 call sites `@ 0x57ef97..0x57f03c`) is **modulator2 → modulator → light → sky → ground →
 fog → skyfog → ceiling → cloud → floor → skybase/bright/highlight →
 cloudbase/highlight/edge** — same-tick propagation (ported: `env::ModulatorChain`,
-divergence #17). The modulator's target is the player's **iris auto-exposure sample**
+divergence #17). The hosts serve the post-modulator currents through the
+`NovaEnvironment` per-tick writeback seam — fill/sun/fog since the weather port, the
+÷64 gain (#17), the #27 scalars, and sky since 2026-07-06 (the object hemisphere had
+read the raw keyframe: D-RLIT-8 in
+[render/render-lighting-re.md](../render/render-lighting-re.md)).
+The modulator's target is the player's **iris auto-exposure sample**
 (`compute_ambient_light_along_direction @ 0x5c7a00`, replicated to gray via ×0x10101 in
 `Environment_ApplyFogAndAmbient @ 0x57e533`, chased over 62 ticks via
 `ColorBlock_SetStepDeltas @ 0x57d940`) — indoor/under-cover dimming and night-brightening

@@ -36,6 +36,7 @@ var _light_dir := Vector3(0.0, 0.70710678, 0.70710678)
 var _is_night := false
 var _day_phase_blend := 1.0
 var _fill_light := Vector3(0.4, 0.45, 0.55)
+var _sky_ambient_rt := Vector3(0.3, 0.4, 0.6)
 var _sun_light := Vector3(0.9, 0.85, 0.75)
 var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
 # ColorSrcGlobalGain — the modulator /64 (iris exposure), NovaWeather-written.
@@ -109,6 +110,7 @@ func _update_tod() -> void:
 		var light_key := "moon" if _is_night else "sun"
 		_sun_light = _tod.get(light_key, _sun_light)
 		_fill_light = _tod.get("ground", _fill_light)
+		_sky_ambient_rt = _tod.get("sky", _sky_ambient_rt)
 		# Fog render color is the keyframe color doubled, saturating
 		# [orig: Environment_UpdateWeatherTick @ 0x57f17c].
 		var fog_raw: Vector3 = _tod.get("fog", _fog_color_rt * 0.5)
@@ -147,8 +149,14 @@ func get_fill_light() -> Vector3:
 	return _fill_light
 
 
+## The SMOOTHED sky block when the weather tick drives it — written back per
+## tick like fill/sun/fog, so object hemi_sky serves the post-modulator block
+## [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 reads
+## Env_SkyBlock[0]; the blocks smooth + modulate in the weather tick
+## @ 0x57ef97..0x57f03c]. Discrete TOD recomputes re-seed it from the keyframe
+## (like _fill_light); the chase target stays get_sky_ambient_target().
 func get_sky_ambient() -> Vector3:
-	return _tod.get("sky", Vector3(0.3, 0.4, 0.6))
+	return _sky_ambient_rt
 
 
 func get_fog_color() -> Vector3:
@@ -356,6 +364,12 @@ func set_sun_light(value: Vector3) -> void:
 func set_fog_color_rt(value: Vector3) -> void:
 	if value != _fog_color_rt:
 		_fog_color_rt = value
+		_env_generation += 1
+
+
+func set_sky_ambient_rt(value: Vector3) -> void:
+	if value != _sky_ambient_rt:
+		_sky_ambient_rt = value
 		_env_generation += 1
 
 

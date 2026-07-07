@@ -879,3 +879,27 @@ func test_environment_parity_vectors() -> void:
 				worst_index = i
 		assert_almost_eq(float(actual[worst_index]), float(expected[worst_index]), FLOAT_EPSILON,
 			"float vector '%s'[%d] (epsilon 1e-4 — a divergence means re-grill, never widen)" % [key, worst_index])
+
+
+# The env-node sky getter serves the weather writeback (the smoothed,
+# modulated block), falling back to the raw keyframe until a tick has
+# written — the same contract as fill/sun/fog [orig: entity constants read
+# Env_SkyBlock[0] @ 0x5c8090; writeback = the weather tick's block pass].
+func test_sky_ambient_serves_smoothed_writeback() -> void:
+	var env := _add_env_node(_make_cfg(0), "EnvSkyWB")
+	env.time_of_day = 1200.0
+	# Un-driven: the getter serves the raw keyframe (== the chase target).
+	assert_eq(env.get_sky_ambient(), env.get_sky_ambient_target(),
+		"pre-weather sky ambient should be the raw keyframe")
+	var weather := _add_weather_node("EnvSkyWB", "WeatherSkyWB")
+	simulate(weather, 64, TICK)
+	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
+		"driven sky ambient should be the weather writeback")
+	# A discrete TOD scrub re-seeds from the new keyframe (the _fill_light
+	# contract) until the next tick writes back the smoothed current.
+	env.time_of_day = 2200.0
+	assert_eq(env.get_sky_ambient(), env.get_sky_ambient_target(),
+		"post-scrub sky ambient should re-seed from the keyframe")
+	simulate(weather, 4, TICK)
+	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
+		"post-scrub ticks should serve the writeback again")

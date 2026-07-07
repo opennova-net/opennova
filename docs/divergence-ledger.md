@@ -468,6 +468,16 @@ the retail noon register (full_00.env tod 1200 bytes — composer +
 nova_object_model + shader-global + terrain-include defaults, one cited
 register).
 
+Minted-and-closed 2026-07-06 (the REN-6 session): **D-RLIT-8** -> `FIXED` —
+the object per-material `hemi_sky` served the RAW TOD keyframe while
+`dir_color`/`hemi_ground` served the smoothed+modulated writeback (mixed
+color spaces; the sky-facing hemisphere half too dark off-noon), where
+retail feeds all entity lighting from the post-modulator block colors
+`[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 fills
+[8..10] ← Env_SkyBlock[0]]`. The sky block now rides the per-tick
+writeback seam (`set_sky_ambient_rt`, mirroring fill/sun/fog); details in
+the catalog below.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-RLIT-1 | Hosted weather runs 4 color blocks through the modulator; retail modulates 16 (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` | A | OPEN (partial — the hosted subset is the rendered set) | joins as consumers are hosted (skyfog rides frame-clear/horizon) |

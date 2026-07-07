@@ -83,6 +83,11 @@ func _process(_delta: float) -> void:
 	env.set_fill_light(get_smooth_fill())
 	env.set_sun_light(get_smooth_sun())
 	env.set_fog_color_rt(get_smooth_fog())
+	# The sky block joins the writeback set — entity hemi_sky serves the
+	# smoothed+modulated block like fill/sun/fog [orig: Env_SkyBlock[0]
+	# consumed by the entity-constants writer @ 0x5c8090].
+	if env.has_method("set_sky_ambient_rt"):
+		env.set_sky_ambient_rt(get_smooth_sky())
 	if env.has_method("set_color_src_gain"):
 		env.set_color_src_gain(_core.get_color_src_gain())
 	# env #27 writeback: the smoothed scalar currents flow back through the
