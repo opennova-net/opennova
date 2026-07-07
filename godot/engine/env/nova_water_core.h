@@ -99,6 +99,12 @@ public:
 	// projective depth pair plus the texm3x2 screen lookup for the env #30
 	// reflection consumer.
 	PackedFloat32Array strip_custom0() const;
+	// 4 floats per vertex: [t1.x, t1.y, t2.x, t2.y] — the texm3x2
+	// perturbation basis (camera right/forward xz under the witnessed rhw
+	// scales [orig: rows @ 0x5c2f83..0x5c3067]) as the mesh's ARRAY_CUSTOM2;
+	// the rows' 3rd components (screen U/V) ride strip_custom0's zw. The
+	// env #30 reflection consumer dots both against the DuDv sample.
+	PackedFloat32Array strip_custom2() const;
 	// PRIMITIVE_TRIANGLES indices unrolled from the witnessed <=5-row
 	// triangle-strip batches through kWaterStripIndexTable
 	// [orig: word_841328; batch walk @ 0x5c3164..0x5c329e].

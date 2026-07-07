@@ -22,6 +22,7 @@ void NovaWaterCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("strip_uv0"), &NovaWaterCore::strip_uv0);
 	ClassDB::bind_method(D_METHOD("strip_custom0"), &NovaWaterCore::strip_custom0);
 	ClassDB::bind_method(D_METHOD("strip_custom1"), &NovaWaterCore::strip_custom1);
+	ClassDB::bind_method(D_METHOD("strip_custom2"), &NovaWaterCore::strip_custom2);
 	ClassDB::bind_method(D_METHOD("strip_indices"), &NovaWaterCore::strip_indices);
 }
 
@@ -307,6 +308,27 @@ PackedFloat32Array NovaWaterCore::strip_custom0() const {
 		write[i * 4 + 1] = strip_rows.rhw[i];
 		write[i * 4 + 2] = strip_rows.t1[i * 3 + 2];
 		write[i * 4 + 3] = strip_rows.t2[i * 3 + 2];
+	}
+	return out;
+}
+
+PackedFloat32Array NovaWaterCore::strip_custom2() const {
+	// 4 floats per vertex: [t1.x, t1.y, t2.x, t2.y] — the texm3x2
+	// perturbation basis, t1 = (right.x, right.z) * (-min(rhw, 0.05)/2),
+	// t2 = (fwd.x, fwd.z) * (-5*min(rhw, 0.05))
+	// [orig: rows @ 0x5c2f83..0x5c3067; consumed by texm3x2pad t1, t0_bx2 /
+	// texm3x2tex t2, t0_bx2 — Water_InitSurfaceShaders @ 0x5c19b0]. The 3rd
+	// components (screen U/V) ride strip_custom0's zw; the env #30 shader
+	// reassembles the full rows from both attributes.
+	PackedFloat32Array out;
+	const int count = strip_row_count * 3;
+	out.resize(count * 4);
+	float *write = out.ptrw();
+	for (int i = 0; i < count; ++i) {
+		write[i * 4 + 0] = strip_rows.t1[i * 3 + 0];
+		write[i * 4 + 1] = strip_rows.t1[i * 3 + 1];
+		write[i * 4 + 2] = strip_rows.t2[i * 3 + 0];
+		write[i * 4 + 3] = strip_rows.t2[i * 3 + 1];
 	}
 	return out;
 }
