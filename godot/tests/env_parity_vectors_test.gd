@@ -215,7 +215,7 @@ const EXPECTED_BYTES := {
 	"wa/k016": "56E5 10 00 00 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
 	"wa/k064": "7CDE 40 00 00 2E342B A2A29F 92ADF3 505354 2E342B A2A29F 92ADF3",
 	"wa/k256": "9787 00 00 00 2D322A 9C9C99 8DA7EB 4D5152 2D322A 9C9C99 8DA7EB",
-	"water/mesh": "0 24 84 3 0 4 4 0 1 4 1 5 5 1 2",
+	"water/mesh": "0 180 708 3 0 4 4 0 1 4 1 5 5 1 2",
 	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
 	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wb/k016": "429E 10 00 07 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
@@ -286,7 +286,7 @@ const EXPECTED_FLOATS := {
 	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
 	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/override": [42.500000000, 7.000000000],
-	"water/strip": [-1458.718017578, 7.000000000, -2033.705444336, 120.675346375, 7.000000000, -59.838756561],
+	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
 	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
 	"we/k008": [1751.612903226],
 	"we/k016": [1803.225806452],
@@ -650,16 +650,22 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	# are the no-camera rung, the batch-unroll index head, and the first/last
 	# marched world positions.
 	#
-	# The sky collection's camera is still current in the shared tree — drop
-	# it so the no-camera rung below is real.
-	var stray_cam := get_viewport().get_camera_3d()
-	if stray_cam:
-		stray_cam.clear_current(false)
-	var water: Node = add_child_autofree(NovaWaterScript.new())
+	# The strip march is a function of VIEWPORT PIXELS (the row clip + stride
+	# walk screen space), so the fixture lives in a code-fixed SubViewport: a
+	# fresh CI runner and a workstation with a persisted user:// window layout
+	# size the GUT root viewport differently, and the golden must not depend
+	# on that. NovaWater resolves its camera through its OWN viewport
+	# (get_viewport().get_camera_3d() and Camera3D.current are per-viewport),
+	# so root-viewport cameras from earlier collections are irrelevant in here.
+	var strip_vp := SubViewport.new()
+	strip_vp.size = Vector2i(1024, 600)
+	add_child_autofree(strip_vp)
+	var water: Node = NovaWaterScript.new()
+	strip_vp.add_child(water)
 	water.water_height = 7.0
 	simulate(water, 1, TICK)
-	# No camera -> no strip surface: the march needs the projected screen
-	# block, and retail only runs it inside the camera pass
+	# No camera in strip_vp -> no strip surface: the march needs the projected
+	# screen block, and retail only runs it inside the camera pass
 	# [orig: render_water_strip_detailed @ 0x5c27d0 projects via
 	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
 	var pre_surfaces: int = (water.mesh_instance.mesh as ArrayMesh).get_surface_count()
@@ -675,10 +681,15 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 
 	# Camera 20 units above the 7.0 plane, default orientation (the old
 	# fixture's y = 7.0 sat exactly ON the plane — a grazing edge case for the
-	# march). The old water/snap row is REMOVED: strip vertices are ABSOLUTE
-	# world positions and the mesh node stays pinned at the origin, so the
-	# camera-snap positioning died with the grid.
-	var cam := _add_camera(Vector3(100.3, 27.0, -33.7))
+	# march), created INSIDE strip_vp — Camera3D.current applies per-viewport,
+	# so the _add_camera helper (which targets the test root) is inlined here
+	# against the SubViewport. The old water/snap row is REMOVED: strip
+	# vertices are ABSOLUTE world positions and the mesh node stays pinned at
+	# the origin, so the camera-snap positioning died with the grid.
+	var cam := Camera3D.new()
+	strip_vp.add_child(cam)
+	cam.global_position = Vector3(100.3, 27.0, -33.7)
+	cam.make_current()
 	assert_not_null(cam, "headless camera injection must succeed")
 	simulate(water, 1, TICK)
 
