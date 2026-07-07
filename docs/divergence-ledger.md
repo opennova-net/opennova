@@ -337,14 +337,15 @@ until that generator ports; the detailmap2/dist2 pair stays authored (the
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-TERRAIN-1 | Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include — a tracked deliberate divergence justified by the editing need | C | PERMANENT (candidate) | PAR (terrain) |
-| D-TERRAIN-3 | Aerial/editor cameras see past the sky dome's 1024-unit rim to the viewport clear color (the black ring behind far terrain in editor screenshots); retail cameras are ground-level and the fog/dome geometry always covers the rim | C | OPEN (cosmetic; editor-view only) | a dome-rim skirt or editor far-env treatment rides ONED polish |
+| D-TERRAIN-2 | Shared surface include stacked TWO ×2 detail-normal factors on the splat (gobj-era chimera); the witnessed top-tier ps.1.4 applies exactly ONE `[orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0; compile_terrain_pixel_shaders @ 0x605260]` — post-gamma the squared factor clipped regions to white (full witness in the prose block above) | A | **FIXED (2026-07-06, the model-parity follow-up)** | REN (model-parity) |
+| D-TERRAIN-3 | Below-horizon region: cameras see past the sky dome's 1024-unit rim to the raw viewport background — retail fills the below-rim region with the **frame clear alone** (the env #21 skyfog blend; no skirt/ring geometry exists in the frame walk — sky-pass leg witness `Terrain_RenderSkyboxPass @ 0x610ac0` → `Terrain_RenderSectorBatchLit @ 0x60c670`, the seam hidden by fog convergence at the 1024 fog reference). The host's ported clear consumer was silently swallowed by a `BG_SKY`(null-sky) Environment mode rendering BLACK — a 1-px black dome-rim seam behind covering geometry, and once env #29's witnessed strip march landed (the strips stop at their witnessed row/fog-clamp extent like retail's), a PURE-BLACK BAND filling the whole strip-edge-to-rim region in water-horizon views (near half the frame at dusk) | C | **FIXED (REN-7, 2026-07-07)**: two facets — `game_world.tscn` ClearColor → `BG_COLOR` + `AMBIENT_SOURCE_DISABLED`, GUT-pinned (`game_world_test`), so the env #21 consumer renders at all; and `get_frame_clear_color()` now serves the post-blend DOUBLED skyfog (the modulate2x-path Clear consumes it verbatim `[orig: @ 0x677100]`; the 07-05 "undoubled" reasoning was the non-modulate2x fallback, no host analog — the undoubled band measured exactly half the fogged dome rim). Env vectors re-dumped (frame-clear token only). Residual (not a retail-parity surface): the ONED editor preview keeps its own viewport environment — far-env adoption rides ONED polish/ENV-1 | REN-7 |
 
 Record is PARTIAL by documentation depth, NOT by open divergences: the data path
 (build → mesh-simplify → CPT) is proven **byte-identical** across 5 fixtures
-(`dvd4_parity` + `parametric_parity` Sample/Gradient/Checker64/Perlin). The only
-tracked terrain divergence is D-TERRAIN-1 (deliberate shader split); the remaining
-work is documenting the CDEP/LOD bitstream + retail-anchoring the render pass, not
-closing a parity gap.
+(`dvd4_parity` + `parametric_parity` Sample/Gradient/Checker64/Perlin). The tracked
+terrain divergences are settled — D-TERRAIN-1 deliberate (shader split), D-TERRAIN-2
+and D-TERRAIN-3 FIXED; the remaining work is documenting the CDEP/LOD bitstream +
+retail-anchoring the render pass, not closing a parity gap.
 
 ### Tiles — [tiles/til-re.md](tiles/til-re.md) (D-TIL catalog; PAR-R3)
 
@@ -514,7 +515,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Particles `.ptl` | 2 | 2 | 0 | 4 | 0 |
 | VFS / PFF mount stack | 3 | 1 | 0 | 4 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
-| Terrain | 1 | 0 | 0 | 1 | 1 |
+| Terrain | 0 | 0 | 0 | 0 | 3 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
 | Foliage | 2 | 0 | 0 | 2 | 1 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
@@ -522,7 +523,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **35** | **11** | **30** | **76** | 12 |
+| **Total** | **34** | **11** | **30** | **75** | 14 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 

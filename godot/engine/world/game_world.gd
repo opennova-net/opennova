@@ -937,8 +937,13 @@ func _process(_delta: float) -> void:
 # water color underwater [orig: Render_ProcessMainSceneFrame @ 0x5ca776..
 # 0x5ca792 - clear color = alternate_fog ? 0x808080 : cam above water ?
 # skyfog[0] : Env_WaterColorLit; the vehicle alternate-fog view is not modeled
-# yet]. Colors stay undoubled - the 1x host matches the non-modulate2x device
-# Clear, which halves the doubled color [orig: @ 0x67715d].
+# yet]. Both branches serve RENDER-SPACE (x2-gained) colors, consumed VERBATIM
+# by the modulate2x-path Clear this host reproduces (D-RMAT-7): above water the
+# post-blend DOUBLED skyfog, underwater Env_WaterColorLit = water x light >> 7;
+# the halving branch [orig: @ 0x67715d] is the non-modulate2x fallback with no
+# host analog. The ClearColor Environment must stay BG_COLOR with ambient
+# disabled - BG_SKY with no sky renders black and swallows these writes
+# (GUT-pinned).
 func _update_frame_clear_color() -> void:
 	if _clear_color == null or _clear_color.environment == null or _env == null:
 		return

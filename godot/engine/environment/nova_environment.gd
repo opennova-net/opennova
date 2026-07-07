@@ -330,23 +330,32 @@ func get_frame_clear_color() -> Vector3:
 	# The frame CLEAR color (divergence #21, closed): skyfog horizon-blended
 	# toward fog when the fog distance drops below half the reference distance -
 	# pure fog at <= ref/4, a linear fade across [ref/4, ref/2], untouched
-	# skyfog above. The blend runs on the UNDOUBLED keyframe colors (retail
-	# doubles after), and the result stays undoubled: a 1x-intensity host
-	# matches the witnessed non-modulate2x device path, whose Clear halves the
-	# doubled color back. Reference distance: the retail default 1024 (the
+	# skyfog above. The blend's distance input is the SMOOTHED fog-distance
+	# current served by get_fog_level() (env #27) [orig: Env_FogDistCurrent
+	# @ 0x26c681c]. The blend runs on the UNDOUBLED keyframe colors, THEN the
+	# result doubles with saturation (the witnessed order) - this is the
+	# POST-BLEND DOUBLED skyfog render color, and the modulate2x-path device
+	# Clear consumes it VERBATIM. That is the path this host reproduces
+	# everywhere (D-RMAT-7 calibrate proof: the x2 fixed-function combine and
+	# the doubled fog/skyfog render colors are in our shaders), and the dome
+	# pass fogs toward the SAME doubled skyfog - the dome-rim/clear seam is
+	# invisible because both sides converge on this one value. The halving
+	# branch in the device Clear is the non-modulate2x compat fallback, with
+	# NO host analog. Reference distance: the retail default 1024 (the
 	# session authority forces it; 768 is an adapter-caps fallback with no
 	# host analog).
-	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1;
-	#  consumer Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca7bf; device Clear
-	#  halving @ 0x67715d; defaults Environment_InitDefaults @ 0x57c0b0 /
-	#  Terrain_Init @ 0x60fca3]
+	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0 blend @ 0x57f037..0x57f0a1,
+	#  doubling @ 0x57f1b1; consumer Render_ProcessMainSceneFrame
+	#  @ 0x5ca776..0x5ca7bf; dome fog toward the same value sub_579CB0; device
+	#  Clear @ 0x677100, its non-modulate2x halving fallback @ 0x67715d;
+	#  defaults Environment_InitDefaults @ 0x57c0b0 / Terrain_Init @ 0x60fca3]
 	var fog_raw: Vector3 = _tod.get("fog", Vector3.ZERO)
 	var sky_raw: Vector3 = _tod.get("skyfog", Vector3.ZERO)
 	var blended := EnvFile.horizon_blend_skyfog(
 		Color(fog_raw.x, fog_raw.y, fog_raw.z),
 		Color(sky_raw.x, sky_raw.y, sky_raw.z),
-		_fog_distance, 1024.0)
-	return Vector3(blended.r, blended.g, blended.b)
+		get_fog_level(), 1024.0)
+	return _double_vec3(Vector3(blended.r, blended.g, blended.b))
 
 
 func set_fill_light(value: Vector3) -> void:
