@@ -393,6 +393,15 @@ bool parse_entity(Reader& r, Entity& e, std::string& error) {
         return false;
     }
 
+    // .mis-interchange defaults for a BMS-sourced entity (transient; NOT part of the 172-byte
+    // record read above). BMS entity z is always absolute (engine spawn extractor,
+    // docs/mission/bms-event-runtime-re.md §6.6), so a .mis export of this entity must declare
+    // height_lock, else the original editor treats z as terrain-relative and the object floats
+    // by the local terrain height [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll —
+    // scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)].
+    e.mis_extra_bheight = 0;
+    e.mis_height_lock = 1;
+
     return true;
 }
 

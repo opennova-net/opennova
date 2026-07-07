@@ -195,6 +195,8 @@ func save_current() -> Error:
 	var ext = _c._current_path.get_extension().to_lower()
 	if _c._current_path.is_empty() or (ext != "bms" and ext != "mis"):
 		return ERR_INVALID_PARAMETER
+	if ext == "mis":
+		_stage_mis_base_heights()
 	var err := int(_c._mission.save_file())
 	if err == OK:
 		# The saved state is the new clean baseline; the undo history is kept so the user can
@@ -233,6 +235,8 @@ func save_as_file(path: String) -> Error:
 		if mkdir != OK:
 			return mkdir
 	var filename := path.get_file()
+	if ext == "mis":
+		_stage_mis_base_heights()
 	var err := int(_c._mission.save_as(path))
 	if err == OK:
 		_c._current_path = path
@@ -279,6 +283,47 @@ func save_as_path(path: String) -> Error:
 # dropped on restore: structural edits reindex entities, and the re-bake resets selection anyway.
 
 # --- Internals ----------------------------------------------------------------
+
+# Stage terrain base heights on the document for a .mis save: one 16.16 fixed-point height per
+# entity, FLAT in the .mis writer's order (items, buildings, markers, organics). The original
+# editor subtracts extra_bheight from a height-locked item's absolute z to recover the
+# terrain-relative offset [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll], so each
+# entity's base height is the terrain height under its (x, y) plane position — sampled through
+# the same transform the placer uses (bms_to_godot_position maps mission (x, y, z) to godot
+# (x, z, -y)): the godot-world sample point for mission (x, y) is (x, -y), and the sampled godot
+# Y IS the mission z-units height. Off-terrain samples (NAN) bake 0; with no terrain surface at
+# all nothing is staged (extra_bheight stays 0 — positions remain absolute-declared either way,
+# only the baked base is absent). Duck-typed like _build_reground_requests so headless stubs work.
+func _stage_mis_base_heights() -> void:
+	if _c._mission == null or _c.terrain_editor == null:
+		return
+	var batched: bool = _c.terrain_editor.has_method("sample_heights_world")
+	if not batched and not _c.terrain_editor.has_method("sample_height_world"):
+		return
+	var points := PackedVector2Array()
+	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ORGANIC]:
+		for e in _c._mission.get_entities(kind):
+			var pos: Vector3 = (e as Dictionary).get("position", Vector3.ZERO)
+			points.append(Vector2(pos.x, -pos.y))
+	if points.is_empty():
+		return
+	var heights: PackedFloat32Array
+	if batched:
+		heights = _c.terrain_editor.sample_heights_world(points)
+	else:
+		heights = PackedFloat32Array()
+		heights.resize(points.size())
+		for i in points.size():
+			heights[i] = _c.terrain_editor.sample_height_world(points[i].x, points[i].y)
+	if heights.size() != points.size():
+		return
+	var fixed := PackedInt32Array()
+	fixed.resize(points.size())
+	for i in points.size():
+		var h := heights[i]
+		fixed[i] = 0 if is_nan(h) else int(roundf(h * 65536.0))
+	_c._mission.set_mis_base_heights(fixed)
+
 
 # Load the mission's environment into the shared editor environment. Returns a
 # short note ("" when clean) describing any problem, so the open status can be

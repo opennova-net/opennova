@@ -267,9 +267,29 @@ Sources: [mission/mis-format-re.md](mission/mis-format-re.md),
 [particles/ptl-format-re.md](particles/ptl-format-re.md). IDs minted this train (see
 "Normalized prose-only catalogs" below).
 
+Minted-and-closed 2026-07-07 (the `.mis` parity pass — the original Nile
+editor's importer `misldr.dll` grilled after a user repro: heights all wrong
+opening our export in the original editor): **D-MIS-4** -> `FIXED` — `.mis`
+item heights are terrain-RELATIVE unless `height_lock 1` declares the z
+ABSOLUTE with `extra_bheight` carrying the baked base height
+(`[orig: MisLdr_ParseMisLine @ 0x100017b0 — height_lock→rec+356,
+extra_bheight→rec+292; MisLdr_WriteNileProjectXml @ 0x10004930 — scene
+Y = z/65536 − (lock ? bheight/65536 : 0); both misldr.dll]`); our exporter
+wrote absolute BMS z with neither, floating every object by the local
+terrain height. Fixed: `height_lock 1` per BMS-sourced item +
+host-sampled `extra_bheight` (the mission workspace passes terrain heights
+in write order). **D-MIS-5** -> `FIXED` — reader/writer asymmetries
+corrupted round-trips (base-0 `strtol` parsed zero-padded numerics as
+OCTAL vs the witnessed base-10 `atol`; `fog_level`/`water_level` u32-out
+u16-truncate-in; `gen_def_val1..4` write-only; parse defaults rewrote
+zero-valued fields on all 1365 retail-00TRg entities); fixed to base-10 +
+symmetric fields + unconditional emission of defaulted keys —
+`.bms`→`.mis`→`.mis` is byte-idempotent on the retail fixture. Full
+witness: [mission/mis-format-re.md](mission/mis-format-re.md).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-MIS-1 | All `begin item` records land in the generic pool; the pool-kind classifier needs a `dfx2med.exe` grill against `items.def`/type flags | B | NEEDS-RE | PAR-WORLD |
+| D-MIS-1 | All `begin item` records land in the generic pool; the pool-kind classifier needs original-editor confirmation | B | NEEDS-RE (narrowed 2026-07-07: the Nile importer classifies by the `items.def` TYPE STRING `[orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]`, matching the placer's empirically-verified kind mapping — porting it into the `.mis` reader closes this; `dfx2med.exe` confirmation rides D-MIS-3) | PAR-WORLD |
 | D-MIS-2 | `weapon_availability` emitted empty + skipped on read; loadout semantics deferred | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-MIS-3 | Full `dfx2med.exe` `.mis` grammar unmapped (hand-authored / legacy variants beyond the writer subset) | B | NEEDS-RE | PAR-WORLD |
 | D-3DILW-1 | v8 branch deferred (v10-only parser; the NovalogicTools v8 layout is unvalidated against the 3 local v8 files) | B | NEEDS-RE | rides an LW-import revival |
@@ -683,5 +703,6 @@ existing text (no new findings, no reworded witnesses):
 - [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..6** (the
   intentional `g{N}_color{M}` map + the §6 bounded deviations; pure "not yet researched"
   §8 items stay in §8).
-- [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..3** (the
-  writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row).
+- [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
+  writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
+  D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).
