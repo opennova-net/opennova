@@ -390,9 +390,12 @@ and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`
 | D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance vs the engine's per-VERTEX quad color + alpha-premultiplied colormap read — the half-plus-bias emitter form `0xFF000000 \| (0x404040 + avg>>1)` IS applied since 2026-07-07 (the foliage-combine slice); the per-vertex gradient is the residual | A | OPEN (approximation — narrowed 2026-07-07) | PAR (foliage) |
 | D-FOLIAGE-2 | The fragment combine ran an unwitnessed ratio stand-in (`(sun/(ground·0.707+sun))×255/128`, no terrain-colormap sample, no SKY term — the shader's own header carried the correct witness) where retail runs `rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` with t1 = the planar-projected terrain colormap and c0/c1 = the SKY/LIGHT blocks `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants @ 0x604420]` | A | **FIXED (2026-07-07)** — the witnessed chain ported (planar uv = (x,−z)/texsize wrap ≡ the CPU sampler; the dispatcher binds the colormap from the CPU-color source chain) | REN-6 rider |
 | D-FOLIAGE-3 | Wind sway: the host displaces X weighted by height (`VERTEX.y/8`, sin of `phase + 0.11x + 0.07z`) where the witnessed VS displaces Z weighted by vertex RED via a polynomial sine of `world.x·c24.y + time` `[orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630; Foliage_WindSwayVS @ 0x2c25e5c]`; the sway amount/phase globals are live (NovaWeather) | A | OPEN (stand-in — minted 2026-07-07) | rides the foliage render-emitter parity |
+| D-FOLIAGE-4 | The witnessed MODEL tier is unhosted (the user-reported wrong/too-tall trees): retail stamps the def graphic's FULL 3DI geometry per instance — near tiles (view Z ≥ 38, ±8u quadrants), ≤21/tile, native scale, upright yaw-only, an 8-sample ground fit — while the host renders the mesh at every quad placement, slope-tilted, single-point anchored `[orig: Foliage_GenerateModelTileInstances @ 0x600980; Foliage_UpdateModelTiles @ 0x601f50; Foliage_DrawModelTileSlot @ 0x601d90; Foliage_LoadDefAssets @ 0x601260]` | B | OPEN (minted 2026-07-08 — the model-tier grill) | the foliage model-tier port slice |
+| D-FOLIAGE-5 | The far-tier quad impostor texture: retail bakes it from the MODEL'S OWN diffuse (`"%s:fd"` + TGA/DDS 16-tap alpha smoothing + `0x808080` gray fold) `[orig: Foliage_LoadDefAssets @ 0x601260 tail]`; the host's quad texture chain never runs the bake | B | OPEN (minted 2026-07-08) | rides D-FOLIAGE-4's port |
 
 Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
-0x20000 proximity) is **MATCHING** — byte-exact vs retail `generate_foliage_instances_0 @ 0x600197`.
+0x20000 proximity) is **MATCHING** — byte-exact vs retail `generate_foliage_instances_0 @ 0x600197`;
+the model tier's generator shares the family `[orig: Foliage_GenerateModelTileInstances @ 0x600980]`.
 
 ### Fonts — [fonts/fnt-re.md](fonts/fnt-re.md) (D-FNT catalog; PAR-R4)
 
@@ -559,13 +562,13 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 0 | 0 | 0 | 0 | 4 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
-| Foliage | 2 | 0 | 0 | 2 | 1 |
+| Foliage | 4 | 0 | 0 | 4 | 1 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **33** | **11** | **30** | **74** | 16 |
+| **Total** | **35** | **11** | **30** | **76** | 16 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 
