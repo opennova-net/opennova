@@ -74,19 +74,21 @@ func _run() -> void:
 	if env != null and env.has_method("set"):
 		env.set("time_of_day", 1200.0)
 
-	# Find a sloped, foliage-painted spot: coarse scan around the painted
-	# center for max height gradient where the foliage map has an index.
-	var cx := float((data.get_origin_x() + 8) * 512)
-	var cz := float((data.get_origin_y() + 8) * 512)
+	# Find a sloped, foliage-painted spot: coarse scan of the full terrain
+	# extent for max height gradient where the foliage map has an index.
+	var lo_x := float(data.get_origin_x() * 512)
+	var lo_z := float(data.get_origin_y() * 512)
+	var cx := lo_x + 8.0 * 512.0
+	var cz := lo_z + 8.0 * 512.0
 	var best_pos := Vector3(cx, 0.0, cz)
 	var best_grad := -1.0
-	for gz in range(-24, 25, 2):
-		for gx in range(-24, 25, 2):
-			var px := cx + float(gx) * 16.0
-			var pz := cz + float(gz) * 16.0
+	for gz in range(4, 508, 8):
+		for gx in range(4, 508, 8):
+			var px := lo_x + float(gx) * 16.0
+			var pz := lo_z + float(gz) * 16.0
 			var idx := 0
 			if data.has_method("get_foliage_index_world"):
-				idx = data.get_foliage_index_world(Vector3(px, 0.0, pz))
+				idx = data.get_foliage_index_world(px, pz)
 			if idx <= 0:
 				continue
 			var h0: float = data.get_height_world_bilinear(Vector3(px, 0.0, pz))
