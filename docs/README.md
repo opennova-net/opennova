@@ -71,7 +71,7 @@ behavior is summarized and cited.
 | Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`, D-TIL-1 outline) |
 | Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes RE'd `libs` via `pyopennova`) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
-| Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (PAR-R1: module surface + witness basis + D-TERRAIN-1 shader split; mesh_simp/CDEP deep grill pending) |
+| Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (PAR-R1: module surface + witness basis + D-TERRAIN-1 shader split; REN-4 runtime surface shading; ENG-3 B0 runtime terrain queries — height samplers + segment raycast, port pending B1; mesh_simp/CDEP deep grill pending) |
 | Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (engine-research; HUD port in flight) |
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown geometry/row-height grill, D-MNU-7/8 fixed) |
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
