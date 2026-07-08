@@ -121,12 +121,18 @@ void vertex() {
 	// build @ 0x5c3348; near 0.2 @ 0x58ac0a, mission far 1024 @ 0x524721, viewport
 	// depth 0.99996948 = 1 - 2^-15 @ 0x58ac32]) — same-curve depths make the
 	// shoreline winner deterministic on the 16/24-bit z-buffer. The host cannot
-	// unify cross-shader depth arithmetic, so this nudge pulls the water toward the
-	// camera by 2^-15 of the remaining clip range (the witnessed constant's own
-	// magnitude) — a TRACKED host approximation (env #29 row) that pins the
-	// witnessed water-wins outcome; invisible at 3e-5 relative.
-	POSITION = PROJECTION_MATRIX * MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
-	POSITION.z += (POSITION.w - POSITION.z) * 3.0517578125e-5;
+	// unify cross-shader depth arithmetic, so the water pulls toward the camera by
+	// a RELATIVE view-depth factor (3e-4 of the ray): scaling the view-space
+	// position uniformly preserves NDC x/y exactly (pure depth pull, zero screen
+	// shift), and the bias tracks the ray length — above the per-frame
+	// re-tessellation jitter at the shoreline, far below the water/terrain
+	// separation at range. A TRACKED host approximation (env #29 row) standing in
+	// for retail's same-curve determinism. (The first form — 2^-15 of the
+	// remaining NDC range — swamped the far-field separation under reverse-Z's
+	// hyperbolic compression: water overpainted above-waterline terrain from
+	// altitude, the "waterline rises as you fly" report.)
+	vec3 view_pos = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	POSITION = PROJECTION_MATRIX * vec4(view_pos * (1.0 - 3.0e-4), 1.0);
 }
 
 void fragment() {
