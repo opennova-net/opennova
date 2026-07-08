@@ -17,6 +17,11 @@ class NovaObjectShaderCache : public Object {
 
 public:
 	static NovaObjectShaderCache *get_singleton();
+	// Extension objects must not outlive module deinit: a leaked singleton
+	// reaches ObjectDB::cleanup() after the library's class info is gone and
+	// the late teardown walk lands in freed memory (the packaging boot-smoke
+	// 0xC0000005). Called from uninitialize_opennova_module (SCENE level).
+	static void destroy_singleton();
 
 	NovaObjectShaderCache();
 	~NovaObjectShaderCache();

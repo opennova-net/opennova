@@ -19,6 +19,12 @@ NovaObjectShaderCache *NovaObjectShaderCache::get_singleton() {
 	return singleton;
 }
 
+void NovaObjectShaderCache::destroy_singleton() {
+	if (singleton != nullptr) {
+		memdelete(singleton); // ~NovaObjectShaderCache nulls the static.
+	}
+}
+
 NovaObjectShaderCache::NovaObjectShaderCache() {
 	if (singleton == nullptr) {
 		singleton = this;
