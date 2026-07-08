@@ -340,6 +340,7 @@ void NovaTerrainData::_bind_methods() {
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
+	ClassDB::bind_method(D_METHOD("world_to_sector_cell", "world_x", "world_z"), &NovaTerrainData::world_to_sector_cell);
 	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
 	ClassDB::bind_method(D_METHOD("sample_height_world_live", "world_x", "world_z"),
 	                     &NovaTerrainData::sample_height_world_live);
@@ -433,6 +434,13 @@ void NovaTerrainData::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "foliage_defs", PROPERTY_HINT_ARRAY_TYPE, "NovaTerrainFoliageDef"),
 	             "set_foliage_defs",
 	             "get_foliage_defs");
+
+	// Sector/atlas layout constants (single-sourced from libs/terrain_query
+	// terrain/coords.h; see the header declarations).
+	BIND_CONSTANT(SECTOR_SIZE);
+	BIND_CONSTANT(SECTOR_GRID_DIM);
+	BIND_CONSTANT(ATLAS_SIZE);
+	BIND_CONSTANT(SECTOR_ID_MAX);
 
 	ADD_SIGNAL(MethodInfo("terrain_changed"));
 }
@@ -815,9 +823,9 @@ void NovaTerrainData::_sync_trn_scalars_from_properties() {
 	trn.wrap_x = wrap_x ? 1 : 0;
 	trn.wrap_y = wrap_y ? 1 : 0;
 	trn.horizon = horizon;
-	for (int gz = 0; gz < 16; gz++) {
-		for (int gx = 0; gx < 16; gx++) {
-			const int idx = gz * 16 + gx;
+	for (int gz = 0; gz < SECTOR_GRID_DIM; gz++) {
+		for (int gx = 0; gx < SECTOR_GRID_DIM; gx++) {
+			const int idx = gz * SECTOR_GRID_DIM + gx;
 			trn.sector_grid[gz][gx] = idx < sector_grid.size() ? sector_grid[idx] : 0;
 		}
 	}
@@ -938,9 +946,9 @@ Error NovaTerrainData::_load_from_trn_text(const std::string &trn_content, const
 	wrap_y = trn.wrap_y != 0;
 	horizon = trn.horizon;
 	sector_grid.resize(256);
-	for (int gz = 0; gz < 16; gz++) {
-		for (int gx = 0; gx < 16; gx++) {
-			sector_grid.set(gz * 16 + gx, trn.sector_grid[gz][gx]);
+	for (int gz = 0; gz < SECTOR_GRID_DIM; gz++) {
+		for (int gx = 0; gx < SECTOR_GRID_DIM; gx++) {
+			sector_grid.set(gz * SECTOR_GRID_DIM + gx, trn.sector_grid[gz][gx]);
 		}
 	}
 
@@ -1393,6 +1401,21 @@ Vector2 NovaTerrainData::world_to_source_coords(double world_x, double world_z) 
 		return Vector2(-1.0f, -1.0f);
 	}
 	return Vector2(static_cast<real_t>(r.source_x), static_cast<real_t>(r.source_z));
+}
+
+Vector2i NovaTerrainData::world_to_sector_cell(double world_x, double world_z) const {
+	// World -> authored sector-grid cell. Mirrors EditorTerrainMesh's
+	// extent-guarded cell lookup: floor(world / SECTOR_SIZE) minus the origin,
+	// the (-1,-1) sentinel outside the authored rows/cols, and NO grid-value
+	// check (an empty cell still reports its row/col). An unloaded document has
+	// sector_rows == 0, so every point rejects (the mesh's degenerate-bounds
+	// guard).
+	const int col = static_cast<int>(std::floor(world_x / static_cast<double>(SECTOR_SIZE))) - origin_x;
+	const int row = static_cast<int>(std::floor(world_z / static_cast<double>(SECTOR_SIZE))) - origin_y;
+	if (row < 0 || row >= sector_rows || col < 0 || col >= sector_count) {
+		return Vector2i(-1, -1);
+	}
+	return Vector2i(row, col);
 }
 
 PackedFloat32Array NovaTerrainData::sample_heights_world_live(const PackedVector2Array &world_xz) const {

@@ -6,7 +6,7 @@ extends RefCounted
 ## relays this to the shell toast. Headless holders can ignore it.
 signal error_reported(message: String)
 
-const HM_SIZE := 1024
+const HM_SIZE := NovaTerrainData.ATLAS_SIZE
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TILEINFO_STATE_NONE := ""

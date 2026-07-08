@@ -10,7 +10,7 @@ enum TileInteractionMode { PLACE, EDIT_SELECTED }
 # BHD-era terrains (DVD4, original DPTH golden) use DPTH; JO/DFX-era use CDEP.
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 
-const HM_SIZE := 1024
+const HM_SIZE := NovaTerrainData.ATLAS_SIZE
 const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
@@ -1009,21 +1009,21 @@ func get_resource_root() -> NovaResourceRoot:
 func get_sector_cell(row: int, col: int) -> int:
 	if not _data:
 		return 0
-	var idx := row * 16 + col
+	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
 	var grid: PackedInt32Array = _data.get_sector_grid()
 	if idx < 0 or idx >= grid.size():
 		return 0
-	return clampi(grid[idx], 0, 4)
+	return clampi(grid[idx], 0, NovaTerrainData.SECTOR_ID_MAX)
 
 
 func set_sector_cell(row: int, col: int, value: int) -> bool:
 	if is_export_running() or not _data:
 		return false
-	var idx := row * 16 + col
+	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
 	var grid: PackedInt32Array = _data.get_sector_grid()
 	if idx < 0 or idx >= grid.size():
 		return false
-	var next := clampi(value, 0, 4)
+	var next := clampi(value, 0, NovaTerrainData.SECTOR_ID_MAX)
 	_active_sector_cell = Vector2i(row, col)
 	if grid[idx] == next:
 		_mark_ui_state_changed()
@@ -2443,10 +2443,10 @@ func _authored_sector_world_rect() -> Rect2:
 
 func _build_default_sector_grid() -> PackedInt32Array:
 	var grid := PackedInt32Array()
-	grid.resize(256)
+	grid.resize(NovaTerrainData.SECTOR_GRID_DIM * NovaTerrainData.SECTOR_GRID_DIM)
 	for row in 8:
 		for col in 8:
-			grid[row * 16 + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
+			grid[row * NovaTerrainData.SECTOR_GRID_DIM + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
 	return grid
 
 

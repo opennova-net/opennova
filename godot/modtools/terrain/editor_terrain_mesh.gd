@@ -1,9 +1,10 @@
 class_name EditorTerrainMesh
 extends Node3D
 
-const ATLAS_SIZE := 1024
-const SECTOR_SIZE := 512.0
-const PATCH_VERTS := 513
+const ATLAS_SIZE := NovaTerrainData.ATLAS_SIZE
+const SECTOR_SIZE := float(NovaTerrainData.SECTOR_SIZE)
+# Verts per sector edge: one per heightmap texel plus the shared far-edge vert.
+const PATCH_VERTS := NovaTerrainData.SECTOR_SIZE + 1
 
 var _sector_instances: Array[MeshInstance3D] = []
 var _material: ShaderMaterial
@@ -176,19 +177,17 @@ func get_sector_rows() -> int:
 func get_sector_cell_value(row: int, col: int) -> int:
 	if row < 0 or row >= _sector_rows or col < 0 or col >= _sector_count:
 		return 0
-	var idx := row * 16 + col
-	return clampi(_sector_grid[idx], 0, 4)
+	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
+	return clampi(_sector_grid[idx], 0, NovaTerrainData.SECTOR_ID_MAX)
 
 
 func world_to_sector_cell(world_x: float, world_z: float) -> Vector2i:
-	if _bounds.size.x <= 0.0 or _bounds.size.z <= 0.0:
+	# Forwards to the shared C++ transform (extent-guarded floor(world/512)-origin
+	# cell lookup, no grid-value check). Pre-load (no data) returns the (-1,-1)
+	# sentinel, like the world_to_source_coords forwarder below.
+	if _data == null:
 		return Vector2i(-1, -1)
-
-	var col := int(floor(world_x / SECTOR_SIZE)) - _origin_x
-	var row := int(floor(world_z / SECTOR_SIZE)) - _origin_y
-	if row < 0 or row >= _sector_rows or col < 0 or col >= _sector_count:
-		return Vector2i(-1, -1)
-	return Vector2i(row, col)
+	return _data.world_to_sector_cell(world_x, world_z)
 
 
 func world_to_source_coords(world_x: float, world_z: float) -> Vector2:
