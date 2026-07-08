@@ -179,11 +179,16 @@ REN-6. Dispositions unchanged — the transfer moves ownership, not status.
 
 The REN-4 shader/TSS decode (2026-07-06) minted-and-closed **env #34** — the
 water surface framebuffer blend + far cutoff: retail draws the above-water
-surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
+surface with SrcBlend ONE + DestBlend SRCALPHA
 `[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_water_surface
 @ 0x5c33f0..0x5c3419]`; the reimpl used standard alpha blending —
 `water.gdshader` now expresses the witnessed blend exactly
-(`blend_premul_alpha` + inverted alpha) with the ref-32 discard.
+(`blend_premul_alpha` + inverted alpha). **The alpha-test half was RE-GRADED
+at the 2026-07-07 fidelity grill** (the user-reported short water draw
+distance): ALPHATESTENABLE rides pass-flag bit 0x40000
+`[orig: CGfxShader_ApplyPass @ 0x68326b]`, which the water passes never set
+— `SetAlphaTestRef(0x20)` is an inert device latch `[orig: @ 0x6770a0]` and
+the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
@@ -191,7 +196,7 @@ surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #17 | Iris auto-exposure modulator gain — **FIXED 2026-07-06 (REN-5)**: the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ 0x57ef97..0x57f03c]`; 62-tick exposure chase `[orig: @ 0x57e512; @ 0x57d940]`; ÷64 gain to `ColorSrcGlobalGain`/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`); env vectors re-dumped surgically (8 weather rows). Sampling-geometry + unhosted-block residuals tracked as D-RLIT-1/-2 ([render/render-lighting-re.md](render/render-lighting-re.md)) | A | FIXED | REN-5 (from PAR-ENV) |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #29 | Water surface tessellation — **FIXED 2026-07-07 (the REN-6 tail)**: the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `NovaWaterCore.strip_*` packed arrays → the per-frame strip ArrayMesh → the witnessed ps.1.1 chain in water.gdshader, found at the port's debug: alpha = noiseA×diffuseA×2, reflection ×2 diffuse ×4 noise + specular `[orig: Water_InitSurfaceShaders @ 0x5c19b0]`); goldens re-pinned. Residuals in-row (env-tod-re.md #29): the LOW tier unported (host runs detail > 1), the underwater opaque-material swap unhosted, the grazing fade exposes the below-horizon dome band (rides #30's skyfog work) | A | FIXED | REN-6 tail |
+| env #29 | Water surface tessellation — **FIXED 2026-07-07 (the REN-6 tail)**: the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `NovaWaterCore.strip_*` packed arrays → the per-frame strip ArrayMesh → the witnessed ps.1.1 chain in water.gdshader, found at the port's debug: alpha = noiseA×diffuseA×2, reflection ×2 diffuse ×4 noise + specular `[orig: Water_InitSurfaceShaders @ 0x5c19b0]`); goldens re-pinned. 2026-07-07 fidelity facets: the far-fade discard misport deleted (#34 re-grade), the witnessed spec-alpha fog factor + z-write/depth-replica model hosted (`depth_draw_always` + the tracked 2⁻¹⁵ near-ward nudge), the underwater opaque `0x20000` swap HOSTED (`u_underwater_view` premul branch). Residuals in-row (env-tod-re.md #29): the LOW tier unported (host runs detail > 1), the nightvision redraw unhosted, the below-horizon dome band pointer rides #30/D-TERRAIN-3 | A | FIXED | REN-6 tail |
 | env #30 | Water reflection — **FIXED 2026-07-07 (the REN-6 tail)**: host planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v = vbase − screenV so the ps.1.1 texm3x2 lookup runs verbatim `[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_main_scene @ 0x5c1240]`) feeding the t2 sampler; water self-excluded via a visual layer. Residuals in-row (env-tod-re.md #30): the wh − 0.1 clip plane approximated (no host oblique near plane), half-res host choice, the below-horizon skyfog band rides the dome follow-up | A | FIXED | REN-6 tail |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)

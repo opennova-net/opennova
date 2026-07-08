@@ -5,7 +5,11 @@ shader_type spatial;
 // @ 0x680f00) - out = src + dst * a - and Godot's premul pass computes
 // out = src + dst * (1 - ALPHA). [orig: Water_InitSurfaceShaders @ 0x5c19b0
 // builds Water_ShaderBlend with SrcBlend 2/DestBlend 5/enable 1]
-render_mode unshaded, blend_premul_alpha, cull_disabled;
+// depth_draw_always = the witnessed water z-write: pass flags 0x30000/0x20000
+// leave bit 0x100000 (zwrite-off) clear [orig: CGfxShader_ApplyPass @ 0x683232;
+// RS14 commit @ 0x67e265], so retail water writes depth and later passes test
+// against it.
+render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 
 // Water surface: structural port of the witnessed render_water_surface pass
 // [orig: @ 0x5c32c0, docs/env/env-tod-re.md "Water surface"]. The look is the
@@ -21,23 +25,26 @@ render_mode unshaded, blend_premul_alpha, cull_disabled;
 // texm3x2 screen coordinates - and CUSTOM2 the texm3x2 perturbation basis
 // (t1.xy, t2.xy). The reflection RTT consumer is LIVE too (env #30):
 // NovaWater hosts the mirrored-scene SubViewport and the fragment below
-// runs the witnessed texm3x2 lookup against it (the fog term keeps its
-// camera-distance model). Remaining variants: the LOW tier
+// runs the witnessed texm3x2 lookup against it (the fog term rides the
+// per-row spec-alpha factor — see v_fog). Remaining variants: the LOW tier
 // (render_water_strip @ 0x5c1d60) and the nightvision redraw.
 //
 // The water material set was decoded at REN-4 [orig: Water_InitSurfaceShaders
 // @ 0x5c19b0; selection in render_water_surface @ 0x5c33e6..0x5c34ea]:
 // - camera ABOVE water: the BLENDED material (ONE + dst*SRCALPHA, ported via
 //   the premul trick above); camera BELOW (underwater view of the surface):
-//   the OPAQUE material - that side swap rides the underwater slice with
-//   D-RORD-3's residual;
+//   the OPAQUE material - hosted as the u_underwater_view branch below
+//   (blend-off = ALPHA 1.0 under the premul pass);
 // - nightvision post-redraw picks NV variants (FrameFX; out of scope here);
 // - all water passes are two-sided (pass flags 0x400000 -> cull NONE
 //   [orig: GfxShader_ApplyPassChecked(shader, 0x400000) @ 0x5c340d;
-//   CGfxShader_ApplyPass @ 0x683190]) = cull_disabled, and alpha-test ref 32
-//   GREATER [orig: CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419] = the discard
-//   below (retail's far cutoff: fragments past the fog fade fail the test and
-//   the skyfog clear color shows instead);
+//   CGfxShader_ApplyPass @ 0x683190]) = cull_disabled, and NO alpha test is
+//   enabled: ALPHATESTENABLE rides pass-flag bit 0x40000, which every water
+//   pass leaves CLEAR, so the state commit forces the test OFF
+//   [orig: CGfxShader_ApplyPass @ 0x68326b -> RS15 commit in
+//   CGfxDevice_ApplyRenderStates @ 0x67e2fc];
+//   CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419 is a device latch
+//   (ALPHAFUNC/ALPHAREF only) inert for water;
 // - PS path (detail >= 2): the embedded ps.1.1 assembled in
 //   Water_InitSurfaceShaders @ 0x5c19b0 —
 //     tex t0 / texm3x2pad t1, t0_bx2 / texm3x2tex t2, t0_bx2 / tex t3
@@ -73,9 +80,12 @@ uniform vec4 u_water_uv = vec4(1.0, 0.2, 0.0, 0.0);
 uniform sampler2D u_noise_color : filter_linear, repeat_enable;
 uniform sampler2D u_noise_normal : filter_linear, repeat_enable;
 uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);
-uniform float u_fog_start = 300.0;
-uniform float u_fog_end = 1000.0;
-uniform int u_fog_type = 2;
+// The underwater pass swaps to the OPAQUE material — blend OFF, flags 0x20000
+// [orig: Water_ShaderOpaque @ 0x28ee8c8; selection @ 0x5c33e6..0x5c34ea]. Under
+// the premul pass, ALPHA = 1.0 expresses blend-off exactly (out = src + dst*0);
+// the ps.1.1 color chain is IDENTICAL on both materials (same 4-tex desc), so one
+// shader serves both sides. The ladder position does not change by side (REN-3).
+uniform bool u_underwater_view = false;
 
 varying vec3 v_world_pos;
 // The ps.1.1 v1 specular register: WaterColorLit RGB under the row's
@@ -92,28 +102,31 @@ varying vec3 v_specular;
 // V-flip rides the rows themselves [orig: @ 0x5c306f..0x5c3085].
 varying vec3 v_refl_row_u;
 varying vec3 v_refl_row_v;
-
-float jointops_fog_factor(float dist, float fog_start, float fog_end, int fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
-	}
-
-	float start = fog_start;
-	if (fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	float fog_range = max(safe_end - start, 1.0);
-	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
-}
+varying float v_fog;
 
 void vertex() {
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_specular = CUSTOM1.rgb;
 	v_refl_row_u = vec3(CUSTOM2.xy, CUSTOM0.z);
 	v_refl_row_v = vec3(CUSTOM2.zw, CUSTOM0.w);
+	// The witnessed water fog factor: D3D8 fogs pre-transformed (XYZRHW) verts by
+	// the SPECULAR ALPHA, which the rows fill with dist_alpha (255 near -> 0 far)
+	// [orig: RS28 on via pass bit 0x20000 @ 0x68324f; spec.a = dist_alpha
+	// @ 0x5c2eb5..0x5c2ef4]. NOT the terrain fog table — the old
+	// jointops_fog_factor curve here was a host invention.
+	v_fog = CUSTOM1.a;
+	// The witnessed depth model: retail computes the strip depth as an arithmetic
+	// replica of the scene projection ((t*uvScale - uvBias)*rhw = viewportMaxZ *
+	// zproj(near 0.2, far = fog-int) [orig: depth chain @ 0x5c2c0c..0x5c2c4a; scale
+	// build @ 0x5c3348; near 0.2 @ 0x58ac0a, mission far 1024 @ 0x524721, viewport
+	// depth 0.99996948 = 1 - 2^-15 @ 0x58ac32]) — same-curve depths make the
+	// shoreline winner deterministic on the 16/24-bit z-buffer. The host cannot
+	// unify cross-shader depth arithmetic, so this nudge pulls the water toward the
+	// camera by 2^-15 of the remaining clip range (the witnessed constant's own
+	// magnitude) — a TRACKED host approximation (env #29 row) that pins the
+	// witnessed water-wins outcome; invisible at 3e-5 relative.
+	POSITION = PROJECTION_MATRIX * MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
+	POSITION.z += (POSITION.w - POSITION.z) * 3.0517578125e-5;
 }
 
 void fragment() {
@@ -174,20 +187,18 @@ void fragment() {
 	// and flat (1 - u_water_murk) knob both retired to it.
 	float alpha_dist = clamp(noise.a * COLOR.a * 2.0, 0.0, 1.0);
 
-	// Alpha test ref 32, GREATER — texels at or below 32/255 are discarded
-	// (kills the fully-faded far edge; retail's skyfog clear covers the
-	// region) [orig: CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419 / @ 0x5c3484;
-	// ref >= 0 -> D3DCMP_GREATER @ 0x6770a0].
-	if (alpha_dist <= 32.0 / 255.0) {
-		discard;
-	}
-
+	// NO alpha test: the REN-4 "ref-32 far-fade cutoff" reading was a misread.
+	// D3DRS_ALPHATESTENABLE rides pass-flag bit 0x40000 [orig: CGfxShader_ApplyPass
+	// @ 0x68326b -> RS15 commit in CGfxDevice_ApplyRenderStates @ 0x67e2fc], and the
+	// water passes carry 0x30000 (blend) / 0x20000 (opaque) + 0x400000 — bit 0x40000
+	// CLEAR, so the state commit forces the test OFF for every water draw.
+	// CGfxDevice_SetAlphaTestRef(0x20) @ 0x5c3419/@ 0x5c3484 only latches
+	// ALPHAFUNC/ALPHAREF on the device [orig: @ 0x6770a0 — no ALPHATESTENABLE write];
+	// the far water renders to the full march extent, converging to the fog color.
 	float alpha = alpha_dist;
 
-	float dist = length(v_world_pos - CAMERA_POSITION_WORLD);
-
-	float fog_factor = jointops_fog_factor(dist, u_fog_start, u_fog_end, u_fog_type);
-	color = mix(u_fog_color, color, fog_factor);
+	// Scene fog toward u_fog_color by the witnessed per-row factor (see v_fog).
+	color = mix(u_fog_color, color, v_fog);
 
 	// The witnessed blend is out = src + dst * a (ONE + dst*SRCALPHA): under
 	// Godot's premul pass (out = src.rgb + dst * (1 - ALPHA)) that is
@@ -197,5 +208,5 @@ void fragment() {
 	// dominant (near) result displays the computed bytes; the dst*a term still
 	// blends in the linear buffer — that residual is D-RMAT-8.
 	ALBEDO = nova_gamma_to_linear(color);
-	ALPHA = 1.0 - alpha;
+	ALPHA = u_underwater_view ? 1.0 : (1.0 - alpha);
 }

@@ -273,11 +273,7 @@ func _process(_delta: float) -> void:
 			_fallback_scroll.tick_cloud_scroll(env.get_sky_speed())
 			uv_state = _fallback_scroll.get_water_uv_state(cam_pos.x, cam_pos.z, fog_end)
 		water_material.set_shader_parameter("u_water_uv", uv_state)
-		var fog_start: float = env.get_fog_start() if env.has_method("get_fog_start") else 0.5
 		water_material.set_shader_parameter("u_fog_color", env.get_fog_color())
-		water_material.set_shader_parameter("u_fog_start", fog_start)
-		water_material.set_shader_parameter("u_fog_end", fog_end)
-		water_material.set_shader_parameter("u_fog_type", env.get_fog_type())
 		env_data = env.get_environment_data()
 		if env_data:
 			murk = env_data.get_water_murk()
@@ -376,7 +372,13 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 	#  Environment_GetFogEndDistance(underwater) @ 0x5c28a2 — below the
 	#  surface the murk visibility curve replaces the weather fog distance].
 	var underwater := cam_pos.y < water_height
-	var pass_fog_end := fog_end
+	# Above water the pass fog end is the smoothed fog distance attenuated by the
+	# overcast blend: fogDist * (1 - overcast/2) [orig: Environment_GetFogEndDistance
+	# @ 0x57e435 — (0x10000 - (Env_OvercastBlend >> 1)) * Env_FogDistCurrent >> 16].
+	# The overcast channel is state-live but unconsumed (env #27 residual) — 0 until
+	# the overcast systems land, like every other overcast feed.
+	var overcast := 0.0
+	var pass_fog_end := fog_end * (1.0 - overcast * 0.5)
 	if underwater and env_data:
 		pass_fog_end = env_data.get_fog_end_underwater()
 	_water_core.strip_set_view(_cached_cam.global_transform,
@@ -405,6 +407,11 @@ func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
 			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
 			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM2_SHIFT))
 	mesh.surface_set_material(0, water_material)
+	# The witnessed per-side material swap: camera-above -> the blend material,
+	# underwater -> the opaque one (blend off, flags 0x20000) — hosted as the
+	# shader's u_underwater_view branch [orig: selection @ 0x5c33e6..0x5c34ea;
+	# Water_ShaderOpaque @ 0x28ee8c8].
+	water_material.set_shader_parameter("u_underwater_view", underwater)
 
 
 func _clear_strip_surfaces() -> void:
