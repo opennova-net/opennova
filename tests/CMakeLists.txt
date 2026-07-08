@@ -629,7 +629,7 @@ add_test(NAME foliage_map_remap_indices COMMAND foliage_map_remap_indices_test)
 # The model_* group covers the MODEL tier (Foliage_GenerateModelTileInstances
 # @ 0x600980 / Foliage_UpdateModelTiles @ 0x601f50) — see
 # libs/foliage/include/foliage/model_placement.h.
-foreach(name placement_determinism placement_cap placement_midpoints dispatcher_quadrants dispatcher_lru dispatcher_stagger dispatcher_near_z dispatcher_frame_progression model_placement_determinism model_placement_cap model_placement_gates model_placement_pins model_placement_fold model_placement_axis)
+foreach(name placement_determinism placement_cap placement_midpoints dispatcher_quadrants dispatcher_lru dispatcher_stagger dispatcher_near_z dispatcher_frame_progression model_placement_determinism model_placement_cap model_placement_gates model_placement_pins model_placement_fold model_placement_axis fd_bake)
     add_executable(foliage_${name}_test foliage/foliage_${name}_test.cpp)
     target_link_libraries(foliage_${name}_test PRIVATE opennova_foliage)
     target_include_directories(foliage_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

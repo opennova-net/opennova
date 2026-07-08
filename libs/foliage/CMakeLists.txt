@@ -3,6 +3,7 @@ add_library(opennova_foliage STATIC
     src/placement.cpp
     src/dispatcher.cpp
     src/model_placement.cpp
+    src/fd_bake.cpp
 )
 
 target_include_directories(opennova_foliage
