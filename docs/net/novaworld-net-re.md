@@ -3748,6 +3748,59 @@ for the local player) — now every motor entity mirrors. **Tracked deferrals:**
 smoothing/collision (`@0x437af0`), the weapon view-bias/bone/velocity-lead/prone-drop (`@0x4dd380`),
 the exact `CameraOffset@+0x6C`, and the FOV source. (The FP arms viewmodel placement is now §5.40.)
 
+**2026-07-08 addendum (controller grill) — the 3P deferrals witnessed.** All camera-system globals
+renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them). Corrections to the
+2026-06-20 rows: the ±40° pitch clamp variant keys on **`MoveOrder & 0x100`** (+0x12c), not entity
+`Flags`; `Input_HandleActionBinding_0`'s function start is `0x4e0420` (0x4e1330 is an inner site);
+`Camera_SetTrackedEntity` takes **(entity, mode)** — the old 1-arg type hid the mode param.
+
+- **Follow anchor** `[orig: ThirdPersonCamera_Update @ 0x437af0]`, called per 62 Hz tick from
+  `Game_ProcessMainFrame @ 0x5263f0`: on foot `anchor_target = Position + CameraOffset(+0x6c)`;
+  seats 2/5 use the **parent vehicle's** Position with Z + max(1.0, 0.375·boundRadius). Anchor eases
+  ¼-step per tick on foot, 1/16 (xy) + 1/32 (z) seated; a (pos − savedLivePose)<<8 velocity-lead
+  pair smooths 1/32. View bits 0x10/0x40 (`dword_B3B738`) orbit yaw ±0x1000000 (≈1.4°)/tick. Dead
+  tracked entity: chase distance auto-reels >7.0 → −1.0/tick, then 1/16-step to exactly 3.0.
+- **Eye/orientation** `[orig: Camera_ComputeThirdPersonView @ 0x437d10]` mode 1: on foot
+  `eye = anchor + R(entYaw+orbitYaw, entPitch+orbitPitch)·(−dist,0,0)` with defaults dist=3.0,
+  orbit pitch=0x4000000 (22.5°) (reset in `Camera_SetTrackedEntity @ 0x4391d0`); orbit-pitch keys
+  ±0x800000 (actions 407/408). Seats 2/5: yaw = vehYaw + (lookYaw−vehYaw)/4, pitch fixed −0x8000000
+  (11.25° down), **dist = 1.0 + 1.5·boundRadius**; plus ground-slope follow (max ground slope
+  toward the anchor × 0.333 raises the eye), a smoothed (1/32) look-ahead point 6.0u along the
+  vehicle's `orientationMatrix(+0xb4)`, and model types 3/4 (helo/plane byte @ model+406) drop the
+  eye by boundRadius/2. Final rotation = atan2 look-at from eye to anchor(+R·(0.125,0.125,0.125)),
+  roll 0 (+ explosion-shake sway from `dword_B764B0` filtered `Env_WeatherPrng` noise).
+- **Collision** `[orig: Camera_RaycastCollisionOffset @ 0x4378b0]` + inline in the view fn:
+  0.25u-step march along the offset ray (skipped when dist ≥ 8.0), bone-collision force
+  (`Entity_ComputeCollisionForceFromBones @ 0x4afff0`) against a per-entity collider list at
+  entity+0x1bc (ptr)/+0x1c0 (count) filtered to defless/type-5 entities, radius 0.25; terrain
+  clearance via `Terrain_SampleHeightBilinear @ 0x6067b0`; eye clamped ≥ water+0.25 (when entity
+  above water) and ≥ ground+0.25 (unless entity flag 0x800000). Min pull-in 0.25.
+- **View actions** `[orig: Input_HandleActionBinding @ 0x49ad40, cases @ 0x49c073]`: 400 = first
+  person (view bit 0x4000000), 401 = cockpit (0x10000000), 402 = third person (0x8000000 +
+  `g_camera_third_person_selected=1`), 412 = toggle FP→3P→cockpit, 405/406 orbit yaw keys, 407/408
+  orbit pitch. The view bits are the same `dword_B3B738` triple the BMS runtime doc lists.
+- **Mode arbiter** (per frame, `[orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca267]`):
+  desired = 0; 3P-selected && parentSlot∈{2,5} → 1; death screen sub-mode 1 → 1, sub-mode 2 →
+  0 **with tracking swapped to the killer** (kill-cam POV, `@ 0x4391f7`); dead or
+  awaiting-spawn-on-foot → 4 (overview lerp over 128 ticks, from/to in `g_camera_lerp_*`) unless
+  option `dword_24D1E34` bit 1; in-session + `dword_24D1E34 & 0x40` → forced 0 (the server
+  "force first person" rule). Session setting +0x5CC==2 → `g_cfg_default_camera_mode=1`
+  (`[orig: apply_session_settings_to_globals @ 0x5521a8]`), applied via
+  `Camera_ResetToLocalPlayer @ 0x4a3d30`. **Open:** on-foot desired mode never leaves 0 in this
+  build's arbiter — how JO:TR-era on-foot third person persisted (server "allow 3P") is
+  unconfirmed here; the on-foot chase math itself is fully present (above). Verify in-game on a
+  LAN host with the 3P option before porting the on-foot toggle semantics.
+- **FP mounted refinements** (mode 0): seat-bone eye (`Entity_GetBoneWorldPosition @ 0x545e60`)
+  when the parent def sets +84 bit 0x20 (and not 0x40); a per-model camera callback (vtable +372)
+  for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
+  pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
+
+**Port (2026-07-08, the controller train):** `local_player_host.gd` now uses the witnessed
+on-foot chase numbers — distance 3.0, orbit pitch 22.5°, quarter-step anchor smoothing, rotation
+re-aimed at the anchor — and the third-person body renders with the §14 aim overlay
+(world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march, orbit keys, the
+0.125u look-at offset, per-stance `CameraOffset`, vehicle mode-1 (no local mounting), FOV.
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with

@@ -45,6 +45,14 @@ namespace {
 
 // [orig: 0x4b9910 — body turn clamp ±69273360/tick (~5.8 deg)]
 constexpr int32_t kBodyTurnClamp = 69273360;
+// Leg-chain chase constants [orig: §3.3 — +0x2d4/+0x2d8 chase +0x2e4/+0x2e8 quarter-step,
+// rate clamp ±83886080/tick (~7 deg), twist limit ±0x20000000 (45 deg) from the body;
+// re-plant hysteresis |Δ| > 59652320 (~5 deg) and (|Δ| > 357913920 (~30 deg) or the
+// per-entity 64-tick window). The 1/16-step def+84&0x200 variant is unused for persons.]
+constexpr int32_t kLegChaseClamp = 83886080;
+constexpr int32_t kLegTwistLimit = 0x20000000;
+constexpr int32_t kLegReplantMin = 59652320;
+constexpr int32_t kLegReplantSnap = 357913920;
 // [orig: gravity vel_z step 416; terminal -32768. Witnessed cadence: NPC org1 -416 EVERY tick
 // (@0x4bf7bf) then pos.z += 2*vel (@0x4bf7ec); player org2 -208 EVERY tick (@0x4b7acf) then
 // pos.z += vel (@0x4b7cef) — neither gates on tick parity. The player keeps a 2-tick
@@ -316,7 +324,11 @@ static int player_stance_remap(int state, InfantryState::Stance st, int move_dir
         case anim_state::kStop:
             if (st == InfantryState::Stance::kCrouch) return anim_state::kIdleCrouch;
             if (st == InfantryState::Stance::kProne) return anim_state::kIdleProne;
-            return anim_state::kIdle;
+            // Standing keeps the SELECTED idle: the 62-pass promotion writes 44
+            // directly (state = 0x2B + (cnt >= 0x3E) [orig: @0x4b727b]) and must
+            // survive the remap — coercing to 43 here suppressed it (caught when the
+            // dormant remote-body test was wired up).
+            return state == anim_state::kStop ? anim_state::kIdle : state;
         default:
             return state;
     }
@@ -548,7 +560,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // 5. Body heading: quarter-step toward the target, clamped. [orig: dump 4600-4611 —
     // step = (diff + 2) >> 2 clamped ±69273360; body and render yaw move together]
     if (inf.is_local_player) {
-        inf.body_heading = inf.target_heading;
+        // The player's render/aim yaw is the mouse, instant [orig: Input_HandleActionBinding
+        // @0x49ad40 cases 0xA6/0xA7 write entity Yaw directly]; only the BODY lags behind it,
+        // which is what the third-person overlay renders as the torso twist. The org2 chase
+        // math is unwitnessed — the org1 quarter-step is applied per D-INF-12.
+        const int32_t diff = inf.target_heading - inf.body_heading;
+        int32_t step = (diff + 2) >> 2;
+        if (step > kBodyTurnClamp) step = kBodyTurnClamp;
+        if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
+        inf.body_heading += step;
         e.heading = inf.target_heading;
     } else {
         const int32_t diff = inf.target_heading - inf.body_heading;
@@ -557,6 +577,28 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
         inf.body_heading += step;
         e.heading = inf.body_heading;
+    }
+
+    // 5b. Leg-chain chase + re-plant (per tick, both motors). The feet hold their planted
+    // yaw until the body has twisted past the hysteresis, then shuffle after it at a
+    // clamped quarter-step, never more than 45 deg from the body. [orig: §3.3 chase of
+    // +0x2d4/+0x2d8 toward +0x2e4/+0x2e8; consumed as the R/L leg-chain bone yaw by
+    // Entity_BuildBoneTransformMatrices @0x4b1290 — world-wac-ai-re.md §14. The re-plant
+    // TARGET source is unwitnessed for org2 and both legs share one target here: D-INF-12.]
+    for (int leg = 0; leg < 2; ++leg) {
+        const int32_t drift = inf.body_heading - inf.leg_target[leg];
+        if (abs_bam(drift) > kLegReplantMin &&
+            (abs_bam(drift) > kLegReplantSnap || (key & 63u) == 0)) {
+            inf.leg_target[leg] = inf.body_heading;
+        }
+        const int32_t ldiff = inf.leg_target[leg] - inf.leg_yaw[leg];
+        int32_t lstep = (ldiff + 2) >> 2;
+        if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
+        if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
+        inf.leg_yaw[leg] += lstep;
+        const int32_t twist = inf.leg_yaw[leg] - inf.body_heading;
+        if (twist > kLegTwistLimit) inf.leg_yaw[leg] = inf.body_heading + kLegTwistLimit;
+        else if (twist < -kLegTwistLimit) inf.leg_yaw[leg] = inf.body_heading - kLegTwistLimit;
     }
 
     // 6. Slope slide + lean (every 8 ticks; alive only). [orig: gate dump 915 + flag rules]

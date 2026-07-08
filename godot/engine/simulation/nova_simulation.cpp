@@ -26,6 +26,7 @@
 #include <mission/bms.h>
 #include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
 #include <mission/mission_systems.h>
+#include <anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <world/angle.h>
 #include <world/player_spawn.h>
 #include <world/spawn_select.h>
@@ -561,6 +562,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
+	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
@@ -1095,6 +1097,53 @@ int NovaSimulation::get_local_player_anim_phase_ticks() const {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	return p ? p->inf.clip_phase : 0;
+}
+
+Dictionary NovaSimulation::get_local_player_aim_overlay() const {
+	// The torso-bend overlay state: the nine per-segment orientations from the exact BAM
+	// blends [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14],
+	// converted once here to mission-euler degrees — yaw via the canonical (90 - heading),
+	// pitch NEGATED (engine BAM pitch is up-positive, BMS euler pitch is nose-down-positive
+	// per MissionObjectPlacer.bms_to_godot_basis). The host builds Godot bases from these
+	// with that single-sourced conversion; delta(body class) is identity by construction.
+	Dictionary out;
+	out["valid"] = false;
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return out;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p) return out;
+
+	opennova::anim::AimOverlayInputs in;
+	in.aim_yaw = p->heading;
+	in.aim_pitch = p->pitch;
+	in.body_yaw = p->inf.body_heading;
+	in.leg_yaw_r = p->inf.leg_yaw[0];
+	in.leg_yaw_l = p->inf.leg_yaw[1];
+	// roll / body_pitch / torso_roll / lean / pitch_blend / head_look_decay stay 0 until
+	// their sim sources (lean keys, recoil, AI head-look) are ported — the formulas above
+	// carry the terms so those drop in without touching this seam.
+	in.aim_state = (opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0;
+	in.rolling = (p->inf.anim_state == 41 || p->inf.anim_state == 42);
+
+	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
+	opennova::anim::compute_aim_overlay_angles(in, angles);
+
+	const auto to_mission = [](const opennova::anim::AimOverlayAngles &a) {
+		return Vector3(
+				static_cast<float>(-static_cast<double>(a.pitch) * opennova::world::kDegreesPerBam),
+				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(a.yaw)),
+				static_cast<float>(static_cast<double>(a.roll) * opennova::world::kDegreesPerBam));
+	};
+
+	PackedVector3Array packed;
+	packed.resize(opennova::anim::kOverlayClassCount);
+	for (int i = 0; i < opennova::anim::kOverlayClassCount; ++i) {
+		packed[i] = to_mission(angles[i]);
+	}
+	out["valid"] = true;
+	out["aim_state"] = in.aim_state;
+	out["body"] = to_mission(angles[opennova::anim::kOverlayBody]);
+	out["angles"] = packed;
+	return out;
 }
 
 // HUD health/team. The original rebuilds these into its per-frame HUD info struct every frame

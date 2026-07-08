@@ -10,6 +10,7 @@
 
 #include <bad/bad.h>
 #include <adm/adm.h>
+#include <anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
 #include <world/body_anim.h>
 
 #include <cmath>
@@ -406,6 +407,64 @@ Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds
 	return out;
 }
 
+PackedInt32Array NovaSkeletalAnim::get_overlay_classes() const {
+	PackedInt32Array out;
+	out.resize(static_cast<int64_t>(bones_.size()));
+	for (size_t i = 0; i < bones_.size(); ++i) {
+		int cls = opennova::anim::kOverlayBody;
+		// "BN01 Hips" -> bone index 0. The model bone order IS the BN order (§14.2), but
+		// parsing the tag keeps husk/accessory variants correct without positional trust.
+		const std::string &n = bones_[i].name;
+		if (n.size() >= 4 && (n[0] == 'B' || n[0] == 'b') && (n[1] == 'N' || n[1] == 'n') &&
+				n[2] >= '0' && n[2] <= '9' && n[3] >= '0' && n[3] <= '9') {
+			const int bn = (n[2] - '0') * 10 + (n[3] - '0');
+			if (bn >= 1 && bn <= 19) {
+				cls = opennova::anim::kOverlayClassByBoneIndex[bn - 1];
+			}
+		}
+		out[static_cast<int64_t>(i)] = cls;
+	}
+	return out;
+}
+
+Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead_seconds,
+		const PackedInt32Array &p_classes, const Array &p_deltas) const {
+	Array pose = eval_pose(p_key, p_playhead_seconds);
+	const int n = static_cast<int>(pose.size());
+	if (n == 0 || static_cast<size_t>(n) != bones_.size() || p_classes.size() < n ||
+			p_deltas.size() < static_cast<int>(opennova::anim::kOverlayClassCount)) {
+		return pose;
+	}
+
+	opennova::anim::Quat deltas[opennova::anim::kOverlayClassCount];
+	for (int c = 0; c < static_cast<int>(opennova::anim::kOverlayClassCount); ++c) {
+		const Basis b = p_deltas[c];
+		const Quaternion q = b.get_rotation_quaternion();
+		deltas[c] = { static_cast<float>(q.w), static_cast<float>(q.x),
+			static_cast<float>(q.y), static_cast<float>(q.z) };
+	}
+	std::vector<int> parents(bones_.size());
+	std::vector<uint8_t> classes(bones_.size());
+	std::vector<opennova::anim::Quat> rots(bones_.size());
+	for (int i = 0; i < n; ++i) {
+		parents[static_cast<size_t>(i)] = bones_[static_cast<size_t>(i)].parent_index;
+		const int c = p_classes[i];
+		classes[static_cast<size_t>(i)] = static_cast<uint8_t>(
+				(c >= 0 && c < static_cast<int>(opennova::anim::kOverlayClassCount)) ? c : 0);
+		const Transform3D t = pose[i];
+		const Quaternion q = t.basis.get_rotation_quaternion();
+		rots[static_cast<size_t>(i)] = { static_cast<float>(q.w), static_cast<float>(q.x),
+			static_cast<float>(q.y), static_cast<float>(q.z) };
+	}
+	opennova::anim::apply_aim_overlay(parents, deltas, classes.data(), rots);
+	for (int i = 0; i < n; ++i) {
+		const Transform3D t = pose[i];
+		const opennova::anim::Quat &q = rots[static_cast<size_t>(i)];
+		pose[i] = Transform3D(Basis(Quaternion(q.x, q.y, q.z, q.w)), t.origin);
+	}
+	return pose;
+}
+
 void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name"), &NovaSkeletalAnim::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad"), &NovaSkeletalAnim::load_from_bad_files);
@@ -422,4 +481,6 @@ void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clip_length", "key"), &NovaSkeletalAnim::get_clip_length);
 	ClassDB::bind_method(D_METHOD("is_clip_looping", "key"), &NovaSkeletalAnim::is_clip_looping);
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds"), &NovaSkeletalAnim::eval_pose);
+	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &NovaSkeletalAnim::get_overlay_classes);
+	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas"), &NovaSkeletalAnim::eval_pose_overlay);
 }

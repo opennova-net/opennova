@@ -148,6 +148,13 @@ struct InfantryState {
 
     int32_t body_heading = 0;
     int32_t target_heading = 0;
+    // Leg-chain chase yaws + their re-plant targets (BAM32): the feet keep pointing
+    // where they were planted and shuffle after the body under the section-3.3
+    // hysteresis; the render bone overlay consumes them as the R/L leg yaw.
+    // [orig: entity +0x2d4/+0x2d8 (IDB "torsoYaw/torsoPitch" -- misnomers) chasing
+    //  +0x2e4/+0x2e8; witness docs/world/world-wac-ai-re.md s3.3 + s14]
+    int32_t leg_yaw[2] = {};              // 0 = right chain, 1 = left chain
+    int32_t leg_target[2] = {};
     int32_t vel[3] = {};                  // entity+152/+156/+160
 
     // Local-player stance input. NPC org1 selection does not consume this field.

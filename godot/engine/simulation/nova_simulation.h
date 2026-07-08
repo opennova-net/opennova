@@ -345,6 +345,15 @@ public:
 	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
 	int get_local_player_anim_phase_ticks() const;
+	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
+	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
+	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;
+	//   angles: PackedVector3Array[9] mission-euler degrees per anim::OverlayClass.
+	// The blends run in exact BAM int math [orig: Entity_BuildBoneTransformMatrices
+	// @0x4b1290; docs/world/world-wac-ai-re.md §14]; the host converts each triple with
+	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
+	// feeds NovaObjectModel.set_aim_overlay. Empty/invalid when no player.
+	Dictionary get_local_player_aim_overlay() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

@@ -107,10 +107,18 @@ Everything below was decompiled and read this session (pseudocode dumps:
 - Aiming (`byte entity+864`): render yaw chases aim heading `entity[187]` quarter-step,
   clamp [−31457280, +503316480]; pitch `entity[5]` chases `entity[180]` likewise.
   Non-aim: eighth-step, clamp ±14680064 (cap 234881024). Per-tick sanity clamp vs prev: ±0x40000000.
-- Torso `entity[181]/[182]` chases head-look `entity[185]/[186]` quarter-step (1/16 when def+84&0x200),
-  rate clamp ±83886080, twist limit ±0x20000000 (45°) from body. Head-look hysteresis: re-aim only when
-  |Δ| > 59652320 (~5°) and (|Δ| > 357913920 (~30°) or the per-entity 64-tick window hits).
-  (Torso/head feed bone overlays — visual; ADR 0007 already defers the overlay skeleton work.)
+- Legs (**CORRECTED 2026-07-08** — previously misread as "torso chases head-look"):
+  `entity[181]/[182]` (+0x2d4/+0x2d8; IDB names `torsoYaw`/`torsoPitch` are misnomers) are the
+  **right/left leg-chain chase yaws**; each chases its re-plant target `entity[185]/[186]`
+  (+0x2e4/+0x2e8; IDB `headLookYaw`/`headLookPitch`, same misnomer family) quarter-step (1/16 when
+  def+84&0x200), rate clamp ±83886080, twist limit ±0x20000000 (45°) from body. Re-plant hysteresis:
+  re-target only when |Δ| > 59652320 (~5°) and (|Δ| > 357913920 (~30°) or the per-entity 64-tick
+  window hits) — the feet shuffle around to catch up once the body has twisted far enough.
+  Proof of the leg reading: the render bone-overlay switch consumes [181]/[182] as the **yaw** of the
+  R/L thigh/calf/foot bone chains (with bodyPitch), §14 `[orig: Entity_BuildBoneTransformMatrices @ 0x4b1290]`.
+  `entity[183]` (+0x2dc `torsoRoll`) genuinely is a torso roll (recoil/flinch chase, §4.14). Head-look
+  proper is the separate `headLookTarget` (+0x344) / `headLookDecay` (+0x36c) / `pitchBlend` (+0x380)
+  system (§4.13).
 
 ### 3.4 Animation state machine (the locomotion driver)
 - State id `entity[175]` (prev `entity[178]`); **state→name table `off_8135F0`** (200 entries, names
@@ -330,6 +338,24 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     (net-equivalent to org2 — its jump/fall tuning + tests pin the `−416`-per-application step, so
     making it per-tick `−208` is deferred to a dedicated player-physics grill). `libs/world/src/
     infantry.cpp`; guarded by the gravity-cadence case in `tests/world/infantry_test.cpp`.
+  - **D-INF-11** third-person body aim overlay (the torso bend) — **LOCAL PLAYER LANDED
+    2026-07-08** (§14.6: `libs/anim/aim_overlay`, the leg-chase sim fields, the
+    `NovaSkeletalAnim.eval_pose_overlay` path, the witnessed 3P camera numbers; verified
+    in-play via `godot/tests/bend_capture_probe.gd`). REMAINING (row stays open, partial):
+    NPC/remote present-pass threading (closes D-NET-117), the upper-body weapon channel
+    (rides D-INF-1), mounted/seated branches, attachment matrices, and the
+    pitchBlend/headLookDecay/lean/torsoRoll sources. `[orig: Entity_BuildBoneTransformMatrices
+    @ 0x4b1290]`, witness §14.
+  - **D-INF-12** player (org2) chase sources approximated by org1 math. The bone builder's
+    inputs for the local player — the `bodyHeading` chase and the leg re-plant TARGET
+    writes — live in `Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (0x42d3 B) and are
+    unwitnessed (the section-scoped re-verify was cut by tooling limits; displacement
+    scanning is unavailable on this MCP). Ours applies the witnessed org1 §3.3 quarter-step
+    to the player's body heading (render yaw stays mouse-instant, witnessed) and gives BOTH
+    legs one shared re-plant target on the shared 64-tick window — the original carries two
+    target fields (+0x2e4/+0x2e8) whose per-leg divergence/stagger is unknown. Consequence:
+    twist/shuffle timing may differ from retail by small constants. Closes with an org2
+    grill of @0x4b40e0's writes to +0x8c/+0x2e4/+0x2e8.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
@@ -757,3 +783,153 @@ DRIVER) and the `mount_type` already exported through `nova_simulation.cpp`. The
 gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
 `pad_2b0` → `heldWeaponAdmIndex`; comment `Entity_CanFireWeapon` as the weapon-visibility
 gate) is proposed but unapplied (shared IDB state).
+
+## 14. Appendix: third-person body aim overlay — the torso bend (engine-research, 2026-07-08)
+
+The question: how does the original bend the soldier at the waist when looking up/down in third
+person (on foot and mounted)? Answer: there is no procedural spine IK — every skeleton bone's
+**world orientation** is `animPose × overlay(boneIndex)`, where the overlay is one of seven full
+entity-orientation matrices built per frame from blends of aim vs body angles; the per-segment
+blend gradient IS the bend. Witnessed end-to-end in
+`[orig: Entity_BuildBoneTransformMatrices @ 0x4b1290]` (callers
+`[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`, `[orig: Entity_UpdateInfantryAI @ 0x4b9910]`;
+render consumers `BoneCallback_org0_* @ 0x4e34b0/0x4e3940`, `Entity_GetCameraTransform @ 0x4b8c00`,
+`Entity_GetAttachmentWorldPosition @ 0x4b2670`). No reimpl exists yet (see D-INF-11 / D-NET-117).
+
+### 14.1 Pipeline
+
+1. `AnimChannel_ComputeBoneMatrices @ 0x410da0` samples the active channel; the copy into the
+   per-bone 4×4 buffer applies the (−x, y, z) handedness flip (ADR 0007 convention).
+2. If entity `Flags & 0x100` (weapon in hands), not gun/ctrl/driver-mounted, and the anim state has
+   flag 0x40, the SECOND channel (`animChannelA @ +0x18c`, the weapon/aim layer) overwrites the
+   **upper-body mask** bones {3,4,5,6,9,10,13,14,15,16} = clavicles, upper arms, forearms, neck,
+   head, both hands — the two-channel upper/lower split (`AnimChannel_BlendTwoChannels @ 0x410740`
+   is the blended variant; this site is the hard override form).
+3. Seven overlay matrices are built by temp-mutating entity `Yaw/Pitch/Roll` (+0x10/+0x14/+0x18)
+   and calling `Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200` on the entity block (position +
+   YPR); originals restored after. Angle sources: aim = render `Yaw`/`Pitch`, body =
+   `bodyHeading/bodyPitch` (+0x8c/+0x90), legs = `+0x2d4/+0x2d8` (§3.3), `torsoRoll +0x2dc`,
+   `leanAngle +0xb0`, `pitchBlend +0x380`, `headLookDecay +0x36c`.
+4. Per bone: `switch (boneIndex)` picks the overlay (table below); result = anim × overlay; then
+   the bone is re-anchored on its parent: translation = parentMatrix·pivot, composed with
+   translate(−pivot) — pivot/parent from the **model bone-def table** at `modelDef+56`
+   (stride 64 B: parent index @ +0x14, pivot float3 @ +0x24). `modelDef = graphicModel[8]`, bone
+   count @ +52.
+5. Special rows: a bone whose `sectionMask` (+0x134) bit is set is zeroed (hidden/dismembered).
+   Bone 16 (R hand) is zeroed when mounted without weapon-use (`parentSlot∈{2,3,5}` and
+   `!(Flags & 0x100)`) or when dead with an attacker ref — the held-weapon stow of §13. When the
+   anim channel drives fewer bones than the model and covers ≥15, the FIRST bone past the channel
+   copies bone 14 (head) — the helmet/head-gear convention.
+
+### 14.2 Bone → overlay map
+
+Bone index = the model/`.bad` bone order (BN## − 1; order witnessed in the BINOC.bad fixture and
+pinned by the upper-body mask's exact complement of the leg chains). Hex-Rays pseudocode shows the
+switch labels **shifted −1** (the jump table indexes `boneIdx−1` via the byte table @ 0x4b25c0;
+bone 0 takes the `default`) — the disasm is the truth.
+
+| idx | bone | overlay (on-foot aim state, flag 0x40) |
+|---|---|---|
+| 0 | BN01 Hips | body: yaw=bodyHeading, pitch=bodyPitch (default case) |
+| 1 | BN02 Lower Spine | yaw = aim + (body−aim)/2, pitch = body + (aim−body)/4 + pitchBlend/2, roll = Roll + lean/2 |
+| 2 | BN03 Upper Spine | yaw = aim + (body−aim)/4, pitch = aim + pitchBlend, roll = Roll + lean |
+| 3,4 | BN04/BN05 R/L Clavicle | same as BN03 (copy) |
+| 5,6,9,10 | BN06/07 upper arms, BN10/11 forearms | yaw = aim + (body−aim)/4, pitch = aim + headLookDecay + 2·pitchBlend, roll = Roll + lean |
+| 15 | BN16 L Hand | same as arms |
+| 7,11,17 | BN08/12/18 R thigh/calf/foot | yaw = `+0x2d4` (R leg chase), pitch = bodyPitch |
+| 8,12,18 | BN09/13/19 L thigh/calf/foot | yaw = `+0x2d8` (L leg chase), pitch = bodyPitch |
+| 13 | BN14 Neck | = BN03's matrix on foot; = FULL aim when seated (driver looks around) |
+| 14 | BN15 Head | full aim: yaw = aim, pitch = aim (+ local-player kick, §14.3), roll = torsoRoll + lean/2 |
+| 16 | BN17 R Hand | stow-hide rule (§14.1.5), else the arm matrix |
+| ≥19 | accessories | body matrix (default) |
+
+The gradient hips(0%) → lower spine(50% yaw, 25% pitch) → upper spine/chest(75% yaw, 100% pitch)
+→ head(100%) is the visible waist bend; legs ignore aim pitch entirely and follow their §3.3
+chase yaws.
+
+### 14.3 Branches and gates
+
+- **Aim-state gate**: `g_animStateFlagsTable[animStateId] & 0x40` selects the bend branch. Prone
+  states (0x603) and rolls/deaths lack 0x40 → no-bend branch: all body bones take the body matrix;
+  arms get aim pitch + headLookDecay/4 + 2·pitchBlend (skipped when `Flags & 0x100000`); head keeps
+  full aim. Anim states 41/42 (`roll_left/right`) additionally zero `Roll`/`torsoRoll` — the clip
+  owns the whole body during combat rolls.
+- **Mounted gunner** (`parentSlot == 3`): keyed on the parent def's mount config (+0x86c, the
+  `emplaced_N` selector, §9): configs 3/5/7 → every bone takes the body matrix (fully-animated
+  emplaced poses); 6 → same but the aim matrix is kept for the head; else → gunner counter-lean:
+  arms/root get yaw = body − (aim−body)/4 and pitch = 2·bodyPitch − aimPitch + pitchBlend/2
+  (reversed — the body counter-rotates against the gun the mount itself aims), spine 1/16
+  counter-yaw, neck/head full aim.
+- **Seated** (`parentSlot ∈ {2,5}`): all bones body-matrix except neck = full aim (the driver's
+  head tracks look). The player body updater additionally HALVES the render pitch fed into the
+  build while in vehicle third person `[orig: @ 0x4b4942]`.
+- **Local player**: when `entity == dword_C6EC38` (the view/local entity global; identity from
+  reads — HUD self-label skip, audio listener), head/aim pitch gets `+ (dword_3346FA8 << 17)` —
+  a fine view-pitch adjustment (recoil kick accumulator at probable confidence; writers
+  unresolved, see §14.5).
+- **Rigid defs**: `itemDef->attrib & 0x200` → every overlay = body matrix (no aim skeleton).
+
+### 14.4 Attachment out-matrices (weapon / sight / muzzle)
+
+- Held-weapon world matrix = **full-aim orientation** (not the hand bone's rotation!) positioned at
+  bone 16 (R hand) × the model attach offset (`modelDef+0x424..0x42C`, ± nudges 0.05/0.051) — the
+  rifle points exactly where you aim while the arms only approximately follow. When the PREVIOUS
+  anim state has table flag 0x80 (death family), a sin/cos wobble (fixed radian constants) tilts
+  it — dropped-weapon sprawl.
+- Sight matrix from bone 15 + `modelDef+0x3E4` offsets (fixed Euler tweaks incl. −15°, ~100°);
+  muzzle-flash matrix from bone 14 + `modelDef+0x3A4`.
+
+### 14.5 Open follow-ups
+
+- `dword_3346FA8` (local pitch kick): value source unwitnessed — data xrefs land near audio-mixer
+  init; likely a computed-address write elsewhere. Pin the writer before porting the kick.
+- `dword_C6EC38` (view/local entity): reads witnessed only; no direct writer xref (register-based
+  store suspected). Name-proposal held until a writer is pinned.
+- The InfantryAI leg-chase excerpt re-verify (the session's sub-investigation was cut by a spend
+  limit after confirming the §3.1 36-tick re-plant stagger applies per DcbId): the §3.3 math rows
+  predate this session and stand; the relabel is anchored by the bone-overlay consumers.
+- Mount-config codes 3/5/6/7 (+0x86c) → which retail emplacements use which (data sweep).
+- `Entity_GetCameraTransform @ 0x4b8c00` (bone-camera for mode-0 mounted view) not yet decompiled.
+
+### 14.6 Port status (D-INF-11 — LOCAL PLAYER LANDED 2026-07-08)
+
+Ported for the local player, end to end, in the controller train:
+
+- **Blends + bone map**: `libs/anim/{include/anim,src}/aim_overlay.{h,cpp}` — exact int32 BAM
+  blends of the on-foot aim/non-aim branches, the BN##→class map, and the pose compose
+  (`apply_aim_overlay`: FK → per-class world delta → back to parent-locals; with parent-local
+  poses the pivot re-anchor preserves every local origin, so only rotations change).
+  `tests/anim/aim_overlay_test.cpp` pins the map, both branch formulas, and the compose
+  invariants (identity = passthrough; uniform delta = world delta; differential = bend).
+- **Sim**: `InfantryState.leg_yaw/leg_target` + the §3.3 chase/re-plant/twist-limit tick in
+  `libs/world/src/infantry.cpp`; the local player's `body_heading` now CHASES the aim
+  (quarter-step, clamped) while render yaw stays mouse-instant — the aim/body split the
+  overlay renders. `tests/world/infantry_test.cpp::test_player_body_chase_and_legs`.
+- **Host**: `NovaSimulation.get_local_player_aim_overlay()` (BAM→mission-euler once, native) →
+  `LocalPlayerHost._update_avatar` builds the per-class deltas via the single-sourced
+  `bms_to_godot_basis` and sets the avatar node to the BODY frame →
+  `NovaObjectModel.set_aim_overlay` → `NovaSkeletalAnim.eval_pose_overlay`. The 3P camera now
+  uses the witnessed 3.0 / 22.5° / ¼-step-anchor numbers (net-re §5.39 addendum).
+- **Verified**: `godot/tests/bend_capture_probe.gd(.tscn)` — boots ONED play-in-editor,
+  injects F4 + mouse-look, captures poses; look-down bends the spine/head forward, look-up
+  arches back (05TR.bms, JOX root).
+
+Remaining under this row: NPC/remote threading (the present-pass `PF_PITCH_DEG` seam + the
+same angles per entity in the snapshot — closes **D-NET-117**), the upper-body weapon channel
+(rides **D-INF-1**), mounted-gunner/seated branches, weapon/sight/muzzle attachment matrices,
+and the pitchBlend / headLookDecay / lean / torsoRoll sources (terms carried, fed 0).
+Player-motor approximations are ledgered as **D-INF-12**.
+
+### 14.7 IDB write-backs (2026-07-08 session, saved)
+
+33 camera-system globals renamed from auto names (`g_camera_mode @ 0xA890C8`,
+`g_camera_tracked_entity @ 0xA890CC`, `g_camera_chase_distance @ 0xA8910C`,
+`g_camera_orbit_yaw/pitch @ 0xA89104/0xA89108`, anchor/lookahead/lerp/spectator families,
+`g_camera_third_person_selected @ 0xA860DF`, `g_cfg_default_camera_mode @ 0x24D20C4`);
+entry comments on `0x4b1290` (the bone map), `0x4b25c0` (case table off-by-one), `0x437af0`,
+`0x437d10`, `0x4391d0` (+ its real 2-arg signature note), `0x49c073` (view actions),
+`0x5ca1d2` (mode arbiter), `0x4b4942` (vehicle-3P pitch halving). **Proposed, NOT applied**
+(curated-name policy): `torsoYaw/torsoPitch → legChaseYawR/L`, `headLookYaw/headLookPitch →
+legTargetYawR/L`, `output_matrix @ 0xA890C0 → g_camera_anchor_z`, `world_x_1616 @ 0xA890EC →
+g_spectator_cam_x`, `outPos @ 0xA89110 → g_camera_lerp_from_x`, `outMillis @ 0x31BFBC0 →
+g_bam_sin_table_q22`.

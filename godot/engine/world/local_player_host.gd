@@ -10,8 +10,15 @@ const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer
 const PLAYER_EYE_HEIGHT := 1.0          # +0x10000 = +1.0 world unit above Position
 const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
 const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
-const PLAYER_TP_DISTANCE := 5.0         # 3P camera distance behind the player
-const PLAYER_TP_HEIGHT := 1.5           # 3P camera height bump
+# Witnessed chase-camera numbers: distance 3.0 (0x30000) and orbit pitch 22.5 deg
+# (0x4000000), the on-change defaults [orig: Camera_SetTrackedEntity @0x4391d0]; the
+# eye is anchor + R(yaw, pitch + orbit)*(-dist) re-aimed at the anchor
+# [orig: Camera_ComputeThirdPersonView @0x437d10]; the anchor eases quarter-step
+# [orig: ThirdPersonCamera_Update @0x437c8d]. Orbit keys, the bone/terrain collision
+# march, and the 0.125u look-at offset are tracked deferrals (net-re section 5.39
+# 2026-07-08 addendum).
+const PLAYER_TP_DISTANCE := 3.0
+const PLAYER_TP_ORBIT_PITCH_DEG := 22.5
 # First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
 # The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
 # the view orientation, then draws the gun (gfx1) + character arms at that view root
@@ -45,6 +52,8 @@ var _crouch := false
 var _prone := false
 var _avatar: Node3D = null
 var _viewmodel: Node3D = null
+var _tp_anchor := Vector3.ZERO
+var _tp_anchor_valid := false
 
 
 func setup(world, camera: Camera3D) -> void:
@@ -117,8 +126,10 @@ func after_world_tick() -> void:
 	_update_player_camera()
 
 
-# Edge-triggered gameplay keys. F4 toggles first/third person [orig: dword_A890C8
-# mode flag; ThirdPersonCamera_Update @0x437af0]. C / Z toggle the player's stance
+# Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
+# @ 0xA890C8; view actions 400/402/412 @ 0x49C073; ThirdPersonCamera_Update @0x437af0
+# — full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14 (D-INF-11),
+# net-re §5.39 2026-07-08 addendum]. C / Z toggle the player's stance
 # (crouch / prone), mutually exclusive — the original toggles stance on a key edge
 # [orig: stance bits on entity+0x12C; NapiNPServerMsg_HandleStanceChange @0x501c60;
 # crouch wins].
@@ -247,9 +258,21 @@ func _update_player_camera() -> void:
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
 	if _third_person:
-		_camera.global_position = eye - forward * PLAYER_TP_DISTANCE + Vector3(0, PLAYER_TP_HEIGHT, 0)
-		_camera.look_at(eye, Vector3.UP)
+		# Chase camera: the smoothed anchor is the follow target [orig: anchor = Position
+		# + CameraOffset, quarter-step ease per 62 Hz tick — ThirdPersonCamera_Update
+		# @0x437af0; ours eases per frame], the eye sits back along the look direction
+		# pitched up by the orbit default and the rotation re-aims at the anchor
+		# [orig: Camera_ComputeThirdPersonView @0x437d10 mode 1].
+		if not _tp_anchor_valid:
+			_tp_anchor = eye
+			_tp_anchor_valid = true
+		_tp_anchor += (eye - _tp_anchor) * 0.25
+		var opr := pr + deg_to_rad(PLAYER_TP_ORBIT_PITCH_DEG)
+		var back := Vector3(sin(yr) * cos(opr), sin(opr), -cos(yr) * cos(opr))
+		_camera.global_position = _tp_anchor - back * PLAYER_TP_DISTANCE
+		_camera.look_at(_tp_anchor, Vector3.UP)
 	else:
+		_tp_anchor_valid = false
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
 	_update_avatar(pos)
@@ -260,8 +283,27 @@ func _update_avatar(pos: Vector3) -> void:
 	if _avatar == null or not is_instance_valid(_avatar) or _world == null:
 		return
 	_avatar.global_position = pos
-	_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
-		Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
+	# The avatar node carries the BODY frame (the lagged body heading), not the aim yaw:
+	# the aim/body split is what the per-segment overlay renders as the torso twist, and
+	# the body-class delta is identity by construction so the hips stay glued to the node.
+	# [orig: Entity_BuildBoneTransformMatrices @0x4b1290 — every overlay blends toward
+	# bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14 (D-INF-11)]
+	var overlay: Dictionary = _world.local_player_aim_overlay() \
+			if _world.has_method("local_player_aim_overlay") else {}
+	if bool(overlay.get("valid", false)):
+		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay["body"])
+		_avatar.global_basis = body_basis
+		if _avatar.has_method("set_aim_overlay"):
+			var inv := body_basis.inverse()
+			var deltas: Array = []
+			for a in (overlay["angles"] as PackedVector3Array):
+				deltas.append(inv * MissionObjectPlacer.bms_to_godot_basis(a))
+			_avatar.set_aim_overlay(deltas)
+	else:
+		_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
+			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
+		if _avatar.has_method("set_aim_overlay"):
+			_avatar.set_aim_overlay([])
 	# The body renders in BOTH modes; first person hides it from the player
 	# camera by LAYER, not by visible = false (which would remove it from every
 	# camera, the water mirror included). Retail's reflection re-renders the

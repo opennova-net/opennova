@@ -77,7 +77,11 @@ by convention #3; compressed clips (C4* etc.) that previously collapsed now pose
 - Two-channel **upper/lower-body blend** (`AnimChannel_BlendTwoChannels @0x410740`) — for aim/walk
   separation; single clip is fine for AI walk cycles.
 - Body-segment **aim/lean overlays** (`Entity_BuildBoneTransformMatrices @0x4b1290` bone-index switch +
-  `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — needs the 3DI bone-def pivot table.
+  `Math_BuildFixedPointToFloatMatrix4x4 @0x612200`) — **WITNESSED IN FULL 2026-07-08**
+  (docs/world/world-wac-ai-re.md §14: the bone→overlay map, the seven blend matrices, the pivot
+  recomposition — the "3DI bone-def pivot table" is the modelDef+56 table, pivot @+0x24, and our
+  `.bad` rest positions carry the same data). Port still pending: D-INF-11 (ledger; closes
+  D-NET-117). Beware: Hex-Rays renders the switch labels shifted −1 (bone 0 = default).
 - Full **anim-slot table** (`Entity_ComputeAnimSlotIndex @0x43a690`, base 180 + 4·variant) and the
   player-avatar `off_8135F0` table — current selector is walk/run/idle by speed+alert.
 - **Cross-fade** on slot change (currently a hard cut); needs the two-channel blend first.

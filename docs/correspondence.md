@@ -502,10 +502,26 @@ First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
 | `Camera_ComputeThirdPersonView` | `0x437d10` | master view placement; mode-0 (FP) sets g_view_pos = Position + (0,0,0x10000 eye), g_view_rot = Yaw/Pitch/Roll | disasm; §5.39 | confirm-only |
-| `ThirdPersonCamera_Update` | `0x437af0` | 3P follow: target = Position + CameraOffset@+0x6C + smoothing/distance/bone-collision | disasm; §5.39 | confirm-only |
+| `ThirdPersonCamera_Update` | `0x437af0` | 3P follow-anchor smoother (per 62 Hz tick from `Game_ProcessMainFrame @0x5263f0`): anchor→Position+CameraOffset@+0x6C (on foot) / vehicle pos + max(1.0, 0.375·boundRadius) Z (seats 2/5); ease ¼ / 1/16+1/32; orbit keys ±0x1000000/tick; dead-target distance reel to 3.0 | decompile 2026-07-08; §5.39 addendum | confirm-only |
 | `Player_UpdateFirstPersonCamera` | `0x4dd380` | builds g_view_matrix @0xB764E0; offset = `ftol(WeaponDef.Bone.pos)` (`pos`, @0xF4) + g_view_pos_bias, rotated by `BuildRotationYXZ(view_rot_bias + Bone.rot)`, + clamped velocity lead + prone Z-drop −0x500; ADS path (entity Flags & 2 ‖ dword_24C1970) swaps offset → `AltCamOffset` (`tpos`, @0x10C) | disasm; §5.39/§5.40 | confirm-only |
 | `Input_HandleActionBinding_0` | `0x4e1330` | applies scaled mouse to entity Yaw@+0x10 (wraps) / Pitch@+0x14 (clamp ±80° = ±954437120) | disasm; §5.39 | confirm-only |
-| `Camera_SetTrackedEntity` | `0x4391d0` | sets the camera mode dword_A890C8 (0=FP on-foot, 1=vehicle 3P) + tracked entity dword_A890CC | disasm; §5.39 | confirm-only |
+| `Camera_SetTrackedEntity` | `0x4391d0` | **(entity, mode)** — 2nd arg hidden by the old 1-arg type; sets `g_camera_mode @0xA890C8` (0=FP, 1=vehicle 3P, 3=spectator, 4=lerp) + `g_camera_tracked_entity @0xA890CC`; on target change resets orbit (yaw 0, pitch 22.5°) + distance 3.0; death sub-mode 2 swaps tracking to the killer (kill-cam) | decompile 2026-07-08; §5.39 addendum | confirm-only |
+| `Camera_RaycastCollisionOffset` | `0x4378b0` | 0.25u ray march: per-step bone-collision force vs entity list @+0x1bc/+0x1c0 + terrain clearance; returns camera pull-in | decompile 2026-07-08; §5.39 addendum | confirm-only |
+| `Camera_ComputeThirdPersonPositions` | `0x438b80` | computes the mode-4 lerp target 3P placement (called from `Camera_SetTrackedEntity` on mode 4) | xref; §5.39 addendum | confirm-only |
+| `Camera_ResetToLocalPlayer` | `0x4a3d30` | ClearViewState + SetTrackedEntity(player, `g_cfg_default_camera_mode @0x24D20C4`) + distance 1.0, orbit 0 | disasm 2026-07-08; §5.39 addendum | confirm-only |
+| `Input_HandleActionBinding` (view cases) | `0x49ad40` @ `0x49c073` | actions 400/401/402/412 = FP/cockpit/3P/toggle (view bits 0x4000000/0x10000000/0x8000000 in `dword_B3B738` + `g_camera_third_person_selected @0xA860DF`); 405–408 = orbit keys | disasm 2026-07-08; §5.39 addendum | confirm-only |
+| camera-mode arbiter | `0x5ca1d2` | per-frame desired-mode logic in `Render_ProcessMainSceneFrame`: seats 2/5 → 1 when 3P selected; death/spawn → 4; server force-FP `dword_24D1E34 & 0x40`; kill-cam redirect | disasm 2026-07-08; §5.39 addendum | confirm-only |
+| `apply_session_settings_to_globals` (+0x5CC) | `0x5521a8` | session setting 2 → `g_cfg_default_camera_mode = 1` (third-person default) | disasm 2026-07-08; §5.39 addendum | confirm-only |
+
+Third-person body aim overlay — the torso bend (engine-research + local-player port 2026-07-08;
+world-wac-ai-re §14/§14.6; D-INF-11 partial, D-INF-12):
+
+| original | addr | role | evidence | status |
+|---|---|---|---|---|
+| `Entity_BuildBoneTransformMatrices` | `0x4b1290` | per-bone world matrices = anim pose × per-segment aim/body overlay (7 matrices), re-anchored on the model bone-def pivot table (modelDef+56, stride 64, parent +0x14, pivot +0x24); bone-index switch via byte table @0x4b25c0 (Hex-Rays labels shifted −1; bone 0 = default/body); gates: state flag 0x40, entity Flags 0x100/0x100000/2, mount config +0x86c, itemDef attrib 0x200; weapon/sight/muzzle out-matrices from bones 16/15/14 | decompile + disasm 2026-07-08; world-wac-ai-re §14; ctest `aim_overlay` | ported (on-foot branches + map: `opennova::anim::compute_aim_overlay_angles`/`apply_aim_overlay`, libs/anim/src/aim_overlay.cpp → `NovaSkeletalAnim.eval_pose_overlay`; local player only — mounted/attachment paths pending, D-INF-11) |
+| leg-chase yaw fields | `+0x2d4/+0x2d8` | consumed as the YAW of the R/L thigh/calf/foot chains with bodyPitch — proves the §3.3 relabel (chase targets +0x2e4/+0x2e8) | decompile 2026-07-08; §3.3/§14; ctest `infantry` (test_player_body_chase_and_legs) | ported (`InfantryState.leg_yaw/leg_target` + the §3.3 chase tick, libs/world/src/infantry.cpp; org2 sources approximated — D-INF-12) |
+| `Entity_GetAttachmentWorldPosition` | `0x4b2670` | attachment consumer of the bone builder | xref 2026-07-08 | confirm-only |
+| vehicle-3P pitch halving | `0x4b4942` | local player seated (2/5) in mode 1: render Pitch halved before the body pose build | disasm 2026-07-08; §14.3 | confirm-only |
 
 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (net-re §5.40, 2026-06-21):
 

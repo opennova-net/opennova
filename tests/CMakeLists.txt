@@ -74,6 +74,14 @@ target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_sample_test PRIVATE cxx_std_17)
 add_test(NAME anim_sample COMMAND anim_sample_test)
 
+# ANIM aim overlay (the torso bend): bone-class map, BAM blend branches, compose
+# invariants. [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md s14]
+add_executable(aim_overlay_test anim/aim_overlay_test.cpp)
+target_link_libraries(aim_overlay_test PRIVATE opennova_anim)
+target_include_directories(aim_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(aim_overlay_test PRIVATE cxx_std_17)
+add_test(NAME aim_overlay COMMAND aim_overlay_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_def)

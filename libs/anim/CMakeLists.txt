@@ -1,5 +1,6 @@
 add_library(opennova_anim STATIC
     src/adm.cpp
+    src/aim_overlay.cpp
     src/anim_sample.cpp
 )
 

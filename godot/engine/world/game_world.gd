@@ -667,6 +667,9 @@ func local_player_anim_key() -> String:
 func local_player_anim_phase_ticks() -> int:
 	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
 
+func local_player_aim_overlay() -> Dictionary:
+	return _runtime.local_player_aim_overlay() if _runtime != null else {}
+
 func local_player_health() -> int:
 	return _runtime.local_player_health() if _runtime != null else 0
 

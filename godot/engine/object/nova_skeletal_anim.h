@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -101,6 +102,20 @@ public:
 	// Per-bone parent-local pose at playhead t (seconds), Godot space. Size == bone count.
 	// Returns the bind pose for an unknown clip / empty result.
 	Array eval_pose(const String &p_key, double p_playhead_seconds) const;
+
+	// Per-bone overlay class (anim::OverlayClass) parsed from the BN## bone names, for
+	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's
+	// default case). [orig: the bone-index switch @0x4b1f3a; world-wac-ai-re.md §14.2]
+	PackedInt32Array get_overlay_classes() const;
+
+	// eval_pose plus the third-person aim overlay — the torso bend. p_deltas is one
+	// node-frame rotation Basis per anim::OverlayClass (the host builds them from
+	// NovaSimulation.get_local_player_aim_overlay() angles via the single-sourced
+	// MissionObjectPlacer.bms_to_godot_basis); p_classes from get_overlay_classes().
+	// Only local rotations change — origins survive the pivot re-anchor identically.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14]
+	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
+			const PackedInt32Array &p_classes, const Array &p_deltas) const;
 
 	NovaSkeletalAnim() = default;
 };
