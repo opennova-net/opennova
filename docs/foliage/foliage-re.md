@@ -24,8 +24,9 @@ so the port is faithful to the shipped product, not just the demo.
 | Foliage instance color | **DIVERGENT (approximation, narrowed 2026-07-07)** | D-FOLIAGE-1 — the half-plus-bias emitter form is applied; the per-vertex gradient is the residual |
 | Fragment combine (the blend PS) | **MATCHING (ported 2026-07-07)** | D-FOLIAGE-2 FIXED — `foliage.gdshader` runs the witnessed `t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` chain (t1 = planar-projected colormap; c0/c1 = the SKY/LIGHT blocks) `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0]`; witness text in [terrain/terrain-re.md](../terrain/terrain-re.md) §Foliage / sector models |
 | Wind-sway vertex path | **DIVERGENT (stand-in)** | D-FOLIAGE-3 — axis/weight/waveform diverge from `Foliage_WindSwayVS`; the sway state globals are live |
-| The MODEL tier (sector-entity 3DI stamping) | **DIVERGENT (unhosted — witness COMPLETE 2026-07-08)** | D-FOLIAGE-4 — retail stamps the def graphic's full 3DI geometry in ±4u clusters around sector entities (≤21/tile, 0.75-XZ/0.5-height scale, upright, 8-sample biquadratic ground fit in `Foliage_GridPlacementVS`); the host renders the mesh at every quad placement, slope-tilted, single-point anchored, native scale. §The model tier |
-| The `:fd` foliage texture (both tiers) | **DIVERGENT (unhosted bake — witness COMPLETE)** | D-FOLIAGE-5 — flat-`0x808080` + 3×3-smoothed-alpha bake of the model's own diffuse, bound by quads AND the model draw `[orig: Foliage_LoadDefAssets @ 0x601260]` |
+| The MODEL tier (sector-entity 3DI stamping) | **MATCHING (ported 2026-07-08)** | D-FOLIAGE-4 FIXED — `libs/foliage` `model_placement`/`model_dispatcher` + the two-tier host stamp the witnessed clusters (±4u around anchors, ≤21/tile, 0.75-XZ/0.5-height, upright, the 8-sample biquadratic fit in `foliage_model.gdshader`); the model-pass COLOR chain is the D-FOLIAGE-6 residual. §The model tier |
+| The `:fd` foliage texture (both tiers) | **MATCHING (ported 2026-07-08)** | D-FOLIAGE-5 FIXED — `bake_fd_rgba` (exact kernel + wrap + `0x808080` fold) via `VegAssets.resolve_slot_fd_textures`; BOTH tiers bind it `[orig: Foliage_LoadDefAssets @ 0x601260]` |
+| The model-pass color chain | **DIVERGENT (needs-RE)** | D-FOLIAGE-6 — the retail model draw's pass object + oD0 = black is unwitnessed; the host runs the quad combine family with the in-shader emitter-form v0. §The draw and the vertex shader |
 
 ## The witnessed placement (`generate_foliage_instances_0 @ 0x600197`)
 
@@ -67,7 +68,7 @@ serves (hosted as the `opennova_sky_ambient` / `opennova_sun_light` globals).
 (`(sun/(ground·0.707+sun))×255/128`, no colormap sample, no SKY term) — the
 gobj-era family the gamma-faithful pipeline (D-RMAT-7) exposed; D-FOLIAGE-2.
 
-## The model tier (witnessed 2026-07-08; port-time pins closed same day)
+## The model tier (witnessed 2026-07-08; port-time pins closed same day; PORTED same day — the model-tier port slice)
 
 The def's `graphic` 3DI is a REAL asset in retail — the earlier "billboards
 only" picture missed a second, model-geometry tier. The 2026-07-08 port-time
@@ -255,15 +256,17 @@ witnessed placement math, per vertex:
 - `oPos = WVP·pos`; `oD0 = c6`; `oT0 = v7`; `oT1 = (dp4 c7, dp4 c8)` =
   the planar colormap projection; fog from clip-Z vs c5.
 
-**Open residual (model-pass color chain)**: the draw sets NO pixel shader
-of its own; pass state comes from the def's pass object (`table[16]`,
-created over a static buffer arg the decompiler folds as `dword_440000`)
-and oD0 is the constant BLACK `(0,0,0,1)` — under the quad tier's blend-PS
-form `t0 × (…) × v0 × 8` that would render black, so the model pass's
-combine must differ (fixed-function TSS or another PS). The stage/combine
-content of that pass object is NOT yet witnessed; the host port renders
-models through the same witnessed foliage combine family with the
-quad-emitter instance color and carries this as a D-FOLIAGE-4 facet.
+**Open residual (model-pass color chain — D-FOLIAGE-6)**: the draw sets NO
+pixel shader of its own; pass state comes from the def's pass object
+(`table[16]`, created over a static buffer arg the decompiler folds as
+`dword_440000`) and oD0 is the constant BLACK `(0,0,0,1)` — under the quad
+tier's blend-PS form `t0 × (…) × v0 × 8` that would render black, so the
+model pass's combine must differ (fixed-function TSS or another PS). The
+stage/combine content of that pass object is NOT yet witnessed; the host
+port renders models through the same witnessed foliage combine family
+(`foliage_model.gdshader`) with v0 DERIVED IN-SHADER as the quad-emitter
+half-plus-bias form of the tinted colormap sample (`0x40/255 + tinted_cm/2`)
+— minted as D-FOLIAGE-6 (needs-RE) at the port slice.
 
 The quad tier (`generate_foliage_instances_0 @ 0x5ffdd0` →
 `foliage_lod_update_texture_slots @ 0x601b30` VB slots) remains the
@@ -276,16 +279,21 @@ byte-exact-ported placement; its quads texture with the same `:fd` bake.
 | D-FOLIAGE-1 | A | OPEN (approximation — narrowed 2026-07-07) | Foliage instance color: the host bakes ONE color per `MultiMesh` instance where the engine emits a per-VERTEX quad color (four corner samples) and reads an alpha-premultiplied colormap. The half-plus-bias emitter form (`0xFF000000 | (0x404040 + (avg>>1))`) IS applied since the combine slice; the per-vertex gradient + the premultiplied read are the residual. Rides the foliage render-emitter parity. |
 | D-FOLIAGE-2 | A | **FIXED (2026-07-07, REN-6 rider)** | The fragment combine was an unwitnessed ratio stand-in (`(sun/(ground·0.707+sun))×255/128` — no terrain-colormap sample, no SKY term; the shader header already carried the correct witness) vs the witnessed `rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8, a = t0.a × v0.a` `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants terrain_setup_lighting_and_shader @ 0x604420]`. Ported 1:1: planar uv `(x,−z)/texsize` wrap ≡ the CPU sampler; the dispatcher binds the colormap from the CPU-color source chain (runtime terrain → editor colormap source) with a neutral no-terrain fallback (retail never draws foliage without a colormap). |
 | D-FOLIAGE-3 | A | OPEN (stand-in — minted 2026-07-07) | Wind sway: the host displaces X weighted by height (`VERTEX.y/8`, `sin(phase + 0.11x + 0.07z)`) where the witnessed VS displaces Z weighted by vertex RED via a polynomial sine of `world.x·c24.y + time` `[orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630; Foliage_WindSwayVS @ 0x2c25e5c]`. The sway amount/phase state is live (NovaWeather globals); the axis/weight/waveform ride the foliage render-emitter parity. |
-| D-FOLIAGE-4 | B | OPEN (minted 2026-07-08 — the model-tier grill; port-time pins closed same day; the user-reported wrong/too-tall trees) | The witnessed MODEL tier is unhosted: retail stamps the def graphic's FULL 3DI geometry in clusters around SECTOR ENTITIES (view depth ≥ 38, ±4u candidate radius, ±8u quadrant 16u tiles, ≤21 instances/tile, foliagemap-byte gate) — upright yaw-only, **effective scale 0.75 XZ / 0.5 height** (VB normalization × the 0.75R footprint corners; the first grill's "native scale" was wrong), anchored by the 8-sample biquadratic ground fit (4 rotated corners + 4 edge midpoints → the `(E_A, T_A, E_B, T_B)` sag fold evaluated in `Foliage_GridPlacementVS`), alpha-ref `clamp(4096/(dist+1), 8, 128)`, height-weighted world-Z wind `sin(ctr·0.001)·0.08` `[orig: Foliage_GenerateModelTileInstances @ 0x600980; Foliage_UpdateModelTiles @ 0x601f50; Foliage_DrawModelTileSlot @ 0x601d90; Foliage_UploadModelTileVSConstants @ 0x600f00; Foliage_FillInstancedModelBuffers @ 0x5ffa20; Terrain_CreateFoliageVertexShaders @ 0x5ff630; Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]`. The host instead renders the def's 3DI mesh (VegAssets) at EVERY quad placement to the LRU horizon, slope-TILTED (`slope_rot·yaw_rot` — retail models stay upright), single-point anchored (`wy + surface_offset`), and at native scale. Residual facet: the model-pass COLOR chain (pass object + oD0=black) is unwitnessed — the host uses the quad combine family. Route: the foliage model-tier port slice (spec in §The model tier). |
-| D-FOLIAGE-5 | B | OPEN (minted 2026-07-08; bake fully witnessed same day) | The `:fd` texture: retail bakes it from the MODEL submesh[0]'s OWN texture (TGA-first, `.dds` fallback) — alpha smoothed by the 3×3 kernel (center 4, edges 1, corners 2, /16, wrap), RGB flattened to exactly `0x808080` — and binds it for BOTH tiers (the far quads AND the near model draw) `[orig: Foliage_LoadDefAssets @ 0x601260 tail; Foliage_DrawModelTileSlot @ 0x601d90]`. The host's texture chain never runs the bake: quads and meshes both bind the model's raw diffuse (`veg_assets.gd` slot 1/2). Rides D-FOLIAGE-4's port. |
+| D-FOLIAGE-4 | B | **FIXED (2026-07-08 — the foliage model-tier port slice)** | The witnessed MODEL tier was unhosted: retail stamps the def graphic's FULL 3DI geometry in clusters around SECTOR ENTITIES (view depth ≥ 38, ±4u candidate radius, ±8u quadrant 16u tiles, ≤21 instances/tile, foliagemap-byte gate) — upright yaw-only, **effective scale 0.75 XZ / 0.5 height** (VB normalization × the 0.75R footprint corners), anchored by the 8-sample biquadratic ground fit (4 rotated corners + 4 edge midpoints → the `(E_A, T_A, E_B, T_B)` sag fold evaluated in `Foliage_GridPlacementVS`), alpha-ref `clamp(4096/(dist+1), 8, 128)`, height-weighted world-Z wind `sin(ctr·0.001)·0.08` `[orig: Foliage_GenerateModelTileInstances @ 0x600980; Foliage_UpdateModelTiles @ 0x601f50; Foliage_DrawModelTileSlot @ 0x601d90; Foliage_UploadModelTileVSConstants @ 0x600f00; Foliage_FillInstancedModelBuffers @ 0x5ffa20; Terrain_CreateFoliageVertexShaders @ 0x5ff630; Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]` — while the host rendered the def's 3DI mesh at EVERY quad placement, slope-tilted, single-point anchored, native scale. Ported: `libs/foliage` `model_placement.{h,cpp}` (generator, pinned by float32-emulated hand vectors) + `model_dispatcher.{h,cpp}` (walk/1000-cache/stagger) + the two-tier `NovaFoliageDispatcher` (`foliage_model.gdshader` runs the fit/wind/alpha curve; the far tier now draws upright `:fd` quads and the slope-tilt path is DELETED). Host mappings (commented in code): anchor source = placed world objects (the visible-sector-entity equivalent) with a view-depth range gate standing in for the sector render's visibility cull; far-quad SIZE from the model bounds pending the quad-emitter grill; the in-shader alpha-ref argument = instance center distance (retail: the anchor distance, one ref per tile draw); wind phase advanced per frame, not per tile draw; shared tiles emitted once per frame where retail re-draws per entity. Residual: the model-pass COLOR chain → D-FOLIAGE-6. |
+| D-FOLIAGE-5 | B | **FIXED (2026-07-08 — the foliage model-tier port slice)** | The `:fd` texture: retail bakes it from the MODEL submesh[0]'s OWN texture (TGA-first, `.dds` fallback) — alpha smoothed by the 3×3 kernel (center 4, edges 1, corners 2, /16, wrap), RGB flattened to exactly `0x808080` — and binds it for BOTH tiers (the far quads AND the near model draw) `[orig: Foliage_LoadDefAssets @ 0x601260 tail; Foliage_DrawModelTileSlot @ 0x601d90]`. The host previously bound the raw diffuse everywhere. Ported: `libs/foliage/fd_bake.{h,cpp}` (exact kernel + pow2 wrap + the `0x808080` fold, hand-vector ctest) exposed as `NovaFoliageDispatcher.bake_fd_image`; `VegAssets.resolve_slot_fd_textures` bakes per def and BOTH tiers' materials bind it (non-pow2 diffuses fall back to the raw texture with a one-line warning — the retail wrap masks assume pow2). |
+| D-FOLIAGE-6 | C | OPEN (minted 2026-07-08 — the model-tier port slice; NEEDS-RE facet) | The retail model-pass COLOR chain is unwitnessed: the draw sets no PS of its own — pass state comes from the def's pass object (`Foliage_DefTable` [16], created over a static buffer arg folded as `dword_440000`) and oD0 = the constant BLACK `(0,0,0,1)` `[orig: Foliage_UploadModelTileVSConstants @ 0x600f00 c6; Foliage_DrawModelTileSlot @ 0x601d90]` — under the quad blend-PS form that would render black, so the model combine must differ (FF TSS or another PS). The host renders models through the witnessed quad combine family (`foliage_model.gdshader`) with v0 DERIVED IN-SHADER as the quad-emitter half-plus-bias form of the tinted colormap sample (`0x40/255 + tinted_cm/2`). Route: grill the pass object's stage/combine content. |
 
 Placement itself carries **no divergence** — the seed, PRNG, candidate count,
 surface gate, and proximity spacing are byte-exact against retail.
 
 ## Cross-references
 
-- Reimpl: `libs/foliage` (`placement.cpp`/`dispatcher.cpp`),
-  `godot/engine/terrain/nova_foliage_dispatcher.cpp` (the `MultiMesh` host).
+- Reimpl: `libs/foliage` (`placement.cpp`/`dispatcher.cpp` — the quad tier;
+  `model_placement.cpp`/`model_dispatcher.cpp`/`fd_bake.cpp` — the model tier
+  and the `:fd` bake), `godot/engine/terrain/nova_foliage_dispatcher.cpp`
+  (the two-tier `MultiMesh` host), `godot/shaders/foliage_model.gdshader`
+  (the grid-placement fit/wind/alpha-curve port),
+  `godot/engine/terrain/veg_assets.gd` (`resolve_slot_fd_textures`).
 - The terrain tint the color path consumes is [env/env-tod-re.md](../env/env-tod-re.md)
   #19 (`env::foliage_lightmap_tint`).
 - Tiles (`libs/til`, PAR-R3) is jodemo-cited in code but retail-auditable
