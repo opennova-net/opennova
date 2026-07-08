@@ -1779,6 +1779,11 @@ func test_split_layout_applies_persisted_offsets_on_load() -> void:
 # --- Resource Browser pane (A10) --------------------------------------------------
 
 func test_browser_pane_defaults_hidden_and_toggles_without_closing_popovers() -> void:
+	# Fresh-default assertions must not read this machine's persisted layout
+	# (before_each restores the real user:// state by design — a session that
+	# left the pane open would leak browser_pane_visible=true into "defaults").
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	var host := workstation.get_node("%ResourceBrowserPaneHost") as Control
@@ -1942,6 +1947,10 @@ func test_browser_pane_rows_drag_as_link_payloads() -> void:
 
 
 func test_right_split_hides_when_dock_and_pane_are_both_hidden() -> void:
+	# Same persisted-state guard as the pane-defaults test above: the split's
+	# initial visibility derives from the pane default, not this machine's cfg.
+	if FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	await get_tree().process_frame
 	var right_split := workstation.get_node("%RightSplit") as Control

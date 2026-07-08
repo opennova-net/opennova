@@ -29,6 +29,15 @@ extends GutTest
 #   pinned (get_frame_clear_color; [orig: Environment_UpdateWeatherTick
 #   @ 0x57e9b0 blend @ 0x57f037..0x57f0a1]) - the re-dump in the same
 #   commit carries that witness, per the policy above.
+#   #21 doubling erratum fixed 2026-07-07 (REN-7, D-TERRAIN-3): the pinned
+#   frame-clear token is the POST-BLEND DOUBLED skyfog render color - retail
+#   blends THEN doubles-with-saturation [orig: blend @ 0x57f037..0x57f0a1,
+#   doubling @ 0x57f1b1], and the modulate2x-path Clear (the framebuffer
+#   this host reproduces, D-RMAT-7) consumes it verbatim [orig:
+#   Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792; the halving
+#   @ 0x67715d is the non-modulate2x fallback, no host analog]. The re-dump
+#   moved ONLY the frame-clear token (14) of the 27 env-cell rows:
+#   new = min(2*old, 255) per channel.
 #   #22-#24 CLOSED 2026-07-05 (the ENG-2 weather-core port): the wa/wb/we
 #   sway states and wc/long_* keys were re-dumped under fresh witnesses -
 #   the PRNG signed carry [orig: Environment_UpdateWeatherTick
@@ -79,6 +88,17 @@ extends GutTest
 #   asset-free [orig: render_skybox_sun_glow @ 0x5acd00]).
 #   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
+#   #17 CLOSED 2026-07-06 (REN-5, the modulator chain going LIVE): the
+#   weather core now ticks modulator-2 -> modulator -> the color blocks in
+#   the witnessed order [orig: Environment_UpdateWeatherTick block sequence
+#   @ 0x57ef97..0x57f03c] with the modulator chasing the outdoor iris gain
+#   over 62 ticks [orig: @ 0x57e512..0x57e538; ColorBlock_SetStepDeltas
+#   @ 0x57d940; curve terrain_sector_compute_lighting @ 0x5c7550]. Exactly
+#   the 8 weather checkpoint rows re-dumped under that witness (wa/k016,
+#   wa/k064, wa/k256, wb/k016..k096, we/k016, we/k032 - the smoothed colors
+#   now carry the exposure; hand-check: wb/k064 0x31*61/64 = 0x2E); every
+#   float, sky, water, celestial, and level-only key UNCHANGED.
+#   docs/render/render-lighting-re.md.
 #
 # TOLERANCE POLICY (stated here, enforced in the compare helpers — these are
 # the ONLY two tolerances):
@@ -136,59 +156,59 @@ const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
 # Committed vectors — regenerate ONLY per the policy header (dumped ONCE).
 
 const EXPECTED_BYTES := {
-	"c0/t0000": "2F4256 0E1D2D 23243B 02040C 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D 02040C 010206 383B27 FFFFFF FFFFFF 808080 01 02",
+	"c0/t0000": "2F4256 0E1D2D 23243B 02040C 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D 02040C 02040C 383B27 FFFFFF FFFFFF 808080 01 02",
 	"c0/t0000/water": "1D2524 CC",
-	"c0/t0550": "18222C 1F2A2D 3B3D4A 4C5A8C 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D 4C5A8C 262D46 383B27 FFFFFF FFFFFF 808080 01 02",
+	"c0/t0550": "18222C 1F2A2D 3B3D4A 4C5A8C 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D 4C5A8C 4C5A8C 383B27 FFFFFF FFFFFF 808080 01 02",
 	"c0/t0550/water": "20271F CC",
-	"c0/t0600": "555554 202A2E 3C3E4A 4E5E90 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E 4E5E90 272F48 383B27 FFFFFF FFFFFF 808080 00 02",
+	"c0/t0600": "555554 202A2E 3C3E4A 4E5E90 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E 4E5E90 4E5E90 383B27 FFFFFF FFFFFF 808080 00 02",
 	"c0/t0600/water": "343828 CC",
-	"c0/t0615": "595957 202B2E 3D3F4B 526096 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E 526096 29304B 383B27 FFFFFF FFFFFF 808080 00 02",
+	"c0/t0615": "595957 202B2E 3D3F4B 526096 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E 526096 526096 383B27 FFFFFF FFFFFF 808080 00 02",
 	"c0/t0615/water": "353929 CC",
-	"c0/t1200": "AAAAA7 31372E 545859 9AB6FF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E 9AB6FF 4D5B8A 383B27 FFFFFF FFFFFF 808080 00 02",
+	"c0/t1200": "AAAAA7 31372E 545859 9AB6FF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E 9AB6FF 9AB6FF 383B27 FFFFFF FFFFFF 808080 00 02",
 	"c0/t1200/water": "595F3F CC",
-	"c0/t1830": "4E4E4C 1E292D 393C49 485684 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D 485684 242B42 383B27 FFFFFF FFFFFF 808080 00 02",
+	"c0/t1830": "4E4E4C 1E292D 393C49 485684 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D 485684 485684 383B27 FFFFFF FFFFFF 808080 00 02",
 	"c0/t1830/water": "313526 CC",
-	"c0/t1845": "1A2530 1D282D 383B48 445280 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D 445280 222940 383B27 FFFFFF FFFFFF 808080 01 02",
+	"c0/t1845": "1A2530 1D282D 383B48 445280 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D 445280 445280 383B27 FFFFFF FFFFFF 808080 01 02",
 	"c0/t1845/water": "20271F CC",
-	"c0/t1900": "1B2732 1D282D 373A47 424E7A 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D 424E7A 21273D 383B27 FFFFFF FFFFFF 808080 01 02",
+	"c0/t1900": "1B2732 1D282D 373A47 424E7A 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D 424E7A 424E7A 383B27 FFFFFF FFFFFF 808080 01 02",
 	"c0/t1900/water": "202720 CC",
-	"c0/t2200": "273748 14212C 2B2D40 1C2238 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C 1C2238 0E111C 383B27 FFFFFF FFFFFF 808080 01 02",
+	"c0/t2200": "273748 14212C 2B2D40 1C2238 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C 1C2238 1C2238 383B27 FFFFFF FFFFFF 808080 01 02",
 	"c0/t2200/water": "1E2622 CC",
-	"c1/t0000": "17212B 070E16 11121D 000206 000000 17212B 11121D 11121D 000000 11121D 070E16 070E16 000206 000003 145078 C89664 FFFFFF 5A7896 01 03",
+	"c1/t0000": "17212B 070E16 11121D 000206 000000 17212B 11121D 11121D 000000 11121D 070E16 070E16 000206 000006 145078 C89664 FFFFFF 5A7896 01 03",
 	"c1/t0000/water": "051937 80",
-	"c1/t0550": "0C1116 0F1416 1D1F24 242C46 292928 0C1116 1D1F24 1D1F24 292928 1D1F24 0F1416 0F1416 242C46 121623 145078 C89664 FFFFFF 5A7896 01 03",
+	"c1/t0550": "0C1116 0F1416 1D1F24 242C46 292928 0C1116 1D1F24 1D1F24 292928 1D1F24 0F1416 0F1416 242C46 242C46 145078 C89664 FFFFFF 5A7896 01 03",
 	"c1/t0550/water": "051A2F 80",
-	"c1/t0600": "2B2B2A 101517 1E1F25 262E48 2B2B2A 0C1116 1E1F25 1E1F25 2B2B2A 1E1F25 101517 101517 262E48 131724 145078 C89664 FFFFFF 5A7896 00 03",
+	"c1/t0600": "2B2B2A 101517 1E1F25 262E48 2B2B2A 0C1116 1E1F25 1E1F25 2B2B2A 1E1F25 101517 101517 262E48 262E48 145078 C89664 FFFFFF 5A7896 00 03",
 	"c1/t0600/water": "09263D 80",
-	"c1/t0615": "2C2C2B 101517 1E2025 28304A 2C2C2B 0B1015 1E2025 1E2025 2C2C2B 1E2025 101517 101517 28304A 141825 145078 C89664 FFFFFF 5A7896 00 03",
+	"c1/t0615": "2C2C2B 101517 1E2025 28304A 2C2C2B 0B1015 1E2025 1E2025 2C2C2B 1E2025 101517 101517 28304A 28304A 145078 C89664 FFFFFF 5A7896 00 03",
 	"c1/t0615/water": "09273E 80",
-	"c1/t1200": "555553 181B17 2A2C2C 4C5A8A 555553 000000 2A2C2C 2A2C2C 555553 2A2C2C 181B17 181B17 4C5A8A 262D45 145078 C89664 FFFFFF 5A7896 00 03",
+	"c1/t1200": "555553 181B17 2A2C2C 4C5A8A 555553 000000 2A2C2C 2A2C2C 555553 2A2C2C 181B17 181B17 4C5A8A 4C5A8A 145078 C89664 FFFFFF 5A7896 00 03",
 	"c1/t1200/water": "0F415F 80",
-	"c1/t1830": "272726 0F1416 1C1E24 222A42 272726 0C1217 1C1E24 1C1E24 272726 1C1E24 0F1416 0F1416 222A42 111521 145078 C89664 FFFFFF 5A7896 00 03",
+	"c1/t1830": "272726 0F1416 1C1E24 222A42 272726 0C1217 1C1E24 1C1E24 272726 1C1E24 0F1416 0F1416 222A42 222A42 145078 C89664 FFFFFF 5A7896 00 03",
 	"c1/t1830/water": "08233A 80",
-	"c1/t1845": "0D1318 0E1416 1C1D24 222840 252524 0D1318 1C1D24 1C1D24 252524 1C1D24 0E1416 0E1416 222840 111420 145078 C89664 FFFFFF 5A7896 01 03",
+	"c1/t1845": "0D1318 0E1416 1C1D24 222840 252524 0D1318 1C1D24 1C1D24 252524 1C1D24 0E1416 0E1416 222840 222840 145078 C89664 FFFFFF 5A7896 01 03",
 	"c1/t1845/water": "051A30 80",
-	"c1/t1900": "0D1319 0E1316 1B1D23 20263C 232323 0D1319 1B1D23 1B1D23 232323 1B1D23 0E1316 0E1316 20263C 10131E 145078 C89664 FFFFFF 5A7896 01 03",
+	"c1/t1900": "0D1319 0E1316 1B1D23 20263C 232323 0D1319 1B1D23 1B1D23 232323 1B1D23 0E1316 0E1316 20263C 20263C 145078 C89664 FFFFFF 5A7896 01 03",
 	"c1/t1900/water": "051A30 80",
-	"c1/t2200": "131C24 0A1016 15161F 0C101C 0E0E0E 131C24 15161F 15161F 0E0E0E 15161F 0A1016 0A1016 0C101C 06080E 145078 C89664 FFFFFF 5A7896 01 03",
+	"c1/t2200": "131C24 0A1016 15161F 0C101C 0E0E0E 131C24 15161F 15161F 0E0E0E 15161F 0A1016 0A1016 0C101C 0C101C 145078 C89664 FFFFFF 5A7896 01 03",
 	"c1/t2200/water": "051934 80",
-	"c2/t0000": "2F4256 0E1D2D 23243B FFFFFF 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D 02040C A69586 1E3C5A FFFFFF FFFFFF 808080 01 01",
+	"c2/t0000": "2F4256 0E1D2D 23243B FFFFFF 000000 2F4256 23243B 23243B 000000 23243B 0E1D2D 0E1D2D 02040C FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t0000/water": "0F2653 59",
-	"c2/t0550": "18222C 1F2A2D 3B3D4A FFFFFF 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D 4C5A8C AC9D91 1E3C5A FFFFFF FFFFFF 808080 01 01",
+	"c2/t0550": "18222C 1F2A2D 3B3D4A FFFFFF 535351 18222C 3B3D4A 3B3D4A 535351 3B3D4A 1F2A2D 1F2A2D 4C5A8C FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t0550/water": "112749 59",
-	"c2/t0600": "555554 202A2E 3C3E4A FFFFFF 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E 4E5E90 AC9D91 1E3C5A FFFFFF FFFFFF 808080 00 01",
+	"c2/t0600": "555554 202A2E 3C3E4A FFFFFF 555554 18212B 3C3E4A 3C3E4A 555554 3C3E4A 202A2E 202A2E 4E5E90 FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
 	"c2/t0600/water": "1C395D 59",
-	"c2/t0615": "595957 202B2E 3D3F4B FFFFFF 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E 526096 AD9D91 1E3C5A FFFFFF FFFFFF 808080 00 01",
+	"c2/t0615": "595957 202B2E 3D3F4B FFFFFF 595957 172029 3D3F4B 3D3F4B 595957 3D3F4B 202B2E 202B2E 526096 FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
 	"c2/t0615/water": "1C3A5F 59",
-	"c2/t1200": "AAAAA7 31372E 545859 FFFFFF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E 9AB6FF B3A59C 1E3C5A FFFFFF FFFFFF 808080 00 01",
+	"c2/t1200": "AAAAA7 31372E 545859 FFFFFF AAAAA7 000000 545859 545859 AAAAA7 545859 31372E 31372E 9AB6FF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
 	"c2/t1200/water": "2F6191 59",
-	"c2/t1830": "4E4E4C 1E292D 393C49 FFFFFF 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D 485684 AC9D90 1E3C5A FFFFFF FFFFFF 808080 00 01",
+	"c2/t1830": "4E4E4C 1E292D 393C49 FFFFFF 4E4E4C 19242F 393C49 393C49 4E4E4C 393C49 1E292D 1E292D 485684 FFFFFF 1E3C5A FFFFFF FFFFFF 808080 00 01",
 	"c2/t1830/water": "1A3558 59",
-	"c2/t1845": "1A2530 1D282D 383B48 FFFFFF 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D 445280 AC9C90 1E3C5A FFFFFF FFFFFF 808080 01 01",
+	"c2/t1845": "1A2530 1D282D 383B48 FFFFFF 4A4A49 1A2530 383B48 383B48 4A4A49 383B48 1D282D 1D282D 445280 FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t1845/water": "112749 59",
-	"c2/t1900": "1B2732 1D282D 373A47 FFFFFF 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D 424E7A AB9C8F 1E3C5A FFFFFF FFFFFF 808080 01 01",
+	"c2/t1900": "1B2732 1D282D 373A47 FFFFFF 474745 1B2732 373A47 373A47 474745 373A47 1D282D 1D282D 424E7A FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t1900/water": "11274A 59",
-	"c2/t2200": "273748 14212C 2B2D40 FFFFFF 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C 1C2238 A89889 1E3C5A FFFFFF FFFFFF 808080 01 01",
+	"c2/t2200": "273748 14212C 2B2D40 FFFFFF 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C 1C2238 FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t2200/water": "102650 59",
 	"celestial/glare_occlusion": "0000 1805 300A 6014 901E C028",
 	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0000 0600 2500 5501 8B0B C028",
@@ -201,23 +221,23 @@ const EXPECTED_BYTES := {
 	"smoother/snap_get": "336699",
 	"wa/k001": "0012 01 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
 	"wa/k004": "035F 04 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k016": "56E5 10 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k064": "7CDE 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wa/k256": "9787 00 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"water/mesh": "4225 24576 0 65 1 1 65 66 1 66 2 2 66 67",
+	"wa/k016": "56E5 10 00 00 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
+	"wa/k064": "7CDE 40 00 00 2E342B A2A29F 92ADF3 505354 2E342B A2A29F 92ADF3",
+	"wa/k256": "9787 00 00 00 2D322A 9C9C99 8DA7EB 4D5152 2D322A 9C9C99 8DA7EB",
+	"water/mesh": "0 180 708 3 0 4 4 0 1 4 1 5 5 1 2",
 	"water/noise": "7d7d7de1707070e7 849cff006666ff00 7c7c7ce1717171e7",
 	"wb/k001": "0009 01 00 09 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k016": "429E 10 00 07 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k064": "71F1 40 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
-	"wb/k096": "833D 60 00 00 31372E AAAAA7 9AB6FF 545859 31372E AAAAA7 9AB6FF",
+	"wb/k016": "429E 10 00 07 30362D A7A7A4 97B3FB 525657 30362D A7A7A4 97B3FB",
+	"wb/k064": "71F1 40 00 00 2E342B A2A29F 92ADF3 505354 2E342B A2A29F 92ADF3",
+	"wb/k096": "833D 60 00 00 2D332B 9F9F9C 90AAEF 4E5253 2D332B 9F9F9C 90AAEF",
 	"wc/long_k01": "007B 02 C8 00 24313D 273748 3D435B 6D6F86 24313D 273748 3D435B",
 	"wc/long_k09": "23AB 0A 64 00 1C2934 273748 2C3249 4C4E63 1C2934 273748 2C3249",
 	"wc/long_k12": "3E47 0D 00 00 14212C 273748 1C2238 2B2D40 14212C 273748 1C2238",
 	"wc/long_seq": "C8 C8 C8 96 96 C8 C8 96 64 32 32 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
 	"wc/short_seq": "00 00 00 00 00 C8 C8 C8 C8 FF FF C8 C8 FF FF 00",
 	"we/k008": "14B3 08 00 00 212B2D 5D5D5C 56659D 3E414B 212B2D 5D5D5C 56659D",
-	"we/k016": "56E5 10 00 00 202A2D 585857 516094 3C3F4A 202A2D 585857 516094",
-	"we/k032": "6404 20 00 00 1D282D 2A323A 44517F 383B48 1D282D 2A323A 44517F",
+	"we/k016": "56E5 10 00 00 1F292C 565655 4F5E91 3B3E48 1F292C 565655 4F5E91",
+	"we/k032": "6404 20 00 00 1C272C 293139 424F7D 373A46 1C272C 293139 424F7D",
 	"we/k064": "7CDE 40 00 00 17242D 23313F 2A3351 303243 17242D 23313F 2A3351",
 }
 
@@ -275,7 +295,7 @@ const EXPECTED_FLOATS := {
 	"sky/k064": [0.121737681, -0.059237681, 0.060325161, -0.030162523],
 	"sky/verts": [0.000000000, 175.690628052, 0.000000000, 15.821670532, 175.263931274, 48.694095612, -0.000044760, 132.723480225, -512.000000000, 0.000179042, -0.000005395, 1024.000000000],
 	"water/override": [42.500000000, 7.000000000],
-	"water/snap": [96.000000000, 7.000000000, -64.000000000],
+	"water/strip": [-2521.397949219, 7.000000000, -2033.695800781, 134.420776367, 7.000000000, -59.729457855],
 	"water/uv_state": [1.000164866, 0.200032964, 1.562694907, 0.781444907],
 	"we/k008": [1751.612903226],
 	"we/k016": [1803.225806452],
@@ -397,8 +417,8 @@ static func _weather_checkpoint(weather: Node, env_node: Node) -> String:
 
 # Per-cell env-node color snapshot. Token order:
 # sun_light fill_light sky_ambient fog_color sun moon skybase skybright
-# skyhighlight cloudbase cloudhighlight cloudedge skyfog water terrain_tint
-# terrain_atten cloud_tint is_night fog_type
+# skyhighlight cloudbase cloudhighlight cloudedge skyfog frame_clear water
+# terrain_tint terrain_atten cloud_tint is_night fog_type
 static func _env_cell_bytes(env_node: Node) -> String:
 	var parts := PackedStringArray()
 	var colors := [
@@ -473,7 +493,9 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			# statics; pinned at the NovaWater output).
 			simulate(water, 1, TICK)
 			var lit: Vector3 = water.water_material.get_shader_parameter("u_water_color")
-			var alpha: float = water.water_material.get_shader_parameter("u_water_alpha")
+			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
+			# value flows through, so the pinned byte is unchanged).
+			var alpha: float = water.water_material.get_shader_parameter("u_water_murk")
 			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
 
 		# u_water_uv = (scale, bias, offset_u, offset_v) [orig:
@@ -629,31 +651,78 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 
 
 func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
-	# Mesh invariants: 65x65 grid = 4225 vertices, 64*64*6 = 24576 indices.
-	var water: Node = add_child_autofree(NovaWaterScript.new())
-	var mesh: ArrayMesh = water.mesh_instance.mesh
-	var arrays := mesh.surface_get_arrays(0)
-	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-	var index_head := PackedStringArray()
-	for i in 12:
-		index_head.append(str(indices[i]))
-	bytes["water/mesh"] = "%d %d %s" % [positions.size(), indices.size(), " ".join(index_head)]
+	# Strip-mesh semantics (env #29 LIVE): the surface rebuilds per frame from
+	# the witnessed screen march [orig: render_water_strip_detailed @ 0x5c27d0
+	# under render_water_surface @ 0x5c32c0; <=5-row batches through the static
+	# strip table word_841328, walk @ 0x5c3164..0x5c329e] — the 65x65 grid
+	# stand-in and its camera-snap positioning died with it, so the pins here
+	# are the no-camera rung, the batch-unroll index head, and the first/last
+	# marched world positions.
+	#
+	# The strip march is a function of VIEWPORT PIXELS (the row clip + stride
+	# walk screen space), so the fixture lives in a code-fixed SubViewport: a
+	# fresh CI runner and a workstation with a persisted user:// window layout
+	# size the GUT root viewport differently, and the golden must not depend
+	# on that. NovaWater resolves its camera through its OWN viewport
+	# (get_viewport().get_camera_3d() and Camera3D.current are per-viewport),
+	# so root-viewport cameras from earlier collections are irrelevant in here.
+	var strip_vp := SubViewport.new()
+	strip_vp.size = Vector2i(1024, 600)
+	add_child_autofree(strip_vp)
+	var water: Node = NovaWaterScript.new()
+	strip_vp.add_child(water)
+	water.water_height = 7.0
+	simulate(water, 1, TICK)
+	# No camera in strip_vp -> no strip surface: the march needs the projected
+	# screen block, and retail only runs it inside the camera pass
+	# [orig: render_water_strip_detailed @ 0x5c27d0 projects via
+	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
+	var pre_surfaces: int = (water.mesh_instance.mesh as ArrayMesh).get_surface_count()
 
 	# Height ladder, override rung: host-driven height wins; clearing (NAN)
 	# hands control back (terrain_environment_preview_test.gd precedent).
+	# (Still no camera here — same order as before the strip port.)
 	water.set_height_override(42.5)
 	var override_height: float = water.water_height
 	water.set_height_override(NAN)
 	water.water_height = 7.0
 	floats["water/override"] = [override_height, water.water_height]
 
-	# Camera-following snap: the plane snaps to a 32-unit grid under the camera.
-	var cam := _add_camera(Vector3(100.3, 7.0, -33.7))
+	# Camera 20 units above the 7.0 plane, default orientation (the old
+	# fixture's y = 7.0 sat exactly ON the plane — a grazing edge case for the
+	# march), created INSIDE strip_vp — Camera3D.current applies per-viewport,
+	# so the _add_camera helper (which targets the test root) is inlined here
+	# against the SubViewport. The old water/snap row is REMOVED: strip
+	# vertices are ABSOLUTE world positions and the mesh node stays pinned at
+	# the origin, so the camera-snap positioning died with the grid.
+	var cam := Camera3D.new()
+	strip_vp.add_child(cam)
+	cam.global_position = Vector3(100.3, 27.0, -33.7)
+	cam.make_current()
 	assert_not_null(cam, "headless camera injection must succeed")
 	simulate(water, 1, TICK)
-	var snap: Vector3 = water.mesh_instance.global_position
-	floats["water/snap"] = [snap.x, snap.y, snap.z]
+
+	var mesh: ArrayMesh = water.mesh_instance.mesh
+	var arrays := mesh.surface_get_arrays(0)
+	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	# positions.size() / 3 = the marched row count (3 vertices per row); the
+	# first 12 unrolled TRIANGLES indices are a pure function of the witnessed
+	# strip-table walk — entries {3,0,4,1,5,2,...} with the {2,6}-style
+	# degenerate stitches dropped by the unroll [orig: word_841328; batch walk
+	# @ 0x5c3164..0x5c329e].
+	var index_head := PackedStringArray()
+	for i in 12:
+		index_head.append(str(indices[i]))
+	bytes["water/mesh"] = "%d %d %d %s" % [
+		pre_surfaces, positions.size(), indices.size(), " ".join(index_head)]
+	# First and last vertex world positions — pins the Godot<->render basis
+	# mapping (godot == render componentwise) and the march extent end to end
+	# through NovaWaterCore; the y components pin the plane height riding the
+	# rows (7.0), not the node transform.
+	var p0 := positions[0]
+	var p_last := positions[positions.size() - 1]
+	floats["water/strip"] = [p0.x, p0.y, p0.z, p_last.x, p_last.y, p_last.z]
 
 	# The witnessed noise texture pair, asset-free through NovaWaterCore
 	# [orig: Water_GenerateNoiseTextures @ 0x5c0360; init tables from the boot
@@ -866,3 +935,27 @@ func test_environment_parity_vectors() -> void:
 				worst_index = i
 		assert_almost_eq(float(actual[worst_index]), float(expected[worst_index]), FLOAT_EPSILON,
 			"float vector '%s'[%d] (epsilon 1e-4 — a divergence means re-grill, never widen)" % [key, worst_index])
+
+
+# The env-node sky getter serves the weather writeback (the smoothed,
+# modulated block), falling back to the raw keyframe until a tick has
+# written — the same contract as fill/sun/fog [orig: entity constants read
+# Env_SkyBlock[0] @ 0x5c8090; writeback = the weather tick's block pass].
+func test_sky_ambient_serves_smoothed_writeback() -> void:
+	var env := _add_env_node(_make_cfg(0), "EnvSkyWB")
+	env.time_of_day = 1200.0
+	# Un-driven: the getter serves the raw keyframe (== the chase target).
+	assert_eq(env.get_sky_ambient(), env.get_sky_ambient_target(),
+		"pre-weather sky ambient should be the raw keyframe")
+	var weather := _add_weather_node("EnvSkyWB", "WeatherSkyWB")
+	simulate(weather, 64, TICK)
+	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
+		"driven sky ambient should be the weather writeback")
+	# A discrete TOD scrub re-seeds from the new keyframe (the _fill_light
+	# contract) until the next tick writes back the smoothed current.
+	env.time_of_day = 2200.0
+	assert_eq(env.get_sky_ambient(), env.get_sky_ambient_target(),
+		"post-scrub sky ambient should re-seed from the keyframe")
+	simulate(weather, 4, TICK)
+	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
+		"post-scrub ticks should serve the writeback again")

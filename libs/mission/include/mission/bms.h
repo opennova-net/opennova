@@ -3,8 +3,10 @@
 #pragma once
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace opennova::bms {
@@ -522,6 +524,29 @@ struct Entity {
     int16_t unk42b;                    // @166: not written by the editor (reserved/pad)
     int32_t unk43;                     // @168: not written by the editor (reserved/pad)
 
+    // --- .mis-interchange-only TRANSIENT fields (NOT serialized into .bms bytes) -----------
+    // The 172-byte BMS entity record (kEntitySize) has no such fields; they are MED/Nile
+    // text-authoring concepts that exist only in the .mis metafile. parse_entity/write_entity
+    // (bms.cpp) serialize the record field-by-field and never touch these; equal() compares
+    // them (they change write_mis_text output, so a difference is a real document change).
+    // Semantics: a plain .mis item z is the editor-frame (terrain-relative) height;
+    // height_lock nonzero declares z ABSOLUTE with extra_bheight carrying the baked base
+    // height under the item, so the original editor recovers the relative offset as
+    //   scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)
+    // [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
+    //  MisLdr_WriteNileProjectXml @ 0x10004930 (<ABSOLUTE>TRUE</ABSOLUTE> iff height_lock);
+    //  both misldr.dll]. BMS entity z is always absolute (bms-event-runtime-re.md §6.6), so
+    // the .bms parse path and freshly authored entities mark height_lock = 1; .mis-parsed
+    // entities round-trip their own values. See docs/mission/mis-format-re.md (D-MIS-4).
+    // Layout invariant: Entity stays TRIVIAL -- no NSDMIs; every construction site value-initializes,
+    // which zeroes all bytes including padding -- and carries no implicit tail padding (the explicit
+    // mis_pad_ tail), because bms::equal byte-compares whole records; static_asserts below enforce both.
+    int32_t mis_extra_bheight;         // .mis extra_bheight: baked base height, 16.16 fixed
+    uint8_t mis_height_lock;           // .mis height_lock: nonzero => z ABSOLUTE + bheight baked
+    uint8_t mis_pad_[3];               // explicit tail pad: keeps sizeof(Entity) free of implicit
+                                       // padding so bms::equal's memcmp is deterministic (always
+                                       // zero via value-init; never serialized)
+
     // Accessors for float positions (fixed-point 16.16 conversion)
     float get_x() const { return x / 65536.0f; }
     float get_y() const { return y / 65536.0f; }
@@ -535,6 +560,15 @@ struct Entity {
     }
 };
 
+static_assert(std::is_trivial<Entity>::value,
+              "bms::Entity must stay trivial (no NSDMIs/user ctors): bms::equal memcmps whole records "
+              "and relies on value-init zeroing + trivial copies preserving all bytes");
+static_assert(std::is_trivially_copyable<Entity>::value,
+              "bms::Entity must stay trivially copyable for bms::equal's byte compare");
+static_assert(offsetof(Entity, mis_pad_) + sizeof(Entity::mis_pad_) == sizeof(Entity),
+              "no implicit tail padding after the explicit .mis pad -- extend mis_pad_ (or re-lay the "
+              "tail) when appending fields, or bms::equal's memcmp reads indeterminate bytes");
+
 struct WaypointRecord {
     WaypointFlags flags;
     uint32_t marker_count;
@@ -546,14 +580,14 @@ struct WaypointRecord {
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
 //  the literal 10, @0 a 2-bit flags, @8 the only free int. See notes/mission/unmodeled-grill-2026-06-06.md.]
 struct GroupRecord {
-    int32_t flags = 0;
-    int32_t value = 0;
+    int32_t flags;
+    int32_t value;
 };
 
 // [orig editor: Med_WriteBmsFile @0x44f920 copies the editor LAYER NAME (a string) into this 20-byte record.
 //  JO reads-and-discards it, but the editor-authored bytes are a fixed-width name, not an opaque payload.]
 struct LayerRecord {
-    char name[kLayerRecordSize] = {};
+    char name[kLayerRecordSize];
 };
 
 // 32-byte area-trigger / restriction-zone record.
@@ -753,9 +787,15 @@ bool is_bms(const uint8_t* data, size_t size);
 
 // Value-equality of two in-memory missions: true iff they would serialize (write()) to the same
 // bytes. The editor's undo / dirty tracking uses this to decide whether an edit changed anything,
-// without round-tripping through the byte serializer. The fixed record structs are trivially
-// copyable and always value-initialized, so they compare byte-wise; WaypointRecord (inner vectors)
-// compares field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
+// without round-tripping through the byte serializer. The fixed record structs are TRIVIAL, are
+// value-initialized at every construction site (zeroing every byte, padding included), and carry
+// no implicit tail padding (Entity ends in the explicit mis_pad_), so the byte-wise compare is
+// exact and platform-deterministic -- and because the types are trivial, snapshots/copies
+// (EditHistory) preserve all bytes, padding included. WaypointRecord (inner vectors) compares
+// field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
+// The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
+// mis_height_lock): they never reach .bms bytes, but they do change write_mis_text output, so a
+// difference between them is a real document change for undo/dirty purposes.
 bool equal(const File& a, const File& b);
 
 } // namespace opennova::bms

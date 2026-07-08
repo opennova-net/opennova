@@ -4,9 +4,12 @@ render_mode unshaded;
 // Shared terrain surface shading + fog (uniforms u_colormap/u_detail*/u_blendmap/
 // u_detailmap*/lighting/fog all live here): terrain_surface_color(), apply_terrain_fog().
 #include "res://shaders/terrain_lighting.gdshaderinc"
+// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+#include "res://shaders/nova_color.gdshaderinc"
 
 // Runtime-only extras (the editor shader has its own brush/overlay set instead).
-uniform sampler2D u_tile_overlay : source_color, filter_linear, repeat_enable;
+// Raw sampling per the gamma-space convention (nova_color.gdshaderinc).
+uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0, 1.0, 1.0);
 
@@ -92,5 +95,8 @@ void fragment() {
 		result = vec3(h);
 	}
 
-	ALBEDO = clamp(result, vec3(0.0), vec3(1.0));
+	// The witnessed math above ran in gamma space; encode once so the display
+	// shows exactly those bytes (D-RMAT-7). Debug overlays ride the same
+	// transform (diagnostic-only).
+	ALBEDO = nova_gamma_to_linear(result);
 }

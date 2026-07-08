@@ -173,10 +173,13 @@ func test_field_consumption_table_mirrors_the_matrix() -> void:
 	assert_string_contains(String(terrain.get("anchor", "")), "0x60b8cb", "anchored to the bake consumer")
 	assert_false(String(terrain.get("note", "")).is_empty(), "deferred rows explain themselves")
 
-	assert_eq(String((table.get("iris_percent", {}) as Dictionary).get("status", "")), "unconsumed",
-		"iris is unconsumed until the modulator chain lands (divergence #17)")
-	assert_false(bool((table.get("iris_percent", {}) as Dictionary).get("faithful", true)),
-		"iris is a real gap, not a faithful no-op")
+	# The modulator chain landed at REN-5 (divergence #17 FIXED) — the outdoor
+	# exposure runs; the row keeps its interior-sampling caveat as the note
+	# (docs/render/render-lighting-re.md D-RLIT-2).
+	assert_eq(String((table.get("iris_percent", {}) as Dictionary).get("status", "")), "honored",
+		"iris is honored since REN-5 (the modulator chain is live, divergence #17)")
+	assert_false(String((table.get("iris_percent", {}) as Dictionary).get("note", "")).is_empty(),
+		"the iris row keeps its interior-sampling caveat")
 	assert_true(bool((table.get("vertex_tint", {}) as Dictionary).get("faithful", false)),
 		"vertex_tint is faithfully unconsumed (retail ignores it too)")
 

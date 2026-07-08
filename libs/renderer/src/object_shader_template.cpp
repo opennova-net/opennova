@@ -42,9 +42,13 @@ std::string compose_render_mode(ObjectShaderKey key) {
 
 std::string compose_uniforms(ObjectShaderKey key) {
 	std::string u;
-	u += "uniform sampler2D u_diffuse : source_color, filter_linear_mipmap, repeat_enable;\n";
+	// Textures sample RAW (no source_color): the retail pipeline never enables
+	// D3DSAMP_SRGBTEXTURE - texel bytes enter the TSS math as-is (the gamma-
+	// space convention, D-RMAT-7; witness map in render-material-re.md and
+	// godot/shaders/nova_color.gdshaderinc).
+	u += "uniform sampler2D u_diffuse : filter_linear_mipmap, repeat_enable;\n";
 	if (has_flag(key, OSCAP_DETAIL))
-		u += "uniform sampler2D u_detail : source_color, filter_linear_mipmap, repeat_enable;\n";
+		u += "uniform sampler2D u_detail : filter_linear_mipmap, repeat_enable;\n";
 	if (has_flag(key, OSCAP_NORMAL_MAP))
 		u += "uniform sampler2D u_normal_map : hint_normal, filter_linear_mipmap, repeat_enable;\n";
 
@@ -63,10 +67,21 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	}
 	u += "uniform float u_emissive = 0.0;\n";
 
-	u += "uniform vec3 u_ambient_color = vec3(0.35, 0.36, 0.40);\n";
+	// The witnessed lighting uniform surface (.fx parameter slots 227-230 +
+	// 232, resolved at load [orig: HLSLEffect_LoadFromFile @ 0x5af417..
+	// 0x5af49e]): DirLightVector/DirLightColor/HemiGroundColor/HemiSkyColor
+	// (AmbientColor derives as their average) and ColorSrcGlobalGain. Engine-
+	// fed values are the env blocks' post-modulator colors (docs/render/
+	// render-lighting-re.md); the defaults below (un-enved swatch/editor
+	// scenes) are the RETAIL NOON register — the shipped full_00.env tod 1200
+	// block bytes /255 (sun_rgb 170,170,167; sky_rgb 84,88,89; ground_rgb
+	// 49,55,46) — so un-enved previews light like a JO noon world. Mirrored
+	// by nova_object_model.gd's DEFAULT_* constants.
+	u += "uniform vec3 u_hemi_sky_color = vec3(0.32941, 0.34510, 0.34902);\n";
+	u += "uniform vec3 u_hemi_ground_color = vec3(0.19216, 0.21569, 0.18039);\n";
 	u += "uniform vec3 u_dir_light_dir = vec3(-0.4082, -0.8165, -0.4082);\n";
-	u += "uniform vec3 u_dir_light_color = vec3(0.85, 0.82, 0.75);\n";
-	u += "uniform vec3 u_fill_light_color = vec3(0.18, 0.20, 0.25);\n";
+	u += "uniform vec3 u_dir_light_color = vec3(0.66667, 0.66667, 0.65490);\n";
+	u += "uniform vec3 u_color_src_global_gain = vec3(1.0);\n";
 	u += "uniform bool u_fog_enabled = false;\n";
 	u += "uniform vec3 u_fog_color = vec3(0.5, 0.6, 0.8);\n";
 	u += "uniform float u_fog_start = 0.0;\n";
@@ -105,16 +120,27 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\treturn out_uv + vec2(0.5) + u_uv_offset;\n";
 	u += "}\n\n";
 
-	u += "vec3 obj_hemi_fill(vec3 n) {\n";
+	// The FF hemisphere: AmbientColor = (sky + ground)/2 applied as the
+	// material emissive, plus two opposing directional lights carrying the
+	// DELTA colors (sky - ambient downward, ground - ambient upward) — which
+	// is exactly mix(ground, sky, n.y * 0.5 + 0.5)
+	// [orig: RenderBatchCtx_StoreLightingConstants @ 0x5d89e0 (the averages);
+	//  Lighting_SetHemisphereD3DLights @ 0x5d8cb0 (the delta lights)].
+	u += "vec3 obj_hemi(vec3 n) {\n";
 	u += "\tfloat up = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);\n";
-	u += "\treturn mix(u_fill_light_color, u_ambient_color, up);\n";
+	u += "\treturn mix(u_hemi_ground_color, u_hemi_sky_color, up);\n";
 	u += "}\n\n";
 
+	// The fixed-function lit combine: the D3D vertex diffuse saturates
+	// (hemi + directional clamped to 1), then the output stage is
+	// MODULATE2X(Texture, Diffuse) — texture x diffuse x 2
+	// [orig: _FFP.fx TBoringFFP TSSColor(0, Modulate2x, Texture, Diffuse);
+	//  D3D light 0 setup @ 0x5d9ce2..0x5d9d76].
 	u += "vec3 obj_ff_lighting(vec3 base_rgb, vec3 normal_ws) {\n";
 	u += "\tvec3 N = normalize(normal_ws);\n";
 	u += "\tvec3 L = normalize(-u_dir_light_dir);\n";
 	u += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-	u += "\treturn base_rgb * (obj_hemi_fill(N) + u_dir_light_color * ndotl);\n";
+	u += "\treturn base_rgb * min(obj_hemi(N) + u_dir_light_color * ndotl, vec3(1.0)) * 2.0;\n";
 	u += "}\n\n";
 
 	// Local-light contribution: returns the additive RGB from u_local_light_*.
@@ -134,11 +160,40 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\treturn base_rgb * u_local_light_color * (u_local_light_intensity * ndotl * atten);\n";
 	u += "}\n\n";
 
+	// The witnessed device fog table (one text with terrain_lighting.gdshaderinc
+	// / water.gdshader): type 0 = exponential density ln(64)/end; types 1/2/3 =
+	// linear with start = caller 0.5 / (1-density)*end*0.5 / (1-density)*end*0.25
+	// (density = overcast, 0 in the ported scope - the ends fold to end/2, end/4)
+	// [orig: Render_SetFogState @ 0x58a950 -> CD3DDevice_SetFogParameters
+	// @ 0x677960; env-tod-re.md "Fog policy"]. Replaces the pre-witness linear
+	// ramp + smoothstep (D-RMAT-9).
 	u += "float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_type) {\n";
-	u += "\tfloat span = max(fog_end - fog_start, 0.001);\n";
-	u += "\tfloat t = clamp((dist - fog_start) / span, 0.0, 1.0);\n";
-	u += "\tif (fog_type == 3) t = smoothstep(0.0, 1.0, t);\n";
-	u += "\treturn 1.0 - t;\n";
+	u += "\tfloat safe_end = max(fog_end, 1.0);\n";
+	u += "\tif (fog_type == 0) {\n";
+	u += "\t\treturn clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);\n";
+	u += "\t}\n";
+	u += "\tfloat start = fog_start;\n";
+	u += "\tif (fog_type == 2) {\n";
+	u += "\t\tstart = safe_end * 0.5;\n";
+	u += "\t} else if (fog_type == 3) {\n";
+	u += "\t\tstart = safe_end * 0.25;\n";
+	u += "\t}\n";
+	u += "\tfloat fog_range = max(safe_end - start, 1.0);\n";
+	u += "\treturn clamp((safe_end - dist) / fog_range, 0.0, 1.0);\n";
+	u += "}\n\n";
+
+	// The gamma-space output convention (D-RMAT-7): the witnessed math above
+	// runs on raw gamma-encoded values like the original device; this exact
+	// inverse of the host's sRGB-encoding blit makes the displayed byte equal
+	// the computed gamma-space byte. Body identical to
+	// godot/shaders/nova_color.gdshaderinc (the witness lives there and in
+	// render-material-re.md; the composer embeds it so generated shaders stay
+	// self-contained). Retail saturates at the byte framebuffer, so the clamp
+	// to [0,1] is itself witnessed behavior.
+	u += "vec3 nova_gamma_to_linear(vec3 gamma_rgb) {\n";
+	u += "\tvec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));\n";
+	u += "\treturn mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),\n";
+	u += "\t\t\tc * (1.0 / 12.92), lessThan(c, vec3(0.04045)));\n";
 	u += "}\n\n";
 
 	return u;
@@ -188,15 +243,32 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "void fragment() {\n";
 	f += "\tvec4 base = texture(u_diffuse, v_uv);\n";
 	if (has_flag(key, OSCAP_DETAIL)) {
+		// The _MT second texture stage: Modulate2x on color (an avg-128 gray
+		// detail map is neutral through the x2), plain Modulate on alpha —
+		// gamma-space bytes per D-RMAT-7, saturation at the output clamp.
+		// Samples the second UV set: the .3di vertex carries two, and MT
+		// models author a distinct uv1 for the detail map (v_uv2 <- UV2).
+		// [orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1 -
+		//  TSSColor(1, Modulate2x, Texture, Current),
+		//  TSSAlpha(1, Modulate, Texture, Current);
+		//  render-material-re.md §FF technique tables]
 		f += "\tvec4 detail = texture(u_detail, v_uv2);\n";
-		f += "\tbase.rgb *= detail.rgb;\n";
+		f += "\tbase.rgb *= detail.rgb * 2.0;\n";
+		f += "\tbase.a *= detail.a;\n";
 	}
 	f += "\tbase.rgb *= u_rgb_mod;\n";
 	f += "\tbase.a *= u_alpha_mod;\n";
 
 	if (has_flag(key, OSCAP_ALPHA_TEST)) {
-		f += "\tfloat aval = (u_alpha_test_invert > 0.5) ? (1.0 - base.a) : base.a;\n";
-		f += "\tif (aval < u_alpha_test_threshold) discard;\n";
+		// The original keeps a > ref (D3DCMP_GREATER); the invert flag flips
+		// the COMPARE to a <= ref, not the sampled value.
+		// [orig: CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401 ->
+		//  CGfxDevice_SetAlphaTestRef @ 0x6770a0]
+		f += "\tif (u_alpha_test_invert > 0.5) {\n";
+		f += "\t\tif (base.a > u_alpha_test_threshold) discard;\n";
+		f += "\t} else {\n";
+		f += "\t\tif (base.a <= u_alpha_test_threshold) discard;\n";
+		f += "\t}\n";
 	}
 
 	f += "\tvec3 view_dir = normalize(CAMERA_POSITION_WORLD - v_world_pos);\n";
@@ -224,47 +296,68 @@ std::string compose_fragment(ObjectShaderKey key) {
 	f += "\tvec3 lit = base.rgb;\n";
 	f += "\tfloat alpha = base.a;\n";
 
-	if (emissive || luminance) {
-		f += "\tlit = base.rgb;\n";
+	if (has_flag(key, OSCAP_VIEW_FADE)) {
+		// vsTracer: unlit, color x |dot(eye, normal)|^2 — the facing-angle
+		// falloff that fades a well-tessellated tube toward its silhouette
+		// edges ("soft edges"); no lighting includes, Spec = 0. Evaluated
+		// per-fragment here (the original computes lum per-vertex in vs_1_1
+		// and interpolates — same formula). Tracer modulates 1x, not 2x
+		// [orig: Tracer.fx vsTracer; TSSColor MODULATE(Texture, Diffuse)].
+		f += "\tfloat vf = abs(dot(geom_normal, view_dir));\n";
+		f += "\tlit = base.rgb * (vf * vf);\n";
+	} else if (emissive || luminance) {
+		// SELFLUM: the material emissive becomes SelfLumColor x
+		// ColorSrcGlobalGain (the modulator /64 — the iris exposure reaching
+		// self-lit surfaces) with black diffuse/ambient, still under the
+		// MODULATE2X output stage. The vertex color saturates before the x2
+		// [orig: _FFP.fx SELFLUM variant; gain bind @ 0x58e05d ->
+		//  Render_LightScaleRGB @ 0x8409f4].
+		f += "\tlit = base.rgb * min(u_color_src_global_gain, vec3(1.0)) * 2.0;\n";
 	} else if (family == ObjectShaderFamily::Flag) {
+		// Two-sided cloth: light the camera-facing side (the host form of the
+		// cull-none FF draw); the lighting model is the standard FF combine.
 		f += "\tvec3 nfacing = surface_normal;\n";
 		f += "\tif (dot(view_dir, geom_normal) < 0.0) nfacing = -nfacing;\n";
-		f += "\tvec3 N = normalize(nfacing);\n";
-		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
-		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = base.rgb * (obj_hemi_fill(N) + u_dir_light_color * ndotl) * 1.5;\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, nfacing);\n";
 	} else if (family == ObjectShaderFamily::Glass) {
+		// Glass NORMAL technique: the FF lit base plus the environment-cube
+		// reflection scaled by ReflectColor. The live scene cube
+		// (Render_CubeEnvironmentTexture, re-rendered every 128 frames
+		// [orig: update_environment_cubemap @ 0x6106a0]) is not hosted; its
+		// dominant content — sky above, ground below — stands in via the
+		// hemisphere sampled along the reflected view (tracked, D-RLIT-5).
 		f += "\tvec3 N = surface_normal;\n";
-		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
-		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tvec3 ff_lit = base.rgb * (max(obj_hemi_fill(N), vec3(0.2)) + u_dir_light_color * ndotl);\n";
+		f += "\tvec3 ff_lit = obj_ff_lighting(base.rgb, N);\n";
+		f += "\tvec3 refl_dir = reflect(-view_dir, N);\n";
+		f += "\tvec3 env = obj_hemi(refl_dir) * 2.0;\n";
 		f += "\tfloat fresnel = pow(1.0 - max(dot(N, view_dir), 0.0), 2.0);\n";
-		f += "\tvec3 env = mix(u_ambient_color, u_dir_light_color, 0.4);\n";
-		f += "\tlit = mix(ff_lit, env * u_reflect_color.rgb, clamp(0.4 + fresnel * 0.6, 0.0, 1.0));\n";
+		f += "\tlit = mix(ff_lit, env * u_reflect_color.rgb, clamp(u_reflect_color.a + fresnel * (1.0 - u_reflect_color.a), 0.0, 1.0));\n";
 		f += "\talpha = clamp(max(base.a, 0.35), 0.0, 1.0);\n";
 	} else if (family == ObjectShaderFamily::Phong ||
 	           family == ObjectShaderFamily::Environment) {
 		f += "\tvec3 N = surface_normal;\n";
 		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
 		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = base.rgb * obj_hemi_fill(N);\n";
-		f += "\tlit += base.rgb * u_dir_light_color * ndotl * 1.6;\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, N);\n";
 		if (has_flag(key, OSCAP_SPECULAR)) {
+			// The VS_PHONG* specular is a PhongMap texture lookup along the
+			// reflection vector; the lobe content is unwitnessed — a pow-16
+			// half-vector lobe in the witnessed light color stands in
+			// (tracked, D-RLIT-5).
 			f += "\tif (ndotl > 0.0) {\n";
 			f += "\t\tvec3 H = normalize(L + view_dir);\n";
 			f += "\t\tfloat spec = pow(max(dot(N, H), 0.0), 16.0);\n";
-			f += "\t\tlit += u_dir_light_color * spec * 0.8;\n";
+			f += "\t\tlit += u_dir_light_color * spec;\n";
 			f += "\t}\n";
 		}
 		if (family == ObjectShaderFamily::Environment) {
+			// Env-mapped surfaces sample the scene cube; the hemisphere along
+			// the reflected view stands in for the unhosted cube (D-RLIT-5).
 			f += "\tfloat fresnel = pow(1.0 - max(dot(N, view_dir), 0.0), 3.0);\n";
-			f += "\tlit = mix(lit, u_dir_light_color * 1.2, fresnel * 0.35);\n";
+			f += "\tlit = mix(lit, obj_hemi(reflect(-view_dir, N)) * 2.0, fresnel * 0.35);\n";
 		}
 	} else if (family == ObjectShaderFamily::Dot3) {
-		f += "\tvec3 N = surface_normal;\n";
-		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
-		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = base.rgb * (obj_hemi_fill(N) + u_dir_light_color * ndotl);\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
 	} else {
 		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
 	}
@@ -273,12 +366,14 @@ std::string compose_fragment(ObjectShaderKey key) {
 	// emissive variants intentionally bypass lighting and shouldn't be
 	// brightened by local point lights).
 	f += "\tif (u_emissive < 0.5) lit += obj_local_light_contrib(base.rgb, surface_normal, v_world_pos);\n";
-	f += "\tif (u_emissive > 0.5) lit = base.rgb;\n";
+	f += "\tif (u_emissive > 0.5) lit = base.rgb * min(u_color_src_global_gain, vec3(1.0)) * 2.0;\n";
 	f += "\tif (u_fog_enabled) {\n";
 	f += "\t\tfloat fog_visibility = obj_fog_visibility(distance(CAMERA_POSITION_WORLD, v_world_pos), u_fog_start, u_fog_end, u_fog_type);\n";
 	f += "\t\tlit = mix(u_fog_color, lit, fog_visibility);\n";
 	f += "\t}\n";
-	f += "\tALBEDO = max(lit, vec3(0.0));\n";
+	// Gamma-space output (D-RMAT-7): `lit` is the witnessed gamma-space result;
+	// encode it so the host blit displays exactly those bytes.
+	f += "\tALBEDO = nova_gamma_to_linear(lit);\n";
 	if (needs_alpha) {
 		f += "\tALPHA = clamp(alpha, 0.0, 1.0);\n";
 	}
@@ -310,6 +405,7 @@ ObjectShaderKey build_object_shader_key(const ObjectMaterialClassification &cls)
 	if (cls.has_detail) key |= OSCAP_DETAIL;
 	if (cls.uses_specular) key |= OSCAP_SPECULAR;
 	if (cls.is_glass) key |= OSCAP_GLASS;
+	if (cls.view_angle_fade) key |= OSCAP_VIEW_FADE;
 	return key;
 }
 

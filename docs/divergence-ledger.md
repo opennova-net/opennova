@@ -29,7 +29,11 @@ Three maintainer decisions (2026-07-05) stand behind this ledger:
    their divergences, if any, were untracked. Audit slices (PAR-R1..R7) turn unknown
    unknowns into tracked rows — **all seven landed this cycle**: VFS/PFF (R7),
    Fonts (R4), Foliage (R2), Tiles (R3) full; Terrain (R1) + Credits (R5) partial;
-   Importer (R6) tracked-by-composition. `UNAUDITED` is now **0**.
+   Importer (R6) tracked-by-composition. `UNAUDITED` reached **0** on 2026-07-05;
+   the REN planning grill reopened the set the same day with the **three
+   runtime-render systems** (materials/state, draw order, lighting — the audit
+   track below), audited by REN-2/3/5
+   ([ADR 0023](adr/0023-render-visual-parity.md)).
 
 ## Canonical disposition vocabulary (normative)
 
@@ -145,7 +149,21 @@ water look — sin/cos waves + fresnel — replaced by the witnessed per-frame
 noise color + DuDv textures over the lit-color pipeline, libs/env-first,
 ctest + vector pinned), **env #29** minted OPEN (the screen-marched adaptive
 strip tessellation, spec complete — the plane is the tracked stand-in), and
-**env #30** minted NEEDS-RE (the reflection passes exist; spec deferred). The
+Closed 2026-07-06 (the REN-6 port leg): **env #27** -> `FIXED` — the scalar
+springs live in `env::EnvScalarChannels` (witnessed steps + in-tick order,
+ctest-pinned), ticked by the weather core with parsed-value targets
+(targets-only snap `[orig: @ 0x57d1e0]`) and written back through the env
+seam so every consumer (dome, water UV, object/terrain fog ends, the frame
+clear) serves the ramp; SunDim is live end-to-end (celestial sun + glare);
+rain%/overcast channels are state-live awaiting their systems, FOV rides the
+camera. **env #33** -> `FIXED` — the witnessed generator + twinkle ported
+(`env::generate_star_instances`/`star_twinkle_tick`/`star_visible_fixed`,
+ctest-pinned) and hosted as the 256-instance camera-anchored billboard field
+(`NovaStarField` + `nova_celestial.gd`; per-star twinkle, 0.98 near-light
+cull, regenerate-per-load); the single-body stand-in deleted. Details:
+[env/env-tod-re.md](env/env-tod-re.md).
+
+**env #30** minted NEEDS-RE (the reflection passes exist; spec deferred; internals closed at the REN-6 witness leg). The
 celestial leg (2026-07-06) CLOSED **env #14** (the glare occlusion — the witnessed
 model is 2 jittered rays/frame into an 8-sample sliding window + dead-band
 hysteresis, ported libs/env-first with the NovaCelestial terrain ray march) and
@@ -154,16 +172,27 @@ camera height, the dir.y gate — the live renderer places at camera + dir × 64
 witnessed alpha folds), plus **env #33** (the 256-instance star field with per-star
 twinkle — specced, table generator unfound; WRD).
 
+The render-consumer rows transferred to the REN track on 2026-07-05
+([ADR 0023](adr/0023-render-visual-parity.md), Slice column updated): #17 →
+REN-5 (the modulator chain is a render-lighting consumer); #27/#29/#30/#33 →
+REN-6. Dispositions unchanged — the transfer moves ownership, not status.
+
+The REN-4 shader/TSS decode (2026-07-06) minted-and-closed **env #34** — the
+water surface framebuffer blend + far cutoff: retail draws the above-water
+surface with SrcBlend ONE + DestBlend SRCALPHA and alpha-test ref 32
+`[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_water_surface
+@ 0x5c33f0..0x5c3419]`; the reimpl used standard alpha blending —
+`water.gdshader` now expresses the witnessed blend exactly
+(`blend_premul_alpha` + inverted alpha) with the ref-32 discard.
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | env #15 | Thunder SoundBank triggers (0 / 0x80) + `SETFLASH1` start — fully specced, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #16 | `.trn`/`overcast.def` first-pass TOD table + overcast cross-fade — precedence corrected, runtime carries the `.env` table only until WAC weather lands | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #17 | Iris auto-exposure modulator gain — the CURVE is ported to `libs/env` (`iris_gain`, unit-tested, `[orig: @ 0x5c7550]`); the residual is the modulator CHAIN that applies the gain to the color blocks (runtime consumer, `get_terrain_lighting_attenuation` still identity for the iris path) | A | WITNESSED-READY-DEFERRED | PAR-ENV |
+| env #17 | Iris auto-exposure modulator gain — **FIXED 2026-07-06 (REN-5)**: the modulator CHAIN is live (`env::ModulatorChain` ticks modulator2 → modulator → the hosted blocks in the witnessed order `[orig: @ 0x57ef97..0x57f03c]`; 62-tick exposure chase `[orig: @ 0x57e512; @ 0x57d940]`; ÷64 gain to `ColorSrcGlobalGain`/ambient scale `[orig: @ 0x58db30; @ 0x5aaef0]`); env vectors re-dumped surgically (8 weather rows). Sampling-geometry + unhosted-block residuals tracked as D-RLIT-1/-2 ([render/render-lighting-re.md](render/render-lighting-re.md)) | A | FIXED | REN-5 (from PAR-ENV) |
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #27 | Smoothed scalar spring channels (fog distance @ 0x57ede2, sky height @ 0x57ee97, FOV, one unidentified pair) unwired — consumers read parsed .env values; scrubs snap where retail ramps | A | WITNESSED-READY-DEFERRED | PAR-ENV |
-| env #29 | Water surface tessellation: witnessed screen-marched adaptive strips (row march + 2..9 columns + sin-displacement low path) vs the reimpl's camera-snapped plane — the LOOK is ported, the architecture is not | A | OPEN (spec complete in env-tod-re.md Water surface) | PAR-ENV |
-| env #30 | Water reflection passes (init @ Terrain_Init 0x60fcc5, Terrain_RenderSceneWithReflection @ 0x5c93a0, mirrored strip verts) — none rendered by the reimpl | A | NEEDS-RE (existence witnessed, spec deferred) | PAR-ENV |
-| env #33 | Star field: 256 camera-anchored twinkling billboard instances vs the reimpl's single star body — render loop specced, instance-table generator unfound | A | WITNESSED-READY-DEFERRED (+ NEEDS-RE facet: the generator) | PAR-ENV |
+| env #29 | Water surface tessellation — **FIXED 2026-07-07 (the REN-6 tail)**: the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `NovaWaterCore.strip_*` packed arrays → the per-frame strip ArrayMesh → the witnessed ps.1.1 chain in water.gdshader, found at the port's debug: alpha = noiseA×diffuseA×2, reflection ×2 diffuse ×4 noise + specular `[orig: Water_InitSurfaceShaders @ 0x5c19b0]`); goldens re-pinned. Residuals in-row (env-tod-re.md #29): the LOW tier unported (host runs detail > 1), the underwater opaque-material swap unhosted, the grazing fade exposes the below-horizon dome band (rides #30's skyfog work) | A | FIXED | REN-6 tail |
+| env #30 | Water reflection — **FIXED 2026-07-07 (the REN-6 tail)**: host planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v = vbase − screenV so the ps.1.1 texm3x2 lookup runs verbatim `[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_main_scene @ 0x5c1240]`) feeding the t2 sampler; water self-excluded via a visual layer. Residuals in-row (env-tod-re.md #30): the wh − 0.1 clip plane approximated (no host oblique near plane), half-res host choice, the below-horizon skyfog band rides the dome follow-up | A | FIXED | REN-6 tail |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -238,9 +267,29 @@ Sources: [mission/mis-format-re.md](mission/mis-format-re.md),
 [particles/ptl-format-re.md](particles/ptl-format-re.md). IDs minted this train (see
 "Normalized prose-only catalogs" below).
 
+Minted-and-closed 2026-07-07 (the `.mis` parity pass — the original Nile
+editor's importer `misldr.dll` grilled after a user repro: heights all wrong
+opening our export in the original editor): **D-MIS-4** -> `FIXED` — `.mis`
+item heights are terrain-RELATIVE unless `height_lock 1` declares the z
+ABSOLUTE with `extra_bheight` carrying the baked base height
+(`[orig: MisLdr_ParseMisLine @ 0x100017b0 — height_lock→rec+356,
+extra_bheight→rec+292; MisLdr_WriteNileProjectXml @ 0x10004930 — scene
+Y = z/65536 − (lock ? bheight/65536 : 0); both misldr.dll]`); our exporter
+wrote absolute BMS z with neither, floating every object by the local
+terrain height. Fixed: `height_lock 1` per BMS-sourced item +
+host-sampled `extra_bheight` (the mission workspace passes terrain heights
+in write order). **D-MIS-5** -> `FIXED` — reader/writer asymmetries
+corrupted round-trips (base-0 `strtol` parsed zero-padded numerics as
+OCTAL vs the witnessed base-10 `atol`; `fog_level`/`water_level` u32-out
+u16-truncate-in; `gen_def_val1..4` write-only; parse defaults rewrote
+zero-valued fields on all 1365 retail-00TRg entities); fixed to base-10 +
+symmetric fields + unconditional emission of defaulted keys —
+`.bms`→`.mis`→`.mis` is byte-idempotent on the retail fixture. Full
+witness: [mission/mis-format-re.md](mission/mis-format-re.md).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-MIS-1 | All `begin item` records land in the generic pool; the pool-kind classifier needs a `dfx2med.exe` grill against `items.def`/type flags | B | NEEDS-RE | PAR-WORLD |
+| D-MIS-1 | All `begin item` records land in the generic pool; the pool-kind classifier needs original-editor confirmation | B | NEEDS-RE (narrowed 2026-07-07: the Nile importer classifies by the `items.def` TYPE STRING `[orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]`, matching the placer's empirically-verified kind mapping — porting it into the `.mis` reader closes this; `dfx2med.exe` confirmation rides D-MIS-3) | PAR-WORLD |
 | D-MIS-2 | `weapon_availability` emitted empty + skipped on read; loadout semantics deferred | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-MIS-3 | Full `dfx2med.exe` `.mis` grammar unmapped (hand-authored / legacy variants beyond the writer subset) | B | NEEDS-RE | PAR-WORLD |
 | D-3DILW-1 | v8 branch deferred (v10-only parser; the NovalogicTools v8 layout is unvalidated against the 3 local v8 files) | B | NEEDS-RE | rides an LW-import revival |
@@ -285,16 +334,38 @@ CBIN codec (magic 0x4E494243 + 20-B header + ROL32/XOR cipher `@0x75e348`) is
 
 ### Terrain — [terrain/terrain-re.md](terrain/terrain-re.md) (D-TERRAIN catalog; PAR-R1, PARTIAL)
 
+Minted-and-closed 2026-07-06 (the model-parity follow-up): **D-TERRAIN-2** ->
+`FIXED` — the shared surface include stacked TWO ×2 detail-normal factors on
+top of the 3-way splat (the gobj-era "v23 dual-normal" chimera); the
+witnessed top-tier ps.1.4 shader applies EXACTLY ONE normal term —
+`out = (cm.a·c1 + c0)/2 ×2 cm ×2 dp3(normalmap, blendmap) ×4 splat`
+`[orig: PolyTrn_PS14SplatNormalMap source @ 0x7dece0; PolyTrn_PS14Splat
+@ 0x7dee18; assembled by compile_terrain_pixel_shaders @ 0x605260]` (the
+dual-normal product belongs to the separate non-splat ps.1.1 tier,
+PolyTrn_PSDualNormalMap, never combined with the splat). Under the
+gamma-faithful pipeline (D-RMAT-7) the squared bump factor clipped whole
+terrain regions to white (retail-texture measurements: colormap ≤128
+nominal, normal pairs 127.5-128 avg — the extra factor was the only >1
+multiplier). The include now matches the witnessed instruction stream;
+`terrain_surface_light` T1 pins are unaffected (the c0/c1 lighting shape is
+unchanged). Residual note-only: the witnessed t3 is the heightmap-derived
+generated normal map (`Texture_GenerateNormalMap`, scale 1/32) — the host
+samples the .trn near/far detail-normal pair as the texture-source stand-in
+until that generator ports; the detailmap2/dist2 pair stays authored (the
+.trn owns the slots; the ps.1.1 tier consumes them).
+
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
 | D-TERRAIN-1 | Terrain-shader edit/runtime split: editor live-sculpt shader vs runtime baked shader, sharing the surface-shading math via an include — a tracked deliberate divergence justified by the editing need | C | PERMANENT (candidate) | PAR (terrain) |
+| D-TERRAIN-2 | Shared surface include stacked TWO ×2 detail-normal factors on the splat (gobj-era chimera); the witnessed top-tier ps.1.4 applies exactly ONE `[orig: PolyTrn_PS14SplatNormalMap @ 0x7dece0; compile_terrain_pixel_shaders @ 0x605260]` — post-gamma the squared factor clipped regions to white (full witness in the prose block above) | A | **FIXED (2026-07-06, the model-parity follow-up)** | REN (model-parity) |
+| D-TERRAIN-3 | Below-horizon region: cameras see past the sky dome's 1024-unit rim to the raw viewport background — retail fills the below-rim region with the **frame clear alone** (the env #21 skyfog blend; no skirt/ring geometry exists in the frame walk — sky-pass leg witness `Terrain_RenderSkyboxPass @ 0x610ac0` → `Terrain_RenderSectorBatchLit @ 0x60c670`, the seam hidden by fog convergence at the 1024 fog reference). The host's ported clear consumer was silently swallowed by a `BG_SKY`(null-sky) Environment mode rendering BLACK — a 1-px black dome-rim seam behind covering geometry, and once env #29's witnessed strip march landed (the strips stop at their witnessed row/fog-clamp extent like retail's), a PURE-BLACK BAND filling the whole strip-edge-to-rim region in water-horizon views (near half the frame at dusk) | C | **FIXED (REN-7, 2026-07-07)**: two facets — `game_world.tscn` ClearColor → `BG_COLOR` + `AMBIENT_SOURCE_DISABLED`, GUT-pinned (`game_world_test`), so the env #21 consumer renders at all; and `get_frame_clear_color()` now serves the post-blend DOUBLED skyfog (the modulate2x-path Clear consumes it verbatim `[orig: @ 0x677100]`; the 07-05 "undoubled" reasoning was the non-modulate2x fallback, no host analog — the undoubled band measured exactly half the fogged dome rim). Env vectors re-dumped (frame-clear token only). Residual (not a retail-parity surface): the ONED editor preview keeps its own viewport environment — far-env adoption rides ONED polish/ENV-1 | REN-7 |
 
 Record is PARTIAL by documentation depth, NOT by open divergences: the data path
 (build → mesh-simplify → CPT) is proven **byte-identical** across 5 fixtures
-(`dvd4_parity` + `parametric_parity` Sample/Gradient/Checker64/Perlin). The only
-tracked terrain divergence is D-TERRAIN-1 (deliberate shader split); the remaining
-work is documenting the CDEP/LOD bitstream + retail-anchoring the render pass, not
-closing a parity gap.
+(`dvd4_parity` + `parametric_parity` Sample/Gradient/Checker64/Perlin). The tracked
+terrain divergences are settled — D-TERRAIN-1 deliberate (shader split), D-TERRAIN-2
+and D-TERRAIN-3 FIXED; the remaining work is documenting the CDEP/LOD bitstream +
+retail-anchoring the render pass, not closing a parity gap.
 
 ### Tiles — [tiles/til-re.md](tiles/til-re.md) (D-TIL catalog; PAR-R3)
 
@@ -309,7 +380,9 @@ and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance (2×2 lightmap avg) vs the engine's per-vertex quad color `0xFF000000 \| (0x404040 + avg>>1)` under a 2× draw + alpha-premultiplied colormap — visually close, the per-vertex gradient is the residual | A | OPEN (approximation) | PAR (foliage) |
+| D-FOLIAGE-1 | Instance color: one color/MultiMesh-instance vs the engine's per-VERTEX quad color + alpha-premultiplied colormap read — the half-plus-bias emitter form `0xFF000000 \| (0x404040 + avg>>1)` IS applied since 2026-07-07 (the foliage-combine slice); the per-vertex gradient is the residual | A | OPEN (approximation — narrowed 2026-07-07) | PAR (foliage) |
+| D-FOLIAGE-2 | The fragment combine ran an unwitnessed ratio stand-in (`(sun/(ground·0.707+sun))×255/128`, no terrain-colormap sample, no SKY term — the shader's own header carried the correct witness) where retail runs `rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8` with t1 = the planar-projected terrain colormap and c0/c1 = the SKY/LIGHT blocks `[orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants @ 0x604420]` | A | **FIXED (2026-07-07)** — the witnessed chain ported (planar uv = (x,−z)/texsize wrap ≡ the CPU sampler; the dispatcher binds the colormap from the CPU-color source chain) | REN-6 rider |
+| D-FOLIAGE-3 | Wind sway: the host displaces X weighted by height (`VERTEX.y/8`, sin of `phase + 0.11x + 0.07z`) where the witnessed VS displaces Z weighted by vertex RED via a polynomial sine of `world.x·c24.y + time` `[orig: Terrain_CreateFoliageVertexShaders @ 0x5ff630; Foliage_WindSwayVS @ 0x2c25e5c]`; the sway amount/phase globals are live (NovaWeather) | A | OPEN (stand-in — minted 2026-07-07) | rides the foliage render-emitter parity |
 
 Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
 0x20000 proximity) is **MATCHING** — byte-exact vs retail `generate_foliage_instances_0 @ 0x600197`.
@@ -328,6 +401,130 @@ Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
 |---|---|---|---|---|
 | D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion); `menu_shell.gd` scans by name heuristic instead | A | OPEN | rides the ENG-6 manifest (Wave 2) |
 
+### Render — materials/state — [render/render-material-re.md](render/render-material-re.md) (D-RMAT catalog; REN-2)
+
+Minted at the REN-2 grill (2026-07-06). D-RMAT-1 (alpha-test compare shape —
+the invert flag flips the COMPARE `a <= ref`, never the value; normal is
+strict `a > ref`) and D-RMAT-3 (tag lookup is case-insensitive `stricmp`)
+were discovered, witnessed, and FIXED in the same slice, with the T1
+render-state golden re-dumped under citation.
+
+Closed 2026-07-06 (REN-4): **D-RMAT-2** -> `FIXED` — the "soft edge" is the
+`vsTracer` facing falloff `Diff = |dot(eye, normal)|^2` (not a displacement),
+ported as `MATERIAL_DESCRIPTOR_VIEW_FADE`/`OSCAP_VIEW_FADE` `[orig: Tracer.fx
+vsTracer]`; **D-RMAT-4** -> `FIXED` — the capability probe replicated over the
+shipped localres text (unions over ALL techniques `[orig: @ 0x5ae690]`): 14/19
+tags match the OED dump, 5 drift rows corrected on the renderer descriptor
+table (FFP_GLASS, VS_SKBUMPDIFFT/PHONGT/DIFFT2, VS_SKGLASS), the 0x10000000
+dialect resolved as the glow-copy capability (`MATERIAL_FLAG_GLOW`).
+
+Closed 2026-07-06 (REN-5): **D-RMAT-5** -> `FIXED` — the composer emits the
+witnessed FF model (`tex × min(hemi + dir·ndotl, 1) × 2`, SELFLUM ×
+`ColorSrcGlobalGain`) on the witnessed uniform surface with engine-fed env
+block values; the ×1.5/×1.6/spec-0.8 prototype constants deleted; T1
+re-dumped (key set identical, 630 hashes re-hashed under citation), T2
+swatch 116/120 cells moved with the 4 unlit VS_TRACER cells byte-identical
+([render/render-lighting-re.md](render/render-lighting-re.md); reflection/
+phong stand-in residuals = D-RLIT-5).
+
+Minted-and-closed 2026-07-06 (the model-parity slice, between REN-5 and
+REN-6): **D-RMAT-7** -> `FIXED` — the retail color pipeline witnessed
+**gamma-space end to end** (no `D3DSAMP_SRGBTEXTURE` at any device
+sampler-state site, no `D3DRS_SRGBWRITEENABLE` at any render-state site, no
+sRGB `.fx` pass states, identity display ramp at default gamma 1.0
+`[orig: GLib_SetGammaRamp @ 0x677be0; default @ 0x84f354]`); the host was
+decoding textures sRGB→linear and re-encoding at the blit around the
+witnessed math. Fixed across the composer + the full shader set: raw
+sampling + gamma-space math + the exact-inverse `nova_gamma_to_linear`
+output (`godot/shaders/nova_color.gdshaderinc`), with a new swatch-probe
+**calibrate mode** proving byte identity 256/256 on the live build; T1
+re-dumped (key set identical, 630 hashes), T2 swatch 120/120 cells moved
+(the expected global response change), composite IDENTICAL, world set
+re-captured. **D-RMAT-9** -> `FIXED` — the object composer's fog was an
+invented linear ramp + `smoothstep`; now the witnessed device fog table
+(`[orig: @ 0x58a950 → @ 0x677960]`, one text with the terrain/water
+shaders). Full witness: [render/render-material-re.md](render/render-material-re.md)
+§Color pipeline.
+
+Minted-and-closed 2026-07-07 (REN-7, the T3 "W_RCK1_O watch item"):
+**D-RMAT-10** -> `FIXED` — the `_MT` secondary (detail) stage ran HALF the
+witnessed combine (composer `×1`, no alpha touch) vs the witnessed stage 1
+`TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate,
+Texture, Current)` — resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg
+93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in
+detail regions). Fixed: the composer emits the witnessed ×2 + alpha
+modulate; the host masks `OSCAP_DETAIL` off the key when the secondary
+fails to resolve (retail's NULL-texture stage drop, exactly; the white ×1
+fallback deleted). UV evidence: the .3di v8 vertex carries TWO authored UV
+sets — `v_uv2` was always right. T1: exactly the 224 detail-keyed hashes
+moved, 0 classification rows. Full witness:
+[render/render-material-re.md](render/render-material-re.md) §Divergence
+catalog.
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-RMAT-6 | Single-pass host materials; the six technique classes (NORMAL/PROJSHAD/DEPTHMASK/CLIP/GLOW/MATCHTERRAIN, batch-selected `[orig: @ 0x5d9ff3]`) are un-modeled beyond NORMAL-class state — selection ported + T1-pinned at REN-3; the class CONTENT witnessed at REN-4 (FF technique tables, the pass-execution model, the GLOW capability landed as `is_glow_capable`) | A | WITNESSED-READY-DEFERRED (selection + GLOW flag ported) | remaining host mappings ride D-RORD-4/-5 residuals |
+| D-RMAT-8 | Framebuffer blending runs on blit-encoded (linear) values; retail blends gamma bytes (`[orig: decode_blend_mode_to_d3d_states @ 0x680f00]`) — opaque + alpha-tested surfaces byte-exact under D-RMAT-7, translucent composites diverge boundedly (alpha midtone shift; additive accumulates dimmer) | C | PERMANENT (register, this slice) | revisit only on an objectionable T3 composite |
+
+### Render — draw order — [render/render-order-re.md](render/render-order-re.md) (D-RORD catalog; REN-3)
+
+Minted at the REN-3 engine-research session (2026-07-06). D-RORD-1 (the
+transparent ordering ladder — sky → far-water-side alpha → water →
+camera-side alpha → overlays, from the witnessed frame bracket
+`[orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]`) was ported and
+FIXED in the same slice: the ladder lives in `libs/renderer/render_order`
+and is applied as the generalized Godot priority ladder (celestial, water,
+object-model rungs), with the sort-key/pass-class semantics T1-pinned.
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-RORD-2 | Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced — the host's internal opaque ordering serves the same intent; key semantics preserved as T1-pinned functions | C | PERMANENT (register, this slice) | — |
+| D-RORD-3 | Water-side transparent binning is per OBJECT (model origin at rebuild / `refresh_render_order()`) vs retail's per STRIP per frame (`[orig: @ 0x5d932e..0x5d9354]`) — straddling or water-crossing models can mis-bin strips | A | OPEN (partial) | REN-6/T3 attestation decides |
+| D-RORD-4 | Viewmodel has no depth treatment (clips into near walls); retail draws it FIRST under near-Z 0.05 + viewport depth range [0, 0.1] with its own flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | A | WITNESSED-READY-DEFERRED | runtime slice; T3 scene 6 |
+| D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED (capability semantics landed at REN-4; the specular-cube SOURCE witnessed at REN-5 — the static sun-glint cube `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`, rotated by MatRotSpecular; [render/render-lighting-re.md](render/render-lighting-re.md)) | residual = host bloom wiring (the cube content is now specced, D-RLIT-5 carries the hosting); FrameFX out of REN scope |
+| D-RORD-6 | The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced — reproducing them manufactures garbage | C | PERMANENT (register, this slice) | — |
+
+### Render — lighting — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT catalog; REN-5)
+
+Minted at the REN-5 session (2026-07-06), which also closed env #17 (the
+modulator chain went live) and D-RMAT-5 (the composed FF lighting model) in
+the same slice, converted the last `UNAUDITED` render system, and answered
+D-RORD-5's specular-cube question (the static sun-glint cube). The chain is
+ported libs-first (`libs/renderer/light_runtime`, `libs/env::ModulatorChain`)
+and T1-pinned (`renderer_state_vectors` section 5).
+
+Minted-and-closed 2026-07-06 (the model-parity slice): **D-RLIT-7** ->
+`FIXED` — the placer's static MultiMesh batches froze the env lighting
+harvested at load (no live owner for the template-harvested materials;
+even the pre-first-iris-tick modulator was baked in), while retail relights
+every entity from the current lighting block each frame
+`[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`. The placer
+now registers every harvested batch material and re-stamps from the live env
+per frame (generation-gated; single-sourced stamping shared with
+NovaObjectModel). The same slice re-derived the un-enved preview defaults to
+the retail noon register (full_00.env tod 1200 bytes — composer +
+nova_object_model + shader-global + terrain-include defaults, one cited
+register).
+
+Minted-and-closed 2026-07-06 (the REN-6 session): **D-RLIT-8** -> `FIXED` —
+the object per-material `hemi_sky` served the RAW TOD keyframe while
+`dir_color`/`hemi_ground` served the smoothed+modulated writeback (mixed
+color spaces; the sky-facing hemisphere half too dark off-noon), where
+retail feeds all entity lighting from the post-modulator block colors
+`[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 fills
+[8..10] ← Env_SkyBlock[0]]`. The sky block now rides the per-tick
+writeback seam (`set_sky_ambient_rt`, mirroring fill/sun/fog); details in
+the catalog below.
+
+| ID | One-liner | Class | Disposition | Slice |
+|---|---|---|---|---|
+| D-RLIT-1 | Hosted weather runs 4 color blocks through the modulator; retail modulates 16 (skyfog, cloud set, statics) `[orig: @ 0x57ef97..0x57f03c]` | A | OPEN (partial — the hosted subset is the rendered set) | joins as consumers are hosted (skyfog rides frame-clear/horizon) |
+| D-RLIT-2 | Iris exposure targets the OUTDOOR sample each tick; retail averages 3 samples marched back from the camera-ray hit with interior detection + sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00]` | A | OPEN (partial — curve/chase/chain exact) | rides the interior system + host raycast wiring |
+| D-RLIT-3 | Object materials light at full sun visibility; retail dims DirLightColor per entity (3-ray occlusion, 1.0..0.25) and lerps interior-parented entities to floor/ceiling ambience by the interior's daylight openness `[orig: @ 0x5c6800; @ 0x5d98a0]` | A | WITNESSED-READY-DEFERRED (math ported + T1-pinned) | runtime/interior slices |
+| D-RLIT-4 | Dynamic point lights (≤4 D3D lights, owner/interior group culling, modulator-scaled colors, {1,0,15/r²,1}) unhosted beyond the editor LGHT preview `[orig: @ 0x5a9180; @ 0x5abc50]` | A | WITNESSED-READY-DEFERRED (color/attenuation math ported) | EffectWorld/particle track |
+| D-RLIT-5 | Glass/env reflection = hemisphere-along-reflection stand-in; phong specular = pow-16 stand-in; retail samples the LIVE scene cube / the static sun-glint cube (contents witnessed) / the PhongMap texture `[orig: @ 0x6106a0; @ 0x58f290; Glass.fx]` | A | OPEN (approximation) | the D-RORD-5 bloom-wiring substrate |
+| D-RLIT-6 | No terrain shadow-map PS variants or baked lightmap TGA draping (`PSShadow*` light scale `4·t3²·t0.a`; the 64-px-tile mission lightmap) `[orig: @ 0x604420; @ 0x604a90]` | A | OPEN | terrain lightmap hosting (terrain-record scope) |
+
 ---
 
 ## Count-to-zero scoreboard
@@ -345,7 +542,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
-| Environment | 1 | 1 | 6 | 8 | 0 |
+| Environment | 0 | 0 | 3 | 3 | 3 |
 | World / AI + events | 2 | 0 | 4 | 6 | 0 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
@@ -353,14 +550,17 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Particles `.ptl` | 2 | 2 | 0 | 4 | 0 |
 | VFS / PFF mount stack | 3 | 1 | 0 | 4 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
-| Terrain | 0 | 0 | 0 | 0 | 1 |
+| Terrain | 0 | 0 | 0 | 0 | 3 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
-| Foliage | 1 | 0 | 0 | 1 | 0 |
+| Foliage | 2 | 0 | 0 | 2 | 1 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 1 | 0 | 0 | 1 | 0 |
-| **Total** | **29** | **12** | **28** | **69** | 5 |
+| Render — materials/state | 0 | 0 | 1 | 1 | 1 |
+| Render — draw order | 1 | 0 | 2 | 3 | 2 |
+| Render — lighting | 4 | 0 | 2 | 6 | 0 |
+| **Total** | **34** | **11** | **30** | **75** | 14 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64, env #33.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 
 <!-- scoreboard:generated:end -->
 
@@ -368,7 +568,12 @@ The Boot-resources row is the R8 audit doing its job: an audit that converts
 unknown unknowns into tracked rows RAISES the count before the burn-down
 lowers it (as PAR-R1..R7 did for their six new domains).
 
-Permanent register size: **17** (below). `UNAUDITED` systems: **0** — every system now has an RE record (full or partial) or a tracked-by-composition audit.
+Permanent register size: **19** (below). `UNAUDITED` systems: **0** — the
+runtime-render systems reopened the set on 2026-07-05 (the REN audit track
+below, [ADR 0023](adr/0023-render-visual-parity.md)); REN-2 converted the
+materials/state system, REN-3 the draw-order system, and REN-5 the lighting
+system (all 2026-07-06) — **the audit track is burned back to zero**; every
+system has an RE record (full or partial) or a tracked-by-composition audit.
 (The former unnumbered BMS-second-chunk note is now D-EVT-5, minted and closed
 in the World table above.)
 
@@ -395,6 +600,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-VFS-8 | Retail's 16-search-path x 16-byte / 16-slot / 6-name caps (incl. the >5-char expansion-name strcpy overflow) | Capacity supersets; reproducing the caps (and the overflow) would manufacture the original's buffer bugs. |
 | D-VFS-9 | `<exp>L.pff` mounted as our persistent primary vs retail's secondary slot 0 | Effective lookup precedence is identical; the slot bookkeeping is host-internal. |
 | D-NET-140 | The listen host's own loopback connection receives the full 0x0A record set; retail sends its local player header-only frames | The full-record loopback is how serve-and-play renders its local view ([ADR 0011](adr/0011-single-player-in-process-listen-server.md)); that frame never leaves the process, so retail interop is unaffected. |
+| D-RORD-2 | Retail's per-frame CPU quicksort of opaque batch entries (alpha-test bit → 256-unit depth slabs → effect index → fine depth) vs the host renderer's internal opaque ordering | The sort is a device-era draw-call-batching strategy, not observable behavior for z-buffered opaques; reproducing it would fight the host pipeline for zero visual difference. The key semantics survive as T1-pinned functions (`renderer::opaque_sort_key`) so any future host that CAN consume them has the witnessed spec ([render/render-order-re.md](render/render-order-re.md)). |
 
 ### Original-bug / garbage class (class D; basis: [ADR 0003](adr/0003-no-raw-passthrough-create-from-scratch.md))
 
@@ -407,6 +613,7 @@ one-line rationale for why porting it would be *wrong*.
 | D-PTL-1 | The engine's outer dispatcher remaps `g2_color1`/`g3_color1`/… into higher color slots (a parse bug); the reimpl maps `g{N}_color{M}` correctly | A recorded intentional divergence: the correct mapping is what an author means; reproducing the dispatch remap would carry the engine's parse bug forward. |
 | D-VFS-6 | Retail's PFF open trusts the header blindly (no magic/entry_size/count checks; entry_size>36 overflows; two write-after-free bugs @ 0x768348/0x7685ba) — ours validates and is UAF-free | Reproducing unvalidated reads and UAFs would manufacture garbage against ADR 0003. |
 | D-SCR-1 / D-SCR-2 | The SCR container codec accepts version bytes 0–2 and selects the key from the version byte + policy, where each original call site fixes the key | A deliberate multi-title superset so one codec serves JO-demo-era and shader containers; load-bearing equivalence holds for everything retail JO ships. |
+| D-RORD-6 | The original's two sort-key defects: opaque key bits 15+ OR in an uninitialized stack slot (`@ 0x5d92b9`), and a transparent strip's key reads the depth slot BEFORE its own store, lagging one strip within a render object (`@ 0x5d9326`) | Both are stale/uninitialized-memory reads whose effect is accidental (constant-per-call garbage; a one-strip-stale depth); reproducing them would manufacture the bugs rather than the intent (back-to-front by depth), against ADR 0003. |
 
 `PERMANENT` is not a resting place for hard work: each entry above is a decision that the
 *faithful* behavior is to diverge. If a future need arises (e.g. exact host-internal-state
@@ -415,11 +622,13 @@ the follow-up path.
 
 ---
 
-## Audit track — COMPLETE (`UNAUDITED` = 0)
+## Audit track
+
+### The 2026-07-05 sweep — COMPLETE
 
 All seven systems that started with no RE record now have one (full or partial) or
-a tracked-by-composition audit. The `UNAUDITED` set is empty; every subsystem's
-divergences are tracked rows, not unknown unknowns.
+a tracked-by-composition audit; their divergences are tracked rows, not unknown
+unknowns.
 
 | System | Slice | Result |
 |---|---|---|
@@ -441,6 +650,30 @@ loop at `0x75e348` (`rol ebx,7` + `xor [blob],key&0xFF`, 4-byte groups), byte-ex
 to `libs/cbin`. The two partials (Terrain, Credits) have their remaining grills
 scoped in their records; the six code-cited-jodemo systems are retail-anchored
 where they ship.
+
+### Render (REN) — reopened 2026-07-05, burned back to `UNAUDITED` = 0 on 2026-07-06
+
+The REN planning grill ([ADR 0023](adr/0023-render-visual-parity.md),
+[maturity-program.md](maturity-program.md) REN track) found the runtime render
+path silently uncovered — the one substantially **reimplemented but
+unwitnessed** surface: the object-material chain (the `libs/oed` 45-entry
+shader-tag table + the `libs/renderer` classifier/composer +
+`NovaObjectShaderCache`) carries only ModSuperOed-side citations, and no
+record covers batching/draw order, the runtime TSS stage tables, or lighting
+application. Three systems enter `UNAUDITED`; the REN grill slices convert
+them into records with catalogs (raising open counts before the burn-down
+lowers them, as the R-audits did):
+
+| System | Slice | Record |
+|---|---|---|
+| Object materials / render state (the runtime flag/tag→state path) | REN-2 | **landed 2026-07-06** — [render/render-material-re.md](render/render-material-re.md) (D-RMAT, tabled above) |
+| Batching / draw order / pass structure | REN-3 | **landed 2026-07-06** — [render/render-order-re.md](render/render-order-re.md) (D-RORD, tabled above) |
+| Lighting (modulator chain, entity lights, terrain lightmaps) | REN-5 | **landed 2026-07-06** — [render/render-lighting-re.md](render/render-lighting-re.md) (D-RLIT, tabled above) |
+
+Terrain-TSS and sky/water shader findings grow the existing
+[terrain/terrain-re.md](terrain/terrain-re.md) and
+[env/env-tod-re.md](env/env-tod-re.md) records in place rather than forking
+new ones.
 
 ## Standing rules
 
@@ -470,5 +703,6 @@ existing text (no new findings, no reworded witnesses):
 - [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..6** (the
   intentional `g{N}_color{M}` map + the §6 bounded deviations; pure "not yet researched"
   §8 items stay in §8).
-- [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..3** (the
-  writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row).
+- [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
+  writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
+  D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).

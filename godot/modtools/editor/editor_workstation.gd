@@ -1284,8 +1284,11 @@ func get_resource_root() -> NovaResourceRoot:
 	return _resource_library.get_resource_root()
 
 
-func set_resource_root_dir(path: String) -> void:
-	_set_resource_root_dir(path, true, true)
+## Public root-dir entry (ADR 0018 — probes/tests come through here, not the
+## private forwarder). persist=false leaves the user's saved root untouched
+## (the headless/windowed probes mount retail dirs transiently).
+func set_resource_root_dir(path: String, persist: bool = true, scan: bool = true) -> void:
+	_set_resource_root_dir(path, persist, scan)
 
 
 # Thin forwarders over EditorResourceLibrary (editor/resource_library.gd): the

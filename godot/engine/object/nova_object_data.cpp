@@ -403,10 +403,14 @@ void add_shader_flag_fields(Dictionary &item, const char *shader_name, uint32_t 
 	item["has_normal_a"] = (flags & oed::MATERIAL_FLAG_NORMAL_A) != 0;
 	item["has_normal_b"] = (flags & oed::MATERIAL_FLAG_NORMAL_B) != 0;
 	item["is_alpha"] = (flags & oed::MATERIAL_FLAG_ALPHA) != 0;
-	item["is_luminance"] = (flags & oed::MATERIAL_FLAG_LUMINANCE) != 0;
+	// Self-lum keys on EMISSIVE; 0x10000000 is the separate glow/bloom-copy
+	// capability (REN-4, D-RMAT-4 — the two ride together on FF _LUM rows but
+	// FFP_GLASS carries only the capability).
+	item["is_luminance"] = (flags & oed::MATERIAL_FLAG_EMISSIVE) != 0;
+	item["is_glow_capable"] = (flags & oed::MATERIAL_FLAG_GLOW) != 0;
 	item["is_glass_shader"] = (flags & oed::MATERIAL_FLAG_GLASS) != 0;
 	item["is_skinned_shader"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SKINNED) != 0;
-	item["is_special_shader"] = (flags & oed::MATERIAL_FLAG_SPECIAL) != 0;
+	item["is_blending_shader"] = (flags & oed::MATERIAL_FLAG_BLENDING) != 0;
 	item["uses_uv_generators"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_UV_TRANSFORM) != 0;
 	item["uses_environment"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_ENVIRONMENT) != 0;
 	item["uses_specular"] = (descriptor_flags & oed::MATERIAL_DESCRIPTOR_SPECULAR) != 0;

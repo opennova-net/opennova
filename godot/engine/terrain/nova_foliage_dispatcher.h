@@ -86,7 +86,7 @@ public:
 	// unset). Runtime ignores it because terrain_data already supplies the colormap.
 	void set_colormap_source(const Ref<NovaTerrainData> &p_data);
 	// The env terrain_rgb tint applied per lightmap sample
-	// [orig: sample_terrain_lightmap @ 0x606030]; default white (FULL 0xFF,
+	// [orig: sample_terrain_colormap_tinted @ 0x606030]; default white (FULL 0xFF,
 	// a ~2x saturating brighten — the retail default).
 	void set_terrain_tint(const Color &p_tint);
 	Color get_terrain_tint() const;

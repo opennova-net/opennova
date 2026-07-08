@@ -34,8 +34,17 @@ func test_partial_fields_carry_badge_and_tooltip() -> void:
 
 func test_unconsumed_fields_carry_badge() -> void:
 	var ctx := _make()
-	var iris := _find_label(ctx.inspector, "Iris percent " + EnvironmentInspectorScript.BADGE_UNCONSUMED)
-	assert_not_null(iris, "the iris row is badged unconsumed")
+	# Vertex tint is the standing unconsumed row (retail ignores it too).
+	# Iris moved to honored at REN-5 (the modulator chain went live,
+	# env #17 — docs/render/render-lighting-re.md); it keeps a caveat
+	# tooltip like other honored-with-scope rows, not a badge.
+	var vertex := _find_label(ctx.inspector, "Vertex tint " + EnvironmentInspectorScript.BADGE_UNCONSUMED)
+	assert_not_null(vertex, "the vertex tint row is badged unconsumed")
+	var iris := _find_label(ctx.inspector, "Iris percent")
+	assert_not_null(iris, "the iris row is honored and unbadged since REN-5")
+	if iris != null:
+		assert_false(iris.tooltip_text.is_empty(),
+			"the iris row keeps its interior-sampling caveat in the tooltip")
 
 
 func test_honored_fields_carry_no_badge() -> void:

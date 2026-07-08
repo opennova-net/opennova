@@ -691,7 +691,10 @@ org0/org1/org2 *motor* split of §1.2). It builds the bone matrices
    child/flag at a Z-rotated transform.
 
 Draws 5 and 6 are *both* additionally suppressed wholesale when the render-pass flag
-`numEntries & 0x10000000` is set (`skipWeaponOverlay` — e.g. a shadow/special pass).
+`numEntries & 0x10000000` is set. REN-3 identified that word as `Render_SubmitEntity`'s
+RENDER FLAGS argument and `0x10000000` as the **repeat-draw marker** — dual-LOD entities
+draw twice (far LOD, then near LOD with the flag set), so one-shot overlay children
+render once ([render-order-re.md](../render/render-order-re.md), submit-flags table).
 
 ### 13.2 The held-weapon submit (draw 5) and its predicate
 [orig: `BoneCallback_org0_World @ 0x4e3940`]

@@ -76,6 +76,30 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	assert_eq(terrain.weather_path, NodePath("../NovaWeather"), "terrain weather path survived extraction")
 
 
+func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
+	# _update_frame_clear_color() writes the witnessed frame clear into the
+	# ClearColor Environment's background_color every frame - but the scene
+	# resource decides whether that color ever renders. The Wave-1 scene shipped
+	# background_mode = 2 (BG_SKY) with no Sky resource, which renders BLACK and
+	# silently swallows the env-#21 clear consumer: a 1px black dome-rim seam in
+	# ground views, a black band in aerial views. Pin the mode so it can't drift.
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	assert_not_null(packed, "the packaged world scene loads")
+	var world := packed.instantiate()
+	add_child_autofree(world)
+	var clear := world.get_node_or_null("ClearColor") as WorldEnvironment
+	assert_not_null(clear, "the ClearColor WorldEnvironment is in the packaged scene")
+	if clear == null:
+		return
+	assert_not_null(clear.environment, "ClearColor carries an Environment resource")
+	if clear.environment == null:
+		return
+	assert_eq(clear.environment.background_mode, Environment.BG_COLOR,
+		"BG_COLOR renders background_color; BG_SKY with a null sky renders BLACK and silently swallows the witnessed frame clear [orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]")
+	assert_eq(clear.environment.ambient_light_source, Environment.AMBIENT_SOURCE_DISABLED,
+		"Godot ambient must never inject into the witnessed lighting model - all OpenNova materials light themselves; AMBIENT_SOURCE_BG would derive ambient from the clear color")
+
+
 func test_game_world_is_playable_by_default_without_env_flag() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

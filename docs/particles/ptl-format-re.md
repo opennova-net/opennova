@@ -477,12 +477,14 @@ when a particle batch's bound texture changes:
 CParticleEmitter_BuildBillboardQuads @ 0x5e6d60
   → CEffectChannel_PlaySample @ 0x5e4230        (actually BindRenderStateAndTexture, §5.5)
     → CD3DDevice_SetFogAndBlendMode @ 0x677740  (fog states + FOGCOLOR only, §5.5)
-    → sub_677020 (thunk) → sub_683190 @ 0x683190
-        → sub_680760 @ 0x680760                 (binds up to 6 textures via SetTexture)
+    → GfxShader_ApplyPassChecked @ 0x677020 (thunk) → CGfxShader_ApplyPass @ 0x683190
+        → apply_texture_stages @ 0x680760       (binds up to 6 textures via SetTexture)
         → GfxBlend_ApplyToDevice @ 0x6817d0     (D3DRS_ALPHABLENDENABLE=27, _SRCBLEND=19, _DESTBLEND=20)
         → RenderState_ApplyToDevice @ 0x681920  (per-stage combiner: D3DTSS_COLOROP=1, _COLORARG1=2,
             _COLORARG2=3, _ALPHAOP=4, _ALPHAARG1=5, _ALPHAARG2=6, _RESULTARG=28, stages 0..5)
-        → SetVertexShader / SetPixelShader      (material +244 / +248, vtable+428 / +368)
+        → SetPixelShader / SetVertexShader      (entry +244 = PIXEL shader, +248 = VERTEX shader —
+            REN-4 erratum: the original note had the pair transposed; when +244 is set the TSS
+            table is SKIPPED and only the blend states apply [orig: CGfxShader_ApplyPass @ 0x683190])
 ```
 
 The `sample` argument is read from the per-frame UV-rect slot at `graphic+724`. Each frame entry
@@ -497,10 +499,18 @@ holds a pointer to a **sample (material) struct** + the 5-float UV rect:
 | `+16` | vertex format / FVF code |
 
 **Render-state struct** layout (per-DWORD access pattern of `RenderState_ApplyToDevice`):
-`+0` = active stage count (loop bound); stage-0 values at `+16` ALPHAOP, `+24` ALPHAARG1,
+`+0` = active stage count (loop bound); `+4/+8/+12` = SRCBLEND / DESTBLEND / ALPHABLENDENABLE
+(consumed by `GfxBlend_ApplyToDevice`); stage-0 values at `+16` ALPHAOP, `+24` ALPHAARG1,
 `+28` ALPHAARG2, `+32` COLOROP, `+40` COLORARG1, `+44` COLORARG2, `+48` RESULTARG selector
 (writes `4*(v!=0) + 1` → 1 = D3DTA_CURRENT or 5 = D3DTA_TEMP); stages 1..5 follow at stride
-36 B from `+56` in the same shape.
+36 B **from `+52`** (REN-4 erratum — this note previously said +56; the per-stage shape is
+`{ALPHAOP, ALPHAARG0, ALPHAARG1, ALPHAARG2, COLOROP, COLORARG0, COLORARG1, COLORARG2,
+RESULTARG}`, the ARG0 slots applied only when non-zero — the LERP third arguments). The full
+struct is 0xF4 bytes with `+236` = pixel-shader and `+240` = vertex-shader handles, deduped
+through a 1024-entry cache (`RenderState_CacheFindOrAdd @ 0x683420`; entries are
+`{-1 sentinel, pad, the 0xF4 struct}`, so entry+244/+248 = struct+236/+240). The engine's
+mode-word decoders that BUILD these structs are decoded in
+[render/render-material-re.md](../render/render-material-re.md).
 
 The per-blend-mode static structs live in read-only data starting around `0x7e7558` — an
 indexed array (blend modes 1..8), each entry a chain ptr + blend-mode index dword + ~15 dwords

@@ -3,19 +3,28 @@ extends Node3D
 
 signal bounds_changed(bounds: AABB)
 
-const MATERIAL_FLAG_ALPHA_TEST := 0x01
-const MATERIAL_FLAG_ALPHA_INVERT := 0x02
-const MATERIAL_FLAG_TWO_SIDED := 0x04
+# The per-material 3DI flag byte constants live on NovaObjectShaderCache,
+# single-sourced from libs/threedi (THREEDI_MATERIAL_FLAG_*) — REN-2.
 const OED_UPDATE_NONE := 0
 const OED_UPDATE_MTRL := 1
 const OED_UPDATE_LGHT := 2
 const OED_UPDATE_PANM := 4
 const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
 
-const DEFAULT_AMBIENT_COLOR := Vector3(0.35, 0.36, 0.40)
+# The witnessed lighting uniform surface (REN-5): HemiSky/HemiGround/DirLight
+# + ColorSrcGlobalGain; the composer applies the fixed-function
+# MODULATE2X model (docs/render/render-lighting-re.md). Defaults for un-enved
+# scenes (previews, no environment node) are the RETAIL NOON register — the
+# shipped full_00.env tod 1200 block bytes /255 (sun_rgb 170,170,167;
+# sky_rgb 84,88,89; ground_rgb 49,55,46), so a preview lights like a JO noon
+# world instead of an invented dusk. Engine-fed values come from the env
+# blocks below. (Must stay equal to the composer's uniform defaults —
+# libs/renderer/src/object_shader_template.cpp.)
+const DEFAULT_HEMI_SKY_COLOR := Vector3(84.0 / 255.0, 88.0 / 255.0, 89.0 / 255.0)
 const DEFAULT_DIR_LIGHT_DIR := Vector3(-0.4082, -0.8165, -0.4082)
-const DEFAULT_DIR_LIGHT_COLOR := Vector3(0.85, 0.82, 0.75)
-const DEFAULT_FILL_LIGHT_COLOR := Vector3(0.18, 0.20, 0.25)
+const DEFAULT_DIR_LIGHT_COLOR := Vector3(170.0 / 255.0, 170.0 / 255.0, 167.0 / 255.0)
+const DEFAULT_HEMI_GROUND_COLOR := Vector3(49.0 / 255.0, 55.0 / 255.0, 46.0 / 255.0)
+const DEFAULT_COLOR_SRC_GAIN := Vector3.ONE
 const DEFAULT_FOG_COLOR := Vector3(0.5, 0.6, 0.8)
 const DEFAULT_FOG_START := 0.0
 const DEFAULT_FOG_END := 1024.0
@@ -24,6 +33,8 @@ const DEFAULT_FOG_TYPE := 0
 var object_data: NovaObjectData
 
 var _material_cache: Dictionary = {}
+# Blended (non-opaque) materials, for the water-side render-order rung (REN-3).
+var _alpha_materials: Array[ShaderMaterial] = []
 var _material_defs: Dictionary = {}
 var _robj_nodes: Dictionary = {}
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
@@ -59,7 +70,7 @@ var _has_lights := false
 var _material_needs_eval: Array[bool] = []          # parallel to _surface_materials
 var _dynamic_material_slots: PackedInt32Array = PackedInt32Array()
 var _last_env_gen := -1
-var _last_env_values: Dictionary = {}
+var _last_env_values: EnvLightValues = null
 
 
 func _ready() -> void:
@@ -86,7 +97,7 @@ func get_object_data() -> NovaObjectData:
 func set_environment_node(value: Node) -> void:
 	_environment_node = value
 	_last_env_gen = -1
-	_last_env_values = {}
+	_last_env_values = null
 	_apply_environment_to_materials()
 
 
@@ -453,6 +464,7 @@ func rebuild() -> void:
 	_skeleton_skin = null
 	_surface_material_indices.clear()
 	_surface_materials.clear()
+	_alpha_materials.clear()
 	_anim_frames_by_mat.clear()
 	_material_cache.clear()
 	_material_defs.clear()
@@ -462,7 +474,7 @@ func rebuild() -> void:
 	_material_needs_eval.clear()
 	_dynamic_material_slots = PackedInt32Array()
 	_last_env_gen = -1
-	_last_env_values = {}
+	_last_env_values = null
 	if object_data == null or not object_data.has_document():
 		_set_model_bounds(AABB())
 		return
@@ -508,6 +520,24 @@ func rebuild() -> void:
 	_has_lights = object_data.has_method("get_light_count") and int(object_data.get_light_count()) > 0
 	_apply_robj_transforms()
 	_apply_runtime_state(0.0)
+	refresh_render_order()
+
+
+# Blended materials take their water-side transparency rung from the witnessed
+# frame ladder (maturity REN-3, docs/render/render-order-re.md): below-water
+# alpha draws before the water surface, above-water after [orig: the Q1/Q2
+# split @ 0x5d932e..0x5d9354 + the flush bracket @ 0x5c9596 / @ 0x5c967a].
+# Retail bins per STRIP per frame; we bin per MODEL from its placed height
+# (D-RORD-3). With no water in the session this is the default rung (0).
+# Hosts that move a model across the water plane re-call this.
+func refresh_render_order() -> void:
+	if _alpha_materials.is_empty() or not is_inside_tree():
+		return
+	var shader_cache := NovaObjectShaderCache.get_singleton()
+	var rung := shader_cache.alpha_rung_for_height(global_position.y)
+	for material in _alpha_materials:
+		if material != null:
+			material.render_priority = rung
 
 
 # Build the Skeleton3D + rest-derived Skin from the loaded NovaSkeletalAnim. Bones come from
@@ -755,19 +785,19 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	if shader_tag.is_empty():
 		shader_tag = "FF_ST_OP"
 	var material_flags := 0
-	if bool(info.get("alpha_test_enabled", (int(material_def.get("flags", 0)) & MATERIAL_FLAG_ALPHA_TEST) != 0)):
-		material_flags |= MATERIAL_FLAG_ALPHA_TEST
-	if bool(info.get("alpha_invert", (int(material_def.get("flags", 0)) & MATERIAL_FLAG_ALPHA_INVERT) != 0)):
-		material_flags |= MATERIAL_FLAG_ALPHA_INVERT
-	if bool(info.get("two_sided", (int(material_def.get("flags", 0)) & MATERIAL_FLAG_TWO_SIDED) != 0)):
-		material_flags |= MATERIAL_FLAG_TWO_SIDED
+	if bool(info.get("alpha_test_enabled", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0)):
+		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST
+	if bool(info.get("alpha_invert", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0)):
+		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT
+	if bool(info.get("two_sided", (int(material_def.get("flags", 0)) & NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED) != 0)):
+		material_flags |= NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED
 	var emissive_type := 2 if bool(info.get("emissive", false)) else int(material_def.get("emissive_type", 0))
 	var is_glass_flag := 1 if bool(info.get("is_glass", material_def.get("is_glass", false))) else 0
 	var alpha_test_byte := int(info.get("alpha_test", roundi(float(material_def.get("alpha_threshold", 0.0)) * 255.0)))
 	var shader_cache := NovaObjectShaderCache.get_singleton()
-	var key := shader_cache.classify(shader_tag, material_flags, emissive_type, is_glass_flag, alpha_test_byte)
-	material.shader = shader_cache.get_shader_for_key(key)
 
+	# Textures resolve before the shader key: the detail stage only survives
+	# classification when the secondary texture actually resolved (below).
 	var diffuse := _load_texture_for_slot(material_def, 1)
 	var detail := _load_texture_for_slot(material_def, 2)
 	var normal := _load_texture_for_slot(material_def, 3)
@@ -776,21 +806,38 @@ func _create_material(index: int, material_def: Dictionary) -> ShaderMaterial:
 	if diffuse == null and detail != null:
 		diffuse = detail
 		detail = null
+
+	var key := shader_cache.classify(shader_tag, material_flags, emissive_type, is_glass_flag, alpha_test_byte)
+	if detail == null:
+		# Retail runs the _MT second stage only with its texture bound — a
+		# NULL-texture stage is dropped. An unresolved secondary therefore
+		# composes the no-detail shader: identical output to no stage at all,
+		# never the Modulate2x stage over a placeholder
+		# (render-material-re.md §FF technique tables).
+		key &= ~NovaObjectShaderCache.CAP_DETAIL
+	material.shader = shader_cache.get_shader_for_key(key)
+	if shader_cache.blend_for_key(key) != NovaObjectShaderCache.BLEND_OPAQUE:
+		# Water-side rung applied by refresh_render_order() once placed.
+		_alpha_materials.append(material)
+
 	if diffuse != null:
 		material.set_shader_parameter("u_diffuse", diffuse)
 	else:
 		material.set_shader_parameter("u_diffuse", _solid_colour_texture(_hash_color_for_index(index)))
 	if detail != null:
+		# The _MT secondary map, same resolver path as the diffuse (slot 2 =
+		# the material record's second texture — OED's SECONDARY slot).
 		material.set_shader_parameter("u_detail", detail)
-	else:
-		material.set_shader_parameter("u_detail", _solid_colour_texture(Color.WHITE))
 	if normal != null:
 		material.set_shader_parameter("u_normal_map", normal)
 	else:
 		material.set_shader_parameter("u_normal_map", _solid_colour_texture(Color(0.5, 0.5, 1.0, 1.0)))
-	if (material_flags & MATERIAL_FLAG_ALPHA_TEST) != 0:
-		material.set_shader_parameter("u_alpha_test_threshold", maxf(0.001, float(alpha_test_byte) / 255.0))
-		material.set_shader_parameter("u_alpha_test_invert", 1.0 if (material_flags & MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
+	if (material_flags & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0:
+		## The ref byte feeds the compare exactly; the shader keeps a > ref
+		## (invert: a <= ref), so no epsilon fudge is needed for ref 0.
+		## [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0]
+		material.set_shader_parameter("u_alpha_test_threshold", float(alpha_test_byte) / 255.0)
+		material.set_shader_parameter("u_alpha_test_invert", 1.0 if (material_flags & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
 	else:
 		material.set_shader_parameter("u_alpha_test_threshold", 0.0)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)
@@ -862,15 +909,7 @@ func _solid_colour_texture(color: Color) -> ImageTexture:
 
 
 func _apply_default_environment_to_material(material: ShaderMaterial) -> void:
-	material.set_shader_parameter("u_ambient_color", DEFAULT_AMBIENT_COLOR)
-	material.set_shader_parameter("u_dir_light_dir", DEFAULT_DIR_LIGHT_DIR)
-	material.set_shader_parameter("u_dir_light_color", DEFAULT_DIR_LIGHT_COLOR)
-	material.set_shader_parameter("u_fill_light_color", DEFAULT_FILL_LIGHT_COLOR)
-	material.set_shader_parameter("u_fog_enabled", false)
-	material.set_shader_parameter("u_fog_color", DEFAULT_FOG_COLOR)
-	material.set_shader_parameter("u_fog_start", DEFAULT_FOG_START)
-	material.set_shader_parameter("u_fog_end", DEFAULT_FOG_END)
-	material.set_shader_parameter("u_fog_type", DEFAULT_FOG_TYPE)
+	apply_environment_values(material, environment_values_from(null))
 
 
 # A surface material needs per-frame UV/RGB/alpha evaluation only if one of its generators
@@ -915,6 +954,93 @@ func _classify_materials() -> void:
 			_dynamic_material_slots.append(i)
 
 
+# ADR 0017 typed record: the env-derived lighting/fog values the object
+# shaders consume — computed once per env change and stamped onto many
+# materials (live model surfaces AND the mission placer's static batches, so
+# batched world objects relight from the SAME values/skip logic as live
+# models; retail relights every entity from the current lighting block each
+# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
+# Fields are always assigned by environment_values_from().
+class EnvLightValues:
+	extends RefCounted
+	var hemi_sky: Vector3
+	var dir: Vector3
+	var dir_color: Vector3
+	var hemi_ground: Vector3
+	var gain: Vector3
+	var fog_enabled: bool
+	var fog_color: Vector3
+	var fog_start: float
+	var fog_end: float
+	var fog_type: int
+
+	# True when `other` carries the same lighting/fog the shaders consume.
+	# Colours compare with is_equal_approx (the weather smoother quantises to
+	# 8-bit, so real changes are >= 1/255, far above epsilon); a null other
+	# (first push after rebuild) is never equal, forcing the initial push.
+	func equals(other: EnvLightValues) -> bool:
+		if other == null:
+			return false
+		return hemi_sky.is_equal_approx(other.hemi_sky) \
+			and dir.is_equal_approx(other.dir) \
+			and dir_color.is_equal_approx(other.dir_color) \
+			and hemi_ground.is_equal_approx(other.hemi_ground) \
+			and gain.is_equal_approx(other.gain) \
+			and fog_enabled == other.fog_enabled \
+			and fog_color.is_equal_approx(other.fog_color) \
+			and is_equal_approx(fog_start, other.fog_start) \
+			and is_equal_approx(fog_end, other.fog_end) \
+			and fog_type == other.fog_type
+
+
+static func environment_values_from(env_node: Node) -> EnvLightValues:
+	var v := EnvLightValues.new()
+	if env_node == null or not env_node.has_method("is_loaded") or not env_node.call("is_loaded"):
+		v.hemi_sky = DEFAULT_HEMI_SKY_COLOR
+		v.dir = DEFAULT_DIR_LIGHT_DIR
+		v.dir_color = DEFAULT_DIR_LIGHT_COLOR
+		v.hemi_ground = DEFAULT_HEMI_GROUND_COLOR
+		v.gain = DEFAULT_COLOR_SRC_GAIN
+		v.fog_enabled = false
+		v.fog_color = DEFAULT_FOG_COLOR
+		v.fog_start = DEFAULT_FOG_START
+		v.fog_end = DEFAULT_FOG_END
+		v.fog_type = DEFAULT_FOG_TYPE
+		return v
+	var sun_dir: Vector3 = env_node.call("get_sun_direction")
+	if sun_dir.length() <= 0.001:
+		sun_dir = -DEFAULT_DIR_LIGHT_DIR
+	var gain: Vector3 = DEFAULT_COLOR_SRC_GAIN
+	if env_node.has_method("get_color_src_gain"):
+		gain = env_node.call("get_color_src_gain")
+	v.hemi_sky = env_node.call("get_sky_ambient")
+	v.dir = -sun_dir.normalized()
+	v.dir_color = env_node.call("get_sun_light")
+	v.hemi_ground = env_node.call("get_fill_light")
+	v.gain = gain
+	v.fog_enabled = true
+	v.fog_color = env_node.call("get_fog_color")
+	v.fog_start = env_node.call("get_fog_start")
+	v.fog_end = env_node.call("get_fog_level")
+	v.fog_type = env_node.call("get_fog_type")
+	return v
+
+
+static func apply_environment_values(material: ShaderMaterial, values: EnvLightValues) -> void:
+	if material == null or values == null:
+		return
+	material.set_shader_parameter("u_hemi_sky_color", values.hemi_sky)
+	material.set_shader_parameter("u_dir_light_dir", values.dir)
+	material.set_shader_parameter("u_dir_light_color", values.dir_color)
+	material.set_shader_parameter("u_hemi_ground_color", values.hemi_ground)
+	material.set_shader_parameter("u_color_src_global_gain", values.gain)
+	material.set_shader_parameter("u_fog_enabled", values.fog_enabled)
+	material.set_shader_parameter("u_fog_color", values.fog_color)
+	material.set_shader_parameter("u_fog_start", values.fog_start)
+	material.set_shader_parameter("u_fog_end", values.fog_end)
+	material.set_shader_parameter("u_fog_type", values.fog_type)
+
+
 func _apply_environment_to_materials() -> void:
 	# The environment is shared and changes slowly (time-of-day) or not at all. NovaWeather
 	# re-stamps it every frame, but the smoothed colours quantise to identical bytes once
@@ -928,10 +1054,10 @@ func _apply_environment_to_materials() -> void:
 	var has_gen: bool = _environment_node != null and _environment_node.has_method("get_env_generation")
 	if has_gen:
 		gen = int(_environment_node.get_env_generation())
-		if gen == _last_env_gen and not _last_env_values.is_empty():
+		if gen == _last_env_gen and _last_env_values != null:
 			return
 	var values := _environment_values()
-	if _env_values_equal(values, _last_env_values):
+	if values.equals(_last_env_values):
 		_last_env_gen = gen
 		return
 	_last_env_values = values
@@ -939,44 +1065,16 @@ func _apply_environment_to_materials() -> void:
 	for material in _surface_materials:
 		if material == null:
 			continue
-		material.set_shader_parameter("u_ambient_color", values.get("ambient", DEFAULT_AMBIENT_COLOR))
-		material.set_shader_parameter("u_dir_light_dir", values.get("dir", DEFAULT_DIR_LIGHT_DIR))
-		material.set_shader_parameter("u_dir_light_color", values.get("dir_color", DEFAULT_DIR_LIGHT_COLOR))
-		material.set_shader_parameter("u_fill_light_color", values.get("fill", DEFAULT_FILL_LIGHT_COLOR))
-		material.set_shader_parameter("u_fog_enabled", bool(values.get("fog_enabled", false)))
-		material.set_shader_parameter("u_fog_color", values.get("fog_color", DEFAULT_FOG_COLOR))
-		material.set_shader_parameter("u_fog_start", float(values.get("fog_start", DEFAULT_FOG_START)))
-		material.set_shader_parameter("u_fog_end", float(values.get("fog_end", DEFAULT_FOG_END)))
-		material.set_shader_parameter("u_fog_type", int(values.get("fog_type", DEFAULT_FOG_TYPE)))
+		apply_environment_values(material, values)
 
 
-func _environment_values() -> Dictionary:
-	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.call("is_loaded"):
-		return {
-			"ambient": DEFAULT_AMBIENT_COLOR,
-			"dir": DEFAULT_DIR_LIGHT_DIR,
-			"dir_color": DEFAULT_DIR_LIGHT_COLOR,
-			"fill": DEFAULT_FILL_LIGHT_COLOR,
-			"fog_enabled": false,
-			"fog_color": DEFAULT_FOG_COLOR,
-			"fog_start": DEFAULT_FOG_START,
-			"fog_end": DEFAULT_FOG_END,
-			"fog_type": DEFAULT_FOG_TYPE,
-		}
-	var sun_dir: Vector3 = _environment_node.call("get_sun_direction")
-	if sun_dir.length() <= 0.001:
-		sun_dir = -DEFAULT_DIR_LIGHT_DIR
-	return {
-		"ambient": _environment_node.call("get_sky_ambient"),
-		"dir": -sun_dir.normalized(),
-		"dir_color": _environment_node.call("get_sun_light"),
-		"fill": _environment_node.call("get_fill_light"),
-		"fog_enabled": true,
-		"fog_color": _environment_node.call("get_fog_color"),
-		"fog_start": _environment_node.call("get_fog_start"),
-		"fog_end": _environment_node.call("get_fog_level"),
-		"fog_type": _environment_node.call("get_fog_type"),
-	}
+# The witnessed block mapping: dir_color <- the light block (sun/moon),
+# hemi_sky <- the sky block, hemi_ground <- the ground block, gain <- the
+# modulator /64 (the iris exposure reaching self-lit surfaces)
+# [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
+#  ColorSrcGlobalGain bind @ 0x58e05d].
+func _environment_values() -> EnvLightValues:
+	return environment_values_from(_environment_node)
 
 
 func _set_model_bounds(bounds: AABB) -> void:
@@ -990,19 +1088,3 @@ func _aabb_equal_approx(a: AABB, b: AABB) -> bool:
 	return a.position.is_equal_approx(b.position) and a.size.is_equal_approx(b.size)
 
 
-# True when two _environment_values() dicts carry the same lighting/fog the shaders consume.
-# Colours are compared with is_equal_approx (the weather smoother quantises to 8-bit, so real
-# changes are >= 1/255, far above epsilon); an empty cache (first push after rebuild) is never
-# equal, forcing the initial push.
-func _env_values_equal(a: Dictionary, b: Dictionary) -> bool:
-	if a.is_empty() or b.is_empty():
-		return false
-	return (a.get("ambient", Vector3.ZERO) as Vector3).is_equal_approx(b.get("ambient", Vector3.ONE)) \
-		and (a.get("dir", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir", Vector3.ONE)) \
-		and (a.get("dir_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("dir_color", Vector3.ONE)) \
-		and (a.get("fill", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fill", Vector3.ONE)) \
-		and bool(a.get("fog_enabled", false)) == bool(b.get("fog_enabled", true)) \
-		and (a.get("fog_color", Vector3.ZERO) as Vector3).is_equal_approx(b.get("fog_color", Vector3.ONE)) \
-		and is_equal_approx(float(a.get("fog_start", 0.0)), float(b.get("fog_start", -1.0))) \
-		and is_equal_approx(float(a.get("fog_end", 0.0)), float(b.get("fog_end", -1.0))) \
-		and int(a.get("fog_type", 0)) == int(b.get("fog_type", -1))

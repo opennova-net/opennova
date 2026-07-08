@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -61,6 +62,18 @@ uint32_t read_u32_at(const bms::Header &header, size_t offset) {
 	       (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
 	       (static_cast<uint32_t>(bytes[offset + 3]) << 24);
 }
+
+// The .mis writer emits gen_def_val1..4 from raw header offsets 264..276; the parser stores them
+// back through the named fields. Pin the correspondence so a Header layout change cannot silently
+// break the symmetry. (Header is #pragma pack(1), so offsetof is exact.)
+static_assert(offsetof(bms::Header, health) == 264, "gen_def_val1 <-> Header.health @264");
+static_assert(offsetof(bms::Header, mana) == 268, "gen_def_val2 <-> Header.mana @268");
+static_assert(offsetof(bms::Header, music) == 272, "gen_def_val3 <-> Header.music @272");
+static_assert(offsetof(bms::Header, reverb) == 276, "gen_def_val4 <-> Header.reverb @276");
+// water_level / fog_level are RAW u32s at 152/156 straddling the named u16 fields; both sides use
+// raw-offset access, anchored here.
+static_assert(offsetof(bms::Header, water_override) == 152, "water_level u32 starts @152");
+static_assert(offsetof(bms::Header, fog_override) == 158, "fog_level u32 (@156) ends in fog_override @158");
 
 int32_t read_i32_at(const uint8_t *bytes, size_t offset) {
 	return static_cast<int32_t>(static_cast<uint32_t>(bytes[offset]) |
@@ -275,8 +288,13 @@ void write_mis_general_information(const bms::File &file, std::string &out) {
 	append_kv(out, "  num_items ", item_total);
 	append_kv(out, "  num_events ", file.events.size());
 	append_kv(out, "  sunset ", fixed_string(header.environment, sizeof(header.environment)));
+	// start_time keeps the HHMM clock zero-padding ("0500"); minutes_per_day is a plain count and
+	// is written unpadded — the original importer parses every numeric base-10 (atol) so padding is
+	// only cosmetic there, but a zero-padded count ("0120") fed back through a base-0 strtol reader
+	// was the octal-corruption repro [orig: j__atol callers throughout MisLdr_ParseMisLine
+	// @ 0x100017b0, misldr.dll]. See docs/mission/mis-format-re.md (D-MIS-5).
 	append_kv(out, "  start_time ", four_digit(header_time_to_hhmm(header.start_time)));
-	append_kv(out, "  minutes_per_day ", four_digit(header.minutes_per_day));
+	append_kv(out, "  minutes_per_day ", header.minutes_per_day);
 	append_kv(out, "  viewx ", read_i32_at(raw, 588));
 	append_kv(out, "  viewy ", read_i32_at(raw, 592));
 	append_kv(out, "  viewz ", read_i32_at(raw, 596));
@@ -355,14 +373,18 @@ void write_mis_area_triggers(const bms::File &file, std::string &out) {
 void write_mis_waypoints(const bms::File &file, std::string &out) {
 	for (size_t i = 1; i < file.waypoint_records.size(); ++i) {
 		const bms::WaypointRecord &record = file.waypoint_records[i];
-		if (static_cast<uint32_t>(record.flags) == 0 && record.marker_count == 0) {
+		// Emit a waypoint section only when it carries information (its flags). Path MEMBERSHIP
+		// never travels in this section: the .mis text carries it on the marker items themselves
+		// and the original importer rebuilds the lists from the type-6005 pair ids
+		// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. A flag-less section body
+		// would be just `description ""` — unrecoverable on re-parse (marker_count is not a .mis
+		// concept), which broke .mis write->parse->write idempotency (D-MIS-5).
+		if (static_cast<uint32_t>(record.flags) == 0) {
 			continue;
 		}
 		append_kv(out, "begin waypoint ", i);
 		append_line(out, "  description \"\"");
-		if (static_cast<uint32_t>(record.flags) != 0) {
-			append_kv(out, "  attrib ", static_cast<uint32_t>(record.flags));
-		}
+		append_kv(out, "  attrib ", static_cast<uint32_t>(record.flags));
 		append_line(out, "end waypoint");
 		append_line(out);
 	}
@@ -449,10 +471,16 @@ void write_mis_events(const bms::File &file, std::string &out) {
 	}
 }
 
-void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out) {
+// `base_height` (optional) is a host-sampled terrain height under the entity, 16.16 fixed-point.
+// When provided it overrides entity.mis_extra_bheight in the emitted text; the entity's absolute
+// z is written either way and height_lock declares it absolute, so the original editor recovers
+// the terrain-relative offset as z - extra_bheight
+// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
+void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out, const int32_t *base_height) {
 	const uint16_t crouch_timer = combined_u16(entity.crouch_timer, entity.unk15a);
 	const int32_t group_rel = combined_i32_from_i16(entity.group_rel_lo, entity.group_rel_hi);
 	const std::string gen_string = fixed_string(entity.gen_string, sizeof(entity.gen_string));
+	const int32_t extra_bheight = base_height != nullptr ? *base_height : entity.mis_extra_bheight;
 
 	append_kv(out, "begin item ", index);
 	append_kv(out, "  type_id ", entity.type_id);
@@ -470,7 +498,13 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	if (entity.team_budget != 0) append_kv(out, "  team_budget ", static_cast<int>(entity.team_budget));
 	if (entity.bmsi_attributes != 0) append_kv(out, "  bmsi_attributes ", entity.bmsi_attributes);
 	if (entity.no_less_than != 0) append_kv(out, "  nolessthan ", static_cast<int>(entity.no_less_than));
-	if (entity.no_more_than != 0) append_kv(out, "  nomorethan ", static_cast<int>(entity.no_more_than));
+	// nomorethan / movetimer / wp_adv_trigger emit UNCONDITIONALLY: their parse-time authoring
+	// defaults are nonzero (no_more_than = 1, spawns = 1) or the old emit condition was not
+	// value-symmetric (wp_adv_trigger omitted only at -1), so omitting the line let the parser's
+	// default rewrite the field on every .mis round-trip (all 1365 entities on retail 00TRg gained
+	// `nomorethan 1`; 1351 gained `movetimer 1`). The parser defaults stay — hand-authored sparse
+	// files rely on them. See docs/mission/mis-format-re.md (D-MIS-5).
+	append_kv(out, "  nomorethan ", static_cast<int>(entity.no_more_than));
 	if (byte_from_i16(entity.weapon_types, 0) != 0) append_kv(out, "  weapon_type ", byte_from_i16(entity.weapon_types, 0));
 	if (byte_from_i16(entity.weapon_types, 1) != 0) append_kv(out, "  sweapon_type ", byte_from_i16(entity.weapon_types, 1));
 	if (entity.group_id != 0) append_kv(out, "  group_id ", static_cast<int>(entity.group_id));
@@ -478,7 +512,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	if (entity.waypoint_id != 0) append_kv(out, "  waypoint_id ", static_cast<int>(entity.waypoint_id));
 	if (entity.wp_number != 0) append_kv(out, "  wpnumber ", entity.wp_number);
 	append_kv(out, "  wpdistance ", entity.wp_distance);
-	if (entity.wp_adv_trigger != -1) append_kv(out, "  wp_adv_trigger ", entity.wp_adv_trigger);
+	append_kv(out, "  wp_adv_trigger ", entity.wp_adv_trigger);
 	for (int i = 0; i < 4; ++i) {
 		const int32_t goal = byte_from_i32(entity.wp_goals, i);
 		if (goal != 0) {
@@ -492,7 +526,7 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_kv(out, "  waccuracy2 ", entity.w_accuracy2);
 	append_kv(out, "  perception2 ", entity.perception2);
 	append_kv(out, "  perfectionist2 ", entity.perfectionist2);
-	if (entity.spawns > 0) append_kv(out, "  movetimer ", entity.spawns);
+	append_kv(out, "  movetimer ", entity.spawns);
 	append_kv(out, "  crouchtimer ", crouch_timer);
 	append_kv(out, "  shoottimer ", entity.shoot_timer);
 	append_kv(out, "  attention ", entity.attention);
@@ -511,21 +545,37 @@ void write_mis_entity(const bms::Entity &entity, size_t index, std::string &out)
 	append_line(out, "  extra_val4 0");
 	append_line(out, "  extra_val5 0");
 	append_line(out, "  extra_valmode 0");
-	append_line(out, "  extra_bheight 0");
+	// Height declaration: the entity's z above is absolute for BMS-sourced documents, so
+	// height_lock marks it ABSOLUTE and extra_bheight carries the baked base (terrain) height
+	// under the item; the original editor recovers the terrain-relative offset as
+	// z - extra_bheight. Without height_lock the editor reads z as terrain-relative and every
+	// object floats by the local terrain height (the D-MIS-4 repro).
+	// [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
+	//  MisLdr_WriteNileProjectXml @ 0x10004930 (scene Y = z/65536 - (lock ? bheight/65536 : 0),
+	//  <ABSOLUTE>TRUE</ABSOLUTE> iff height_lock); both misldr.dll]
+	append_kv(out, "  extra_bheight ", extra_bheight);
+	append_kv(out, "  height_lock ", static_cast<int>(entity.mis_height_lock));
 	append_kv(out, "  gen_string \"", mis_string(gen_string.empty() ? std::string("null") : gen_string), "\"");
 	append_line(out, "end item");
 	append_line(out);
 }
 
-void write_mis_items(const bms::File &file, std::string &out) {
+// `base_heights` (optional): host-sampled terrain heights (16.16 fixed-point), FLAT and in WRITE
+// ORDER — items, buildings, markers, organics — one per entity; entries beyond the vector fall
+// back to the entity's own mis_extra_bheight.
+void write_mis_items(const bms::File &file, std::string &out, const std::vector<int32_t> *base_heights) {
 	size_t index = 0;
-	for (const bms::Entity &entity : file.items) write_mis_entity(entity, index++, out);
-	for (const bms::Entity &entity : file.buildings) write_mis_entity(entity, index++, out);
-	for (const bms::Entity &entity : file.markers) write_mis_entity(entity, index++, out);
-	for (const bms::Entity &entity : file.organics) write_mis_entity(entity, index++, out);
+	const auto height_at = [base_heights](size_t i) -> const int32_t * {
+		return (base_heights != nullptr && i < base_heights->size()) ? &(*base_heights)[i] : nullptr;
+	};
+	for (const bms::Entity &entity : file.items) { write_mis_entity(entity, index, out, height_at(index)); ++index; }
+	for (const bms::Entity &entity : file.buildings) { write_mis_entity(entity, index, out, height_at(index)); ++index; }
+	for (const bms::Entity &entity : file.markers) { write_mis_entity(entity, index, out, height_at(index)); ++index; }
+	for (const bms::Entity &entity : file.organics) { write_mis_entity(entity, index, out, height_at(index)); ++index; }
 }
 
-bool write_mis_text(const bms::File &file, std::string &out, std::string &error) {
+bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
+                    const std::vector<int32_t> *base_heights = nullptr) {
 	(void)error;
 	out.clear();
 	out.reserve(32768);
@@ -539,7 +589,7 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error)
 	write_mis_groups(file, out);
 	write_mis_layers(file, out);
 	write_mis_events(file, out);
-	write_mis_items(file, out);
+	write_mis_items(file, out, base_heights);
 	return true;
 }
 
@@ -623,9 +673,13 @@ std::vector<MisLine> tokenize_mis_text(const std::string &text) {
 	return lines;
 }
 
+// All .mis numerics parse base-10, matching the original importer's plain atol (a base-0 strtol
+// read zero-padded values as OCTAL: "0120" -> 80, degrading to 0 across round-trips). Our writer
+// never emits hex, so there is no hex special case to keep.
+// [orig: j__atol callers throughout MisLdr_ParseMisLine @ 0x100017b0, misldr.dll]
 bool parse_i32_token(const std::string &token, int32_t &out) {
 	char *end = nullptr;
-	const long value = std::strtol(token.c_str(), &end, 0);
+	const long value = std::strtol(token.c_str(), &end, 10);
 	if (end == token.c_str() || *end != '\0') {
 		return false;
 	}
@@ -635,7 +689,7 @@ bool parse_i32_token(const std::string &token, int32_t &out) {
 
 bool parse_u32_token(const std::string &token, uint32_t &out) {
 	char *end = nullptr;
-	const unsigned long value = std::strtoul(token.c_str(), &end, 0);
+	const unsigned long value = std::strtoul(token.c_str(), &end, 10);
 	if (end == token.c_str() || *end != '\0') {
 		return false;
 	}
@@ -756,11 +810,33 @@ bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &po
 			if (!token_u32(line, 1, u32, error)) return false;
 			header.murk = static_cast<uint16_t>(u32);
 		} else if (key == "water_level") {
+			// Symmetric with write_mis_general_information, which emits the RAW u32s at header
+			// offsets 152/156. Those u32s straddle the named u16 fields (water_override @152,
+			// unknown1 @154, fog_override @158), so store back through the same raw-offset helper
+			// the writer reads with — the old u16 truncation zeroed real values (fog 45875200 ->
+			// 0 on reload). The u16 override semantics themselves are untouched: the raw bytes
+			// restored here are exactly the ones the overrides live in. (D-MIS-5)
 			if (!token_u32(line, 1, u32, error)) return false;
-			header.water_override = static_cast<uint16_t>(u32);
+			write_i32_at(reinterpret_cast<uint8_t *>(&header), 152, static_cast<int32_t>(u32));
 		} else if (key == "fog_level") {
 			if (!token_u32(line, 1, u32, error)) return false;
-			header.fog_override = static_cast<uint16_t>(u32);
+			write_i32_at(reinterpret_cast<uint8_t *>(&header), 156, static_cast<int32_t>(u32));
+		} else if (key == "gen_def_val1") {
+			// gen_def_val1..4 are the header u32s @264/268/272/276 the writer emits (bms.h names
+			// them health/mana/music/reverb); they were write-only before, zeroing on reload. The
+			// original importer parses the same key names [orig: MisLdr_ParseMisLine gen_def_val
+			// handlers @ 0x1000257d..0x10002640 -> doc+0x40EEB0..BC, misldr.dll]. (D-MIS-5)
+			if (!token_u32(line, 1, u32, error)) return false;
+			header.health = u32;
+		} else if (key == "gen_def_val2") {
+			if (!token_u32(line, 1, u32, error)) return false;
+			header.mana = u32;
+		} else if (key == "gen_def_val3") {
+			if (!token_u32(line, 1, u32, error)) return false;
+			header.music = u32;
+		} else if (key == "gen_def_val4") {
+			if (!token_u32(line, 1, u32, error)) return false;
+			header.reverb = u32;
 		} else if (key == "weather_type") {
 			if (!token_i32(line, 1, i32, error)) return false;
 			header.weather_type = static_cast<bms::WeatherType>(i32);
@@ -1202,6 +1278,16 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos, bms::File &f
 		} else if (key == "lfp_group") {
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.lfp_group = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
+		} else if (key == "extra_bheight") {
+			// .mis-interchange transient fields (never serialized to .bms): height_lock declares
+			// the position z ABSOLUTE and extra_bheight carries the baked base height under the
+			// item [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292,
+			// height_lock->rec+356), misldr.dll]. A .mis-parsed entity round-trips its own values;
+			// an absent height_lock stays 0 (terrain-relative z in the original editor's frame).
+			if (!token_i32(line, 1, entity.mis_extra_bheight, error)) return false;
+		} else if (key == "height_lock") {
+			if (!token_i32(line, 1, v, error)) return false;
+			entity.mis_height_lock = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
 		} else if (key == "gen_string") {
 			if (t.size() > 1 && t[1] != "null") {
 				mis_copy_fixed(entity.gen_string, sizeof(entity.gen_string), t[1]);
@@ -1894,6 +1980,10 @@ bms::Entity make_default_entity(const bms::File &file,
 	entity.spawns = 1;
 	entity.no_more_than = 1;
 	entity.max_attack_distance = 100;
+	// Editor-authored entities are placed at absolute z (BMS semantics), so a .mis export must
+	// declare the height locked, same as the .bms parse path (see bms.cpp parse_entity)
+	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
+	entity.mis_height_lock = 1;
 	apply_transform(entity, transform);
 	return entity;
 }
@@ -2193,7 +2283,7 @@ bool MissionDocument::write_bms_bytes(std::vector<uint8_t> &out) {
 	return true;
 }
 
-bool MissionDocument::save_mis_file(const std::string &path) {
+bool MissionDocument::save_mis_file(const std::string &path, const std::vector<int32_t> *base_heights) {
 	if (!impl_->loaded) {
 		impl_->last_error = "No mission loaded";
 		return false;
@@ -2203,7 +2293,7 @@ bool MissionDocument::save_mis_file(const std::string &path) {
 		return false;
 	}
 	std::string text;
-	if (!write_mis_text(text)) {
+	if (!write_mis_text(text, base_heights)) {
 		return false;
 	}
 	std::ofstream file(path, std::ios::binary);
@@ -2220,7 +2310,7 @@ bool MissionDocument::save_mis_file(const std::string &path) {
 	return true;
 }
 
-bool MissionDocument::write_mis_text(std::string &out) {
+bool MissionDocument::write_mis_text(std::string &out, const std::vector<int32_t> *base_heights) {
 	out.clear();
 	if (!impl_->loaded) {
 		impl_->last_error = "No mission loaded";
@@ -2228,7 +2318,7 @@ bool MissionDocument::write_mis_text(std::string &out) {
 	}
 	sync_counts();
 	std::string error;
-	if (!opennova::mission::write_mis_text(impl_->file, out, error)) {
+	if (!opennova::mission::write_mis_text(impl_->file, out, error, base_heights)) {
 		impl_->last_error = error;
 		return false;
 	}

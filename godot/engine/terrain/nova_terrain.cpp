@@ -415,10 +415,10 @@ void NovaTerrain::_notification(int p_what) {
 				// (NovaEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
 				cached_env_node->call("apply_terrain_uniforms", terrain_material);
 				// Runtime-only: prefer NovaWeather-smoothed colors when a weather node
-				// is present (overriding the four it smooths).
+				// is present (overriding the ones it smooths). The terrain surface
+				// consumes only c1 = light + c0 = sky [orig: @ 0x604420].
 				if (cached_weather_node) {
 					terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->call("get_smooth_sun"));
-					terrain_material->set_shader_parameter("u_fill_light", cached_weather_node->call("get_smooth_fill"));
 					terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->call("get_smooth_sky"));
 					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
 				}

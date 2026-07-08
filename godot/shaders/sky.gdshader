@@ -14,6 +14,9 @@ render_mode unshaded, cull_front;
 // D3DRS_AMBIENT 0xFFFFFF [orig: render_skybox @ 0x579b42..0x579bb6].
 // Full spec: docs/env/env-tod-re.md "Sky dome".
 
+// Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
+#include "res://shaders/nova_color.gdshaderinc"
+
 uniform vec3 u_sky_base = vec3(0.3, 0.4, 0.7); // c11 skybase
 uniform vec3 u_sky_bright = vec3(0.5, 0.6, 0.9); // c11 + c12
 uniform vec3 u_sky_highlight = vec3(1.0, 0.95, 0.8); // c15
@@ -131,5 +134,8 @@ void fragment() {
 	if (u_fog_end > 0.0) {
 		col = mix(u_fog_color, col, clamp(v_fog, 0.0, 1.0));
 	}
-	ALBEDO = col;
+	// Gamma-space output (D-RMAT-7): the gradient/cloud/fog combine above ran
+	// on raw byte values (colors and cloud texels alike); encode once so the
+	// displayed dome bytes equal the computed ones.
+	ALBEDO = nova_gamma_to_linear(col);
 }

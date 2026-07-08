@@ -3,6 +3,8 @@ add_library(opennova_renderer STATIC
     src/material_eval.cpp
     src/material_classify.cpp
     src/object_shader_template.cpp
+    src/render_order.cpp
+    src/uv_anim.cpp
 )
 
 target_include_directories(opennova_renderer

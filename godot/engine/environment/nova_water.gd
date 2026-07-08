@@ -20,13 +20,12 @@ extends Node3D
 		# height beats the .env one (witnessed precedence, env #28).
 		_recompute_terrain_water_fallback()
 		_apply_environment_water_height()
-		if mesh_instance:
-			mesh_instance.position.y = water_height
 @export_range(-100, 200, 0.1) var water_height: float = 0.0:
 	set(value):
 		water_height = value
-		if mesh_instance:
-			mesh_instance.position.y = water_height
+		# The strip vertices carry the plane height themselves (the mesh node
+		# stays pinned at the world origin) — no node repositioning here.
+		_push_water_split_height()
 @export_range(0, 1, 0.01) var water_alpha: float = 0.6
 
 # When set (not NaN), the host drives water height directly and the env/terrain
@@ -39,16 +38,47 @@ func set_height_override(value: float) -> void:
 	if not is_nan(value):
 		water_height = value
 
+
+# Publish this water plane's height as the session's transparent water-split
+# (the g_WaterSplitHeightFloat equivalent [orig: @ 0x5c93e2..0x5c93f0]) so
+# blended world materials can take their far/camera-side rung; cleared when
+# the water node leaves the tree.
+func _push_water_split_height() -> void:
+	if built and is_inside_tree():
+		NovaObjectShaderCache.get_singleton().set_water_split_height(water_height)
+
+
+func _exit_tree() -> void:
+	NovaObjectShaderCache.get_singleton().clear_water_split_height()
+	# Reflection teardown: stop the offscreen renders and disarm the shader's
+	# reflection branch — the u_water_color fallback takes over if the
+	# material outlives the node. Re-armed by the next build().
+	if reflection_viewport:
+		reflection_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	if water_material:
+		water_material.set_shader_parameter("u_has_reflection", false)
+		water_material.set_shader_parameter("u_reflection", null)
+
 var mesh_instance: MeshInstance3D
 var water_material: ShaderMaterial
+# The reflection RTT rig (env #30): retail prerenders the mirrored scene
+# into Water_ReflectionTexture BEFORE the main frame [orig: Render_TerrainScene
+# @ 0x610c80 -> Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
+# @ 0x5c1240]. The host form is a SubViewport on the SAME World3D with a
+# mirrored camera; Godot renders SubViewports ahead of the viewport that
+# samples them, preserving the witnessed prerender order.
+var reflection_viewport: SubViewport = null
+var reflection_camera: Camera3D = null
 var built: bool = false
 var _cached_env: Node = null
 var _cached_weather: Node = null
 var _cached_cam: Camera3D = null
 var _terrain_water_height: float = 0.0
-# The witnessed per-frame noise texture pair [orig: render_water_surface
-# @ 0x5c32c0 -> Water_GenerateNoiseTextures @ 0x5c0360]; math in libs/env.
-var _noise_core := NovaWaterCore.new()
+# The witnessed per-frame water core: the noise texture pair
+# [orig: render_water_surface @ 0x5c32c0 -> Water_GenerateNoiseTextures
+# @ 0x5c0360] plus the screen-marched strip tessellation (env #29)
+# [orig: render_water_strip_detailed @ 0x5c27d0]; math in libs/env.
+var _water_core := NovaWaterCore.new()
 var _noise_color_img: Image = null
 var _noise_normal_img: Image = null
 var _noise_color_tex: ImageTexture = null
@@ -88,85 +118,112 @@ func build() -> void:
 	built = false
 	water_material = ShaderMaterial.new()
 	water_material.shader = load("res://shaders/water.gdshader") as Shader
+	# The water surface draws between the two water-side transparent brackets
+	# [orig: Terrain_RenderWaterPass @ 0x610640 between the SortAndFlush pair
+	# @ 0x5c9596 / @ 0x5c967a; ladder in libs/renderer/render_order, REN-3].
+	water_material.render_priority = NovaObjectShaderCache.RENDER_RUNG_WATER
 
-	# The 65x65 camera-snapped plane is the TRACKED stand-in for the witnessed
-	# screen-marched strips (env #29 - spec complete in env-tod-re.md); the
-	# shader computes the witnessed camera-relative UVs itself, so the mesh
-	# carries none.
-	const GRID := 65
-	const CELL := 32.0
-	var half := (GRID - 1) * CELL * 0.5
-	var positions := PackedVector3Array()
-	var indices := PackedInt32Array()
-	positions.resize(GRID * GRID)
-
-	for z in GRID:
-		for x in GRID:
-			var idx := z * GRID + x
-			var px := x * CELL - half
-			var pz := z * CELL - half
-			positions[idx] = Vector3(px, 0.0, pz)
-
-	for z in GRID - 1:
-		for x in GRID - 1:
-			var i0 := z * GRID + x
-			var i1 := i0 + 1
-			var i2 := i0 + GRID
-			var i3 := i2 + 1
-			indices.push_back(i0)
-			indices.push_back(i2)
-			indices.push_back(i1)
-			indices.push_back(i1)
-			indices.push_back(i2)
-			indices.push_back(i3)
-
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = positions
-	arrays[Mesh.ARRAY_INDEX] = indices
-
+	# The witnessed screen-marched strip mesh is LIVE (env #29): _process
+	# rebuilds the surface every frame from NovaWaterCore.strip_build
+	# [orig: render_water_strip_detailed @ 0x5c27d0], so the mesh starts
+	# empty. The reflection RTT consumer is LIVE too (env #30, rig below).
+	# Remaining variants: the LOW tier (render_water_strip @ 0x5c1d60,
+	# water detail <= 1 — sin-table Y displacement) and the nightvision
+	# redraw.
 	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(0, water_material)
 	mesh_instance = MeshInstance3D.new()
 	mesh_instance.mesh = mesh
-	mesh_instance.position = Vector3(0.0, water_height, 0.0)
+	# Strip vertices are ABSOLUTE world positions (the plane height rides the
+	# rows, not the node): pin the mesh at the world origin; top_level guards
+	# against a transformed host parent.
+	mesh_instance.top_level = true
+	mesh_instance.position = Vector3.ZERO
+	# The water surface rides its OWN visual layer (bit 10) instead of the
+	# default bit 0: a fresh Camera3D cull_mask has all 20 layer bits set, so
+	# every normal view still renders the water, while the mirror camera
+	# below masks this one bit out — the witnessed offscreen prerender draws
+	# sky/terrain/world/celestials but never the water surface itself
+	# [orig: the render_main_scene @ 0x5c1240 pass list has no water draw].
+	mesh_instance.layers = 1 << 10
 	add_child(mesh_instance)
 	built = true
+	_push_water_split_height()
 
 	# The witnessed per-frame noise texture pair (created once, updated per
 	# frame) [orig: Water_GenerateNoiseTextures @ 0x5c0360].
-	var size := _noise_core.get_texture_size()
-	_noise_core.update(0)
-	_noise_color_img = Image.create_from_data(size, size, false, Image.FORMAT_RGBA8, _noise_core.get_color_rgba8())
-	_noise_normal_img = Image.create_from_data(size, size, false, Image.FORMAT_RGBA8, _noise_core.get_normal_rgba8())
+	var size := _water_core.get_texture_size()
+	_water_core.update(0)
+	_noise_color_img = Image.create_from_data(size, size, false, Image.FORMAT_RGBA8, _water_core.get_color_rgba8())
+	_noise_normal_img = Image.create_from_data(size, size, false, Image.FORMAT_RGBA8, _water_core.get_normal_rgba8())
 	_noise_color_tex = ImageTexture.create_from_image(_noise_color_img)
 	_noise_normal_tex = ImageTexture.create_from_image(_noise_normal_img)
 	water_material.set_shader_parameter("u_noise_color", _noise_color_tex)
 	water_material.set_shader_parameter("u_noise_normal", _noise_normal_tex)
 
+	# The reflection RTT (env #30): the mirrored scene renders offscreen and
+	# the strip shader samples it as t2. Retail clears the RTT to the SKYFOG
+	# color at depth 1 - 2^-15 and re-renders sky dome, lo-res terrain, the
+	# reflected world, celestial bodies + sun glare [orig:
+	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240];
+	# hosted, the shared World3D's sky/environment covers the skyfog clear
+	# and the mirror camera sees the same live scene.
+	if reflection_viewport == null:
+		reflection_viewport = SubViewport.new()
+		reflection_viewport.name = "WaterReflectionViewport"
+		# The mirror renders the LIVE world, not a copy.
+		reflection_viewport.own_world_3d = false
+		reflection_viewport.handle_input_locally = false
+		# Placeholder until the first _process sizes it from the live view.
+		reflection_viewport.size = Vector2i(256, 256)
+		add_child(reflection_viewport)
+		reflection_camera = Camera3D.new()
+		reflection_camera.name = "WaterReflectionCamera"
+		# Hide the water-only visual layer (bit 10, set on mesh_instance
+		# above) from the mirror pass: the witnessed offscreen scene never
+		# draws the water surface [orig: render_main_scene @ 0x5c1240].
+		reflection_camera.cull_mask = 0xFFFFF & ~(1 << 10)
+		reflection_viewport.add_child(reflection_camera)
+		reflection_camera.current = true
+	reflection_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	water_material.set_shader_parameter("u_reflection", reflection_viewport.get_texture())
+	water_material.set_shader_parameter("u_has_reflection", true)
+
 
 func _process(_delta: float) -> void:
 	if not built or water_material == null:
 		return
-	water_material.set_shader_parameter("u_water_alpha", water_alpha)
+	# The murk uniform feed stays for host/probe compatibility even though the
+	# shader's murk role moved to the per-vertex COLOR.a (env #29).
+	water_material.set_shader_parameter("u_water_murk", water_alpha)
 
 	if not _cached_cam or not _cached_cam.is_inside_tree():
 		_cached_cam = _find_camera()
 	var cam_pos := Vector3.ZERO
 	if _cached_cam:
 		cam_pos = _cached_cam.global_position
-	if _cached_cam and mesh_instance:
-		mesh_instance.global_position = Vector3(floorf(cam_pos.x / 32.0) * 32.0, water_height, floorf(cam_pos.z / 32.0) * 32.0)
+
+	# env #30: refresh the mirror camera before this frame's strip rebuild —
+	# the SubViewport renders ahead of the main view, like the witnessed
+	# prerender [orig: Water_ReflectionPrerender @ 0x5c2780 runs BEFORE the
+	# main frame in Render_TerrainScene @ 0x610c80].
+	_update_reflection_camera()
 
 	# Regenerate the animated noise pair, one tick per rendered frame like the
 	# weather core [orig: render_water_surface @ 0x5c3326 regenerates per frame].
 	_frame_counter += 1
-	_noise_core.update(_frame_counter)
-	_noise_color_img.set_data(_noise_core.get_texture_size(), _noise_core.get_texture_size(), false, Image.FORMAT_RGBA8, _noise_core.get_color_rgba8())
-	_noise_normal_img.set_data(_noise_core.get_texture_size(), _noise_core.get_texture_size(), false, Image.FORMAT_RGBA8, _noise_core.get_normal_rgba8())
+	_water_core.update(_frame_counter)
+	_noise_color_img.set_data(_water_core.get_texture_size(), _water_core.get_texture_size(), false, Image.FORMAT_RGBA8, _water_core.get_color_rgba8())
+	_noise_normal_img.set_data(_water_core.get_texture_size(), _water_core.get_texture_size(), false, Image.FORMAT_RGBA8, _water_core.get_normal_rgba8())
 	_noise_color_tex.update(_noise_color_img)
 	_noise_normal_tex.update(_noise_normal_img)
+
+	# Strip inputs default to the shader-uniform stand-in values so hosts
+	# without a loaded env still march strips.
+	var murk := water_alpha
+	var fog_end := 1000.0
+	var uv_state := Vector4(1.0, 0.2, 0.0, 0.0)
+	var lit := Color(0.408, 0.314, 0.224)
+	var env_data: EnvFile = null
 
 	var env := _cached_env
 	if env and env.has_method("is_loaded") and env.is_loaded():
@@ -178,16 +235,15 @@ func _process(_delta: float) -> void:
 		var sky: Vector3 = env.get_sky_ambient()
 		var combined := EnvFile.combine_terrain_light(
 				Color(light.x, light.y, light.z), Color(sky.x, sky.y, sky.z))
-		var lit := EnvFile.lit_water_color(Color(water.x, water.y, water.z), combined)
+		lit = EnvFile.lit_water_color(Color(water.x, water.y, water.z), combined)
 		water_material.set_shader_parameter("u_water_color", Vector3(lit.r, lit.g, lit.b))
-		var fog_end: float = env.get_fog_level()
+		fog_end = env.get_fog_level()
 		# The witnessed UV transform (scale/bias from the fog-distance INT
 		# part, offsets from the layer-1 cloud accumulators + 32x camera)
 		# [orig: render_water_surface @ 0x5c3348..0x5c33db]. The weather node
 		# owns the shared accumulators; standalone hosts tick a private core.
 		if not _cached_weather or not _cached_weather.is_inside_tree():
 			_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
-		var uv_state: Vector4
 		if _cached_weather and _cached_weather.has_method("get_water_uv_state"):
 			uv_state = _cached_weather.get_water_uv_state(cam_pos.x, cam_pos.z, fog_end)
 		else:
@@ -201,9 +257,141 @@ func _process(_delta: float) -> void:
 		water_material.set_shader_parameter("u_fog_start", fog_start)
 		water_material.set_shader_parameter("u_fog_end", fog_end)
 		water_material.set_shader_parameter("u_fog_type", env.get_fog_type())
-		var env_data: EnvFile = env.get_environment_data()
+		env_data = env.get_environment_data()
 		if env_data:
-			water_material.set_shader_parameter("u_water_alpha", env_data.get_water_murk())
+			murk = env_data.get_water_murk()
+			water_material.set_shader_parameter("u_water_murk", murk)
+
+	_rebuild_strip_mesh(cam_pos, murk, fog_end, uv_state, lit, env_data)
+
+
+# Mirrors the live camera about the water plane y = water_height into the
+# reflection SubViewport [orig: Water_ReflectionPrerender @ 0x5c2780 packs the
+# live camera block {x, y, z, yaw, pitch, roll}; the mirrored view builds
+# inside render_main_scene @ 0x5c1240's view-matrix section]. Hex-Rays elides
+# retail's exact mirror transform, but the witnessed texm3x2 rows PIN its
+# form: they sample the RTT at u = screen U (no horizontal flip) and
+# v ~ 1 - screen V (libs/env WaterStripRows), which only holds when the
+# offscreen camera is the UP-PRESERVED proper mirror — reflect the basis
+# about the plane, then negate the reflected up column. The raw reflection
+# alone is IMPROPER (det -1: every triangle's winding flips, so faces cull
+# backwards); negating the up column restores det +1 (the conjugated rotation
+# = yaw kept, pitch/roll negated) and renders the vertical mirror the rows'
+# vbase - screenV coordinate expects, so the fragment lookup stays the
+# witnessed math verbatim with NO host UV compensation. (Negating any other
+# column would instead need matching flips in the shader.)
+func _update_reflection_camera() -> void:
+	if reflection_viewport == null or reflection_camera == null:
+		return
+	if _cached_cam == null or not _cached_cam.is_inside_tree():
+		# No live view: the strip build clears too — the stale mirror image
+		# is never sampled.
+		return
+	var viewport := _cached_cam.get_viewport()
+	if viewport == null:
+		return
+	# Half the main viewport per axis: a HOST PERFORMANCE CHOICE — retail
+	# renders the full offscreen scene at Water_ReflectionTexture's own RTT
+	# size [orig: GTexRT_SelectThunk(&Water_ReflectionTexture) in
+	# render_main_scene @ 0x5c1240].
+	var target := Vector2i(viewport.get_visible_rect().size) / 2
+	target.x = maxi(target.x, 1)
+	target.y = maxi(target.y, 1)
+	if reflection_viewport.size != target:
+		reflection_viewport.size = target
+
+	# position' = (x, 2*wh - y, z); each basis column reflects about the
+	# plane normal n = (0, 1, 0) as c' = c - 2*n*dot(c, n) (flip the Y
+	# component), then the reflected up column negates — see above.
+	var xform := _cached_cam.global_transform
+	var bx := xform.basis.x
+	var by := xform.basis.y
+	var bz := xform.basis.z
+	var mirrored := Basis(
+			Vector3(bx.x, -bx.y, bx.z),
+			Vector3(-by.x, by.y, -by.z),
+			Vector3(bz.x, -bz.y, bz.z))
+	var origin := xform.origin
+	origin.y = 2.0 * water_height - origin.y
+	reflection_camera.global_transform = Transform3D(mirrored, origin)
+	reflection_camera.fov = _cached_cam.fov
+	reflection_camera.near = _cached_cam.near
+	reflection_camera.far = _cached_cam.far
+	# NEAR-PLANE NOTE (TRACKED approximation, env #30 ledger): retail clips
+	# the mirrored scene against the water surface — the PolyTrn context arms
+	# a below-plane clip at waterHeight - 0.1 [orig: plane block wh - 0.1,
+	# render_main_scene @ 0x5c1240]. Godot exposes no oblique clip plane, so
+	# the host does NOT clip: the mirrored camera predominantly sees
+	# above-water geometry anyway.
+
+
+# Rebuilds the surface from the witnessed screen march (env #29)
+# [orig: render_water_strip_detailed @ 0x5c27d0; per-side callers
+# render_water_surface @ 0x5c3492 (camera above) / @ 0x5c3542 (underwater)].
+# Vertices are absolute world positions; COLOR carries the row diffuse,
+# CUSTOM1 the row specular (the ps.1.1 v1 register [orig: add r0.rgb, r0, v1
+# — Water_InitSurfaceShaders @ 0x5c19b0]), CUSTOM0 = (depth, rhw, screen U,
+# screen V), CUSTOM2 the texm3x2 perturbation basis (t1.xy, t2.xy — with
+# CUSTOM0.zw it reassembles the witnessed t1/t2 rows the env #30 reflection
+# lookup dots against the DuDv sample), TEX_UV the witnessed world/32 pair
+# (carried for parity/debug — the shader keeps its camera-relative UV model).
+func _rebuild_strip_mesh(cam_pos: Vector3, murk: float, fog_end: float,
+		uv_state: Vector4, lit: Color, env_data: EnvFile) -> void:
+	if mesh_instance == null or not (mesh_instance.mesh is ArrayMesh):
+		return
+	if _cached_cam == null or not _cached_cam.is_inside_tree():
+		_clear_strip_surfaces()
+		return
+	var viewport := _cached_cam.get_viewport()
+	if viewport == null:
+		_clear_strip_surfaces()
+		return
+	var vp_size := Vector2i(viewport.get_visible_rect().size)
+	if vp_size.x <= 1 or vp_size.y <= 1:
+		_clear_strip_surfaces()
+		return
+	# The camera-side gate and the pass fog end both ride the underwater flag
+	# [orig: side gate against Env_WaterHeightFixed in render_water_surface;
+	#  Environment_GetFogEndDistance(underwater) @ 0x5c28a2 — below the
+	#  surface the murk visibility curve replaces the weather fog distance].
+	var underwater := cam_pos.y < water_height
+	var pass_fog_end := fog_end
+	if underwater and env_data:
+		pass_fog_end = env_data.get_fog_end_underwater()
+	_water_core.strip_set_view(_cached_cam.global_transform,
+			_cached_cam.get_camera_projection(), vp_size, pass_fog_end)
+	# The nightvision redraw variant is a FrameFX pass, not hosted yet.
+	var rows: int = _water_core.strip_build(water_height, murk, lit,
+			uv_state.x, uv_state.y, underwater, false)
+	if rows < 2:
+		# Plane off-screen or a sub-2-row march — nothing submits
+		# [orig: windows under 2 rows draw nothing @ 0x5c3195].
+		_clear_strip_surfaces()
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = _water_core.strip_positions()
+	arrays[Mesh.ARRAY_COLOR] = _water_core.strip_colors()
+	arrays[Mesh.ARRAY_TEX_UV] = _water_core.strip_uv0()
+	arrays[Mesh.ARRAY_CUSTOM0] = _water_core.strip_custom0()
+	arrays[Mesh.ARRAY_CUSTOM1] = _water_core.strip_custom1()
+	arrays[Mesh.ARRAY_CUSTOM2] = _water_core.strip_custom2()
+	arrays[Mesh.ARRAY_INDEX] = _water_core.strip_indices()
+	var mesh := mesh_instance.mesh as ArrayMesh
+	mesh.clear_surfaces()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
+			(Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
+			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM2_SHIFT))
+	mesh.surface_set_material(0, water_material)
+
+
+func _clear_strip_surfaces() -> void:
+	if mesh_instance == null:
+		return
+	var mesh := mesh_instance.mesh as ArrayMesh
+	if mesh and mesh.get_surface_count() > 0:
+		mesh.clear_surfaces()
 
 
 func _apply_environment_water_height() -> void:

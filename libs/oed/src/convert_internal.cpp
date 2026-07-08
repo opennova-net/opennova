@@ -235,7 +235,7 @@ static int find_material_index_by_flags(int map_count, bool skinned) {
   const int count = static_cast<int>(std::size(kMaterialInfoTable));
   for (int i = 0; i < count; ++i) {
     const uint32_t flags = kMaterialInfoTable[i].flags;
-    const bool table_skinned = (flags & MATERIAL_FLAG_FILTER) != 0;
+    const bool table_skinned = (flags & MATERIAL_FLAG_SKINNED) != 0;
     if (skinned != table_skinned) continue;
     int present = (flags & MATERIAL_FLAG_DIFFUSE ? 1 : 0) +
                   (flags & MATERIAL_FLAG_SECONDARY ? 1 : 0);

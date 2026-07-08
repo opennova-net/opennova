@@ -37,6 +37,10 @@ private:
 	// as the dirty fallback before a clean baseline exists; the exact dirty flag is the
 	// clean_baseline compare below.
 	bool modified = false;
+	// Staged terrain base heights for the next .mis save (see set_mis_base_heights). Cleared by
+	// every save_as() (whichever format ran) and by open_file()/create_default(), so stale
+	// heights can never leak onto a different document or a later save.
+	PackedInt32Array mis_base_heights;
 
 	// Whole-document undo / redo history + exact dirty, on the shared editor core
 	// (libs/oned_edit). The snapshot is the parsed bms::File (never serialized bytes);
@@ -349,6 +353,15 @@ public:
 	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
 	Error save_file();
 	Error save_as(const String &path);
+	// Stage host-sampled terrain base heights for the NEXT save that routes through the
+	// .mis writer: one 16.16 fixed-point height per entity, FLAT in WRITE ORDER (items,
+	// buildings, markers, organics). The .mis writer emits each as the entity's
+	// `extra_bheight` — the baked base height the original editor subtracts from the
+	// height-locked absolute z [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
+	// Consumed and cleared by the next save_as()/save_file() (any format); when absent,
+	// extra_bheight falls back to the entity's parsed value (0 for .bms-sourced documents —
+	// positions stay absolute-declared, offsets just lose the baked base).
+	void set_mis_base_heights(const PackedInt32Array &flat_write_order);
 	bool is_modified() const;
 
 	// --- Undo / redo + dirty (in-memory document snapshots) -------------------

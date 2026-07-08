@@ -56,6 +56,7 @@ behavior is summarized and cited.
 | [0020](adr/0020-world-terrain-query-seam.md) | libs/terrain_query is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
 | [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
 | [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
+| [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |
 
 ## RE records by domain
 
@@ -79,13 +80,21 @@ behavior is summarized and cited.
 | Net | [`net/novaworld-net-re.md`](net/novaworld-net-re.md) | authoritative NovaWorld wire record — layering, matchmaking, and the in-match protocol — current through §5.61 and D-NET-162; per-entry fix/live-verify state and the ranked open items live in the doc's own D-NET divergence catalog |
 | Particles | [`particles/ptl-format-re.md`](particles/ptl-format-re.md) | redesign in flight in a worktree |
 | Player info | [`playerinfo/avatars-re.md`](playerinfo/avatars-re.md) | landed (`libs/avatars` + ONED editor bridge + full `PLAYER_INFO` screen orchestration grilled, D-PLAYERINFO-1..12; runtime `player.mnu` host wiring + spawned-player binding open) |
+| Render | [`render/render-material-re.md`](render/render-material-re.md) | landed (REN-2: the runtime material path — HLSLEffect registry, tag resolution, flag-byte state, blend/depth policy — D-RMAT-1..6) |
+| Render | [`render/render-order-re.md`](render/render-order-re.md) | landed (REN-3: the batch queues, sort keys, technique-class selection, render-state stack, and the frame pass sequence — D-RORD-1..6; the ordering ladder ported to `libs/renderer/render_order`) |
+| Render | [`render/render-lighting-re.md`](render/render-lighting-re.md) | landed (REN-5: the iris/modulator chain, the world lighting block + entity uniforms + hemisphere lights, dynamic point lights, terrain/foliage c0/c1, lighting textures + the cubemap sources — D-RLIT-1..6; ported to `libs/renderer/light_runtime` + `libs/env::ModulatorChain`) |
 | 3DI | [`threedi/3di-gp-format-re.md`](threedi/3di-gp-format-re.md) | landed (`libs/threedi`) |
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
 | VFS/PFF | [`vfs/vfs-pff-mount-re.md`](vfs/vfs-pff-mount-re.md) | landed (PAR-R7 audit: the mount stack, resolution order, /d gate, D-VFS-1..9) |
 | World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed |
 | World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide, engine-research) |
 
-Every subsystem now has a dedicated RE record (full or partial) or a
-tracked-by-composition audit — the UNAUDITED set is empty. The project glossary
-lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the project vision is
-[`GOALS.md`](../GOALS.md).
+The UNAUDITED set was emptied by the PAR-R1..R7 sweep (2026-07-05), then
+reopened the same day with the three runtime-render systems the REN track
+audits — materials/state, draw order, lighting (the records land under
+`docs/render/` at REN-2/3/5; see the
+[divergence ledger](divergence-ledger.md)'s audit track and
+[ADR 0023](adr/0023-render-visual-parity.md)). Every other subsystem has a
+dedicated RE record (full or partial) or a tracked-by-composition audit. The
+project glossary lives at the repo root in [`CONTEXT.md`](../CONTEXT.md); the
+project vision is [`GOALS.md`](../GOALS.md).

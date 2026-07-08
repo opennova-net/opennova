@@ -134,6 +134,18 @@ int spring_step(int current, int target, int step_clamp, int max_abs) {
 	return next;
 }
 
+void EnvScalarChannels::tick() {
+	// The witnessed in-tick order [orig: Environment_UpdateWeatherTick scalar
+	// tail @ 0x57edd7..0x57ef92]; the FOV eighth-snap (@ 0x57ee62) and the
+	// cloud-scroll eighth-snap (@ 0x57eecc, CloudScrollState) interleave here
+	// in the original and live with their owners.
+	fog_dist_fp = spring_step(fog_dist_fp, fog_dist_target_fp, fog_step_fp, fog_max_fp);
+	sun_dim_fp = spring_step(sun_dim_fp, sun_dim_target_fp, sun_dim_step_fp, sun_dim_max_fp);
+	sky_height_fp = smooth_eighth(sky_height_fp, sky_height_target_fp);
+	rain_pct_fp = spring_step(rain_pct_fp, rain_pct_target_fp, rain_step_fp, rain_max_fp);
+	overcast_fp = spring_step(overcast_fp, overcast_target_fp, overcast_step_fp, overcast_max_fp);
+}
+
 void ColorChannelState::snap_to(uint32_t packed) {
 	b_fp = static_cast<int32_t>(packed & 0xFF) << 20;
 	g_fp = static_cast<int32_t>((packed >> 8) & 0xFF) << 20;
@@ -291,6 +303,24 @@ void WeatherColorBlock::snap(uint32_t packed) {
 	render_color = packed;
 	pre_mod_color = packed;
 	target = packed;
+}
+
+void WeatherColorBlock::set_step_deltas(int frames) {
+	// [orig: ColorBlock_SetStepDeltas @ 0x57d940] — per channel:
+	// |target_byte << 20 + frames/2 - current| / frames (the +frames/2 rounds
+	// the numerator before the truncating divide).
+	if (frames == 0) {
+		frames = 1;
+	}
+	const auto rate_for = [frames](int target_byte, int32_t channel_fp) -> int32_t {
+		const int32_t delta = (target_byte << 20) + (frames >> 1) - channel_fp;
+		const int32_t magnitude = delta < 0 ? -delta : delta;
+		return magnitude / frames;
+	};
+	max_rate[0] = rate_for(static_cast<int>(target & 0xFF), channels.b_fp);
+	max_rate[1] = rate_for(static_cast<int>((target >> 8) & 0xFF), channels.g_fp);
+	max_rate[2] = rate_for(static_cast<int>((target >> 16) & 0xFF), channels.r_fp);
+	max_rate[3] = rate_for(static_cast<int>((target >> 24) & 0xFF), channels.a_fp);
 }
 
 void WeatherColorBlock::tick(uint32_t modulator_packed, int rain_intensity) {
@@ -585,6 +615,510 @@ WaterUvState water_uv_state(const CloudScrollState &scroll, float cam_x, float c
 }
 
 // ---------------------------------------------------------------------------
+// Water strip tessellation (env #29)
+
+namespace {
+
+constexpr float kWaterFixedToFloat = 1.52587890625e-05f; // 2^-16 [orig: flt_7C3310]
+
+// _ftol2_sse truncation. The retail-unreachable overflow range saturates
+// instead of producing x86's 0x80000000 indefinite, so the C++ stays defined;
+// every observable strip output is identical (the callers clamp right after).
+int32_t ftol_trunc(double value) {
+	if (value >= 2147483647.0) {
+		return 2147483647;
+	}
+	if (value <= -2147483648.0) {
+		return INT32_MIN;
+	}
+	return static_cast<int32_t>(value);
+}
+
+// world -> viewport pixels through the view then projection matrix, both in
+// the originals' row-vector convention (out = v * M; translation in row 3)
+// [orig: Math_TransformPointByMatrix4x4 @ 0x40cf20 ->
+// Math_TransformPoint4ByMatrix4x4_Float @ 0x612e80, screen mapping
+// s = center +- clip/(2w) * (max - min) @ 0x5c0cf1..0x5c0d25].
+void water_project_point(const WaterStripView &view, const float world[3], float out_xy[2]) {
+	const float *m = view.view;
+	const float vx = m[0] * world[0] + m[4] * world[1] + m[8] * world[2] + m[12];
+	const float vy = m[1] * world[0] + m[5] * world[1] + m[9] * world[2] + m[13];
+	const float vz = m[2] * world[0] + m[6] * world[1] + m[10] * world[2] + m[14];
+	const float *p = view.proj;
+	const float cx = p[0] * vx + p[4] * vy + p[8] * vz + p[12];
+	const float cy = p[1] * vx + p[5] * vy + p[9] * vz + p[13];
+	const float cw = p[3] * vx + p[7] * vy + p[11] * vz + p[15];
+	const double inv_2w = 1.0 / (static_cast<double>(cw) + static_cast<double>(cw));
+	out_xy[0] = static_cast<float>(
+			view.vp_center_x + cx * inv_2w * (view.vp_max_x - view.vp_min_x));
+	out_xy[1] = static_cast<float>(
+			view.vp_center_y - cy * inv_2w * (view.vp_max_y - view.vp_min_y));
+}
+
+} // namespace
+
+void water_project_plane_to_screen(const WaterStripView &view, int32_t plane_height_fp,
+                                   WaterScreenBlock &out) {
+	// [orig: terrain_project_sector_to_screen @ 0x5c0bf0] — structural
+	// translation; the camera block converts fild * 2^-16 (@ 0x5c0c08).
+	const float cam_x = view.cam_x_fp * kWaterFixedToFloat;
+	const float cam_z = view.cam_z_fp * kWaterFixedToFloat;
+	const float plane_y = plane_height_fp * kWaterFixedToFloat;
+
+	// The horizontal forward: view-matrix column 2's x/z, normalized in the
+	// ground plane; a zero-length pair stays raw [orig: @ 0x5c0c19..0x5c0c56].
+	float fwd_x = view.view[2];
+	float fwd_z = view.view[10];
+	const float fwd_len = std::sqrt(fwd_z * fwd_z + fwd_x * fwd_x);
+	if (fwd_len != 0.0f) {
+		const float inv_len = 1.0f / fwd_len;
+		fwd_x *= inv_len;
+		fwd_z *= inv_len;
+	}
+
+	// Origin: the plane point at camera + horizontal-forward * 2000
+	// [orig: @ 0x5c0c7c..0x5c0d25].
+	float p0[3] = {cam_x + fwd_x * 2000.0f, plane_y, cam_z + fwd_z * 2000.0f};
+	water_project_point(view, p0, out.origin);
+
+	// Row delta: a 1000-unit horizontal RIGHT step (view column 0's x/z,
+	// unnormalized), projected relative to the origin; dy forced to 1e-6
+	// when 0 [orig: @ 0x5c0d3c..0x5c0deb].
+	const float p1[3] = {p0[0] + 1000.0f * view.view[0], plane_y,
+	                     p0[2] + 1000.0f * view.view[8]};
+	float s1[2];
+	water_project_point(view, p1, s1);
+	out.row_delta[0] = s1[0] - out.origin[0];
+	out.row_delta[1] = s1[1] - out.origin[1];
+	if (out.row_delta[1] == 0.0f) {
+		out.row_delta[1] = 0.000001f;
+	}
+
+	// The 1000-unit reference point [orig: @ 0x5c0e0f..0x5c0e9b].
+	const float p2[3] = {cam_x + fwd_x * 1000.0f, plane_y, cam_z + fwd_z * 1000.0f};
+	water_project_point(view, p2, out.ref_point);
+
+	// March direction = normalize(ref - origin); degenerate -> (0, 1)
+	// [orig: @ 0x5c0ea1..0x5c0ee8].
+	const float march_dx = out.ref_point[0] - out.origin[0];
+	const float march_dy = out.ref_point[1] - out.origin[1];
+	const float march_len = std::sqrt(march_dy * march_dy + march_dx * march_dx);
+	if (march_len == 0.0f) {
+		out.march_dir[0] = 0.0f;
+		out.march_dir[1] = 1.0f;
+	} else {
+		const float inv_len = 1.0f / march_len;
+		out.march_dir[0] = march_dx * inv_len;
+		out.march_dir[1] = march_dy * inv_len;
+	}
+
+	// Visibility: in-viewport, else the origin row's line crossing, else the
+	// same-side halfplane pair with the entry-edge origin clamp
+	// [orig: @ 0x5c0eea..0x5c1029].
+	out.visible = 0;
+	if (static_cast<float>(view.vp_min_x) <= out.origin[0] &&
+	    static_cast<float>(view.vp_max_x) >= out.origin[0] &&
+	    static_cast<float>(view.vp_min_y) <= out.origin[1] &&
+	    static_cast<float>(view.vp_max_y) >= out.origin[1]) {
+		out.visible = 1;
+	} else {
+		WaterRowClip clip;
+		water_clip_row_to_viewport(view, out.origin[0], out.origin[1],
+		                           out.row_delta[0] / out.row_delta[1], clip);
+		out.visible = clip.crossed ? 1 : 0;
+	}
+	out.origin_row_visible = out.visible;
+	if (!out.visible) {
+		// The row line through the origin with normal = march_dir: visible
+		// when the reference point and the viewport center sit strictly on
+		// the same side [orig: @ 0x5c0f7b..0x5c0ffd].
+		const float nx = out.march_dir[0];
+		const float ny = out.march_dir[1];
+		const float d = -(out.origin[1] * ny + out.origin[0] * nx);
+		const float ref_side = out.ref_point[0] * nx + out.ref_point[1] * ny + d;
+		const float center_side = static_cast<float>(view.vp_center_x) * nx +
+				static_cast<float>(view.vp_center_y) * ny + d;
+		if ((ref_side > 0.0f && center_side > 0.0f) ||
+		    (ref_side < 0.0f && center_side < 0.0f)) {
+			out.visible = 1;
+			// Marching in from off-screen: the origin clamps onto the edges
+			// the march will enter through [orig: @ 0x5c0fd1..0x5c1023].
+			out.origin[1] = (0.0f >= ny) ? static_cast<float>(view.vp_max_y) + 1.0f
+			                             : static_cast<float>(view.vp_min_y);
+			out.origin[0] = (0.0f >= nx) ? static_cast<float>(view.vp_max_x) + 1.0f
+			                             : static_cast<float>(view.vp_min_x);
+		}
+	}
+}
+
+void water_clip_row_to_viewport(const WaterStripView &view, float x0, float y0,
+                                float dx_over_dy, WaterRowClip &out) {
+	// [orig: clip_line_to_viewport @ 0x5c0a30] — endpoints seed at the left
+	// and right rect edges through inv = dy/dx, then clamp vertically through
+	// the dx/dy slope; the rect is [min_x, max_x + 1] x [min_y, max_y + 1].
+	const float left = static_cast<float>(view.vp_min_x);
+	const float right = static_cast<float>(view.vp_max_x + 1);
+	const float top = static_cast<float>(view.vp_min_y);
+	const float bottom = static_cast<float>(view.vp_max_y + 1);
+	const float inv_slope = 1.0f / dx_over_dy;
+
+	out.left[0] = left;
+	out.left[1] = y0 - (x0 - left) * inv_slope;
+	out.right[0] = right;
+	out.right[1] = y0 - inv_slope * (x0 - right);
+
+	if (top <= out.left[1]) {
+		if (bottom < out.left[1]) {
+			out.left[0] = x0 - (y0 - bottom) * dx_over_dy;
+			out.left[1] = bottom;
+		}
+	} else {
+		out.left[0] = x0 - (y0 - top) * dx_over_dy;
+		out.left[1] = top;
+	}
+	if (top <= out.right[1]) {
+		if (bottom < out.right[1]) {
+			out.right[0] = x0 - dx_over_dy * (y0 - bottom);
+			out.right[1] = bottom;
+		}
+	} else {
+		out.right[0] = x0 - dx_over_dy * (y0 - top);
+		out.right[1] = top;
+	}
+
+	out.crossed = !(left > out.left[0] || right < out.left[0]) &&
+			!(top > out.left[1] || bottom < out.left[1]) &&
+			!(left > out.right[0] || right < out.right[0]) &&
+			!(top > out.right[1] || bottom < out.right[1]);
+}
+
+int water_strip_stride(float row_rhw) {
+	// [orig: @ 0x5c30c7..0x5c30eb — ftol(rhw * 500) clamped 2..9;
+	// flt_7D6FB4 = 500.0]
+	const int steps = ftol_trunc(static_cast<double>(row_rhw) * 500.0);
+	if (steps < 2) {
+		return 2;
+	}
+	if (steps > 9) {
+		return 9;
+	}
+	return steps;
+}
+
+float water_strip_depth(float view_depth, float uv_scale, float uv_bias) {
+	// [orig: @ 0x5c2bfd..0x5c2c4a] — rhw first, then z = (t*scale - bias)*rhw
+	// against the witnessed clamp pair (flt_7C4658 upper / flt_7DBF7C lower).
+	const float rhw = 1.0f / view_depth;
+	float z = (view_depth * uv_scale - uv_bias) * rhw;
+	if (z > kWaterStripDepthMax) {
+		z = kWaterStripDepthMax;
+	}
+	if (z < kWaterStripDepthMin) {
+		z = kWaterStripDepthMin;
+	}
+	return z;
+}
+
+WaterRowColors water_strip_row_colors(float row_view_depth, const float right_delta[3],
+                                      int32_t fog_end_fp, float water_murk,
+                                      uint32_t water_color_lit_packed,
+                                      bool underwater_view, bool nightvision) {
+	// [orig: render_water_strip_detailed @ 0x5c2d3f..0x5c2ef6] — the header
+	// block maps the chain; every constant below is the cited literal.
+	float base = 1.0f - water_murk; // [orig: fsub Env_WaterMurk @ 0x5c2d46]
+	if (underwater_view) {
+		base = 1.0f; // the murk term is skipped [orig: @ 0x5c2d4c..0x5c2d50]
+	}
+	if (nightvision) {
+		base = 0.1f; // flt_7C69F4 [orig: @ 0x5c2d5a]
+	}
+	const float k = 0.8f * base + 0.2f;  // flt_7C6F9C / flt_7C3340 [orig: @ 0x5c2d60..0x5c2d7a]
+	const float bright_far = 38.4f * k;  // flt_7DBFA8 [orig: @ 0x5c2d80]
+	const float bright_near = 192.0f * k; // flt_7DBFA4 [orig: @ 0x5c2d93]
+	const float alpha_lo = 0.0f * base;  // flt_7C3284 = 0.0 (retail multiplies zero) [orig: @ 0x5c2da4]
+	const float alpha_hi = 229.5f * base; // flt_7DBFA0 [orig: @ 0x5c2daf]
+	const float one_minus_base = 1.0f - base;    // [orig: @ 0x5c2db8]
+	const float spec_lo = 128.0f * one_minus_base; // flt_7C461C [orig: @ 0x5c2dbe]
+	const float spec_hi = 255.0f * one_minus_base; // flt_7CA29C [orig: @ 0x5c2dc9]
+
+	// The sine of the right-edge ray's depression angle: |dy| / |delta|
+	// [orig: @ 0x5c2dd2..0x5c2def].
+	const double horiz_sq = static_cast<double>(right_delta[0]) * right_delta[0] +
+			static_cast<double>(right_delta[2]) * right_delta[2];
+	const double dist = std::sqrt(
+			horiz_sq + static_cast<double>(right_delta[1]) * right_delta[1]);
+	const double sin_angle = std::fabs(static_cast<double>(right_delta[1])) / dist;
+
+	int brightness;
+	int diffuse_alpha;
+	int dist_alpha;
+	if (underwater_view) {
+		// Solid white diffuse; LINEAR distance falloff (no square). Both
+		// tiers' distance term multiplies dbl_7DBF98 = 2^24 (= 256 per world
+		// unit against the 16.16 fog end); the doc's "x255 <-> x229.5" swap
+		// is the LOW tier's dbl_7DBF70 @ 0x5c244b. [orig: @ 0x5c2df3..0x5c2e20]
+		brightness = 255;
+		diffuse_alpha = 255;
+		const int a = ftol_trunc(
+				static_cast<double>(row_view_depth) * 16777216.0 / fog_end_fp);
+		dist_alpha = clamp_int(255 - a, 0, 255);
+	} else {
+		// [orig: @ 0x5c2e22..0x5c2e9d] — the two lerps ftol-truncate; the
+		// /255 divisions are the 0x80808081 magic (exact truncating idiv).
+		const int alpha_term = ftol_trunc(alpha_lo + (alpha_hi - alpha_lo) * sin_angle);
+		brightness = ftol_trunc(bright_far + (bright_near - bright_far) * (1.0 - sin_angle));
+		const int a = clamp_int(
+				ftol_trunc(static_cast<double>(row_view_depth) * 16777216.0 / fog_end_fp),
+				0, 255);
+		dist_alpha = 255 - a * a / 255;
+		diffuse_alpha = alpha_term * dist_alpha / 255;
+	}
+
+	WaterRowColors colors;
+	colors.diffuse = (static_cast<uint32_t>(diffuse_alpha) << 24) |
+			(0x10101u * static_cast<uint32_t>(brightness)); // [orig: @ 0x5c2e9f..0x5c2eab]
+	if (nightvision) {
+		colors.specular = static_cast<uint32_t>(dist_alpha) << 24; // [orig: @ 0x5c2ef8]
+	} else {
+		// [orig: @ 0x5c2eb5..0x5c2ef4] — WaterColorLit bytes * term >> 8
+		// under the distance alpha in the top byte.
+		const int term = ftol_trunc(spec_lo + (spec_hi - spec_lo) * (1.0 - sin_angle));
+		const uint32_t r = (((water_color_lit_packed >> 16) & 0xFFu) * term) >> 8;
+		const uint32_t g = (((water_color_lit_packed >> 8) & 0xFFu) * term) >> 8;
+		const uint32_t b = ((water_color_lit_packed & 0xFFu) * term) >> 8;
+		colors.specular =
+				(static_cast<uint32_t>(dist_alpha) << 24) | (r << 16) | (g << 8) | b;
+	}
+	return colors;
+}
+
+int water_build_strip_rows(const WaterStripView &view, const WaterStripParams &params,
+                           WaterStripRows &out) {
+	// [orig: render_water_strip_detailed @ 0x5c27d0] — structural translation
+	// of the march loop; the device/VB setup and the batch submits stay with
+	// the host (water_strip_batches expresses the submit shape). x87
+	// intermediates approximated as double, stored float32 like the original
+	// stack spills (the sky-dome port's convention).
+	out.screen_pos.clear();
+	out.depth.clear();
+	out.rhw.clear();
+	out.diffuse.clear();
+	out.specular.clear();
+	out.uv0.clear();
+	out.t1.clear();
+	out.t2.clear();
+
+	WaterScreenBlock block;
+	water_project_plane_to_screen(view, params.plane_height_fp, block);
+	if (!block.visible) { // [orig: @ 0x5c28c6]
+		return 0;
+	}
+
+	// Pass-constant state [orig: @ 0x5c2822..0x5c28ac]. The half extents,
+	// centers and projection reciprocals are re-derived per row in retail
+	// (@ 0x5c29ce..0x5c2a32) with identical values — hoisted here.
+	const float cam_x = view.cam_x_fp * kWaterFixedToFloat;
+	const float cam_y = view.cam_y_fp * kWaterFixedToFloat;
+	const float cam_z = view.cam_z_fp * kWaterFixedToFloat;
+	const float plane_y = params.plane_height_fp * kWaterFixedToFloat;
+	const float width = static_cast<float>(view.vp_max_x - view.vp_min_x);
+	const float height = static_cast<float>(view.vp_max_y - view.vp_min_y);
+	const float inv_width = 1.0f / width;   // var_DC
+	const float inv_height = 1.0f / height; // var_B8
+	const float half_width = width * 0.5f;  // flt_7C3B94 = 0.5
+	const float half_height = height * 0.5f;
+	const float center_x = static_cast<float>(view.vp_center_x);
+	const float center_y = static_cast<float>(view.vp_center_y);
+	const float inv_m00 = 1.0f / view.proj[0]; // var_54 (mat @ 0x2721980)
+	const float inv_m11 = 1.0f / view.proj[5]; // var_48 (flt_2721994)
+	const float *inv = view.view_inv;
+
+	const float slope = block.row_delta[0] / block.row_delta[1]; // var_6C [orig: @ 0x5c2918]
+	float px = block.origin[0]; // var_8
+	float py = block.origin[1]; // var_4
+	double last_t = 1.0;        // var_64 [orig: fld1 @ 0x5c28a7]
+	int stride = 4;             // var_1C [orig: @ 0x5c286d]
+	int rows = 0;
+
+	// Unprojects a clipped screen point to the plane: view ray (ndc/m00,
+	// ndc/m11, 1) through the inverse view rotation rows, then t = (plane -
+	// camY)/ray.y; a zero ray.y reuses the previous t and the RAW ray
+	// components as the world delta (the witnessed fallback)
+	// [orig: left @ 0x5c29ef..0x5c2ae8; right @ 0x5c2b08..0x5c2bce].
+	const auto unproject = [&](float sx, float sy, double &t, double delta[3]) {
+		const double ndc_x = (static_cast<double>(sx) - center_x) / half_width;
+		const double ndc_y = -((static_cast<double>(sy) - center_y) / half_height);
+		const double vx = ndc_x * inv_m00;
+		const double vy = ndc_y * inv_m11;
+		const double ray_x = inv[0] * vx + inv[4] * vy + inv[8];
+		const double ray_y = inv[1] * vx + inv[5] * vy + inv[9];
+		const double ray_z = inv[2] * vx + inv[6] * vy + inv[10];
+		if (ray_y != 0.0) {
+			// (camY - planeY) * (-1/rayY) [orig: flt_7D7C00 = -1.0 @ 0x5c2ac4]
+			t = (static_cast<double>(cam_y) - plane_y) * (-1.0 / ray_y);
+			last_t = t;
+			delta[0] = ray_x * t;
+			delta[1] = ray_y * t;
+			delta[2] = ray_z * t;
+		} else {
+			t = last_t;
+			delta[0] = ray_x;
+			delta[1] = ray_y;
+			delta[2] = ray_z;
+		}
+	};
+
+	WaterRowClip clip;
+	for (;;) {
+		water_clip_row_to_viewport(view, px, py, slope, clip);
+		if (!clip.crossed) {
+			// Hunt backward by single march steps (up to stride - 1) for the
+			// last crossing row line [orig: @ 0x5c296d..0x5c29c3].
+			if (stride <= 1) {
+				break;
+			}
+			for (int hunt = 1;;) {
+				px -= block.march_dir[0];
+				py -= block.march_dir[1];
+				water_clip_row_to_viewport(view, px, py, slope, clip);
+				if (clip.crossed) {
+					break;
+				}
+				if (++hunt >= stride) {
+					break;
+				}
+			}
+			if (!clip.crossed) {
+				break;
+			}
+		}
+
+		// --- One row: left / mid / right of the clipped span ---
+		double t_left = 0.0;
+		double t_right = 0.0;
+		double delta_l[3];
+		double delta_r[3];
+		unproject(clip.left[0], clip.left[1], t_left, delta_l);
+		const float u0_l = static_cast<float>((cam_x + delta_l[0]) * 0.03125); // flt_7DBFAC
+		const float v0_l = static_cast<float>((cam_z + delta_l[2]) * 0.03125);
+		unproject(clip.right[0], clip.right[1], t_right, delta_r);
+		const float u0_r = static_cast<float>((cam_x + delta_r[0]) * 0.03125);
+		const float v0_r = static_cast<float>((cam_z + delta_r[2]) * 0.03125);
+
+		const float mid_x = (clip.right[0] + clip.left[0]) * 0.5f; // [orig: @ 0x5c2c4c]
+		const float mid_y = (clip.right[1] + clip.left[1]) * 0.5f;
+		const float u0_m = (u0_r + u0_l) * 0.5f;
+		const float v0_m = (v0_r + v0_l) * 0.5f;
+		const double t_mid = (t_left + t_right) * 0.5; // [orig: @ 0x5c2c7e]
+
+		const float row_rhw = static_cast<float>(1.0 / t_left); // [orig: fst @ 0x5c2c06]
+		const float right_delta[3] = {static_cast<float>(delta_r[0]),
+		                              static_cast<float>(delta_r[1]),
+		                              static_cast<float>(delta_r[2])};
+		const WaterRowColors colors = water_strip_row_colors(
+				static_cast<float>(t_left), right_delta, view.fog_end_fp,
+				params.water_murk, params.water_color_lit, params.underwater_view,
+				params.nightvision);
+
+		// Row-constant texm3x2 bump rows [orig: @ 0x5c2efd..0x5c2fcd]:
+		// scale = min(rhw, 0.05); right row * -scale/2, forward row * -5*scale;
+		// vbase = 1 - min(297*rhw + 0.15, 2)/256. The rows' world-Y products
+		// are dead stores in retail and are not emitted.
+		float bump = row_rhw;
+		if (bump > 0.05f) { // flt_7C68E8
+			bump = 0.05f;
+		}
+		const float right_scale = bump * -0.5f; // flt_7C59B0
+		const float fwd_scale = -5.0f * bump;   // flt_7DBF94
+		const float t1_x = view.cam_right[0] * right_scale;
+		const float t1_y = view.cam_right[2] * right_scale;
+		const float t2_x = view.cam_forward[0] * fwd_scale;
+		const float t2_y = view.cam_forward[2] * fwd_scale;
+		float q = 297.0f * row_rhw + 0.15f; // flt_7DBF68 / flt_7C6FA4
+		if (q > 2.0f) {                     // flt_7C3B90
+			q = 2.0f;
+		}
+		const float v_base = 1.0f - (q * 0.5f) * 0.0078125f; // flt_7C3DD4 = 1/128
+
+		const float min_x = static_cast<float>(view.vp_min_x);
+		const float min_y = static_cast<float>(view.vp_min_y);
+		const float screen_x[3] = {clip.left[0], mid_x, clip.right[0]};
+		const float screen_y[3] = {clip.left[1], mid_y, clip.right[1]};
+		const double depth_t[3] = {t_left, t_mid, t_right};
+		const float u0[3] = {u0_l, u0_m, u0_r};
+		const float v0[3] = {v0_l, v0_m, v0_r};
+		for (int i = 0; i < 3; ++i) {
+			out.screen_pos.push_back(screen_x[i]);
+			out.screen_pos.push_back(screen_y[i]);
+			out.depth.push_back(water_strip_depth(static_cast<float>(depth_t[i]),
+			                                      params.uv_scale, params.uv_bias));
+			out.rhw.push_back(static_cast<float>(1.0 / depth_t[i]));
+			out.diffuse.push_back(colors.diffuse);
+			out.specular.push_back(colors.specular);
+			out.uv0.push_back(u0[i]);
+			out.uv0.push_back(v0[i]);
+			out.t1.push_back(t1_x);
+			out.t1.push_back(t1_y);
+			out.t1.push_back((screen_x[i] - min_x) * inv_width); // [orig: @ 0x5c2fd0..]
+			float t2_z = v_base - (screen_y[i] - min_y) * inv_height; // [orig: @ 0x5c301e..]
+			if (params.underwater_view) {
+				// The underwater pass samples the offscreen scene
+				// upside-down [orig: @ 0x5c306f..0x5c3085].
+				t2_z = 1.0f - t2_z;
+			}
+			out.t2.push_back(t2_x);
+			out.t2.push_back(t2_y);
+			out.t2.push_back(t2_z);
+		}
+		rows += 1;
+
+		// Adaptive stride from this row's 1/w; the underwater pass never
+		// re-derives (the boot 4 holds) [orig: @ 0x5c30c5..0x5c30eb].
+		if (!params.underwater_view) {
+			stride = water_strip_stride(row_rhw);
+		}
+		// March [orig: @ 0x5c30f2..0x5c3132] and the 1024-row cap
+		// [orig: cmp 0x400 @ 0x5c312d].
+		px += block.march_dir[0] * static_cast<float>(stride);
+		py += block.march_dir[1] * static_cast<float>(stride);
+		if (rows >= kWaterStripMaxRows) {
+			break;
+		}
+	}
+	return rows;
+}
+
+std::vector<WaterStripBatch> water_strip_batches(int row_count) {
+	// [orig: @ 0x5c313f..0x5c329e] — <=5-row windows stepping 4 (1-row
+	// overlap); windows under 2 rows draw nothing. Vertices lock 8n-10 per
+	// window (@ 0x5c3195), drawn as a TRIANGLESTRIP of 8n-12 primitives
+	// (DrawPrimitive @ 0x5c3209 passes vertex_count - 2).
+	std::vector<WaterStripBatch> batches;
+	if (row_count < 2) {
+		return batches;
+	}
+	int start = 0;
+	int end = row_count < 5 ? row_count : 5;
+	while (start < row_count) {
+		const int rows = end - start;
+		if (rows >= 2) {
+			WaterStripBatch batch;
+			batch.first_row = start;
+			batch.rows = rows;
+			batch.vertex_count = 8 * rows - 10;
+			batch.primitive_count = batch.vertex_count - 2;
+			batches.push_back(batch);
+		}
+		start += 4;
+		end = start + 5;
+		if (end > row_count) {
+			end = row_count;
+		}
+	}
+	return batches;
+}
+
+// ---------------------------------------------------------------------------
 // Sun glare
 
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
@@ -855,7 +1389,7 @@ TerrainTint terrain_tint_from_rgb(const Rgb &terrain_rgb) {
 }
 
 uint32_t foliage_lightmap_tint(uint32_t texel_argb, uint32_t full_tint) {
-	// [orig: sample_terrain_lightmap @ 0x606030] per channel
+	// [orig: sample_terrain_colormap_tinted @ 0x606030] per channel
 	// min((texel * FULL) >> 7, 255); alpha passthrough.
 	uint32_t out = texel_argb & 0xFF000000u;
 	for (int shift = 0; shift <= 16; shift += 8) {
@@ -875,6 +1409,97 @@ Rgb tile_overlay_tint_factor(const TerrainTint &tint) {
 	factor.g = static_cast<float>(2u * ((tint.half >> 8) & 0xFFu)) / 255.0f;
 	factor.b = static_cast<float>(2u * (tint.half & 0xFFu)) / 255.0f;
 	return factor;
+}
+
+// ---------------------------------------------------------------------------
+// Star field (env #33)
+
+namespace {
+
+inline uint32_t star_rotl32(uint32_t value, int count) {
+	return (value << count) | (value >> (32 - count));
+}
+
+} // namespace
+
+uint32_t star_prng_next(uint32_t &state) {
+	// [orig: inlined at Star_GenerateInstanceTable @ 0x5ac850 and
+	// render_star_field @ 0x5adb1a; standalone dead stub @ 0x5ac010]
+	const uint32_t rolled = star_rotl32(state + star_rotl32(state, 11), 4) ^ 1u;
+	state = rolled;
+	return rolled & 0xFFFFu;
+}
+
+namespace {
+
+// int(min(len, 2147418112.0f)) — the generator's ftol overflow guard
+// [orig: flt_7C19E0 = 0x7FFF8000 as float].
+int32_t star_length_int(double len) {
+	const double kCeil = 2147418112.0;
+	return static_cast<int32_t>(len < kCeil ? len : kCeil);
+}
+
+} // namespace
+
+void generate_star_instances(StarInstance *out, uint32_t &prng_state) {
+	// [orig: Star_GenerateInstanceTable @ 0x5ac850] — draw order per star:
+	// offX, offY, offZ, billboard, mask, add; brightness untouched.
+	for (int i = 0; i < kStarInstanceCount; ++i) {
+		StarInstance &star = out[i];
+		const int32_t rx = static_cast<int32_t>(star_prng_next(prng_state));
+		star.offset_fp[0] = (rx - 0x8000) << 9;
+		const int32_t ry = static_cast<int32_t>(star_prng_next(prng_state));
+		star.offset_fp[1] = (ry - 0x8000) << 9;
+		const int32_t abs_x = star.offset_fp[0] < 0 ? -star.offset_fp[0] : star.offset_fp[0];
+		const int32_t abs_y = star.offset_fp[1] < 0 ? -star.offset_fp[1] : star.offset_fp[1];
+		const int32_t rz = static_cast<int32_t>(star_prng_next(prng_state));
+		star.offset_fp[2] = ((rz + 0x20000) << 6) - ((abs_x + abs_y) >> 3);
+		const int32_t rb = static_cast<int32_t>(star_prng_next(prng_state));
+		star.billboard_param = (rb & 0x3FF) + 12288;
+		const int32_t rm = static_cast<int32_t>(star_prng_next(prng_state));
+		star.twinkle_mask = 31 >> (rm & 3);
+		const int32_t ra = static_cast<int32_t>(star_prng_next(prng_state)) & 0xFF;
+		star.twinkle_add = ra == 0 ? 1 : ra;
+		const int32_t max_add = 255 - star.twinkle_mask;
+		if (star.twinkle_add > max_add) {
+			star.twinkle_add = max_add;
+		}
+		// dir = normalize(off >> 8) via 2^32/len with +0x8000 rounding; a
+		// zero integer length leaves the >>8 values unnormalized (the
+		// original stores them first and guards the divide).
+		int32_t scaled[3];
+		double sum_sq = 0.0;
+		for (int c = 0; c < 3; ++c) {
+			scaled[c] = star.offset_fp[c] >> 8;
+			star.dir_fp[c] = scaled[c];
+			sum_sq += static_cast<double>(scaled[c]) * static_cast<double>(scaled[c]);
+		}
+		const int32_t len = star_length_int(std::sqrt(sum_sq));
+		if (len != 0) {
+			const int64_t inv = static_cast<int64_t>(0x100000000LL / len);
+			for (int c = 0; c < 3; ++c) {
+				star.dir_fp[c] = static_cast<int32_t>(
+						static_cast<uint64_t>(inv * static_cast<int64_t>(scaled[c]) + 0x8000) >> 16);
+			}
+		}
+	}
+}
+
+int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state) {
+	// [orig: render_star_field @ 0x5adb45]
+	const int32_t r = static_cast<int32_t>(star_prng_next(prng_state));
+	star.brightness = (star.brightness + star.twinkle_add + (r & star.twinkle_mask)) >> 1;
+	return star.brightness;
+}
+
+bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]) {
+	// [orig: render_star_field @ 0x5adac4] — hidden when the 16.16 dot
+	// exceeds 64225 (~0.98).
+	const int64_t dot = (static_cast<int64_t>(light_dir_fp[0]) * star.dir_fp[0] +
+								static_cast<int64_t>(light_dir_fp[1]) * star.dir_fp[1] +
+								static_cast<int64_t>(light_dir_fp[2]) * star.dir_fp[2]) >>
+			16;
+	return dot <= 64225;
 }
 
 } // namespace opennova::env

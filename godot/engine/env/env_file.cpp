@@ -658,17 +658,19 @@ Dictionary EnvFile::get_field_consumption() {
 	add("fog_level", "honored", false, "Render_SetFogState @ 0x58a950", "");
 	add("fog_type", "honored", false, "Render_SetFogState @ 0x58a950", "");
 	add("terrain_tint", "partial", false,
-			"PolyTrn_InitTextures @ 0x60b8cb; PolyTrn_RenderTile @ 0x60df0d; sample_terrain_lightmap @ 0x606030",
+			"PolyTrn_InitTextures @ 0x60b8cb; PolyTrn_RenderTile @ 0x60df0d; sample_terrain_colormap_tinted @ 0x606030",
 			"In the game this tints the ground, shoreline water, and plants. That part of the picture isn't built yet, so edits won't show in the preview.");
 	add("vertex_tint", "unconsumed", true, "vestigial; retail modulator identity",
 			"The game itself never uses this value; it's kept so files save back unchanged.");
 	add("water_color", "honored", false, "TimeOfDay_ParseProperty @ 0x57c590", "");
 	add("water_height", "honored", false, "water_height << 15 parse", "");
 	add("water_murk", "honored", false, "Environment_SetWaterMurk @ 0x57d4f0", "");
-	add("iris_percent", "unconsumed", false, "terrain_sector_compute_lighting @ 0x5c7550",
-			"The game's automatic exposure - how the view brightens in dark scenes. Not built yet, so edits won't show in the preview.");
-	add("iris_center", "unconsumed", false, "terrain_sector_compute_lighting @ 0x5c7550",
-			"The game's automatic exposure - how the view brightens in dark scenes. Not built yet, so edits won't show in the preview.");
+	add("iris_percent", "honored", false,
+			"terrain_sector_compute_lighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
+			"The game's automatic exposure - how the view brightens in dark scenes. The outdoor exposure runs; looking into buildings does not dim yet (interiors aren't built).");
+	add("iris_center", "honored", false,
+			"terrain_sector_compute_lighting @ 0x5c7550; modulator chain @ 0x57e512/0x57ef97",
+			"The game's automatic exposure - how the view brightens in dark scenes. The outdoor exposure runs; looking into buildings does not dim yet (interiors aren't built).");
 	add("ceiling_color", "partial", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",
 			"Indoor light color. It takes effect when indoor lighting is built.");
 	add("floor_color", "partial", false, "indoor exposure inputs @ 0x5c7646; Env_CeilingFloorBlend @ 0x5f7163",

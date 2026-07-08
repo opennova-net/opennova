@@ -1,5 +1,7 @@
 #include "env/nova_weather_core.h"
 
+#include <renderer/light_runtime.h>
+
 #include <algorithm>
 
 using namespace godot;
@@ -31,6 +33,11 @@ void NovaWeatherCore::_bind_methods() {
 								  "sky_speed"),
 			&NovaWeatherCore::tick);
 	ClassDB::bind_method(D_METHOD("tick_cloud_scroll", "sky_speed"), &NovaWeatherCore::tick_cloud_scroll);
+	ClassDB::bind_method(D_METHOD("set_scalar_targets", "fog_distance", "sky_height"), &NovaWeatherCore::set_scalar_targets);
+	ClassDB::bind_method(D_METHOD("get_fog_distance"), &NovaWeatherCore::get_fog_distance);
+	ClassDB::bind_method(D_METHOD("get_sky_height"), &NovaWeatherCore::get_sky_height);
+	ClassDB::bind_method(D_METHOD("get_sun_dim_pct"), &NovaWeatherCore::get_sun_dim_pct);
+	ClassDB::bind_method(D_METHOD("get_rain_pct"), &NovaWeatherCore::get_rain_pct);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset1", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset1);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_offset2", "cam_x", "cam_z"), &NovaWeatherCore::get_cloud_uv_offset2);
 	ClassDB::bind_method(D_METHOD("get_cloud_uv_rate_per_second"), &NovaWeatherCore::get_cloud_uv_rate_per_second);
@@ -42,6 +49,9 @@ void NovaWeatherCore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_wind_duration_ticks"), &NovaWeatherCore::get_wind_duration_ticks);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_short"), &NovaWeatherCore::trigger_lightning_short);
 	ClassDB::bind_method(D_METHOD("trigger_lightning_long"), &NovaWeatherCore::trigger_lightning_long);
+	ClassDB::bind_method(D_METHOD("set_exposure_from_iris", "light_dir", "iris_percent", "iris_center"),
+			&NovaWeatherCore::set_exposure_from_iris);
+	ClassDB::bind_method(D_METHOD("get_color_src_gain"), &NovaWeatherCore::get_color_src_gain);
 	ClassDB::bind_method(D_METHOD("get_fill"), &NovaWeatherCore::get_fill);
 	ClassDB::bind_method(D_METHOD("get_sun"), &NovaWeatherCore::get_sun);
 	ClassDB::bind_method(D_METHOD("get_fog"), &NovaWeatherCore::get_fog);
@@ -84,6 +94,11 @@ void NovaWeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target
 		}
 	}
 	rain.tick();
+	// The scalar spring channels step between the sequencers and the color
+	// blocks — the witnessed in-tick position [orig: the scalar tail
+	// @ 0x57edd7..0x57ef92 runs before the 16 interpolate_weather_color
+	// calls @ 0x57ef97..] (env #27).
+	scalar_channels.tick();
 	if (lightning.tick()) {
 		const opennova::env::LightningAdditivesPacked additives =
 				opennova::env::lightning_additives_packed(
@@ -93,12 +108,18 @@ void NovaWeatherCore::tick(const Color &p_fill_target, const Color &p_sun_target
 		fill_block.additive = additives.ground;
 		sun_block.additive = 0;
 	}
-	// The iris modulator chain (env #17) stays identity until its consumer
-	// lands; rain enters as the witnessed per-block blend factor.
-	fill_block.tick(opennova::env::kModulatorIdentityPacked, rain.intensity);
-	sun_block.tick(opennova::env::kModulatorIdentityPacked, rain.intensity);
-	fog_block.tick(opennova::env::kModulatorIdentityPacked, rain.intensity);
-	sky_block.tick(opennova::env::kModulatorIdentityPacked, rain.intensity);
+	// The iris modulator chain (env #17, REN-5): modulator-2 then the
+	// modulator tick FIRST, then every color block modulates against the
+	// modulator's fresh render color — the witnessed same-tick order
+	// [orig: Environment_UpdateWeatherTick block sequence @ 0x57ef97..
+	//  0x57f03c: 0x26c6678 modulator2, 0x26c6644 modulator, then the color
+	//  blocks]. Rain enters as the witnessed per-block blend factor.
+	modulator_chain.tick(rain.intensity);
+	const uint32_t modulator_packed = modulator_chain.render_color();
+	fill_block.tick(modulator_packed, rain.intensity);
+	sun_block.tick(modulator_packed, rain.intensity);
+	fog_block.tick(modulator_packed, rain.intensity);
+	sky_block.tick(modulator_packed, rain.intensity);
 
 	// The tick's tail [orig: accumulators @ 0x57f1a5..0x57f1d1].
 	tick_cloud_scroll(p_sky_speed);
@@ -133,6 +154,35 @@ void NovaWeatherCore::trigger_lightning_short() {
 
 void NovaWeatherCore::trigger_lightning_long() {
 	lightning.trigger_long();
+}
+
+void NovaWeatherCore::set_exposure_from_iris(const Vector3 &p_light_dir, float p_iris_percent, float p_iris_center) {
+	// The iris inputs are the blocks' [1] slots (step + lightning additive,
+	// pre modulation) / 255 [orig: terrain_sector_compute_lighting @ 0x5c7550
+	// reads Env_LightBlock[1]/Env_SkyBlock[1]/Env_GroundBlock[1]]; the outdoor
+	// directional term keeps full sun visibility (8/8 rays).
+	const auto to_rgb = [](uint32_t packed) {
+		opennova::env::Rgb c;
+		c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
+		c.g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
+		c.b = static_cast<float>(packed & 0xFF) / 255.0f;
+		return c;
+	};
+	const int gain = opennova::env::iris_gain(
+			to_rgb(sun_block.pre_mod_color),
+			to_rgb(sky_block.pre_mod_color),
+			to_rgb(fill_block.pre_mod_color),
+			p_light_dir.x, p_light_dir.y, p_light_dir.z,
+			p_iris_center, p_iris_percent);
+	// target = 0x10101 * gain, chased over 62 ticks (1 s)
+	// [orig: @ 0x57e512..0x57e538 -> ColorBlock_SetStepDeltas @ 0x57d940].
+	modulator_chain.set_exposure_target(gain);
+}
+
+Vector3 NovaWeatherCore::get_color_src_gain() const {
+	const std::array<float, 3> scale =
+			renderer::unpack_modulator_scale(modulator_chain.render_color() & 0xFFFFFFu);
+	return Vector3(scale[0], scale[1], scale[2]);
 }
 
 Color NovaWeatherCore::get_fill() const {
@@ -183,4 +233,28 @@ Vector4 NovaWeatherCore::get_water_uv_state(float p_cam_x, float p_cam_z, float 
 	const opennova::env::WaterUvState state =
 			opennova::env::water_uv_state(cloud_scroll, p_cam_x, p_cam_z, p_fog_distance);
 	return Vector4(state.scale, state.bias, state.offset_u, state.offset_v);
+}
+
+void NovaWeatherCore::set_scalar_targets(float p_fog_distance, float p_sky_height) {
+	// Targets only — the currents always ramp, exactly like the witnessed
+	// mission-start snap [orig: Environment_SnapStateToTargets @ 0x57d1e0:
+	// Env_FogDistTarget <- Env_FogLevelFixed, sky target <- Env_SkyHeightFixed].
+	scalar_channels.fog_dist_target_fp = static_cast<int32_t>(p_fog_distance * 65536.0f);
+	scalar_channels.sky_height_target_fp = static_cast<int32_t>(p_sky_height * 65536.0f);
+}
+
+float NovaWeatherCore::get_fog_distance() const {
+	return static_cast<float>(scalar_channels.fog_dist_fp) / 65536.0f;
+}
+
+float NovaWeatherCore::get_sky_height() const {
+	return static_cast<float>(scalar_channels.sky_height_fp) / 65536.0f;
+}
+
+float NovaWeatherCore::get_sun_dim_pct() const {
+	return static_cast<float>(scalar_channels.sun_dim_fp) / 65536.0f;
+}
+
+float NovaWeatherCore::get_rain_pct() const {
+	return static_cast<float>(scalar_channels.rain_pct_fp) / 65536.0f;
 }

@@ -182,6 +182,22 @@ func test_save_as_file_mis_adopts_path_and_save_current_preserves_extension() ->
 	DirAccess.remove_absolute(path)
 
 
+func test_save_as_file_mis_bakes_terrain_base_heights() -> void:
+	# A .mis Save As samples the terrain height under each entity (the stub surface is a flat
+	# plane at sample_height = 10.0) and bakes it as the item's extra_bheight (16.16: 655360)
+	# next to the absolute-height declaration, so the original editor recovers the
+	# terrain-relative offset from the height-locked absolute z
+	# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. See D-MIS-4.
+	var controller := _new_with_item_db()
+	controller.get_mission().add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
+	var path := ProjectSettings.globalize_path("user://mission_controller_bheight_%d.mis" % Time.get_ticks_usec())
+	assert_eq(controller.save_as_file(path), OK, "Save As writes the .mis")
+	var text := FileAccess.get_file_as_string(path)
+	assert_string_contains(text, "extra_bheight 655360", "the sampled terrain height is baked (10.0 in 16.16)")
+	assert_string_contains(text, "height_lock 1", "the item z is declared absolute")
+	DirAccess.remove_absolute(path)
+
+
 func test_handle_viewport_input_is_safe_without_a_mission() -> void:
 	# The controller is wired as the viewport input target; with no mission (or no
 	# terrain editor) every event must be an inert no-op, never a crash or a dirty.
