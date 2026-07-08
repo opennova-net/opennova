@@ -269,17 +269,23 @@ runs opposite world y (samplers negate y internally).
   `terrain_occlusion_check_three_rays @ 0x610ed0` (the D-RLIT 3-ray
   sun-visibility source).
 
-### B1 port pairing
+### B1 port (landed 2026-07-07)
 
-The ENG-3 B1 port lands the LoRes march + HiRes_0 refine as
-`libs/terrain_query`'s segment raycast over OUR canonical sampler substrate
-(`height_field` + `coords` — themselves the witnessed jodemo samplers), with
-the editor host consuming it through `NovaTerrainData` (live-image sampling +
-editor extent guards per `coords_editor_options` replace the retail OOB
-clamp-to-edge and the seam-flag machinery — the editor atlas is one
-contiguous image). Any observable divergence the substrate swap produces
-(quadrant-seam bilinear policy, OOB clamp vs reject) gets a `D-TERRAIN` row
-minted at the port.
+The B1a/B1b slices landed the LoRes march + HiRes_0 refine as
+`libs/terrain_query/terrain_raycast.{h,cpp}` (`terrain_raycast_march` /
+`terrain_raycast_refined`, 16.16 structural translations with a
+point+bilinear sampler seam; ~60 pinned checks in the `terrain_raycast`
+ctest incl. the step-math exactness, the crossing-rule asymmetry, the
+height-0 floor, and the odd refine guard's zero-step no-op-walk interplay),
+bound as `NovaTerrainData.raycast_terrain(from, to)` over BOTH host
+substrates (live editable Image preferred, baked CPT otherwise — the
+existing slice-A sampler cores reused). Adopters: ONED mission picking
+(`terrain_editor.raycast_terrain_at` — the GDScript march/slab/bisection
+trio deleted) and the celestial glare ray
+(`nova_celestial._glare_ray_clear`, the 32-unit stand-in retired). The
+editor-host guard divergences (OOB no-terrain vs retail clamp-to-edge,
+no-data NAN vs retail return-HIT, contiguous-atlas bilinear vs the seam
+flags) are **D-TERRAIN-4** (class C, PERMANENT candidate).
 
 Open follow-ups from this pass: the seam-flag WRITER (load-time adjacency
 derivation), `Terrain_RaycastHeightmapHiRes @ 0x60c760` internals, and the
@@ -292,6 +298,8 @@ rationale (if any) behind HiRes_0's odd skip-refine guard.
 | D-TERRAIN-1 | C | PERMANENT (candidate) | **Terrain-shader edit/runtime split** (the one deliberate divergence): the editor renders terrain with a live-sculpt shader (height edits without rebake), the runtime with the baked shader — the *surface-shading math is shared via an include* so the two cannot drift in look. Tracked, justified by an editing need the runtime path cannot serve, and sharing the fidelity-bearing core ([oned/editor-runtime-parity.md](../oned/editor-runtime-parity.md) §Terrain shaders). Ratify under ADR 0022 to move from candidate to `PERMANENT`. |
 | D-TERRAIN-2 | A | **FIXED (2026-07-06)** | **Doubled detail-normal factor** (the gobj-era chimera): `terrain_lighting.gdshaderinc` stacked TWO ×2 `dp3(normalmap, blendmap)` factors on the 3-way splat; the witnessed top-tier ps.1.4 applies exactly ONE `[orig: PolyTrn_PS14SplatNormalMap source @ 0x7dece0; PolyTrn_PS14Splat @ 0x7dee18; compile_terrain_pixel_shaders @ 0x605260]` (the dual-normal product belongs to the separate non-splat ps.1.1 tier). Post-gamma (D-RMAT-7) the squared factor clipped whole regions to white. See §Include correction above; ledger row carries the full witness. |
 | D-TERRAIN-3 | C | **FIXED (REN-7, 2026-07-07)** | **Below-horizon fill**: retail fills the below-rim region with the frame clear alone — the env #21 horizon-blended skyfog `[orig: Render_ProcessMainSceneFrame @ 0x5ca776..0x5ca792]`; no skirt/ring geometry exists in the frame walk (the sky-pass terrain leg `Terrain_RenderSkyboxPass @ 0x610ac0` → `Terrain_RenderSectorBatchLit @ 0x60c670` is the plain fogged sector batch), the seam hidden by fog convergence at the 1024 fog reference (= the dome rim radius). The host's clear consumer was swallowed by a `BG_SKY`(null-sky) Environment rendering BLACK; fixed to `BG_COLOR` + `AMBIENT_SOURCE_DISABLED` in `game_world.tscn`, GUT-pinned — and `get_frame_clear_color()` corrected to the post-blend DOUBLED skyfog (the modulate2x-path Clear takes it verbatim; the "undoubled" 07-05 reasoning was the non-modulate2x fallback, no host analog). Residual (not a retail-parity surface): the ONED editor preview's far-env adoption rides ONED polish/ENV-1. |
+
+| D-TERRAIN-4 | C | PERMANENT (candidate) | **Raycast editor-host guards** (ENG-3 B1): beyond-extent = no-terrain/no-hit vs retail's clamp-to-edge `[orig: @ 0x31a0010/0x319fc0c]`; no-data = clear/NAN vs retail's return-HIT `[orig: @ 0x60ccf7]`; contiguous-atlas bilinear vs the per-quadrant seam flags `[orig: @ 0x31a17f0..]`. Same class as the ratified `coords_editor_options` guards (ADR 0020); §Runtime terrain queries carries the retail forms for any future runtime-faithful host. |
 
 No other terrain divergence is confirmed — the data path is the byte-identical
 TrnGen port. The pending grill (below) may surface facets in mesh_simp / CDEP.

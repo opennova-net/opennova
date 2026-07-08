@@ -239,6 +239,17 @@ func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
 	return _data.sample_heights_world_live(points)
 
 
+# Segment raycast against the live terrain surface. Forwards to the engine's
+# witnessed raycast (NovaTerrainData.raycast_terrain, the ENG-3 B1 port
+# [orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0
+# @ 0x60e710]); returns the refined world-space hit or the all-NAN miss.
+# Pre-load (no data) misses, like the sampler forwarders above.
+func raycast_world(from: Vector3, to: Vector3) -> Vector3:
+	if _data == null:
+		return Vector3(NAN, NAN, NAN)
+	return _data.raycast_terrain(from, to)
+
+
 func world_to_cell_source_coords(world_x: float, world_z: float, row: int, col: int) -> Vector2:
 	# Explicit-cell, unclamped-local variant. Forwards to the C++ kernel.
 	if _data == null:

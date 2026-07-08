@@ -266,6 +266,17 @@ public:
 	// per-point core, same NAN semantics. EditorTerrainMesh.sample_world_height
 	// forwards here (it translates NAN to its legacy -1e6 sentinel).
 	float sample_height_world_live(double world_x, double world_z) const;
+	// Segment raycast against the terrain surface — the ENG-3 B1 port
+	// (libs/terrain_query/terrain_raycast.h) [orig: Terrain_RaycastHeightmapLoRes
+	// @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710]; witness record
+	// docs/terrain/terrain-re.md §Runtime terrain queries. Returns the refined
+	// world-space hit (x, height, z), or Vector3(NAN, NAN, NAN) when the segment
+	// is clear or no terrain data is mounted. Samples the LIVE editable heightmap
+	// when mounted, else the baked CPT heights (the same substrate split as
+	// sample_height_world_live vs get_height_world_bilinear); the working segment
+	// is host-clipped to the authored-extent XZ AABB before entering the 16.16
+	// fixed-point core.
+	Vector3 raycast_terrain(const Vector3 &p_from, const Vector3 &p_to) const;
 	Rect2i get_cell_atlas_rect(int row, int col) const;
 	int get_tile_count() const;
 

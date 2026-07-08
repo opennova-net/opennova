@@ -10,6 +10,7 @@
 #include <terrain/coords.h>
 #include <terrain/height_field.h>
 #include <terrain/lighting.h>
+#include <terrain/terrain_raycast.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -278,6 +279,111 @@ float sample_live_height_at(const opennova::terrain::SectorLayout &layout,
 	return static_cast<float>(hx0 + (hx1 - hx0) * fz);
 }
 
+// --- The raycast sampler adapter (ENG-3 B1b) --------------------------------
+// Host substrate behind NovaTerrainData::raycast_terrain: one
+// TerrainRaycastSampler (terrain/terrain_raycast.h) over BOTH height
+// substrates — the LIVE editable FORMAT_RF image when mounted (what the
+// brushes mutate and the placement raycasts must see), else the BAKED CPT
+// heights — the same live-vs-baked split as sample_height_world_live vs
+// get_height_world_bilinear. Kind classification runs the editor-mode
+// world->source transform (coords_editor_options): bounds-reject ->
+// kOutOfExtent (the editor-guard divergence the core documents), in-extent
+// sector id <= 0 -> kEmpty (the witnessed height-0 floor), else kHeight. The
+// POINT callback is the coarse floor-texel read; the BILINEAR callback reuses
+// the substrate's shared bilinear core (sample_live_height_at /
+// height_field_height_world_bilinear) so the raycast can never disagree with
+// the scalar samplers. Heights cross the 16.16 boundary via
+// llround(h * 65536.0) — for the baked raw16 substrate that is exactly
+// raw16 << 8 (raw16/256 * 65536 == raw16 * 256, exact in float and double).
+struct RaycastSubstrate {
+	opennova::terrain::SectorLayout layout; // the authored editor extent (classification)
+	// Live substrate (preferred when non-null).
+	const float *live = nullptr;
+	int live_w = 0;
+	int live_h = 0;
+	// Baked substrate (valid() when active).
+	opennova::terrain::TerrainHeightField baked;
+};
+
+inline int32_t raycast_height_to_1616(double height_world) {
+	return static_cast<int32_t>(std::llround(height_world * 65536.0));
+}
+
+// The editor-mode transform rejected the point: split the shared valid=false
+// result back into the two sampler kinds using the cell the transform already
+// derived (sector_sx/sz are filled before the bounds test).
+inline opennova::terrain::TerrainRaycastSample::Kind raycast_classify_invalid(
+		const opennova::terrain::SectorLayout &layout,
+		const opennova::terrain::CoordsResult<double> &r) {
+	const int grid_x = r.sector_sx - layout.origin_x;
+	const int grid_z = r.sector_sz - layout.origin_y;
+	const bool in_extent = grid_z >= 0 && grid_z < layout.sector_rows &&
+	                       grid_x >= 0 && grid_x < layout.sector_count;
+	return in_extent ? opennova::terrain::TerrainRaycastSample::kEmpty
+	                 : opennova::terrain::TerrainRaycastSample::kOutOfExtent;
+}
+
+// The coarse POINT sample: one floor-texel read of the active substrate
+// (the core's march tests it before the bilinear confirm).
+opennova::terrain::TerrainRaycastSample raycast_sample_point(void *ctx, int32_t world_x_1616,
+                                                             int32_t world_y_1616) {
+	const RaycastSubstrate &s = *static_cast<const RaycastSubstrate *>(ctx);
+	const double wx = world_x_1616 / 65536.0;
+	const double wz = world_y_1616 / 65536.0;
+	opennova::terrain::TerrainRaycastSample out;
+	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
+	        s.layout, wx, wz, opennova::terrain::coords_editor_options());
+	if (!r.valid) {
+		out.kind = raycast_classify_invalid(s.layout, r);
+		return out;
+	}
+	out.kind = opennova::terrain::TerrainRaycastSample::kHeight;
+	if (s.live) {
+		// Floor-texel read of the live image; source coords rounded through
+		// float32 first, matching sample_live_height_at's boundary.
+		const double source_x = static_cast<double>(static_cast<float>(r.source_x));
+		const double source_z = static_cast<double>(static_cast<float>(r.source_z));
+		const int x0 = std::clamp(static_cast<int>(std::floor(source_x)), 0, s.live_w - 1);
+		const int z0 = std::clamp(static_cast<int>(std::floor(source_z)), 0, s.live_h - 1);
+		out.height_1616 = raycast_height_to_1616(s.live[static_cast<size_t>(z0) * s.live_w + x0]);
+	} else {
+		// The baked point accessor (nearest texel, raw16/256 world units).
+		out.height_1616 = raycast_height_to_1616(opennova::terrain::height_field_height_world(
+		        s.baked, static_cast<float>(wx), static_cast<float>(wz)));
+	}
+	return out;
+}
+
+// The BILINEAR sample: the shared bilinear core of the active substrate.
+opennova::terrain::TerrainRaycastSample raycast_sample_bilinear(void *ctx, int32_t world_x_1616,
+                                                                int32_t world_y_1616) {
+	const RaycastSubstrate &s = *static_cast<const RaycastSubstrate *>(ctx);
+	const double wx = world_x_1616 / 65536.0;
+	const double wz = world_y_1616 / 65536.0;
+	opennova::terrain::TerrainRaycastSample out;
+	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
+	        s.layout, wx, wz, opennova::terrain::coords_editor_options());
+	if (!r.valid) {
+		out.kind = raycast_classify_invalid(s.layout, r);
+		return out;
+	}
+	out.kind = opennova::terrain::TerrainRaycastSample::kHeight;
+	if (s.live) {
+		const float h = sample_live_height_at(s.layout, s.live, s.live_w, s.live_h, wx, wz);
+		if (std::isnan(h)) {
+			// Unreachable (the classification above passed); keep the guard so a
+			// disagreement degrades to "no terrain here" instead of NAN fixed-point.
+			out.kind = opennova::terrain::TerrainRaycastSample::kOutOfExtent;
+			return out;
+		}
+		out.height_1616 = raycast_height_to_1616(h);
+	} else {
+		out.height_1616 = raycast_height_to_1616(opennova::terrain::height_field_height_world_bilinear(
+		        s.baked, static_cast<float>(wx), static_cast<float>(wz)));
+	}
+	return out;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -344,6 +450,7 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
 	ClassDB::bind_method(D_METHOD("sample_height_world_live", "world_x", "world_z"),
 	                     &NovaTerrainData::sample_height_world_live);
+	ClassDB::bind_method(D_METHOD("raycast_terrain", "from", "to"), &NovaTerrainData::raycast_terrain);
 	ClassDB::bind_method(D_METHOD("world_to_cell_source_coords", "world_x", "world_z", "row", "col"),
 	                     &NovaTerrainData::world_to_cell_source_coords);
 	ClassDB::bind_method(D_METHOD("get_cell_atlas_rect", "row", "col"), &NovaTerrainData::get_cell_atlas_rect);
@@ -1459,6 +1566,100 @@ float NovaTerrainData::sample_height_world_live(double world_x, double world_z) 
 	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
 	return sample_live_height_at(layout, reinterpret_cast<const float *>(pixels.ptr()), w, h,
 	                             world_x, world_z);
+}
+
+Vector3 NovaTerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to) const {
+	// The ENG-3 B1 segment raycast [orig: Terrain_RaycastHeightmapLoRes
+	// @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710] over the
+	// RaycastSubstrate sampler adapter above; docs/terrain/terrain-re.md
+	// §Runtime terrain queries. Godot plane coords map straight onto the core's
+	// axis-agnostic (x, y): (world_x, world_z), with world_y as the core's
+	// z = height axis, all quantized to 16.16 at this boundary.
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const Vector3 miss(nan, nan, nan);
+	if (!p_from.is_finite() || !p_to.is_finite()) {
+		return miss;
+	}
+
+	// Substrate pick: the live editable image when mounted, else the baked CPT.
+	// NO substrate at all -> the all-NAN miss. Retail's null-atlas raycast
+	// returns HIT there instead ("blocked" is the runtime's no-data default
+	// [orig: @ 0x60ccf7]) — that is runtime-substrate behavior; this binding is
+	// the editor-host surface, so no-data misses: the same deliberate
+	// editor-guard divergence class as the sampler's kOutOfExtent
+	// (terrain/terrain_raycast.h header note).
+	RaycastSubstrate substrate;
+	PackedByteArray live_pixels; // keeps the borrowed live mip-0 alive across the march
+	if (live_heightmap_pixels(heightmap_image, live_pixels, substrate.live_w, substrate.live_h)) {
+		substrate.live = reinterpret_cast<const float *>(live_pixels.ptr());
+	} else if (loaded && !cpt.depth_buffer.empty()) {
+		substrate.baked = height_field_from(cpt, trn);
+	} else {
+		return miss;
+	}
+	if (sector_grid.size() < 256) {
+		return miss; // no authored layout to classify against (mirrors the live samplers)
+	}
+	substrate.layout = editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+
+	// HOST bounding, not part of the witnessed core: clip the working segment
+	// to the authored-extent XZ AABB (replacing the editor's old GDScript slab
+	// test) plus a generous height band so the 16.16 quantization below cannot
+	// overflow — callers pass long probe segments (the editor mouse ray uses
+	// origin + dir * 100000).
+	const double extent_min_x = static_cast<double>(substrate.layout.origin_x) *
+	                            opennova::terrain::COORDS_SECTOR_SIZE;
+	const double extent_max_x = extent_min_x + static_cast<double>(substrate.layout.sector_count) *
+	                                                   opennova::terrain::COORDS_SECTOR_SIZE;
+	const double extent_min_z = static_cast<double>(substrate.layout.origin_y) *
+	                            opennova::terrain::COORDS_SECTOR_SIZE;
+	const double extent_max_z = extent_min_z + static_cast<double>(substrate.layout.sector_rows) *
+	                                                   opennova::terrain::COORDS_SECTOR_SIZE;
+	constexpr double HEIGHT_BAND = 30000.0; // within int32 16.16 (±32768), far above any terrain
+	const double dx = static_cast<double>(p_to.x) - static_cast<double>(p_from.x);
+	const double dy = static_cast<double>(p_to.y) - static_cast<double>(p_from.y);
+	const double dz = static_cast<double>(p_to.z) - static_cast<double>(p_from.z);
+	double t0 = 0.0;
+	double t1 = 1.0;
+	const auto clip_axis = [&t0, &t1](double origin, double delta, double lo, double hi) -> bool {
+		if (delta == 0.0) {
+			return origin >= lo && origin <= hi;
+		}
+		const double ta = (lo - origin) / delta;
+		const double tb = (hi - origin) / delta;
+		t0 = std::max(t0, std::min(ta, tb));
+		t1 = std::min(t1, std::max(ta, tb));
+		return true;
+	};
+	if (!clip_axis(p_from.x, dx, extent_min_x, extent_max_x) ||
+	    !clip_axis(p_from.z, dz, extent_min_z, extent_max_z) ||
+	    !clip_axis(p_from.y, dy, -HEIGHT_BAND, HEIGHT_BAND) || t1 < t0) {
+		return miss;
+	}
+
+	const auto to_1616 = [](double v) { return static_cast<int32_t>(std::llround(v * 65536.0)); };
+	const int32_t start[3] = {
+		to_1616(static_cast<double>(p_from.x) + dx * t0),
+		to_1616(static_cast<double>(p_from.z) + dz * t0),
+		to_1616(static_cast<double>(p_from.y) + dy * t0),
+	};
+	const int32_t end[3] = {
+		to_1616(static_cast<double>(p_from.x) + dx * t1),
+		to_1616(static_cast<double>(p_from.z) + dz * t1),
+		to_1616(static_cast<double>(p_from.y) + dy * t1),
+	};
+
+	opennova::terrain::TerrainRaycastSampler sampler;
+	sampler.point = &raycast_sample_point;
+	sampler.bilinear = &raycast_sample_bilinear;
+	sampler.ctx = &substrate;
+	int32_t hit[3] = { 0, 0, 0 };
+	if (!opennova::terrain::terrain_raycast_refined(sampler, start, end, hit)) {
+		return miss;
+	}
+	return Vector3(static_cast<real_t>(hit[0] / 65536.0),
+	               static_cast<real_t>(hit[2] / 65536.0),
+	               static_cast<real_t>(hit[1] / 65536.0));
 }
 
 Vector2 NovaTerrainData::world_to_cell_source_coords(double world_x, double world_z, int row, int col) const {

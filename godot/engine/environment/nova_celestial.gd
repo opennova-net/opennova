@@ -297,17 +297,18 @@ func _find_camera() -> Camera3D:
 	return viewport.get_camera_3d() if viewport else null
 
 
-# Terrain line-of-sight stand-in for [orig: Terrain_RaycastHeightmapLoRes
-# @ 0x60cb80] until ENG-3 ports the witnessed lo-res DDA: sample the jittered
-# segment (camera -> camera + sun_dir * 1024 + jitter) against the bilinear
-# height field at 32-unit steps. No terrain loaded = clear (nothing occludes).
+# Terrain line-of-sight for the glare: the ported boolean raycast form
+# [orig: Terrain_RaycastLoResNoNormal @ 0x610860 -> Terrain_RaycastHeightmapLoRes
+# @ 0x60cb80] over the jittered segment (camera -> camera + sun_dir * ray_length
+# + jitter). Retail's wrapper passes hit = NULL (a pure clear test); our
+# NovaTerrainData.raycast_terrain reports the miss as all-NAN, so clear = the
+# hit is NAN (the refine only sharpens the hit point — the clear/blocked answer
+# is the march's). No terrain loaded = clear (nothing occludes) — the
+# editor-guard divergence from retail's null-atlas return-HIT, kept
+# deliberately: an unloaded host has nothing to block the sun
+# (docs/terrain/terrain-re.md §Runtime terrain queries).
 func _glare_ray_clear(from_pos: Vector3, sun_dir: Vector3, ray_length: float, jitter: Vector3) -> bool:
 	if terrain_data == null or not terrain_data.is_loaded():
 		return true
-	var to_pos := from_pos + sun_dir * ray_length + jitter
-	const STEPS := 32
-	for i in range(1, STEPS + 1):
-		var point := from_pos.lerp(to_pos, float(i) / float(STEPS))
-		if terrain_data.get_height_world_bilinear(point) > point.y:
-			return false
-	return true
+	var hit: Vector3 = terrain_data.raycast_terrain(from_pos, from_pos + sun_dir * ray_length + jitter)
+	return is_nan(hit.x)
