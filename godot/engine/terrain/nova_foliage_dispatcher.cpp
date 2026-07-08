@@ -2,9 +2,7 @@
 
 #include "nova_terrain_data.h"
 
-#include <env/env_render.h>
 #include <foliage/fd_bake.h>
-#include <terrain/lighting.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/box_mesh.hpp>
@@ -42,26 +40,11 @@ constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
 // The XZ counterpart is opennova::foliage::MODEL_FOOTPRINT_SCALE (0.75).
 constexpr float MODEL_RENDER_HEIGHT_SCALE = 0.5f;
 
-// Foliage instance color: the witnessed sampler chain (per-sample terrain_rgb
-// tint + 2x2 average [orig: sample_terrain_colormap_tinted @ 0x606030;
-// generate_foliage_instances_0 @ 0x600197..0x6001eb]) baked into MultiMesh
-// instance colors. The emitter's half-plus-bias vertex color and the retail
-// colormap alpha-premultiply ride the foliage render-emitter parity (PAR-R2).
-
-uint32_t color_to_argb(const Color &color) {
-	auto to_byte = [](float value) -> uint32_t {
-		return static_cast<uint32_t>(std::clamp(static_cast<int>(std::lround(value * 255.0f)), 0, 255));
-	};
-	return (to_byte(color.a) << 24) | (to_byte(color.r) << 16) | (to_byte(color.g) << 8) | to_byte(color.b);
-}
-
-Color argb_to_color(uint32_t argb) {
-	constexpr float INV_255 = 1.0f / 255.0f;
-	return Color(static_cast<float>((argb >> 16) & 0xFFu) * INV_255,
-	             static_cast<float>((argb >> 8) & 0xFFu) * INV_255,
-	             static_cast<float>(argb & 0xFFu) * INV_255,
-	             static_cast<float>((argb >> 24) & 0xFFu) * INV_255);
-}
+// Both tiers derive their ground color IN-SHADER from the tinted colormap
+// sample (the quad-emitter half-plus-bias form; foliage_model.gdshader) -
+// the per-pixel form supersedes the old CPU per-instance average and sits
+// closer to the witnessed per-VERTEX quad colors; the exact emitter form
+// remains the D-FOLIAGE-1 render-emitter parity leg.
 
 } // namespace
 
@@ -87,6 +70,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	                            &NovaFoliageDispatcher::bake_fd_image);
 	ClassDB::bind_method(D_METHOD("get_model_tile_debug", "slot"),
 	                     &NovaFoliageDispatcher::get_model_tile_debug);
+	ClassDB::bind_method(D_METHOD("get_far_tile_debug", "slot"),
+	                     &NovaFoliageDispatcher::get_far_tile_debug);
 	ClassDB::bind_method(D_METHOD("set_height_sampler", "sampler"), &NovaFoliageDispatcher::set_height_sampler);
 	ClassDB::bind_method(D_METHOD("get_height_sampler"), &NovaFoliageDispatcher::get_height_sampler);
 	ClassDB::bind_method(D_METHOD("set_foliage_sampler", "sampler"), &NovaFoliageDispatcher::set_foliage_sampler);
@@ -257,12 +242,11 @@ void NovaFoliageDispatcher::set_terrain_tint(const Color &p_tint) {
 	if (terrain_tint_ == p_tint) {
 		return;
 	}
+	// The env terrain_rgb tint, derived once like the terrain-init global
+	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20 <- Terrain_Init
+	// @ 0x60fc42]. Both tiers apply the FULL form in-shader
+	// (min(texel * tint * 255/128, 1) - the u_terrain_tint uniform).
 	terrain_tint_ = p_tint;
-	// FULL = c | FF000000, derived once like the terrain-init global
-	// [orig: PolyTrn_SetTerrainTintColors @ 0x605e20 <- Terrain_Init @ 0x60fc42].
-	terrain_tint_full_ = opennova::env::terrain_tint_from_rgb(
-			opennova::env::Rgb{ terrain_tint_.r, terrain_tint_.g, terrain_tint_.b }).full;
-	// The tint is baked into the cached instance colors at scatter time.
 	reset();
 }
 
@@ -311,6 +295,7 @@ int NovaFoliageDispatcher::get_lru_capacity() const { return lru_capacity_; }
 
 void NovaFoliageDispatcher::set_quad_half_width(float p_width) {
 	quad_half_width_ = p_width;
+	far_patch_mesh_.unref();  // rebuilt lazily at the next rebuild
 	reset();
 }
 
@@ -349,6 +334,9 @@ void NovaFoliageDispatcher::reset() {
 	}
 	for (auto &slot_colors : engine_colors_) {
 		slot_colors.clear();
+	}
+	for (auto &slot_customs : engine_customs_) {
+		slot_customs.clear();
 	}
 	model_frame_counter_ = 0;
 	model_wind_counter_ = 0;
@@ -452,6 +440,38 @@ Array NovaFoliageDispatcher::get_model_tile_debug(int p_slot) const {
 	return out;
 }
 
+Array NovaFoliageDispatcher::get_far_tile_debug(int p_slot) const {
+	Array out;
+	if (p_slot < 0 || p_slot >= opennova::FOLIAGE_MAX_DEFS) {
+		return out;
+	}
+	auto emit = [&out](const std::vector<Transform3D> &transforms,
+	                   const std::vector<Color> &colors,
+	                   const std::vector<Color> &customs) {
+		const size_t n = transforms.size();
+		if (colors.size() != n || customs.size() != n) {
+			return;
+		}
+		for (size_t i = 0; i < n; ++i) {
+			Dictionary d;
+			d["transform"] = transforms[i];
+			d["color"] = colors[i];
+			d["custom"] = customs[i];
+			out.push_back(d);
+		}
+	};
+	if (render_algorithm_ == DISPATCH_ALGORITHM_ENGINE_CENTERS) {
+		emit(engine_transforms_[p_slot], engine_colors_[p_slot], engine_customs_[p_slot]);
+	} else {
+		for (const auto &kv : lru_) {
+			if (kv.first.slot == p_slot) {
+				emit(kv.second.transforms, kv.second.colors, kv.second.customs);
+			}
+		}
+	}
+	return out;
+}
+
 void NovaFoliageDispatcher::_invalidate_dispatch_coverage() {
 	last_cell_grid_base_valid_ = false;
 	last_cell_grid_base_x_ = 0;
@@ -550,13 +570,16 @@ void NovaFoliageDispatcher::_dispatch_cell_grid(Vector3 centre, const Dictionary
 
 				std::vector<Transform3D> transforms;
 				std::vector<Color> colors;
-				const bool any = _scatter_cell(slot_index, cell_x, cell_z, def, defs_by_match, transforms, colors);
+				std::vector<Color> customs;
+				const bool any = _scatter_cell(slot_index, cell_x, cell_z, def, defs_by_match,
+				                               transforms, colors, customs);
 				if (!any) {
 					continue;
 				}
 				LRUEntry entry;
 				entry.transforms = std::move(transforms);
 				entry.colors = std::move(colors);
+				entry.customs = std::move(customs);
 				entry.touch = touch_counter_;
 				lru_.emplace(key, std::move(entry));
 				mm_dirty_ = true;
@@ -619,68 +642,42 @@ float NovaFoliageDispatcher::_sample_height(float world_x, float world_z) const 
 	return static_cast<float>(static_cast<double>(result));
 }
 
-Color NovaFoliageDispatcher::_sample_ground_color(const opennova::foliage::PlacementInstance &inst,
-                                                  float quad_half_width) const {
-	using opennova::foliage::FIXED_TO_FLOAT;
-
-	(void)quad_half_width;
-	// Prefer the runtime fast-path terrain_data; fall back to the editor's
-	// colormap-only source so the editor preview tints from the colormap too.
-	NovaTerrainData *td = terrain_data_.is_valid() ? terrain_data_.ptr() : colormap_source_.ptr();
-	if (td == nullptr) {
-		return Color(1.0f, 1.0f, 1.0f, 1.0f);
-	}
-
-	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
-	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
-
-	// Four lightmap samples at the instance center +-0.5 world units
-	// (+-0x8000 fixed) with the env terrain_rgb FULL tint applied per sample
-	// (min((texel * FULL) >> 7, 255), alpha passthrough), then the 2x2 SWAR
-	// average [orig: sample_terrain_colormap_tinted @ 0x606030; sample fan
-	// generate_foliage_instances_0 @ 0x600197..0x6001eb]. MultiMesh has one
-	// color per instance, so the average IS the instance color. The
-	// half-plus-bias emitter form is applied below (2026-07-07); the
-	// per-VERTEX gradient (four distinct corner colors vs one instance color)
-	// remains the PAR-R2 residual.
-	const uint32_t full_tint = terrain_tint_full_;
-	const auto tinted = [full_tint, td](float sx, float sz) -> uint32_t {
-		return opennova::env::foliage_lightmap_tint(
-				color_to_argb(td->get_colormap_color_world(sx, sz)), full_tint);
-	};
-	const uint32_t c0 = tinted(wx - 0.5f, wz - 0.5f);
-	const uint32_t c1 = tinted(wx + 0.5f, wz - 0.5f);
-	const uint32_t c2 = tinted(wx - 0.5f, wz + 0.5f);
-	const uint32_t c3 = tinted(wx + 0.5f, wz + 0.5f);
-	const uint32_t packed = opennova::terrain::terrain_average_four_argb(c0, c1, c2, c3);
-	// The emitter's half-plus-bias vertex color over the tinted average —
-	// alpha forced opaque; per-channel 0x40 + avg/2 cannot carry (max 0xBF)
-	// [orig: generate_foliage_instances_0 @ 0x600197..0x6001eb emits
-	// 0xFF000000 | (0x404040 + (avg >> 1))].
-	const uint32_t biased = 0xFF000000u | (0x00404040u + ((packed >> 1) & 0x007F7F7Fu));
-	return argb_to_color(biased);
-}
-
 void NovaFoliageDispatcher::_append_render_instance(const opennova::foliage::PlacementInstance &inst,
-                                                    float quad_half_width,
                                                     std::vector<Transform3D> &out_transforms,
-                                                    std::vector<Color> &out_colors) const {
+                                                    std::vector<Color> &out_colors,
+                                                    std::vector<Color> &out_customs) const {
 	using opennova::foliage::FIXED_TO_FLOAT;
 
 	const float wx = static_cast<float>(inst.world_x_fixed) * FIXED_TO_FLOAT;
 	const float wz = static_cast<float>(inst.world_z_fixed) * FIXED_TO_FLOAT;
-	const float wy = static_cast<float>(inst.world_y_fixed) * FIXED_TO_FLOAT;
-	const float yaw = inst.rotation_radians;
 
-	// Upright, yaw-only. Retail foliage never slope-tilts: the model tier
-	// stamps upright with the yaw baked into the corner geometry
-	// [orig: Foliage_GenerateModelTileInstances @ 0x600980], and the quad
-	// tier conforms to terrain through its per-corner heights, not a tilt.
-	// The slope-tilt basis this host used to apply was unwitnessed; deleted
-	// with the two-tier port (D-FOLIAGE-4).
-	const Basis basis(Quaternion(Vector3(0, 1, 0), yaw));
-	out_transforms.emplace_back(basis, Vector3(wx, wy + surface_offset_, wz));
-	out_colors.emplace_back(_sample_ground_color(inst, quad_half_width));
+	// The quad placement's OWN witnessed ground fit: patch_control IS the
+	// (E_A, T_A, E_B, T_B) fold of the corner/midpoint heights - the same
+	// family the model tier feeds its grid-placement VS (pinned by the
+	// foliage_quad_fold ctest) [orig: Foliage_BuildPatchData @ 0x5C0240,
+	// 0x5C06B8..0x5C07FC; retail generate_foliage_instances_0 @ 0x600197].
+	const float e_a = inst.patch_control[0];
+	const float t_a = inst.patch_control[1];
+	const float e_b = inst.patch_control[2];
+	const float t_b = inst.patch_control[3];
+	float h[4];
+	for (int k = 0; k < 4; ++k) {
+		h[k] = static_cast<float>(inst.corner_y_fixed[k]) * FIXED_TO_FLOAT;
+	}
+	// hbase = the fit at the patch center (corner average + E_A + E_B); the
+	// shader adds only the per-vertex delta, like the model tier.
+	const float hbase = (h[0] + h[1] + h[2] + h[3]) * 0.25f + e_a + e_b;
+
+	// Ground-conforming, upright, yaw-only: conformance comes per-vertex
+	// from the height fold, never from a basis tilt. The quad corner layout
+	// shares the model tier's axis form (A -> +X form, B -> -Z form; the
+	// patch mesh spans mesh (x, z) = (-A, +B)), so the SAME rotY(yaw + pi)
+	// mapping, the same (1, 0, 3, 2) COLOR corner order, and the same T_A
+	// sign flip apply (derivation at _model_instance_transform).
+	out_transforms.emplace_back(_engine_yaw_basis(inst.rotation_radians),
+	                            Vector3(wx, hbase + surface_offset_, wz));
+	out_colors.emplace_back(Color(h[1] - hbase, h[0] - hbase, h[3] - hbase, h[2] - hbase));
+	out_customs.emplace_back(Color(e_a, -t_a, e_b, t_b));
 }
 
 void NovaFoliageDispatcher::_dispatch_engine_centers(const PackedVector3Array &centers,
@@ -697,6 +694,9 @@ void NovaFoliageDispatcher::_dispatch_engine_centers(const PackedVector3Array &c
 	}
 	for (auto &slot_colors : engine_colors_) {
 		slot_colors.clear();
+	}
+	for (auto &slot_customs : engine_customs_) {
+		slot_customs.clear();
 	}
 
 	opennova::foliage::PlacementConfig config;
@@ -796,10 +796,12 @@ void NovaFoliageDispatcher::_dispatch_engine_centers(const PackedVector3Array &c
 			                                         zsort);
 			auto &slot_transforms = engine_transforms_[slot_index];
 			auto &slot_colors = engine_colors_[slot_index];
+			auto &slot_customs = engine_customs_[slot_index];
 			slot_transforms.reserve(slot_transforms.size() + zsort.size());
 			slot_colors.reserve(slot_colors.size() + zsort.size());
+			slot_customs.reserve(slot_customs.size() + zsort.size());
 			for (const auto &z_instance : zsort) {
-				_append_render_instance(z_instance.instance, quad_half_width_, slot_transforms, slot_colors);
+				_append_render_instance(z_instance.instance, slot_transforms, slot_colors, slot_customs);
 			}
 		}
 	}
@@ -867,34 +869,44 @@ void NovaFoliageDispatcher::_make_sampler_bindings(const Dictionary &defs_by_mat
 	};
 }
 
-// The model-instance transform, DERIVED from the libs corner outputs (pinned
-// by the ctest/GUT parity tests - never guessed):
+// The engine->Godot instance mapping, DERIVED from the libs corner outputs
+// (pinned by the ctest/GUT parity tests - never guessed). Both tiers share
+// it: the model tier through the transform below, the far ground patch
+// through _append_render_instance.
 //
-//   TRANSFORM = translate(center, hbase) * rotY(yaw + pi)
-//             * scale(0.75, 0.5, 0.75) * translate(-(cx, 0, cz))
+//   MODEL TRANSFORM = translate(center, hbase) * rotY(yaw + pi)
+//                   * scale(0.75, 0.5, 0.75) * translate(-(cx, 0, cz))
+//   PATCH TRANSFORM = translate(center, hbase + surface_offset)
+//                   * rotY(yaw + pi)            (mesh already at world size)
 //
-// Derivation. The libs generator emits engine-space corners k = 0..3 at
-// footprint coords (A, B) = (k&1 ? +F : -F, k&2 ? +F : -F) rotated by yaw,
-// with world deltas dX = A cos - B sin, dZ = -(A sin + B cos) (the B axis
-// runs NEGATIVE world Z - a handedness flip, det -1 on (A, B) -> (X, Z)).
-// The 3DI -> Godot mesh conversion negates X (nova_object_data.cpp
-// godot_position), which flips handedness AGAIN, so the composite Godot-mesh
-// -> world XZ map is a proper rotation: for a mesh-space offset (gx, gz)
-// from the bound center, (dX, dZ) = 0.75 * (gx cos t + gz sin t,
+// Derivation. Both libs generators emit engine-space corners k = 0..3 at
+// local coords (A, B) = (k&1 ? +F : -F, k&2 ? +F : -F) rotated by yaw, with
+// world deltas dX = A cos - B sin, dZ = -(A sin + B cos) (the B axis runs
+// NEGATIVE world Z - a handedness flip, det -1 on (A, B) -> (X, Z))
+// [orig: Foliage_GenerateModelTileInstances @ 0x600980 (model);
+// Foliage_BuildPatchData @ 0x5C0240 (quad)]. Both render meshes live in an
+// X-mirrored space relative to that layout - the 3DI -> Godot conversion
+// negates X (nova_object_data.cpp godot_position), and the far patch mesh
+// is BUILT with mesh (x, z) = (-A, +B) to match - which flips handedness
+// AGAIN, so the composite Godot-mesh -> world XZ map is a proper rotation:
+// for a mesh-space offset (gx, gz), (dX, dZ) = s * (gx cos t + gz sin t,
 // -gx sin t + gz cos t) with t = yaw + pi - exactly Godot's rotY(t).
-// Mesh corner (sx, sz) = (+-1, +-1)*R therefore lands on engine corner
-// (A, B) = (-F sx, +F sz):
+// Mesh corner (sx, sz) therefore lands on engine corner (A, B) =
+// (-F sx, +F sz):
 //   mesh (-1,-1) -> c1, (+1,-1) -> c0, (-1,+1) -> c3, (+1,+1) -> c2
 // which is why the packed COLOR corner order is (h1, h0, h3, h2) and the
 // engine u axis maps to -u_mesh (the CUSTOM_DATA T_A sign flip); v is
-// unchanged. Scale: the VB normalization x_n = (x - cx)/(2R) + 0.5 spanning
-// footprint corners at +-0.75R gives the witnessed effective render scale
-// 0.75 on XZ [orig: Foliage_FillInstancedModelBuffers @ 0x5ffa20 (the
-// normalize); Foliage_GenerateModelTileInstances @ 0x600980 (the corners)],
-// and pos.y = y * 0.5 - the model height is HALVED in the VB. hbase = the
-// bilinear ground height at the instance center (corner average + the
-// sag-fold center E_A + E_B); the vertex shader adds only the per-vertex
-// DELTA, so the transform carries the base.
+// unchanged. Model scale: the VB normalization x_n = (x - cx)/(2R) + 0.5
+// spanning footprint corners at +-0.75R gives the witnessed effective
+// render scale 0.75 on XZ [orig: Foliage_FillInstancedModelBuffers
+// @ 0x5ffa20 (the normalize)], and pos.y = y * 0.5 - the model height is
+// HALVED in the VB. hbase = the fit at the instance center (corner average
+// + the sag-fold center E_A + E_B); the vertex shader adds only the
+// per-vertex DELTA, so the transform carries the base.
+Basis NovaFoliageDispatcher::_engine_yaw_basis(float yaw_radians) const {
+	return Basis(Vector3(0, 1, 0), yaw_radians + static_cast<float>(Math_PI));
+}
+
 Transform3D NovaFoliageDispatcher::_model_instance_transform(
 		const opennova::foliage::ModelInstance &inst,
 		float hbase,
@@ -902,7 +914,7 @@ Transform3D NovaFoliageDispatcher::_model_instance_transform(
 	using opennova::foliage::FIXED_TO_FLOAT;
 	const float wx = static_cast<float>(inst.center_x_fixed) * FIXED_TO_FLOAT;
 	const float wz = static_cast<float>(inst.center_z_fixed) * FIXED_TO_FLOAT;
-	Basis basis(Vector3(0, 1, 0), inst.yaw_radians + static_cast<float>(Math_PI));
+	Basis basis = _engine_yaw_basis(inst.yaw_radians);
 	basis = basis * Basis::from_scale(Vector3(opennova::foliage::MODEL_FOOTPRINT_SCALE,
 	                                          MODEL_RENDER_HEIGHT_SCALE,
 	                                          opennova::foliage::MODEL_FOOTPRINT_SCALE));
@@ -1027,7 +1039,6 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 void NovaFoliageDispatcher::_refresh_slot_bounds() {
 	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
 		slot_bounds_[s] = SlotModelBounds{};
-		far_quad_meshes_[s].unref();
 		Ref<Mesh> mesh;
 		if (s < slot_meshes_.size()) {
 			mesh = slot_meshes_[s];
@@ -1052,40 +1063,42 @@ void NovaFoliageDispatcher::_refresh_slot_bounds() {
 		}
 		bounds.valid = true;
 		slot_bounds_[s] = bounds;
-		far_quad_meshes_[s] = _build_far_quad_mesh(bounds);
 	}
 }
 
-Ref<Mesh> NovaFoliageDispatcher::_build_far_quad_mesh(const SlotModelBounds &bounds) const {
-	// FAR-tier quad: upright, base at the placement anchor. Width = the model
-	// tier's stamped footprint span (2 * 0.75 * R), height = the model bound
-	// height * the witnessed 0.5 height scale. The SIZE is a host mapping
-	// from the model bounds pending the quad-emitter grill (D-FOLIAGE-1/-3
-	// leg); retail sizes its quads in the still-ungrilled quad emitter.
-	const float half_width = opennova::foliage::MODEL_FOOTPRINT_SCALE * bounds.radius;
-	const float height = bounds.max_y * MODEL_RENDER_HEIGHT_SCALE;
+Ref<Mesh> NovaFoliageDispatcher::_build_far_patch_mesh() const {
+	// FAR-tier GROUND patch: an XZ-plane quad the ground-fit shader bends
+	// onto the placement's witnessed corner/midpoint fold. The quad tier's
+	// own placement data (corner_y/midpoint_y/patch_control) describes a
+	// ground-conforming patch, not a billboard - the earlier upright-quad
+	// host mapping is retracted (D-FOLIAGE-4 note). Mesh axes are chosen as
+	// mesh (x, z) = (-A, +B) so the SAME engine yaw mapping as the model
+	// tier applies; UV = the normalized weight space ((0,0) at mesh
+	// (-w, -w)). The retail emitter's exact quad SIZE remains the ungrilled
+	// D-FOLIAGE-1/-3 leg, so the width stays the quad_half_width knob.
+	const float w = quad_half_width_;
 
 	PackedVector3Array positions;
 	PackedVector3Array normals;
 	PackedVector2Array uvs;
 	PackedInt32Array indices;
-	positions.push_back(Vector3(-half_width, height, 0.0f));
-	positions.push_back(Vector3(half_width, height, 0.0f));
-	positions.push_back(Vector3(half_width, 0.0f, 0.0f));
-	positions.push_back(Vector3(-half_width, 0.0f, 0.0f));
+	positions.push_back(Vector3(-w, 0.0f, -w));
+	positions.push_back(Vector3(w, 0.0f, -w));
+	positions.push_back(Vector3(-w, 0.0f, w));
+	positions.push_back(Vector3(w, 0.0f, w));
 	uvs.push_back(Vector2(0.0f, 0.0f));
 	uvs.push_back(Vector2(1.0f, 0.0f));
-	uvs.push_back(Vector2(1.0f, 1.0f));
 	uvs.push_back(Vector2(0.0f, 1.0f));
+	uvs.push_back(Vector2(1.0f, 1.0f));
 	for (int i = 0; i < 4; ++i) {
-		normals.push_back(Vector3(0.0f, 0.0f, 1.0f));
+		normals.push_back(Vector3(0.0f, 1.0f, 0.0f));
 	}
 	indices.push_back(0);
 	indices.push_back(1);
-	indices.push_back(2);
-	indices.push_back(0);
-	indices.push_back(2);
 	indices.push_back(3);
+	indices.push_back(0);
+	indices.push_back(3);
+	indices.push_back(2);
 
 	Array arrays;
 	arrays.resize(Mesh::ARRAY_MAX);
@@ -1107,7 +1120,30 @@ Ref<Texture2D> NovaFoliageDispatcher::_slot_fd_texture(int slot_index) const {
 	return slot_fd_textures_[slot_index];
 }
 
-void NovaFoliageDispatcher::_update_model_slot_material(int slot_index, const Ref<Mesh> &slot_mesh) {
+Ref<Texture2D> NovaFoliageDispatcher::_slot_fd_or_albedo(int slot_index) const {
+	// The ":fd" bake - both tiers bind it [orig: Foliage_DrawModelTileSlot
+	// @ 0x601d90]; fall back to the MODEL mesh's own albedo when no bake
+	// was supplied.
+	Ref<Texture2D> fd_tex = _slot_fd_texture(slot_index);
+	if (fd_tex.is_valid()) {
+		return fd_tex;
+	}
+	Ref<Mesh> model_mesh;
+	if (slot_index >= 0 && slot_index < slot_meshes_.size()) {
+		model_mesh = slot_meshes_[slot_index];
+	}
+	if (model_mesh.is_valid() && model_mesh->get_surface_count() > 0) {
+		Ref<Material> source_material = model_mesh->surface_get_material(0);
+		if (source_material.is_valid()) {
+			if (BaseMaterial3D *base_material = Object::cast_to<BaseMaterial3D>(source_material.ptr())) {
+				return base_material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
+			}
+		}
+	}
+	return Ref<Texture2D>();
+}
+
+void NovaFoliageDispatcher::_update_model_slot_material(int slot_index) {
 	if (slot_index < 0 || slot_index >= opennova::FOLIAGE_MAX_DEFS) {
 		return;
 	}
@@ -1129,17 +1165,10 @@ void NovaFoliageDispatcher::_update_model_slot_material(int slot_index, const Re
 		material->set_shader(foliage_model_shader_);
 	}
 
-	// The ":fd" bake - both tiers bind it [orig: Foliage_DrawModelTileSlot
-	// @ 0x601d90]; fall back to the mesh's own albedo when no bake exists.
-	Ref<Texture2D> fd_tex = _slot_fd_texture(slot_index);
-	if (fd_tex.is_null() && slot_mesh.is_valid() && slot_mesh->get_surface_count() > 0) {
-		Ref<Material> source_material = slot_mesh->surface_get_material(0);
-		if (source_material.is_valid()) {
-			if (BaseMaterial3D *base_material = Object::cast_to<BaseMaterial3D>(source_material.ptr())) {
-				fd_tex = base_material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
-			}
-		}
-	}
+	// NEAR tier: weights re-normalized from the pre-scale model vertex.
+	material->set_shader_parameter("u_weights_from_uv", false);
+
+	Ref<Texture2D> fd_tex = _slot_fd_or_albedo(slot_index);
 	material->set_shader_parameter("u_fd_texture", fd_tex);
 	material->set_shader_parameter("u_has_fd_texture", fd_tex.is_valid());
 
@@ -1221,7 +1250,7 @@ void NovaFoliageDispatcher::_rebuild_model_multimeshes() {
 			mm->set_mesh(slot_mesh);
 		}
 
-		_update_model_slot_material(s, slot_mesh);
+		_update_model_slot_material(s);
 		Ref<ShaderMaterial> material = foliage_model_materials_[s];
 		if (material.is_valid()) {
 			// The wind phase [orig: c9 = (sin(counter*0.001)*0.08, ...) in
@@ -1258,7 +1287,8 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
                                           const Ref<NovaTerrainFoliageDef> &def,
                                           const Dictionary &defs_by_match,
                                           std::vector<Transform3D> &out_transforms,
-                                          std::vector<Color> &out_colors) {
+                                          std::vector<Color> &out_colors,
+                                          std::vector<Color> &out_customs) {
 	using opennova::foliage::Fixed16_16;
 
 	opennova::foliage::PlacementSamplers samplers;
@@ -1333,7 +1363,7 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 	                                  samplers);
 
 	for (int i = 0; i < result.count; ++i) {
-		_append_render_instance(result.instances[i], quad_half_width_, out_transforms, out_colors);
+		_append_render_instance(result.instances[i], out_transforms, out_colors, out_customs);
 	}
 
 	(void)def;
@@ -1360,59 +1390,50 @@ Ref<Mesh> NovaFoliageDispatcher::_fallback_mesh() const {
 	return box;
 }
 
-void NovaFoliageDispatcher::_update_slot_material(int slot_index, const Ref<Mesh> &slot_mesh) {
+void NovaFoliageDispatcher::_update_slot_material(int slot_index) {
 	if (slot_index < 0 || slot_index >= opennova::FOLIAGE_MAX_DEFS) {
 		return;
 	}
 
-	if (foliage_shader_.is_null()) {
-		foliage_shader_ = ResourceLoader::get_singleton()->load("res://shaders/foliage.gdshader", "Shader");
+	// The FAR ground patches run the SAME witnessed ground-fit shader as the
+	// model tier (one shader, one copy of the fit/combine math); the patch
+	// spans the corner rectangle directly, so weights come from UV.
+	if (foliage_model_shader_.is_null()) {
+		foliage_model_shader_ =
+		    ResourceLoader::get_singleton()->load("res://shaders/foliage_model.gdshader", "Shader");
 	}
-	if (foliage_shader_.is_null()) {
+	if (foliage_model_shader_.is_null()) {
 		return;
 	}
 
 	Ref<ShaderMaterial> material = foliage_materials_[slot_index];
 	if (material.is_null()) {
 		material.instantiate();
-		material->set_shader(foliage_shader_);
+		material->set_shader(foliage_model_shader_);
 		foliage_materials_[slot_index] = material;
-	} else if (material->get_shader() != foliage_shader_) {
-		material->set_shader(foliage_shader_);
+	} else if (material->get_shader() != foliage_model_shader_) {
+		material->set_shader(foliage_model_shader_);
 	}
 
-	// The far quads bind the ":fd" bake [orig: Foliage_LoadDefAssets
-	// @ 0x601260 tail - the quad tier textures with the same "%s:fd"];
-	// fall back to the MODEL mesh's own albedo when no bake was supplied
-	// (the rendered far mesh is the derived quad, which carries no material).
-	Ref<Texture2D> albedo_tex = _slot_fd_texture(slot_index);
-	if (albedo_tex.is_null()) {
-		Ref<Mesh> model_mesh;
-		if (slot_index < slot_meshes_.size()) {
-			model_mesh = slot_meshes_[slot_index];
-		}
-		if (model_mesh.is_valid() && model_mesh->get_surface_count() > 0) {
-			Ref<Material> source_material = model_mesh->surface_get_material(0);
-			if (source_material.is_valid()) {
-				if (BaseMaterial3D *base_material = Object::cast_to<BaseMaterial3D>(source_material.ptr())) {
-					albedo_tex = base_material->get_texture(BaseMaterial3D::TEXTURE_ALBEDO);
-				}
-			}
-		}
-	}
-	(void)slot_mesh;
+	material->set_shader_parameter("u_weights_from_uv", true);
 
-	material->set_shader_parameter("u_albedo_texture", albedo_tex);
-	material->set_shader_parameter("u_has_albedo_texture", albedo_tex.is_valid());
-	// Bind the colormap from the same source chain as the CPU instance color
-	// (runtime terrain first, editor colormap-only source second) so the
-	// witnessed blend PS sees the identical texels the emitter averaged.
+	// The far patches bind the ":fd" bake [orig: Foliage_LoadDefAssets
+	// @ 0x601260 tail - the quad tier textures with the same "%s:fd"].
+	Ref<Texture2D> fd_tex = _slot_fd_or_albedo(slot_index);
+	material->set_shader_parameter("u_fd_texture", fd_tex);
+	material->set_shader_parameter("u_has_fd_texture", fd_tex.is_valid());
+
+	// Colormap from the runtime terrain first, editor colormap-only source
+	// second, so the witnessed blend PS sees the CPU sampler's texels.
 	Ref<NovaTerrainData> cm_src = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
 	const bool has_cm = cm_src.is_valid() && cm_src->get_colormap().is_valid();
 	if (has_cm) {
 		material->set_shader_parameter("u_colormap", cm_src->get_colormap());
 	}
 	material->set_shader_parameter("u_has_colormap", has_cm);
+
+	// The env terrain tint feeding the in-shader emitter-form v0 derivation.
+	material->set_shader_parameter("u_terrain_tint", terrain_tint_);
 
 	if (mm_by_slot_[slot_index] != nullptr) {
 		mm_by_slot_[slot_index]->set_material_override(material);
@@ -1422,11 +1443,13 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index, const Ref<Mesh
 void NovaFoliageDispatcher::_rebuild_multimeshes() {
 	std::vector<Transform3D> per_slot_t[opennova::FOLIAGE_MAX_DEFS];
 	std::vector<Color> per_slot_c[opennova::FOLIAGE_MAX_DEFS];
+	std::vector<Color> per_slot_cd[opennova::FOLIAGE_MAX_DEFS];
 
 	if (render_algorithm_ == DISPATCH_ALGORITHM_ENGINE_CENTERS) {
 		for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
 			per_slot_t[s] = engine_transforms_[s];
 			per_slot_c[s] = engine_colors_[s];
+			per_slot_cd[s] = engine_customs_[s];
 		}
 	} else {
 		for (const auto &kv : lru_) {
@@ -1437,15 +1460,20 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 			const auto &entry = kv.second;
 			per_slot_t[s].insert(per_slot_t[s].end(), entry.transforms.begin(), entry.transforms.end());
 			per_slot_c[s].insert(per_slot_c[s].end(), entry.colors.begin(), entry.colors.end());
+			per_slot_cd[s].insert(per_slot_cd[s].end(), entry.customs.begin(), entry.customs.end());
 		}
 	}
 
-	// FAR tier renders the bounds-derived quad, never the full model mesh -
+	// FAR tier renders the shared ground patch, never the full model mesh -
 	// the full 3DI stamps only in the NEAR/MODEL tier clusters
-	// (docs/foliage/foliage-re.md §The model tier; D-FOLIAGE-4).
+	// (docs/foliage/foliage-re.md §The model tier; D-FOLIAGE-4). Slots
+	// without a usable model keep the visible fallback box.
+	if (far_patch_mesh_.is_null()) {
+		far_patch_mesh_ = _build_far_patch_mesh();
+	}
 	auto mesh_for_slot = [this](int s) -> Ref<Mesh> {
-		if (s >= 0 && s < opennova::FOLIAGE_MAX_DEFS && far_quad_meshes_[s].is_valid()) {
-			return far_quad_meshes_[s];
+		if (s >= 0 && s < opennova::FOLIAGE_MAX_DEFS && slot_bounds_[s].valid) {
+			return far_patch_mesh_;
 		}
 		return _fallback_mesh();
 	};
@@ -1470,8 +1498,12 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 			mm.instantiate();
 			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
 			mm->set_use_colors(true);
+			mm->set_use_custom_data(true);
 			mm->set_mesh(slot_mesh);
 			mmi->set_multimesh(mm);
+			// The ground-fit shader bends the flat patch after the CPU AABB
+			// is computed; margin keeps the culler honest on relief.
+			mmi->set_extra_cull_margin(8.0f);
 			add_child(mmi);
 			mm_by_slot_[s] = mmi;
 		}
@@ -1481,6 +1513,7 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 			mm.instantiate();
 			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
 			mm->set_use_colors(true);
+			mm->set_use_custom_data(true);
 			mm->set_mesh(slot_mesh);
 			mm_by_slot_[s]->set_multimesh(mm);
 		} else if (mm->get_mesh() != slot_mesh) {
@@ -1491,7 +1524,7 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 		// The bit is a shadow-render opt-in; when set the slot's instances cast shadows,
 		// otherwise we disable the pass entirely. Applied every rebuild so def edits
 		// propagate without forcing a full scene reload.
-		_update_slot_material(s, slot_mesh);
+		_update_slot_material(s);
 
 		int shadow_attrib = 0;
 		if (s < foliage_defs_.size()) {
@@ -1506,9 +1539,13 @@ void NovaFoliageDispatcher::_rebuild_multimeshes() {
 		        : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 
 		mm->set_instance_count(count);
+		const bool has_customs = per_slot_cd[s].size() == per_slot_t[s].size();
 		for (int i = 0; i < count; ++i) {
 			mm->set_instance_transform(i, per_slot_t[s][i]);
 			mm->set_instance_color(i, per_slot_c[s][i]);
+			if (has_customs) {
+				mm->set_instance_custom_data(i, per_slot_cd[s][i]);
+			}
 		}
 	}
 }

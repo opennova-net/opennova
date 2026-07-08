@@ -32,9 +32,12 @@ class NovaTerrainData;
 // Renders BOTH witnessed tiers (docs/foliage/foliage-re.md):
 //
 //   - FAR tier: the byte-exact quad placements (libs Dispatcher/place_cell),
-//     drawn as upright yaw-rotated quads textured with the ":fd" bake
-//     [orig: generate_foliage_instances_0 @ 0x600197 (placement);
-//     Foliage_LoadDefAssets @ 0x601260 (the :fd bake both tiers bind)].
+//     drawn as GROUND-CONFORMING patches bent onto the placement's own
+//     witnessed corner/midpoint height fold (patch_control = the
+//     (E_A, T_A, E_B, T_B) family), textured with the ":fd" bake
+//     [orig: generate_foliage_instances_0 @ 0x600197 / Foliage_BuildPatchData
+//     @ 0x5C0240 (placement + fold); Foliage_LoadDefAssets @ 0x601260
+//     (the :fd bake both tiers bind)].
 //   - NEAR/MODEL tier: full 3DI geometry stamped in clusters around anchors
 //     (the host equivalent of visible sector entities), via the libs
 //     ModelDispatcher [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50;
@@ -187,6 +190,12 @@ public:
 	// parity pin reads these (ADR 0018 public-seam testability).
 	Array get_model_tile_debug(int p_slot) const;
 
+	// Far-tier test/debug introspection: one Dictionary per current patch
+	// instance for the slot ({transform, color, custom} - exactly the packed
+	// MultiMesh data). Needed because the headless dummy RenderingServer
+	// does not store MultiMesh instance data for readback.
+	Array get_far_tile_debug(int p_slot) const;
+
 protected:
 	static void _bind_methods();
 
@@ -212,7 +221,8 @@ private:
 
 	struct LRUEntry {
 		std::vector<Transform3D> transforms;
-		std::vector<Color> colors;
+		std::vector<Color> colors;    // corner height deltas (shader corner order)
+		std::vector<Color> customs;   // the (E_A, -T_A, E_B, T_B) ground-fit fold
 		int64_t touch = 0;
 	};
 	struct DispatchStats {
@@ -251,6 +261,7 @@ private:
 	std::array<opennova::foliage::Dispatcher, opennova::FOLIAGE_MAX_DEFS> engine_dispatchers_{};
 	std::array<std::vector<Transform3D>, opennova::FOLIAGE_MAX_DEFS> engine_transforms_{};
 	std::array<std::vector<Color>, opennova::FOLIAGE_MAX_DEFS> engine_colors_{};
+	std::array<std::vector<Color>, opennova::FOLIAGE_MAX_DEFS> engine_customs_{};
 	int32_t engine_frame_counter_ = 0;
 
 	// NEAR/MODEL tier: one shared-core model dispatcher per foliage slot.
@@ -269,13 +280,14 @@ private:
 	// Per-slot rendered children (one MultiMeshInstance3D per def slot and tier).
 	MultiMeshInstance3D *mm_by_slot_[4] = {};
 	MultiMeshInstance3D *mm_model_by_slot_[4] = {};
-	Ref<Shader> foliage_shader_;
+	// BOTH tiers render through the shared ground-fit shader
+	// (foliage_model.gdshader); the far tier sets u_weights_from_uv.
 	Ref<Shader> foliage_model_shader_;
 	Ref<ShaderMaterial> foliage_materials_[4];
 	Ref<ShaderMaterial> foliage_model_materials_[4];
-	// FAR-tier quad meshes derived from the slot model bounds; rebuilt on
-	// set_slot_meshes.
-	Ref<Mesh> far_quad_meshes_[4];
+	// FAR-tier ground patch (XZ plane, +-quad_half_width_, UV (0..1)^2);
+	// shared by every slot with a valid model, rebuilt on width change.
+	Ref<Mesh> far_patch_mesh_;
 	SlotModelBounds slot_bounds_[4];
 
 	// Configuration
@@ -286,8 +298,9 @@ private:
 	Callable foliage_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
 	Ref<NovaTerrainData> colormap_source_;
+	// The env terrain_rgb tint; the shaders apply the witnessed FULL form
+	// (min(texel * tint * 255/128, 1)) per pixel.
 	Color terrain_tint_ = Color(1.0f, 1.0f, 1.0f, 1.0f);
-	uint32_t terrain_tint_full_ = 0xFFFFFFFFu; // FULL from set_terrain_tint
 	int dispatch_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
 	int render_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
 	int cell_grid_radius_ = 8;
@@ -307,6 +320,9 @@ private:
 	void _dispatch_cell_grid(Vector3 centre, const Dictionary &defs_by_match);
 	void _dispatch_model_tier(const Transform3D &view_xform, const Dictionary &defs_by_match);
 	void _rebuild_model_multimeshes();
+	// The engine->Godot yaw mapping shared by BOTH tiers: rotY(yaw + pi).
+	// Derivation at the .cpp definition; pinned by the GUT parity tests.
+	Basis _engine_yaw_basis(float yaw_radians) const;
 	// The derived model-instance transform (see the .cpp derivation comment):
 	// translate(center, hbase) * rotY(yaw + pi) * scale(0.75, 0.5, 0.75) *
 	// translate(-(cx, 0, cz)).
@@ -315,33 +331,40 @@ private:
 	                                      const SlotModelBounds &bounds) const;
 	void _refresh_slot_bounds();
 	Ref<Texture2D> _slot_fd_texture(int slot_index) const;
+	// The ":fd" texture for a slot, falling back to the model mesh's own
+	// albedo when no bake was supplied.
+	Ref<Texture2D> _slot_fd_or_albedo(int slot_index) const;
 	void _make_sampler_bindings(const Dictionary &defs_by_match,
 	                            opennova::foliage::PlacementSamplers &out_samplers) const;
 	void _rebuild_multimeshes();
-	void _update_slot_material(int slot_index, const Ref<Mesh> &slot_mesh);
-	void _update_model_slot_material(int slot_index, const Ref<Mesh> &slot_mesh);
-	Color _sample_ground_color(const opennova::foliage::PlacementInstance &inst,
-	                           float quad_half_width) const;
+	void _update_slot_material(int slot_index);
+	void _update_model_slot_material(int slot_index);
 	bool _scatter_cell(int slot_index,
 	                   int cell_x_int, int cell_z_int,
 	                   const Ref<NovaTerrainFoliageDef> &def,
 	                   const Dictionary &defs_by_match,
 	                   std::vector<Transform3D> &out_transforms,
-	                   std::vector<Color> &out_colors);
+	                   std::vector<Color> &out_colors,
+	                   std::vector<Color> &out_customs);
+	// Pack one FAR-tier ground patch instance: transform (center, hbase +
+	// surface_offset, yaw via _engine_yaw_basis), COLOR = corner height
+	// deltas (shader corner order), CUSTOM = the patch_control fold with the
+	// mesh-axis T_A sign flip.
 	void _append_render_instance(const opennova::foliage::PlacementInstance &inst,
-	                             float quad_half_width,
 	                             std::vector<Transform3D> &out_transforms,
-	                             std::vector<Color> &out_colors) const;
+	                             std::vector<Color> &out_colors,
+	                             std::vector<Color> &out_customs) const;
 	float _sample_height(float world_x, float world_z) const;
 	Dictionary _build_defs_by_match() const;
 	void _clear_children();
 	void _invalidate_dispatch_coverage();
 	Ref<Mesh> _fallback_mesh() const;
-	// FAR-tier quad: two triangles, width 2 * 0.75 * R, height = model bound
-	// height * 0.5, base (y = 0) at the placement anchor. The SIZE is a host
-	// mapping from the model bounds pending the quad-emitter grill
-	// (D-FOLIAGE-1/-3 leg).
-	Ref<Mesh> _build_far_quad_mesh(const SlotModelBounds &bounds) const;
+	// FAR-tier ground patch: an XZ-plane quad (verts +-quad_half_width_ at
+	// y = 0, UV (0..1)^2) the ground-fit shader bends onto the witnessed
+	// corner/midpoint fold per instance. The retail emitter's exact quad
+	// size remains the ungrilled D-FOLIAGE-1/-3 leg, so the width stays the
+	// quad_half_width knob.
+	Ref<Mesh> _build_far_patch_mesh() const;
 };
 
 } // namespace godot

@@ -1,8 +1,22 @@
 shader_type spatial;
 render_mode unshaded, cull_disabled;
 
-// The foliage MODEL tier - full 3DI geometry stamped around sector entities,
-// terrain-fitted per vertex by the witnessed grid-placement VS
+// The foliage GROUND-FIT shader - BOTH witnessed tiers render through it
+// (docs/foliage/foliage-re.md):
+// - NEAR/MODEL tier: full 3DI geometry stamped around sector entities,
+//   weights re-normalized from the pre-scale model vertex over the bound
+//   square (u_weights_from_uv = false);
+// - FAR tier: the byte-exact quad placements drawn as flat GROUND patches
+//   spanning the corner rectangle directly - UV IS the weight space
+//   (u_weights_from_uv = true). The patch fold comes from the placement's
+//   own witnessed corner/midpoint data (patch_control = the same
+//   (E_A, T_A, E_B, T_B) family) [orig: Foliage_BuildPatchData @ 0x5C0240].
+//   Patches are flat (VERTEX.y = 0), so the model tier's height-weighted
+//   wind term vanishes on them by construction; the quad tier's OWN
+//   witnessed sway (Foliage_WindSwayVS: Z displaced weighted by vertex RED)
+//   is D-FOLIAGE-3's separate, still-unported leg.
+//
+// The fit is the witnessed grid-placement VS
 // (docs/foliage/foliage-re.md §The model tier):
 // - Foliage_GridPlacementVS (assembled inline in
 //   Terrain_CreateFoliageVertexShaders @ 0x5ff630): normalized model XZ over
@@ -26,14 +40,26 @@ render_mode unshaded, cull_disabled;
 // carries the corner height DELTAS (shader corner order), INSTANCE_CUSTOM
 // carries the sag fold with the mesh-axis T_A sign flip baked in.
 //
-// Fragment combine: the SAME witnessed foliage family as foliage.gdshader
-// (rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8 [orig:
-// Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants
-// terrain_setup_lighting_and_shader @ 0x604420]). The retail MODEL pass's
+// Fragment combine: the witnessed foliage blend-PS family
+// (rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8, a = t0.a x v0.a; t1 = the
+// terrain colormap sampled by a planar world-position projection, c0 = the
+// SKY block, c1 = the LIGHT block, inherited from the terrain surface push
+// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants
+// terrain_setup_lighting_and_shader @ 0x604420; ramps
+// init_terrain_lighting_color_ramps @ 0x604ee0]; witness text in
+// docs/terrain/terrain-re.md §Foliage / sector models. RE-anchor history:
+// the pre-REN-4 "0x005BF064" PS anchor was bogus - that address is inside
+// draw_death_screen_overlay; corrected at REN-4). The retail MODEL pass's
 // own color chain (its pass object + oD0 = black constant) is NOT yet
 // witnessed - D-FOLIAGE-6 (needs-RE); until then v0 is DERIVED IN-SHADER as
 // the quad-emitter half-plus-bias form of the tinted colormap sample
-// (0x40/255 + tinted_cm/2), the recorded host mapping.
+// (0x40/255 + tinted_cm/2), the recorded host mapping - superseding the old
+// CPU per-instance average (closer to the witnessed per-VERTEX colors; the
+// exact emitter form is D-FOLIAGE-1's leg). Related witnessed state the
+// port has not split by quality yet: Terrain_SetupSectorModelDraw @ 0x6007c0
+// sets alpha-test ref 180 (high quality) / 8 (low) for the SECTOR-MODEL
+// draw path, and Terrain_InitSectors @ 0x601260 carries the FF fallback
+// stage tables (3-stage TEMP-routed MODULATE4X / 2-stage MODULATE2X).
 
 // Gamma-space output convention (D-RMAT-7): nova_gamma_to_linear().
 #include "res://shaders/nova_color.gdshaderinc"
@@ -50,6 +76,10 @@ uniform vec3 u_terrain_tint = vec3(1.0);
 // pos.xz = (xz - center) / (2 * radius) + 0.5].
 uniform vec2 u_bound_center = vec2(0.0);
 uniform float u_bound_radius = 1.0;
+// FAR tier: the flat ground patch spans the corner rectangle directly, so
+// the normalized weight space IS the mesh UV - no bound-square
+// re-normalization.
+uniform bool u_weights_from_uv = false;
 // counter * 0.001 [orig: Foliage_ModelWindPhaseCounter @ 0x3162170].
 uniform float u_model_wind_phase = 0.0;
 
@@ -80,13 +110,21 @@ float fog_factor_for_distance(float dist) {
 }
 
 void vertex() {
-	// Normalized coords over the bound square, from the PRE-scale model
-	// vertex - the exact VB form [orig: Foliage_FillInstancedModelBuffers
-	// @ 0x5ffa20]. x_n/z_n here are the SHADER (Godot-mesh) axes; the host
-	// packed COLOR/CUSTOM in this basis (corner permutation + T_A flip).
-	float inv_span = 1.0 / (2.0 * max(u_bound_radius, 1e-6));
-	float x_n = (VERTEX.x - u_bound_center.x) * inv_span + 0.5;
-	float z_n = (VERTEX.z - u_bound_center.y) * inv_span + 0.5;
+	// Normalized coords in the SHADER (Godot-mesh) axes; the host packed
+	// COLOR/CUSTOM in this basis (corner permutation + T_A flip).
+	// - model tier: over the bound square, from the PRE-scale model vertex -
+	//   the exact VB form [orig: Foliage_FillInstancedModelBuffers @ 0x5ffa20];
+	// - far patch: the mesh UV directly (the patch IS the corner rectangle).
+	float x_n;
+	float z_n;
+	if (u_weights_from_uv) {
+		x_n = UV.x;
+		z_n = UV.y;
+	} else {
+		float inv_span = 1.0 / (2.0 * max(u_bound_radius, 1e-6));
+		x_n = (VERTEX.x - u_bound_center.x) * inv_span + 0.5;
+		z_n = (VERTEX.z - u_bound_center.y) * inv_span + 0.5;
+	}
 
 	// Bilinear corner weights + the biquadratic sag
 	// [orig: Foliage_GridPlacementVS]. COLOR = corner height deltas
@@ -132,8 +170,8 @@ void fragment() {
 		discard;
 	}
 
-	// The witnessed foliage combine family (foliage.gdshader carries the full
-	// anchor commentary): rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8 - t1 =
+	// The witnessed foliage combine family (full anchor commentary in the
+	// header): rgb = t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8 - t1 =
 	// the terrain colormap planar-projected at the fragment's world position
 	// (uv = (x, -z)/texsize, wrap), c0 = the SKY block, c1 = the LIGHT block
 	// [orig: Foliage_CreateLightmapBlendPS @ 0x5ff7a0; constants

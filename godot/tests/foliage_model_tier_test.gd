@@ -1,9 +1,10 @@
 extends GutTest
 
-# The foliage MODEL tier host (docs/foliage/foliage-re.md §The model tier;
+# The two-tier foliage host (docs/foliage/foliage-re.md §The model tier;
 # D-FOLIAGE-4): anchor depth gating, the per-tile cap, the derived
-# transform-vs-libs-corner parity pin, and cache/stagger observability -
-# all through the dispatcher's public seams (ADR 0018).
+# transform-vs-libs-corner parity pin (model tier), the far-tier
+# ground-patch conformance pin, and cache/stagger observability - all
+# through the dispatcher's public seams (ADR 0018).
 
 const NEAR_DEPTH_ANCHOR := Vector3(24.0, 0.0, -20.0)  # view depth 20 < 38
 const FAR_DEPTH_ANCHOR := Vector3(24.0, 0.0, -100.0)  # view depth 100 >= 38
@@ -171,3 +172,61 @@ func test_no_anchors_clears_model_tier() -> void:
 	_dispatcher.dispatch(Vector3.ZERO, _camera_xform())
 	assert_eq(_dispatcher.get_model_tile_debug(0).size(), 0,
 		"Dropping every anchor clears the stamped model instances.")
+
+
+func test_far_tier_patches_conform_to_ground() -> void:
+	# FAR tier = flat GROUND patches bent onto the quad placement's own
+	# witnessed corner/midpoint fold (patch_control = (E_A, T_A, E_B, T_B))
+	# [orig: Foliage_BuildPatchData @ 0x5C0240] - not billboards. Pin:
+	# transform x mesh corner (+-w, 0, +-w) + the shader-side delta (the
+	# matching COLOR channel; sag = 0 at corners) must land on the sampled
+	# ground height + surface_offset. Same derived axis mapping as the model
+	# tier: mesh corner (-1,-1)->c1, (+1,-1)->c0, (-1,+1)->c3, (+1,+1)->c2.
+	_dispatch(FAR_DEPTH_ANCHOR)
+	var mmi := _dispatcher.find_child("FoliageSlot0", false, false) as MultiMeshInstance3D
+	assert_not_null(mmi, "The far tier renders through its own MultiMesh child.")
+	if mmi == null:
+		return
+	var mm := mmi.multimesh
+	assert_gt(mm.instance_count, 0, "The far tier stamps patch instances.")
+	assert_true(mm.use_custom_data, "Patch instances carry the fold in CUSTOM_DATA.")
+
+	# The patch mesh is FLAT at world size (the upright-quad geometry is gone).
+	var mesh_aabb := mm.mesh.get_aabb()
+	var w: float = _dispatcher.quad_half_width
+	assert_almost_eq(mesh_aabb.size.y, 0.0, 1e-5, "The far mesh is an XZ-plane patch.")
+	assert_almost_eq(mesh_aabb.size.x, 2.0 * w, 1e-5, "The patch spans 2 x quad_half_width in X.")
+	assert_almost_eq(mesh_aabb.size.z, 2.0 * w, 1e-5, "The patch spans 2 x quad_half_width in Z.")
+
+	# Instance data via the debug seam (the packed MultiMesh data; the
+	# headless dummy RenderingServer cannot read the GPU buffer back).
+	var debug: Array = _dispatcher.get_far_tile_debug(0)
+	assert_eq(debug.size(), mm.instance_count, "The debug view lists every patch instance.")
+
+	var mesh_corners := [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]
+	# The COLOR channel holding each mesh corner's height delta: at UV corner
+	# (0,0) the bilinear picks COLOR.r, (1,0) -> .g, (0,1) -> .b, (1,1) -> .a.
+	var channel_for_corner := [0, 1, 2, 3]
+	var offset: float = _dispatcher.surface_offset
+	var checked := 0
+	for i in range(mini(debug.size(), 12)):
+		var inst: Dictionary = debug[i]
+		var xform: Transform3D = inst.transform
+		var color: Color = inst.color
+		var custom: Color = inst.custom
+		for c in range(4):
+			var sc: Vector2 = mesh_corners[c]
+			var world_pt := xform * Vector3(sc.x * w, 0.0, sc.y * w)
+			# The transform maps the flat mesh onto hbase + surface_offset;
+			# the shader adds the corner's height delta (sag = 0 at corners).
+			var final_y: float = world_pt.y + color[channel_for_corner[c]]
+			var ground: float = _sample_height(world_pt.x, world_pt.z)
+			assert_almost_eq(final_y, ground + offset, 0.02,
+				"Patch corner %d of instance %d lands on the sampled ground" % [c, i])
+		# hbase - corner average == E_A + E_B (CUSTOM r/b), i.e. the packed
+		# fold is consistent with the packed deltas.
+		var avg_delta := (color.r + color.g + color.b + color.a) * 0.25
+		assert_almost_eq(custom.r + custom.b, -avg_delta, 0.002,
+			"The packed fold center E_A + E_B matches the corner deltas (instance %d)" % i)
+		checked += 1
+	assert_gt(checked, 0, "At least one far instance was pinned.")
