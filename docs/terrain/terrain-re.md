@@ -215,20 +215,29 @@ runs opposite world y (samplers negate y internally).
 - **`Terrain_RaycastHeightmapLoRes @ 0x60cb80`** —
   `int __cdecl(start[3], end[3], hit[3]|NULL)`; **returns 0 = HIT, 1 =
   CLEAR**. Remaps `x += 0x8000`, `y → 0x8000 − y` (half-texel bias + V flip).
+  - *Null atlas*: no terrain loaded (`Terrain_HeightAtlasPtr` null) → returns
+    0 = HIT immediately, no hit write `[orig: @ 0x60ccf7]` — "blocked" is the
+    no-data default.
   - *Column shortcut*: when `|dx| < 4096` AND `|dy| < 4096` (both under 1/16
     unit): ONE bilinear sample at the start x/y; HIT iff the segment
     **crosses** the surface — a fully-buried segment returns CLEAR
     (**witnessed asymmetry**: the march path hits at its first sample when
-    starting below ground). Hit out = (start x, start y, terrain height);
-    step globals zeroed.
+    starting below ground). The hit out = (start x, start y, terrain height)
+    and the ZEROED step globals are written **even on the CLEAR outcomes**
+    `[orig: @ 0x60cc12..0x60cc2d]`.
   - *March*: per-sample step = `delta · (2^32 / max(|dx|, |dy_r|)) >> 16`
-    (rounded) — ~1.0 world unit along the major axis; the sample budget is
-    the major-axis extent (`remaining 0x10000 −= 2^32/maxΔ` per sample; ≤ 0 →
-    CLEAR). Per sample: coarse **point sample** of the atlas ≥ ray z →
-    confirm with `Terrain_SampleHeightBilinear` at the reconstructed world
-    coords → HIT iff bilinear ≥ ray z. Cell re-resolve on a 512 crossing
-    (`frac & 0xFE000000`; base `>> 25`; OOB clamp-to-edge). An EMPTY cell
-    (null tile) marches until ray z ≤ 0 → HIT on the height-0 floor.
+    (rounded per component, `+0x8000`) — ~1.0 world unit along the major
+    axis; the sample budget is the major-axis extent (`remaining 0x10000 −=
+    floor(2^32/maxΔ)` per sample; ≤ 0 → CLEAR). Order per iteration:
+    **sample → decrement budget → advance** — an N-unit ray gets exactly N
+    samples (the floored divide under-fills the budget, so e.g. a 3-unit
+    extent gets a 4th sample). Per sample: coarse **point sample** of the
+    atlas ≥ ray z → confirm with `Terrain_SampleHeightBilinear` at the
+    reconstructed world coords → HIT iff bilinear ≥ ray z. Cell re-resolve
+    on a 512 crossing (`frac & 0xFE000000`; base `>> 25`; OOB
+    clamp-to-edge). An EMPTY cell (null tile) marches until ray z ≤ 0 → HIT
+    on the height-0 floor, through the SAME hit epilogue (step globals
+    stored).
   - On HIT with a hit pointer: hit = reconstructed world x/y and the **ray z**
     at the hit sample (not the terrain height — HiRes_0 refines it), and the
     step vector lands in `Terrain_LastRayStep*`.
@@ -236,10 +245,12 @@ runs opposite world y (samplers negate y internally).
   hit. Guard (witnessed odd form): refine is skipped iff
   `step_x == 0 && step_y != 0 && step_z != 0`. Refine steps =
   `Terrain_LastRayStep*/4` (arithmetic `>> 2`; y **negated** back to the
-  world axis): ≤ 8 back-steps while the ray point is below the bilinear
-  height, ≤ 8 forward-steps while above, then an 8-iteration bisection
-  (above → +step, below → −step, steps halve after each move) — final
-  precision ~(1/4)/2⁸ unit along the ray. Callers:
+  world axis): back-steps while the ray point is below the bilinear height,
+  then forward-steps while above — each walk's counter test is on the OLD
+  value (postfix `count--`), so a counter-terminated walk moves up to **9**
+  times with 8 resamples — then an 8-iteration bisection (above → +step,
+  below → −step, steps halve after each move) — final precision ~(1/4)/2⁸
+  unit along the ray. Callers:
   `raycast_entity_collision @ 0x413760`, `Entity_FindNearestByRay
   @ 0x413af0`, and via the thunk `@ 0x610890`:
   `Entity_ProcessProjectileTravel`, `Weapon_RaycastAndSpawnImpact`,
