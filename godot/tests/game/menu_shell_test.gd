@@ -11,6 +11,7 @@ const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
 const SP_PLAY_FIXTURE := "res://../fixtures/mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
+const MUS_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -285,6 +286,145 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 			"hover colour macro resolves, so button mouse-over highlights")
 	root.clear()  # release the PFF handle before deleting
 	DirAccess.remove_absolute(dir.path_join("resource.pff"))
+	DirAccess.remove_absolute(dir)
+
+
+# --- Interactive music: the witnessed hardcoded pairs (D-BOOT-1) ----------------
+#
+# Retail hardcodes MENUMUS.SBF/.BIN + GAMEMUS.SBF/.BIN, renamed to M<n>/G<n> under
+# expansion <n> [orig: Expansion_LoadAssets @ 0x4a4798]; the .bin scripts ship
+# PFF-archived and must load by name through the VFS, while the .sbf banks stream
+# loose from disk. These pin the shell's resolution order and byte-path loading.
+
+# The base pair loads from a packed archive (no loose music files at all): the
+# scripts resolve by their hardcoded names through the VFS byte path.
+func test_music_scripts_load_pff_archived_by_hardcoded_names() -> void:
+	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var dir := OS.get_temp_dir().path_join("menu_shell_mus_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	_write_pff(dir.path_join("resource.pff"), [
+		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "menumus.bin", "bytes": mus},
+		{"name": "gamemus.bin", "bytes": mus},
+	])
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir) != OK:
+		pass_test("runtime resource root unavailable in this environment")
+		DirAccess.remove_absolute(dir.path_join("resource.pff"))
+		DirAccess.remove_absolute(dir)
+		return
+	var host = MenuHostScript.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	host.setup(root)
+	assert_not_null(host._menu_music, "menumus.bin loaded from the PFF by hardcoded name")
+	if host._menu_music != null:
+		assert_eq(host._menu_music.get_source_path(), "menumus.bin", "menu script is the base name")
+	assert_not_null(host._game_music, "gamemus.bin loaded from the PFF by hardcoded name")
+	if host._game_music != null:
+		assert_eq(host._game_music.get_source_path(), "gamemus.bin", "game script is the base name")
+	root.clear()
+	DirAccess.remove_absolute(dir.path_join("resource.pff"))
+	DirAccess.remove_absolute(dir)
+
+
+# With an expansion mounted, the M<n>/G<n> forms win over the base pair, the
+# expansion bank resolves loose inside the expansion folder, and bank/script
+# halves never mix across stems (a stem with no bank keeps its bank empty).
+func test_music_resolution_prefers_expansion_pair_then_base() -> void:
+	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var dir := OS.get_temp_dir().path_join("menu_shell_musx_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
+	_write_pff(dir.path_join("resource.pff"), [
+		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "menumus.bin", "bytes": mus},
+		{"name": "gamemus.bin", "bytes": mus},
+	])
+	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "Mjox01.bin", "bytes": mus},
+		{"name": "Gjox01.bin", "bytes": mus},
+	])
+	# Resolution probes bank existence only (bank parsing is the audio suite's
+	# pin), so a stub file marks the loose expansion bank.
+	var stub := FileAccess.open(dir.path_join("expansion/jox01/Mjox01.sbf"), FileAccess.WRITE)
+	if stub != null:
+		stub.store_buffer(PackedByteArray([0]))
+		stub.close()
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir, "jox01") != OK:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_music_exp_dir(dir)
+		return
+	var host = MenuHostScript.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	host.setup(root)
+	assert_not_null(host._menu_music, "expansion menu script loaded")
+	if host._menu_music != null:
+		assert_eq(host._menu_music.get_source_path(), "Mjox01.bin", "M<n>.bin preferred over menumus.bin")
+	assert_not_null(host._game_music, "expansion game script loaded")
+	if host._game_music != null:
+		assert_eq(host._game_music.get_source_path(), "Gjox01.bin", "G<n>.bin preferred over gamemus.bin")
+	var menu_pair: Dictionary = host._resolve_music_pair("M", "menumus")
+	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
+		"the menu bank streams loose from the expansion folder")
+	var game_pair: Dictionary = host._resolve_music_pair("G", "gamemus")
+	assert_eq(String(game_pair.script), "Gjox01.bin", "game stem resolves its script")
+	assert_eq(String(game_pair.bank), "",
+		"no G<n>.sbf shipped -> that half stays empty; the base bank is never mixed in")
+	root.clear()
+	_rm_music_exp_dir(dir)
+
+
+# An expansion that ships no music falls back to the base pair (retail reselects
+# the base names when the expansion is absent; a mounted-but-musicless expansion
+# degrades the same way instead of going silent).
+func test_music_resolution_falls_back_to_base_pair() -> void:
+	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var dir := OS.get_temp_dir().path_join("menu_shell_musb_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
+	_write_pff(dir.path_join("resource.pff"), [
+		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "menumus.bin", "bytes": mus},
+		{"name": "gamemus.bin", "bytes": mus},
+	])
+	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "expmodel.3di", "bytes": "exp model"},
+	])
+	var stub := FileAccess.open(dir.path_join("menumus.sbf"), FileAccess.WRITE)
+	if stub != null:
+		stub.store_buffer(PackedByteArray([0]))
+		stub.close()
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir, "jox01") != OK:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_music_base_dir(dir)
+		return
+	var host = MenuHostScript.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	host.setup(root)
+	assert_not_null(host._menu_music, "base menu script loaded under a musicless expansion")
+	if host._menu_music != null:
+		assert_eq(host._menu_music.get_source_path(), "menumus.bin", "fell back to MENUMUS.BIN")
+	if host._game_music != null:
+		assert_eq(host._game_music.get_source_path(), "gamemus.bin", "fell back to GAMEMUS.BIN")
+	var pair: Dictionary = host._resolve_music_pair("M", "menumus")
+	assert_true(String(pair.bank).ends_with("menumus.sbf"), "base bank resolved loose from the root")
+	root.clear()
+	_rm_music_base_dir(dir)
+
+
+func _rm_music_exp_dir(dir: String) -> void:
+	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01/Mjox01.sbf",
+			"expansion/jox01", "expansion"]:
+		DirAccess.remove_absolute(dir.path_join(sub))
+	DirAccess.remove_absolute(dir)
+
+
+func _rm_music_base_dir(dir: String) -> void:
+	for sub in ["resource.pff", "menumus.sbf", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
+		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
 
 

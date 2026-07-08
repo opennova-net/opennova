@@ -401,7 +401,7 @@ Placement (seed 0xA55B1EED, ROL-hash PRNG, 36 candidates/cell, surface gate,
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion); `menu_shell.gd` scans by name heuristic instead | A | OPEN | rides the ENG-6 manifest (Wave 2) |
+| D-BOOT-1 | Menu/game music bank resolution: retail hardcodes `MENUMUS.SBF/.BIN` + `GAMEMUS.SBF/.BIN` (`M<exp>`/`G<exp>` under an expansion); `menu_shell.gd` scanned by name heuristic instead | A | **FIXED (2026-07-07, fidelity backlog)** — the shell resolves the witnessed hardcoded pairs (`[orig: Expansion_LoadAssets @ 0x4a4798/@ 0x4a4906; AudioVM_OpenContextFile @ 0x672160; AudioVM_LoadScriptFile @ 0x672d20; Sbf_OpenFile_Gamemus @ 0x4ed6c0]`): expansion `M<n>`/`G<n>` first then the base pair (a documented host graceful-degrade — retail selects names ONCE and goes silent on a musicless expansion), scripts via VFS bytes + the single-sourced SCR decode (they ship inside PFFs; the old loose-only `ResourceLoader` path could never load them on a PFF install — the actual "no menu music" defect), banks loose-streamed as witnessed; the GAMEMUS pair swaps onto the director at game entry; `menu_shell_test` 16/16 incl. three resolution pins | fidelity backlog (D-BOOT-1) |
 
 ### Render — materials/state — [render/render-material-re.md](render/render-material-re.md) (D-RMAT catalog; REN-2)
 
@@ -556,11 +556,11 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Tiles | 0 | 0 | 0 | 0 | 1 |
 | Foliage | 2 | 0 | 0 | 2 | 1 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
-| Boot-required resources | 1 | 0 | 0 | 1 | 0 |
+| Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 2 | 3 | 2 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **34** | **11** | **30** | **75** | 15 |
+| **Total** | **33** | **11** | **30** | **74** | 16 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
 

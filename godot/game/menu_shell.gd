@@ -50,12 +50,16 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 # browsers surface it), but the engine contract stays the canonical NAME loaded
 # through the VFS. A blank value falls back to the first .mns found.
 @export var menu_stylesheet_file := "menu_style.mns"
-@export var menu_sound_bank_file := ""   # "" -> a .sbf whose name contains "menu", else first
+# Interactive music: the engine hardcodes two bank+script pairs -- MENUMUS.SBF/.BIN
+# (menu) and GAMEMUS.SBF/.BIN (game), renamed to M<n>/G<n> forms when expansion <n>
+# is active [orig: Expansion_LoadAssets @ 0x4a4798]. Blank = that witnessed
+# resolution (see _resolve_music_pair); an explicit value wins (loose dev override).
+@export var menu_sound_bank_file := ""   # "" -> MENUMUS.SBF (M<n>.sbf under an expansion)
 # Menu SFX profile: the .lwf the widgets' <SOUND> elements reference (hover/click).
 # "" -> a .lwf whose name contains "menu" (i.e. menu.lwf), else the first .lwf found.
 @export var menu_sound_profile_file := ""
-@export var menu_music_file := ""        # "" -> a .mus/.bin whose name contains "menu", else first
-@export var game_music_file := ""        # "" -> a .mus/.bin whose name contains "game", else first
+@export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
+@export var game_music_file := ""        # "" -> GAMEMUS.BIN (G<n>.bin under an expansion)
 
 # Well-known control names (the JO "wired by convention" launch/quit controls).
 # A button found by one of these names gets its `pressed` connected to the host.
@@ -114,7 +118,8 @@ var _director: NovaMusicDirector
 var _root: NovaResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
-var _sound_bank: NovaSbfBank
+var _menu_music_bank: NovaSbfBank
+var _game_music_bank: NovaSbfBank
 var _sound_profile: NovaLwfData
 var _menu_music: NovaMusicScript
 var _game_music: NovaMusicScript
@@ -190,12 +195,21 @@ func _assemble_assets() -> void:
 	if gametext != null:
 		NovaStrings.register_table("gametext", gametext)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
-	_sound_bank = _load_bank(_discover_path(menu_sound_bank_file, ".sbf", "menu"))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
-	_menu_music = _load_music(_discover_music(menu_music_file, "menu"))
-	_game_music = _load_music(_discover_music(game_music_file, "game"))
-	if _sound_bank != null:
-		_director.set_bank(_sound_bank)
+	# The two witnessed interactive-music pairs (D-BOOT-1). Each .sbf bank streams
+	# loose from disk by path [orig: AudioVM_OpenContextFile @ 0x672160 CreateFileA;
+	# Sbf_OpenFile_Gamemus @ 0x4ed6c0] while each .bin script loads by name through
+	# the engine file system, so it resolves from PFF archives too [orig:
+	# AudioVM_LoadScriptFile @ 0x672d20 via AudioVM_OpenContextFile @ 0x6721f7].
+	var menu_pair := _resolve_music_pair("M", "menumus")
+	var game_pair := _resolve_music_pair("G", "gamemus")
+	var menu_bank_path := String(menu_pair.bank)
+	if not menu_sound_bank_file.is_empty():
+		menu_bank_path = _resolve(menu_sound_bank_file)  # explicit override wins
+	_menu_music_bank = _load_bank(menu_bank_path)
+	_game_music_bank = _load_bank(String(game_pair.bank))
+	_menu_music = _load_music_script(menu_music_file, String(menu_pair.script))
+	_game_music = _load_music_script(game_music_file, String(game_pair.script))
 
 	_menu = NovaMnuMenu.new()
 	_menu.name = "Menu"
@@ -539,19 +553,27 @@ func _on_mission_activated(index: int) -> void:
 # --- Audio --------------------------------------------------------------------
 
 func _enter_menu_music() -> void:
-	_play_script(_menu_music)
+	_play_script(_menu_music, _menu_music_bank)
 
 
+# Swap to the GAMEMUS pair when gameplay starts. The original opens the game bank
+# as its own music context [orig: Sbf_OpenFile_Gamemus @ 0x4ed6c0]; our single
+# director takes the bank swap alongside the script swap.
 func enter_game_music() -> void:
-	_play_script(_game_music)
+	_play_script(_game_music, _game_music_bank)
 
 
-func _play_script(script: NovaMusicScript) -> void:
+# Bank + script swap together: the witnessed context open takes the pair and bails
+# before loading the script when the bank is missing [orig: AudioVM_OpenContextFile
+# @ 0x672160 -- the .sbf CreateFileA gate precedes the script load], so a missing
+# half means silence (non-fatal), never a mixed pair.
+func _play_script(script: NovaMusicScript, bank: NovaSbfBank) -> void:
 	if _director == null:
 		return
 	_director.stop()
-	if script == null or _is_headless():
-		return  # no script, or no audio device (headless tests / probes)
+	if script == null or bank == null or _is_headless():
+		return  # incomplete pair, or no audio device (headless tests / probes)
+	_director.set_bank(bank)
 	_director.load_mus_script(script)
 	_director.start()
 
@@ -565,25 +587,9 @@ func _resolve(name: String) -> String:
 
 
 # Resolve an explicit file, else discover one by extension (preferring a name
-# containing `prefer`). Returns a loadable path, or "".
-func _discover_path(explicit: String, suffix: String, prefer: String) -> String:
-	if not explicit.is_empty():
-		return _resolve(explicit)
-	if _root == null:
-		return ""
-	var files := _root.list_files(suffix)
-	if files.is_empty():
-		return ""
-	if not prefer.is_empty():
-		for f in files:
-			if String(f).get_file().to_lower().contains(prefer):
-				return _resolve(String(f).get_file())
-	return _resolve(String(files[0]).get_file())
-
-
-# Like _discover_path, but returns the winning entry's logical basename (loadable
-# through the VFS by name via _root.read_file) rather than a loose disk path. Used
-# by the byte-based loaders so discovery works for PFF-archived assets too.
+# containing `prefer`). Returns the winning entry's logical basename (loadable
+# through the VFS by name via _root.read_file) rather than a loose disk path, so
+# discovery works for PFF-archived assets too.
 func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 	if not explicit.is_empty():
 		return explicit
@@ -599,28 +605,36 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 	return String(files[0]).get_file()
 
 
-# Music scripts ship as .bin (e.g. menumus.bin / gamemus.bin); .bin also covers
-# the menu string table (menutxt.BIN), so a music candidate must contain "mus"
-# (gamemus/menumus) to avoid grabbing the text table. Prefer one also matching
-# `prefer` ("menu" / "game").
-func _discover_music(explicit: String, prefer: String) -> String:
-	if not explicit.is_empty():
-		return _resolve(explicit)
+# Resolve one interactive-music pair by its witnessed hardcoded stem. The engine
+# names the base pairs MENUMUS.SBF/.BIN and GAMEMUS.SBF/.BIN; when expansion <n>
+# is active they become expansion\<n>\M<n>.sbf + M<n>.bin (menu) and
+# expansion\<n>\G<n>.sbf + G<n>.bin (game) [orig: Expansion_LoadAssets @ 0x4a4798
+# (base names) / @ 0x4a4906-0x4a494a (expansion forms)]. Retail sets the names
+# once -- a missing expansion .pff clears the expansion and reselects the base
+# names (@ 0x4a4775); we probe the expansion pair first and fall back to the base
+# pair, which reproduces that plus stays graceful for an expansion that ships no
+# music. Bank and script always come from the SAME stem (the script's play ops
+# index that bank's entries), so halves are never mixed across stems.
+# Returns {"bank": loose path or "", "script": VFS basename or ""}.
+func _resolve_music_pair(prefix: String, base_stem: String) -> Dictionary:
 	if _root == null:
-		return ""
-	var candidates := PackedStringArray()
-	candidates.append_array(_root.list_files(".mus"))
-	candidates.append_array(_root.list_files(".bin"))
-	var fallback := ""
-	for f in candidates:
-		var n := String(f).get_file().to_lower()
-		if not n.contains("mus"):
-			continue
-		if n.contains(prefer):
-			return _resolve(String(f).get_file())
-		if fallback.is_empty():
-			fallback = _resolve(String(f).get_file())
-	return fallback
+		return {"bank": "", "script": ""}
+	var exp_name := _root.get_expansion()
+	if not exp_name.is_empty():
+		var stem := prefix + exp_name
+		# The expansion bank lives inside the expansion folder, streamed loose
+		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
+		var bank_path := _root.get_root_dir().path_join("expansion").path_join(exp_name).path_join(stem + ".sbf")
+		var pair := {
+			"bank": bank_path if FileAccess.file_exists(bank_path) else "",
+			"script": stem + ".bin" if _root.has_file(stem + ".bin") else "",
+		}
+		if String(pair.bank) != "" or String(pair.script) != "":
+			return pair
+	return {
+		"bank": _resolve(base_stem + ".sbf"),
+		"script": base_stem + ".bin" if _root.has_file(base_stem + ".bin") else "",
+	}
 
 
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
@@ -681,8 +695,27 @@ func _load_sound_profile(name: String) -> NovaLwfData:
 	return d if d.is_loaded() and d.get_set_count() > 0 else null
 
 
+# Music script: an explicit @export override keeps the loose-path ResourceLoader
+# route (the registered loader strips the SCR layer); the hardcoded name loads as
+# bytes through the VFS so it resolves from PFF archives [orig: AudioVM_LoadScriptFile
+# @ 0x672d20]. _root.read_file already applies the shared SCR/BFC1 payload decode
+# (libs/vfs vfs_decode_payload -- the same codec the registered loader runs), so the
+# bytes arrive in the decrypted SCR0 form load_from_decrypted_bytes expects.
+func _load_music_script(explicit: String, name: String) -> NovaMusicScript:
+	if not explicit.is_empty():
+		return _load_music(_resolve(explicit))
+	if _root == null or name.is_empty():
+		return null
+	var bytes := _root.read_file(name)
+	if bytes.is_empty():
+		return null
+	var script := NovaMusicScript.new()
+	script.load_from_decrypted_bytes(bytes, name)
+	return script if script.get_script_count() > 0 else null
+
+
 # Music scripts carry an SCR encryption layer that only the registered loader
-# strips, so they load via ResourceLoader (not a direct load_from_path).
+# strips, so loose files load via ResourceLoader (not a direct load_from_path).
 func _load_music(path: String) -> NovaMusicScript:
 	if path.is_empty():
 		return null
