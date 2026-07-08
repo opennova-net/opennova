@@ -229,6 +229,55 @@ opennova::terrain::SectorLayout editor_layout_from(const godot::PackedInt32Array
 	return layout;
 }
 
+// Borrow the live editable heightmap's mip-0 as float32 pixels for the
+// live-surface height samplers. False when no editable image is mounted, it is
+// not FORMAT_RF (the guard matches extract_heightmap_floats, the brushes'
+// contract), or the buffer is short; out_pixels shares the image's buffer and
+// keeps the float view alive.
+bool live_heightmap_pixels(const Ref<Image> &image, PackedByteArray &out_pixels, int &out_w, int &out_h) {
+	if (image.is_null() || image->get_format() != Image::FORMAT_RF) {
+		return false;
+	}
+	out_w = image->get_width();
+	out_h = image->get_height();
+	out_pixels = image->get_data();
+	return out_w > 0 && out_h > 0 &&
+	       out_pixels.size() >= static_cast<int64_t>(out_w) * out_h * 4;
+}
+
+// Per-point core of the live-surface height samplers: editor world->source
+// transform, then edge-clamped bilinear over the FORMAT_RF mip-0 floats. NAN
+// when the point is off the active sectors. Shared by the batch
+// sample_heights_world_live and the scalar sample_height_world_live so the two
+// can never disagree.
+float sample_live_height_at(const opennova::terrain::SectorLayout &layout,
+                            const float *heights, int w, int h,
+                            double world_x, double world_z) {
+	const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
+	        layout, world_x, world_z, opennova::terrain::coords_editor_options());
+	if (!r.valid) {
+		return std::numeric_limits<float>::quiet_NaN();
+	}
+	// Round the source coords through float32 first (the scalar coords API,
+	// world_to_source_coords, hands GDScript a float32 Vector2), then floor,
+	// edge clamp, clamped fractions, bilinear in 64-bit.
+	const double source_x = static_cast<double>(static_cast<float>(r.source_x));
+	const double source_z = static_cast<double>(static_cast<float>(r.source_z));
+	const int x0 = std::clamp(static_cast<int>(std::floor(source_x)), 0, w - 1);
+	const int z0 = std::clamp(static_cast<int>(std::floor(source_z)), 0, h - 1);
+	const int x1 = std::min(x0 + 1, w - 1);
+	const int z1 = std::min(z0 + 1, h - 1);
+	const double fx = std::clamp(source_x - static_cast<double>(x0), 0.0, 1.0);
+	const double fz = std::clamp(source_z - static_cast<double>(z0), 0.0, 1.0);
+	const double h00 = heights[static_cast<size_t>(z0) * w + x0];
+	const double h10 = heights[static_cast<size_t>(z0) * w + x1];
+	const double h01 = heights[static_cast<size_t>(z1) * w + x0];
+	const double h11 = heights[static_cast<size_t>(z1) * w + x1];
+	const double hx0 = h00 + (h10 - h00) * fx;
+	const double hx1 = h01 + (h11 - h01) * fx;
+	return static_cast<float>(hx0 + (hx1 - hx0) * fz);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -292,6 +341,8 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
 	ClassDB::bind_method(D_METHOD("sample_heights_world_live", "world_xz"), &NovaTerrainData::sample_heights_world_live);
+	ClassDB::bind_method(D_METHOD("sample_height_world_live", "world_x", "world_z"),
+	                     &NovaTerrainData::sample_height_world_live);
 	ClassDB::bind_method(D_METHOD("world_to_cell_source_coords", "world_x", "world_z", "row", "col"),
 	                     &NovaTerrainData::world_to_cell_source_coords);
 	ClassDB::bind_method(D_METHOD("get_cell_atlas_rect", "row", "col"), &NovaTerrainData::get_cell_atlas_rect);
@@ -1348,20 +1399,12 @@ PackedFloat32Array NovaTerrainData::sample_heights_world_live(const PackedVector
 	PackedFloat32Array out;
 	out.resize(world_xz.size());
 	float *out_ptr = out.ptrw();
-	const float nan = std::numeric_limits<float>::quiet_NaN();
-	// No editable image / no layout: every point is off the live surface. The
-	// FORMAT_RF guard matches extract_heightmap_floats (the brushes' contract).
-	if (heightmap_image.is_null() || heightmap_image->get_format() != Image::FORMAT_RF ||
-	        sector_grid.size() < 256) {
-		for (int i = 0; i < world_xz.size(); ++i) {
-			out_ptr[i] = nan;
-		}
-		return out;
-	}
-	const int w = heightmap_image->get_width();
-	const int h = heightmap_image->get_height();
-	const PackedByteArray pixels = heightmap_image->get_data();
-	if (w <= 0 || h <= 0 || pixels.size() < static_cast<int64_t>(w) * h * 4) {
+	// No editable image / no layout: every point is off the live surface.
+	PackedByteArray pixels;
+	int w = 0;
+	int h = 0;
+	if (sector_grid.size() < 256 || !live_heightmap_pixels(heightmap_image, pixels, w, h)) {
+		const float nan = std::numeric_limits<float>::quiet_NaN();
 		for (int i = 0; i < world_xz.size(); ++i) {
 			out_ptr[i] = nan;
 		}
@@ -1374,32 +1417,25 @@ PackedFloat32Array NovaTerrainData::sample_heights_world_live(const PackedVector
 	const float *heights = reinterpret_cast<const float *>(pixels.ptr());
 	const Vector2 *points = world_xz.ptr();
 	for (int i = 0; i < world_xz.size(); ++i) {
-		const opennova::terrain::CoordsResult<double> r = opennova::terrain::coords_world_to_source<double>(
-		        layout, points[i].x, points[i].y, opennova::terrain::coords_editor_options());
-		if (!r.valid) {
-			out_ptr[i] = nan;
-			continue;
-		}
-		// Round the source coords through float32 first — the scalar path hands
-		// GDScript a float32 Vector2 — then mirror _sample_source_height: floor,
-		// edge clamp, clamped fractions, bilinear in 64-bit.
-		const double source_x = static_cast<double>(static_cast<float>(r.source_x));
-		const double source_z = static_cast<double>(static_cast<float>(r.source_z));
-		const int x0 = std::clamp(static_cast<int>(std::floor(source_x)), 0, w - 1);
-		const int z0 = std::clamp(static_cast<int>(std::floor(source_z)), 0, h - 1);
-		const int x1 = std::min(x0 + 1, w - 1);
-		const int z1 = std::min(z0 + 1, h - 1);
-		const double fx = std::clamp(source_x - static_cast<double>(x0), 0.0, 1.0);
-		const double fz = std::clamp(source_z - static_cast<double>(z0), 0.0, 1.0);
-		const double h00 = heights[static_cast<size_t>(z0) * w + x0];
-		const double h10 = heights[static_cast<size_t>(z0) * w + x1];
-		const double h01 = heights[static_cast<size_t>(z1) * w + x0];
-		const double h11 = heights[static_cast<size_t>(z1) * w + x1];
-		const double hx0 = h00 + (h10 - h00) * fx;
-		const double hx1 = h01 + (h11 - h01) * fx;
-		out_ptr[i] = static_cast<float>(hx0 + (hx1 - hx0) * fz);
+		out_ptr[i] = sample_live_height_at(layout, heights, w, h, points[i].x, points[i].y);
 	}
 	return out;
+}
+
+float NovaTerrainData::sample_height_world_live(double world_x, double world_z) const {
+	// Scalar twin of sample_heights_world_live: same guards, one point through
+	// the same per-point core, NAN for off-mesh / no-data.
+	// EditorTerrainMesh.sample_world_height forwards here.
+	PackedByteArray pixels;
+	int w = 0;
+	int h = 0;
+	if (sector_grid.size() < 256 || !live_heightmap_pixels(heightmap_image, pixels, w, h)) {
+		return std::numeric_limits<float>::quiet_NaN();
+	}
+	const opennova::terrain::SectorLayout layout =
+	        editor_layout_from(sector_grid, origin_x, origin_y, sector_count, sector_rows);
+	return sample_live_height_at(layout, reinterpret_cast<const float *>(pixels.ptr()), w, h,
+	                             world_x, world_z);
 }
 
 Vector2 NovaTerrainData::world_to_cell_source_coords(double world_x, double world_z, int row, int col) const {

@@ -637,9 +637,9 @@ func sample_height_world(world_x: float, world_z: float) -> float:
 
 # Batch variant of sample_height_world: the live-surface height under each
 # (world_x, world_z) point, NAN per off-mesh / no-terrain point — one C++ call
-# for the whole set instead of ~6 boundary crossings per point (the mission
-# re-ground builds one request per entity). Same live-image semantics as the
-# scalar above; duck-typed so the mission tests' headless stubs can fake the
+# for the whole set instead of one per point (the mission re-ground builds one
+# request per entity). Scalar and batch run the same NovaTerrainData live
+# sampler core; duck-typed so the mission tests' headless stubs can fake the
 # surface (they implement this by looping their scalar fake).
 func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
 	if terrain_mesh == null:

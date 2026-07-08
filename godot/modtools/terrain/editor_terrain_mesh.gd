@@ -217,19 +217,20 @@ func get_sector_center_world(row: int, col: int) -> Vector3:
 
 
 func sample_world_height(world_x: float, world_z: float) -> float:
-	var source := world_to_source_coords(world_x, world_z)
-	if source.x < 0.0:
+	# Scalar and batch now run the same C++ live-surface sampler; -1e6 is this
+	# wrapper's legacy off-mesh sentinel (the batch variant keeps NAN).
+	if _data == null:
 		return -1000000.0
-	return _sample_source_height(source.x, source.y)
+	var height := _data.sample_height_world_live(world_x, world_z)
+	return height if not is_nan(height) else -1000000.0
 
 
 # Batch variant of sample_world_height: one C++ call for the whole point set
-# (the per-point path pays ~6 GDScript->C++ crossings each). Samples the SAME
-# live editable image — the document hands one Image to both this mesh and the
-# NovaTerrainData, and the C++ math mirrors world_to_source_coords +
-# _sample_source_height exactly (pinned by terrain_height_revision_test's
-# batch/scalar parity rows). Off-mesh / no-data points are NAN, not the scalar
-# path's -1e6 sentinel.
+# instead of one crossing per point. Scalar and batch run the same
+# NovaTerrainData per-point sampler core over the SAME live editable image
+# (the document hands one Image to both this mesh and the NovaTerrainData;
+# pinned by terrain_height_revision_test). Off-mesh / no-data points are NAN,
+# not the scalar path's -1e6 sentinel.
 func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
 	if _data == null:
 		var out := PackedFloat32Array()
@@ -269,20 +270,3 @@ func get_cells_overlapping_brush(world_x: float, world_z: float, radius_world: f
 			if get_sector_cell_value(row, col) > 0:
 				result.append(Vector2i(row, col))
 	return result
-
-
-func _sample_source_height(source_x: float, source_z: float) -> float:
-	var x0 := clampi(int(floor(source_x)), 0, ATLAS_SIZE - 1)
-	var z0 := clampi(int(floor(source_z)), 0, ATLAS_SIZE - 1)
-	var x1 := mini(x0 + 1, ATLAS_SIZE - 1)
-	var z1 := mini(z0 + 1, ATLAS_SIZE - 1)
-	var fx := clampf(source_x - float(x0), 0.0, 1.0)
-	var fz := clampf(source_z - float(z0), 0.0, 1.0)
-
-	var h00 := _heightmap_image.get_pixel(x0, z0).r
-	var h10 := _heightmap_image.get_pixel(x1, z0).r
-	var h01 := _heightmap_image.get_pixel(x0, z1).r
-	var h11 := _heightmap_image.get_pixel(x1, z1).r
-	var hx0 := lerpf(h00, h10, fx)
-	var hx1 := lerpf(h01, h11, fx)
-	return lerpf(hx0, hx1, fz)

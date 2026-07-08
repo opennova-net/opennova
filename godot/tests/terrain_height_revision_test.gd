@@ -56,13 +56,15 @@ func test_sample_height_world_reads_the_live_editable_surface() -> void:
 		"height edits are visible to the re-ground sampler immediately")
 
 
-func test_batch_sampler_matches_the_scalar_live_surface_sampler() -> void:
-	# The batch sampler (one C++ call — the re-ground request builder's fast
-	# path) and the scalar sampler must be the same surface read: same live
-	# image, same editor-mode remap, same edge-clamped bilinear. A sloped surface
-	# pins the sample LOCATION as well as the height source (a flat fill cannot
-	# tell a remap bug from a correct read), and it is written AFTER new_terrain,
-	# so parity here also proves the batch path reads live edits.
+func test_batch_and_scalar_run_the_single_cpp_sampler() -> void:
+	# Scalar and batch both forward to NovaTerrainData's live-surface sampler
+	# (one C++ per-point core), so this pins that single path end-to-end through
+	# the wrappers, including their NAN/sentinel translation (the mesh's scalar
+	# maps NAN to -1e6; terrain_editor's sample_height_world maps it back to
+	# NAN). A sloped surface pins the sample LOCATION as well as the height
+	# source (a flat fill cannot tell a remap bug from a correct read), and it
+	# is written AFTER new_terrain, so this also proves the sampler reads live
+	# edits.
 	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	editor.new_terrain()

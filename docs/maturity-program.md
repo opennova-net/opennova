@@ -224,7 +224,7 @@ TOD/celestial/fog/weather math that belongs in `libs/env`.
 
 | Item | Where | Status |
 |---|---|---|
-| Scalar GDScript height sampler duplicating C++ | terrain editor mesh | open (ENG-3) |
+| Scalar GDScript height sampler duplicating C++ | terrain editor mesh | **closed (ENG-3, 2026-07-07)** — `EditorTerrainMesh.sample_world_height` forwards to the new `NovaTerrainData.sample_height_world_live` (the batch sampler's per-point core, shared so the two can never disagree); the GDScript bilinear deleted; `terrain_height_revision_test` flipped from pinning batch/scalar drift to pinning the single path |
 | Hand-rolled terrain ray-march + slab test | terrain editor → mission picking | open (ENG-3) |
 | Sector/atlas constants + coord math duplicated | terrain editor mesh | open (ENG-3) |
 | FNT format facts + shelf packer in editor | fonts rasterizer | open (ENG-4) |
