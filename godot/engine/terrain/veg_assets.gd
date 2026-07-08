@@ -5,6 +5,7 @@ extends RefCounted
 # global search-root state.
 
 static var _mesh_cache: Dictionary = {}
+static var _fd_texture_cache: Dictionary = {}
 static var _model_path_cache: Dictionary = {}
 static var _graphics_cache_by_root: Dictionary = {}
 # The global cache epoch (NovaResourceRoot.cache_epoch) the caches above were built
@@ -14,6 +15,7 @@ static var _built_epoch: int = 0
 
 static func clear_cache() -> void:
 	_mesh_cache.clear()
+	_fd_texture_cache.clear()
 	_model_path_cache.clear()
 	_graphics_cache_by_root.clear()
 
@@ -72,6 +74,69 @@ static func resolve_slot_meshes(resource_root: NovaResourceRoot, defs: Array) ->
 		var mesh: Mesh = load_mesh(resource_root, graphic) if not graphic.is_empty() else null
 		meshes.append(mesh)
 	return meshes
+
+
+## Build the per-def ":fd" textures - the flat-0x808080 + smoothed-alpha bake
+## of each model's OWN diffuse that BOTH foliage tiers bind [orig:
+## Foliage_LoadDefAssets @ 0x601260 tail; bound by Foliage_DrawModelTileSlot
+## @ 0x601d90 and the quad tier alike]. Returns an Array parallel to `defs`;
+## non-power-of-two diffuses fall back to the raw texture (the retail bake's
+## wrap masks assume pow2), null entries stay null.
+static func resolve_slot_fd_textures(resource_root: NovaResourceRoot, defs: Array) -> Array:
+	var textures: Array = []
+	for def in defs:
+		if def == null:
+			textures.append(null)
+			continue
+		var graphic: String = String(def.graphic)
+		textures.append(load_fd_texture(resource_root, graphic) if not graphic.is_empty() else null)
+	return textures
+
+
+## The ":fd" texture for one graphic: the model's diffuse run through the
+## witnessed bake (NovaFoliageDispatcher.bake_fd_image). Cached per root+model.
+static func load_fd_texture(resource_root: NovaResourceRoot, graphic: String) -> Texture2D:
+	_check_epoch()
+	if resource_root == null or resource_root.get_root_dir().is_empty():
+		return null
+	var basename: String = graphic.get_file().get_basename().to_lower()
+	if basename.is_empty():
+		return null
+	var cache_key := _cache_key(_root_key(resource_root), basename)
+	if _fd_texture_cache.has(cache_key):
+		return _fd_texture_cache[cache_key]
+
+	var diffuse := _mesh_albedo_texture(load_mesh(resource_root, graphic))
+	if diffuse == null:
+		return null
+	var image: Image = diffuse.get_image()
+	if image == null:
+		return null
+	image = image.duplicate()
+	if image.is_compressed():
+		image.decompress()
+	image.convert(Image.FORMAT_RGBA8)
+
+	var fd: Texture2D
+	if NovaFoliageDispatcher.bake_fd_image(image):
+		# Mips after the bake so distance sampling smooths the BAKED alpha
+		# (the witnessed alpha-ref curve compensates exactly this erosion).
+		image.generate_mipmaps()
+		fd = ImageTexture.create_from_image(image)
+	else:
+		push_warning("VegAssets: '%s' diffuse is not power-of-two; :fd bake skipped, binding the raw diffuse." % basename)
+		fd = diffuse
+	_fd_texture_cache[cache_key] = fd
+	return fd
+
+
+static func _mesh_albedo_texture(mesh: Mesh) -> Texture2D:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return null
+	var material := mesh.surface_get_material(0) as BaseMaterial3D
+	if material == null:
+		return null
+	return material.albedo_texture
 
 
 ## Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to the first

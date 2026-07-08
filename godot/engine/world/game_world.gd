@@ -563,6 +563,8 @@ func _configure_foliage() -> void:
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.foliage_defs = defs
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
+	# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
+	_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, defs)
 	_apply_foliage_tint()
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
@@ -596,6 +598,17 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	_perf_runtime_us = 0
 	_perf_audio_us = 0
 	if _loaded and _dispatcher != null:
+		# Near-tier anchors: the witnessed driver is per-SECTOR-ENTITY (the
+		# .trn/.bms-placed world models) [orig: Terrain_RenderSectorEntitiesBySide
+		# @ 0x5c7d50]; placed mission objects are the host equivalent (host
+		# mapping). Maps without objects fall back to the visible-patch centers
+		# so terrain content still grows the near tier.
+		var model_anchors := PackedVector3Array()
+		if _placer != null and _placer.has_method("get_placed_world_positions"):
+			model_anchors = _placer.get_placed_world_positions()
+		if model_anchors.is_empty() and _terrain != null:
+			model_anchors = _terrain.get_foliage_dispatch_centers()
+		_dispatcher.set_model_anchors(model_anchors)
 		if _dispatcher.dispatch_algorithm == NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
 			_dispatcher.dispatch(camera_pos, camera_xform)
 		else:
