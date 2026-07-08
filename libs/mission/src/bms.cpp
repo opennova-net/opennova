@@ -1272,10 +1272,17 @@ bool write_file(const File& file, const std::string& path, std::string& error) {
 namespace {
 
 // Byte compare a vector of trivially-copyable records. Every fixed BMS record is value-initialized
-// on construction (padding included) and mutators only touch named fields, so this is exact.
+// on construction (padding included) and mutators only touch named fields, so this is exact. Copies
+// (EditHistory undo/baseline snapshots) preserve padding only for TRIVIAL types -- a non-trivial
+// (e.g. NSDMI'd) record may be copied member-wise, leaving padding indeterminate -- which the
+// static_asserts below enforce.
 template <typename T>
 bool pod_vectors_equal(const std::vector<T>& a, const std::vector<T>& b) {
     static_assert(std::is_trivially_copyable<T>::value, "pod_vectors_equal needs a trivially-copyable element");
+    static_assert(std::is_trivial<T>::value,
+                  "pod_vectors_equal needs a trivial element: non-trivial (e.g. NSDMI'd) records broke the "
+                  "padding-preserving copy on libc++/arm64 and made the memcmp read indeterminate padding "
+                  "(macOS-only dirty-flag regression, 2026-07)");
     if (a.size() != b.size()) {
         return false;
     }
