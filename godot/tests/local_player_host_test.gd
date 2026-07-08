@@ -8,6 +8,8 @@ class FakeWorld:
 	var input_calls: Array = []
 	var avatar_count := 0
 	var viewmodel_count := 0
+	var last_avatar: Node3D = null
+	var last_viewmodel: Node3D = null
 	var _has_player := true
 	var _loaded := true
 
@@ -17,16 +19,23 @@ class FakeWorld:
 	func has_local_player() -> bool:
 		return _has_player
 
+	# The real builders return NovaObjectModel subtrees whose MeshInstance3D
+	# children hang under container/Robj/Skeleton3D nodes; a plain child mesh
+	# models that shape (layers live on the VisualInstance3D, not the root).
 	func build_local_player_avatar() -> Node3D:
 		avatar_count += 1
 		var node := Node3D.new()
+		node.add_child(MeshInstance3D.new())
 		add_child(node)
+		last_avatar = node
 		return node
 
 	func build_local_player_viewmodel() -> Node3D:
 		viewmodel_count += 1
 		var node := Node3D.new()
+		node.add_child(MeshInstance3D.new())
 		add_child(node)
+		last_viewmodel = node
 		return node
 
 	func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, run: bool,
@@ -112,6 +121,70 @@ func test_shared_host_mouse_yaw_wraps_and_pitch_clamps() -> void:
 	assert_gte(call["yaw"], 0.0)
 	assert_lt(call["yaw"], 360.0)
 	assert_eq(call["pitch"], 80.0)
+
+
+func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
+	# The water-reflection player-model pin: retail's mirror re-renders the
+	# world scene, which CONTAINS the local player's body; the first-person
+	# arms/weapon are a separate near-Z overlay that never enters it
+	# [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
+	# @ 0x5c1240; Player_RenderFirstPersonViewModel @ 0x4ded60]. Hosted, that
+	# is LAYER plumbing: in first person the body stays visible on the
+	# reflection-only layer (masked off the player camera, kept by NovaWater's
+	# mirror camera) and the viewmodel rides its own mirror-excluded layer.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	host.before_world_tick(0.016)  # builds the avatar + viewmodel
+	host.after_world_tick()        # first person by default: placement + layer stamps
+
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
+		"setup() masks the reflection-only body layer off the player camera")
+	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+		"the player camera keeps drawing the FP viewmodel")
+	assert_true(world.last_avatar.visible,
+		"the body stays VISIBLE in first person - the mirror renders it")
+	assert_true(world.last_viewmodel.visible, "the FP overlay shows in first person")
+	var body_instances := _visual_instances(world.last_avatar)
+	var vm_instances := _visual_instances(world.last_viewmodel)
+	assert_gt(body_instances.size(), 0, "the fake body carries a visual instance")
+	assert_gt(vm_instances.size(), 0, "the fake viewmodel carries a visual instance")
+	for vi in body_instances:
+		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY,
+			"first person: the body's visual instances ride the reflection-only layer")
+	for vi in vm_instances:
+		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_VIEWMODEL,
+			"the viewmodel's visual instances ride the mirror-excluded viewmodel layer")
+
+	host.set_third_person(true)
+	host.after_world_tick()
+
+	for vi in _visual_instances(world.last_avatar):
+		assert_eq(vi.layers, NovaWater.VISUAL_LAYER_WORLD,
+			"third person: the body returns to the normal world layer")
+	assert_true(world.last_avatar.visible, "the body shows in third person")
+	assert_false(world.last_viewmodel.visible, "the FP overlay hides entirely in third person")
+
+	host.teardown()
+	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
+		"teardown() restores the player camera's cull mask")
+
+
+# Every VisualInstance3D under `root`, inclusive (mirrors the host's stamping walk).
+func _visual_instances(root: Node) -> Array:
+	var out: Array = []
+	if root is VisualInstance3D:
+		out.append(root)
+	for child in root.get_children():
+		out.append_array(_visual_instances(child))
+	return out
 
 
 func test_shared_host_teardown_releases_captured_mouse() -> void:

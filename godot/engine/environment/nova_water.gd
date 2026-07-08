@@ -7,6 +7,20 @@ extends Node3D
 # [orig: TimeOfDay_ParseProperty @ 0x57c590] and fog colors interpolated by
 # [orig: Environment_ComputeTimeOfDayColors @ 0x57de40] (docs/env/env-tod-re.md).
 
+# Visual-layer allocation for the reflection contract (env #30). The mirror
+# re-renders the WORLD scene - which contains the local player's body - but
+# never the water surface itself [orig: Water_ReflectionPrerender @ 0x5c2780
+# -> render_main_scene @ 0x5c1240 (mirrored sky/terrain/world/celestial/glare;
+# no water draw)] and never the first-person arms/weapon, which retail renders
+# as its own separate near-Z viewport pass over the finished frame
+# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. LocalPlayerHost stamps
+# the two player layers each frame and masks BODY_REFLECTION_ONLY off the
+# player camera; the mirror camera below is the only view that includes it.
+const VISUAL_LAYER_WORLD := 1 << 0  # Godot's default layer: every normal world instance
+const VISUAL_LAYER_WATER := 1 << 10  # the water surface itself; mirror-excluded
+const VISUAL_LAYER_VIEWMODEL := 1 << 11  # the FP arms/weapon overlay; mirror-excluded, main-visible
+const VISUAL_LAYER_BODY_REFLECTION_ONLY := 1 << 12  # the FP-mode local body; mirror-visible, main-excluded
+
 @export var environment_path: NodePath
 # The weather node owning the cloud-scroll core: the water scroll speed rides
 # the same RAMPING rate the sky layers consume (duck-typed, lazy resolve).
@@ -144,7 +158,7 @@ func build() -> void:
 	# below masks this one bit out — the witnessed offscreen prerender draws
 	# sky/terrain/world/celestials but never the water surface itself
 	# [orig: the render_main_scene @ 0x5c1240 pass list has no water draw].
-	mesh_instance.layers = 1 << 10
+	mesh_instance.layers = VISUAL_LAYER_WATER
 	add_child(mesh_instance)
 	built = true
 	_push_water_split_height()
@@ -178,10 +192,17 @@ func build() -> void:
 		add_child(reflection_viewport)
 		reflection_camera = Camera3D.new()
 		reflection_camera.name = "WaterReflectionCamera"
-		# Hide the water-only visual layer (bit 10, set on mesh_instance
-		# above) from the mirror pass: the witnessed offscreen scene never
-		# draws the water surface [orig: render_main_scene @ 0x5c1240].
-		reflection_camera.cull_mask = 0xFFFFF & ~(1 << 10)
+		# Hide the water-only visual layer (set on mesh_instance above) from
+		# the mirror pass: the witnessed offscreen scene never draws the water
+		# surface [orig: render_main_scene @ 0x5c1240]. The first-person
+		# viewmodel layer is masked out with it - retail's FP arms/weapon are
+		# a separate near-Z overlay pass that never enters the mirrored scene
+		# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. Everything
+		# else stays in, INCLUDING the reflection-only body layer: the
+		# witnessed mirrored scene is a re-render of the world, local player's
+		# body and all [orig: Water_ReflectionPrerender @ 0x5c2780 ->
+		# render_main_scene @ 0x5c1240].
+		reflection_camera.cull_mask = 0xFFFFF & ~(VISUAL_LAYER_WATER | VISUAL_LAYER_VIEWMODEL)
 		reflection_viewport.add_child(reflection_camera)
 		reflection_camera.current = true
 	reflection_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS

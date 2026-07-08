@@ -28,6 +28,11 @@ var _viewmodel: Node3D = null
 func setup(world, camera: Camera3D) -> void:
 	_world = world
 	_camera = camera
+	# The player camera never draws the reflection-only body layer: in first
+	# person the body lives there for the water mirror alone (see
+	# _update_avatar); NovaWater's mirror camera is the one view that keeps it.
+	if _camera != null:
+		_camera.cull_mask &= ~NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
 	_reset_state()
 
 
@@ -35,6 +40,8 @@ func teardown() -> void:
 	_set_fly_camera_locked(false)
 	_release_mouse_capture()
 	_clear_models()
+	if _camera != null:
+		_camera.cull_mask |= NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
 	_world = null
 	_camera = null
 	_input_source = Callable()
@@ -218,7 +225,19 @@ func _update_avatar(pos: Vector3) -> void:
 	_avatar.global_position = pos
 	_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
 		Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
-	_avatar.visible = _third_person
+	# The body renders in BOTH modes; first person hides it from the player
+	# camera by LAYER, not by visible = false (which would remove it from every
+	# camera, the water mirror included). Retail's reflection re-renders the
+	# world scene, which CONTAINS the local player's body - the FP arms are a
+	# separate overlay pass that never enters it [orig: Water_ReflectionPrerender
+	# @ 0x5c2780 -> render_main_scene @ 0x5c1240; the viewmodel pass is
+	# Player_RenderFirstPersonViewModel @ 0x4ded60]. setup() masked the
+	# reflection-only bit off the player camera; the mirror camera includes it.
+	# Stamped every frame: NovaObjectModel.rebuild() recreates its mesh
+	# children on the default layer.
+	_avatar.visible = true
+	_set_visual_layers(_avatar, NovaWater.VISUAL_LAYER_WORLD if _third_person
+			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
 	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
 	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
 	if not anim_key.is_empty() and _avatar.has_method("play_body_clip_at"):
@@ -240,7 +259,24 @@ func _update_viewmodel() -> void:
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
+	# The FP overlay never enters the water mirror: retail draws it as its own
+	# near-Z viewport pass over the finished frame, not as part of the mirrored
+	# world scene [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted,
+	# the dedicated layer is what the mirror camera's cull_mask excludes.
+	_set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
 	_viewmodel.visible = not _third_person
+
+
+# Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).
+# VisualInstance3D.layers is per-instance - a container's value does not
+# propagate to children - and both player models are NovaObjectModel subtrees
+# (mesh instances under Robj/Skeleton3D nodes) whose rebuild() recreates them
+# on the default layer, so the callers above re-stamp every frame.
+func _set_visual_layers(root: Node, layer_mask: int) -> void:
+	if root is VisualInstance3D:
+		(root as VisualInstance3D).layers = layer_mask
+	for child in root.get_children():
+		_set_visual_layers(child, layer_mask)
 
 
 func _viewmodel_offset(units: Vector3) -> Vector3:

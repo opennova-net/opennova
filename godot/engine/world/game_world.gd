@@ -681,7 +681,10 @@ func set_local_player_input(forward: bool, back: bool, left: bool, right: bool, 
 		_runtime.set_player_input(forward, back, left, right, run, crouch, prone, jump, look_yaw_deg, look_pitch_deg)
 
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
-## own). The caller (main_game) positions it and toggles first/third-person visibility. Null
+## own). The caller (LocalPlayerHost) positions it and swaps its visual layer per first/third
+## person: in first person the body stays renderable on the reflection-only layer, because the
+## witnessed water mirror re-renders the world scene, local body included
+## [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240]. Null
 ## when the resource root / item graphic is unavailable. 0x14B9 = player infantry [net-re §5.2b].
 func build_local_player_avatar() -> Node3D:
 	if _placer == null:
