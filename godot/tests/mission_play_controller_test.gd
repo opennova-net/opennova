@@ -91,23 +91,95 @@ func test_builds_the_play_stack() -> void:
 	assert_false(play.is_playing())
 
 
-func test_play_viewport_input_route_drives_mouse_look() -> void:
+func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	var play = _make_play()
 	await get_tree().process_frame
 	var world := FakeWorld.new()
 	add_child_autofree(world)
-	play.get_player_host().setup(world, play.get_play_camera())
+	var host = play.get_player_host()
+	host.setup(world, play.get_play_camera())
 	play._playing = true
 
 	var motion := InputEventMouseMotion.new()
 	motion.relative = Vector2(40.0, -20.0)
 	assert_true(play.handle_viewport_input(motion), "SubViewport input path must feed gameplay look")
-	play.get_player_host().before_world_tick(0.016)
+	host.before_world_tick(0.016)
 
 	assert_eq(world.input_calls.size(), 1)
 	assert_gt(world.input_calls[0]["yaw"], 0.0)
 	assert_gt(world.input_calls[0]["pitch"], 0.0)
+
+	# The stance/camera keys ride the same route the input-stage interception
+	# feeds: F4 flips the shared host's first/third person...
+	assert_false(host.is_third_person())
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_F4)), "F4 is claimed by the play session")
+	assert_true(host.is_third_person(), "and toggles third person on the shared host")
+
+	# ...and C / Z edge-toggle the stance, mutually exclusive, observed through
+	# the input the host packs into the world (the public seam).
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_C)), "C (crouch) is claimed")
+	host.before_world_tick(0.016)
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_Z)), "Z (prone) is claimed")
+	host.before_world_tick(0.016)
+	assert_eq(world.input_calls.size(), 3)
+	assert_true(world.input_calls[1]["crouch"], "C toggles crouch on")
+	assert_false(world.input_calls[1]["prone"])
+	assert_false(world.input_calls[2]["crouch"], "prone clears crouch (mutually exclusive)")
+	assert_true(world.input_calls[2]["prone"], "Z toggles prone on")
+
+	# While playing the game owns the keyboard: a key pushed through the root
+	# viewport's real input pipeline is claimed at the input stage, before the
+	# focused editor control (the thing that used to eat F4/C/Z) ever sees it.
+	var editor_box := LineEdit.new()
+	add_child_autofree(editor_box)
+	editor_box.grab_focus()
+	get_tree().root.push_input(_pressed_key(KEY_C, "c"))
+	host.before_world_tick(0.016)
+	assert_eq(world.input_calls.size(), 4)
+	assert_true(world.input_calls[3]["crouch"], "the pushed key reached the player host, not the editor UI")
+	assert_eq(editor_box.text, "", "the focused control never saw the key while playing")
+
+	# Esc still stops via the same path.
+	watch_signals(play)
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_ESCAPE)), "Esc is claimed while playing")
+	assert_signal_emitted(play, "stop_requested")
 	play._playing = false
+
+	# Stopped: the same pushed key falls through to the editor UI again.
+	get_tree().root.push_input(_pressed_key(KEY_C, "c"))
+	assert_eq(editor_box.text, "c", "not playing: the editor gets its keyboard back")
+
+
+func test_input_stage_interception_is_gated_on_playing() -> void:
+	# While playing, the play session claims the keyboard at the earliest input
+	# stage (the script overrides the _input virtual) so focused editor controls,
+	# menu accelerators, and workspace key handlers cannot eat the game keys; the
+	# unhandled-stage route stays as the backstop. Not playing, every event is
+	# declined and the editor keeps its input untouched.
+	var controller_script: Script = PlayController
+	var script_methods: Array = []
+	for m in controller_script.get_script_method_list():
+		script_methods.append(String(m.get("name", "")))
+	assert_has(script_methods, "_input", "the play controller intercepts at the input stage")
+	assert_has(script_methods, "_unhandled_input", "the unhandled-stage backstop remains")
+
+	var play = _make_play()
+	await get_tree().process_frame
+	assert_false(play.handle_viewport_input(_pressed_key(KEY_F4)), "not playing: F4 is not claimed")
+	assert_false(play.handle_viewport_input(_pressed_key(KEY_ESCAPE)), "not playing: Esc is not claimed")
+	assert_false(play.get_player_host().is_third_person(), "and the host state never moved")
+
+
+# A pressed, non-echo key event; `typed` fills unicode so a focused text field
+# would type it if the event ever reached the GUI stage.
+func _pressed_key(keycode: Key, typed := "") -> InputEventKey:
+	var key := InputEventKey.new()
+	key.keycode = keycode
+	key.physical_keycode = keycode
+	key.pressed = true
+	if not typed.is_empty():
+		key.unicode = typed.unicode_at(0)
+	return key
 
 
 func test_start_rejects_missing_or_unloaded_mission() -> void:

@@ -113,6 +113,29 @@ family, `FogStart`/`FogRangeRecip`, `MatRotSpecular` from the live light
 direction, and `ColorSrcGlobalGain` ← `Render_LightScaleR @ 0x8409f4` (the
 env #17 modulator triple's shader-path consumer — REN-5).
 
+**The GfxShader pass-flag word (anchored at the 2026-07-07 water fidelity
+grill).** The `GfxShader_Create*TexDesc` material family applies state
+through `CGfxShader_ApplyPass @ 0x683190` (checked wrapper
+`GfxShader_ApplyPassChecked @ 0x677020`): `combined = shaderFlags |
+passFlags` decodes into the device state block committed by
+`CGfxDevice_ApplyRenderStates @ 0x67e230` — **0x10000** =
+`D3DRS_SPECULARENABLE(29)`, **0x20000** = `FOGENABLE(28)`, **0x40000** =
+`ALPHATESTENABLE(15)`, **0x100000** = z-write OFF (inverted →
+`ZWRITEENABLE(14)` `@ 0x683232`), **0x200000** = z-test ALWAYS (inverted →
+`ZFUNC(23)` = current-else-ALWAYS `@ 0x683249`), **0x400000** = `CULLMODE
+NONE` (else CCW, CW under the mirror flag `@ 0x6832a8..0x6832be`),
+**0x1000000/0x2000000** = the stage-clamp pair. `CGfxDevice_SetAlphaTestRef
+@ 0x6770a0` latches only ALPHAFUNC (GREATER for ref ≥ 0, LESSEQUAL
+negated) + ALPHAREF — the ENABLE rides bit 0x40000 alone, so a
+SetAlphaTestRef call without that bit is an inert device latch (the water
+surface's `0x20` call is the canonical example — env-tod-re.md #34
+re-grade). The technique blend block applies only
+ALPHABLENDENABLE/SRCBLEND/DESTBLEND (`GfxBlend_ApplyToDevice @ 0x6817d0`).
+Scene projection depth range: `Render_SetProjectionDepthRange @ 0x58abe0`
+(ex `sub_58ABE0`) — near pinned 0.2, far = arg (missions pass 0x400 = 1024
+`[orig: Game_StartMission @ 0x524721]`), viewport-depth slot 0.99996948 =
+1 − 2⁻¹⁵ (`@ 0x58ac32`).
+
 **Ground truth corpus.** The shipped shader set: 44 `.fx` in JO:CA
 `localres.pff` (SCR\x01-wrapped, key 0xA55B1EED), 20 `_`-prefixed includes +
 24 effect files → 19 tags (+3 `EffectAlt_UV` twins: VS_DOT3DIFF, VS_PHONGT,

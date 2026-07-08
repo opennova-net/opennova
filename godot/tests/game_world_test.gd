@@ -100,6 +100,40 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 		"Godot ambient must never inject into the witnessed lighting model - all OpenNova materials light themselves; AMBIENT_SOURCE_BG would derive ambient from the clear color")
 
 
+func test_water_mirror_camera_sees_the_body_layer_but_never_the_viewmodel() -> void:
+	# The reflection layer contract (env #30): the witnessed mirror is a
+	# re-render of the WORLD scene - which contains the local player's body -
+	# but never the water surface itself and never the first-person overlay,
+	# which retail draws as its own near-Z viewport pass [orig:
+	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240;
+	# Player_RenderFirstPersonViewModel @ 0x4ded60]. Pin the packaged scene's
+	# mirror cull_mask so first-person arms can never leak back into the
+	# reflection (and the FP-mode body, parked on the reflection-only layer by
+	# LocalPlayerHost, always renders in it).
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	assert_not_null(packed, "the packaged world scene loads")
+	var world := packed.instantiate()
+	add_child_autofree(world)
+	var water: NovaWater = world.get_node_or_null("NovaWater")
+	assert_not_null(water, "the packaged scene ships the water node")
+	if water == null:
+		return
+	var mirror: Camera3D = water.reflection_camera
+	assert_not_null(mirror, "the water builds its mirror camera on ready")
+	if mirror == null:
+		return
+	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_WATER, 0,
+		"the mirrored scene never draws the water surface itself")
+	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+		"the FP arms/weapon overlay never enters the mirrored scene")
+	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
+		"the FP-mode local body DOES render in the mirror")
+	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD, 0,
+		"the mirrored scene renders the normal world")
+	assert_eq(water.mesh_instance.layers, NovaWater.VISUAL_LAYER_WATER,
+		"the water strip rides the water-only layer the mirror excludes")
+
+
 func test_game_world_is_playable_by_default_without_env_flag() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

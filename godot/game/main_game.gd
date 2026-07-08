@@ -11,7 +11,6 @@ const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_s
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
 const GameHudScript := preload("res://game/game_hud.gd")
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
@@ -20,38 +19,6 @@ const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd"
 const CHANGE_DIR_KEY := KEY_F9
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
-# Faithful first-person camera. The eye is +1.0
-# world unit above the player [orig: Camera_ComputeThirdPersonView @0x437d10]; F4 swaps to a
-# behind+above third person [orig: ThirdPersonCamera_Update @0x437af0]. The mouse drives look
-# yaw/pitch (pitch clamped ±80° [orig: Input_HandleActionBinding_0 @0x4e1330]).
-const PLAYER_EYE_HEIGHT := 1.0          # +0x10000 = +1.0 world unit above Position
-const PLAYER_PITCH_CLAMP_DEG := 80.0    # ±954437120 BAM
-const PLAYER_MOUSE_SENS_DEG := 0.12     # degrees per mouse pixel (tunable)
-const PLAYER_TP_DISTANCE := 5.0         # 3P camera distance behind the player
-const PLAYER_TP_HEIGHT := 1.5           # 3P camera height bump
-# First-person weapon viewmodel placement, witnessed from weapon.def `pos` (hip) / `tpos` (ADS).
-# The original adds the equipped weapon's view-bias offset to the eye in view-local space, rotated by
-# the view orientation, then draws the gun (gfx1) + character arms at that view root
-# [orig: Player_UpdateFirstPersonCamera @0x4dd380 -> g_view_euler_translation_out;
-# Player_RenderFirstPersonViewModel @0x4ded60]. The weapon.def parser stores the pos/tpos POSITION as
-# `atof(str) * 256.0` (a 16.16 fixed-point world coord; scale flt_7D1D70 @0x544770) and the ROTATION
-# as degrees -> 32-bit BAM (`* 0x0B60B60` = 2^32/360) [orig: weapon.def 'tpos' handler @0x54471f].
-# The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
-# offset is simply `file_value / 256`. The view-local frame is (x = right, y = forward, z = up): the
-# dominant `pos[2]` is the grip's DOWN offset (barrel reaches forward via the model), not depth — see
-# `_viewmodel_offset` for the axis map and derivation. The Sighted/ADS path swaps `pos` -> `tpos`
-# (WeaponDef.AltCamOffset @0x10C, read when entity Flags & 2).
-# Units are WPN_AK47AUTO (REVX02\WEAPON.DEF) — hardcoded with the fixed-default model until a
-# weapon.def Godot binding resolves the equipped weapon's pos/tpos per-weapon. (Swapped from WPN_MP5SD
-# to confirm the placement generalizes; AK47AUTO pos is a near-pure vertical drop = a clean test.)
-const WEAPON_DEF_POS_SCALE := 256.0                                    # flt_7D1D70: file unit -> /256 world units
-const PLAYER_VIEWMODEL_POS_UNITS := Vector3(10.0, 0.0, -201.0)         # weapon.def `pos`  (hip)
-const PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-28.046, 21.531, -187.857)  # weapon.def `tpos` (ADS/sighted)
-# FP viewmodel model-facing rotation, euler DEGREES, camera-local. Our NovaObjectModel mesh is
-# model-native (Y-up, only X-negated) so it must NOT get the world-object bms_to_godot_basis; this
-# lays the gun barrel down-range relative to the view. The small per-weapon `pos`-rotation columns
-# (Bone.rot, yaw/pitch/roll BAM — AK47AUTO = 0.0 / 0.0 / 1.0 deg) are a separate fine-tune, deferred.
-const PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 
 enum State { MENU, WORLD, PAUSED }
 
@@ -70,15 +37,6 @@ var _game_hud       # GameHud, built on the first frame a mission has a local pl
 var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
 var _hud_objective := ""  # latest mission-effect text line shown by the HUD
 var _player_host: LocalPlayerHost = null
-var _player_look_yaw := 0.0    # the local player's look yaw (mission deg), from the mouse
-var _player_look_pitch := 0.0  # the local player's look pitch (deg), from the mouse, ±80°
-var _player_third_person := false  # F4 toggles first/third person
-# Stance is toggled on a key edge (C = crouch, Z = prone), mirroring the original's edge-toggle;
-# the two are mutually exclusive. Jump is momentary (polled). [orig: stance bits on entity+0x12C]
-var _player_crouch := false
-var _player_prone := false
-var _player_avatar: Node3D = null  # host-managed soldier body (shown in 3P); null until built
-var _player_viewmodel: Node3D = null  # host-managed FP arms+weapon (shown in 1P); null until built
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
@@ -161,24 +119,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
 		return
+	# The gameplay keys (F4 first/third person, C/Z stance) live on the shared
+	# LocalPlayerHost — the same host ONED play-in-editor routes to.
 	if _player_host != null and _player_host.handle_key_input(event, _state == State.WORLD):
-		get_viewport().set_input_as_handled()
-		return
-	# F4 toggles first/third person for the local player [orig: dword_A890C8 mode flag].
-	if key.keycode == KEY_F4 and _world.has_local_player():
-		_player_third_person = not _player_third_person
-		get_viewport().set_input_as_handled()
-	# C / Z toggle the player's stance (crouch / prone), mutually exclusive — the original toggles
-	# stance on a key edge. [orig: NapiNPServerMsg_HandleStanceChange @0x501c60; crouch wins]
-	elif key.keycode == KEY_C and _world.has_local_player():
-		_player_crouch = not _player_crouch
-		if _player_crouch:
-			_player_prone = false
-		get_viewport().set_input_as_handled()
-	elif key.keycode == KEY_Z and _world.has_local_player():
-		_player_prone = not _player_prone
-		if _player_prone:
-			_player_crouch = false
 		get_viewport().set_input_as_handled()
 
 
@@ -640,99 +583,10 @@ func _process(delta: float) -> void:
 	_update_game_hud()
 
 
-# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe); the mouse turns
-# the look (see _unhandled_input). Shift runs. [orig: Player_PackInputStateToEntity @0x4df450]
-func _drive_local_player(_delta: float) -> void:
-	var fwd: bool = Input.is_key_pressed(KEY_W)
-	var back: bool = Input.is_key_pressed(KEY_S)
-	var left: bool = Input.is_key_pressed(KEY_A)
-	var right: bool = Input.is_key_pressed(KEY_D)
-	var run: bool = Input.is_key_pressed(KEY_SHIFT)
-	var jump: bool = Input.is_key_pressed(KEY_SPACE)  # momentary; the motor jumps once when grounded
-	_world.set_local_player_input(fwd, back, left, right, run, _player_crouch, _player_prone, jump,
-		_player_look_yaw, _player_look_pitch)
-
-
-# Mouse-look: turn the look yaw (X) and pitch (Y, clamped ±80°). [orig: mouse -> entity
-# Yaw@+0x10 / Pitch@+0x14, Input_HandleActionBinding_0 @0x4e1330]. Signs are tunable.
+# Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);
+# the shell only says when the player is live: in-world, loaded, mouse captured.
 func _unhandled_input(event: InputEvent) -> void:
 	if _player_host != null and _player_host.handle_input(
 			event,
 			_state == State.WORLD and _world.is_loaded() and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED):
 		get_viewport().set_input_as_handled()
-		return
-	if not (event is InputEventMouseMotion):
-		return
-	if _state != State.WORLD or not _world.is_loaded() or not _world.has_local_player():
-		return
-	if Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
-		return
-	var mm := event as InputEventMouseMotion
-	_player_look_yaw += mm.relative.x * PLAYER_MOUSE_SENS_DEG
-	_player_look_pitch = clampf(_player_look_pitch - mm.relative.y * PLAYER_MOUSE_SENS_DEG,
-		-PLAYER_PITCH_CLAMP_DEG, PLAYER_PITCH_CLAMP_DEG)
-
-
-# Place the camera from the player's authoritative pose. First person: eye = player + 1.0u
-# looking along the facing. Third person (F4): behind + above, looking at the player. The
-# mission yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission facing
-# yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted by pitch.
-func _update_player_camera() -> void:
-	var pos: Vector3 = _world.local_player_position()
-	var yr := deg_to_rad(_world.local_player_yaw_deg())
-	var pr := deg_to_rad(_world.local_player_pitch_deg())
-	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
-	if _player_third_person:
-		_camera.global_position = eye - forward * PLAYER_TP_DISTANCE + Vector3(0, PLAYER_TP_HEIGHT, 0)
-		_camera.look_at(eye, Vector3.UP)
-	else:
-		_camera.global_position = eye
-		_camera.look_at(eye + forward, Vector3.UP)
-	# Host-managed avatar: stand it at the player facing the look yaw (the body doesn't pitch);
-	# shown in third person, hidden in first (the FP arms viewmodel is a later weapon-phase step).
-	if _player_avatar != null and is_instance_valid(_player_avatar):
-		_player_avatar.global_position = pos
-		_player_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
-			Vector3(0.0, _world.local_player_yaw_deg(), 0.0))
-		_player_avatar.visible = _player_third_person
-		# Drive the body clip from the player's authoritative anim STATE + phase. The sim/root track
-		# owns phase; the model only poses the matching .bad clip so root motion and skeleton do not
-		# drift apart. Fall back to the old selector path for compatibility.
-		var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
-		var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
-		if not anim_key.is_empty() and _player_avatar.has_method("play_body_clip_at"):
-			_player_avatar.play_body_clip_at(anim_key, anim_phase)
-		elif not anim_key.is_empty() and _player_avatar.has_method("play_body_clip"):
-			_player_avatar.play_body_clip(anim_key)
-		elif _player_avatar.has_method("play_body_anim_at"):
-			_player_avatar.play_body_anim_at(_world.local_player_body_anim_slot(), anim_phase)
-		elif _player_avatar.has_method("play_body_anim"):
-			_player_avatar.play_body_anim(_world.local_player_body_anim_slot())
-	# First-person weapon viewmodel: sit it in front of the eye, tracking the camera 1:1, shown in
-	# first person only (hidden in 3P, where the body avatar shows instead). The original biases the
-	# CAMERA by the weapon's `pos`/`tpos` view offset and draws the model at the view root
-	# [orig: Player_UpdateFirstPersonCamera @0x4dd380]; placing it in camera space is the faithful
-	# structural equivalent (camera.global_transform == the engine view transform here).
-	if _player_viewmodel != null and is_instance_valid(_player_viewmodel):
-		var vm_basis := Basis.from_euler(Vector3(
-			deg_to_rad(PLAYER_VIEWMODEL_ROT.x), deg_to_rad(PLAYER_VIEWMODEL_ROT.y), deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
-		var vm_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)  # TODO: -> TPOS when ADS (entity Flags & 2)
-		_player_viewmodel.global_transform = _camera.global_transform * Transform3D(vm_basis, vm_offset)
-		_player_viewmodel.visible = not _player_third_person
-
-
-# Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.
-# Faithful to the witnessed pipeline [orig: Player_UpdateFirstPersonCamera @0x4dd380; scale
-# flt_7D1D70=256 @0x544770]: the camera adds `ftol(Bone.pos)` straight onto g_view_pos, and at a
-# level look the view matrix is identity [orig: Math_BuildFixedPointRotationMatrixYXZ @0x615400], so
-# component i lands on world axis i (world Z = up). The view-local frame is therefore
-# (x = right, y = forward, z = up) — `pos[2]` is the grip's DOWN offset (the dominant term; the barrel
-# reaches forward via the model), NOT depth. Godot camera-local is (x right, y up, -z forward), so:
-#   file x (right)   -> Godot  x
-#   file y (forward) -> Godot -z
-#   file z (up)      -> Godot  y      (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
-# The two small lateral/forward terms (x, y) are sign-confirmable by drive; the z->y (down) term is
-# the certain one. (oscarmike WeaponManager._jo_to_godot_position agrees on /256 + z->up/down.)
-func _viewmodel_offset(units: Vector3) -> Vector3:
-	return Vector3(units.x, units.z, -units.y) / WEAPON_DEF_POS_SCALE
