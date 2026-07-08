@@ -53,7 +53,7 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 # Interactive music: the engine hardcodes two bank+script pairs -- MENUMUS.SBF/.BIN
 # (menu) and GAMEMUS.SBF/.BIN (game), renamed to M<n>/G<n> forms when expansion <n>
 # is active [orig: Expansion_LoadAssets @ 0x4a4798]. Blank = that witnessed
-# resolution (see _resolve_music_pair); an explicit value wins (loose dev override).
+# resolution (see resolve_music_pair); an explicit value wins (loose dev override).
 @export var menu_sound_bank_file := ""   # "" -> MENUMUS.SBF (M<n>.sbf under an expansion)
 # Menu SFX profile: the .lwf the widgets' <SOUND> elements reference (hover/click).
 # "" -> a .lwf whose name contains "menu" (i.e. menu.lwf), else the first .lwf found.
@@ -201,8 +201,8 @@ func _assemble_assets() -> void:
 	# Sbf_OpenFile_Gamemus @ 0x4ed6c0] while each .bin script loads by name through
 	# the engine file system, so it resolves from PFF archives too [orig:
 	# AudioVM_LoadScriptFile @ 0x672d20 via AudioVM_OpenContextFile @ 0x6721f7].
-	var menu_pair := _resolve_music_pair("M", "menumus")
-	var game_pair := _resolve_music_pair("G", "gamemus")
+	var menu_pair := resolve_music_pair("M", "menumus")
+	var game_pair := resolve_music_pair("G", "gamemus")
 	var menu_bank_path := String(menu_pair.bank)
 	if not menu_sound_bank_file.is_empty():
 		menu_bank_path = _resolve(menu_sound_bank_file)  # explicit override wins
@@ -552,6 +552,16 @@ func _on_mission_activated(index: int) -> void:
 
 # --- Audio --------------------------------------------------------------------
 
+# Read-only music state (ADR 0018 seams: tests/diagnostics read the loaded
+# scripts through these, never the private fields).
+func menu_music_script() -> NovaMusicScript:
+	return _menu_music
+
+
+func game_music_script() -> NovaMusicScript:
+	return _game_music
+
+
 func _enter_menu_music() -> void:
 	_play_script(_menu_music, _menu_music_bank)
 
@@ -616,7 +626,9 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 # music. Bank and script always come from the SAME stem (the script's play ops
 # index that bank's entries), so halves are never mixed across stems.
 # Returns {"bank": loose path or "", "script": VFS basename or ""}.
-func _resolve_music_pair(prefix: String, base_stem: String) -> Dictionary:
+# Public: the witnessed resolution is a queryable engine fact (ADR 0018 —
+# tests and diagnostics read it through this seam, not the privates).
+func resolve_music_pair(prefix: String, base_stem: String) -> Dictionary:
 	if _root == null:
 		return {"bank": "", "script": ""}
 	var exp_name := _root.get_expansion()

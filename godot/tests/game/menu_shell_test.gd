@@ -317,12 +317,12 @@ func test_music_scripts_load_pff_archived_by_hardcoded_names() -> void:
 	host.size = Vector2(800, 600)
 	add_child_autofree(host)
 	host.setup(root)
-	assert_not_null(host._menu_music, "menumus.bin loaded from the PFF by hardcoded name")
-	if host._menu_music != null:
-		assert_eq(host._menu_music.get_source_path(), "menumus.bin", "menu script is the base name")
-	assert_not_null(host._game_music, "gamemus.bin loaded from the PFF by hardcoded name")
-	if host._game_music != null:
-		assert_eq(host._game_music.get_source_path(), "gamemus.bin", "game script is the base name")
+	assert_not_null(host.menu_music_script(), "menumus.bin loaded from the PFF by hardcoded name")
+	if host.menu_music_script() != null:
+		assert_eq(host.menu_music_script().get_source_path(), "menumus.bin", "menu script is the base name")
+	assert_not_null(host.game_music_script(), "gamemus.bin loaded from the PFF by hardcoded name")
+	if host.game_music_script() != null:
+		assert_eq(host.game_music_script().get_source_path(), "gamemus.bin", "game script is the base name")
 	root.clear()
 	DirAccess.remove_absolute(dir.path_join("resource.pff"))
 	DirAccess.remove_absolute(dir)
@@ -359,16 +359,16 @@ func test_music_resolution_prefers_expansion_pair_then_base() -> void:
 	host.size = Vector2(800, 600)
 	add_child_autofree(host)
 	host.setup(root)
-	assert_not_null(host._menu_music, "expansion menu script loaded")
-	if host._menu_music != null:
-		assert_eq(host._menu_music.get_source_path(), "Mjox01.bin", "M<n>.bin preferred over menumus.bin")
-	assert_not_null(host._game_music, "expansion game script loaded")
-	if host._game_music != null:
-		assert_eq(host._game_music.get_source_path(), "Gjox01.bin", "G<n>.bin preferred over gamemus.bin")
-	var menu_pair: Dictionary = host._resolve_music_pair("M", "menumus")
+	assert_not_null(host.menu_music_script(), "expansion menu script loaded")
+	if host.menu_music_script() != null:
+		assert_eq(host.menu_music_script().get_source_path(), "Mjox01.bin", "M<n>.bin preferred over menumus.bin")
+	assert_not_null(host.game_music_script(), "expansion game script loaded")
+	if host.game_music_script() != null:
+		assert_eq(host.game_music_script().get_source_path(), "Gjox01.bin", "G<n>.bin preferred over gamemus.bin")
+	var menu_pair: Dictionary = host.resolve_music_pair("M", "menumus")
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
 		"the menu bank streams loose from the expansion folder")
-	var game_pair: Dictionary = host._resolve_music_pair("G", "gamemus")
+	var game_pair: Dictionary = host.resolve_music_pair("G", "gamemus")
 	assert_eq(String(game_pair.script), "Gjox01.bin", "game stem resolves its script")
 	assert_eq(String(game_pair.bank), "",
 		"no G<n>.sbf shipped -> that half stays empty; the base bank is never mixed in")
@@ -404,12 +404,12 @@ func test_music_resolution_falls_back_to_base_pair() -> void:
 	host.size = Vector2(800, 600)
 	add_child_autofree(host)
 	host.setup(root)
-	assert_not_null(host._menu_music, "base menu script loaded under a musicless expansion")
-	if host._menu_music != null:
-		assert_eq(host._menu_music.get_source_path(), "menumus.bin", "fell back to MENUMUS.BIN")
-	if host._game_music != null:
-		assert_eq(host._game_music.get_source_path(), "gamemus.bin", "fell back to GAMEMUS.BIN")
-	var pair: Dictionary = host._resolve_music_pair("M", "menumus")
+	assert_not_null(host.menu_music_script(), "base menu script loaded under a musicless expansion")
+	if host.menu_music_script() != null:
+		assert_eq(host.menu_music_script().get_source_path(), "menumus.bin", "fell back to MENUMUS.BIN")
+	if host.game_music_script() != null:
+		assert_eq(host.game_music_script().get_source_path(), "gamemus.bin", "fell back to GAMEMUS.BIN")
+	var pair: Dictionary = host.resolve_music_pair("M", "menumus")
 	assert_true(String(pair.bank).ends_with("menumus.sbf"), "base bank resolved loose from the root")
 	root.clear()
 	_rm_music_base_dir(dir)
