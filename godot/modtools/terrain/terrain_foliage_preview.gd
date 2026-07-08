@@ -88,6 +88,8 @@ func set_preview_state(
 		if _dispatcher != null:
 			_dispatcher.foliage_defs = _foliage_defs
 			_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, _foliage_defs)
+			# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
+			_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, _foliage_defs)
 		_pending_flush = true
 
 	if _dispatcher == null:

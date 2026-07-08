@@ -563,6 +563,8 @@ func _configure_foliage() -> void:
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.foliage_defs = defs
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
+	# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
+	_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, defs)
 	_apply_foliage_tint()
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
