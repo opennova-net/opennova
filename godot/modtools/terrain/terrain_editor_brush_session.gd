@@ -2,7 +2,7 @@ class_name TerrainEditorBrushSession
 extends RefCounted
 
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
-const HM_SIZE := 1024
+const HM_SIZE := NovaTerrainData.ATLAS_SIZE
 const BRUSH_RADIUS_MIN := 1.0
 const BRUSH_RADIUS_MAX := 128.0
 const BRUSH_STRENGTH_MIN := 0.01

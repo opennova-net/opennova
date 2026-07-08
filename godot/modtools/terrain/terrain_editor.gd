@@ -10,7 +10,7 @@ enum TileInteractionMode { PLACE, EDIT_SELECTED }
 # BHD-era terrains (DVD4, original DPTH golden) use DPTH; JO/DFX-era use CDEP.
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 
-const HM_SIZE := 1024
+const HM_SIZE := NovaTerrainData.ATLAS_SIZE
 const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
@@ -618,8 +618,8 @@ func get_data() -> NovaTerrainData:
 
 
 # World-space height of the LIVE editable surface under (world_x, world_z) — the
-# same image-backed bilinear sample the placement/drag raycasts ground on
-# (EditorTerrainMesh.sample_world_height over the edited heightmap). NOT the baked
+# same live substrate + bilinear core the placement/drag raycasts hit
+# (raycast_terrain_at, via NovaTerrainData's shared sampler). NOT the baked
 # CPT sampler (NovaTerrainData.get_height_world*): height brushes mutate only the
 # editable image, so the baked buffer is stale the moment _height_revision moves
 # (and absent entirely on never-exported project terrains). Returns NAN when no
@@ -637,9 +637,9 @@ func sample_height_world(world_x: float, world_z: float) -> float:
 
 # Batch variant of sample_height_world: the live-surface height under each
 # (world_x, world_z) point, NAN per off-mesh / no-terrain point — one C++ call
-# for the whole set instead of ~6 boundary crossings per point (the mission
-# re-ground builds one request per entity). Same live-image semantics as the
-# scalar above; duck-typed so the mission tests' headless stubs can fake the
+# for the whole set instead of one per point (the mission re-ground builds one
+# request per entity). Scalar and batch run the same NovaTerrainData live
+# sampler core; duck-typed so the mission tests' headless stubs can fake the
 # surface (they implement this by looping their scalar fake).
 func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
 	if terrain_mesh == null:
@@ -1009,21 +1009,21 @@ func get_resource_root() -> NovaResourceRoot:
 func get_sector_cell(row: int, col: int) -> int:
 	if not _data:
 		return 0
-	var idx := row * 16 + col
+	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
 	var grid: PackedInt32Array = _data.get_sector_grid()
 	if idx < 0 or idx >= grid.size():
 		return 0
-	return clampi(grid[idx], 0, 4)
+	return clampi(grid[idx], 0, NovaTerrainData.SECTOR_ID_MAX)
 
 
 func set_sector_cell(row: int, col: int, value: int) -> bool:
 	if is_export_running() or not _data:
 		return false
-	var idx := row * 16 + col
+	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
 	var grid: PackedInt32Array = _data.get_sector_grid()
 	if idx < 0 or idx >= grid.size():
 		return false
-	var next := clampi(value, 0, 4)
+	var next := clampi(value, 0, NovaTerrainData.SECTOR_ID_MAX)
 	_active_sector_cell = Vector2i(row, col)
 	if grid[idx] == next:
 		_mark_ui_state_changed()
@@ -1685,11 +1685,20 @@ func _on_primary_end() -> void:
 
 # Public: intersect a viewport-space mouse position with the terrain surface. Returns
 # a world-space point, or INVALID_HIT on a miss; pair with is_valid_terrain_hit().
-# Used by the Mission workspace to drag/place entities onto the ground.
+# Used by the Mission workspace to drag/place entities onto the ground. Forwards to
+# the engine's witnessed segment raycast ([orig: Terrain_RaycastHeightmapLoRes
+# @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710], docs/terrain/terrain-re.md
+# §Runtime terrain queries) via EditorTerrainMesh.raycast_world; the engine side
+# slab-clips the long probe segment to the authored extent.
 func raycast_terrain_at(mouse_pos: Vector2) -> Vector3:
 	if camera == null or terrain_mesh == null:
 		return INVALID_HIT
-	return _raycast_terrain_from(mouse_pos)
+	var origin := camera.project_ray_origin(mouse_pos)
+	var direction := camera.project_ray_normal(mouse_pos)
+	var hit: Vector3 = terrain_mesh.raycast_world(origin, origin + direction * 100000.0)
+	if is_nan(hit.x) or is_nan(hit.y) or is_nan(hit.z):
+		return INVALID_HIT
+	return hit
 
 
 func is_valid_terrain_hit(hit: Vector3) -> bool:
@@ -1698,108 +1707,7 @@ func is_valid_terrain_hit(hit: Vector3) -> bool:
 
 func _raycast_terrain() -> Vector3:
 	var mouse_pos := _viewport_mouse_position if _uses_workspace_viewport else get_viewport().get_mouse_position()
-	return _raycast_terrain_from(mouse_pos)
-
-
-func _raycast_terrain_from(mouse_pos: Vector2) -> Vector3:
-	var from := camera.project_ray_origin(mouse_pos)
-	var direction := camera.project_ray_normal(mouse_pos)
-	var bounds_hit := _intersect_ray_xz_bounds(from, direction)
-	if bounds_hit.y < bounds_hit.x:
-		return INVALID_HIT
-
-	var t_entry := bounds_hit.x
-	var t_exit := bounds_hit.y
-	var entry_pos := from + direction * t_entry
-	var entry_height := terrain_mesh.sample_world_height(entry_pos.x, entry_pos.z)
-	if entry_height == INVALID_HEIGHT:
-		entry_height = 0.0
-
-	var planar_distance := Vector2(
-		(from + direction * t_exit).x - entry_pos.x,
-		(from + direction * t_exit).z - entry_pos.z
-	).length()
-	var steps := clampi(int(ceil(planar_distance / 8.0)), 24, 512)
-
-	var prev_t := t_entry
-	var prev_diff := entry_pos.y - entry_height
-	var prev_valid := terrain_mesh.sample_world_height(entry_pos.x, entry_pos.z) != INVALID_HEIGHT
-	if prev_valid and prev_diff <= 0.0:
-		return Vector3(entry_pos.x, entry_height, entry_pos.z)
-
-	for step in range(1, steps + 1):
-		var t := lerpf(t_entry, t_exit, float(step) / float(steps))
-		var pos := from + direction * t
-		var height := terrain_mesh.sample_world_height(pos.x, pos.z)
-		var valid := height != INVALID_HEIGHT
-		if valid:
-			var diff := pos.y - height
-			if prev_valid and prev_diff > 0.0 and diff <= 0.0:
-				return _refine_ray_hit(from, direction, prev_t, t)
-			prev_t = t
-			prev_diff = diff
-			prev_valid = true
-		else:
-			prev_valid = false
-
-	return INVALID_HIT
-
-
-func _intersect_ray_xz_bounds(from: Vector3, direction: Vector3) -> Vector2:
-	var bounds := terrain_mesh.get_world_bounds()
-	if bounds.size.x <= 0.0 or bounds.size.z <= 0.0:
-		return Vector2(1.0, -1.0)
-
-	var min_t := -INF
-	var max_t := INF
-	var min_x := bounds.position.x
-	var max_x := bounds.position.x + bounds.size.x
-	var min_z := bounds.position.z
-	var max_z := bounds.position.z + bounds.size.z
-
-	if absf(direction.x) < 0.00001:
-		if from.x < min_x or from.x > max_x:
-			return Vector2(1.0, -1.0)
-	else:
-		var tx1 := (min_x - from.x) / direction.x
-		var tx2 := (max_x - from.x) / direction.x
-		min_t = maxf(min_t, minf(tx1, tx2))
-		max_t = minf(max_t, maxf(tx1, tx2))
-
-	if absf(direction.z) < 0.00001:
-		if from.z < min_z or from.z > max_z:
-			return Vector2(1.0, -1.0)
-	else:
-		var tz1 := (min_z - from.z) / direction.z
-		var tz2 := (max_z - from.z) / direction.z
-		min_t = maxf(min_t, minf(tz1, tz2))
-		max_t = minf(max_t, maxf(tz1, tz2))
-
-	if max_t < maxf(min_t, 0.0):
-		return Vector2(1.0, -1.0)
-	return Vector2(maxf(min_t, 0.0), max_t)
-
-
-func _refine_ray_hit(from: Vector3, direction: Vector3, t_min: float, t_max: float) -> Vector3:
-	var lo := t_min
-	var hi := t_max
-	for _iteration in 8:
-		var mid := (lo + hi) * 0.5
-		var pos := from + direction * mid
-		var height := terrain_mesh.sample_world_height(pos.x, pos.z)
-		if height == INVALID_HEIGHT:
-			lo = mid
-			continue
-		if pos.y > height:
-			lo = mid
-		else:
-			hi = mid
-
-	var hit_pos := from + direction * hi
-	var hit_height := terrain_mesh.sample_world_height(hit_pos.x, hit_pos.z)
-	if hit_height == INVALID_HEIGHT:
-		return INVALID_HIT
-	return Vector3(hit_pos.x, hit_height, hit_pos.z)
+	return raycast_terrain_at(mouse_pos)
 
 
 func _is_valid_hit(hit: Vector3) -> bool:
@@ -2443,10 +2351,10 @@ func _authored_sector_world_rect() -> Rect2:
 
 func _build_default_sector_grid() -> PackedInt32Array:
 	var grid := PackedInt32Array()
-	grid.resize(256)
+	grid.resize(NovaTerrainData.SECTOR_GRID_DIM * NovaTerrainData.SECTOR_GRID_DIM)
 	for row in 8:
 		for col in 8:
-			grid[row * 16 + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
+			grid[row * NovaTerrainData.SECTOR_GRID_DIM + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
 	return grid
 
 

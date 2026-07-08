@@ -584,8 +584,10 @@ calls `raycast_entity_collision @ 0x413760`, which writes the sampled ground hei
 (returned in eax) — the 5 taps DO sample 5 distinct columns. `sub_414320` additionally stores the
 raycast collision-object at record+40. The real sampler is
 `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`: a LoRes pass, then back/forward step + 8-iteration
-bisection refine (the per-step terrain samples are inlined FPU the decompiler dropped to
-`null_stub()`); for a near-vertical down-ray this equals the bilinear heightmap column height.
+bisection refine (the per-step terrain samples are `Terrain_SampleHeightBilinear @ 0x6067b0` —
+that callee sat IDB-mistyped as a `void()` "null_stub" so decompiles elided it; retyped at the
+ENG-3 B0 grill, full witness in [terrain-re.md](../terrain/terrain-re.md) §Runtime terrain
+queries); for a near-vertical down-ray this equals the bilinear heightmap column height.
 
 ### 10.3 The vertical assignment + our port
 Both movers recompute `brain[131]` from the sampler EVERY tick: `0x466db0` sets

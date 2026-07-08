@@ -739,6 +739,16 @@ target_link_libraries(coords_test PRIVATE opennova_terrain)
 target_include_directories(coords_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME coords COMMAND coords_test)
 
+# The retail terrain segment raycast (libs/terrain_query/terrain_raycast):
+# the Terrain_RaycastHeightmapLoRes march + HiRes_0 refine structural
+# translation over a synthetic sampler — step normalization/budget, ray-z hit
+# semantics, the column-shortcut crossing asymmetry, the empty-cell height-0
+# floor, the out-of-extent editor guard, and the odd skip-refine guard.
+add_executable(terrain_raycast_test terrain/terrain_raycast_test.cpp)
+target_link_libraries(terrain_raycast_test PRIVATE opennova_terrain_query)
+target_include_directories(terrain_raycast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_raycast COMMAND terrain_raycast_test)
+
 # Height brush kernels (libs/terrain/brush): raise/lower, smooth (two-pass),
 # flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
 add_executable(brush_height_test terrain/brush_height_test.cpp)

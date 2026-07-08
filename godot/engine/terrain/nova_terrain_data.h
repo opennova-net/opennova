@@ -10,8 +10,10 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 
 #include <cpt/cpt_io.h>
+#include <terrain/coords.h>
 #include <trn/trn_io.h>
 
 #include "resource_index/nova_resource_root.h"
@@ -119,6 +121,17 @@ protected:
 	static void _bind_methods();
 
 public:
+	// Sector/atlas layout constants, single-sourced from libs/terrain_query
+	// (terrain/coords.h) and bound to GDScript so editor scripts reference the
+	// engine's numbers instead of re-declaring them: SECTOR_SIZE world units per
+	// sector edge, the SECTOR_GRID_DIM x SECTOR_GRID_DIM authored grid, the
+	// ATLAS_SIZE source atlas (a 2x2 quadrant grid of sectors), and sector ids
+	// 0 (empty) .. SECTOR_ID_MAX (the four quadrants).
+	static constexpr int SECTOR_SIZE = opennova::terrain::COORDS_SECTOR_SIZE;
+	static constexpr int SECTOR_GRID_DIM = opennova::terrain::COORDS_SECTOR_GRID_DIM;
+	static constexpr int ATLAS_SIZE = opennova::terrain::COORDS_ATLAS_SIZE;
+	static constexpr int SECTOR_ID_MAX = opennova::terrain::COORDS_SECTOR_ID_MAX;
+
 	NovaTerrainData();
 	~NovaTerrainData();
 
@@ -234,16 +247,36 @@ public:
 	// GDScript callers branch on); get_cell_atlas_rect returns a zero Rect2i.
 	Vector2 world_to_source_coords(double world_x, double world_z) const;
 	Vector2 world_to_cell_source_coords(double world_x, double world_z, int row, int col) const;
+	// World -> authored sector-grid cell (row, col), or (-1,-1) outside the
+	// authored extent. Mirrors EditorTerrainMesh's extent-guarded cell lookup:
+	// floor(world / SECTOR_SIZE) minus the origin, with NO grid-value check (an
+	// empty cell still reports its row/col).
+	Vector2i world_to_sector_cell(double world_x, double world_z) const;
 	// Batch bilinear height sample of the LIVE editable heightmap (the FORMAT_RF
 	// Image the brushes mutate in place) — NOT the baked CPT, which height edits
 	// leave stale (see get_height_world_bilinear vs terrain_editor.
 	// sample_height_world). One float per input (world_x, world_z) pair; NAN when
 	// the point is off the active sectors or no editable image is mounted. The
-	// per-point math mirrors world_to_source_coords + EditorTerrainMesh.
-	// _sample_source_height exactly (editor-mode remap, float32 source coords,
-	// edge-clamped bilinear) so the scalar and batch samplers can never disagree;
-	// the sector layout is built once for the whole batch.
+	// per-point core is shared with sample_height_world_live (editor-mode remap,
+	// float32 source coords, edge-clamped bilinear) so the scalar and batch
+	// samplers can never disagree; the sector layout is built once for the whole
+	// batch.
 	PackedFloat32Array sample_heights_world_live(const PackedVector2Array &world_xz) const;
+	// Scalar twin of sample_heights_world_live: one point through the same
+	// per-point core, same NAN semantics. EditorTerrainMesh.sample_world_height
+	// forwards here (it translates NAN to its legacy -1e6 sentinel).
+	float sample_height_world_live(double world_x, double world_z) const;
+	// Segment raycast against the terrain surface — the ENG-3 B1 port
+	// (libs/terrain_query/terrain_raycast.h) [orig: Terrain_RaycastHeightmapLoRes
+	// @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710]; witness record
+	// docs/terrain/terrain-re.md §Runtime terrain queries. Returns the refined
+	// world-space hit (x, height, z), or Vector3(NAN, NAN, NAN) when the segment
+	// is clear or no terrain data is mounted. Samples the LIVE editable heightmap
+	// when mounted, else the baked CPT heights (the same substrate split as
+	// sample_height_world_live vs get_height_world_bilinear); the working segment
+	// is host-clipped to the authored-extent XZ AABB before entering the 16.16
+	// fixed-point core.
+	Vector3 raycast_terrain(const Vector3 &p_from, const Vector3 &p_to) const;
 	Rect2i get_cell_atlas_rect(int row, int col) const;
 	int get_tile_count() const;
 

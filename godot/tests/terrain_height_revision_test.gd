@@ -56,13 +56,15 @@ func test_sample_height_world_reads_the_live_editable_surface() -> void:
 		"height edits are visible to the re-ground sampler immediately")
 
 
-func test_batch_sampler_matches_the_scalar_live_surface_sampler() -> void:
-	# The batch sampler (one C++ call — the re-ground request builder's fast
-	# path) and the scalar sampler must be the same surface read: same live
-	# image, same editor-mode remap, same edge-clamped bilinear. A sloped surface
-	# pins the sample LOCATION as well as the height source (a flat fill cannot
-	# tell a remap bug from a correct read), and it is written AFTER new_terrain,
-	# so parity here also proves the batch path reads live edits.
+func test_batch_and_scalar_run_the_single_cpp_sampler() -> void:
+	# Scalar and batch both forward to NovaTerrainData's live-surface sampler
+	# (one C++ per-point core), so this pins that single path end-to-end through
+	# the wrappers, including their NAN/sentinel translation (the mesh's scalar
+	# maps NAN to -1e6; terrain_editor's sample_height_world maps it back to
+	# NAN). A sloped surface pins the sample LOCATION as well as the height
+	# source (a flat fill cannot tell a remap bug from a correct read), and it
+	# is written AFTER new_terrain, so this also proves the sampler reads live
+	# edits.
 	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
 	await get_tree().process_frame
 	editor.new_terrain()
@@ -94,3 +96,56 @@ func test_batch_sampler_matches_the_scalar_live_surface_sampler() -> void:
 		else:
 			assert_almost_eq(batch[i], scalar, 0.0001, "batch/scalar parity at point %d" % i)
 	assert_true(nan_seen, "the grid includes at least one off-mesh row (the NAN branch is exercised)")
+
+
+func test_raycast_world_hits_the_live_surface() -> void:
+	# EditorTerrainMesh.raycast_world forwards to the engine's witnessed segment
+	# raycast (NovaTerrainData.raycast_terrain, the ENG-3 B1 port [orig:
+	# Terrain_RaycastHeightmapLoRes @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0
+	# @ 0x60e710]) over the SAME live editable surface the height samplers above
+	# read, so a hit must land on the sampled surface and on the cast segment.
+	var editor = add_child_autofree(EditorMainScene.instantiate()).get_terrain_editor()
+	await get_tree().process_frame
+	editor.new_terrain()
+	# The sloped surface from the sampler-parity test: a slope pins the hit
+	# LOCATION as well as the height substrate (a flat fill cannot tell a
+	# remap bug from a correct read).
+	var img: Image = editor.terrain_mesh.get_heightmap_image()
+	var w := img.get_width()
+	var h := img.get_height()
+	var floats := PackedFloat32Array()
+	floats.resize(w * h)
+	for i in floats.size():
+		@warning_ignore("integer_division")
+		floats[i] = float(i % w) * 0.05 + float(i / w) * 0.025
+	img.set_data(w, h, false, Image.FORMAT_RF, floats.to_byte_array())
+
+	# A descending segment from above the active region down through the slope.
+	var from := Vector3(-300.0, 200.0, -260.0)
+	var to := Vector3(340.0, -40.0, 300.0)
+	var hit: Vector3 = editor.terrain_mesh.raycast_world(from, to)
+	assert_false(is_nan(hit.x) or is_nan(hit.y) or is_nan(hit.z),
+		"the descending segment hits the live surface")
+	var surface: float = editor.sample_height_world(hit.x, hit.z)
+	assert_almost_eq(hit.y, surface, 1.0 / 256.0 + 0.02,
+		"the refined hit sits on the sampled surface (raw16 quantum + refine tolerance)")
+	# The hit lies on the cast segment: x and z share one segment parameter,
+	# inside [0, 1].
+	var tx := (hit.x - from.x) / (to.x - from.x)
+	var tz := (hit.z - from.z) / (to.z - from.z)
+	assert_almost_eq(tx, tz, 0.001, "hit x/z share one segment parameter")
+	assert_between(tx, 0.0, 1.0, "the hit lies between the endpoints")
+
+	# Entirely outside the authored extent -> the all-NAN miss (the engine-side
+	# slab clip rejects before the core marches).
+	var missed: Vector3 = editor.terrain_mesh.raycast_world(
+		Vector3(50000.0, 100.0, 50000.0), Vector3(50100.0, -100.0, 50100.0))
+	assert_true(is_nan(missed.x) and is_nan(missed.y) and is_nan(missed.z),
+		"a segment outside the authored extent misses")
+
+	# No terrain mounted at all (neither a live image nor a baked CPT) -> the
+	# all-NAN miss, never a fake ground plane.
+	var bare_hit: Vector3 = NovaTerrainData.new().raycast_terrain(
+		Vector3(0.0, 100.0, 0.0), Vector3(0.0, -100.0, 0.0))
+	assert_true(is_nan(bare_hit.x) and is_nan(bare_hit.y) and is_nan(bare_hit.z),
+		"no terrain data -> the all-NAN miss")

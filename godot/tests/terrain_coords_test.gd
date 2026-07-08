@@ -152,3 +152,39 @@ func test_get_cell_atlas_rect() -> void:
 		assert_eq(got_mesh, expected, "rect golden for (%d,%d)" % [row, col])
 
 	mesh.free()
+
+
+func test_layout_constants_and_sector_cell_match_the_engine() -> void:
+	# Contract pin: the GDScript layer consumes these bound constants, so a C++
+	# layout-value change must trip a GDScript-visible test.
+	assert_eq(NovaTerrainData.SECTOR_SIZE, 512, "SECTOR_SIZE")
+	assert_eq(NovaTerrainData.SECTOR_GRID_DIM, 16, "SECTOR_GRID_DIM")
+	assert_eq(NovaTerrainData.ATLAS_SIZE, 1024, "ATLAS_SIZE")
+	assert_eq(NovaTerrainData.SECTOR_ID_MAX, 4, "SECTOR_ID_MAX")
+
+	var mesh := _make_mesh()
+	var data := _make_data()
+	mesh.set_terrain_data(data)
+
+	# point -> expected cell (row from world_z, col from world_x), or the (-1,-1)
+	# sentinel outside the authored extent. No grid-value check: the empty cell
+	# (0,2) still reports its row/col (contrast world_to_source_coords).
+	var cases := [
+		[Vector2(-2000.0, -2000.0), Vector2i(0, 0)],   # in-extent, negative world coords
+		[Vector2(-1500.0, -2000.0), Vector2i(0, 1)],   # col from world_x
+		[Vector2(-2000.0, -1500.0), Vector2i(1, 0)],   # row from world_z
+		[Vector2(-800.0, -2000.0), Vector2i(0, 2)],    # empty cell id0 still reported
+		[Vector2(-2048.0, -2048.0), Vector2i(0, 0)],   # exact lower extent boundary
+		[Vector2(100.0, 2048.0), Vector2i(-1, -1)],    # exact upper boundary: row == rows
+		[Vector2(-5000.0, -2000.0), Vector2i(-1, -1)], # out of extent (col < 0)
+		[Vector2(3000.0, 100.0), Vector2i(-1, -1)],    # out of extent (col >= count)
+	]
+	for case in cases:
+		var p: Vector2 = case[0]
+		var expected: Vector2i = case[1]
+		var got_mesh: Vector2i = mesh.world_to_sector_cell(p.x, p.y)
+		var got_cpp: Vector2i = data.world_to_sector_cell(p.x, p.y)
+		assert_eq(got_mesh, got_cpp, "mesh == C++ for %s" % p)
+		assert_eq(got_mesh, expected, "cell golden for %s" % p)
+
+	mesh.free()

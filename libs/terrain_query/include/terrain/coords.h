@@ -28,6 +28,11 @@ namespace opennova::terrain {
 
 constexpr int COORDS_SECTOR_SIZE = 512;
 constexpr int COORDS_SECTOR_GRID_DIM = 16;
+// The 1024 source atlas: a 2x2 quadrant grid of 512 sectors (each authored cell
+// samples a 512x512 window at its quadrant offset; see coords_cell_atlas_rect).
+constexpr int COORDS_ATLAS_SIZE = 2 * COORDS_SECTOR_SIZE;
+// Sector ids are 0 (empty) .. 4 (the four quadrants).
+constexpr int COORDS_SECTOR_ID_MAX = 4;
 
 // The 16x16 sector grid plus its placement. `sector_grid` points at
 // COORDS_SECTOR_GRID_DIM^2 ints, row-major (index = row * 16 + col), holding the
@@ -89,7 +94,7 @@ inline int coords_sector_id_at_cell(const SectorLayout &layout, int row, int col
 	if (row < 0 || row >= layout.sector_rows || col < 0 || col >= layout.sector_count) {
 		return 0;
 	}
-	return coords_clampi(layout.sector_grid[row * COORDS_SECTOR_GRID_DIM + col], 0, 4);
+	return coords_clampi(layout.sector_grid[row * COORDS_SECTOR_GRID_DIM + col], 0, COORDS_SECTOR_ID_MAX);
 }
 
 // World -> source/atlas coordinate transform.
@@ -123,7 +128,7 @@ CoordsResult<Real> coords_world_to_source(const SectorLayout &layout, Real world
 
 	int sector_id = layout.sector_grid[cell_z * COORDS_SECTOR_GRID_DIM + cell_x];
 	if (opts.clamp_sector_id) {
-		sector_id = coords_clampi(sector_id, 0, 4);
+		sector_id = coords_clampi(sector_id, 0, COORDS_SECTOR_ID_MAX);
 	}
 	if (sector_id <= 0) {
 		return out;

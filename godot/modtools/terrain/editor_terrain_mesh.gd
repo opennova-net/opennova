@@ -1,9 +1,10 @@
 class_name EditorTerrainMesh
 extends Node3D
 
-const ATLAS_SIZE := 1024
-const SECTOR_SIZE := 512.0
-const PATCH_VERTS := 513
+const ATLAS_SIZE := NovaTerrainData.ATLAS_SIZE
+const SECTOR_SIZE := float(NovaTerrainData.SECTOR_SIZE)
+# Verts per sector edge: one per heightmap texel plus the shared far-edge vert.
+const PATCH_VERTS := NovaTerrainData.SECTOR_SIZE + 1
 
 var _sector_instances: Array[MeshInstance3D] = []
 var _material: ShaderMaterial
@@ -176,19 +177,17 @@ func get_sector_rows() -> int:
 func get_sector_cell_value(row: int, col: int) -> int:
 	if row < 0 or row >= _sector_rows or col < 0 or col >= _sector_count:
 		return 0
-	var idx := row * 16 + col
-	return clampi(_sector_grid[idx], 0, 4)
+	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
+	return clampi(_sector_grid[idx], 0, NovaTerrainData.SECTOR_ID_MAX)
 
 
 func world_to_sector_cell(world_x: float, world_z: float) -> Vector2i:
-	if _bounds.size.x <= 0.0 or _bounds.size.z <= 0.0:
+	# Forwards to the shared C++ transform (extent-guarded floor(world/512)-origin
+	# cell lookup, no grid-value check). Pre-load (no data) returns the (-1,-1)
+	# sentinel, like the world_to_source_coords forwarder below.
+	if _data == null:
 		return Vector2i(-1, -1)
-
-	var col := int(floor(world_x / SECTOR_SIZE)) - _origin_x
-	var row := int(floor(world_z / SECTOR_SIZE)) - _origin_y
-	if row < 0 or row >= _sector_rows or col < 0 or col >= _sector_count:
-		return Vector2i(-1, -1)
-	return Vector2i(row, col)
+	return _data.world_to_sector_cell(world_x, world_z)
 
 
 func world_to_source_coords(world_x: float, world_z: float) -> Vector2:
@@ -217,19 +216,20 @@ func get_sector_center_world(row: int, col: int) -> Vector3:
 
 
 func sample_world_height(world_x: float, world_z: float) -> float:
-	var source := world_to_source_coords(world_x, world_z)
-	if source.x < 0.0:
+	# Scalar and batch now run the same C++ live-surface sampler; -1e6 is this
+	# wrapper's legacy off-mesh sentinel (the batch variant keeps NAN).
+	if _data == null:
 		return -1000000.0
-	return _sample_source_height(source.x, source.y)
+	var height := _data.sample_height_world_live(world_x, world_z)
+	return height if not is_nan(height) else -1000000.0
 
 
 # Batch variant of sample_world_height: one C++ call for the whole point set
-# (the per-point path pays ~6 GDScript->C++ crossings each). Samples the SAME
-# live editable image — the document hands one Image to both this mesh and the
-# NovaTerrainData, and the C++ math mirrors world_to_source_coords +
-# _sample_source_height exactly (pinned by terrain_height_revision_test's
-# batch/scalar parity rows). Off-mesh / no-data points are NAN, not the scalar
-# path's -1e6 sentinel.
+# instead of one crossing per point. Scalar and batch run the same
+# NovaTerrainData per-point sampler core over the SAME live editable image
+# (the document hands one Image to both this mesh and the NovaTerrainData;
+# pinned by terrain_height_revision_test). Off-mesh / no-data points are NAN,
+# not the scalar path's -1e6 sentinel.
 func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
 	if _data == null:
 		var out := PackedFloat32Array()
@@ -237,6 +237,17 @@ func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
 		out.fill(NAN)
 		return out
 	return _data.sample_heights_world_live(points)
+
+
+# Segment raycast against the live terrain surface. Forwards to the engine's
+# witnessed raycast (NovaTerrainData.raycast_terrain, the ENG-3 B1 port
+# [orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0
+# @ 0x60e710]); returns the refined world-space hit or the all-NAN miss.
+# Pre-load (no data) misses, like the sampler forwarders above.
+func raycast_world(from: Vector3, to: Vector3) -> Vector3:
+	if _data == null:
+		return Vector3(NAN, NAN, NAN)
+	return _data.raycast_terrain(from, to)
 
 
 func world_to_cell_source_coords(world_x: float, world_z: float, row: int, col: int) -> Vector2:
@@ -269,20 +280,3 @@ func get_cells_overlapping_brush(world_x: float, world_z: float, radius_world: f
 			if get_sector_cell_value(row, col) > 0:
 				result.append(Vector2i(row, col))
 	return result
-
-
-func _sample_source_height(source_x: float, source_z: float) -> float:
-	var x0 := clampi(int(floor(source_x)), 0, ATLAS_SIZE - 1)
-	var z0 := clampi(int(floor(source_z)), 0, ATLAS_SIZE - 1)
-	var x1 := mini(x0 + 1, ATLAS_SIZE - 1)
-	var z1 := mini(z0 + 1, ATLAS_SIZE - 1)
-	var fx := clampf(source_x - float(x0), 0.0, 1.0)
-	var fz := clampf(source_z - float(z0), 0.0, 1.0)
-
-	var h00 := _heightmap_image.get_pixel(x0, z0).r
-	var h10 := _heightmap_image.get_pixel(x1, z0).r
-	var h01 := _heightmap_image.get_pixel(x0, z1).r
-	var h11 := _heightmap_image.get_pixel(x1, z1).r
-	var hx0 := lerpf(h00, h10, fx)
-	var hx1 := lerpf(h01, h11, fx)
-	return lerpf(hx0, hx1, fz)
