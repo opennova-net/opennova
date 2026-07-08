@@ -372,6 +372,8 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(mns_saver);
 	mns_saver.unref();
+
+	NovaObjectShaderCache::destroy_singleton();
 }
 
 extern "C" {

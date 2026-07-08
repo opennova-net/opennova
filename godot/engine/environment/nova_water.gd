@@ -63,7 +63,12 @@ func _push_water_split_height() -> void:
 
 
 func _exit_tree() -> void:
-	NovaObjectShaderCache.get_singleton().clear_water_split_height()
+	# Only clear a split that could have been pushed (_push_water_split_height
+	# requires `built`): an unconditional call here CREATED the shader-cache
+	# singleton during scene teardown on every quit — the never-freed extension
+	# object behind the packaging boot-smoke teardown AV.
+	if built:
+		NovaObjectShaderCache.get_singleton().clear_water_split_height()
 	# Reflection teardown: stop the offscreen renders and disarm the shader's
 	# reflection branch — the u_water_color fallback takes over if the
 	# material outlives the node. Re-armed by the next build().
