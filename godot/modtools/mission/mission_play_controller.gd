@@ -148,6 +148,18 @@ func _process(delta: float) -> void:
 			_player_host.after_world_tick()
 
 
+# While playing, the game owns the keyboard — the game shell's parity stage is
+# _unhandled_key_input (main_game.gd), but inside the editor the shell UI (focused
+# controls, menu accelerators, workspace key handlers) would consume the play keys
+# first; _input-level interception while _playing reproduces the shell's effective
+# priority. Esc still stops via the same path.
+func _input(event: InputEvent) -> void:
+	if not _playing:
+		return
+	if handle_viewport_input(event):
+		get_viewport().set_input_as_handled()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if handle_viewport_input(event):
 		get_viewport().set_input_as_handled()
