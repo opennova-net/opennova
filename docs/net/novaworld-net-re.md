@@ -3948,9 +3948,11 @@ a silent `BadBone.position` fallback that point (4) should have killed:
    the frame-0 channel under any constant conjugation (48-perm × 48-perm × transpose sweeps) nor
    any accumulated relative-channel chain — it is DCC-side authoring data lost at export, which
    is exactly why the field can rot without anyone noticing: **`BadBone.position` is not
-   reconstructible from shipped data and nothing at runtime wants it.** (`BadBone.length` is the
-   Max bone length — equals the child distance on chain bones only.) The stored bind 3×3 ≡ the
-   RST frame-0 channel transposed, confirming bind = reset-pose channel in matrix form.
+   reconstructible from shipped data and nothing at runtime wants it.** *(Superseded — the
+   position-derivation correction below: that sweep's frame-matching metric false-negatived;
+   `F` IS the bind under one constant map and the field is reconstructible.)* (`BadBone.length`
+   is the Max bone length — equals the child distance on chain bones only.) The stored bind 3×3
+   ≡ the RST frame-0 channel transposed, confirming bind = reset-pose channel in matrix form.
 4. **Port.** `sample_clip` gained `model_parents` (paired with the origins): in model-table mode
    the rig's count/hierarchy/pivots come from the model, rows past the `.bad`'s channels take row
    0's composed rotation, self-parent roots normalize to −1, and the equality-gated fallback to
@@ -3967,6 +3969,51 @@ a silent `BadBone.position` fallback that point (4) should have killed:
    `@+40`, pivots 16.16 fixed `@+56/60/64` consumed in (z,x,y) order with x negated, bind-inverse
    `T(−parent pivot)`, and NO bone-0 padding loop. Bodies close by porting that table, not by
    inventing a part↔bone matcher.
+
+**§5.40 position-derivation correction — `BadBone.position` IS reconstructible from shipped
+data (2026-07-09 derivation experiment, fourth pass).** Point (3) above closed the export
+relation through a per-parent solved Max frame `F` and declared `F` unrecoverable. Re-solving
+with a *position-residual* metric instead of frame matching refutes the unrecoverability half:
+
+1. **The relation, restated without the DCC detour:**
+   `BadBone.position[i] = bind_rows[parent(i)] · (−d.x, d.y, d.z)` — the parent bone's stored
+   bind 3×3 (row-major as parsed; ≡ the reset frame-0 channel transposed, numerically identical
+   residuals either way) applied to the child's x-negated model `rel` pivot, the engine's own
+   model→render negation (the same map the composed builders apply — pivot negate `@0x40c953`).
+   Equivalently `F_parent = L·bindᵀ` with the single constant signed perm `L = (−x, z, y)`;
+   folded against point (3)'s `P`, `L·P = diag(−1,1,1)` — the mystery "Max bone frame" was the
+   bind all along under one constant two-sided map.
+2. **Why the third-pass sweep false-negatived.** It matched solved *frames*: (a) the only
+   two-child solvable parent (the gun-assembly bone) is det-ambiguous at k=2 — the solver's
+   arbitrary improper branch sits 90° from the true frame while fitting positions exactly;
+   (b) position prediction is blind to frame error about the bone axis, so frame matching
+   demands agreement the data never pins (every single-child chain). Under the
+   position-residual metric the constant map is unique — the runner-up (L, R, transpose)
+   combo is 37× worse.
+3. **Corpus validation** (94 rigs: 42 JOX + 52 REVX02-archive `*_1st` model+`.adm` pairs;
+   M4AC_1st shares m4's skeleton; 26 scrambled REVX02 `.adm`s resolved via the
+   `<stem>_RST.bad` convention; FM92/uzi lack loose RSTs). Of 2753 norm-consistent bones,
+   2463 reconstruct within 2e-4 and 61 more within 5e-4 (the float32 floor). Every larger
+   deviation clusters by bone-name × export batch — JOX: the shared `BN38 BONE` gun bone on
+   12 rigs (≤7.8e-3); REVX02: the LEFT-hand finger chain on exactly the 8-rig MG/shotgun
+   batch (G36/m60/P90/R870/M240/M249/PKM/RPK, ≤1e-2) plus AKM_1st's L-forearm/L-hand pair
+   (1.4e-3) — pos/bind pairs exported from different rig states (stale), the same per-batch
+   export rot as the broken-12 catalog above, not rule failures. Negative control: on the
+   X-triplicated rigs (JOX ak47/M4) the reconstruction disagrees with 38/38 broken bones and
+   leaks 0 healthy ones. The per-parent orthogonal solve reproduced the third pass first
+   (≤1.02e-4 across the four solvable parents) before any rule work.
+4. **Port.** `bad_positions_from_model` in `pyopennova/bad_build.py` (byte-identical mirror
+   in `blender/opennova/bad_build.py`): index-paired to the model part table, root bones
+   (parent < 0/self) take the x-negated rel unrotated (zero on every shipped rig), surplus
+   `.bad` bones past the part count excluded by construction. Evidence: pytest
+   `tests/test_bad_pos_derivation.py` — synthetic exactness runs unconditionally;
+   `OPENNOVA_JO_ASSETS`-gated legs reconstruct M16/M24/M21/Frag within 5e-4 per bone and
+   prove the ak47 triplication control (see docs/asset-gated-tests.md).
+
+Consequence: DCC import of the broken-12 no longer depends on the shipped field — armatures
+can derive it from the model + bind; anything that consumes `BadBone.position` (the pre-repo
+oscarmike path, our exporters' round-trips) has a corpus-exact reconstruction. The runtime is
+untouched — the model-pivot path above remains the witnessed-faithful rig source.
 
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
