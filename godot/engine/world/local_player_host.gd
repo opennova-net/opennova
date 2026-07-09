@@ -54,6 +54,21 @@ var _avatar: Node3D = null
 var _viewmodel: Node3D = null
 var _tp_anchor := Vector3.ZERO
 var _tp_anchor_valid := false
+# Debug experiments (the F3 overlay's View tab): keep the FP arms drawn in every
+# camera mode, and/or draw the player's own body in first person — the "see our
+# feet" probe (the §14 aim overlay bends the spine away from the eye, so looking
+# down shows your legs; the head/shoulders will clip the near plane until a
+# section-hide like the original's bone zeroing @0x4b1f2a is ported).
+var debug_force_viewmodel := false
+var debug_body_in_first_person := false
+
+
+func set_debug_force_viewmodel(enabled: bool) -> void:
+	debug_force_viewmodel = enabled
+
+
+func set_debug_body_in_first_person(enabled: bool) -> void:
+	debug_body_in_first_person = enabled
 
 
 func setup(world, camera: Camera3D) -> void:
@@ -315,7 +330,8 @@ func _update_avatar(pos: Vector3) -> void:
 	# Stamped every frame: NovaObjectModel.rebuild() recreates its mesh
 	# children on the default layer.
 	_avatar.visible = true
-	_set_visual_layers(_avatar, NovaWater.VISUAL_LAYER_WORLD if _third_person
+	_set_visual_layers(_avatar, NovaWater.VISUAL_LAYER_WORLD
+			if (_third_person or debug_body_in_first_person)
 			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
 	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
 	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
@@ -349,7 +365,7 @@ func _update_viewmodel() -> void:
 	# world scene [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted,
 	# the dedicated layer is what the mirror camera's cull_mask excludes.
 	_set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
-	_viewmodel.visible = not _third_person
+	_viewmodel.visible = (not _third_person) or debug_force_viewmodel
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

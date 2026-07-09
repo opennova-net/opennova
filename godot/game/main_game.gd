@@ -138,6 +138,8 @@ func _toggle_debug_overlay() -> void:
 		# The View tab toggles: the overlay only emits intent; we own the world.
 		_debug_overlay.skeleton_debug_toggled.connect(_on_skeleton_debug_toggled)
 		_debug_overlay.foliage_hidden_toggled.connect(_on_foliage_hidden_toggled)
+		_debug_overlay.viewmodel_forced_toggled.connect(_on_viewmodel_forced_toggled)
+		_debug_overlay.body_in_first_person_toggled.connect(_on_body_in_first_person_toggled)
 	_debug_overlay.toggle()
 
 
@@ -217,6 +219,16 @@ func _on_skeleton_debug_toggled(enabled: bool) -> void:
 func _on_foliage_hidden_toggled(hidden: bool) -> void:
 	if _world != null:
 		_world.set_foliage_hidden(hidden)
+
+
+func _on_viewmodel_forced_toggled(enabled: bool) -> void:
+	if _player_host != null:
+		_player_host.set_debug_force_viewmodel(enabled)
+
+
+func _on_body_in_first_person_toggled(enabled: bool) -> void:
+	if _player_host != null:
+		_player_host.set_debug_body_in_first_person(enabled)
 
 
 # Whether the folder picker may be summoned right now: only from the menu front-end

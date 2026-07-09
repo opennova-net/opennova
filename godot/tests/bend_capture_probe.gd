@@ -111,6 +111,22 @@ func _ready() -> void:
 	await _settle(30)
 	await _capture("08_tp_up.png")
 
+	# Debug experiments (the F3 View-tab toggles): back to first person with the
+	# body forced onto the world layer — look down and find our own feet.
+	var host := _find_player_host(get_tree().root)
+	if host != null:
+		_press_key(KEY_F4)            # back to first person
+		host.set_debug_body_in_first_person(true)
+		host.set_debug_force_viewmodel(true)
+		_look(Vector2(0, 380))        # level-ish again
+		await _settle(20)
+		await _capture("09_fp_body_level.png")
+		_look(Vector2(0, 580))        # ~70 deg down
+		await _settle(30)
+		await _capture("10_fp_feet.png")
+	else:
+		push_warning("[bend] no LocalPlayerHost found for the FP-body captures")
+
 	ws.stop_play_mission()
 	print("[bend] done -> ", _out_abs)
 	get_tree().quit()
@@ -119,6 +135,17 @@ func _ready() -> void:
 func _settle(frames: int) -> void:
 	for _i in frames:
 		await get_tree().process_frame
+
+
+# The play controller owns a LocalPlayerHost child; find it by capability.
+func _find_player_host(node: Node) -> Node:
+	if node.has_method("set_debug_body_in_first_person"):
+		return node
+	for child in node.get_children():
+		var found := _find_player_host(child)
+		if found != null:
+			return found
+	return null
 
 
 func _hold_key(keycode: Key, down: bool) -> void:
