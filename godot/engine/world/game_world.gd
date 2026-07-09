@@ -682,8 +682,8 @@ func local_player_anim_key() -> String:
 func local_player_anim_phase_ticks() -> int:
 	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
 
-func local_player_aim_overlay() -> Dictionary:
-	return _runtime.local_player_aim_overlay() if _runtime != null else {}
+func local_player_aim_overlay() -> PlayerAimOverlay:
+	return _runtime.local_player_aim_overlay() if _runtime != null else null
 
 func local_player_health() -> int:
 	return _runtime.local_player_health() if _runtime != null else 0
@@ -735,9 +735,9 @@ func build_local_player_viewmodel() -> Node3D:
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
 	var def := local_player_viewmodel_def()
-	var gun_name := String(def.get("gfx1", "ak47_1st"))
-	var arms_name := String(def.get("gfx1a", "armsG"))
-	var adm_name := String(def.get("animadm", "ak47_1st"))
+	var gun_name := def.gfx1 if def != null and not def.gfx1.is_empty() else "ak47_1st"
+	var arms_name := def.gfx1a if def != null and not def.gfx1a.is_empty() else "armsG"
+	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
 	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
 	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env)
 	if arms == null:
@@ -752,29 +752,30 @@ func build_local_player_viewmodel() -> Node3D:
 
 ## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
 ## witnessed view-bias fields (pos/tpos raw units + rot degrees, renderfov horizontal
-## degrees) LocalPlayerHost consumes. Empty when the mounted root has no weapon.def or
-## the weapon name is absent — callers keep their witnessed JOX AK-47 defaults then.
-## The weapon is DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands;
-## NOVA_VM_WEAPON overrides the name (debug: rig A/B against another SKU's def).
-func local_player_viewmodel_def() -> Dictionary:
+## degrees) LocalPlayerHost consumes — decoded from NovaWeaponDatabase's transport dict
+## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
+## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
+## DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands; NOVA_VM_WEAPON
+## overrides the name (debug: rig A/B against another SKU's def).
+func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _weapon_db == null:
 		if _resource_root == null:
-			return {}
+			return null
 		_weapon_db = NovaWeaponDatabase.new()
 		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
 			push_warning("GameWorld: weapon.def unavailable (%s) — FP viewmodel keeps built-in defaults"
 					% _weapon_db.get_last_error())
-			return {}
+			return null
 	if not _weapon_db.is_loaded():
-		return {}
+		return null
 	var weapon_name := OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = DEFAULT_VIEWMODEL_WEAPON
 	var index: int = _weapon_db.find_weapon(weapon_name)
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
-		return {}
-	return _weapon_db.get_weapon(index)
+		return null
+	return PlayerViewmodelDef.from_weapon_dict(_weapon_db.get_weapon(index))
 
 
 # --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------

@@ -402,15 +402,15 @@ func _update_avatar(pos: Vector3) -> void:
 	# the body-class delta is identity by construction so the hips stay glued to the node.
 	# [orig: Entity_BuildBoneTransformMatrices @0x4b1290 — every overlay blends toward
 	# bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14 (D-INF-11)]
-	var overlay: Dictionary = _world.local_player_aim_overlay() \
-			if _world.has_method("local_player_aim_overlay") else {}
-	if bool(overlay.get("valid", false)):
-		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay["body"])
+	var overlay: PlayerAimOverlay = _world.local_player_aim_overlay() \
+			if _world.has_method("local_player_aim_overlay") else null
+	if overlay != null:
+		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay.body_angles)
 		_avatar.global_basis = body_basis
 		if _avatar.has_method("set_aim_overlay"):
 			var inv := body_basis.inverse()
 			var deltas: Array = []
-			for a in (overlay["angles"] as PackedVector3Array):
+			for a in overlay.segment_angles:
 				deltas.append(inv * MissionObjectPlacer.bms_to_godot_basis(a))
 			_avatar.set_aim_overlay(deltas)
 	else:
@@ -494,24 +494,20 @@ func _set_visual_layers(root: Node, layer_mask: int) -> void:
 		_set_visual_layers(child, layer_mask)
 
 
-# Pull the resolved weapon.def view fields from the world; empty when no weapon.def (or the
+# Pull the resolved weapon.def view record from the world; null when no weapon.def (or the
 # weapon) resolves in the mounted root — the witnessed JOX WPN_AK47AUTO constants above stay
 # in force. The def rows carry xyz raw file units + yaw/pitch/roll degrees
 # [orig: weapon.def 'pos'/'tpos' handlers @0x54471f; 'renderfov' @0x54482a, default 80.0].
 func _apply_viewmodel_def() -> void:
 	if _world == null or not _world.has_method("local_player_viewmodel_def"):
 		return
-	var def: Dictionary = _world.local_player_viewmodel_def()
-	if def.is_empty():
+	var def: PlayerViewmodelDef = _world.local_player_viewmodel_def()
+	if def == null:
 		return
-	var pos: PackedFloat32Array = def.get("pos", PackedFloat32Array())
-	if pos.size() >= 6:
-		PLAYER_VIEWMODEL_POS_UNITS = Vector3(pos[0], pos[1], pos[2])
-		PLAYER_VIEWMODEL_ROT_BIAS_DEF = Vector3(pos[3], pos[4], pos[5])
-	var tpos: PackedFloat32Array = def.get("tpos", PackedFloat32Array())
-	if tpos.size() >= 3:
-		PLAYER_VIEWMODEL_TPOS_UNITS = Vector3(tpos[0], tpos[1], tpos[2])
-	PLAYER_VIEWMODEL_RENDERFOV_H_DEG = float(def.get("renderfov", PLAYER_VIEWMODEL_RENDERFOV_H_DEG))
+	PLAYER_VIEWMODEL_POS_UNITS = def.pos_units
+	PLAYER_VIEWMODEL_ROT_BIAS_DEF = def.rot_bias_deg
+	PLAYER_VIEWMODEL_TPOS_UNITS = def.tpos_units
+	PLAYER_VIEWMODEL_RENDERFOV_H_DEG = def.renderfov_h_deg
 
 
 # Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.

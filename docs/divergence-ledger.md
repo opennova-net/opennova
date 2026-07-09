@@ -496,7 +496,7 @@ object-model rungs), with the sort-key/pass-class semantics T1-pinned.
 |---|---|---|---|---|
 | D-RORD-2 | Opaque state-sort (per-frame CPU quicksort by alpha-test bit → 256-unit depth slabs → effect index → fine depth `[orig: RenderBatch_QuickSort @ 0x5d8b40]`) not reproduced — the host's internal opaque ordering serves the same intent; key semantics preserved as T1-pinned functions | C | PERMANENT (register, this slice) | — |
 | D-RORD-3 | Water-side transparent binning is per OBJECT (model origin at rebuild / `refresh_render_order()`) vs retail's per STRIP per frame (`[orig: @ 0x5d932e..0x5d9354]`) — straddling or water-crossing models can mis-bin strips | A | OPEN (partial) | REN-6/T3 attestation decides |
-| D-RORD-4 | FP render pass PORTED 2026-07-09: `LocalPlayerHost` composites the viewmodel through a dedicated shared-world SubViewport — camera cull-masked to the viewmodel layer, near 0.05, weapon `renderfov` HORIZONTAL degrees converted to vertical via aspect (JO defs omit the key; every weapon uses the record default 80.0 = `flt_7D1898`, `AdmDef_InitEntryDefaults @0x53ff31`), drawn over the finished frame (the depth-window's visible equivalent) (`[orig: @ 0x4ded60: near swap @0x4dee29/restore @0x4df0aa, fov @0x4dee71 -> h->v @0x58d900, depth remap @ 0x58a7b0; parser key 'renderfov' @0x54482a]`). Residual: per-weapon `renderfov`/`pos`/`tpos` still hardcode the defaults until a weapon.def binding lands | A | PORTED (per-weapon def plumbing open) | PAR-WORLD |
+| D-RORD-4 | FP render pass ported 2026-07-09: `LocalPlayerHost` composites the viewmodel through a dedicated shared-world SubViewport — camera cull-masked to the viewmodel layer, near 0.05, weapon `renderfov` HORIZONTAL degrees converted to vertical via aspect (JO defs omit the key; every weapon uses the record default 80.0 = `flt_7D1898`, `AdmDef_InitEntryDefaults @0x53ff31`), drawn over the finished frame (the depth-window's visible equivalent) (`[orig: @ 0x4ded60: near swap @0x4dee29/restore @0x4df0aa, fov @0x4dee71 -> h->v @0x58d900, depth remap @ 0x58a7b0; parser key 'renderfov' @0x54482a]`). Per-weapon `renderfov`/`pos`/`tpos` def plumbing landed same day (net-re §5.40 fifth pass) | A | RESOLVED (SubViewport composite realizes the depth window; def plumbing landed) | PAR-WORLD |
 | D-RORD-5 | No glow/envmap duplicate pass: retail re-queues strips whose effect carries capability 0x10000000 back-to-front into Q3, flushed in the bloom pass (`[orig: @ 0x5d93b5; FrameFX_RenderBloomPass @ 0x582a54]`) | A | WITNESSED-READY-DEFERRED (capability semantics landed at REN-4; the specular-cube SOURCE witnessed at REN-5 — the static sun-glint cube `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`, rotated by MatRotSpecular; [render/render-lighting-re.md](render/render-lighting-re.md)) | residual = host bloom wiring (the cube content is now specced, D-RLIT-5 carries the hosting); FrameFX out of REN scope |
 | D-RORD-6 | The two original sort-key quirks (opaque key bits 15+ = residual stack garbage; transparent key lags one strip within a render object) not reproduced — reproducing them manufactures garbage | C | PERMANENT (register, this slice) | — |
 
@@ -559,7 +559,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 3 |
-| World / AI + events | 2 | 0 | 4 | 6 | 0 |
+| World / AI + events | 6 | 0 | 4 | 10 | 1 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -572,9 +572,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
-| Render — draw order | 1 | 0 | 2 | 3 | 2 |
+| Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **34** | **11** | **30** | **75** | 18 |
+| **Total** | **38** | **11** | **29** | **78** | 20 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-FOLIAGE-6, D-HUD-2, D-NET-136, D-NET-64.
 
