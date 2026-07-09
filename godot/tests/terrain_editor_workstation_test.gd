@@ -641,7 +641,7 @@ func test_workstation_opens_menu_workspace_by_action_target() -> void:
 		"Opening a cross-menu action should switch to the Menus workspace.")
 	assert_eq(workstation.get_node("%ContextDocLabel").text, "jo_sp",
 		"The Menus workspace title should show the opened menu.")
-	var ws = workstation._workspaces.get(EditorWorkstationScript.Workspace.MNU)
+	var ws = workstation.get_workspace(EditorWorkstationScript.Workspace.MNU)
 	assert_not_null(ws, "The Menus workspace instance exists.")
 	if ws == null:
 		return

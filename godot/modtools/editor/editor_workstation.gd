@@ -632,6 +632,13 @@ func get_active_workspace_id() -> int:
 	return _active_workspace_id
 
 
+## The workspace adapter for `workspace_id` (Workspace.*), or null if it isn't built.
+## Public surface for tools and test probes (screenshot capture, play-mission probes) --
+## reaching into _workspaces from outside is a ratcheted private poke (ADR 0018).
+func get_workspace(workspace_id: int) -> EditorWorkspace:
+	return _get_workspace(workspace_id)
+
+
 # Generic cross-workspace jump: open `path` in the workspace that declares `kind`
 # (EditorWorkspace.get_open_resource_kind), then forward `focus` to its
 # focus_reference hook. Capability-driven so the shell never grows per-type jump

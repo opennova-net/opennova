@@ -39,7 +39,7 @@ func _ready() -> void:
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "05TR.bms"
-	var ws = ws_station._workspaces.get(EditorWorkstation.Workspace.MISSION)
+	var ws = ws_station.get_workspace(EditorWorkstation.Workspace.MISSION)
 	var path := NovaPaths.resolve_file(root, bms)
 	if ws.open_file(path) != OK:
 		push_error("[fp] open failed"); get_tree().quit(1); return
