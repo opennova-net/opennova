@@ -24,6 +24,7 @@ var _app: Node
 var _workstation: Node
 var _root := ""
 var _out_abs := ""
+var _play_viewport: Viewport = null
 
 
 func _ready() -> void:
@@ -47,6 +48,12 @@ func _ready() -> void:
 		await get_tree().process_frame
 	_workstation = _app.workstation
 	_workstation.set_resource_root_dir(_root)
+
+	# Fullscreen for the captures (the core-engine window mode; F11 / the MCP
+	# set_fullscreen tool route here too) — the play viewport fills the display.
+	if OS.get_environment("NOVA_FULLSCREEN") != "0":
+		NovaWindow.set_fullscreen(get_window(), true)
+		await _settle(6)
 
 	if _app.environment_editor != null:
 		var env_path := NovaPaths.resolve_file(_root, ENV_NAME)
@@ -81,6 +88,11 @@ func _ready() -> void:
 		return
 	for _i in PLAY_BOOT_FRAMES:
 		await get_tree().process_frame
+	# Capture the CLEAN play view (the game's SubViewport), not the whole editor
+	# window with its workspace chrome — a real gameplay frame.
+	var play_cam := _find_play_camera(get_tree().root)
+	if play_cam != null:
+		_play_viewport = play_cam.get_viewport()
 
 	await _capture("01_fp.png")
 
@@ -200,9 +212,24 @@ func _look(total: Vector2) -> void:
 
 func _capture(filename: String) -> void:
 	await RenderingServer.frame_post_draw
-	var img: Image = get_viewport().get_texture().get_image()
+	var vp: Viewport = _play_viewport if _play_viewport != null else get_viewport()
+	var img: Image = vp.get_texture().get_image()
 	if img == null:
 		push_error("[bend] capture failed for %s" % filename)
 		return
 	img.save_png(_out_abs.path_join(filename))
 	print("[bend] wrote ", filename)
+
+
+# Walk for the mission play controller's game camera (its SubViewport is the clean
+# gameplay render target).
+func _find_play_camera(node: Node) -> Camera3D:
+	if node.has_method("get_play_camera"):
+		var cam = node.call("get_play_camera")
+		if cam is Camera3D:
+			return cam
+	for child in node.get_children():
+		var found := _find_play_camera(child)
+		if found != null:
+			return found
+	return null

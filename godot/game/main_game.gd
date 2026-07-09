@@ -111,6 +111,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
+	# F11 fullscreen — the core-engine window concept (NovaWindow), shared with ONED.
+	if NovaWindow.is_toggle_event(event):
+		NovaWindow.toggle_fullscreen(get_window())
+		get_viewport().set_input_as_handled()
+		return
 	if key.keycode == CHANGE_DIR_KEY and _can_summon_dir_picker():
 		_request_resource_dir()
 		get_viewport().set_input_as_handled()
