@@ -35,6 +35,8 @@
 
 #include <cmath>
 
+#include <io/bam.h>
+
 #include "world/ai.h"
 #include "world/angle.h"
 #include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
@@ -78,14 +80,14 @@ constexpr double kBamPerRadian = 683565275.5764316;
 // [orig: degrees -> BAM32 = 2^32/360 = 11930464; same const as ai.cpp/promote.cpp.
 // Used only to mirror the local player's engine heading back to the registry Entity's
 // mission yaw — the precise (90 - deg) Q1 reconciliation lives with the present path.]
-int32_t abs_bam(int32_t v) { return v < 0 ? -v : v; } // BAM diffs never hit INT_MIN in practice
+int32_t abs_bam(int32_t v) { return opennova::io::bam_abs(v); } // x86 neg: INT32_MIN stays put, never UB
 
 bool reset_capsule_bottom_state(int state) {
     return (state >= 32 && state <= 35) || (state >= 176 && state <= 179);
 }
 
 int32_t damp_npc_slide(int32_t v) {
-    const int32_t out = (7 * v + 4) >> 3; // [orig: 0x4b9910 entity[38/39] decay]
+    const int32_t out = opennova::io::bam_sar(7 * v + 4, 3); // [orig: 0x4b9910 entity[38/39] decay]
     return abs_bam(out) <= 8 ? 0 : out;
 }
 
@@ -361,7 +363,7 @@ void AiSystem::infantry_select(AiEntity &e) {
     // selects movement from entity+0x12C input bits, not from this NPC turn gate.
     // [orig: Entity_UpdateInfantryAI @0x4b9910 dump 2940-2952]
     if (!inf.is_local_player) {
-        const int32_t err = abs_bam(inf.target_heading - inf.body_heading);
+        const int32_t err = abs_bam(opennova::io::bam_sub(inf.target_heading, inf.body_heading));
         if (err > kTurnStopGate) target = anim_state::kStop;
         else if (err > kTurnWalkGate) target = anim_state::kWalkForward;
     }
@@ -564,18 +566,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // @0x49ad40 cases 0xA6/0xA7 write entity Yaw directly]; only the BODY lags behind it,
         // which is what the third-person overlay renders as the torso twist. The org2 chase
         // math is unwitnessed — the org1 quarter-step is applied per D-INF-12.
-        const int32_t diff = inf.target_heading - inf.body_heading;
-        int32_t step = (diff + 2) >> 2;
+        const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
+        int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
         if (step > kBodyTurnClamp) step = kBodyTurnClamp;
         if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
-        inf.body_heading += step;
+        inf.body_heading = io::bam_add(inf.body_heading, step);
         e.heading = inf.target_heading;
     } else {
-        const int32_t diff = inf.target_heading - inf.body_heading;
-        int32_t step = (diff + 2) >> 2;
+        const int32_t diff = io::bam_sub(inf.target_heading, inf.body_heading);
+        int32_t step = io::bam_sar(io::bam_add(diff, 2), 2);
         if (step > kBodyTurnClamp) step = kBodyTurnClamp;
         if (step < -kBodyTurnClamp) step = -kBodyTurnClamp;
-        inf.body_heading += step;
+        inf.body_heading = io::bam_add(inf.body_heading, step);
         e.heading = inf.body_heading;
     }
 
@@ -586,19 +588,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Entity_BuildBoneTransformMatrices @0x4b1290 — world-wac-ai-re.md §14. The re-plant
     // TARGET source is unwitnessed for org2 and both legs share one target here: D-INF-12.]
     for (int leg = 0; leg < 2; ++leg) {
-        const int32_t drift = inf.body_heading - inf.leg_target[leg];
+        const int32_t drift = io::bam_sub(inf.body_heading, inf.leg_target[leg]);
         if (abs_bam(drift) > kLegReplantMin &&
             (abs_bam(drift) > kLegReplantSnap || (key & 63u) == 0)) {
             inf.leg_target[leg] = inf.body_heading;
         }
-        const int32_t ldiff = inf.leg_target[leg] - inf.leg_yaw[leg];
-        int32_t lstep = (ldiff + 2) >> 2;
+        const int32_t ldiff = io::bam_sub(inf.leg_target[leg], inf.leg_yaw[leg]);
+        int32_t lstep = io::bam_sar(io::bam_add(ldiff, 2), 2);
         if (lstep > kLegChaseClamp) lstep = kLegChaseClamp;
         if (lstep < -kLegChaseClamp) lstep = -kLegChaseClamp;
-        inf.leg_yaw[leg] += lstep;
-        const int32_t twist = inf.leg_yaw[leg] - inf.body_heading;
-        if (twist > kLegTwistLimit) inf.leg_yaw[leg] = inf.body_heading + kLegTwistLimit;
-        else if (twist < -kLegTwistLimit) inf.leg_yaw[leg] = inf.body_heading - kLegTwistLimit;
+        inf.leg_yaw[leg] = io::bam_add(inf.leg_yaw[leg], lstep);
+        const int32_t twist = io::bam_sub(inf.leg_yaw[leg], inf.body_heading);
+        if (twist > kLegTwistLimit) inf.leg_yaw[leg] = io::bam_add(inf.body_heading, kLegTwistLimit);
+        else if (twist < -kLegTwistLimit) inf.leg_yaw[leg] = io::bam_sub(inf.body_heading, kLegTwistLimit);
     }
 
     // 6. Slope slide + lean (every 8 ticks; alive only). [orig: gate dump 915 + flag rules]

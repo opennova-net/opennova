@@ -3,12 +3,20 @@
 
 #include "anim/aim_overlay.h"
 
+#include <io/bam.h>
+
 namespace opennova::anim {
+
+using io::bam_add;
+using io::bam_dbl;
+using io::bam_sar;
+using io::bam_sub;
 
 // The original mutates entity Yaw/Pitch/Roll and calls the fixed-point matrix builder
 // per overlay; here each build is one AimOverlayAngles record. Differences like
 // (body - aim) are int32 BAM subtractions (wraparound is the shortest-arc delta) and the
-// blend steps are arithmetic right shifts, exactly as the sar-based original.
+// blend steps are arithmetic right shifts, exactly as the sar-based original — routed
+// through io/bam.h so the x86 wrap/sar semantics hold without signed-overflow UB.
 void compute_aim_overlay_angles(const AimOverlayInputs &in,
                                 AimOverlayAngles out[kOverlayClassCount]) {
     const int32_t A = in.aim_yaw;
@@ -27,7 +35,7 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
     // v142 (head/full aim): Roll = torsoRoll + lean/2 while Yaw/Pitch stay the aim pair.
     // [orig: @ 0x4b17e5 + 0x4b180a. The local-player fine pitch kick
     //  (dword_3346FA8 << 17, @ 0x4b17fb) is unported -- its writer is unwitnessed.]
-    out[kOverlayHead] = {A, P, TR + (LN >> 1)};
+    out[kOverlayHead] = {A, P, bam_add(TR, bam_sar(LN, 1))};
     // v132 (body): bodyHeading / bodyPitch / original Roll. [orig: @ 0x4b182e]
     out[kOverlayBody] = {B, Q, R};
     // v143 / v144 (leg chains): the leg chase yaws with body pitch. [orig: @ 0x4b1845 /
@@ -38,18 +46,22 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
     if (in.aim_state) {
         // The aim branch (g_animStateFlagsTable & 0x40). [orig: @ 0x4b1bbe..0x4b1ce4]
         // elbow (arms): 3/4 aim yaw, full aim pitch + head-look + 2x pitch blend.
-        out[kOverlayArm] = {A + ((B - A) >> 2), P + HLD + 2 * PB, R + LN};
+        out[kOverlayArm] = {bam_add(A, bam_sar(bam_sub(B, A), 2)),
+                            bam_add(bam_add(P, HLD), bam_dbl(PB)),
+                            bam_add(R, LN)};
         // v137 (upper spine): 3/4 aim yaw, full aim pitch + pitch blend.
-        out[kOverlayUpperSpine] = {A + ((B - A) >> 2), P + PB, R + LN};
+        out[kOverlayUpperSpine] = {bam_add(A, bam_sar(bam_sub(B, A), 2)),
+                                   bam_add(P, PB),
+                                   bam_add(R, LN)};
         // rootMatrix (clavicles) and v138 (neck) are v137 copies on foot.
         // [orig: qmemcpy @ 0x4b1c8f / 0x4b1caa]
         out[kOverlayClavicle] = out[kOverlayUpperSpine];
         out[kOverlayNeck] = out[kOverlayUpperSpine];
         // spineMatrix (lower spine, the first bend segment): half yaw, quarter pitch.
         // [orig: @ 0x4b1cb4..0x4b1ce4]
-        out[kOverlaySpine] = {A + ((B - A) >> 1),
-                              Q + ((P - Q) >> 2) + (PB >> 1),
-                              R + (LN >> 1)};
+        out[kOverlaySpine] = {bam_add(A, bam_sar(bam_sub(B, A), 1)),
+                              bam_add(bam_add(Q, bam_sar(bam_sub(P, Q), 2)), bam_sar(PB, 1)),
+                              bam_add(R, bam_sar(LN, 1))};
     } else {
         // The reduced branch: spine/clavicles/neck stay on the body; only arms and the
         // head track aim (head keeps v142 from above). [orig: @ 0x4b1cf1..0x4b1dfa]
@@ -62,7 +74,9 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
             out[kOverlayArm] = out[kOverlayBody];
         } else {
             // [orig: @ 0x4b1da4..0x4b1dce -- head-look decays to a quarter here]
-            out[kOverlayArm] = {A + ((B - A) >> 2), P + (HLD >> 2) + 2 * PB, R + LN};
+            out[kOverlayArm] = {bam_add(A, bam_sar(bam_sub(B, A), 2)),
+                                bam_add(bam_add(P, bam_sar(HLD, 2)), bam_dbl(PB)),
+                                bam_add(R, LN)};
         }
     }
 }

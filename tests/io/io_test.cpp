@@ -8,6 +8,7 @@
 #include <io/bit_stream.h>
 #include <io/byte_reader.h>
 #include <io/byte_writer.h>
+#include <io/bam.h>
 #include <io/fixed.h>
 #include <io/le.h>
 #include <io/strutil.h>
@@ -156,9 +157,30 @@ static int test_strutil()
     return 0;
 }
 
+static int test_bam_wrap_arithmetic()
+{
+    // The x86 semantics the BAM ports rely on, pinned as defined behavior:
+    // add/sub/dbl wrap two's-complement, sar shifts arithmetically, abs maps
+    // INT32_MIN to itself (x86 neg).
+    constexpr int32_t kMax = 2147483647;               // INT32_MAX
+    constexpr int32_t kMin = -kMax - 1;                // INT32_MIN
+    TEST_EXPECT(io::bam_add(kMax, 1) == kMin);         // wrap over the seam
+    TEST_EXPECT(io::bam_sub(kMin, kMax) == 1);         // shortest arc across it
+    TEST_EXPECT(io::bam_sub(kMax, kMin) == -1);
+    TEST_EXPECT(io::bam_dbl(0x40000001) == kMin + 2);  // 2*x wraps like shl
+    TEST_EXPECT(io::bam_sar(-1, 1) == -1);             // arithmetic, not logical
+    TEST_EXPECT(io::bam_sar(-8, 2) == -2);
+    TEST_EXPECT(io::bam_sar(kMin, 2) == kMin / 4);
+    TEST_EXPECT(io::bam_sar(7, 1) == 3);
+    TEST_EXPECT(io::bam_abs(-5) == 5);
+    TEST_EXPECT(io::bam_abs(kMin) == kMin);            // x86 neg: stays put
+    return 0;
+}
+
 int main()
 {
     if (test_le_primitives()) return 1;
+    if (test_bam_wrap_arithmetic()) return 1;
     if (test_fixed_point()) return 1;
     if (test_byte_reader_bounds()) return 1;
     if (test_byte_writer_roundtrip()) return 1;

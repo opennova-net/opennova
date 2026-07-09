@@ -26,6 +26,7 @@ target_include_directories(opennova_world
 target_link_libraries(opennova_world
     PUBLIC
         opennova_terrain_query
+        opennova_io
 )
 
 target_compile_features(opennova_world PUBLIC cxx_std_17)

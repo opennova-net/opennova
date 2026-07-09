@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "anim/aim_overlay.h"
+#include <io/bam.h>
 
 using namespace opennova::anim;
 
@@ -202,11 +203,47 @@ void test_apply_differential_bend() {
     CHECK(quat_angle_between(quat_mul(rot[0], rot[1]), head) < 1e-4f);
 }
 
+
+void test_blends_wrap_across_the_bam_seam() {
+    // The +/-180 deg seam: aim just left of the seam, body just across it. The x86
+    // int32 wrap makes (B - A) the SHORTEST arc (a small positive delta), so every
+    // blend stays glued to the seam instead of sweeping the long way — and in C++
+    // that must come from the io/bam.h wrap helpers, not signed overflow (UB).
+    using opennova::io::bam_add;
+    using opennova::io::bam_dbl;
+    using opennova::io::bam_sar;
+    using opennova::io::bam_sub;
+    AimOverlayInputs in;
+    in.aim_yaw = INT32_MAX - 0xFFFF;         // ~ +180 deg, just below the seam
+    in.body_yaw = INT32_MIN + 0x20001;       // ~ -180 deg, just past it
+    in.aim_pitch = 0;
+    in.body_pitch = 0;
+    in.aim_state = true;
+    AimOverlayAngles out[kOverlayClassCount];
+    compute_aim_overlay_angles(in, out);
+
+    const int32_t A = in.aim_yaw, B = in.body_yaw;
+    const int32_t d = bam_sub(B, A);
+    CHECK(d == 0x30001);  // the short way across the seam, not a -360 deg sweep
+    CHECK(out[kOverlayUpperSpine].yaw == bam_add(A, bam_sar(d, 2)));
+    CHECK(out[kOverlaySpine].yaw == bam_add(A, bam_sar(d, 1)));
+    // Both blends sit INSIDE the short arc from A across the seam.
+    CHECK(bam_sub(out[kOverlayUpperSpine].yaw, A) >= 0);
+    CHECK(bam_sub(B, out[kOverlaySpine].yaw) >= 0);
+
+    // The doubled pitch-blend term wraps two's-complement like the x86 shl.
+    in.pitch_blend = 0x40000001;  // 2*PB wraps into the negative half-turn
+    compute_aim_overlay_angles(in, out);
+    CHECK(out[kOverlayArm].pitch == bam_dbl(in.pitch_blend));
+    CHECK(bam_dbl(in.pitch_blend) == INT32_MIN + 2);
+}
+
 } // namespace
 
 int main() {
     test_bone_class_map();
     test_aim_branch_blends();
+    test_blends_wrap_across_the_bam_seam();
     test_non_aim_branch();
     test_rolling_zeroes_roll();
     test_apply_identity_is_passthrough();

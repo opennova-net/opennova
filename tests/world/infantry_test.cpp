@@ -15,6 +15,7 @@
 //     injectable scale [orig: dword_C6EAE4],
 //   * slope slide on steep ground: the exact 2048/8-tick downhill drift + body lean.
 #include <cmath>
+#include <io/bam.h>
 #include <cstdint>
 #include <cstdio>
 #include <array>
@@ -199,6 +200,41 @@ void test_remote_player_body_anim() {
 // overlay, Entity_BuildBoneTransformMatrices @0x4b1290 / world-wac-ai-re.md §14; the
 // org2 chase source is unwitnessed — org1 math applied under D-INF-12]. Own function:
 // main's frame is at its MSVC stack-probe limit (see test_remote_player_body_anim).
+
+void test_player_body_chase_crosses_the_bam_seam() {
+    // The chase near +/-180 deg: the wrapping (diff + 2) >> 2 quarter-step takes the
+    // SHORT arc across the seam (io/bam.h wrap semantics — signed overflow would be
+    // UB), so a body at ~+180 deg chasing a target just past -180 deg crosses the
+    // seam instead of sweeping the long way around.
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    const int32_t start = 0x7FFF0000;             // ~ +180 deg, just below the seam
+    const int32_t target = (int32_t)0x80020000u;  // just past -180: +0x30000 the short way
+    e->inf.body_heading = start;
+    e->inf.target_heading = target;
+    e->inf.leg_yaw[0] = e->inf.leg_yaw[1] = start;
+    e->inf.leg_target[0] = e->inf.leg_target[1] = start;
+
+    run_ticks(ai, w, 1, 2);
+    // One quarter-step of the short arc, still on the positive side of the seam.
+    CHECK(e->inf.body_heading == start + 0xC000);
+    CHECK(e->heading == target);  // player aim yaw is instant
+
+    run_ticks(ai, w, 2, 400);
+    // Settled ACROSS the seam at the target (the chase stalls within one BAM unit),
+    // legs re-planted and settled with it.
+    CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.body_heading, target)) <= 1);
+    CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.leg_yaw[0], e->inf.body_heading)) < 0x20000000);
+}
+
 void test_player_body_chase_and_legs() {
     constexpr int32_t kClampL = 69273360;     // body turn clamp
     constexpr int32_t kLegTwist = 0x20000000; // 45 deg
@@ -1082,6 +1118,7 @@ int main() {
     // change landed alongside it.
     test_remote_player_body_anim();
     test_player_body_chase_and_legs();
+    test_player_body_chase_crosses_the_bam_seam();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);
