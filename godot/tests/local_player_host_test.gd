@@ -141,6 +141,7 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.setup(world, camera)
 	host.set_input_source(func() -> Dictionary:
 		return {})
+	await get_tree().process_frame  # setup() mounts the FP pass deferred
 
 	host.before_world_tick(0.016)  # builds the avatar + viewmodel
 	host.after_world_tick()        # first person by default: placement + layer stamps
@@ -184,6 +185,47 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.teardown()
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
+
+
+# The game shell calls setup() from its own _ready — while the player camera's
+# viewport is still making its children ready, so it rejects add_child ("parent
+# busy": _propagate_ready blocks the parent for the whole walk). A direct FP-pass
+# mount fails then, leaving the viewmodel layer masked off the player camera with
+# nothing drawing it: an invisible FP viewmodel in the runtime (but not in ONED,
+# whose play controller enters an already-running tree). The pass mount is
+# deferred for exactly this boot shape; this pins it.
+class BootTrigger:
+	extends Node
+	var host
+	var world: Node3D
+	var camera: Camera3D
+
+	func _ready() -> void:
+		host.setup(world, camera)
+
+
+func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
+	var vp := SubViewport.new()  # the play viewport the pass composites into
+	var trigger := BootTrigger.new()
+	trigger.world = FakeWorld.new()
+	trigger.camera = Camera3D.new()
+	trigger.host = LocalPlayerHost.new()
+	vp.add_child(trigger.world)
+	vp.add_child(trigger.camera)
+	vp.add_child(trigger.host)
+	vp.add_child(trigger)  # last: world/camera/host are in-tree when _ready fires
+	# Entering the tree makes vp's children ready — vp is "busy" exactly while
+	# BootTrigger._ready runs setup(), the game shell's boot shape.
+	add_child_autofree(vp)
+	await get_tree().process_frame
+
+	var pass_layer: CanvasLayer = trigger.host.get("_vm_pass_layer")
+	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
+	if pass_layer != null:
+		assert_true(pass_layer.is_inside_tree(),
+			"the FP pass mounted despite the busy boot (a failed add_child leaves it orphaned)")
+		assert_eq(pass_layer.get_parent(), vp,
+			"the pass composites into the camera's viewport, not this host's ancestor")
 
 
 # Every VisualInstance3D under `root`, inclusive (mirrors the host's stamping walk).

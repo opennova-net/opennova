@@ -143,7 +143,12 @@ func setup(world, camera: Camera3D) -> void:
 	# through the dedicated renderfov pass built below.
 	if _camera != null:
 		_camera.cull_mask &= ~(NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY | NovaWater.VISUAL_LAYER_VIEWMODEL)
-	_build_viewmodel_pass()
+	# Deferred: the game shell calls setup() from its own _ready, while the root
+	# viewport is still mid-scene-setup — a direct add_child into it fails then
+	# ("parent busy"), which would leave the viewmodel layer masked off the player
+	# camera with NO pass to draw it (an invisible FP viewmodel). The build's own
+	# guards make the deferred call a no-op after teardown()/double setup().
+	_build_viewmodel_pass.call_deferred()
 	_reset_state()
 
 
