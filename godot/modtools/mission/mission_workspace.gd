@@ -64,6 +64,7 @@ func _ensure_play_mount() -> ViewportMount:
 			var play := MissionPlayControllerScript.new()
 			play.stop_requested.connect(stop_play_mission)
 			play.status_reported.connect(_on_controller_status)
+			play.debug_overlay_requested.connect(toggle_debug_overlay)
 			return play)
 	return _play_mount
 
@@ -339,8 +340,10 @@ func stop_play_mission() -> void:
 
 # --- Mission debug overlay (C12) -------------------------------------------
 # The same NovaDebugOverlay the game summons with F3, mounted over the editor
-# shell with variable edits locked. The runtime source is re-resolved on every
-# overlay refresh, so Play/Stop/sim restarts need no rewiring here.
+# shell with variable edits locked — summoned from the Simulate panel's debug
+# button, or with F3 while playing (the play controller forwards the key). The
+# runtime source is re-resolved on every overlay refresh, so Play/Stop/sim
+# restarts need no rewiring here.
 
 func toggle_debug_overlay() -> void:
 	if editor_shell == null:
@@ -357,8 +360,16 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
 		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
 		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
+		_debug_overlay.viewmodel_forced_toggled.connect(_on_overlay_viewmodel_forced)
+		_debug_overlay.body_in_first_person_toggled.connect(_on_overlay_body_in_first_person)
 		_host_under_shell(_debug_overlay)
 	_debug_overlay.toggle()
+	# While the overlay is up during play, the play session frees the mouse so
+	# the overlay takes clicks (the game shell gets this via its pause menu;
+	# play-in-editor has none).
+	var play = _play_node()
+	if play != null and play.has_method("set_capture_suspended"):
+		play.set_capture_suspended(is_debug_overlay_open())
 
 
 # The View tab toggles act on the PIE world (game_world.tscn) the same way the game host
@@ -376,6 +387,22 @@ func _on_overlay_foliage_hidden(hidden: bool) -> void:
 		var world = _play_node().get_world()
 		if world != null:
 			world.set_foliage_hidden(hidden)
+
+
+# The FP-viewmodel debug toggles live on the shared LocalPlayerHost (the same
+# host the game shell drives from its F3 overlay); only Play Mission has one.
+func _on_overlay_viewmodel_forced(enabled: bool) -> void:
+	if is_playing_mission():
+		var host = _play_node().get_player_host()
+		if host != null:
+			host.set_debug_force_viewmodel(enabled)
+
+
+func _on_overlay_body_in_first_person(enabled: bool) -> void:
+	if is_playing_mission():
+		var host = _play_node().get_player_host()
+		if host != null:
+			host.set_debug_body_in_first_person(enabled)
 
 
 func is_debug_overlay_open() -> bool:

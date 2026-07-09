@@ -217,6 +217,10 @@ func local_player_anim_key() -> String:
 func local_player_anim_phase_ticks() -> int:
 	return int(_sim.get_local_player_anim_phase_ticks()) if _sim != null else 0
 
+# Decoded at the NovaSimulation transport edge (ADR 0017); null when absent/invalid.
+func local_player_aim_overlay() -> PlayerAimOverlay:
+	return PlayerAimOverlay.from_sim_dict(_sim.get_local_player_aim_overlay()) if _sim != null else null
+
 func local_player_health() -> int:
 	return int(_sim.get_local_player_health()) if _sim != null else 0
 

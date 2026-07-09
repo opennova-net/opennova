@@ -153,10 +153,20 @@ func reset_animation_time() -> void:
 		_arms_model.reset_animation_time()
 
 
-# --- Skeletal animation preview (.bad/.adm smoke test) --------------------------
+# --- Skeletal animation preview (.bad/.adm) --------------------------------------
 # Load a model's animation set from the mounted resource root (its .adm names the .bad
 # clips), bind it to the model (builds the Skeleton3D + Skin when the model is skinned),
 # and return the available clip keys. Empty on failure (see get_animation_error()).
+#
+# The rig ALWAYS comes from a model's bone table — count and hierarchy from the model
+# rows, rest positions reconstructed from the model pivots + the reset .bad's bind
+# rotations (the corpus-exact export relation; NovaSkeletalAnim); the lossy shipped
+# BadBone.position is never read (12 of 43 JO viewmodel rigs ship it zeroed/stale and
+# retail renders them all) [orig: BoneAnim_BuildWorldMatrices @0x40c400 walks
+# modelDef+56, bounded by modelDef+52]. The skeleton belongs to the .adm's MODEL,
+# not necessarily the previewed one (the FP arms ride the gun's table), so resolve the
+# .adm basename's .3di and fall back to the open model — the same rule the game's
+# viewmodel builder applies (MissionObjectPlacer.build_model_from_graphic).
 func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
 	_skeletal = null
 	_last_anim_error = ""
@@ -165,22 +175,47 @@ func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
 		return PackedStringArray()
 	if resource_root == null:
 		_last_anim_error = "No resource directory mounted"
-		_model.set_skeletal_anim(null)
+		_clear_skeletal_binding()
 		return PackedStringArray()
 	if adm_name.strip_edges().is_empty():
 		_last_anim_error = "Enter a .adm name"
-		_model.set_skeletal_anim(null)
+		_clear_skeletal_binding()
 		return PackedStringArray()
+	var skel_data := _resolve_skeleton_model(adm_name, resource_root)
+	var origins: PackedVector3Array = skel_data.get_bone_origins() if skel_data != null else PackedVector3Array()
+	var parents: PackedInt32Array = skel_data.get_bone_parents() if skel_data != null else PackedInt32Array()
 	var sk := NovaSkeletalAnim.new()
-	if not sk.load_from_resource_root(resource_root, adm_name):
+	if not sk.load_from_resource_root(resource_root, adm_name, origins, parents):
 		_last_anim_error = sk.get_last_error()
-		_model.set_skeletal_anim(null)
+		_clear_skeletal_binding()
 		return PackedStringArray()
 	_skeletal = sk
 	_model.set_skeletal_anim(sk)
 	if _arms_model != null:
 		_arms_model.set_skeletal_anim(sk)  # the arms overlay rides the same .adm skeleton
 	return sk.get_clip_keys()
+
+
+# The .3di whose bone table defines the rig for `adm_name`: the open model when the
+# names match, else the .adm basename's own model from the resource root, else the
+# open model (a rig-less .adm preview still binds; the model table just stays its own).
+func _resolve_skeleton_model(adm_name: String, resource_root) -> NovaObjectData:
+	var adm_base := adm_name.get_file().get_basename()
+	var own_base := String(object_data.get_object_name()).get_file().get_basename() if object_data != null else ""
+	if object_data != null and adm_base.nocasecmp_to(own_base) == 0:
+		return object_data
+	var d := NovaObjectData.new()
+	if d.open_from_resource_root(resource_root, adm_base + ".3di") == OK:
+		return d
+	return object_data
+
+
+# Drop the skeletal binding from the previewed model and the arms overlay.
+func _clear_skeletal_binding() -> void:
+	if _model != null:
+		_model.set_skeletal_anim(null)
+	if _arms_model != null:
+		_arms_model.set_skeletal_anim(null)
 
 
 func play_animation(clip_key: String) -> void:
@@ -194,10 +229,7 @@ func play_animation(clip_key: String) -> void:
 func clear_animation_set() -> void:
 	_skeletal = null
 	_current_clip = ""
-	if _model != null:
-		_model.set_skeletal_anim(null)
-	if _arms_model != null:
-		_arms_model.set_skeletal_anim(null)
+	_clear_skeletal_binding()
 
 
 func get_animation_error() -> String:

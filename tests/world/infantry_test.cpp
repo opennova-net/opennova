@@ -15,6 +15,7 @@
 //     injectable scale [orig: dword_C6EAE4],
 //   * slope slide on steep ground: the exact 2048/8-tick downhill drift + body lean.
 #include <cmath>
+#include <io/bam.h>
 #include <cstdint>
 #include <cstdio>
 #include <array>
@@ -193,6 +194,99 @@ void test_remote_player_body_anim() {
     // 62 idle selection passes (4-tick cadence) promote 43 -> 44 [orig: @0x4b727b].
     run_ticks(ai, w, 40, 40 + 62 * 4 + 4);
     CHECK(ent->net_anim_state == anim_state::kIdle2);
+}
+
+// Local-player body chase + leg-chain re-plant [orig: §3.3; consumed by the render
+// overlay, Entity_BuildBoneTransformMatrices @0x4b1290 / world-wac-ai-re.md §14; the
+// org2 chase source is unwitnessed — org1 math applied under D-INF-12]. Own function:
+// main's frame is at its MSVC stack-probe limit (see test_remote_player_body_anim).
+
+void test_player_body_chase_crosses_the_bam_seam() {
+    // The chase near +/-180 deg: the wrapping (diff + 2) >> 2 quarter-step takes the
+    // SHORT arc across the seam (io/bam.h wrap semantics — signed overflow would be
+    // UB), so a body at ~+180 deg chasing a target just past -180 deg crosses the
+    // seam instead of sweeping the long way around.
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    const int32_t start = 0x7FFF0000;             // ~ +180 deg, just below the seam
+    const int32_t target = (int32_t)0x80020000u;  // just past -180: +0x30000 the short way
+    e->inf.body_heading = start;
+    e->inf.target_heading = target;
+    e->inf.leg_yaw[0] = e->inf.leg_yaw[1] = start;
+    e->inf.leg_target[0] = e->inf.leg_target[1] = start;
+
+    run_ticks(ai, w, 1, 2);
+    // One quarter-step of the short arc, still on the positive side of the seam.
+    CHECK(e->inf.body_heading == start + 0xC000);
+    CHECK(e->heading == target);  // player aim yaw is instant
+
+    run_ticks(ai, w, 2, 400);
+    // Settled ACROSS the seam at the target (the chase stalls within one BAM unit),
+    // legs re-planted and settled with it.
+    CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.body_heading, target)) <= 1);
+    CHECK(opennova::io::bam_abs(opennova::io::bam_sub(e->inf.leg_yaw[0], e->inf.body_heading)) < 0x20000000);
+}
+
+void test_player_body_chase_and_legs() {
+    constexpr int32_t kClampL = 69273360;     // body turn clamp
+    constexpr int32_t kLegTwist = 0x20000000; // 45 deg
+
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    // Spawn-aligned: everything at heading 0; swing the aim 90 deg right.
+    e->inf.target_heading = 0x40000000;
+    run_ticks(ai, w, 1, 2);
+    // Aim/render yaw is INSTANT for the player; the body lags at the clamped quarter-step.
+    CHECK(e->heading == 0x40000000);
+    CHECK(e->inf.body_heading == kClampL);
+    // Legs: the body has only moved ~5.8 deg — under the ~30 deg snap and off the 64-tick
+    // window, the re-plant holds and the legs stay planted at 0.
+    CHECK(e->inf.leg_yaw[0] == 0 && e->inf.leg_yaw[1] == 0);
+
+    // Keep turning: once the body outruns the 45-deg twist limit the legs clamp to
+    // body - 45 deg even before a re-plant fires.
+    run_ticks(ai, w, 2, 12);
+    const int32_t body = e->inf.body_heading;
+    CHECK(body > kLegTwist); // the body has swung past 45 deg by now
+    CHECK(e->inf.leg_yaw[0] >= body - kLegTwist);
+    CHECK(e->inf.leg_yaw[1] >= body - kLegTwist);
+
+    // Long settle: the body reaches the aim (the (diff + 2) >> 2 chase stalls one BAM
+    // unit short — step rounds to 0 at |diff| <= 1) and the legs re-plant + chase to
+    // within the ~5 deg hysteresis FLOOR of the body: sub-floor drift never re-plants
+    // (the witnessed rest state), so the legs settle near, not on, the body heading.
+    run_ticks(ai, w, 12, 400);
+    CHECK(std::abs(e->inf.body_heading - 0x40000000) <= 1);
+    CHECK(std::abs(e->inf.leg_target[0] - e->inf.body_heading) < 59652320);
+    CHECK(std::abs(e->inf.leg_target[1] - e->inf.body_heading) < 59652320);
+    CHECK(std::abs(e->inf.leg_yaw[0] - e->inf.leg_target[0]) <= 1); // chase settled
+    CHECK(std::abs(e->inf.leg_yaw[1] - e->inf.leg_target[1]) <= 1);
+
+    // Small look-around (< 5 deg drift once the body follows): the legs never budge —
+    // the re-plant hysteresis floor. 4 deg = 47721856 BAM.
+    const int32_t planted_r = e->inf.leg_yaw[0];
+    const int32_t planted_l = e->inf.leg_yaw[1];
+    e->inf.target_heading = 0x40000000 + 47721856;
+    run_ticks(ai, w, 400, 500);
+    CHECK(std::abs(e->inf.body_heading - e->inf.target_heading) <= 1);
+    CHECK(e->inf.leg_yaw[0] == planted_r);
+    CHECK(e->inf.leg_yaw[1] == planted_l);
 }
 
 } // namespace
@@ -1019,6 +1113,12 @@ int main() {
         CHECK(landmark_512 == 0);        // sin(pi) truncates toward zero
         CHECK(landmark_768 == -4194304); // sin(3pi/2)
     }
+
+    // Was defined but never invoked (a silently-dead test) — called since the leg-chase
+    // change landed alongside it.
+    test_remote_player_body_anim();
+    test_player_body_chase_and_legs();
+    test_player_body_chase_crosses_the_bam_seam();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

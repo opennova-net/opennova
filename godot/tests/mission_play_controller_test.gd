@@ -64,6 +64,10 @@ class FakeWorld:
 		return -1
 
 
+func after_each() -> void:
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
 func _make_play():
 	var play = PlayController.new()
 	add_child_autofree(play)
@@ -139,15 +143,37 @@ func test_play_viewport_input_route_drives_player_keys_and_mouse_look() -> void:
 	assert_true(world.input_calls[3]["crouch"], "the pushed key reached the player host, not the editor UI")
 	assert_eq(editor_box.text, "", "the focused control never saw the key while playing")
 
-	# Esc still stops via the same path.
+	# F3 summons the workspace's debug overlay — the game shell's key
+	# (main_game.DEBUG_OVERLAY_KEY), shared by play-in-editor.
 	watch_signals(play)
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_F3)), "F3 is claimed while playing")
+	assert_signal_emitted(play, "debug_overlay_requested")
+
+	# While the overlay is up the workspace suspends the per-tick capture: the
+	# mouse is freed for the overlay's controls (play-in-editor has no pause menu
+	# to do it, unlike the game shell) and a free mouse drives the GUI, not the
+	# look; resuming lets the next tick recapture.
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	play.set_capture_suspended(true)
+	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
+		"suspending frees the mouse for the overlay")
+	assert_false(play.handle_viewport_input(motion),
+		"a free mouse drives the overlay GUI, not the gameplay look")
+	play.set_capture_suspended(false)
+	assert_true(play.handle_viewport_input(motion), "resumed: the look input route is back")
+	host.before_world_tick(0.016)
+
+	# Esc still stops via the same path.
 	assert_true(play.handle_viewport_input(_pressed_key(KEY_ESCAPE)), "Esc is claimed while playing")
 	assert_signal_emitted(play, "stop_requested")
 	play._playing = false
 
-	# Stopped: the same pushed key falls through to the editor UI again.
+	# Stopped: the same pushed key falls through to the editor UI again, and F3
+	# is no longer claimed.
 	get_tree().root.push_input(_pressed_key(KEY_C, "c"))
 	assert_eq(editor_box.text, "c", "not playing: the editor gets its keyboard back")
+	assert_false(play.handle_viewport_input(_pressed_key(KEY_F3)),
+		"not playing: F3 falls through to the editor")
 
 
 func test_input_stage_interception_is_gated_on_playing() -> void:

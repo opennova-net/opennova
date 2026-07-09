@@ -71,6 +71,26 @@ class FakeWorld:
 	func local_player_body_anim_slot() -> int:
 		return -1
 
+	# The equipped-weapon FSM seam (null = no weapon installed, the default).
+	var weapon_view = null  # PlayerWeaponView
+	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
+	var view = null  # PlayerLocalView
+	var scope_toggle_requests := 0
+	var camera_mode_calls: Array = []
+
+	func local_player_weapon_view():
+		return weapon_view
+
+	func local_player_view():
+		return view
+
+	func request_local_player_scope_toggle() -> bool:
+		scope_toggle_requests += 1
+		return true
+
+	func set_local_player_camera_third_person(third_person: bool) -> void:
+		camera_mode_calls.append(third_person)
+
 
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -141,14 +161,24 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.setup(world, camera)
 	host.set_input_source(func() -> Dictionary:
 		return {})
+	await get_tree().process_frame  # setup() mounts the FP pass deferred
 
 	host.before_world_tick(0.016)  # builds the avatar + viewmodel
 	host.after_world_tick()        # first person by default: placement + layer stamps
 
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"setup() masks the reflection-only body layer off the player camera")
-	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
-		"the player camera keeps drawing the FP viewmodel")
+	# The FP viewmodel renders through the dedicated renderfov pass, never the player
+	# camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own projection + flush].
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
+	var pass_cam: Camera3D = host.get("_vm_camera")
+	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
+	if pass_cam != null:
+		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
+			"the pass camera draws ONLY the viewmodel layer")
+		assert_almost_eq(pass_cam.near, 0.05, 0.0001,
+			"the pass near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
 	assert_true(world.last_avatar.visible,
 		"the body stays VISIBLE in first person - the mirror renders it")
 	assert_true(world.last_viewmodel.visible, "the FP overlay shows in first person")
@@ -175,6 +205,103 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	host.teardown()
 	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"teardown() restores the player camera's cull mask")
+
+
+func test_camera_state_rides_the_sim_view() -> void:
+	# ADR 0016: the ADS ease, the fov policy, and the 3P anchor are SIM state at
+	# the world cadence — the host reads the PlayerLocalView snapshot and places
+	# nodes. Scoped fov: the sim's horizontal policy value through the ONE shared
+	# h->v conversion. 3P: the camera aims at the sim's chased anchor.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	world.view = PlayerLocalView.new()
+	world.view.fov_h_deg = 20.0  # the sim's sighted 80/4 policy value
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	var size := camera.get_viewport().get_visible_rect().size
+	assert_almost_eq(camera.fov,
+		NovaSimulation.fov_vertical_from_horizontal(20.0, size.x / size.y), 0.001,
+		"the camera fov is the sim's policy value through the shared conversion")
+
+	# Third person: the sim's chased anchor is the look target; the eye sits back
+	# along the orbit. (level look, yaw 0 -> anchor - back*3 with 22.5 deg orbit)
+	world.view.tp_anchor = Vector3(4.0, 2.0, -6.0)
+	world.view.tp_anchor_valid = true
+	host.set_third_person(true)
+	host.after_world_tick()
+	var to_anchor: Vector3 = world.view.tp_anchor - camera.global_position
+	assert_almost_eq(to_anchor.length(), 3.0, 0.001,
+		"the camera orbits the SIM anchor at the witnessed 3.0 distance")
+
+
+func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
+	# The sim owns g_camera_mode's consequences and the ADS gates: F4 pushes the
+	# mode; the host never carries scope state of its own.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)  # _reset_state syncs the initial mode
+	world.camera_mode_calls.clear()
+
+	var f4 := InputEventKey.new()
+	f4.keycode = KEY_F4
+	f4.pressed = true
+	assert_true(host.handle_key_input(f4, true))
+	assert_eq(world.camera_mode_calls, [true], "F4 pushes third person into the sim")
+	assert_true(host.handle_key_input(f4, true))
+	assert_eq(world.camera_mode_calls, [true, false], "and back")
+
+
+# The game shell calls setup() from its own _ready — while the player camera's
+# viewport is still making its children ready, so it rejects add_child ("parent
+# busy": _propagate_ready blocks the parent for the whole walk). A direct FP-pass
+# mount fails then, leaving the viewmodel layer masked off the player camera with
+# nothing drawing it: an invisible FP viewmodel in the runtime (but not in ONED,
+# whose play controller enters an already-running tree). The pass mount is
+# deferred for exactly this boot shape; this pins it.
+class BootTrigger:
+	extends Node
+	var host
+	var world: Node3D
+	var camera: Camera3D
+
+	func _ready() -> void:
+		host.setup(world, camera)
+
+
+func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
+	var vp := SubViewport.new()  # the play viewport the pass composites into
+	var trigger := BootTrigger.new()
+	trigger.world = FakeWorld.new()
+	trigger.camera = Camera3D.new()
+	trigger.host = LocalPlayerHost.new()
+	vp.add_child(trigger.world)
+	vp.add_child(trigger.camera)
+	vp.add_child(trigger.host)
+	vp.add_child(trigger)  # last: world/camera/host are in-tree when _ready fires
+	# Entering the tree makes vp's children ready — vp is "busy" exactly while
+	# BootTrigger's _ready runs setup(), the game shell's boot shape.
+	add_child_autofree(vp)
+	await get_tree().process_frame
+
+	var pass_layer: CanvasLayer = trigger.host.get("_vm_pass_layer")
+	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
+	if pass_layer != null:
+		assert_true(pass_layer.is_inside_tree(),
+			"the FP pass mounted despite the busy boot (a failed add_child leaves it orphaned)")
+		assert_eq(pass_layer.get_parent(), vp,
+			"the pass composites into the camera's viewport, not this host's ancestor")
 
 
 # Every VisualInstance3D under `root`, inclusive (mirrors the host's stamping walk).

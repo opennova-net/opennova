@@ -1321,7 +1321,9 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_part_anim_field", "lod_index", "anim_index", "key", "value"), &NovaObjectData::set_part_anim_field);
 	ClassDB::bind_method(D_METHOD("set_part_anim_track_field", "lod_index", "anim_index", "track", "key", "value"), &NovaObjectData::set_part_anim_track_field);
 	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &NovaObjectData::get_render_lod_info);
-	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index", "skeletal", "bone_count"), &NovaObjectData::build_lod_submeshes, DEFVAL(false), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_bone_origins", "lod_index"), &NovaObjectData::get_bone_origins, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_bone_parents", "lod_index"), &NovaObjectData::get_bone_parents, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index", "skeletal", "bone_count", "native_frame"), &NovaObjectData::build_lod_submeshes, DEFVAL(false), DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_skinned", "lod_index"), &NovaObjectData::is_skinned);
 	ClassDB::bind_method(D_METHOD("eval_material_runtime", "index", "time_ms", "ctrl_values"), &NovaObjectData::eval_material_runtime);
 	ClassDB::bind_method(D_METHOD("compute_anim_frame", "index", "time_ms", "ctrl_values"), &NovaObjectData::compute_anim_frame);
@@ -3002,6 +3004,39 @@ Dictionary NovaObjectData::get_render_lod_info(int p_lod_index) const {
 	return info;
 }
 
+PackedVector3Array NovaObjectData::get_bone_origins(int p_lod_index) const {
+	PackedVector3Array out;
+	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return out;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	out.resize(static_cast<int64_t>(lod.part_count));
+	for (size_t i = 0; i < lod.part_count; ++i) {
+		const ThreediIRPart &part = lod.parts[i];
+		// Raw native rel_position (parent-relative -- the parent-local FK offset the sampler wants),
+		// NOT godot_vec3-flipped: bones stay engine-native (ADR 0007 conv #1 -- the mesh carries the
+		// (-x,y,z) flip, the bones do not), matching how BadBone.position is consumed as-is by
+		// sample_clip. Verified: this reproduces retail's modelDef+56 pivot (the rigid gun renders
+		// correctly). [orig: BoneAnim_BuildWorldMatrices @0x40c400 reads the model pivot raw.]
+		out[static_cast<int64_t>(i)] = Vector3(part.rel_position[0], part.rel_position[1], part.rel_position[2]);
+	}
+	return out;
+}
+
+PackedInt32Array NovaObjectData::get_bone_parents(int p_lod_index) const {
+	PackedInt32Array out;
+	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return out;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	out.resize(static_cast<int64_t>(lod.part_count));
+	for (size_t i = 0; i < lod.part_count; ++i) {
+		// Raw parent index (the root references itself in the file; the sampler normalizes).
+		out[static_cast<int64_t>(i)] = lod.parts[i].parent_index;
+	}
+	return out;
+}
+
 bool NovaObjectData::is_skinned(int p_lod_index) const {
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return false;
@@ -3151,13 +3186,15 @@ Array NovaObjectData::get_lod_surfaces(int p_lod_index) const {
 	return result;
 }
 
-uint64_t NovaObjectData::_submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count) {
+uint64_t NovaObjectData::_submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame) {
 	return static_cast<uint64_t>(p_lod_index) |
 			(static_cast<uint64_t>(p_skeletal ? 1 : 0) << 16) |
+			(static_cast<uint64_t>(p_native_frame ? 1 : 0) << 17) |
 			(static_cast<uint64_t>(p_bone_count) << 24);
 }
 
-Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bone_count) const {
+Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bone_count,
+		bool p_native_frame) const {
 	Array result;
 	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
 		return result;
@@ -3166,7 +3203,7 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 	// edits never taint the cache) whose ArrayMesh refs stay SHARED —
 	// Array::duplicate(true) does not duplicate Resources, and that sharing is
 	// the point: N models from one data render one set of meshes.
-	const uint64_t cache_key = _submesh_cache_key(p_lod_index, p_skeletal, p_bone_count);
+	const uint64_t cache_key = _submesh_cache_key(p_lod_index, p_skeletal, p_bone_count, p_native_frame);
 	const auto cached = submesh_cache.find(cache_key);
 	if (cached != submesh_cache.end()) {
 		return cached->second.duplicate(true);
@@ -3178,18 +3215,43 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 		const int part_index = static_cast<int>(surface.get("part_index", 0));
 		const int material_array_index = static_cast<int>(surface.get("material_array_index", surface.get("material_index", 0)));
 
-		const PackedVector3Array vertices = surface.get("vertices", PackedVector3Array());
+		PackedVector3Array vertices = surface.get("vertices", PackedVector3Array());
 		if (vertices.is_empty()) {
 			continue;
+		}
+		PackedVector3Array normals = surface.get("normals", PackedVector3Array());
+		PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
+		PackedInt32Array mesh_indices = surface.get("indices", PackedInt32Array());
+		if (p_native_frame) {
+			// Undo the baked (-x,y,z) import flip: native positions/normals/tangents, and
+			// reverse each triangle's winding — the source D3D clockwise-front order is only
+			// CCW-correct for Godot BECAUSE of that mirror; unmirrored it must be re-reversed.
+			// (See header: the FP viewmodel path, paired with NovaSkeletalAnim model_bind.)
+			for (int v = 0; v < vertices.size(); ++v) {
+				const Vector3 p = vertices[v];
+				vertices.set(v, Vector3(-p.x, p.y, p.z));
+			}
+			for (int v = 0; v < normals.size(); ++v) {
+				const Vector3 n = normals[v];
+				normals.set(v, Vector3(-n.x, n.y, n.z));
+			}
+			for (int t = 0; t + 3 < tangents.size(); t += 4) {
+				tangents.set(t, -tangents[t]);          // tangent x back to native
+				tangents.set(t + 3, -tangents[t + 3]);  // bitangent handedness follows the mirror
+			}
+			for (int t = 0; t + 2 < mesh_indices.size(); t += 3) {
+				const int32_t tmp = mesh_indices[t + 1];
+				mesh_indices.set(t + 1, mesh_indices[t + 2]);
+				mesh_indices.set(t + 2, tmp);
+			}
 		}
 
 		Array arrays;
 		arrays.resize(Mesh::ARRAY_MAX);
 		arrays[Mesh::ARRAY_VERTEX] = vertices;
-		arrays[Mesh::ARRAY_NORMAL] = surface.get("normals", PackedVector3Array());
+		arrays[Mesh::ARRAY_NORMAL] = normals;
 		arrays[Mesh::ARRAY_TEX_UV] = surface.get("uvs", PackedVector2Array());
 		arrays[Mesh::ARRAY_TEX_UV2] = surface.get("uvs2", PackedVector2Array());
-		const PackedFloat32Array tangents = surface.get("tangents", PackedFloat32Array());
 		if (!tangents.is_empty() && tangents.size() == vertices.size() * 4) {
 			arrays[Mesh::ARRAY_TANGENT] = tangents;
 		}
@@ -3223,7 +3285,7 @@ Array NovaObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int 
 			arrays[Mesh::ARRAY_BONES] = bones;
 			arrays[Mesh::ARRAY_WEIGHTS] = weights;
 		}
-		arrays[Mesh::ARRAY_INDEX] = surface.get("indices", PackedInt32Array());
+		arrays[Mesh::ARRAY_INDEX] = mesh_indices;
 
 		Ref<ArrayMesh> mesh;
 		mesh.instantiate();

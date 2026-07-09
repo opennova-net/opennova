@@ -7,7 +7,9 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
@@ -53,11 +55,28 @@ private:
 
 	// Shared core: build bones_/bind_local_/clips_ from already-resolved .bad bytes.
 	// p_reset_bytes defines the shared skeleton + bind pose; each (key, bytes) pair is sampled
-	// against the shared rest origins and registered as a clip. Caller clears state first and
-	// sets adm_name_. Returns false (with last_error_) on an unusable reset .bad or when no clip
-	// survives. Shared by load_from_resource_root and load_from_bad_files.
+	// against the shared rest origins and registered as a clip. When p_model_parents pairs with
+	// p_model_origins (same non-zero size), the MODEL's bone table defines the rig outright --
+	// row count, hierarchy, and pivots; the .bad contributes rotations only, by row index, and
+	// its bone count/parents/positions are never read [orig: BoneAnim_BuildWorldMatrices
+	// @0x40c400 bounds the FK by modelDef+52 and reads parent/pivot from the modelDef+56 rows;
+	// extra rows past the .bad's channels take bone 0's composed matrix, the padding loop
+	// @0x40c5a1]. The skeleton's rest POSITIONS are RECONSTRUCTED from the model table + the
+	// reset .bad's bind rotations via the corpus-exact export relation
+	// (anim_sample.h positions_from_model), and the clips run the SAME rest-carrying
+	// composition the body pipeline uses -- so a rig whose shipped BadBone.position is
+	// zeroed/stale renders exactly like a healthy one, and a healthy one renders bit-for-bit
+	// like the .bad-driven path (the proven-equivalent factorization of the witnessed composed
+	// builders; sample_clip's model_bind mode remains the direct reference implementation,
+	// exercised by ctest). Legacy (no parents): p_model_origins sized like the .bad's bone
+	// count OVERRIDES the reset .bad's bone positions as the shared rest origins; otherwise
+	// the reset .bad positions are used (menu-preview semantics). Caller clears state first
+	// and sets adm_name_. Returns false (with last_error_) on an unusable reset .bad or when
+	// no clip survives. Shared by load_from_resource_root and load_from_bad_files.
 	bool build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
-			const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads);
+			const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads,
+			const std::vector<opennova::anim::Vec3> &p_model_origins = {},
+			const std::vector<int> &p_model_parents = {});
 
 protected:
 	static void _bind_methods();
@@ -65,7 +84,15 @@ protected:
 public:
 	// Load + sample a model's animation set. p_adm_name is the .adm file name resolvable
 	// through the resource root (the .bad clips it lists are read the same way).
-	bool load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name);
+	// p_model_bone_origins + p_model_bone_parents (optional, paired): the .3di model's bone
+	// table (NovaObjectData.get_bone_origins / get_bone_parents) -- when both are supplied
+	// with equal sizes, the MODEL defines the rig (count, hierarchy, pivots-by-reconstruction)
+	// and the .bad contributes rotations only, exactly as the original consumes
+	// modelDef+52/+56; origins alone are the legacy positional override (see
+	// build_from_bad_bytes).
+	bool load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name,
+			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
+			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
 
 	// Load + sample a skeletal set from EXPLICIT raw .bad files (no .adm), as the original
 	// PLAYER_INFO preview does: p_skeleton_bad is the rest/bind source (e.g. "Dt1rst.bad") and
@@ -76,7 +103,9 @@ public:
 	// [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 -> BoneFile_Load("PI_Idle.BAD"/"Dt1rst.bad")
 	//  + AnimChannel_InitFromData; reimpl wraps both raw .bad files as one shared skeletal set.]
 	bool load_from_bad_files(const Ref<NovaResourceRoot> &p_resource_root,
-			const String &p_skeleton_bad, const Dictionary &p_key_to_bad);
+			const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
+			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
+			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
 
 	bool is_loaded() const { return loaded_; }
 	String get_last_error() const { return last_error_; }
@@ -101,6 +130,22 @@ public:
 	// Per-bone parent-local pose at playhead t (seconds), Godot space. Size == bone count.
 	// Returns the bind pose for an unknown clip / empty result.
 	Array eval_pose(const String &p_key, double p_playhead_seconds) const;
+
+	// Per-bone overlay class (anim::OverlayClass) parsed from the BN## bone names, for
+	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's
+	// default case). BODY rigs only: first-person weapon rigs reuse BN## tags for a
+	// different 39-bone Pelvis/arms/fingers skeleton (ak47_RST.bad et al.) — never feed
+	// a viewmodel through the overlay path. [orig: switch @0x4b1f3a; world-wac-ai-re §14.2]
+	PackedInt32Array get_overlay_classes() const;
+
+	// eval_pose plus the third-person aim overlay — the torso bend. p_deltas is one
+	// node-frame rotation Basis per anim::OverlayClass (the host builds them from
+	// NovaSimulation.get_local_player_aim_overlay() angles via the single-sourced
+	// MissionObjectPlacer.bms_to_godot_basis); p_classes from get_overlay_classes().
+	// Only local rotations change — origins survive the pivot re-anchor identically.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14]
+	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
+			const PackedInt32Array &p_classes, const Array &p_deltas) const;
 
 	NovaSkeletalAnim() = default;
 };

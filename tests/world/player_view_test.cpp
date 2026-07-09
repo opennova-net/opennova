@@ -1,0 +1,180 @@
+// Player view-state tests [orig: CNetPlayerInterp_Setup @ 0x4df36e;
+// ThirdPersonCamera_Update @ 0x437af0; Player_ToggleWeaponScope @ 0x4df0c0..401;
+// Render_SetViewAndProjectionMatrices @ 0x58d900]: the fixed-tick scope ease and
+// anchor chase (render-cadence invariance — the review's 30/60/144 fps case),
+// the fov policy, and the input-dispatch gates in front of the FSM requests.
+#include <cmath>
+#include <cstdio>
+#include <cstdint>
+
+#include "world/player_view.h"
+#include "world/weapon_fsm.h"
+
+using namespace opennova::world;
+
+static int failures = 0;
+#define CHECK(c)                                                                       \
+    do {                                                                               \
+        if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
+    } while (0)
+
+namespace {
+
+void test_scope_ease_is_fifteen_ticks_exactly() {
+    PlayerViewState v;
+    const float eye[3] = {0, 0, 0};
+    v.scope_engaged = true;
+    for (int i = 1; i <= kScopeEaseSteps; ++i) {
+        player_view_tick(v, eye);
+        CHECK(v.scope_step == i);
+    }
+    CHECK(player_view_scope_fraction(v) == 1.0f);
+    player_view_tick(v, eye); // saturates, never overshoots
+    CHECK(v.scope_step == kScopeEaseSteps);
+    v.scope_engaged = false;
+    for (int i = kScopeEaseSteps - 1; i >= 0; --i) {
+        player_view_tick(v, eye);
+        CHECK(v.scope_step == i);
+    }
+    CHECK(player_view_scope_fraction(v) == 0.0f);
+}
+
+// The review's fps case: the SAME simulated time must produce the SAME state no
+// matter how the render loop groups the ticks (one per frame at 60 fps, four
+// then zero at 15/144 fps, ...). The state is a pure function of the tick
+// count, so any grouping of N ticks lands identically.
+void test_equal_ticks_equal_state_regardless_of_frame_grouping() {
+    const float eye[3] = {100.0f, -40.0f, 12.0f};
+
+    PlayerViewState per_frame;       // "60 fps": one tick per render frame
+    per_frame.scope_engaged = true;
+    per_frame.third_person = true;
+    for (int i = 0; i < 24; ++i) player_view_tick(per_frame, eye);
+
+    PlayerViewState bursty;          // "uneven fps": frames of 4/0/3/0/1... ticks
+    bursty.scope_engaged = true;
+    bursty.third_person = true;
+    const int frames[] = {4, 0, 3, 0, 1, 7, 0, 0, 2, 5, 0, 2};
+    int total = 0;
+    for (int n : frames) {
+        for (int i = 0; i < n; ++i) player_view_tick(bursty, eye);
+        total += n;
+    }
+    CHECK(total == 24);
+    CHECK(per_frame.scope_step == bursty.scope_step);
+    CHECK(per_frame.tp_anchor_valid && bursty.tp_anchor_valid);
+    for (int i = 0; i < 3; ++i) CHECK(per_frame.tp_anchor[i] == bursty.tp_anchor[i]);
+}
+
+void test_anchor_chase_quarter_step_and_seeding() {
+    PlayerViewState v;
+    float eye[3] = {8.0f, 0.0f, 4.0f};
+    v.third_person = true;
+    player_view_tick(v, eye); // first 3P tick seeds AT the eye
+    CHECK(v.tp_anchor_valid);
+    CHECK(v.tp_anchor[0] == 8.0f && v.tp_anchor[2] == 4.0f);
+
+    // Move the eye: each tick closes exactly a quarter of the gap. [orig: @ 0x437c8d]
+    eye[0] = 16.0f;
+    player_view_tick(v, eye);
+    CHECK(v.tp_anchor[0] == 10.0f);
+    player_view_tick(v, eye);
+    CHECK(v.tp_anchor[0] == 11.5f);
+
+    // Leaving third person invalidates; re-entering re-seeds at the current eye.
+    v.third_person = false;
+    player_view_tick(v, eye);
+    CHECK(!v.tp_anchor_valid);
+    v.third_person = true;
+    player_view_tick(v, eye);
+    CHECK(v.tp_anchor_valid && v.tp_anchor[0] == 16.0f);
+}
+
+void test_fov_policy() {
+    PlayerViewState v;
+    const float eye[3] = {0, 0, 0};
+    // Hip: the witnessed 80-degree base.
+    CHECK(player_view_fov_h_deg(v, 2, 4.0f) == kPlayerCameraFovHDeg);
+    // Fully sighted with mag 4: 80 / 4. [orig: @ 0x4df401]
+    v.scope_engaged = true;
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(player_view_fov_h_deg(v, 2, 4.0f) == 20.0f);
+    // No sighted flag, or no magnification: the base fov even when engaged.
+    CHECK(player_view_fov_h_deg(v, 1, 4.0f) == kPlayerCameraFovHDeg);
+    CHECK(player_view_fov_h_deg(v, 2, 0.0f) == kPlayerCameraFovHDeg);
+    // Third person suppresses the zoom outright. [orig: @ 0x4df3fa]
+    v.third_person = true;
+    CHECK(player_view_fov_h_deg(v, 2, 4.0f) == kPlayerCameraFovHDeg);
+}
+
+void test_fov_vertical_conversion() {
+    // [orig: @ 0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)] Square viewport: v == h.
+    CHECK(std::fabs(fov_vertical_from_horizontal_deg(80.0f, 1.0f) - 80.0f) < 1e-4f);
+    // 4:3 at 80 horizontal: 2*atan(tan(40 deg)/(4/3)) = 64.36644 degrees.
+    CHECK(std::fabs(fov_vertical_from_horizontal_deg(80.0f, 4.0f / 3.0f) - 64.36644f) < 1e-3f);
+    // Wider view -> smaller vertical fov, monotonically.
+    CHECK(fov_vertical_from_horizontal_deg(80.0f, 16.0f / 9.0f) <
+          fov_vertical_from_horizontal_deg(80.0f, 4.0f / 3.0f));
+}
+
+void test_view_bias_blend() {
+    PlayerViewState v;
+    const float eye[3] = {0, 0, 0};
+    const float pos[3] = {-19.46f, 21.19f, -161.31f};   // JOX WPN_AK47AUTO pos
+    const float tpos[3] = {-62.33f, 29.19f, -152.56f};  // ... and tpos
+    float out[3];
+    player_view_bias_units(v, pos, tpos, out);
+    CHECK(out[0] == pos[0] && out[1] == pos[1] && out[2] == pos[2]);
+    v.scope_engaged = true;
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    player_view_bias_units(v, pos, tpos, out);
+    CHECK(out[0] == tpos[0] && out[1] == tpos[1] && out[2] == tpos[2]);
+}
+
+void test_input_dispatch_gates() {
+    WeaponFsmDef def;
+    def.clip_capacity = 30;
+    def.flags = 2; // sighted
+    WeaponSlotState slot;
+    slot.clip = 30;
+    slot.reserve = 300;
+    // Reload: refused on a full magazine, an empty reserve, or a clipless def.
+    // [orig: input case 0xD3 @ 0x4e0420]
+    CHECK(!weapon_fsm_reload_allowed(def, slot));
+    slot.clip = 12;
+    CHECK(weapon_fsm_reload_allowed(def, slot));
+    slot.reserve = 0;
+    CHECK(!weapon_fsm_reload_allowed(def, slot));
+    slot.reserve = 300;
+    def.clip_capacity = 0;
+    CHECK(!weapon_fsm_reload_allowed(def, slot));
+    def.clip_capacity = 30;
+
+    // Scope toggle: refused during RELOAD/SWITCHFROM and for unscoped defs.
+    // [orig: input case 6 @ 0x4e0420; Player_ToggleWeaponScope @ 0x4df0c0]
+    slot.current = weapon_action::kIdle;
+    CHECK(weapon_fsm_scope_toggle_allowed(def, slot));
+    slot.current = weapon_action::kReload;
+    CHECK(!weapon_fsm_scope_toggle_allowed(def, slot));
+    slot.current = weapon_action::kSwitchFrom;
+    CHECK(!weapon_fsm_scope_toggle_allowed(def, slot));
+    slot.current = weapon_action::kIdle;
+    def.flags = 0;
+    CHECK(!weapon_fsm_scope_toggle_allowed(def, slot));
+    def.flags = 1; // scoped counts too (Flags & 3)
+    CHECK(weapon_fsm_scope_toggle_allowed(def, slot));
+}
+
+} // namespace
+
+int main() {
+    test_scope_ease_is_fifteen_ticks_exactly();
+    test_equal_ticks_equal_state_regardless_of_frame_grouping();
+    test_anchor_chase_quarter_step_and_seeding();
+    test_fov_policy();
+    test_fov_vertical_conversion();
+    test_view_bias_blend();
+    test_input_dispatch_gates();
+    if (failures == 0) std::printf("player_view_test: all passed\n");
+    return failures == 0 ? 0 : 1;
+}

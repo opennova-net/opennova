@@ -57,6 +57,35 @@ transforms.
 Use this shape for live behavior: one driver, host-chosen transport, mutual
 exclusion between the simulation's writes and the editor's.
 
+### Local player & play-in-editor — one host, two boot shapes
+
+`godot/engine/world/local_player_host.gd` is THE local-player host both hosts
+instance: the game shell (`main_game.gd`) and the Mission workspace's play
+controller (`mission_play_controller.gd`) each create one, call `setup(world,
+camera)`, and drive the same `before_world_tick` / `after_world_tick` pair
+around `GameWorld.tick()`. The gameplay keys (F4 camera, C/Z stance), the
+mouse-look, the FP viewmodel (and its dedicated render pass), and the debug
+overlay's View toggles all live on the shared host — the shells only route
+input and decide when the player is live. F3 summons the same
+`NovaDebugOverlay` in both hosts (the game shell binds the key directly; the
+play controller forwards it to the workspace's overlay).
+
+Two lessons this surface carries:
+
+- **The hosts enter the tree differently.** The game shell wires the host from
+  its scene `_ready`, while the player camera's viewport is still making its
+  children ready — a direct `add_child` into that viewport is rejected
+  ("parent busy"), so anything the host mounts into `camera.get_viewport()`
+  must mount deferred. ONED's play controller enters an already-running tree
+  and never sees the rejection; only the runtime boot does. Symptom when
+  violated: a feature that "works in ONED but not in the game" with identical
+  shared code.
+- **Freeing the mouse is a host decision.** The game shell frees the captured
+  mouse through its pause menu (Esc); play-in-editor has no pause state
+  (Esc stops), so the workspace suspends the play session's per-tick capture
+  while the debug overlay is up and resumes it on close. Same shared overlay,
+  host-appropriate mouse ownership.
+
 ### Terrain shaders — intentional, contained divergence
 
 Terrain is the one deliberate split: the editor renders with a live-sculpt

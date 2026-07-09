@@ -82,6 +82,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.inf.is_local_player = is_local;
     ae.inf.body_heading = ae.heading;
     ae.inf.target_heading = ae.heading;
+    ae.inf.leg_yaw[0] = ae.inf.leg_yaw[1] = ae.heading;
+    ae.inf.leg_target[0] = ae.inf.leg_target[1] = ae.heading;
     ae.inf.max_health = hp;
     ae.inf.anim_state = anim_state::kIdle;
 

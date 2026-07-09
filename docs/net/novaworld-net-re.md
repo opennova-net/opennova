@@ -3748,6 +3748,345 @@ for the local player) — now every motor entity mirrors. **Tracked deferrals:**
 smoothing/collision (`@0x437af0`), the weapon view-bias/bone/velocity-lead/prone-drop (`@0x4dd380`),
 the exact `CameraOffset@+0x6C`, and the FOV source. (The FP arms viewmodel placement is now §5.40.)
 
+**2026-07-08 addendum (controller grill) — the 3P deferrals witnessed.** All camera-system globals
+renamed in the IDB this session (`g_camera_*`; world-wac-ai-re §14.7 lists them). Corrections to the
+2026-06-20 rows: the ±40° pitch clamp variant keys on **`MoveOrder & 0x100`** (+0x12c), not entity
+`Flags`; `Input_HandleActionBinding_0`'s function start is `0x4e0420` (0x4e1330 is an inner site);
+`Camera_SetTrackedEntity` takes **(entity, mode)** — the old 1-arg type hid the mode param.
+
+- **Follow anchor** `[orig: ThirdPersonCamera_Update @ 0x437af0]`, called per 62 Hz tick from
+  `Game_ProcessMainFrame @ 0x5263f0`: on foot `anchor_target = Position + CameraOffset(+0x6c)`;
+  seats 2/5 use the **parent vehicle's** Position with Z + max(1.0, 0.375·boundRadius). Anchor eases
+  ¼-step per tick on foot, 1/16 (xy) + 1/32 (z) seated; a (pos − savedLivePose)<<8 velocity-lead
+  pair smooths 1/32. View bits 0x10/0x40 (`dword_B3B738`) orbit yaw ±0x1000000 (≈1.4°)/tick. Dead
+  tracked entity: chase distance auto-reels >7.0 → −1.0/tick, then 1/16-step to exactly 3.0.
+- **Eye/orientation** `[orig: Camera_ComputeThirdPersonView @ 0x437d10]` mode 1: on foot
+  `eye = anchor + R(entYaw+orbitYaw, entPitch+orbitPitch)·(−dist,0,0)` with defaults dist=3.0,
+  orbit pitch=0x4000000 (22.5°) (reset in `Camera_SetTrackedEntity @ 0x4391d0`); orbit-pitch keys
+  ±0x800000 (actions 407/408). Seats 2/5: yaw = vehYaw + (lookYaw−vehYaw)/4, pitch fixed −0x8000000
+  (11.25° down), **dist = 1.0 + 1.5·boundRadius**; plus ground-slope follow (max ground slope
+  toward the anchor × 0.333 raises the eye), a smoothed (1/32) look-ahead point 6.0u along the
+  vehicle's `orientationMatrix(+0xb4)`, and model types 3/4 (helo/plane byte @ model+406) drop the
+  eye by boundRadius/2. Final rotation = atan2 look-at from eye to anchor(+R·(0.125,0.125,0.125)),
+  roll 0 (+ explosion-shake sway from `dword_B764B0` filtered `Env_WeatherPrng` noise).
+- **Collision** `[orig: Camera_RaycastCollisionOffset @ 0x4378b0]` + inline in the view fn:
+  0.25u-step march along the offset ray (skipped when dist ≥ 8.0), bone-collision force
+  (`Entity_ComputeCollisionForceFromBones @ 0x4afff0`) against a per-entity collider list at
+  entity+0x1bc (ptr)/+0x1c0 (count) filtered to defless/type-5 entities, radius 0.25; terrain
+  clearance via `Terrain_SampleHeightBilinear @ 0x6067b0`; eye clamped ≥ water+0.25 (when entity
+  above water) and ≥ ground+0.25 (unless entity flag 0x800000). Min pull-in 0.25.
+- **View actions** `[orig: Input_HandleActionBinding @ 0x49ad40, cases @ 0x49c073]`: 400 = first
+  person (view bit 0x4000000), 401 = cockpit (0x10000000), 402 = third person (0x8000000 +
+  `g_camera_third_person_selected=1`), 412 = toggle FP→3P→cockpit, 405/406 orbit yaw keys, 407/408
+  orbit pitch. The view bits are the same `dword_B3B738` triple the BMS runtime doc lists.
+- **Mode arbiter** (per frame, `[orig: Render_ProcessMainSceneFrame @ 0x5ca1d2..0x5ca267]`):
+  desired = 0; 3P-selected && parentSlot∈{2,5} → 1; death screen sub-mode 1 → 1, sub-mode 2 →
+  0 **with tracking swapped to the killer** (kill-cam POV, `@ 0x4391f7`); dead or
+  awaiting-spawn-on-foot → 4 (overview lerp over 128 ticks, from/to in `g_camera_lerp_*`) unless
+  option `dword_24D1E34` bit 1; in-session + `dword_24D1E34 & 0x40` → forced 0 (the server
+  "force first person" rule). Session setting +0x5CC==2 → `g_cfg_default_camera_mode=1`
+  (`[orig: apply_session_settings_to_globals @ 0x5521a8]`), applied via
+  `Camera_ResetToLocalPlayer @ 0x4a3d30`. **Open:** on-foot desired mode never leaves 0 in this
+  build's arbiter — how JO:TR-era on-foot third person persisted (server "allow 3P") is
+  unconfirmed here; the on-foot chase math itself is fully present (above). Verify in-game on a
+  LAN host with the 3P option before porting the on-foot toggle semantics.
+- **FP mounted refinements** (mode 0): seat-bone eye (`Entity_GetBoneWorldPosition @ 0x545e60`)
+  when the parent def sets +84 bit 0x20 (and not 0x40); a per-model camera callback (vtable +372)
+  for cockpit-type parents; itemDef type-3 entities add `CameraOffset` to the eye with
+  pitch += 2·pitchBlend and roll = torsoRoll + lean/4 (the FP lean tilt).
+
+**Port (2026-07-08, the controller train):** `local_player_host.gd` now uses the witnessed
+on-foot chase numbers — distance 3.0, orbit pitch 22.5°, quarter-step anchor smoothing, rotation
+re-aimed at the anchor — and the third-person body renders with the §14 aim overlay
+(world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march, orbit keys, the
+0.125u look-at offset, per-stance `CameraOffset`, vehicle mode-1 (no local mounting), FOV.
+
+**§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
+model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms
+had no skeleton — an invisible viewmodel with every failure silent. Fixed to the witnessed
+WPN_AK47AUTO def names (`animadm ak47_1st`, `gfx1 ak47_1st`, `gfx1a armsG`, `gfx1b armsGb`
+unused), load failures now warn, `pos` corrected to the def line (−19.46, 21.19, −161.31)
+(the old (10, 0, −201) matched no def line), and the facing derives from
+`bms_to_godot_basis` on the camera's engine orientation (model space == view space
+`[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]`) instead of a hand-tuned rotation.
+**Open (the §5.40 refinement grill):** the FP rig is its OWN pre-posed skeleton —
+`ak47_RST.bad` is 39 bones (BN01 Pelvis, arms, 26 fingers, gun bones; BN## tags do NOT match
+the body rig) — and the rendered hold pose is still visibly mis-framed. Pinning the rig's
+authored frame + the view-bias chain (and D-RORD-4's near-Z depth trick) is the follow-up;
+the arms/gun at least load, render, and warn on failure now.
+
+**§5.40 FP rig runtime semantics — RESOLVED (2026-07-09 grill).** The mis-framed hold traced to
+three stacked misreadings, each now witnessed and ported:
+
+1. **Bone pivots come from the MODEL, not the `.bad`.** Every composed bone-matrix builder reads
+   per-bone rest positions from the model's bone table (`modelDef+56`, stride 64, pivot float3
+   @+0x24 — the runtime form of the .3di ROBJ chunk); `BadBone.position` is never consumed at
+   runtime. That field is a lossy export — 257/477 retail `.bad`s triplicate X into all three
+   slots (ak47_RST 100%) — and the engine simply doesn't care.
+   `[orig: BoneAnim_BuildWorldMatrices @0x40c400 (FP), build_world_bone_matrices @0x40c770
+   (world, fixed-point pivots @+56/60/64 of the 108-byte entity bone table).]`
+2. **Channels are BIND-RELATIVE deltas, and the bind is a pure translation.** The shared channel
+   evaluator multiplies `Transpose(bind 3x3) × sampled channel matrix` per bone — the stored bind
+   3x3 (the 100-byte `.bad` bone record) is only the zero-reference the channels are measured
+   against, and it is stored TRANSPOSED relative to the channel quaternions (verified on
+   ak47_RST: `mat3(bind) × channel ≈ identity` through reset AND idle; the reload clip carries
+   real 139° mid-clip motion). The composed builders then apply `T(−pivot) · delta` with a
+   translation-only hierarchy — the skinning bind-inverse is a translation, bind world rotations
+   are identity by construction, and the authored mesh renders verbatim at the reset clip no
+   matter how degenerate the stored bind matrices look in isolation.
+   `[orig: BoneAnim_TransformBones @0x410360 (slerp → matB scratch) →
+   AnimChannel_ComputeBoneMatrices @0x410da0 (Transpose(state bind) × matB; state = the .bad
+   bone records at boneData+24) → @0x40c400/@0x40c770 (T(−p), pivot chain via the parent's FULL
+   matrix + channel translation).]`
+3. **The FP rig is authored IN VIEW SPACE and both builders' X-negation is a frame map, not
+   posing.** ak47_1st/armsG live in x = downrange (muzzle at +1.5, the arms' upper ends at −0.9
+   behind the eye plane), y = up (content ~0.6 above the waist origin — cancelling the def `pos`
+   −0.63 drop to land at eye level), z = lateral. The `S·Aᵀ·S` copy loops + x-negated
+   pivots/translations in both builders are the engine's model→render frame conversion — the
+   same job our world pipeline does with the (−x,y,z) mesh import flip.
+   `[orig: the copy loops @0x40c4d8..0x40c57c / @0x40c84c..0x40c8f5; pivot negate @0x40c953.]`
+
+**Port** (PR #213): `libs/anim sample_clip(…, model_bind)` implements (2) natively (bind-relative
+deltas, identity rest, model pivots via `NovaObjectData.get_bone_origins`); the FP meshes build in
+the NATIVE frame (`build_lod_submeshes(…, native_frame)` — no import flip, winding re-reversed for
+Godot's CCW cull) so mesh, skeleton, and Skin (`T(−abs pivot)` from identity rests) share one frame;
+`LocalPlayerHost` maps rig→camera with yaw +90 plus the witnessed per-weapon biases (`pos`/256 in
+view axes; `rot` degrees added about the eye `[orig: Player_UpdateFirstPersonCamera @0x4dd444]`).
+Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
+(`godot/tests/fp_clean_probe.gd`, `vm_mesh_probe.gd`). **Still open:** the dedicated FP render pass
+(weapon `renderfov` @Def+0x148, near-Z 0.05 swap + viewport depth [0, 0.1] — D-RORD-4) which gives
+retail its close-up framing; def `rot` bias sign confirmation against retail footage; the delta
+sense final pin (D-INF-14); body-rig unification onto the same semantics (D-INF-13).
+
+**§5.40 bind-source correction — the T-pose freeze (2026-07-09 grill, second pass).** Point (2)
+above misread WHOSE bind the channels compose against, and the port froze the FP rig at its
+authored T-pose (idle composed to identity → the mesh rendered verbatim: splayed arms, gun parked
+on the outstretched right hand). The witnessed mechanism:
+
+1. **The bind operand is the `channel+44` override, pinned once to the `.adm` slot-0 `.bad`.**
+   `AnimChannel_ComputeBoneMatrices @0x410da0` resolves its bone records as
+   `boneData = *(channel+44) ? *(channel+44) : *(channel+0)` (`@0x410dd8`/`@0x410de3`).
+   `AnimMap_RegisterEntity @0x40bb60` writes `channel+44` exactly once at entity registration —
+   to the slot-0 node's `.bad` (`@0x40bbe3`), i.e. the `.adm`'s reset/skeleton animation
+   (ak47_RST). Clip switches re-init only the playing channel: `AnimMap_PlayAnimBySlot @0x40bda0`
+   and `AnimMap_UpdateEntity @0x40b5f0` write `channel+0..+12` and the slot bookkeeping, never
+   `+44`. The null-override fallback (compose against the playing clip's own records) is real but
+   reaches only standalone channels (the menu profile preview's global channel `@0x560cde`).
+2. **Consequence:** every clip of a rig is measured against the ONE skeleton bind. A clip composed
+   against its *own* bind self-cancels at its start frame by construction — that was the
+   2026-07-08 oracle's blind spot: `mat3(stored bind) × channel ≈ I` at reset AND idle is true
+   *per-file* (each `.bad`'s channels start at its own bind) but says nothing about the runtime
+   pairing. Against the skeleton bind, `anim_wpn_idle` composes to the HOLD (~180° bone rotations
+   folding the T-pose arms onto the weapon), and the reset clip still composes to identity.
+3. **The rig, re-read:** ak47_1st is a 39-bone T-posed character skeleton (BN01 Pelvis at the
+   origin, R/L arm chains along ±X, 26 finger bones, gun bones) with a 39-entry model part table
+   matching bones 1:1 (part[1] rel x 0.1564 ↔ "BN02 R UpperArm"); armsG is the same skeleton's
+   skin with a 38-part table of its own (unused — the placer passes the GUN's origins). The wpn
+   clips pose it into the view hold facing +Z model space; the §5.40 "authored in view space"
+   reading described the T-pose bind, not the runtime hold.
+4. **`.bad` positions, closed:** retail derives `BadBone.position` at export
+   (≈ `inv(parent bind world) ⊗ swizzled model rel` — maintainer's relation; the EXACT form is
+   pinned in the model-table correction below: `F_parent⁻¹ · P · d` with `F` = the Max bone
+   frame, not the bind) and never reads it at runtime; pivots come
+   from the model bone table (`modelDef+56` rel float3 @+0x24, parent @+20, stride 64
+   `[orig: BoneAnim_BuildWorldMatrices @0x40c400, pivot reads @0x40c5f2]`). Pipelines that consume
+   `BadBone.position` directly (the pre-repo oscarmike port) work exactly on the healthy subset
+   and break on the triplicated one; the model-pivot path works on both — matching retail.
+
+**Port correction** (same PR): `sample_clip` gained a `bind_source` parameter (`nullptr` = the
+faithful no-override fallback); `NovaSkeletalAnim` keeps the parsed reset `.bad` alive through
+Pass 2 and passes it for every clip; the `NOVA_VM_DELTA` experiment knob is deleted — composition
+is `q(stored skeleton bind) ⊗ channel`, operand order pinned visually on the ak47 rig (the
+conjugate order collapses the rig; oscarmike's `pose × inverse-bind` shape differs legitimately
+because its Skeleton3D rest carries the bind rotations, ours bakes the whole composition into the
+pose over identity rests). The rig→camera container map corrected from yaw +90 to the yaw-180
+Z-flip (model forward +Z → camera forward −Z, Y up; the +90 was tuned against the misread pose).
+Verified: `anim_sample` ctest (self-bind fallback + skeleton-bind override cases) +
+`fp_clean_probe` captures on 05TR — both camo arms gripping the AK, mag hanging −Y, muzzle
+downrange. **Same train, the FP render pass (D-RORD-4) ported:** the viewmodel now composites
+through a dedicated shared-world SubViewport whose camera draws only the viewmodel layer at the
+weapon `renderfov` — HORIZONTAL degrees converted to vertical through the live aspect, with the
+witnessed near-plane swap; JO's weapon.def never sets the key, so every weapon renders at the
+record default 80.0 `[orig: fov read @0x4dee71 → h→v @0x58d900; near 0.05 swap @0x4dee29 /
+restore 0.2 @0x4df0aa; depth remap @0x58a7b0; default flt_7D1898=80.0 @0x53ff31; parser key
+'renderfov' @0x54482a]`. A four-way container-yaw sweep (`fp_clean_probe` `NOVA_VM_SWEEP=1`)
+confirmed yaw-180 is the only map that places the rig in frame — 0 puts it behind the eye,
+±90 off-frame laterally. The stored ak47_RST binds are all proper rotations (det +1 across the
+39 bones), so the quat composition is exact — no reflection caveat. **Still open:** def `rot`
+bias signs + reload direction vs retail footage (the D-INF-14 tail); left-hand/finger pose
+fidelity vs retail footage (retail's hip idle is a low-ready — compare before judging); per-weapon
+`renderfov`/`pos`/`tpos` def plumbing *(landed — the fifth pass below)*; D-INF-13 (bodies onto
+model_bind — the part↔bone question
+is resolved by the model-table correction below: rows pair by index, no matcher needed).
+
+**§5.40 model-table correction — the rig IS the model's bone table (2026-07-09 grill, third
+pass).** Point (4) above said "pivots come from the model bone table"; the data + a re-read of
+`@0x40c400` show the table's role is total, and the port still keyed the rig off the `.bad` with
+a silent `BadBone.position` fallback that point (4) should have killed:
+
+1. **Corpus proof that `BadBone.position` is dead data.** Sweeping every `*1st.3di + .adm` pair:
+   **12 of 43 JO (JOX) viewmodel rigs ship broken positions** — the recurring signature is 24
+   zeroed bones + ~14 stale values (ak47, M4, M4GL, 357, 47GL, 74GL, AK74, PKM, RPG7, SR25, L115,
+   Mach, Mort, Dgnv, FM92) — and retail renders every one correctly. The REVVY-SKU `ak47_RST.bad`
+   is **byte-identical** to JO's (`max|Δpos| = 0`, same rot/length), so "healthy vs broken" is a
+   per-rig export accident shipped unchanged across SKUs, not a data revision. Several rigs flip
+   health across SKUs from different export batches (M4/PKM/RPG7/SR25 broken in JO, healthy in
+   REVVY; G17 the reverse).
+2. **The witnessed rig source (`@0x40c400`, re-read).** The FK loop is bounded by `modelDef+52`
+   — the MODEL's row count, never the `.bad`'s — and takes BOTH the parent index (row `+0x14`)
+   and the float pivot (row `+0x24`) from the `modelDef+56` table. The `.bad` contributes
+   rotations only, channel *i* → row *i* by index. When the anim has FEWER bones than the model,
+   a padding loop (`@0x40c5a1`) pre-fills the extra rows with bone 0's composed matrix; when it
+   has MORE (AKM_1st: 46 bones, 45 parts), the surplus channels are simply never read. On flag-2
+   (translated) clips the padded rows sum an UNINITIALIZED `bone_translations` stack slot
+   (`@0x40c6e9..0x40c71d`) — ported as zero, ledgered **D-INF-15** (class D, ADR 0003).
+3. **The export relation, closed exactly.** On healthy rigs,
+   `BadBone.position = F_parent⁻¹ · P · d` **exactly** (residuals ≤ 6e-5 on AKM_1st, M4AC_1st,
+   m4_1st — M4AC/m4 share identical solved frames, i.e. one skeleton, swappable attachment
+   models), where `d` = the model-space pivot offset parent→child, `P` = the y↔z SWAP (an
+   improper axis exchange, det −1), and `F_parent` = the parent's **3ds Max bone frame**
+   (X-down-the-bone; root = identity; mirrored L/R). `F` matches NEITHER the stored bind 3×3 nor
+   the frame-0 channel under any constant conjugation (48-perm × 48-perm × transpose sweeps) nor
+   any accumulated relative-channel chain — it is DCC-side authoring data lost at export, which
+   is exactly why the field can rot without anyone noticing: **`BadBone.position` is not
+   reconstructible from shipped data and nothing at runtime wants it.** *(Superseded — the
+   position-derivation correction below: that sweep's frame-matching metric false-negatived;
+   `F` IS the bind under one constant map and the field is reconstructible.)* (`BadBone.length`
+   is the Max bone length — equals the child distance on chain bones only.) The stored bind 3×3
+   ≡ the RST frame-0 channel transposed, confirming bind = reset-pose channel in matrix form.
+4. **Port.** `sample_clip` gained `model_parents` (paired with the origins): in model-table mode
+   the rig's count/hierarchy/pivots come from the model, rows past the `.bad`'s channels take row
+   0's composed rotation, self-parent roots normalize to −1, and the equality-gated fallback to
+   `BadBone.position` is gone from the runtime path (it survives only as the no-model
+   menu-preview fallback, the original's own `@0x410de3` shape). `NovaObjectData.get_bone_parents`
+   exposes the table; `NovaSkeletalAnim`/the placer pass origins+parents (the FP arms still use
+   the GUN's table). Verified: `anim_sample` ctest (model-table count/hierarchy/pivots, bone-0
+   padding, AKM-shape shrink, garbage-`.bad`-pos immunity) + `vm_mesh_probe` on REVVY — ak47
+   (broken pos, 39=39) and AKM_1st (healthy pos, 46 bones/45 parts, previously reachable only
+   through the fallback) both rest exactly on their model pivots, compose reset→identity, and
+   pose the idle hold (barrel → +Z view space).
+5. **For D-INF-13 (bodies):** the world builder `@0x40c770` has the same composed math but its
+   own table shape — count `skeletonData+104`, 108-byte rows at `skeletonData+108`, parent
+   `@+40`, pivots 16.16 fixed `@+56/60/64` consumed in (z,x,y) order with x negated, bind-inverse
+   `T(−parent pivot)`, and NO bone-0 padding loop. Bodies close by porting that table, not by
+   inventing a part↔bone matcher.
+
+**§5.40 position-derivation correction — `BadBone.position` IS reconstructible from shipped
+data (2026-07-09 derivation experiment, fourth pass).** Point (3) above closed the export
+relation through a per-parent solved Max frame `F` and declared `F` unrecoverable. Re-solving
+with a *position-residual* metric instead of frame matching refutes the unrecoverability half:
+
+1. **The relation, restated without the DCC detour:**
+   `BadBone.position[i] = bind_rows[parent(i)] · (−d.x, d.y, d.z)` — the parent bone's stored
+   bind 3×3 (row-major as parsed; ≡ the reset frame-0 channel transposed, numerically identical
+   residuals either way) applied to the child's x-negated model `rel` pivot, the engine's own
+   model→render negation (the same map the composed builders apply — pivot negate `@0x40c953`).
+   Equivalently `F_parent = L·bindᵀ` with the single constant signed perm `L = (−x, z, y)`;
+   folded against point (3)'s `P`, `L·P = diag(−1,1,1)` — the mystery "Max bone frame" was the
+   bind all along under one constant two-sided map.
+2. **Why the third-pass sweep false-negatived.** It matched solved *frames*: (a) the only
+   two-child solvable parent (the gun-assembly bone) is det-ambiguous at k=2 — the solver's
+   arbitrary improper branch sits 90° from the true frame while fitting positions exactly;
+   (b) position prediction is blind to frame error about the bone axis, so frame matching
+   demands agreement the data never pins (every single-child chain). Under the
+   position-residual metric the constant map is unique — the runner-up (L, R, transpose)
+   combo is 37× worse.
+3. **Corpus validation** (94 rigs: 42 JOX + 52 REVX02-archive `*_1st` model+`.adm` pairs;
+   M4AC_1st shares m4's skeleton; 26 scrambled REVX02 `.adm`s resolved via the
+   `<stem>_RST.bad` convention; FM92/uzi lack loose RSTs). Of 2753 norm-consistent bones,
+   2463 reconstruct within 2e-4 and 61 more within 5e-4 (the float32 floor). Every larger
+   deviation clusters by bone-name × export batch — JOX: the shared `BN38 BONE` gun bone on
+   12 rigs (≤7.8e-3); REVX02: the LEFT-hand finger chain on exactly the 8-rig MG/shotgun
+   batch (G36/m60/P90/R870/M240/M249/PKM/RPK, ≤1e-2) plus AKM_1st's L-forearm/L-hand pair
+   (1.4e-3) — pos/bind pairs exported from different rig states (stale), the same per-batch
+   export rot as the broken-12 catalog above, not rule failures. Negative control: on the
+   X-triplicated rigs (JOX ak47/M4) the reconstruction disagrees with 38/38 broken bones and
+   leaks 0 healthy ones. The per-parent orthogonal solve reproduced the third pass first
+   (≤1.02e-4 across the four solvable parents) before any rule work.
+4. **Port.** `bad_positions_from_model` in `pyopennova/bad_build.py` (byte-identical mirror
+   in `blender/opennova/bad_build.py`): index-paired to the model part table, root bones
+   (parent < 0/self) take the x-negated rel unrotated (zero on every shipped rig), surplus
+   `.bad` bones past the part count excluded by construction. Evidence: pytest
+   `tests/test_bad_pos_derivation.py` — synthetic exactness runs unconditionally;
+   `OPENNOVA_JO_ASSETS`-gated legs reconstruct M16/M24/M21/Frag within 5e-4 per bone and
+   prove the ak47 triplication control (see docs/asset-gated-tests.md).
+
+Consequence: DCC import of the broken-12 no longer depends on the shipped field — armatures
+can derive it from the model + bind; anything that consumes `BadBone.position` (the pre-repo
+oscarmike path, our exporters' round-trips) has a corpus-exact reconstruction. The runtime is
+untouched — the model-pivot path above remains the witnessed-faithful rig source.
+
+**§5.40 per-weapon def plumbing + position-source unification (2026-07-09, fifth pass).**
+Two loose ends of the series closed together, validated end to end on both SKUs:
+
+1. **The viewmodel def slice is data-driven.** `libs/def` parses `renderfov` (record
+   default **80.0** seeded per weapon block `[orig: AdmDef_InitEntryDefaults @ 0x53ff31;
+   parser key @ 0x54482a]`; REVX-era defs only ever comment the key out, reaffirming the
+   default-80 witness), `NovaWeaponDatabase` exposes the viewmodel slice —
+   `animadm`/`gfx1`/`gfx1a`/`gfx1b`/`gfx3`, the `pos`/`tpos` rows (xyz raw units +
+   yaw/pitch/roll degrees), `renderfov` — plus a case-insensitive `find_weapon`
+   `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`.
+   `GameWorld.build_local_player_viewmodel` resolves the fixed default weapon
+   (`WPN_AK47AUTO`; `NOVA_VM_WEAPON` overrides the name for rig A/B checks) from the
+   MOUNTED root's weapon.def and `LocalPlayerHost` applies the resolved
+   `pos`/`rot`/`tpos`/`renderfov`; the witnessed JOX AK-47 constants survive only as the
+   no-def fallback. Equipped-weapon resolution (the def per the player's actual weapon)
+   remains the follow-up — the plumbing no longer cares which weapon it is.
+2. **The `(10, 0, −201)` archaeology, closed.** The pre-2026-07-08 hardcode that "matched
+   no def line" is the REVX-era `WPN_AK47AUTO` `pos` row verbatim — and in that SKU the
+   AK-47's viewmodel IS `AKM_1st` (`ANIMADM AKM_1ST`, `GFX1 AKM_1st`, `GFX1A ARMSG`,
+   `pos 10.0 0.0 -201.0 / rot 0 0 1`). Both old constants (the model name and the offset)
+   came from the same REVX def; neither matched JO because JO re-modeled the rig
+   (`ak47_1st`, `pos −19.46 21.19 −161.31 / rot 5 3.75 353`). One weapon name resolving
+   per-SKU data is exactly the original's shape.
+3. **`BadBone.position` has no remaining preview/runtime consumer.** The ONED object
+   preview's Anims workflow now binds the `.adm`'s MODEL bone table — the .adm basename's
+   `.3di`, falling back to the open model; the FP arms therefore ride the gun's table, the
+   same rule as `build_model_from_graphic` — with the bind-relative channel semantics and
+   native-frame meshes; the net-replay model resolver passes model origins like the mission
+   placer's body path. The only reader left anywhere is `NovaSkeletalAnim`'s no-model
+   fallback, the original's own no-override shape `[orig: @ 0x410de3]`.
+4. **Evidence.** Play-in-Editor on both SKUs through the def path: REVX root (00TRa) draws
+   the AKM_1st/ARMSG composed hold, JOX root (05TR) the ak47_1st/armsG one. Preview↔lib
+   numeric parity: the posed AKM idle (the 46-channel/45-row rig) dumps 0/45 joint
+   mismatches against the plain-file evaluator, and the ak47 preview's canonical-camera
+   idle matches `vm_mesh_probe`'s j37 discriminator (barrel → +Z, belly → −Y). A US01 body
+   previews through the same semantics. ctest `def_parse_weapons` pins the renderfov
+   default + override; GUT `anims_inspector`/`local_player_host`/`game_world`/
+   `object_editor` green in isolation. The drive surface is new curated ONED MCP tools
+   (`object_load_anims`/`object_play_clip`/`object_rig_state` rest+posed joint dumps;
+   `mission_play` for Play-in-Editor).
+5. **Still open** (unchanged): the D-INF-14 tail — def `rot` bias signs + reload direction
+   + left-hand/finger pose vs retail footage; the `pos`→`tpos` ADS swap (value plumbed,
+   swap unwired) *(landed — the §5.62 FSM/ADS pass)*; velocity lead + prone drop; D-INF-13 (bodies onto the world table
+   @ 0x40c770); D-INF-15.
+
+**§5.40 frame correction — rig positions COMPUTED from the model; the native+container
+realization was X-mirrored (2026-07-09, sixth pass).** The model-table port's Godot
+realization (native-frame meshes + identity rests + the yaw-180 container) rendered the FP
+viewmodel **left/right mirrored against retail** — stock anchored bottom-LEFT where retail
+(and the pre-train build, retail-confirmed side-by-side this session) anchors it
+bottom-RIGHT. Root cause: the original's model→render frame map is IMPROPER
+(`S = diag(−1,1,1)`) and lives INSIDE its composed builders — the S·Aᵀ·S conjugation
+loops and the x-negated pivots/translations (`[orig: @ 0x40c4d8..0x40c57c; pivot negate
+@ 0x40c953]`) — so no proper container rotation can realize it after the fact; yaw-180
+covers only the D3D→Godot forward flip's share and leaves one mirror unpaid.
+
+The shipped realization now factors the mirror where the data already carries it:
+`NovaSkeletalAnim`'s model-table mode RECONSTRUCTS the skeleton's rest positions from the
+model bone table + the reset `.bad`'s bind rotations via the corpus-exact export relation
+(`opennova::anim::positions_from_model`, the fourth-pass derivation
+`pos[i] = bind_rows[parent]·(−dx, dy, dz)`) and runs the SAME rest-carrying composition +
+import-flipped meshes as every body rig. On rigs whose shipped `BadBone.position` is
+healthy this is bit-for-bit the `.bad`-driven pipeline (the pre-train look); on the
+broken twelve it substitutes exact reconstructed values — the model computes what the
+`.bad` should have said, and nothing trusts the shipped field. `sample_clip`'s
+`model_bind` mode survives as the witnessed-composition reference implementation
+(ctest `anim_sample`, incl. a `positions_from_model` exactness case); the knob left the
+Godot binding (all callers updated). Validated in ONED Play-in-Editor on both SKUs:
+REVX `AKM_1st` and JOX `ak47_1st` (fully broken shipped positions) render the
+master-identical close-up hold, user-confirmed live against retail memory.
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with
@@ -3799,8 +4138,9 @@ so file `x→x`, `y→−z`, `z→y`. (A first cut mistakenly sent `pos[2]` into
 gun floating ~0.7u in front of the camera — the screensnapr.io/s/8e9d030 symptom; corrected here.
 oscarmike `WeaponManager._jo_to_godot_position` independently agrees on `/256` + `pos[2]→up/down`.)
 Hardcoded to WPN_MP5SD until a weapon.def Godot binding resolves the equipped weapon. **Deferrals:**
-per-weapon `pos`/`tpos` from a weapon.def binding; the `pos`→`tpos` ADS swap (entity `Flags & 2`); the
-small per-weapon `Bone.rot`; velocity lead + prone drop; the model-facing basis and the two small
+per-weapon `pos`/`tpos` from a weapon.def binding *(landed — the fifth-pass def plumbing above)*; the
+`pos`→`tpos` ADS swap (entity `Flags & 2`); the small per-weapon `Bone.rot` *(landed, same pass)*;
+velocity lead + prone drop; the model-facing basis and the two small
 lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certain one).
 
 ### 5.41 `Player_*` family — naming validation + decomp cleanup grill (2026-06-26)
@@ -7666,3 +8006,168 @@ other observer decodes. FIXED: `resolve_item_traits` caches the Player-template 
 the structural port of the retail spawn init. Pinned by player_spawn + two_peer_fanout (spawn
 byte 0x28). LIVE-VERIFIED retail-join v16/v18 (2026-07-02): the joiner's field-17 reads the
 golden 0x28 on the wire; diff_0a header health = 150 matches golden.
+
+### 5.62 The FP weapon action FSM — weapon.def ACTION rows → the 12-state pump (2026-07-09)
+
+How the equipped weapon animates and sequences: the weapon.def ACTION rows bind into a
+per-weapon **12-slot action table** and one per-tick pump advances an action QUEUE on the
+equipped slot. Witnessed end to end this session (all anchored, Jointops.exe.kong.i64);
+ported as `libs/world/weapon_fsm.{h,cpp}` + the `NovaSimulation` slot pump + the
+GameWorld/LocalPlayerHost host wiring (PR #213 train). This is the runtime half the §5.16
+fire pipeline and §5.58 reload round-trip plug into.
+
+**The ACTION-row registry** [orig: `ActionDef_ParseScriptLine @ 0x4023c0`]. `action
+"<name>"` find-or-creates a global ActionDef pool entry named `<prefix>_<name>` (the
+prefix argument is the weapon's name; entry name at +122, `ActionDef_InitDefaults
+@ 0x4022b0` memsets the record — so **absent keys default to 0**, only an explicit
+`auto` writes the bake sentinel −1). Keys: `function` → +0 handler via
+`ActionFuncDef_FindByName @ 0x401040` (unknown name → the `ActionSlot_ExecuteAction
+@ 0x4020a0` placeholder + warn), `anim` → +58 (a literal `.adm` clip key, e.g.
+`anim_wpn_fire`), `delaystart` → +36 / `delay`/`delayend` → +40 (ticks; `auto` → −1),
+`soundset` → +8 / `soundsetend` → +12, `particle` → +16, `particleuserpoint` → +186,
+`dupsound` → +44/+48, `action_value` → +52, `ctrlreg` → +28 / `ctrlreginc` → +32,
+`texttoken` → +20. The function registry `g_actionFuncDefTable @ 0x829E58` (count
+@ 0x829F30 = 18, 12-byte rows `{name, fn, min_params}`): `null`, `wpn_std_null`,
+`wpn_std_{idle,emptyidle,fire,recoil,reload,empty,switchto,switchfrom,switchrank,
+scopeup,scopeup_map,scopedown,scopedown_map,switchfrom_map}`, `powerup_pickup`,
+`powerup_respawn`. Data sweep (JOX + REVX weapon.def corpora): only the NINE bare
+suffixes ship as ACTION names (never scopeup/scopedown/overheated), and FUNCTION only
+ever names `wpn_std_<own suffix>` — the `*_map` variants are unused by weapons.
+
+**The bind + bake** [orig: `Anim_InitActions @ 0x541fa0`]. After a weapon block parses,
+each of the 12 slots at `WeaponDef+0x2A4` binds by looking up `<weaponName>_<suffix>`
+against the suffix table `@ 0x830B90` — 12 `{suffix, defaultHandler}` pairs in id order:
+idle `@ 0x542920`, emptyidle `@ 0x542A20`, fire `@ 0x542B10`, recoil `@ 0x542DD0`,
+reload `@ 0x5430B0`, empty `@ 0x543180`, switchto `@ 0x5431D0`, switchfrom `@ 0x5433B0`,
+switchrank `@ 0x543500`, scopeup `@ 0x543290`, scopedown `@ 0x543320`, overheated →
+the idle handler. Missing rows become generated defaults; a null/placeholder handler
+takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
+`AnimMap_FindSlotByName @ 0x40cfa0`) and the −1 delays bake from the clip:
+`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` = ms × 62.5/1000 + 1 —
+the 62.5 t/s constant `flt_7C3B3C`), `delayend = ticks`, minus `delaystart` when
+`ticks > delaystart`; no anim/adm → −1 collapses to 0. Ends by playing global slot 241
+(`wpn_idle`) on the weapon's adm.
+
+**The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
+pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
+counter +0, clip u16 +0x10, rate/muzzle-flash tick +0x14, Def +0x20, owner +0x24,
+currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58 (i16),
+phase +0x5A, kickIntensity +0x5B, charge +0x5C, flags +0x5E (bit0 = the §5.16 net-fire
+pose latch, bit1 = FP), burstCounter +0x62. Phase protocol: a transition writes
+phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1(|0x40)→2 and
+**starts the action's clip on the owner's animadm — local player only**
+[orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the FP-routing shims
+`@ 0x541860`/`@ 0x5419e0` write the same protocol]; `ActionSlot_FinishActivePhase
+@ 0x53f7b0(desc, slot, entity, next)` sets counter=delayEnd, nextAction=arg4, the
+ACTIVE→DONE kick bump (skipped for RELOAD), phase=4. Pump tail per tick: kick decay;
+overheat deny (heat > 0xFFFF converts a queued FIRE to EMPTY `@ 0x541046`); the IDLE
+reseed (`counter==0 && current==next==0 → counter = idle.ds+de` `@ 0x54135d`);
+`counter>0 → --counter, run handler`; at 0: the **rescope-after-reload** block
+(`current==4 && next==0 && local && g_rescopeAfterReload @ 0xB7647C →
+Player_ToggleWeaponScope` `@ 0x54139e`); then `current != next && phase ∈ {4,0}` →
+transition (prev=current unless current ∈ {6,7}, current=next, next=0(idle),
+counter=ds, phase=1, `word_B7C670=−1`, run the new handler; the phase==0x40 variant
+re-marks 0x40 after).
+
+**The handlers** (decisions, all witnessed): **idle** — LOOP; enter replays global 241
++ phase=4; empty mag → reserve>0 && `g_autoReloadEnabled @ 0x24D2118` →
+`WeaponSlot_RequestReload`, else next=EMPTYIDLE + one-shot unscope (local, clip
+capacity 1, `!(Flags & 0x20000000)`). **emptyidle** — LOOP on global 242; reserve>0 →
+RequestReload (no auto-reload gate); else hold. **fire** — phase-1 recheck
+`WeaponSlot_CanFire @ 0x541ba0`: busy weapon-child, underwater ban, and the clip leg
+which on empty **writes nextAction itself** — 3 (RECOIL → the auto-reload arbiter)
+when the class reserve has rounds else 1 (EMPTYIDLE) `@ 0x541c8b` — the abort adopts
+it (`Finish(next=[esi+0x30])` read AFTER the call `@ 0x542b50`); the shot: body-anim
+stamps 62/63, `Entity_CalcWeaponFirePosition @ 0x4dc750`,
+`Entity_FireWeaponAndSendPacket @ 0x42bd80` (§5.16), `consume_weapon_ammo @ 0x540850`,
+3-round burst (Flags&0x20) cycling 0→2→1→0, **next=RECOIL unconditional `@ 0x542c9e`**,
+kick += recoil.ds+de+counter+10 cap 20. **recoil** — THE ARBITER: at clip end
+(counter==0) phase=4, heat stamp (def+876/880 → +0x14, clamp 73728); local decision:
+rounds → next = burst ? FIRE : IDLE; else reserve ≥ clipSize×unitsPerRound &&
+auto-reload → RELOAD `@ 0x54301d`; else EMPTYIDLE + one-shot unscope + the def+0x168
+auto-switch (`Player_SwitchToWeaponByHandle(65×def+0x164)` `@ 0x54307c`); the
+held-trigger refire re-queues input binding 149 `@ 0x542e9d`. **reload** — first tick
+(phase bit0, no 0x80) sends C2S 0x25 (§5.58), phase|=0x80 (transient — the first shim
+tick overwrites 2), stashes the scope (`g_rescopeAfterReload = g_weaponScopeActive`
+unless Flags&0x40000) + unscopes; clip end → Finish(next=IDLE `push 0 @ 0x543169`),
+burst=0. **empty** — dry-click one-shot → EMPTYIDLE. **switchto/switchfrom** — the
+±30/tick switchTimer machines (−900 seed ≈ 0.48 s); switchfrom swaps
+`EquippedSlot = g_pendingWeaponSlot @ 0xB75FD0` and queues SWITCHTO on the new slot
+(`WeaponSlot_TryQueueSwitchTo @ 0x53f140`); instant on Flags&0x80. **switchrank** —
+in-place swap (fire-mode/rank). **scopeup/scopedown** — timed one-shots (zero-length
+on every shipped def; the ADS easing is the camera interp).
+
+**The requests** (the input dispatch, `Input_HandleActionBinding_0 @ 0x4e0420`):
+fire = `WeaponSlot_RequestFire @ 0x53efa0` (ex `sub_53EFA0`; via
+`Player_RequestPrimaryFire @ 0x5414c0`, ex the kong-misnamed
+`Terrain_UpdateColorInterpolation`) — AUTO (Flags&0x100): current {0,3,9,10}→FIRE,
+{1}→EMPTY, {2}→deferred re-queue; SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
+(Flags&0x80000000) hold-release via `g_fireChargeStartTick @ 0xB76800` (≥31 ticks
+scales the charge, binding 150). reload = `WeaponSlot_RequestReload @ 0x53f110`
+(phase sign clear && queued next ∈ {0,1,11}); the key case 0xD3 pre-gates clip ≠
+clipsize && reserve>0. ADS = case 6 (current ∉ {4,7}) → `Player_ToggleWeaponScope
+@ 0x4df0c0`: gates def Flags&3 + `g_fpCameraInterp.activeFlag`; engage sets
+`g_scopeEngaged @ 0x82CE94` (the §5.41 `g_weaponScopeActive` mirror settles later),
+seat-flag C2S 0x1D/169, camera interp (15 steps; 7 for `Field0C & 0x200`) toward
+`AltCamOffset` (the §5.40 tpos), `WeaponSlot_TryQueueScopeUp @ 0x53f050` (ex
+"TryQueueReload" — queues 9, phase-gated {0,4}); disengage mirrors down
+(`..ScopeDown @ 0x53f080`, ex "TryQueueUnload" — queues 10), FOV back to 80.0; the
+zoom FOV (Flags&2): `g_cameraFovDeg @ 0x26C6848 = 80.0 / Player_GetClampedWeaponElevation`
+(16.16) — the weapon.def `scope_max_mag` magnification.
+
+**Port** (PR #213 train). `libs/world/weapon_fsm.{h,cpp}`: the bake
+(`weapon_fsm_bake`, def-agnostic rows per ADR 0020 + a clip-seconds callback), the
+pump + all 12 handlers as structural translations (ctest `weapon_fsm`: bake pins,
+fire→recoil chain, auto cadence, semi edge, burst-3, empty paths, auto-reload +
+§5.58 refill math, scope stash/rescope, request gates, non-local no-decision).
+`libs/def` parses `scope_max_mag` (+ the `whileswimming` flag-table length fixed:
+13, not 14 — the token never matched); `NovaWeaponDatabase` surfaces
+flags/scope_max_mag/actions; `NovaSimulation` pumps the LOCAL player's slot once per
+logic tick after the world advances (all four paths) and exposes typed-record state
+(serial counters); `GameWorld` bakes from the resolved weapon dict + the loaded
+viewmodel's clip lengths; `LocalPlayerHost` feeds LMB/R/RMB through the world-tick
+input path, plays FSM clips on BOTH viewmodel parts (restart via
+`set_animation_time(0)`), and realizes ADS: the eased pos→tpos view bias
+(15-tick fraction), the main-camera FOV 80h → 80/mag h→v through the live aspect,
+reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_probe
+`NOVA_VM_FSM=1`, JOX 05TR): 6-shot auto burst (clip 30→24, ~9-tick cadence from the
+recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
+mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
+
+**Divergences** (ledger D-WPN-1..9): the FUNCTION registry unported (std-only in all
+shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
+busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
+(`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
+weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
+ammo seed clipsize/startrounds (D-WPN-7); FSM↔net uplink unwired (C2S 0x06/0x25 from
+events, D-WPN-8); ADS residuals — SIGHTS overlay draw, unscope-on-move site, zoom-level
+keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9).
+
+**IDB (this session).** Renamed: `WeaponSlot_RequestFire @ 0x53efa0`,
+`Player_RequestPrimaryFire @ 0x5414c0`, `WeaponSlot_TryQueueScopeUp @ 0x53f050`,
+`WeaponSlot_TryQueueScopeDown @ 0x53f080`, `g_pendingWeaponSlot @ 0xB75FD0`,
+`g_rescopeAfterReload @ 0xB7647C`, `g_fireChargeStartTick @ 0xB76800`,
+`g_autoReloadEnabled @ 0x24D2118`, `g_actionFuncDefTable @ 0x829E58` (+count).
+Comments at the pump, bake, and request sites; idb_save run.
+
+**The weapon-switch chain (same session, closes the SWITCHFROM/pending follow-up).**
+`Player_SwitchToWeaponByHandle @ 0x4e0170` (handle = category×65 + rank): stance gate
+(parentSlot ∉ {2,3,5}), clears `g_fireChargeStartTick`, then scans the category's 65
+slots in the 100-B `weaponSlotArrayBase @ 0xB75FD4` pool from the def's own rank —
+eligibility = def+932 type 1/2 or `calculate_kill_score @ 0x5407e0` (the §5.41
+eligibility reuse) and `!(def+12 & 1)`; a full wrap plays the deny sound. The pick
+lands in `Player_MountWeaponSlot @ 0x4dfa40`: **writes `g_pendingWeaponSlot = slot`
+`@ 0x4dfb16`**, then queues the FSM — same category → `WeaponSlot_TryQueueSwitchRank
+@ 0x53f1c0` (ex `sub_53F1C0`: phase {0,4,0x40} → counter=0, next=8), cross category →
+`WeaponSlot_ForceQueueSwitchFrom @ 0x53f170` (ex `sub_53F170`: phase {0,4,0x40} →
+HARD RESET counter=0/burst=0/switchTimer=0/current=0/prev=0, next=7; SwitchFrom's
+timer expiry then swaps `EquippedSlot` from the pending global and queues SWITCHTO on
+the NEW slot). Mount-scoped weapons (`Flags & 0x20000000`) auto-engage the scope
+(`g_weaponScopeActive = 1` + `dword_B76808` zoom stash); a cross-category switch
+resets the scope + FOV 80. View biases zeroed, `Player_UpdateFirstPersonCamera` runs
+immediately, seat-flag 0x40000 → C2S 0x1D/169, scoped-capable slots re-arm the camera
+interp. IDB: both queue helpers renamed + commented; saved.
+
+**Open follow-ups:** who queues OVERHEATED(11);
+the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
+`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq.

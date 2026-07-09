@@ -28,6 +28,17 @@ signal skeleton_debug_toggled(enabled: bool)
 ## contract as skeleton_debug_toggled: the host hides/shows the world's foliage.
 signal foliage_hidden_toggled(hidden: bool)
 
+## Fired when the View tab's "Always draw FP arms" checkbox is toggled. Debug
+## experiment: the host keeps the first-person arms viewmodel visible in every
+## camera mode instead of first person only.
+signal viewmodel_forced_toggled(enabled: bool)
+
+## Fired when the View tab's "Show body in first person" checkbox is toggled. Debug
+## experiment (the "see our feet" probe): the host moves the player's third-person
+## body onto the world layer even in first person, so looking down shows your own
+## torso/legs/feet posed by the aim overlay (world-wac-ai-re.md §14).
+signal body_in_first_person_toggled(enabled: bool)
+
 const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 
@@ -69,6 +80,8 @@ var _perf_pane: DebugPerfPane
 # View pane: render-debug toggles the host acts on (skeleton bone overlay, foliage, ...).
 var _skeleton_check: CheckBox
 var _foliage_check: CheckBox
+var _viewmodel_check: CheckBox
+var _body_fp_check: CheckBox
 
 
 func _init() -> void:
@@ -199,6 +212,22 @@ func _build_view_tab() -> void:
 	_foliage_check.button_pressed = false
 	_foliage_check.toggled.connect(_on_foliage_toggled)
 	tab.add_child(_foliage_check)
+
+	_viewmodel_check = CheckBox.new()
+	_viewmodel_check.name = "ViewForceFpArms"
+	_viewmodel_check.text = "Always draw FP arms"
+	_viewmodel_check.tooltip_text = "Keep the first-person arms + weapon drawn in every camera mode (debug experiment)."
+	_viewmodel_check.button_pressed = false
+	_viewmodel_check.toggled.connect(_on_viewmodel_forced_toggled)
+	tab.add_child(_viewmodel_check)
+
+	_body_fp_check = CheckBox.new()
+	_body_fp_check.name = "ViewBodyInFirstPerson"
+	_body_fp_check.text = "Show body in first person"
+	_body_fp_check.tooltip_text = "Draw your own body in first person — look down to see your legs and feet (debug experiment; expect the head/shoulders to clip the camera)."
+	_body_fp_check.button_pressed = false
+	_body_fp_check.toggled.connect(_on_body_fp_toggled)
+	tab.add_child(_body_fp_check)
 
 
 func _build_entities_tab() -> void:
@@ -601,6 +630,14 @@ func _on_skeleton_toggled(pressed: bool) -> void:
 
 func _on_foliage_toggled(pressed: bool) -> void:
 	foliage_hidden_toggled.emit(pressed)
+
+
+func _on_viewmodel_forced_toggled(pressed: bool) -> void:
+	viewmodel_forced_toggled.emit(pressed)
+
+
+func _on_body_fp_toggled(pressed: bool) -> void:
+	body_in_first_person_toggled.emit(pressed)
 
 
 func _on_var_submitted(text: String, index: int) -> void:

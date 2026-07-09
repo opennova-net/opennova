@@ -24,6 +24,12 @@ behave exactly as in the game runtime; Stop rewinds the world and restores the
 authored scene (one runtime, see
 [`docs/runtime-architecture.md`](../../../docs/runtime-architecture.md)).
 
+While playing, the game's own controls apply: WASD moves, the mouse looks,
+F4 switches first/third person, C and Z toggle crouch and prone, and F3 opens
+the same Mission debug panel the game runtime has (the mouse is freed while it
+is open so its controls are clickable; it is also available from the Simulate
+panel while editing). Esc stops and returns to editing.
+
 ## Formats
 
 | Format | Backing library | Notes |

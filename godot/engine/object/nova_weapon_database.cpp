@@ -2,6 +2,8 @@
 
 #include "resource_index/nova_resource_root.h"
 
+#include <godot_cpp/variant/packed_float32_array.hpp>
+
 #include <def/def.h>
 
 using namespace godot;
@@ -18,6 +20,7 @@ void NovaWeaponDatabase::_bind_methods() {
 			&NovaWeaponDatabase::get_slot_weapons);
 	ClassDB::bind_method(D_METHOD("get_weapons"), &NovaWeaponDatabase::get_weapons);
 	ClassDB::bind_method(D_METHOD("get_weapon", "index"), &NovaWeaponDatabase::get_weapon);
+	ClassDB::bind_method(D_METHOD("find_weapon", "name"), &NovaWeaponDatabase::find_weapon);
 
 	BIND_CONSTANT(SLOT_ACCESSORY);
 	BIND_CONSTANT(SLOT_PRIMARY);
@@ -36,22 +39,7 @@ Error NovaWeaponDatabase::load(const String &path) {
 		return ERR_CANT_OPEN;
 	}
 	for (size_t i = 0; i < file.count; ++i) {
-		const DefWeaponDef &e = file.entries[i];
-		Weapon w;
-		w.name = String(e.weapon_name);
-		w.display_textid = String(e.loadout_menu_textid);
-		w.round_type = String(e.round_type);
-		w.icon = String(e.loadout_menu_icon);
-		w.selectable = e.loadout_selectable;
-		w.slot = e.weapon_class_slot;
-		w.team_mask = e.teamfilter_mask;
-		w.class_mask = e.charfilter_mask;
-		w.weight = e.weaponweight;
-		w.clip_weight = e.clipweight;
-		w.clipsize = e.clipsize;
-		w.startrounds = e.startrounds;
-		w.maxclips = e.maxclips;
-		weapons.push_back(w);
+		append_entry(file.entries[i]);
 	}
 	def_free_weapons(&file);
 	return OK;
@@ -82,25 +70,50 @@ Error NovaWeaponDatabase::load_from_resource_root(const Ref<NovaResourceRoot> &p
 		return ERR_CANT_OPEN;
 	}
 	for (size_t i = 0; i < file.count; ++i) {
-		const DefWeaponDef &e = file.entries[i];
-		Weapon w;
-		w.name = String(e.weapon_name);
-		w.display_textid = String(e.loadout_menu_textid);
-		w.round_type = String(e.round_type);
-		w.icon = String(e.loadout_menu_icon);
-		w.selectable = e.loadout_selectable;
-		w.slot = e.weapon_class_slot;
-		w.team_mask = e.teamfilter_mask;
-		w.class_mask = e.charfilter_mask;
-		w.weight = e.weaponweight;
-		w.clip_weight = e.clipweight;
-		w.clipsize = e.clipsize;
-		w.startrounds = e.startrounds;
-		w.maxclips = e.maxclips;
-		weapons.push_back(w);
+		append_entry(file.entries[i]);
 	}
 	def_free_weapons(&file);
 	return OK;
+}
+
+void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
+	Weapon w;
+	w.name = String(e.weapon_name);
+	w.display_textid = String(e.loadout_menu_textid);
+	w.round_type = String(e.round_type);
+	w.icon = String(e.loadout_menu_icon);
+	w.selectable = e.loadout_selectable;
+	w.slot = e.weapon_class_slot;
+	w.team_mask = e.teamfilter_mask;
+	w.class_mask = e.charfilter_mask;
+	w.weight = e.weaponweight;
+	w.clip_weight = e.clipweight;
+	w.clipsize = e.clipsize;
+	w.startrounds = e.startrounds;
+	w.maxclips = e.maxclips;
+	w.animadm = String(e.animadm);
+	w.gfx1 = String(e.gfx1);
+	w.gfx1a = String(e.gfx1a);
+	w.gfx1b = String(e.gfx1b);
+	w.gfx3 = String(e.gfx3);
+	for (int k = 0; k < 6; ++k) {
+		w.pos[k] = e.pos[k];
+		w.tpos[k] = e.tpos[k];
+	}
+	w.renderfov = e.renderfov;
+	w.flags = e.flags;
+	w.scope_max_mag = e.scope_max_mag;
+	for (size_t a = 0; a < e.actions_count; ++a) {
+		const DefWeaponAction &row = e.actions[a];
+		Dictionary act;
+		act["name"] = String(row.name);
+		act["anim"] = String(row.anim);
+		act["function"] = String(row.function);
+		act["delaystart"] = row.delaystart;
+		act["delayend"] = row.delayend;
+		w.actions.push_back(act);
+	}
+	weapons.push_back(w);
 }
 
 bool NovaWeaponDatabase::is_loaded() const {
@@ -139,7 +152,33 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	d["clipsize"] = w.clipsize;
 	d["startrounds"] = w.startrounds;
 	d["maxclips"] = w.maxclips;
+	d["animadm"] = w.animadm;
+	d["gfx1"] = w.gfx1;
+	d["gfx1a"] = w.gfx1a;
+	d["gfx1b"] = w.gfx1b;
+	d["gfx3"] = w.gfx3;
+	PackedFloat32Array pos;
+	PackedFloat32Array tpos;
+	for (int k = 0; k < 6; ++k) {
+		pos.push_back(w.pos[k]);
+		tpos.push_back(w.tpos[k]);
+	}
+	d["pos"] = pos;   // xyz raw file units (/256 = world), then yaw/pitch/roll degrees
+	d["tpos"] = tpos; // the ADS variant [orig: WeaponDef.AltCamOffset @ 0x10C]
+	d["renderfov"] = w.renderfov;
+	d["flags"] = w.flags;
+	d["scope_max_mag"] = w.scope_max_mag;
+	d["actions"] = w.actions.duplicate(true);
 	return d;
+}
+
+int NovaWeaponDatabase::find_weapon(const String &p_name) const {
+	for (int i = 0; i < static_cast<int>(weapons.size()); ++i) {
+		if (weapons[i].name.nocasecmp_to(p_name) == 0) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 Array NovaWeaponDatabase::get_slot_weapons(int slot, int class_mask, int team_mask) const {

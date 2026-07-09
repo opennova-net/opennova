@@ -48,6 +48,12 @@ var _is_playing := true
 var _model_bounds := AABB()
 var _environment_node: Node
 
+# NATIVE-frame build: meshes emitted without the (-x,y,z) import flip (winding re-reversed),
+# for the first-person viewmodel rigs whose skeletal runtime (model_bind) poses in the native
+# model frame; the host maps the whole rig to the camera in one container transform. Set by
+# the placer BEFORE set_object_data. World models keep the default flipped frame.
+var native_frame := false
+
 # Main-body skeletal animation (.bad/.adm via NovaSkeletalAnim). Distinct from PANM
 # (vehicle part channels above): this drives a Skeleton3D built from the .bad skeleton,
 # with the skinned meshes bound through a rest-derived Skin. _skeletal is null for static
@@ -435,6 +441,25 @@ func _advance_part_anims(delta: float) -> bool:
 	return changed
 
 
+# --- third-person aim overlay (the torso bend) ----------------------------------
+# One node-frame rotation Basis per anim overlay class; empty disables. The host that
+# owns the aim state (LocalPlayerHost) sets this each frame from
+# NovaSimulation.get_local_player_aim_overlay(); the pose write then routes through
+# NovaSkeletalAnim.eval_pose_overlay so each skeleton segment gets its witnessed
+# aim/body blend. [orig: Entity_BuildBoneTransformMatrices @0x4b1290;
+# docs/world/world-wac-ai-re.md §14 (D-INF-11)]
+var _aim_overlay_deltas: Array = []
+var _aim_overlay_classes := PackedInt32Array()
+
+
+func set_aim_overlay(deltas: Array) -> void:
+	_aim_overlay_deltas = deltas
+	if not deltas.is_empty() and _aim_overlay_classes.is_empty() and _skeletal != null \
+			and _skeletal.has_method("get_overlay_classes"):
+		_aim_overlay_classes = _skeletal.get_overlay_classes()
+	_body_pose_dirty = true
+
+
 # Pose the Skeleton3D from the active main-body clip. Advances the playhead while playing,
 # evaluates the parent-local pose per bone (NovaSkeletalAnim, Godot space) and writes it as
 # the bone pose. With no active clip the bones stay at their reset (== bind) pose.
@@ -446,7 +471,13 @@ func _advance_body_anim(delta: float) -> void:
 		_body_pose_dirty = true
 	if not _body_pose_dirty:
 		return
-	var pose: Array = _skeletal.eval_pose(_anim_key, _anim_time)
+	var pose: Array
+	if not _aim_overlay_deltas.is_empty() and not _aim_overlay_classes.is_empty() \
+			and _skeletal.has_method("eval_pose_overlay"):
+		pose = _skeletal.eval_pose_overlay(
+			_anim_key, _anim_time, _aim_overlay_classes, _aim_overlay_deltas)
+	else:
+		pose = _skeletal.eval_pose(_anim_key, _anim_time)
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):
 		var t: Transform3D = pose[i]
@@ -489,7 +520,7 @@ func rebuild() -> void:
 	if skeletal_mode:
 		_build_skeleton()
 	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count) if object_data.has_method("build_lod_submeshes") else []
+	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame) if object_data.has_method("build_lod_submeshes") else []
 	if submeshes.is_empty():
 		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
 	for entry in submeshes:

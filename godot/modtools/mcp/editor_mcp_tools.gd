@@ -95,6 +95,11 @@ func register_all(registry: McpToolRegistry) -> void:
 				"text": { "type": "string" },
 				"duration_s": { "type": "number", "default": 4.0 },
 			}, ["text"]), Callable(self, "_tool_show_status"))
+	registry.register(_def("set_fullscreen",
+			"Put the editor window into (or out of) fullscreen — the core-engine window mode (NovaWindow), the same F11 toggles. Do this before screenshots so the 3D viewport fills the display. Omit `enabled` to toggle. Returns the resulting fullscreen state.",
+			{
+				"enabled": { "type": "boolean", "description": "true = fullscreen, false = windowed; omit to toggle." },
+			}), Callable(self, "_tool_set_fullscreen"))
 	registry.register(_def("set_resource_root",
 			"Mount a different game resource root (loose asset dir or install dir with PFFs) — the same seam as the editor's folder picker. Persists like the UI action; note the previous dir from get_editor_state first if you plan to restore it.",
 			{
@@ -424,6 +429,20 @@ func _tool_show_status(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("The editor shell is not bound yet.")
 	ctx.shell.show_status_message(String(args.get("text", "")), float(args.get("duration_s", 4.0)))
 	return { "ok": true }
+
+
+func _tool_set_fullscreen(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var tree := ctx.main_tree()
+	var window: Window = tree.root if tree != null else null
+	if window == null:
+		return McpToolResult.error("No window is available.")
+	var fullscreen: bool
+	if args.has("enabled"):
+		NovaWindow.set_fullscreen(window, bool(args["enabled"]))
+		fullscreen = NovaWindow.is_fullscreen(window)
+	else:
+		fullscreen = NovaWindow.toggle_fullscreen(window)
+	return { "ok": true, "fullscreen": fullscreen }
 
 
 func _tool_describe_api(args: Dictionary, ctx: McpToolContext) -> Variant:

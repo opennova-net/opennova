@@ -64,6 +64,8 @@ var _loaded_mission: NovaMissionData
 var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
+var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
+var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
 var _mission_audio: NovaMissionAudio
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
@@ -489,6 +491,8 @@ func unload() -> void:
 	_runtime = null
 	_mission_audio = null
 	_placer = null
+	_weapon_db = null  # re-resolves against the next load's mounted root
+	_local_weapon_dict = {}
 	_mission_stats = {}
 
 
@@ -680,6 +684,9 @@ func local_player_anim_key() -> String:
 func local_player_anim_phase_ticks() -> int:
 	return _runtime.local_player_anim_phase_ticks() if _runtime != null else 0
 
+func local_player_aim_overlay() -> PlayerAimOverlay:
+	return _runtime.local_player_aim_overlay() if _runtime != null else null
+
 func local_player_health() -> int:
 	return _runtime.local_player_health() if _runtime != null else 0
 
@@ -710,32 +717,137 @@ func build_local_player_avatar() -> Node3D:
 ## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
 ## the character arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel @0x4ded60 draws
-## the weapon FP model + arms with shared bone matrices]. FIRST CUT: a fixed default (ak47auto) read
-## from weapon.def — gfx1 AKM_1st (gun) + gfx1a armsG (arms) on animadm AKM_1st — built in rest
-## (holding) pose. Returned as a container the caller attaches to the FP camera. Per-weapon
-## resolution (a weapon.def binding; libs/def already parses DefWeaponDef.gfx1/gfx1a/animadm) and the
-## camera bias / sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380] are
-## follow-ups. Null when the placer or both models fail to resolve.
+## the weapon FP model + arms with shared bone matrices]. The models come from the mounted root's
+## weapon.def — gfx1 (gun), gfx1a (arms; gfx1b alternate skin unused until team/skin selection),
+## animadm (the shared animation set) [orig: WeaponDef_ParseProperty @0x54d730 rows] — for the
+## DEFAULT_VIEWMODEL_WEAPON entry until the player's equipped weapon resolves it per-weapon
+## (NOVA_VM_WEAPON overrides the name for rig A/B checks). The witnessed JOX values stay as the
+## no-def fallback. Camera sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380]
+## are follow-ups. Null when the placer or both models fail to resolve.
+const DEFAULT_VIEWMODEL_WEAPON := "WPN_AK47AUTO"
+
 func build_local_player_viewmodel() -> Node3D:
 	if _placer == null:
 		return null
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
 	add_child(container)
-	# ak47auto weapon.def (REVX02/WEAPON.DEF "WPN_AK47AUTO"): animadm AKM_1st, gfx1 AKM_1st (gun),
-	# gfx1a armsG (arms). Hardcoded as the chosen fixed default until a weapon.def reader resolves
-	# the player's equipped weapon. The gun shares the arms' skeleton plus gun-part bones, so both
-	# pose from the one animadm. (Swapped from mp5sd to confirm the pos/tpos placement generalizes.)
 	# anim_wpn_idle = the FP holding pose; without it the arms sit in their bind/T-pose.
 	# _env: the viewmodel lights/fogs with the live TOD like every entity
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
-	var arms = _placer.build_model_from_graphic("armsG", "AKM_1st", container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic("AKM_1st", "AKM_1st", container, "anim_wpn_idle", _env)
+	var def := local_player_viewmodel_def()
+	var gun_name := def.gfx1 if def != null and not def.gfx1.is_empty() else "ak47_1st"
+	var arms_name := def.gfx1a if def != null and not def.gfx1a.is_empty() else "armsG"
+	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
+	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env)
+	if arms == null:
+		push_warning("GameWorld: FP arms model '%s' failed to load from the resource root" % arms_name)
+	if gun == null:
+		push_warning("GameWorld: FP gun model '%s' failed to load from the resource root" % gun_name)
 	if arms == null and gun == null:
 		container.queue_free()
 		return null
+	_setup_local_player_weapon(gun if gun != null else arms)
 	return container
+
+
+## Install the equipped weapon's action FSM on the sim: the weapon dict's ACTION rows +
+## flags/clipsize/startrounds plus the loaded .adm clip lengths (seconds) the bake turns
+## into 62.5 Hz delays [orig: Anim_InitActions @0x541fa0 binds the rows and bakes 'auto'
+## delays via Anim_GetDurationTicks @0x53ee10; net-re §5.62]. The arms ride the same
+## animadm, so one part's clip table covers both.
+func _setup_local_player_weapon(model) -> void:
+	var sim := get_sim()
+	if sim == null:
+		return
+	if _local_weapon_dict.is_empty() or model == null or not model.has_method("get_skeletal_anim"):
+		sim.clear_local_player_weapon()
+		return
+	var skeletal = model.get_skeletal_anim()
+	var clip_seconds := {}
+	if skeletal != null:
+		var keys := ["anim_wpn_idle", "anim_wpn_empty_idle"]
+		for a in _local_weapon_dict.get("actions", []):
+			var k := String(a.get("anim", ""))
+			if not k.is_empty() and not keys.has(k):
+				keys.append(k)
+		for k in keys:
+			if skeletal.has_clip(k):
+				clip_seconds[k] = float(skeletal.get_clip_length(k))
+	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
+
+
+## Per-frame weapon trigger state from the host: fire held + edge and the RAW reload
+## edge — the dispatch gates (full-magazine/empty-reserve refusal) run in the sim
+## [orig: the binding-149/reload input dispatch, Input_HandleActionBinding_0 @0x4e0420].
+func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_pressed: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed)
+
+
+## The ADS toggle request; the sim applies the dispatcher gates and owns the engaged
+## state [orig: input case 6 @0x4e0420; Player_ToggleWeaponScope @0x4df0c0].
+func request_local_player_scope_toggle() -> bool:
+	var sim := get_sim()
+	return sim != null and bool(sim.request_local_player_scope_toggle())
+
+
+## The host camera mode, driving the sim-side fov suppression + anchor chase
+## [orig: g_camera_mode @0xA890C8].
+func set_local_player_camera_third_person(third_person: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_camera_third_person(third_person)
+
+
+## The 62.5 Hz view state (ADS ease, fov policy, 3P anchor), decoded once at this
+## edge (ADR 0017); null without a sim.
+func local_player_view() -> PlayerLocalView:
+	var sim := get_sim()
+	if sim == null:
+		return null
+	return PlayerLocalView.from_view_dict(sim.get_local_player_view())
+
+
+## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
+## weapon FSM is installed.
+func local_player_weapon_view() -> PlayerWeaponView:
+	var sim := get_sim()
+	if sim == null:
+		return null
+	return PlayerWeaponView.from_state_dict(sim.get_local_player_weapon_state())
+
+
+## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
+## witnessed view-bias fields (pos/tpos raw units + rot degrees, renderfov horizontal
+## degrees) LocalPlayerHost consumes — decoded from NovaWeaponDatabase's transport dict
+## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
+## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
+## DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands; NOVA_VM_WEAPON
+## overrides the name (debug: rig A/B against another SKU's def).
+func local_player_viewmodel_def() -> PlayerViewmodelDef:
+	if _weapon_db == null:
+		if _resource_root == null:
+			return null
+		_weapon_db = NovaWeaponDatabase.new()
+		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
+			push_warning("GameWorld: weapon.def unavailable (%s) — FP viewmodel keeps built-in defaults"
+					% _weapon_db.get_last_error())
+			return null
+	if not _weapon_db.is_loaded():
+		return null
+	var weapon_name := OS.get_environment("NOVA_VM_WEAPON")
+	if weapon_name.is_empty():
+		weapon_name = DEFAULT_VIEWMODEL_WEAPON
+	var index: int = _weapon_db.find_weapon(weapon_name)
+	if index < 0:
+		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
+		return null
+	_local_weapon_dict = _weapon_db.get_weapon(index)
+	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
 # --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------

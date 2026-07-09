@@ -23,6 +23,8 @@
 #include <world/ai.h>
 #include <world/player_input.h>
 #include <world/player_spawn.h>
+#include <world/player_view.h>
+#include <world/weapon_fsm.h>
 #include <world/world.h>
 
 #include "mission/nova_mission_data.h"
@@ -171,6 +173,38 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+
+	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
+	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
+	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
+	// this port pumps the LOCAL player's slot only — D-WPN-6]. The host feeds the baked def
+	// via set_local_player_weapon and per-frame trigger state via
+	// set_local_player_weapon_input; events surface as monotonic serials in
+	// get_local_player_weapon_state (several logic ticks can run per render frame).
+	opennova::world::WeaponFsmDef weapon_def_{};
+	opennova::world::WeaponSlotState weapon_slot_{};
+	bool weapon_active_ = false;
+	bool weapon_fire_held_ = false;
+	bool weapon_fire_pressed_ = false;
+	bool weapon_reload_pressed_ = false;
+	uint64_t weapon_play_serial_ = 0;
+	String weapon_anim_key_;
+	uint64_t weapon_fired_serial_ = 0;
+	uint64_t weapon_dry_serial_ = 0;
+	uint64_t weapon_reload_serial_ = 0;
+	uint64_t weapon_unscope_serial_ = 0;
+	uint64_t weapon_rescope_serial_ = 0;
+	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
+	void tick_local_player_weapon();
+
+	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
+	// Ticked at the world cadence right after the weapon pump, so camera lag and the
+	// ADS swing are render-rate independent [orig: the 62 Hz frame loop runs
+	// CNetPlayerInterp @ 0x4df36e and ThirdPersonCamera_Update @ 0x437af0 per tick].
+	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
+	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
+	opennova::world::PlayerViewState player_view_{};
+	void tick_local_player_view();
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
 	// One in-match runtime funnels every path: the host/SP/editor-preview is the §5.0 mode-3
@@ -345,6 +379,49 @@ public:
 	// host plays it on the avatar via NovaObjectModel.play_body_clip for full stance fidelity.
 	String get_local_player_anim_key() const;
 	int get_local_player_anim_phase_ticks() const;
+	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
+	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
+	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;
+	//   angles: PackedVector3Array[9] mission-euler degrees per anim::OverlayClass.
+	// The blends run in exact BAM int math [orig: Entity_BuildBoneTransformMatrices
+	// @0x4b1290; docs/world/world-wac-ai-re.md §14]; the host converts each triple with
+	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
+	// feeds NovaObjectModel.set_aim_overlay. Empty/invalid when no player.
+	Dictionary get_local_player_aim_overlay() const;
+
+	// --- the local player's equipped-weapon FSM (net-re §5.62) -------------
+	// Install the equipped weapon: p_def is the NovaWeaponDatabase weapon dict (the
+	// {actions, flags, clipsize, startrounds} slice is consumed) and p_clip_seconds
+	// maps each .adm clip key to its length in SECONDS — the Anim_InitActions bake
+	// source [orig: @ 0x541fa0; 'auto' delays come from Anim_GetDurationTicks
+	// @ 0x53ee10]. Resets the slot to a fresh idle with a full magazine.
+	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
+	void clear_local_player_weapon();
+	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
+	// gate runs sim-side) [orig: the binding-149/reload input dispatch,
+	// Input_HandleActionBinding_0 @ 0x4e0420].
+	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
+	                                   bool p_reload_pressed);
+	// The ADS toggle request: gated by the dispatcher rules (no toggle during
+	// RELOAD/SWITCHFROM, def Flags & 3 required), flips the sim-owned engaged bit
+	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
+	// [orig: input case 6 @ 0x4e0420; Player_ToggleWeaponScope @ 0x4df0c0;
+	//  WeaponSlot_TryQueueScopeUp @ 0x53f050 / ..ScopeDown @ 0x53f080]
+	bool request_local_player_scope_toggle();
+	// The host's camera mode, driving the fov suppression + anchor chase
+	// [orig: g_camera_mode @ 0xA890C8].
+	void set_local_player_camera_third_person(bool p_third_person);
+	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
+	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
+	Dictionary get_local_player_view() const;
+	// Horizontal -> vertical projection fov (degrees) through the aspect — the
+	// ONE conversion both cameras use [orig: @ 0x58d900].
+	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
+	// The FSM view for the host: {active, current, anim_key, play_serial,
+	// fired_serial, dry_serial, reload_serial, unscope_serial, rescope_serial,
+	// clip, reserve, kick}. Serials are monotonic so no event is lost when several
+	// logic ticks run per render frame.
+	Dictionary get_local_player_weapon_state() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if

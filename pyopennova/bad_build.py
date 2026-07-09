@@ -143,6 +143,42 @@ def dedupe_quat_sign(prev: QuatXyzw, cur: QuatXyzw) -> QuatXyzw:
     return (float(cur[0]), float(cur[1]), float(cur[2]), float(cur[3]))
 
 
+def bad_positions_from_model(
+    bone_rotations: Sequence[Mat3],
+    bone_parents: Sequence[int],
+    model_rel_positions: Sequence[Sequence[float]],
+) -> "list[Vec3]":
+    """Reconstruct ``BadBone.position`` from the model part table.
+
+    Retail derives the field at export and never reads it back (the runtime rig
+    pivots come from the model bone table), so 12/43 JO viewmodel rigs ship it
+    zeroed/stale.  The witnessed relation, corpus-exact on healthy rigs
+    (docs/net/novaworld-net-re.md section 5.40):
+
+        position[i] = bind_rows[parent(i)] @ (-rel.x, rel.y, rel.z)
+
+    where ``bind_rows`` is the parent's stored bind 3x3 (``BadBone.rotation``,
+    row-major as parsed — identical to the reset clip's frame-0 channel
+    transposed) and ``rel`` is the model part's parent-relative pivot in the
+    engine frame (``ThreediIRPart.rel_position``); the x-negation is the
+    engine's own model->render frame map.  Root bones (parent < 0 or
+    self-parented) take the x-negated rel unrotated (zero on every shipped rig).
+
+    Inputs are index-paired (bone i <-> part i, the runtime pairing); pass
+    arrays already trimmed to the paired range.  ``bone_rotations`` may be
+    longer than ``model_rel_positions`` (e.g. AKM_1st's 46 bones / 45 parts).
+    """
+    out: list[Vec3] = []
+    for i, rel in enumerate(model_rel_positions):
+        flipped = (-float(rel[0]), float(rel[1]), float(rel[2]))
+        parent = int(bone_parents[i])
+        if parent < 0 or parent == i or parent >= len(bone_rotations):
+            out.append(flipped)
+            continue
+        out.append(mat_vec_mul(bone_rotations[parent], flipped))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Neutral carriers (BAD coordinate space)
 # ---------------------------------------------------------------------------

@@ -74,6 +74,14 @@ target_include_directories(anim_sample_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(anim_sample_test PRIVATE cxx_std_17)
 add_test(NAME anim_sample COMMAND anim_sample_test)
 
+# ANIM aim overlay (the torso bend): bone-class map, BAM blend branches, compose
+# invariants. [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md s14]
+add_executable(aim_overlay_test anim/aim_overlay_test.cpp)
+target_link_libraries(aim_overlay_test PRIVATE opennova_anim)
+target_include_directories(aim_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(aim_overlay_test PRIVATE cxx_std_17)
+add_test(NAME aim_overlay COMMAND aim_overlay_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_def)
@@ -880,6 +888,26 @@ target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 add_test(NAME infantry COMMAND infantry_test)
 
+# The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
+# @0x541fa0, net-re §5.62): the ACTION-row bake (auto delays from clip ticks), the
+# pump phase protocol, and the witnessed handler decisions — the fire->recoil chain,
+# the recoil arbiter (refire/auto-reload/emptyidle), reload scope stash/rescope,
+# 3-round burst, dry-fire.
+add_executable(weapon_fsm_test world/weapon_fsm_test.cpp)
+target_link_libraries(weapon_fsm_test PRIVATE opennova_world)
+target_include_directories(weapon_fsm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(weapon_fsm_test PRIVATE cxx_std_17)
+add_test(NAME weapon_fsm COMMAND weapon_fsm_test)
+
+# Local player view state (the ADS scope ease, the 3P anchor chase, the fov
+# policy) at the fixed 62.5 Hz tick — render-cadence invariance — plus the
+# input-dispatch gates in front of the FSM requests.
+add_executable(player_view_test world/player_view_test.cpp)
+target_link_libraries(player_view_test PRIVATE opennova_world)
+target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_view_test PRIVATE cxx_std_17)
+add_test(NAME player_view COMMAND player_view_test)
+
 # Spawn-state init (Entity_ResetToSpawnState @0x4B9610, net-re §5.2b): the entity+36
 # bit-1 movement-gate clear + Position backup — the field-init half of the host
 # player-spawn machine that the Phase-2 listen-server player spawn reuses.
@@ -1563,7 +1591,7 @@ target_link_libraries(npruntime_client_fire_test
     PRIVATE opennova_npruntime opennova_netsim opennova_novaworld opennova_world)
 add_test(NAME npruntime_client_fire COMMAND npruntime_client_fire_test)
 
-# §5.60: the authoritative round sim — fire -> synchronous spawn [orig: RoundData_AddRound
+# §5.62: the authoritative round sim — fire -> synchronous spawn [orig: RoundData_AddRound
 # @0x4fdb40 inline RoundData_SpawnRound @0x4ec0d0], flight + hit [orig:
 # Weapon_UpdateAllProjectiles @0x4ec020 -> Projectile_UpdatePhysics @0x4e9d70], the kinetic
 # damage number [orig: Weapon_CalcImpactDamage @0x4ec920], and the death routing + respawn

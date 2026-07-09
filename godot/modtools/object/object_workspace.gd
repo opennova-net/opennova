@@ -160,6 +160,13 @@ func get_viewport_camera() -> Camera3D:
 	return null
 
 
+## The live ObjectPreview, or null before the viewport mounts / after release.
+## Public surface for tools and the MCP object verbs — reaching for _preview
+## from outside is a ratcheted private poke (ADR 0018).
+func get_preview() -> ObjectPreview:
+	return _preview if _preview != null and is_instance_valid(_preview) else null
+
+
 func shows_view_guides() -> bool:
 	return true
 

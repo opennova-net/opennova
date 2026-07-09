@@ -299,6 +299,54 @@ int main(void) {
     }
     printf("M4AUTO/M4 armory fields OK\n");
 
+    /* Weapon flags mask (WeaponDef+8 bits via the token table: auto = 0x100, Sighted =
+       0x2, WhileSwimming = 0x4; LaserBeam is unmapped -> raw_lines) and the ADS zoom
+       magnification [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
+       Player_ToggleWeaponScope @ 0x4df0c0 Flags & 3 gate + FOV 80/zoom @ 0x4df401]. */
+    if (m4->flags != (0x100 | 0x2 | 0x4)) {
+        fprintf(stderr, "FAIL: M4AUTO flags mismatch: 0x%x\n", m4->flags);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    if (fabsf(m4->scope_max_mag - 2.0f) > FEPS) {
+        fprintf(stderr, "FAIL: M4AUTO scope_max_mag mismatch: %.3f\n", m4->scope_max_mag);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    printf("flags + scope_max_mag OK\n");
+
+    /* renderfov: no shipped JO weapon.def sets the key, so every entry carries the
+       record default 80.0 [orig: AdmDef_InitEntryDefaults @ 0x53ff31]; the parser
+       key overrides it [orig: 'renderfov' @ 0x54482a]. */
+    if (fabsf(m4->renderfov - 80.0f) > FEPS) {
+        fprintf(stderr, "FAIL: M4AUTO renderfov default mismatch: %.3f\n", m4->renderfov);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    {
+        static const char kFovDef[] =
+            "weapon \"WPN_FOVTEST\"\n"
+            "\trenderfov 40\n"
+            "end\n";
+        DefWeaponsFile ff;
+        memset(&ff, 0, sizeof(ff));
+        if (def_parse_weapons_memory((const unsigned char *)kFovDef, sizeof(kFovDef) - 1, &ff) != 0 ||
+            ff.count != 1) {
+            fprintf(stderr, "FAIL: renderfov inline parse failed\n");
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        if (fabsf(ff.entries[0].renderfov - 40.0f) > FEPS) {
+            fprintf(stderr, "FAIL: renderfov override mismatch: %.3f\n", ff.entries[0].renderfov);
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&ff);
+        printf("renderfov default/override OK\n");
+    }
+
     /* def_parse_weapons_memory parity: same bytes, same result (covers both the
        string armory fields and the D-PLAYERINFO-11 loadout slot/masks). */
     {

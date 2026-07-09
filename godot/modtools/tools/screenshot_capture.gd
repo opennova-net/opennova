@@ -147,7 +147,7 @@ func _capture_mission_play() -> void:
 	var bms_name := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms_name.is_empty():
 		return
-	var ws: EditorWorkspace = _workstation._workspaces.get(EditorWorkstation.Workspace.MISSION)
+	var ws: EditorWorkspace = _workstation.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
 	if ws == null or not ws.has_method("play_mission"):
 		push_error("[capture] mission workspace unavailable for mission_play.png")
 		return
