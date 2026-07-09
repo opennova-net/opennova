@@ -51,9 +51,9 @@ static func _def(name: String, description: String, properties := {}, required: 
 # while the workspace is (or has been) active — open_in_workspace mounts it.
 func _require_preview(ctx: McpToolContext) -> Dictionary:
 	var ws: Variant = ctx.workspace("object")
-	if ws == null:
+	if ws == null or not ws.has_method("get_preview"):
 		return { "error": "Object workspace unavailable." }
-	var preview: Variant = ws.get("_preview")
+	var preview: Variant = ws.get_preview()
 	if preview == null or not is_instance_valid(preview):
 		return { "error": "No model open — open_in_workspace(workspace=\"object\", path=...) first." }
 	if preview.object_data == null:
