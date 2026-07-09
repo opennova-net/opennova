@@ -91,6 +91,17 @@ func _ready() -> void:
 	await _settle(24)
 	await _capture("02_fp_down.png")
 
+	# NOVA_VM_FSM=1: drive the weapon action FSM live — full-auto fire (LMB held),
+	# reload (R), ADS in/out (RMB) — through the REAL input path (LocalPlayerHost reads
+	# the Input singleton while the mouse is captured), logging the FSM view at each
+	# stage and capturing frames. [net-re §5.62]
+	if OS.get_environment("NOVA_VM_FSM") == "1":
+		await _fsm_sequence()
+		ws.stop_play_mission()
+		print("[fp] done -> ", _out_abs)
+		get_tree().quit()
+		return
+
 	# NOVA_VM_LAB=1: the viewmodel experiment matrix — {mirrored, unmirrored} x {idle, rest}.
 	# Rest pose makes skinning mathematically identity (pose == bind), isolating mesh/skin
 	# plumbing from pose deformation; the unmirror isolates the (-x,y,z) handedness question.
@@ -136,6 +147,66 @@ func _ready() -> void:
 	ws.stop_play_mission()
 	print("[fp] done -> ", _out_abs)
 	get_tree().quit()
+
+
+func _fsm_sequence() -> void:
+	var world := _find_by_method(get_tree().root, "local_player_weapon_view")
+	if world == null:
+		push_error("[fp] fsm: no weapon world")
+		return
+	await _settle(12)
+	print("[fp] fsm idle: ", _fsm_str(world.local_player_weapon_view()))
+	await _capture("30_fsm_idle.png")
+	# Full-auto burst: hold LMB ~40 frames (the AK is flags auto).
+	_mouse_btn(MOUSE_BUTTON_LEFT, true)
+	await _settle(12)
+	await _capture("31_fsm_firing.png")
+	await _settle(28)
+	_mouse_btn(MOUSE_BUTTON_LEFT, false)
+	await _settle(10)
+	print("[fp] fsm after burst: ", _fsm_str(world.local_player_weapon_view()))
+	# Reload (R edge).
+	_hold(KEY_R, true)
+	await _settle(3)
+	_hold(KEY_R, false)
+	await _settle(20)
+	print("[fp] fsm mid-reload: ", _fsm_str(world.local_player_weapon_view()))
+	await _capture("32_fsm_reload.png")
+	await _settle(140)
+	print("[fp] fsm post-reload: ", _fsm_str(world.local_player_weapon_view()))
+	# ADS in (RMB edge), hold for the eased tpos view + zoom, then back to hip.
+	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await _settle(3)
+	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await _settle(30)
+	await _capture("33_fsm_ads.png")
+	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+	if host != null:
+		var cam: Camera3D = host.get("_camera")
+		print("[fp] fsm ads: engaged=%s fraction=%.2f cam_fov=%.1f" % [
+			str(host.get("_scope_engaged")), float(host.get("_scope_fraction")),
+			cam.fov if cam != null else -1.0])
+	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
+	await _settle(3)
+	_mouse_btn(MOUSE_BUTTON_RIGHT, false)
+	await _settle(30)
+	await _capture("34_fsm_hip.png")
+	print("[fp] fsm final: ", _fsm_str(world.local_player_weapon_view()))
+
+
+func _fsm_str(v) -> String:
+	if v == null:
+		return "<null>"
+	return "act=%d clip=%d res=%d fired=%d dry=%d rel=%d play=%d key=%s" % [
+		v.current_action, v.clip, v.reserve, v.fired_serial, v.dry_serial,
+		v.reload_serial, v.play_serial, v.anim_key]
+
+
+func _mouse_btn(b: MouseButton, down: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = b
+	e.pressed = down
+	Input.parse_input_event(e)
 
 
 func _find_by_method(node: Node, method: String) -> Node:

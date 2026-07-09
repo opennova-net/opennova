@@ -38,6 +38,7 @@ DOMAIN_ORDER: list[tuple[str, str]] = [
     ("env", "Environment"),
     ("INF", "World / AI + events"),
     ("EVT", "World / AI + events"),
+    ("WPN", "World / AI + events"),
     ("ITEMDEF", "Item def"),
     ("MNU", "UI (menu/ctrl/sound/playerinfo/HUD)"),
     ("CTRL", "UI (menu/ctrl/sound/playerinfo/HUD)"),

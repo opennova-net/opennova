@@ -563,6 +563,11 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
+	ClassDB::bind_method(D_METHOD("set_local_player_weapon", "def", "clip_seconds"), &NovaSimulation::set_local_player_weapon);
+	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &NovaSimulation::clear_local_player_weapon);
+	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed", "scope_active"), &NovaSimulation::set_local_player_weapon_input);
+	ClassDB::bind_method(D_METHOD("queue_local_player_weapon_scope", "up"), &NovaSimulation::queue_local_player_weapon_scope);
+	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &NovaSimulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
@@ -714,6 +719,7 @@ void NovaSimulation::step() {
 	// No-net editor/unit path: one authoritative logic tick, no replication.
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 }
 
@@ -741,6 +747,7 @@ bool NovaSimulation::advance_frame() {
 	// No-net editor/unit path: one authoritative logic tick, no replication.
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
@@ -891,6 +898,7 @@ void NovaSimulation::host_pump() {
 	apply_player_input_pre_tick(); // input -> the host player's body input, before logic (ADR 0009/0012)
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
 }
 
@@ -924,6 +932,7 @@ void NovaSimulation::joiner_pump() {
 	}
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
+	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
 
 	// Run the client frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C uplink (gated
 	// InMatch && deployed inside the runtime). Build the uplink from L once it exists.
@@ -1143,6 +1152,126 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	out["aim_state"] = in.aim_state;
 	out["body"] = to_mission(angles[opennova::anim::kOverlayBody]);
 	out["angles"] = packed;
+	return out;
+}
+
+// --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------
+
+void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
+		const Dictionary &p_clip_seconds) {
+	using opennova::world::WeaponFsmActionRow;
+	// Mirror the weapon dict's ACTION rows into the def-agnostic bake inputs.
+	std::vector<WeaponFsmActionRow> rows;
+	const Array actions = p_def.get("actions", Array());
+	rows.reserve(static_cast<size_t>(actions.size()));
+	for (int i = 0; i < actions.size(); ++i) {
+		const Dictionary a = actions[i];
+		WeaponFsmActionRow row;
+		const CharString name = String(a.get("name", "")).utf8();
+		const CharString anim = String(a.get("anim", "")).utf8();
+		const CharString function = String(a.get("function", "")).utf8();
+		snprintf(row.name, sizeof(row.name), "%s", name.get_data());
+		snprintf(row.anim, sizeof(row.anim), "%s", anim.get_data());
+		snprintf(row.function, sizeof(row.function), "%s", function.get_data());
+		row.delaystart = static_cast<int32_t>(int64_t(a.get("delaystart", -1)));
+		row.delayend = static_cast<int32_t>(int64_t(a.get("delayend", -1)));
+		rows.push_back(row);
+	}
+	// Clip lengths come from the loaded viewmodel's .adm (seconds); the bake converts to
+	// the 62.5 Hz ticks [orig: Anim_GetDurationTicks @ 0x53ee10].
+	struct ClipCtx {
+		const Dictionary *seconds;
+	} ctx{ &p_clip_seconds };
+	const auto clip_fn = [](void *p_ctx, const char *key) -> float {
+		const ClipCtx *c = static_cast<const ClipCtx *>(p_ctx);
+		const String k = String::utf8(key);
+		if (!c->seconds->has(k)) return -1.0f;
+		return static_cast<float>(double((*c->seconds)[k]));
+	};
+	weapon_def_ = opennova::world::WeaponFsmDef{};
+	opennova::world::weapon_fsm_bake(rows.data(), rows.size(), clip_fn, &ctx, weapon_def_);
+	const int flags = int(p_def.get("flags", 0));
+	weapon_def_.auto_fire = (flags & 0x100) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
+	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
+	const int clipsize = int(p_def.get("clipsize", 0));
+	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
+	// Fresh slot: full magazine + the def's carried reserve (the interim ammo default
+	// until PLAYER_INFO loadout resolution lands — D-WPN-7).
+	weapon_slot_ = opennova::world::WeaponSlotState{};
+	weapon_slot_.clip = clipsize > 0 ? clipsize : 0;
+	weapon_slot_.reserve = int(p_def.get("startrounds", 0));
+	weapon_play_serial_ = 0;
+	weapon_anim_key_ = String();
+	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
+	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
+	weapon_fire_held_ = weapon_fire_pressed_ = weapon_reload_pressed_ = false;
+	weapon_scope_active_ = false;
+	weapon_active_ = true;
+}
+
+void NovaSimulation::clear_local_player_weapon() {
+	weapon_active_ = false;
+}
+
+void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
+		bool p_reload_pressed, bool p_scope_active) {
+	weapon_fire_held_ = p_fire_held;
+	weapon_fire_pressed_ = weapon_fire_pressed_ || p_fire_pressed; // latch until consumed
+	weapon_reload_pressed_ = weapon_reload_pressed_ || p_reload_pressed;
+	weapon_scope_active_ = p_scope_active;
+}
+
+void NovaSimulation::queue_local_player_weapon_scope(bool p_up) {
+	if (!weapon_active_) return;
+	if (p_up)
+		opennova::world::weapon_fsm_queue_scope_up(weapon_slot_);
+	else
+		opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
+}
+
+// One 62.5 Hz pump of the local player's slot, after the world logic tick
+// [orig: WeaponAction_ProcessAllEntities @ 0x542690 pumps every pooled entity in the
+// frame loop; local-player-only here — D-WPN-6].
+void NovaSimulation::tick_local_player_weapon() {
+	if (!weapon_active_ || !world_ || !world_->cached.local_player.valid()) return;
+	opennova::world::WeaponFsmInputs in;
+	in.fire_held = weapon_fire_held_;
+	in.fire_pressed = weapon_fire_pressed_;
+	in.reload_pressed = weapon_reload_pressed_;
+	in.is_local = true;
+	in.is_authority = !joiner_; // the joiner defers the refill to the §5.58 round-trip
+	in.auto_reload = true;      // [orig: g_autoReloadEnabled @ 0x24D2118, default on]
+	in.scope_active = weapon_scope_active_;
+	opennova::world::WeaponFsmEvents ev;
+	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
+	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
+	weapon_reload_pressed_ = false;
+	if (ev.play_anim) {
+		++weapon_play_serial_;
+		weapon_anim_key_ = String::utf8(ev.anim_key);
+	}
+	if (ev.fired) ++weapon_fired_serial_;
+	if (ev.dry_fired) ++weapon_dry_serial_;
+	if (ev.reload_requested) ++weapon_reload_serial_;
+	if (ev.unscope) ++weapon_unscope_serial_;
+	if (ev.rescope) ++weapon_rescope_serial_;
+}
+
+Dictionary NovaSimulation::get_local_player_weapon_state() const {
+	Dictionary out;
+	out["active"] = weapon_active_;
+	if (!weapon_active_) return out;
+	out["current"] = weapon_slot_.current;
+	out["anim_key"] = weapon_anim_key_;
+	out["play_serial"] = static_cast<int64_t>(weapon_play_serial_);
+	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
+	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);
+	out["reload_serial"] = static_cast<int64_t>(weapon_reload_serial_);
+	out["unscope_serial"] = static_cast<int64_t>(weapon_unscope_serial_);
+	out["rescope_serial"] = static_cast<int64_t>(weapon_rescope_serial_);
+	out["clip"] = weapon_slot_.clip;
+	out["reserve"] = weapon_slot_.reserve;
+	out["kick"] = static_cast<int>(weapon_slot_.kick);
 	return out;
 }
 

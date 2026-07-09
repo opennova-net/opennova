@@ -65,6 +65,7 @@ var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pa
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
+var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
 var _mission_audio: NovaMissionAudio
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
@@ -491,6 +492,7 @@ func unload() -> void:
 	_mission_audio = null
 	_placer = null
 	_weapon_db = null  # re-resolves against the next load's mounted root
+	_local_weapon_dict = {}
 	_mission_stats = {}
 
 
@@ -747,7 +749,60 @@ func build_local_player_viewmodel() -> Node3D:
 	if arms == null and gun == null:
 		container.queue_free()
 		return null
+	_setup_local_player_weapon(gun if gun != null else arms)
 	return container
+
+
+## Install the equipped weapon's action FSM on the sim: the weapon dict's ACTION rows +
+## flags/clipsize/startrounds plus the loaded .adm clip lengths (seconds) the bake turns
+## into 62.5 Hz delays [orig: Anim_InitActions @0x541fa0 binds the rows and bakes 'auto'
+## delays via Anim_GetDurationTicks @0x53ee10; net-re §5.62]. The arms ride the same
+## animadm, so one part's clip table covers both.
+func _setup_local_player_weapon(model) -> void:
+	var sim := get_sim()
+	if sim == null:
+		return
+	if _local_weapon_dict.is_empty() or model == null or not model.has_method("get_skeletal_anim"):
+		sim.clear_local_player_weapon()
+		return
+	var skeletal = model.get_skeletal_anim()
+	var clip_seconds := {}
+	if skeletal != null:
+		var keys := ["anim_wpn_idle", "anim_wpn_empty_idle"]
+		for a in _local_weapon_dict.get("actions", []):
+			var k := String(a.get("anim", ""))
+			if not k.is_empty() and not keys.has(k):
+				keys.append(k)
+		for k in keys:
+			if skeletal.has_clip(k):
+				clip_seconds[k] = float(skeletal.get_clip_length(k))
+	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
+
+
+## Per-frame weapon trigger state from the host (fire held + edge, reload edge, and the
+## host's ADS engaged state the reload scope-stash reads) [orig: the binding-149/reload
+## input dispatch, Input_HandleActionBinding_0 @0x4e0420].
+func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_pressed: bool, scope_active: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed, scope_active)
+
+
+## Queue the ADS FSM easing state on a scope toggle
+## [orig: WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown @0x53f080].
+func queue_local_player_weapon_scope(up: bool) -> void:
+	var sim := get_sim()
+	if sim != null:
+		sim.queue_local_player_weapon_scope(up)
+
+
+## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
+## weapon FSM is installed.
+func local_player_weapon_view() -> PlayerWeaponView:
+	var sim := get_sim()
+	if sim == null:
+		return null
+	return PlayerWeaponView.from_state_dict(sim.get_local_player_weapon_state())
 
 
 ## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
@@ -775,7 +830,8 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
 		return null
-	return PlayerViewmodelDef.from_weapon_dict(_weapon_db.get_weapon(index))
+	_local_weapon_dict = _weapon_db.get_weapon(index)
+	return PlayerViewmodelDef.from_weapon_dict(_local_weapon_dict)
 
 
 # --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------

@@ -216,7 +216,7 @@ static const FlagEntry flag_table[] = {
     {"scoped",        6, 0x0001},
     {"sighted",       7, 0x0002},
     {"underwater",   10, 0x0004},
-    {"whileswimming",14, 0x0004},
+    {"whileswimming",13, 0x0004},
     {"burst",         5, 0x0020},
     {"auto",          4, 0x0100},
     {"nocardswitch", 12, 0x02000000},
@@ -900,6 +900,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 /* [orig: weapon.def parser key 'renderfov' @ 0x54482a] */
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
                 cw.renderfov = parse_float_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "scope_max_mag", 13)) {
+                /* ADS zoom magnification; the scoped FOV = 80 / clamped zoom
+                   [orig: Player_ToggleWeaponScope @ 0x4df401]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+                cw.scope_max_mag = parse_float_n(v, vl);
                 parsed = 1;
             } else if (ll > 3 && lower_starts_with(lower, ll, "pos", 3) &&
                        (lower[3] == ' ' || lower[3] == '\t')) {

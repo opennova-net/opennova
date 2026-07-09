@@ -101,6 +101,18 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 		w.tpos[k] = e.tpos[k];
 	}
 	w.renderfov = e.renderfov;
+	w.flags = e.flags;
+	w.scope_max_mag = e.scope_max_mag;
+	for (size_t a = 0; a < e.actions_count; ++a) {
+		const DefWeaponAction &row = e.actions[a];
+		Dictionary act;
+		act["name"] = String(row.name);
+		act["anim"] = String(row.anim);
+		act["function"] = String(row.function);
+		act["delaystart"] = row.delaystart;
+		act["delayend"] = row.delayend;
+		w.actions.push_back(act);
+	}
 	weapons.push_back(w);
 }
 
@@ -154,6 +166,9 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	d["pos"] = pos;   // xyz raw file units (/256 = world), then yaw/pitch/roll degrees
 	d["tpos"] = tpos; // the ADS variant [orig: WeaponDef.AltCamOffset @ 0x10C]
 	d["renderfov"] = w.renderfov;
+	d["flags"] = w.flags;
+	d["scope_max_mag"] = w.scope_max_mag;
+	d["actions"] = w.actions.duplicate(true);
 	return d;
 }
 

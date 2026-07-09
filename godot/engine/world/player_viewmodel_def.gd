@@ -20,6 +20,16 @@ var pos_units := Vector3.ZERO       # hip view bias, raw def units
 var rot_bias_deg := Vector3.ZERO    # def rot columns: yaw/pitch/roll degrees
 var tpos_units := Vector3.ZERO      # ADS view bias [orig: WeaponDef.AltCamOffset @0x10C]
 var renderfov_h_deg := 80.0
+# The witnessed WeaponDef+8 flag mask (file tokens: scoped 1, sighted 2, burst 0x20,
+# auto 0x100) — Flags & 3 gates the ADS toggle [orig: Player_ToggleWeaponScope
+# @0x4df0c0] — and the ADS zoom magnification (scoped camera FOV = 80 / zoom
+# [orig: @0x4df401]; 0 = key absent, no zoom change).
+var flags := 0
+var scope_max_mag := 0.0
+# Magazine size (0 = no clipsize key -> the FSM tracks no clip); the reload key is
+# refused on a full magazine [orig: the reload input case @0x4e0420 compares the clip
+# against clipsize before WeaponSlot_RequestReload].
+var clipsize := 0
 
 
 ## Decode one NovaWeaponDatabase weapon dict; null when the dict is empty (weapon.def
@@ -41,4 +51,7 @@ static func from_weapon_dict(d: Dictionary) -> PlayerViewmodelDef:
 	if tpos.size() >= 3:
 		out.tpos_units = Vector3(tpos[0], tpos[1], tpos[2])
 	out.renderfov_h_deg = float(d.get("renderfov", 80.0))
+	out.flags = int(d.get("flags", 0))
+	out.scope_max_mag = float(d.get("scope_max_mag", 0.0))
+	out.clipsize = int(d.get("clipsize", 0))
 	return out

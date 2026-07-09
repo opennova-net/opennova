@@ -87,6 +87,34 @@ var _vm_viewport: SubViewport = null
 var _vm_camera: Camera3D = null
 var _tp_anchor := Vector3.ZERO
 var _tp_anchor_valid := false
+# --- the equipped-weapon FSM view + ADS state (net-re §5.62 / §5.41) ----------
+# The FSM ticks in the sim; this host feeds trigger input, plays the event clips on
+# BOTH viewmodel parts (arms + gun share the animadm), and owns the ADS camera state:
+# the eased pos -> tpos swing and the scoped FOV.
+var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
+var _weapon_play_serial := -1
+var _weapon_unscope_serial := -1
+var _weapon_rescope_serial := -1
+var _weapon_current_action := 0
+var _weapon_clip := 0
+var _weapon_reserve := 0
+var _fire_was_held := false
+var _reload_was_down := false
+var _scope_was_down := false
+# ADS: engaged is the host's g_scopeEngaged mirror [orig: @0x82CE94]; the fraction is
+# the camera interp (0 = hip, 1 = sighted; 15 steps at 62.5 Hz
+# [orig: CNetPlayerInterp_Setup steps @0x4df36e]). The pos -> tpos swap itself is
+# instant in the original's camera once engaged [orig: Player_UpdateFirstPersonCamera
+# @0x4dd380 entity Flags & 2]; the interp carries the visible ease.
+var _scope_engaged := false
+var _scope_fraction := 0.0
+var _frame_delta := 0.0
+var _camera_saved_fov := -1.0
+const SCOPE_EASE_STEPS := 15.0
+const PLAYER_CAMERA_FOV_H_DEG := 80.0  # [orig: g_cameraFovDeg @0x26C6848 default 0x500000]
+var PLAYER_VIEWMODEL_FLAGS := 0        # def flags (scoped 1 / sighted 2 gate ADS)
+var PLAYER_VIEWMODEL_SCOPE_MAG := 0.0  # def scope_max_mag (scoped FOV = 80 / mag)
+var PLAYER_VIEWMODEL_CLIPSIZE := 0
 # Debug experiments (the F3 overlay's View tab): keep the FP arms drawn in every
 # camera mode, and/or draw the player's own body in first person — the "see our
 # feet" probe (the §14 aim overlay bends the spine away from the eye, so looking
@@ -107,6 +135,7 @@ func set_debug_body_in_first_person(enabled: bool) -> void:
 func setup(world, camera: Camera3D) -> void:
 	_world = world
 	_camera = camera
+	_camera_saved_fov = camera.fov if camera != null else -1.0
 	# The player camera never draws the reflection-only body layer: in first
 	# person the body lives there for the water mirror alone (see
 	# _update_avatar); NovaWater's mirror camera is the one view that keeps it.
@@ -125,6 +154,8 @@ func teardown() -> void:
 	_free_viewmodel_pass()
 	if _camera != null:
 		_camera.cull_mask |= NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY | NovaWater.VISUAL_LAYER_VIEWMODEL
+		if _camera_saved_fov > 0.0:
+			_camera.fov = _camera_saved_fov
 	_world = null
 	_camera = null
 	_input_source = Callable()
@@ -204,6 +235,7 @@ func is_third_person() -> bool:
 
 
 func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
+	_frame_delta = _delta
 	if not _has_player():
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
@@ -227,6 +259,46 @@ func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
 		_bool(state, "jump"),
 		_look_yaw,
 		_look_pitch)
+	_send_weapon_input()
+
+
+# The weapon trigger input: LMB fire (held + edge), R reload (edge, refused on a full
+# magazine or empty reserve), RMB the ADS toggle (edge). Only while the mouse is
+# captured - UI clicks never fire. [orig: the binding dispatch cases 0x95 fire /
+# 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420]
+func _send_weapon_input() -> void:
+	if _world == null or not _world.has_method("set_local_player_weapon_input"):
+		return
+	var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var fire_edge := fire_held and not _fire_was_held
+	_fire_was_held = fire_held
+	var reload_down := captured and Input.is_physical_key_pressed(KEY_R)
+	var reload_edge := reload_down and not _reload_was_down
+	_reload_was_down = reload_down
+	# [orig: reload case 0xD3 refuses when clip == clipsize or the reserve is empty]
+	if reload_edge and (PLAYER_VIEWMODEL_CLIPSIZE <= 0
+			or _weapon_clip == PLAYER_VIEWMODEL_CLIPSIZE or _weapon_reserve <= 0):
+		reload_edge = false
+	var scope_down := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	if scope_down and not _scope_was_down:
+		_toggle_scope()
+	_scope_was_down = scope_down
+	_world.set_local_player_weapon_input(fire_held, fire_edge, reload_edge, _scope_engaged)
+
+
+# The ADS toggle [orig: input case 6 @0x4e0420 gates currentAction not in {RELOAD,
+# SWITCHFROM}; Player_ToggleWeaponScope @0x4df0c0 gates def Flags & 3 (scoped/sighted)].
+# Engaging queues the scopeup FSM state; disengaging scopedown
+# [orig: WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown @0x53f080].
+func _toggle_scope() -> void:
+	if _weapon_current_action == 4 or _weapon_current_action == 7:
+		return
+	if (PLAYER_VIEWMODEL_FLAGS & 3) == 0:
+		return
+	_scope_engaged = not _scope_engaged
+	if _world.has_method("queue_local_player_weapon_scope"):
+		_world.queue_local_player_weapon_scope(_scope_engaged)
 
 
 func after_world_tick() -> void:
@@ -235,7 +307,50 @@ func after_world_tick() -> void:
 		_release_mouse_capture()
 		_clear_models()
 		return
+	_consume_weapon_view()
 	_update_player_camera()
+
+
+# Drain the FSM's per-tick events (monotonic serials - several 62.5 Hz ticks can run
+# per frame): clip starts land on BOTH viewmodel parts, forced unscope (one-shot /
+# reload stash) and the pump's rescope-after-reload drive the host scope state.
+# [orig: ActionSlot_BeginActivePhase @0x53f830 plays the action clip on the owner's
+# animadm channel; the rescope block @0x54139e]
+func _consume_weapon_view() -> void:
+	if _world == null or not _world.has_method("local_player_weapon_view"):
+		return
+	var view: PlayerWeaponView = _world.local_player_weapon_view()
+	if view == null:
+		return
+	_weapon_current_action = view.current_action
+	_weapon_clip = view.clip
+	_weapon_reserve = view.reserve
+	if view.play_serial != _weapon_play_serial:
+		_weapon_play_serial = view.play_serial
+		_play_viewmodel_clip(view.anim_key)
+	if view.unscope_serial != _weapon_unscope_serial:
+		_weapon_unscope_serial = view.unscope_serial
+		_scope_engaged = false
+	if view.rescope_serial != _weapon_rescope_serial:
+		_weapon_rescope_serial = view.rescope_serial
+		if (PLAYER_VIEWMODEL_FLAGS & 3) != 0:
+			_scope_engaged = true
+			if _world.has_method("queue_local_player_weapon_scope"):
+				_world.queue_local_player_weapon_scope(true)
+
+
+# Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
+# of the active key restarts it (fire/recoil re-triggers), unlike play_body_clip's
+# same-key resume.
+func _play_viewmodel_clip(key: String) -> void:
+	if key.is_empty():
+		return
+	for part in _vm_parts:
+		if part == null or not is_instance_valid(part):
+			continue
+		part.play_body_clip(key)
+		if part.has_method("set_animation_time"):
+			part.set_animation_time(0.0)
 
 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode
@@ -337,6 +452,13 @@ func _ensure_models() -> void:
 		_viewmodel = _world.build_local_player_viewmodel()
 		if _viewmodel != null:
 			_apply_viewmodel_def()
+			_vm_parts.clear()
+			for child in _viewmodel.get_children():
+				if child.has_method("play_body_clip"):
+					_vm_parts.append(child)
+			_weapon_play_serial = -1  # re-sync the FSM event serials to the new parts
+			_weapon_unscope_serial = -1
+			_weapon_rescope_serial = -1
 
 
 func _clear_models() -> void:
@@ -346,6 +468,11 @@ func _clear_models() -> void:
 		_viewmodel.queue_free()
 	_avatar = null
 	_viewmodel = null
+	_vm_parts.clear()
+	_scope_engaged = false
+	_scope_fraction = 0.0
+	if _camera != null and _camera_saved_fov > 0.0:
+		_camera.fov = _camera_saved_fov
 
 
 func _set_fly_camera_locked(locked: bool) -> void:
@@ -389,8 +516,36 @@ func _update_player_camera() -> void:
 		_tp_anchor_valid = false
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
+	_update_scope_camera()
 	_update_avatar(pos)
 	_update_viewmodel()
+
+
+# The ADS camera: step the 15-tick scope ease toward engaged/hip and drive the main
+# camera FOV — 80 horizontal base [orig: g_cameraFovDeg @0x26C6848 default 0x500000],
+# scoped = 80 / zoom for sighted weapons [orig: Player_ToggleWeaponScope @0x4df401 ->
+# 80.0 / Player_GetClampedWeaponElevation], suppressed in third person
+# [orig: @0x4df3fa g_camera_mode -> 80.0]. Horizontal -> vertical through the live
+# aspect, the same conversion as the render setup [orig: @0x58d900].
+func _update_scope_camera() -> void:
+	var target := 1.0 if _scope_engaged else 0.0
+	_scope_fraction = move_toward(_scope_fraction, target, _frame_delta * 62.5 / SCOPE_EASE_STEPS)
+	if _camera == null:
+		return
+	var mag := 1.0
+	if (PLAYER_VIEWMODEL_FLAGS & 2) != 0 and PLAYER_VIEWMODEL_SCOPE_MAG > 1.0:
+		mag = PLAYER_VIEWMODEL_SCOPE_MAG
+	var zoom_fraction := 0.0 if _third_person else _scope_fraction
+	var fov_h := lerpf(PLAYER_CAMERA_FOV_H_DEG, PLAYER_CAMERA_FOV_H_DEG / mag, zoom_fraction)
+	var viewport := _camera.get_viewport()
+	if viewport == null:
+		return
+	var size := viewport.get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		return
+	var aspect := size.x / size.y
+	var half_h := deg_to_rad(fov_h) * 0.5
+	_camera.fov = rad_to_deg(2.0 * atan(tan(half_h) / aspect))
 
 
 func _update_avatar(pos: Vector3) -> void:
@@ -471,8 +626,14 @@ func _update_viewmodel() -> void:
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
+	# The ADS pos -> tpos swap: instant once sighted in the original's camera
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380, entity Flags & 2 -> AltCamOffset],
+	# with the visible ease carried by the 15-step scope-camera interp
+	# [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp @0x82CE40] - realized
+	# here as the eased blend toward the tpos view bias.
+	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, _scope_fraction)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
-		vm_basis, bias * _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
+		vm_basis, bias * _viewmodel_offset(view_units))
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
@@ -508,6 +669,9 @@ func _apply_viewmodel_def() -> void:
 	PLAYER_VIEWMODEL_ROT_BIAS_DEF = def.rot_bias_deg
 	PLAYER_VIEWMODEL_TPOS_UNITS = def.tpos_units
 	PLAYER_VIEWMODEL_RENDERFOV_H_DEG = def.renderfov_h_deg
+	PLAYER_VIEWMODEL_FLAGS = def.flags
+	PLAYER_VIEWMODEL_SCOPE_MAG = def.scope_max_mag
+	PLAYER_VIEWMODEL_CLIPSIZE = def.clipsize
 
 
 # Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.

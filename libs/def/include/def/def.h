@@ -193,6 +193,11 @@ typedef struct DefWeaponDef {
        [orig: parser key 'renderfov' @ 0x54482a; default flt_7D1898 = 80.0 stored by
        AdmDef_InitEntryDefaults @ 0x53ff31; consumer @ 0x4dee71 (WeaponDef+0x148)]. */
     float renderfov;               /* +148 */
+    /* ADS zoom magnification ('scope_max_mag'; the JOX AK-47 ships 2). The scoped
+       camera FOV divides the 80-degree default by the clamped zoom
+       [orig: Player_ToggleWeaponScope @ 0x4df401 -> 80.0 / Player_GetClampedWeaponElevation
+       @ 0x4dc6b0; g_cameraFovDeg @ 0x26C6848]. 0 = key absent. */
+    float scope_max_mag;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

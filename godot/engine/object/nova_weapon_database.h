@@ -51,6 +51,16 @@ private:
 		float pos[6] = { 0, 0, 0, 0, 0, 0 };
 		float tpos[6] = { 0, 0, 0, 0, 0, 0 };
 		float renderfov = 80.0f;
+		// The witnessed WeaponDef+8 flag mask (libs/def flag_table maps the file
+		// tokens: scoped 1, sighted 2, burst 0x20, auto 0x100, ...) and the ADS zoom
+		// magnification [orig: Player_ToggleWeaponScope @ 0x4df0c0 gates Flags & 3;
+		// scoped FOV = 80 / zoom @ 0x4df401].
+		int flags = 0;
+		float scope_max_mag = 0.0f;
+		// The weapon's ACTION blocks, verbatim rows for the weapon-FSM bake — Dicts
+		// {name, anim, function, delaystart, delayend} [orig: ActionDef_ParseScriptLine
+		// @ 0x4023c0; bound by Anim_InitActions @ 0x541fa0; net-re §5.62].
+		Array actions;
 	};
 	std::vector<Weapon> weapons; // file order (mirrors the engine's table order)
 	String source_path;

@@ -23,6 +23,7 @@
 #include <world/ai.h>
 #include <world/player_input.h>
 #include <world/player_spawn.h>
+#include <world/weapon_fsm.h>
 #include <world/world.h>
 
 #include "mission/nova_mission_data.h"
@@ -171,6 +172,29 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+
+	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
+	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
+	// world advances [orig: WeaponAction_ProcessAllEntities @ 0x542690 in the frame loop;
+	// this port pumps the LOCAL player's slot only — D-WPN-6]. The host feeds the baked def
+	// via set_local_player_weapon and per-frame trigger state via
+	// set_local_player_weapon_input; events surface as monotonic serials in
+	// get_local_player_weapon_state (several logic ticks can run per render frame).
+	opennova::world::WeaponFsmDef weapon_def_{};
+	opennova::world::WeaponSlotState weapon_slot_{};
+	bool weapon_active_ = false;
+	bool weapon_fire_held_ = false;
+	bool weapon_fire_pressed_ = false;
+	bool weapon_reload_pressed_ = false;
+	bool weapon_scope_active_ = false; // host-owned ADS engaged state, mirrored in
+	uint64_t weapon_play_serial_ = 0;
+	String weapon_anim_key_;
+	uint64_t weapon_fired_serial_ = 0;
+	uint64_t weapon_dry_serial_ = 0;
+	uint64_t weapon_reload_serial_ = 0;
+	uint64_t weapon_unscope_serial_ = 0;
+	uint64_t weapon_rescope_serial_ = 0;
+	void tick_local_player_weapon();
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
 	// One in-match runtime funnels every path: the host/SP/editor-preview is the §5.0 mode-3
@@ -354,6 +378,28 @@ public:
 	// MissionObjectPlacer.bms_to_godot_basis (the single-sourced frame conversion) and
 	// feeds NovaObjectModel.set_aim_overlay. Empty/invalid when no player.
 	Dictionary get_local_player_aim_overlay() const;
+
+	// --- the local player's equipped-weapon FSM (net-re §5.62) -------------
+	// Install the equipped weapon: p_def is the NovaWeaponDatabase weapon dict (the
+	// {actions, flags, clipsize, startrounds} slice is consumed) and p_clip_seconds
+	// maps each .adm clip key to its length in SECONDS — the Anim_InitActions bake
+	// source [orig: @ 0x541fa0; 'auto' delays come from Anim_GetDurationTicks
+	// @ 0x53ee10]. Resets the slot to a fresh idle with a full magazine.
+	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
+	void clear_local_player_weapon();
+	// Per-frame trigger state: fire held + edge, reload edge, and the host's ADS
+	// engaged state (the reload scope stash reads it) [orig: the binding-149/reload/
+	// scope input dispatch, Input_HandleActionBinding_0 @ 0x4e0420].
+	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
+	                                   bool p_reload_pressed, bool p_scope_active);
+	// Queue the ADS FSM easing states on toggle
+	// [orig: WeaponSlot_TryQueueScopeUp @ 0x53f050 / ..ScopeDown @ 0x53f080].
+	void queue_local_player_weapon_scope(bool p_up);
+	// The FSM view for the host: {active, current, anim_key, play_serial,
+	// fired_serial, dry_serial, reload_serial, unscope_serial, rescope_serial,
+	// clip, reserve, kick}. Serials are monotonic so no event is lost when several
+	// logic ticks run per render frame.
+	Dictionary get_local_player_weapon_state() const;
 
 	// --- WAC scripts ------------------------------------------------------
 	// Install a compiled program on the script VM (NovaWacProgram). Applied now if
