@@ -29,7 +29,7 @@ const PLAYER_TP_ORBIT_PITCH_DEG := 22.5
 # The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
 # offset is simply `file_value / 256` — see _viewmodel_offset for the axis map and derivation.
 # The Sighted/ADS path swaps `pos` -> `tpos` (WeaponDef.AltCamOffset @0x10C, read when entity
-# Flags & 2), wired when ADS lands. The view fields now flow from the mounted root's weapon.def
+# Flags & 2), eased by the sim's scope fraction. The view fields flow from the mounted root's weapon.def
 # (_apply_viewmodel_def <- GameWorld.local_player_viewmodel_def, the fixed default weapon until
 # equipped-weapon resolution lands); the values below are the witnessed JOX WPN_AK47AUTO line,
 # kept as the no-def fallback. (The pre-def constant (10, 0, -201) turned out to be the
@@ -38,8 +38,8 @@ const WEAPON_DEF_POS_SCALE := 256.0                                # flt_7D1D70:
 # Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
 # the witnessed WPN_AK47AUTO def line + the current best facing.
 var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def WPN_AK47AUTO `pos` (hip)
-# The ADS/sighted view offset (weapon.def `tpos` -> WeaponDef.AltCamOffset @0x10C), held for
-# the ADS swap follow-up; JOX AK47AUTO = (-62.33, 29.19, -152.56).
+# The ADS/sighted view offset (weapon.def `tpos` -> WeaponDef.AltCamOffset @0x10C), blended
+# in by the sim's scope fraction; JOX AK47AUTO = (-62.33, 29.19, -152.56).
 var PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-62.33, 29.19, -152.56)
 # The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is a
 # T-posed character skeleton (BN01 Pelvis at the origin) that the wpn clips POSE into the
@@ -85,36 +85,20 @@ var _viewmodel: Node3D = null
 var _vm_pass_layer: CanvasLayer = null
 var _vm_viewport: SubViewport = null
 var _vm_camera: Camera3D = null
-var _tp_anchor := Vector3.ZERO
-var _tp_anchor_valid := false
-# --- the equipped-weapon FSM view + ADS state (net-re §5.62 / §5.41) ----------
-# The FSM ticks in the sim; this host feeds trigger input, plays the event clips on
-# BOTH viewmodel parts (arms + gun share the animadm), and owns the ADS camera state:
-# the eased pos -> tpos swing and the scoped FOV.
+# --- the equipped-weapon FSM view + the sim-owned view state (net-re §5.62/§5.41) --
+# The FSM and the VIEW STATE both tick in the sim at 62.5 Hz (libs/world
+# weapon_fsm + player_view; ADR 0016 — policy, state, and cadence live in the
+# engine): the ADS engaged bit + 15-step ease, the fov policy, and the 3P anchor
+# chase arrive as a PlayerLocalView snapshot each frame. This host samples raw
+# input (trigger edges, the RMB toggle REQUEST), plays the FSM's event clips on
+# BOTH viewmodel parts (arms + gun share the animadm), and places nodes.
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
 var _weapon_play_serial := -1
-var _weapon_unscope_serial := -1
-var _weapon_rescope_serial := -1
-var _weapon_current_action := 0
-var _weapon_clip := 0
-var _weapon_reserve := 0
 var _fire_was_held := false
 var _reload_was_down := false
 var _scope_was_down := false
-# ADS: engaged is the host's g_scopeEngaged mirror [orig: @0x82CE94]; the fraction is
-# the camera interp (0 = hip, 1 = sighted; 15 steps at 62.5 Hz
-# [orig: CNetPlayerInterp_Setup steps @0x4df36e]). The pos -> tpos swap itself is
-# instant in the original's camera once engaged [orig: Player_UpdateFirstPersonCamera
-# @0x4dd380 entity Flags & 2]; the interp carries the visible ease.
-var _scope_engaged := false
-var _scope_fraction := 0.0
-var _frame_delta := 0.0
+var _view: PlayerLocalView = null   # the sim's per-tick view snapshot (null = no sim)
 var _camera_saved_fov := -1.0
-const SCOPE_EASE_STEPS := 15.0
-const PLAYER_CAMERA_FOV_H_DEG := 80.0  # [orig: g_cameraFovDeg @0x26C6848 default 0x500000]
-var PLAYER_VIEWMODEL_FLAGS := 0        # def flags (scoped 1 / sighted 2 gate ADS)
-var PLAYER_VIEWMODEL_SCOPE_MAG := 0.0  # def scope_max_mag (scoped FOV = 80 / mag)
-var PLAYER_VIEWMODEL_CLIPSIZE := 0
 # Debug experiments (the F3 overlay's View tab): keep the FP arms drawn in every
 # camera mode, and/or draw the player's own body in first person — the "see our
 # feet" probe (the §14 aim overlay bends the spine away from the eye, so looking
@@ -222,9 +206,8 @@ func _update_viewmodel_pass() -> void:
 	_vm_camera.environment = _camera.environment
 	var size := _vm_viewport.size
 	if size.x > 0 and size.y > 0:
-		var aspect := float(size.x) / float(size.y)
-		var half_h := deg_to_rad(PLAYER_VIEWMODEL_RENDERFOV_H_DEG) * 0.5
-		_vm_camera.fov = rad_to_deg(2.0 * atan(tan(half_h) / aspect))
+		_vm_camera.fov = NovaSimulation.fov_vertical_from_horizontal(
+				PLAYER_VIEWMODEL_RENDERFOV_H_DEG, float(size.x) / float(size.y))
 
 
 func set_input_source(source: Callable) -> void:
@@ -233,6 +216,14 @@ func set_input_source(source: Callable) -> void:
 
 func set_third_person(enabled: bool) -> void:
 	_third_person = enabled
+	_sync_camera_mode()
+
+
+# The sim owns the camera-mode-dependent view state (fov suppression + the 3P
+# anchor chase) [orig: g_camera_mode @0xA890C8]; tell it whenever the mode flips.
+func _sync_camera_mode() -> void:
+	if _world != null and _world.has_method("set_local_player_camera_third_person"):
+		_world.set_local_player_camera_third_person(_third_person)
 
 
 func is_third_person() -> bool:
@@ -240,7 +231,6 @@ func is_third_person() -> bool:
 
 
 func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
-	_frame_delta = _delta
 	if not _has_player():
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
@@ -267,10 +257,12 @@ func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
 	_send_weapon_input()
 
 
-# The weapon trigger input: LMB fire (held + edge), R reload (edge, refused on a full
-# magazine or empty reserve), RMB the ADS toggle (edge). Only while the mouse is
-# captured - UI clicks never fire. [orig: the binding dispatch cases 0x95 fire /
-# 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420]
+# The weapon trigger input: LMB fire (held + edge), R reload (raw edge — the
+# full-magazine/empty-reserve refusal is the SIM's dispatch gate), RMB the ADS
+# toggle REQUEST (the sim gates it and owns the engaged state). Only while the
+# mouse is captured - UI clicks never fire. [orig: the binding dispatch cases
+# 0x95 fire / 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420 —
+# ported in libs/world weapon_fsm + NovaSimulation]
 func _send_weapon_input() -> void:
 	if _world == null or not _world.has_method("set_local_player_weapon_input"):
 		return
@@ -281,29 +273,11 @@ func _send_weapon_input() -> void:
 	var reload_down := captured and Input.is_physical_key_pressed(KEY_R)
 	var reload_edge := reload_down and not _reload_was_down
 	_reload_was_down = reload_down
-	# [orig: reload case 0xD3 refuses when clip == clipsize or the reserve is empty]
-	if reload_edge and (PLAYER_VIEWMODEL_CLIPSIZE <= 0
-			or _weapon_clip == PLAYER_VIEWMODEL_CLIPSIZE or _weapon_reserve <= 0):
-		reload_edge = false
 	var scope_down := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	if scope_down and not _scope_was_down:
-		_toggle_scope()
+	if scope_down and not _scope_was_down and _world.has_method("request_local_player_scope_toggle"):
+		_world.request_local_player_scope_toggle()
 	_scope_was_down = scope_down
-	_world.set_local_player_weapon_input(fire_held, fire_edge, reload_edge, _scope_engaged)
-
-
-# The ADS toggle [orig: input case 6 @0x4e0420 gates currentAction not in {RELOAD,
-# SWITCHFROM}; Player_ToggleWeaponScope @0x4df0c0 gates def Flags & 3 (scoped/sighted)].
-# Engaging queues the scopeup FSM state; disengaging scopedown
-# [orig: WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown @0x53f080].
-func _toggle_scope() -> void:
-	if _weapon_current_action == 4 or _weapon_current_action == 7:
-		return
-	if (PLAYER_VIEWMODEL_FLAGS & 3) == 0:
-		return
-	_scope_engaged = not _scope_engaged
-	if _world.has_method("queue_local_player_weapon_scope"):
-		_world.queue_local_player_weapon_scope(_scope_engaged)
+	_world.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
 
 
 func after_world_tick() -> void:
@@ -311,14 +285,17 @@ func after_world_tick() -> void:
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
 		_clear_models()
+		_view = null
 		return
+	_view = _world.local_player_view() if _world.has_method("local_player_view") else null
 	_consume_weapon_view()
 	_update_player_camera()
 
 
-# Drain the FSM's per-tick events (monotonic serials - several 62.5 Hz ticks can run
-# per frame): clip starts land on BOTH viewmodel parts, forced unscope (one-shot /
-# reload stash) and the pump's rescope-after-reload drive the host scope state.
+# Drain the FSM's clip events (a monotonic serial - several 62.5 Hz ticks can run
+# per frame): clip starts land on BOTH viewmodel parts. The scope side effects
+# (forced unscope, rescope-after-reload) flip the SIM's own engaged bit — they
+# arrive here already folded into the view snapshot.
 # [orig: ActionSlot_BeginActivePhase @0x53f830 plays the action clip on the owner's
 # animadm channel; the rescope block @0x54139e]
 func _consume_weapon_view() -> void:
@@ -327,30 +304,9 @@ func _consume_weapon_view() -> void:
 	var view: PlayerWeaponView = _world.local_player_weapon_view()
 	if view == null:
 		return
-	_weapon_current_action = view.current_action
-	_weapon_clip = view.clip
-	_weapon_reserve = view.reserve
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
 		_play_viewmodel_clip(view.anim_key)
-	if _weapon_unscope_serial < 0 and _weapon_rescope_serial < 0:
-		# First snapshot for these parts (cursors reset to -1): ADOPT the scope
-		# serials without treating them as edges — the sim's counters start at 0,
-		# and a phantom "rescope" here would auto-ADS a sighted weapon at spawn.
-		# (The play cursor above intentionally DOES fire: fresh parts need the
-		# FSM's active clip restarted on them.)
-		_weapon_unscope_serial = view.unscope_serial
-		_weapon_rescope_serial = view.rescope_serial
-		return
-	if view.unscope_serial != _weapon_unscope_serial:
-		_weapon_unscope_serial = view.unscope_serial
-		_scope_engaged = false
-	if view.rescope_serial != _weapon_rescope_serial:
-		_weapon_rescope_serial = view.rescope_serial
-		if (PLAYER_VIEWMODEL_FLAGS & 3) != 0:
-			_scope_engaged = true
-			if _world.has_method("queue_local_player_weapon_scope"):
-				_world.queue_local_player_weapon_scope(true)
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay
@@ -382,6 +338,7 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		return false
 	if key.keycode == KEY_F4:
 		_third_person = not _third_person
+		_sync_camera_mode()
 		return true
 	if key.keycode == KEY_C:
 		_crouch = not _crouch
@@ -416,6 +373,8 @@ func _reset_state() -> void:
 	_third_person = false
 	_crouch = false
 	_prone = false
+	_view = null
+	_sync_camera_mode()
 
 
 func _has_player() -> bool:
@@ -470,9 +429,7 @@ func _ensure_models() -> void:
 			for child in _viewmodel.get_children():
 				if child.has_method("play_body_clip"):
 					_vm_parts.append(child)
-			_weapon_play_serial = -1  # re-sync the FSM event serials to the new parts
-			_weapon_unscope_serial = -1
-			_weapon_rescope_serial = -1
+			_weapon_play_serial = -1  # re-sync the clip serial: fresh parts replay the active clip
 
 
 func _clear_models() -> void:
@@ -483,8 +440,6 @@ func _clear_models() -> void:
 	_avatar = null
 	_viewmodel = null
 	_vm_parts.clear()
-	_scope_engaged = false
-	_scope_fraction = 0.0
 	if _camera != null and _camera_saved_fov > 0.0:
 		_camera.fov = _camera_saved_fov
 
@@ -513,21 +468,21 @@ func _update_player_camera() -> void:
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var eye := pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)
 	if _third_person:
-		# Chase camera: the smoothed anchor is the follow target [orig: anchor = Position
-		# + CameraOffset, quarter-step ease per 62 Hz tick — ThirdPersonCamera_Update
-		# @0x437af0; ours eases per frame], the eye sits back along the look direction
-		# pitched up by the orbit default and the rotation re-aims at the anchor
-		# [orig: Camera_ComputeThirdPersonView @0x437d10 mode 1].
-		if not _tp_anchor_valid:
-			_tp_anchor = eye
-			_tp_anchor_valid = true
-		_tp_anchor += (eye - _tp_anchor) * 0.25
+		# Chase camera: the smoothed anchor is SIM state, eased a quarter-step per
+		# 62.5 Hz TICK (render-rate independent) [orig: anchor = Position +
+		# CameraOffset, quarter-step per 62 Hz tick — ThirdPersonCamera_Update
+		# @0x437af0; ported in libs/world player_view]. The eye sits back along the
+		# look direction pitched up by the orbit default and the rotation re-aims
+		# at the anchor [orig: Camera_ComputeThirdPersonView @0x437d10 mode 1].
+		# Until the first 3P tick seeds the chase, the eye stands in.
+		var anchor := eye
+		if _view != null and _view.tp_anchor_valid:
+			anchor = _view.tp_anchor
 		var opr := pr + deg_to_rad(PLAYER_TP_ORBIT_PITCH_DEG)
 		var back := Vector3(sin(yr) * cos(opr), sin(opr), -cos(yr) * cos(opr))
-		_camera.global_position = _tp_anchor - back * PLAYER_TP_DISTANCE
-		_camera.look_at(_tp_anchor, Vector3.UP)
+		_camera.global_position = anchor - back * PLAYER_TP_DISTANCE
+		_camera.look_at(anchor, Vector3.UP)
 	else:
-		_tp_anchor_valid = false
 		_camera.global_position = eye
 		_camera.look_at(eye + forward, Vector3.UP)
 	_update_scope_camera()
@@ -535,31 +490,21 @@ func _update_player_camera() -> void:
 	_update_viewmodel()
 
 
-# The ADS camera: step the 15-tick scope ease toward engaged/hip and drive the main
-# camera FOV — 80 horizontal base [orig: g_cameraFovDeg @0x26C6848 default 0x500000],
-# scoped = 80 / zoom for sighted weapons [orig: Player_ToggleWeaponScope @0x4df401 ->
-# 80.0 / Player_GetClampedWeaponElevation], suppressed in third person
-# [orig: @0x4df3fa g_camera_mode -> 80.0]. Horizontal -> vertical through the live
-# aspect, the same conversion as the render setup [orig: @0x58d900].
+# The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted defs,
+# eased by the 15-tick interp, suppressed in third person — libs/world
+# player_view [orig: g_cameraFovDeg @0x26C6848; Player_ToggleWeaponScope @0x4df401;
+# @0x4df3fa]); this host converts horizontal -> vertical through the live aspect
+# via the ONE shared conversion [orig: @0x58d900].
 func _update_scope_camera() -> void:
-	var target := 1.0 if _scope_engaged else 0.0
-	_scope_fraction = move_toward(_scope_fraction, target, _frame_delta * 62.5 / SCOPE_EASE_STEPS)
-	if _camera == null:
+	if _camera == null or _view == null:
 		return
-	var mag := 1.0
-	if (PLAYER_VIEWMODEL_FLAGS & 2) != 0 and PLAYER_VIEWMODEL_SCOPE_MAG > 1.0:
-		mag = PLAYER_VIEWMODEL_SCOPE_MAG
-	var zoom_fraction := 0.0 if _third_person else _scope_fraction
-	var fov_h := lerpf(PLAYER_CAMERA_FOV_H_DEG, PLAYER_CAMERA_FOV_H_DEG / mag, zoom_fraction)
 	var viewport := _camera.get_viewport()
 	if viewport == null:
 		return
 	var size := viewport.get_visible_rect().size
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
-	var aspect := size.x / size.y
-	var half_h := deg_to_rad(fov_h) * 0.5
-	_camera.fov = rad_to_deg(2.0 * atan(tan(half_h) / aspect))
+	_camera.fov = NovaSimulation.fov_vertical_from_horizontal(_view.fov_h_deg, size.x / size.y)
 
 
 func _update_avatar(pos: Vector3) -> void:
@@ -642,10 +587,11 @@ func _update_viewmodel() -> void:
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
 	# The ADS pos -> tpos swap: instant once sighted in the original's camera
 	# [orig: Player_UpdateFirstPersonCamera @0x4dd380, entity Flags & 2 -> AltCamOffset],
-	# with the visible ease carried by the 15-step scope-camera interp
-	# [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp @0x82CE40] - realized
-	# here as the eased blend toward the tpos view bias.
-	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, _scope_fraction)
+	# with the visible ease carried by the 15-step scope-camera interp — SIM state
+	# at the world cadence [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp
+	# @0x82CE40; libs/world player_view_bias_units states the blend].
+	var ads := _view.scope_fraction if _view != null else 0.0
+	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it
@@ -683,9 +629,8 @@ func _apply_viewmodel_def() -> void:
 	PLAYER_VIEWMODEL_ROT_BIAS_DEF = def.rot_bias_deg
 	PLAYER_VIEWMODEL_TPOS_UNITS = def.tpos_units
 	PLAYER_VIEWMODEL_RENDERFOV_H_DEG = def.renderfov_h_deg
-	PLAYER_VIEWMODEL_FLAGS = def.flags
-	PLAYER_VIEWMODEL_SCOPE_MAG = def.scope_max_mag
-	PLAYER_VIEWMODEL_CLIPSIZE = def.clipsize
+	# flags / scope_max_mag / clipsize stay with the SIM (the weapon dict feeds
+	# set_local_player_weapon): the ADS gates + fov policy run there (ADR 0016).
 
 
 # Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.

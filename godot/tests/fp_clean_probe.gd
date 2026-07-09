@@ -39,7 +39,7 @@ func _ready() -> void:
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms.is_empty():
 		bms = "05TR.bms"
-	var ws = ws_station.get_workspace(EditorWorkstation.Workspace.MISSION)
+	var ws = ws_station.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
 	var path := NovaPaths.resolve_file(root, bms)
 	if ws.open_file(path) != OK:
 		push_error("[fp] open failed"); get_tree().quit(1); return
@@ -172,7 +172,13 @@ func _fsm_sequence() -> void:
 	await _settle(20)
 	print("[fp] fsm mid-reload: ", _fsm_str(world.local_player_weapon_view()))
 	await _capture("32_fsm_reload.png")
-	await _settle(140)
+	# The reload's baked span is TICKS (delaystart 100 + delayend auto from the clip,
+	# ~3.5 s of 62.5 Hz wall-clock), while _settle counts FRAMES — wait by STATE so
+	# the probe is fps-independent instead of racing the reload at high frame rates.
+	var reload_waits := 0
+	while world.local_player_weapon_view().current_action != 0 and reload_waits < 60:
+		await _settle(10)
+		reload_waits += 1
 	print("[fp] fsm post-reload: ", _fsm_str(world.local_player_weapon_view()))
 	# ADS in (RMB edge), hold for the eased tpos view + zoom, then back to hip.
 	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
@@ -183,8 +189,11 @@ func _fsm_sequence() -> void:
 	var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
 	if host != null:
 		var cam: Camera3D = host.get("_camera")
+		var pv: PlayerLocalView = world.local_player_view() \
+				if world.has_method("local_player_view") else null
 		print("[fp] fsm ads: engaged=%s fraction=%.2f cam_fov=%.1f" % [
-			str(host.get("_scope_engaged")), float(host.get("_scope_fraction")),
+			str(pv.scope_engaged) if pv != null else "<null>",
+			pv.scope_fraction if pv != null else -1.0,
 			cam.fov if cam != null else -1.0])
 	_mouse_btn(MOUSE_BUTTON_RIGHT, true)
 	await _settle(3)

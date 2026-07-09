@@ -23,6 +23,7 @@
 #include <world/ai.h>
 #include <world/player_input.h>
 #include <world/player_spawn.h>
+#include <world/player_view.h>
 #include <world/weapon_fsm.h>
 #include <world/world.h>
 
@@ -186,7 +187,6 @@ private:
 	bool weapon_fire_held_ = false;
 	bool weapon_fire_pressed_ = false;
 	bool weapon_reload_pressed_ = false;
-	bool weapon_scope_active_ = false; // host-owned ADS engaged state, mirrored in
 	uint64_t weapon_play_serial_ = 0;
 	String weapon_anim_key_;
 	uint64_t weapon_fired_serial_ = 0;
@@ -194,7 +194,17 @@ private:
 	uint64_t weapon_reload_serial_ = 0;
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
+	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
 	void tick_local_player_weapon();
+
+	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
+	// Ticked at the world cadence right after the weapon pump, so camera lag and the
+	// ADS swing are render-rate independent [orig: the 62 Hz frame loop runs
+	// CNetPlayerInterp @ 0x4df36e and ThirdPersonCamera_Update @ 0x437af0 per tick].
+	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
+	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
+	opennova::world::PlayerViewState player_view_{};
+	void tick_local_player_view();
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over libs/npruntime ----------------
 	// One in-match runtime funnels every path: the host/SP/editor-preview is the §5.0 mode-3
@@ -387,14 +397,26 @@ public:
 	// @ 0x53ee10]. Resets the slot to a fresh idle with a full magazine.
 	void set_local_player_weapon(const Dictionary &p_def, const Dictionary &p_clip_seconds);
 	void clear_local_player_weapon();
-	// Per-frame trigger state: fire held + edge, reload edge, and the host's ADS
-	// engaged state (the reload scope stash reads it) [orig: the binding-149/reload/
-	// scope input dispatch, Input_HandleActionBinding_0 @ 0x4e0420].
+	// Per-frame trigger state: fire held + edge, raw reload edge (the dispatch
+	// gate runs sim-side) [orig: the binding-149/reload input dispatch,
+	// Input_HandleActionBinding_0 @ 0x4e0420].
 	void set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
-	                                   bool p_reload_pressed, bool p_scope_active);
-	// Queue the ADS FSM easing states on toggle
-	// [orig: WeaponSlot_TryQueueScopeUp @ 0x53f050 / ..ScopeDown @ 0x53f080].
-	void queue_local_player_weapon_scope(bool p_up);
+	                                   bool p_reload_pressed);
+	// The ADS toggle request: gated by the dispatcher rules (no toggle during
+	// RELOAD/SWITCHFROM, def Flags & 3 required), flips the sim-owned engaged bit
+	// and queues the scopeup/scopedown FSM states. Returns whether it toggled.
+	// [orig: input case 6 @ 0x4e0420; Player_ToggleWeaponScope @ 0x4df0c0;
+	//  WeaponSlot_TryQueueScopeUp @ 0x53f050 / ..ScopeDown @ 0x53f080]
+	bool request_local_player_scope_toggle();
+	// The host's camera mode, driving the fov suppression + anchor chase
+	// [orig: g_camera_mode @ 0xA890C8].
+	void set_local_player_camera_third_person(bool p_third_person);
+	// The view-state snapshot: {scope_engaged, scope_fraction, fov_h_deg,
+	// tp_anchor (Godot space), tp_anchor_valid}. Read-only; ticked at 62.5 Hz.
+	Dictionary get_local_player_view() const;
+	// Horizontal -> vertical projection fov (degrees) through the aspect — the
+	// ONE conversion both cameras use [orig: @ 0x58d900].
+	static float fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect);
 	// The FSM view for the host: {active, current, anim_key, play_serial,
 	// fired_serial, dry_serial, reload_serial, unscope_serial, rescope_serial,
 	// clip, reserve, kick}. Serials are monotonic so no event is lost when several

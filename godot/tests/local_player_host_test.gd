@@ -73,13 +73,23 @@ class FakeWorld:
 
 	# The equipped-weapon FSM seam (null = no weapon installed, the default).
 	var weapon_view = null  # PlayerWeaponView
-	var scope_queue: Array = []
+	# The sim-owned view state seam (ADS ease / fov policy / 3P anchor).
+	var view = null  # PlayerLocalView
+	var scope_toggle_requests := 0
+	var camera_mode_calls: Array = []
 
 	func local_player_weapon_view():
 		return weapon_view
 
-	func queue_local_player_weapon_scope(up: bool) -> void:
-		scope_queue.append(up)
+	func local_player_view():
+		return view
+
+	func request_local_player_scope_toggle() -> bool:
+		scope_toggle_requests += 1
+		return true
+
+	func set_local_player_camera_third_person(third_person: bool) -> void:
+		camera_mode_calls.append(third_person)
 
 
 func after_each() -> void:
@@ -197,11 +207,11 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		"teardown() restores the player camera's cull mask")
 
 
-func test_first_weapon_snapshot_never_auto_engages_ads() -> void:
-	# The sim's FSM event serials start at 0 while the host cursors reset to -1,
-	# so the FIRST consumed snapshot must be a baseline, not a set of edges — a
-	# phantom "rescope" there silently ADS-engages any sighted weapon at spawn.
-	# Observed through the public seam: the world's scope queue.
+func test_camera_state_rides_the_sim_view() -> void:
+	# ADR 0016: the ADS ease, the fov policy, and the 3P anchor are SIM state at
+	# the world cadence — the host reads the PlayerLocalView snapshot and places
+	# nodes. Scoped fov: the sim's horizontal policy value through the ONE shared
+	# h->v conversion. 3P: the camera aims at the sim's chased anchor.
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()
 	var host := LocalPlayerHost.new()
@@ -211,18 +221,46 @@ func test_first_weapon_snapshot_never_auto_engages_ads() -> void:
 	host.setup(world, camera)
 	host.set_input_source(func() -> Dictionary:
 		return {})
-	host.PLAYER_VIEWMODEL_FLAGS = 2  # sighted (the default AK is)
 
-	world.weapon_view = PlayerWeaponView.new()  # all serials 0, the sim's start
+	world.view = PlayerLocalView.new()
+	world.view.fov_h_deg = 20.0  # the sim's sighted 80/4 policy value
 	host.before_world_tick(0.016)
 	host.after_world_tick()
-	assert_eq(world.scope_queue, [], "the initial snapshot is a baseline: no ADS queued")
+	var size := camera.get_viewport().get_visible_rect().size
+	assert_almost_eq(camera.fov,
+		NovaSimulation.fov_vertical_from_horizontal(20.0, size.x / size.y), 0.001,
+		"the camera fov is the sim's policy value through the shared conversion")
 
-	# A REAL rescope edge (serial bump — e.g. the pump's rescope-after-reload)
-	# still drives the scope queue.
-	world.weapon_view.rescope_serial = 1
+	# Third person: the sim's chased anchor is the look target; the eye sits back
+	# along the orbit. (level look, yaw 0 -> anchor - back*3 with 22.5 deg orbit)
+	world.view.tp_anchor = Vector3(4.0, 2.0, -6.0)
+	world.view.tp_anchor_valid = true
+	host.set_third_person(true)
 	host.after_world_tick()
-	assert_eq(world.scope_queue, [true], "a serial bump after the baseline is an event")
+	var to_anchor: Vector3 = world.view.tp_anchor - camera.global_position
+	assert_almost_eq(to_anchor.length(), 3.0, 0.001,
+		"the camera orbits the SIM anchor at the witnessed 3.0 distance")
+
+
+func test_camera_mode_and_scope_toggle_reach_the_sim() -> void:
+	# The sim owns g_camera_mode's consequences and the ADS gates: F4 pushes the
+	# mode; the host never carries scope state of its own.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)  # _reset_state syncs the initial mode
+	world.camera_mode_calls.clear()
+
+	var f4 := InputEventKey.new()
+	f4.keycode = KEY_F4
+	f4.pressed = true
+	assert_true(host.handle_key_input(f4, true))
+	assert_eq(world.camera_mode_calls, [true], "F4 pushes third person into the sim")
+	assert_true(host.handle_key_input(f4, true))
+	assert_eq(world.camera_mode_calls, [true, false], "and back")
 
 
 # The game shell calls setup() from its own _ready — while the player camera's

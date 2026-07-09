@@ -494,6 +494,21 @@ void weapon_fsm_queue_scope_up(WeaponSlotState &slot) {
         slot.next = weapon_action::kIdle;
 }
 
+bool weapon_fsm_reload_allowed(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: the reload input case 0xD3 @ 0x4e0420 compares the clip against
+    // clipsize and the reserve against zero before WeaponSlot_RequestReload]
+    if (def.clip_capacity <= 0) return false;
+    return slot.clip != def.clip_capacity && slot.reserve > 0;
+}
+
+bool weapon_fsm_scope_toggle_allowed(const WeaponFsmDef &def, const WeaponSlotState &slot) {
+    // [orig: input case 6 @ 0x4e0420 gates currentAction not in {RELOAD,
+    // SWITCHFROM}; Player_ToggleWeaponScope @ 0x4df0c0 gates def Flags & 3]
+    if (slot.current == weapon_action::kReload || slot.current == weapon_action::kSwitchFrom)
+        return false;
+    return (def.flags & 3) != 0;
+}
+
 void weapon_fsm_queue_scope_down(WeaponSlotState &slot) {
     // [orig: WeaponSlot_TryQueueScopeDown @ 0x53f080]
     if (slot.current == weapon_action::kScopeDown) return;

@@ -899,6 +899,15 @@ target_include_directories(weapon_fsm_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(weapon_fsm_test PRIVATE cxx_std_17)
 add_test(NAME weapon_fsm COMMAND weapon_fsm_test)
 
+# Local player view state (the ADS scope ease, the 3P anchor chase, the fov
+# policy) at the fixed 62.5 Hz tick — render-cadence invariance — plus the
+# input-dispatch gates in front of the FSM requests.
+add_executable(player_view_test world/player_view_test.cpp)
+target_link_libraries(player_view_test PRIVATE opennova_world)
+target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_view_test PRIVATE cxx_std_17)
+add_test(NAME player_view COMMAND player_view_test)
+
 # Spawn-state init (Entity_ResetToSpawnState @0x4B9610, net-re §5.2b): the entity+36
 # bit-1 movement-gate clear + Position backup — the field-init half of the host
 # player-spawn machine that the Phase-2 listen-server player spawn reuses.

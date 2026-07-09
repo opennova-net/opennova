@@ -89,6 +89,7 @@ struct WeaponFsmDef {
     bool auto_fire = false;
     bool burst3 = false;
     int32_t clip_capacity = 0; // rounds per clip; < 0 = infinite (the def+0x58 == -1 paths)
+    int32_t flags = 0;         // the raw weapon.def flag mask (scoped 1 / sighted 2 / ...)
 };
 
 // ms -> 62.5 Hz ticks. [orig: Anim_GetDurationTicks @ 0x53ee10 = ms * 62.5 / 1000 + 1
@@ -173,6 +174,16 @@ void weapon_fsm_request_reload(WeaponSlotState &slot);
 // phase is {0,4} and the state isn't already current; else queue idle.
 void weapon_fsm_queue_scope_up(WeaponSlotState &slot);
 void weapon_fsm_queue_scope_down(WeaponSlotState &slot);
+
+// The input-dispatcher gates in front of the requests
+// [orig: Input_HandleActionBinding_0 @ 0x4e0420]:
+// reload (case 0xD3) is refused on a full magazine or an empty reserve (and for
+// defs without a clip);
+bool weapon_fsm_reload_allowed(const WeaponFsmDef &def, const WeaponSlotState &slot);
+// the scope toggle (case 6) is refused while RELOAD or SWITCHFROM is current and
+// for defs without the scoped/sighted flags
+// [orig: + Player_ToggleWeaponScope @ 0x4df0c0 gates def Flags & 3].
+bool weapon_fsm_scope_toggle_allowed(const WeaponFsmDef &def, const WeaponSlotState &slot);
 
 // One 62.5 Hz tick of the pump + the current action's handler.
 void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,

@@ -565,8 +565,11 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_aim_overlay"), &NovaSimulation::get_local_player_aim_overlay);
 	ClassDB::bind_method(D_METHOD("set_local_player_weapon", "def", "clip_seconds"), &NovaSimulation::set_local_player_weapon);
 	ClassDB::bind_method(D_METHOD("clear_local_player_weapon"), &NovaSimulation::clear_local_player_weapon);
-	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed", "scope_active"), &NovaSimulation::set_local_player_weapon_input);
-	ClassDB::bind_method(D_METHOD("queue_local_player_weapon_scope", "up"), &NovaSimulation::queue_local_player_weapon_scope);
+	ClassDB::bind_method(D_METHOD("set_local_player_weapon_input", "fire_held", "fire_pressed", "reload_pressed"), &NovaSimulation::set_local_player_weapon_input);
+	ClassDB::bind_method(D_METHOD("request_local_player_scope_toggle"), &NovaSimulation::request_local_player_scope_toggle);
+	ClassDB::bind_method(D_METHOD("set_local_player_camera_third_person", "third_person"), &NovaSimulation::set_local_player_camera_third_person);
+	ClassDB::bind_method(D_METHOD("get_local_player_view"), &NovaSimulation::get_local_player_view);
+	ClassDB::bind_static_method("NovaSimulation", D_METHOD("fov_vertical_from_horizontal", "fov_h_deg", "aspect"), &NovaSimulation::fov_vertical_from_horizontal);
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &NovaSimulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
@@ -720,6 +723,7 @@ void NovaSimulation::step() {
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
+	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 }
 
@@ -748,6 +752,7 @@ bool NovaSimulation::advance_frame() {
 	apply_player_input_pre_tick();
 	world_->run_logic_tick(/*is_authority=*/true);
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
+	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
 	last_sim_tick_us_ = perf_now_us() - sim_start;
 	return true;
 }
@@ -899,6 +904,7 @@ void NovaSimulation::host_pump() {
 	NovaUdpPumpDatagramSocket sock(host_listen_ ? pump_.ptr() : nullptr);
 	np::host_session_pump(host_owner_, sock); // recv-drain -> tick_connections -> Server_TickUpdate -> S2C flush
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
+	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
 	if (runtime_) runtime_->Client_ProcessNetworkFrame(now); // fold host_loop_ -> ClientState (HostClient view)
 }
 
@@ -933,6 +939,7 @@ void NovaSimulation::joiner_pump() {
 	apply_player_input_pre_tick();                  // input -> L's body input
 	world_->run_logic_tick(/*is_authority=*/false); // local World tick: moves L's motor ONLY (never Server_TickUpdate)
 	tick_local_player_weapon(); // the equipped-slot FSM pump, after the world tick (net-re §5.62)
+	tick_local_player_view();   // the ADS ease + 3P anchor chase, same cadence
 
 	// Run the client frame: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C uplink (gated
 	// InMatch && deployed inside the runtime). Build the uplink from L once it exists.
@@ -1193,6 +1200,8 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	const int flags = int(p_def.get("flags", 0));
 	weapon_def_.auto_fire = (flags & 0x100) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
+	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
+	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
 	const int clipsize = int(p_def.get("clipsize", 0));
 	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
 	// Fresh slot: full magazine + the def's carried reserve (the interim ammo default
@@ -1205,28 +1214,72 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_fired_serial_ = weapon_dry_serial_ = weapon_reload_serial_ = 0;
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
 	weapon_fire_held_ = weapon_fire_pressed_ = weapon_reload_pressed_ = false;
-	weapon_scope_active_ = false;
+	player_view_.scope_engaged = false; // a fresh mount starts at the hip
 	weapon_active_ = true;
 }
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
+	player_view_.scope_engaged = false;
 }
 
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
-		bool p_reload_pressed, bool p_scope_active) {
+		bool p_reload_pressed) {
 	weapon_fire_held_ = p_fire_held;
 	weapon_fire_pressed_ = weapon_fire_pressed_ || p_fire_pressed; // latch until consumed
 	weapon_reload_pressed_ = weapon_reload_pressed_ || p_reload_pressed;
-	weapon_scope_active_ = p_scope_active;
 }
 
-void NovaSimulation::queue_local_player_weapon_scope(bool p_up) {
-	if (!weapon_active_) return;
-	if (p_up)
+bool NovaSimulation::request_local_player_scope_toggle() {
+	// [orig: input case 6 @ 0x4e0420 gates currentAction not in {RELOAD, SWITCHFROM};
+	//  Player_ToggleWeaponScope @ 0x4df0c0 gates def Flags & 3, flips g_scopeEngaged
+	//  @ 0x82CE94, and queues the scopeup/scopedown FSM state @ 0x53f050/0x53f080]
+	if (!weapon_active_) return false;
+	if (!opennova::world::weapon_fsm_scope_toggle_allowed(weapon_def_, weapon_slot_)) return false;
+	player_view_.scope_engaged = !player_view_.scope_engaged;
+	if (player_view_.scope_engaged)
 		opennova::world::weapon_fsm_queue_scope_up(weapon_slot_);
 	else
 		opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
+	return true;
+}
+
+void NovaSimulation::set_local_player_camera_third_person(bool p_third_person) {
+	player_view_.third_person = p_third_person; // [orig: g_camera_mode @ 0xA890C8]
+}
+
+// One 62.5 Hz tick of the view state, after the weapon pump: the ADS ease and the
+// third-person anchor chase run at the WORLD cadence, so camera lag is identical at
+// any render rate [orig: the 62 Hz frame loop; ThirdPersonCamera_Update @ 0x437af0].
+void NovaSimulation::tick_local_player_view() {
+	if (!world_ || !world_->cached.local_player.valid()) {
+		player_view_ = opennova::world::PlayerViewState{};
+		return;
+	}
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (!e) return;
+	// The eye is +1.0 world unit above Position, mission space (Z-up)
+	// [orig: Camera_ComputeThirdPersonView @ 0x437d10 eye = Position + 0x10000].
+	const float eye[3] = {e->position.x, e->position.y, e->position.z + 1.0f};
+	opennova::world::player_view_tick(player_view_, eye);
+}
+
+Dictionary NovaSimulation::get_local_player_view() const {
+	Dictionary out;
+	out["scope_engaged"] = player_view_.scope_engaged;
+	out["scope_fraction"] = opennova::world::player_view_scope_fraction(player_view_);
+	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
+			weapon_active_ ? weapon_def_.flags : 0,
+			weapon_active_ ? weapon_scope_max_mag_ : 0.0f);
+	// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position map.
+	out["tp_anchor"] = Vector3(player_view_.tp_anchor[0], player_view_.tp_anchor[2],
+			-player_view_.tp_anchor[1]);
+	out["tp_anchor_valid"] = player_view_.tp_anchor_valid;
+	return out;
+}
+
+float NovaSimulation::fov_vertical_from_horizontal(float p_fov_h_deg, float p_aspect) {
+	return opennova::world::fov_vertical_from_horizontal_deg(p_fov_h_deg, p_aspect);
 }
 
 // One 62.5 Hz pump of the local player's slot, after the world logic tick
@@ -1237,11 +1290,14 @@ void NovaSimulation::tick_local_player_weapon() {
 	opennova::world::WeaponFsmInputs in;
 	in.fire_held = weapon_fire_held_;
 	in.fire_pressed = weapon_fire_pressed_;
-	in.reload_pressed = weapon_reload_pressed_;
+	// The dispatch gate runs here now: the raw reload edge is refused on a full
+	// magazine or an empty reserve [orig: input case 0xD3 @ 0x4e0420].
+	in.reload_pressed = weapon_reload_pressed_ &&
+			opennova::world::weapon_fsm_reload_allowed(weapon_def_, weapon_slot_);
 	in.is_local = true;
 	in.is_authority = !joiner_; // the joiner defers the refill to the §5.58 round-trip
 	in.auto_reload = true;      // [orig: g_autoReloadEnabled @ 0x24D2118, default on]
-	in.scope_active = weapon_scope_active_;
+	in.scope_active = player_view_.scope_engaged;
 	opennova::world::WeaponFsmEvents ev;
 	opennova::world::weapon_fsm_tick(weapon_def_, weapon_slot_, in, ev);
 	weapon_fire_pressed_ = false; // edges consume on the first tick of the frame
@@ -1253,8 +1309,17 @@ void NovaSimulation::tick_local_player_weapon() {
 	if (ev.fired) ++weapon_fired_serial_;
 	if (ev.dry_fired) ++weapon_dry_serial_;
 	if (ev.reload_requested) ++weapon_reload_serial_;
-	if (ev.unscope) ++weapon_unscope_serial_;
-	if (ev.rescope) ++weapon_rescope_serial_;
+	// The FSM's scope side effects land on the sim-owned engaged bit: forced
+	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
+	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
+	if (ev.unscope) {
+		++weapon_unscope_serial_;
+		player_view_.scope_engaged = false;
+	}
+	if (ev.rescope) {
+		++weapon_rescope_serial_;
+		player_view_.scope_engaged = true;
+	}
 }
 
 Dictionary NovaSimulation::get_local_player_weapon_state() const {

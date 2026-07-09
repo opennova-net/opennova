@@ -779,21 +779,37 @@ func _setup_local_player_weapon(model) -> void:
 	sim.set_local_player_weapon(_local_weapon_dict, clip_seconds)
 
 
-## Per-frame weapon trigger state from the host (fire held + edge, reload edge, and the
-## host's ADS engaged state the reload scope-stash reads) [orig: the binding-149/reload
-## input dispatch, Input_HandleActionBinding_0 @0x4e0420].
-func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_pressed: bool, scope_active: bool) -> void:
+## Per-frame weapon trigger state from the host: fire held + edge and the RAW reload
+## edge — the dispatch gates (full-magazine/empty-reserve refusal) run in the sim
+## [orig: the binding-149/reload input dispatch, Input_HandleActionBinding_0 @0x4e0420].
+func set_local_player_weapon_input(fire_held: bool, fire_pressed: bool, reload_pressed: bool) -> void:
 	var sim := get_sim()
 	if sim != null:
-		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed, scope_active)
+		sim.set_local_player_weapon_input(fire_held, fire_pressed, reload_pressed)
 
 
-## Queue the ADS FSM easing state on a scope toggle
-## [orig: WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown @0x53f080].
-func queue_local_player_weapon_scope(up: bool) -> void:
+## The ADS toggle request; the sim applies the dispatcher gates and owns the engaged
+## state [orig: input case 6 @0x4e0420; Player_ToggleWeaponScope @0x4df0c0].
+func request_local_player_scope_toggle() -> bool:
+	var sim := get_sim()
+	return sim != null and bool(sim.request_local_player_scope_toggle())
+
+
+## The host camera mode, driving the sim-side fov suppression + anchor chase
+## [orig: g_camera_mode @0xA890C8].
+func set_local_player_camera_third_person(third_person: bool) -> void:
 	var sim := get_sim()
 	if sim != null:
-		sim.queue_local_player_weapon_scope(up)
+		sim.set_local_player_camera_third_person(third_person)
+
+
+## The 62.5 Hz view state (ADS ease, fov policy, 3P anchor), decoded once at this
+## edge (ADR 0017); null without a sim.
+func local_player_view() -> PlayerLocalView:
+	var sim := get_sim()
+	if sim == null:
+		return null
+	return PlayerLocalView.from_view_dict(sim.get_local_player_view())
 
 
 ## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
