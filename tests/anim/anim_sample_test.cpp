@@ -297,6 +297,48 @@ int main() {
         cbad.channels = cchan; cbad.num_channels = 1;
         const Clip cc = sample_clip(cbad, {{0.0f, 0.0f, 0.0f}}, /*model_bind=*/true);
         TEST_EXPECT(quat_approx(cc.frames[0][0].world_rotation, {s45, 0.0f, 0.0f, s45}, 1e-3f));
+
+        // --- bind_source: the witnessed channel+44 mechanism. A rig's clips compose against
+        // the SKELETON .bad's bind (the .adm slot-0 / reset animation), never their own. A
+        // clip whose own stored bind mirrors its channel self-cancels ONLY under the no-source
+        // fallback; against the skeleton bind the channel pose survives -- this is exactly the
+        // difference between the FP viewmodel frozen at its T-pose and holding the weapon.
+        // [orig: AnimMap_RegisterEntity @0x40bb60 (channel+44 = slot-0 .bad, set once);
+        // AnimChannel_ComputeBoneMatrices @0x410da0 (fallback to the playing anim @0x410de3).]
+        {
+            // Clip: channel = +90 about Z, own stored bind = its transpose (self-canceling).
+            BadBone kbones[1] = {};
+            kbones[0].parent_index = -1;
+            kbones[0].rotation[1] = 1.0f; kbones[0].rotation[3] = -1.0f; kbones[0].rotation[8] = 1.0f;
+            BadQuaternion krot[1] = {{0.0f, 0.0f, s45, s45}};
+            BadChannel kchan[1] = {};
+            kchan[0].frame_count = 1; kchan[0].frame_lengths = mfl; kchan[0].rotations = krot;
+            BadFile kclip = {};
+            kclip.fps = 30; kclip.frame_count = 1; kclip.flags = 0;
+            kclip.bones = kbones; kclip.num_bones = 1;
+            kclip.channels = kchan; kclip.num_channels = 1;
+
+            // Skeleton (reset) .bad: identity bind.
+            BadBone skbones[1] = {};
+            skbones[0].parent_index = -1;
+            skbones[0].rotation[0] = 1.0f; skbones[0].rotation[4] = 1.0f; skbones[0].rotation[8] = 1.0f;
+            BadFile skel = {};
+            skel.fps = 30; skel.frame_count = 1; skel.flags = 0;
+            skel.bones = skbones; skel.num_bones = 1;
+            skel.channels = kchan; skel.num_channels = 1;
+
+            const std::vector<Vec3> org = {{0.0f, 0.0f, 0.0f}};
+            // No bind source (the original's no-override fallback): self-cancels to identity.
+            Quat self_bound = sample_clip(kclip, org, /*model_bind=*/true).frames[0][0].world_rotation;
+            if (self_bound.w < 0.0f) {
+                self_bound = {-self_bound.w, -self_bound.x, -self_bound.y, -self_bound.z};
+            }
+            TEST_EXPECT(quat_approx(self_bound, {1.0f, 0.0f, 0.0f, 0.0f}, 1e-3f));
+            // Against the skeleton bind: the channel pose SURVIVES (identity skeleton bind
+            // makes every composition sense equal to the raw channel).
+            const Clip held = sample_clip(kclip, org, /*model_bind=*/true, &skel);
+            TEST_EXPECT(quat_approx(held.frames[0][0].world_rotation, {s45, 0.0f, 0.0f, s45}, 1e-3f));
+        }
     }
 
     bad_free(&bad);

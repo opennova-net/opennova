@@ -10,13 +10,6 @@
 
 namespace opennova::anim {
 
-// TEMPORARY experiment knob (default 2 = bind * channel -- the winner on real data: the
-// .bad bind 3x3 is stored transposed relative to the channel quats, so our row-major read
-// of it is already the inverse and the delta is mat3(bind) * channel; reset AND idle land
-// at identity with it, exactly the hold-steady a viewmodel shows). 1/3/4 kept while the
-// reload clip pins the final sense. Not part of the API.
-int g_model_bind_delta_variant = 2;
-
 namespace {
 
 constexpr Quat kIdentityQuat = {1.0f, 0.0f, 0.0f, 0.0f};
@@ -144,7 +137,8 @@ Quat sample_bone_world_rot(const BadChannel &ch, uint32_t tick) {
 
 }  // namespace
 
-Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind) {
+Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
+                 const BadFile *bind_source) {
     Clip clip;
     clip.fps = bad.fps;
     clip.flags = bad.flags;
@@ -159,12 +153,18 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
 
     clip.bones.resize(bone_count);
     std::vector<Vec3> rest_origins(bone_count, kZeroVec);
-    // model_bind: every channel rotation is re-based against this .bad's own per-bone bind
-    // 3x3 -- the channels are deltas from the bind, not absolute orientations. [orig:
-    // AnimChannel_ComputeBoneMatrices @0x410da0 multiplies Transpose(bind) x channel.]
-    std::vector<Quat> bind_inv;
+    // model_bind: every channel rotation composes against the SKELETON's per-bone bind 3x3.
+    // The bind operand is the rig-wide bind source (the .adm slot-0 / reset .bad -- the
+    // channel+44 override), NOT this clip's own bone records; those are only the original's
+    // fallback when no override exists. Composing a clip against its own bind self-cancels
+    // at its start frame -- the 2026-07-08 misreading that froze the FP rig at its T-pose.
+    // [orig: AnimChannel_ComputeBoneMatrices @0x410da0 (Transpose(bind) x channel; bind =
+    // *(channel+44) ? *(channel+44) : playing anim @0x410de3); AnimMap_RegisterEntity
+    // @0x40bb60 pins channel+44 to the .adm slot-0 .bad once, at entity registration.]
+    const BadFile &bind_bad = (model_bind && bind_source != nullptr) ? *bind_source : bad;
+    std::vector<Quat> bind_rot;
     if (model_bind) {
-        bind_inv.resize(bone_count, kIdentityQuat);
+        bind_rot.resize(bone_count, kIdentityQuat);
     }
     for (size_t b = 0; b < bone_count; ++b) {
         const BadBone &bone = bad.bones[b];
@@ -199,7 +199,12 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             for (int k = 0; k < 9; ++k) {
                 clip.bones[b].rest_rotation[k] = (k % 4 == 0) ? 1.0f : 0.0f;
             }
-            bind_inv[b] = quat_inv(mat3_to_quat(bone.rotation));
+            // Bind operand from the rig's skeleton .bad (bone-index aligned; the original
+            // walks the bind source's records by the same bone index, count from ITS header
+            // [orig: @0x410deb..0x410e4e boneData+20/boneData+24]).
+            if (b < bind_bad.num_bones) {
+                bind_rot[b] = mat3_to_quat(bind_bad.bones[b].rotation);
+            }
         } else {
             // Carry the raw BadBone BIND rotation so the host can build the Skeleton3D rest from
             // it; the rest ORIGIN follows the same source as the FK (model pivots when shared), so
@@ -228,20 +233,20 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
                 world_rot = sample_bone_world_rot(bad.channels[b], f);
             }
             if (model_bind) {
-                // Re-base against the bind: the used rotation is the channel's delta from the
-                // bind, identity at the reset clip by construction. [orig: AnimChannel_
-                // ComputeBoneMatrices @0x410da0 multiplies Transpose(bind 3x3) x channel.]
-                // Native frame throughout. Variant knob (see header): composition order/sense
-                // under test while the .bad matrix-vs-quat storage convention is pinned
-                // against retail visuals.
-                Quat delta;
-                switch (g_model_bind_delta_variant) {
-                    case 2:  delta = quat_mul(quat_inv(bind_inv[b]), world_rot); break;            // B*C
-                    case 3:  delta = quat_inv(quat_mul(bind_inv[b], world_rot)); break;            // (B^-1*C)^-1
-                    case 4:  delta = quat_inv(quat_mul(quat_inv(bind_inv[b]), world_rot)); break;  // (B*C)^-1
-                    default: delta = quat_mul(bind_inv[b], world_rot); break;                      // B^-1*C
-                }
-                world_rot = quat_normalize(delta);
+                // Compose against the SKELETON bind: the .bad stores each bind 3x3 TRANSPOSED
+                // relative to the channel quats (on-data: mat3(stored) x channel-at-reset ==
+                // identity on every clip's own records), so with our row-major read the
+                // witnessed `Transpose(bind 3x3) x channel` is mat3(stored) x channel --
+                // quat form: q(stored) * channel. Identity at the skeleton's own reset
+                // clip; the pose that carries the rig from the bind (T-pose) into the
+                // clip's stance everywhere else -- the FP hold at anim_wpn_idle. The
+                // operand order was pinned VISUALLY on the ak47 rig: this order renders
+                // the two-armed hold; the conjugate (channel * bind, oscarmike's
+                // pose x inverse-bind shape) collapses the rig -- their pipeline differs
+                // because its Skeleton3D rest carries the bind rotations, ours bakes the
+                // whole composition into the pose over identity rests.
+                // [orig: AnimChannel_ComputeBoneMatrices @0x410da0; sense pin D-INF-14.]
+                world_rot = quat_normalize(quat_mul(bind_rot[b], world_rot));
             }
 
             Vec3 translation = kZeroVec;

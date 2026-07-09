@@ -38,13 +38,15 @@ const WEAPON_DEF_POS_SCALE := 256.0                                # flt_7D1D70:
 # Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
 # the witnessed WPN_AK47AUTO def line + the current best facing.
 var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def WPN_AK47AUTO `pos` (hip)
-# The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is authored
-# IN VIEW SPACE (x = downrange -- the ak47_1st muzzle reaches x +1.5, the arms' upper ends sit
-# at x -0.9 behind the eye plane; y = up -- content ~0.6 above the waist origin, cancelling the
-# def pos drop; z = lateral). Godot's camera looks down -Z, so the map is yaw +90
-# (x->-Z, y->y, z->x) — the structural equivalent of the original drawing the rig with the raw
-# view matrix [orig: Player_RenderFirstPersonViewModel @0x4ded60 root = view transform].
-var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 90.0, 0.0)
+# The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is a
+# T-posed character skeleton (BN01 Pelvis at the origin, arms along +/-X) that the wpn clips
+# POSE into the hold, facing +Z in model space (at anim_wpn_idle the hands reach +Z, the mag
+# hangs -Y, the muzzle line runs along Z). Godot's camera looks down -Z, so the map is the
+# yaw-180 Z-flip (model forward +Z -> camera forward -Z), keeping Y up — the structural
+# equivalent of the original drawing the rig with the raw view matrix after its builders'
+# model->render frame remap [orig: Player_RenderFirstPersonViewModel @0x4ded60 root = view
+# transform; the S*A^T*S copy loops @0x40c4d8..0x40c57c].
+var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 # Witnessed per-weapon view-rotation bias: weapon.def `pos` rotation columns, DEGREES
 # (yaw, pitch, roll) ADDED to the view angles — the weapon cant. AK47AUTO = 5.0 / 3.75 / 353.0.
 # [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot = view_rot + Def.Bone.rot; parser stores

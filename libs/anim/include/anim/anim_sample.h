@@ -13,17 +13,22 @@
 //  (world entities) / BoneAnim_BuildWorldMatrices @0x40c400 (first-person viewmodel)
 //  (whose "X negated, Y/Z kept" is exactly the mesh's (-x,y,z) relationship).]
 //
-// The witnessed channel semantics (grilled 2026-07-08): the per-bone channel rotation is
-// NOT an absolute bone orientation -- AnimChannel_ComputeBoneMatrices @0x410da0 multiplies
-// Transpose(bind 3x3) x sampled channel matrix, i.e. every channel is measured RELATIVE to
-// the same .bad's per-bone bind rotation, and the composed builders (@0x40c400/@0x40c770)
-// then treat the result as the bone's rotation with a PURE-TRANSLATION bind: the skinning
-// bind-inverse is T(-pivot), no rotation. At the reset clip the delta is identity, so the
-// authored mesh renders verbatim regardless of how degenerate the stored bind matrices
-// look in isolation (ak47_RST.bad's are wild permutations; the deltas are sane).
-// `model_bind` below enables that faithful interpretation; the default (absolute channel
-// rotations + bind-matrix rest) is the legacy body pipeline, byte-identical for healthy
-// exports where channel-at-reset == bind.
+// The witnessed channel semantics (grilled 2026-07-08, CORRECTED 2026-07-09): the per-bone
+// channel rotation composes against a bind 3x3 -- AnimChannel_ComputeBoneMatrices @0x410da0
+// multiplies Transpose(bind 3x3) x sampled channel matrix -- but the bind operand is NOT the
+// playing clip's own bone records. The channel struct carries a bind-source override
+// (channel+44) that AnimMap_RegisterEntity @0x40bb60 pins ONCE to the .adm's slot-0 .bad
+// (the reset/skeleton animation, e.g. ak47_RST); clip switches (AnimMap_PlayAnimBySlot
+// @0x40bda0 / AnimMap_UpdateEntity @0x40b5f0) re-init only the playing anim and never touch
+// it. Every clip of a rig is therefore measured against the ONE skeleton bind -- the playing
+// clip's own records are only the fallback when no override is set (@0x410de3, the menu
+// preview's standalone channel). Composing each clip against its own bind self-cancels at
+// clip start by construction and freezes the FP rig at its authored T-pose -- that was the
+// 2026-07-08 misreading. The composed builders (@0x40c400/@0x40c770) then treat the result
+// as the bone's rotation with a PURE-TRANSLATION bind: the skinning bind-inverse is
+// T(-pivot), no rotation. `model_bind` below enables that faithful interpretation; the
+// default (absolute channel rotations + bind-matrix rest) is the legacy body pipeline,
+// byte-identical for healthy exports where channel-at-reset == bind.
 
 #ifndef OPENNOVA_ANIM_SAMPLE_H
 #define OPENNOVA_ANIM_SAMPLE_H
@@ -85,25 +90,25 @@ struct Clip {
 // each clip's .bad may carry different/zero bone positions -- using a clip's own positions
 // collapses the pose. (Matches oscarmike, which accumulates with skeleton->get_bone_rest.)
 //
-// model_bind: faithful channel semantics -- every sampled channel rotation is re-based
-// against this .bad's own per-bone bind 3x3 (a delta from the bind), rest_rotation becomes
+// model_bind: faithful channel semantics -- every sampled channel rotation composes against
+// the SKELETON's per-bone bind 3x3 (bind_source, the .adm slot-0 / reset .bad -- the
+// channel+44 override AnimMap_RegisterEntity pins @0x40bbe3), rest_rotation becomes
 // identity (the bind is a pure translation: the skin bind-inverse is T(-pivot)), and the FK
-// rotates pivots by the re-based rotations. Use with the model's bone pivots as
-// shared_rest_origins. Everything stays in the NATIVE model frame -- the host renders these
-// rigs with a native-frame mesh (NovaObjectData native_frame submeshes) and maps the whole
-// rig to the camera in one container transform; the original's S=diag(-1,1,1) conjugation +
-// x-negated pivots/translations in its composed builders are its model->render frame map,
-// realized here at that container boundary instead. At the reset clip the pose is identity
-// + absolute pivots, i.e. the authored mesh verbatim, for ANY export -- including rigs whose
-// stored bind matrices are degenerate (ak47_RST). [orig: AnimChannel_ComputeBoneMatrices
-// @0x410da0 (Transpose(bind) x channel); BoneAnim_BuildWorldMatrices @0x40c400 (T(-pivot)
-// bind-inverse, translation-only hierarchy, the S*A^T*S copy loops).]
+// rotates pivots by the composed rotations. bind_source == nullptr falls back to this
+// .bad's own bone records -- the original's no-override path (@0x410de3), correct only for
+// a standalone channel; a rig's clips MUST pass the shared skeleton .bad or every clip
+// self-cancels at its start frame and the rig freezes at the authored bind (T-pose). Use
+// with the model's bone pivots as shared_rest_origins. Everything stays in the NATIVE model
+// frame -- the host renders these rigs with a native-frame mesh (NovaObjectData
+// native_frame submeshes) and maps the whole rig to the camera in one container transform;
+// the original's S=diag(-1,1,1) conjugation + x-negated pivots/translations in its composed
+// builders are its model->render frame map, realized here at that container boundary
+// instead. [orig: AnimChannel_ComputeBoneMatrices @0x410da0 (Transpose(bind) x channel,
+// bind = *(channel+44) ? *(channel+44) : playing anim); AnimMap_RegisterEntity @0x40bb60
+// (channel+44 = .adm slot-0 .bad, set once); BoneAnim_BuildWorldMatrices @0x40c400
+// (T(-pivot) bind-inverse, translation-only hierarchy, the S*A^T*S copy loops).]
 Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
-                 bool model_bind = false);
-
-// TEMPORARY (see anim_sample.cpp): model_bind delta composition under test.
-// 1 = bind^-1*ch, 2 = bind*ch, 3 = (bind^-1*ch)^-1, 4 = (bind*ch)^-1.
-extern int g_model_bind_delta_variant;
+                 bool model_bind = false, const BadFile *bind_source = nullptr);
 
 // --- quaternion / vector helpers, exposed for tests ---
 Quat quat_normalize(Quat q);

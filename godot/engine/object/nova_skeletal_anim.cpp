@@ -10,7 +10,6 @@
 
 #include <bad/bad.h>
 
-#include <cstdlib>
 #include <adm/adm.h>
 #include <anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
 #include <world/body_anim.h>
@@ -258,27 +257,22 @@ bool NovaSkeletalAnim::load_from_bad_files(const Ref<NovaResourceRoot> &p_resour
 bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
 		const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads,
 		const std::vector<opennova::anim::Vec3> &p_model_origins, bool p_model_bind) {
-	// TEMPORARY experiment hook (see anim_sample.h): NOVA_VM_DELTA=1..4 selects the model_bind
-	// delta composition order while it is pinned down against retail visuals.
-	if (p_model_bind) {
-		const char *variant_env = std::getenv("NOVA_VM_DELTA");
-		if (variant_env != nullptr && variant_env[0] >= '1' && variant_env[0] <= '4' && variant_env[1] == '\0') {
-			opennova::anim::g_model_bind_delta_variant = variant_env[0] - '0';
-		}
-	}
 	// Pass 1: parse the reset/skeleton .bad -> canonical bones, shared rest origins, bind pose.
 	// ALL clips share this ONE skeleton's bone offsets + bind pose; each clip's own .bad may carry
-	// different/zero bone positions, so sampling must use the shared origins.
+	// different/zero bone positions, so sampling must use the shared origins. The parsed skeleton
+	// .bad stays alive through Pass 2: in model_bind mode it is ALSO the bind operand every clip's
+	// channels compose against [orig: AnimMap_RegisterEntity @0x40bb60 pins channel+44 to the .adm
+	// slot-0 .bad once; AnimChannel_ComputeBoneMatrices @0x410da0 reads its records per bone].
 	std::vector<opennova::anim::Vec3> shared_rest;
+	BadFile skeleton_bf = {};
 	{
-		BadFile bf;
 		if (p_reset_bytes.is_empty() ||
-				bad_parse_buffer(p_reset_bytes.ptr(), static_cast<size_t>(p_reset_bytes.size()), &bf) != 0) {
+				bad_parse_buffer(p_reset_bytes.ptr(), static_cast<size_t>(p_reset_bytes.size()), &skeleton_bf) != 0) {
 			last_error_ = "Reset/skeleton animation not parseable";
 			return false;
 		}
-		const opennova::anim::Clip reset_clip = opennova::anim::sample_clip(bf, {}, p_model_bind);
-		bad_free(&bf);
+		const opennova::anim::Clip reset_clip =
+				opennova::anim::sample_clip(skeleton_bf, {}, p_model_bind, &skeleton_bf);
 		bones_ = reset_clip.bones;
 		// When the model supplies per-bone bind positions (one per bone), they OVERRIDE the reset
 		// .bad's bone positions -- the .bad's BadBone.position is a lossy export (~half the corpus
@@ -310,10 +304,14 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 		}
 	}
 
-	// Pass 2: sample every clip against the SHARED skeleton rest origins (not each clip's own).
-	// In model_bind mode each clip re-bases its channels against ITS OWN .bad's bind matrices --
-	// the original resolves the bone table from the channel's own anim data the same way.
-	// [orig: AnimChannel_ComputeBoneMatrices @0x410da0 reads boneData = channel+44.]
+	// Pass 2: sample every clip against the SHARED skeleton rest origins (not each clip's own),
+	// and -- in model_bind mode -- against the SKELETON's bind matrices. The original pins the
+	// bind operand to the .adm slot-0 (reset) .bad once at entity registration and never per
+	// clip; a clip composed against its OWN bind self-cancels at its start frame and the rig
+	// freezes at the authored T-pose (the 2026-07-08 misreading, seen as T-posed FP arms/gun).
+	// [orig: AnimMap_RegisterEntity @0x40bb60 (channel+44 = slot-0 .bad, set once);
+	// AnimChannel_ComputeBoneMatrices @0x410da0 (bind = *(channel+44), fallback the playing
+	// anim @0x410de3); AnimMap_PlayAnimBySlot @0x40bda0 re-inits only the playing channel.]
 	for (const std::pair<String, PackedByteArray> &kv : p_clip_bads) {
 		const PackedByteArray &bad_bytes = kv.second;
 		BadFile bf;
@@ -323,10 +321,11 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 		}
 		LoadedClip lc;
 		lc.key = kv.first;
-		lc.clip = opennova::anim::sample_clip(bf, shared_rest, p_model_bind);
+		lc.clip = opennova::anim::sample_clip(bf, shared_rest, p_model_bind, &skeleton_bf);
 		bad_free(&bf);
 		clips_.push_back(std::move(lc));
 	}
+	bad_free(&skeleton_bf);
 
 	if (clips_.empty()) {
 		last_error_ = "No animation clips could be loaded";

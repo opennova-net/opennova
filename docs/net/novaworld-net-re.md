@@ -3858,6 +3858,55 @@ Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
 retail its close-up framing; def `rot` bias sign confirmation against retail footage; the delta
 sense final pin (D-INF-14); body-rig unification onto the same semantics (D-INF-13).
 
+**§5.40 bind-source correction — the T-pose freeze (2026-07-09 grill, second pass).** Point (2)
+above misread WHOSE bind the channels compose against, and the port froze the FP rig at its
+authored T-pose (idle composed to identity → the mesh rendered verbatim: splayed arms, gun parked
+on the outstretched right hand). The witnessed mechanism:
+
+1. **The bind operand is the `channel+44` override, pinned once to the `.adm` slot-0 `.bad`.**
+   `AnimChannel_ComputeBoneMatrices @0x410da0` resolves its bone records as
+   `boneData = *(channel+44) ? *(channel+44) : *(channel+0)` (`@0x410dd8`/`@0x410de3`).
+   `AnimMap_RegisterEntity @0x40bb60` writes `channel+44` exactly once at entity registration —
+   to the slot-0 node's `.bad` (`@0x40bbe3`), i.e. the `.adm`'s reset/skeleton animation
+   (ak47_RST). Clip switches re-init only the playing channel: `AnimMap_PlayAnimBySlot @0x40bda0`
+   and `AnimMap_UpdateEntity @0x40b5f0` write `channel+0..+12` and the slot bookkeeping, never
+   `+44`. The null-override fallback (compose against the playing clip's own records) is real but
+   reaches only standalone channels (the menu profile preview's global channel `@0x560cde`).
+2. **Consequence:** every clip of a rig is measured against the ONE skeleton bind. A clip composed
+   against its *own* bind self-cancels at its start frame by construction — that was the
+   2026-07-08 oracle's blind spot: `mat3(stored bind) × channel ≈ I` at reset AND idle is true
+   *per-file* (each `.bad`'s channels start at its own bind) but says nothing about the runtime
+   pairing. Against the skeleton bind, `anim_wpn_idle` composes to the HOLD (~180° bone rotations
+   folding the T-pose arms onto the weapon), and the reset clip still composes to identity.
+3. **The rig, re-read:** ak47_1st is a 39-bone T-posed character skeleton (BN01 Pelvis at the
+   origin, R/L arm chains along ±X, 26 finger bones, gun bones) with a 39-entry model part table
+   matching bones 1:1 (part[1] rel x 0.1564 ↔ "BN02 R UpperArm"); armsG is the same skeleton's
+   skin with a 38-part table of its own (unused — the placer passes the GUN's origins). The wpn
+   clips pose it into the view hold facing +Z model space; the §5.40 "authored in view space"
+   reading described the T-pose bind, not the runtime hold.
+4. **`.bad` positions, closed:** retail derives `BadBone.position` at export
+   (≈ `inv(parent bind world) ⊗ swizzled model rel` — maintainer's relation, consistent with the
+   norm-breaking triplicated files being lossy exports) and never reads it at runtime; pivots come
+   from the model bone table (`modelDef+56` rel float3 @+0x24, parent @+20, stride 64
+   `[orig: BoneAnim_BuildWorldMatrices @0x40c400, pivot reads @0x40c5f2]`). Pipelines that consume
+   `BadBone.position` directly (the pre-repo oscarmike port) work exactly on the healthy subset
+   and break on the triplicated one; the model-pivot path works on both — matching retail.
+
+**Port correction** (same PR): `sample_clip` gained a `bind_source` parameter (`nullptr` = the
+faithful no-override fallback); `NovaSkeletalAnim` keeps the parsed reset `.bad` alive through
+Pass 2 and passes it for every clip; the `NOVA_VM_DELTA` experiment knob is deleted — composition
+is `q(stored skeleton bind) ⊗ channel`, operand order pinned visually on the ak47 rig (the
+conjugate order collapses the rig; oscarmike's `pose × inverse-bind` shape differs legitimately
+because its Skeleton3D rest carries the bind rotations, ours bakes the whole composition into the
+pose over identity rests). The rig→camera container map corrected from yaw +90 to the yaw-180
+Z-flip (model forward +Z → camera forward −Z, Y up; the +90 was tuned against the misread pose).
+Verified: `anim_sample` ctest (self-bind fallback + skeleton-bind override cases) +
+`fp_clean_probe` captures on 05TR — both camo arms gripping the AK, mag hanging −Y, muzzle
+downrange. **Still open:** D-RORD-4 (unchanged); def `rot` bias signs + reload direction vs retail
+footage (the D-INF-14 tail); finger/left-hand pose fidelity vs retail footage; D-INF-13 (bodies
+onto model_bind — the export relation above doubles as the part↔bone matcher for the
+20-parts/19-bones body models).
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with
