@@ -88,6 +88,8 @@ func set_preview_state(
 		if _dispatcher != null:
 			_dispatcher.foliage_defs = _foliage_defs
 			_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, _foliage_defs)
+			# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
+			_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, _foliage_defs)
 		_pending_flush = true
 
 	if _dispatcher == null:
@@ -148,11 +150,31 @@ func rebuild_if_needed() -> void:
 
 	# Only re-dispatch when the camera crosses a 16u cell boundary. Within a
 	# cell, the LRU output is unchanged, so calling dispatch() would be pure
-	# cache hits + a no-op MultiMesh check.
+	# cache hits + a no-op MultiMesh check. The model tier rides the same
+	# cadence in the editor (its stagger regen only matters in motion).
 	var base_x := int(floor(_camera.global_position.x / 16.0)) * 16
 	var base_z := int(floor(_camera.global_position.z / 16.0)) * 16
 	var key := "%d,%d" % [base_x, base_z]
 	if key == _last_camera_cell_key:
 		return
 	_last_camera_cell_key = key
-	_dispatcher.dispatch(_camera.global_position)
+	_dispatcher.set_model_anchors(_collect_model_anchors())
+	_dispatcher.dispatch(_camera.global_position, _camera.global_transform)
+
+
+# Near-tier anchors. The witnessed driver is per-SECTOR-ENTITY (the
+# .trn/.bms-placed world models) [orig: Terrain_RenderSectorEntitiesBySide
+# @ 0x5c7d50]; placed world objects are the host equivalent (host mapping).
+# The terrain workspace carries no placed-object index yet, so probe for one
+# duck-typed, then fall back to terrain-content centers (the visible sector
+# centers - the editor analog of the runtime's patch-centers fallback).
+func _collect_model_anchors() -> PackedVector3Array:
+	if _terrain_mesh == null:
+		return PackedVector3Array()
+	if _terrain_mesh.has_method("get_placed_object_positions"):
+		var placed: PackedVector3Array = _terrain_mesh.get_placed_object_positions()
+		if not placed.is_empty():
+			return placed
+	if _terrain_mesh.has_method("get_visible_sector_centers"):
+		return _terrain_mesh.get_visible_sector_centers()
+	return PackedVector3Array()

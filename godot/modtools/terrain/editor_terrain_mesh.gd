@@ -166,6 +166,19 @@ func get_world_bounds() -> AABB:
 	return _bounds
 
 
+## Visible sector centers in world space (y = 0; the editor mesh displaces
+## height in-shader, so no CPU height is available here). The terrain
+## workspace's terrain-content anchor fallback for the foliage model tier -
+## the editor analog of the runtime's NovaTerrain.get_foliage_dispatch_centers
+## visible-patch centers.
+func get_visible_sector_centers() -> PackedVector3Array:
+	var centers := PackedVector3Array()
+	for instance in _sector_instances:
+		if instance.visible:
+			centers.push_back(instance.position + Vector3(SECTOR_SIZE * 0.5, 0.0, SECTOR_SIZE * 0.5))
+	return centers
+
+
 func get_sector_count() -> int:
 	return _sector_count
 

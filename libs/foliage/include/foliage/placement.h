@@ -76,10 +76,14 @@ struct PlacementInstance {
 	Fixed16_16 corner_y_fixed[4] = {};
 	Fixed16_16 midpoint_y_fixed[4] = {};
 
-	// Four height-derived patch control values written by
-	// Foliage_BuildPatchData@0x005C0240 at 0x5C07E8..0x5C07FC. These are not
-	// final colors; the still-unrecovered render emitter sub_5C1790 appears to
-	// consume them as vertex-shader constants/control data.
+	// The patch ground-fit fold (E_A, T_A, E_B, T_B), written by
+	// Foliage_BuildPatchData@0x005C0240 at 0x5C07E8..0x5C07FC - the SAME fold
+	// family the model tier feeds its grid-placement VS: per edge the sag
+	// D = h_mid - (h_cornerA + h_cornerB)/2 over the corner pairing
+	// (-A: c0/c2 with m0, +A: c1/c3 with m1, -B: c0/c1 with m2, +B: c2/c3
+	// with m3), folded to E = (D_- + D_+)/2, T = D_+ - E. Pinned by
+	// tests/foliage/foliage_quad_fold_test.cpp; the far-tier host consumes
+	// these as its ground-fit constants.
 	float patch_control[4] = {};
 };
 

@@ -53,6 +53,13 @@ var edit_mode: bool = false
 # { kind, index, graphic, node, animated=true } and move the node directly.
 var pickable_records: Array = []
 
+# World positions (Godot space) of every RESOLVED placed entity (static +
+# animated), built once per place(). The foliage model tier reads this per
+# tick as its anchor set (COW ref, no copy) - the host equivalent of retail's
+# per-visible-sector-entity driver
+# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50].
+var placed_world_positions := PackedVector3Array()
+
 # graphic -> NovaObjectData (or null when unresolvable).
 var _object_data_cache: Dictionary = {}
 # adm name -> NovaSkeletalAnim (or null when it failed to load). Shared read-only across
@@ -190,6 +197,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		"batches": 0,
 	}
 	pickable_records = []
+	placed_world_positions = PackedVector3Array()
 	if mission == null or parent == null or resource_root == null:
 		return stats
 	_ensure_item_db()
@@ -257,6 +265,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			continue
 		resolved_graphics.append(graphic)
 		stats.graphics += 1
+		for xf in xforms:
+			placed_world_positions.push_back((xf as Transform3D).origin)
 		for batch in batches:
 			var mm := MultiMesh.new()
 			mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -337,6 +347,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			"position": a.get("position", Vector3.ZERO),
 		}
 		model.set_meta("entity_ref", ref)
+		placed_world_positions.push_back((a["xform"] as Transform3D).origin)
 		if edit_mode:
 			pickable_records.append({
 				"kind": ref["kind"],
@@ -573,6 +584,12 @@ func _ensure_item_db() -> void:
 func get_item_db() -> NovaItemDatabase:
 	_ensure_item_db()
 	return item_db
+
+
+## World positions of every resolved placed entity, built by place(). The
+## foliage model tier's per-tick anchor feed (see the field's comment).
+func get_placed_world_positions() -> PackedVector3Array:
+	return placed_world_positions
 
 
 func _graphic_for(item_id: int) -> String:

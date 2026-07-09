@@ -100,6 +100,24 @@ func register_all(registry: McpToolRegistry) -> void:
 			{
 				"enabled": { "type": "boolean", "description": "true = fullscreen, false = windowed; omit to toggle." },
 			}), Callable(self, "_tool_set_fullscreen"))
+	registry.register(_def("set_resource_root",
+			"Mount a different game resource root (loose asset dir or install dir with PFFs) — the same seam as the editor's folder picker. Persists like the UI action; note the previous dir from get_editor_state first if you plan to restore it.",
+			{
+				"dir": { "type": "string", "description": "Absolute directory to mount." },
+			}, ["dir"]), Callable(self, "_tool_set_resource_root"))
+	registry.register(_def("set_node_visible",
+			"Show/hide a live scene node (CanvasItem/Node3D `visible`) — tier/layer isolation while troubleshooting rendering. Path rules match get_node_state. Restore what you hide.",
+			{
+				"path": { "type": "string" },
+				"visible": { "type": "boolean" },
+			}, ["path", "visible"]), Callable(self, "_tool_set_node_visible"))
+	registry.register(_def("get_node_state",
+			"Troubleshooting X-ray for a live scene node: resolve it by absolute path or recursive name search, read named properties, and call zero-arg read-only query methods (get_*/is_*/has_* names only). Returns class, script, and child names for orientation. Read-only.",
+			{
+				"path": { "type": "string", "description": "Absolute node path (\"/root/...\"), or a bare node NAME searched recursively from the scene root (first match; e.g. \"FoliageDispatcher\")." },
+				"properties": { "type": "array", "items": { "type": "string" }, "description": "Property names to read." },
+				"call": { "type": "array", "items": { "type": "string" }, "description": "Zero-arg query methods to call — get_*/is_*/has_* names only." },
+			}, ["path"]), Callable(self, "_tool_get_node_state"))
 	registry.register(_def("describe_api",
 			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"runtime\", \"sim\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
 			{
@@ -165,6 +183,120 @@ func register_all(registry: McpToolRegistry) -> void:
 				"format": { "type": "string", "enum": ["webp", "png"], "default": "webp" },
 				"quality": { "type": "number", "default": 0.8 },
 			}, [], { "timeout_ms": 30000 }), Callable(self, "_tool_screenshot"))
+
+
+func _tool_set_resource_root(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var dir := String(args.get("dir", ""))
+	if dir.is_empty():
+		return McpToolResult.error("dir is required.")
+	if not DirAccess.dir_exists_absolute(dir):
+		return McpToolResult.error("Directory does not exist: %s" % dir)
+	var shell := ctx.shell
+	if shell == null or not shell.has_method("set_resource_root_dir"):
+		return McpToolResult.error("The editor shell is not bound or has no set_resource_root_dir.")
+	var previous: String = shell.get_resource_root_dir() if shell.has_method("get_resource_root_dir") else ""
+	shell.set_resource_root_dir(dir)
+	return {
+		"ok": true,
+		"dir": dir,
+		"previous": previous,
+		"mounted": ctx.root() != null,
+	}
+
+
+func _resolve_live_node(path: String) -> Node:
+	var tree_root: Node = service.get_tree().root
+	if path.begins_with("/"):
+		return tree_root.get_node_or_null(NodePath(path))
+	return tree_root.find_child(path, true, false)
+
+
+func _tool_set_node_visible(args: Dictionary, _ctx: McpToolContext) -> Variant:
+	var path := String(args.get("path", ""))
+	var node := _resolve_live_node(path)
+	if node == null:
+		return McpToolResult.error("No node found for '%s'." % path)
+	if not ("visible" in node):
+		return McpToolResult.error("Node '%s' (%s) has no `visible` property." % [path, node.get_class()])
+	node.set("visible", bool(args.get("visible", true)))
+	return { "ok": true, "path": String(node.get_path()), "visible": bool(node.get("visible")) }
+
+
+func _tool_get_node_state(args: Dictionary, _ctx: McpToolContext) -> Variant:
+	var path := String(args.get("path", ""))
+	if path.is_empty():
+		return McpToolResult.error("path is required.")
+	var node := _resolve_live_node(path)
+	if node == null:
+		return McpToolResult.error("No node found for '%s' (absolute path or recursive name search from the scene root)." % path)
+	var script_path := ""
+	var script: Variant = node.get_script()
+	if script != null and script is Resource:
+		script_path = (script as Resource).resource_path
+	var out := {
+		"path": String(node.get_path()),
+		"class": node.get_class(),
+		"script": script_path,
+		"children": node.get_children().map(func(c: Node) -> String: return String(c.name)),
+	}
+	var prop_names: Variant = args.get("properties", [])
+	if prop_names is Array and not (prop_names as Array).is_empty():
+		var props := {}
+		for p in prop_names:
+			var pname := String(p)
+			# ":"-paths reach into resources (e.g. "multimesh:instance_count").
+			props[pname] = _node_state_jsonable(node.get_indexed(pname) if pname.contains(":") else node.get(pname))
+		out["properties"] = props
+	var call_names: Variant = args.get("call", [])
+	if call_names is Array and not (call_names as Array).is_empty():
+		var calls := {}
+		for m in call_names:
+			var mname := String(m)
+			if not (mname.begins_with("get_") or mname.begins_with("is_") or mname.begins_with("has_")):
+				calls[mname] = "SKIPPED: only get_*/is_*/has_* query methods"
+			elif not node.has_method(mname):
+				calls[mname] = "SKIPPED: no such method"
+			else:
+				calls[mname] = _node_state_jsonable(node.call(mname))
+		out["calls"] = calls
+	return out
+
+
+static func _node_state_jsonable(v: Variant, depth: int = 0) -> Variant:
+	if depth > 4:
+		return "<depth capped>"
+	match typeof(v):
+		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING:
+			return v
+		TYPE_DICTIONARY:
+			var d := {}
+			for k in v:
+				d[str(k)] = _node_state_jsonable(v[k], depth + 1)
+			return d
+		TYPE_ARRAY:
+			var a: Array = []
+			for e in v:
+				a.append(_node_state_jsonable(e, depth + 1))
+				if a.size() >= 64:
+					a.append("<truncated at 64>")
+					break
+			return a
+		TYPE_OBJECT:
+			if v == null:
+				return null
+			var o: Object = v
+			var suffix := ""
+			if o is Resource and (o as Resource).resource_path != "":
+				suffix = ":" + (o as Resource).resource_path
+			elif o is Node:
+				suffix = ":" + String((o as Node).name)
+			return "<%s%s>" % [o.get_class(), suffix]
+		TYPE_PACKED_BYTE_ARRAY, TYPE_PACKED_INT32_ARRAY, TYPE_PACKED_INT64_ARRAY, \
+		TYPE_PACKED_FLOAT32_ARRAY, TYPE_PACKED_FLOAT64_ARRAY, TYPE_PACKED_STRING_ARRAY, \
+		TYPE_PACKED_VECTOR2_ARRAY, TYPE_PACKED_VECTOR3_ARRAY, TYPE_PACKED_COLOR_ARRAY:
+			return "<packed array, size %d>" % [v.size()]
+		_:
+			return var_to_str(v)
 
 
 static func _def(name: String, description: String, properties := {}, required: Array = [], extra := {}) -> Dictionary:
