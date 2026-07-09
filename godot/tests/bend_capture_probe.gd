@@ -63,7 +63,7 @@ func _ready() -> void:
 	var bms_name := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
 	if bms_name.is_empty():
 		bms_name = "00TRa.bms"
-	var ws = _workstation.get_workspace(EditorWorkstation.Workspace.MISSION)
+	var ws = _workstation.get_workspace_adapter(EditorWorkstation.Workspace.MISSION)
 	if ws == null or not ws.has_method("play_mission"):
 		push_error("[bend] mission workspace unavailable")
 		get_tree().quit(1)
