@@ -3801,6 +3801,20 @@ re-aimed at the anchor — and the third-person body renders with the §14 aim o
 (world-wac-ai-re §14.6, D-INF-11 partial). Still deferred: the collision march, orbit keys, the
 0.125u look-at offset, per-stance `CameraOffset`, vehicle mode-1 (no local mounting), FOV.
 
+**§5.40 viewmodel correction (2026-07-08, same train):** the FP viewmodel hardcode named a
+model that does not exist in the JO assets ("AKM_1st"), so the gun never loaded and the arms
+had no skeleton — an invisible viewmodel with every failure silent. Fixed to the witnessed
+WPN_AK47AUTO def names (`animadm ak47_1st`, `gfx1 ak47_1st`, `gfx1a armsG`, `gfx1b armsGb`
+unused), load failures now warn, `pos` corrected to the def line (−19.46, 21.19, −161.31)
+(the old (10, 0, −201) matched no def line), and the facing derives from
+`bms_to_godot_basis` on the camera's engine orientation (model space == view space
+`[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]`) instead of a hand-tuned rotation.
+**Open (the §5.40 refinement grill):** the FP rig is its OWN pre-posed skeleton —
+`ak47_RST.bad` is 39 bones (BN01 Pelvis, arms, 26 fingers, gun bones; BN## tags do NOT match
+the body rig) — and the rendered hold pose is still visibly mis-framed. Pinning the rig's
+authored frame + the view-bias chain (and D-RORD-4's near-Z depth trick) is the follow-up;
+the arms/gun at least load, render, and warn on failure now.
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with

@@ -105,7 +105,9 @@ public:
 
 	// Per-bone overlay class (anim::OverlayClass) parsed from the BN## bone names, for
 	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's
-	// default case). [orig: the bone-index switch @0x4b1f3a; world-wac-ai-re.md §14.2]
+	// default case). BODY rigs only: first-person weapon rigs reuse BN## tags for a
+	// different 39-bone Pelvis/arms/fingers skeleton (ak47_RST.bad et al.) — never feed
+	// a viewmodel through the overlay path. [orig: switch @0x4b1f3a; world-wac-ai-re §14.2]
 	PackedInt32Array get_overlay_classes() const;
 
 	// eval_pose plus the third-person aim overlay — the torso bend. p_deltas is one

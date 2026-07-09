@@ -712,16 +712,23 @@ func build_local_player_viewmodel() -> Node3D:
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
 	add_child(container)
-	# ak47auto weapon.def (REVX02/WEAPON.DEF "WPN_AK47AUTO"): animadm AKM_1st, gfx1 AKM_1st (gun),
-	# gfx1a armsG (arms). Hardcoded as the chosen fixed default until a weapon.def reader resolves
-	# the player's equipped weapon. The gun shares the arms' skeleton plus gun-part bones, so both
-	# pose from the one animadm. (Swapped from mp5sd to confirm the pos/tpos placement generalizes.)
+	# WPN_AK47AUTO (weapon.def): animadm ak47_1st, gfx1 ak47_1st (gun), gfx1a armsG (arms),
+	# gfx1b armsGb (alternate arm skin, unused until team/skin selection lands). Hardcoded as
+	# the chosen fixed default until a weapon.def reader resolves the player's equipped weapon.
+	# The gun shares the arms' skeleton plus gun-part bones, so both pose from the one animadm.
+	# (The previous hardcode named "AKM_1st" — a model that does not exist in the JO assets, so
+	# the gun never loaded and the arms had no skeleton to skin to: invisible viewmodel. Names
+	# now match the witnessed weapon.def entry; failures warn instead of vanishing.)
 	# anim_wpn_idle = the FP holding pose; without it the arms sit in their bind/T-pose.
 	# _env: the viewmodel lights/fogs with the live TOD like every entity
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
-	var arms = _placer.build_model_from_graphic("armsG", "AKM_1st", container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic("AKM_1st", "AKM_1st", container, "anim_wpn_idle", _env)
+	var arms = _placer.build_model_from_graphic("armsG", "ak47_1st", container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic("ak47_1st", "ak47_1st", container, "anim_wpn_idle", _env)
+	if arms == null:
+		push_warning("GameWorld: FP arms model 'armsG' failed to load from the resource root")
+	if gun == null:
+		push_warning("GameWorld: FP gun model 'ak47_1st' failed to load from the resource root")
 	if arms == null and gun == null:
 		container.queue_free()
 		return null

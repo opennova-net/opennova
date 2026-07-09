@@ -83,6 +83,25 @@ func _ready() -> void:
 		await get_tree().process_frame
 
 	await _capture("01_fp.png")
+
+	# NOVA_VM_SWEEP=1: sweep candidate viewmodel facings (one capture each) to pin the
+	# first-person weapon model's native orientation, then quit. Tuning aid only.
+	if OS.get_environment("NOVA_VM_SWEEP") == "1":
+		var host := _find_player_host(get_tree().root)
+		if host != null:
+			var candidates: Array = [
+				Vector3(0, 180, 0), Vector3(0, 0, 0), Vector3(0, 90, 0), Vector3(0, -90, 0),
+				Vector3(-90, 180, 0), Vector3(90, 180, 0), Vector3(-90, 0, 0), Vector3(90, 0, 0),
+			]
+			for i in candidates.size():
+				host.PLAYER_VIEWMODEL_ROT = candidates[i]
+				await _settle(8)
+				await _capture("vm_rot_%d_%s.png" % [i, str(candidates[i]).replace(" ", "")])
+		ws.stop_play_mission()
+		print("[bend] sweep done -> ", _out_abs)
+		get_tree().quit()
+		return
+
 	_press_key(KEY_F4)
 	await _settle(20)
 	await _capture("02_tp_level.png")

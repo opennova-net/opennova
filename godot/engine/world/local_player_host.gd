@@ -29,17 +29,20 @@ const PLAYER_TP_ORBIT_PITCH_DEG := 22.5
 # The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
 # offset is simply `file_value / 256` — see _viewmodel_offset for the axis map and derivation.
 # The Sighted/ADS path swaps `pos` -> `tpos` (WeaponDef.AltCamOffset @0x10C, read when entity
-# Flags & 2): AK47AUTO tpos = (-28.046, 21.531, -187.857), wired when ADS lands.
-# Units are WPN_AK47AUTO (REVX02\WEAPON.DEF) — hardcoded with the fixed-default model until a
-# weapon.def Godot binding resolves the equipped weapon's pos/tpos per-weapon. (Swapped from WPN_MP5SD
-# to confirm the placement generalizes; AK47AUTO pos is a near-pure vertical drop = a clean test.)
-const WEAPON_DEF_POS_SCALE := 256.0                            # flt_7D1D70: file unit -> /256 world units
-const PLAYER_VIEWMODEL_POS_UNITS := Vector3(10.0, 0.0, -201.0) # weapon.def `pos` (hip)
-# FP viewmodel model-facing rotation, euler DEGREES, camera-local. Our NovaObjectModel mesh is
-# model-native (Y-up, only X-negated) so it must NOT get the world-object bms_to_godot_basis; this
-# lays the gun barrel down-range relative to the view. The small per-weapon `pos`-rotation columns
-# (Bone.rot, yaw/pitch/roll BAM — AK47AUTO = 0.0 / 0.0 / 1.0 deg) are a separate fine-tune, deferred.
-const PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
+# Flags & 2): AK47AUTO tpos = (-62.33, 29.19, -152.56), wired when ADS lands. Units are
+# WPN_AK47AUTO (weapon.def) — hardcoded with the fixed-default model until a weapon.def Godot
+# binding resolves the equipped weapon's pos/tpos per-weapon. The per-weapon `pos` fine-tune
+# rotation columns (AK47AUTO = 5.0 / 3.75 / 353.0 deg) stay deferred with the rest of the
+# view-bias chain. (The previous constant (10, 0, -201) did not match any AK47AUTO def line.)
+const WEAPON_DEF_POS_SCALE := 256.0                                # flt_7D1D70: file unit -> /256 world units
+# Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
+# the witnessed WPN_AK47AUTO def line + the current best facing.
+var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def WPN_AK47AUTO `pos` (hip)
+# Per-weapon fine-tune rotation, euler DEGREES, applied AFTER the faithful facing (the
+# viewmodel world basis is derived in _update_viewmodel via bms_to_godot_basis from the
+# camera's engine orientation — model space == view space in the original). This slot is
+# for the weapon.def `pos` rotation columns (AK47AUTO = 5.0 / 3.75 / 353.0), deferred at 0.
+var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 0.0, 0.0)
 
 var _world
 var _camera: Camera3D
@@ -354,12 +357,24 @@ func _update_avatar(pos: Vector3) -> void:
 func _update_viewmodel() -> void:
 	if _viewmodel == null or not is_instance_valid(_viewmodel) or _camera == null:
 		return
-	var vm_basis := Basis.from_euler(Vector3(
+	# The engine draws the FP model with the RAW VIEW MATRIX as its world transform —
+	# model space == view space [orig: Player_RenderFirstPersonViewModel @0x4ded60] — so
+	# the faithful Godot world basis is the single-sourced engine->Godot orientation map
+	# applied to the camera's engine orientation (mission pitch is nose-down-positive =
+	# the negated host pitch). No hand-tuned facing: this is the same conversion every
+	# placed model uses. PLAYER_VIEWMODEL_ROT remains as the per-weapon def `pos`
+	# rotation-columns fine-tune slot (AK47AUTO = 5.0/3.75/353.0, still deferred).
+	var vm_world_basis := MissionObjectPlacer.bms_to_godot_basis(Vector3(
+		-float(_world.local_player_pitch_deg()),
+		float(_world.local_player_yaw_deg()),
+		0.0))
+	var fine := Basis.from_euler(Vector3(
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
-	_viewmodel.global_transform = _camera.global_transform * Transform3D(
-		vm_basis, _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
+	_viewmodel.global_transform = Transform3D(
+		vm_world_basis * fine,
+		_camera.global_position + _camera.global_basis * _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
 	# The FP overlay never enters the water mirror: retail draws it as its own
 	# near-Z viewport pass over the finished frame, not as part of the mirrored
 	# world scene [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted,
