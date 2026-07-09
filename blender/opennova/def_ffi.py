@@ -85,6 +85,8 @@ class DefWeaponDef(ctypes.Structure):
         ("clipweight", ctypes.c_float),
         # First-person render fov, horizontal degrees (default 80.0; mirror def.h).
         ("renderfov", ctypes.c_float),
+        # ADS zoom magnification ('scope_max_mag'; 0 = key absent; mirror def.h).
+        ("scope_max_mag", ctypes.c_float),
     ]
 
 
