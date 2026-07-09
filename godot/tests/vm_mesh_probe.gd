@@ -75,9 +75,10 @@ func _dump(root: NovaResourceRoot, graphic: String, adm: String, bone_count: int
 	# uses the GUN model's table (build_model_from_graphic resolves the .adm's model).
 	if adm.is_empty():
 		return
-	# model_bind: the witnessed faithful semantics (bind-relative channels, identity rest).
+	# Model-table rig: count/hierarchy from the model rows, rest positions reconstructed
+	# from the model pivots + the reset .bad's bind rotations (NovaSkeletalAnim).
 	var sk := NovaSkeletalAnim.new()
-	if not sk.load_from_resource_root(root, adm + ".adm", data.get_bone_origins(0), data.get_bone_parents(0), true):
+	if not sk.load_from_resource_root(root, adm + ".adm", data.get_bone_origins(0), data.get_bone_parents(0)):
 		print("[vm] adm load failed: ", sk.get_last_error())
 		return
 	var bones: Array = sk.get_skeleton_bones()

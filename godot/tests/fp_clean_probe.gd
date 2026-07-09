@@ -99,9 +99,10 @@ func _ready() -> void:
 		var vm_models := _viewmodel_models(get_tree().root)
 		print("[fp] lab: host=%s models=%d" % [str(host != null), vm_models.size()])
 		if host != null:
-			# Runtime oracle: in model_bind mode the skeleton rest is identity+pivots and the
-			# reset clip must sample to ~identity deltas, so rest-vs-eval_pose(anim_reset)
-			# angles ~0 prove the faithful convention holds on the REAL ak47 data.
+			# Runtime oracle: the skeleton rest carries the bind rotations and the reset
+			# clip's channels ARE the bind (bind == frame-0 channel on every shipped .bad),
+			# so rest-vs-eval_pose(anim_reset) angles ~0 prove the convention holds on the
+			# REAL ak47 data.
 			for m in vm_models:
 				var skel = m.get("_skeletal")
 				if skel == null:

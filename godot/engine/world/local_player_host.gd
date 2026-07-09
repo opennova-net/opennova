@@ -42,13 +42,15 @@ var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def 
 # the ADS swap follow-up; JOX AK47AUTO = (-62.33, 29.19, -152.56).
 var PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-62.33, 29.19, -152.56)
 # The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is a
-# T-posed character skeleton (BN01 Pelvis at the origin, arms along +/-X) that the wpn clips
-# POSE into the hold, facing +Z in model space (at anim_wpn_idle the hands reach +Z, the mag
-# hangs -Y, the muzzle line runs along Z). Godot's camera looks down -Z, so the map is the
-# yaw-180 Z-flip (model forward +Z -> camera forward -Z), keeping Y up — the structural
-# equivalent of the original drawing the rig with the raw view matrix after its builders'
-# model->render frame remap [orig: Player_RenderFirstPersonViewModel @0x4ded60 root = view
-# transform; the S*A^T*S copy loops @0x40c4d8..0x40c57c].
+# T-posed character skeleton (BN01 Pelvis at the origin) that the wpn clips POSE into the
+# hold facing downrange; the rig renders through the standard skeletal pipeline (import-
+# flipped meshes + the bind-rotation rests, positions reconstructed from the model table),
+# and the yaw-180 turns the rig's authored forward onto Godot's -Z camera forward — the
+# structural equivalent of the original drawing its composed render-frame bone matrices
+# with the raw view matrix [orig: Player_RenderFirstPersonViewModel @0x4ded60 root = view
+# transform; the S*A^T*S copy loops @0x40c4d8..0x40c57c realize the model->render map
+# inside the composition]. Sign pinned against retail: the stock/grip anchor bottom-RIGHT
+# at the hip idle (the pre-train build renders identically and was retail-confirmed).
 var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 # Witnessed per-weapon view-rotation bias: weapon.def `pos` rotation columns, DEGREES
 # (yaw, pitch, roll) ADDED to the view angles — the weapon cant. AK47AUTO = 5.0 / 3.75 / 353.0.

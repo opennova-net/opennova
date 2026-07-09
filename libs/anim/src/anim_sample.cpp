@@ -137,6 +137,30 @@ Quat sample_bone_world_rot(const BadChannel &ch, uint32_t tick) {
 
 }  // namespace
 
+std::vector<Vec3> positions_from_model(const BadFile &bind_bad,
+                                       const std::vector<int> &model_parents,
+                                       const std::vector<Vec3> &model_rel_positions) {
+    std::vector<Vec3> out;
+    out.reserve(model_rel_positions.size());
+    for (size_t i = 0; i < model_rel_positions.size(); ++i) {
+        const Vec3 &rel = model_rel_positions[i];
+        const Vec3 flipped = {-rel.x, rel.y, rel.z};
+        const int parent = (i < model_parents.size()) ? model_parents[i] : -1;
+        if (parent < 0 || static_cast<size_t>(parent) == i ||
+                static_cast<size_t>(parent) >= bind_bad.num_bones) {
+            out.push_back(flipped);
+            continue;
+        }
+        const float *m = bind_bad.bones[parent].rotation;  // row-major 3x3
+        out.push_back({
+                m[0] * flipped.x + m[1] * flipped.y + m[2] * flipped.z,
+                m[3] * flipped.x + m[4] * flipped.y + m[5] * flipped.z,
+                m[6] * flipped.x + m[7] * flipped.y + m[8] * flipped.z,
+        });
+    }
+    return out;
+}
+
 Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
                  const BadFile *bind_source, const std::vector<int> &model_parents) {
     Clip clip;

@@ -126,6 +126,26 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
                  bool model_bind = false, const BadFile *bind_source = nullptr,
                  const std::vector<int> &model_parents = {});
 
+// Reconstruct the BadBone.position table from the MODEL's bone table + the skeleton
+// .bad's bind rotations -- the corpus-exact export relation (94 rigs, <=5e-4 on every
+// non-stale bone; docs/net/novaworld-net-re.md section 5.40 position-derivation
+// correction):
+//
+//     position[i] = bind_rows[parent(i)] . (-rel.x, rel.y, rel.z)
+//
+// bind_rows = the parent's stored bind 3x3 (BadBone.rotation, row-major -- identical to
+// the reset clip's frame-0 channel transposed); rel = the model part's parent-relative
+// pivot (engine frame); the x-negation is the engine's own model->render map. Root rows
+// (parent < 0 / self / past the bind's records) take the x-negated rel unrotated (zero
+// on every shipped rig). Index-paired (bone i <-> part i, the runtime pairing); rows
+// past the bind's bone count fall back to the unrotated form. This is what lets a rig
+// whose SHIPPED positions are zeroed/stale (12 of 43 JO viewmodel rigs) rebuild the
+// exact healthy table from data that never rots: the model pivots and the bind
+// rotations. Mirror of pyopennova/bad_build.py bad_positions_from_model.
+std::vector<Vec3> positions_from_model(const BadFile &bind_bad,
+                                       const std::vector<int> &model_parents,
+                                       const std::vector<Vec3> &model_rel_positions);
+
 // --- quaternion / vector helpers, exposed for tests ---
 Quat quat_normalize(Quat q);
 Quat quat_mul(Quat a, Quat b);

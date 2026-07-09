@@ -421,6 +421,46 @@ int main() {
                 mbp.frames[0][0].world_rotation, 1e-3f));
     }
 
+    // --- positions_from_model: reconstruct BadBone.position from the model table + the ---
+    // skeleton .bad's bind rotations -- position[i] = bind_rows[parent(i)] . (-rel.x, rel.y,
+    // rel.z); roots / rows whose parent is past the bind's records take the x-negated rel
+    // unrotated. Synthetic exactness (mirrors pytest tests/test_bad_pos_derivation.py; the
+    // corpus legs are asset-gated there). [docs/net/novaworld-net-re.md section 5.40
+    // position-derivation correction.]
+    {
+        BadBone pbones[2] = {};
+        pbones[0].parent_index = -1;
+        // bone0 bind: Rz(90) row-major {0,-1,0, 1,0,0, 0,0,1}.
+        pbones[0].rotation[1] = -1.0f;
+        pbones[0].rotation[3] = 1.0f;
+        pbones[0].rotation[8] = 1.0f;
+        pbones[1].parent_index = 0;
+        BadFile pbad = {};
+        pbad.bones = pbones;
+        pbad.num_bones = 2;
+
+        const std::vector<int> parents = {0, 0, 1};  // root self-parented like the real rows
+        const std::vector<Vec3> rels = {
+                {0.5f, 0.25f, -0.75f},   // root: x-negated, unrotated
+                {1.0f, 2.0f, 3.0f},      // parent 0: Rz90 . (-1, 2, 3)
+                {4.0f, 5.0f, 6.0f},      // parent 1: identity bind (zero matrix rows? no --
+        };                               //   bone1 bind is zeroed => acts as all-zero rows
+        const std::vector<Vec3> got = positions_from_model(pbad, parents, rels);
+        TEST_EXPECT(got.size() == 3);
+        TEST_EXPECT(approx(got[0].x, -0.5f) && approx(got[0].y, 0.25f) && approx(got[0].z, -0.75f));
+        // Rz90 rows applied to (-1, 2, 3): row0 = (0,-1,0) -> -2; row1 = (1,0,0) -> -1; row2 = (0,0,1) -> 3.
+        TEST_EXPECT(approx(got[1].x, -2.0f) && approx(got[1].y, -1.0f) && approx(got[1].z, 3.0f));
+        // bone1's bind rows are all zero (uninitialized record) -> zero vector out; the REAL
+        // guarantee under test is the row-major multiply + index pairing, not this degenerate row.
+        TEST_EXPECT(approx(got[2].x, 0.0f) && approx(got[2].y, 0.0f) && approx(got[2].z, 0.0f));
+        // A parent past the bind's records falls back to the unrotated x-negated rel.
+        const std::vector<int> far_parents = {5};
+        const std::vector<Vec3> one_rel = {{1.0f, 2.0f, 3.0f}};
+        const std::vector<Vec3> far = positions_from_model(pbad, far_parents, one_rel);
+        TEST_EXPECT(far.size() == 1);
+        TEST_EXPECT(approx(far[0].x, -1.0f) && approx(far[0].y, 2.0f) && approx(far[0].z, 3.0f));
+    }
+
     bad_free(&bad);
     return 0;
 }
