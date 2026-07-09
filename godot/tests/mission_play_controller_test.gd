@@ -64,6 +64,10 @@ class FakeWorld:
 		return -1
 
 
+func after_each() -> void:
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
 func _make_play():
 	var play = PlayController.new()
 	add_child_autofree(play)
@@ -168,6 +172,44 @@ func test_input_stage_interception_is_gated_on_playing() -> void:
 	assert_false(play.handle_viewport_input(_pressed_key(KEY_F4)), "not playing: F4 is not claimed")
 	assert_false(play.handle_viewport_input(_pressed_key(KEY_ESCAPE)), "not playing: Esc is not claimed")
 	assert_false(play.get_player_host().is_third_person(), "and the host state never moved")
+
+
+func test_f3_requests_the_debug_overlay_while_playing() -> void:
+	# The game shell binds F3 to the NovaDebugOverlay (main_game.DEBUG_OVERLAY_KEY);
+	# play-in-editor shares the gesture by forwarding it to the workspace's overlay.
+	var play = _make_play()
+	await get_tree().process_frame
+	play._playing = true
+	watch_signals(play)
+	assert_true(play.handle_viewport_input(_pressed_key(KEY_F3)), "F3 is claimed while playing")
+	assert_signal_emitted(play, "debug_overlay_requested")
+	play._playing = false
+	assert_false(play.handle_viewport_input(_pressed_key(KEY_F3)),
+		"not playing: F3 falls through to the editor")
+
+
+func test_debug_overlay_suspends_mouse_capture_for_its_controls() -> void:
+	# The game shell frees the mouse for the overlay via its pause menu (Esc);
+	# play-in-editor has no pause state, so the workspace suspends the play
+	# session's capture while the overlay is up — clicks drive the overlay,
+	# not the look, and closing it lets the next tick recapture.
+	var play = _make_play()
+	await get_tree().process_frame
+	play._playing = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+	play.set_capture_suspended(true)
+	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
+		"suspending frees the mouse for the overlay")
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(10.0, 0.0)
+	assert_false(play.handle_viewport_input(motion),
+		"a free mouse drives the overlay GUI, not the gameplay look")
+
+	play.set_capture_suspended(false)
+	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
+		"resuming does not itself grab the mouse; the per-tick capture does")
+	play._playing = false
 
 
 # A pressed, non-echo key event; `typed` fills unicode so a focused text field

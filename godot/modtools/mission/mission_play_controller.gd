@@ -18,6 +18,10 @@ extends Control
 
 signal stop_requested
 signal status_reported(message: String, is_error: bool)
+# F3 while playing, forwarded to the workspace's NovaDebugOverlay — the same key
+# the game shell binds (main_game.DEBUG_OVERLAY_KEY), so play-in-editor and the
+# runtime share the gesture.
+signal debug_overlay_requested
 
 const GameWorldScene := preload("res://engine/world/game_world.tscn")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
@@ -31,6 +35,10 @@ var _player_host: LocalPlayerHost
 var _input_router: Node
 var _status: Label
 var _playing := false
+# True while the workspace's debug overlay is up: the mouse stays free so the
+# overlay is clickable. The game shell gets this via its pause menu (Esc);
+# play-in-editor has no pause state, so the overlay suspends capture instead.
+var _capture_suspended := false
 
 
 func _ready() -> void:
@@ -100,6 +108,7 @@ func start(mission: NovaMissionData, bms_name: String, resource_root: NovaResour
 		_world.unload()
 		return err as Error
 	_playing = true
+	_capture_suspended = false
 	_park_camera(mission)
 	_status.text = "Playing %s — saved terrain/env from %s (unsaved sculpt edits are not in the play world). Esc stops." % [
 		bms_name, resource_root.get_root_dir().get_file()]
@@ -142,10 +151,20 @@ func get_player_host():
 func _process(delta: float) -> void:
 	if _playing and _world != null and _world.is_loaded():
 		if _player_host != null:
-			_player_host.before_world_tick(delta, true)
+			_player_host.before_world_tick(delta, not _capture_suspended)
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
 		if _player_host != null:
 			_player_host.after_world_tick()
+
+
+## The workspace flips this with its debug overlay: while the overlay is up the
+## mouse stays visible (and the per-tick capture pauses) so its controls take
+## clicks; closing it lets the next tick recapture. The world keeps running —
+## the overlay is a live inspector, not a pause.
+func set_capture_suspended(suspended: bool) -> void:
+	_capture_suspended = suspended
+	if suspended and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
 # While playing, the game owns the keyboard — the game shell's parity stage is
@@ -173,9 +192,16 @@ func handle_viewport_input(event: InputEvent) -> bool:
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
 			stop_requested.emit()
 			return true
+		if key.pressed and not key.echo and key.keycode == KEY_F3:
+			debug_overlay_requested.emit()
+			return true
 		if _player_host != null and _player_host.handle_key_input(event, true):
 			return true
-	if _player_host != null and _player_host.handle_input(event, true):
+	# Mouse-look only while the play session owns the mouse — the game shell
+	# gates on the captured mouse (main_game._unhandled_input); here capture is
+	# re-asserted per tick unless the debug overlay suspended it, so suspension
+	# IS the free-mouse state: the overlay takes the clicks, not the look.
+	if _player_host != null and _player_host.handle_input(event, not _capture_suspended):
 		return true
 	return false
 
