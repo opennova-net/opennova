@@ -4061,6 +4061,32 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    swap unwired); velocity lead + prone drop; D-INF-13 (bodies onto the world table
    @ 0x40c770); D-INF-15.
 
+**§5.40 frame correction — rig positions COMPUTED from the model; the native+container
+realization was X-mirrored (2026-07-09, sixth pass).** The model-table port's Godot
+realization (native-frame meshes + identity rests + the yaw-180 container) rendered the FP
+viewmodel **left/right mirrored against retail** — stock anchored bottom-LEFT where retail
+(and the pre-train build, retail-confirmed side-by-side this session) anchors it
+bottom-RIGHT. Root cause: the original's model→render frame map is IMPROPER
+(`S = diag(−1,1,1)`) and lives INSIDE its composed builders — the S·Aᵀ·S conjugation
+loops and the x-negated pivots/translations (`[orig: @ 0x40c4d8..0x40c57c; pivot negate
+@ 0x40c953]`) — so no proper container rotation can realize it after the fact; yaw-180
+covers only the D3D→Godot forward flip's share and leaves one mirror unpaid.
+
+The shipped realization now factors the mirror where the data already carries it:
+`NovaSkeletalAnim`'s model-table mode RECONSTRUCTS the skeleton's rest positions from the
+model bone table + the reset `.bad`'s bind rotations via the corpus-exact export relation
+(`opennova::anim::positions_from_model`, the fourth-pass derivation
+`pos[i] = bind_rows[parent]·(−dx, dy, dz)`) and runs the SAME rest-carrying composition +
+import-flipped meshes as every body rig. On rigs whose shipped `BadBone.position` is
+healthy this is bit-for-bit the `.bad`-driven pipeline (the pre-train look); on the
+broken twelve it substitutes exact reconstructed values — the model computes what the
+`.bad` should have said, and nothing trusts the shipped field. `sample_clip`'s
+`model_bind` mode survives as the witnessed-composition reference implementation
+(ctest `anim_sample`, incl. a `positions_from_model` exactness case); the knob left the
+Godot binding (all callers updated). Validated in ONED Play-in-Editor on both SKUs:
+REVX `AKM_1st` and JOX `ak47_1st` (fully broken shipped positions) render the
+master-identical close-up hold, user-confirmed live against retail memory.
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with
