@@ -216,7 +216,7 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 | D-WPN-2 | Single-pool ammo model: the original tracks per-ammo-class carried pools (`Entity_GetScoreValueBySlotType @0x5406e0` class byte def+0xD8, units/round def+0xE0, pool caps `ammoclass_max_carry`); the FSM folds them to one rounds counter and the recoil auto-reload gate approximates units=1 (net-re §5.62) | A | OPEN (rides the ammo-class/pool port, with §5.57/§5.58 pool semantics) | PAR-WORLD |
 | D-WPN-3 | `WeaponSlot_CanFire @0x541ba0` legs beyond the clip: busy weapon-child entity, the underwater-fire ban vs `Env_WaterHeightFixed`, the adm+224 score-lock; plus the kick bump's fire-sound-id gate (Def+0x294) — all need slot/env/sound state the port does not model yet (net-re §5.62) | A | OPEN (partial — the clip + reserve-routing leg ported) | PAR-WORLD |
 | D-WPN-4 | The heat model: the def+876/880 window stamp into slot+0x14, `WeaponSlot_CalcAccumulatedHeat @0x53f780` (internals unwitnessed), the pump's overheat deny (heat>0xFFFF → queued FIRE becomes EMPTY `@0x541046`), and the OVERHEATED(11) entry writer (unfound) (net-re §5.62) | A | NEEDS-RE (CalcAccumulatedHeat + the state-11 writer), then port | PAR-WORLD |
-| D-WPN-5 | Weapon-switch machinery: `g_pendingWeaponSlot @0xB75FD0` writes + SWITCHFROM(7) queueing (`Player_SwitchToWeaponByHandle @0x4e0170` presumed), the switchfrom slot swap + `TryQueueSwitchTo`, the −901 instant paths (Flags&0x80), the recoil def+0x168 auto-switch — the FSM ports the timing shapes; the swap seam rides the loadout slice (net-re §5.62) | A | OPEN (rides the priority-3 loadout/equipped-weapon slice) | PAR-WORLD |
+| D-WPN-5 | Weapon-switch machinery — NOW FULLY WITNESSED (net-re §5.62 switch-chain block): `Player_SwitchToWeaponByHandle @0x4e0170` category scan over `weaponSlotArrayBase @0xB75FD4` → `Player_MountWeaponSlot @0x4dfa40` writes `g_pendingWeaponSlot` + queues SWITCHRANK(8)/`ForceQueueSwitchFrom`(7); the switchfrom swap + `TryQueueSwitchTo`, the −901 instant paths (Flags&0x80), the recoil def+0x168 auto-switch, mount-scoped auto-engage — the FSM ports the timing shapes; the multi-slot pool + swap port rides the loadout slice | A | WITNESSED-READY-DEFERRED (rides the priority-3 loadout/equipped-weapon slice) | PAR-WORLD |
 | D-WPN-6 | The pump covers the LOCAL player's equipped slot only; the original pumps every pool-0 equipped slot + pool-1 unmounted weapons with a live muzzle flash (`WeaponAction_ProcessAllEntities @0x542690`) (net-re §5.62) | A | OPEN (extend with NPC/remote weapon state) | PAR-WORLD |
 | D-WPN-7 | Interim ammo seed: the FSM installs with clip=clipsize + reserve=startrounds from the def; the original resolves ammo through the PLAYER_INFO loadout + S2C 0x5A apply (§5.30/§5.57) (net-re §5.62) | A | OPEN (rides D-PLAYERINFO-1/-11) | PAR-WORLD |
 | D-WPN-8 | FSM↔net uplink unwired: the fired event does not emit C2S 0x06 nor spawn rounds through world::RoundSim, and a joiner's reload_requested does not send C2S 0x25 / await the S2C 0x49 refill (the authority path is complete and zero-latency) (net-re §5.62, §5.16, §5.58) | A | OPEN (rides the npruntime in-match integration) | PAR-WORLD |
@@ -568,7 +568,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 3 |
-| World / AI + events | 13 | 1 | 5 | 19 | 1 |
+| World / AI + events | 12 | 1 | 6 | 19 | 1 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
@@ -583,7 +583,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **45** | **12** | **30** | **87** | 20 |
+| **Total** | **44** | **12** | **31** | **87** | 20 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-FOLIAGE-6, D-HUD-2, D-NET-136, D-NET-64.
 

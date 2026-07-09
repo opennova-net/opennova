@@ -8148,8 +8148,26 @@ keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9).
 `WeaponSlot_TryQueueScopeDown @ 0x53f080`, `g_pendingWeaponSlot @ 0xB75FD0`,
 `g_rescopeAfterReload @ 0xB7647C`, `g_fireChargeStartTick @ 0xB76800`,
 `g_autoReloadEnabled @ 0x24D2118`, `g_actionFuncDefTable @ 0x829E58` (+count).
-Comments at the pump, bake, and request sites; idb_save run. **Open follow-ups:**
-who queues SWITCHFROM(7)/writes `g_pendingWeaponSlot` (`Player_SwitchToWeaponByHandle
-@ 0x4e0170` presumed — the priority-3 loadout work); who queues OVERHEATED(11);
+Comments at the pump, bake, and request sites; idb_save run.
+
+**The weapon-switch chain (same session, closes the SWITCHFROM/pending follow-up).**
+`Player_SwitchToWeaponByHandle @ 0x4e0170` (handle = category×65 + rank): stance gate
+(parentSlot ∉ {2,3,5}), clears `g_fireChargeStartTick`, then scans the category's 65
+slots in the 100-B `weaponSlotArrayBase @ 0xB75FD4` pool from the def's own rank —
+eligibility = def+932 type 1/2 or `calculate_kill_score @ 0x5407e0` (the §5.41
+eligibility reuse) and `!(def+12 & 1)`; a full wrap plays the deny sound. The pick
+lands in `Player_MountWeaponSlot @ 0x4dfa40`: **writes `g_pendingWeaponSlot = slot`
+`@ 0x4dfb16`**, then queues the FSM — same category → `WeaponSlot_TryQueueSwitchRank
+@ 0x53f1c0` (ex `sub_53F1C0`: phase {0,4,0x40} → counter=0, next=8), cross category →
+`WeaponSlot_ForceQueueSwitchFrom @ 0x53f170` (ex `sub_53F170`: phase {0,4,0x40} →
+HARD RESET counter=0/burst=0/switchTimer=0/current=0/prev=0, next=7; SwitchFrom's
+timer expiry then swaps `EquippedSlot` from the pending global and queues SWITCHTO on
+the NEW slot). Mount-scoped weapons (`Flags & 0x20000000`) auto-engage the scope
+(`g_weaponScopeActive = 1` + `dword_B76808` zoom stash); a cross-category switch
+resets the scope + FOV 80. View biases zeroed, `Player_UpdateFirstPersonCamera` runs
+immediately, seat-flag 0x40000 → C2S 0x1D/169, scoped-capable slots re-arm the camera
+interp. IDB: both queue helpers renamed + commented; saved.
+
+**Open follow-ups:** who queues OVERHEATED(11);
 the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
 `dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq.
