@@ -29,15 +29,18 @@ const PLAYER_TP_ORBIT_PITCH_DEG := 22.5
 # The camera ftol's the stored float and adds it straight onto g_view_pos (16.16), so the net WORLD
 # offset is simply `file_value / 256` — see _viewmodel_offset for the axis map and derivation.
 # The Sighted/ADS path swaps `pos` -> `tpos` (WeaponDef.AltCamOffset @0x10C, read when entity
-# Flags & 2): AK47AUTO tpos = (-62.33, 29.19, -152.56), wired when ADS lands. Units are
-# WPN_AK47AUTO (weapon.def) — hardcoded with the fixed-default model until a weapon.def Godot
-# binding resolves the equipped weapon's pos/tpos per-weapon. The per-weapon `pos` fine-tune
-# rotation columns (AK47AUTO = 5.0 / 3.75 / 353.0 deg) stay deferred with the rest of the
-# view-bias chain. (The previous constant (10, 0, -201) did not match any AK47AUTO def line.)
+# Flags & 2), wired when ADS lands. The view fields now flow from the mounted root's weapon.def
+# (_apply_viewmodel_def <- GameWorld.local_player_viewmodel_def, the fixed default weapon until
+# equipped-weapon resolution lands); the values below are the witnessed JOX WPN_AK47AUTO line,
+# kept as the no-def fallback. (The pre-def constant (10, 0, -201) turned out to be the
+# REVX-era WPN_AK47AUTO `pos` — that SKU's def drives the AKM_1st viewmodel.)
 const WEAPON_DEF_POS_SCALE := 256.0                                # flt_7D1D70: file unit -> /256 world units
 # Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
 # the witnessed WPN_AK47AUTO def line + the current best facing.
 var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def WPN_AK47AUTO `pos` (hip)
+# The ADS/sighted view offset (weapon.def `tpos` -> WeaponDef.AltCamOffset @0x10C), held for
+# the ADS swap follow-up; JOX AK47AUTO = (-62.33, 29.19, -152.56).
+var PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-62.33, 29.19, -152.56)
 # The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is a
 # T-posed character skeleton (BN01 Pelvis at the origin, arms along +/-X) that the wpn clips
 # POSE into the hold, facing +Z in model space (at anim_wpn_idle the hands reach +Z, the mag
@@ -330,6 +333,8 @@ func _ensure_models() -> void:
 		_avatar = _world.build_local_player_avatar()
 	if (_viewmodel == null or not is_instance_valid(_viewmodel)) and _world.has_method("build_local_player_viewmodel"):
 		_viewmodel = _world.build_local_player_viewmodel()
+		if _viewmodel != null:
+			_apply_viewmodel_def()
 
 
 func _clear_models() -> void:
@@ -485,6 +490,26 @@ func _set_visual_layers(root: Node, layer_mask: int) -> void:
 		(root as VisualInstance3D).layers = layer_mask
 	for child in root.get_children():
 		_set_visual_layers(child, layer_mask)
+
+
+# Pull the resolved weapon.def view fields from the world; empty when no weapon.def (or the
+# weapon) resolves in the mounted root — the witnessed JOX WPN_AK47AUTO constants above stay
+# in force. The def rows carry xyz raw file units + yaw/pitch/roll degrees
+# [orig: weapon.def 'pos'/'tpos' handlers @0x54471f; 'renderfov' @0x54482a, default 80.0].
+func _apply_viewmodel_def() -> void:
+	if _world == null or not _world.has_method("local_player_viewmodel_def"):
+		return
+	var def: Dictionary = _world.local_player_viewmodel_def()
+	if def.is_empty():
+		return
+	var pos: PackedFloat32Array = def.get("pos", PackedFloat32Array())
+	if pos.size() >= 6:
+		PLAYER_VIEWMODEL_POS_UNITS = Vector3(pos[0], pos[1], pos[2])
+		PLAYER_VIEWMODEL_ROT_BIAS_DEF = Vector3(pos[3], pos[4], pos[5])
+	var tpos: PackedFloat32Array = def.get("tpos", PackedFloat32Array())
+	if tpos.size() >= 3:
+		PLAYER_VIEWMODEL_TPOS_UNITS = Vector3(tpos[0], tpos[1], tpos[2])
+	PLAYER_VIEWMODEL_RENDERFOV_H_DEG = float(def.get("renderfov", PLAYER_VIEWMODEL_RENDERFOV_H_DEG))
 
 
 # Convert a weapon.def `pos`/`tpos` POSITION (raw file units) into a Godot camera-local offset.

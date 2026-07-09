@@ -64,6 +64,7 @@ var _loaded_mission: NovaMissionData
 var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
+var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _mission_audio: NovaMissionAudio
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
@@ -489,6 +490,7 @@ func unload() -> void:
 	_runtime = null
 	_mission_audio = null
 	_placer = null
+	_weapon_db = null  # re-resolves against the next load's mounted root
 	_mission_stats = {}
 
 
@@ -713,39 +715,66 @@ func build_local_player_avatar() -> Node3D:
 ## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
 ## the character arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel @0x4ded60 draws
-## the weapon FP model + arms with shared bone matrices]. FIRST CUT: a fixed default (ak47auto) read
-## from weapon.def — gfx1 AKM_1st (gun) + gfx1a armsG (arms) on animadm AKM_1st — built in rest
-## (holding) pose. Returned as a container the caller attaches to the FP camera. Per-weapon
-## resolution (a weapon.def binding; libs/def already parses DefWeaponDef.gfx1/gfx1a/animadm) and the
-## camera bias / sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380] are
-## follow-ups. Null when the placer or both models fail to resolve.
+## the weapon FP model + arms with shared bone matrices]. The models come from the mounted root's
+## weapon.def — gfx1 (gun), gfx1a (arms; gfx1b alternate skin unused until team/skin selection),
+## animadm (the shared animation set) [orig: WeaponDef_ParseProperty @0x54d730 rows] — for the
+## DEFAULT_VIEWMODEL_WEAPON entry until the player's equipped weapon resolves it per-weapon
+## (NOVA_VM_WEAPON overrides the name for rig A/B checks). The witnessed JOX values stay as the
+## no-def fallback. Camera sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380]
+## are follow-ups. Null when the placer or both models fail to resolve.
+const DEFAULT_VIEWMODEL_WEAPON := "WPN_AK47AUTO"
+
 func build_local_player_viewmodel() -> Node3D:
 	if _placer == null:
 		return null
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
 	add_child(container)
-	# WPN_AK47AUTO (weapon.def): animadm ak47_1st, gfx1 ak47_1st (gun), gfx1a armsG (arms),
-	# gfx1b armsGb (alternate arm skin, unused until team/skin selection lands). Hardcoded as
-	# the chosen fixed default until a weapon.def reader resolves the player's equipped weapon.
-	# The gun shares the arms' skeleton plus gun-part bones, so both pose from the one animadm.
-	# (The previous hardcode named "AKM_1st" — a model that does not exist in the JO assets, so
-	# the gun never loaded and the arms had no skeleton to skin to: invisible viewmodel. Names
-	# now match the witnessed weapon.def entry; failures warn instead of vanishing.)
 	# anim_wpn_idle = the FP holding pose; without it the arms sit in their bind/T-pose.
 	# _env: the viewmodel lights/fogs with the live TOD like every entity
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
-	var arms = _placer.build_model_from_graphic("armsG", "ak47_1st", container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic("ak47_1st", "ak47_1st", container, "anim_wpn_idle", _env)
+	var def := local_player_viewmodel_def()
+	var gun_name := String(def.get("gfx1", "ak47_1st"))
+	var arms_name := String(def.get("gfx1a", "armsG"))
+	var adm_name := String(def.get("animadm", "ak47_1st"))
+	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", _env)  # _placer untyped -> no :=
+	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", _env)
 	if arms == null:
-		push_warning("GameWorld: FP arms model 'armsG' failed to load from the resource root")
+		push_warning("GameWorld: FP arms model '%s' failed to load from the resource root" % arms_name)
 	if gun == null:
-		push_warning("GameWorld: FP gun model 'ak47_1st' failed to load from the resource root")
+		push_warning("GameWorld: FP gun model '%s' failed to load from the resource root" % gun_name)
 	if arms == null and gun == null:
 		container.queue_free()
 		return null
 	return container
+
+
+## The resolved weapon.def record driving the FP viewmodel: model/adm names plus the
+## witnessed view-bias fields (pos/tpos raw units + rot degrees, renderfov horizontal
+## degrees) LocalPlayerHost consumes. Empty when the mounted root has no weapon.def or
+## the weapon name is absent — callers keep their witnessed JOX AK-47 defaults then.
+## The weapon is DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands;
+## NOVA_VM_WEAPON overrides the name (debug: rig A/B against another SKU's def).
+func local_player_viewmodel_def() -> Dictionary:
+	if _weapon_db == null:
+		if _resource_root == null:
+			return {}
+		_weapon_db = NovaWeaponDatabase.new()
+		if _weapon_db.load_from_resource_root(_resource_root, "weapon.def") != OK:
+			push_warning("GameWorld: weapon.def unavailable (%s) — FP viewmodel keeps built-in defaults"
+					% _weapon_db.get_last_error())
+			return {}
+	if not _weapon_db.is_loaded():
+		return {}
+	var weapon_name := OS.get_environment("NOVA_VM_WEAPON")
+	if weapon_name.is_empty():
+		weapon_name = DEFAULT_VIEWMODEL_WEAPON
+	var index: int = _weapon_db.find_weapon(weapon_name)
+	if index < 0:
+		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
+		return {}
+	return _weapon_db.get_weapon(index)
 
 
 # --- Skeleton debug view (F3 overlay's "Show skeletons") ---------------------

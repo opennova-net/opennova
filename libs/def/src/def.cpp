@@ -688,6 +688,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             if (lower_starts_with(lower, ll, "weapon", 6)) {
                 memset(&cw, 0, sizeof(cw));
                 cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
+                /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
+                cw.renderfov = 80.0f;
                 extract_quoted(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
                 state = ST_WEAPON;
             }
@@ -893,6 +895,11 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (lower_match_key(lower, ll, "error", 5)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
                 parse_floats(v, vl, cw.error, 6);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "renderfov", 9)) {
+                /* [orig: weapon.def parser key 'renderfov' @ 0x54482a] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+                cw.renderfov = parse_float_n(v, vl);
                 parsed = 1;
             } else if (ll > 3 && lower_starts_with(lower, ll, "pos", 3) &&
                        (lower[3] == ' ' || lower[3] == '\t')) {

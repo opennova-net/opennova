@@ -188,6 +188,11 @@ typedef struct DefWeaponDef {
     int charfilter_mask;           /* +116: mask medic1 sniper2 gunner4 rifleman8 engineer16 */
     float weaponweight;            /* +120 */
     float clipweight;              /* +140 */
+    /* First-person render fov, HORIZONTAL degrees; the record default is 80.0 and
+       no shipped JO weapon.def sets the key (REVX-era defs only comment it out).
+       [orig: parser key 'renderfov' @ 0x54482a; default flt_7D1898 = 80.0 stored by
+       AdmDef_InitEntryDefaults @ 0x53ff31; consumer @ 0x4dee71 (WeaponDef+0x148)]. */
+    float renderfov;               /* +148 */
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

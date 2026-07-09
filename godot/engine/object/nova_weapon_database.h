@@ -8,6 +8,8 @@
 
 #include <vector>
 
+struct DefWeaponDef;
+
 namespace godot {
 
 class NovaResourceRoot;
@@ -35,12 +37,27 @@ private:
 		int clipsize = 0;
 		int startrounds = 0;
 		int maxclips = 0;
+		// First-person viewmodel slice [orig: WeaponDef_ParseProperty @ 0x54d730 rows;
+		// consumer Player_RenderFirstPersonViewModel @ 0x4ded60]: the FP gun model (gfx1),
+		// the character arms riding its skeleton (gfx1a, alternate skin gfx1b), the 3P
+		// model (gfx3), the shared animation set (animadm), the hip/ADS view biases
+		// (pos/tpos: xyz raw file units + yaw/pitch/roll degrees), and renderfov
+		// (horizontal degrees, record default 80.0 — no shipped JO def sets it).
+		String animadm;
+		String gfx1;
+		String gfx1a;
+		String gfx1b;
+		String gfx3;
+		float pos[6] = { 0, 0, 0, 0, 0, 0 };
+		float tpos[6] = { 0, 0, 0, 0, 0, 0 };
+		float renderfov = 80.0f;
 	};
 	std::vector<Weapon> weapons; // file order (mirrors the engine's table order)
 	String source_path;
 	String last_error;
 
 	Dictionary weapon_dict(int index) const;
+	void append_entry(const DefWeaponDef &e);
 
 protected:
 	static void _bind_methods();
@@ -70,6 +87,9 @@ public:
 	// All weapons, unfiltered, in table order.
 	Array get_weapons() const;
 	Dictionary get_weapon(int index) const;
+	// Table index of the weapon named `name` (the raw weapon "<id>" token,
+	// case-insensitive like every def lookup), or -1 when absent.
+	int find_weapon(const String &name) const;
 };
 
 } // namespace godot

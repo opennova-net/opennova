@@ -299,6 +299,38 @@ int main(void) {
     }
     printf("M4AUTO/M4 armory fields OK\n");
 
+    /* renderfov: no shipped JO weapon.def sets the key, so every entry carries the
+       record default 80.0 [orig: AdmDef_InitEntryDefaults @ 0x53ff31]; the parser
+       key overrides it [orig: 'renderfov' @ 0x54482a]. */
+    if (fabsf(m4->renderfov - 80.0f) > FEPS) {
+        fprintf(stderr, "FAIL: M4AUTO renderfov default mismatch: %.3f\n", m4->renderfov);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    {
+        static const char kFovDef[] =
+            "weapon \"WPN_FOVTEST\"\n"
+            "\trenderfov 40\n"
+            "end\n";
+        DefWeaponsFile ff;
+        memset(&ff, 0, sizeof(ff));
+        if (def_parse_weapons_memory((const unsigned char *)kFovDef, sizeof(kFovDef) - 1, &ff) != 0 ||
+            ff.count != 1) {
+            fprintf(stderr, "FAIL: renderfov inline parse failed\n");
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        if (fabsf(ff.entries[0].renderfov - 40.0f) > FEPS) {
+            fprintf(stderr, "FAIL: renderfov override mismatch: %.3f\n", ff.entries[0].renderfov);
+            def_free_weapons(&ff);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&ff);
+        printf("renderfov default/override OK\n");
+    }
+
     /* def_parse_weapons_memory parity: same bytes, same result (covers both the
        string armory fields and the D-PLAYERINFO-11 loadout slot/masks). */
     {
