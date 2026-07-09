@@ -10,9 +10,20 @@
 //
 // [orig: the runtime pose chain is BoneAnim_TransformBones @0x410360 ->
 //  AnimChannel_ComputeBoneMatrices @0x410da0 -> build_world_bone_matrices @0x40c770
-//  (whose "X negated, Y/Z kept" is exactly the mesh's (-x,y,z) relationship). Exact
-//  byte-fidelity to that chain (100-vs-108 bone stride, sign convention) is a tracked
-//  grill-ida follow-up.]
+//  (world entities) / BoneAnim_BuildWorldMatrices @0x40c400 (first-person viewmodel)
+//  (whose "X negated, Y/Z kept" is exactly the mesh's (-x,y,z) relationship).]
+//
+// The witnessed channel semantics (grilled 2026-07-08): the per-bone channel rotation is
+// NOT an absolute bone orientation -- AnimChannel_ComputeBoneMatrices @0x410da0 multiplies
+// Transpose(bind 3x3) x sampled channel matrix, i.e. every channel is measured RELATIVE to
+// the same .bad's per-bone bind rotation, and the composed builders (@0x40c400/@0x40c770)
+// then treat the result as the bone's rotation with a PURE-TRANSLATION bind: the skinning
+// bind-inverse is T(-pivot), no rotation. At the reset clip the delta is identity, so the
+// authored mesh renders verbatim regardless of how degenerate the stored bind matrices
+// look in isolation (ak47_RST.bad's are wild permutations; the deltas are sane).
+// `model_bind` below enables that faithful interpretation; the default (absolute channel
+// rotations + bind-matrix rest) is the legacy body pipeline, byte-identical for healthy
+// exports where channel-at-reset == bind.
 
 #ifndef OPENNOVA_ANIM_SAMPLE_H
 #define OPENNOVA_ANIM_SAMPLE_H
@@ -44,10 +55,12 @@ struct BoneSample {
 struct ClipBone {
     std::string name;
     int parent_index = -1;
-    // Raw BadBone BIND pose (engine-native): the 3x3 world bind rotation (row-major) and the
-    // parent-local bind position, straight from the .bad. The host builds the Skeleton3D REST from
-    // THIS (matching oscarmike adm_import_plugin + the Blender importer's build_armature_from_bad),
-    // not from a sampled frame -- the .3di mesh is skinned to this bind, so the skin must match it.
+    // BIND pose the host builds the Skeleton3D REST from. Default mode: the raw BadBone 3x3
+    // world bind rotation (row-major) + bind position, straight from the .bad (matching oscarmike
+    // adm_import_plugin + the Blender importer's build_armature_from_bad). model_bind mode:
+    // IDENTITY rotation -- the original's bind is a pure translation (the skin bind-inverse is
+    // T(-pivot)), and the channel rotations are re-based to be relative to the .bad bind
+    // [orig: BoneAnim_BuildWorldMatrices @0x40c400 + AnimChannel_ComputeBoneMatrices @0x410da0].
     float rest_rotation[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     float rest_position[3] = {0, 0, 0};
 };
@@ -71,7 +84,26 @@ struct Clip {
 // shared origins MUST be passed for non-bind clips: a model's clips share ONE skeleton, but
 // each clip's .bad may carry different/zero bone positions -- using a clip's own positions
 // collapses the pose. (Matches oscarmike, which accumulates with skeleton->get_bone_rest.)
-Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {});
+//
+// model_bind: faithful channel semantics -- every sampled channel rotation is re-based
+// against this .bad's own per-bone bind 3x3 (a delta from the bind), rest_rotation becomes
+// identity (the bind is a pure translation: the skin bind-inverse is T(-pivot)), and the FK
+// rotates pivots by the re-based rotations. Use with the model's bone pivots as
+// shared_rest_origins. Everything stays in the NATIVE model frame -- the host renders these
+// rigs with a native-frame mesh (NovaObjectData native_frame submeshes) and maps the whole
+// rig to the camera in one container transform; the original's S=diag(-1,1,1) conjugation +
+// x-negated pivots/translations in its composed builders are its model->render frame map,
+// realized here at that container boundary instead. At the reset clip the pose is identity
+// + absolute pivots, i.e. the authored mesh verbatim, for ANY export -- including rigs whose
+// stored bind matrices are degenerate (ak47_RST). [orig: AnimChannel_ComputeBoneMatrices
+// @0x410da0 (Transpose(bind) x channel); BoneAnim_BuildWorldMatrices @0x40c400 (T(-pivot)
+// bind-inverse, translation-only hierarchy, the S*A^T*S copy loops).]
+Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
+                 bool model_bind = false);
+
+// TEMPORARY (see anim_sample.cpp): model_bind delta composition under test.
+// 1 = bind^-1*ch, 2 = bind*ch, 3 = (bind^-1*ch)^-1, 4 = (bind*ch)^-1.
+extern int g_model_bind_delta_variant;
 
 // --- quaternion / vector helpers, exposed for tests ---
 Quat quat_normalize(Quat q);
@@ -83,6 +115,8 @@ Quat quat_slerp(Quat a, Quat b, float t);
 // BAD channel quaternion (stored x, y, z, w) -> our w-first {w,x,y,z}, normalized
 // (a reorder only -- the engine consumes BAD quaternions natively, no axis swap).
 Quat bad_channel_quat(float x, float y, float z, float w);
+// Row-major 3x3 (the BadBone.rotation layout) -> quaternion, Shepperd's method.
+Quat mat3_to_quat(const float m[9]);
 
 }  // namespace opennova::anim
 

@@ -38,11 +38,18 @@ const WEAPON_DEF_POS_SCALE := 256.0                                # flt_7D1D70:
 # Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
 # the witnessed WPN_AK47AUTO def line + the current best facing.
 var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def WPN_AK47AUTO `pos` (hip)
-# Per-weapon fine-tune rotation, euler DEGREES, applied AFTER the faithful facing (the
-# viewmodel world basis is derived in _update_viewmodel via bms_to_godot_basis from the
-# camera's engine orientation — model space == view space in the original). This slot is
-# for the weapon.def `pos` rotation columns (AK47AUTO = 5.0 / 3.75 / 353.0), deferred at 0.
-var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 0.0, 0.0)
+# The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is authored
+# IN VIEW SPACE (x = downrange -- the ak47_1st muzzle reaches x +1.5, the arms' upper ends sit
+# at x -0.9 behind the eye plane; y = up -- content ~0.6 above the waist origin, cancelling the
+# def pos drop; z = lateral). Godot's camera looks down -Z, so the map is yaw +90
+# (x->-Z, y->y, z->x) — the structural equivalent of the original drawing the rig with the raw
+# view matrix [orig: Player_RenderFirstPersonViewModel @0x4ded60 root = view transform].
+var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 90.0, 0.0)
+# Witnessed per-weapon view-rotation bias: weapon.def `pos` rotation columns, DEGREES
+# (yaw, pitch, roll) ADDED to the view angles — the weapon cant. AK47AUTO = 5.0 / 3.75 / 353.0.
+# [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot = view_rot + Def.Bone.rot; parser stores
+# degrees -> BAM @0x54471f.] Sign map to Godot camera axes verified visually.
+var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 
 var _world
 var _camera: Camera3D
@@ -357,24 +364,26 @@ func _update_avatar(pos: Vector3) -> void:
 func _update_viewmodel() -> void:
 	if _viewmodel == null or not is_instance_valid(_viewmodel) or _camera == null:
 		return
-	# The engine draws the FP model with the RAW VIEW MATRIX as its world transform —
-	# model space == view space [orig: Player_RenderFirstPersonViewModel @0x4ded60] — so
-	# the faithful Godot world basis is the single-sourced engine->Godot orientation map
-	# applied to the camera's engine orientation (mission pitch is nose-down-positive =
-	# the negated host pitch). No hand-tuned facing: this is the same conversion every
-	# placed model uses. PLAYER_VIEWMODEL_ROT remains as the per-weapon def `pos`
-	# rotation-columns fine-tune slot (AK47AUTO = 5.0/3.75/353.0, still deferred).
-	var vm_world_basis := MissionObjectPlacer.bms_to_godot_basis(Vector3(
-		-float(_world.local_player_pitch_deg()),
-		float(_world.local_player_yaw_deg()),
-		0.0))
-	var fine := Basis.from_euler(Vector3(
+	# The engine draws the FP model with the RAW VIEW MATRIX as its world transform, i.e. the
+	# model lives in VIEW space [orig: Player_RenderFirstPersonViewModel @0x4ded60]. So the
+	# viewmodel is parented to the CAMERA transform (view-relative), NOT oriented in world space —
+	# a viewmodel must stay fixed to the view, not swing with the aim. PLAYER_VIEWMODEL_ROT lays
+	# the model's forward down-range (and picks the correct handedness so a right-handed weapon
+	# sits on the right); PLAYER_VIEWMODEL_POS_UNITS is the weapon.def `pos` view offset.
+	# camera x bias(def rot, about the eye in view axes) x axis map(rig -> camera).
+	# [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Def.Bone.rot to the view angles and
+	# rotates Def.Bone.pos into view orientation before adding to the eye.]
+	var b := PLAYER_VIEWMODEL_ROT_BIAS_DEF
+	var bias := Basis.from_euler(Vector3(
+		deg_to_rad(_wrap180(b.y)),    # their pitch -> Godot x
+		deg_to_rad(_wrap180(b.x)),    # their yaw   -> Godot y
+		deg_to_rad(-_wrap180(b.z))))  # their roll  -> Godot z (opposite sense)
+	var vm_basis := bias * Basis.from_euler(Vector3(
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.x),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.y),
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
-	_viewmodel.global_transform = Transform3D(
-		vm_world_basis * fine,
-		_camera.global_position + _camera.global_basis * _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
+	_viewmodel.global_transform = _camera.global_transform * Transform3D(
+		vm_basis, bias * _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
 	# The FP overlay never enters the water mirror: retail draws it as its own
 	# near-Z viewport pass over the finished frame, not as part of the mirrored
 	# world scene [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted,
@@ -412,6 +421,14 @@ func _viewmodel_offset(units: Vector3) -> Vector3:
 		units.x / WEAPON_DEF_POS_SCALE,
 		units.z / WEAPON_DEF_POS_SCALE,
 		-units.y / WEAPON_DEF_POS_SCALE)
+
+
+# Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).
+func _wrap180(degrees: float) -> float:
+	var out := fmod(degrees + 180.0, 360.0)
+	if out < 0.0:
+		out += 360.0
+	return out - 180.0
 
 
 func _wrap_degrees(degrees: float) -> float:

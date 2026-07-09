@@ -48,6 +48,12 @@ var _is_playing := true
 var _model_bounds := AABB()
 var _environment_node: Node
 
+# NATIVE-frame build: meshes emitted without the (-x,y,z) import flip (winding re-reversed),
+# for the first-person viewmodel rigs whose skeletal runtime (model_bind) poses in the native
+# model frame; the host maps the whole rig to the camera in one container transform. Set by
+# the placer BEFORE set_object_data. World models keep the default flipped frame.
+var native_frame := false
+
 # Main-body skeletal animation (.bad/.adm via NovaSkeletalAnim). Distinct from PANM
 # (vehicle part channels above): this drives a Skeleton3D built from the .bad skeleton,
 # with the skinned meshes bound through a rest-derived Skin. _skeletal is null for static
@@ -514,7 +520,7 @@ func rebuild() -> void:
 	if skeletal_mode:
 		_build_skeleton()
 	var bone_count: int = _skeleton.get_bone_count() if skeletal_mode and _skeleton != null else 0
-	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count) if object_data.has_method("build_lod_submeshes") else []
+	var submeshes: Array = object_data.build_lod_submeshes(_active_lod, skeletal_mode, bone_count, native_frame) if object_data.has_method("build_lod_submeshes") else []
 	if submeshes.is_empty():
 		submeshes = _legacy_submeshes_from_surfaces(_active_lod)
 	for entry in submeshes:

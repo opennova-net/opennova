@@ -1,0 +1,4 @@
+[gd_scene load_steps=2 format=3 uid="uid://c8fpcleanprobe0"]
+[ext_resource type="Script" path="res://tests/fp_clean_probe.gd" id="1_fpclean"]
+[node name="FpCleanProbe" type="Node"]
+script = ExtResource("1_fpclean")

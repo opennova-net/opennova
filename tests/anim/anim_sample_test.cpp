@@ -146,6 +146,32 @@ int main() {
         TEST_EXPECT(real_differs);
     }
 
+    // --- shared origins also drive the Skeleton3D REST (rest_position follows the shared source, ---
+    // not BadBone.position). This is what lets the .3di model's bone pivots override the lossy .bad
+    // positions for BOTH the FK and the bind rest, so they agree (the FP viewmodel fix). ---
+    {
+        std::vector<Vec3> custom(clip.bones.size());
+        for (size_t b = 0; b < clip.bones.size(); ++b) {
+            // distinct, independent per-bone origins unlike anything in the .bad
+            custom[b] = {static_cast<float>(b) * 0.5f, static_cast<float>(b) * -0.25f, 1.0f + static_cast<float>(b)};
+        }
+        Clip with_custom = sample_clip(bad, custom);
+        bool rest_follows_shared = true;
+        bool default_rest_is_bad = true;
+        for (size_t b = 0; b < with_custom.bones.size(); ++b) {
+            const auto &rp = with_custom.bones[b].rest_position;
+            if (!approx(rp[0], custom[b].x) || !approx(rp[1], custom[b].y) || !approx(rp[2], custom[b].z))
+                rest_follows_shared = false;
+            // With NO shared origins, rest_position stays the raw .bad position (legacy path).
+            const auto &dp = clip.bones[b].rest_position;
+            if (!approx(dp[0], bad.bones[b].position[0]) || !approx(dp[1], bad.bones[b].position[1]) ||
+                    !approx(dp[2], bad.bones[b].position[2]))
+                default_rest_is_bad = false;
+        }
+        TEST_EXPECT(rest_follows_shared);
+        TEST_EXPECT(default_rest_is_bad);
+    }
+
     // --- compressed clip: per-bone sparse keyframes with non-uniform durations (regression) ---
     // A flat rotations[frame] index snaps a bone to IDENTITY once frame >= its keyframe count; the
     // per-bone duration walk (BoneAnim_FindKeyframeAtTime) must instead hold/interpolate its own
@@ -183,6 +209,94 @@ int main() {
         // bone1 mid-window (tick 5 spans keyframe 1->2): a valid normalized, non-identity slerp.
         const Quat &w1 = sclip.frames[5][1].world_rotation;
         TEST_EXPECT(approx(w1.w * w1.w + w1.x * w1.x + w1.y * w1.y + w1.z * w1.z, 1.0f, 1e-3f));
+    }
+
+    // --- model_bind: the witnessed faithful channel semantics (the FP viewmodel fix). ---
+    // Channels are re-based against the .bad's own bind 3x3 (a delta from the bind), rest
+    // rotations become identity (the original's skin bind-inverse is the pure translation
+    // T(-pivot)). The file stores the bind 3x3 TRANSPOSED relative to the channel quats (the
+    // real-data finding on ak47_RST: mat3(bind) * channel == identity at the reset clip), so
+    // the synthetic bind below stores the transpose of the channel rotation's matrix. Oracle:
+    // the reset-equivalent channel must sample to IDENTITY -- for ANY bind, including a
+    // degenerate permutation like ak47_RST's. [orig: AnimChannel_ComputeBoneMatrices
+    // @0x410da0; BoneAnim_BuildWorldMatrices @0x40c400.]
+    {
+        BadBone mbones[2] = {};
+        mbones[0].parent_index = -1;
+        // bone0 bind: a wild permutation (x->z, y->-y, z->x flavor -- symmetric, its own
+        // transpose), like the FP rigs carry.
+        mbones[0].rotation[2] = 1.0f; mbones[0].rotation[4] = -1.0f; mbones[0].rotation[6] = 1.0f;
+        mbones[1].parent_index = 0; mbones[1].position[0] = 2.0f;
+        // bone1 channel rotation is 90deg about Z (row-major {0,-1,0, 1,0,0, 0,0,1});
+        // the FILE stores its TRANSPOSE: {0,1,0, -1,0,0, 0,0,1}.
+        mbones[1].rotation[1] = 1.0f; mbones[1].rotation[3] = -1.0f; mbones[1].rotation[8] = 1.0f;
+
+        // Channels store the bind ROTATIONS (as quats, file (x,y,z,w) order) -- the transpose
+        // of the stored 3x3s.
+        const float chan0_mat[9] = {0, 0, 1, 0, -1, 0, 1, 0, 0};   // == its own transpose
+        const float chan1_mat[9] = {0, -1, 0, 1, 0, 0, 0, 0, 1};   // Rz(90), transpose of stored
+        const Quat qb0 = mat3_to_quat(chan0_mat);
+        const Quat qb1 = mat3_to_quat(chan1_mat);
+        BadQuaternion mrot0[1] = {{qb0.x, qb0.y, qb0.z, qb0.w}};
+        BadQuaternion mrot1[1] = {{qb1.x, qb1.y, qb1.z, qb1.w}};
+        uint16_t mfl[1] = {1};
+        BadChannel mchan[2] = {};
+        mchan[0].frame_count = 1; mchan[0].frame_lengths = mfl; mchan[0].rotations = mrot0;
+        mchan[1].frame_count = 1; mchan[1].frame_lengths = mfl; mchan[1].rotations = mrot1;
+
+        BadFile mbad = {};
+        mbad.fps = 30; mbad.frame_count = 1; mbad.flags = 0;
+        mbad.bones = mbones; mbad.num_bones = 2;
+        mbad.channels = mchan; mbad.num_channels = 2;
+
+        const std::vector<Vec3> pivots = {{0.0f, 0.0f, 0.0f}, {2.0f, 0.0f, 0.0f}};
+        const Clip mb = sample_clip(mbad, pivots, /*model_bind=*/true);
+        const Quat identity = {1.0f, 0.0f, 0.0f, 0.0f};
+        // Reset oracle: bind-relative of a channel equal to its own bind == identity
+        // (up to quat double-cover: -identity is the same rotation).
+        for (int b = 0; b < 2; ++b) {
+            Quat w = mb.frames[0][static_cast<size_t>(b)].world_rotation;
+            if (w.w < 0.0f) {
+                w = {-w.w, -w.x, -w.y, -w.z};
+            }
+            TEST_EXPECT(quat_approx(w, identity, 1e-3f));
+            // Rest rotations forced to identity (pure-translation bind).
+            const float *rr = mb.bones[static_cast<size_t>(b)].rest_rotation;
+            TEST_EXPECT(approx(rr[0], 1) && approx(rr[4], 1) && approx(rr[8], 1) &&
+                    approx(rr[1], 0) && approx(rr[2], 0) && approx(rr[3], 0) &&
+                    approx(rr[5], 0) && approx(rr[6], 0) && approx(rr[7], 0));
+        }
+        // Native frame: with identity deltas the FK lands children at the plain pivot chain
+        // (the authored joints).
+        TEST_EXPECT(approx(mb.bones[1].rest_position[0], 2.0f, 1e-3f));
+        TEST_EXPECT(approx(mb.frames[0][1].world_position.x, 2.0f, 1e-3f));
+        TEST_EXPECT(approx(mb.frames[0][1].world_position.y, 0.0f, 1e-3f));
+        TEST_EXPECT(approx(mb.frames[0][1].world_position.z, 0.0f, 1e-3f));
+        // Legacy mode on the same data: world rotation stays the raw channel (the bind), NOT
+        // identity.
+        const Clip legacy = sample_clip(mbad, pivots, /*model_bind=*/false);
+        Quat lw = legacy.frames[0][0].world_rotation;
+        if (lw.w < 0.0f) {
+            lw = {-lw.w, -lw.x, -lw.y, -lw.z};
+        }
+        TEST_EXPECT(!quat_approx(lw, identity, 1e-3f));
+
+        // A NON-identity delta stays native (no conjugation): bind = identity (transpose
+        // of identity is identity), channel = +90deg about Z -> the sampled rotation IS
+        // the channel.
+        BadBone cbones[1] = {};
+        cbones[0].parent_index = -1;
+        cbones[0].rotation[0] = 1.0f; cbones[0].rotation[4] = 1.0f; cbones[0].rotation[8] = 1.0f;
+        const float s45 = 0.70710678f;
+        BadQuaternion crot[1] = {{0.0f, 0.0f, s45, s45}};  // +90 about Z (x,y,z,w)
+        BadChannel cchan[1] = {};
+        cchan[0].frame_count = 1; cchan[0].frame_lengths = mfl; cchan[0].rotations = crot;
+        BadFile cbad = {};
+        cbad.fps = 30; cbad.frame_count = 1; cbad.flags = 0;
+        cbad.bones = cbones; cbad.num_bones = 1;
+        cbad.channels = cchan; cbad.num_channels = 1;
+        const Clip cc = sample_clip(cbad, {{0.0f, 0.0f, 0.0f}}, /*model_bind=*/true);
+        TEST_EXPECT(quat_approx(cc.frames[0][0].world_rotation, {s45, 0.0f, 0.0f, s45}, 1e-3f));
     }
 
     bad_free(&bad);

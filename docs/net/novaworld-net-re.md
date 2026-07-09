@@ -3815,6 +3815,49 @@ the body rig) — and the rendered hold pose is still visibly mis-framed. Pinnin
 authored frame + the view-bias chain (and D-RORD-4's near-Z depth trick) is the follow-up;
 the arms/gun at least load, render, and warn on failure now.
 
+**§5.40 FP rig runtime semantics — RESOLVED (2026-07-09 grill).** The mis-framed hold traced to
+three stacked misreadings, each now witnessed and ported:
+
+1. **Bone pivots come from the MODEL, not the `.bad`.** Every composed bone-matrix builder reads
+   per-bone rest positions from the model's bone table (`modelDef+56`, stride 64, pivot float3
+   @+0x24 — the runtime form of the .3di ROBJ chunk); `BadBone.position` is never consumed at
+   runtime. That field is a lossy export — 257/477 retail `.bad`s triplicate X into all three
+   slots (ak47_RST 100%) — and the engine simply doesn't care.
+   `[orig: BoneAnim_BuildWorldMatrices @0x40c400 (FP), build_world_bone_matrices @0x40c770
+   (world, fixed-point pivots @+56/60/64 of the 108-byte entity bone table).]`
+2. **Channels are BIND-RELATIVE deltas, and the bind is a pure translation.** The shared channel
+   evaluator multiplies `Transpose(bind 3x3) × sampled channel matrix` per bone — the stored bind
+   3x3 (the 100-byte `.bad` bone record) is only the zero-reference the channels are measured
+   against, and it is stored TRANSPOSED relative to the channel quaternions (verified on
+   ak47_RST: `mat3(bind) × channel ≈ identity` through reset AND idle; the reload clip carries
+   real 139° mid-clip motion). The composed builders then apply `T(−pivot) · delta` with a
+   translation-only hierarchy — the skinning bind-inverse is a translation, bind world rotations
+   are identity by construction, and the authored mesh renders verbatim at the reset clip no
+   matter how degenerate the stored bind matrices look in isolation.
+   `[orig: BoneAnim_TransformBones @0x410360 (slerp → matB scratch) →
+   AnimChannel_ComputeBoneMatrices @0x410da0 (Transpose(state bind) × matB; state = the .bad
+   bone records at boneData+24) → @0x40c400/@0x40c770 (T(−p), pivot chain via the parent's FULL
+   matrix + channel translation).]`
+3. **The FP rig is authored IN VIEW SPACE and both builders' X-negation is a frame map, not
+   posing.** ak47_1st/armsG live in x = downrange (muzzle at +1.5, the arms' upper ends at −0.9
+   behind the eye plane), y = up (content ~0.6 above the waist origin — cancelling the def `pos`
+   −0.63 drop to land at eye level), z = lateral. The `S·Aᵀ·S` copy loops + x-negated
+   pivots/translations in both builders are the engine's model→render frame conversion — the
+   same job our world pipeline does with the (−x,y,z) mesh import flip.
+   `[orig: the copy loops @0x40c4d8..0x40c57c / @0x40c84c..0x40c8f5; pivot negate @0x40c953.]`
+
+**Port** (PR #213): `libs/anim sample_clip(…, model_bind)` implements (2) natively (bind-relative
+deltas, identity rest, model pivots via `NovaObjectData.get_bone_origins`); the FP meshes build in
+the NATIVE frame (`build_lod_submeshes(…, native_frame)` — no import flip, winding re-reversed for
+Godot's CCW cull) so mesh, skeleton, and Skin (`T(−abs pivot)` from identity rests) share one frame;
+`LocalPlayerHost` maps rig→camera with yaw +90 plus the witnessed per-weapon biases (`pos`/256 in
+view axes; `rot` degrees added about the eye `[orig: Player_UpdateFirstPersonCamera @0x4dd444]`).
+Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
+(`godot/tests/fp_clean_probe.gd`, `vm_mesh_probe.gd`). **Still open:** the dedicated FP render pass
+(weapon `renderfov` @Def+0x148, near-Z 0.05 swap + viewport depth [0, 0.1] — D-RORD-4) which gives
+retail its close-up framing; def `rot` bias sign confirmation against retail footage; the delta
+sense final pin (D-INF-14); body-rig unification onto the same semantics (D-INF-13).
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with

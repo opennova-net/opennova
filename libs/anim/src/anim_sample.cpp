@@ -10,6 +10,13 @@
 
 namespace opennova::anim {
 
+// TEMPORARY experiment knob (default 2 = bind * channel -- the winner on real data: the
+// .bad bind 3x3 is stored transposed relative to the channel quats, so our row-major read
+// of it is already the inverse and the delta is mat3(bind) * channel; reset AND idle land
+// at identity with it, exactly the hold-steady a viewmodel shows). 1/3/4 kept while the
+// reload clip pins the final sense. Not part of the API.
+int g_model_bind_delta_variant = 2;
+
 namespace {
 
 constexpr Quat kIdentityQuat = {1.0f, 0.0f, 0.0f, 0.0f};
@@ -60,6 +67,26 @@ Quat bad_channel_quat(float x, float y, float z, float w) {
     // Engine-native: the stored (x, y, z, w) becomes our w-first {w, x, y, z}, no axis
     // swap. (The Blender path swaps to Z-up; Godot/the engine are Y-up, so we don't.)
     return quat_normalize({w, x, y, z});
+}
+
+Quat mat3_to_quat(const float m[9]) {
+    // Row-major 3x3 -> quat (Shepperd). m[r*3+c].
+    const float trace = m[0] + m[4] + m[8];
+    Quat q;
+    if (trace > 0.0f) {
+        const float s = std::sqrt(trace + 1.0f) * 2.0f;
+        q = {0.25f * s, (m[7] - m[5]) / s, (m[2] - m[6]) / s, (m[3] - m[1]) / s};
+    } else if (m[0] > m[4] && m[0] > m[8]) {
+        const float s = std::sqrt(1.0f + m[0] - m[4] - m[8]) * 2.0f;
+        q = {(m[7] - m[5]) / s, 0.25f * s, (m[1] + m[3]) / s, (m[2] + m[6]) / s};
+    } else if (m[4] > m[8]) {
+        const float s = std::sqrt(1.0f + m[4] - m[0] - m[8]) * 2.0f;
+        q = {(m[2] - m[6]) / s, (m[1] + m[3]) / s, 0.25f * s, (m[5] + m[7]) / s};
+    } else {
+        const float s = std::sqrt(1.0f + m[8] - m[0] - m[4]) * 2.0f;
+        q = {(m[3] - m[1]) / s, (m[2] + m[6]) / s, (m[5] + m[7]) / s, 0.25f * s};
+    }
+    return quat_normalize(q);
 }
 
 Quat quat_slerp(Quat a, Quat b, float t) {
@@ -117,7 +144,7 @@ Quat sample_bone_world_rot(const BadChannel &ch, uint32_t tick) {
 
 }  // namespace
 
-Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins) {
+Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind) {
     Clip clip;
     clip.fps = bad.fps;
     clip.flags = bad.flags;
@@ -132,6 +159,13 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
 
     clip.bones.resize(bone_count);
     std::vector<Vec3> rest_origins(bone_count, kZeroVec);
+    // model_bind: every channel rotation is re-based against this .bad's own per-bone bind
+    // 3x3 -- the channels are deltas from the bind, not absolute orientations. [orig:
+    // AnimChannel_ComputeBoneMatrices @0x410da0 multiplies Transpose(bind) x channel.]
+    std::vector<Quat> bind_inv;
+    if (model_bind) {
+        bind_inv.resize(bone_count, kIdentityQuat);
+    }
     for (size_t b = 0; b < bone_count; ++b) {
         const BadBone &bone = bad.bones[b];
         clip.bones[b].name = bone.name;
@@ -140,17 +174,44 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             parent = -1;
         }
         clip.bones[b].parent_index = parent;
-        // Engine-native: bone bind position used as-is (parent-local origin).
-        rest_origins[b] = use_shared
+        // Engine-native: bone bind position used as-is (parent-local origin). When the caller
+        // supplies shared origins (the .3di model's bone pivots -- see NovaSkeletalAnim), they win
+        // over the BadBone.position field, which is a lossy export (roughly half the .bad corpus
+        // triplicates X into all three slots, destroying Y/Z). The original engine likewise sources
+        // bone pivots from the model, not the .bad. [orig: BoneAnim_BuildWorldMatrices @0x40c400 /
+        // build_world_bone_matrices @0x40c770 read the model bone table (modelDef+56); the .bad
+        // supplies only rotations via AnimChannel_ComputeBoneMatrices @0x410da0.]
+        const Vec3 origin = use_shared
                 ? shared_rest_origins[b]
                 : Vec3{bone.position[0], bone.position[1], bone.position[2]};
-        // Carry the raw BadBone BIND pose so the host can build the Skeleton3D rest from it.
-        for (int k = 0; k < 9; ++k) {
-            clip.bones[b].rest_rotation[k] = bone.rotation[k];
+        if (model_bind) {
+            // Faithful bind: pure translation. The bind-inverse the original bakes into the
+            // composed bone matrices is T(-pivot) with NO rotation; the stored bind 3x3 only
+            // serves as the zero-reference the channels are measured against.
+            // [orig: BoneAnim_BuildWorldMatrices @0x40c400 T(-p) * local.]
+            //
+            // Everything stays in the NATIVE model frame (pivots, deltas, translations). The
+            // original's builders emit S*A^T*S with x-negated pivots/translations -- that
+            // diag(-1,1,1) conjugation is its model->render frame map, which the host realizes
+            // instead by building the FP mesh in the native frame and mapping the whole rig to
+            // the camera in one container transform. [orig: the copy loops @0x40c4d8..0x40c57c
+            // / @0x40c84c..0x40c8f5.]
+            for (int k = 0; k < 9; ++k) {
+                clip.bones[b].rest_rotation[k] = (k % 4 == 0) ? 1.0f : 0.0f;
+            }
+            bind_inv[b] = quat_inv(mat3_to_quat(bone.rotation));
+        } else {
+            // Carry the raw BadBone BIND rotation so the host can build the Skeleton3D rest from
+            // it; the rest ORIGIN follows the same source as the FK (model pivots when shared), so
+            // the Skeleton3D bind and the FK agree.
+            for (int k = 0; k < 9; ++k) {
+                clip.bones[b].rest_rotation[k] = bone.rotation[k];
+            }
         }
-        clip.bones[b].rest_position[0] = bone.position[0];
-        clip.bones[b].rest_position[1] = bone.position[1];
-        clip.bones[b].rest_position[2] = bone.position[2];
+        rest_origins[b] = origin;
+        clip.bones[b].rest_position[0] = origin.x;
+        clip.bones[b].rest_position[1] = origin.y;
+        clip.bones[b].rest_position[2] = origin.z;
     }
 
     clip.frames.resize(clip.frame_count);
@@ -165,6 +226,22 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             Quat world_rot = kIdentityQuat;
             if (b < bad.num_channels) {
                 world_rot = sample_bone_world_rot(bad.channels[b], f);
+            }
+            if (model_bind) {
+                // Re-base against the bind: the used rotation is the channel's delta from the
+                // bind, identity at the reset clip by construction. [orig: AnimChannel_
+                // ComputeBoneMatrices @0x410da0 multiplies Transpose(bind 3x3) x channel.]
+                // Native frame throughout. Variant knob (see header): composition order/sense
+                // under test while the .bad matrix-vs-quat storage convention is pinned
+                // against retail visuals.
+                Quat delta;
+                switch (g_model_bind_delta_variant) {
+                    case 2:  delta = quat_mul(quat_inv(bind_inv[b]), world_rot); break;            // B*C
+                    case 3:  delta = quat_inv(quat_mul(bind_inv[b], world_rot)); break;            // (B^-1*C)^-1
+                    case 4:  delta = quat_inv(quat_mul(quat_inv(bind_inv[b]), world_rot)); break;  // (B*C)^-1
+                    default: delta = quat_mul(bind_inv[b], world_rot); break;                      // B^-1*C
+                }
+                world_rot = quat_normalize(delta);
             }
 
             Vec3 translation = kZeroVec;

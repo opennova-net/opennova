@@ -64,7 +64,7 @@ private:
 	// _notify_object_changed(), the two funnels every document mutation passes
 	// through. Main-thread only, like the rest of this class.
 	mutable std::unordered_map<uint64_t, Array> submesh_cache;
-	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count);
+	static uint64_t _submesh_cache_key(int p_lod_index, bool p_skeletal, int p_bone_count, bool p_native_frame);
 
 	void _clear();
 	void _clear_oed_session();
@@ -172,7 +172,20 @@ public:
 	bool set_part_anim_field(int p_lod_index, int p_anim_index, const String &p_key, const Variant &p_value);
 	bool set_part_anim_track_field(int p_lod_index, int p_anim_index, const String &p_track, const String &p_key, const Variant &p_value);
 	Dictionary get_render_lod_info(int p_lod_index) const;
-	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0) const;
+	// Per-part parent-relative bone pivot (native model space, raw ThreediIRPart.rel_position),
+	// indexed by part index, for the given LOD -- the model's authoritative bone rest positions.
+	// The skeletal runtime feeds these to NovaSkeletalAnim in place of the .bad's lossy
+	// BadBone.position (roughly half the .bad corpus triplicates X into all 3 slots). Matches the
+	// original engine, which sources bone pivots from the model bone-def table, not the .bad.
+	// [orig: the modelDef+56 pivot table read by BoneAnim_BuildWorldMatrices @0x40c400.]
+	PackedVector3Array get_bone_origins(int p_lod_index = 0) const;
+	// p_native_frame: emit vertices/normals/tangents in the NATIVE model frame (no (-x,y,z)
+	// import flip) with triangle winding reversed to stay front-facing under Godot's CCW cull.
+	// For the first-person viewmodel rigs, whose skeletal runtime (NovaSkeletalAnim model_bind)
+	// poses in the native frame; the host maps the whole rig to the camera in one container
+	// transform. World models keep the default flipped frame.
+	Array build_lod_submeshes(int p_lod_index, bool p_skeletal = false, int p_bone_count = 0,
+			bool p_native_frame = false) const;
 	Dictionary eval_material_runtime(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
 	int compute_anim_frame(int p_index, int p_time_ms, const Dictionary &p_ctrl_values) const;
 	Dictionary evaluate_panm(int p_lod_index, int p_time_ms, const Dictionary &p_ctrl_values) const;

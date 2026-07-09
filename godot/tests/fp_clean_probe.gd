@@ -1,0 +1,170 @@
+extends Node
+
+# Minimal clean first-person capture of the arms+gun viewmodel on OPEN ground (away from
+# the 05TR spawn tent/foliage), to judge the viewmodel fix without occlusion. Boots ONED
+# play-in-editor, walks forward to clear the tents, stays first person, captures level + a
+# slight look-down. Fullscreen + clean play SubViewport (same as bend_capture_probe).
+
+const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const EditorScene := preload("res://modtools/editor/editor_main.tscn")
+const OUT_DIR := "res://../.scratch/fp"
+const ENV_NAME := "full_00.env"
+
+var _play_viewport: Viewport = null
+var _out_abs := ""
+
+
+func _ready() -> void:
+	_out_abs = ProjectSettings.globalize_path(OUT_DIR)
+	DirAccess.make_dir_recursive_absolute(_out_abs)
+	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
+	if root.is_empty():
+		root = ResourceDirSettings.get_resource_dir()
+	ResourceDirSettings.set_resource_dir(root)
+
+	var app = EditorScene.instantiate()
+	add_child(app)
+	await get_tree().process_frame
+	for _i in 8:
+		await get_tree().process_frame
+	var ws_station = app.workstation
+	ws_station.set_resource_root_dir(root)
+	NovaWindow.set_fullscreen(get_window(), true)
+	await _settle(6)
+	if app.environment_editor != null:
+		var env_path := NovaPaths.resolve_file(root, ENV_NAME)
+		if not env_path.is_empty():
+			app.environment_editor.open_env(env_path)
+
+	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
+	if bms.is_empty():
+		bms = "05TR.bms"
+	var ws = ws_station._workspaces.get(EditorWorkstation.Workspace.MISSION)
+	var path := NovaPaths.resolve_file(root, bms)
+	if ws.open_file(path) != OK:
+		push_error("[fp] open failed"); get_tree().quit(1); return
+	ws_station.set_active_workspace(EditorWorkstation.Workspace.MISSION)
+	await _settle(30)
+	if int(ws.play_mission()) != OK:
+		push_error("[fp] play failed"); get_tree().quit(1); return
+	await _settle(120)
+	var cam := _find_play_camera(get_tree().root)
+	if cam != null:
+		_play_viewport = cam.get_viewport()
+
+	# Walk out to open ground, stay first person.
+	_hold(KEY_W, true)
+	await _settle(300)
+	_hold(KEY_W, false)
+	await _settle(30)
+	await _capture("01_fp_level.png")
+	_look(Vector2(0, 260))   # ~30 deg down at 0.12 deg/px -- see the gun + hands
+	await _settle(24)
+	await _capture("02_fp_down.png")
+
+	# NOVA_VM_LAB=1: the viewmodel experiment matrix — {mirrored, unmirrored} x {idle, rest}.
+	# Rest pose makes skinning mathematically identity (pose == bind), isolating mesh/skin
+	# plumbing from pose deformation; the unmirror isolates the (-x,y,z) handedness question.
+	if OS.get_environment("NOVA_VM_LAB") == "1":
+		var host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+		var vm_models := _viewmodel_models(get_tree().root)
+		print("[fp] lab: host=%s models=%d" % [str(host != null), vm_models.size()])
+		if host != null:
+			# Runtime oracle: in model_bind mode the skeleton rest is identity+pivots and the
+			# reset clip must sample to ~identity deltas, so rest-vs-eval_pose(anim_reset)
+			# angles ~0 prove the faithful convention holds on the REAL ak47 data.
+			for m in vm_models:
+				var skel = m.get("_skeletal")
+				if skel == null:
+					continue
+				var bindb: Array = skel.get_skeleton_bones()
+				var posed: Array = skel.eval_pose("anim_reset", 0.0)
+				var worst := 0.0
+				var mean := 0.0
+				var n: int = min(bindb.size(), posed.size())
+				for i in range(n):
+					var rb: Basis = (bindb[i] as Dictionary).get("rest", Transform3D()).basis
+					var pb: Basis = (posed[i] as Transform3D).basis
+					var d: float = rad_to_deg((rb.inverse() * pb).get_rotation_quaternion().get_angle())
+					worst = max(worst, d)
+					mean += d
+				mean = mean / max(n, 1)
+				print("[fp] bind-vs-reset %s: bones=%d worst=%.1f deg mean=%.1f deg" % [m.name, n, worst, mean])
+			await _capture("10_idle_native.png")
+			# The reset CLIP: identity deltas -> the authored (native) rig verbatim.
+			for m in vm_models:
+				m.play_body_clip("anim_reset")
+			await _settle(6)
+			await _capture("22_resetclip.png")
+			for m in vm_models:
+				m.play_body_clip("anim_wpn_idle")
+	else:
+		_look(Vector2(0, -430))  # look up a touch
+		await _settle(24)
+		await _capture("03_fp_up.png")
+
+	ws.stop_play_mission()
+	print("[fp] done -> ", _out_abs)
+	get_tree().quit()
+
+
+func _find_by_method(node: Node, method: String) -> Node:
+	if node.has_method(method):
+		return node
+	for ch in node.get_children():
+		var f := _find_by_method(ch, method)
+		if f != null:
+			return f
+	return null
+
+
+# The two NovaObjectModels under the PlayerViewmodel container (arms + gun).
+func _viewmodel_models(node: Node) -> Array:
+	if node.name == "PlayerViewmodel":
+		var out: Array = []
+		for ch in node.get_children():
+			if ch.has_method("play_body_clip"):
+				out.append(ch)
+		return out
+	for ch in node.get_children():
+		var f := _viewmodel_models(ch)
+		if not f.is_empty():
+			return f
+	return []
+
+
+func _settle(n: int) -> void:
+	for _i in n:
+		await get_tree().process_frame
+
+
+func _hold(k: Key, down: bool) -> void:
+	var e := InputEventKey.new(); e.keycode = k; e.physical_keycode = k; e.pressed = down
+	Input.parse_input_event(e)
+
+
+func _look(total: Vector2) -> void:
+	for _i in 10:
+		var mm := InputEventMouseMotion.new(); mm.relative = total / 10.0
+		Input.parse_input_event(mm)
+
+
+func _capture(name: String) -> void:
+	await RenderingServer.frame_post_draw
+	var vp: Viewport = _play_viewport if _play_viewport != null else get_viewport()
+	var img: Image = vp.get_texture().get_image()
+	if img != null:
+		img.save_png(_out_abs.path_join(name))
+		print("[fp] wrote ", name)
+
+
+func _find_play_camera(node: Node) -> Camera3D:
+	if node.has_method("get_play_camera"):
+		var c = node.call("get_play_camera")
+		if c is Camera3D:
+			return c
+	for ch in node.get_children():
+		var f := _find_play_camera(ch)
+		if f != null:
+			return f
+	return null
