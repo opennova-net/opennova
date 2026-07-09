@@ -125,6 +125,11 @@ func register_all(registry: McpToolRegistry) -> void:
 	registry.register(_def("save_mission",
 			"Write the open mission to disk. ONLY call this when the user explicitly asked to save. No args: saves to its current path (errors if never saved — pass path). path: a filename (\"patrol.bms\", written into the mounted resource root) or an absolute path; must end in .bms and becomes the mission's current path. Clears the dirty flag; undo history survives.",
 			{ "path": { "type": "string" } }), Callable(self, "_tool_save"))
+	registry.register(_def("mission_play",
+			"Start or stop playing the open mission inside the editor (Play-in-Editor) — the toolbar Play button. Boots the real game runtime over the open mission: the local player spawns at a player start with the first-person camera, movement, and the weapon viewmodel. op=start|stop|state. While playing, editing tools are rejected (stop first); screenshot target=\"viewport\" captures the play view, and get_sim_state reads the live world. The play window takes keyboard/mouse focus in the editor — a human at the machine can walk around while the session runs.",
+			{
+				"op": { "type": "string", "enum": ["start", "stop", "state"] },
+			}, ["op"], { "timeout_ms": 60000 }), Callable(self, "_tool_mission_play"))
 	registry.register(_def("sim_control",
 			"Drive the in-editor mission simulation — the same AI and pacing the game runs, over the authored data. action=play|pause|step|stop; step advances `steps` ticks (max 600). While the sim runs ALL editing tools are rejected; stop also rewinds the world to the authored state. Unavailable while a human's Play-in-Editor session owns the runtime.",
 			{
@@ -205,6 +210,37 @@ static func _world_echo(bms_pos: Vector3) -> Array:
 
 
 # --- discovery ------------------------------------------------------------------
+
+# Start/stop Play-in-Editor through the workspace's own seams (play_mission /
+# stop_play_mission) — the same path as the toolbar Play button, viewport swap
+# included. `state` is the poll form.
+func _tool_mission_play(args: Dictionary, ctx: McpToolContext) -> Variant:
+	var ws: Variant = ctx.workspace("mission")
+	if ws == null or not ws.has_method("is_playing_mission"):
+		return McpToolResult.error("Mission workspace unavailable.")
+	var op := String(args.get("op", ""))
+	match op:
+		"state":
+			return { "playing": bool(ws.is_playing_mission()) }
+		"stop":
+			if ws.is_playing_mission():
+				ws.stop_play_mission()
+				await ctx.frames(1)
+			return { "playing": bool(ws.is_playing_mission()) }
+		"start":
+			if ws.is_playing_mission():
+				return { "playing": true }
+			var gate := _require_mission(ctx)
+			if gate.has("error"):
+				return McpToolResult.error(gate["error"])
+			var err: Error = ws.play_mission()
+			if err != OK:
+				return McpToolResult.error("Play failed (%s) — check get_logs; the mission needs a player start and the editor must be docked." % error_string(err))
+			# Let the runtime boot a couple of frames so the first screenshot has a world.
+			await ctx.frames(2)
+			return { "playing": bool(ws.is_playing_mission()) }
+	return McpToolResult.error("op must be start, stop, or state.")
+
 
 # Create a fresh empty mission, optionally loading a terrain first. Mirrors the
 # editor's New action (MissionController.new_mission) so authoring needs no manual

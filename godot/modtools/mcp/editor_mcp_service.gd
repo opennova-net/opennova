@@ -19,6 +19,7 @@ var log_hub: McpLogHub
 var tool_host: EditorMcpTools
 var mission_tool_host: EditorMcpMissionTools
 var menu_tool_host: EditorMcpMenuTools
+var object_tool_host: EditorMcpObjectTools
 var editor: Node = null
 var shell: Node = null
 
@@ -44,6 +45,8 @@ func setup(editor_node: Node, shell_node: Node) -> void:
 	mission_tool_host.register_all(server.registry)
 	menu_tool_host = EditorMcpMenuTools.new(self)
 	menu_tool_host.register_all(server.registry)
+	object_tool_host = EditorMcpObjectTools.new(self)
+	object_tool_host.register_all(server.registry)
 	if McpSettings.resolve_enabled():
 		start(McpSettings.resolve_port())
 
