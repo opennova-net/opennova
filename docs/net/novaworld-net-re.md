@@ -3915,7 +3915,8 @@ confirmed yaw-180 is the only map that places the rig in frame — 0 puts it beh
 39 bones), so the quat composition is exact — no reflection caveat. **Still open:** def `rot`
 bias signs + reload direction vs retail footage (the D-INF-14 tail); left-hand/finger pose
 fidelity vs retail footage (retail's hip idle is a low-ready — compare before judging); per-weapon
-`renderfov`/`pos`/`tpos` def plumbing; D-INF-13 (bodies onto model_bind — the part↔bone question
+`renderfov`/`pos`/`tpos` def plumbing *(landed — the fifth pass below)*; D-INF-13 (bodies onto
+model_bind — the part↔bone question
 is resolved by the model-table correction below: rows pair by index, no matcher needed).
 
 **§5.40 model-table correction — the rig IS the model's bone table (2026-07-09 grill, third
@@ -4015,6 +4016,51 @@ can derive it from the model + bind; anything that consumes `BadBone.position` (
 oscarmike path, our exporters' round-trips) has a corpus-exact reconstruction. The runtime is
 untouched — the model-pivot path above remains the witnessed-faithful rig source.
 
+**§5.40 per-weapon def plumbing + position-source unification (2026-07-09, fifth pass).**
+Two loose ends of the series closed together, validated end to end on both SKUs:
+
+1. **The viewmodel def slice is data-driven.** `libs/def` parses `renderfov` (record
+   default **80.0** seeded per weapon block `[orig: AdmDef_InitEntryDefaults @ 0x53ff31;
+   parser key @ 0x54482a]`; REVX-era defs only ever comment the key out, reaffirming the
+   default-80 witness), `NovaWeaponDatabase` exposes the viewmodel slice —
+   `animadm`/`gfx1`/`gfx1a`/`gfx1b`/`gfx3`, the `pos`/`tpos` rows (xyz raw units +
+   yaw/pitch/roll degrees), `renderfov` — plus a case-insensitive `find_weapon`
+   `[orig: WeaponDef_ParseProperty @ 0x54d730; pos/tpos handlers @ 0x54476b/@ 0x54471f]`.
+   `GameWorld.build_local_player_viewmodel` resolves the fixed default weapon
+   (`WPN_AK47AUTO`; `NOVA_VM_WEAPON` overrides the name for rig A/B checks) from the
+   MOUNTED root's weapon.def and `LocalPlayerHost` applies the resolved
+   `pos`/`rot`/`tpos`/`renderfov`; the witnessed JOX AK-47 constants survive only as the
+   no-def fallback. Equipped-weapon resolution (the def per the player's actual weapon)
+   remains the follow-up — the plumbing no longer cares which weapon it is.
+2. **The `(10, 0, −201)` archaeology, closed.** The pre-2026-07-08 hardcode that "matched
+   no def line" is the REVX-era `WPN_AK47AUTO` `pos` row verbatim — and in that SKU the
+   AK-47's viewmodel IS `AKM_1st` (`ANIMADM AKM_1ST`, `GFX1 AKM_1st`, `GFX1A ARMSG`,
+   `pos 10.0 0.0 -201.0 / rot 0 0 1`). Both old constants (the model name and the offset)
+   came from the same REVX def; neither matched JO because JO re-modeled the rig
+   (`ak47_1st`, `pos −19.46 21.19 −161.31 / rot 5 3.75 353`). One weapon name resolving
+   per-SKU data is exactly the original's shape.
+3. **`BadBone.position` has no remaining preview/runtime consumer.** The ONED object
+   preview's Anims workflow now binds the `.adm`'s MODEL bone table — the .adm basename's
+   `.3di`, falling back to the open model; the FP arms therefore ride the gun's table, the
+   same rule as `build_model_from_graphic` — with the bind-relative channel semantics and
+   native-frame meshes; the net-replay model resolver passes model origins like the mission
+   placer's body path. The only reader left anywhere is `NovaSkeletalAnim`'s no-model
+   fallback, the original's own no-override shape `[orig: @ 0x410de3]`.
+4. **Evidence.** Play-in-Editor on both SKUs through the def path: REVX root (00TRa) draws
+   the AKM_1st/ARMSG composed hold, JOX root (05TR) the ak47_1st/armsG one. Preview↔lib
+   numeric parity: the posed AKM idle (the 46-channel/45-row rig) dumps 0/45 joint
+   mismatches against the plain-file evaluator, and the ak47 preview's canonical-camera
+   idle matches `vm_mesh_probe`'s j37 discriminator (barrel → +Z, belly → −Y). A US01 body
+   previews through the same semantics. ctest `def_parse_weapons` pins the renderfov
+   default + override; GUT `anims_inspector`/`local_player_host`/`game_world`/
+   `object_editor` green in isolation. The drive surface is new curated ONED MCP tools
+   (`object_load_anims`/`object_play_clip`/`object_rig_state` rest+posed joint dumps;
+   `mission_play` for Play-in-Editor).
+5. **Still open** (unchanged): the D-INF-14 tail — def `rot` bias signs + reload direction
+   + left-hand/finger pose vs retail footage; the `pos`→`tpos` ADS swap (value plumbed,
+   swap unwired); velocity lead + prone drop; D-INF-13 (bodies onto the world table
+   @ 0x40c770); D-INF-15.
+
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 
 How the original places the first-person arms+weapon, from the user's lead that it "has to do with
@@ -4066,8 +4112,9 @@ so file `x→x`, `y→−z`, `z→y`. (A first cut mistakenly sent `pos[2]` into
 gun floating ~0.7u in front of the camera — the screensnapr.io/s/8e9d030 symptom; corrected here.
 oscarmike `WeaponManager._jo_to_godot_position` independently agrees on `/256` + `pos[2]→up/down`.)
 Hardcoded to WPN_MP5SD until a weapon.def Godot binding resolves the equipped weapon. **Deferrals:**
-per-weapon `pos`/`tpos` from a weapon.def binding; the `pos`→`tpos` ADS swap (entity `Flags & 2`); the
-small per-weapon `Bone.rot`; velocity lead + prone drop; the model-facing basis and the two small
+per-weapon `pos`/`tpos` from a weapon.def binding *(landed — the fifth-pass def plumbing above)*; the
+`pos`→`tpos` ADS swap (entity `Flags & 2`); the small per-weapon `Bone.rot` *(landed, same pass)*;
+velocity lead + prone drop; the model-facing basis and the two small
 lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certain one).
 
 ### 5.41 `Player_*` family — naming validation + decomp cleanup grill (2026-06-26)
