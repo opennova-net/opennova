@@ -3885,8 +3885,9 @@ on the outstretched right hand). The witnessed mechanism:
    clips pose it into the view hold facing +Z model space; the §5.40 "authored in view space"
    reading described the T-pose bind, not the runtime hold.
 4. **`.bad` positions, closed:** retail derives `BadBone.position` at export
-   (≈ `inv(parent bind world) ⊗ swizzled model rel` — maintainer's relation, consistent with the
-   norm-breaking triplicated files being lossy exports) and never reads it at runtime; pivots come
+   (≈ `inv(parent bind world) ⊗ swizzled model rel` — maintainer's relation; the EXACT form is
+   pinned in the model-table correction below: `F_parent⁻¹ · P · d` with `F` = the Max bone
+   frame, not the bind) and never reads it at runtime; pivots come
    from the model bone table (`modelDef+56` rel float3 @+0x24, parent @+20, stride 64
    `[orig: BoneAnim_BuildWorldMatrices @0x40c400, pivot reads @0x40c5f2]`). Pipelines that consume
    `BadBone.position` directly (the pre-repo oscarmike port) work exactly on the healthy subset
@@ -3914,8 +3915,58 @@ confirmed yaw-180 is the only map that places the rig in frame — 0 puts it beh
 39 bones), so the quat composition is exact — no reflection caveat. **Still open:** def `rot`
 bias signs + reload direction vs retail footage (the D-INF-14 tail); left-hand/finger pose
 fidelity vs retail footage (retail's hip idle is a low-ready — compare before judging); per-weapon
-`renderfov`/`pos`/`tpos` def plumbing; D-INF-13 (bodies onto model_bind — the export relation
-above doubles as the part↔bone matcher for the 20-parts/19-bones body models).
+`renderfov`/`pos`/`tpos` def plumbing; D-INF-13 (bodies onto model_bind — the part↔bone question
+is resolved by the model-table correction below: rows pair by index, no matcher needed).
+
+**§5.40 model-table correction — the rig IS the model's bone table (2026-07-09 grill, third
+pass).** Point (4) above said "pivots come from the model bone table"; the data + a re-read of
+`@0x40c400` show the table's role is total, and the port still keyed the rig off the `.bad` with
+a silent `BadBone.position` fallback that point (4) should have killed:
+
+1. **Corpus proof that `BadBone.position` is dead data.** Sweeping every `*1st.3di + .adm` pair:
+   **12 of 43 JO (JOX) viewmodel rigs ship broken positions** — the recurring signature is 24
+   zeroed bones + ~14 stale values (ak47, M4, M4GL, 357, 47GL, 74GL, AK74, PKM, RPG7, SR25, L115,
+   Mach, Mort, Dgnv, FM92) — and retail renders every one correctly. The REVVY-SKU `ak47_RST.bad`
+   is **byte-identical** to JO's (`max|Δpos| = 0`, same rot/length), so "healthy vs broken" is a
+   per-rig export accident shipped unchanged across SKUs, not a data revision. Several rigs flip
+   health across SKUs from different export batches (M4/PKM/RPG7/SR25 broken in JO, healthy in
+   REVVY; G17 the reverse).
+2. **The witnessed rig source (`@0x40c400`, re-read).** The FK loop is bounded by `modelDef+52`
+   — the MODEL's row count, never the `.bad`'s — and takes BOTH the parent index (row `+0x14`)
+   and the float pivot (row `+0x24`) from the `modelDef+56` table. The `.bad` contributes
+   rotations only, channel *i* → row *i* by index. When the anim has FEWER bones than the model,
+   a padding loop (`@0x40c5a1`) pre-fills the extra rows with bone 0's composed matrix; when it
+   has MORE (AKM_1st: 46 bones, 45 parts), the surplus channels are simply never read. On flag-2
+   (translated) clips the padded rows sum an UNINITIALIZED `bone_translations` stack slot
+   (`@0x40c6e9..0x40c71d`) — ported as zero, ledgered **D-INF-15** (class D, ADR 0003).
+3. **The export relation, closed exactly.** On healthy rigs,
+   `BadBone.position = F_parent⁻¹ · P · d` **exactly** (residuals ≤ 6e-5 on AKM_1st, M4AC_1st,
+   m4_1st — M4AC/m4 share identical solved frames, i.e. one skeleton, swappable attachment
+   models), where `d` = the model-space pivot offset parent→child, `P` = the y↔z SWAP (an
+   improper axis exchange, det −1), and `F_parent` = the parent's **3ds Max bone frame**
+   (X-down-the-bone; root = identity; mirrored L/R). `F` matches NEITHER the stored bind 3×3 nor
+   the frame-0 channel under any constant conjugation (48-perm × 48-perm × transpose sweeps) nor
+   any accumulated relative-channel chain — it is DCC-side authoring data lost at export, which
+   is exactly why the field can rot without anyone noticing: **`BadBone.position` is not
+   reconstructible from shipped data and nothing at runtime wants it.** (`BadBone.length` is the
+   Max bone length — equals the child distance on chain bones only.) The stored bind 3×3 ≡ the
+   RST frame-0 channel transposed, confirming bind = reset-pose channel in matrix form.
+4. **Port.** `sample_clip` gained `model_parents` (paired with the origins): in model-table mode
+   the rig's count/hierarchy/pivots come from the model, rows past the `.bad`'s channels take row
+   0's composed rotation, self-parent roots normalize to −1, and the equality-gated fallback to
+   `BadBone.position` is gone from the runtime path (it survives only as the no-model
+   menu-preview fallback, the original's own `@0x410de3` shape). `NovaObjectData.get_bone_parents`
+   exposes the table; `NovaSkeletalAnim`/the placer pass origins+parents (the FP arms still use
+   the GUN's table). Verified: `anim_sample` ctest (model-table count/hierarchy/pivots, bone-0
+   padding, AKM-shape shrink, garbage-`.bad`-pos immunity) + `vm_mesh_probe` on REVVY — ak47
+   (broken pos, 39=39) and AKM_1st (healthy pos, 46 bones/45 parts, previously reachable only
+   through the fallback) both rest exactly on their model pivots, compose reset→identity, and
+   pose the idle hold (barrel → +Z view space).
+5. **For D-INF-13 (bodies):** the world builder `@0x40c770` has the same composed math but its
+   own table shape — count `skeletonData+104`, 108-byte rows at `skeletonData+108`, parent
+   `@+40`, pivots 16.16 fixed `@+56/60/64` consumed in (z,x,y) order with x negated, bind-inverse
+   `T(−parent pivot)`, and NO bone-0 padding loop. Bodies close by porting that table, not by
+   inventing a part↔bone matcher.
 
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 

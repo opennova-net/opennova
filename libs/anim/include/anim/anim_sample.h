@@ -107,8 +107,24 @@ struct Clip {
 // bind = *(channel+44) ? *(channel+44) : playing anim); AnimMap_RegisterEntity @0x40bb60
 // (channel+44 = .adm slot-0 .bad, set once); BoneAnim_BuildWorldMatrices @0x40c400
 // (T(-pivot) bind-inverse, translation-only hierarchy, the S*A^T*S copy loops).]
+//
+// model_parents (paired with shared_rest_origins): the MODEL's bone table drives the rig.
+// When non-empty and sized like shared_rest_origins, the rig's row count, parent indices,
+// AND pivots all come from the model -- the original never reads the .bad's bone count,
+// parents, or positions on this path; the .bad contributes rotations only, paired by row
+// index [orig: BoneAnim_BuildWorldMatrices @0x40c400 -- FK bounded by modelDef+52, parent
+// from the modelDef+56 row's +20, pivot from +36]. Rows at/past the .bad's channel count
+// take row 0's already-composed rotation (the padding loop @0x40c5a1 copies bone 0's
+// matrix into every extra slot) with zero per-frame translation (the original sums
+// uninitialized stack floats there -- UB, ported as zeros; divergence ledger D-INF-15).
+// A row's parent equal to itself normalizes to -1 (the table stores the root's parent as
+// itself; the original's in-place multiply against the model-origin root pivot is a no-op).
+// ClipBone.name is empty for rows past the .bad's records -- hosts synthesize names.
+// This is what makes broken BadBone.position corpora irrelevant: 12 of 43 JO viewmodel
+// rigs ship zeroed/stale positions and retail renders them all (data sweep 2026-07-09).
 Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins = {},
-                 bool model_bind = false, const BadFile *bind_source = nullptr);
+                 bool model_bind = false, const BadFile *bind_source = nullptr,
+                 const std::vector<int> &model_parents = {});
 
 // --- quaternion / vector helpers, exposed for tests ---
 Quat quat_normalize(Quat q);

@@ -138,18 +138,26 @@ Quat sample_bone_world_rot(const BadChannel &ch, uint32_t tick) {
 }  // namespace
 
 Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
-                 const BadFile *bind_source) {
+                 const BadFile *bind_source, const std::vector<int> &model_parents) {
     Clip clip;
     clip.fps = bad.fps;
     clip.flags = bad.flags;
     clip.frame_count = bad.frame_count;
 
-    const size_t bone_count = bad.num_bones;
+    const size_t bad_bone_count = bad.num_bones;
     const bool translated = (bad.flags & 0x02u) != 0;
-    // The FK accumulation uses ONE shared skeleton's bone offsets across all of a model's
-    // clips. Use the caller-supplied shared origins when present; otherwise fall back to this
-    // clip's own bind positions (correct only for the bind/reset clip itself).
-    const bool use_shared = shared_rest_origins.size() == bone_count;
+    // Model-table mode: the MODEL's bone table defines the rig -- row count, hierarchy, and
+    // pivots; the .bad's own bone count/parents/positions are never read (BadBone.position is
+    // a lossy DCC export -- 12 of 43 JO viewmodel rigs ship zeroed/stale values and retail
+    // renders them all). [orig: BoneAnim_BuildWorldMatrices @0x40c400 -- the FK loop runs to
+    // modelDef+52 and reads parent (+20) and pivot (+36) from each modelDef+56 row.]
+    const bool model_table =
+            !model_parents.empty() && model_parents.size() == shared_rest_origins.size();
+    const size_t bone_count = model_table ? model_parents.size() : bad_bone_count;
+    // Legacy path: the FK accumulation uses ONE shared skeleton's bone offsets across all of a
+    // model's clips. Use the caller-supplied shared origins when present; otherwise fall back
+    // to this clip's own bind positions (correct only for the bind/reset clip itself).
+    const bool use_shared = model_table || shared_rest_origins.size() == bone_count;
 
     clip.bones.resize(bone_count);
     std::vector<Vec3> rest_origins(bone_count, kZeroVec);
@@ -167,10 +175,15 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         bind_rot.resize(bone_count, kIdentityQuat);
     }
     for (size_t b = 0; b < bone_count; ++b) {
-        const BadBone &bone = bad.bones[b];
-        clip.bones[b].name = bone.name;
-        int parent = bone.parent_index;
-        if (parent < 0 || static_cast<size_t>(parent) >= bone_count) {
+        const BadBone *bone = (b < bad_bone_count) ? &bad.bones[b] : nullptr;
+        clip.bones[b].name = (bone != nullptr) ? bone->name : "";
+        // Hierarchy: the model table when supplied, else this .bad's records. The table stores
+        // the root row's parent as ITSELF (the original's in-place multiply against the
+        // model-origin root pivot is a no-op) -- normalize self/invalid to -1.
+        int parent = model_table ? model_parents[b]
+                                 : ((bone != nullptr) ? bone->parent_index : -1);
+        if (parent < 0 || static_cast<size_t>(parent) >= bone_count ||
+                static_cast<size_t>(parent) == b) {
             parent = -1;
         }
         clip.bones[b].parent_index = parent;
@@ -183,7 +196,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         // supplies only rotations via AnimChannel_ComputeBoneMatrices @0x410da0.]
         const Vec3 origin = use_shared
                 ? shared_rest_origins[b]
-                : Vec3{bone.position[0], bone.position[1], bone.position[2]};
+                : Vec3{bone->position[0], bone->position[1], bone->position[2]};
         if (model_bind) {
             // Faithful bind: pure translation. The bind-inverse the original bakes into the
             // composed bone matrices is T(-pivot) with NO rotation; the stored bind 3x3 only
@@ -205,12 +218,13 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             if (b < bind_bad.num_bones) {
                 bind_rot[b] = mat3_to_quat(bind_bad.bones[b].rotation);
             }
-        } else {
+        } else if (bone != nullptr) {
             // Carry the raw BadBone BIND rotation so the host can build the Skeleton3D rest from
             // it; the rest ORIGIN follows the same source as the FK (model pivots when shared), so
-            // the Skeleton3D bind and the FK agree.
+            // the Skeleton3D bind and the FK agree. (Model-table rows past the .bad's records keep
+            // the identity default.)
             for (int k = 0; k < 9; ++k) {
-                clip.bones[b].rest_rotation[k] = bone.rotation[k];
+                clip.bones[b].rest_rotation[k] = bone->rotation[k];
             }
         }
         rest_origins[b] = origin;
@@ -231,6 +245,24 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             Quat world_rot = kIdentityQuat;
             if (b < bad.num_channels) {
                 world_rot = sample_bone_world_rot(bad.channels[b], f);
+            } else if (model_table) {
+                // Model rows past the .bad's channels take row 0's already-COMPOSED rotation --
+                // the original copies bone 0's finished matrix into every extra slot before the
+                // FK [orig: the padding loop @0x40c5a1]. Rows 0..b-1 are complete (ascending b);
+                // with no channels at all the identity stands.
+                frame[b].world_rotation = (bad.num_channels > 0) ? frame[0].world_rotation
+                                                                 : kIdentityQuat;
+                Vec3 pad_translation = kZeroVec;  // orig sums uninitialized stack here (UB): D-INF-15
+                const int pad_parent = clip.bones[b].parent_index;
+                if (pad_parent < 0) {
+                    frame[b].world_position = vec_add(rest_origins[b], pad_translation);
+                } else {
+                    const BoneSample &pp = frame[static_cast<size_t>(pad_parent)];
+                    frame[b].world_position = vec_add(
+                            vec_add(pp.world_position, quat_rotate(pp.world_rotation, rest_origins[b])),
+                            pad_translation);
+                }
+                continue;
             }
             if (model_bind) {
                 // Compose against the SKELETON bind: the .bad stores each bind 3x3 TRANSPOSED
@@ -250,8 +282,10 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             }
 
             Vec3 translation = kZeroVec;
-            if (translated && bad.translations != nullptr) {
-                const size_t idx = static_cast<size_t>(f) * bone_count + b;
+            if (translated && bad.translations != nullptr && b < bad_bone_count) {
+                // The translation block is laid out by the FILE's own bone count (its stride),
+                // regardless of the rig's row count in model-table mode.
+                const size_t idx = static_cast<size_t>(f) * bad_bone_count + b;
                 if (idx < bad.num_translations) {
                     const float *t = bad.translations[idx];
                     translation = {t[0], t[1], t[2]};

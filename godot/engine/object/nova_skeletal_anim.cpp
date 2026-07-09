@@ -119,6 +119,15 @@ std::vector<opennova::anim::Vec3> to_model_origins(const PackedVector3Array &p_o
 	return out;
 }
 
+std::vector<int> to_model_parents(const PackedInt32Array &p_parents) {
+	std::vector<int> out;
+	out.reserve(static_cast<size_t>(p_parents.size()));
+	for (int i = 0; i < p_parents.size(); ++i) {
+		out.push_back(p_parents[i]);
+	}
+	return out;
+}
+
 }  // namespace
 
 const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip(const String &p_key) const {
@@ -131,7 +140,8 @@ const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip(const String &p_
 }
 
 bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name,
-		const PackedVector3Array &p_model_bone_origins, bool p_model_bind) {
+		const PackedVector3Array &p_model_bone_origins, const PackedInt32Array &p_model_bone_parents,
+		bool p_model_bind) {
 	bones_.clear();
 	bind_local_.clear();
 	clips_.clear();
@@ -205,7 +215,8 @@ bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 	}
 	adm_free(&adm);
 
-	if (!build_from_bad_bytes(reset_bytes, clip_bads, to_model_origins(p_model_bone_origins), p_model_bind)) {
+	if (!build_from_bad_bytes(reset_bytes, clip_bads, to_model_origins(p_model_bone_origins),
+			to_model_parents(p_model_bone_parents), p_model_bind)) {
 		// Carry the .adm name into the core's generic error for context.
 		if (!last_error_.is_empty() && last_error_.find(p_adm_name) < 0) {
 			last_error_ += " for: " + p_adm_name;
@@ -217,7 +228,8 @@ bool NovaSkeletalAnim::load_from_resource_root(const Ref<NovaResourceRoot> &p_re
 
 bool NovaSkeletalAnim::load_from_bad_files(const Ref<NovaResourceRoot> &p_resource_root,
 		const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
-		const PackedVector3Array &p_model_bone_origins, bool p_model_bind) {
+		const PackedVector3Array &p_model_bone_origins, const PackedInt32Array &p_model_bone_parents,
+		bool p_model_bind) {
 	bones_.clear();
 	bind_local_.clear();
 	clips_.clear();
@@ -251,18 +263,35 @@ bool NovaSkeletalAnim::load_from_bad_files(const Ref<NovaResourceRoot> &p_resour
 		clip_bads.emplace_back(key, bytes);
 	}
 
-	return build_from_bad_bytes(reset_bytes, clip_bads, to_model_origins(p_model_bone_origins), p_model_bind);
+	return build_from_bad_bytes(reset_bytes, clip_bads, to_model_origins(p_model_bone_origins),
+			to_model_parents(p_model_bone_parents), p_model_bind);
 }
 
 bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
 		const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads,
-		const std::vector<opennova::anim::Vec3> &p_model_origins, bool p_model_bind) {
+		const std::vector<opennova::anim::Vec3> &p_model_origins,
+		const std::vector<int> &p_model_parents, bool p_model_bind) {
 	// Pass 1: parse the reset/skeleton .bad -> canonical bones, shared rest origins, bind pose.
 	// ALL clips share this ONE skeleton's bone offsets + bind pose; each clip's own .bad may carry
 	// different/zero bone positions, so sampling must use the shared origins. The parsed skeleton
 	// .bad stays alive through Pass 2: in model_bind mode it is ALSO the bind operand every clip's
 	// channels compose against [orig: AnimMap_RegisterEntity @0x40bb60 pins channel+44 to the .adm
 	// slot-0 .bad once; AnimChannel_ComputeBoneMatrices @0x410da0 reads its records per bone].
+	//
+	// Model-table mode (origins + parents paired): the .3di model's bone table defines the rig
+	// outright -- count, hierarchy, pivots -- and the .bad rows pair by index; the .bad's own
+	// bone count/parents/positions are never read. This is the witnessed original: the FK is
+	// bounded by modelDef+52 and walks the modelDef+56 rows; a rig whose .bad and model disagree
+	// in bone count (AKM_1st: 46 bones, 45 parts) renders from the model table, extra channels
+	// simply never sampled, extra model rows taking bone 0's composed matrix. BadBone.position
+	// stays untouched -- 12 of 43 JO viewmodel rigs ship broken values and retail renders them
+	// all. [orig: BoneAnim_BuildWorldMatrices @0x40c400 + the padding loop @0x40c5a1.]
+	const bool model_table =
+			!p_model_parents.empty() && p_model_parents.size() == p_model_origins.size();
+	if (!p_model_parents.empty() && !model_table) {
+		WARN_PRINT(vformat("NovaSkeletalAnim: %s: model bone parents size %d != origins size %d; model table ignored",
+				adm_name_, static_cast<int>(p_model_parents.size()), static_cast<int>(p_model_origins.size())));
+	}
 	std::vector<opennova::anim::Vec3> shared_rest;
 	BadFile skeleton_bf = {};
 	{
@@ -271,20 +300,23 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 			last_error_ = "Reset/skeleton animation not parseable";
 			return false;
 		}
-		const opennova::anim::Clip reset_clip =
-				opennova::anim::sample_clip(skeleton_bf, {}, p_model_bind, &skeleton_bf);
+		const opennova::anim::Clip reset_clip = opennova::anim::sample_clip(
+				skeleton_bf, model_table ? p_model_origins : std::vector<opennova::anim::Vec3>{},
+				p_model_bind, &skeleton_bf,
+				model_table ? p_model_parents : std::vector<int>{});
 		bones_ = reset_clip.bones;
-		// When the model supplies per-bone bind positions (one per bone), they OVERRIDE the reset
-		// .bad's bone positions -- the .bad's BadBone.position is a lossy export (~half the corpus
-		// triplicates X into all 3 slots, destroying Y/Z), while the .3di model carries the real
-		// pivots (parent-relative, model-frame). This mirrors the original engine, which reads bone
-		// positions from the model, not the .bad. [orig: BoneAnim_BuildWorldMatrices @0x40c400
-		// reads modelDef+56 pivots.] In model_bind mode the rest rotations are identity (the
-		// original's bind is a pure translation; channels are re-based -- see anim_sample.h), so
-		// bind_local_ becomes T(pivot) exactly and the Skin's global-rest-inverse is T(-abs pivot),
-		// matching the T(-p) the original bakes into every composed bone matrix.
-		const bool use_model = p_model_origins.size() == bones_.size();
-		if (!p_model_origins.empty() && !use_model) {
+		// Legacy positional override (no parents supplied): when the model supplies per-bone bind
+		// positions (one per bone), they OVERRIDE the reset .bad's bone positions -- the .bad's
+		// BadBone.position is a lossy export (~half the corpus triplicates X into all 3 slots,
+		// destroying Y/Z), while the .3di model carries the real pivots (parent-relative,
+		// model-frame). In model-table mode sample_clip already sourced count/hierarchy/pivots
+		// from the model. [orig: BoneAnim_BuildWorldMatrices @0x40c400 reads modelDef+56 pivots.]
+		// In model_bind mode the rest rotations are identity (the original's bind is a pure
+		// translation; channels are re-based -- see anim_sample.h), so bind_local_ becomes
+		// T(pivot) exactly and the Skin's global-rest-inverse is T(-abs pivot), matching the
+		// T(-p) the original bakes into every composed bone matrix.
+		const bool use_model = !model_table && p_model_origins.size() == bones_.size();
+		if (!model_table && !p_model_origins.empty() && !use_model) {
 			WARN_PRINT(vformat("NovaSkeletalAnim: %s: model bone origins size %d != bone count %d; falling back to .bad positions",
 					adm_name_, static_cast<int>(p_model_origins.size()), static_cast<int>(bones_.size())));
 		}
@@ -295,6 +327,11 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 				bones_[i].rest_position[0] = p_model_origins[i].x;
 				bones_[i].rest_position[1] = p_model_origins[i].y;
 				bones_[i].rest_position[2] = p_model_origins[i].z;
+			}
+			// Model-table rows past the .bad's records carry no name; Skeleton3D needs unique
+			// non-empty names, so synthesize stable ones.
+			if (bones_[i].name.empty()) {
+				bones_[i].name = "MDL" + std::to_string(i);
 			}
 			shared_rest[i] = {bones_[i].rest_position[0], bones_[i].rest_position[1], bones_[i].rest_position[2]};
 			const int parent = bones_[i].parent_index;
@@ -321,7 +358,8 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 		}
 		LoadedClip lc;
 		lc.key = kv.first;
-		lc.clip = opennova::anim::sample_clip(bf, shared_rest, p_model_bind, &skeleton_bf);
+		lc.clip = opennova::anim::sample_clip(bf, shared_rest, p_model_bind, &skeleton_bf,
+				model_table ? p_model_parents : std::vector<int>{});
 		bad_free(&bf);
 		clips_.push_back(std::move(lc));
 	}
@@ -510,8 +548,8 @@ Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead
 }
 
 void NovaSkeletalAnim::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name", "model_bone_origins", "model_bind"), &NovaSkeletalAnim::load_from_resource_root, DEFVAL(PackedVector3Array()), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad", "model_bone_origins", "model_bind"), &NovaSkeletalAnim::load_from_bad_files, DEFVAL(PackedVector3Array()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name", "model_bone_origins", "model_bone_parents", "model_bind"), &NovaSkeletalAnim::load_from_resource_root, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad", "model_bone_origins", "model_bone_parents", "model_bind"), &NovaSkeletalAnim::load_from_bad_files, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_loaded"), &NovaSkeletalAnim::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &NovaSkeletalAnim::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_adm_name"), &NovaSkeletalAnim::get_adm_name);

@@ -24,7 +24,11 @@ func _run() -> void:
 		quit(1)
 		return
 
-	for spec in [["ak47_1st", "ak47_1st", 39], ["armsG", "ak47_1st", 39], ["US01", "", 20]]:
+	# AKM_1st (REVVY-only): the count-mismatch rig -- 46 .bad bones vs 45 model parts. The
+	# model table drives the rig (45 rows); the .bad's 46th channel is never sampled
+	# [orig: the FK is bounded by modelDef+52 @0x40c400]. Previously this rig silently fell
+	# back to BadBone.position (healthy on AKM, broken on a third of the JO corpus).
+	for spec in [["ak47_1st", "ak47_1st", 39], ["armsG", "ak47_1st", 39], ["US01", "", 20], ["AKM_1st", "AKM_1st", 45]]:
 		_dump(root, spec[0], spec[1], spec[2])
 	quit(0)
 
@@ -66,12 +70,14 @@ func _dump(root: NovaResourceRoot, graphic: String, adm: String, bone_count: int
 			str(mesh.get_aabb().position), str(mesh.get_aabb().size)])
 		shown += 1
 
-	# Skeleton rest-world spread (accumulated bind chain from the .adm, with model origins).
+	# Skeleton rest-world spread (accumulated bind chain from the .adm, with the model bone
+	# table). NOTE probe artifact: this passes each model's OWN table; in-game the armsG rig
+	# uses the GUN model's table (build_model_from_graphic resolves the .adm's model).
 	if adm.is_empty():
 		return
 	# model_bind: the witnessed faithful semantics (bind-relative channels, identity rest).
 	var sk := NovaSkeletalAnim.new()
-	if not sk.load_from_resource_root(root, adm + ".adm", data.get_bone_origins(0), true):
+	if not sk.load_from_resource_root(root, adm + ".adm", data.get_bone_origins(0), data.get_bone_parents(0), true):
 		print("[vm] adm load failed: ", sk.get_last_error())
 		return
 	var bones: Array = sk.get_skeleton_bones()

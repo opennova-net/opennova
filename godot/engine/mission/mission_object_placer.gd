@@ -420,16 +420,21 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 		model.set_environment_node(env_node)
 	if not adm_name.is_empty():
 		# The skeleton belongs to the .adm's model, NOT necessarily THIS graphic: the FP arms
-		# (armsG) share the gun's ak47_1st skeleton, so their bone pivots must come from the gun
+		# (armsG) share the gun's ak47_1st skeleton, so their bone table must come from the gun
 		# model -- exactly as retail draws the arms with the GUN's bone matrices, not their own
 		# [orig: Player_RenderFirstPersonViewModel @0x4ded60 reuses one bone_matrices for both
 		# the gfx1 gun and the character-arms submit]. When graphic == adm the model is the same.
+		# Origins + parents = the model bone table: the rig's count/hierarchy/pivots come from
+		# the MODEL, the .bad contributes rotations by row index -- so rigs whose .bad and model
+		# disagree in bone count (AKM_1st: 46 vs 45) and rigs with broken BadBone.position
+		# (12 of 43 JO viewmodels) both render exactly as retail does.
 		var skel_model := data if adm_name == graphic else _load_object_data(adm_name)
 		var skel_origins := skel_model.get_bone_origins() if skel_model != null else PackedVector3Array()
+		var skel_parents := skel_model.get_bone_parents() if skel_model != null else PackedInt32Array()
 		# model_bind=true: FP rigs carry degenerate bind matrices (ak47_RST) -- only the faithful
 		# bind-relative channel interpretation renders them [orig: BoneAnim_BuildWorldMatrices
 		# @0x40c400, the FP builder, via AnimChannel_ComputeBoneMatrices @0x410da0].
-		_apply_skeletal_anim_by_name(model, adm_name, skel_origins, true)
+		_apply_skeletal_anim_by_name(model, adm_name, skel_origins, skel_parents, true)
 	model.set_object_data(data)
 	# Pose into a starting clip (e.g. the FP weapon idle "anim_wpn_idle" -> mp5_1i) so the model
 	# holds that pose rather than its bind/T-pose; the model self-ticks the clip via _process.
@@ -441,11 +446,11 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 # Attach a skeletal anim set from an EXPLICIT .adm name (vs _apply_skeletal_anim, which resolves it
 # from an item def's anim_def). Same per-.adm cache + load path; leaves the model static if the
 # .adm fails to load.
-func _apply_skeletal_anim_by_name(model: Node3D, adm_name_in: String, model_bone_origins := PackedVector3Array(), model_bind := false) -> void:
+func _apply_skeletal_anim_by_name(model: Node3D, adm_name_in: String, model_bone_origins := PackedVector3Array(), model_bone_parents := PackedInt32Array(), model_bind := false) -> void:
 	if model == null or resource_root == null:
 		return
 	var adm_name := adm_name_in if adm_name_in.to_lower().ends_with(".adm") else adm_name_in + ".adm"
-	_apply_skeletal_from_adm(model, adm_name, model_bone_origins, model_bind)
+	_apply_skeletal_from_adm(model, adm_name, model_bone_origins, model_bone_parents, model_bind)
 
 
 # --- Incremental placement (editor authoring) ---------------------------------
@@ -624,21 +629,23 @@ func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := Pac
 	_apply_skeletal_from_adm(model, adm_name, model_bone_origins)
 
 
-# Attach a skeletal set from a resolved .adm name, feeding the .3di model's bone pivots
-# (get_bone_origins) as the shared rest so bones position from the MODEL, not the lossy .bad
-# positions. The cache key folds in the origins: two models can share one .adm (the FP arms +
-# gun both use ak47_1st.adm) yet carry different .3di pivots, so they must not alias.
+# Attach a skeletal set from a resolved .adm name, feeding the .3di model's bone table
+# (get_bone_origins + get_bone_parents) so the rig builds from the MODEL, never the lossy .bad
+# bone records -- with parents supplied the model defines count/hierarchy/pivots outright, the
+# witnessed original semantics [orig: BoneAnim_BuildWorldMatrices @0x40c400 walks modelDef+56].
+# The cache key folds in the table: two models can share one .adm (the FP arms + gun both use
+# ak47_1st.adm) yet carry different .3di pivots, so they must not alias.
 # model_bind: the witnessed faithful channel semantics (bind-relative channels, pure-translation
 # bind) -- required for the FP viewmodel rigs whose stored bind matrices are degenerate; bodies
 # stay on the legacy interpretation until separately validated. See NovaSkeletalAnim.
-func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origins: PackedVector3Array, model_bind := false) -> void:
-	var cache_key := adm_name + "#" + str(hash(model_bone_origins)) + ("#mb" if model_bind else "")
+func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origins: PackedVector3Array, model_bone_parents := PackedInt32Array(), model_bind := false) -> void:
+	var cache_key := adm_name + "#" + str(hash(model_bone_origins)) + "#" + str(hash(model_bone_parents)) + ("#mb" if model_bind else "")
 	var skeletal
 	if _skeletal_cache.has(cache_key):
 		skeletal = _skeletal_cache[cache_key]
 	else:
 		skeletal = NovaSkeletalAnim.new()
-		if not skeletal.load_from_resource_root(resource_root, adm_name, model_bone_origins, model_bind):
+		if not skeletal.load_from_resource_root(resource_root, adm_name, model_bone_origins, model_bone_parents, model_bind):
 			skeletal = null
 		_skeletal_cache[cache_key] = skeletal
 	if skeletal != null and model.has_method("set_skeletal_anim"):

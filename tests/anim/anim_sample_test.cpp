@@ -341,6 +341,86 @@ int main() {
         }
     }
 
+    // --- model-table mode: the MODEL's bone table defines the rig (count, hierarchy, pivots); ---
+    // the .bad contributes rotations only, paired by row index; rows past the .bad's channels
+    // take row 0's already-composed rotation; BadBone.position is NEVER read (12 of 43 JO
+    // viewmodel rigs ship broken values -- retail renders them all). [orig:
+    // BoneAnim_BuildWorldMatrices @0x40c400 (FK bounded by modelDef+52, parent/pivot from the
+    // modelDef+56 rows); the padding loop @0x40c5a1.]
+    {
+        const float s45 = 0.70710678f;
+        BadBone tbones[2] = {};
+        tbones[0].parent_index = -1;
+        tbones[0].rotation[0] = 1.0f; tbones[0].rotation[4] = 1.0f; tbones[0].rotation[8] = 1.0f;
+        // Garbage .bad positions -- the model table must win.
+        tbones[0].position[0] = 9.0f; tbones[0].position[1] = 9.0f; tbones[0].position[2] = 9.0f;
+        tbones[1] = tbones[0];
+        tbones[1].parent_index = 0;
+
+        BadQuaternion trot0[1] = {{0.0f, 0.0f, s45, s45}};  // +90 about Z
+        BadQuaternion trot1[1] = {{0.0f, 0.0f, 0.0f, 1.0f}};  // identity
+        uint16_t tfl[1] = {1};
+        BadChannel tchan[2] = {};
+        tchan[0].frame_count = 1; tchan[0].frame_lengths = tfl; tchan[0].rotations = trot0;
+        tchan[1].frame_count = 1; tchan[1].frame_lengths = tfl; tchan[1].rotations = trot1;
+
+        BadFile tbad = {};
+        tbad.fps = 30; tbad.frame_count = 1; tbad.flags = 0;
+        tbad.bones = tbones; tbad.num_bones = 2;
+        tbad.channels = tchan; tbad.num_channels = 2;
+
+        // Model table: 4 rows (2 more than the .bad), root's parent stored as ITSELF like the
+        // real modelDef+56 rows.
+        const std::vector<int> parents = {0, 0, 1, 0};
+        const std::vector<Vec3> pivots = {
+                {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 2.0f}};
+        const Clip tc = sample_clip(tbad, pivots, /*model_bind=*/false, nullptr, parents);
+        const Quat rz90 = bad_channel_quat(0.0f, 0.0f, s45, s45);
+
+        TEST_EXPECT(tc.bones.size() == 4);                    // the MODEL's count, not the .bad's
+        TEST_EXPECT(tc.bones[0].parent_index == -1);          // self-parent normalized
+        TEST_EXPECT(tc.bones[1].parent_index == 0);
+        TEST_EXPECT(tc.bones[2].parent_index == 1);
+        TEST_EXPECT(tc.bones[3].parent_index == 0);
+        TEST_EXPECT(tc.bones[2].name.empty());                // no .bad record -> host names it
+        for (size_t b = 0; b < 4; ++b) {                      // pivots from the table, never .bad pos
+            TEST_EXPECT(approx(tc.bones[b].rest_position[0], pivots[b].x) &&
+                    approx(tc.bones[b].rest_position[1], pivots[b].y) &&
+                    approx(tc.bones[b].rest_position[2], pivots[b].z));
+        }
+        const auto &fr = tc.frames[0];
+        TEST_EXPECT(quat_approx(fr[0].world_rotation, rz90, 1e-3f));
+        TEST_EXPECT(quat_approx(fr[1].world_rotation, {1, 0, 0, 0}, 1e-3f));
+        // Padded rows (>= .bad channel count) carry row 0's composed rotation...
+        TEST_EXPECT(quat_approx(fr[2].world_rotation, rz90, 1e-3f));
+        TEST_EXPECT(quat_approx(fr[3].world_rotation, rz90, 1e-3f));
+        // ...and FK through the MODEL hierarchy/pivots: row1 = Rz90*(1,0,0) = (0,1,0);
+        // row2 under row1 (identity rot) adds (0,1,0); row3 under root adds Rz90*(0,0,2).
+        TEST_EXPECT(approx(fr[1].world_position.x, 0.0f, 1e-3f) &&
+                approx(fr[1].world_position.y, 1.0f, 1e-3f) &&
+                approx(fr[1].world_position.z, 0.0f, 1e-3f));
+        TEST_EXPECT(approx(fr[2].world_position.x, 0.0f, 1e-3f) &&
+                approx(fr[2].world_position.y, 2.0f, 1e-3f) &&
+                approx(fr[2].world_position.z, 0.0f, 1e-3f));
+        TEST_EXPECT(approx(fr[3].world_position.x, 0.0f, 1e-3f) &&
+                approx(fr[3].world_position.y, 0.0f, 1e-3f) &&
+                approx(fr[3].world_position.z, 2.0f, 1e-3f));
+
+        // Model table SMALLER than the .bad (the AKM_1st shape: 46 bones, 45 parts): the rig is
+        // the model's size; the extra channel is simply never sampled.
+        const std::vector<int> small_parents = {0};
+        const std::vector<Vec3> small_pivots = {{0.0f, 0.0f, 0.0f}};
+        const Clip sc = sample_clip(tbad, small_pivots, /*model_bind=*/false, nullptr, small_parents);
+        TEST_EXPECT(sc.bones.size() == 1);
+        TEST_EXPECT(quat_approx(sc.frames[0][0].world_rotation, rz90, 1e-3f));
+
+        // model_bind + padding compose: identity bind -> padded row copies row 0's COMPOSED
+        // rotation (bind (x) channel), not the raw channel.
+        const Clip mbp = sample_clip(tbad, pivots, /*model_bind=*/true, &tbad, parents);
+        TEST_EXPECT(quat_approx(mbp.frames[0][2].world_rotation,
+                mbp.frames[0][0].world_rotation, 1e-3f));
+    }
+
     bad_free(&bad);
     return 0;
 }

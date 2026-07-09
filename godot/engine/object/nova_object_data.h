@@ -179,6 +179,13 @@ public:
 	// original engine, which sources bone pivots from the model bone-def table, not the .bad.
 	// [orig: the modelDef+56 pivot table read by BoneAnim_BuildWorldMatrices @0x40c400.]
 	PackedVector3Array get_bone_origins(int p_lod_index = 0) const;
+	// Per-part parent index (raw ThreediIRPart.parent_index), indexed by part index, for the
+	// given LOD -- the model's authoritative bone hierarchy, paired with get_bone_origins as
+	// the model bone table. The root part's parent is itself in the file; NovaSkeletalAnim/
+	// sample_clip normalize that to -1. [orig: the modelDef+56 row's +20 parent index read by
+	// BoneAnim_BuildWorldMatrices @0x40c400 -- the FK hierarchy comes from the MODEL, never
+	// the .bad.]
+	PackedInt32Array get_bone_parents(int p_lod_index = 0) const;
 	// p_native_frame: emit vertices/normals/tangents in the NATIVE model frame (no (-x,y,z)
 	// import flip) with triangle winding reversed to stay front-facing under Godot's CCW cull.
 	// For the first-person viewmodel rigs, whose skeletal runtime (NovaSkeletalAnim model_bind)

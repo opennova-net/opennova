@@ -1322,6 +1322,7 @@ void NovaObjectData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_part_anim_track_field", "lod_index", "anim_index", "track", "key", "value"), &NovaObjectData::set_part_anim_track_field);
 	ClassDB::bind_method(D_METHOD("get_render_lod_info", "lod_index"), &NovaObjectData::get_render_lod_info);
 	ClassDB::bind_method(D_METHOD("get_bone_origins", "lod_index"), &NovaObjectData::get_bone_origins, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("get_bone_parents", "lod_index"), &NovaObjectData::get_bone_parents, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("build_lod_submeshes", "lod_index", "skeletal", "bone_count", "native_frame"), &NovaObjectData::build_lod_submeshes, DEFVAL(false), DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_skinned", "lod_index"), &NovaObjectData::is_skinned);
 	ClassDB::bind_method(D_METHOD("eval_material_runtime", "index", "time_ms", "ctrl_values"), &NovaObjectData::eval_material_runtime);
@@ -3018,6 +3019,20 @@ PackedVector3Array NovaObjectData::get_bone_origins(int p_lod_index) const {
 		// sample_clip. Verified: this reproduces retail's modelDef+56 pivot (the rigid gun renders
 		// correctly). [orig: BoneAnim_BuildWorldMatrices @0x40c400 reads the model pivot raw.]
 		out[static_cast<int64_t>(i)] = Vector3(part.rel_position[0], part.rel_position[1], part.rel_position[2]);
+	}
+	return out;
+}
+
+PackedInt32Array NovaObjectData::get_bone_parents(int p_lod_index) const {
+	PackedInt32Array out;
+	if (!has_ir || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= ir.lod_count) {
+		return out;
+	}
+	const ThreediIRLod &lod = ir.lods[p_lod_index];
+	out.resize(static_cast<int64_t>(lod.part_count));
+	for (size_t i = 0; i < lod.part_count; ++i) {
+		// Raw parent index (the root references itself in the file; the sampler normalizes).
+		out[static_cast<int64_t>(i)] = lod.parts[i].parent_index;
 	}
 	return out;
 }

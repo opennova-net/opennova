@@ -55,18 +55,25 @@ private:
 
 	// Shared core: build bones_/bind_local_/clips_ from already-resolved .bad bytes.
 	// p_reset_bytes defines the shared skeleton + bind pose; each (key, bytes) pair is sampled
-	// against the shared rest origins and registered as a clip. When p_model_origins is non-empty
-	// AND its size equals the bone count, it OVERRIDES the reset .bad's bone positions as the
-	// shared rest origins (the .3di model's bone pivots -- see get_bone_origins); otherwise the
-	// reset .bad positions are used (unchanged legacy behaviour). p_model_bind enables the
-	// witnessed faithful channel semantics -- channels re-based against each .bad's own bind
-	// 3x3s, identity rest rotations (the original's skin bind-inverse is the pure translation
+	// against the shared rest origins and registered as a clip. When p_model_parents pairs with
+	// p_model_origins (same non-zero size), the MODEL's bone table defines the rig outright --
+	// row count, hierarchy, and pivots; the .bad contributes rotations only, by row index, and
+	// its bone count/parents/positions are never read [orig: BoneAnim_BuildWorldMatrices
+	// @0x40c400 bounds the FK by modelDef+52 and reads parent/pivot from the modelDef+56 rows;
+	// extra rows past the .bad's channels take bone 0's composed matrix, the padding loop
+	// @0x40c5a1]. Legacy (no parents): p_model_origins sized like the .bad's bone count
+	// OVERRIDES the reset .bad's bone positions as the shared rest origins; otherwise the reset
+	// .bad positions are used (menu-preview semantics -- BadBone.position is a lossy export a
+	// third of the retail viewmodel corpus ships broken). p_model_bind enables the witnessed
+	// faithful channel semantics -- channels re-based against the skeleton .bad's bind 3x3s,
+	// identity rest rotations (the original's skin bind-inverse is the pure translation
 	// T(-pivot)) -- see anim_sample.h. Caller clears state first and sets adm_name_. Returns
 	// false (with last_error_) on an unusable reset .bad or when no clip survives. Shared by
 	// load_from_resource_root and load_from_bad_files.
 	bool build_from_bad_bytes(const PackedByteArray &p_reset_bytes,
 			const std::vector<std::pair<String, PackedByteArray>> &p_clip_bads,
 			const std::vector<opennova::anim::Vec3> &p_model_origins = {},
+			const std::vector<int> &p_model_parents = {},
 			bool p_model_bind = false);
 
 protected:
@@ -74,14 +81,18 @@ protected:
 
 public:
 	// Load + sample a model's animation set. p_adm_name is the .adm file name resolvable
-	// through the resource root (the .bad clips it lists are read the same way). p_model_bone_origins
-	// (optional): the .3di model's per-bone pivots (NovaObjectData.get_bone_origins), used as the
-	// shared rest origins in place of the lossy .bad positions when its size matches the bone count.
+	// through the resource root (the .bad clips it lists are read the same way).
+	// p_model_bone_origins + p_model_bone_parents (optional, paired): the .3di model's bone
+	// table (NovaObjectData.get_bone_origins / get_bone_parents) -- when both are supplied
+	// with equal sizes, the MODEL defines the rig (count, hierarchy, pivots) and the .bad
+	// contributes rotations only, exactly as the original consumes modelDef+52/+56; origins
+	// alone are the legacy positional override (see build_from_bad_bytes).
 	// p_model_bind (optional): faithful channel semantics (bind-relative channels + pure-translation
 	// bind) -- required for the first-person viewmodel rigs, whose stored bind matrices are
 	// degenerate; see build_from_bad_bytes.
 	bool load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_adm_name,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
+			const PackedInt32Array &p_model_bone_parents = PackedInt32Array(),
 			bool p_model_bind = false);
 
 	// Load + sample a skeletal set from EXPLICIT raw .bad files (no .adm), as the original
@@ -95,6 +106,7 @@ public:
 	bool load_from_bad_files(const Ref<NovaResourceRoot> &p_resource_root,
 			const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
+			const PackedInt32Array &p_model_bone_parents = PackedInt32Array(),
 			bool p_model_bind = false);
 
 	bool is_loaded() const { return loaded_; }
