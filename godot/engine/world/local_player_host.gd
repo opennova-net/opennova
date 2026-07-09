@@ -333,6 +333,15 @@ func _consume_weapon_view() -> void:
 	if view.play_serial != _weapon_play_serial:
 		_weapon_play_serial = view.play_serial
 		_play_viewmodel_clip(view.anim_key)
+	if _weapon_unscope_serial < 0 and _weapon_rescope_serial < 0:
+		# First snapshot for these parts (cursors reset to -1): ADOPT the scope
+		# serials without treating them as edges — the sim's counters start at 0,
+		# and a phantom "rescope" here would auto-ADS a sighted weapon at spawn.
+		# (The play cursor above intentionally DOES fire: fresh parts need the
+		# FSM's active clip restarted on them.)
+		_weapon_unscope_serial = view.unscope_serial
+		_weapon_rescope_serial = view.rescope_serial
+		return
 	if view.unscope_serial != _weapon_unscope_serial:
 		_weapon_unscope_serial = view.unscope_serial
 		_scope_engaged = false

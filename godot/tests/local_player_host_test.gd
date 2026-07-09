@@ -71,6 +71,16 @@ class FakeWorld:
 	func local_player_body_anim_slot() -> int:
 		return -1
 
+	# The equipped-weapon FSM seam (null = no weapon installed, the default).
+	var weapon_view = null  # PlayerWeaponView
+	var scope_queue: Array = []
+
+	func local_player_weapon_view():
+		return weapon_view
+
+	func queue_local_player_weapon_scope(up: bool) -> void:
+		scope_queue.append(up)
+
 
 func after_each() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -187,6 +197,34 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		"teardown() restores the player camera's cull mask")
 
 
+func test_first_weapon_snapshot_never_auto_engages_ads() -> void:
+	# The sim's FSM event serials start at 0 while the host cursors reset to -1,
+	# so the FIRST consumed snapshot must be a baseline, not a set of edges — a
+	# phantom "rescope" there silently ADS-engages any sighted weapon at spawn.
+	# Observed through the public seam: the world's scope queue.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+	host.PLAYER_VIEWMODEL_FLAGS = 2  # sighted (the default AK is)
+
+	world.weapon_view = PlayerWeaponView.new()  # all serials 0, the sim's start
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(world.scope_queue, [], "the initial snapshot is a baseline: no ADS queued")
+
+	# A REAL rescope edge (serial bump — e.g. the pump's rescope-after-reload)
+	# still drives the scope queue.
+	world.weapon_view.rescope_serial = 1
+	host.after_world_tick()
+	assert_eq(world.scope_queue, [true], "a serial bump after the baseline is an event")
+
+
 # The game shell calls setup() from its own _ready — while the player camera's
 # viewport is still making its children ready, so it rejects add_child ("parent
 # busy": _propagate_ready blocks the parent for the whole walk). A direct FP-pass
@@ -215,7 +253,7 @@ func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
 	vp.add_child(trigger.host)
 	vp.add_child(trigger)  # last: world/camera/host are in-tree when _ready fires
 	# Entering the tree makes vp's children ready — vp is "busy" exactly while
-	# BootTrigger._ready runs setup(), the game shell's boot shape.
+	# BootTrigger's _ready runs setup(), the game shell's boot shape.
 	add_child_autofree(vp)
 	await get_tree().process_frame
 
