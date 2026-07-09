@@ -52,6 +52,18 @@ var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 # [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot = view_rot + Def.Bone.rot; parser stores
 # degrees -> BAM @0x54471f.] Sign map to Godot camera axes verified visually.
 var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
+# The FP render pass: the original draws the viewmodel through its OWN projection — the
+# weapon's `renderfov` (HORIZONTAL degrees; every JO weapon.def omits the key, so all use the
+# record default 80.0) converted to vertical via the aspect, with the near plane swapped
+# 0.2 -> 0.05 and the viewport depth range remapped so the world never overdraws it, then its
+# own flush [orig: Player_RenderFirstPersonViewModel @0x4ded60: Render_SwapProjectionNearZ(0.05)
+# @0x4dee29 / restore 0.2 @0x4df0aa, fov = WeaponDef+0x148 @0x4dee71 -> h->v conversion in
+# Render_SetViewAndProjectionMatrices @0x58d900, depth remap Render_SetViewportDepth01 @0x58a7b0;
+# default 80.0 = flt_7D1898 stored by AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov'
+# @0x54482a]. Hosted as a SubViewport sharing the world, camera cull-masked to the viewmodel
+# layer, composited over the finished frame (the depth-remap's visible equivalent).
+var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
+const VIEWMODEL_PASS_NEAR := 0.05
 
 var _world
 var _camera: Camera3D
@@ -64,6 +76,10 @@ var _crouch := false
 var _prone := false
 var _avatar: Node3D = null
 var _viewmodel: Node3D = null
+# The FP render pass nodes (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG).
+var _vm_pass_layer: CanvasLayer = null
+var _vm_viewport: SubViewport = null
+var _vm_camera: Camera3D = null
 var _tp_anchor := Vector3.ZERO
 var _tp_anchor_valid := false
 # Debug experiments (the F3 overlay's View tab): keep the FP arms drawn in every
@@ -89,8 +105,11 @@ func setup(world, camera: Camera3D) -> void:
 	# The player camera never draws the reflection-only body layer: in first
 	# person the body lives there for the water mirror alone (see
 	# _update_avatar); NovaWater's mirror camera is the one view that keeps it.
+	# It never draws the viewmodel layer either — the FP arms/weapon render
+	# through the dedicated renderfov pass built below.
 	if _camera != null:
-		_camera.cull_mask &= ~NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
+		_camera.cull_mask &= ~(NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY | NovaWater.VISUAL_LAYER_VIEWMODEL)
+	_build_viewmodel_pass()
 	_reset_state()
 
 
@@ -98,12 +117,73 @@ func teardown() -> void:
 	_set_fly_camera_locked(false)
 	_release_mouse_capture()
 	_clear_models()
+	_free_viewmodel_pass()
 	if _camera != null:
-		_camera.cull_mask |= NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY
+		_camera.cull_mask |= NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY | NovaWater.VISUAL_LAYER_VIEWMODEL
 	_world = null
 	_camera = null
 	_input_source = Callable()
 	_reset_state()
+
+
+# Build the dedicated FP render pass (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG): a SubViewport
+# sharing this host's World3D whose camera draws ONLY the viewmodel layer through the
+# weapon renderfov projection, composited over the world frame below the HUD (layer 0 —
+# the game HUD CanvasLayers sit at 1+). The container ignores the mouse so gameplay
+# input passes through.
+func _build_viewmodel_pass() -> void:
+	if _camera == null or _vm_pass_layer != null or not _camera.is_inside_tree():
+		return
+	_vm_pass_layer = CanvasLayer.new()
+	_vm_pass_layer.name = "ViewmodelPass"
+	_vm_pass_layer.layer = 0
+	var container := SubViewportContainer.new()
+	container.stretch = true
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_vm_viewport = SubViewport.new()
+	# Render the CAMERA's World3D: the pass re-renders the SAME scene, culled to the
+	# viewmodel layer [orig: one scene, second projection + depth window @0x4ded60].
+	# Assigned explicitly — this host node may live OUTSIDE the play viewport (ONED
+	# play-in-editor), so tree-inherited world/canvas targets would be the editor
+	# window's, not the game's.
+	_vm_viewport.world_3d = _camera.get_world_3d()
+	_vm_viewport.transparent_bg = true
+	_vm_viewport.handle_input_locally = false
+	_vm_camera = Camera3D.new()
+	_vm_camera.cull_mask = NovaWater.VISUAL_LAYER_VIEWMODEL
+	_vm_camera.near = VIEWMODEL_PASS_NEAR  # [orig: Render_SwapProjectionNearZ(0.05) @0x4dee29]
+	_vm_viewport.add_child(_vm_camera)
+	container.add_child(_vm_viewport)
+	_vm_pass_layer.add_child(container)
+	# Composite INTO the viewport the player camera renders (the play viewport), sized
+	# to it via the full-rect container — not into this node's own ancestor viewport.
+	_camera.get_viewport().add_child(_vm_pass_layer)
+
+
+func _free_viewmodel_pass() -> void:
+	if _vm_pass_layer != null and is_instance_valid(_vm_pass_layer):
+		_vm_pass_layer.queue_free()
+	_vm_pass_layer = null
+	_vm_viewport = null
+	_vm_camera = null
+
+
+# Track the player camera 1:1 and rebuild the witnessed projection: renderfov is a
+# HORIZONTAL fov in degrees, converted to Godot's vertical fov through the live aspect
+# [orig: Render_SetViewAndProjectionMatrices @0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)].
+func _update_viewmodel_pass() -> void:
+	if _vm_camera == null or _camera == null:
+		return
+	_vm_camera.global_transform = _camera.global_transform
+	_vm_camera.far = _camera.far
+	_vm_camera.attributes = _camera.attributes
+	_vm_camera.environment = _camera.environment
+	var size := _vm_viewport.size
+	if size.x > 0 and size.y > 0:
+		var aspect := float(size.x) / float(size.y)
+		var half_h := deg_to_rad(PLAYER_VIEWMODEL_RENDERFOV_H_DEG) * 0.5
+		_vm_camera.fov = rad_to_deg(2.0 * atan(tan(half_h) / aspect))
 
 
 func set_input_source(source: Callable) -> void:
@@ -386,12 +466,13 @@ func _update_viewmodel() -> void:
 		deg_to_rad(PLAYER_VIEWMODEL_ROT.z)))
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS))
-	# The FP overlay never enters the water mirror: retail draws it as its own
-	# near-Z viewport pass over the finished frame, not as part of the mirrored
-	# world scene [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted,
-	# the dedicated layer is what the mirror camera's cull_mask excludes.
+	# The FP overlay never enters the water mirror OR the main camera: retail draws it
+	# as its own renderfov/near-Z pass over the finished frame [orig:
+	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
+	# only by the pass camera (and excluded by the mirror camera's cull_mask).
 	_set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
 	_viewmodel.visible = (not _third_person) or debug_force_viewmodel
+	_update_viewmodel_pass()
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

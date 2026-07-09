@@ -58,6 +58,35 @@ func _ready() -> void:
 	_hold(KEY_W, false)
 	await _settle(30)
 	await _capture("01_fp_level.png")
+
+	# NOVA_VM_SWEEP=1: capture the four cardinal container yaws to pin the rig->camera
+	# axis map against the retail look in one run (PLAYER_VIEWMODEL_ROT is a live var).
+	if OS.get_environment("NOVA_VM_SWEEP") == "1":
+		var sweep_host := _find_by_method(get_tree().root, "set_debug_force_viewmodel")
+		if sweep_host != null:
+			var pvp: SubViewport = sweep_host.get("_vm_viewport")
+			var pcam: Camera3D = sweep_host.get("_vm_camera")
+			print("[fp] pass: vp=%s size=%s cam=%s current=%s fov=%.1f cull=%d world_shared=%s" % [
+				str(pvp != null), str(pvp.size) if pvp != null else "-", str(pcam != null),
+				str(pcam.current) if pcam != null else "-", pcam.fov if pcam != null else -1.0,
+				pcam.cull_mask if pcam != null else -1,
+				str(pvp.world_3d == pcam.get_world_3d()) if pvp != null and pcam != null else "-"])
+			var vm_models := _viewmodel_models(get_tree().root)
+			for m in vm_models:
+				print("[fp] vm model %s visible=%s inside_tree=%s" % [m.name, str(m.visible), str(m.is_inside_tree())])
+			if pvp != null:
+				await RenderingServer.frame_post_draw
+				var pimg: Image = pvp.get_texture().get_image()
+				if pimg != null:
+					pimg.save_png(_out_abs.path_join("pass_view.png"))
+					print("[fp] wrote pass_view.png")
+			var restore: Vector3 = sweep_host.PLAYER_VIEWMODEL_ROT
+			for y in [0, 90, 180, 270]:
+				sweep_host.PLAYER_VIEWMODEL_ROT = Vector3(0, y, 0)
+				await _settle(6)
+				await _capture("sweep_yaw_%03d.png" % y)
+			sweep_host.PLAYER_VIEWMODEL_ROT = restore
+			await _settle(6)
 	_look(Vector2(0, 260))   # ~30 deg down at 0.12 deg/px -- see the gun + hands
 	await _settle(24)
 	await _capture("02_fp_down.png")

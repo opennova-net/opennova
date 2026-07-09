@@ -3902,10 +3902,20 @@ pose over identity rests). The rig→camera container map corrected from yaw +90
 Z-flip (model forward +Z → camera forward −Z, Y up; the +90 was tuned against the misread pose).
 Verified: `anim_sample` ctest (self-bind fallback + skeleton-bind override cases) +
 `fp_clean_probe` captures on 05TR — both camo arms gripping the AK, mag hanging −Y, muzzle
-downrange. **Still open:** D-RORD-4 (unchanged); def `rot` bias signs + reload direction vs retail
-footage (the D-INF-14 tail); finger/left-hand pose fidelity vs retail footage; D-INF-13 (bodies
-onto model_bind — the export relation above doubles as the part↔bone matcher for the
-20-parts/19-bones body models).
+downrange. **Same train, the FP render pass (D-RORD-4) ported:** the viewmodel now composites
+through a dedicated shared-world SubViewport whose camera draws only the viewmodel layer at the
+weapon `renderfov` — HORIZONTAL degrees converted to vertical through the live aspect, with the
+witnessed near-plane swap; JO's weapon.def never sets the key, so every weapon renders at the
+record default 80.0 `[orig: fov read @0x4dee71 → h→v @0x58d900; near 0.05 swap @0x4dee29 /
+restore 0.2 @0x4df0aa; depth remap @0x58a7b0; default flt_7D1898=80.0 @0x53ff31; parser key
+'renderfov' @0x54482a]`. A four-way container-yaw sweep (`fp_clean_probe` `NOVA_VM_SWEEP=1`)
+confirmed yaw-180 is the only map that places the rig in frame — 0 puts it behind the eye,
+±90 off-frame laterally. The stored ak47_RST binds are all proper rotations (det +1 across the
+39 bones), so the quat composition is exact — no reflection caveat. **Still open:** def `rot`
+bias signs + reload direction vs retail footage (the D-INF-14 tail); left-hand/finger pose
+fidelity vs retail footage (retail's hip idle is a low-ready — compare before judging); per-weapon
+`renderfov`/`pos`/`tpos` def plumbing; D-INF-13 (bodies onto model_bind — the export relation
+above doubles as the part↔bone matcher for the 20-parts/19-bones body models).
 
 ### 5.40 First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21)
 

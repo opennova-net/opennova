@@ -147,8 +147,17 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 
 	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY, 0,
 		"setup() masks the reflection-only body layer off the player camera")
-	assert_ne(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
-		"the player camera keeps drawing the FP viewmodel")
+	# The FP viewmodel renders through the dedicated renderfov pass, never the player
+	# camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own projection + flush].
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+		"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
+	var pass_cam: Camera3D = host.get("_vm_camera")
+	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
+	if pass_cam != null:
+		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
+			"the pass camera draws ONLY the viewmodel layer")
+		assert_almost_eq(pass_cam.near, 0.05, 0.0001,
+			"the pass near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
 	assert_true(world.last_avatar.visible,
 		"the body stays VISIBLE in first person - the mirror renders it")
 	assert_true(world.last_viewmodel.visible, "the FP overlay shows in first person")
