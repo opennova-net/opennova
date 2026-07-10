@@ -576,3 +576,66 @@ Closed since the notes were taken (do not resurrect from `notes/`): the hardcode
 `[orig: @ 0x647d40]` were fixed by the 2026-06-09 grill (see Layout and Frame above);
 `FORM`, `GLOBAL_VAR`, `PASSWORD`, and scroll `HEIGHT/WIDTH` are now parsed and
 round-tripped by `libs/mnu`.
+
+## In-game armory — the WEAPON screen (engine-research, 2026-07-09)
+
+The in-match loadout UI is **weapon.mnu's WEAPON screen** (a boot resource of the
+game.mnu family) — NOT the loadout.mnu/LOADOUT screen found in some extracts, which
+retail `Jointops.exe` never references (no `loadout` string exists in the image).
+Reimpl: `godot/game/armory_menu_host.gd` (companion) + the main_game armory key +
+`NovaSimulation.apply_local_player_loadout`; GUT `armory_menu_seam_test.gd`.
+
+**Open path.** Input action 218 `[orig: Input_HandleActionBinding @ 0x49b83d]`:
+while the local player's entity carries Flags 0x400000 (inside a type-6 armory
+collision volume — see world-wac-ai-re.md §15.4) ->
+`UI_OpenMenuScreen("weapon.mnu", "WEAPON", 0) @ 0x49b8e3` + latch
+`g_WeaponScreenOpen @ 0x24C1884`; Flags 0x800 (type-11 vehicle-loadout volume) ->
+`vehicle.mnu` VEHICLE (occupancy check via groundEntity+0x162); case 221 ->
+`cmap.mnu` CMAP (the deploy map, after `Game_InitRespawnState @ 0x499360`).
+`dword_A85B6C` (the host WPN_NEVER/WPN_MISSION weapons rule) blocks the armory;
+the WPN_ARMORY / WPN_NEVER / WPN_MISSION radios on MULTI_PLAYER_HOST are that
+rule's setter `[orig: the registration block @ 0x5580f0]`. `UI_OpenMenuScreen
+@ 0x54e520` was renamed this session (ex auto-name with a "renderer init"
+misnomer comment).
+
+**Control registration** `[orig: WeaponDef_RegisterUICallbacks @ 0x567020 —
+(screen "WEAPON", control, kind, handler, arg) via the shared registrar
+@ 0x63c060]`:
+
+| Control | Handler | Notes |
+|---|---|---|
+| PRIMARY | `UI_OnPrimaryWeaponTypeChanged @ 0x5662d0` | slot combo |
+| PRIMARY_AMMO1 / _AMMO2 | `sub_566620` (arg 0/1) | clip-count combos |
+| PRIMARY_AMMO1_TYPE | `sub_566650` | round-type combo |
+| SECONDARY (+ ammo/type) | `UI_OnSecondaryWeaponChanged @ 0x566670`, `sub_5669C0/…F0` | |
+| ACCESSORY (+ ammo) | `ui_on_weapon_ammo_slot_changed @ 0x566a10`, `sub_566D40` | |
+| GRENADE_AMMO1..3 | `sub_566D70` (arg 0/1/2) | |
+| PLAYER_CLASS | `handle_team_class_selection @ 0x566f60` (kind 0x40 spinlist) | classes 5..9; host fills the authored-empty items |
+| ACCEPT / CANCEL | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (arg 0/1) | kind 8 buttons |
+
+Population reuses the PLAYER_INFO witnesses (avatars-re.md): slot lists filtered
+by class/team masks `[orig: populate_weapon_slot_lists @ 0x560430;
+PlayerInfo_SetTeamAndClassMask @ 0x55de60]`, ammo combos
+`[orig: populate_ammo_combo_boxes @ 0x55def0 /
+populate_weapon_accessory_ammo_ui @ 0x55e8b0]`, weight
+`[orig: calculate_loadout_weight @ 0x55f1f0]`, icons
+`[orig: update_player_info_weight_and_weapon_icons @ 0x55f480]` (icon swaps +
+the exact ammo row text remain unwitnessed details — tracked in
+armory_menu_host.gd's header).
+
+**ACCEPT** `[orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0]` (CANCEL = arg 1,
+skips the apply; both clear the latch): serialize the UI into the per-team
+2048-byte loadout string buffer `{name\0 ammoPri\0 ammoSec\0 flags\0}*`
+`[orig: WeaponLoadout_SerializeToBufferTeamBased @ 0x5658b0 -> unk_25DD740 +
+2048*team]`; in an MP session the CLIENT resets its slots and sends the buffer
+to the host (the C2S 0x2F seam `[orig: @ 0x42cdc0]`, already byte-golden in
+npruntime — net-re §5.56/5.57); offline/SP it applies locally through the SAME
+chain as the S2C 0x5A client apply (clips clamped to adm[83], −1 -> adm[23]
+default, × adm[22] clipsize, `WeaponSlot_SetAmmoCount @ 0x540b50`,
+`WeaponSlotPool_ResetAllEntries @ 0x53f240` ->
+`WeaponSlotTable_LoadAllFromDefs @ 0x5414e0` ->
+`WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280`), then re-selects the
+equipped slot `[orig: Player_SelectWeaponSlot @ 0x4dd680 /
+Player_MountWeaponSlot @ 0x4dfa40]`. Our SP apply stamps
+`equipped_adm_index` + `player_class` and re-mounts the FP viewmodel/action FSM
+(the sim's multi-slot inventory is the tracked runtime gap).
