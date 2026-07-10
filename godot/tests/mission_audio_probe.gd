@@ -62,6 +62,21 @@ func _run() -> void:
 			m, int(stats.get("markers_resolved", 0)), int(stats.get("markers_total", 0)),
 			int(stats.get("banks_loaded", 0)), int(stats.get("voices", 0)),
 			int(stats.get("dialogs", 0))])
+		# A voice can exist yet be inaudible: a looping stream whose loop region is
+		# empty (loop_end <= loop_begin) wraps at sample 0 forever = silence. This
+		# is what "210 voices but no ambience in-game" looked like.
+		var loop_voices := 0
+		var loop_empty := 0
+		for p in container.find_children("*", "AudioStreamPlayer3D", true, false):
+			var sw := (p as AudioStreamPlayer3D).stream as AudioStreamWAV
+			if sw == null or sw.loop_mode == AudioStreamWAV.LOOP_DISABLED:
+				continue
+			loop_voices += 1
+			if sw.loop_end <= sw.loop_begin:
+				loop_empty += 1
+		if loop_empty > 0:
+			print("[probe] %-28s WARNING: %d/%d looping voices have an EMPTY loop region -> silent" % [
+				m, loop_empty, loop_voices])
 		audio.teardown()
 		container.queue_free()
 	quit(0)
