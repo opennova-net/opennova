@@ -277,9 +277,11 @@ func _apply_reverb(reverb_id: int) -> void:
 	AudioServer.add_bus_effect(bus_idx, reverb)
 
 
-# Music bed: routed through the MUS AudioVM in the original (AudioVM_OpenMusicContext
-# @0x6722a0); that system is not present in this worktree, so this is a logged hook
-# pending MUS integration.
-func _apply_music(music_id: int) -> void:
-	if music_id > 0:
-		print("NovaMissionAudio: mission music id %d (MUS playback deferred)" % music_id)
+# Witnessed no-op: the .bms header `music` field has NO live consumer in retail
+# JO — the only per-entry music starter (Sbf_StartEntry @ 0x4ed910, the WAC
+# `music` handler) targets a stream whose opener (Sbf_OpenFile_Gamemus
+# @ 0x4ed6c0) is unreferenced, so nothing ever plays it. The field is vestigial
+# data the mission editor round-trips (docs/audio/mus-sbf-re.md §Game music
+# driving). Kept as the seam in case a sibling title turns out to consume it.
+func _apply_music(_music_id: int) -> void:
+	pass
