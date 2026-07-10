@@ -51,7 +51,7 @@ func test_draw_helpers_null_safe() -> void:
 	HudText.draw_text(null, null, Vector2.ZERO, Vector2.ONE, "x", Color.WHITE)
 	HudWeaponText.draw_ammo(null, null, Vector4i.ZERO, 30, 90, 30, Color.WHITE, Vector2.ONE)
 	HudWeaponText.draw_weapon_name(null, null, Vector4i.ZERO, "AK-47", Color.WHITE, Vector2.ONE)
-	HudClipIndicator.new().draw(null, Vector2i(5, 579), {}, null, null, 12, 90,
+	HudClipIndicator.new().draw(null, Vector2i(5, 579), null, null, null, 12, 90,
 		Color.WHITE, Vector3i(30, 50, 3), 0, Vector2.ONE)
 	HudMessages.new().draw(null, null, Vector2.ZERO, Vector2.ONE, 0, 8, 100.0, Color.WHITE)
 	assert_true(true, "Null-guarded draw helpers returned without error.")
@@ -109,6 +109,25 @@ func test_ammo_text_format() -> void:
 	assert_eq(HudWeaponText.format_ammo(1, 4, 1), "4", "Capacity 1 -> reserve only.")
 	assert_eq(HudWeaponText.format_ammo(5, -1, 30), "", "Reserve -1 hides the element.")
 	assert_eq(HudWeaponText.format_ammo(5, 90, -1), "", "Capacity -1 hides the element.")
+
+
+func test_hud_weapon_def_decode() -> void:
+	# The ADR 0017 record over NovaWeaponDatabase's transport dict.
+	assert_null(PlayerHudWeaponDef.from_weapon_dict({}), "Empty dict decodes to null.")
+	var def := PlayerHudWeaponDef.from_weapon_dict({
+		"name": "WPN_AK47", "round_type": "AMMO_762", "clipsize": 30,
+		"error": PackedFloat32Array([0.05, 0.2, 0.25, 0.05, 0.1, 0.15]),
+		"hudclipgfx_texture": "H_clip.tga", "hudclipgfx_offset": Vector2i(0, 0),
+		"hudrndgfx_texture": "H_round.tga", "hudrndgfx_offset": Vector2i(9, 0),
+		"hudrndgfx_layout": Vector3i(18, 0, 1),
+	})
+	assert_eq(def.weapon_name, "WPN_AK47")
+	assert_eq(def.clipsize, 30)
+	assert_eq(def.rndgfx_offset, Vector2i(9, 0))
+	assert_eq(def.rndgfx_step, Vector2i(18, 0))
+	assert_eq(def.rounds_per_icon, 1)
+	assert_almost_eq(def.error_row_deg(2), 0.25, 0.0001, "Hip-stand dispersion row.")
+	assert_eq(def.error_row_deg(9), 0.0, "Out-of-table row reads 0.")
 
 
 func test_round_icon_count() -> void:

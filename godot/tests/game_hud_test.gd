@@ -52,7 +52,7 @@ func test_weapon_cluster_artless_safe() -> void:
 	var hp := NovaHudPos.new()
 	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK)
 	hud.set_layout(hp, null)
-	hud.set_weapon({
+	hud.set_weapon(PlayerHudWeaponDef.from_weapon_dict({
 		"name": "WPN_AK47",
 		"clipsize": 30,
 		"round_type": "AMMO_762",
@@ -62,7 +62,7 @@ func test_weapon_cluster_artless_safe() -> void:
 		"hudrndgfx_texture": "H_round.tga",
 		"hudrndgfx_offset": Vector2i(9, 0),
 		"hudrndgfx_layout": Vector3i(18, 0, 1),
-	}, "AK-47")
+	}), "AK-47")
 	hud.update_info({
 		"health_fraction": 0.8, "stance": 0, "team": 1, "objective": "",
 		"weapon_active": true, "clip": 12, "reserve": 90,
@@ -76,7 +76,7 @@ func test_weapon_cluster_artless_safe() -> void:
 		"scope_engaged": true, "fov_deg": 40.0, "ticks": 160,
 	})
 	await get_tree().process_frame
-	hud.set_weapon({}, "")
+	hud.set_weapon(null, "")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "Weapon cluster draw is art-less safe.")
 

@@ -235,8 +235,8 @@ func _update_game_hud() -> void:
 		stance = 1
 
 	# The equipped weapon's HUD slice: re-resolve on weapon change only.
-	var weapon: Dictionary = _world.local_player_weapon_dict() if _world.has_method("local_player_weapon_dict") else {}
-	var weapon_name := String(weapon.get("name", ""))
+	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def() if _world.has_method("local_player_hud_weapon_def") else null
+	var weapon_name := weapon.weapon_name if weapon != null else ""
 	if weapon_name != _hud_weapon_name:
 		_hud_weapon_name = weapon_name
 		_game_hud.set_weapon(weapon, _resolve_weapon_display_name(weapon_name))
@@ -250,8 +250,7 @@ func _update_game_hud() -> void:
 	var wv: PlayerWeaponView = _world.local_player_weapon_view() if _world.has_method("local_player_weapon_view") else null
 	if wv != null and wv.active:
 		weapon_active = true
-		var capacity := int(weapon.get("clipsize", 0))
-		clip = wv.clip if capacity != -1 else -1
+		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
 		reserve = wv.reserve
 	var scope_engaged := false
 	var fov_deg := 80.0

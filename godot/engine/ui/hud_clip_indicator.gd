@@ -32,23 +32,22 @@ func reset() -> void:
 	_stamp_ticks = 0
 
 
-## `weapon` is the NovaWeaponDatabase dict slice: hudclipgfx_offset (Vector2i),
-## hudrndgfx_offset (Vector2i), hudrndgfx_layout (Vector3i: step x, step y, divisor),
-## clipsize. `anchor_design` is the hudpos HUDCLIP position; either component nonzero
-## enables the element. `fade` is the ALPHAFADE triple (base%, max%, seconds — raw
-## file fields). [orig gates: @0x599a4a anchor, @0x599a59 ramp, @0x599a82 -1 sentinels]
-func draw(ci: CanvasItem, anchor_design: Vector2i, weapon: Dictionary,
+## `weapon` is the equipped weapon's HUD slice (PlayerHudWeaponDef). `anchor_design`
+## is the hudpos HUDCLIP position; either component nonzero enables the element.
+## `fade` is the ALPHAFADE triple (base%, max%, seconds — raw file fields).
+## [orig gates: @0x599a4a anchor, @0x599a59 ramp, @0x599a82 -1 sentinels]
+func draw(ci: CanvasItem, anchor_design: Vector2i, weapon: PlayerHudWeaponDef,
 		clip_tex: Texture2D, round_tex: Texture2D, clip: int, reserve: int,
 		tint: Color, fade: Vector3i, now_ticks: int, surface: Vector2) -> void:
-	if ci == null or anchor_design == Vector2i.ZERO:
+	if ci == null or weapon == null or anchor_design == Vector2i.ZERO:
 		return
 	var ramp_ticks := int(fade.z * HudFade.SECONDS_TO_TICKS)
-	if ramp_ticks <= 0 or weapon.is_empty():
+	if ramp_ticks <= 0:
 		return
 	if reserve == -1 or clip == -1:
 		return
 
-	var key := "%s|%d" % [String(weapon.get("round_type", "")), reserve]
+	var key := "%s|%d" % [weapon.round_type, reserve]
 	if key != _key:
 		_key = key
 		_stamp_ticks = now_ticks
@@ -59,19 +58,15 @@ func draw(ci: CanvasItem, anchor_design: Vector2i, weapon: Dictionary,
 	var anchor := Vector2(anchor_design)
 	if clip_tex != null:
 		var bg_color := Color(tint.r, tint.g, tint.b, base_alpha / 255.0)
-		var off: Vector2i = weapon.get("hudclipgfx_offset", Vector2i.ZERO)
 		ci.draw_texture_rect(clip_tex,
-			HudLayout.scale_rect(Rect2(anchor + Vector2(off), clip_tex.get_size()), surface),
+			HudLayout.scale_rect(Rect2(anchor + Vector2(weapon.clipgfx_offset), clip_tex.get_size()), surface),
 			false, bg_color)
 
 	if round_tex != null:
-		var n := round_icon_count(clip, reserve, int(weapon.get("clipsize", 0)),
-			Vector3i(weapon.get("hudrndgfx_layout", Vector3i.ZERO)).z)
+		var n := round_icon_count(clip, reserve, weapon.clipsize, weapon.rounds_per_icon)
 		var round_color := Color(tint.r, tint.g, tint.b, flash / 255.0)
-		var start: Vector2i = weapon.get("hudrndgfx_offset", Vector2i.ZERO)
-		var layout: Vector3i = weapon.get("hudrndgfx_layout", Vector3i.ZERO)
-		var pos := anchor + Vector2(start)
-		var step := Vector2(layout.x, layout.y)
+		var pos := anchor + Vector2(weapon.rndgfx_offset)
+		var step := Vector2(weapon.rndgfx_step)
 		var round_size := round_tex.get_size()
 		for i in n:
 			ci.draw_texture_rect(round_tex,

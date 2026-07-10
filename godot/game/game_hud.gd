@@ -31,9 +31,9 @@ var _colors: Dictionary = {}
 var _alpha_fade := Vector3i.ZERO
 var _chat_lines := DEFAULT_CHAT_LINES
 
-# The equipped weapon's HUD slice: the weapon.def transport dict, its resolved WepDes
-# display name, and the loaded HUDCLIPGFX/HUDRNDGFX textures.
-var _weapon: Dictionary = {}
+# The equipped weapon's HUD slice (PlayerHudWeaponDef, null = no weapon), its resolved
+# WepDes display name, and the loaded HUDCLIPGFX/HUDRNDGFX textures.
+var _weapon: PlayerHudWeaponDef = null
 var _weapon_display_name := ""
 var _clip_tex: Texture2D
 var _round_tex: Texture2D
@@ -77,15 +77,15 @@ func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
 	queue_redraw()
 
 
-## Install the equipped weapon's HUD slice (the weapon.def transport dict plus its
-## resolved display name); loads the clip/round graphics and resets the flash state.
+## Install the equipped weapon's HUD slice (null = no weapon) plus its resolved
+## display name; loads the clip/round graphics and resets the flash state.
 ## Mirrors the per-frame weapon-def pointer of the original's HUD info struct.
 ## [orig: HUD_BuildEntityInfo @0x4b8561; textures HUD_LoadAllTextures @0x59e246]
-func set_weapon(weapon: Dictionary, display_name: String) -> void:
+func set_weapon(weapon: PlayerHudWeaponDef, display_name: String) -> void:
 	_weapon = weapon
 	_weapon_display_name = display_name
-	_clip_tex = _load_texture(String(weapon.get("hudclipgfx_texture", "")))
-	_round_tex = _load_texture(String(weapon.get("hudrndgfx_texture", "")))
+	_clip_tex = _load_texture(weapon.clipgfx_texture) if weapon != null else null
+	_round_tex = _load_texture(weapon.rndgfx_texture) if weapon != null else null
 	_clip_indicator.reset()
 	queue_redraw()
 
@@ -225,12 +225,12 @@ func _draw_stance(surface: Vector2, ticks: int) -> void:
 # crosshair. Nothing draws without an installed weapon FSM (the original gates every
 # weapon element on the info struct's weapon-def pointer). [orig: @0x5939f3 / @0x599a67]
 func _draw_weapon_cluster(surface: Vector2, ticks: int) -> void:
-	if not bool(_info.get("weapon_active", false)) or _weapon.is_empty():
+	if not bool(_info.get("weapon_active", false)) or _weapon == null:
 		_draw_fallback_reticle(surface)
 		return
 	var clip := int(_info.get("clip", -1))
 	var reserve := int(_info.get("reserve", -1))
-	var capacity := int(_weapon.get("clipsize", 0))
+	var capacity := _weapon.clipsize
 	var wc: Color = _colors.get("weapon_textcolor", Color(0.98, 0.84, 0.02))
 
 	if _font != null:
@@ -265,9 +265,7 @@ func _draw_crosshair(surface: Vector2) -> void:
 		err_stance = 0
 	elif stance_icon == 1:
 		err_stance = 1
-	var error: PackedFloat32Array = _weapon.get("error", PackedFloat32Array())
-	var row := HudCrosshair.error_row(err_stance, false)
-	var err_deg := error[row] if row < error.size() else 0.0
+	var err_deg := _weapon.error_row_deg(HudCrosshair.error_row(err_stance, false))
 	var spread := HudCrosshair.spread_px(err_deg, float(_info.get("fov_deg", 80.0)), surface.x)
 	HudCrosshair.draw(self, _crosshair_tex, Vector2(512, 384), surface, spread)
 
