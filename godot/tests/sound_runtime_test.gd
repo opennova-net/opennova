@@ -7,6 +7,18 @@ extends GutTest
 const NovaSoundBankScript = preload("res://engine/world/nova_sound_bank.gd")
 
 
+# Duck-typed NovaResourceRoot stand-in serving in-memory wav bytes.
+class ResourceRootStub:
+	extends RefCounted
+	var files := {}  # filename(lower) -> PackedByteArray
+
+	func has_file(name: String) -> bool:
+		return files.has(name.to_lower())
+
+	func read_file(name: String) -> PackedByteArray:
+		return files.get(name.to_lower(), PackedByteArray())
+
+
 func _profile_with_set(set_name: String, wav: String) -> NovaLwfData:
 	var d := NovaLwfData.new()
 	d.create_empty()
@@ -36,6 +48,37 @@ func test_spawn_unknown_or_unresolvable_returns_null() -> void:
 		"unknown set yields no voice")
 	assert_null(bank.spawn_ambient(parent, Vector3.ZERO, "Z00AMB1", &"Ambient"),
 		"known set with no resolvable .wav yields no voice (graceful)")
+
+
+func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
+	# Regression: AudioStreamWAV.loop_end is an absolute frame index, not
+	# "0 = whole stream". With LOOP_FORWARD and loop_end 0, playback wraps at
+	# sample 0 forever, so every looping "snd:" ambient marker voice in-game was
+	# a constant sample-0 value — silence.
+	var root := ResourceRootStub.new()
+	var samples := PackedByteArray()
+	samples.resize(32)  # 16 mono 16-bit frames
+	root.files["z00ar100.wav"] = _build_wav(samples, 1, 22050, 16)
+	var bank = NovaSoundBankScript.new(root)
+	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var holder: Node3D = bank.spawn_ambient(parent, Vector3(1.0, 2.0, 3.0), "Z00AMB1", &"Ambient")
+	assert_not_null(holder, "resolvable set spawns a voice holder")
+	if holder == null:
+		return
+	var player: AudioStreamPlayer3D = null
+	for child in holder.get_children():
+		if child is AudioStreamPlayer3D:
+			player = child
+	assert_not_null(player, "holder carries an AudioStreamPlayer3D voice")
+	if player == null:
+		return
+	assert_true(player.playing, "ambient voice is playing")
+	var s: AudioStreamWAV = player.stream
+	assert_eq(s.loop_mode, AudioStreamWAV.LOOP_FORWARD, "ambient voice loops")
+	assert_eq(s.loop_begin, 0)
+	assert_eq(s.loop_end, 16, "loop region spans the full decoded stream")
 
 
 func test_wav_loader_decodes_pcm8_unsigned() -> void:

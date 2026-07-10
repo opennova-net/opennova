@@ -174,7 +174,10 @@ func _make_player(stream: AudioStreamWAV, layer_d: Dictionary, member: Dictionar
 		s = stream.duplicate()
 		s.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		s.loop_begin = 0
-		s.loop_end = 0
+		# loop_end is an absolute frame index and playback wraps the moment it is
+		# reached — 0 does NOT mean "whole stream", it pins the voice at sample 0
+		# forever (constant DC = silence). Loop the full decoded buffer.
+		s.loop_end = _stream_frames(s)
 	player.stream = s
 	# Only route to a bus that actually exists; otherwise keep the default (Master)
 	# so a missing/renamed bus can never silence the voice.
@@ -196,6 +199,16 @@ func _make_player(stream: AudioStreamWAV, layer_d: Dictionary, member: Dictionar
 	if max_distance > 0.0:
 		player.max_distance = max_distance
 	return player
+
+
+# Frame count of a decoded stream, exact from the byte size (get_length() *
+# mix_rate re-derives it through a float). NovaWavLoader always emits 16-bit
+# PCM; the 8-bit branch is for completeness — IMA-ADPCM never reaches here
+# (the loader decodes it to 16-bit).
+static func _stream_frames(s: AudioStreamWAV) -> int:
+	var bytes_per_sample := 2 if s.format == AudioStreamWAV.FORMAT_16_BITS else 1
+	var bytes_per_frame := bytes_per_sample * (2 if s.stereo else 1)
+	return s.data.size() / bytes_per_frame
 
 
 # Pick the member to play for one layer. The selection STATE MACHINE (mode + per-layer cursor/bag)
