@@ -424,12 +424,16 @@ int main(void) {
     }
 
     def_free_weapons(&wf);
-    /* Implicit ACTION closure: retail JOTAC weapon.def mixes terminator styles
-       (AK47AUTO: idle/emptyidle have NO `end`; fire/recoil do). The shipped
-       corpus firing in retail is the witness that the parser accepts a new
-       `action` line as the close of the open one. Regression: the old parser
-       swallowed emptyidle + fire into idle, baking a zero-duration FIRE (the
-       "AK47AUTO can't fire full auto" report). */
+    /* A nested `action` line while one is open is REFUSED by the original: it
+       logs "forgot an end", keeps the current row open (subsequent keys
+       overwrite it, last writer wins) and never creates the new row — the
+       never-created suffixes become zeroed generated defaults at bind time.
+       [orig: ActionDef_ParseScriptLine @ 0x402409 "forgot an end"; the driver
+       WeaponDefs_ParseLineCallback @ 0x54388d forwards in-ACTION lines before
+       its own `action` dispatch]. Every shipped weapon.def corpus (JOX, JOTAC
+       localres, RevX02, JO:CA, jox01, demo) is fully END-terminated, so only
+       malformed data reaches this. Also covers the bare `delay` alias
+       (= delayend) [orig: @ 0x40279a / @ 0x402b2c]. */
     {
         static const char mixed[] =
             "weapon \"WPN_MIXED\"\n"
@@ -445,7 +449,7 @@ int main(void) {
             "\t\tanim anim_wpn_fire\n"
             "\tend\n"
             "\taction \"recoil\"\n"
-            "\t\tdelayend 0\n"
+            "\t\tdelay 4\n"
             "\tend\n"
             "end\n";
         DefWeaponsFile wx;
@@ -456,20 +460,23 @@ int main(void) {
         const DefWeaponDef *w = NULL;
         for (size_t i = 0; i < wx.count; ++i)
             if (strcmp(wx.entries[i].weapon_name, "WPN_MIXED") == 0) w = &wx.entries[i];
-        int ok = w != NULL && w->actions_count == 4;
-        const DefWeaponAction *fire = NULL;
+        /* idle stays open through both refused `action` lines and ends up
+           carrying fire's keys; emptyidle/fire rows are never created. */
+        int ok = w != NULL && w->actions_count == 2;
         if (ok) {
-            for (size_t i = 0; i < w->actions_count; ++i)
-                if (strcmp(w->actions[i].name, "fire") == 0) fire = &w->actions[i];
-            ok = fire != NULL && fire->delayend == 6 &&
-                 strcmp(fire->anim, "anim_wpn_fire") == 0;
+            const DefWeaponAction *idle = &w->actions[0];
+            const DefWeaponAction *recoil = &w->actions[1];
+            ok = strcmp(idle->name, "idle") == 0 && idle->delaystart == 0 &&
+                 idle->delayend == 6 && strcmp(idle->anim, "anim_wpn_fire") == 0 &&
+                 strcmp(recoil->name, "recoil") == 0 && recoil->delaystart == 0 &&
+                 recoil->delayend == 4;
         }
         def_free_weapons(&wx);
         if (!ok) {
-            fprintf(stderr, "FAIL: implicit action closure (fire row missing/wrong)\n");
+            fprintf(stderr, "FAIL: nested-action refusal (swallow) semantics\n");
             return 1;
         }
-        printf("implicit action closure OK\n");
+        printf("nested-action refusal + delay alias OK\n");
     }
 
     printf("PASS: weapon parsing OK\n");

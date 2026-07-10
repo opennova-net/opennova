@@ -131,8 +131,12 @@ std::vector<int> to_model_parents(const PackedInt32Array &p_parents) {
 }  // namespace
 
 const NovaSkeletalAnim::LoadedClip *NovaSkeletalAnim::find_clip(const String &p_key) const {
+	// Case-insensitive: JOTAC-era weapon.def ACTION rows author ANIM_WPN_* uppercase
+	// while the .adm stores anim_wpn_* lowercase — an exact match starves the FSM
+	// bake's clip lengths (every 'auto' delay collapsed to 0) and has_anim.
+	// [orig: AnimMap_FindSlotByName @ 0x40cfa0 — stricmp]
 	for (const LoadedClip &c : clips_) {
-		if (c.key == p_key) {
+		if (c.key.nocasecmp_to(p_key) == 0) {
 			return &c;
 		}
 	}

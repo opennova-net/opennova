@@ -984,21 +984,18 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 state = ST_WEAPON;
                 continue;
             }
-            /* Implicit close: a new `action` line while one is open pushes the
-               current row and opens the next. Retail data mixes terminator
-               styles (JOTAC weapon.def: AK47AUTO's idle/emptyidle carry NO
-               `end`, fire/recoil/reload do) and the retail engine fires those
-               weapons — the shipped corpus is the witness that its parser
-               accepts implicit closure. Without this, idle swallowed emptyidle
-               + fire and the FSM baked a zero-duration FIRE (the maintainer's
-               "AK47AUTO can't fire full auto" on JOTAC installs). */
-            if (lower_starts_with(lower, ll, "action", 6)) {
-                DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
-                memset(&ca, 0, sizeof(ca));
-                ca_raw_cap = 0;
-                extract_quoted(trimmed, tlen, ca.name, sizeof(ca.name));
-                continue;
-            }
+            /* A nested `action` line while one is open is REFUSED by the
+               original: it logs "forgot an end", keeps the current row open
+               (subsequent keys overwrite it, last writer wins), and never
+               creates the new row — suffixes that never got a row become
+               zeroed generated defaults at bind time
+               [orig: ActionDef_ParseScriptLine @ 0x402409 "forgot an end";
+               the driver forwards in-ACTION lines before its own `action`
+               dispatch, WeaponDefs_ParseLineCallback @ 0x54388d]. Falling
+               through to raw_lines below reproduces exactly that. Every
+               shipped weapon.def corpus (JOX, JOTAC localres, RevX02, JO:CA,
+               jox01, demo) is fully END-terminated, so no retail data hits
+               this path. */
 
             int parsed = 0;
             if (lower_starts_with(lower, ll, "anim", 4) &&
@@ -1017,6 +1014,15 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             } else if (lower_match_key(lower, ll, "delayend", 8)) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+                char vlow[16];
+                size_t vll = vl < 15 ? vl : 15;
+                to_lower_buf(vlow, v, vll);
+                ca.delayend = (vll == 4 && memcmp(vlow, "auto", 4) == 0) ? -1 : parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "delay", 5)) {
+                /* bare `delay` is an alias of delayend — both write +40
+                   [orig: ActionDef_ParseScriptLine @ 0x40279a / @ 0x402b2c] */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
                 char vlow[16];
                 size_t vll = vl < 15 ? vl : 15;
                 to_lower_buf(vlow, v, vll);
@@ -1839,14 +1845,10 @@ DEF_EXPORT int def_parse_def(const char *path, DefFile *out) {
         }
 
         if (state == ST_ACTION) {
-            /* Implicit close on the next `action` line — same retail-corpus
-               witness as the weapon.def parser above (JOTAC mixes styles). */
-            if (lower_starts_with(lower, ll, "action", 6)) {
-                DA_PUSH(out->weapon.actions, out->weapon.actions_count, act_cap, ca);
-                memset(&ca, 0, sizeof(ca));
-                extract_quoted(trimmed, tlen, ca.name, sizeof(ca.name));
-                continue;
-            }
+            /* A nested `action` line is REFUSED by the original ("forgot an
+               end"): the open row stays current and the new row is never
+               created — ignoring the line here reproduces that
+               [orig: ActionDef_ParseScriptLine @ 0x402409]. */
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
                 DA_PUSH(out->weapon.actions, out->weapon.actions_count, act_cap, ca);
                 memset(&ca, 0, sizeof(ca));

@@ -8024,7 +8024,18 @@ fire pipeline and §5.58 reload round-trip plug into.
 "<name>"` find-or-creates a global ActionDef pool entry named `<prefix>_<name>` (the
 prefix argument is the weapon's name; entry name at +122, `ActionDef_InitDefaults
 @ 0x4022b0` memsets the record — so **absent keys default to 0**, only an explicit
-`auto` writes the bake sentinel −1). Keys: `function` → +0 handler via
+`auto` writes the bake sentinel −1). The weapon.def driver
+(`WeaponDefs_ParseLineCallback @ 0x543680`) latches `g_weaponParseInActionBlock
+@ 0x252DB88` on `action` (after validating the name against the 12-suffix table;
+the created row — `ActionDef_GetCurrent @ 0x401ef0` — is stored per-suffix at
+`WeaponDef+0x2A4`) and forwards EVERY in-block line here — **before** its own
+`action` dispatch (`@ 0x54388d`). A nested `action` while one is open is therefore
+REFUSED: `@ 0x402409` logs "forgot an end", returns 1 WITHOUT creating the row, the
+old row stays current (subsequent keys overwrite it, last writer wins), and the
+driver ignores the rc — there is NO implicit closure; never-created suffixes become
+zeroed generated defaults at bind time. (Corpus note, 2026-07-10: every shipped
+weapon.def — JOX, JOTAC localres, RevX02, JO:CA, jox01, demo — is fully
+END-terminated; only malformed data reaches the refusal.) Keys: `function` → +0 handler via
 `ActionFuncDef_FindByName @ 0x401040` (unknown name → the `ActionSlot_ExecuteAction
 @ 0x4020a0` placeholder + warn), `anim` → +58 (a literal `.adm` clip key, e.g.
 `anim_wpn_fire`), `delaystart` → +36 / `delay`/`delayend` → +40 (ticks; `auto` → −1),
@@ -8046,10 +8057,17 @@ reload `@ 0x5430B0`, empty `@ 0x543180`, switchto `@ 0x5431D0`, switchfrom `@ 0x
 switchrank `@ 0x543500`, scopeup `@ 0x543290`, scopedown `@ 0x543320`, overheated →
 the idle handler. Missing rows become generated defaults; a null/placeholder handler
 takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
-`AnimMap_FindSlotByName @ 0x40cfa0`) and the −1 delays bake from the clip:
-`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` = ms × 62.5/1000 + 1 —
-the 62.5 t/s constant `flt_7C3B3C`), `delayend = ticks`, minus `delaystart` when
-`ticks > delaystart`; no anim/adm → −1 collapses to 0. Ends by playing global slot 241
+`AnimMap_FindSlotByName @ 0x40cfa0` — **stricmp, case-insensitive**, comparing from
+name+5 so the `anim_` prefix is skipped against the unprefixed 252-entry
+`g_animStateNameTable @ 0x8135F0`; JOTAC-era defs author `ANIM_WPN_*` uppercase
+while the .adm stores lowercase, D-WPN-10) and the −1 delays bake from the clip:
+`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` =
+**trunc(ms × 62.5/1000 + 0.5) + 1** — the 62.5 t/s constant `flt_7C3B3C` and the
+round-to-nearest 0.5 `flt_7C3B94 @ 0x7C3B94`; byte-witnessed 2026-07-10, the
+pre-#219 port truncated without the +0.5), `delayend = ticks`, minus `delaystart` when
+`ticks > delaystart` (the just-baked delaystart — both fields auto → ds = de = ticks);
+unresolved anim (`@ 0x542202`) / no adm (`@ 0x542180`) / no anim key (`@ 0x542152`)
+→ −1 collapses to 0. Ends by playing global slot 241
 (`wpn_idle`) on the weapon's adm.
 
 **The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
@@ -8145,14 +8163,43 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..9): the FUNCTION registry unported (std-only in all
+**Divergences** (ledger D-WPN-1..10): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net uplink unwired (C2S 0x06/0x25 from
 events, D-WPN-8); ADS residuals — SIGHTS overlay draw, unscope-on-move site, zoom-level
-keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9).
+keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9);
+**D-WPN-10** [reimpl divergence, FIXED 2026-07-10] the host clip-key lookup
+(`NovaSkeletalAnim::find_clip`) compared case-SENSITIVELY where the original is
+stricmp (`AnimMap_FindSlotByName @ 0x40cfa0`) — on JOTAC-era data (base localres +
+RevX02 author `ANIM_WPN_*` uppercase; the .adm stores `anim_wpn_*` lowercase) every
+`auto` delaystart/delayend collapsed to 0 and `has_anim` died, so the viewmodel
+played no weapon-action clips (JOX's lowercase rows masked it). Fixed to
+`nocasecmp_to`.
+
+**The delaystart/delayend grill (2026-07-10, PR #219 validation).** Re-witnessed the
+delay pipeline end to end: parse (`delaystart` → +36, `delay`/`delayend` → +40 — the
+bare `delay` alias now ported; `auto` → −1, absent → 0), the bake (formula corrected
+above), and every pump consumption site (transition `counter=ds @ 0x5413ea` +
+`@ 0x54146d`; finish `counter=de @ 0x53f7b0`; idle reseed `ds+de @ 0x54135d`;
+idle-with-queued-next counter cut to 0 `@ 0x541370`; kick `recoil.ds+de+counter+10`)
+— all MATCHING. #219's interim "implicit ACTION closure" parser change was REVERTED
+to the witnessed nested-`action` refusal (see the registry paragraph): its
+justifying corpus claim (JOTAC AK47AUTO missing `end`s) is false — all six corpus
+copies are fully terminated, and retail parses a genuinely-mixed file by swallowing,
+not closing. Retail tolerates the resulting zero-delay generated defaults: at
+counter==0 with phase 1/2 the pump still runs the handler (LABEL_118 `@ 0x5414a2`),
+so a {ds 0, de 0} action finishes on its entry tick — shipped data leans on this
+(every JO fire row is `delaystart 0` + explicit `delayend`; the AK's cadence is the
+fire delayend + recoil {0,0}).
+
+**IDB (2026-07-10 session).** Renamed: `ActionDef_GetCurrent @ 0x401ef0` (ex
+`sub_401EF0` — returns the open ActionDef), `g_currentActionDef @ 0xA2E8E8`,
+`g_weaponParseInActionBlock @ 0x252DB88`, `g_weaponParseCurActionDef @ 0x252DB8C`.
+Comments: the `@ 0x402409` refusal, the `@ 0x54388d` forward-before-dispatch order,
+`@ 0x40cfa0` stricmp + name+5 prefix skip, `@ 0x401ef0`. idb_save run.
 
 **IDB (this session).** Renamed: `WeaponSlot_RequestFire @ 0x53efa0`,
 `Player_RequestPrimaryFire @ 0x5414c0`, `WeaponSlot_TryQueueScopeUp @ 0x53f050`,
