@@ -32,7 +32,8 @@ const _FRAME_ROWS := [
 var history_option: OptionButton
 var span_tree: Tree
 var monitor_labels: Dictionary = {}
-var frame_labels: Dictionary = {}
+# Keyed frame-budget value labels (private; read through frame_label_text).
+var _frame_labels: Dictionary = {}
 var frame_status: Label
 
 var _history: Array = []
@@ -67,7 +68,7 @@ func _init() -> void:
 		value_label.text = "—"
 		hbox.add_child(value_label)
 		add_child(hbox)
-		frame_labels[row[0]] = value_label
+		_frame_labels[row[0]] = value_label
 
 	var loads_label := Label.new()
 	loads_label.name = "PerfLoadsLabel"
@@ -139,8 +140,8 @@ func render_frame_budget(counters: Dictionary) -> void:
 		"net_tick_us": sim.get("net_tick_us"),
 		"present_snapshot_us": sim.get("present_snapshot_us"),
 	}
-	for key in frame_labels:
-		var label: Label = frame_labels[key]
+	for key in _frame_labels:
+		var label: Label = _frame_labels[key]
 		var v: Variant = values.get(key)
 		label.text = _fmt_us(int(v)) if v != null else "—"
 
@@ -239,3 +240,9 @@ func _same_history(history: Array) -> bool:
 		if history[i] != _history[i]:
 			return false
 	return true
+
+
+# ADR 0018 read seam: the frame-budget cell text by counter key ("" = unknown key).
+func frame_label_text(key: String) -> String:
+	var label: Label = _frame_labels.get(key)
+	return label.text if label != null else ""

@@ -164,7 +164,7 @@ func test_new_tabs_build_headless_without_a_sim_or_world() -> void:
 	assert_true(overlay.is_foliage_status_visible(), "the foliage pane explains itself without a world")
 	assert_true(overlay.perf_pane().frame_status.visible,
 		"the frame budget explains itself without a world")
-	assert_eq((overlay.perf_pane().frame_labels["tick_us"] as Label).text, "—",
+	assert_eq(overlay.perf_pane().frame_label_text("tick_us"), "—",
 		"frame rows dash out without counters")
 
 
@@ -177,11 +177,11 @@ func test_frame_budget_and_foliage_render_from_world_source() -> void:
 	overlay.toggle()
 
 	assert_false(overlay.perf_pane().frame_status.visible, "counters present - no status line")
-	assert_eq((overlay.perf_pane().frame_labels["tick_us"] as Label).text, "1.23 ms",
+	assert_eq(overlay.perf_pane().frame_label_text("tick_us"), "1.23 ms",
 		"top-level µs render (ms above 1000)")
-	assert_eq((overlay.perf_pane().frame_labels["sim_tick_us"] as Label).text, "900 µs",
+	assert_eq(overlay.perf_pane().frame_label_text("sim_tick_us"), "900 µs",
 		"the nested runtime.sim numbers render")
-	assert_eq((overlay.perf_pane().frame_labels["present_us"] as Label).text, "700 µs",
+	assert_eq(overlay.perf_pane().frame_label_text("present_us"), "700 µs",
 		"the nested runtime numbers render")
 
 	assert_false(overlay.is_foliage_status_visible(), "foliage stats present - no status line")
@@ -194,7 +194,7 @@ func test_frame_budget_and_foliage_render_from_world_source() -> void:
 	overlay.set_world_source(func(): return null)
 	overlay.refresh_now()
 	assert_true(overlay.perf_pane().frame_status.visible)
-	assert_eq((overlay.perf_pane().frame_labels["tick_us"] as Label).text, "—")
+	assert_eq(overlay.perf_pane().frame_label_text("tick_us"), "—")
 
 
 func test_player_tab_reports_the_live_player_and_net_state() -> void:
