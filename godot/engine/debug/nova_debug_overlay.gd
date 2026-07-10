@@ -24,6 +24,11 @@ signal transport_used(action: String)
 ## debug view in response.
 signal skeleton_debug_toggled(enabled: bool)
 
+## Fired when the View tab's "Show collision" checkbox is toggled. Same host-neutral
+## contract as skeleton_debug_toggled: the host that owns the world builds/frees the
+## collision debug view (object collision volumes + the player capsule) in response.
+signal collision_debug_toggled(enabled: bool)
+
 ## Fired when the View tab's "Hide foliage" checkbox is toggled. Same host-neutral
 ## contract as skeleton_debug_toggled: the host hides/shows the world's foliage.
 signal foliage_hidden_toggled(hidden: bool)
@@ -43,6 +48,7 @@ const REFRESH_INTERVAL := 0.25
 const PANEL_WIDTH := 380.0
 
 var _runtime_source := Callable()
+var _world_source := Callable()
 var _timer: Timer
 var _tabs: TabContainer
 
@@ -74,11 +80,19 @@ var _var_rows_signature := ""
 
 var _status_label: Label
 
-# Perf pane (C11): the PerfTimeline ring + live monitors.
+# Perf pane (C11): the PerfTimeline ring + live monitors + the per-frame budget.
 var _perf_pane: DebugPerfPane
+
+# Foliage pane: the world's live vegetation counters, one label row per stat.
+var _foliage_status: Label
+var _foliage_stat_labels: Dictionary = {}
+
+# Player pane: the local player's live state + the network one-liner.
+var _player_label: Label
 
 # View pane: render-debug toggles the host acts on (skeleton bone overlay, foliage, ...).
 var _skeleton_check: CheckBox
+var _collision_check: CheckBox
 var _foliage_check: CheckBox
 var _viewmodel_check: CheckBox
 var _body_fp_check: CheckBox
@@ -108,6 +122,22 @@ func set_runtime_source(source: Callable) -> void:
 func set_runtime(runtime) -> void:
 	var ref: WeakRef = weakref(runtime)
 	set_runtime_source(func(): return ref.get_ref())
+
+
+## Optional world supplier: a Callable returning the host's current GameWorld (or
+## null), re-resolved every refresh like the runtime source. Feeds the Perf tab's
+## per-frame budget and the Foliage tab; hosts that never call this simply leave
+## those panes in their empty states.
+func set_world_source(source: Callable) -> void:
+	_world_source = source
+	if visible:
+		_refresh()
+
+
+## Convenience for hosts holding one world instance directly.
+func set_world(world) -> void:
+	var ref: WeakRef = weakref(world)
+	set_world_source(func(): return ref.get_ref())
 
 
 func toggle() -> void:
@@ -178,8 +208,10 @@ func _build_panel() -> void:
 
 	_build_entities_tab()
 	_build_sim_tab()
+	_build_player_tab()
 	_build_vars_tab()
 	_build_perf_tab()
+	_build_foliage_tab()
 	_build_view_tab()
 
 
@@ -187,6 +219,90 @@ func _build_perf_tab() -> void:
 	_perf_pane = DebugPerfPane.new()
 	_perf_pane.name = "Perf"
 	_tabs.add_child(_perf_pane)
+
+
+# The local player's live state: where they are, health/side, the equipped weapon,
+# the zone flags the collision resolver maintains, and the network one-liner.
+func _build_player_tab() -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "Player"
+	tab.add_theme_constant_override("separation", 6)
+	_tabs.add_child(tab)
+
+	_player_label = Label.new()
+	_player_label.name = "PlayerState"
+	_player_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_player_label.text = "No mission running."
+	tab.add_child(_player_label)
+
+
+# Foliage stat rows. A fixed row set (built once) fed from the world's dispatch
+# counters each refresh; label copy stays artist-facing (the far tier is the
+# scattered ground cover, the model tier the bush/tree clusters around objects).
+const _FOLIAGE_ROWS := [
+	["_header_far", "Ground cover (scattered)"],
+	["far_cells_visible", "Patches visible"],
+	["cached_cells", "Patches kept"],
+	["total_instances", "Plants kept"],
+	["far_pool_hits", "Cache hits"],
+	["far_pool_misses", "Cache misses"],
+	["far_cells_baked", "Patches built"],
+	["far_instances_baked", "Plants built"],
+	["_header_model", "Bushes & trees (around objects)"],
+	["model_anchors_in_range", "Objects in view"],
+	["model_tiles_emitted", "Clusters drawn"],
+	["model_instances", "Plants drawn"],
+	["model_cached_tiles", "Clusters kept"],
+	["model_cache_hits", "Cache hits"],
+	["model_cache_misses", "Cache misses"],
+	["model_regenerations", "Clusters rebuilt"],
+	["model_uploads", "Mesh uploads"],
+]
+
+
+func _build_foliage_tab() -> void:
+	var tab := VBoxContainer.new()
+	tab.name = "Foliage"
+	tab.add_theme_constant_override("separation", 4)
+	_tabs.add_child(tab)
+
+	_foliage_status = Label.new()
+	_foliage_status.name = "FoliageStatus"
+	_foliage_status.text = "No world running."
+	_foliage_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tab.add_child(_foliage_status)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "FoliageScroll"
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	tab.add_child(scroll)
+
+	var rows := VBoxContainer.new()
+	rows.name = "FoliageRows"
+	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(rows)
+
+	for entry in _FOLIAGE_ROWS:
+		var key: String = entry[0]
+		if key.begins_with("_header"):
+			var header := Label.new()
+			header.name = "FoliageHeader%s" % key.trim_prefix("_header")
+			header.text = String(entry[1])
+			rows.add_child(header)
+			continue
+		var row := HBoxContainer.new()
+		row.name = "FoliageRow_%s" % key
+		var name_label := Label.new()
+		name_label.text = "  %s" % String(entry[1])
+		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(name_label)
+		var value_label := Label.new()
+		value_label.name = "Value"
+		value_label.text = "—"
+		row.add_child(value_label)
+		rows.add_child(row)
+		_foliage_stat_labels[key] = value_label
 
 
 # Render-debug toggles. Unlike the other tabs these don't read the sim: the checkbox holds
@@ -204,6 +320,14 @@ func _build_view_tab() -> void:
 	_skeleton_check.button_pressed = false
 	_skeleton_check.toggled.connect(_on_skeleton_toggled)
 	tab.add_child(_skeleton_check)
+
+	_collision_check = CheckBox.new()
+	_collision_check.name = "ViewCollision"
+	_collision_check.text = "Show collision"
+	_collision_check.tooltip_text = "Draw the shapes objects block movement with (walls gray, platforms blue, armory zones green, indoor boxes yellow, hurt zones red, player-only walls purple) plus your soldier's collision capsule and ground gap."
+	_collision_check.button_pressed = false
+	_collision_check.toggled.connect(_on_collision_toggled)
+	tab.add_child(_collision_check)
 
 	_foliage_check = CheckBox.new()
 	_foliage_check.name = "ViewHideFoliage"
@@ -350,6 +474,15 @@ func _resolve_sim(runtime: Object) -> Object:
 	return sim
 
 
+func _resolve_world() -> Object:
+	if not _world_source.is_valid():
+		return null
+	var world: Variant = _world_source.call()
+	if world == null or not is_instance_valid(world):
+		return null
+	return world
+
+
 # --- Refresh ---------------------------------------------------------------
 
 func _refresh() -> void:
@@ -357,10 +490,17 @@ func _refresh() -> void:
 	var sim := _resolve_sim(runtime)
 	var live := sim != null
 	_status_label.visible = not live
-	# The perf pane is fed by HOST-WIDE state (the PerfTimeline ring + live
-	# monitors), not the sim — it refreshes regardless, so "that load was slow,
-	# let me look" works from the menu after returning from a mission.
+	# The perf + foliage panes are fed by HOST-WIDE state (the PerfTimeline ring,
+	# live monitors, and the world's frame counters), not the sim — they refresh
+	# regardless, so "that load was slow, let me look" works from the menu after
+	# returning from a mission.
+	var world := _resolve_world()
+	var world_counters: Dictionary = {}
+	if world != null and world.has_method("get_runtime_perf_counters"):
+		world_counters = world.get_runtime_perf_counters()
+	_perf_pane.render_frame_budget(world_counters)
 	_perf_pane.refresh()
+	_refresh_foliage(world_counters)
 	# The other tabs stay usable without a sim too: the panes that need one
 	# clear to their empty states (their handlers already null-check).
 	if not live:
@@ -369,6 +509,7 @@ func _refresh() -> void:
 	_refresh_entities(sim)
 	_refresh_sim(runtime, sim)
 	_refresh_vars(sim)
+	_refresh_player(sim)
 
 
 func _clear_live_panes() -> void:
@@ -380,6 +521,7 @@ func _clear_live_panes() -> void:
 	_entities_label.text = ""
 	_events_label.text = ""
 	_wac_label.text = ""
+	_player_label.text = "No mission running."
 	if _var_rows_signature != "":
 		_var_rows_signature = ""
 		_var_controls.clear()
@@ -480,6 +622,75 @@ func _refresh_sim(runtime: Object, sim: Object) -> void:
 	else:
 		_wac_label.text = "scripts: none"
 	_wac_pause_check.set_pressed_no_signal(bool(wac.get("paused", false)))
+
+
+# The Player tab: every line reads a sim seam guarded by has_method, so the pane
+# stays resilient across sim variants (net spectators, dedicated hosts, tests).
+func _refresh_player(sim: Object) -> void:
+	var lines := PackedStringArray()
+	var has_player: bool = sim.has_method("has_local_player") and bool(sim.has_local_player())
+	if has_player:
+		var pos: Vector3 = sim.get_local_player_position() if sim.has_method("get_local_player_position") else Vector3.ZERO
+		var yaw := float(sim.get_local_player_yaw_deg()) if sim.has_method("get_local_player_yaw_deg") else 0.0
+		lines.append("position: (%.1f, %.1f, %.1f)  facing %.0f°" % [pos.x, pos.y, pos.z, yaw])
+		if sim.has_method("get_local_player_health"):
+			lines.append("health: %d / %d   side %d" % [int(sim.get_local_player_health()),
+					int(sim.get_local_player_max_health()), int(sim.get_local_player_team())])
+		lines.append(_weapon_line(sim))
+		var indoors: bool = sim.has_method("local_player_indoors") and bool(sim.local_player_indoors())
+		var blink := int(sim.local_player_blink_flags()) if sim.has_method("local_player_blink_flags") else 0
+		lines.append("indoors: %s   (blink flags 0x%X)" % ["yes" if indoors else "no", blink])
+		var in_armory: bool = sim.has_method("local_player_in_armory_zone") and bool(sim.local_player_in_armory_zone())
+		lines.append("in armory zone: %s" % ("yes" if in_armory else "no"))
+	else:
+		lines.append("No player in the world.")
+	lines.append(_net_line(sim))
+	_player_label.text = "\n".join(lines)
+
+
+func _weapon_line(sim: Object) -> String:
+	if not sim.has_method("get_local_player_weapon_state"):
+		return "weapon: none"
+	var ws: Dictionary = sim.get_local_player_weapon_state()
+	if not bool(ws.get("active", false)):
+		return "weapon: none"
+	var anim := String(ws.get("anim_key", ""))
+	var clip := int(ws.get("clip", -1))
+	var reserve := int(ws.get("reserve", -1))
+	return "weapon: %s   magazine %s   spare %s" % [
+		anim if not anim.is_empty() else "(idle)",
+		str(clip) if clip >= 0 else "∞",
+		str(reserve) if reserve >= 0 else "∞",
+	]
+
+
+# The network one-liner: hosting (port + joined count), joining (phase), or
+# single player. Reads the same seams the shell's net flows use.
+func _net_line(sim: Object) -> String:
+	if sim.has_method("is_host_listening") and bool(sim.is_host_listening()):
+		var port := int(sim.get_host_listen_port()) if sim.has_method("get_host_listen_port") else 0
+		var peers := int(sim.get_host_peer_count()) if sim.has_method("get_host_peer_count") else 0
+		return "network: hosting on port %d, %d joined" % [port, peers]
+	if sim.has_method("is_joiner") and bool(sim.is_joiner()):
+		if sim.has_method("is_joined_in_match") and bool(sim.is_joined_in_match()):
+			return "network: joined a host (in match)"
+		var phase := int(sim.get_joiner_phase()) if sim.has_method("get_joiner_phase") else -1
+		return "network: joining a host (step %d)" % phase
+	return "network: single player"
+
+
+# The Foliage tab: the world's live dispatch counters as label rows. Fed the
+# same Dictionary the Perf tab's frame budget reads; empty (no world / no
+# terrain) leaves the rows dashed with the status line explaining why.
+func _refresh_foliage(world_counters: Dictionary) -> void:
+	var stats_v: Variant = world_counters.get("foliage", {})
+	var stats: Dictionary = stats_v if stats_v is Dictionary else {}
+	_foliage_status.visible = stats.is_empty()
+	if stats.is_empty():
+		_foliage_status.text = "No world running." if world_counters.is_empty() else "No foliage in this world."
+	for key in _foliage_stat_labels:
+		var label: Label = _foliage_stat_labels[key]
+		label.text = str(int(stats[key])) if stats.has(key) else "—"
 
 
 func _refresh_vars(sim: Object) -> void:
@@ -626,6 +837,10 @@ func _on_vars_filter_toggled(_pressed: bool) -> void:
 
 func _on_skeleton_toggled(pressed: bool) -> void:
 	skeleton_debug_toggled.emit(pressed)
+
+
+func _on_collision_toggled(pressed: bool) -> void:
+	collision_debug_toggled.emit(pressed)
 
 
 func _on_foliage_toggled(pressed: bool) -> void:
