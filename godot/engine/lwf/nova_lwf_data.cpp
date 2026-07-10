@@ -76,8 +76,8 @@ Dictionary make_member() {
 Dictionary make_layer() {
 	Dictionary l;
 	l["selection_mode"] = NovaLwfData::SELECTION_RANDOM;
-	l["inner_distance"] = 0;
-	l["max_distance"] = 0;
+	l["falloff_radius"] = 0;
+	l["min_distance"] = 0;
 	l["looping"] = false;
 	l["directional"] = false;
 	l["heading"] = false;
@@ -202,8 +202,8 @@ bool NovaLwfData::decode_into_tree(const PackedByteArray &bytes) {
 
 			Dictionary layer;
 			layer["selection_mode"] = selection_mode_from_flags(pl.flags);
-			layer["inner_distance"] = static_cast<int>(pl.inner_distance);
-			layer["max_distance"] = static_cast<int>(pl.max_distance);
+			layer["falloff_radius"] = static_cast<int>(pl.falloff_radius);
+			layer["min_distance"] = static_cast<int>(pl.min_distance);
 			layer["looping"] = (pl.flags & opennova::lwf::kFlagLooping) != 0;
 			layer["directional"] = (pl.flags & opennova::lwf::kFlagDirectional) != 0;
 			layer["heading"] = (pl.flags & opennova::lwf::kFlagHeading) != 0;
@@ -322,8 +322,8 @@ PackedByteArray NovaLwfData::encode_current(String &r_error) const {
 		for (int li = 0; li < layers.size(); ++li) {
 			Dictionary layer = layers[li];
 			opennova::lwf::Playlist playlist;
-			playlist.inner_distance = static_cast<uint16_t>(static_cast<int>(layer.get("inner_distance", 0)));
-			playlist.max_distance = static_cast<uint16_t>(static_cast<int>(layer.get("max_distance", 0)));
+			playlist.falloff_radius = static_cast<uint16_t>(static_cast<int>(layer.get("falloff_radius", 0)));
+			playlist.min_distance = static_cast<uint16_t>(static_cast<int>(layer.get("min_distance", 0)));
 			playlist.flags = flags_from_layer(layer);
 
 			Array members = layer.get("members", Array());

@@ -110,15 +110,15 @@ func _build_layer_panel(box: VBoxContainer) -> void:
 		func(v): _apply_layer("selection_mode", int(v)),
 		func(): return MODE_OPTIONS)
 
-	var inner_dist := InspectorForms.add_spin_row(_layer_panel, "SoundLayerInnerDistance", "Full-volume radius", 0, 65535, 1)
-	_layer_binder.bind_spin(inner_dist,
-		func(info): return float(info.get("inner_distance", 0)),
-		func(v): _apply_layer("inner_distance", int(v)))
+	var falloff := InspectorForms.add_spin_row(_layer_panel, "SoundLayerFalloffRadius", "Falloff radius", 0, 65535, 1)
+	_layer_binder.bind_spin(falloff,
+		func(info): return float(info.get("falloff_radius", 0)),
+		func(v): _apply_layer("falloff_radius", int(v)))
 
-	var max_dist := InspectorForms.add_spin_row(_layer_panel, "SoundLayerMaxDistance", "Max distance", 0, 65535, 1)
-	_layer_binder.bind_spin(max_dist,
-		func(info): return float(info.get("max_distance", 0)),
-		func(v): _apply_layer("max_distance", int(v)))
+	var min_dist := InspectorForms.add_spin_row(_layer_panel, "SoundLayerMinDistance", "Min distance", 0, 65535, 1)
+	_layer_binder.bind_spin(min_dist,
+		func(info): return float(info.get("min_distance", 0)),
+		func(v): _apply_layer("min_distance", int(v)))
 
 	InspectorForms.add_section_heading(_layer_panel, "Flags")
 	for flag: String in LAYER_FLAGS:

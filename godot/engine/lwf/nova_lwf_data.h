@@ -30,7 +30,7 @@ class NovaResourceRoot;
 // Jointops.exe -- see libs/lwf/include/lwf/lwf.h for the [orig:] anchors):
 //   set:    { name:String, target_id:int, pitch_base:int, pitch_random_range:int,
 //             set_flags:int, layer_count:int, layers:Array[layer] }
-//   layer:  { selection_mode:int, inner_distance:int, max_distance:int,
+//   layer:  { selection_mode:int, falloff_radius:int, min_distance:int,
 //             looping/directional/heading/preload/stoppable/internal/external/
 //             reverb/rapid:bool, member_count:int, members:Array[member] }
 //   member: { name:String, wav_path:String, value_hi:int,

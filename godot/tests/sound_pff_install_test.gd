@@ -84,6 +84,6 @@ func test_pff_install_mission_audio() -> void:
 	if int(stats.get("markers_total", 0)) > 0:
 		assert_gt(int(stats.get("markers_resolved", 0)), 0,
 			"sound markers resolve against the install's items.def")
-		assert_eq(int(stats.get("voices", 0)), int(stats.get("markers_resolved", 0)),
-			"each resolved marker spawned a decoded voice")
+		assert_gte(int(stats.get("voices", 0)), int(stats.get("markers_resolved", 0)),
+			"each resolved marker spawned at least one decoded voice (time-of-day slot variants may add more)")
 	audio.teardown()
