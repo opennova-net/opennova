@@ -424,6 +424,54 @@ int main(void) {
     }
 
     def_free_weapons(&wf);
+    /* Implicit ACTION closure: retail JOTAC weapon.def mixes terminator styles
+       (AK47AUTO: idle/emptyidle have NO `end`; fire/recoil do). The shipped
+       corpus firing in retail is the witness that the parser accepts a new
+       `action` line as the close of the open one. Regression: the old parser
+       swallowed emptyidle + fire into idle, baking a zero-duration FIRE (the
+       "AK47AUTO can't fire full auto" report). */
+    {
+        static const char mixed[] =
+            "weapon \"WPN_MIXED\"\n"
+            "\tflags auto\n"
+            "\taction \"idle\"\n"
+            "\t\tdelayend auto\n"
+            "\t\tanim anim_wpn_idle\n"
+            "\taction \"emptyidle\"\n"
+            "\t\tdelayend auto\n"
+            "\t\tanim anim_wpn_idle\n"
+            "\taction \"fire\"\n"
+            "\t\tdelayend 6\n"
+            "\t\tanim anim_wpn_fire\n"
+            "\tend\n"
+            "\taction \"recoil\"\n"
+            "\t\tdelayend 0\n"
+            "\tend\n"
+            "end\n";
+        DefWeaponsFile wx;
+        if (def_parse_weapons_memory((const uint8_t *)mixed, sizeof(mixed) - 1, &wx) != 0) {
+            fprintf(stderr, "FAIL: mixed-terminator parse errored\n");
+            return 1;
+        }
+        const DefWeaponDef *w = NULL;
+        for (size_t i = 0; i < wx.count; ++i)
+            if (strcmp(wx.entries[i].weapon_name, "WPN_MIXED") == 0) w = &wx.entries[i];
+        int ok = w != NULL && w->actions_count == 4;
+        const DefWeaponAction *fire = NULL;
+        if (ok) {
+            for (size_t i = 0; i < w->actions_count; ++i)
+                if (strcmp(w->actions[i].name, "fire") == 0) fire = &w->actions[i];
+            ok = fire != NULL && fire->delayend == 6 &&
+                 strcmp(fire->anim, "anim_wpn_fire") == 0;
+        }
+        def_free_weapons(&wx);
+        if (!ok) {
+            fprintf(stderr, "FAIL: implicit action closure (fire row missing/wrong)\n");
+            return 1;
+        }
+        printf("implicit action closure OK\n");
+    }
+
     printf("PASS: weapon parsing OK\n");
     return 0;
 }
