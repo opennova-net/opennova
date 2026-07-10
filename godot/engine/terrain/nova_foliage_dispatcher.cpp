@@ -98,6 +98,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	                     &NovaFoliageDispatcher::set_model_anchor_range);
 	ClassDB::bind_method(D_METHOD("get_model_anchor_range"),
 	                     &NovaFoliageDispatcher::get_model_anchor_range);
+	ClassDB::bind_method(D_METHOD("set_model_view_fov", "fov_y_deg", "aspect"),
+	                     &NovaFoliageDispatcher::set_model_view_fov);
 	ClassDB::bind_static_method("NovaFoliageDispatcher", D_METHOD("bake_fd_image", "image"),
 	                            &NovaFoliageDispatcher::bake_fd_image);
 	ClassDB::bind_method(D_METHOD("get_model_tile_debug", "slot"),
@@ -196,6 +198,17 @@ void NovaFoliageDispatcher::set_model_anchor_range(float p_range) {
 }
 
 float NovaFoliageDispatcher::get_model_anchor_range() const { return model_anchor_range_; }
+
+void NovaFoliageDispatcher::set_model_view_fov(float p_fov_y_deg, float p_aspect) {
+	if (p_fov_y_deg <= 0.0f || p_aspect <= 0.0f) {
+		model_view_tan_half_h_ = 0.0f;
+		model_view_tan_half_v_ = 0.0f;
+		return;
+	}
+	const float half_v = Math::deg_to_rad(p_fov_y_deg) * 0.5f;
+	model_view_tan_half_v_ = Math::tan(half_v);
+	model_view_tan_half_h_ = model_view_tan_half_v_ * p_aspect;
+}
 
 bool NovaFoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
 	// [orig: Foliage_LoadDefAssets @ 0x601260 tail] - the ":fd" bake over the
@@ -855,8 +868,10 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 		// look down -Z). Identity view transform passes the gate
 		// (headless/tests).
 		float view_depth = MODEL_DEPTH_GATE;
+		Vector3 view_pos;
 		if (has_view) {
-			view_depth = -view_inv.xform(anchor).z;
+			view_pos = view_inv.xform(anchor);
+			view_depth = -view_pos.z;
 		}
 		if (view_depth < MODEL_DEPTH_GATE) {
 			continue;  // the witnessed >= 38.0 gate (also enforced in the libs walk)
@@ -864,9 +879,19 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 		// Host visibility mapping: retail only dispatches VISIBLE sector
 		// entities (sector render + occlusion test
 		// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]); the host
-		// approximates with a view-depth range gate.
+		// gates on view depth + the view frustum (occlusion un-hosted — the
+		// host culls strictly less than retail). The margin covers the
+		// cluster's spread around its anchor: quadrant tiles snap up to 32u
+		// out, plus the footprint jitter.
 		if (view_depth > model_anchor_range_) {
 			continue;
+		}
+		if (has_view && model_view_tan_half_h_ > 0.0f) {
+			constexpr float MODEL_CLUSTER_MARGIN = 40.0f;
+			if (Math::abs(view_pos.x) > view_depth * model_view_tan_half_h_ + MODEL_CLUSTER_MARGIN ||
+			    Math::abs(view_pos.y) > view_depth * model_view_tan_half_v_ + MODEL_CLUSTER_MARGIN) {
+				continue;
+			}
 		}
 		++dispatch_stats_.model_anchors_in_range;
 		const float anchor_distance =

@@ -608,7 +608,14 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 			model_anchors = _placer.get_placed_world_positions()
 		_dispatcher.set_model_anchors(model_anchors)
 		# FAR runs the witnessed 42u near-cell pool around the camera; the
-		# MODEL walk gates on view depth via camera_xform.
+		# MODEL walk gates on view depth + the view frustum via camera_xform
+		# (retail dispatches only VISIBLE sector entities [orig:
+		# Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]).
+		var cam := get_viewport().get_camera_3d() if get_viewport() != null else null
+		if cam != null:
+			var vp_size := get_viewport().get_visible_rect().size
+			var aspect := (vp_size.x / vp_size.y) if vp_size.y > 0.0 else 1.777
+			_dispatcher.set_model_view_fov(cam.fov, aspect)
 		_dispatcher.dispatch(camera_pos, camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()

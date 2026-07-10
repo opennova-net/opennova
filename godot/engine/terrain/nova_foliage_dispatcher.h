@@ -97,6 +97,14 @@ public:
 	void set_model_anchor_range(float p_range);
 	float get_model_anchor_range() const;
 
+	// The dispatch view's frustum half-angles (vertical fov + aspect). Retail
+	// only dispatches VISIBLE sector entities [orig:
+	// Terrain_RenderSectorEntitiesBySide @ 0x5c7d50 — sector render +
+	// occlusion gate]; the host gates anchors on the view frustum (occlusion
+	// stays un-hosted — the host culls strictly less than retail). A fov of 0
+	// disables the gate (headless probes/tests keep the old depth-only walk).
+	void set_model_view_fov(float p_fov_y_deg, float p_aspect);
+
 	// In-place ":fd" bake of an RGBA8 Image (pow2 dimensions required):
 	// alpha smoothed by the witnessed 3x3 kernel, RGB flattened to exactly
 	// 0x808080 [orig: Foliage_LoadDefAssets @ 0x601260 tail]. Returns false
@@ -246,6 +254,8 @@ private:
 	std::vector<ModelDrawNodeState> model_draw_node_states_;
 	PackedVector3Array model_anchors_;
 	float model_anchor_range_ = 512.0f;
+	float model_view_tan_half_h_ = 0.0f;  // 0 = frustum gate off
+	float model_view_tan_half_v_ = 0.0f;
 	int32_t model_frame_counter_ = 0;
 	// Retail increments this once per TILE DRAW
 	// [orig: Foliage_ModelWindPhaseCounter @ 0x3162170, bumped in

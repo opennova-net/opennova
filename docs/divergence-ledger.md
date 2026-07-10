@@ -416,7 +416,9 @@ and the 128-LRU cache are **MATCHING** vs retail `PolyTrn_RenderTile @ 0x60df0d`
 | D-FOLIAGE-4 | MODEL stamps full source geometry with cap 21, XZ 0.75/Y 0.5, yaw-only eight-sample ground fit, anchor-derived alpha, duplicate tile draws per qualifying anchor, and per-tile-draw wind counter `[orig: @ 0x600980, 0x601f50, 0x601d90, 0x600f00]`; former shared-shader/shared-cap and FAR ground-patch addenda are retracted | B | **FIXED (corrected 2026-07-09)** — dedicated MODEL host/shader; FAR uses the full-mesh emitter; exact upstream entity visibility rides D-FOLIAGE-7 | foliage IDA parity |
 | D-FOLIAGE-5 | Both tiers bind the model submesh[0] `:fd` bake: wrapped 3×3 alpha kernel and flattened `0x808080` RGB `[orig: Foliage_LoadDefAssets @ 0x601260; Foliage_DrawModelTileSlot @ 0x601d90]` | B | **FIXED (2026-07-08)** — `libs/foliage/fd_bake` + `VegAssets.resolve_slot_fd_textures` | foliage model-tier slice |
 | D-FOLIAGE-6 | MODEL table[16] is a witnessed one-stage pass: T0=`:fd`, flags `0x00440000`, RGB selects c6 diffuse `(0,0,0,1)`, alpha=`T0.a*diffuse.a`; unfogged RGB is black and the texture supplies the silhouette `[orig: @ 0x601260, 0x601d90, 0x600f00]` | C | **FIXED (2026-07-09)** — separate black-alpha `foliage_model.gdshader`, not FAR's lightmap combine | foliage IDA parity |
-| D-FOLIAGE-7 | FAR feed/pool/draw state witnessed AND hosted 2026-07-10 (42.0 traversal collect <=128 `[orig: Terrain_CollectNearFoliagePatches @ 0x603e60]`, bake-once slot pool `[orig: Foliage_UpdateFarCellSlots @ 0x601b30]`, fade knee 20/slope 1-22, high pass under 33 refs 180/8; the jodemo per-entity dispatcher and place_cell view cull deleted). Remaining approximate: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), exact c6.rgb floats (host: 0.5 FF-parity neutral), MODEL sector-entity visibility, blocker registry, the second low wireframe resubmit, retail pool residency count | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) — local placement/emission/shader mechanics are ported; these five upstream feeds remain | terrain/foliage integration |
+| D-FOLIAGE-7 | FAR feed/pool/draw state witnessed AND hosted 2026-07-10 (42.0 traversal collect <=128 `[orig: Terrain_CollectNearFoliagePatches @ 0x603e60]`, bake-once slot pool `[orig: Foliage_UpdateFarCellSlots @ 0x601b30]`, fade knee 20/slope 1-22, high pass under 33 refs 180/8; the jodemo per-entity dispatcher and place_cell view cull deleted). Remaining approximate: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), exact c6.rgb floats (host: 0.5 FF-parity neutral), MODEL sector-entity visibility (the host now frustum-gates anchors; occlusion unhosted), blocker registry, the second low wireframe resubmit, retail pool residency count | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) — local placement/emission/shader mechanics are ported; these five upstream feeds remain | terrain/foliage integration |
+| D-FOLIAGE-8 | FAR cell-key provenance: retail keys pack native sector+offset (wrapped [0,1024), never signed) and seed the per-cell PRNG from the key `[orig: generate_foliage_instances_0 @ 0x5ffe66]`; the host keys FAR cells in Godot render space (z = −native), so per-cell jitter diverges from retail and the mask boundary carries a compensating sign | A | OPEN (minted 2026-07-10) — fix = native-keyed collect + render conversion at emit | trunk 2026-07-10 |
+| D-FOLIAGE-9 | 00TRg painted FAR cells bake instances that do not rasterize (nodes/meshes/materials present and in-frustum; Dvxi5 draws fine), and Dvxi5 far tufts render white-silver (the T1 recompose reads wrong/missing sources on flat-extract loads) | B | OPEN (minted 2026-07-10) — probes committed (foliage_00trg_capture_probe, foliage_sampler_compare_probe); needs a focused render-side session | trunk 2026-07-10 |
 
 Candidate placement is **MATCHING**: FAR's seed/ROL-hash PRNG, gates and
 36-candidate/36-accepted ceiling come from `generate_foliage_instances_0
@@ -589,13 +591,13 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 1 |
 | Terrain | 0 | 0 | 0 | 0 | 4 |
 | Tiles | 0 | 0 | 0 | 0 | 1 |
-| Foliage | 0 | 0 | 1 | 1 | 6 |
+| Foliage | 2 | 0 | 1 | 3 | 6 |
 | Fonts | 0 | 1 | 0 | 1 | 2 |
 | Boot-required resources | 0 | 0 | 0 | 0 | 1 |
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **41** | **13** | **32** | **86** | 27 |
+| **Total** | **43** | **13** | **32** | **88** | 27 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-NET-136, D-NET-64.
 

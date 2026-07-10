@@ -59,9 +59,8 @@ func test_nova_terrain_data_far_mask_pins_match_remap_over_shared_resolve() -> v
 	assert_eq(data.load(), OK, "The production sampler fixture must be a loaded NovaTerrainData.")
 	if not data.is_loaded():
 		return
-	assert_eq(data.load_foliage_indices(), OK, "The fixture's foliagemap must load.")
+	assert_not_null(data.get_foliage_map(), "The fixture's foliagemap must load with the terrain.")
 
-	var defs: Array = []
 	var matches: Array = []
 	for d in data.get_foliage_defs():
 		matches.append(int(d.get_match()))

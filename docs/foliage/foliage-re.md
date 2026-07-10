@@ -55,9 +55,19 @@ deleted with that witness.
 - **Grid and cap**: 36 candidates in a 6×6 grid, three PRNG draws per
   candidate. The loop ends after candidate 35. There is **no accepted-count
   early-out at 21**: an all-accept cell emits 36 complete source meshes.
-- **Range/surface gate**: candidates outside the requested L∞ view range reject;
-  `(1 << slot) & Terrain_GetSurfaceTypeAtFixedPoint(x, -z) @ 0x6066d0` must
-  survive.
+- **Range/foliage-map gate**: candidates outside the requested L∞ view range
+  reject; `(1 << slot) & Foliage_SampleFarMapMask(x, -z) @ 0x6066d0` must
+  survive. **Corrected 2026-07-10** (the 00TRg overcoverage grill): the buffer
+  behind `0x6066d0` (kong-misnamed `Terrain_GetSurfaceTypeAtFixedPoint`) is
+  the **FOLIAGEMAP**, not the charmap — `sub_605AD0` loads the foliagemap PCX
+  ("PolyTrn Foliagemap" `@ 0x605b35`) and remaps every pixel through
+  `sub_5FF4E0`: bit(def) set when the pixel equals ANY of the def's four
+  `match` bytes (record +0x108..+0x10B; TRN corpus authors one — "match with
+  up to four different colors in the foliagemap"); pixel 0 never matches. The
+  FAR accessor addresses the remapped map FLAT (`(x & 1023, -z & 1023)
+  >> (10 − log2 W)`, no sector routing); the MODEL accessor `@ 0x606620`
+  routes the SAME buffer through SectorGrid + the 512-world quadrants. The
+  charmap (walking surfaces) is not a foliage input anywhere.
 - **Path/spacing gate**: `sub_606490(x, -z, 0x20000)` rejects a candidate within
   2.0 world units of a blocker unless def attrib bit 0 (`forceon`) is set.
 
@@ -329,9 +339,11 @@ evict the max-age entry and generate. Draw only when count > 0.
 - **Gates**, in order: per-axis range `|world − entity| ≤ 0x40000`; path
   spacing `sub_606490(x, −z, 0x20000)` skipped on attrib bit 0 `forceon`
   (`byte_2C2608C`, record +532); **foliage-map mask** `(1 << def) &
-  Foliage_SampleFoliageMapMask(x, z) @ 0x606620` — the model tier gates on
-  the FOLIAGEMAP byte (512-quadrant tile layout, resolution-shift
-  downsample), NOT the FAR tier's charmap surface-type fn `@ 0x6066d0`.
+  Foliage_SampleFoliageMapMask(x, z) @ 0x606620` — the model tier routes the
+  match-remapped FOLIAGEMAP through SectorGrid + the 512-world quadrants
+  (resolution-shift downsample). The FAR gate `@ 0x6066d0` reads the SAME
+  remapped buffer flat (corrected 2026-07-10 — its former "charmap
+  surface-type" reading is retracted; see the FAR gate above).
 - **Corners**: k = 0..3 at `(A, B) = (k&1 ? +F : −F, k&2 ? +F : −F)`,
   F = footprint; corner local = `(LA + A·cos − B·sin, LB + A·sin +
   B·cos)`; heights `h[k] = Terrain_SampleHeightBilinear @ 0x6067b0`
@@ -452,7 +464,9 @@ cells, the host bakes them and lets per-node frustum culling drop the draws.
 | D-FOLIAGE-4 | B | **FIXED (corrected 2026-07-09)** | MODEL stamps full source geometry with cap 21, XZ 0.75/Y 0.5, yaw-only eight-sample ground fit, anchor-derived alpha, duplicate tile draws per qualifying anchor, and per-tile-draw wind counter `[orig: @ 0x600980, 0x601f50, 0x601d90, 0x600f00]`. The former shared-shader/shared-cap and FAR ground-patch addenda are retracted; FAR instead uses `far_mesh_emitter`. Exact upstream entity visibility rides D-FOLIAGE-7. |
 | D-FOLIAGE-5 | B | **FIXED (2026-07-08)** | Both tiers bind the model submesh[0] `:fd` bake: wrapped 3×3 alpha kernel and flattened `0x808080` RGB `[orig: Foliage_LoadDefAssets @ 0x601260; Foliage_DrawModelTileSlot @ 0x601d90]`. |
 | D-FOLIAGE-6 | C | **FIXED (2026-07-09)** | MODEL's table[16] pass is now witnessed: one T0=`:fd` stage, flags `0x00440000`, RGB selects c6 diffuse `(0,0,0,1)`, alpha multiplies `T0.a*diffuse.a`. The resulting unfogged RGB is black; `foliage_model.gdshader` ports that pass rather than sharing FAR's lightmap combine. |
-| D-FOLIAGE-7 | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) | The FAR feed (42.0 traversal collect, 128 caps), bake-once slot pool, and per-patch fade/high-low draw state are witnessed AND hosted. Remaining approximations: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), exact c6.rgb lighting-factor floats (host: 0.5 FF-parity neutral), the MODEL sector-entity visibility stream, the blocker registry, the second low wireframe resubmit, and the retail pool residency count (field [37]). |
+| D-FOLIAGE-7 | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) | The FAR feed (42.0 traversal collect, 128 caps), bake-once slot pool, and per-patch fade/high-low draw state are witnessed AND hosted. Remaining approximations: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), exact c6.rgb lighting-factor floats (host: 0.5 FF-parity neutral), the MODEL sector-entity visibility stream (the host now frustum-gates anchors — the occlusion half stays unhosted), the blocker registry, the second low wireframe resubmit, and the retail pool residency count (field [37]). |
+| D-FOLIAGE-8 | A | OPEN (minted 2026-07-10) | FAR cell-key provenance: retail keys pack native sector+offset coordinates (always in the wrapped [0,1024) domain) and the per-cell PRNG seeds from that key; the host's FAR cells are keyed in Godot render space (z = −native, signed near the origin), so per-cell jitter patterns diverge from retail and the mask sampler needs a compensating sign at the slot_mask boundary. Fix direction: native-keyed collect + native placement with a render-space conversion at emit (touches the collect, both height lambdas, and the emitted-vertex Z). |
+| D-FOLIAGE-9 | B | OPEN (minted 2026-07-10) | With the corrected foliagemap gate, painted 00TRg cells bake instances (nodes, meshes, materials all present and in-frustum) that do not rasterize; on Dvxi5 the same path draws. Also the Dvxi5 far tufts render white-silver — the T1 recompose (u_terrain_light/detail chain) reads wrong or missing sources on flat-extract loads. Both need a focused render-side session (probes committed: foliage_00trg_capture_probe, foliage_sampler_compare_probe). |
 
 Candidate placement math carries **no divergence**: seed, PRNG, raw surface
 mask, the FAR 36-candidate/36-accepted ceiling, MODEL's separate 21-accepted

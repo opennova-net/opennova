@@ -456,8 +456,8 @@ func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
 		var center: Vector3 = placement.center
 		var found_boundary_sample := false
 		for sample in _split_surface_samples:
-			if absf(sample.x - center.x) < 0.0001 and absf(sample.y + center.z) < 0.0001:
+			if absf(sample.x - center.x) < 0.0001 and absf(sample.y - center.z) < 0.0001:
 				found_boundary_sample = true
 				break
 		assert_true(found_boundary_sample,
-			"The surface seam receives (world X, -world Z) for an emitted placement.")
+			"The seam receives the witnessed -nativeZ argument — equal to the emitted render Z under the render-keyed host cells (D-FOLIAGE-8).")
