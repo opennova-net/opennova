@@ -75,7 +75,90 @@ var). The JO main-menu screen `STARTUP` has `MUSICVAR=1`, selecting the menumus 
 
 | ID | Ours | Original | Why / consequence |
 | --- | --- | --- | --- |
-| D-MUS-VAR | the runtime pushed the screen `MUSICVAR` to var **index 0** (`menu_shell.gd MUSIC_VAR_INDEX` / `nova_mnu_menu.cpp music_var_index_`), so menumus' `var2` stayed 0 | the host sets the discriminator var the script actually reads (menumus `var2`, gamemus `var1`) | at index 0 the screen `MUSICVAR` was inert; the menu always ran the `var2=0` path (`P1,P2` then a `P0` loop) instead of the screen's `MUSICVAR=1` theme (`P2..P8`). Fixed: `MUSIC_VAR_INDEX = 2`; the shell pushes it synchronously in `setup()` (before the director's first `_process` tick) so the VM starts in the selected section. Mission-driven gamemus `var1` transitions remain a follow-up. |
+| D-MUS-VAR | the runtime pushed the screen `MUSICVAR` to var **index 0** (`menu_shell.gd MUSIC_VAR_INDEX` / `nova_mnu_menu.cpp music_var_index_`), so menumus' `var2` stayed 0 | the host sets the discriminator var the script actually reads (menumus `var2`, gamemus `var1`) | at index 0 the screen `MUSICVAR` was inert; the menu always ran the `var2=0` path (`P1,P2` then a `P0` loop) instead of the screen's `MUSICVAR=1` theme (`P2..P8`). Fixed: `MUSIC_VAR_INDEX = 2`; the shell pushes it synchronously in `setup()` (before the director's first `_process` tick) so the VM starts in the selected section. gamemus `var1` is never driven in retail — see "Game music driving" below. |
+
+## Game music driving — the full host writer map (witnessed 2026-07-09)
+
+How the original drives the gamemus context in-mission. Every host write of the
+music VM globals goes through `AudioVM_SetVariable @ 0x671fa0`
+(`g_audiovm_globals[idx] = val`); the COMPLETE caller set is the five functions
+below (exhaustive xref sweep of 0x671fa0).
+
+### Context lifecycle
+
+- Menu context: opened once at boot — `AudioVM_InitMenuMusicStreaming @ 0x56aa60`
+  calls `AudioVM_OpenMusicContext(g_path_menu_sbf, g_path_menu_bin, "music")` +
+  `AudioVM_SetGlobalVolume` (no initial var).
+- Game context: `Game_StartMission @ 0x524360` at `@ 0x525581` tests
+  `g_napi_np_ctx.is_mp_session_peer`: MP peer →
+  `AudioVM_OpenMusicContext(g_path_game_sbf, g_path_game_bin, "music")` +
+  `AudioVM_SetGlobalVolume` (`@ 0x525589-0x5255a4`); NOT a peer →
+  `AudioVM_StopMusicContext @ 0x671e00` (`@ 0x5255ae`) — retail single-player
+  plays **no front-end music in-mission at all** (the stop also kills the menu
+  context that was still streaming).
+- Var seeding then runs on BOTH branches (`@ 0x5255b3-0x52561b+`):
+  `Var1 = dword_A762E0`, `Var2..Var6 = 0`, `Var7 = 100`, `Var8..Var12 = 0`.
+- `AudioVM_SetGlobalVolume @ 0x671f20` clamps [0,255] and stores `vol << 16`
+  (8.16); the streamer applies `(word_31C37FE * word_31C3802) >> 8` per update
+  (`@ 0x671cef`).
+
+### Var1 is ALWAYS 0 — retail JO's in-game music is one MP loop
+
+`dword_A762E0` (the Var1 seed) has **no writers anywhere in Jointops.exe** (its
+single xref is the seed read `@ 0x5255b3`), so gamemus always enters its
+`var1=0` path: the `Multiplayerstart` section looping track `P0`. The
+`Missionnull`/`Missionwin`/`Missionlose` sections in the shipped gamemus.bin are
+**unreachable dead content** (BHD-era mission-music machinery) — retail JO has
+no win/lose stings and no mission-state music transitions. Do not invent them.
+
+### Per-frame var writes (local player only)
+
+`Entity_UpdateInfantryPlayerBody @ 0x4b40e0`, gated
+`entity == g_local_player_entity` (`@ 0x4b6234`; a second gate `@ 0x4b635b`):
+
+| Var | Value | Witness |
+| --- | --- | --- |
+| Var5 | distance to the nearest threat in whole units + 1 (`sqrt(dpos²) >> 16 + 1`), 0 when none. Threat = `Entity_FindNearestThreat @ 0x4b0990` (ex kong "Entity_SpawnProjectile" — it SEARCHES via `Entity_FindTargets @ 0x53a610`, range `min(fog_dist/2, 40u)`, and on authority side-writes spotted/enemy relation bits) called with `Env_FogDistCurrent` | `@ 0x4b6240-0x4b62a9` |
+| Var6 | that threat's current target is the local player (bool) | `@ 0x4b62b3-0x4b62c9` |
+| Var2 | local-player view pitch | `@ 0x4b62d8` |
+| Var3 / Var4 | body-update stack args (orientation/state; low confidence) | `@ 0x4b62e4 / 0x4b62f0` |
+| Var10 | local-player team | `@ 0x4b62fc` |
+| Var7 | health % = `cur*100/max` (`Entity_GetMaxHealthWithDifficulty @ 0x43b8a0`), clamped 100 | `@ 0x4b6324` |
+| Var8 | `g_scoreGameType` (`dword_24C1970`) — the match's scoring game TYPE, not a dynamic state | `@ 0x4b6335` |
+| Var7/Var8 (alt path) | re-written on a second local-player-gated path (Var7 source low confidence) | `@ 0x4b6366 / 0x4b6374` |
+
+Menu-side writers (menuscript context): `UI_DispatchScreenEvent` stores the
+active screen's `MUSICVAR` to Var2 on every screen event (`@ 0x54eff4`) — this
+fires for in-game menus too; while gamemus runs, the per-frame ViewPitch write
+overwrites it next frame, so pause/resume needs no special music handling.
+Session teardown writes `Var10 = (reason==1 ? 2 : 1)` when not in session
+(`sub_568460 @ 0x56866a`); an expansion/mod reload re-drives Var2
+(`Game_ReloadExpansionAndMods @ 0x55287a`).
+
+### The WAC `music` command and the .bms header `music` field are DEAD in retail JO
+
+- WAC `music N` (command-table entry `@ 0x82e1f0`) = `Sbf_StartEntry @ 0x4ed910`:
+  seeks a **separate** gamemus SBF stream (globals `0xC60Dxx`) to entry N. That
+  stream's opener `Sbf_OpenFile_Gamemus @ 0x4ed6c0` (CreateFileA on
+  `g_path_game_sbf`, header+entry parse) has **zero references** in
+  Jointops.exe — the stream never opens, `dword_C60D80` stays null, and
+  `Sbf_StartEntry` early-returns success. The per-frame pump exists and runs
+  (`Audio_StreamNextChunk @ 0x4ed7d0` from `Audio_UpdateAmbientStream
+  @ 0x4ed9c0`, called in the frame loop `@ 0x5ca348` inside
+  `Render_ProcessMainSceneFrame`) but has nothing to stream;
+  `WacScript_FreeAll @ 0x4f634c` closes the never-opened handle. Net: **the WAC
+  `music` command produces no audio in retail JO** (Delta Force-era leftover).
+  Our WAC VM accordingly leaves the emitted `music` effect unconsumed.
+- No other code path starts gamemus SBF entries, so the `.bms` header `music`
+  field (offset 272) has **no live consumer** in JO — it is vestigial data the
+  mission editor round-trips. `NovaMissionAudio._apply_music` stays a
+  witnessed no-op.
+
+### Divergence D-MUS-SPGATE
+
+| ID | Ours | Original | Why / consequence |
+| --- | --- | --- | --- |
+| D-MUS-SPGATE | the gamemus context opens at mission start in ALL sessions | opens only when `g_napi_np_ctx.is_mp_session_peer`; otherwise `AudioVM_StopMusicContext` (retail SP is music-silent in-mission) | maintainer decision 2026-07-09: our single-player runs as a listen server (ADR 0009/0011/0012), so every session is architecturally an MP session, and silent-SP reads as a defect to players. One-line seam at the open site; retail parity available by gating on the session-peer flag. |
 
 ## SCR container codec — witness map (grill of 2026-06-09)
 
