@@ -26,6 +26,18 @@
 
 ## Cleanup & verification backlog
 
+- [ ] `env_render_unit` STILL fails "color pixels landmarks (t=0)" on the
+      `macos-26-arm64` runner image (2026-07-10, PR #219 round 2) — with the water
+      sine LUT already a committed constant (env #35) and the field checksum
+      passing, i.e. every input byte identical and the downstream chain
+      all-integer. `macos-latest` currently serves a MIXED fleet (round 1 drew
+      macos-15-arm64 and passed the same code), so red/green is a per-run coin
+      flip. Deprioritized by the maintainer 2026-07-10 ("Mac tests are not
+      important to me right now"). Next lead when picked up: reproduce on a
+      macos-26 runner with the intermediate buffers dumped (field -> animated ->
+      kernel -> pixel) to see which integer stage diverges; suspect a new-Xcode
+      codegen issue or an unnoticed UB in the kernel fold.
+
 - [ ] `npruntime_golden_gameplay` FAILS when actually run against the golden capture
       (found 2026-07-04 by re-arming the asset-gated tests; it skip-passed before):
       the test pins the pre-round-14 `0x2B idle default` at record off-14
