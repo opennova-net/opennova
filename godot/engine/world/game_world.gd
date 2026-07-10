@@ -29,6 +29,7 @@ const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd"
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
 const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
+const CollisionDebugView := preload("res://engine/debug/collision_debug_view.gd")
 # The shared interactive-music service script (constants) — the live service is the
 # NovaMusicService autoload, resolved via the tree in _music_service() so the engine
 # layer never names the shell autoload identifier (host-neutral; -s probes and
@@ -36,6 +37,7 @@ const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
 const MusicServiceScript := preload("res://engine/world/nova_music_service.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
+const COLLISION_DEBUG_NAME := "CollisionDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
 
 signal world_loaded()
@@ -91,6 +93,8 @@ var _nw_host
 var _injected_root: NovaResourceRoot = null
 # Debug: draw character bones over the world (F3 overlay's "Show skeletons"). Off by default.
 var _skeleton_debug := false
+# Debug: draw the collision volumes + player capsule (F3 overlay's "Show collision"). Off by default.
+var _collision_debug := false
 # Debug: hide the scattered foliage (F3 overlay's "Hide foliage"). Off by default.
 var _foliage_hidden := false
 var _playable := true
@@ -463,10 +467,14 @@ func unload() -> void:
 	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		container.queue_free()
-	# Skeleton debug overlay, if summoned (harmless to leave, but free for a clean teardown).
+	# Skeleton / collision debug overlays, if summoned (harmless to leave, but free for a
+	# clean teardown).
 	var skel_debug := get_node_or_null(NodePath(SKELETON_DEBUG_NAME))
 	if skel_debug != null:
 		skel_debug.queue_free()
+	var col_debug := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
+	if col_debug != null:
+		col_debug.queue_free()
 	# Net session teardown (no-ops for a normal mission).
 	if _net_event_view != null:
 		_net_event_view.queue_free()
@@ -899,6 +907,31 @@ func _refresh_skeleton_debug() -> void:
 	view.name = SKELETON_DEBUG_NAME
 	add_child(view)
 	view.setup(self)  # walks this GameWorld's subtree for Skeleton3D nodes each frame
+
+
+# --- Collision debug view (F3 overlay's "Show collision") --------------------
+# Build / free a child CollisionDebugView drawing the sim's collision volumes +
+# the local player's capsule test points over the world. Same build/free toggle
+# flow as the skeleton view; the view re-resolves the sim through this
+# GameWorld every frame, so mission reloads never leave it stale.
+
+func set_collision_debug(enabled: bool) -> void:
+	_collision_debug = enabled
+	_refresh_collision_debug()
+
+func is_collision_debug() -> bool:
+	return _collision_debug
+
+func _refresh_collision_debug() -> void:
+	var existing := get_node_or_null(NodePath(COLLISION_DEBUG_NAME))
+	if existing != null:
+		existing.queue_free()
+	if not _collision_debug:
+		return
+	var view := CollisionDebugView.new()
+	view.name = COLLISION_DEBUG_NAME
+	add_child(view)
+	view.setup(self)  # duck-typed get_sim(), re-resolved per frame
 
 
 # --- Hide foliage (F3 overlay's "Hide foliage") ------------------------------
