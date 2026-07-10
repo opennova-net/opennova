@@ -179,6 +179,11 @@ struct InfantryState {
     // reload2); 0 = rifle default, mirror the primary. [orig: read @ 0x4b5dba;
     // parser key 'special_hold' @ 0x543cb7]
     int wpn_hold_kind = 0;
+    // Host-issued identity serial for the resolved held AnimMap. This lives on the
+    // entity (the original's previous-held record is per entity), so a fresh local
+    // player receives the initial switch stamp even when the simulation keeps the
+    // same equipped weapon across a world/player replacement.
+    uint64_t wpn_anim_map_serial = 0;
     // Local-player Flags-bit mirrors, refreshed per tick by the host [orig: the
     // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_weaponScopeActive,
     // Flags|8 from g_binocularsRaised (the case-26 input toggle @ 0x4e064c, forced
@@ -234,6 +239,18 @@ struct InfantryState {
 // IMMEDIATELY — it bypasses the selection commit's locked/emote defer.
 // [orig: WeaponAction_Fire @ 0x542bbc..0x542bea — +0x2C8 = state, +0x2C4 = 0]
 void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind);
+
+// Stamp the witnessed 20-tick arms dip when this entity observes a different resolved
+// held AnimMap identity. Serial 0 means no mounted weapon map. Keeping the observed
+// serial on InfantryState makes the edge per entity rather than simulation-global.
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial);
+
+// Consumer gate for the secondary channel. Equal primary/secondary state ids do NOT
+// disable composition: their playheads are independent. mount_blocks_channel is true
+// for controller/gunner/driver seats; passenger seats retain the on-foot composition.
+// [orig: Flags&0x100 + mount-class tests + PRIMARY state flag 0x40 @0x4b14a7]
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+                                     bool mount_blocks_channel);
 
 } // namespace opennova::world
 

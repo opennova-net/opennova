@@ -1136,10 +1136,10 @@ clip-end deferred promotion via the new `IRootMotionSource::clip_length_ticks`, 
 root-motion-discarding playhead advance; ctest `infantry`
 `test_player_weapon_channel`); the refill's window stamp on `NovaSimulation`'s FSM
 `reload_applied` event; the typed-record exposure (`PlayerWeaponView.body_anim_key/
-body_anim_phase` — key empty when the channel mirrors the primary, exact for us
-without D-INF-1 blend windows, or when the §14.8.6 gate is off); the mask-bone splice
+body_anim_phase` — same-state channels remain populated because their playheads are
+independent; key empty only when the §14.8.6 gate is off); the mask-bone splice
 in `libs/anim` (`kWeaponChannelMaskBones`) + `NovaSkeletalAnim::splice_weapon_channel`
-composed INSIDE `eval_pose_overlay` in the witnessed order;
+composed in WORLD-rotation space inside `eval_pose_overlay` in the witnessed order;
 `NovaObjectModel.set_weapon_channel` and `LocalPlayerHost._update_avatar` consumption.
 Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, ONED PIE, JOX 05TR, F4 + R
 through the real input path, completion waited by state): mid-reload

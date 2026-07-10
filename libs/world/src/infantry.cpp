@@ -528,6 +528,18 @@ void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
     inf.wpn_deferred = 0;
 }
 
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial) {
+    if (anim_map_serial == 0 || inf.wpn_anim_map_serial == anim_map_serial) return;
+    inf.wpn_anim_map_serial = anim_map_serial;
+    inf.arms_dip_ticks = 20;
+}
+
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+                                     bool mount_blocks_channel) {
+    return inf.active && weapon_in_hands && !mount_blocks_channel &&
+           (infantry_anim_flags(inf.anim_state) & 0x40u) != 0;
+}
+
 // ----------------------------------------------------------------------------
 // Slope sampling + slide (every 8 ticks). [orig: 0x4b9910 dump 930-1000]
 // ----------------------------------------------------------------------------
@@ -654,15 +666,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         inf.jump_requested = false;
         infantry_select(e);
-        // The secondary (weapon) channel runs beside the primary selection — local
-        // player slice; NPC/remote threading rides D-NET-117. [orig: the same body
-        // updater drives both pairs @0x4b40e0; witness §14.8]
-        infantry_weapon_channel(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
         infantry_select(e);
     }
+
+    // The secondary (weapon) channel and its arms/head-look decay block run on every
+    // local-player body tick, including death ticks. The primary death state disables
+    // rendering through its flag gate, but the independent playhead/timers do not
+    // freeze on the corpse. NPC/remote threading rides D-NET-117.
+    // [orig: the same body updater drives both pairs @0x4b40e0; witness §14.8]
+    if (inf.is_local_player) infantry_weapon_channel(e);
 
     // 3. Advance the selected playing clip and fetch its root motion (every tick).
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;

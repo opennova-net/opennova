@@ -551,8 +551,8 @@ func _update_avatar(pos: Vector3) -> void:
 	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
 	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
 	# The upper-body weapon channel: the sim's secondary-channel clip (reload etc.) posed
-	# at its own playhead onto the mask bones, composed under the aim overlay. Empty key =
-	# the channel mirrors locomotion (identity) or the gate is off — cleared either way.
+	# at its own playhead onto the mask bones, composed under the aim overlay. Equal
+	# state ids still carry the secondary playhead; an empty key means the gate is off.
 	# [orig: producer @0x4b5dad, override @0x4b14db; world-wac-ai-re.md §14.8]
 	if _avatar.has_method("set_weapon_channel"):
 		if _weapon_view != null:

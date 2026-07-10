@@ -65,6 +65,18 @@ opennova::world::SeatType seat_type_from_variant(int value) {
 	}
 }
 
+bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
+	if (!entity.mounted) return false;
+	switch (entity.mount_type) {
+		case opennova::world::SeatType::Controller:
+		case opennova::world::SeatType::Gunner:
+		case opennova::world::SeatType::Driver:
+			return true;
+		default:
+			return false; // passenger seats retain the on-foot upper-body channel
+	}
+}
+
 int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &item_db) {
 	if (item_id == opennova::world::kPlayerInfantryTypeId && item_db.is_valid() &&
 	    item_db->has_item(kPlayerVisualItemId)) {
@@ -980,6 +992,10 @@ void NovaSimulation::apply_player_input_pre_tick() {
 	// (Flags|0x10 from g_weaponScopeActive; the binoculars bit stays false until a host
 	// binoculars input exists). [orig: @ 0x4b5d7f..0x4b5dc0]
 	if (p->inf.active) {
+		if (weapon_active_) {
+			opennova::world::infantry_weapon_switch_stamp(
+					p->inf, weapon_anim_map_serial_);
+		}
 		p->inf.wpn_hold_kind = weapon_active_ ? weapon_hold_kind_ : 0;
 		p->inf.scope_raised = weapon_active_ && player_view_.scope_engaged;
 	}
@@ -1218,16 +1234,16 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
 	weapon_hold_kind_ = int(int64_t(p_def.get("special_hold", 0)));
 	weapon_attack_kind_ = int(int64_t(p_def.get("attack_anim", 0)));
-	// A held-weapon CHANGE stamps the 20-tick arms-dip window (the original compares the
-	// previous held index's AdmDefs record against the current one each body tick; our
-	// mount edge is that comparison) [orig: @ 0x4b46d0..0x4b46f5 -> byte +0x371 = 20].
-	const String def_name = p_def.get("name", String());
-	if (def_name != weapon_def_name_) {
-		weapon_def_name_ = def_name;
-		if (world_ && world_->ai && world_->cached.local_player.valid()) {
-			AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
-			if (p && p->inf.active) p->inf.arms_dip_ticks = 20;
-		}
+	// A held-AnimMap CHANGE advances a host serial; the local InfantryState observes
+	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
+	// resolved map identity, not the weapon name: two weapon records sharing one
+	// AnimMap do NOT dip. A fresh mount advances even when the map key is empty.
+	// [orig: previous/current AdmDefs record +0 comparison @0x4b46d0..0x4b4701].
+	const String anim_map = p_def.get("animadm", String());
+	if (!weapon_active_ || anim_map.nocasecmp_to(weapon_anim_map_) != 0) {
+		weapon_anim_map_ = anim_map;
+		++weapon_anim_map_serial_;
+		if (weapon_anim_map_serial_ == 0) ++weapon_anim_map_serial_; // reserve 0 = none
 	}
 	const int clipsize = int(p_def.get("clipsize", 0));
 	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
@@ -1250,7 +1266,7 @@ void NovaSimulation::clear_local_player_weapon() {
 	player_view_.scope_engaged = false;
 	weapon_hold_kind_ = 0;
 	weapon_attack_kind_ = 0;
-	weapon_def_name_ = String();
+	weapon_anim_map_ = String();
 }
 
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
@@ -1387,16 +1403,21 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["reserve"] = weapon_slot_.reserve;
 	out["kick"] = static_cast<int>(weapon_slot_.kick);
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
-	// + its own playhead for the host's mask-bone override. Empty key when the channel
-	// mirrors the primary (identity without blend windows — D-INF-1) or when the
-	// override gate is off (weapon in hands + primary state flag 0x40)
+	// + its own playhead for the host's mask-bone override. The key remains populated
+	// when the state id matches the primary because the two playheads are independent.
+	// Empty means the override gate is off (weapon in hands + allowed mount class +
+	// primary state flag 0x40).
 	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
 	out["body_anim_key"] = String();
 	out["body_anim_phase"] = 0;
 	if (world_ && world_->ai && world_->cached.local_player.valid()) {
 		const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
-		if (p && p->inf.active && p->inf.wpn_state != p->inf.anim_state &&
-				(opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0) {
+		const opennova::world::Entity *entity =
+				world_->registry.get(world_->cached.local_player);
+		const bool blocked_mount =
+				entity != nullptr && mount_blocks_weapon_channel(*entity);
+		if (p && entity && opennova::world::infantry_weapon_channel_visible(
+					p->inf, weapon_active_, blocked_mount)) {
 			out["body_anim_key"] = infantry_anim_key(p->inf.wpn_state);
 			out["body_anim_phase"] = p->inf.wpn_clip_phase;
 		}

@@ -508,10 +508,11 @@ PackedInt32Array NovaSkeletalAnim::get_overlay_classes() const {
 
 void NovaSkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
 		double p_wpn_playhead_seconds) const {
-	// Hard override of the mask bones' local rotations with the weapon channel's clip at
-	// its own playhead; the primary pose keeps every origin (the shared skeleton owns the
-	// pivots, and the re-anchor is translation-only there). [orig: mask @0x4b14db, second
-	// AnimChannel_ComputeBoneMatrices @0x4b16a7; world-wac-ai-re.md §14.8.6]
+	// Hard override of the mask bones' WORLD rotations with the weapon channel's clip at
+	// its own playhead, then re-localize the complete mixed hierarchy. The primary pose
+	// keeps every local origin (the shared skeleton/model pivots own translation).
+	// [orig: mask @0x4b14db, second AnimChannel_ComputeBoneMatrices @0x4b16a7;
+	// world-wac-ai-re.md §14.8.6]
 	if (p_wpn_key.is_empty() || find_clip(p_wpn_key) == nullptr) {
 		return;
 	}
@@ -520,7 +521,25 @@ void NovaSkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_
 	if (wpose.size() != n || static_cast<size_t>(n) != bones_.size()) {
 		return;
 	}
+	std::vector<int> parents(static_cast<size_t>(n));
+	std::vector<uint8_t> mask(static_cast<size_t>(n), 0);
+	std::vector<opennova::anim::Quat> primary_rot(static_cast<size_t>(n));
+	std::vector<opennova::anim::Quat> weapon_rot(static_cast<size_t>(n));
+	bool any_masked = false;
 	for (int i = 0; i < n; ++i) {
+		const Transform3D base = p_pose[i];
+		const Transform3D w = wpose[i];
+		const Quaternion bq = base.basis.get_rotation_quaternion();
+		const Quaternion wq = w.basis.get_rotation_quaternion();
+		parents[static_cast<size_t>(i)] = bones_[static_cast<size_t>(i)].parent_index;
+		primary_rot[static_cast<size_t>(i)] = {
+			static_cast<float>(bq.w), static_cast<float>(bq.x),
+			static_cast<float>(bq.y), static_cast<float>(bq.z)
+		};
+		weapon_rot[static_cast<size_t>(i)] = {
+			static_cast<float>(wq.w), static_cast<float>(wq.x),
+			static_cast<float>(wq.y), static_cast<float>(wq.z)
+		};
 		// BN## tag -> model bone index, the same parse get_overlay_classes trusts.
 		const std::string &bn = bones_[static_cast<size_t>(i)].name;
 		if (bn.size() < 4 || (bn[0] != 'B' && bn[0] != 'b') || (bn[1] != 'N' && bn[1] != 'n') ||
@@ -528,12 +547,20 @@ void NovaSkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_
 			continue;
 		}
 		const int model_index = (bn[2] - '0') * 10 + (bn[3] - '0') - 1;
-		if (!opennova::anim::weapon_channel_masks_bone(model_index)) {
-			continue;
+		if (opennova::anim::weapon_channel_masks_bone(model_index)) {
+			mask[static_cast<size_t>(i)] = 1;
+			any_masked = true;
 		}
+	}
+	if (!any_masked) {
+		return;
+	}
+	opennova::anim::splice_weapon_channel_rotations(
+			parents, mask.data(), weapon_rot, primary_rot);
+	for (int i = 0; i < n; ++i) {
 		const Transform3D base = p_pose[i];
-		const Transform3D w = wpose[i];
-		p_pose[i] = Transform3D(w.basis, base.origin);
+		const opennova::anim::Quat &q = primary_rot[static_cast<size_t>(i)];
+		p_pose[i] = Transform3D(Basis(Quaternion(q.x, q.y, q.z, q.w)), base.origin);
 	}
 }
 

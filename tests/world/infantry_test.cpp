@@ -520,6 +520,70 @@ void test_player_arms_dip() {
     CHECK(opennova::io::bam_abs(e->inf.head_look_decay) <= 8);
 }
 
+// The dual-channel body update and arms/HLD block continue on dead local-player ticks.
+// The death primary disables composition via its flags, but timers must not freeze a
+// persistent arm-pitch offset on the corpse and the secondary playhead still advances.
+void test_player_weapon_channel_ticks_while_dead() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kDeathFire, anim_state::kReload};
+    src.lengths[anim_state::kReload] = 20;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 0;
+    e->inf.anim_state = anim_state::kIdle;
+    e->inf.wpn_state = anim_state::kReload;
+    e->inf.wpn_clip_phase = 4;
+    e->inf.reload_anim_ticks = 3;
+    e->inf.arms_dip_ticks = 4;
+    e->inf.head_look_decay = -1000;
+
+    run_ticks(ai, w, 1, 2);
+    CHECK(e->inf.anim_state == anim_state::kDeathFire);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_clip_phase == 5);
+    CHECK(e->inf.reload_anim_ticks == 2);
+    CHECK(e->inf.arms_dip_ticks == 2);
+    CHECK(e->inf.head_look_decay != -1000);
+    CHECK(!infantry_weapon_channel_visible(e->inf, true, false));
+}
+
+void test_weapon_channel_consumer_gate_and_switch_identity() {
+    InfantryState inf;
+    inf.active = true;
+    inf.anim_state = anim_state::kIdle; // flags 0x48: on-foot composition enabled
+    inf.wpn_state = anim_state::kIdle;  // same state, but an independent playhead
+    CHECK(infantry_weapon_channel_visible(inf, true, false));
+    CHECK(!infantry_weapon_channel_visible(inf, false, false));
+    CHECK(!infantry_weapon_channel_visible(inf, true, true));
+    inf.anim_state = anim_state::kWalkProneForward; // flags 0x603: no 0x40
+    CHECK(!infantry_weapon_channel_visible(inf, true, false));
+
+    // The observed AnimMap serial is per entity: a repeated map does not restamp,
+    // a changed map does, and a newly spawned entity sees the current map as new.
+    InfantryState first;
+    infantry_weapon_switch_stamp(first, 7);
+    CHECK(first.wpn_anim_map_serial == 7);
+    CHECK(first.arms_dip_ticks == 20);
+    first.arms_dip_ticks = 5;
+    infantry_weapon_switch_stamp(first, 7);
+    CHECK(first.arms_dip_ticks == 5);
+    infantry_weapon_switch_stamp(first, 8);
+    CHECK(first.wpn_anim_map_serial == 8);
+    CHECK(first.arms_dip_ticks == 20);
+
+    InfantryState replacement;
+    infantry_weapon_switch_stamp(replacement, 8);
+    CHECK(replacement.wpn_anim_map_serial == 8);
+    CHECK(replacement.arms_dip_ticks == 20);
+    replacement.arms_dip_ticks = 3;
+    infantry_weapon_switch_stamp(replacement, 0);
+    CHECK(replacement.wpn_anim_map_serial == 8);
+    CHECK(replacement.arms_dip_ticks == 3);
+}
+
 } // namespace
 
 int main() {
@@ -1356,6 +1420,8 @@ int main() {
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();
     test_player_arms_dip();
+    test_player_weapon_channel_ticks_while_dead();
+    test_weapon_channel_consumer_gate_and_switch_identity();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

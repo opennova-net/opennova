@@ -132,10 +132,10 @@ public:
 	Array eval_pose(const String &p_key, double p_playhead_seconds) const;
 
 	// The upper-body WEAPON channel: sample p_wpn_key at ITS OWN playhead and hard-override
-	// the mask bones' local rotations (clavicles/arms/forearms/neck/head/hands — the
-	// anim::kWeaponChannelMaskBones set by BN## index) in an already-evaluated pose.
-	// Origins keep the primary pose's (the shared skeleton owns the pivots). No-op when
-	// the key is unknown or sizes mismatch. [orig: the mask override in
+	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
+	// anim::kWeaponChannelMaskBones set by BN## index), then re-localize the complete
+	// mixed hierarchy. Origins keep the primary pose's (the shared skeleton owns the
+	// pivots). No-op when the key is unknown or sizes mismatch. [orig: the mask override in
 	// Entity_BuildBoneTransformMatrices @0x4b14db/@0x4b16a7; world-wac-ai-re.md §14.8.6]
 	void splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
 			double p_wpn_playhead_seconds) const;
