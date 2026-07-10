@@ -109,6 +109,16 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 			_stats.markers_resolved += 1
 			_stats.voices += players.size()
 
+	# Silence here has historically gone unnoticed (a bare stats print) — warn on
+	# the two states that mean "no ambience will play" so they surface in logs.
+	if int(_stats.banks_loaded) == 0:
+		push_warning("NovaMissionAudio: no sound banks loaded (probed %s.LWF, expansion, %s) — mission ambience will be silent" % [
+			mission_name.get_file().get_basename(), ", ".join(GLOBAL_LWFS)])
+	elif int(_stats.markers_total) > 0 and int(_stats.markers_resolved) == 0:
+		push_warning("NovaMissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent" % [
+			int(_stats.markers_total),
+			"missing" if _item_db == null else "loaded"])
+
 	_apply_reverb(int(mission.get_info().get("reverb", 0)))
 	_apply_music(int(mission.get_info().get("music", 0)))
 	return _stats
