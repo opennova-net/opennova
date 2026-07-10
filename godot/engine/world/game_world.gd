@@ -793,6 +793,14 @@ func local_player_view() -> PlayerLocalView:
 	return PlayerLocalView.from_view_dict(sim.get_local_player_view())
 
 
+## The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX, clipsize, name),
+## decoded from NovaWeaponDatabase's transport dict at this edge (ADR 0017) — the HUD
+## reads it per frame, mirroring the original HUD info struct's weapon-def pointer
+## [orig: HUD_BuildEntityInfo @0x4b8561 -> hudInfo+552]. Null until a weapon resolves.
+func local_player_hud_weapon_def() -> PlayerHudWeaponDef:
+	return PlayerHudWeaponDef.from_weapon_dict(_local_weapon_dict)
+
+
 ## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
 ## weapon FSM is installed.
 func local_player_weapon_view() -> PlayerWeaponView:

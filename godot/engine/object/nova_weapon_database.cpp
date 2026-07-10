@@ -105,6 +105,18 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.scope_max_mag = e.scope_max_mag;
 	w.special_hold = e.special_hold;
 	w.attack_anim = e.attack_anim;
+	for (int k = 0; k < 6; ++k) {
+		w.error[k] = e.error[k];
+	}
+	w.hudclipgfx_texture = String(e.hudclipgfx_texture);
+	w.hudclipgfx_offset[0] = e.hudclipgfx_offset[0];
+	w.hudclipgfx_offset[1] = e.hudclipgfx_offset[1];
+	w.hudrndgfx_texture = String(e.hudrndgfx_texture);
+	w.hudrndgfx_offset[0] = e.hudrndgfx_offset[0];
+	w.hudrndgfx_offset[1] = e.hudrndgfx_offset[1];
+	for (int k = 0; k < 3; ++k) {
+		w.hudrndgfx_layout[k] = e.hudrndgfx_layout[k];
+	}
 	for (size_t a = 0; a < e.actions_count; ++a) {
 		const DefWeaponAction &row = e.actions[a];
 		Dictionary act;
@@ -174,6 +186,16 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	// AdmDefs +0xA4/+0xA8; world-wac-ai-re.md section 14.8].
 	d["special_hold"] = w.special_hold;
 	d["attack_anim"] = w.attack_anim;
+	PackedFloat32Array error;
+	for (int k = 0; k < 6; ++k) {
+		error.push_back(w.error[k]);
+	}
+	d["error"] = error; // degrees; rows hip P/C/S then scoped P/C/S [orig: weapon+0xB0]
+	d["hudclipgfx_texture"] = w.hudclipgfx_texture;
+	d["hudclipgfx_offset"] = Vector2i(w.hudclipgfx_offset[0], w.hudclipgfx_offset[1]);
+	d["hudrndgfx_texture"] = w.hudrndgfx_texture;
+	d["hudrndgfx_offset"] = Vector2i(w.hudrndgfx_offset[0], w.hudrndgfx_offset[1]);
+	d["hudrndgfx_layout"] = Vector3i(w.hudrndgfx_layout[0], w.hudrndgfx_layout[1], w.hudrndgfx_layout[2]);
 	d["actions"] = w.actions.duplicate(true);
 	return d;
 }

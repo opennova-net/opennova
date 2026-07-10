@@ -278,10 +278,14 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-PLAYERINFO-10 | Voice preview (`VOICE_%d` via `menu.lwf`) host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-11 | Loadout ammo combos + weight readout remaining (weapon lists implemented; the weight-calc CORE now ported to `libs/def` `def_loadout_weight`/`def_encumbrance_class` `[orig: @ 0x55f1f0; @ 0x55f480]`, unit-tested — the residual is the ammo combos + the UI host wiring, which need the Godot runtime) | A | OPEN (partial) | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals host wiring is the next phase | A | WITNESSED-READY-DEFERRED | PAR-UI |
-| D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB `draw_minimap_compass_overlay` + oscarmike model it as a compass) | A | OPEN (HUD port in flight) | PAR-UI |
-| D-HUD-2 | Stance widget = frame-swap + fade; heading/north is a *separate* top-down radar (do not port a rotating ring) | A | OPEN (port in flight) + NEEDS-RE (radar) | PAR-UI / research starter |
-| D-HUD-3 | HUD design space is fixed 1024×768, scaled round-to-nearest (`Viewport_ScaleToVirtualCoords`) | A | OPEN (port in flight) | PAR-UI |
-| D-HUD-4 | Health-bar fill WIDTH uses the capped `+92` ratio; fill COLOR uses an uncapped recomputed ratio — the port matches both reads | A | OPEN (port in flight) | PAR-UI |
+| D-HUD-1 | Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB `draw_minimap_compass_overlay` + oscarmike model it as a compass) — the cross-fade ported 2026-07-09 (`hud_stance.gd`/`hud_fade.gd`); the IDB rename is still a held proposal | A | FIXED (2026-07-09 port; the IDB rename proposal stays held) | PAR-UI |
+| D-HUD-2 | Stance widget = frame-swap + fade; heading/north is a *separate* top-down radar (do not port a rotating ring) | A | NEEDS-RE (the radar; the stance leg is fixed by the 2026-07-09 port) | PAR-UI / research starter |
+| D-HUD-3 | HUD design space is fixed 1024×768, scaled round-to-nearest (`Viewport_ScaleToVirtualCoords`) | A | FIXED (`hud_layout.gd`) | PAR-UI |
+| D-HUD-4 | Health-bar fill WIDTH uses the capped `+92` ratio; fill COLOR uses an uncapped recomputed ratio — the port matches both reads | A | FIXED | PAR-UI |
+| D-HUD-5 | Clip-indicator flash restamp keys on (`round_type`, reserve) — the original keys (ammo class `def+220`, reserve, pool id `def+216`); same transitions under the single-pool weapon model (D-WPN-2) | A | OPEN (revisit with per-class pools) | PAR-UI |
+| D-HUD-6 | Mission triggered text ported as a timed message-line feed (930-tick life, ≥186 stagger) at the `HUDCHATTEXT` anchor — the original rides the full chat pipeline (channel ring buffers + a geometry table whose writer is unwitnessed) | A | OPEN (chat-pipeline follow-up) | PAR-UI / research starter |
+| D-HUD-7 | Crosshair spread omits the recoil accumulators (`player+0x380/+0x384 >> 7`) — the runtime does not surface them yet; ERROR-row term ported exactly | A | OPEN (needs the recoil write-side witness) | PAR-UI / research starter |
+| D-HUD-8 | Crosshair color modulates the texture — the original writes it to the strip's specular channel (blend stage in the unwitnessed HUD shader pass); identical for the default white | B | OPEN (witness the texture-stage state) | PAR-UI |
 
 ### Format ports — mission `.mis`, LW `.3di`, particles `.ptl`
 
@@ -576,7 +580,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 3 |
 | World / AI + events | 12 | 1 | 6 | 19 | 1 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 1 | 5 | 14 | 0 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 2 | 5 | 15 | 3 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 | 0 |
@@ -590,9 +594,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **41** | **12** | **32** | **85** | 23 |
+| **Total** | **41** | **13** | **32** | **86** | 26 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-HUD-2, D-NET-136, D-NET-64.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-NET-136, D-NET-64.
 
 <!-- scoreboard:generated:end -->
 
