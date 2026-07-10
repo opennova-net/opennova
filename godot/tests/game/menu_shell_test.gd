@@ -405,7 +405,7 @@ func test_music_resolution_prefers_expansion_pair_then_base() -> void:
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
 		"the menu bank streams loose from the expansion folder")
 	var game_pair: MusicPair = host.resolve_music_pair("G", "gamemus")
-	assert_eq(String(game_pair.script), "gamemus.bin",
+	assert_eq(String(game_pair.script_name), "gamemus.bin",
 		"incomplete G stem -> whole base pair (halves never mix across stems)")
 	root.clear()
 	_rm_music_exp_dir(dir)
@@ -441,7 +441,7 @@ func test_music_incomplete_expansion_bank_only_falls_back() -> void:
 	add_child_autofree(host)
 	host.setup(root)
 	var pair: MusicPair = host.resolve_music_pair("G", "gamemus")
-	assert_eq(String(pair.script), "gamemus.bin",
+	assert_eq(String(pair.script_name), "gamemus.bin",
 		"bank-only G stem (no G<n>.bin) -> base script, not a cross-stem mix")
 	assert_true(String(pair.bank).ends_with("gamemus.sbf"),
 		"bank-only G stem -> base bank resolved loose from the root")

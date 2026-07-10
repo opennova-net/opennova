@@ -75,10 +75,10 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Music
 		var bank_path: String = root.get_root_dir().path_join("expansion").path_join(exp_name).path_join(stem + ".sbf")
 		if FileAccess.file_exists(bank_path) and root.has_file(stem + ".bin"):
 			pair.bank = bank_path
-			pair.script = stem + ".bin"
+			pair.script_name = stem + ".bin"
 			return pair
 	pair.bank = String(root.resolve_file(base_stem + ".sbf"))
-	pair.script = base_stem + ".bin" if root.has_file(base_stem + ".bin") else ""
+	pair.script_name = base_stem + ".bin" if root.has_file(base_stem + ".bin") else ""
 	return pair
 
 
@@ -92,7 +92,7 @@ func open_menu_context(root, script_override := "", bank_override := "") -> bool
 	var bank_path := pair.bank
 	if not bank_override.is_empty() and root != null:
 		bank_path = String(root.resolve_file(bank_override))  # explicit override wins
-	return _open_context("menu", root, bank_path, pair.script, script_override)
+	return _open_context("menu", root, bank_path, pair.script_name, script_override)
 
 
 ## Open the GAME music context at mission start. The original opens it only for
@@ -107,7 +107,7 @@ func open_menu_context(root, script_override := "", bank_override := "") -> bool
 ## Var2..Var6 = 0, Var7 = 100 (health %), Var8..Var12 = 0.
 func open_game_context(root) -> bool:
 	var pair := resolve_music_pair(root, "G", "gamemus")
-	var opened := _open_context("game", root, pair.bank, pair.script, "")
+	var opened := _open_context("game", root, pair.bank, pair.script_name, "")
 	if opened:
 		for idx in range(SEEDED_VARS_FIRST, SEEDED_VARS_LAST + 1):
 			_director.set_var(idx, 100 if idx == VAR_HEALTH_PCT else 0)
