@@ -22,8 +22,6 @@ func before_each() -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2.0, 6.0, 2.0)
 
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 0
 	_dispatcher.foliage_defs = [def]
 	_dispatcher.slot_meshes = [mesh]
 	_dispatcher.height_sampler = Callable(self, "_sample_height")
@@ -55,7 +53,7 @@ func _expected_alpha_ref(anchor: Vector3) -> int:
 func _model_draw_nodes() -> Array:
 	var out: Array = []
 	for child in _dispatcher.get_children():
-		if child is MultiMeshInstance3D and String(child.name).begins_with("FoliageModelSlot"):
+		if child is MultiMeshInstance3D and child.visible 				and String(child.name).begins_with("FoliageModelDraw"):
 			out.push_back(child)
 	return out
 

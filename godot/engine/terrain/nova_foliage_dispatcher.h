@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -13,12 +14,11 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
-#include <foliage/dispatcher.h>
 #include <foliage/model_dispatcher.h>
+#include <foliage/placement.h>
 
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -29,34 +29,37 @@ namespace godot {
 class Image;
 class NovaTerrainData;
 
-// Foliage adapter for the shared engine-spec placement/dispatcher core.
-// Renders BOTH witnessed tiers (docs/foliage/foliage-re.md):
+// Foliage adapter for the shared engine-spec placement core. Renders the two
+// witnessed retail tiers, and only those (docs/foliage/foliage-re.md):
 //
-//   - FAR tier: up to 36 placements per cell, each receiving a complete copy
-//     of the def source mesh at XZ scale 1/Y scale .5. Every transformed
-//     source vertex samples terrain independently and carries source-Y wind
-//     weight in red [orig: generate_foliage_instances_0 @ 0x5ffdd0].
+//   - FAR tier: the near-camera carpet. The terrain feed collects 16u leaf
+//     cells whose clamped-AABB 3D distance from the camera is <= 42.0
+//     (<= 128 per frame) [orig: Terrain_TraverseQuadtreeNode @ 0x60905c ->
+//     Terrain_CollectNearFoliagePatches @ 0x603e60]. Each new cell is baked
+//     ONCE into a persistent per-slot pool - up to 36 placements, each a
+//     complete copy of the def source mesh at XZ scale 1/Y scale .5, terrain
+//     sampled under every transformed vertex, source-Y wind weight in
+//     COLOR.r [orig: Foliage_UpdateFarCellSlots @ 0x601b30;
+//     generate_foliage_instances_0 @ 0x5ffdd0]. Per frame the pool only
+//     toggles visibility and refreshes the witnessed per-cell draw params:
+//     fade alpha 1 through distance 20 then 1-(d-20)/22, alpha-test ref 180
+//     under 33 else 8 [orig: render_terrain_lightmaps @ 0x60a171..0x60a53b].
+//     Godot's per-node frustum culling stands in for the traversal's frustum
+//     gate; the host enumerates the 42u disc directly (D-FOLIAGE-7).
 //   - NEAR/MODEL tier: full 3DI geometry stamped in clusters around anchors
-//     (the host equivalent of visible sector entities), via the libs
-//     ModelDispatcher [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50;
-//     Foliage_UpdateModelTiles @ 0x601f50;
+//     (the host equivalent of visible sector entities >= 38.0 view depth),
+//     via the libs ModelDispatcher [orig: Terrain_RenderSectorEntitiesBySide
+//     @ 0x5c7d50; Foliage_UpdateModelTiles @ 0x601f50;
 //     Foliage_GenerateModelTileInstances @ 0x600980].
 //
-// FAR coverage:
-//   - ENGINE_CENTERS gives each visible center independent per-slot
-//     `opennova::foliage::Dispatcher` state and
-//     `place_cell` for the original quadrant/LRU/stagger logic.
-//   - CELL_GRID is a camera/editor coverage algorithm that scans a wider 16u
-//     cell grid while still using the same per-cell placement kernel.
+// There is no camera-carpet grid, per-center quadrant walk, or any other
+// non-retail coverage algorithm here: the jodemo-era per-entity dispatcher
+// (sub_5C1940) was removed when the retail slot-pool architecture was
+// witnessed. Editor previews run this same path.
 class NovaFoliageDispatcher : public Node3D {
 	GDCLASS(NovaFoliageDispatcher, Node3D)
 
 public:
-	enum DispatchAlgorithm {
-		DISPATCH_ALGORITHM_ENGINE_CENTERS = 0,
-		DISPATCH_ALGORITHM_CELL_GRID = 1,
-	};
-
 	NovaFoliageDispatcher();
 	~NovaFoliageDispatcher();
 
@@ -108,7 +111,7 @@ public:
 
 	// Callable receiving (world_x: float, world_z: float) -> int. Returns the
 	// foliage-map palette index at that world position (0 means empty).
-// Runtime analogue: Foliage_SampleFoliageMapMask @ 0x606620.
+	// Runtime analogue: Foliage_SampleFoliageMapMask @ 0x606620. MODEL only.
 	void set_foliage_sampler(const Callable &p_sampler);
 	Callable get_foliage_sampler() const;
 
@@ -119,10 +122,10 @@ public:
 	void set_surface_sampler(const Callable &p_sampler);
 	Callable get_surface_sampler() const;
 
-	// Direct runtime fast path. When set, runtime dispatch uses
-// NovaTerrainData height, raw surface-mask, and foliage-map queries directly
-// and skips Callable/Variant boxing. Editor leaves this unset so
-	// the live-sculpt-aware Callable path still runs.
+	// Direct runtime fast path. When set, dispatch uses NovaTerrainData
+	// height, raw surface-mask, and foliage-map queries directly and skips
+	// Callable/Variant boxing. Editor leaves this unset so the
+	// live-sculpt-aware Callable path still runs.
 	void set_terrain_data(const Ref<NovaTerrainData> &p_data);
 	Ref<NovaTerrainData> get_terrain_data() const;
 
@@ -130,56 +133,18 @@ public:
 	// editor uses it while placement remains on live-sculpt Callable samplers;
 	// runtime normally obtains the same texture from terrain_data.
 	void set_colormap_source(const Ref<NovaTerrainData> &p_data);
-	// Legacy serialized compatibility. The former CPU terrain-tint payload was
-	// disproven; retail overwrites FAR COLOR.r with source-Y wind weight.
-	void set_terrain_tint(const Color &p_tint);
-	Color get_terrain_tint() const;
 	Ref<NovaTerrainData> get_colormap_source() const;
-
-	// Configuration ---------------------------------------------------------
-
-	// Coverage algorithm. ENGINE_CENTERS is the IDA-matched per-center path;
-	// CELL_GRID scans a wider 16u cell grid around the supplied camera/preview center.
-	void set_dispatch_algorithm(int p_algorithm);
-	int get_dispatch_algorithm() const;
-
-	// Cell-grid algorithm radius in 16u cells.
-	void set_cell_grid_radius(int p_radius);
-	int get_cell_grid_radius() const;
-
-	// Compatibility alias for older editor code/scenes.
-	void set_preview_cell_radius(int p_radius);
-	int get_preview_cell_radius() const;
-
-// Cell-grid cache capacity. ENGINE_CENTERS uses an independent engine-spec
-// 128-entry LRU for each active (center, slot) pair.
-	void set_lru_capacity(int p_capacity);
-	int get_lru_capacity() const;
-
-	// Legacy serialized compatibility; ignored by retail-shaped FAR emission.
-	void set_quad_half_width(float p_width);
-	float get_quad_half_width() const;
-
-	// Legacy serialized compatibility; retail uses no extra terrain lift.
-	void set_surface_offset(float p_offset);
-	float get_surface_offset() const;
-
-	void set_engine_view_radius_fixed(int p_radius);
-	int get_engine_view_radius_fixed() const;
 
 	// Main API --------------------------------------------------------------
 
-	// Dispatch around `centre` using the configured coverage algorithm.
-	// ENGINE_CENTERS uses `view_xform` to compute the 38.0 near-plane reject
-	// from the original per-center path; identity transform skips that reject.
-	// CELL_GRID ignores `view_xform` and scans a wider 16u cell grid.
+	// Per-frame dispatch. `centre` is the camera position - the witnessed
+	// 42.0 collect distance, per-cell fade, and high/low pass metrics all
+	// measure from it. `view_xform` feeds only the MODEL tier's 38.0
+	// view-depth gate; the identity transform passes that gate so headless
+	// tests exercise the walk.
 	void dispatch(Vector3 centre, Transform3D view_xform = Transform3D());
 
-	// Future visible-entity API: run ENGINE_CENTERS over all supplied centers
-	// regardless of the configured single-center dispatch_algorithm.
-	void dispatch_centers(PackedVector3Array centers, Transform3D view_xform = Transform3D());
-
-	// Drop runtime/editor caches and MultiMesh state. Call on paint / def edits.
+	// Drop all pools, caches, and draw nodes. Call on paint / def edits.
 	void reset();
 
 	// Introspection
@@ -200,86 +165,92 @@ public:
 	// counter for every submission.
 	Array get_model_draw_debug() const;
 
-	// FAR test/debug introspection: one Dictionary per accepted placement
-	// ({center, yaw}). The production batch mesh is inspectable through the
-	// FoliageSlotN MultiMesh's single wrapped Mesh.
+	// FAR test/debug introspection: one Dictionary per placement in every
+	// ACTIVE pooled cell ({center, yaw, cell_key, distance, fade, alpha_ref}).
 	Array get_far_tile_debug(int p_slot) const;
 
 protected:
 	static void _bind_methods();
 
 private:
-	// Cell key: pack (cell_x_int, cell_z_int, slot) into 64-bit. cell_x/z are
-	// 16u-aligned world-unit ints; slot in [0, 3].
-	struct CellKey {
-		int32_t cell_x;
-		int32_t cell_z;
-		int slot;
-		bool operator==(const CellKey &o) const noexcept {
-			return cell_x == o.cell_x && cell_z == o.cell_z && slot == o.slot;
-		}
-	};
-	struct CellKeyHash {
-		size_t operator()(const CellKey &k) const noexcept {
-			uint64_t h = static_cast<uint32_t>(k.cell_x);
-			h = (h * 0x9E3779B185EBCA87ull) ^ static_cast<uint32_t>(k.cell_z);
-			h = (h * 0xC2B2AE3D27D4EB4Full) ^ static_cast<uint32_t>(k.slot);
-			return static_cast<size_t>(h);
-		}
-	};
-
-	struct LRUEntry {
+	// FAR: one persistent baked cell per (slot, packed retail cell key)
+	// [orig: Foliage_UpdateFarCellSlots @ 0x601b30 - resident keys are only
+	// re-stamped; new keys bake into an LRU-evicted slot]. `node` is null
+	// when the cell baked empty (cached emptiness is retail behavior: a
+	// zero-count slot stays resident and draws nothing).
+	struct FarCellEntry {
+		MeshInstance3D *node = nullptr;
 		std::vector<opennova::foliage::PlacementInstance> placements;
-		int64_t touch = 0;
+		int64_t last_touched = 0;
+		bool active = false;
+		float distance = 0.0f;
 	};
-	struct EngineCenterKey {
-		opennova::foliage::Fixed16_16 x = 0;
-		opennova::foliage::Fixed16_16 z = 0;
-		bool operator==(const EngineCenterKey &o) const noexcept {
-			return x == o.x && z == o.z;
-		}
+	struct FarVisibleCell {
+		uint32_t key = 0;
+		int32_t cell_x_int = 0;  // 16u-aligned world ints, CELL_GRID key basis
+		int32_t cell_z_int = 0;  // (+16 biased, the walk's witnessed Z bias)
+		float distance = 0.0f;   // clamped-box 3D distance from the camera
 	};
-	struct EngineCenterKeyHash {
-		size_t operator()(const EngineCenterKey &k) const noexcept {
-			uint64_t h = static_cast<uint32_t>(k.x);
-			h = (h * 0x9E3779B185EBCA87ull) ^ static_cast<uint32_t>(k.z);
-			return static_cast<size_t>(h);
-		}
-	};
-	struct EngineCenterState {
-		std::array<std::unique_ptr<opennova::foliage::Dispatcher>,
-		           opennova::FOLIAGE_MAX_DEFS> dispatchers;
 
-		opennova::foliage::Dispatcher &dispatcher_for_slot(int slot) {
-			auto &dispatcher = dispatchers[slot];
-			if (!dispatcher) {
-				dispatcher = std::make_unique<opennova::foliage::Dispatcher>();
-			}
-			return *dispatcher;
-		}
-
-		int cached_cells() const noexcept {
-			int total = 0;
-			for (const auto &dispatcher : dispatchers) {
-				if (dispatcher) {
-					total += dispatcher->lru_occupancy();
-				}
-			}
-			return total;
-		}
+	// Per pooled MODEL draw node: what its MultiMesh currently holds, so
+	// stable draws skip the instance re-upload entirely. The material is the
+	// node's own (per-draw alpha ref/wind phase are witnessed per-draw
+	// state); it is created once per node from the slot base material.
+	struct ModelDrawNodeState {
+		int slot = -1;
+		uint32_t tile_key = 0xFFFFFFFFu;
+		int32_t generation = -1;
+		int count = 0;
+		Ref<ShaderMaterial> material;
 	};
+
 	struct DispatchStats {
 		int64_t dispatch_calls = 0;
-		int64_t coverage_skips = 0;
-		int64_t rebuilt_slots = 0;
-		int64_t instance_uploads = 0;
-		int64_t cell_cache_hits = 0;
-		int64_t cell_cache_misses = 0;
+		// FAR (witnessed pool mechanics).
+		int64_t far_cells_visible = 0;   // last dispatch
+		int64_t far_pool_hits = 0;
+		int64_t far_pool_misses = 0;
+		int64_t far_cells_baked = 0;     // cumulative place_cell+mesh bakes
+		int64_t far_instances_baked = 0; // cumulative placements baked
 		// Model tier (last dispatch / accumulated in the libs dispatchers).
 		int64_t model_anchors_in_range = 0;
 		int64_t model_tiles_emitted = 0;
 		int64_t model_instances = 0;
+		int64_t model_uploads = 0;       // cumulative change-detected re-uploads
 	};
+
+	// FAR pool state.
+	std::array<std::unordered_map<uint32_t, FarCellEntry>,
+	           opennova::FOLIAGE_MAX_DEFS> far_cells_;
+	std::vector<FarVisibleCell> far_visible_;
+	int64_t far_frame_counter_ = 0;
+
+	// NEAR/MODEL tier: one shared-core model dispatcher per foliage slot.
+	std::array<opennova::foliage::ModelDispatcher, opennova::FOLIAGE_MAX_DEFS> model_dispatchers_{};
+	std::array<std::vector<opennova::foliage::ModelInstance>, opennova::FOLIAGE_MAX_DEFS>
+	    model_instances_{};
+	struct ModelDrawBatch {
+		int slot = 0;
+		uint32_t tile_key = 0;
+		int32_t generation = 0;
+		Vector3 anchor;
+		float view_depth = 0.0f;
+		float anchor_distance = 0.0f;
+		float alpha_ref = 8.0f;  // D3D alpha-ref byte domain [8, 128]
+		int64_t wind_counter = 0;
+		float wind_phase = 0.0f; // counter * 0.001
+		std::vector<opennova::foliage::ModelInstance> instances;
+	};
+	std::vector<ModelDrawBatch> model_draw_batches_;
+	std::vector<MultiMeshInstance3D *> model_draw_nodes_;
+	std::vector<ModelDrawNodeState> model_draw_node_states_;
+	PackedVector3Array model_anchors_;
+	float model_anchor_range_ = 512.0f;
+	int32_t model_frame_counter_ = 0;
+	// Retail increments this once per TILE DRAW
+	// [orig: Foliage_ModelWindPhaseCounter @ 0x3162170, bumped in
+	// Foliage_UploadModelTileVSConstants @ 0x600f00].
+	int64_t model_wind_counter_ = 0;
 
 	// Per-slot model bounds derived from the slot mesh AABB - the host analog
 	// of the retail def-table bounds (XZ min/max over the raw 3DI verts ->
@@ -292,59 +263,6 @@ private:
 		float max_y = 1.0f;     // max vertex Y from the mesh AABB
 	};
 
-	// A MODEL tile is a draw-state boundary, not merely an instance source.
-	// Alpha ref is derived from the sector-entity anchor and the wind phase
-	// counter advances once per tile submission, so tiles cannot be flattened
-	// into a slot-wide MultiMesh without losing retail state.
-	struct ModelDrawBatch {
-		int slot = 0;
-		uint32_t tile_key = 0;
-		Vector3 anchor;
-		float view_depth = 0.0f;
-		float anchor_distance = 0.0f;
-		float alpha_ref = 8.0f;  // D3D alpha-ref byte domain [8, 128]
-		int64_t wind_counter = 0;
-		float wind_phase = 0.0f; // counter * 0.001
-		std::vector<opennova::foliage::ModelInstance> instances;
-	};
-
-	// CELL_GRID algorithm: cell (cell_x, cell_z, slot) -> placed instances.
-	std::unordered_map<CellKey, LRUEntry, CellKeyHash> lru_;
-	int64_t touch_counter_ = 0;
-	DispatchStats dispatch_stats_;
-	bool last_cell_grid_base_valid_ = false;
-	int last_cell_grid_base_x_ = 0;
-	int last_cell_grid_base_z_ = 0;
-
-	// ENGINE_CENTERS algorithm: each visible center owns independent per-slot
-	// retail Dispatcher state. NovaTerrain exposes at most its 256 patch-pool
-	// centers; overflow callers are handled transiently so persistent residency
-	// remains deterministic and bounded.
-	static constexpr size_t ENGINE_CENTER_CACHE_CAPACITY = 256;
-	std::unordered_map<EngineCenterKey, EngineCenterState, EngineCenterKeyHash>
-	    engine_center_states_;
-	std::array<std::vector<opennova::foliage::PlacementInstance>,
-	           opennova::FOLIAGE_MAX_DEFS> engine_placements_{};
-	int32_t engine_frame_counter_ = 0;
-
-	// NEAR/MODEL tier: one shared-core model dispatcher per foliage slot.
-	std::array<opennova::foliage::ModelDispatcher, opennova::FOLIAGE_MAX_DEFS> model_dispatchers_{};
-	std::array<std::vector<opennova::foliage::ModelInstance>, opennova::FOLIAGE_MAX_DEFS>
-	    model_instances_{};
-	std::vector<ModelDrawBatch> model_draw_batches_;
-	std::vector<MultiMeshInstance3D *> model_draw_nodes_;
-	PackedVector3Array model_anchors_;
-	float model_anchor_range_ = 512.0f;
-	int32_t model_frame_counter_ = 0;
-	// Retail increments this once per TILE DRAW
-	// [orig: Foliage_ModelWindPhaseCounter @ 0x3162170, bumped in
-	// Foliage_UploadModelTileVSConstants @ 0x600f00].
-	int64_t model_wind_counter_ = 0;
-
-	// FAR uses one dynamic full-mesh batch per slot. The MultiMesh wrapper has
-	// one identity instance; its Mesh is the retail-shaped replicated vertex
-	// buffer. MODEL children are held one per tile draw.
-	MultiMeshInstance3D *mm_by_slot_[4] = {};
 	Ref<Shader> foliage_far_shader_;
 	Ref<Shader> foliage_model_shader_;
 	Ref<ShaderMaterial> foliage_materials_[4];
@@ -360,28 +278,25 @@ private:
 	Callable surface_sampler_;
 	Ref<NovaTerrainData> terrain_data_;
 	Ref<NovaTerrainData> colormap_source_;
-	// Retained for terrain/editor API compatibility. The disproven FAR
-	// half-plus-bias terrain-color path no longer consumes this value.
-	Color terrain_tint_ = Color(1.0f, 1.0f, 1.0f, 1.0f);
-	int dispatch_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
-	int render_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
-	int cell_grid_radius_ = 8;
-	int lru_capacity_ = 128;
-	float quad_half_width_ = 2.0f;
-	float surface_offset_ = 0.0f;
-	int32_t engine_view_radius_fixed_ = 0x40000;
 
-	bool mm_dirty_ = true;
+	DispatchStats dispatch_stats_;
 
 	// Helpers ---------------------------------------------------------------
 
 	bool _has_sampling_source() const;
-	void _dispatch_engine_centers(const PackedVector3Array &centers,
-	                              const Transform3D &view_xform);
-	void _dispatch_cell_grid(Vector3 centre);
+	float _sample_height_world(float p_world_x, float p_world_z) const;
+	void _collect_far_cells(const Vector3 &camera_pos);
+	void _dispatch_far_tier(const Vector3 &camera_pos);
+	void _bake_far_cell_into(int slot_index,
+	                         const FarVisibleCell &cell,
+	                         const Ref<NovaTerrainFoliageDef> &def,
+	                         FarCellEntry &entry);
+	void _apply_far_cell_state(int slot_index, FarCellEntry &entry, float distance);
+	void _evict_far_overflow(int slot_index);
 	void _dispatch_model_tier(const Transform3D &view_xform, const Dictionary &defs_by_match);
-	void _rebuild_model_multimeshes();
+	void _update_model_draw_nodes();
 	void _clear_model_draw_nodes();
+	void _clear_far_cells();
 	// Source-model -> Godot yaw mapping: rotY(yaw + pi/2), witnessed at the
 	// MODEL draw transform. FAR owns a separate emitter mapping.
 	Basis _engine_yaw_basis(float yaw_radians) const;
@@ -396,7 +311,6 @@ private:
 	void _make_model_sampler_bindings(
 	    const Dictionary &defs_by_match,
 	    opennova::foliage::PlacementSamplers &out_samplers) const;
-	void _rebuild_multimeshes();
 	void _update_slot_material(int slot_index);
 	void _update_model_slot_material(int slot_index);
 	bool _scatter_cell(int slot_index,
@@ -404,9 +318,7 @@ private:
 	                   const Ref<NovaTerrainFoliageDef> &def,
 	                   std::vector<opennova::foliage::PlacementInstance> &out_placements);
 	Dictionary _build_defs_by_match() const;
-	void _retire_far_node(int slot_index);
 	void _clear_children();
-	void _invalidate_dispatch_coverage();
 	Ref<Mesh> _build_far_mesh(
 	    int slot_index,
 	    const std::vector<opennova::foliage::PlacementInstance> &placements) const;

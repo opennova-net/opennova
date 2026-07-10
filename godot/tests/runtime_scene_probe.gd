@@ -83,11 +83,9 @@ func _run() -> void:
 		"foliage_defs": data.get_foliage_defs().size() if data != null else -1,
 		"painted_probe_found": painted_probe.has("position"),
 		"painted_probe": painted_probe,
-		"dispatcher_algorithm": dispatcher.get_dispatch_algorithm() if dispatcher != null else -1,
-		"dispatcher_cell_grid_radius": dispatcher.get_cell_grid_radius() if dispatcher != null else -1,
 		"dispatcher_total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"dispatcher_cached_cells": dispatcher.get_cached_cells() if dispatcher != null else -1,
-		"terrain_foliage_centers": terrain.get_foliage_dispatch_centers().size() if terrain != null else -1,
+		"dispatcher_stats": dispatcher.get_dispatch_stats() if dispatcher != null else {},
 		"overlay_tile_info": overlay != null and overlay.tile_info != null,
 		"overlay_tilestrip": overlay != null and overlay.tilestrip != null,
 		"overlay_entries_rendered": overlay.get_entry_count_rendered() if overlay != null else -1,
@@ -103,14 +101,9 @@ func _run() -> void:
 
 	if dispatcher == null:
 		failures.append("expected NovaTerrain/FoliageDispatcher to exist")
-	elif dispatcher.get_dispatch_algorithm() != NovaFoliageDispatcher.DISPATCH_ALGORITHM_ENGINE_CENTERS:
-		failures.append(
-			"expected runtime dispatcher to consume renderer-visible ENGINE_CENTERS, got %d"
-				% dispatcher.get_dispatch_algorithm()
-		)
 	elif dispatcher.get_cached_cells() <= 0:
 		failures.append(
-			"expected dispatcher.cached_cells > 0 after visible-center dispatch, got %d"
+			"expected dispatcher.cached_cells > 0 after the 42u near-cell dispatch, got %d"
 				% dispatcher.get_cached_cells()
 		)
 	if terrain == null:

@@ -6,8 +6,6 @@
 // (PAR-R2). Originally ported from jodemo sub_5C0240/5C6450/5C65E0.]
 #include "foliage/placement.h"
 
-#include <cstdlib>
-
 namespace opennova::foliage {
 
 namespace {
@@ -58,9 +56,6 @@ uint32_t pack_cell_key(Fixed16_16 cell_x_fixed, Fixed16_16 cell_z_fixed) noexcep
 
 PlacementResult place_cell(int slot_index,
                            uint32_t cell_key,
-                           Fixed16_16 view_center_x,
-                           Fixed16_16 view_center_z,
-                           int32_t view_radius,
                            const PlacementConfig &config,
                            const PlacementSamplers &samplers) noexcept {
 	PlacementResult result{};
@@ -73,14 +68,14 @@ PlacementResult place_cell(int slot_index,
 		return result;
 	}
 
-	// Decode cell origin from the key. Engine uses the raw packed dword; the low
-	// 16 bits encode the z-cell (<<16) and the upper 16 bits encode the x-cell.
-	// `v43` (engine) = cell_z integer in world units, and `v38` = cell_x integer.
-	// Note the asymmetry between pack/unpack here - the engine decodes the key by
-	// sign-extending its HIWORD and LOWORD directly, which is the same as reading
-	// the upper/lower halves of the original (x_fixed, z_fixed) truncated to 16 bits.
-	const int32_t cell_z_int = sext_key_half(cell_key >> 16);  // v43
-	const int32_t cell_x_int = sext_key_half(cell_key);        // v38
+	// Decode cell origin from the key. Engine uses the raw packed dword; the
+	// HIGH half is the world-X cell base and the LOW half the world-Z cell
+	// base - retail passes the HIWORD-derived coordinate as the X argument of
+	// the spacing/surface queries [orig: generate_foliage_instances_0
+	// @ 0x600001..0x600009]. Sign-extension mirrors the engine's
+	// `(half << 17) >> 17` decode.
+	const int32_t key_x_int = sext_key_half(cell_key >> 16);
+	const int32_t key_z_int = sext_key_half(cell_key);
 
 	const uint8_t slot_force_on =
 	    (config.attrib_flags[slot_index] & FOLIAGE_ATTRIB_FORCE_ON) != 0 ? 1u : 0u;
@@ -106,25 +101,19 @@ PlacementResult place_cell(int slot_index,
 		const uint16_t frac_rot = prng_frac16(rng);
 		const float rotation = static_cast<float>(frac_rot) * FOLIAGE_ROTATION_SCALE;
 
-		// World-fixed position. Engine @ 0x5c042d:
-		//   (int)((v43 + v39) * 65536.0) - *a4  // x delta
-		//   v32 = (int)((v38 - v27) * 65536.0); // z in engine's negated convention
+		// World-fixed position [orig: generate_foliage_instances_0
+		// @ 0x5fff7a..0x5fffb2]: world X = keyHigh + localA, world Z =
+		// keyLow - localB (the local B axis runs negative world Z). The
+		// retail generator applies no view cull here - the caller's collect
+		// list already scoped the cell set.
 		const Fixed16_16 world_x_fixed =
-		    static_cast<Fixed16_16>((static_cast<float>(cell_z_int) + cand_x) * FIXED_SCALE);
+		    static_cast<Fixed16_16>((static_cast<float>(key_x_int) + cand_x) * FIXED_SCALE);
 		const Fixed16_16 world_z_fixed =
-		    static_cast<Fixed16_16>((static_cast<float>(cell_x_int) - cand_y) * FIXED_SCALE);
+		    static_cast<Fixed16_16>((static_cast<float>(key_z_int) - cand_y) * FIXED_SCALE);
 
-		// L-infinity cull. Engine @ 0x5c04a5:
-		//   abs(world_x - center.x) <= view_radius && abs(z_delta) <= view_radius
-		const int64_t dx = static_cast<int64_t>(world_x_fixed) - static_cast<int64_t>(view_center_x);
-		const int64_t dz = static_cast<int64_t>(world_z_fixed) - static_cast<int64_t>(view_center_z);
-		if (std::llabs(dx) > view_radius || std::llabs(dz) > view_radius) {
-			continue;
-		}
-
-		// Path-blocker check: engine short-circuits this when the slot has FORCE_ON.
-		// Engine @ 0x5c04a5:
-		//   (FORCE_ON) || !sub_5C6450(world_x, -world_z, 0x20000)
+		// Path-blocker check: retail short-circuits it when the slot has
+		// FORCE_ON [orig: generate_foliage_instances_0 @ 0x5fffb6 (attrib
+		// byte_2C2608C bit 0) / sub_606490(x, -z, 0x20000) @ 0x600009].
 		if (!slot_force_on) {
 			if (samplers.path_blocked && samplers.path_blocked(world_x_fixed, -world_z_fixed, 0x20000)) {
 				continue;
@@ -149,9 +138,6 @@ PlacementResult place_cell(int slot_index,
 		inst.rotation_radians = rotation;
 
 		result.instances[result.count++] = inst;
-		if (result.count >= FAR_CELL_CAP) {
-			break;
-		}
 	}
 
 	return result;

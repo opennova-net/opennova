@@ -134,7 +134,15 @@ sampler params, opaque + additive variants; the four texture slot ids 1-4
 shared `:fd` alpha texture (wrapped 3×3 smoothing, RGB flattened to 0x808080),
 but FAR and MODEL use distinct geometry and material paths.
 
-- **FAR geometry** — `generate_foliage_instances_0 @ 0x5ffdd0` accepts up to
+- **FAR feed** - terrain traversal collects leaf tiles within 42.0 of the
+  camera (<=128) into `Terrain_NearSectorPatchList`/`Foliage_VisibleFarKeyList`
+  `[orig: Terrain_TraverseQuadtreeNode @ 0x60905c ->
+  Terrain_CollectNearFoliagePatches @ 0x603e60]`; per-def slot pools bake each
+  new key once and LRU-evict by frame stamp `[orig: Foliage_UpdateFarCellSlots
+  @ 0x601b30]`. Draws walk the collected list far-to-near with per-patch
+  fade (knee 20.0, slope 1/22) and the high/low pass split at 33.0
+  `[orig: render_terrain_lightmaps @ 0x60a171..0x60a53b]`.
+- **FAR geometry** — `generate_foliage_instances_0 @ 0x5ffdd0` (args: key, VB, IB, out counts - no view cull) accepts up to
   all 36 candidates and copies the complete source vertex/index arrays per
   candidate; it is not a square/quad/ground patch. XZ scale is 1.0, source Y is
   halved, and terrain is sampled below every transformed source vertex. Source
@@ -163,11 +171,11 @@ but FAR and MODEL use distinct geometry and material paths.
   `[orig: Foliage_DrawModelTileSlot @ 0x601d90]`.
 
 The host ports these as separate `foliage_far.gdshader` and
-`foliage_model.gdshader` paths. The upstream feeds still missing are the exact
-visible FAR keys, visible/occlusion-tested MODEL sector entities, blocker
-registry, exact per-sector FAR T1/c6 inputs, and the sector-distance/force-low
-pass split (including the conditional second low wireframe draw), all under
-D-FOLIAGE-7. Full detail is in
+`foliage_model.gdshader` paths, with the FAR feed/pool/draw state hosted as
+witnessed. Still approximate under D-FOLIAGE-7: the exact per-tile T1
+render-target content, the c6.rgb float chain, the MODEL sector-entity
+visibility stream, the blocker registry, and the second low wireframe
+resubmit. Full detail is in
 [foliage/foliage-re.md](../foliage/foliage-re.md).
 
 **Embedded-shader census (REN-4)**: every `D3DXAssembleShader` caller in the

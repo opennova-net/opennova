@@ -22,14 +22,23 @@ Note on binaries: `libs/foliage/placement.cpp` was originally ported from
 `jodemo.exe` (it cites `sub_5C0240`/`sub_5C6450`/`sub_5C65E0`). Retail confirms
 the candidate loop inside `generate_foliage_instances_0 @ 0x5ffdd0`
 (`@ 0x600197` is an interior address), including the seed, PRNG, and gates.
+A third audit (2026-07-10) witnessed the retail FAR *driver*: the jodemo-era
+per-entity quadrant dispatcher (`sub_5C1940` - 4-quadrant walk, 128-LRU,
+38.0 near-Z, L-infinity view cull) does not exist in Jointops' FAR path.
+Retail collects visible leaf cells during terrain traversal and bakes each
+cell ONCE into a persistent per-def slot pool; `generate_foliage_instances_0`
+takes `(key, VB, IB, &idx_count, &vtx_count)` - no view center, no radius.
+The jodemo dispatcher port and `place_cell`'s view-cull parameters were
+deleted with that witness.
 
 ## Verdict table
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| FAR candidate placement | **MATCHING** | `placement.cpp` preserves the 36-candidate ROL-hash sequence and gates from `generate_foliage_instances_0 @ 0x5ffdd0`; accepted count is 0..36, not capped at 21 |
+| FAR candidate placement | **MATCHING** | `placement.cpp` preserves the 36-candidate ROL-hash sequence and gates from `generate_foliage_instances_0 @ 0x5ffdd0`; accepted count is 0..36, not capped at 21; no view cull (the retail generator has no center/radius arguments) |
+| FAR feed + slot pool | **MATCHING (witnessed 2026-07-10)** | Traversal collects leaf cells within **42.0** of the camera (<=128) `[orig: Terrain_TraverseQuadtreeNode @ 0x60905c -> Terrain_CollectNearFoliagePatches @ 0x603e60]`; per-def slot pools bake each new key ONCE and LRU-evict by frame stamp `[orig: Foliage_UpdateFarCellSlots @ 0x601b30]`; the host `NovaFoliageDispatcher` runs the same bake-once pool over the 42u disc |
 | FAR geometry and vertex payload | **MATCHING (corrected 2026-07-09)** | `far_mesh_emitter.cpp` copies the complete source mesh per accepted candidate, transforms XZ at 1.0 scale, halves source Y, samples terrain below every transformed source vertex, preserves UV/index topology, and emits the witnessed red wind weight `[orig: @ 0x6002DB..0x60030A]` |
-| FAR wind and fragment pass | **MATCHING hosted mechanics; exact terrain feeds pending** | `foliage_far.gdshader` ports the `Foliage_WindSwayVS` polynomial/axis and `Foliage_LightmapBlendPS`; the host binds the complete witnessed c24.x phase expression, while D-FOLIAGE-7 tracks exact visible-key and per-sector T1/c6 inputs |
+| FAR wind and fragment pass | **MATCHING hosted mechanics** | `foliage_far.gdshader` ports the `Foliage_WindSwayVS` polynomial/axis and `Foliage_LightmapBlendPS`, the witnessed c24.x phase expression, and the per-cell draw state (fade knee 20.0, slope 1/22, high pass under 33.0 with refs 180/8); D-FOLIAGE-7 keeps the exact T1 render-target content and c6.rgb float chain |
 | MODEL tier geometry/placement | **MATCHING mechanics; exact terrain driver pending** | Full source mesh, cap 21, 0.75 XZ / 0.5 Y, eight-sample biquadratic fit, per-anchor alpha, and per-tile draw/wind cadence are hosted; D-FOLIAGE-7 tracks the exact visible/occlusion-tested sector-entity feed |
 | The `:fd` foliage texture (both tiers) | **MATCHING (ported 2026-07-08)** | D-FOLIAGE-5 FIXED — `bake_fd_rgba` (exact kernel + wrap + `0x808080` fold) via `VegAssets.resolve_slot_fd_textures`; BOTH tiers bind it `[orig: Foliage_LoadDefAssets @ 0x601260]` |
 | MODEL material pass | **MATCHING (resolved 2026-07-09)** | Pass table[16] selects the black c6 diffuse for RGB and multiplies `:fd.a × diffuse.a`; `foliage_model.gdshader` is deliberately separate from FAR `[orig: Foliage_DrawModelTileSlot @ 0x601d90]` |
@@ -131,6 +140,70 @@ fixed-function fallback stage 0 is `2*T0*diffuse` for RGB and
 from the terrain lighting factors. c6 alpha is 1 through apparent distance 20,
 then `1 - (distance - 20)/22` (with an alternate-path ×0.1). The shader mechanics
 are ported; exact sector-owned T1 and c6 source values remain D-FOLIAGE-7.
+
+### The FAR feed and slot pool (witnessed 2026-07-10)
+
+The FAR tier is a bake-once pipeline driven by terrain traversal, not a
+per-frame regeneration and not a per-entity quadrant walk:
+
+- **Collect**: `Terrain_TraverseQuadtreeNode @ 0x608a00` calls
+  `Terrain_CollectNearFoliagePatches @ 0x603e60` (ex kong
+  `collect_nearby_sector_patches`) for frustum-surviving nodes with LOD >= 3
+  inside 42.0 (`flt_7DEA3C`, gate `@ 0x60905c..0x609078`). The collector
+  recurses to leaves and admits each leaf whose clamped-AABB 3D distance from
+  the camera (Y term `|node+52 - camY|`) is <= **42.0** (`@ 0x603f5c`),
+  appending `(key, mesh, 0, sector_ox, sector_oz, dist, node)` to
+  `Terrain_NearSectorPatchList @ 0x319B2F0` and the packed key to
+  `Foliage_VisibleFarKeyList @ 0x319C0F8` - both capped at **128**
+  (`@ 0x603f98 / 0x603ff1`). Key layout per axis half: bits 14..10 = sector
+  index (x1024 in the packed value, x512 world), bit 9 unused, bits 8..0 =
+  world units within the sector; `0x80000000` marks OOB sectors. The HIGH
+  half is world X, the LOW half world Z (the generator passes the
+  HIWORD-derived coordinate as the X argument of the spacing/surface queries
+  `@ 0x600001..0x600009`).
+- **Bake once per new key**: after tile rendering, `PolyTrn_RenderFrame
+  @ 0x60f0ef` runs def slots 0..3 through `Foliage_UpdateFarCellSlotsForDef
+  @ 0x601d50` -> `Foliage_UpdateFarCellSlots @ 0x601b30` (ex kong
+  `foliage_lod_update_texture_slots` - its "textures" are the packed keys).
+  Resident keys are only re-stamped (`Foliage_FarSlotFrameCounter
+  @ 0x2C266D8`); each NEW key evicts the max-age slot record (7 dwords at
+  region+38: key, stamp, active, IB base, idx count, vtx count), locks that
+  slot's VB/IB stripe (region[15]/[16] = verts/indices per slot; stripes
+  sized in `Foliage_InitModelTileBuffers @ 0x5ffcd0`, which also resets the
+  1000 record slots), and bakes it with `generate_foliage_instances_0`.
+  FAR cell geometry regenerates only on slot eviction - never per frame.
+- **Draw per collected patch**: `render_terrain_lightmaps @ 0x609de0`
+  bubble-sorts the near list far-to-near (`@ 0x609fb9..0x60a141`), then per
+  entry per def: looks up the tile's detail-lightmap render target
+  (`sub_6042A0 @ 0x60a1de`, bound as T1 through a world-planar texture
+  transform `@ 0x60a220..0x60a356`), binds the pool ranges/`:fd`/passes via
+  `Terrain_SetupSectorModelDraw @ 0x6007c0` (high fill + ref 180 / low +
+  optional wireframe fill + ref 8), uploads c6 = (lighting-factor RGB,
+  fade) through `setup_water_vertex_shader_constants`'s float4 argument
+  (`@ 0x60a4ca..0x60a526`) and PS c0/c1 = `PolyTrn_PSConstC0_SkyColorR` /
+  `PolyTrn_PSConstC1_LightColorR` (`@ 0x60a53b..0x60a55a`). The per-entry
+  draw state: **fade = 1 through distance 20.0** (`flt_7D8E60`), then
+  `1 - (d - 20) * (1/22)` (`flt_7DF1BC`) - reaching 0 exactly at the 42.0
+  collect edge - with an alternate-path x0.1 (`flt_7C69F4` `@ 0x60a4a1`);
+  **high pass when dist < 33.0** (`flt_7DF1C0` `@ 0x60a171`), and after a
+  high draw the same geometry is resubmitted on the low pass with the
+  wireframe fill flag (`@ 0x60a655..0x60a694`). The fixed-function fallback
+  block (`D3DRS_AMBIENT` + material `(0.8, 1.0, 0.7, fade)` `@ 0x60a412..`)
+  is skipped on the shader path.
+
+**Host mapping** (`NovaFoliageDispatcher`): the dispatcher enumerates the 16u
+cells whose clamped-box 3D distance from the camera is <= 42.0 (terrain
+height under the cell center as the leaf Y metric; Godot's per-node frustum
+culling stands in for the traversal's frustum gate), keeps a per-slot
+bake-once pool capped at the 128 collect bound (the retail resident count -
+pool header field [37] - is untraced), and per frame only toggles pooled
+cell visibility and refreshes the witnessed per-cell fade/pass instance
+parameters. The T1 stand-in recomposes the tile render target's content
+(colormap x blend-weighted detail splat, sampled at LOD 0 because the retail
+render target carries no mip chain) from the same `.trn` sources the terrain
+shader consumes; c6.rgb holds the 0.5 neutral that reproduces the
+fixed-function `2*T0*diffuse` level over the untinted terrain surface
+(env #19: the terrain_rgb texture-bake consumer is retail dead code).
 
 ## The MODEL tier (`Foliage_GenerateModelTileInstances @ 0x600980`)
 
@@ -347,20 +420,27 @@ occlusion-tested sector-entity stream (D-FOLIAGE-7).
 
 ## Host upstream seams still open
 
-The local tier algorithms and shaders are now separated and witnessed, but full
-scene parity still depends on five terrain-owned inputs that are not
-yet exposed to `NovaFoliageDispatcher`:
+The FAR feed, slot pool, and per-patch fade/pass draw state are now witnessed
+AND hosted (see The FAR feed and slot pool above). The remaining
+approximations, recorded together as D-FOLIAGE-7:
 
-- the exact visible FAR cell-key list from terrain traversal;
-- the exact visible and occlusion-tested sector-entity stream that drives MODEL;
-- the world/path blocker registry consumed by the 0x20000 spacing gate;
-- the exact per-sector FAR T1 texture and c6 lighting/fade inputs;
-- the per-sector high/low selector and conditional second low wireframe pass.
+- the exact per-tile T1 render-target content (the host recomposes
+  colormap x detail splat from the `.trn` sources at LOD 0; retail renders
+  terrain tiles into the texture it binds);
+- the exact per-frame c6.rgb lighting-factor floats (host: the 0.5
+  fixed-function-parity neutral);
+- the exact visible and occlusion-tested sector-entity stream that drives
+  MODEL (host: placed world objects with a view-depth range gate);
+- the world/path blocker registry consumed by the 0x20000 spacing gate
+  (host: always-clear);
+- the conditional second low wireframe resubmit after a high-pass draw
+  (host: single pass per cell);
+- the retail FAR pool residency count (header field [37]; host: the 128
+  collect cap).
 
-These are recorded together as D-FOLIAGE-7. Camera-centered cell enumeration,
-generic world-object anchors, an always-clear blocker callback, approximate
-global lighting, and one slot-wide high-ref pass are host adapters, not claims
-about retail behavior.
+The host's direct 42u disc enumeration (vs the traversal's frustum-gated
+collect) is a coverage-equivalent adapter: retail skips collecting off-frustum
+cells, the host bakes them and lets per-node frustum culling drop the draws.
 
 ## D-FOLIAGE divergence catalog
 
@@ -372,19 +452,21 @@ about retail behavior.
 | D-FOLIAGE-4 | B | **FIXED (corrected 2026-07-09)** | MODEL stamps full source geometry with cap 21, XZ 0.75/Y 0.5, yaw-only eight-sample ground fit, anchor-derived alpha, duplicate tile draws per qualifying anchor, and per-tile-draw wind counter `[orig: @ 0x600980, 0x601f50, 0x601d90, 0x600f00]`. The former shared-shader/shared-cap and FAR ground-patch addenda are retracted; FAR instead uses `far_mesh_emitter`. Exact upstream entity visibility rides D-FOLIAGE-7. |
 | D-FOLIAGE-5 | B | **FIXED (2026-07-08)** | Both tiers bind the model submesh[0] `:fd` bake: wrapped 3×3 alpha kernel and flattened `0x808080` RGB `[orig: Foliage_LoadDefAssets @ 0x601260; Foliage_DrawModelTileSlot @ 0x601d90]`. |
 | D-FOLIAGE-6 | C | **FIXED (2026-07-09)** | MODEL's table[16] pass is now witnessed: one T0=`:fd` stage, flags `0x00440000`, RGB selects c6 diffuse `(0,0,0,1)`, alpha multiplies `T0.a*diffuse.a`. The resulting unfogged RGB is black; `foliage_model.gdshader` ports that pass rather than sharing FAR's lightmap combine. |
-| D-FOLIAGE-7 | A | WITNESSED-READY-DEFERRED | Terrain-to-foliage host feeds remain approximate: exact visible FAR keys, visible/occlusion-tested MODEL sector entities, the blocker registry, exact per-sector FAR T1/c6 inputs, and the sector-distance/force-low pass split (including the conditional second low wireframe draw). Local placement/emission/shader mechanics are ported; these five upstream feeds are the remaining scene-parity seam. |
+| D-FOLIAGE-7 | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) | The FAR feed (42.0 traversal collect, 128 caps), bake-once slot pool, and per-patch fade/high-low draw state are witnessed AND hosted. Remaining approximations: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), exact c6.rgb lighting-factor floats (host: 0.5 FF-parity neutral), the MODEL sector-entity visibility stream, the blocker registry, the second low wireframe resubmit, and the retail pool residency count (field [37]). |
 
 Candidate placement math carries **no divergence**: seed, PRNG, raw surface
-mask, the FAR
-36-candidate/36-accepted ceiling, MODEL's separate 21-accepted ceiling, gates,
-and spacing arithmetic are witnessed. Supplying the exact visible keys and
-blocker/entity/draw inputs is D-FOLIAGE-7.
+mask, the FAR 36-candidate/36-accepted ceiling, MODEL's separate 21-accepted
+ceiling, gates, and spacing arithmetic are witnessed. The former L-infinity
+view cull in `place_cell` was jodemo-only and is deleted - the retail
+generator bakes the whole cell. Supplying the exact blocker/entity/draw
+inputs is D-FOLIAGE-7.
 
 ## Cross-references
 
-- Reimpl: `libs/foliage` (`placement.cpp`/`dispatcher.cpp` plus
-  `far_mesh_emitter.cpp` for FAR; `model_placement.cpp`/
-  `model_dispatcher.cpp` for MODEL; `fd_bake.cpp` for the shared asset),
+- Reimpl: `libs/foliage` (`placement.cpp` plus `far_mesh_emitter.cpp` for
+  FAR; `model_placement.cpp`/`model_dispatcher.cpp` for MODEL; `fd_bake.cpp`
+  for the shared asset; the jodemo-era `dispatcher.cpp` was deleted with the
+  2026-07-10 slot-pool witness),
   `godot/engine/terrain/nova_foliage_dispatcher.cpp` (the two-tier host),
   `godot/shaders/foliage_far.gdshader` (FAR wind/lightmap pass),
   `godot/shaders/foliage_model.gdshader` (MODEL fit/wind/black-alpha pass),

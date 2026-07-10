@@ -8,20 +8,42 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 #include "res://shaders/nova_color.gdshaderinc"
 
 uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
+// FAR T1. Retail binds the per-tile detail-lightmap RENDER TARGET (the
+// colormap x light x detail-splat composite, world-planar UV)
+// [orig: render_terrain_lightmaps @ 0x60a1de (sub_6042A0 lookup) +
+// 0x60a220..0x60a356 (the texture transform)]. The host recomposes that
+// texel from the same .trn sources the terrain shader uses; the exact
+// per-sector render-target feed stays on D-FOLIAGE-7.
 uniform sampler2D u_terrain_light_texture : filter_linear, repeat_enable;
+uniform sampler2D u_terrain_blend_texture : filter_linear, repeat_enable;
+uniform sampler2D u_terrain_detail_c1 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_terrain_detail_c2 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_terrain_detail_c3 : filter_linear_mipmap, repeat_enable;
+uniform float u_terrain_detail_density = 128.0;
+uniform bool u_has_terrain_detail = false;
 
 // Foliage_WindSwayVS c24.x. Retail supplies
 // GetTickCount*0.003 + Env_WaveOscRing[0]*1.5258789e-6. The dispatcher binds
 // the clock term; NovaWeather publishes the fixed ring-head term below.
 uniform float u_far_wind_phase = 0.0;
 
-// GridPlacementVS/Foliage_WindSwayVS c6: retail terrain-light RGB factors and
-// per-sector fade alpha. The alpha is 1 through distance 20, then falls by
-// 1/22 per unit; the alternate path multiplies it by 0.1.
-uniform vec4 u_far_pass_color = vec4(1.0);
+// Foliage_WindSwayVS c6 RGB: the per-frame terrain lighting factors. The host
+// holds the 0.5 neutral: with the flat-0x808080 ":fd" RGB and the *8 below it
+// reproduces the fixed-function fallback's 2*T0*diffuse level, so foliage
+// tracks the untinted terrain surface (env #19: the terrain_rgb texture-bake
+// consumer is retail dead code). Exact c6 floats stay on D-FOLIAGE-7. Alpha
+// rides per cell in u_cell_fade.
+uniform vec4 u_far_pass_color = vec4(0.5, 0.5, 0.5, 1.0);
 
-// Foliage high/low pass objects use 180 and 8 respectively.
-uniform float u_far_alpha_ref : hint_range(8.0, 180.0, 1.0) = 8.0;
+// Per-cell c6.a distance fade: 1 through distance 20, then 1-(d-20)/22,
+// reaching 0 exactly at the 42.0 collect edge
+// [orig: render_terrain_lightmaps @ 0x60a45d..0x60a483].
+instance uniform float u_cell_fade = 1.0;
+
+// Per-cell high/low pass alpha-test ref: 180 when the cell distance is under
+// 33.0, else 8 [orig: render_terrain_lightmaps @ 0x60a171;
+// Terrain_SetupSectorModelDraw @ 0x6008f5 / 0x600931].
+instance uniform float u_cell_alpha_ref = 180.0;
 
 global uniform vec3 opennova_sky_ambient;
 global uniform vec3 opennova_sun_light;
@@ -80,13 +102,33 @@ void vertex() {
 
 void fragment() {
 	vec4 fd = texture(u_fd_texture, UV);
-	vec2 terrain_uv = vec2(v_world_pos.x, -v_world_pos.z)
+	// World-planar T1 projection in the host terrain row order (1 texel per
+	// world unit, +z rows - the same mapping the terrain mesh UVs use; the
+	// witnessed native query (x, -z) is this same texel through the native-Z
+	// sign boundary [orig: Terrain_GetModulatedColorAtPos @ 0x5C5FE0]).
+	vec2 terrain_uv = vec2(v_world_pos.x, v_world_pos.z)
 		/ vec2(textureSize(u_terrain_light_texture, 0));
-	vec4 terrain_light = texture(u_terrain_light_texture, terrain_uv);
+	// LOD 0 throughout the T1 chain: retail's tile render target carries no
+	// mip chain, and derivative-driven mips collapse planar projections on
+	// the near-vertical foliage surfaces to their texture averages.
+	vec4 terrain_light = textureLod(u_terrain_light_texture, terrain_uv, 0.0);
+
+	// The T1 texel stand-in: retail's tile render target already contains
+	// the colormap x detail-splat composite, so recompose it here. The
+	// ps.1.4 terrain chain's dp3 normal term averages ~0.5; folded with its
+	// x2 that leaves splat * 2 (detail-less terrains use the same neutral).
+	vec3 splat = vec3(0.5);
+	if (u_has_terrain_detail) {
+		vec3 blend = textureLod(u_terrain_blend_texture, terrain_uv, 0.0).rgb;
+		vec2 detail_uv = terrain_uv * u_terrain_detail_density;
+		splat = textureLod(u_terrain_detail_c1, detail_uv, 0.0).rgb * blend.r
+			+ textureLod(u_terrain_detail_c2, detail_uv, 0.0).rgb * blend.g
+			+ textureLod(u_terrain_detail_c3, detail_uv, 0.0).rgb * blend.b;
+	}
 
 	// Foliage_LightmapBlendPS:
 	// rgb=t0*(t1*(t1.a*c1+c0))*v0*8, alpha=t0.a*v0.a.
-	vec3 lit = terrain_light.rgb
+	vec3 lit = (terrain_light.rgb * splat * 2.0)
 		* (terrain_light.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 result = clamp(fd.rgb * lit * u_far_pass_color.rgb * 8.0,
 		vec3(0.0), vec3(1.0));
@@ -94,8 +136,10 @@ void fragment() {
 	float fog_factor = fog_factor_for_distance(length(v_world_pos - CAMERA_POSITION_WORLD));
 	result = mix(opennova_fog_color, result, fog_factor);
 
-	float alpha_threshold = clamp(u_far_alpha_ref, 8.0, 180.0) / 255.0;
+	float alpha_threshold = clamp(u_cell_alpha_ref, 8.0, 180.0) / 255.0;
 	ALBEDO = nova_gamma_to_linear(result);
-	ALPHA = fd.a * u_far_pass_color.a;
+	// c6.a fade multiplies the ":fd" alpha before the alpha test - the retail
+	// dissolve: as fade drops toward the 42.0 edge, fewer texels clear the ref.
+	ALPHA = fd.a * u_far_pass_color.a * u_cell_fade;
 	ALPHA_SCISSOR_THRESHOLD = alpha_threshold;
 }

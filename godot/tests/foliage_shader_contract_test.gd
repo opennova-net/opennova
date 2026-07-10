@@ -34,15 +34,16 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"Far T1 is an explicit terrain light texture.")
 	assert_true(source.contains("uniform vec4 u_far_pass_color"),
 		"The host supplies retail c6 RGB and sector-fade alpha.")
-	assert_true(source.contains("uniform float u_far_alpha_ref"),
-		"The input can represent the witnessed low/high alpha refs (8/180); selector parity remains D-FOLIAGE-7.")
+	assert_true(source.contains("instance uniform float u_cell_fade"),
+		"Each baked cell carries its own witnessed c6.a distance fade.")
+	assert_true(source.contains("instance uniform float u_cell_alpha_ref"),
+		"Each baked cell carries the witnessed high/low alpha-test ref (180 under 33, else 8).")
 	assert_true(source.contains("global uniform float opennova_foliage_wave_addend"),
 		"FAR foliage receives the scaled Env_WaveOscRing[0] weather global.")
 	assert_true(source.contains(
 		"float phase = world_pos.x + (u_far_wind_phase + opennova_foliage_wave_addend)"),
 		"The ring-head addend joins GetTickCount*0.003 before the world-X phase term.")
-	assert_true(source.contains("hint_range(8.0, 180.0")
-		and source.contains("clamp(u_far_alpha_ref, 8.0, 180.0)"),
+	assert_true(source.contains("clamp(u_cell_alpha_ref, 8.0, 180.0)"),
 		"The far alpha-test input is restricted to the witnessed low/high range.")
 	assert_true(source.contains("float wind_weight = COLOR.r"),
 		"Packed vertex red is wind weight, not terrain lighting.")
@@ -57,8 +58,8 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"Far wind retains the retail tenth-order cosine coefficients.")
 	assert_true(source.contains("world_pos.z -= wind_weight * wave * 0.03"),
 		"Retail render-Z wind maps to negative Godot world Z.")
-	assert_true(source.contains("ALPHA = fd.a * u_far_pass_color.a"),
-		":fd alpha is modulated by the sector fade in c6.a.")
+	assert_true(source.contains("ALPHA = fd.a * u_far_pass_color.a * u_cell_fade"),
+		":fd alpha is modulated by the per-cell distance fade in c6.a.")
 	assert_true(source.contains("terrain_light.a * opennova_sun_light + opennova_sky_ambient")
 		and source.contains("fd.rgb * lit * u_far_pass_color.rgb * 8.0"),
 		"The far fragment keeps the witnessed T0/T1/c0/c1/c6 multiply chain.")

@@ -122,8 +122,7 @@ bool all_accept_emits_36_full_mesh_copies() {
 	PlacementConfig config{};
 	config.attrib_flags[0] = FOLIAGE_ATTRIB_FORCE_ON;
 	const uint32_t key = pack_cell_key(fixed(16.0f), fixed(16.0f));
-	const PlacementResult placements =
-	    place_cell(0, key, fixed(16.0f), fixed(16.0f), 0x40000000, config, samplers);
+	const PlacementResult placements = place_cell(0, key, config, samplers);
 
 	if (!expect(placements.count == FAR_CELL_CAP, "all-accept FAR placement yields 36 candidates")) return false;
 	if (!expect(height_calls == 0,

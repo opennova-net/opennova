@@ -28,15 +28,14 @@ var _last_raw_foliage_defs: Array = []
 var _selected_index: int = -1
 
 var _dispatcher: NovaFoliageDispatcher
-var _last_camera_cell_key: String = ""
 var _pending_flush: bool = true
 
 
 func _ready() -> void:
+	# The preview runs the same witnessed retail coverage as the game (the
+	# 42u near-cell pool); what you see while painting is what ships.
 	_dispatcher = NovaFoliageDispatcher.new()
 	_dispatcher.name = "Dispatcher"
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 8
 	add_child(_dispatcher)
 
 
@@ -170,18 +169,10 @@ func rebuild_if_needed() -> void:
 	if _pending_flush:
 		_dispatcher.reset()
 		_pending_flush = false
-		_last_camera_cell_key = ""  # force dispatch on next frame
 
-	# Only re-dispatch when the camera crosses a 16u cell boundary. Within a
-	# cell, the LRU output is unchanged, so calling dispatch() would be pure
-	# cache hits + a no-op MultiMesh check. The model tier rides the same
-	# cadence in the editor (its stagger regen only matters in motion).
-	var base_x := int(floor(_camera.global_position.x / 16.0)) * 16
-	var base_z := int(floor(_camera.global_position.z / 16.0)) * 16
-	var key := "%d,%d" % [base_x, base_z]
-	if key == _last_camera_cell_key:
-		return
-	_last_camera_cell_key = key
+	# Per-frame dispatch is cheap now: the pool bakes each 16u cell once and a
+	# steady frame is pure hits plus the per-cell fade/pass refresh (which
+	# tracks the camera continuously, like the retail draw).
 	_dispatcher.set_model_anchors(_collect_model_anchors())
 	_dispatcher.dispatch(_camera.global_position, _camera.global_transform)
 
@@ -190,15 +181,11 @@ func rebuild_if_needed() -> void:
 # .trn/.bms-placed world models) [orig: Terrain_RenderSectorEntitiesBySide
 # @ 0x5c7d50]; placed world objects are the host equivalent (host mapping).
 # The terrain workspace carries no placed-object index yet, so probe for one
-# duck-typed, then fall back to terrain-content centers (the visible sector
-# centers - the editor analog of the runtime's patch-centers fallback).
+# duck-typed. No entities means no model clusters - retail has no
+# camera-carpet model dispatch.
 func _collect_model_anchors() -> PackedVector3Array:
 	if _terrain_mesh == null:
 		return PackedVector3Array()
 	if _terrain_mesh.has_method("get_placed_object_positions"):
-		var placed: PackedVector3Array = _terrain_mesh.get_placed_object_positions()
-		if not placed.is_empty():
-			return placed
-	if _terrain_mesh.has_method("get_visible_sector_centers"):
-		return _terrain_mesh.get_visible_sector_centers()
+		return _terrain_mesh.get_placed_object_positions()
 	return PackedVector3Array()

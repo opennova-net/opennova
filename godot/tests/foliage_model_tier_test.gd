@@ -30,8 +30,6 @@ func before_each() -> void:
 	# max Y 3 - a valid model-tier slot.
 	mesh.size = Vector3(2.0, 6.0, 2.0)
 
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 0
 	_dispatcher.foliage_defs = [def]
 	_dispatcher.slot_meshes = [mesh]
 	_dispatcher.height_sampler = Callable(self, "_sample_height")
@@ -75,16 +73,14 @@ func _sample_split_foliage_index(_world_x: float, _world_z: float) -> int:
 	return _split_foliage_index
 
 
-func _make_engine_centers_dispatcher() -> NovaFoliageDispatcher:
+func _make_far_dispatcher() -> NovaFoliageDispatcher:
 	var dispatcher := NovaFoliageDispatcher.new()
 	_own_dispatcher(dispatcher)
 	var def := NovaTerrainFoliageDef.new()
-	def.graphic = "test_engine_centers"
+	def.graphic = "test_far_pool"
 	def.match = 1
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2.0, 6.0, 2.0)
-	dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_ENGINE_CENTERS
-	dispatcher.engine_view_radius_fixed = 4 * 65536
 	dispatcher.foliage_defs = [def]
 	dispatcher.slot_meshes = [mesh]
 	dispatcher.height_sampler = Callable(self, "_sample_height")
@@ -93,13 +89,21 @@ func _make_engine_centers_dispatcher() -> NovaFoliageDispatcher:
 	return dispatcher
 
 
-func _far_placement_keys(dispatcher: NovaFoliageDispatcher) -> Array[String]:
-	var keys: Array[String] = []
-	for placement: Dictionary in dispatcher.get_far_tile_debug(0):
-		var center: Vector3 = placement.center
-		keys.append("%.6f,%.6f,%.9f" % [center.x, center.z, float(placement.yaw)])
-	keys.sort()
-	return keys
+# The cell that contains the origin camera: key = pack(0, 16) = 16 (a cell
+# keyed (kx, kz) covers x in [kx, kx+16], z in [kz-16, kz]).
+const ORIGIN_CELL_KEY := 16
+
+
+func _far_cell_node(dispatcher: NovaFoliageDispatcher, slot: int, key: int) -> MeshInstance3D:
+	return dispatcher.find_child("FarCell%d_%d" % [slot, key], false, false) as MeshInstance3D
+
+
+func _visible_model_draw_nodes(dispatcher: NovaFoliageDispatcher) -> Array:
+	var out: Array = []
+	for child in dispatcher.get_children():
+		if child is MultiMeshInstance3D and child.visible 				and String(child.name).begins_with("FoliageModelDraw"):
+			out.push_back(child)
+	return out
 
 
 # Camera looking down -Z (Godot forward); anchors sit on -Z so the engine
@@ -122,8 +126,8 @@ func test_depth_gate_blocks_near_anchors() -> void:
 		"An anchor at view depth < 38 must stamp no model instances [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7d50].")
 	assert_eq(_dispatcher.get_model_tile_debug(0).size(), 0,
 		"No debug instances below the depth gate.")
-	assert_null(_dispatcher.find_child("FoliageModelSlot0", false, false),
-		"No model MultiMesh child below the depth gate.")
+	assert_eq(_visible_model_draw_nodes(_dispatcher).size(), 0,
+		"No visible model draw batch below the depth gate.")
 
 
 func test_deep_anchor_stamps_bounded_instances() -> void:
@@ -135,10 +139,7 @@ func test_deep_anchor_stamps_bounded_instances() -> void:
 	assert_true(int(stats.model_instances) <= 21 * int(stats.model_tiles_emitted),
 		"No tile may exceed the witnessed 21-instance cap.")
 
-	var model_nodes: Array = []
-	for child in _dispatcher.get_children():
-		if child is MultiMeshInstance3D and String(child.name).begins_with("FoliageModelSlot0"):
-			model_nodes.push_back(child)
+	var model_nodes: Array = _visible_model_draw_nodes(_dispatcher)
 	assert_eq(model_nodes.size(), int(stats.model_tiles_emitted),
 		"The model tier renders one MultiMesh batch per tile draw.")
 	var rendered_instances := 0
@@ -243,19 +244,26 @@ func test_no_anchors_clears_model_tier() -> void:
 
 func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 	# [orig: generate_foliage_instances_0 @ 0x5ffdd0] FAR copies every source
-	# vertex for every accepted placement. It is not a synthetic ground patch.
+	# vertex for every accepted placement, baked once per 16u cell into the
+	# persistent pool [orig: Foliage_UpdateFarCellSlots @ 0x601b30].
 	_dispatch(FAR_DEPTH_ANCHOR)
-	var mmi := _dispatcher.find_child("FoliageSlot0", false, false) as MultiMeshInstance3D
-	assert_not_null(mmi, "The far tier renders through its own dynamic mesh batch.")
-	if mmi == null:
+	var mi := _far_cell_node(_dispatcher, 0, ORIGIN_CELL_KEY)
+	assert_not_null(mi, "The camera cell owns one baked far-cell mesh node.")
+	if mi == null:
 		return
-	var mm := mmi.multimesh
-	assert_eq(mm.instance_count, 1,
-		"The MultiMesh is only a wrapper around one retail-shaped dynamic vertex buffer.")
+	assert_true(mi.visible, "A collected cell's node is visible.")
 
 	var debug: Array = _dispatcher.get_far_tile_debug(0)
-	assert_eq(debug.size(), 36, "A permissive FAR cell accepts all 36 candidates.")
-	if debug.is_empty():
+	assert_gt(debug.size(), 0, "The 42u collect emits placements.")
+	assert_eq(debug.size() % 36, 0,
+		"Permissive FAR cells accept all 36 candidates each.")
+	var cell_placements: Array = []
+	for placement: Dictionary in debug:
+		if int(placement.cell_key) == ORIGIN_CELL_KEY:
+			cell_placements.push_back(placement)
+	assert_eq(cell_placements.size(), 36,
+		"The camera cell accepts all 36 candidates under permissive samplers.")
+	if cell_placements.is_empty():
 		return
 
 	var source_mesh := _dispatcher.slot_meshes[0] as Mesh
@@ -264,21 +272,21 @@ func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 	var source_uvs: PackedVector2Array = source_arrays[Mesh.ARRAY_TEX_UV]
 	var source_indices: PackedInt32Array = source_arrays[Mesh.ARRAY_INDEX]
 
-	var emitted_arrays := mm.mesh.surface_get_arrays(0)
+	var emitted_arrays := mi.mesh.surface_get_arrays(0)
 	var emitted_positions: PackedVector3Array = emitted_arrays[Mesh.ARRAY_VERTEX]
 	var emitted_colors: PackedColorArray = emitted_arrays[Mesh.ARRAY_COLOR]
 	var emitted_uvs: PackedVector2Array = emitted_arrays[Mesh.ARRAY_TEX_UV]
 	var emitted_indices: PackedInt32Array = emitted_arrays[Mesh.ARRAY_INDEX]
-	assert_eq(emitted_positions.size(), source_positions.size() * debug.size(),
-		"Every placement receives the complete authored source vertex array.")
+	assert_eq(emitted_positions.size(), source_positions.size() * cell_placements.size(),
+		"Every placement in the cell receives the complete authored source vertex array.")
 	assert_eq(emitted_colors.size(), emitted_positions.size(),
 		"Every emitted vertex carries the packed red wind weight.")
 	assert_eq(emitted_uvs.size(), emitted_positions.size(), "Source UVs are replicated.")
-	assert_eq(emitted_indices.size(), source_indices.size() * debug.size(),
+	assert_eq(emitted_indices.size(), source_indices.size() * cell_placements.size(),
 		"Source topology is replicated for every placement.")
 
-	for placement_index in range(mini(debug.size(), 3)):
-		var placement: Dictionary = debug[placement_index]
+	for placement_index in range(mini(cell_placements.size(), 3)):
+		var placement: Dictionary = cell_placements[placement_index]
 		var center: Vector3 = placement.center
 		var yaw: float = placement.yaw
 		for source_index in range(source_positions.size()):
@@ -299,20 +307,108 @@ func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
 				float(wind_byte) / 255.0, 0.00001,
 				"COLOR.r is clamp(trunc(sourceY*128),0,255), not terrain tint.")
 
-	if not source_indices.is_empty() and debug.size() > 1:
+	if not source_indices.is_empty() and cell_placements.size() > 1:
 		var vertex_stride := source_positions.size()
 		var index_stride := source_indices.size()
 		for i in range(index_stride):
 			assert_eq(emitted_indices[index_stride + i], source_indices[i] + vertex_stride,
 				"The next full-mesh copy offsets source indices by one vertex stride.")
 
-	var material := mmi.material_override as ShaderMaterial
-	assert_not_null(material, "The FAR batch owns a distinct shader material.")
+	var material := mi.material_override as ShaderMaterial
+	assert_not_null(material, "The FAR cells share the slot's FAR shader material.")
 	if material != null:
 		assert_true(material.shader.resource_path.ends_with("foliage_far.gdshader"),
-			"FAR no longer shares the MODEL ground-fit shader.")
-		assert_eq(float(material.get_shader_parameter("u_far_alpha_ref")), 180.0,
-			"The slot-wide FAR host explicitly approximates the high alpha-ref-180 pass.")
+			"FAR does not share the MODEL ground-fit shader.")
+	# The camera cell sits well inside 20u: full fade, high pass
+	# [orig: render_terrain_lightmaps @ 0x60a171 / 0x60a45d].
+	assert_almost_eq(float(mi.get_instance_shader_parameter("u_cell_fade")), 1.0, 0.000001,
+		"Cells inside distance 20 draw with c6.a = 1.")
+	assert_almost_eq(float(mi.get_instance_shader_parameter("u_cell_alpha_ref")), 180.0, 0.000001,
+		"Cells under distance 33 draw the high pass (alpha-test ref 180).")
+
+
+func test_far_pool_bakes_once_fades_by_distance_and_survives_reset() -> void:
+	# The witnessed slot-pool mechanics [orig: Foliage_UpdateFarCellSlots
+	# @ 0x601b30]: resident keys are only re-stamped; per-cell fade/pass state
+	# tracks the camera distance [orig: render_terrain_lightmaps @ 0x60a171].
+	var dispatcher := _make_far_dispatcher()
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var first: Dictionary = dispatcher.get_dispatch_stats()
+	assert_gt(int(first.far_cells_visible), 0, "The 42u disc collects cells.")
+	assert_eq(int(first.far_pool_misses), int(first.far_cells_visible),
+		"Every collected cell bakes exactly once on first sight.")
+	assert_eq(int(first.far_cells_baked), int(first.far_pool_misses),
+		"Bake count matches pool misses.")
+
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var second: Dictionary = dispatcher.get_dispatch_stats()
+	assert_eq(int(second.far_cells_baked), int(first.far_cells_baked),
+		"A steady frame re-bakes nothing - the pool serves every cell.")
+	assert_gt(int(second.far_pool_hits), 0, "Steady frames are pure pool hits.")
+
+	# Distance bands: fade 1 through 20; the low pass (ref 8) beyond 33.
+	var saw_full_fade := false
+	var saw_partial_fade := false
+	var saw_low_pass := false
+	for placement: Dictionary in dispatcher.get_far_tile_debug(0):
+		var distance := float(placement.distance)
+		var fade := float(placement.fade)
+		var ref := float(placement.alpha_ref)
+		assert_true(distance <= 42.0 + 0.001, "No placement comes from beyond the 42u collect gate.")
+		if distance <= 20.0:
+			assert_almost_eq(fade, 1.0, 0.000001, "c6.a = 1 through distance 20.")
+			saw_full_fade = true
+		else:
+			assert_almost_eq(fade, 1.0 - (distance - 20.0) / 22.0, 0.0001,
+				"c6.a = 1 - (d - 20)/22 beyond the knee.")
+			saw_partial_fade = true
+		if distance < 33.0:
+			assert_almost_eq(ref, 180.0, 0.000001, "High pass under 33.")
+		else:
+			assert_almost_eq(ref, 8.0, 0.000001, "Low pass at 33 and beyond.")
+			saw_low_pass = true
+	assert_true(saw_full_fade, "The disc contains full-fade cells.")
+	assert_true(saw_partial_fade, "The disc contains fading cells past 20u.")
+	assert_true(saw_low_pass, "The disc contains low-pass cells past 33u.")
+
+	# Leaving the disc hides the cells but keeps them pooled; returning is
+	# hit-only.
+	dispatcher.dispatch(Vector3(200.0, 0.0, 200.0), _camera_xform())
+	var away: Dictionary = dispatcher.get_dispatch_stats()
+	var origin_node := _far_cell_node(dispatcher, 0, ORIGIN_CELL_KEY)
+	assert_not_null(origin_node, "Out-of-range cells stay pooled.")
+	if origin_node != null:
+		assert_false(origin_node.visible, "Out-of-range cells are hidden, not freed.")
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var back: Dictionary = dispatcher.get_dispatch_stats()
+	assert_eq(int(back.far_cells_baked), int(away.far_cells_baked),
+		"Returning to pooled cells re-bakes nothing.")
+
+	dispatcher.reset()
+	assert_eq(dispatcher.get_cached_cells(), 0, "Reset drops the pool.")
+
+
+func test_far_only_requires_height_plus_surface_sampler() -> void:
+	var dispatcher := _make_far_dispatcher()
+	dispatcher.foliage_sampler = Callable()
+	dispatcher.dispatch(Vector3(8.0, 0.0, -8.0), _camera_xform())
+	assert_gt(dispatcher.get_far_tile_debug(0).size(), 0,
+		"FAR only requires height plus its raw surface sampler.")
+
+
+func test_reset_detaches_far_nodes_before_queue_free() -> void:
+	var dispatcher := _make_far_dispatcher()
+	dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	var far_node := _far_cell_node(dispatcher, 0, ORIGIN_CELL_KEY)
+	assert_not_null(far_node, "The fixture bakes the camera cell.")
+	if far_node == null:
+		return
+
+	dispatcher.reset()
+	assert_null(_far_cell_node(dispatcher, 0, ORIGIN_CELL_KEY),
+		"Reset removes the far cell nodes from the scene tree synchronously.")
+	assert_null(far_node.get_parent(),
+		"The queued far cell node is detached before deferred destruction.")
 
 
 func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
@@ -326,8 +422,6 @@ func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
 	def.match = 7
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2.0, 6.0, 2.0)
-	split.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	split.cell_grid_radius = 0
 	split.foliage_defs = [def]
 	split.slot_meshes = [mesh]
 	split.height_sampler = Callable(self, "_sample_height")
@@ -350,89 +444,20 @@ func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
 	split.reset()
 	split.dispatch(Vector3.ZERO, _camera_xform())
 	var far_debug: Array = split.get_far_tile_debug(0)
-	assert_eq(far_debug.size(), 36,
+	assert_gt(far_debug.size(), 0,
 		"The raw slot bit accepts FAR without any def.match translation.")
+	assert_eq(far_debug.size() % 36, 0,
+		"Permissive surface masks accept all 36 candidates per collected cell.")
 	assert_eq(split.get_model_tile_debug(0).size(), 0,
 		"A zero foliage-map index rejects MODEL even when FAR's surface mask matches.")
 	assert_gt(_split_surface_samples.size(), 0, "FAR queried the dedicated surface seam.")
 	if not far_debug.is_empty() and not _split_surface_samples.is_empty():
-		var first_sample := _split_surface_samples[0]
-		var sampled_center := Vector3(first_sample.x, 0.0, -first_sample.y)
-		var found_sampled_center := false
-		for placement: Dictionary in far_debug:
-			if sampled_center.distance_to(placement.center) < 0.0001:
-				found_sampled_center = true
+		var placement: Dictionary = far_debug[0]
+		var center: Vector3 = placement.center
+		var found_boundary_sample := false
+		for sample in _split_surface_samples:
+			if absf(sample.x - center.x) < 0.0001 and absf(sample.y + center.z) < 0.0001:
+				found_boundary_sample = true
 				break
-		assert_true(found_sampled_center,
+		assert_true(found_boundary_sample,
 			"The surface seam receives (world X, -world Z) for an emitted placement.")
-
-
-func test_engine_centers_compose_independent_center_caches() -> void:
-	# Two nearby centers address the same four cell keys but have different
-	# radius-gated candidate sets. Each visible center therefore needs its own
-	# retail Dispatcher cache; sharing by slot replays the first center's set.
-	const CENTER_A := Vector3(8.0, 0.0, -8.0)
-	const CENTER_B := Vector3(12.0, 0.0, -8.0)
-
-	var only_a := _make_engine_centers_dispatcher()
-	only_a.dispatch_centers(PackedVector3Array([CENTER_A]))
-	var only_a_keys := _far_placement_keys(only_a)
-	assert_gt(only_a_keys.size(), 0, "The first center fixture emits FAR placements.")
-
-	var only_b := _make_engine_centers_dispatcher()
-	only_b.dispatch_centers(PackedVector3Array([CENTER_B]))
-	var only_b_keys := _far_placement_keys(only_b)
-	assert_gt(only_b_keys.size(), 0, "The second center fixture emits FAR placements.")
-	assert_ne(only_a_keys, only_b_keys,
-		"The nearby centers deliberately have distinct radius-gated candidate sets.")
-
-	var expected: Array[String] = only_a_keys.duplicate()
-	expected.append_array(only_b_keys)
-	expected.sort()
-
-	var together := _make_engine_centers_dispatcher()
-	together.dispatch_centers(PackedVector3Array([CENTER_A, CENTER_B]))
-	assert_eq(_far_placement_keys(together), expected,
-		"Multi-center output equals the composition of independently dispatched centers.")
-	assert_eq(together.get_cached_cells(),
-		only_a.get_cached_cells() + only_b.get_cached_cells(),
-		"Cache accounting includes every independently owned center state.")
-
-	var duplicate := _make_engine_centers_dispatcher()
-	duplicate.dispatch_centers(PackedVector3Array([CENTER_A, CENTER_A]))
-	var duplicate_expected: Array[String] = only_a_keys.duplicate()
-	duplicate_expected.append_array(only_a_keys)
-	duplicate_expected.sort()
-	assert_eq(_far_placement_keys(duplicate), duplicate_expected,
-		"Duplicate inputs preserve caller multiplicity.")
-	assert_eq(duplicate.get_cached_cells(), only_a.get_cached_cells(),
-		"Duplicate coordinates share one center cache rather than growing residency.")
-
-	together.dispatch_centers(PackedVector3Array([CENTER_A]))
-	assert_eq(together.get_cached_cells(), only_a.get_cached_cells(),
-		"Centers absent from the current dispatch are retired.")
-	together.reset()
-	assert_eq(together.get_cached_cells(), 0, "Reset clears all per-center cache state.")
-
-
-func test_engine_centers_far_uses_surface_sampler_without_foliage_sampler() -> void:
-	var dispatcher := _make_engine_centers_dispatcher()
-	dispatcher.foliage_sampler = Callable()
-	dispatcher.dispatch_centers(PackedVector3Array([Vector3(8.0, 0.0, -8.0)]))
-	assert_gt(dispatcher.get_far_tile_debug(0).size(), 0,
-		"ENGINE_CENTERS FAR only requires height plus its raw surface sampler.")
-
-
-func test_reset_detaches_far_nodes_before_queue_free() -> void:
-	var dispatcher := _make_engine_centers_dispatcher()
-	dispatcher.dispatch_centers(PackedVector3Array([Vector3(8.0, 0.0, -8.0)]))
-	var far_node := dispatcher.find_child("FoliageSlot0", false, false)
-	assert_not_null(far_node, "The fixture creates a FAR batch node.")
-	if far_node == null:
-		return
-
-	dispatcher.reset()
-	assert_null(dispatcher.find_child("FoliageSlot0", false, false),
-		"Reset removes the FAR node from the scene tree synchronously.")
-	assert_null(far_node.get_parent(),
-		"The queued FAR node is detached before deferred destruction.")

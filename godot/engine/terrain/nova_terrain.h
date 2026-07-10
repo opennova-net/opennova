@@ -53,7 +53,6 @@ private:
 	Transform3D last_transform[PATCH_POOL_SIZE];
 	bool patch_visible[PATCH_POOL_SIZE] = {};
 	int patches_active = 0;
-	PackedVector3Array foliage_dispatch_centers;
 
 	// Shader
 	Ref<Shader> terrain_shader;
@@ -138,7 +137,6 @@ public:
 	Dictionary get_traversal_stats() const;
 	PackedInt32Array get_lod_distribution() const;
 	int get_patches_active() const;
-	PackedVector3Array get_foliage_dispatch_centers() const;
 
 	void set_debug_no_frustum(bool v);
 	bool get_debug_no_frustum() const;

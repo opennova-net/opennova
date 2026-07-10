@@ -75,16 +75,17 @@ uint32_t pack_cell_key(Fixed16_16 cell_x_fixed, Fixed16_16 cell_z_fixed) noexcep
 //
 //   slot_index:       foliage def slot (0..3)
 //   cell_key:         packed 32-bit cell key (see pack_cell_key)
-//   view_center_x/z:  16.16 fixed world coords of the visibility origin
-//   view_radius:      16.16 fixed L-infinity radius; candidates outside reject
 //
 // Returns the populated result. Count is in [0, FAR_CELL_CAP]. Unlike the
 // MODEL tier's separate MODEL_TILE_CAP=21, all 36 FAR candidates may survive.
+// The retail generator takes no view center or radius: it bakes the whole
+// cell once into its slot-pool VB, and visibility is the caller's collect
+// gate [orig: generate_foliage_instances_0 @ 0x5ffdd0 (args: key, VB, IB,
+// out counts); Foliage_UpdateFarCellSlots @ 0x601b30]. The former L-infinity
+// cull parameters were jodemo-era (sub_5C1940) and left with that
+// architecture.
 PlacementResult place_cell(int slot_index,
                            uint32_t cell_key,
-                           Fixed16_16 view_center_x,
-                           Fixed16_16 view_center_z,
-                           int32_t view_radius,
                            const PlacementConfig &config,
                            const PlacementSamplers &samplers) noexcept;
 

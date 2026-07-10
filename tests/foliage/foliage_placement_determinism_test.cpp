@@ -57,14 +57,10 @@ int main() {
 	const uint32_t key_a = pack_cell_key(0x00100000, 0x00200000);
 	const uint32_t key_b = pack_cell_key(0x00200000, 0x00100000);
 
-	const int32_t huge_radius = 0x40000000;  // accept everything
-	const Fixed16_16 centre_x = 0x00100000;
-	const Fixed16_16 centre_z = 0x00200000;
-
-	const auto r1 = place_cell(0, key_a, centre_x, centre_z, huge_radius, cfg, samplers);
-	const auto r2 = place_cell(0, key_a, centre_x, centre_z, huge_radius, cfg, samplers);
+	const auto r1 = place_cell(0, key_a, cfg, samplers);
+	const auto r2 = place_cell(0, key_a, cfg, samplers);
 	if (!expect(same_result(r1, r2), "same (slot, cell_key) must yield identical placements")) return 1;
-	if (!expect(r1.count > 0, "permissive samplers + huge radius must place at least one instance")) return 1;
+	if (!expect(r1.count > 0, "permissive samplers must place at least one instance")) return 1;
 
 	// Independent float32 golden for candidate 0 of key 0x00100020.
 	// [orig: generate_foliage_instances_0 @ 0x5ffdd0]
@@ -78,12 +74,12 @@ int main() {
 	if (!expect(float_bits(candidate0.rotation_radians) == 0x407F00ACu,
 	            "candidate 0 yaw matches the retail float32 golden")) return 1;
 
-	const auto r3 = place_cell(0, key_b, centre_x, centre_z, huge_radius, cfg, samplers);
+	const auto r3 = place_cell(0, key_b, cfg, samplers);
 	if (!expect(!same_result(r1, r3), "different cell keys must produce different placements")) return 1;
 
 	// Slot selection changes acceptance gates, not the deterministic PRNG stream.
 	// This permissive fixture only needs to remain within the FAR capacity.
-	const auto r4 = place_cell(1, key_a, centre_x, centre_z, huge_radius, cfg, samplers);
+	const auto r4 = place_cell(1, key_a, cfg, samplers);
 	if (!expect(r4.count >= 0 && r4.count <= FAR_CELL_CAP, "slot 1 output within bounds")) return 1;
 
 	std::printf("OK: foliage placement is deterministic per (slot, cell_key)\n");

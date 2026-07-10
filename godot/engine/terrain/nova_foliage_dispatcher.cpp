@@ -39,6 +39,45 @@ constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
 // The XZ counterpart is opennova::foliage::MODEL_FOOTPRINT_SCALE (0.75).
 constexpr float MODEL_RENDER_HEIGHT_SCALE = 0.5f;
 
+// FAR collect/draw constants, all witnessed in retail Jointops.exe:
+//   - 42.0: both the traversal pregate (flt_7DEA3C @ 0x60906d) and the
+//     per-leaf clamped-AABB distance gate (@ 0x603f5c) that admit a cell
+//     into the foliage key list.
+//   - 128: the per-frame cap of both collect lists (@ 0x603f98 / 0x603ff1).
+//   - fade: c6.a = 1 through distance 20 (flt_7D8E60), then
+//     1 - (d - 20) * (1/22) (flt_7DF1BC) [orig: @ 0x60a45d..0x60a483].
+//   - pass split: high under 33.0 (flt_7DF1C0 @ 0x60a171), alpha-test ref
+//     180 high / 8 low [orig: Terrain_SetupSectorModelDraw @ 0x6008f5 /
+//     0x600931].
+constexpr float FAR_COLLECT_RADIUS = 42.0f;
+constexpr int FAR_COLLECT_CAP = 128;
+constexpr float FAR_FADE_START = 20.0f;
+constexpr float FAR_FADE_INV_RANGE = 1.0f / 22.0f;
+constexpr float FAR_HIGH_PASS_DISTANCE = 33.0f;
+constexpr float FAR_ALPHA_REF_HIGH = 180.0f;
+constexpr float FAR_ALPHA_REF_LOW = 8.0f;
+// Host pool residency. Retail keeps baked cells resident in per-def VB slot
+// pools and LRU-evicts by frame stamp [orig: Foliage_UpdateFarCellSlots
+// @ 0x601b30]; the collect cap bounds the set a frame can touch, so the host
+// sizes its pool to it.
+constexpr size_t FAR_POOL_CAP = 128;
+
+constexpr float FOLIAGE_CELL_SIZE = 16.0f;
+
+inline float far_fade_for_distance(float distance) {
+	// [orig: render_terrain_lightmaps @ 0x60a45d..0x60a483] c6.a: 1 through
+	// 20, then 1 - (d - 20)/22 (reaches 0 exactly at the 42.0 collect edge).
+	if (distance <= FAR_FADE_START) {
+		return 1.0f;
+	}
+	return std::max(0.0f, 1.0f - (distance - FAR_FADE_START) * FAR_FADE_INV_RANGE);
+}
+
+inline float far_alpha_ref_for_distance(float distance) {
+	// [orig: render_terrain_lightmaps @ 0x60a171] high pass under 33.0.
+	return distance < FAR_HIGH_PASS_DISTANCE ? FAR_ALPHA_REF_HIGH : FAR_ALPHA_REF_LOW;
+}
+
 } // namespace
 
 NovaFoliageDispatcher::NovaFoliageDispatcher() = default;
@@ -77,28 +116,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &NovaFoliageDispatcher::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("set_colormap_source", "data"), &NovaFoliageDispatcher::set_colormap_source);
 	ClassDB::bind_method(D_METHOD("get_colormap_source"), &NovaFoliageDispatcher::get_colormap_source);
-	ClassDB::bind_method(D_METHOD("set_terrain_tint", "tint"), &NovaFoliageDispatcher::set_terrain_tint);
-	ClassDB::bind_method(D_METHOD("get_terrain_tint"), &NovaFoliageDispatcher::get_terrain_tint);
-	ClassDB::bind_method(D_METHOD("set_dispatch_algorithm", "algorithm"), &NovaFoliageDispatcher::set_dispatch_algorithm);
-	ClassDB::bind_method(D_METHOD("get_dispatch_algorithm"), &NovaFoliageDispatcher::get_dispatch_algorithm);
-	ClassDB::bind_method(D_METHOD("set_cell_grid_radius", "radius"), &NovaFoliageDispatcher::set_cell_grid_radius);
-	ClassDB::bind_method(D_METHOD("get_cell_grid_radius"), &NovaFoliageDispatcher::get_cell_grid_radius);
-	ClassDB::bind_method(D_METHOD("set_preview_cell_radius", "radius"), &NovaFoliageDispatcher::set_preview_cell_radius);
-	ClassDB::bind_method(D_METHOD("get_preview_cell_radius"), &NovaFoliageDispatcher::get_preview_cell_radius);
-	ClassDB::bind_method(D_METHOD("set_lru_capacity", "capacity"), &NovaFoliageDispatcher::set_lru_capacity);
-	ClassDB::bind_method(D_METHOD("get_lru_capacity"), &NovaFoliageDispatcher::get_lru_capacity);
-	ClassDB::bind_method(D_METHOD("set_quad_half_width", "width"), &NovaFoliageDispatcher::set_quad_half_width);
-	ClassDB::bind_method(D_METHOD("get_quad_half_width"), &NovaFoliageDispatcher::get_quad_half_width);
-	ClassDB::bind_method(D_METHOD("set_surface_offset", "offset"), &NovaFoliageDispatcher::set_surface_offset);
-	ClassDB::bind_method(D_METHOD("get_surface_offset"), &NovaFoliageDispatcher::get_surface_offset);
-	ClassDB::bind_method(D_METHOD("set_engine_view_radius_fixed", "radius"),
-	                     &NovaFoliageDispatcher::set_engine_view_radius_fixed);
-	ClassDB::bind_method(D_METHOD("get_engine_view_radius_fixed"),
-	                     &NovaFoliageDispatcher::get_engine_view_radius_fixed);
 	ClassDB::bind_method(D_METHOD("dispatch", "centre", "view_xform"),
 	                     &NovaFoliageDispatcher::dispatch, DEFVAL(Transform3D()));
-	ClassDB::bind_method(D_METHOD("dispatch_centers", "centers", "view_xform"),
-	                     &NovaFoliageDispatcher::dispatch_centers, DEFVAL(Transform3D()));
 	ClassDB::bind_method(D_METHOD("reset"), &NovaFoliageDispatcher::reset);
 	ClassDB::bind_method(D_METHOD("get_total_instances"), &NovaFoliageDispatcher::get_total_instances);
 	ClassDB::bind_method(D_METHOD("get_cached_cells"), &NovaFoliageDispatcher::get_cached_cells);
@@ -118,22 +137,8 @@ void NovaFoliageDispatcher::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "surface_sampler"), "set_surface_sampler", "get_surface_sampler");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_terrain_data", "get_terrain_data");
-	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "terrain_tint"), "set_terrain_tint", "get_terrain_tint");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source", PROPERTY_HINT_RESOURCE_TYPE, "NovaTerrainData"),
 	             "set_colormap_source", "get_colormap_source");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "dispatch_algorithm", PROPERTY_HINT_ENUM,
-	                          "Engine Centers,Cell Grid"),
-	             "set_dispatch_algorithm", "get_dispatch_algorithm");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_grid_radius"), "set_cell_grid_radius", "get_cell_grid_radius");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "preview_cell_radius"), "set_preview_cell_radius", "get_preview_cell_radius");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "lru_capacity"), "set_lru_capacity", "get_lru_capacity");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "quad_half_width"), "set_quad_half_width", "get_quad_half_width");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "surface_offset"), "set_surface_offset", "get_surface_offset");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "engine_view_radius_fixed"),
-	             "set_engine_view_radius_fixed", "get_engine_view_radius_fixed");
-
-	BIND_CONSTANT(DISPATCH_ALGORITHM_ENGINE_CENTERS);
-	BIND_CONSTANT(DISPATCH_ALGORITHM_CELL_GRID);
 }
 
 void NovaFoliageDispatcher::set_foliage_defs(const Array &p_defs) {
@@ -161,14 +166,19 @@ Array NovaFoliageDispatcher::get_slot_meshes() const { return slot_meshes_; }
 
 void NovaFoliageDispatcher::set_slot_fd_textures(const Array &p_textures) {
 	slot_fd_textures_ = p_textures;
-	// Texture-only swap: refresh materials, keep every placement cache.
+	// Texture-only swap: refresh materials, keep every placement cache. The
+	// FAR pool nodes re-adopt the recreated shared material on their next
+	// active frame; MODEL draw nodes rebuild their per-draw clones.
 	for (Ref<ShaderMaterial> &material : foliage_materials_) {
 		material.unref();
 	}
 	for (Ref<ShaderMaterial> &material : foliage_model_materials_) {
 		material.unref();
 	}
-	mm_dirty_ = true;
+	for (ModelDrawNodeState &state : model_draw_node_states_) {
+		state.material.unref();
+		state.slot = -1;  // force a refresh on the next update
+	}
 }
 
 Array NovaFoliageDispatcher::get_slot_fd_textures() const { return slot_fd_textures_; }
@@ -196,8 +206,14 @@ bool NovaFoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
 	const int w = p_image->get_width();
 	const int h = p_image->get_height();
 	PackedByteArray data = p_image->get_data();
-	if (data.size() < static_cast<int64_t>(w) * h * 4) {
+	const int64_t level0_size = static_cast<int64_t>(w) * h * 4;
+	if (data.size() < level0_size) {
 		return false;
+	}
+	if (data.size() > level0_size) {
+		// Mipmapped input: bake level 0 and drop the mip tail (callers
+		// regenerate mips from the baked result).
+		data.resize(level0_size);
 	}
 	if (!opennova::foliage::bake_fd_rgba(data.ptrw(), w, h)) {
 		return false;
@@ -208,7 +224,7 @@ bool NovaFoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
 
 void NovaFoliageDispatcher::set_height_sampler(const Callable &p_sampler) {
 	height_sampler_ = p_sampler;
-	// FAR vertices bake the sampled terrain height into their dynamic mesh.
+	// FAR vertices bake the sampled terrain height into their cell meshes.
 	reset();
 }
 Callable NovaFoliageDispatcher::get_height_sampler() const { return height_sampler_; }
@@ -245,82 +261,9 @@ void NovaFoliageDispatcher::set_colormap_source(const Ref<NovaTerrainData> &p_da
 	for (Ref<ShaderMaterial> &material : foliage_materials_) {
 		material.unref();
 	}
-	mm_dirty_ = true;
-}
-
-void NovaFoliageDispatcher::set_terrain_tint(const Color &p_tint) {
-	if (terrain_tint_ == p_tint) {
-		return;
-	}
-	// Compatibility surface only. The earlier terrain-color interpretation
-	// was disproven by the unconditional red wind-weight write @ 0x60030A.
-	terrain_tint_ = p_tint;
-}
-
-Color NovaFoliageDispatcher::get_terrain_tint() const {
-	return terrain_tint_;
 }
 
 Ref<NovaTerrainData> NovaFoliageDispatcher::get_colormap_source() const { return colormap_source_; }
-
-void NovaFoliageDispatcher::set_dispatch_algorithm(int p_algorithm) {
-	const int clamped = std::clamp(p_algorithm,
-	                               static_cast<int>(DISPATCH_ALGORITHM_ENGINE_CENTERS),
-	                               static_cast<int>(DISPATCH_ALGORITHM_CELL_GRID));
-	if (dispatch_algorithm_ == clamped) {
-		return;
-	}
-	dispatch_algorithm_ = clamped;
-	reset();
-}
-
-int NovaFoliageDispatcher::get_dispatch_algorithm() const { return dispatch_algorithm_; }
-
-void NovaFoliageDispatcher::set_cell_grid_radius(int p_radius) {
-	const int clamped = p_radius < 0 ? 0 : p_radius;
-	if (cell_grid_radius_ == clamped) {
-		return;
-	}
-	cell_grid_radius_ = clamped;
-	reset();
-}
-
-int NovaFoliageDispatcher::get_cell_grid_radius() const { return cell_grid_radius_; }
-
-void NovaFoliageDispatcher::set_preview_cell_radius(int p_radius) {
-	set_cell_grid_radius(p_radius);
-}
-
-int NovaFoliageDispatcher::get_preview_cell_radius() const { return get_cell_grid_radius(); }
-
-void NovaFoliageDispatcher::set_lru_capacity(int p_capacity) {
-	lru_capacity_ = p_capacity < 1 ? 1 : p_capacity;
-	_invalidate_dispatch_coverage();
-}
-
-int NovaFoliageDispatcher::get_lru_capacity() const { return lru_capacity_; }
-
-void NovaFoliageDispatcher::set_quad_half_width(float p_width) {
-	// Compatibility surface: retail FAR emits the authored mesh at XZ scale 1.
-	quad_half_width_ = p_width;
-}
-
-float NovaFoliageDispatcher::get_quad_half_width() const { return quad_half_width_; }
-
-void NovaFoliageDispatcher::set_surface_offset(float p_offset) {
-	// Compatibility surface: retail anchors every source vertex directly at
-	// terrain_height + source_y*0.5, with no extra lift.
-	surface_offset_ = p_offset;
-}
-
-float NovaFoliageDispatcher::get_surface_offset() const { return surface_offset_; }
-
-void NovaFoliageDispatcher::set_engine_view_radius_fixed(int p_radius) {
-	engine_view_radius_fixed_ = p_radius < 0 ? 0 : p_radius;
-	reset();
-}
-
-int NovaFoliageDispatcher::get_engine_view_radius_fixed() const { return engine_view_radius_fixed_; }
 
 bool NovaFoliageDispatcher::_has_sampling_source() const {
 	return terrain_data_.is_valid() ||
@@ -329,16 +272,9 @@ bool NovaFoliageDispatcher::_has_sampling_source() const {
 }
 
 void NovaFoliageDispatcher::reset() {
-	lru_.clear();
-	touch_counter_ = 0;
 	dispatch_stats_ = DispatchStats{};
-	_invalidate_dispatch_coverage();
-	engine_frame_counter_ = 0;
-	render_algorithm_ = dispatch_algorithm_;
-	engine_center_states_.clear();
-	for (auto &slot_placements : engine_placements_) {
-		slot_placements.clear();
-	}
+	far_frame_counter_ = 0;
+	far_visible_.clear();
 	model_frame_counter_ = 0;
 	model_wind_counter_ = 0;
 	for (auto &dispatcher : model_dispatchers_) {
@@ -348,33 +284,25 @@ void NovaFoliageDispatcher::reset() {
 		slot_instances.clear();
 	}
 	model_draw_batches_.clear();
-	mm_dirty_ = true;
 	_clear_children();
 }
 
 int NovaFoliageDispatcher::get_cached_cells() const {
-	if (render_algorithm_ == DISPATCH_ALGORITHM_ENGINE_CENTERS) {
-		int total = 0;
-		for (const auto &entry : engine_center_states_) {
-			total += entry.second.cached_cells();
-		}
-		return total;
+	int total = 0;
+	for (const auto &pool : far_cells_) {
+		total += static_cast<int>(pool.size());
 	}
-	return static_cast<int>(lru_.size());
+	return total;
 }
 
 int NovaFoliageDispatcher::get_total_instances() const {
-	if (render_algorithm_ == DISPATCH_ALGORITHM_ENGINE_CENTERS) {
-		int total = 0;
-		for (const auto &slot_instances : engine_placements_) {
-			total += static_cast<int>(slot_instances.size());
-		}
-		return total;
-	}
-
 	int total = 0;
-	for (const auto &kv : lru_) {
-		total += static_cast<int>(kv.second.placements.size());
+	for (const auto &pool : far_cells_) {
+		for (const auto &kv : pool) {
+			if (kv.second.active) {
+				total += static_cast<int>(kv.second.placements.size());
+			}
+		}
 	}
 	return total;
 }
@@ -382,17 +310,18 @@ int NovaFoliageDispatcher::get_total_instances() const {
 Dictionary NovaFoliageDispatcher::get_dispatch_stats() const {
 	Dictionary out;
 	out["dispatch_calls"] = dispatch_stats_.dispatch_calls;
-	out["coverage_skips"] = dispatch_stats_.coverage_skips;
-	out["rebuilt_slots"] = dispatch_stats_.rebuilt_slots;
-	out["instance_uploads"] = dispatch_stats_.instance_uploads;
-	out["cell_cache_hits"] = dispatch_stats_.cell_cache_hits;
-	out["cell_cache_misses"] = dispatch_stats_.cell_cache_misses;
+	out["far_cells_visible"] = dispatch_stats_.far_cells_visible;
+	out["far_pool_hits"] = dispatch_stats_.far_pool_hits;
+	out["far_pool_misses"] = dispatch_stats_.far_pool_misses;
+	out["far_cells_baked"] = dispatch_stats_.far_cells_baked;
+	out["far_instances_baked"] = dispatch_stats_.far_instances_baked;
 	out["cached_cells"] = get_cached_cells();
 	out["total_instances"] = get_total_instances();
 	// Model tier.
 	out["model_anchors_in_range"] = dispatch_stats_.model_anchors_in_range;
 	out["model_tiles_emitted"] = dispatch_stats_.model_tiles_emitted;
 	out["model_instances"] = dispatch_stats_.model_instances;
+	out["model_uploads"] = dispatch_stats_.model_uploads;
 	int64_t model_hits = 0;
 	int64_t model_misses = 0;
 	int64_t model_regens = 0;
@@ -450,6 +379,7 @@ Array NovaFoliageDispatcher::get_model_draw_debug() const {
 		d["draw_index"] = i;
 		d["slot"] = batch.slot;
 		d["tile_key"] = static_cast<int64_t>(batch.tile_key);
+		d["generation"] = batch.generation;
 		d["anchor"] = batch.anchor;
 		d["view_depth"] = batch.view_depth;
 		d["anchor_distance"] = batch.anchor_distance;
@@ -467,34 +397,26 @@ Array NovaFoliageDispatcher::get_far_tile_debug(int p_slot) const {
 	if (p_slot < 0 || p_slot >= opennova::FOLIAGE_MAX_DEFS) {
 		return out;
 	}
-	auto emit = [&out](
-	                const std::vector<opennova::foliage::PlacementInstance> &placements) {
-		for (const auto &placement : placements) {
+	for (const auto &kv : far_cells_[p_slot]) {
+		const FarCellEntry &entry = kv.second;
+		if (!entry.active) {
+			continue;
+		}
+		for (const auto &placement : entry.placements) {
 			Dictionary d;
 			d["center"] = Vector3(
 			    static_cast<float>(placement.world_x_fixed) * opennova::foliage::FIXED_TO_FLOAT,
 			    0.0f,
 			    static_cast<float>(placement.world_z_fixed) * opennova::foliage::FIXED_TO_FLOAT);
 			d["yaw"] = placement.rotation_radians;
+			d["cell_key"] = static_cast<int64_t>(kv.first);
+			d["distance"] = entry.distance;
+			d["fade"] = far_fade_for_distance(entry.distance);
+			d["alpha_ref"] = far_alpha_ref_for_distance(entry.distance);
 			out.push_back(d);
-		}
-	};
-	if (render_algorithm_ == DISPATCH_ALGORITHM_ENGINE_CENTERS) {
-		emit(engine_placements_[p_slot]);
-	} else {
-		for (const auto &kv : lru_) {
-			if (kv.first.slot == p_slot) {
-				emit(kv.second.placements);
-			}
 		}
 	}
 	return out;
-}
-
-void NovaFoliageDispatcher::_invalidate_dispatch_coverage() {
-	last_cell_grid_base_valid_ = false;
-	last_cell_grid_base_x_ = 0;
-	last_cell_grid_base_z_ = 0;
 }
 
 void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
@@ -503,42 +425,17 @@ void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
 		return;
 	}
 
-	// FAR coverage skip: unchanged 16u-cell check. The model tier still
-	// ticks below (its stagger/cache is frame-driven and its anchors move
-	// independently of the FAR coverage cell).
-	bool far_coverage_current = false;
-	if (dispatch_algorithm_ == DISPATCH_ALGORITHM_CELL_GRID && terrain_data_.is_valid() &&
-	    render_algorithm_ == DISPATCH_ALGORITHM_CELL_GRID && !mm_dirty_) {
-		const int base_x = static_cast<int>(std::floor(centre.x / 16.0f) * 16.0f);
-		const int base_z = static_cast<int>(std::floor(centre.z / 16.0f) * 16.0f + 16.0f);
-		if (last_cell_grid_base_valid_ &&
-		    last_cell_grid_base_x_ == base_x &&
-		    last_cell_grid_base_z_ == base_z) {
-			++dispatch_stats_.coverage_skips;
-			far_coverage_current = true;
-		}
-	}
-
 	Dictionary defs_by_match = _build_defs_by_match();
 	if (!_has_sampling_source()) {
 		return;
 	}
 
-	if (!far_coverage_current) {
-		if (dispatch_algorithm_ == DISPATCH_ALGORITHM_CELL_GRID) {
-			_dispatch_cell_grid(centre);
-		} else {
-			PackedVector3Array centers;
-			centers.push_back(centre);
-			_dispatch_engine_centers(centers, view_xform);
-		}
-	}
+	_dispatch_far_tier(centre);
 
-	// FAR geometry is static until placement coverage changes, but the retail
-	// wind phase advances every draw. Refresh the four small material parameter
-	// sets even when CELL_GRID legitimately skips a mesh rebuild.
+	// The FAR wind phase advances every draw; refresh the small per-slot
+	// material parameter sets each frame.
 	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
-		if (mm_by_slot_[s] != nullptr) {
+		if (foliage_materials_[s].is_valid()) {
 			_update_slot_material(s);
 		}
 	}
@@ -546,86 +443,242 @@ void NovaFoliageDispatcher::dispatch(Vector3 centre, Transform3D view_xform) {
 	_dispatch_model_tier(view_xform, defs_by_match);
 }
 
-void NovaFoliageDispatcher::dispatch_centers(PackedVector3Array centers, Transform3D view_xform) {
-	++dispatch_stats_.dispatch_calls;
-	if (foliage_defs_.is_empty() || centers.is_empty()) {
-		return;
-	}
+// --- The FAR tier ------------------------------------------------------------
 
-	Dictionary defs_by_match = _build_defs_by_match();
-	if (!_has_sampling_source()) {
-		return;
+float NovaFoliageDispatcher::_sample_height_world(float p_world_x, float p_world_z) const {
+	if (NovaTerrainData *td = terrain_data_.ptr()) {
+		return td->get_height_world_bilinear(Vector3(p_world_x, 0.0f, p_world_z));
 	}
-
-	_dispatch_engine_centers(centers, view_xform);
-	_dispatch_model_tier(view_xform, defs_by_match);
+	if (height_sampler_.is_valid()) {
+		Array args;
+		args.push_back(p_world_x);
+		args.push_back(p_world_z);
+		return static_cast<float>(static_cast<double>(height_sampler_.callv(args)));
+	}
+	return INVALID_HEIGHT_THRESHOLD;
 }
 
-void NovaFoliageDispatcher::_dispatch_cell_grid(Vector3 centre) {
-	render_algorithm_ = DISPATCH_ALGORITHM_CELL_GRID;
-	++touch_counter_;
+void NovaFoliageDispatcher::_collect_far_cells(const Vector3 &camera_pos) {
+	// Host analog of the traversal collect [orig: Terrain_TraverseQuadtreeNode
+	// @ 0x60905c -> Terrain_CollectNearFoliagePatches @ 0x603e60]: every 16u
+	// leaf cell whose clamped-box 3D distance from the camera is <= 42.0 joins
+	// the frame's key list (<= 128). Retail measures leaf AABBs during the
+	// frustum-culled traversal; the host enumerates the 42u disc directly and
+	// lets Godot's per-node culling drop the off-screen draws, and it uses the
+	// terrain height under the cell center as the leaf's Y metric.
+	far_visible_.clear();
 
-	// CELL_GRID algorithm: scan a wider 16u cell grid around the supplied center.
-	const float base_x = std::floor(centre.x / 16.0f) * 16.0f;
-	const float base_z = std::floor(centre.z / 16.0f) * 16.0f + 16.0f;
-	last_cell_grid_base_valid_ = true;
-	last_cell_grid_base_x_ = static_cast<int>(base_x);
-	last_cell_grid_base_z_ = static_cast<int>(base_z);
+	const float r = FAR_COLLECT_RADIUS;
+	// A cell keyed (kx, kz) covers world x in [kx, kx+16] and z in [kz-16, kz]
+	// (the witnessed +16 Z key bias; the placement B axis runs negative world
+	// Z).
+	const int kx_min = static_cast<int>(std::floor((camera_pos.x - r) / FOLIAGE_CELL_SIZE)) * 16;
+	const int kx_max = static_cast<int>(std::floor((camera_pos.x + r) / FOLIAGE_CELL_SIZE)) * 16;
+	const int kz_min = static_cast<int>(std::floor((camera_pos.z - r) / FOLIAGE_CELL_SIZE)) * 16 + 16;
+	const int kz_max = static_cast<int>(std::floor((camera_pos.z + r) / FOLIAGE_CELL_SIZE)) * 16 + 16;
 
-	const int num_slots = foliage_defs_.size();
-	for (int slot_index = 0; slot_index < num_slots && slot_index < opennova::FOLIAGE_MAX_DEFS; ++slot_index) {
-		Ref<NovaTerrainFoliageDef> def = foliage_defs_[slot_index];
-		if (def.is_null()) {
-			continue;
-		}
-		for (int dz = -cell_grid_radius_; dz <= cell_grid_radius_; ++dz) {
-			for (int dx = -cell_grid_radius_; dx <= cell_grid_radius_; ++dx) {
-				const int cell_x = static_cast<int>(base_x) + dx * 16;
-				const int cell_z = static_cast<int>(base_z) + dz * 16;
+	for (int kz = kz_min; kz <= kz_max; kz += 16) {
+		for (int kx = kx_min; kx <= kx_max; kx += 16) {
+			// Clamped-box XZ distance to the cell footprint.
+			float dx = 0.0f;
+			if (camera_pos.x < static_cast<float>(kx)) {
+				dx = static_cast<float>(kx) - camera_pos.x;
+			} else if (camera_pos.x > static_cast<float>(kx) + FOLIAGE_CELL_SIZE) {
+				dx = camera_pos.x - (static_cast<float>(kx) + FOLIAGE_CELL_SIZE);
+			}
+			float dz = 0.0f;
+			if (camera_pos.z < static_cast<float>(kz) - FOLIAGE_CELL_SIZE) {
+				dz = (static_cast<float>(kz) - FOLIAGE_CELL_SIZE) - camera_pos.z;
+			} else if (camera_pos.z > static_cast<float>(kz)) {
+				dz = camera_pos.z - static_cast<float>(kz);
+			}
+			if (dx * dx + dz * dz > r * r) {
+				continue;
+			}
 
-				CellKey key{cell_x, cell_z, slot_index};
-				auto it = lru_.find(key);
-				if (it != lru_.end()) {
-					it->second.touch = touch_counter_;
-					++dispatch_stats_.cell_cache_hits;
-					continue;
-				}
-				++dispatch_stats_.cell_cache_misses;
+			// Y metric: terrain height under the cell center. No terrain here
+			// means no key - the OOB analog of the 0x80000000 empty marker.
+			const float height = _sample_height_world(static_cast<float>(kx) + 8.0f,
+			                                          static_cast<float>(kz) - 8.0f);
+			if (height <= INVALID_HEIGHT_THRESHOLD) {
+				continue;
+			}
+			const float dy = camera_pos.y - height;
+			const float dist_sq = dx * dx + dz * dz + dy * dy;
+			if (dist_sq > r * r) {
+				continue;
+			}
 
-				std::vector<opennova::foliage::PlacementInstance> placements;
-				const bool any =
-				    _scatter_cell(slot_index, cell_x, cell_z, def, placements);
-				if (!any) {
-					continue;
-				}
-				LRUEntry entry;
-				entry.placements = std::move(placements);
-				entry.touch = touch_counter_;
-				lru_.emplace(key, std::move(entry));
-				mm_dirty_ = true;
+			FarVisibleCell cell;
+			cell.cell_x_int = kx;
+			cell.cell_z_int = kz;
+			cell.key = opennova::foliage::pack_cell_key(
+			    static_cast<opennova::foliage::Fixed16_16>(kx) << 16,
+			    static_cast<opennova::foliage::Fixed16_16>(kz) << 16);
+			cell.distance = std::sqrt(dist_sq);
+			far_visible_.push_back(cell);
+			if (far_visible_.size() >= static_cast<size_t>(FAR_COLLECT_CAP)) {
+				return;  // the witnessed 128-entry list cap
 			}
 		}
 	}
+}
 
-	const int num_slots_used = foliage_defs_.size();
-	const int grid_side = 2 * cell_grid_radius_ + 1;
-	const int required_capacity = grid_side * grid_side * num_slots_used * 2;
-	const int effective_capacity = std::max(lru_capacity_, required_capacity);
+void NovaFoliageDispatcher::_dispatch_far_tier(const Vector3 &camera_pos) {
+	++far_frame_counter_;
+	_collect_far_cells(camera_pos);
+	dispatch_stats_.far_cells_visible = static_cast<int64_t>(far_visible_.size());
 
-	while (static_cast<int>(lru_.size()) > effective_capacity) {
-		auto oldest = lru_.begin();
-		for (auto it = lru_.begin(); it != lru_.end(); ++it) {
-			if (it->second.touch < oldest->second.touch) {
+	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
+		auto &pool = far_cells_[s];
+
+		Ref<NovaTerrainFoliageDef> def;
+		if (s < foliage_defs_.size()) {
+			def = foliage_defs_[s];
+		}
+		Ref<Mesh> slot_mesh;
+		if (s < slot_meshes_.size()) {
+			slot_mesh = slot_meshes_[s];
+		}
+		const bool slot_enabled = def.is_valid() && slot_mesh.is_valid();
+
+		if (slot_enabled) {
+			for (const FarVisibleCell &cell : far_visible_) {
+				auto it = pool.find(cell.key);
+				if (it == pool.end()) {
+					++dispatch_stats_.far_pool_misses;
+					it = pool.emplace(cell.key, FarCellEntry{}).first;
+					_bake_far_cell_into(s, cell, def, it->second);
+				} else {
+					++dispatch_stats_.far_pool_hits;
+				}
+				FarCellEntry &entry = it->second;
+				entry.last_touched = far_frame_counter_;
+				entry.active = true;
+				entry.distance = cell.distance;
+				_apply_far_cell_state(s, entry, cell.distance);
+			}
+		}
+
+		// Hide pooled cells that fell out of this frame's collect (or the
+		// whole slot when it lost its def/mesh).
+		for (auto &kv : pool) {
+			FarCellEntry &entry = kv.second;
+			if (entry.last_touched != far_frame_counter_ && entry.active) {
+				entry.active = false;
+				if (entry.node != nullptr) {
+					entry.node->set_visible(false);
+				}
+			}
+		}
+
+		_evict_far_overflow(s);
+	}
+}
+
+void NovaFoliageDispatcher::_bake_far_cell_into(int slot_index,
+                                                const FarVisibleCell &cell,
+                                                const Ref<NovaTerrainFoliageDef> &def,
+                                                FarCellEntry &entry) {
+	// Bake once per newly-resident key [orig: Foliage_UpdateFarCellSlots
+	// @ 0x601b30 -> generate_foliage_instances_0 @ 0x5ffdd0]. A cell that
+	// bakes empty stays resident with no node - retail keeps zero-count slots
+	// and draws nothing for them.
+	std::vector<opennova::foliage::PlacementInstance> placements;
+	_scatter_cell(slot_index, cell.cell_x_int, cell.cell_z_int, def, placements);
+	++dispatch_stats_.far_cells_baked;
+	dispatch_stats_.far_instances_baked += static_cast<int64_t>(placements.size());
+
+	entry.placements = std::move(placements);
+	if (entry.placements.empty()) {
+		return;
+	}
+
+	Ref<Mesh> cell_mesh = _build_far_mesh(slot_index, entry.placements);
+	if (cell_mesh.is_null()) {
+		return;
+	}
+
+	_update_slot_material(slot_index);
+
+	MeshInstance3D *mi = memnew(MeshInstance3D);
+	mi->set_name(String("FarCell") + String::num_int64(slot_index) + String("_") +
+	             String::num_uint64(cell.key));
+	add_child(mi);
+	// The baked vertices are world-space; a top-level node keeps the mesh AABB
+	// authoritative for Godot's frustum culling (the host stand-in for the
+	// traversal's frustum gate).
+	mi->set_as_top_level(true);
+	mi->set_mesh(cell_mesh);
+	if (foliage_materials_[slot_index].is_valid()) {
+		mi->set_material_override(foliage_materials_[slot_index]);
+	}
+	// SHADOW attribute bit (Jointops.exe FoliageDef +532 bit 1).
+	const int attribs = def.is_valid() ? def->get_attrib_flags() : 0;
+	mi->set_cast_shadows_setting((attribs & opennova::FOLIAGE_ATTRIB_SHADOW)
+	                                 ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
+	                                 : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+	mi->set_extra_cull_margin(1.0f);  // wind sway margin (amplitude 0.03)
+	entry.node = mi;
+}
+
+void NovaFoliageDispatcher::_apply_far_cell_state(int slot_index, FarCellEntry &entry,
+                                                  float distance) {
+	if (entry.node == nullptr) {
+		return;
+	}
+	// A texture swap recreates the shared slot material; re-adopt it lazily.
+	if (foliage_materials_[slot_index].is_valid() &&
+	    entry.node->get_material_override() != foliage_materials_[slot_index]) {
+		entry.node->set_material_override(foliage_materials_[slot_index]);
+	}
+	entry.node->set_visible(true);
+	// The witnessed per-cell draw state: c6.a distance fade and the high/low
+	// alpha-test ref [orig: render_terrain_lightmaps @ 0x60a171..0x60a53b].
+	entry.node->set_instance_shader_parameter("u_cell_fade",
+	                                          far_fade_for_distance(distance));
+	entry.node->set_instance_shader_parameter("u_cell_alpha_ref",
+	                                          far_alpha_ref_for_distance(distance));
+}
+
+void NovaFoliageDispatcher::_evict_far_overflow(int slot_index) {
+	auto &pool = far_cells_[slot_index];
+	while (pool.size() > FAR_POOL_CAP) {
+		// Evict the stalest inactive entry [orig: the frame-stamp LRU scan in
+		// Foliage_UpdateFarCellSlots @ 0x601c05..0x601c27].
+		auto oldest = pool.end();
+		for (auto it = pool.begin(); it != pool.end(); ++it) {
+			if (it->second.active) {
+				continue;
+			}
+			if (oldest == pool.end() || it->second.last_touched < oldest->second.last_touched) {
 				oldest = it;
 			}
 		}
-		lru_.erase(oldest);
-		mm_dirty_ = true;
+		if (oldest == pool.end()) {
+			return;  // every resident entry is active this frame
+		}
+		if (oldest->second.node != nullptr) {
+			if (oldest->second.node->get_parent() == this) {
+				remove_child(oldest->second.node);
+			}
+			oldest->second.node->queue_free();
+		}
+		pool.erase(oldest);
 	}
+}
 
-	if (mm_dirty_) {
-		_rebuild_multimeshes();
-		mm_dirty_ = false;
+void NovaFoliageDispatcher::_clear_far_cells() {
+	for (auto &pool : far_cells_) {
+		for (auto &kv : pool) {
+			if (kv.second.node != nullptr) {
+				if (kv.second.node->get_parent() == this) {
+					remove_child(kv.second.node);
+				}
+				kv.second.node->queue_free();
+			}
+		}
+		pool.clear();
 	}
 }
 
@@ -649,157 +702,6 @@ Dictionary NovaFoliageDispatcher::_build_defs_by_match() const {
 		out[match] = list;
 	}
 	return out;
-}
-
-void NovaFoliageDispatcher::_dispatch_engine_centers(const PackedVector3Array &centers,
-                                                     const Transform3D &view_xform) {
-	render_algorithm_ = DISPATCH_ALGORITHM_ENGINE_CENTERS;
-	NovaTerrainData *td = terrain_data_.ptr();
-	if (td == nullptr && (!height_sampler_.is_valid() || !surface_sampler_.is_valid())) {
-		return;
-	}
-
-	for (auto &slot_placements : engine_placements_) {
-		slot_placements.clear();
-	}
-
-	opennova::foliage::PlacementConfig config;
-	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
-		if (s < foliage_defs_.size()) {
-			Ref<NovaTerrainFoliageDef> def = foliage_defs_[s];
-			if (def.is_valid()) {
-				config.attrib_flags[s] = static_cast<uint8_t>(def->get_attrib_flags());
-			}
-		}
-	}
-
-	opennova::foliage::PlacementSamplers samplers;
-	samplers.path_blocked = nullptr;  // sub_5C6450 remains deferred until the ambient-source registry exists.
-	samplers.height_at = [this, td](opennova::foliage::Fixed16_16 wx,
-	                                opennova::foliage::Fixed16_16 wz) -> opennova::foliage::Fixed16_16 {
-		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		const float wz_f = static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
-		float y = INVALID_HEIGHT_THRESHOLD;
-		if (td != nullptr) {
-			y = td->get_height_world_bilinear(Vector3(wx_f, 0.0f, wz_f));
-		} else if (height_sampler_.is_valid()) {
-			Array args;
-			args.push_back(wx_f);
-			args.push_back(wz_f);
-			y = static_cast<float>(static_cast<double>(height_sampler_.callv(args)));
-		}
-		return static_cast<opennova::foliage::Fixed16_16>(y * 65536.0f);
-	};
-	samplers.slot_mask_at = [this, td](opennova::foliage::Fixed16_16 wx,
-	                                  opennova::foliage::Fixed16_16 wz) -> uint32_t {
-		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		// place_cell() already supplies the witnessed Terrain_GetSurfaceTypeAtFixedPoint
-		// boundary coordinate (world X, -world Z).
-		const float native_z =
-		    static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
-		int surface_mask = 0;
-		if (td != nullptr) {
-			surface_mask = td->get_surface_mask_world(wx_f, native_z);
-		} else if (surface_sampler_.is_valid()) {
-			Array args;
-			args.push_back(wx_f);
-			args.push_back(native_z);
-			surface_mask = static_cast<int>(surface_sampler_.callv(args));
-		}
-		return static_cast<uint32_t>(surface_mask) & 0xFFu;
-	};
-
-	++engine_frame_counter_;
-
-	auto center_key_for = [](const Vector3 &center) {
-		return EngineCenterKey{
-		    static_cast<opennova::foliage::Fixed16_16>(
-		        std::lround(static_cast<double>(center.x) * 65536.0)),
-		    static_cast<opennova::foliage::Fixed16_16>(
-		        std::lround(static_cast<double>(center.z) * 65536.0))};
-	};
-
-	// Retain the first 256 unique centers in caller order, matching
-	// NovaTerrain's production patch-pool bound. Overflow centers still get
-	// independent transient state for this dispatch, preserving output parity
-	// without allowing persistent cache growth.
-	std::vector<EngineCenterKey> retained_keys;
-	retained_keys.reserve(std::min(static_cast<size_t>(centers.size()),
-	                              ENGINE_CENTER_CACHE_CAPACITY));
-	for (int center_index = 0; center_index < centers.size(); ++center_index) {
-		const EngineCenterKey key = center_key_for(centers[center_index]);
-		if (std::find(retained_keys.begin(), retained_keys.end(), key) == retained_keys.end() &&
-		    retained_keys.size() < ENGINE_CENTER_CACHE_CAPACITY) {
-			retained_keys.push_back(key);
-		}
-	}
-	auto retains_key = [&retained_keys](const EngineCenterKey &key) {
-		return std::find(retained_keys.begin(), retained_keys.end(), key) != retained_keys.end();
-	};
-	for (auto it = engine_center_states_.begin(); it != engine_center_states_.end();) {
-		if (!retains_key(it->first)) {
-			it = engine_center_states_.erase(it);
-		} else {
-			++it;
-		}
-	}
-
-	for (int center_index = 0; center_index < centers.size(); ++center_index) {
-		const Vector3 centre = centers[center_index];
-		const EngineCenterKey center_key = center_key_for(centre);
-		const auto centre_x_fixed = center_key.x;
-		const auto centre_z_fixed = center_key.z;
-
-		EngineCenterState *center_state = nullptr;
-		std::unique_ptr<EngineCenterState> transient_state;
-		if (retains_key(center_key)) {
-			auto [it, inserted] = engine_center_states_.try_emplace(center_key);
-			(void)inserted;
-			center_state = &it->second;
-		} else {
-			transient_state = std::make_unique<EngineCenterState>();
-			center_state = transient_state.get();
-		}
-
-		// Engine near-plane reject. sub_5C1940 @ 0x5c19a3 calls
-		// Math_TransformPoint(view_matrix, center, ...) and rejects the whole
-		// dispatch when transformed Z >= 38.0. Godot cameras look down -Z, so
-		// camera-local Z is negated into the engine's +Z-forward convention.
-		float engine_view_camera_z = opennova::foliage::DISPATCHER_NEAR_Z;
-		if (!(view_xform == Transform3D())) {
-			const Vector3 view_local = view_xform.affine_inverse().xform(centre);
-			engine_view_camera_z = -view_local.z;
-		}
-
-		for (int slot_index = 0;
-		     slot_index < foliage_defs_.size() && slot_index < opennova::FOLIAGE_MAX_DEFS;
-		     ++slot_index) {
-			Ref<NovaTerrainFoliageDef> def = foliage_defs_[slot_index];
-			if (def.is_null()) {
-				continue;
-			}
-
-			std::vector<opennova::foliage::ZSortInstance> zsort;
-			center_state->dispatcher_for_slot(slot_index).dispatch(
-			    slot_index,
-			    centre_x_fixed,
-			    centre_z_fixed,
-			    engine_view_camera_z,
-			    engine_view_radius_fixed_,
-			    engine_frame_counter_,
-			    config,
-			    samplers,
-			    zsort);
-			auto &slot_placements = engine_placements_[slot_index];
-			slot_placements.reserve(slot_placements.size() + zsort.size());
-			for (const auto &z_instance : zsort) {
-				slot_placements.push_back(z_instance.instance);
-			}
-		}
-	}
-
-	_rebuild_multimeshes();
-	mm_dirty_ = false;
 }
 
 // --- The NEAR/MODEL tier -----------------------------------------------------
@@ -832,8 +734,7 @@ void NovaFoliageDispatcher::_make_model_sampler_bindings(
 	// The model tier's witnessed gate is the FOLIAGEMAP byte
 	// [orig: Foliage_SampleFoliageMapMask @ 0x606620]; the host analog is the
 	// foliage-map index -> def-slot mask chain. Dictionary captured by value
-	// (COW ref) so the samplers
-	// outlive the caller's local.
+	// (COW ref) so the samplers outlive the caller's local.
 	out_samplers.slot_mask_at = [this, td, defs_by_match](opennova::foliage::Fixed16_16 wx,
 	                                                      opennova::foliage::Fixed16_16 wz) -> uint32_t {
 		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
@@ -910,9 +811,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	dispatch_stats_.model_tiles_emitted = 0;
 	dispatch_stats_.model_instances = 0;
 
-	bool had_instances = false;
 	for (auto &slot_instances : model_instances_) {
-		had_instances = had_instances || !slot_instances.empty();
 		slot_instances.clear();
 	}
 	model_draw_batches_.clear();
@@ -935,9 +834,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	}
 
 	if (model_anchors_.is_empty() || !any_slot) {
-		if (had_instances) {
-			_rebuild_model_multimeshes();
-		}
+		_update_model_draw_nodes();
 		return;
 	}
 
@@ -955,8 +852,8 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 		const Vector3 anchor = model_anchors_[a];
 
 		// Per-anchor view depth, engine +Z-forward convention (Godot cameras
-		// look down -Z) - the same mapping the quad ENGINE_CENTERS path uses.
-		// Identity view transform passes the gate (headless/tests).
+		// look down -Z). Identity view transform passes the gate
+		// (headless/tests).
 		float view_depth = MODEL_DEPTH_GATE;
 		if (has_view) {
 			view_depth = -view_inv.xform(anchor).z;
@@ -995,6 +892,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 				ModelDrawBatch batch;
 				batch.slot = s;
 				batch.tile_key = draw.tile_key;
+				batch.generation = draw.generation;
 				batch.anchor = anchor;
 				batch.view_depth = view_depth;
 				batch.anchor_distance = anchor_distance;
@@ -1018,7 +916,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 		dispatch_stats_.model_instances += static_cast<int64_t>(slot_instances.size());
 	}
 
-	_rebuild_model_multimeshes();
+	_update_model_draw_nodes();
 }
 
 void NovaFoliageDispatcher::_refresh_slot_bounds() {
@@ -1195,8 +1093,8 @@ void NovaFoliageDispatcher::_update_model_slot_material(int slot_index) {
 	const SlotModelBounds &bounds = slot_bounds_[slot_index];
 	material->set_shader_parameter("u_bound_center", Vector2(bounds.center_x, bounds.center_z));
 	material->set_shader_parameter("u_bound_radius", bounds.radius);
-	// Per-draw clones replace these defaults with the anchor-derived alpha
-	// reference and the tile-draw wind phase.
+	// Per-draw node materials replace these defaults with the anchor-derived
+	// alpha reference and the tile-draw wind phase.
 	material->set_shader_parameter("u_model_alpha_ref", 8.0f);
 	material->set_shader_parameter("u_model_wind_phase", 0.0f);
 }
@@ -1212,14 +1110,13 @@ void NovaFoliageDispatcher::_clear_model_draw_nodes() {
 		node->queue_free();
 	}
 	model_draw_nodes_.clear();
+	model_draw_node_states_.clear();
 }
 
-void NovaFoliageDispatcher::_rebuild_model_multimeshes() {
+void NovaFoliageDispatcher::_update_model_draw_nodes() {
 	using opennova::foliage::model_instance_hbase;
 
 	size_t node_index = 0;
-	int slot_draw_index[opennova::FOLIAGE_MAX_DEFS] = {};
-	bool slot_material_ready[opennova::FOLIAGE_MAX_DEFS] = {};
 
 	for (const ModelDrawBatch &batch : model_draw_batches_) {
 		const int s = batch.slot;
@@ -1235,84 +1132,93 @@ void NovaFoliageDispatcher::_rebuild_model_multimeshes() {
 			continue;
 		}
 
-		if (!slot_material_ready[s]) {
-			_update_model_slot_material(s);
-			slot_material_ready[s] = true;
-		}
-
 		MultiMeshInstance3D *mmi = nullptr;
-		Ref<MultiMesh> mm;
 		if (node_index < model_draw_nodes_.size()) {
 			mmi = model_draw_nodes_[node_index];
-			mm = mmi->get_multimesh();
 		} else {
 			mmi = memnew(MultiMeshInstance3D);
+			mmi->set_name(String("FoliageModelDraw") +
+			              String::num_int64(static_cast<int64_t>(node_index)));
 			mmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 			mmi->set_extra_cull_margin(8.0f);
 			add_child(mmi);
-			model_draw_nodes_.push_back(mmi);
-		}
-		++node_index;
-
-		const int draw_index = slot_draw_index[s]++;
-		String node_name = String("FoliageModelSlot") + String::num_int64(s);
-		if (draw_index > 0) {
-			node_name += String("Draw") + String::num_int64(draw_index);
-		}
-		mmi->set_name(node_name);
-
-		if (mm.is_null()) {
+			Ref<MultiMesh> mm;
 			mm.instantiate();
 			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
 			mm->set_use_colors(true);
 			mm->set_use_custom_data(true);
 			mmi->set_multimesh(mm);
+			model_draw_nodes_.push_back(mmi);
+			model_draw_node_states_.push_back(ModelDrawNodeState{});
 		}
-		if (mm->get_mesh() != slot_mesh) {
-			mm->set_mesh(slot_mesh);
+		ModelDrawNodeState &state = model_draw_node_states_[node_index];
+		++node_index;
+
+		Ref<MultiMesh> mm = mmi->get_multimesh();
+		if (mm.is_null()) {
+			continue;
 		}
 
-		Ref<ShaderMaterial> base_material = foliage_model_materials_[s];
-		if (base_material.is_valid()) {
-			Ref<ShaderMaterial> material = base_material->duplicate();
-			if (material.is_valid()) {
-				material->set_shader_parameter("u_model_alpha_ref", batch.alpha_ref);
-				material->set_shader_parameter("u_model_wind_phase", batch.wind_phase);
-				mmi->set_material_override(material);
+		// Per-draw material: retail submits alpha ref + wind phase per tile
+		// draw; each pooled node keeps its own material and only those two
+		// parameters change on stable draws.
+		if (state.slot != s || state.material.is_null()) {
+			_update_model_slot_material(s);
+			Ref<ShaderMaterial> base_material = foliage_model_materials_[s];
+			if (base_material.is_valid()) {
+				state.material = base_material->duplicate();
+				mmi->set_material_override(state.material);
 			}
+		}
+		if (state.material.is_valid()) {
+			state.material->set_shader_parameter("u_model_alpha_ref", batch.alpha_ref);
+			state.material->set_shader_parameter("u_model_wind_phase", batch.wind_phase);
 		}
 
 		const int count = static_cast<int>(batch.instances.size());
-		mm->set_instance_count(count);
-		const SlotModelBounds &bounds = slot_bounds_[s];
-		for (int i = 0; i < count; ++i) {
-			const auto &inst = batch.instances[i];
-			const float hbase = model_instance_hbase(inst);
-			mm->set_instance_transform(i, _model_instance_transform(inst, hbase, bounds));
-			// Source-model (x,z) maps to engine fit axes (B,A), hence the
-			// corner permutation c0,c2,c1,c3 and the swapped fold families.
-			mm->set_instance_color(i, Color(inst.corner_height[0] - hbase,
-			                                inst.corner_height[2] - hbase,
-			                                inst.corner_height[1] - hbase,
-			                                inst.corner_height[3] - hbase));
-			mm->set_instance_custom_data(i, Color(inst.fold_e_b, inst.fold_t_b,
-			                                      inst.fold_e_a, inst.fold_t_a));
+		const bool content_changed = state.slot != s ||
+		                             state.tile_key != batch.tile_key ||
+		                             state.generation != batch.generation ||
+		                             state.count != count ||
+		                             mm->get_mesh() != slot_mesh;
+		if (content_changed) {
+			++dispatch_stats_.model_uploads;
+			if (mm->get_mesh() != slot_mesh) {
+				mm->set_mesh(slot_mesh);
+			}
+			mm->set_instance_count(count);
+			const SlotModelBounds &bounds = slot_bounds_[s];
+			for (int i = 0; i < count; ++i) {
+				const auto &inst = batch.instances[i];
+				const float hbase = model_instance_hbase(inst);
+				mm->set_instance_transform(i, _model_instance_transform(inst, hbase, bounds));
+				// Source-model (x,z) maps to engine fit axes (B,A), hence the
+				// corner permutation c0,c2,c1,c3 and the swapped fold families.
+				mm->set_instance_color(i, Color(inst.corner_height[0] - hbase,
+				                                inst.corner_height[2] - hbase,
+				                                inst.corner_height[1] - hbase,
+				                                inst.corner_height[3] - hbase));
+				mm->set_instance_custom_data(i, Color(inst.fold_e_b, inst.fold_t_b,
+				                                      inst.fold_e_a, inst.fold_t_a));
+			}
+			state.slot = s;
+			state.tile_key = batch.tile_key;
+			state.generation = batch.generation;
+			state.count = count;
+		}
+		if (!mmi->is_visible()) {
+			mmi->set_visible(true);
 		}
 	}
 
-	// Keep the live prefix as a stable node pool. Retire only surplus draws;
-	// stable dispatches update their existing MultiMeshes in place instead of
-	// allocating and orphaning a full batch set every frame.
-	for (size_t i = model_draw_nodes_.size(); i > node_index; --i) {
-		MultiMeshInstance3D *node = model_draw_nodes_[i - 1];
-		if (node != nullptr) {
-			if (node->get_parent() == this) {
-				remove_child(node);
-			}
-			node->queue_free();
+	// Keep the live prefix as a stable node pool; hide surplus draws instead
+	// of freeing them so anchor churn does not reallocate nodes every frame.
+	for (size_t i = node_index; i < model_draw_nodes_.size(); ++i) {
+		MultiMeshInstance3D *node = model_draw_nodes_[i];
+		if (node != nullptr && node->is_visible()) {
+			node->set_visible(false);
 		}
 	}
-	model_draw_nodes_.resize(node_index);
 }
 
 bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
@@ -1368,41 +1274,17 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 	const Fixed16_16 cell_x_fixed = static_cast<Fixed16_16>(cell_x_int) << 16;
 	const Fixed16_16 cell_z_fixed = static_cast<Fixed16_16>(cell_z_int) << 16;
 	const uint32_t cell_key = opennova::foliage::pack_cell_key(cell_x_fixed, cell_z_fixed);
-	constexpr int32_t HUGE_RADIUS = 0x40000000;
 
 	const opennova::foliage::PlacementResult result =
-	    opennova::foliage::place_cell(slot_index,
-	                                  cell_key,
-	                                  cell_x_fixed + (1 << 19),
-	                                  cell_z_fixed - (1 << 19),
-	                                  HUGE_RADIUS,
-	                                  config,
-	                                  samplers);
+	    opennova::foliage::place_cell(slot_index, cell_key, config, samplers);
 
 	out_placements.assign(result.instances.begin(), result.instances.begin() + result.count);
 
 	return !out_placements.empty();
 }
 
-void NovaFoliageDispatcher::_retire_far_node(int slot_index) {
-	if (slot_index < 0 || slot_index >= opennova::FOLIAGE_MAX_DEFS) {
-		return;
-	}
-	MultiMeshInstance3D *node = mm_by_slot_[slot_index];
-	if (node == nullptr) {
-		return;
-	}
-	if (Node *parent = node->get_parent()) {
-		parent->remove_child(node);
-	}
-	node->queue_free();
-	mm_by_slot_[slot_index] = nullptr;
-}
-
 void NovaFoliageDispatcher::_clear_children() {
-	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
-		_retire_far_node(s);
-	}
+	_clear_far_cells();
 	_clear_model_draw_nodes();
 }
 
@@ -1431,11 +1313,31 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index) {
 	Ref<Texture2D> fd_tex = _slot_fd_texture(slot_index);
 	material->set_shader_parameter("u_fd_texture", fd_tex);
 
-	// FAR T1: the terrain light/colormap texture projected from world XZ.
+	// FAR T1: retail binds the per-tile detail-lightmap render target; the
+	// host recomposes that composite in the shader from the same .trn
+	// sources (colormap + blend/detail splat) [orig: render_terrain_lightmaps
+	// @ 0x60a1de; D-FOLIAGE-7 keeps the exact per-sector feed].
 	Ref<NovaTerrainData> cm_src = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
 	Ref<Texture2D> terrain_light =
 	    cm_src.is_valid() ? cm_src->get_colormap() : Ref<Texture2D>();
 	material->set_shader_parameter("u_terrain_light_texture", terrain_light);
+	Ref<Texture2D> blend_tex, c1_tex, c2_tex, c3_tex;
+	float detail_density = 128.0f;
+	if (cm_src.is_valid()) {
+		blend_tex = cm_src->get_detailblendmap();
+		c1_tex = cm_src->get_detailmap_c1();
+		c2_tex = cm_src->get_detailmap_c2();
+		c3_tex = cm_src->get_detailmap_c3();
+		detail_density = static_cast<float>(cm_src->get_detail_density());
+	}
+	const bool has_detail = blend_tex.is_valid() && c1_tex.is_valid() &&
+	                        c2_tex.is_valid() && c3_tex.is_valid();
+	material->set_shader_parameter("u_terrain_blend_texture", blend_tex);
+	material->set_shader_parameter("u_terrain_detail_c1", c1_tex);
+	material->set_shader_parameter("u_terrain_detail_c2", c2_tex);
+	material->set_shader_parameter("u_terrain_detail_c3", c3_tex);
+	material->set_shader_parameter("u_terrain_detail_density", detail_density);
+	material->set_shader_parameter("u_has_terrain_detail", has_detail);
 
 	// [orig: setup_water_vertex_shader_constants @ 0x600450] c24.x clock
 	// term. The FAR shader associates the registered NovaWeather ring-head
@@ -1443,95 +1345,11 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index) {
 	const double ticks = static_cast<double>(Time::get_singleton()->get_ticks_msec());
 	material->set_shader_parameter("u_far_wind_phase",
 	                               static_cast<float>(ticks * 0.003));
-	// c6 is per-sector state; neutral RGB/full fade is explicit until the
-	// terrain renderer exposes that draw input (D-FOLIAGE-7).
-	material->set_shader_parameter("u_far_pass_color", Color(1.0f, 1.0f, 1.0f, 1.0f));
-	// Explicit slot-wide host approximation: retail selects per visible sector
-	// at 33u (with a caller force-low override), and its high path additionally
-	// submits an alpha-ref-8 wireframe pass. This combined batch has neither
-	// boundary, so do not claim selector parity here.
-	material->set_shader_parameter("u_far_alpha_ref", 180.0f);
-
-	if (mm_by_slot_[slot_index] != nullptr) {
-		mm_by_slot_[slot_index]->set_material_override(material);
-	}
-}
-
-void NovaFoliageDispatcher::_rebuild_multimeshes() {
-	std::vector<opennova::foliage::PlacementInstance>
-	    per_slot[opennova::FOLIAGE_MAX_DEFS];
-
-	if (render_algorithm_ == DISPATCH_ALGORITHM_ENGINE_CENTERS) {
-		for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
-			per_slot[s] = engine_placements_[s];
-		}
-	} else {
-		for (const auto &kv : lru_) {
-			const int s = kv.first.slot;
-			if (s < 0 || s >= opennova::FOLIAGE_MAX_DEFS) {
-				continue;
-			}
-			const auto &entry = kv.second;
-			per_slot[s].insert(per_slot[s].end(),
-			                   entry.placements.begin(), entry.placements.end());
-		}
-	}
-
-	// FAR streams a terrain-bent copy of every source-mesh surface for every
-	// accepted placement. MODEL uses the same source mesh through its separate
-	// per-tile-draw MultiMesh path.
-	for (int s = 0; s < opennova::FOLIAGE_MAX_DEFS; ++s) {
-		const int count = static_cast<int>(per_slot[s].size());
-		if (count == 0) {
-			_retire_far_node(s);
-			continue;
-		}
-		++dispatch_stats_.rebuilt_slots;
-		dispatch_stats_.instance_uploads += count;
-
-		Ref<Mesh> slot_mesh = _build_far_mesh(s, per_slot[s]);
-		if (slot_mesh.is_null()) {
-			_retire_far_node(s);
-			continue;
-		}
-		if (mm_by_slot_[s] == nullptr) {
-			MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
-			mmi->set_name(String("FoliageSlot") + String::num_int64(s));
-			add_child(mmi);
-			mmi->set_as_top_level(true);
-			mm_by_slot_[s] = mmi;
-		}
-
-		// Retail streams a dynamic vertex/index buffer. The one-instance
-		// MultiMesh wrapper preserves the public node shape; its Mesh is the
-		// replicated, terrain-anchored buffer and carries vertex COLOR.r.
-		Ref<MultiMesh> mm;
-		mm.instantiate();
-		mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-		mm->set_mesh(slot_mesh);
-		mm->set_instance_count(1);
-		mm->set_instance_transform(0, Transform3D());
-		mm_by_slot_[s]->set_multimesh(mm);
-
-		// SHADOW attribute bit (Jointops.exe FoliageDef +532 bit 1, engine_spec_foliage §3.1).
-		// The bit is a shadow-render opt-in; when set the slot's instances cast shadows,
-		// otherwise we disable the pass entirely. Applied every rebuild so def edits
-		// propagate without forcing a full scene reload.
-		_update_slot_material(s);
-
-		int shadow_attrib = 0;
-		if (s < foliage_defs_.size()) {
-			Ref<NovaTerrainFoliageDef> def = foliage_defs_[s];
-			if (def.is_valid()) {
-				shadow_attrib = def->get_attrib_flags();
-			}
-		}
-		mm_by_slot_[s]->set_cast_shadows_setting(
-		    (shadow_attrib & opennova::FOLIAGE_ATTRIB_SHADOW)
-		        ? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
-		        : GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-
-	}
+	// c6.rgb rides the shader default (0.5 neutral): with the flat-0x808080
+	// ":fd" RGB and the PS *8 that reproduces the fixed-function fallback's
+	// 2*T0*diffuse level, so foliage brightness tracks the untinted terrain
+	// surface (env #19: the terrain_rgb texture-bake consumer is dead code).
+	// The exact per-frame c6 float chain stays on D-FOLIAGE-7.
 }
 
 } // namespace godot
