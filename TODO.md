@@ -26,17 +26,6 @@
 
 ## Cleanup & verification backlog
 
-- [ ] `env_render_unit` fails on SOME macOS CI runners: "color pixels landmarks (t=0)"
-      (seen on REN-track runs 28765062069/28792988083; PASSED between them on
-      28789728085 with no env change — tracks the runner image, not a commit; Windows
-      and Linux stay green). Cause: the water sine LUT builds from `std::sin`
-      (`libs/env/src/env_render.cpp:490`); a last-ulp libm difference at a
-      non-landmark index survives the LUT landmark+sum checks (truncation errors pair
-      symmetrically) but flips color bytes downstream. The landmarks are pinned-current
-      deterministic-instance bytes, not witnessed bytes (the original used x87 fsin) —
-      fix direction is a committed 256-byte LUT constant (or per-platform reference),
-      a test-design change, NOT a parity tolerance. ENG-2/env follow-up.
-
 - [ ] `npruntime_golden_gameplay` FAILS when actually run against the golden capture
       (found 2026-07-04 by re-arming the asset-gated tests; it skip-passed before):
       the test pins the pre-round-14 `0x2B idle default` at record off-14

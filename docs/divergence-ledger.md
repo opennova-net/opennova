@@ -198,6 +198,7 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 | env #18 | Earthquake / rain / wind oscillator rings — constants documented, wiring deferred to WAC weather | A | WITNESSED-READY-DEFERRED | PAR-ENV |
 | env #29 | Water surface tessellation — **FIXED 2026-07-07 (the REN-6 tail)**: the DETAILED tier live end to end (`env::water_*` structural translation with 40 ctest pins → `NovaWaterCore.strip_*` packed arrays → the per-frame strip ArrayMesh → the witnessed ps.1.1 chain in water.gdshader, found at the port's debug: alpha = noiseA×diffuseA×2, reflection ×2 diffuse ×4 noise + specular `[orig: Water_InitSurfaceShaders @ 0x5c19b0]`); goldens re-pinned. 2026-07-07 fidelity facets: the far-fade discard misport deleted (#34 re-grade), the witnessed spec-alpha fog factor + z-write/depth-replica model hosted (`depth_draw_always` + the tracked 2⁻¹⁵ near-ward nudge), the underwater opaque `0x20000` swap HOSTED (`u_underwater_view` premul branch). Residuals in-row (env-tod-re.md #29): the LOW tier unported (host runs detail > 1), the nightvision redraw unhosted, the below-horizon dome band pointer rides #30/D-TERRAIN-3 | A | FIXED | REN-6 tail |
 | env #30 | Water reflection — **FIXED 2026-07-07 (the REN-6 tail)**: host planar reflection (SubViewport mirror camera about y = wh, up-column-negated proper mirror — the witnessed strip rows pin u = screenU / v = vbase − screenV so the ps.1.1 texm3x2 lookup runs verbatim `[orig: Water_InitSurfaceShaders @ 0x5c19b0; render_main_scene @ 0x5c1240]`) feeding the t2 sampler; water self-excluded via a visual layer. Residuals in-row (env-tod-re.md #30): the wh − 0.1 clip plane approximated (no host oblique near plane), half-res host choice, the below-horizon skyfog band rides the dome follow-up | A | FIXED | REN-6 tail |
+| env #35 | Water sine LUT provenance: the runtime `std::sin` build forked per libm at trunc boundaries (the GitHub `macos-26-arm64` image flipped non-landmark bytes and every downstream noise pixel — `env_render_unit` red on macOS only, 2026-07-10); the original builds ONE deterministic instance via x87 fsin `[orig: Water_InitNoiseFieldAndSineLut @ 0x5c0308..0x5c0334]` | C | FIXED (2026-07-10): the LUT is a committed 256-byte constant — the deterministic instance every existing pin was generated from; landmarks + symmetry sum unchanged; the retail-instance byte check rides the pinned-current caveat (env-tod-re.md #35) | fidelity 2026-07-10 |
 
 ### World / AI + mission events — [world/world-wac-ai-re.md](world/world-wac-ai-re.md), [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md), [world/itemdef-re.md](world/itemdef-re.md)
 
@@ -573,7 +574,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
-| Environment | 0 | 0 | 3 | 3 | 3 |
+| Environment | 0 | 0 | 3 | 3 | 4 |
 | World / AI + events | 12 | 1 | 6 | 19 | 1 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 2 | 7 | 17 | 3 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
@@ -589,7 +590,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **44** | **13** | **33** | **90** | 23 |
+| **Total** | **44** | **13** | **33** | **90** | 24 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-FOLIAGE-6, D-NET-136, D-NET-64.
 
