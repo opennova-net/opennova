@@ -8,7 +8,9 @@
 //     encoding, indoors only on accum bit 2 (the V-letter-cleared authored bit),
 //   * segment clip: entry-point exactness on an axis ray into a box volume,
 //   * ground probe through a candidate model (standing on a box roof) + terrain,
-//   * resolver wall push-out with prev-position gating, and the idle skip throttle.
+//   * resolver wall push-out with prev-position gating, and the idle skip throttle,
+//   * the read-only debug seams (debug_instances corner transform + range cap,
+//     the local player's LocalResolveDebug capture).
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -365,6 +367,59 @@ void test_idle_skip_throttle() {
     CHECK(pos[2] == sunk + 2 * 400); // [orig: pos.Z -= 2*slideDecay on the skip path]
 }
 
+// ---------------------------------------------------------------------------
+void test_debug_seams() {
+    // debug_instances: the world-space wireframe snapshot transforms the volume
+    // AABB through the SAME matrix path the queries use.
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
+    const int32_t anchor[3] = {0, 0, 0};
+    const auto insts = rig.cw.debug_instances(rig.world, anchor, /*range=*/-1, /*max=*/16);
+    CHECK(insts.size() == 1);
+    if (!insts.empty()) {
+        const auto &inst = insts[0];
+        CHECK(inst.handle == rig.building);
+        CHECK(inst.pos[0] == fx(10.0) && inst.pos[1] == fx(10.0));
+        CHECK(inst.volumes.size() == 1);
+        const auto &v = inst.volumes[0];
+        CHECK(v.type == 1);
+        // Building yaw 90 -> engine heading 0 (identity rotation): corner 0 is
+        // pos + local min, corner 7 pos + local max (corner index bit0 = max x,
+        // bit1 = max y, bit2 = max z; quantized-table rounding tolerance).
+        CHECK(std::abs(v.corners[0][0] - fx(8.0)) <= 4);
+        CHECK(std::abs(v.corners[0][1] - fx(8.0)) <= 4);
+        CHECK(std::abs(v.corners[0][2] - 0) <= 4);
+        CHECK(std::abs(v.corners[7][0] - fx(12.0)) <= 4);
+        CHECK(std::abs(v.corners[7][1] - fx(12.0)) <= 4);
+        CHECK(std::abs(v.corners[7][2] - fx(3.0)) <= 4);
+    }
+
+    // Range cap: an anchor farther than `range` on any axis excludes the instance.
+    const int32_t far_anchor[3] = {fx(400.0), fx(400.0), 0};
+    CHECK(rig.cw.debug_instances(rig.world, far_anchor, fx(150.0), 16).empty());
+
+    // LocalResolveDebug: the local player's full resolve captures the capsule
+    // test points/extents and the returned foot clearance; a non-local resolve
+    // never writes it (still invalid before local_player is set).
+    CHECK(!rig.cw.local_resolve_debug.valid);
+    rig.cw.local_player = rig.soldier;
+    rig.move_soldier(30.0, 30.0, 1.0);
+    int32_t pos[3] = {fx(30.0), fx(30.0), fx(1.0)};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    const int32_t ret = rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
+                                              fx(0.5), fx(1.8), 0, 0, /*is_player=*/true,
+                                              /*is_authority=*/true, /*tick=*/0, 43, health);
+    const CollisionWorld::LocalResolveDebug &lrd = rig.cw.local_resolve_debug;
+    CHECK(lrd.valid);
+    CHECK(lrd.capsule_bottom == fx(0.5));
+    CHECK(lrd.capsule_top == fx(1.8));
+    CHECK(lrd.foot_clearance == ret);
+    CHECK(lrd.pos[0] == pos[0] && lrd.pos[1] == pos[1] && lrd.pos[2] == pos[2]);
+    CHECK(lrd.points[2][0] == fx(30.0)); // the feet point rides the entity column
+    CHECK(lrd.radii[1] == 20480);        // the fixed eye-point radius [orig: 0.3125u]
+}
+
 } // namespace
 
 int main() {
@@ -375,6 +430,7 @@ int main() {
     test_resolver_wall_pushout();
     test_resolver_hurt_and_zones();
     test_idle_skip_throttle();
+    test_debug_seams();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
