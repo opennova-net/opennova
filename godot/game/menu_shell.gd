@@ -627,12 +627,17 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 # names the base pairs MENUMUS.SBF/.BIN and GAMEMUS.SBF/.BIN; when expansion <n>
 # is active they become expansion\<n>\M<n>.sbf + M<n>.bin (menu) and
 # expansion\<n>\G<n>.sbf + G<n>.bin (game) [orig: Expansion_LoadAssets @ 0x4a4798
-# (base names) / @ 0x4a4906-0x4a494a (expansion forms)]. Retail sets the names
-# once -- a missing expansion .pff clears the expansion and reselects the base
-# names (@ 0x4a4775); we probe the expansion pair first and fall back to the base
-# pair, which reproduces that plus stays graceful for an expansion that ships no
-# music. Bank and script always come from the SAME stem (the script's play ops
-# index that bank's entries), so halves are never mixed across stems.
+# (base names) / @ 0x4a4906-0x4a494a (expansion forms)]. Retail's ONLY reselect is
+# the expansion .pff existence check -- a missing expansion\<n>\<n>.pff clears the
+# expansion and reselects the base names [orig: File_CheckExists @ 0x4a4767, clear
+# @ 0x4a4775]; once the .pff exists the expansion names are set unconditionally,
+# and the context open then bails when the loose .sbf is absent (the CreateFileA
+# gate precedes the script load [orig: AudioVM_OpenContextFile @ 0x672160]), so an
+# expansion that ships partial or no music is SILENT in retail. We diverge by
+# grace: the expansion pair is used only when COMPLETE (both halves resolve);
+# otherwise the base pair plays instead of silence. Bank and script always come
+# from the SAME stem (the script's play ops index that bank's entries), so halves
+# are never mixed across stems.
 # Returns {"bank": loose path or "", "script": VFS basename or ""}.
 # Public: the witnessed resolution is a queryable engine fact (ADR 0018 —
 # tests and diagnostics read it through this seam, not the privates).
@@ -645,12 +650,8 @@ func resolve_music_pair(prefix: String, base_stem: String) -> Dictionary:
 		# The expansion bank lives inside the expansion folder, streamed loose
 		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
 		var bank_path := _root.get_root_dir().path_join("expansion").path_join(exp_name).path_join(stem + ".sbf")
-		var pair := {
-			"bank": bank_path if FileAccess.file_exists(bank_path) else "",
-			"script": stem + ".bin" if _root.has_file(stem + ".bin") else "",
-		}
-		if String(pair.bank) != "" or String(pair.script) != "":
-			return pair
+		if FileAccess.file_exists(bank_path) and _root.has_file(stem + ".bin"):
+			return {"bank": bank_path, "script": stem + ".bin"}
 	return {
 		"bank": _resolve(base_stem + ".sbf"),
 		"script": base_stem + ".bin" if _root.has_file(base_stem + ".bin") else "",

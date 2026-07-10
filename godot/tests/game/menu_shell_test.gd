@@ -332,9 +332,14 @@ func test_music_scripts_load_pff_archived_by_hardcoded_names() -> void:
 	DirAccess.remove_absolute(dir)
 
 
-# With an expansion mounted, the M<n>/G<n> forms win over the base pair, the
-# expansion bank resolves loose inside the expansion folder, and bank/script
-# halves never mix across stems (a stem with no bank keeps its bank empty).
+# With an expansion mounted, a COMPLETE M<n>/G<n> pair wins over the base pair
+# (bank loose in the expansion folder + script via the VFS). An INCOMPLETE stem
+# (here: Gjox01.bin ships but no Gjox01.sbf) falls back to the whole base pair --
+# retail would go silent there (the names are set unconditionally once the
+# expansion .pff exists and the context open bails on the missing loose .sbf
+# [orig: Expansion_LoadAssets @ 0x4a4767-75; AudioVM_OpenContextFile @ 0x672160]);
+# our documented grace divergence plays the base pair instead. Halves are never
+# mixed across stems.
 func test_music_resolution_prefers_expansion_pair_then_base() -> void:
 	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
 	var dir := OS.get_temp_dir().path_join("menu_shell_musx_%d" % Time.get_ticks_usec())
@@ -365,19 +370,64 @@ func test_music_resolution_prefers_expansion_pair_then_base() -> void:
 	host.setup(root)
 	assert_not_null(host.menu_music_script(), "expansion menu script loaded")
 	if host.menu_music_script() != null:
-		assert_eq(host.menu_music_script().get_source_path(), "Mjox01.bin", "M<n>.bin preferred over menumus.bin")
-	assert_not_null(host.game_music_script(), "expansion game script loaded")
+		assert_eq(host.menu_music_script().get_source_path(), "Mjox01.bin", "M<n>.bin preferred over menumus.bin (complete pair)")
+	assert_not_null(host.game_music_script(), "game script loaded")
 	if host.game_music_script() != null:
-		assert_eq(host.game_music_script().get_source_path(), "Gjox01.bin", "G<n>.bin preferred over gamemus.bin")
+		assert_eq(host.game_music_script().get_source_path(), "gamemus.bin",
+			"no G<n>.sbf shipped -> the INCOMPLETE expansion stem falls back to the base script")
 	var menu_pair: Dictionary = host.resolve_music_pair("M", "menumus")
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
 		"the menu bank streams loose from the expansion folder")
 	var game_pair: Dictionary = host.resolve_music_pair("G", "gamemus")
-	assert_eq(String(game_pair.script), "Gjox01.bin", "game stem resolves its script")
-	assert_eq(String(game_pair.bank), "",
-		"no G<n>.sbf shipped -> that half stays empty; the base bank is never mixed in")
+	assert_eq(String(game_pair.script), "gamemus.bin",
+		"incomplete G stem -> whole base pair (halves never mix across stems)")
 	root.clear()
 	_rm_music_exp_dir(dir)
+
+
+# The converse incomplete pair: a loose G<n>.sbf with no G<n>.bin script also
+# falls back to the whole base pair (never a cross-stem mix of expansion bank +
+# base script).
+func test_music_incomplete_expansion_bank_only_falls_back() -> void:
+	var mus := FileAccess.get_file_as_bytes(MUS_FIXTURE)
+	var dir := OS.get_temp_dir().path_join("menu_shell_musk_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
+	_write_pff(dir.path_join("resource.pff"), [
+		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
+		{"name": "menumus.bin", "bytes": mus},
+		{"name": "gamemus.bin", "bytes": mus},
+	])
+	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
+		{"name": "expmodel.3di", "bytes": "exp model"},
+	])
+	for stub_name in ["expansion/jox01/Gjox01.sbf", "gamemus.sbf"]:
+		var stub := FileAccess.open(dir.path_join(stub_name), FileAccess.WRITE)
+		if stub != null:
+			stub.store_buffer(PackedByteArray([0]))
+			stub.close()
+	var root := NovaResourceRoot.new()
+	if root.mount_runtime(dir, "jox01") != OK:
+		pass_test("runtime resource root unavailable in this environment")
+		_rm_music_bank_only_dir(dir)
+		return
+	var host = MenuHostScript.new()
+	host.size = Vector2(800, 600)
+	add_child_autofree(host)
+	host.setup(root)
+	var pair: Dictionary = host.resolve_music_pair("G", "gamemus")
+	assert_eq(String(pair.script), "gamemus.bin",
+		"bank-only G stem (no G<n>.bin) -> base script, not a cross-stem mix")
+	assert_true(String(pair.bank).ends_with("gamemus.sbf"),
+		"bank-only G stem -> base bank resolved loose from the root")
+	root.clear()
+	_rm_music_bank_only_dir(dir)
+
+
+func _rm_music_bank_only_dir(dir: String) -> void:
+	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01/Gjox01.sbf",
+			"gamemus.sbf", "expansion/jox01", "expansion"]:
+		DirAccess.remove_absolute(dir.path_join(sub))
+	DirAccess.remove_absolute(dir)
 
 
 # An expansion that ships no music falls back to the base pair (retail reselects
