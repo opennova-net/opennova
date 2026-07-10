@@ -517,7 +517,11 @@ func _enter_net_session() -> void:
 
 
 func _on_world_loaded() -> void:
-	_menu_host.enter_game_music()
+	# The GAME music context is the world's to open at mission start (GameWorld
+	# calls NovaMusicService.open_game_context — host-neutral, so ONED play gets
+	# the same music); nothing to do here. Quit-to-menu re-enters menu music via
+	# reset_to_root().
+	pass
 
 
 func _on_world_load_failed(reason: String) -> void:

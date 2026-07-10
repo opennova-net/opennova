@@ -482,6 +482,9 @@ func unload() -> void:
 		_nw_host = null
 	if _mission_audio != null:
 		_mission_audio.teardown()
+	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
+	# The game shell re-opens menu music on its return to the front end.
+	NovaMusicService.stop_context()
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
 	_loaded = false
@@ -646,6 +649,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		_mission_audio.tick(camera_pos)
+		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
 
@@ -1049,10 +1053,37 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 		int(stats.get("banks_loaded", 0)),
 		int(stats.get("voices", 0)),
 	])
+	# Open the GAME music context + seed the witnessed vars [orig: Game_StartMission
+	# @ 0x525581-0x52561b]. Retail gates the open on is_mp_session_peer and STOPS
+	# music in single-player; ours opens in ALL sessions — D-MUS-SPGATE
+	# (docs/audio/mus-sbf-re.md §Game music driving; SP-as-listen-server, ADR
+	# 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
+	# retail), so the Multiplayerstart P0 loop plays.
+	NovaMusicService.open_game_context(_resource_root)
 
 
 func get_mission_audio() -> NovaMissionAudio:
 	return _mission_audio
+
+
+# Re-drive the gamemus vars from the local player each frame, the way the
+# original does from the local player's body update [orig:
+# Entity_UpdateInfantryPlayerBody @ 0x4b40e0, gate entity ==
+# g_local_player_entity @ 0x4b6234; full map docs/audio/mus-sbf-re.md §Game
+# music driving]. Pumped here: Var7 = health % (cur*100/max, 100 when max <=
+# cur [orig: @ 0x4b6315-0x4b6324]) and Var10 = team [orig: @ 0x4b62fc].
+# Witnessed-but-unpumped seams (the shipped gamemus reads none of them):
+# Var2 view pitch (the original writes raw engine angle units, unwitnessed
+# conversion), Var5/Var6 threat distance / threat-targets-me
+# (Entity_FindNearestThreat @ 0x4b0990 unported), Var3/Var4 (low-confidence),
+# Var8 game type (retail scoring-mode ids not yet mapped to our sessions).
+func _music_var_pump() -> void:
+	if not has_local_player():
+		return
+	var max_h := local_player_max_health()
+	var cur_h := local_player_health()
+	NovaMusicService.set_var(7, (cur_h * 100 / max_h) if max_h > cur_h else 100)
+	NovaMusicService.set_var(10, local_player_team())
 
 
 # --- Frame clear color (env divergence #21, closed) ----------------------------
