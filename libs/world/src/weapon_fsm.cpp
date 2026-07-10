@@ -401,8 +401,11 @@ const char *const kWeaponActionSuffixes[weapon_action::kCount] = {
 };
 
 int32_t weapon_anim_ticks_from_ms(int32_t ms) {
-    // [orig: Anim_GetDurationTicks @ 0x53ee10 — ms * 62.5 (flt_7C3B3C) / 1000 + 1]
-    return static_cast<int32_t>(static_cast<float>(ms) * 62.5f / 1000.0f) + 1;
+    // [orig: Anim_GetDurationTicks @ 0x53ee10 — trunc(ms * 62.5 (flt_7C3B3C)
+    // / 1000 + 0.5 (flt_7C3B94)) + 1: ROUND-to-nearest, then +1. The prior
+    // port truncated without the +0.5 (re-grilled 2026-07-10 at the oscarmike
+    // adjudication — one tick short whenever the fraction reached .5).]
+    return static_cast<int32_t>(static_cast<float>(ms) * 62.5f / 1000.0f + 0.5f) + 1;
 }
 
 void weapon_fsm_bake(const WeaponFsmActionRow *rows, size_t row_count,
