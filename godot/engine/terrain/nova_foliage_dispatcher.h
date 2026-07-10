@@ -166,11 +166,15 @@ public:
 	// parity pin reads these (ADR 0018 public-seam testability).
 	Array get_model_tile_debug(int p_slot) const;
 
-	// One Dictionary per retail-equivalent MODEL tile draw ({slot, tile_key,
-	// anchor, view_depth, anchor_distance, alpha_ref, wind_counter, wind_phase,
-	// instance_count}). A tile shared by two visible anchors appears twice:
-	// retail submits it once per sector-entity walk and advances the wind
-	// counter for every submission.
+	// One Dictionary per RENDERED model batch ({slot, tile_key, anchor,
+	// view_depth, anchor_distance, alpha_ref, wind_counter, wind_phase,
+	// instance_count, submissions}). Retail submits a shared tile once per
+	// qualifying sector entity (the wind counter advances per submission
+	// [orig: Foliage_UploadModelTileVSConstants @ 0x600f00]) and each later
+	// immediate-mode draw overwrites the earlier one (z-write on, LESSEQUAL
+	// [orig: Foliage_DrawModelTileSlot @ 0x601e33]); the retained host keeps
+	// ONE batch per (slot, tile) carrying the LAST submission's state, with
+	// `submissions` counting the retail-equivalent draws.
 	Array get_model_draw_debug() const;
 
 	// FAR test/debug introspection: one Dictionary per placement in every
@@ -247,6 +251,7 @@ private:
 		float alpha_ref = 8.0f;  // D3D alpha-ref byte domain [8, 128]
 		int64_t wind_counter = 0;
 		float wind_phase = 0.0f; // counter * 0.001
+		int submissions = 1;     // retail-equivalent draws folded into this batch
 		std::vector<opennova::foliage::ModelInstance> instances;
 	};
 	std::vector<ModelDrawBatch> model_draw_batches_;

@@ -2,8 +2,13 @@ extends GutTest
 
 # MODEL draw-state parity recovered from Foliage_UpdateModelTiles @ 0x601f50,
 # Foliage_UploadModelTileVSConstants @ 0x600f00, and the visible sector-entity
-# caller. A cached tile is still submitted once per anchor; alpha-test state is
-# anchor-derived and the wind counter advances once per submitted tile.
+# caller. A cached tile is still SUBMITTED once per anchor and the wind counter
+# advances once per submission, but retail's later immediate-mode draw
+# overwrites the earlier one in the framebuffer (z-write on, LESSEQUAL
+# [orig: Foliage_DrawModelTileSlot @ 0x601e33]) - so the retained host renders
+# ONE batch per (slot, tile) carrying the LAST submission's anchor state
+# (coexisting duplicates would z-fight, which retail never shows;
+# docs/foliage/foliage-re.md D-FOLIAGE-10).
 
 const ANCHOR_A := Vector3(24.0, 0.0, -100.0)
 const ANCHOR_B := Vector3(31.0, 0.0, -101.0)
@@ -58,66 +63,67 @@ func _model_draw_nodes() -> Array:
 	return out
 
 
-func test_shared_tiles_remain_distinct_draws_with_anchor_state() -> void:
+func test_shared_tiles_render_once_with_last_submission_state() -> void:
 	_dispatch_shared_tiles()
 	var draws: Array = _dispatcher.get_model_draw_debug()
-	assert_gt(draws.size(), 1,
-		"Two anchors in the same snapped region submit each non-empty cached tile twice.")
-	if draws.size() < 2:
+	assert_gt(draws.size(), 0, "Two in-range anchors produce rendered model batches.")
+	if draws.is_empty():
 		return
-
-	var draws_by_key := {}
-	var previous_counter := -1
-	for i in range(draws.size()):
-		var draw: Dictionary = draws[i]
-		var key := int(draw.tile_key)
-		var same_key: Array = draws_by_key.get(key, [])
-		same_key.push_back(draw)
-		draws_by_key[key] = same_key
-
-		var anchor: Vector3 = draw.anchor
-		var expected_distance := anchor.distance_to(_camera_xform().origin)
-		assert_almost_eq(float(draw.anchor_distance), expected_distance, 0.001,
-			"Alpha state carries the Euclidean camera-to-anchor distance.")
-		assert_eq(int(draw.alpha_ref), _expected_alpha_ref(anchor),
-			"Alpha ref is clamp(int(4096/(floor(distance)+1)), 8, 128) in byte space.")
-
-		var counter := int(draw.wind_counter)
-		assert_almost_eq(float(draw.wind_phase), float(counter) * 0.001, 0.000001,
-			"Each draw carries counter * 0.001 as its wind phase.")
-		if previous_counter >= 0:
-			assert_eq(counter, previous_counter + 1,
-				"The global model wind counter advances once per tile draw.")
-		previous_counter = counter
-
-	assert_gt(draws_by_key.size(), 0, "At least one shared tile contains model instances.")
-	for key in draws_by_key:
-		var same_key: Array = draws_by_key[key]
-		assert_eq(same_key.size(), 2,
-			"Tile %s is drawn once for each visible anchor; it is not deduplicated." % key)
-		if same_key.size() == 2:
-			var first_anchor: Vector3 = same_key[0].anchor
-			var second_anchor: Vector3 = same_key[1].anchor
-			assert_false(first_anchor.is_equal_approx(second_anchor),
-				"The duplicate tile draws retain their distinct anchors.")
 
 	assert_ne(_expected_alpha_ref(ANCHOR_A), _expected_alpha_ref(ANCHOR_B),
 		"Fixture anchors exercise distinct alpha-test references.")
 
+	var seen_keys := {}
+	var previous_counter := -1
+	var total_submissions := 0
+	for i in range(draws.size()):
+		var draw: Dictionary = draws[i]
+		var key := int(draw.tile_key)
+		assert_false(seen_keys.has(key),
+			"Tile %s renders exactly ONE batch per frame (retail's later draw overwrites; coexisting copies would z-fight)." % key)
+		seen_keys[key] = true
+
+		assert_eq(int(draw.submissions), 2,
+			"Both anchors share the fixture tiles, so each batch folds two retail submissions.")
+		total_submissions += int(draw.submissions)
+
+		var anchor: Vector3 = draw.anchor
+		assert_true(anchor.is_equal_approx(ANCHOR_B),
+			"The rendered batch carries the LAST submission's anchor (walk order).")
+		var expected_distance := anchor.distance_to(_camera_xform().origin)
+		assert_almost_eq(float(draw.anchor_distance), expected_distance, 0.001,
+			"Alpha state carries the Euclidean camera-to-anchor distance.")
+		assert_eq(int(draw.alpha_ref), _expected_alpha_ref(ANCHOR_B),
+			"Alpha ref = clamp(int(4096/(floor(distance)+1)), 8, 128) of the LAST submitting anchor.")
+
+		var counter := int(draw.wind_counter)
+		assert_almost_eq(float(draw.wind_phase), float(counter) * 0.001, 0.000001,
+			"Each batch carries counter * 0.001 as its wind phase.")
+		if previous_counter >= 0:
+			assert_gt(counter, previous_counter,
+				"Wind counters stay strictly increasing across rendered batches.")
+		previous_counter = counter
+
+	var stats: Dictionary = _dispatcher.get_dispatch_stats()
+	assert_eq(int(stats.model_tiles_emitted), total_submissions,
+		"The wind counter advances once per SUBMISSION [orig: 0x600f00], not per rendered batch.")
+	assert_eq(int(stats.model_batches), draws.size(),
+		"The stats expose the deduped rendered-batch count.")
+
 	var nodes := _model_draw_nodes()
-	assert_eq(nodes.size(), draws.size(), "Each retail tile draw owns one MultiMesh batch.")
+	assert_eq(nodes.size(), draws.size(), "Each rendered batch owns one MultiMesh node.")
 	for i in range(mini(nodes.size(), draws.size())):
 		var node := nodes[i] as MultiMeshInstance3D
 		var draw: Dictionary = draws[i]
 		assert_eq(node.multimesh.instance_count, int(draw.instance_count),
-			"The batch contains exactly that tile draw's instances.")
+			"The batch contains exactly that tile's instances.")
 		var material := node.material_override as ShaderMaterial
-		assert_not_null(material, "Each tile draw clones the slot's model material.")
+		assert_not_null(material, "Each rendered batch clones the slot's model material.")
 		if material != null:
 			assert_almost_eq(float(material.get_shader_parameter("u_model_alpha_ref")),
-				float(draw.alpha_ref), 0.000001, "Batch material keeps its anchor alpha ref.")
+				float(draw.alpha_ref), 0.000001, "Batch material keeps the last submission's alpha ref.")
 			assert_almost_eq(float(material.get_shader_parameter("u_model_wind_phase")),
-				float(draw.wind_phase), 0.000001, "Batch material keeps its tile wind phase.")
+				float(draw.wind_phase), 0.000001, "Batch material keeps the last submission's wind phase.")
 
 
 func test_slot_mesh_change_invalidates_model_tile_cache_and_batches() -> void:

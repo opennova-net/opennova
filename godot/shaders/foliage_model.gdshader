@@ -5,11 +5,14 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 //
 // Foliage_GridPlacementVS performs the bound-square biquadratic ground fit
 // and height-weighted sway. The pass object binds :fd at T0, selects diffuse
-// for RGB, and the VS supplies c6=(0,0,0,1). Consequently the unfogged model
-// is black; :fd contributes its alpha silhouette only. This intentionally
-// does not share the FAR foliage lighting contract.
-
-#include "res://shaders/nova_color.gdshaderinc"
+// for RGB, and the VS supplies c6=(0,0,0,1) [orig: Foliage_DrawModelTileSlot
+// @ 0x601df1 passes (0,0,0,1)]. The model draw runs with D3DRS_FOGENABLE
+// OFF: the pass word 0x00440000 carries no FOGENABLE (0x20000) bit and
+// CGfxShader_ApplyPass writes the fog state unconditionally, so the c5 fog
+// constants are dead on this pass - retail far models are UNFOGGED black
+// alpha silhouettes [orig: apply mode 0 @ 0x601e33; fog latch
+// @ CGfxShader_ApplyPass 0x68324f]. This intentionally does not share the
+// FAR foliage lighting/fog contract.
 
 uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
 // Anchor-derived clamp(int(4096 / (distance_units + 1)), 8, 128).
@@ -21,30 +24,6 @@ uniform vec2 u_bound_center = vec2(0.0);
 uniform float u_bound_radius = 1.0;
 // Per-tile counter * 0.001 [Foliage_ModelWindPhaseCounter @ 0x3162170].
 uniform float u_model_wind_phase = 0.0;
-
-global uniform vec3 opennova_fog_color;
-global uniform float opennova_fog_start;
-global uniform float opennova_fog_end;
-global uniform int opennova_fog_type;
-
-varying vec3 v_world_pos;
-
-
-float fog_factor_for_distance(float dist) {
-	float safe_end = max(opennova_fog_end, 1.0);
-	if (opennova_fog_type == 0) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
-	}
-
-	float start = opennova_fog_start;
-	if (opennova_fog_type == 2) {
-		start = safe_end * 0.5;
-	} else if (opennova_fog_type == 3) {
-		start = safe_end * 0.25;
-	}
-	float fog_range = max(safe_end - start, 1.0);
-	return clamp((safe_end - dist) / fog_range, 0.0, 1.0);
-}
 
 
 void vertex() {
@@ -74,7 +53,6 @@ void vertex() {
 	float y_half = VERTEX.y * 0.5;
 	world_pos.z -= y_half * sin(u_model_wind_phase) * 0.08;
 
-	v_world_pos = world_pos;
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 }
 
@@ -86,12 +64,12 @@ void fragment() {
 		discard;
 	}
 
-	// Stage0 RGB selects diffuse and GridPlacementVS emits black c6.
+	// Stage0 RGB selects diffuse, GridPlacementVS emits black c6, and the
+	// pass draws with fog DISABLED (see the header witness): the silhouette
+	// stays pure black at every distance, exactly as retail renders it.
 	vec3 result = vec3(0.0);
-	float fog_factor = fog_factor_for_distance(length(v_world_pos - CAMERA_POSITION_WORLD));
-	result = mix(opennova_fog_color, result, fog_factor);
 
-	ALBEDO = nova_gamma_to_linear(result);
+	ALBEDO = result;
 	ALPHA = fd.a;
 	ALPHA_SCISSOR_THRESHOLD = alpha_threshold;
 }

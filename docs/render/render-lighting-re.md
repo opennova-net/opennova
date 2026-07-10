@@ -160,9 +160,16 @@ and the packed sun/blend ratio `PolyTrn_SunToBlendRatioColor @ 0x849930`
 @ 0x604420` pushes c0/c1 as PS constants and picks the PS variant
 (shadow-map loaded → PSShadow*, tier ≥1 + normal map → NM variants, splat
 textures → PS14Splat*); all eight terrain PS share
-`r0 = ((t0.a·c1 + c0)/2) ×2 …` — **terrain light = colormapAlpha × light +
-sky** (the ÷2 and MODULATE2X cancel; colormap alpha = the baked per-texel
-sun mask). The foliage/sector-model blend PS
+`r0 = ((t0.a·c1 + c0)/2) ×2 …` — **terrain light = t0Alpha × light +
+sky** (the ÷2 and MODULATE2X cancel). t0-identity correction (2026-07-10
+foliage regrill): t0 = the BAKED TILE RT (`CD3DDevice_FindBestTexturePermutation
+@ 0x604392`), whose bake zeroes the colormap alpha and additively writes
+**saturate(N·L)** (TrnNMap · packed light dir) into alpha
+`[orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a]` — the earlier "colormap
+alpha = the baked per-texel sun mask" fold-input reading is retracted (see
+[terrain/terrain-re.md](../terrain/terrain-re.md) §Terrain pixel shaders and
+[foliage/foliage-re.md](../foliage/foliage-re.md) §The tile RT). The
+foliage/sector-model blend PS
 (`rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8`) **inherits the same device
 c0/c1** — `Terrain_SetupSectorModelDraw @ 0x6007c0` binds the PS without
 touching the constants. The sector-model lightmap pass

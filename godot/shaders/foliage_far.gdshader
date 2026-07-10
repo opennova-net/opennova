@@ -8,19 +8,23 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 #include "res://shaders/nova_color.gdshaderinc"
 
 uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
-// FAR T1. Retail binds the per-tile detail-lightmap RENDER TARGET (the
-// colormap x light x detail-splat composite, world-planar UV)
-// [orig: render_terrain_lightmaps @ 0x60a1de (sub_6042A0 lookup) +
-// 0x60a220..0x60a356 (the texture transform)]. The host recomposes that
-// texel from the same .trn sources the terrain shader uses; the exact
-// per-sector render-target feed stays on D-FOLIAGE-7.
+// FAR T1. Retail binds the per-tile terrain RENDER TARGET (world-planar UV)
+// [orig: render_terrain_lightmaps @ 0x60a1de (Terrain_FindSectorTileRT
+// lookup) + 0x60a220..0x60a356 (the texture transform)]. The tile BAKE was
+// witnessed 2026-07-10: the base quad draws the colormap quadrant with
+// MODULATE2X(TEXTURE, DIFFUSE=0x808080) - rgb ~= the colormap x 1.004 - and
+// the quad diffuse ALPHA byte is 0, so tile alpha starts at ZERO; the
+// additive ONE/ONE DOT3 pass then adds dp3(TrnNMap, packed-light-dir) to
+// ALPHA only (its stage 1 selects TFACTOR = 0 for RGB on the multitexture
+// path). Final tile RT: rgb ~= colormap.rgb (NO detail splat, NO noise),
+// alpha = saturate(N.L) with the CURRENT light direction
+// [orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a; PolyTrn_TileBakeBasePass
+// mode 0x20650; PolyTrn_TileBakeDot3LightPass]. The host binds the colormap
+// and folds through ITS alpha - the same fold input the host ground include
+// uses - so foliage tracks the host ground exactly the way retail foliage
+// tracks the tile RT (the exact N.L alpha rides the terrain normal-map
+// generator port, tracked with D-FOLIAGE-7).
 uniform sampler2D u_terrain_light_texture : filter_linear, repeat_enable;
-uniform sampler2D u_terrain_blend_texture : filter_linear, repeat_enable;
-uniform sampler2D u_terrain_detail_c1 : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_terrain_detail_c2 : filter_linear_mipmap, repeat_enable;
-uniform sampler2D u_terrain_detail_c3 : filter_linear_mipmap, repeat_enable;
-uniform float u_terrain_detail_density = 128.0;
-uniform bool u_has_terrain_detail = false;
 
 // Foliage_WindSwayVS c24.x. Retail supplies
 // GetTickCount*0.003 + Env_WaveOscRing[0]*1.5258789e-6. The dispatcher binds
@@ -108,27 +112,20 @@ void fragment() {
 	// sign boundary [orig: Terrain_GetModulatedColorAtPos @ 0x5C5FE0]).
 	vec2 terrain_uv = vec2(v_world_pos.x, v_world_pos.z)
 		/ vec2(textureSize(u_terrain_light_texture, 0));
-	// LOD 0 throughout the T1 chain: retail's tile render target carries no
-	// mip chain, and derivative-driven mips collapse planar projections on
-	// the near-vertical foliage surfaces to their texture averages.
+	// LOD 0: retail's tile render target carries no mip chain, and
+	// derivative-driven mips collapse planar projections on the
+	// near-vertical foliage surfaces to their texture averages.
 	vec4 terrain_light = textureLod(u_terrain_light_texture, terrain_uv, 0.0);
-
-	// The T1 texel stand-in: retail's tile render target already contains
-	// the colormap x detail-splat composite, so recompose it here. The
-	// ps.1.4 terrain chain's dp3 normal term averages ~0.5; folded with its
-	// x2 that leaves splat * 2 (detail-less terrains use the same neutral).
-	vec3 splat = vec3(0.5);
-	if (u_has_terrain_detail) {
-		vec3 blend = textureLod(u_terrain_blend_texture, terrain_uv, 0.0).rgb;
-		vec2 detail_uv = terrain_uv * u_terrain_detail_density;
-		splat = textureLod(u_terrain_detail_c1, detail_uv, 0.0).rgb * blend.r
-			+ textureLod(u_terrain_detail_c2, detail_uv, 0.0).rgb * blend.g
-			+ textureLod(u_terrain_detail_c3, detail_uv, 0.0).rgb * blend.b;
-	}
 
 	// Foliage_LightmapBlendPS:
 	// rgb=t0*(t1*(t1.a*c1+c0))*v0*8, alpha=t0.a*v0.a.
-	vec3 lit = (terrain_light.rgb * splat * 2.0)
+	// t1.rgb is the colormap-only tile RT (see the T1 uniform note): retail
+	// foliage carries NO detail-splat term - c6 = the average detail color
+	// (128/255 on the blendmap tier) supplies the ground chain's
+	// 4*splat x 2*dp3 AVERAGE instead, so tufts sit at the brightness of the
+	// ground they grow from [orig: Foliage_LightmapBlendPS @ 0x5ff7a0;
+	// avg-detail writer @ PolyTrn_InitTextures 0x60ab00].
+	vec3 lit = terrain_light.rgb
 		* (terrain_light.a * opennova_sun_light + opennova_sky_ambient);
 	vec3 result = clamp(fd.rgb * lit * u_far_pass_color.rgb * 8.0,
 		vec3(0.0), vec3(1.0));

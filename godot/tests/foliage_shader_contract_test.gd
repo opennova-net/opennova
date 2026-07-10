@@ -26,6 +26,10 @@ func test_model_pass_uses_fd_alpha_and_black_diffuse() -> void:
 		"The disproven half-plus-bias tint approximation must stay removed.")
 	assert_false(source.contains("u_weights_from_uv"),
 		"Only model bound-square ground-fit weights belong in this shader.")
+	assert_false(source.contains("opennova_fog"),
+		"The model pass draws with D3DRS_FOGENABLE OFF - pass word 0x00440000 has no "
+		+ "FOGENABLE bit and the apply latches fog unconditionally "
+		+ "[orig: Foliage_DrawModelTileSlot @ 0x601e33; CGfxShader_ApplyPass @ 0x68324f].")
 
 
 func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
@@ -65,6 +69,11 @@ func test_far_pass_has_witnessed_wind_and_lighting_contract() -> void:
 		"The far fragment keeps the witnessed T0/T1/c0/c1/c6 multiply chain.")
 	assert_false(source.contains("u_terrain_tint"),
 		"Far lighting never derives a half-plus-bias v0 from vertex color.")
+	assert_false(source.contains("u_terrain_detail") or source.contains("u_terrain_blend"),
+		"Far T1 is the colormap-only tile RT - the bake writes rgb ~= colormap with NO "
+		+ "detail splat [orig: PolyTrn_RenderTile @ 0x60dce5]; the recompose stays removed.")
+	assert_true(source.contains("opennova_fog_color"),
+		"FAR pass words 0x02460000/0x02560000 carry FOGENABLE - the far pass keeps its fog fold.")
 
 
 func test_both_foliage_shaders_parse_as_shader_resources() -> void:

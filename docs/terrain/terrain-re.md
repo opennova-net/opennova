@@ -93,9 +93,24 @@ PolyTrn_PSConstC1_Light @ 0x31a182c); values init_terrain_lighting_color_ramps
 @ 0x604ee0 ← Render_TerrainScene @ 0x610c80 (Env_LightBlock/Env_SkyBlock;
 NVG blends the sky arg toward the modulator, the vehicle scope forces
 0x101010/0xF0F0F0)]` — so the shared shape is **terrain light =
-colormapAlpha × light + sky** (colormap alpha = the baked sun mask; the ÷2
-and MODULATE2X cancel). The foliage/sector-model blend PS inherits the same
-device constants. Ported: `terrain_lighting.gdshaderinc` (the prior
+t0Alpha × light + sky** (the ÷2 and MODULATE2X cancel). **t0-identity
+correction (2026-07-10 foliage regrill)**: the mesh draw's t0 is the BAKED
+TILE RT, not the raw colormap — `CD3DDevice_FindBestTexturePermutation
+@ 0x604392` resolves the 128-slot tile cache into the t0 dynamic slot — and
+the tile bake zeroes the colormap alpha (base-pass diffuse `0x00808080`,
+alpha byte 0) then adds **saturate(N·L)** into alpha via the additive DOT3
+pass (`PolyTrn_TileBakeDot3LightPass`: TrnNMap · packed light-dir diffuse)
+`[orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a]`. The earlier "colormap
+alpha = the baked sun mask" fold-input reading is RETRACTED — the fold
+consumes the tile RT's N·L, rebaked as the TOD moves (the tile cache stamps
+`Env_TodMinutesElapsed @ 0x60dbc0`); tile rgb is the colormap ×1.004 (no
+detail, no noise). The host include (`terrain_lighting.gdshaderinc`) folds
+the colormap alpha as its stand-in until the heightmap normal-map generator
+ports (D-TRN ledger row; the foliage FAR pass shares the same stand-in —
+[foliage/foliage-re.md](../foliage/foliage-re.md) §The tile RT). The
+foliage/sector-model blend PS inherits the same
+device constants and the same tile RT as its t1. Ported:
+`terrain_lighting.gdshaderinc` (the prior
 combined/fill pairing was a gobj-era stand-in) +
 `renderer::terrain_surface_light` (T1 section 5). Full chain:
 [render/render-lighting-re.md](../render/render-lighting-re.md).

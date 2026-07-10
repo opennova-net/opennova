@@ -333,6 +333,7 @@ Dictionary NovaFoliageDispatcher::get_dispatch_stats() const {
 	// Model tier.
 	out["model_anchors_in_range"] = dispatch_stats_.model_anchors_in_range;
 	out["model_tiles_emitted"] = dispatch_stats_.model_tiles_emitted;
+	out["model_batches"] = static_cast<int64_t>(model_draw_batches_.size());
 	out["model_instances"] = dispatch_stats_.model_instances;
 	out["model_uploads"] = dispatch_stats_.model_uploads;
 	int64_t model_hits = 0;
@@ -400,6 +401,7 @@ Array NovaFoliageDispatcher::get_model_draw_debug() const {
 		d["wind_counter"] = batch.wind_counter;
 		d["wind_phase"] = batch.wind_phase;
 		d["instance_count"] = static_cast<int64_t>(batch.instances.size());
+		d["submissions"] = batch.submissions;
 		out.push_back(d);
 	}
 	return out;
@@ -860,6 +862,16 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 	const Transform3D view_inv = has_view ? view_xform.affine_inverse() : Transform3D();
 
 	std::vector<ModelTileDraw> draws;
+	// Per-frame (slot, tile) -> rendered-batch index. Retail submits a shared
+	// tile once per qualifying sector entity and each later immediate-mode
+	// draw overwrites the earlier one (z-write on, ZFUNC LESSEQUAL)
+	// [orig: Foliage_DrawModelTileSlot @ 0x601e33]; two coexisting retained
+	// copies would z-fight instead, so the host keeps ONE batch per
+	// (slot, tile) carrying the LAST submission's draw state
+	// (docs/foliage/foliage-re.md D-FOLIAGE-10). The wind counter still
+	// advances once per SUBMISSION [orig:
+	// Foliage_UploadModelTileVSConstants @ 0x600f00 pre-increments per call].
+	std::unordered_map<uint64_t, size_t> frame_batches;
 
 	for (int a = 0; a < model_anchors_.size(); ++a) {
 		const Vector3 anchor = model_anchors_[a];
@@ -914,6 +926,29 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 			                           model_frame_counter_, config, samplers, draws);
 			for (const auto &draw : draws) {
 				++dispatch_stats_.model_tiles_emitted;
+				const int64_t wind_counter = ++model_wind_counter_;
+				const float wind_phase = static_cast<float>(
+				    static_cast<double>(wind_counter) * 0.001);
+				const uint64_t batch_key =
+				    (static_cast<uint64_t>(static_cast<uint32_t>(s)) << 32) |
+				    static_cast<uint64_t>(draw.tile_key);
+				auto seen = frame_batches.find(batch_key);
+				if (seen != frame_batches.end()) {
+					// A later submission of the same tile: retail's second
+					// draw overwrites the first in the framebuffer - the
+					// rendered batch takes the LAST submission's anchor
+					// state (alpha ref, wind phase).
+					ModelDrawBatch &existing = model_draw_batches_[seen->second];
+					existing.generation = draw.generation;
+					existing.anchor = anchor;
+					existing.view_depth = view_depth;
+					existing.anchor_distance = anchor_distance;
+					existing.alpha_ref = static_cast<float>(alpha_ref_byte);
+					existing.wind_counter = wind_counter;
+					existing.wind_phase = wind_phase;
+					++existing.submissions;
+					continue;
+				}
 				ModelDrawBatch batch;
 				batch.slot = s;
 				batch.tile_key = draw.tile_key;
@@ -922,9 +957,8 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 				batch.view_depth = view_depth;
 				batch.anchor_distance = anchor_distance;
 				batch.alpha_ref = static_cast<float>(alpha_ref_byte);
-				batch.wind_counter = ++model_wind_counter_;
-				batch.wind_phase = static_cast<float>(
-				    static_cast<double>(batch.wind_counter) * 0.001);
+				batch.wind_counter = wind_counter;
+				batch.wind_phase = wind_phase;
 				batch.instances.reserve(static_cast<size_t>(draw.result.count));
 				auto &slot_instances = model_instances_[s];
 				for (int i = 0; i < draw.result.count; ++i) {
@@ -932,6 +966,7 @@ void NovaFoliageDispatcher::_dispatch_model_tier(const Transform3D &view_xform,
 					batch.instances.push_back(instance);
 					slot_instances.push_back(instance);
 				}
+				frame_batches.emplace(batch_key, model_draw_batches_.size());
 				model_draw_batches_.push_back(std::move(batch));
 			}
 		}
@@ -1343,31 +1378,18 @@ void NovaFoliageDispatcher::_update_slot_material(int slot_index) {
 	Ref<Texture2D> fd_tex = _slot_fd_texture(slot_index);
 	material->set_shader_parameter("u_fd_texture", fd_tex);
 
-	// FAR T1: retail binds the per-tile detail-lightmap render target; the
-	// host recomposes that composite in the shader from the same .trn
-	// sources (colormap + blend/detail splat) [orig: render_terrain_lightmaps
-	// @ 0x60a1de; D-FOLIAGE-7 keeps the exact per-sector feed].
+	// FAR T1: retail binds the per-tile terrain render target, and the tile
+	// BAKE writes rgb ~= the colormap only (MODULATE2X with diffuse
+	// 0x808080; NO detail splat, NO noise) with alpha = saturate(N.L)
+	// [orig: PolyTrn_RenderTile @ 0x60dce5 / 0x60e38a;
+	// Terrain_FindSectorTileRT @ 0x6042a0]. The host binds the colormap as
+	// that stand-in; its alpha is the same fold input the host ground
+	// include consumes (the exact N.L alpha rides the terrain normal-map
+	// generator port, tracked with D-FOLIAGE-7).
 	Ref<NovaTerrainData> cm_src = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
 	Ref<Texture2D> terrain_light =
 	    cm_src.is_valid() ? cm_src->get_colormap() : Ref<Texture2D>();
 	material->set_shader_parameter("u_terrain_light_texture", terrain_light);
-	Ref<Texture2D> blend_tex, c1_tex, c2_tex, c3_tex;
-	float detail_density = 128.0f;
-	if (cm_src.is_valid()) {
-		blend_tex = cm_src->get_detailblendmap();
-		c1_tex = cm_src->get_detailmap_c1();
-		c2_tex = cm_src->get_detailmap_c2();
-		c3_tex = cm_src->get_detailmap_c3();
-		detail_density = static_cast<float>(cm_src->get_detail_density());
-	}
-	const bool has_detail = blend_tex.is_valid() && c1_tex.is_valid() &&
-	                        c2_tex.is_valid() && c3_tex.is_valid();
-	material->set_shader_parameter("u_terrain_blend_texture", blend_tex);
-	material->set_shader_parameter("u_terrain_detail_c1", c1_tex);
-	material->set_shader_parameter("u_terrain_detail_c2", c2_tex);
-	material->set_shader_parameter("u_terrain_detail_c3", c3_tex);
-	material->set_shader_parameter("u_terrain_detail_density", detail_density);
-	material->set_shader_parameter("u_has_terrain_detail", has_detail);
 
 	// [orig: setup_water_vertex_shader_constants @ 0x600450] c24.x clock
 	// term. The FAR shader associates the registered NovaWeather ring-head
