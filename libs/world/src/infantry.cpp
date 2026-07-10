@@ -781,10 +781,19 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Entity_UpdateInfantryPlayerBody @0x4b40e0 callers; resolver @0x4b2bd0]
     if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
         // Gravity. Witnessed: neither motor gates on tick parity. The NPC (org1) falls EVERY tick
-        // (-416, then pos.z += 2*vel) [orig: @0x4bf7bf / @0x4bf7ec]; the player (org2) keeps its
-        // 2-tick discretization (-416 every 2 ticks + 2*vel nets to org2's -208/tick + vel/tick),
-        // which the jump/fall tuning + tests pin. [D-INF-10]
-        if (inf.is_local_player ? ((key & 1u) == 0) : true) {
+        // (-416, then pos.z += 2*vel) [orig: @0x4bf7bf / @0x4bf7ec]; the player (org2) falls
+        // -208 EVERY tick then pos.z += vel, once [orig: @0x4b7acf / @0x4b7cef]. The prior
+        // 2-tick player discretization netted the same fall rate but broke the collision
+        // resolver's witnessed idle-skip revert (1x vel_z for players, 2x for NPCs [orig:
+        // Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0]): the skip band reverted half
+        // of each gravity displacement, sinking a standing player -416 per gravity tick and
+        // popping back on the next full resolve — the reported ~4cm idle bounce.
+        // [D-INF-10 CLOSED 2026-07-10]
+        if (inf.is_local_player) {
+            inf.vel[2] -= kGravityStep / 2;
+            if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
+            e.pos[2] += inf.vel[2];
+        } else {
             inf.vel[2] -= kGravityStep;
             if (inf.vel[2] < kTerminalVelZ) inf.vel[2] = kTerminalVelZ;
             e.pos[2] += 2 * inf.vel[2];

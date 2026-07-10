@@ -416,6 +416,65 @@ created with one texture stage and flags `0x00440000`. The draw binds `:fd` as
 T0. Stage 0 selects diffuse argument 2 for RGB and multiplies `T0.a` by
 diffuse alpha. `Foliage_GridPlacementVS` emits c6 = `(0,0,0,1)`, so MODEL's
 unfogged RGB is deliberately black while `:fd` supplies the alpha silhouette;
+
+### The FAR draw constants — 2026-07-10 trust-but-verify grill
+
+Witnessed at the instruction level (session addenda; IDB comments landed):
+
+- **c0/c1 identity**: `init_terrain_lighting_color_ramps @ 0x604ee0` writes
+  `PolyTrn_PSConstC0_SkyColorR ← Env_SkyBlock` and `PolyTrn_PSConstC1_LightColorR
+  ← Env_LightBlock` — the kong PARAMETER names are inverted (the caller
+  `Render_TerrainScene @ 0x610e8b..0x610ea1` pushes LightBlock as arg1, SkyBlock
+  as arg2); the C0/C1 global names are right. The FAR PS fold `t1*(t1.a*c1+c0)`
+  is therefore `tileRT.rgb * (tileRT.a * LIGHT + SKY)` — the reimpl's
+  `terrain_light.a * opennova_sun_light + opennova_sky_ambient` mapping is
+  **MATCHING**. The same c0/c1 registers are re-uploaded per FAR patch
+  `[orig: @ 0x60a53d / @ 0x60a552]`. An NV-ish special path feeds constants
+  `0x101010 / 0xFFF0F0F0` `[orig: @ 0x610e53]`.
+- **c6.rgb identity**: the per-patch VS color block builds
+  `flt_319F9D0[rgb] × flt_319F9E0[rgb]` on the multitexture path
+  `[orig: @ 0x609efe..0x609f30]`. `flt_319F9D0` = the average detail color —
+  **128/255 = 0.50196 constants on the blendmap tier** (terrain-re.md §Texture
+  build) — and `flt_319F9E0[rgb] = (1,1,1)` constants `[orig: writer @ 0x604ffa
+  region]`. So PS-path c6.rgb ≈ **0.50196 neutral**: the reimpl's 0.5 was right
+  to 0.4%; `foliage_far.gdshader` now carries 128/255 exactly. The
+  fixed-function path folds `flt_319FA50[rgb] × flt_319F9D0[rgb] × 2.0`
+  `[orig: @ 0x609f32..0x609f70; flt_7C3B90 = 2.0]` with
+  `flt_319FA50 = 0.707·LIGHT + SKY` per channel `[orig: @ 0x604ee0]`, and the
+  same trio feeds D3D light 4's AMBIENT for the FF fallback
+  `[orig: SetLight(4)/LightEnable(4) @ 0x609f94/0x609fa4]`.
+- **Fade + pass constants confirmed at the byte level**: knee 20.0
+  (`flt_7D8E60`), slope 1/22 (`flt_7DF1BC = 0x3D3A2E8C`), high-pass threshold
+  33.0 (`flt_7DF1C0`, gate `[orig: @ 0x60a171]`), fade → c6.a with the
+  distance from the patch record `[orig: @ 0x60a45d..0x60a483]`. NEW: the
+  SECOND call (arg_8 — the low/wireframe resubmit) forces the LOW pass
+  `[orig: @ 0x60a193]` and multiplies the fade by **0.1** (`flt_7C69F4`)
+  `[orig: @ 0x60a4a8]` — the resubmit renders at 10% fade. The host models
+  fade+ref per cell but does not yet run the second draw (in-row at
+  D-FOLIAGE-7).
+- **The per-def pass objects**: the HIGH pass applies `def[14]`
+  (`dword_3162098`, ref 180 `[orig: @ 0x6008eb/0x6008f5]`) and the LOW pass
+  `def[13]` (`dword_3162094`, ref 8 `[orig: @ 0x60090e/0x600931]`) — correcting
+  this record's earlier "[13]/[14] are GfxResource image objects" attribution.
+- **The draw descriptor walk**: `Terrain_SetupSectorModelDraw @ 0x6007c0`
+  searches the per-def FAR slot pool (the 7-dword records at region+38) for the
+  requested cell key and fills the draw descriptor (VB base = poolIdx ×
+  per-def stride, index/vertex counts from the record, primitive count = idx/3,
+  FVF 0x152, `Foliage_WindSwayVS`); fog mode 8 (VS fog) when the wind VS
+  exists `[orig: @ 0x6008c1]`. `Terrain_FindSectorTileRT @ 0x6042a0` (renamed
+  this session from `sub_6042A0`) resolves the sector/quadrant tile render
+  target with progressive LOD masks — T1 is that tile RT, sampled through the
+  world→tile UV matrix staged at `[orig: @ 0x60a220..0x60a356]`.
+
+Proposed renames (curated-name policy — NOT applied, awaiting maintainer OK):
+`render_terrain_lightmaps @ 0x609de0 → Foliage_RenderFarPatches` (it renders
+the FAR foliage patches over the tile RTs; the current name is a kong
+misnomer), `Terrain_SetupSectorModelDraw @ 0x6007c0 → Foliage_SetupFarSlotDraw`.
+
+IDB changes this session: `sub_6042A0 → Terrain_FindSectorTileRT`; witness
+comments at `0x609efe`, `0x60a45d`, `0x60a4a8`, `0x60a171`, `0x60a53d`,
+`0x6007eb`, `0x604ee0`; `idb_save` checkpointed.
+
 distance fog can lift that black toward the fog color. MODEL does not run the
 FAR lightmap blend. `foliage_model.gdshader` now expresses this separate pass,
 closing D-FOLIAGE-6 `[orig: Foliage_LoadDefAssets @ 0x601260;
@@ -464,7 +523,7 @@ cells, the host bakes them and lets per-node frustum culling drop the draws.
 | D-FOLIAGE-4 | B | **FIXED (corrected 2026-07-09)** | MODEL stamps full source geometry with cap 21, XZ 0.75/Y 0.5, yaw-only eight-sample ground fit, anchor-derived alpha, duplicate tile draws per qualifying anchor, and per-tile-draw wind counter `[orig: @ 0x600980, 0x601f50, 0x601d90, 0x600f00]`. The former shared-shader/shared-cap and FAR ground-patch addenda are retracted; FAR instead uses `far_mesh_emitter`. Exact upstream entity visibility rides D-FOLIAGE-7. |
 | D-FOLIAGE-5 | B | **FIXED (2026-07-08)** | Both tiers bind the model submesh[0] `:fd` bake: wrapped 3×3 alpha kernel and flattened `0x808080` RGB `[orig: Foliage_LoadDefAssets @ 0x601260; Foliage_DrawModelTileSlot @ 0x601d90]`. |
 | D-FOLIAGE-6 | C | **FIXED (2026-07-09)** | MODEL's table[16] pass is now witnessed: one T0=`:fd` stage, flags `0x00440000`, RGB selects c6 diffuse `(0,0,0,1)`, alpha multiplies `T0.a*diffuse.a`. The resulting unfogged RGB is black; `foliage_model.gdshader` ports that pass rather than sharing FAR's lightmap combine. |
-| D-FOLIAGE-7 | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) | The FAR feed (42.0 traversal collect, 128 caps), bake-once slot pool, and per-patch fade/high-low draw state are witnessed AND hosted. Remaining approximations: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), exact c6.rgb lighting-factor floats (host: 0.5 FF-parity neutral), the MODEL sector-entity visibility stream (the host now frustum-gates anchors — the occlusion half stays unhosted), the blocker registry, the second low wireframe resubmit, and the retail pool residency count (field [37]). |
+| D-FOLIAGE-7 | A | WITNESSED-READY-DEFERRED (narrowed 2026-07-10) | The FAR feed (42.0 traversal collect, 128 caps), bake-once slot pool, and per-patch fade/high-low draw state are witnessed AND hosted. Remaining approximations: exact per-tile T1 render-target content (host recomposes colormap x detail splat at LOD 0), the MODEL sector-entity visibility stream (the host now frustum-gates anchors — the occlusion half stays unhosted), the blocker registry, the second low wireframe resubmit (now precisely specced: LOW pass object, fade ×0.1 — see §The FAR draw constants), and the retail pool residency count (field [37]). CLOSED 2026-07-10: the c6.rgb floats — witnessed as avgDetailColor × (1,1,1) ≈ 128/255 on the PS path (§The FAR draw constants); the shader now carries 128/255 exactly. |
 | D-FOLIAGE-8 | A | OPEN (minted 2026-07-10) | FAR cell-key provenance: retail keys pack native sector+offset coordinates (always in the wrapped [0,1024) domain) and the per-cell PRNG seeds from that key; the host's FAR cells are keyed in Godot render space (z = −native, signed near the origin), so per-cell jitter patterns diverge from retail and the mask sampler needs a compensating sign at the slot_mask boundary. Fix direction: native-keyed collect + native placement with a render-space conversion at emit (touches the collect, both height lambdas, and the emitted-vertex Z). |
 | D-FOLIAGE-9 | B | OPEN (minted 2026-07-10) | With the corrected foliagemap gate, painted 00TRg cells bake instances (nodes, meshes, materials all present and in-frustum) that do not rasterize; on Dvxi5 the same path draws. Also the Dvxi5 far tufts render white-silver — the T1 recompose (u_terrain_light/detail chain) reads wrong or missing sources on flat-extract loads. Both need a focused render-side session (probes committed: foliage_00trg_capture_probe, foliage_sampler_compare_probe). |
 

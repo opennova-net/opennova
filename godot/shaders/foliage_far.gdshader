@@ -27,13 +27,13 @@ uniform bool u_has_terrain_detail = false;
 // the clock term; NovaWeather publishes the fixed ring-head term below.
 uniform float u_far_wind_phase = 0.0;
 
-// Foliage_WindSwayVS c6 RGB: the per-frame terrain lighting factors. The host
-// holds the 0.5 neutral: with the flat-0x808080 ":fd" RGB and the *8 below it
-// reproduces the fixed-function fallback's 2*T0*diffuse level, so foliage
-// tracks the untinted terrain surface (env #19: the terrain_rgb texture-bake
-// consumer is retail dead code). Exact c6 floats stay on D-FOLIAGE-7. Alpha
-// rides per cell in u_cell_fade.
-uniform vec4 u_far_pass_color = vec4(0.5, 0.5, 0.5, 1.0);
+// Foliage_WindSwayVS c6 RGB — witnessed 2026-07-10 (foliage-re.md §The FAR
+// draw constants): on the pixel-shader path c6.rgb = avgDetailColor x (1,1,1),
+// and the average detail color is the 128/255 constant on the blendmap tier
+// [orig: c6 build @ 0x609efe; avg detail = 128/255 per terrain-re.md; the
+// (1,1,1) factor's writer @ 0x604ee0]. 0.50196 exactly, not 0.5.
+// Alpha rides per cell in u_cell_fade.
+uniform vec4 u_far_pass_color = vec4(0.50196078, 0.50196078, 0.50196078, 1.0);
 
 // Per-cell c6.a distance fade: 1 through distance 20, then 1-(d-20)/22,
 // reaching 0 exactly at the 42.0 collect edge

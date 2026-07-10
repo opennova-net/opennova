@@ -334,10 +334,14 @@ can see it (`Physics_RaycastTerrainAndSectors` watch-check, retry 62); respawn r
     [orig: `Entity_UpdateInfantryPlayerBody @0x4b7acf` (`add … 0xFFFFFF30`) / `@0x4b7cef`]; both clamp
     to terminal −32768. A prior pass applied one `−416 every 2 ticks` + `pos += 2·vel` to BOTH, which
     nets to the player's −208/tick + vel/tick (org2) but left the NPC at HALF the org1 fall rate.
-    FIXED for the NPC (faithful per-tick `−416` + `2·vel`); the player keeps the 2-tick discretization
-    (net-equivalent to org2 — its jump/fall tuning + tests pin the `−416`-per-application step, so
-    making it per-tick `−208` is deferred to a dedicated player-physics grill). `libs/world/src/
-    infantry.cpp`; guarded by the gravity-cadence case in `tests/world/infantry_test.cpp`.
+    FIXED for the NPC (faithful per-tick `−416` + `2·vel`); **the player CLOSED 2026-07-10** — the
+    2-tick discretization was net-equivalent in free fall but broke §15.3's witnessed idle-skip
+    revert (1× `vel_z` for players, 2× for NPCs [orig: @0x4b2bd0]): the skip band reverted half of
+    each 2-tick gravity displacement, sinking a standing player −416 per gravity tick and popping
+    on the next full resolve — the maintainer-reported ~4 cm idle bounce on the #217 trunk. The
+    player now runs the witnessed org2 form (`vel_z −= 208` EVERY tick, `pos.z += vel_z`), making
+    the skip revert an exact cancel. `libs/world/src/infantry.cpp`; guarded by the gravity-cadence
+    case + the new idle skip-band fixed-point case in `tests/world/infantry_test.cpp`.
   - **D-INF-11** third-person body aim overlay (the torso bend) — **LOCAL PLAYER LANDED
     2026-07-08** (§14.6: `libs/anim/aim_overlay`, the leg-chase sim fields, the
     `NovaSkeletalAnim.eval_pose_overlay` path, the witnessed 3P camera numbers; verified

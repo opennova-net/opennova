@@ -955,8 +955,10 @@ int main() {
         CHECK(e->health == 100);
     }
 
-    // ---- gravity cadence: the NPC (org1) falls EVERY tick; the player (org2) keeps the 2-tick
-    //      discretization. [orig: NPC -416/tick @0x4bf7bf; player -416 every 2 ticks; D-INF-10]
+    // ---- gravity cadence: the NPC (org1) falls EVERY tick at -416 + 2*vel; the player (org2)
+    //      falls EVERY tick at -208 + vel. [orig: NPC @0x4bf7bf/@0x4bf7ec; player
+    //      @0x4b7acf/@0x4b7cef; D-INF-10 CLOSED 2026-07-10 — the 2-tick player form broke the
+    //      collision resolver's 1x idle-skip revert (the standing bounce)]
     {
         Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
         World w;
@@ -973,7 +975,53 @@ int main() {
 
         run_ticks(ai, w, 0, 2); // ticks 0 (even) and 1 (odd); both stay airborne (100u up)
         CHECK(ai.at(0)->inf.vel[2] == -2 * 416); // NPC: two gravity steps -> per-tick fall
-        CHECK(ai.at(1)->inf.vel[2] == -416);     // player: one gravity step -> 2-tick discretization
+        CHECK(ai.at(1)->inf.vel[2] == -2 * 208); // player: org2's -208 EVERY tick
+    }
+
+    // ---- idle skip-band fixed point: a standing player's Z must be stationary across the
+    //      collision resolver's skip ticks — the org2 gravity displacement (pos += vel) is
+    //      exactly what the witnessed idle-skip revert removes (1x vel_z for players)
+    //      [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 skip path; the 2-tick
+    //      discretization sank -416 per gravity tick here — the reported standing bounce]
+    {
+        Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
+        const int32_t floor_z = fx(50) + kFloorStand;
+
+        World w;
+        AiSystem ai;
+        ai.terrain = &flat.field;
+        // Arm the resolver path: one (volumeless) collision instance far away —
+        // instance_count() != 0 routes the motor through resolve_entity.
+        CollisionWorld cw;
+        cw.terrain = &flat.field;
+        w.registry.configure_pool(2, 8);
+        Entity b;
+        b.kind = EntityKind::Building;
+        b.net_id = 4242;
+        b.position = {500.0f, 500.0f, 50.0f};
+        b.alive = true;
+        const EntityHandle bh = w.registry.spawn(2, b);
+        cw.assign_entity(bh, cw.add_model(CollisionModel{}));
+        ai.collision = &cw;
+
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->pos[0] = fx(100); e->pos[1] = fx(100); e->pos[2] = floor_z;
+        e->inf.vel[2] = 0;
+
+        // Settle through the counter's full band into the skip band, then watch a
+        // full skip cycle: Z must hold the floor the whole way.
+        TickContext ctx;
+        ctx.world = &w;
+        ctx.is_authority = true;
+        int32_t min_z = e->pos[2], max_z = e->pos[2];
+        for (uint32_t t = 0; t < 64; ++t) {
+            ctx.logic_tick = t;
+            ai.tick(w, ctx);
+            if (e->pos[2] < min_z) min_z = e->pos[2];
+            if (e->pos[2] > max_z) max_z = e->pos[2];
+        }
+        CHECK(max_z - min_z <= 208); // stationary within one gravity quantum — no sawtooth
     }
 
     // ---- slope slide: steep ground drifts the soldier downhill + leans the body ----
@@ -1261,7 +1309,7 @@ int main() {
         e->inf.jump_requested = true;
         run_ticks(ai, w, 2, 3);               // the jump tick
         CHECK(e->inf.airborne);
-        CHECK(e->inf.vel[2] == 0x1600 - 416); // launch impulse minus one gravity step
+        CHECK(e->inf.vel[2] == 0x1600 - 208); // launch impulse minus one org2 gravity step (-208/tick)
         CHECK(e->inf.anim_state == anim_state::kJumpLoop);
         CHECK(e->pos[2] > floor_z);           // rose off the ground
 
