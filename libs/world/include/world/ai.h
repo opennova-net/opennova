@@ -29,6 +29,7 @@
 #include <cstring>
 #include <vector>
 
+#include "world/collision.h"
 #include "world/entity.h"
 #include "world/infantry.h"
 #include "world/world.h"
@@ -273,6 +274,10 @@ struct AiEntity {
     // by AiSystem::tick_infantry [orig: Entity_UpdateInfantryAI @0x4b9910] instead of the
     // vehicle state machine; promote routes BMS organics here. See world/infantry.h.
     InfantryState inf;
+
+    // Per-entity collision-resolver state (prev-position gating + the idle skip
+    // throttle). [orig: entity savedLivePose + pad_370[3]; collision.h]
+    CollisionWorld::ResolveState collide_state;
 };
 
 // A resolved AI target — the fields the engagement bookkeeping reads off the target entity.
@@ -485,6 +490,11 @@ public:
     // every step; see apply_ground_clamp.]
     const terrain::TerrainHeightField *terrain = nullptr;
     GroundClearance ground_clearance{};
+    // World-object collision (host-wired like `terrain`; null = terrain-only motor).
+    // When set, the tick rebuilds the proximity tables [orig: Entity_UpdateAllEntities
+    // @0x4c2100 -> Entity_BuildAllProximityLists @0x4c20f0] and the infantry vertical
+    // resolve routes through CollisionWorld::resolve_entity (D-INF-3 burn-down).
+    CollisionWorld *collision = nullptr;
     // [orig: the +0x50000 the movers add after grounding — AI_ProcessMovementStep @0x466db0
     // brain[131] = ground + 0x50000; AI_UpdateMovementTarget @0x460e40 adds def heightOffset.]
     // NOTE: the INFANTRY motor (tick_infantry — player AND AI) does NOT use this. It settles

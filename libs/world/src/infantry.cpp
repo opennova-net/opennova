@@ -15,13 +15,18 @@
 //            (guard/hold) are decoded but not driven by a command source; they idle.
 //            127 (follow local player) idles because the simulation has no local player.
 //   D-INF-3  the ground/water resolver [orig: Entity_ProcessCollisionAndPlatformPhysics
-//            @0x4b2bd0] is modeled as terrain-only collision (no platforms/water yet).
-//            The caller semantics are preserved: return <= 0 lifts the foot out of the
-//            floor, return > 0xF000 marks airborne, and small positive clearance is left
-//            alone. The airborne anim overlay (entity+36 flags 0x2000/0x20 set, 0x40
-//            clear -> parachute 47 else jump_loop 31; dump 3679) waits on those flags.
-//            NOTE: patrol walking has NO peer/obstacle avoidance in the original — entity
-//            separation is the resolver's push-out, not a steering behavior (dump survey).
+//            @0x4b2bd0]: with a CollisionWorld wired (AiSystem::collision) the full
+//            resolver runs — wall push-out, standing on objects, hurt/zone volumes,
+//            person repulsion, blink/indoors (world/collision.h; witness
+//            docs/world/world-wac-ai-re.md §15, deferral tails D-COL-1..8). Without one
+//            (headless tests) the terrain-cache clearance stands. Remaining D-INF-3
+//            tail: water (swim transitions). The caller semantics are preserved either
+//            way: return <= 0 lifts the foot out of the floor, return > 0xF000 marks
+//            airborne, small positive clearance is left alone; the airborne anim overlay
+//            (entity+36 flags 0x2000/0x20 set, 0x40 clear -> parachute 47 else jump_loop
+//            31; dump 3679) waits on those flags. NOTE: patrol walking has NO
+//            peer/obstacle avoidance in the original — entity separation is the
+//            resolver's push-out, not a steering behavior (dump survey).
 //   D-INF-4  CLOSED: the direction table generator is witnessed and ported —
 //            Math_BuildSinTable @ 0x613050 builds ONE 1281-entry sin table at 2^22
 //            by an accumulating x87 loop (angle += 2pi/1024 per entry, ftol2_sse
@@ -39,6 +44,8 @@
 
 #include "world/ai.h"
 #include "world/angle.h"
+#include "world/collision.h"
+#include "world/dir_table.h"
 #include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
 
 namespace opennova::world {
@@ -100,41 +107,8 @@ int player_directional_state(int base, int move_dir_index) {
     return base + kOffsetFromInputIndex[move_dir_index & 7];
 }
 
-// The runtime-built direction table [orig: Math_BuildSinTable @ 0x613050]:
-// 1281 entries (end bound 0x31C0FC4), value = trunc(sin(angle) * 2^22) with the
-// angle ACCUMULATED per entry (angle += dbl_7DF578 = 0.006135923151542565, the
-// double nearest 2pi/1024) and truncated toward zero (_ftol2_sse). The cos
-// consumer reads the same table +256 entries (off_849934 = outMillis + 0x400);
-// the 1281st entry covers idx 1023 + 256 + wrap. Double accumulation is
-// integer-identical to the closed form for every entry (pinned in
-// world_dir_table ctest); any residual x87-extended vs SSE2-double low-bit
-// difference is the D-3DI-1 substrate class, not an algorithm divergence.
-struct DirTable {
-    int32_t sin22[1281];
-    DirTable() {
-        double angle = 0.0;
-        constexpr double kStep = 0.006135923151542565; // [orig: dbl_7DF578]
-        for (int i = 0; i < 1281; ++i) {
-            sin22[i] = static_cast<int32_t>(std::sin(angle) * 4194304.0); // [orig: dbl_7C3600]
-            angle += kStep;
-        }
-    }
-};
-
-const DirTable &dir_table() {
-    static const DirTable t;
-    return t;
-}
-
-// Quantized heading -> direction vector, 22-bit scale. [orig: idx = (h + 0x200000) >> 22
-// into Math_BuildSinTable's table; sin = outMillis[idx], cos = (outMillis+0x400)[idx];
-// dump 934-940, 4783-4797] (D-INF-4)
-void quantized_dir(int32_t heading, int32_t &cos22, int32_t &sin22) {
-    uint32_t idx = (static_cast<uint32_t>(heading) + 0x200000u) >> 22;
-    const DirTable &t = dir_table();
-    sin22 = t.sin22[idx];
-    cos22 = t.sin22[idx + 256u];
-}
+// The quantized direction table + accessor moved to world/dir_table.h (shared
+// with the collision resolver); the generator/witness notes live there. (D-INF-4)
 
 int32_t bearing_to(int32_t dx, int32_t dy) {
     return static_cast<int32_t>(std::atan2(static_cast<double>(dy), static_cast<double>(dx)) *
@@ -676,7 +650,21 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             e.pos[2] += 2 * inf.vel[2];
         }
 
-        const int32_t foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
+        // Foot clearance: with a collision world wired this is the full resolver —
+        // candidate contact forces (wall push-out, hurt/ladder/blink volumes, platform
+        // standing-on) + person repulsion + the ground probe THROUGH candidate models
+        // (standing on buildings) [orig: Entity_ProcessCollisionAndPlatformPhysics
+        // @0x4b2bd0; burns down D-INF-3's terrain-only stand-in]. Without one, the
+        // terrain-cache clearance stands (headless tests, no placed objects).
+        int32_t foot_clearance;
+        if (collision != nullptr && collision->instance_count() != 0) {
+            foot_clearance = collision->resolve_entity(
+                world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
+                frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
+                inf.is_local_player, is_authority, logic_tick, inf.anim_state, e.health);
+        } else {
+            foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
+        }
         if (foot_clearance > kAirborneGap) {
             inf.airborne = true;
         } else if (foot_clearance <= 0) {

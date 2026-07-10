@@ -16,8 +16,15 @@ extends RefCounted
 # re-import (same convention as mission_object_placer.gd / veg_assets.gd).
 
 
-# Tentative collidable-type abbreviations (from the reference exporter's
-# map_collidable_type; the meanings are inferred, hence the trailing "?" callers add).
+# Collidable-type abbreviations (from the reference exporter's map_collidable_type).
+# The LETTER CODES are exporter-side naming; the RUNTIME semantics are now witnessed
+# (docs/world/world-wac-ai-re.md §15.4): 1 solid (the only type raycasts clip),
+# 4 platform/seat, 5 contact-no-force, 6 armory zone (Flags 0x400000 gates
+# weapon.mnu), 7 damage-pass, 8 blink box (indoors), 9 destructible-section touch,
+# 10 capture-zone touch, 11 vehicle-loadout zone (Flags 0x800 gates vehicle.mnu),
+# 12 masked, 13 grounded-only touch, 16/17/18 hurt -50/-6/-1 HP, 19 player-only
+# solid, 20..23 occlusion. [orig: Entity_ComputeBoneCollisionForce @0x4ae150 +
+# Entity_TestCollisionSections @0x4aef90 + Entity_RaycastCollisionModel @0x413060]
 const TYPE_NAMES := {
 	1: "CB", 4: "CL", 5: "CV", 6: "CA", 7: "VC", 8: "BB", 9: "CD",
 	10: "CT", 11: "CM", 12: "VK", 13: "CF", 14: "LP",
