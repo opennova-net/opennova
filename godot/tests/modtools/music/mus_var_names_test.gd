@@ -33,13 +33,14 @@ func test_menuscript_unknown_indices_fall_back():
 
 func test_gamescript_known_vars_get_friendly_names():
 	# Binary-grounded by the Jointops.exe grill: AudioVM_SetVariable @ 0x671FA0
-	# callers Game_StartMission @ 0x524360 and
-	# Entity_UpdateInfantryPhysics_Continuation2 @ 0x4B434F.
+	# callers Game_StartMission @ 0x524360 and Entity_UpdateInfantryPlayerBody
+	# @ 0x4B40E0 (docs/audio/mus-sbf-re.md §Game music driving).
 	assert_eq(MusVarNames.label_for("gamescript", 1), "MissionActive (Var01)")
 	assert_eq(MusVarNames.label_for("gamescript", 2), "ViewPitch (Var02)")
-	assert_eq(MusVarNames.label_for("gamescript", 5), "Speed (Var05)")
+	assert_eq(MusVarNames.label_for("gamescript", 5), "ThreatDistance (Var05)")
+	assert_eq(MusVarNames.label_for("gamescript", 6), "ThreatTargetsMe (Var06)")
 	assert_eq(MusVarNames.label_for("gamescript", 7), "HealthPct (Var07)")
-	assert_eq(MusVarNames.label_for("gamescript", 8), "GameState (Var08)")
+	assert_eq(MusVarNames.label_for("gamescript", 8), "GameType (Var08)")
 	assert_eq(MusVarNames.label_for("gamescript", 10), "Team (Var10)")
 
 
@@ -75,13 +76,13 @@ func test_meta_for_known_controls():
 func test_meta_for_falls_back_to_empty():
 	# No control hint -> {} so the inspector uses a plain int32 spinbox.
 	assert_eq(MusVarNames.meta_for("gamescript", 99), {})
-	assert_eq(MusVarNames.meta_for("gamescript", 5), {})
+	assert_eq(MusVarNames.meta_for("gamescript", 2), {})
 	assert_eq(MusVarNames.meta_for("user_authored", 0), {})
 	assert_eq(MusVarNames.meta_for("", 0), {})
 
 
 func test_known_indices_sorted():
-	assert_eq(MusVarNames.known_indices("gamescript"), [1, 2, 5, 7, 8, 10])
+	assert_eq(MusVarNames.known_indices("gamescript"), [1, 2, 5, 6, 7, 8, 10])
 	assert_eq(MusVarNames.known_indices("menuscript"), [0, 2, 14])
 	# Unknown scripts have no known vars, so the inspector renders all slots raw.
 	assert_eq(MusVarNames.known_indices("user_authored"), [])

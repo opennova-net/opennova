@@ -40,27 +40,32 @@ const KNOWN := {
 	#   - seeded once at mission start: Jointops.exe!Game_StartMission @ 0x524360
 	#     (Var01=dword_A762E0, Var07=100, Var02..06/08..12=0)
 	#   - re-driven per-frame from the LOCAL PLAYER's state:
-	#     Jointops.exe!Entity_UpdateInfantryPhysics_Continuation2 @ 0x4B434F
-	#     (gated on g_local_player_entity).
-	# Friendly names below are the high/medium-confidence identifications.
+	#     Jointops.exe!Entity_UpdateInfantryPlayerBody @ 0x4B40E0, gated
+	#     entity == g_local_player_entity (@ 0x4B6234).
+	# Full witness map: docs/audio/mus-sbf-re.md §Game music driving (2026-07-09).
 	# Lower-confidence per-frame slots (left raw): Var03/Var04 = orientation/state
-	# args (@0x4B62E4/0x4B62F0), Var06 = a state bool (@0x4B62C9). Var09/11/12 are
-	# seeded 0 and never re-driven (meaning unknown).
+	# args (@0x4B62E4/0x4B62F0). Var09/11/12 are seeded 0 and never re-driven.
 	"gamescript": {
-		# Var01: seeded from dword_A762E0 at mission start; gates Testmission
-		#        audio via `if (Var01 != 0)`. Witnessed @ 0x5255BF.
+		# Var01: seeded from dword_A762E0 at mission start (@ 0x5255BF). That
+		#        global is NEVER WRITTEN in retail JO, so Var01 is always 0 and
+		#        gamemus always runs its Multiplayerstart P0 loop; the script's
+		#        Missionnull/Missionwin/Missionlose branches are dead content.
 		1: "MissionActive",
 		# Var02: local-player view pitch (outPitch). Witnessed @ 0x4B62D8.
 		2: "ViewPitch",
-		# Var05: local-player movement speed magnitude (sqrt(sumsq)>>16 +1; 0 when
-		#        stationary). Witnessed @ 0x4B62A9.
-		5: "Speed",
+		# Var05: distance to the nearest threat, whole units +1 (0 = none).
+		#        Threat = Entity_FindNearestThreat @ 0x4B0990 within
+		#        min(fog_dist/2, 40u); dist folded @ 0x4B6261-0x4B62A9.
+		5: "ThreatDistance",
+		# Var06: that threat's current target is the local player (bool).
+		#        Witnessed @ 0x4B62B3-0x4B62C9.
+		6: "ThreatTargetsMe",
 		# Var07: local-player health % (init 100; cur*100/max via
 		#        Entity_GetMaxHealthWithDifficulty). Witnessed @ 0x4B6324 / seed @ 0x5255F0.
 		7: "HealthPct",
-		# Var08: game/round state (dword_24C1970; shared with scoreboard/HUD/
-		#        camera/net-client-msgs). Witnessed @ 0x4B6335.
-		8: "GameState",
+		# Var08: the match's scoring game TYPE (g_scoreGameType @ 0x24C1970),
+		#        not a dynamic round state. Witnessed @ 0x4B6335.
+		8: "GameType",
 		# Var10: local-player team. Witnessed @ 0x4B62FC.
 		10: "Team",
 	},
@@ -80,8 +85,10 @@ const KNOWN := {
 const META := {
 	"gamescript": {
 		1: {"kind": "bool"},                          # MissionActive: gate flag
+		5: {"kind": "int", "min": 0, "max": 64},      # ThreatDistance: units (0=none; search caps ~40u)
+		6: {"kind": "bool"},                          # ThreatTargetsMe: 0/1
 		7: {"kind": "slider", "min": 0, "max": 100},  # HealthPct: 0..100
-		8: {"kind": "int", "min": 0, "max": 255},     # GameState: small enum-ish
+		8: {"kind": "int", "min": 0, "max": 255},     # GameType: scoring-mode id
 		10: {"kind": "int", "min": 0, "max": 32},     # Team: small index
 	},
 	"menuscript": {

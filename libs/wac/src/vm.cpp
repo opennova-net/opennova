@@ -199,6 +199,18 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 0;
     }
 
+    // ---- scripted voice (wave / pwave): play a .wav by FILENAME ----
+    // [orig: wave/pwave @ 0x4ED610] loads the named wav from the archive
+    // (Audio_LoadWavFileFromArchive @ 0x766480) and plays it on a single dedicated
+    // voice channel (dword_C6EC30) that it RESETS first -- so a new wave interrupts
+    // the previous one. This is a separate channel from the .DBF dialog queue
+    // (PlayWavList), not serialized with it. The filename rides the effect string.
+    // pwave is the network-broadcast twin (same handler); host-side identical.
+    if (ieq(n, "wave") || ieq(n, "pwave")) {
+        w.effects.push({"dialog_wav", 0, 0, 0, 0, S(0)});
+        return 0;
+    }
+
     // ---- default: record the command as an observable effect ----
     w.effects.push({def.name, A(0), A(1), A(2), A(3), S(0)});
     return 0;

@@ -2,11 +2,13 @@ class_name NovaMenuHost
 extends Control
 
 # Runtime menu shell: drives a live NovaMnuMenu (the same engine node the ONED
-# Menus workspace previews, here with edit_mode off so it is fully interactive)
-# and a NovaMusicDirector, loading the game's .mnu menu set + audio from the
-# user's resource directory. It is the runtime counterpart to GameWorld: GameWorld
-# turns a resource dir into a playable world, this turns it into the playable
-# menu front-end, and main_game.gd hands off between the two.
+# Menus workspace previews, here with edit_mode off so it is fully interactive),
+# loading the game's .mnu menu set + audio from the user's resource directory.
+# Music streams through the shared NovaMusicService autoload (one context at a
+# time, like the original AudioVM): the shell opens the MENU context; GameWorld
+# opens the GAME context at mission start. It is the runtime counterpart to
+# GameWorld: GameWorld turns a resource dir into a playable world, this turns it
+# into the playable menu front-end, and main_game.gd hands off between the two.
 #
 # The menu itself owns intra-.mnu navigation, window show/hide, the back stack,
 # and per-screen music (it pushes each screen's MUSICVAR into the director). The
@@ -19,9 +21,17 @@ extends Control
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 
-# Menu var index the director uses for the current-screen MUSICVAR (matches the
-# menu's set_music_var_index default and the engine tests' set_var(0, ...) path).
-const MUSIC_VAR_INDEX := 0
+# Var index the director sets to the current screen's MUSICVAR. The menumus MUS
+# script reads its section discriminator at var INDEX 2 (golden test
+# tests/mus/mus_vm_test.cpp drives "jo_menumus.bin" via var 2; gamemus uses var 1),
+# so the screen MUSICVAR must land at var2 — at index 0 it was inert and the VM
+# always ran the var2=0 path (P1,P2 then a P0 loop) instead of the screen's section
+# (the main menu's MUSICVAR=1 selects the P2..P8 theme). The original stores the
+# active screen's MUSICVAR to Var2 on every screen event [orig:
+# UI_DispatchScreenEvent @ 0x54e6a0, store @ 0x54eff4 -> AudioVM_SetVariable(2, v)].
+# setup() pushes it synchronously (open_menu rebuilds in-tree) before the
+# director's first _process tick, so the VM starts in the right section.
+const MUSIC_VAR_INDEX := 2
 
 # Menus are authored in a fixed 800x600 virtual design space and scaled to the
 # screen by independent X/Y factors (anamorphic fill, no letterbox, origin 0,0):
@@ -59,7 +69,6 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 # "" -> a .lwf whose name contains "menu" (i.e. menu.lwf), else the first .lwf found.
 @export var menu_sound_profile_file := ""
 @export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
-@export var game_music_file := ""        # "" -> GAMEMUS.BIN (G<n>.bin under an expansion)
 
 # Well-known control names (the JO "wired by convention" launch/quit controls).
 # A button found by one of these names gets its `pressed` connected to the host.
@@ -114,15 +123,10 @@ signal novaworld_requested()
 signal expansion_selected(name: String)
 
 var _menu: NovaMnuMenu
-var _director: NovaMusicDirector
 var _root: NovaResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
-var _menu_music_bank: NovaSbfBank
-var _game_music_bank: NovaSbfBank
 var _sound_profile: NovaLwfData
-var _menu_music: NovaMusicScript
-var _game_music: NovaMusicScript
 
 var _menu_cache: Dictionary = {}            # filename -> NovaMnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
@@ -179,11 +183,6 @@ func setup(root: NovaResourceRoot) -> bool:
 # --- Asset assembly -----------------------------------------------------------
 
 func _assemble_assets() -> void:
-	_director = NovaMusicDirector.new()
-	_director.name = "MusicDirector"
-	_director.auto_start = false
-	add_child(_director)
-
 	_text = _load_text(menu_text_file)
 	# Register the engine text tables into the shared NovaStrings registry, the way the
 	# original loads its TextResource globals at boot [orig: Game_InitSubsystems @ 0x4A6CD0]:
@@ -196,20 +195,6 @@ func _assemble_assets() -> void:
 		NovaStrings.register_table("gametext", gametext)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
-	# The two witnessed interactive-music pairs (D-BOOT-1). Each .sbf bank streams
-	# loose from disk by path [orig: AudioVM_OpenContextFile @ 0x672160 CreateFileA;
-	# Sbf_OpenFile_Gamemus @ 0x4ed6c0] while each .bin script loads by name through
-	# the engine file system, so it resolves from PFF archives too [orig:
-	# AudioVM_LoadScriptFile @ 0x672d20 via AudioVM_OpenContextFile @ 0x6721f7].
-	var menu_pair := resolve_music_pair("M", "menumus")
-	var game_pair := resolve_music_pair("G", "gamemus")
-	var menu_bank_path := String(menu_pair.bank)
-	if not menu_sound_bank_file.is_empty():
-		menu_bank_path = _resolve(menu_sound_bank_file)  # explicit override wins
-	_menu_music_bank = _load_bank(menu_bank_path)
-	_game_music_bank = _load_bank(String(game_pair.bank))
-	_menu_music = _load_music_script(menu_music_file, String(menu_pair.script))
-	_game_music = _load_music_script(game_music_file, String(game_pair.script))
 
 	_menu = NovaMnuMenu.new()
 	_menu.name = "Menu"
@@ -224,7 +209,10 @@ func _assemble_assets() -> void:
 	# SBF stays on the music director only; it is not the menu's SFX source.
 	if _sound_profile != null:
 		_menu.set_sound_profile(_sound_profile)
-	_menu.set_music_director(_director)
+	# The one music context lives on the NovaMusicService autoload (the original
+	# streams one AudioVM context at a time); the menu pushes each screen's
+	# MUSICVAR into its director at the menumus discriminator index.
+	_menu.set_music_director(NovaMusicService.director())
 	_menu.set_music_var_index(MUSIC_VAR_INDEX)
 	# Pin the menu root at the top-left, sized to the 800x600 design space; the
 	# anamorphic scale is applied per-resize in _recompute_fit. Top-left anchors keep
@@ -552,49 +540,15 @@ func _on_mission_activated(index: int) -> void:
 
 # --- Audio --------------------------------------------------------------------
 
-# Read-only music state (ADR 0018 seams: tests/diagnostics read the loaded
-# scripts through these, never the private fields).
-func menu_music_script() -> NovaMusicScript:
-	return _menu_music
-
-
-func game_music_script() -> NovaMusicScript:
-	return _game_music
-
-
+# Open the MENU music context on the shared NovaMusicService (the original opens
+# it once at boot [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60] and re-opens
+# it when the front end returns; the GAME context is the world's to open at
+# mission start [orig: Game_StartMission @ 0x525598]).
 func _enter_menu_music() -> void:
-	_play_script(_menu_music, _menu_music_bank)
-
-
-# Swap to the GAMEMUS pair when gameplay starts. The original opens the game bank
-# as its own music context [orig: Sbf_OpenFile_Gamemus @ 0x4ed6c0]; our single
-# director takes the bank swap alongside the script swap.
-func enter_game_music() -> void:
-	_play_script(_game_music, _game_music_bank)
-
-
-# Bank + script swap together: the witnessed context open takes the pair and bails
-# before loading the script when the bank is missing [orig: AudioVM_OpenContextFile
-# @ 0x672160 -- the .sbf CreateFileA gate precedes the script load], so a missing
-# half means silence (non-fatal), never a mixed pair.
-func _play_script(script: NovaMusicScript, bank: NovaSbfBank) -> void:
-	if _director == null:
-		return
-	_director.stop()
-	if script == null or bank == null or _is_headless():
-		return  # incomplete pair, or no audio device (headless tests / probes)
-	_director.set_bank(bank)
-	_director.load_mus_script(script)
-	_director.start()
+	NovaMusicService.open_menu_context(_root, menu_music_file, menu_sound_bank_file)
 
 
 # --- Asset resolution helpers (all best-effort, degrade to null) --------------
-
-func _resolve(name: String) -> String:
-	if _root == null or name.is_empty():
-		return ""
-	return _root.resolve_file(name)
-
 
 # Resolve an explicit file, else discover one by extension (preferring a name
 # containing `prefer`). Returns the winning entry's logical basename (loadable
@@ -615,38 +569,12 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 	return String(files[0]).get_file()
 
 
-# Resolve one interactive-music pair by its witnessed hardcoded stem. The engine
-# names the base pairs MENUMUS.SBF/.BIN and GAMEMUS.SBF/.BIN; when expansion <n>
-# is active they become expansion\<n>\M<n>.sbf + M<n>.bin (menu) and
-# expansion\<n>\G<n>.sbf + G<n>.bin (game) [orig: Expansion_LoadAssets @ 0x4a4798
-# (base names) / @ 0x4a4906-0x4a494a (expansion forms)]. Retail sets the names
-# once -- a missing expansion .pff clears the expansion and reselects the base
-# names (@ 0x4a4775); we probe the expansion pair first and fall back to the base
-# pair, which reproduces that plus stays graceful for an expansion that ships no
-# music. Bank and script always come from the SAME stem (the script's play ops
-# index that bank's entries), so halves are never mixed across stems.
-# Returns {"bank": loose path or "", "script": VFS basename or ""}.
-# Public: the witnessed resolution is a queryable engine fact (ADR 0018 —
-# tests and diagnostics read it through this seam, not the privates).
+# The witnessed music-pair resolution (base MENUMUS/GAMEMUS names, expansion
+# M<n>/G<n> forms, complete-pair-or-base fallback) lives on NovaMusicService;
+# this seam keeps it queryable against the shell's root (ADR 0018 — tests and
+# diagnostics read it here, not the privates).
 func resolve_music_pair(prefix: String, base_stem: String) -> Dictionary:
-	if _root == null:
-		return {"bank": "", "script": ""}
-	var exp_name := _root.get_expansion()
-	if not exp_name.is_empty():
-		var stem := prefix + exp_name
-		# The expansion bank lives inside the expansion folder, streamed loose
-		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
-		var bank_path := _root.get_root_dir().path_join("expansion").path_join(exp_name).path_join(stem + ".sbf")
-		var pair := {
-			"bank": bank_path if FileAccess.file_exists(bank_path) else "",
-			"script": stem + ".bin" if _root.has_file(stem + ".bin") else "",
-		}
-		if String(pair.bank) != "" or String(pair.script) != "":
-			return pair
-	return {
-		"bank": _resolve(base_stem + ".sbf"),
-		"script": base_stem + ".bin" if _root.has_file(base_stem + ".bin") else "",
-	}
+	return NovaMusicService.resolve_music_pair(_root, prefix, base_stem)
 
 
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
@@ -687,14 +615,6 @@ func _load_style(file: String) -> MnsStyleSheet:
 	return s if s.load_from_bytes(bytes) == OK else null
 
 
-func _load_bank(path: String) -> NovaSbfBank:
-	if path.is_empty():
-		return null
-	var b := NovaSbfBank.new()
-	b.load_from_path(path)
-	return b if b.get_entry_count() > 0 else null
-
-
 # The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves
 # from PFF archives too; its members point at loose .wav files the menu resolves
 # on demand. Degrades to null (silent menu SFX) when absent.
@@ -705,34 +625,6 @@ func _load_sound_profile(name: String) -> NovaLwfData:
 	if d.open_from_resource_root(_root, name) != OK:
 		return null
 	return d if d.is_loaded() and d.get_set_count() > 0 else null
-
-
-# Music script: an explicit @export override keeps the loose-path ResourceLoader
-# route (the registered loader strips the SCR layer); the hardcoded name loads as
-# bytes through the VFS so it resolves from PFF archives [orig: AudioVM_LoadScriptFile
-# @ 0x672d20]. _root.read_file already applies the shared SCR/BFC1 payload decode
-# (libs/vfs vfs_decode_payload -- the same codec the registered loader runs), so the
-# bytes arrive in the decrypted SCR0 form load_from_decrypted_bytes expects.
-func _load_music_script(explicit: String, name: String) -> NovaMusicScript:
-	if not explicit.is_empty():
-		return _load_music(_resolve(explicit))
-	if _root == null or name.is_empty():
-		return null
-	var bytes := _root.read_file(name)
-	if bytes.is_empty():
-		return null
-	var script := NovaMusicScript.new()
-	script.load_from_decrypted_bytes(bytes, name)
-	return script if script.get_script_count() > 0 else null
-
-
-# Music scripts carry an SCR encryption layer that only the registered loader
-# strips, so loose files load via ResourceLoader (not a direct load_from_path).
-func _load_music(path: String) -> NovaMusicScript:
-	if path.is_empty():
-		return null
-	var res = ResourceLoader.load(path, "NovaMusicScript")
-	return res as NovaMusicScript
 
 
 # --- Layout (anamorphic fill of the 800x600 design space to the window) --------
@@ -752,10 +644,6 @@ func _recompute_fit(_unused: Variant = null) -> void:
 
 
 # --- Misc helpers / accessors -------------------------------------------------
-
-func _is_headless() -> bool:
-	return DisplayServer.get_name() == "headless"
-
 
 func _is_mission_list(widget_name: String) -> bool:
 	for n in mission_list_names:
@@ -802,7 +690,7 @@ func get_menu() -> NovaMnuMenu:
 
 
 func get_music_director() -> NovaMusicDirector:
-	return _director
+	return NovaMusicService.director()
 
 
 func get_current_menu_file() -> String:
