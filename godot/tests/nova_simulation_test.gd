@@ -21,6 +21,63 @@ func _anim_root() -> NovaResourceRoot:
 	root.set_root_dir(ProjectSettings.globalize_path(ANIM_FIXTURES))
 	return root
 
+
+func _minimal_weapon(name: String, animadm: String) -> Dictionary:
+	return {
+		"name": name,
+		"animadm": animadm,
+		"actions": [],
+		"flags": 0,
+		"clipsize": 0,
+		"startrounds": 0,
+	}
+
+
+func _weapon_arm_pitch_deg(sim: NovaSimulation) -> float:
+	var overlay: Dictionary = sim.get_local_player_aim_overlay()
+	var angles: PackedVector3Array = overlay.get("angles", PackedVector3Array())
+	return float(angles[4].x) if angles.size() > 4 else 0.0
+
+
+func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+
+	sim.set_local_player_weapon(_minimal_weapon("WPN_A", "shared.adm"), {})
+	sim.step()
+	var state: Dictionary = sim.get_local_player_weapon_state()
+	assert_eq(String(state.get("body_anim_key", "")), "anim_idle",
+		"equal state ids still export the secondary channel's independent playhead")
+	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
+		"the first AnimMap observed by this entity stamps the arms dip")
+
+	for _i in range(200):
+		sim.step()
+	assert_lt(absf(_weapon_arm_pitch_deg(sim)), 0.001, "the first dip settled")
+
+	sim.set_local_player_weapon(_minimal_weapon("WPN_B", "SHARED.ADM"), {})
+	sim.step()
+	assert_lt(absf(_weapon_arm_pitch_deg(sim)), 0.001,
+		"a differently named weapon sharing the resolved AnimMap does not dip")
+
+	sim.set_local_player_weapon(_minimal_weapon("WPN_C", "different.adm"), {})
+	sim.step()
+	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
+		"a changed AnimMap stamps the dip")
+
+	# Replacing the world/player keeps the equipped host state, but the new entity's
+	# observed serial starts empty and must receive its own initial stamp.
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.set_local_player_weapon(_minimal_weapon("WPN_C", "different.adm"), {})
+	sim.step()
+	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
+		"a replacement local entity observes the current AnimMap as new")
+	sim.free()
+
 func test_entities_walk_their_route() -> void:
 	# Soldiers are anim-driven [orig: Entity_UpdateInfantryAI @0x4b9910]: their motion
 	# comes from .bad root-motion clips resolved through a model's .adm. Without a clip

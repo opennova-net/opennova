@@ -36,8 +36,26 @@ enum : int {
     kIdleCrouch = 45,
     kIdleProne = 48,
     kIdle3 = 49,
+    // The weapon-channel hold-pose ladder [orig: g_animStateNameTable @ 0x8135F0
+    // indices 50-61; selected by the special_hold kind @ 0x4b5dc0..0x4b5e35].
+    kHoldKnife = 50,
+    kHoldPistol = 51,
+    kHoldGrenade = 52,
+    kHoldStinger = 53,
+    kHoldDesignator = 54,
+    kHoldDesignatorScoped = 55,
+    kHoldP90 = 56,
+    kHoldP90Scoped = 57,
+    kHoldMP7 = 58,
+    kHoldMP7Scoped = 59,
+    kHoldJavelin = 60,
+    kHoldJavelinScoped = 61,
+    kKnifeAttack = 62,
+    kGrenadeAttack = 63,
+    kBinoculars = 64,
     kSit = 76,
     kReload = 65,
+    kReload2 = 66,
     kEmplaced = 67,
     kIdleLook = 125,
     kIdle2Look = 126,
@@ -111,6 +129,12 @@ public:
     virtual ~IRootMotionSource() = default;
     virtual bool has_clip(int adm_id, int state_id) const = 0;
     virtual bool advance(int adm_id, int state_id, int32_t &phase_ticks, RootMotionFrame &out) = 0;
+    // Clip length for a state's track, in the phase-tick convention advance() uses
+    // (half-frame ticks), or -1 when the state has no track. The weapon channel's
+    // deferred-state promotion fires when the playhead reaches this — the original's
+    // clip-end channel flag [orig: the 0x20000 end-flag promotion in
+    // AnimMap_UpdateEntity @ 0x40b77b; witness world-wac-ai-re.md §14.8.1].
+    virtual int32_t clip_length_ticks(int adm_id, int state_id) const = 0;
 };
 
 struct InfantryState {
@@ -137,6 +161,43 @@ struct InfantryState {
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
     int32_t clip_phase = 0;
+    // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
+    // target state, clip-end-deferred state, and its own playhead — the entity
+    // +0x2C8/+0x2C4 pair the dual-channel update swaps through the shared machinery.
+    // [orig: AnimMap_UpdateDualChannels @ 0x40b8c0; witness world-wac-ai-re.md §14.8]
+    int wpn_state = anim_state::kIdle;    // entity+0x2C8
+    int wpn_deferred = 0;                 // entity+0x2C4
+    int32_t wpn_clip_phase = 0;
+    // The 3P reload-anim window: 80 ticks, stamped by the reload refill and counted
+    // down once per tick; while nonzero the weapon channel wants state 65 reload
+    // (66 reload2 when the hold kind is 2, pistol). [orig: entity+0x372 byte;
+    // stamp WeaponSlot_ReloadAmmo @ 0x54173c, decrement @ 0x4b5cf9; §14.8.5]
+    int32_t reload_anim_ticks = 0;
+    // The held weapon's 3P body-channel hold kind — the AdmDefs record dword +0xA4 the
+    // original reads through byte entity+0x2B0 each tick; mirrored from the equipped
+    // def's special_hold key. 1..8 selects the 50-61 pose ladder (2 also selects
+    // reload2); 0 = rifle default, mirror the primary. [orig: read @ 0x4b5dba;
+    // parser key 'special_hold' @ 0x543cb7]
+    int wpn_hold_kind = 0;
+    // Host-issued identity serial for the resolved held AnimMap. This lives on the
+    // entity (the original's previous-held record is per entity), so a fresh local
+    // player receives the initial switch stamp even when the simulation keeps the
+    // same equipped weapon across a world/player replacement.
+    uint64_t wpn_anim_map_serial = 0;
+    // Local-player Flags-bit mirrors, refreshed per tick by the host [orig: the
+    // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_weaponScopeActive,
+    // Flags|8 from g_binocularsRaised (the case-26 input toggle @ 0x4e064c, forced
+    // off when dead / spawn-gated / inputFlags&0x1E; no host binoculars input yet)].
+    bool scope_raised = false;
+    bool binoculars_raised = false;
+    // The arms-dip feed (entity+0x371 byte / +0x36C head-look decay term): while the
+    // dip window runs, head_look_decay drops 0x2800000 per tick before the eighth-step
+    // ease, and the window decrements TWICE per tick (both witnessed sub-1 sites), so
+    // the 20-tick weapon-switch stamp dips for 10 ticks. Seeds: 20 on a held-weapon
+    // adm change [orig: @ 0x4b46f5], 80 by the remote-reload 0x49 path (D-NET-117).
+    // [orig: @ 0x4b5cab..0x4b5ce7; consumed by the section-14.2 aim overlay]
+    int32_t arms_dip_ticks = 0;
+    int32_t head_look_decay = 0;
     // Standing-idle tick counter (entity+0x148): the player-body idle starts at 43 and
     // promotes to 44 once >= 62 idle ticks; any movement resets it. [orig:
     // Entity_UpdateInfantryPlayerBody @0x4b727b-0x4b7293 (state = 0x2B + (cnt >= 0x3E)),
@@ -171,6 +232,25 @@ struct InfantryState {
     bool ground_cache_valid = false;
     int16_t max_health = 100;
 };
+
+// The fire-path 3P attack stamp, keyed on the held weapon's attack kind (attack_anim):
+// 1 -> 62 knife_attack, 2 -> 63 grenade_attack, anything else -> no body stamp (rifle
+// fire plays only the FP clip on the weapon adm + the .3di control registers). Written
+// IMMEDIATELY — it bypasses the selection commit's locked/emote defer.
+// [orig: WeaponAction_Fire @ 0x542bbc..0x542bea — +0x2C8 = state, +0x2C4 = 0]
+void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind);
+
+// Stamp the witnessed 20-tick arms dip when this entity observes a different resolved
+// held AnimMap identity. Serial 0 means no mounted weapon map. Keeping the observed
+// serial on InfantryState makes the edge per entity rather than simulation-global.
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial);
+
+// Consumer gate for the secondary channel. Equal primary/secondary state ids do NOT
+// disable composition: their playheads are independent. mount_blocks_channel is true
+// for controller/gunner/driver seats; passenger seats retain the on-foot composition.
+// [orig: Flags&0x100 + mount-class tests + PRIMARY state flag 0x40 @0x4b14a7]
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+                                     bool mount_blocks_channel);
 
 } // namespace opennova::world
 

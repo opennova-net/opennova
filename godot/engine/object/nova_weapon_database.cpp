@@ -103,6 +103,8 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.renderfov = e.renderfov;
 	w.flags = e.flags;
 	w.scope_max_mag = e.scope_max_mag;
+	w.special_hold = e.special_hold;
+	w.attack_anim = e.attack_anim;
 	for (size_t a = 0; a < e.actions_count; ++a) {
 		const DefWeaponAction &row = e.actions[a];
 		Dictionary act;
@@ -168,6 +170,10 @@ Dictionary NovaWeaponDatabase::weapon_dict(int index) const {
 	d["renderfov"] = w.renderfov;
 	d["flags"] = w.flags;
 	d["scope_max_mag"] = w.scope_max_mag;
+	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim ->
+	// AdmDefs +0xA4/+0xA8; world-wac-ai-re.md section 14.8].
+	d["special_hold"] = w.special_hold;
+	d["attack_anim"] = w.attack_anim;
 	d["actions"] = w.actions.duplicate(true);
 	return d;
 }

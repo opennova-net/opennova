@@ -43,6 +43,7 @@ public:
 	bool has_clip(int adm_id, int state_id) const override;
 	bool advance(int adm_id, int state_id, int32_t &phase_ticks,
 	             opennova::world::RootMotionFrame &out) override;
+	int32_t clip_length_ticks(int adm_id, int state_id) const override;
 
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }

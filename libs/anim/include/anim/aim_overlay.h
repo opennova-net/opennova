@@ -65,6 +65,34 @@ inline constexpr uint8_t kOverlayClassByBoneIndex[19] = {
     kOverlayLegL,        // 18 BN19 L Foot
 };
 
+// The upper-body WEAPON-CHANNEL mask: model bone indices (BN## - 1) whose sampled
+// channel matrices are HARD-OVERWRITTEN by the entity's secondary AnimMap channel
+// (clavicles, upper arms, forearms, neck, head, both hands) before the aim overlay
+// composes on top. The legs and spine keep the primary (locomotion) channel.
+// [orig: the mask build @ 0x4b14db inside Entity_BuildBoneTransformMatrices
+//  @ 0x4b1290, gated Flags & 0x100 + not-mounted + primary-state flag 0x40
+//  @ 0x4b14a7; witness docs/world/world-wac-ai-re.md section 14.8.6]
+inline constexpr int kWeaponChannelMaskBones[] = {3, 4, 5, 6, 9, 10, 13, 14, 15, 16};
+
+inline constexpr bool weapon_channel_masks_bone(int model_bone_index) {
+    for (int b : kWeaponChannelMaskBones)
+        if (b == model_bone_index) return true;
+    return false;
+}
+
+// Compose the secondary weapon channel in the same space as the original's matrix
+// mask: FK both parent-local rotation poses, select PRIMARY or WEAPON per bone in
+// world space, then convert the complete mixed hierarchy back to parent-local. The
+// caller keeps the primary pose's local origins; the later model-pivot re-anchor owns
+// translation. Recomputing every local (including unmasked children below a masked
+// parent) preserves each selected absolute rotation exactly.
+// [orig: channel-A matrix overwrite @ 0x4b16a7, before the overlay pivot re-anchor;
+//  witness docs/world/world-wac-ai-re.md section 14.8.6]
+void splice_weapon_channel_rotations(const std::vector<int> &parent_index,
+                                     const uint8_t *masked_bone,
+                                     const std::vector<Quat> &weapon_local_rotation,
+                                     std::vector<Quat> &primary_local_rotation);
+
 // The entity angle state feeding the overlay, all BAM32.
 // [orig fields: Yaw/Pitch/Roll +0x10/+0x14/+0x18, bodyHeading/bodyPitch +0x8c/+0x90,
 //  leg chase yaws +0x2d4/+0x2d8, torsoRoll +0x2dc, leanAngle +0xb0, pitchBlend +0x380,

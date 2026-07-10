@@ -907,6 +907,18 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
                 cw.scope_max_mag = parse_float_n(v, vl);
                 parsed = 1;
+            } else if (lower_match_key(lower, ll, "special_hold", 12)) {
+                /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->
+                   record+0xA4 @ 0x543cb7/0x543cd8]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+                cw.special_hold = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (lower_match_key(lower, ll, "attack_anim", 11)) {
+                /* 3P fire attack-stamp kind, atol [orig: weapon.def key 'attack_anim' ->
+                   record+0xA8 @ 0x543ce9/0x543d0a]. */
+                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+                cw.attack_anim = parse_int_n(v, vl);
+                parsed = 1;
             } else if (ll > 3 && lower_starts_with(lower, ll, "pos", 3) &&
                        (lower[3] == ' ' || lower[3] == '\t')) {
                 size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);

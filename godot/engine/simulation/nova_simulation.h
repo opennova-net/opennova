@@ -195,6 +195,16 @@ private:
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
+	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
+	// plus the resolved AnimMap identity. The serial advances only when that AnimMap
+	// changes; each InfantryState remembers which serial it observed, matching the
+	// original's per-entity previous-held record and suppressing false dips between
+	// differently named weapons that share one map.
+	// [orig: AdmDefs +0/+0xA4/+0xA8; the +0x371 = 20 switch stamp @ 0x4b46f5].
+	int weapon_hold_kind_ = 0;
+	int weapon_attack_kind_ = 0;
+	String weapon_anim_map_;
+	uint64_t weapon_anim_map_serial_ = 0;
 	void tick_local_player_weapon();
 
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------

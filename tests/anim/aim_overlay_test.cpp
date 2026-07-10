@@ -37,6 +37,18 @@ float quat_angle_between(Quat a, Quat b) {
     return 2.0f * std::atan2(v, std::fabs(d.w));
 }
 
+std::vector<Quat> fk_rotations(const std::vector<int> &parents,
+                               const std::vector<Quat> &local) {
+    std::vector<Quat> world(local.size());
+    for (size_t i = 0; i < local.size(); ++i) {
+        const int p = parents[i];
+        world[i] = (p >= 0 && static_cast<size_t>(p) < i)
+                       ? quat_normalize(quat_mul(world[static_cast<size_t>(p)], local[i]))
+                       : quat_normalize(local[i]);
+    }
+    return world;
+}
+
 void test_bone_class_map() {
     // The witnessed map, spot-checked at the semantic anchors (section 14.2).
     CHECK(kOverlayClassByBoneIndex[0] == kOverlayBody);        // BN01 Hips = default
@@ -203,6 +215,38 @@ void test_apply_differential_bend() {
     CHECK(quat_angle_between(quat_mul(rot[0], rot[1]), head) < 1e-4f);
 }
 
+void test_weapon_channel_splices_world_rotations() {
+    // Miniature upper-body hierarchy:
+    //   unmasked upper spine -> masked clavicle -> masked arm -> unmasked accessory.
+    // The two channels deliberately disagree at every local. Selecting secondary
+    // locals directly would contaminate the clavicle with the PRIMARY spine and make
+    // the accessory inherit the SECONDARY arm. The matrix mask instead selects each
+    // bone's absolute channel rotation, then re-localizes the entire mixed hierarchy.
+    const std::vector<int> parents = {-1, 0, 1, 2};
+    std::vector<Quat> primary = {
+        quat_axis_angle(0, 1, 0, 0.55f),
+        quat_axis_angle(1, 0, 0, -0.25f),
+        quat_axis_angle(0, 0, 1, 0.35f),
+        quat_axis_angle(1, 0, 0, 0.15f),
+    };
+    const std::vector<Quat> weapon = {
+        quat_axis_angle(1, 0, 0, -0.70f),
+        quat_axis_angle(0, 1, 0, 0.45f),
+        quat_axis_angle(0, 0, 1, -0.60f),
+        quat_axis_angle(0, 1, 0, -0.20f),
+    };
+    const uint8_t mask[] = {0, 1, 1, 0};
+    const std::vector<Quat> primary_world = fk_rotations(parents, primary);
+    const std::vector<Quat> weapon_world = fk_rotations(parents, weapon);
+
+    splice_weapon_channel_rotations(parents, mask, weapon, primary);
+    const std::vector<Quat> mixed_world = fk_rotations(parents, primary);
+    CHECK(quat_angle_between(mixed_world[0], primary_world[0]) < 1e-4f);
+    CHECK(quat_angle_between(mixed_world[1], weapon_world[1]) < 1e-4f);
+    CHECK(quat_angle_between(mixed_world[2], weapon_world[2]) < 1e-4f);
+    CHECK(quat_angle_between(mixed_world[3], primary_world[3]) < 1e-4f);
+}
+
 
 void test_blends_wrap_across_the_bam_seam() {
     // The +/-180 deg seam: aim just left of the seam, body just across it. The x86
@@ -249,6 +293,7 @@ int main() {
     test_apply_identity_is_passthrough();
     test_apply_world_delta_reaches_target();
     test_apply_differential_bend();
+    test_weapon_channel_splices_world_rotations();
     if (failures == 0) std::printf("aim_overlay_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

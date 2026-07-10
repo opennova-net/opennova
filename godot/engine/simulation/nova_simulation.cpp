@@ -65,6 +65,18 @@ opennova::world::SeatType seat_type_from_variant(int value) {
 	}
 }
 
+bool mount_blocks_weapon_channel(const opennova::world::Entity &entity) {
+	if (!entity.mounted) return false;
+	switch (entity.mount_type) {
+		case opennova::world::SeatType::Controller:
+		case opennova::world::SeatType::Gunner:
+		case opennova::world::SeatType::Driver:
+			return true;
+		default:
+			return false; // passenger seats retain the on-foot upper-body channel
+	}
+}
+
 int visual_item_id_for_runtime_type(int item_id, const Ref<NovaItemDatabase> &item_db) {
 	if (item_id == opennova::world::kPlayerInfantryTypeId && item_db.is_valid() &&
 	    item_db->has_item(kPlayerVisualItemId)) {
@@ -973,7 +985,20 @@ void NovaSimulation::joiner_pump() {
 void NovaSimulation::apply_player_input_pre_tick() {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
 	AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
-	if (p) opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
+	if (!p) return;
+	opennova::world::apply_player_body_input(*p, opennova::world::pack_player_body_input(player_input_));
+	// The local-player weapon-channel inputs, refreshed before the body updater runs —
+	// the per-tick re-read of the held AdmDefs record kind + the Flags-bit refresh
+	// (Flags|0x10 from g_weaponScopeActive; the binoculars bit stays false until a host
+	// binoculars input exists). [orig: @ 0x4b5d7f..0x4b5dc0]
+	if (p->inf.active) {
+		if (weapon_active_) {
+			opennova::world::infantry_weapon_switch_stamp(
+					p->inf, weapon_anim_map_serial_);
+		}
+		p->inf.wpn_hold_kind = weapon_active_ ? weapon_hold_kind_ : 0;
+		p->inf.scope_raised = weapon_active_ && player_view_.scope_engaged;
+	}
 }
 
 bool NovaSimulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
@@ -1134,9 +1159,12 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	in.body_yaw = p->inf.body_heading;
 	in.leg_yaw_r = p->inf.leg_yaw[0];
 	in.leg_yaw_l = p->inf.leg_yaw[1];
-	// roll / body_pitch / torso_roll / lean / pitch_blend / head_look_decay stay 0 until
-	// their sim sources (lean keys, recoil, AI head-look) are ported — the formulas above
-	// carry the terms so those drop in without touching this seam.
+	// The head-look decay term carries the arms-dip feed (the +0x371 weapon-switch
+	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
+	// [orig: @ 0x4b5cab..0x4b5cd5]. roll / body_pitch / torso_roll / lean / pitch_blend
+	// stay 0 until their sim sources (lean keys, recoil, AI head-look) are ported —
+	// the formulas above carry the terms so those drop in without touching this seam.
+	in.head_look_decay = p->inf.head_look_decay;
 	in.aim_state = (opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0;
 	in.rolling = (p->inf.anim_state == 41 || p->inf.anim_state == 42);
 
@@ -1202,6 +1230,21 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
 	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
+	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim -> the
+	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
+	weapon_hold_kind_ = int(int64_t(p_def.get("special_hold", 0)));
+	weapon_attack_kind_ = int(int64_t(p_def.get("attack_anim", 0)));
+	// A held-AnimMap CHANGE advances a host serial; the local InfantryState observes
+	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
+	// resolved map identity, not the weapon name: two weapon records sharing one
+	// AnimMap do NOT dip. A fresh mount advances even when the map key is empty.
+	// [orig: previous/current AdmDefs record +0 comparison @0x4b46d0..0x4b4701].
+	const String anim_map = p_def.get("animadm", String());
+	if (!weapon_active_ || anim_map.nocasecmp_to(weapon_anim_map_) != 0) {
+		weapon_anim_map_ = anim_map;
+		++weapon_anim_map_serial_;
+		if (weapon_anim_map_serial_ == 0) ++weapon_anim_map_serial_; // reserve 0 = none
+	}
 	const int clipsize = int(p_def.get("clipsize", 0));
 	weapon_def_.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking
 	// Fresh slot: full magazine + the def's carried reserve (the interim ammo default
@@ -1221,6 +1264,9 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
 	player_view_.scope_engaged = false;
+	weapon_hold_kind_ = 0;
+	weapon_attack_kind_ = 0;
+	weapon_anim_map_ = String();
 }
 
 void NovaSimulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pressed,
@@ -1306,9 +1352,28 @@ void NovaSimulation::tick_local_player_weapon() {
 		++weapon_play_serial_;
 		weapon_anim_key_ = String::utf8(ev.anim_key);
 	}
-	if (ev.fired) ++weapon_fired_serial_;
+	if (ev.fired) {
+		++weapon_fired_serial_;
+		// The 3P body attack stamp — knife/grenade kinds only; rifle fire stamps NO body
+		// state (the FP clip plays on the weapon adm channel, and the fire path's only
+		// other anim side effect drives the .3di control registers)
+		// [orig: WeaponAction_Fire @ 0x542bbc..0x542bea; ActionSlot_TryAllocCtrlRegAnim
+		//  @ 0x401f00 -> dword_83FCE8].
+		AiEntity *p = world_->ai ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
+		if (p && p->inf.active)
+			opennova::world::infantry_weapon_attack_stamp(p->inf, weapon_attack_kind_);
+	}
 	if (ev.dry_fired) ++weapon_dry_serial_;
 	if (ev.reload_requested) ++weapon_reload_serial_;
+	if (ev.reload_applied) {
+		// The refill stamps the 3P body reload-anim window on the entity — 80 ticks; the
+		// infantry weapon channel then wants state 65 reload until it expires (and the
+		// locked clip plays to its end). In the original the stamp lives inside the
+		// refill itself; the SP/listen-host loopback applies it at reload start.
+		// [orig: WeaponSlot_ReloadAmmo @ 0x54173c; world-wac-ai-re.md §14.8.5]
+		AiEntity *p = world_->ai ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
+		if (p && p->inf.active) p->inf.reload_anim_ticks = 80;
+	}
 	// The FSM's scope side effects land on the sim-owned engaged bit: forced
 	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
 	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
@@ -1337,6 +1402,26 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = weapon_slot_.clip;
 	out["reserve"] = weapon_slot_.reserve;
 	out["kick"] = static_cast<int>(weapon_slot_.kick);
+	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
+	// + its own playhead for the host's mask-bone override. The key remains populated
+	// when the state id matches the primary because the two playheads are independent.
+	// Empty means the override gate is off (weapon in hands + allowed mount class +
+	// primary state flag 0x40).
+	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
+	out["body_anim_key"] = String();
+	out["body_anim_phase"] = 0;
+	if (world_ && world_->ai && world_->cached.local_player.valid()) {
+		const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+		const opennova::world::Entity *entity =
+				world_->registry.get(world_->cached.local_player);
+		const bool blocked_mount =
+				entity != nullptr && mount_blocks_weapon_channel(*entity);
+		if (p && entity && opennova::world::infantry_weapon_channel_visible(
+					p->inf, weapon_active_, blocked_mount)) {
+			out["body_anim_key"] = infantry_anim_key(p->inf.wpn_state);
+			out["body_anim_phase"] = p->inf.wpn_clip_phase;
+		}
+	}
 	return out;
 }
 

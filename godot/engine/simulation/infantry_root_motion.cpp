@@ -185,6 +185,20 @@ bool InfantryRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
 	return true;
 }
 
+int32_t InfantryRootMotion::clip_length_ticks(int adm_id, int state_id) const {
+	// Half-frame ticks, the advance() playhead convention (frame_count * 2). -1 when the
+	// state has no track — the weapon channel's deferred promotion then never length-fires.
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+		return -1;
+	}
+	const auto &tracks = sets_[adm_id].tracks;
+	auto it = tracks.find(state_id);
+	if (it == tracks.end()) {
+		return -1;
+	}
+	return it->second.frame_count * 2;
+}
+
 int InfantryRootMotion::clip_count(int adm_id) const {
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
 		return 0;

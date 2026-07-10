@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <array>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -83,6 +84,13 @@ struct TestSource : IRootMotionSource {
                id == anim_state::kWalkProneForward;
     }
     bool has_clip(int /*adm_id*/, int id) const override { return clips.count(id) != 0; }
+    // One-shot length per state when set: the weapon channel's clip-end promotion
+    // [orig: AnimMap_UpdateEntity @0x40b77b] is exercised through this.
+    std::map<int, int32_t> lengths;
+    int32_t clip_length_ticks(int /*adm_id*/, int id) const override {
+        auto it = lengths.find(id);
+        return it == lengths.end() ? -1 : it->second;
+    }
     bool advance(int /*adm_id*/, int id, int32_t &phase, RootMotionFrame &out) override {
         if (clips.count(id) == 0) return false;
         ++phase;
@@ -287,6 +295,293 @@ void test_player_body_chase_and_legs() {
     CHECK(std::abs(e->inf.body_heading - e->inf.target_heading) <= 1);
     CHECK(e->inf.leg_yaw[0] == planted_r);
     CHECK(e->inf.leg_yaw[1] == planted_l);
+}
+
+// The upper-body weapon channel (the entity's SECONDARY AnimMap channel), local-player
+// slice: the rifle-mirror default, the 80-tick reload window -> state 65, the locked
+// commit rule (65 = flag 0x84 defers exits to clip end), and the clip-end promotion.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 + AnimMap_UpdateDualChannels
+//  @0x40b8c0 / AnimMap_UpdateEntity @0x40b77b; witness world-wac-ai-re.md §14.8]
+void test_player_weapon_channel() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kWalkForward);
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    src.clips.insert(anim_state::kReload);
+    src.lengths[anim_state::kReload] = 40; // one-shot reload clip, 40 phase ticks
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    // Rifle default: the secondary channel MIRRORS the primary [orig: @0x4b5e46].
+    run_ticks(ai, w, 1, 4);
+    CHECK(e->inf.anim_state == anim_state::kIdle);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    e->inf.player_moving = true;
+    run_ticks(ai, w, 4, 8);
+    CHECK(e->inf.anim_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_clip_phase > 0); // the secondary playhead advances on its own
+
+    // The refill stamps the 80-tick window -> the channel wants 65 reload; idle/walk
+    // currents are not locked, so the stamp lands immediately [orig: @0x4b5e67/@0x4b5e9d].
+    e->inf.reload_anim_ticks = 80; // [orig: WeaponSlot_ReloadAmmo @0x54173c]
+    run_ticks(ai, w, 8, 9);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_clip_phase == 1);          // fresh channel re-init + first advance
+    CHECK(e->inf.anim_state == anim_state::kWalkForward); // the legs keep locomotion
+
+    // While the window runs, the desire holds; the primary is untouched.
+    run_ticks(ai, w, 9, 40);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.reload_anim_ticks == 80 - 32);
+
+    // The clip ends (40 phase ticks) BEFORE the window does: 65 is locked (flag 0x84),
+    // so the mirror desire defers, and the deferred state only lands once BOTH the
+    // window has expired (desire leaves 65) and the clip end promotes it
+    // [orig: defer @0x4b5e88; promote @0x40b77b].
+    run_ticks(ai, w, 40, 88);
+    CHECK(e->inf.reload_anim_ticks == 0);
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward); // promoted back to the mirror
+    CHECK(e->inf.wpn_deferred == 0);
+
+    // Window expiring MID-CLIP: re-stamp, then cut it short after 10 ticks — the locked
+    // reload keeps playing to its own end, the mirror desire waits in the deferred slot.
+    e->inf.reload_anim_ticks = 80;
+    run_ticks(ai, w, 88, 89);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    e->inf.reload_anim_ticks = 10;
+    run_ticks(ai, w, 89, 99); // window over, clip at ~11/40
+    CHECK(e->inf.reload_anim_ticks == 0);
+    CHECK(e->inf.wpn_state == anim_state::kReload);          // still locked in
+    CHECK(e->inf.wpn_deferred == anim_state::kWalkForward);  // the exit is queued
+    run_ticks(ai, w, 99, 89 + 41); // ...until the clip's 40 phase ticks complete
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_deferred == 0);
+}
+
+// The hold-pose kind ladder (special_hold 1-8 -> states 50-61, the scoped +1 variants),
+// the scoped rifle default (49 idle_3), and the override order — binoculars 64 beats the
+// holds, the reload window beats binoculars, and the pistol kind selects 66 reload2.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5dc0..0x4b5e6f]
+void test_player_weapon_hold_kinds() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    for (int s = anim_state::kHoldKnife; s <= anim_state::kHoldJavelinScoped; ++s)
+        src.clips.insert(s);
+    src.clips.insert(anim_state::kBinoculars);
+    src.clips.insert(anim_state::kReload2);
+    src.lengths[anim_state::kReload2] = 30;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    uint32_t tick = 1;
+    auto step = [&](int n) { run_ticks(ai, w, tick, tick + n); tick += n; };
+
+    // Kinds 1-4: fixed holds 50-53; the scope flag is ignored [orig: lea eax,[ecx+31h]
+    // @0x4b5dc5/0x4b5dd2/0x4b5ddc/0x4b5de6].
+    static constexpr int kFixedHold[4] = {anim_state::kHoldKnife, anim_state::kHoldPistol,
+                                          anim_state::kHoldGrenade, anim_state::kHoldStinger};
+    for (int kind = 1; kind <= 4; ++kind) {
+        e->inf.wpn_hold_kind = kind;
+        e->inf.scope_raised = (kind & 1) != 0; // must not matter for 1-4
+        step(1);
+        CHECK(e->inf.wpn_state == kFixedHold[kind - 1]);
+    }
+    // Kinds 5-8: 54/56/58/60, +1 scoped [orig: test Flags&0x10 @0x4b5df0..0x4b5e35].
+    static constexpr int kScopedHold[4] = {anim_state::kHoldDesignator, anim_state::kHoldP90,
+                                           anim_state::kHoldMP7, anim_state::kHoldJavelin};
+    for (int kind = 5; kind <= 8; ++kind) {
+        e->inf.wpn_hold_kind = kind;
+        e->inf.scope_raised = false;
+        step(1);
+        CHECK(e->inf.wpn_state == kScopedHold[kind - 5]);
+        e->inf.scope_raised = true;
+        step(1);
+        CHECK(e->inf.wpn_state == kScopedHold[kind - 5] + 1);
+    }
+    // Rifle (kind 0) + scope: the mirror default coerces to 49 idle_3; dropping the
+    // scope returns the mirror [orig: @0x4b5e48..0x4b5e4e].
+    e->inf.wpn_hold_kind = 0;
+    e->inf.scope_raised = true;
+    step(1);
+    CHECK(e->inf.wpn_state == anim_state::kIdle3);
+    e->inf.scope_raised = false;
+    step(1);
+    CHECK(e->inf.wpn_state == e->inf.anim_state);
+
+    // Binoculars override the hold pose [orig: @0x4b5e53]; the reload window overrides
+    // binoculars, and the pistol kind (2) selects reload2 [orig: @0x4b5e5e..0x4b5e6f].
+    e->inf.wpn_hold_kind = 2;
+    e->inf.binoculars_raised = true;
+    step(1);
+    CHECK(e->inf.wpn_state == anim_state::kBinoculars);
+    e->inf.reload_anim_ticks = 80;
+    step(1);
+    CHECK(e->inf.wpn_state == anim_state::kReload2);
+}
+
+// The fire-path attack stamps [orig: WeaponAction_Fire @0x542bbc..0x542bea]: knife kind
+// 1 -> 62 / grenade kind 2 -> 63 stamped IMMEDIATELY, other kinds stamp nothing, a
+// repeat stamp of the playing state does not restart the clip, and the locked (0x94)
+// exit defers to clip end.
+void test_player_weapon_attack_stamp() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    src.clips.insert(anim_state::kHoldKnife);
+    src.clips.insert(anim_state::kHoldGrenade);
+    src.clips.insert(anim_state::kKnifeAttack);
+    src.clips.insert(anim_state::kGrenadeAttack);
+    src.lengths[anim_state::kKnifeAttack] = 24;
+    src.lengths[anim_state::kGrenadeAttack] = 24;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+    e->inf.wpn_hold_kind = 1; // knife family
+
+    run_ticks(ai, w, 1, 3);
+    CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
+
+    // Rifle / unknown kinds: NO body stamp [orig: only the 1/2 compares].
+    infantry_weapon_attack_stamp(e->inf, 0);
+    CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
+    infantry_weapon_attack_stamp(e->inf, 3);
+    CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
+
+    // The knife stamp lands immediately [orig: @0x542bcb]; the hold desire then defers
+    // behind the locked attack until its 24-tick clip end.
+    infantry_weapon_attack_stamp(e->inf, 1);
+    CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
+    CHECK(e->inf.wpn_deferred == 0);
+    CHECK(e->inf.wpn_clip_phase == 0); // fresh clip on the target change
+    run_ticks(ai, w, 3, 4);
+    CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
+    CHECK(e->inf.wpn_deferred == anim_state::kHoldKnife); // the exit is queued
+
+    // A repeat stamp mid-clip keeps the playhead — the channel re-inits only on a
+    // target CHANGE [orig: AnimMap_UpdateEntity @0x40b5f0].
+    const int32_t mid_phase = e->inf.wpn_clip_phase;
+    CHECK(mid_phase > 0);
+    infantry_weapon_attack_stamp(e->inf, 1);
+    CHECK(e->inf.wpn_clip_phase == mid_phase);
+    CHECK(e->inf.wpn_deferred == 0);
+
+    // Clip end -> promotion back to the hold pose [orig: @0x40b77b].
+    run_ticks(ai, w, 4, 40);
+    CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
+
+    // The grenade kind stamps 63 [orig: @0x542be0].
+    e->inf.wpn_hold_kind = 3;
+    infantry_weapon_attack_stamp(e->inf, 2);
+    CHECK(e->inf.wpn_state == anim_state::kGrenadeAttack);
+}
+
+// The arms-dip feed [orig: @0x4b5cab..0x4b5ce7]: while the window runs the head-look
+// decay term drops 0x2800000/tick before the eighth-step ease, and the window
+// decrements TWICE per tick — the 20-tick weapon-switch stamp dips for 10 ticks —
+// then the ease brings the term back toward rest.
+void test_player_arms_dip() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    e->inf.arms_dip_ticks = 20; // [orig: the switch stamp @0x4b46f5]
+    run_ticks(ai, w, 1, 2);
+    // One tick: dip, then ease — HLD = d - (d+4)>>3 with d = -0x2800000 — and TWO
+    // window decrements.
+    const int32_t d = -0x2800000;
+    const int32_t expected = d - opennova::io::bam_sar(opennova::io::bam_add(d, 4), 3);
+    CHECK(e->inf.head_look_decay == expected);
+    CHECK(e->inf.arms_dip_ticks == 18);
+
+    run_ticks(ai, w, 2, 11); // 9 more ticks: the window drains at 2/tick
+    CHECK(e->inf.arms_dip_ticks == 0);
+    CHECK(e->inf.head_look_decay < d); // accumulated deeper than a single tick's dip
+
+    run_ticks(ai, w, 11, 200); // the eighth-step ease settles back near rest
+    CHECK(opennova::io::bam_abs(e->inf.head_look_decay) <= 8);
+}
+
+// The dual-channel body update and arms/HLD block continue on dead local-player ticks.
+// The death primary disables composition via its flags, but timers must not freeze a
+// persistent arm-pitch offset on the corpse and the secondary playhead still advances.
+void test_player_weapon_channel_ticks_while_dead() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips = {anim_state::kIdle, anim_state::kDeathFire, anim_state::kReload};
+    src.lengths[anim_state::kReload] = 20;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 0;
+    e->inf.anim_state = anim_state::kIdle;
+    e->inf.wpn_state = anim_state::kReload;
+    e->inf.wpn_clip_phase = 4;
+    e->inf.reload_anim_ticks = 3;
+    e->inf.arms_dip_ticks = 4;
+    e->inf.head_look_decay = -1000;
+
+    run_ticks(ai, w, 1, 2);
+    CHECK(e->inf.anim_state == anim_state::kDeathFire);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_clip_phase == 5);
+    CHECK(e->inf.reload_anim_ticks == 2);
+    CHECK(e->inf.arms_dip_ticks == 2);
+    CHECK(e->inf.head_look_decay != -1000);
+    CHECK(!infantry_weapon_channel_visible(e->inf, true, false));
+}
+
+void test_weapon_channel_consumer_gate_and_switch_identity() {
+    InfantryState inf;
+    inf.active = true;
+    inf.anim_state = anim_state::kIdle; // flags 0x48: on-foot composition enabled
+    inf.wpn_state = anim_state::kIdle;  // same state, but an independent playhead
+    CHECK(infantry_weapon_channel_visible(inf, true, false));
+    CHECK(!infantry_weapon_channel_visible(inf, false, false));
+    CHECK(!infantry_weapon_channel_visible(inf, true, true));
+    inf.anim_state = anim_state::kWalkProneForward; // flags 0x603: no 0x40
+    CHECK(!infantry_weapon_channel_visible(inf, true, false));
+
+    // The observed AnimMap serial is per entity: a repeated map does not restamp,
+    // a changed map does, and a newly spawned entity sees the current map as new.
+    InfantryState first;
+    infantry_weapon_switch_stamp(first, 7);
+    CHECK(first.wpn_anim_map_serial == 7);
+    CHECK(first.arms_dip_ticks == 20);
+    first.arms_dip_ticks = 5;
+    infantry_weapon_switch_stamp(first, 7);
+    CHECK(first.arms_dip_ticks == 5);
+    infantry_weapon_switch_stamp(first, 8);
+    CHECK(first.wpn_anim_map_serial == 8);
+    CHECK(first.arms_dip_ticks == 20);
+
+    InfantryState replacement;
+    infantry_weapon_switch_stamp(replacement, 8);
+    CHECK(replacement.wpn_anim_map_serial == 8);
+    CHECK(replacement.arms_dip_ticks == 20);
+    replacement.arms_dip_ticks = 3;
+    infantry_weapon_switch_stamp(replacement, 0);
+    CHECK(replacement.wpn_anim_map_serial == 8);
+    CHECK(replacement.arms_dip_ticks == 3);
 }
 
 } // namespace
@@ -987,6 +1282,7 @@ int main() {
         // integration. Real idle clips may author zero mean root velocity; the gate is data.
         struct SwaySource : IRootMotionSource {
             bool has_clip(int, int) const override { return true; }
+            int32_t clip_length_ticks(int, int) const override { return -1; }
             bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
                 ++phase;
                 out = RootMotionFrame{};
@@ -1025,6 +1321,7 @@ int main() {
                 if (adm_id < 0 || adm_id >= static_cast<int>(clips.size())) return false;
                 return clips[static_cast<size_t>(adm_id)].count(id) != 0;
             }
+            int32_t clip_length_ticks(int, int) const override { return -1; }
             bool advance(int adm_id, int id, int32_t &phase, RootMotionFrame &out) override {
                 if (!has_clip(adm_id, id)) return false;
                 ++phase;
@@ -1119,6 +1416,12 @@ int main() {
     test_remote_player_body_anim();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
+    test_player_weapon_channel();
+    test_player_weapon_hold_kinds();
+    test_player_weapon_attack_stamp();
+    test_player_arms_dip();
+    test_player_weapon_channel_ticks_while_dead();
+    test_weapon_channel_consumer_gate_and_switch_identity();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

@@ -81,6 +81,43 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
     }
 }
 
+void splice_weapon_channel_rotations(const std::vector<int> &parent_index,
+                                     const uint8_t *masked_bone,
+                                     const std::vector<Quat> &weapon_local_rotation,
+                                     std::vector<Quat> &primary_local_rotation) {
+    const size_t n = primary_local_rotation.size();
+    if (parent_index.size() < n || weapon_local_rotation.size() != n ||
+        masked_bone == nullptr) {
+        return;
+    }
+
+    // Both AnimMap channels compute complete absolute bone rotations before the
+    // mask is applied. Select in that space, then re-localize the ENTIRE hierarchy:
+    // an unmasked accessory below a masked hand must retain its primary absolute
+    // orientation rather than inheriting the weapon hand's rotation.
+    std::vector<Quat> primary_world(n);
+    std::vector<Quat> weapon_world(n);
+    std::vector<Quat> mixed_world(n);
+    for (size_t k = 0; k < n; ++k) {
+        const int p = parent_index[k];
+        const bool has_parent = p >= 0 && static_cast<size_t>(p) < k;
+        primary_world[k] = quat_normalize(
+            has_parent ? quat_mul(primary_world[static_cast<size_t>(p)],
+                                  primary_local_rotation[k])
+                       : primary_local_rotation[k]);
+        weapon_world[k] = quat_normalize(
+            has_parent ? quat_mul(weapon_world[static_cast<size_t>(p)],
+                                  weapon_local_rotation[k])
+                       : weapon_local_rotation[k]);
+        mixed_world[k] = masked_bone[k] != 0 ? weapon_world[k] : primary_world[k];
+        primary_local_rotation[k] =
+            has_parent
+                ? quat_normalize(quat_mul(quat_inv(mixed_world[static_cast<size_t>(p)]),
+                                          mixed_world[k]))
+                : mixed_world[k];
+    }
+}
+
 void apply_aim_overlay(const std::vector<int> &parent_index,
                        const Quat deltas[kOverlayClassCount],
                        const uint8_t *bone_class,

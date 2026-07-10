@@ -408,6 +408,139 @@ void AiSystem::infantry_select(AiEntity &e) {
 }
 
 // ----------------------------------------------------------------------------
+// The upper-body weapon channel — the entity's SECONDARY AnimMap channel.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 (selection + commit)
+//  + AnimMap_UpdateDualChannels @0x40b8c0 (advance; deferred promotion at clip end
+//  via AnimMap_UpdateEntity @0x40b77b); witness world-wac-ai-re.md §14.8]
+// ----------------------------------------------------------------------------
+void AiSystem::infantry_weapon_channel(AiEntity &e) {
+    InfantryState &inf = e.inf;
+
+    // The arms-dip / head-look decay block [orig: @0x4b5cab..0x4b5ce7]: while the dip
+    // window runs, the decay term drops 0x2800000 per tick BEFORE the eighth-step ease;
+    // the window byte decrements in BOTH branches — twice per tick — so the 20-tick
+    // weapon-switch stamp dips for 10 ticks (the 0x49 remote-reload 80 for 40).
+    if (inf.arms_dip_ticks > 0) {
+        --inf.arms_dip_ticks;             // [orig: @0x4b5cb5]
+        inf.head_look_decay -= 0x2800000; // [orig: @0x4b5cb7 += 0xFD800000]
+    }
+    inf.head_look_decay -=
+        io::bam_sar(io::bam_add(inf.head_look_decay, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
+    if (inf.arms_dip_ticks > 0) --inf.arms_dip_ticks;        // [orig: @0x4b5cdb..0x4b5ce7]
+
+    // The 3P reload-anim window counts down once per tick [orig: @0x4b5cf9].
+    if (inf.reload_anim_ticks > 0) --inf.reload_anim_ticks;
+
+    // Desired state [orig: @0x4b5dad..0x4b5e6f]: the held weapon's hold kind (the
+    // AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
+    // pose ladder; the default (rifles, kind 0) MIRRORS the primary state.
+    int desired;
+    switch (inf.wpn_hold_kind) {
+        case 1: // knife family -> 50 [orig: @0x4b5dc0 lea eax,[ecx+31h]]
+            desired = anim_state::kHoldKnife;
+            break;
+        case 2: // pistol -> 51 [orig: @0x4b5dcd]
+            desired = anim_state::kHoldPistol;
+            break;
+        case 3: // grenade -> 52 [orig: @0x4b5dd7]
+            desired = anim_state::kHoldGrenade;
+            break;
+        case 4: // stinger/AT4/RPG -> 53 [orig: @0x4b5de1]
+            desired = anim_state::kHoldStinger;
+            break;
+        case 5: // designator -> 54, scoped 55 [orig: @0x4b5deb test Flags&0x10]
+            desired = inf.scope_raised ? anim_state::kHoldDesignatorScoped
+                                       : anim_state::kHoldDesignator;
+            break;
+        case 6: // P90 -> 56, scoped 57 [orig: @0x4b5dfe]
+            desired = inf.scope_raised ? anim_state::kHoldP90Scoped : anim_state::kHoldP90;
+            break;
+        case 7: // MP7 -> 58, scoped 59 [orig: @0x4b5e11]
+            desired = inf.scope_raised ? anim_state::kHoldMP7Scoped : anim_state::kHoldMP7;
+            break;
+        case 8: // javelin -> 60, scoped 61 [orig: @0x4b5e24]
+            desired = inf.scope_raised ? anim_state::kHoldJavelinScoped
+                                       : anim_state::kHoldJavelin;
+            break;
+        default:
+            // MIRROR the primary state — 43 idle when the primary is locked (flag 4);
+            // 49 idle_3 when scoped [orig: @0x4b5e37..0x4b5e4e].
+            desired = (infantry_anim_flags(inf.anim_state) & 0x4u) != 0 ? anim_state::kIdle
+                                                                        : inf.anim_state;
+            if (inf.scope_raised) desired = anim_state::kIdle3;
+            break;
+    }
+    // Overrides, strongest last [orig: @0x4b5e53..0x4b5e6f]: binoculars 64, then the
+    // reload window — 66 reload2 when the hold kind is 2 (pistol), else 65 reload.
+    if (inf.binoculars_raised) desired = anim_state::kBinoculars; // [orig: @0x4b5e53]
+    if (inf.reload_anim_ticks > 0)
+        desired = inf.wpn_hold_kind == 2 ? anim_state::kReload2
+                                         : anim_state::kReload; // [orig: @0x4b5e5e..0x4b5e6f]
+
+    // Commit [orig: @0x4b5e72]: same -> skip; a locked (flag 4: attacks 62/63, reloads
+    // 65/66) or emote (0x20) current defers the change to clip end; else stamp now.
+    if (desired != inf.wpn_state) {
+        const uint32_t curf = infantry_anim_flags(inf.wpn_state);
+        if ((curf & 0x4u) != 0 || (curf & 0x20u) != 0) {
+            inf.wpn_deferred = desired; // [orig: @0x4b5e88/@0x4b5e95]
+        } else {
+            inf.wpn_state = desired;    // [orig: @0x4b5e9d]
+            inf.wpn_deferred = 0;       // [orig: @0x4b5ea3]
+            inf.wpn_clip_phase = 0;     // channel re-init (D-INF-1: no blend window)
+        }
+    }
+
+    // Deferred promotion when the playing clip reaches its end — the channel end-flag
+    // path [orig: AnimMap_UpdateEntity @0x40b77b, reached through the @0x40b8c0 swap].
+    if (inf.wpn_deferred != 0 && root_motion != nullptr) {
+        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.wpn_state);
+        if (len >= 0 && inf.wpn_clip_phase >= len) {
+            inf.wpn_state = inf.wpn_deferred;
+            inf.wpn_deferred = 0;
+            inf.wpn_clip_phase = 0;
+        }
+    }
+
+    // Advance the secondary playhead every tick; root motion is DISCARDED — the weapon
+    // layer never feeds the parent transform [orig: parentEntity=0 @0x40b8f3].
+    if (root_motion != nullptr) {
+        RootMotionFrame discard;
+        root_motion->advance(inf.adm_id, inf.wpn_state, inf.wpn_clip_phase, discard);
+    }
+}
+
+// The fire-path attack stamp — see the infantry.h declaration. Unlike the per-tick
+// selection this writes the target immediately, whatever the current state's flags.
+// [orig: WeaponAction_Fire @0x542bbc..0x542bea; ebx = 0 from @0x542b22]
+void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
+    int state;
+    if (attack_kind == 1)
+        state = anim_state::kKnifeAttack;   // 62 [orig: @0x542bcb]
+    else if (attack_kind == 2)
+        state = anim_state::kGrenadeAttack; // 63 [orig: @0x542be0]
+    else
+        return; // rifle fire stamps NO body state [orig: only the 1/2 compares]
+    // The channel re-inits only on a target CHANGE [orig: AnimMap_UpdateEntity @0x40b5f0
+    // pulls a new clip only when target differs] — a repeat stamp of the same attack
+    // state mid-clip does not restart the playing clip.
+    if (inf.wpn_state != state) inf.wpn_clip_phase = 0; // (D-INF-1: no blend window)
+    inf.wpn_state = state;
+    inf.wpn_deferred = 0;
+}
+
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial) {
+    if (anim_map_serial == 0 || inf.wpn_anim_map_serial == anim_map_serial) return;
+    inf.wpn_anim_map_serial = anim_map_serial;
+    inf.arms_dip_ticks = 20;
+}
+
+bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
+                                     bool mount_blocks_channel) {
+    return inf.active && weapon_in_hands && !mount_blocks_channel &&
+           (infantry_anim_flags(inf.anim_state) & 0x40u) != 0;
+}
+
+// ----------------------------------------------------------------------------
 // Slope sampling + slide (every 8 ticks). [orig: 0x4b9910 dump 930-1000]
 // ----------------------------------------------------------------------------
 void AiSystem::infantry_slope_slide(AiEntity &e) {
@@ -538,6 +671,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_think(e, world);
         infantry_select(e);
     }
+
+    // The secondary (weapon) channel and its arms/head-look decay block run on every
+    // local-player body tick, including death ticks. The primary death state disables
+    // rendering through its flag gate, but the independent playhead/timers do not
+    // freeze on the corpse. NPC/remote threading rides D-NET-117.
+    // [orig: the same body updater drives both pairs @0x4b40e0; witness §14.8]
+    if (inf.is_local_player) infantry_weapon_channel(e);
 
     // 3. Advance the selected playing clip and fetch its root motion (every tick).
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;

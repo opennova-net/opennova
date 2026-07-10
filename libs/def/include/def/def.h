@@ -198,6 +198,16 @@ typedef struct DefWeaponDef {
        [orig: Player_ToggleWeaponScope @ 0x4df401 -> 80.0 / Player_GetClampedWeaponElevation
        @ 0x4dc6b0; g_cameraFovDeg @ 0x26C6848]. 0 = key absent. */
     float scope_max_mag;
+    /* Third-person body-channel kinds, plain integers, 0 = key absent (rifle).
+       special_hold (record +0xA4, read @ 0x4b5dba): 1..8 selects the body hold-pose
+       ladder 50-61 (1 knife family, 2 pistol — also selects reload2 66, 3 grenade,
+       4 stinger/AT4/RPG, 5 designator, 6 P90, 7 MP7, 8 javelin; 5-8 +1 when scoped).
+       attack_anim (record +0xA8, read @ 0x542bbc): 1 stamps body state 62 knife_attack
+       on fire, 2 stamps 63 grenade_attack; 0 = rifle, NO body stamp on fire.
+       [orig: WeaponDefs_ParseLineCallback keys 'special_hold' @ 0x543cb7 /
+       'attack_anim' @ 0x543ce9; docs/world/world-wac-ai-re.md section 14.8]. */
+    int special_hold;
+    int attack_anim;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

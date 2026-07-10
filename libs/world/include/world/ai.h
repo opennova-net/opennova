@@ -603,6 +603,14 @@ public:
     // Map the movement order to an anim state (walk/run/jog/turn/stop/wounded + availability
     // fallbacks) and commit it under the lock/emote rules.
     void infantry_select(AiEntity &e);
+    // The upper-body weapon channel (the entity's SECONDARY AnimMap channel): per-tick
+    // desired-state selection + the locked/emote commit rule + the clip-end deferred
+    // promotion + the playhead advance. Local-player slice: reload 65 via the 80-tick
+    // window; hold poses 50-61 / binoculars 64 / reload2 ride the AdmDef kind dwords
+    // (unparsed) so the rifle default (mirror the primary) applies. [orig:
+    // Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 + AnimMap_UpdateDualChannels
+    // @0x40b8c0; witness world-wac-ai-re.md §14.8.4/.5]
+    void infantry_weapon_channel(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
     int infantry_resolve_state(int adm_id, int state) const;
     // Slope sampling + slide [orig: every-8 block, 4 probes around the entity].

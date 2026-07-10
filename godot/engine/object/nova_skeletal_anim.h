@@ -131,6 +131,15 @@ public:
 	// Returns the bind pose for an unknown clip / empty result.
 	Array eval_pose(const String &p_key, double p_playhead_seconds) const;
 
+	// The upper-body WEAPON channel: sample p_wpn_key at ITS OWN playhead and hard-override
+	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
+	// anim::kWeaponChannelMaskBones set by BN## index), then re-localize the complete
+	// mixed hierarchy. Origins keep the primary pose's (the shared skeleton owns the
+	// pivots). No-op when the key is unknown or sizes mismatch. [orig: the mask override in
+	// Entity_BuildBoneTransformMatrices @0x4b14db/@0x4b16a7; world-wac-ai-re.md §14.8.6]
+	void splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
+			double p_wpn_playhead_seconds) const;
+
 	// Per-bone overlay class (anim::OverlayClass) parsed from the BN## bone names, for
 	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's
 	// default case). BODY rigs only: first-person weapon rigs reuse BN## tags for a
@@ -143,9 +152,13 @@ public:
 	// NovaSimulation.get_local_player_aim_overlay() angles via the single-sourced
 	// MissionObjectPlacer.bms_to_godot_basis); p_classes from get_overlay_classes().
 	// Only local rotations change — origins survive the pivot re-anchor identically.
-	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14]
+	// p_wpn_key (optional): the weapon channel's clip, spliced onto the mask bones at
+	// p_wpn_playhead BEFORE the overlay composes — the witnessed order (primary sample →
+	// mask override → overlay multiply). Empty = single channel.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14/§14.8.6]
 	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
-			const PackedInt32Array &p_classes, const Array &p_deltas) const;
+			const PackedInt32Array &p_classes, const Array &p_deltas,
+			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0) const;
 
 	NovaSkeletalAnim() = default;
 };
