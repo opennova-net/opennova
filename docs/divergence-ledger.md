@@ -328,6 +328,8 @@ witness: [mission/mis-format-re.md](mission/mis-format-re.md).
 | D-PTL-4 | `bump`/`bumpadd` lit-color rotation about view-Z vs the engine's composite-matrix X (combiner topology matches; pending a 4×4 port + reference capture) | A | OPEN (approximation) | PAR-UI/render |
 | D-PTL-5 | `distort` fixed-strength screen-tex UV offset; the engine stage-1 combiner bytes are undecoded | B | NEEDS-RE | PAR-UI/render |
 | D-PTL-6 | Atlas pack strategy undecoded (shelf vs the engine's layout); `inset` bleed padding defaults to 0 | B | NEEDS-RE | PAR-UI/render |
+| D-PTL-7 | Scripted fx spawns pass the up vector as the descriptor orientation; the engine passes the terrain surface normal at the entity's grid cell | A | OPEN | PAR-UI/render |
+| D-PTL-8 | Unknown effect name at intern returns 0 (no spawn); the engine clones `stockeffect` under the requested name | A | OPEN | PAR-UI/render |
 
 The LW `.3di` record is unlanded overall (PR #45 closed); its rows ride whenever an LW
 import is revived. Note D-3DILW-1's v8 branch overlaps the 3DI/GP audit surface only at
@@ -742,9 +744,10 @@ existing text (no new findings, no reworded witnesses):
   SSE2 low-FP-bit divergence; `PERMANENT`).
 - [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) → **D-3DILW-1..3** (v8
   branch, textures, SAF/KSA playback — the record's own deferrals).
-- [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..6** (the
-  intentional `g{N}_color{M}` map + the §6 bounded deviations; pure "not yet researched"
-  §8 items stay in §8).
+- [particles/ptl-format-re.md](particles/ptl-format-re.md) → **D-PTL-1..8** (the
+  intentional `g{N}_color{M}` map + the §6 bounded deviations + the runtime spawn-chain
+  gaps minted at the 2026-07-10 effect-world port; pure "not yet researched" §8 items
+  stay in §8).
 - [mission/mis-format-re.md](mission/mis-format-re.md) → **D-MIS-1..5** (the
   writer-subset gaps + the full `dfx2med.exe` grill as a `NEEDS-RE` row;
   D-MIS-4/-5 minted-and-FIXED at the 2026-07-07 Nile parity pass).

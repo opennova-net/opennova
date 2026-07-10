@@ -1,8 +1,8 @@
 # Particles (.ptl) - format + system RE record
 
-> **Status**: the particle runtime/editor redesign (blueprint-graph workspace + curve tables) is
-> in flight in a worktree. This format and witness record is the durable reference; reimpl code
-> locations cited below may move with that redesign.
+> **Status**: the blueprint-graph workspace + curve tables redesign landed with the runtime
+> effect world (`NovaEffectWorld`) on the 2026-07-10 particles train. This format and witness
+> record is the durable reference.
 
 Consolidated 2026-06-10 from the scratch notes `ptl_format.md`, `ida_particle_witness.md`,
 `particle_visual_parity.md`, and `ptl_corpus_catalog.md` (RE passes 2026-04-27/28).
@@ -395,7 +395,7 @@ damping, force vec); our struct does not mirror byte layout.
 | Original | Addr (size) | Behavior witnessed | Reimpl + pinning |
 | --- | --- | --- | --- |
 | `CParticleEmitter_AdvanceFrame` | `0x5e6570` (0x40b) | emit timing (interval = 1/emit_rate), burst loop, expire-by-age | `emitter_advance` (collapses AdvanceFrame + UpdateParticles) |
-| `CParticleEmitter_UpdateParticles` | `0x5e6980` (0x3df) | explicit Euler, pos first then forces: `pos += vel*dt`; `vel.y += gravity*dt`; `vel -= drag*dt*vel`; `scale += scale_vel*dt`; `age -= dt` unless NEVERAGE. **GRAVITATE** (`move & Gravitate`): `delta = pos − emitter.pos`, masked by `gravity_mask`, `D3DXVec3Normalize` (constant-magnitude force; verified via the `sub_68B032 → off_85072C` thunk), `vel += unit_delta * dt * spring`; direction is AWAY from the emitter — authors flip via negative mask components. Spring scalar at emitter+0x308, set in `CEffectEmitter_Initialize @ 0x5e6020`. **Kill-plane** at `*(emitter+332)`: flags bit 27 kills `y > threshold`, bit 28 kills `y <= threshold`; engine writes `age = 0` (no position clamp) | `integrate_particle`; `Emitter::spring_const` (default 0 → fall back to `def.gravity`), `kill_plane_mode`/`kill_plane_y`. Pinned by gravitate + kill-plane ctest cases in `tests/particle/` and GUT clamp tests |
+| `CParticleEmitter_UpdateParticles` | `0x5e6980` (0x3df) | explicit Euler, pos first then forces: `pos += vel*dt`; `vel.y += gravity_slot*dt` (**no `gravity_mask` in the NORMAL branch** — the mask is read only under `move & 2`); `vel -= drag*dt*vel`; `scale += scale_vel*dt`; `age -= dt` unless NEVERAGE. **GRAVITATE** (`move & Gravitate`): `delta = pos − emitter.pos`, `D3DXVec3Normalize` **first** (verified via the `sub_68B032 → off_85072C` thunk), **then** `gravity_mask` (def+3916, gated on a non-null emitter field) scales the unit vector per axis with **no renormalize** — a zeroed axis leaves a sub-unit force; `vel += masked_unit * dt * slot`; direction is AWAY from the emitter — authors flip via negative mask components. The same emitter slot (+308 dec) serves as the NORMAL gravity accel and the GRAVITATE scalar; seeded in `CEffectEmitter_Initialize @ 0x5e6020`. **Kill-plane** at `*(emitter+332)`: flags bit 27 kills `y > threshold`, bit 28 kills `y <= threshold`; engine writes `age = 0` (no position clamp) | `integrate_particle`; `Emitter::spring_const` (default 0 → fall back to `def.gravity`), `kill_plane_mode`/`kill_plane_y`. **Re-grilled 2026-07-10**: the port had mask-before-normalize and a masked NORMAL gravity — both fixed to the witnessed order; the zero-mask ctest now pins normalize-then-mask (vy ≈ 0.577·dt for a {0,1,0} mask on a diagonal delta). Pinned by gravitate + kill-plane ctest cases in `tests/particle/` and GUT clamp tests |
 | `CParticleEmitter_UpdateAllParticles` (ORBIT branch) | `0x5f3be0` (0x1224) | `(def.move & 4)`: rotates `(pos − emitter.pos)` and velocity around `def.orbital_axis` via `D3DXMatrixRotationAxis` + `D3DXVec3TransformCoord`; engine angle derives from an FPU chain over particle age × emitter basis | `integrate_particle` ORBIT branch: `orbitalspeed * dt` per frame via Rodrigues' formula. Pinned by `test_orbit_rotates_around_axis`, `test_orbit_axis_y_keeps_y_constant` |
 | `CParticleEmitter_SpawnParticle` | `0x5e7640` (0xaa9) | emit_shape switch: 1 = box one-axis dominant + range, 2 = sphere annular per-axis `lerp(skip, size, rand)`, 3 = cone half-angle around forward + annular per-axis; random color1..4 pick; `age = age + age_adj*rand10`; `scale_velocity = 1/age`; flag bits §2.4. RNG resolution `rand() & 0x3FF` | `emit_one_internal` + `apply_emission_shape`; `emitter_rand10` uses a portable LCG for platform-stable seeds. Pinned by `particle_emit_shape_test.cpp` + `test_spawn_records_curve_flags` |
 | `CParticleEmitter_TranslatePosition` | `0x5efe90` (0xad) | `delta = newPos − pos`; shifts AABB min/max accumulators (seeded at spawn by `CEffectEmitter_Initialize @ 0x5e6020`; `UpdateAllParticles` re-inits to ±∞ per frame and rebuilds per particle). **PositionRelative** (flags bit 18): particles travel with the emitter; default clear = world-space, particles "left behind" | `emitter_translate` + `last_translation_delta`/`cumulative_translation`; Godot wrapper hooks `NOTIFICATION_TRANSFORM_CHANGED`. AABB tracking itself deferred (no consumer yet). Pinned by `particle_translate_test.cpp` (6 cases) + 3 GUT tests |
@@ -428,24 +428,44 @@ damping, force vec); our struct does not mirror byte layout.
 | `nova_particle_emitter.{h,cpp}` | `CParticleEmitter` | Node3D driving the portable simulator + per-layer meshes/materials |
 | `ptl_resource_format.{h,cpp}` | (no engine analogue) | Godot ResourceFormat loader/saver for `.ptl`, round-trips |
 
-All rows verdict **match (semantic)**. The ONED workspace (`godot/modtools/particle/`) mounts a
-SubViewport preview over these wrappers; its shape is owned by the in-flight redesign.
+All rows verdict **match (semantic)**. The ONED workspace (`godot/modtools/particle/`) mounts the
+blueprint screen (node graph + live preview) over these wrappers.
+
+### Runtime load & spawn chain (game integration, witnessed 2026-07-10)
+
+The game-side effect world: who loads the `.ptl` set and how effects spawn by name at runtime.
+Reimpl: `godot/engine/world/effect_world.gd` (`NovaEffectWorld`, host-side render service — a
+dedicated host is headless and never draws) + the `game_world.gd` fx routing.
+
+| Original | Addr (size) | Behavior witnessed | Reimpl + pinning |
+| --- | --- | --- | --- |
+| `CEffectSystem_Init` | `0x5f6070` (0x53f) | called from `Game_StartMission @ 0x524980`; creates `g_EffectWorld` (a `CParticleManager`, 0x454 B) once, registers the static+rotated billboard renderers, texture dir = `<exe>\tga\`; then parses **every** loose `ptl\*.ptl`, the `.ptu`/`.ptg` alternate set (`byte_24D4DF9` selects `.ptg`), and **every** `.ptl`/`.ptu` entry of **every** mounted PFF volume through `CEffectWorld_ParseSectionCallback` — no fixed file list; post-load resolve `sub_5DF7B0(g_EffectWorld, 1)` | `NovaEffectWorld.load_from_resource_root`: every `.ptl` in the mounted root (loose overrides + all PFF volumes via the resource index), tables merged globally (§1.5). Pinned by `effect_world_test.gd` |
+| `CEffectWorld_LoadDefinitionFile` | `0x5ecf70` (0x45) | single-file entry: copies the path into two static buffers, then `File_ParseASCIIFile(path, ParseSectionCallback, 710577837)` | per-file `NovaParticleFile.load_from_buffer` |
+| `CEffectWorld_InternEffectHandle` | `0x5f7310` (0xfc) | (renamed 2026-07-10 from kong `CEffect_FindOrCreateMaterial` misnomer) interns an effect NAME → stable **1-based handle**: linear `stricmp` scan of the interned pool (`dword_2C25B18`, count `dword_2C25CE0`); miss → `CEffectWorld_FindDefByName` + append; still missing → clone `stockeffect` (vtable+28) under the requested name. WAC `fx` params resolve through this at script compile (`WacScript_ResolveParameter @ 0x4f2920`) | `NovaEffectWorld.intern_effect` (case-insensitive, 1-based, first-registration-wins; `stockeffect` clone fallback unported — §8) |
+| `CEffectWorld_FindDefByName` | `0x5e34f0` | by-name effect lookup over the parsed set | `_effects_by_name` lower-cased map |
+| `CEffectWorld_SpawnEmitterAtPosition` | `0x5f6df0` (0x182) | spawn descriptor (14 dwords): +0 flags (bit0/1 = orientation-in-descriptor; bit2 inverted into the spawn call), +4 interned handle (≤0 → +8 name ptr), +12 owner/tag (stored at emitter+0), +16..24 fixed-point position and +28..36 fixed-point orientation (both through `Math_FixedPointToFloat3_YNegated @ 0x611210`), +40 attenuation 16.16, +44 blend 16.16, +48/+52 sample params (action-slot coupling); spawns via `sub_5EA200(g_EffectWorld, 0, def, pos, orient, flag)` | `spawn_effect` / `spawn_effect_by_handle` (Godot-space positions; one `NovaParticleEmitter` per `pdefs` entry, expiry sweep frees finished finite groups) |
+| `WacScript_SpawnEffectAtSsnEntity` | `0x4f23a0` (0x13f) | (renamed from kong `WacScript_SpawnSoundAtEntity` — it spawns a particle emitter) WAC `fx2ssn`: resolves the `(pool<<12)\|slot` handle, **detaches any live emitter at entity+460 first**, descriptor at the entity position, orientation = **terrain surface normal** at its grid cell (`outMillis`/`off_849934` tables), new handle → entity+460 | `game_world._route_mission_effects` `"fx2ssn"` → `MissionRuntime.entity_position_for_ssn` (linear walk, matching the original's pool scan) → `spawn_effect`; up-vector orientation until the terrain-normal read lands (§8) |
+| `WacScript_SpawnEffectAtTargetMarker` | `0x4f7fd0` (0x122) | (renamed from kong `WacScript_PlaySoundAtEmitter`) WAC `fx2tgt`: pool-3 walk for `itemDef+80 == 6088` (placed target marker, ids 1..99) with the matching target id; same descriptor + entity+460 handle protocol | unrouted: which `.bms` record field carries the target number is unwitnessed (§8) |
+| `ActionSlot_SpawnEffect` | `0x401f20` (0x17f) | weapon-action effect spawn (the ACTION block `particle` key = ActionDef+16, a 1-based interned handle): resolves the firing entity through vehicle parent chains, `Entity_ComputeActionTransform @ 0x401310` fills descriptor position/orientation from the action bone, descriptor dwords 12/13 couple the emitter back to the action slot, handle stored at slot+24 for attach mode 2 | unported — the muzzle-flash/weapon chain (§8) |
+
+`CEffectDef_FindByTypeName @ 0x5b01a0` / `CEffectDef_Construct @ 0x5b01e0` are **NOT particle
+functions** — that family is the `.3DI` model-def cache (`sub_5B6160` appends `.3DI` to the name
+before the lookup); a kong naming trap, recorded in §5.5.
 
 Deferred / unported function index (witnessed addresses, no port yet — renderer- or manager-bound):
 
 | Function | Addr | Function | Addr |
 | --- | --- | --- | --- |
 | `CParticleEmitter_TrySubmitForRender` | `0x5e7540` | `CEffectDef_AddSubEffect` | `0x5a3020` |
-| `CParticleEmitter_SpawnNewParticle` | `0x5f35b0` | `CEffectDef_FindByTypeName` | `0x5b01a0` |
-| `CParticleSystemDef_InitDefaults` | `0x5e14f0` | `CEffectDef_Construct` | `0x5b01e0` |
-| `CParticleManager_Construct` | `0x5e87f0` | `CEffectDef_InvokeFactory` | `0x5e19e0` |
-| `CParticleManager_ResolveAllReferences` | `0x5ec850` | `CEffectDef_SetTextureName` | `0x5ef8e0` |
-| `CParticleManager_RenderBatch` | `0x5e9890` | `CEffectEmitter_Initialize` | `0x5e6020` |
-| `CParticleManager_BeginFrame` | `0x5ecfc0` | `CEffectEmitter_SpawnBetweenPositions` | `0x5ea0a0` |
-| `CParticleManager_FindTableDefByName` | `0x5e9540` | `CEffectEmitter_Destroy` | `0x5e3460` |
-| `CEffectWorld_SpawnEmitterAtPosition` | `0x5f6df0` | `CEffectEmitter_SetOrientationFromDirection` | `0x5e5b00` |
-| `CEffect_UpdateEmitterTransform` | `0x5f7410` | `WeatherParticle_UpdateAllEmitters` | `0x5cb100` |
-| `Debug_DrawParticleStats` | `0x44c840` | `WeatherParticle_LoadTextures` | `0x5de840` |
+| `CParticleEmitter_SpawnNewParticle` | `0x5f35b0` | `CEffectDef_InvokeFactory` | `0x5e19e0` |
+| `CParticleSystemDef_InitDefaults` | `0x5e14f0` | `CEffectDef_SetTextureName` | `0x5ef8e0` |
+| `CParticleManager_Construct` | `0x5e87f0` | `CEffectEmitter_Initialize` | `0x5e6020` |
+| `CParticleManager_ResolveAllReferences` | `0x5ec850` | `CEffectEmitter_SpawnBetweenPositions` | `0x5ea0a0` |
+| `CParticleManager_RenderBatch` | `0x5e9890` | `CEffectEmitter_Destroy` | `0x5e3460` |
+| `CParticleManager_BeginFrame` | `0x5ecfc0` | `CEffectEmitter_SetOrientationFromDirection` | `0x5e5b00` |
+| `CParticleManager_FindTableDefByName` | `0x5e9540` | `WeatherParticle_UpdateAllEmitters` | `0x5cb100` |
+| `CEffect_UpdateEmitterTransform` | `0x5f7410` | `WeatherParticle_LoadTextures` | `0x5de840` |
+| `Debug_DrawParticleStats` | `0x44c840` | | |
 
 ## 5. Render chain
 
@@ -583,6 +603,12 @@ These functions in the particle render path carry misleading kong names; do not 
 | `CEffectChannel_PlaySample` | `0x5e4230` | **BindRenderStateAndTexture**. Called from `BuildBillboardQuads` when the bound texture changes: drains pending verts via `GDynamicVB_FlushAndRender`, dispatches fog state by `*sample`, then `device->SetTexture(sample[4])`. Nothing to do with audio. |
 | `CD3DDevice_SetFogAndBlendMode` | `0x677740` | **SetFogStateAndTextureFactor**. Only writes fog render states (D3DRS 35/36/37/38/140) + D3DRS_FOGCOLOR (34), the color picked by the low 2 bits of `mode` from {self-color, gray `0xFF7F7F7F`, black `0xFF000000`, white `0xFFFFFFFF`}. Never touches SRCBLEND/DESTBLEND/ALPHABLENDENABLE. |
 | `Render_ResetFogAndBlendState` | `0x589ad0` | **Render_ResetFogState**. Two-step fog reset (`SetFogStateAndTextureFactor(-1)` then `(0)`) + 3 dirty flags. No alpha-blend reset. |
+| `CEffect_FindOrCreateMaterial` | `0x5f7310` | **CEffectWorld_InternEffectHandle** (renamed in the IDB 2026-07-10). Interns effect names → 1-based spawn handles; no materials involved. |
+| `WacScript_PlaySoundAtEmitter` | `0x4f7fd0` | **WacScript_SpawnEffectAtTargetMarker** (renamed 2026-07-10). The WAC `fx2tgt` handler — spawns a particle emitter at a placed type-6088 target marker; audio-free. |
+| `WacScript_SpawnSoundAtEntity` | `0x4f23a0` | **WacScript_SpawnEffectAtSsnEntity** (renamed 2026-07-10). The WAC `fx2ssn` handler — spawns a particle emitter at an SSN entity; audio-free. |
+| `CEffectDef_FindByTypeName` / `CEffectDef_Construct` | `0x5b01a0` / `0x5b01e0` | **The `.3DI` model-def cache**, not particles: `sub_5B6160` appends `.3DI` to the name before this lookup and loads via `ThreediGp_LoadFromFile`. The `CEffectDef_*` prefix on this family is a kong trap — particle effect defs resolve through `CEffectWorld_FindDefByName @ 0x5e34f0`. |
+| `CGameConfig_SetWindowClassName` | `0x5df8a0` | sets the effect manager's **texture search dir** (`<exe>\tga\` from `CEffectSystem_Init`); nothing to do with window classes. Comment-only — not yet renamed. |
+| `CNapiTransport_DetachFromSession` | `0x5f75d0` | detaches a live effect **emitter** from its owner entity (entity+460 handle protocol, called before a respawn in `WacScript_SpawnEffectAtSsnEntity`); not networking. Comment-only — not yet renamed. |
 
 ## 6. Visual parity — implemented features
 
@@ -661,6 +687,29 @@ carried here.
 
 ## 8. Open RE work
 
+- **fx2tgt target-id record field**: which `.bms` type-6088 record field carries the 1..99
+  target number the runtime matches (`WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0`; the
+  MED-side picker `Med_ParamTeleportTargetNum @ 0x449b00` lives in `dfx2med.exe`, a different
+  image). Blocks routing `fx2tgt` in `game_world.gd`.
+- **Scripted-spawn orientation**: both WAC handlers orient the descriptor to the terrain
+  surface normal at the entity's grid cell (`outMillis` / `off_849934` tables); the host route
+  passes the up vector until the terrain-normal read is ported (D-PTL-7).
+- **`stockeffect` clone fallback**: `CEffectWorld_InternEffectHandle @ 0x5f7310` clones the
+  `stockeffect` def (vtable+28) under an unknown requested name; `NovaEffectWorld.intern_effect`
+  returns 0 instead (D-PTL-8).
+- **`.ptu`/`.ptg` alternate set**: `CEffectSystem_Init @ 0x5f6070` loads `*.ptu` — or `*.ptg`
+  when `byte_24D4DF9` is set — alongside `*.ptl`; the selector byte's meaning (gore toggle?)
+  is unwitnessed, and the runtime port loads only `.ptl`.
+- **Weapon-action effects** (muzzle flash chain): `ActionSlot_SpawnEffect @ 0x401f20` spawns
+  the ACTION block's `particle` handle (ActionDef+16) at the action-bone transform
+  (`Entity_ComputeActionTransform @ 0x401310`), coupling the emitter to the action slot
+  (descriptor dwords 12/13; attach mode 2 stores the handle at slot+24). Unported — the
+  natural follow-up to the weapon FSM train, alongside the other spawn sites witnessed in the
+  xref sweep (projectile travel/explosions, vehicle physics dust, bone trails, death effects,
+  `Weapon_RaycastAndSpawnImpact @ 0x4e8460` impacts, weather).
+- **Descriptor +40/+44 consumers** (attenuation / blend 16.16 fields): the spawner forwards
+  them through kong-misnamed calls (`SoundWorld_UpdateChannelAttenuation @ 0x5e5db0`,
+  `CEffectWorld_UpdateBlendValues @ 0x5e5df0`); semantics unwitnessed.
 - Atlas pack algorithm `[orig: BuildTextureAtlases @ 0x5e8db0]` (shelf vs row vs binary tree)
   and `inset` semantics.
 - Lit-color rotation axis convention (§5.3): 4×4 matrix port + side-by-side reference capture
@@ -693,6 +742,8 @@ witnessed behavior gap stay in §8.
 | D-PTL-4 | `bump`/`bumpadd` lit-color axis (§5.3, §6): rotation about view-Z instead of the engine's composite-matrix X (combiner topology confirmed matching) | **OPEN** — pending the 4×4 matrix port + a side-by-side reference capture (§8). |
 | D-PTL-5 | `distort` (§5.4, §6): fixed-strength screen-tex UV offset; the engine stage-1 combiner bytes are undecoded | **NEEDS-RE** — decode the index-8 combiner layout (§8). |
 | D-PTL-6 | Atlas pack (§6): the engine layout strategy (shelf vs row vs binary tree) is undecoded; our shelf packer matches the UV-rect data shape; `inset` bleed padding defaults to 0 | **NEEDS-RE** [orig: BuildTextureAtlases @ 0x5e8db0] |
+| D-PTL-7 | Scripted-spawn orientation (§4 runtime chain): the WAC fx handlers pass the terrain surface normal at the entity's grid cell as the descriptor orientation; the host route passes the up vector | **OPEN** — port the terrain-normal read (§8). [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0] |
+| D-PTL-8 | Unknown effect name at intern (§4 runtime chain): the engine clones `stockeffect` under the requested name; `NovaEffectWorld.intern_effect` returns 0 (no spawn) with a warning | **OPEN** — port the clone fallback (§8). [orig: CEffectWorld_InternEffectHandle @ 0x5f7310] |
 
 WANDER/BUBBLE (engine-vestigial, zero xrefs), the emitter AABB accumulators, the ORBIT
 orientation-matrix port, collision sounds, and the pending parser decompiles remain §8 research

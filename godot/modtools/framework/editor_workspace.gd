@@ -549,6 +549,14 @@ func _sync_shell() -> void:
 		editor_shell.sync_from_editor_state()
 
 
+## Re-sync the shell's workflow rail + inspector after this workspace changed
+## its active workflow programmatically (activate_workflow from workspace UI
+## rather than the rail). No-op without a shell (headless tests).
+func _sync_shell_workflow() -> void:
+	if editor_shell != null and editor_shell.has_method("sync_workflow_from_workspace"):
+		editor_shell.sync_workflow_from_workspace()
+
+
 ## Parent a Node under the shell: domain editors that need _process/audio,
 ## transient dialogs, preview players. RefCounted workspaces have no tree of
 ## their own; without a shell the node stays parentless and the caller's

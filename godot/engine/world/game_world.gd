@@ -75,6 +75,7 @@ var _placer  # MissionObjectPlacer (kept so mission audio reuses its item databa
 var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
 var _mission_audio: NovaMissionAudio
+var _effect_world: NovaEffectWorld  # the runtime .ptl effect world (render-only, per mission)
 # Frame-clear cache (divergence #21): recompute only when the env generation
 # moves or the camera crosses the water plane.
 var _clear_env_generation: int = -1
@@ -384,6 +385,9 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	timeline.span("audio")
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
+	timeline.span("effects")
+	_start_effect_world()
+	timeline.end_span()
 	timeline.finish()
 	_loaded = true
 	world_loaded.emit()
@@ -496,6 +500,9 @@ func unload() -> void:
 		_nw_host = null
 	if _mission_audio != null:
 		_mission_audio.teardown()
+	if _effect_world != null:
+		_effect_world.queue_free()
+		_effect_world = null
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
 	if _music != null:
@@ -952,22 +959,38 @@ func is_foliage_hidden() -> bool:
 	return _foliage_hidden
 
 
-# Fire mission audio for presentation effects. PlayWavList actions surface as "dialog" effects
-# carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id through
-# the co-named .DBF and plays the LWF set). Other kinds are still emitted via mission_effects for
-# host consumers (HUD, etc.).
+# Fire mission audio + particle effects for presentation. PlayWavList actions surface as "dialog"
+# effects carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id
+# through the co-named .DBF and plays the LWF set). WAC fx commands surface with the effect name in
+# `str`; route them to the effect world. Other kinds are still emitted via mission_effects for host
+# consumers (HUD, etc.).
 func _route_mission_effects(effects: Array) -> void:
-	if _mission_audio == null:
-		return
 	for e in effects:
 		var eff: Dictionary = e
 		var kind := String(eff.get("kind", ""))
 		if kind == "dialog":
 			# BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
-			_mission_audio.play_dialog(int(eff.get("a", 0)))
+			if _mission_audio != null:
+				_mission_audio.play_dialog(int(eff.get("a", 0)))
 		elif kind == "dialog_wav":
 			# WAC wave/pwave: a scripted voice .wav by filename on its own channel.
-			_mission_audio.play_wac_wave(String(eff.get("str", "")))
+			if _mission_audio != null:
+				_mission_audio.play_wac_wave(String(eff.get("str", "")))
+		elif kind == "fx2ssn":
+			# WAC fx2ssn: spawn the named effect at the SSN entity's position with
+			# the emitter handle owned per entity (respawn detaches the old one)
+			# [orig: WacScript_SpawnSoundAtEntity @ 0x4f23a0 — kong "sound" misnomer,
+			# it spawns a particle emitter]. The original orients the emitter to the
+			# terrain surface normal at the entity's grid cell; ported as up-vector
+			# until the terrain-normal read lands (ptl-format-re §8 follow-up).
+			if _effect_world != null and _runtime != null:
+				var pos = _runtime.entity_position_for_ssn(int(eff.get("b", 0)))
+				if pos != null:
+					_effect_world.spawn_effect(String(eff.get("str", "")), pos)
+		# fx2tgt (spawn at a placed type-6088 target marker
+		# [orig: WacScript_PlaySoundAtEmitter @ 0x4f7fd0 — same misnomer family])
+		# stays unrouted: which .bms record field carries the 1..99 target number
+		# is unwitnessed — ptl-format-re §8 follow-up.
 
 
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
@@ -1131,6 +1154,23 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 
 func get_mission_audio() -> NovaMissionAudio:
 	return _mission_audio
+
+
+# Build the runtime particle-effect world over the mounted root: parse every
+# .ptl reachable in the mounts (loose overrides + all PFF volumes) into one
+# effect registry, ready to spawn by name/handle [orig: CEffectSystem_Init
+# @ 0x5f6070, called from Game_StartMission @ 0x524360].
+func _start_effect_world() -> void:
+	_effect_world = NovaEffectWorld.new()
+	_effect_world.name = "EffectWorld"
+	add_child(_effect_world)
+	var count := _effect_world.load_from_resource_root(_resource_root)
+	print("GameWorld: effect world — %d effect(s) across %d .ptl file(s)" % [
+		count, _effect_world.file_count()])
+
+
+func get_effect_world() -> NovaEffectWorld:
+	return _effect_world
 
 
 # Re-drive the gamemus vars from the local player each frame, the way the

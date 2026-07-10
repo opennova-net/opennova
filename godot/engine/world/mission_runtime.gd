@@ -202,6 +202,19 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	return _sim.get_entity_count()
 
 
+# World position of the entity addressed by a runtime SSN (WAC/BMS addressing),
+# or null when no live entity carries that net id. Linear entity walk — matches
+# the original's pool scans in the WAC fx/sound handlers
+# [orig: WacScript_SpawnSoundAtEntity @ 0x4f23a0].
+func entity_position_for_ssn(ssn: int) -> Variant:
+	if _sim == null or ssn <= 0:
+		return null
+	for i in _sim.get_entity_count():
+		if _sim.get_entity_net_id(i) == ssn:
+			return _sim.get_entity_position(i)
+	return null
+
+
 # --- the local player (Phase 2; ADR 0012). Thin delegates to the sim for the host. ---
 func has_player() -> bool:
 	return _sim != null and _sim.has_local_player()

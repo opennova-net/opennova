@@ -71,6 +71,25 @@
 - [ ] `mission_controller.gd` full decomposition (beyond what the inspector split needed): extract selection/gizmo/placement concerns
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 
+## Particles (runtime effect world)
+
+The .ptl stack (libs/particle + engine wrappers + the ONED Particles workspace) and the
+runtime effect world (NovaEffectWorld: mission-start load of every mounted .ptl, name/handle
+intern, WAC fx2ssn spawns) landed on the 2026-07-10 particles train. Witnessed follow-ups
+(addresses + detail in docs/particles/ptl-format-re.md §8):
+
+- [ ] Weapon-action effects (muzzle flash): `ActionSlot_SpawnEffect @ 0x401f20` spawns the
+      ACTION block's `particle` handle at the action-bone transform
+      (`Entity_ComputeActionTransform @ 0x401310`) — the natural tail of the weapon FSM
+      train. The wider spawn-site sweep (projectiles/explosions, vehicle dust, bone trails,
+      death effects, `Weapon_RaycastAndSpawnImpact @ 0x4e8460` impacts, weather) rides after.
+- [ ] fx2tgt routing: pin which `.bms` type-6088 record field carries the 1..99 target
+      number (`WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0`), then route it like fx2ssn.
+- [ ] D-PTL-7: scripted spawns should orient to the terrain surface normal at the entity's
+      grid cell (both WAC handlers); host passes up-vector today.
+- [ ] D-PTL-8: `stockeffect` clone fallback for unknown interned names
+      (`CEffectWorld_InternEffectHandle @ 0x5f7310`).
+
 ## Player info (player.mnu / PLAYER_INFO)
 
 The avatar lists, cascade, team filter, name, 3D preview, and ACCEPT seam are wired
