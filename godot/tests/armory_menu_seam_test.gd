@@ -77,7 +77,8 @@ func test_owns_menu_detects_weapon_screen() -> void:
 
 func test_populates_classes_slots_and_ammo() -> void:
 	var host := ArmoryMenuHost.new()
-	host._weapons = _load_weapons()
+	var wdb := _load_weapons()
+	host.set_weapon_database(wdb)
 	var menu := _make_menu()
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 
@@ -87,7 +88,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 
 	# Rifleman (mask 8), blue (mask 2): NONE + the filtered primaries, first weapon pre-selected.
 	var primary := _combo(menu, "PRIMARY")
-	var expected: Array = host._weapons.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 8, 2)
+	var expected: Array = wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 8, 2)
 	assert_gt(expected.size(), 0, "the fixture has rifleman/blue primaries")
 	assert_eq(primary.get_item_count(), expected.size() + 1, "PRIMARY = NONE + filtered weapons")
 	assert_eq(primary.get_selected(), 1, "the first real weapon is pre-selected")
@@ -102,7 +103,7 @@ func test_populates_classes_slots_and_ammo() -> void:
 
 func test_class_change_refilters_slots() -> void:
 	var host := ArmoryMenuHost.new()
-	host._weapons = _load_weapons()
+	host.set_weapon_database(_load_weapons())
 	var menu := _make_menu()
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 	var primary := _combo(menu, "PRIMARY")
@@ -120,30 +121,30 @@ func test_class_change_refilters_slots() -> void:
 
 func test_weight_updates_from_selection() -> void:
 	var host := ArmoryMenuHost.new()
-	host._weapons = _load_weapons()
+	host.set_weapon_database(_load_weapons())
 	var menu := _make_menu()
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 	var weight := menu.find_child("STATIC_TOTAL_WEIGHT", true, false) as Label
 	# weight = weaponweight + clips * clipweight summed over selected slots
 	# [orig: calculate_loadout_weight @0x55f1f0]
 	assert_false(weight.text.is_empty(), "the weight readout renders")
-	var w: Dictionary = host._selected_weapon("PRIMARY")
-	var clips := int(host._selected_clips("PRIMARY"))
+	var w: Dictionary = host.selected_weapon("PRIMARY")
+	var clips := int(host.selected_clips("PRIMARY"))
 	var expected := float(w.get("weight", 0.0)) + clips * float(w.get("clip_weight", 0.0))
-	var sec: Dictionary = host._selected_weapon("SECONDARY")
+	var sec: Dictionary = host.selected_weapon("SECONDARY")
 	if not sec.is_empty():
 		expected += float(sec.get("weight", 0.0)) \
-			+ host._selected_clips("SECONDARY") * float(sec.get("clip_weight", 0.0))
-	var acc: Dictionary = host._selected_weapon("ACCESSORY")
+			+ host.selected_clips("SECONDARY") * float(sec.get("clip_weight", 0.0))
+	var acc: Dictionary = host.selected_weapon("ACCESSORY")
 	if not acc.is_empty():
 		expected += float(acc.get("weight", 0.0)) \
-			+ host._selected_clips("ACCESSORY") * float(acc.get("clip_weight", 0.0))
+			+ host.selected_clips("ACCESSORY") * float(acc.get("clip_weight", 0.0))
 	assert_true(weight.text.ends_with("%.1f" % expected), "weight = sum of slot + clip weights")
 
 
 func test_accept_emits_loadout_and_cancel_closes() -> void:
 	var host := ArmoryMenuHost.new()
-	host._weapons = _load_weapons()
+	host.set_weapon_database(_load_weapons())
 	watch_signals(host)
 	var menu := _make_menu()
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
@@ -182,7 +183,7 @@ func test_real_weapon_mnu_populates() -> void:
 
 	var host := ArmoryMenuHost.new()
 	assert_true(host.owns_menu(menu), "the real weapon.mnu is claimed by the armory companion")
-	host._weapons = _load_weapons()
+	host.set_weapon_database(_load_weapons())
 	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 
 	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
