@@ -194,6 +194,15 @@ func _free_viewmodel_pass() -> void:
 	_vm_camera = null
 
 
+## Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM from the
+## (changed) equipped weapon — the armory ACCEPT re-mount [orig:
+## WeaponLoadout_ApplyFromBuffer @0x565cd0 tail -> Player_MountWeaponSlot @0x4dfa40].
+func refresh_viewmodel() -> void:
+	if _viewmodel != null and is_instance_valid(_viewmodel):
+		_viewmodel.queue_free()
+	_viewmodel = null
+
+
 # Track the player camera 1:1 and rebuild the witnessed projection: renderfov is a
 # HORIZONTAL fov in degrees, converted to Godot's vertical fov through the live aspect
 # [orig: Render_SetViewAndProjectionMatrices @0x58d900 fovY = 2*atan(tan(fovX/2)/aspect)].

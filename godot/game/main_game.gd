@@ -17,6 +17,12 @@ const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
+# The armory key — this host's binding for the original input action 218 (the loadout
+# screen key; user-remappable in retail). Zone-gated: it opens weapon.mnu's WEAPON
+# screen only while the player stands inside a type-6 armory volume (entity Flags
+# 0x400000, maintained by the collision resolver) [orig: Input_HandleActionBinding
+# @0x49b848 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3].
+const ARMORY_KEY := KEY_B
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
 
@@ -39,6 +45,7 @@ var _hud_objective := ""  # latest mission-effect text line shown by the HUD
 var _player_host: LocalPlayerHost = null
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
+var _armory_host  # ArmoryMenuHost: drives the in-game armory (weapon.mnu WEAPON screen)
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
 
 
@@ -123,6 +130,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key.keycode == DEBUG_OVERLAY_KEY:
 		_toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
+		return
+	# The armory key: in-world only, gated on the type-6 armory-volume contact flag the
+	# collision resolver maintains [orig: input action 218, Flags & 0x400000 @0x49b848].
+	if key.keycode == ARMORY_KEY and _state == State.WORLD:
+		if _try_open_armory():
+			get_viewport().set_input_as_handled()
 		return
 	# The gameplay keys (F4 first/third person, C/Z stance) live on the shared
 	# LocalPlayerHost — the same host ONED play-in-editor routes to.
@@ -275,14 +288,18 @@ func _wire_host() -> void:
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
 	_mp_host = MpMenuHost.new()
 	_player_info_host = PlayerInfoMenuHost.new()
+	_armory_host = ArmoryMenuHost.new()
 	if _menu_host.has_method("add_companion"):
 		_menu_host.add_companion(_mp_host)
 		_menu_host.add_companion(_player_info_host)
+		_menu_host.add_companion(_armory_host)
 	elif _menu_host.has_method("set_companion"):
 		_menu_host.set_companion(_mp_host)
 	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
 	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
 	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
+	_armory_host.loadout_accepted.connect(_on_loadout_accepted)
+	_armory_host.armory_closed.connect(_on_resume)
 
 
 # The player pressed OK on the PLAYER_INFO screen. The on-disk player-profile format
@@ -291,6 +308,44 @@ func _wire_host() -> void:
 # a profile format. See docs/playerinfo/avatars-re.md (ACCEPT / commit, D-PLAYERINFO-9).
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	_chosen_avatar = profile
+
+
+# The armory key while in-world: open weapon.mnu's WEAPON screen over the paused
+# world when the player stands in an armory zone [orig: input action 218 ->
+# UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3, gated on Flags & 0x400000
+# @0x49b848 + the host weapons rule]. Returns false when out of zone (key ignored).
+func _try_open_armory() -> bool:
+	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	if sim == null or not sim.has_method("local_player_in_armory_zone"):
+		return false
+	if not sim.local_player_in_armory_zone():
+		return false
+	if _armory_host != null:
+		_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
+	_state = State.PAUSED
+	if not _menu_host.open_menu("weapon.mnu", "WEAPON"):
+		_state = State.WORLD
+		return false
+	_menu_host.show_menu()
+	return true
+
+
+# Armory ACCEPT: stamp the sim entity (equipped_adm_index + player_class), rebuild the
+# FP viewmodel + action FSM around the new primary, and resume play. SP-local apply —
+# the MP client path rides the 0x2F/0x5A loadout service instead. [orig:
+# WeaponLoadout_ApplyFromBuffer @0x565cd0 -> WeaponSlot rebuild chain +
+# Player_SelectWeaponSlot @0x4dd680 / Player_MountWeaponSlot @0x4dfa40]
+func _on_loadout_accepted(loadout: Dictionary) -> void:
+	var primary := String(loadout.get("primary", ""))
+	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	if not primary.is_empty():
+		if sim != null and sim.has_method("apply_local_player_loadout"):
+			sim.apply_local_player_loadout(primary, int(loadout.get("player_class", 0)))
+		if _world.has_method("set_local_player_weapon_by_name") \
+				and _world.set_local_player_weapon_by_name(primary) \
+				and _player_host != null:
+			_player_host.refresh_viewmodel()
+	_on_resume()
 
 
 # --- Resource dir picker (first launch) ---------------------------------------

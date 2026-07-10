@@ -726,6 +726,27 @@ func build_local_player_avatar() -> Node3D:
 ## are follow-ups. Null when the placer or both models fail to resolve.
 const DEFAULT_VIEWMODEL_WEAPON := "WPN_AK47AUTO"
 
+# The armory-equipped weapon name; overrides DEFAULT_VIEWMODEL_WEAPON/env once the
+# player accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
+# Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot].
+var _viewmodel_weapon_override := ""
+
+## Armory apply, host side: point the FP viewmodel + action FSM at `weapon_name`.
+## Validates against weapon.def; the caller (main_game) drops the old viewmodel so the
+## per-frame pass rebuilds gun/arms/FSM from the new def [orig: the ACCEPT re-mount,
+## WeaponLoadout_ApplyFromBuffer @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
+func set_local_player_weapon_by_name(weapon_name: String) -> bool:
+	if weapon_name.is_empty():
+		return false
+	if _weapon_db == null:
+		local_player_viewmodel_def()  # lazily loads weapon.def into _weapon_db
+	if _weapon_db == null or not _weapon_db.is_loaded() \
+			or _weapon_db.find_weapon(weapon_name) < 0:
+		push_warning("GameWorld: armory weapon '%s' not in weapon.def — keeping current" % weapon_name)
+		return false
+	_viewmodel_weapon_override = weapon_name
+	return true
+
 func build_local_player_viewmodel() -> Node3D:
 	if _placer == null:
 		return null
@@ -839,7 +860,11 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 			return null
 	if not _weapon_db.is_loaded():
 		return null
-	var weapon_name := OS.get_environment("NOVA_VM_WEAPON")
+	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
+	# else the fixed default until first equip.
+	var weapon_name := _viewmodel_weapon_override
+	if weapon_name.is_empty():
+		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = DEFAULT_VIEWMODEL_WEAPON
 	var index: int = _weapon_db.find_weapon(weapon_name)
