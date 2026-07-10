@@ -45,6 +45,18 @@ var _audio_root: Node3D
 var _markers: Array = []  # [{ node:Node3D, pos:Vector3, players:Array, paused:bool }]
 var _strategy: int = STRATEGY_ITEM_SOUNDLOOP
 var _stats: Dictionary = {}
+# Serialized dialog playback. The engine plays one dialog audio channel at a time
+# (Dialog_Register @ 0x44d980 queues, Dialog_UpdatePlayback @ 0x44e470 only loads
+# the next clip once the active channel frees), so we queue resolved line
+# set-names and play them one after another instead of firing every PlayWavList
+# at once.
+var _dialog_queue: Array = []  # pending set names (resolved group lines), FIFO
+var _dialog_voice: AudioStreamPlayer = null  # currently-playing dialog voice, or null
+# WAC wave/pwave scripted voice: a single dedicated channel the engine RESETS
+# before each play (a new wave interrupts the previous one), independent of the
+# .DBF dialog queue [orig: wave/pwave @ 0x4ed610, channel dword_C6EC30].
+var _wac_voice: AudioStreamPlayer = null
+var _wac_wav_cache: Dictionary = {}  # filename(lower) -> AudioStreamWAV (or null)
 var _perf_tick_us: int = 0
 var _perf_markers: int = 0
 var _perf_voice_writes: int = 0
@@ -150,46 +162,116 @@ func fire_soundset(name: String, world_pos: Vector3) -> bool:
 	return _bank.play_oneshot_3d(_audio_root, world_pos, name, SFX_BUS)
 
 
-## Play a mission dialog/wav by its PlayWavList id (param1). Resolution, faithful
+## Enqueue a mission dialog by its PlayWavList id (param1). Resolution, faithful
 ## first: dialog id "dlg%03d" -> co-named .DBF -> def_id set name(s); then direct
-## set-name fallbacks. Plays a non-positional voice. Returns true if anything fired.
+## set-name fallbacks. Playback is SERIALIZED: the original plays one dialog audio
+## channel at a time [orig: Dialog_PlayByIndex @ 0x527ae0 -> Dialog_PlayByName
+## @ 0x44d9f0 -> Dialog_Register @ 0x44d980 queue; Dialog_UpdatePlayback @ 0x44e470
+## advances only when the active channel frees], so the resolved line set-names are
+## queued and played one after another instead of all at mission start. Returns true
+## if the id resolved to at least one playable set.
 func play_dialog(wav_id: int) -> bool:
 	if _bank == null or _audio_root == null:
 		return false
-	var candidates := PackedStringArray()
-	var dlg_id := "dlg%03d" % wav_id
-	if _dbf != null and _dbf.is_loaded():
-		for def_id in _dbf.resolve_dialog(dlg_id):
-			if not String(def_id).is_empty():
-				candidates.append(def_id)
-	# Fallbacks if there is no .dbf or it did not resolve: try direct set-name forms.
-	candidates.append("DLG%03d" % wav_id)
-	candidates.append(dlg_id)
-	candidates.append(str(wav_id))
-	for name in candidates:
-		if _bank.has_set(name):
-			return _bank.play_oneshot_2d(_audio_root, name, VOICE_BUS)
-	push_warning("NovaMissionAudio: unresolved dialog id %d (tried %s)" % [wav_id, str(Array(candidates))])
-	return false
+	var sets := _resolve_dialog_sets(wav_id)
+	if sets.is_empty():
+		push_warning("NovaMissionAudio: unresolved dialog id %d" % wav_id)
+		return false
+	for s in sets:
+		_dialog_queue.append(s)
+	_pump_dialog_queue()
+	return true
 
 
 ## Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
 ## maps to that the loaded banks actually contain, or "" if none.
 func resolve_dialog_set(wav_id: int) -> String:
+	var sets := _resolve_dialog_sets(wav_id)
+	return String(sets[0]) if not sets.is_empty() else ""
+
+
+# Resolve a PlayWavList dialog id to the ordered set name(s) it should play. With a
+# co-named .DBF, that is the dialog group's line set-names (played in sequence, one
+# per dialog "line" as the engine advances entry index in Dialog_UpdatePlayback);
+# without a .DBF, the first direct set-name form that the banks contain.
+func _resolve_dialog_sets(wav_id: int) -> Array:
 	if _bank == null:
-		return ""
-	var candidates := PackedStringArray()
+		return []
+	var out: Array = []
 	var dlg_id := "dlg%03d" % wav_id
 	if _dbf != null and _dbf.is_loaded():
 		for def_id in _dbf.resolve_dialog(dlg_id):
-			candidates.append(def_id)
-	candidates.append("DLG%03d" % wav_id)
-	candidates.append(dlg_id)
-	candidates.append(str(wav_id))
-	for name in candidates:
-		if _bank.has_set(name):
-			return name
-	return ""
+			var n := String(def_id)
+			if not n.is_empty() and _bank.has_set(n):
+				out.append(n)
+	if not out.is_empty():
+		return out
+	for n in ["DLG%03d" % wav_id, dlg_id, str(wav_id)]:
+		if _bank.has_set(n):
+			return [n]
+	return out
+
+
+# Start the next queued dialog line if nothing is currently playing. A line that
+# fails to actually spawn is skipped so the queue never stalls.
+func _pump_dialog_queue() -> void:
+	if _dialog_voice != null and is_instance_valid(_dialog_voice):
+		return  # a line is still playing; _on_dialog_finished pumps the next
+	_dialog_voice = null
+	while not _dialog_queue.is_empty():
+		var name := String(_dialog_queue.pop_front())
+		var voice := _bank.spawn_oneshot_2d(_audio_root, name, VOICE_BUS)
+		if voice != null:
+			_dialog_voice = voice
+			voice.finished.connect(_on_dialog_finished)
+			return
+
+
+func _on_dialog_finished() -> void:
+	if _dialog_voice != null and is_instance_valid(_dialog_voice):
+		_dialog_voice.queue_free()
+	_dialog_voice = null
+	_pump_dialog_queue()
+
+
+## Play a WAC-scripted voice .wav by filename [orig: wave/pwave @ 0x4ed610]. Loads it
+## from the VFS and plays it non-positional on a single dedicated channel that
+## REPLACES any currently-playing wave (the engine resets the channel before each
+## play [orig: AudioChannel_ResetByHandle(dword_C6EC30) @ 0x4ed625]), so a new
+## scripted line interrupts the previous one. Independent of the .DBF dialog queue
+## (they may overlap). Returns true if the wav resolved and played.
+func play_wac_wave(filename: String) -> bool:
+	if _audio_root == null or _resource_root == null or filename.is_empty():
+		return false
+	var stream := _resolve_wav(filename)
+	if stream == null:
+		push_warning("NovaMissionAudio: WAC wave '%s' did not resolve" % filename)
+		return false
+	if _wac_voice == null or not is_instance_valid(_wac_voice):
+		_wac_voice = AudioStreamPlayer.new()
+		if AudioServer.get_bus_index(VOICE_BUS) >= 0:
+			_wac_voice.bus = VOICE_BUS
+		_audio_root.add_child(_wac_voice)
+	_wac_voice.stream = stream
+	_wac_voice.play()  # play() on an active player restarts it -> interrupts the previous wave
+	return true
+
+
+# Resolve + cache a .wav by filename through the VFS (tolerates a missing .wav
+# extension). Returns the decoded AudioStreamWAV, or null.
+func _resolve_wav(filename: String) -> AudioStreamWAV:
+	var key := filename.to_lower()
+	if _wac_wav_cache.has(key):
+		return _wac_wav_cache[key]
+	# Explicit type: _resource_root is untyped, so := cannot infer read_file's return.
+	var bytes: PackedByteArray = _resource_root.read_file(filename)
+	if bytes.is_empty() and not key.ends_with(".wav"):
+		bytes = _resource_root.read_file(filename + ".wav")
+	var stream: AudioStreamWAV = null
+	if not bytes.is_empty():
+		stream = NovaWavLoader.from_bytes(bytes)
+	_wac_wav_cache[key] = stream
+	return stream
 
 
 ## Pause ambient voices outside the cull radius around the listener; resume inside.
@@ -218,6 +300,12 @@ func tick(camera_pos: Vector3) -> void:
 
 
 func teardown() -> void:
+	# Dropping _audio_root frees the dialog + wac voice nodes too; just drop our refs
+	# so a late `finished` after teardown can't pump a freed queue.
+	_dialog_queue.clear()
+	_dialog_voice = null
+	_wac_voice = null
+	_wac_wav_cache.clear()
 	if _audio_root != null and is_instance_valid(_audio_root):
 		_audio_root.queue_free()
 	_audio_root = null
