@@ -305,6 +305,22 @@ public:
     uint32_t local_player_blink_flags = 0;
     EntityHandle local_player;
 
+    // Read-only capture of the local player's last FULL resolve (skip-throttled
+    // ticks keep the previous capture): the capsule test points/radii the
+    // resolver actually queried, the anim-frame capsule extents, and the
+    // returned foot clearance. Debug-view seam only — never consumed by the
+    // resolver itself. All values 16.16 mission space.
+    struct LocalResolveDebug {
+        bool valid = false;
+        int32_t pos[3] = {};        // resolved position (post push-out)
+        int32_t points[3][3] = {};  // the 3 capsule test points (pre pass-shift)
+        int32_t radii[3] = {};
+        int32_t capsule_bottom = 0; // anim-frame extents (resolve_entity inputs)
+        int32_t capsule_top = 0;
+        int32_t foot_clearance = 0; // resolve_entity's return (feet Z - ground Z)
+    };
+    LocalResolveDebug local_resolve_debug;
+
     // Host-wired terrain (shared with the AI system's field).
     const terrain::TerrainHeightField *terrain = nullptr;
 
@@ -312,6 +328,28 @@ public:
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
+
+    // Read-only world-space geometry snapshot for a host collision debug view.
+    // Each instance's volumes are transformed through the SAME target_view /
+    // collision_matrix_from_heading path every query uses, so what the host
+    // draws is exactly what the resolver tests. Corner order: index bit 0 = max
+    // x, bit 1 = max y, bit 2 = max z (mission space, 16.16). `range` > 0 keeps
+    // only instances whose entity position is within it (per-axis box) of
+    // `anchor`; `max_instances` caps the sweep either way.
+    struct DebugVolume {
+        int32_t type = 0;
+        uint32_t flags = 0;
+        int32_t min[3] = {}, max[3] = {}; // section-local AABB
+        int32_t corners[8][3] = {};       // world-space transformed corners
+    };
+    struct DebugInstance {
+        EntityHandle handle;
+        int32_t pos[3] = {};
+        int32_t heading_bam = 0; // the exact heading the world matrix was built from
+        std::vector<DebugVolume> volumes;
+    };
+    std::vector<DebugInstance> debug_instances(World &world, const int32_t anchor[3],
+                                               int32_t range, int32_t max_instances) const;
 
 private:
     // Contact-flag side effects shared by both resolver passes (damage tiers +

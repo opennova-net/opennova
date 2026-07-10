@@ -576,6 +576,20 @@ public:
 	int resolve_collision_instances(const Ref<class NovaItemDatabase> &p_item_db,
 	                                Object *p_placer);
 
+	// Read-only collision-world geometry for the F3 "Show collision" debug view:
+	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw deg),
+	//   volumes: [ { type, min_x..max_z (section-local units), corners:
+	//   PackedVector3Array[8] (Godot world space, index bit0=max x / bit1=max y /
+	//   bit2=max z in mission axes) } ] } ],
+	//   player: { valid, position, points (PackedVector3Array[3]), radii
+	//   (PackedFloat32Array[3]), capsule_bottom, capsule_top, foot_clearance } }.
+	// Volumes are transformed through the SAME fixed-point path the resolver
+	// queries use (CollisionWorld::debug_instances -> target_view ->
+	// collision_matrix_from_heading), so the drawn boxes ARE what movement
+	// resolves against. Output is capped: instances within 150u of the local
+	// player (or the first 128 instances when no player is spawned).
+	Dictionary get_collision_debug() const;
+
 	// Local-player blink state [orig: g_LocalPlayerBlinkFlags @0x24C1934; entity Flags
 	// 0x800000]. The render/audio hosts gate interior behavior on these.
 	bool local_player_indoors() const;

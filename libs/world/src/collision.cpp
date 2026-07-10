@@ -1001,6 +1001,20 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     radii[2] = outer_radius;
     const int32_t num_points = 3;
 
+    // Debug capture (local player, full resolves only): the untouched test
+    // points — the pass-2 relaxation shifts `points` in place below.
+    if (is_local) {
+        local_resolve_debug.valid = true;
+        for (int32_t i = 0; i < 3; ++i) {
+            local_resolve_debug.points[i][0] = points[i].x;
+            local_resolve_debug.points[i][1] = points[i].y;
+            local_resolve_debug.points[i][2] = points[i].z;
+            local_resolve_debug.radii[i] = radii[i];
+        }
+        local_resolve_debug.capsule_bottom = capsule_bottom;
+        local_resolve_debug.capsule_top = capsule_top;
+    }
+
     ContactQuery q;
     q.points = points;
     q.radii = radii;
@@ -1163,7 +1177,66 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     state.prev_pos[0] = pos[0];
     state.prev_pos[1] = pos[1];
     state.prev_pos[2] = pos[2];
+    if (is_local) {
+        local_resolve_debug.pos[0] = pos[0];
+        local_resolve_debug.pos[1] = pos[1];
+        local_resolve_debug.pos[2] = pos[2];
+        local_resolve_debug.foot_clearance = feet_z - ground;
+    }
     return feet_z - ground;
+}
+
+std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
+    World &world, const int32_t anchor[3], int32_t range, int32_t max_instances) const {
+    std::vector<DebugInstance> out;
+    for (const auto &kv : instances_) {
+        if (max_instances > 0 && static_cast<int32_t>(out.size()) >= max_instances) break;
+        EntityHandle h;
+        h.packed = kv.first;
+        CollisionTargetView view;
+        std::vector<CollisionMatrix> mats;
+        // The SAME per-instance view every query goes through: entity pose ->
+        // collision_matrix_from_heading (quantized dir table) per section.
+        const CollisionTargetView *tv = target_view(world, h, view, mats);
+        if (tv == nullptr) continue;
+        if (range > 0 && anchor != nullptr &&
+            (abs32(tv->pos[0] - anchor[0]) > range || abs32(tv->pos[1] - anchor[1]) > range ||
+             abs32(tv->pos[2] - anchor[2]) > range))
+            continue;
+
+        DebugInstance inst;
+        inst.handle = h;
+        inst.pos[0] = tv->pos[0];
+        inst.pos[1] = tv->pos[1];
+        inst.pos[2] = tv->pos[2];
+        if (const Entity *e = world.registry.get(h))
+            inst.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
+
+        const CollisionModel &m = *tv->model;
+        for (size_t si = 0; si < m.sections.size(); ++si) {
+            const CollisionSection &sec = m.sections[si];
+            const CollisionMatrix &mat = tv->matrices[si];
+            if (sec.volume_count == 0 || mat.disabled()) continue; // mirrors the query skip
+            for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
+                const CollisionVolume &vol = m.volumes[sec.volume_start + vi];
+                DebugVolume dv;
+                dv.type = vol.type;
+                dv.flags = vol.flags;
+                dv.min[0] = vol.min_x; dv.max[0] = vol.max_x;
+                dv.min[1] = vol.min_y; dv.max[1] = vol.max_y;
+                dv.min[2] = vol.min_z; dv.max[2] = vol.max_z;
+                for (int c = 0; c < 8; ++c) {
+                    const int32_t local[3] = {(c & 1) ? vol.max_x : vol.min_x,
+                                              (c & 2) ? vol.max_y : vol.min_y,
+                                              (c & 4) ? vol.max_z : vol.min_z};
+                    mat.transform_point(local, dv.corners[c]);
+                }
+                inst.volumes.push_back(dv);
+            }
+        }
+        if (!inst.volumes.empty()) out.push_back(std::move(inst));
+    }
+    return out;
 }
 
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside
