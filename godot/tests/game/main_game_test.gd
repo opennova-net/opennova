@@ -39,3 +39,18 @@ func test_cannot_summon_while_picker_open() -> void:
 	game._picker = picker
 	assert_false(game._can_summon_dir_picker(), "no second picker while one is already open")
 	picker.queue_free()
+
+
+func test_mission_text_effect_reaches_hud_objective() -> void:
+	# Drained effects carry {kind, a..d, str} (NovaSimulation::drain_effects); the
+	# WAC text/consol family lands as kind=="text" with the string in "str". The
+	# old handler read nonexistent "text"/"message" keys, so mission text never
+	# reached the HUD.
+	var game := _make()
+	game._on_mission_effects([
+		{"kind": "dialog", "a": 3},
+		{"kind": "text", "str": "Proceed to the beach"},
+		{"kind": "text", "str": ""},
+	])
+	assert_eq(game._hud_objective, "Proceed to the beach",
+		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
