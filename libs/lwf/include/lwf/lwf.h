@@ -98,14 +98,18 @@ enum PlaylistFlags : uint32_t {
 };
 
 struct Playlist {
-  // Inner/full-volume radius: inside it the proximity term (pan/volume curve)
-  // applies [orig: SoundBank_PlayTriggerEntries @ 0x75cf5c]. The authoring
-  // tools called this column "Falloff".
-  uint16_t inner_distance = 0;
-  // Outer audible distance: the distance fade runs out to this radius
-  // [orig: SoundBank_PlayTriggerEntries @ 0x75cf1a..0x75cf55]. The authoring
-  // tools called this column "Min distance".
-  uint16_t max_distance = 0;
+  // Audible falloff radius (tool column "Falloff"): volume runs
+  // vol * (1 - d/r)^2 and hits ZERO at this radius; it is also the ambient
+  // emitter's cull range [orig: SoundBank_CalcDistanceVolPan @ 0x75ca20
+  // (d >= r returns 0); SoundBank_PlayTriggerEntries @ 0x75cf5c;
+  // SoundEmitter_UpdateAndMixTop8 @ 0x52856a caches it <<16 as the slot range].
+  uint16_t falloff_radius = 0;
+  // Proximity fade radius (tool column "Min distance"): inside it volume
+  // RISES as (d/r)^2 - the sound fades out as the listener closes on the
+  // emitter - and the falloff above is rebased to run from this radius out
+  // [orig: SoundBank_PlayTriggerEntries @ 0x75cf1a..0x75cf55;
+  // SoundEmitter_UpdateAndMixTop8 @ 0x528667..0x5286b9]. 0 = no proximity fade.
+  uint16_t min_distance = 0;
   uint32_t flags = 0;                       // PlaylistFlags bitmask
   std::vector<uint32_t> sndparm_indices;    // indices into sndparm table
   // Raw bytes for byte-perfect round-trip. On disk this dword is scratch; the

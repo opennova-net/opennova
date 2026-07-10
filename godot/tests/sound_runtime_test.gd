@@ -81,6 +81,90 @@ func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
 	assert_eq(s.loop_end, 16, "loop region spans the full decoded stream")
 
 
+# --- The witnessed distance-volume curve [orig: SoundBank_CalcDistanceVolPan
+# @ 0x75ca20]: vol * (255/256) * (1 - d/r)^2, integer-exact, hard 0 at d >= r,
+# ceilinged by clamp_volume. Expectations are hand-computed from the formula.
+
+func test_calc_distance_volume_curve() -> void:
+	var S := NovaSoundBankScript
+	# d = 0: inv = 0xFFFF -> ((255*255)>>8) * 0xFFFF^2 >> 32 = 253.
+	assert_eq(S.calc_distance_volume(0, 200 << 16, 255, 255), 253, "full volume at the emitter")
+	# d = r/2: inv = 0x7FFF -> quadratic quarter -> 63.
+	assert_eq(S.calc_distance_volume(100 << 16, 200 << 16, 255, 255), 63, "half distance = quarter volume")
+	# At and beyond the radius: hard silent [orig: 0x75ca31].
+	assert_eq(S.calc_distance_volume(200 << 16, 200 << 16, 255, 255), 0)
+	assert_eq(S.calc_distance_volume(300 << 16, 200 << 16, 255, 255), 0)
+	# clamp_volume ceilings the result [orig: 0x75ca65].
+	assert_eq(S.calc_distance_volume(0, 200 << 16, 255, 100), 100, "clamp_volume ceiling")
+	# Lower member volume scales in before the curve.
+	assert_eq(S.calc_distance_volume(0, 200 << 16, 128, 255), 126)
+	# A zero radius is silent, not a division.
+	assert_eq(S.calc_distance_volume(0, 0, 255, 255), 0)
+
+
+func test_emitter_layer_volume_two_radius_model() -> void:
+	var S := NovaSoundBankScript
+	# Bare falloff radius [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5286df]:
+	# vol_in = (255*255)>>8 = 254 -> d=0 gives 252, half gives 63.
+	assert_eq(S.emitter_layer_volume(0, 200, 0, 255, 255, 255), 252)
+	assert_eq(S.emitter_layer_volume(100, 200, 0, 255, 255, 255), 63)
+	assert_eq(S.emitter_layer_volume(200, 200, 0, 255, 255, 255), 0)
+	# min_distance rebases the falloff to run min..falloff [orig: @ 0x5286b9]:
+	# at d = min the curve is at its peak, half-way through gives the quarter.
+	assert_eq(S.emitter_layer_volume(50, 200, 50, 255, 255, 255), 252)
+	assert_eq(S.emitter_layer_volume(125, 200, 50, 255, 255, 255), 63)
+	# Inside min_distance volume RISES as (d/min)^2 — the proximity fade
+	# [orig: @ 0x528691]: at half min it is a quarter.
+	assert_eq(S.emitter_layer_volume(25, 200, 50, 255, 255, 255), 63)
+	# The blend byte (time-of-day crossfade) scales member volume and clamp.
+	assert_eq(S.emitter_layer_volume(0, 200, 0, 128, 255, 255), 125)
+	# Both radii zero: silent as a looping emitter [orig: @ 0x528704].
+	assert_eq(S.emitter_layer_volume(0, 0, 0, 255, 255, 255), 0)
+
+
+func test_oneshot_distance_volume_is_not_rebased() -> void:
+	var bank = NovaSoundBankScript.new(null)
+	var layer := {"falloff_radius": 200, "min_distance": 0}
+	var member := {"volume": 255, "clamp_volume": 255}
+	# One-shots run the plain falloff over 0..r [orig: SoundBank_PlayTriggerEntries
+	# @ 0x75cf75]: half distance = quarter volume of the 254-scaled input.
+	assert_eq(bank.oneshot_distance_volume(100 << 16, layer, member), 63)
+	assert_eq(bank.oneshot_distance_volume(0, layer, member), 253)
+	assert_eq(bank.oneshot_distance_volume(200 << 16, layer, member), 0)
+	# No distance fields: distance-flat at member volume.
+	assert_eq(bank.oneshot_distance_volume(500 << 16, {}, member), 255)
+
+
+func test_time_of_day_regions_and_blend() -> void:
+	var A := preload("res://engine/world/nova_mission_audio.gd")
+	# Region cuts [orig: Entity_CalcTimeOfDayRegion @ 0x408110]:
+	# [4,10) morning, [10,17) day, [17,21) evening, else night.
+	assert_eq(int(A.time_of_day_region(6.0).region), 0)
+	assert_eq(int(A.time_of_day_region(12.0).region), 1)
+	assert_eq(int(A.time_of_day_region(18.0).region), 2)
+	assert_eq(int(A.time_of_day_region(23.0).region), 3)
+	assert_eq(int(A.time_of_day_region(0.5).region), 3, "night wraps past midnight")
+	assert_eq(int(A.time_of_day_region(3.99).region), 3)
+	# Mid-region: full blend.
+	assert_eq(float(A.time_of_day_region(12.0).blend), 1.0)
+	# Just after a cut: fading in, adjacent = the previous region.
+	var fade_in: Dictionary = A.time_of_day_region(10.02)
+	assert_eq(int(fade_in.region), 1)
+	assert_eq(int(fade_in.adjacent), 0)
+	assert_between(float(fade_in.blend), 0.1, 0.5)
+	# Just before a cut: fading out, adjacent = the next region.
+	var fade_out: Dictionary = A.time_of_day_region(9.98)
+	assert_eq(int(fade_out.region), 0)
+	assert_eq(int(fade_out.adjacent), 1)
+	assert_between(float(fade_out.blend), 0.1, 0.5)
+	# Night holds full volume up to the 4h cut (the wrapped region's far edge
+	# never blends [orig: @ 0x40820f]).
+	assert_eq(float(A.time_of_day_region(3.98).blend), 1.0)
+	# The exact cut instant reads full volume — the original's zero-blend-distance
+	# guard [orig: @ 0x408251].
+	assert_eq(float(A.time_of_day_region(10.0).blend), 1.0)
+
+
 func test_wav_loader_decodes_pcm8_unsigned() -> void:
 	# Minimal 8-bit unsigned mono 22050 Hz PCM WAV with 4 samples.
 	var samples := PackedByteArray([0x80, 0x00, 0xFF, 0x80])  # center, min, max, center

@@ -647,6 +647,10 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 				_nw_host.set_player_count(1 + sim.get_host_peer_count())
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
+		# The env clock drives the marker soundloop time-of-day slots
+		# [orig: Entity_CalcTimeOfDayRegion @ 0x408110 reads the env time].
+		if _env != null and _env.get("time_of_day") != null:
+			_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
 		_mission_audio.tick(camera_pos)
 		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start

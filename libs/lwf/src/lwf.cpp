@@ -51,8 +51,8 @@ struct DiskMulti {
 // [orig: SoundBank_LoadTriggerSets @ 0x75c548 reads this 48-byte record (0x30)]
 struct DiskPlaylist {
   uint32_t member_count;
-  uint16_t inner_distance;
-  uint16_t max_distance;
+  uint16_t falloff_radius;   // tool "Falloff": audible falloff radius
+  uint16_t min_distance;     // tool "Min distance": proximity fade radius
   uint32_t flags;
   uint32_t reserved0;
   uint32_t member_offsets[8];  // offsets to sndparms
@@ -323,8 +323,8 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     }
 
     Playlist p{};
-    p.inner_distance = dp.inner_distance;
-    p.max_distance = dp.max_distance;
+    p.falloff_radius = dp.falloff_radius;
+    p.min_distance = dp.min_distance;
     p.flags = dp.flags;
     // Store raw bytes for byte-perfect round-trip.
     p.reserved0 = dp.reserved0;
@@ -448,9 +448,9 @@ bool lwf_to_sdf(const File &file,
         out_sdf.append("\t").append(m.name).push_back('_');
         out_sdf.push_back(layer_letter);
         // Layer Falloff / Min distance (the original tool's column names for
-        // inner_distance / max_distance; keep them so SDF output matches lwf2sdf).
-        out_sdf.append("\t").append(std::to_string(pl.inner_distance));
-        out_sdf.append("\t").append(std::to_string(pl.max_distance));
+        // falloff_radius / min_distance; keep them so SDF output matches lwf2sdf).
+        out_sdf.append("\t").append(std::to_string(pl.falloff_radius));
+        out_sdf.append("\t").append(std::to_string(pl.min_distance));
 
         // Choice method
         std::string choice = "Unknown";
@@ -620,8 +620,8 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   for (const auto &pl : file.playlists) {
     DiskPlaylist dp{};
     dp.member_count = static_cast<uint32_t>(pl.sndparm_indices.size());
-    dp.inner_distance = pl.inner_distance;
-    dp.max_distance = pl.max_distance;
+    dp.falloff_radius = pl.falloff_radius;
+    dp.min_distance = pl.min_distance;
     dp.flags = pl.flags;
     dp.reserved0 = pl.reserved0;
     // Start with raw member_offsets (preserves garbage in unused slots).

@@ -586,11 +586,11 @@ bool NovaMnuMenu::play_lwf_set(const Ref<NovaLwfData> &p_bank, int p_bank_id, co
 			const Dictionary member = members[idx];
 			// Channel volume [orig: @ 0x75cf25..0x75cf6e]: a layer with no
 			// distances (every shipped menu layer) plays at the menu's master
-			// volume and the member volume is not consulted; a layer with an
-			// inner radius scales member volume by (master+1)/256 toward its
-			// clamp (distance-curve global @ 0x85A3E4 approximated at the UI
+			// volume and the member volume is not consulted; a layer with a
+			// falloff radius scales member volume by (master+1)/256 toward its
+			// clamp (distance curve @ 0x75ca20 approximated at the UI
 			// emitter's distance 0).
-			const int inner = (int)layer_d.get("inner_distance", 0);
+			const int inner = (int)layer_d.get("falloff_radius", 0);
 			int vol255 = master_volume_;
 			if (inner > 0) {
 				int att = ((int)member.get("volume", 255) * (master_volume_ + 1)) >> 8;

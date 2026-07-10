@@ -41,8 +41,8 @@ func test_jo_00tra_sound_marker_resolution() -> void:
 	# markers. 00TRa resolves ~210 of its 390 markers (the rest are waypoints /
 	# spawns / time-of-day one-shot markers, which use nightshot/dawnshot/duskshot).
 	assert_gt(int(stats.get("markers_resolved", 0)), 0, "sound markers resolve to real sound sets")
-	assert_eq(int(stats.get("voices", 0)), int(stats.get("markers_resolved", 0)),
-		"each resolved marker spawned a decoded voice")
+	assert_gte(int(stats.get("voices", 0)), int(stats.get("markers_resolved", 0)),
+		"each resolved marker spawned at least one decoded voice (time-of-day slot variants may add more)")
 	assert_between(int(stats.get("markers_resolved", 0)), 0, int(stats.get("markers_total", 0)),
 		"resolved markers are a subset of total markers")
 	audio.teardown()
