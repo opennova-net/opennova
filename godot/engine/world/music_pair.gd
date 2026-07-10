@@ -8,5 +8,5 @@ extends RefCounted
 ## "unresolved"; the context open then bails to silence, matching the
 ## witnessed .sbf CreateFileA gate [orig: AudioVM_OpenContextFile @ 0x672160].
 
-var bank := ""    # loose .sbf path ("" = unresolved)
-var script := ""  # VFS .bin basename ("" = unresolved)
+var bank := ""         # loose .sbf path ("" = unresolved)
+var script_name := ""  # VFS .bin basename ("" = unresolved; "script" is Object's own property)
