@@ -42,6 +42,10 @@ var _net_killfeed   # net spectator kill feed, built while in a net session
 var _game_hud       # GameHud, built on the first frame a mission has a local player
 var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
 var _hud_weapon_name := ""  # the HUD's equipped-weapon cache (re-resolves WepDes on change)
+# The latest mission-effect text line (ADR 0018 read seam via hud_objective_line();
+# display rides the HUD message feed — update_info's "objective" stays the MP
+# objective-status anchor).
+var _hud_objective := ""
 var _player_host: LocalPlayerHost = null
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
@@ -318,6 +322,8 @@ func apply_mission_effects(effects: Array) -> void:
 			var t := String(e.get("str", ""))
 			if not t.is_empty():
 				_hud_objective = t
+				if _game_hud != null:
+					_game_hud.push_message(t)
 			elif int(e.get("a", 0)) != 0:
 				_show_triggered_text(int(e.get("a", 0)))
 
@@ -335,6 +341,7 @@ func _show_triggered_text(text_id: int) -> void:
 	if text.is_empty():
 		push_warning("GameHud: mission text %s not found in the mission string table." % key)
 		return
+	_hud_objective = text
 	_game_hud.push_message(text)
 
 
@@ -734,6 +741,7 @@ func _on_return_to_menu() -> void:
 		_game_hud.queue_free()
 		_game_hud = null
 		_hud_weapon_name = ""
+		_hud_objective = ""
 		NovaStrings.register_table("mission", null)
 	_warned_hud_no_player = false
 	if _root != null:
