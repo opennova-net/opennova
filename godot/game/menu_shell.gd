@@ -573,7 +573,7 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 # M<n>/G<n> forms, complete-pair-or-base fallback) lives on NovaMusicService;
 # this seam keeps it queryable against the shell's root (ADR 0018 — tests and
 # diagnostics read it here, not the privates).
-func resolve_music_pair(prefix: String, base_stem: String) -> Dictionary:
+func resolve_music_pair(prefix: String, base_stem: String) -> MusicPair:
 	return NovaMusicService.resolve_music_pair(_root, prefix, base_stem)
 
 
