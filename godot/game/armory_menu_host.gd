@@ -48,6 +48,12 @@ func set_player_team(team: int) -> void:
 	_team = team
 
 
+# Inject a pre-loaded weapon.def database (ADR 0018 seam: tests and hosts that
+# already carry the db hand it in; on_menu_built otherwise loads it from the root).
+func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
+	_weapons = weapons
+
+
 func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourceRoot) -> void:
 	_menu = menu
 	_root = root
@@ -151,7 +157,9 @@ func _weapon_label(w: Dictionary) -> String:
 	return String(w.get("name", ""))
 
 
-func _selected_weapon(control: String) -> Dictionary:
+# The slot's selected weapon dict (the NovaWeaponDatabase transport dict; {} = NONE).
+# Public read seam (ADR 0018): tests and diagnostics read the selection here.
+func selected_weapon(control: String) -> Dictionary:
 	var combo := _combo(control)
 	if combo == null:
 		return {}
@@ -177,7 +185,7 @@ func _populate_ammo(control: String) -> void:
 	var combo := _combo(control + "_AMMO1")
 	if combo == null:
 		return
-	var w := _selected_weapon(control)
+	var w := selected_weapon(control)
 	var rows := PackedStringArray()
 	var maxclips := int(w.get("maxclips", 0))
 	for i in range(0, maxclips + 1):
@@ -189,7 +197,9 @@ func _populate_ammo(control: String) -> void:
 	_update_weight()
 
 
-func _selected_clips(control: String) -> int:
+# The slot's selected clip count. Public read seam (ADR 0018), paired with
+# selected_weapon.
+func selected_clips(control: String) -> int:
 	var combo := _combo(control + "_AMMO1")
 	if combo == null or combo.get_selected() < 0:
 		return -1  # -1 = the weapon's default clips [orig: -1 -> adm[23] @0x565cd0]
@@ -204,10 +214,10 @@ func _selected_clips(control: String) -> int:
 func _update_weight() -> void:
 	var total := 0.0
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		var w := _selected_weapon(slot_name)
+		var w := selected_weapon(slot_name)
 		if w.is_empty():
 			continue
-		var clips := _selected_clips(slot_name)
+		var clips := selected_clips(slot_name)
 		if clips < 0:
 			clips = int(w.get("maxclips", 0))
 		total += float(w.get("weight", 0.0)) + clips * float(w.get("clip_weight", 0.0))
@@ -226,12 +236,12 @@ func _on_accept() -> void:
 	var loadout := {
 		"player_class": _selected_class(),
 		"team": _team,
-		"primary": String(_selected_weapon("PRIMARY").get("name", "")),
-		"primary_clips": _selected_clips("PRIMARY"),
-		"secondary": String(_selected_weapon("SECONDARY").get("name", "")),
-		"secondary_clips": _selected_clips("SECONDARY"),
-		"accessory": String(_selected_weapon("ACCESSORY").get("name", "")),
-		"accessory_clips": _selected_clips("ACCESSORY"),
+		"primary": String(selected_weapon("PRIMARY").get("name", "")),
+		"primary_clips": selected_clips("PRIMARY"),
+		"secondary": String(selected_weapon("SECONDARY").get("name", "")),
+		"secondary_clips": selected_clips("SECONDARY"),
+		"accessory": String(selected_weapon("ACCESSORY").get("name", "")),
+		"accessory_clips": selected_clips("ACCESSORY"),
 	}
 	loadout_accepted.emit(loadout)
 
