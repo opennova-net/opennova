@@ -49,6 +49,12 @@ still playing (`_active_play->is_playing()`), reproducing the
 rather than a byte counter (host-idiomatic), and stream one music context at a time as the
 original does.
 
+Related host note (2026-07-09): `NovaSbfAudioStreamPlayback` now extends Godot's
+`AudioStreamPlaybackResampled` and reports the SBF content rate (22050 Hz), so the mixer
+resamples to the device rate — the original achieves the same by submitting 22050 Hz
+buffers to DirectSound, which resamples to the device format. The prior 1:1 frame mapping
+played SBF content at half speed on the default 44100 Hz mix rate.
+
 ## Music state variable selection — the host sets the section discriminator (grilled 2026-06-15; re-confirmed 2026-07-09)
 
 The MUS scripts are var-driven state machines: a "discriminator" global selects which
