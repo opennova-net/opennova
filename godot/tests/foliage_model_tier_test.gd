@@ -3,18 +3,23 @@ extends GutTest
 # The two-tier foliage host (docs/foliage/foliage-re.md §The model tier;
 # D-FOLIAGE-4): anchor depth gating, the per-tile cap, the derived
 # transform-vs-libs-corner parity pin (model tier), the far-tier
-# ground-patch conformance pin, and cache/stagger observability - all
+# full-source-mesh emission pin, and cache/stagger observability - all
 # through the dispatcher's public seams (ADR 0018).
 
 const NEAR_DEPTH_ANCHOR := Vector3(24.0, 0.0, -20.0)  # view depth 20 < 38
 const FAR_DEPTH_ANCHOR := Vector3(24.0, 0.0, -100.0)  # view depth 100 >= 38
 
 var _dispatcher: NovaFoliageDispatcher
+var _split_surface_mask := 0
+var _split_foliage_index := 0
+var _split_surface_samples: Array[Vector2] = []
+var _owned_dispatchers: Array[NovaFoliageDispatcher] = []
 
 
 func before_each() -> void:
+	_owned_dispatchers.clear()
 	_dispatcher = NovaFoliageDispatcher.new()
-	add_child_autofree(_dispatcher)
+	_own_dispatcher(_dispatcher)
 
 	var def := NovaTerrainFoliageDef.new()
 	def.graphic = "test_model"
@@ -31,6 +36,21 @@ func before_each() -> void:
 	_dispatcher.slot_meshes = [mesh]
 	_dispatcher.height_sampler = Callable(self, "_sample_height")
 	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
+	_dispatcher.surface_sampler = Callable(self, "_sample_surface_mask")
+
+
+func after_each() -> void:
+	# Dispatcher reset intentionally detaches renderer nodes synchronously and
+	# queues their destruction. Flush that queue before GUT checks for orphans.
+	for dispatcher in _owned_dispatchers:
+		if is_instance_valid(dispatcher):
+			dispatcher.reset()
+	await get_tree().process_frame
+
+
+func _own_dispatcher(dispatcher: NovaFoliageDispatcher) -> void:
+	add_child_autofree(dispatcher)
+	_owned_dispatchers.append(dispatcher)
 
 
 # A sloped, non-planar height field so corner heights and folds carry signal.
@@ -42,9 +62,49 @@ func _sample_foliage_index(_world_x: float, _world_z: float) -> int:
 	return 1  # everywhere painted with the def's match index
 
 
+func _sample_surface_mask(_world_x: float, _native_z: float) -> int:
+	return 1  # raw slot-0 bit, independent from the foliage-map palette index
+
+
+func _sample_split_surface_mask(world_x: float, native_z: float) -> int:
+	_split_surface_samples.append(Vector2(world_x, native_z))
+	return _split_surface_mask
+
+
+func _sample_split_foliage_index(_world_x: float, _world_z: float) -> int:
+	return _split_foliage_index
+
+
+func _make_engine_centers_dispatcher() -> NovaFoliageDispatcher:
+	var dispatcher := NovaFoliageDispatcher.new()
+	_own_dispatcher(dispatcher)
+	var def := NovaTerrainFoliageDef.new()
+	def.graphic = "test_engine_centers"
+	def.match = 1
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2.0, 6.0, 2.0)
+	dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_ENGINE_CENTERS
+	dispatcher.engine_view_radius_fixed = 4 * 65536
+	dispatcher.foliage_defs = [def]
+	dispatcher.slot_meshes = [mesh]
+	dispatcher.height_sampler = Callable(self, "_sample_height")
+	dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
+	dispatcher.surface_sampler = Callable(self, "_sample_surface_mask")
+	return dispatcher
+
+
+func _far_placement_keys(dispatcher: NovaFoliageDispatcher) -> Array[String]:
+	var keys: Array[String] = []
+	for placement: Dictionary in dispatcher.get_far_tile_debug(0):
+		var center: Vector3 = placement.center
+		keys.append("%.6f,%.6f,%.9f" % [center.x, center.z, float(placement.yaw)])
+	keys.sort()
+	return keys
+
+
 # Camera looking down -Z (Godot forward); anchors sit on -Z so the engine
 # view depth is -view_local.z = -anchor.z. Slightly raised because the exact
-# IDENTITY transform means "no camera supplied" to the dispatcher (the quad
+# IDENTITY transform means "no camera supplied" to the dispatcher (the FAR
 # path's convention) and would bypass the depth gate.
 func _camera_xform() -> Transform3D:
 	return Transform3D(Basis(), Vector3(0.0, 1.5, 0.0))
@@ -75,11 +135,17 @@ func test_deep_anchor_stamps_bounded_instances() -> void:
 	assert_true(int(stats.model_instances) <= 21 * int(stats.model_tiles_emitted),
 		"No tile may exceed the witnessed 21-instance cap.")
 
-	var mmi := _dispatcher.find_child("FoliageModelSlot0", false, false) as MultiMeshInstance3D
-	assert_not_null(mmi, "The model tier renders through its own MultiMesh child.")
-	if mmi != null:
-		assert_eq(mmi.multimesh.instance_count, int(stats.model_instances),
-			"MultiMesh instance count matches the stats.")
+	var model_nodes: Array = []
+	for child in _dispatcher.get_children():
+		if child is MultiMeshInstance3D and String(child.name).begins_with("FoliageModelSlot0"):
+			model_nodes.push_back(child)
+	assert_eq(model_nodes.size(), int(stats.model_tiles_emitted),
+		"The model tier renders one MultiMesh batch per tile draw.")
+	var rendered_instances := 0
+	for node in model_nodes:
+		rendered_instances += (node as MultiMeshInstance3D).multimesh.instance_count
+	assert_eq(rendered_instances, int(stats.model_instances),
+		"Per-tile MultiMesh instance counts sum to the model stats.")
 	assert_eq(_dispatcher.get_model_tile_debug(0).size(), int(stats.model_instances),
 		"The debug view lists every stamped instance.")
 
@@ -93,11 +159,11 @@ func test_transform_lands_on_libs_corner_positions() -> void:
 
 	# Mesh-corner -> engine-corner mapping derived with the transform
 	# (nova_foliage_dispatcher.cpp _model_instance_transform): the 3DI->Godot
-	# X negation makes mesh corner (sx, sz) land on engine corner
-	# (A, B) = (-F*sx, +F*sz):
-	#   (-1,-1) -> c1, (+1,-1) -> c0, (-1,+1) -> c3, (+1,+1) -> c2
+	# source-model orientation rotY(yaw + PI/2) makes mesh corner (sx, sz)
+	# land on engine fit axes (A, B) = (F*sz, F*sx):
+	#   (-1,-1) -> c0, (+1,-1) -> c2, (-1,+1) -> c1, (+1,+1) -> c3
 	var mesh_corners := [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]
-	var engine_corner_for := [1, 0, 3, 2]
+	var engine_corner_for := [0, 2, 1, 3]
 
 	for inst_value in debug:
 		var inst: Dictionary = inst_value
@@ -123,12 +189,12 @@ func test_transform_lands_on_libs_corner_positions() -> void:
 			assert_almost_eq(world_pt.y, hbase, 0.002,
 				"The transform maps model y=0 onto hbase; the shader adds the delta.")
 
-		# COLOR carries the corner height deltas in the shader corner order
-		# (h1, h0, h3, h2) - together with the transform the corner heights close.
-		assert_almost_eq(color.r, corners[1].y - hbase, 0.002, "COLOR.r = h1 - hbase")
-		assert_almost_eq(color.g, corners[0].y - hbase, 0.002, "COLOR.g = h0 - hbase")
-		assert_almost_eq(color.b, corners[3].y - hbase, 0.002, "COLOR.b = h3 - hbase")
-		assert_almost_eq(color.a, corners[2].y - hbase, 0.002, "COLOR.a = h2 - hbase")
+		# COLOR carries the corner height deltas in source-mesh corner order
+		# (h0, h2, h1, h3) - together with the transform the corner heights close.
+		assert_almost_eq(color.r, corners[0].y - hbase, 0.002, "COLOR.r = h0 - hbase")
+		assert_almost_eq(color.g, corners[2].y - hbase, 0.002, "COLOR.g = h2 - hbase")
+		assert_almost_eq(color.b, corners[1].y - hbase, 0.002, "COLOR.b = h1 - hbase")
+		assert_almost_eq(color.a, corners[3].y - hbase, 0.002, "COLOR.a = h3 - hbase")
 
 		# hbase = corner average + sag(0,0) = E_A + E_B (CUSTOM x/z carry E_A, E_B).
 		var corner_avg := (corners[0].y + corners[1].y + corners[2].y + corners[3].y) * 0.25
@@ -170,63 +236,203 @@ func test_no_anchors_clears_model_tier() -> void:
 	assert_gt(_dispatcher.get_model_tile_debug(0).size(), 0, "Anchored dispatch stamps.")
 	_dispatcher.set_model_anchors(PackedVector3Array())
 	_dispatcher.dispatch(Vector3.ZERO, _camera_xform())
+	await get_tree().process_frame
 	assert_eq(_dispatcher.get_model_tile_debug(0).size(), 0,
 		"Dropping every anchor clears the stamped model instances.")
 
 
-func test_far_tier_patches_conform_to_ground() -> void:
-	# FAR tier = flat GROUND patches bent onto the quad placement's own
-	# witnessed corner/midpoint fold (patch_control = (E_A, T_A, E_B, T_B))
-	# [orig: Foliage_BuildPatchData @ 0x5C0240] - not billboards. Pin:
-	# transform x mesh corner (+-w, 0, +-w) + the shader-side delta (the
-	# matching COLOR channel; sag = 0 at corners) must land on the sampled
-	# ground height + surface_offset. Same derived axis mapping as the model
-	# tier: mesh corner (-1,-1)->c1, (+1,-1)->c0, (-1,+1)->c3, (+1,+1)->c2.
+func test_far_tier_replicates_full_source_mesh_and_bends_each_vertex() -> void:
+	# [orig: generate_foliage_instances_0 @ 0x5ffdd0] FAR copies every source
+	# vertex for every accepted placement. It is not a synthetic ground patch.
 	_dispatch(FAR_DEPTH_ANCHOR)
 	var mmi := _dispatcher.find_child("FoliageSlot0", false, false) as MultiMeshInstance3D
-	assert_not_null(mmi, "The far tier renders through its own MultiMesh child.")
+	assert_not_null(mmi, "The far tier renders through its own dynamic mesh batch.")
 	if mmi == null:
 		return
 	var mm := mmi.multimesh
-	assert_gt(mm.instance_count, 0, "The far tier stamps patch instances.")
-	assert_true(mm.use_custom_data, "Patch instances carry the fold in CUSTOM_DATA.")
+	assert_eq(mm.instance_count, 1,
+		"The MultiMesh is only a wrapper around one retail-shaped dynamic vertex buffer.")
 
-	# The patch mesh is FLAT at world size (the upright-quad geometry is gone).
-	var mesh_aabb := mm.mesh.get_aabb()
-	var w: float = _dispatcher.quad_half_width
-	assert_almost_eq(mesh_aabb.size.y, 0.0, 1e-5, "The far mesh is an XZ-plane patch.")
-	assert_almost_eq(mesh_aabb.size.x, 2.0 * w, 1e-5, "The patch spans 2 x quad_half_width in X.")
-	assert_almost_eq(mesh_aabb.size.z, 2.0 * w, 1e-5, "The patch spans 2 x quad_half_width in Z.")
-
-	# Instance data via the debug seam (the packed MultiMesh data; the
-	# headless dummy RenderingServer cannot read the GPU buffer back).
 	var debug: Array = _dispatcher.get_far_tile_debug(0)
-	assert_eq(debug.size(), mm.instance_count, "The debug view lists every patch instance.")
+	assert_eq(debug.size(), 36, "A permissive FAR cell accepts all 36 candidates.")
+	if debug.is_empty():
+		return
 
-	var mesh_corners := [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]
-	# The COLOR channel holding each mesh corner's height delta: at UV corner
-	# (0,0) the bilinear picks COLOR.r, (1,0) -> .g, (0,1) -> .b, (1,1) -> .a.
-	var channel_for_corner := [0, 1, 2, 3]
-	var offset: float = _dispatcher.surface_offset
-	var checked := 0
-	for i in range(mini(debug.size(), 12)):
-		var inst: Dictionary = debug[i]
-		var xform: Transform3D = inst.transform
-		var color: Color = inst.color
-		var custom: Color = inst.custom
-		for c in range(4):
-			var sc: Vector2 = mesh_corners[c]
-			var world_pt := xform * Vector3(sc.x * w, 0.0, sc.y * w)
-			# The transform maps the flat mesh onto hbase + surface_offset;
-			# the shader adds the corner's height delta (sag = 0 at corners).
-			var final_y: float = world_pt.y + color[channel_for_corner[c]]
-			var ground: float = _sample_height(world_pt.x, world_pt.z)
-			assert_almost_eq(final_y, ground + offset, 0.02,
-				"Patch corner %d of instance %d lands on the sampled ground" % [c, i])
-		# hbase - corner average == E_A + E_B (CUSTOM r/b), i.e. the packed
-		# fold is consistent with the packed deltas.
-		var avg_delta := (color.r + color.g + color.b + color.a) * 0.25
-		assert_almost_eq(custom.r + custom.b, -avg_delta, 0.002,
-			"The packed fold center E_A + E_B matches the corner deltas (instance %d)" % i)
-		checked += 1
-	assert_gt(checked, 0, "At least one far instance was pinned.")
+	var source_mesh := _dispatcher.slot_meshes[0] as Mesh
+	var source_arrays := source_mesh.surface_get_arrays(0)
+	var source_positions: PackedVector3Array = source_arrays[Mesh.ARRAY_VERTEX]
+	var source_uvs: PackedVector2Array = source_arrays[Mesh.ARRAY_TEX_UV]
+	var source_indices: PackedInt32Array = source_arrays[Mesh.ARRAY_INDEX]
+
+	var emitted_arrays := mm.mesh.surface_get_arrays(0)
+	var emitted_positions: PackedVector3Array = emitted_arrays[Mesh.ARRAY_VERTEX]
+	var emitted_colors: PackedColorArray = emitted_arrays[Mesh.ARRAY_COLOR]
+	var emitted_uvs: PackedVector2Array = emitted_arrays[Mesh.ARRAY_TEX_UV]
+	var emitted_indices: PackedInt32Array = emitted_arrays[Mesh.ARRAY_INDEX]
+	assert_eq(emitted_positions.size(), source_positions.size() * debug.size(),
+		"Every placement receives the complete authored source vertex array.")
+	assert_eq(emitted_colors.size(), emitted_positions.size(),
+		"Every emitted vertex carries the packed red wind weight.")
+	assert_eq(emitted_uvs.size(), emitted_positions.size(), "Source UVs are replicated.")
+	assert_eq(emitted_indices.size(), source_indices.size() * debug.size(),
+		"Source topology is replicated for every placement.")
+
+	for placement_index in range(mini(debug.size(), 3)):
+		var placement: Dictionary = debug[placement_index]
+		var center: Vector3 = placement.center
+		var yaw: float = placement.yaw
+		for source_index in range(source_positions.size()):
+			var source: Vector3 = source_positions[source_index]
+			var emitted_index := placement_index * source_positions.size() + source_index
+			var emitted: Vector3 = emitted_positions[emitted_index]
+			var expected_x := center.x - source.x * sin(yaw) + source.z * cos(yaw)
+			var expected_z := center.z - source.x * cos(yaw) - source.z * sin(yaw)
+			var expected_y := _sample_height(expected_x, expected_z) + source.y * 0.5
+			assert_almost_eq(emitted.x, expected_x, 0.002, "FAR vertex X uses rotY(yaw+PI/2).")
+			assert_almost_eq(emitted.z, expected_z, 0.002, "FAR vertex Z uses rotY(yaw+PI/2).")
+			assert_almost_eq(emitted.y, expected_y, 0.002,
+				"Each source vertex samples terrain independently and keeps Y scale 0.5.")
+			assert_eq(emitted_uvs[emitted_index], source_uvs[source_index],
+				"Source UV is preserved.")
+			var wind_byte := clampi(int(source.y * 128.0), 0, 255)
+			assert_almost_eq(emitted_colors[emitted_index].r,
+				float(wind_byte) / 255.0, 0.00001,
+				"COLOR.r is clamp(trunc(sourceY*128),0,255), not terrain tint.")
+
+	if not source_indices.is_empty() and debug.size() > 1:
+		var vertex_stride := source_positions.size()
+		var index_stride := source_indices.size()
+		for i in range(index_stride):
+			assert_eq(emitted_indices[index_stride + i], source_indices[i] + vertex_stride,
+				"The next full-mesh copy offsets source indices by one vertex stride.")
+
+	var material := mmi.material_override as ShaderMaterial
+	assert_not_null(material, "The FAR batch owns a distinct shader material.")
+	if material != null:
+		assert_true(material.shader.resource_path.ends_with("foliage_far.gdshader"),
+			"FAR no longer shares the MODEL ground-fit shader.")
+		assert_eq(float(material.get_shader_parameter("u_far_alpha_ref")), 180.0,
+			"The slot-wide FAR host explicitly approximates the high alpha-ref-180 pass.")
+
+
+func test_far_surface_mask_and_model_foliage_map_gate_independently() -> void:
+	# Retail FAR consumes the raw charmap byte as a slot mask at the
+	# Terrain_GetSurfaceTypeAtFixedPoint(x, -z) boundary. MODEL separately maps
+	# the foliage-map palette index through def.match.
+	var split := NovaFoliageDispatcher.new()
+	_own_dispatcher(split)
+	var def := NovaTerrainFoliageDef.new()
+	def.graphic = "test_model"
+	def.match = 7
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(2.0, 6.0, 2.0)
+	split.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
+	split.cell_grid_radius = 0
+	split.foliage_defs = [def]
+	split.slot_meshes = [mesh]
+	split.height_sampler = Callable(self, "_sample_height")
+	split.surface_sampler = Callable(self, "_sample_split_surface_mask")
+	split.foliage_sampler = Callable(self, "_sample_split_foliage_index")
+	split.model_anchors = PackedVector3Array([FAR_DEPTH_ANCHOR])
+
+	_split_surface_mask = 0
+	_split_foliage_index = 7
+	_split_surface_samples.clear()
+	split.dispatch(Vector3.ZERO, _camera_xform())
+	assert_eq(split.get_far_tile_debug(0).size(), 0,
+		"A zero raw surface mask rejects FAR even when MODEL's foliage map matches.")
+	assert_gt(split.get_model_tile_debug(0).size(), 0,
+		"MODEL still accepts through its independent foliage-map match.")
+
+	_split_surface_mask = 1 << 0
+	_split_foliage_index = 0
+	_split_surface_samples.clear()
+	split.reset()
+	split.dispatch(Vector3.ZERO, _camera_xform())
+	var far_debug: Array = split.get_far_tile_debug(0)
+	assert_eq(far_debug.size(), 36,
+		"The raw slot bit accepts FAR without any def.match translation.")
+	assert_eq(split.get_model_tile_debug(0).size(), 0,
+		"A zero foliage-map index rejects MODEL even when FAR's surface mask matches.")
+	assert_gt(_split_surface_samples.size(), 0, "FAR queried the dedicated surface seam.")
+	if not far_debug.is_empty() and not _split_surface_samples.is_empty():
+		var first_sample := _split_surface_samples[0]
+		var sampled_center := Vector3(first_sample.x, 0.0, -first_sample.y)
+		var found_sampled_center := false
+		for placement: Dictionary in far_debug:
+			if sampled_center.distance_to(placement.center) < 0.0001:
+				found_sampled_center = true
+				break
+		assert_true(found_sampled_center,
+			"The surface seam receives (world X, -world Z) for an emitted placement.")
+
+
+func test_engine_centers_compose_independent_center_caches() -> void:
+	# Two nearby centers address the same four cell keys but have different
+	# radius-gated candidate sets. Each visible center therefore needs its own
+	# retail Dispatcher cache; sharing by slot replays the first center's set.
+	const CENTER_A := Vector3(8.0, 0.0, -8.0)
+	const CENTER_B := Vector3(12.0, 0.0, -8.0)
+
+	var only_a := _make_engine_centers_dispatcher()
+	only_a.dispatch_centers(PackedVector3Array([CENTER_A]))
+	var only_a_keys := _far_placement_keys(only_a)
+	assert_gt(only_a_keys.size(), 0, "The first center fixture emits FAR placements.")
+
+	var only_b := _make_engine_centers_dispatcher()
+	only_b.dispatch_centers(PackedVector3Array([CENTER_B]))
+	var only_b_keys := _far_placement_keys(only_b)
+	assert_gt(only_b_keys.size(), 0, "The second center fixture emits FAR placements.")
+	assert_ne(only_a_keys, only_b_keys,
+		"The nearby centers deliberately have distinct radius-gated candidate sets.")
+
+	var expected: Array[String] = only_a_keys.duplicate()
+	expected.append_array(only_b_keys)
+	expected.sort()
+
+	var together := _make_engine_centers_dispatcher()
+	together.dispatch_centers(PackedVector3Array([CENTER_A, CENTER_B]))
+	assert_eq(_far_placement_keys(together), expected,
+		"Multi-center output equals the composition of independently dispatched centers.")
+	assert_eq(together.get_cached_cells(),
+		only_a.get_cached_cells() + only_b.get_cached_cells(),
+		"Cache accounting includes every independently owned center state.")
+
+	var duplicate := _make_engine_centers_dispatcher()
+	duplicate.dispatch_centers(PackedVector3Array([CENTER_A, CENTER_A]))
+	var duplicate_expected: Array[String] = only_a_keys.duplicate()
+	duplicate_expected.append_array(only_a_keys)
+	duplicate_expected.sort()
+	assert_eq(_far_placement_keys(duplicate), duplicate_expected,
+		"Duplicate inputs preserve caller multiplicity.")
+	assert_eq(duplicate.get_cached_cells(), only_a.get_cached_cells(),
+		"Duplicate coordinates share one center cache rather than growing residency.")
+
+	together.dispatch_centers(PackedVector3Array([CENTER_A]))
+	assert_eq(together.get_cached_cells(), only_a.get_cached_cells(),
+		"Centers absent from the current dispatch are retired.")
+	together.reset()
+	assert_eq(together.get_cached_cells(), 0, "Reset clears all per-center cache state.")
+
+
+func test_engine_centers_far_uses_surface_sampler_without_foliage_sampler() -> void:
+	var dispatcher := _make_engine_centers_dispatcher()
+	dispatcher.foliage_sampler = Callable()
+	dispatcher.dispatch_centers(PackedVector3Array([Vector3(8.0, 0.0, -8.0)]))
+	assert_gt(dispatcher.get_far_tile_debug(0).size(), 0,
+		"ENGINE_CENTERS FAR only requires height plus its raw surface sampler.")
+
+
+func test_reset_detaches_far_nodes_before_queue_free() -> void:
+	var dispatcher := _make_engine_centers_dispatcher()
+	dispatcher.dispatch_centers(PackedVector3Array([Vector3(8.0, 0.0, -8.0)]))
+	var far_node := dispatcher.find_child("FoliageSlot0", false, false)
+	assert_not_null(far_node, "The fixture creates a FAR batch node.")
+	if far_node == null:
+		return
+
+	dispatcher.reset()
+	assert_null(dispatcher.find_child("FoliageSlot0", false, false),
+		"Reset removes the FAR node from the scene tree synchronously.")
+	assert_null(far_node.get_parent(),
+		"The queued FAR node is detached before deferred destruction.")

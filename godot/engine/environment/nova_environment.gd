@@ -139,6 +139,7 @@ func _write_shader_globals() -> void:
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", get_fog_type())
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_amount", 1.0)
 	RenderingServer.global_shader_parameter_set(&"opennova_wind_sway_phase", 0.0)
+	RenderingServer.global_shader_parameter_set(&"opennova_foliage_wave_addend", 0.0)
 
 
 func get_sun_light() -> Vector3:
@@ -200,9 +201,11 @@ func get_terrain_lighting_attenuation() -> Vector3:
 	# written and freed but its three readers (0x606ce0, 0x606c30,
 	# Terrain_GetColorMapBilinear @ 0x606d80) have zero xrefs (full .text
 	# E8/E9 scan), so the GPU terrain textures ship untinted
-	# (docs/env/env-tod-re.md #19). The two LIVE terrain_rgb consumers render
-	# elsewhere: the .til tile overlay (get_tile_overlay_tint below) and the
-	# foliage lightmap sample (NovaFoliageDispatcher.terrain_tint).
+	# (docs/env/env-tod-re.md #19). The confirmed LIVE terrain renderer consumer
+	# is the .til tile overlay (get_tile_overlay_tint below). FAR does execute
+	# four CPU tinted-colormap samples, but its final COLOR write replaces those
+	# results with source-Y red wind weight; draw-time terrain lighting instead
+	# comes through the distinct T1/c0/c1/c6 pass (D-FOLIAGE-7 tracks its feed).
 	return Vector3.ONE
 
 

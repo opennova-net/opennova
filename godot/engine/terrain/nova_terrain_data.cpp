@@ -444,6 +444,8 @@ void NovaTerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &NovaTerrainData::get_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &NovaTerrainData::get_modulated_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("get_surface_mask_world", "world_x", "native_z"),
+	                     &NovaTerrainData::get_surface_mask_world);
 	ClassDB::bind_method(D_METHOD("get_foliage_index_world", "world_x", "world_z"), &NovaTerrainData::get_foliage_index_world);
 	ClassDB::bind_method(D_METHOD("world_to_source_coords", "world_x", "world_z"), &NovaTerrainData::world_to_source_coords);
 	ClassDB::bind_method(D_METHOD("world_to_sector_cell", "world_x", "world_z"), &NovaTerrainData::world_to_sector_cell);
@@ -1693,6 +1695,32 @@ Rect2i NovaTerrainData::get_cell_atlas_rect(int row, int col) const {
 
 int NovaTerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
+}
+
+int NovaTerrainData::get_surface_mask_world(float world_x, float native_z) const {
+	// [orig: Terrain_GetSurfaceTypeAtFixedPoint @ 0x6066d0] indexes the raw
+	// surface map as ((x >> 16) & 1023, (-z >> 16) & 1023), downscaled to the
+	// loaded map resolution. Its caller passes candidate (x, -worldZ), and
+	// consumes this unsigned byte directly as the four-slot mask.
+	if (!loaded || charmap_width <= 0 || charmap_height <= 0 ||
+	    charmap_indices.size() <
+	        static_cast<size_t>(charmap_width) * static_cast<size_t>(charmap_height)) {
+		return 0;
+	}
+	constexpr int WRAP_SIZE = 1024;
+	auto wrap_1024 = [](int value) {
+		constexpr int wrap_size = 1024;
+		const int wrapped = value % wrap_size;
+		return wrapped < 0 ? wrapped + wrap_size : wrapped;
+	};
+	const int wrapped_x = wrap_1024(static_cast<int>(std::floor(world_x)));
+	const int wrapped_z = wrap_1024(static_cast<int>(std::floor(-native_z)));
+	const int sample_x = std::min((wrapped_x * charmap_width) / WRAP_SIZE,
+	                              charmap_width - 1);
+	const int sample_z = std::min((wrapped_z * charmap_height) / WRAP_SIZE,
+	                              charmap_height - 1);
+	return static_cast<int>(
+	    charmap_indices[static_cast<size_t>(sample_z) * charmap_width + sample_x]);
 }
 
 int NovaTerrainData::get_foliage_index_world(float world_x, float world_z) const {

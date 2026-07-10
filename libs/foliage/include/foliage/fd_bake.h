@@ -1,14 +1,13 @@
 #pragma once
 
 // The ":fd" foliage texture bake, ported from retail Jointops.exe. Both
-// foliage tiers (the far quads AND the near model draw) texture with this
-// bake of the model's OWN diffuse: the alpha channel is smoothed by a 3x3
-// kernel and the RGB is flattened to exactly 0x808080 - the foliage look's
-// color comes entirely from the lighting/colormap combine, never from the
-// diffuse RGB. Registered in retail as "<texture>:fd".
+// foliage tiers sample this bake of the model's OWN diffuse: the alpha channel
+// is smoothed by a 3x3 kernel and RGB is flattened to exactly 0x808080. FAR
+// combines that sample with terrain-light T1; MODEL's witnessed constants zero
+// its RGB chain before fog. Registered in retail as "<texture>:fd".
 // [orig: Foliage_LoadDefAssets @ 0x601260 tail ->
 // GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270; bound by
-// Foliage_DrawModelTileSlot @ 0x601d90 and the quad tier alike]
+// Foliage_DrawModelTileSlot @ 0x601d90 and the FAR tier alike]
 // Witness record: docs/foliage/foliage-re.md §Def-asset load and the :fd bake.
 
 #include <cstdint>

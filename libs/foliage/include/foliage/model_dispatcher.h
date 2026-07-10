@@ -3,7 +3,7 @@
 // The foliage MODEL-tier tile walk + per-def cache, ported from retail
 // Jointops.exe [orig: Foliage_UpdateModelTiles @ 0x601f50, driven per visible
 // sector entity by Terrain_RenderSectorEntitiesBySide @ 0x5c7d50]. Mirrors
-// the quad tier's Dispatcher shape (dispatcher.h): one instance per foliage
+// the FAR tier's Dispatcher shape (dispatcher.h): one instance per foliage
 // def slot; the host walks it once per anchor per frame.
 //
 // Witnessed behavior: gate the whole walk on the anchor's view-space depth
@@ -71,7 +71,7 @@ public:
 	          std::vector<ModelTileDraw> &out) noexcept;
 
 	// The 8-frame regen stagger [orig: Foliage_UpdateModelTiles @ 0x601f50]:
-	// ((frame + 2 * slot) & 7) == 0 - same gate family as the quad tier.
+	// ((frame + 2 * slot) & 7) == 0 - same gate family as the FAR tier.
 	static bool is_staggered_regen_frame(int32_t frame_counter, int slot_index) noexcept;
 
 	// Introspection for hosts/tests.

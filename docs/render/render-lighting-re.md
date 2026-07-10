@@ -176,10 +176,14 @@ feeds the wind VS's c7/c8 projection). The mission lightmap TGA
 @ 0x319f7b0..) is sampled by `render_foliage_billboards @ 0x607b30` and
 `PolyTrn_RenderTile @ 0x60da70` via the view @ 0x319f7d4. The CPU-side
 1024×1024 premultiplied colormap (`PolyTrn_ColormapPixels @ 0x319f79c`) is
-sampled per foliage instance corner by `sample_terrain_colormap_tinted
-@ 0x606030` (ex-misnomer `sample_terrain_lightmap`): colormap[u, −v] ×
-`PolyTrn_TerrainTintFull` >>7 saturating — the D-FOLIAGE-1 instance-color
-source, witnessed exactly.
+also sampled four times by `sample_terrain_colormap_tinted @ 0x606030`
+(ex-misnomer `sample_terrain_lightmap`): colormap[u, −v] ×
+`PolyTrn_TerrainTintFull` >>7 saturating. The 2026-07-09 D-FOLIAGE-1
+re-audit proved those four results do not reach emitted COLOR:
+`generate_foliage_instances_0 @ 0x5ffdd0` unconditionally replaces every
+intermediate write with source-Y red wind weight at `0x60030A`. FAR still
+lights at draw time through terrain-light/colormap T1 plus c0/c1/c6; exact
+sector-owned T1/c6 host inputs are D-FOLIAGE-7.
 
 **Lighting textures + the DOT3 light shader.** `Lighting_InitTextures
 @ 0x5a94f0` builds the procedural set: `texlight2d`/`texlightspot2d` (64²
@@ -286,7 +290,7 @@ directional with 0.75 ambient material.
 | 0x5d7250 | setup_entity_render_lighting | RenderSlot_SetupNextLighting | pops the pending slot list; slot-render D3D lighting |
 | 0x5d6a30 | Entity_UpdateRenderState | RenderSlot_UpdateEntityLight | the shadow-slot dominant-light pick + terrain anchor march |
 | 0x604ce0 | sub_604CE0 | Terrain_LoadScorchTextures | trscrch1-3.tga + qburn01.tga (the brief's "4 lightmap materials" guess was wrong — scorch decals) |
-| 0x606030 | sample_terrain_lightmap | sample_terrain_colormap_tinted | samples the CPU colormap (not the lightmap TGA) × tint >>7; foliage instance colors |
+| 0x606030 | sample_terrain_lightmap | sample_terrain_colormap_tinted | samples the CPU colormap (not the lightmap TGA) × tint >>7; all four FAR results are overwritten before emission, so they are not instance colors |
 | 0x58f290 | sub_58F290 | Render_FillStaticCubemaps | fills CubeNormalize + CubeRotSpecular at init (caps-gated) |
 | 0x5899e0 | sub_5899E0 | Render_ApplyCubemapCapsDisableMask | clears Render_DeviceCapsFlags bits from the disable mask |
 | 0x58b220 | generate_sky_cubemap | EnvCube_RenderFaceOrAnalyticFill | callback → live scene face render; no callback → the dead analytic 5-light fill |

@@ -22,13 +22,11 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
-// Counting sampler: every call into place_cell hits height_at 8 times per
-// accepted candidate (4 corners + 4 midpoints), so the height call count is
-// a reliable "did this cell actually re-bake?" signal. slot_mask_at fires
-// first in place_cell, so count it too to be safe.
+// Candidate placement calls slot_mask_at during a bake. Terrain height now
+// belongs to full source-mesh emission, so cache/cadence evidence must use the
+// slot-mask calls rather than removed synthetic-quad height samples.
 struct CountingSamplers {
 	int slot_mask_calls = 0;
-	int height_calls = 0;
 };
 
 PlacementSamplers make_samplers(CountingSamplers &counters) {
@@ -38,10 +36,7 @@ PlacementSamplers make_samplers(CountingSamplers &counters) {
 		++counters.slot_mask_calls;
 		return 0xFu;  // allow all four slots
 	};
-	s.height_at = [&counters](Fixed16_16, Fixed16_16) -> Fixed16_16 {
-		++counters.height_calls;
-		return 0;
-	};
+	s.height_at = [](Fixed16_16, Fixed16_16) -> Fixed16_16 { return 0; };
 	return s;
 }
 

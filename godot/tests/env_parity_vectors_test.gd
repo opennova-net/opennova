@@ -959,3 +959,47 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 	simulate(weather, 4, TICK)
 	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
 		"post-scrub ticks should serve the writeback again")
+
+
+func test_weather_core_exposes_wave_osc_ring_zero() -> void:
+	# [orig: setup_water_vertex_shader_constants @ 0x600450] FAR foliage
+	# consumes the fixed head of Env_WaveOscRing, not the current ring index or
+	# the shader-facing sway phase. The committed oscillator vector reaches
+	# smoothed=0x9787 exactly when tick 256 wraps the writer back to index 0.
+	var core := NovaWeatherCore.new()
+	assert_true(core.has_method("get_wave_osc_ring0"),
+		"NovaWeatherCore exposes the raw Env_WaveOscRing[0] seam")
+	if not core.has_method("get_wave_osc_ring0"):
+		return
+	assert_eq(int(core.call("get_wave_osc_ring0")), 0,
+		"the boot ring head starts at zero")
+	for _i in 256:
+		core.tick(Color.BLACK, Color.BLACK, Color.BLACK, Color.BLACK, Color.BLACK, 0.0)
+	assert_eq(int(core.call("get_wave_osc_ring0")), 0x9787,
+		"tick 256 writes the witnessed smoothed value into ring slot zero")
+
+
+func test_weather_exposes_foliage_wave_phase_addend() -> void:
+	# FAR foliage consumes the fixed ring head scaled by the constant pushed
+	# into c24.x [orig: setup_water_vertex_shader_constants @ 0x600450].
+	# Keep this distinct from the rotating sway phase: ring slot zero changes
+	# only when the 256-entry writer wraps.
+	var env := _add_env_node(_make_cfg(0), "EnvWavePhase")
+	env.time_of_day = 1200.0
+	var weather := _add_weather_node("EnvWavePhase", "WeatherWavePhase")
+	simulate(weather, 256, TICK)
+
+	assert_true(weather.has_method("get_foliage_wind_phase_addend"),
+		"NovaWeather exposes the scaled fixed ring head")
+	assert_almost_eq(float(weather.call("get_foliage_wind_phase_addend")),
+		0.05919037014245987, 0.0000001,
+		"weather scales Env_WaveOscRing[0] by 1.5258789e-6")
+
+	var setting_path := "shader_globals/opennova_foliage_wave_addend"
+	assert_true(ProjectSettings.has_setting(setting_path),
+		"the scaled addend is registered as a shader global")
+	var global_spec: Dictionary = ProjectSettings.get_setting(setting_path, {})
+	assert_eq(global_spec.get("type"), "float",
+		"the foliage wave addend is a float shader global")
+	assert_eq(float(global_spec.get("value", -1.0)), 0.0,
+		"the no-weather project default is zero")

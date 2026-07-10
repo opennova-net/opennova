@@ -105,6 +105,9 @@ public:
 	Color get_sun() const;
 	Color get_fog() const;
 	Color get_sky() const;
+	// Raw Env_WaveOscRing[0], consumed by FAR foliage c24.x after a
+	// 1.5258789e-6 scale [orig: setup_water_vertex_shader_constants @ 0x600450].
+	int get_wave_osc_ring0() const;
 
 	// (smoothed - 0x8000) / 0x8000 * 2 — the shader-facing sway scalar.
 	float get_sway_amount() const;

@@ -23,7 +23,7 @@ bool expect(bool condition, const char *message) {
 } // namespace
 
 int main() {
-	// The stagger table mirrors the quad tier's: slot 0 fires on frame % 8 == 0,
+	// The stagger table mirrors the FAR tier's: slot 0 fires on frame % 8 == 0,
 	// slot 1 on 6, slot 2 on 4, slot 3 on 2 - exactly once per 8-frame window.
 	for (int32_t frame = 0; frame < 64; ++frame) {
 		if (!expect(ModelDispatcher::is_staggered_regen_frame(frame, 0) == ((frame & 7) == 0),
