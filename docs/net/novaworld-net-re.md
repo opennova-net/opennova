@@ -5704,7 +5704,11 @@ arrives.** Witnessed chain:
    `WeaponSlot_ReloadAmmo @ 0x541720` on its own copy for remote requesters.
 4. Client: `NapiNPClientMsg_WeaponReload_0x049 @ 0x42C0A0` (dispatch @0x82AE28): local player →
    `WeaponSlot_ReloadAmmo` — **the only place a client's clip refills** (clears the 0x80 flag
-   @0x5417A2); other players → +0x371 = 80 (3P reload anim); vehicle weapons → direct refill.
+   @0x5417A2; also stamps `entity+0x372 = 80`, the 3P body reload-clip window — ANIMNUM 65/66,
+   world-wac-ai-re.md §14.8.5); other players → +0x371 = 80 (CORRECTED 2026-07-09: not a clip
+   window — the arms-dip `headLookDecay` feed, §14.8.5; a pure client shows remote reloads as
+   the dip only, the host shows the full clip via its own-copy refill); vehicle weapons →
+   direct refill.
 
 Reload ammo math: `WeaponSlot_ReloadAmmo` transfers `def[22] (clipsize) × def[56]
 (pool-units/round)` from the per-ammo-class carried pool (`Entity_GetScoreValueBySlotType
@@ -8055,9 +8059,14 @@ currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58 (i16)
 phase +0x5A, kickIntensity +0x5B, charge +0x5C, flags +0x5E (bit0 = the §5.16 net-fire
 pose latch, bit1 = FP), burstCounter +0x62. Phase protocol: a transition writes
 phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1(|0x40)→2 and
-**starts the action's clip on the owner's animadm — local player only**
-[orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the FP-routing shims
-`@ 0x541860`/`@ 0x5419e0` write the same protocol]; `ActionSlot_FinishActivePhase
+**starts the action's clip on the equipped WeaponDef's own adm channel
+(`WeaponDef+0x174`, the FP viewmodel rig) — local player only** (CORRECTED 2026-07-09:
+the earlier "owner's animadm" reading; the 3P body's weapon layer is a separate
+producer, world-wac-ai-re.md §14.8)
+[orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the effect shims
+`@ 0x541860`/`@ 0x5419e0` write the same protocol and same play target — they differ
+only in muzzle/particle spawning, forked by `ActionSlot_ExecuteActionTick @ 0x541a70`
+on third person / vehicle-attack / remoteness]; `ActionSlot_FinishActivePhase
 @ 0x53f7b0(desc, slot, entity, next)` sets counter=delayEnd, nextAction=arg4, the
 ACTIVE→DONE kick bump (skipped for RELOAD), phase=4. Pump tail per tick: kick decay;
 overheat deny (heat > 0xFFFF converts a queued FIRE to EMPTY `@ 0x541046`); the IDLE
@@ -8077,8 +8086,10 @@ RequestReload (no auto-reload gate); else hold. **fire** — phase-1 recheck
 `WeaponSlot_CanFire @ 0x541ba0`: busy weapon-child, underwater ban, and the clip leg
 which on empty **writes nextAction itself** — 3 (RECOIL → the auto-reload arbiter)
 when the class reserve has rounds else 1 (EMPTYIDLE) `@ 0x541c8b` — the abort adopts
-it (`Finish(next=[esi+0x30])` read AFTER the call `@ 0x542b50`); the shot: body-anim
-stamps 62/63, `Entity_CalcWeaponFirePosition @ 0x4dc750`,
+it (`Finish(next=[esi+0x30])` read AFTER the call `@ 0x542b50`); the shot: the 3P body
+weapon-channel stamps 62 `knife_attack` / 63 `grenade_attack` into `entity+0x2C8`
+(keyed on the AdmDef kind dword `@ 0x24E8088`; rifles stamp nothing —
+world-wac-ai-re.md §14.8.4 `@ 0x542bcb`), `Entity_CalcWeaponFirePosition @ 0x4dc750`,
 `Entity_FireWeaponAndSendPacket @ 0x42bd80` (§5.16), `consume_weapon_ammo @ 0x540850`,
 3-round burst (Flags&0x20) cycling 0→2→1→0, **next=RECOIL unconditional `@ 0x542c9e`**,
 kick += recoil.ds+de+counter+10 cap 20. **recoil** — THE ARBITER: at clip end

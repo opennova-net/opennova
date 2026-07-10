@@ -506,9 +506,45 @@ PackedInt32Array NovaSkeletalAnim::get_overlay_classes() const {
 	return out;
 }
 
+void NovaSkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
+		double p_wpn_playhead_seconds) const {
+	// Hard override of the mask bones' local rotations with the weapon channel's clip at
+	// its own playhead; the primary pose keeps every origin (the shared skeleton owns the
+	// pivots, and the re-anchor is translation-only there). [orig: mask @0x4b14db, second
+	// AnimChannel_ComputeBoneMatrices @0x4b16a7; world-wac-ai-re.md §14.8.6]
+	if (p_wpn_key.is_empty() || find_clip(p_wpn_key) == nullptr) {
+		return;
+	}
+	const Array wpose = eval_pose(p_wpn_key, p_wpn_playhead_seconds);
+	const int n = static_cast<int>(p_pose.size());
+	if (wpose.size() != n || static_cast<size_t>(n) != bones_.size()) {
+		return;
+	}
+	for (int i = 0; i < n; ++i) {
+		// BN## tag -> model bone index, the same parse get_overlay_classes trusts.
+		const std::string &bn = bones_[static_cast<size_t>(i)].name;
+		if (bn.size() < 4 || (bn[0] != 'B' && bn[0] != 'b') || (bn[1] != 'N' && bn[1] != 'n') ||
+				bn[2] < '0' || bn[2] > '9' || bn[3] < '0' || bn[3] > '9') {
+			continue;
+		}
+		const int model_index = (bn[2] - '0') * 10 + (bn[3] - '0') - 1;
+		if (!opennova::anim::weapon_channel_masks_bone(model_index)) {
+			continue;
+		}
+		const Transform3D base = p_pose[i];
+		const Transform3D w = wpose[i];
+		p_pose[i] = Transform3D(w.basis, base.origin);
+	}
+}
+
 Array NovaSkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead_seconds,
-		const PackedInt32Array &p_classes, const Array &p_deltas) const {
+		const PackedInt32Array &p_classes, const Array &p_deltas,
+		const String &p_wpn_key, double p_wpn_playhead_seconds) const {
 	Array pose = eval_pose(p_key, p_playhead_seconds);
+	// The witnessed order: primary sample -> weapon-channel mask override -> the aim
+	// overlay multiplies ON TOP of the composed pose [orig: @0x4b14a7..@0x4b16a7 run
+	// before the per-bone overlay loop; world-wac-ai-re.md §14.8.6].
+	splice_weapon_channel(pose, p_wpn_key, p_wpn_playhead_seconds);
 	const int n = static_cast<int>(pose.size());
 	if (n == 0 || static_cast<size_t>(n) != bones_.size() || p_classes.size() < n ||
 			p_deltas.size() < static_cast<int>(opennova::anim::kOverlayClassCount)) {
@@ -561,5 +597,5 @@ void NovaSkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_clip_looping", "key"), &NovaSkeletalAnim::is_clip_looping);
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds"), &NovaSkeletalAnim::eval_pose);
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &NovaSkeletalAnim::get_overlay_classes);
-	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas"), &NovaSkeletalAnim::eval_pose_overlay);
+	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds"), &NovaSkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0));
 }

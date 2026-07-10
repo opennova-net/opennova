@@ -451,6 +451,23 @@ func _advance_part_anims(delta: float) -> bool:
 var _aim_overlay_deltas: Array = []
 var _aim_overlay_classes := PackedInt32Array()
 
+# The upper-body weapon channel: a second clip posed at its OWN playhead onto the mask
+# bones (clavicles/arms/forearms/neck/head/hands) before the aim overlay composes. The
+# host that owns the sim state (LocalPlayerHost) feeds it each frame from
+# PlayerWeaponView.body_anim_key/body_anim_phase; empty key disables. Unknown keys
+# no-op inside the native splice. [orig: the mask override @0x4b14db/@0x4b16a7 in
+# Entity_BuildBoneTransformMatrices; docs/world/world-wac-ai-re.md §14.8]
+var _wpn_key := ""
+var _wpn_phase_ticks := 0
+
+
+func set_weapon_channel(key: String, phase_ticks: int) -> void:
+	if key == _wpn_key and phase_ticks == _wpn_phase_ticks:
+		return
+	_wpn_key = key
+	_wpn_phase_ticks = phase_ticks
+	_body_pose_dirty = true
+
 
 func set_aim_overlay(deltas: Array) -> void:
 	_aim_overlay_deltas = deltas
@@ -474,9 +491,19 @@ func _advance_body_anim(delta: float) -> void:
 	var pose: Array
 	if not _aim_overlay_deltas.is_empty() and not _aim_overlay_classes.is_empty() \
 			and _skeletal.has_method("eval_pose_overlay"):
+		# Weapon-channel playhead: half-frame ticks -> seconds, the play_body_clip_at
+		# convention (seconds = ticks / (2 * clip_fps)).
+		var wpn_time := 0.0
+		if not _wpn_key.is_empty():
+			var wfps: float = _skeletal.get_clip_fps(_wpn_key)
+			if wfps > 0.0:
+				wpn_time = float(maxi(_wpn_phase_ticks, 0)) / (2.0 * wfps)
 		pose = _skeletal.eval_pose_overlay(
-			_anim_key, _anim_time, _aim_overlay_classes, _aim_overlay_deltas)
+			_anim_key, _anim_time, _aim_overlay_classes, _aim_overlay_deltas,
+			_wpn_key, wpn_time)
 	else:
+		# The weapon channel only renders through the overlay path — its export gate
+		# (primary-state flag 0x40) implies the aim overlay is active [orig: @0x4b14a7].
 		pose = _skeletal.eval_pose(_anim_key, _anim_time)
 	var count: int = mini(pose.size(), _skeleton.get_bone_count())
 	for i in range(count):

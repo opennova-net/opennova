@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <array>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -83,6 +84,13 @@ struct TestSource : IRootMotionSource {
                id == anim_state::kWalkProneForward;
     }
     bool has_clip(int /*adm_id*/, int id) const override { return clips.count(id) != 0; }
+    // One-shot length per state when set: the weapon channel's clip-end promotion
+    // [orig: AnimMap_UpdateEntity @0x40b77b] is exercised through this.
+    std::map<int, int32_t> lengths;
+    int32_t clip_length_ticks(int /*adm_id*/, int id) const override {
+        auto it = lengths.find(id);
+        return it == lengths.end() ? -1 : it->second;
+    }
     bool advance(int /*adm_id*/, int id, int32_t &phase, RootMotionFrame &out) override {
         if (clips.count(id) == 0) return false;
         ++phase;
@@ -287,6 +295,72 @@ void test_player_body_chase_and_legs() {
     CHECK(std::abs(e->inf.body_heading - e->inf.target_heading) <= 1);
     CHECK(e->inf.leg_yaw[0] == planted_r);
     CHECK(e->inf.leg_yaw[1] == planted_l);
+}
+
+// The upper-body weapon channel (the entity's SECONDARY AnimMap channel), local-player
+// slice: the rifle-mirror default, the 80-tick reload window -> state 65, the locked
+// commit rule (65 = flag 0x84 defers exits to clip end), and the clip-end promotion.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 + AnimMap_UpdateDualChannels
+//  @0x40b8c0 / AnimMap_UpdateEntity @0x40b77b; witness world-wac-ai-re.md §14.8]
+void test_player_weapon_channel() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kWalkForward);
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kIdle2);
+    src.clips.insert(anim_state::kReload);
+    src.lengths[anim_state::kReload] = 40; // one-shot reload clip, 40 phase ticks
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    // Rifle default: the secondary channel MIRRORS the primary [orig: @0x4b5e46].
+    run_ticks(ai, w, 1, 4);
+    CHECK(e->inf.anim_state == anim_state::kIdle);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    e->inf.player_moving = true;
+    run_ticks(ai, w, 4, 8);
+    CHECK(e->inf.anim_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_clip_phase > 0); // the secondary playhead advances on its own
+
+    // The refill stamps the 80-tick window -> the channel wants 65 reload; idle/walk
+    // currents are not locked, so the stamp lands immediately [orig: @0x4b5e67/@0x4b5e9d].
+    e->inf.reload_anim_ticks = 80; // [orig: WeaponSlot_ReloadAmmo @0x54173c]
+    run_ticks(ai, w, 8, 9);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_clip_phase == 1);          // fresh channel re-init + first advance
+    CHECK(e->inf.anim_state == anim_state::kWalkForward); // the legs keep locomotion
+
+    // While the window runs, the desire holds; the primary is untouched.
+    run_ticks(ai, w, 9, 40);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.reload_anim_ticks == 80 - 32);
+
+    // The clip ends (40 phase ticks) BEFORE the window does: 65 is locked (flag 0x84),
+    // so the mirror desire defers, and the deferred state only lands once BOTH the
+    // window has expired (desire leaves 65) and the clip end promotes it
+    // [orig: defer @0x4b5e88; promote @0x40b77b].
+    run_ticks(ai, w, 40, 88);
+    CHECK(e->inf.reload_anim_ticks == 0);
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward); // promoted back to the mirror
+    CHECK(e->inf.wpn_deferred == 0);
+
+    // Window expiring MID-CLIP: re-stamp, then cut it short after 10 ticks — the locked
+    // reload keeps playing to its own end, the mirror desire waits in the deferred slot.
+    e->inf.reload_anim_ticks = 80;
+    run_ticks(ai, w, 88, 89);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    e->inf.reload_anim_ticks = 10;
+    run_ticks(ai, w, 89, 99); // window over, clip at ~11/40
+    CHECK(e->inf.reload_anim_ticks == 0);
+    CHECK(e->inf.wpn_state == anim_state::kReload);          // still locked in
+    CHECK(e->inf.wpn_deferred == anim_state::kWalkForward);  // the exit is queued
+    run_ticks(ai, w, 99, 89 + 41); // ...until the clip's 40 phase ticks complete
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_deferred == 0);
 }
 
 } // namespace
@@ -987,6 +1061,7 @@ int main() {
         // integration. Real idle clips may author zero mean root velocity; the gate is data.
         struct SwaySource : IRootMotionSource {
             bool has_clip(int, int) const override { return true; }
+            int32_t clip_length_ticks(int, int) const override { return -1; }
             bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
                 ++phase;
                 out = RootMotionFrame{};
@@ -1025,6 +1100,7 @@ int main() {
                 if (adm_id < 0 || adm_id >= static_cast<int>(clips.size())) return false;
                 return clips[static_cast<size_t>(adm_id)].count(id) != 0;
             }
+            int32_t clip_length_ticks(int, int) const override { return -1; }
             bool advance(int adm_id, int id, int32_t &phase, RootMotionFrame &out) override {
                 if (!has_clip(adm_id, id)) return false;
                 ++phase;
@@ -1119,6 +1195,7 @@ int main() {
     test_remote_player_body_anim();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
+    test_player_weapon_channel();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

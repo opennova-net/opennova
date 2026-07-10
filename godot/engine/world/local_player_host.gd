@@ -94,6 +94,7 @@ var _vm_camera: Camera3D = null
 # BOTH viewmodel parts (arms + gun share the animadm), and places nodes.
 var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
 var _weapon_play_serial := -1
+var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
 var _reload_was_down := false
 var _scope_was_down := false
@@ -302,6 +303,7 @@ func _consume_weapon_view() -> void:
 	if _world == null or not _world.has_method("local_player_weapon_view"):
 		return
 	var view: PlayerWeaponView = _world.local_player_weapon_view()
+	_weapon_view = view
 	if view == null:
 		return
 	if view.play_serial != _weapon_play_serial:
@@ -548,6 +550,15 @@ func _update_avatar(pos: Vector3) -> void:
 			else NovaWater.VISUAL_LAYER_BODY_REFLECTION_ONLY)
 	var anim_key := String(_world.local_player_anim_key()) if _world.has_method("local_player_anim_key") else ""
 	var anim_phase := int(_world.local_player_anim_phase_ticks()) if _world.has_method("local_player_anim_phase_ticks") else 0
+	# The upper-body weapon channel: the sim's secondary-channel clip (reload etc.) posed
+	# at its own playhead onto the mask bones, composed under the aim overlay. Empty key =
+	# the channel mirrors locomotion (identity) or the gate is off — cleared either way.
+	# [orig: producer @0x4b5dad, override @0x4b14db; world-wac-ai-re.md §14.8]
+	if _avatar.has_method("set_weapon_channel"):
+		if _weapon_view != null:
+			_avatar.set_weapon_channel(_weapon_view.body_anim_key, _weapon_view.body_anim_phase)
+		else:
+			_avatar.set_weapon_channel("", 0)
 	if not anim_key.is_empty() and _avatar.has_method("play_body_clip_at"):
 		_avatar.play_body_clip_at(anim_key, anim_phase)
 	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip"):

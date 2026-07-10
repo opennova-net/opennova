@@ -111,6 +111,12 @@ public:
     virtual ~IRootMotionSource() = default;
     virtual bool has_clip(int adm_id, int state_id) const = 0;
     virtual bool advance(int adm_id, int state_id, int32_t &phase_ticks, RootMotionFrame &out) = 0;
+    // Clip length for a state's track, in the phase-tick convention advance() uses
+    // (half-frame ticks), or -1 when the state has no track. The weapon channel's
+    // deferred-state promotion fires when the playhead reaches this — the original's
+    // clip-end channel flag [orig: the 0x20000 end-flag promotion in
+    // AnimMap_UpdateEntity @ 0x40b77b; witness world-wac-ai-re.md §14.8.1].
+    virtual int32_t clip_length_ticks(int adm_id, int state_id) const = 0;
 };
 
 struct InfantryState {
@@ -137,6 +143,18 @@ struct InfantryState {
     int anim_pending = 0;                 // entity[174]
     int anim_prev = anim_state::kIdle;    // entity[178]
     int32_t clip_phase = 0;
+    // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
+    // target state, clip-end-deferred state, and its own playhead — the entity
+    // +0x2C8/+0x2C4 pair the dual-channel update swaps through the shared machinery.
+    // [orig: AnimMap_UpdateDualChannels @ 0x40b8c0; witness world-wac-ai-re.md §14.8]
+    int wpn_state = anim_state::kIdle;    // entity+0x2C8
+    int wpn_deferred = 0;                 // entity+0x2C4
+    int32_t wpn_clip_phase = 0;
+    // The 3P reload-anim window: 80 ticks, stamped by the reload refill and counted
+    // down once per tick; while nonzero the weapon channel wants state 65 reload
+    // (66 reload2 for pistols — AdmDef kind unported). [orig: entity+0x372 byte;
+    // stamp WeaponSlot_ReloadAmmo @ 0x54173c, decrement @ 0x4b5cf9; §14.8.5]
+    int32_t reload_anim_ticks = 0;
     // Standing-idle tick counter (entity+0x148): the player-body idle starts at 43 and
     // promotes to 44 once >= 62 idle ticks; any movement resets it. [orig:
     // Entity_UpdateInfantryPlayerBody @0x4b727b-0x4b7293 (state = 0x2B + (cnt >= 0x3E)),

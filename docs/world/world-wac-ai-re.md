@@ -1,7 +1,7 @@
 # World / WAC / AI runtime — RE record and equivalence verdicts
 
 Binary: `Jointops.exe` (retail JO:CA, Steam), IDB `Jointops.exe.kong.i64`, imagebase 0x400000.
-Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**.
+Sessions: 2026-06-07 (WAC ISA + AI P1/P2, prior), 2026-06-08 (foundation), **2026-06-10 (entity-motor architecture grill — this record)**, 2026-07-08 (§14 aim overlay), 2026-07-09 (§14.8 weapon-channel producer).
 Scope: `libs/world` (entity registry, var store, AI), `libs/wac` (VM), the mission-runtime bridge, and the
 locomotion/motor layer. Companion docs: `docs/mission/bms-event-runtime-re.md`,
 [ADR 0007](../adr/0007-skeletal-runtime-and-entity-visual.md) (skeletal),
@@ -62,7 +62,7 @@ controller(brain[2])+16 phase += brain[7]/tick, thresholds 372/744, workZ = grou
 | `AiSystem::apply_locomotion` | — (model) | — | vehicle-layer kinematic model only (organics no longer pass through it); HELO/vehicle physics remain visible `not_yet_ported` stubs | tracked model (vehicle slice) |
 | organics → `tick_infantry` routing | `g_EntityClassPhysicsTable` row "org1" | 0x82abc8 → 0x4b9910 | promote marks `inf.active`; `AiSystem::tick` branches before the SM | **matching** |
 | `AiSystem::tick_infantry` (+think/select/slide) | `Entity_UpdateInfantryAI` | 0x4b9910 | structural translation, per-mechanic dump cites in libs/world/src/infantry.cpp; constants byte-pinned (turn clamp 69273360, gravity 416/−32768, slide 2048 @ threshold 0x22222200, gates 30°/45°, jog windows 139264/270336/73728) | **matching** w/ D-INF-1..10 (enumerated below) |
-| `kInfantryAnimNames/Flags` | `off_8135F0` / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | all 200 entries index-verified vs IDB | **matching** |
+| `kInfantryAnimNames/Flags` | `g_animStateNameTable` (ex `off_8135F0`) / `g_animStateFlagsTable` | 0x8135F0/0x8139E8 | body entries index-verified vs IDB; full table is 253 entries — body 0–239 + `wpn_*` 240–251 + `EOF` 252 (§14.8.2) | **matching** (body slice) |
 | promote `init_infantry` + marker fill | `Entity_SpawnFromBMSRecord` | 0x40e9f0 | slot map (speeds %, accuracy, engagement, timers ×62, alert, route) + marker radius/facing/movetimer | **matching** |
 | `InfantryRootMotion` (engine host) | `AnimMap_UpdateEntity` out-transform | 0x40b5f0 (+0x40b230, 0x40b140) | scales pinned by disasm + real-clip grill (tests/anim/root_motion_test.cpp: I_walkf 1.82 u/s, E_RUNF 5.28 u/s) | **matching** (playhead dt = open item 16) |
 | `AiSystem::apply_ground_clamp` | per-motor ground sampling | 0x457230 + motors | 5-tap port matches; the infantry motor resamples on the faithful every-8 cadence (cache `inf.ground_cache`); the vehicle path still clamps per tick | matching-core (infantry aligned; vehicle cadence with its slice) |
@@ -800,11 +800,12 @@ render consumers `BoneCallback_org0_* @ 0x4e34b0/0x4e3940`, `Entity_GetCameraTra
 
 1. `AnimChannel_ComputeBoneMatrices @ 0x410da0` samples the active channel; the copy into the
    per-bone 4×4 buffer applies the (−x, y, z) handedness flip (ADR 0007 convention).
-2. If entity `Flags & 0x100` (weapon in hands), not gun/ctrl/driver-mounted, and the anim state has
-   flag 0x40, the SECOND channel (`animChannelA @ +0x18c`, the weapon/aim layer) overwrites the
+2. If entity `Flags & 0x100` (weapon in hands), not gun/ctrl/driver-mounted, and the PRIMARY
+   channel's anim state (`+0x2BC`) has flag 0x40 `[orig: gate @ 0x4b14a7..0x4b14d1]`, the SECOND
+   channel (`animChannelA @ +0x18c`, the weapon layer — producer witnessed §14.8) overwrites the
    **upper-body mask** bones {3,4,5,6,9,10,13,14,15,16} = clavicles, upper arms, forearms, neck,
    head, both hands — the two-channel upper/lower split (`AnimChannel_BlendTwoChannels @ 0x410740`
-   is the blended variant; this site is the hard override form).
+   is the blended variant; this site is the hard override form, second compute `@ 0x4b16a7`).
 3. Seven overlay matrices are built by temp-mutating entity `Yaw/Pitch/Roll` (+0x10/+0x14/+0x18)
    and calling `Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200` on the entity block (position +
    YPR); originals restored after. Angle sources: aim = render `Yaw`/`Pitch`, body =
@@ -873,9 +874,10 @@ chase yaws.
 
 - Held-weapon world matrix = **full-aim orientation** (not the hand bone's rotation!) positioned at
   bone 16 (R hand) × the model attach offset (`modelDef+0x424..0x42C`, ± nudges 0.05/0.051) — the
-  rifle points exactly where you aim while the arms only approximately follow. When the PREVIOUS
-  anim state has table flag 0x80 (death family), a sin/cos wobble (fixed radian constants) tilts
-  it — dropped-weapon sprawl.
+  rifle points exactly where you aim while the arms only approximately follow. When the WEAPON
+  CHANNEL's state (`+0x2C8` — the IDB field `prevAnimStateId` is a misname, see §14.8.6) has table
+  flag 0x80 (the weapon-pose/death family), a sin/cos wobble (fixed radian constants) tilts
+  it — dropped-weapon sprawl `[orig: gate @ 0x4b21b0]`.
 - Sight matrix from bone 15 + `modelDef+0x3E4` offsets (fixed Euler tweaks incl. −15°, ~100°);
   muzzle-flash matrix from bone 14 + `modelDef+0x3A4`.
 
@@ -915,10 +917,11 @@ Ported for the local player, end to end, in the controller train:
   arches back (05TR.bms, JOX root).
 
 Remaining under this row: NPC/remote threading (the present-pass `PF_PITCH_DEG` seam + the
-same angles per entity in the snapshot — closes **D-NET-117**), the upper-body weapon channel
-(rides **D-INF-1**), mounted-gunner/seated branches, weapon/sight/muzzle attachment matrices,
-and the pitchBlend / headLookDecay / lean / torsoRoll sources (terms carried, fed 0).
-Player-motor approximations are ledgered as **D-INF-12**.
+same angles per entity in the snapshot — closes **D-NET-117**), mounted-gunner/seated
+branches, weapon/sight/muzzle attachment matrices, and the pitchBlend / lean / torsoRoll
+sources (terms carried, fed 0; headLookDecay's arms-dip feed witnessed §14.8.5).
+The upper-body weapon channel's producer is witnessed and ported for the local player
+(§14.8, 2026-07-09). Player-motor approximations are ledgered as **D-INF-12**.
 
 ### 14.7 IDB write-backs (2026-07-08 session, saved)
 
@@ -933,3 +936,177 @@ entry comments on `0x4b1290` (the bone map), `0x4b25c0` (case table off-by-one),
 legTargetYawR/L`, `output_matrix @ 0xA890C0 → g_camera_anchor_z`, `world_x_1616 @ 0xA890EC →
 g_spectator_cam_x`, `outPos @ 0xA89110 → g_camera_lerp_from_x`, `outMillis @ 0x31BFBC0 →
 g_bam_sin_table_q22`.
+
+## 14.8 Appendix: the upper-body weapon channel — producer half (engine-research, 2026-07-09)
+
+The question (the D-INF-11 "weapon channel" tail declared in PR #213): what plays the
+third-person body's weapon-action animations (reload, knife/grenade attacks, weapon-hold
+poses), on which channel, keyed how, and how does it sync with the FP weapon FSM
+(net-re §5.62)? The consumer half (the §14.1 step-2 mask override) was already witnessed;
+this session witnessed the producer. All addresses `Jointops.exe.kong.i64`, imagebase
+0x400000.
+
+### 14.8.1 Two channels, one shared update
+
+Every organic entity carries TWO AnimMap channels, allocated together by
+`AnimMap_RegisterEntity @ 0x40bb60` from the SAME body `.adm`: the primary (locomotion)
+handle at `entity+0x188`, the secondary (weapon layer, §14.1's `animChannelA`) at
+`entity+0x18C`. Both bind `channel+44` to the `.adm` slot-0 reset `.bad` (the shared
+skeleton bind, net-re §5.40 correction) and share the `.adm`'s state→clip table
+(`channel+72`; entry pointer per ANIMNUM, clip at entry+32, variant-ring next at
+entry+36). At registration, every NULL state entry is backfilled with entry 0 (the reset
+anim) — in the original a state whose `anim_<name>` key is absent plays the RESET clip,
+it does not no-op `[orig: the unrolled backfill loops @ 0x40bc24 / 0x40bd2e]`.
+
+Channel state lives on the ENTITY as (deferred, target) dword pairs: primary
+`+0x2B8/+0x2BC`, secondary `+0x2C4/+0x2C8`. `AnimMap_UpdateDualChannels @ 0x40b8c0`
+updates the SECONDARY first by swapping its pair into the primary's fields, zeroing the
+blend-suppress byte `+0x377`, and passing `parentEntity = 0` — the weapon layer never
+feeds root motion — then restores and updates the primary normally
+`[orig: AnimMap_UpdateDualChannels @ 0x40b8c0]`. `AnimMap_UpdateEntity @ 0x40b5f0` (the
+shared body) on a target change re-inits the channel with blend 10 (15 when the target
+state has table flag 0x400) and pulls the clip from `channelTable[target]`; a nonzero
+DEFERRED state is promoted to target only when the playing clip signals end (channel
+flag 0x20000) — the two-step transition machinery §3.4 already recorded.
+
+### 14.8.2 ANIMNUM — one 253-entry name table
+
+`g_animStateNameTable @ 0x8135F0` (renamed this session from `off_8135F0`) is the single
+ANIMNUM enum: indices 0–239 are the body states (§3.4's table, now complete: 43 idle,
+50–61 the weapon-hold poses `knife, pistol, grenade, stinger, designator,
+designator_scoped, P90, P90_scoped, MP7, MP7_scoped, javelin, javelin_scoped`,
+62 `knife_attack`, 63 `grenade_attack`, 64 `binoculars`, **65 `reload`, 66 `reload2`**,
+67–75 emplaced, 76–110 sit family, 176+ the death matrix), **240–251 the `wpn_*` FP
+viewmodel states** (`wpn_reset, wpn_idle(241), wpn_empty_idle, wpn_fire(243),
+wpn_recoil, wpn_reload(245), wpn_empty, wpn_switchto, wpn_switchfrom, wpn_switchrank,
+wpn_scopeup, wpn_scopedown`), 252 `EOF`. `g_animStateFlagsTable @ 0x8139E8` sits
+immediately after (= base + 4×254). The `.adm` binder resolves `anim_<name>` clip keys
+against this enum (`AnimMap_FindSlotByName @ 0x40cfa0` scans it) — so the "action→body
+key mapping" the port needed does not exist as a translation: US01.adm's `anim_reload` IS
+state 65 and ak47.adm's `anim_wpn_reload` IS state 245; the FSM and the body run two
+independent producers that share triggers.
+
+Key flags for this appendix: 65/66 = 0x84, 62/63 = 0x94 (both carry **bit 2 = locked**
+and 0x80 = weapon-pose family); holds 50/52/54/64 = 0x80; 51/53/55–61 = 0.
+
+### 14.8.3 The FP path plays on the WeaponDef's channel, not the entity's
+
+`ActionSlot_BeginActivePhase @ 0x53f830` and both shims (`ActionSlot_ExecuteActionWithEffect
+@ 0x541860`, `ActionSlot_ExecuteActionNoEffect @ 0x5419e0`) play the action's anim slot via
+`AnimMap_PlayAnimBySlot(*(WeaponDef+0x174), actionDef+24)` — the **equipped WeaponDef's own
+adm channel** (the FP viewmodel rig), gated `owner == g_local_player_entity`. §5.62's
+"owner's animadm" phrasing is corrected in place. The WithEffect/NoEffect fork
+(`ActionSlot_ExecuteActionTick @ 0x541a70`) differs only in muzzle/particle effect
+spawning — third person (`g_camera_mode`), vehicle-attack and remote entities take
+WithEffect; the anim play target is identical. Nothing in the ActionSlot family touches
+the entity's channels.
+
+### 14.8.4 The body producer — secondary-state selection @ 0x4b5dad
+
+`Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (org2; org1 has its own writer @ 0x4b9a28,
+unwitnessed) selects the desired secondary state each tick `[orig: 0x4b5dad..0x4b5ea9]`:
+
+1. **Local-player flag refresh** `[orig: @ 0x4b5d7f]`: Flags(+0x24) bits cleared then
+   re-set from `byte_B7653A` → |8 (binoculars raised), `g_weaponScopeActive` → |0x10
+   (scoped), `g_NVGActive` → |4.
+2. **Weapon-hold kind**: `kind = dword @ (AdmDefs=0x24E8084 + 0x460 × byte entity+0x2B0)`
+   (the held-weapon ADM index of §13.2). kind 1–4 → states 50–53; kind 5–8 → 54/56/58/60,
+   +1 when scoped (the `*_scoped` variants). Default (rifles etc.): MIRROR the primary
+   state `+0x2BC` (43 `idle` if the primary is locked/flag-4; 49 `idle_3` when scoped).
+3. **Overrides**, strongest last: Flags&8 → 64 `binoculars`;
+   **`entity+0x372` ≠ 0 → 65 `reload`, or 66 `reload2` when kind == 2 (pistol)**.
+4. **Commit** `[orig: @ 0x4b5e72]`: same state → skip. Else if the CURRENT secondary
+   state has flag 4 (locked: attacks 62/63, reloads 65/66) or 0x20 (emote) → write the
+   desired state to `+0x2C4` (deferred; applied at clip end). Else stamp `+0x2C8` now
+   and clear `+0x2C4`.
+
+**Attack stamps** bypass the selection: `WeaponAction_Fire` writes 62/63 directly with
+`+0x2C4 = 0`, keyed on the second AdmDef kind dword `@ 0x24E8088 + 0x460×idx`
+(1 = knife → 62, 2 = grenade → 63) `[orig: @ 0x542bcb/0x542be0]`; rifle fire stamps
+NOTHING body-side. The net receive path mirrors the same stamp for remote entities
+`[orig: NetPacket_DeserializeRoundEvent @ 0x42f79d/0x42f7ba]`; `NapiNPClientMsg_0x02D
+@ 0x427f12` also writes `+0x2C8` (unwitnessed detail, follow-up).
+
+### 14.8.5 The reload window and the FSM sync
+
+`WeaponSlot_ReloadAmmo @ 0x541720` (the §5.58 refill) stamps **`entity+0x372 = 80`**
+(ticks) at entry `[orig: @ 0x54173c]`; the body updater decrements it once per 62.5 Hz
+tick `[orig: @ 0x4b5cf9]`. While nonzero the selection wants 65/66; because 65/66 are
+LOCKED states, the reload clip always plays to its own end even if the window expires
+mid-clip, and the exit transition (back to hold/mirror, blend 10) is deferred to clip
+end. There is NO duration coupling to the FSM's reload span (~220 ticks baked from the
+`wpn_reload` clip, §5.62): the shared trigger is the reload round-trip — C2S 0x25 on the
+FSM reload's first tick → the refill applies on the server handler
+(`NapiNPServerMsg_HandleReloadRequest @ 0x514df0`, remote requesters) and on the S2C
+0x49 receive (`NapiNPClientMsg_WeaponReload_0x049 @ 0x42c0a0`, the local player) — i.e.
+the body reload anim starts ≈ one loopback after the FSM reload begins. Loadout init
+(`WeaponSlot_InitFromAvatarDef @ 0x542883/0x542909`) also calls the refill (and thus
+stamps the window).
+
+**`entity+0x371` is NOT a clip window** (correcting the §5.58 "3P reload anim" reading):
+while nonzero it feeds `headLookDecay(+0x36C) -= 0x2800000` per tick (against the
+standing ≈⅛ decay `[orig: @ 0x4b5cc7]`) — the arms-dip overlay term of §14.2. It is
+seeded 80 by the 0x49 handler for OTHER players' reloads `[orig: @ 0x42c10b]` and 20 on
+a weapon switch (when `+0x370`, the previous held ADM index, differs from `+0x2B0`)
+`[orig: @ 0x4b46f5]`. So a pure client shows remote reloads as the arms-dip only; the
+HOST (which calls the refill on its copy for remote requesters) shows the full 65/66
+clip. `PlayerClass_InitEntity @ 0x4b1182/0x4b115b` zeroes the trio at spawn.
+
+### 14.8.6 Composition (consumer, gates corrected)
+
+In `Entity_BuildBoneTransformMatrices @ 0x4b1290`: the primary channel fills ALL bones
+(`AnimChannel_ComputeBoneMatrices @ 0x4b1388`); then, gated on `Flags & 0x100` AND not
+gun/ctrl/driver-mounted AND `g_animStateFlagsTable[PRIMARY state +0x2BC] & 0x40`
+`[orig: @ 0x4b14a7..0x4b14d1]` — the gate reads the PRIMARY state, not the weapon
+channel's — the mask array for bones {3,4,5,6,9,10,13,14,15,16} is set
+`[orig: @ 0x4b14db]` and channel A's matrices (its own clip at its own playhead, same
+skeleton bind) HARD-OVERWRITE those bones `[orig: second compute @ 0x4b16a7]`. The §14.1
+step-3+ overlay multiply and pivot re-anchor then apply to the composed pose — the aim
+overlay rides ON TOP of the weapon-channel bones. §14.4 correction: the held-weapon
+wobble gate reads the SECONDARY state `+0x2C8` table flag 0x80 `[orig: @ 0x4b21b0]` —
+"the PREVIOUS anim state" was the `prevAnimStateId` IDB misname (that field IS the
+weapon-channel target state).
+
+### 14.8.7 Port status (2026-07-09, this train — local player) and follow-ups
+
+Landed: the secondary channel's state machine in `libs/world/src/infantry.cpp`
+(`AiSystem::infantry_weapon_channel` — the per-tick selection with the rifle-mirror
+default, the 80-tick reload window → state 65, the locked/emote defer rule, the
+clip-end deferred promotion via the new `IRootMotionSource::clip_length_ticks`, and the
+root-motion-discarding playhead advance; ctest `infantry`
+`test_player_weapon_channel`); the refill's window stamp on `NovaSimulation`'s FSM
+`reload_applied` event; the typed-record exposure (`PlayerWeaponView.body_anim_key/
+body_anim_phase` — key empty when the channel mirrors the primary, exact for us
+without D-INF-1 blend windows, or when the §14.8.6 gate is off); the mask-bone splice
+in `libs/anim` (`kWeaponChannelMaskBones`) + `NovaSkeletalAnim::splice_weapon_channel`
+composed INSIDE `eval_pose_overlay` in the witnessed order;
+`NovaObjectModel.set_weapon_channel` and `LocalPlayerHost._update_avatar` consumption.
+Live-verified (`godot/tests/body_reload_probe.gd(.tscn)`, ONED PIE, JOX 05TR, F4 + R
+through the real input path, completion waited by state): mid-reload
+`body_anim_key=anim_reload` playhead advancing, the R-forearm mask bone 73.3° off the
+locomotion pose, clean mirror return post-reload.
+
+Deferred (all riding the unparsed AdmDef kind dwords @0x24E8084/+4 or later slices):
+the hold poses 50–61 + binoculars 64 + reload2/pistol keying, the 62/63 knife/grenade
+attack stamps (no knife/grenade equip path yet), the +0x371 arms-dip feed, blend
+windows on channel re-init (D-INF-1), NPC/remote threading (D-NET-117). Reimpl
+divergence to note: unknown body keys NO-OP in our host (`play_body_clip`), where the
+original backfills missing states with the RESET clip (§14.8.1) — invisible for the
+ported slice (player bodies ship `anim_reload`), revisit with the holdables slice.
+
+Follow-ups: `NapiNPClientMsg_0x02D` (+0x2C8 writer) semantics; the org1 AI writer
+`@ 0x4b9a28`; the AdmDef kind dwords' `.adm`-file key names (which .adm text keys set
+0x24E8084+0/+4 — data sweep); `WeaponSlot_InitFromAvatarDef`'s spawn-time window stamp
+(does retail visibly reload on spawn?).
+
+### 14.8.8 IDB write-backs (2026-07-09 session, saved)
+
+Renamed: `off_8135F0 → g_animStateNameTable` (anchored: "reload" string data xref at
+index 65, "wpn_idle" at 241 = §5.62's global slot 241, `AnimMap_FindSlotByName` scan).
+Entry/line comments: `0x53f830` (FP-channel correction), `0x541720` (+0x372 stamp),
+`0x40b8c0` (state pairs + swap protocol), `0x4b5dad` (selection block), `0x542bcb` /
+`0x42f79d` (attack stamps), `0x4b14a7` (mask gate), `0x4b21b0` (wobble gate),
+`0x8135f0` (table layout). **Proposed, NOT applied** (curated-name policy):
+`GamePlayerEntity.prevAnimStateId(+0x2C8) → animStateIdWpn`,
+`pad_2c4(+0x2C4) → animStateDeferredWpn`, `+0x370/371/372 →
+prevHeldAdmIndex/armsDipTicks/reloadAnimTicks`.

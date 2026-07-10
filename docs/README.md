@@ -87,7 +87,7 @@ behavior is summarized and cited.
 | 3DI | [`threedi/3di-lw-format-re.md`](threedi/3di-lw-format-re.md) | unlanded: Land Warrior import, PR #45 closed |
 | VFS/PFF | [`vfs/vfs-pff-mount-re.md`](vfs/vfs-pff-mount-re.md) | landed (PAR-R7 audit: the mount stack, resolution order, /d gate, D-VFS-1..9) |
 | World | [`world/itemdef-re.md`](world/itemdef-re.md) | landed |
-| World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide; §14 third-person body aim overlay / torso bend + camera modes, engine-research 2026-07-08 — port pending D-INF-11) |
+| World | [`world/world-wac-ai-re.md`](world/world-wac-ai-re.md) | landed (+ §13 held-weapon mount-hide; §14 third-person body aim overlay / torso bend + camera modes, local player ported 2026-07-08; §14.8 upper-body weapon channel producer, local player ported 2026-07-09 — remainder tracked D-INF-11) |
 
 The UNAUDITED set was emptied by the PAR-R1..R7 sweep (2026-07-05), then
 reopened the same day with the three runtime-render systems the REN track

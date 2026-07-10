@@ -1309,6 +1309,15 @@ void NovaSimulation::tick_local_player_weapon() {
 	if (ev.fired) ++weapon_fired_serial_;
 	if (ev.dry_fired) ++weapon_dry_serial_;
 	if (ev.reload_requested) ++weapon_reload_serial_;
+	if (ev.reload_applied) {
+		// The refill stamps the 3P body reload-anim window on the entity — 80 ticks; the
+		// infantry weapon channel then wants state 65 reload until it expires (and the
+		// locked clip plays to its end). In the original the stamp lives inside the
+		// refill itself; the SP/listen-host loopback applies it at reload start.
+		// [orig: WeaponSlot_ReloadAmmo @ 0x54173c; world-wac-ai-re.md §14.8.5]
+		AiEntity *p = world_->ai ? world_->ai->for_handle(world_->cached.local_player) : nullptr;
+		if (p && p->inf.active) p->inf.reload_anim_ticks = 80;
+	}
 	// The FSM's scope side effects land on the sim-owned engaged bit: forced
 	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
 	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
@@ -1337,6 +1346,21 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	out["clip"] = weapon_slot_.clip;
 	out["reserve"] = weapon_slot_.reserve;
 	out["kick"] = static_cast<int>(weapon_slot_.kick);
+	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
+	// + its own playhead for the host's mask-bone override. Empty key when the channel
+	// mirrors the primary (identity without blend windows — D-INF-1) or when the
+	// override gate is off (weapon in hands + primary state flag 0x40)
+	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
+	out["body_anim_key"] = String();
+	out["body_anim_phase"] = 0;
+	if (world_ && world_->ai && world_->cached.local_player.valid()) {
+		const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+		if (p && p->inf.active && p->inf.wpn_state != p->inf.anim_state &&
+				(opennova::world::infantry_anim_flags(p->inf.anim_state) & 0x40u) != 0) {
+			out["body_anim_key"] = infantry_anim_key(p->inf.wpn_state);
+			out["body_anim_phase"] = p->inf.wpn_clip_phase;
+		}
+	}
 	return out;
 }
 

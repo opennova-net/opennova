@@ -22,6 +22,12 @@ var rescope_serial := 0
 var clip := 0              # rounds in the magazine
 var reserve := 0           # carried pool, rounds
 var kick := 0              # recoil kick intensity 0..20 [orig: MountSlot+0x5B]
+# The 3P body's upper-body weapon channel (the entity's SECONDARY AnimMap channel):
+# the body .adm clip key (e.g. "anim_reload") posed at its OWN playhead on the mask
+# bones, empty when the channel mirrors locomotion or the override gate is off.
+# [orig: producer @0x4b5dad + gate @0x4b14a7; docs/world/world-wac-ai-re.md §14.8]
+var body_anim_key := ""
+var body_anim_phase := 0   # half-frame ticks, the play_body_clip_at convention
 
 
 ## Decode one weapon-state dict; null when the FSM is inactive (no weapon installed).
@@ -41,4 +47,6 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.clip = int(d.get("clip", 0))
 	out.reserve = int(d.get("reserve", 0))
 	out.kick = int(d.get("kick", 0))
+	out.body_anim_key = String(d.get("body_anim_key", ""))
+	out.body_anim_phase = int(d.get("body_anim_phase", 0))
 	return out

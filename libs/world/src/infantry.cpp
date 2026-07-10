@@ -408,6 +408,59 @@ void AiSystem::infantry_select(AiEntity &e) {
 }
 
 // ----------------------------------------------------------------------------
+// The upper-body weapon channel — the entity's SECONDARY AnimMap channel.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 (selection + commit)
+//  + AnimMap_UpdateDualChannels @0x40b8c0 (advance; deferred promotion at clip end
+//  via AnimMap_UpdateEntity @0x40b77b); witness world-wac-ai-re.md §14.8]
+// ----------------------------------------------------------------------------
+void AiSystem::infantry_weapon_channel(AiEntity &e) {
+    InfantryState &inf = e.inf;
+
+    // The 3P reload-anim window counts down once per tick [orig: @0x4b5cf9].
+    if (inf.reload_anim_ticks > 0) --inf.reload_anim_ticks;
+
+    // Desired state [orig: @0x4b5dad..0x4b5e6f]. The hold-pose family (50-61 by the
+    // AdmDef kind dword @0x24E8084, binoculars 64, scoped variants) and reload2 (66,
+    // kind==2 pistol) ride the unparsed AdmDef kind fields, so the witnessed rifle
+    // default applies: MIRROR the primary state — 43 idle when the primary is locked
+    // (flag 4) [orig: @0x4b5e37..0x4b5e46].
+    int desired = (infantry_anim_flags(inf.anim_state) & 0x4u) != 0 ? anim_state::kIdle
+                                                                    : inf.anim_state;
+    if (inf.reload_anim_ticks > 0) desired = anim_state::kReload; // 65 [orig: @0x4b5e67]
+
+    // Commit [orig: @0x4b5e72]: same -> skip; a locked (flag 4: attacks 62/63, reloads
+    // 65/66) or emote (0x20) current defers the change to clip end; else stamp now.
+    if (desired != inf.wpn_state) {
+        const uint32_t curf = infantry_anim_flags(inf.wpn_state);
+        if ((curf & 0x4u) != 0 || (curf & 0x20u) != 0) {
+            inf.wpn_deferred = desired; // [orig: @0x4b5e88/@0x4b5e95]
+        } else {
+            inf.wpn_state = desired;    // [orig: @0x4b5e9d]
+            inf.wpn_deferred = 0;       // [orig: @0x4b5ea3]
+            inf.wpn_clip_phase = 0;     // channel re-init (D-INF-1: no blend window)
+        }
+    }
+
+    // Deferred promotion when the playing clip reaches its end — the channel end-flag
+    // path [orig: AnimMap_UpdateEntity @0x40b77b, reached through the @0x40b8c0 swap].
+    if (inf.wpn_deferred != 0 && root_motion != nullptr) {
+        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.wpn_state);
+        if (len >= 0 && inf.wpn_clip_phase >= len) {
+            inf.wpn_state = inf.wpn_deferred;
+            inf.wpn_deferred = 0;
+            inf.wpn_clip_phase = 0;
+        }
+    }
+
+    // Advance the secondary playhead every tick; root motion is DISCARDED — the weapon
+    // layer never feeds the parent transform [orig: parentEntity=0 @0x40b8f3].
+    if (root_motion != nullptr) {
+        RootMotionFrame discard;
+        root_motion->advance(inf.adm_id, inf.wpn_state, inf.wpn_clip_phase, discard);
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Slope sampling + slide (every 8 ticks). [orig: 0x4b9910 dump 930-1000]
 // ----------------------------------------------------------------------------
 void AiSystem::infantry_slope_slide(AiEntity &e) {
@@ -533,6 +586,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         inf.jump_requested = false;
         infantry_select(e);
+        // The secondary (weapon) channel runs beside the primary selection — local
+        // player slice; NPC/remote threading rides D-NET-117. [orig: the same body
+        // updater drives both pairs @0x4b40e0; witness §14.8]
+        infantry_weapon_channel(e);
     } else if (is_authority && (key & 15u) == 0) {
         // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
