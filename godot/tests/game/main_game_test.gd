@@ -47,10 +47,10 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 	# old handler read nonexistent "text"/"message" keys, so mission text never
 	# reached the HUD.
 	var game := _make()
-	game._on_mission_effects([
+	game.apply_mission_effects([
 		{"kind": "dialog", "a": 3},
 		{"kind": "text", "str": "Proceed to the beach"},
 		{"kind": "text", "str": ""},
 	])
-	assert_eq(game._hud_objective, "Proceed to the beach",
+	assert_eq(game.hud_objective_line(), "Proceed to the beach",
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
