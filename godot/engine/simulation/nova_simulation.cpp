@@ -462,6 +462,92 @@ int NovaSimulation::local_player_blink_flags() const {
 	return static_cast<int>(collision_world_.local_player_blink_flags);
 }
 
+namespace {
+// Mission-space 16.16 triple -> Godot world space: (x, y, z) -> (x, z, -y) units.
+inline Vector3 godot_from_fixed3(const int32_t p[3]) {
+	return Vector3(static_cast<float>(p[0] / 65536.0), static_cast<float>(p[2] / 65536.0),
+	               static_cast<float>(-p[1] / 65536.0));
+}
+} // namespace
+
+Dictionary NovaSimulation::get_collision_debug() const {
+	Dictionary out;
+	Array instances;
+	Dictionary player;
+	player["valid"] = false;
+	out["instances"] = instances;
+	out["player"] = player;
+	if (!world_) return out;
+
+	// Anchor the sweep on the local player when one is spawned (150u box, the
+	// resolver's own neighborhood scale); an editor preview with no player sweeps
+	// the whole table up to the instance cap.
+	int32_t anchor[3] = {0, 0, 0};
+	int32_t range = -1;
+	const opennova::world::Entity *lp =
+	    world_->cached.local_player.valid() ? world_->registry.get(world_->cached.local_player)
+	                                        : nullptr;
+	if (lp != nullptr) {
+		anchor[0] = opennova::world::to_fixed(lp->position.x);
+		anchor[1] = opennova::world::to_fixed(lp->position.y);
+		anchor[2] = opennova::world::to_fixed(lp->position.z);
+		range = 150 << 16;
+	}
+	const std::vector<opennova::world::CollisionWorld::DebugInstance> insts =
+	    collision_world_.debug_instances(*world_, anchor, range, 128);
+	for (const opennova::world::CollisionWorld::DebugInstance &inst : insts) {
+		Dictionary d;
+		d["entity_handle"] = static_cast<int>(inst.handle.packed);
+		d["pos"] = godot_from_fixed3(inst.pos);
+		d["heading"] = static_cast<float>(
+		    opennova::world::mission_yaw_deg_from_bam_heading(inst.heading_bam));
+		Array vols;
+		for (const opennova::world::CollisionWorld::DebugVolume &v : inst.volumes) {
+			Dictionary vd;
+			vd["type"] = v.type;
+			vd["min_x"] = static_cast<float>(v.min[0] / kFixed16);
+			vd["max_x"] = static_cast<float>(v.max[0] / kFixed16);
+			vd["min_y"] = static_cast<float>(v.min[1] / kFixed16);
+			vd["max_y"] = static_cast<float>(v.max[1] / kFixed16);
+			vd["min_z"] = static_cast<float>(v.min[2] / kFixed16);
+			vd["max_z"] = static_cast<float>(v.max[2] / kFixed16);
+			PackedVector3Array corners;
+			corners.resize(8);
+			Vector3 *cw = corners.ptrw();
+			for (int c = 0; c < 8; ++c) cw[c] = godot_from_fixed3(v.corners[c]);
+			vd["corners"] = corners;
+			vols.push_back(vd);
+		}
+		d["volumes"] = vols;
+		instances.push_back(d);
+	}
+
+	// The local player's last full resolve: the capsule test points the resolver
+	// queried and the returned foot clearance (CollisionWorld::LocalResolveDebug).
+	const opennova::world::CollisionWorld::LocalResolveDebug &lrd =
+	    collision_world_.local_resolve_debug;
+	if (lrd.valid) {
+		player["valid"] = true;
+		player["position"] = godot_from_fixed3(lrd.pos);
+		PackedVector3Array pts;
+		pts.resize(3);
+		Vector3 *pw = pts.ptrw();
+		PackedFloat32Array radii;
+		radii.resize(3);
+		float *rw = radii.ptrw();
+		for (int i = 0; i < 3; ++i) {
+			pw[i] = godot_from_fixed3(lrd.points[i]);
+			rw[i] = static_cast<float>(lrd.radii[i] / kFixed16);
+		}
+		player["points"] = pts;
+		player["radii"] = radii;
+		player["capsule_bottom"] = static_cast<float>(lrd.capsule_bottom / kFixed16);
+		player["capsule_top"] = static_cast<float>(lrd.capsule_top / kFixed16);
+		player["foot_clearance"] = static_cast<float>(lrd.foot_clearance / kFixed16);
+	}
+	return out;
+}
+
 bool NovaSimulation::local_player_in_armory_zone() const {
 	if (!world_) return false;
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
@@ -786,6 +872,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
 	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
 	                     &NovaSimulation::resolve_collision_instances);
+	ClassDB::bind_method(D_METHOD("get_collision_debug"), &NovaSimulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
 	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
