@@ -20,6 +20,10 @@ extends Control
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+# The interactive-music service script (statics/constants); the live service is the
+# NovaMusicService autoload, resolved via the tree so -s probes (no autoloads)
+# still compile the shell.
+const MusicServiceScript := preload("res://engine/world/nova_music_service.gd")
 
 # Var index the director sets to the current screen's MUSICVAR. The menumus MUS
 # script reads its section discriminator at var INDEX 2 (golden test
@@ -212,7 +216,8 @@ func _assemble_assets() -> void:
 	# The one music context lives on the NovaMusicService autoload (the original
 	# streams one AudioVM context at a time); the menu pushes each screen's
 	# MUSICVAR into its director at the menumus discriminator index.
-	_menu.set_music_director(NovaMusicService.director())
+	if _music_service() != null:
+		_menu.set_music_director(_music_service().director())
 	_menu.set_music_var_index(MUSIC_VAR_INDEX)
 	# Pin the menu root at the top-left, sized to the 800x600 design space; the
 	# anamorphic scale is applied per-resize in _recompute_fit. Top-left anchors keep
@@ -545,7 +550,13 @@ func _on_mission_activated(index: int) -> void:
 # it when the front end returns; the GAME context is the world's to open at
 # mission start [orig: Game_StartMission @ 0x525598]).
 func _enter_menu_music() -> void:
-	NovaMusicService.open_menu_context(_root, menu_music_file, menu_sound_bank_file)
+	if _music_service() != null:
+		_music_service().open_menu_context(_root, menu_music_file, menu_sound_bank_file)
+
+
+# The NovaMusicService autoload, tree-resolved (null in autoload-less probes).
+func _music_service() -> Node:
+	return get_node_or_null(^"/root/NovaMusicService")
 
 
 # --- Asset resolution helpers (all best-effort, degrade to null) --------------
@@ -574,7 +585,7 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 # this seam keeps it queryable against the shell's root (ADR 0018 — tests and
 # diagnostics read it here, not the privates).
 func resolve_music_pair(prefix: String, base_stem: String) -> MusicPair:
-	return NovaMusicService.resolve_music_pair(_root, prefix, base_stem)
+	return MusicServiceScript.resolve_music_pair(_root, prefix, base_stem)
 
 
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
@@ -690,7 +701,7 @@ func get_menu() -> NovaMnuMenu:
 
 
 func get_music_director() -> NovaMusicDirector:
-	return NovaMusicService.director()
+	return _music_service().director() if _music_service() != null else null
 
 
 func get_current_menu_file() -> String:

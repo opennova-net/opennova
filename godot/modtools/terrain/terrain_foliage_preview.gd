@@ -104,9 +104,10 @@ func set_preview_state(
 		# Consumer applies polytrn_origin + sector_grid shift (editor has both
 		# via EditorTerrainMesh).
 		_dispatcher.foliage_sampler = Callable(self, "_sample_foliage_index")
-		# FAR consumes the raw surface/charmap byte, at the original
-		# Terrain_GetSurfaceTypeAtFixedPoint(x, -z) call boundary.
-		_dispatcher.surface_sampler = Callable(self, "_sample_surface_mask")
+		# FAR consumes the foliagemap remapped through the def match values, at
+		# the original (x, -z) call boundary [orig: Foliage_SampleFarMapMask
+		# @ 0x6066d0 over the load-remapped map @ 0x605AD0/0x5FF4E0].
+		_dispatcher.surface_sampler = Callable(self, "_sample_far_mask")
 		_pending_flush = true
 
 	if surface_changed or map_changed or sel_changed:
@@ -140,22 +141,22 @@ func _sample_foliage_index(world_x: float, world_z: float) -> int:
 	return int(_foliage_map.get_index(map_x, map_y))
 
 
-# Raw charmap byte for FAR. native_z is already -candidate_world_z, matching
-# the original query boundary; the surface function itself indexes with -z.
-func _sample_surface_mask(world_x: float, native_z: float) -> int:
-	if _surface_map == null:
+# The FAR def-slot mask: the foliagemap pixel remapped through the def match
+# values (pixel == match -> bit(def); pixel 0 never matches) [orig:
+# Foliage_SampleFarMapMask @ 0x6066d0; remap sub_605AD0 -> sub_5FF4E0].
+# native_z is already -candidate_world_z (the witnessed argument boundary);
+# the pixel resolves through the editor's shared world->map chain — the same
+# resolution the runtime uses on the atlas-normalized map resource.
+func _sample_far_mask(world_x: float, native_z: float) -> int:
+	var pixel := _sample_foliage_index(world_x, -native_z)
+	if pixel == 0:
 		return 0
-	var w := _surface_map.get_width()
-	var h := _surface_map.get_height()
-	if w <= 0 or h <= 0:
-		return 0
-	var wrapped_x := posmod(int(floor(world_x)), 1024)
-	var wrapped_z := posmod(int(floor(-native_z)), 1024)
-	var map_x := _surface_map.map_x_from_heightmap_x(wrapped_x)
-	var map_y := _surface_map.map_y_from_heightmap_y(wrapped_z)
-	if map_x < 0 or map_x >= w or map_y < 0 or map_y >= h:
-		return 0
-	return int(_surface_map.get_index(map_x, map_y))
+	var mask := 0
+	for d in mini(_foliage_defs.size(), 4):
+		var def := _foliage_defs[d]
+		if def != null and def.get_match() >= 0 and pixel == def.get_match():
+			mask |= 1 << d
+	return mask
 
 
 func mark_dirty() -> void:

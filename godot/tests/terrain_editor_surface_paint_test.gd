@@ -45,43 +45,47 @@ func test_nova_terrain_data_charmap_state_roundtrips() -> void:
 	assert_not_null(data.get_charmap_tex(), "Editing charmap slot state should rebuild the preview texture.")
 
 
-func test_nova_terrain_data_surface_mask_pins_native_sign_wrap_and_downscale() -> void:
+func test_nova_terrain_data_far_mask_pins_match_remap_over_shared_resolve() -> void:
+	# The FAR gate samples the FOLIAGEMAP remapped through the def match values
+	# — pixel == match -> bit(def), pixel 0 never matches [orig:
+	# Foliage_SampleFarMapMask @ 0x6066d0 over the load-remap sub_605AD0 ->
+	# sub_5FF4E0]. The charmap (the walking-surface map) is NOT a foliage
+	# input. On our atlas-normalized map resource the world->pixel resolution
+	# is the shared sector-routed chain, so the pin is: far mask ==
+	# match-remap(get_foliage_index_world) at the witnessed (x, -worldZ)
+	# argument boundary.
 	var data := NovaTerrainData.new()
 	data.set_trn_path(DVXI5_TRN)
 	assert_eq(data.load(), OK, "The production sampler fixture must be a loaded NovaTerrainData.")
 	if not data.is_loaded():
 		return
+	assert_eq(data.load_foliage_indices(), OK, "The fixture's foliagemap must load.")
 
-	# A deliberately non-1024 raster makes the 1024-domain downscale observable.
-	# Bytes are slot masks, including a non-one-hot value that must survive raw.
-	var indices := PackedByteArray([
-		0x01, 0x02, 0x04, 0x08,
-		0x10, 0x20, 0x40, 0xA5,
-	])
-	var palette := PackedByteArray()
-	palette.resize(256 * 3)
-	data.set_pcx_slot_state("charmap", {
-		"width": 4,
-		"height": 2,
-		"indices": indices,
-		"palette": palette,
-	})
+	var defs: Array = []
+	var matches: Array = []
+	for d in data.get_foliage_defs():
+		matches.append(int(d.get_match()))
+	assert_gt(matches.size(), 0, "The Dvxi5 fixture authors foliage defs.")
 
-	assert_eq(data.get_surface_mask_world(255.999, -1.0), 0x01,
-		"X stays in downscaled column 0 below the 256u boundary.")
-	assert_eq(data.get_surface_mask_world(256.0, -1.0), 0x02,
-		"X enters downscaled column 1 at the 256u boundary.")
-	assert_eq(data.get_surface_mask_world(1024.0 + 256.0, -1.0), 0x02,
-		"X wraps in the native 1024u domain before downscaling.")
-	assert_eq(data.get_surface_mask_world(-1.0, -1.0), 0x08,
-		"Negative X wraps to native column 1023, then downscales to the final pixel.")
-
-	assert_eq(data.get_surface_mask_world(0.0, -1.0), 0x01,
-		"The callee's internal -native_z maps native -1 to raster row 0.")
-	assert_eq(data.get_surface_mask_world(0.0, 1.0), 0x10,
-		"The opposite native sign wraps -1 to row 1023 and selects raster row 1.")
-	assert_eq(data.get_surface_mask_world(1023.0, 1.0), 0xA5,
-		"The sampler returns the raw unsigned surface byte without palette or def translation.")
+	var painted := 0
+	var empty := 0
+	for wz in range(8, 1016, 56):
+		for wx in range(8, 1016, 56):
+			var pixel: int = data.get_foliage_index_world(float(wx), float(wz))
+			var expected := 0
+			if pixel != 0:
+				for d in matches.size():
+					if matches[d] >= 0 and pixel == matches[d]:
+						expected |= 1 << d
+			var got: int = data.get_foliage_far_mask_world(float(wx), -float(wz))
+			assert_eq(got, expected,
+				"far mask == match-remap(foliagemap pixel %d) at native (%d, %d)" % [pixel, wx, wz])
+			if expected != 0:
+				painted += 1
+			else:
+				empty += 1
+	assert_gt(painted, 0, "The sweep must cross painted foliage (else the pin is vacuous).")
+	assert_gt(empty, 0, "The sweep must cross unpainted ground (else the pin is vacuous).")
 
 
 func test_surface_type_labels_match_charmap_legend() -> void:

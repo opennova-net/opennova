@@ -29,6 +29,11 @@ const NovaModelResolver := preload("res://engine/mission/nova_model_resolver.gd"
 const NetWorldView := preload("res://engine/world/net_world_view.gd")
 const NetEventView := preload("res://engine/world/net_event_view.gd")
 const SkeletonDebugView := preload("res://engine/debug/skeleton_debug_view.gd")
+# The shared interactive-music service script (constants) — the live service is the
+# NovaMusicService autoload, resolved via the tree in _music_service() so the engine
+# layer never names the shell autoload identifier (host-neutral; -s probes and
+# headless flows run without autoloads and must still compile).
+const MusicServiceScript := preload("res://engine/world/nova_music_service.gd")
 const NET_CONTAINER_NAME := "NetObjects"
 const SKELETON_DEBUG_NAME := "SkeletonDebug"
 const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick()'s delta param
@@ -53,6 +58,7 @@ signal mission_effects(effects: Array)
 @onready var _terrain: NovaTerrain = $NovaTerrain
 @onready var _env: Node = get_node_or_null("NovaEnvironment")
 @onready var _water: Node = get_node_or_null("NovaWater")
+@onready var _music: Node = get_node_or_null(^"/root/NovaMusicService")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: NovaFoliageDispatcher
@@ -484,7 +490,8 @@ func unload() -> void:
 		_mission_audio.teardown()
 	# Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
 	# The game shell re-opens menu music on its return to the front end.
-	NovaMusicService.stop_context()
+	if _music != null:
+		_music.stop_context()
 	if _env != null and _env.environment_data != null:
 		_env.environment_data.clear_mission_overrides()
 	_loaded = false
@@ -1074,7 +1081,8 @@ func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	# (docs/audio/mus-sbf-re.md §Game music driving; SP-as-listen-server, ADR
 	# 0009/0011/0012). gamemus's discriminator Var1 stays 0 (never written in
 	# retail), so the Multiplayerstart P0 loop plays.
-	NovaMusicService.open_game_context(_resource_root)
+	if _music != null:
+		_music.open_game_context(_resource_root)
 
 
 func get_mission_audio() -> NovaMissionAudio:
@@ -1093,13 +1101,13 @@ func get_mission_audio() -> NovaMissionAudio:
 # (Entity_FindNearestThreat @ 0x4b0990 unported), Var3/Var4 (low-confidence),
 # Var8 game type (retail scoring-mode ids not yet mapped to our sessions).
 func _music_var_pump() -> void:
-	if not has_local_player():
+	if _music == null or not has_local_player():
 		return
 	var max_h := local_player_max_health()
 	var cur_h := local_player_health()
-	NovaMusicService.set_var(NovaMusicService.VAR_HEALTH_PCT,
+	_music.set_var(MusicServiceScript.VAR_HEALTH_PCT,
 		(cur_h * 100 / max_h) if max_h > cur_h else 100)
-	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, local_player_team())
+	_music.set_var(MusicServiceScript.VAR_TEAM, local_player_team())
 
 
 # --- Frame clear color (env divergence #21, closed) ----------------------------

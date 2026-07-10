@@ -1252,20 +1252,25 @@ bool NovaFoliageDispatcher::_scatter_cell(int slot_index,
 
 	samplers.slot_mask_at = [this, td](Fixed16_16 wx, Fixed16_16 wz) -> uint32_t {
 		const float wx_f = static_cast<float>(wx) * opennova::foliage::FIXED_TO_FLOAT;
-		// place_cell() already supplies the witnessed Terrain_GetSurfaceTypeAtFixedPoint
-		// boundary coordinate (world X, -world Z).
-		const float native_z =
+		// place_cell() supplies -cellZ [orig: Foliage_SampleFarMapMask
+		// @ 0x6066d0 over the match-remapped foliagemap, NOT a charmap]. The
+		// host's FAR cells are keyed in Godot render space (z = -native), so
+		// the incoming value is TRUE native z; the witnessed sampler argument
+		// is -nativeZ — negate to restore it. (Native-keyed cells — retail's
+		// PRNG key provenance — are tracked as D-FOLIAGE-8.)
+		const float incoming_native_z =
 		    static_cast<float>(wz) * opennova::foliage::FIXED_TO_FLOAT;
-		int surface_mask = 0;
+		const float witnessed_arg = -incoming_native_z;
+		int far_mask = 0;
 		if (td != nullptr) {
-			surface_mask = td->get_surface_mask_world(wx_f, native_z);
+			far_mask = td->get_foliage_far_mask_world(wx_f, witnessed_arg);
 		} else if (surface_sampler_.is_valid()) {
 			Array args;
 			args.push_back(wx_f);
-			args.push_back(native_z);
-			surface_mask = static_cast<int>(surface_sampler_.callv(args));
+			args.push_back(witnessed_arg);
+			far_mask = static_cast<int>(surface_sampler_.callv(args));
 		}
-		return static_cast<uint32_t>(surface_mask) & 0xFFu;
+		return static_cast<uint32_t>(far_mask) & 0xFFu;
 	};
 
 	opennova::foliage::PlacementConfig config;
