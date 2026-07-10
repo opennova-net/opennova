@@ -268,6 +268,14 @@ struct Entity {
     // record write @0x4c0a1a]
     uint8_t mount_bone = 0;
 
+    // The packed blink-box hits this entity currently sits inside (up to 4), refreshed by
+    // the collision pass: ((section & 0x1F) | (pool_index << 8)) << 12. The renderer's
+    // interior-lighting group selection reads these; hit presence + accum flag bit 2 set
+    // the Flags 0x800000 "indoors" bit. [orig: the per-entity blink quad stamped by
+    // Entity_BuildProximityList @ 0x4b406b / Entity_ProcessCollisionAndPlatformPhysics
+    // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
+    uint32_t blink_hits[4] = {};
+
     // Standing-on carrier (entity+0x28 groundEntity): the entity this one stands ON — a
     // building floor, a vehicle deck — any pool. Retail's platform physics maintains it
     // every tick (Flags |= 0x100000 + groundEntity = platform

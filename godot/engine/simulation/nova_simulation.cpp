@@ -32,6 +32,7 @@
 #include <world/spawn_select.h>
 
 #include "object/nova_item_database.h"
+#include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
 #include "resource_index/nova_resource_root.h"
 #include "terrain/nova_terrain_data.h"
 
@@ -183,8 +184,12 @@ void NovaSimulation::reset_world() {
 	last_net_tick_us_ = 0;
 	last_present_snapshot_us_ = 0;
 	last_present_entity_count_ = 0;
+	// Collision models/instances are mission-scoped: drop them with the world (the
+	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
+	collision_world_ = opennova::world::CollisionWorld{};
 	apply_terrain_to_ai(); // re-point the fresh ai_ at the persisted terrain field (if any)
 	apply_root_motion_to_ai(); // ...and at the persisted infantry clip set (if any)
+	apply_collision_to_ai();
 }
 
 // Re-point the (possibly just-rebuilt) AI system at our owned terrain field. The field's raw
@@ -195,6 +200,8 @@ void NovaSimulation::apply_terrain_to_ai() {
 	if (!ai_) return;
 	ai_->terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	ai_->ground_clearance = opennova::world::GroundClearance{};
+	// The collision ground probe shares the same field.
+	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 }
 
 // Re-point the (possibly just-rebuilt) AI system at the owned infantry root-motion source.
@@ -334,6 +341,151 @@ void NovaSimulation::resolve_item_traits(const Ref<NovaItemDatabase> &p_item_db)
 	// the latch is Server_UpdateCaptureZoneEntities' first act @0x519764; net-re §5.61]
 	opennova::world::zone_chain_build_from_mission(*world_, world_->zone_chain);
 	opennova::world::zone_chain_latch_control(*world_, world_->zone_chain);
+}
+
+namespace {
+
+// Build the runtime collision model from a parsed .3di collision IR block — the exact
+// inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
+// libs/threedi/src/threedi_3di3.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
+// grouping (volumes are sequential per object in the IR conversion). Returns false when
+// the model carries no volumes.
+bool collision_model_from_ir(const ThreediIRCollision *col,
+                             opennova::world::CollisionModel &out) {
+	if (col == nullptr || col->volume_count == 0) return false;
+	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * 65536.0)); };
+
+	out.planes.reserve(col->plane_count);
+	for (size_t i = 0; i < col->plane_count; ++i) {
+		const ThreediIRCollisionPlane &sp = col->planes[i];
+		opennova::world::CollisionPlane p;
+		p.nx = static_cast<int16_t>(std::lround(sp.normal[0] * 16384.0f));
+		p.ny = static_cast<int16_t>(std::lround(sp.normal[1] * 16384.0f));
+		p.nz = static_cast<int16_t>(std::lround(sp.normal[2] * 16384.0f));
+		p.dist = fx(sp.distance);
+		out.planes.push_back(p);
+	}
+
+	out.volumes.reserve(col->volume_count);
+	int32_t max_object = 0;
+	for (size_t i = 0; i < col->volume_count; ++i) {
+		const ThreediIRCollisionVolume &sv = col->volumes[i];
+		opennova::world::CollisionVolume v;
+		v.type = sv.type;
+		v.flags = static_cast<uint32_t>(sv.flags);
+		v.min_x = fx(sv.min[0]);
+		v.max_x = fx(sv.max[0]);
+		v.min_y = fx(sv.min[1]);
+		v.max_y = fx(sv.max[1]);
+		v.min_z = fx(sv.min[2]);
+		v.max_z = fx(sv.max[2]);
+		v.plane_start = sv.plane_start;
+		v.plane_count = sv.plane_count;
+		out.volumes.push_back(v);
+		if (sv.object_index > max_object) max_object = sv.object_index;
+	}
+
+	// One section per collision object; object_index -1 (no COBJ) folds into section 0.
+	const int32_t section_count = max_object + 1;
+	out.sections.assign(static_cast<size_t>(section_count), {});
+	// Volumes are contiguous per object; derive the runs.
+	int32_t cursor = 0;
+	for (int32_t s = 0; s < section_count; ++s) {
+		opennova::world::CollisionSection &sec = out.sections[s];
+		sec.volume_start = cursor;
+		sec.volume_count = 0;
+		while (cursor < static_cast<int32_t>(col->volume_count)) {
+			const int32_t oi = col->volumes[cursor].object_index;
+			if ((oi < 0 ? 0 : oi) != s) break;
+			++sec.volume_count;
+			++cursor;
+		}
+		if (s < static_cast<int32_t>(col->object_count))
+			sec.part_index = col->objects[s].parent_subobject_index;
+	}
+	return true;
+}
+
+} // namespace
+
+void NovaSimulation::apply_collision_to_ai() {
+	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
+	if (ai_) ai_->collision = &collision_world_;
+}
+
+int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
+                                                Object *p_placer) {
+	if (!world_ || p_item_db.is_null() || p_placer == nullptr) return 0;
+	apply_collision_to_ai();
+	std::unordered_map<std::string, int32_t> model_by_graphic; // -1 = no collision block
+	std::vector<opennova::world::EntityHandle> handles;
+	world_->registry.for_each(
+			[&](const opennova::world::Entity &e) { handles.push_back(e.handle); });
+	int attached = 0;
+	for (const opennova::world::EntityHandle h : handles) {
+		opennova::world::Entity *e = world_->registry.get(h);
+		if (!e || e->kind == opennova::world::EntityKind::Organic ||
+		    e->kind == opennova::world::EntityKind::Marker)
+			continue;
+		const int def_id = static_cast<int>(e->item_id) + opennova::mission::kItemIdOffset;
+		const String graphic = p_item_db->get_graphic(def_id);
+		if (graphic.is_empty()) continue;
+		const std::string key(graphic.utf8().get_data());
+		auto it = model_by_graphic.find(key);
+		if (it == model_by_graphic.end()) {
+			int32_t model_id = -1;
+			// Duck-typed MissionObjectPlacer.object_data_for(graphic) — the placer's
+			// per-graphic NovaObjectData cache (the render path loads the same object).
+			Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
+			if (data.is_valid()) {
+				opennova::world::CollisionModel model;
+				if (collision_model_from_ir(data->native_ir().collision, model))
+					model_id = collision_world_.add_model(std::move(model));
+			}
+			it = model_by_graphic.emplace(key, model_id).first;
+		}
+		if (it->second >= 0) {
+			collision_world_.assign_entity(h, it->second);
+			++attached;
+		}
+	}
+	return attached;
+}
+
+bool NovaSimulation::local_player_indoors() const {
+	if (!world_) return false;
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e != nullptr && (e->flags & opennova::world::kEntityFlagIndoors) != 0;
+}
+
+int NovaSimulation::local_player_blink_flags() const {
+	return static_cast<int>(collision_world_.local_player_blink_flags);
+}
+
+bool NovaSimulation::local_player_in_armory_zone() const {
+	if (!world_) return false;
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e != nullptr && (e->flags & opennova::world::kEntityFlagArmoryZone) != 0;
+}
+
+bool NovaSimulation::local_player_in_vehicle_loadout_zone() const {
+	if (!world_) return false;
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e != nullptr &&
+	       (e->flags & opennova::world::kEntityFlagVehicleLoadoutZone) != 0;
+}
+
+bool NovaSimulation::apply_local_player_loadout(const String &p_weapon_name,
+                                                int p_player_class) {
+	if (!world_) return false;
+	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (e == nullptr) return false;
+	const int idx = world_->weapons.index_of(p_weapon_name.utf8().get_data());
+	if (idx < 0) return false;
+	e->equipped_adm_index = static_cast<uint8_t>(idx);
+	if (p_player_class >= 5 && p_player_class <= 9)
+		e->player_class = static_cast<uint8_t>(p_player_class);
+	return true;
 }
 
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
@@ -632,6 +784,14 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);
+	ClassDB::bind_method(D_METHOD("resolve_collision_instances", "item_db", "placer"),
+	                     &NovaSimulation::resolve_collision_instances);
+	ClassDB::bind_method(D_METHOD("local_player_indoors"), &NovaSimulation::local_player_indoors);
+	ClassDB::bind_method(D_METHOD("local_player_blink_flags"), &NovaSimulation::local_player_blink_flags);
+	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &NovaSimulation::local_player_in_armory_zone);
+	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &NovaSimulation::local_player_in_vehicle_loadout_zone);
+	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "weapon_name", "player_class"),
+	                     &NovaSimulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("load_weapon_table", "resource_root", "name"),
 	                     &NovaSimulation::load_weapon_table, DEFVAL(String("weapon.def")));
 	ClassDB::bind_method(D_METHOD("load_ammo_table", "resource_root", "name"),

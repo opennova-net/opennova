@@ -2,6 +2,7 @@ add_library(opennova_world STATIC
     src/entity_registry.cpp
     src/world.cpp
     src/ai.cpp
+    src/collision.cpp
     src/infantry.cpp
     src/infantry_tables.cpp
     src/entity_spawn.cpp
