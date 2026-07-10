@@ -61,11 +61,12 @@ func current_script() -> NovaMusicScript:
 ## no music is SILENT in retail. We diverge by grace: the expansion pair is used
 ## only when COMPLETE (both halves resolve); otherwise the base pair plays
 ## instead of silence. Bank and script always come from the SAME stem (the
-## script's play ops index that bank's entries), so halves are never mixed.
-## Returns {"bank": loose path or "", "script": VFS basename or ""}.
-static func resolve_music_pair(root, prefix: String, base_stem: String) -> Dictionary:
+## script's play ops index that bank's entries), so halves are never mixed —
+## the MusicPair typed record carries the two halves (ADR 0017).
+static func resolve_music_pair(root, prefix: String, base_stem: String) -> MusicPair:
+	var pair := MusicPair.new()
 	if root == null:
-		return {"bank": "", "script": ""}
+		return pair
 	var exp_name: String = root.get_expansion()
 	if not exp_name.is_empty():
 		var stem := prefix + exp_name
@@ -73,11 +74,12 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Dicti
 		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
 		var bank_path: String = root.get_root_dir().path_join("expansion").path_join(exp_name).path_join(stem + ".sbf")
 		if FileAccess.file_exists(bank_path) and root.has_file(stem + ".bin"):
-			return {"bank": bank_path, "script": stem + ".bin"}
-	return {
-		"bank": String(root.resolve_file(base_stem + ".sbf")),
-		"script": base_stem + ".bin" if root.has_file(base_stem + ".bin") else "",
-	}
+			pair.bank = bank_path
+			pair.script = stem + ".bin"
+			return pair
+	pair.bank = String(root.resolve_file(base_stem + ".sbf"))
+	pair.script = base_stem + ".bin" if root.has_file(base_stem + ".bin") else ""
+	return pair
 
 
 ## Open the MENU music context [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60:
@@ -87,10 +89,10 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Dicti
 ## Returns true when the context is loaded (audible start is headless-guarded).
 func open_menu_context(root, script_override := "", bank_override := "") -> bool:
 	var pair := resolve_music_pair(root, "M", "menumus")
-	var bank_path := String(pair.bank)
+	var bank_path := pair.bank
 	if not bank_override.is_empty() and root != null:
 		bank_path = String(root.resolve_file(bank_override))  # explicit override wins
-	return _open_context("menu", root, bank_path, String(pair.script), script_override)
+	return _open_context("menu", root, bank_path, pair.script, script_override)
 
 
 ## Open the GAME music context at mission start. The original opens it only for
@@ -105,7 +107,7 @@ func open_menu_context(root, script_override := "", bank_override := "") -> bool
 ## Var2..Var6 = 0, Var7 = 100 (health %), Var8..Var12 = 0.
 func open_game_context(root) -> bool:
 	var pair := resolve_music_pair(root, "G", "gamemus")
-	var opened := _open_context("game", root, String(pair.bank), String(pair.script), "")
+	var opened := _open_context("game", root, pair.bank, pair.script, "")
 	if opened:
 		for idx in range(SEEDED_VARS_FIRST, SEEDED_VARS_LAST + 1):
 			_director.set_var(idx, 100 if idx == VAR_HEALTH_PCT else 0)

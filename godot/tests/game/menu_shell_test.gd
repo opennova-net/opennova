@@ -401,10 +401,10 @@ func test_music_resolution_prefers_expansion_pair_then_base() -> void:
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
 			"M<n>.bin preferred over menumus.bin (complete pair)")
-	var menu_pair: Dictionary = host.resolve_music_pair("M", "menumus")
+	var menu_pair: MusicPair = host.resolve_music_pair("M", "menumus")
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
 		"the menu bank streams loose from the expansion folder")
-	var game_pair: Dictionary = host.resolve_music_pair("G", "gamemus")
+	var game_pair: MusicPair = host.resolve_music_pair("G", "gamemus")
 	assert_eq(String(game_pair.script), "gamemus.bin",
 		"incomplete G stem -> whole base pair (halves never mix across stems)")
 	root.clear()
@@ -440,7 +440,7 @@ func test_music_incomplete_expansion_bank_only_falls_back() -> void:
 	host.size = Vector2(800, 600)
 	add_child_autofree(host)
 	host.setup(root)
-	var pair: Dictionary = host.resolve_music_pair("G", "gamemus")
+	var pair: MusicPair = host.resolve_music_pair("G", "gamemus")
 	assert_eq(String(pair.script), "gamemus.bin",
 		"bank-only G stem (no G<n>.bin) -> base script, not a cross-stem mix")
 	assert_true(String(pair.bank).ends_with("gamemus.sbf"),
@@ -489,7 +489,7 @@ func test_music_resolution_falls_back_to_base_pair() -> void:
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin",
 			"fell back to MENUMUS.BIN")
-	var pair: Dictionary = host.resolve_music_pair("M", "menumus")
+	var pair: MusicPair = host.resolve_music_pair("M", "menumus")
 	assert_true(String(pair.bank).ends_with("menumus.sbf"), "base bank resolved loose from the root")
 	root.clear()
 	_rm_music_base_dir(dir)
