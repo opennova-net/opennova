@@ -354,16 +354,20 @@ static DefHudColor parse_hud_color_argb(Token *vals, int n) {
     return c;
 }
 
-/* Parse x,y,align from tokens */
+/* Parse a positioned-text token into (x, y, hidden, align) — the original's
+   4-dword global layout: field 3 is the hidden gate (0 = draw), field 4 the
+   alignment word (left=0/right=1/center=2). A 3-token (x, y, alignword) form
+   leaves hidden at 0. [orig: AMMOCOUNTPOS parse @0x59fc3d writes
+   x/y/hidden/align; the draws gate on the hidden dword @0x5939f3] */
 static void parse_pos_aligned(Token *vals, int n, int *out) {
     if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
     if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
     if (n >= 4) {
-        /* Fourth token is alignment */
+        out[2] = parse_int_n(vals[2].s, vals[2].len);
         char low[16];
         size_t ll = vals[3].len < 15 ? vals[3].len : 15;
         to_lower_buf(low, vals[3].s, ll);
-        out[2] = parse_alignment(low, ll);
+        out[3] = parse_alignment(low, ll);
     } else if (n >= 3) {
         char low[16];
         size_t ll = vals[2].len < 15 ? vals[2].len : 15;
@@ -371,7 +375,9 @@ static void parse_pos_aligned(Token *vals, int n, int *out) {
         if (memcmp(low, "left", ll < 4 ? ll : 4) == 0 ||
             memcmp(low, "center", ll < 6 ? ll : 6) == 0 ||
             memcmp(low, "right", ll < 5 ? ll : 5) == 0) {
-            out[2] = parse_alignment(low, ll);
+            out[3] = parse_alignment(low, ll);
+        } else {
+            out[2] = parse_int_n(vals[2].s, vals[2].len);
         }
     }
 }

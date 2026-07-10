@@ -68,8 +68,13 @@ func test_to_dictionary_shape() -> void:
 	var rects: Dictionary = d["rects"]
 	assert_eq(rects["health"], Rect2i(2, 739, 139, 18), "to_dictionary health rect matches getter.")
 	var positions: Dictionary = d["positions"]
-	assert_true(positions["ammo_count"] is Vector3i, "[3] positions are Vector3i (x,y,align).")
+	assert_true(positions["ammo_count"] is Vector4i, "[4] positions are Vector4i (x,y,hidden,align).")
 	assert_true(positions["stance"] is Vector2i, "[2] positions are Vector2i.")
+	# GAMEINFO 1013,430 (2 fields) -> hidden 0, align left.
+	assert_eq(positions["game_info"], Vector4i(1013, 430, 0, 0), "game_info carries x,y,hidden,align.")
+	var misc: Dictionary = d["misc"]
+	# ALPHAFADE 30 50 3 raw file fields (base %, max %, seconds).
+	assert_eq(misc["alpha_fade"], Vector3i(30, 50, 3), "alpha_fade raw triple exposed in misc.")
 
 
 func test_not_loaded_is_safe() -> void:

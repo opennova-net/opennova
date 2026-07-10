@@ -62,6 +62,19 @@ private:
 		// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc].
 		int special_hold = 0;
 		int attack_anim = 0;
+		// HUD weapon-coupled slice (docs/interface/hud-re.md): the 6-row dispersion
+		// table in DEGREES, rows = hip prone/crouch/stand then scoped prone/crouch/
+		// stand — the crosshair spread reads ERROR[stance + 3*scoped] [orig: weapon
+		// +0xB0 parse @0x543b21 (16.16); HUD_DrawCrosshair @0x592b84]. The clip
+		// graphic (HUDCLIPGFX: offset + texture [orig: parse @0x54427f]) and the
+		// per-round row (HUDRNDGFX: start x/y, step x/y, rounds-per-icon divisor,
+		// texture [orig: parse @0x5442fc -> weapon +644/+648/+652/+656/+727]).
+		float error[6] = { 0, 0, 0, 0, 0, 0 };
+		String hudclipgfx_texture;
+		int hudclipgfx_offset[2] = { 0, 0 };
+		String hudrndgfx_texture;
+		int hudrndgfx_offset[2] = { 0, 0 };
+		int hudrndgfx_layout[3] = { 0, 0, 0 }; // step_x, step_y, rounds-per-icon
 		// The weapon's ACTION blocks, verbatim rows for the weapon-FSM bake — Dicts
 		// {name, anim, function, delaystart, delayend} [orig: ActionDef_ParseScriptLine
 		// @ 0x4023c0; bound by Anim_InitActions @ 0x541fa0; net-re §5.62].

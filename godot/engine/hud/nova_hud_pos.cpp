@@ -15,8 +15,11 @@ Rect2i rect_from_corners(const int v[4]) {
 	return Rect2i(v[0], v[1], v[2] - v[0], v[3] - v[1]);
 }
 
-Vector3i pos3(const int v[3]) {
-	return Vector3i(v[0], v[1], v[2]);
+// Positioned text tokens keep the original's 4-dword layout: x, y, hidden
+// (0 = draw), alignment (0=left 1=right 2=center). [orig: AMMOCOUNTPOS parse
+// @0x59fc3d; the draws gate on the hidden dword @0x5939f3]
+Vector4i pos4(const int v[4]) {
+	return Vector4i(v[0], v[1], v[2], v[3]);
 }
 
 Vector2i pos2(const int v[2]) {
@@ -246,21 +249,21 @@ Dictionary NovaHudPos::to_dictionary() const {
 	rects["mrclippy_alternate"] = rect_from_corners(h.mrclippy_alternate);
 	out["rects"] = rects;
 
-	// [3] = (x, y, alignment); [2] = (x, y).
+	// [4] = (x, y, hidden, alignment); [2] = (x, y).
 	Dictionary positions;
-	positions["flag_carrier"] = pos3(h.flag_carrier);
-	positions["game_info"] = pos3(h.game_info);
-	positions["wpd_info"] = pos3(h.wpd_info);
-	positions["zone_info"] = pos3(h.zone_info);
-	positions["exp_points"] = pos3(h.exp_points);
-	positions["connect_status"] = pos3(h.connect_status);
-	positions["team_xy"] = pos3(h.team_xy);
-	positions["player_count"] = pos3(h.player_count);
-	positions["ammo_count"] = pos3(h.ammo_count_pos);
-	positions["weapon_name"] = pos3(h.weapon_name_pos);
-	positions["map_coords"] = pos3(h.map_coords);
-	positions["time_clock"] = pos3(h.time_clock);
-	positions["breath_time"] = pos3(h.breath_time);
+	positions["flag_carrier"] = pos4(h.flag_carrier);
+	positions["game_info"] = pos4(h.game_info);
+	positions["wpd_info"] = pos4(h.wpd_info);
+	positions["zone_info"] = pos4(h.zone_info);
+	positions["exp_points"] = pos4(h.exp_points);
+	positions["connect_status"] = pos4(h.connect_status);
+	positions["team_xy"] = pos4(h.team_xy);
+	positions["player_count"] = pos4(h.player_count);
+	positions["ammo_count"] = pos4(h.ammo_count_pos);
+	positions["weapon_name"] = pos4(h.weapon_name_pos);
+	positions["map_coords"] = pos4(h.map_coords);
+	positions["time_clock"] = pos4(h.time_clock);
+	positions["breath_time"] = pos4(h.breath_time);
 	positions["orders"] = pos2(h.orders);
 	positions["spec_mode_label"] = pos2(h.spec_mode_label);
 	positions["cargo"] = pos2(h.cargo_pos);
@@ -304,6 +307,10 @@ Dictionary NovaHudPos::to_dictionary() const {
 	misc["agl_radius"] = h.agl_radius;
 	misc["roc_len"] = h.roc_len;
 	misc["ping_right"] = h.ping_right;
+	// ALPHAFADE raw file fields: base%, max%, seconds. The original stores
+	// base*2.55 / max*2.55 (0..255 alpha) and seconds*62 (ticks); consumers do
+	// that conversion. [orig: alphafade parse @0x5a086c -> 0x2723614/18/1C]
+	misc["alpha_fade"] = Vector3i(h.alpha_fade[0], h.alpha_fade[1], h.alpha_fade[2]);
 	out["misc"] = misc;
 
 	return out;

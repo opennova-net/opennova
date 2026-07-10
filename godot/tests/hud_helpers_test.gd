@@ -45,12 +45,90 @@ func test_health_thresholds() -> void:
 
 func test_draw_helpers_null_safe() -> void:
 	# All draw helpers guard null inputs and must not crash.
-	HudCrosshair.draw(null, null, Vector2.ZERO)
+	HudCrosshair.draw(null, null, Vector2.ZERO, Vector2.ONE)
 	HudStance.draw(null, null, Vector2.ZERO, Vector2.ONE)
 	HudHealthBar.draw(null, Rect2(0, 0, 10, 2), 0.5, Color.GRAY, Color.GREEN, Color.YELLOW, Color.RED, Vector2.ONE)
 	HudText.draw_text(null, null, Vector2.ZERO, Vector2.ONE, "x", Color.WHITE)
+	HudWeaponText.draw_ammo(null, null, Vector4i.ZERO, 30, 90, 30, Color.WHITE, Vector2.ONE)
+	HudWeaponText.draw_weapon_name(null, null, Vector4i.ZERO, "AK-47", Color.WHITE, Vector2.ONE)
+	HudClipIndicator.new().draw(null, Vector2i(5, 579), {}, null, null, 12, 90,
+		Color.WHITE, Vector3i(30, 50, 3), 0, Vector2.ONE)
+	HudMessages.new().draw(null, null, Vector2.ZERO, Vector2.ONE, 0, 8, 100.0, Color.WHITE)
 	assert_true(true, "Null-guarded draw helpers returned without error.")
 
 
 func test_load_font_null_safe() -> void:
 	assert_null(HudText.load_font(null, "anything.fnt"), "Null root returns null font.")
+
+
+func test_crosshair_spread_px() -> void:
+	# [orig: HUD_DrawCrosshair @0x592b07..0x592bf5] pixel = (err_16.16 * screen_w /
+	# int(fov_deg)) >> 16 — 0.25 deg over an 80-deg fov on a 1024-wide screen = 3 px.
+	assert_eq(HudCrosshair.spread_px(0.25, 80.0, 1024.0), 3.0)
+	assert_eq(HudCrosshair.spread_px(0.0, 80.0, 1024.0), 0.0)
+	# The fov register's integer part gates: fov <= 0 is a safe no-spread.
+	assert_eq(HudCrosshair.spread_px(1.0, 0.0, 1024.0), 0.0)
+
+
+func test_crosshair_error_row() -> void:
+	# Rows: hip prone/crouch/stand then scoped prone/crouch/stand.
+	assert_eq(HudCrosshair.error_row(0, false), 0)
+	assert_eq(HudCrosshair.error_row(2, false), 2)
+	assert_eq(HudCrosshair.error_row(0, true), 3)
+	assert_eq(HudCrosshair.error_row(2, true), 5)
+
+
+func test_fade_decay_curve() -> void:
+	# [orig: draw_hud_ammo_indicator @0x599af9] — 255 right after the change, 0 at the
+	# ramp end, with the witnessed elapsed-0 u16 wrap quirk reading as fully decayed.
+	assert_eq(HudFade.decay(0, 186), 0, "Elapsed 0 wraps to no flash (one-tick latency).")
+	assert_eq(HudFade.decay(1, 186), 254)
+	assert_eq(HudFade.decay(93, 186), 128)
+	assert_eq(HudFade.decay(186, 186), 0)
+	assert_eq(HudFade.decay(500, 186), 0, "Elapsed clamps to the ramp.")
+	assert_eq(HudFade.decay(10, 0), 0, "Zero ramp is safe.")
+
+
+func test_fade_alphas() -> void:
+	# ALPHAFADE 30 50 3 -> base 76, max 127, ramp 186 ticks.
+	assert_eq(int(30 * HudFade.PERCENT_TO_ALPHA), 76)
+	assert_eq(int(50 * HudFade.PERCENT_TO_ALPHA), 127)
+	assert_eq(int(3 * HudFade.SECONDS_TO_TICKS), 186)
+	# The clip flash clamps at the ALPHAFADE max; the stance pair clamps at 255 and
+	# ghosts the previous frame at quarter fade.
+	assert_eq(HudFade.flash_alpha(93, 186, 76, 127), 127)
+	assert_eq(HudFade.flash_alpha(186, 186, 76, 127), 76)
+	assert_eq(HudFade.stance_current_alpha(93, 186, 76), 204)
+	assert_eq(HudFade.stance_prev_alpha(93, 186), 32)
+
+
+func test_ammo_text_format() -> void:
+	# [orig: hud_draw_weapon_ammo_and_name @0x593a33..0x593ab0]
+	assert_eq(HudWeaponText.format_ammo(30, 90, 30), "30/90")
+	assert_eq(HudWeaponText.format_ammo(-1, 90, 30), "90", "No clip -> reserve only.")
+	assert_eq(HudWeaponText.format_ammo(1, 4, 1), "4", "Capacity 1 -> reserve only.")
+	assert_eq(HudWeaponText.format_ammo(5, -1, 30), "", "Reserve -1 hides the element.")
+	assert_eq(HudWeaponText.format_ammo(5, 90, -1), "", "Capacity -1 hides the element.")
+
+
+func test_round_icon_count() -> void:
+	# [orig: draw_hud_ammo_indicator @0x599b9c..0x599bc1]
+	assert_eq(HudClipIndicator.round_icon_count(12, 90, 30, 1), 12)
+	assert_eq(HudClipIndicator.round_icon_count(12, 90, 1, 1), 40, "Capacity 1 counts the pool, capped at 40.")
+	assert_eq(HudClipIndicator.round_icon_count(12, 90, 30, 3), 4, "Divisor rounds up: (12+1)/3.")
+	assert_eq(HudClipIndicator.round_icon_count(0, 90, 30, 1), 0)
+
+
+func test_message_feed_expiry() -> void:
+	# [orig: Chat_AddDebugMessage @0x4987f0 — 930-tick life, >=186-tick expiry stagger]
+	var feed := HudMessages.new()
+	feed.push("first", Color.WHITE, 0)
+	feed.push("second", Color.WHITE, 0)
+	assert_eq(feed.live_lines(0).size(), 2)
+	assert_eq(feed.live_lines(929).size(), 2)
+	assert_eq(feed.live_lines(930).size(), 1, "The first line expires at 930 ticks.")
+	assert_eq(feed.live_lines(1115).size(), 1, "The second is staggered to 930+186.")
+	assert_eq(feed.live_lines(1116).size(), 0)
+	var empty_feed := HudMessages.new()
+	empty_feed.push("", Color.WHITE, 0)
+	assert_eq(empty_feed.live_lines(0).size(), 0, "Empty text is ignored.")

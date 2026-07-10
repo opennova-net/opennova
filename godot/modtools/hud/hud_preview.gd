@@ -133,9 +133,12 @@ func _draw_text_element(positions: Dictionary, key: String, sample: String, colo
 	var v = positions[key]
 	var p := Vector2.ZERO
 	var align := int(HudText.Align.LEFT)
-	if v is Vector3i:
+	if v is Vector4i:
+		# (x, y, hidden, align) — the original's 4-field positioned-text layout.
+		if v.z != 0:
+			return # hidden in this hudpos.def
 		p = Vector2(v.x, v.y)
-		align = v.z
+		align = v.w
 	elif v is Vector2i:
 		p = Vector2(v.x, v.y)
 	if p == Vector2.ZERO:

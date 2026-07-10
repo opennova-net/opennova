@@ -101,6 +101,52 @@ int main(void) {
     }
     printf("Single values OK\n");
 
+    /* Positioned text: GAMEINFO 1013,430 (2 fields) -> x,y with hidden 0, align 0. */
+    if (hud->game_info[0] != 1013 || hud->game_info[1] != 430 ||
+        hud->game_info[2] != 0 || hud->game_info[3] != 0) {
+        fprintf(stderr, "FAIL: game_info mismatch: %d,%d,%d,%d\n",
+                hud->game_info[0], hud->game_info[1], hud->game_info[2], hud->game_info[3]);
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+
+    /* The 4-field positioned form (x, y, hidden, align) the original parses —
+       AMMOCOUNTPOS writes x/y/hidden/align [orig: parse @0x59fc3d]. Inline sample
+       mirroring the retail JO hudpos.def lines. */
+    {
+        static const char pos_text[] =
+            "AMMOCOUNTPOS\t128,597,0,right\n"
+            "HUDWEAPONNAME\t11,630,1,left\n"
+            "HUDTIMECLOCK\t10 20 center\n";
+        DefHudPosFile pf;
+        memset(&pf, 0, sizeof(pf));
+        if (def_parse_hudpos_memory((const unsigned char *)pos_text,
+                                    sizeof(pos_text) - 1, &pf) != 0) {
+            fprintf(stderr, "FAIL: positioned-form memory parse failed\n");
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        const DefHudPosDef *p = &pf.hud;
+        int ok = p->ammo_count_pos[0] == 128 && p->ammo_count_pos[1] == 597 &&
+                 p->ammo_count_pos[2] == 0 && p->ammo_count_pos[3] == 1 &&
+                 p->weapon_name_pos[0] == 11 && p->weapon_name_pos[1] == 630 &&
+                 p->weapon_name_pos[2] == 1 && p->weapon_name_pos[3] == 0 &&
+                 p->time_clock[0] == 10 && p->time_clock[1] == 20 &&
+                 p->time_clock[2] == 0 && p->time_clock[3] == 2;
+        if (!ok) {
+            fprintf(stderr,
+                    "FAIL: positioned form mismatch: ammo %d,%d,%d,%d name %d,%d,%d,%d clock %d,%d,%d,%d\n",
+                    p->ammo_count_pos[0], p->ammo_count_pos[1], p->ammo_count_pos[2], p->ammo_count_pos[3],
+                    p->weapon_name_pos[0], p->weapon_name_pos[1], p->weapon_name_pos[2], p->weapon_name_pos[3],
+                    p->time_clock[0], p->time_clock[1], p->time_clock[2], p->time_clock[3]);
+            def_free_hudpos(&pf);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&pf);
+    }
+    printf("Positioned text fields OK\n");
+
     /* Test declutter — MSNTITLE should exist */
     if (hud->declutter_count == 0) {
         fprintf(stderr, "FAIL: declutter is empty\n");
