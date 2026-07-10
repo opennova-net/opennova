@@ -63,18 +63,19 @@ WeaponSlotState make_ak_slot() {
 }
 
 void test_ticks_from_ms() {
-    // [orig: Anim_GetDurationTicks @ 0x53ee10 = ms*62.5/1000 + 1]
+    // [orig: Anim_GetDurationTicks @ 0x53ee10 = trunc(ms*62.5/1000 + 0.5) + 1 —
+    // ROUND-to-nearest then +1 (0.5 = flt_7C3B94; re-grilled 2026-07-10)]
     CHECK(weapon_anim_ticks_from_ms(0) == 1);
-    CHECK(weapon_anim_ticks_from_ms(96) == 7);
-    CHECK(weapon_anim_ticks_from_ms(1000) == 63);
-    CHECK(weapon_anim_ticks_from_ms(16) == 2);
+    CHECK(weapon_anim_ticks_from_ms(96) == 7);    // 6.0 -> trunc(6.5)+1
+    CHECK(weapon_anim_ticks_from_ms(1000) == 64); // 62.5 -> trunc(63.0)+1 (was 63 pre-rounding)
+    CHECK(weapon_anim_ticks_from_ms(16) == 2);    // 1.0 -> trunc(1.5)+1
 }
 
 void test_bake() {
     WeaponFsmDef def = make_ak_def();
-    // idle: ds explicit 0; de auto -> full clip ticks (63; ticks > ds -> ticks - 0).
+    // idle: ds explicit 0; de auto -> full clip ticks (64; ticks > ds -> ticks - 0).
     CHECK(def.actions[wa::kIdle].delay_start == 0);
-    CHECK(def.actions[wa::kIdle].delay_end == 63);
+    CHECK(def.actions[wa::kIdle].delay_end == 64);
     CHECK(def.actions[wa::kIdle].has_anim);
     // recoil: ds auto -> 7 ticks (anim_wpn_fire); de explicit 0.
     CHECK(def.actions[wa::kRecoil].delay_start == 7);
