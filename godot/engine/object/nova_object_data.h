@@ -102,6 +102,11 @@ public:
 	NovaObjectData();
 	~NovaObjectData();
 
+	// Native-side read access to the parsed IR. The collision sweep
+	// (NovaSimulation::resolve_collision_instances) builds the runtime collision
+	// model from the CDTA block; GDScript keeps the curated getters only.
+	const ThreediModelIR &native_ir() const { return ir; }
+
 	Error open_file(const String &p_path);
 	Error open_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
 	Error save_project_to_dir(const String &p_dir_path);
