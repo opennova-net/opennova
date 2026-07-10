@@ -83,11 +83,9 @@ func _run() -> void:
 		"foliage_defs": data.get_foliage_defs().size() if data != null else -1,
 		"painted_probe_found": painted_probe.has("position"),
 		"painted_probe": painted_probe,
-		"dispatcher_algorithm": dispatcher.get_dispatch_algorithm() if dispatcher != null else -1,
-		"dispatcher_cell_grid_radius": dispatcher.get_cell_grid_radius() if dispatcher != null else -1,
 		"dispatcher_total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"dispatcher_cached_cells": dispatcher.get_cached_cells() if dispatcher != null else -1,
-		"terrain_foliage_centers": terrain.get_foliage_dispatch_centers().size() if terrain != null else -1,
+		"dispatcher_stats": dispatcher.get_dispatch_stats() if dispatcher != null else {},
 		"overlay_tile_info": overlay != null and overlay.tile_info != null,
 		"overlay_tilestrip": overlay != null and overlay.tilestrip != null,
 		"overlay_entries_rendered": overlay.get_entry_count_rendered() if overlay != null else -1,
@@ -103,14 +101,9 @@ func _run() -> void:
 
 	if dispatcher == null:
 		failures.append("expected NovaTerrain/FoliageDispatcher to exist")
-	elif dispatcher.get_dispatch_algorithm() != NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
-		failures.append(
-			"expected runtime dispatcher algorithm CELL_GRID until engine-center radius/center feed is fully recovered, got %d"
-				% dispatcher.get_dispatch_algorithm()
-		)
 	elif dispatcher.get_cached_cells() <= 0:
 		failures.append(
-			"expected dispatcher.cached_cells > 0 after camera-grid dispatch, got %d"
+			"expected dispatcher.cached_cells > 0 after the 42u near-cell dispatch, got %d"
 				% dispatcher.get_cached_cells()
 		)
 	if terrain == null:
@@ -155,32 +148,9 @@ func _run() -> void:
 						% [slot_index, wants_shadow, expected, child.cast_shadow]
 				)
 
-	# Foliage ground-color tint. The runtime dispatcher (terrain_data set) tints
-	# each instance from the colormap. Pre-fix the editor path left foliage white.
-	if dispatcher != null and dispatcher.get_total_instances() > 0:
-		if not _has_nonwhite_instance(dispatcher):
-			failures.append("runtime foliage instances are all white; colormap tint not applied")
-
-	# Editor-path parity: a dispatcher wired like terrain_foliage_preview.gd
-	# (colormap_source set, terrain_data UNSET, Callable samplers) must tint from
-	# the colormap too. This is the regression gate for the editor-foliage fix.
-	if data != null and data.is_loaded() and camera != null and painted_probe.has("position"):
-		var editor_dispatcher := _make_editor_style_dispatcher(data)
-		root.add_child(editor_dispatcher)
-		for _i in range(6):
-			await process_frame
-		editor_dispatcher.dispatch(camera.global_position)
-		for _i in range(4):
-			await process_frame
-		var editor_instances := editor_dispatcher.get_total_instances()
-		var editor_nonwhite := _has_nonwhite_instance(editor_dispatcher)
-		print("editor-style foliage: instances=%d nonwhite=%s" % [editor_instances, editor_nonwhite])
-		if editor_instances <= 0:
-			failures.append("editor-style dispatcher placed no foliage at painted point")
-		elif not editor_nonwhite:
-			failures.append("editor-style foliage instances are all white (colormap_source tint missing)")
-		editor_dispatcher.queue_free()
-		await process_frame
+	# FAR vertex COLOR is the source-height wind weight. Lighting comes from
+	# the distinct FAR shader's terrain-light texture/c6 inputs; treating the
+	# instance channel as a CPU terrain tint was a false-positive probe.
 
 	if failures.is_empty():
 		print("runtime_scene_probe: OK")
@@ -191,20 +161,6 @@ func _run() -> void:
 	scene.queue_free()
 	await process_frame
 	quit(0 if failures.is_empty() else 1)
-
-
-func _has_nonwhite_instance(dispatcher: NovaFoliageDispatcher) -> bool:
-	for child in dispatcher.get_children():
-		if not (child is MultiMeshInstance3D):
-			continue
-		var mm: MultiMesh = (child as MultiMeshInstance3D).multimesh
-		if mm == null or not mm.use_colors:
-			continue
-		for i in range(mm.instance_count):
-			var c := mm.get_instance_color(i)
-			if absf(c.r - 1.0) > 0.02 or absf(c.g - 1.0) > 0.02 or absf(c.b - 1.0) > 0.02:
-				return true
-	return false
 
 
 func _default_runtime_resource_root() -> String:
@@ -245,21 +201,6 @@ func _copy_file(src_path: String, dst_path: String) -> void:
 	dst.store_buffer(src.get_buffer(src.get_length()))
 	dst.close()
 	src.close()
-
-
-func _make_editor_style_dispatcher(data: NovaTerrainData) -> NovaFoliageDispatcher:
-	# Mirror terrain_foliage_preview.gd: colormap_source set for tint, terrain_data
-	# left null, placement driven by Callable samplers over the same data.
-	var d := NovaFoliageDispatcher.new()
-	d.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	d.cell_grid_radius = 8
-	d.foliage_defs = data.get_foliage_defs()
-	d.colormap_source = data
-	d.height_sampler = func(wx: float, wz: float) -> float:
-		return data.get_height_world_bilinear(Vector3(wx, 0.0, wz))
-	d.foliage_sampler = func(wx: float, wz: float) -> int:
-		return int(data.get_foliage_index_world(wx, wz))
-	return d
 
 
 func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:

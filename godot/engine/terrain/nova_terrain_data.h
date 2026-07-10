@@ -231,6 +231,11 @@ public:
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
 	Color get_colormap_color_world(float world_x, float world_z) const;
 	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;
+	// Raw terrain surface/charmap byte at the witnessed
+	// Terrain_GetSurfaceTypeAtFixedPoint(x, z) call boundary. The callee
+	// internally negates z before indexing the wrapped 1024-domain raster.
+	// Retail FAR consumes the returned byte directly as a foliage-slot mask.
+	int get_surface_mask_world(float world_x, float native_z) const;
 	// Returns the foliagemap palette index at the given world position, or 0
 	// for "outside map / empty".
 	// Engine: jodemo.exe sub_5C65E0@0x5C65E0

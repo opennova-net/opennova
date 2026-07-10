@@ -79,7 +79,7 @@ static func resolve_slot_meshes(resource_root: NovaResourceRoot, defs: Array) ->
 ## Build the per-def ":fd" textures - the flat-0x808080 + smoothed-alpha bake
 ## of each model's OWN diffuse that BOTH foliage tiers bind [orig:
 ## Foliage_LoadDefAssets @ 0x601260 tail; bound by Foliage_DrawModelTileSlot
-## @ 0x601d90 and the quad tier alike]. Returns an Array parallel to `defs`;
+## @ 0x601d90 and the FAR tier alike]. Returns an Array parallel to `defs`;
 ## non-power-of-two diffuses fall back to the raw texture (the retail bake's
 ## wrap masks assume pow2), null entries stay null.
 static func resolve_slot_fd_textures(resource_root: NovaResourceRoot, defs: Array) -> Array:

@@ -1,7 +1,7 @@
 add_library(opennova_foliage STATIC
     src/foliage.cpp
     src/placement.cpp
-    src/dispatcher.cpp
+    src/far_mesh_emitter.cpp
     src/model_placement.cpp
     src/model_dispatcher.cpp
     src/fd_bake.cpp

@@ -505,21 +505,10 @@ func _load_environment(env_path: String) -> bool:
 		return false
 	# NovaEnvironment's setter reloads + pushes shader globals on assignment.
 	_env.environment_data = env
-	_apply_foliage_tint()
 	var celestial := get_node_or_null("NovaCelestial")
 	if celestial != null and celestial.has_method("set_resource_root"):
 		celestial.set_resource_root(_resource_root)
 	return true
-
-
-## Push the env terrain_rgb onto the foliage dispatcher — the retail analog
-## derives the tint globals once at terrain init from the loaded env
-## [orig: Terrain_Init @ 0x60fc42 -> PolyTrn_SetTerrainTintColors @ 0x605e20].
-## Called from both orders (env-then-terrain and env reload after foliage).
-func _apply_foliage_tint() -> void:
-	if _dispatcher == null or _env == null or _env.environment_data == null:
-		return
-	_dispatcher.terrain_tint = _env.environment_data.get_terrain_tint()
 
 
 ## Apply the mission's attrib-gated water/fog overrides onto the loaded env via
@@ -556,20 +545,17 @@ func _load_terrain(trn_path: String) -> bool:
 
 
 # Runtime foliage: feed the dispatcher NovaTerrainData directly (C++ fast path).
-# Gameplay uses the coverage-safe CELL_GRID path until the exact retail
-# engine-center radius/center feed is fully recovered.
+# The dispatcher runs the witnessed retail coverage: the 42u near-cell pool
+# for FAR plus the sector-entity model walk (docs/foliage/foliage-re.md).
 func _configure_foliage() -> void:
 	if _dispatcher == null or _terrain_data == null:
 		return
 	_dispatcher.terrain_data = _terrain_data
-	_dispatcher.dispatch_algorithm = NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID
-	_dispatcher.cell_grid_radius = 8
 	var defs: Array = _terrain_data.get_foliage_defs()
 	_dispatcher.foliage_defs = defs
 	_dispatcher.slot_meshes = VegAssets.resolve_slot_meshes(_resource_root, defs)
 	# The ":fd" bake both tiers bind [orig: Foliage_LoadDefAssets @ 0x601260].
 	_dispatcher.slot_fd_textures = VegAssets.resolve_slot_fd_textures(_resource_root, defs)
-	_apply_foliage_tint()
 	if _tile_overlay != null:
 		# NovaTerrain composites the tile overlay into its own material; the scene
 		# TileOverlay node is only an authoring override provider here.
@@ -605,24 +591,15 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		# Near-tier anchors: the witnessed driver is per-SECTOR-ENTITY (the
 		# .trn/.bms-placed world models) [orig: Terrain_RenderSectorEntitiesBySide
 		# @ 0x5c7d50]; placed mission objects are the host equivalent (host
-		# mapping). Maps without objects fall back to the visible-patch centers
-		# so terrain content still grows the near tier.
+		# mapping). No entities means no model clusters - retail has no
+		# camera-carpet model dispatch.
 		var model_anchors := PackedVector3Array()
 		if _placer != null and _placer.has_method("get_placed_world_positions"):
 			model_anchors = _placer.get_placed_world_positions()
-		if model_anchors.is_empty() and _terrain != null:
-			model_anchors = _terrain.get_foliage_dispatch_centers()
 		_dispatcher.set_model_anchors(model_anchors)
-		if _dispatcher.dispatch_algorithm == NovaFoliageDispatcher.DISPATCH_ALGORITHM_CELL_GRID:
-			_dispatcher.dispatch(camera_pos, camera_xform)
-		else:
-			var centers := PackedVector3Array()
-			if _terrain != null:
-				centers = _terrain.get_foliage_dispatch_centers()
-			if centers.is_empty():
-				_dispatcher.dispatch(camera_pos, camera_xform)
-			else:
-				_dispatcher.dispatch_centers(centers, camera_xform)
+		# FAR runs the witnessed 42u near-cell pool around the camera; the
+		# MODEL walk gates on view depth via camera_xform.
+		_dispatcher.dispatch(camera_pos, camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
