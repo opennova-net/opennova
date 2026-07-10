@@ -119,17 +119,20 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 	return played
 
 
-## Fire a one-shot, NON-positional voice for the named set (mission dialog/voice is
-## centered and full-volume, not 3D-attenuated). Auto-frees on finish. Returns true
-## if anything played.
-func play_oneshot_2d(parent: Node, name: String, bus: StringName) -> bool:
+## Spawn a one-shot, NON-positional voice for the named set (mission dialog/voice
+## is centered and full-volume, not 3D-attenuated) and RETURN its
+## AudioStreamPlayer (the first resolvable layer's voice) without auto-freeing it
+## — the caller owns its lifetime and listens for `finished`. Used by the
+## serialized dialog queue (the engine plays one dialog audio channel at a time:
+## Dialog_UpdatePlayback @ 0x44e470 only advances when the active channel frees).
+## Returns null if the set is unknown or no member resolves to audio.
+func spawn_oneshot_2d(parent: Node, name: String, bus: StringName) -> AudioStreamPlayer:
 	var loc := _find_set(name)
 	if loc.is_empty():
-		return false
+		return null
 	var lwf = _banks[loc.bank]
 	var set_d: Dictionary = lwf.get_set(loc.set)
 	var layers: Array = set_d.get("layers", [])
-	var played := false
 	for li in layers.size():
 		var layer_d: Dictionary = layers[li]
 		var member := _pick_member(layer_d, loc.bank, loc.set, li)
@@ -147,10 +150,9 @@ func play_oneshot_2d(parent: Node, name: String, bus: StringName) -> bool:
 		player.volume_db = linear_to_db(clampf(float(volume) / 255.0, 0.0001, 1.0))
 		player.stream = stream
 		parent.add_child(player)
-		player.finished.connect(player.queue_free)
 		player.play()
-		played = true
-	return played
+		return player
+	return null
 
 
 # --- Internals ---

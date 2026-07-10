@@ -900,8 +900,13 @@ func _route_mission_effects(effects: Array) -> void:
 		return
 	for e in effects:
 		var eff: Dictionary = e
-		if String(eff.get("kind", "")) == "dialog":
+		var kind := String(eff.get("kind", ""))
+		if kind == "dialog":
+			# BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
 			_mission_audio.play_dialog(int(eff.get("a", 0)))
+		elif kind == "dialog_wav":
+			# WAC wave/pwave: a scripted voice .wav by filename on its own channel.
+			_mission_audio.play_wac_wave(String(eff.get("str", "")))
 
 
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
