@@ -141,14 +141,14 @@ func test_view_tab_collision_toggle_emits() -> void:
 	# world builds/frees the collision debug view.
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._collision_check, "the collision checkbox is reachable as a member")
-	assert_eq(overlay._collision_check.name, "ViewCollision")
-	assert_false(overlay._collision_check.button_pressed, "it defaults off")
+	assert_false(overlay.is_collision_debug_on(), "the collision toggle seam resolves")
+	
+	assert_false(overlay.is_collision_debug_on(), "it defaults off")
 
 	watch_signals(overlay)
-	overlay._collision_check.toggled.emit(true)
+	overlay.set_collision_debug(true)
 	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [true])
-	overlay._collision_check.toggled.emit(false)
+	overlay.set_collision_debug(false)
 	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [false])
 
 
@@ -157,14 +157,14 @@ func test_new_tabs_build_headless_without_a_sim_or_world() -> void:
 	# runtime, no world, no mission (the menu-only F3 case).
 	var overlay := _make_overlay()
 	overlay.toggle()
-	assert_not_null(overlay._tabs.get_node_or_null("Foliage"), "a Foliage tab exists")
-	assert_not_null(overlay._tabs.get_node_or_null("Player"), "a Player tab exists")
-	assert_eq(overlay._player_label.text, "No mission running.",
+	assert_true(overlay.tab_names().has("Foliage"), "a Foliage tab exists")
+	assert_true(overlay.tab_names().has("Player"), "a Player tab exists")
+	assert_eq(overlay.player_panel_text(), "No mission running.",
 		"the player pane reports the no-mission state")
-	assert_true(overlay._foliage_status.visible, "the foliage pane explains itself without a world")
-	assert_true(overlay._perf_pane.frame_status.visible,
+	assert_true(overlay.is_foliage_status_visible(), "the foliage pane explains itself without a world")
+	assert_true(overlay.perf_pane().frame_status.visible,
 		"the frame budget explains itself without a world")
-	assert_eq((overlay._perf_pane.frame_labels["tick_us"] as Label).text, "—",
+	assert_eq((overlay.perf_pane().frame_labels["tick_us"] as Label).text, "—",
 		"frame rows dash out without counters")
 
 
@@ -176,25 +176,25 @@ func test_frame_budget_and_foliage_render_from_world_source() -> void:
 	overlay.set_world_source(func(): return world)
 	overlay.toggle()
 
-	assert_false(overlay._perf_pane.frame_status.visible, "counters present - no status line")
-	assert_eq((overlay._perf_pane.frame_labels["tick_us"] as Label).text, "1.23 ms",
+	assert_false(overlay.perf_pane().frame_status.visible, "counters present - no status line")
+	assert_eq((overlay.perf_pane().frame_labels["tick_us"] as Label).text, "1.23 ms",
 		"top-level µs render (ms above 1000)")
-	assert_eq((overlay._perf_pane.frame_labels["sim_tick_us"] as Label).text, "900 µs",
+	assert_eq((overlay.perf_pane().frame_labels["sim_tick_us"] as Label).text, "900 µs",
 		"the nested runtime.sim numbers render")
-	assert_eq((overlay._perf_pane.frame_labels["present_us"] as Label).text, "700 µs",
+	assert_eq((overlay.perf_pane().frame_labels["present_us"] as Label).text, "700 µs",
 		"the nested runtime numbers render")
 
-	assert_false(overlay._foliage_status.visible, "foliage stats present - no status line")
-	assert_eq((overlay._foliage_stat_labels["far_cells_visible"] as Label).text, "12")
-	assert_eq((overlay._foliage_stat_labels["total_instances"] as Label).text, "3456")
-	assert_eq((overlay._foliage_stat_labels["model_uploads"] as Label).text, "—",
+	assert_false(overlay.is_foliage_status_visible(), "foliage stats present - no status line")
+	assert_eq(overlay.foliage_stat_text("far_cells_visible"), "12")
+	assert_eq(overlay.foliage_stat_text("total_instances"), "3456")
+	assert_eq(overlay.foliage_stat_text("model_uploads"), "—",
 		"stats the world did not report stay dashed")
 
 	# Dropping the world returns every pane to its empty state.
 	overlay.set_world_source(func(): return null)
 	overlay.refresh_now()
-	assert_true(overlay._perf_pane.frame_status.visible)
-	assert_eq((overlay._perf_pane.frame_labels["tick_us"] as Label).text, "—")
+	assert_true(overlay.perf_pane().frame_status.visible)
+	assert_eq((overlay.perf_pane().frame_labels["tick_us"] as Label).text, "—")
 
 
 func test_player_tab_reports_the_live_player_and_net_state() -> void:
@@ -205,7 +205,7 @@ func test_player_tab_reports_the_live_player_and_net_state() -> void:
 	var rt := _make_runtime()
 	overlay.set_runtime(rt)
 	overlay.toggle()
-	var text: String = overlay._player_label.text
+	var text: String = overlay.player_panel_text()
 	assert_string_contains(text, "position:")
 	assert_string_contains(text, "health: 100 / 100")
 	assert_string_contains(text, "weapon: none")

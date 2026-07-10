@@ -112,6 +112,43 @@ func _init() -> void:
 
 ## The runtime supplier: a Callable returning the current MissionRuntime (or
 ## null). Re-resolved every refresh because reloads recreate the runtime.
+# --- ADR 0018 read seams: tests and diagnostics reach panel state through
+# these, never the widget privates. ---
+
+func perf_pane() -> DebugPerfPane:
+	return _perf_pane
+
+
+func tab_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	if _tabs != null:
+		for c in _tabs.get_children():
+			out.append(String(c.name))
+	return out
+
+
+func set_collision_debug(enabled: bool) -> void:
+	if _collision_check != null:
+		_collision_check.button_pressed = enabled  # emits toggled -> collision_debug_toggled
+
+
+func is_collision_debug_on() -> bool:
+	return _collision_check != null and _collision_check.button_pressed
+
+
+func foliage_stat_text(key: String) -> String:
+	var l: Label = _foliage_stat_labels.get(key)
+	return l.text if l != null else ""
+
+
+func is_foliage_status_visible() -> bool:
+	return _foliage_status != null and _foliage_status.visible
+
+
+func player_panel_text() -> String:
+	return _player_label.text if _player_label != null else ""
+
+
 func set_runtime_source(source: Callable) -> void:
 	_runtime_source = source
 	if visible:
