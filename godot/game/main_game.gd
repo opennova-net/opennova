@@ -207,11 +207,14 @@ func _update_game_hud() -> void:
 
 
 # Mission effects feed the HUD's objective/subtitle line (the WAC/mission text the
-# original routes to the HUD). Best-effort: pick up any text-bearing effect.
+# original routes to the HUD). Drained effects carry {kind, a..d, str}
+# (NovaSimulation::drain_effects); the WAC text/consol family lands as
+# kind=="text" with the string in "str" — the old code read nonexistent
+# "text"/"message" keys, so mission text never displayed.
 func _on_mission_effects(effects: Array) -> void:
 	for e in effects:
-		if e is Dictionary:
-			var t := String(e.get("text", e.get("message", "")))
+		if e is Dictionary and String(e.get("kind", "")) == "text":
+			var t := String(e.get("str", ""))
 			if not t.is_empty():
 				_hud_objective = t
 
