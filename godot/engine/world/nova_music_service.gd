@@ -12,6 +12,13 @@ extends Node
 ##
 ## Full driving witness: docs/audio/mus-sbf-re.md §Game music driving.
 
+# gamescript var indices the mission-start seed and the per-frame pump write
+# (full per-index witness map: docs/audio/mus-sbf-re.md §Game music driving).
+const VAR_HEALTH_PCT := 7  # health % [orig: seed @ 0x5255f0; per-frame @ 0x4b6324]
+const VAR_TEAM := 10       # local-player team [orig: @ 0x4b62fc]
+const SEEDED_VARS_FIRST := 1   # Var1..Var12 seeded at mission start
+const SEEDED_VARS_LAST := 12   # [orig: @ 0x5255b3-0x52561b]
+
 # The service owns the one director (and thereby the AudioStreamPlayer pool).
 var _director: NovaMusicDirector = null
 # "", "menu" or "game" — which context is loaded (ADR 0018 read seam for tests).
@@ -100,8 +107,8 @@ func open_game_context(root) -> bool:
 	var pair := resolve_music_pair(root, "G", "gamemus")
 	var opened := _open_context("game", root, String(pair.bank), String(pair.script), "")
 	if opened:
-		for idx in range(1, 13):
-			_director.set_var(idx, 100 if idx == 7 else 0)
+		for idx in range(SEEDED_VARS_FIRST, SEEDED_VARS_LAST + 1):
+			_director.set_var(idx, 100 if idx == VAR_HEALTH_PCT else 0)
 	return opened
 
 

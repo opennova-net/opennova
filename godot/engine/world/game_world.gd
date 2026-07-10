@@ -1087,8 +1087,9 @@ func _music_var_pump() -> void:
 		return
 	var max_h := local_player_max_health()
 	var cur_h := local_player_health()
-	NovaMusicService.set_var(7, (cur_h * 100 / max_h) if max_h > cur_h else 100)
-	NovaMusicService.set_var(10, local_player_team())
+	NovaMusicService.set_var(NovaMusicService.VAR_HEALTH_PCT,
+		(cur_h * 100 / max_h) if max_h > cur_h else 100)
+	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, local_player_team())
 
 
 # --- Frame clear color (env divergence #21, closed) ----------------------------

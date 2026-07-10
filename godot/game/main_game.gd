@@ -172,8 +172,8 @@ func _ensure_game_hud() -> void:
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_layout(hudpos, root)
-	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
-		_world.mission_effects.connect(_on_mission_effects)
+	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(apply_mission_effects):
+		_world.mission_effects.connect(apply_mission_effects)
 
 
 # Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
@@ -210,13 +210,19 @@ func _update_game_hud() -> void:
 # original routes to the HUD). Drained effects carry {kind, a..d, str}
 # (NovaSimulation::drain_effects); the WAC text/consol family lands as
 # kind=="text" with the string in "str" — the old code read nonexistent
-# "text"/"message" keys, so mission text never displayed.
-func _on_mission_effects(effects: Array) -> void:
+# "text"/"message" keys, so mission text never displayed. Public with the
+# hud_objective_line() read seam (ADR 0018): tests drive/read the HUD text
+# through these, never the privates.
+func apply_mission_effects(effects: Array) -> void:
 	for e in effects:
 		if e is Dictionary and String(e.get("kind", "")) == "text":
 			var t := String(e.get("str", ""))
 			if not t.is_empty():
 				_hud_objective = t
+
+
+func hud_objective_line() -> String:
+	return _hud_objective
 
 
 func _on_skeleton_debug_toggled(enabled: bool) -> void:
@@ -564,8 +570,8 @@ func _on_return_to_menu() -> void:
 		_net_killfeed.queue_free()
 		_net_killfeed = null
 	if _game_hud != null:
-		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(_on_mission_effects):
-			_world.mission_effects.disconnect(_on_mission_effects)
+		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(apply_mission_effects):
+			_world.mission_effects.disconnect(apply_mission_effects)
 		_game_hud.queue_free()
 		_game_hud = null
 		_hud_objective = ""
