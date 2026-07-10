@@ -57,6 +57,11 @@ private:
 		// scoped FOV = 80 / zoom @ 0x4df401].
 		int flags = 0;
 		float scope_max_mag = 0.0f;
+		// The 3P body-channel kinds (0 = absent, rifle): special_hold 1..8 picks the
+		// body hold-pose ladder 50-61 (2 also selects reload2), attack_anim 1/2 stamps
+		// 62/63 on fire [orig: AdmDefs +0xA4/+0xA8, read @ 0x4b5dba / @ 0x542bbc].
+		int special_hold = 0;
+		int attack_anim = 0;
 		// The weapon's ACTION blocks, verbatim rows for the weapon-FSM bake — Dicts
 		// {name, anim, function, delaystart, delayend} [orig: ActionDef_ParseScriptLine
 		// @ 0x4023c0; bound by Anim_InitActions @ 0x541fa0; net-re §5.62].

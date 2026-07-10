@@ -416,17 +416,66 @@ void AiSystem::infantry_select(AiEntity &e) {
 void AiSystem::infantry_weapon_channel(AiEntity &e) {
     InfantryState &inf = e.inf;
 
+    // The arms-dip / head-look decay block [orig: @0x4b5cab..0x4b5ce7]: while the dip
+    // window runs, the decay term drops 0x2800000 per tick BEFORE the eighth-step ease;
+    // the window byte decrements in BOTH branches — twice per tick — so the 20-tick
+    // weapon-switch stamp dips for 10 ticks (the 0x49 remote-reload 80 for 40).
+    if (inf.arms_dip_ticks > 0) {
+        --inf.arms_dip_ticks;             // [orig: @0x4b5cb5]
+        inf.head_look_decay -= 0x2800000; // [orig: @0x4b5cb7 += 0xFD800000]
+    }
+    inf.head_look_decay -=
+        io::bam_sar(io::bam_add(inf.head_look_decay, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
+    if (inf.arms_dip_ticks > 0) --inf.arms_dip_ticks;        // [orig: @0x4b5cdb..0x4b5ce7]
+
     // The 3P reload-anim window counts down once per tick [orig: @0x4b5cf9].
     if (inf.reload_anim_ticks > 0) --inf.reload_anim_ticks;
 
-    // Desired state [orig: @0x4b5dad..0x4b5e6f]. The hold-pose family (50-61 by the
-    // AdmDef kind dword @0x24E8084, binoculars 64, scoped variants) and reload2 (66,
-    // kind==2 pistol) ride the unparsed AdmDef kind fields, so the witnessed rifle
-    // default applies: MIRROR the primary state — 43 idle when the primary is locked
-    // (flag 4) [orig: @0x4b5e37..0x4b5e46].
-    int desired = (infantry_anim_flags(inf.anim_state) & 0x4u) != 0 ? anim_state::kIdle
-                                                                    : inf.anim_state;
-    if (inf.reload_anim_ticks > 0) desired = anim_state::kReload; // 65 [orig: @0x4b5e67]
+    // Desired state [orig: @0x4b5dad..0x4b5e6f]: the held weapon's hold kind (the
+    // AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
+    // pose ladder; the default (rifles, kind 0) MIRRORS the primary state.
+    int desired;
+    switch (inf.wpn_hold_kind) {
+        case 1: // knife family -> 50 [orig: @0x4b5dc0 lea eax,[ecx+31h]]
+            desired = anim_state::kHoldKnife;
+            break;
+        case 2: // pistol -> 51 [orig: @0x4b5dcd]
+            desired = anim_state::kHoldPistol;
+            break;
+        case 3: // grenade -> 52 [orig: @0x4b5dd7]
+            desired = anim_state::kHoldGrenade;
+            break;
+        case 4: // stinger/AT4/RPG -> 53 [orig: @0x4b5de1]
+            desired = anim_state::kHoldStinger;
+            break;
+        case 5: // designator -> 54, scoped 55 [orig: @0x4b5deb test Flags&0x10]
+            desired = inf.scope_raised ? anim_state::kHoldDesignatorScoped
+                                       : anim_state::kHoldDesignator;
+            break;
+        case 6: // P90 -> 56, scoped 57 [orig: @0x4b5dfe]
+            desired = inf.scope_raised ? anim_state::kHoldP90Scoped : anim_state::kHoldP90;
+            break;
+        case 7: // MP7 -> 58, scoped 59 [orig: @0x4b5e11]
+            desired = inf.scope_raised ? anim_state::kHoldMP7Scoped : anim_state::kHoldMP7;
+            break;
+        case 8: // javelin -> 60, scoped 61 [orig: @0x4b5e24]
+            desired = inf.scope_raised ? anim_state::kHoldJavelinScoped
+                                       : anim_state::kHoldJavelin;
+            break;
+        default:
+            // MIRROR the primary state — 43 idle when the primary is locked (flag 4);
+            // 49 idle_3 when scoped [orig: @0x4b5e37..0x4b5e4e].
+            desired = (infantry_anim_flags(inf.anim_state) & 0x4u) != 0 ? anim_state::kIdle
+                                                                        : inf.anim_state;
+            if (inf.scope_raised) desired = anim_state::kIdle3;
+            break;
+    }
+    // Overrides, strongest last [orig: @0x4b5e53..0x4b5e6f]: binoculars 64, then the
+    // reload window — 66 reload2 when the hold kind is 2 (pistol), else 65 reload.
+    if (inf.binoculars_raised) desired = anim_state::kBinoculars; // [orig: @0x4b5e53]
+    if (inf.reload_anim_ticks > 0)
+        desired = inf.wpn_hold_kind == 2 ? anim_state::kReload2
+                                         : anim_state::kReload; // [orig: @0x4b5e5e..0x4b5e6f]
 
     // Commit [orig: @0x4b5e72]: same -> skip; a locked (flag 4: attacks 62/63, reloads
     // 65/66) or emote (0x20) current defers the change to clip end; else stamp now.
@@ -458,6 +507,25 @@ void AiSystem::infantry_weapon_channel(AiEntity &e) {
         RootMotionFrame discard;
         root_motion->advance(inf.adm_id, inf.wpn_state, inf.wpn_clip_phase, discard);
     }
+}
+
+// The fire-path attack stamp — see the infantry.h declaration. Unlike the per-tick
+// selection this writes the target immediately, whatever the current state's flags.
+// [orig: WeaponAction_Fire @0x542bbc..0x542bea; ebx = 0 from @0x542b22]
+void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
+    int state;
+    if (attack_kind == 1)
+        state = anim_state::kKnifeAttack;   // 62 [orig: @0x542bcb]
+    else if (attack_kind == 2)
+        state = anim_state::kGrenadeAttack; // 63 [orig: @0x542be0]
+    else
+        return; // rifle fire stamps NO body state [orig: only the 1/2 compares]
+    // The channel re-inits only on a target CHANGE [orig: AnimMap_UpdateEntity @0x40b5f0
+    // pulls a new clip only when target differs] — a repeat stamp of the same attack
+    // state mid-clip does not restart the playing clip.
+    if (inf.wpn_state != state) inf.wpn_clip_phase = 0; // (D-INF-1: no blend window)
+    inf.wpn_state = state;
+    inf.wpn_deferred = 0;
 }
 
 // ----------------------------------------------------------------------------

@@ -195,6 +195,12 @@ private:
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
+	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
+	// + its name, kept to detect a weapon SWITCH for the arms-dip stamp
+	// [orig: AdmDefs +0xA4/+0xA8; the +0x371 = 20 switch stamp @ 0x4b46f5].
+	int weapon_hold_kind_ = 0;
+	int weapon_attack_kind_ = 0;
+	String weapon_def_name_;
 	void tick_local_player_weapon();
 
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------

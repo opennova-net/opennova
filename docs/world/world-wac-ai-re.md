@@ -865,9 +865,18 @@ chase yaws.
   head tracks look). The player body updater additionally HALVES the render pitch fed into the
   build while in vehicle third person `[orig: @ 0x4b4942]`.
 - **Local player**: when `entity == dword_C6EC38` (the view/local entity global; identity from
-  reads — HUD self-label skip, audio listener), head/aim pitch gets `+ (dword_3346FA8 << 17)` —
-  a fine view-pitch adjustment (recoil kick accumulator at probable confidence; writers
-  unresolved, see §14.5).
+  reads — HUD self-label skip, audio listener), head/aim pitch gets
+  `+ (g_audioOutLevel << 17)` `[orig: @ 0x4b17f0]`. **RESOLVED (2026-07-09)**:
+  `g_audioOutLevel @ 0x3346FA8` is the software audio mixer's smoothed OUTPUT POWER
+  meter — every 0x400 mixed samples the mixer loop takes its block amplitude
+  accumulator, computes `(a²) >> 15 − 0x400` clamped to 0..0x3FF, and double-smooths it
+  (`(prev+new)/2` into `g_audioOutLevelStage1 @ 0x3346FA4`, then again into
+  `g_audioOutLevel`) `[orig: the mixer loop @ 0x7bef3e..0x7bef55, function-less blob;
+  zeroed by AudioMixer_Init @ 0x7bd405; the MMX blend routine ptr @ 0x3346F9C]`. The
+  "recoil twitch" on fire is literally the game's LOUDNESS kicking the POV body's
+  head/aim pitch — own gunfire being the loudest nearby source. There is no dedicated
+  rifle recoil body anim. Porting it needs an audio-output level tap in the host mixer
+  (deferred; the overlay input carries the term).
 - **Rigid defs**: `itemDef->attrib & 0x200` → every overlay = body matrix (no aim skeleton).
 
 ### 14.4 Attachment out-matrices (weapon / sight / muzzle)
@@ -883,8 +892,10 @@ chase yaws.
 
 ### 14.5 Open follow-ups
 
-- `dword_3346FA8` (local pitch kick): value source unwitnessed — data xrefs land near audio-mixer
-  init; likely a computed-address write elsewhere. Pin the writer before porting the kick.
+- ~~`dword_3346FA8` (local pitch kick): value source unwitnessed~~ **RESOLVED
+  2026-07-09**: the audio mixer's output power meter, renamed `g_audioOutLevel` — full
+  verdict in §14.3's local-player bullet. Remaining: the host-side port needs a mixer
+  output-level tap (the overlay carries the term, fed 0).
 - `dword_C6EC38` (view/local entity): reads witnessed only; no direct writer xref (register-based
   store suspected). Name-proposal held until a writer is pinned.
 - The InfantryAI leg-chase excerpt re-verify (the session's sub-investigation was cut by a spend
@@ -919,9 +930,11 @@ Ported for the local player, end to end, in the controller train:
 Remaining under this row: NPC/remote threading (the present-pass `PF_PITCH_DEG` seam + the
 same angles per entity in the snapshot — closes **D-NET-117**), mounted-gunner/seated
 branches, weapon/sight/muzzle attachment matrices, and the pitchBlend / lean / torsoRoll
-sources (terms carried, fed 0; headLookDecay's arms-dip feed witnessed §14.8.5).
-The upper-body weapon channel's producer is witnessed and ported for the local player
-(§14.8, 2026-07-09). Player-motor approximations are ledgered as **D-INF-12**.
+sources (terms carried, fed 0; headLookDecay now carries the PORTED arms-dip feed —
+§14.8.5/§14.8.7 — its other producers, the idle look-at and the audio pitch kick,
+stay open). The upper-body weapon channel's producer is witnessed and FULLY ported for
+the local player (§14.8, 2026-07-09 sessions 1–2). Player-motor approximations are
+ledgered as **D-INF-12**.
 
 ### 14.7 IDB write-backs (2026-07-08 session, saved)
 
@@ -1007,12 +1020,28 @@ the entity's channels.
 unwitnessed) selects the desired secondary state each tick `[orig: 0x4b5dad..0x4b5ea9]`:
 
 1. **Local-player flag refresh** `[orig: @ 0x4b5d7f]`: Flags(+0x24) bits cleared then
-   re-set from `byte_B7653A` → |8 (binoculars raised), `g_weaponScopeActive` → |0x10
-   (scoped), `g_NVGActive` → |4.
-2. **Weapon-hold kind**: `kind = dword @ (AdmDefs=0x24E8084 + 0x460 × byte entity+0x2B0)`
-   (the held-weapon ADM index of §13.2). kind 1–4 → states 50–53; kind 5–8 → 54/56/58/60,
-   +1 when scoped (the `*_scoped` variants). Default (rifles etc.): MIRROR the primary
-   state `+0x2BC` (43 `idle` if the primary is locked/flag-4; 49 `idle_3` when scoped).
+   re-set from `g_binocularsRaised @ 0xB7653A` → |8 (binoculars raised),
+   `g_weaponScopeActive` → |0x10 (scoped), `g_NVGActive` → |4. The binoculars chain
+   (witnessed 2026-07-09 session 2): an input action binding (jumptable `0x4E048B`
+   case 26) TOGGLES `g_binocularsToggle @ 0xB76539` unless fire-charging or scoped with
+   `+0x168 == 3` `[orig: Input_HandleActionBinding_0 @ 0x4e064c]`, cleared on weapon
+   switch `[orig: @ 0x4e11d7]` and round init/reset; each frame
+   `Player_UpdatePerFrame @ 0x4de37b` copies toggle → raised, forcing 0 when dead
+   (`entity+0x11E <= 0`), when the spawn-success gate is set, or when
+   `g_inputFlags & 0x1E`.
+2. **Weapon-hold kind**: `kind = dword @ (0x24E8084 + 0x460 × byte entity+0x2B0)` — the
+   held-weapon record's dword **+0xA4** (`AdmDefs` base `0x24E7FE0`, stride 0x460, entry
+   pointer via `AdmDef_GetEntryByIndex @ 0x53fc80`; the held index is §13.2's
+   `entity+0x2B0`). kind 1–4 → states 50–53; kind 5–8 → 54/56/58/60, +1 when scoped
+   (the `*_scoped` variants). Default (rifles etc.): MIRROR the primary state `+0x2BC`
+   (43 `idle` if the primary is locked/flag-4; 49 `idle_3` when scoped).
+   **Data source (RESOLVED)**: the weapon.def key **`special_hold`**, plain `atol`
+   `[orig: WeaponDefs_ParseLineCallback @ 0x543cb7/0x543cd8]`; the memset defaults leave
+   it 0 `[orig: AdmDef_InitEntryDefaults @ 0x53fef0]`. JOX corpus (94 weapon blocks):
+   1 = the knife FAMILY (knife/knife2/medpack/satchel+detonator/claymore/antitank),
+   2 = the five pistols, 3 = the three grenades, 4 = AT4/Stinger/RPG, 5 = designator,
+   6 = P90/P90AUTO, 8 = javelin; 7 (MP7) unused in JO retail; WPN_RemmingtonSG sets an
+   explicit 0.
 3. **Overrides**, strongest last: Flags&8 → 64 `binoculars`;
    **`entity+0x372` ≠ 0 → 65 `reload`, or 66 `reload2` when kind == 2 (pistol)**.
 4. **Commit** `[orig: @ 0x4b5e72]`: same state → skip. Else if the CURRENT secondary
@@ -1021,11 +1050,34 @@ unwitnessed) selects the desired secondary state each tick `[orig: 0x4b5dad..0x4
    and clear `+0x2C4`.
 
 **Attack stamps** bypass the selection: `WeaponAction_Fire` writes 62/63 directly with
-`+0x2C4 = 0`, keyed on the second AdmDef kind dword `@ 0x24E8088 + 0x460×idx`
-(1 = knife → 62, 2 = grenade → 63) `[orig: @ 0x542bcb/0x542be0]`; rifle fire stamps
-NOTHING body-side. The net receive path mirrors the same stamp for remote entities
+`+0x2C4 = 0` (ebx zeroed `@ 0x542b22`), keyed on the held record's dword **+0xA8**
+`@ 0x24E8088 + 0x460×idx` (1 = knife → 62, 2 = grenade → 63)
+`[orig: @ 0x542bcb/0x542be0]`. **Data source (RESOLVED)**: the weapon.def key
+**`attack_anim`**, plain `atol` `[orig: @ 0x543ce9/0x543d0a]` — JOX ships 1 on the two
+knives, 2 on the three grenades, explicit 0 on the launcher/designator family. The net
+receive path mirrors the same stamp for remote entities
 `[orig: NetPacket_DeserializeRoundEvent @ 0x42f79d/0x42f7ba]`; `NapiNPClientMsg_0x02D
 @ 0x427f12` also writes `+0x2C8` (unwitnessed detail, follow-up).
+
+**Rifle-fire verdict (2026-07-09 session 2)**: rifle fire plays NO third-person body
+clip — parity means we don't either. The evidence closes airtight: (a) the only
+`+0x2C8` writes in `WeaponAction_Fire` are gated on kind-B 1/2; (b) the action clip
+plays on the WeaponDef's FP channel (§14.8.3), local-player-gated; (c) the fire path's
+remaining anim side effect, `ActionSlot_TryAllocCtrlRegAnim @ 0x401f00` →
+`CtrlRegAnimSlot_Allocate @ 0x401ca0` / `CtrlRegAnimSlot_UpdateAll @ 0x401bf0`, drives
+the **.3di CONTROL REGISTERS** (a 30-slot table @ 0x85C440 ping-ponging 0..0xFFFF into
+`dword_83FCE8`) — a weapon-MODEL visual, never the skeleton. The visible 3P fire
+feedback is the §13.1 muzzle-flash draw plus the audio-level pitch kick (§14.3,
+resolved below).
+
+**.adm data coverage (JOX sweep)**: `US01.adm` — the player body — is the ONLY body
+`.adm` carrying the full hold/attack/binocular key set (all of `anim_knife..
+anim_javelin_scoped`, `anim_binoculars`, `anim_reload/reload2`,
+`anim_knife_attack/grenade_attack`, 185 `anim_*` keys total). The AI bodies
+(Eindo/FSldr/pilots/ESTAND) carry `anim_reload` only; the Cindo family not even that.
+With the original's RESET backfill (§14.8.1), an AI body in a hold state plays the
+reset pose; our host's unknown-key no-op is therefore invisible for the local-player
+slice and only becomes observable with NPC/remote threading (D-NET-117).
 
 ### 14.8.5 The reload window and the FSM sync
 
@@ -1044,13 +1096,21 @@ the body reload anim starts ≈ one loopback after the FSM reload begins. Loadou
 stamps the window).
 
 **`entity+0x371` is NOT a clip window** (correcting the §5.58 "3P reload anim" reading):
-while nonzero it feeds `headLookDecay(+0x36C) -= 0x2800000` per tick (against the
-standing ≈⅛ decay `[orig: @ 0x4b5cc7]`) — the arms-dip overlay term of §14.2. It is
-seeded 80 by the 0x49 handler for OTHER players' reloads `[orig: @ 0x42c10b]` and 20 on
-a weapon switch (when `+0x370`, the previous held ADM index, differs from `+0x2B0`)
-`[orig: @ 0x4b46f5]`. So a pure client shows remote reloads as the arms-dip only; the
-HOST (which calls the refill on its copy for remote requesters) shows the full 65/66
-clip. `PlayerClass_InitEntity @ 0x4b1182/0x4b115b` zeroes the trio at spawn.
+it is the arms-dip window feeding `headLookDecay(+0x36C)` — the §14.2 overlay term. The
+exact per-tick block (witnessed 2026-07-09 session 2, `[orig: @ 0x4b5cab..0x4b5ce7]`):
+if the window byte is nonzero, decrement it AND `+0x36C -= 0x2800000`
+`[orig: @ 0x4b5cb5/0x4b5cb7]`; then the eighth-step ease
+`+0x36C -= (+0x36C + 4) >> 3` `[orig: @ 0x4b5cc7..0x4b5cd5]`; then a SECOND
+window decrement `[orig: @ 0x4b5cdb..0x4b5ce7]` — the byte drains at 2/tick, so the
+20-tick weapon-switch stamp dips for 10 ticks and the 80-tick remote-reload seed for 40.
+Seeds: 80 by the 0x49 handler for OTHER players' reloads `[orig: @ 0x42c10b]`; 20 on a
+weapon switch — the body tick compares the PREVIOUS held index's record pointer against
+the current one (`AdmDefs[+0x370×0x460]+0` vs `AdmDefs[+0x2B0×0x460]+0` — the resolved
+anim-def dword, so two weapons sharing an AnimMap do NOT dip) and stamps on mismatch
+before latching `+0x370 = +0x2B0` `[orig: @ 0x4b46d0..0x4b4701]`. So a pure client shows
+remote reloads as the arms-dip only; the HOST (which calls the refill on its copy for
+remote requesters) shows the full 65/66 clip. `PlayerClass_InitEntity
+@ 0x4b1182/0x4b115b` zeroes the trio at spawn.
 
 ### 14.8.6 Composition (consumer, gates corrected)
 
@@ -1086,18 +1146,40 @@ through the real input path, completion waited by state): mid-reload
 `body_anim_key=anim_reload` playhead advancing, the R-forearm mask bone 73.3° off the
 locomotion pose, clean mirror return post-reload.
 
-Deferred (all riding the unparsed AdmDef kind dwords @0x24E8084/+4 or later slices):
-the hold poses 50–61 + binoculars 64 + reload2/pistol keying, the 62/63 knife/grenade
-attack stamps (no knife/grenade equip path yet), the +0x371 arms-dip feed, blend
-windows on channel re-init (D-INF-1), NPC/remote threading (D-NET-117). Reimpl
-divergence to note: unknown body keys NO-OP in our host (`play_body_clip`), where the
-original backfills missing states with the RESET clip (§14.8.1) — invisible for the
-ported slice (player bodies ship `anim_reload`), revisit with the holdables slice.
+Session 2 (2026-07-09, same train) closed the kind-dword gap and landed the rest of the
+producer: `libs/def` parses `special_hold`/`attack_anim` (ctest `def_parse_weapons`,
+both ctypes mirrors extended, layout-pinned by `test_def_ffi_mirror`);
+`NovaWeaponDatabase` exposes them; `NovaSimulation` refreshes the held kind + the
+scoped flag onto the entity pre-tick (`apply_player_input_pre_tick` — the @0x4b5d7f
+refresh) and stamps the fire-path attack via `infantry_weapon_attack_stamp`
+(`[orig: @ 0x542bbc..0x542bea]`, repeat-stamp keeps the playhead);
+`infantry_weapon_channel` now runs the full witnessed ladder — kinds 1–8 → 50–61 with
+the scoped +1 variants, the scoped rifle-mirror coercion to 49, binoculars 64
+(the `binoculars_raised` input exists and is tested; the host input toggle is deferred
+until a binoculars item exists), reload 65 / reload2 66 by kind==2 — plus the exact
++0x371 arms-dip block (dip-before-ease, double decrement) feeding
+`InfantryState.head_look_decay` into the §14 overlay's `head_look_decay` term, seeded
+20 on a weapon-switch mount edge. ctest `infantry` (`test_player_weapon_hold_kinds`,
+`test_player_weapon_attack_stamp`, `test_player_arms_dip` + the original
+`test_player_weapon_channel`). Live-verified (`godot/tests/body_holds_probe.gd(.tscn)`,
+ONED PIE, JOX 05TR, NOVA_VM_WEAPON, completion by state): WPN_colt45 —
+steady `anim_pistol`, reload plays `anim_reload2`, clean hold return; WPN_KNIFE —
+steady `anim_knife`, fire stamps `anim_knife_attack` with an advancing playhead,
+locked exit back to the hold; the rifle `body_reload_probe` re-run green (mirror at
+idle, `anim_reload`, 73.4° mask-bone delta).
+
+Deferred (later slices): NPC/remote threading (D-NET-117 — includes the AI-body RESET
+backfill question, see the data-coverage note in §14.8.4), the binoculars input toggle
+(case-26 binding + forced-clear rules; the ladder side is ported), blend windows on
+channel re-init (D-INF-1), the audio-level pitch kick (needs a mixer level tap —
+§14.3/§14.5). Reimpl divergence to note: unknown body keys NO-OP in our host
+(`play_body_clip`) where the original backfills to the RESET clip (§14.8.1) —
+invisible for the local-player slice (US01 ships every key), observable only for AI
+bodies once threading lands.
 
 Follow-ups: `NapiNPClientMsg_0x02D` (+0x2C8 writer) semantics; the org1 AI writer
-`@ 0x4b9a28`; the AdmDef kind dwords' `.adm`-file key names (which .adm text keys set
-0x24E8084+0/+4 — data sweep); `WeaponSlot_InitFromAvatarDef`'s spawn-time window stamp
-(does retail visibly reload on spawn?).
+`@ 0x4b9a28`; `WeaponSlot_InitFromAvatarDef`'s spawn-time window stamp (does retail
+visibly reload on spawn?).
 
 ### 14.8.8 IDB write-backs (2026-07-09 session, saved)
 
@@ -1110,3 +1192,12 @@ Entry/line comments: `0x53f830` (FP-channel correction), `0x541720` (+0x372 stam
 `GamePlayerEntity.prevAnimStateId(+0x2C8) → animStateIdWpn`,
 `pad_2c4(+0x2C4) → animStateDeferredWpn`, `+0x370/371/372 →
 prevHeldAdmIndex/armsDipTicks/reloadAnimTicks`.
+
+Session 2 (2026-07-09, saved): renamed `byte_B76539 → g_binocularsToggle`,
+`byte_B7653A → g_binocularsRaised`, `dword_3346FA4 → g_audioOutLevelStage1`,
+`dword_3346FA8 → g_audioOutLevel` (anchored: `AudioMixer_Init @ 0x7bd405` zeroing +
+the mixer-loop smoother @ 0x7bef3e..0x7bef55 + the @ 0x4b17f0 consumer). Line comments:
+`0x543cb7`/`0x543ce9` (the special_hold/attack_anim keys), `0x4de37b` (the binoculars
+gate refresh), `0x4e064c` (the case-26 toggle), `0x7bef3e` (the output power meter),
+`0x4b17f0` (the pitch kick resolved), `0x401f00` (control-registers-only fire side
+effect).

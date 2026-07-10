@@ -87,6 +87,10 @@ class DefWeaponDef(ctypes.Structure):
         ("renderfov", ctypes.c_float),
         # ADS zoom magnification ('scope_max_mag'; 0 = key absent; mirror def.h).
         ("scope_max_mag", ctypes.c_float),
+        # 3P body-channel kinds ('special_hold' 1..8 hold-pose ladder,
+        # 'attack_anim' 1 knife / 2 grenade; 0 = key absent; mirror def.h).
+        ("special_hold", ctypes.c_int),
+        ("attack_anim", ctypes.c_int),
     ]
 
 

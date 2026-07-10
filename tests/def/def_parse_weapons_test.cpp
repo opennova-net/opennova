@@ -315,6 +315,31 @@ int main(void) {
     }
     printf("flags + scope_max_mag OK\n");
 
+    /* 3P body-channel kinds [orig: 'special_hold' -> +0xA4 @ 0x543cb7, 'attack_anim'
+       -> +0xA8 @ 0x543ce9]: the knife carries 1/1, the colt pistol 2 with no
+       attack_anim key (0), and the rifle carries neither (0/0). */
+    {
+        const DefWeaponDef *knife = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_KNIFE") == 0) {
+                knife = &wf.entries[i];
+                break;
+            }
+        }
+        if (!knife || knife->special_hold != 1 || knife->attack_anim != 1 ||
+            colt->special_hold != 2 || colt->attack_anim != 0 ||
+            m4->special_hold != 0 || m4->attack_anim != 0) {
+            fprintf(stderr,
+                    "FAIL: body-channel kinds: knife=%d/%d colt=%d/%d m4=%d/%d\n",
+                    knife ? knife->special_hold : -1, knife ? knife->attack_anim : -1,
+                    colt->special_hold, colt->attack_anim, m4->special_hold,
+                    m4->attack_anim);
+            def_free_weapons(&wf);
+            return 1;
+        }
+    }
+    printf("special_hold + attack_anim OK\n");
+
     /* renderfov: no shipped JO weapon.def sets the key, so every entry carries the
        record default 80.0 [orig: AdmDef_InitEntryDefaults @ 0x53ff31]; the parser
        key overrides it [orig: 'renderfov' @ 0x54482a]. */
