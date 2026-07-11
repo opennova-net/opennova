@@ -77,6 +77,12 @@ class FakeWorld:
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
 	var camera_mode_calls: Array = []
+	# The action sound seam the host drains on the serial edges (the effect-world
+	# seam rides the particles slice).
+	var mission_audio = null  # FakeMissionAudio
+
+	func get_mission_audio():
+		return mission_audio
 
 	func local_player_weapon_view():
 		return weapon_view
@@ -346,3 +352,76 @@ func test_shared_host_teardown_releases_captured_mouse() -> void:
 	host.teardown()
 
 	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE)
+
+
+class FakeMissionAudio:
+	extends Node
+	var oneshots: Array = []
+
+	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
+		oneshots.append({"set": set_name, "pos": world_pos})
+		return true
+
+
+func _weapon_view() -> PlayerWeaponView:
+	var v := PlayerWeaponView.new()
+	v.active = true
+	return v
+
+
+func test_action_sound_legs_drain_to_mission_audio() -> void:
+	# The two ACTION sound legs [orig: ActionSlot_PlaySound @0x4010c0 at begin;
+	# ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100]: the begin
+	# leg rides action_serial/action_soundset, the END leg (the per-shot gunshot,
+	# GS_*) rides action_end_serial/action_end_soundset. The first snapshot adopts
+	# silently — a viewmodel rebuild must not refire sounds.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var audio := FakeMissionAudio.new()
+	add_child_autofree(audio)
+	world.mission_audio = audio
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	# Adopt tick: serials arrive non-zero on the first snapshot; nothing plays.
+	var v := _weapon_view()
+	v.action_serial = 4
+	v.action_end_serial = 7
+	v.action_soundset = "GF_RL_TEST"
+	v.action_end_soundset = "GS_TEST"
+	world.weapon_view = v
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 0, "the first snapshot adopts serials silently")
+
+	# End-leg edge: the finished action's soundsetend plays at the player.
+	var v2 := _weapon_view()
+	v2.action_serial = 4
+	v2.action_end_serial = 8
+	v2.action_end_soundset = "GS_TEST"
+	world.weapon_view = v2
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 1, "the end-leg serial edge plays one set")
+	if audio.oneshots.size() == 1:
+		assert_eq(String(audio.oneshots[0]["set"]), "GS_TEST",
+			"the END leg plays the finished action's soundsetend [orig: ActionDef+12]")
+
+	# Begin-leg edge alongside: soundset plays too.
+	var v3 := _weapon_view()
+	v3.action_serial = 5
+	v3.action_soundset = "GF_RL_TEST"
+	v3.action_end_serial = 8
+	world.weapon_view = v3
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 2, "the begin-leg serial edge plays one set")
+	if audio.oneshots.size() == 2:
+		assert_eq(String(audio.oneshots[1]["set"]), "GF_RL_TEST",
+			"the begin leg plays the started action's soundset [orig: ActionDef+8]")
+

@@ -86,15 +86,25 @@ void begin_active(const WeaponFsmAction &desc, WeaponSlotState &slot,
 }
 
 // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 (desc, slot, entity, nextAction)]:
-// counter = delayEnd, nextAction = the passed value, the ACTIVE->DONE kick bump
-// (skipped for RELOAD), phase = DONE. The original gates the kick on the weapon's
-// fire-sound id being set (Def+0x294) — every shipped weapon carries one (D-WPN-3).
-void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t next) {
+// counter = delayEnd, nextAction = the passed value, the END-leg sound (ACTIVE only),
+// the ACTIVE->DONE kick bump (skipped for RELOAD), phase = DONE. The original gates the
+// kick on the weapon's fire-sound id being set (Def+0x294) — every shipped weapon
+// carries one (D-WPN-3).
+void finish_active(const WeaponFsmAction &desc, WeaponSlotState &slot, int32_t next,
+                   WeaponFsmEvents &out) {
     const bool was_active = slot.phase == weapon_phase::kActive;
     slot.counter = desc.delay_end;
     slot.next = next;
-    if (was_active && slot.current != weapon_action::kReload)
-        kick_add(slot, desc.delay_start + desc.delay_end + slot.counter + 10);
+    if (was_active) {
+        // The end-leg sound plays only when the phase byte was 2 (ACTIVE) at entry —
+        // a phase-1 abort (the fire CanFire refusal) finishes silently.
+        // [orig: @ 0x53f7b9 phase==2 latch -> the end shim @ 0x53f7d6 (sub_401100
+        //  plays ActionDef+12); the shim's dupsound repeat loop (+44 count / +48
+        //  interval) is data-dead in the JOX/REVX corpora]
+        out.action_finished = desc.id;
+        if (slot.current != weapon_action::kReload)
+            kick_add(slot, desc.delay_start + desc.delay_end + slot.counter + 10);
+    }
     slot.phase = weapon_phase::kDone;
 }
 
@@ -171,9 +181,10 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                   WeaponSlotState &slot, const WeaponFsmInputs &in, WeaponFsmEvents &out) {
     if (slot.phase == weapon_phase::kEntered && !can_fire_ammo(def, slot)) {
         // The abort adopts whatever CanFire queued (RECOIL toward auto-reload, or
-        // EMPTYIDLE) — the [esi+30h] read happens AFTER the CanFire call.
+        // EMPTYIDLE) — the [esi+30h] read happens AFTER the CanFire call. Phase is
+        // still 1 here, so the finish plays no end-leg sound.
         // [orig: @ 0x542b44..0x542b5e]
-        finish_active(desc, slot, slot.next);
+        finish_active(desc, slot, slot.next, out);
         slot.counter = 0;
         return;
     }
@@ -193,7 +204,9 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     const WeaponFsmAction &recoil = def.actions[weapon_action::kRecoil];
     // [orig: @ 0x542cf1..0x542d0f — recoil ds + de + counter + 10, cap 20]
     kick_add(slot, recoil.delay_start + recoil.delay_end + slot.counter + 10);
-    finish_active(desc, slot, slot.next); // [orig: @ 0x542d13 push [esi+30h] — keeps 3]
+    finish_active(desc, slot, slot.next, out); // [orig: @ 0x542d13 push [esi+30h] — keeps
+                                               //  3; the finish plays the fire row's
+                                               //  soundsetend = the per-shot gunshot]
 }
 
 // [orig: WpnAction_Recoil @ 0x542dd0] THE ARBITER: when the recoil clip ends, decide
@@ -263,7 +276,7 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     }
     begin_active(desc, slot, in, out); // [orig: ExecuteActionTick @ 0x543150]
     if (slot.counter == 0 && slot.phase != weapon_phase::kDone) {
-        finish_active(desc, slot, weapon_action::kIdle); // [orig: @ 0x54316e push 0]
+        finish_active(desc, slot, weapon_action::kIdle, out); // [orig: @ 0x54316e push 0]
         slot.burst = 0; // [orig: @ 0x543176]
     }
 }

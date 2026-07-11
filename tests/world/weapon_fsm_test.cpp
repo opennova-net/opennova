@@ -343,6 +343,75 @@ void test_idle_plays_once_per_entry() {
     CHECK(idle_plays == 1);
 }
 
+void test_action_sound_legs() {
+    // The corpus split: fire rows carry the gunshot in soundsetEND (118/130 REVX,
+    // 83/89 JOX), reload rows in soundset (start). The shot tick begins AND finishes
+    // the fire action's ACTIVE phase, so both legs land on that tick — begin plays
+    // ActionDef+8, finish plays ActionDef+12. [orig: ActionSlot_PlaySound @ 0x4010c0
+    // from the begin shims; ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim
+    // @ 0x401100, reached from WeaponAction_Fire @ 0x542d1a]
+    WeaponFsmActionRow rows[3];
+    set_row(rows[0], "fire", "anim_wpn_fire", 0, 6);
+    std::snprintf(rows[0].soundsetend, sizeof(rows[0].soundsetend), "%s", "GS_TEST");
+    set_row(rows[1], "reload", "anim_wpn_reload", 0, -1);
+    std::snprintf(rows[1].soundset, sizeof(rows[1].soundset), "%s", "GF_RL_TEST");
+    set_row(rows[2], "idle", "anim_wpn_idle", 0, -1);
+    WeaponFsmDef def;
+    weapon_fsm_bake(rows, 3, clip_seconds, nullptr, def);
+    def.auto_fire = true;
+    def.clip_capacity = 10;
+    CHECK(std::strcmp(def.actions[wa::kFire].soundsetend, "GS_TEST") == 0);
+    CHECK(std::strcmp(def.actions[wa::kFire].soundset, "") == 0);
+    CHECK(std::strcmp(def.actions[wa::kReload].soundset, "GF_RL_TEST") == 0);
+
+    WeaponSlotState s;
+    s.clip = 10;
+    s.reserve = 20;
+    WeaponFsmInputs in;
+    in.fire_pressed = true;
+    WeaponFsmEvents ev;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(ev.fired);
+    CHECK(ev.action_started == wa::kFire);
+    CHECK(ev.action_finished == wa::kFire); // the per-shot GS_* leg
+}
+
+void test_fire_abort_finishes_silently() {
+    // A CanFire refusal finishes from phase 1 (never ACTIVE) -> no end-leg sound.
+    // [orig: @ 0x542b5e finish; the phase==2 latch @ 0x53f7b9 stays false]
+    WeaponFsmDef def = make_ak_def();
+    WeaponSlotState s = make_ak_slot();
+    s.clip = 0;
+    s.reserve = 0;
+    WeaponFsmInputs in;
+    in.fire_pressed = true;
+    WeaponFsmEvents ev;
+    weapon_fsm_tick(def, s, in, ev);
+    CHECK(s.current == wa::kFire);
+    CHECK(!ev.fired);
+    CHECK(ev.action_finished == -1);
+}
+
+void test_reload_end_leg() {
+    // Reload completion runs the finish shim -> the end leg fires exactly once.
+    // [orig: WeaponAction_Reload @ 0x54316e]
+    WeaponFsmDef def = make_ak_def();
+    WeaponSlotState s = make_ak_slot();
+    s.clip = 0;
+    s.reserve = 300;
+    WeaponFsmInputs in;
+    in.reload_pressed = true;
+    int end_legs = 0;
+    for (int t = 0; t < 80; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        in.reload_pressed = false;
+        if (ev.action_finished == wa::kReload) ++end_legs;
+    }
+    CHECK(end_legs == 1);
+    CHECK(s.clip == 30);
+}
+
 void test_non_local_recoil_makes_no_decision() {
     WeaponFsmDef def = make_ak_def();
     WeaponSlotState s = make_ak_slot();
@@ -374,6 +443,9 @@ int main() {
     test_reload_request_gate();
     test_scope_queue();
     test_idle_plays_once_per_entry();
+    test_action_sound_legs();
+    test_fire_abort_finishes_silently();
+    test_reload_end_leg();
     test_non_local_recoil_makes_no_decision();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;

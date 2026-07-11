@@ -96,6 +96,8 @@ var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel 
 var _weapon_play_serial := -1
 var _weapon_action_serial := -1     # action-begin drain; -1 adopts the first snapshot
                                     # silently (viewmodel rebuilds must not refire sounds)
+var _weapon_action_end_serial := -1 # action-END drain (soundsetend — the per-shot
+                                    # gunshot / reload-complete legs); same adopt rule
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
 var _reload_was_down := false
@@ -329,15 +331,22 @@ func _consume_weapon_view() -> void:
 		_weapon_action_serial = view.action_serial
 		if not adopt_only:
 			_fire_action_effects(view)
+	if view.action_end_serial != _weapon_action_end_serial:
+		var end_adopt := _weapon_action_end_serial < 0
+		_weapon_action_end_serial = view.action_end_serial
+		if not end_adopt:
+			_fire_action_end_sound(view)
 
 
 # The action-begin SOUND leg: play the started ACTION's soundset 3D-positional at the
 # firing entity [orig: ActionSlot_ExecuteActionWithEffect @0x541860 plays the row's
 # soundset; the one-shot 3D placement is Sound_Play3DPositional @0x527cb0]. The
 # original's paired MUZZLE leg (ActionSlot_SpawnEffect @0x401f20 at the row's
-# particle + userpoint, FIRE-only local routing @0x541a70) rides the particles slice
-# with the effect world itself. Several 62.5 Hz ticks can land in one frame; like the
-# clip drain above, the last started action wins the frame.
+# particle + userpoint, with the FIRE-only / !scoped-FP / no-local-casings routing
+# [orig: ActionSlot_ExecuteActionTick @0x541a70] and the slot+24 one-live-group guard
+# [orig: @0x5418c8]) rides the particles slice with the effect world itself. Several
+# 62.5 Hz ticks can land in one frame; like the clip drain above, the last started
+# action wins the frame.
 func _fire_action_effects(view: PlayerWeaponView) -> void:
 	if _world == null:
 		return
@@ -345,6 +354,21 @@ func _fire_action_effects(view: PlayerWeaponView) -> void:
 		var audio = _world.get_mission_audio()
 		if audio != null:
 			audio.fire_soundset(view.action_soundset, _world.local_player_position())
+
+
+# The action-END sound leg: the finished ACTION's soundsetend, 3D-positional at the
+# firing entity — the fire rows' per-shot gunshot (GS_*) and the reload completion.
+# [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
+#  ActionDef+12 at the owner entity, gated on the phase byte being 2 (ACTIVE); its
+#  dupsound repeat loop (+44/+48) is data-dead in the JOX/REVX corpora]
+func _fire_action_end_sound(view: PlayerWeaponView) -> void:
+	if _world == null or view.action_end_soundset.is_empty():
+		return
+	if not _world.has_method("get_mission_audio"):
+		return
+	var audio = _world.get_mission_audio()
+	if audio != null:
+		audio.fire_soundset(view.action_end_soundset, _world.local_player_position())
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay

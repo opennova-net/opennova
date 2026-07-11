@@ -6075,9 +6075,68 @@ resets the scope + FOV 80. View biases zeroed, `Player_UpdateFirstPersonCamera` 
 immediately, seat-flag 0x40000 → C2S 0x1D/169, scoped-capable slots re-arm the camera
 interp. IDB: both queue helpers renamed + commented; saved.
 
+**The ACTION sound legs (2026-07-10, the "no gun sounds" grill).** The rows carry TWO
+sound fields and the engine plays them at different phase edges:
+
+- **Begin leg** — `soundset` → `ActionDef+8`, resolved at parse
+  (`SoundBank_FindSetByNameAnyBank @ 0x5274f0`; a missing set logs + skips the write).
+  Played by `ActionSlot_PlaySound @ 0x4010c0` from every begin shim on the phase 1→2
+  edge (`ActionSlot_BeginActivePhase @ 0x53f873`, `..ExecuteActionWithEffect @ 0x5418b0
+  / @ 0x541976`, `..ExecuteActionNoEffect @ 0x541a2a`) — 3D at the owner entity
+  (`Entity_PlaySound3D_FullVolume @ 0x528e20`; local uses entity+4 position directly).
+  The plain-Begin held-variant (0x40) plays anim only, no sound `@ 0x53f88b`.
+- **End leg** — `soundsetend` → `ActionDef+12`. Played by the end shim `@ 0x401100`
+  (ex kong "ActionSlot_RenderModelWithLOD" — a misnomer; its "LOD loop" is the
+  `dupsound` repeat scheduler) from `ActionSlot_FinishActivePhase @ 0x53f7d6`, gated
+  on the phase byte being 2 (ACTIVE) at entry `@ 0x53f7b9` — a phase-1 abort finishes
+  silently. FinishActivePhase is reached from exactly two handlers:
+  `WeaponAction_Fire @ 0x542d1a` (per shot — **the gunshot lives here**: 118/130 REVX
+  and 83/89 JOX fire rows use `soundsetend`, not `soundset`) and `WeaponAction_Reload
+  @ 0x54316e` (completion). `dupsound N M` (`+44` count / `+48` interval; `N==1`
+  normalized to 0 `@ 0x40260f`) schedules N−1 delayed repeats — zero uses in the
+  JOX/REVX corpora (data-dead).
+- **Weapon-level sounds** — four 24-B name strings at WeaponDef `+0x2F8/+0x310/+0x328/
+  +0x340` from keys `soundfireloop`/`soundtrailoff`/`soundhead`/`soundlockedtone`
+  (`WeaponDefs_ParseLineCallback @ 0x5444c8..0x544578`), resolved post-parse into ids
+  `+0x294/+0x298/+0x29C/+0x2A0` (`WeaponDef_ResolveAllReferences @ 0x54042c..0x540482`).
+  The fire handler plays `+0x294` only when `kickIntensity == 0` (volley start)
+  `@ 0x542ccc..0x542ce9`. **Zero uses in JOX+REVX weapon.def** — the leg is data-dead
+  for our SKUs (witnessed, unported; the `sub_527AD0(+8)` read after the fire begin is
+  a discarded pure read `set+72 << 16` — no audible effect).
+- **Effect (particle) routing** — the local player's begins route through
+  `ActionSlot_ExecuteActionTick @ 0x541a70`: only FIRE (`slot+44 == 2`) can take the
+  with-effect shim, and only in third person (`g_camera_mode`), from a vehicle-attack
+  seat, or un-scoped FP (`dword_24D20C0 & 1 && !g_weaponScopeActive @ 0x541aba`);
+  every other local begin is the no-effect shim `@ 0x541b17` — casing ejects
+  (`recoil` rows' particles) never spawn in your own FP view. Remote entities always
+  take the with-effect shim `@ 0x541a83` (an MP seam for us). The muzzle spawn is
+  double-spawn-guarded: `@ 0x5418c8` spawns only when `slot+24` is clear;
+  `ActionSlot_SpawnEffect @ 0x401f20` records the emitter handle there with the
+  on-death callback `ActionSlot_ClearEffectHandle @ 0x53f760` riding the 14-dword
+  descriptor. The spawn point is the weapon model's `launchuserpoint` (name `+0x2E8`
+  → resolved 1-based index `+0x2D4` on the gfx1 model; per-entity fallback
+  `Entity_GetWeaponSlotByte(entity, clip & 3, 1) @ 0x541912`). Reload begins pass
+  effectScale 0.0 (`@ 0x543150`) — reload rows' particles never spawn anywhere.
+- **Cadence refutation** — the June "+20 fire-expiry" note is refuted at both request
+  sites: `WeaponSlot_RequestFire @ 0x53efa0` and `WeaponSlot_CanFire @ 0x541ba0` carry
+  no tick gate; the rate of fire IS the fire row's `delayend` (AK47AUTO `delayend 6` ≈
+  625 rpm at 62.5 Hz) + the recoil delays. `WeaponSlot_CanFire`'s other legs annotated:
+  busy weapon child (`Entity_FindChildByDefType(e,1,1)`), underwater refusal (def
+  `Underwater 0x4` / entity swim `0x8000` vs `Env_WaterHeightFixed`), and the empty leg
+  writing `slot+48` = 3 (reserve) / 1 — the port's `can_fire_ammo` shape.
+
+Port row: `WeaponFsmEvents.action_finished` (emitted in `finish_active` on the
+was-ACTIVE edge) → `NovaSimulation` `action_end_serial`/`action_end_soundset` →
+`LocalPlayerHost._fire_action_end_sound`; the begin-leg SOUND drains the same way.
+The particle legs (the `@ 0x541a70` routing gates, `spawn_effect_unless_alive` /
+the slot+24 guard) ride the particles slice with `NovaEffectWorld` itself. ctest
+`weapon_fsm` pins both legs + the silent abort; GUT `local_player_host_test` pins
+the sound drains.
+
 **Open follow-ups:** who queues OVERHEATED(11);
 the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
-`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq.
+`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq;
+remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump.
 
 ## 6. Struct reference
 

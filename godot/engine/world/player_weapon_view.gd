@@ -19,9 +19,17 @@ var play_serial := 0
 # soundset and spawns the particle at the model user point on the serial edge.
 # [orig: ActionSlot_ExecuteActionWithEffect @0x541860 -> ActionSlot_SpawnEffect @0x401f20]
 var action_serial := 0
+var action_started := -1   # the started action's slot id (weapon_action::*; -1 = none)
 var action_soundset := ""
 var action_particle := ""
 var action_particle_userpoint := ""
+# The action-END seam: `action_end_serial` bumps when an ACTIVE phase finishes; the
+# finished row's soundsetend rides alongside — fire rows carry the per-shot gunshot
+# here (GS_*), reload rows the completion sound.
+# [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
+#  ActionDef+12, gated on the phase byte being 2 (ACTIVE)]
+var action_end_serial := 0
+var action_end_soundset := ""
 var fired_serial := 0
 var dry_serial := 0
 var reload_serial := 0
@@ -49,9 +57,12 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.anim_key = String(d.get("anim_key", ""))
 	out.play_serial = int(d.get("play_serial", 0))
 	out.action_serial = int(d.get("action_serial", 0))
+	out.action_started = int(d.get("action_started", -1))
 	out.action_soundset = String(d.get("action_soundset", ""))
 	out.action_particle = String(d.get("action_particle", ""))
 	out.action_particle_userpoint = String(d.get("action_particle_userpoint", ""))
+	out.action_end_serial = int(d.get("action_end_serial", 0))
+	out.action_end_soundset = String(d.get("action_end_soundset", ""))
 	out.fired_serial = int(d.get("fired_serial", 0))
 	out.dry_serial = int(d.get("dry_serial", 0))
 	out.reload_serial = int(d.get("reload_serial", 0))
