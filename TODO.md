@@ -110,3 +110,32 @@ D-PLAYERINFO-7..12). Remaining:
       the weight budget label in the companion.
 - [ ] Persist the chosen avatar/name to a player profile + render the chosen combo on
       the spawned soldier (D-PLAYERINFO-1, combo -> spawned-player model still open).
+
+## Foliage rebuild (fix-219, started 2026-07-11)
+
+Maintainer verdict: delete the current foliage implementation, re-study the
+original from scratch, reimplement. Perf triage (tests/perf_probe.gd, REVVY
+ASB_G11A): the MODEL tier burns 15.8 ms/frame of a 17.8 ms world tick (89%),
+171k cumulative tile regenerations — churn instead of the witnessed bake-once
+architecture. The rebuild is both the fidelity and the perf fix.
+
+Phases:
+- A. Fresh IDA verification sweep of the load-bearing claims (docs/foliage/
+  foliage-re.md is the prior record; verify, don't trust): the FAR feed
+  (traverse-collect 42.0 <=128/frame @0x60905c/@0x603e60), per-def slot pools
+  bake-once + LRU (@0x601b30, generate @0x5ffdd0 seed 0xA55B1EED), the draw
+  walk + fades (@0x60a171..0x60a694, 20..42, high pass <33, refs 180/8),
+  tile-RT t0 = COLORMAP-ONLY + N.L alpha (@0x60dce5/@0x60e38a), the
+  foliagemap match remap (@0x605AD0/@0x5FF4E0/@0x6066d0), the MODEL tier
+  (@0x601f50 quadrant walk + 8-frame stagger + 1000-entry cache, >=38.0;
+  dispatch @0x5c7d50; FOGENABLE-OFF black; dedup-to-last D-FOLIAGE-10).
+- B. Delete + reimplement the HOST side to the witnessed retained model:
+  godot/engine/terrain/nova_foliage_dispatcher.{h,cpp} rebuilt around
+  bake-once slot pools (NO per-frame regeneration; LRU eviction by frame
+  stamp; frustum-gated MODEL dispatch). libs/foliage placement.cpp (byte-exact
+  0xA55B1EED placement) KEEPS — it is parity-tested; the dispatcher/emitter
+  layers rebuild against it.
+- C. Gates: perf_probe ASB_G11A foliage_us < 3000 (from 15849); the fp/keys
+  probes' scenes visually re-checked (near brightness, far tint, no flicker,
+  black far models); GUT foliage files + ctest foliage suite green; the
+  RE record rewritten as the single source.
