@@ -519,6 +519,11 @@ func unload() -> void:
 	_placer = null
 	_weapon_db = null  # re-resolves against the next load's mounted root
 	_local_weapon_dict = {}
+	# Armory selections belong to the entity from the mission being torn down.
+	# A new spawn must resolve from its own equipped AdmDef instead of inheriting
+	# either the previous mission's override or its authored NONE state.
+	_viewmodel_weapon_override = ""
+	_viewmodel_weapon_cleared = false
 	_mission_stats = {}
 
 
@@ -762,8 +767,58 @@ func build_local_player_avatar() -> Node3D:
 ## are follow-ups. Null when the placer or both models fail to resolve.
 const DEFAULT_VIEWMODEL_WEAPON := "WPN_AK47AUTO"
 
+# The armory-equipped weapon name; overrides DEFAULT_VIEWMODEL_WEAPON/env once the
+# player accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
+# Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot].
+var _viewmodel_weapon_override := ""
+# NONE is distinct from the pre-armory empty override, which falls back to the
+# witnessed bring-up default until an equipped weapon is resolved.
+var _viewmodel_weapon_cleared := false
+
+## Armory apply, host side: point the FP viewmodel + action FSM at `weapon_name`.
+## Validates against weapon.def; the caller (main_game) drops the old viewmodel so the
+## per-frame pass rebuilds gun/arms/FSM from the new def [orig: the ACCEPT re-mount,
+## WeaponLoadout_ApplyFromBuffer @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
+func set_local_player_weapon_by_name(weapon_name: String) -> bool:
+	if weapon_name.is_empty():
+		return false
+	if _weapon_db == null:
+		local_player_viewmodel_def()  # lazily loads weapon.def into _weapon_db
+	var index: int = _weapon_db.find_weapon(weapon_name) \
+			if _weapon_db != null and _weapon_db.is_loaded() else -1
+	if index < 0:
+		push_warning("GameWorld: armory weapon '%s' not in weapon.def — keeping current" % weapon_name)
+		return false
+	_viewmodel_weapon_override = weapon_name
+	_viewmodel_weapon_cleared = false
+	# Install the new weapon's FSM on the sim NOW — the mount is not hostage to the FP
+	# model load [orig: the ACCEPT chain rebuilds the slot table + mounts with no
+	# render dependency — WeaponSlotTable_LoadAllFromDefs @0x5414e0 +
+	# Player_MountWeaponSlot @0x4dfa40 (camera/scope/switch-queue state only); the FP
+	# model resolve is a separate per-frame consumer @0x4ded60]. Clip lengths bake in
+	# again when the rebuilt viewmodel resolves (_setup_local_player_weapon); a model
+	# that never loads leaves 'auto' delays collapsed instead of leaving the OLD
+	# weapon's FSM live under the new entity stamp.
+	_local_weapon_dict = _weapon_db.get_weapon(index)
+	var sim := get_sim()
+	if sim != null:
+		sim.set_local_player_weapon(_local_weapon_dict, {})
+	return true
+
+## Armory NONE: clear the equipped render/FSM state instead of falling back to the
+## pre-armory default model on the next frame.
+func clear_local_player_weapon() -> void:
+	_viewmodel_weapon_override = ""
+	_viewmodel_weapon_cleared = true
+	_local_weapon_dict = {}
+	var sim := get_sim()
+	if sim != null:
+		sim.clear_local_player_weapon()
+
 func build_local_player_viewmodel() -> Node3D:
 	if _placer == null:
+		return null
+	if _viewmodel_weapon_cleared:
 		return null
 	var container := Node3D.new()
 	container.name = "PlayerViewmodel"
@@ -873,6 +928,8 @@ func local_player_weapon_view() -> PlayerWeaponView:
 ## DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands; NOVA_VM_WEAPON
 ## overrides the name (debug: rig A/B against another SKU's def).
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
+	if _viewmodel_weapon_cleared:
+		return null
 	if _weapon_db == null:
 		if _resource_root == null:
 			return null
@@ -883,7 +940,11 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 			return null
 	if not _weapon_db.is_loaded():
 		return null
-	var weapon_name := OS.get_environment("NOVA_VM_WEAPON")
+	# Precedence: the armory-equipped weapon, else the NOVA_VM_WEAPON debug override,
+	# else the fixed default until first equip.
+	var weapon_name := _viewmodel_weapon_override
+	if weapon_name.is_empty():
+		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
 		weapon_name = DEFAULT_VIEWMODEL_WEAPON
 	var index: int = _weapon_db.find_weapon(weapon_name)

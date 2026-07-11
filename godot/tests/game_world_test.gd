@@ -233,6 +233,29 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 		"an unloaded world no longer reports a stale active mission")
 
 
+func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
+	world.set_resource_root(root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	world.clear_local_player_weapon()
+	assert_null(world.local_player_viewmodel_def(), "the authored NONE row has no viewmodel")
+	world.unload()
+
+	var old_debug_weapon := OS.get_environment("NOVA_VM_WEAPON")
+	OS.set_environment("NOVA_VM_WEAPON", "WPN_M4")
+	var restored: PlayerViewmodelDef = world.local_player_viewmodel_def()
+	OS.set_environment("NOVA_VM_WEAPON", old_debug_weapon)
+	assert_not_null(restored, "a new mission is not stuck with the previous entity's NONE state")
+	if restored != null:
+		assert_eq(restored.weapon_name, "WPN_M4",
+			"the next mission can resolve a weapon after the previous entity selected NONE")
+
+
 func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	var world := _make_world()
 	add_child_autofree(world)

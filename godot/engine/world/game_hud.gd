@@ -181,8 +181,10 @@ func _draw() -> void:
 	# This overlay is a Control parented directly to a CanvasLayer, which does not drive a child
 	# Control's layout — so our own `size` can stay (0,0) and every scaled element would collapse.
 	# Draw against the viewport rect, which is the real screen the original scales its HUD to.
+	# An embedded ONED host supplies a nonzero Control size; that panel wins over
+	# the enclosing editor viewport so HUD geometry stays clipped to play.
 	# [orig: overlayCtx @0x24c1420 screen_w/h -> Viewport_ScaleToVirtualCoords @0x5d2b20]
-	var surface := get_viewport_rect().size
+	var surface := size if size.x > 1.0 and size.y > 1.0 else get_viewport_rect().size
 	var ticks := int(_info.get("ticks", 0))
 
 	# Static HUD frame background.

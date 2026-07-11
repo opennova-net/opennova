@@ -542,13 +542,14 @@ groundEntity store corrected in the port; world-wac-ai-re §15):
 | — | `Entity_FindNearestByRay` | `0x413af0` | projectile-side ray over the global static+dyn tables | decompile | confirm-only (round_sim follow-up) |
 | — | `terrain_sector_compute_lighting` (blink read) | `0x5c7550` | per-sample blink query; INDOOR keyed on hit-slot presence -> interior light group | decompile | confirm-only (REN scope) |
 
-In-game armory sim seams (engine-research 2026-07-09; the WEAPON-screen UI host and its
-witness rows land with the armory slice):
+In-game armory sim seams (engine-research 2026-07-09; re-grilled 2026-07-11 with the
+armory slice — the WEAPON-screen UI host, protocol, and divergences live in
+mnu/menu-re.md "In-game armory"):
 
 | reimpl symbol (file) | original | addr | signature / role | evidence | status |
 |---|---|---|---|---|---|
-| `NovaSimulation.local_player_in_armory_zone` | `Input_HandleActionBinding` case 218 (gate half) | `0x49b83d` | armory key gated on Flags 0x400000 (type-6 volume); 0x800 -> vehicle.mnu | disasm | ported (zone gate; the key binding + UI host ride the armory slice) |
-| `apply_local_player_loadout` (NovaSimulation) | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> per-team buffer; MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount | decompile | ported (equipped+class slice; UI producer rides the armory slice) |
+| `NovaSimulation.local_player_in_armory_zone` | `Input_HandleActionBinding_0` case 0xB1 (gate half; the USE-ITEM key, retail default Shift) | `0x4e0b3f` | armory open gated on Flags 0x400000 (type-6 volume); 0x800 -> vehicle.mnu; the parallel action 218 @0x49b83d ships unbound | decompile | ported (zone gate + the Shift key + UI host: `NovaArmoryHost`/`ArmoryMenuHost`) |
+| `apply_local_player_loadout` (NovaSimulation) | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> PER-CLASS buffer (`g_armoryLoadoutBufferByClass` + 2048*class); MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount | decompile | ported (equipped+class slice; multi-slot inventory + per-class buffers deferred, menu-re.md D-MNU-9) |
 
 First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
 

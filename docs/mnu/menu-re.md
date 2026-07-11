@@ -535,6 +535,12 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `menu_shell.gd::_seed_control_mapping` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) | `build_table` — `nova_mnu_builder.cpp` (id lookup + body justify + authored scrollbar) + `NovaMnuTable` |
 | `NovaControlsModel` (Godot wrapper) | `godot/engine/mnu/nova_controls_model.cpp` |
+| `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
+| `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuHost._populate_classes` |
+| `Armory_ResolveSelectedClass @ 0x5642f0` + `SpinList_SelectItemByValue @ 0x64ba50` | `ArmoryMenuHost._resolve_selected_class` + select-by-value |
+| `populate_three_category_lists @ 0x566db0` (+ `ListWidget_SortRows @ 0x644990` / `cmp @ 0x6448a0`) | `ArmoryMenuHost._populate_slots/_fill_slot` (sorted rows, NONE at 0) |
+| `update_weapon_weight_display @ 0x565640` + `calculate_equipped_weapons_weight @ 0x565490` | `ArmoryMenuHost._update_weight` (witnessed format + encumbrance bands; D-MNU-9 on the ammo model) |
+| `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (ACCEPT/CANCEL, `skip_apply` arg) | `ArmoryMenuHost._on_accept/_on_cancel` -> the shell's SP apply |
 
 IDB state note (2026-06-23): the 2026-06-23 render grill renamed `sub_639480 ->
 CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `sub_6394E0 ->
@@ -576,3 +582,147 @@ Closed since the notes were taken (do not resurrect from `notes/`): the hardcode
 `[orig: @ 0x647d40]` were fixed by the 2026-06-09 grill (see Layout and Frame above);
 `FORM`, `GLOBAL_VAR`, `PASSWORD`, and scroll `HEIGHT/WIDTH` are now parsed and
 round-tripped by `libs/mnu`.
+
+## In-game armory — the WEAPON screen (engine-research 2026-07-09; re-grilled 2026-07-11)
+
+The in-match loadout UI is **weapon.mnu's WEAPON screen** (a boot resource of the
+game.mnu family) — NOT the loadout.mnu/LOADOUT screen found in some extracts, which
+retail `Jointops.exe` never references (no `loadout` string exists in the image).
+Reimpl: `ArmoryMenuHost` (companion) + the shell armory key +
+`NovaSimulation.apply_local_player_loadout`; GUT `armory_menu_seam_test.gd`.
+
+**Open paths (three, all -> `UI_OpenMenuScreen("weapon.mnu", "WEAPON", 0)
+@ 0x54e520` + latch `g_WeaponScreenOpen @ 0x24C1884`; none stops the world —
+the screen is a live overlay, and in an MP session the team scoreboard draws
+over it `[orig: Render_ProcessMainSceneFrame @ 0x5cae1c]`):**
+
+1. **The USE-ITEM key** (action 177, binding row 44 `useitem`; shipped default =
+   **SHIFT**, per the retail KeyChart's "USE ITEM/ATTACH/ARMORY")
+   `[orig: Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f]`: gated on a local
+   player, NOT seated (parentSlot == 0), entity Flags 0x400000 (inside a type-6
+   armory collision volume — world-wac-ai-re.md §15.4), the repeat debounce
+   `g_weaponScreenOpenDebounce @ 0x24C18E8`, and the host weapons rule
+   `dword_A85B6C` (BSS ⇒ 0 at boot: SP allows; the WPN_ARMORY / WPN_NEVER /
+   WPN_MISSION radios on MULTI_PLAYER_HOST are its setter `[orig: @ 0x5580f0]`).
+   Flags 0x800 (type-11 vehicle-loadout volume) -> `vehicle.mnu` VEHICLE
+   (occupancy check via groundEntity Team); out of both zones the key falls
+   through to its normal use-item leg.
+2. **Action 218** `[orig: Input_HandleActionBinding @ 0x49b83d]` — the same
+   zone-gated open, but **no binding row ships for 218** (no config name, no
+   default key: NOT user-remappable; programmatic/legacy only). Case 221 ->
+   `cmap.mnu` CMAP (the deploy map, after `Game_InitRespawnState @ 0x499360`).
+3. **Action 40** (`!ToSpecial`, row 117, not remappable) ->
+   `UI_OpenWeaponScreenSinglePlayer @ 0x424390/0x4ddce0`: SP-only
+   (`!is_in_session`), **no zone gate**.
+
+**Screen lifecycle.** INIT (once) `[orig: UI_InitWeaponClassSelection
+@ 0x567250]`: runs the control registrar, then fills PLAYER_CLASS with the
+"Menu"-section `CHARCLASS_MEDIC/SNIPER/GUNNER/RIFLEMAN/ENGINEER` rows, values
+5..9. ON SHOW `[orig: @ 0x567370]`: the selected class =
+`Armory_ResolveSelectedClass @ 0x5642f0` — the player's current `playerClass`
+when `g_hostClassAllowMask @ 0x24D59FC` allows it, else the next allowed class
+scanning up through 9, else **7 (gunner)**; a class outside 5..9 (an unclassed
+SP spawn) filters NOTHING (switch default mask = −1). Per-item enable rides the
+mask bits 5..9; the spin selects **by value** (`SpinList_SelectItemByValue
+@ 0x64ba50`, row 0 on no match); the spin + its label are enabled **only
+in-session** (SP: disabled). ACCEPT gains hotkeys from binding row 177's
+runtime keys (`0x81A468/6A`, writer unwalked).
+
+**Control registration** `[orig: WeaponDef_RegisterUICallbacks @ 0x567020 —
+(screen "WEAPON", control, kind, handler, arg) via the shared registrar
+@ 0x63c060]`:
+
+| Control | Handler | Notes |
+|---|---|---|
+| PRIMARY | `UI_OnPrimaryWeaponTypeChanged @ 0x5662d0` | slot combo (kind 0x220) |
+| PRIMARY_AMMO1 / _AMMO2 | `sub_566620` (arg 0/1) | clip-count combos |
+| PRIMARY_AMMO1_TYPE | `sub_566650` | round-type combo |
+| SECONDARY (+ ammo/type) | `UI_OnSecondaryWeaponChanged @ 0x566670`, `sub_5669C0/…F0` | |
+| ACCESSORY (+ ammo) | `ui_on_weapon_ammo_slot_changed @ 0x566a10`, `sub_566D40` | |
+| GRENADE_AMMO1..3 | `sub_566D70` (arg 0/1/2) | |
+| PLAYER_CLASS | `handle_team_class_selection @ 0x566f60` (kind 0x40 spinlist) | MP-only flip; host fills the authored-empty items |
+| ACCEPT / CANCEL | `WeaponLoadout_ApplyFromBuffer @ 0x565cd0` (arg 0/1) | kind 8 buttons |
+
+**Population** `[orig: populate_three_category_lists @ 0x566db0]` — the WEAPON
+screen's own populate (the similar `populate_weapon_slot_lists @ 0x560430`
+serves player.mnu's PLAYER_INFO): filter = def valid && class mask && team mask
+&& `g_armoryWeaponAvailability @ 0x24D5600` (per-adm-index byte table; writers:
+`Mission_LoadBMSFile @ 0x40f834` — SP missions author the armory list —
+`NapiNPClientMsg_HandleWeaponRestrictions @ 0x42d4cc`,
+`apply_session_settings_to_globals`, `Game_StartMission`,
+`CAdminServer_HandleWeaponCommand`); category dword +17 routes 1->PRIMARY,
+2->SECONDARY, 0->ACCESSORY; rows **sorted case-insensitively ascending**
+(`ListWidget_SortRows @ 0x644990` -> `cmp @ 0x6448a0`, params (string, asc));
+`Menu/NONE` prepended at row 0. The tail re-selects each list from the
+**per-class** loadout buffer (`populate_ammo_type_combo_boxes @ 0x564930`
+select-by-adm-index via `sub_645240`) and fills the ammo/type combos from it,
+then `update_weapon_weight_display @ 0x565640` renders STATIC_TOTAL_WEIGHT as
+`sprintf "%s %.1f %s (%s)"` = TOTAL_WEIGHT / `calculate_equipped_weapons_weight
+@ 0x565490` / LBS / encumbrance (`< 33.3 LIGHT_ENCUMBRANCE`, `< 66.6 NORMAL_`,
+else `HEAVY_`), and swaps PRIMARY/SECONDARY/ACCESSORY_ICON from the 192-byte
+icon table `@ 0x2540D70`. The weight sum: selected weapon `adm[85]/65536` per
+slot + `(ammoRow+1) × selectedAmmoDef[84]/65536` per ammo combo — the ammo
+TYPE's own def carries the clip weight. A class flip
+`[orig: handle_team_class_selection @ 0x566f60]` (MP-only) first serializes the
+outgoing class's selections into its buffer, then swaps + repopulates.
+
+**ACCEPT** `[orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0]` (CANCEL = arg 1 =
+the `skip_apply` param; both legs clear the latch + `Server_ResetBalanceCounters
+@ 0x54b940`; guard = `!g_weaponScreenOpenDebounce && g_WeaponScreenOpen`):
+serialize the UI into the **per-class** (5..9) 2048-byte loadout string buffer
+`{name\0 ammoPri\0 ammoSec\0 flags\0}*`
+`[orig: WeaponLoadout_SerializeSelectionsToBuffer @ 0x5658b0 ->
+g_armoryLoadoutBufferByClass @ 0x25DD740 + 2048*g_armorySelectedClass
+@ 0x25DCF34]`; in an MP session the CLIENT resets its slots and sends the buffer
+to the host (the C2S 0x2F seam `[orig: @ 0x42cdc0]`, already byte-golden in
+npruntime — net-re §5.56/5.57); offline/SP it parses the tuples back
+(`AvatarDef_FindByName`), expands each def's **sub-weapons** (`def[235]` count),
+and applies through the SAME chain as the S2C 0x5A client apply (clips clamped
+to adm[83]; −1 -> **adm[23] used RAW as the total on the main leg but
+× adm[22] on the sub-weapon leg** `[orig: @ 0x566166 vs @ 0x566209]`;
+`WeaponSlot_SetAmmoCount @ 0x540b50`, `WeaponSlotPool_ResetAllEntries
+@ 0x53f240` -> `WeaponSlotTable_LoadAllFromDefs @ 0x5414e0` ->
+`WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280`; carry-flag bits
+`entity+44 |= 8/0x10` from adm[2]&0x1000 / adm[3]&2), then re-selects the
+equipped slot `[orig: Player_SelectWeaponSlot @ 0x4dd680 /
+Player_MountWeaponSlot @ 0x4dfa40 — camera/scope/switch-queue state only: the
+mount never consults the FP render model]`. Our SP apply stamps
+`equipped_adm_index` + `player_class` and re-mounts the FP viewmodel/action FSM
+(the sim's multi-slot inventory is the tracked runtime gap).
+
+**Reimpl status (2026-07-11 re-grill).** Ported and matching: the zone-gated
+open on the use-item key (SHIFT), including its not-seated gate, the live-overlay
+(no world-stop) state, the CHARCLASS_* class rows + resolve rule in offline play, sorted rows
+under NONE, the equipped-primary reselect, the witnessed weight format, and the
+offline ACCEPT collect/apply seam. Kept divergence: **D-MNU-9**. Deferred (unported
+sub-elements, tracked here + in `ArmoryMenuHost`'s header): the per-class
+loadout buffers (save-on-flip + reselect + remembered ammo counts), live MP
+C2S 0x2F / S2C 0x5A submission (the UI stays gated in a network session until
+that authoritative path is exposed), MP class selection, the
+`g_armoryWeaponAvailability` table (mission/S2C/admin-authored), the
+`*_AMMO1_TYPE` round-type cascade + per-ammo-def weight, `*_AMMO2` /
+GRENADE_AMMO1..3, the icon swaps, the ACCEPT hotkeys, the MP scoreboard
+overlay, and the use-item key's non-armory leg. Open questions: the SP-time
+value/writer of `g_hostClassAllowMask` (unwalked); the runtime site that stamps
+the shipped default keys into the binding rows (default.key ships in no JO PFF;
+the KeyChart is the defaults witness); the entity Team {1,3}->mask 2 else 1
+convention vs our avatar team ids.
+
+**IDB changes (2026-07-11):** renamed `sub_5642F0 ->
+Armory_ResolveSelectedClass`, `sub_424390 -> UI_OpenWeaponScreenSinglePlayer`,
+`sub_64BA50 -> SpinList_SelectItemByValue`, `sub_644990 -> ListWidget_SortRows`,
+`WeaponLoadout_SerializeToBufferTeamBased ->
+WeaponLoadout_SerializeSelectionsToBuffer` (the buffer is per-CLASS, not
+per-team), `unused6 -> g_armoryWeaponAvailability`, `team2 ->
+g_armorySelectedClass`, `unk_25DD740 -> g_armoryLoadoutBufferByClass`,
+`dword_24C18E8 -> g_weaponScreenOpenDebounce`, `dword_24D59FC ->
+g_hostClassAllowMask`; `WeaponLoadout_ApplyFromBuffer` param 3 ->
+`skip_apply`. (2026-07-09: `UI_OpenMenuScreen @ 0x54e520` renamed, ex
+"renderer init" misnomer.)
+
+- **D-MNU-9 (armory ammo-combo model):** the original's clip-count combos are
+  driven by the per-class loadout buffer (remembered counts; the weight path
+  reads `(row+1)` clips `[orig: @ 0x565490]`); the reimpl fills `0..maxclips`
+  with full clips pre-selected and no per-class memory. Kept until the
+  per-class buffer layer is ported; the ACCEPT-side clamp and −1 default match
+  the original.

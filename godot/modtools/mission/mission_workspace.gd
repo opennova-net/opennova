@@ -73,6 +73,13 @@ func _play_node():
 	return _play_mount.get_viewport_node() if _play_mount != null else null
 
 
+## The live play-in-editor controller, null unless play is mounted. Public read
+## seam (ADR 0018): probes and diagnostics reach play through this, never the
+## privates.
+func play_controller():
+	return _play_node()
+
+
 func set_terrain_editor(value: Node) -> void:
 	terrain_editor = value
 	if _controller != null:
