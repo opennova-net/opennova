@@ -201,6 +201,46 @@ void test_toggle_latch_refusal_and_inset() {
     CHECK(vi.ease_steps == kScopeEaseStepsInset);
 }
 
+void test_unscope_on_move_and_up_refusal() {
+    // The movement-held latch legs [orig: Player_PackInputStateToEntity @ 0x4df450]:
+    // byte_B7653B blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while SETTLED
+    // at scope on a Scoped (flags 1) weapon, forces the toggle (@ 0x4df4c9..0x4df4ec).
+    const int32_t kScoped = 1;         // weapon.def flags: Scoped
+    const int32_t kSighted = 2;        // Sighted (no auto-unscope leg of its own)
+    PlayerViewState v;
+    const float eye[3] = {0, 0, 0};
+
+    // Movement alone never fires the leg from the hip.
+    CHECK(!player_view_move_input(v, true, kScoped));
+    CHECK(v.move_held);
+    // The scope-UP refusal while moving, Scoped only [orig: @ 0x4df29c].
+    CHECK(player_view_scope_up_blocked(v, kScoped));
+    CHECK(!player_view_scope_up_blocked(v, kSighted));
+    CHECK(!player_view_move_input(v, false, kScoped));
+    CHECK(!v.move_held);
+    CHECK(!player_view_scope_up_blocked(v, kScoped));
+
+    // Raise and settle the scope; mid-ease movement does NOT fire the settled leg
+    // (the mid-ease reversal is the witnessed-deferred tri-state follow-up).
+    CHECK(player_view_set_engaged(v, true, false));
+    player_view_tick(v, eye);
+    CHECK(player_view_scope_ease_active(v));
+    CHECK(!player_view_move_input(v, true, kScoped));
+    CHECK(!player_view_move_input(v, false, kScoped));
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(!player_view_scope_ease_active(v));
+
+    // Settled + movement: the auto-unscope fires, Scoped weapons only
+    // [orig: g_weaponScopeActive && Def->Flags & 1 @ 0x4df4c9..0x4df4ea].
+    CHECK(!player_view_move_input(v, true, kSighted));
+    CHECK(player_view_move_input(v, true, kScoped));
+    // The caller then runs the standard disengage (the full 15-step return —
+    // hipfire was cleared at the raise).
+    CHECK(player_view_set_engaged(v, false, false));
+    CHECK(v.ease_steps == kScopeEaseSteps);
+    CHECK(v.scope_hipfire);
+}
+
 int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
@@ -210,6 +250,7 @@ int main() {
     test_view_bias_blend();
     test_input_dispatch_gates();
     test_toggle_latch_refusal_and_inset();
+    test_unscope_on_move_and_up_refusal();
     if (failures == 0) std::printf("player_view_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

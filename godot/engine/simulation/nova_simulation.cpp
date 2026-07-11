@@ -1348,6 +1348,20 @@ void NovaSimulation::set_player_input(bool p_forward, bool p_back, bool p_left, 
 	// Look pitch (mission degrees, up positive) -> entity Pitch@+0x14 (BAM32). No 90-offset.
 	player_input_.look_pitch =
 	    static_cast<int32_t>(static_cast<double>(p_look_pitch_deg) * opennova::world::kBamPerDegree);
+	// The movement-held latch and the unscope-on-move [orig:
+	// Player_PackInputStateToEntity @ 0x4df450 — any of the four direction keys
+	// sets byte_B7653B (blocks scope-UP on Scoped weapons @ 0x4df29c) and, while
+	// SETTLED at scope on a Scoped (flags 1) weapon, routes through
+	// Player_ToggleWeaponScope @ 0x4df4c9..0x4df4ec = the full unscope. The
+	// toggle's ForceScoped pin (@ 0x4df12d) keeps pinned sights raised].
+	const bool move_held = p_forward || p_back || p_left || p_right;
+	if (opennova::world::player_view_move_input(player_view_, move_held,
+			weapon_active_ ? weapon_def_.flags : 0) &&
+			(weapon_def_.flags & 0x20000000) == 0) {
+		if (opennova::world::player_view_set_engaged(player_view_, false,
+				(weapon_def_.flags2 & 0x200) != 0))
+			opennova::world::weapon_fsm_queue_scope_down(weapon_slot_);
+	}
 }
 
 Vector3 NovaSimulation::get_local_player_position() const {
@@ -1565,6 +1579,16 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	//  @ 0x82CE94, and queues the scopeup/scopedown FSM state @ 0x53f050/0x53f080]
 	if (!weapon_active_) return false;
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(weapon_def_, weapon_slot_)) return false;
+	// Scope-UP is refused while a movement key is held on a Scoped weapon
+	// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
+	if (!player_view_.scope_engaged &&
+			opennova::world::player_view_scope_up_blocked(player_view_, weapon_def_.flags))
+		return false;
+	// ForceScoped pins the raised sight: un-scoping is refused once settled
+	// [orig: (flags1 & 0x20000000) == 0 || !g_weaponScopeActive @ 0x4df12d].
+	if (player_view_.scope_engaged && (weapon_def_.flags & 0x20000000) != 0 &&
+			!opennova::world::player_view_scope_ease_active(player_view_))
+		return false;
 	// The toggle latches this ease's step count (7 for Inset weapons, else 15;
 	// 1 on the hipfire-return leg) and REFUSES while the previous ease runs
 	// [orig: Player_ToggleWeaponScope @ 0x4df177 !activeFlag; Setup @ 0x4df1b3..0x4df36e].
