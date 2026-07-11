@@ -120,8 +120,13 @@ void NovaParticleEmitter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_kill_plane_y", "p_value"), &NovaParticleEmitter::set_kill_plane_y);
 	ClassDB::bind_method(D_METHOD("get_kill_plane_y"), &NovaParticleEmitter::get_kill_plane_y);
 
+	ClassDB::bind_method(D_METHOD("set_emission_forward", "p_forward"), &NovaParticleEmitter::set_emission_forward);
+	ClassDB::bind_method(D_METHOD("get_emission_forward"), &NovaParticleEmitter::get_emission_forward);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "emission_forward"), "set_emission_forward", "get_emission_forward");
+
 	ClassDB::bind_method(D_METHOD("play"), &NovaParticleEmitter::play);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaParticleEmitter::stop);
+	ClassDB::bind_method(D_METHOD("stop_emitting"), &NovaParticleEmitter::stop_emitting);
 	ClassDB::bind_method(D_METHOD("restart"), &NovaParticleEmitter::restart);
 	ClassDB::bind_method(D_METHOD("advance", "dt"), &NovaParticleEmitter::advance);
 	ClassDB::bind_method(D_METHOD("is_finite"), &NovaParticleEmitter::is_finite);
@@ -274,18 +279,21 @@ void NovaParticleEmitter::_ensure_fallback_texture() {
 }
 
 String NovaParticleEmitter::_shader_path_for_blend(int p_blend_mode) {
+	// Engine-layer shaders live in godot/shaders/ (like foliage_far/foliage_model):
+	// the game runtime export excludes modtools/* — a modtools path here would load
+	// null in an exported build and every runtime particle would render nothing.
 	using opennova::particle::BlendMode;
 	switch (static_cast<BlendMode>(std::clamp(p_blend_mode, 0, 7))) {
-		case BlendMode::Blend:    return "res://modtools/particle/shaders/particle_blend_blend.gdshader";
-		case BlendMode::Additive: return "res://modtools/particle/shaders/particle_blend_additive.gdshader";
-		case BlendMode::Premult:  return "res://modtools/particle/shaders/particle_blend_premult.gdshader";
-		case BlendMode::Bump:     return "res://modtools/particle/shaders/particle_blend_bump.gdshader";
-		case BlendMode::Mod:      return "res://modtools/particle/shaders/particle_blend_mod.gdshader";
-		case BlendMode::Mod2x:    return "res://modtools/particle/shaders/particle_blend_mod2x.gdshader";
-		case BlendMode::Bumpadd:  return "res://modtools/particle/shaders/particle_blend_bumpadd.gdshader";
-		case BlendMode::Distort:  return "res://modtools/particle/shaders/particle_blend_distort.gdshader";
+		case BlendMode::Blend:    return "res://shaders/particle/particle_blend_blend.gdshader";
+		case BlendMode::Additive: return "res://shaders/particle/particle_blend_additive.gdshader";
+		case BlendMode::Premult:  return "res://shaders/particle/particle_blend_premult.gdshader";
+		case BlendMode::Bump:     return "res://shaders/particle/particle_blend_bump.gdshader";
+		case BlendMode::Mod:      return "res://shaders/particle/particle_blend_mod.gdshader";
+		case BlendMode::Mod2x:    return "res://shaders/particle/particle_blend_mod2x.gdshader";
+		case BlendMode::Bumpadd:  return "res://shaders/particle/particle_blend_bumpadd.gdshader";
+		case BlendMode::Distort:  return "res://shaders/particle/particle_blend_distort.gdshader";
 	}
-	return "res://modtools/particle/shaders/particle_blend_blend.gdshader";
+	return "res://shaders/particle/particle_blend_blend.gdshader";
 }
 
 Ref<Shader> NovaParticleEmitter::_get_blend_shader(int p_blend_mode) {
@@ -371,6 +379,9 @@ void NovaParticleEmitter::_refresh_emitter() {
 		}
 		opennova::particle::emitter_init(emitter, native_def.get(), origin,
 				static_cast<std::uint32_t>(seed));
+		// emitter_init resets forward to +Z; re-apply the spawn direction so
+		// cone-shaped defs emit along the descriptor axis across restarts.
+		emitter.forward = {emission_forward.x, emission_forward.y, emission_forward.z};
 	} else {
 		native_def.reset();
 		emitter.def = nullptr;
@@ -529,13 +540,6 @@ void NovaParticleEmitter::_rebuild_atlas_texture(
 			unchanged = false;
 		}
 	}
-	if (unchanged) {
-		return;
-	}
-
-	atlas_layer_widths = widths;
-	atlas_layer_heights = heights;
-	atlas_layer_present = present;
 
 	std::array<opennova::particle::AtlasInputSize, 4> sizes{};
 	for (int i = 0; i < MAX_VISUAL_LAYERS; ++i) {
@@ -543,6 +547,22 @@ void NovaParticleEmitter::_rebuild_atlas_texture(
 	}
 
 	constexpr int ATLAS_GUTTER_PIXELS = 1;
+	if (unchanged) {
+		// The atlas IMAGE is still valid, but native_def may be fresh —
+		// _refresh_emitter recreates it with strip-default baked_uv_rects on
+		// every restart/play/set_def/set_seed. The layout derives
+		// deterministically from the sizes + def metadata, so re-baking just
+		// the UV remap keeps the new def's rects in atlas coordinates without
+		// re-blitting the image (the restart-corrupts-preview-UVs bug).
+		opennova::particle::bake_atlas_layout(*native_def, sizes,
+				opennova::particle::AtlasBakeOptions{ATLAS_GUTTER_PIXELS});
+		return;
+	}
+
+	atlas_layer_widths = widths;
+	atlas_layer_heights = heights;
+	atlas_layer_present = present;
+
 	const opennova::particle::AtlasLayout layout =
 			opennova::particle::bake_atlas_layout(*native_def, sizes,
 					opennova::particle::AtlasBakeOptions{ATLAS_GUTTER_PIXELS});
@@ -1136,6 +1156,25 @@ void NovaParticleEmitter::stop() {
 	playing = false;
 	emitter.particles.clear();
 	_clear_meshes();
+}
+
+void NovaParticleEmitter::stop_emitting() {
+	// Detach semantics: cease spawning but keep integrating what's alive — the
+	// group frees once the last particle expires (is_finished flips playing).
+	emitter.finite = true;
+	emitter.emit_dur_remaining = 0.0f;
+}
+
+void NovaParticleEmitter::set_emission_forward(const Vector3 &p_forward) {
+	const Vector3 dir = p_forward.length_squared() > 0.000001f
+			? p_forward.normalized()
+			: Vector3(0, 0, 1);
+	emission_forward = dir;
+	emitter.forward = {dir.x, dir.y, dir.z};
+}
+
+Vector3 NovaParticleEmitter::get_emission_forward() const {
+	return emission_forward;
 }
 
 void NovaParticleEmitter::restart() {

@@ -123,9 +123,10 @@ struct Emitter {
 
 	// Emission scheduling
 	float emit_accumulator = 0.0f;     // tracks time since last burst
-	float emit_dur_remaining = 0.0f;   // counts down from def.emit_dur
+	float emit_dur_remaining = 0.0f;   // counts down from def.emit_dur (by AGE, not per burst)
 	float age = 0.0f;                  // emitter wall-clock
 	float emit_delay_remaining = 0.0f; // counts down from def.emit_delay before any spawn
+	bool emit_started = false;         // first burst primed? (it lands at t≈0, not one interval in)
 	bool active = false;
 	bool finite = true;                // false if FOREVEREMIT flag set
 

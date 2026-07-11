@@ -42,11 +42,15 @@ var _tables: Array = []
 ## held so the Callable's target outlives the caller's local reference.
 var _root: NovaResourceRoot
 var _texture_provider := Callable()
-## Live spawn groups: [{ "emitters": Array[NovaParticleEmitter], "window": float,
-##   "elapsed": float, "forever": bool }]. Finite groups free themselves once
-## their window elapses with nothing alive.
+## Live spawn groups: [{ "id": int, "emitters": Array[NovaParticleEmitter],
+##   "window": float, "elapsed": float, "forever": bool }]. Finite groups free
+## themselves once their window elapses with nothing alive.
 var _live: Array = []
 var _spawn_serial := 0
+## Caller-owned spawn handles (owner key -> live group id): a re-spawn under the
+## same key detaches the previous group [orig: WacScript_SpawnSoundAtEntity
+## @ 0x4f23a0 — the per-entity emitter handle; respawn detaches the old one].
+var _owned_groups: Dictionary = {}
 
 
 func file_count() -> int:
@@ -102,6 +106,7 @@ func clear_world() -> void:
 			if is_instance_valid(emitter):
 				emitter.queue_free()
 	_live.clear()
+	_owned_groups.clear()
 	_files.clear()
 	_effect_entries.clear()
 	_effects_by_name.clear()
@@ -165,6 +170,27 @@ func spawn_effect(name: String, position: Vector3, orientation: Vector3 = Vector
 	return handle
 
 
+## Spawn a named effect owned by a caller key (the WAC per-entity handle model):
+## a re-spawn under the same key detaches the previous group — its emission
+## stops and it frees once the last particle drains — so scripted re-triggers
+## and FOREVEREMIT effects never stack [orig: WacScript_SpawnSoundAtEntity
+## @ 0x4f23a0 owns one emitter handle per entity; respawn detaches the old one].
+## Returns the interned effect handle, 0 when the name is unknown.
+func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
+		orientation: Vector3 = Vector3.ZERO) -> int:
+	var handle := intern_effect(name)
+	if handle == 0:
+		push_warning("effect world: unknown effect '%s'" % name)
+		return 0
+	var previous: int = int(_owned_groups.get(owner_key, 0))
+	if previous > 0:
+		stop_group(previous)
+	var group_id := _spawn_interned(handle, position, orientation)
+	if group_id > 0:
+		_owned_groups[owner_key] = group_id
+	return handle
+
+
 ## Spawn by an already-interned 1-based handle (the WAC fx parameter shape).
 func spawn_effect_by_handle(handle: int, position: Vector3, orientation: Vector3 = Vector3.ZERO) -> bool:
 	if handle < 1 or handle > _interned.size():
@@ -173,17 +199,31 @@ func spawn_effect_by_handle(handle: int, position: Vector3, orientation: Vector3
 	return true
 
 
-func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> void:
+## Detach a live group: stop its emitters spawning and let alive particles
+## drain; the sweep frees it once empty (forever groups become finite).
+func stop_group(group_id: int) -> void:
+	for group in _live:
+		if int(group.get("id", 0)) != group_id:
+			continue
+		group.forever = false
+		group.window = 0.0
+		for emitter in group.emitters:
+			if is_instance_valid(emitter):
+				emitter.stop_emitting()
+		return
+
+
+## Spawns one live group; returns its id (0 = nothing spawned).
+func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> int:
 	var entry: Dictionary = _interned[handle - 1]
 	var effect: NovaParticleEffect = entry.get("effect")
-	var file: NovaParticleFile = entry.get("file")
 	if effect == null:
-		return
-	var group := {"emitters": [], "window": 1.0, "forever": false, "elapsed": 0.0}
+		return 0
+	var group := {"id": _spawn_serial + 1, "emitters": [], "window": 1.0, "forever": false, "elapsed": 0.0}
 	var window := 0.0
 	var pdefs: PackedStringArray = effect.pdefs
 	for i in range(pdefs.size()):
-		var def := _find_particle(file, pdefs[i])
+		var def := _find_particle(pdefs[i])
 		if def == null:
 			continue
 		var emitter := NovaParticleEmitter.new()
@@ -196,32 +236,31 @@ func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> vo
 		add_child(emitter)
 		emitter.global_position = position
 		if orientation.length_squared() > 0.0001:
-			# Aim the emitter frame down the descriptor direction (cone/EMITVECTOR
-			# shapes emit around the forward axis).
-			var up := Vector3.UP if absf(orientation.normalized().dot(Vector3.UP)) < 0.99 else Vector3.RIGHT
-			emitter.look_at(position + orientation.normalized(), up)
+			# The descriptor direction feeds the SIMULATOR frame (cone/EMITVECTOR
+			# shapes emit around Emitter::forward). The node transform is not the
+			# seam — quads render world-space top-level, so rotating the node did
+			# nothing.
+			emitter.emission_forward = orientation
 		emitter.play()
 		group.emitters.append(emitter)
 		window = maxf(window, _def_window_seconds(def))
 		group.forever = group.forever or (int(def.flags) & PARTICLE_FLAG_FOREVER_EMIT) != 0
 	_spawn_serial += 1
 	if group.emitters.is_empty():
-		return
+		return 0
 	group.window = maxf(window, 1.0)
 	_live.append(group)
+	return int(group.id)
 
 
-## pdef lookup: the owning file first, then globally across every loaded file
-## (cross-file id resolution, ptl-format-re §1.5).
-func _find_particle(file: NovaParticleFile, id: String) -> NovaParticleDef:
-	if file != null:
-		var local := file.find_particle(id)
-		if local != null:
-			return local
-	for other in _files:
-		if other == file:
-			continue
-		var def: NovaParticleDef = other.find_particle(id)
+## pdef lookup: ONE global pool across every loaded file, scanned in load order
+## (first registration wins — the same linear-scan-first semantics as the effect
+## registry). The witnessed resolve is global, with no owning-file preference
+## [orig: CEffectDef_ResolveAllReferences @ 0x5e9d70; ptl-format-re §1.5], so a
+## duplicated pdef id binds every effect to the same winner.
+func _find_particle(id: String) -> NovaParticleDef:
+	for file in _files:
+		var def: NovaParticleDef = file.find_particle(id)
 		if def != null:
 			return def
 	return null

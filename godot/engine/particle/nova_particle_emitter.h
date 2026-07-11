@@ -44,6 +44,11 @@ private:
 	bool auto_advance = true;
 	float time_scale = 1.0f;
 	bool playing = false;
+	// Emission direction for cone-shaped defs (Emitter::forward). The node's
+	// transform does NOT feed the simulator — quads render world-space
+	// top-level — so spawn sites set this explicitly (the original's spawn
+	// descriptor carries a direction vector).
+	Vector3 emission_forward = Vector3(0, 0, 1);
 	String texture_dir;
 	// Host texture seam: when valid, called with the graphic-layer texture NAME
 	// and expected to return a Texture2D (or null). Lets the game runtime serve
@@ -155,6 +160,9 @@ public:
 	void set_kill_plane_y(float p_value);
 	float get_kill_plane_y() const;
 
+	void set_emission_forward(const Vector3 &p_forward);
+	Vector3 get_emission_forward() const;
+
 	Vector3 get_debug_last_translation_delta() const;
 	Vector3 get_debug_first_layer_aabb_center() const;
 	Color get_debug_first_lit_color() const;
@@ -163,6 +171,7 @@ public:
 
 	void play();
 	void stop();
+	void stop_emitting(); // cease spawning, let alive particles drain (detach semantics)
 	void restart();
 	void advance(float dt);
 

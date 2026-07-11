@@ -385,6 +385,7 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 	e.forward = {0.0f, 0.0f, 1.0f};
 	e.particles.clear();
 	e.emit_accumulator = 0.0f;
+	e.emit_started = false;
 	e.emit_delay_remaining = def != nullptr ? std::max(def->emit_delay, 0.0f) : 0.0f;
 	e.emit_dur_remaining = def != nullptr ? std::max(def->emit_dur, 0.0f) : 0.0f;
 	e.age = 0.0f;
@@ -492,7 +493,20 @@ void emitter_advance(Emitter &e, float dt) {
 		const float scaled_rate = def.emit_rate * rate_scale;
 		if (scaled_rate > 1e-3f) {
 			const float interval = 1.0f / scaled_rate;
+			// The first burst lands on the first emitting advance (t ≈ 0), not one
+			// full interval in: a flash-class def (emit_dur 0.1, emit_rate 10) must
+			// emit inside its authored window at all. The base cadence is not pinned
+			// by the AdvanceEmission @ 0x5e1d30 record (it witnesses only the LUT
+			// scaling); an immediate first burst is the only reading under which such
+			// windows produce their particles.
+			if (!e.emit_started) {
+				e.emit_started = true;
+				e.emit_accumulator += interval;
+			}
 			e.emit_accumulator += dt;
+			// Bound this frame's bursts by the remaining window so one large dt
+			// cannot overshoot it; the window itself elapses with AGE below.
+			float window = e.finite ? e.emit_dur_remaining : 0.0f;
 			while (e.emit_accumulator >= interval) {
 				e.emit_accumulator -= interval;
 				const int burst = std::max(def.emit_burst, 1);
@@ -500,8 +514,8 @@ void emitter_advance(Emitter &e, float dt) {
 					emit_one_internal(e, def);
 				}
 				if (e.finite) {
-					e.emit_dur_remaining -= interval;
-					if (e.emit_dur_remaining <= 0.0f) {
+					window -= interval;
+					if (window <= 0.0f) {
 						break;
 					}
 				}
@@ -512,8 +526,14 @@ void emitter_advance(Emitter &e, float dt) {
 			// where it left off.
 		}
 	}
-	if (e.finite && e.emit_dur_remaining < 0.0f) {
-		e.emit_dur_remaining = 0.0f;
+	// The emission window elapses with age — the same clock the rate LUT indexes by
+	// (t = age / emit_dur) — not per fired burst: a def with emit_rate 1.0 and
+	// emit_dur 0.5 closes its window at t = 0.5 regardless of cadence.
+	if (e.finite) {
+		e.emit_dur_remaining -= dt;
+		if (e.emit_dur_remaining < 0.0f) {
+			e.emit_dur_remaining = 0.0f;
+		}
 	}
 
 	// Physics integration + aging.

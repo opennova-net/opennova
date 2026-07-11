@@ -335,8 +335,9 @@ func test_yaw_and_pitch_clear_keeps_rotation() -> void:
 
 
 # CParticleDefEntry_ParseBlendMode @ 0x5e29f0 → 8 distinct shader paths under
-# modtools/particle/shaders/. The renderer caches one ShaderMaterial per layer
-# and assigns the matching shader resource for the parsed BlendMode.
+# shaders/particle/ (engine-layer, shipped in the runtime export). The renderer
+# caches one ShaderMaterial per layer and assigns the matching shader resource
+# for the parsed BlendMode.
 func test_blend_mode_dispatches_matching_shader() -> void:
 	# Additive (1) → particle_blend_additive.gdshader
 	var add_emitter := _add_render_test_emitter(_make_render_test_particle(1))

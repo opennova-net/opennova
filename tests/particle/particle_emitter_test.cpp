@@ -132,13 +132,13 @@ bool test_burst() {
 	def.age = 10.0f;              // long-lived so they don't die during the test
 	Emitter e;
 	emitter_init(e, &def, {0, 0, 0}, 1);
-	emitter_advance(e, 1.5f);     // 1 emit cycle (at t=1.0)
-	if (!expect(e.particles.size() == 5, "burst of 5 spawns 5")) {
+	emitter_advance(e, 1.5f);     // 2 emit cycles: the primed burst at t≈0, then t=1.0
+	if (!expect(e.particles.size() == 10, "primed + first-interval cycles spawn 5 each")) {
 		std::fprintf(stderr, "  got %zu\n", e.particles.size());
 		return false;
 	}
 	emitter_advance(e, 1.0f);     // another cycle (at t=2.0)
-	if (!expect(e.particles.size() == 10, "second cycle adds another 5")) {
+	if (!expect(e.particles.size() == 15, "second-interval cycle adds another 5")) {
 		std::fprintf(stderr, "  got %zu\n", e.particles.size());
 		return false;
 	}
