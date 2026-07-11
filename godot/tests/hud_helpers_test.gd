@@ -179,3 +179,47 @@ func test_message_feed_expiry() -> void:
 	var empty_feed := HudMessages.new()
 	empty_feed.push("", Color.WHITE, 0)
 	assert_eq(empty_feed.live_lines(0).size(), 0, "Empty text is ignored.")
+
+
+func test_message_feed_preserves_text_until_display_wrap() -> void:
+	var feed := HudMessages.new()
+	var text := "x".repeat(238)
+	feed.push(text, Color.WHITE, 0)
+	assert_eq(feed.live_lines(0)[0]["text"], text,
+		"The source message remains whole until display width is known.")
+
+	var rows := feed.display_lines(null, 16, 0, 0.0)
+	assert_eq(rows.size(), 3)
+	assert_eq(rows[0]["text"], "x".repeat(119))
+	assert_eq(rows[1]["text"], "  " + "x".repeat(117),
+		"Continuation indentation is part of the 119-character slot.")
+	assert_eq(rows[2]["text"], "  xx", "Wrapping preserves the final remainder.")
+	assert_eq(rows[0]["expire"], HudMessages.LINE_LIFE_TICKS)
+	assert_eq(rows[1]["expire"], HudMessages.LINE_LIFE_TICKS,
+		"Wrapping copies the source message timer; the 186-tick floor applies per push.")
+	assert_eq(rows[2]["expire"], HudMessages.LINE_LIFE_TICKS)
+	assert_eq(feed.display_lines(null, 16, HudMessages.LINE_LIFE_TICKS, 0.0).size(), 0)
+
+
+func test_message_feed_keeps_newest_40_messages() -> void:
+	var feed := HudMessages.new()
+	feed.push("x".repeat(238), Color.WHITE, 0)
+	for i in 40:
+		feed.push("line %d" % i, Color.WHITE, 0)
+	var live := feed.live_lines(0)
+	assert_eq(live.size(), HudMessages.DISPLAY_SLOT_COUNT)
+	assert_eq(live[0]["text"], "line 0", "The oldest source message is replaced.")
+	assert_eq(live[-1]["text"], "line 39")
+	assert_eq(live[0]["expire"], HudMessages.LINE_LIFE_TICKS + HudMessages.EXPIRY_STAGGER,
+		"Evicting a wrapped source does not reset the persisted per-message expiry floor.")
+	assert_eq(live[-1]["expire"],
+		HudMessages.LINE_LIFE_TICKS + HudMessages.EXPIRY_STAGGER * 40)
+
+
+func test_message_display_keeps_newest_40_wrapped_slots() -> void:
+	var feed := HudMessages.new()
+	feed.push("x".repeat(HudMessages.LINE_TEXT_MAX * 41), Color.WHITE, 0)
+	var rows := feed.display_lines(null, 16, 0, 0.0)
+	assert_eq(rows.size(), HudMessages.DISPLAY_SLOT_COUNT)
+	for row in rows:
+		assert_lte(String(row["text"]).length(), HudMessages.LINE_TEXT_MAX)

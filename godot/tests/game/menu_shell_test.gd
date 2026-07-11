@@ -12,6 +12,25 @@ const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu tar
 const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
 const SP_PLAY_FIXTURE := "res://../fixtures/mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
 const MUS_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
+const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
+
+var _saved_state_config := PackedByteArray()
+var _had_state_config := false
+
+
+func before_each() -> void:
+	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
+	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
+
+
+func after_each() -> void:
+	if _had_state_config:
+		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
+		if file != null:
+			file.store_buffer(_saved_state_config)
+			file.close()
+	elif FileAccess.file_exists(STATE_CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -155,6 +174,30 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 	host._on_start_control()  # no selection -> first .bms in the dir (test.bms)
 	assert_signal_emitted_with_parameters(host, "start_requested", ["test.bms"])
 	_cleanup(dir)
+
+
+func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
+	var saved := NovaResourceDirSettings.get_crosshair_style()
+	NovaResourceDirSettings.set_crosshair_style(11)
+	var dir := _make_runtime_dir()
+	var host = _make_runtime_host(dir)
+	if host == null:
+		pass_test("runtime resource root unavailable in this environment")
+		NovaResourceDirSettings.set_crosshair_style(saved)
+		_rm_runtime_dir(dir)
+		return
+	var spin = host.get_menu().find_child("XHAIR_APPEARANCE", true, false)
+	assert_true(spin is NovaMnuSpinList, "Options builds the crosshair spin list.")
+	if spin is NovaMnuSpinList:
+		assert_eq((spin as NovaMnuSpinList).get_value_index(), 11,
+			"The spin list starts on the persisted crosshair.")
+	watch_signals(host)
+	host.get_menu().notify_widget_value("XHAIR_APPEARANCE", "spinlist", 18, "cross19.tga")
+	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 18, "Selection persists.")
+	assert_signal_emitted_with_parameters(host, "crosshair_style_changed", [18])
+	host._root.clear()
+	NovaResourceDirSettings.set_crosshair_style(saved)
+	_rm_runtime_dir(dir)
 
 
 # Options -> Mods: the host lists discoverable expansions in AVAIL_LIST by name, and

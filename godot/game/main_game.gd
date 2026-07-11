@@ -171,6 +171,7 @@ func _ensure_game_hud() -> void:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
+	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
 	_game_hud.set_layout(hudpos, root)
 	_load_hud_text_tables(root)
 	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
@@ -195,8 +196,8 @@ func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 	# the filename; the load result is stored either way]
 	var mission_table: RtxtStringFile = null
 	var mission_bin := ""
-	if _world != null and "mission_file" in _world:
-		var base := String(_world.mission_file).get_basename()
+	if _world != null:
+		var base := _world.get_loaded_mission_file().get_basename()
 		if not base.is_empty():
 			mission_bin = base + ".bin"
 	if not mission_bin.is_empty() and root.has_file(mission_bin):
@@ -383,6 +384,8 @@ func _wire_host() -> void:
 	_menu_host.resume_requested.connect(_on_resume)
 	if _menu_host.has_signal("novaworld_requested"):
 		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
+	if _menu_host.has_signal("crosshair_style_changed"):
+		_menu_host.crosshair_style_changed.connect(_on_crosshair_style_changed)
 	# The multiplayer menu (mp.mnu) and the PLAYER_INFO character screen (player.mnu) are
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
 	_mp_host = MpMenuHost.new()
@@ -403,6 +406,11 @@ func _wire_host() -> void:
 # a profile format. See docs/playerinfo/avatars-re.md (ACCEPT / commit, D-PLAYERINFO-9).
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	_chosen_avatar = profile
+
+
+func _on_crosshair_style_changed(style: int) -> void:
+	if _game_hud != null:
+		_game_hud.set_crosshair_style(style)
 
 
 # --- Resource dir picker (first launch) ---------------------------------------

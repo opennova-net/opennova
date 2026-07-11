@@ -16,14 +16,17 @@ extends Control
 
 ## The user crosshair-style index; the original loads "cross%02d.tga" (index+1) from
 ## the player config. [orig: HUD_LoadAllTextures @0x59e3d6, style @0x25510dc]
-const CROSSHAIR_STYLE := 0
+const MIN_CROSSHAIR_STYLE := 0
+const MAX_CROSSHAIR_STYLE := 24
 const DEFAULT_CHAT_LINES := 8 # HUDCHLINE fallback
+const STANCE_FRAME_COUNT := 6
 
 var _hudpos: NovaHudPos
 var _root: NovaResourceRoot
 var _font: FontFile
 var _frame_tex: Texture2D
 var _crosshair_tex: Texture2D
+var _crosshair_style := MIN_CROSSHAIR_STYLE
 var _stance_textures: Array[Texture2D] = []
 var _stance_offsets: Array[Vector2] = []
 var _positions: Dictionary = {}
@@ -74,6 +77,14 @@ func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
 	_alpha_fade = Vector3.ZERO
 	_chat_lines = DEFAULT_CHAT_LINES
 	_load_assets()
+	queue_redraw()
+
+
+## Select and immediately reload the configured crosshair art. Style 0 is cross01.tga;
+## style 24 is cross25.tga, matching the retail options range.
+func set_crosshair_style(style: int) -> void:
+	_crosshair_style = clampi(style, MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE)
+	_crosshair_tex = _load_texture("cross%02d.tga" % (_crosshair_style + 1))
 	queue_redraw()
 
 
@@ -134,10 +145,22 @@ func _load_assets() -> void:
 	var frames := _hudpos.get_static_frames()
 	if frames.size() > 0:
 		_frame_tex = _load_texture(String((frames[0] as Dictionary).get("texture", "")))
-	for s in _hudpos.get_stances():
-		_stance_textures.append(_load_texture(String((s as Dictionary).get("texture", ""))))
-		_stance_offsets.append(Vector2((s as Dictionary).get("offset", Vector2i.ZERO)))
-	_crosshair_tex = _load_texture("cross%02d.tga" % (CROSSHAIR_STYLE + 1))
+	# HUDSTANCE's explicit id addresses the retail slot arrays; file order is irrelevant
+	# and a later record for the same id replaces the earlier one.
+	var stance_names: Array[String] = []
+	stance_names.resize(STANCE_FRAME_COUNT)
+	_stance_offsets.resize(STANCE_FRAME_COUNT)
+	for raw_stance in _hudpos.get_stances():
+		var stance: Dictionary = raw_stance
+		var stance_id := int(stance.get("id", -1))
+		if stance_id < 0 or stance_id >= STANCE_FRAME_COUNT:
+			continue
+		stance_names[stance_id] = String(stance.get("texture", ""))
+		_stance_offsets[stance_id] = Vector2(stance.get("offset", Vector2i.ZERO))
+	_stance_textures.resize(STANCE_FRAME_COUNT)
+	for stance_id in STANCE_FRAME_COUNT:
+		_stance_textures[stance_id] = _load_texture(stance_names[stance_id])
+	_crosshair_tex = _load_texture("cross%02d.tga" % (_crosshair_style + 1))
 
 
 func _load_texture(name: String) -> Texture2D:
@@ -211,9 +234,9 @@ func _draw_stance(surface: Vector2, ticks: int) -> void:
 	var ramp := int(_alpha_fade.z * HudFade.SECONDS_TO_TICKS)
 	if ramp <= 0:
 		return
-	if _stance_textures.size() < 6:
+	if _stance_textures.size() < STANCE_FRAME_COUNT:
 		return
-	for i in 6:
+	for i in STANCE_FRAME_COUNT:
 		if _stance_textures[i] == null:
 			return
 	var frame0_size := Vector2i(_stance_textures[0].get_size())
@@ -239,7 +262,6 @@ func _draw_stance(surface: Vector2, ticks: int) -> void:
 # weapon element on the info struct's weapon-def pointer). [orig: @0x5939f3 / @0x599a67]
 func _draw_weapon_cluster(surface: Vector2, ticks: int) -> void:
 	if not bool(_info.get("weapon_active", false)) or _weapon == null:
-		_draw_fallback_reticle(surface)
 		return
 	var clip := int(_info.get("clip", -1))
 	var reserve := int(_info.get("reserve", -1))
@@ -272,7 +294,6 @@ func _draw_crosshair(surface: Vector2) -> void:
 	if bool(_info.get("scope_engaged", false)):
 		return
 	if _crosshair_tex == null:
-		_draw_fallback_reticle(surface)
 		return
 	var stance_icon := int(_info.get("stance", 0))
 	# The icon index (0=stand 1=crouch 2=prone) remaps to the ERROR row order
@@ -285,16 +306,6 @@ func _draw_crosshair(surface: Vector2) -> void:
 	var err_deg := _weapon.error_row_deg(HudCrosshair.error_row(err_stance, false))
 	var spread := HudCrosshair.spread_px(err_deg, float(_info.get("fov_deg", 80.0)), surface.x)
 	HudCrosshair.draw(self, _crosshair_tex, Vector2(512, 384), surface, spread)
-
-
-# A minimal center cross marking aim while no crosshair art is loadable (art-less
-# roots, or no weapon installed yet).
-func _draw_fallback_reticle(surface: Vector2) -> void:
-	var center := surface * 0.5
-	var rc := Color(1, 1, 1, 0.7)
-	draw_line(center - Vector2(8, 0), center + Vector2(8, 0), rc, 1.0)
-	draw_line(center - Vector2(0, 8), center + Vector2(0, 8), rc, 1.0)
-
 
 func _stance_offset(idx: int) -> Vector2:
 	return _stance_offsets[idx] if idx >= 0 and idx < _stance_offsets.size() else Vector2.ZERO

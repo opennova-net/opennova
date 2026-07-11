@@ -176,6 +176,48 @@ func test_injected_root_bypasses_settings_mount() -> void:
 		"the error names the injected root's directory, proving no settings mount ran")
 
 
+func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+
+	var root := NovaResourceRoot.new()
+	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	world.set_resource_root(root)
+	world.mission_file = "boot-option.bms"
+
+	assert_eq(world.load_mission("mnml.bms"), OK)
+	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
+		"the successful load argument, not the exported boot option, is the active mission")
+	assert_eq(world.mission_file, "boot-option.bms",
+		"loading does not repurpose the exported boot option as mutable runtime state")
+
+	world.unload()
+	assert_eq(world.get_loaded_mission_file(), "",
+		"an unloaded world no longer reports a stale active mission")
+
+
+func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
+	var world := _make_world()
+	add_child_autofree(world)
+	await get_tree().process_frame
+	var root := NovaResourceRoot.new()
+	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	world.set_resource_root(root)
+
+	var err := world.load_mission_as_joiner({
+		"mission": "mnml",
+		"host_ip": "127.0.0.1",
+		"port": 9,
+	}, "Joiner")
+	assert_eq(err, OK, "A NovaWorld host-row basename resolves to its .bms resource.")
+	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
+		"The normalized filename reaches the active mission/text-table seam.")
+	world.unload()
+
+
 func test_skeleton_debug_builds_and_frees_the_view() -> void:
 	# The F3 overlay's "Show skeletons" toggle routes here: enabling builds a child
 	# SkeletonDebugView under the world, disabling frees it (mirrors set_pick_debug).

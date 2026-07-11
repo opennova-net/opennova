@@ -58,3 +58,24 @@ func test_launch_flag_falls_back_to_setting_then_jo() -> void:
 	assert_eq(NovaLaunchFlags.game(""), "jo", "An empty fallback resolves to JO.")
 	assert_eq(NovaLaunchFlags.game(), "jo", "The default fallback is JO.")
 	assert_eq(NovaLaunchFlags.game("JODEMO"), "jodemo", "The fallback is lowercased.")
+
+
+func test_crosshair_style_defaults_round_trips_and_clamps() -> void:
+	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 0, "Absent style uses cross01.tga.")
+	NovaResourceDirSettings.set_crosshair_style(17)
+	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 17, "Crosshair style persists.")
+	NovaResourceDirSettings.set_crosshair_style(99)
+	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 24, "Style is capped at cross25.tga.")
+	NovaResourceDirSettings.set_crosshair_style(-4)
+	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 0, "Negative styles clamp to cross01.tga.")
+
+
+func test_set_crosshair_style_preserves_other_sections() -> void:
+	var config := ConfigFile.new()
+	config.set_value("layout", "left_split_offset", 123)
+	config.save(STATE_CONFIG_PATH)
+	NovaResourceDirSettings.set_crosshair_style(8)
+	var reloaded := ConfigFile.new()
+	assert_eq(reloaded.load(STATE_CONFIG_PATH), OK, "Config reloads.")
+	assert_eq(int(reloaded.get_value("layout", "left_split_offset", -1)), 123,
+		"Unrelated sections survive a crosshair write.")
