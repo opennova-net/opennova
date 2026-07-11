@@ -599,6 +599,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         return;
     }
 
+    // The registry Entity is the script/HUD/wire health store. Hydrate the
+    // motor copy before death selection and damage so item-trait resolution,
+    // round hits, and scripted health changes all feed this tick's one result.
+    if (const Entity *ent = world.registry.get(e.handle)) e.health = ent->health;
+
     InfantryState &inf = e.inf;
     // Per-entity stagger key. [orig: tickCounter = current_tick + 36 * entity[31]]
     const uint32_t key = logic_tick + 36u * static_cast<uint32_t>(e.net_id);

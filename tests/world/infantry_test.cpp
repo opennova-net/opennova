@@ -213,7 +213,9 @@ void test_hurt_volume_updates_registry_health() {
     motor->inf.active = true;
     motor->inf.is_local_player = true;
     motor->inf.player_moving = true;
-    motor->health = 1;
+    // Registry health is the canonical HUD/wire/script value. Leave the motor
+    // deliberately stale to prove the tick hydrates it before applying damage.
+    motor->health = 100;
     motor->pos[0] = fx(10.0);
     motor->pos[1] = fx(10.0);
     motor->pos[2] = fx(0.5);
