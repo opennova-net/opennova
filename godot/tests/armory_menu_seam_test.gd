@@ -1,7 +1,7 @@
 extends GutTest
 
 # The in-game armory seam: weapon.mnu's WEAPON screen driven by the ArmoryMenuHost
-# companion (godot/game/armory_menu_host.gd). Pins the witnessed wiring [orig:
+# companion (godot/engine/world/armory_menu_host.gd). Pins the witnessed wiring [orig:
 # WeaponDef_RegisterUICallbacks @0x567020 registers PLAYER_CLASS / PRIMARY / SECONDARY /
 # ACCESSORY / *_AMMO / ACCEPT / CANCEL on the "WEAPON" screen; population
 # populate_three_category_lists @0x566db0 (sorted rows, NONE at 0); class resolution

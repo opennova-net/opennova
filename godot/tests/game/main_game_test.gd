@@ -62,13 +62,16 @@ func test_mission_text_effect_reaches_hud_objective() -> void:
 	# WAC text/ptext family lands as kind=="text" with the string in "str". The
 	# old handler read nonexistent "text"/"message" keys, so mission text never
 	# reached the HUD.
-	var game := _make()
-	game.apply_mission_effects([
+	# The surface lives on the shared NovaGameHudHost (main_game passes through);
+	# out-of-tree _make() never runs _ready, so drive the host directly.
+	var host := NovaGameHudHost.new()
+	autofree(host)
+	host.apply_mission_effects([
 		{"kind": "dialog", "a": 3},
 		{"kind": "text", "str": "Proceed to the beach"},
 		{"kind": "text", "str": ""},
 	])
-	assert_eq(game.hud_objective_line(), "Proceed to the beach",
+	assert_eq(host.hud_objective_line(), "Proceed to the beach",
 		"kind=='text' effect drives the HUD objective line; empty/other kinds ignored")
 
 
@@ -76,20 +79,24 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	# consol/pconsol ride the distinct debug_text channel. The game does not yet
 	# present an on-screen debug console, so these effects remain intentionally
 	# unrouted instead of replacing player-facing mission text.
-	var game := _make()
-	game.apply_mission_effects([
+	var host := NovaGameHudHost.new()
+	autofree(host)
+	host.apply_mission_effects([
 		{"kind": "text", "str": "Hold this position"},
 		{"kind": "debug_text", "str": "trigger 17 entered"},
 	])
-	assert_eq(game.hud_objective_line(), "Hold this position",
+	assert_eq(host.hud_objective_line(), "Hold this position",
 		"debug_text stays off the player-facing HUD mission-text channel")
 
 
 func test_crosshair_option_updates_an_existing_hud() -> void:
-	var game := _make()
+	# The Options signal reaches the built HUD through the shared host's public
+	# set_crosshair_style (main_game delegates its _on_crosshair_style_changed there).
+	var host := NovaGameHudHost.new()
+	autofree(host)
 	var hud := FakeGameHud.new()
-	game._game_hud = hud
-	game._on_crosshair_style_changed(13)
+	host._game_hud = hud
+	host.set_crosshair_style(13)
 	assert_eq(hud.crosshair_style, 13, "A paused game's HUD adopts the menu selection immediately.")
 
 
@@ -109,9 +116,12 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	assert_eq(world.mission_file, "", "the exported boot option remains separate after a normal load")
 
-	var game := _make()
-	game._world = world
-	game._load_hud_text_tables(root)
+	# The mission string table selection lives on the shared HUD host now (the
+	# exists-only mission-bin fallback rides its world wiring).
+	var host := NovaGameHudHost.new()
+	autofree(host)
+	host.setup(world, null, null)
+	host._load_hud_text_tables(root)
 
 	assert_not_null(NovaStrings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")

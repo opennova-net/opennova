@@ -32,6 +32,8 @@ var _viewport: SubViewport
 var _world  # GameWorld
 var _camera: Camera3D
 var _player_host: LocalPlayerHost
+var _armory: NovaArmoryHost
+var _hud_host: NovaGameHudHost
 var _input_router: Node
 var _status: Label
 var _playing := false
@@ -76,6 +78,25 @@ func _ready() -> void:
 	_player_host.name = "LocalPlayerHost"
 	add_child(_player_host)
 	_player_host.setup(_world, _camera)
+
+	# The in-game HUD — the SAME NovaGameHudHost the game shell mounts (crosshair,
+	# ammo cluster, mission text), so play-in-editor shows the game's HUD. Added
+	# before the armory so its overlay draws beneath the WEAPON screen.
+	_hud_host = NovaGameHudHost.new()
+	_hud_host.name = "GameHudHost"
+	add_child(_hud_host)
+	_hud_host.setup(_world, _player_host, self)
+
+	# The in-world armory — the SAME NovaArmoryHost the game shell mounts (one
+	# armory code path; editor-runtime parity). The weapon.mnu overlay parents to
+	# this control, over the play viewport.
+	_armory = NovaArmoryHost.new()
+	_armory.name = "ArmoryHost"
+	add_child(_armory)
+	_armory.setup(_world, _player_host, self)
+	_armory.opened.connect(func() -> void:
+		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE))
 
 	_status = Label.new()
 	_status.name = "PlayStatus"
@@ -122,6 +143,11 @@ func stop() -> void:
 	if not _playing:
 		return
 	_playing = false
+	if _armory != null:
+		_armory.close()
+		_armory.teardown()  # the built menu holds the play world's resource root
+	if _hud_host != null:
+		_hud_host.teardown()
 	if _player_host != null:
 		_player_host.teardown()
 	_world.unload()
@@ -150,11 +176,17 @@ func get_player_host():
 # world's foliage + runtime + audio around the play camera.
 func _process(delta: float) -> void:
 	if _playing and _world != null and _world.is_loaded():
+		# The armory overlay frees the mouse like the debug overlay does — play
+		# keeps ticking (LIVE armory, no world-stop leg) but input idles and the
+		# per-tick capture pauses so the menu takes the clicks.
+		var player_live := not _capture_suspended and not (_armory != null and _armory.is_open())
 		if _player_host != null:
-			_player_host.before_world_tick(delta, not _capture_suspended)
+			_player_host.before_world_tick(delta, player_live)
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
 		if _player_host != null:
 			_player_host.after_world_tick()
+		if _hud_host != null:
+			_hud_host.tick()  # the shared per-frame HUD info rebuild
 
 
 ## The workspace flips this with its debug overlay: while the overlay is up the
@@ -187,6 +219,16 @@ func _unhandled_input(event: InputEvent) -> void:
 func handle_viewport_input(event: InputEvent) -> bool:
 	if not _playing:
 		return false
+	# While the armory overlay is up, the MENU owns the input: only Esc is claimed
+	# (close-and-resume, the game shell's gesture); every other event falls through
+	# to the GUI stage so the weapon.mnu controls take the clicks.
+	if _armory != null and _armory.is_open():
+		if event is InputEventKey:
+			var akey := event as InputEventKey
+			if akey.pressed and not akey.echo and akey.keycode == KEY_ESCAPE:
+				_armory.close()
+				return true
+		return false
 	if event is InputEventKey:
 		var key := event as InputEventKey
 		if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
@@ -195,6 +237,12 @@ func handle_viewport_input(event: InputEvent) -> bool:
 		if key.pressed and not key.echo and key.keycode == KEY_F3:
 			debug_overlay_requested.emit()
 			return true
+		# The armory key — the same binding the game shell owns (main_game.ARMORY_KEY,
+		# the use-item key; retail default SHIFT), zone-gated inside the shared host
+		# [orig: useitem action 177 @0x4e0b3f].
+		if key.pressed and not key.echo and key.keycode == KEY_SHIFT:
+			if _armory != null and _armory.try_open():
+				return true
 		if _player_host != null and _player_host.handle_key_input(event, true):
 			return true
 	# Mouse-look only while the play session owns the mouse — the game shell
