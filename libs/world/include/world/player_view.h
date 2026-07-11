@@ -21,8 +21,13 @@
 
 namespace opennova::world {
 
-// [orig: the interp step count @ 0x4df36e]
+// The per-toggle ease lengths [orig: CNetPlayerInterp_Setup call sites in
+// Player_ToggleWeaponScope — engage 15 @ 0x4df36e / 7 for Inset (flags2 0x200)
+// weapons @ 0x4df355; disengage mirrors them @ 0x4df201 / @ 0x4df1e8, and the
+// hipfire-return leg is a single step @ 0x4df1c3].
 constexpr int32_t kScopeEaseSteps = 15;
+constexpr int32_t kScopeEaseStepsInset = 7;
+constexpr int32_t kScopeEaseStepsHipfire = 1;
 // [orig: g_cameraFovDeg @ 0x26C6848 default 0x500000 = 80.0 horizontal degrees]
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: the chase anchor ease @ 0x437c8d — one quarter per 62 Hz tick]
@@ -30,7 +35,9 @@ constexpr float kTpAnchorEase = 0.25f;
 
 struct PlayerViewState {
     bool scope_engaged = false;   // [orig: g_scopeEngaged @ 0x82CE94]
-    int32_t scope_step = 0;       // 0 (hip) .. kScopeEaseSteps (sighted)
+    int32_t scope_step = 0;       // 0 (hip) .. ease_steps (sighted), of the CURRENT ease
+    int32_t ease_steps = kScopeEaseSteps; // latched per toggle [orig: the Setup steps arg]
+    bool scope_hipfire = true;    // [orig: g_scopeHipfire @ 0x82CE98, init/reset 1]
     bool third_person = false;    // [orig: g_camera_mode @ 0xA890C8]
     bool tp_anchor_valid = false;
     float tp_anchor[3] = {0.0f, 0.0f, 0.0f}; // mission space (Z-up)
@@ -41,6 +48,17 @@ struct PlayerViewState {
 // seeds the anchor at the eye [orig: Camera_SetTrackedEntity @ 0x4391d0 resets
 // the track on change]; leaving invalidates it.
 void player_view_tick(PlayerViewState &v, const float eye[3]);
+
+// Whether the scope-camera interp is mid-ease. Every scope toggle is REFUSED
+// while it runs [orig: the !g_fpCameraInterp.activeFlag gate @ 0x4df177].
+bool player_view_scope_ease_active(const PlayerViewState &v);
+
+// The witnessed toggle: latch this ease's step count (engage: 15, or 7 for
+// Inset weapons; disengage: the same, or 1 on the hipfire-return leg), seed the
+// step at the departing endpoint, and flip the target. Returns false (state
+// untouched) when refused mid-ease. [orig: Player_ToggleWeaponScope
+// @ 0x4df1b3..0x4df373 — the Setup calls + the g_scopeHipfire writes]
+bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon);
 
 // The eased hip->sighted blend, 0..1 in 1/15ths.
 float player_view_scope_fraction(const PlayerViewState &v);

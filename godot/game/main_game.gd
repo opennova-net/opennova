@@ -281,11 +281,13 @@ func _update_game_hud() -> void:
 		reserve = wv.reserve
 	var scope_engaged := false
 	var scope_fraction := 0.0
+	var scope_card := false
 	var fov_deg := 80.0
 	var lv: PlayerLocalView = _world.local_player_view() if _world.has_method("local_player_view") else null
 	if lv != null:
 		scope_engaged = lv.scope_engaged
 		scope_fraction = lv.scope_fraction
+		scope_card = lv.scope_card_active
 		fov_deg = lv.fov_h_deg
 
 	_game_hud.update_info({
@@ -298,6 +300,8 @@ func _update_game_hud() -> void:
 		"reserve": reserve,
 		"scope_engaged": scope_engaged,
 		"scope_fraction": scope_fraction,
+		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
+		"scope_card": scope_card,
 		# The crosshair's witnessed anchor: the aim ray projected through the live
 		# camera (screen px; INF = no projection this frame) [orig: HUD_DrawCrosshair
 		# @0x592640 centers on the projected aim point].

@@ -8283,7 +8283,71 @@ FIRE + (!scoped or 3P) and spawns through `NovaEffectWorld.spawn_effect_unless_a
 (the slot+24 guard). ctest `weapon_fsm` pins both legs + the silent abort;
 GUT `local_player_host_test` pins the drains and the gates.
 
+**The FLAGS table + the ADS toggle protocol (2026-07-10, the nocardswitch grill).**
+The weapon.def `flags` token table is fully witnessed: a 16-B-stride
+`{name, 0, flags1 bit, flags2 bit}` table `@ 0x830bf0` — flags1: Scoped 1, Sighted 2,
+Underwater 4, ShowComander 8, NoClipsNoDraw 0x10, Burst 0x20, NotDropable 0x40,
+Emplaced 0x80, Auto 0x100, norangecheck 0x200, ShowRange 0x400, ShowElevation 0x800,
+Armor 0x1000, OkWhileJumping 0x2000, OnlyFireScoped 0x4000, LollyPop 0x8000,
+AbsorbPitch 0x10000, NoMove 0x20000, ForceCrouch 0x40000, OnlyScoped 0x80000,
+2DImpact 0x100000, UseDesignator 0x200000, UseSpreadTwo 0x400000,
+ShowImpactDist 0x800000, WhileSwimming 0x1000000, **NoCardSwitch 0x2000000**,
+HandGunUp 0x4000000, QuickSwitch 0x8000000, OnlyFireLocked 0x10000000,
+ForceScoped 0x20000000, LaserBeam 0x40000000, PowerThrow 0x80000000; flags2:
+NoSelect 1, Parachute 2, Thermal 4, Monitor 8, ViewLock 0x10, onlylockscoped 0x20,
+NoAmmoTypes 0x40, showhudpip 0x80, FixVerticalOfst 0x100, **Inset 0x200**,
+NoAutoZero 0x400, Invisible 0x800. The libs/def 7-entry subset had WhileSwimming
+aliased onto Underwater's 0x4 — replaced with the full two-dword table
+(`DefWeaponDef.flags2` appended; both FFI mirrors extended).
+
+`Player_ToggleWeaponScope @ 0x4df0c0`, re-read in full:
+
+- Every toggle is REFUSED while the scope-camera interp runs
+  (`!g_fpCameraInterp.activeFlag @ 0x4df177`), and while swimming/parachuting
+  (entity Flags 0xA000), on mounts with parentSlot 2/5, un-scoping a ForceScoped
+  weapon (`0x20000000 && g_weaponScopeActive @ 0x4df12d`), or NVG-blocked Inset
+  weapons (flags2 0x200 + `g_NVGActive`).
+- The ease is `CNetPlayerInterp_Setup` between the def POS (`AltCamOffset` + 0x10C)
+  and TPOS (+0x124): **15 steps, or 7 for Inset weapons** (`Def->Field0C & 0x200`
+  `@ 0x4df1d2/@ 0x4df33f`), and **1 step on the hipfire-return leg**
+  (`g_scopeHipfire @ 0x82CE98`, set 1 on disengage `@ 0x4df212`, 0 on engage
+  `@ 0x4df373`). The stepper (`CNetPlayer_InterpolateTransformStep @ 0x4ddd20`)
+  writes the view bias globals (`g_view_pos_bias_* @ 0xB76520..`,
+  `g_view_rot_bias_* @ 0xB7652C..`) the FP camera adds each frame;
+  `Player_MountWeaponSlot` zeroes them `@ 0x4dfbcf`.
+- Sighted-weapon FOV: engaged FP = `80 / Player_GetClampedWeaponElevation
+  @ 0x4dc6b0` — the slot's ADJUSTABLE zoom (`MountSlot.Elevation`), seeded to
+  `Def->MaxElevation` (scope_max_mag) on first use and clamped [0, max]; 3P or
+  disengaged = 80 (`g_cameraFovDeg = 0x500000`). Port note: our 80/scope_max_mag
+  equals the seeded default; the zoom-adjust input is an open tail.
+- The engage leg replicates C2S 0x1D (type 169) when seat-flag 0x40000 allows,
+  and seat-flag 0x10000 zeroes the pitch.
+
+**NoCardSwitch (0x2000000) — the witnessed consumers** (the full binary sweep for
+the 0x02000000 immediate): while the equipped slot is mid-RELOAD on a weapon
+WITHOUT the flag — the predicate is `Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0`
+(ex kong "Player_IsDriverInVehicle"; its "seat 4" was currentAction==RELOAD) —
+(a) `Player_UpdateFirstPersonCamera` SKIPS the view bias add, rot and pos legs
+(`@ 0x4dd439/@ 0x4dd4cc`): the sight picture drops instantly for the reload;
+(b) `Player_CanFireWeapon @ 0x5cf7be` refuses fire. NoCardSwitch weapons (REVX:
+knife, pistols, shotgun, the PointAim MGs, mortar/emplaced/turrets) keep their
+raised view through a reload. A third `test edx, 2000000h` site sits in
+`RoundData_SpawnRound @ 0x4ec249` (unclassified — likely a different dword; open).
+Related reload rule: **ForceCrouch (0x40000) weapons skip the reload scope stash
+entirely** (`@ 0x543126` -> `g_rescopeAfterReload = 0 @ 0x54313d`) — the mortars
+keep the sight view; every other weapon stashes + unscopes `@ 0x54312f`. The
+one-shot last-round unscope sites are gated on `!ForceScoped` (0x20000000).
+
+Port row: libs/def full flag table + `flags2`; `player_view_set_engaged` (the
+latch/refusal protocol, 15/7/1 steps, the hipfire latch);
+`weapon_fsm` keep-scope reload + ForceScoped gates; the sim exposes
+`suppress_view_bias` (the NoCardSwitch reload camera rule) and refuses mid-ease
+scope toggles; ctest player_view/weapon_fsm/def_parse_weapons pin all three.
+
 **Open follow-ups:** who queues OVERHEATED(11);
 the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
 `dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq;
-remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump.
+remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
+the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust input;
+loose-REVX audio: a loose extract advertises no expansion, so revx02.LWF (the M82
+GS_/GF_ sets) never loads — the expansion setting must name it (config, not code).

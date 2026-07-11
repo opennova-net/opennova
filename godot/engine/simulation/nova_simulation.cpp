@@ -1486,6 +1486,7 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_def_.auto_fire = (flags & 0x100) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
 	weapon_def_.burst3 = (flags & 0x20) != 0;     // [orig: WeaponAction_Fire @ 0x542c8a]
 	weapon_def_.flags = flags;                    // raw mask: the scope gate + fov policy read it
+	weapon_def_.flags2 = int(p_def.get("flags2", 0)); // Inset (0x200) picks the 7-step ease
 	weapon_scope_max_mag_ = float(double(p_def.get("scope_max_mag", 0.0)));
 	// The 3P body-channel kinds [orig: weapon.def special_hold/attack_anim -> the
 	// AdmDefs record +0xA4/+0xA8; world-wac-ai-re.md §14.8.4].
@@ -1518,13 +1519,21 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_action_end_serial_ = 0;
 	weapon_action_finished_ = -1;
 	weapon_fire_held_ = weapon_fire_pressed_ = weapon_reload_pressed_ = false;
-	player_view_.scope_engaged = false; // a fresh mount starts at the hip
+	// A fresh mount starts at the hip with the interp cleared and the hipfire
+	// latch reset [orig: Player_MountWeaponSlot zeroes the view biases @ 0x4dfbcf].
+	player_view_.scope_engaged = false;
+	player_view_.scope_step = 0;
+	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
+	player_view_.scope_hipfire = true;
 	weapon_active_ = true;
 }
 
 void NovaSimulation::clear_local_player_weapon() {
 	weapon_active_ = false;
 	player_view_.scope_engaged = false;
+	player_view_.scope_step = 0;
+	player_view_.ease_steps = opennova::world::kScopeEaseSteps;
+	player_view_.scope_hipfire = true;
 	weapon_hold_kind_ = 0;
 	weapon_attack_kind_ = 0;
 	weapon_anim_map_ = String();
@@ -1543,7 +1552,12 @@ bool NovaSimulation::request_local_player_scope_toggle() {
 	//  @ 0x82CE94, and queues the scopeup/scopedown FSM state @ 0x53f050/0x53f080]
 	if (!weapon_active_) return false;
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(weapon_def_, weapon_slot_)) return false;
-	player_view_.scope_engaged = !player_view_.scope_engaged;
+	// The toggle latches this ease's step count (7 for Inset weapons, else 15;
+	// 1 on the hipfire-return leg) and REFUSES while the previous ease runs
+	// [orig: Player_ToggleWeaponScope @ 0x4df177 !activeFlag; Setup @ 0x4df1b3..0x4df36e].
+	if (!opennova::world::player_view_set_engaged(player_view_, !player_view_.scope_engaged,
+			(weapon_def_.flags2 & 0x200) != 0))
+		return false;
 	if (player_view_.scope_engaged)
 		opennova::world::weapon_fsm_queue_scope_up(weapon_slot_);
 	else
@@ -1575,6 +1589,23 @@ Dictionary NovaSimulation::get_local_player_view() const {
 	Dictionary out;
 	out["scope_engaged"] = player_view_.scope_engaged;
 	out["scope_fraction"] = opennova::world::player_view_scope_fraction(player_view_);
+	// The NoCardSwitch reload rule: while the equipped slot is mid-RELOAD on a
+	// weapon WITHOUT NoCardSwitch (flags 0x2000000), the FP camera drops the ADS
+	// view bias for the frame — the host reads the eased fraction as 0.
+	// [orig: Player_UpdateFirstPersonCamera @ 0x4dd439/@ 0x4dd4cc; the same
+	//  predicate is Player_IsReloadingCardSwitchWeapon @ 0x4dcdd0 (ex kong
+	//  "Player_IsDriverInVehicle"), whose one caller refuses fire @ 0x5cf7be]
+	out["suppress_view_bias"] = weapon_active_ &&
+			weapon_slot_.current == opennova::world::weapon_action::kReload &&
+			(weapon_def_.flags & 0x2000000) == 0;
+	// The scope-card switch: a Scoped (flags 0x1) weapon at FULL raise in first person
+	// draws the SIGHTS card INSTEAD of the FP viewmodel — the frame draws one or the
+	// other, never both. [orig: Player_IsEquippedWeaponScoped @ 0x4dcc80 (Flags & 1 &&
+	// g_weaponScopeActive) routes the frame to draw_weapon_sight_overlays @ 0x4dce00;
+	// the FP model call @ 0x5d822c requires both scope gates CLEAR @ 0x5d8212..0x5d8218]
+	out["scope_card_active"] = weapon_active_ && (weapon_def_.flags & 1) != 0 &&
+			player_view_.scope_engaged && !player_view_.third_person &&
+			!opennova::world::player_view_scope_ease_active(player_view_);
 	out["fov_h_deg"] = opennova::world::player_view_fov_h_deg(player_view_,
 			weapon_active_ ? weapon_def_.flags : 0,
 			weapon_active_ ? weapon_scope_max_mag_ : 0.0f);
@@ -1654,11 +1685,16 @@ void NovaSimulation::tick_local_player_weapon() {
 	// [orig: g_weaponScopeActive writes; the rescope block @ 0x54139e].
 	if (ev.unscope) {
 		++weapon_unscope_serial_;
-		player_view_.scope_engaged = false;
+		// The forced paths run the same refusing toggle — a mid-ease unscope keeps
+		// the scope (rare: a reload requested inside the raise ease)
+		// [orig: @ 0x543136 calls Player_ToggleWeaponScope, activeFlag-gated].
+		opennova::world::player_view_set_engaged(player_view_, false,
+				(weapon_def_.flags2 & 0x200) != 0);
 	}
 	if (ev.rescope) {
 		++weapon_rescope_serial_;
-		player_view_.scope_engaged = true;
+		opennova::world::player_view_set_engaged(player_view_, true,
+				(weapon_def_.flags2 & 0x200) != 0);
 	}
 }
 

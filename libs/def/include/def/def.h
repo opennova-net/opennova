@@ -208,6 +208,10 @@ typedef struct DefWeaponDef {
        'attack_anim' @ 0x543ce9; docs/world/world-wac-ai-re.md section 14.8]. */
     int special_hold;
     int attack_anim;
+    /* The second FLAGS dword (NoSelect/Parachute/.../Inset/NoAutoZero/Invisible) —
+       the token table's fourth column. Appended (FFI mirror stability); `flags`
+       above stays the flags1 dword. [orig: the 16-B-stride token table @ 0x830bf0] */
+    int flags2;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {

@@ -38,6 +38,33 @@ var _weapon_display_name := ""
 var _clip_tex: Texture2D
 var _round_tex: Texture2D
 
+# The scoped-ADS SIGHTS card: one child control per authored row (order preserved,
+# per-row blend mode), drawn BEHIND this control's own elements so the HUD text/bars
+# stay readable over the card — the original draws the card at scene end and the HUD
+# overlays after [orig: draw_weapon_sight_overlays @0x4dce00 from render_hud_overlay
+# @0x5d82da; HUD_RenderAllOverlays runs later in the frame]. Row rects live in the
+# virtual 1024x768 design space and scale to the live viewport per draw
+# [orig: Viewport_ScaleToVirtualCoords @0x5d2b20].
+var _card_rows: Array = []
+
+
+class SightRowControl:
+	extends Control
+	const DESIGN := Vector2(1024, 768)
+	var tex: Texture2D
+	var rect_v := Rect2()
+
+	func _draw() -> void:
+		if tex == null:
+			return
+		var s := get_viewport_rect().size
+		var scale_v := Vector2(s.x / DESIGN.x, s.y / DESIGN.y)
+		draw_texture_rect(tex, Rect2(rect_v.position * scale_v, rect_v.size * scale_v), false)
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_RESIZED:
+			queue_redraw()
+
 var _clip_indicator := HudClipIndicator.new()
 var _messages := HudMessages.new()
 
@@ -87,7 +114,50 @@ func set_weapon(weapon: PlayerHudWeaponDef, display_name: String) -> void:
 	_clip_tex = _load_texture(weapon.clipgfx_texture) if weapon != null else null
 	_round_tex = _load_texture(weapon.rndgfx_texture) if weapon != null else null
 	_clip_indicator.reset()
+	_rebuild_sights_card()
 	queue_redraw()
+
+
+# Build the SIGHTS card rows for the equipped weapon (authored order; add rows get an
+# additive canvas material — the blend token map [orig: sub_540180 blend/add/...]).
+# Rows draw behind this control's own elements and stay hidden until the card is up.
+func _rebuild_sights_card() -> void:
+	for row in _card_rows:
+		if is_instance_valid(row):
+			row.queue_free()
+	_card_rows.clear()
+	if _weapon == null or not _weapon.scoped:
+		return
+	for entry in _weapon.sights:
+		var e: Dictionary = entry
+		var tex := _load_texture(String(e.get("texture", "")))
+		if tex == null:
+			continue
+		var row := SightRowControl.new()
+		row.tex = tex
+		var x1 := float(e.get("x1", 0))
+		var y1 := float(e.get("y1", 0))
+		row.rect_v = Rect2(x1, y1, float(e.get("x2", 0)) - x1, float(e.get("y2", 0)) - y1)
+		if int(e.get("blend", 0)) == 1:
+			var mat := CanvasItemMaterial.new()
+			mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+			row.material = mat
+		row.show_behind_parent = true
+		row.set_anchors_preset(Control.PRESET_FULL_RECT)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.visible = false
+		add_child(row)
+		_card_rows.append(row)
+
+
+# The card switch: visible only while the sim reports the scope fully raised on a
+# Scoped weapon in first person (the FP viewmodel hides on the same bit)
+# [orig: Player_IsEquippedWeaponScoped @0x4dcc80 -> draw_weapon_sight_overlays].
+func _sync_sights_card() -> void:
+	var up: bool = bool(_info.get("scope_card", false)) and not _card_rows.is_empty()
+	for row in _card_rows:
+		if is_instance_valid(row):
+			row.visible = up
 
 
 ## A mission triggered-text line for the message feed. [orig: HUD_DisplayTriggeredText
@@ -105,6 +175,7 @@ func update_info(info: Dictionary) -> void:
 		_stance_cur = stance
 		_stance_stamp = int(info.get("ticks", 0))
 	_info = info
+	_sync_sights_card()
 	queue_redraw()
 
 

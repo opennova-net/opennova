@@ -24,6 +24,13 @@ var rndgfx_texture := ""
 var rndgfx_offset := Vector2i.ZERO  # first round icon, relative to the HUDCLIP anchor
 var rndgfx_step := Vector2i.ZERO    # per-round icon step
 var rounds_per_icon := 0            # >1 draws one icon per N rounds, rounded up
+# The scoped-ADS card: Scoped (flags 0x1) weapons draw their SIGHTS rows at full
+# raise instead of the FP viewmodel. Rows are dicts {texture,x1,y1,x2,y2,blend,
+# scale,slide,slide_frames} in the authored draw order, virtual 1024x768 space.
+# [orig: draw_weapon_sight_overlays @0x4dce00; gate Player_IsEquippedWeaponScoped
+# @0x4dcc80]
+var scoped := false
+var sights: Array = []
 
 
 ## The dispersion row in degrees; 0.0 outside the parsed table.
@@ -48,4 +55,6 @@ static func from_weapon_dict(d: Dictionary) -> PlayerHudWeaponDef:
 	var layout: Vector3i = d.get("hudrndgfx_layout", Vector3i.ZERO)
 	out.rndgfx_step = Vector2i(layout.x, layout.y)
 	out.rounds_per_icon = layout.z
+	out.scoped = (int(d.get("flags", 0)) & 1) != 0
+	out.sights = d.get("sights", [])
 	return out

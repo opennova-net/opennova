@@ -143,10 +143,10 @@ void handler_idle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x5429cf]
-    // One-shot weapons drop the scope with the last round (the Flags & 0x20000000
-    // stay-scoped exception is unmapped in our flag table; no JOX/REVX token sets it).
-    // [orig: @ 0x5429ee g_weaponScopeActive = 0]
-    if (in.is_local && def.clip_capacity == 1) out.unscope = true;
+    // One-shot weapons drop the scope with the last round — unless ForceScoped
+    // (0x20000000) pins the sight view. [orig: @ 0x5429ee g_weaponScopeActive = 0]
+    if (in.is_local && def.clip_capacity == 1 && (def.flags & 0x20000000) == 0)
+        out.unscope = true;
 }
 
 // [orig: WeaponAction_EmptyIdle @ 0x542a20] Same LOOP shape on the global
@@ -168,7 +168,8 @@ void handler_emptyidle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
             weapon_fsm_request_reload(slot); // [orig: @ 0x542aa3]
         } else {
             slot.next = weapon_action::kEmptyIdle; // hold [orig: @ 0x542ab2]
-            if (in.is_local && def.clip_capacity == 1) out.unscope = true; // [orig: @ 0x542ad1]
+            if (in.is_local && def.clip_capacity == 1 && (def.flags & 0x20000000) == 0)
+                out.unscope = true; // [orig: @ 0x542ad1; ForceScoped pins the view]
         }
     }
     slot.phase = weapon_phase::kDone; // [orig: @ 0x542ae1]
@@ -244,7 +245,8 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x543036]
-    if (in.is_local && def.clip_capacity == 1) out.unscope = true; // [orig: @ 0x543053]
+    if (in.is_local && def.clip_capacity == 1 && (def.flags & 0x20000000) == 0)
+        out.unscope = true; // [orig: @ 0x543053; ForceScoped pins the view]
     // (auto-switch to the def+0x168 follow-up weapon — Player_SwitchToWeaponByHandle
     //  @ 0x54307c — is the weapon-switch seam, D-WPN-5)
 }
@@ -261,11 +263,17 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         out.reload_requested = true; // [orig: NetPacket send @ 0x5430ff]
         slot.phase = static_cast<uint8_t>(slot.phase | weapon_phase::kReloadPendingBit);
         if (in.is_local) {
-            // Stash the scope across the reload; the pump rescopes when it completes.
-            // (The Flags & 0x40000 keep-scoped class is unmapped — no JOX/REVX token.)
-            // [orig: @ 0x54312f g_rescopeAfterReload = g_weaponScopeActive]
-            slot.rescope_after_reload = in.scope_active;
-            if (in.scope_active) out.unscope = true; // [orig: Player_ToggleWeaponScope @ 0x543136]
+            if ((def.flags & 0x40000) != 0) {
+                // The keep-scope reload class (ForceCrouch 0x40000 — the mortars):
+                // no stash, no unscope; the sight view rides through the reload.
+                // [orig: @ 0x543126 -> g_rescopeAfterReload = 0 @ 0x54313d]
+                slot.rescope_after_reload = false;
+            } else {
+                // Stash the scope across the reload; the pump rescopes on completion.
+                // [orig: @ 0x54312f g_rescopeAfterReload = g_weaponScopeActive]
+                slot.rescope_after_reload = in.scope_active;
+                if (in.scope_active) out.unscope = true; // [orig: Player_ToggleWeaponScope @ 0x543136]
+            }
         }
         if (in.is_authority) {
             // Listen-host/SP zero-latency loopback of the §5.58 round-trip: the

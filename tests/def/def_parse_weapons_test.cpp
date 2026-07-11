@@ -299,14 +299,39 @@ int main(void) {
     }
     printf("M4AUTO/M4 armory fields OK\n");
 
-    /* Weapon flags mask (WeaponDef+8 bits via the token table: auto = 0x100, Sighted =
-       0x2, WhileSwimming = 0x4; LaserBeam is unmapped -> raw_lines) and the ADS zoom
-       magnification [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
+    /* Weapon flags — the FULL witnessed token table, both dwords [orig: the
+       16-B-stride {name, 0, flags1, flags2} table @ 0x830bf0]: auto = 0x100,
+       Sighted = 0x2, WhileSwimming = 0x1000000 (the old 7-entry table aliased it
+       onto Underwater's 0x4 — corrected), LaserBeam = 0x40000000 (previously
+       unmapped -> raw_lines only), NoAmmoTypes = flags2 0x40.
+       [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
        Player_ToggleWeaponScope @ 0x4df0c0 Flags & 3 gate + FOV 80/zoom @ 0x4df401]. */
-    if (m4->flags != (0x100 | 0x2 | 0x4)) {
+    if (m4->flags != (0x100 | 0x2 | 0x1000000 | 0x40000000)) {
         fprintf(stderr, "FAIL: M4AUTO flags mismatch: 0x%x\n", m4->flags);
         def_free_weapons(&wf);
         return 1;
+    }
+    if (m4->flags2 != 0) {
+        fprintf(stderr, "FAIL: M4AUTO flags2 mismatch: 0x%x\n", m4->flags2);
+        def_free_weapons(&wf);
+        return 1;
+    }
+    /* flags2 tokens land in the SECOND dword (the table's fourth column):
+       the shotgun's NoAmmoTypes = flags2 0x40, flags1 untouched by it. */
+    {
+        const DefWeaponDef *sg = NULL;
+        for (size_t i = 0; i < wf.count; ++i) {
+            if (strcmp(wf.entries[i].weapon_name, "WPN_RemmingtonSG") == 0) {
+                sg = &wf.entries[i];
+                break;
+            }
+        }
+        if (!sg || sg->flags2 != 0x40) {
+            fprintf(stderr, "FAIL: RemmingtonSG flags2 mismatch (found=%d flags2=0x%x)\n",
+                    sg != NULL, sg ? sg->flags2 : 0);
+            def_free_weapons(&wf);
+            return 1;
+        }
     }
     if (fabsf(m4->scope_max_mag - 2.0f) > FEPS) {
         fprintf(stderr, "FAIL: M4AUTO scope_max_mag mismatch: %.3f\n", m4->scope_max_mag);

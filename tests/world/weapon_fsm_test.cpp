@@ -412,6 +412,31 @@ void test_reload_end_leg() {
     CHECK(s.clip == 30);
 }
 
+void test_keep_scope_reload_class() {
+    // ForceCrouch (0x40000 — the mortars) keeps the sight view through a reload:
+    // no stash, no unscope, no rescope. [orig: @ 0x543126 -> g_rescopeAfterReload
+    // = 0 @ 0x54313d; every other weapon stashes @ 0x54312f]
+    WeaponFsmDef def = make_ak_def();
+    def.flags |= 0x40000;
+    WeaponSlotState s = make_ak_slot();
+    s.clip = 5;
+    WeaponFsmInputs in;
+    in.scope_active = true;
+    in.reload_pressed = true;
+    bool unscoped = false, rescoped = false;
+    for (int t = 0; t < 80; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        in.reload_pressed = false;
+        unscoped |= ev.unscope;
+        rescoped |= ev.rescope;
+    }
+    CHECK(!unscoped);
+    CHECK(!rescoped);
+    CHECK(!s.rescope_after_reload);
+    CHECK(s.clip == 30); // the reload itself still applied
+}
+
 void test_non_local_recoil_makes_no_decision() {
     WeaponFsmDef def = make_ak_def();
     WeaponSlotState s = make_ak_slot();
@@ -446,6 +471,7 @@ int main() {
     test_action_sound_legs();
     test_fire_abort_finishes_silently();
     test_reload_end_leg();
+    test_keep_scope_reload_class();
     test_non_local_recoil_makes_no_decision();
     if (failures == 0) std::printf("weapon_fsm_test: all passed\n");
     return failures == 0 ? 0 : 1;

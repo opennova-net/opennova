@@ -728,6 +728,11 @@ func _update_viewmodel() -> void:
 	# at the world cadence [orig: CNetPlayerInterp_Setup @0x4df36e / g_fpCameraInterp
 	# @0x82CE40; libs/world player_view_bias_units states the blend].
 	var ads := _view.scope_fraction if _view != null else 0.0
+	# The NoCardSwitch reload rule: reloading a card-switching weapon drops the
+	# ADS bias for the frame (instant, not eased) [orig: Player_UpdateFirstPersonCamera
+	# @0x4dd439/@0x4dd4cc skip the bias add while Player_IsReloadingCardSwitchWeapon].
+	if _view != null and _view.suppress_view_bias:
+		ads = 0.0
 	var view_units := PLAYER_VIEWMODEL_POS_UNITS.lerp(PLAYER_VIEWMODEL_TPOS_UNITS, ads)
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * _viewmodel_offset(view_units))
@@ -736,7 +741,11 @@ func _update_viewmodel() -> void:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; hosted, the dedicated layer is drawn
 	# only by the pass camera (and excluded by the mirror camera's cull_mask).
 	_set_visual_layers(_viewmodel, NovaWater.VISUAL_LAYER_VIEWMODEL)
-	_viewmodel.visible = (not _third_person) or debug_force_viewmodel
+	# The card switch: while the SIGHTS card is up, the FP model does not draw —
+	# the frame shows one or the other [orig: the FP model call @0x5d822c requires
+	# the scope gates clear @0x5d8212; the card path is draw_weapon_sight_overlays].
+	var carded := _view != null and _view.scope_card_active
+	_viewmodel.visible = ((not _third_person) and not carded) or debug_force_viewmodel
 	_update_viewmodel_pass()
 
 

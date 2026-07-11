@@ -167,6 +167,40 @@ void test_input_dispatch_gates() {
 
 } // namespace
 
+void test_toggle_latch_refusal_and_inset() {
+    // The witnessed toggle protocol [orig: Player_ToggleWeaponScope — the
+    // !activeFlag refusal @ 0x4df177; Setup 15 @ 0x4df36e / 7 Inset @ 0x4df355 /
+    // 1 hipfire-return @ 0x4df1c3; g_scopeHipfire writes @ 0x4df212/@ 0x4df373].
+    PlayerViewState v;
+    const float eye[3] = {0, 0, 0};
+    CHECK(v.scope_hipfire); // [orig: g_scopeHipfire init 1]
+    CHECK(player_view_set_engaged(v, true, false));
+    CHECK(v.ease_steps == kScopeEaseSteps);
+    CHECK(!v.scope_hipfire);
+    player_view_tick(v, eye);
+    CHECK(player_view_scope_ease_active(v));
+    CHECK(!player_view_set_engaged(v, false, false)); // refused mid-ease
+    CHECK(v.scope_engaged);
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(!player_view_scope_ease_active(v));
+    CHECK(player_view_set_engaged(v, false, false)); // full disengage ease (not hipfire)
+    CHECK(v.ease_steps == kScopeEaseSteps);
+    CHECK(v.scope_step == kScopeEaseSteps);
+    CHECK(v.scope_hipfire);
+    for (int i = 0; i < kScopeEaseSteps; ++i) player_view_tick(v, eye);
+    CHECK(player_view_scope_fraction(v) == 0.0f);
+
+    // Inset weapons (flags2 0x200 — the REVX PointAim MGs / emplaced guns) latch
+    // the 7-step ease both ways.
+    PlayerViewState vi;
+    CHECK(player_view_set_engaged(vi, true, true));
+    CHECK(vi.ease_steps == kScopeEaseStepsInset);
+    for (int i = 0; i < kScopeEaseStepsInset; ++i) player_view_tick(vi, eye);
+    CHECK(player_view_scope_fraction(vi) == 1.0f);
+    CHECK(player_view_set_engaged(vi, false, true));
+    CHECK(vi.ease_steps == kScopeEaseStepsInset);
+}
+
 int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
@@ -175,6 +209,7 @@ int main() {
     test_fov_vertical_conversion();
     test_view_bias_blend();
     test_input_dispatch_gates();
+    test_toggle_latch_refusal_and_inset();
     if (failures == 0) std::printf("player_view_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }
