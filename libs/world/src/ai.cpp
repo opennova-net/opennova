@@ -609,9 +609,10 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
         }
         if (e.inf.active) {
             // Net-snapped remote peers skip the movement motor, so their blink/indoors
-            // state comes from the position-only refresh instead. [orig: the per-tick
-            // Entity_BuildProximityList @0x4b3dc0 call from Entity_UpdateAllEntities
-            // @0x4c229c]
+            // state comes from the position-only refresh instead. [orig: remote persons
+            // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
+            // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
+            // walk is pool-2 statics on an 8-per-tick stagger, not persons]
             if (collision_active && e.net_is_remote_peer) {
                 if (Entity *ent = world.registry.get(e.handle))
                     collision->refresh_blink(world, *ent);

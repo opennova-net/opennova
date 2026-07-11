@@ -123,13 +123,19 @@ struct Rig {
 
         const int32_t mid = cw.add_model(std::move(model));
         cw.assign_entity(building, mid);
-        cw.build_tick_tables(world);
+        rebuild();
+    }
+
+    // Candidate slices only rebuild every 17th tick [orig: dword_B57C84 vs 0x10
+    // @ 0x4c240f], so a test step ticks the tables 17 times to force one build.
+    void rebuild() {
+        for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
     }
 
     void move_soldier(double x, double y, double z) {
         Entity *s = world.registry.get(soldier);
         s->position = {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
-        cw.build_tick_tables(world);
+        rebuild();
     }
 };
 
@@ -291,7 +297,7 @@ void test_resolver_wall_pushout() {
     CollisionWorld::ResolveState state;
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
                           /*is_player=*/false, /*is_authority=*/true, /*tick=*/0,
-                          /*anim=*/43, health);
+                          /*anim=*/43, 0u, health);
 
     // Step into the wall: prev pos (12.8) was outside the +X plane -> it separates.
     pos[0] = fx(11.6);
@@ -300,7 +306,7 @@ void test_resolver_wall_pushout() {
     rig.cw.build_tick_tables(rig.world);
     const int32_t before = pos[0];
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
-                          false, true, 0, 43, health);
+                          false, true, 0, 43, 0u, health);
     CHECK(pos[0] > before); // pushed back toward +X (out of the wall)
     CHECK(health == 100);   // solid volumes never hurt
 }
@@ -315,7 +321,7 @@ void test_resolver_hurt_and_zones() {
     int16_t health = 100;
     CollisionWorld::ResolveState state;
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
-                          false, true, 0, 43, health);
+                          false, true, 0, 43, 0u, health);
     CHECK(health == 99); // [orig: flag 0x40 -> health - 1 @0x4b318c]
 
     // A vehicle-loadout volume (type 11) sets the zone flag; an armory volume
@@ -327,7 +333,7 @@ void test_resolver_hurt_and_zones() {
     int16_t lhealth = 100;
     CollisionWorld::ResolveState lstate;
     lrig.cw.resolve_entity(lrig.world, lrig.soldier, lstate, lpos, lvel, lvel[2], 0, fx(1.8),
-                           0, 0, false, true, 0, 43, lhealth);
+                           0, 0, false, true, 0, 43, 0u, lhealth);
     Entity *s = lrig.world.registry.get(lrig.soldier);
     CHECK((s->flags & kEntityFlagVehicleLoadoutZone) != 0);
     CHECK(lhealth == 100);
@@ -339,7 +345,7 @@ void test_resolver_hurt_and_zones() {
     int16_t ahealth = 100;
     CollisionWorld::ResolveState astate;
     arig.cw.resolve_entity(arig.world, arig.soldier, astate, apos, avel, avel[2], 0, fx(1.8),
-                           0, 0, false, true, 0, 43, ahealth);
+                           0, 0, false, true, 0, 43, 0u, ahealth);
     Entity *sa = arig.world.registry.get(arig.soldier);
     CHECK((sa->flags & kEntityFlagArmoryZone) != 0);
 }
@@ -355,13 +361,13 @@ void test_idle_skip_throttle() {
     // Ticks 1..11 (tick & 0x3F != 0, no motion): counter ramps to the skip band.
     for (uint32_t t = 1; t <= 11; ++t)
         rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0,
-                              0, false, true, t, 43, health);
+                              0, false, true, t, 43, 0u, health);
     // Tick 12: skip path — the caller's gravity displacement is reverted and vel zeroed.
     vel[2] = -400;
     pos[2] -= 400 * 2; // what the caller's gravity integration just did
     const int32_t sunk = pos[2];
     const int32_t ret = rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
-                                              0, fx(1.8), 0, 0, false, true, 12, 43, health);
+                                              0, fx(1.8), 0, 0, false, true, 12, 43, 0u, health);
     CHECK(ret == 0);
     CHECK(vel[2] == 0);
     CHECK(pos[2] == sunk + 2 * 400); // [orig: pos.Z -= 2*slideDecay on the skip path]
@@ -409,7 +415,7 @@ void test_debug_seams() {
     CollisionWorld::ResolveState state;
     const int32_t ret = rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2],
                                               fx(0.5), fx(1.8), 0, 0, /*is_player=*/true,
-                                              /*is_authority=*/true, /*tick=*/0, 43, health);
+                                              /*is_authority=*/true, /*tick=*/0, 43, 0u, health);
     const CollisionWorld::LocalResolveDebug &lrd = rig.cw.local_resolve_debug;
     CHECK(lrd.valid);
     CHECK(lrd.capsule_bottom == fx(0.5));
@@ -418,6 +424,106 @@ void test_debug_seams() {
     CHECK(lrd.pos[0] == pos[0] && lrd.pos[1] == pos[1] && lrd.pos[2] == pos[2]);
     CHECK(lrd.points[2][0] == fx(30.0)); // the feet point rides the entity column
     CHECK(lrd.radii[1] == 20480);        // the fixed eye-point radius [orig: 0.3125u]
+}
+
+// ---------------------------------------------------------------------------
+void test_slice_cadence_and_invuln() {
+    // Candidate slices build on the 17th table tick, not the first — retail's
+    // BSS-zero counter means mission starts run 16 sliceless ticks. [orig:
+    // dword_B57C84 vs 0x10 @ 0x4c240f, zeroed inside 0x4b8eb0]
+    World world;
+    CollisionWorld cw;
+    Field field{0};
+    cw.terrain = &field.field;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(2, 8);
+    Entity b;
+    b.kind = EntityKind::Building;
+    b.net_id = 100;
+    b.position = {10.0f, 10.0f, 0.0f};
+    b.yaw = 90;
+    b.alive = true;
+    const EntityHandle building = world.registry.spawn(2, b);
+    Entity s;
+    s.kind = EntityKind::Organic;
+    s.net_id = 1;
+    s.position = {10.0f, 10.0f, 0.0f};
+    s.alive = true;
+    const EntityHandle soldier = world.registry.spawn(0, s);
+    const int32_t mid = cw.add_model(box_model(1, 0, 2.0, 2.0, 3.0));
+    cw.assign_entity(building, mid);
+    for (int i = 0; i < 16; ++i) {
+        cw.build_tick_tables(world);
+        CHECK(cw.candidate_count(soldier) == 0);
+    }
+    cw.build_tick_tables(world); // the 17th call builds
+    CHECK(cw.candidate_count(soldier) == 1);
+
+    // Hurt volumes never damage a Flags-0x4000000 entity. [orig: the
+    // (Flags & 0x4000000) == 0 wrap @ 0x4b3148]
+    Rig rig(box_model(18, 0, 3.0, 3.0, 3.0));
+    Entity *inv = rig.world.registry.get(rig.soldier);
+    inv->flags |= 0x4000000u;
+    rig.move_soldier(10.0, 10.0, 0.5);
+    int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          false, true, 0, 43, 0u, health);
+    CHECK(health == 100);
+}
+
+// ---------------------------------------------------------------------------
+void test_platform_latch() {
+    // A type-4 seat volume latches the platform state EVEN WITH ZERO FORCE —
+    // the flag dispatch runs on a zero contact return [orig: the goto LABEL_67
+    // @ 0x4b2fa5; the latch @ 0x4b3291-0x4b3297]. The authored shape pairs the
+    // seat with a type-1 deck below it; the ground-settle tail probe re-hits
+    // the deck (type 4 is ray-invisible), so groundEntity lands on the
+    // platform via the probe's unconditional +0x28 store [orig: @ 0x414370].
+    // The anchor/carry legs stay D-COL-5.
+    CollisionModel model = box_model(1, 0, 3.0, 3.0, 1.0); // the solid deck z 0..1
+    {
+        // The seat volume z 1.0..1.2 above the deck, its own plane run.
+        auto plane = [&](int nx, int ny, int nz, double d) {
+            CollisionPlane p;
+            p.nx = static_cast<int16_t>(nx);
+            p.ny = static_cast<int16_t>(ny);
+            p.nz = static_cast<int16_t>(nz);
+            p.dist = fx(d);
+            model.planes.push_back(p);
+        };
+        plane(16384, 0, 0, -3.0);
+        plane(-16384, 0, 0, -3.0);
+        plane(0, 16384, 0, -3.0);
+        plane(0, -16384, 0, -3.0);
+        plane(0, 0, 16384, -1.2);
+        plane(0, 0, -16384, 1.0);
+        CollisionVolume seat;
+        seat.type = 4;
+        seat.min_x = fx(-3.0);
+        seat.max_x = fx(3.0);
+        seat.min_y = fx(-3.0);
+        seat.max_y = fx(3.0);
+        seat.min_z = fx(1.0);
+        seat.max_z = fx(1.2);
+        seat.plane_start = 6;
+        seat.plane_count = 6;
+        model.volumes.push_back(seat);
+        model.sections[0].volume_count = 2;
+    }
+    Rig rig(std::move(model));
+    rig.move_soldier(10.0, 10.0, 1.05); // standing on the deck, inside the seat
+    int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          false, true, 0, 43, 0u, health);
+    Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagOnPlatform) != 0);
+    CHECK(s->ground_target == rig.building);
 }
 
 } // namespace
@@ -430,6 +536,8 @@ int main() {
     test_resolver_wall_pushout();
     test_resolver_hurt_and_zones();
     test_idle_skip_throttle();
+    test_slice_cadence_and_invuln();
+    test_platform_latch();
     test_debug_seams();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

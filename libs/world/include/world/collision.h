@@ -165,6 +165,9 @@ struct CollisionTargetView {
     const CollisionModel *model = nullptr;
     const CollisionMatrix *matrices = nullptr; // one per section
     int32_t pos[3] = {};                       // entity+4/+8/+12 (16.16)
+    int32_t yaw_bam = 0;                       // entity+16 Yaw (BAM32) — platform-anchor leg
+    int32_t pitch_bam = 0;                     // entity+20 Pitch (BAM32) — platform-anchor leg
+    uint32_t entity_flags = 0;                 // entity+36 Flags (contact rejects flags & 1)
     int32_t bound_radius = 0;                  // entity+0 boundRadius (16.16)
     bool is_building = false;                  // itemDef type == 5 (blink gate)
     int32_t pool_index = 0;                    // pool index for the packed blink hit
@@ -196,6 +199,10 @@ struct CollisionRay {
     // Build mid/half/dir from start/end. [orig: prologue of raycast_entity_collision
     // @ 0x413760 / Entity_FindNearestByRay @ 0x413af0 (float normalize, ftol)]
     void refresh();
+    // Recompute mid/half only — dir is built ONCE at ray construction and never
+    // re-derived from a clipped segment. [orig: the hit tail @ 0x41370c-0x41374e
+    // refreshes point[6..11] and leaves dir untouched]
+    void refresh_bounds();
 };
 
 bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ray);
@@ -293,12 +300,14 @@ public:
         bool prev_valid = false;
         uint8_t skip_counter = 0;   // [orig: entity pad_370[3] idle throttle]
     };
+    // anim_state_flags = the state's g_animStateFlagsTable word (bit 0 forces a
+    // full update; the id itself picks the repulsion-exempt states).
     int32_t resolve_entity(World &world, EntityHandle source, ResolveState &state,
                            int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                            int32_t capsule_bottom, int32_t capsule_top,
                            int32_t heading, int32_t body_pitch, bool is_player,
                            bool is_authority, uint32_t tick, int32_t anim_state_id,
-                           int16_t &health);
+                           uint32_t anim_state_flags, int16_t &health);
 
     // World-level blink state for the local player.
     // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
@@ -383,9 +392,16 @@ private:
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
 
-    std::vector<StaticSlot> statics_;   // cap 1200 [orig: g_StaticProx*]
+    std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;
     int32_t static_building_count_ = 0;
+    // Candidate slices rebuild only every 17th tick — the counter increments per
+    // tick and the rebuild fires (and resets it) once it reaches 16; pool tables
+    // rebuild every tick. BSS-zero start: retail's first slice build lands on
+    // tick 17 (mission starts run 16 sliceless ticks). [orig: dword_B57C84 vs
+    // 0x10 @ 0x4c240f, zeroed by Entity_BuildProximityListsFromPools @ 0x4b8ed0]
+    uint32_t slice_refresh_counter_ = 0;
+
     std::vector<DynSlot> dynamics_;     // [orig: g_DynProx*]
     std::vector<PersonSlot> persons_;   // [orig: g_PersonProx*]
     std::vector<EntityHandle> arena_;   // cap 3000 [orig: g_ProxCandidateArena]

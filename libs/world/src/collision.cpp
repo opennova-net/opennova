@@ -23,6 +23,21 @@ inline int32_t abs32(int32_t v) { return opennova::io::bam_abs(v); }
 
 // [orig: dbl_7C19D8 = 2^31/pi — BAM per radian]
 constexpr double kBamPerRadian = 683565275.5764316;
+// [orig: dbl_7C57B8 = -2^31/pi — the NEGATED BAM-per-radian the platform-anchor
+// leg multiplies its atan2 results by (the target-relative subtraction then
+// yields target + atan*BAM).]
+constexpr double kNegBamPerRadian = -683565275.5764316;
+// [orig: dbl_7C3608 = 2*pi/2^32 — radians per BAM32]
+constexpr double kRadianPerBam = 1.4629180792671596e-9;
+// [orig: flt_7C19E0 = 2147352576.0 — every sqrt is min-clamped to this before
+// _ftol2_sse so the int cast can't overflow]
+constexpr double kFtolClamp = 2147352576.0;
+
+int32_t sqrt_ftol(double squared_len) {
+    double len = std::sqrt(squared_len);
+    if (len > kFtolClamp) len = kFtolClamp;
+    return static_cast<int32_t>(len);
+}
 
 // Distance of `p` from the ray line through `start` along normalized `dir`
 // (16.16), computed exactly like the original: project (float sqrt + ftol).
@@ -38,16 +53,13 @@ int32_t ray_line_distance(const int32_t start[3], const int32_t dir[3], const in
             start[i] + static_cast<int32_t>((static_cast<int64_t>(dir[i]) * t + 0x8000) >> 16);
         d[i] = abs32(closest - p[i]);
     }
-    const double len = std::sqrt(static_cast<double>(d[0]) * d[0] +
-                                 static_cast<double>(d[1]) * d[1] +
-                                 static_cast<double>(d[2]) * d[2]);
-    return static_cast<int32_t>(len);
+    return sqrt_ftol(static_cast<double>(d[0]) * d[0] + static_cast<double>(d[1]) * d[1] +
+                     static_cast<double>(d[2]) * d[2]);
 }
 
 int32_t vec_len_ftol(int32_t x, int32_t y, int32_t z) {
-    return static_cast<int32_t>(std::sqrt(static_cast<double>(x) * x +
-                                          static_cast<double>(y) * y +
-                                          static_cast<double>(z) * z));
+    return sqrt_ftol(static_cast<double>(x) * x + static_cast<double>(y) * y +
+                     static_cast<double>(z) * z);
 }
 
 } // namespace
@@ -189,6 +201,11 @@ bool collision_test_blink(const CollisionTargetView &target, const CollisionPoin
 
         CollisionMatrix inv;
         mat.invert_into(inv);
+        // The type-8 ordinal counter restarts from the section-entry value for
+        // EACH point, so the same volume keeps the same ordinal across points;
+        // the last point's count carries into the next section. [orig: the
+        // savedFaceIdx save @ 0x4af0d3 / per-point reset @ 0x4af165]
+        const int32_t section_entry_counter = face_counter;
         for (int32_t pi = 0; pi < num_points; ++pi) {
             int32_t local[3];
             const int32_t pw[3] = {points[pi].x, points[pi].y, points[pi].z};
@@ -199,6 +216,7 @@ bool collision_test_blink(const CollisionTargetView &target, const CollisionPoin
                 local[2] - r > sec.max_z || local[2] + r < sec.min_z)
                 continue; // [orig: section AABB reject @ 0x4af109-0x4af155]
 
+            face_counter = section_entry_counter;
             for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
                 const CollisionVolume &vol = model.volumes[sec.volume_start + vi];
                 if (vol.type != 8) continue; // [orig: @ 0x4af188 — blink volumes only]
@@ -254,6 +272,16 @@ void CollisionRay::refresh() {
         dir[2] = static_cast<int32_t>(d[2] * inv);
     } else {
         dir[0] = dir[1] = dir[2] = 0;
+    }
+}
+
+void CollisionRay::refresh_bounds() {
+    // [orig: the hit tail @ 0x41370c-0x41374e — mid/half from the clipped
+    // start/end; dir keeps the construction-time normalization]
+    for (int i = 0; i < 3; ++i) {
+        const int32_t h = (end[i] - start[i]) >> 1;
+        mid[i] = start[i] + h;
+        half[i] = abs32(h);
     }
 }
 
@@ -333,7 +361,7 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
         }
     }
 
-    if (hit_found) ray.refresh(); // [orig: @ 0x41370c mid/half recompute]
+    if (hit_found) ray.refresh_bounds(); // [orig: @ 0x41370c mid/half recompute — dir untouched]
     return hit_found;
 }
 
@@ -344,6 +372,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                              BlinkAccum &blink, PlatformContact &platform, ContactResult &out) {
     out = ContactResult{};
     if (target.model == nullptr || target.matrices == nullptr) return false;
+    if ((target.entity_flags & 1u) != 0) return false; // [orig: targetEntity[9] & 1 @ 0x4ae1bd]
     const CollisionModel &model = *target.model;
     if (model.sections.empty() || q.num_points <= 0) return false;
 
@@ -383,6 +412,10 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
         bool has_collision = false;
         int32_t primary[3] = {0, 0, 0};
         int32_t secondary[3] = {0, 0, 0};
+        // The type-8 ordinal restarts from the section-entry value per point (the
+        // same volume keeps its ordinal across points). [orig: v118 save @ 0x4ae384
+        // / per-point restore @ 0x4ae4f6]
+        const int32_t section_entry_counter = damage_volume_counter;
 
         for (int32_t pi = 0; pi < q.num_points; ++pi) {
             const bool prev_has_collision = has_collision;
@@ -395,6 +428,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                 local[2] - radius > sec.max_z || local[2] + radius < sec.min_z)
                 continue; // [orig: @ 0x4ae43b-0x4ae4a6]
 
+            damage_volume_counter = section_entry_counter;
             // Damage pass start index. [orig: @ 0x4ae4b8-0x4ae4df]
             const bool damage_pass = (q.mask & 8) != 0;
             int32_t vi = 0;
@@ -492,42 +526,55 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                         break;
                     case 4: { // platform/seat anchor [orig: @ 0x4ae894-0x4aea30]
                         out.flags |= 0x1u;
-                        int32_t anchor_local[3] = {
-                            vol.min_x + ((vol.max_x - vol.min_x) >> 1),
-                            vol.min_y + ((vol.max_y - vol.min_y) >> 1),
-                            local[2]};
-                        int32_t anchor_rot[3];
-                        mat.rotate_point(anchor_local, anchor_rot);
-                        platform.anchor[0] = anchor_rot[0] + target.pos[0];
-                        platform.anchor[1] = anchor_rot[1] + target.pos[1];
-                        platform.anchor[2] = (vol.max_z - 0x10000) + target.pos[2];
+                        // Two rotations through the section matrix: x/y from
+                        // (mid, mid, the point's local z), z from (mid, mid,
+                        // maxZ - 1.0u). [orig: the paired
+                        // Math_TransformPointFixedPoint22 calls @ 0x4ae8f2/0x4ae903]
+                        const int32_t mid_x = vol.min_x + ((vol.max_x - vol.min_x) >> 1);
+                        const int32_t mid_y = vol.min_y + ((vol.max_y - vol.min_y) >> 1);
+                        const int32_t anchor_xy_local[3] = {mid_x, mid_y, local[2]};
+                        const int32_t anchor_z_local[3] = {mid_x, mid_y, vol.max_z - 0x10000};
+                        int32_t anchor_xy[3], anchor_z[3];
+                        mat.rotate_point(anchor_xy_local, anchor_xy);
+                        mat.rotate_point(anchor_z_local, anchor_z);
+                        platform.anchor[0] = anchor_xy[0] + target.pos[0];
+                        platform.anchor[1] = anchor_xy[1] + target.pos[1];
+                        platform.anchor[2] = anchor_z[2] + target.pos[2];
                         if (vol.plane_count > 0) {
                             const CollisionPlane &p0 = model.planes[vol.plane_start];
-                            // Platform yaw/pitch from the first plane normal.
-                            // [orig: @ 0x4ae938-0x4ae9d9 — target yaw - atan2(nx, ny),
-                            // pitch - atan2(nz, len_xy); the exact anchor pull-in]
-                            const double yaw =
-                                std::atan2(static_cast<double>(-p0.ny),
-                                           static_cast<double>(-p0.nx)) * kBamPerRadian;
-                            platform.yaw = q.query_is_player
-                                               ? static_cast<int32_t>(yaw)
-                                               : static_cast<int32_t>(yaw);
-                            const double lxy = std::sqrt(static_cast<double>(p0.nx) * p0.nx +
-                                                         static_cast<double>(p0.ny) * p0.ny);
-                            platform.pitch = -static_cast<int32_t>(
-                                std::atan2(static_cast<double>(p0.nz), lxy) * kBamPerRadian);
+                            // Yaw/pitch are TARGET-RELATIVE: entity Yaw/Pitch minus
+                            // atan2 * -BAM (net +). The XY length is ftol'd to int
+                            // before the pitch atan2. [orig: @ 0x4ae938-0x4ae9d9,
+                            // dbl_7C57B8 = -2^31/pi]
+                            platform.yaw =
+                                target.yaw_bam -
+                                static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),
+                                                                -static_cast<double>(p0.nx)) *
+                                                     kNegBamPerRadian);
+                            const int32_t lxy_int = sqrt_ftol(
+                                static_cast<double>(p0.nx) * p0.nx +
+                                static_cast<double>(p0.ny) * p0.ny);
+                            platform.pitch =
+                                target.pitch_bam -
+                                static_cast<int32_t>(std::atan2(static_cast<double>(p0.nz),
+                                                                static_cast<double>(lxy_int)) *
+                                                     kNegBamPerRadian);
                         } else {
-                            platform.yaw = 0;
-                            platform.pitch = 0;
+                            // The original reads plane[0] unguarded even for a
+                            // 0-plane volume (adjacent-memory read); a bounds
+                            // guard is required here, defaults target-relative.
+                            platform.yaw = target.yaw_bam;
+                            platform.pitch = target.pitch_bam;
                         }
-                        // Pull the anchor 0.375u back along the platform yaw.
-                        // [orig: @ 0x4ae9f6-0x4aea30 — anchor -= 24576*sin/cos >> 22]
-                        int32_t c, s;
-                        quantized_dir(platform.yaw, c, s);
-                        platform.anchor[0] -=
-                            static_cast<int32_t>((24576LL * c) >> 22);
-                        platform.anchor[1] -=
-                            static_cast<int32_t>((24576LL * s) >> 22);
+                        // Pull the anchor 0.375u back along the platform yaw — REAL
+                        // sin/cos of the BAM angle scaled 2^22 and truncated, not the
+                        // quantized table. [orig: @ 0x4ae9df-0x4aea30 — fsin/fcos of
+                        // yaw * dbl_7C3608, * dbl_7C3600]
+                        const double yaw_rad = static_cast<double>(platform.yaw) * kRadianPerBam;
+                        const int32_t s22 = static_cast<int32_t>(std::sin(yaw_rad) * 4194304.0);
+                        const int32_t c22 = static_cast<int32_t>(std::cos(yaw_rad) * 4194304.0);
+                        platform.anchor[0] -= static_cast<int32_t>((24576LL * c22) >> 22);
+                        platform.anchor[1] -= static_cast<int32_t>((24576LL * s22) >> 22);
                         platform.valid = true;
                         break;
                     }
@@ -685,7 +732,10 @@ void CollisionWorld::build_tick_tables(World &world) {
     statics_.clear();
     static_building_count_ = 0;
     auto push_static = [&](const Entity &e) {
-        if (statics_.size() >= 1200) return; // [orig: cap 1199+1]
+        // The original's count saturates at 1199 — the 1200th slot is written
+        // but never counted, so 1199 is the effective cap. [orig: the
+        // `count < 1199` post-increment gate @ 0x4b94cb / 0x4b955f]
+        if (statics_.size() >= 1199) return;
         auto it = instances_.find(e.handle.packed);
         if (it == instances_.end()) return; // no collision model -> not a collider
         StaticSlot s;
@@ -742,8 +792,17 @@ void CollisionWorld::build_tick_tables(World &world) {
         dynamics_.push_back(d);
     });
 
-    // --- per-entity candidate slices. [orig: 0x4b8eb0 — pool 0 radius +4.0u,
-    // pool 1 radius +6.0u; shared 3000-entry arena] ---
+    // --- per-entity candidate slices, every 17th tick. [orig: 0x4b8eb0 — pool 0
+    // radius +4.0u, pool 1 +6.0u, shared 3000-entry arena; the call is gated on
+    // dword_B57C84 >= 0x10 @ 0x4c240f (incremented per tick, zeroed inside the
+    // builder), so slices are up to 16 ticks stale by design. Pool-1 SOURCE
+    // slices (dynamics, +6.0u, the foliage-attrib parent gate) ride the vehicle
+    // pass — only organics run our resolver today.] ---
+    if (slice_refresh_counter_ < 16) {
+        ++slice_refresh_counter_;
+        return; // keep the previous slices/arena
+    }
+    slice_refresh_counter_ = 0;
     arena_.clear();
     candidates_.clear();
     auto build_for = [&](const Entity &e, int32_t pad) {
@@ -770,7 +829,10 @@ void CollisionWorld::build_tick_tables(World &world) {
             const int32_t sx = static_cast<int32_t>(s.x) << 16;
             const int32_t sy = static_cast<int32_t>(s.y) << 16;
             const int32_t sz = static_cast<int32_t>(s.z) << 16;
-            const int32_t total = range + (static_cast<int32_t>(s.radius) << 16) + 0x8000;
+            // No quantization slack: the original accepts the +-0.5u table error
+            // as-is (the +111876 radius pad at table build absorbs it).
+            // [orig: total = range + (radius << 16) @ 0x4b902f]
+            const int32_t total = range + (static_cast<int32_t>(s.radius) << 16);
             if (abs32(sx - p[0]) > total || abs32(sy - p[1]) > total || abs32(sz - p[2]) > total)
                 continue;
             if (vec_len_ftol(sx - p[0], sy - p[1], sz - p[2]) > total) continue;
@@ -807,6 +869,9 @@ const CollisionTargetView *CollisionWorld::target_view(World &world, EntityHandl
     scratch.pos[0] = p[0];
     scratch.pos[1] = p[1];
     scratch.pos[2] = p[2];
+    scratch.yaw_bam = heading;
+    scratch.pitch_bam = 0; // statics carry no pitch; the vehicle pass fills it (D-COL-5)
+    scratch.entity_flags = e->flags;
     scratch.bound_radius = entity_bound_radius(*this, m);
     scratch.is_building = (e->kind == EntityKind::Building);
     scratch.pool_index = h.slot();
@@ -827,11 +892,31 @@ void CollisionWorld::refresh_blink(World &world, Entity &ent) {
     pt.z = to_fixed(ent.position.z);
     const int32_t radius = 0x8000; // [orig: searchRadius_fp = 0x8000]
 
-    if (ent.kind != EntityKind::Building) {
-        // Test against the building prefix of the static table. [orig: the
-        // buildings-only loop, count g_StaticProxBuildingCount]
+    if (ent.kind == EntityKind::Organic) {
+        // Persons (and vehicles, once they get slices) walk their own candidate
+        // list testing building-kind candidates — no distance prefilter. [orig:
+        // the def type 1/3 branch @ 0x4b3e5f-0x4b3f93]
+        auto it = candidates_.find(ent.handle.packed);
+        if (it != candidates_.end()) {
+            const CandidateSlice slice = it->second;
+            for (int32_t i = 0; i < slice.count; ++i) {
+                const EntityHandle ch = arena_[slice.start + i];
+                if (ch == ent.handle) continue; // [orig: @ 0x4b3f73]
+                const Entity *ce = world.registry.get(ch);
+                if (ce == nullptr || ce->kind != EntityKind::Building) continue;
+                CollisionTargetView view;
+                std::vector<CollisionMatrix> mats;
+                if (const CollisionTargetView *tv = target_view(world, ch, view, mats))
+                    collision_test_blink(*tv, &pt, &radius, 1, accum);
+            }
+        }
+    } else if (ent.kind != EntityKind::Building) {
+        // Everything else non-building tests the building prefix of the static
+        // table. [orig: the def-null / other-type loops @ 0x4b3e6b / 0x4b3fa0,
+        // reject radius = building radius + the 0.5u query radius]
         for (int32_t i = 0; i < static_building_count_; ++i) {
             const StaticSlot &s = statics_[i];
+            if (s.h == ent.handle) continue; // [orig: the self check @ 0x4b3f13]
             const int32_t sx = static_cast<int32_t>(s.x) << 16;
             const int32_t sy = static_cast<int32_t>(s.y) << 16;
             const int32_t sz = static_cast<int32_t>(s.z) << 16;
@@ -869,7 +954,9 @@ int32_t CollisionWorld::raycast_ground(World &world, EntityHandle source, const 
     if (out_hit_entity) *out_hit_entity = EntityHandle{};
 
     // Terrain clamp — skipped for an indoors source. [orig: the Flags & 0x800000
-    // gate @ 0x413785; vertical column == the hi-res down-raycast result]
+    // gate @ 0x413785; vertical column == the hi-res down-raycast result —
+    // bilinear column height equals the @ 0x60e710 march for vertical rays,
+    // docs/world/world-wac-ai-re.md (D-COL-7)]
     bool indoors = false;
     if (source.valid()) {
         if (const Entity *se = world.registry.get(source))
@@ -927,7 +1014,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        int32_t capsule_bottom, int32_t capsule_top,
                                        int32_t heading, int32_t body_pitch, bool is_player,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
-                                       int16_t &health) {
+                                       uint32_t anim_state_flags, int16_t &health) {
     // [orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]
     (void)heading;    // consumed by the on-platform 2-point variant (D-COL-5)
     (void)body_pitch;
@@ -940,14 +1027,17 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         state.prev_valid = true;
     }
 
-    // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when moving,
-    // sliding, displaced > 200, or every 64th tick; otherwise counter 0..10 full,
-    // 11..20 skip (revert the caller's gravity integration + zero vel_z).]
+    // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when the anim
+    // state's table bit 0 is set, moving, sliding, displaced > 200, swimming
+    // (Flags 0x2000), or every 64th tick; otherwise counter 0..10 full, 11..20
+    // skip (revert the caller's gravity integration + zero vel_z).]
     bool full_update = false;
+    if ((anim_state_flags & 1u) != 0) full_update = true; // [orig: @ 0x4b2c1e]
     if (vel_xy[0] != 0 || vel_xy[1] != 0) full_update = true;
     if (vel_z > 0 || vel_z < -420) full_update = true;
     if (abs32(pos[0] - state.prev_pos[0]) > 200 || abs32(pos[1] - state.prev_pos[1]) > 200)
         full_update = true;
+    if (ent != nullptr && (ent->flags & 0x2000u) != 0) full_update = true; // [orig: @ 0x4b2ca6]
     if ((tick & 0x3Fu) == 0) full_update = true;
     if (!full_update) {
         if (state.skip_counter <= 10) {
@@ -965,6 +1055,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
 
     // Per-resolve blink/query state. [orig: the g_Blink* clears @ 0x4b2d54-0x4b2d7d]
+    // Not modeled: the mounted/carried source gate (savedPosY force suppression),
+    // the +0x2c aux latches, and the resolver's kill/sound/callback side effects —
+    // docs/world/world-wac-ai-re.md (D-COL-8, D-COL-9); on-foot organics only today.
     BlinkAccum blink;
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
@@ -1049,10 +1142,15 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     mut.is_ground_of_source = (ent->ground_target == ch);
                 }
                 ContactResult res;
-                if (!collision_contact_force(*tv, q, blink, platform, res)) {
-                    if (pass == 0) apply_touch_flags(ent, res.flags, health, is_authority);
-                    continue;
+                const bool contact = collision_contact_force(*tv, q, blink, platform, res);
+                if (pass == 0) {
+                    // The contact-flag dispatch runs whether or not the query
+                    // produced force — a pure seat/zone touch still latches.
+                    // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
+                    if ((res.flags & 0x1u) != 0 && platform.valid) platform_entity = ch;
+                    apply_touch_flags(ent, res.flags, health, is_authority);
                 }
+                if (!contact) continue;
                 if (pass == 0) {
                     // Down-force suppression: a mostly-vertical negative force is
                     // dropped (standing pressure, not a wall). [orig: @ 0x4b3010]
@@ -1068,8 +1166,6 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     pass_force[1] -= f[1];
                     pass_force[2] -= f[2];
                     pass_contact = true;
-                    if ((res.flags & 0x1u) != 0 && platform.valid) platform_entity = ch;
-                    apply_touch_flags(ent, res.flags, health, is_authority);
                 } else {
                     int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
                     if (f[2] < 0) {
@@ -1104,7 +1200,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         }
     }
 
-    // Apply the push-out. [orig: @ 0x4b3746-0x4b375a]
+    // Apply the push-out; a net push resets the idle skip counter. [orig:
+    // @ 0x4b3746-0x4b375a; pad_370[3] = 0 @ 0x4b3773]
+    if (total_force[0] != 0 || total_force[1] != 0 || total_force[2] != 0)
+        state.skip_counter = 0;
     pos[0] += total_force[0];
     pos[1] += total_force[1];
     pos[2] += total_force[2];
@@ -1136,22 +1235,36 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // [orig: @ 0x4b3a77-0x4b3aa1 — the dragger/carry anim states skip repulsion]
     const bool repulse_exempt_state = anim_state_id == 27 || anim_state_id == 137 ||
                                       anim_state_id == 138 || anim_state_id == 139;
-    if (!had_model_contact && !repulse_exempt_state) {
-        const int32_t my_radius = 0x10000; // (D-COL-3)
+    // [orig: @ 0x4b3aac — Flags 0x43 (dead/hidden/carried) skips repulsion;
+    // @ 0x4b3aba — Flags 0x20 widens the radius by 2.0u]
+    const bool repulse_exempt_flags = ent != nullptr && (ent->flags & 0x43u) != 0;
+    if (!had_model_contact && !repulse_exempt_state && !repulse_exempt_flags) {
+        int32_t my_radius = 0x10000; // [orig: entity boundRadius] (D-COL-3)
+        if (ent != nullptr && (ent->flags & 0x20u) != 0) my_radius += 0x20000;
         for (const PersonSlot &p : persons_) {
             if (p.h == source) continue;
             const int32_t threshold = 30 * (my_radius + p.radius) / 100;
+            // Snapshot positions for the coarse reject... [orig: the g_PersonProx*
+            // table reads @ 0x4b3b07-0x4b3b74]
             const int32_t ddx = p.x - pos[0];
             const int32_t ddy = p.y - pos[1];
             const int32_t ddz = p.z - pos[2];
             if (abs32(ddx) > threshold || abs32(ddy) > threshold || abs32(ddz) > threshold)
                 continue;
             if (vec_len_ftol(ddx, ddy, 0) > threshold) continue;
-            const int32_t dist = vec_len_ftol(pos[0] - p.x, pos[1] - p.y, 0);
+            // ...then the LIVE entity for the second distance and the push, and
+            // the dead/hidden peer skip. [orig: g_PersonProxEntity re-read
+            // @ 0x4b3b7a-0x4b3bca, the +36 & 2 skip @ 0x4b3b8d]
+            const Entity *peer = world.registry.get(p.h);
+            if (peer == nullptr || (peer->flags & 2u) != 0) continue;
+            int32_t live[3];
+            entity_pos_fixed(*peer, live);
+            const int32_t dist = vec_len_ftol(pos[0] - live[0], pos[1] - live[1], 0);
             if (dist > threshold) continue;
             const int32_t amount = (threshold - dist) >> 2;
             const int32_t ang = static_cast<int32_t>(
-                std::atan2(static_cast<double>(pos[1] - p.y), static_cast<double>(pos[0] - p.x)) *
+                std::atan2(static_cast<double>(pos[1] - live[1]),
+                           static_cast<double>(pos[0] - live[0])) *
                 kBamPerRadian);
             const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
             const DirTable &t = dir_table();
@@ -1172,7 +1285,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const int32_t ground =
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
     pos[2] = saved_z;
-    if (ent != nullptr && !platform_entity.valid()) ent->ground_target = ground_hit;
+    // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
+    // even a same-resolve platform latch (which normally re-hits the platform).
+    // [orig: the unconditional +0x28 store in
+    // Entity_RaycastGroundHeightAndObject @ 0x414370]
+    if (ent != nullptr) ent->ground_target = ground_hit;
 
     state.prev_pos[0] = pos[0];
     state.prev_pos[1] = pos[1];
@@ -1244,7 +1361,9 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
 void CollisionWorld::apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health,
                                        bool is_authority) {
     if (ent == nullptr || flags == 0) return;
-    if (is_authority) {
+    // Hurt damage is authority-only AND gated off for Flags 0x4000000 entities.
+    // [orig: the is_authority + (Flags & 0x4000000) == 0 wrap @ 0x4b3139-0x4b3148]
+    if (is_authority && (ent->flags & 0x4000000u) == 0) {
         // Hurt-volume damage tiers. [orig: @ 0x4b317b-0x4b31d7 — -1 / -6 / -50 HP]
         if ((flags & 0x40u) != 0 && health > 0) health = static_cast<int16_t>(health - 1);
         if ((flags & 0x80u) != 0 && health > 0) health = static_cast<int16_t>(health - 6);

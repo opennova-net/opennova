@@ -801,7 +801,8 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
-                inf.is_local_player, is_authority, logic_tick, inf.anim_state, e.health);
+                inf.is_local_player, is_authority, logic_tick, inf.anim_state,
+                infantry_anim_flags(inf.anim_state), e.health);
         } else {
             foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
         }
