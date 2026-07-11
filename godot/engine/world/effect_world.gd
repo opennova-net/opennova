@@ -260,7 +260,11 @@ func _spawn_interned(handle: int, position: Vector3, orientation: Vector3) -> in
 		emitter.seed = 1 + ((_spawn_serial * 17 + i) % 1023)
 		emitter.set_tables(_tables)
 		if _texture_provider.is_valid():
-			emitter.texture_provider = _texture_provider
+			# Call the setter: texture_provider is bound as set/get methods without a
+			# registered property, so property-style assignment raises "Invalid
+			# assignment ... of type 'Callable'" and the emitter silently loses its
+			# textures (the muzzle-flash-invisible bug).
+			emitter.set_texture_provider(_texture_provider)
 		emitter.def = def
 		add_child(emitter)
 		emitter.global_position = position

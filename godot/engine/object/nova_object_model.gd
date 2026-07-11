@@ -608,8 +608,22 @@ func _build_skeleton() -> void:
 	_skeleton.name = "Skeleton3D"
 	add_child(_skeleton)
 	var bones: Array = _skeletal.get_skeleton_bones()
-	for b in bones:
-		_skeleton.add_bone(String((b as Dictionary).get("name", "bone")))
+	# The rig is INDEX-driven (the model bone table pairs channels/parts by row —
+	# net-re §5.40; empty or duplicate row names are legal in shipped models, e.g.
+	# the REVX M82_1st carries unnamed rows). Godot's Skeleton3D refuses empty/
+	# duplicate/':'/'/' names, and a refused add_bone SHIFTS every later index —
+	# the whole rig past the first bad row then binds to the wrong bones. Sanitize
+	# to unique placeholders so row i is ALWAYS bone i.
+	var used := {}
+	for i in range(bones.size()):
+		var n := String((bones[i] as Dictionary).get("name", "")).strip_edges()
+		n = n.replace(":", "_").replace("/", "_")
+		if n.is_empty():
+			n = "bone_%d" % i
+		if used.has(n):
+			n = "%s_%d" % [n, i]
+		used[n] = true
+		_skeleton.add_bone(n)
 	for i in range(bones.size()):
 		var bd: Dictionary = bones[i]
 		var parent := int(bd.get("parent_index", -1))
