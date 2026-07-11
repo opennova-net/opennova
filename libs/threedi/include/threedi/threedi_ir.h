@@ -472,9 +472,28 @@ THREEDI_EXPORT void threedi_ir_free(ThreediModelIR *ir);
 
 // Return 1 when every collision volume is safe for runtime convex queries:
 // backing arrays are present, each volume owns a non-empty plane window wholly
-// inside `planes`, and any object index names an existing collision object (or
-// is -1 for the legacy ungrouped form). Return 0 for a null or malformed block.
-THREEDI_EXPORT int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision *collision);
+// inside the plane array, and any object index names an existing collision object
+// (or is -1 for the legacy ungrouped form). Return 0 for a null or malformed block.
+// This is header-local so validation does not expand the stable shared-library ABI.
+static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision *collision) {
+    if (!collision) return 0;
+    if (collision->volume_count != 0 && !collision->volumes) return 0;
+    if (collision->plane_count != 0 && !collision->planes) return 0;
+    if (collision->object_count != 0 && !collision->objects) return 0;
+
+    for (size_t i = 0; i < collision->volume_count; ++i) {
+        const ThreediIRCollisionVolume *volume = &collision->volumes[i];
+        if (volume->plane_start < 0 || volume->plane_count <= 0) return 0;
+        const size_t start = (size_t)volume->plane_start;
+        const size_t count = (size_t)volume->plane_count;
+        if (start > collision->plane_count ||
+            count > collision->plane_count - start) return 0;
+        if (volume->object_index < -1) return 0;
+        if (volume->object_index >= 0 &&
+            (size_t)volume->object_index >= collision->object_count) return 0;
+    }
+    return 1;
+}
 
 // Convert Modern (3DI3) model to IR
 // Returns 0 on success, -1 on error

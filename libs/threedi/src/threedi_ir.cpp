@@ -13,25 +13,6 @@ void threedi_ir_init(ThreediModelIR *ir) {
     ir->collision_lod = -1;
 }
 
-int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision *collision) {
-    if (!collision) return 0;
-    if (collision->volume_count != 0 && !collision->volumes) return 0;
-    if (collision->plane_count != 0 && !collision->planes) return 0;
-    if (collision->object_count != 0 && !collision->objects) return 0;
-
-    for (size_t i = 0; i < collision->volume_count; ++i) {
-        const ThreediIRCollisionVolume *volume = &collision->volumes[i];
-        if (volume->plane_start < 0 || volume->plane_count <= 0) return 0;
-        const size_t start = (size_t)volume->plane_start;
-        const size_t count = (size_t)volume->plane_count;
-        if (start > collision->plane_count || count > collision->plane_count - start) return 0;
-        if (volume->object_index < -1) return 0;
-        if (volume->object_index >= 0 &&
-            (size_t)volume->object_index >= collision->object_count) return 0;
-    }
-    return 1;
-}
-
 static void threedi_ir_lod_free(ThreediIRLod *lod) {
     if (!lod) return;
     free(lod->vertices);
