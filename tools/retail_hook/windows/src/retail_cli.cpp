@@ -124,10 +124,11 @@ InjectorCliResult parse_injector_cli(
             L"--game-dir, --role, --pipe, --run-id, --stream-id, "
             L"--scenario, --mission, and -- are required");
     }
-    const std::vector<std::wstring> expected{L"/w", L"/exp", L"revx02"};
+    const std::vector<std::wstring> expected{
+        L"/w", L"/exp", L"jox01", L"/MANY"};
     if (result.options.game_arguments != expected) {
         return fail<InjectorCliResult>(
-            L"game arguments must be exactly: /w /exp revx02");
+            L"game arguments must be exactly: /w /exp jox01 /MANY");
     }
     return result;
 }

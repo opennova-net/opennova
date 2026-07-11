@@ -18,6 +18,13 @@ assert_contains() {
     fail "expected output to contain: $needle"
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  [[ "$haystack" != *"$needle"* ]] ||
+    fail "expected output not to contain: $needle"
+}
+
 run_dry() {
   RETAIL_PARITY_ENV_FILE="$tmp/retail-parity.env" \
   RETAIL_PARITY_RUN_ID="test-run" \
@@ -59,25 +66,29 @@ assert_contains "$validate" '--role retail-client'
 assert_contains "$validate" '--run-id test-run --stream-id retail-host'
 assert_contains "$validate" '--run-id test-run --stream-id retail-client'
 assert_contains "$validate" '--scenario player-combat-loop --mission ASH_G3D.bms'
-assert_contains "$validate" '-- /w /exp revx02'
+assert_contains "$validate" '--role retail-host --pipe opennova-retail-parity-test-run-baseline --run-id test-run --stream-id retail-host --scenario player-combat-loop --mission ASH_G3D.bms -- /w /exp jox01 /MANY'
+assert_contains "$validate" '--role retail-client --pipe opennova-retail-parity-test-run-baseline --run-id test-run --stream-id retail-client --scenario player-combat-loop --mission ASH_G3D.bms -- /w /exp jox01 /MANY'
 assert_contains "$validate" 'ROLE_SET=candidate TOPOLOGY=opennova-host+hooked-client'
 assert_contains "$validate" 'GUIDE_ACTOR=retail-client'
 assert_contains "$validate" 'GUIDE_STEP=idle-at-spawn'
 assert_contains "$validate" 'GUIDE_STEP=move-stance-look'
 assert_contains "$validate" 'GUIDE_STEP=aim-fire-reload'
 assert_contains "$validate" 'OPENNOVA_RESOURCE_DIR=C:\Games\Joint Operations'
+assert_contains "$validate" 'MSYS2_ARG_CONV_EXCL=*'
 assert_contains "$validate" 'OPENNOVA_PARITY_ROLE=opennova-host'
 assert_contains "$validate" 'OPENNOVA_PARITY_STREAM_ID=opennova-host'
 assert_contains "$validate" 'OPENNOVA_PARITY_RUN_ID=test-run'
 assert_contains "$validate" 'OPENNOVA_PARITY_BUILD_ID=opennova-'
 assert_contains "$validate" 'OPENNOVA_PARITY_SCENARIO=player-combat-loop'
 assert_contains "$validate" 'OPENNOVA_PARITY_TITLE=joint-operations'
-assert_contains "$validate" 'OPENNOVA_PARITY_EXPANSION=revx02'
+assert_contains "$validate" 'OPENNOVA_PARITY_EXPANSION=jox01'
 assert_contains "$validate" 'OPENNOVA_PARITY_MISSION=ASH_G3D.bms'
 assert_contains "$validate" 'OPENNOVA_PARITY_TRACE=Z:\fixture\traces\player-combat-loop\test-run\candidate.ontrace'
 assert_contains "$validate" 'NW_LAN_HOST=ASH_G3D.bms'
 assert_contains "$validate" 'C:\Tools\Godot\Godot.exe --path'
-assert_contains "$validate" '-- /w /exp revx02'
+assert_contains "$validate" '-- /w /exp jox01'
+godot_launch="$(printf '%s\n' "$validate" | grep 'C:\\Tools\\Godot\\Godot.exe --path' | head -n 1)"
+assert_not_contains "$godot_launch" '/MANY'
 
 msys="$(
   RETAIL_PARITY_ENV_FILE="$tmp/retail-parity.env" \
@@ -153,7 +164,7 @@ pcapng="$(run_dry export-pcapng candidate.ontrace candidate.pcapng)"
 assert_contains "$pcapng" 'opennova_parity_tool.exe export-pcapng candidate.ontrace candidate.pcapng'
 
 writable="$(run_dry --allow-writes retail)"
-assert_contains "$writable" '--pipe opennova-retail-parity-test-run-baseline --run-id test-run --stream-id retail-host --scenario player-combat-loop --mission ASH_G3D.bms --allow-writes -- /w /exp revx02'
+assert_contains "$writable" '--pipe opennova-retail-parity-test-run-baseline --run-id test-run --stream-id retail-host --scenario player-combat-loop --mission ASH_G3D.bms --allow-writes -- /w /exp jox01 /MANY'
 assert_contains "$writable" 'GUIDE_WAIT=baseline'
 
 standalone_candidate="$(run_dry opennova)"

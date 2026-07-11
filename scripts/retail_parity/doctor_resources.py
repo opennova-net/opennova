@@ -183,7 +183,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--game-root", required=True, type=Path)
     parser.add_argument("--expected-sha", required=True)
-    parser.add_argument("--expansion", default="revx02")
+    parser.add_argument("--expansion", default="jox01")
     parser.add_argument("--mission", required=True)
     return parser.parse_args()
 

@@ -484,7 +484,7 @@ int wmain(int argc, wchar_t** argv) {
                L"--game-dir <dir> --role <retail-host|retail-client> "
                L"--pipe <name> --run-id <id> --stream-id <id> "
                L"--scenario <name> --mission <name> [--allow-writes] "
-               L"-- /w /exp revx02\n";
+               L"-- /w /exp jox01 /MANY\n";
     };
     const auto parsed =
         opennova::retail_hook::windows::parse_injector_cli(arguments);

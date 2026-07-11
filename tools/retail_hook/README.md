@@ -45,18 +45,25 @@ The default `validate` run is the `player-combat-loop` scenario on
 1. Baseline: retail host plus hooked retail client.
 2. Candidate: OpenNova host plus the same hooked retail client.
 
-Both retail roles are launched with exactly `/w /exp revx02`. For the candidate
-leg the wrapper sets `OPENNOVA_RESOURCE_DIR`, `OPENNOVA_PARITY_PIPE`,
+Both retail roles are launched with exactly `/w /exp jox01 /MANY`.
+`/MANY` is the pinned executable's built-in bypass for its `FindWindow`
+singleton check, which is required to run the retail host and client together.
+It is not process patching: the wrapper and injector pass the witnessed switch
+through unchanged. For the candidate leg the OpenNova process deliberately
+remains `/w /exp jox01`, without the retail-only switch. The wrapper sets
+`OPENNOVA_RESOURCE_DIR`, `OPENNOVA_PARITY_PIPE`,
 `OPENNOVA_PARITY_ROLE`, `OPENNOVA_PARITY_STREAM_ID`,
 `OPENNOVA_PARITY_RUN_ID`, `OPENNOVA_PARITY_BUILD_ID`,
 `OPENNOVA_PARITY_SCENARIO`, `OPENNOVA_PARITY_TITLE`,
 `OPENNOVA_PARITY_EXPANSION`, `OPENNOVA_PARITY_MISSION`,
 `OPENNOVA_PARITY_TRACE`, and `NW_LAN_HOST`, then starts
-`$GODOT_BIN --path godot -- /w /exp revx02`. An empty build-id override uses
+`$GODOT_BIN --path godot -- /w /exp jox01`. An empty build-id override uses
 the wrapper's commit-derived `opennova-<short-sha>` value (or
 `opennova-worktree` when Git provenance is unavailable); the runtime's
 `opennova-godot-worktree` fallback is only for direct invocation outside the
-wrapper. The wrapper pauses after each leg so
+wrapper. The Git Bash boundary disables MSYS argument rewriting only for the
+native injector and Godot launches, preserving those slash-prefixed arguments
+verbatim. The wrapper pauses after each leg so
 the operator can perform the scenario and close both game windows before the
 trace is finalized. Override the defaults with `--scenario` and `--mission`.
 
@@ -74,8 +81,8 @@ way to audit the exact commands before a live run.
 
 `doctor` fails closed before a live launch. It hashes the configured
 `Jointops.exe` and requires the supported SHA-256 above, verifies
-`expansion/revx02/revx02.pff`, and resolves the selected mission through the
-packed retail mount order: `revx02L.pff`, `revx02.pff`, then the applicable base
+`expansion/jox01/jox01.pff`, and resolves the selected mission through the
+packed retail mount order: `jox01L.pff`, `jox01.pff`, then the applicable base
 `language.pff`, `localres.pff`, and `resource.pff`. Successful mission output
 names the source archive and path. Because the exact launch omits `/d`, a loose
 BMS that is absent from those archives is reported missing with
@@ -86,7 +93,7 @@ mission is packed.
 
 | Command | Behavior |
 | --- | --- |
-| `doctor` | Check tools, configured paths, retail SHA-256, revx02, and packed mission reachability. |
+| `doctor` | Check tools, configured paths, retail SHA-256, jox01, and packed mission reachability. |
 | `setup` | Create the local environment template, once. |
 | `build` | Build the Win32 hook/injector/inspector, parity tool, and Godot extension. |
 | `test` | Run Bash syntax/CLI tests plus focused native parity tests. |
@@ -165,7 +172,7 @@ interfaces verbatim:
 
 ```text
 retail_parity_inspector.exe --pipe <name> --trace <bundle.ontrace> --scenario <name> --role-set <baseline|candidate>
-retail_hook_injector.exe --game-dir <dir> --role <retail-host|retail-client> --pipe <name> --run-id <id> --stream-id <id> --scenario <name> --mission <name> [--allow-writes] -- /w /exp revx02
+retail_hook_injector.exe --game-dir <dir> --role <retail-host|retail-client> --pipe <name> --run-id <id> --stream-id <id> --scenario <name> --mission <name> [--allow-writes] -- /w /exp jox01 /MANY
 opennova_parity_tool validate <bundle.ontrace>
 opennova_parity_tool dump <bundle.ontrace> [output.txt]
 opennova_parity_tool export-pcapng <bundle.ontrace> <output.pcapng>

@@ -87,6 +87,12 @@ write_exit_script() {
   chmod +x "$path"
 }
 
+write_msys_guard() {
+  local path="$1" target="$2"
+  printf '%s\n' '#!/usr/bin/env bash' '[[ "${MSYS2_ARG_CONV_EXCL:-}" == "*" ]] || exit 65' "exec \"$target\" \"\$@\"" >"$path"
+  chmod +x "$path"
+}
+
 write_long_inspector() {
   local path="$1" marker="$2" pid_file="$3"
   printf '%s\n' \
@@ -147,6 +153,9 @@ printf '%s\n' \
   'fi' \
   'exit 31' >"$stateful_injector"
 chmod +x "$stateful_injector"
+raw_stateful_injector="$stateful_injector"
+stateful_injector="$tmp/stateful-injector-guard.sh"
+write_msys_guard "$stateful_injector" "$raw_stateful_injector"
 
 sleep 30 &
 unrelated_pid=$!
@@ -183,6 +192,9 @@ printf '%s\n' \
   "printf '%s\\n' \"\$game_pid\" >>\"$interrupt_game_pid_file\"" \
   'printf '\''JO_PROCESS_ID=%s\n'\'' "$game_pid"' >"$interrupt_injector"
 chmod +x "$interrupt_injector"
+raw_interrupt_injector="$interrupt_injector"
+interrupt_injector="$tmp/interrupt-injector-guard.sh"
+write_msys_guard "$interrupt_injector" "$raw_interrupt_injector"
 fifo="$tmp/operator-input"
 mkfifo "$fifo"
 exec 9<>"$fifo"

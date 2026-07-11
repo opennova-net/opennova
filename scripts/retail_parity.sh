@@ -300,6 +300,7 @@ run_with_env_background() {
   shift 5
   if ((dry_run)); then
     print_command 'DRY_RUN_BACKGROUND' \
+      "MSYS2_ARG_CONV_EXCL=*" \
       "OPENNOVA_RESOURCE_DIR=$resource_dir" \
       "OPENNOVA_PARITY_PIPE=$pipe" \
       "OPENNOVA_PARITY_ROLE=$role" \
@@ -308,13 +309,13 @@ run_with_env_background() {
       "OPENNOVA_PARITY_BUILD_ID=$opennova_build_id" \
       "OPENNOVA_PARITY_SCENARIO=$scenario" \
       "OPENNOVA_PARITY_TITLE=joint-operations" \
-      "OPENNOVA_PARITY_EXPANSION=revx02" \
+      "OPENNOVA_PARITY_EXPANSION=jox01" \
       "OPENNOVA_PARITY_MISSION=$hosted_mission" \
       "OPENNOVA_PARITY_TRACE=$trace" \
       "NW_LAN_HOST=$hosted_mission" "$@"
     last_background_pid="dry-run"
   else
-    env \
+    env "MSYS2_ARG_CONV_EXCL=*" \
       "OPENNOVA_RESOURCE_DIR=$resource_dir" \
       "OPENNOVA_PARITY_PIPE=$pipe" \
       "OPENNOVA_PARITY_ROLE=$role" \
@@ -323,7 +324,7 @@ run_with_env_background() {
       "OPENNOVA_PARITY_BUILD_ID=$opennova_build_id" \
       "OPENNOVA_PARITY_SCENARIO=$scenario" \
       "OPENNOVA_PARITY_TITLE=joint-operations" \
-      "OPENNOVA_PARITY_EXPANSION=revx02" \
+      "OPENNOVA_PARITY_EXPANSION=jox01" \
       "OPENNOVA_PARITY_MISSION=$hosted_mission" \
       "OPENNOVA_PARITY_TRACE=$trace" \
       "NW_LAN_HOST=$hosted_mission" "$@" &
@@ -436,19 +437,19 @@ command_doctor() {
 
   if ((dry_run)); then
     printf 'CHECK=JO_EXECUTABLE_SHA256 STATUS=dry-run EXPECTED=%s\n' "$expected_jo_sha256"
-    printf 'CHECK=EXPANSION STATUS=dry-run NAME=revx02\n'
+    printf 'CHECK=EXPANSION STATUS=dry-run NAME=jox01\n'
     printf 'CHECK=MISSION STATUS=dry-run NAME=%s SOURCE=packed\n' "$(basename "$mission")"
   elif [[ -n "$game_bash" && -f "$game_bash" ]] && command -v python >/dev/null 2>&1; then
     if ! python "$root/scripts/retail_parity/doctor_resources.py" \
       --game-root "$(dirname "$game_bash")" \
       --expected-sha "$expected_jo_sha256" \
-      --expansion revx02 \
+      --expansion jox01 \
       --mission "$mission"; then
       ((failures += 1))
     fi
   else
     printf 'CHECK=JO_EXECUTABLE_SHA256 STATUS=unavailable EXPECTED=%s\n' "$expected_jo_sha256" >&2
-    printf 'CHECK=EXPANSION STATUS=unavailable NAME=revx02\n' >&2
+    printf 'CHECK=EXPANSION STATUS=unavailable NAME=jox01\n' >&2
     printf 'CHECK=MISSION STATUS=unavailable NAME=%s SOURCE=packed\n' "$(basename "$mission")" >&2
   fi
   ((failures == 0)) || return 64
@@ -525,12 +526,12 @@ start_retail_role() {
     --run-id "$run_id" --stream-id "$role"
     --scenario "$scenario" --mission "$mission")
   ((allow_writes)) && args+=(--allow-writes)
-  args+=(-- /w /exp revx02)
+  args+=(-- /w /exp jox01 /MANY)
   if ((dry_run)); then
     run_command "${args[@]}"
     return
   fi
-  if output="$("${args[@]}")"; then status=0
+  if output="$(MSYS2_ARG_CONV_EXCL='*' "${args[@]}")"; then status=0
   else status=$?
   fi
   [[ -z "$output" ]] || printf '%s\n' "$output"
@@ -589,7 +590,7 @@ command_opennova() {
   godot_project_win="$(to_windows_path "$root/godot")"
   trace_win="$(to_windows_path "$candidate_trace")"
   run_with_env_background "$resource_dir" "$candidate_pipe" opennova-host "$mission" "$trace_win" \
-    "$godot_command" --path "$godot_project_win" -- /w /exp revx02
+    "$godot_command" --path "$godot_project_win" -- /w /exp jox01
   start_retail_role retail-client "$candidate_pipe"
   last_background_pid="$inspector_pid"
   remember_trace candidate "$candidate_trace"

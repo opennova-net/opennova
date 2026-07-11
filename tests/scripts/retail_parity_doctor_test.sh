@@ -23,16 +23,16 @@ dry="$(
     bash "$cli" --dry-run doctor
 )"
 assert_contains "$dry" "CHECK=JO_EXECUTABLE_SHA256 STATUS=dry-run EXPECTED=$expected_sha"
-assert_contains "$dry" 'CHECK=EXPANSION STATUS=dry-run NAME=revx02'
+assert_contains "$dry" 'CHECK=EXPANSION STATUS=dry-run NAME=jox01'
 assert_contains "$dry" 'CHECK=MISSION STATUS=dry-run NAME=ASH_G3D.bms'
 
 game="$tmp/game-root"
-expansion="$game/expansion/revx02"
+expansion="$game/expansion/jox01"
 mkdir -p "$expansion"
 printf 'synthetic executable, intentionally not retail\n' >"$game/Jointops.exe"
 printf 'synthetic Godot marker\n' >"$tmp/Godot.exe"
 
-python - "$expansion/revx02.pff" <<'PY'
+python - "$expansion/jox01.pff" <<'PY'
 import struct
 import sys
 
@@ -67,9 +67,9 @@ fixture_status=$?
 set -e
 [[ "$fixture_status" -eq 64 ]] || fail "wrong-hash doctor exited $fixture_status, expected 64"
 assert_contains "$fixture" "CHECK=JO_EXECUTABLE_SHA256 STATUS=mismatch EXPECTED=$expected_sha"
-assert_contains "$fixture" 'CHECK=EXPANSION STATUS=ok NAME=revx02'
+assert_contains "$fixture" 'CHECK=EXPANSION STATUS=ok NAME=jox01'
 assert_contains "$fixture" 'CHECK=MISSION STATUS=ok NAME=ASH_G3D.bms SOURCE=packed'
-assert_contains "$fixture" 'ARCHIVE=revx02.pff'
+assert_contains "$fixture" 'ARCHIVE=jox01.pff'
 
 python - "$game/resource.pff" <<'PY'
 import struct
@@ -121,7 +121,7 @@ set -e
 assert_contains "$loose_only" 'CHECK=MISSION STATUS=missing NAME=LOOSE_ONLY.bms SOURCE=packed'
 assert_contains "$loose_only" 'DETAIL=loose-only-requires-/d'
 
-mv "$expansion/revx02.pff" "$expansion/revx02.pff.fixture-away"
+mv "$expansion/jox01.pff" "$expansion/jox01.pff.fixture-away"
 set +e
 missing_archive="$(
   RETAIL_PARITY_ENV_FILE="$tmp/missing.env" \
@@ -132,6 +132,6 @@ missing_archive="$(
 missing_archive_status=$?
 set -e
 [[ "$missing_archive_status" -eq 64 ]] || fail "missing-archive doctor exited $missing_archive_status, expected 64"
-assert_contains "$missing_archive" 'CHECK=EXPANSION STATUS=missing-archive NAME=revx02'
+assert_contains "$missing_archive" 'CHECK=EXPANSION STATUS=missing-archive NAME=jox01'
 
 printf 'retail_parity_doctor_test: OK\n'

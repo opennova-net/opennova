@@ -26,7 +26,7 @@ int main() {
             L"--stream-id", L"retail-host-42",
             L"--scenario", L"revx02-smoke",
             L"--mission", L"training-range",
-            L"--", L"/w", L"/exp", L"revx02",
+            L"--", L"/w", L"/exp", L"jox01", L"/MANY",
         });
     CHECK(host);
     CHECK(host.options.role == windows::RetailRole::host);
@@ -36,7 +36,8 @@ int main() {
     CHECK(host.options.scenario == L"revx02-smoke");
     CHECK(host.options.mission == L"training-range");
     CHECK(host.options.game_arguments ==
-          std::vector<std::wstring>({L"/w", L"/exp", L"revx02"}));
+          std::vector<std::wstring>(
+              {L"/w", L"/exp", L"jox01", L"/MANY"}));
 
     const windows::InjectorCliResult writable =
         windows::parse_injector_cli({
@@ -49,11 +50,25 @@ int main() {
             L"--stream-id", L"retail-client-42",
             L"--scenario", L"revx02-smoke",
             L"--mission", L"training-range",
-            L"--", L"/w", L"/exp", L"revx02",
+            L"--", L"/w", L"/exp", L"jox01", L"/MANY",
         });
     CHECK(writable);
     CHECK(writable.options.role == windows::RetailRole::client);
     CHECK(writable.options.allow_writes);
+
+    const windows::InjectorCliResult missing_many =
+        windows::parse_injector_cli({
+            L"retail_hook_injector.exe",
+            L"--game-dir", L"C:\\Games\\Joint Operations",
+            L"--role", L"retail-client",
+            L"--pipe", L"parity-retail-client",
+            L"--run-id", L"run-42",
+            L"--stream-id", L"retail-client-42",
+            L"--scenario", L"revx02-smoke",
+            L"--mission", L"training-range",
+            L"--", L"/w", L"/exp", L"jox01",
+        });
+    CHECK(!missing_many);
 
     const windows::InjectorCliResult wrong_forwarding =
         windows::parse_injector_cli({
@@ -65,7 +80,7 @@ int main() {
             L"--stream-id", L"retail-host-42",
             L"--scenario", L"revx02-smoke",
             L"--mission", L"training-range",
-            L"--", L"/exp", L"revx02",
+            L"--", L"/exp", L"jox01", L"/MANY",
         });
     CHECK(!wrong_forwarding);
 
@@ -78,7 +93,7 @@ int main() {
             L"--run-id", L"run-42",
             L"--stream-id", L"retail-host-42",
             L"--scenario", L"revx02-smoke",
-            L"--", L"/w", L"/exp", L"revx02",
+            L"--", L"/w", L"/exp", L"jox01", L"/MANY",
         });
     CHECK(!incomplete_metadata);
 

@@ -106,7 +106,7 @@ struct RetailCaptureAgent::Impl {
         result.started_unix_ns = unix_time_ns();
         result.identity = identity;
         result.title = "joint-operations";
-        result.expansion = "revx02";
+        result.expansion = "jox01";
         result.mission = utf8(config.mission);
         return result;
     }
