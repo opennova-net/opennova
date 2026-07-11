@@ -205,14 +205,22 @@ private:
 	};
 
 	// Per pooled MODEL draw node: what its MultiMesh currently holds, so
-	// stable draws skip the instance re-upload entirely. The material is the
-	// node's own (per-draw alpha ref/wind phase are witnessed per-draw
-	// state); it is created once per node from the slot base material.
+	// stable draws skip the instance re-upload entirely. Nodes are KEYED by
+	// (slot, tile_key) — the retained model the original's tile cache carries
+	// [orig: the 1000-entry per-def cache @ 0x601f50: entries own their tile's
+	// content across frames; only the 8-frame-stagger regeneration rewrites
+	// one]. Pairing draw nodes to batches by list ORDER re-uploaded whole
+	// MultiMeshes whenever the batch order shifted (anchors moving between
+	// quadrants) — the 76k-uploads/15.8 ms-frame churn the perf probe caught.
+	// The material is the node's own (per-draw alpha ref/wind phase are
+	// witnessed per-draw state); created once per node from the slot base.
 	struct ModelDrawNodeState {
 		int slot = -1;
 		uint32_t tile_key = 0xFFFFFFFFu;
 		int32_t generation = -1;
 		int count = 0;
+		uint64_t last_used_frame = 0;  // LRU reuse stamp (0 = never used)
+		bool in_use = false;           // used by a batch this dispatch
 		Ref<ShaderMaterial> material;
 	};
 
@@ -257,6 +265,9 @@ private:
 	std::vector<ModelDrawBatch> model_draw_batches_;
 	std::vector<MultiMeshInstance3D *> model_draw_nodes_;
 	std::vector<ModelDrawNodeState> model_draw_node_states_;
+	// (slot << 32) | tile_key -> node index: the keyed pool lookup.
+	std::unordered_map<uint64_t, size_t> model_node_by_key_;
+	uint64_t model_draw_frame_ = 0;
 	PackedVector3Array model_anchors_;
 	float model_anchor_range_ = 512.0f;
 	float model_view_tan_half_h_ = 0.0f;  // 0 = frustum gate off
@@ -311,6 +322,7 @@ private:
 	void _dispatch_model_tier(const Transform3D &view_xform, const Dictionary &defs_by_match);
 	void _update_model_draw_nodes();
 	void _clear_model_draw_nodes();
+	size_t _acquire_model_draw_node(uint64_t p_key);
 	void _clear_far_cells();
 	// Source-model -> Godot yaw mapping: rotY(yaw + pi/2), witnessed at the
 	// MODEL draw transform. FAR owns a separate emitter mapping.

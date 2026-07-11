@@ -1171,12 +1171,67 @@ void NovaFoliageDispatcher::_clear_model_draw_nodes() {
 	}
 	model_draw_nodes_.clear();
 	model_draw_node_states_.clear();
+	model_node_by_key_.clear();
+}
+
+// Acquire the pooled draw node for (slot, tile_key): the keyed lookup first, then
+// LRU reuse of a node idle this dispatch, then a fresh node. Mirrors the retained
+// ownership of the original's tile cache — a tile's GPU content survives while its
+// cache entry lives, so steady-state dispatches upload NOTHING
+// [orig: Foliage_UpdateModelTiles @ 0x601f50 — hits restamp and draw; only the
+// 8-frame-stagger regeneration or an LRU adoption rewrites an entry].
+size_t NovaFoliageDispatcher::_acquire_model_draw_node(uint64_t p_key) {
+	auto found = model_node_by_key_.find(p_key);
+	if (found != model_node_by_key_.end()) {
+		return found->second;
+	}
+	// LRU among nodes not used this dispatch.
+	size_t reuse = model_draw_nodes_.size();
+	uint64_t oldest = UINT64_MAX;
+	for (size_t i = 0; i < model_draw_node_states_.size(); ++i) {
+		const ModelDrawNodeState &st = model_draw_node_states_[i];
+		if (st.in_use) {
+			continue;
+		}
+		if (st.last_used_frame < oldest) {
+			oldest = st.last_used_frame;
+			reuse = i;
+		}
+	}
+	if (reuse == model_draw_nodes_.size()) {
+		MultiMeshInstance3D *mmi = memnew(MultiMeshInstance3D);
+		mmi->set_name(String("FoliageModelDraw") +
+		              String::num_int64(static_cast<int64_t>(model_draw_nodes_.size())));
+		mmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+		mmi->set_extra_cull_margin(8.0f);
+		add_child(mmi);
+		Ref<MultiMesh> mm;
+		mm.instantiate();
+		mm->set_transform_format(MultiMesh::TRANSFORM_3D);
+		mm->set_use_colors(true);
+		mm->set_use_custom_data(true);
+		mmi->set_multimesh(mm);
+		model_draw_nodes_.push_back(mmi);
+		model_draw_node_states_.push_back(ModelDrawNodeState{});
+	} else {
+		// Steal the idle node: drop its old key mapping so the pool stays 1:1.
+		const ModelDrawNodeState &st = model_draw_node_states_[reuse];
+		if (st.slot >= 0) {
+			model_node_by_key_.erase((static_cast<uint64_t>(static_cast<uint32_t>(st.slot)) << 32) |
+			                         st.tile_key);
+		}
+	}
+	model_node_by_key_[p_key] = reuse;
+	return reuse;
 }
 
 void NovaFoliageDispatcher::_update_model_draw_nodes() {
 	using opennova::foliage::model_instance_hbase;
 
-	size_t node_index = 0;
+	++model_draw_frame_;
+	for (ModelDrawNodeState &st : model_draw_node_states_) {
+		st.in_use = false;
+	}
 
 	for (const ModelDrawBatch &batch : model_draw_batches_) {
 		const int s = batch.slot;
@@ -1192,27 +1247,13 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 			continue;
 		}
 
-		MultiMeshInstance3D *mmi = nullptr;
-		if (node_index < model_draw_nodes_.size()) {
-			mmi = model_draw_nodes_[node_index];
-		} else {
-			mmi = memnew(MultiMeshInstance3D);
-			mmi->set_name(String("FoliageModelDraw") +
-			              String::num_int64(static_cast<int64_t>(node_index)));
-			mmi->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-			mmi->set_extra_cull_margin(8.0f);
-			add_child(mmi);
-			Ref<MultiMesh> mm;
-			mm.instantiate();
-			mm->set_transform_format(MultiMesh::TRANSFORM_3D);
-			mm->set_use_colors(true);
-			mm->set_use_custom_data(true);
-			mmi->set_multimesh(mm);
-			model_draw_nodes_.push_back(mmi);
-			model_draw_node_states_.push_back(ModelDrawNodeState{});
-		}
+		const uint64_t key =
+		    (static_cast<uint64_t>(static_cast<uint32_t>(s)) << 32) | batch.tile_key;
+		const size_t node_index = _acquire_model_draw_node(key);
+		MultiMeshInstance3D *mmi = model_draw_nodes_[node_index];
 		ModelDrawNodeState &state = model_draw_node_states_[node_index];
-		++node_index;
+		state.in_use = true;
+		state.last_used_frame = model_draw_frame_;
 
 		Ref<MultiMesh> mm = mmi->get_multimesh();
 		if (mm.is_null()) {
@@ -1236,6 +1277,9 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 		}
 
 		const int count = static_cast<int>(batch.instances.size());
+		// With keyed nodes, content changes only when the tile's instance list
+		// actually regenerated (the witnessed 8-frame stagger / LRU adoption
+		// bumps generation) or the slot mesh swapped.
 		const bool content_changed = state.slot != s ||
 		                             state.tile_key != batch.tile_key ||
 		                             state.generation != batch.generation ||
@@ -1271,12 +1315,14 @@ void NovaFoliageDispatcher::_update_model_draw_nodes() {
 		}
 	}
 
-	// Keep the live prefix as a stable node pool; hide surplus draws instead
-	// of freeing them so anchor churn does not reallocate nodes every frame.
-	for (size_t i = node_index; i < model_draw_nodes_.size(); ++i) {
-		MultiMeshInstance3D *node = model_draw_nodes_[i];
-		if (node != nullptr && node->is_visible()) {
-			node->set_visible(false);
+	// Hide idle nodes; their content stays valid for reuse when the tile
+	// scrolls back into a quadrant (no reallocation, no re-upload).
+	for (size_t i = 0; i < model_draw_nodes_.size(); ++i) {
+		if (!model_draw_node_states_[i].in_use) {
+			MultiMeshInstance3D *node = model_draw_nodes_[i];
+			if (node != nullptr && node->is_visible()) {
+				node->set_visible(false);
+			}
 		}
 	}
 }
