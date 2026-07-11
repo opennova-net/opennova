@@ -107,6 +107,36 @@ bool test_spawn_records_visual_choices() {
 	return true;
 }
 
+bool test_spawn_pop_scale_ramp() {
+	// The per-particle scale ramp is a SPAWN-POP softener, not whole-life growth:
+	// scale_velocity = 256 / lifetime, so the ramp saturates at 1.0 within
+	// lifetime/256 seconds. A 1/lifetime rate (the prior read) kept every particle
+	// under-sized for its entire life — fire at ~1/3, smoke at ~1/15 — the
+	// invisible-effects bug. [orig: CParticleEmitter_SpawnParticle @ 0x5e7892
+	// flt_7D1D70 (256.0) / age -> +0x34; advance `+0x30 += +0x34 * dt` clamp 1]
+	using namespace opennova::particle;
+	ParticleDef def = make_minimal_def();
+	def.emit_rate = 1.0f;
+	def.emit_burst = 1;
+	def.emit_dur = 5.0f;
+	def.age = 2.0f;  // lifetime 2 s -> full scale after 2/256 s
+	Emitter e;
+	emitter_init(e, &def, {0, 0, 0}, 1);
+	if (!expect(emitter_spawn_one(e), "spawn for the ramp test")) return false;
+	if (!expect(near(e.particles[0].scale_velocity, 256.0f / 2.0f),
+			"scale_velocity = 256 / lifetime [orig: @ 0x5e7892]")) {
+		std::fprintf(stderr, "  got %f\n", e.particles[0].scale_velocity);
+		return false;
+	}
+	emitter_advance(e, 2.0f / 256.0f);  // one full ramp interval
+	if (!expect(e.particles[0].scale >= 1.0f - 1e-4f,
+			"the ramp saturates within lifetime/256 s")) {
+		std::fprintf(stderr, "  got %f\n", e.particles[0].scale);
+		return false;
+	}
+	return true;
+}
+
 bool test_advance_emits() {
 	using namespace opennova::particle;
 	ParticleDef def = make_minimal_def();
@@ -904,6 +934,7 @@ int main() {
 	if (!test_init())                       ++failures;
 	if (!test_manual_spawn())               ++failures;
 	if (!test_spawn_records_visual_choices()) ++failures;
+	if (!test_spawn_pop_scale_ramp())       ++failures;
 	if (!test_advance_emits())              ++failures;
 	if (!test_burst())                      ++failures;
 	if (!test_lifetime_expires())           ++failures;

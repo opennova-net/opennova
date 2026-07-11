@@ -687,6 +687,29 @@ carried here.
 
 ## 8. Open RE work
 
+- **The billboard SIZE formula (2026-07-11, PARTIALLY witnessed — the top open item).**
+  Landed this pass: the per-particle scale ramp is a SPAWN-POP softener —
+  `scale_velocity = 256 / lifetime` (`flt_7D1D70` / age → particle+0x34
+  [orig: CParticleEmitter_SpawnParticle @ 0x5e7892]), saturating at 1.0 within
+  lifetime/256 s; the prior 1/lifetime reading kept every particle under-sized for
+  its whole life (the invisible-effects bug; ctest `test_spawn_pop_scale_ramp`).
+  Still open, witnessed fragments only:
+  - The static-billboard path feeds its matrix helper X = `0.0174533 × graphic+0`,
+    Y = `0.0174533 × graphic+8`, Z = `rotation° × π/180`
+    (`@ 0x5f506e..0x5f508d` — the import is named `D3DXMatrixScaling` but the arg
+    pattern says rotation-Z + XY-size composite; graphic+0/+8 field keys and the
+    1/57.3 factor's meaning are unresolved). The reimpl's
+    `p.scale × def/layer scale × scale_func(t)` draw size is therefore
+    UNVALIDATED against the binary — probe frames still read ~an order small
+    next to expectations for airexp/blacksmoke at 20 u.
+  - `emitter+0x140 = −def z_offset` [orig: CEffectEmitter_Initialize @ 0x5e6349]
+    and the quad CENTER adds `emitter+0x140 × flt_2C06578/7C/80` (per-frame view
+    axis globals from `CParticleManager_BeginFrame @ 0x5ecfe8`)
+    [orig: BuildBillboardQuads @ 0x5e71c9..0x5e720d] — i.e. **z_offset is a
+    camera-ward pull**, not a world-Z add; the reimpl adds it to `position.z`
+    at spawn (divergence, unfixed pending the size grill).
+  - The `256 / scale_velocity × graphic+0x2D0 × scale × −1/64` block
+    (`@ 0x5e6f17..0x5e6f2c`) is the FLIPBOOK frame counter, not size.
 - **fx2tgt target-id record field**: which `.bms` type-6088 record field carries the 1..99
   target number the runtime matches (`WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0`; the
   MED-side picker `Med_ParamTeleportTargetNum @ 0x449b00` lives in `dfx2med.exe`, a different

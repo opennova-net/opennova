@@ -283,8 +283,11 @@ void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, f
 		p.velocity = vec3_rotate_around_axis(p.velocity, axis, angle);
 	}
 
-	// Scale grows from 0 toward 1 over the particle's lifetime
-	// (engine: `*(extra+48) += *(extra+52) * dt` with scale_velocity = 1/age).
+	// The spawn-pop ramp: scale runs 0 -> 1 at 256/lifetime per second — full size
+	// within lifetime/256 s (2-12 ms for typical ages), a pop softener, NOT a
+	// whole-life growth. The prior 1/lifetime read made every particle spend its
+	// entire life under-sized (fire at ~1/3, smoke at ~1/15 — the invisible-effects
+	// bug). (engine: `*(extra+48) += *(extra+52) * dt`, clamp 1.)
 	p.scale += p.scale_velocity * dt;
 	if (p.scale > 1.0f) p.scale = 1.0f;
 
@@ -342,7 +345,9 @@ void emit_one_internal(Emitter &e, const ParticleDef &def) noexcept {
 	p.lifetime = std::max(def.age + emitter_rand_unit(e) * def.age_adj, 1e-3f);
 	p.age = p.lifetime;
 	p.scale = 0.0f;
-	p.scale_velocity = 1.0f / p.lifetime;
+	// [orig: CParticleEmitter_SpawnParticle @ 0x5e7892 — flt_7D1D70 (256.0) / age
+	//  into +0x34; the ramp saturates in lifetime/256 s]
+	p.scale_velocity = 256.0f / p.lifetime;
 	p.rotation = (def.yaw_rot + emitter_rand_unit(e) * def.yaw_rot_adj) * 0.0174533f;
 	p.rotation_rate = (def.roll_rot + emitter_rand_unit(e) * def.roll_rot_adj) * 0.0174533f;
 	p.alpha = static_cast<std::uint8_t>(clampf(def.alpha * 255.0f, 0.0f, 255.0f));
