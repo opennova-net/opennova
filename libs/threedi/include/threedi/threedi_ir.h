@@ -470,6 +470,12 @@ THREEDI_EXPORT void threedi_ir_init(ThreediModelIR *ir);
 // Free all allocations inside an IR structure
 THREEDI_EXPORT void threedi_ir_free(ThreediModelIR *ir);
 
+// Return 1 when every collision volume is safe for runtime convex queries:
+// backing arrays are present, each volume owns a non-empty plane window wholly
+// inside `planes`, and any object index names an existing collision object (or
+// is -1 for the legacy ungrouped form). Return 0 for a null or malformed block.
+THREEDI_EXPORT int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision *collision);
+
 // Convert Modern (3DI3) model to IR
 // Returns 0 on success, -1 on error
 THREEDI_EXPORT int threedi_ir_from_3di3(const struct Threedi3di3 *model, ThreediModelIR *out);

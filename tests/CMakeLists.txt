@@ -47,6 +47,11 @@ target_link_libraries(threedi_userpoint_ir_test PRIVATE opennova_threedi)
 target_include_directories(threedi_userpoint_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_userpoint_ir COMMAND threedi_userpoint_ir_test)
 
+add_executable(threedi_collision_ir_test threedi/collision_ir_test.cpp)
+target_link_libraries(threedi_collision_ir_test PRIVATE opennova_threedi)
+target_include_directories(threedi_collision_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_collision_ir COMMAND threedi_collision_ir_test)
+
 # ADM tests
 foreach(test comment trim_value parse write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)

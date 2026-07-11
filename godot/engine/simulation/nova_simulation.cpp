@@ -351,8 +351,10 @@ namespace {
 // grouping (volumes are sequential per object in the IR conversion). Returns false when
 // the model carries no volumes.
 bool collision_model_from_ir(const ThreediIRCollision *col,
-                             opennova::world::CollisionModel &out) {
-	if (col == nullptr || col->volume_count == 0) return false;
+	                             opennova::world::CollisionModel &out) {
+	if (col == nullptr || col->volume_count == 0 ||
+	    !threedi_ir_collision_is_runtime_safe(col))
+		return false;
 	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * 65536.0)); };
 
 	out.planes.reserve(col->plane_count);
