@@ -626,7 +626,16 @@ SP spawn) filters NOTHING (switch default mask = −1). Per-item enable rides th
 mask bits 5..9; the spin selects **by value** (`SpinList_SelectItemByValue
 @ 0x64ba50`, row 0 on no match); the spin + its label are enabled **only
 in-session** (SP: disabled). ACCEPT gains hotkeys from binding row 177's
-runtime keys (`0x81A468/6A`, writer unwalked).
+runtime keys (`g_useItemBindingKey0/1 @ 0x81A468/6A`, writer still unwalked):
+the on-show clears then re-adds them on the ACCEPT control
+(`CUIWidget_ResetScreenHotkeys @ 0x649ce0`, `CUIWidget_AddScreenHotkey
+@ 0x649e20 -> the screen's key->widget table @ 0x63a8e0`), so the armory-opener
+key doubles as ACCEPT while the screen is up. The opener press must RELEASE
+once first: the open stamps `g_weaponScreenOpenDebounce` `[orig: @ 0x4e0b21]`
+and only the row's KEYUP clears it (`Input_HandleMenuKeyRelease @ 0x4de2d0`).
+PORTED 2026-07-11 (the weapon round): `ArmoryMenuHost.accept_hotkey_edge`
+(armed-on-release debounce; `on_menu_built` = the on-show stamp) routed by
+`NovaArmoryHost._unhandled_key_input` while the overlay is open.
 
 **Control registration** `[orig: WeaponDef_RegisterUICallbacks @ 0x567020 —
 (screen "WEAPON", control, kind, handler, arg) via the shared registrar
@@ -701,8 +710,9 @@ C2S 0x2F / S2C 0x5A submission (the UI stays gated in a network session until
 that authoritative path is exposed), MP class selection, the
 `g_armoryWeaponAvailability` table (mission/S2C/admin-authored), the
 `*_AMMO1_TYPE` round-type cascade + per-ammo-def weight, `*_AMMO2` /
-GRENADE_AMMO1..3, the icon swaps, the ACCEPT hotkeys, the MP scoreboard
-overlay, and the use-item key's non-armory leg. Open questions: the SP-time
+GRENADE_AMMO1..3, the icon swaps, the MP scoreboard overlay, and the use-item
+key's non-armory leg (the ACCEPT hotkeys landed with the weapon round —
+see the on-show section above). Open questions: the SP-time
 value/writer of `g_hostClassAllowMask` (unwalked); the runtime site that stamps
 the shipped default keys into the binding rows (default.key ships in no JO PFF;
 the KeyChart is the defaults witness); the entity Team {1,3}->mask 2 else 1

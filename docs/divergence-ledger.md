@@ -220,7 +220,7 @@ the ref-32 discard was a misport, now deleted (env-tod-re.md #34).
 | D-WPN-6 | The pump covers the LOCAL player's equipped slot only; the original pumps every pool-0 equipped slot + pool-1 unmounted weapons with a live muzzle flash (`WeaponAction_ProcessAllEntities @0x542690`) (net-re §5.62) | A | OPEN (extend with NPC/remote weapon state) | PAR-WORLD |
 | D-WPN-7 | Interim ammo seed: the FSM installs with clip=clipsize + reserve=startrounds from the def; the original resolves ammo through the PLAYER_INFO loadout + S2C 0x5A apply (§5.30/§5.57) (net-re §5.62) | A | OPEN (rides D-PLAYERINFO-1/-11) | PAR-WORLD |
 | D-WPN-8 | FSM↔net uplink unwired: the fired event does not emit C2S 0x06 nor spawn rounds through world::RoundSim, and a joiner's reload_requested does not send C2S 0x25 / await the S2C 0x49 refill (the authority path is complete and zero-latency) (net-re §5.62, §5.16, §5.58) | A | OPEN (rides the npruntime in-match integration) | PAR-WORLD |
-| D-WPN-9 | ADS residuals: the SIGHTS overlay texture draw (DefSightEntry parsed, undrawn), the unscope-on-move consumer site, zoom-level adjust keys (`Player_AdjustWeaponZoomLevel @0x4dbcc0`), the scope-state C2S 0x1D notify, the 7-step interp variant (Field0C&0x200), stance (parentSlot 2/5) + NVG gates (net-re §5.62, §5.41) | A | OPEN (partial — toggle/tpos-ease/FOV/rescope landed) | PAR-WORLD |
+| D-WPN-9 | ADS residuals: zoom-level adjust keys (`Player_AdjustWeaponZoomLevel @0x4dbcc0`), the scope-state C2S 0x1D notify, stance (parentSlot 2/5) + NVG gates, the mid-ease movement reversal + auto-re-raise legs (`@0x4df548`/`@0x4df5ae`/`@0x4df607` — need the engaged/active/hipfire tri-state), the HandGunUp (0x4000000) auto-follow leg (`@0x4de444`, player-flag writer unwalked) (net-re §5.62, §5.41) | A | OPEN (landed: toggle/tpos-ease/FOV/rescope, the SIGHTS card, the 7-step Inset interp, unscope-on-move + the scope-up move refusal + the ForceScoped toggle pin — the weapon round) | PAR-WORLD |
 | D-WPN-10 | Host clip-key lookup was case-SENSITIVE (`NovaSkeletalAnim::find_clip` exact ==) where the original resolves anim names with stricmp (`AnimMap_FindSlotByName @0x40cfa0`, name+5 `anim_` skip): JOTAC-era weapon.def rows author `ANIM_WPN_*` uppercase vs the .adm's lowercase clip keys, so every `auto` delaystart/delayend collapsed to 0 and no weapon-action clip played on JOTAC/RevX02 mounts (JOX's lowercase rows masked it) (net-re §5.62) | A | FIXED 2026-07-10 (`nocasecmp_to`) | PAR-WORLD |
 | D-EVT-1 | Spawn-point activation on fire: fully witnessed (POI/deploy list `0xB76570`, marker @0x452ce0, +0x210/+0x217/+0x218 authoring) — rides the deploy/POI subsystem port | A | WITNESSED-READY-DEFERRED | PAR-WORLD |
 | D-EVT-3 | Residual after the TriggerRelations port (state + evaluators + recounts + alert stamps + damage-site SHOT writes landed): the acquisition/fire-time write quads ride the combat pass, motor visited marks ride D-INF-2, sub 11 needs the held-object link; cat-2 alert/count + 42-45 subs unwitnessed | A | WITNESSED-READY-DEFERRED (write-sites) + NEEDS-RE (cat-2 subs) | PAR-WORLD |
@@ -283,8 +283,8 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-HUD-6 | Mission triggered text ported as a timed message-line feed (930-tick life, ≥186 stagger) at the `HUDCHATTEXT` anchor — the original rides the full chat pipeline (channel ring buffers + a geometry table whose writer is unwitnessed) | A | OPEN (chat-pipeline follow-up) | PAR-UI / research starter |
 | D-HUD-7 | Crosshair spread omits the recoil accumulators (`player+0x380/+0x384 >> 7`) — the runtime does not surface them yet; ERROR-row term ported exactly | A | OPEN (needs the recoil write-side witness) | PAR-UI / research starter |
 | D-HUD-8 | Crosshair color modulates the texture — the original writes it to the strip's specular channel (blend stage in the unwitnessed HUD shader pass); identical for the default white | B | OPEN (witness the texture-stage state) | PAR-UI |
-| D-HUD-9 | Crosshair hides the instant the scope engages — the original draws while an aimed shot is unavailable (`!Player_CanFireWeapon @ 0x5cf780`, which needs the SETTLED sight view), i.e. through the whole ADS ease; the row select stays hip (`+3` keys on CanFire, not the scope toggle, `@ 0x592b87`) | A | WITNESSED-READY-DEFERRED (needs the settled-scope/ease state surfaced — the weapon fix round) | PAR-UI |
-| D-HUD-10 | Crosshair anchors at the fixed design center — the original anchors at the projected aim point (screen center only on-foot first-person `@ 0x5928a0`; spectate/`g_camera_mode` project `Entity_BuildCameraView` `@ 0x592910`) | A | WITNESSED-READY-DEFERRED (needs the aim-ray screen projection surfaced — the weapon fix round) | PAR-UI |
+| D-HUD-9 | Crosshair hides the instant the scope engages — the original draws while an aimed shot is unavailable (`!Player_CanFireWeapon @ 0x5cf780`, which needs the SETTLED sight view), i.e. through the whole ADS ease; the row select stays hip (`+3` keys on CanFire, not the scope toggle, `@ 0x592b87`) | A | FIXED 2026-07-11 (weapon round: the hide is `scope_engaged && scope_fraction >= 1`; `NovaGameHudHost` plumbs `scope_fraction`) | PAR-UI |
+| D-HUD-10 | Crosshair anchors at the fixed design center — the original anchors at the projected aim point (screen center only on-foot first-person `@ 0x5928a0`; spectate/`g_camera_mode` project `Entity_BuildCameraView` `@ 0x592910`) | A | FIXED 2026-07-11 (weapon round: `aim_screen_point()` = INF in 1P -> the HUD pins the exact center; the 3P projection uses the witnessed 1000.0 far point) | PAR-UI |
 
 ### Format ports — mission `.mis`, LW `.3di`, particles `.ptl`
 
@@ -575,8 +575,8 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 |---|---|---|---|---|---|
 | Net | 11 | 1 | 11 | 23 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 3 |
-| World / AI + events | 12 | 1 | 6 | 19 | 1 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 2 | 7 | 17 | 3 |
+| World / AI + events | 12 | 1 | 6 | 19 | 2 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 8 | 2 | 5 | 15 | 5 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 2 | 0 | 4 | 0 |
@@ -590,7 +590,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 1 |
 | Render — draw order | 1 | 0 | 1 | 2 | 3 |
 | Render — lighting | 4 | 0 | 2 | 6 | 0 |
-| **Total** | **44** | **13** | **33** | **90** | 23 |
+| **Total** | **44** | **13** | **31** | **88** | 26 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-FOLIAGE-6, D-NET-136, D-NET-64.
 

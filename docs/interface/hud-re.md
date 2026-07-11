@@ -279,7 +279,9 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   @0x4dcc80`, the SIGHTS-card gate) and returns 0 under `g_camera_mode`
   `[orig: @0x5cf807/@0x5cf828]` — so the crosshair draws from the hip, **all
   through the ADS ease**, and in every external-camera mode; it yields only
-  once fully sighted (D-HUD-9: the port hides at ease start). Its can't-fire
+  once fully sighted (D-HUD-9 CLOSED 2026-07-11: the port hides only at
+  `scope_fraction >= 1` — the settled sight view; the `@0x4de4f7` promoter is
+  the only writer of `g_weaponScopeActive`). Its can't-fire
   path also resets `g_cameraFovDeg = 5242880` = **80.0 deg** 16.16
   `[orig: @0x5cf88e]` — the port's `fov_deg` default.
 - **Anchor**: the offset applies to the **virtual-space** projection of the
@@ -287,8 +289,10 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   camera mode that point is the literal screen center
   `[orig: @0x5928a0 — overlayCtx/2, dword_24C1424/2]`; a spectated entity or
   `g_camera_mode` (external/3P) projects `Entity_BuildCameraView` instead
-  `[orig: @0x592910..0x59295e]` (D-HUD-10: the port anchors the fixed design
-  center — first-person-correct only). Arms draw at top `(x, y−off)`, bottom
+  `[orig: @0x592910..0x59295e]` (D-HUD-10 CLOSED 2026-07-11: the host's
+  `aim_screen_point()` returns no projection in first person — the HUD pins the
+  exact design center — and projects the aim ray's 1000.0-unit far point
+  `[orig: 65536000 q16 @0x592910]` in third person). Arms draw at top `(x, y−off)`, bottom
   `(x, y+off)`, left `(x−off, y)`, right `(x+off, y)`, center `(x, y)`
   `[orig: @0x592c50..0x592cd2]`.
 - **Spread**: with `mp_CrossHairSpread` enabled (`dword_25510E4`; disabled
@@ -429,8 +433,8 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 | D-HUD-6 | `hud_messages.gd` is a timed line feed (930-tick life, ≥186 stagger, wrap, two-space continuation indent) drawn at the `HUDCHATTEXT` anchor | triggered text rides the full chat system: channel-2 ring buffers `[orig: Chat_AddDebugMessage @0x4987f0]`, display rebuild `[orig: @0x498bd0]`, and a channel geometry table (`dword_28E4DF8`, writer unwitnessed) | Message-line altitude port. The channel's exact screen geometry, per-line fade curve, and the player-chat channel are the chat-pipeline follow-up. |
 | D-HUD-7 | crosshair spread = the ERROR term only | spread adds `(player+0x380 >> 7) + (player+0x384 >> 7)` — the recoil/aim accumulators `[orig: @0x592b95..0x592bc8]` | The runtime does not yet surface those accumulators (they live in the entity angle state; see `docs/world/world-wac-ai-re.md` pitchBlend). Wire them when the recoil write-side is witnessed. |
 | D-HUD-8 | crosshair color multiplies the texture (canvas modulate); default white | the strip writes the color to the **specular** channel with `diffuse = 1.0` `[orig: @0x5914d7]`; the blend-stage setup lives in the HUD shader pass (`GfxShader_ApplyPassChecked @0x677020`, unwitnessed); color source = user config `dword_25510E0` | Identical for the default white; witness the texture-stage state (and the config default) before modeling the user crosshair color. |
-| D-HUD-9 | the crosshair hides the instant the scope engages (`scope_engaged`) | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, which requires the **settled** sight view (`Player_IsEquippedWeaponScoped @0x4dcc80`) — so it stays up through the whole ADS ease and yields only once fully sighted `[orig: gate @0x592adc..0x592b01]` | Needs the settled-scope/ease state surfaced by the sim (the weapon fix round's `scope_fraction` plumbing). NOTE for that round: the row select stays hip — `+3` keys on `Player_CanFireWeapon()`, not on the scope toggle (`@0x592b87`). |
-| D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` `[orig: @0x592910..0x59295e]` | First-person-correct as ported; diverges in the 3P camera. Needs the aim-ray screen projection surfaced (weapon fix round). |
+| D-HUD-9 | the crosshair hides the instant the scope engages (`scope_engaged`) | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, which requires the **settled** sight view (`Player_IsEquippedWeaponScoped @0x4dcc80` = `g_weaponScopeActive`, promoted only at ease completion `@0x4de4f7`) — so it stays up through the whole ADS ease and yields only once fully sighted `[orig: gate @0x592afa]` | FIXED 2026-07-11 (weapon round): the hide is `scope_engaged && scope_fraction >= 1`; the row select stays hip — `+3` keys on `Player_CanFireWeapon()` itself (`@0x592b87`), unreachable on foot while the crosshair draws. |
+| D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerHost.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `NovaGameHudHost` feeds it to both shells. |
 
 ## Follow-ups (not yet witnessed / deferred)
 

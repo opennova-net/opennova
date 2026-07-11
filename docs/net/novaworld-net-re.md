@@ -6194,13 +6194,37 @@ latch/refusal protocol, 15/7/1 steps, the hipfire latch);
 `suppress_view_bias` (the NoCardSwitch reload camera rule) and refuses mid-ease
 scope toggles; ctest player_view/weapon_fsm/def_parse_weapons pin all three.
 
+**The movement-scope legs (2026-07-11, the weapon-round grill).** The input packer
+`Player_PackInputStateToEntity @ 0x4df450` latches `g_movementKeyHeld @ 0xB7653B`
+on any of the four direction keys (`@ 0x4df4bb` / cleared `@ 0x4df4f9`) and drives:
+(a) **unscope-on-move** — SETTLED at scope (`g_weaponScopeActive`, promoted only at
+ease completion by `Player_UpdatePerFrame @ 0x4de4f7`: `scopeActive = engaged`)
+on a Scoped (flags 1) weapon, movement routes through `Player_ToggleWeaponScope`
+(`@ 0x4df4c9..0x4df4ec`) = the full unscope, subject to the toggle's own
+**ForceScoped pin** (`(flags1 & 0x20000000) == 0 || !scopeActive` `@ 0x4df12d` —
+a grill catch: the pin previously lived only on the FSM one-shot path in the
+port); (b) **scope-UP refusal while moving** — `g_movementKeyHeld && (flags & 1)
+-> return` `@ 0x4df29c`. PORTED: `player_view_move_input` /
+`player_view_scope_up_blocked` + the `NovaSimulation` wiring; the prior
+"@ 0x4df0a2" site note was the FP-viewmodel render epilogue (corrected).
+WITNESSED-DEFERRED (the tri-state follow-up): the mid-UP-ease movement reversal
+(`@ 0x4df548` — ease back to hip, `g_scopeEngaged` stays latched), the settled
+drop-with-memory (`@ 0x4df5ae`, masked by `flags & 0x20000080`), and the
+auto-re-raise on key release (`@ 0x4df607`) — all keep `engaged` latched while
+away from the scope, which needs the explicit engaged/active/hipfire tri-state
+our derived `scope_card_active` cannot represent. Related new witness: weapons
+with **HandGunUp (0x4000000)** auto-follow player flag 0x4000 raise/lower when
+the ease is idle (`@ 0x4de444..0x4de4b7`; the player-flag writer is unwalked).
+
 **Open follow-ups:** who queues OVERHEATED(11);
 the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
 `dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq;
 remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
 the RoundData_SpawnRound 0x2000000 test site; the slot Elevation zoom-adjust input;
-loose-REVX audio: a loose extract advertises no expansion, so revx02.LWF (the M82
-GS_/GF_ sets) never loads — the expansion setting must name it (config, not code).
+the scope tri-state (engaged/active/hipfire) for the movement reversal legs; the
+HandGunUp auto-follow (player flag 0x4000 writer); loose-REVX audio: a loose
+extract advertises no expansion, so revx02.LWF (the M82 GS_/GF_ sets) never
+loads — the expansion setting must name it (config, not code).
 
 ## 6. Struct reference
 
