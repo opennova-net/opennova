@@ -159,11 +159,18 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | NovaWorld networking | `libs/npwire`, `libs/novaworld`, `libs/napi`, `libs/novacrypto`, `libs/netsim`, `apps/novaworld_server`, `godot/engine/network` | [net/novaworld-net-re.md](net/novaworld-net-re.md) | landed + maturing (backend + SP listen server; in-match decode byte-witnessed, encode in progress) |
 | Boot-required resources | boot literals scattered in `godot/game/` today; ENG-6 manifest pending | [required-resources.md](required-resources.md) | witnessed (R8): the fatal set, per-resource failure behavior, boot order, D-BOOT catalog |
 | VFS / PFF mount stack | `libs/vfs`, `libs/pff`, `NovaResourceRoot` | [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md) | witnessed (PAR-R7): mount, precedence, /d gate; D-VFS-1..9 |
+| Terrain (TRN + runtime queries) | `libs/terrain`, `libs/terrain_query` | [terrain/terrain-re.md](terrain/terrain-re.md) | partial record (PAR-R1; runtime queries witnessed ENG-3 B0, port pending B1) |
+| Foliage | `libs/foliage`, `NovaFoliageDispatcher` | [foliage/foliage-re.md](foliage/foliage-re.md) | matching incl. the model tier (PAR-R2; D-FOLIAGE-6 open) |
+| Tiles (`.til` overlay) | `libs/til` | [tiles/til-re.md](tiles/til-re.md) | landed (PAR-R3; D-TIL-1) |
+| Fonts (`.fnt`) | `libs/fnt` | [fonts/fnt-re.md](fonts/fnt-re.md) | landed (PAR-R4; D-FNT-1..3) |
+| Credits (CBIN) | `libs/cbin` | [credits/cbin-re.md](credits/cbin-re.md) | partial (PAR-R5: codec matching; markup NEEDS-RE) |
+| Importer pipeline | `apps/importer`, `pyopennova` | [importer/importer-audit.md](importer/importer-audit.md) | tracked-by-composition (PAR-R6) |
 
-No dedicated RE record yet — documented by code and tests only: terrain, foliage,
-tiles, fonts, credits, and the importer pipeline (the PFF write side is
-[ADR 0008](adr/0008-pff-writer-policy.md); the mount stack landed as
-[vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md), PAR-R7). See [docs/README.md](README.md).
+Every subsystem now has a dedicated RE record (full or partial) or a
+tracked-by-composition audit — the PAR-R1..R7 sweep (2026-07-05) landed the last seven
+(terrain, foliage, tiles, fonts, credits, the importer, and the VFS/PFF mount stack; the
+PFF write side is [ADR 0008](adr/0008-pff-writer-policy.md)). The full per-record status
+table is [docs/README.md](README.md).
 
 ## 5. Researching the engine
 

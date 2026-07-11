@@ -5,7 +5,9 @@ to invent a new multiplayer architecture. The goal is to make retail clients,
 retail hosts, OpenNova clients, OpenNova listen hosts, and future dedicated
 hosts speak the same in-match protocol.
 
-Read these first for any networking task:
+Orient from these for any networking task — consult what the task needs rather than
+reading end to end (the net RE record is grep-navigated: §5 index at its top,
+divergences in its §8 catalog):
 
 - `CLAUDE.md`, `CONTEXT.md`, and `GOALS.md`
 - `docs/README.md` and `docs/engine-primer.md`
