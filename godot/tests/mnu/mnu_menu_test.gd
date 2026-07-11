@@ -381,8 +381,9 @@ func test_master_volume_property_defaults_and_clamps() -> void:
 
 func test_music_changed_fires_on_screen_show() -> void:
 	# MAIN declares <MUSICVAR>3</MUSICVAR>; the initial build emits music_changed(3).
-	# OPTIONS declares no MUSICVAR (0), so the track is left alone (no new emit) -
-	# matching the reference's music_var > 0 guard.
+	# OPTIONS declares no MUSICVAR, whose parsed default 0 is still written. Every
+	# screen event repeats the write [orig: UI_DispatchScreenEvent @ 0x54e6a0,
+	# AudioVM_SetVariable(2, value) @ 0x54eff4].
 	var menu := NovaMnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
@@ -392,7 +393,10 @@ func test_music_changed_fires_on_screen_show() -> void:
 	assert_signal_emit_count(menu, "music_changed", 1, "only MAIN's music applied")
 
 	menu.navigate_to_screen("OPTIONS")
-	assert_signal_emit_count(menu, "music_changed", 1, "no-music screen leaves the track alone")
+	assert_signal_emitted_with_parameters(menu, "music_changed", [0])
+	assert_signal_emit_count(menu, "music_changed", 2, "no-MUSICVAR screen resets the selector")
+	menu.show_screen("OPTIONS")
+	assert_signal_emit_count(menu, "music_changed", 3, "repeated screen events repeat the write")
 
 
 # --- URL action + MONOGRAM render -------------------------------------------
@@ -742,9 +746,9 @@ func test_music_director_receives_set_var() -> void:
 	menu.set_music_director(dir)
 	menu.menu = _load_doc()  # MAIN MUSICVAR 3 -> set_var(0, 3)
 	assert_eq(dir.get_var(0), 3, "MAIN MUSICVAR pushed to the director")
-	# OPTIONS has no MUSICVAR: the director var is left untouched (> 0 guard).
+	# OPTIONS has no MUSICVAR: its parsed default zero is still pushed.
 	menu.navigate_to_screen("OPTIONS")
-	assert_eq(dir.get_var(0), 3, "no-music screen leaves the director var untouched")
+	assert_eq(dir.get_var(0), 0, "no-MUSICVAR screen resets the director var")
 
 
 func test_edit_mode_does_not_drive_director() -> void:

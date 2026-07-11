@@ -154,6 +154,41 @@ func test_load_mission_data_rejects_an_empty_document() -> void:
 	assert_eq(failures.size(), 2, "both rejections explain themselves via load_failed")
 
 
+func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
+	var packed := load("res://engine/world/game_world.tscn") as PackedScene
+	var world := packed.instantiate() as GameWorld
+	add_child_autofree(world)
+	await get_tree().process_frame
+	world.set_playable(false)
+
+	var root := NovaResourceRoot.new()
+	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	world.set_resource_root(root)
+	var mission := NovaMissionData.new()
+	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
+	mission.set_header_int("start_time", 0x0540)  # unsigned Q8.8 = 05:15
+	mission.set_header_int("minutes_per_day", 60)
+
+	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
+	var audio := world.get_mission_audio()
+	assert_not_null(audio)
+	if audio == null:
+		return
+	var env := world.get_node("NovaEnvironment") as NovaEnvironment
+	assert_almost_eq(env.time_of_day, 515.0, 0.001,
+		"the BMS start time, not the environment node's noon default, initializes the shared clock")
+
+	# 0.128 seconds advances eight fixed 62.5 Hz ticks. The exact clock math is
+	# pinned at NovaEnvironment's public seam; this integration assertion pins
+	# GameWorld's runtime-tick routing and guards against a reset to stale noon.
+	world.tick(Vector3.ZERO, Transform3D(), 0.128)
+	var advanced := env.time_of_day
+	assert_gt(advanced, 515.0, "runtime ticks advance the authored mission clock")
+	assert_lt(advanced, 516.0, "a single frame cannot jump the clock to another hour")
+	world.unload()
+
+
 func test_injected_root_bypasses_settings_mount() -> void:
 	# The editor injects its own mounted root; the load must resolve through it
 	# (and report ITS directory in errors) instead of mounting from settings.

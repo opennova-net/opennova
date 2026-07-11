@@ -1,7 +1,8 @@
 extends GutTest
 
-## Guarded diagnosis + regression probe against a real PFF install (the local
-## JO:TR install with the revx02 expansion mounted). The ambient-marker path is
+## Guarded diagnosis + regression probe against a real PFF install. The install
+## comes from OPENNOVA_JO_DIR; JO_EXPANSION optionally selects an expansion. The
+## ambient-marker path is
 ## GUT-green against the flat JOX extract (sound_integration_test.gd); this
 ## probe exercises the GAME SHELL's actual mount instead — mount_runtime: PFF
 ## archives + expansion, loose files gated on /d [orig boot table:
@@ -11,19 +12,23 @@ extends GutTest
 
 const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
 
-const INSTALL_DIR := "C:/GAMES/JOTAC/Game/JO"
-const EXPANSION := "revx02"
 const MISSION_CANDIDATES: PackedStringArray = ["00TRa.bms", "00TRg.bms"]
 
 
 func test_pff_install_mission_audio() -> void:
-	if not DirAccess.dir_exists_absolute(INSTALL_DIR):
-		pass_test("JO:TR install not present; skipping PFF-install probe")
+	var install_dir := OS.get_environment("OPENNOVA_JO_DIR")
+	var expansion := OS.get_environment("JO_EXPANSION")
+	if install_dir.is_empty():
+		pass_test("OPENNOVA_JO_DIR is not configured; skipping PFF-install probe")
+		return
+	assert_true(DirAccess.dir_exists_absolute(install_dir),
+		"OPENNOVA_JO_DIR points to an existing directory")
+	if not DirAccess.dir_exists_absolute(install_dir):
 		return
 
 	var root := NovaResourceRoot.new()
-	var err: int = root.mount_runtime(INSTALL_DIR, EXPANSION, false, "jo")
-	assert_eq(err, OK, "mount_runtime(%s, exp=%s) mounts" % [INSTALL_DIR, EXPANSION])
+	var err: int = root.mount_runtime(install_dir, expansion, false, "jo")
+	assert_eq(err, OK, "mount_runtime(%s, exp=%s) mounts" % [install_dir, expansion])
 	if err != OK:
 		return
 
@@ -32,11 +37,14 @@ func test_pff_install_mission_audio() -> void:
 	# these), so one run discriminates bank-load vs item-db vs music-pair causes.
 	var probe_names: PackedStringArray = [
 		"game.lwf", "gamelocl.LWF", "game2.lwf", "game3.lwf",
-		EXPANSION + "L.lwf", EXPANSION + ".lwf",
 		"items.def",
 		"menumus.bin", "gamemus.bin",
-		"M" + EXPANSION + ".bin", "G" + EXPANSION + ".bin",
 	]
+	if not expansion.is_empty():
+		probe_names.append(expansion + "L.lwf")
+		probe_names.append(expansion + ".lwf")
+		probe_names.append("M" + expansion + ".bin")
+		probe_names.append("G" + expansion + ".bin")
 	for n in probe_names:
 		var have: bool = root.has_file(n)
 		var size: int = root.read_file(n).size() if have else 0

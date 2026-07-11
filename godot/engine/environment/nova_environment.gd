@@ -10,6 +10,17 @@ extends Node
 # - [orig: Environment_ApplyFogAndAmbient @ 0x57e440] pushes fog state;
 #   fog/skyfog render colors are doubled with saturation (@ 0x57f17c).
 
+const HOURS_PER_DAY := 24
+const MINUTES_PER_HOUR := 60.0
+const HHMM_HOUR_SCALE := 100.0
+const FIXED24_ONE_HOUR := 1 << 24
+const TOD_DAY_FIXED24 := HOURS_PER_DAY * FIXED24_ONE_HOUR
+const TOD_TICKS_PER_REAL_MINUTE := 3720  # 60 seconds * 62 logic ticks
+const Q8_8_TO_FIXED24_SHIFT := 16
+const MIN_MINUTES_PER_DAY := 60
+const DEFAULT_MINUTES_PER_DAY := 1440
+const DEFAULT_START_HOUR := 12
+
 @export var environment_data: EnvFile:
 	set(value):
 		if environment_data and environment_data.environment_changed.is_connected(_on_environment_changed):
@@ -19,7 +30,10 @@ extends Node
 			environment_data.environment_changed.connect(_on_environment_changed)
 		if is_inside_tree():
 			_ensure_loaded()
-			_update_tod()
+			if is_loaded():
+				time_of_day = float(environment_data.get_curtime())
+			else:
+				_update_tod()
 
 @export_range(0, 2359, 1) var time_of_day: float = 1200.0:
 	set(value):
@@ -42,6 +56,9 @@ var _fog_color_rt := Vector3(0.5, 0.7, 0.9)
 # ColorSrcGlobalGain — the modulator /64 (iris exposure), NovaWeather-written.
 var _color_src_gain := Vector3.ONE
 var _fog_distance: float = 1000.0
+var _mission_time_fixed24: int = DEFAULT_START_HOUR * FIXED24_ONE_HOUR
+var _mission_advance_per_tick: int = int(
+	TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * DEFAULT_MINUTES_PER_DAY))
 
 # Monotonic counter bumped only when a value object materials consume (lighting/fog) actually
 # changes -- via _update_tod (TOD scrub / reload / day_speed advance) or the per-frame weather
@@ -63,8 +80,8 @@ func _process(delta: float) -> void:
 	# for scrubbing previews — host plumbing, not the witnessed day advance.
 	# Retail advances Env_CurTimeFixed24 by 0x18000000/(3720 x minutes) per
 	# 62 Hz tick [orig: Environment_SetTodAdvanceRate @ 0x57d170 (BMS day
-	# length) / Environment_SetTodRate @ 0x57c4f0 (options)]; that wiring
-	# rides the mission-runtime TOD work, not this preview knob.
+	# length) / Environment_SetTodRate @ 0x57c4f0 (options)]; GameWorld drives
+	# that path through advance_mission_clock, separately from this preview knob.
 	if not is_loaded():
 		return
 	if day_speed <= 0.0:
@@ -75,6 +92,40 @@ func _process(delta: float) -> void:
 	while time_of_day < 0.0:
 		time_of_day += 2400.0
 	_update_tod()
+
+
+## Start the one runtime mission clock from the BMS header. start_time is Q8.8
+## hours and widens to the engine's 8.24 accumulator; minutes_per_day is clamped
+## to retail's 60-minute minimum [orig: Game_StartMission @ 0x525371;
+## Environment_SetTodAdvanceRate @ 0x57d170].
+func configure_mission_clock(start_time_q8_8: int, minutes_per_day: int) -> void:
+	var raw := start_time_q8_8 & 0xFFFF
+	_mission_time_fixed24 = (raw << Q8_8_TO_FIXED24_SHIFT) % TOD_DAY_FIXED24
+	var rate := maxi(minutes_per_day, MIN_MINUTES_PER_DAY)
+	_mission_advance_per_tick = int(TOD_DAY_FIXED24 / (TOD_TICKS_PER_REAL_MINUTE * rate))
+	time_of_day = _fixed24_to_hhmm(_mission_time_fixed24)
+
+
+## Advance by completed logic ticks using the exact integer increment
+## [orig: Env_TodAdvancePerTick =
+## 0x18000000 / (3720 * minutes_per_day) @ 0x57d108].
+func advance_mission_clock(ticks: int) -> void:
+	if ticks <= 0:
+		return
+	_mission_time_fixed24 = (
+		_mission_time_fixed24 + ticks * _mission_advance_per_tick
+	) % TOD_DAY_FIXED24
+	time_of_day = _fixed24_to_hhmm(_mission_time_fixed24)
+
+
+static func _fixed24_to_hhmm(value: int) -> float:
+	return _hours_to_hhmm(float(value) / float(FIXED24_ONE_HOUR))
+
+
+static func _hours_to_hhmm(hours: float) -> float:
+	var wrapped := fposmod(hours, float(HOURS_PER_DAY))
+	var hour := floorf(wrapped)
+	return hour * HHMM_HOUR_SCALE + (wrapped - hour) * MINUTES_PER_HOUR
 
 
 func _ensure_loaded() -> void:

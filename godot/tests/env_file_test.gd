@@ -134,6 +134,27 @@ func test_mission_overrides_apply_as_live_view_only() -> void:
 	assert_almost_eq(env.get_fog_level(), 1000.0, 0.5, "Clearing overrides should restore the base fog level.")
 
 
+func test_environment_owns_the_authored_mission_clock() -> void:
+	var env_node := NovaEnvironment.new()
+	add_child_autofree(env_node)
+	var env := _load_full_00()
+	env.set_curtime(900)
+	env_node.environment_data = env
+	assert_almost_eq(env_node.time_of_day, 900.0, 0.001,
+		"assigning environment data after _ready synchronizes its authored curtime")
+
+	# BMS start_time is Q8.8 hours. 0x0540 = 05:15 exactly.
+	env_node.configure_mission_clock(0x0540, 60)
+	assert_almost_eq(env_node.time_of_day, 515.0, 0.001,
+		"the mission header, not a stale noon default, initializes the shared clock")
+
+	# At the witnessed 62 logic ticks/s, 9,300 ticks are 150 seconds: one
+	# game-hour step for a 60-real-minute authored day.
+	env_node.advance_mission_clock(9300)
+	assert_almost_eq(env_node.time_of_day, 615.0, 0.001,
+		"the environment advances at minutes_per_day for every downstream consumer")
+
+
 func test_fog_start_follows_engine_policy() -> void:
 	var env := _new_default_env()
 	env.set_fog_level(1000.0)

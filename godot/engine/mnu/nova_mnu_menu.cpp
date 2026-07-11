@@ -128,7 +128,6 @@ void NovaMnuMenu::clear() {
 void NovaMnuMenu::build() {
 	clear();
 	nav_stack_.clear();
-	current_music_var_ = -1;
 	if (menu_.is_null()) {
 		unresolved_asset_count_ = 0;
 		return;
@@ -218,14 +217,9 @@ void NovaMnuMenu::apply_music_for_screen(NovaMnuScreen *p_screen) {
 		return;
 	}
 	const int music_var = p_screen->get_music_var();
-	// A screen with no MUSICVAR (<= 0) declares no music and leaves the current
-	// track alone; dedup repeats so re-showing a screen does not retrigger it.
-	// Both match menu_manager.gd / mnu_screen.gd (act only on music_var > 0,
-	// guarded by _current_music_var).
-	if (music_var <= 0 || music_var == current_music_var_) {
-		return;
-	}
-	current_music_var_ = music_var;
+	// The retail dispatcher writes the field on every screen event, including
+	// the default zero and repeated values [orig: UI_DispatchScreenEvent
+	// @ 0x54e6a0, AudioVM_SetVariable(2, value) @ 0x54eff4].
 	emit_signal("music_changed", music_var);
 	if (edit_mode_) {
 		return;

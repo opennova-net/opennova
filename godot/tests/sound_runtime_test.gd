@@ -152,6 +152,24 @@ func test_oneshot_no_falloff_plays_at_emitter_volume() -> void:
 	assert_eq(bank.oneshot_distance_volume(25 << 16, min_only, quiet), 255)
 
 
+func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
+	var root := ResourceRootStub.new()
+	var samples := PackedByteArray()
+	samples.resize(32)
+	root.files["tone.wav"] = _build_wav(samples, 1, 22050, 16)
+	var profile := _profile_with_set("POINT_ONLY", "tone.wav")
+	profile.set_set_field(0, "target_id", 0)
+	var bank = NovaSoundBankScript.new(root)
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	assert_false(bank.play_oneshot_3d(parent, Vector3(1, 0, 0), "POINT_ONLY", StringName(), Vector3.ZERO),
+		"retail's dist <= range gate rejects every nonzero distance when range is zero")
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "POINT_ONLY", StringName(), Vector3.ZERO),
+		"equality passes, so a zero-range set can still fire at its exact source")
+
+
 func test_crossfade_volume_byte_rounding() -> void:
 	var A := preload("res://engine/world/nova_mission_audio.gd")
 	# The register volume word is (0xFFFF * blend + 0x8000) >> 16, ROUNDED, and
@@ -181,12 +199,12 @@ func test_time_of_day_regions_and_blend() -> void:
 	# Mid-region: full blend.
 	assert_eq(float(A.time_of_day_region(12.0).blend), 1.0)
 	# Just after a cut: fading in, adjacent = the previous region.
-	var fade_in: Dictionary = A.time_of_day_region(10.02)
+	var fade_in = A.time_of_day_region(10.02)
 	assert_eq(int(fade_in.region), 1)
 	assert_eq(int(fade_in.adjacent), 0)
 	assert_between(float(fade_in.blend), 0.1, 0.5)
 	# Just before a cut: fading out, adjacent = the next region.
-	var fade_out: Dictionary = A.time_of_day_region(9.98)
+	var fade_out = A.time_of_day_region(9.98)
 	assert_eq(int(fade_out.region), 0)
 	assert_eq(int(fade_out.adjacent), 1)
 	assert_between(float(fade_out.blend), 0.1, 0.5)

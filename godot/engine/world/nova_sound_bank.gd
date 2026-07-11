@@ -132,7 +132,7 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		# @ 0x527cd1-0x527d83]. Retail also inflates the distance by occlusion
 		# before the last recheck — unported (D-SND-7).
 		var cull_u := int(set_d.get("target_id", 0))
-		if cull_u > 0 and dist_q16 > cull_u << 16:
+		if dist_q16 > maxi(cull_u, 0) << 16:
 			return false
 	var played := false
 	for li in layers.size():

@@ -38,7 +38,8 @@ const TICK_DT := 1.0 / 62.5  # mirrors MissionRuntime.TICK_DT; default for tick(
 signal world_loaded()
 signal load_failed(reason: String)
 # Host-presentation side effects drained from the mission runtime's EffectLog each tick
-# (kind: "text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog"). Consumed by the HUD;
+# (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog").
+# Player text is consumed by the HUD; debug_text remains a distinct unrouted channel.
 # "dialog" is also routed straight to mission audio below.
 signal mission_effects(effects: Array)
 
@@ -636,6 +637,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 				_dispatcher.dispatch_centers(centers, camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 	var runtime_start := Time.get_ticks_usec()
+	var runtime_ticks := 0
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# in both hosts: the debug overlay's Pause/Step work in the game too, not
 	# just the editor preview. _start_runtime calls play(), so normal missions
@@ -644,9 +646,9 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		# Fixed-timestep accumulator: the sim runs at a constant 62.5 Hz regardless of render rate.
 		# Guard keeps the duck-typed test stubs (game_world_test.gd) that only implement tick() green.
 		if _runtime.has_method("tick_realtime"):
-			_runtime.tick_realtime(delta)
+			runtime_ticks = int(_runtime.tick_realtime(delta))
 		else:
-			_runtime.tick()
+			runtime_ticks = 1 if bool(_runtime.tick()) else 0
 		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
 		# Keep the gate's advertised occupancy current (host + admitted joiners).
 		# set_player_count self-dedupes, so this is a no-op until the count changes.
@@ -654,10 +656,14 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 			var sim = _runtime.get_sim()
 			if sim != null and sim.has_method("get_host_peer_count"):
 				_nw_host.set_player_count(1 + sim.get_host_peer_count())
+	# The environment owns the one mission clock and advances only for fixed
+	# simulation ticks [orig: Environment_SetTodAdvanceRate @ 0x57d170].
+	if _loaded and runtime_ticks > 0 and _env != null:
+		_env.advance_mission_clock(runtime_ticks)
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
-		# The env clock drives the marker soundloop time-of-day slots
-		# [orig: Entity_CalcTimeOfDayRegion @ 0x408110 reads the env time].
+		# Ambient soundloop regions read that same clock [orig:
+		# Entity_CalcTimeOfDayRegion @ 0x408110].
 		if _env != null and _env.get("time_of_day") != null:
 			_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
 		_mission_audio.tick(camera_pos)
@@ -1087,8 +1093,15 @@ func _on_runtime_effects(effects: Array) -> void:
 # voices. Reuses the placer's item database for the item_id -> soundloop_1..4 lookup.
 func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var item_db = _placer.get_item_db() if _placer != null else null
+	var mission_info: Dictionary = mission.get_info()
+	if _env != null:
+		_env.configure_mission_clock(
+			int(mission_info.get("start_time", 0)),
+			int(mission_info.get("minutes_per_day", NovaEnvironment.DEFAULT_MINUTES_PER_DAY)))
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
 	var stats := _mission_audio.setup(mission, bms_name, self)
+	if _env != null and _env.get("time_of_day") != null:
+		_mission_audio.set_time_of_day_hhmm(float(_env.get("time_of_day")))
 	print("GameWorld: mission audio — %d/%d sound markers resolved, %d bank(s), %d voice(s)" % [
 		int(stats.get("markers_resolved", 0)),
 		int(stats.get("markers_total", 0)),

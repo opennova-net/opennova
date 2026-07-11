@@ -139,3 +139,121 @@ func test_tick_writes_only_on_change() -> void:
 
 	audio.tick(Vector3(2000, 0, 0))
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 0, "steady silence writes nothing")
+
+
+func test_setup_dispatches_envs_items_across_entity_kinds() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_envs_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	var items := """begin "Env building"
+  id 100001
+  type decoration
+  move_function envs
+  soundloop_1 BUILD_AMB
+  soundloop_2 BUILD_AMB
+  soundloop_3 BUILD_AMB
+  soundloop_4 BUILD_AMB
+end
+
+begin "Non-env marker"
+  id 100002
+  type marker
+  soundloop_1 MISSING_AMB
+  soundloop_2 MISSING_AMB
+  soundloop_3 MISSING_AMB
+  soundloop_4 MISSING_AMB
+end
+"""
+	_write_text(fixture_dir.path_join("items.def"), items)
+	_write_bytes(fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
+	var lwf := NovaLwfData.new()
+	lwf.create_empty()
+	var si := lwf.add_set()
+	lwf.set_set_field(si, "name", "BUILD_AMB")
+	var li := lwf.add_layer(si)
+	lwf.set_layer_field(si, li, "falloff_radius", 200)
+	var mi := lwf.add_member(si, li)
+	lwf.set_member_field(si, li, mi, "wav_path", "tone.wav")
+	assert_eq(lwf.save_file(fixture_dir.path_join("probe.LWF")), OK)
+
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	var mission := NovaMissionData.new()
+	mission.create_default()
+	mission.add_entity(NovaMissionData.KIND_BUILDING, 100001, Vector3(10, 0, 0), Vector3.ZERO)
+	mission.add_entity(NovaMissionData.KIND_MARKER, 100002, Vector3(20, 0, 0), Vector3.ZERO)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = NovaMissionAudioScript.new(root, item_db)
+	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
+
+	assert_eq(int(stats.get("markers_total", 0)), 1,
+		"only the items.def envs class participates, regardless of BMS entity kind")
+	assert_eq(int(stats.get("markers_resolved", 0)), 1,
+		"an envs decoration/building resolves its ambient soundloop")
+	assert_gt(int(stats.get("voices", 0)), 0)
+	audio.teardown()
+	_remove_dir_recursive(fixture_dir)
+
+
+func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_reverb_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := NovaMissionData.new()
+	mission.create_default()
+	mission.set_header_int("reverb", 1)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = NovaMissionAudioScript.new(root, null)
+	var ambient_bus := AudioServer.get_bus_index(&"Ambient")
+	assert_gte(ambient_bus, 0)
+	audio.setup(mission, "reverb_probe.bms", container)
+	assert_eq(_reverb_count(ambient_bus), 1, "mission setup installs its Ambient reverb")
+
+	audio.teardown()
+	assert_eq(_reverb_count(ambient_bus), 0,
+		"unloading the mission cannot leave its global bus effect in the menu/next world")
+	_remove_dir_recursive(fixture_dir)
+
+
+func _write_text(path: String, value: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file != null:
+		file.store_string(value)
+
+
+func _write_bytes(path: String, value: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file != null:
+		file.store_buffer(value)
+
+
+func _reverb_count(bus_idx: int) -> int:
+	var count := 0
+	for i in AudioServer.get_bus_effect_count(bus_idx):
+		if AudioServer.get_bus_effect(bus_idx, i) is AudioEffectReverb:
+			count += 1
+	return count
+
+
+func _remove_dir_recursive(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		var child := path.path_join(entry)
+		if dir.current_is_dir():
+			_remove_dir_recursive(child)
+		else:
+			DirAccess.remove_absolute(child)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)

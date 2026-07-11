@@ -73,8 +73,12 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Music
 		var stem := prefix + exp_name
 		# The expansion bank lives inside the expansion folder, streamed loose
 		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
-		var bank_path: String = root.get_root_dir().path_join("expansion").path_join(exp_name).path_join(stem + ".sbf")
-		if FileAccess.file_exists(bank_path) and root.has_file(stem + ".bin"):
+		# Resolve its spelling case-insensitively, as retail did on Windows. Keep
+		# the actual on-disk spelling for case-sensitive hosts, and poison an
+		# ambiguous duplicate instead of choosing by enumeration order.
+		var expansion_dir: String = root.get_root_dir().path_join("expansion").path_join(exp_name)
+		var bank_path := _resolve_loose_file(expansion_dir, stem + ".sbf")
+		if not bank_path.is_empty() and root.has_file(stem + ".bin"):
 			pair.bank = bank_path
 			pair.script_name = stem + ".bin"
 			return pair
@@ -83,11 +87,26 @@ static func resolve_music_pair(root, prefix: String, base_stem: String) -> Music
 	return pair
 
 
+static func _resolve_loose_file(dir_path: String, filename: String) -> String:
+	if dir_path.is_empty() or filename.is_empty():
+		return ""
+	var resolved_path := ""
+	var wanted := filename.to_lower()
+	for entry in DirAccess.get_files_at(dir_path):
+		var actual := String(entry)
+		if actual.to_lower() != wanted:
+			continue
+		if not resolved_path.is_empty():
+			return ""  # duplicate case variants are ambiguous
+		resolved_path = dir_path.path_join(actual)
+	return resolved_path
+
+
 ## Open the MENU music context [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60:
 ## open the M pair + set volume, NO initial var — the shown screen's MUSICVAR
 ## selects the section afterwards]. Explicit overrides keep the shell's dev
 ## seams (an explicit script loads by loose path via ResourceLoader).
-## Returns true when the context is loaded (audible start is headless-guarded).
+## Returns true when the context is loaded and the VM has been freshly started.
 func open_menu_context(root, script_override := "", bank_override := "") -> bool:
 	var pair := resolve_music_pair(root, "M", "menumus")
 	var bank_path := pair.bank
@@ -120,6 +139,9 @@ func open_game_context(root) -> bool:
 func stop_context() -> void:
 	if _director != null:
 		_director.stop()
+		_director.set_bank(null)
+		_director.load_mus_script(null)
+		_director.set_script_name(&"")
 	_context = ""
 	_script = null
 
@@ -140,21 +162,22 @@ func get_var(idx: int) -> int:
 # AudioVM_OpenContextFile @ 0x672160 — the .sbf CreateFileA gate precedes the
 # script load], so a missing half means silence (non-fatal), never a mixed pair.
 func _open_context(name: String, root, bank_path: String, script_name: String, script_override: String) -> bool:
+	stop_context()
 	if _director == null:
 		return false
-	_director.stop()
-	_context = ""
-	_script = null
 	var bank := _load_bank(bank_path)
+	if bank == null:
+		return false  # retail's CreateFileA gate precedes script loading
 	var script := _load_music_script(root, script_override, script_name)
-	if script == null or bank == null:
+	if script == null:
 		return false  # incomplete pair -> silence, matching the witnessed bail
 	_context = name
 	_script = script
 	_director.set_bank(bank)
 	_director.load_mus_script(script)
-	if not _is_headless():  # no audio device in headless tests/probes
-		_director.start()
+	# start() performs mus_vm_load_script(), which is the full-context reset.
+	# The dummy audio driver supports the same lifecycle in headless tests.
+	_director.start()
 	return true
 
 
@@ -189,7 +212,3 @@ func _load_music_script(root, explicit: String, name: String) -> NovaMusicScript
 	var script := NovaMusicScript.new()
 	script.load_from_decrypted_bytes(bytes, name)
 	return script if script.get_script_count() > 0 else null
-
-
-func _is_headless() -> bool:
-	return DisplayServer.get_name() == "headless"

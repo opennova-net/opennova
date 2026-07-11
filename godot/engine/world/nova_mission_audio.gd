@@ -2,7 +2,7 @@ class_name NovaMissionAudio
 extends RefCounted
 
 ## Runtime mission audio orchestrator. Loads the mission's co-named .LWF + the
-## global banks into a NovaSoundBank, resolves each placed sound marker's
+## global banks into a NovaSoundBank, resolves each placed envs-class entity's
 ## time-of-day slot sets BY NAME (items.def soundloop_1..4 = morning/day/
 ## evening/night [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080]; the engine is
 ## name-keyed — see docs/audio/lwf-dbf-sound-re.md), and spawns looping
@@ -23,6 +23,18 @@ extends RefCounted
 ## name is plumbed into the world — host follow-up).
 
 const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+
+
+class TimeOfDayRegion extends RefCounted:
+	var region: int
+	var adjacent: int
+	var blend: float
+
+	func _init(p_region: int, p_adjacent: int, p_blend: float) -> void:
+		region = p_region
+		adjacent = p_adjacent
+		blend = p_blend
+
 
 const AMBIENT_BUS := &"Ambient"
 const SFX_BUS := &"SFX"
@@ -96,6 +108,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	_stats = {"markers_total": 0, "markers_resolved": 0, "banks_loaded": 0, "voices": 0}
 	if mission == null or container == null or _resource_root == null:
 		return _stats
+	var mission_info: Dictionary = mission.get_info()
 
 	_bank = NovaSoundBank.new(_resource_root)
 	_load_bank(mission_name.get_file().get_basename() + ".LWF")
@@ -126,7 +139,13 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 
 	for e in mission.get_all_entities():
 		var entity: Dictionary = e
-		if int(entity.get("kind", -1)) != NovaMissionData.KIND_MARKER:
+		var item_id := int(entity.get("item_id", 0))
+		if _strategy == STRATEGY_ITEM_SOUNDLOOP:
+			if not _is_envs_item(item_id):
+				continue
+		elif int(entity.get("kind", -1)) != NovaMissionData.KIND_MARKER:
+			# Preserve the two explicit host-only fallback strategies on the
+			# marker pool; only the faithful item dispatch crosses BMS kinds.
 			continue
 		_stats.markers_total += 1
 		var slot_sets := _resolve_slot_sets(entity)
@@ -180,8 +199,8 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 			int(_stats.markers_total),
 			"missing" if _item_db == null else "loaded"])
 
-	_apply_reverb(int(mission.get_info().get("reverb", 0)))
-	_apply_music(int(mission.get_info().get("music", 0)))
+	_apply_reverb(int(mission_info.get("reverb", 0)))
+	_apply_music(int(mission_info.get("music", 0)))
 	return _stats
 
 
@@ -360,7 +379,7 @@ func tick(camera_pos: Vector3) -> void:
 	_last_camera_pos = camera_pos
 	var writes := 0
 	var hhmm := _time_of_day_hhmm
-	var base_hours := floorf(hhmm / 100.0) + fmod(hhmm, 100.0) / 60.0
+	var base_hours := _hhmm_to_hours(hhmm)
 	var candidates: Array = []  # [{player, vol}]
 	var silent: Array[AudioStreamPlayer3D] = []
 	for m in _markers:
@@ -425,6 +444,7 @@ func tick(camera_pos: Vector3) -> void:
 func teardown() -> void:
 	# Dropping _audio_root frees the dialog + wac voice nodes too; just drop our refs
 	# so a late `finished` after teardown can't pump a freed queue.
+	_apply_reverb(0)
 	_dialog_queue.clear()
 	_dialog_voice = null
 	_wac_voice = null
@@ -437,6 +457,26 @@ func teardown() -> void:
 
 
 # --- Internals ---
+
+static func _hhmm_to_hours(hhmm: float) -> float:
+	var wrapped := fposmod(hhmm, 2400.0)
+	var hour := floorf(wrapped / 100.0)
+	var minute := clampf(fmod(wrapped, 100.0), 0.0, 59.999999)
+	return hour + minute / 60.0
+
+
+func _is_envs_item(item_id: int) -> bool:
+	if _item_db == null:
+		return false
+	# The env sound updater is selected by the item's dispatch tag, not by the
+	# BMS record pool. Most authored `snd:` entries are marker records, but JOX
+	# also places envs decorations in the building pool (oil pumps/flares).
+	# [orig: the `envs` entry in the class dispatch table @ 0x82ABD4 routes to
+	# Entity_UpdateEnvSoundEmitter @ 0x4a8080].
+	var ai := String(_item_db.get_ai_function(item_id))
+	var move := String(_item_db.get_move_function(item_id))
+	return ai.to_lower() == "envs" or move.to_lower() == "envs"
+
 
 func _load_bank(lwf_name: String) -> void:
 	if not _resource_root.has_file(lwf_name):
@@ -478,12 +518,12 @@ func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
 
 
 ## Time-of-day region + crossfade for env sound markers [orig:
-## Entity_CalcTimeOfDayRegion @ 0x408110]. Returns { region:int 0..3,
-## adjacent:int, blend:float 0..1 } — each region fades IN over the first
+## Entity_CalcTimeOfDayRegion @ 0x408110]. The typed result carries region
+## 0..3, its adjacent region, and blend 0..1; each region fades IN over the first
 ## ~5 game-minutes after its low cut and fades OUT over the last ~5 before the
 ## next cut; `adjacent` is the neighbouring region at that edge (same-set
 ## neighbours suppress the dip [orig: @ 0x4a819d]).
-static func time_of_day_region(hours: float) -> Dictionary:
+static func time_of_day_region(hours: float) -> TimeOfDayRegion:
 	var t := fposmod(hours, 24.0)
 	var region := 3
 	var low := REGION_CUTS_H[3]
@@ -525,7 +565,7 @@ static func time_of_day_region(hours: float) -> Dictionary:
 		adjacent = 0
 	elif adjacent < 0:
 		adjacent = 3
-	return {"region": region, "adjacent": adjacent, "blend": clampf(blend, 0.0, 1.0)}
+	return TimeOfDayRegion.new(region, adjacent, clampf(blend, 0.0, 1.0))
 
 
 ## The emitter volume byte for a region crossfade blend. The original registers

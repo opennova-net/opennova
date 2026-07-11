@@ -419,12 +419,19 @@ func _apply_expansion(name: String) -> void:
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
+	# A full context reload clears the AudioVM globals. Preserve the active
+	# screen selector so the expansion's newly selected M<n> script enters the
+	# same menu section [orig: Expansion_ReloadAllAssets @ 0x568370 followed by
+	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(2, MUSICVAR)].
+	var active_music_var := NovaMusicService.get_var(MUSIC_VAR_INDEX)
 	if _root.mount_runtime(dir, name, NovaLaunchFlags.loose_override_enabled()) != OK:
 		push_warning("NovaMenuHost: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
 		_root.mount_runtime(dir, prev, NovaLaunchFlags.loose_override_enabled())  # rollback
 		return
 	ResourceDirSettings.set_expansion(name)
 	_selected_expansion = name
+	_enter_menu_music()
+	NovaMusicService.set_var(MUSIC_VAR_INDEX, active_music_var)
 	_refresh_dependent_content()
 	_update_mod_desc(name)
 	expansion_selected.emit(name)

@@ -15,6 +15,23 @@ const MUS_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"  # decrypted SCR0 MU
 const SBF_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"  # real SBF bank (banks stream loose)
 
 
+class _MissingBankMusicRoot extends RefCounted:
+	var script_reads := 0
+
+	func get_expansion() -> String:
+		return ""
+
+	func resolve_file(_name: String) -> String:
+		return ""
+
+	func has_file(name: String) -> bool:
+		return name.to_lower() == "menumus.bin"
+
+	func read_file(_name: String) -> PackedByteArray:
+		script_reads += 1
+		return PackedByteArray([1])
+
+
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
 # stub mission), and a host pointed at it. Returns null when a real temp root is
 # unavailable in this environment (the caller pass_test-skips, as mnu_menu_test does).
@@ -177,6 +194,11 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 		_rm_runtime_dir(dir)
 		return
 	watch_signals(host)
+	assert_eq(NovaMusicService.current_context(), "menu", "base MENU music starts with the shell")
+	assert_not_null(NovaMusicService.current_script(), "base MENUMUS.BIN resolves")
+	if NovaMusicService.current_script() != null:
+		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin")
+	assert_eq(NovaMusicService.get_var(2), 9, "OPTIONS MUSICVAR drives Var2 before the swap")
 	var menu = host.get_menu()
 	var avail = menu.find_child("AVAIL_LIST", true, false)
 	assert_not_null(avail, "AVAIL_LIST built")
@@ -187,6 +209,12 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	assert_signal_emitted_with_parameters(host, "expansion_selected", ["jox01"])
 	assert_eq(host.get_selected_expansion(), "jox01")
 	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
+	assert_not_null(NovaMusicService.current_script(), "expansion menu context reopens")
+	if NovaMusicService.current_script() != null:
+		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
+			"live expansion selection swaps to the M<exp> script")
+	assert_eq(NovaMusicService.get_var(2), 9,
+		"full expansion reload re-drives the active screen MUSICVAR")
 	var desc = menu.find_child("MOD_DESC", true, false)
 	assert_not_null(desc, "MOD_DESC built")
 	assert_string_contains(desc.text, "Kendari", "friendly expansion name shown")
@@ -341,6 +369,7 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "menumus.bin",
 			"menumus.bin loaded from the PFF by hardcoded name")
+	NovaMusicService.set_var(14, 77)
 	# Mission start = a full context reload onto the GAME pair + the witnessed seed.
 	assert_true(NovaMusicService.open_game_context(root), "game context opens")
 	assert_eq(NovaMusicService.current_context(), "game", "the one context swapped to GAME")
@@ -350,6 +379,18 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	assert_eq(NovaMusicService.get_var(1), 0, "Var1 seeded 0 (never written in retail)")
 	assert_eq(NovaMusicService.get_var(7), 100, "Var7 seeded 100 (full health %)")
 	assert_eq(NovaMusicService.get_var(2), 0, "Var2 seeded 0")
+	assert_eq(NovaMusicService.get_var(14), 0, "full context reload clears unseeded globals")
+	NovaMusicService.set_var(14, 88)
+	assert_true(NovaMusicService.open_menu_context(root), "menu context reopens")
+	assert_eq(NovaMusicService.get_var(14), 0,
+		"menu reload also clears globals under the headless audio driver")
+	# A failed replacement open tears down the old pair and obeys the witnessed
+	# bank-first gate: retail never attempts to read the script after no .sbf.
+	var missing_root := _MissingBankMusicRoot.new()
+	assert_false(NovaMusicService.open_menu_context(missing_root), "missing bank leaves silence")
+	assert_eq(missing_root.script_reads, 0, "missing-bank gate precedes VFS script read")
+	assert_null(NovaMusicService.director().get_bank(), "failed open retains no old bank")
+	assert_null(NovaMusicService.director().get_mus_script(), "failed open retains no old script")
 	root.clear()
 	_rm_music_ctx_dir(dir)
 
@@ -537,10 +578,16 @@ func _make_runtime_dir() -> String:
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	_write_pff(dir.path_join("resource.pff"), [
 		{"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(OPTIONS_FIXTURE)},
+		{"name": "menumus.bin", "bytes": FileAccess.get_file_as_bytes(MUS_FIXTURE)},
 	])
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
+		{"name": "Mjox01.bin", "bytes": FileAccess.get_file_as_bytes(MUS_FIXTURE)},
 	])
+	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
+	# Deliberately use retail-style uppercase to pin case-insensitive resolution
+	# on Linux/macOS while preserving the actual host path.
+	_copy(SBF_FIXTURE, dir.path_join("expansion/jox01/MJOX01.SBF"))
 	return dir
 
 
@@ -557,7 +604,8 @@ func _make_runtime_host(dir: String):
 
 
 func _rm_runtime_dir(dir: String) -> void:
-	for sub in ["resource.pff", "expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
+	for sub in ["resource.pff", "menumus.sbf", "expansion/jox01/jox01.pff",
+			"expansion/jox01/MJOX01.SBF", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
 

@@ -45,6 +45,11 @@ var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (t
 func _ready() -> void:
 	if _world == null or _camera == null or _menu_host == null:
 		return
+	# Connect before any world can tick: PreMission/WAC effects may drain on the
+	# first runtime tick, while the local-player HUD is deliberately built only
+	# after that tick. The host owns this persistent GameWorld for its lifetime.
+	if _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(apply_mission_effects):
+		_world.mission_effects.connect(apply_mission_effects)
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# host decides what it means).
 	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
@@ -173,8 +178,6 @@ func _ensure_game_hud() -> void:
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_layout(hudpos, root)
-	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(apply_mission_effects):
-		_world.mission_effects.connect(apply_mission_effects)
 
 
 # Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
@@ -582,11 +585,9 @@ func _on_return_to_menu() -> void:
 		_net_killfeed.queue_free()
 		_net_killfeed = null
 	if _game_hud != null:
-		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(apply_mission_effects):
-			_world.mission_effects.disconnect(apply_mission_effects)
 		_game_hud.queue_free()
 		_game_hud = null
-		_hud_objective = ""
+	_hud_objective = ""
 	_warned_hud_no_player = false
 	if _root != null:
 		_enter_menu(_root.get_root_dir())

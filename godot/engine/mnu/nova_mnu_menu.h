@@ -72,10 +72,6 @@ private:
 	Ref<NovaSbfBank> sound_bank_;
 	NovaMusicDirector *music_director_ = nullptr;
 	int music_var_index_ = 0;
-	// Last music var actually applied; -1 == none yet. Dedups repeated values so
-	// re-showing a screen does not retrigger its track (mirrors menu_manager.gd's
-	// _current_music_var). Reset on each build().
-	int current_music_var_ = -1;
 	String current_screen_;
 	bool edit_mode_ = false;
 	// Layered on top of edit_mode_ for the ONED "play" preview: keeps the authoring

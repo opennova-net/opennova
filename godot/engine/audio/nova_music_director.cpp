@@ -244,6 +244,9 @@ void NovaMusicDirector::stop() {
 	for (int i = 0; i < _players.size(); ++i) {
 		if (_players[i]) {
 			_players[i]->stop();
+			// A stopped player still owns its AudioStream (and therefore the old
+			// SBF bank). Drop it so a context teardown actually releases the pair.
+			_players[i]->set_stream(Ref<AudioStream>());
 		}
 	}
 	_active_play = nullptr;
