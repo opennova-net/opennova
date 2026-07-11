@@ -1044,9 +1044,15 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             ++state.skip_counter;
         } else {
             if (++state.skip_counter > 20) state.skip_counter = 10;
-            int32_t v = vel_z;
-            if (!is_player) v *= 2;
-            pos[2] -= v;
+            // Revert the caller's gravity displacement so a skipped tick nets
+            // zero. The original reverts x1 for players / x2 for NPCs
+            // [orig: @ 0x4b2ce5-0x4b2ce9] because ITS player motor integrates
+            // slideDecay x1 EVERY tick; OUR motor integrates pos += 2*vel for
+            // both (the player on the 2-tick gravity cadence — infantry.cpp,
+            // D-INF-10), so the exact undo is x2 for both. A x1 player revert
+            // here leaks -vel per gravity tick through the skip band: the
+            // idle sink-and-pop sawtooth.
+            pos[2] -= 2 * vel_z;
             vel_z = 0;
             return 0; // [orig: skip path returns 0 @ 0x4b2cec]
         }
