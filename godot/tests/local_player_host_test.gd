@@ -121,6 +121,25 @@ func test_shared_host_drives_simultaneous_raw_input_before_world_tick() -> void:
 	assert_eq(world.viewmodel_count, 1, "FP viewmodel is owned by the shared host")
 
 
+func test_inactive_gameplay_submits_neutral_movement_while_world_keeps_ticking() -> void:
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {"forward": true, "left": true, "run": true, "jump": true})
+
+	host.before_world_tick(0.016, false, false)
+
+	assert_eq(world.input_calls.size(), 1, "the live overlay still submits one input frame")
+	var call: Dictionary = world.input_calls[0]
+	for key in ["forward", "back", "left", "right", "run", "jump"]:
+		assert_false(bool(call[key]), "%s is neutral while the armory owns input" % key)
+
+
 func test_shared_host_mouse_yaw_wraps_and_pitch_clamps() -> void:
 	var world := FakeWorld.new()
 	var camera := Camera3D.new()

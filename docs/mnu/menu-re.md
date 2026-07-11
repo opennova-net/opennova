@@ -691,12 +691,14 @@ mount never consults the FP render model]`. Our SP apply stamps
 (the sim's multi-slot inventory is the tracked runtime gap).
 
 **Reimpl status (2026-07-11 re-grill).** Ported and matching: the zone-gated
-open on the use-item key (SHIFT), the live-overlay (no world-stop) state, the
-CHARCLASS_* class rows + resolve rule + MP-only class selection, sorted rows
+open on the use-item key (SHIFT), including its not-seated gate, the live-overlay
+(no world-stop) state, the CHARCLASS_* class rows + resolve rule in offline play, sorted rows
 under NONE, the equipped-primary reselect, the witnessed weight format, and the
-ACCEPT collect/apply seam. Kept divergence: **D-MNU-9**. Deferred (unported
+offline ACCEPT collect/apply seam. Kept divergence: **D-MNU-9**. Deferred (unported
 sub-elements, tracked here + in `ArmoryMenuHost`'s header): the per-class
-loadout buffers (save-on-flip + reselect + remembered ammo counts), the
+loadout buffers (save-on-flip + reselect + remembered ammo counts), live MP
+C2S 0x2F / S2C 0x5A submission (the UI stays gated in a network session until
+that authoritative path is exposed), MP class selection, the
 `g_armoryWeaponAvailability` table (mission/S2C/admin-authored), the
 `*_AMMO1_TYPE` round-type cascade + per-ammo-def weight, `*_AMMO2` /
 GRENADE_AMMO1..3, the icon swaps, the ACCEPT hotkeys, the MP scoreboard

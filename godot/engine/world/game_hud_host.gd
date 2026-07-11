@@ -90,18 +90,21 @@ func _ensure_game_hud() -> void:
 	_load_hud_text_tables(root)
 
 
-# The string tables the HUD resolves against: the gametext table (weapon "WepDes"
-# names) if the menu shell has not already registered it, and the per-mission text
-# table (<mission>.bin, falling back to medmssn.bin) for WAC/BMS triggered text.
+# The string tables the HUD resolves against: the current root's gametext table
+# (weapon "WepDes" names), and the per-mission text table (<mission>.bin, falling
+# back to medmssn.bin) for WAC/BMS triggered text.
 # [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
 #  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
 func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 	if root == null:
 		return
-	if NovaStrings.get_table("gametext") == null:
-		var gametext := _load_rtxt(root, "gametext.bin")
-		if gametext != null:
-			NovaStrings.register_table("gametext", gametext)
+	# Refresh this global registry from the current world's root every build.
+	# Otherwise a second ONED play session can silently reuse the first root's
+	# strings, and its armory will skip the JO Game.bin table it expects.
+	var gametext := _load_rtxt(root, "Game.bin")
+	if gametext == null:
+		gametext = _load_rtxt(root, "gametext.bin")
+	NovaStrings.register_table("gametext", gametext)
 	# The medmssn fallback fires only when the mission .bin does not EXIST — a
 	# present-but-unparseable file loads to nothing with no fallback.
 	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks

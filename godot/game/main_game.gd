@@ -137,6 +137,19 @@ func _ready() -> void:
 		})
 
 
+# Consume Esc before weapon.mnu's host-wired CANCEL hotkey and FlyCamera can both
+# observe it. The menu button has no authored ACTION, so its generic hotkey path
+# reports unhandled even after emitting pressed; without this early claim the same
+# Esc closes ARMORY and then immediately opens PAUSE.
+func _input(event: InputEvent) -> void:
+	if _state != State.ARMORY or not (event is InputEventKey):
+		return
+	var key := event as InputEventKey
+	if key.pressed and not key.echo and key.keycode == KEY_ESCAPE:
+		_on_resume()
+		get_viewport().set_input_as_handled()
+
+
 # F9 (re)opens the asset-folder picker from the front-end so the player can point
 # the runtime at a different game folder. Restricted to the menu state so an active
 # mission is never yanked out from under a remount; ignored while a picker is open.
@@ -619,7 +632,8 @@ func _process(delta: float) -> void:
 	if _state == State.PAUSED or not _world.is_loaded():
 		return
 	if _player_host != null:
-		_player_host.before_world_tick(delta, _state == State.WORLD)
+		var player_live := _state == State.WORLD
+		_player_host.before_world_tick(delta, player_live, player_live)
 	_world.tick(_camera.global_position, _camera.global_transform, delta)
 	if _player_host != null:
 		_player_host.after_world_tick()

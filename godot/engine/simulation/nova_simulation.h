@@ -386,6 +386,11 @@ public:
 	int get_local_player_health() const;
 	int get_local_player_max_health() const;
 	int get_local_player_team() const;
+	// Authoritative armory on-show state from the spawned entity. The class is
+	// playerClass +0x294; the name resolves equipped AdmDef index +0x2B0.
+	// [orig: Armory_ResolveSelectedClass @0x5642f0; Player_MountWeaponSlot @0x4dfa40]
+	int get_local_player_class() const;
+	String get_local_player_weapon_name() const;
 	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The host
 	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
 	int get_local_player_body_anim_slot() const;
@@ -605,7 +610,9 @@ public:
 	// The armory ACCEPT apply for the local player: resolve the weapon name in the
 	// armory table and stamp equipped_adm_index (+ player_class 5..9 when given).
 	// The FP viewmodel + action-FSM rebuild is the host's move (GameWorld). Returns
-	// false when the name is not in the table. [orig: WeaponLoadout_ApplyFromBuffer
+	// An empty name is the authored NONE row: clear equipped_adm_index while still
+	// applying a valid class. Returns false when a non-empty name is not in the table.
+	// [orig: WeaponLoadout_ApplyFromBuffer
 	// @0x565cd0 tail -> Player_SelectWeaponSlot/Player_MountWeaponSlot; the MP client
 	// path rides the C2S 0x2F / S2C 0x5A service instead (npruntime, D-NET-141/143)]
 	bool apply_local_player_loadout(const String &p_weapon_name, int p_player_class);

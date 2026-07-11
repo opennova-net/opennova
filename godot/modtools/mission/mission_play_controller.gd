@@ -32,6 +32,7 @@ var _viewport: SubViewport
 var _world  # GameWorld
 var _camera: Camera3D
 var _player_host: LocalPlayerHost
+var _ui_overlay: Control
 var _armory: NovaArmoryHost
 var _hud_host: NovaGameHudHost
 var _input_router: Node
@@ -79,13 +80,22 @@ func _ready() -> void:
 	add_child(_player_host)
 	_player_host.setup(_world, _camera)
 
+	# One clipped overlay surface sized to the embedded play panel. The HUD and
+	# armory share it; PlayStatus is added afterward and stays above both.
+	_ui_overlay = Control.new()
+	_ui_overlay.name = "GameplayOverlay"
+	_ui_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui_overlay.clip_contents = true
+	add_child(_ui_overlay)
+	_ui_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+
 	# The in-game HUD — the SAME NovaGameHudHost the game shell mounts (crosshair,
 	# ammo cluster, mission text), so play-in-editor shows the game's HUD. Added
 	# before the armory so its overlay draws beneath the WEAPON screen.
 	_hud_host = NovaGameHudHost.new()
 	_hud_host.name = "GameHudHost"
 	add_child(_hud_host)
-	_hud_host.setup(_world, _player_host, self)
+	_hud_host.setup(_world, _player_host, _ui_overlay)
 
 	# The in-world armory — the SAME NovaArmoryHost the game shell mounts (one
 	# armory code path; editor-runtime parity). The weapon.mnu overlay parents to
@@ -93,7 +103,7 @@ func _ready() -> void:
 	_armory = NovaArmoryHost.new()
 	_armory.name = "ArmoryHost"
 	add_child(_armory)
-	_armory.setup(_world, _player_host, self)
+	_armory.setup(_world, _player_host, _ui_overlay)
 	_armory.opened.connect(func() -> void:
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE))
@@ -181,7 +191,7 @@ func _process(delta: float) -> void:
 		# per-tick capture pauses so the menu takes the clicks.
 		var player_live := not _capture_suspended and not (_armory != null and _armory.is_open())
 		if _player_host != null:
-			_player_host.before_world_tick(delta, player_live)
+			_player_host.before_world_tick(delta, player_live, player_live)
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
 		if _player_host != null:
 			_player_host.after_world_tick()

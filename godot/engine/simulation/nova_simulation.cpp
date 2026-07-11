@@ -553,7 +553,10 @@ Dictionary NovaSimulation::get_collision_debug() const {
 bool NovaSimulation::local_player_in_armory_zone() const {
 	if (!world_) return false;
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
-	return e != nullptr && (e->flags & opennova::world::kEntityFlagArmoryZone) != 0;
+	// The use-item armory leg rejects a seated player before consulting the type-6
+	// volume bit [orig: Input_HandleActionBinding_0 @0x4e0b3f, parentSlot == 0].
+	return e != nullptr && !e->mounted &&
+	       (e->flags & opennova::world::kEntityFlagArmoryZone) != 0;
 }
 
 bool NovaSimulation::local_player_in_vehicle_loadout_zone() const {
@@ -568,6 +571,12 @@ bool NovaSimulation::apply_local_player_loadout(const String &p_weapon_name,
 	if (!world_) return false;
 	opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (e == nullptr) return false;
+	if (p_weapon_name.is_empty()) {
+		e->equipped_adm_index = 0xFF;
+		if (p_player_class >= 5 && p_player_class <= 9)
+			e->player_class = static_cast<uint8_t>(p_player_class);
+		return true;
+	}
 	const int idx = world_->weapons.index_of(p_weapon_name.utf8().get_data());
 	if (idx < 0) return false;
 	e->equipped_adm_index = static_cast<uint8_t>(idx);
@@ -826,6 +835,8 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &NovaSimulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &NovaSimulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &NovaSimulation::get_local_player_team);
+	ClassDB::bind_method(D_METHOD("get_local_player_class"), &NovaSimulation::get_local_player_class);
+	ClassDB::bind_method(D_METHOD("get_local_player_weapon_name"), &NovaSimulation::get_local_player_weapon_name);
 	ClassDB::bind_method(D_METHOD("drain_effects"), &NovaSimulation::drain_effects);
 	ClassDB::bind_method(D_METHOD("set_wac_program", "program"), &NovaSimulation::set_wac_program);
 	ClassDB::bind_method(D_METHOD("get_wac_program"), &NovaSimulation::get_wac_program);
@@ -1694,6 +1705,21 @@ int NovaSimulation::get_local_player_team() const {
 	if (!world_ || !world_->cached.local_player.valid()) return 0;
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	return e ? static_cast<int>(e->team) : 0;
+}
+
+int NovaSimulation::get_local_player_class() const {
+	if (!world_ || !world_->cached.local_player.valid()) return 0;
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	return e ? static_cast<int>(e->player_class) : 0;
+}
+
+String NovaSimulation::get_local_player_weapon_name() const {
+	if (!world_ || !world_->cached.local_player.valid()) return String();
+	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+	if (!e) return String();
+	const opennova::world::WeaponTableEntry *weapon =
+			world_->weapons.by_index(e->equipped_adm_index);
+	return weapon ? String(weapon->name.c_str()) : String();
 }
 
 void NovaSimulation::restart() {

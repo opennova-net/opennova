@@ -78,6 +78,29 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 		"a replacement local entity observes the current AnimMap as new")
 	sim.free()
 
+func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
+	var md := NovaMissionData.new()
+	assert_eq(md.create_default(), OK)
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 2))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+
+	assert_eq(sim.get_local_player_class(), 8, "spawned player exposes its rifleman class")
+	assert_eq(sim.get_local_player_team(), 2, "spawned player exposes the assigned red team")
+	assert_eq(sim.get_local_player_weapon_name(), "WPN_M4AUTO",
+		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
+
+	assert_true(sim.apply_local_player_loadout("WPN_M4AUTO", 6))
+	assert_eq(sim.get_local_player_class(), 6, "accepted class is authoritative on reopen")
+	assert_true(sim.apply_local_player_loadout("", 9), "the authored NONE row is a valid apply")
+	assert_eq(sim.get_local_player_class(), 9, "NONE still commits the selected class")
+	assert_eq(sim.get_local_player_weapon_name(), "", "NONE clears the equipped AdmDef")
+	sim.free()
+
+
 func test_entities_walk_their_route() -> void:
 	# Soldiers are anim-driven [orig: Entity_UpdateInfantryAI @0x4b9910]: their motion
 	# comes from .bad root-motion clips resolved through a model's .adm. Without a clip

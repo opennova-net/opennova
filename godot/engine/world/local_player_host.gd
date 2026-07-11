@@ -240,7 +240,8 @@ func is_third_person() -> bool:
 	return _third_person
 
 
-func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
+func before_world_tick(_delta: float, capture_mouse: bool = false,
+		gameplay_input_active: bool = true) -> void:
 	if not _has_player():
 		_set_fly_camera_locked(false)
 		_release_mouse_capture()
@@ -252,7 +253,10 @@ func before_world_tick(_delta: float, capture_mouse: bool = false) -> void:
 	if capture_mouse and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 	_ensure_models()
-	var state := _read_input_state()
+	# A live UI overlay keeps the world ticking but must actively submit a neutral
+	# movement frame. Skipping this call leaves the sim holding its previous input,
+	# so a player who opened the armory while running would keep running under it.
+	var state := _read_input_state() if gameplay_input_active else {}
 	_world.set_local_player_input(
 		_bool(state, "forward"),
 		_bool(state, "back"),

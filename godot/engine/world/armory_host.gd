@@ -21,6 +21,8 @@ extends Node
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
 const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (menu_shell's default)
+const DESIGN_SIZE := Vector2(800, 600)
+const MUSIC_VAR_INDEX := 2
 
 signal opened
 signal closed
@@ -33,6 +35,7 @@ var _team := 0
 # [orig: entity playerClass feeds Armory_ResolveSelectedClass @0x5642f0]. Stamped
 # by the armory ACCEPT until the spawn path carries a class of its own.
 var _player_class := 0
+var _warned_mp_unavailable := false
 
 var _menu: NovaMnuMenu = null
 var _menu_root: NovaResourceRoot = null  # the root the built menu was fed from
@@ -50,6 +53,7 @@ func setup(world, player_host, ui_parent: Node) -> void:
 	_world = world
 	_player_host = player_host
 	_ui_parent = ui_parent
+	_connect_layout_source()
 
 
 func set_player_team(team: int) -> void:
@@ -72,17 +76,39 @@ func try_open() -> bool:
 		return false
 	if not sim.local_player_in_armory_zone():
 		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
+	# The current Godot client has no live C2S 0x2F submission API. Letting a LAN
+	# client use the SP-local apply would bypass the server's availability/class
+	# checks, so keep the surface offline-only until that request/reply path lands.
+	if _in_multiplayer_session(sim):
+		if not _warned_mp_unavailable:
+			_warned_mp_unavailable = true
+			push_warning("NovaArmoryHost: multiplayer armory waits for the live 0x2F/0x5A loadout service")
+		return false
 	if not _ensure_menu():
 		return false
 	# The on-show protocol: the screen re-resolves the class and repopulates every
 	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0]; the
 	# equipped primary stands in for the per-class buffer reselect (see the
 	# companion's header).
+	# Re-read the spawned entity on every show. Entity teams use 1/3=blue and
+	# 2/4=red; the menu filter uses the profile-side 0=blue, 1=red domain.
+	if _world.has_method("local_player_team"):
+		var entity_team := int(_world.local_player_team())
+		if entity_team == 1 or entity_team == 3:
+			_team = 0
+		elif entity_team == 2 or entity_team == 4:
+			_team = 1
+	if sim.has_method("get_local_player_class"):
+		_player_class = int(sim.get_local_player_class())
 	_armory.set_player_team(_team)
 	_armory.set_player_class(_player_class)
+	_armory.set_class_selection_enabled(false)
 	var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
 			if _world.has_method("local_player_viewmodel_def") else null
-	_armory.set_current_loadout(vmdef.weapon_name if vmdef != null else "")
+	var current_primary := vmdef.weapon_name if vmdef != null else ""
+	if sim.has_method("get_local_player_weapon_name"):
+		current_primary = String(sim.get_local_player_weapon_name())
+	_armory.set_current_loadout(current_primary)
 	_armory.on_menu_built(_menu, MENU_FILE, MENU_SCREEN, _menu_root)
 	# The menu draws over every HUD element (the lazily built GameHud may have been
 	# added after us) [orig: the UI scene renders after HUD_DrawGameplayOverlays in
@@ -109,8 +135,8 @@ func teardown() -> void:
 
 # Build the runtime menu node over the gameplay view: the same NovaMnuMenu the
 # menu shell drives (edit_mode off), fed weapon.mnu from the WORLD's mounted
-# resource root, with the canonical stylesheet and the menutxt/gametext tables
-# registered when no front-end shell did it already (ONED play has none).
+# resource root, with the canonical stylesheet and the current root's
+# menutxt/gametext tables (ONED play has no front-end shell to load them).
 func _ensure_menu() -> bool:
 	if _menu != null and is_instance_valid(_menu):
 		return true
@@ -132,10 +158,21 @@ func _ensure_menu() -> bool:
 	_menu.build_on_ready = false
 	_menu.set_edit_mode(false)
 	_menu.set_resource_root(root)
+	var menu_text: RtxtStringFile = NovaStrings.get_table("menutxt")
+	if menu_text != null:
+		_menu.set_text_resource(menu_text)
 	var style := _load_style(root)
 	if style != null:
 		_menu.set_stylesheet(style)
+	_menu.set_music_director(NovaMusicService.director())
+	_menu.set_music_var_index(MUSIC_VAR_INDEX)
+	# weapon.mnu shares the retail menu's fixed 800x600 design space and the
+	# independent X/Y fill used by every front-end screen.
+	# [orig: CUIScene_SetScreenScale @0x639480]
+	_menu.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_menu.size = DESIGN_SIZE
 	_ui_parent.add_child(_menu)
+	_recompute_fit()
 	_menu.set_menu_file(MENU_FILE)
 	_menu.menu = doc
 	_menu.show_screen(MENU_SCREEN)
@@ -153,10 +190,22 @@ func _ensure_menu() -> bool:
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
-	if not primary.is_empty() and _world != null:
+	if _world != null:
 		var sim = _world.get_sim() if _world.has_method("get_sim") else null
+		var applied := false
 		if sim != null and sim.has_method("apply_local_player_loadout"):
-			sim.apply_local_player_loadout(primary, int(loadout.get("player_class", 0)))
+			applied = bool(sim.apply_local_player_loadout(
+					primary, int(loadout.get("player_class", 0))))
+		if not applied:
+			close()
+			return
+		if primary.is_empty():
+			if _world.has_method("clear_local_player_weapon"):
+				_world.clear_local_player_weapon()
+				if _player_host != null:
+					_player_host.refresh_viewmodel()
+			close()
+			return
 		if _world.has_method("set_local_player_weapon_by_name") \
 				and _world.set_local_player_weapon_by_name(primary) \
 				and _player_host != null:
@@ -170,14 +219,13 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 # [orig: Game_InitSubsystems @0x4a6cd0 loads menutxt/gametext at boot]
 func _register_text_tables(root: NovaResourceRoot) -> void:
 	for spec in [["menutxt", "menutxt.BIN"], ["gametext", "Game.bin"]]:
-		if NovaStrings.get_table(spec[0]) != null:
-			continue
 		var bytes := root.read_file(spec[1])
-		if bytes.is_empty():
-			continue
-		var t := RtxtStringFile.new()
-		if t.load_from_byte_array(bytes) == OK:
-			NovaStrings.register_table(spec[0], t)
+		var table: RtxtStringFile = null
+		if not bytes.is_empty():
+			var loaded := RtxtStringFile.new()
+			if loaded.load_from_byte_array(bytes) == OK:
+				table = loaded
+		NovaStrings.register_table(spec[0], table)
 
 
 # The canonical menu stylesheet name the original engine looks for.
@@ -187,3 +235,35 @@ func _load_style(root: NovaResourceRoot) -> MnsStyleSheet:
 		return null
 	var s := MnsStyleSheet.new()
 	return s if s.load_from_bytes(bytes) == OK else null
+
+
+func _in_multiplayer_session(sim) -> bool:
+	if sim.has_method("is_host_listening") and bool(sim.is_host_listening()):
+		return true
+	return sim.has_method("is_joiner") and bool(sim.is_joiner())
+
+
+func _connect_layout_source() -> void:
+	if _ui_parent is Control:
+		var control := _ui_parent as Control
+		if not control.resized.is_connected(_recompute_fit):
+			control.resized.connect(_recompute_fit)
+		return
+	var viewport := _ui_parent.get_viewport() if _ui_parent != null else null
+	if viewport != null and not viewport.size_changed.is_connected(_recompute_fit):
+		viewport.size_changed.connect(_recompute_fit)
+
+
+func _recompute_fit() -> void:
+	if _menu == null or not is_instance_valid(_menu):
+		return
+	var target_size := Vector2.ZERO
+	if _ui_parent is Control:
+		target_size = (_ui_parent as Control).size
+	elif _ui_parent != null and _ui_parent.get_viewport() != null:
+		target_size = _ui_parent.get_viewport().get_visible_rect().size
+	if target_size.x <= 1.0 or target_size.y <= 1.0:
+		return
+	_menu.position = Vector2.ZERO
+	_menu.size = DESIGN_SIZE
+	_menu.scale = Vector2(target_size.x / DESIGN_SIZE.x, target_size.y / DESIGN_SIZE.y)
