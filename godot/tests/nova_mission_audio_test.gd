@@ -44,7 +44,7 @@ func test_only_the_loudest_eight_voices_mix() -> void:
 		var p := _voice(holder, 2000)
 		players.append(p)
 		markers.append(_marker(holder, Vector3(float(10 + i * 50), 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]}))
-	audio._markers = markers
+	audio.set_markers(markers)
 	audio.tick(Vector3.ZERO)
 	for i in range(12):
 		if i < 8:
@@ -60,7 +60,7 @@ func test_beyond_falloff_radius_is_hard_silent() -> void:
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var p := _voice(holder, 100)
-	audio._markers = [_marker(holder, Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})]
+	audio.set_markers([_marker(holder, Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})])
 	audio.tick(Vector3.ZERO)
 	assert_eq(p.volume_db, SILENT_DB, "a voice at d >= falloff_radius is silent [orig: 0x75ca31]")
 
@@ -71,7 +71,7 @@ func test_time_of_day_slot_selects_the_active_set() -> void:
 	add_child_autofree(holder)
 	var night := _voice(holder, 500)
 	# Night-only marker (a flourescent light): soundloop_4 filled, 1..3 empty.
-	audio._markers = [_marker(holder, Vector3(10, 0, 0), ["", "", "", "night_hum"], {"night_hum": [night]})]
+	audio.set_markers([_marker(holder, Vector3(10, 0, 0), ["", "", "", "night_hum"], {"night_hum": [night]})])
 
 	audio.set_time_of_day_hhmm(1200.0)  # noon -> region 1 (day) -> empty slot
 	audio.tick(Vector3.ZERO)
@@ -88,7 +88,7 @@ func test_region_crossfade_scales_volume() -> void:
 	add_child_autofree(holder)
 	var day := _voice(holder, 500)
 	var markers := [_marker(holder, Vector3(10, 0, 0), ["", "day_amb", "", ""], {"day_amb": [day]})]
-	audio._markers = markers
+	audio.set_markers(markers)
 
 	audio.set_time_of_day_hhmm(1200.0)  # mid-day: full blend
 	audio.tick(Vector3.ZERO)
@@ -108,7 +108,7 @@ func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
 	add_child_autofree(holder)
 	var allday := _voice(holder, 500)
 	# The same set in every slot (a marker whose soundloop_1..4 all name one set).
-	audio._markers = [_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [allday]})]
+	audio.set_markers([_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [allday]})])
 
 	audio.set_time_of_day_hhmm(1200.0)
 	audio.tick(Vector3.ZERO)
@@ -125,7 +125,7 @@ func test_tick_writes_only_on_change() -> void:
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var p := _voice(holder, 500)
-	audio._markers = [_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})]
+	audio.set_markers([_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [p]})])
 
 	audio.tick(Vector3.ZERO)
 	assert_eq(int(audio.get_perf_counters().get("voice_writes", -1)), 1, "first tick writes the voice on")

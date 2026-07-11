@@ -99,7 +99,7 @@ func _run() -> void:
 	if not ambient:
 		# STRATEGY_TARGET_ID resolves no marker names -> banks + .DBF still load,
 		# zero ambient voices spawn. This is the "ambient sounds disabled" arm.
-		audio._strategy = NovaMissionAudioScript.STRATEGY_TARGET_ID
+		audio.set_resolution_strategy(NovaMissionAudioScript.STRATEGY_TARGET_ID)
 	var stats: Dictionary = audio.setup(mission, mission_name, container)
 	print("[dlgprobe] setup: %s" % str(stats))
 
@@ -182,7 +182,7 @@ func _run() -> void:
 		if not ok:
 			_fail_note("dlg%03d (%s): play_dialog returned false" % [id, set_name])
 			continue
-		var voice: AudioStreamPlayer = audio._dialog_voice
+		var voice: AudioStreamPlayer = audio.dialog_voice()
 		if voice == null:
 			_fail_note("dlg%03d (%s): queued but no voice spawned" % [id, set_name])
 			continue
@@ -194,7 +194,7 @@ func _run() -> void:
 		var peak_voice := -200.0
 		var peak_ambient := -200.0
 		var peak_master := -200.0
-		while audio._dialog_voice != null and is_instance_valid(audio._dialog_voice):
+		while audio.dialog_voice() != null:
 			if Time.get_ticks_msec() > deadline:
 				break
 			if voice_bus >= 0:
@@ -203,7 +203,7 @@ func _run() -> void:
 				peak_ambient = maxf(peak_ambient, AudioServer.get_bus_peak_volume_left_db(ambient_bus, 0))
 			peak_master = maxf(peak_master, AudioServer.get_bus_peak_volume_left_db(master_bus, 0))
 			await process_frame
-		var advanced: bool = audio._dialog_voice == null
+		var advanced: bool = audio.dialog_voice() == null
 		var audible := peak_voice > SILENCE_FLOOR_DB
 		print("[dlgprobe] dlg%03d set=%s len=%.2fs loop_mode=%d -> spawn=OK audible=%s (voice peak %.1f dB) advance=%s | ambient peak %.1f dB master peak %.1f dB" % [
 			id, set_name, length, loop_mode, str(audible), peak_voice, str(advanced), peak_ambient, peak_master])

@@ -189,6 +189,22 @@ func get_stats() -> Dictionary:
 	return _stats
 
 
+## Read/drive seams (ADR 0018): tests and diagnostics go through these, never
+## the private fields. set_markers injects fully-resolved marker entries (the
+## shape _markers documents above) so the mix tick can be driven without a
+## mission; dialog_voice exposes the active serialized-dialog voice.
+func set_markers(markers: Array) -> void:
+	_markers = markers
+
+
+func set_resolution_strategy(strategy: int) -> void:
+	_strategy = strategy
+
+
+func dialog_voice() -> AudioStreamPlayer:
+	return _dialog_voice if _dialog_voice != null and is_instance_valid(_dialog_voice) else null
+
+
 func get_perf_counters() -> Dictionary:
 	return {
 		"tick_us": _perf_tick_us,
