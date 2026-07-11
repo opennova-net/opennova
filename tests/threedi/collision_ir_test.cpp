@@ -50,6 +50,29 @@ int main() {
     check(threedi_ir_collision_is_runtime_safe(nullptr) == 0,
           "null collision block is rejected");
 
+    ThreediIRCollisionPlane grouped_planes[4] = {};
+    ThreediIRCollisionVolume grouped_volumes[2] = {};
+    ThreediIRCollisionObject grouped_objects[2] = {};
+    grouped_volumes[0].plane_start = 0;
+    grouped_volumes[0].plane_count = 2;
+    grouped_volumes[0].object_index = 1;
+    grouped_volumes[1].plane_start = 2;
+    grouped_volumes[1].plane_count = 2;
+    grouped_volumes[1].object_index = 0;
+    ThreediIRCollision grouped = {};
+    grouped.planes = grouped_planes;
+    grouped.plane_count = 4;
+    grouped.volumes = grouped_volumes;
+    grouped.volume_count = 2;
+    grouped.objects = grouped_objects;
+    grouped.object_count = 2;
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 0,
+          "non-monotonic object groups are rejected");
+    grouped_volumes[0].object_index = 0;
+    grouped_volumes[1].object_index = 1;
+    check(threedi_ir_collision_is_runtime_safe(&grouped) == 1,
+          "ordered object groups are safe");
+
     if (failures == 0) std::printf("collision_ir_test: OK\n");
     return failures == 0 ? 0 : 1;
 }

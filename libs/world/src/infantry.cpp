@@ -38,7 +38,9 @@
 //            25) are not ported; alerts currently come from the BMS seed / explicit state.
 //            Rides the combat pass with the rest of the targeting layer.
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <io/bam.h>
 
@@ -602,7 +604,14 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // The registry Entity is the script/HUD/wire health store. Hydrate the
     // motor copy before death selection and damage so item-trait resolution,
     // round hits, and scripted health changes all feed this tick's one result.
-    if (const Entity *ent = world.registry.get(e.handle)) e.health = ent->health;
+    if (const Entity *ent = world.registry.get(e.handle)) {
+        e.health = ent->health;
+        if (ent->health_max > 0) {
+            e.inf.max_health = static_cast<int16_t>(
+                std::min(ent->health_max,
+                         static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+        }
+    }
 
     InfantryState &inf = e.inf;
     // Per-entity stagger key. [orig: tickCounter = current_tick + 36 * entity[31]]

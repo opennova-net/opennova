@@ -535,6 +535,21 @@ void test_slice_cadence_and_invuln() {
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
                           false, true, 0, 43, 0u, health);
     CHECK(health == 100);
+
+    // The similarly numbered runtime Flags bit is unrelated: only EngineFlags
+    // carries item-definition indestructibility.
+    Rig runtime_flags(box_model(18, 0, 3.0, 3.0, 3.0));
+    Entity *not_inv = runtime_flags.world.registry.get(runtime_flags.soldier);
+    not_inv->flags |= 0x4000000u;
+    runtime_flags.move_soldier(10.0, 10.0, 0.5);
+    int32_t pos2[3] = {fx(10.0), fx(10.0), fx(0.5)};
+    int32_t vel2[3] = {0, 0, 0};
+    int16_t health2 = 100;
+    CollisionWorld::ResolveState state2;
+    runtime_flags.cw.resolve_entity(runtime_flags.world, runtime_flags.soldier, state2, pos2,
+                                    vel2, vel2[2], 0, fx(1.8), 0, 0, false, true, 0, 43, 0u,
+                                    health2);
+    CHECK(health2 == 99);
 }
 
 // ---------------------------------------------------------------------------
@@ -560,6 +575,7 @@ void test_pool1_item_is_one_collision_candidate() {
     cw.assign_entity(item_handle, model_id);
     for (int i = 0; i < 17; ++i) cw.build_tick_tables(world);
 
+    CHECK(cw.static_count() == 0);
     CHECK(cw.candidate_count(source) == 1);
 }
 

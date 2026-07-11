@@ -46,6 +46,13 @@ static func _quarter_turn_box_corners() -> PackedVector3Array:
 	return corners
 
 
+static func _shifted_box_corners() -> PackedVector3Array:
+	var corners := _unit_box_corners()
+	for c in range(corners.size()):
+		corners[c] += Vector3(2.0, 0.0, 0.0)
+	return corners
+
+
 func _debug_payload() -> Dictionary:
 	return {
 		"instances": [{
@@ -139,3 +146,24 @@ func test_rotation_only_refreshes_hull_geometry() -> void:
 		"a vehicle rotating in place redraws its collision hull")
 	assert_eq(rotated_bounds.position, Vector3(0.0, 0.0, -1.0),
 		"the redrawn hull uses the rotated corners from the sim")
+
+
+func test_same_pose_replacement_refreshes_hull_geometry() -> void:
+	var payload := _debug_payload()
+	var world := _make_world(payload)
+	var view := _make_view(world)
+	view.refresh_now()
+	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
+	var initial_bounds := (hull.mesh as ImmediateMesh).get_aabb()
+
+	# Mission reloads can reuse a handle at the same position and heading while
+	# replacing its collision model. Geometry itself must participate in the key.
+	var instance: Dictionary = payload["instances"][0]
+	(instance["volumes"][0] as Dictionary)["corners"] = _shifted_box_corners()
+	view.refresh_now()
+
+	var replacement_bounds := (hull.mesh as ImmediateMesh).get_aabb()
+	assert_ne(replacement_bounds, initial_bounds,
+		"same-pose replacement geometry invalidates the hull cache")
+	assert_eq(replacement_bounds.position, Vector3(2.0, 0.0, 0.0),
+		"the redraw uses the replacement model's corners")

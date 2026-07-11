@@ -481,6 +481,7 @@ static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision 
     if (collision->plane_count != 0 && !collision->planes) return 0;
     if (collision->object_count != 0 && !collision->objects) return 0;
 
+    int32_t previous_group = -1;
     for (size_t i = 0; i < collision->volume_count; ++i) {
         const ThreediIRCollisionVolume *volume = &collision->volumes[i];
         if (volume->plane_start < 0 || volume->plane_count <= 0) return 0;
@@ -491,6 +492,9 @@ static inline int threedi_ir_collision_is_runtime_safe(const ThreediIRCollision 
         if (volume->object_index < -1) return 0;
         if (volume->object_index >= 0 &&
             (size_t)volume->object_index >= collision->object_count) return 0;
+        const int32_t group = volume->object_index < 0 ? 0 : volume->object_index;
+        if (group < previous_group) return 0;
+        previous_group = group;
     }
     return 1;
 }

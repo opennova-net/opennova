@@ -230,6 +230,32 @@ void test_hurt_volume_updates_registry_health() {
     CHECK(!observed->alive);
 }
 
+void test_registry_max_health_drives_wounded_gait() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity infantry;
+    infantry.kind = EntityKind::Organic;
+    infantry.health = 75;
+    infantry.health_max = 150;
+    const EntityHandle handle = world.registry.spawn(0, infantry);
+
+    AiSystem ai;
+    TestSource source;
+    source.clips = {anim_state::kWalkForward, anim_state::kWoundedWalk};
+    ai.root_motion = &source;
+    AiEntity *motor = ai.at(ai.attach(handle));
+    motor->inf.active = true;
+    motor->health = 100;
+    motor->inf.max_health = 100;
+    route(ai, motor, {node(fx(500), 0, fx(1))}, 0);
+
+    run_ticks(ai, world, 0, 1);
+
+    CHECK(motor->health == 75);
+    CHECK(motor->inf.max_health == 150);
+    CHECK(motor->inf.anim_state == anim_state::kWoundedWalk);
+}
+
 // D-NET-159 — AUTHORITY body-anim selection for a net-snapped REMOTE player. Runs in
 // its own function: main's frame already unions a dozen scoped World locals and MSVC
 // probes the whole frame at entry, so one more inline block overflowed the stack.
@@ -1501,6 +1527,7 @@ int main() {
     // change landed alongside it.
     test_remote_player_body_anim();
     test_hurt_volume_updates_registry_health();
+    test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
     test_player_weapon_channel();

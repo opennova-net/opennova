@@ -739,6 +739,8 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
         ThreediIRCollision *col = (ThreediIRCollision *)calloc(1, sizeof(ThreediIRCollision));
         if (!col) goto error;
         out->collision = col;
+        if (src->object_count < 0 ||
+            (src->object_count > 0 && !src->objects)) goto error;
 
         // Copy model bounds from header
         memcpy(col->model_min, src->min, sizeof(float) * 3);
@@ -755,6 +757,26 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
             int32_t imax = obj0->bbox_max_x;
             if (hmax != 0.0f && imax != 0) {
                 inv_scale = hmax / (float)imax;
+            }
+        }
+
+        // Preserve the GP collision-object table in the canonical IR, matching
+        // the modern COBJ converter. Runtime sections use the parent subobject
+        // to attach collision to the correct animated model part.
+        col->object_count = (size_t)src->object_count;
+        if (col->object_count > 0) {
+            col->objects = (ThreediIRCollisionObject *)calloc(
+                col->object_count, sizeof(ThreediIRCollisionObject));
+            if (!col->objects) goto error;
+            for (size_t i = 0; i < col->object_count; ++i) {
+                const ThreediGpCollisionObject *so = &src->objects[i];
+                ThreediIRCollisionObject *d = &col->objects[i];
+                d->num_vertices = so->vertex_count;
+                d->num_faces = so->face_count;
+                d->parent_subobject_index = so->parent_subobject;
+                d->offset[0] = (float)so->translation[0];
+                d->offset[1] = (float)so->translation[1];
+                d->offset[2] = (float)so->translation[2];
             }
         }
 
@@ -809,19 +831,25 @@ int threedi_ir_from_gp(const ThreediGpFile *gp, ThreediModelIR *out) {
 
             // Second pass: walk collision objects, assign part_index + object_index
             size_t vol_cursor = 0;
-            int32_t plane_cursor = 0;
+            size_t plane_cursor = 0;
             for (size_t obj_idx = 0; obj_idx < (size_t)src->object_count; ++obj_idx) {
                 const ThreediGpCollisionObject *obj = &src->objects[obj_idx];
+                if (obj->volume_count < 0 ||
+                    (size_t)obj->volume_count > col->volume_count - vol_cursor) goto error;
                 for (int32_t v = 0; v < obj->volume_count; ++v) {
-                    if (vol_cursor < col->volume_count) {
-                        col->volumes[vol_cursor].part_index = obj->parent_subobject;
-                        col->volumes[vol_cursor].object_index = (int32_t)obj_idx;
-                        col->volumes[vol_cursor].plane_start = plane_cursor;
-                        plane_cursor += col->volumes[vol_cursor].plane_count;
-                        ++vol_cursor;
-                    }
+                    ThreediIRCollisionVolume *volume = &col->volumes[vol_cursor];
+                    if (volume->plane_count <= 0 ||
+                        (size_t)volume->plane_count > col->plane_count - plane_cursor)
+                        goto error;
+                    volume->part_index = obj->parent_subobject;
+                    volume->object_index = (int32_t)obj_idx;
+                    volume->plane_start = (int32_t)plane_cursor;
+                    plane_cursor += (size_t)volume->plane_count;
+                    ++vol_cursor;
                 }
             }
+            if (vol_cursor != col->volume_count || plane_cursor != col->plane_count)
+                goto error;
         }
     }
 
