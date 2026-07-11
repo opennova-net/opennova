@@ -75,16 +75,26 @@ func _ready() -> void:
 	await _settle(4)
 	_check(bool(host.get("_crouch")) != crouch_before, "C toggles crouch")
 
-	# B: the armory. In the game shell this opens weapon.mnu's WEAPON screen when
-	# standing in an armory zone; report what ONED play does with it today.
+	# B: the armory — the shared NovaArmoryHost (zone-gated). Out of zone the key is
+	# ignored (the original's silent gate); in zone the WEAPON overlay opens.
 	var world = play.get_world()
 	var sim = world.get_sim() if world != null and world.has_method("get_sim") else null
 	var in_zone: bool = sim != null and sim.has_method("local_player_in_armory_zone") \
 			and sim.local_player_in_armory_zone()
+	var armory = play.get("_armory")
+	_check(armory != null, "ONED play mounts the shared armory host")
 	_tap(KEY_B)
 	await _settle(6)
-	print("[keys] B pressed: in_armory_zone=%s (ONED armory surface: %s)" % [
-		str(in_zone), "present" if play.has_method("open_armory") else "ABSENT"])
+	if armory != null:
+		if in_zone:
+			_check(bool(armory.is_open()), "B opens the WEAPON overlay in an armory zone")
+			_tap(KEY_ESCAPE)
+			await _settle(4)
+			_check(not bool(armory.is_open()), "Esc closes the armory overlay")
+		else:
+			_check(not bool(armory.is_open()), "B out of zone stays ignored [orig: @0x49b848]")
+	# The shared HUD host is mounted (crosshair/ammo/scope card parity in PIE).
+	_check(play.get("_hud_host") != null, "ONED play mounts the shared HUD host")
 
 	ws.stop_play_mission()
 	print("[keys] result: %s" % ("ALL OK" if _fails == 0 else "%d FAILED" % _fails))

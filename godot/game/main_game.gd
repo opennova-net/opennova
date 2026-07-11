@@ -10,7 +10,6 @@ extends Node3D
 const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
 const DebugOverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const NetKillFeedScript := preload("res://game/net_killfeed.gd")
-const GameHudScript := preload("res://game/game_hud.gd")
 const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd")
 
 # Re-summon the game-folder picker. The original engine has no "change game dir"
@@ -44,17 +43,15 @@ var _state: int = State.MENU
 var _host_wired := false
 var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
-var _game_hud       # GameHud, built on the first frame a mission has a local player
-var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
-var _hud_weapon_name := ""  # the HUD's equipped-weapon cache (re-resolves WepDes on change)
-# The latest mission-effect text line (ADR 0018 read seam via hud_objective_line();
-# display rides the HUD message feed — update_info's "objective" stays the MP
-# objective-status anchor).
-var _hud_objective := ""
+# The in-game HUD rides the SHARED NovaGameHudHost — the same component ONED
+# play-in-editor mounts, so both hosts run one HUD code path (editor-runtime
+# parity). It owns the lazy GameHud build, the per-frame info rebuild, and the
+# mission text feed; this shell only says when the player is in-world.
+var _hud_host: NovaGameHudHost
 var _player_host: LocalPlayerHost = null
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
-var _armory_host  # ArmoryMenuHost: drives the in-game armory (weapon.mnu WEAPON screen)
+var _armory_host: NovaArmoryHost  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
 
 
@@ -152,6 +149,18 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+# ADR 0018 read seam kept on the shell: the last mission text line the HUD showed.
+func hud_objective_line() -> String:
+	return _hud_host.hud_objective_line() if _hud_host != null else ""
+
+
+# Mission-effect passthrough (the world signal connects on the shared host; this
+# stays callable for drains routed at the shell).
+func apply_mission_effects(effects: Array) -> void:
+	if _hud_host != null:
+		_hud_host.apply_mission_effects(effects)
+
+
 # F3: the mission debug overlay over the live runtime. Built lazily; without a
 # running mission it just reports so (the runtime source re-resolves per
 # refresh, so reloads and menu round-trips never leave it stale).
@@ -178,196 +187,6 @@ func _toggle_debug_overlay() -> void:
 func _current_runtime():
 	return _world.get_runtime() if _world != null else null
 
-
-# The in-game HUD over the live runtime: built lazily the first frame a mission has a
-# local player (so net spectators, which have none, never get it). Reads the witnessed
-# hudpos.def layout from the world's mounted VFS and draws under $HUD, so
-# _set_hud_visible hides it behind menus. [orig: HUD_RenderAllOverlays @0x5a8070]
-func _ensure_game_hud() -> void:
-	if _game_hud != null:
-		return
-	_game_hud = GameHudScript.new()
-	_game_hud.name = "GameHud"
-	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var host: Node = _hud if _hud != null else self
-	host.add_child(_game_hud)
-	_game_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
-	var hudpos := NovaHudPos.new()
-	var root: NovaResourceRoot = _world.get_resource_root() if _world != null and _world.has_method("get_resource_root") else null
-	if root == null:
-		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
-	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
-		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
-	_game_hud.set_layout(hudpos, root)
-	_load_hud_text_tables(root)
-	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(apply_mission_effects):
-		_world.mission_effects.connect(apply_mission_effects)
-
-
-# The string tables the HUD resolves against: the gametext table (weapon "WepDes"
-# names) if the menu shell has not already registered it, and the per-mission text
-# table (<mission>.bin, falling back to medmssn.bin) for WAC/BMS triggered text.
-# [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
-#  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
-func _load_hud_text_tables(root: NovaResourceRoot) -> void:
-	if root == null:
-		return
-	if NovaStrings.get_table("gametext") == null:
-		var gametext := _load_rtxt(root, "gametext.bin")
-		if gametext != null:
-			NovaStrings.register_table("gametext", gametext)
-	var mission_table: RtxtStringFile = null
-	if _world != null and "mission_file" in _world:
-		var base := String(_world.mission_file).get_basename()
-		if not base.is_empty():
-			mission_table = _load_rtxt(root, base + ".bin")
-	if mission_table == null:
-		mission_table = _load_rtxt(root, "medmssn.bin")
-	NovaStrings.register_table("mission", mission_table)
-
-
-func _load_rtxt(root: NovaResourceRoot, name: String) -> RtxtStringFile:
-	var bytes := root.read_file(name)
-	if bytes.is_empty():
-		return null
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return null
-	return table
-
-
-# Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
-# original rebuilding its HUD info struct each frame. [orig: HUD_BuildEntityInfo @0x4b8440]
-func _update_game_hud() -> void:
-	if (_state != State.WORLD and _state != State.ARMORY) or not _world.is_loaded():
-		return
-	if not _world.has_local_player():
-		if not _warned_hud_no_player:
-			_warned_hud_no_player = true
-			push_warning("GameHud: world loaded but has no local player — the in-game HUD will not appear (net spectator, or the mission was not loaded as playable).")
-		return
-	_ensure_game_hud()
-	if _game_hud == null:
-		return
-	var max_h: int = _world.local_player_max_health()
-	var frac := float(_world.local_player_health()) / float(max_h) if max_h > 0 else 0.0
-	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip
-	# key). Icon indices: 0=stand, 1=crouch, 2=prone. [orig: HUD_BuildEntityInfo
-	# @0x4b860c — entity+300 flags 0x200=crouch->1, 0x100=prone->2]
-	var anim_key := _world.local_player_anim_key()
-	var stance := 0
-	if "prone" in anim_key:
-		stance = 2
-	elif "crouch" in anim_key:
-		stance = 1
-
-	# The equipped weapon's HUD slice: re-resolve on weapon change only.
-	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def() if _world.has_method("local_player_hud_weapon_def") else null
-	var weapon_name := weapon.weapon_name if weapon != null else ""
-	if weapon_name != _hud_weapon_name:
-		_hud_weapon_name = weapon_name
-		_game_hud.set_weapon(weapon, _resolve_weapon_display_name(weapon_name))
-
-	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
-	# struct's ammo fields; an infinite-capacity weapon reads clip -1.
-	# [orig: HUD_BuildEntityInfo @0x4b8573..0x4b85fa]
-	var clip := -1
-	var reserve := -1
-	var weapon_active := false
-	var wv: PlayerWeaponView = _world.local_player_weapon_view() if _world.has_method("local_player_weapon_view") else null
-	if wv != null and wv.active:
-		weapon_active = true
-		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
-		reserve = wv.reserve
-	var scope_engaged := false
-	var scope_fraction := 0.0
-	var scope_card := false
-	var fov_deg := 80.0
-	var lv: PlayerLocalView = _world.local_player_view() if _world.has_method("local_player_view") else null
-	if lv != null:
-		scope_engaged = lv.scope_engaged
-		scope_fraction = lv.scope_fraction
-		scope_card = lv.scope_card_active
-		fov_deg = lv.fov_h_deg
-
-	_game_hud.update_info({
-		"health_fraction": clampf(frac, 0.0, 1.0),
-		"stance": stance,
-		"team": _world.local_player_team(),
-		"objective": "",
-		"weapon_active": weapon_active,
-		"clip": clip,
-		"reserve": reserve,
-		"scope_engaged": scope_engaged,
-		"scope_fraction": scope_fraction,
-		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
-		"scope_card": scope_card,
-		# The crosshair's witnessed anchor: the aim ray projected through the live
-		# camera (screen px; INF = no projection this frame) [orig: HUD_DrawCrosshair
-		# @0x592640 centers on the projected aim point].
-		"aim_screen": _player_host.aim_screen_point() if _player_host != null else Vector2.INF,
-		"fov_deg": fov_deg,
-		"ticks": _hud_ticks(),
-	})
-
-
-# The HUD's 62 Hz presentation clock driving the fade/message timers.
-# [orig: current_tick @0x24c1968]
-func _hud_ticks() -> int:
-	return int(Time.get_ticks_msec() * 0.062)
-
-
-# The weapon's HUD display name: the raw weapon id resolved in the gametext table's
-# "WepDes" section; a miss is the empty string (the element then draws nothing).
-# [orig: GameText_GetString("WepDes", weapondef+20) @0x593b7f; miss "" @0x51ec00]
-func _resolve_weapon_display_name(weapon_name: String) -> String:
-	if weapon_name.is_empty():
-		return ""
-	var t: RtxtStringFile = NovaStrings.get_table("gametext")
-	if t != null and t.has_string_in_section("WepDes", weapon_name):
-		return t.get_string_in_section("WepDes", weapon_name)
-	return ""
-
-
-# Mission effects feed the HUD's text surfaces (the WAC/mission text the original
-# routes to the HUD). Drained effects carry {kind, a..d, str}
-# (NovaSimulation::drain_effects); the WAC text/consol family lands as
-# kind=="text" — the literal form (text/consol) carries the string in "str"
-# (a == 0), the id form (text#/consol#) carries the Triggered-Text id in "a"
-# (str empty; the VM's S(0) only resolves string-table operands). Public with
-# the hud_objective_line() read seam (ADR 0018): tests drive/read the HUD text
-# through these, never the privates.
-func apply_mission_effects(effects: Array) -> void:
-	for e in effects:
-		if e is Dictionary and String(e.get("kind", "")) == "text":
-			var t := String(e.get("str", ""))
-			if not t.is_empty():
-				_hud_objective = t
-				if _game_hud != null:
-					_game_hud.push_message(t)
-			elif int(e.get("a", 0)) != 0:
-				_show_triggered_text(int(e.get("a", 0)))
-
-
-# [orig: HUD_DisplayTriggeredText @0x51f190 — the mission table's "Triggered Text"
-# section, key ID%03i, read directly (no override-table consult); a miss shows nothing]
-func _show_triggered_text(text_id: int) -> void:
-	if _game_hud == null:
-		return
-	var key := "ID%03d" % text_id
-	var table: RtxtStringFile = NovaStrings.get_table("mission")
-	var text := ""
-	if table != null and table.has_string_in_section("Triggered Text", key):
-		text = table.get_string_in_section("Triggered Text", key)
-	if text.is_empty():
-		push_warning("GameHud: mission text %s not found in the mission string table." % key)
-		return
-	_hud_objective = text
-	_game_hud.push_message(text)
-
-
-func hud_objective_line() -> String:
-	return _hud_objective
 
 
 func _on_skeleton_debug_toggled(enabled: bool) -> void:
@@ -434,18 +253,28 @@ func _wire_host() -> void:
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
 	_mp_host = MpMenuHost.new()
 	_player_info_host = PlayerInfoMenuHost.new()
-	_armory_host = ArmoryMenuHost.new()
 	if _menu_host.has_method("add_companion"):
 		_menu_host.add_companion(_mp_host)
 		_menu_host.add_companion(_player_info_host)
-		_menu_host.add_companion(_armory_host)
 	elif _menu_host.has_method("set_companion"):
 		_menu_host.set_companion(_mp_host)
 	_mp_host.lan_host_start_requested.connect(_on_lan_host_start_requested)
 	_mp_host.lan_join_requested.connect(_on_lan_join_requested)
 	_player_info_host.avatar_chosen.connect(_on_avatar_chosen)
-	_armory_host.loadout_accepted.connect(_on_loadout_accepted)
-	_armory_host.armory_closed.connect(_on_resume)
+	# The in-world armory + HUD ride the SHARED hosts — the same components ONED
+	# play-in-editor mounts, so both shells run one armory/HUD code path
+	# (editor-runtime parity). The armory owns the weapon.mnu WEAPON overlay + the
+	# ACCEPT apply; the HUD host owns the lazy GameHud build + per-frame info.
+	_armory_host = NovaArmoryHost.new()
+	_armory_host.name = "ArmoryHost"
+	add_child(_armory_host)
+	_armory_host.setup(_world, _player_host, _hud if _hud != null else self)
+	_armory_host.opened.connect(func() -> void: _state = State.ARMORY)
+	_armory_host.closed.connect(_on_resume)
+	_hud_host = NovaGameHudHost.new()
+	_hud_host.name = "GameHudHost"
+	add_child(_hud_host)
+	_hud_host.setup(_world, _player_host, _hud if _hud != null else self)
 
 
 # The player pressed OK on the PLAYER_INFO screen. The on-disk player-profile format
@@ -456,43 +285,17 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 	_chosen_avatar = profile
 
 
-# The armory key while in-world: open weapon.mnu's WEAPON screen over LIVE play
-# when the player stands in an armory zone — the world keeps ticking underneath
-# (State.ARMORY) [orig: input action 218 -> UI_OpenMenuScreen("weapon.mnu",
-# "WEAPON") @0x49b8e3, gated on Flags & 0x400000 @0x49b848 + the host weapons
-# rule; no world-stop leg]. Returns false when out of zone (key ignored).
+# The armory key while in-world: the shared NovaArmoryHost opens weapon.mnu's
+# WEAPON screen over LIVE play when the player stands in an armory zone — the
+# world keeps ticking underneath (State.ARMORY rides the host's opened signal)
+# [orig: input action 218 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3,
+# gated on Flags & 0x400000 @0x49b848; no world-stop leg]. Returns false when out
+# of zone (key ignored). The ACCEPT apply lives on the host.
 func _try_open_armory() -> bool:
-	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("local_player_in_armory_zone"):
+	if _armory_host == null:
 		return false
-	if not sim.local_player_in_armory_zone():
-		return false
-	if _armory_host != null:
-		_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
-	_state = State.ARMORY
-	if not _menu_host.open_menu("weapon.mnu", "WEAPON"):
-		_state = State.WORLD
-		return false
-	_menu_host.show_menu()
-	return true
-
-
-# Armory ACCEPT: stamp the sim entity (equipped_adm_index + player_class), rebuild the
-# FP viewmodel + action FSM around the new primary, and resume play. SP-local apply —
-# the MP client path rides the 0x2F/0x5A loadout service instead. [orig:
-# WeaponLoadout_ApplyFromBuffer @0x565cd0 -> WeaponSlot rebuild chain +
-# Player_SelectWeaponSlot @0x4dd680 / Player_MountWeaponSlot @0x4dfa40]
-func _on_loadout_accepted(loadout: Dictionary) -> void:
-	var primary := String(loadout.get("primary", ""))
-	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
-	if not primary.is_empty():
-		if sim != null and sim.has_method("apply_local_player_loadout"):
-			sim.apply_local_player_loadout(primary, int(loadout.get("player_class", 0)))
-		if _world.has_method("set_local_player_weapon_by_name") \
-				and _world.set_local_player_weapon_by_name(primary) \
-				and _player_host != null:
-			_player_host.refresh_viewmodel()
-	_on_resume()
+	_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
+	return _armory_host.try_open()
 
 
 # --- Resource dir picker (first launch) ---------------------------------------
@@ -750,6 +553,9 @@ func _pause() -> void:
 func _on_resume() -> void:
 	if _state != State.PAUSED and _state != State.ARMORY:
 		return
+	if _armory_host != null and _armory_host.is_open():
+		_armory_host.close()  # Esc from ARMORY closes the overlay (no re-entry: closed
+		                      # only fires while open)
 	_menu_host.hide_menu()
 	_state = State.WORLD
 
@@ -757,21 +563,16 @@ func _on_resume() -> void:
 func _on_return_to_menu() -> void:
 	if _player_host != null:
 		_player_host.teardown()
+	if _armory_host != null:
+		_armory_host.teardown()  # the built menu holds the OLD world's resource root
 	_world.unload()
 	if _player_host != null:
 		_player_host.setup(_world, _camera)
 	if _net_killfeed != null:
 		_net_killfeed.queue_free()
 		_net_killfeed = null
-	if _game_hud != null:
-		if _world != null and _world.has_signal("mission_effects") and _world.mission_effects.is_connected(apply_mission_effects):
-			_world.mission_effects.disconnect(apply_mission_effects)
-		_game_hud.queue_free()
-		_game_hud = null
-		_hud_weapon_name = ""
-		_hud_objective = ""
-		NovaStrings.register_table("mission", null)
-	_warned_hud_no_player = false
+	if _hud_host != null:
+		_hud_host.teardown()
 	if _root != null:
 		_enter_menu(_root.get_root_dir())
 
@@ -811,7 +612,10 @@ func _process(delta: float) -> void:
 	_world.tick(_camera.global_position, _camera.global_transform, delta)
 	if _player_host != null:
 		_player_host.after_world_tick()
-	_update_game_hud()
+	# The shared HUD host rebuilds the per-frame info while the player is in-world
+	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
+	if _hud_host != null and (_state == State.WORLD or _state == State.ARMORY):
+		_hud_host.tick()
 
 
 # Mouse-look rides the shared LocalPlayerHost (the yaw/pitch witnesses live there);

@@ -261,8 +261,10 @@ func _look(total: Vector2) -> void:
 
 func _capture(name: String) -> void:
 	await RenderingServer.frame_post_draw
-	var vp: Viewport = _play_viewport if _play_viewport != null else get_viewport()
-	var img: Image = vp.get_texture().get_image()
+	# The WINDOW viewport: the play SubViewport composites into it and the shared
+	# HUD host (crosshair/ammo/scope card) draws over the container — capturing the
+	# play viewport alone would miss every HUD element.
+	var img: Image = get_viewport().get_texture().get_image()
 	if img != null:
 		img.save_png(_out_abs.path_join(name))
 		print("[fp] wrote ", name)
