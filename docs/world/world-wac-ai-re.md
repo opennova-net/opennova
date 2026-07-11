@@ -1413,10 +1413,11 @@ Input action 218 `[orig: Input_HandleActionBinding @ 0x49b83d]`: Flags 0x400000
 `g_WeaponScreenOpen @ 0x24C1884`), Flags 0x800 -> vehicle.mnu VEHICLE
 (occupancy checks via groundEntity+0x162), case 221 -> cmap.mnu CMAP deploy.
 The WEAPON screen wiring, population and ACCEPT apply are recorded in
-[menu-re.md](../mnu/menu-re.md) §In-game armory. Reimpl: the armory zone gates
-(`NovaSimulation.local_player_in_armory_zone`), the companion
-`godot/game/armory_menu_host.gd`, and the apply seam
-(`apply_local_player_loadout` + the GameWorld viewmodel re-mount).
+[menu-re.md](../mnu/menu-re.md) (its §In-game armory record rides the armory
+slice). Reimpl here: the collision-side zone gate
+(`NovaSimulation.local_player_in_armory_zone`) and the sim apply seam
+(`apply_local_player_loadout`); the WEAPON-screen UI host and the GameWorld
+viewmodel re-mount ride the armory slice.
 
 ### 15.7 IDB write-backs (2026-07-09 session, saved)
 

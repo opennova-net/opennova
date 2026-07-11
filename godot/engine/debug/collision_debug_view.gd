@@ -19,16 +19,22 @@ const MissionOverlayUtil := preload("res://engine/mission/mission_overlay_util.g
 
 # Volume type -> wireframe color (the collidable-type table in
 # docs/world/world-wac-ai-re.md section 15 / libs/world/include/world/collision.h).
-const TYPE_COLORS := {
-	1: Color(0.78, 0.78, 0.78),   # solid walls/floors - gray
-	4: Color(0.30, 0.55, 1.0),    # platform / stand-on surface - blue
-	6: Color(0.30, 1.0, 0.45),    # armory zone - green
-	8: Color(1.0, 0.9, 0.25),     # indoor (blink) box - yellow
-	16: Color(1.0, 0.25, 0.2),    # hurt volumes - red
-	17: Color(1.0, 0.25, 0.2),
-	18: Color(1.0, 0.25, 0.2),
-	19: Color(0.75, 0.35, 1.0),   # player-only solid - purple
-}
+static func type_color(volume_type: int) -> Color:
+	match volume_type:
+		1:
+			return Color(0.78, 0.78, 0.78)   # solid walls/floors - gray
+		4:
+			return Color(0.30, 0.55, 1.0)    # platform / stand-on surface - blue
+		6:
+			return Color(0.30, 1.0, 0.45)    # armory zone - green
+		8:
+			return Color(1.0, 0.9, 0.25)     # indoor (blink) box - yellow
+		16, 17, 18:
+			return Color(1.0, 0.25, 0.2)     # hurt volumes - red
+		19:
+			return Color(0.75, 0.35, 1.0)    # player-only solid - purple
+		_:
+			return COLOR_OTHER
 const COLOR_OTHER := Color(1.0, 0.55, 0.15)   # any other type - orange
 const COLOR_CAPSULE := Color(0.2, 1.0, 1.0)   # player test points / capsule span
 const COLOR_GROUNDED := Color(0.3, 1.0, 0.5)  # foot ray while standing
@@ -136,7 +142,7 @@ func _update_hulls(instances: Array) -> void:
 			var corners: PackedVector3Array = vol.get("corners", PackedVector3Array())
 			if corners.size() != 8:
 				continue
-			var color: Color = TYPE_COLORS.get(int(vol.get("type", 0)), COLOR_OTHER)
+			var color: Color = type_color(int(vol.get("type", 0)))
 			for edge in BOX_EDGES:
 				segments.append({ "a": corners[edge[0]], "b": corners[edge[1]], "color": color })
 	if segments.is_empty():

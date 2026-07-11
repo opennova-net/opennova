@@ -532,15 +532,13 @@ World-object collision + blink boxes (engine-research 2026-07-09; world-wac-ai-r
 | — | `Entity_FindNearestByRay` | `0x413af0` | projectile-side ray over the global static+dyn tables | decompile | confirm-only (round_sim follow-up) |
 | — | `terrain_sector_compute_lighting` (blink read) | `0x5c7550` | per-sample blink query; INDOOR keyed on hit-slot presence -> interior light group | decompile | confirm-only (REN scope) |
 
-In-game armory (engine-research 2026-07-09; menu-re §In-game armory):
+In-game armory sim seams (engine-research 2026-07-09; the WEAPON-screen UI host and its
+witness rows land with the armory slice):
 
 | reimpl symbol (file) | original | addr | signature / role | evidence | status |
 |---|---|---|---|---|---|
-| `ArmoryMenuHost` (godot/game/armory_menu_host.gd) | `WeaponDef_RegisterUICallbacks` | `0x567020` | the WEAPON-screen control table (PLAYER_CLASS/slots/ammo/ACCEPT/CANCEL) | disasm; GUT `armory_menu_seam_test` | ported (icons/ammo-text tails) |
-| `main_game._try_open_armory` + `NovaSimulation.local_player_in_armory_zone` | `Input_HandleActionBinding` case 218 | `0x49b83d` | armory key gated on Flags 0x400000 (type-6 volume); 0x800 -> vehicle.mnu | disasm | ported (armory leg) |
-| — | `UI_OpenMenuScreen` | `0x54e520` | opens a .mnu screen in-game (weapon/vehicle/cmap call sites) | disasm (renamed this session) | confirm-only |
-| `main_game._on_loadout_accepted` + `apply_local_player_loadout` | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> per-team buffer; MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount | decompile | ported (equipped+class slice; multi-slot inventory tracked) |
-| — | `WeaponLoadout_SerializeToBufferTeamBased` | `0x5658b0` | UI -> {name, ammoPri, ammoSec, flags}* string buffer | decompile | confirm-only |
+| `NovaSimulation.local_player_in_armory_zone` | `Input_HandleActionBinding` case 218 (gate half) | `0x49b83d` | armory key gated on Flags 0x400000 (type-6 volume); 0x800 -> vehicle.mnu | disasm | ported (zone gate; the key binding + UI host ride the armory slice) |
+| `apply_local_player_loadout` (NovaSimulation) | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> per-team buffer; MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount | decompile | ported (equipped+class slice; UI producer rides the armory slice) |
 
 First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
 
