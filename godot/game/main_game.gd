@@ -35,7 +35,7 @@ var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
 var _net_killfeed   # net spectator kill feed, built while in a net session
 var _game_hud       # GameHud, built on the first frame a mission has a local player
 var _warned_hud_no_player := false  # one-shot: warn if a loaded world never yields a local player
-var _hud_objective := ""  # latest mission-effect text line shown by the HUD
+var _hud_weapon_name := ""  # the HUD's equipped-weapon cache (re-resolves WepDes on change)
 var _player_host: LocalPlayerHost = null
 var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
@@ -172,9 +172,50 @@ func _ensure_game_hud() -> void:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
+	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
 	_game_hud.set_layout(hudpos, root)
+	_load_hud_text_tables(root)
 	if _world != null and _world.has_signal("mission_effects") and not _world.mission_effects.is_connected(_on_mission_effects):
 		_world.mission_effects.connect(_on_mission_effects)
+
+
+# The string tables the HUD resolves against: the gametext table (weapon "WepDes"
+# names) if the menu shell has not already registered it, and the per-mission text
+# table (<mission>.bin, falling back to medmssn.bin) for WAC/BMS triggered text.
+# [orig: Game_InitSubsystems @0x4a6cd0 (gametext.bin);
+#  TextResource_LoadMissionTextBin @0x51ed90 (per mission start + medmssn fallback)]
+func _load_hud_text_tables(root: NovaResourceRoot) -> void:
+	if root == null:
+		return
+	if NovaStrings.get_table("gametext") == null:
+		var gametext := _load_rtxt(root, "gametext.bin")
+		if gametext != null:
+			NovaStrings.register_table("gametext", gametext)
+	# The medmssn fallback fires only when the mission .bin does not EXIST — a
+	# present-but-unparseable file loads to nothing with no fallback.
+	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
+	# the filename; the load result is stored either way]
+	var mission_table: RtxtStringFile = null
+	var mission_bin := ""
+	if _world != null:
+		var base := _world.get_loaded_mission_file().get_basename()
+		if not base.is_empty():
+			mission_bin = base + ".bin"
+	if not mission_bin.is_empty() and root.has_file(mission_bin):
+		mission_table = _load_rtxt(root, mission_bin)
+	else:
+		mission_table = _load_rtxt(root, "medmssn.bin")
+	NovaStrings.register_table("mission", mission_table)
+
+
+func _load_rtxt(root: NovaResourceRoot, name: String) -> RtxtStringFile:
+	var bytes := root.read_file(name)
+	if bytes.is_empty():
+		return null
+	var table := RtxtStringFile.new()
+	if table.load_from_byte_array(bytes) != OK:
+		return null
+	return table
 
 
 # Rebuild the HUD's per-frame info from the authoritative local player, mirroring the
@@ -192,29 +233,101 @@ func _update_game_hud() -> void:
 		return
 	var max_h: int = _world.local_player_max_health()
 	var frac := float(_world.local_player_health()) / float(max_h) if max_h > 0 else 0.0
-	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip key).
+	# Stance from the motor's selected anim-state (crouch/prone is encoded in the clip
+	# key). Icon indices: 0=stand, 1=crouch, 2=prone. [orig: HUD_BuildEntityInfo
+	# @0x4b860c — entity+300 flags 0x200=crouch->1, 0x100=prone->2]
 	var anim_key := _world.local_player_anim_key()
 	var stance := 0
 	if "prone" in anim_key:
 		stance = 2
 	elif "crouch" in anim_key:
 		stance = 1
+
+	# The equipped weapon's HUD slice: re-resolve on weapon change only.
+	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def() if _world.has_method("local_player_hud_weapon_def") else null
+	var weapon_name := weapon.weapon_name if weapon != null else ""
+	if weapon_name != _hud_weapon_name:
+		_hud_weapon_name = weapon_name
+		_game_hud.set_weapon(weapon, _resolve_weapon_display_name(weapon_name))
+
+	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
+	# struct's ammo fields; an infinite-capacity weapon reads clip -1.
+	# [orig: HUD_BuildEntityInfo @0x4b8573..0x4b85fa]
+	var clip := -1
+	var reserve := -1
+	var weapon_active := false
+	var wv: PlayerWeaponView = _world.local_player_weapon_view() if _world.has_method("local_player_weapon_view") else null
+	if wv != null and wv.active:
+		weapon_active = true
+		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
+		reserve = wv.reserve
+		# Capacity-1 weapons fold the chambered round into the displayed reserve
+		# (the ammo text and the round icons both read the folded count).
+		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
+		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
+			reserve += clip
+	var scope_engaged := false
+	var fov_deg := 80.0
+	var lv: PlayerLocalView = _world.local_player_view() if _world.has_method("local_player_view") else null
+	if lv != null:
+		scope_engaged = lv.scope_engaged
+		fov_deg = lv.fov_h_deg
+
 	_game_hud.update_info({
 		"health_fraction": clampf(frac, 0.0, 1.0),
 		"stance": stance,
 		"team": _world.local_player_team(),
-		"objective": _hud_objective,
+		"objective": "",
+		"weapon_active": weapon_active,
+		"clip": clip,
+		"reserve": reserve,
+		"scope_engaged": scope_engaged,
+		"fov_deg": fov_deg,
+		"ticks": _hud_ticks(),
 	})
 
 
-# Mission effects feed the HUD's objective/subtitle line (the WAC/mission text the
-# original routes to the HUD). Best-effort: pick up any text-bearing effect.
+# The HUD's 62 Hz presentation clock driving the fade/message timers.
+# [orig: current_tick @0x24c1968]
+func _hud_ticks() -> int:
+	return int(Time.get_ticks_msec() * 0.062)
+
+
+# The weapon's HUD display name: the raw weapon id resolved in the gametext table's
+# "WepDes" section; a miss is the empty string (the element then draws nothing).
+# [orig: GameText_GetString("WepDes", weapondef+20) @0x593b7f; miss "" @0x51ec00]
+func _resolve_weapon_display_name(weapon_name: String) -> String:
+	if weapon_name.is_empty():
+		return ""
+	var t: RtxtStringFile = NovaStrings.get_table("gametext")
+	if t != null and t.has_string_in_section("WepDes", weapon_name):
+		return t.get_string_in_section("WepDes", weapon_name)
+	return ""
+
+
+# Mission effects feed the HUD: a WAC/BMS "text" action carries the GameText id in
+# `a`; resolve it against the mission string table and push it onto the HUD's
+# triggered-text message feed.
 func _on_mission_effects(effects: Array) -> void:
 	for e in effects:
-		if e is Dictionary:
-			var t := String(e.get("text", e.get("message", "")))
-			if not t.is_empty():
-				_hud_objective = t
+		if e is Dictionary and String(e.get("kind", "")) == "text":
+			_show_triggered_text(int(e.get("a", 0)))
+
+
+# [orig: HUD_DisplayTriggeredText @0x51f190 — the mission table's "Triggered Text"
+# section, key ID%03i, read directly (no override-table consult); a miss shows nothing]
+func _show_triggered_text(text_id: int) -> void:
+	if _game_hud == null:
+		return
+	var key := "ID%03d" % text_id
+	var table: RtxtStringFile = NovaStrings.get_table("mission")
+	var text := ""
+	if table != null and table.has_string_in_section("Triggered Text", key):
+		text = table.get_string_in_section("Triggered Text", key)
+	if text.is_empty():
+		push_warning("GameHud: mission text %s not found in the mission string table." % key)
+		return
+	_game_hud.push_message(text)
 
 
 func _on_skeleton_debug_toggled(enabled: bool) -> void:
@@ -277,6 +390,8 @@ func _wire_host() -> void:
 	_menu_host.resume_requested.connect(_on_resume)
 	if _menu_host.has_signal("novaworld_requested"):
 		_menu_host.novaworld_requested.connect(_on_novaworld_requested)
+	if _menu_host.has_signal("crosshair_style_changed"):
+		_menu_host.crosshair_style_changed.connect(_on_crosshair_style_changed)
 	# The multiplayer menu (mp.mnu) and the PLAYER_INFO character screen (player.mnu) are
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
 	_mp_host = MpMenuHost.new()
@@ -297,6 +412,11 @@ func _wire_host() -> void:
 # a profile format. See docs/playerinfo/avatars-re.md (ACCEPT / commit, D-PLAYERINFO-9).
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	_chosen_avatar = profile
+
+
+func _on_crosshair_style_changed(style: int) -> void:
+	if _game_hud != null:
+		_game_hud.set_crosshair_style(style)
 
 
 # --- Resource dir picker (first launch) ---------------------------------------
@@ -567,7 +687,8 @@ func _on_return_to_menu() -> void:
 			_world.mission_effects.disconnect(_on_mission_effects)
 		_game_hud.queue_free()
 		_game_hud = null
-		_hud_objective = ""
+		_hud_weapon_name = ""
+		NovaStrings.register_table("mission", null)
 	_warned_hud_no_player = false
 	if _root != null:
 		_enter_menu(_root.get_root_dir())

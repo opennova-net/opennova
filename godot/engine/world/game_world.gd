@@ -63,6 +63,9 @@ var _terrain_data: NovaTerrainData
 var _resource_root: NovaResourceRoot
 var _loaded: bool = false
 var _loaded_mission: NovaMissionData
+# The BMS argument that completed the active mission load. This is runtime
+# state, deliberately separate from mission_file (the exported boot option).
+var _loaded_mission_file: String = ""
 var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
@@ -222,6 +225,11 @@ func load_mission_as_joiner(server: Dictionary, player_name: String) -> int:
 		_host_config = {}
 		load_failed.emit("join: no mission name (the host's mission must be known)")
 		return ERR_INVALID_PARAMETER
+	# NovaWorld's host row carries the retail basename (e.g. ASH_I5A), while the
+	# VFS load requires the resource filename. LAN callers that already supply the
+	# extension pass through unchanged.
+	if not bms.to_lower().ends_with(".bms"):
+		bms += ".bms"
 	return load_mission(bms, String(server.get("dir", "")))
 
 
@@ -379,6 +387,7 @@ func _load_mission_internal(mission: NovaMissionData, bms_name: String, resource
 	_start_mission_audio(mission, bms_name)
 	timeline.end_span()
 	timeline.finish()
+	_loaded_mission_file = bms_name
 	_loaded = true
 	world_loaded.emit()
 	return OK
@@ -432,6 +441,10 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 
 func get_loaded_mission() -> NovaMissionData:
 	return _loaded_mission
+
+
+func get_loaded_mission_file() -> String:
+	return _loaded_mission_file
 
 
 ## The active net spectator client (NovaNetClient), or null outside a net session.
@@ -494,6 +507,7 @@ func unload() -> void:
 		_env.environment_data.clear_mission_overrides()
 	_loaded = false
 	_loaded_mission = null
+	_loaded_mission_file = ""
 	if _runtime != null:
 		_runtime.queue_free()  # frees its off-tree sim too (MissionRuntime._exit_tree)
 	_runtime = null
@@ -818,6 +832,14 @@ func local_player_view() -> PlayerLocalView:
 	if sim == null:
 		return null
 	return PlayerLocalView.from_view_dict(sim.get_local_player_view())
+
+
+## The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX, clipsize, name),
+## decoded from NovaWeaponDatabase's transport dict at this edge (ADR 0017) — the HUD
+## reads it per frame, mirroring the original HUD info struct's weapon-def pointer
+## [orig: HUD_BuildEntityInfo @0x4b8561 -> hudInfo+552]. Null until a weapon resolves.
+func local_player_hud_weapon_def() -> PlayerHudWeaponDef:
+	return PlayerHudWeaponDef.from_weapon_dict(_local_weapon_dict)
 
 
 ## The equipped-weapon FSM view, decoded once at this edge (ADR 0017); null when no
