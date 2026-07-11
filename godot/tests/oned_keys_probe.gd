@@ -44,7 +44,7 @@ func _ready() -> void:
 		return
 	await _settle(120)
 
-	var play = ws._play_node()
+	var play = ws.play_controller()
 	var host = play.get_player_host() if play != null else null
 	if host == null:
 		push_error("[keys] no player host")

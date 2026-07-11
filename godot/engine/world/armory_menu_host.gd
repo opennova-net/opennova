@@ -295,6 +295,11 @@ func selected_clips(control: String) -> int:
 # "<TOTAL_WEIGHT> <w> <LBS> (<encumbrance>)" with the witnessed encumbrance bands
 # <33.3 LIGHT / <66.6 NORMAL / else HEAVY [orig: update_weapon_weight_display
 # @0x565640 — sprintf "%s %.1f %s (%s)"].
+# The witnessed encumbrance bands [orig: update_weapon_weight_display @0x565640 —
+# < 33.3 LIGHT, < 66.6 NORMAL, else HEAVY].
+const NORMAL_ENCUMBRANCE_LBS := 33.3
+const HEAVY_ENCUMBRANCE_LBS := 66.6
+
 func _update_weight() -> void:
 	var total := 0.0
 	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
@@ -306,9 +311,9 @@ func _update_weight() -> void:
 			clips = int(w.get("maxclips", 0))
 		total += float(w.get("weight", 0.0)) + clips * float(w.get("clip_weight", 0.0))
 	var encumbrance := _menu_text("LIGHT_ENCUMBRANCE", "Light")
-	if total >= 66.6:
+	if total >= HEAVY_ENCUMBRANCE_LBS:
 		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
-	elif total >= 33.3:
+	elif total >= NORMAL_ENCUMBRANCE_LBS:
 		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
 	var node := _find("STATIC_TOTAL_WEIGHT")
 	if node != null and node is Label:
