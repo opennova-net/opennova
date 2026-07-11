@@ -50,6 +50,11 @@ var _current_primary := ""
 var _populating := false
 # Selected weapon dicts per slot control name ("" row 0 = NONE).
 var _slot_rows := {}                 # control name -> Array[Dictionary] (row-1 aligned)
+# The ACCEPT-hotkey debounce: the opener press that showed the screen must release
+# once before the key acts as ACCEPT — the open stamps it, only the row's KEYUP
+# arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
+# Input_HandleMenuKeyRelease @0x4de2d0].
+var _accept_hotkey_armed := false
 
 signal loadout_accepted(loadout: Dictionary)
 signal armory_closed
@@ -103,6 +108,10 @@ func on_menu_built(menu: Node, _file: String, _screen: String, root: NovaResourc
 		_connect_combo(slot_name, _on_slot_selected.bind(slot_name))
 	_connect_pressed("ACCEPT", _on_accept)   # [orig: @0x5671f6 arg 0]
 	_connect_pressed("CANCEL", _on_cancel)   # [orig: @0x567214 arg 1 skips the apply]
+	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
+	# debounce [orig: CUIWidget_ResetScreenHotkeys/AddScreenHotkey @0x567483..
+	# 0x5674c0; g_weaponScreenOpenDebounce = 1 @0x4e0b21].
+	_accept_hotkey_armed = false
 	_update_weight()
 
 
@@ -341,6 +350,32 @@ func _on_accept() -> void:
 		"accessory_clips": selected_clips("ACCESSORY"),
 	}
 	loadout_accepted.emit(loadout)
+
+
+## Programmatic ACCEPT — the hotkey-accelerator path. The WEAPON screen's on-show
+## registers the USE-ITEM binding row's runtime keys on the ACCEPT control, so the
+## armory-opener key doubles as ACCEPT while the screen is up
+## [orig: UI_InitTeamClassSelection @0x567370 — control "ACCEPT" gains
+##  g_useItemBindingKey0/1 via CUIWidget_AddScreenHotkey @0x5674a8/@0x5674c0].
+## Same collect + apply as clicking the button.
+func trigger_accept() -> void:
+	_on_accept()
+
+
+## One armory-hotkey edge (true = pressed). Returns true when the edge triggered
+## ACCEPT. The release ARMS the key (the opener press that showed the screen must
+## release once [orig: Input_HandleMenuKeyRelease @0x4de2d0 clears the open
+## debounce]); an armed press is the ACCEPT accelerator [orig: the on-show
+## registration @0x5674a8]. NovaArmoryHost routes key input here while open.
+func accept_hotkey_edge(pressed: bool) -> bool:
+	if not pressed:
+		_accept_hotkey_armed = true
+		return false
+	if not _accept_hotkey_armed:
+		return false
+	_accept_hotkey_armed = false
+	trigger_accept()
+	return true
 
 
 func _on_cancel() -> void:

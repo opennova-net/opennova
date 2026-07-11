@@ -24,6 +24,13 @@ const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (menu_shell's de
 const DESIGN_SIZE := Vector2(800, 600)
 const MUSIC_VAR_INDEX := 2
 
+# The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding
+# row's runtime keys (retail default: the Shifts — the same row 177 the shells'
+# open key mirrors) as ACCEPT accelerators on the ACCEPT control
+# [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT" (@0x7C7650)
+#  and adds word_81A468/word_81A46A @0x5674a8/@0x5674c0].
+const ACCEPT_HOTKEY := KEY_SHIFT
+
 signal opened
 signal closed
 
@@ -124,6 +131,19 @@ func close() -> void:
 		return
 	_menu.visible = false
 	closed.emit()
+
+
+# Route the armory-key edges to the companion's debounced ACCEPT accelerator
+# while the screen is open (the companion owns the armed state — its
+# on_menu_built stamp is the original's open-debounce [orig: @0x4e0b21]).
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not is_open():
+		return
+	var key := event as InputEventKey
+	if key == null or key.keycode != ACCEPT_HOTKEY or key.echo:
+		return
+	if _armory.accept_hotkey_edge(key.pressed):
+		get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:

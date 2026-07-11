@@ -202,6 +202,38 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 	assert_signal_emitted(host, "armory_closed", "CANCEL closes without applying")
 
 
+# The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding row's
+# runtime keys (the armory opener — Shift) on the ACCEPT control, debounced until the
+# opener press releases once [orig: UI_InitTeamClassSelection @0x567370 adds
+# g_useItemBindingKey0/1 to control "ACCEPT" via CUIWidget_AddScreenHotkey
+# @0x5674a8/@0x5674c0; the open stamps g_weaponScreenOpenDebounce @0x4e0b21,
+# cleared only by the row's KEYUP — Input_HandleMenuKeyRelease @0x4de2d0].
+# on_menu_built = the on-show: it stamps the debounce; NovaArmoryHost routes the
+# key edges here while its overlay is open.
+func test_armory_accept_hotkey_debounces_until_release() -> void:
+	var host := ArmoryMenuHost.new()
+	host.set_weapon_database(_load_weapons())
+	host.set_player_class(8)
+	host.set_current_loadout("WPN_M4AUTO")
+	var menu := _make_menu()
+	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
+	watch_signals(host)
+
+	assert_false(host.accept_hotkey_edge(true),
+		"the still-held opener press must not ACCEPT [orig: @0x4e0b21]")
+	assert_signal_not_emitted(host, "loadout_accepted")
+	assert_false(host.accept_hotkey_edge(false),
+		"the release arms the key, no ACCEPT of its own [orig: @0x4de2d0]")
+	assert_true(host.accept_hotkey_edge(true),
+		"the armed press is the ACCEPT accelerator [orig: @0x5674a8]")
+	assert_signal_emitted(host, "loadout_accepted")
+
+	# A re-show re-stamps the debounce — the next press is swallowed again.
+	host.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
+	assert_false(host.accept_hotkey_edge(true),
+		"the on-show re-stamps the open debounce [orig: @0x4e0b21]")
+
+
 func test_degrades_without_weapon_def() -> void:
 	var host := ArmoryMenuHost.new()
 	var menu := _make_menu()
