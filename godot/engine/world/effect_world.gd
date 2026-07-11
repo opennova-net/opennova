@@ -191,6 +191,35 @@ func spawn_effect_owned(owner_key: Variant, name: String, position: Vector3,
 	return handle
 
 
+## Spawn suppressed-while-alive (the weapon muzzle model): a re-spawn under the same
+## key is IGNORED while the key's previous group still lives. The original records the
+## live emitter on the weapon slot and skips the spawn until the emitter's death
+## callback clears the record [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860
+## spawns only when slot+24 is clear; ActionSlot_SpawnEffect @ 0x401f20 records the
+## handle + the on-death ActionSlot_ClearEffectHandle @ 0x53f760 rides the descriptor].
+## Returns the interned effect handle (0 = unknown), even when suppressed.
+func spawn_effect_unless_alive(owner_key: Variant, name: String, position: Vector3,
+		orientation: Vector3 = Vector3.ZERO) -> int:
+	var handle := intern_effect(name)
+	if handle == 0:
+		push_warning("effect world: unknown effect '%s'" % name)
+		return 0
+	var previous: int = int(_owned_groups.get(owner_key, 0))
+	if previous > 0 and _group_alive(previous):
+		return handle
+	var group_id := _spawn_interned(handle, position, orientation)
+	if group_id > 0:
+		_owned_groups[owner_key] = group_id
+	return handle
+
+
+func _group_alive(group_id: int) -> bool:
+	for group in _live:
+		if int(group.get("id", 0)) == group_id:
+			return true
+	return false
+
+
 ## Spawn by an already-interned 1-based handle (the WAC fx parameter shape).
 func spawn_effect_by_handle(handle: int, position: Vector3, orientation: Vector3 = Vector3.ZERO) -> bool:
 	if handle < 1 or handle > _interned.size():

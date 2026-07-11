@@ -96,6 +96,8 @@ var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel 
 var _weapon_play_serial := -1
 var _weapon_action_serial := -1     # action-begin drain; -1 adopts the first snapshot
                                     # silently (viewmodel rebuilds must not refire sounds)
+var _weapon_action_end_serial := -1 # action-END drain (soundsetend — the per-shot
+                                    # gunshot / reload-complete legs); same adopt rule
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 var _fire_was_held := false
 var _reload_was_down := false
@@ -325,7 +327,15 @@ func _consume_weapon_view() -> void:
 		_weapon_action_serial = view.action_serial
 		if not adopt_only:
 			_fire_action_effects(view)
+	if view.action_end_serial != _weapon_action_end_serial:
+		var end_adopt := _weapon_action_end_serial < 0
+		_weapon_action_end_serial = view.action_end_serial
+		if not end_adopt:
+			_fire_action_end_sound(view)
 
+
+# The FIRE action id [orig: the suffix/default table @0x830B90 row 2].
+const WEAPON_ACTION_FIRE := 2
 
 # The action-begin sound/muzzle legs: play the started ACTION's soundset 3D-positional
 # at the firing entity and spawn its particle effect at the weapon model's user point
@@ -333,6 +343,13 @@ func _consume_weapon_view() -> void:
 # ActionSlot_SpawnEffect @0x401f20 with the row's particle + userpoint; the one-shot
 # 3D placement is Sound_Play3DPositional @0x527cb0]. Several 62.5 Hz ticks can land in
 # one frame; like the clip drain above, the last started action wins the frame.
+#
+# Particle gating is the witnessed local-player routing [orig: ActionSlot_ExecuteActionTick
+# @0x541a70]: for the LOCAL player only the FIRE action takes the with-effect shim, and
+# only in third person, from a vehicle, or un-scoped in first person (the FP muzzle-flash
+# config dword_24D20C0 bit 0 rides that leg; treated always-on here) — every other local
+# begin routes through the no-effect shim @0x5419e0 (no casing ejects in your own FP
+# view; remote views spawn them via the remote leg @0x541a83, an MP seam).
 func _fire_action_effects(view: PlayerWeaponView) -> void:
 	if _world == null:
 		return
@@ -340,10 +357,38 @@ func _fire_action_effects(view: PlayerWeaponView) -> void:
 		var audio = _world.get_mission_audio()
 		if audio != null:
 			audio.fire_soundset(view.action_soundset, _world.local_player_position())
-	if not view.action_particle.is_empty() and _world.has_method("get_effect_world"):
-		var fx = _world.get_effect_world()
-		if fx != null:
-			fx.spawn_effect(view.action_particle, _action_particle_world_position(view.action_particle_userpoint))
+	if view.action_particle.is_empty() or not _world.has_method("get_effect_world"):
+		return
+	if view.action_started != WEAPON_ACTION_FIRE:
+		return  # local non-fire begins are the no-effect shim [orig: @0x541b17]
+	var scoped := _view != null and _view.scope_engaged
+	if scoped and not _third_person:
+		return  # scoped FP fire shows no muzzle flash [orig: @0x541aba !g_weaponScopeActive]
+	var fx = _world.get_effect_world()
+	if fx == null:
+		return
+	var pos := _action_particle_world_position(view.action_particle_userpoint)
+	if fx.has_method("spawn_effect_unless_alive"):
+		# One live muzzle group at a time — the witnessed slot+24 guard
+		# [orig: @0x5418c8 spawns only when the recorded handle is clear].
+		fx.spawn_effect_unless_alive(self, view.action_particle, pos)
+	else:
+		fx.spawn_effect(view.action_particle, pos)
+
+
+# The action-END sound leg: the finished ACTION's soundsetend, 3D-positional at the
+# firing entity — the fire rows' per-shot gunshot (GS_*) and the reload completion.
+# [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100 plays
+#  ActionDef+12 at the owner entity, gated on the phase byte being 2 (ACTIVE); its
+#  dupsound repeat loop (+44/+48) is data-dead in the JOX/REVX corpora]
+func _fire_action_end_sound(view: PlayerWeaponView) -> void:
+	if _world == null or view.action_end_soundset.is_empty():
+		return
+	if not _world.has_method("get_mission_audio"):
+		return
+	var audio = _world.get_mission_audio()
+	if audio != null:
+		audio.fire_soundset(view.action_end_soundset, _world.local_player_position())
 
 
 # World-space spawn point for an ACTION particle: the named user point on a viewmodel

@@ -204,6 +204,11 @@ private:
 	// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
 	uint64_t weapon_action_serial_ = 0;
 	int weapon_action_started_ = -1;
+	// The action-END seam: serial + the finished slot id; the state dict resolves the
+	// finished action's soundsetend — the per-shot gunshot / reload-complete sound
+	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
+	uint64_t weapon_action_end_serial_ = 0;
+	int weapon_action_finished_ = -1;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
 	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
 	// plus the resolved AnimMap identity. The serial advances only when that AnimMap

@@ -89,7 +89,8 @@ struct WeaponFsmAction {
     char anim_key[64] = {};  // the .adm clip key (ACTION rows name them directly,
                              // e.g. "anim_wpn_fire")
     char soundset[128] = {};          // played when the action's active phase begins
-    char soundsetend[128] = {};       // the end-leg set (host seam; not yet emitted)
+    char soundsetend[128] = {};       // played when the active phase finishes (the
+                                      // events.action_finished seam)
     char particle[128] = {};          // effect spawned at the model user point
     char particle_userpoint[128] = {};
 };
@@ -172,6 +173,15 @@ struct WeaponFsmEvents {
                                    // host's sound/muzzle seam (def.actions[id] carries
                                    // the soundset/particle names)
                                    // [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860]
+    int32_t action_finished = -1;  // slot id whose ACTIVE phase finished this tick — the
+                                   // END-leg sound seam (def.actions[id].soundsetend).
+                                   // Fire rows carry the gunshot here (118/130 REVX,
+                                   // 83/89 JOX fire rows use soundsetend, not soundset).
+                                   // [orig: ActionSlot_FinishActivePhase @ 0x53f7b0
+                                   //  plays ActionDef+12 via the end shim @ 0x401100,
+                                   //  gated on the phase byte being 2 (ACTIVE) at entry;
+                                   //  reached from WeaponAction_Fire @ 0x542d1a (per
+                                   //  shot) and WeaponAction_Reload @ 0x54316e]
     bool fired = false;            // Entity_FireWeaponAndSendPacket seam [orig: @ 0x542c5e]
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]

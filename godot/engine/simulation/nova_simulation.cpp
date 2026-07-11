@@ -1515,6 +1515,8 @@ void NovaSimulation::set_local_player_weapon(const Dictionary &p_def,
 	weapon_unscope_serial_ = weapon_rescope_serial_ = 0;
 	weapon_action_serial_ = 0;
 	weapon_action_started_ = -1;
+	weapon_action_end_serial_ = 0;
+	weapon_action_finished_ = -1;
 	weapon_fire_held_ = weapon_fire_pressed_ = weapon_reload_pressed_ = false;
 	player_view_.scope_engaged = false; // a fresh mount starts at the hip
 	weapon_active_ = true;
@@ -1618,6 +1620,13 @@ void NovaSimulation::tick_local_player_weapon() {
 		++weapon_action_serial_;
 		weapon_action_started_ = ev.action_started;
 	}
+	if (ev.action_finished >= 0) {
+		// The END leg: the finished action's soundsetend — fire rows carry the gunshot
+		// here, reload rows the completion sound
+		// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100].
+		++weapon_action_end_serial_;
+		weapon_action_finished_ = ev.action_finished;
+	}
 	if (ev.fired) {
 		++weapon_fired_serial_;
 		// The 3P body attack stamp — knife/grenade kinds only; rifle fire stamps NO body
@@ -1667,13 +1676,27 @@ Dictionary NovaSimulation::get_local_player_weapon_state() const {
 	if (weapon_action_started_ >= 0 &&
 			weapon_action_started_ < opennova::world::weapon_action::kCount) {
 		const opennova::world::WeaponFsmAction &act = weapon_def_.actions[weapon_action_started_];
+		out["action_started"] = weapon_action_started_;
 		out["action_soundset"] = String::utf8(act.soundset);
 		out["action_particle"] = String::utf8(act.particle);
 		out["action_particle_userpoint"] = String::utf8(act.particle_userpoint);
 	} else {
+		out["action_started"] = -1;
 		out["action_soundset"] = String();
 		out["action_particle"] = String();
 		out["action_particle_userpoint"] = String();
+	}
+	// The END-leg seam: the finished action's soundsetend on its own serial edge — fire
+	// rows carry the per-shot gunshot here (GS_*), reload rows the completion sound
+	// [orig: ActionSlot_FinishActivePhase @ 0x53f7b0 -> the end shim @ 0x401100 plays
+	//  ActionDef+12 at the owner entity].
+	out["action_end_serial"] = static_cast<int64_t>(weapon_action_end_serial_);
+	if (weapon_action_finished_ >= 0 &&
+			weapon_action_finished_ < opennova::world::weapon_action::kCount) {
+		out["action_end_soundset"] =
+				String::utf8(weapon_def_.actions[weapon_action_finished_].soundsetend);
+	} else {
+		out["action_end_soundset"] = String();
 	}
 	out["fired_serial"] = static_cast<int64_t>(weapon_fired_serial_);
 	out["dry_serial"] = static_cast<int64_t>(weapon_dry_serial_);

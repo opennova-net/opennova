@@ -77,6 +77,15 @@ class FakeWorld:
 	var view = null  # PlayerLocalView
 	var scope_toggle_requests := 0
 	var camera_mode_calls: Array = []
+	# The action sound/effect seams the host drains on the serial edges.
+	var mission_audio = null  # FakeMissionAudio
+	var effect_world = null   # FakeEffectWorld
+
+	func get_mission_audio():
+		return mission_audio
+
+	func get_effect_world():
+		return effect_world
 
 	func local_player_weapon_view():
 		return weapon_view
@@ -327,3 +336,153 @@ func test_shared_host_teardown_releases_captured_mouse() -> void:
 	host.teardown()
 
 	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE)
+
+
+class FakeMissionAudio:
+	extends Node
+	var oneshots: Array = []
+
+	func fire_soundset(set_name: String, world_pos: Vector3) -> bool:
+		oneshots.append({"set": set_name, "pos": world_pos})
+		return true
+
+
+class FakeEffectWorld:
+	extends Node
+	var spawns: Array = []
+
+	func spawn_effect_unless_alive(_owner_key, effect: String, pos: Vector3,
+			_orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"effect": effect, "pos": pos})
+		return 1
+
+	func spawn_effect(effect: String, pos: Vector3, _orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"effect": effect, "pos": pos})
+		return 1
+
+
+func _weapon_view() -> PlayerWeaponView:
+	var v := PlayerWeaponView.new()
+	v.active = true
+	return v
+
+
+func test_action_sound_legs_drain_to_mission_audio() -> void:
+	# The two ACTION sound legs [orig: ActionSlot_PlaySound @0x4010c0 at begin;
+	# ActionSlot_FinishActivePhase @0x53f7b0 -> the end shim @0x401100]: the begin
+	# leg rides action_serial/action_soundset, the END leg (the per-shot gunshot,
+	# GS_*) rides action_end_serial/action_end_soundset. The first snapshot adopts
+	# silently — a viewmodel rebuild must not refire sounds.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var audio := FakeMissionAudio.new()
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(audio)
+	add_child_autofree(fx)
+	world.mission_audio = audio
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	# Adopt tick: serials arrive non-zero on the first snapshot; nothing plays.
+	var v := _weapon_view()
+	v.action_serial = 4
+	v.action_end_serial = 7
+	v.action_soundset = "GF_RL_TEST"
+	v.action_end_soundset = "GS_TEST"
+	world.weapon_view = v
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 0, "the first snapshot adopts serials silently")
+
+	# End-leg edge: the finished action's soundsetend plays at the player.
+	var v2 := _weapon_view()
+	v2.action_serial = 4
+	v2.action_end_serial = 8
+	v2.action_end_soundset = "GS_TEST"
+	world.weapon_view = v2
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 1, "the end-leg serial edge plays one set")
+	if audio.oneshots.size() == 1:
+		assert_eq(String(audio.oneshots[0]["set"]), "GS_TEST",
+			"the END leg plays the finished action's soundsetend [orig: ActionDef+12]")
+
+	# Begin-leg edge alongside: soundset plays too.
+	var v3 := _weapon_view()
+	v3.action_serial = 5
+	v3.action_soundset = "GF_RL_TEST"
+	v3.action_end_serial = 8
+	world.weapon_view = v3
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(audio.oneshots.size(), 2, "the begin-leg serial edge plays one set")
+	if audio.oneshots.size() == 2:
+		assert_eq(String(audio.oneshots[1]["set"]), "GF_RL_TEST",
+			"the begin leg plays the started action's soundset [orig: ActionDef+8]")
+
+
+func test_action_particles_gate_on_fire_and_scope() -> void:
+	# The witnessed local-player particle routing [orig: ActionSlot_ExecuteActionTick
+	# @0x541a70]: only FIRE takes the with-effect shim, and scoped FP fire suppresses
+	# the muzzle flash [orig: @0x541aba !g_weaponScopeActive]; non-fire local begins
+	# (casing ejects on RECOIL rows) route through the no-effect shim @0x5419e0.
+	var world := FakeWorld.new()
+	var camera := Camera3D.new()
+	var host := LocalPlayerHost.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(host)
+	var audio := FakeMissionAudio.new()
+	var fx := FakeEffectWorld.new()
+	add_child_autofree(audio)
+	add_child_autofree(fx)
+	world.mission_audio = audio
+	world.effect_world = fx
+	host.setup(world, camera)
+	host.set_input_source(func() -> Dictionary:
+		return {})
+
+	# Adopt.
+	var v := _weapon_view()
+	world.weapon_view = v
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+
+	# RECOIL begin with a particle (the casing row): no local spawn.
+	var recoil := _weapon_view()
+	recoil.action_serial = 1
+	recoil.action_started = 3  # RECOIL
+	recoil.action_particle = "Effect_TestCas"
+	world.weapon_view = recoil
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 0, "non-fire local begins spawn no particle [orig: @0x541b17]")
+
+	# FIRE begin unscoped: the muzzle flash spawns.
+	var fire := _weapon_view()
+	fire.action_serial = 2
+	fire.action_started = 2  # FIRE
+	fire.action_particle = "Effect_TestMF"
+	world.weapon_view = fire
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 1, "FIRE begins spawn the muzzle particle")
+
+	# FIRE begin scoped in first person: suppressed.
+	var scoped_view := PlayerLocalView.new()
+	scoped_view.scope_engaged = true
+	world.view = scoped_view
+	var fire2 := _weapon_view()
+	fire2.action_serial = 3
+	fire2.action_started = 2
+	fire2.action_particle = "Effect_TestMF"
+	world.weapon_view = fire2
+	host.before_world_tick(0.016)
+	host.after_world_tick()
+	assert_eq(fx.spawns.size(), 1, "scoped FP fire shows no muzzle flash [orig: @0x541aba]")
