@@ -199,6 +199,11 @@ private:
 	uint64_t weapon_reload_serial_ = 0;
 	uint64_t weapon_unscope_serial_ = 0;
 	uint64_t weapon_rescope_serial_ = 0;
+	// The action-begin seam: serial + the started slot id; the state dict resolves
+	// the started action's soundset/particle names for the host's sound/muzzle legs
+	// [orig: ActionSlot_ExecuteActionWithEffect @ 0x541860].
+	uint64_t weapon_action_serial_ = 0;
+	int weapon_action_started_ = -1;
 	float weapon_scope_max_mag_ = 0.0f; // def scope_max_mag (0 = key absent)
 	// The mounted def's 3P body-channel kinds (special_hold / attack_anim; 0 = rifle)
 	// plus the resolved AnimMap identity. The serial advances only when that AnimMap

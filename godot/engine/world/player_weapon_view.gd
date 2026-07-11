@@ -14,6 +14,14 @@ var active := false
 var current_action := 0    # world::weapon_action id (0 idle .. 11 overheated)
 var anim_key := ""         # the .adm clip key of the last play event
 var play_serial := 0
+# The action-begin seam: `action_serial` bumps when an action's ACTIVE phase begins;
+# the started ACTION row's audio/effect legs ride alongside. The host plays the
+# soundset and spawns the particle at the model user point on the serial edge.
+# [orig: ActionSlot_ExecuteActionWithEffect @0x541860 -> ActionSlot_SpawnEffect @0x401f20]
+var action_serial := 0
+var action_soundset := ""
+var action_particle := ""
+var action_particle_userpoint := ""
 var fired_serial := 0
 var dry_serial := 0
 var reload_serial := 0
@@ -40,6 +48,10 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.current_action = int(d.get("current", 0))
 	out.anim_key = String(d.get("anim_key", ""))
 	out.play_serial = int(d.get("play_serial", 0))
+	out.action_serial = int(d.get("action_serial", 0))
+	out.action_soundset = String(d.get("action_soundset", ""))
+	out.action_particle = String(d.get("action_particle", ""))
+	out.action_particle_userpoint = String(d.get("action_particle_userpoint", ""))
 	out.fired_serial = int(d.get("fired_serial", 0))
 	out.dry_serial = int(d.get("dry_serial", 0))
 	out.reload_serial = int(d.get("reload_serial", 0))

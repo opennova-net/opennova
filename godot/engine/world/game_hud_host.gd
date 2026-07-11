@@ -185,11 +185,13 @@ func tick() -> void:
 		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
 			reserve += clip
 	var scope_engaged := false
+	var scope_fraction := 0.0
 	var fov_deg := 80.0
 	var lv: PlayerLocalView = _world.local_player_view() \
 			if _world.has_method("local_player_view") else null
 	if lv != null:
 		scope_engaged = lv.scope_engaged
+		scope_fraction = lv.scope_fraction
 		fov_deg = lv.fov_h_deg
 
 	_game_hud.update_info({
@@ -201,6 +203,14 @@ func tick() -> void:
 		"clip": clip,
 		"reserve": reserve,
 		"scope_engaged": scope_engaged,
+		# The ease progress: the crosshair yields only at the SETTLED sight view
+		# (fraction 1) [orig: the @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780].
+		"scope_fraction": scope_fraction,
+		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
+		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
+		"aim_screen": _player_host.aim_screen_point() \
+				if _player_host != null and _player_host.has_method("aim_screen_point") \
+				else Vector2.INF,
 		"fov_deg": fov_deg,
 		"ticks": _hud_ticks(),
 	})

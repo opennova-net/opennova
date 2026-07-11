@@ -125,6 +125,15 @@ void NovaWeaponDatabase::append_entry(const DefWeaponDef &e) {
 		act["function"] = String(row.function);
 		act["delaystart"] = row.delaystart;
 		act["delayend"] = row.delayend;
+		// Per-ACTION audio/effect hooks: the GF_* sound set played on action
+		// start/end and the particle effect spawned at the model user point
+		// [orig: ActionSlot fields consumed by ActionSlot_SpawnEffect
+		// @ 0x401f20]. Dropping these severed weapon-fire sound and
+		// muzzle-flash from every consumer.
+		act["soundset"] = String(row.soundset);
+		act["soundsetend"] = String(row.soundsetend);
+		act["particle"] = String(row.particle);
+		act["particleuserpoint"] = String(row.particleuserpoint);
 		w.actions.push_back(act);
 	}
 	weapons.push_back(w);

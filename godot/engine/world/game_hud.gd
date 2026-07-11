@@ -283,17 +283,25 @@ func _draw_weapon_cluster(surface: Vector2, ticks: int) -> void:
 	_draw_crosshair(surface)
 
 
-# The spreading crosshair, hidden while the aim is scoped-in (the original draws it
-# only when an aimed shot is NOT available — in scope view the scope overlay owns the
-# reticle; that gate is the SETTLED sight view, so the original stays up through the
-# ADS ease: docs/interface/hud-re.md D-HUD-9, plumbing-deferred). Anchored at the
-# design center — first-person-correct; the 3P projected-aim anchor is D-HUD-10.
-# Spread = ERROR[hip stance row] over the live fov (the +3 scoped rows key on the
-# original's CanFire predicate, vehicle-only — hip is faithful on foot); the
-# recoil-accumulator terms (+0x380/+0x384 >>7) are D-HUD-7.
+# The spreading crosshair. Witnessed visibility: it draws when an aimed shot is NOT
+# available [orig: the gate @0x592afa — !Player_CanFireWeapon() (plus vehicle
+# autoaim/scoped-gunner keep-up legs, unported); Player_CanFireWeapon @0x5cf780
+# returns the SETTLED sight view: g_weaponScopeActive is promoted only when the
+# scope ease completes (@0x4de4f7)] — so it stays up from the hip and through the
+# whole ADS ease, and yields once fully sighted (D-HUD-9 CLOSED; the magnified scope
+# overlay itself is still the recorded hud-re deferral). Spread = ERROR[stance row]
+# over the live fov. The +3 sighted rows key on the SAME CanFire predicate
+# [orig: row += 3·CanFire @0x592b87 — NOT "scoped"], so on foot they are unreachable
+# (the crosshair only draws while !CanFire); the reachable-at-CanFire cases are
+# vehicle autoaim / scoped gunner — unported with vehicles. Stance-row overrides
+# still deferred: airborne/swimming → standing (@0x592b65), mounted → crouch
+# (@0x592b6c). The recoil-accumulator terms (+0x380/+0x384 >>7) are D-HUD-7.
 # [orig: HUD_DrawCrosshair @0x592640]
 func _draw_crosshair(surface: Vector2) -> void:
-	if bool(_info.get("scope_engaged", false)):
+	var scoped := bool(_info.get("scope_engaged", false))
+	# The settled-sights hide [orig: !Player_CanFireWeapon @0x5cf780 via @0x592afa;
+	# scope_fraction < 1 = the ease still interpolating = scopeActive still 0].
+	if scoped and float(_info.get("scope_fraction", 1.0)) >= 1.0:
 		return
 	if _crosshair_tex == null:
 		return
@@ -305,9 +313,26 @@ func _draw_crosshair(surface: Vector2) -> void:
 		err_stance = 0
 	elif stance_icon == 1:
 		err_stance = 1
+	# Hip rows only: the crosshair draws only while !CanFire, and the +3 select keys
+	# on CanFire itself [orig: @0x592b87] — never reachable here on foot.
 	var err_deg := _weapon.error_row_deg(HudCrosshair.error_row(err_stance, false))
 	var spread := HudCrosshair.spread_px(err_deg, float(_info.get("fov_deg", 80.0)), surface.x)
-	HudCrosshair.draw(self, _crosshair_tex, Vector2(512, 384), surface, spread)
+	HudCrosshair.draw(self, _crosshair_tex, _crosshair_center(surface), surface, spread)
+
+
+# The crosshair anchor: the projected aim point mapped into the 1024×768 design space
+# (Viewport_ScreenToVirtual is ×1024/width) — in third person / spectate, where the
+# orbit-pitched chase camera does not look along the aim. First person arrives as
+# Vector2.INF and PINS the exact design center [orig: @0x5928a0 — the original never
+# projects in 1P; the projected branch is @0x592910..0x59293c]. (D-HUD-10 CLOSED.)
+# [orig: @0x592c50..0x592cd2 offsets around the virtual-space projected aim;
+# Viewport_ScreenToVirtual @0x5d2c70]
+func _crosshair_center(surface: Vector2) -> Vector2:
+	var aim: Vector2 = _info.get("aim_screen", Vector2.INF)
+	if aim == Vector2.INF or surface.x <= 0.0 or surface.y <= 0.0:
+		return Vector2(512, 384)
+	return Vector2(aim.x * HudLayout.DESIGN_WIDTH / surface.x,
+			aim.y * HudLayout.DESIGN_HEIGHT / surface.y)
 
 func _stance_offset(idx: int) -> Vector2:
 	return _stance_offsets[idx] if idx >= 0 and idx < _stance_offsets.size() else Vector2.ZERO
