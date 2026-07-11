@@ -47,6 +47,11 @@ target_link_libraries(threedi_userpoint_ir_test PRIVATE opennova_threedi)
 target_include_directories(threedi_userpoint_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_userpoint_ir COMMAND threedi_userpoint_ir_test)
 
+add_executable(threedi_collision_ir_test threedi/collision_ir_test.cpp)
+target_link_libraries(threedi_collision_ir_test PRIVATE opennova_threedi)
+target_include_directories(threedi_collision_ir_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_collision_ir COMMAND threedi_collision_ir_test)
+
 # ADM tests
 foreach(test comment trim_value parse write)
     add_executable(adm_${test}_test anim/adm_${test}_test.cpp)
@@ -887,6 +892,17 @@ target_link_libraries(infantry_test PRIVATE opennova_world)
 target_include_directories(infantry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(infantry_test PRIVATE cxx_std_17)
 add_test(NAME infantry COMMAND infantry_test)
+
+# World-object collision (Entity_TestCollisionSections @0x4aef90 / _RaycastCollisionModel
+# @0x413060 / _ComputeBoneCollisionForce @0x4ae150 / _ProcessCollisionAndPlatformPhysics
+# @0x4b2bd0): matrix roundtrip, blink type-8 query + flags^6/indoors, type-1 segment
+# clip, the ground probe through candidate models, wall push-out with prev-position
+# gating, hurt/ladder volumes, and the idle skip throttle — over hand-built volumes.
+add_executable(collision_test world/collision_test.cpp)
+target_link_libraries(collision_test PRIVATE opennova_world)
+target_include_directories(collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(collision_test PRIVATE cxx_std_17)
+add_test(NAME collision COMMAND collision_test)
 
 # The FP weapon action FSM (WeaponAction_ProcessFrame @0x540e60 + Anim_InitActions
 # @0x541fa0, net-re §5.62): the ACTION-row bake (auto delays from clip ticks), the

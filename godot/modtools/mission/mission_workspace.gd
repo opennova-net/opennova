@@ -359,6 +359,7 @@ func toggle_debug_overlay() -> void:
 		_debug_overlay.set_runtime_source(Callable(self, "_debug_runtime_source"))
 		_debug_overlay.transport_used.connect(_on_overlay_transport)
 		_debug_overlay.skeleton_debug_toggled.connect(_on_overlay_skeleton_debug)
+		_debug_overlay.collision_debug_toggled.connect(_on_overlay_collision_debug)
 		_debug_overlay.foliage_hidden_toggled.connect(_on_overlay_foliage_hidden)
 		_debug_overlay.viewmodel_forced_toggled.connect(_on_overlay_viewmodel_forced)
 		_debug_overlay.body_in_first_person_toggled.connect(_on_overlay_body_in_first_person)
@@ -380,6 +381,13 @@ func _on_overlay_skeleton_debug(enabled: bool) -> void:
 		var world = _play_node().get_world()
 		if world != null:
 			world.set_skeleton_debug(enabled)
+
+
+func _on_overlay_collision_debug(enabled: bool) -> void:
+	if is_playing_mission():
+		var world = _play_node().get_world()
+		if world != null:
+			world.set_collision_debug(enabled)
 
 
 func _on_overlay_foliage_hidden(hidden: bool) -> void:

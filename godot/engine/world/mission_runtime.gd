@@ -177,6 +177,13 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# the vehicle record), and hp -> health/health_max (vehicles spawn at full health on the wire).
 	if options.get("item_db") != null:
 		_sim.resolve_item_traits(options["item_db"])
+	# World-object collision: register each placed graphic's .3di collision block (BVOL
+	# volumes + BPLN planes) on the sim and attach per-entity instances — walls push back,
+	# roofs carry, hurt/ladder volumes act, blink boxes set indoors. [orig:
+	# Entity_ProcessCollisionAndPlatformPhysics @0x4b2bd0 + the query set;
+	# docs/world/world-wac-ai-re.md §15; D-INF-3 burn-down]
+	if options.get("item_db") != null and options.get("placer") != null:
+		_sim.resolve_collision_instances(options["item_db"], options["placer"])
 	# Armory table (weapon.def) onto the sim world — the 0x5A ammo resolve + 0x2F filter source
 	# and the uplink equipped-weapon gate (D-NET-141/143). Missing root/file leaves the table
 	# empty; the loadout reply then degrades to the tracked request-echo fallback.

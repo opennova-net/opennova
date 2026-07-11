@@ -29,6 +29,45 @@ static int is_gp_file(const char *path) {
            memcmp(magic, "GPP", 3) == 0;
 }
 
+static int collision_ir_matches_gp(const char *path,
+                                   const ThreediGpCollision *src,
+                                   const ThreediIRCollision *ir) {
+    if (!ir) {
+        fprintf(stderr, "Missing collision IR for %s\n", path);
+        return 0;
+    }
+    if (src->object_count < 0 ||
+        ir->object_count != (size_t)src->object_count) {
+        fprintf(stderr, "Collision object count mismatch for %s\n", path);
+        return 0;
+    }
+    if (!threedi_ir_collision_is_runtime_safe(ir)) {
+        fprintf(stderr, "Runtime-unsafe collision IR for %s\n", path);
+        return 0;
+    }
+    for (size_t i = 0; i < ir->object_count; ++i) {
+        const ThreediGpCollisionObject *s = &src->objects[i];
+        const ThreediIRCollisionObject *d = &ir->objects[i];
+        if (d->num_vertices != s->vertex_count ||
+            d->num_faces != s->face_count ||
+            d->parent_subobject_index != s->parent_subobject ||
+            d->offset[0] != (float)s->translation[0] ||
+            d->offset[1] != (float)s->translation[1] ||
+            d->offset[2] != (float)s->translation[2]) {
+            fprintf(stderr, "Collision object metadata mismatch for %s\n", path);
+            return 0;
+        }
+    }
+    for (size_t i = 0; i < ir->volume_count; ++i) {
+        const int32_t object_index = ir->volumes[i].object_index;
+        if (object_index >= 0 && (size_t)object_index >= ir->object_count) {
+            fprintf(stderr, "Collision volume object index out of range for %s\n", path);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int test_gp_parse(const char *path) {
     ThreediGpFile gp;
     threedi_gp_init(&gp);
@@ -95,6 +134,11 @@ static int test_gp_parse(const char *path) {
     // Verify IR has expected data
     if (ir.lod_count == 0) {
         fprintf(stderr, "No LODs in IR for %s\n", path);
+        threedi_ir_free(&ir);
+        threedi_gp_free(&gp);
+        return 0;
+    }
+    if (gp.collision && !collision_ir_matches_gp(path, gp.collision, ir.collision)) {
         threedi_ir_free(&ir);
         threedi_gp_free(&gp);
         return 0;

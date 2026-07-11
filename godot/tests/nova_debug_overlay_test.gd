@@ -9,6 +9,8 @@ extends GutTest
 const OverlayScript := preload("res://engine/debug/nova_debug_overlay.gd")
 const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
 const MainGameScript := preload("res://game/main_game.gd")
+const COLLISION_TOGGLE_PATH := NodePath(
+	"DebugPanel/DebugContent/DebugTabs/View/ViewCollision")
 
 
 class FakeModel:
@@ -98,6 +100,23 @@ func test_view_tab_skeleton_toggle_emits() -> void:
 	assert_signal_emitted_with_parameters(overlay, "skeleton_debug_toggled", [false])
 
 
+func test_view_tab_collision_toggle_emits() -> void:
+	# The View tab's "Show collision" checkbox: same host-neutral, runtime-free
+	# contract as the skeleton toggle -- it only emits intent; the host builds/frees
+	# the collision debug view.
+	var overlay := _make_overlay()
+	overlay.toggle()
+	var collision_check := overlay.get_node_or_null(COLLISION_TOGGLE_PATH) as CheckBox
+	assert_not_null(collision_check, "the collision checkbox has a stable public node path")
+	assert_false(collision_check.button_pressed, "it defaults off")
+
+	watch_signals(overlay)
+	collision_check.toggled.emit(true)
+	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [true])
+	collision_check.toggled.emit(false)
+	assert_signal_emitted_with_parameters(overlay, "collision_debug_toggled", [false])
+
+
 func test_view_tab_hide_foliage_toggle_emits() -> void:
 	# The View tab's "Hide foliage" checkbox: same host-neutral, runtime-free contract as
 	# the skeleton toggle -- it only emits intent for the host to act on.
@@ -126,5 +145,4 @@ func before_all() -> void:
 
 func after_all() -> void:
 	ResourceDirSettings.set_resource_dir(_saved_resource_dir)
-
 

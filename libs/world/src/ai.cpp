@@ -583,6 +583,15 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
     if (ctx.pre_mission) return;
     is_authority = ctx.is_authority;
     scheduler.budget = 0; // per-frame budget reset (the staggering accumulator)
+    // Rebuild the collision proximity tables once per tick, before any entity update.
+    // [orig: Entity_UpdateAllEntities @0x4c2100 -> Entity_BuildAllProximityLists
+    // @0x4c20f0 (pool-2 statics + pool-0/1 snapshots) + Entity_BuildProximityListsFromPools
+    // @0x4b8eb0 (per-entity candidate slices)]
+    const bool collision_active = collision != nullptr && collision->instance_count() != 0;
+    if (collision_active) {
+        collision->local_player = world.cached.local_player; // blink accumulation target
+        collision->build_tick_tables(world);
+    }
     // The loop runs on a JOINER (client, !is_authority) too: tick_infantry's §5.38
     // entity==g_local_player branch (line below, no authority guard) motor-sims the
     // joiner's own player from input, while NPC think/select stays authority-gated, so
@@ -599,6 +608,15 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             continue;
         }
         if (e.inf.active) {
+            // Net-snapped remote peers skip the movement motor, so their blink/indoors
+            // state comes from the position-only refresh instead. [orig: remote persons
+            // refresh via the net position/create handlers — NapiNPClientMsg_0x00F
+            // @0x42e442, NetPacket_HandleEntityCreate @0x42f227; the @0x4c229c per-tick
+            // walk is pool-2 statics on an 8-per-tick stagger, not persons]
+            if (collision_active && e.net_is_remote_peer) {
+                if (Entity *ent = world.registry.get(e.handle))
+                    collision->refresh_blink(world, *ent);
+            }
             // org1-class soldier: the infantry motor replaces the vehicle SM + kinematic
             // locomotion for this entity. [orig: g_EntityClassPhysicsTable row "org1" ->
             // Entity_UpdateInfantryAI @0x4b9910]

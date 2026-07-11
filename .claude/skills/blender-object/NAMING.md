@@ -76,11 +76,15 @@ to a numeric **collidableType**; `libs/oed/src/export_3di.cpp` then routes types
 `-colonly` suffix for collision, `-occonly` for occlusion. Repeated same-kind volumes get a
 base-26 letter suffix (`CB01`, `CB01a`, `CB01b`, …).
 
-> **The English meanings are inferred, not witnessed.** Our code knows every code and its
-> type number (`convert_internal.cpp` classify switch; `scene_builder.CollisionType`;
-> `godot/engine/object/collision_hull.gd` reverse map) but **not** what each type *is* —
-> `collision_hull.gd` calls its table "tentative … the meanings are inferred" and the editor
-> appends a `?`. The "hint" column below is a guess from the letters; do not state it as fact.
+> **The letter EXPANSIONS are inferred, but the runtime SEMANTICS are now witnessed**
+> (2026-07-09, docs/world/world-wac-ai-re.md §15.4 [orig: Entity_ComputeBoneCollisionForce
+> @0x4ae150 dispatch]): 1 solid (the only type raycasts clip), 4 platform/seat, 5
+> contact-no-force, 6 armory zone (gates the in-game weapon.mnu armory), 7 damage-pass,
+> 8 blink box (interior detection — accum bit 2 sets the entity indoors flag 0x800000),
+> 9 destructible-section touch, 10 capture-zone touch, 11 vehicle-loadout zone (gates
+> vehicle.mnu), 12 masked, 13 grounded-only touch, 16/17/18 hurt volumes (-50/-6/-1 HP),
+> 19 player-only solid, 20..23 occlusion. The "hint" column below predates that witness;
+> trust §15.4 where they differ.
 
 | Code | collidableType | Routing | Hint (inferred, unverified) |
 |---|---|---|---|

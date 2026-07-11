@@ -1201,3 +1201,321 @@ the mixer-loop smoother @ 0x7bef3e..0x7bef55 + the @ 0x4b17f0 consumer). Line co
 gate refresh), `0x4e064c` (the case-26 toggle), `0x7bef3e` (the output power meter),
 `0x4b17f0` (the pitch kick resolved), `0x401f00` (control-registers-only fire side
 effect).
+
+## 15. World-object collision + blink boxes (engine-research 2026-07-09; re-grilled 2026-07-11)
+
+The runtime consumers of the `.3di` collision block (CDTA: CMDL/BVOL/BPLN/COBJ —
+format landed in [3di-gp-format-re.md](../threedi/3di-gp-format-re.md), previously
+"no downstream consumer traced"). Ported as `libs/world/collision.{h,cpp}`
+(`CollisionWorld` + the query set), consumed by the infantry motor's vertical
+resolve (infantry.cpp step 9 — the D-INF-3 seam) and fed by the host sweep
+`NovaSimulation::resolve_collision_instances`. Evidence ctest: `collision`
+(tests/world/collision_test.cpp). All addresses: retail `Jointops.exe`
+(`Jointops.exe.kong.i64`, imagebase 0x400000). The 2026-07-11 full re-grill
+(the collision extraction slice) walked every ported function against fresh
+decompiles: it corrected the port's platform-anchor leg, type-8 ordinals,
+skip-throttle triggers, repulsion gates, proximity cadence, and groundEntity
+store (details inline below), added D-COL-9, and extended D-COL-5/-8.
+
+### 15.1 Verdicts
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Runtime collision records (COBJ 108 B / BVOL 40 B / BPLN 12 B query-side layout) | MATCHING (read-only grill) | field offsets witnessed in all three query functions; `collision` ctest |
+| Point-vs-blink query (`collision_test_blink`) | MATCHING | `[orig: Entity_TestCollisionSections @ 0x4aef90]`; `collision` ctest blink cases |
+| Segment-vs-solid convex clip (`collision_raycast_model`) | MATCHING | `[orig: Entity_RaycastCollisionModel @ 0x413060]`; `collision` ctest ray cases |
+| Contact force + type dispatch (`collision_contact_force`) | MATCHING (core paths; D-COL-2/4/5 tails) | `[orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]`; `collision` ctest push-out/hurt/zones |
+| World raycast + ground probes (`CollisionWorld::raycast_ground`) | MATCHING (vertical; D-COL-7 terrain leg) | `[orig: raycast_entity_collision @ 0x413760; Entity_RaycastGroundHeight @ 0x4142c0 / ...AndObject @ 0x414320]` |
+| Per-tick proximity tables + candidate slices | MATCHING (structural) | `[orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 / _Pool01 @ 0x4b9340 / FromPools @ 0x4b8eb0]` |
+| The movement resolver (`CollisionWorld::resolve_entity`) | MATCHING (core; deferrals D-COL-5/6/8) | `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]` — the §4 open item 5 internals now decoded |
+| Blink boxes -> indoors | MATCHING | `[orig: @ 0x4aef90 / @ 0x4aea68-0x4aeae8 / Entity_BuildProximityList @ 0x4b3dc0]`; `collision` ctest blink cases |
+| Armory/vehicle loadout-zone gates | MATCHING (read-only grill) | `[orig: Input_HandleActionBinding @ 0x49b83d case 218]`; menu side in [menu-re.md](../mnu/menu-re.md) §In-game armory |
+
+### 15.2 Witness map — the query set
+
+- **Runtime records.** COBJ section record (108 B): `+28` volume count, `+32`
+  first-damage-volume index (-1 none), `+36` volume ptr, `+68..+88` local AABB
+  (minX,maxX,minY,maxY,minZ,maxZ), `+92..+100` bound-sphere center, `+104` radius.
+  BVOL volume record (40 B): `+0` collidable type, `+4..+24` local AABB (same
+  order), `+28` plane count, `+32` plane ptr, `+36` flags. BPLN plane record
+  (12 B): `+0` s16 flags, `+2/+4/+6` s16 Q14 normal, `+8` 16.16 distance.
+  Witnessed as the common field reads of `@ 0x4aef90`, `@ 0x413060`, `@ 0x4ae150`.
+  On-disk BVOL types are ALREADY the runtime types — the remap switch cited in the
+  format record is the ModSuperOed writer side, not a JO load step.
+- **Transforms.** Per-section 16-dword fixed matrices from the model callback
+  (`model+168`; collision header at `model+176`, ready gate dword`[32]`): row-major
+  3x4, Q22 rotation rows with `+0x200000` rounding, world 16.16 translation at
+  `[3]/[7]/[11]`, `[15]` bit 0 = section disabled. `[orig:
+  Math_TransformPointWithTranslation22 @ 0x412f60 (translate-then-rotate — the
+  inverse application), Math_TransformPointFixedPoint22 @ 0x412e90 (rotate only),
+  Math_FixedPointTransformPoint22 @ 0x615810 (rotate-then-translate),
+  Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0 (rigid inverse)]`. Husk select:
+  entity Flags & 4 -> husk model else graphic `[orig: @ 0x413086 / @ 0x4ae233]`.
+- **Blink point query** `[orig: Entity_TestCollisionSections @ 0x4aef90]`: gate
+  itemDef type == 5 (building); broad phase |p - entityPos| <= boundRadius+r per
+  axis; per section (matrix flag skip) inverse-transform each point; section AABB
+  then TYPE-8 volumes only: volume AABB then all-planes-inside test
+  `dot(local,n)>>14 + dist - r < 0`. On hit: `g_BlinkFlagsAccum |= flags ^ 6`,
+  packed hit `((section & 0x1F) + (pool2_index << 8)) << 12` into
+  `g_BlinkHitSlot0..3` (count `g_BlinkHitCount`, cap 4, type-8 ordinal < 16).
+- **Segment clip** `[orig: Entity_RaycastCollisionModel @ 0x413060]`: ray record
+  {start[3], end[3] (in/out), mid[3], half[3], dir[3] float-normalized 16.16};
+  per section: bound-sphere-vs-ray-line reject (project via dir dot >>16, float
+  sqrt distance), then TYPE-1 volumes only: volume bound-sphere reject, convex
+  clip of [start,end] against the plane run (d = dot>>14 + dist; both >= 0 miss,
+  straddle clips at t = d0<<16/(d0-d1) with +0x8000 rounding); entry point = the
+  clipped start, transformed back and written into the record end (progressive
+  narrowing across sections); mid/half refreshed at exit.
+- **Contact force** `[orig: Entity_ComputeBoneCollisionForce @ 0x4ae150]`: args
+  (source, points stride-4, radii, n, target, outForce[4], outFlags, mask). Entry
+  rejects a target with `Flags & 1` `[orig: @ 0x4ae1bd]`. Mask:
+  1 on-platform (type-4 seat test), 2 player (type-19), 8 damage pass (types 7/12
+  only, from the section's `+32` start), 0x10 type-12. The type-8 ordinal counter
+  restores its section-entry save per POINT (`v118` `@ 0x4ae384/0x4ae4f6`) so a
+  volume keeps a stable ordinal across points; the same pattern gates the blink
+  query's `faceIdx` (`@ 0x4af0d3/0x4af165`). Solid path: plane test in
+  Q21 (`dot>>9` vs `32*dist`), a plane is a separator candidate only when the
+  source's PREVIOUS position (savedLivePose) sat outside it within +r margin;
+  min-penetration plane wins, second-best assists (added at half when it grows the
+  component); per-section force rotated to world; total clamped to
+  `sourceBoundRadius << 7` then `(f+16)>>5` (the length ftol is min-clamped by
+  `flt_7C19E0 = 2147352576.0`, the shared sqrt-overflow guard on every distance
+  in the query set). Type dispatch on containment:
+  4 platform anchor -> flag 0x1 — the anchor is TWO rotations through the section
+  matrix (x/y from `(midX, midY, point-local z)`, z from `(midX, midY,
+  maxZ - 1.0u)` `[orig: @ 0x4ae8f2/0x4ae903]`); yaw/pitch are TARGET-RELATIVE —
+  `entity.Yaw − ftol(atan2(−ny,−nx) · dbl_7C57B8[−2^31/π])` and
+  `entity.Pitch − ftol(atan2(nz, ftol(lenXY)) · same)` `[orig:
+  @ 0x4ae938-0x4ae9d9]` — and the 0.375u pull-in uses REAL fsin/fcos of
+  `yaw · 2π/2^32` scaled 2^22 truncated, not the quantized dir table `[orig:
+  @ 0x4ae9df-0x4aea30]`; plane[0] is read unguarded even for a 0-plane volume;
+  5 contact-no-force; 6 armory volume -> 0x4; 7/12 masked; 8 blink accumulate
+  (buildings, body/eye points only) -> 0x10; 9 destructible-section touch mask on
+  target+692 -> 0x20; 10 capture-zone -> 0x200; 11 vehicle-loadout volume -> 0x400;
+  13 grounded-on-target only -> 0x800; 16/17/18 hurt -> 0x100/0x80/0x40;
+  19 player-only solid; 1/others solid.
+- **World raycast** `[orig: raycast_entity_collision @ 0x413760]`: terrain clamp
+  first (`Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) — SKIPPED when the source
+  entity is indoors (Flags & 0x800000); then the source's candidate list
+  (`entity+0x1BC` ptr / `+0x1C0` count): broad AABB + ray-line distance vs
+  boundRadius, skip Flags & 0x2000001 and candidates standing on the source
+  (3-level groundEntity chain), narrow clip via `@ 0x413060`; returns the hit
+  entity, the clipped end stays in the record. Ground probes `[orig:
+  Entity_RaycastGroundHeight @ 0x4142c0 / ...AndObject @ 0x414320 — renamed this
+  session from sub_4142C0/sub_414320]`: ray {x+dx, y+dy, z+zUp} down zDrop,
+  return end Z; the AndObject variant stores the hit into entity->groundEntity
+  (+0x28). The 5-tap slope sampler and the resolver tail are its callers.
+  `Entity_FindNearestByRay @ 0x413af0` is the projectile-side sibling over the
+  global static (count `g_StaticProxCount`) + dynamic (`g_DynProxCount`) tables.
+- **Proximity tables — the witnessed cadence (corrected 2026-07-11).**
+  `Entity_BuildAllProximityLists @ 0x4c20f0` (statics + pool-0/1 together) is
+  the SPAWN/TELEPORT path (`Entity_TeleportTeamToSpawn @ 0x43d4f8`,
+  `EventAction_TeleportEntityToSpawn @ 0x43e1f2`, mission start) — NOT per
+  tick. Per tick, `Entity_UpdateAllEntities @ 0x4c2100` calls the pool-0/1
+  builder directly `[orig: @ 0x4c240a]` and the candidate-slice builder only
+  every 17th tick: `g_ProxSliceRefreshCounter @ 0xB57C84` (renamed this
+  session) increments per tick and `@ 0x4c240f` gates the
+  `Entity_BuildProximityListsFromPools` call on `>= 0x10` (the builder zeroes
+  it `@ 0x4b8ed0`) — slices are up to 16 ticks stale by design, and BSS-zero
+  start means mission starts run 16 sliceless ticks (`collision` ctest cadence
+  pin). Content: pool-2 statics quantized `(p+0x8000)>>16` u16 with radius
+  padded +111876, buildings first (`g_StaticProxBuildingCount`) then all
+  (`g_StaticProxCount`; the `count < 1199` post-increment gate `@ 0x4b94cb`
+  means the 1200th write is never counted — effective cap 1199)
+  `[orig: @ 0x4b9430]`; pool-0 persons + pool-1 dynamics full-precision
+  (`g_PersonProx* / g_DynProx*`), both gated `!(Flags & 1)` (statics are not)
+  `[orig: @ 0x4b9340]`; per-entity candidate slices into the 3000-entry
+  `g_ProxCandidateArena` with ptr/count at `entity+0x1BC/+0x1C0`
+  `[orig: @ 0x4b8eb0]` — pool-0 SOURCES at boundRadius+4.0u, pool-1 SOURCES at
+  +6.0u gated on parent-def foliage-attrib 0x20 clear unless def type 1 (the
+  attrib gate is on the pool-1 source, not the candidate); dyn CANDIDATES with
+  `+0x114` flag 0x4000 are skipped (unmodeled in the port — no +0x114 mirror;
+  rides D-COL-3's table-content note), statics have no extra slack (the
+  +111876 pad absorbs the quantization error). Port notes: our tables carry
+  instanced entities only; pool-1 source slices are unbuilt until the vehicle
+  pass (only organics run our resolver — D-COL-5 scope). Persons' savedLivePose
+  stamp site: pool-1 dynamics stamp per tick `@ 0x4c23b8` (+4..+18 → +0x80);
+  the pool-0 stamp is NOT in `@ 0x4c2100` — unwitnessed (open follow-up); our
+  ResolveState.prev_pos = last-resolve-end is behaviorally equivalent if the
+  stamp sits at update start.
+
+### 15.3 Witness map — the movement resolver `[orig: Entity_ProcessCollisionAndPlatformPhysics @ 0x4b2bd0]`
+
+Closes §4 open item 5 (the 0x11e3-byte internals). Per call (from the motor's
+gravity block, every 2 ticks):
+
+1. **Idle skip-throttle**: full update when the anim-state table bit 0 is set,
+   velocity/slide non-zero (slide > 0 or < -420), displaced > 200 from
+   savedLivePose (X/Y only), swim flag 0x2000, or every 64th tick; otherwise
+   counter 0..10 full, 11..20 skip (revert the caller's gravity displacement
+   `pos.Z -= slide` (x2 non-player), zero it, return 0), reset to 10. A net
+   push-out later in the resolve resets the counter to 0 `[orig: @ 0x4b3773]`.
+2. **Per-query state**: blink globals cleared; entity Flags &= ~0x00D00800
+   (indoors 0x800000, armory 0x400000, platform 0x100000, vehicle-zone 0x800)
+   plus the `+0x2c` aux bit 0x40 (the type-13 grounded-touch latch, D-COL-9);
+   local player clears `g_LocalPlayerBlinkFlags`. A mounted/carried source
+   (parentEntity set + alive, or Flags 0x40) suppresses force ACCUMULATION while
+   the flag dispatch still runs (`savedPosY`, D-COL-9).
+3. **Capsule points** (not-on-platform): 3 points — head (z + collisionRadius -
+   halfRadius + 4096), eye (pos + CameraOffset), feet — radii {collisionRadius,
+   20480, outerRadius} where halfRadius = capsuleBottom>>4, collisionRadius =
+   halfRadius + |capsuleTop - capsuleBottom|/2 (floor 57344 - 2*cr, min 4096;
+   both radii floored at 6144). On-platform: 2 pitched/heading points, radii 25088.
+4. **Candidate loop** over the entity slice: `@ 0x4ae150` per candidate; the
+   contact-flag dispatch runs EVEN ON A ZERO-FORCE RETURN (`the goto @ 0x4b2fa5`
+   — a pure seat/zone touch still latches; `collision` ctest platform pin);
+   forces accumulate NEGATED; a mostly-vertical negative force is dropped
+   (standing pressure `@ 0x4b3010`); while swimming (Flags 0x2000) an UPWARD
+   force damps slideDecay toward -167 (-83 steps; `@ 0x4b304e-0x4b308c` —
+   rides the D-INF-3 water tail, unported); contact-flag dispatch:
+   0x40/0x80/0x100 hurt -1/-6/-50 HP (authority only `@ 0x4b317b-0x4b31d7`,
+   skipped entirely for Flags 0x4000000 sources `@ 0x4b3148`; each hit also
+   stamps the damage-source attribution); 0x200 capture touch ->
+   `Server_OnPlayerTouchCaptureZone @ 0x500ba0` (def attrib 0x20000, spawn gates);
+   0x1 platform (entry-gated: not Flags 2, and was-on-platform OR player OR
+   MoveOrder 0x400): Flags |= 0x100000 + groundEntity = candidate (`@ 0x4b3291`), the
+   moving-deck carry (anchor chase `(target-pos+32)>>6`, yaw `(delta+8)>>4` for
+   players / hard-set for AI, pitch copy, step-up +20480 / +39936 (MoveOrder
+   0x200) / +60416 (0x100), deck velocity 24576*sincos>>22); 0x4 -> Flags 0x400000
+   (armory zone); 0x400 -> Flags 0x800 (vehicle-loadout zone); 0x800 -> the
+   `+0x2c` aux 0x40 latch (type 13, D-COL-9); 0x10 blink apply —
+   bit 2 of the accum -> Flags 0x800000, local player ORs into
+   `g_LocalPlayerBlinkFlags` (`@ 0x4b34c2-0x4b3502`); 0x20 section-touch callback
+   (candidate vtbl+456)(6,0); walking over a live body plays the def sound
+   (`@ 0x4b30da`). itemDef attrib 1 -> `Entity_ProcessWaypointInteraction
+   @ 0x4ad820`; attrib 2 + player -> `Entity_InvokeCollisionCallback @ 0x442350`.
+5. **Second relaxation pass** at the force-shifted points, adding half the fresh
+   X/Y force when not on a platform (`@ 0x4b3549-0x4b36ec`); packed blink hits
+   copied onto the entity quad (`@ 0x4b36f0` — only when a candidate slice
+   exists; sliceless entities keep the refresh-stamped quad). When a push was
+   applied and the push direction roughly opposes targetHeading (atan2 gates
+   ~8°/~15°), a "blocked" latch is set at `entity pad_368[1]` (`@ 0x4b378a-
+   0x4b37bb` — AI-steering consumer unmapped; D-COL-8).
+6. **Run-over kill**: pushed by a moving vehicle (itemDef type 1) of another team
+   (or MoveOrder 0x200) with push > 10160 on both axes -> Health 0 +
+   `Score_ProcessKillEvent @ 0x4fd400` + death anim via
+   `Entity_ComputeAnimSlotIndex @ 0x43a690`; crush sound above 1016.
+7. **Person repulsion** (no model contact; anim states 27/137/138/139 exempt;
+   Flags 0x43 exempt; radius +2.0u under Flags 0x20 `@ 0x4b3aac-0x4b3abc`):
+   the pool-0 table SNAPSHOT for the coarse rejects, then the LIVE entity
+   position for the second distance + the push (dead/hidden peers Flags 2
+   skipped `@ 0x4b3b8d`), threshold 30% of summed radii, push (thr - dist)/4
+   along the `(0x200000 - atan2BAM)>>22`-indexed sin/cos pair
+   (`@ 0x4b3a5c-0x4b3c52`). Walking OFF a platform (was-platform, not latched,
+   player) nudges 24576*sincos(bodyHeading)>>22 and runs the local-player
+   pitch-restore chase (`@ 0x4b3c5c-0x4b3d69` — D-COL-5's exit leg).
+8. **Ground settle tail**: quantize Z up to the 6144 grid (`(z+6143) & ~0x17FF`),
+   probe `@ 0x414320 (entity,0,0,0,0x20000)` (2.0u drop), restore Z, return
+   feetZ - groundZ (`@ 0x4b3d6e-0x4b3da9`); the probe's hit lands in
+   groundEntity UNCONDITIONALLY (`the +0x28 store @ 0x414370` — null on a miss,
+   overwriting even the same-resolve platform latch, which normally re-hits the
+   deck); callers treat <= 0 as grounded (lift by the return), > 0xF000
+   airborne (section 3.5, unchanged).
+
+Blink refresh also runs position-only on spawn/teleport/net-create and per net
+position update for remote persons (`NapiNPClientMsg_0x00F @ 0x42e442`,
+`NetPacket_HandleEntityCreate @ 0x42f227`, `NapiNPClientMsg_0x02F @ 0x4310ec`);
+the per-tick `@ 0x4c229c` walk in `Entity_UpdateAllEntities` is POOL-2 STATICS
+on an 8-per-tick stagger with a 62-tick per-entity countdown (`+0x2AC`), not
+persons `[orig: Entity_BuildProximityList @ 0x4b3dc0 — one point, radius 0x8000;
+def type 1/3 (vehicle/person) walks the entity's candidate list testing
+building-kind candidates, def-null/others the global building prefix at
+buildingRadius+0x8000; writes the packed quad + Flags 0x800000]`, and the
+lighting sampler runs
+the same point query per sector sample with an INDOOR result keyed on hit-slot
+presence, hit slot -> pool-2 entity (>>20) + section ((>>12)&0x1F) ->
+`Lighting_SetInteriorLightGroup @ 0x5a90e0` `[orig:
+terrain_sector_compute_lighting @ 0x5c7550 — its "0x8000" is the query RADIUS]`.
+Local-player accumulated flags (`g_LocalPlayerBlinkFlags @ 0x24C1934`) are
+consumed by the render collectors (`render_main_scene @ 0x5c1240`,
+`Terrain_CollectVisibleEntities_0 @ 0x5c6f20`, `collect_visible_entities_for_terrain
+@ 0x5c8c60`, `Render_ProcessMainSceneFrame @ 0x5ca0f0`, `terrain_scene_render
+@ 0x5d04c0`) — REN-scope follow-ups. Projectiles refresh blink state per tick
+(`Projectile_UpdatePhysics @ 0x4e9d70, call @ 0x4e9f21`) and indoor rays skip the
+terrain clamp (the `@ 0x413785` gate).
+
+### 15.4 Collidable-type semantics (now witnessed at runtime)
+
+| Type | Runtime behavior | Witness |
+|---|---|---|
+| 1 (and unlisted) | solid — SAT push-out; the ONLY type raycasts clip | `@ 0x413298`, `@ 0x4aebdd` |
+| 4 | platform/seat surface — contact 0x1 + platform-carry anchor | `@ 0x4ae894-0x4aea30` |
+| 5 | contact marker, no force | `@ 0x4ae874` |
+| 6 | armory volume — Flags 0x400000, gates weapon.mnu on action 218 | `@ 0x4aea45`, `@ 0x49b848` |
+| 7 | damage-pass volume (mask 8) | `@ 0x4ae558` |
+| 8 | blink box — blink accumulate (buildings), indoors bit | `@ 0x4aea68` |
+| 9 | destructible-section touch — bit per section on target+692; the bit index is `sectionIdx − itemDef+2193` (boneMapStart) through a char shift (x86 `shl cl` masks &31) — equal to `si & 31` while the bone map is unmodeled (D-COL-2) | `@ 0x4aeb0f-0x4aeb22` |
+| 10 | capture-zone touch | `@ 0x4aeb7b`, `@ 0x4b31e3` |
+| 11 | vehicle-loadout volume — Flags 0x800, gates vehicle.mnu | `@ 0x4aeb92`, `@ 0x49b858` |
+| 12 | masked volume (mask 0x10) | `@ 0x4ae568` |
+| 13 | grounded-on-target-only touch | `@ 0x4aebb3` |
+| 16/17/18 | hurt volumes: -50/-6/-1 HP per resolve (authority) | `@ 0x4aeb39/50/67` |
+| 19 | player-only solid (mask 2) | `@ 0x4ae543` |
+| 20..23 | occlusion list (not in the collision walkers) | format record |
+
+The authored bvol FLAGS letters (V/S/W/L/O clearing bits of init 0x3E) remain
+inference (exporter-side; ModSuperOed follow-up) — but the runtime consumption is
+witnessed: accumulated as `flags ^ 6`, and accum bit 2 (set by an authored
+bit-1-cleared box) IS the indoors trigger (entity Flags 0x800000).
+
+### 15.5 Divergence catalog (D-COL)
+
+| ID | Ours | Original | Why / consequence |
+|---|---|---|---|
+| D-COL-1 | one yaw-only world matrix shared by every section | per-section matrices from the model callback (animated parts: doors) | animated-part collision (doors) pending; static buildings match |
+| D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
+| D-COL-3 | bound radius derived from the collision AABB (statics; persons 1.0u) | entity+0 boundRadius stamped at model load | broad-phase margins differ slightly; conservative |
+| D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
+| D-COL-5 | platform standing sets flags/groundEntity (any source, on plain contact) | full deck carry (anchor/yaw/pitch chase, step-up +20480/+39936/+60416, deck velocity), the entry gates (not Flags 2; was-platform OR player OR MoveOrder 0x400), the on-platform 2-point capsule mode, the platform-EXIT nudge (24576·sincos(bodyHeading)>>22) + local pitch-restore chase, pool-1 source slices | infantry-on-buildings unaffected; riders of MOVING vehicles slide until the vehicle pass wires it |
+| D-COL-6 | capture-zone touch (0x200) not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` | zone capture rides its own radius path today (zone_capture.cpp); reconcile when contact-driven capture lands |
+| D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
+| D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the 0x20 section-touch vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | need Score/net + sound + destruction hooks; tracked here so the resolver stays honest |
+| D-COL-9 | mounted/carried source semantics unmodeled: the `savedPosY` force-suppression gate (parentEntity+alive or Flags 0x40), the MoveOrder-0x100 step-up variant it selects, and the `+0x2c` aux latches (the pre-resolve 0x40 clear + the type-13 0x800 set) | `@ 0x4b2bfc/0x4b2d25/0x4b3330/0x4b34ba` | only on-foot organics run our resolver today; rides the vehicle/mount pass with D-COL-5 |
+
+**D-INF-3 status**: the horizontal capsule + object standing now land through
+this port (walls push out, roofs carry via the model-aware ground probe); the
+remaining D-INF-3 tail is water (the swim transitions) — platforms moved to
+D-COL-5.
+
+### 15.6 The armory / loadout-zone flow (cross-record pointer)
+
+Input action 218 `[orig: Input_HandleActionBinding @ 0x49b83d]`: Flags 0x400000
+-> `UI_OpenMenuScreen("weapon.mnu", "WEAPON") @ 0x49b8e3` (+ latch
+`g_WeaponScreenOpen @ 0x24C1884`), Flags 0x800 -> vehicle.mnu VEHICLE
+(occupancy checks via groundEntity+0x162), case 221 -> cmap.mnu CMAP deploy.
+The WEAPON screen wiring, population and ACCEPT apply are recorded in
+[menu-re.md](../mnu/menu-re.md) (its §In-game armory record rides the armory
+slice). Reimpl here: the collision-side zone gate
+(`NovaSimulation.local_player_in_armory_zone`) and the sim apply seam
+(`apply_local_player_loadout`); the WEAPON-screen UI host and the GameWorld
+viewmodel re-mount ride the armory slice.
+
+### 15.7a IDB write-backs (2026-07-11 re-grill, saved)
+
+Rename: `g_ProxSliceRefreshCounter @ 0xB57C84` (ex `dword_B57C84` — the 17-tick
+candidate-slice cadence counter). Comments: the cadence gate `@ 0x4c240f`, the
+statics 1199 count saturation `@ 0x4b94cb`, the per-point type-8 ordinal
+restore `@ 0x4ae4f6`, the unconditional groundEntity store `@ 0x414370`, the
+push-resets-skip-counter `@ 0x4b3773`, and the target-relative platform
+yaw/pitch + real-sincos pull-in `@ 0x4ae938`. Confirmed no drift: the 0x4142c0
+rename from the 2026-07-09 session is intact (a stale Hex-Rays cache had shown
+the auto name).
+
+### 15.7 IDB write-backs (2026-07-09 session, saved)
+
+Renames (auto names -> anchored): `Entity_RaycastGroundHeight @ 0x4142c0`,
+`Entity_RaycastGroundHeightAndObject @ 0x414320`, `UI_OpenMenuScreen @ 0x54e520`
+(ex "renderer init" misnomer), and 35 globals — the blink set
+(`g_BlinkFlagsAccum @ 0xB57C70`, `g_BlinkHitSlot0..3 @ 0xB57C74..80`,
+`g_BlinkHitCount @ 0x82AE20`, `g_LocalPlayerBlinkFlags @ 0x24C1934`), the
+proximity tables (`g_StaticProx* / g_DynProx* / g_PersonProx*`, counts
+`g_StaticProxCount @ 0xB52FD0`, `g_StaticProxBuildingCount @ 0xB4D20C`,
+`g_DynProxCount @ 0xB4D208`, `g_PersonProxCount @ 0xB52FD4`,
+`g_ProxCandidateArena @ 0xB57C90` + used), the platform-contact anchors
+(`g_PlatformContact* @ 0xB5AB70..80`, `g_CollisionQueryIsPlayer @ 0xB5AB84`),
+and the screen latches (`g_WeaponScreenOpen @ 0x24C1884`, `g_VehicleScreenOpen
+@ 0x24C1890`, `g_CmapScreenOpen @ 0x24C188C`). Entry comments on the ground
+probes, pool builders, blink query, action-218 gate, the ACCEPT handler, the
+WEAPON registration, and the type-6/11 dispatch sites. Proposed, NOT applied
+(curated-name policy): `collisionModel @ 0xB52FD8 -> g_StaticProxEntity`,
+`result @ 0xB5AB78 -> g_PlatformContactX`.

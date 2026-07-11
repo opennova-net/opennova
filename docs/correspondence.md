@@ -517,6 +517,32 @@ On-foot ground settle (D-INF-6, world-wac-ai-re; re-witnessed 2026-06-20):
 | `AnimMap_UpdateEntity` | `0x40b5f0` | feeds `entityRadius` = anim frame `capsule_bottom × 65536` (out-transform block @0x40b82f, out_transform[3] store @0x40b84d); out_transform[4] = top×65536 + 0x2000 | disasm; D-INF-6 (paired to godot `InfantryRootMotion`) | confirm-only |
 | `AI_ProcessMovementStep` | `0x466db0` | id-3 death-fall mover: `ai_comp[131] = ground + 0x50000` (@0x466e2d) — a TARGET slot, NOT the live pos[2] (refutes the +0x50000 render-Z reading) | disasm; D-INF-6 | confirm-only |
 
+World-object collision + blink boxes (engine-research 2026-07-09; full re-grill
+2026-07-11 with fresh decompiles of every row — platform-anchor leg, type-8
+ordinals, skip-throttle triggers, repulsion gates, proximity cadence, and the
+groundEntity store corrected in the port; world-wac-ai-re §15):
+
+| reimpl symbol (file) | original | addr | signature / role | evidence | status |
+|---|---|---|---|---|---|
+| `world::collision_test_blink` (libs/world/src/collision.cpp) | `Entity_TestCollisionSections` | `0x4aef90` | point-vs-type-8 blink query on building models; flags^6 accum + packed hits | decompile; `collision` ctest | ported |
+| `world::collision_raycast_model` (collision.cpp) | `Entity_RaycastCollisionModel` | `0x413060` | segment convex clip vs type-1 volumes (dot>>14 planes); progressive end narrowing | decompile; `collision` ctest | ported |
+| `world::collision_contact_force` (collision.cpp) | `Entity_ComputeBoneCollisionForce` | `0x4ae150` | capsule-points contact: prev-pos-gated SAT push-out (Q21) + the collidable-type dispatch table | decompile; `collision` ctest | ported (D-COL-2/4/5 tails) |
+| `world::CollisionWorld::raycast_ground` (collision.cpp) | `raycast_entity_collision` + `Entity_RaycastGroundHeight(AndObject)` | `0x413760` / `0x4142c0` / `0x414320` | terrain clamp (indoors-skip) + candidate narrow phase; ground probes store groundEntity | decompile + disasm | ported (D-COL-7) |
+| `world::CollisionWorld::resolve_entity` (collision.cpp) | `Entity_ProcessCollisionAndPlatformPhysics` | `0x4b2bd0` | the movement resolver: skip-throttle, candidate forces + flag dispatch (runs on zero-force returns), repulsion, ground-settle tail | decompile x2 (closes §4 item 5; re-grilled 2026-07-11) | ported (D-COL-5/6/8/9) |
+| `world::CollisionWorld::build_tick_tables` (collision.cpp) | `Entity_BuildProximityLists_Pool2` / `_Pool01` / `FromPools` | `0x4b9430` / `0x4b9340` / `0x4b8eb0` | per-tick static/dyn/person tables + per-entity candidate slices (+0x1BC/+0x1C0) | decompile | ported (D-COL-3) |
+| `world::CollisionWorld::refresh_blink` (collision.cpp) | `Entity_BuildProximityList` | `0x4b3dc0` | position-only blink refresh (radius 0x8000 vs the building prefix); indoors 0x800000 | decompile | ported |
+| `world::CollisionMatrix` helpers (collision.cpp) | `Math_TransformPointWithTranslation22` / `Math_TransformPointFixedPoint22` / `Math_FixedPointTransformPoint22` / `Matrix_Transpose3x3WithNegateCol3` | `0x412f60` / `0x412e90` / `0x615810` / `0x6136d0` | Q22 row-major 3x4 fixed transforms + rigid inverse | decompile | ported |
+| — | `Entity_FindNearestByRay` | `0x413af0` | projectile-side ray over the global static+dyn tables | decompile | confirm-only (round_sim follow-up) |
+| — | `terrain_sector_compute_lighting` (blink read) | `0x5c7550` | per-sample blink query; INDOOR keyed on hit-slot presence -> interior light group | decompile | confirm-only (REN scope) |
+
+In-game armory sim seams (engine-research 2026-07-09; the WEAPON-screen UI host and its
+witness rows land with the armory slice):
+
+| reimpl symbol (file) | original | addr | signature / role | evidence | status |
+|---|---|---|---|---|---|
+| `NovaSimulation.local_player_in_armory_zone` | `Input_HandleActionBinding` case 218 (gate half) | `0x49b83d` | armory key gated on Flags 0x400000 (type-6 volume); 0x800 -> vehicle.mnu | disasm | ported (zone gate; the key binding + UI host ride the armory slice) |
+| `apply_local_player_loadout` (NovaSimulation) | `WeaponLoadout_ApplyFromBuffer` | `0x565cd0` | ACCEPT: serialize UI -> per-team buffer; MP sends (0x2F seam), SP applies via the 0x5A-equivalent chain + weapon re-mount | decompile | ported (equipped+class slice; UI producer rides the armory slice) |
+
 First/third-person player camera (Phase 2.5, 2026-06-20; net-re §5.39):
 
 | original | addr | role | evidence | status |

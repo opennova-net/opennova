@@ -70,6 +70,40 @@ struct Field {
     }
 };
 
+CollisionModel hurt_box_model() {
+    CollisionModel model;
+    auto plane = [&](int nx, int ny, int nz, double distance) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fx(distance);
+        model.planes.push_back(p);
+    };
+    plane(16384, 0, 0, -3.0);
+    plane(-16384, 0, 0, -3.0);
+    plane(0, 16384, 0, -3.0);
+    plane(0, -16384, 0, -3.0);
+    plane(0, 0, 16384, -3.0);
+    plane(0, 0, -16384, 0.0);
+
+    CollisionVolume hurt;
+    hurt.type = 18;
+    hurt.min_x = fx(-3.0);
+    hurt.max_x = fx(3.0);
+    hurt.min_y = fx(-3.0);
+    hurt.max_y = fx(3.0);
+    hurt.min_z = 0;
+    hurt.max_z = fx(3.0);
+    hurt.plane_count = 6;
+    model.volumes.push_back(hurt);
+
+    CollisionSection section;
+    section.volume_count = 1;
+    model.sections.push_back(section);
+    return model;
+}
+
 // Test root source: a configurable clip set; gait clips move `step` forward per
 // tick, everything else plays without root motion.
 struct TestSource : IRootMotionSource {
@@ -142,6 +176,84 @@ void run_ticks(AiSystem &ai, World &w, uint32_t from, uint32_t to_excl) {
         ctx.logic_tick = t;
         ai.tick(w, ctx);
     }
+}
+
+void test_hurt_volume_updates_registry_health() {
+    Field flat([](int) { return static_cast<uint16_t>(0); });
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity hazard;
+    hazard.kind = EntityKind::Building;
+    hazard.position = {10.0f, 10.0f, 0.0f};
+    hazard.yaw = 90;
+    const EntityHandle hazard_handle = world.registry.spawn(2, hazard);
+
+    Entity infantry;
+    infantry.kind = EntityKind::Organic;
+    infantry.position = {10.0f, 10.0f, 0.5f};
+    infantry.health = 1;
+    infantry.health_max = 1;
+    const EntityHandle infantry_handle = world.registry.spawn(0, infantry);
+
+    CollisionWorld collision;
+    collision.terrain = &flat.field;
+    const int32_t model_id = collision.add_model(hurt_box_model());
+    collision.assign_entity(hazard_handle, model_id);
+
+    AiSystem ai;
+    ai.terrain = &flat.field;
+    ai.collision = &collision;
+    TestSource source;
+    source.clips = {anim_state::kWalkForward};
+    source.step = 0;
+    ai.root_motion = &source;
+    AiEntity *motor = ai.at(ai.attach(infantry_handle));
+    motor->inf.active = true;
+    motor->inf.is_local_player = true;
+    motor->inf.player_moving = true;
+    // Registry health is the canonical HUD/wire/script value. Leave the motor
+    // deliberately stale to prove the tick hydrates it before applying damage.
+    motor->health = 100;
+    motor->pos[0] = fx(10.0);
+    motor->pos[1] = fx(10.0);
+    motor->pos[2] = fx(0.5);
+
+    // Candidate slices mature on the seventeenth build. The type-18 contact then removes
+    // the soldier's final HP through the normal authority tick.
+    run_ticks(ai, world, 0, 17);
+
+    const Entity *observed = world.registry.get(infantry_handle);
+    CHECK(observed != nullptr);
+    CHECK(observed->health == 0);
+    CHECK(!observed->alive);
+}
+
+void test_registry_max_health_drives_wounded_gait() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    Entity infantry;
+    infantry.kind = EntityKind::Organic;
+    infantry.health = 75;
+    infantry.health_max = 150;
+    const EntityHandle handle = world.registry.spawn(0, infantry);
+
+    AiSystem ai;
+    TestSource source;
+    source.clips = {anim_state::kWalkForward, anim_state::kWoundedWalk};
+    ai.root_motion = &source;
+    AiEntity *motor = ai.at(ai.attach(handle));
+    motor->inf.active = true;
+    motor->health = 100;
+    motor->inf.max_health = 100;
+    route(ai, motor, {node(fx(500), 0, fx(1))}, 0);
+
+    run_ticks(ai, world, 0, 1);
+
+    CHECK(motor->health == 75);
+    CHECK(motor->inf.max_health == 150);
+    CHECK(motor->inf.anim_state == anim_state::kWoundedWalk);
 }
 
 // D-NET-159 — AUTHORITY body-anim selection for a net-snapped REMOTE player. Runs in
@@ -1414,6 +1526,8 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_hurt_volume_updates_registry_health();
+    test_registry_max_health_drives_wounded_gait();
     test_player_body_chase_and_legs();
     test_player_body_chase_crosses_the_bam_seam();
     test_player_weapon_channel();

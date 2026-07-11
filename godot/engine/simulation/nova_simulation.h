@@ -108,6 +108,11 @@ public:
 private:
 	std::unique_ptr<opennova::world::World> world_;
 	std::unique_ptr<opennova::world::AiSystem> ai_;
+	// World-object collision: the runtime models + per-tick proximity tables the AI
+	// motor resolves against (world/collision.h). Reset per load; models re-registered
+	// by resolve_collision_instances. ai_->collision points here (apply_collision_to_ai).
+	opennova::world::CollisionWorld collision_world_;
+	void apply_collision_to_ai();
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
@@ -558,6 +563,52 @@ public:
 	// [orig: Entity_InitFromItemDef @0x49e550]). Idempotent; call after load (and again after
 	// spawning the local player).
 	void resolve_item_traits(const Ref<class NovaItemDatabase> &p_item_db);
+
+	// World-object collision sweep: for each live entity with an items.def graphic,
+	// load its .3di collision block (BVOL volumes + BPLN planes via the placer's
+	// NovaObjectData cache), register one runtime model per graphic on the sim
+	// collision world, and attach the per-entity instance. From then on the infantry
+	// motor resolves against placed objects — wall push-out, standing on roofs,
+	// hurt/ladder volumes, blink-box indoors [orig: Entity_ProcessCollisionAndPlatform-
+	// Physics @0x4b2bd0 + the query set; docs/world/world-wac-ai-re.md §15; D-INF-3].
+	// p_placer duck-types MissionObjectPlacer (object_data_for(graphic)). Returns the
+	// instance count. Idempotent per load.
+	int resolve_collision_instances(const Ref<class NovaItemDatabase> &p_item_db,
+	                                Object *p_placer);
+
+	// Read-only collision-world geometry for the F3 "Show collision" debug view:
+	// { instances: [ { entity_handle, pos (Godot space), heading (mission yaw deg),
+	//   volumes: [ { type, min_x..max_z (section-local units), corners:
+	//   PackedVector3Array[8] (Godot world space, index bit0=max x / bit1=max y /
+	//   bit2=max z in mission axes) } ] } ],
+	//   player: { valid, position, points (PackedVector3Array[3]), radii
+	//   (PackedFloat32Array[3]), capsule_bottom, capsule_top, foot_clearance } }.
+	// Volumes are transformed through the SAME fixed-point path the resolver
+	// queries use (CollisionWorld::debug_instances -> target_view ->
+	// collision_matrix_from_heading), so the drawn boxes ARE what movement
+	// resolves against. Output is capped: instances within 150u of the local
+	// player (or the first 128 instances when no player is spawned).
+	Dictionary get_collision_debug() const;
+
+	// Local-player blink state [orig: g_LocalPlayerBlinkFlags @0x24C1934; entity Flags
+	// 0x800000]. The render/audio hosts gate interior behavior on these.
+	bool local_player_indoors() const;
+	int local_player_blink_flags() const;
+
+	// Loadout-zone gates for the host's armory key [orig: input action 218 opens
+	// weapon.mnu WEAPON only while entity Flags & 0x400000 (a type-6 armory volume
+	// contact), vehicle.mnu VEHICLE on Flags & 0x800 (type-11);
+	// Input_HandleActionBinding @0x49b848/@0x49b858].
+	bool local_player_in_armory_zone() const;
+	bool local_player_in_vehicle_loadout_zone() const;
+
+	// The armory ACCEPT apply for the local player: resolve the weapon name in the
+	// armory table and stamp equipped_adm_index (+ player_class 5..9 when given).
+	// The FP viewmodel + action-FSM rebuild is the host's move (GameWorld). Returns
+	// false when the name is not in the table. [orig: WeaponLoadout_ApplyFromBuffer
+	// @0x565cd0 tail -> Player_SelectWeaponSlot/Player_MountWeaponSlot; the MP client
+	// path rides the C2S 0x2F / S2C 0x5A service instead (npruntime, D-NET-141/143)]
+	bool apply_local_player_loadout(const String &p_weapon_name, int p_player_class);
 
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the

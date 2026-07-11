@@ -24,6 +24,11 @@ signal transport_used(action: String)
 ## debug view in response.
 signal skeleton_debug_toggled(enabled: bool)
 
+## Fired when the View tab's "Show collision" checkbox is toggled. Same host-neutral
+## contract as skeleton_debug_toggled: the host that owns the world builds/frees the
+## collision debug view (object collision volumes + the player capsule) in response.
+signal collision_debug_toggled(enabled: bool)
+
 ## Fired when the View tab's "Hide foliage" checkbox is toggled. Same host-neutral
 ## contract as skeleton_debug_toggled: the host hides/shows the world's foliage.
 signal foliage_hidden_toggled(hidden: bool)
@@ -79,6 +84,7 @@ var _perf_pane: DebugPerfPane
 
 # View pane: render-debug toggles the host acts on (skeleton bone overlay, foliage, ...).
 var _skeleton_check: CheckBox
+var _collision_check: CheckBox
 var _foliage_check: CheckBox
 var _viewmodel_check: CheckBox
 var _body_fp_check: CheckBox
@@ -157,6 +163,7 @@ func _build_panel() -> void:
 	add_child(panel)
 
 	var box := VBoxContainer.new()
+	box.name = "DebugContent"
 	box.add_theme_constant_override("separation", 6)
 	panel.add_child(box)
 
@@ -204,6 +211,14 @@ func _build_view_tab() -> void:
 	_skeleton_check.button_pressed = false
 	_skeleton_check.toggled.connect(_on_skeleton_toggled)
 	tab.add_child(_skeleton_check)
+
+	_collision_check = CheckBox.new()
+	_collision_check.name = "ViewCollision"
+	_collision_check.text = "Show collision"
+	_collision_check.tooltip_text = "Draw object collision volumes (type-colored boxes) and the player's capsule test points over the world."
+	_collision_check.button_pressed = false
+	_collision_check.toggled.connect(_on_collision_toggled)
+	tab.add_child(_collision_check)
 
 	_foliage_check = CheckBox.new()
 	_foliage_check.name = "ViewHideFoliage"
@@ -626,6 +641,10 @@ func _on_vars_filter_toggled(_pressed: bool) -> void:
 
 func _on_skeleton_toggled(pressed: bool) -> void:
 	skeleton_debug_toggled.emit(pressed)
+
+
+func _on_collision_toggled(pressed: bool) -> void:
+	collision_debug_toggled.emit(pressed)
 
 
 func _on_foliage_toggled(pressed: bool) -> void:
