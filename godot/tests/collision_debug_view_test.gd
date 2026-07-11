@@ -75,7 +75,10 @@ func _make_view(world: Node) -> Node3D:
 func test_draws_hulls_capsule_and_gap_label() -> void:
 	var world := _make_world(_debug_payload())
 	var view := _make_view(world)
-	await get_tree().process_frame
+	# Drive the frame hook directly: process_frame's signal fires BEFORE nodes
+	# process, so awaiting it races the view's first draw (in-suite vs isolation
+	# scheduling differed). A direct call is deterministic.
+	view._process(0.0)
 
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_gt((hull.mesh as ImmediateMesh).get_surface_count(), 0, "hull wireframe drawn")
@@ -89,11 +92,11 @@ func test_draws_hulls_capsule_and_gap_label() -> void:
 func test_missing_sim_clears_instead_of_erroring() -> void:
 	var world := _make_world(_debug_payload())
 	var view := _make_view(world)
-	await get_tree().process_frame
+	view._process(0.0)
 
 	# The sim goes away (mission unloaded): the next frame clears every surface.
 	world.sim = null
-	await get_tree().process_frame
+	view._process(0.0)
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_eq((hull.mesh as ImmediateMesh).get_surface_count(), 0, "hulls cleared")
 	var player := view.get_node("CollisionPlayerLines") as MeshInstance3D
@@ -104,7 +107,7 @@ func test_missing_sim_clears_instead_of_erroring() -> void:
 func test_empty_world_draws_nothing() -> void:
 	var world := _make_world({ "instances": [], "player": { "valid": false } })
 	var view := _make_view(world)
-	await get_tree().process_frame
+	view._process(0.0)
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_eq((hull.mesh as ImmediateMesh).get_surface_count(), 0)
 	assert_false((view.get_node("CollisionGapLabel") as Label3D).visible)
