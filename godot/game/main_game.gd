@@ -17,12 +17,15 @@ const LocalPlayerHostScript := preload("res://engine/world/local_player_host.gd"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
-# The armory key — this host's binding for the original input action 218 (the loadout
-# screen key; user-remappable in retail). Zone-gated: it opens weapon.mnu's WEAPON
-# screen only while the player stands inside a type-6 armory volume (entity Flags
-# 0x400000, maintained by the collision resolver) [orig: Input_HandleActionBinding
-# @0x49b848 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3].
-const ARMORY_KEY := KEY_B
+# The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
+# SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
+# opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
+# armory volume (entity Flags 0x400000, maintained by the collision resolver)
+# [orig: Input_HandleActionBinding_0 case 0xB1 @0x4e0b3f ->
+# UI_OpenMenuScreen("weapon.mnu", "WEAPON"); the parallel action 218 @0x49b8e3
+# ships with no binding row]. Out of zone the key falls through to its use-item
+# leg (unported; our motor separately polls Shift as the run modifier).
+const ARMORY_KEY := KEY_SHIFT
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
@@ -54,6 +57,10 @@ var _mp_host  # MpMenuHost: drives the multiplayer (mp.mnu) menu by control name
 var _player_info_host  # PlayerInfoMenuHost: drives the PLAYER_INFO (player.mnu) character screen
 var _armory_host  # ArmoryMenuHost: drives the in-game armory (weapon.mnu WEAPON screen)
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
+# The local player's class (5..9; 0 = unclassed SP spawn) — the armory opens on it
+# [orig: entity playerClass feeds Armory_ResolveSelectedClass @0x5642f0]. Stamped by
+# the armory ACCEPT until the spawn path carries a class of its own.
+var _player_class := 0
 
 
 func _ready() -> void:
@@ -144,7 +151,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	# The armory key: in-world only, gated on the type-6 armory-volume contact flag the
-	# collision resolver maintains [orig: input action 218, Flags & 0x400000 @0x49b848].
+	# collision resolver maintains [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
 	if key.keycode == ARMORY_KEY and _state == State.WORLD:
 		if _try_open_armory():
 			get_viewport().set_input_as_handled()
@@ -483,9 +490,10 @@ func _on_crosshair_style_changed(style: int) -> void:
 
 
 # The armory key while in-world: open weapon.mnu's WEAPON screen over the paused
-# world when the player stands in an armory zone [orig: input action 218 ->
-# UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x49b8e3, gated on Flags & 0x400000
-# @0x49b848 + the host weapons rule]. Returns false when out of zone (key ignored).
+# world when the player stands in an armory zone [orig: useitem action 177 ->
+# UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x4e0b44, gated on Flags & 0x400000
+# @0x4e0b4d + the host weapons rule (dword_A85B6C, BSS 0 in SP = allowed)]. Returns
+# false when out of zone (key ignored, the original's silent gate).
 func _try_open_armory() -> bool:
 	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
 	if sim == null or not sim.has_method("local_player_in_armory_zone"):
@@ -494,6 +502,13 @@ func _try_open_armory() -> bool:
 		return false
 	if _armory_host != null:
 		_armory_host.set_player_team(int(_chosen_avatar.get("team", 0)))
+		# The screen opens on the player's current class + equipped primary
+		# [orig: Armory_ResolveSelectedClass @0x5642f0; the per-class buffer
+		# reselect @0x564930]. SP: class selection stays disabled (no session).
+		_armory_host.set_player_class(_player_class)
+		var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
+				if _world.has_method("local_player_viewmodel_def") else null
+		_armory_host.set_current_loadout(vmdef.weapon_name if vmdef != null else "")
 	_state = State.PAUSED
 	if not _menu_host.open_menu("weapon.mnu", "WEAPON"):
 		_state = State.WORLD
@@ -509,6 +524,7 @@ func _try_open_armory() -> bool:
 # Player_SelectWeaponSlot @0x4dd680 / Player_MountWeaponSlot @0x4dfa40]
 func _on_loadout_accepted(loadout: Dictionary) -> void:
 	var primary := String(loadout.get("primary", ""))
+	_player_class = int(loadout.get("player_class", _player_class))
 	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
 	if not primary.is_empty():
 		if sim != null and sim.has_method("apply_local_player_loadout"):
