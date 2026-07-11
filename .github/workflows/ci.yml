@@ -117,6 +117,36 @@ jobs:
           ctest --test-dir build-server --output-on-failure -R \
             "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture)$"
 
+  # Research-only retail validator: keep its portable memory/session logic under
+  # test while also proving the injected DLL and injector remain 32-bit clean.
+  retail-hook:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false   # source + synthetic-memory test only; no retail bytes
+
+      - name: Configure Win32 retail validator
+        shell: pwsh
+        run: |
+          cmake -S . -B build-retail-hook -A Win32 `
+            -DBUILD_SHARED_LIB=OFF `
+            -DOPENNOVA_ENABLE_MODSUPEROED_TOOLS=OFF `
+            -DOPENNOVA_ENABLE_RETAIL_HOOK_TOOLS=ON
+
+      - name: Build Win32 retail validator
+        shell: pwsh
+        run: |
+          cmake --build build-retail-hook --config Release --target `
+            retail_hook_validation_test opennova_retail_hook opennova_retail_injector
+
+      - name: Test Win32 retail validator
+        shell: pwsh
+        run: |
+          ctest --test-dir build-retail-hook -C Release --output-on-failure `
+            -R "^retail_hook_validation$"
+
   modsuperoed-smoke:
     runs-on: windows-latest
     steps:

@@ -1679,6 +1679,13 @@ if(WIN32)
 endif()
 add_test(NAME npruntime_two_endpoint_socket COMMAND npruntime_two_endpoint_socket_test)
 
+# Shared-memory fixture for the research-only retail ABI validator.
+add_executable(retail_hook_validation_test
+    retail_hook/validation_session_test.cpp)
+target_link_libraries(retail_hook_validation_test PRIVATE
+    opennova_retail_hook_core)
+add_test(NAME retail_hook_validation COMMAND retail_hook_validation_test)
+
 # NET-4 (ADR 0019 §5): the C-ABI export-identity guard. The shared library's
 # flat export list must match scripts/lint/abi_exports_baseline.txt, and no
 # net-lib symbol family may appear at all. Runs wherever BUILD_SHARED_LIB=ON

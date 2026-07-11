@@ -4,6 +4,10 @@ project(opennova LANGUAGES C CXX)
 # Add libraries
 # io first: header-only shared infrastructure (byte/bit IO, fixed-point, strutil)
 add_subdirectory(libs/io)
+# Exact, fixed-width views of witnessed retail process memory. Header-only so
+# research tools consume the same declarations without pulling runtime code
+# into an injected process.
+add_subdirectory(libs/retail_abi)
 add_subdirectory(libs/pcx)
 add_subdirectory(libs/fnt)
 add_subdirectory(libs/foliage)
@@ -272,6 +276,11 @@ if(OPENNOVA_ENABLE_MODSUPEROED_TOOLS)
         message(STATUS "Skipping ModSuperOED automation tools: Windows is required")
     endif()
 endif()
+
+# Research-only retail introspection. The validation core is portable and
+# testable on every host; the injected DLL/injector are added only by a 32-bit
+# Windows configure inside the tool's own CMake file.
+add_subdirectory(tools/retail_hook)
 
 # Enable testing
 enable_testing()
