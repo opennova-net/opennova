@@ -60,9 +60,10 @@ func current_script() -> NovaMusicScript:
 ## AudioVM_OpenContextFile @ 0x672160]), so an expansion that ships partial or
 ## no music is SILENT in retail. We diverge by grace: the expansion pair is used
 ## only when COMPLETE (both halves resolve); otherwise the base pair plays
-## instead of silence. Bank and script always come from the SAME stem (the
-## script's play ops index that bank's entries), so halves are never mixed —
-## the MusicPair typed record carries the two halves (ADR 0017).
+## instead of silence — docs/audio/mus-sbf-re.md (D-MUS-PAIRGRACE). Bank and
+## script always come from the SAME stem (the script's play ops index that
+## bank's entries), so halves are never mixed — the MusicPair typed record
+## carries the two halves (ADR 0017).
 static func resolve_music_pair(root, prefix: String, base_stem: String) -> MusicPair:
 	var pair := MusicPair.new()
 	if root == null:

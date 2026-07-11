@@ -107,15 +107,20 @@ func test_emitter_layer_volume_two_radius_model() -> void:
 	# Bare falloff radius [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5286df]:
 	# vol_in = (255*255)>>8 = 254 -> d=0 gives 252, half gives 63.
 	assert_eq(S.emitter_layer_volume(0, 200, 0, 255, 255, 255), 252)
-	assert_eq(S.emitter_layer_volume(100, 200, 0, 255, 255, 255), 63)
-	assert_eq(S.emitter_layer_volume(200, 200, 0, 255, 255, 255), 0)
+	assert_eq(S.emitter_layer_volume(100 << 16, 200, 0, 255, 255, 255), 63)
+	assert_eq(S.emitter_layer_volume(200 << 16, 200, 0, 255, 255, 255), 0)
 	# min_distance rebases the falloff to run min..falloff [orig: @ 0x5286b9]:
 	# at d = min the curve is at its peak, half-way through gives the quarter.
-	assert_eq(S.emitter_layer_volume(50, 200, 50, 255, 255, 255), 252)
-	assert_eq(S.emitter_layer_volume(125, 200, 50, 255, 255, 255), 63)
+	assert_eq(S.emitter_layer_volume(50 << 16, 200, 50, 255, 255, 255), 252)
+	assert_eq(S.emitter_layer_volume(125 << 16, 200, 50, 255, 255, 255), 63)
 	# Inside min_distance volume RISES as (d/min)^2 — the proximity fade
 	# [orig: @ 0x528691]: at half min it is a quarter.
-	assert_eq(S.emitter_layer_volume(25, 200, 50, 255, 255, 255), 63)
+	assert_eq(S.emitter_layer_volume(25 << 16, 200, 50, 255, 255, 255), 63)
+	# Fractional distance in the proximity arm: the original subtracts in Q16
+	# FIRST then truncates — ((min<<16) - d) >> 16 = floor(min - d), NOT
+	# min - floor(d) [orig: @ 0x528691]. d = 25.5, min = 50 -> curve distance
+	# 24 (floor(24.5)) -> 68; the un-witnessed form (50 - 25 = 25) gave 63.
+	assert_eq(S.emitter_layer_volume(25 * 65536 + 32768, 200, 50, 255, 255, 255), 68)
 	# The blend byte (time-of-day crossfade) scales member volume and clamp.
 	assert_eq(S.emitter_layer_volume(0, 200, 0, 128, 255, 255), 125)
 	# Both radii zero: silent as a looping emitter [orig: @ 0x528704].
@@ -131,8 +136,31 @@ func test_oneshot_distance_volume_is_not_rebased() -> void:
 	assert_eq(bank.oneshot_distance_volume(100 << 16, layer, member), 63)
 	assert_eq(bank.oneshot_distance_volume(0, layer, member), 253)
 	assert_eq(bank.oneshot_distance_volume(200 << 16, layer, member), 0)
-	# No distance fields: distance-flat at member volume.
-	assert_eq(bank.oneshot_distance_volume(500 << 16, {}, member), 255)
+
+
+func test_oneshot_no_falloff_plays_at_emitter_volume() -> void:
+	var bank = NovaSoundBankScript.new(null)
+	# A layer with NO falloff radius plays at the RAW emitter volume — the
+	# member volume is not consulted [orig: SoundBank_PlayTriggerEntries
+	# @ 0x75cf88 stores emitter_info[2], host emitter = full 255].
+	var quiet := {"volume": 100, "clamp_volume": 255}
+	assert_eq(bank.oneshot_distance_volume(500 << 16, {}, quiet), 255)
+	# A min-only layer computes the proximity stage but the no-falloff branch
+	# DISCARDS it with the member volume [orig: @ 0x75cf88] (no JOX layer
+	# ships min-only; pinned for the witnessed form).
+	var min_only := {"falloff_radius": 0, "min_distance": 50}
+	assert_eq(bank.oneshot_distance_volume(25 << 16, min_only, quiet), 255)
+
+
+func test_crossfade_volume_byte_rounding() -> void:
+	var A := preload("res://engine/world/nova_mission_audio.gd")
+	# The register volume word is (0xFFFF * blend + 0x8000) >> 16, ROUNDED, and
+	# the mixer reads its high byte [orig: Entity_UpdateEnvSoundEmitter
+	# @ 0x4a81c6]. Full blend (the 0xFFFF sentinel) -> 255; half -> 128 (the
+	# +0x8000 round add: a floor form gives 127); zero -> 0.
+	assert_eq(A.crossfade_volume_byte(1.0), 255)
+	assert_eq(A.crossfade_volume_byte(0.5), 128)
+	assert_eq(A.crossfade_volume_byte(0.0), 0)
 
 
 func test_time_of_day_regions_and_blend() -> void:
@@ -145,6 +173,11 @@ func test_time_of_day_regions_and_blend() -> void:
 	assert_eq(int(A.time_of_day_region(23.0).region), 3)
 	assert_eq(int(A.time_of_day_region(0.5).region), 3, "night wraps past midnight")
 	assert_eq(int(A.time_of_day_region(3.99).region), 3)
+	# The regions are OPEN at the low cut: the exact cut instant classifies as
+	# night at full blend (the original's unsigned range-check idiom starts
+	# each interval one tick past the cut) [orig: @ 0x408175].
+	assert_eq(int(A.time_of_day_region(4.0).region), 3, "exact cut instant falls through to night")
+	assert_eq(float(A.time_of_day_region(4.0).blend), 1.0)
 	# Mid-region: full blend.
 	assert_eq(float(A.time_of_day_region(12.0).blend), 1.0)
 	# Just after a cut: fading in, adjacent = the previous region.

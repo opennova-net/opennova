@@ -207,12 +207,18 @@ func _update_game_hud() -> void:
 	})
 
 
-# Mission effects feed the HUD's objective/subtitle line (the WAC/mission text the
-# original routes to the HUD). Drained effects carry {kind, a..d, str}
-# (NovaSimulation::drain_effects); the WAC text/consol family lands as
-# kind=="text" with the string in "str" — the old code read nonexistent
-# "text"/"message" keys, so mission text never displayed. Public with the
-# hud_objective_line() read seam (ADR 0018): tests drive/read the HUD text
+# Mission effects feed the HUD's mission-text line. The original routes WAC
+# `text` to the player chat/message feed with color -1 (raw white) and type
+# 0x3A2 [orig: WAC 'text' handler @ 0x4edb50 -> Chat_AddMessageChannel1
+# @ 0x4985d0]; `consol` goes to the on-screen DEBUG channel instead
+# [orig: @ 0x4edbe0 -> Chat_AddDebugMessage] and stays unrouted here. Drained
+# effects carry {kind, a..d, str} (NovaSimulation::drain_effects); the WAC text
+# family lands as kind=="text" with the string in "str" — the old code read
+# nonexistent "text"/"message" keys, so mission text never displayed. This
+# host's HUD line is the minimal presentation; when the HUD message feed lands
+# (PR #222's Triggered-Text ID form reads `a` on the same kind), BOTH forms
+# compose onto game_hud.push_message like the #219 train's union. Public with
+# the hud_objective_line() read seam (ADR 0018): tests drive/read the HUD text
 # through these, never the privates.
 func apply_mission_effects(effects: Array) -> void:
 	for e in effects:

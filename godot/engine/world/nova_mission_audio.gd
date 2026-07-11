@@ -203,9 +203,11 @@ func get_bank() -> NovaSoundBank:
 
 ## PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 ## position. The .bms action param -> set-name decode is left to the caller (the
-## engine resolves a pre-loaded sound_id handle; see docs/audio/lwf-dbf-sound-re.md
-## ActionSlot_PlaySound @0x4010c0). One-shot volume snapshots the listener
-## distance at fire time [orig: Sound_Play3DPositional @ 0x527cb0].
+## engine resolves a pre-loaded sound_id handle; the action path plays it at full
+## emitter volume: ActionSlot_PlaySound @0x4010c0 -> Entity_PlaySound3D_FullVolume
+## @0x528e20). One-shot volume snapshots the listener distance at fire time, and
+## the set's cull range gates the fire entirely [orig: Sound_Play3DPositional
+## @ 0x527cb0; cull @ 0x527cd1].
 func fire_soundset(name: String, world_pos: Vector3) -> bool:
 	if _bank == null or _audio_root == null:
 		return false
@@ -358,8 +360,8 @@ func tick(camera_pos: Vector3) -> void:
 		# crossfade [orig: @ 0x4a819d same-slot check].
 		if active_set == String(slot_sets[int(tod.adjacent)]):
 			blend = 1.0
-		var vol_byte := int(clampf(blend, 0.0, 1.0) * 255.0)
-		var dist_u := int((m.pos as Vector3).distance_to(camera_pos))
+		var vol_byte := crossfade_volume_byte(blend)
+		var dist_q16 := int((m.pos as Vector3).distance_to(camera_pos) * 65536.0)
 		var voices: Dictionary = m.voices
 		for set_name in voices.keys():
 			var players: Array = voices[set_name]
@@ -371,7 +373,7 @@ func tick(camera_pos: Vector3) -> void:
 				if is_active and player.has_meta("layer_params"):
 					var lp: Dictionary = player.get_meta("layer_params")
 					vol = NovaSoundBank.emitter_layer_volume(
-						dist_u,
+						dist_q16,
 						int(lp.get("falloff_radius", 0)), int(lp.get("min_distance", 0)),
 						vol_byte, int(lp.get("volume", 255)), int(lp.get("clamp_volume", 255)))
 				if vol > 0:
@@ -433,8 +435,9 @@ func _load_bank(lwf_name: String) -> void:
 # region morning/day/evening/night [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080
 # indexes itemDef.soundLoopId[region]]. Unresolvable/empty slots stay "" — a
 # marker whose current region has no set is SILENT, like the original's null
-# soundLoopId. The sound_profile fallback (no soundloops at all) fills all four
-# slots, i.e. plays around the clock.
+# soundLoopId (the original has NO fallback; a sound_profile fallback we once
+# carried was unwitnessed and never fires with JO data — zero envs-class items
+# ship a sound_profile key).
 func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
 	var slots: PackedStringArray = ["", "", "", ""]
 	match _strategy:
@@ -443,18 +446,11 @@ func _resolve_slot_sets(entity: Dictionary) -> PackedStringArray:
 				return slots
 			var item_id := int(entity.get("item_id", 0))
 			var loops: Array = _item_db.get_sound_loops(item_id)
-			var any := false
 			for i in range(4):
 				if i < loops.size():
 					var n := String(loops[i])
 					if not n.is_empty() and _bank.has_set(n):
 						slots[i] = n
-						any = true
-			if not any:
-				var sp := String(_item_db.get_sound_profile(item_id))
-				if not sp.is_empty() and _bank.has_set(sp):
-					for i in range(4):
-						slots[i] = sp
 		STRATEGY_MARKER_NAME:
 			var n := String(entity.get("name", ""))
 			if not n.is_empty() and _bank.has_set(n):
@@ -477,7 +473,11 @@ static func time_of_day_region(hours: float) -> Dictionary:
 	var low := REGION_CUTS_H[3]
 	var high := 0.0
 	for i in range(3):
-		if t >= REGION_CUTS_H[i] and t < REGION_CUTS_H[i + 1]:
+		# Regions are OPEN at the low cut (the original's unsigned range-check
+		# idiom starts each interval at cut+1 tick): the exact cut instant
+		# falls through to night at full blend [orig: @ 0x408175/0x4081b0
+		# (t - (cut+1)) <= (width-2) forms].
+		if t > REGION_CUTS_H[i] and t < REGION_CUTS_H[i + 1]:
 			region = i
 			low = REGION_CUTS_H[i]
 			high = REGION_CUTS_H[i + 1]
@@ -510,6 +510,16 @@ static func time_of_day_region(hours: float) -> Dictionary:
 	elif adjacent < 0:
 		adjacent = 3
 	return {"region": region, "adjacent": adjacent, "blend": clampf(blend, 0.0, 1.0)}
+
+
+## The emitter volume byte for a region crossfade blend. The original registers
+## the volume word (0xFFFF * blend_q16 + 0x8000) >> 16 — ROUNDED, with 0xFFFF as
+## the full-blend sentinel — and the mixer reads its HIGH byte as the emitter
+## volume [orig: Entity_UpdateEnvSoundEmitter @ 0x4a81c6 (blendAlpha); the mix
+## reads slot byte +25 @ 0x52865e]. Net: byte = (0xFFFF * blend_q16 + 0x8000) >> 24.
+static func crossfade_volume_byte(blend: float) -> int:
+	var blend_q16 := 0xFFFF if blend >= 1.0 else int(clampf(blend, 0.0, 1.0) * 65536.0)
+	return (0xFFFF * blend_q16 + 0x8000) >> 24
 
 
 # Reverb id -> an AudioEffectReverb preset on the Ambient bus. The exact JO preset

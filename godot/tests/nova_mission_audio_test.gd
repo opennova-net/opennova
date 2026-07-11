@@ -107,7 +107,7 @@ func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	var allday := _voice(holder, 500)
-	# The same set in every slot (the sound_profile fallback shape).
+	# The same set in every slot (a marker whose soundloop_1..4 all name one set).
 	audio._markers = [_marker(holder, Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"], {"amb": [allday]})]
 
 	audio.set_time_of_day_hhmm(1200.0)

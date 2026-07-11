@@ -12,8 +12,11 @@ extends RefCounted
 ##
 ## Resolution is NAME-keyed and case-insensitive, matching the engine
 ## (SoundBank_FindTriggerByName @ 0x75be90 stricmp's set names;
-## SoundProfile_FindLoadedByName @ 0x5274f0 for the profile layer); the .lwf
-## Multi.target_id is NOT used. See docs/audio/lwf-dbf-sound-re.md.
+## SoundBank_FindSetByNameAnyBank @ 0x5274f0); the .lwf Multi.target_id is
+## never used for NAME resolution — its runtime meaning is the 3D one-shot
+## CULL RANGE in whole units [orig: Sound_Play3DPositional @ 0x527cd1 reads
+## set+72] (every JOX set carries one; the field rename is a tracked
+## follow-up). See docs/audio/lwf-dbf-sound-re.md.
 
 # Mirrors NovaLwfData / opennova::audio::SelectionMode selection-mode constants.
 const SELECTION_FIRST := 0
@@ -122,6 +125,15 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 	var dist_q16 := 0
 	if has_listener:
 		dist_q16 = int(world_pos.distance_to(listener_pos) * 65536.0)
+		# The set-level 3D cull: beyond the set's range (Multi dword 18,
+		# in-memory set+72) the one-shot does not fire at all — axis checks,
+		# then euclidean, all <= range<<16 (equality passes); the euclidean
+		# test subsumes the axis ones [orig: Sound_Play3DPositional
+		# @ 0x527cd1-0x527d83]. Retail also inflates the distance by occlusion
+		# before the last recheck — unported (D-SND-7).
+		var cull_u := int(set_d.get("target_id", 0))
+		if cull_u > 0 and dist_q16 > cull_u << 16:
+			return false
 	var played := false
 	for li in layers.size():
 		var layer_d: Dictionary = layers[li]
@@ -247,43 +259,55 @@ static func calc_distance_volume(dist_q16: int, radius_q16: int, vol255: int, cl
 	return v
 
 
-## Layer volume for the looping ambient-emitter path at integer-unit distance
-## [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528667..0x5286df — distances are
-## taken HIWORD (whole units)]. `vol_byte` is the emitter volume 0..255 (the
+## Layer volume for the looping ambient-emitter path. `dist_q16` is the
+## listener distance in Q16.16 units — the arms subtract in Q16 FIRST and
+## truncate to whole units at the curve call, exactly like the original
+## (HIWORD(dist - min) is floor(d - m), NOT min - floor(d): the proximity arm
+## differs by a unit for fractional d) [orig: SoundEmitter_UpdateAndMixTop8
+## @ 0x528667..0x5286df]. `vol_byte` is the emitter volume 0..255 (the
 ## time-of-day crossfade blend for placed markers); member volume and clamp
 ## scale by it before the curve [orig: @ 0x5286b9]. With a min_distance the
 ## falloff REBASES to run min..falloff; inside min_distance the volume RISES
 ## as (d/min)^2 (the proximity fade); a bare falloff runs 0..falloff.
-static func emitter_layer_volume(dist_u: int, falloff_u: int, min_u: int, vol_byte: int, member_vol: int, clamp_vol: int) -> int:
+static func emitter_layer_volume(dist_q16: int, falloff_u: int, min_u: int, vol_byte: int, member_vol: int, clamp_vol: int) -> int:
 	var vol_in := (vol_byte * member_vol) >> 8
 	var clamp_in := (vol_byte * clamp_vol) >> 8
 	if min_u > 0:
-		if dist_u >= min_u:
-			return calc_distance_volume((dist_u - min_u) << 16, (falloff_u - min_u) << 16, vol_in, clamp_in)
-		return calc_distance_volume((min_u - dist_u) << 16, min_u << 16, vol_in, clamp_in)
+		if dist_q16 >= min_u << 16:
+			# Rebased falloff, whole-unit args [orig: @ 0x528693-0x5286b9
+			# CalcDistanceVolPan(HIWORD(d - min), HIWORD(falloff - min), ...)].
+			return calc_distance_volume((dist_q16 - (min_u << 16)) >> 16, falloff_u - min_u, vol_in, clamp_in)
+		# Proximity fade [orig: @ 0x528691 ((min<<16) - d) >> 16, HIWORD(min<<16)].
+		return calc_distance_volume(((min_u << 16) - dist_q16) >> 16, min_u, vol_in, clamp_in)
 	if falloff_u > 0:
-		return calc_distance_volume(dist_u << 16, falloff_u << 16, vol_in, clamp_in)
+		# Plain falloff [orig: @ 0x5286df HIWORD(d), HIWORD(falloff<<16)].
+		return calc_distance_volume(dist_q16 >> 16, falloff_u, vol_in, clamp_in)
 	# Both radii zero: the emitter mix unpacks the volume byte of the packed
 	# (vol << 8 | pan) result; with no curve run the raw byte's >> 8 is 0, so a
 	# no-radius layer is SILENT as a looping emitter [orig: @ 0x528704 volume_low
-	# == 0 -> skip] (one-shots differ: they play it distance-flat).
+	# == 0 -> skip] (one-shots differ — see oneshot_distance_volume).
 	return 0
 
 
 ## One-shot volume at fire time [orig: SoundBank_PlayTriggerEntries @ 0x75cf14..
-## 0x75cf80]: the proximity stage ((d/min)^2, only under min_distance) feeds the
+## 0x75cf8b]: the proximity stage ((d/min)^2, only under min_distance) feeds the
 ## falloff stage ((1 - d/falloff)^2, NOT rebased — the one-shot path differs
-## from the emitter path here). No distance fields -> plain member volume.
+## from the emitter path here). A layer with NO falloff radius plays at the RAW
+## emitter volume — member volume is not consulted, and a min-only layer's
+## proximity result is discarded with it [orig: @ 0x75cf88 the no-falloff branch
+## stores emitter_info[2]]. Host emitter volume is full (255): the engine's
+## fire-time (vol * g_SoundVolumeOption) >> 8 folds the options slider we map to
+## bus volume (docs/audio/lwf-dbf-sound-re.md D-SND-8).
 func oneshot_distance_volume(dist_q16: int, layer_d: Dictionary, member: Dictionary) -> int:
 	var vol := int(member.get("volume", 255))
 	var clamp_vol := int(member.get("clamp_volume", 255))
 	var min_q16 := int(layer_d.get("min_distance", 0)) << 16
 	var falloff_q16 := int(layer_d.get("falloff_radius", 0)) << 16
+	if falloff_q16 <= 0:
+		return 255
 	if min_q16 > 0 and dist_q16 < min_q16:
 		vol = calc_distance_volume(min_q16 - dist_q16, min_q16, vol, clamp_vol)
-	if falloff_q16 > 0:
-		vol = calc_distance_volume(dist_q16, falloff_q16, vol, clamp_vol)
-	return vol
+	return calc_distance_volume(dist_q16, falloff_q16, vol, clamp_vol)
 
 
 # Frame count of a decoded stream, exact from the byte size (get_length() *

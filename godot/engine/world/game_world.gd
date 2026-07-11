@@ -1084,7 +1084,7 @@ func _on_runtime_effects(effects: Array) -> void:
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
 # + gamelocl.LWF, resolve each marker to a sound set by name, and spawn looping 3D
-# voices. Reuses the placer's item database for the item_id -> sound_profile lookup.
+# voices. Reuses the placer's item database for the item_id -> soundloop_1..4 lookup.
 func _start_mission_audio(mission: NovaMissionData, bms_name: String) -> void:
 	var item_db = _placer.get_item_db() if _placer != null else null
 	_mission_audio = NovaMissionAudio.new(_resource_root, item_db)
@@ -1114,11 +1114,12 @@ func get_mission_audio() -> NovaMissionAudio:
 # g_local_player_entity @ 0x4b6234; full map docs/audio/mus-sbf-re.md §Game
 # music driving]. Pumped here: Var7 = health % (cur*100/max, 100 when max <=
 # cur [orig: @ 0x4b6315-0x4b6324]) and Var10 = team [orig: @ 0x4b62fc].
-# Witnessed-but-unpumped seams (the shipped gamemus reads none of them):
-# Var2 view pitch (the original writes raw engine angle units, unwitnessed
-# conversion), Var5/Var6 threat distance / threat-targets-me
-# (Entity_FindNearestThreat @ 0x4b0990 unported), Var3/Var4 (low-confidence),
-# Var8 game type (retail scoring-mode ids not yet mapped to our sessions).
+# Witnessed-but-unpumped seams (the shipped gamemus reads none of them —
+# docs/audio/mus-sbf-re.md (D-MUS-VARPUMP)): Var2 view pitch (the original
+# writes raw engine angle units, unwitnessed conversion), Var5/Var6 threat
+# distance / threat-targets-me (Entity_FindNearestThreat @ 0x4b0990 unported),
+# Var3/Var4 (low-confidence), Var8 game type (retail scoring-mode ids not yet
+# mapped to our sessions).
 func _music_var_pump() -> void:
 	if not has_local_player():
 		return

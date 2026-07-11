@@ -17,7 +17,7 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 | PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `libs/pff` |
 | `godot/engine/audio` glue | host code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
-## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-confirmed 2026-07-09)
+## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
 
 The MUS VM is **not** stepped per frame; the original advances it only when the
 currently-playing track finishes streaming. `audio_stream_update @ 0x671c60` (the
@@ -49,13 +49,20 @@ still playing (`_active_play->is_playing()`), reproducing the
 rather than a byte counter (host-idiomatic), and stream one music context at a time as the
 original does.
 
-Related host note (2026-07-09): `NovaSbfAudioStreamPlayback` now extends Godot's
-`AudioStreamPlaybackResampled` and reports the SBF content rate (22050 Hz), so the mixer
-resamples to the device rate — the original achieves the same by submitting 22050 Hz
-buffers to DirectSound, which resamples to the device format. The prior 1:1 frame mapping
-played SBF content at half speed on the default 44100 Hz mix rate.
+Related host note (2026-07-09; rate witness corrected 2026-07-11): `NovaSbfAudioStreamPlayback`
+extends Godot's `AudioStreamPlaybackResampled` and reports the SBF content rate (22050 Hz), so
+the mixer resamples to the device rate. The original's audio service runs at a **44100 Hz
+device rate** — one-shot wavs carry a device-relative pitch ratio
+`(nSamplesPerSec << 16 + 22050) / 44100` (the +22050 is the rounding half-add)
+[orig: Audio_LoadWavFileFromArchive @ 0x766735], so 22050-content wavs play at ratio 0.5 —
+and the music stream pump submits split L/R buffers at queue pitch 0x10000 through an inline
+ADPCM-decode/interpolate stage (`play_stereo_sample @ 0x7bcf95`, stepper
+`Audio_AdpcmDecodeNibbleStep @ 0x7bf250`, ex kong "noop_stub"), netting the same 22050 Hz
+content rate in real time. The decoded PCM itself is pinned byte-exact by the `sbf_roundtrip`
+golden tests; the prior host 1:1 frame mapping played SBF content at half speed on the 44100 Hz
+mix rate.
 
-## Music state variable selection — the host sets the section discriminator (grilled 2026-06-15; re-confirmed 2026-07-09)
+## Music state variable selection — the host sets the section discriminator (grilled 2026-06-15; re-verified 2026-07-11)
 
 The MUS scripts are var-driven state machines: a "discriminator" global selects which
 section/track loop plays, and its var **index is per-script** (golden test
@@ -77,12 +84,41 @@ var). The JO main-menu screen `STARTUP` has `MUSICVAR=1`, selecting the menumus 
 | --- | --- | --- | --- |
 | D-MUS-VAR | the runtime pushed the screen `MUSICVAR` to var **index 0** (`menu_shell.gd MUSIC_VAR_INDEX` / `nova_mnu_menu.cpp music_var_index_`), so menumus' `var2` stayed 0 | the host sets the discriminator var the script actually reads (menumus `var2`, gamemus `var1`) | at index 0 the screen `MUSICVAR` was inert; the menu always ran the `var2=0` path (`P1,P2` then a `P0` loop) instead of the screen's `MUSICVAR=1` theme (`P2..P8`). Fixed: `MUSIC_VAR_INDEX = 2`; the shell pushes it synchronously in `setup()` (before the director's first `_process` tick) so the VM starts in the selected section. gamemus `var1` is never driven in retail — see "Game music driving" below. |
 
-## Game music driving — the full host writer map (witnessed 2026-07-09)
+## Game music driving — the full host writer map (witnessed 2026-07-09; re-verified 2026-07-11)
 
 How the original drives the gamemus context in-mission. Every host write of the
 music VM globals goes through `AudioVM_SetVariable @ 0x671fa0`
 (`g_audiovm_globals[idx] = val`); the COMPLETE caller set is the five functions
 below (exhaustive xref sweep of 0x671fa0).
+
+### The music pair names and the expansion reselect (witnessed 2026-07-09; landed 2026-07-11)
+
+`Expansion_LoadAssets` builds the (bank .sbf, script .bin) pair paths once at
+expansion (re)load:
+
+- Base names are constants: `GAMEMUS.BIN/SBF`, `MENUMUS.BIN/SBF`
+  (const table `@ 0x7C8D50`, copied into `g_path_menu_sbf/bin`,
+  `g_path_game_sbf/bin` `@ 0x4a4798-0x4a4801`). They are VFS basenames — the
+  `.bin` resolves from PFF archives; the `.sbf` streams loose.
+- The ONLY reselect is the expansion `.pff` existence check:
+  `File_CheckExists("expansion\\<n>\\<n>.pff") @ 0x4a4767`; missing → the
+  expansion name clears (`@ 0x4a4775`) and the base names stand. Once the
+  `.pff` exists, the expansion music paths are set **unconditionally** — bank
+  `expansion\<n>\M<n>.sbf` / `expansion\<n>\G<n>.sbf` as loose paths
+  (`@ 0x4a4906 / 0x4a4936`), script `M<n>.bin` / `G<n>.bin` as VFS basenames
+  (`@ 0x4a491d / 0x4a494a`) — with **no probe of the music files themselves**.
+  An expansion that ships partial or no music is therefore SILENT in retail:
+  the context open bails at the bank's CreateFileA
+  (`AudioVM_OpenContextFile @ 0x672160`) before loading the script.
+- The same pass sets the expansion LWF bank-slot names (`<n>L.lwf`
+  `@ 0x4a4989`, `<n>.lwf` `@ 0x4a495e` — slots 0/1 of the six-slot table, see
+  docs/audio/lwf-dbf-sound-re.md).
+
+### Divergence D-MUS-PAIRGRACE
+
+| ID | Ours | Original | Why / consequence |
+| --- | --- | --- | --- |
+| D-MUS-PAIRGRACE | `NovaMusicService.resolve_music_pair` uses the expansion pair only when COMPLETE (bank on disk AND script in the VFS); otherwise the base pair plays | the `.pff` exists-check is the only reselect; a partial-music expansion is silent (`@ 0x4a4767/0x4a4775`) | deliberate grace: silence reads as a defect to players (the REV expansion ships no `Mrevx02`/`Grevx02` pair and would be music-dead). Halves never mix across stems — bank and script always come from the SAME stem, matching the witnessed unconditional pair-set. Retail parity available by dropping the completeness probe. |
 
 ### Context lifecycle
 
@@ -126,6 +162,12 @@ no win/lose stings and no mission-state music transitions. Do not invent them.
 | Var7 | health % = `cur*100/max` (`Entity_GetMaxHealthWithDifficulty @ 0x43b8a0`), clamped 100 | `@ 0x4b6324` |
 | Var8 | `g_scoreGameType` (`dword_24C1970`) — the match's scoring game TYPE, not a dynamic state | `@ 0x4b6335` |
 | Var7/Var8 (alt path) | re-written on a second local-player-gated path (Var7 source low confidence) | `@ 0x4b6366 / 0x4b6374` |
+
+### Divergence D-MUS-VARPUMP
+
+| ID | Ours | Original | Why / consequence |
+| --- | --- | --- | --- |
+| D-MUS-VARPUMP | `GameWorld._music_var_pump` re-drives Var7 (health %, the exact `max > cur ? cur*100/max : 100` form `@ 0x4b6313-0x4b6324`) and Var10 (team) per frame; Var2/Var3/Var4/Var5/Var6/Var8 are witnessed but unpumped | all eight per-frame writes above | none for retail JO content: the shipped gamemus reads ONLY its var1 discriminator (always 0), so every per-frame var is inert. The unpumped set needs engine pieces we haven't ported (Var5/6: `Entity_FindNearestThreat @ 0x4b0990`; Var2: raw engine angle units; Var8: retail scoring-mode ids). Close by pumping them when a consumer (custom gamemus content) materializes. |
 
 Menu-side writers (menuscript context): `UI_DispatchScreenEvent` stores the
 active screen's `MUSICVAR` to Var2 on every screen event (`@ 0x54eff4`) — this
