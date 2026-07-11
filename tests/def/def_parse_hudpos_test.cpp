@@ -83,13 +83,34 @@ int main(void) {
     }
     printf("Stances OK (%zu entries)\n", hud->stances_count);
 
-    /* Test alphafade */
-    if (hud->alpha_fade[0] != 30 || hud->alpha_fade[1] != 50 ||
-        hud->alpha_fade[2] != 3) {
-        fprintf(stderr, "FAIL: alphafade mismatch: %d,%d,%d\n",
+    /* Test alphafade — raw float fields (base %, max %, seconds) */
+    if (hud->alpha_fade[0] != 30.0f || hud->alpha_fade[1] != 50.0f ||
+        hud->alpha_fade[2] != 3.0f) {
+        fprintf(stderr, "FAIL: alphafade mismatch: %g,%g,%g\n",
                 hud->alpha_fade[0], hud->alpha_fade[1], hud->alpha_fade[2]);
         def_free_hudpos(&hudpos);
         return 1;
+    }
+
+    /* Fractional ALPHAFADE survives the parse: the original reads each field via
+       atof and the fraction feeds the x2.55/x62 converts [orig: @0x5a0882..0x5a08c2].
+       An integer parse would truncate 1.5 s to a 62-tick ramp instead of 93. */
+    {
+        static const char fade_text[] = "alphafade\t12.5 75.5 1.5\n";
+        DefHudPosFile ff;
+        memset(&ff, 0, sizeof(ff));
+        if (def_parse_hudpos_memory((const unsigned char *)fade_text,
+                                    sizeof(fade_text) - 1, &ff) != 0 ||
+            ff.hud.alpha_fade[0] != 12.5f || ff.hud.alpha_fade[1] != 75.5f ||
+            ff.hud.alpha_fade[2] != 1.5f ||
+            (int)(ff.hud.alpha_fade[2] * 62.0) != 93) {
+            fprintf(stderr, "FAIL: fractional alphafade mismatch: %g,%g,%g\n",
+                    ff.hud.alpha_fade[0], ff.hud.alpha_fade[1], ff.hud.alpha_fade[2]);
+            def_free_hudpos(&ff);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&ff);
     }
     printf("Alphafade OK\n");
 
@@ -111,8 +132,11 @@ int main(void) {
     }
 
     /* The 4-field positioned form (x, y, hidden, align) the original parses —
-       AMMOCOUNTPOS writes x/y/hidden/align [orig: parse @0x59fc3d]. Inline sample
-       mirroring the retail JO hudpos.def lines. */
+       strictly positional: field 3 is ALWAYS the hidden gate (a word reads 0 via
+       atof), field 4 the alignment word, left when missing. Retail 2-field lines
+       (GAMEINFO, HUDCHATTEXT) render visible/left in retail JO, pinning missing
+       fields to 0. [orig: AMMOCOUNTPOS parse @0x59fc3d; HUD_ParseTextAlignment
+       @0x59d6b0] */
     {
         static const char pos_text[] =
             "AMMOCOUNTPOS\t128,597,0,right\n"
@@ -127,12 +151,14 @@ int main(void) {
             return 1;
         }
         const DefHudPosDef *p = &pf.hud;
+        /* HUDTIMECLOCK "10 20 center": field 3 = atof("center") = 0 (visible),
+           field 4 missing = left — NOT center. */
         int ok = p->ammo_count_pos[0] == 128 && p->ammo_count_pos[1] == 597 &&
                  p->ammo_count_pos[2] == 0 && p->ammo_count_pos[3] == 1 &&
                  p->weapon_name_pos[0] == 11 && p->weapon_name_pos[1] == 630 &&
                  p->weapon_name_pos[2] == 1 && p->weapon_name_pos[3] == 0 &&
                  p->time_clock[0] == 10 && p->time_clock[1] == 20 &&
-                 p->time_clock[2] == 0 && p->time_clock[3] == 2;
+                 p->time_clock[2] == 0 && p->time_clock[3] == 0;
         if (!ok) {
             fprintf(stderr,
                     "FAIL: positioned form mismatch: ammo %d,%d,%d,%d name %d,%d,%d,%d clock %d,%d,%d,%d\n",

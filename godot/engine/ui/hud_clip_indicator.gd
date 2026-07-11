@@ -38,7 +38,7 @@ func reset() -> void:
 ## [orig gates: @0x599a4a anchor, @0x599a59 ramp, @0x599a82 -1 sentinels]
 func draw(ci: CanvasItem, anchor_design: Vector2i, weapon: PlayerHudWeaponDef,
 		clip_tex: Texture2D, round_tex: Texture2D, clip: int, reserve: int,
-		tint: Color, fade: Vector3i, now_ticks: int, surface: Vector2) -> void:
+		tint: Color, fade: Vector3, now_ticks: int, surface: Vector2) -> void:
 	if ci == null or weapon == null or anchor_design == Vector2i.ZERO:
 		return
 	var ramp_ticks := int(fade.z * HudFade.SECONDS_TO_TICKS)

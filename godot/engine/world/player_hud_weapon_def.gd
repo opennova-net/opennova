@@ -47,5 +47,7 @@ static func from_weapon_dict(d: Dictionary) -> PlayerHudWeaponDef:
 	out.rndgfx_offset = d.get("hudrndgfx_offset", Vector2i.ZERO)
 	var layout: Vector3i = d.get("hudrndgfx_layout", Vector3i.ZERO)
 	out.rndgfx_step = Vector2i(layout.x, layout.y)
-	out.rounds_per_icon = layout.z
+	# The original stores the divisor as a byte (weapon+727) — out-of-range
+	# file values wrap mod 256. [orig: HUDRNDGFX parse @0x5442fc; read @0x599bb1]
+	out.rounds_per_icon = layout.z & 0xFF
 	return out

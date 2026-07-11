@@ -73,8 +73,9 @@ func test_to_dictionary_shape() -> void:
 	# GAMEINFO 1013,430 (2 fields) -> hidden 0, align left.
 	assert_eq(positions["game_info"], Vector4i(1013, 430, 0, 0), "game_info carries x,y,hidden,align.")
 	var misc: Dictionary = d["misc"]
-	# ALPHAFADE 30 50 3 raw file fields (base %, max %, seconds).
-	assert_eq(misc["alpha_fade"], Vector3i(30, 50, 3), "alpha_fade raw triple exposed in misc.")
+	# ALPHAFADE 30 50 3 raw file fields (base %, max %, seconds) — floats, since the
+	# original's atof keeps fractions for the x2.55/x62 converts [orig: @0x5a0882].
+	assert_eq(misc["alpha_fade"], Vector3(30, 50, 3), "alpha_fade raw triple exposed in misc.")
 
 
 func test_not_loaded_is_safe() -> void:

@@ -72,7 +72,7 @@ behavior is summarized and cited.
 | Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes RE'd `libs` via `pyopennova`) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
 | Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (PAR-R1: module surface + witness basis + D-TERRAIN-1 shader split; REN-4 runtime surface shading; ENG-3 B0 runtime terrain queries — height samplers + segment raycast, port pending B1; mesh_simp/CDEP deep grill pending) |
-| Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (2026-07-09: weapon-coupled elements witnessed AND ported — ammo/name text, clip indicator, crosshair spread, stance cross-fade, triggered text; D-HUD-1..8; radar/MP-HUD follow-ups tracked) |
+| Interface | [`interface/hud-re.md`](interface/hud-re.md) | landed (2026-07-09: weapon-coupled elements witnessed AND ported — ammo/name text, clip indicator, crosshair spread, stance cross-fade, triggered text; 2026-07-11 re-grill: every ported function fresh-decompiled, seven port fixes, D-HUD-1..10; radar/MP-HUD follow-ups tracked) |
 | Menus | [`mnu/menu-re.md`](mnu/menu-re.md) | landed (+ 2026-06-23c combo-dropdown geometry/row-height grill, D-MNU-7/8 fixed) |
 | Menus | [`mnu/menu-wiring.md`](mnu/menu-wiring.md) | landed (host wiring, architectural) |
 | Mission | [`mission/bms-event-runtime-re.md`](mission/bms-event-runtime-re.md) | landed |

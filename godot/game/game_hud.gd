@@ -28,7 +28,7 @@ var _stance_textures: Array[Texture2D] = []
 var _stance_offsets: Array[Vector2] = []
 var _positions: Dictionary = {}
 var _colors: Dictionary = {}
-var _alpha_fade := Vector3i.ZERO
+var _alpha_fade := Vector3.ZERO
 var _chat_lines := DEFAULT_CHAT_LINES
 
 # The equipped weapon's HUD slice (PlayerHudWeaponDef, null = no weapon), its resolved
@@ -71,7 +71,7 @@ func set_layout(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
 	_stance_offsets.clear()
 	_positions = {}
 	_colors = {}
-	_alpha_fade = Vector3i.ZERO
+	_alpha_fade = Vector3.ZERO
 	_chat_lines = DEFAULT_CHAT_LINES
 	_load_assets()
 	queue_redraw()
@@ -90,10 +90,12 @@ func set_weapon(weapon: PlayerHudWeaponDef, display_name: String) -> void:
 	queue_redraw()
 
 
-## A mission triggered-text line for the message feed. [orig: HUD_DisplayTriggeredText
-## @0x51f190 -> Chat_AddDebugMessage @0x4987f0 (default color)]
+## A mission triggered-text line for the message feed. The original pushes color -1
+## = raw ARGB 0xFFFFFFFF (opaque white); the chat drawer's own default handling is
+## the D-HUD-6 follow-up. [orig: HUD_DisplayTriggeredText @0x51f190 ->
+## Chat_AddDebugMessage(text, -1, 930) @0x51f216]
 func push_message(text: String) -> void:
-	_messages.push(text, Color(0, 0, 0, 0), int(_info.get("ticks", 0)))
+	_messages.push(text, Color.WHITE, int(_info.get("ticks", 0)))
 	queue_redraw()
 
 
@@ -124,7 +126,7 @@ func _load_assets() -> void:
 	_positions = dict.get("positions", {})
 	_colors = _hudpos.get_colors()
 	var misc: Dictionary = dict.get("misc", {})
-	_alpha_fade = misc.get("alpha_fade", Vector3i.ZERO)
+	_alpha_fade = misc.get("alpha_fade", Vector3.ZERO)
 	var chline := int(misc.get("hud_chline", 0))
 	if chline > 0:
 		_chat_lines = chline
@@ -197,28 +199,39 @@ func _draw() -> void:
 
 # The stance indicator with the witnessed cross-fade: current frame at base+fade,
 # previous frame ghosting at quarter fade, both tinted STANCEICON_COLOR, each frame
-# at HUDSTANCEPOS plus its own HUDSTANCE offset. The MP team tile underneath is
-# deferred with the MP HUD. [orig: HUD_DrawStanceIndicator @0x599f10 (D-HUD-1)]
+# at HUDSTANCEPOS plus its own HUDSTANCE offset plus the centering offset shared from
+# frame 0. The whole element hides without an ALPHAFADE ramp or with any of the six
+# stance frames unloaded, like the original's gates; the MP team tile underneath is
+# deferred with the MP HUD. [orig: HUD_DrawStanceIndicator @0x599f10 (D-HUD-1) —
+# ramp+texture gates @0x599f18..0x599f50, shared frame-0 scale @0x599fed..0x59a00a]
 func _draw_stance(surface: Vector2, ticks: int) -> void:
 	var anchor := Vector2(_hudpos.get_stance_pos())
 	if anchor == Vector2.ZERO:
 		return
-	var tint: Color = _colors.get("stanceicon_color", Color.WHITE)
 	var ramp := int(_alpha_fade.z * HudFade.SECONDS_TO_TICKS)
+	if ramp <= 0:
+		return
+	if _stance_textures.size() < 6:
+		return
+	for i in 6:
+		if _stance_textures[i] == null:
+			return
+	var frame0_size := Vector2i(_stance_textures[0].get_size())
+	var tint: Color = _colors.get("stanceicon_color", Color.WHITE)
 	var base_alpha := int(_alpha_fade.x * HudFade.PERCENT_TO_ALPHA)
 	var elapsed := ticks - _stance_stamp
-	var cur_a := HudFade.stance_current_alpha(elapsed, ramp, base_alpha) if ramp > 0 else 255
-	var prev_a := HudFade.stance_prev_alpha(elapsed, ramp) if ramp > 0 else 0
+	var cur_a := HudFade.stance_current_alpha(elapsed, ramp, base_alpha)
+	var prev_a := HudFade.stance_prev_alpha(elapsed, ramp)
 
 	var cur := _stance_cur
 	if cur >= 0 and cur < _stance_textures.size() and _stance_textures[cur] != null:
 		HudStance.draw(self, _stance_textures[cur], anchor, surface,
-			Color(tint.r, tint.g, tint.b, cur_a / 255.0), _stance_offset(cur))
+			Color(tint.r, tint.g, tint.b, cur_a / 255.0), _stance_offset(cur), frame0_size)
 	if prev_a > 0 and _stance_prev != cur \
 			and _stance_prev >= 0 and _stance_prev < _stance_textures.size() \
 			and _stance_textures[_stance_prev] != null:
 		HudStance.draw(self, _stance_textures[_stance_prev], anchor, surface,
-			Color(tint.r, tint.g, tint.b, prev_a / 255.0), _stance_offset(_stance_prev))
+			Color(tint.r, tint.g, tint.b, prev_a / 255.0), _stance_offset(_stance_prev), frame0_size)
 
 
 # The weapon-coupled cluster: ammo count + weapon name, the clip indicator, and the
@@ -248,8 +261,12 @@ func _draw_weapon_cluster(surface: Vector2, ticks: int) -> void:
 
 # The spreading crosshair, hidden while the aim is scoped-in (the original draws it
 # only when an aimed shot is NOT available — in scope view the scope overlay owns the
-# reticle). Spread = ERROR[stance row] over the live fov; the recoil-accumulator terms
-# (+0x380/+0x384 >>7) are a recorded follow-up (docs/interface/hud-re.md D-HUD-7).
+# reticle; that gate is the SETTLED sight view, so the original stays up through the
+# ADS ease: docs/interface/hud-re.md D-HUD-9, plumbing-deferred). Anchored at the
+# design center — first-person-correct; the 3P projected-aim anchor is D-HUD-10.
+# Spread = ERROR[hip stance row] over the live fov (the +3 scoped rows key on the
+# original's CanFire predicate, vehicle-only — hip is faithful on foot); the
+# recoil-accumulator terms (+0x380/+0x384 >>7) are D-HUD-7.
 # [orig: HUD_DrawCrosshair @0x592640]
 func _draw_crosshair(surface: Vector2) -> void:
 	if bool(_info.get("scope_engaged", false)):

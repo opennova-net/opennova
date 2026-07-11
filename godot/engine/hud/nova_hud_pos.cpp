@@ -307,10 +307,12 @@ Dictionary NovaHudPos::to_dictionary() const {
 	misc["agl_radius"] = h.agl_radius;
 	misc["roc_len"] = h.roc_len;
 	misc["ping_right"] = h.ping_right;
-	// ALPHAFADE raw file fields: base%, max%, seconds. The original stores
-	// base*2.55 / max*2.55 (0..255 alpha) and seconds*62 (ticks); consumers do
-	// that conversion. [orig: alphafade parse @0x5a086c -> 0x2723614/18/1C]
-	misc["alpha_fade"] = Vector3i(h.alpha_fade[0], h.alpha_fade[1], h.alpha_fade[2]);
+	// ALPHAFADE raw file fields: base%, max%, seconds — floats, because the
+	// original reads them via atof and the fraction survives into the stored
+	// base*2.55 / max*2.55 (0..255 alpha) and seconds*62 (ticks) converts;
+	// consumers do that conversion. [orig: alphafade parse @0x5a0882..0x5a08c2
+	// -> 0x2723614/18/1C]
+	misc["alpha_fade"] = Vector3(h.alpha_fade[0], h.alpha_fade[1], h.alpha_fade[2]);
 	out["misc"] = misc;
 
 	return out;

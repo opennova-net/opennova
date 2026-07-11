@@ -189,12 +189,19 @@ func _load_hud_text_tables(root: NovaResourceRoot) -> void:
 		var gametext := _load_rtxt(root, "gametext.bin")
 		if gametext != null:
 			NovaStrings.register_table("gametext", gametext)
+	# The medmssn fallback fires only when the mission .bin does not EXIST — a
+	# present-but-unparseable file loads to nothing with no fallback.
+	# [orig: TextResource_LoadMissionTextBin @0x51ede3 — FileSystem_FileExists picks
+	# the filename; the load result is stored either way]
 	var mission_table: RtxtStringFile = null
+	var mission_bin := ""
 	if _world != null and "mission_file" in _world:
 		var base := String(_world.mission_file).get_basename()
 		if not base.is_empty():
-			mission_table = _load_rtxt(root, base + ".bin")
-	if mission_table == null:
+			mission_bin = base + ".bin"
+	if not mission_bin.is_empty() and root.has_file(mission_bin):
+		mission_table = _load_rtxt(root, mission_bin)
+	else:
 		mission_table = _load_rtxt(root, "medmssn.bin")
 	NovaStrings.register_table("mission", mission_table)
 
@@ -252,6 +259,11 @@ func _update_game_hud() -> void:
 		weapon_active = true
 		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
 		reserve = wv.reserve
+		# Capacity-1 weapons fold the chambered round into the displayed reserve
+		# (the ammo text and the round icons both read the folded count).
+		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
+		if weapon != null and weapon.clipsize == 1 and clip >= 0 and reserve >= 0:
+			reserve += clip
 	var scope_engaged := false
 	var fov_deg := 80.0
 	var lv: PlayerLocalView = _world.local_player_view() if _world.has_method("local_player_view") else null

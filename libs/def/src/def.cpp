@@ -355,30 +355,23 @@ static DefHudColor parse_hud_color_argb(Token *vals, int n) {
 }
 
 /* Parse a positioned-text token into (x, y, hidden, align) — the original's
-   4-dword global layout: field 3 is the hidden gate (0 = draw), field 4 the
-   alignment word (left=0/right=1/center=2). A 3-token (x, y, alignword) form
-   leaves hidden at 0. [orig: AMMOCOUNTPOS parse @0x59fc3d writes
-   x/y/hidden/align; the draws gate on the hidden dword @0x5939f3] */
+   4-dword global layout, read strictly positionally: field 1 x, field 2 y,
+   field 3 the hidden gate via numeric parse (0 = draw; a word reads 0), field 4
+   the alignment word ("right"=1/"center"=2/anything else 0=left — full-string
+   match; a missing field is left). Retail 2-field lines (GAMEINFO, HUDCHATTEXT)
+   render visible/left in retail JO, pinning missing fields to 0.
+   [orig: AMMOCOUNTPOS parse @0x59fc3d — atof->ftol x/y/hidden then
+   HUD_ParseTextAlignment @0x59d6b0 on field 4; the draws gate on the hidden
+   dword @0x5939f3] */
 static void parse_pos_aligned(Token *vals, int n, int *out) {
     if (n >= 1) out[0] = parse_int_n(vals[0].s, vals[0].len);
     if (n >= 2) out[1] = parse_int_n(vals[1].s, vals[1].len);
+    if (n >= 3) out[2] = parse_int_n(vals[2].s, vals[2].len);
     if (n >= 4) {
-        out[2] = parse_int_n(vals[2].s, vals[2].len);
         char low[16];
         size_t ll = vals[3].len < 15 ? vals[3].len : 15;
         to_lower_buf(low, vals[3].s, ll);
         out[3] = parse_alignment(low, ll);
-    } else if (n >= 3) {
-        char low[16];
-        size_t ll = vals[2].len < 15 ? vals[2].len : 15;
-        to_lower_buf(low, vals[2].s, ll);
-        if (memcmp(low, "left", ll < 4 ? ll : 4) == 0 ||
-            memcmp(low, "center", ll < 6 ? ll : 6) == 0 ||
-            memcmp(low, "right", ll < 5 ? ll : 5) == 0) {
-            out[3] = parse_alignment(low, ll);
-        } else {
-            out[2] = parse_int_n(vals[2].s, vals[2].len);
-        }
     }
 }
 
@@ -1639,8 +1632,10 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             if (nvals >= 1) hud->roc_len = parse_int_n(vals[0].s, vals[0].len);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "alphafade", 9)) {
+            /* atof per field — fractional values survive into the original's
+               x2.55/x62 converts [orig: @0x5a0882..0x5a08c2]. */
             for (int i = 0; i < 3 && i < nvals; ++i)
-                hud->alpha_fade[i] = parse_int_n(vals[i].s, vals[i].len);
+                hud->alpha_fade[i] = parse_float_n(vals[i].s, vals[i].len);
             parsed = 1;
         }
         /* AGL settings */

@@ -395,7 +395,11 @@ typedef struct DefHudPosDef {
     int hud_chline;
     int agl_radius;
     int roc_len;
-    int alpha_fade[3];
+    /* ALPHAFADE raw file fields (base %, max %, seconds) kept as floats: the
+       original reads each via atof and the fraction survives into the x2.55 /
+       x2.55 / x62 converts before ftol [orig: alphafade parse @0x5a0882..0x5a08c2];
+       consumers apply that conversion. */
+    float alpha_fade[3];
 
     int agl_tlrx[2];
     int agl_ylen[2];

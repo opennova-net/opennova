@@ -52,7 +52,7 @@ func test_draw_helpers_null_safe() -> void:
 	HudWeaponText.draw_ammo(null, null, Vector4i.ZERO, 30, 90, 30, Color.WHITE, Vector2.ONE)
 	HudWeaponText.draw_weapon_name(null, null, Vector4i.ZERO, "AK-47", Color.WHITE, Vector2.ONE)
 	HudClipIndicator.new().draw(null, Vector2i(5, 579), null, null, null, 12, 90,
-		Color.WHITE, Vector3i(30, 50, 3), 0, Vector2.ONE)
+		Color.WHITE, Vector3(30, 50, 3), 0, Vector2.ONE)
 	HudMessages.new().draw(null, null, Vector2.ZERO, Vector2.ONE, 0, 8, 100.0, Color.WHITE)
 	assert_true(true, "Null-guarded draw helpers returned without error.")
 
@@ -94,6 +94,9 @@ func test_fade_alphas() -> void:
 	assert_eq(int(30 * HudFade.PERCENT_TO_ALPHA), 76)
 	assert_eq(int(50 * HudFade.PERCENT_TO_ALPHA), 127)
 	assert_eq(int(3 * HudFade.SECONDS_TO_TICKS), 186)
+	# Fractional file fields survive: the original converts through atof
+	# [orig: @0x5a0882..0x5a08c2] — 1.5 s is a 93-tick ramp, not 62.
+	assert_eq(int(1.5 * HudFade.SECONDS_TO_TICKS), 93)
 	# The clip flash clamps at the ALPHAFADE max; the stance pair clamps at 255 and
 	# ghosts the previous frame at quarter fade.
 	assert_eq(HudFade.flash_alpha(93, 186, 76, 127), 127)
@@ -128,6 +131,31 @@ func test_hud_weapon_def_decode() -> void:
 	assert_eq(def.rounds_per_icon, 1)
 	assert_almost_eq(def.error_row_deg(2), 0.25, 0.0001, "Hip-stand dispersion row.")
 	assert_eq(def.error_row_deg(9), 0.0, "Out-of-table row reads 0.")
+	# The divisor is a byte in the original (weapon+727) — out-of-range wraps.
+	# [orig: HUDRNDGFX parse @0x5442fc; unsigned byte read @0x599bb1]
+	var wrapped := PlayerHudWeaponDef.from_weapon_dict({
+		"name": "X", "hudrndgfx_layout": Vector3i(18, 0, 257),
+	})
+	assert_eq(wrapped.rounds_per_icon, 1, "Divisor 257 wraps to the byte 1.")
+
+
+func test_stance_shared_scale() -> void:
+	# One 16.16 factor from FRAME 0 scales every frame; centering comes from frame
+	# 0's scaled dims and skips at 127+. [orig: HUD_DrawStanceIndicator
+	# @0x599fed..0x59a07e — 0x800000/max(w0,h0), (q16*dim+0x8000)>>16]
+	assert_eq(HudStance.scale_q16(Vector2i(128, 128)), 0x10000)
+	assert_eq(HudStance.scaled_dim(128, 0x10000), 128)
+	assert_eq(HudStance.center_offset(Vector2i(128, 128), 0x10000), Vector2i.ZERO,
+		"128 scales to 128 (>=127): no centering.")
+	var q := HudStance.scale_q16(Vector2i(64, 32))
+	assert_eq(q, 0x20000)
+	assert_eq(HudStance.scaled_dim(64, q), 128, "The max dim fills the box.")
+	assert_eq(HudStance.scaled_dim(32, q), 64)
+	assert_eq(HudStance.center_offset(Vector2i(64, 32), q), Vector2i(0, 32),
+		"The minor dim centers by (128-scaled)/2; the 128 dim does not.")
+	assert_eq(HudStance.scaled_dim(256, q), 512,
+		"Other frames scale by frame 0's factor blindly, like the original.")
+	assert_eq(HudStance.scale_q16(Vector2i.ZERO), 0, "Zero dims are safe.")
 
 
 func test_round_icon_count() -> void:
