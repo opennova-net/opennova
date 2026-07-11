@@ -1,9 +1,11 @@
 # NovaWorld networking - protocol + struct RE record
 
-> **Status**: the NovaWorld web/UDP stack (libs/novacrypto, libs/napi, libs/npwire, libs/novaworld, the
-> standalone server app, and the web portal) landed in PR #37, was reverted in PR #50 while
-> it matured, and is now **landed on master**. This protocol RE remains the durable wire record; §8 will accumulate
-> per-system equivalence verdicts as the IDA grill proceeds.
+> **Status**: the NovaWorld stack (libs/novacrypto, libs/napi, libs/npwire, libs/novaworld, the
+> standalone server app, and the web portal) is **landed on master**; this protocol RE is the
+> durable wire record. Navigation: §5 = tag-level findings (index at its top; discovery-order
+> numbering, never renumbered), §7 = landed architecture + the per-system grill waves, §8 = the
+> D-NET divergence catalog (stable IDs). Per-system parity verdicts roll up in
+> [correspondence.md](../correspondence.md).
 
 Consolidated 2026-06-10 from `notes/novaworld_protocol_matrix.md`, `notes/dispatcher_table.md`,
 `notes/dispatcher_findings.md`, `notes/spawn_gate_24C1928.md`, `notes/tag_cross_capture_diff.md`,
@@ -23,7 +25,7 @@ capture7 (spawn-flow session), retail_capture2 (g11, AS Kendari Airport).
 NovaLogic multiplayer UDP is a layered protocol with a universal wire format and pluggable
 per-game message sets:
 
-| Layer | Contents | Reimpl home (reverted stack) |
+| Layer | Contents | Reimpl home |
 |---|---|---|
 | 4 — message sets | Selected by the `PN` field at CLIENT_HELLO. `PN=NOVAWORLDUDP` → container-based browser/session services (ClientHostRequest, ClientPlayRequest, ServerVerifyResult, ...; §3). `PN="JointOperations"` etc. → in-match TLV game traffic dispatched via the NAPI msginfo tables (§4). | `libs/novaworld` (PN dispatch inside the lib) |
 | 3 — session + framing | Per-(ip,port) session state (`CK`, `SK`, `SCRK`, fragment buffers); the opcode `0x43`/`0x83` protocol-message envelope (flags/len/seq/frag). | `libs/napi` |
@@ -509,6 +511,77 @@ This is what a reimplemented server must **handle**.
 
 ## 5. Tag-level findings (audited against retail captures)
 
+Sections are numbered in discovery order and never renumbered; lettered entries (5.0a,
+5.2a…) are same-topic follow-ups, and unnumbered rows are cross-notes filed where they
+were found. Divergence IDs referenced here are defined in the §8 catalog.
+
+| § | Finding |
+|---|---|
+| 5.0 | Session bring-up — single player is an in-process listen server |
+| 5.0a | Join-leg lifecycle fixes (grill 2026-06-26; D-NET-104/105/106) |
+| 5.0b | The game-session 0x42 CU var set (the joiner's character/profile upload; D-NET-146) |
+| 5.1 | Loading-progress counter — `dword_A82370` |
+| 5.2 | Spawn-success gate — `dword_24C1928` |
+| 5.2a | Host-side spawn flow — how the listen-server host spawns its own player (R1, 2026-06-16) |
+| 5.2b | Entity build + spawn-state init — the field-init sequence (2026-06-20) |
+| 5.2c | Map spawn-marker selection — where the human player's pose comes from (2026-06-22) |
+| 5.3 | Tag direction asymmetry (durable warning) |
+| 5.4 | Tag 0x0B — 616-byte BMS header field map |
+| 5.5 | Tag 0x11 bundling policy (retail) |
+| 5.6 | Tag 0x0D — local-player spawn dead end (durable warning) |
+| 5.7 | Tag 0x18 — superseded by §5.46 |
+| 5.8 | Wire-format verification gaps |
+| 5.9 | Core in-game replication loop — field maps (loopback capture 2026-06-16) |
+| 5.10 | Per-entity-type serialize callback at `ItemDef+356` (loopback capture 2026-06-16b) |
+| 5.10b | Per-entity-type callback at `ItemDef+356` — class dispatch table |
+| 5.11 | Tag 0x0D — pool-entity spawn batch (loopback capture 2026-06-16b) |
+| 5.12 | Tag 0x20 — bulk pool-3 entity sync (loopback capture 2026-06-16b) |
+| 5.13 | Vehicle compact record (S2C 0x0A trailing event) |
+| 5.14 | Infantry / AI compact record (S2C 0x0A trailing event) |
+| 5.15 | Guided weapon record — per-(mode, field-group) codec |
+| 5.16 | C2S 0x06 — client-fired-round (3-player loopback 2026-06-16d) |
+| 5.17 | C2S 0x21 — anti-cheat CRC reply (3-player loopback 2026-06-16d) |
+| 5.18 | C2S 0x47 / 0x48 — request entity-state broadcast + stub (3-player loopback 2026-06-16d) |
+| – | Cross-witness append for §5.10 — 3-player loopback 2026-06-16d |
+| 5.19 | Tag 0x40 — minimap-overlay update / capture-zone state (controlled capture 2026-06-17) |
+| 5.20 | Tag 0x16 — PLAYER-LIST / SCOREBOARD (controlled capture 2026-06-17; header/trailer + HUD-count semantics witnessed 2026-07-03) |
+| 5.21 | Tag 0x46 — PLAYER-SYNC (controlled capture 2026-06-17) |
+| – | Cross-note — pool-0 organic spawn path (controlled capture 2026-06-17) |
+| 5.22 | `/PROFILE` `.sph` server-log recording — independent value oracle (controlled capture 2026-06-17) |
+| 5.23 | Tag 0x0C — pool-0 organic spawn batch (field map; D-NET-62) |
+| 5.24 | Authored-mission cross-validation — pools 1/2/3 (D-NET-62) |
+| 5.25 | Replay timeline — assembling a capture into per-entity tracks (tooling, 2026-06-17) |
+| 5.26 | Tags 0x1E / 0x26 / 0x4E — game events, kills, batch despawn (the kill feed; one-host/one-client capture 2026-06-17) |
+| 5.27 | Replay event + environment streams (tooling, 2026-06-17) |
+| 5.28 | Mission delivery to a joiner — a chunked file transfer (probe2, 2026-06-18; header corrected 2026-06-18b) |
+| 5.29 | Tag 0x0F — world-state-load (joiner spawn + scores + location names; probe2, 2026-06-18; server writer + field roles witnessed 2026-07-03) |
+| 5.30 | Tag 0x5A — weapon-loadout sync (probe2, 2026-06-18) |
+| 5.31 | Tag 0x6E — team/squad roster sync (probe2, 2026-06-18) |
+| 5.32 | Tag 0x7B — full player/session info (probe2 + loopbacks, 2026-06-18) |
+| 5.33 | C2S burst replies 0x22 / 0x23 / 0x28 / 0x29 / 0x4C (probe2, 2026-06-18) |
+| 5.34 | Session/transport control pings — RTT 0x57/0x2C + request trio 0x68/0x43/0x39 (probe3_again, 2026-06-19) |
+| 5.35 | Minimap overlays, weapon reload, second death path, checksum + misc scalars (probe3_again, 2026-06-19) |
+| 5.36 | Deployed-item spawn 0x59 + entity-routed sub-packet 0x44 (probe3_again, 2026-06-19) |
+| 5.37 | Terrain-tile load batch 0x45 (operation_whitenoise stock Co-op, 2026-06-19) |
+| 5.38 | Local-player input→pose locomotion — the player simulates, never interpolates (Phase 2, 2026-06-20) |
+| 5.39 | First/third-person player camera (Phase 2.5, 2026-06-20) |
+| 5.40 | First-person weapon viewmodel placement — weapon.def `pos`/`tpos` (2026-06-21) |
+| 5.41 | `Player_*` family — naming validation + decomp cleanup grill (2026-06-26) |
+| 5.42 | `Server_*` family — naming validation + decomp cleanup grill (2026-06-26) |
+| 5.43 | Player add → spawn: id allocation, team, burst cadence, placement (2026-06-26) |
+| – | P4 `Server_TickUpdate` host-loop review (2026-06-27) |
+| 5.44 | `Client_ProcessNetworkFrame` — the per-frame client net role (P5, 2026-06-27) |
+| 5.45 | P8 reactive-reply gate — the `game_session.cpp` reply machine vs the witnessed serializers (2026-06-27) |
+| 5.46 | C2S 0x0F entity-info query → S2C 0x18 FULL-ENTITY-SPAWN — the self-heal path (2026-07-01) |
+| 5.47 | Server per-frame S2C 0x0A emit — phase counter + sub-block cycle + priority/budget entity loop (2026-07-01) |
+| 5.48–5.56 | The 2026-07-01 wire-coverage sweep — session/HUD state channel (decoded) |
+| 5.57 | The weapon.def loadout pipeline — AdmDef table, C2S 0x2F → S2C 0x5A derivation, ammo semantics (2026-07-02) |
+| 5.58 | The reload round-trip — C2S 0x25 → S2C 0x49 (2026-07-02) |
+| 5.59 | The character-slot binding family — C2S 0x29, S2C 0x29/0x50/0x51, and the registry/blip structures (2026-07-02) |
+| 5.60 | The authoritative round simulation, damage, and the death broadcast family (engine-research scope, 2026-07-03) |
+| 5.61 | Advance & Secure — spawn selection, the zone chain, and the capture loop (engine-research scope, 2026-07-03) |
+| 5.62 | The FP weapon action FSM — weapon.def ACTION rows → the 12-state pump (2026-07-09) |
+
 ### 5.0 Session bring-up — single player is an in-process listen server
 
 A single-player mission is **not** an offline codepath. It stands up a NovaWorld **host** in the
@@ -666,7 +739,7 @@ against `Jointops.exe` and ported; the in-match flow is `0x41 → 0x81`, `0x42 �
 ### 5.0b — The game-session 0x42 CU var set (the joiner's character/profile upload; D-NET-146)
 
 The game-session ClientAuth carries a CU chunk set DISTINCT from the NovaWorld-gate connect set
-(§8 NW-S3's Application/BuildDateAndTime/.../UdpCode1/UdpCode2): the joiner's client/profile
+(§7 Wave 1 NW-S3's Application/BuildDateAndTime/.../UdpCode1/UdpCode2): the joiner's client/profile
 environment plus its per-SIDE character selection. Emitter: `[orig:
 CNapiServerInfo_SerializeToSession @ 0x4c3650]` — one `NapiNPChunk_Create(conn, 2, name, value)`
 per field, each omitted when the value is 0/empty, values printed as decimal strings. Host parse:
@@ -5070,528 +5143,6 @@ Hex-Rays mis-render all three callsites. Plus ~34 local renames across @ 0x43378
 mountHandles[8], "cameraByte" → playerClass, position dwords mis-named as damage/health, …) and
 reimpl reverse-link comments on every grilled handler.
 
-## 6. Struct reference
-
-All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
-decomp-quality plan) and the follow-on refinements. Witness rule: every named field has ≥2
-independent decompile witnesses unless flagged. One Kong artifact to know: the
-`CNapiSession_*` name prefix is **heterogeneous** (it covers both particle/effect code and
-message-queue code) — it is not a real class.
-
-### 6.1 `NapiNPMsgInfo` / `NapiNPOpcodeInfo` (16 B each)
-
-| Struct | Layout | Notes |
-|---|---|---|
-| `NapiNPMsgInfo` | `{u32 msg_id, u32 magic, handler, handler2}` | sentinel = `magic==0`; `handler2` always 0 in observed entries |
-| `NapiNPOpcodeInfo` | `{u32 index, u32 opcode, u32 magic, handler}` | magic always `0x7C08C6` (= addr of `font_name`; possible string pointer, see §5.0); sentinel `index=0xFFFFFFFF` |
-
-### 6.2 `CNapiNetwork_*` / `CNapiServer*` method family (42 methods; receiver = `NapiNPServerCtx`)
-
-The NAPI "CNapiNetwork" class methods (range 0x4a8040-0x4ca4a0) all operate on the game
-singleton `g_napi_np_ctx` (§6.3). **There is no separate `CNapiNetwork` struct.** An undersized
-4432-B duplicate type by that name existed in the IDB and was **deleted 2026-06-27** (grill below);
-the single canonical receiver is `NapiNPServerCtx` (§6.3). All `__thiscall` methods are now typed
-`(NapiNPServerCtx *this)`; the callbacks are `__cdecl` with the ctx as the first arg.
-
-Roster (retail `Jointops.exe`):
-
-- **Lifecycle:** `_Init @0x4ca4a0` (list heads + manager pointers + settings; ping 3000/2/10, §6.6),
-  `_ClearState @0x4c8690` (zeroes the whole **0x1470 = 5232 B** object + re-inits
-  `game_settings`/`net_config`; was Kong `CNapiServerInfo_Init` — a misnomer, it resets the ctx not a
-  sub-struct), `_Shutdown @0x4ca440`.
-- **Transport:** `_SetTransportMode @0x4c8750` (writes `socket_state` +0x54), `_OpenTransportSocket
-  @0x4c6a40` (opens a UDP socket only for modes 2/3/4), `_TearDownSocket @0x4c4c90`, `_SendUDPPacket
-  @0x4c4d30`, `_GetLocalAddress @0x4c4f60` (static `__stdcall`, no `this`).
-- **Pump** (thin wrappers over `NapiNP*_Pump`; flag bitmask decoded in-IDB): `_PumpManagerReceive
-  @0x4c4d10` (mgr flag 4 = receive pass), `_PumpServerProtocolRecv @0x4c4ee0` (flags 25),
-  `_PumpServerProtocolSend @0x4c4f00` (737), `_PumpClientProtocolRecv @0x4c4fe0` (26),
-  `_PumpClientProtocolSend @0x4c5000` (738), `_PumpTransportAndProtocol @0x4c6e00`, `_PumpAndCheckState
-  @0x4c6e80`, `_DrainProtocolTimers @0x4c6de0`, `_DrainPendingDataTransfers @0x4c6e50`. Kong named the
-  four protocol pumps `PumpProtocolType<flags>`; renamed recv/send × server/client per the
-  `[orig: NapiNPProtocol_Pump @ 0x62a650]` decode (bit 0x8 = `PumpRecvQueues`, 0x3F0 = per-conn) and
-  `[orig: CNapiNPConnection_PumpFlags @ 0x629780]` (0x20 = enumerator-send, 0x40 = state machine; low
-  bit 0x1 selects server-role connections, 0x2 client-role), corroborated by the caller split
-  (`Server_*` vs `Client_*`/`NetClient_*`).
-- **Session/state:** `_IsSessionActive @0x4c6f00`, `_GetSessionUptime @0x4c6ed0`,
-  `_UpdateSessionTimestamps @0x4c6f20`, `_RandomizeTimeout @0x4c4d80` (writes `randomized_timeout_ms`
-  +0x1194, value 1000-9999 ms — **retail addr; the `0x4a6d50` cited in `libs/napi` & `libs/novaworld`
-  is the jodemo image, a different binary**), `_UpdateDedicatedServerFlag @0x4c6d50`, `_FindPlayerByName
-  @0x4c69e0`, `_ParseServerVarList @0x4c4310`, `_SetNetLogFile @0x4c69a0`, `_QueueReliableMessage
-  @0x4c4fa0`, `_GetDisconnectReasonString @0x4c7000` (fills `disconnect_reason_buf` +0x1270),
-  `_DisconnectActiveConnection @0x4c9140` (builds a `NapiNPDisconnectEvent` on `napi_conn` then
-  `[orig: CNapiNPConnection_RequestDisconnect @ 0x61e0f0]`; was Kong `SendPunkBusterChat` — a misnomer,
-  there is no chat path, only a disconnect-with-reason).
-- **Callbacks (`__cdecl`, ctx as first arg):** `_ValidateJoinRequest @0x4c61b0`, `_OnConnectedToServer
-  @0x4c62e0` (writes `active_connection_id` +0x1190), `_OnDisconnectedFromServer @0x4c63d0` (writes
-  `disconnect_event_buf`), `_CheckPlayerTimeouts @0x4c8ad0`. `_OnSessionDiscovered @0x4c8470` and
-  `_OnSessionRemoved @0x4c68c0` take a session-list head (not the ctx); `_QueueEventEntry @0x4c6890`
-  takes a player object.
-- **Server subclass:** `CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0`,
-  `CNapiServer_DisconnectPendingSpawnBans @0x4c9290`, `CNapiServer_OnPlayerDisconnected @0x4c94d0`
-  (`__cdecl`), `CNapiServerConfig_BuildFlags @0x4c4dc0`. `CNapiServerInfo_SerializeToSession @0x4c3650`
-  and `CNapiServerInfo_ClearAllStrings @0x4cad10` genuinely operate on a separate ~520-B server-info
-  struct (fields BT/VN/BN/DB/.../PBC/NWUVERSION), not the ctx — names retained.
-- **Not a network method:** `0x4a8040` (Kong `CNapiNetwork_GetConnectionParams`) reads display
-  width/height/AA-level from the video-config object `off_840960`; sole caller `Game_InitSubsystems`
-  right after `Renderer_SetDisplayModeWithFallback`. Renamed `VideoConfig_GetResolution` and removed
-  from the family.
-
-### 6.3 `NapiNPServerCtx` — `g_napi_np_ctx @ 0xB5CBC8` (5232 B = 0x1470, 473 xrefs)
-
-`NapiNPServerCtx` is the **single canonical type** for this object and the receiver of the entire
-`CNapiNetwork_*`/`CNapiServer*` family (§6.2). The previously-documented separate `CNapiNetwork`
-struct was an undersized (4432 B) duplicate of the same layout and was deleted from the IDB
-2026-06-27. The **true size is 0x1470 = 5232 B**, witnessed by `[orig: CNapiNetwork_ClearState @
-0x4c8690]` doing `memset(&g_napi_np_ctx, 0, 0x1470)` and by `[orig: CNapiServer_OnPlayerDisconnected
-@ 0x4c94d0]` writing at +0x11A8; the struct was grown to 5232 and the four interior addresses that
-IDA had auto-named as standalone globals (0xB5DD70/74, 0xB5DDB4, 0xB5DDB8) were folded back in as
-ctx fields. Applied layout:
-
-| Offset | Field | Size | Notes |
-|---|---|---|---|
-| 0x000 | `list_heads[5]` | 80 | `+0x04` = enumerated session-list head (NovaWorld + LAN); `+0x24` = player connection-list head (PCID dup-check walks it in `[orig: Server_ValidatePlayerJoinRequest @ 0x512100]`) |
-| 0x050 | `transport_mode` | 4 | 1=NovaWorld, 2=LAN (UI enumeration branches ==1 → SetTransportMode(4), ==2 → (2)); NovaWorld-only AppId/JoinTicket gates check ==1 |
-| 0x054 | `socket_state` | 4 | |
-| 0x058 | `is_in_session` | 4 | non-zero whenever an MP session is in progress; gates `[orig: Server_PumpNetworkTransport @ 0x4FD960]`, 14 branches of `[orig: Server_TickUpdate @ 0x51D7E0]`, 11 of `[orig: Game_StartMission @ 0x524360]`, the whole body of `[orig: NetClient_FlushAndSync @ 0x424710]` |
-| 0x05C | `connection_mode` | 4 | host/client mode written by `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` (0=none, 1=host, 2=client, 3=host+client); single player uses 3 (§5.0). Was `field_5C` |
-| 0x060 | `is_authority` | 4 | non-zero on host/server (preserved Kong name); set by `SetConnectionMode` = is_host bit of `connection_mode` (§5.0) |
-| 0x064 | `is_mp_session_peer` | 4 | renamed 2026-04-26 from `is_dedicated_server` (see below); set by `SetConnectionMode` = is_client bit of `connection_mode` (mode 3 → 1, §5.0) |
-| 0x068 | pad | 3372 | NAPI internals |
-| 0xD94 | `disconnect_event_buf` | 184 | |
-| 0xE4C-0xE54 | `field_E4C/E50/E54` | 12 | |
-| 0xE58 | `np_manager` | 4 | `NapiNPManager *` |
-| 0xE5C | `np_protocol` | 4 | `NapiNPProtocol *` (was Kong `player_list_owner`); `[orig: NapiNPServer_SendFiltered @ 0x4C87E0]` derefs its connection list at +0xEBC |
-| 0xE60 | `field_E60` | 4 | protocol pointer cached for the client frame path (`[orig: Client_ProcessNetworkFrame @ 0x42C180]`); never proven to differ from `np_protocol` |
-| 0xE64 | `ping_manager` | 4 | `NapiPingManager *` (global alias `0xB5DA2C`) |
-| 0xE68 | `game_settings` | 216 | inline `NapiGameSettings` (§6.4); side passwords at absolute 0xEA8/0xEC8 drive join-reject codes 19/20 |
-| 0xF40 | `server_info_buf` | 72 | `+0xF3C` region note: a PunkBuster handle/flag is read at 0xF3C (single witness, `Server_TickUpdate` → `PBServer_Shutdown`) |
-| 0xF88 | `net_config` | 520 | |
-| 0x1190 | `active_connection_id` | 4 | set on connect from the connection's id (`OnConnectedToServer`), cleared on disconnect. Was `field_1190` |
-| 0x1194 | `randomized_timeout_ms` | 4 | 1000-9999 ms, written by `[orig: CNapiNetwork_RandomizeTimeout @ 0x4c4d80]`. Was pad |
-| 0x1198 | `send_mask` | 4 | bitmask used by `NapiNPServer_SendFiltered` (preserved) |
-| 0x119C | `send_target_player` | 4 | preserved |
-| 0x11A0 | `send_target_slot` | 4 | preserved (was `send_target_state`) |
-| 0x11A4 | `send_filter_416` | 4 | preserved |
-| 0x11A8 | `field_11A8` | 4 | cleared (=0) on player disconnect by `CNapiServer_OnPlayerDisconnected`; semantics unconfirmed |
-| 0x11AC | `field_11AC` / `field_11EC` / `field_11F0` | 196 | interior fields (formerly auto-named globals); not yet individually witnessed |
-| 0x1270 | `disconnect_reason_buf` | 512 | localized disconnect/error string built by `[orig: CNapiNetwork_GetDisconnectReasonString @ 0x4c7000]`; ends at 0x1470 |
-
-`is_mp_session_peer` rename rationale (user-approved, applied to the IDB): the literal
-"is dedicated server" reading is contradicted by three witnesses —
-`[orig: CNapiGameSession_BuildHostVarLists @ 0x4D0B50]` publishes the lobby key `Dedicated=0`
-when the flag is set (inverted); `[orig: Chat_SendTeamMessage @ 0x49A900]` takes the
-client-style reliable-uplink branch when set and the host broadcast branch on `is_authority`
-(a real dedi host would never take the first); `[orig: Game_StartMission @ 0x524360]` gates
-both polarities in ways only consistent with "peer in an MP session".
-`[orig: Game_ParseCommandLineAndInit @ 0x4A7310]` never sets it from `/SERVEONLY`.
-
-Deliberately not applied from the maximal field map: inline `gs_*` password names at the
-singleton level (the agent's inline arithmetic was off by one 32-byte slot; the authoritative
-offsets are the `NapiGameSettings` ones in §6.4 — side A at settings+0x40 = absolute 0xEA8,
-side B at +0x60 = 0xEC8, both directly witnessed in `Server_ValidatePlayerJoinRequest`), a
-separate `active_protocol` name for 0xE60, and `pb_server_handle` at 0xF3C (single witness).
-Admin SET-command password buffers live in a game-state struct reached through `np_protocol`,
-not inline in the singleton.
-
-### 6.4 `NapiGameSettings` (216 B; inline at `CNapiNetwork+3688` / `g_napi_np_ctx+0xE68`)
-
-10 of 11 fields named, all ≥2 witnesses. Strongest source:
-`[orig: ServerConfig_ApplyHostSetting @ 0x4a6000]` maps host-config keys to exactly the
-globals that `[orig: CNapiGameSession_BuildAndCreateSession @ 0x5694d0]` copies into this
-struct. Other witnesses: `[orig: SinglePlayer_StartMission @ 0x561af0]` (default init),
-`[orig: Server_ValidatePlayerJoinRequest @ 0x512100]` + `[orig: NapiNPServerMsg_0x001 @
-0x512ed0]` (validation sink), `[orig: Game_SaveConfig @ 0x54c490]` (game.cfg writer),
-`[orig: UI_PopulateHostSettingsFromConfig @ 0x555fe0]` (host-screen widget labels),
-`[orig: CNapiGameSession_BuildHostVarLists @ 0x4d0b50]` (lobby publish),
-`[orig: CAdminServer_HandleSetCommand @ 0x405a60]` (admin SET).
-
-| Offset | Field | Type | Config key / semantics |
-|---|---|---|---|
-| 0x00 | `server_name` | char[32] | lobby-visible `"ServerName"`; saved as `game_name`; UI widget `GAME_NAME` |
-| 0x20 | `server_password` | char[32] | `MPHostGamePassword` / admin SET `ServerPassword`; widget `SERVER_PASSWORD` |
-| 0x40 | `side_a_password` | char[32] | `MPHostSidePasswordA`; widget `BLUE_PW`; mismatch → join-reject code 19 |
-| 0x60 | `side_b_password` | char[32] | `MPHostSidePasswordB`; widget `RED_PW`; mismatch → join-reject code 20 |
-| 0x80 | `internet_address` | char[64] | connect-target hostname/IP, default `"0.0.0.0"`; resolved via `Napi_ResolveAddress` in transport mode 3 |
-| 0xC0 | `max_players` | u32 | `MaxPlayers`, clamped 1..65 |
-| 0xC4 | `use_lineup_queue` | u32 | `UseLineUpQueue` |
-| 0xC8 | `lineup_queue_size` | u32 | `LineUpQueueSize` |
-| 0xCC | `game_type` | u32 | `mp_gametype` enum (the mission entry's gametype dword); discrete values not enumerated |
-| 0xD0 | `mp_attributes` | u32 | `mpattrib` bitmask — observed bits: 0x001 NoTracers, 0x004 TeamChoose, 0x008 FFWarning-suppress, 0x200 NoFriendlyFire, 0x400 NoFriendlyTag, 0x8000 ClaymorePref; `[orig: CNapiServerConfig_BuildFlags @ 0x4c4dc0]` re-derives a public flag word |
-| 0xD4 | `_pad_0xD4` | 4 | actually the `sv_punkbuster` server flag carried into the session blob (single witness pair; rename to `sv_punkbuster_enabled` once a second witness lands; see `[orig: Config_SetPunkBusterServerEnabled @ 0x4d94c0]`) |
-
-### 6.5 `NapiNPProtocol` (4064 B, 94 named members; reached via `g_napi_np_ctx.np_protocol`)
-
-Full layout after the `_pad_0x500` refinement (2120 unknown bytes → 100% named):
-
-| Offset | Field | Type/size | Notes |
-|---|---|---|---|
-| 0x000 | `manager` | ptr | `NapiNPManager *` |
-| 0x004 | `link` | 16 | `NapiListNode` |
-| 0x014 | `instance_id` | u32 | |
-| 0x018 | `company` | char[64] | |
-| 0x058 | `machine_name` | char[64] | |
-| 0x098 | `build_date` | char[64] | |
-| 0x0D8 | `unk_0xD8` | u32 | |
-| 0x0DC | `game_name` | char[64] | |
-| 0x11C | `version_block` | 16 | `NapiNPVarBlock` |
-| 0x12C | `version_string` | char[64] | |
-| 0x16C | `max_players_string` | char[64] | |
-| 0x1AC | `build_string` | char[64] | |
-| 0x1EC | `msginfo_client_table` | ptr | flat S2C table (§4) |
-| 0x1F0 | `msginfo_server_table` | ptr | flat C2S table |
-| 0x1F4 | `msginfo_flags0` / `disable_processing` / `msginfo_flags2` / `msginfo_flags3` | 4×u8 | |
-| 0x1F8 | `callback_ctx` | ptr | |
-| 0x1FC | pad | 16 | |
-| 0x20C | `msginfo_high_client_index` / `_len` | ptr+u32 | high-bit dispatch index |
-| 0x214 | `msginfo_client_index` / `_len` | ptr+u32 | inverted msg_id index |
-| 0x21C | `msginfo_high_server_index` / `_len` | ptr+u32 | |
-| 0x224 | `msginfo_server_index` / `_len` | ptr+u32 | |
-| 0x22C | `pool_client` | 32 | actually a `NapiFifo`, not `NapiNPBufferPool` (Kong mislabel) |
-| 0x24C | `pool_server` | 32 | same |
-| 0x26C | `cb_client_msg` / `_unhandled` / `_error` / `cb_client_0..3` | 7 ptrs | client-direction callbacks |
-| 0x288 | `nstmout_path` | char[64] | actually the **session/server name** (lobby-visible; "HOST STARTED \"%s\"" log) — rename candidate `session_name` |
-| 0x2C8 | pad | 8 | two server callbacks set in CreateSession: `CNapiServer_OnPlayerDisconnected`, `CNapiClient_OnDisconnected` |
-| 0x2D0 | `cb_server_0..2`, `cb_server_msg` / `_unhandled` / `_error`, `cb_server_3..8` | 12 ptrs | server-direction callbacks |
-| 0x300 | `log_buffer` | char[512] | misnamed — compared against the client `PW` TLV in HandleClientJoin; rename candidate `server_password[512]` |
-| 0x500 | `server_flags` | u32 | `P1` TLV (server config flag word) |
-| 0x504 | `build_flags` | u32 | `P2` TLV (`CNapiServerConfig_BuildFlags`) |
-| 0x508-0x51C | `p3_count`..`p8_count` | 6×u32 | `P3`..`P8` TLVs; always zeroed in retail JO (reserved slots) |
-| 0x520 | `np_count` | u32 | `NP` TLV (zeroed) |
-| 0x524 | `max_players` | u32 | `MP` TLV; clamped 1..251 |
-| 0x528 | `npw_count` | u32 | `NPW` TLV (zeroed) |
-| 0x52C | `gen_session_seed_flag` | u32 | 1 → regenerate `session_seed_id` at host start |
-| 0x530 | `session_seed_id` | u32 | `(GetTickCount + rand) % 900000 + 100000` |
-| 0x534 | `host_key` | u32 | `HK` TLV; `NapiNP_GenerateSessionKey()` at StartServer; validated against the client's HK on join (mismatch → result 3) |
-| 0x538 | `host_running` | u32 | 1 once StartServer succeeds; HandleClientHello rejects when 0 |
-| 0x53C | `host_start_tick` | u32 | GetTickCount at StartServer; uptime base |
-| 0x540 | `host_stop_tick` | u32 | GetTickCount at StopServer |
-| 0x544 | `host_run_duration_ms` | u32 | stop − start, frozen post-stop |
-| 0x548 | `server_user_string1` | char[512] | `SUS1` TLV (populated from a global server-info string) |
-| 0x748 | `server_user_string2` | char[512] | `SUS2` TLV (from CGameSession +4056; likely server URL/NF) |
-| 0x948 | `server_user_string3` | char[512] | `SUS3` TLV (cleared in retail) |
-| 0xB48 | `server_user_string4` | char[512] | `SUS4` TLV (cleared in retail) |
-| 0xD48-0xD4C | `unk_0xD48/0xD4C` | 2×u32 | gates a write-flag block |
-| 0xD50 | `unk_0xD50` + pad[63] | 64 | NUL-terminated string, emitted as TLV — likely `country_code[64]` (`CN`) |
-| 0xD90 | `unk_0xD90` + pad[63] | 64 | likely `timezone[64]` (`TZB`) or `language[64]` (`LNG`) |
-| 0xDD0 | `unk_0xDD0` | u32 | TZB DWORD payload? |
-| 0xDD4 | `unk_0xDD4` | 112 | actually `opcode_msg_count[14]` + `opcode_msg_bytes[14]` per-opcode stats (indexed by `NapiNPOpcodeInfo.index <= 0xD`; zeroed at Create and StartServer) |
-| 0xE44 | `cs_dir1` | 60 | `NapiCSConfig` |
-| 0xE80 | `cs_dir0` | 60 | `NapiCSConfig` |
-| 0xEBC | `connection_list` | 16 | `NapiListHead` — the list `SendFiltered`/timeouts walk |
-| 0xECC | pad | 16 | |
-| 0xEDC | `log_netflow` | 80 | `NapiLog` |
-| 0xF2C | `unk_0xF2C` | u32 | |
-| 0xF30 | `log_condump` | 80 | `NapiLog` |
-| 0xF80 | `log_inout` | 80 | `NapiLog` |
-| 0xFD0 | `unk_0xFD0` | u32 | connection-lookup cache: packed `{addr,port}[N]` table ptr |
-| 0xFD4 | `unk_0xFD4` | u32 | parallel `NapiNPConnection*[N]` ptr |
-| 0xFD8 | `unk_0xFD8` | u32 | cache entry count |
-| 0xFDC | `unk_0xFDC` | u32 | unknown (capacity / dirty flag?) |
-
-Strongest witnesses for the 0x500 region: `[orig: NapiNPProtocol_SendServerInfoPacket @
-0x6204b0]` reads each DWORD in order and emits the matching TLV tag;
-`[orig: CNapiGameSession_CreateSession @ 0x4c97c0]` performs the symmetric writes with
-explicit 512-byte copies into the SUS buffers. Host-state DWORDs confirmed by StartServer
-(`sub_62B5E0`), `StopServer @ 0x62a820`, `NapiNPProtocol_Create @ 0x625a10`,
-`NapiNPTimer_GenerateRandomId @ 0x61e533`, and HandleClientJoin's HK validation.
-
-#### `NapiCSConfig` defaults and direction mirroring
-
-`[orig: CNapiGameSession_InitNPConnection @ 0x4D3BE0]` initializes both protocol CS templates
-(`proto+0xE44` and `proto+0xE80`) to the same 15-dword default block. `[orig:
-CNapiNPConnection_Create @ 0x62ACB0]` copies those protocol templates into each connection with
-direction-dependent mirroring:
-
-| Connection type | `conn+0x17C` | `conn+0x1B8` |
-|---|---|---|
-| server-side connection (`type == 1`) | `proto+0xE44` | `proto+0xE80` |
-| client-side connection (`type == 2`) | `proto+0xE80` | `proto+0xE44` |
-
-Field defaults:
-
-| Index | Working field name | Default |
-|---|---|---:|
-| 0 | `timeout_ms` | 240000 |
-| 1 | `recv_max_per_tick` | 4 |
-| 2 | `send_interval_ms` | 0 |
-| 3 | `send_holdoff_ticks` | 0 |
-| 4 | `idle_send_interval_ms` | 60000 |
-| 5 | `active_send_interval_ms` | 1000 |
-| 6 | `packet_queue_interval_ms` | `0xffffffff` |
-| 7 | `allow_dir0_update` | 0 |
-| 8 | `static_msg_payload_max` | 2048 |
-| 9 | `static_msg_count` | 128 |
-| 10 | `packet_queue_max` | 100 |
-| 11 | `msg_out_max` | 500 |
-| 12 | `msg_out_overflow_log` | 1 |
-| 13 | `max_packet_bytes` | 1300 |
-| 14 | `max_packets_per_tick` | `0xffffffff` |
-
-The `max_packet_bytes` default is the clamped MTU value `0x514` (min 100, max `0x10000`).
-`[orig: NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0]` computes field 3 as one of
-`1/3/4/6/12` depending on transport/LAN mode; the observed retail/OpenNova loopback update used
-`12`.
-
-### 6.6 `NapiPingManager` (declared 288 B; **real allocation 116 B**)
-
-`[orig: NapiPingManager_Create @ 0x6303D0]` allocates 116 (0x74) bytes; every witnessed access
-is within `0x00..0x73`. The trailing 172 bytes of the declared struct are dead (kept only for
-size compatibility). Global instance via `g_napi_np_ctx.ping_manager` (`0xB5DA2C`).
-Initializer `[orig: NapiConnection_Init @ 0x6302F0]` (misnamed — only called from Create;
-rename candidate `NapiPingManager_Init`).
-
-| Offset | Field | Type | Notes |
-|---|---|---|---|
-| 0x00 | `mem_mgr_handle` | int | allocator handle |
-| 0x04 | `state` | int | −1 stopped, 0 init, 1 paused, 2 running, 3 idle |
-| 0x08 | `start_tick_ms` | u32 | |
-| 0x0C | `last_active_tick_ms` | u32 | |
-| 0x10 | `elapsed_ms` | u32 | |
-| 0x14 | `periodicity_ms` | int | **misnamed** — actually the response timeout before retry; default 3000 |
-| 0x18 | `field_18` | int | actually `max_retries`; default 2 |
-| 0x1C | `max_attempts` | int | **misnamed** — actually the per-entry send throttle in ms; default 1, set to 10 by `CNapiNetwork_Init` |
-| 0x20 | `socket_initialized` | int | 1 if `Network_CreateRawSocket` succeeded |
-| 0x24 | `socket` | SOCKET | raw UDP socket |
-| 0x28 | `last_pump_tick_ms` | u32 | 100 ms pump throttle |
-| 0x2C | `last_send_tick_ms` | u32 | backdated by the send throttle at init |
-| 0x30 | `thread_running` / `thread_stop_request` + pad | 4 | NapiThread block start |
-| 0x34 | `thread_proc` | fn ptr | = `CNapiNPConnection_NetworkThreadProc` |
-| 0x38 | `thread_param` | ptr | = this |
-| 0x3C-0x48 | `field_3C..48` | 4×u32 | zeroed by `NapiThread_Reset`; no read sites |
-| 0x4C | `active_count` | int | entries with state>0; gates thread launch/continue and the idle transition |
-| 0x50 | `state3_count` | int | entries with state==3; gates the recvfrom loop |
-| 0x54 | `anchor_self` | ptr | back-pointer; entries store `&mgr->anchor_self` as owner |
-| 0x58 | `entry_head` | ptr | first `CNapiPingEntry` (also walked by `[orig: Server_SendPingMetricsToGate @ 0x511BF0]`) |
-| 0x5C | `entry_tail` | ptr | (single witness; structurally paired) |
-| 0x60 | `entry_count` | int | guards metrics emit |
-| 0x64 | `callback_ctx` | ptr | `CNapiGateManager *` in practice |
-| 0x68 | `callback_event` | fn ptr | fires on entry start AND done; set to `sub_63BC60` |
-| 0x6C | `add_jitter_flag` | u8 | fudges RTT by `rand()%15` in `[orig: CNapiNPConnection_HandlePingResponse @ 0x62FC20]` (single witness) |
-| 0x70 | `sleep_ms` | int | thread loop sleep; default 5, clamped to 1000 |
-| 0x74 | dead pad | 172 | beyond the real allocation |
-
-Per-entry tick logic: `[orig: CNapiPingEntry_ProcessTick @ 0x62F900]` retries after the
-response timeout, gives up after `max_retries`, and throttles sends to one per
-`send_throttle_ms`. Stale `sub_` names identified: `sub_62FE50` = `NapiPingManager_Start`,
-`sub_62FD10` = `NapiPingManager_Pump` (100 ms throttle), `sub_62FE10` =
-`NapiPingManager_DestroyEntries`.
-
-### 6.7 `CNapiGateManager` (304 B; methods 0x4ce6b0-0x637b30; 14/14 typed)
-
-| Offset | Field | Type | Notes |
-|---|---|---|---|
-| 0 | `gate_type` | int | set in InitDefaults from arg |
-| 4 | `gate_state` | int | pre-connect cleanup state {−9, −8, −2, −1, 1, 2} |
-| 8 | `hostname` | char[24] | default `"gs.novaworld.net"` |
-| 32 | `conn_state` | int | state machine [−8..3] in SetState |
-| 36 | `state2_enter_tick` | int | GetTickCount at state→2 |
-| 40 | `state2_exit_tick` | int | GetTickCount at state 2→other |
-| 44 | `state2_duration_ms` | int | |
-| 48 | `field_30` | int | semantics unclear (response state / buffer metadata?) |
-| 52 | `response_buffer` | ptr | freed when state→0 |
-| 56-68 | `field_38/3C/40/44` | 4×int | semantics unclear |
-| 72 | `port` | int | default **7597** |
-| 76 | `protocol` | char[64] | default **`"jop:cus2"`** (retail JO gate-probe tag; jodemo uses `jopd:cus4`) |
-| 140 | pad | 164 | embedded NapiThread + NapiMutex (type when those are declared) |
-
-Size confirmed by the constructor's 0x130 memset. The struct literally hard-codes the
-retail gate-probe identity.
-
-### 6.8 `ItemDef` health fields (net-spawn relevant)
-
-> The full 2780-byte `ItemDef` layout, the `type`/`attrib`/`attrib2` enums, and
-> the complete `ItemDef → GamePlayerEntity` copy table now live in
-> [`../world/itemdef-re.md`](../world/itemdef-re.md) (D-ITEMDEF-n). The two
-> health fields below are the net-spawn-relevant slice.
-
-The 2780-byte `ItemDef` got two fields lifted out of `pad_17C` during the spawn
-investigation:
-
-| Offset | Field | Flows to |
-|---|---|---|
-| 0x17C | `healthMax` (i16) | `entity[+286]` on creation |
-| 0x17E | `armorMax` (i16) | `entity[+288]` |
-
-Witness chain: `[orig: Entity_InitFromItemDef @ 0x49e550]` copies both on entity creation;
-`[orig: Player_BuildTag0CInputBody @ 0x42a550]` refuses to serialize player input while
-`entity[+286] == 0`; `[orig: Entity_KillByNetId @ 0x43dc10]` and
-`[orig: AI_CheckVehicleStuckState @ 0x465480]` clear it on death/stuck;
-`[orig: Entity_CalcAverageGroundHeight @ 0x45733f]` uses `<= 0` as a skip-dead guard. The AI
-class flag relevant to §5.6 is `ItemDef[+84] & 0x100000`. Open ItemDef follow-ups: `+0x138` →
-`entity[+456]` (post-physics handler / model ptr?), `+0x148` init-callback fn ptr (with
-recursion guard vs `Entity_InitFromItemDef` itself), `+0x158` → `entity[+452]`, 28 unknown
-bytes after `armorMax`.
-
-### 6.9 `CAdminServer` — remote admin/RCON console + the authoritative server-state field map
-
-`CAdminServer_*` (30 methods, `0x402bf0`–`0x406f50`) is the original engine's **remote
-admin/RCON server**: a TCP listener (`[orig: CAdminServer_Listen @ 0x406e00]` →
-`AcceptConnection @0x405580` → `HandleLogin @0x405870`) that parses text commands
-(`[orig: CAdminServer_DispatchCommand @ 0x406720]`) and reads/writes live server state.
-It is **not** the in-match game-state owner (that is the listen-server host, §5.0/§5.2a) —
-but because its `SET`/`STATUS`/`GET` verbs read and write the *same* globals the host
-advertises and the config save mirrors, it is the single best **enumeration** of what
-"server state" the engine actually keeps. Use it as the spec for our consolidated
-`GameConfig` + authoritative server state (faithful-port target; ADR 0013).
-
-**Settable config — `[orig: CAdminServer_HandleSetCommand @ 0x405a60]`.** Each `SET <key>
-<val>` writes a **runtime global** AND a **persisted shadow** (`dword_2550xxx`, flushed by
-`[orig: Game_SaveConfig @ 0x54c490]`); the rule *flags* pack into one bitfield
-`g_rules_flags @ 0x24D1E34` (shadow `0x2550A04`). On a name/password change the host
-recomputes the wire-advertised `np_protocol->server_flags = game_settings.game_type` and
-`build_flags = [orig: CNapiServerConfig_BuildFlags @ 0x4c4dc0]` (§6.5). Identity strings
-route into `g_napi_np_ctx.game_settings` (§6.4) via `CAITask_SetName @0x402bd0` /
-`CAdminServer_SetSidePassword @0x402bf0`.
-
-| `SET` key | runtime global | notes |
-|---|---|---|
-| `ServerName` | `g_ServerName @ 0x2550A5D` (32 B) | also → `np_protocol->nstmout_path` (advertised name) |
-| `ServerPassword` | `g_ServerPassword @ 0x2550A08` (17 B) | empty arg clears; → `game_settings` |
-| `SideAPassword` / `SideBPassword` | `g_SideAPassword @ 0x2550A3B` / `g_SideBPassword @ 0x2550A4C` (17 B) | per-side join gate (§3 reject 19/20) |
-| `GameTime` | `g_respawn_time @ 0x24D2140` | also sets `dword_24C1958 = 3720 * val` (frame budget) |
-| `KOTHLimit` | `g_time_limit_minutes @ 0x24D2144` | |
-| `KillLimit` | `g_score_limit @ 0x24D2134` | **name/global swap**: `KillLimit`→`score_limit` |
-| `MaxScore` | `g_kill_limit @ 0x24D2138` | **name/global swap**: `MaxScore`→`kill_limit` |
-| `MaxFriendlyKills` | `g_max_friendly_kills @ 0x24D2244` | |
-| `StartDelay` | `g_StartDelay @ 0x24D2160` | |
-| `AutoBalanceOnRecycle` | `g_autobalance_enabled @ 0x24D2190` | |
-| `PuntVote`/`VotePercent`/`VoteNumPlayersReq` | `g_votekick_enabled @ 0x24D226C` / `g_votekick_percent @ 0x24D2274` (float) / `g_votekick_min_players @ 0x24D2270` | |
-| `ChangeTeamInterval`/`Penalty`/`Delay` | `0x24D2280` / `0x24D2284` / `g_capture_duration @ 0x24D2248` | |
-| `DoMinPingCheck`/`MinPing`/`DoMaxPingCheck`/`MaxPing` | `0x24D21B0`/`0x24D21AC`/`0x24D21B8`/`0x24D21B4` | |
-| `FatBullets`/`OneShotKill`/`ArmoryTimer` | `0x24D21A0`/`0x24D219C`/`g_ArmoryTimer @ 0x25510F0` | |
-| `Tracers` | `g_rules_flags & 0x1` (inverted) | flag bit |
-| `ChangeTeam` | `g_rules_flags & 0x4` | flag bit |
-| `FriendlyFire` | `g_rules_flags & 0x200` (inverted) | flag bit |
-| `FriendlyTags` | `g_rules_flags & 0x400` (inverted) | flag bit |
-| `TeamTriggerClaymore` | `g_rules_flags & 0x8000` | flag bit |
-
-**Live state — `[orig: CAdminServer_HandleStatus @ 0x402e30]`.** The status read enumerates
-the *runtime* server state, and is load-bearing for the "pools / entities / bookkeeping"
-model: the **roster is the player-entity slot array itself**, not a connection-side cache.
-`STATUS` walks `capacity @ 0x24C0CA4` slots from `g_player_slots @ 0x24C0CA8` (stride
-`0x18E88` bytes), and for each active slot reads name/team/class/kills/deaths/ping **off the
-entity** (`name @ entity-32`, `slot# @ entity-13 dwords`, `team @ entity+344`, `class`,
-kills/deaths via `[orig: CRenderState_GetFieldByIndex @ 0x52d7d0]` fields 6/4, ping). Plus
-the session header: active server name `0x24D1FA4`, uptime `[orig: CSessionTimer @ 0x24E3E88]`,
-TOD `Env_CurTimeFixed24`, current map `g_map_file_name @ 0x24D1F3E`, `g_GameType @ 0x24D2128`,
-and the mission-rotation queue `g_entity_action_queue @ 0xC86FDC` (current/next/one-shot/
-flipped/2x flags) against `missionListOut @ 0x2551118` (stride 4584).
-
-The status read is byte-precise about *where* each roster field lives — witnessed at the
-`sprintf` @0x403182 that formats one player line off `renderState` (the per-slot entity):
-`name @ entity-32` (`%-16s`), `slot# @ *(entity-13 dwords)`, **`team @ *((uint8_t*)entity + 344)`**,
-`class @ entity[22437]`, `deaths/kills` via `[orig: CRenderState_GetFieldByIndex @0x52d7d0]`
-fields 4/6, `ping @ entity[23582]`. The session header reads `g_GameType @0x24D2128` (via
-`get_game_type_abbreviation @0x520fd0`), so STATUS, the S2C 0x08 block, and the S2C 0x7B body
-all read the SAME game-type global (see the witness note below).
-
-**Witness — one `g_GameType`, one `g_server_name_str`, one BuildFlags copy.** The reimpl had
-split each of these into multiple diverging copies; IDA shows the wire serializers read one
-global each:
-- **`g_GameType @0x24D2128`** is read by BOTH `[orig: ServerConfig_SerializeToPacket @0x505bd0]`
-  (the S2C 0x08 block, `dword[3]` @0x505c2b) AND `[orig: NapiNPMsg_0x7B_BuildPayload @0x507740]`
-  (the S2C 0x7B `gametype` u32 @0x5078ce and its title-selection gate `(g_GameType & 0xFFFDFFFF)
-  == 0x10020` @0x507822) AND STATUS above. `[orig: CNapiServerConfig_BuildFlags @0x4c4dc0]` reads
-  a SEPARATE `game_settings.game_type` copy (ctx+0xCC @0x4c4e3a) for its `& 0x10000` team-gate — a
-  snapshot of `g_GameType` set at session build, equal in a live session.
-- **`g_server_name_str @0x24D1FC4`** is read by BOTH `[orig: NetPacket_WriteServerNameAndMapFile
-  @0x505780]` (the S2C 0x2C) AND `NapiNPMsg_0x7B_BuildPayload` (the 0x7B serverName @0x5077f1);
-  `game_settings.server_name` (ctx+0xE68) is the distinct lobby/`nstmout_path` name.
-- The 0x08 block's other 9 dwords map to the standalone rule globals in wire order (`g_respawn_time
-  @0x24D2140`, `g_time_limit_minutes @0x24D2144`, `g_replay_enabled @0x24D2120`, **`g_GameType`**,
-  `g_max_team_lives @0x24D2130`, `g_score_limit @0x24D2134`, `g_respawn_timeout @0x24D214C`,
-  `g_StartDelay @0x24D2160`, `g_destroy_buildings @0x24D2164`, `g_death_messages @0x24D2168`), then
-  7 bytes (`byte_24D234C..byte_24D2360` + `dword_24D2110` low byte), then the BuildFlags dword.
-  **The five formerly-unnamed dwords were witnessed 2026-07-01** by tracing each to its
-  `Config_ParseSettingsLine @0x54f740` setting-name compare through `apply_session_settings_to_globals
-  @0x551500` (cfg global → live rule global): dword[2] = SET `replay` (cfg @0x2550B24),
-  dword[4] = SET `max_team_lives` (cfg @0x2550ABC), dword[6] = SET `timeout` (cfg @0x2550B34; read by
-  `GameEvent_PlayerDeath @0x516dd0` — the respawn timeout), dword[8] = SET `destroybuild` (cfg
-  @0x2550ACC; read by `Entity_ApplyWeaponDamage @0x4e6820`), dword[9] = SET `deathmes` (cfg
-  @0x2550AD0; read ×3 by `GameEvent_PlayerDeath`). The two BuildFlags inputs likewise:
-  `dword_2550A04` IS the mpattrib bitfield store (`ServerConfig_ApplyHostSetting @0x4a6000` maps SET
-  `TeamChoose` → bit 0x4 direct @0x4a63d9, `TeamFF` → 0x200 inverted, `FriendlyTag` → 0x400 inverted,
-  `ClaymorePref` → …), so the `|0x4` input = **TeamChoose**; `dword_2550CA4` = cfg
-  `mp_allowsniperscopezoom` (@0x550ac9; read by `WeaponSlot_InitFromDef @0x53ee70`) → `|0x10000`.
-  Reimpl `GameConfig` fields renamed accordingly (`replay_enabled`/`max_team_lives`/`respawn_timeout`/
-  `destroy_buildings`/`death_messages`/`team_choose`/`allow_sniper_scope_zoom`).
-
-**Consequence for the reimpl (D-NET-132, ADR 0013) — IMPLEMENTED:** team/class/slot/kills/deaths
-are derived from the authoritative pool-0 entity, so `NapiNPConnection` holds the entity *handle*
-(`link.owned_entity`) as the single binding and the §5.1 reply builders read team (@entity+344) and
-the wire handle THROUGH it from the live `world::EntityRegistry` — no per-connection reply cache.
-The pre-World reactive path (`bind_session_reply_player`, a World-less session-responder / test host)
-stamps `owned_entity` with the bare wire handle, so it resolves the same way (team defaults when no
-live entity backs the handle). `player_slot` (roster ORDER, not on the entity) + the echoed
-`player_name` stay on `conn.reply`. The former `ServerRules` + `NapiGameSettings` (§6.3/6.4) +
-`SessionReplyConfig` (§5.1) are merged into one `GameConfig` (`libs/npruntime/.../game_config.h`)
-mirroring the `SET` field set above, with the three diverging gametype copies collapsed onto the one
-`g_GameType`-role field; the persisted `dword_2550xxx` shadow + `g_rules_flags` packing are a
-config-file concern modeled only if we add cfg persistence.
-
-## 7. Landed architecture
-
-The design that shipped in PR #37, was reverted in PR #50, and is now landed on master.
-`web/` and `apps/novaworld_server/` are on master.
-
-- **One standalone C++ server binary, three listeners**: gate UDP :7597, HTTP :8080 (the
-  `/api/*` routes plus the bundled Vue web portal from `web/dist/`), NW UDP :64206. Shared
-  in-memory connection registry; SQLite state at `backend/data/state.db` (schema kept abstract
-  enough to swap libpq later). HTTP framework was decided as Drogon but implemented with Crow
-  + standalone Asio.
-- **Protocol code lives once** in Godot-free libs: `libs/novacrypto` (Layer 2 cipher),
-  `libs/napi` (Layer 2-3 framing/session/TLV), `libs/npwire` (the in-game wire codec, NWU
-  session framing, and capture/replay chain — extracted post-landing, ADR 0019), and
-  `libs/novaworld` (the matchmaking/service lib: Layer-4 PN browser/session message sets,
-  connection registry, and db wrapper). PN dispatch happens inside `libs/novaworld`; the
-  NovaWorld server routes `NOVAWORLDUDP` to lobby containers and
-  `JointOperations`/`JOINTOPERATIONS` to a World-less `libs/npruntime` session-responder ctx
-  (the experimental in-match `GameSession`/`GameServerRuntime` were retired at npruntime P8).
-- **Godot is the client only**: GDExtension binding under `godot/engine/network/`; servers are
-  pure C++ with no Godot dependency. A future Godot admin/stats viewer would talk to the
-  standalone server over HTTP, never be the server.
-- **Reference equivalence**: `libs/napi/tlv.h::NapiMessage` is byte-for-byte equivalent to the
-  Python reference container parser (`onnet/onnw/protocol/container_parser.py`); the wire
-  markers are those in §1. The authoritative dissector for opcode/message enumeration is
-  `novaworld_udp.lua`.
-- State at revert: gate + NW UDP + HTTP listeners, ServerAuth defaults matched to retail
-  captures (MI=0x113f, CR=1, NovaworldName="NWServer", 62-char SCRK, 60-char hex NWUID),
-  Layer-4 session dispatch, web portal build, DB migrations, and the Godot client demo were
-  done; the legacy `NW*.dll` HTTP routes (§2) followed; full retail end-to-end join (spawn
-  flow, §5) was still being chased.
-
-### 7.1 Client session state machine (ADR 0010, Phase 1)
-
-The client direction of the session flow is a Godot-free state machine,
-`libs/novaworld/client_session.{h,cpp}` — the mirror of `LobbySession`/
-`nw_udp_listener.cpp` with request and response inverted. The `NovaWorldClient`
-GDExtension binding (`godot/engine/network/`) is now a thin socket pump: the
-gate leg yields the NW UDP host:port, then `ClientSession` runs
-`HELLO → AUTH → {ClientConnected → ServerStartVerify → ClientRequestVerifyResult →
-ServerVerifyResult} → Verified`.
-
-Two client-direction parsers were added (inverses of the existing serializers):
-`parse_server_hello` (recovers the host key `HK` the client must echo) and
-`parse_server_auth` (recovers `CR`/`SK`/server `SCRK` + the CS/CU control
-fields). Phase 1 closed two stubs in the old binding: the hardcoded
-`send_session_join(/*server_hk=*/0)` (now echoes `ServerHello.HK` in
-`ClientAuth.HK`) and the empty `0x83` handler (now decodes the lobby stream and
-drives the verify handshake to `ServerVerifyResult`). The inner-stream crypto is
-symmetric: the client encrypts its `0x43` with its own `SCRK`, decrypts inbound
-`0x83` with the server's `SCRK`; outbound `session_id` = the server `SK`.
-
-Verified offline by `tests/novaworld/client_session_loopback_test.cpp`, which
-drives `ClientSession` against the real server-side parsers/builders +
-`LobbySession` in-process and asserts the `HK` echo and the
-`Verified`/`SessIdString` outcome. The HELLO and AUTH legs now **have** fresh
-IDA witnesses against real NW — the identity gates in `HandleClientHello @
-0x6213B0` (NW-S1) and `HandleClientJoin @ 0x62B750` plus the retail `0x42`
-builder `CNapiNPConnection_SendClientJoin @ 0x61fe20` (NW-S2, §8) — confirmed
-live: the client reaches `session_join`, and after NW-S2 the join carries the
-identity block real NW requires for `ServerAuth`. The verify framing is still
-inferred from the container set (§3). Live-smoke past AUTH and the host/join
-legs are ADR 0010 Phases 3-5.
-
 ### 5.57 The weapon.def loadout pipeline — AdmDef table, C2S 0x2F → S2C 0x5A derivation, ammo semantics (2026-07-02)
 
 **The "AdmDef" table IS the weapon-definition table** (the IDB's `AdmDef_*`/`AvatarDef_*` helpers
@@ -6309,6 +5860,700 @@ WriteZoneTimerValue@0x506E70 (0x6F), WriteSpawnWaveStatus@0x507490 (0x6E)}`;
 `g_spawn_wave_time_base/zone @ 0x24D224C/50`, `g_capture_speed_setting @ 0x24D2254`,
 `g_respawn_requires_team_dead @ 0x24D2260`. Entry comments on the 15 core functions.
 
+### 5.62 The FP weapon action FSM — weapon.def ACTION rows → the 12-state pump (2026-07-09)
+
+How the equipped weapon animates and sequences: the weapon.def ACTION rows bind into a
+per-weapon **12-slot action table** and one per-tick pump advances an action QUEUE on the
+equipped slot. Witnessed end to end this session (all anchored, Jointops.exe.kong.i64);
+ported as `libs/world/weapon_fsm.{h,cpp}` + the `NovaSimulation` slot pump + the
+GameWorld/LocalPlayerHost host wiring (PR #213 train). This is the runtime half the §5.16
+fire pipeline and §5.58 reload round-trip plug into.
+
+**The ACTION-row registry** [orig: `ActionDef_ParseScriptLine @ 0x4023c0`]. `action
+"<name>"` find-or-creates a global ActionDef pool entry named `<prefix>_<name>` (the
+prefix argument is the weapon's name; entry name at +122, `ActionDef_InitDefaults
+@ 0x4022b0` memsets the record — so **absent keys default to 0**, only an explicit
+`auto` writes the bake sentinel −1). Keys: `function` → +0 handler via
+`ActionFuncDef_FindByName @ 0x401040` (unknown name → the `ActionSlot_ExecuteAction
+@ 0x4020a0` placeholder + warn), `anim` → +58 (a literal `.adm` clip key, e.g.
+`anim_wpn_fire`), `delaystart` → +36 / `delay`/`delayend` → +40 (ticks; `auto` → −1),
+`soundset` → +8 / `soundsetend` → +12, `particle` → +16, `particleuserpoint` → +186,
+`dupsound` → +44/+48, `action_value` → +52, `ctrlreg` → +28 / `ctrlreginc` → +32,
+`texttoken` → +20. The function registry `g_actionFuncDefTable @ 0x829E58` (count
+@ 0x829F30 = 18, 12-byte rows `{name, fn, min_params}`): `null`, `wpn_std_null`,
+`wpn_std_{idle,emptyidle,fire,recoil,reload,empty,switchto,switchfrom,switchrank,
+scopeup,scopeup_map,scopedown,scopedown_map,switchfrom_map}`, `powerup_pickup`,
+`powerup_respawn`. Data sweep (JOX + REVX weapon.def corpora): only the NINE bare
+suffixes ship as ACTION names (never scopeup/scopedown/overheated), and FUNCTION only
+ever names `wpn_std_<own suffix>` — the `*_map` variants are unused by weapons.
+
+**The bind + bake** [orig: `Anim_InitActions @ 0x541fa0`]. After a weapon block parses,
+each of the 12 slots at `WeaponDef+0x2A4` binds by looking up `<weaponName>_<suffix>`
+against the suffix table `@ 0x830B90` — 12 `{suffix, defaultHandler}` pairs in id order:
+idle `@ 0x542920`, emptyidle `@ 0x542A20`, fire `@ 0x542B10`, recoil `@ 0x542DD0`,
+reload `@ 0x5430B0`, empty `@ 0x543180`, switchto `@ 0x5431D0`, switchfrom `@ 0x5433B0`,
+switchrank `@ 0x543500`, scopeup `@ 0x543290`, scopedown `@ 0x543320`, overheated →
+the idle handler. Missing rows become generated defaults; a null/placeholder handler
+takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
+`AnimMap_FindSlotByName @ 0x40cfa0`) and the −1 delays bake from the clip:
+`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` = ms × 62.5/1000 + 1 —
+the 62.5 t/s constant `flt_7C3B3C`), `delayend = ticks`, minus `delaystart` when
+`ticks > delaystart`; no anim/adm → −1 collapses to 0. Ends by playing global slot 241
+(`wpn_idle`) on the weapon's adm.
+
+**The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
+pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
+counter +0, clip u16 +0x10, rate/muzzle-flash tick +0x14, Def +0x20, owner +0x24,
+currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58 (i16),
+phase +0x5A, kickIntensity +0x5B, charge +0x5C, flags +0x5E (bit0 = the §5.16 net-fire
+pose latch, bit1 = FP), burstCounter +0x62. Phase protocol: a transition writes
+phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1(|0x40)→2 and
+**starts the action's clip on the equipped WeaponDef's own adm channel
+(`WeaponDef+0x174`, the FP viewmodel rig) — local player only** (CORRECTED 2026-07-09:
+the earlier "owner's animadm" reading; the 3P body's weapon layer is a separate
+producer, world-wac-ai-re.md §14.8)
+[orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the effect shims
+`@ 0x541860`/`@ 0x5419e0` write the same protocol and same play target — they differ
+only in muzzle/particle spawning, forked by `ActionSlot_ExecuteActionTick @ 0x541a70`
+on third person / vehicle-attack / remoteness]; `ActionSlot_FinishActivePhase
+@ 0x53f7b0(desc, slot, entity, next)` sets counter=delayEnd, nextAction=arg4, the
+ACTIVE→DONE kick bump (skipped for RELOAD), phase=4. Pump tail per tick: kick decay;
+overheat deny (heat > 0xFFFF converts a queued FIRE to EMPTY `@ 0x541046`); the IDLE
+reseed (`counter==0 && current==next==0 → counter = idle.ds+de` `@ 0x54135d`);
+`counter>0 → --counter, run handler`; at 0: the **rescope-after-reload** block
+(`current==4 && next==0 && local && g_rescopeAfterReload @ 0xB7647C →
+Player_ToggleWeaponScope` `@ 0x54139e`); then `current != next && phase ∈ {4,0}` →
+transition (prev=current unless current ∈ {6,7}, current=next, next=0(idle),
+counter=ds, phase=1, `word_B7C670=−1`, run the new handler; the phase==0x40 variant
+re-marks 0x40 after).
+
+**The handlers** (decisions, all witnessed): **idle** — LOOP; enter replays global 241
++ phase=4; empty mag → reserve>0 && `g_autoReloadEnabled @ 0x24D2118` →
+`WeaponSlot_RequestReload`, else next=EMPTYIDLE + one-shot unscope (local, clip
+capacity 1, `!(Flags & 0x20000000)`). **emptyidle** — LOOP on global 242; reserve>0 →
+RequestReload (no auto-reload gate); else hold. **fire** — phase-1 recheck
+`WeaponSlot_CanFire @ 0x541ba0`: busy weapon-child, underwater ban, and the clip leg
+which on empty **writes nextAction itself** — 3 (RECOIL → the auto-reload arbiter)
+when the class reserve has rounds else 1 (EMPTYIDLE) `@ 0x541c8b` — the abort adopts
+it (`Finish(next=[esi+0x30])` read AFTER the call `@ 0x542b50`); the shot: the 3P body
+weapon-channel stamps 62 `knife_attack` / 63 `grenade_attack` into `entity+0x2C8`
+(keyed on the AdmDef kind dword `@ 0x24E8088`; rifles stamp nothing —
+world-wac-ai-re.md §14.8.4 `@ 0x542bcb`), `Entity_CalcWeaponFirePosition @ 0x4dc750`,
+`Entity_FireWeaponAndSendPacket @ 0x42bd80` (§5.16), `consume_weapon_ammo @ 0x540850`,
+3-round burst (Flags&0x20) cycling 0→2→1→0, **next=RECOIL unconditional `@ 0x542c9e`**,
+kick += recoil.ds+de+counter+10 cap 20. **recoil** — THE ARBITER: at clip end
+(counter==0) phase=4, heat stamp (def+876/880 → +0x14, clamp 73728); local decision:
+rounds → next = burst ? FIRE : IDLE; else reserve ≥ clipSize×unitsPerRound &&
+auto-reload → RELOAD `@ 0x54301d`; else EMPTYIDLE + one-shot unscope + the def+0x168
+auto-switch (`Player_SwitchToWeaponByHandle(65×def+0x164)` `@ 0x54307c`); the
+held-trigger refire re-queues input binding 149 `@ 0x542e9d`. **reload** — first tick
+(phase bit0, no 0x80) sends C2S 0x25 (§5.58), phase|=0x80 (transient — the first shim
+tick overwrites 2), stashes the scope (`g_rescopeAfterReload = g_weaponScopeActive`
+unless Flags&0x40000) + unscopes; clip end → Finish(next=IDLE `push 0 @ 0x543169`),
+burst=0. **empty** — dry-click one-shot → EMPTYIDLE. **switchto/switchfrom** — the
+±30/tick switchTimer machines (−900 seed ≈ 0.48 s); switchfrom swaps
+`EquippedSlot = g_pendingWeaponSlot @ 0xB75FD0` and queues SWITCHTO on the new slot
+(`WeaponSlot_TryQueueSwitchTo @ 0x53f140`); instant on Flags&0x80. **switchrank** —
+in-place swap (fire-mode/rank). **scopeup/scopedown** — timed one-shots (zero-length
+on every shipped def; the ADS easing is the camera interp).
+
+**The requests** (the input dispatch, `Input_HandleActionBinding_0 @ 0x4e0420`):
+fire = `WeaponSlot_RequestFire @ 0x53efa0` (ex `sub_53EFA0`; via
+`Player_RequestPrimaryFire @ 0x5414c0`, ex the kong-misnamed
+`Terrain_UpdateColorInterpolation`) — AUTO (Flags&0x100): current {0,3,9,10}→FIRE,
+{1}→EMPTY, {2}→deferred re-queue; SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
+(Flags&0x80000000) hold-release via `g_fireChargeStartTick @ 0xB76800` (≥31 ticks
+scales the charge, binding 150). reload = `WeaponSlot_RequestReload @ 0x53f110`
+(phase sign clear && queued next ∈ {0,1,11}); the key case 0xD3 pre-gates clip ≠
+clipsize && reserve>0. ADS = case 6 (current ∉ {4,7}) → `Player_ToggleWeaponScope
+@ 0x4df0c0`: gates def Flags&3 + `g_fpCameraInterp.activeFlag`; engage sets
+`g_scopeEngaged @ 0x82CE94` (the §5.41 `g_weaponScopeActive` mirror settles later),
+seat-flag C2S 0x1D/169, camera interp (15 steps; 7 for `Field0C & 0x200`) toward
+`AltCamOffset` (the §5.40 tpos), `WeaponSlot_TryQueueScopeUp @ 0x53f050` (ex
+"TryQueueReload" — queues 9, phase-gated {0,4}); disengage mirrors down
+(`..ScopeDown @ 0x53f080`, ex "TryQueueUnload" — queues 10), FOV back to 80.0; the
+zoom FOV (Flags&2): `g_cameraFovDeg @ 0x26C6848 = 80.0 / Player_GetClampedWeaponElevation`
+(16.16) — the weapon.def `scope_max_mag` magnification.
+
+**Port** (PR #213 train). `libs/world/weapon_fsm.{h,cpp}`: the bake
+(`weapon_fsm_bake`, def-agnostic rows per ADR 0020 + a clip-seconds callback), the
+pump + all 12 handlers as structural translations (ctest `weapon_fsm`: bake pins,
+fire→recoil chain, auto cadence, semi edge, burst-3, empty paths, auto-reload +
+§5.58 refill math, scope stash/rescope, request gates, non-local no-decision).
+`libs/def` parses `scope_max_mag` (+ the `whileswimming` flag-table length fixed:
+13, not 14 — the token never matched); `NovaWeaponDatabase` surfaces
+flags/scope_max_mag/actions; `NovaSimulation` pumps the LOCAL player's slot once per
+logic tick after the world advances (all four paths) and exposes typed-record state
+(serial counters); `GameWorld` bakes from the resolved weapon dict + the loaded
+viewmodel's clip lengths; `LocalPlayerHost` feeds LMB/R/RMB through the world-tick
+input path, plays FSM clips on BOTH viewmodel parts (restart via
+`set_animation_time(0)`), and realizes ADS: the eased pos→tpos view bias
+(15-tick fraction), the main-camera FOV 80h → 80/mag h→v through the live aspect,
+reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_probe
+`NOVA_VM_FSM=1`, JOX 05TR): 6-shot auto burst (clip 30→24, ~9-tick cadence from the
+recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
+mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
+
+**Divergences** (ledger D-WPN-1..9): the FUNCTION registry unported (std-only in all
+shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
+busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
+(`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
+weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
+ammo seed clipsize/startrounds (D-WPN-7); FSM↔net uplink unwired (C2S 0x06/0x25 from
+events, D-WPN-8); ADS residuals — SIGHTS overlay draw, unscope-on-move site, zoom-level
+keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9).
+
+**IDB (this session).** Renamed: `WeaponSlot_RequestFire @ 0x53efa0`,
+`Player_RequestPrimaryFire @ 0x5414c0`, `WeaponSlot_TryQueueScopeUp @ 0x53f050`,
+`WeaponSlot_TryQueueScopeDown @ 0x53f080`, `g_pendingWeaponSlot @ 0xB75FD0`,
+`g_rescopeAfterReload @ 0xB7647C`, `g_fireChargeStartTick @ 0xB76800`,
+`g_autoReloadEnabled @ 0x24D2118`, `g_actionFuncDefTable @ 0x829E58` (+count).
+Comments at the pump, bake, and request sites; idb_save run.
+
+**The weapon-switch chain (same session, closes the SWITCHFROM/pending follow-up).**
+`Player_SwitchToWeaponByHandle @ 0x4e0170` (handle = category×65 + rank): stance gate
+(parentSlot ∉ {2,3,5}), clears `g_fireChargeStartTick`, then scans the category's 65
+slots in the 100-B `weaponSlotArrayBase @ 0xB75FD4` pool from the def's own rank —
+eligibility = def+932 type 1/2 or `calculate_kill_score @ 0x5407e0` (the §5.41
+eligibility reuse) and `!(def+12 & 1)`; a full wrap plays the deny sound. The pick
+lands in `Player_MountWeaponSlot @ 0x4dfa40`: **writes `g_pendingWeaponSlot = slot`
+`@ 0x4dfb16`**, then queues the FSM — same category → `WeaponSlot_TryQueueSwitchRank
+@ 0x53f1c0` (ex `sub_53F1C0`: phase {0,4,0x40} → counter=0, next=8), cross category →
+`WeaponSlot_ForceQueueSwitchFrom @ 0x53f170` (ex `sub_53F170`: phase {0,4,0x40} →
+HARD RESET counter=0/burst=0/switchTimer=0/current=0/prev=0, next=7; SwitchFrom's
+timer expiry then swaps `EquippedSlot` from the pending global and queues SWITCHTO on
+the NEW slot). Mount-scoped weapons (`Flags & 0x20000000`) auto-engage the scope
+(`g_weaponScopeActive = 1` + `dword_B76808` zoom stash); a cross-category switch
+resets the scope + FOV 80. View biases zeroed, `Player_UpdateFirstPersonCamera` runs
+immediately, seat-flag 0x40000 → C2S 0x1D/169, scoped-capable slots re-arm the camera
+interp. IDB: both queue helpers renamed + commented; saved.
+
+**Open follow-ups:** who queues OVERHEATED(11);
+the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
+`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq.
+
+## 6. Struct reference
+
+All structs typed in the IDB during the 2026-04-26 per-class typing pass (Stage 5 of the
+decomp-quality plan) and the follow-on refinements. Witness rule: every named field has ≥2
+independent decompile witnesses unless flagged. One Kong artifact to know: the
+`CNapiSession_*` name prefix is **heterogeneous** (it covers both particle/effect code and
+message-queue code) — it is not a real class.
+
+### 6.1 `NapiNPMsgInfo` / `NapiNPOpcodeInfo` (16 B each)
+
+| Struct | Layout | Notes |
+|---|---|---|
+| `NapiNPMsgInfo` | `{u32 msg_id, u32 magic, handler, handler2}` | sentinel = `magic==0`; `handler2` always 0 in observed entries |
+| `NapiNPOpcodeInfo` | `{u32 index, u32 opcode, u32 magic, handler}` | magic always `0x7C08C6` (= addr of `font_name`; possible string pointer, see §5.0); sentinel `index=0xFFFFFFFF` |
+
+### 6.2 `CNapiNetwork_*` / `CNapiServer*` method family (42 methods; receiver = `NapiNPServerCtx`)
+
+The NAPI "CNapiNetwork" class methods (range 0x4a8040-0x4ca4a0) all operate on the game
+singleton `g_napi_np_ctx` (§6.3). **There is no separate `CNapiNetwork` struct.** An undersized
+4432-B duplicate type by that name existed in the IDB and was **deleted 2026-06-27** (grill below);
+the single canonical receiver is `NapiNPServerCtx` (§6.3). All `__thiscall` methods are now typed
+`(NapiNPServerCtx *this)`; the callbacks are `__cdecl` with the ctx as the first arg.
+
+Roster (retail `Jointops.exe`):
+
+- **Lifecycle:** `_Init @0x4ca4a0` (list heads + manager pointers + settings; ping 3000/2/10, §6.6),
+  `_ClearState @0x4c8690` (zeroes the whole **0x1470 = 5232 B** object + re-inits
+  `game_settings`/`net_config`; was Kong `CNapiServerInfo_Init` — a misnomer, it resets the ctx not a
+  sub-struct), `_Shutdown @0x4ca440`.
+- **Transport:** `_SetTransportMode @0x4c8750` (writes `socket_state` +0x54), `_OpenTransportSocket
+  @0x4c6a40` (opens a UDP socket only for modes 2/3/4), `_TearDownSocket @0x4c4c90`, `_SendUDPPacket
+  @0x4c4d30`, `_GetLocalAddress @0x4c4f60` (static `__stdcall`, no `this`).
+- **Pump** (thin wrappers over `NapiNP*_Pump`; flag bitmask decoded in-IDB): `_PumpManagerReceive
+  @0x4c4d10` (mgr flag 4 = receive pass), `_PumpServerProtocolRecv @0x4c4ee0` (flags 25),
+  `_PumpServerProtocolSend @0x4c4f00` (737), `_PumpClientProtocolRecv @0x4c4fe0` (26),
+  `_PumpClientProtocolSend @0x4c5000` (738), `_PumpTransportAndProtocol @0x4c6e00`, `_PumpAndCheckState
+  @0x4c6e80`, `_DrainProtocolTimers @0x4c6de0`, `_DrainPendingDataTransfers @0x4c6e50`. Kong named the
+  four protocol pumps `PumpProtocolType<flags>`; renamed recv/send × server/client per the
+  `[orig: NapiNPProtocol_Pump @ 0x62a650]` decode (bit 0x8 = `PumpRecvQueues`, 0x3F0 = per-conn) and
+  `[orig: CNapiNPConnection_PumpFlags @ 0x629780]` (0x20 = enumerator-send, 0x40 = state machine; low
+  bit 0x1 selects server-role connections, 0x2 client-role), corroborated by the caller split
+  (`Server_*` vs `Client_*`/`NetClient_*`).
+- **Session/state:** `_IsSessionActive @0x4c6f00`, `_GetSessionUptime @0x4c6ed0`,
+  `_UpdateSessionTimestamps @0x4c6f20`, `_RandomizeTimeout @0x4c4d80` (writes `randomized_timeout_ms`
+  +0x1194, value 1000-9999 ms — **retail addr; the `0x4a6d50` cited in `libs/napi` & `libs/novaworld`
+  is the jodemo image, a different binary**), `_UpdateDedicatedServerFlag @0x4c6d50`, `_FindPlayerByName
+  @0x4c69e0`, `_ParseServerVarList @0x4c4310`, `_SetNetLogFile @0x4c69a0`, `_QueueReliableMessage
+  @0x4c4fa0`, `_GetDisconnectReasonString @0x4c7000` (fills `disconnect_reason_buf` +0x1270),
+  `_DisconnectActiveConnection @0x4c9140` (builds a `NapiNPDisconnectEvent` on `napi_conn` then
+  `[orig: CNapiNPConnection_RequestDisconnect @ 0x61e0f0]`; was Kong `SendPunkBusterChat` — a misnomer,
+  there is no chat path, only a disconnect-with-reason).
+- **Callbacks (`__cdecl`, ctx as first arg):** `_ValidateJoinRequest @0x4c61b0`, `_OnConnectedToServer
+  @0x4c62e0` (writes `active_connection_id` +0x1190), `_OnDisconnectedFromServer @0x4c63d0` (writes
+  `disconnect_event_buf`), `_CheckPlayerTimeouts @0x4c8ad0`. `_OnSessionDiscovered @0x4c8470` and
+  `_OnSessionRemoved @0x4c68c0` take a session-list head (not the ctx); `_QueueEventEntry @0x4c6890`
+  takes a player object.
+- **Server subclass:** `CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0`,
+  `CNapiServer_DisconnectPendingSpawnBans @0x4c9290`, `CNapiServer_OnPlayerDisconnected @0x4c94d0`
+  (`__cdecl`), `CNapiServerConfig_BuildFlags @0x4c4dc0`. `CNapiServerInfo_SerializeToSession @0x4c3650`
+  and `CNapiServerInfo_ClearAllStrings @0x4cad10` genuinely operate on a separate ~520-B server-info
+  struct (fields BT/VN/BN/DB/.../PBC/NWUVERSION), not the ctx — names retained.
+- **Not a network method:** `0x4a8040` (Kong `CNapiNetwork_GetConnectionParams`) reads display
+  width/height/AA-level from the video-config object `off_840960`; sole caller `Game_InitSubsystems`
+  right after `Renderer_SetDisplayModeWithFallback`. Renamed `VideoConfig_GetResolution` and removed
+  from the family.
+
+### 6.3 `NapiNPServerCtx` — `g_napi_np_ctx @ 0xB5CBC8` (5232 B = 0x1470, 473 xrefs)
+
+`NapiNPServerCtx` is the **single canonical type** for this object and the receiver of the entire
+`CNapiNetwork_*`/`CNapiServer*` family (§6.2). The previously-documented separate `CNapiNetwork`
+struct was an undersized (4432 B) duplicate of the same layout and was deleted from the IDB
+2026-06-27. The **true size is 0x1470 = 5232 B**, witnessed by `[orig: CNapiNetwork_ClearState @
+0x4c8690]` doing `memset(&g_napi_np_ctx, 0, 0x1470)` and by `[orig: CNapiServer_OnPlayerDisconnected
+@ 0x4c94d0]` writing at +0x11A8; the struct was grown to 5232 and the four interior addresses that
+IDA had auto-named as standalone globals (0xB5DD70/74, 0xB5DDB4, 0xB5DDB8) were folded back in as
+ctx fields. Applied layout:
+
+| Offset | Field | Size | Notes |
+|---|---|---|---|
+| 0x000 | `list_heads[5]` | 80 | `+0x04` = enumerated session-list head (NovaWorld + LAN); `+0x24` = player connection-list head (PCID dup-check walks it in `[orig: Server_ValidatePlayerJoinRequest @ 0x512100]`) |
+| 0x050 | `transport_mode` | 4 | 1=NovaWorld, 2=LAN (UI enumeration branches ==1 → SetTransportMode(4), ==2 → (2)); NovaWorld-only AppId/JoinTicket gates check ==1 |
+| 0x054 | `socket_state` | 4 | |
+| 0x058 | `is_in_session` | 4 | non-zero whenever an MP session is in progress; gates `[orig: Server_PumpNetworkTransport @ 0x4FD960]`, 14 branches of `[orig: Server_TickUpdate @ 0x51D7E0]`, 11 of `[orig: Game_StartMission @ 0x524360]`, the whole body of `[orig: NetClient_FlushAndSync @ 0x424710]` |
+| 0x05C | `connection_mode` | 4 | host/client mode written by `[orig: CGameSession_SetConnectionMode @ 0x4c49f0]` (0=none, 1=host, 2=client, 3=host+client); single player uses 3 (§5.0). Was `field_5C` |
+| 0x060 | `is_authority` | 4 | non-zero on host/server (preserved Kong name); set by `SetConnectionMode` = is_host bit of `connection_mode` (§5.0) |
+| 0x064 | `is_mp_session_peer` | 4 | renamed 2026-04-26 from `is_dedicated_server` (see below); set by `SetConnectionMode` = is_client bit of `connection_mode` (mode 3 → 1, §5.0) |
+| 0x068 | pad | 3372 | NAPI internals |
+| 0xD94 | `disconnect_event_buf` | 184 | |
+| 0xE4C-0xE54 | `field_E4C/E50/E54` | 12 | |
+| 0xE58 | `np_manager` | 4 | `NapiNPManager *` |
+| 0xE5C | `np_protocol` | 4 | `NapiNPProtocol *` (was Kong `player_list_owner`); `[orig: NapiNPServer_SendFiltered @ 0x4C87E0]` derefs its connection list at +0xEBC |
+| 0xE60 | `field_E60` | 4 | protocol pointer cached for the client frame path (`[orig: Client_ProcessNetworkFrame @ 0x42C180]`); never proven to differ from `np_protocol` |
+| 0xE64 | `ping_manager` | 4 | `NapiPingManager *` (global alias `0xB5DA2C`) |
+| 0xE68 | `game_settings` | 216 | inline `NapiGameSettings` (§6.4); side passwords at absolute 0xEA8/0xEC8 drive join-reject codes 19/20 |
+| 0xF40 | `server_info_buf` | 72 | `+0xF3C` region note: a PunkBuster handle/flag is read at 0xF3C (single witness, `Server_TickUpdate` → `PBServer_Shutdown`) |
+| 0xF88 | `net_config` | 520 | |
+| 0x1190 | `active_connection_id` | 4 | set on connect from the connection's id (`OnConnectedToServer`), cleared on disconnect. Was `field_1190` |
+| 0x1194 | `randomized_timeout_ms` | 4 | 1000-9999 ms, written by `[orig: CNapiNetwork_RandomizeTimeout @ 0x4c4d80]`. Was pad |
+| 0x1198 | `send_mask` | 4 | bitmask used by `NapiNPServer_SendFiltered` (preserved) |
+| 0x119C | `send_target_player` | 4 | preserved |
+| 0x11A0 | `send_target_slot` | 4 | preserved (was `send_target_state`) |
+| 0x11A4 | `send_filter_416` | 4 | preserved |
+| 0x11A8 | `field_11A8` | 4 | cleared (=0) on player disconnect by `CNapiServer_OnPlayerDisconnected`; semantics unconfirmed |
+| 0x11AC | `field_11AC` / `field_11EC` / `field_11F0` | 196 | interior fields (formerly auto-named globals); not yet individually witnessed |
+| 0x1270 | `disconnect_reason_buf` | 512 | localized disconnect/error string built by `[orig: CNapiNetwork_GetDisconnectReasonString @ 0x4c7000]`; ends at 0x1470 |
+
+`is_mp_session_peer` rename rationale (user-approved, applied to the IDB): the literal
+"is dedicated server" reading is contradicted by three witnesses —
+`[orig: CNapiGameSession_BuildHostVarLists @ 0x4D0B50]` publishes the lobby key `Dedicated=0`
+when the flag is set (inverted); `[orig: Chat_SendTeamMessage @ 0x49A900]` takes the
+client-style reliable-uplink branch when set and the host broadcast branch on `is_authority`
+(a real dedi host would never take the first); `[orig: Game_StartMission @ 0x524360]` gates
+both polarities in ways only consistent with "peer in an MP session".
+`[orig: Game_ParseCommandLineAndInit @ 0x4A7310]` never sets it from `/SERVEONLY`.
+
+Deliberately not applied from the maximal field map: inline `gs_*` password names at the
+singleton level (the agent's inline arithmetic was off by one 32-byte slot; the authoritative
+offsets are the `NapiGameSettings` ones in §6.4 — side A at settings+0x40 = absolute 0xEA8,
+side B at +0x60 = 0xEC8, both directly witnessed in `Server_ValidatePlayerJoinRequest`), a
+separate `active_protocol` name for 0xE60, and `pb_server_handle` at 0xF3C (single witness).
+Admin SET-command password buffers live in a game-state struct reached through `np_protocol`,
+not inline in the singleton.
+
+### 6.4 `NapiGameSettings` (216 B; inline at `CNapiNetwork+3688` / `g_napi_np_ctx+0xE68`)
+
+10 of 11 fields named, all ≥2 witnesses. Strongest source:
+`[orig: ServerConfig_ApplyHostSetting @ 0x4a6000]` maps host-config keys to exactly the
+globals that `[orig: CNapiGameSession_BuildAndCreateSession @ 0x5694d0]` copies into this
+struct. Other witnesses: `[orig: SinglePlayer_StartMission @ 0x561af0]` (default init),
+`[orig: Server_ValidatePlayerJoinRequest @ 0x512100]` + `[orig: NapiNPServerMsg_0x001 @
+0x512ed0]` (validation sink), `[orig: Game_SaveConfig @ 0x54c490]` (game.cfg writer),
+`[orig: UI_PopulateHostSettingsFromConfig @ 0x555fe0]` (host-screen widget labels),
+`[orig: CNapiGameSession_BuildHostVarLists @ 0x4d0b50]` (lobby publish),
+`[orig: CAdminServer_HandleSetCommand @ 0x405a60]` (admin SET).
+
+| Offset | Field | Type | Config key / semantics |
+|---|---|---|---|
+| 0x00 | `server_name` | char[32] | lobby-visible `"ServerName"`; saved as `game_name`; UI widget `GAME_NAME` |
+| 0x20 | `server_password` | char[32] | `MPHostGamePassword` / admin SET `ServerPassword`; widget `SERVER_PASSWORD` |
+| 0x40 | `side_a_password` | char[32] | `MPHostSidePasswordA`; widget `BLUE_PW`; mismatch → join-reject code 19 |
+| 0x60 | `side_b_password` | char[32] | `MPHostSidePasswordB`; widget `RED_PW`; mismatch → join-reject code 20 |
+| 0x80 | `internet_address` | char[64] | connect-target hostname/IP, default `"0.0.0.0"`; resolved via `Napi_ResolveAddress` in transport mode 3 |
+| 0xC0 | `max_players` | u32 | `MaxPlayers`, clamped 1..65 |
+| 0xC4 | `use_lineup_queue` | u32 | `UseLineUpQueue` |
+| 0xC8 | `lineup_queue_size` | u32 | `LineUpQueueSize` |
+| 0xCC | `game_type` | u32 | `mp_gametype` enum (the mission entry's gametype dword); discrete values not enumerated |
+| 0xD0 | `mp_attributes` | u32 | `mpattrib` bitmask — observed bits: 0x001 NoTracers, 0x004 TeamChoose, 0x008 FFWarning-suppress, 0x200 NoFriendlyFire, 0x400 NoFriendlyTag, 0x8000 ClaymorePref; `[orig: CNapiServerConfig_BuildFlags @ 0x4c4dc0]` re-derives a public flag word |
+| 0xD4 | `_pad_0xD4` | 4 | actually the `sv_punkbuster` server flag carried into the session blob (single witness pair; rename to `sv_punkbuster_enabled` once a second witness lands; see `[orig: Config_SetPunkBusterServerEnabled @ 0x4d94c0]`) |
+
+### 6.5 `NapiNPProtocol` (4064 B, 94 named members; reached via `g_napi_np_ctx.np_protocol`)
+
+Full layout after the `_pad_0x500` refinement (2120 unknown bytes → 100% named):
+
+| Offset | Field | Type/size | Notes |
+|---|---|---|---|
+| 0x000 | `manager` | ptr | `NapiNPManager *` |
+| 0x004 | `link` | 16 | `NapiListNode` |
+| 0x014 | `instance_id` | u32 | |
+| 0x018 | `company` | char[64] | |
+| 0x058 | `machine_name` | char[64] | |
+| 0x098 | `build_date` | char[64] | |
+| 0x0D8 | `unk_0xD8` | u32 | |
+| 0x0DC | `game_name` | char[64] | |
+| 0x11C | `version_block` | 16 | `NapiNPVarBlock` |
+| 0x12C | `version_string` | char[64] | |
+| 0x16C | `max_players_string` | char[64] | |
+| 0x1AC | `build_string` | char[64] | |
+| 0x1EC | `msginfo_client_table` | ptr | flat S2C table (§4) |
+| 0x1F0 | `msginfo_server_table` | ptr | flat C2S table |
+| 0x1F4 | `msginfo_flags0` / `disable_processing` / `msginfo_flags2` / `msginfo_flags3` | 4×u8 | |
+| 0x1F8 | `callback_ctx` | ptr | |
+| 0x1FC | pad | 16 | |
+| 0x20C | `msginfo_high_client_index` / `_len` | ptr+u32 | high-bit dispatch index |
+| 0x214 | `msginfo_client_index` / `_len` | ptr+u32 | inverted msg_id index |
+| 0x21C | `msginfo_high_server_index` / `_len` | ptr+u32 | |
+| 0x224 | `msginfo_server_index` / `_len` | ptr+u32 | |
+| 0x22C | `pool_client` | 32 | actually a `NapiFifo`, not `NapiNPBufferPool` (Kong mislabel) |
+| 0x24C | `pool_server` | 32 | same |
+| 0x26C | `cb_client_msg` / `_unhandled` / `_error` / `cb_client_0..3` | 7 ptrs | client-direction callbacks |
+| 0x288 | `nstmout_path` | char[64] | actually the **session/server name** (lobby-visible; "HOST STARTED \"%s\"" log) — rename candidate `session_name` |
+| 0x2C8 | pad | 8 | two server callbacks set in CreateSession: `CNapiServer_OnPlayerDisconnected`, `CNapiClient_OnDisconnected` |
+| 0x2D0 | `cb_server_0..2`, `cb_server_msg` / `_unhandled` / `_error`, `cb_server_3..8` | 12 ptrs | server-direction callbacks |
+| 0x300 | `log_buffer` | char[512] | misnamed — compared against the client `PW` TLV in HandleClientJoin; rename candidate `server_password[512]` |
+| 0x500 | `server_flags` | u32 | `P1` TLV (server config flag word) |
+| 0x504 | `build_flags` | u32 | `P2` TLV (`CNapiServerConfig_BuildFlags`) |
+| 0x508-0x51C | `p3_count`..`p8_count` | 6×u32 | `P3`..`P8` TLVs; always zeroed in retail JO (reserved slots) |
+| 0x520 | `np_count` | u32 | `NP` TLV (zeroed) |
+| 0x524 | `max_players` | u32 | `MP` TLV; clamped 1..251 |
+| 0x528 | `npw_count` | u32 | `NPW` TLV (zeroed) |
+| 0x52C | `gen_session_seed_flag` | u32 | 1 → regenerate `session_seed_id` at host start |
+| 0x530 | `session_seed_id` | u32 | `(GetTickCount + rand) % 900000 + 100000` |
+| 0x534 | `host_key` | u32 | `HK` TLV; `NapiNP_GenerateSessionKey()` at StartServer; validated against the client's HK on join (mismatch → result 3) |
+| 0x538 | `host_running` | u32 | 1 once StartServer succeeds; HandleClientHello rejects when 0 |
+| 0x53C | `host_start_tick` | u32 | GetTickCount at StartServer; uptime base |
+| 0x540 | `host_stop_tick` | u32 | GetTickCount at StopServer |
+| 0x544 | `host_run_duration_ms` | u32 | stop − start, frozen post-stop |
+| 0x548 | `server_user_string1` | char[512] | `SUS1` TLV (populated from a global server-info string) |
+| 0x748 | `server_user_string2` | char[512] | `SUS2` TLV (from CGameSession +4056; likely server URL/NF) |
+| 0x948 | `server_user_string3` | char[512] | `SUS3` TLV (cleared in retail) |
+| 0xB48 | `server_user_string4` | char[512] | `SUS4` TLV (cleared in retail) |
+| 0xD48-0xD4C | `unk_0xD48/0xD4C` | 2×u32 | gates a write-flag block |
+| 0xD50 | `unk_0xD50` + pad[63] | 64 | NUL-terminated string, emitted as TLV — likely `country_code[64]` (`CN`) |
+| 0xD90 | `unk_0xD90` + pad[63] | 64 | likely `timezone[64]` (`TZB`) or `language[64]` (`LNG`) |
+| 0xDD0 | `unk_0xDD0` | u32 | TZB DWORD payload? |
+| 0xDD4 | `unk_0xDD4` | 112 | actually `opcode_msg_count[14]` + `opcode_msg_bytes[14]` per-opcode stats (indexed by `NapiNPOpcodeInfo.index <= 0xD`; zeroed at Create and StartServer) |
+| 0xE44 | `cs_dir1` | 60 | `NapiCSConfig` |
+| 0xE80 | `cs_dir0` | 60 | `NapiCSConfig` |
+| 0xEBC | `connection_list` | 16 | `NapiListHead` — the list `SendFiltered`/timeouts walk |
+| 0xECC | pad | 16 | |
+| 0xEDC | `log_netflow` | 80 | `NapiLog` |
+| 0xF2C | `unk_0xF2C` | u32 | |
+| 0xF30 | `log_condump` | 80 | `NapiLog` |
+| 0xF80 | `log_inout` | 80 | `NapiLog` |
+| 0xFD0 | `unk_0xFD0` | u32 | connection-lookup cache: packed `{addr,port}[N]` table ptr |
+| 0xFD4 | `unk_0xFD4` | u32 | parallel `NapiNPConnection*[N]` ptr |
+| 0xFD8 | `unk_0xFD8` | u32 | cache entry count |
+| 0xFDC | `unk_0xFDC` | u32 | unknown (capacity / dirty flag?) |
+
+Strongest witnesses for the 0x500 region: `[orig: NapiNPProtocol_SendServerInfoPacket @
+0x6204b0]` reads each DWORD in order and emits the matching TLV tag;
+`[orig: CNapiGameSession_CreateSession @ 0x4c97c0]` performs the symmetric writes with
+explicit 512-byte copies into the SUS buffers. Host-state DWORDs confirmed by StartServer
+(`sub_62B5E0`), `StopServer @ 0x62a820`, `NapiNPProtocol_Create @ 0x625a10`,
+`NapiNPTimer_GenerateRandomId @ 0x61e533`, and HandleClientJoin's HK validation.
+
+#### `NapiCSConfig` defaults and direction mirroring
+
+`[orig: CNapiGameSession_InitNPConnection @ 0x4D3BE0]` initializes both protocol CS templates
+(`proto+0xE44` and `proto+0xE80`) to the same 15-dword default block. `[orig:
+CNapiNPConnection_Create @ 0x62ACB0]` copies those protocol templates into each connection with
+direction-dependent mirroring:
+
+| Connection type | `conn+0x17C` | `conn+0x1B8` |
+|---|---|---|
+| server-side connection (`type == 1`) | `proto+0xE44` | `proto+0xE80` |
+| client-side connection (`type == 2`) | `proto+0xE80` | `proto+0xE44` |
+
+Field defaults:
+
+| Index | Working field name | Default |
+|---|---|---:|
+| 0 | `timeout_ms` | 240000 |
+| 1 | `recv_max_per_tick` | 4 |
+| 2 | `send_interval_ms` | 0 |
+| 3 | `send_holdoff_ticks` | 0 |
+| 4 | `idle_send_interval_ms` | 60000 |
+| 5 | `active_send_interval_ms` | 1000 |
+| 6 | `packet_queue_interval_ms` | `0xffffffff` |
+| 7 | `allow_dir0_update` | 0 |
+| 8 | `static_msg_payload_max` | 2048 |
+| 9 | `static_msg_count` | 128 |
+| 10 | `packet_queue_max` | 100 |
+| 11 | `msg_out_max` | 500 |
+| 12 | `msg_out_overflow_log` | 1 |
+| 13 | `max_packet_bytes` | 1300 |
+| 14 | `max_packets_per_tick` | `0xffffffff` |
+
+The `max_packet_bytes` default is the clamped MTU value `0x514` (min 100, max `0x10000`).
+`[orig: NapiNPServer_GetSendHoldoffTicks @ 0x4C4AB0]` computes field 3 as one of
+`1/3/4/6/12` depending on transport/LAN mode; the observed retail/OpenNova loopback update used
+`12`.
+
+### 6.6 `NapiPingManager` (declared 288 B; **real allocation 116 B**)
+
+`[orig: NapiPingManager_Create @ 0x6303D0]` allocates 116 (0x74) bytes; every witnessed access
+is within `0x00..0x73`. The trailing 172 bytes of the declared struct are dead (kept only for
+size compatibility). Global instance via `g_napi_np_ctx.ping_manager` (`0xB5DA2C`).
+Initializer `[orig: NapiConnection_Init @ 0x6302F0]` (misnamed — only called from Create;
+rename candidate `NapiPingManager_Init`).
+
+| Offset | Field | Type | Notes |
+|---|---|---|---|
+| 0x00 | `mem_mgr_handle` | int | allocator handle |
+| 0x04 | `state` | int | −1 stopped, 0 init, 1 paused, 2 running, 3 idle |
+| 0x08 | `start_tick_ms` | u32 | |
+| 0x0C | `last_active_tick_ms` | u32 | |
+| 0x10 | `elapsed_ms` | u32 | |
+| 0x14 | `periodicity_ms` | int | **misnamed** — actually the response timeout before retry; default 3000 |
+| 0x18 | `field_18` | int | actually `max_retries`; default 2 |
+| 0x1C | `max_attempts` | int | **misnamed** — actually the per-entry send throttle in ms; default 1, set to 10 by `CNapiNetwork_Init` |
+| 0x20 | `socket_initialized` | int | 1 if `Network_CreateRawSocket` succeeded |
+| 0x24 | `socket` | SOCKET | raw UDP socket |
+| 0x28 | `last_pump_tick_ms` | u32 | 100 ms pump throttle |
+| 0x2C | `last_send_tick_ms` | u32 | backdated by the send throttle at init |
+| 0x30 | `thread_running` / `thread_stop_request` + pad | 4 | NapiThread block start |
+| 0x34 | `thread_proc` | fn ptr | = `CNapiNPConnection_NetworkThreadProc` |
+| 0x38 | `thread_param` | ptr | = this |
+| 0x3C-0x48 | `field_3C..48` | 4×u32 | zeroed by `NapiThread_Reset`; no read sites |
+| 0x4C | `active_count` | int | entries with state>0; gates thread launch/continue and the idle transition |
+| 0x50 | `state3_count` | int | entries with state==3; gates the recvfrom loop |
+| 0x54 | `anchor_self` | ptr | back-pointer; entries store `&mgr->anchor_self` as owner |
+| 0x58 | `entry_head` | ptr | first `CNapiPingEntry` (also walked by `[orig: Server_SendPingMetricsToGate @ 0x511BF0]`) |
+| 0x5C | `entry_tail` | ptr | (single witness; structurally paired) |
+| 0x60 | `entry_count` | int | guards metrics emit |
+| 0x64 | `callback_ctx` | ptr | `CNapiGateManager *` in practice |
+| 0x68 | `callback_event` | fn ptr | fires on entry start AND done; set to `sub_63BC60` |
+| 0x6C | `add_jitter_flag` | u8 | fudges RTT by `rand()%15` in `[orig: CNapiNPConnection_HandlePingResponse @ 0x62FC20]` (single witness) |
+| 0x70 | `sleep_ms` | int | thread loop sleep; default 5, clamped to 1000 |
+| 0x74 | dead pad | 172 | beyond the real allocation |
+
+Per-entry tick logic: `[orig: CNapiPingEntry_ProcessTick @ 0x62F900]` retries after the
+response timeout, gives up after `max_retries`, and throttles sends to one per
+`send_throttle_ms`. Stale `sub_` names identified: `sub_62FE50` = `NapiPingManager_Start`,
+`sub_62FD10` = `NapiPingManager_Pump` (100 ms throttle), `sub_62FE10` =
+`NapiPingManager_DestroyEntries`.
+
+### 6.7 `CNapiGateManager` (304 B; methods 0x4ce6b0-0x637b30; 14/14 typed)
+
+| Offset | Field | Type | Notes |
+|---|---|---|---|
+| 0 | `gate_type` | int | set in InitDefaults from arg |
+| 4 | `gate_state` | int | pre-connect cleanup state {−9, −8, −2, −1, 1, 2} |
+| 8 | `hostname` | char[24] | default `"gs.novaworld.net"` |
+| 32 | `conn_state` | int | state machine [−8..3] in SetState |
+| 36 | `state2_enter_tick` | int | GetTickCount at state→2 |
+| 40 | `state2_exit_tick` | int | GetTickCount at state 2→other |
+| 44 | `state2_duration_ms` | int | |
+| 48 | `field_30` | int | semantics unclear (response state / buffer metadata?) |
+| 52 | `response_buffer` | ptr | freed when state→0 |
+| 56-68 | `field_38/3C/40/44` | 4×int | semantics unclear |
+| 72 | `port` | int | default **7597** |
+| 76 | `protocol` | char[64] | default **`"jop:cus2"`** (retail JO gate-probe tag; jodemo uses `jopd:cus4`) |
+| 140 | pad | 164 | embedded NapiThread + NapiMutex (type when those are declared) |
+
+Size confirmed by the constructor's 0x130 memset. The struct literally hard-codes the
+retail gate-probe identity.
+
+### 6.8 `ItemDef` health fields (net-spawn relevant)
+
+> The full 2780-byte `ItemDef` layout, the `type`/`attrib`/`attrib2` enums, and
+> the complete `ItemDef → GamePlayerEntity` copy table now live in
+> [`../world/itemdef-re.md`](../world/itemdef-re.md) (D-ITEMDEF-n). The two
+> health fields below are the net-spawn-relevant slice.
+
+The 2780-byte `ItemDef` got two fields lifted out of `pad_17C` during the spawn
+investigation:
+
+| Offset | Field | Flows to |
+|---|---|---|
+| 0x17C | `healthMax` (i16) | `entity[+286]` on creation |
+| 0x17E | `armorMax` (i16) | `entity[+288]` |
+
+Witness chain: `[orig: Entity_InitFromItemDef @ 0x49e550]` copies both on entity creation;
+`[orig: Player_BuildTag0CInputBody @ 0x42a550]` refuses to serialize player input while
+`entity[+286] == 0`; `[orig: Entity_KillByNetId @ 0x43dc10]` and
+`[orig: AI_CheckVehicleStuckState @ 0x465480]` clear it on death/stuck;
+`[orig: Entity_CalcAverageGroundHeight @ 0x45733f]` uses `<= 0` as a skip-dead guard. The AI
+class flag relevant to §5.6 is `ItemDef[+84] & 0x100000`. Open ItemDef follow-ups: `+0x138` →
+`entity[+456]` (post-physics handler / model ptr?), `+0x148` init-callback fn ptr (with
+recursion guard vs `Entity_InitFromItemDef` itself), `+0x158` → `entity[+452]`, 28 unknown
+bytes after `armorMax`.
+
+### 6.9 `CAdminServer` — remote admin/RCON console + the authoritative server-state field map
+
+`CAdminServer_*` (30 methods, `0x402bf0`–`0x406f50`) is the original engine's **remote
+admin/RCON server**: a TCP listener (`[orig: CAdminServer_Listen @ 0x406e00]` →
+`AcceptConnection @0x405580` → `HandleLogin @0x405870`) that parses text commands
+(`[orig: CAdminServer_DispatchCommand @ 0x406720]`) and reads/writes live server state.
+It is **not** the in-match game-state owner (that is the listen-server host, §5.0/§5.2a) —
+but because its `SET`/`STATUS`/`GET` verbs read and write the *same* globals the host
+advertises and the config save mirrors, it is the single best **enumeration** of what
+"server state" the engine actually keeps. Use it as the spec for our consolidated
+`GameConfig` + authoritative server state (faithful-port target; ADR 0013).
+
+**Settable config — `[orig: CAdminServer_HandleSetCommand @ 0x405a60]`.** Each `SET <key>
+<val>` writes a **runtime global** AND a **persisted shadow** (`dword_2550xxx`, flushed by
+`[orig: Game_SaveConfig @ 0x54c490]`); the rule *flags* pack into one bitfield
+`g_rules_flags @ 0x24D1E34` (shadow `0x2550A04`). On a name/password change the host
+recomputes the wire-advertised `np_protocol->server_flags = game_settings.game_type` and
+`build_flags = [orig: CNapiServerConfig_BuildFlags @ 0x4c4dc0]` (§6.5). Identity strings
+route into `g_napi_np_ctx.game_settings` (§6.4) via `CAITask_SetName @0x402bd0` /
+`CAdminServer_SetSidePassword @0x402bf0`.
+
+| `SET` key | runtime global | notes |
+|---|---|---|
+| `ServerName` | `g_ServerName @ 0x2550A5D` (32 B) | also → `np_protocol->nstmout_path` (advertised name) |
+| `ServerPassword` | `g_ServerPassword @ 0x2550A08` (17 B) | empty arg clears; → `game_settings` |
+| `SideAPassword` / `SideBPassword` | `g_SideAPassword @ 0x2550A3B` / `g_SideBPassword @ 0x2550A4C` (17 B) | per-side join gate (§3 reject 19/20) |
+| `GameTime` | `g_respawn_time @ 0x24D2140` | also sets `dword_24C1958 = 3720 * val` (frame budget) |
+| `KOTHLimit` | `g_time_limit_minutes @ 0x24D2144` | |
+| `KillLimit` | `g_score_limit @ 0x24D2134` | **name/global swap**: `KillLimit`→`score_limit` |
+| `MaxScore` | `g_kill_limit @ 0x24D2138` | **name/global swap**: `MaxScore`→`kill_limit` |
+| `MaxFriendlyKills` | `g_max_friendly_kills @ 0x24D2244` | |
+| `StartDelay` | `g_StartDelay @ 0x24D2160` | |
+| `AutoBalanceOnRecycle` | `g_autobalance_enabled @ 0x24D2190` | |
+| `PuntVote`/`VotePercent`/`VoteNumPlayersReq` | `g_votekick_enabled @ 0x24D226C` / `g_votekick_percent @ 0x24D2274` (float) / `g_votekick_min_players @ 0x24D2270` | |
+| `ChangeTeamInterval`/`Penalty`/`Delay` | `0x24D2280` / `0x24D2284` / `g_capture_duration @ 0x24D2248` | |
+| `DoMinPingCheck`/`MinPing`/`DoMaxPingCheck`/`MaxPing` | `0x24D21B0`/`0x24D21AC`/`0x24D21B8`/`0x24D21B4` | |
+| `FatBullets`/`OneShotKill`/`ArmoryTimer` | `0x24D21A0`/`0x24D219C`/`g_ArmoryTimer @ 0x25510F0` | |
+| `Tracers` | `g_rules_flags & 0x1` (inverted) | flag bit |
+| `ChangeTeam` | `g_rules_flags & 0x4` | flag bit |
+| `FriendlyFire` | `g_rules_flags & 0x200` (inverted) | flag bit |
+| `FriendlyTags` | `g_rules_flags & 0x400` (inverted) | flag bit |
+| `TeamTriggerClaymore` | `g_rules_flags & 0x8000` | flag bit |
+
+**Live state — `[orig: CAdminServer_HandleStatus @ 0x402e30]`.** The status read enumerates
+the *runtime* server state, and is load-bearing for the "pools / entities / bookkeeping"
+model: the **roster is the player-entity slot array itself**, not a connection-side cache.
+`STATUS` walks `capacity @ 0x24C0CA4` slots from `g_player_slots @ 0x24C0CA8` (stride
+`0x18E88` bytes), and for each active slot reads name/team/class/kills/deaths/ping **off the
+entity** (`name @ entity-32`, `slot# @ entity-13 dwords`, `team @ entity+344`, `class`,
+kills/deaths via `[orig: CRenderState_GetFieldByIndex @ 0x52d7d0]` fields 6/4, ping). Plus
+the session header: active server name `0x24D1FA4`, uptime `[orig: CSessionTimer @ 0x24E3E88]`,
+TOD `Env_CurTimeFixed24`, current map `g_map_file_name @ 0x24D1F3E`, `g_GameType @ 0x24D2128`,
+and the mission-rotation queue `g_entity_action_queue @ 0xC86FDC` (current/next/one-shot/
+flipped/2x flags) against `missionListOut @ 0x2551118` (stride 4584).
+
+The status read is byte-precise about *where* each roster field lives — witnessed at the
+`sprintf` @0x403182 that formats one player line off `renderState` (the per-slot entity):
+`name @ entity-32` (`%-16s`), `slot# @ *(entity-13 dwords)`, **`team @ *((uint8_t*)entity + 344)`**,
+`class @ entity[22437]`, `deaths/kills` via `[orig: CRenderState_GetFieldByIndex @0x52d7d0]`
+fields 4/6, `ping @ entity[23582]`. The session header reads `g_GameType @0x24D2128` (via
+`get_game_type_abbreviation @0x520fd0`), so STATUS, the S2C 0x08 block, and the S2C 0x7B body
+all read the SAME game-type global (see the witness note below).
+
+**Witness — one `g_GameType`, one `g_server_name_str`, one BuildFlags copy.** The reimpl had
+split each of these into multiple diverging copies; IDA shows the wire serializers read one
+global each:
+- **`g_GameType @0x24D2128`** is read by BOTH `[orig: ServerConfig_SerializeToPacket @0x505bd0]`
+  (the S2C 0x08 block, `dword[3]` @0x505c2b) AND `[orig: NapiNPMsg_0x7B_BuildPayload @0x507740]`
+  (the S2C 0x7B `gametype` u32 @0x5078ce and its title-selection gate `(g_GameType & 0xFFFDFFFF)
+  == 0x10020` @0x507822) AND STATUS above. `[orig: CNapiServerConfig_BuildFlags @0x4c4dc0]` reads
+  a SEPARATE `game_settings.game_type` copy (ctx+0xCC @0x4c4e3a) for its `& 0x10000` team-gate — a
+  snapshot of `g_GameType` set at session build, equal in a live session.
+- **`g_server_name_str @0x24D1FC4`** is read by BOTH `[orig: NetPacket_WriteServerNameAndMapFile
+  @0x505780]` (the S2C 0x2C) AND `NapiNPMsg_0x7B_BuildPayload` (the 0x7B serverName @0x5077f1);
+  `game_settings.server_name` (ctx+0xE68) is the distinct lobby/`nstmout_path` name.
+- The 0x08 block's other 9 dwords map to the standalone rule globals in wire order (`g_respawn_time
+  @0x24D2140`, `g_time_limit_minutes @0x24D2144`, `g_replay_enabled @0x24D2120`, **`g_GameType`**,
+  `g_max_team_lives @0x24D2130`, `g_score_limit @0x24D2134`, `g_respawn_timeout @0x24D214C`,
+  `g_StartDelay @0x24D2160`, `g_destroy_buildings @0x24D2164`, `g_death_messages @0x24D2168`), then
+  7 bytes (`byte_24D234C..byte_24D2360` + `dword_24D2110` low byte), then the BuildFlags dword.
+  **The five formerly-unnamed dwords were witnessed 2026-07-01** by tracing each to its
+  `Config_ParseSettingsLine @0x54f740` setting-name compare through `apply_session_settings_to_globals
+  @0x551500` (cfg global → live rule global): dword[2] = SET `replay` (cfg @0x2550B24),
+  dword[4] = SET `max_team_lives` (cfg @0x2550ABC), dword[6] = SET `timeout` (cfg @0x2550B34; read by
+  `GameEvent_PlayerDeath @0x516dd0` — the respawn timeout), dword[8] = SET `destroybuild` (cfg
+  @0x2550ACC; read by `Entity_ApplyWeaponDamage @0x4e6820`), dword[9] = SET `deathmes` (cfg
+  @0x2550AD0; read ×3 by `GameEvent_PlayerDeath`). The two BuildFlags inputs likewise:
+  `dword_2550A04` IS the mpattrib bitfield store (`ServerConfig_ApplyHostSetting @0x4a6000` maps SET
+  `TeamChoose` → bit 0x4 direct @0x4a63d9, `TeamFF` → 0x200 inverted, `FriendlyTag` → 0x400 inverted,
+  `ClaymorePref` → …), so the `|0x4` input = **TeamChoose**; `dword_2550CA4` = cfg
+  `mp_allowsniperscopezoom` (@0x550ac9; read by `WeaponSlot_InitFromDef @0x53ee70`) → `|0x10000`.
+  Reimpl `GameConfig` fields renamed accordingly (`replay_enabled`/`max_team_lives`/`respawn_timeout`/
+  `destroy_buildings`/`death_messages`/`team_choose`/`allow_sniper_scope_zoom`).
+
+**Consequence for the reimpl (D-NET-132, ADR 0013) — IMPLEMENTED:** team/class/slot/kills/deaths
+are derived from the authoritative pool-0 entity, so `NapiNPConnection` holds the entity *handle*
+(`link.owned_entity`) as the single binding and the §5.1 reply builders read team (@entity+344) and
+the wire handle THROUGH it from the live `world::EntityRegistry` — no per-connection reply cache.
+The pre-World reactive path (`bind_session_reply_player`, a World-less session-responder / test host)
+stamps `owned_entity` with the bare wire handle, so it resolves the same way (team defaults when no
+live entity backs the handle). `player_slot` (roster ORDER, not on the entity) + the echoed
+`player_name` stay on `conn.reply`. The former `ServerRules` + `NapiGameSettings` (§6.3/6.4) +
+`SessionReplyConfig` (§5.1) are merged into one `GameConfig` (`libs/npruntime/.../game_config.h`)
+mirroring the `SET` field set above, with the three diverging gametype copies collapsed onto the one
+`g_GameType`-role field; the persisted `dword_2550xxx` shadow + `g_rules_flags` packing are a
+config-file concern modeled only if we add cfg persistence.
+
+## 7. Landed architecture
+
+The design that shipped in PR #37, was reverted in PR #50, and is now landed on master.
+`web/` and `apps/novaworld_server/` are on master.
+
+- **One standalone C++ server binary, three listeners**: gate UDP :7597, HTTP :8080 (the
+  `/api/*` routes plus the bundled Vue web portal from `web/dist/`), NW UDP :64206. Shared
+  in-memory connection registry; SQLite state at `backend/data/state.db` (schema kept abstract
+  enough to swap libpq later). HTTP framework was decided as Drogon but implemented with Crow
+  + standalone Asio.
+- **Protocol code lives once** in Godot-free libs: `libs/novacrypto` (Layer 2 cipher),
+  `libs/napi` (Layer 2-3 framing/session/TLV), `libs/npwire` (the in-game wire codec, NWU
+  session framing, and capture/replay chain — extracted post-landing, ADR 0019), and
+  `libs/novaworld` (the matchmaking/service lib: Layer-4 PN browser/session message sets,
+  connection registry, and db wrapper). PN dispatch happens inside `libs/novaworld`; the
+  NovaWorld server routes `NOVAWORLDUDP` to lobby containers and
+  `JointOperations`/`JOINTOPERATIONS` to a World-less `libs/npruntime` session-responder ctx
+  (the experimental in-match `GameSession`/`GameServerRuntime` were retired at npruntime P8).
+- **Godot is the client only**: GDExtension binding under `godot/engine/network/`; servers are
+  pure C++ with no Godot dependency. A future Godot admin/stats viewer would talk to the
+  standalone server over HTTP, never be the server.
+- **Reference equivalence**: `libs/napi/tlv.h::NapiMessage` is byte-for-byte equivalent to the
+  Python reference container parser (`onnet/onnw/protocol/container_parser.py`); the wire
+  markers are those in §1. The authoritative dissector for opcode/message enumeration is
+  `novaworld_udp.lua`.
+- State at revert: gate + NW UDP + HTTP listeners, ServerAuth defaults matched to retail
+  captures (MI=0x113f, CR=1, NovaworldName="NWServer", 62-char SCRK, 60-char hex NWUID),
+  Layer-4 session dispatch, web portal build, DB migrations, and the Godot client demo were
+  done; the legacy `NW*.dll` HTTP routes (§2) followed; full retail end-to-end join (spawn
+  flow, §5) was still being chased.
+
+### 7.1 Client session state machine (ADR 0010, Phase 1)
+
+The client direction of the session flow is a Godot-free state machine,
+`libs/novaworld/client_session.{h,cpp}` — the mirror of `LobbySession`/
+`nw_udp_listener.cpp` with request and response inverted. The `NovaWorldClient`
+GDExtension binding (`godot/engine/network/`) is now a thin socket pump: the
+gate leg yields the NW UDP host:port, then `ClientSession` runs
+`HELLO → AUTH → {ClientConnected → ServerStartVerify → ClientRequestVerifyResult →
+ServerVerifyResult} → Verified`.
+
+Two client-direction parsers were added (inverses of the existing serializers):
+`parse_server_hello` (recovers the host key `HK` the client must echo) and
+`parse_server_auth` (recovers `CR`/`SK`/server `SCRK` + the CS/CU control
+fields). Phase 1 closed two stubs in the old binding: the hardcoded
+`send_session_join(/*server_hk=*/0)` (now echoes `ServerHello.HK` in
+`ClientAuth.HK`) and the empty `0x83` handler (now decodes the lobby stream and
+drives the verify handshake to `ServerVerifyResult`). The inner-stream crypto is
+symmetric: the client encrypts its `0x43` with its own `SCRK`, decrypts inbound
+`0x83` with the server's `SCRK`; outbound `session_id` = the server `SK`.
+
+Verified offline by `tests/novaworld/client_session_loopback_test.cpp`, which
+drives `ClientSession` against the real server-side parsers/builders +
+`LobbySession` in-process and asserts the `HK` echo and the
+`Verified`/`SessIdString` outcome. The HELLO and AUTH legs now **have** fresh
+IDA witnesses against real NW — the identity gates in `HandleClientHello @
+0x6213B0` (NW-S1) and `HandleClientJoin @ 0x62B750` plus the retail `0x42`
+builder `CNapiNPConnection_SendClientJoin @ 0x61fe20` (NW-S2, §7 Wave 1) — confirmed
+live: the client reaches `session_join`, and after NW-S2 the join carries the
+identity block real NW requires for `ServerAuth`. The verify framing is still
+inferred from the container set (§3). Live-smoke past AUTH and the host/join
+legs are ADR 0010 Phases 3-5.
+
 ### Wave 1 — gate protocol + session envelope (2026-06-11)
 
 | System (reimpl) | Original | Verdict | Notes |
@@ -6663,7 +6908,7 @@ the IDB is the live record.
 > verify prerequisite, and the verify `Cookie` var-list is CD-key/hardware identity (with the
 > CD-key fields **empty**), not login cookies. The Phase-3 HTTP login work above is still
 > correct and still needed — for the **account/GSB** leg that follows VALIDATE — just not for
-> reaching VALIDATE. Same correction applies to NW-S3's "blocked on auth" verdict (§8 Wave 1).
+> reaching VALIDATE. Same correction applies to NW-S3's "blocked on auth" verdict (§7 Wave 1).
 
 ### Wave 5 — the genuine .204 lobby, captured end to end (2026-06-12)
 
@@ -6865,8 +7110,13 @@ their `dword_2550xxx` cfg shadows → `g_cfg_*`, `dword_2550A04` → `g_mpattrib
 `CNapiNPConnection_SendSessionPacket @ 0x61edd0` prototype corrected to
 `(NapiNPConnection *conn, unsigned int packet_seq)` (was a bogus `__thiscall(int *)`). IDB saved.
 
-**Divergence catalog (D-NET-n; stable IDs, never renumbered).** Status: FIXED = applied this
-session (green ctest); TRACKED = confirmed, fix specified, not yet applied.
+## 8. D-NET divergence catalog
+
+Every D-NET divergence, grouped by reimpl area. IDs are stable and never renumbered;
+entries accumulate from the grill sessions (the §5 findings and the §7 waves) and keep the
+status tag recorded at their last update (FIXED = applied with green ctest; TRACKED =
+confirmed, fix specified, not yet applied). Dispositions map to the canonical vocabulary
+in [divergence-ledger.md](../divergence-ledger.md).
 
 `session_hello.cpp` (A4 ClientAuth/ServerSessionInit 0x42/0x82):
 - **D-NET-1** [HIGH, FIXED] CS field default tables were onnet guesses, wrong at idx 4/8/9/10/12/13. Engine template (IDENTICAL both directions): `{0:240000,1:4,4:60000,5:1000,6:0xFFFFFFFF,8:2048,9:128,10:100,11:500,12:1,13:MTU(1300),14:0xFFFFFFFF}`. [orig: CNapiGameSession_InitNPConnection @ 0x4d3e1f / CNapiNPConnection_Create @ 0x62acb0 / CNapiNPConnection_SendSessionInit @ 0x620ef0]
@@ -8011,174 +8261,3 @@ the structural port of the retail spawn init. Pinned by player_spawn + two_peer_
 byte 0x28). LIVE-VERIFIED retail-join v16/v18 (2026-07-02): the joiner's field-17 reads the
 golden 0x28 on the wire; diff_0a header health = 150 matches golden.
 
-### 5.62 The FP weapon action FSM — weapon.def ACTION rows → the 12-state pump (2026-07-09)
-
-How the equipped weapon animates and sequences: the weapon.def ACTION rows bind into a
-per-weapon **12-slot action table** and one per-tick pump advances an action QUEUE on the
-equipped slot. Witnessed end to end this session (all anchored, Jointops.exe.kong.i64);
-ported as `libs/world/weapon_fsm.{h,cpp}` + the `NovaSimulation` slot pump + the
-GameWorld/LocalPlayerHost host wiring (PR #213 train). This is the runtime half the §5.16
-fire pipeline and §5.58 reload round-trip plug into.
-
-**The ACTION-row registry** [orig: `ActionDef_ParseScriptLine @ 0x4023c0`]. `action
-"<name>"` find-or-creates a global ActionDef pool entry named `<prefix>_<name>` (the
-prefix argument is the weapon's name; entry name at +122, `ActionDef_InitDefaults
-@ 0x4022b0` memsets the record — so **absent keys default to 0**, only an explicit
-`auto` writes the bake sentinel −1). Keys: `function` → +0 handler via
-`ActionFuncDef_FindByName @ 0x401040` (unknown name → the `ActionSlot_ExecuteAction
-@ 0x4020a0` placeholder + warn), `anim` → +58 (a literal `.adm` clip key, e.g.
-`anim_wpn_fire`), `delaystart` → +36 / `delay`/`delayend` → +40 (ticks; `auto` → −1),
-`soundset` → +8 / `soundsetend` → +12, `particle` → +16, `particleuserpoint` → +186,
-`dupsound` → +44/+48, `action_value` → +52, `ctrlreg` → +28 / `ctrlreginc` → +32,
-`texttoken` → +20. The function registry `g_actionFuncDefTable @ 0x829E58` (count
-@ 0x829F30 = 18, 12-byte rows `{name, fn, min_params}`): `null`, `wpn_std_null`,
-`wpn_std_{idle,emptyidle,fire,recoil,reload,empty,switchto,switchfrom,switchrank,
-scopeup,scopeup_map,scopedown,scopedown_map,switchfrom_map}`, `powerup_pickup`,
-`powerup_respawn`. Data sweep (JOX + REVX weapon.def corpora): only the NINE bare
-suffixes ship as ACTION names (never scopeup/scopedown/overheated), and FUNCTION only
-ever names `wpn_std_<own suffix>` — the `*_map` variants are unused by weapons.
-
-**The bind + bake** [orig: `Anim_InitActions @ 0x541fa0`]. After a weapon block parses,
-each of the 12 slots at `WeaponDef+0x2A4` binds by looking up `<weaponName>_<suffix>`
-against the suffix table `@ 0x830B90` — 12 `{suffix, defaultHandler}` pairs in id order:
-idle `@ 0x542920`, emptyidle `@ 0x542A20`, fire `@ 0x542B10`, recoil `@ 0x542DD0`,
-reload `@ 0x5430B0`, empty `@ 0x543180`, switchto `@ 0x5431D0`, switchfrom `@ 0x5433B0`,
-switchrank `@ 0x543500`, scopeup `@ 0x543290`, scopedown `@ 0x543320`, overheated →
-the idle handler. Missing rows become generated defaults; a null/placeholder handler
-takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
-`AnimMap_FindSlotByName @ 0x40cfa0`) and the −1 delays bake from the clip:
-`delaystart = Anim_GetDurationTicks(adm, slot)` (`@ 0x53ee10` = ms × 62.5/1000 + 1 —
-the 62.5 t/s constant `flt_7C3B3C`), `delayend = ticks`, minus `delaystart` when
-`ticks > delaystart`; no anim/adm → −1 collapses to 0. Ends by playing global slot 241
-(`wpn_idle`) on the weapon's adm.
-
-**The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
-pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
-counter +0, clip u16 +0x10, rate/muzzle-flash tick +0x14, Def +0x20, owner +0x24,
-currentAction +0x2C, nextAction +0x30, prevAction +0x34, switchTimer +0x58 (i16),
-phase +0x5A, kickIntensity +0x5B, charge +0x5C, flags +0x5E (bit0 = the §5.16 net-fire
-pose latch, bit1 = FP), burstCounter +0x62. Phase protocol: a transition writes
-phase=1 + counter=newDesc.delayStart; the handler's first tick flips 1(|0x40)→2 and
-**starts the action's clip on the equipped WeaponDef's own adm channel
-(`WeaponDef+0x174`, the FP viewmodel rig) — local player only** (CORRECTED 2026-07-09:
-the earlier "owner's animadm" reading; the 3P body's weapon layer is a separate
-producer, world-wac-ai-re.md §14.8)
-[orig: `ActionSlot_BeginActivePhase @ 0x53f830`; the effect shims
-`@ 0x541860`/`@ 0x5419e0` write the same protocol and same play target — they differ
-only in muzzle/particle spawning, forked by `ActionSlot_ExecuteActionTick @ 0x541a70`
-on third person / vehicle-attack / remoteness]; `ActionSlot_FinishActivePhase
-@ 0x53f7b0(desc, slot, entity, next)` sets counter=delayEnd, nextAction=arg4, the
-ACTIVE→DONE kick bump (skipped for RELOAD), phase=4. Pump tail per tick: kick decay;
-overheat deny (heat > 0xFFFF converts a queued FIRE to EMPTY `@ 0x541046`); the IDLE
-reseed (`counter==0 && current==next==0 → counter = idle.ds+de` `@ 0x54135d`);
-`counter>0 → --counter, run handler`; at 0: the **rescope-after-reload** block
-(`current==4 && next==0 && local && g_rescopeAfterReload @ 0xB7647C →
-Player_ToggleWeaponScope` `@ 0x54139e`); then `current != next && phase ∈ {4,0}` →
-transition (prev=current unless current ∈ {6,7}, current=next, next=0(idle),
-counter=ds, phase=1, `word_B7C670=−1`, run the new handler; the phase==0x40 variant
-re-marks 0x40 after).
-
-**The handlers** (decisions, all witnessed): **idle** — LOOP; enter replays global 241
-+ phase=4; empty mag → reserve>0 && `g_autoReloadEnabled @ 0x24D2118` →
-`WeaponSlot_RequestReload`, else next=EMPTYIDLE + one-shot unscope (local, clip
-capacity 1, `!(Flags & 0x20000000)`). **emptyidle** — LOOP on global 242; reserve>0 →
-RequestReload (no auto-reload gate); else hold. **fire** — phase-1 recheck
-`WeaponSlot_CanFire @ 0x541ba0`: busy weapon-child, underwater ban, and the clip leg
-which on empty **writes nextAction itself** — 3 (RECOIL → the auto-reload arbiter)
-when the class reserve has rounds else 1 (EMPTYIDLE) `@ 0x541c8b` — the abort adopts
-it (`Finish(next=[esi+0x30])` read AFTER the call `@ 0x542b50`); the shot: the 3P body
-weapon-channel stamps 62 `knife_attack` / 63 `grenade_attack` into `entity+0x2C8`
-(keyed on the AdmDef kind dword `@ 0x24E8088`; rifles stamp nothing —
-world-wac-ai-re.md §14.8.4 `@ 0x542bcb`), `Entity_CalcWeaponFirePosition @ 0x4dc750`,
-`Entity_FireWeaponAndSendPacket @ 0x42bd80` (§5.16), `consume_weapon_ammo @ 0x540850`,
-3-round burst (Flags&0x20) cycling 0→2→1→0, **next=RECOIL unconditional `@ 0x542c9e`**,
-kick += recoil.ds+de+counter+10 cap 20. **recoil** — THE ARBITER: at clip end
-(counter==0) phase=4, heat stamp (def+876/880 → +0x14, clamp 73728); local decision:
-rounds → next = burst ? FIRE : IDLE; else reserve ≥ clipSize×unitsPerRound &&
-auto-reload → RELOAD `@ 0x54301d`; else EMPTYIDLE + one-shot unscope + the def+0x168
-auto-switch (`Player_SwitchToWeaponByHandle(65×def+0x164)` `@ 0x54307c`); the
-held-trigger refire re-queues input binding 149 `@ 0x542e9d`. **reload** — first tick
-(phase bit0, no 0x80) sends C2S 0x25 (§5.58), phase|=0x80 (transient — the first shim
-tick overwrites 2), stashes the scope (`g_rescopeAfterReload = g_weaponScopeActive`
-unless Flags&0x40000) + unscopes; clip end → Finish(next=IDLE `push 0 @ 0x543169`),
-burst=0. **empty** — dry-click one-shot → EMPTYIDLE. **switchto/switchfrom** — the
-±30/tick switchTimer machines (−900 seed ≈ 0.48 s); switchfrom swaps
-`EquippedSlot = g_pendingWeaponSlot @ 0xB75FD0` and queues SWITCHTO on the new slot
-(`WeaponSlot_TryQueueSwitchTo @ 0x53f140`); instant on Flags&0x80. **switchrank** —
-in-place swap (fire-mode/rank). **scopeup/scopedown** — timed one-shots (zero-length
-on every shipped def; the ADS easing is the camera interp).
-
-**The requests** (the input dispatch, `Input_HandleActionBinding_0 @ 0x4e0420`):
-fire = `WeaponSlot_RequestFire @ 0x53efa0` (ex `sub_53EFA0`; via
-`Player_RequestPrimaryFire @ 0x5414c0`, ex the kong-misnamed
-`Terrain_UpdateColorInterpolation`) — AUTO (Flags&0x100): current {0,3,9,10}→FIRE,
-{1}→EMPTY, {2}→deferred re-queue; SEMI: {0}→FIRE, {1}→EMPTY; charge weapons
-(Flags&0x80000000) hold-release via `g_fireChargeStartTick @ 0xB76800` (≥31 ticks
-scales the charge, binding 150). reload = `WeaponSlot_RequestReload @ 0x53f110`
-(phase sign clear && queued next ∈ {0,1,11}); the key case 0xD3 pre-gates clip ≠
-clipsize && reserve>0. ADS = case 6 (current ∉ {4,7}) → `Player_ToggleWeaponScope
-@ 0x4df0c0`: gates def Flags&3 + `g_fpCameraInterp.activeFlag`; engage sets
-`g_scopeEngaged @ 0x82CE94` (the §5.41 `g_weaponScopeActive` mirror settles later),
-seat-flag C2S 0x1D/169, camera interp (15 steps; 7 for `Field0C & 0x200`) toward
-`AltCamOffset` (the §5.40 tpos), `WeaponSlot_TryQueueScopeUp @ 0x53f050` (ex
-"TryQueueReload" — queues 9, phase-gated {0,4}); disengage mirrors down
-(`..ScopeDown @ 0x53f080`, ex "TryQueueUnload" — queues 10), FOV back to 80.0; the
-zoom FOV (Flags&2): `g_cameraFovDeg @ 0x26C6848 = 80.0 / Player_GetClampedWeaponElevation`
-(16.16) — the weapon.def `scope_max_mag` magnification.
-
-**Port** (PR #213 train). `libs/world/weapon_fsm.{h,cpp}`: the bake
-(`weapon_fsm_bake`, def-agnostic rows per ADR 0020 + a clip-seconds callback), the
-pump + all 12 handlers as structural translations (ctest `weapon_fsm`: bake pins,
-fire→recoil chain, auto cadence, semi edge, burst-3, empty paths, auto-reload +
-§5.58 refill math, scope stash/rescope, request gates, non-local no-decision).
-`libs/def` parses `scope_max_mag` (+ the `whileswimming` flag-table length fixed:
-13, not 14 — the token never matched); `NovaWeaponDatabase` surfaces
-flags/scope_max_mag/actions; `NovaSimulation` pumps the LOCAL player's slot once per
-logic tick after the world advances (all four paths) and exposes typed-record state
-(serial counters); `GameWorld` bakes from the resolved weapon dict + the loaded
-viewmodel's clip lengths; `LocalPlayerHost` feeds LMB/R/RMB through the world-tick
-input path, plays FSM clips on BOTH viewmodel parts (restart via
-`set_animation_time(0)`), and realizes ADS: the eased pos→tpos view bias
-(15-tick fraction), the main-camera FOV 80h → 80/mag h→v through the live aspect,
-reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_probe
-`NOVA_VM_FSM=1`, JOX 05TR): 6-shot auto burst (clip 30→24, ~9-tick cadence from the
-recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
-mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
-
-**Divergences** (ledger D-WPN-1..9): the FUNCTION registry unported (std-only in all
-shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
-busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
-(`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
-weapon-switch machinery seams (D-WPN-5); local-player-only pump (D-WPN-6); interim
-ammo seed clipsize/startrounds (D-WPN-7); FSM↔net uplink unwired (C2S 0x06/0x25 from
-events, D-WPN-8); ADS residuals — SIGHTS overlay draw, unscope-on-move site, zoom-level
-keys, scope net notify, 7-step interp variant, stance/NVG gates (D-WPN-9).
-
-**IDB (this session).** Renamed: `WeaponSlot_RequestFire @ 0x53efa0`,
-`Player_RequestPrimaryFire @ 0x5414c0`, `WeaponSlot_TryQueueScopeUp @ 0x53f050`,
-`WeaponSlot_TryQueueScopeDown @ 0x53f080`, `g_pendingWeaponSlot @ 0xB75FD0`,
-`g_rescopeAfterReload @ 0xB7647C`, `g_fireChargeStartTick @ 0xB76800`,
-`g_autoReloadEnabled @ 0x24D2118`, `g_actionFuncDefTable @ 0x829E58` (+count).
-Comments at the pump, bake, and request sites; idb_save run.
-
-**The weapon-switch chain (same session, closes the SWITCHFROM/pending follow-up).**
-`Player_SwitchToWeaponByHandle @ 0x4e0170` (handle = category×65 + rank): stance gate
-(parentSlot ∉ {2,3,5}), clears `g_fireChargeStartTick`, then scans the category's 65
-slots in the 100-B `weaponSlotArrayBase @ 0xB75FD4` pool from the def's own rank —
-eligibility = def+932 type 1/2 or `calculate_kill_score @ 0x5407e0` (the §5.41
-eligibility reuse) and `!(def+12 & 1)`; a full wrap plays the deny sound. The pick
-lands in `Player_MountWeaponSlot @ 0x4dfa40`: **writes `g_pendingWeaponSlot = slot`
-`@ 0x4dfb16`**, then queues the FSM — same category → `WeaponSlot_TryQueueSwitchRank
-@ 0x53f1c0` (ex `sub_53F1C0`: phase {0,4,0x40} → counter=0, next=8), cross category →
-`WeaponSlot_ForceQueueSwitchFrom @ 0x53f170` (ex `sub_53F170`: phase {0,4,0x40} →
-HARD RESET counter=0/burst=0/switchTimer=0/current=0/prev=0, next=7; SwitchFrom's
-timer expiry then swaps `EquippedSlot` from the pending global and queues SWITCHTO on
-the NEW slot). Mount-scoped weapons (`Flags & 0x20000000`) auto-engage the scope
-(`g_weaponScopeActive = 1` + `dword_B76808` zoom stash); a cross-category switch
-resets the scope + FOV 80. View biases zeroed, `Player_UpdateFirstPersonCamera` runs
-immediately, seat-flag 0x40000 → C2S 0x1D/169, scoped-capable slots re-arm the camera
-interp. IDB: both queue helpers renamed + commented; saved.
-
-**Open follow-ups:** who queues OVERHEATED(11);
-the `*_map` scope function variants; `WeaponSlot_CalcAccumulatedHeat @ 0x53f780`;
-`dword_24D20C0` option bits; the `word_B7C670` transition write vs the §5.16 shot-seq.

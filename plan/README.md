@@ -1,8 +1,10 @@
 # NovaWorld integration plan
 
-> This document is fluid. It tracks the effort to integrate the NovaWorld server, the
-> gate, the website, the launcher, and the deploy infrastructure into this repository.
-> Live progress lives in [status.md](status.md). Track designs:
+> **Completed-effort record.** This plan tracked the integration of the NovaWorld server,
+> the gate, the website, the launcher, and the deploy infrastructure into this repository;
+> the work landed on master (PR #136). Current truth is the source and
+> [docs/net/novaworld-net-re.md](../docs/net/novaworld-net-re.md);
+> [status.md](status.md) keeps the historical PR tables. Track designs:
 > [Track A (server + engine)](track-a-server-engine.md),
 > [Track B (infra + deploy)](track-b-infra.md),
 > [Track C (launcher + website)](track-c-launcher-web.md).
